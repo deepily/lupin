@@ -1232,7 +1232,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
                                      alive_threshold_seconds=self.alive_threshold_seconds )  # free-count fix: live-idle only (session_is_stale gate)
         # #6 roster broadcast DROPPED (Part-6 cut) — the fleet roster is PULL-state,
         # served by /state via the snapshot below; no per-tick commons post.
-        taps_fired    = self._tap_managers( fleet_view, graph, roster, now, active_managers )  # #7 / #8
+        taps_fired    = self._tap_managers( fleet_view, graph, roster, now, active_managers, bridge_mtimes=manager_bridge_mtimes )  # #7 / #8 (bug bf8c5cbb: bridge-fresh peers count alive in the blocked-roster)
         managers_down = self._check_manager_acks( now, who_rows, fleet_view, active_managers, owed_class=owed_class, count_dm=count_dm, owed_items=owed_items, store_read_degraded=store_degraded )  # #9 (L1 store-aware, 5-signal ACK; owed_items → de3c5b87/33949e83 diagnostics; store gate)
         decisions     = self._check_decision_needed( now )          # #10 Rick (+owning mgr if known)
         stalled       = self._check_fleet_stall( fleet_view, now, active_managers, owed_class=owed_class )  # #11 (L1 store-aware)
@@ -2194,7 +2194,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
 
     # ── v2.2 B2: active manager-tap (DM-push, per-group, throttled) ─────────────
 
-    def _attention_workers( self, fleet_view, graph ):
+    def _attention_workers( self, fleet_view, graph, now=None, bridge_mtimes=None ):
         """
         The workers needing a manager's attention: STUCK sessions ∪ holders
         blocked on a peer (the §4 blocked-edge holders).
@@ -2233,6 +2233,21 @@ class ArbiterConsumerJob( AgenticJobBase ):
         holders        = set( graph[ "edges" ].keys() )
         alive_personas = { v.get( "persona" ) for v in fleet_view.values()
                            if isinstance( v, dict ) and v.get( "alive" ) is True and v.get( "persona" ) }
+        # bug bf8c5cbb: a comms-silent (view.alive False) but BRIDGE-FRESH persona is
+        # demonstrably ALIVE — count it for the live-peer exclusion, the same stale-
+        # liveness gap 26dd3afb fixed for MANAGER-STALE, applied to the blocked-roster.
+        # Reuses the per-poll bridge_mtimes map (persona→freshest bridge mtime, canonical-
+        # keyed). Fail-safe: bridge_mtimes None / now None ⇒ no augmentation ⇒ today's
+        # behavior (a genuine dead-peer block is never hidden).
+        if bridge_mtimes and now is not None:
+            now_epoch = now.timestamp()
+            for v in fleet_view.values():
+                if not isinstance( v, dict ):
+                    continue
+                p  = v.get( "persona" )
+                mt = bridge_mtimes.get( canonical_persona_key( p ) ) if p else None
+                if mt is not None and ( now_epoch - mt ) <= self.manager_stale_poke_threshold_seconds:
+                    alive_personas.add( p )
         cycle_personas = { p for cycle in graph[ "cycles" ] for p in cycle }
         out            = [ ]
         for view in fleet_view.values():
@@ -2357,7 +2372,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
             f"worker(s) fleet-wide. (Recommendation only — I do not reap.)"
         )
 
-    def _tap_managers( self, fleet_view, graph, roster, now, active_managers=None ):
+    def _tap_managers( self, fleet_view, graph, roster, now, active_managers=None, bridge_mtimes=None ):
         """
         Actively TAP each manager-on-duty with their crew's actionable ADVISORY
         summary (DM-push), throttled tap-on-change + min-interval (B2 / D1).
@@ -2377,7 +2392,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
               managers
             - returns the count of manager DMs fired this poll; never raises
         """
-        attention = self._attention_workers( fleet_view, graph )
+        attention = self._attention_workers( fleet_view, graph, now=now, bridge_mtimes=bridge_mtimes )   # bug bf8c5cbb: bridge-fresh peers count alive
         if not attention:
             return 0
 

@@ -16,9 +16,15 @@ if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
 from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob
+from lupin_mcp.persona_normalization import canonical_persona_key
 
 
 NOW = datetime.datetime( 2026, 6, 6, 22, 0, 0, tzinfo=datetime.timezone.utc )
+
+
+def _bridge_key( persona ):
+    """The canonical key the per-poll bridge_mtimes map is keyed by (bug bf8c5cbb)."""
+    return canonical_persona_key( persona ) or persona
 
 
 class _Gateway:
@@ -162,6 +168,51 @@ class TestAttentionWorkers:
         graph = { "edges": { "Stuckie": "Rio" }, "cycles": [ ] }
         out   = job._attention_workers( fleet, graph )
         assert { v[ "persona" ] for v in out } == { "Stuckie" }
+
+    # ── bug bf8c5cbb: bridge-mtime veto extended to the blocked-roster ──────────
+    # The awaited peer reads view alive=False (comms-silent / heads-down) but its
+    # session-bridge mtime is FRESH → it IS alive → the wait is a legit in-flight
+    # dependency → EXCLUDE (the 26dd3afb bridge-veto applied to _attention_workers).
+    # Threads the per-poll bridge_mtimes map (fail-safe: None ⇒ current behavior).
+
+    def test_holder_awaiting_bridge_fresh_but_comms_silent_peer_excluded( self ):
+        """THE REPRO (Rachel case): holder awaits a peer whose view.alive is False
+        (comms-silent) but whose bridge mtime is fresh → excluded, not rostered."""
+        job   = _job( _Gateway(), { } )
+        fleet = {
+            "h":    _working( "h", "Rachel" ),                    # awaiting peer:Busy (Rachel NOT in bridge map)
+            "busy": _working( "busy", "Busy", alive=False ),      # comms-silent view…
+            "bad":  "not-a-dict",                                 # augmentation loop skips non-dicts
+        }
+        graph = { "edges": { "Rachel": "Busy" }, "cycles": [ ] }
+        bridge_mtimes = { _bridge_key( "Busy" ): NOW.timestamp() - 60 }   # …but bridge fresh (60s)
+        out   = job._attention_workers( fleet, graph, now=NOW, bridge_mtimes=bridge_mtimes )
+        assert out == [ ]                                         # bridge-fresh peer → excluded
+
+    def test_holder_awaiting_stale_bridge_peer_kept( self ):
+        """A stale-bridge peer (mtime older than the threshold) does NOT count alive
+        → the holder is KEPT (genuine block; the veto is freshness-gated)."""
+        job   = _job( _Gateway(), { } )
+        fleet = {
+            "h":    _working( "h", "Rachel" ),
+            "busy": _working( "busy", "Busy", alive=False ),
+        }
+        graph = { "edges": { "Rachel": "Busy" }, "cycles": [ ] }
+        bridge_mtimes = { _bridge_key( "Busy" ): NOW.timestamp() - 99999 }   # stale bridge
+        out   = job._attention_workers( fleet, graph, now=NOW, bridge_mtimes=bridge_mtimes )
+        assert { v[ "persona" ] for v in out } == { "Rachel" }
+
+    def test_bridge_mtimes_none_inert_dead_peer_kept( self ):
+        """Fail-safe: bridge_mtimes None (seam unwired / read failed) ⇒ no augmentation
+        ⇒ today's behavior — a comms-silent (non-alive) awaited peer keeps the holder."""
+        job   = _job( _Gateway(), { } )
+        fleet = {
+            "h":    _working( "h", "Rachel" ),
+            "busy": _working( "busy", "Busy", alive=False ),
+        }
+        graph = { "edges": { "Rachel": "Busy" }, "cycles": [ ] }
+        out   = job._attention_workers( fleet, graph, now=NOW, bridge_mtimes=None )
+        assert { v[ "persona" ] for v in out } == { "Rachel" }
 
 
 # ── tap firing / throttle ──────────────────────────────────────────────────────
