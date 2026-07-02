@@ -2,6 +2,19 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-19 to 05-22](history/2026-05-19-to-22-history.md). History health: ✅ **HEALTHY at 12,208 tokens (48.8% of 25k)** — archived 2026-06-10 by Mr. Radio 🦉 (session 0102cf69), ~11,476 tokens moved to archive.
 
+### 2026.07.01 - Session 2b34ae38 (Mr. Radio 🦉) | v0.2.0 pgvector migration Lanes A+B co-landed + Lane C 8/9 · image swap LIVE + collation incident fixed · dep-durability closed · 38-branch cleanup executed · 3 Rick-gates walked · PUSH+backup (Rick broadcast)
+
+**Accomplishments** (respin ~18:05; 6 worker seats across Tiffany 💍×3 / Rachel 🕊️×2 / Clayton 😎 / Krishna 🦚; MANAGE-not-build throughout):
+- **Gate walkthrough**: fdfb5b05 task-list features CLOSED on Rick's visual sign-off (`d5aea435`+`298c0341`); pgvector image force-recreate GREENLIT after Rick's "neither" → explainer card (`src/rnd/v0.2.0/2026.07.01-pgvector-image-force-recreate-explainer.md`); ffecbcdf parked on Rick's own rerun.
+- **v0.2.0 Lane A CO-LANDED** (`b3b86530`): Tiffany's pgvector models+alembic proven on LIVE pg (38/38, `<#>` nearest-k), Rachel delta-APPROVE; startup auto-migrate created 8 tables + 4 HNSW dot indexes on lupin_db_dev. **Incident 1**: alpine→Debian swap = musl→glibc collation → all text btree indexes silently corrupt → REINDEX ×3 DBs + datcollversion recorded; rider added design §11. **Incident 2**: ~4-min :7999 crash (pgvector pkg missing in containers at merge) → exec-install + touch-retrigger, no bounce.
+- **Dep durability CLOSED** (Clayton, `2a2cc63c`): Rick's push exposed that requirements.txt feeds NO Dockerfile — pyproject/uv.lock (the real source) lacked pgvector; fixed + candidate image `lupin:1.1.1-pgvector-candidate` in-image boot-chain verified (NO promotion; swap staged on Rick's called moment).
+- **v0.2.0 Lane B CO-LANDED** (`86467cbd`): 8 per-table repos + backend flag (default lancedb) + §7 numpy-oracle equivalence harness + A1 rollback test; 48/48, 100% L/B/F ×10; Rachel APPROVE 7/7 (dot*100 verified against real legacy call sites :174/:258).
+- **v0.2.0 Lane C 8/9 GREEN** (3 held commits on lane branch): all consumers except the solution-manager orchestrator routed under the flag; zero-regression invariant held (existing tests pass UNCHANGED); wound down at a safe seam → memento → resumes next session.
+- **Branch/worktree cleanup EXECUTED** (Krishna audit → my review → Rick ruled + typed "Approved"): 38 branches deleted (24 `-d` + 14 double-witnessed `-D`) + 2 dead worktrees + 4 stale remote refs; **61→23**; 6 UNKNOWN honestly held for owner triage. Receipts: proposal §7a.
+- **Coordination**: merge-all-worktrees directive closed with Tiberius (both sides zero unmerged); his flagged arbiter residual minted `e8eee4c4` → he fixed same night. F1/F2 "not rendering" triaged for María: served bundle verified byte-fresh on both ports → client-cache/wrong-page verdict.
+
+**Files changed** (doc commit): history.md, TODO.md (3+2 Decisions Log rulings), post-game `src/rnd/v0.1.9/2026.07.01-mr-radio-session-2b34ae38-postgame.md`, explainer + design-§11 rider, cleanup proposal (+§7a), src/rnd/README.md. Code landed via lane merges above. **Carry-over**: Lane C 3b orchestrator, container swap (Rick's moment), Q1 backfill (gates Lane D), 6 UNKNOWN triage, history.md archive (21.5k WARNING).
+
 ### 2026.06.30 - Session eb4b105f (Tiberius 👑) | GCP GPU model-server→Cloud Run split: cascaded-review REVISE → remediate → #5 cost-correction → BUY the split ($527/mo) · committed-held `c89c31ea` + pushed · a5559b49 rebaseline landing · arbiter dual-false-positive filed
 
 **Accomplishments** (re-spun mid-day; drove two lanes to done/held as fleet manager — MANAGE-not-build, visible workers, adversarial review vs LIVE code):
