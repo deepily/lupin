@@ -25,6 +25,24 @@ from cosa.memory.snapshot_manager_interface import (
 )
 from cosa.memory.solution_snapshot import SolutionSnapshot
 from cosa.memory.question_embeddings_table import QuestionEmbeddingsTable
+from cosa.rest.db.repositories.vector_store_backend import is_postgres_backend
+
+
+# Column order mirrors _snapshot_to_record EXACTLY (Postgres ORM columns are 1:1
+# with the LanceDB record keys). Used by _pg_record_from_entity to marshal a
+# SolutionSnapshot ORM entity back into the record dict _record_to_snapshot reads.
+_SNAPSHOT_RECORD_COLUMNS = (
+    "id_hash", "user_id", "question", "question_normalized", "question_gist",
+    "answer", "answer_conversational", "solution_summary", "thoughts", "error",
+    "routing_command", "agent_class_name", "code", "solution_summary_gist",
+    "code_returns", "code_example", "code_type", "programming_language",
+    "language_version", "synonymous_questions", "synonymous_question_gists",
+    "non_synonymous_questions", "last_question_asked", "created_date",
+    "updated_date", "run_date", "runtime_stats", "replay_history", "replay_stats",
+    "is_cache_hit", "answer_is_correct", "question_embedding",
+    "question_normalized_embedding", "question_gist_embedding", "solution_embedding",
+    "code_embedding", "thoughts_embedding", "solution_gist_embedding",
+)
 
 
 class LanceDBSolutionManager( SolutionSnapshotManagerInterface ):
@@ -99,6 +117,13 @@ class LanceDBSolutionManager( SolutionSnapshotManagerInterface ):
         # Get standardized embedding dimension from config
         _cfg = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
         self._embedding_dim = int( _cfg.get( "embedding dimensions", default="768" ) )
+
+        # v0.2.0 migration flag: route through SolutionSnapshotRepository (Postgres+
+        # pgvector) when `vector store backend = postgres`. Defaults lancedb (old path
+        # preserved). NOTE: __init__ does NO lancedb work (that is initialize()), and
+        # QuestionEmbeddingsTable + _resolve_db_path are needed in BOTH modes, so they
+        # are NOT guarded out here — the postgres divergence lives in the _pg_* helpers.
+        self._use_postgres = is_postgres_backend()
 
         if self.debug:
             print( f"LanceDBSolutionManager configured:" )
@@ -543,6 +568,8 @@ class LanceDBSolutionManager( SolutionSnapshotManagerInterface ):
             - PermissionError if insufficient access rights
             - ValueError if configuration invalid
         """
+        if self._use_postgres: return self._pg_initialize()
+
         monitor = PerformanceMonitor( "initialization" )
         monitor.start()
         
@@ -651,6 +678,8 @@ class LanceDBSolutionManager( SolutionSnapshotManagerInterface ):
             - ConnectionError if database unavailable
             - PermissionError if insufficient access rights
         """
+        if self._use_postgres: return self._pg_reload()
+
         if not self._initialized:
             raise RuntimeError( "LanceDBSolutionManager must be initialized before reload" )
 
@@ -719,6 +748,8 @@ class LanceDBSolutionManager( SolutionSnapshotManagerInterface ):
             - RuntimeError if not initialized
             - ValueError if snapshot invalid
         """
+        if self._use_postgres: return self._pg_save_snapshot( snapshot )
+
         if not self.is_initialized():
             raise RuntimeError( "Manager must be initialized before saving snapshots" )
 
@@ -1120,6 +1151,8 @@ class LanceDBSolutionManager( SolutionSnapshotManagerInterface ):
         Returns:
             SolutionSnapshot instance if found, None otherwise
         """
+        if self._use_postgres: return self._pg_get_snapshot_by_id( snapshot_id )
+
         if not self._initialized:
             if self.debug:
                 print( f"Manager not initialized, cannot retrieve snapshot {snapshot_id}" )
@@ -1165,9 +1198,11 @@ class LanceDBSolutionManager( SolutionSnapshotManagerInterface ):
             - RuntimeError if not initialized
             - ValueError if question empty
         """
+        if self._use_postgres: return self._pg_delete_snapshot( question, delete_physical )
+
         if not self.is_initialized():
             raise RuntimeError( "Manager must be initialized before deleting snapshots" )
-        
+
         if not question:
             raise ValueError( "Question cannot be empty" )
         
@@ -1257,6 +1292,9 @@ class LanceDBSolutionManager( SolutionSnapshotManagerInterface ):
             - RuntimeError if not initialized
             - ValueError if parameters invalid
         """
+        if self._use_postgres:
+            return self._pg_get_snapshots_by_question( question, question_gist, threshold_question, threshold_gist, limit, debug )
+
         if not self.is_initialized():
             raise RuntimeError( "Manager must be initialized before searching" )
 
@@ -1460,6 +1498,9 @@ class LanceDBSolutionManager( SolutionSnapshotManagerInterface ):
             - RuntimeError if not initialized
             - ValueError if exemplar_snapshot invalid or missing code_embedding
         """
+        if self._use_postgres:
+            return self._pg_get_snapshots_by_code_similarity( exemplar_snapshot, threshold, limit, exclude_self, ensure_top_result, debug )
+
         if not self.is_initialized():
             raise RuntimeError( "Manager must be initialized before searching" )
 
@@ -1582,6 +1623,9 @@ class LanceDBSolutionManager( SolutionSnapshotManagerInterface ):
             - RuntimeError if not initialized
             - ValueError if exemplar_snapshot invalid or missing solution_embedding
         """
+        if self._use_postgres:
+            return self._pg_get_snapshots_by_solution_similarity( exemplar_snapshot, threshold, limit, exclude_self, ensure_top_result, debug )
+
         if not self.is_initialized():
             raise RuntimeError( "Manager must be initialized before searching" )
 
@@ -1691,9 +1735,11 @@ class LanceDBSolutionManager( SolutionSnapshotManagerInterface ):
         Raises:
             - RuntimeError if not initialized
         """
+        if self._use_postgres: return self._pg_get_gists()
+
         if not self.is_initialized():
             raise RuntimeError( "Manager must be initialized before getting gists" )
-        
+
         try:
             gists = []
             
@@ -1726,9 +1772,11 @@ class LanceDBSolutionManager( SolutionSnapshotManagerInterface ):
         Raises:
             - RuntimeError if not initialized
         """
+        if self._use_postgres: return self._pg_get_stats()
+
         if not self.is_initialized():
             raise RuntimeError( "Manager must be initialized before getting stats" )
-        
+
         try:
             snapshot_count = len( self._question_lookup )
             
@@ -1780,6 +1828,8 @@ class LanceDBSolutionManager( SolutionSnapshotManagerInterface ):
         Raises:
             - None (handles all errors gracefully)
         """
+        if self._use_postgres: return self._pg_health_check()
+
         try:
             health = {
                 "status": "healthy",
@@ -1829,7 +1879,469 @@ class LanceDBSolutionManager( SolutionSnapshotManagerInterface ):
                 "backend_type": "lancedb",
                 "errors": [f"Health check failed: {e}"]
             }
-    
+
+    # ==================================================================================
+    # Postgres+pgvector backend (v0.2.0 migration) — activated when
+    # `vector store backend = postgres`. Routes through SolutionSnapshotRepository.
+    #
+    # DESIGN NOTE (RIDER 2 / design §9): postgres mode DELIBERATELY BYPASSES the
+    # in-memory _question_lookup / _id_lookup caches that the LanceDB path builds at
+    # initialize()/reload(). Every lookup queries pgvector (HNSW) directly. This leans
+    # on HNSW latency where the LanceDB path leaned on in-memory exact-match hits — a
+    # latency regression on the hot cache-hit path at soak is an EXPECTED trade-off of
+    # this design, NOT a surprise (re-introduce a read-through cache if soak shows it).
+    # Caller-visible cache-hit SEMANTICS (same question -> same snapshot) are preserved
+    # and proven by the RIDER-1 equivalence harness.
+    # ==================================================================================
+
+    def _pg_record_from_entity( self, entity ) -> Dict[str, Any]:
+        """
+        Marshal a SolutionSnapshot ORM entity into the record dict _record_to_snapshot reads.
+
+        Requires:
+            - entity is a SolutionSnapshot ORM row carrying all _SNAPSHOT_RECORD_COLUMNS attrs
+            - called INSIDE an open session (attrs accessed before the row detaches)
+
+        Ensures:
+            - returns a dict keyed by every _SNAPSHOT_RECORD_COLUMNS name; columns are 1:1
+              with the LanceDB record keys, so _record_to_snapshot / _ensure_list handle the
+              JSON-string, ARRAY, and pgvector-array columns unchanged
+        """
+        return { column: getattr( entity, column ) for column in _SNAPSHOT_RECORD_COLUMNS }
+
+    def _pg_initialize( self ) -> None:
+        """
+        Postgres init — cache BYPASS: mark initialized, build NO in-memory lookups.
+
+        Ensures:
+            - sets _initialized True; lookups query pgvector per-call (no full-table scan)
+        """
+        self._initialized = True
+        if self.debug: print( "✓ LanceDBSolutionManager initialized (postgres backend, cache bypass)" )
+
+    def _pg_reload( self ) -> None:
+        """
+        Postgres reload — no-op (no in-memory cache to refresh; pgvector is queried live).
+
+        Requires:
+            - manager has been initialized
+
+        Ensures:
+            - raises RuntimeError if not initialized; otherwise a no-op
+
+        Raises:
+            - RuntimeError if not initialized
+        """
+        if not self._initialized:
+            raise RuntimeError( "LanceDBSolutionManager must be initialized before reload" )
+        if self.debug: print( "Postgres backend reload is a no-op (cache bypass — pgvector queried live)" )
+
+    def _pg_save_snapshot( self, snapshot: SolutionSnapshot ) -> bool:
+        """
+        Save a snapshot to Postgres via SolutionSnapshotRepository.upsert_snapshot.
+
+        Resolves an existing row by VERBATIM question (reproducing the LanceDB dedup-by-
+        question + Session-108 base-hash override) WITHOUT the in-memory cache.
+
+        Requires:
+            - manager is initialized; snapshot is valid with a non-empty question
+
+        Ensures:
+            - inserts a new row, or updates the existing row keyed on the resolved id_hash
+            - updates canonical synonyms; returns True on success, False on failure
+
+        Raises:
+            - RuntimeError if not initialized
+            - ValueError if snapshot invalid
+        """
+        if not self.is_initialized():
+            raise RuntimeError( "Manager must be initialized before saving snapshots" )
+
+        if not snapshot or not snapshot.question:
+            raise ValueError( "Invalid snapshot: question cannot be empty" )
+
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories.solution_snapshot_repository import SolutionSnapshotRepository
+        from cosa.rest.db.vector_store_models import SolutionSnapshot as _PgRow
+
+        try:
+            # Lock the whole resolve-then-upsert flow (mirrors the LanceDB TOCTOU guard).
+            with self._save_lock:
+                record = self._snapshot_to_record( snapshot )
+                with get_db() as session:
+                    existing = session.query( _PgRow ).filter( _PgRow.question == snapshot.question ).first()
+                    if existing is not None:
+                        # DUPE-GUARD + Session-108 base-hash override, cache-free
+                        record[ "id_hash" ] = existing.id_hash
+                    id_hash = record.pop( "id_hash" )
+                    SolutionSnapshotRepository( session ).upsert_snapshot( id_hash, **record )
+                # Update canonical synonyms (already postgres-routed) using the snapshot's
+                # own id_hash — matches the LanceDB path (synonym keyed on snapshot.id_hash).
+                self._update_canonical_synonyms( snapshot )
+                return True
+        except Exception as e:
+            if self.debug: print( f"✗ Failed to save snapshot (postgres): {e}" )
+            return False
+
+    def _pg_get_snapshot_by_id( self, snapshot_id: str ) -> Optional[Any]:
+        """
+        Fetch a snapshot by id_hash from Postgres and marshal it to a SolutionSnapshot.
+
+        Ensures:
+            - returns the SolutionSnapshot if found, else None (marshalling done INSIDE
+              the session to avoid DetachedInstanceError)
+        """
+        if not self._initialized:
+            if self.debug: print( f"Manager not initialized, cannot retrieve snapshot {snapshot_id}" )
+            return None
+
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories.solution_snapshot_repository import SolutionSnapshotRepository
+
+        try:
+            with get_db() as session:
+                entity = SolutionSnapshotRepository( session ).get_snapshot_by_id( snapshot_id )
+                if entity is None:
+                    if self.debug: print( f"No snapshot found with id_hash: {snapshot_id}" )
+                    return None
+                snapshot = self._record_to_snapshot( self._pg_record_from_entity( entity ) )
+                if self.debug: print( f"Found snapshot {snapshot_id}: {snapshot.question[:50]}..." )
+                return snapshot
+        except Exception as e:
+            if self.debug: print( f"Error retrieving snapshot by id {snapshot_id}: {e}" )
+            return None
+
+    def _pg_delete_snapshot( self, question: str, delete_physical: bool = False ) -> bool:
+        """
+        Delete a snapshot by verbatim question from Postgres + cascade canonical synonyms.
+
+        (delete_physical is accepted for signature parity and IGNORED — the LanceDB path
+        ignores it too.)
+
+        Requires:
+            - manager is initialized; question is non-empty
+
+        Ensures:
+            - deletes the row + its canonical-synonym entries; returns True if found, else False
+
+        Raises:
+            - RuntimeError if not initialized
+            - ValueError if question empty
+        """
+        if not self.is_initialized():
+            raise RuntimeError( "Manager must be initialized before deleting snapshots" )
+
+        if not question:
+            raise ValueError( "Question cannot be empty" )
+
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories.solution_snapshot_repository import SolutionSnapshotRepository
+        from cosa.rest.db.vector_store_models import SolutionSnapshot as _PgRow
+
+        try:
+            with get_db() as session:
+                existing = session.query( _PgRow ).filter( _PgRow.question == question ).first()
+                if existing is None:
+                    if self.debug: print( f"Snapshot not found for: {du.truncate_string( question, 50 )}" )
+                    return False
+                id_hash = existing.id_hash
+                SolutionSnapshotRepository( session ).delete_snapshot( id_hash )
+            # Clean up associated canonical_synonyms entries (already postgres-routed) —
+            # same guard as the LanceDB path (only when the table has been initialized).
+            if self._canonical_synonyms is not None and self._canonical_synonyms is not False:
+                deleted_count = self._canonical_synonyms.delete_by_snapshot_id( id_hash )
+                if self.debug: print( f"[DELETE-DEBUG] Cleaned up {deleted_count} canonical synonym(s) for {id_hash[:8]}..." )
+            if self.debug: print( f"✓ Deleted snapshot: {id_hash[:8]}..." )
+            return True
+        except Exception as e:
+            if self.debug: print( f"✗ Failed to delete snapshot: {e}" )
+            return False
+
+    def _pg_get_snapshots_by_question( self,
+                                       question: str,
+                                       question_gist: Optional[str] = None,
+                                       threshold_question: float = 90.0,
+                                       threshold_gist: float = 90.0,
+                                       limit: int = 7,
+                                       debug: bool = False ) -> List[Tuple[float, Any]]:
+        """
+        Hierarchical question search against Postgres, MIRRORING the LanceDB hierarchy
+        minus the in-memory cache tier (cache bypass): Level 1 exact-verbatim -> Level 2
+        exact-normalized (both via the already-postgres-routed canonical_synonyms) ->
+        Level 4 pgvector dot similarity.
+
+        Requires:
+            - manager is initialized; question non-empty; thresholds in [0,100]
+
+        Ensures:
+            - returns [(similarity_pct, snapshot)] sorted descending; exact matches
+              short-circuit at 100.0; empty list when no embedding / no hits
+
+        Raises:
+            - RuntimeError if not initialized
+            - ValueError if question empty or a threshold is out of range
+        """
+        if not self.is_initialized():
+            raise RuntimeError( "Manager must be initialized before searching" )
+
+        if not question:
+            raise ValueError( "Question cannot be empty" )
+
+        if not (0.0 <= threshold_question <= 100.0) or not (0.0 <= threshold_gist <= 100.0):
+            raise ValueError( "Thresholds must be between 0.0 and 100.0" )
+
+        monitor = PerformanceMonitor( "get_snapshots_by_question" )
+        monitor.start()
+
+        try:
+            # Lazy-init hierarchical search components (mirrors the LanceDB path)
+            if self._canonical_synonyms is None:
+                try:
+                    from cosa.memory.canonical_synonyms_table import CanonicalSynonymsTable
+                    self._canonical_synonyms = CanonicalSynonymsTable( db_path=self.db_path, debug=self.debug, verbose=self.verbose )
+                    if self.debug: print( "Initialized CanonicalSynonyms for hierarchical search" )
+                except Exception as e:
+                    if self.debug: print( f"Could not initialize CanonicalSynonyms, using direct search: {e}" )
+                    self._canonical_synonyms = False
+
+            if self._normalizer is None:
+                try:
+                    from cosa.memory.normalizer import Normalizer
+                    self._normalizer = Normalizer()
+                    if self.debug: print( "Initialized Normalizer for hierarchical search" )
+                except Exception as e:
+                    if self.debug: print( f"Could not initialize Normalizer: {e}" )
+                    self._normalizer = False
+
+            # Level 1: exact verbatim match in CanonicalSynonyms
+            if self._canonical_synonyms and self._canonical_synonyms is not False:
+                snapshot_id = self._canonical_synonyms.find_exact_verbatim( question )
+                if snapshot_id:
+                    if self.debug: print( f"✓ LEVEL 1: Exact verbatim match found for snapshot: {snapshot_id}" )
+                    snapshot = self.get_snapshot_by_id( snapshot_id )
+                    if snapshot:
+                        monitor.stop()
+                        return [ ( 100.0, snapshot ) ]
+                    else:
+                        print( f"[GHOST] WARNING: Level 1 synonym points to missing snapshot {snapshot_id[:8]}... — auto-cleaning" )
+                        self._canonical_synonyms.delete_by_snapshot_id( snapshot_id )
+
+                # Level 2: exact normalized match
+                if self._normalizer and self._normalizer is not False:
+                    question_normalized = self._normalizer.normalize( question )
+                    snapshot_id = self._canonical_synonyms.find_exact_normalized( question_normalized )
+                    if snapshot_id:
+                        if self.debug: print( f"✓ LEVEL 2: Exact normalized match found for snapshot: {snapshot_id}" )
+                        snapshot = self.get_snapshot_by_id( snapshot_id )
+                        if snapshot:
+                            monitor.stop()
+                            return [ ( 100.0, snapshot ) ]
+                        else:
+                            print( f"[GHOST] WARNING: Level 2 synonym points to missing snapshot {snapshot_id[:8]}... — auto-cleaning" )
+                            self._canonical_synonyms.delete_by_snapshot_id( snapshot_id )
+
+            # (Level-3 gist tier + in-memory cache tier are SKIPPED — postgres cache bypass)
+
+            # Level 4: pgvector dot similarity search
+            if self.debug: print( "LEVEL 4: No exact matches found, performing vector similarity search..." )
+
+            query_embedding = self._question_embeddings_tbl.get_embedding( question )
+            if not query_embedding:
+                if self.debug: print( "Failed to generate query embedding, returning empty results" )
+                monitor.stop()
+                return []
+
+            from cosa.rest.db.database import get_db
+            from cosa.rest.db.repositories.solution_snapshot_repository import SolutionSnapshotRepository
+
+            similar_snapshots = []
+            with get_db() as session:
+                # threshold=None => no SQL threshold (top-1 + confirm: return all, caller decides)
+                hits = SolutionSnapshotRepository( session ).get_snapshots_by_question(
+                    query_embedding, threshold=None, limit=limit if limit > 0 else 100
+                )
+                for pct, entity in hits:
+                    similar_snapshots.append( ( pct, self._record_to_snapshot( self._pg_record_from_entity( entity ) ) ) )
+
+            similar_snapshots.sort( key=lambda x: x[0], reverse=True )
+
+        except Exception as e:
+            if self.debug: print( f"✗ Search failed: {e}" )
+            raise
+        finally:
+            monitor.stop()
+
+        return similar_snapshots
+
+    def _pg_similarity_search( self, exemplar_snapshot, embedding_attr, repo_method_name,
+                               threshold, limit, exclude_self, ensure_top_result ):
+        """
+        Shared pgvector dot similarity search backing the code + solution similarity paths.
+
+        Fetches WITHOUT a SQL threshold/exclusion (threshold=None) then replicates the
+        LanceDB Python-side self-skip + threshold split + ensure_top_result + limit —
+        byte-exact behavior including the best-below-threshold fallback.
+
+        Requires:
+            - manager is initialized; exemplar_snapshot not None; threshold in [0,100]
+
+        Ensures:
+            - returns [(similarity_pct, snapshot)] sorted descending, capped at limit;
+              [] on a missing / all-zero embedding
+
+        Raises:
+            - RuntimeError if not initialized
+            - ValueError if exemplar_snapshot None or threshold out of range
+        """
+        if not self.is_initialized():
+            raise RuntimeError( "Manager must be initialized before searching" )
+        if not exemplar_snapshot:
+            raise ValueError( "Exemplar snapshot cannot be None" )
+        if not (0.0 <= threshold <= 100.0):
+            raise ValueError( "Threshold must be between 0.0 and 100.0" )
+
+        query_embedding = getattr( exemplar_snapshot, embedding_attr )
+        if not query_embedding:
+            return []
+        if all( v == 0.0 for v in query_embedding[:100] ):
+            return []
+
+        effective_limit = ( limit + 1 ) if exclude_self else ( limit if limit > 0 else 100 )
+
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories.solution_snapshot_repository import SolutionSnapshotRepository
+
+        similar_snapshots     = []
+        best_below_threshold  = None
+        with get_db() as session:
+            repo = SolutionSnapshotRepository( session )
+            hits = getattr( repo, repo_method_name )( query_embedding, threshold=None, limit=effective_limit )
+            for pct, entity in hits:
+                if exclude_self and entity.id_hash == exemplar_snapshot.id_hash:
+                    continue
+                if pct >= threshold:
+                    similar_snapshots.append( ( pct, self._record_to_snapshot( self._pg_record_from_entity( entity ) ) ) )
+                elif ensure_top_result and best_below_threshold is None:
+                    best_below_threshold = ( pct, self._record_to_snapshot( self._pg_record_from_entity( entity ) ) )
+
+        similar_snapshots.sort( key=lambda x: x[0], reverse=True )
+        if limit > 0:
+            similar_snapshots = similar_snapshots[:limit]
+        if len( similar_snapshots ) == 0 and ensure_top_result and best_below_threshold is not None:
+            similar_snapshots.append( best_below_threshold )
+        return similar_snapshots
+
+    def _pg_get_snapshots_by_code_similarity( self, exemplar_snapshot, threshold=85.0, limit=20,
+                                              exclude_self=True, ensure_top_result=True, debug=False ):
+        """Postgres code-similarity search (thin wrapper over _pg_similarity_search)."""
+        return self._pg_similarity_search( exemplar_snapshot, "code_embedding",
+                                           "get_snapshots_by_code_similarity",
+                                           threshold, limit, exclude_self, ensure_top_result )
+
+    def _pg_get_snapshots_by_solution_similarity( self, exemplar_snapshot, threshold=85.0, limit=20,
+                                                  exclude_self=True, ensure_top_result=True, debug=False ):
+        """Postgres solution-similarity search (thin wrapper over _pg_similarity_search)."""
+        return self._pg_similarity_search( exemplar_snapshot, "solution_embedding",
+                                           "get_snapshots_by_solution_similarity",
+                                           threshold, limit, exclude_self, ensure_top_result )
+
+    def _pg_get_gists( self ) -> List[str]:
+        """
+        Return distinct non-empty question gists from Postgres (dedup preserves order,
+        mirroring the LanceDB path).
+
+        Raises:
+            - RuntimeError if not initialized
+        """
+        if not self.is_initialized():
+            raise RuntimeError( "Manager must be initialized before getting gists" )
+
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories.solution_snapshot_repository import SolutionSnapshotRepository
+
+        try:
+            with get_db() as session:
+                raw_gists = SolutionSnapshotRepository( session ).get_gists()
+            gists = []
+            for gist in raw_gists:
+                if gist and gist not in gists:
+                    gists.append( gist )
+            if self.debug: print( f"Retrieved {len( gists )} unique question gists" )
+            return gists
+        except Exception as e:
+            if self.debug: print( f"✗ Failed to get gists: {e}" )
+            return []
+
+    def _pg_get_stats( self ) -> Dict[str, Any]:
+        """
+        Return storage statistics from Postgres. storage_size_mb is 0.0 (a shared Postgres
+        table has no per-manager on-disk footprint to walk).
+
+        Raises:
+            - RuntimeError if not initialized
+        """
+        if not self.is_initialized():
+            raise RuntimeError( "Manager must be initialized before getting stats" )
+
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories.solution_snapshot_repository import SolutionSnapshotRepository
+
+        try:
+            with get_db() as session:
+                total = SolutionSnapshotRepository( session ).get_stats()[ "total_snapshots" ]
+            stats = {
+                "total_snapshots" : total,
+                "storage_size_mb" : 0.0,
+                "database_path"   : self.db_path,
+                "table_name"      : self.table_name,
+                "backend_type"    : "postgres",
+                "last_updated"    : time.strftime( "%Y-%m-%d @ %H:%M:%S %Z" )
+            }
+            if self.debug: print( f"Stats: {total} snapshots (postgres)" )
+            return stats
+        except Exception as e:
+            if self.debug: print( f"✗ Failed to get stats: {e}" )
+            return {
+                "total_snapshots" : 0,
+                "storage_size_mb" : 0.0,
+                "backend_type"    : "postgres",
+                "status"          : "error",
+                "error"           : str( e )
+            }
+
+    def _pg_health_check( self ) -> Dict[str, Any]:
+        """
+        Return health status from Postgres — pings the store via get_stats.
+
+        Ensures:
+            - status is healthy / degraded / unhealthy; never raises
+        """
+        health = {
+            "status"        : "healthy",
+            "initialized"   : self.is_initialized(),
+            "backend_type"  : "postgres",
+            "database_path" : self.db_path,
+            "table_name"    : self.table_name,
+            "errors"        : []
+        }
+
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories.solution_snapshot_repository import SolutionSnapshotRepository
+
+        try:
+            with get_db() as session:
+                count = SolutionSnapshotRepository( session ).get_stats()[ "total_snapshots" ]
+            health[ "snapshot_count" ]    = count
+            health[ "connection_status" ] = "connected"
+            if not self.is_initialized():
+                health[ "status" ] = "degraded"
+            return health
+        except Exception as e:
+            health[ "status" ]            = "unhealthy"
+            health[ "connection_status" ] = "disconnected"
+            health[ "errors" ].append( f"Health check failed: {e}" )
+            return health
+
 
 def quick_smoke_test():
     """Test the LanceDB manager interface implementation."""

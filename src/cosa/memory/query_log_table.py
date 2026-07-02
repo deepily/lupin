@@ -19,6 +19,7 @@ from datetime import datetime
 import cosa.utils.util as du
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.utils.util_stopwatch import Stopwatch
+from cosa.rest.db.repositories.vector_store_backend import is_postgres_backend
 
 
 class QueryLogTable:
@@ -56,27 +57,33 @@ class QueryLogTable:
         # Get standardized embedding dimension from config
         self._embedding_dim = int( self._config_mgr.get( "embedding dimensions", default="768" ) )
 
-        # Get database path from config
-        uri = du.get_project_root() + self._config_mgr.get( "path to database wo root" )
+        # v0.2.0 backend flag (§6): when 'postgres', route storage through the
+        # QueryLogRepository and skip LanceDB entirely. 'lancedb' (default)
+        # preserves the legacy path below byte-for-byte.
+        self._use_postgres = is_postgres_backend( self._config_mgr )
 
-        if self.debug:
-            print( f"Connecting to LanceDB at: {uri}" )
+        if not self._use_postgres:
+            # Get database path from config
+            uri = du.get_project_root() + self._config_mgr.get( "path to database wo root" )
 
-        db = lancedb.connect( uri )
-
-        # Validate existing table dimensions match config before creating/opening
-        self._validate_embedding_dimensions( db, "query_log", "embedding_verbatim" )
-
-        # Check if table exists, create if it doesn't
-        if "query_log" not in db.table_names():
             if self.debug:
-                print( "Table 'query_log' doesn't exist, creating it..." )
-            self._create_table_if_needed( db )
-        else:
-            self._query_log_table = db.open_table( "query_log" )
+                print( f"Connecting to LanceDB at: {uri}" )
 
-        if self.verbose:
-            print( f"Opened query_log table w/ [{self._query_log_table.count_rows()}] rows" )
+            db = lancedb.connect( uri )
+
+            # Validate existing table dimensions match config before creating/opening
+            self._validate_embedding_dimensions( db, "query_log", "embedding_verbatim" )
+
+            # Check if table exists, create if it doesn't
+            if "query_log" not in db.table_names():
+                if self.debug:
+                    print( "Table 'query_log' doesn't exist, creating it..." )
+                self._create_table_if_needed( db )
+            else:
+                self._query_log_table = db.open_table( "query_log" )
+
+            if self.verbose:
+                print( f"Opened query_log table w/ [{self._query_log_table.count_rows()}] rows" )
 
     def _validate_embedding_dimensions( self, db, table_name, embedding_field_name ):
         """
@@ -240,6 +247,12 @@ class QueryLogTable:
         Raises:
             - None (catches and logs errors)
         """
+        if self._use_postgres:
+            return self._pg_log_query(
+                query_verbatim, query_normalized, query_gist, user_id, session_id,
+                input_type, embeddings, match_result, processing_time_ms, cache_hits,
+            )
+
         if self.debug:
             timer = Stopwatch( msg=f"Logging query: '{du.truncate_string( query_verbatim )}'" )
 
@@ -314,6 +327,8 @@ class QueryLogTable:
         Returns:
             List of query log records
         """
+        if self._use_postgres: return self._pg_get_recent_queries( limit, user_id )
+
         try:
             query = self._query_log_table.search()
 
@@ -349,6 +364,8 @@ class QueryLogTable:
         Returns:
             Dict with cache hit percentages for each level
         """
+        if self._use_postgres: return self._pg_get_cache_hit_stats( days )
+
         try:
             # Calculate date threshold
             from datetime import timedelta
@@ -374,6 +391,79 @@ class QueryLogTable:
                 "total_queries": total
             }
 
+        except Exception as e:
+            if self.debug:
+                print( f"Error calculating cache hit stats: {e}" )
+            return { "verbatim": 0.0, "normalized": 0.0 }
+
+    # ----------------------------------------------------------------------- #
+    # Postgres+pgvector backend (v0.2.0 §6). Append-only telemetry via
+    # QueryLogRepository; id generation + config reads preserved here so log_query
+    # returns the identical query_id contract.
+    # ----------------------------------------------------------------------- #
+    def _pg_log_query( self, query_verbatim, query_normalized, query_gist, user_id,
+                       session_id, input_type, embeddings, match_result,
+                       processing_time_ms, cache_hits ) -> str:
+        """Postgres mirror of log_query (same id-generation + field mapping; returns query_id)."""
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories.query_log_repository import QueryLogRepository
+        try:
+            query_id = du.get_current_datetime( format_str='%Y%m%d_%H%M%S_%f' )
+            with get_db() as session:
+                QueryLogRepository( session ).log_query(
+                    id                    = query_id,
+                    timestamp             = du.get_timestamp_ms(),
+                    user_id               = user_id,
+                    session_id            = session_id,
+                    query_verbatim        = query_verbatim,
+                    query_normalized      = query_normalized,
+                    query_gist            = query_gist,
+                    embedding_verbatim    = embeddings.get( 'verbatim', [] ) if embeddings else [],
+                    embedding_normalized  = embeddings.get( 'normalized', [] ) if embeddings else [],
+                    matched_snapshot_id   = match_result.get( 'snapshot_id', '' ) if match_result else '',
+                    match_type            = match_result.get( 'type', 'none' ) if match_result else 'none',
+                    match_confidence      = match_result.get( 'confidence', 0.0 ) if match_result else 0.0,
+                    processing_time_ms    = processing_time_ms,
+                    input_type            = input_type,
+                    user_satisfaction     = "unknown",
+                    normalization_version = self._config_mgr.get( "normalization version", "v2.0" ),
+                    gist_model_version    = self._config_mgr.get( "llm spec key for gist generation", "unknown" ),
+                    cache_hit_verbatim    = cache_hits.get( 'verbatim', False ) if cache_hits else False,
+                    cache_hit_normalized  = cache_hits.get( 'normalized', False ) if cache_hits else False,
+                )
+            return query_id
+        except Exception as e:
+            du.print_stack_trace( e, explanation="log_query() failed", caller="QueryLogTable._pg_log_query()" )
+            return ""
+
+    def _pg_get_recent_queries( self, limit: int, user_id: Optional[str] ) -> list[Dict[str, Any]]:
+        """Postgres mirror of get_recent_queries (newest first; ORM rows, telemetry read)."""
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories.query_log_repository import QueryLogRepository
+        try:
+            with get_db() as session:
+                return QueryLogRepository( session ).get_recent_queries( limit=limit, user_id=user_id )
+        except Exception as e:
+            if self.debug:
+                print( f"Error getting recent queries: {e}" )
+            return []
+
+    def _pg_get_cache_hit_stats( self, days: int ) -> Dict[str, float]:
+        """Postgres mirror of get_cache_hit_stats (percentages + total_queries, same shape)."""
+        from datetime import timedelta
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories.query_log_repository import QueryLogRepository
+        try:
+            since = du.get_timestamp_ms() - timedelta( days=days )
+            with get_db() as session:
+                stats = QueryLogRepository( session ).get_cache_hit_stats( since=since )
+            if stats[ "total_queries" ] == 0:
+                return { "verbatim": 0.0, "normalized": 0.0 }
+            return {
+                "verbatim":      stats[ "verbatim_hit_rate" ]   * 100.0,
+                "normalized":    stats[ "normalized_hit_rate" ] * 100.0,
+                "total_queries": stats[ "total_queries" ],
+            }
         except Exception as e:
             if self.debug:
                 print( f"Error calculating cache hit stats: {e}" )

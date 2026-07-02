@@ -264,17 +264,30 @@ async def reset_prediction_engine( drop_table: bool = True ):
         table_name  = config_mgr.get( "prediction engine lancedb table", default="prediction_decisions" )
         table_dropped = False
 
-        # Drop LanceDB table (server process has write permission, test process may not)
+        # Clear the decision store (server process has write permission, test process may not).
+        # v0.2.0 §6: under the postgres backend clear the pgvector prediction_decisions
+        # rows (the alembic-managed table is kept); under lancedb drop the table.
+        from cosa.rest.db.repositories.vector_store_backend import is_postgres_backend
         if drop_table:
-            try:
-                import lancedb
-                lancedb_path = cu.get_project_root() + "/src/conf/long-term-memory/lupin.lancedb"
-                db = lancedb.connect( lancedb_path )
-                if table_name in db.table_names():
-                    db.drop_table( table_name )
+            if is_postgres_backend( config_mgr ):
+                try:
+                    from cosa.rest.db.database import get_db
+                    from cosa.rest.db.repositories.prediction_decision_repository import PredictionDecisionRepository
+                    with get_db() as session:
+                        PredictionDecisionRepository( session ).delete_all()
                     table_dropped = True
-            except Exception as drop_err:
-                print( f"[PE-RESET] Table drop note: {drop_err}" )
+                except Exception as drop_err:
+                    print( f"[PE-RESET] Postgres clear note: {drop_err}" )
+            else:
+                try:
+                    import lancedb
+                    lancedb_path = cu.get_project_root() + "/src/conf/long-term-memory/lupin.lancedb"
+                    db = lancedb.connect( lancedb_path )
+                    if table_name in db.table_names():
+                        db.drop_table( table_name )
+                        table_dropped = True
+                except Exception as drop_err:
+                    print( f"[PE-RESET] Table drop note: {drop_err}" )
 
         PredictionEngine.reset()
         engine = get_prediction_engine( config_mgr=config_mgr )

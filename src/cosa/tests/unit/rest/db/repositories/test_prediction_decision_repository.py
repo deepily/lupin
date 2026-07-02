@@ -85,3 +85,14 @@ def test_update_ratification_state( db_session ):
     updated = repo.update_ratification_state( "d1", "ratified" )
     assert updated.ratification_state == "ratified"
     assert repo.update_ratification_state( "missing", "x" ) is None
+
+
+def test_delete_all_clears_table( db_session ):
+    repo = PredictionDecisionRepository( db_session )
+    _add( repo, "d1", _vec( 1.0 ) )
+    _add( repo, "d2", _vec( 1.0 ) )
+    db_session.flush()
+    assert repo.count() == 2
+    assert repo.delete_all() == 2
+    assert repo.count() == 0
+    assert repo.delete_all() == 0          # empty table → 0
