@@ -26,7 +26,18 @@ Schema (§0 decision #7 + 6929f4ac §9.2 — the public interface; hold to it ex
     ttl_seconds : int   — freshness window; expired ⇒ undeclared ⇒ pokeable
     work_owed   : bool  — False ⇒ done ⇒ never poke
     reason      : str   — why the instance is holding
-    awaiting    : str   — "user:<name>" / "peer:<persona>" / "commons:<topic>" / "none"
+    awaiting    : str   — "user:<name>" / "peer:<persona>" / "commons:<topic>" /
+                          "cadence:<what>" / "none".
+                          "cadence:<what>" (task c7ae9033, 2026-07-02) = an
+                          OBSERVATION/TIMER cadence: work owed, but NOBODY owes
+                          this session anything — it re-polls at its own TTL
+                          (e.g. "cadence:observation-ttl" for a steward
+                          drift-watch). Use it INSTEAD of a "peer:" label when
+                          no peer owes you a deliverable: only "peer:" strings
+                          mint arbiter blocking edges (dependency_graph
+                          _parse_peer_target), so a cadence hold is
+                          WAITING-BY-DESIGN by construction — never read as
+                          BLOCKED, never chased.
     pending_user_gates           : list — structured open/answered direct-user-gate
                                           rows (6929f4ac §9.2 outward twin; promotes
                                           the free-text `awaiting: user:rick` to
