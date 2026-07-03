@@ -402,10 +402,14 @@ def _default_tmux_inject( session_id, text, wrap ):   # pragma: no cover - host-
     inject_qualifier_via_tmux( session_id, text, wrap=wrap )
 
 
-def _default_peer_dm_reminder( body, persona, icon, msg_id, thread_id ):   # pragma: no cover - host-side framing import
-    """Real envelope: reuse the SHARED build_peer_dm_reminder so the woken pane frames it identically to a peer DM."""
+def _default_peer_dm_reminder( body, persona, icon, msg_id, thread_id ):
+    """Real envelope: reuse the SHARED build_peer_dm_reminder, but framed ONE-WAY
+    (bug 8894e597) — the arbiter is a pure observer with no inbox (bug 9694fb11),
+    so its pokes/advisories must NOT carry a dm_send reply affordance the poked
+    session cannot deliver. one_way=True swaps the false reply-line for the honest
+    signal path (resume work; bridge/hold/store freshness IS the ACK)."""
     from lupin_cli.claude_code.hooks.lib.hook_common import build_peer_dm_reminder
-    return build_peer_dm_reminder( body, persona=persona, icon=icon, msg_id=msg_id, thread_id=thread_id )
+    return build_peer_dm_reminder( body, persona=persona, icon=icon, msg_id=msg_id, thread_id=thread_id, one_way=True )
 
 
 def make_tmux_push_fn(
