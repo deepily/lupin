@@ -108,6 +108,16 @@ class TestMultiplexerActionRequiredInPane:
     def test_drain_restores_section_home_and_closes_pane( self, logged_in_page ):
         page = logged_in_page
         _open_multiplexer( page )
+        # mux commit 75a1bad3 (Lane 0a+0c) relocated #action-required-section from
+        # inside #notifications-pane to a standalone LEADING accordion under
+        # <main class="container">. Capture its RESTING home parent BEFORE the lift
+        # so the restore assertion is robust to WHERE that home is (and to future
+        # relocations) — the point is "restored home", not a hardcoded parent id.
+        home_marker = page.evaluate(
+            "() => { const s = document.getElementById( 'action-required-section' );"
+            "        const p = s && s.parentElement;"
+            "        return p ? ( p.id || p.className || p.tagName ) : null; }"
+        )
         _click_layout_toggle( page )                       # → horizontal
         _emit_action_required( page, "mux-ar-pane-2" )
         assert _pane_state( page )[ "inPane" ] is True
@@ -125,15 +135,19 @@ class TestMultiplexerActionRequiredInPane:
                 const pane    = document.getElementById( 'content-pane' );
                 const rp      = window.__multiplexerTestHook.stores.readingPane;
                 return {
-                    homeParent : section ? ( section.parentElement ? section.parentElement.id : null ) : null,
+                    homeParent : section && section.parentElement
+                        ? ( section.parentElement.id || section.parentElement.className || section.parentElement.tagName )
+                        : null,
                     paneHidden : pane ? pane.hidden : null,
                     flag       : rp.isActionRequiredInPane(),
                     marked     : section ? section.classList.contains( 'in-reading-pane' ) : null,
                 };
             }"""
         )
-        assert after[ "homeParent" ] == "notifications-pane", \
-            "drained section must return to its #notifications-pane home"
+        assert after[ "homeParent" ] == home_marker, \
+            "drained section must return to its resting home parent (mux 75a1bad3 " \
+            "relocated it from #notifications-pane to a standalone accordion under " \
+            "<main class=\"container\">)"
         assert after[ "flag" ] is False, "AR-in-pane flag cleared on drain"
         assert after[ "marked" ] is False, "the .in-reading-pane class is removed on restore"
         assert after[ "paneHidden" ] is True, "pane closes when nothing else was open"
