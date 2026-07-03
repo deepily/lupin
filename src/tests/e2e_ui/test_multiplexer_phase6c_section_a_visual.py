@@ -159,7 +159,7 @@ def test_multiplexer_phase6c_section_a_popover_open_visual(
 
 
 def test_multiplexer_phase6c_section_a_popover_borrowed_visual(
-    request, clean_test_db, assert_snapshot, logged_in_page,
+    request, clean_test_db, assert_snapshot_content_shift_tolerant, logged_in_page,
 ):
     """AC-A12 snapshot #3: popover OPEN for a borrowed persona — borrowed
     badge surfaces (no `hidden` attribute), distinguishing visually from
@@ -186,5 +186,5 @@ def test_multiplexer_phase6c_section_a_popover_borrowed_visual(
     # (same unstable-baseline-by-construction reason as popover_open above). The
     # borrowed-badge surface lives entirely inside the popover element.
     popover = page.locator( '#persona-popover-phase6c-a-borrowed' )
-    assert_snapshot( popover, name="multiplexer_phase6c_section_a_popover_borrowed.png" )
+    assert_snapshot_content_shift_tolerant( popover, name="multiplexer_phase6c_section_a_popover_borrowed.png" )
     print( "✓ multiplexer_phase6c_section_a_popover_borrowed: snapshot compared" )

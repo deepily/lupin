@@ -33,7 +33,12 @@ import sys as _sys_vt
 _THIS_DIR = os.path.dirname( os.path.abspath( __file__ ) )
 if _THIS_DIR not in _sys_vt.path:
     _sys_vt.path.insert( 0, _THIS_DIR )
-from visual_height_tolerance import compare_pngs_height_tolerant, compare_pngs_structure_only
+from visual_height_tolerance import (
+    compare_pngs_height_tolerant,
+    compare_pngs_structure_only,
+    compare_pngs_content_shift_tolerant,
+    compare_pngs_aa_scatter_tolerant,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -192,6 +197,114 @@ def assert_snapshot_height_tolerant( pytestconfig, request ):
         ( fail_dir / f"actual_{name}" ).write_bytes( img )
         ( fail_dir / f"expected_{name}" ).write_bytes( baseline_file.read_bytes() )
         pytest.fail( f"[height-tolerant-snapshot] Snapshots DO NOT match! {name} — {result.reason}" )
+
+    return _assert
+
+
+# ---------------------------------------------------------------------------
+# Render-nondeterminism-tolerant snapshot assertion  (bug c0bbd2af)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def assert_snapshot_content_shift_tolerant( pytestconfig, request ):
+    """
+    A snapshot assertion that forgives SUB-PERCEPTUAL render nondeterminism of two
+    proven-benign classes surfaced by re-proof ts-5012699a — while never greening a
+    genuine regression:
+
+      (1) a UNIFORM <=1px content shift inside a same-size frame
+          (`multiplexer_phase6b_tts_chrome`: a ~64px green section-header band that
+          rounds to y11 or y12 run-to-run). Handled by
+          `compare_pngs_content_shift_tolerant`: forgives ONLY when some offset
+          within +/-1px drives the overlap to ZERO mismatch. A >=2px shift can't
+          re-align within +/-1px and ANY hue change never zeroes at any offset, so
+          both hard-fail — the anti-masking line is STRUCTURAL, not a threshold.
+
+      (2) small-region isolated glyph/AA scatter
+          (`multiplexer_phase6c_section_a_popover_borrowed`: an 8x8-corner speckle
+          with the persona modal + CSS untouched). Handled as a FALLBACK by
+          `compare_pngs_aa_scatter_tolerant`: forgives ONLY spatially-isolated
+          sub-floor clusters that leave NO erosion survivor, and fails the instant a
+          diff forms a contiguous block.
+
+    Composition safety: the two comparators are tried in order and the snapshot
+    passes iff EITHER forgives. This preserves never-false-green because EACH
+    comparator independently can only forgive its own proven-benign class — a real
+    regression (a >=2px/contiguous content move, a recolor, a width/height break)
+    fails BOTH, so it fails the OR. Distinct from
+    `assert_snapshot_height_tolerant`, which forgives a TOTAL-HEIGHT delta (the
+    frame grew) but NOT internal band position; this fixture is its intra-image
+    sibling.
+
+    Requires:
+        - the pytest-playwright-visual-snapshot ini keys are set
+          (`playwright_visual_snapshots_path`, `..._threshold`, `..._failures_path`)
+        - the passed object is a Playwright Locator/Page (screenshotted here) or
+          raw PNG bytes
+
+    Ensures:
+        - `--update-snapshots` writes the capture as the baseline (then fails the
+          test with a "review" note, mirroring the stock fixture)
+        - a missing baseline is created (then flagged for review)
+        - otherwise the capture is compared content-shift-tolerantly, then (only if
+          that refuses) aa-scatter-tolerantly; a match under EITHER passes, else
+          `pytest.fail` fires and actual/expected artifacts are saved under the
+          failures dir with BOTH refusal reasons
+    """
+    from pathlib import Path as _Path
+    from playwright.sync_api import Locator as _Locator, Page as _Page
+
+    root_dir       = _Path( pytestconfig.rootdir )
+    snapshots_path = root_dir / pytestconfig.getini( "playwright_visual_snapshots_path" )
+    failures_path  = root_dir / pytestconfig.getini( "playwright_visual_snapshot_failures_path" )
+    threshold      = float( pytestconfig.getini( "playwright_visual_snapshot_threshold" ) )
+    update         = bool( request.config.getoption( "--update-snapshots" ) )
+
+    test_file_stem = _Path( request.node.fspath ).stem
+    test_name      = request.node.name.split( "[", 1 )[ 0 ]
+
+    def _assert( locator_or_bytes, *, name, max_shift=1, max_height_delta=1,
+                 max_isolated_cluster=2 ):
+        if isinstance( locator_or_bytes, ( _Locator, _Page ) ):
+            img = locator_or_bytes.screenshot( animations="disabled", type="png" )
+        else:
+            img = locator_or_bytes
+
+        snapshot_dir  = snapshots_path / test_file_stem / test_name
+        snapshot_dir.mkdir( parents=True, exist_ok=True )
+        baseline_file = snapshot_dir / name
+
+        if update or not baseline_file.exists():
+            baseline_file.write_bytes( img )
+            verb = "updated" if update else "created (new)"
+            pytest.fail( f"[content-shift-snapshot] Snapshot {verb}; please review. {baseline_file}" )
+
+        baseline = baseline_file.read_bytes()
+
+        shift = compare_pngs_content_shift_tolerant(
+            img, baseline,
+            threshold=threshold, max_shift=max_shift, max_height_delta=max_height_delta,
+        )
+        if shift.matched:
+            return
+
+        scatter = compare_pngs_aa_scatter_tolerant(
+            img, baseline,
+            threshold=threshold, max_height_delta=max_height_delta,
+            max_isolated_cluster=max_isolated_cluster,
+        )
+        if scatter.matched:
+            return
+
+        # Save artifacts for triage (parity with the stock fixture's layout).
+        fail_dir = failures_path / test_file_stem / test_name
+        fail_dir.mkdir( parents=True, exist_ok=True )
+        ( fail_dir / f"actual_{name}" ).write_bytes( img )
+        ( fail_dir / f"expected_{name}" ).write_bytes( baseline )
+        pytest.fail(
+            f"[content-shift-snapshot] Snapshots DO NOT match! {name} — "
+            f"content-shift: {shift.reason}; aa-scatter: {scatter.reason}"
+        )
 
     return _assert
 

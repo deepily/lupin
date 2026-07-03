@@ -202,7 +202,7 @@ def test_multiplexer_phase6b_action_required_visual(
 # ---------------------------------------------------------------------------
 
 def test_multiplexer_phase6b_tts_chrome_visual(
-    request, clean_test_db, assert_snapshot_height_tolerant, logged_in_page,
+    request, clean_test_db, assert_snapshot_content_shift_tolerant, logged_in_page,
 ):
     """
     Capture the Phase 6b TTS chrome in its idle baseline state.
@@ -251,6 +251,6 @@ def test_multiplexer_phase6b_tts_chrome_visual(
     # row-height rounding flap (e.g. 129 vs 130) between --update-snapshots and a
     # plain COMPARE, while staying strict on width + overlapping pixels.
     pane = page.locator( '#tts-pane' )
-    assert_snapshot_height_tolerant( pane, name="multiplexer_phase6b_tts_chrome.png" )
+    assert_snapshot_content_shift_tolerant( pane, name="multiplexer_phase6b_tts_chrome.png" )
 
     print( "✓ multiplexer_phase6b_tts_chrome: visual snapshot compared" )
