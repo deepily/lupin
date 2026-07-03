@@ -3318,7 +3318,7 @@ def dm_list(
 # — a session cannot impersonate. Day-to-day practice: planning-is-prompting
 # workflow/task-store-discipline.md.
 
-from lupin_mcp.task_store_tools import task_create_impl, task_transition_impl, task_correlate_impl, task_query_impl, task_reassign_impl
+from lupin_mcp.task_store_tools import task_create_impl, task_transition_impl, task_correlate_impl, task_query_impl, task_reassign_impl, task_amend_impl
 
 
 def _task_store_identity() -> str:
@@ -3706,6 +3706,63 @@ def task_reassign(
         reason            = reason,
         new_manager       = new_manager,
         authority         = authority,
+    )
+
+
+@mcp.tool
+def task_amend(
+    task_id   : str,
+    note      : str,
+    reason    : Optional[ str ] = None,
+    authority : str             = "standing",
+) -> dict:
+    """
+    **[SELF-DISCLOSURE]** Append an amendment to a task-store item's body.
+
+    The durable-record seam for a LIVE item whose scope is legitimately reframed
+    mid-flight (Krishna's 2026-07-02 friction): instead of leaving the current
+    spec in scratchpad checklists / code comments / transition reasons — where a
+    successor rehydrating from the store never sees it — append it to the item's
+    DURABLE body. APPEND-ONLY: the original body is preserved verbatim and your
+    note lands below a persona-stamped + UTC-timestamped divider, so the full
+    amendment history reads inline. This is NOT a destructive edit — reach for it
+    when you would otherwise rewrite a body but must keep the prior spec.
+
+    The server REJECTS terminal items (no amending closed history), a blank note,
+    and a bad authority — this tool does NOT pre-check those; a 422 carries the
+    server's words verbatim.
+
+    Example:
+        # Record a manager-ruled scope reframe on a live item:
+        task_amend(task_id="<uuid>",
+                   note="SCOPE REFRAME (Rick 2026-07-02): scheduler-port -> "
+                        "request-initiation subscriber. Prior spec below stands "
+                        "as history.",
+                   reason="4f14d38f manager ruling on cited evidence")
+
+    Args:
+        task_id: The item's UUID
+        note: The amendment text to append (server validates 1..4000 + non-blank)
+        reason: Optional justification stamping the 'amended' audit event; when
+            omitted the event records an auto-marker naming the appended length
+        authority: standing | user_direct | manager_relay (default "standing")
+
+    Returns:
+        { item, event } (server 200 body) verbatim, or an error dict — a 404
+        carries "task {id} not found" verbatim under "detail"; a 422 (terminal
+        item / blank note / bad authority) carries the server's detail verbatim.
+
+    `actor` is NOT a parameter — bridge-stamped like task_transition's actor
+    (anti-impersonation; the amendment is auditable to the real session).
+    """
+    return task_amend_impl(
+        api_base_url = _get_server_url(),
+        api_key      = _mcp_outbound_api_key(),
+        actor        = _task_store_identity(),
+        task_id      = task_id,
+        note         = note,
+        reason       = reason,
+        authority    = authority,
     )
 
 

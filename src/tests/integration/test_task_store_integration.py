@@ -281,7 +281,7 @@ class TestTaskStoreLifecycle:
 
 
 class TestTaskStorePhase2WritePaths:
-    """Phase 2 live wire: reason on ->dropped, correlation_key filter, /correlate."""
+    """Phase 2 live wire: reason on ->dropped, correlation_key filter, /correlate, /amend."""
 
     def test_dropped_requires_reason_and_persists_it( self, test_api_key ):
         """C12 live: ->dropped without reason 422s; with reason it lands on the event row."""
@@ -340,6 +340,47 @@ class TestTaskStorePhase2WritePaths:
                                 json={ "correlation_key": old_ck, "actor": "tiffany d03e6219" } )
         assert locked.status_code == 422
         assert any( "immutable" in e for e in locked.json()[ "detail" ][ "errors" ] )
+
+    def test_amend_appends_body_with_audit_event( self, test_api_key ):
+        """Append-only body amend live: original body preserved verbatim, 'amended' event, terminal + blank-note refuse."""
+        headers = { "X-API-Key": test_api_key[ "api_key" ] }
+        created = requests.post( ENDPOINT, json=_create_body( body="ORIGINAL SPEC verbatim." ),
+                                 headers=headers, timeout=10 )
+        task_id = created.json()[ "id" ]
+
+        r = requests.post( f"{ENDPOINT}/{task_id}/amend", headers=headers, timeout=10,
+                           json={ "note": "SCOPE REFRAME: subscriber path now.",
+                                  "actor": "arnold 8b7225c4", "reason": "manager ruling on cited evidence" } )
+        assert r.status_code == 200
+        body = r.json()
+        # Original preserved verbatim; the note appended below a persona+UTC divider.
+        assert body[ "item" ][ "body" ].startswith( "ORIGINAL SPEC verbatim.\n\n[amendment · arnold 8b7225c4 · " )
+        assert body[ "item" ][ "body" ].endswith( "SCOPE REFRAME: subscriber path now." )
+        assert body[ "item" ][ "status" ] == "queued"                     # status untouched (not a transition)
+        assert body[ "event" ][ "transition" ] == "amended"
+        assert body[ "event" ][ "reason" ] == "manager ruling on cited evidence"
+
+        # A second amend stacks below the first — full history reads inline.
+        r2 = requests.post( f"{ENDPOINT}/{task_id}/amend", headers=headers, timeout=10,
+                            json={ "note": "and one more clarification.", "actor": "arnold 8b7225c4" } )
+        assert r2.status_code == 200
+        stacked = r2.json()[ "item" ][ "body" ]
+        assert stacked.count( "[amendment · arnold 8b7225c4 · " ) == 2
+        assert stacked.startswith( "ORIGINAL SPEC verbatim." )           # earliest text still first
+        assert r2.json()[ "event" ][ "reason" ].startswith( "body amended (+" )   # auto-marker when reason absent
+
+        # Blank-note reject: min_length passes "   " at the wire; handler strip-guards it.
+        blank = requests.post( f"{ENDPOINT}/{task_id}/amend", headers=headers, timeout=10,
+                               json={ "note": "   ", "actor": "arnold 8b7225c4" } )
+        assert blank.status_code == 422
+        assert any( "note" in e for e in blank.json()[ "detail" ][ "errors" ] )
+
+        # Terminal lockout: drop it, then amend must 422 (no amending closed history).
+        _transition( headers, task_id, to_status="dropped", actor="arnold 8b7225c4", reason="probe cleanup" )
+        locked = requests.post( f"{ENDPOINT}/{task_id}/amend", headers=headers, timeout=10,
+                                json={ "note": "too late", "actor": "arnold 8b7225c4" } )
+        assert locked.status_code == 422
+        assert any( "closed history" in e for e in locked.json()[ "detail" ][ "errors" ] )
 
 
 class TestTaskStoreWrapperE2E:

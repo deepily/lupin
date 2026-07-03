@@ -883,5 +883,101 @@ def test_count_only_canonicalizes_project_filter_FLIP( client, repo ):
     assert repo.count_tasks.call_args.kwargs[ "project" ] == "plan"
 
 
+# ---------------------------------------------------------------------------
+# Phase 2.2 — POST /api/tasks/{id}/amend (append-only body amendment)
+# ---------------------------------------------------------------------------
+
+_AMEND_BODY = { "note": "SCOPE REFRAME: subscriber path now.", "actor": "arnold 8b7225c4" }
+
+
+def test_amend_404_when_missing( client, repo ):
+    repo.get_by_id_for_update.return_value = None
+    r = client.post( f"/api/tasks/{uuid.uuid4()}/amend", json=_AMEND_BODY )
+    assert r.status_code == 404
+    repo.apply_amendment.assert_not_called()
+
+
+def test_amend_422_on_malformed_uuid( client, repo ):
+    r = client.post( "/api/tasks/not-a-uuid/amend", json=_AMEND_BODY )
+    assert r.status_code == 422
+    repo.get_by_id_for_update.assert_not_called()
+
+
+@pytest.mark.parametrize( "terminal", [ "done", "dropped" ] )
+def test_amend_rejects_terminal_items( client, repo, terminal ):
+    repo.get_by_id_for_update.return_value = make_item( status=terminal )
+    r = client.post( f"/api/tasks/{uuid.uuid4()}/amend", json=_AMEND_BODY )
+    assert r.status_code == 422
+    assert any( "closed history" in e for e in r.json()[ "detail" ][ "errors" ] )
+    repo.apply_amendment.assert_not_called()
+
+
+def test_amend_rejects_bad_authority( client, repo ):
+    repo.get_by_id_for_update.return_value = make_item()
+    r = client.post( f"/api/tasks/{uuid.uuid4()}/amend",
+                     json={ **_AMEND_BODY, "authority": "divine_right" } )
+    assert r.status_code == 422
+    assert any( "authority" in e for e in r.json()[ "detail" ][ "errors" ] )
+    repo.apply_amendment.assert_not_called()
+
+
+def test_amend_rejects_blank_note( client, repo ):
+    # min_length=1 lets a whitespace-only note THROUGH the wire; the handler's
+    # strip-guard rejects it so no meaningless empty amendment block is written.
+    repo.get_by_id_for_update.return_value = make_item()
+    r = client.post( f"/api/tasks/{uuid.uuid4()}/amend",
+                     json={ **_AMEND_BODY, "note": "   " } )
+    assert r.status_code == 422
+    assert any( "note" in e for e in r.json()[ "detail" ][ "errors" ] )
+    repo.apply_amendment.assert_not_called()
+
+
+def test_amend_rejects_empty_note_at_wire( client, repo ):
+    # An empty-string note is a Pydantic min_length 422 BEFORE the handler runs.
+    r = client.post( f"/api/tasks/{uuid.uuid4()}/amend",
+                     json={ **_AMEND_BODY, "note": "" } )
+    assert r.status_code == 422
+    repo.get_by_id_for_update.assert_not_called()
+
+
+def test_amend_reports_all_violations_together( client, repo ):
+    repo.get_by_id_for_update.return_value = make_item( status="done" )
+    r = client.post( f"/api/tasks/{uuid.uuid4()}/amend",
+                     json={ **_AMEND_BODY, "authority": "divine_right", "note": "   " } )
+    # bad authority + blank note + terminal item -> all three at once.
+    assert r.status_code == 422 and len( r.json()[ "detail" ][ "errors" ] ) == 3
+
+
+def test_amend_happy_path_returns_item_and_event( client, repo ):
+    item = make_item( body="ORIGINAL." )
+    repo.get_by_id_for_update.return_value = item
+    repo.apply_amendment.return_value = make_event(
+        item.id, transition="amended", reason="manager ruling" )
+
+    r = client.post( f"/api/tasks/{item.id}/amend",
+                     json={ **_AMEND_BODY, "reason": "manager ruling" } )
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body[ "event" ][ "transition" ] == "amended"
+    kwargs = repo.apply_amendment.call_args.kwargs
+    assert kwargs[ "note" ]      == "SCOPE REFRAME: subscriber path now."
+    assert kwargs[ "actor" ]     == "arnold 8b7225c4"
+    assert kwargs[ "authority" ] == "standing"
+    assert kwargs[ "reason" ]    == "manager ruling"
+    # The router owns the clock -> passes a tz-aware datetime the repo stamps.
+    assert kwargs[ "now" ].tzinfo is not None
+    # Row-locked read (N3 parity): the terminal check must not be raceable.
+    repo.get_by_id_for_update.assert_called_once()
+    repo.get_by_id.assert_not_called()
+
+
+@pytest.mark.parametrize( "field,limit", [ ( "note", 4000 ), ( "actor", 255 ), ( "reason", 4000 ) ] )
+def test_amend_rejects_overlong_fields( client, repo, field, limit ):
+    r = client.post( f"/api/tasks/{uuid.uuid4()}/amend",
+                     json={ **_AMEND_BODY, field: "x" * ( limit + 1 ) } )
+    assert r.status_code == 422   # Pydantic max_length — never a DB error
+
+
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )
