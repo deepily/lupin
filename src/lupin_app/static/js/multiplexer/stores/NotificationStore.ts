@@ -614,9 +614,12 @@ class NotificationStoreImpl implements NotificationStore {
       // here — so reading norm.message needs no nullish guard and stays typed
       // `string` (priority/tts_raw are raw-only, dropped by normalize, read off raw).
       const ttsText = raw.tts_raw === true ? norm.message : formatTtsMessage( raw.priority, norm.message );
+      // 70cbff3e (A1 producer-seam): carry the NORMALIZED action_required flag
+      // (norm.action_required === raw.response_requested===true, set at :757) so
+      // the downstream TtsQueueItem knows whether this item can enter focus mode.
       this.bus.emit<StoreNotificationTtsIntentPayload>({
         type    : "store_notification_tts_intent",
-        payload : { id_hash: norm.id_hash, ttsText, priority: raw.priority },
+        payload : { id_hash: norm.id_hash, ttsText, priority: raw.priority, action_required: norm.action_required },
         source  : "notification-store",
         ts      : this.nowFn(),
       });

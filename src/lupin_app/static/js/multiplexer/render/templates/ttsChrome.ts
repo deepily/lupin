@@ -54,6 +54,12 @@ export interface TtsChromeHandlers {
   // is supplied. WP4 provides it (→ TtsQueueStore.clear()); pre-WP4 callers omit
   // it, so the button is present but inert (never a misleading no-op call).
   onClearAll?(): void;
+  // 70cbff3e — the focus Resume button (`.tts-btn-resume`, present only in focus
+  // mode). DISTINCT from onResume: onResume unpauses the AUDIO (transport toggle);
+  // onFocusResume exits FOCUS + rolls the queue (→ TtsQueueStore.resumeFocus()).
+  // OPTIONAL, same inert-when-absent contract as onClearAll — pre-70cbff3e callers
+  // never render the focus button (focusMode false) so they omit it harmlessly.
+  onFocusResume?(): void;
 }
 
 export interface TtsChromeOpts {
@@ -226,9 +232,14 @@ export function renderTtsChrome(
     if (ctl.skipEnabled) skip.addEventListener("click", () => handlers.onSkip());
   }
 
-  // WP3 — focus Resume (present only in focus mode) → onResume.
+  // 70cbff3e — focus Resume (present only in focus mode) → onFocusResume (exit
+  // focus + roll the queue), DISTINCT from the transport toggle's onResume. Wired
+  // only when a handler is supplied (inert-when-absent, mirroring onClearAll).
   const resume = root.querySelector<HTMLButtonElement>(".tts-btn-resume");
-  if (resume !== null) resume.addEventListener("click", () => handlers.onResume());
+  if (resume !== null && handlers.onFocusResume !== undefined) {
+    const onFocusResume = handlers.onFocusResume;
+    resume.addEventListener("click", () => onFocusResume());
+  }
 
   // WP3 + desync-fix — Clear-all: the chrome renders ONLY when the queue is
   // non-empty (queueEmpty short-circuits to the empty panel above), so Clear-all

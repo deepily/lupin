@@ -680,14 +680,14 @@ test("F0-d: a HIGH-priority new-arrival emits a TTS intent (contextualized, non-
   const { bus } = setupStore();
   const intents = captureTtsIntents(bus);
   emitRaw(bus, { id_hash: "t-high", sender_id: "cc@x#s1", message: "build finished", priority: "high" });
-  assert.deepEqual(intents, [ { id_hash: "t-high", ttsText: "build finished", priority: "high" } ]);
+  assert.deepEqual(intents, [ { id_hash: "t-high", ttsText: "build finished", priority: "high", action_required: false } ]);
 });
 
 test("F0-d: an URGENT new-arrival emits a TTS intent with the \"Urgent! \" prefix", () => {
   const { bus } = setupStore();
   const intents = captureTtsIntents(bus);
   emitRaw(bus, { id_hash: "t-urg", sender_id: "cc@x#s2", message: "disk full", priority: "urgent" });
-  assert.deepEqual(intents, [ { id_hash: "t-urg", ttsText: "Urgent! disk full", priority: "urgent" } ]);
+  assert.deepEqual(intents, [ { id_hash: "t-urg", ttsText: "Urgent! disk full", priority: "urgent", action_required: false } ]);
 });
 
 test("F0-d: tts_raw === true bypasses the contextualizer — the raw message is spoken verbatim", () => {
@@ -695,7 +695,16 @@ test("F0-d: tts_raw === true bypasses the contextualizer — the raw message is 
   const intents = captureTtsIntents(bus);
   // urgent + tts_raw:true → NO "Urgent!" prefix (raw wins).
   emitRaw(bus, { id_hash: "t-raw", sender_id: "cc@x#s3", message: "raw text only", priority: "urgent", tts_raw: true });
-  assert.deepEqual(intents, [ { id_hash: "t-raw", ttsText: "raw text only", priority: "urgent" } ]);
+  assert.deepEqual(intents, [ { id_hash: "t-raw", ttsText: "raw text only", priority: "urgent", action_required: false } ]);
+});
+
+test("F0-d (70cbff3e): an action-required high/urgent arrival carries action_required:true on the intent", () => {
+  const { bus } = setupStore();
+  const intents = captureTtsIntents(bus);
+  // response_requested === true → norm.action_required === true (normalize :757);
+  // the producer seam carries it through so the queue item can enter focus mode.
+  emitRaw(bus, { id_hash: "t-ar", sender_id: "cc@x#s8", message: "approve deploy?", priority: "urgent", response_requested: true } );
+  assert.deepEqual(intents, [ { id_hash: "t-ar", ttsText: "Urgent! approve deploy?", priority: "urgent", action_required: true } ]);
 });
 
 test("F0-d: suppress_ding does NOT gate speech — a suppressed high/urgent still emits (manager closing-turn parity)", () => {

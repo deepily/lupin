@@ -20,21 +20,23 @@ before(() => {
 });
 
 interface CallLog {
-  pause    : number;
-  resume   : number;
-  stop     : number;
-  skip     : number;
-  clearAll : number;
+  pause       : number;
+  resume      : number;
+  stop        : number;
+  skip        : number;
+  clearAll    : number;
+  focusResume : number;   // 70cbff3e — the focus Resume button (distinct from resume)
 }
 
 function makeHandlers(): { handlers: TtsChromeHandlers; calls: CallLog } {
-  const calls: CallLog = { pause: 0, resume: 0, stop: 0, skip: 0, clearAll: 0 };
+  const calls: CallLog = { pause: 0, resume: 0, stop: 0, skip: 0, clearAll: 0, focusResume: 0 };
   const handlers: TtsChromeHandlers = {
-    onPause()    : void { calls.pause    += 1; },
-    onResume()   : void { calls.resume   += 1; },
-    onStop()     : void { calls.stop     += 1; },
-    onSkip()     : void { calls.skip     += 1; },
-    onClearAll() : void { calls.clearAll += 1; },
+    onPause()       : void { calls.pause       += 1; },
+    onResume()      : void { calls.resume      += 1; },
+    onStop()        : void { calls.stop        += 1; },
+    onSkip()        : void { calls.skip        += 1; },
+    onClearAll()    : void { calls.clearAll    += 1; },
+    onFocusResume() : void { calls.focusResume += 1; },
   };
   return { handlers, calls };
 }
@@ -268,11 +270,22 @@ test("non-focus mode: no Resume button (querySelector null)", () => {
   assert.equal(el.querySelector(".tts-btn-resume"), null);
 });
 
-test("focus Resume click dispatches onResume", () => {
+test("70cbff3e — focus Resume click dispatches onFocusResume, NOT onResume (distinct from the transport toggle)", () => {
   const { handlers, calls } = makeHandlers();
   const el = renderTtsChrome(makeOpts({ state: "playing", queueLength: 1, focusMode: true }), handlers);
   (el.querySelector(".tts-btn-resume") as HTMLButtonElement).click();
-  assert.equal(calls.resume, 1);
+  assert.equal(calls.focusResume, 1, "focus Resume → onFocusResume");
+  assert.equal(calls.resume, 0, "focus Resume must NOT fire the audio-resume path");
+});
+
+test("70cbff3e — focus Resume with no onFocusResume handler is inert (present but no throw on click)", () => {
+  // Mirrors the onClearAll inert-when-absent contract: a caller omitting
+  // onFocusResume renders the button but wires no listener.
+  const inert: TtsChromeHandlers = { onPause() {}, onResume() {}, onStop() {}, onSkip() {} };
+  const el = renderTtsChrome(makeOpts({ state: "playing", queueLength: 1, focusMode: true }), inert);
+  const btn = el.querySelector(".tts-btn-resume") as HTMLButtonElement;
+  assert.notEqual(btn, null, "button present in focus mode");
+  btn.click();   // no listener → no throw
 });
 
 test("Clear-all: enabled + shown whenever the chrome renders (queue non-empty)", () => {

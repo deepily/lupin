@@ -663,6 +663,13 @@ export interface TtsQueueItem {
   notification ?: Notification;   // the source notification (renderer context)
   ttsText      ?: string;         // the text submitted to /ws/audio (legacy `ttsText`)
   addedAt      ?: number;         // ms epoch the item was enqueued (legacy `addedAt`)
+  // 70cbff3e (A1 producer-seam, Tiberius 2026-07-02): whether the source
+  // notification is action-required. TtsQueueStore reads it on store_audio_ended
+  // to decide focus-mode ENTER (active AR item finished speaking → hold the roll).
+  // Legacy keys on the item's OWN type (`justCompletedItem.type==='action-required'`,
+  // notifications.js:17178), so the flag rides the item, not a store cross-ref.
+  // Optional + absent → false (a fire-and-forget item never enters focus).
+  action_required ?: boolean;
 }
 
 // store_tts_queue_changed payload (F0-c). Emitted by TtsQueueStore on every
@@ -688,6 +695,11 @@ export interface StoreNotificationTtsIntentPayload {
   id_hash  : string;
   ttsText  : string;
   priority : string;
+  // 70cbff3e (A1 producer-seam): the normalized action-required flag, carried
+  // through so wireTtsIntent can stamp it onto the enqueued TtsQueueItem. Gated
+  // the same as the emit (high/urgent only), but action_required is orthogonal to
+  // priority — an action-required prompt may be high/urgent OR not.
+  action_required : boolean;
 }
 
 // store_audio_ended payload (F0-f / 00c seam). 00c's Phase-6 playback engine

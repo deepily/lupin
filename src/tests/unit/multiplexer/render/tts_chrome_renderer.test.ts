@@ -70,9 +70,11 @@ function makeAudioStore(initialState: AudioPlaybackState = "playing", initialQue
 }
 
 // WP4 — TtsQueueStore mock (active head + pending tail + mutator call tracking).
+// 70cbff3e — extended with focusMode() read + resumeFocus() mutator.
 interface FakeTtsQueueCalls {
-  removeById : string[];
-  clear      : number;
+  removeById  : string[];
+  clear       : number;
+  resumeFocus : number;
 }
 
 function makeTtsQueueStore(): {
@@ -80,10 +82,12 @@ function makeTtsQueueStore(): {
   calls      : FakeTtsQueueCalls;
   setActive  : (item: TtsQueueItem | null) => void;
   setPending : (items: TtsQueueItem[]) => void;
+  setFocus   : (on: boolean) => void;
 } {
-  let active  : TtsQueueItem | null = null;
-  let pending : TtsQueueItem[] = [];
-  const calls : FakeTtsQueueCalls = { removeById: [], clear: 0 };
+  let active    : TtsQueueItem | null = null;
+  let pending   : TtsQueueItem[] = [];
+  let focusMode = false;
+  const calls : FakeTtsQueueCalls = { removeById: [], clear: 0, resumeFocus: 0 };
   const store : TtsQueueStoreLike = {
     current        : (): string | null => (active === null ? null : active.id_hash),
     activeItem     : (): TtsQueueItem | null => active,
@@ -91,12 +95,15 @@ function makeTtsQueueStore(): {
     itemQueueLength: (): number => pending.length,
     removeById     : (id: string): void => { calls.removeById.push(id); },
     clear          : (): void => { calls.clear += 1; },
+    focusMode      : (): boolean => focusMode,
+    resumeFocus    : (): void => { calls.resumeFocus += 1; },
   };
   return {
     store,
     calls,
     setActive : (item: TtsQueueItem | null): void => { active = item; },
     setPending: (items: TtsQueueItem[]): void => { pending = items; },
+    setFocus  : (on: boolean): void => { focusMode = on; },
   };
 }
 
@@ -526,5 +533,46 @@ test("WP4: Clear-all dispatches ttsQueue.clear() (non-empty queue)", () => {
   renderer.mount(root);
   (root.querySelector(".tts-btn-clear-all") as HTMLButtonElement).click();
   assert.equal(ttsQueue.calls.clear, 1);
+  renderer.unmount();
+});
+
+// ---------------------------------------------------------------------------
+// 70cbff3e — focus-mode integration (renderer reads focusMode() + wires
+// onFocusResume, and its queueEmpty is focus-aware).
+// ---------------------------------------------------------------------------
+
+test("70cbff3e (T13): focus mode renders 'Paused: N waiting' header + Resume button (active discarded, pending held)", () => {
+  const { renderer, root, ttsQueue } = setupRenderer("ended", 0);
+  ttsQueue.setActive(null);                              // AR head discarded at enter
+  ttsQueue.setPending([ttsItem("p1"), ttsItem("p2")]);  // held pending tail
+  ttsQueue.setFocus(true);
+  renderer.mount(root);
+  const header = root.querySelector(".tts-playing-header")!;
+  assert.match(header.textContent ?? "", /Paused: 2 waiting/);
+  assert.equal(header.className, "tts-playing-header focus-mode");
+  assert.notEqual(root.querySelector(".tts-btn-resume"), null, "Resume present in focus mode");
+  renderer.unmount();
+});
+
+test("70cbff3e (T13b): focus with ZERO pending still renders the chrome (focus-aware queueEmpty), never the empty panel", () => {
+  const { renderer, root, ttsQueue } = setupRenderer("ended", 0);
+  ttsQueue.setActive(null);
+  ttsQueue.setPending([]);
+  ttsQueue.setFocus(true);
+  renderer.mount(root);
+  assert.equal(root.querySelector(".tts-queue-empty-state"), null, "focused ⟹ not the empty panel");
+  assert.match((root.querySelector(".tts-playing-header")!).textContent ?? "", /Paused: 0 waiting/);
+  renderer.unmount();
+});
+
+test("70cbff3e (T14): clicking the focus Resume button dispatches ttsQueue.resumeFocus(), NOT audio.resume()", () => {
+  const { renderer, root, ttsQueue, audio } = setupRenderer("ended", 0);
+  ttsQueue.setActive(null);
+  ttsQueue.setPending([ttsItem("p1")]);
+  ttsQueue.setFocus(true);
+  renderer.mount(root);
+  (root.querySelector(".tts-btn-resume") as HTMLButtonElement).click();
+  assert.equal(ttsQueue.calls.resumeFocus, 1, "focus Resume → resumeFocus()");
+  assert.equal(audio.calls.resume, 0, "focus Resume must NOT unpause audio");
   renderer.unmount();
 });

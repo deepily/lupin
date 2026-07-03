@@ -67,6 +67,11 @@ export interface TtsQueueStoreLike {
   itemQueueLength(): number;
   removeById(idHash: string): void;
   clear(): void;
+  // 70cbff3e — focus-mode read + manual Resume. focusMode() drives the "Paused: N
+  // waiting" header + Resume button; resumeFocus() is the Resume click handler
+  // (exit focus + roll the queue). Kept off the audio path — this is queue state.
+  focusMode(): boolean;
+  resumeFocus(): void;
 }
 
 export interface TtsChromeRendererStores {
@@ -236,23 +241,31 @@ class TtsChromeRendererImpl implements TtsChromeRenderer {
     // is truly empty (no active head AND no pending tail); otherwise it renders
     // the transport chrome + cards even while audio is idle (item queued, not yet
     // speaking). This prevents "🔇 Nothing in the queue" rendering alongside cards.
-    const queueEmpty   = activeItem === null && pending.length === 0;
+    // 70cbff3e — focus mode is now LIVE (the §8.3 follow-on). When focused the
+    // roll is paused (active discarded at enter → activeItem null) but the chrome
+    // must still render its "Paused: N waiting" header + Resume, so queueEmpty is
+    // focus-aware: a focused queue is NEVER "empty" even at zero pending.
+    const focusMode    = this.stores.ttsQueue.focusMode();
+    const queueEmpty   = activeItem === null && pending.length === 0 && !focusMode;
 
-    // Transport chrome (WP3). count = pending (waiting) item count. Focus mode is
-    // deferred (§8.3 — its own follow-on cycle), so focusMode is omitted (false).
+    // Transport chrome (WP3). count = pending (waiting) item count.
     const chrome = renderTtsChrome(
       {
         state       : this.stores.audio.state(),
         queueLength : pendingCount,
         queueEmpty,
+        focusMode,
         // currentTrackName omitted — Phase 0 prereq #3 pending.
       },
       {
-        onPause    : () => this.stores.audio.pause(),
-        onResume   : () => this.stores.audio.resume(),
-        onStop     : () => this.stores.audio.stop(),
-        onSkip     : () => this.stores.audio.skip(),
-        onClearAll : () => this.stores.ttsQueue.clear(),
+        onPause       : () => this.stores.audio.pause(),
+        onResume      : () => this.stores.audio.resume(),
+        onStop        : () => this.stores.audio.stop(),
+        onSkip        : () => this.stores.audio.skip(),
+        onClearAll    : () => this.stores.ttsQueue.clear(),
+        // 70cbff3e — the focus Resume button is DISTINCT from the transport
+        // toggle's onResume (audio.resume()): it exits focus + rolls the queue.
+        onFocusResume : () => this.stores.ttsQueue.resumeFocus(),
       },
     );
 
