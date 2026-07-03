@@ -157,6 +157,12 @@ def test_multiplexer_phase6c_section_d_baseline_visual(
     page.evaluate( _STABILIZE_LAST_ACTIVITY_JS )
     time.sleep( 0.3 )
 
+    # Font-load barrier (task 006cb393 — emoji glyph-render race): await
+    # document.fonts.ready + 2 RAFs so the sender-card NotoColorEmoji glyphs are
+    # loaded before capture. networkidle does NOT gate fonts. See
+    # test_multiplexer_task_editing.py:316-318. Pure load barrier — comparator untouched.
+    page.evaluate( "() => document.fonts.ready" )
+    page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
     container = page.locator( '#sender-cards-container' )
     assert_snapshot( container, name="multiplexer_phase6c_section_d_baseline.png" )
     print( "✓ multiplexer_phase6c_section_d_baseline: visual snapshot compared" )
@@ -195,6 +201,11 @@ def test_multiplexer_phase6c_section_d_pinned_visual(
     # at steady-state when the snapshot fires.
     time.sleep( 0.3 )
 
+    # Font-load barrier (task 006cb393 — emoji glyph-render race): await
+    # document.fonts.ready + 2 RAFs so the sender-card NotoColorEmoji glyphs are
+    # loaded before capture. See test_multiplexer_task_editing.py:316-318.
+    page.evaluate( "() => document.fonts.ready" )
+    page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
     container = page.locator( '#sender-cards-container' )
     assert_snapshot( container, name="multiplexer_phase6c_section_d_pinned.png" )
     print( "✓ multiplexer_phase6c_section_d_pinned: visual snapshot compared" )
@@ -248,6 +259,11 @@ def test_multiplexer_phase6c_section_d_pin_moved_visual(
     # flash window so the focus-flash attribute survives until capture.
     time.sleep( 0.3 )
 
+    # Font-load barrier (task 006cb393 — emoji glyph-render race): await
+    # document.fonts.ready + 2 RAFs so the sender-card NotoColorEmoji glyphs are
+    # loaded before capture. See test_multiplexer_task_editing.py:316-318.
+    page.evaluate( "() => document.fonts.ready" )
+    page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
     container = page.locator( '#sender-cards-container' )
     assert_snapshot( container, name="multiplexer_phase6c_section_d_pin_moved.png" )
     print( "✓ multiplexer_phase6c_section_d_pin_moved: visual snapshot compared" )

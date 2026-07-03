@@ -133,6 +133,27 @@ _STABILIZE_COUNTDOWN_JS = """
 """
 
 
+# Pin the pending TTS card's `.message-time` cell to the frozen golden HH:MM so the
+# focus-mode snapshot is deterministic (task 02f99882). The held "Build finished"
+# card renders its time via ttsCardTime() → new Date( item.addedAt ), and addedAt is
+# stamped nowFn() (wall-clock) at enqueue in wireTtsIntent — IGNORING the injected
+# fixed ts. So the rendered HH:MM drifts every run (golden 01:45 vs a live capture
+# time) → a ~24px CONTIGUOUS timestamp diff that is NOT a font-race (fonts.ready
+# already fixed the glyph race) and NOT AA (a contiguous block, correctly rejected by
+# the content-shift comparator). Mirrors _STABILIZE_COUNTDOWN_JS above + the 6a
+# _STABILIZE_DOM_JS TIMING_PINS approach. Value = the frozen golden baseline; the pin
+# fires before EVERY capture (compare AND --update) so golden and actual always agree.
+_STABILIZE_TTS_CARD_TIME_JS = """
+() => {
+    const PIN = '01:45';
+    document.querySelectorAll( '#tts-pane .message-time' ).forEach( el => {
+        el.textContent = PIN;
+    } );
+    return true;
+}
+"""
+
+
 # ---------------------------------------------------------------------------
 # Visual regression — action-required interactive widgets
 # ---------------------------------------------------------------------------
@@ -191,6 +212,12 @@ def test_multiplexer_phase6b_action_required_visual(
     # while staying strict on width + overlapping pixels. (A larger genuine
     # height change — e.g. the 0a/0c section-header +57px — still fails until the
     # baseline is legitimately re-captured.)
+    # Font-load barrier (task 006cb393 — emoji glyph-render race): await
+    # document.fonts.ready + 2 RAFs so any NotoColorEmoji glyphs are loaded before
+    # capture. networkidle does NOT gate fonts. See
+    # test_multiplexer_task_editing.py:316-318. Pure load barrier — comparator untouched.
+    page.evaluate( "() => document.fonts.ready" )
+    page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
     section = page.locator( '#action-required-section' )
     assert_snapshot_height_tolerant( section, name="multiplexer_phase6b_action_required.png" )
 
@@ -250,6 +277,12 @@ def test_multiplexer_phase6b_tts_chrome_visual(
     # Height-tolerant compare (bug 660d02b4): forgives the benign ≤1px sub-pixel
     # row-height rounding flap (e.g. 129 vs 130) between --update-snapshots and a
     # plain COMPARE, while staying strict on width + overlapping pixels.
+    # Font-load barrier (task 006cb393 — emoji glyph-render race): await
+    # document.fonts.ready + 2 RAFs so the 🔇/persona NotoColorEmoji glyphs are
+    # loaded before capture. networkidle does NOT gate fonts. See
+    # test_multiplexer_task_editing.py:316-318. Pure load barrier — comparator untouched.
+    page.evaluate( "() => document.fonts.ready" )
+    page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
     pane = page.locator( '#tts-pane' )
     assert_snapshot_content_shift_tolerant( pane, name="multiplexer_phase6b_tts_chrome.png" )
 
@@ -348,11 +381,23 @@ def test_multiplexer_phase6b_tts_chrome_focus_visual(
     header_text = page.locator( '#tts-pane .tts-playing-header.focus-mode' ).inner_text()
     assert "Paused: 1 waiting" in header_text, f"unexpected focus header: {header_text!r}"
 
+    # Freeze the pending card's live wall-clock timestamp before capture (task
+    # 02f99882 — see _STABILIZE_TTS_CARD_TIME_JS). The residual left after the
+    # fonts.ready barrier was an unfrozen `.message-time` HH:MM (arrival wall-clock),
+    # NOT AA — this pin makes the focus snapshot deterministic run-to-run.
+    page.evaluate( _STABILIZE_TTS_CARD_TIME_JS )
+
     # Brief settle window for the RAF-coalesced repaint.
     time.sleep( 0.2 )
 
     # Height-tolerant compare (bug 660d02b4): forgives ≤1px sub-pixel row-height
     # rounding, strict on width + overlapping pixels.
+    # Font-load barrier (task 006cb393 — emoji glyph-render race): await
+    # document.fonts.ready + 2 RAFs so the 🔇/persona NotoColorEmoji glyphs are
+    # loaded before capture. networkidle does NOT gate fonts. See
+    # test_multiplexer_task_editing.py:316-318. Pure load barrier — comparator untouched.
+    page.evaluate( "() => document.fonts.ready" )
+    page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
     pane = page.locator( '#tts-pane' )
     assert_snapshot_height_tolerant( pane, name="multiplexer_phase6b_tts_chrome_focus.png" )
 

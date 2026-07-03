@@ -252,6 +252,18 @@ def test_multiplexer_phase6a_jobs_pane_visual(
     # Stabilize all dynamic .job-timing text before screenshot.
     page.evaluate( _STABILIZE_DOM_JS )
 
+    # Font-load barrier (Gate D FAIL 1 — font-load race, task 006cb393): the
+    # NotoColorEmoji status icons (⏳ todo / ⚙ running) load lazily; a screenshot
+    # taken before the color-emoji font is ready captures a FALLBACK glyph — a
+    # ~1881px contiguous block on this pane → intermittent visual FAIL. The
+    # `networkidle` wait above does NOT gate font loading. Await
+    # document.fonts.ready + two animation frames so the final glyph is committed
+    # before capture. Mirrors test_multiplexer_task_editing.py:316-318 (the one
+    # test already doing this right). Pure load barrier — comparators/tolerances
+    # untouched.
+    page.evaluate( "() => document.fonts.ready" )
+    page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
+
     # Brief settle window for any post-inject layout repaint.
     time.sleep( 0.2 )
 

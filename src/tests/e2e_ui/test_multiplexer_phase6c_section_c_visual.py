@@ -77,6 +77,12 @@ def test_multiplexer_phase6c_section_c_idle_visual(
     page.evaluate( _STABILIZE_JS )
     time.sleep( 0.3 )
 
+    # Font-load barrier (task 006cb393 — emoji glyph-render race): await
+    # document.fonts.ready + 2 RAFs so the conv-mode/mic NotoColorEmoji glyphs are
+    # loaded before capture. networkidle does NOT gate fonts. See
+    # test_multiplexer_task_editing.py:316-318. Pure load barrier — comparator untouched.
+    page.evaluate( "() => document.fonts.ready" )
+    page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
     pane = page.locator( '#notifications-pane' )
     assert_snapshot( pane, name="multiplexer_phase6c_section_c_idle.png" )
     print( "✓ multiplexer_phase6c_section_c_idle: snapshot compared" )
@@ -101,6 +107,11 @@ def test_multiplexer_phase6c_section_c_filled_visual(
     page.evaluate( _STABILIZE_JS )
     time.sleep( 0.3 )
 
+    # Font-load barrier (task 006cb393 — emoji glyph-render race): await
+    # document.fonts.ready + 2 RAFs so the conv-mode/mic NotoColorEmoji glyphs are
+    # loaded before capture. See test_multiplexer_task_editing.py:316-318.
+    page.evaluate( "() => document.fonts.ready" )
+    page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
     pane = page.locator( '#notifications-pane' )
     assert_snapshot( pane, name="multiplexer_phase6c_section_c_filled.png" )
     print( "✓ multiplexer_phase6c_section_c_filled: snapshot compared" )
