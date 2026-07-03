@@ -120,9 +120,13 @@ def test_git_worktree_add_functional():
             f"then recreate container."
         )
     finally:
+        # `remove --force` already deletes the smoke worktree's admin entry — do
+        # NOT append `git worktree prune`. An in-container prune wipes the ENTIRE
+        # host .git/worktrees registry (bug 47ac0e50: ./.git is mounted but
+        # lupin-worktrees/ is not, so every host lane's gitdir reads as missing).
         _docker_exec( "sh", "-c",
                       f"cd /var/lupin && git worktree remove --force {smoke_path} "
-                      f">/dev/null 2>&1 ; git worktree prune >/dev/null 2>&1" )
+                      f">/dev/null 2>&1" )
 
 
 def test_claude_credentials_mount_present():
@@ -165,10 +169,13 @@ def test_worktree_bind_mount_end_to_end():
             f"docker compose up -d {CONTAINER}"
         )
     finally:
+        # `remove --force` already deletes the smoke worktree's admin entry — do
+        # NOT append `git worktree prune` (bug 47ac0e50: an in-container prune
+        # wipes the entire host .git/worktrees registry).
         _docker_exec(
             "sh", "-c",
             f"cd /var/lupin && git worktree remove --force {container_path} "
-            f">/dev/null 2>&1 ; git worktree prune >/dev/null 2>&1"
+            f">/dev/null 2>&1"
         )
 
 

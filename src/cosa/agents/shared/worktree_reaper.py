@@ -41,6 +41,36 @@ import cosa.utils.util as cu
 WIP_COMMIT_PREFIX = "WIP: auto-saved at reap"
 RESCUE_BRANCH_PREFIX = "wt-rescue"
 
+# The Lupin server containers' canonical LUPIN_ROOT (docker-compose.yml). Used to
+# detect an in-container reap so we never `git worktree prune` from inside a
+# container (bug 47ac0e50 — see _is_in_container).
+CONTAINER_PROJECT_ROOT = "/var/lupin"
+
+
+def _is_in_container( project_root: str ) -> bool:
+    """
+    True when this reaper is running INSIDE a Lupin server container.
+
+    Bug 47ac0e50: the :7999/:8000 containers bind-mount ./.git but NOT
+    lupin-worktrees/, so a `git worktree prune` run in-container reads every
+    host-registered worktree's gitdir as a missing /mnt/DATA01 path and prunes
+    the ENTIRE shared registry — wiping every host lane at once. The container's
+    canonical LUPIN_ROOT is /var/lupin (docker-compose.yml), so
+    project_root == /var/lupin — or an explicit truthy LUPIN_IN_CONTAINER env
+    sentinel — is the discriminator that gates the in-container prune OFF.
+
+    Requires:
+        - project_root is the resolved main-repo path a prune would run in
+
+    Ensures:
+        - returns True iff LUPIN_IN_CONTAINER is set truthy (1/true/yes, case-
+          insensitive) OR project_root == CONTAINER_PROJECT_ROOT
+        - never raises
+    """
+    if os.environ.get( "LUPIN_IN_CONTAINER", "" ).strip().lower() in ( "1", "true", "yes" ):
+        return True
+    return project_root == CONTAINER_PROJECT_ROOT
+
 
 def _default_run( argv, cwd=None, timeout=60 ):
     """
@@ -219,9 +249,20 @@ def drain_then_remove(
         # (e.g. submodule). Prune cleans only the admin entry, not the dir, so we
         # surface the failure rather than force-remove (force could discard).
         result[ "errors" ].append( f"git worktree remove failed: {remove[ 'stderr' ]}" )
-        prune = _git( run, project_root, "worktree", "prune" )
-        if not prune[ "success" ]:
-            result[ "errors" ].append( f"git worktree prune failed: {prune[ 'stderr' ]}" )
+        # In-container guard (bug 47ac0e50): NEVER `git worktree prune` from inside
+        # a Lupin container — it bind-mounts ./.git but not lupin-worktrees/, so an
+        # in-container prune reads every host worktree's gitdir as a missing path
+        # and wipes the ENTIRE shared registry. Skip with a recorded note instead.
+        if _is_in_container( project_root ):
+            result[ "errors" ].append(
+                f"skipped `git worktree prune` — in-container (project_root={project_root}); "
+                "an in-container prune would wipe the shared host worktree registry (bug 47ac0e50)"
+            )
+            if debug: print( "[worktree_reaper] in-container: SKIPPED prune to protect host registry" )
+        else:
+            prune = _git( run, project_root, "worktree", "prune" )
+            if not prune[ "success" ]:
+                result[ "errors" ].append( f"git worktree prune failed: {prune[ 'stderr' ]}" )
         if debug: print( f"[worktree_reaper] remove failed (work preserved on {branch}): {worktree_path}" )
 
     return result

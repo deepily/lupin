@@ -94,7 +94,11 @@ smoke_path="/tmp/preflight-smoke-$$"
 wt_add_out="$(run_cmd docker exec "${CONTAINER}" sh -c "cd /var/lupin && git worktree add ${smoke_path} HEAD 2>&1" 2>&1 || true)"
 if echo "$wt_add_out" | grep -qE "(Preparing worktree|HEAD is now at)"; then
     # cleanup (best-effort)
-    run_cmd docker exec "${CONTAINER}" sh -c "cd /var/lupin && git worktree remove --force ${smoke_path} >/dev/null 2>&1 ; git worktree prune >/dev/null 2>&1" || true
+    # NB: `remove --force` already deletes the smoke worktree's admin entry — do
+    # NOT add `git worktree prune` here. An in-container prune wipes the ENTIRE
+    # host .git/worktrees registry (bug 47ac0e50: ./.git is mounted but
+    # lupin-worktrees/ is not, so every host lane's gitdir reads as missing).
+    run_cmd docker exec "${CONTAINER}" sh -c "cd /var/lupin && git worktree remove --force ${smoke_path} >/dev/null 2>&1" || true
     say_ok "git worktree add/remove works inside container"
 else
     say_fail "git worktree add failed inside container"
@@ -129,8 +133,10 @@ if run_cmd docker exec "${CONTAINER}" sh -c "cd /var/lupin && git worktree add $
         say_fail "worktree created in container but NOT visible on host at ${HOST_WT}"
         remedy "verify docker-compose.yml has '- ./.claude/worktrees:/var/lupin/.claude/worktrees' on both services"
     fi
-    # Teardown regardless of outcome
-    run_cmd docker exec "${CONTAINER}" sh -c "cd /var/lupin && git worktree remove --force ${CONTAINER_WT} >/dev/null 2>&1 ; git worktree prune >/dev/null 2>&1" || true
+    # Teardown regardless of outcome. `remove --force` cleans the smoke worktree's
+    # admin entry — do NOT add `git worktree prune` (bug 47ac0e50: an in-container
+    # prune wipes the entire host .git/worktrees registry).
+    run_cmd docker exec "${CONTAINER}" sh -c "cd /var/lupin && git worktree remove --force ${CONTAINER_WT} >/dev/null 2>&1" || true
 else
     say_fail "worktree bind-mount: could not create smoke worktree inside container"
     remedy "check ${CONTAINER_WT} is writable inside container (bind-mount permissions)"
