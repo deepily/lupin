@@ -707,6 +707,19 @@ test("F0-d (70cbff3e): an action-required high/urgent arrival carries action_req
   assert.deepEqual(intents, [ { id_hash: "t-ar", ttsText: "Urgent! approve deploy?", priority: "urgent", action_required: true } ]);
 });
 
+test("F0-d (766bb609): a notification WITH a voice_persona carries its voice_id on the intent; WITHOUT one omits the key", () => {
+  const { bus } = setupStore();
+  const intents = captureTtsIntents(bus);
+  // voice_persona present → norm.voice_persona set (:770) → payload carries voice_id.
+  emitRaw(bus, { id_hash: "t-vp", sender_id: "cc@x#s9", message: "build done", priority: "high",
+    voice_persona: { name: "Rachel", voice_id: "vox-rachel", icon: "🕊️", color: "#CE93D8", borrowed: false } } );
+  // no voice_persona → payload omits voice_id (byte-identical to pre-766bb609).
+  emitRaw(bus, { id_hash: "t-novp", sender_id: "cc@x#s10", message: "fyi high", priority: "high" } );
+  assert.deepEqual(intents[0], { id_hash: "t-vp", ttsText: "build done", priority: "high", action_required: false, voice_id: "vox-rachel" });
+  assert.deepEqual(intents[1], { id_hash: "t-novp", ttsText: "fyi high", priority: "high", action_required: false });
+  assert.equal(Object.prototype.hasOwnProperty.call(intents[1]!, "voice_id"), false, "no-persona intent omits voice_id");
+});
+
 test("F0-d: suppress_ding does NOT gate speech — a suppressed high/urgent still emits (manager closing-turn parity)", () => {
   const { bus } = setupStore();
   const intents = captureTtsIntents(bus);

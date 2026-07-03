@@ -619,7 +619,17 @@ class NotificationStoreImpl implements NotificationStore {
       // the downstream TtsQueueItem knows whether this item can enter focus mode.
       this.bus.emit<StoreNotificationTtsIntentPayload>({
         type    : "store_notification_tts_intent",
-        payload : { id_hash: norm.id_hash, ttsText, priority: raw.priority, action_required: norm.action_required },
+        // 766bb609: carry the session's persona voice_id (from the normalized
+        // voice_persona, set at :770) so the downstream TTS request can speak in
+        // the sender's own voice. OMITTED when the notification has no persona
+        // (byte-identical to the pre-766bb609 payload → server default voice).
+        payload : {
+          id_hash         : norm.id_hash,
+          ttsText,
+          priority        : raw.priority,
+          action_required : norm.action_required,
+          ...( norm.voice_persona !== undefined ? { voice_id: norm.voice_persona.voice_id } : {} ),
+        },
         source  : "notification-store",
         ts      : this.nowFn(),
       });
