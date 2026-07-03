@@ -112,12 +112,22 @@ def _is_spawn_call( node, aliases ):
     return False
 
 
-def _is_os_system_call( node ):
-    """True iff the AST Call node is os.system(...) — banned outright: it
-    always inherits stdout, and a shell-backgrounded `cmd &` grandchild is the
-    exact pipe-hold shape with no way to redirect per-child."""
+OS_BANNED_ATTRS = { "system", "popen" }
+
+
+def _is_banned_os_call( node ):
+    """True iff the AST Call node is os.system(...) or os.popen(...) — banned
+    outright: both inherit the hook's streams (system: stdout+stderr; popen:
+    stderr), and a shell-backgrounded `cmd &` grandchild is the exact
+    pipe-hold shape with no way to redirect per-child. (os.popen ban added on
+    Cheech's review probe of 935171ea.)
+
+    KNOWN LIMITATION (noted-and-deferred, Cheech review 2026-07-03): a
+    backgrounded grandchild via `subprocess.run("cmd &", shell=True)` also
+    pipe-holds and is NOT swept — a clean guard needs a shell=True/string-arg
+    heuristic that is over-broad if naive. Not present in the tree today."""
     func = node.func
-    return isinstance( func, ast.Attribute ) and func.attr == "system" \
+    return isinstance( func, ast.Attribute ) and func.attr in OS_BANNED_ATTRS \
         and isinstance( func.value, ast.Name ) and func.value.id == "os"
 
 
@@ -131,8 +141,8 @@ def _popen_violations( tree, path ):
     for node in ast.walk( tree ):
         if not isinstance( node, ast.Call ):
             continue
-        if _is_os_system_call( node ):
-            yield f"{path}:{node.lineno} os.system is banned in hook code (inherits stdout; '&' backgrounding = pipe-hold)"
+        if _is_banned_os_call( node ):
+            yield f"{path}:{node.lineno} os.{node.func.attr} is banned in hook code (inherits streams; '&' backgrounding = pipe-hold)"
             continue
         if not _is_spawn_call( node, aliases ):
             continue
@@ -214,6 +224,18 @@ def test_sweep_bans_os_system():
     tree       = ast.parse( src, filename="synthetic.py" )
     violations = list( _popen_violations( tree, "synthetic.py" ) )
     assert len( violations ) == 1 and "os.system is banned" in violations[ 0 ]
+
+
+def test_sweep_bans_os_popen():
+    """Evasion guard (Cheech probe B): os.popen('cmd &') is os.system's
+    unambiguous legacy-shell sibling — same pipe-hold shape, banned."""
+    src = (
+        "import os\n"
+        "os.popen( 'sleep 300 &' )\n"
+    )
+    tree       = ast.parse( src, filename="synthetic.py" )
+    violations = list( _popen_violations( tree, "synthetic.py" ) )
+    assert len( violations ) == 1 and "os.popen is banned" in violations[ 0 ]
 
 
 def test_sweep_detects_asyncio_subprocess():
