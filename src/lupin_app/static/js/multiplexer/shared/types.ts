@@ -670,6 +670,12 @@ export interface TtsQueueItem {
   // notifications.js:17178), so the flag rides the item, not a store cross-ref.
   // Optional + absent → false (a fire-and-forget item never enters focus).
   action_required ?: boolean;
+  // 766bb609 (producer-seam, Tiberius GO 2026-07-03): the source notification's
+  // per-session persona voice_id (from voice_persona). wireTtsPlayback adds it to
+  // the /api/get-speech-elevenlabs POST body so each CC session speaks in its own
+  // voice. Optional + absent → omitted from the body = server default voice (Sam),
+  // legacy's null-voice_id case (notifications.js:4262-4293) — unchanged.
+  voice_id ?: string;
 }
 
 // store_tts_queue_changed payload (F0-c). Emitted by TtsQueueStore on every
@@ -700,6 +706,11 @@ export interface StoreNotificationTtsIntentPayload {
   // the same as the emit (high/urgent only), but action_required is orthogonal to
   // priority — an action-required prompt may be high/urgent OR not.
   action_required : boolean;
+  // 766bb609 (producer-seam): the source notification's persona voice_id (from
+  // voice_persona.voice_id), carried through so wireTtsIntent can stamp it onto
+  // the enqueued TtsQueueItem. Optional — a notification without a voice_persona
+  // omits it (→ server default voice downstream).
+  voice_id ?: string;
 }
 
 // store_audio_ended payload (F0-f / 00c seam). 00c's Phase-6 playback engine

@@ -21,10 +21,12 @@
 //     to the wrong socket (or 400). The server IGNORES the X-Session-ID header
 //     (speech.py:488 only debug-prints headers) — it is DELIBERATELY OMITTED here,
 //     NOT forgotten; the body session_id is authoritative.
-//   • voice_id is OMITTED → the server falls back to its configured default voice
-//     (Sam), matching legacy's null-voice_id case (notifications.js:4262-4293).
-//     Per-session persona voice is a NAMED follow-on (P3 store item) — NOT MVP;
-//     do not "fix" this omission.
+//   • voice_id (766bb609): threaded from the item's per-session persona voice_id
+//     when present → the sender's own voice; OMITTED when absent → server default
+//     voice (Sam), legacy's null-voice_id case (notifications.js:4262-4293). The
+//     omitted-branch body is byte-identical to the pre-766bb609 request. The
+//     live-voice E2E (each session actually speaks in its own voice) is deferred
+//     to post-switchover — the mux must be the live client to verify it.
 //
 // RE-REQUEST GUARD: fire the POST EXACTLY ONCE per new active notification. Track
 // the last-requested id and request only when the active id rolls to a NEW
@@ -74,9 +76,17 @@ export function wireTtsPlayback(
     }
     if ( active.id_hash === lastRequestedId ) return;   // same item still active — no re-request
     lastRequestedId = active.id_hash;
-    void apiClient.post( "/api/get-speech-elevenlabs", {
+    // 766bb609: base body { text, session_id }. Thread the sender's persona
+    // voice_id when the item carries one (→ that session speaks in its own voice);
+    // OMIT the key entirely when absent → server default voice (Sam), legacy's
+    // null-voice_id case (notifications.js:4262-4293) — byte-identical to the
+    // pre-766bb609 body, so a persona-less notification is unaffected.
+    const body: { text: string; session_id: string; voice_id?: string } = {
       text       : active.ttsText ?? "",
       session_id : sessionId,
-    } ).catch( () => { /* fire-and-forget: a failed TTS request degrades to silence, not a crash */ } );
+    };
+    if ( active.voice_id !== undefined ) body.voice_id = active.voice_id;
+    void apiClient.post( "/api/get-speech-elevenlabs", body )
+      .catch( () => { /* fire-and-forget: a failed TTS request degrades to silence, not a crash */ } );
   } );
 }

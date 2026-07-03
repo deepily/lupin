@@ -63,6 +63,21 @@ test("wire: 70cbff3e — the intent's action_required flag is stamped onto the e
   assert.deepEqual(recorder.items, [ { id_hash: "ar1", ttsText: "respond please", addedAt: 7, action_required: true } ]);
 });
 
+test("wire: 766bb609 — a payload voice_id is stamped onto the enqueued item; absent → the key is OMITTED", () => {
+  const bus      = createEventBusForTesting();
+  const recorder = makeRecorder();
+  wireNotificationTtsIntent(bus, recorder, () => 9);
+
+  // present → stamped
+  emitIntent(bus, { id_hash: "v1", ttsText: "hi", priority: "high", action_required: false, voice_id: "vox-rachel" });
+  // absent → key omitted (byte-identical pre-766bb609 item)
+  emitIntent(bus, { id_hash: "v2", ttsText: "yo", priority: "high", action_required: false });
+
+  assert.deepEqual(recorder.items[0], { id_hash: "v1", ttsText: "hi", addedAt: 9, action_required: false, voice_id: "vox-rachel" });
+  assert.deepEqual(recorder.items[1], { id_hash: "v2", ttsText: "yo", addedAt: 9, action_required: false });
+  assert.equal(Object.prototype.hasOwnProperty.call(recorder.items[1], "voice_id"), false, "no-persona item omits voice_id");
+});
+
 test("wire: the returned unsubscriber detaches the seam — no further enqueues after it runs", () => {
   const bus      = createEventBusForTesting();
   const recorder = makeRecorder();

@@ -143,3 +143,26 @@ test("unsubscriber detaches the seam — no POST after it runs", () => {
   emitChange( bus, "A" );
   assert.equal( api.calls.length, 0 );
 });
+
+test("766bb609: an item carrying voice_id includes it in the POST body (persona voice)", () => {
+  const bus = createEventBusForTesting();
+  const q   = makeActiveReader();
+  const api = makePoster();
+  wireTtsPlayback( bus, q.reader, api.poster, SESSION );
+  q.setActive( item( "A", { voice_id: "vox-tiberius" } ) );
+  emitChange( bus, "A" );
+  assert.deepEqual( api.calls[0]!.body, { text: "say A", session_id: SESSION, voice_id: "vox-tiberius" } );
+});
+
+test("766bb609: an item WITHOUT voice_id OMITS the key entirely (byte-identical to legacy null-voice body)", () => {
+  const bus = createEventBusForTesting();
+  const q   = makeActiveReader();
+  const api = makePoster();
+  wireTtsPlayback( bus, q.reader, api.poster, SESSION );
+  q.setActive( item( "A" ) );   // no voice_id
+  emitChange( bus, "A" );
+  assert.deepEqual( api.calls[0]!.body, { text: "say A", session_id: SESSION } );
+  // The key must be ABSENT (not present-with-undefined) so the request is
+  // byte-identical to the pre-766bb609 body → server default voice.
+  assert.equal( Object.prototype.hasOwnProperty.call( api.calls[0]!.body, "voice_id" ), false );
+});
