@@ -91,6 +91,14 @@
     color : #664d03;
 }
 
+/* 70cbff3e — TTS focus mode: the queue-roll is paused awaiting a response to an
+   action-required item ("Paused: N waiting"). Header text GRAY (legacy #6c757d
+   "gray for paused", notifications.css:2969) — the mux header is text-color per
+   state (green playing / amber manual-pause), so focus = gray text. */
+.tts-chrome .tts-playing-header.focus-mode {
+    color : #6c757d;
+}
+
 /* Idle empty-state text — DE-FORKED (WP7 single-source, 2026-07-02): the empty
    panel's `tts-queue-empty-state` element is now styled by the single shared
    declaration in shared/notifications-surface.css (linked by multiplexer.html),
@@ -157,6 +165,21 @@
 
 .tts-chrome.is-paused-current .tts-btn-toggle:hover {
     background : #e0a800;
+}
+
+/* 70cbff3e — focus Resume button (present only in focus mode): green-filled,
+   ported from legacy `.tts-resume-button` (#28a745 / white, hover #218838,
+   notifications.css:2973-2988), matched to Rachel's Bootstrap-green scheme.
+   Inherits `.tts-btn` base (border/radius/padding); overrides fill only. */
+.tts-chrome .tts-btn-resume {
+    background   : #28a745;
+    color        : #fff;
+    border-color : #28a745;
+}
+
+.tts-chrome .tts-btn-resume:hover {
+    background   : #218838;
+    border-color : #218838;
 }
 
 .tts-chrome .tts-btn-stop {
