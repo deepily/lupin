@@ -18,10 +18,12 @@ from types import SimpleNamespace
 
 import pytest
 
+import cosa.agents.shared.worktree_reaper as _reaper_mod   # module handle: this file defines a LOCAL `_git` helper that would shadow the import
 from cosa.agents.shared.worktree_reaper import (
     drain_then_remove,
     list_worktrees,
     reconcile_worktrees,
+    _newest_mtime_age_hours,
     _is_in_container,
     CONTAINER_PROJECT_ROOT,
     WIP_COMMIT_PREFIX,
@@ -401,6 +403,122 @@ def test_real_reconcile_sweeps_idle_keeps_fresh_and_branch( repo ):
     assert fresh.exists(),     "fresh worktree DIR kept"
     assert _branch_exists( repo, "wt-idle" ),  "idle branch must be KEPT (preservation)"
     assert _branch_exists( repo, "wt-fresh" ), "fresh branch intact"
+
+
+# ----------------------------------------------------------------------------
+# Grandfathered coverage-gap closure (a20fca35) — pre-existing defensive/edge
+# branches enumerated by the 47ac0e50 fix. TEST-ONLY: no product behavior change.
+# ----------------------------------------------------------------------------
+
+def test_git_runner_exception_becomes_failure_dict():
+    # _reaper_mod._git (module fn, NOT this file's local real-git `_git` helper):
+    # an injected runner that RAISES normalizes to a success=False dict.
+    def boom( argv, cwd=None, timeout=60 ):
+        raise RuntimeError( "git exploded" )
+    out = _reaper_mod._git( boom, "/tmp", "status" )
+    assert out[ "success" ] is False
+    assert out[ "returncode" ] == -1
+    assert "git exploded" in out[ "stderr" ]
+
+
+def test_detached_head_rescue_branch_failure_is_recorded():
+    # drain_then_remove: detached HEAD + `switch -c` failure appends a rescue error.
+    def run( argv, cwd=None, timeout=60 ):
+        sub = argv[ 1 ] if len( argv ) > 1 else ""
+        if sub == "rev-parse" and "--abbrev-ref" in argv:
+            return SimpleNamespace( returncode=0, stdout="HEAD\n", stderr="" )   # detached
+        if sub == "switch":
+            return SimpleNamespace( returncode=1, stdout="", stderr="cannot create branch" )
+        return SimpleNamespace( returncode=0, stdout="", stderr="" )
+    r = drain_then_remove( "/tmp", project_root="/tmp", run=run )
+    assert any( "rescue-branch create failed" in e for e in r[ "errors" ] )
+    assert r[ "rescue_branch" ] is None                                          # never set on failure
+
+
+def test_git_add_failure_is_recorded():
+    # drain_then_remove: dirty tree + `git add -A` failure appends an add error.
+    def run( argv, cwd=None, timeout=60 ):
+        sub = argv[ 1 ] if len( argv ) > 1 else ""
+        if sub == "rev-parse" and "--abbrev-ref" in argv:
+            return SimpleNamespace( returncode=0, stdout="wt-x\n", stderr="" )
+        if sub == "status":
+            return SimpleNamespace( returncode=0, stdout=" M a.py\n", stderr="" )
+        if sub == "add":
+            return SimpleNamespace( returncode=1, stdout="", stderr="add failed" )
+        return SimpleNamespace( returncode=0, stdout="", stderr="" )
+    r = drain_then_remove( "/tmp", project_root="/tmp", run=run )
+    assert any( "git add -A failed" in e for e in r[ "errors" ] )
+
+
+def test_list_worktrees_returns_empty_on_git_failure():
+    # list_worktrees: a failed `worktree list --porcelain` yields [].
+    def run( argv, cwd=None, timeout=60 ):
+        return SimpleNamespace( returncode=1, stdout="", stderr="not a repo" )
+    assert list_worktrees( project_root="/tmp", run=run ) == []
+
+
+def test_list_worktrees_skips_block_without_path():
+    # list_worktrees: a porcelain block with no `worktree ` line is skipped.
+    porcelain = "worktree /a\nbranch refs/heads/main\n\nbranch refs/heads/orphan\n"
+    def run( argv, cwd=None, timeout=60 ):
+        return SimpleNamespace( returncode=0, stdout=porcelain, stderr="" )
+    recs = list_worktrees( project_root="/a", run=run )
+    assert len( recs ) == 1 and recs[ 0 ][ "path" ] == "/a"                      # orphan block dropped
+
+
+def test_newest_mtime_empty_tree_is_infinite( tmp_path ):
+    # _newest_mtime_age_hours: an empty tree (no non-vendored files) -> inf.
+    assert _newest_mtime_age_hours( str( tmp_path ), now_ts=1_000_000.0 ) == float( "inf" )
+
+
+def test_newest_mtime_skips_unstatable_file( tmp_path, monkeypatch ):
+    # _newest_mtime_age_hours: getmtime raising OSError is swallowed (file skipped).
+    # With the only file unstatable, newest stays 0.0 -> inf.
+    ( tmp_path / "a.py" ).write_text( "x" )
+    real_getmtime = os.path.getmtime
+    def boom( p ):
+        if str( p ).endswith( "a.py" ): raise OSError( "stat failed" )
+        return real_getmtime( p )
+    monkeypatch.setattr( os.path, "getmtime", boom )
+    assert _newest_mtime_age_hours( str( tmp_path ), now_ts=1_000_000.0 ) == float( "inf" )
+
+
+def test_newest_mtime_returns_finite_age_for_real_file( tmp_path ):
+    # _newest_mtime_age_hours: a real file yields a finite age (the m>newest + normal return).
+    f = tmp_path / "a.py"; f.write_text( "x" )
+    mt  = os.path.getmtime( str( f ) )
+    age = _newest_mtime_age_hours( str( tmp_path ), now_ts=mt + 3600.0 )
+    assert age == pytest.approx( 1.0, abs=0.05 )
+
+
+def test_reconcile_defaults_sandbox_root_to_claude_worktrees():
+    # reconcile_worktrees: sandbox_root=None -> <project_root>/.claude/worktrees default.
+    out = reconcile_worktrees( sandbox_root=None, project_root="/repo",
+                               list_fn=lambda: [], run=lambda *a, **k: None )
+    assert out == { "swept": [], "skipped": [], "errors": [] }
+
+
+def test_reconcile_joins_relative_sandbox_root():
+    # reconcile_worktrees: a relative sandbox_root is joined onto project_root, so
+    # "/repo/wt/x" falls INSIDE the resolved sandbox and is swept.
+    seen = {}
+    def list_fn():
+        return [ { "path": "/repo/wt/x", "is_main": False, "locked": False } ]
+    def drain_fn( path, project_root=None, run=None, now=None, debug=False ):
+        seen[ "swept" ] = path; return { "removed": True }
+    reconcile_worktrees( sandbox_root="wt", project_root="/repo",
+                         list_fn=list_fn, age_fn=lambda p: 999.0, drain_fn=drain_fn,
+                         run=lambda *a, **k: None )
+    assert seen.get( "swept" ) == "/repo/wt/x"
+
+
+def test_reconcile_skips_record_with_empty_path():
+    # reconcile_worktrees: a record whose path is falsy is silently skipped (continue).
+    def list_fn():
+        return [ { "path": "" }, { "path": None } ]
+    out = reconcile_worktrees( sandbox_root="/s", project_root="/repo",
+                               list_fn=list_fn, run=lambda *a, **k: None )
+    assert out == { "swept": [], "skipped": [], "errors": [] }
 
 
 if __name__ == "__main__":
