@@ -172,5 +172,9 @@ coverage/
 .claude-session.md
 .claude-memento.md
 .claude-memento-*.md
+# Reviewer/worker groundtruth snapshots — transient per-item state (roundtable
+# Q3 sanctioned interim until task_amend 0ca43477 lands); e.g.
+# .clayton-lane2-groundtruth-b980080e.md
+.*-groundtruth-*.md
 io/mementos/
 lupin-worktrees/
