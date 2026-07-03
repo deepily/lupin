@@ -264,6 +264,7 @@ def build_fleet_arbiter_job_factory(
     auto_poke_enabled    : bool                 = True,
     poke_stall_threshold : int                  = 720,
     poke_max_per_episode : int                  = 3,
+    stuck_poke_min_interval_seconds : int       = 0,            # bug 5a1f17f8 (c) fire-throttle (0 → disabled)
     manager_stale_poke_threshold : int          = 2700,
     manager_stale_poke_max_age : int            = 7200,
     # role-goals Phase 2-3: role-selected north-star goal echoes appended to the
@@ -283,6 +284,7 @@ def build_fleet_arbiter_job_factory(
     pending_ledger_path  : Optional[ str ]      = None,
     # F-A (2026.06.11 lineage-persistence design): the restart-surviving carry file.
     lineage_carry_path   : Optional[ str ]      = None,
+    offsets_state_path   : Optional[ str ]      = None,          # bug 5a1f17f8 (b): durable event-offset store; None → in-memory (replay on restart)
     # L1 (2026-06-17 arbiter detector gaps): the per-poll owed-work store reader
     # (arbiter = reader #2). Defaults to the real DB reader so the :8001 service
     # activates the store-aware suppression of the false-escalating detectors;
@@ -388,6 +390,7 @@ def build_fleet_arbiter_job_factory(
             auto_poke_enabled            = auto_poke_enabled,
             poke_stall_threshold_seconds = poke_stall_threshold,
             poke_max_per_episode         = poke_max_per_episode,
+            stuck_poke_min_interval_seconds = stuck_poke_min_interval_seconds,      # bug 5a1f17f8 (c) fire-throttle
             manager_stale_poke_threshold_seconds = manager_stale_poke_threshold,   # post-game F2
             manager_stale_poke_max_age_seconds   = manager_stale_poke_max_age,     # corpse ceiling
             manager_goal_line          = manager_goal_line,                        # role-goals Phase 2-3
@@ -396,6 +399,7 @@ def build_fleet_arbiter_job_factory(
             tmux_push_fn                = tmux_push_fn,                            # Thread C+D host-side tmux wake
             poke_wake_mechanism         = poke_wake_mechanism,                     # Thread C+D wake selector
             lineage_carry_path          = lineage_carry_path,                      # F-A lineage carry
+            offsets_state_path          = offsets_state_path,                       # bug 5a1f17f8 (b) durable event offsets
             live_retry_fn               = live_retry_fn,                           # Item B §3.5
             outreach_ack_window_seconds = outreach_ack_window,
             reannounce_interval_seconds = reannounce_interval,

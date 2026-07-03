@@ -570,5 +570,56 @@ def test_cross_evidence_active_manager_with_replayed_stale_cap_history():
     assert _pokes( gw ) == [ ]
 
 
+# ── 5a1f17f8 (c): stuck-poke fire-throttle (min interval between consecutive pokes) ──
+# The per-episode CAP bounds how MANY pokes a stuck session gets; the throttle bounds
+# their RATE. Belt for any residual storm — without it the ≤N pokes can all land within
+# N ~60s polls. Inert by default (0). A throttled poll skips WITHOUT consuming the
+# per-episode budget, and the throttle re-arms when the episode ends.
+
+def test_negative_throttle_raises():
+    with pytest.raises( ValueError ):
+        _job( stuck_poke_min_interval_seconds=-1 )
+
+
+def test_fire_throttle_disabled_pokes_each_poll():
+    """Default (0) → no throttle: pokes at poll cadence up to the cap (today's behavior)."""
+    gw  = _GW()
+    job = _job( gw, poke_stall_threshold_seconds=0, poke_max_per_episode=3,
+                stuck_poke_min_interval_seconds=0 )
+    fleet = _live_stuck()
+    assert job._auto_poke( fleet, NOW, [ ] ) == 1
+    assert job._auto_poke( fleet, NOW + datetime.timedelta( seconds=1 ), [ ] ) == 1   # fires immediately
+    assert len( _pokes( gw ) ) == 2
+
+
+def test_fire_throttle_skips_within_interval_without_consuming_budget():
+    """A poke within the min interval is SKIPPED (fired=0) and does NOT burn the
+    per-episode budget; a poke after the interval fires. So across polls the session
+    gets its full cap of pokes, just RATE-limited."""
+    gw  = _GW()
+    job = _job( gw, poke_stall_threshold_seconds=0, poke_max_per_episode=3,
+                stuck_poke_min_interval_seconds=300 )
+    fleet = _live_stuck()
+    assert job._auto_poke( fleet, NOW, [ ] ) == 1                                      # poke #1
+    assert job._auto_poke( fleet, NOW + datetime.timedelta( seconds=60 ), [ ] ) == 0   # +60s < 300 → skipped
+    assert job._auto_poke( fleet, NOW + datetime.timedelta( seconds=120 ), [ ] ) == 0  # still throttled
+    assert job._auto_poke( fleet, NOW + datetime.timedelta( seconds=301 ), [ ] ) == 1  # +301s ≥ 300 → poke #2
+    assert job._auto_poke( fleet, NOW + datetime.timedelta( seconds=602 ), [ ] ) == 1  # poke #3 (cap reached)
+    assert len( _pokes( gw ) ) == 3                                                    # full budget honored, rate-limited
+
+
+def test_fire_throttle_rearms_on_episode_end():
+    """When the session leaves the pokeable set (recovered), the throttle clears with
+    the episode — a fresh episode's first poke fires immediately even if < interval
+    since the prior poke."""
+    gw  = _GW()
+    job = _job( gw, poke_stall_threshold_seconds=0, stuck_poke_min_interval_seconds=300 )
+    fleet = _live_stuck()
+    assert job._auto_poke( fleet, NOW, [ ] ) == 1                                      # poke, last_at set
+    assert job._auto_poke( { }, NOW + datetime.timedelta( seconds=60 ), [ ] ) == 0     # recovered → episode ends, throttle cleared
+    assert job._auto_poke( fleet, NOW + datetime.timedelta( seconds=61 ), [ ] ) == 1   # re-stuck: fresh episode → fires despite <300s
+    assert len( _pokes( gw ) ) == 2
+
+
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )

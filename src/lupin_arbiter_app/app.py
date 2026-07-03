@@ -305,6 +305,7 @@ def assemble_app(
         auto_poke_enabled    = cfg.get( "arbiter auto poke enabled", default=True, return_type="boolean" ),
         poke_stall_threshold = int( cfg.get( "arbiter poke stall threshold seconds", default=720, return_type="int" ) ),
         poke_max_per_episode = int( cfg.get( "arbiter poke max per episode", default=3, return_type="int" ) ),
+        stuck_poke_min_interval_seconds = int( cfg.get( "arbiter stuck poke min interval seconds", default=0, return_type="int" ) ),   # bug 5a1f17f8 (c)
         manager_stale_poke_threshold = int( cfg.get( "arbiter manager stale poke threshold seconds", default=2700, return_type="int" ) ),
         manager_stale_poke_max_age   = int( cfg.get( "arbiter manager stale poke max age seconds", default=7200, return_type="int" ) ),
         # role-goals Phase 2-3 (D1): role-selected north-star goal echoes appended to
@@ -335,6 +336,7 @@ def assemble_app(
         reannounce_ttl       = int( cfg.get( "arbiter outreach reannounce ttl seconds", default=86400, return_type="int" ) ),
         pending_ledger_path  = _pending_ledger_path( cfg ),
         lineage_carry_path   = _lineage_carry_path( cfg ),
+        offsets_state_path   = _offsets_state_path( cfg ),                      # bug 5a1f17f8 (b) durable event offsets
         # DM-as-liveness toggle (2026-06-17): a cfg-closed lambda re-read EACH poll
         # (ConfigurationManager.get is mtime-gated) so `arbiter count dm as liveness`
         # is runtime-tunable with NO :8001 bounce — flip the INI, takes effect on
@@ -401,6 +403,23 @@ def _lineage_carry_path( cfg ):
     rel = ( cfg.get( "arbiter lineage carry path",
                      default="/io/arbiter/lineage-carry.json" )
             or "/io/arbiter/lineage-carry.json" )
+    return cu.get_project_root() + rel
+
+
+def _offsets_state_path( cfg ):
+    """
+    Resolve the durable event-offset store path (bug 5a1f17f8 (b)): relative INI
+    value + the canonical project root (PATH MANAGEMENT). Persisting the per-session
+    byte offsets here lets a :8001 restart RESUME tailing instead of re-reading every
+    events file from byte 0 — the STUCK-poke replay root cause.
+
+    Ensures:
+        - returns <project_root> + <`arbiter event offsets state path`>
+    """
+    import cosa.utils.util as cu
+    rel = ( cfg.get( "arbiter event offsets state path",
+                     default="/io/arbiter/event-offsets.json" )
+            or "/io/arbiter/event-offsets.json" )
     return cu.get_project_root() + rel
 
 

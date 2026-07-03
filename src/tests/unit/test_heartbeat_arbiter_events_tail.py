@@ -176,6 +176,59 @@ def test_fleet_default_dir_is_fleet_events_dir( tmp_path, monkeypatch ):
     assert isinstance( ev, dict ) and isinstance( offs, dict )
 
 
+# ── 5a1f17f8 (b): durable offsets across restarts ─────────────────────────────
+# Root cause of the STUCK-poke replay: the arbiter holds byte offsets in memory
+# (self._offsets), so a :8001 restart re-reads every events file from byte 0 and
+# re-consumes historical cap_reached as fresh. save_offsets/load_offsets persist the
+# per-session offset map so a bounce resumes where it left off (no replay). Both are
+# swallow-safe I/O (never raise) — an offset-store hiccup degrades to today's
+# in-memory behavior, never crashes the poll loop.
+
+def test_offsets_save_then_load_roundtrip( tmp_path ):
+    path = tmp_path / "offsets.json"
+    offs = { "s1": 42, "s2-full-uuid": 1024 }
+    assert et.save_offsets( path, offs ) is True
+    assert et.load_offsets( path ) == offs
+
+
+def test_offsets_load_missing_returns_empty( tmp_path ):
+    assert et.load_offsets( tmp_path / "nope.json" ) == { }
+
+
+def test_offsets_load_corrupt_returns_empty( tmp_path ):
+    path = tmp_path / "offsets.json"
+    path.write_text( "{not valid json" )
+    assert et.load_offsets( path ) == { }
+
+
+def test_offsets_load_non_dict_returns_empty( tmp_path ):
+    path = tmp_path / "offsets.json"
+    path.write_text( "[1, 2, 3]" )                               # valid JSON, wrong shape
+    assert et.load_offsets( path ) == { }
+
+
+def test_offsets_save_overwrites_atomically( tmp_path ):
+    path = tmp_path / "offsets.json"
+    et.save_offsets( path, { "s1": 1 } )
+    et.save_offsets( path, { "s1": 2, "s2": 9 } )               # latest wins, no temp residue
+    assert et.load_offsets( path ) == { "s1": 2, "s2": 9 }
+    assert not ( tmp_path / "offsets.json.tmp" ).exists()
+
+
+def test_offsets_save_swallows_unwritable( tmp_path ):
+    # target path is a DIRECTORY → write raises → save swallows → False, never raises
+    d = tmp_path / "adir"
+    d.mkdir()
+    assert et.save_offsets( d, { "s1": 1 } ) is False
+
+
+def test_offsets_load_swallows_unreadable( tmp_path ):
+    # path is a DIRECTORY → read raises → load swallows → {} (fail-safe = in-memory start)
+    d = tmp_path / "adir"
+    d.mkdir()
+    assert et.load_offsets( d ) == { }
+
+
 # ── smoke ─────────────────────────────────────────────────────────────────────
 
 def test_quick_smoke_test_passes():

@@ -8,6 +8,8 @@ Target: 100% line + branch + function coverage of
 Pure transform — all inputs injected (events + who rows + now); no I/O.
 """
 import datetime
+import json
+import os
 
 from cosa.agents.heartbeat_arbiter import fleet_data_model as f
 
@@ -94,7 +96,84 @@ def test_count_stuck_episodes():
         "not-a-dict",
         { "outcome": "cap_reached", "work_owed": True },
     ]
+    assert f._count_stuck_episodes( events ) == 2               # no honored recovery → both live
+
+
+# ── 5a1f17f8 (a): freshness-gate consumed cap_reached against a later `honored` ──
+# The offset-reset replay (a :8001 restart re-reads the events file from byte 0)
+# re-surfaces HISTORICAL cap_reached as if fresh. In real streams those are followed
+# by `honored` recovery outcomes — so a cap_reached BEFORE the last honored is
+# CONSUMED, not live stuck evidence. Only cap_reached+owed AFTER the last honored count.
+
+def test_cap_reached_consumed_by_later_honored_not_counted():
+    """The 2026-07-02 replay pattern (Mr Radio's fixture): one historical cap_reached
+    followed by ≥1 honored recovery → CONSUMED → 0 live stuck episodes → not wedged."""
+    events = [
+        { "outcome": "cap_reached", "work_owed": True },        # historical, replayed
+        { "outcome": "honored",      "work_owed": True },        # recovery #1
+        { "outcome": "honored",      "work_owed": True },        # recovery #2 (…5 in the real file)
+    ]
+    assert f._count_stuck_episodes( events ) == 0
+
+
+def test_cap_reached_after_last_honored_still_counts():
+    """Recovered-then-re-stuck: cap_reached AFTER the last honored is LIVE. Two such
+    → genuinely repeated-stuck (the true-positive is preserved)."""
+    events = [
+        { "outcome": "cap_reached", "work_owed": True },        # consumed (before honored)
+        { "outcome": "honored",      "work_owed": True },        # last recovery
+        { "outcome": "cap_reached", "work_owed": True },        # live
+        { "outcome": "cap_reached", "work_owed": True },        # live
+    ]
     assert f._count_stuck_episodes( events ) == 2
+
+
+def test_honored_before_cap_reached_does_not_consume():
+    """Order matters: a honored BEFORE the cap_reached (recovered, then wedged) does
+    NOT consume the later cap_reached — genuine stuck stands."""
+    events = [
+        { "outcome": "honored",      "work_owed": True },
+        { "outcome": "cap_reached", "work_owed": True },
+        { "outcome": "cap_reached", "work_owed": True },
+    ]
+    assert f._count_stuck_episodes( events ) == 2
+
+
+def test_consumed_cap_reached_not_owed_ignored_either_way():
+    """A not-owed cap_reached is never counted, consumed or not (unchanged predicate)."""
+    events = [
+        { "outcome": "cap_reached", "work_owed": False },
+        { "outcome": "honored",      "work_owed": True },
+        { "outcome": "cap_reached", "work_owed": False },
+    ]
+    assert f._count_stuck_episodes( events ) == 0
+
+
+def test_real_replay_fixture_defeated_by_freshness_gate():
+    """RED-BENCH (Mr Radio's preserved 8a92b253 events file, frozen snapshot): the
+    2026-07-02 offset-reset replay. Chronological stream has 5 cap_reached+owed but
+    each is followed by `honored` recoveries — so the freshness-gate yields 0 live
+    stuck episodes (stuck=False), where the OLD all-cap_reached count was 5 (false
+    stuck=True → the ~60s STUCK loop-fire). Proves the fix on REAL data shapes, not a
+    synthetic mock (feedback_e2e_route_intercept_false_passes_on_real_data)."""
+    fixture = os.path.join(
+        os.environ[ "LUPIN_ROOT" ], "src", "tests", "unit", "fixtures",
+        "arbiter_offset_reset_events.jsonl",
+    )
+    activity = [ ]
+    with open( fixture ) as fh:
+        for line in fh:
+            line = line.strip()
+            if not line or "FIXTURE-META" in line:
+                continue
+            rec = json.loads( line )
+            if rec.get( "outcome" ) != "idle_prompt":            # the ACTIVITY axis
+                activity.append( rec )
+    old_count = sum( 1 for e in activity
+                     if e.get( "outcome" ) == "cap_reached" and e.get( "work_owed" ) is True )
+    assert old_count == 5                                        # the replayed historical cap_reached
+    assert f._count_stuck_episodes( activity ) == 0             # freshness-gate consumes them all
+    assert f._count_stuck_episodes( activity ) < f.STUCK_REPEAT_THRESHOLD   # → stuck=False, no false poke
 
 
 # ── build_fleet_view ──────────────────────────────────────────────────────────
