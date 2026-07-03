@@ -254,3 +254,106 @@ def test_multiplexer_phase6b_tts_chrome_visual(
     assert_snapshot_content_shift_tolerant( pane, name="multiplexer_phase6b_tts_chrome.png" )
 
     print( "✓ multiplexer_phase6b_tts_chrome: visual snapshot compared" )
+
+
+# ---------------------------------------------------------------------------
+# Test-hook injection — drive the TTS chrome into FOCUS mode (70cbff3e).
+#
+# focus-mode ENTER path (TtsQueueStore.onAudioEnded → enterFocus): an
+# action-required TTS item becomes the active head, then store_audio_ended
+# fires while it is UNRESOLVED → the roll pauses, the head is discarded, and a
+# pending item is held behind it. All three events go straight onto the boot
+# eventBus (the wireTtsIntent producer seam + the F0-f store_audio_ended
+# subscriber both listen there) — no NotificationStore / DB dependency.
+# ---------------------------------------------------------------------------
+
+_INJECT_TTS_FOCUS_JS = """
+() => {
+    const hook = window.__multiplexerTestHook;
+    if ( !hook || !hook.eventBus ) {
+        throw new Error( "test hook not present — boot.ts test surface missing" );
+    }
+    const bus = hook.eventBus;
+
+    // 1) An ACTION-REQUIRED item enters the TTS queue as the active head
+    //    (store_notification_tts_intent → wireTtsIntent → enqueue auto-promote).
+    bus.emit({
+        type    : 'store_notification_tts_intent',
+        payload : { id_hash: 'phase6b_focus_ar', ttsText: 'Approve the deploy?', priority: 'urgent', action_required: true },
+        source  : 'phase6b-focus-visual',
+        ts      : 1778702400000,
+    });
+    // 2) A fire-and-forget item waits behind it in the pending tail.
+    bus.emit({
+        type    : 'store_notification_tts_intent',
+        payload : { id_hash: 'phase6b_focus_pending', ttsText: 'Build finished', priority: 'high', action_required: false },
+        source  : 'phase6b-focus-visual',
+        ts      : 1778702460000,
+    });
+    // 3) The active AR item's audio completes while UNRESOLVED → focus ENTER:
+    //    roll paused, active discarded, header → "Paused: 1 waiting" + Resume.
+    bus.emit({
+        type    : 'store_audio_ended',
+        payload : {},
+        source  : 'phase6b-focus-visual',
+        ts      : 1778702520000,
+    });
+
+    return true;
+}
+"""
+
+
+# ---------------------------------------------------------------------------
+# Visual regression — TTS chrome (FOCUS mode, 70cbff3e)
+# ---------------------------------------------------------------------------
+
+def test_multiplexer_phase6b_tts_chrome_focus_visual(
+    request, clean_test_db, assert_snapshot_height_tolerant, logged_in_page,
+):
+    """
+    Capture the Phase 6b TTS chrome in FOCUS mode (70cbff3e — first golden of
+    the focus-mode render; the idle `multiplexer_phase6b_tts_chrome` golden does
+    NOT drive focus, so this is purely additive).
+
+    Drives the focus-mode ENTER path via the test-hook eventBus: an
+    action-required TTS item becomes the active head, then `store_audio_ended`
+    fires while it is unresolved → `TtsQueueStore.onAudioEnded` enters focus
+    (holds the roll, discards the head), leaving one pending item behind it.
+
+    Ensures:
+        - `.tts-playing-header.focus-mode` renders "Paused: 1 waiting" (gray #6c757d)
+        - `.tts-btn-resume` renders (green #28a745)
+        - Snapshot of `#tts-pane` matches the focus-mode baseline
+    """
+    page = logged_in_page
+
+    page.goto( f"{BASE_URL}/app/multiplexer" )
+    page.wait_for_load_state( "networkidle" )
+
+    page.wait_for_function(
+        "() => window.__multiplexerTestHook !== undefined && window.__multiplexerTestHook.eventBus !== undefined",
+        timeout=15000,
+    )
+
+    # Drive focus mode (AR active → audio ends unresolved → ENTER, 1 held pending).
+    page.evaluate( _INJECT_TTS_FOCUS_JS )
+
+    # Wait for the focus header + Resume button (proves ENTER rendered).
+    page.wait_for_selector( '#tts-pane .tts-playing-header.focus-mode', timeout=15000 )
+    page.wait_for_selector( '#tts-pane .tts-btn-resume', timeout=5000 )
+
+    # Content assertion before the pixel snapshot — the header must read the
+    # held-queue count ("Paused: N waiting", N = 1 pending item).
+    header_text = page.locator( '#tts-pane .tts-playing-header.focus-mode' ).inner_text()
+    assert "Paused: 1 waiting" in header_text, f"unexpected focus header: {header_text!r}"
+
+    # Brief settle window for the RAF-coalesced repaint.
+    time.sleep( 0.2 )
+
+    # Height-tolerant compare (bug 660d02b4): forgives ≤1px sub-pixel row-height
+    # rounding, strict on width + overlapping pixels.
+    pane = page.locator( '#tts-pane' )
+    assert_snapshot_height_tolerant( pane, name="multiplexer_phase6b_tts_chrome_focus.png" )
+
+    print( "✓ multiplexer_phase6b_tts_chrome_focus: focus-mode visual snapshot compared" )
