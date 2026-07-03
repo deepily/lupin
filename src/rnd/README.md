@@ -27,6 +27,8 @@ Documents are archived into the branch/version where they were completed. Date p
 
 **Repo operations**: [**git branch/worktree cleanup — audit, proposal + execution receipts (2026-07-01)**](2026.07.01-git-branch-worktree-cleanup-proposal.md) — Krishna's read-only two-signal audit (ancestry + patch-id) of 61 local branches; Rick-approved + executed same evening (38 branches deleted, 2 dead TFE worktrees + 4 stale remote refs pruned, 61→23); §7a execution receipts; 6 UNKNOWN squash-rewrite branches held for owner triage.
 
+**Milestone gate (v0.1.9 mux-consolidation)**: [**E2E-gate classification — Gate D env-fail triage (2026-07-03)**](2026.07.03-e2e-gate-classification.md) — Cheech's 3-bucket framework (env-cleared / real-pre-existing / mux-merge-related) + Stage-1/Stage-2 decision tree for Sam's full e2e_ui sweep (32 errors + 16 failures, none touching c0bbd2af); adopts Rachel's 4-part ENV criterion (incl. confirmed-by-green-re-run anchor); firsthand corroboration that e2e_ui's `clean_test_db` relies on `refresh_tokens` `ondelete=CASCADE` (not an explicit reset) so fresh-user tokens self-clear → 32 errors read as cross-suite residue a bounce clears; 4 survivor-risk watch-flags + a contamination/missing-seed/reset-gap sub-cause split; classification table PENDING Tiberius' bounce-fresh re-run.
+
 **Note**: v0.1.2 was released the same day as v0.1.1 (2026-01-28) — no documents fall in its window.
 
 ## How Documents Are Assigned
