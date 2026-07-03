@@ -22,9 +22,32 @@ from cosa.agents.shared.worktree_reaper import (
     drain_then_remove,
     list_worktrees,
     reconcile_worktrees,
+    _is_in_container,
+    CONTAINER_PROJECT_ROOT,
     WIP_COMMIT_PREFIX,
     RESCUE_BRANCH_PREFIX,
 )
+
+
+def _run_remove_fails( prune_returncode=0 ):
+    """
+    Injected runner where `git worktree remove` FAILS (returncode=1) so the
+    drain reaches the remove-failure branch that (host-side) runs prune.
+    prune_returncode controls the prune result for the failure sub-branch.
+    """
+    def run( argv, cwd=None, timeout=60 ):
+        sub = argv[ 1 ] if len( argv ) > 1 else ""
+        if sub == "rev-parse" and "--abbrev-ref" in argv:
+            return SimpleNamespace( returncode=0, stdout="wt-feature\n", stderr="" )
+        if sub == "status":
+            return SimpleNamespace( returncode=0, stdout="", stderr="" )
+        if sub == "worktree" and len( argv ) > 2 and argv[ 2 ] == "remove":
+            return SimpleNamespace( returncode=1, stdout="", stderr="remove failed (submodule)" )
+        if sub == "worktree" and len( argv ) > 2 and argv[ 2 ] == "prune":
+            return SimpleNamespace( returncode=prune_returncode, stdout="",
+                                    stderr="" if prune_returncode == 0 else "prune failed" )
+        return SimpleNamespace( returncode=0, stdout="", stderr="" )
+    return run
 
 
 # ----------------------------------------------------------------------------
@@ -119,6 +142,62 @@ def test_broken_orphan_is_refused_not_rm():
     r = drain_then_remove( "/tmp", project_root="/tmp", run=run )
     assert r[ "removed" ] is False
     assert r[ "skipped_reason" ] == "broken_or_not_a_worktree"
+
+
+# ----------------------------------------------------------------------------
+# In-container prune guard (bug 47ac0e50) — remove-failure branch
+# ----------------------------------------------------------------------------
+
+def test_remove_failure_prunes_on_host( monkeypatch ):
+    # Host-side (project_root != /var/lupin, no env sentinel): the remove-failure
+    # branch runs `git worktree prune` as before — safe, full worktree visibility.
+    monkeypatch.delenv( "LUPIN_IN_CONTAINER", raising=False )
+    calls = []
+    base  = _run_remove_fails()
+    def spy( argv, cwd=None, timeout=60 ):
+        calls.append( argv )
+        return base( argv, cwd=cwd, timeout=timeout )
+    r = drain_then_remove( "/tmp", project_root="/tmp", run=spy )
+    assert r[ "removed" ] is False
+    assert any( a[ :3 ] == [ "git", "worktree", "prune" ] for a in calls ), "host must still prune"
+    assert any( "git worktree remove failed" in e for e in r[ "errors" ] )
+
+
+def test_remove_failure_prune_failure_is_recorded( monkeypatch ):
+    # The prune sub-branch failure (host) is surfaced in errors[].
+    monkeypatch.delenv( "LUPIN_IN_CONTAINER", raising=False )
+    r = drain_then_remove( "/tmp", project_root="/tmp", run=_run_remove_fails( prune_returncode=1 ) )
+    assert any( "git worktree prune failed" in e for e in r[ "errors" ] )
+
+
+def test_remove_failure_skips_prune_in_container():
+    # In-container (project_root == /var/lupin): NEVER prune — it would wipe the
+    # shared host worktree registry (bug 47ac0e50). Skip with a recorded note.
+    # debug=True exercises the in-container skip + remove-failed debug prints.
+    calls = []
+    base  = _run_remove_fails()
+    def spy( argv, cwd=None, timeout=60 ):
+        calls.append( argv )
+        return base( argv, cwd=cwd, timeout=timeout )
+    r = drain_then_remove( "/tmp", project_root=CONTAINER_PROJECT_ROOT, run=spy, debug=True )
+    assert not any( a[ :3 ] == [ "git", "worktree", "prune" ] for a in calls ), "in-container must NOT prune"
+    assert any( "skipped `git worktree prune`" in e and "47ac0e50" in e for e in r[ "errors" ] )
+
+
+def test_is_in_container_true_on_container_project_root( monkeypatch ):
+    monkeypatch.delenv( "LUPIN_IN_CONTAINER", raising=False )
+    assert _is_in_container( CONTAINER_PROJECT_ROOT ) is True
+
+
+def test_is_in_container_false_on_host_path( monkeypatch ):
+    monkeypatch.delenv( "LUPIN_IN_CONTAINER", raising=False )
+    assert _is_in_container( "/mnt/DATA01/whatever/lupin" ) is False
+
+
+def test_is_in_container_true_on_env_sentinel( monkeypatch ):
+    # An explicit sentinel forces in-container even on a host-shaped path.
+    monkeypatch.setenv( "LUPIN_IN_CONTAINER", "true" )
+    assert _is_in_container( "/mnt/DATA01/whatever/lupin" ) is True
 
 
 # ----------------------------------------------------------------------------
