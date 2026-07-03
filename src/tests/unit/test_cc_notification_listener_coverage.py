@@ -237,44 +237,180 @@ class TestDeliverPeerDm:
         listener._handle_peer_dm.assert_not_called()
 
 
-class TestRecipientIsInjectable:
+# ── pane-idle probe (bug d1bb1456) ──────────────────────────────────────────────
+#
+# The fix REPLACES the heartbeat-outcome heuristic with a bounded, fail-open tmux
+# PANE-IDLE PROBE. The prior heuristic returned False (→ buffer) for a parked pane
+# whose last outcome was None (only idle_prompt beacons) or "poked" — stranding the
+# DM (the DM-wake gap). These are the repro cases from the triage doc:
+#   A: parked, no qualifying outcome (None)   — pre-fix BUFFER, must now INJECT
+#   B: parked, idle outcome                   — inject (unchanged)
+#   C: last outcome "poked", re-parked        — pre-fix BUFFER, must now INJECT
+#   D: honored hold                           — inject (unchanged)
+# Post-fix ALL FOUR wake when the PANE is observably idle (the outcome log is no
+# longer consulted); a genuinely BUSY / DIALOG pane never injects.
 
-    def test_injectable_outcome_returns_true( self, listener ):
-        from lupin_cli.claude_code.hooks.lib.heartbeat_events import EVENT_IDLE
-        with patch(
-            "lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id",
-            return_value={ "stable_session_id": "full-uuid-1234" },
-        ), patch(
-            "lupin_cli.claude_code.hooks.lib.heartbeat_events.last_emitted_outcome",
-            return_value=EVENT_IDLE,
-        ):
+_DIVIDER = "─" * 128        # the real prompt divider is ~128 wide; IDLE_PROMPT_DIVIDER is 40
+
+def _idle_capture( queued="" ):
+    """A normal idle prompt: input-box divider chrome, no busy/dialog sentinels."""
+    return ( f"{_DIVIDER}\n❯ {queued}\n{_DIVIDER}\n"
+             "  ⏵⏵ auto mode on (shift+tab to cycle)\n" )
+
+def _busy_capture():
+    """A running turn: the status line carries the 'esc to interrupt' affordance."""
+    return ( f"{_DIVIDER}\n❯ Press up to edit queued messages\n{_DIVIDER}\n"
+             "  ⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt · ← for agents\n" )
+
+def _dialog_capture():
+    """A permission/AskUserQuestion modal — NO 'esc to interrupt', divider present,
+    so it defeats naive absence-logic; only the dialog guard catches it."""
+    return ( f"{_DIVIDER}\nDo you want to proceed?\n❯ 1. Yes\n"
+             "  2. No, and tell Claude what to do differently\n" )
+
+
+class TestClassifyCaptureIdle:
+    """PURE classifier — the fail-closed-toward-buffer discriminator."""
+
+    def test_idle_prompt_is_idle( self ):
+        assert CCNotificationListener._classify_capture_idle( _idle_capture() ) is True
+
+    def test_busy_sentinel_is_not_idle( self ):
+        # Mr. Radio hardening: a running turn must NEVER be injected.
+        assert CCNotificationListener._classify_capture_idle( _busy_capture() ) is False
+
+    def test_dialog_sentinel_is_not_idle( self ):
+        # Mr. Radio hardening #2: a permission/AskUserQuestion modal → buffer, even
+        # though it shows no 'esc to interrupt' and DOES carry the divider chrome.
+        assert CCNotificationListener._classify_capture_idle( _dialog_capture() ) is False
+
+    def test_absence_of_busy_without_idle_chrome_is_not_idle( self ):
+        # Mr. Radio hardening #1: ABSENCE ≠ IDLE — no busy/dialog sentinel but also
+        # no positive idle-prompt divider (unknown/blank state) → NOT idle → buffer.
+        assert CCNotificationListener._classify_capture_idle(
+            "just scrollback, no structural prompt chrome here\n" ) is False
+
+    def test_none_capture_is_not_idle( self ):
+        assert CCNotificationListener._classify_capture_idle( None ) is False
+
+    def test_empty_capture_is_not_idle( self ):
+        assert CCNotificationListener._classify_capture_idle( "" ) is False
+
+
+class TestCapturePane:
+    """Bounded, total tmux capture-pane wrapper — all fail-open→None branches."""
+
+    def test_clean_capture_returns_text( self, listener ):
+        proc = MagicMock( returncode=0, stdout=_idle_capture() )
+        with patch.object( listener_module.subprocess, "run", return_value=proc ):
+            assert listener._capture_pane( "test tmux" ) == _idle_capture()
+
+    def test_nonzero_rc_returns_none( self, listener ):
+        listener._log = MagicMock()
+        proc = MagicMock( returncode=1, stdout="" )
+        with patch.object( listener_module.subprocess, "run", return_value=proc ):
+            assert listener._capture_pane( "test tmux" ) is None
+
+    def test_empty_stdout_returns_none( self, listener ):
+        proc = MagicMock( returncode=0, stdout="   \n  " )
+        with patch.object( listener_module.subprocess, "run", return_value=proc ):
+            assert listener._capture_pane( "test tmux" ) is None
+
+    def test_timeout_returns_none( self, listener ):
+        listener._log = MagicMock()
+        with patch.object( listener_module.subprocess, "run",
+                           side_effect=listener_module.subprocess.TimeoutExpired( "tmux", 2 ) ):
+            assert listener._capture_pane( "test tmux" ) is None
+        assert any( "pane-idle probe capture failed" in str( c ) for c in listener._log.call_args_list )
+
+    def test_oserror_returns_none( self, listener ):
+        listener._log = MagicMock()
+        with patch.object( listener_module.subprocess, "run", side_effect=OSError( "no tmux" ) ):
+            assert listener._capture_pane( "test tmux" ) is None
+
+
+class TestPaneIsIdleAtPrompt:
+    """Probe orchestration — session resolution + the double-capture race guard."""
+
+    def test_no_tmux_session_is_not_injectable( self, listener ):
+        # Can't probe → fail-open to buffer.
+        with patch.object( listener, "_resolve_tmux_session", return_value=None ):
+            assert listener._pane_is_idle_at_prompt() is False
+
+    def test_both_captures_idle_is_injectable( self, listener ):
+        with patch.object( listener, "_resolve_tmux_session", return_value="t" ), \
+             patch.object( listener, "_capture_pane", side_effect=[ _idle_capture(), _idle_capture() ] ), \
+             patch.object( listener_module.time, "sleep" ) as sleep:
+            assert listener._pane_is_idle_at_prompt() is True
+        sleep.assert_called_once()          # the ~300ms recheck gap actually elapses
+
+    def test_first_capture_busy_short_circuits_no_recheck( self, listener ):
+        # Busy on the first read → False immediately, no second capture / sleep.
+        cap = MagicMock( return_value=_busy_capture() )
+        with patch.object( listener, "_resolve_tmux_session", return_value="t" ), \
+             patch.object( listener, "_capture_pane", cap ), \
+             patch.object( listener_module.time, "sleep" ) as sleep:
+            assert listener._pane_is_idle_at_prompt() is False
+        assert cap.call_count == 1
+        sleep.assert_not_called()
+
+    def test_transition_race_second_capture_busy_is_not_injectable( self, listener ):
+        # Hardening #1: idle-then-busy across the ~300ms gap (a turn starting mid-
+        # probe) → NOT injectable. The single-capture version would false-inject.
+        with patch.object( listener, "_resolve_tmux_session", return_value="t" ), \
+             patch.object( listener, "_capture_pane", side_effect=[ _idle_capture(), _busy_capture() ] ), \
+             patch.object( listener_module.time, "sleep" ):
+            assert listener._pane_is_idle_at_prompt() is False
+
+
+class TestRecipientIsInjectableProbe:
+    """_recipient_is_injectable delegates to the probe; the d1bb1456 regression anchor."""
+
+    def test_delegates_to_probe( self, listener ):
+        with patch.object( listener, "_pane_is_idle_at_prompt", return_value=True ) as p:
+            assert listener._recipient_is_injectable() is True
+        p.assert_called_once()
+
+    def test_parked_pane_wakes_regardless_of_heartbeat_outcome( self, listener ):
+        # THE d1bb1456 FIX (cases A + C flip buffer→inject): a parked pane whose
+        # heartbeat last-outcome was None (case A) or "poked" (case C) — which the
+        # OLD heuristic buffered — now WAKES, because the idle PANE state alone
+        # decides. We assert the probe consults the PANE, not the outcome log:
+        # last_emitted_outcome is patched to raise, proving it is never read.
+        with patch.object( listener, "_resolve_tmux_session", return_value="t" ), \
+             patch.object( listener, "_capture_pane", side_effect=[ _idle_capture(), _idle_capture() ] ), \
+             patch.object( listener_module.time, "sleep" ), \
+             patch( "lupin_cli.claude_code.hooks.lib.heartbeat_events.last_emitted_outcome",
+                    side_effect=AssertionError( "outcome log must not be consulted post-fix" ) ):
             assert listener._recipient_is_injectable() is True
 
-    def test_non_injectable_outcome_returns_false( self, listener ):
-        with patch(
-            "lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id",
-            return_value={ "stable_session_id": "full-uuid-1234" },
-        ), patch(
-            "lupin_cli.claude_code.hooks.lib.heartbeat_events.last_emitted_outcome",
-            return_value="poked",
-        ):
+    def test_busy_pane_buffers_regardless_of_outcome( self, listener ):
+        # The mid-turn guard: a busy pane never injects even if the old heuristic
+        # would have (e.g. a stale 'idle'/'honored' outcome on record).
+        with patch.object( listener, "_resolve_tmux_session", return_value="t" ), \
+             patch.object( listener, "_capture_pane", return_value=_busy_capture() ), \
+             patch.object( listener_module.time, "sleep" ):
             assert listener._recipient_is_injectable() is False
 
-    def test_unresolvable_full_id_returns_true( self, listener ):
-        with patch(
-            "lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id",
-            return_value=None,
-        ):
-            assert listener._recipient_is_injectable() is True
 
-    def test_read_error_returns_true( self, listener ):
-        listener._log = MagicMock()
-        with patch(
-            "lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id",
-            side_effect=RuntimeError( "boom" ),
-        ):
-            assert listener._recipient_is_injectable() is True
-        assert any( "idle-state read failed" in str( c ) for c in listener._log.call_args_list )
+class TestPaneProbeSentinelsDocumented:
+    """Version-coupling pin (Mr. Radio hardening #3): these sentinels are strings the
+    Claude Code CLI paints. A CLI UI change that alters them will fail THIS test —
+    the deliberate tripwire — and, at runtime, degrade safely to BUFFER (an
+    unrecognised status line fails the positive-idle check → not-injectable)."""
+
+    def test_busy_sentinel_pinned( self ):
+        assert listener_module.BUSY_STATUS_SENTINELS == ( "esc to interrupt", )
+
+    def test_idle_divider_is_a_long_horizontal_rule( self ):
+        assert listener_module.IDLE_PROMPT_DIVIDER == "─" * 40
+
+    def test_dialog_sentinels_cover_permission_and_question_modals( self ):
+        for expected in ( "Do you want to proceed", "No, and tell Claude", "❯ 1." ):
+            assert expected in listener_module.DIALOG_SENTINELS
+
+    def test_recheck_gap_is_subsecond( self ):
+        assert 0 < listener_module.PANE_PROBE_RECHECK_SECONDS < 1
 
 
 # ═════════════════════════════════════════════════════════════════════════════

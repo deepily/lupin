@@ -54,6 +54,46 @@ SESSION_DIR       = Path.home() / ".claude" / "sessions"
 CENTRALIZED_LOG   = SESSION_DIR / "cc-listeners.log"
 SUBSCRIBED_EVENTS = [ "notification_queue_update" ]
 
+# ── Pane-idle probe sentinels (bug d1bb1456) ────────────────────────────────────
+# The pane-idle probe (`_pane_is_idle_at_prompt`) reads the RECIPIENT tmux pane's
+# real state to decide whether it is safe to inject/wake a peer DM. These sentinel
+# sets are the ONLY CLI-UI-coupled surface: they are strings the Claude Code TUI
+# paints, and a CLI upgrade can change them. That coupling is DELIBERATELY isolated
+# here (+ pinned by test_pane_probe_sentinels_documented) so a UI change is a
+# one-line edit, and — critically — an UNRECOGNISED status line fails the positive
+# idle check and degrades to BUFFER (fail-open direction: never a false inject).
+#
+# Empirically confirmed on live panes 2026-07-02 (see the triage doc).
+
+# A RUNNING turn paints the interrupt affordance in its live status line; a pane
+# parked at an idle prompt does not. Presence ⇒ BUSY ⇒ never inject.
+BUSY_STATUS_SENTINELS = ( "esc to interrupt", )
+
+# Permission / trust / AskUserQuestion dialogs show NO "esc to interrupt", so naive
+# absence-logic would type INTO the dialog and could select an option. Presence of
+# any of these ⇒ a modal is up ⇒ never inject (Mr. Radio hardening #2, 2026-07-02).
+DIALOG_SENTINELS = (
+    "Do you want to proceed",
+    "Would you like to",
+    "No, and tell Claude",
+    "Yes, and don't ask again",
+    "esc to reject",
+    "❯ 1.",
+    "1. Yes",
+)
+
+# POSITIVE idle signal (Mr. Radio hardening #1): the normal input prompt paints a
+# full-width horizontal-rule divider around the entry box. Requiring it means mere
+# busy-sentinel ABSENCE never classifies idle — an unknown/blank state has no
+# divider ⇒ not-injectable ⇒ buffer. 40 rules is well below the real width (~128+)
+# yet long enough to never match incidental box-drawing.
+IDLE_PROMPT_DIVIDER   = "─" * 40          # "────…" (40×)
+
+# Transition-race guard (Mr. Radio hardening #1): a turn that is STARTING may not
+# have painted "esc to interrupt" yet. Require TWO captures this far apart to BOTH
+# classify idle before injecting.
+PANE_PROBE_RECHECK_SECONDS = 0.3
+
 
 # ── Listener ──────────────────────────────────────────────────────────────────
 
@@ -319,92 +359,109 @@ class CCNotificationListener( BaseWebSocketListener ):
     def _recipient_is_injectable( self ):
         """
         Is this CC session safe to tmux-inject / wake an arriving peer DM into
-        right now — i.e. is it PARKED AT A PROMPT (not busy mid-turn)?
+        right now — i.e. is it PARKED AT AN IDLE PROMPT (not busy mid-turn, not
+        sitting at a permission/AskUserQuestion dialog)?
 
-        Reads the most recent heartbeat outcome for this session and treats it as
-        injectable iff it is one of the PARKED-AT-PROMPT outcomes — the pane sat
-        down at a prompt and will only resume on external input (a poke, a DM
-        injection, or the human). Three outcomes qualify (heartbeat_events /
-        heartbeat_decision):
-
-          - EVENT_IDLE     ("idle")        — the genuine-idle transition beacon;
-                                             the pane declared idle and waits.
-          - OUTCOME_HONORED ("honored")    — a fresh declared HOLD defended the
-                                             pane's quiescence: decide_heartbeat
-                                             returned {"continue": True} (it did
-                                             NOT block/re-engage), so the Stop hook
-                                             completed and the pane is parked at a
-                                             prompt. This is the held-worker case
-                                             this method exists to fix — a holding
-                                             worker SUPPRESSES pokes, so without
-                                             treating "honored" as injectable its
-                                             buffered DM may never drain.
-          - OUTCOME_CAP_REACHED ("cap_reached") — owed work, but the poke cap was
-                                             hit so the heartbeat STOPPED nudging;
-                                             decide_heartbeat returned {"continue":
-                                             True}, the Stop completed, the pane is
-                                             parked. Waking it with an arriving DM
-                                             is exactly desirable.
-
-        DELIBERATELY EXCLUDED — these mean the pane is BUSY (mid-turn), where a
-        tmux injection would corrupt the running turn:
-          - OUTCOME_POKE   ("poked")       — decide_heartbeat returned {"decision":
-                                             "block", "reason": …}: the Stop is
-                                             BLOCKED and the poke reason is injected
-                                             back into the model, RE-ENGAGING it.
-                                             So a last outcome of "poked" means the
-                                             model is actively running the poked
-                                             turn → NOT parked → buffer (drains at
-                                             the next clean tool boundary).
-          - OUTCOME_NOT_OWED ("not_owed")  — never emitted (per-turn noise, skipped
-                                             by emit policy), so it can never be the
-                                             last emitted outcome; listed only for
-                                             completeness.
-        None (no heartbeat history yet — a freshly-started session) is treated as
-        BUSY/active, so a peer DM buffers cleanly rather than interrupting.
-
-        Requires:
-            - self.session_id_hash is the 8-char CC session hash
+        SOURCE OF TRUTH (bug d1bb1456, Mr. Radio ratified 2026-07-02): a bounded,
+        fail-open tmux PANE-IDLE PROBE (`_pane_is_idle_at_prompt`) that OBSERVES
+        the recipient pane's real state. This REPLACES the prior heartbeat-outcome
+        heuristic, which read `last_emitted_outcome()` and returned False (→ buffer)
+        for a parked pane whose last outcome was None (only `idle_prompt` beacons
+        emitted, or a fresh session) or "poked". A parked pane so misclassified had
+        its DM buffered for drain-at-next-tool-boundary — but a parked pane has NO
+        next tool boundary and no UserPromptSubmit, so the DM never drained (the
+        residual of baf5ea6d; see src/rnd/v0.1.9/2026.07.02-parked-worker-dm-wake-
+        gap-triage.md). The probe reads the pane's ACTUAL state instead of inferring
+        from a possibly-stale outcome log.
 
         Ensures:
-            - Returns True iff last_emitted_outcome(<full stable uuid>) is one of
-              {EVENT_IDLE, OUTCOME_HONORED, OUTCOME_CAP_REACHED}
-            - Returns False for "poked"/None (BUSY → buffer, never inject mid-turn)
-            - Returns True when the full id can't be resolved, or on any
-              read/import error (fail toward tmux-wake so a DM is never silently
-              lost to a buffer that nothing drains)
+            - Returns True iff the pane is OBSERVABLY parked at a normal idle prompt
+              (delegates to `_pane_is_idle_at_prompt`).
+            - Returns False when the pane is busy mid-turn, sitting at a dialog, or
+              the probe cannot positively confirm idle (fail-open → buffer; the
+              buffered DM still surfaces via the store reconcile on the next
+              UserPromptSubmit, whereas a mis-injected running turn is unrecoverable).
+            - Never raises.
+        """
+        return self._pane_is_idle_at_prompt()
+
+    def _pane_is_idle_at_prompt( self ):
+        """
+        The pane-idle probe (bug d1bb1456). Captures the recipient tmux pane TWICE,
+        ~PANE_PROBE_RECHECK_SECONDS apart, and returns True iff BOTH captures
+        classify as a normal idle prompt (`_classify_capture_idle`).
+
+        The double capture is the transition-race guard (Mr. Radio hardening #1): a
+        turn that is STARTING may not have painted "esc to interrupt" yet, so a
+        single capture could momentarily read idle; requiring two consistent reads
+        closes that window.
+
+        Ensures:
+            - Returns False when the tmux session can't be resolved (can't probe →
+              fail-open to buffer).
+            - Returns True iff the first AND the (short-)later capture both classify
+              idle; False otherwise. Never raises (capture is total).
+        """
+        tmux_session = self._resolve_tmux_session()
+        if not tmux_session:
+            # No pane to probe → can't confirm idle → fail-open to the buffer path.
+            return False
+        if not self._classify_capture_idle( self._capture_pane( tmux_session ) ):
+            return False
+        time.sleep( PANE_PROBE_RECHECK_SECONDS )
+        return self._classify_capture_idle( self._capture_pane( tmux_session ) )
+
+    def _capture_pane( self, tmux_session ):
+        """
+        Bounded, total `tmux capture-pane` of the recipient pane.
+
+        Ensures:
+            - Returns the captured pane text on a clean (rc==0), non-empty capture.
+            - Returns None on any tmux error (timeout / missing binary / OSError),
+              a non-zero return code, or an empty capture — the caller treats None
+              as NOT-idle (fail-open → buffer). Never raises.
         """
         try:
-            from lupin_cli.claude_code.hooks.lib.session_bridge import find_session_by_id
-            from lupin_cli.claude_code.hooks.lib.heartbeat_events import (
-                last_emitted_outcome, EVENT_IDLE
+            result = subprocess.run(
+                [ "tmux", "capture-pane", "-p", "-t", tmux_session ],
+                capture_output=True, text=True, timeout=2
             )
-            from lupin_cli.claude_code.hooks.lib.heartbeat_decision import (
-                OUTCOME_HONORED, OUTCOME_CAP_REACHED
-            )
-            # Outcomes whose MOST-RECENT value means the pane is parked at a prompt
-            # and therefore safe to tmux-inject (wake). "poked" is excluded on
-            # purpose — it re-engages the model (busy mid-turn); injecting there
-            # would corrupt the running turn. See the docstring for the per-outcome
-            # justification.
-            injectable_outcomes = ( EVENT_IDLE, OUTCOME_HONORED, OUTCOME_CAP_REACHED )
-            # heartbeat events are keyed by the FULL stable UUID — the file is
-            # <full_uuid>.jsonl, read by EXACT match (no prefix glob), and stop.py
-            # writes via resolve_stable_session_id (full UUID). self.session_id_hash
-            # is the 8-char form, so we MUST resolve the full id via the bridge
-            # first; passing the 8-char hash straight through always misses the
-            # file → None → "active" → the idle→tmux-wake branch was DEAD in prod
-            # (F1, Cheech 2026-06-15). Fix at the source (the listener holds the
-            # wrong-form id), not by loosening the store's exact-match contract.
-            data    = find_session_by_id( self.session_id_hash )
-            full_id = ( data.get( "stable_session_id" ) or data.get( "session_id" ) ) if data else None
-            if not full_id:
-                # No live bridge → can't resolve the full id → fail toward tmux-wake.
-                return True
-            return last_emitted_outcome( full_id ) in injectable_outcomes
-        except Exception as e:
-            self._log( f"{self.LOG_PREFIX} idle-state read failed (assuming idle/tmux-wake): {e}" )
-            return True
+        except ( subprocess.TimeoutExpired, FileNotFoundError, OSError ) as e:
+            self._log( f"{self.LOG_PREFIX} pane-idle probe capture failed (fail-open→buffer): {e}" )
+            return None
+        if result.returncode != 0:
+            self._log( f"{self.LOG_PREFIX} pane-idle probe rc={result.returncode} (fail-open→buffer)" )
+            return None
+        captured = result.stdout or ""
+        return captured if captured.strip() else None
+
+    @staticmethod
+    def _classify_capture_idle( captured ):
+        """
+        PURE classifier: does a captured pane show a NORMAL IDLE PROMPT — safe to
+        tmux-inject a peer DM into?
+
+        Fail-closed-toward-buffer (Mr. Radio hardening #1 & #2): idle requires a
+        POSITIVE signal, never mere busy-sentinel absence. All must hold:
+          - `captured` is a non-empty string (None ⇒ probe failed ⇒ NOT idle);
+          - no BUSY_STATUS_SENTINELS  (a running turn ⇒ never inject);
+          - no DIALOG_SENTINELS       (permission/AskUserQuestion modal ⇒ typing
+                                        into it could select an option ⇒ never inject);
+          - the IDLE_PROMPT_DIVIDER is present (the normal input-box chrome — the
+                                        positive idle signal; an unknown/blank state
+                                        lacks it ⇒ NOT idle ⇒ buffer).
+
+        Ensures:
+            - Returns True iff captured is non-empty AND busy-free AND dialog-free
+              AND carries the idle-prompt divider; False otherwise. Never raises.
+        """
+        if not captured:
+            return False
+        if any( sentinel in captured for sentinel in BUSY_STATUS_SENTINELS ):
+            return False
+        if any( sentinel in captured for sentinel in DIALOG_SENTINELS ):
+            return False
+        return IDLE_PROMPT_DIVIDER in captured
 
     def _handle_peer_dm( self, notification ):
         """
