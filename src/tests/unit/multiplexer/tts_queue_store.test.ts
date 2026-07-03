@@ -15,7 +15,9 @@ import assert from "node:assert/strict";
 import { createEventBusForTesting } from "../../../lupin_app/static/js/multiplexer/shared/EventBus";
 import { createTtsQueueStore } from "../../../lupin_app/static/js/multiplexer/stores/TtsQueueStore";
 import type {
+  ActionRequiredChangeKind,
   LupinEvent,
+  StoreActionRequiredChangedPayload,
   StoreAudioStateChangePayload,
   StoreTtsQueueChangedPayload,
   TtsQueueItem,
@@ -389,4 +391,197 @@ test("activeItem: tracks the promoted head across advance() — stays consistent
   store.advance();            // a popped, b promoted to active
   assert.equal(store.activeItem()?.id_hash, "b");
   assert.equal(store.activeItem()?.id_hash, store.current());
+});
+
+// ===========================================================================
+// 70cbff3e — TTS focus mode. ENTER when an ACTIVE action-required item's audio
+// completes while unresolved (pause the ROLL); EXIT on responded|expired|
+// cancelled matching the focus id, on manual Resume, and (de-focus only) when
+// manually paused (A4). `failed` and non-terminal AR changes STAY in focus (A2).
+// Legacy parity: notifications.js onTTSPlaybackComplete :17176-17204,
+// enterTTSFocusMode :17262, exitTTSFocusMode :17309, toggleTTSFocusMode :17348.
+// ===========================================================================
+
+function arItem(idHash: string): TtsQueueItem {
+  return { id_hash: idHash, ttsText: `say ${idHash}`, addedAt: 42, action_required: true };
+}
+
+function emitArChanged(
+  bus       : ReturnType<typeof createEventBusForTesting>,
+  changeKind: ActionRequiredChangeKind,
+  idHash    : string,
+): void {
+  bus.emit<StoreActionRequiredChangedPayload>({
+    type    : "store_action_required_changed",
+    payload : { changeKind, id_hash: idHash },
+    source  : "test",
+    ts      : 0,
+  });
+}
+
+test("focus ENTER (T1): active AR item whose audio ends while unresolved holds the roll — focusMode true, active discarded (null), pending untouched, one emit", () => {
+  const { bus, store, events } = setup();
+  store.enqueue(arItem("ar1"));   // active head
+  store.enqueue(item("p1"));      // pending tail (must NOT promote)
+  assert.equal(store.current(), "ar1");
+  assert.equal(store.focusMode(), false);
+  const before = events.length;
+  emitAudioEnded(bus);
+  assert.equal(store.focusMode(), true, "entered focus");
+  assert.equal(store.current(), null, "the completed AR head is discarded (legacy :17201)");
+  assert.deepEqual(store.pending().map(i => i.id_hash), ["p1"], "roll paused — p1 NOT promoted");
+  assert.equal(events.length, before + 1, "exactly one emit on enter");
+  assert.equal(lastPayload(events).activeNotificationId, null);
+});
+
+test("focus Path B-2 guard (T2): an AR item RESOLVED before its audio ends does NOT enter focus — it advances normally", () => {
+  const { bus, store } = setup();
+  store.enqueue(arItem("ar1"));
+  store.enqueue(item("p1"));
+  emitArChanged(bus, "responded", "ar1");   // resolved WHILE audio still playing
+  assert.equal(store.focusMode(), false, "resolution alone does not enter focus");
+  emitAudioEnded(bus);
+  assert.equal(store.focusMode(), false, "already-resolved AR skips focus (legacy :17196)");
+  assert.equal(store.current(), "p1", "advanced normally to the next pending item");
+});
+
+test("focus F1 (Clayton fold — resolved-bank reuse): after a resolved AR advances, a LATER same-id AR CAN re-enter focus (the consumed id was dropped from the bank)", () => {
+  const { bus, store } = setup();
+  // First life: ar1 resolves while playing → Path B-2 skips focus, advances,
+  // AND drops ar1 from the resolved bank (F1 delete on the non-focus consume).
+  store.enqueue(arItem("ar1"));
+  emitArChanged(bus, "responded", "ar1");
+  emitAudioEnded(bus);
+  assert.equal(store.focusMode(), false, "first life: resolved-before-ended skips focus");
+  assert.equal(store.current(), null, "advanced to empty (no pending)");
+  // Second life: the SAME id_hash re-arrives (simulating a byId eviction + reuse
+  // upstream) and this time is UNRESOLVED when its audio ends. Because F1 dropped
+  // the stale entry, resolved.has(ar1) is false → it correctly ENTERS focus.
+  // (Without the F1 delete, the stale bank entry would wrongly skip focus here.)
+  store.enqueue(arItem("ar1"));
+  emitAudioEnded(bus);
+  assert.equal(store.focusMode(), true, "second life: bank was cleared → re-entry allowed");
+  assert.equal(store.current(), null, "focus discards the AR head (held), so current() is null");
+});
+
+test("focus (T3): a NON-action-required item ending advances normally, never enters focus", () => {
+  const { bus, store } = setup();
+  store.enqueue(item("f1"));     // fire-and-forget (action_required undefined)
+  store.enqueue(item("f2"));
+  emitAudioEnded(bus);
+  assert.equal(store.focusMode(), false);
+  assert.equal(store.current(), "f2");
+});
+
+test("focus onAudioEnded on an empty queue (dup/late ended): no active head → advance no-op, focusMode stays false", () => {
+  const { bus, store, events } = setup();
+  emitAudioEnded(bus);
+  assert.equal(store.focusMode(), false);
+  assert.equal(store.current(), null);
+  assert.equal(events.length, 0, "no-op — nothing emitted");
+});
+
+test("focus advance() guard (T4): a direct advance() while focused is a hard no-op (pause-the-ROLL belt)", () => {
+  const { bus, store, events } = setup();
+  store.enqueue(arItem("ar1"));
+  store.enqueue(item("p1"));
+  emitAudioEnded(bus);                 // enter focus
+  const afterEnter = events.length;
+  store.advance();                     // stray external advance
+  assert.equal(store.focusMode(), true, "still focused");
+  assert.equal(store.current(), null, "roll not advanced");
+  assert.deepEqual(store.pending().map(i => i.id_hash), ["p1"], "p1 still held");
+  assert.equal(events.length, afterEnter, "guarded advance emits nothing");
+});
+
+for (const kind of ["responded", "expired", "cancelled"] as const) {
+  test(`focus EXIT (T5/6/7): store_action_required_changed{${kind}} on the focus id exits focus and rolls the queue`, () => {
+    const { bus, store } = setup();
+    store.enqueue(arItem("ar1"));
+    store.enqueue(item("p1"));
+    emitAudioEnded(bus);               // enter focus, p1 held
+    assert.equal(store.focusMode(), true);
+    emitArChanged(bus, kind, "ar1");   // terminal resolution of the focus item
+    assert.equal(store.focusMode(), false, `${kind} exits focus`);
+    assert.equal(store.current(), "p1", "queue rolled to the next pending item");
+  });
+}
+
+test("focus EXIT ignores a NON-focus id (T8): a terminal AR change for another notification does not exit", () => {
+  const { bus, store } = setup();
+  store.enqueue(arItem("ar1"));
+  store.enqueue(item("p1"));
+  emitAudioEnded(bus);
+  emitArChanged(bus, "responded", "someone-else");
+  assert.equal(store.focusMode(), true, "unrelated resolution leaves focus intact");
+  assert.equal(store.current(), null);
+});
+
+test("focus A2 (T9): `failed` (respondAndAwait POST rejected) STAYS in focus — the user can retry", () => {
+  const { bus, store } = setup();
+  store.enqueue(arItem("ar1"));
+  store.enqueue(item("p1"));
+  emitAudioEnded(bus);
+  emitArChanged(bus, "failed", "ar1");
+  assert.equal(store.focusMode(), true, "failed does not exit focus");
+});
+
+test("focus A2: a non-terminal AR change (`responded-pending`) does not exit focus", () => {
+  const { bus, store } = setup();
+  store.enqueue(arItem("ar1"));
+  emitAudioEnded(bus);
+  emitArChanged(bus, "responded-pending", "ar1");
+  assert.equal(store.focusMode(), true);
+});
+
+test("focus manual Resume (T10): resumeFocus() exits focus and rolls the queue", () => {
+  const { bus, store } = setup();
+  store.enqueue(arItem("ar1"));
+  store.enqueue(item("p1"));
+  emitAudioEnded(bus);
+  store.resumeFocus();
+  assert.equal(store.focusMode(), false);
+  assert.equal(store.current(), "p1", "manual Resume promotes the next pending item");
+});
+
+test("focus EXIT with empty pending (T11): exit sets current() null AND emits (de-focus repaint, not a stuck header)", () => {
+  const { bus, store, events } = setup();
+  store.enqueue(arItem("ar1"));      // no pending behind it
+  emitAudioEnded(bus);               // enter focus, current() null, pending empty
+  assert.equal(store.focusMode(), true);
+  const beforeExit = events.length;
+  store.resumeFocus();
+  assert.equal(store.focusMode(), false);
+  assert.equal(store.current(), null, "nothing to promote");
+  assert.equal(events.length, beforeExit + 1, "exit STILL emits so the focus header repaints away");
+});
+
+test("focus A4 (T12): exiting while manually PAUSED de-focuses WITHOUT rolling (legacy !isTTSPaused)", () => {
+  const { bus, store } = setup();
+  store.enqueue(arItem("ar1"));
+  store.enqueue(item("p1"));
+  emitAudioEnded(bus);               // enter focus
+  emitAudioState(bus, "paused");     // user manually paused
+  store.resumeFocus();               // exit request
+  assert.equal(store.focusMode(), false, "focus cleared");
+  assert.equal(store.current(), null, "roll HELD — p1 not promoted while paused");
+  assert.deepEqual(store.pending().map(i => i.id_hash), ["p1"], "pending retained");
+});
+
+test("focus clear() (T-clear): Clear-all while focused with an empty pending queue resets focus + emits", () => {
+  const { bus, store, events } = setup();
+  store.enqueue(arItem("ar1"));
+  emitAudioEnded(bus);               // focus, active null, pending empty
+  const beforeClear = events.length;
+  store.clear();
+  assert.equal(store.focusMode(), false, "clear resets focus even when active+pending already empty");
+  assert.equal(events.length, beforeClear + 1, "clear emits the reset");
+});
+
+test("focus resumeFocus() when NOT focused is a safe no-op (exit guard)", () => {
+  const { store, events } = setup();
+  const before = events.length;
+  store.resumeFocus();
+  assert.equal(store.focusMode(), false);
+  assert.equal(events.length, before, "no state change, no emit");
 });

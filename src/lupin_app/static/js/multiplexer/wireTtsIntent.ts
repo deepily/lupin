@@ -33,7 +33,7 @@ export type TtsQueueEnqueuer = Pick<TtsQueueStore, "enqueue">;
  *
  * Ensures:
  *   - every store_notification_tts_intent event enqueues exactly one TtsQueueItem
- *     carrying { id_hash, ttsText, addedAt } from the intent payload
+ *     carrying { id_hash, ttsText, addedAt, action_required } from the intent payload
  *   - returns the bus unsubscriber (page-lifetime in boot; disposed in tests)
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line (same as TtsQueueStore.ts:221).
@@ -44,10 +44,13 @@ export function wireNotificationTtsIntent(
 ): () => void {
   return bus.on<StoreNotificationTtsIntentPayload>(
     "store_notification_tts_intent",
+    // 70cbff3e (A1 producer-seam): stamp action_required onto the item so
+    // TtsQueueStore can decide focus-mode ENTER at store_audio_ended.
     ( e ) => ttsQueue.enqueue( {
-      id_hash : e.payload.id_hash,
-      ttsText : e.payload.ttsText,
-      addedAt : nowFn(),
+      id_hash         : e.payload.id_hash,
+      ttsText         : e.payload.ttsText,
+      addedAt         : nowFn(),
+      action_required : e.payload.action_required,
     } ),
   );
 }

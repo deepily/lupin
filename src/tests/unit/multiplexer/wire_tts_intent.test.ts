@@ -28,14 +28,14 @@ function emitIntent(bus: ReturnType<typeof createEventBusForTesting>, payload: S
   });
 }
 
-test("wire: a store_notification_tts_intent enqueues one TtsQueueItem carrying id_hash + ttsText + injected addedAt", () => {
+test("wire: a store_notification_tts_intent enqueues one TtsQueueItem carrying id_hash + ttsText + injected addedAt + action_required", () => {
   const bus      = createEventBusForTesting();
   const recorder = makeRecorder();
   wireNotificationTtsIntent(bus, recorder, () => 4_242);
 
-  emitIntent(bus, { id_hash: "w1", ttsText: "speak me", priority: "high" });
+  emitIntent(bus, { id_hash: "w1", ttsText: "speak me", priority: "high", action_required: false });
 
-  assert.deepEqual(recorder.items, [ { id_hash: "w1", ttsText: "speak me", addedAt: 4_242 } ]);
+  assert.deepEqual(recorder.items, [ { id_hash: "w1", ttsText: "speak me", addedAt: 4_242, action_required: false } ]);
 });
 
 test("wire: each intent enqueues independently; addedAt reflects the nowFn AT enqueue time", () => {
@@ -44,13 +44,23 @@ test("wire: each intent enqueues independently; addedAt reflects the nowFn AT en
   let clock      = 100;
   wireNotificationTtsIntent(bus, recorder, () => clock);
 
-  emitIntent(bus, { id_hash: "a", ttsText: "one",   priority: "urgent" });
+  emitIntent(bus, { id_hash: "a", ttsText: "one",   priority: "urgent", action_required: false });
   clock = 200;
-  emitIntent(bus, { id_hash: "b", ttsText: "two",   priority: "high" });
+  emitIntent(bus, { id_hash: "b", ttsText: "two",   priority: "high", action_required: false });
 
   assert.equal(recorder.items.length, 2);
-  assert.deepEqual(recorder.items[0], { id_hash: "a", ttsText: "one", addedAt: 100 });
-  assert.deepEqual(recorder.items[1], { id_hash: "b", ttsText: "two", addedAt: 200 });
+  assert.deepEqual(recorder.items[0], { id_hash: "a", ttsText: "one", addedAt: 100, action_required: false });
+  assert.deepEqual(recorder.items[1], { id_hash: "b", ttsText: "two", addedAt: 200, action_required: false });
+});
+
+test("wire: 70cbff3e — the intent's action_required flag is stamped onto the enqueued item (AR case)", () => {
+  const bus      = createEventBusForTesting();
+  const recorder = makeRecorder();
+  wireNotificationTtsIntent(bus, recorder, () => 7);
+
+  emitIntent(bus, { id_hash: "ar1", ttsText: "respond please", priority: "urgent", action_required: true });
+
+  assert.deepEqual(recorder.items, [ { id_hash: "ar1", ttsText: "respond please", addedAt: 7, action_required: true } ]);
 });
 
 test("wire: the returned unsubscriber detaches the seam — no further enqueues after it runs", () => {
@@ -58,9 +68,9 @@ test("wire: the returned unsubscriber detaches the seam — no further enqueues 
   const recorder = makeRecorder();
   const off      = wireNotificationTtsIntent(bus, recorder, () => 0);
 
-  emitIntent(bus, { id_hash: "before", ttsText: "kept", priority: "high" });
+  emitIntent(bus, { id_hash: "before", ttsText: "kept", priority: "high", action_required: false });
   off();
-  emitIntent(bus, { id_hash: "after", ttsText: "dropped", priority: "high" });
+  emitIntent(bus, { id_hash: "after", ttsText: "dropped", priority: "high", action_required: false });
 
   assert.deepEqual(recorder.items.map(i => i.id_hash), [ "before" ]);
 });
