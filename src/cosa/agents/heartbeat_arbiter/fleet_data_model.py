@@ -147,10 +147,35 @@ def _dm_ts_for_session( dm_activity, sid ):
 
 
 def _count_stuck_episodes( events ):
-    """Count cap_reached records with work_owed True in the accumulated tail."""
+    """Count LIVE cap_reached+owed records in the accumulated tail — those NOT
+    consumed by a later recovery.
+
+    5a1f17f8 (a): a cap_reached is CONSUMED when a `honored` outcome appears LATER in
+    the ordered (oldest→newest) tail — the session moved to defended quiescence (or
+    resumed), so that prior wedge no longer stands. Only cap_reached+owed AFTER the
+    last honored count as live stuck evidence.
+
+    Why: the offset-reset replay (a :8001 restart re-reads the events file from byte 0,
+    bug 5a1f17f8 root cause) re-surfaces HISTORICAL cap_reached as if fresh. In the real
+    streams those are followed by `honored` recoveries (Mr Radio's 2026-07-02 fixture:
+    one cap_reached at 21:27Z + FIVE honored after it, yet replayed as fresh STUCK on
+    two restarts). Gating on a later honored makes the `stuck` signal robust to replay
+    WITHOUT a now/threshold knob — deterministic, order-respecting. A genuinely wedged
+    session emits repeated cap_reached with NO intervening honored → last_recovery stays
+    behind them → they all count → the true-positive is preserved. This composes with
+    the durable-offset fix (b): (a) is the belt for any replayed/lingering record, (b)
+    stops the re-read at the source.
+    """
+    last_recovery = -1
+    for i, e in enumerate( events ):
+        if isinstance( e, dict ) and e.get( "outcome" ) == OUTCOME_HONORED:
+            last_recovery = i
     return sum(
-        1 for e in events
-        if isinstance( e, dict ) and e.get( "outcome" ) == OUTCOME_CAP_REACHED and e.get( "work_owed" ) is True
+        1 for i, e in enumerate( events )
+        if i > last_recovery
+        and isinstance( e, dict )
+        and e.get( "outcome" ) == OUTCOME_CAP_REACHED
+        and e.get( "work_owed" ) is True
     )
 
 

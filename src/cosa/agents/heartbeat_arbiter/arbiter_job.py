@@ -41,7 +41,7 @@ from cosa.agents.agentic_job_base import AgenticJobBase
 # Reuse the Hook-Poker's clock seam (DRY — same SystemClock / FakeClock pattern).
 from cosa.agents.heartbeat_poker_job import Clock, SystemClock
 
-from cosa.agents.heartbeat_arbiter.events_tail import tail_fleet_events
+from cosa.agents.heartbeat_arbiter.events_tail import tail_fleet_events, load_offsets, save_offsets
 from cosa.agents.heartbeat_arbiter.arbiter_state import (
     FleetEventAccumulator, PingLedger, DEFAULT_TAIL_MAXLEN,
 )
@@ -589,6 +589,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         ping_cap_window_seconds  : int                  = 3600,
         max_duration_seconds     : int                  = 43_200,   # 12h
         events_dir               : Optional[ str ]      = None,     # None → fleet dir
+        offsets_state_path       : Optional[ str ]      = None,     # bug 5a1f17f8 (b): durable event offsets across restarts; None → in-memory only (today's behavior)
         tail_maxlen              : int                  = DEFAULT_TAIL_MAXLEN,
         tap_min_interval_seconds : int                  = 300,
         manager_ack_window_seconds : int                = 600,
@@ -598,6 +599,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         auto_poke_enabled        : bool                 = True,
         poke_stall_threshold_seconds : int              = 720,    # ~12 min
         poke_max_per_episode     : int                  = 3,
+        stuck_poke_min_interval_seconds : int           = 0,      # bug 5a1f17f8 (c): min seconds between consecutive stuck-pokes to one session; 0 → disabled (poll-cadence, today's behavior)
         manager_stale_poke_threshold_seconds : int      = 2700,   # post-game F2 (~45 min; 0 disables)
         manager_stale_poke_max_age_seconds : int        = 7200,   # corpse ceiling (~2h; must be > threshold)
         # Role-goal poke echoes (role-goals Phase 2-3, 2026-06-24). The role-selected
@@ -726,6 +728,8 @@ class ArbiterConsumerJob( AgenticJobBase ):
             raise ValueError( f"poke_stall_threshold_seconds must be >= 0, got {poke_stall_threshold_seconds}" )
         if poke_max_per_episode < 1:
             raise ValueError( f"poke_max_per_episode must be >= 1, got {poke_max_per_episode}" )
+        if stuck_poke_min_interval_seconds < 0:
+            raise ValueError( f"stuck_poke_min_interval_seconds must be >= 0, got {stuck_poke_min_interval_seconds}" )
         # post-game F2: 0 disables the manager-staleness tier; negative is a config bug.
         if manager_stale_poke_threshold_seconds < 0:
             raise ValueError( f"manager_stale_poke_threshold_seconds must be >= 0, "
@@ -795,6 +799,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         self.ping_cap_window_seconds = ping_cap_window_seconds
         self.max_duration_seconds    = max_duration_seconds
         self.events_dir              = events_dir
+        self._offsets_state_path     = offsets_state_path          # bug 5a1f17f8 (b): durable-offset store path (None → inert)
 
         # --- injected seams ---
         self._commons   = commons
@@ -898,6 +903,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         self.auto_poke_enabled             = auto_poke_enabled
         self.poke_stall_threshold_seconds  = poke_stall_threshold_seconds
         self.poke_max_per_episode          = poke_max_per_episode
+        self.stuck_poke_min_interval_seconds = stuck_poke_min_interval_seconds     # bug 5a1f17f8 (c) fire-throttle
         # post-game F2: the SECOND, role-gated pokeable criterion — a MANAGER-role
         # session whose freshest union signal is older than this is poked + Rick-
         # advised even with zero stuck workers (the 2026-06-10 gap). 0 disables.
@@ -963,7 +969,10 @@ class ArbiterConsumerJob( AgenticJobBase ):
         self._outreach_throttle_window_seconds = outreach_throttle_window_minutes * 60
 
         # --- consumer state (carried across polls) ---
-        self._offsets       = { }                                  # sid -> byte offset
+        # bug 5a1f17f8 (b): resume from the durable offset store on (re)start so a
+        # :8001 bounce does NOT re-read every events file from byte 0 (the STUCK-poke
+        # replay root cause). None path → {} = today's fresh-start behavior.
+        self._offsets       = load_offsets( self._offsets_state_path ) if self._offsets_state_path else { }   # sid -> byte offset
         self._acc           = FleetEventAccumulator( maxlen=tail_maxlen )
         self._ledger        = PingLedger()
         self._ping_attempts = { }                                  # edge_key -> attempt count
@@ -1030,6 +1039,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # ticks, NOT per-poll). Keyed by session_id; cleared when a session leaves
         # the pokeable set (its episode ends → the cap re-arms for a future episode).
         self._poke_stuck_since = { }                               # sid -> episode-start datetime
+        self._poke_last_at     = { }                               # bug 5a1f17f8 (c): sid -> last stuck-poke datetime (fire-throttle)
         self._poke_count       = { }                               # sid -> pokes fired this episode
         self._poke_escalated   = set()                             # sids whose reap-rec already fired
         # Fleet-Status offline-lineage carry (2026-06-10): last poll's resolved
@@ -1114,6 +1124,11 @@ class ArbiterConsumerJob( AgenticJobBase ):
         now = datetime.datetime.fromisoformat( self._clock.now_iso() )
 
         new_events, self._offsets = tail_fleet_events( self.events_dir, self._offsets )
+        # bug 5a1f17f8 (b): persist the advanced offsets so a restart resumes here,
+        # not at byte 0. Swallow-safe (never raises) → a store hiccup degrades to the
+        # in-memory path, never crashes the poll. Inert when no path is configured.
+        if self._offsets_state_path:
+            save_offsets( self._offsets_state_path, self._offsets )
         self._acc.update( new_events )
 
         who_rows        = self._commons.who()
@@ -3659,6 +3674,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
             del self._poke_stuck_since[ sid ]
             self._poke_count.pop( sid, None )
             self._poke_escalated.discard( sid )
+            self._poke_last_at.pop( sid, None )                   # bug 5a1f17f8 (c): re-arm the throttle on episode end
 
         fired = 0
         for sid, view in pokeable.items():
@@ -3668,6 +3684,16 @@ class ArbiterConsumerJob( AgenticJobBase ):
             if ( now - self._poke_stuck_since[ sid ] ).total_seconds() < self.poke_stall_threshold_seconds:
                 continue                                          # not stuck long enough yet
             if self._poke_count[ sid ] < self.poke_max_per_episode:
+                # bug 5a1f17f8 (c) fire-throttle: enforce a minimum interval between
+                # consecutive stuck-pokes to the SAME session (0 → disabled). The cap
+                # bounds pokes PER EPISODE; the throttle bounds their RATE — belt for
+                # any residual storm (poll cadence is ~60s; without this the ≤N pokes
+                # can all land within N polls). Inert by default; skips this poll's
+                # poke WITHOUT consuming the per-episode budget when too soon.
+                last_at = self._poke_last_at.get( sid )
+                if ( self.stuck_poke_min_interval_seconds > 0 and last_at is not None
+                     and ( now - last_at ).total_seconds() < self.stuck_poke_min_interval_seconds ):
+                    continue
                 recipient   = view.get( "persona" ) or sid
                 body        = self._stamp( self._format_poke( view ) )   # Item B: direct-send site (bypasses _route)
                 # post-game F1 — kind "stuck_poke", never the bare four-letter literal
@@ -3682,6 +3708,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
                 self._emit_dm( outreach_id, "stuck_poke", recipient, body,
                                session_id=sid, expects_ack=False )
                 self._poke_count[ sid ] += 1
+                self._poke_last_at[ sid ] = now                   # bug 5a1f17f8 (c): stamp for the fire-throttle
                 fired += 1
             elif sid not in self._poke_escalated:
                 self._poke_escalated.add( sid )

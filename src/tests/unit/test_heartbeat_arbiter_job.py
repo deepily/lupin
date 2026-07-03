@@ -148,6 +148,42 @@ def test_last_question_asked_display( tmp_path ):
     assert "Heartbeat arbiter" in s and "Tiberius" in s and "30s" in s
 
 
+# ── 5a1f17f8 (b): durable event offsets across restarts ───────────────────────
+
+def test_offsets_state_path_none_is_in_memory_only( tmp_path ):
+    """Default (no offsets_state_path) → offsets start empty + are NOT persisted:
+    today's in-memory behavior is preserved exactly (the inert branch)."""
+    job = _make_job( tmp_path )                                  # no offsets_state_path
+    assert job._offsets == { } and job._offsets_state_path is None
+    _write_events( str( tmp_path ), "s1", _event( "s1", "honored", persona="Alice" ) )
+    job._poll_once()
+    # nothing written anywhere; offsets advanced only in memory
+    assert job._offsets.get( "s1", 0 ) > 0
+
+
+def test_offsets_loaded_on_init_from_state_path( tmp_path ):
+    """A restart RESUMES from the persisted offsets (bug 5a1f17f8 (b)): the durable
+    store seeds self._offsets so tail_fleet_events does NOT re-read from byte 0."""
+    import json as _json
+    state = tmp_path / "offsets.json"
+    state.write_text( _json.dumps( { "s1": 999999 } ) )         # a prior run's saved offset
+    job = _make_job( tmp_path, offsets_state_path=str( state ) )
+    assert job._offsets == { "s1": 999999 }                     # resumed, not fresh {}
+
+
+def test_offsets_saved_after_poll( tmp_path ):
+    """After each poll the advanced offsets are persisted so the NEXT process start
+    resumes here — no replay of historical cap_reached."""
+    import json as _json
+    state = tmp_path / "offsets.json"
+    _write_events( str( tmp_path ), "s1", _event( "s1", "honored", persona="Alice" ) )
+    job = _make_job( tmp_path, offsets_state_path=str( state ) )
+    assert job._offsets == { }                                  # first-ever start (file absent → {})
+    job._poll_once()
+    persisted = _json.loads( state.read_text() )
+    assert persisted.get( "s1", 0 ) > 0 and persisted == job._offsets   # saved == in-memory
+
+
 # ── _poll_once composition ────────────────────────────────────────────────────
 
 def test_poll_once_builds_view_no_roster_broadcast( tmp_path ):
