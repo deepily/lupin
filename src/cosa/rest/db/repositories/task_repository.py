@@ -258,6 +258,64 @@ class TaskRepository( BaseRepository[TaskItem] ):
         event_reason = reason if reason else ( "; ".join( changes ) if changes else "no-op patch (no field changed)" )
         return self._append_event( item.id, actor, "patched", authority, receipt_refs=None, reason=event_reason )
 
+    def apply_amendment(
+        self,
+        item      : TaskItem,
+        note      : str,
+        actor     : str,
+        authority : str,
+        now       : datetime,
+        reason    = None,
+    ) -> TaskEvent:
+        """
+        Append a persona-stamped + timestamped amendment block to a live item's
+        body + append an 'amended' audit event — the APPEND-ONLY body-amend seam
+        (Krishna's mid-flight scope-reframe friction, 2026-07-02).
+
+        Unlike apply_patch (which OVERWRITES item.body destructively), this NEVER
+        rewrites the existing body: the original text is preserved verbatim and
+        the note is appended below a `[amendment · <actor> · <utc>]` divider, so
+        a successor rehydrating from the store reads the FULL amendment history
+        inline — closing the gap where the durable record of the CURRENT spec
+        leaked outside the store (scratchpad checklists / code comments /
+        transition reasons).
+
+        Requires:
+            - item is a NON-terminal TaskItem loaded in THIS session (row-locked
+              by the router, N3 parity)
+            - note is the caller's amendment text (wire-checked 1..4000 + the
+              router rejects a whitespace-only note)
+            - now is a timezone-aware datetime (the router owns the clock so this
+              method stays deterministic — mirrors apply_chase's injected time)
+            - reason is an OPTIONAL justification stamping the audit event; None /
+              "" means "auto-describe the amendment"
+
+        Ensures:
+            - item.body := the original body (verbatim) + a blank line + the
+              stamped block when the body was non-empty; the stamped block ALONE
+              when the body was empty/None (no leading blank lines on a first
+              amendment)
+            - item.status is NEVER touched (an amend is not a transition)
+            - exactly one TaskEvent appended: transition='amended',
+              receipt_refs=None, reason = the caller-supplied `reason` when it is
+              non-empty, else an auto-marker naming the appended length (R3 — the
+              amendment is auditable either way)
+            - flush() called; commit NOT called (caller's get_db() commits)
+
+        Returns:
+            The appended TaskEvent instance
+        """
+        block = f"[amendment · {actor} · {now.isoformat()}]\n{note}"
+        if item.body:
+            item.body = f"{item.body}\n\n{block}"
+        else:
+            item.body = block
+
+        # Caller-supplied reason wins (the "why" for the amendment); otherwise
+        # auto-describe the appended length so the event is never blank.
+        event_reason = reason if reason else f"body amended (+{len( note )} chars)"
+        return self._append_event( item.id, actor, "amended", authority, receipt_refs=None, reason=event_reason )
+
     def query_chase_due( self, now: datetime, limit: int = 100 ) -> List[TaskItem]:
         """
         Return blocked items whose next_chase_ts is at/before `now` (design I3 —

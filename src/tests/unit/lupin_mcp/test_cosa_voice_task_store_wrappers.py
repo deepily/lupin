@@ -270,3 +270,35 @@ class TestTaskReassignWrapper:
                              lambda **kwargs: ( _ for _ in () ).throw( AssertionError( "must not call" ) ) )
         result = cv.task_reassign.fn( task_id="abc", new_owner_persona="marcus", reason=None )
         assert result[ "reason" ] == "empty_reason"
+
+
+class TestTaskAmendWrapper:
+
+    def test_stamps_actor_and_passes_through( self, stamped_identity, monkeypatch ):
+        captured = { }
+        monkeypatch.setattr( cv, "task_amend_impl", lambda **kwargs: captured.update( kwargs ) or SENTINEL )
+
+        result = cv.task_amend.fn(
+            task_id   = "abc-uuid",
+            note      = "SCOPE REFRAME: subscriber path.",
+            reason    = "manager ruling",
+            authority = "manager_relay",
+        )
+
+        assert result is SENTINEL
+        assert captured == {
+            "api_base_url" : "http://stub:7999",
+            "api_key"      : "ck_live_stub",
+            "actor"        : "krishna 38d15e3b",
+            "task_id"      : "abc-uuid",
+            "note"         : "SCOPE REFRAME: subscriber path.",
+            "reason"       : "manager ruling",
+            "authority"    : "manager_relay",
+        }
+
+    def test_defaults_standing_authority_and_none_reason( self, stamped_identity, monkeypatch ):
+        captured = { }
+        monkeypatch.setattr( cv, "task_amend_impl", lambda **kwargs: captured.update( kwargs ) or SENTINEL )
+        cv.task_amend.fn( task_id="abc", note="n" )
+        assert captured[ "authority" ] == "standing"
+        assert captured[ "reason" ]    is None

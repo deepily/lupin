@@ -20,6 +20,7 @@ from lupin_mcp.task_store_tools import (
     task_transition_impl,
     task_correlate_impl,
     task_reassign_impl,
+    task_amend_impl,
     task_query_impl,
 )
 
@@ -485,3 +486,51 @@ class TestProjectAliasRoundTrip:
 
         # The crux: the key written is the key queried -> no false-idle.
         assert stored_project == queried_project == "plan"
+
+
+class TestTaskAmendImpl:
+
+    def test_payload_and_route( self, capture_request ):
+        body  = { "item": { "id": "abc" }, "event": { "transition": "amended" } }
+        calls = capture_request( FakeResponse( 200, json_body=body ) )
+        result = task_amend_impl(
+            BASE_URL, API_KEY,
+            actor   = "arnold 8b7225c4",
+            task_id = "abc-def",
+            note    = "SCOPE REFRAME: subscriber path.",
+            reason  = "manager ruling",
+        )
+        assert result == body
+        assert calls[ "method" ] == "POST"
+        assert calls[ "url" ]    == f"{BASE_URL}/api/tasks/abc-def/amend"
+        assert calls[ "json" ]   == {
+            "note"      : "SCOPE REFRAME: subscriber path.",
+            "reason"    : "manager ruling",
+            "actor"     : "arnold 8b7225c4",
+            "authority" : "standing",
+        }
+
+    def test_reason_defaults_none_and_authority_passes_through( self, capture_request ):
+        calls = capture_request( FakeResponse( 200, json_body={ } ) )
+        task_amend_impl(
+            BASE_URL, API_KEY,
+            actor     = "arnold 8b7225c4",
+            task_id   = "abc",
+            note      = "n",
+            authority = "manager_relay",
+        )
+        assert calls[ "json" ][ "reason" ]    is None
+        assert calls[ "json" ][ "authority" ] == "manager_relay"
+
+    def test_422_terminal_item_surfaces_detail_verbatim( self, capture_request ):
+        # No amending closed history: the terminal reject is the SERVER's 422
+        # (one rules home) — transport carries its words unedited.
+        detail = "item is terminal ('done') — no amendments to closed history"
+        capture_request( FakeResponse( 422, json_body={ "detail": detail } ) )
+        result = task_amend_impl(
+            BASE_URL, API_KEY,
+            actor   = "arnold 8b7225c4",
+            task_id = "abc",
+            note    = "n",
+        )
+        assert result == { "status": "error", "http_status": 422, "detail": detail }

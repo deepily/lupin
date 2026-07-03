@@ -24,7 +24,7 @@ Canonical design: planning-is-prompting ->
 src/rnd/2026.06.11-unified-task-store-design.md (v0.4, Rick-ruled §3.1).
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Annotated, Optional
 import uuid
 
@@ -188,6 +188,24 @@ class TaskCorrelateIn( BaseModel ):
     correlation_key : str = Field( ..., min_length=1, max_length=255 )
     actor           : str = Field( ..., min_length=1, max_length=255, description="persona + session id performing the re-correlation" )
     authority       : str = Field( default="standing" )
+
+
+class TaskAmendIn( BaseModel ):
+    """
+    Body for POST /api/tasks/{id}/amend (Phase 2.2 — append-only body amendment).
+
+    Appends a persona-stamped + UTC-timestamped block to a NON-terminal item's
+    body WITHOUT rewriting the existing text — the durable-record seam for a
+    live item whose scope is legitimately reframed mid-flight (Krishna's
+    2026-07-02 friction). Distinct from PATCH `body`, which OVERWRITES: an amend
+    can NEVER lose prior spec history. `note` is the text appended; `reason`
+    stamps the audit event (mirrors the PATCH reason discipline), falling back to
+    an auto-marker when absent. `actor`/`authority` stamp the event, not the item.
+    """
+    note      : str           = Field( ..., min_length=1, max_length=4000, description="the amendment text appended to the item body (original preserved verbatim)" )
+    actor     : str           = Field( ..., min_length=1, max_length=255, description="persona + session id performing the amendment" )
+    authority : str           = Field( default="standing" )
+    reason    : Optional[str] = Field( default=None, max_length=4000, description="free-text justification stamping the 'amended' audit event; falls back to an auto-marker when absent" )
 
 
 class TaskPatchIn( BaseModel ):
@@ -503,6 +521,69 @@ def correlate_task(
             correlation_key = payload.correlation_key,
             actor           = payload.actor,
             authority       = payload.authority,
+        )
+        return { "item": _serialize_item( item ), "event": _serialize_event( event ) }
+
+
+@router.post(
+    "/tasks/{task_id}/amend",
+    summary     = "Append an amendment to a task-store item's body",
+    description = "Phase-2.2 append-only body amendment: appends a persona-stamped "
+                  "+ UTC-timestamped block to a NON-terminal item's body WITHOUT "
+                  "rewriting the existing text (distinct from PATCH body, which "
+                  "overwrites) and appends an 'amended' audit event. status / the "
+                  "oracle fields are never touched. Terminal items, a blank note, "
+                  "and a bad authority are rejected (every violation at once). "
+                  "Auth: X-API-Key or Bearer JWT."
+)
+def amend_task(
+    task_id: uuid.UUID,
+    payload: TaskAmendIn,
+    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ]
+):
+    """
+    Append an amendment to an item's body (audited).
+
+    Requires:
+        - authenticated caller (X-API-Key or Bearer JWT)
+        - task_id is a valid UUID (FastAPI 422s malformed ids)
+        - payload validates against TaskAmendIn (min_length=1 lets a
+          whitespace-only note through the wire — the handler strip-guards it)
+
+    Ensures:
+        - 404 when the item does not exist
+        - 422 when authority is not a valid enum member, the note is blank after
+          strip, or the item is terminal (no amending closed history) — every
+          violation reported at once
+        - row-locked read (N3 parity) so the terminal check cannot be raced by a
+          concurrent ->done/->dropped transition
+        - the router owns the clock (datetime.now(utc)) so the repo stays
+          deterministic; body append + 'amended' event are atomic (one
+          get_db() transaction)
+        - returns { item, event } serialized
+    """
+    with get_db() as session:
+        repo = TaskRepository( session )
+        item = repo.get_by_id_for_update( task_id )
+        if item is None:
+            raise HTTPException( status_code=404, detail=f"task {task_id} not found" )
+
+        errors = [ ]
+        if payload.authority not in rules.VALID_AUTHORITIES:
+            errors.append( f"authority '{payload.authority}' must be one of {rules.VALID_AUTHORITIES}" )
+        if not payload.note.strip():
+            errors.append( "note must be a non-blank string" )
+        if item.status in rules.TERMINAL_STATUSES:
+            errors.append( f"item is terminal ('{item.status}') — no amendments to closed history" )
+        _reject_if_errors( errors )
+
+        event = repo.apply_amendment(
+            item      = item,
+            note      = payload.note,
+            actor     = payload.actor,
+            authority = payload.authority,
+            now       = datetime.now( timezone.utc ),
+            reason    = payload.reason,
         )
         return { "item": _serialize_item( item ), "event": _serialize_event( event ) }
 

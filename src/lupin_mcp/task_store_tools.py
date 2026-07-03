@@ -277,6 +277,51 @@ def task_reassign_impl(
     return task_store_request( "PATCH", f"/api/tasks/{task_id}", api_base_url, api_key, json_body=payload )
 
 
+def task_amend_impl(
+    api_base_url,
+    api_key,
+    actor,
+    task_id,
+    note,
+    reason    = None,
+    authority = "standing",
+):
+    """
+    POST /api/tasks/{task_id}/amend — append a persona-stamped block to an item's
+    body (APPEND-ONLY; the original body is preserved verbatim server-side) +
+    append an audited 'amended' event. The mid-flight scope-reframe seam
+    (Krishna's 2026-07-02 friction): a live item whose spec is legitimately
+    reframed gets the new spec appended to its DURABLE body, so a successor
+    rehydrating from the store reads the current spec inline instead of chasing
+    it through scratchpad checklists / code comments / transition reasons.
+
+    Distinct from task_reassign's PATCH (which OVERWRITES `body`): an amend can
+    never lose prior spec history.
+
+    Requires:
+        - actor is the bridge-stamped identity ("<persona> <8-hex sid>"); the
+          CALLER (cosa_voice_mcp) stamps it — never a tool param, so a session
+          cannot impersonate (spec §2.1, same lane as task_transition's actor)
+        - task_id is the item's UUID string (a malformed id is the server's
+          reject to report, not ours — transport only)
+        - note is the amendment text (server validates 1..4000 + non-blank)
+
+    Ensures:
+        - returns { item, event } (200 body) verbatim on success
+        - 404 surfaces "task {id} not found" verbatim
+        - 422 surfaces the server's detail VERBATIM (spec §2.2) — terminal items
+          (no amending closed history), a blank note, and a bad authority are the
+          server's reject, never pre-checked here
+    """
+    payload = {
+        "note"      : note,
+        "reason"    : reason,
+        "actor"     : actor,
+        "authority" : authority,
+    }
+    return task_store_request( "POST", f"/api/tasks/{task_id}/amend", api_base_url, api_key, json_body=payload )
+
+
 def task_query_impl(
     api_base_url,
     api_key,

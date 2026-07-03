@@ -593,5 +593,57 @@ def test_query_events_filter_combinations( repo, session, kwargs, expected_filte
     assert query.join.called is expect_join
 
 
+# ---------------------------------------------------------------------------
+# Phase 2.2 — apply_amendment (append-only body-amend seam; never rewrites)
+# ---------------------------------------------------------------------------
+
+_AMEND_NOW = datetime( 2026, 7, 2, 21, 55, 0, tzinfo=timezone.utc )
+
+
+def test_apply_amendment_appends_block_preserving_original_body( repo, session ):
+    item  = _item( body="ORIGINAL SPEC verbatim." )
+    event = repo.apply_amendment(
+        item      = item,
+        note      = "SCOPE REFRAME: now the subscriber path.",
+        actor     = "arnold 8b7225c4",
+        authority = "standing",
+        now       = _AMEND_NOW,
+        reason    = "manager ruling on cited evidence",
+    )
+    # Original preserved verbatim; the note lands below a persona+UTC divider.
+    assert item.body.startswith(
+        "ORIGINAL SPEC verbatim.\n\n[amendment · arnold 8b7225c4 · 2026-07-02T21:55:00+00:00]\n"
+    )
+    assert item.body.endswith( "SCOPE REFRAME: now the subscriber path." )
+    assert item.status        == "in_progress"                # status untouched (an amend is not a transition)
+    assert event.transition   == "amended"
+    assert event.receipt_refs is None
+    assert event.reason       == "manager ruling on cited evidence"
+    assert event.actor        == "arnold 8b7225c4"
+    added_events = _added_instances( session, TaskEvent )
+    assert len( added_events ) == 1 and added_events[ 0 ] is event
+
+
+def test_apply_amendment_on_empty_body_writes_block_alone( repo, session ):
+    # No original body -> the stamped block stands alone (no leading blank lines).
+    item = _item( body=None )
+    repo.apply_amendment(
+        item      = item, note="first note", actor="a b",
+        authority = "standing", now=_AMEND_NOW, reason=None,
+    )
+    assert item.body == "[amendment · a b · 2026-07-02T21:55:00+00:00]\nfirst note"
+
+
+def test_apply_amendment_auto_marker_reason_when_absent( repo, session ):
+    # reason falsy -> the audit event auto-describes the appended length.
+    item  = _item( body="x" )
+    event = repo.apply_amendment(
+        item      = item, note="abcde", actor="a b",
+        authority = "manager_relay", now=_AMEND_NOW, reason=None,
+    )
+    assert event.reason    == "body amended (+5 chars)"
+    assert event.authority == "manager_relay"
+
+
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )
