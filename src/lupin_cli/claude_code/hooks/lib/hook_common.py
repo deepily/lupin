@@ -410,7 +410,7 @@ VOICE_LINE_PREFIX = "[Voice]: "
 PEER_DM_FRAME_PREFIX = "PEER DM from "
 
 
-def build_peer_dm_reminder( body, persona=None, icon=None, msg_id=None, thread_id=None ):
+def build_peer_dm_reminder( body, persona=None, icon=None, msg_id=None, thread_id=None, one_way=False ):
     """
     Build the peer-DM <system-reminder> block — the SINGLE source of peer-DM
     framing for BOTH delivery paths: the listener's idle tmux-wake
@@ -425,14 +425,29 @@ def build_peer_dm_reminder( body, persona=None, icon=None, msg_id=None, thread_i
     speakerphone voice rider / "user spoke" / notify-to-speak instruction. Peers
     reply via dm_send, never TTS.
 
+    ONE-WAY variant (bug 8894e597, 2026-07-02): a genuine peer DM is bidirectional,
+    but an ARBITER-authored poke/advisory is NOT — the arbiter is a pure observer
+    with NO deliverable inbox by ratified design (bug 9694fb11: "there is NO
+    deliverable tap-ACK path — a manager literally cannot DM the arbiter back").
+    The default dm_send affordance is therefore a FALSE promise on arbiter pokes:
+    every poked session burns a turn attempting the impossible reply, then falls
+    back to hold-mtime as the de-facto ACK. When `one_way=True`, the affordance is
+    replaced with an honest statement of the REAL signal path — resuming work
+    (bridge / hold / store freshness IS the acknowledgment the arbiter reads),
+    which composes with the 92c7ab1d bridge-mtime sign-of-life veto. Genuine peer
+    DMs keep the default (one_way=False) affordance untouched.
+
     Requires:
         - body is the message text (any string; caller strips/validates emptiness)
         - persona, icon, msg_id, thread_id are strings or None
+        - one_way is a bool (True only for arbiter-authored one-way advisories)
 
     Ensures:
         - Returns a complete "<system-reminder>...</system-reminder>" block
         - Missing persona falls back to "a peer session"; missing icon/ids → ""
-        - Output is identical regardless of which delivery path calls it
+        - one_way=False → the dm_send reply affordance (bidirectional peer DM)
+        - one_way=True  → an honest one-way notice (no dm_send line); resuming
+          work is named as the acknowledgment
 
     Args:
         body: The inline DM body
@@ -440,6 +455,7 @@ def build_peer_dm_reminder( body, persona=None, icon=None, msg_id=None, thread_i
         icon: Sender's persona icon
         msg_id: Originating notification id (for reply_to threading)
         thread_id: Conversation thread id (for thread_id threading)
+        one_way: True → arbiter-authored one-way advisory (no reply affordance)
 
     Returns:
         str: The peer-DM system-reminder block
@@ -449,10 +465,19 @@ def build_peer_dm_reminder( body, persona=None, icon=None, msg_id=None, thread_i
     msg_id       = msg_id or ""
     thread_id    = thread_id or ""
     sender_label = f"{persona} {icon}".strip()
-    reply_affordance = (
-        f'↳ Reply via dm_send( recipient="{persona}", body="<your reply>", '
-        f'reply_to="{msg_id}", thread_id="{thread_id}" )'
-    )
+    if one_way:
+        # bug 8894e597: the arbiter has no inbox — state the honest signal path
+        # instead of a dm_send affordance that cannot be delivered.
+        reply_affordance = (
+            "↳ This is a ONE-WAY advisory — the arbiter is an observer with no inbox "
+            "and cannot receive a reply. Do NOT reply; signal by resuming work "
+            "(your bridge / hold / store-transition freshness IS the acknowledgment)."
+        )
+    else:
+        reply_affordance = (
+            f'↳ Reply via dm_send( recipient="{persona}", body="<your reply>", '
+            f'reply_to="{msg_id}", thread_id="{thread_id}" )'
+        )
     reminder_body = (
         f"{PEER_DM_FRAME_PREFIX}{sender_label} (message_id {msg_id}, thread {thread_id}):\n\n"
         f"{body}\n\n"

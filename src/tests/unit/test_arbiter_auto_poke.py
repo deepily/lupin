@@ -30,9 +30,15 @@ from cosa.agents.heartbeat_arbiter.arbiter_job import (
     ArbiterConsumerJob,
     CLASS_BLOCKED_ON_USER, CLASS_DONE, CLASS_ACTIVE, CLASS_UNKNOWN,
 )
+from lupin_mcp.persona_normalization import canonical_persona_key
 
 
 NOW = datetime.datetime( 2026, 6, 9, 0, 0, 0, tzinfo=datetime.timezone.utc )
+
+
+def _bridge_key( persona ):
+    # the arbiter keys bridge_mtimes by canonical_persona_key (bug 26dd3afb/92c7ab1d)
+    return canonical_persona_key( persona ) or persona
 
 
 class _GW:
@@ -452,6 +458,116 @@ def test_owed_class_omitted_defaults_to_today_behavior():
     job = _job( gw, poke_stall_threshold_seconds=0 )
     assert job._auto_poke( _live_stuck(), NOW, [ ] ) == 1                  # no owed_class arg
     assert len( _pokes( gw ) ) == 1
+
+
+# ── 92c7ab1d: bridge-mtime SIGN-OF-LIFE veto on the stuck path ─────────────────
+#
+# `stuck` = repeated cap_reached+owed in the accumulated tail (maxlen 50, NO recency
+# bound). cap_reached fires on EVERY turn a session ends while owed AND at poke-cap —
+# so a busy manager who owns a full board emits it every turn and is flagged `stuck`
+# from stale cap-history even while demonstrably active (DMs, merges, hold rewrites —
+# the 2026-07-02 Tiberius false-positive). None of the three owed-work suppressors
+# catch it (owed_class ACTIVE is fail-SAFE). Mirror the 26dd3afb MANAGER-STALE veto:
+# a FRESH persona'd bridge mtime is ground-truth "took a real turn recently" → NOT
+# wedged → drop from pokeable. The veto suppresses ONLY on positive liveness evidence
+# (stale/absent/None/future bridge → still poked — the safety direction is preserved).
+
+def test_fresh_bridge_vetoes_stuck_poke():
+    """The incident: a live+stuck session whose bridge was touched 60s ago is
+    demonstrably taking real turns → NOT wedged → the stuck poke is suppressed."""
+    gw  = _GW()
+    job = _job( gw, poke_stall_threshold_seconds=0 )
+    bridge_mtimes = { _bridge_key( "Stuckie" ): NOW.timestamp() - 60 }      # touched 60s ago → fresh
+    assert job._auto_poke( _live_stuck(), NOW, [ ], bridge_mtimes=bridge_mtimes ) == 0
+    assert _pokes( gw ) == [ ]
+
+
+def test_stale_bridge_does_not_veto_stuck_poke():
+    """SAFETY DIRECTION: a genuinely-wedged session takes no turns → its bridge goes
+    stale → NOT vetoed → STILL poked. The veto can never hide a real stall."""
+    gw  = _GW()
+    job = _job( gw, poke_stall_threshold_seconds=0 )
+    bridge_mtimes = { _bridge_key( "Stuckie" ): NOW.timestamp() - 9000 }    # 2.5h old → stale
+    assert job._auto_poke( _live_stuck(), NOW, [ ], bridge_mtimes=bridge_mtimes ) == 1
+    assert len( _pokes( gw ) ) == 1
+
+
+def test_absent_persona_bridge_does_not_veto_stuck_poke():
+    """A bridge map with NO entry for the stuck persona carries no liveness evidence
+    for it → no veto → still poked."""
+    gw  = _GW()
+    job = _job( gw, poke_stall_threshold_seconds=0 )
+    bridge_mtimes = { _bridge_key( "SomeoneElse" ): NOW.timestamp() - 60 }
+    assert job._auto_poke( _live_stuck(), NOW, [ ], bridge_mtimes=bridge_mtimes ) == 1
+    assert len( _pokes( gw ) ) == 1
+
+
+def test_bridge_mtimes_none_is_inert_stuck_poke():
+    """bridge_mtimes=None (seam unwired / read failed) → veto inert → today's poke
+    behavior (the veto can only ADD suppression, never silence)."""
+    gw  = _GW()
+    job = _job( gw, poke_stall_threshold_seconds=0 )
+    assert job._auto_poke( _live_stuck(), NOW, [ ], bridge_mtimes=None ) == 1
+    assert len( _pokes( gw ) ) == 1
+
+
+def test_future_bridge_does_not_veto_stuck_poke():
+    """097778b8 lower bound: a FUTURE bridge mtime (clock skew/corruption ⇒ negative
+    age) is NOT ground-truth liveness → do not veto; fail toward poking."""
+    gw  = _GW()
+    job = _job( gw, poke_stall_threshold_seconds=0 )
+    bridge_mtimes = { _bridge_key( "Stuckie" ): NOW.timestamp() + 60 }      # future → age -60
+    assert job._auto_poke( _live_stuck(), NOW, [ ], bridge_mtimes=bridge_mtimes ) == 1
+    assert len( _pokes( gw ) ) == 1
+
+
+def test_view_without_persona_still_pokes_with_bridge_map():
+    """A stuck view carrying NO persona cannot be bridge-keyed → the veto is inert for
+    it (persona-None guard) → still poked (recipient falls back to session_id)."""
+    gw  = _GW()
+    job = _job( gw, poke_stall_threshold_seconds=0 )
+    fleet = { "s1": { "session_id": "s1", "persona": None, "state": "stuck",
+                      "stuck": True, "holding_on": "none", "alive": True } }
+    bridge_mtimes = { _bridge_key( "Whoever" ): NOW.timestamp() - 60 }
+    assert job._auto_poke( fleet, NOW, [ ], bridge_mtimes=bridge_mtimes ) == 1
+    assert len( _pokes( gw ) ) == 1
+
+
+def test_bridge_veto_ends_episode_and_rearms():
+    """A bridge-vetoed session leaves the pokeable set → its poke episode ENDS (state
+    cleared, cap re-arms) exactly like a recovery. When the bridge later goes stale
+    the session pokes from a FRESH episode (not a mid-episode continuation)."""
+    gw    = _GW()
+    job   = _job( gw, poke_stall_threshold_seconds=0, poke_max_per_episode=1 )
+    fleet = _live_stuck()
+    fresh = { _bridge_key( "Stuckie" ): NOW.timestamp() - 60 }
+    # poll 1: fresh bridge → vetoed → no poke, no episode state
+    assert job._auto_poke( fleet, NOW, [ ], bridge_mtimes=fresh ) == 0
+    assert "s1" not in job._poke_stuck_since
+    # poll 2: bridge now stale → veto lifts → pokes from a fresh episode
+    stale = { _bridge_key( "Stuckie" ): NOW.timestamp() - 9000 }
+    assert job._auto_poke( fleet, NOW + datetime.timedelta( seconds=60 ), [ ], bridge_mtimes=stale ) == 1
+    assert len( _pokes( gw ) ) == 1
+
+
+def test_cross_evidence_active_manager_with_replayed_stale_cap_history():
+    """CROSS-EVIDENCE regression (2026-07-02): the deployed :8001 arbiter loop-poked
+    Tiberius (16:05-16:07) and Mr Radio (22:00-22:01) — both flagged `stuck` from
+    HISTORICAL cap_reached records replayed after a redeploy reset the events-file
+    offsets, while both were demonstrably ACTIVE (DMs, merges, hold refreshes → fresh
+    bridge). This pins that the bridge-veto suppresses exactly that pattern: a live
+    session flagged stuck from stale cap-history but with a fresh persona'd bridge is
+    NOT poked. (The offset-reset replay ITSELF — durable offsets + consumed-record
+    ts-gating — is a documented FOLLOW-ON, not this diff.)"""
+    gw    = _GW()
+    job   = _job( gw, poke_stall_threshold_seconds=0 )
+    # stuck=True stands in for the replayed historical cap_reached tail
+    fleet = { "mrradio": { "session_id": "mrradio", "persona": "Mr Radio",
+                           "state": "stuck", "stuck": True, "holding_on": "none",
+                           "alive": True } }
+    bridge_mtimes = { _bridge_key( "Mr Radio" ): NOW.timestamp() - 30 }    # active 30s ago
+    assert job._auto_poke( fleet, NOW, [ ], bridge_mtimes=bridge_mtimes ) == 0
+    assert _pokes( gw ) == [ ]
 
 
 if __name__ == "__main__":

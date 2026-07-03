@@ -420,6 +420,32 @@ class TestBuildPeerDmReminder:
         assert "notify("      not in r
         assert "tts"          not in lowered
 
+    def test_one_way_omits_reply_affordance( self ):
+        """bug 8894e597: one_way=True (arbiter-authored advisory) → NO dm_send reply
+        affordance (the arbiter has no inbox — bug 9694fb11), replaced by the honest
+        one-way notice naming resumed work as the acknowledgment. Header + body intact."""
+        r = build_peer_dm_reminder(
+            "you appear STUCK — status?", persona="heartbeat-arbiter", icon="🛰️",
+            msg_id="m-1", thread_id="t-1", one_way=True,
+        )
+        # still a framed peer-DM block with the header + body
+        assert r.startswith( "<system-reminder>" ) and r.endswith( "</system-reminder>" )
+        assert "PEER DM from heartbeat-arbiter 🛰️" in r
+        assert "you appear STUCK — status?" in r
+        # the FALSE reply affordance is gone
+        assert "dm_send" not in r
+        assert "Reply via" not in r
+        # the honest one-way signal path is present
+        assert "ONE-WAY" in r and "no inbox" in r
+        assert "resuming work" in r and "acknowledgment" in r
+
+    def test_default_stays_bidirectional_when_one_way_false( self ):
+        """Regression guard: the DEFAULT (one_way=False) still emits the dm_send
+        affordance — genuine peer DMs are untouched by the 8894e597 arbiter variant."""
+        r = build_peer_dm_reminder( "body", persona="maría", icon="🌸", msg_id="m1", thread_id="t1" )
+        assert 'dm_send( recipient="maría"' in r
+        assert "ONE-WAY" not in r
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # TestFormatVoiceContextPeerDm — §6a ai_to_ai branch of format_voice_context

@@ -24,7 +24,7 @@ from lupin_arbiter_app.arbiter_live_notify import (
     build_notify_request, build_dm_send_payload, make_dm_push_fn,
     make_live_notify_fn, make_notify_transport, parse_notify_outcome,
     resolve_arbiter_api_key, validate_live_notify_target,
-    _default_log_fn, quick_smoke_test, NOTIFY_PATH, DM_SEND_PATH,
+    _default_log_fn, _default_peer_dm_reminder, quick_smoke_test, NOTIFY_PATH, DM_SEND_PATH,
 )
 from lupin_arbiter_app.fleet_arbiter_loop import make_escalation_notify_fn, ESCALATION_TOPIC
 from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob
@@ -357,6 +357,21 @@ class TestResolveArbiterApiKey:
         assert key is None
         out = capsys.readouterr().out
         assert "live_notify_disabled" in out and "development" in out
+
+
+def test_default_peer_dm_reminder_frames_one_way():
+    """bug 8894e597: the arbiter's default reminder builder frames pokes ONE-WAY —
+    the arbiter is a pure observer with no inbox (bug 9694fb11), so its wake-nudge
+    must NOT carry a dm_send reply affordance the poked session cannot deliver. This
+    pins the WIRING (arbiter → one_way=True), not just the shared builder's flag."""
+    framed = _default_peer_dm_reminder(
+        "you appear STUCK — status?", "heartbeat-arbiter", "🛰️", "m-1", "t-1",
+    )
+    assert "PEER DM from heartbeat-arbiter 🛰️" in framed
+    assert "you appear STUCK — status?" in framed
+    assert "dm_send" not in framed and "Reply via" not in framed   # no false affordance
+    assert "ONE-WAY" in framed and "no inbox" in framed            # honest one-way notice
+    assert "resuming work" in framed and "acknowledgment" in framed
 
 
 def test_default_log_fn_emits_structured_json( capsys ):

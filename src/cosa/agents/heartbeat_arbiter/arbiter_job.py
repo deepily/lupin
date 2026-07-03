@@ -1236,7 +1236,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         managers_down = self._check_manager_acks( now, who_rows, fleet_view, active_managers, owed_class=owed_class, count_dm=count_dm, owed_items=owed_items, store_read_degraded=store_degraded )  # #9 (L1 store-aware, 5-signal ACK; owed_items → de3c5b87/33949e83 diagnostics; store gate)
         decisions     = self._check_decision_needed( now )          # #10 Rick (+owning mgr if known)
         stalled       = self._check_fleet_stall( fleet_view, now, active_managers, owed_class=owed_class )  # #11 (L1 store-aware)
-        pokes_fired   = self._auto_poke( fleet_view, now, active_managers, owed_class=owed_class )  # 2b-3 auto-poke (262c59f6 store-aware)
+        pokes_fired   = self._auto_poke( fleet_view, now, active_managers, owed_class=owed_class, bridge_mtimes=manager_bridge_mtimes )  # 2b-3 auto-poke (262c59f6 store-aware; bug 92c7ab1d bridge-mtime sign-of-life veto)
         rendered      = self._publish_fleet_snapshot( fleet_view, now, count_dm )
         # post-game F2/F3 detectors read the FULL (include_offline=True) detection
         # snapshot + published count the publish step just stashed on the instance.
@@ -3527,7 +3527,58 @@ class ArbiterConsumerJob( AgenticJobBase ):
         awaiting = hold.get( "awaiting" )
         return isinstance( awaiting, str ) and awaiting.startswith( "peer:" )
 
-    def _auto_poke( self, fleet_view, now, active_managers, owed_class=None ):
+    def _session_bridge_fresh( self, persona, now, bridge_mtimes ):
+        """
+        bug 92c7ab1d: is this stuck-flagged session demonstrably ACTIVE — taking real
+        turns right now — per a FRESH persona'd session-bridge mtime? The `stuck` flag
+        is derived from the ACCUMULATED cap_reached tail (maxlen 50, NO recency bound),
+        and cap_reached fires on EVERY turn a session ends while owed AND at poke-cap —
+        so a busy manager who owns a full board emits it every turn and stays flagged
+        `stuck` from stale cap-history long after it is demonstrably productive (the
+        2026-07-02 Tiberius false-positive: DMs sent + hold rewritten + 3 wip merges
+        landed BETWEEN the ~60s-cadence pokes). None of the three owed-work suppressors
+        (awaiting-user / awaiting-peer / owed_class) catch it — owed_class ACTIVE is
+        fail-SAFE (never silence a real stuck-poke).
+
+        A fresh bridge mtime is the SAME ground-truth-liveness signal the MANAGER-STALE
+        bridge veto (bug 26dd3afb) reads — every hook fire touches the bridge — so a
+        session whose bridge was touched within the freshness window took a real turn
+        recently and is NOT wedged. It cleanly distinguishes active-from-wedged here:
+        at poke-cap the self-poke nudge STOPS (cap_reached → should_increment=False), so
+        a genuinely wedged/parked session takes NO further turns → its bridge goes stale
+        → it is NOT vetoed → it is STILL poked (the true-positive is preserved).
+
+        Keyed by canonical_persona_key( persona ) — the always-present analog of the
+        sid-keyed activity signal (also catches a re-spun twin under a new sid). Reuses
+        manager_stale_poke_threshold_seconds as the freshness window (symmetric with the
+        sibling veto). Same seam discipline as the staleness veto: bridge_mtimes falsy
+        (seam unwired / read raised / empty) → False (INERT = today's behavior); a
+        persona with no bridge entry → False; a FUTURE bridge mtime (clock skew ⇒
+        negative age, bug 097778b8) → False (fail toward poking). The veto can ONLY
+        suppress on POSITIVE liveness evidence — it never hides a real stall.
+
+        Requires:
+            - persona is a persona name or None; now is an aware datetime;
+              bridge_mtimes is { canonical_persona_key: epoch-mtime } or None
+
+        Ensures:
+            - returns False when bridge_mtimes is falsy, persona is None, the persona
+              has no bridge entry, or the bridge age is negative / beyond the window
+            - returns True iff 0 <= (now - bridge_mtime) <= manager_stale_poke_threshold_seconds;
+              logs one arbiter_stuck_bridge_veto event when it vetoes; never raises
+        """
+        if not bridge_mtimes or persona is None:
+            return False
+        bridge_mtime = bridge_mtimes.get( canonical_persona_key( persona ) )
+        if bridge_mtime is None:
+            return False
+        age = now.timestamp() - bridge_mtime
+        if 0 <= age <= self.manager_stale_poke_threshold_seconds:
+            self._log( "arbiter_stuck_bridge_veto", persona=persona, bridge_age_s=age )
+            return True
+        return False
+
+    def _auto_poke( self, fleet_view, now, active_managers, owed_class=None, bridge_mtimes=None ):
         """
         2b-3 auto-poke: fire a BOUNDED, TARGETED, NON-DESTRUCTIVE wake-nudge at each
         genuinely-stuck LIVE session; after ≤N pokes with no recovery, emit ONE
@@ -3585,12 +3636,22 @@ class ArbiterConsumerJob( AgenticJobBase ):
         #       activity-tail oracle and the store oracle can no longer contradict
         #       within one poll. ACTIVE / UNKNOWN / unclassified → today's behavior
         #       (fail-SAFE — never silence a real stuck-poke).
+        #   (d) 92c7ab1d bridge-fresh — the session's persona'd session-bridge was
+        #       touched within the freshness window: ground-truth "took a real turn
+        #       recently" liveness (the SAME signal the 26dd3afb MANAGER-STALE veto
+        #       reads). `stuck` comes from the ACCUMULATED cap_reached tail with no
+        #       recency bound, so a busy manager owning a full board (cap_reached every
+        #       turn) stays flagged wedged from stale cap-history while demonstrably
+        #       active — owed_class ACTIVE cannot suppress it (fail-SAFE). A fresh
+        #       bridge is the missing sign-of-life. INERT when bridge_mtimes is
+        #       None/unwired; suppresses ONLY on positive liveness evidence.
         # Dropping a session from `pokeable` ends any in-flight poke episode via the
         # clear-on-resume loop below (the cap re-arms), exactly as a recovery would.
         pokeable = { sid: v for sid, v in pokeable.items()
                      if not self._session_awaiting_user( sid, now )
                      and not self._session_awaiting_peer( sid, now )
-                     and not owed_class_suppresses( owed_class.get( v.get( "persona" ) ) ) }
+                     and not owed_class_suppresses( owed_class.get( v.get( "persona" ) ) )
+                     and not self._session_bridge_fresh( v.get( "persona" ), now, bridge_mtimes ) }
 
         # episode bookkeeping: a session no longer pokeable ended its episode →
         # clear its state so the cap re-arms (clear-on-resume, mirrors _auto_ping).
