@@ -2,6 +2,18 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-19 to 05-22](history/2026-05-19-to-22-history.md). History health: ✅ **HEALTHY at 12,208 tokens (48.8% of 25k)** — archived 2026-06-10 by Mr. Radio 🦉 (session 0102cf69), ~11,476 tokens moved to archive.
 
+### 2026.07.03 - Session 8a92b253 (Mr. Radio 🦉) | Overnight fleet mgmt: CC Stop-phase wedge-guard (73d2b589) + notify-turn-hold root-cause proven (25c7441c) · venv-drift landmine found (c90f24f4) · v0.2.0 migration swap-chain reached-and-halted at classifier wall (Rick-gated) · END-OF-SESSION push 24301068 + backup (Rick broadcast)
+
+**Accomplishments** (rehydrated ~02:16 EDT off memento; 3 workers Arnold 🪨 / Cheech 🌿 / Tiffany 💍; MANAGE-not-build; push=Rick given at session-end):
+- **73d2b589 wedge-guard DONE** (merged `24301068`, pushed): Arnold's audit REFUTED the `:842`-pipe-leak premise (hook tree already stdout-compliant since 949cf6e8/v0.1.5) → pivoted to an enforcement guard suite (AST sweep w/ alias+os.system+asyncio evasion guards + 4 seam pins + live pipe-hold demo, 15/15) + unwedge runbook. Cheech APPROVE `db07a9eb` + independent probe-B 3/3 + merge-safety verified.
+- **25c7441c root cause PROVEN + fix-design** (`654786f4`/`ba8fd4db`, held→pushed, fix-build Rick-gated `f1a21917`): the fleet wedge = a FIRE-AND-FORGET `notify()` hung the turn 54m47s via the MCP server response leg (client HTTP leg exonerated, hard-bounded). Levers ranked by blast radius; lever (i-a) `MCP_TOOL_TIMEOUT` VALIDATED by a live honor-check (CC aborted a hang at exactly 15s).
+- **c90f24f4 venv-drift landmine found** (Cheech+Arnold, reproduce-don't-trust caught a cross-interpreter false-negative): pgvector missing from `src/cosa/.venv` (hooks+MCP interpreter) since v0.2.0 Lane A → latent fleet landmine. Rick-gated fix (gate `7d50a03a`).
+- **v0.2.0 migration swap-chain — REACHED then HALTED at the classifier wall**: 08:37 cron ran all read-only gates green (quiesce verified, image present, rollback known, forensics snapshot) but the container recreate + an autonomous resume-cron were BOTH classifier-DENIED → **ruling: migration RUN is Rick-triggered, not autonomous**. Parked on operator gate `d93a1edb` (P1). Zero breakage; :7999 untouched.
+- **END-OF-SESSION (Rick broadcast)**: 3 workers documented + reaped (clean worktrees, items reassigned to me); **PUSH LANDED** `de67707b..24301068` (102 commits); **BACKUP** DATA01→DATA02 16.67G complete; pinged María for the global cross-repo LoC roll-up (Tiberius excluded, no-push).
+- **Bugs filed**: c90f24f4 (venv drift), 75f392c0 (Stop-hook re-ask loop on blocked-on-offline-user gate — same family as María's P1 6fc8d78d, Mr-Radio-path-specific spurious pokes).
+
+**Files changed** (doc commit): history.md, TODO.md. Code+docs landed via the lane-arnold-wedge-guard merge (`24301068`). **Carry-over (Rick-gated)**: migration swap `d93a1edb` + backfill (Tiffany first-pick, in-container), venv gate `7d50a03a`; daylight bugs c90f24f4/75f392c0/6fc8d78d; c0bbd2af reviewer-of-record still open (Sam-pending). Memento: io/mementos/mr-radio.md.
+
 ### 2026.07.01 - Session 2b34ae38 (Mr. Radio 🦉) | v0.2.0 pgvector migration Lanes A+B co-landed + Lane C 8/9 · image swap LIVE + collation incident fixed · dep-durability closed · 38-branch cleanup executed · 3 Rick-gates walked · PUSH+backup (Rick broadcast)
 
 **Accomplishments** (respin ~18:05; 6 worker seats across Tiffany 💍×3 / Rachel 🕊️×2 / Clayton 😎 / Krishna 🦚; MANAGE-not-build throughout):
