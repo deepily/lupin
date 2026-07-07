@@ -54,14 +54,24 @@ class TestRevisionChain( unittest.TestCase ):
         matches = glob.glob( os.path.join( _versions_dir(), f"{_HEAD_BEFORE_THIS}_*.py" ) )
         self.assertTrue( matches, f"prior head {_HEAD_BEFORE_THIS} file missing" )
 
-    def test_this_revision_is_a_head( self ):
-        # No other migration may list this revision as its down_revision.
+    def test_known_successors_only( self ):
+        # This revision is no longer the chain head: e1f2a3b4c5d6 (drop the
+        # input_and_output HNSW index — exact-scan ruling, Rick 2026-07-07)
+        # legitimately chains off it. Pin the successor set so any FUTURE
+        # migration accidentally branching off this revision (a fork) still
+        # fails loudly.
+        successors = set()
         for path in glob.glob( os.path.join( _versions_dir(), "*.py" ) ):
             with open( path ) as fh:
                 src = fh.read()
             m = re.search( r"down_revision.*?=\s*['\"]([0-9a-f]+)['\"]", src )
-            if m:
-                self.assertNotEqual( m.group( 1 ), _THIS_REVISION, f"{path} chains off this head" )
+            if m and m.group( 1 ) == _THIS_REVISION:
+                successors.add( os.path.basename( path ) )
+        self.assertEqual(
+            successors,
+            { "e1f2a3b4c5d6_drop_input_and_output_hnsw_exact_scan.py" },
+            f"unexpected fork off {_THIS_REVISION}: {successors}",
+        )
 
 
 class TestTableSelection( unittest.TestCase ):

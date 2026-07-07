@@ -110,11 +110,12 @@ class InputAndOutput( Base ):
     output_final_embedding: Mapped[Optional[list]] = mapped_column( Vector( EMBEDDING_DIM ) )
     solution_path_wo_root:  Mapped[Optional[str]]  = mapped_column( Text )
 
-    __table_args__ = (
-        # ANN target — the only HNSW dot index on this table.
-        _hnsw_index( "idx_input_and_output_input_embedding_hnsw", "input_embedding" ),
-        # output_final_embedding: not ANN-searched → deliberately NO index.
-    )
+    # NO vector index — EXACT-scan ruling (Rick, 2026-07-07 cutover; migration
+    # e1f2a3b4c5d6): the live table is 97.2% duplicate vectors, which traps HNSW
+    # beam search in duplicate plateaus (wrong neighbors at default ef_search).
+    # Exact `<#>` scan is guaranteed LanceDB-parity and 2.7x faster than the
+    # legacy LanceDB flat scan. Revisit HNSW after the notification-spam purge.
+    # output_final_embedding: not ANN-searched → deliberately NO index either.
 
 
 # =========================================================================== #
@@ -327,9 +328,11 @@ VECTOR_STORE_MODELS = [
     SolutionSnapshot,
 ]
 
-# The 4 ANN-searched (table, col) pairs that carry an HNSW vector_ip_ops index.
+# The ANN-searched (table, col) pairs that carry an HNSW vector_ip_ops index.
+# input_and_output.input_embedding is deliberately ABSENT — exact-scan ruling
+# (Rick 2026-07-07, migration e1f2a3b4c5d6): 97.2% duplicate vectors break HNSW
+# recall; exact `<#>` scan is LanceDB-parity-guaranteed and faster than legacy.
 HNSW_DOT_INDEXES = [
-    ( "input_and_output",     "input_embedding" ),
     ( "prediction_decisions", "question_embedding" ),
     ( "solution_snapshots",   "question_embedding" ),
     ( "solution_snapshots",   "code_embedding" ),

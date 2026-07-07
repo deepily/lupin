@@ -84,16 +84,18 @@ class TestGistCacheIsRelational( unittest.TestCase ):
 
 class TestHnswIndexes( unittest.TestCase ):
 
-    def test_exactly_four_hnsw_dot_indexes_on_the_right_columns( self ):
+    def test_exactly_three_hnsw_dot_indexes_on_the_right_columns( self ):
         pairs = _hnsw_index_pairs( Base.metadata )
         self.assertEqual( pairs, set( vsm.HNSW_DOT_INDEXES ) )
-        self.assertEqual( len( pairs ), 4 )
+        self.assertEqual( len( pairs ), 3 )
 
-    def test_hnsw_dot_indexes_registry_is_the_four_ann_columns( self ):
+    def test_hnsw_dot_indexes_registry_is_the_three_ann_columns( self ):
+        # input_and_output.input_embedding is deliberately ABSENT — exact-scan
+        # ruling (Rick 2026-07-07, migration e1f2a3b4c5d6): the 97.2%-duplicate
+        # keystone breaks HNSW recall; exact <#> scan is parity-guaranteed.
         self.assertEqual(
             set( vsm.HNSW_DOT_INDEXES ),
             {
-                ( "input_and_output",     "input_embedding" ),
                 ( "prediction_decisions", "question_embedding" ),
                 ( "solution_snapshots",   "question_embedding" ),
                 ( "solution_snapshots",   "code_embedding" ),
