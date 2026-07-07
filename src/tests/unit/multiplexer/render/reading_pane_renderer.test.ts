@@ -508,6 +508,23 @@ test("abstract-indicator second click on same abstract toggles pane closed", () 
   assert.equal(store.isPaneOpen(), false);
 });
 
+test("abstract-indicator with a SPACED raw data-abstract round-trips verbatim (no url-encoding) — bug 2b0411c7 guard", () => {
+  // The production writer stores data-abstract RAW (notificationItem.ts →
+  // html helper setAttribute, no encode) and the reader reads it RAW (raw/raw,
+  // Bug#2 d9d8d651). A spaced abstract must surface VERBATIM in the pane, never
+  // url-encoded (%20). A stale E2E fixture had encodeURIComponent'd the value,
+  // injecting a shape production never emits; this pins the raw contract so the
+  // regression can't recur at the cheap unit tier.
+  const { store } = setup({ seed: HORIZ });
+  const ind = document.createElement("span");
+  ind.className = "abstract-indicator";
+  ind.setAttribute("data-abstract", "**Second abstract**");   // RAW, with a space
+  document.body.appendChild(ind);
+  clickEl(ind);
+  assert.equal(store.currentEntry()?.type, "abstract");
+  assert.equal(store.currentEntry()?.payload, "**Second abstract**");   // verbatim — NOT **Second%20abstract**
+});
+
 test("abstract-indicator click in VERTICAL mode does nothing (handler bails)", () => {
   const { store } = setup();   // vertical
   clickEl($(".abstract-indicator"));
