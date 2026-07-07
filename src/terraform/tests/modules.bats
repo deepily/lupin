@@ -93,8 +93,19 @@ setup() {
   grep -q 'point_in_time_recovery_enabled = true' "${MODULES}/cloud-sql-pg16/main.tf"
 }
 
-@test "cloud-sql password comes from a secret data source (no plaintext)" {
-  grep -q 'data.google_secret_manager_secret_version.db_password' "${MODULES}/cloud-sql-pg16/main.tf"
+@test "cloud-sql password is generated + stored in Secret Manager, never plaintext" {
+  # Pattern flipped from a data-source READ to generate-and-write in commit 6c0adaed
+  # (avoids the read-before-exists chicken-egg — see cloud-sql-pg16/main.tf:8-11). The
+  # security property is UNCHANGED: the DB password is never a plaintext literal/tfvar.
+  local sql_main="${MODULES}/cloud-sql-pg16/main.tf"
+  # generated in-module, not hardcoded:
+  grep -q 'resource "random_password" "db"' "${sql_main}"
+  # written as a Secret Manager version RESOURCE (not read via a data source):
+  grep -q 'resource "google_secret_manager_secret_version" "db_password"' "${sql_main}"
+  # the SQL user consumes the generated value, not a literal:
+  grep -q 'password = random_password.db\[0\].result' "${sql_main}"
+  # security property held: no plaintext password assignment in env tfvars:
+  ! grep -qiE 'password' "${ENV_TEST}"/*.tfvars
 }
 
 # NOTE: the GCE VM + VPC/subnet/NAT/SSH are now owned by the standalone
