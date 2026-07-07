@@ -301,7 +301,13 @@ RUN ln -sf "$(python -c 'import claude_agent_sdk as m, pathlib as p; print(p.Pat
 # Runtime configuration
 # ----------------------------------------------------------------------------
 ENV LUPIN_ROOT=/var/lupin
-ENV LUPIN_CONFIG_MGR_CLI_ARGS="config_path=/var/lupin/src/conf/lupin-app.ini splainer_path=/var/lupin/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development"
+# config_path / splainer_path are PROJECT-ROOT-RELATIVE (start "/src/…") per the PATH
+# MANAGEMENT mandate: ConfigurationManager combines them with the project root
+# (LUPIN_ROOT=/var/lupin) at runtime. An ABSOLUTE "/var/lupin/src/conf/…" here
+# double-prefixes to "/var/lupin/var/lupin/src/conf/…" → AssertionError at boot.
+# Dev/test masked it via the docker-compose env-override; GCP (no override) hit it
+# → app wouldn't boot. Baked default must be self-consistent (boots with no crutch).
+ENV LUPIN_CONFIG_MGR_CLI_ARGS="config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development"
 
 # ----------------------------------------------------------------------------
 # Application source code (most-volatile layers last for cache reuse).
