@@ -1,5 +1,17 @@
 # TODO
 
+## 🌅 FIRST THING 2026-07-07 (Rick RULED at 2026-07-06 session-end ask) — run the v0.2.0 pgvector migration swap-chain
+
+**Rick's words (23:14 EDT ask comment): "Let's go ahead and do this first thing in the morning."** Next Mr. Radio: remind Rick at spin-up → get the GO → run the FULLY STAGED chain (~30–45 min): compose tag edit `lupin:1.1.0`→`lupin:1.1.1-pgvector-candidate` → recreate `lupin-rest-dev` (voice dark ~1–2 min) → health + pgvector verify → alembic check → full in-container dry-run → LIVE 196k backfill (truncate-then-load: 195,576 + 35 + 57 rows) → equivalence spot-check + flag-flip readiness report. Gate `d93a1edb` (P1, chase 09:00 EDT) carries the full amended record. **Flag-flip stays a separate Rick gate.** `docker compose` is allowlisted in interactive sessions — no permission blocker; the gate is purely Rick's GO.
+
+---
+
+## 🗓️ STATUS 2026-07-06 (Mr. Radio 🦉, session 2352acab) — evening: 2 bug lanes shipped, 2 gates executed, arbiter payloads live
+
+Both worker lanes DONE same-evening: **75f392c0** Stop-hook poke-storm relief valve (Cheech, merged `ecae99a0` + doctrine §8 `de355d84`) and **f1a21917** wedge remediation (Rio, merged `7b7f2977` — `MCP_TOOL_TIMEOUT=660000` for all new spawns + turn-age watchdog). Rick-gates executed: `7d50a03a`+`c90f24f4` (pgvector → `src/cosa/.venv`, 93/93 green) + wedge ratification. Arbiter double-bounced w/ Tiberius (Rick broadcast bcea4232 re-affirmed manager bounce authority): **Tiffany's flood fix + turn-age watchdog both LIVE**, first sweeps clean. `63c5d913` closed-verified (`--model` flag injects; stale-process root cause). History archived (22.5k→6.9k). Rick's still-open card: arbiter flood-row purge (on Tiberius's ask). María's `6fc8d78d` (P1 spurious-poke root-cause) remains hers.
+
+---
+
 ## ✅ RESOLVED (was: FIRST THING 2026-06-30) — `d1bdb7ca` mux TTS architecture gate
 **Rick RULED (2026-07-01): server-push stands — "server pushes audio, END OF STORY."** Decision `d1bdb7ca` DROPPED in the store; the client-initiate flip is dead scope. Do not resurface.
 
