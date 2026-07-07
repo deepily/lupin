@@ -30,8 +30,37 @@ from pathlib import Path
 # in io/ directory, consistent with existing io/log/ convention.
 import cosa.utils.util as cu
 
-LOGS_DIR    = Path( cu.get_project_root() ) / "io" / "claude_code_hooks" / "logs"
-STREAM_LOG  = LOGS_DIR / "hook-events.jsonl"
+
+def _logs_dir():
+    """
+    Runtime-resolved hook-log directory (Lever P, item 6fc8d78d, 2026-07-07).
+
+    Resolved at CALL time — NOT bound to an import-time module constant — so a
+    test fixture setting LUPIN_HOOK_LOG_DIR is honored regardless of import order.
+
+    Why this exists: `LOGS_DIR`/`STREAM_LOG` were import-time constants off the
+    real project root. A unit test driving log_to_stream/log_payload (e.g.
+    test_heartbeat_integration, which monkeypatches the persona to "Mr. Radio 🦉"
+    and drives _run_heartbeat with synthetic session ids) could NOT redirect them
+    by monkeypatching cu.get_project_root — the constant was already bound. So test
+    emissions appended to the REAL production io/claude_code_hooks/logs/
+    hook-events.jsonl (1,259+ synthetic `sidC*` rows), manufacturing a false
+    "Mr-Radio-only" arbiter false-poke signature. Resolving lazily + honoring an
+    env override lets the conftest redirect writes to a per-test tmp dir.
+
+    Requires:
+        - (none)
+
+    Ensures:
+        - LUPIN_HOOK_LOG_DIR set (non-empty) → Path( that )  (test-hermetic override)
+        - else → <project root>/io/claude_code_hooks/logs  (production default,
+          byte-identical to the pre-Lever-P constant; production leaves it UNSET)
+        - Never raises
+    """
+    override = os.environ.get( "LUPIN_HOOK_LOG_DIR" )
+    if override:
+        return Path( override )
+    return Path( cu.get_project_root() ) / "io" / "claude_code_hooks" / "logs"
 
 # Tool classification for smart TTS filtering (PostToolUse)
 TOOLS_SILENT   = frozenset( { "Read", "Grep", "Glob", "TaskCreate", "TaskUpdate", "TaskGet", "TaskList" } )
@@ -90,7 +119,8 @@ def log_to_stream( hook_name, payload, extra=None ):
         extra: Optional dict of hook-specific fields to merge into entry
     """
     try:
-        LOGS_DIR.mkdir( parents=True, exist_ok=True )
+        logs_dir = _logs_dir()
+        logs_dir.mkdir( parents=True, exist_ok=True )
         entry = {
             "ts"   : get_timestamp(),
             "hook" : hook_name,
@@ -105,7 +135,7 @@ def log_to_stream( hook_name, payload, extra=None ):
             entry[ "tool" ]       = payload.get( "tool_name", "" )
         if extra:
             entry.update( extra )
-        with open( STREAM_LOG, "a" ) as f:
+        with open( logs_dir / "hook-events.jsonl", "a" ) as f:
             f.write( json.dumps( entry, default=str ) + "\n" )
     except Exception:
         pass  # Logging failure is non-fatal
@@ -130,9 +160,10 @@ def log_payload( hook_name, payload ):
         payload: Full hook input dict to log
     """
     try:
-        LOGS_DIR.mkdir( parents=True, exist_ok=True )
+        logs_dir  = _logs_dir()
+        logs_dir.mkdir( parents=True, exist_ok=True )
         timestamp = datetime.now( timezone.utc ).strftime( "%Y%m%dT%H%M%S_%f" )
-        log_file  = LOGS_DIR / f"{hook_name}-{timestamp}.json"
+        log_file  = logs_dir / f"{hook_name}-{timestamp}.json"
 
         log_entry = {
             "hook_name"  : hook_name,
@@ -1591,7 +1622,7 @@ def speakerphone_reminder_block( source, session_id ):
 
 if __name__ == "__main__":
 
-    print( f"LOGS_DIR:  {LOGS_DIR}" )
+    print( f"LOGS_DIR:  {_logs_dir()}" )
     print( f"TTS enabled: {is_tts_enabled()}" )
     print( f"Target email: {get_target_email()}" )
     print( f"Timestamp: {get_timestamp()}" )
@@ -1599,7 +1630,7 @@ if __name__ == "__main__":
     # Test logging
     test_payload = { "test": True, "session_id": "smoke-test" }
     log_payload( "smoke_test", test_payload )
-    print( f"Log written to: {LOGS_DIR}/smoke_test-*.json" )
+    print( f"Log written to: {_logs_dir()}/smoke_test-*.json" )
 
     # Test emit
     print( "\nEmit test:" )

@@ -1890,7 +1890,13 @@ def _run_heartbeat( session_id, transcript_path, cwd=None, state=None ):
         "owed_items"   : len( owed_items ),
         "delegations"  : len( delegations ),
         "open_inbound"  : len( open_inbound ),
-        "stale_inbound" : len( stale_inbound ),   # surfaced-for-review, not owed
+        # stale_inbound REMOVED from the oracle log (item 6fc8d78d, Tiberius
+        # 2026-07-07): María's watch measured it 0/12891 — never populated on
+        # production data, so it was pure noise in the greppable oracle stream. The
+        # underlying mechanism (partition_inbound_by_age + the "review, not owed"
+        # poke-abstract display) is a working, fully-tested feature and STAYS — it
+        # simply never triggers in prod because real inbound is handled/acked before
+        # it ages out. Only the dead LOG field is pruned, per her "prune or wire".
         "needs_verification" : needs_verification,            # 6929f4ac inward twin
         "open_user_gates"    : len( open_gates ),             # 6929f4ac outward twin (owed)
         "due_user_gates"     : len( due_gates ),              # 6929f4ac outward twin (re-ask now)
