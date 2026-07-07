@@ -119,6 +119,23 @@ PERSONA_ENV_FLAGS=(
     # Static always-on for every session this script launches (interactive +
     # headless/spawned).
     -e "CLAUDE_CODE_DISABLE_MOUSE=1"
+    # Bound EVERY MCP tool call end-to-end (wedge fix f1a21917 lever (i-a), Rick-
+    # ratified 2026-07-06). Claude Code honors MCP_TOOL_TIMEOUT (milliseconds) as
+    # an upper bound on MCP tool-call execution, so a stalled MCP server response
+    # leg becomes a bounded, recoverable tool-error instead of an open-turn wedge
+    # (incident 25c7441c: a fire-and-forget cosa-voice notify() held a turn 54m47s
+    # until process death). 660_000 ms (11 min) sits ABOVE the 600s converse/ask_*
+    # blocking-ask ceiling (so a legitimate wait is never severed) and an order of
+    # magnitude BELOW the observed 55-min wedge. Static always-on + forwarded via
+    # -e for the SAME reason as the mouse flag — it must cross the tmux boundary to
+    # reach `claude`; session_spawner.py's --headless spawns run through this script
+    # too, so both interactive and spawned sessions inherit the bound.
+    # HONOR-CHECK VERIFIED (CC v2.1.199, 2026-07-03 ~07:04Z): a hang(120) MCP tool
+    # under MCP_TOOL_TIMEOUT=15000 aborted at exactly 15s and the turn recovered.
+    # Caveats: already-live sessions won't have it (coverage arrives as sessions
+    # cycle — no forced respawn); bare terminals not launched via this script are
+    # out of scope. Design + receipt: src/rnd/v0.1.9/2026.07.03-notify-turn-hold-fix-design.md §2(i-a)
+    -e "MCP_TOOL_TIMEOUT=660000"
 )
 
 # Forward manager-spawn lineage env (set by session_spawner on the spawning
