@@ -445,10 +445,12 @@ def _build_arbiter_outreach_hops( cfg, gateway ):   # pragma: no cover - literal
           LOUDLY, best-effort posts the misconfiguration to fleet-escalations,
           and disables the live hops — no doomed-404 spam, and every subsequent
           Rick-bound outreach journals outcome "disabled" (visible, not silent)
-        - happy path → live_notify_fn = dedup-guarded transport (first sends);
-          live_retry_fn = the RAW transport (re-announce bypasses content-dedup
-          by design — it re-sends the same text); dm_push_fn = the §3.3
-          register-question hop (or None when its gate is off)
+        - happy path → live_notify_fn = dedup-guarded transport (first sends,
+          persist=True → one forensic row); live_retry_fn = the RAW persist=False
+          transport (re-announce bypasses content-dedup by design — it re-sends the
+          same text — AND skips the DB insert so retries never mint duplicate rows,
+          bug e1bbe011); dm_push_fn = the §3.3 register-question hop (or None when
+          its gate is off)
     """
     from cosa.utils.config_loader import get_api_config, load_api_key
     from lupin_arbiter_app.arbiter_live_notify import (
@@ -498,12 +500,22 @@ def _build_arbiter_outreach_hops( cfg, gateway ):   # pragma: no cover - literal
             _default_log_fn( "escalation_post_error", error=str( e ) )
         return None, None, dm_push_fn, tmux_push_fn
 
+    # Two transports (bug e1bbe011): the first-send transport persists a forensic
+    # row (persist=True); the re-announce transport does NOT (persist=False) — so a
+    # pending advisory re-pushed every reannounce_interval to an offline Rick
+    # re-attempts LIVE delivery WITHOUT minting a duplicate DB row each retry (the
+    # 3000+-row flood). Live delivery + the user_not_available/queued outcome are
+    # unaffected, so re-announce still lands + terminates when Rick returns.
     transport = make_notify_transport(
         base_url=base_url, target_user=target_user, sender_id=sender_id,
         api_key=api_key, timeout_seconds=timeout,
     )
+    retry_transport = make_notify_transport(
+        base_url=base_url, target_user=target_user, sender_id=sender_id,
+        api_key=api_key, timeout_seconds=timeout, persist=False,
+    )
     return ( make_live_notify_fn( transport, dedup_window_seconds=dedup_window ),
-             transport, dm_push_fn, tmux_push_fn )
+             retry_transport, dm_push_fn, tmux_push_fn )
 
 
 def create_production_app() -> FastAPI:   # pragma: no cover - literal external construction (config, gateway)

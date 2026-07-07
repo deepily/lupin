@@ -541,6 +541,7 @@ async def notify_user(
     display_qualifier_widget: bool = Query(False, description="Render yes/no qualifier comment widget expanded by default with softer instructional text."),
     session_name: Optional[str] = Query(None, description="Human-readable session name for UI header display. Updates sender-session-name span in notification history card."),
     idempotency_key: Optional[str] = Query(None, description="UUID idempotency key to prevent duplicate notifications on retry. Same key = same notification, skip push/persist."),
+    persist: bool = Query(True, description="Whether to persist a forensic DB row (default True — byte-identical prior behavior). Set False for delivery-only re-attempts (e.g. arbiter re-announce-on-return) so repeated retries of an already-persisted advisory never mint duplicate rows (bug e1bbe011). Live WebSocket delivery + the offline/online outcome are unaffected; only the DB insert is skipped."),
     notification_queue: NotificationFifoQueue = Depends(get_notification_queue),
     ws_manager: WebSocketManager = Depends(get_websocket_manager)
 ):
@@ -802,23 +803,31 @@ async def notify_user(
                         print( f"[NOTIFY] Idempotency hit: {idempotency_key} — returning cached response" )
                         return cached_response
 
-            # 1. Persist to PostgreSQL (unconditionally — preserves notification history).
+            # 1. Persist to PostgreSQL (preserves notification history).
             #    Lever B (messaging plane): run the blocking DB I/O OFF the event loop
             #    via asyncio.to_thread so a slow DB under fleet load can't stall the
             #    notify path (and every other request sharing the loop) — the FM-7 fix.
+            #    persist=False (bug e1bbe011) skips ONLY the DB insert — a delivery-only
+            #    re-attempt (arbiter re-announce-on-return) must NOT mint a duplicate
+            #    forensic row on every 300s retry. db_notification_id stays None; all
+            #    downstream logic already tolerates None (push_notification falls back
+            #    to a generated uuid4; the offline/online responses are id-agnostic).
             db_notification_id = None
-            try:
-                db_notification_id = await asyncio.to_thread(
-                    _persist_notification_sync,
-                    resolved_sender_id, target_system_id, message, type, priority,
-                    title, abstract, parsed_response_options, job_id, progress_group_id, is_connected,
-                    direction
-                )
-                print( f"[NOTIFY] ✓ Persisted notification {db_notification_id} to PostgreSQL" )
+            if persist:
+                try:
+                    db_notification_id = await asyncio.to_thread(
+                        _persist_notification_sync,
+                        resolved_sender_id, target_system_id, message, type, priority,
+                        title, abstract, parsed_response_options, job_id, progress_group_id, is_connected,
+                        direction
+                    )
+                    print( f"[NOTIFY] ✓ Persisted notification {db_notification_id} to PostgreSQL" )
 
-            except Exception as db_error:
-                # Log but don't fail - FIFO queue is the primary delivery mechanism
-                print( f"[NOTIFY] ⚠️ Failed to persist to PostgreSQL (non-fatal): {db_error}" )
+                except Exception as db_error:
+                    # Log but don't fail - FIFO queue is the primary delivery mechanism
+                    print( f"[NOTIFY] ⚠️ Failed to persist to PostgreSQL (non-fatal): {db_error}" )
+            else:
+                print( f"[NOTIFY] persist=false — skipping DB row (delivery-only re-attempt, flood-guard)" )
 
             # 2. If user is offline, attempt cross-user CC-listener fallback
             #    BEFORE giving up. Delegates to the canonical helper

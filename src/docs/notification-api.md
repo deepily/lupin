@@ -80,6 +80,14 @@ All notifications are persisted via the `Notification` SQLAlchemy ORM model and 
 **Source**: `src/cosa/rest/postgres_models.py` ( lines 482-628 ),
 `src/cosa/rest/db/repositories/notification_repository.py`
 
+> **`persist=false` — delivery-only re-attempts skip THIS layer only** ( bug
+> `e1bbe011` ). The fire-and-forget branch persists a forensic row by default
+> (`persist=true`). A caller that is re-attempting delivery of an *already-persisted*
+> notification passes `persist=false` to skip the DB insert while leaving Layer 1
+> (FIFO + WebSocket) delivery fully intact — so a repeated retry never mints a
+> duplicate forensic row. The sole production user is the fleet arbiter's
+> re-announce-on-return loop ( see § `persist` param below ).
+
 #### Layer 3: SSE ( synchronous blocking )
 
 For response-required notifications, the `POST /api/notify` endpoint returns a
@@ -990,6 +998,34 @@ class AsyncNotificationRequest( BaseModel ):
 Same conversion logic as `NotificationRequest.to_api_params()`, minus
 `response_requested`, `response_type`, and `timeout_seconds` fields. Includes
 `queue_name` for provisional job card registration, and `progress_group_id` for in-place DOM updates.
+
+---
+
+### 5.2a Server-Side Query Param: `persist` ( fire-and-forget only )
+
+`persist` is a **server-side query parameter on `POST /api/notify`** — it is NOT a
+field on the client convenience models above, because its only production user
+(the fleet arbiter) builds the notify URL directly rather than through those models.
+
+| Param     | Type   | Default | Applies to        | Semantics                                                              |
+|-----------|--------|---------|-------------------|-----------------------------------------------------------------------|
+| `persist` | `bool` | `True`  | fire-and-forget   | `True` → persist a forensic Layer-2 (PostgreSQL) row (prior behavior, byte-identical for all existing callers). `False` → skip ONLY the DB insert; Layer-1 (FIFO + WebSocket) delivery + the `queued` / `user_not_available` outcome are unchanged. |
+
+- **Not a config/INI knob** — `persist` is request-scoped (per-call query param). There
+  is no `lupin-app.ini` key for it; each caller decides per request. Response-required
+  mode ignores it and always persists.
+- **Who sends `persist=false` and why** — the fleet arbiter's re-announce-on-return
+  loop ( `_check_pending_outreach`, `arbiter_job.py` ). When Rick is offline, a pending
+  Rick-bound advisory is re-pushed every `reannounce_interval_seconds` (300s) until a
+  DELIVERED outcome or the 24h TTL. Each retry is a *delivery* re-attempt of an
+  advisory whose forensic row was already written by the FIRST escalation
+  (`persist=true`). Without `persist=false`, every 300s retry minted a fresh forensic
+  row — the bug `e1bbe011` flood (3000+ duplicate rows on Rick's return). With
+  `persist=false`, retries collapse to **exactly one forensic row per advisory**.
+- **Wiring** — `arbiter_live_notify.build_notify_request` / `make_notify_transport`
+  thread the flag; `app._build_arbiter_outreach_hops` builds TWO transports: the
+  first-send `live_notify_fn` (persist=True → the one forensic row) and the
+  re-announce `live_retry_fn` (persist=False → no new rows).
 
 ---
 

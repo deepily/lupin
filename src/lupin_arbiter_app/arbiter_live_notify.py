@@ -67,6 +67,7 @@ def build_notify_request(
     notify_type   : str  = "alert",
     title         : str  = "Fleet arbiter escalation",
     suppress_ding : bool = False,
+    persist       : bool = True,
 ):
     """
     Build the (url, headers) for a POST :7999/api/notify live push.
@@ -82,7 +83,9 @@ def build_notify_request(
     Ensures:
         - returns (url, headers) where url = <base>/api/notify?<encoded params>
           carrying message + type + priority + target_user + sender_id + title +
-          suppress_ding, and headers carries the X-API-Key
+          suppress_ding + persist, and headers carries the X-API-Key
+        - persist=False rides as `persist=false` — the re-announce flood-guard
+          (bug e1bbe011): a delivery-only retry must not mint a duplicate DB row
         - base_url's trailing slash is normalised (no double slash)
         - never raises
     """
@@ -94,6 +97,7 @@ def build_notify_request(
         "sender_id"     : sender_id,
         "title"         : title,
         "suppress_ding" : "true" if suppress_ding else "false",
+        "persist"       : "true" if persist else "false",
     } )
     url     = f"{base_url.rstrip( '/' )}{NOTIFY_PATH}?{params}"
     headers = { "X-API-Key": api_key }
@@ -138,6 +142,7 @@ def make_notify_transport(
     sender_id       : str,
     api_key         : str,
     timeout_seconds : int                  = 5,
+    persist         : bool                 = True,
     http_post_fn    : Optional[ Callable ] = None,
     log_fn          : Optional[ Callable ] = None,
 ) -> Callable[ [ str ], dict ]:
@@ -150,8 +155,11 @@ def make_notify_transport(
           ( http_status, parsed_body ) — test seam; default the urllib boundary
 
     Ensures:
-        - POSTs the build_notify_request shape and returns
-          parse_notify_outcome( status, body )
+        - POSTs the build_notify_request shape (with this transport's `persist`)
+          and returns parse_notify_outcome( status, body )
+        - persist=False builds the re-announce flood-guard transport (bug
+          e1bbe011): every retry re-attempts LIVE delivery WITHOUT re-persisting a
+          forensic row — the first-send transport keeps persist=True
         - ANY transport exception (HTTPError 4xx/5xx, timeout, refused) becomes
           { channel: "live", outcome: "http_error", detail } — NEVER raises
           (failures are outcome VALUES per §1.5; tonight's swallowed 404 becomes
@@ -165,7 +173,7 @@ def make_notify_transport(
     def transport( message: str ) -> dict:
         url, headers = build_notify_request(
             message, base_url=base_url, target_user=target_user,
-            sender_id=sender_id, api_key=api_key,
+            sender_id=sender_id, api_key=api_key, persist=persist,
         )
         try:
             status, body = http_post_fn( url, headers, timeout_seconds )
@@ -523,7 +531,15 @@ def quick_smoke_test():
     )
     assert url.startswith( "http://127.0.0.1:7999/api/notify?" )      # trailing slash normalised
     assert "type=alert" in url and "priority=high" in url and "target_user=rick" in url
+    assert "persist=true" in url                                       # default persists (byte-identical)
     assert headers[ "X-API-Key" ] == "k-123"
+
+    # persist=False flood-guard shape (bug e1bbe011): the re-announce transport
+    url_np, _ = build_notify_request(
+        "re-announce retry", base_url="http://127.0.0.1:7999",
+        target_user="rick@x.com", sender_id="s", api_key="k", persist=False,
+    )
+    assert "persist=false" in url_np
 
     # body-status mapping — the L1 kill: user_not_available is now VISIBLE
     assert parse_notify_outcome( 200, { "status": "queued", "connection_count": 2 } )[ "outcome" ] == "queued"

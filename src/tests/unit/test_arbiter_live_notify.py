@@ -85,6 +85,23 @@ class TestBuildNotifyRequest:
         assert "suppress_ding=true" in url
         assert "priority=urgent" in url and "type=custom" in url and "title=Custom" in url
 
+    def test_persist_defaults_true_byte_identical( self ):
+        """Bug e1bbe011: the default persists a forensic row (byte-identical prior
+        behavior for every existing caller)."""
+        url, _ = build_notify_request(
+            "x", base_url="http://h:7999", target_user="r@x.com", sender_id="s", api_key="k",
+        )
+        assert "persist=true" in url
+
+    def test_persist_false_rides_as_flood_guard( self ):
+        """The re-announce transport (persist=False) carries `persist=false` so a
+        delivery-only retry never mints a duplicate DB row."""
+        url, _ = build_notify_request(
+            "re-announce retry", base_url="http://h:7999", target_user="r@x.com",
+            sender_id="s", api_key="k", persist=False,
+        )
+        assert "persist=false" in url and "persist=true" not in url
+
 
 # ── make_live_notify_fn — the DEDUP guard (receipt b) ──────────────────────────
 
@@ -212,6 +229,27 @@ class TestMakeNotifyTransport:
         t( "alert" )
         out = capsys.readouterr().out
         assert "live_notify_sent" in out and '"outcome": "queued"' in out
+
+    def test_persist_defaults_true_in_request_url( self ):
+        """The first-send transport (default) threads persist=true into the POST URL."""
+        seen = [ ]
+        t = make_notify_transport(
+            http_post_fn=lambda u, h, s: ( seen.append( u ), ( 200, { "status": "queued" } ) )[ 1 ],
+            log_fn=lambda e, **f: None, **self._ARGS )
+        t( "first send" )
+        assert "persist=true" in seen[ 0 ]
+
+    def test_persist_false_threads_into_request_url( self ):
+        """Bug e1bbe011: the re-announce transport (persist=False) threads
+        persist=false all the way into the POST URL — the flood-guard end to end."""
+        seen = [ ]
+        t = make_notify_transport(
+            persist=False,
+            http_post_fn=lambda u, h, s: ( seen.append( u ), ( 200, { "status": "user_not_available" } ) )[ 1 ],
+            log_fn=lambda e, **f: None, **self._ARGS )
+        out = t( "re-announce retry" )
+        assert "persist=false" in seen[ 0 ] and "persist=true" not in seen[ 0 ]
+        assert out[ "outcome" ] == "user_not_available"     # delivery outcome unaffected by persist
 
 
 # ── validate_live_notify_target — the §3.6 misconfig guard (tonight's R1) ──────
