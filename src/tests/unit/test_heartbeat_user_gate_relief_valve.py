@@ -305,3 +305,36 @@ def test_repro_contrast_undeferred_stale_gate_still_pokes():
     assert "outstanding_user_gate" in verdict[ "signals" ]
     result    = dec_mod.decide_heartbeat( _honored_hold(), verdict, 0, 3, now=_T0 )
     assert result[ "outcome" ] == dec_mod.OUTCOME_POKE      # still surfaces (override)
+
+
+def test_redefer_after_resumed_unanswered_gate_restores_honored_hold():
+    # Deliverable-2 verification (task 2d8b6d1c) — the §8.2 post-chase RE-DEFER
+    # reflex, end-to-end at the decision layer. This is Cheech hot-spot (a): after
+    # a chase PASSES, the gate resumes cadence-eligible EVERY tick (is_reask_capped
+    # is False while next_chase_ts is set, even in the past), so a resumed-but-
+    # still-unanswered gate STORMS again UNLESS the manager re-defers. This walks
+    # the full residual cycle and proves the re-defer restores quiet.
+    #
+    # STATE 1 — resumed + unanswered: chase already passed (60s ago), stale, budget
+    # long-since exhausted. The storm is live: the gate overrides the honored hold.
+    resumed   = ug.make_gate( "7d50a03a", "Proceed?", "ask_yes_no",
+                              last_asked_ts=_ago( 7200 ), reask_count=9, reask_cap=3,
+                              next_chase_ts=_ago( 60 ) )
+    due       = ug.due_gates( [ resumed ], _NOW )
+    verdict   = owed_mod.evaluate_work_owed( open_user_gates=due )
+    assert "outstanding_user_gate" in verdict[ "signals" ]           # storm live
+    assert dec_mod.decide_heartbeat( _honored_hold(), verdict, 0, 3, now=_T0 )[ "outcome" ] \
+        == dec_mod.OUTCOME_POKE
+
+    # STATE 2 — the manager applies the RE-DEFER reflex: defer_to_chase with a NEW
+    # future chase. Storm suppressed (due_gates empty ⇒ hold honored) AND the
+    # fresh-window invariants hold: chase is future-deferred + budget reset to 0.
+    redeferred = ug.defer_to_chase( [ resumed ], "7d50a03a", _ahead( 10_800 ) )
+    assert ug.is_chase_deferred( redeferred[ 0 ], _NOW ) is True
+    assert redeferred[ 0 ][ "reask_count" ] == 0                     # fresh N-ask budget
+    due2       = ug.due_gates( redeferred, _NOW )
+    assert due2 == [ ]                                               # quiet restored
+    verdict2   = owed_mod.evaluate_work_owed( open_user_gates=due2 )
+    assert "outstanding_user_gate" not in verdict2[ "signals" ]
+    assert dec_mod.decide_heartbeat( _honored_hold(), verdict2, 0, 3, now=_T0 )[ "outcome" ] \
+        == dec_mod.OUTCOME_HONORED                                   # re-defer engaged
