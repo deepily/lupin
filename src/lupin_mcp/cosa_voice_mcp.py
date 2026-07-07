@@ -2385,7 +2385,7 @@ def list_spawned_sessions() -> dict:
     with live/dead status probed from tmux.
 
     Returns:
-        dict: { sessions:[{session_name, requested_role, status, alive}], count, ... }
+        dict: { sessions:[{session_name, requested_role, status, alive, model}], count, ... }
     """
     _wait_for_sender_id()
     from lupin_mcp import session_spawner

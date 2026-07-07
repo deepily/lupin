@@ -459,6 +459,41 @@ class TestSpawnSessionsModel:
         assert argv.index( "--dry-run" ) < argv.index( "--model" )
 
 
+# ── list_spawned_sessions model surfacing (bug 35bdd68f) ──────────────────────
+
+class TestListSpawnedSessionsModel:
+    """Bug 35bdd68f (2026-07-07): the roster row must SURFACE the persisted model
+    id so the fleet can answer 'what LLM is this worker running' without asking the
+    worker. Model is captured + persisted at spawn (see TestSpawnSessionsModel);
+    the bug was the read-side row builder dropping it. A pre-fix record (no 'model'
+    key) surfaces None — honest absence, never a guessed default."""
+
+    def _seed( self, tmp_path, records ):
+        _write_manifest( _manifest_path( "mgr", tmp_path ), records )
+
+    def test_model_surfaces_per_row_echoing_persisted_value( self, tmp_path ):
+        # two DIFFERENT model ids prove the row echoes the PERSISTED value,
+        # not a hardcoded opus default.
+        self._seed( tmp_path, [
+            { "session_name": "cc-author-rio",  "requested_role": "author", "model": "claude-opus-4-8" },
+            { "session_name": "cc-tester-clay", "requested_role": "tester", "model": "claude-sonnet-5"  },
+        ] )
+        res  = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ), session_dir=tmp_path )
+        rows = { r[ "session_name" ]: r for r in res[ "sessions" ] }
+        assert rows[ "cc-author-rio"  ][ "model" ] == "claude-opus-4-8"
+        assert rows[ "cc-tester-clay" ][ "model" ] == "claude-sonnet-5"
+        # contract: EVERY row carries the key, not just the asserted ones
+        assert all( "model" in r for r in res[ "sessions" ] )
+
+    def test_prefix_record_without_model_surfaces_none( self, tmp_path ):
+        # a record persisted BEFORE model capture has no 'model' key
+        self._seed( tmp_path, [ { "session_name": "cc-legacy", "requested_role": "reviewer" } ] )
+        res = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ), session_dir=tmp_path )
+        row = res[ "sessions" ][ 0 ]
+        assert "model" in row            # key present — honest absence, not omission
+        assert row[ "model" ] is None    # None, never a guessed default
+
+
 # ── dismiss_sessions ──────────────────────────────────────────────────────────
 
 class TestDismissSessions:
@@ -587,7 +622,7 @@ class TestListSpawnedSessions:
         res = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ), session_dir=tmp_path )
         assert res[ "count" ] == 2
         assert res[ "sessions" ][ 0 ] == { "session_name": "a", "requested_role": "author",
-                                           "status": "live", "alive": True }
+                                           "status": "live", "alive": True, "model": None }
         # default requested_role when missing
         assert res[ "sessions" ][ 1 ][ "requested_role" ] == "reviewer"
 

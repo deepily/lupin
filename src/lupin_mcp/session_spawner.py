@@ -919,8 +919,10 @@ def list_spawned_sessions(
     Ensures:
         - For each manifest entry, probes `tmux has-session -t <name>` via runner;
           returncode 0 → "live", else "dead"
-        - Returns { sessions: [ {session_name, requested_role, status, alive} ],
+        - Returns { sessions: [ {session_name, requested_role, status, alive, model} ],
                     manager_session_id, count }
+        - model surfaces the persisted manifest model id (None when a pre-fix
+          record predates model capture — honest absence, never a guess)
         - Never raises (a missing manifest yields an empty list)
 
     Args:
@@ -943,7 +945,8 @@ def list_spawned_sessions(
             "session_name"   : name,
             "requested_role" : r.get( "requested_role", "reviewer" ),
             "status"         : "live" if alive else "dead",
-            "alive"          : alive
+            "alive"          : alive,
+            "model"          : r.get( "model" )
         } )
 
     return {
