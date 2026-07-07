@@ -602,6 +602,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         stuck_poke_min_interval_seconds : int           = 0,      # bug 5a1f17f8 (c): min seconds between consecutive stuck-pokes to one session; 0 → disabled (poll-cadence, today's behavior)
         manager_stale_poke_threshold_seconds : int      = 2700,   # post-game F2 (~45 min; 0 disables)
         manager_stale_poke_max_age_seconds : int        = 7200,   # corpse ceiling (~2h; must be > threshold)
+        manager_stale_velocity_suppress_streak : int    = 2,      # item 285c0343 Lever B: >= N consecutive episodes whose last-signal ADVANCED ⇒ alive-on-a-cadence ⇒ suppress the staleness poke; 0 disables. Ctor default (NOT INI day-one — a tunable, not a safety switch; INI promotion is the follow-on IF live tuning is wanted).
         # Role-goal poke echoes (role-goals Phase 2-3, 2026-06-24). The role-selected
         # north-star goal lines APPENDED to the stuck-poke + manager-staleness poke
         # bodies. Default None = inert (legacy in-pool construction unchanged); the
@@ -734,6 +735,10 @@ class ArbiterConsumerJob( AgenticJobBase ):
         if manager_stale_poke_threshold_seconds < 0:
             raise ValueError( f"manager_stale_poke_threshold_seconds must be >= 0, "
                               f"got {manager_stale_poke_threshold_seconds}" )
+        # item 285c0343 Lever B: 0 disables the velocity suppression; negative is a config bug.
+        if manager_stale_velocity_suppress_streak < 0:
+            raise ValueError( f"manager_stale_velocity_suppress_streak must be >= 0, "
+                              f"got {manager_stale_velocity_suppress_streak}" )
         # corpse ceiling (2026-06-11): F2 means "this manager went dark RECENTLY",
         # not "a corpse exists" — the eligibility window is [threshold, max_age].
         # A ceiling at or below the threshold makes that window EMPTY and silently
@@ -913,6 +918,9 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # yesterday's dead manager session poked with a bogus 1134m age on every
         # process start), never a live manager going dark — NOT eligible.
         self.manager_stale_poke_max_age_seconds   = manager_stale_poke_max_age_seconds
+        # item 285c0343 Lever B: consecutive-advancing-episode streak at/above which the
+        # manager-staleness poke is suppressed as alive-on-a-cadence (0 disables).
+        self.manager_stale_velocity_suppress_streak = manager_stale_velocity_suppress_streak
         # Role-goal poke echoes (role-goals Phase 2-3): the role-selected north-star
         # goal lines appended to the stuck-poke (_format_poke, via view["role"]) and
         # the manager-staleness poke (_format_manager_stale_poke, always Manager).
@@ -1060,6 +1068,13 @@ class ArbiterConsumerJob( AgenticJobBase ):
         self._mgr_stale_since  = { }                               # sid -> episode-start datetime
         self._mgr_poke_count   = { }                               # sid -> staleness pokes this episode
         self._mgr_advised      = set()                             # sids whose Rick advisory fired this episode
+        # item 285c0343 Lever B: cross-episode last-signal VELOCITY state. Keyed by
+        # PERSONA (not sid) so it PERSISTS across the per-sid episode clear above (a
+        # freshen wipes _mgr_stale_since/_mgr_poke_count but the cadence memory must
+        # survive to compare episode N against N-1) and across re-spins. A manager
+        # whose last-signal advances each episode is alive-on-a-cadence, not stale.
+        self._mgr_last_signal_seen = { }                           # persona -> last-signal datetime captured at the prior episode start
+        self._mgr_velocity_streak  = { }                           # persona -> count of consecutive episodes whose last-signal ADVANCED
         # L1 store-awareness (lane 4, 2026-06-17): sids whose case-14 staleness
         # poke was SUPPRESSED because the manager classified BLOCKED_ON_USER/DONE.
         # sid -> (CLASS_*, persona) so the re-arm can clear the SHARED case-16/17
@@ -1273,7 +1288,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         self._emit_poke_gates( fleet_view, self._last_full_snapshot, now )
         # Item B (2026.06.11): close the delivery loops — manager threaded-ack
         # receipts (§3.4) + Rick re-announce of pending advisories (§3.5).
-        outreach_acks = self._check_outreach_receipts( now, offline_personas=self._confirmed_offline_personas() )
+        outreach_acks = self._check_outreach_receipts( now, offline_personas=self._confirmed_offline_personas(), bridge_mtimes=manager_bridge_mtimes )  # item 285c0343 Lever C: recipient bridge-activity since delivery = implicit ACK
         reannounces   = self._check_pending_outreach( now )
         # eng#7 (2026-06-17): ONE follow-through aged-escalation sweep on the poll
         # path (build-plan §3b). Doubly inert — no watcher wired OR flag OFF — and
@@ -1899,7 +1914,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
             all_offline[ persona ] = is_off if persona not in all_offline else ( all_offline[ persona ] and is_off )
         return { p for p, off in all_offline.items() if off }
 
-    def _check_outreach_receipts( self, now, offline_personas=None ):
+    def _check_outreach_receipts( self, now, offline_personas=None, bridge_mtimes=None ):
         """
         §3.4 manager-side receipt polling — the acked-ledger principle (the
         receipt is an explicit, OWNER-WRITTEN mark, never an inference): an
@@ -1961,6 +1976,21 @@ class ArbiterConsumerJob( AgenticJobBase ):
                 acked += 1
                 continue
             if ( now - state[ "sent_at" ] ).total_seconds() < self.outreach_ack_window_seconds:
+                continue
+            # item 285c0343 Lever C: demonstrable recipient ACTIVITY since delivery counts
+            # as an IMPLICIT ACK — an active peer manager (fresh bridge mtime in
+            # [sent_at, now]) has not gone dark and needs no duplicate advisory. Checked
+            # AFTER the ack window (so it only pre-empts the -r2, never the explicit
+            # threaded-reply ACK above) and BEFORE the resend gate. Distinct receipt
+            # outcome ("acked_by_activity") for María's audit; the resend MECHANISM, the
+            # Fix-3 offline suppression, and the milestone-must-land Rick note are all
+            # UNTOUCHED. Inert when bridge_mtimes is None (seam unwired) → today's behavior.
+            if self._recipient_active_since( state[ "persona" ], state[ "sent_at" ], now, bridge_mtimes ):
+                latency = ( now - state[ "sent_at" ] ).total_seconds()
+                self._log_outreach_receipt( outreach_id, state[ "kind" ], state[ "persona" ],
+                                            "acked_by_activity", latency_s=int( latency ) )
+                del self._awaiting_ack[ outreach_id ]
+                acked += 1
                 continue
             # Fix 3 (ping-storm durable): suppress the one-shot resend when the
             # target is CONFIRMED offline — a -r2 to a dead pane is the doubling Rick
@@ -3498,6 +3528,78 @@ class ArbiterConsumerJob( AgenticJobBase ):
             return True
         return bool( open_gates( get_pending_user_gates( hold ) ) )
 
+    def _awaiting_user_hold_facets( self, session_id ):
+        """
+        item 285c0343 Lever A audit granularity (Tiberius Q1 rider): the hold's
+        `awaiting` string plus the SOONEST open-gate `next_chase_ts`, for the
+        MANAGER-STALE awaiting-user SUPPRESSION log row — ONE outcome, distinguishable
+        post-hoc (María's audit), computed in a single best-effort hold read. Called
+        ONLY after `_session_awaiting_user` already returned True, so the hold is
+        present + honored; this read is purely for observability, never control flow.
+
+        Ensures:
+            - returns {} when the seam is unwired (None), the read raises, or the hold
+              is not a dict — the suppression still fires, the log row just omits facets
+            - otherwise returns a dict with `awaiting` (when a non-empty str) and
+              `soonest_next_chase_ts` (when ≥1 open gate carries one) — the soonest
+              chosen by parsed chronological order (offset-aware), falling back to the
+              first stamp on any parse hiccup; never raises
+        """
+        if self._hold_reader_fn is None:
+            return { }
+        try:
+            hold = self._hold_reader_fn( session_id )
+        except Exception:
+            return { }
+        if not isinstance( hold, dict ):
+            return { }
+        facets   = { }
+        awaiting = hold.get( "awaiting" )
+        if isinstance( awaiting, str ) and awaiting:
+            facets[ "awaiting" ] = awaiting
+        chase_stamps = [ g.get( "next_chase_ts" )
+                         for g in open_gates( get_pending_user_gates( hold ) )
+                         if isinstance( g, dict ) and g.get( "next_chase_ts" ) ]
+        if chase_stamps:
+            try:
+                facets[ "soonest_next_chase_ts" ] = min(
+                    chase_stamps, key=lambda s: datetime.datetime.fromisoformat( s ) )
+            except Exception:
+                facets[ "soonest_next_chase_ts" ] = chase_stamps[ 0 ]
+        return facets
+
+    def _recipient_active_since( self, persona, sent_at, now, bridge_mtimes ):
+        """
+        item 285c0343 Lever C: did the outreach recipient show ground-truth ACTIVITY
+        since we delivered? A fresh session-bridge mtime in [sent_at, now] means the
+        peer manager took a turn (any hook fire — a DM / task_transition / hold write
+        all ride a turn) AFTER delivery → it is demonstrably active, NOT dark → an
+        implicit ACK; the one-shot `-r2` resend is redundant noise to an active peer.
+
+        This is the SAME persona-keyed bridge-mtime signal the MANAGER-STALE veto
+        (bug 26dd3afb) uses, threaded into the receipt poller. All ack-tracked
+        recipients are managers (every expects_ack=True route targets a manager), so
+        the manager-only bridge map covers them.
+
+        Requires:
+            - persona is a persona name; sent_at, now are aware datetimes;
+              bridge_mtimes is {canonical_persona_key: epoch} or None
+
+        Ensures:
+            - returns False when bridge_mtimes is None/empty (seam unwired), persona is
+              falsy, or the persona has no mtime → today's resend behavior (fail toward
+              delivery — never drop a genuine escalation)
+            - returns True iff sent_at <= bridge_mtime <= now — a future-skewed mtime
+              (> now) is rejected (mirrors the 26dd3afb veto's [lower, upper] discipline,
+              failing toward the resend); never raises
+        """
+        if not bridge_mtimes or not persona:
+            return False
+        mt = bridge_mtimes.get( canonical_persona_key( persona ) )
+        if mt is None:
+            return False
+        return sent_at.timestamp() <= mt <= now.timestamp()
+
     def _session_awaiting_peer( self, session_id, now ):
         """
         262c59f6 (H2): is this session correctly MANAGER-AWAITING-PEER — a delegating
@@ -3943,6 +4045,41 @@ class ArbiterConsumerJob( AgenticJobBase ):
                         exclude_persona=persona,                     # b9911943: not to the subject itself
                     )
                 continue
+            # item 285c0343 Lever A — HOLD-GATING (the hold-side dual of the owed_class
+            # BLOCKED_ON_USER branch above). owed_class reads the STORE, where the
+            # 6929f4ac open-gate override reclassifies an awaiting-user session as
+            # CLASS_ACTIVE (it owes Rick a re-ask) — so a manager PARKED awaiting Rick's
+            # gate answer reaches HERE classed ACTIVE and would draw the case-14 poke
+            # (the 2026-07-07 episode-2 false positive). The awaiting-user truth lives
+            # ONLY in the hold artifact; read it. A FRESH HONORED hold declaring
+            # awaiting:user:* (or holding ≥1 OPEN user-gate — which already covers a
+            # defer_to_chase gate carrying a future next_chase_ts) is defended
+            # quiescence, NOT staleness → suppress the repeating case-14 poke, emit AT
+            # MOST ONE case-16 advisory via the SHARED _manager_blocked_advised set
+            # (cross-detector de-dupe with #9, no Rick double-page; re-arm reuses the
+            # _mgr_stale_suppressed loop). Placed BEFORE the store-health gate and the
+            # velocity lever so a defended hold (ground truth from the artifact) wins.
+            # Inert when the hold-reader seam is unwired (_session_awaiting_user → False)
+            # → today's escalation preserved. Layered pair with Lever B: an EXPIRED hold
+            # (is_honored=False) falls THROUGH here to the velocity check below.
+            if self._session_awaiting_user( sid, now ):
+                _facets = self._awaiting_user_hold_facets( sid )     # Q1 rider: awaiting + soonest next_chase_ts for María's audit
+                self._log( "arbiter_manager_stale_suppressed_awaiting_user_hold",
+                           session_id=sid, persona=persona, freshest_age_s=age,
+                           awaiting=_facets.get( "awaiting" ),
+                           soonest_next_chase_ts=_facets.get( "soonest_next_chase_ts" ) )
+                if persona not in self._manager_blocked_advised:
+                    self._manager_blocked_advised.add( persona )
+                    self._mgr_stale_suppressed[ sid ] = ( CLASS_BLOCKED_ON_USER, persona )
+                    self._route(
+                        CASE_MANAGER_AWAITING_USER,
+                        f"MANAGER-AWAITING-RICK (advisory, NOT manager-stale): {persona} is "
+                        f"silent {_fmt_minutes( age )} but its honored hold declares it PARKED "
+                        f"awaiting Rick — defended quiescence, not a stall. One-time notice, no poke.",
+                        active_managers=active_managers,
+                        exclude_persona=persona,                     # b9911943: not to the subject itself
+                    )
+                continue
             # ACTIVE / UNKNOWN → today's case-14 poke + Rick advisory (UNKNOWN = fail-SAFE)
             # 33949e83 STORE-HEALTH GATE: a self-observed degraded owed read this poll
             # means the manager's "silence" is an infra outage artifact, not darkness →
@@ -3955,6 +4092,33 @@ class ArbiterConsumerJob( AgenticJobBase ):
             if sid not in self._mgr_stale_since:
                 self._mgr_stale_since[ sid ] = now                # episode start
                 self._mgr_poke_count[ sid ]  = 0
+                # item 285c0343 Lever B — LAST-SIGNAL VELOCITY (updated ONCE per episode,
+                # here at episode start). A manager whose last-signal ADVANCED since the
+                # prior episode is alive on a wake-tick-park rhythm SLOWER than the 45m
+                # threshold (mr radio 13:08→13:59→14:59→15:59, four false episodes, all
+                # advancing) — definitionally NOT stale. Track the streak of consecutive
+                # advancing episodes; a NON-advancing (frozen) last-signal RESETS it, so a
+                # genuinely-wedged manager (last-signal stuck) still pokes — the real-stall
+                # true positive Tiberius requires. Persona-keyed state survives the per-sid
+                # episode clear + re-spins.
+                last_seen = now - datetime.timedelta( seconds=age )
+                prior     = self._mgr_last_signal_seen.get( persona )
+                if prior is not None and last_seen > prior:
+                    self._mgr_velocity_streak[ persona ] = self._mgr_velocity_streak.get( persona, 0 ) + 1
+                else:
+                    self._mgr_velocity_streak[ persona ] = 0
+                self._mgr_last_signal_seen[ persona ] = last_seen
+            # Lever B suppress guard (streak is stable within an episode): at/above the
+            # configured advancing-streak threshold ⇒ alive-on-a-cadence ⇒ suppress this
+            # episode's advisory + poke (the episode counter above is still opened so the
+            # re-arm on freshen stays symmetric). 0 disables the lever. Distinct log
+            # outcome for María's audit — never silent.
+            if ( self.manager_stale_velocity_suppress_streak > 0
+                 and self._mgr_velocity_streak.get( persona, 0 ) >= self.manager_stale_velocity_suppress_streak ):
+                self._log( "arbiter_manager_stale_suppressed_velocity",
+                           session_id=sid, persona=persona, freshest_age_s=age,
+                           advancing_streak=self._mgr_velocity_streak.get( persona, 0 ) )
+                continue
             if sid not in self._mgr_advised:                      # Rick advisory: FIRST crossing, same poll as poke #1
                 self._mgr_advised.add( sid )
                 # age is never None here — the corpse-ceiling eligibility gate

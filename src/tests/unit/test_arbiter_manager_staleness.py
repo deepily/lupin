@@ -1004,5 +1004,246 @@ def test_read_manager_bridge_mtimes_swallows_exception():
     assert job._read_manager_bridge_mtimes() is None
 
 
+# ── item 285c0343 Lever A: HOLD-GATING (honored awaiting-user hold ⇒ suppress) ──
+# The hold-side dual of the owed_class BLOCKED_ON_USER branch. owed_class reads the
+# STORE, where the 6929f4ac open-gate override reclassifies an awaiting-user session
+# as CLASS_ACTIVE (it owes Rick a re-ask) — so a manager PARKED awaiting Rick's gate
+# answer reaches the poke path classed ACTIVE and would draw the case-14 poke (the
+# 2026-07-07 episode-2 false positive). Lever A reads the HOLD and suppresses.
+#
+# RED-first equivalence: each suppression test is PAIRED with its seam-off fail-safe
+# (hold_reader_fn=None → main behavior → the SAME scenario POKES). The pair proves the
+# new branch is load-bearing (remove it ⇒ revert to poke), stronger than a stash-RED.
+
+from lupin_cli.claude_code.hooks.lib import heartbeat_user_gates as _ug2
+
+
+def _honored_awaiting_user_hold( awaiting="user:rick", pending_user_gates=None ):
+    """A FRESH HONORED hold (is_honored: fresh + reasoned) declaring awaiting:user:*."""
+    return { "awaiting": awaiting, "reason": "parked awaiting Rick's gate answer",
+             "held_at": NOW.isoformat(), "ttl_seconds": 100000,     # huge → honored across every test's time span
+             "work_owed": True, "pending_user_gates": pending_user_gates or [ ] }
+
+
+def _await_sup_logs( logs ):
+    return [ ( ev, f ) for ev, f in logs if ev == "arbiter_manager_stale_suppressed_awaiting_user_hold" ]
+
+
+class TestLeverA_AwaitingUserHoldGating:
+
+    def test_awaiting_user_hold_suppresses_case14_poke( self ):
+        """CORE (RED on main — main never calls _session_awaiting_user in the staleness
+        poke path): honored awaiting:user:rick hold + owed_class ACTIVE ⇒ ZERO pokes,
+        exactly ONE case-16 MANAGER-AWAITING-RICK advisory, distinct suppression log."""
+        gw, escal, logs = _GW(), [ ], [ ]
+        job = _job( gw, notify=lambda m, *a, **k: escal.append( m ),
+                    log_fn=lambda ev, **k: logs.append( ( ev, k ) ),
+                    hold_reader_fn=lambda sid: _honored_awaiting_user_hold() )
+        snap  = _snap( _row( "m1", "manager", 3000, persona="mr radio" ) )
+        fired = job._check_manager_staleness( snap, NOW, active_managers=[ ],
+                                              owed_class={ "mr radio": CLASS_ACTIVE } )
+        assert fired == 0                                       # Lever A suppressed the case-14 poke
+        assert _stale_pokes( gw ) == [ ]
+        assert len( _awaiting( escal ) ) == 1                  # ONE case-16 advisory
+        assert [ m for m in escal if "MANAGER-STALE" in m ] == [ ]   # NOT the case-14 advisory
+        assert "m1" not in job._mgr_stale_since                # no staleness episode opened
+        assert "mr radio" in job._manager_blocked_advised
+        assert len( _await_sup_logs( logs ) ) == 1             # distinct, observable
+        assert _await_sup_logs( logs )[ 0 ][ 1 ][ "awaiting" ] == "user:rick"   # Q1 rider: awaiting stamped
+
+    def test_seam_off_same_scenario_still_pokes( self ):
+        """FAIL-SAFE / RED-equivalence: hold_reader_fn=None (main behavior) → Lever A
+        inert → the SAME awaiting-user scenario draws the case-14 poke. Proves the
+        branch is load-bearing."""
+        gw, escal = _GW(), [ ]
+        job = _job( gw, notify=lambda m, *a, **k: escal.append( m ) )   # hold_reader_fn defaults None
+        snap  = _snap( _row( "m1", "manager", 3000, persona="mr radio" ) )
+        fired = job._check_manager_staleness( snap, NOW, active_managers=[ ],
+                                              owed_class={ "mr radio": CLASS_ACTIVE } )
+        assert fired == 1 and len( _stale_pokes( gw ) ) == 1   # pokes without the hold read
+
+    def test_open_gate_hold_suppresses_and_stamps_next_chase( self ):
+        """The open-gate branch of _session_awaiting_user (no awaiting str, ≥1 OPEN
+        user-gate) also suppresses — and the Q1-rider log carries the soonest
+        next_chase_ts. Covers the defer_to_chase cadence transitively (an open gate on
+        a future next_chase_ts is still OPEN)."""
+        soon = "2026-06-11T19:30:00+00:00"
+        late = "2026-06-11T20:30:00+00:00"
+        g1   = _ug2.make_gate( "g1", "Proceed?", "ask_yes_no", last_asked_ts=NOW.isoformat(),
+                               next_chase_ts=late )
+        g2   = _ug2.make_gate( "g2", "Deploy?",  "ask_yes_no", last_asked_ts=NOW.isoformat(),
+                               next_chase_ts=soon )
+        gw, escal, logs = _GW(), [ ], [ ]
+        job = _job( gw, notify=lambda m, *a, **k: escal.append( m ),
+                    log_fn=lambda ev, **k: logs.append( ( ev, k ) ),
+                    hold_reader_fn=lambda sid: _honored_awaiting_user_hold(
+                        awaiting="peer:cheech", pending_user_gates=[ g1, g2 ] ) )
+        snap  = _snap( _row( "m1", "manager", 3000, persona="mr radio" ) )
+        fired = job._check_manager_staleness( snap, NOW, active_managers=[ ],
+                                              owed_class={ "mr radio": CLASS_ACTIVE } )
+        assert fired == 0 and _stale_pokes( gw ) == [ ]
+        assert _await_sup_logs( logs )[ 0 ][ 1 ][ "soonest_next_chase_ts" ] == soon   # earliest chosen
+
+    def test_awaiting_user_hold_rearms_after_freshen( self ):
+        """Re-arm: the SHARED _manager_blocked_advised flag clears when the manager
+        freshens below threshold (leaves eligible), so a LATER awaiting-user episode
+        re-advises once (mirrors the BLOCKED_ON_USER re-arm)."""
+        gw, escal = _GW(), [ ]
+        job = _job( gw, notify=lambda m, *a, **k: escal.append( m ),
+                    hold_reader_fn=lambda sid: _honored_awaiting_user_hold() )
+        oc  = { "mr radio": CLASS_ACTIVE }
+        job._check_manager_staleness( _snap( _row( "m1", "manager", 3000, persona="mr radio" ) ),
+                                      NOW, active_managers=[ ], owed_class=oc )
+        assert len( _awaiting( escal ) ) == 1
+        # freshen: a sub-threshold row clears the suppression bookkeeping
+        job._check_manager_staleness( _snap( _row( "m1", "manager", 100, persona="mr radio" ) ),
+                                      NOW, active_managers=[ ], owed_class=oc )
+        assert "mr radio" not in job._manager_blocked_advised
+        # a later stale episode re-advises
+        job._check_manager_staleness( _snap( _row( "m1", "manager", 3000, persona="mr radio" ) ),
+                                      NOW, active_managers=[ ], owed_class=oc )
+        assert len( _awaiting( escal ) ) == 2
+
+    def test_expired_hold_falls_through_lever_a( self ):
+        """LAYERED PAIR (Tiberius rider): an EXPIRED hold (is_honored=False: stale
+        held_at) is NOT defended by Lever A → falls THROUGH to the poke path (here,
+        with velocity off, it pokes). This is the class today's hook-side 9-FP fix
+        targets; the arbiter hands it to Lever B, not Lever A."""
+        gw, escal = _GW(), [ ]
+        expired = { "awaiting": "user:rick", "reason": "parked",
+                    "held_at": "2026-06-11T10:00:00+00:00", "ttl_seconds": 60,   # long expired at NOW=18:00
+                    "work_owed": True, "pending_user_gates": [ ] }
+        job = _job( gw, notify=lambda m, *a, **k: escal.append( m ),
+                    manager_stale_velocity_suppress_streak=0,          # isolate Lever A
+                    hold_reader_fn=lambda sid: expired )
+        snap  = _snap( _row( "m1", "manager", 3000, persona="mr radio" ) )
+        fired = job._check_manager_staleness( snap, NOW, active_managers=[ ],
+                                              owed_class={ "mr radio": CLASS_ACTIVE } )
+        assert fired == 1 and len( _stale_pokes( gw ) ) == 1   # not honored → not suppressed by A
+
+    def test_awaiting_user_hold_facets_swallows_raising_reader( self ):
+        """_awaiting_user_hold_facets is best-effort: a raising reader → {} (the
+        suppression still fires elsewhere; the log row just omits facets)."""
+        def _boom( sid ): raise RuntimeError( "hold read failed" )
+        job = _job( hold_reader_fn=_boom )
+        assert job._awaiting_user_hold_facets( "m1" ) == { }
+
+    def test_awaiting_user_hold_facets_unwired_and_non_dict( self ):
+        """Facets helper: unwired seam → {}; a non-dict hold → {}."""
+        assert _job()._awaiting_user_hold_facets( "m1" ) == { }        # hold_reader_fn None
+        job = _job( hold_reader_fn=lambda sid: "not-a-dict" )
+        assert job._awaiting_user_hold_facets( "m1" ) == { }
+
+    def test_awaiting_user_hold_facets_unparseable_next_chase_falls_back( self ):
+        """Q1 rider robustness: an unparseable next_chase_ts → fall back to the first
+        stamp (never raises), and a hold with no awaiting str omits that key."""
+        g = _ug2.make_gate( "g1", "Proceed?", "ask_yes_no", last_asked_ts=NOW.isoformat(),
+                            next_chase_ts="not-an-iso-stamp" )
+        job = _job( hold_reader_fn=lambda sid: { "reason": "x", "held_at": NOW.isoformat(),
+                                                 "ttl_seconds": 7200, "pending_user_gates": [ g ] } )
+        facets = job._awaiting_user_hold_facets( "m1" )
+        assert facets == { "soonest_next_chase_ts": "not-an-iso-stamp" }   # no awaiting key; fallback stamp
+
+
+# ── item 285c0343 Lever B: LAST-SIGNAL VELOCITY (N advancing episodes ⇒ suppress) ──
+
+def _velocity_sup_logs( logs ):
+    return [ ( ev, f ) for ev, f in logs if ev == "arbiter_manager_stale_suppressed_velocity" ]
+
+
+def test_negative_velocity_streak_raises():
+    """Config guard: a negative velocity-suppress streak is a config bug → ValueError."""
+    with pytest.raises( ValueError, match="manager_stale_velocity_suppress_streak" ):
+        _job( manager_stale_velocity_suppress_streak=-1 )
+
+
+class TestLeverB_LastSignalVelocity:
+
+    _OC = { "mr radio": CLASS_ACTIVE }
+
+    def _episode( self, job, gw, at_epoch_min ):
+        """Drive one stale episode at a wall-clock `at_epoch_min` minutes past NOW with a
+        fixed 3000s age (so last_seen = that-instant − 3000 ADVANCES each episode), then
+        freshen to close the episode. Returns pokes fired on the stale poll."""
+        t_stale = NOW + datetime.timedelta( minutes=at_epoch_min )
+        before  = len( _stale_pokes( gw ) )
+        fired   = job._check_manager_staleness( _snap( _row( "m1", "manager", 3000, persona="mr radio" ) ),
+                                                t_stale, active_managers=[ ], owed_class=self._OC )
+        # freshen (sub-threshold) at +1min → clears the per-sid episode so the next call re-opens one
+        job._check_manager_staleness( _snap( _row( "m1", "manager", 100, persona="mr radio" ) ),
+                                      t_stale + datetime.timedelta( minutes=1 ), active_managers=[ ], owed_class=self._OC )
+        return fired, len( _stale_pokes( gw ) ) - before
+
+    def test_third_advancing_episode_suppressed( self ):
+        """CORE (RED on main — main has no velocity memory): three episodes whose
+        last-signal ADVANCES each time → ep1 pokes, ep2 pokes, ep3 SUPPRESSED with a
+        distinct velocity log carrying advancing_streak>=2 (the mr radio 13:08→13:59→
+        14:59 cadence)."""
+        gw, logs = _GW(), [ ]
+        job = _job( gw, log_fn=lambda ev, **k: logs.append( ( ev, k ) ) )   # default streak=2
+        f1, _ = self._episode( job, gw, 0 )     # last_seen ≈ NOW-3000
+        f2, _ = self._episode( job, gw, 60 )    # advanced ~1h → streak 1
+        f3, s3 = self._episode( job, gw, 120 )  # advanced ~1h → streak 2 ⇒ suppress
+        assert f1 == 1 and f2 == 1              # first two episodes poke
+        assert f3 == 0 and s3 == 0              # third suppressed (no poke sent)
+        assert len( _velocity_sup_logs( logs ) ) == 1
+        assert _velocity_sup_logs( logs )[ 0 ][ 1 ][ "advancing_streak" ] >= 2
+
+    def test_streak_zero_disables_lever( self ):
+        """manager_stale_velocity_suppress_streak=0 → the lever is OFF → even a long
+        advancing run keeps poking (RED-equivalence: turning the knob to 0 reverts to
+        main behavior)."""
+        gw, logs = _GW(), [ ]
+        job = _job( gw, manager_stale_velocity_suppress_streak=0,
+                    log_fn=lambda ev, **k: logs.append( ( ev, k ) ) )
+        f1, _ = self._episode( job, gw, 0 )
+        f2, _ = self._episode( job, gw, 60 )
+        f3, _ = self._episode( job, gw, 120 )
+        assert ( f1, f2, f3 ) == ( 1, 1, 1 )
+        assert _velocity_sup_logs( logs ) == [ ]
+
+    def test_non_advancing_episode_resets_streak_and_pokes( self ):
+        """A FROZEN last-signal (genuinely wedged) RESETS the streak → the real-stall
+        true positive still pokes. Drive two advancing episodes (streak→1) then an
+        episode whose last-signal did NOT advance (same instant math) → reset → poke."""
+        gw = _GW()
+        job = _job( gw )   # streak=2
+        self._episode( job, gw, 0 )       # ep1
+        self._episode( job, gw, 60 )      # ep2 advanced → streak 1
+        # ep3 with a LARGER age so last_seen does NOT advance vs ep2:
+        # ep2 last_seen ≈ (NOW+60m) − 3000s; make ep3 last_seen == that by pairing now/age.
+        t3   = NOW + datetime.timedelta( minutes=120 )
+        # choose age so t3 - age <= ep2 last_seen (NOW+60m-3000s): age = 120m-60m + 3000s = 6600s (< max 7200)
+        before = len( _stale_pokes( gw ) )
+        fired  = job._check_manager_staleness( _snap( _row( "m1", "manager", 6600, persona="mr radio" ) ),
+                                               t3, active_managers=[ ], owed_class=self._OC )
+        assert fired == 1 and len( _stale_pokes( gw ) ) - before == 1   # frozen last-signal → pokes
+
+    def test_first_episode_always_pokes( self ):
+        """Q3 (intended): the FIRST quiet episode has no prior → streak 0 → pokes. A
+        manager that just went quiet once is caught on ep1, never never."""
+        gw = _GW()
+        job = _job( gw )
+        f1, _ = self._episode( job, gw, 0 )
+        assert f1 == 1
+
+    def test_lever_a_wins_over_velocity_when_both_apply( self ):
+        """ORDERING: a manager BOTH awaiting-user AND on an advancing cadence → Lever A
+        (honored hold) suppresses FIRST via the case-16 path and NEVER perturbs the
+        velocity streak (no velocity log; streak stays 0)."""
+        gw, escal, logs = _GW(), [ ], [ ]
+        job = _job( gw, notify=lambda m, *a, **k: escal.append( m ),
+                    log_fn=lambda ev, **k: logs.append( ( ev, k ) ),
+                    hold_reader_fn=lambda sid: _honored_awaiting_user_hold() )
+        for mins in ( 0, 60, 120 ):
+            job._check_manager_staleness( _snap( _row( "m1", "manager", 3000, persona="mr radio" ) ),
+                                          NOW + datetime.timedelta( minutes=mins ),
+                                          active_managers=[ ], owed_class=self._OC )
+        assert _stale_pokes( gw ) == [ ]                       # never poked
+        assert _velocity_sup_logs( logs ) == [ ]               # velocity never engaged
+        assert job._mgr_velocity_streak.get( "mr radio", 0 ) == 0
+        assert len( _await_sup_logs( logs ) ) == 3             # A suppressed every episode
+
+
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )
