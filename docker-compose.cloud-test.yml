@@ -82,7 +82,12 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - ./src:/var/lupin/src                # mount model — code from the on-VM checkout (Decision 3)
+      # Decision 3 (./src bind-mount) SUPERSEDED for the v0.2.0 pgvector leg (2026-07-07, Mr. Radio ruling):
+      # app code now rides the self-consistent baked image (lupin:1.2.1-pgvector-r3 @ sha256:4748ab2a…), NOT
+      # the on-VM checkout. A live ./src bind would SHADOW the baked cutover code (is_postgres_backend,
+      # backend=postgres, boot auto-migrate to e1f2a3b4c5d6) with whatever the on-VM checkout happens to be —
+      # the exact mount-shadow trap Clayton's probe caught. Deploy pins LUPIN_IMAGE to the -r3 digest; keys +
+      # io stay as independent mounts below. See src/rnd/2026.06.30-gpu-model-server-cloud-run-split/08-*.md Part 4.
       - ./io:/var/lupin/io
       - ./src/conf/keys:/var/lupin/src/conf/keys:ro   # provider keys, out-of-band (Decision 3b)
       - cloudsql-socket:/cloudsql           # shared Auth-Proxy socket → matches database.py host=/cloudsql/<CONN>
