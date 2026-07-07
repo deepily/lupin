@@ -54,7 +54,12 @@ export interface TaskMutation {
 // to `?owner_persona=<self>&status=<open>` by editing this one constant if a
 // per-session scope is later wanted (cascade §F left the exact param values to
 // the consumer).
-export const TASK_LIST_ENDPOINT         = "/api/tasks?limit=500";
+// unscoped_audit=true: this is a DELIBERATE full-board sweep (the human's
+// dashboard), so it passes the repository unscoped-size guard's escape rather
+// than 400ing once the store exceeds the threshold. include_terminal=true:
+// preserve the documented "any status" composite (the renderer, not the server,
+// filters to open) — the human's view is never silently truncated.
+export const TASK_LIST_ENDPOINT         = "/api/tasks?limit=500&unscoped_audit=true&include_terminal=true";
 export const TASK_LIST_POLL_INTERVAL_MS = 60000;   // 60s auto-poll (fleet parity)
 
 export interface TaskListStore {

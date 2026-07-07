@@ -624,5 +624,53 @@ class TestSoftGuardTitle:
         assert advisory[ "cap" ] == 4 and advisory[ "original_length" ] == 10
 
 
+class TestUnscopedGuardRules:
+    """The unscoped-query guard primitives (design 2026.07.07)."""
+
+    @pytest.mark.parametrize( "scoping_filter", [
+        "owner_persona", "status", "item_class", "project",
+        "gate_class", "accountable_manager", "correlation_key",
+    ] )
+    def test_any_scoping_filter_makes_query_scoped( self, scoping_filter ):
+        # Every one of the 7 narrowing filters flips is_unscoped to False.
+        assert rules.is_unscoped( { scoping_filter: "x" } ) is False
+
+    def test_no_filters_is_unscoped( self ):
+        assert rules.is_unscoped( { } ) is True
+
+    def test_all_none_filters_is_unscoped( self ):
+        # Explicit None counts as absent — the bare board glance.
+        assert rules.is_unscoped( { "owner_persona": None, "status": None } ) is True
+
+    def test_urgency_only_is_unscoped( self ):
+        # urgency is deliberately EXCLUDED from the scoping set — too coarse to narrow.
+        assert rules.is_unscoped( { "urgency": "urgent" } ) is True
+
+    def test_urgency_plus_scoping_filter_is_scoped( self ):
+        # urgency alongside a real narrowing filter is scoped (the filter wins).
+        assert rules.is_unscoped( { "urgency": "urgent", "owner_persona": "sam" } ) is False
+
+    def test_scoping_filters_set_membership( self ):
+        # Pin the exact scoping set + urgency's exclusion (the guard boolean María reviews).
+        assert set( rules.SCOPING_FILTERS ) == {
+            "owner_persona", "status", "item_class", "project",
+            "gate_class", "accountable_manager", "correlation_key",
+        }
+        assert "urgency" not in rules.SCOPING_FILTERS
+
+    def test_unscoped_query_error_carries_count_and_threshold( self ):
+        err = rules.UnscopedQueryError( 273, 50 )
+        assert err.count == 273 and err.threshold == 50
+        assert "273" in str( err ) and "unscoped_audit=true" in str( err )
+
+    def test_unscoped_query_error_defaults_threshold_to_constant( self ):
+        err = rules.UnscopedQueryError( 99 )
+        assert err.threshold == rules.UNSCOPED_QUERY_THRESHOLD
+
+    def test_threshold_constants_are_positive_ints( self ):
+        assert isinstance( rules.UNSCOPED_QUERY_THRESHOLD, int ) and rules.UNSCOPED_QUERY_THRESHOLD > 0
+        assert isinstance( rules.NONTERSE_WARN_THRESHOLD, int ) and rules.NONTERSE_WARN_THRESHOLD > 0
+
+
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )

@@ -294,7 +294,18 @@ def _default_known_owners_fn():   # pragma: no cover - production store-read IO 
     from cosa.rest.db.repositories.task_repository import TaskRepository
     with get_db() as session:
         repo = TaskRepository( session )
-        return { it.owner_persona for it in repo.query_tasks() if it.owner_persona }
+        # unscoped_audit=True: this is a DELIBERATE full-store sweep — the arbiter's
+        # known-owner fail-safe MUST see every owner, so it passes the guard's escape
+        # (Rick's operational mandate, verbatim: "make sure the arbiter passes that
+        # unscoped_audit flag in as true … the last thing we want is for the arbiter
+        # to break"). include_terminal=True: a genuinely-finished persona (only
+        # terminal rows) MUST remain a known owner so its real completion still
+        # classifies DONE — so the ALL-status read is preserved (decision-5, verified).
+        return {
+            it.owner_persona
+            for it in repo.query_tasks( unscoped_audit=True, include_terminal=True )
+            if it.owner_persona
+        }
 
 
 def _default_operator_gates_fn():   # pragma: no cover - production store-read IO boundary

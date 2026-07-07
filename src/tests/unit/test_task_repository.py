@@ -189,11 +189,15 @@ def test_transition_to_done_carries_receipts_onto_event( repo, session ):
 # ---------------------------------------------------------------------------
 
 def test_query_tasks_no_filters_skips_filter_calls( repo, session ):
+    # unscoped_audit=True + include_terminal=True reproduces the PRE-guard "raw,
+    # all-status" query_tasks() so this test isolates the filter-application
+    # mechanics (no guard COUNT(*), no terminal-exclusion filter) — the guard and
+    # terminal-default behaviors are covered by their own tests below.
     sentinel = [ _item() ]
     query    = session.query.return_value
     query.all.return_value = sentinel
 
-    result = repo.query_tasks()
+    result = repo.query_tasks( unscoped_audit=True, include_terminal=True )
 
     assert result is sentinel
     query.filter.assert_not_called()
@@ -238,7 +242,10 @@ def test_query_tasks_applies_every_provided_filter( repo, session ):
 def test_query_tasks_filter_combinations( repo, session, kwargs, expected_filters ):
     query = session.query.return_value
     query.all.return_value = [ ]
-    repo.query_tasks( **kwargs )
+    # include_terminal=True + unscoped_audit=True → the raw pre-guard path, so the
+    # filter count equals exactly the provided-filter count (no terminal-exclusion
+    # filter, no guard COUNT(*) that a urgency-only unscoped case would otherwise trip).
+    repo.query_tasks( include_terminal=True, unscoped_audit=True, **kwargs )
     assert query.filter.call_count == expected_filters
 
 
@@ -249,7 +256,9 @@ def test_query_tasks_filter_combinations( repo, session, kwargs, expected_filter
 def test_count_tasks_no_filters_returns_scalar_no_pagination( repo, session ):
     query = session.query.return_value
     query.scalar.return_value = 273                            # >100: no page saturation
-    result = repo.count_tasks()
+    # include_terminal=True → count every status (the pre-terminal-default count),
+    # so this test stays about pagination/ordering, not terminal exclusion.
+    result = repo.count_tasks( include_terminal=True )
     assert result == 273
     query.filter.assert_not_called()
     query.scalar.assert_called_once()
@@ -289,8 +298,114 @@ def test_count_tasks_applies_every_provided_filter( repo, session ):
 def test_count_tasks_filter_combinations( repo, session, kwargs, expected_filters ):
     query = session.query.return_value
     query.scalar.return_value = 0
-    repo.count_tasks( **kwargs )
+    # include_terminal=True → no terminal-exclusion filter, so the filter count
+    # equals exactly the provided-filter count regardless of whether status is set.
+    repo.count_tasks( include_terminal=True, **kwargs )
     assert query.filter.call_count == expected_filters
+
+
+# ---------------------------------------------------------------------------
+# Unscoped-query guard + terminal-exclusion default (design 2026.07.07)
+# ---------------------------------------------------------------------------
+
+from cosa.rest.task_store_rules import UnscopedQueryError, UNSCOPED_QUERY_THRESHOLD
+
+
+def test_query_tasks_guard_fires_on_bare_unscoped_over_threshold( repo, session ):
+    # A BARE unscoped pull whose non-terminal COUNT(*) exceeds the threshold, with
+    # no unscoped_audit escape, HARD-FAILS before a single row is materialized.
+    query = session.query.return_value
+    query.scalar.return_value = UNSCOPED_QUERY_THRESHOLD + 10   # the guard's COUNT(*)
+    with pytest.raises( UnscopedQueryError ) as exc:
+        repo.query_tasks()
+    assert exc.value.count == UNSCOPED_QUERY_THRESHOLD + 10
+    assert exc.value.threshold == UNSCOPED_QUERY_THRESHOLD
+    query.all.assert_not_called()                              # rejected before row fetch
+
+
+def test_query_tasks_guard_boundary_at_threshold_does_not_fire( repo, session ):
+    # EXACTLY the threshold is allowed (strictly-greater fails) — no raise, rows fetched.
+    sentinel = [ _item() ]
+    query    = session.query.return_value
+    query.scalar.return_value = UNSCOPED_QUERY_THRESHOLD        # == threshold, not >
+    query.all.return_value = sentinel
+    assert repo.query_tasks() is sentinel                       # no UnscopedQueryError raised
+    query.all.assert_called_once()
+
+
+def test_query_tasks_unscoped_audit_escape_bypasses_guard( repo, session ):
+    # unscoped_audit=True is the deliberate-full-sweep escape: even a huge count
+    # does NOT raise, and the guard's COUNT(*) is never consulted.
+    query = session.query.return_value
+    query.scalar.return_value = UNSCOPED_QUERY_THRESHOLD + 999
+    query.all.return_value = [ _item(), _item() ]
+    result = repo.query_tasks( unscoped_audit=True )
+    assert result == query.all.return_value
+    query.scalar.assert_not_called()                           # guard COUNT(*) skipped entirely
+
+
+@pytest.mark.parametrize( "scoping", [
+    { "owner_persona": "krishna" },
+    { "status": "in_progress" },
+    { "gate_class": "operator" },
+    { "accountable_manager": "tiberius" },
+    { "project": "lupin" },
+    { "item_class": "task" },
+    { "correlation_key": "cc-task:sid:5" },
+] )
+def test_query_tasks_scoped_query_skips_guard_even_when_large( repo, session, scoping ):
+    # A SCOPED query (any narrowing filter) never trips the guard, however large —
+    # the exact false-positive to avoid (owner=me with 60 rows must NOT fail).
+    sentinel = [ _item() ]
+    query    = session.query.return_value
+    query.scalar.return_value = UNSCOPED_QUERY_THRESHOLD + 500  # would trip IF consulted
+    query.all.return_value = sentinel
+    result = repo.query_tasks( **scoping )                      # no raise
+    assert result is sentinel
+    query.scalar.assert_not_called()                           # scoped → guard COUNT(*) never run
+
+
+def test_query_tasks_urgency_only_is_unscoped_and_guarded( repo, session ):
+    # urgency is deliberately NOT a scoping filter — a urgency-only query is still
+    # unscoped and still guarded (a bare urgency pull can't narrow the store enough).
+    query = session.query.return_value
+    query.scalar.return_value = UNSCOPED_QUERY_THRESHOLD + 1
+    with pytest.raises( UnscopedQueryError ):
+        repo.query_tasks( urgency="urgent" )
+
+
+def test_query_tasks_excludes_terminal_by_default_on_unstatused_scoped_query( repo, session ):
+    # status=None + include_terminal=False → the terminal-exclusion filter is added
+    # ON TOP of the scoping filter (owner). Scoped, so the guard never runs.
+    query = session.query.return_value
+    query.all.return_value = [ ]
+    repo.query_tasks( owner_persona="krishna" )
+    assert query.filter.call_count == 2                        # owner filter + terminal-exclusion
+
+
+def test_query_tasks_include_terminal_suppresses_terminal_filter( repo, session ):
+    # include_terminal=True on an un-status'd scoped query → NO terminal filter.
+    query = session.query.return_value
+    query.all.return_value = [ ]
+    repo.query_tasks( owner_persona="krishna", include_terminal=True )
+    assert query.filter.call_count == 1                        # owner filter only
+
+
+def test_query_tasks_explicit_terminal_status_overrides_exclusion( repo, session ):
+    # An explicit status=done governs alone — no terminal-exclusion double-filter.
+    query = session.query.return_value
+    query.all.return_value = [ ]
+    repo.query_tasks( status="done" )                          # scoped by status → guard skipped
+    assert query.filter.call_count == 1                        # status filter only, terminal returned
+
+
+def test_count_tasks_excludes_terminal_by_default_on_unstatused_query( repo, session ):
+    # count_tasks parity: status=None + include_terminal=False → terminal-exclusion
+    # filter applied, so the guard's non-terminal count matches the payload it guards.
+    query = session.query.return_value
+    query.scalar.return_value = 0
+    repo.count_tasks( owner_persona="krishna" )
+    assert query.filter.call_count == 2                        # owner + terminal-exclusion
 
 
 # ---------------------------------------------------------------------------

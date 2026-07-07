@@ -673,6 +673,8 @@ def query_tasks(
     correlation_key     : Optional[str] = None,
     count_only          : bool = False,
     terse               : bool = False,
+    include_terminal    : bool = False,
+    unscoped_audit      : bool = False,
     limit               : int = Query( default=100, ge=0, le=500 ),
     offset              : int = Query( default=0, ge=0 ),
 ):
@@ -732,7 +734,8 @@ def query_tasks(
         repo = TaskRepository( session )
         if count_only:
             # True COUNT(*) — no row materialization (§G). limit/offset are
-            # deliberately NOT forwarded: a count is page-independent.
+            # deliberately NOT forwarded: a count is page-independent. A count
+            # returns no rows, so the unscoped-size guard does not apply here.
             count = repo.count_tasks(
                 owner_persona       = owner_persona,
                 status              = status,
@@ -742,23 +745,50 @@ def query_tasks(
                 project             = project,
                 item_class          = item_class,
                 correlation_key     = correlation_key,
+                include_terminal    = include_terminal,
             )
             return { "count": count }
-        items = repo.query_tasks(
-            owner_persona       = owner_persona,
-            status              = status,
-            gate_class          = gate_class,
-            urgency             = urgency,
-            accountable_manager = accountable_manager,
-            project             = project,
-            item_class          = item_class,
-            correlation_key     = correlation_key,
-            limit               = limit,
-            offset              = offset,
-        )
+        # The unscoped-query guard (design 2026.07.07) is a repository-layer raise;
+        # map it to an educational HTTP 400 that names the two fixes (mirrors the
+        # ?scope= teach-while-enforcing 400). A legitimate full sweep passes
+        # unscoped_audit=true (the arbiter + the two UI board cards).
+        try:
+            items = repo.query_tasks(
+                owner_persona       = owner_persona,
+                status              = status,
+                gate_class          = gate_class,
+                urgency             = urgency,
+                accountable_manager = accountable_manager,
+                project             = project,
+                item_class          = item_class,
+                correlation_key     = correlation_key,
+                limit               = limit,
+                offset              = offset,
+                include_terminal    = include_terminal,
+                unscoped_audit      = unscoped_audit,
+            )
+        except rules.UnscopedQueryError as e:
+            raise HTTPException(
+                status_code = 400,
+                detail      = (
+                    f"unscoped task_query would return {e.count} non-terminal rows "
+                    f"(> {e.threshold}). Narrow it with a filter (owner_persona / "
+                    f"status / item_class / project / gate_class / accountable_manager "
+                    f"/ correlation_key), or pass unscoped_audit=true for a deliberate "
+                    f"full-store audit."
+                ),
+            )
         # terse → the at-a-glance projection (§G); else the full wire shape.
         serialize = _serialize_item_terse if terse else _serialize_item
         tasks = [ serialize( item ) for item in items ]
+        # Warn-not-fail (María #3): a heavy NON-terse pull earns an OBSERVABLE log
+        # line nudging toward terse=True — never a rejection, rows still returned.
+        if not terse and len( tasks ) > rules.NONTERSE_WARN_THRESHOLD:
+            print(
+                f"[task_query WARN] non-terse pull returned {len( tasks )} full rows "
+                f"(> {rules.NONTERSE_WARN_THRESHOLD}) — pass terse=true for the "
+                f"at-a-glance projection to cut token weight"
+            )
         return { "tasks": tasks, "count": len( tasks ) }
 
 

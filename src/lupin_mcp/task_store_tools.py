@@ -336,6 +336,8 @@ def task_query_impl(
     limit               = None,
     offset              = None,
     terse               = False,
+    include_terminal    = False,
+    unscoped_audit      = False,
 ):
     """
     GET /api/tasks — the deterministic owed-work query (design R4).
@@ -350,6 +352,12 @@ def task_query_impl(
           (id/title/status/blocked_by/next_chase_ts/priority — body dropped);
           passed to the server as the canonical lowercase "true" (a pre-§G
           server simply ignores the unknown param and returns full rows)
+        - include_terminal=True includes done/dropped rows on an un-status'd
+          query (default: terminal rows excluded — the 89->2 payload collapse);
+          unscoped_audit=True is the deliberate-full-sweep escape past the
+          unscoped-size guard. Both are forwarded ONLY when truthy, as the
+          canonical lowercase "true" (mirror of terse), so a pre-guard server
+          simply ignores the unknown params.
         - the `project` filter is canonicalized through the shared
           `_PROJECT_ALIASES` map (mirror of the write seam) so an agent-facing
           query by the raw repo name still matches the canonically-stored rows
@@ -368,6 +376,7 @@ def task_query_impl(
         "offset"              : offset,
     }
     params = { key: value for key, value in filters.items() if value is not None }
-    if terse:
-        params[ "terse" ] = "true"
+    if terse:            params[ "terse" ]            = "true"
+    if include_terminal: params[ "include_terminal" ] = "true"
+    if unscoped_audit:   params[ "unscoped_audit" ]   = "true"
     return task_store_request( "GET", "/api/tasks", api_base_url, api_key, params=params )

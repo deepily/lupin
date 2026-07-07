@@ -794,6 +794,20 @@ test( "fetchTaskList: 200 ok → parsed { tasks, count }", async () => {
   assert.deepEqual( await ui.fetchTaskList(), body );
 } );
 
+test( "fetchTaskList: fetches the unscoped-guard escape endpoint (design 2026.07.07)", async () => {
+  // The board card is a DELIBERATE full-board sweep — its URL MUST carry the
+  // guard escape (unscoped_audit=true) or it 400s past the threshold, plus
+  // include_terminal=true so the human's all-status view is never truncated.
+  const ui = newUI();
+  let seen = "";
+  ui.authedFetch = async ( url: string ) => { seen = url; return fakeResponse( 200, true, { tasks: [], count: 0 } ); };
+  await ui.fetchTaskList();
+  assert.ok( seen.includes( "/api/tasks?" ), "hits the tasks endpoint" );
+  assert.ok( seen.includes( "unscoped_audit=true" ), "passes unscoped_audit=true" );
+  assert.ok( seen.includes( "include_terminal=true" ), "passes include_terminal=true" );
+  assert.ok( seen.includes( "limit=500" ), "still caps at 500" );
+} );
+
 test( "fetchTaskList: 401 → auth_required", async () => {
   const ui = newUI();
   ui.authedFetch = async () => fakeResponse( 401, false, null );

@@ -101,6 +101,44 @@ test("initial composite is null", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Unscoped-query guard escape (design 2026.07.07) — the board card is a
+// DELIBERATE full-board sweep, so its endpoint MUST carry the guard escape or
+// it 400s once the store grows past the threshold. Pin both params + prove the
+// full board (incl. terminal rows) is cached WITHOUT truncation (rider ii).
+// ---------------------------------------------------------------------------
+
+test("endpoint carries the unscoped-guard escape params", () => {
+  assert.ok(TASK_LIST_ENDPOINT.includes("unscoped_audit=true"), "must pass unscoped_audit=true");
+  assert.ok(TASK_LIST_ENDPOINT.includes("include_terminal=true"), "must pass include_terminal=true");
+  assert.ok(TASK_LIST_ENDPOINT.includes("limit=500"), "still caps at 500");
+});
+
+test("refresh: a large all-status board is cached in full — no truncation", async () => {
+  // The human's view is never silently truncated: a board carrying MORE than the
+  // guard threshold, spanning open AND terminal statuses, round-trips unchanged.
+  const statuses = ["queued", "in_progress", "blocked", "done", "dropped"];
+  const bigBoard: TaskListComposite = {
+    tasks: Array.from({ length: 120 }, (_, i) => ({
+      id: String(i), title: `t${i}`, status: statuses[i % statuses.length], owner_persona: "amy",
+    })),
+    count: 120,
+  };
+  const { bus } = makeBus();
+  const getCalls: string[] = [];
+  const api: TaskListApiClient = {
+    get: async <T,>(path: string): Promise<T> => { getCalls.push(path); return bigBoard as T; },
+    patch: async <T,>(): Promise<T> => null as T,
+    post:  async <T,>(): Promise<T> => null as T,
+  };
+  const store = createTaskListStore({ bus, api, endpoint: ENDPOINT, nowFn });
+  await store.refresh();
+  assert.deepEqual(getCalls, [ENDPOINT]);                       // fetched via the escape endpoint
+  assert.equal(store.composite()?.count, 120);                 // every row kept
+  assert.equal(store.composite()?.tasks.length, 120);
+  assert.ok(store.composite()?.tasks.some((t) => t.status === "done"));   // terminal rows preserved
+});
+
+// ---------------------------------------------------------------------------
 // fetch sentinel mapping via refresh()
 // ---------------------------------------------------------------------------
 

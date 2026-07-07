@@ -446,6 +446,70 @@ def test_query_reports_multiple_junk_filters_at_once( client, repo ):
     assert r.status_code == 422 and len( r.json()[ "detail" ][ "errors" ] ) == 3
 
 
+# ---------------------------------------------------------------------------
+# GET /api/tasks — unscoped-query guard (design 2026.07.07)
+# ---------------------------------------------------------------------------
+
+def test_query_maps_unscoped_query_error_to_educational_400( client, repo ):
+    # The repository raises UnscopedQueryError on a bare over-threshold pull; the
+    # router maps it to HTTP 400 whose detail NAMES the two fixes (teach-while-enforce).
+    repo.query_tasks.side_effect = tasks.rules.UnscopedQueryError( 273, 50 )
+    r = client.get( "/api/tasks" )
+    assert r.status_code == 400
+    detail = r.json()[ "detail" ]
+    assert "273" in detail and "unscoped_audit=true" in detail
+    assert "owner_persona" in detail                          # names a narrowing filter too
+
+
+def test_query_forwards_include_terminal_and_unscoped_audit_to_repo( client, repo ):
+    # Both new params reach the repository query (the UI board cards + arbiter escape).
+    repo.query_tasks.return_value = [ ]
+    r = client.get( "/api/tasks", params={ "unscoped_audit": "true", "include_terminal": "true" } )
+    assert r.status_code == 200
+    kwargs = repo.query_tasks.call_args.kwargs
+    assert kwargs[ "unscoped_audit" ] is True and kwargs[ "include_terminal" ] is True
+
+
+def test_query_defaults_include_terminal_and_unscoped_audit_false( client, repo ):
+    # Omitted → both default False (the guarded, terminal-excluding common path).
+    repo.query_tasks.return_value = [ ]
+    client.get( "/api/tasks", params={ "owner_persona": "krishna" } )
+    kwargs = repo.query_tasks.call_args.kwargs
+    assert kwargs[ "unscoped_audit" ] is False and kwargs[ "include_terminal" ] is False
+
+
+def test_query_count_only_forwards_include_terminal_to_count( client, repo ):
+    # count_only path plumbs include_terminal to count_tasks (parity with the list path).
+    repo.count_tasks.return_value = 0
+    client.get( "/api/tasks", params={ "count_only": "true", "include_terminal": "true" } )
+    assert repo.count_tasks.call_args.kwargs[ "include_terminal" ] is True
+
+
+def test_query_warns_on_heavy_nonterse_pull( client, repo, capsys ):
+    # María #3 warn-not-fail: a non-terse pull over the WARN threshold logs an
+    # OBSERVABLE line AND still returns every row (never a rejection).
+    over = tasks.rules.NONTERSE_WARN_THRESHOLD + 1
+    repo.query_tasks.return_value = [ make_item() for _ in range( over ) ]
+    r = client.get( "/api/tasks" )
+    assert r.status_code == 200 and r.json()[ "count" ] == over  # rows NOT truncated
+    assert "[task_query WARN]" in capsys.readouterr().out
+
+
+def test_query_no_warn_on_terse_pull( client, repo, capsys ):
+    # A terse pull of the same size does NOT warn — terse is the desired shape.
+    over = tasks.rules.NONTERSE_WARN_THRESHOLD + 1
+    repo.query_tasks.return_value = [ make_item() for _ in range( over ) ]
+    client.get( "/api/tasks", params={ "terse": "true" } )
+    assert "[task_query WARN]" not in capsys.readouterr().out
+
+
+def test_query_no_warn_on_small_nonterse_pull( client, repo, capsys ):
+    # A small non-terse pull (<= threshold) is silent — the WARN targets heavy pulls only.
+    repo.query_tasks.return_value = [ make_item(), make_item() ]
+    client.get( "/api/tasks" )
+    assert "[task_query WARN]" not in capsys.readouterr().out
+
+
 @pytest.mark.parametrize( "params", [
     { "limit": -1 },          # Postgres InvalidRowCountInLimitClause — was an authenticated 500
     { "limit": 501 },         # above the wire cap

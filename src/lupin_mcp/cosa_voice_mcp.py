@@ -3539,6 +3539,8 @@ def task_query(
     limit               : Optional[ int ] = None,
     offset              : Optional[ int ] = None,
     terse               : bool            = False,
+    include_terminal    : bool            = False,
+    unscoped_audit      : bool            = False,
 ) -> dict:
     """
     **[READ — always allowed, no user permission needed]** Query the task store.
@@ -3553,15 +3555,25 @@ def task_query(
     dropped), a fraction of the full-row token weight. Reach for the full shape
     (terse=False) ONLY when you actually need a row's body/audit context.
 
-    Examples:
-        # Manager board glance — everything, newest first, CHEAP projection:
-        task_query(terse=True)
+    UNSCOPED-QUERY GUARD (design 2026.07.07): a BARE `task_query()` with no
+    narrowing filter is REJECTED with an educational error-dict once the store
+    holds more than the threshold of non-terminal rows — the DB only grows;
+    nobody pulls the whole board by accident. The two fixes the error names:
+    (1) add a narrowing filter (owner_persona / status / item_class / project /
+    gate_class / accountable_manager / correlation_key), or (2) pass
+    `unscoped_audit=True` for a DELIBERATE full-store audit. Terminal (done/
+    dropped) rows are excluded by default; pass `include_terminal=True` to
+    include them on an un-status'd query.
 
-        # My owed work (terse list):
+    Examples:
+        # My owed work (terse list) — the everyday scoped query:
         task_query(owner_persona="sam", status="in_progress", terse=True)
 
         # Operator queue, full rows (need the body):
         task_query(gate_class="operator")
+
+        # Deliberate full-store audit (past the guard, incl. terminal rows):
+        task_query(unscoped_audit=True, include_terminal=True, terse=True)
 
     Args:
         owner_persona: Filter by who owes the work
@@ -3577,10 +3589,16 @@ def task_query(
         offset: Pagination offset
         terse: True → the at-a-glance projection (§G token win); False (default)
             → the full wire shape including body
+        include_terminal: True → include done/dropped rows on an un-status'd
+            query (default False excludes them)
+        unscoped_audit: True → the deliberate-full-sweep escape past the
+            unscoped-size guard (default False → a bare over-threshold pull is
+            rejected as an error-dict)
 
     Returns:
         { tasks: [...], count } verbatim (terse rows when terse=True), or an
-        error dict (see task_create).
+        error dict — an unscoped over-threshold pull without unscoped_audit
+        surfaces { status: "error", http_status: 400, detail: <the two fixes> }.
     """
     return task_query_impl(
         api_base_url        = _get_server_url(),
@@ -3596,6 +3614,8 @@ def task_query(
         limit               = limit,
         offset              = offset,
         terse               = terse,
+        include_terminal    = include_terminal,
+        unscoped_audit      = unscoped_audit,
     )
 
 

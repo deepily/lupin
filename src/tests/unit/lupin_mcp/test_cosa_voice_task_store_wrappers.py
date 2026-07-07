@@ -188,6 +188,8 @@ class TestTaskQueryWrapper:
             "limit"               : None,
             "offset"              : None,
             "terse"               : False,                     # §G: defaults off (full rows)
+            "include_terminal"    : False,                     # guard: exclude done/dropped by default
+            "unscoped_audit"      : False,                     # guard: no deliberate-audit escape by default
         }
 
     def test_filters_pass_through( self, stamped_identity, monkeypatch ):
@@ -214,6 +216,15 @@ class TestTaskQueryWrapper:
         cv.task_query.fn( owner_persona="sam", terse=True )
         assert captured[ "terse" ]         is True
         assert captured[ "owner_persona" ] == "sam"
+
+    def test_guard_escape_params_pass_through( self, stamped_identity, monkeypatch ):
+        # The unscoped-query guard escape: include_terminal + unscoped_audit reach
+        # the transport impl verbatim (the deliberate-audit path).
+        captured = { }
+        monkeypatch.setattr( cv, "task_query_impl", lambda **kwargs: captured.update( kwargs ) or SENTINEL )
+        cv.task_query.fn( unscoped_audit=True, include_terminal=True )
+        assert captured[ "unscoped_audit" ]   is True
+        assert captured[ "include_terminal" ] is True
 
 
 class TestTaskReassignWrapper:

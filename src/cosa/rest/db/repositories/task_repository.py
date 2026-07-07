@@ -20,6 +20,12 @@ from sqlalchemy.orm import Session
 
 from cosa.rest.postgres_models import TaskItem, TaskEvent
 from cosa.rest.db.repositories.base import BaseRepository
+from cosa.rest.task_store_rules import (
+    TERMINAL_STATUSES,
+    UNSCOPED_QUERY_THRESHOLD,
+    UnscopedQueryError,
+    is_unscoped,
+)
 
 
 class TaskRepository( BaseRepository[TaskItem] ):
@@ -383,23 +389,63 @@ class TaskRepository( BaseRepository[TaskItem] ):
         correlation_key     : Optional[str] = None,
         limit               : int = 100,
         offset              : int = 0,
+        include_terminal    : bool = False,
+        unscoped_audit      : bool = False,
     ) -> List[TaskItem]:
         """
         The deterministic owed-work query (design R4) — identical for every caller.
+
+        The unscoped-query guard (design 2026.07.07) lives HERE at the repository
+        layer so it is universal + un-bypassable by any repo-direct caller (the
+        arbiter, the in-process watchers) — not just the REST/MCP surface.
 
         Requires:
             - each filter is either None (no constraint) or an exact-match value
             - limit/offset are non-negative ints
 
         Ensures:
+            - EXCLUDES terminal (done/dropped) rows by DEFAULT (include_terminal=
+              False) UNLESS an explicit terminal `status` filter is set (you asked
+              for terminal, you get it) — the 89->2 payload collapse. Pass
+              include_terminal=True to include terminal rows on an un-status'd query.
+            - HARD-FAILS with UnscopedQueryError when the query is UNSCOPED (no
+              narrowing filter — see task_store_rules.is_unscoped) AND would return
+              more than UNSCOPED_QUERY_THRESHOLD non-terminal rows AND
+              unscoped_audit is False. The count is a cheap COUNT(*) (count_tasks),
+              never a row materialization. A SCOPED query skips the guard entirely
+              (zero overhead on the common path).
             - returns items matching ALL provided filters (AND semantics)
             - ordered by created_ts descending (newest first), then id for
               a stable total order
             - paginated via limit/offset
 
+        Raises:
+            - UnscopedQueryError when the unscoped-over-threshold-not-audit
+              conjunction holds (the router maps it to HTTP 400; the MCP verb to
+              an error-dict)
+
         Returns:
             List of TaskItem instances (may be empty)
         """
+        filters = {
+            "owner_persona"       : owner_persona,
+            "status"              : status,
+            "gate_class"          : gate_class,
+            "urgency"             : urgency,
+            "accountable_manager" : accountable_manager,
+            "project"             : project,
+            "item_class"          : item_class,
+            "correlation_key"     : correlation_key,
+        }
+
+        # The guard: a bare unscoped pull over-threshold, with no deliberate-audit
+        # opt-in, is rejected BEFORE any row is fetched. Count is always NON-terminal
+        # (the default payload shape) via the cheap COUNT(*) — no rows materialized.
+        if not unscoped_audit and is_unscoped( filters ):
+            non_terminal = self.count_tasks( include_terminal=False, **filters )
+            if non_terminal > UNSCOPED_QUERY_THRESHOLD:
+                raise UnscopedQueryError( non_terminal, UNSCOPED_QUERY_THRESHOLD )
+
         query = self.session.query( TaskItem )
 
         if owner_persona is not None:       query = query.filter( TaskItem.owner_persona == owner_persona )
@@ -410,6 +456,11 @@ class TaskRepository( BaseRepository[TaskItem] ):
         if project is not None:             query = query.filter( TaskItem.project == project )
         if item_class is not None:          query = query.filter( TaskItem.item_class == item_class )
         if correlation_key is not None:     query = query.filter( TaskItem.correlation_key == correlation_key )
+        # Terminal-exclusion default: an un-status'd query drops done/dropped unless
+        # the caller opts in via include_terminal. An explicit `status` filter (incl.
+        # status=done/dropped) governs on its own — no double-filtering.
+        if not include_terminal and status is None:
+            query = query.filter( TaskItem.status.notin_( TERMINAL_STATUSES ) )
 
         return query.order_by( TaskItem.created_ts.desc(), TaskItem.id ).limit( limit ).offset( offset ).all()
 
@@ -423,6 +474,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         project             : Optional[str] = None,
         item_class          : Optional[str] = None,
         correlation_key     : Optional[str] = None,
+        include_terminal    : bool = False,
     ) -> int:
         """
         True COUNT(*) over the SAME filter set as query_tasks — no row materialization.
@@ -439,6 +491,11 @@ class TaskRepository( BaseRepository[TaskItem] ):
             - each filter is either None (no constraint) or an exact-match value
 
         Ensures:
+            - EXCLUDES terminal (done/dropped) rows by DEFAULT (include_terminal=
+              False) UNLESS an explicit terminal `status` filter is set — parity
+              with query_tasks so the guard's count matches the payload it guards.
+              The Stop-hook owed-count seam always passes a (non-terminal) `status`
+              filter, so this default is behavior-neutral for it.
             - returns the integer count of items matching ALL provided filters
             - no ORDER BY / LIMIT / OFFSET — a count is order- and page-independent
         """
@@ -452,6 +509,8 @@ class TaskRepository( BaseRepository[TaskItem] ):
         if project is not None:             query = query.filter( TaskItem.project == project )
         if item_class is not None:          query = query.filter( TaskItem.item_class == item_class )
         if correlation_key is not None:     query = query.filter( TaskItem.correlation_key == correlation_key )
+        if not include_terminal and status is None:
+            query = query.filter( TaskItem.status.notin_( TERMINAL_STATUSES ) )
 
         return query.scalar()
 

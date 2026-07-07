@@ -457,6 +457,21 @@ class TestTaskQueryImpl:
         task_query_impl( BASE_URL, API_KEY, project="planning-is-prompting" )
         assert calls[ "params" ] == { "project": "plan" }
 
+    def test_guard_params_default_omitted( self, capture_request ):
+        # include_terminal / unscoped_audit default False → NOT sent (the guarded,
+        # terminal-excluding common path; contract unchanged for existing callers).
+        calls = capture_request( FakeResponse( 200, json_body={ "tasks": [ ], "count": 0 } ) )
+        task_query_impl( BASE_URL, API_KEY, owner_persona="sam" )
+        assert "include_terminal" not in calls[ "params" ]
+        assert "unscoped_audit" not in calls[ "params" ]
+
+    def test_guard_params_true_send_canonical_lowercase_true( self, capture_request ):
+        # The deliberate-audit escape (the arbiter + UI board cards): both ride the
+        # wire as the canonical lowercase "true" (mirror of terse).
+        calls = capture_request( FakeResponse( 200, json_body={ "tasks": [ ], "count": 0 } ) )
+        task_query_impl( BASE_URL, API_KEY, unscoped_audit=True, include_terminal=True )
+        assert calls[ "params" ] == { "unscoped_audit": "true", "include_terminal": "true" }
+
 
 class TestProjectAliasRoundTrip:
     """

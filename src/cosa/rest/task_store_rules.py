@@ -59,6 +59,80 @@ LEGAL_TRANSITIONS = {
 # Receipt key whitelist + shape rules (design §4.1 AC1)
 RECEIPT_KEY_WHITELIST = ( "commit", "test_run", "qid", "doc_path", "log_line" )
 
+
+# ---------------------------------------------------------------------------
+# Unscoped-query guard (design 2026.07.07 task_query unscoped-guard — Option B)
+# ---------------------------------------------------------------------------
+#
+# Rick's operational mandate (voice, 2026-07-07): the task DB only grows; make
+# task_query FAIL so nobody can pull hundreds/thousands of rows. The guard is a
+# REPOSITORY-layer enforcement (universal, un-bypassable by any repo-direct
+# caller) that HARD-FAILS a BARE, unscoped query that would return more than
+# UNSCOPED_QUERY_THRESHOLD non-terminal rows — UNLESS the caller passes an
+# explicit `unscoped_audit=True` (the deliberate-full-sweep escape the arbiter
+# and the two UI board cards use).
+
+# The row ceiling for an unscoped pull. Counted NON-terminal always (done/dropped
+# are excluded from the count, mirroring the default query payload).
+UNSCOPED_QUERY_THRESHOLD = 50
+
+# A non-terse pull returning more than this many rows earns an OBSERVABLE WARN
+# (never a failure — María #3 warn-not-fail): a nudge toward terse=True. Distinct
+# axis from UNSCOPED_QUERY_THRESHOLD (that gates unscoped SIZE; this nudges
+# non-terse WEIGHT), same number by coincidence, not by coupling.
+NONTERSE_WARN_THRESHOLD = 50
+
+# "scoped" = ANY genuinely-narrowing filter present. Broadened past María's literal
+# four (owner_persona/status/item_class/project) to also protect the arbiter's
+# operator-gate sweep (gate_class), manager board-audits (accountable_manager), and
+# idempotency probes (correlation_key). `urgency` is deliberately EXCLUDED — it is
+# too coarse to meaningfully narrow the store, so a bare urgency filter is still
+# "unscoped" and still guarded.
+SCOPING_FILTERS = (
+    "owner_persona", "status", "item_class", "project",
+    "gate_class", "accountable_manager", "correlation_key",
+)
+
+
+class UnscopedQueryError( Exception ):
+    """
+    Raised by TaskRepository.query_tasks when a BARE unscoped query would return
+    more than UNSCOPED_QUERY_THRESHOLD non-terminal rows and the caller did NOT
+    pass unscoped_audit=True. Carries the offending count + the threshold so the
+    router can render an educational HTTP 400 (name the two fixes) and the MCP
+    verb can surface a structured error-dict.
+    """
+
+    def __init__( self, count: int, threshold: int = UNSCOPED_QUERY_THRESHOLD ):
+        self.count     = count
+        self.threshold = threshold
+        super().__init__(
+            f"unscoped task_query would return {count} non-terminal rows "
+            f"(> {threshold}) — narrow it with a filter (owner_persona / status / "
+            f"item_class / project / gate_class / accountable_manager / "
+            f"correlation_key) or pass unscoped_audit=true for a deliberate audit"
+        )
+
+
+def is_unscoped( filters: dict ) -> bool:
+    """
+    Return True iff NONE of the genuinely-narrowing SCOPING_FILTERS is present
+    (non-None) in `filters` — i.e. the query is a bare, un-narrowed full-store
+    pull that the guard must size-check.
+
+    Requires:
+        - filters is a dict of filter-name -> value (absent keys and explicit
+          None both count as "not present")
+
+    Ensures:
+        - returns True when every SCOPING_FILTERS entry is absent or None
+          (`urgency` is NOT a scoping filter, so a urgency-only query is
+          still unscoped)
+        - returns False the moment ANY scoping filter carries a non-None value
+        - never raises (a missing key is treated as None)
+    """
+    return not any( filters.get( name ) is not None for name in SCOPING_FILTERS )
+
 # Shape patterns are applied via re.fullmatch ONLY — never re.match + `$`,
 # because Python's `$` matches before a trailing newline, letting
 # "abcdef1\n" smuggle through the AC1 gate (cold-review N1, live-proven).

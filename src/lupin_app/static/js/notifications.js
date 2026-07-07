@@ -9078,7 +9078,12 @@ class NotificationsUI {
          *       or non-2xx, non-401 status (never throws)
          */
         try {
-            const response = await this.authedFetch( "/api/tasks?limit=500" );
+            // unscoped_audit=true: deliberate full-board sweep (the human's
+            // dashboard) — passes the repository unscoped-size guard's escape
+            // rather than 400ing once the store grows past the threshold.
+            // include_terminal=true: preserve the all-status board the renderer
+            // filters client-side, so the human's view is never truncated.
+            const response = await this.authedFetch( "/api/tasks?limit=500&unscoped_audit=true&include_terminal=true" );
             if ( response.status === 401 ) {
                 return { status: "auth_required" };
             }
