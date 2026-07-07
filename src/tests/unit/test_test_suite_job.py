@@ -966,3 +966,116 @@ class TestResetStateBetweenSuitesBody:
         with patch( "cosa.rest.db.database.engine", engine ):
             # Must not raise
             job._reset_state_between_suites( "e2e", "integration" )
+
+
+class TestPreflightAssertExclusiveTestDb:
+    """The sweep-start exclusivity preflight (bug caf58f71 — concurrent-writer
+    contamination). Fails LOUD if a non-test agentic job is inflight on the shared
+    lupin_db_test; NO-OPs off the test DB or when the running queue is unreachable."""
+
+    @staticmethod
+    def _test_engine():
+        engine     = MagicMock()
+        engine.url = "postgresql://u@h/lupin_db_test"
+        return engine
+
+    @staticmethod
+    def _install_main( jobs_run_queue="__unset__" ):
+        """Return a patch.dict context injecting fake lupin_app / lupin_app.main
+        into sys.modules. jobs_run_queue: '__unset__' → attr absent (AttributeError
+        path); None → attribute present but None; None-module → ImportError path;
+        any object → that queue."""
+        import sys, types
+        fake_pkg  = types.ModuleType( "lupin_app" )
+        if jobs_run_queue == "__import_error__":
+            fake_pkg.main = None
+            return patch.dict( sys.modules, { "lupin_app": fake_pkg, "lupin_app.main": None } )
+        fake_main = types.ModuleType( "lupin_app.main" )
+        if jobs_run_queue != "__unset__":
+            fake_main.jobs_run_queue = jobs_run_queue
+        fake_pkg.main = fake_main
+        return patch.dict( sys.modules, { "lupin_app": fake_pkg, "lupin_app.main": fake_main } )
+
+    def test_off_test_db_is_noop( self, job ):
+        """Off lupin_db_test (e.g. a sweep aimed at :7999 dev) the preflight must
+        NOT raise and must never consult the running queue."""
+        engine     = MagicMock()
+        engine.url = "postgresql://u@h/lupin_db_dev"
+        with patch( "cosa.rest.db.database.engine", engine ):
+            job._preflight_assert_exclusive_test_db()   # must not raise
+
+    def test_import_error_is_noop( self, job ):
+        """On the test DB but the running-queue module import fails → logged
+        NO-OP, never a raise."""
+        with patch( "cosa.rest.db.database.engine", self._test_engine() ), \
+             self._install_main( jobs_run_queue="__import_error__" ):
+            job._preflight_assert_exclusive_test_db()   # must not raise
+
+    def test_missing_attribute_is_noop( self, job ):
+        """Module present but jobs_run_queue attribute absent → AttributeError
+        path → logged NO-OP."""
+        with patch( "cosa.rest.db.database.engine", self._test_engine() ), \
+             self._install_main():   # attr unset
+            job._preflight_assert_exclusive_test_db()   # must not raise
+
+    def test_none_queue_is_noop( self, job ):
+        """jobs_run_queue present but None (server not yet initialised) → NO-OP."""
+        with patch( "cosa.rest.db.database.engine", self._test_engine() ), \
+             self._install_main( jobs_run_queue=None ):
+            job._preflight_assert_exclusive_test_db()   # must not raise
+
+    def test_no_offenders_passes( self, job ):
+        """A clean pool (no non-test inflight jobs) → preflight passes, no raise,
+        and the sweep's own id_hash is excluded from the query."""
+        fake_queue = MagicMock()
+        fake_queue.get_non_test_inflight_agentic_jobs.return_value = [ ]
+        with patch( "cosa.rest.db.database.engine", self._test_engine() ), \
+             self._install_main( jobs_run_queue=fake_queue ):
+            job._preflight_assert_exclusive_test_db()   # must not raise
+        fake_queue.get_non_test_inflight_agentic_jobs.assert_called_once_with(
+            exclude_id_hash=job.id_hash
+        )
+
+    def test_offenders_raise_loud( self, job ):
+        """A non-test inflight writer → RuntimeError naming the offender(s) and
+        the bug id, aborting the sweep before any suite runs."""
+        fake_queue = MagicMock()
+        fake_queue.get_non_test_inflight_agentic_jobs.return_value = [
+            { "id_hash": "dr-abc123", "job_type": "deep_research" }
+        ]
+        with patch( "cosa.rest.db.database.engine", self._test_engine() ), \
+             self._install_main( jobs_run_queue=fake_queue ):
+            with pytest.raises( RuntimeError ) as exc:
+                job._preflight_assert_exclusive_test_db()
+        msg = str( exc.value )
+        assert "caf58f71" in msg
+        assert "dr-abc123" in msg
+        assert "deep_research" in msg
+
+    @patch( "cosa.agents.test_suite.job.cu.get_project_root" )
+    @patch( "cosa.agents.test_suite.voice_io" )
+    def test_preflight_fires_before_first_suite( self, mock_voice_io, mock_root, single_suite_job, tmp_path ):
+        """The preflight is called at sweep start — BEFORE any suite runs. A
+        loud-fail must abort the run (job FAILED) with no _run_suite call."""
+        mock_root.return_value     = str( tmp_path )
+        mock_voice_io.reconfigure  = MagicMock()
+        mock_voice_io.set_job_id   = MagicMock()
+        mock_voice_io.clear_job_id = MagicMock()
+        mock_voice_io.notify       = AsyncMock()
+
+        order = [ ]
+        def _preflight( self ):
+            order.append( "preflight" )
+            raise RuntimeError( "Merge-gate sweep preflight FAILED (bug caf58f71): offenders" )
+        def _run( self, suite_type, project_root ):
+            order.append( f"run:{suite_type}" )
+            return { "passed": 1, "failed": 0, "skipped": 0, "errors": 0,
+                     "exit_code": 0, "log_path": None, "duration": 0.1 }
+
+        with patch.object( TestSuiteJob, "_preflight_assert_exclusive_test_db", _preflight, create=True ), \
+             patch.object( TestSuiteJob, "_run_suite", _run ):
+            with pytest.raises( RuntimeError ):
+                single_suite_job.do_all()
+
+        assert order == [ "preflight" ]   # aborted before the first suite
+        assert single_suite_job.state == JobState.FAILED

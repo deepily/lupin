@@ -353,6 +353,12 @@ class TestSuiteJob( AgenticJobBase ):
             print( f"[TestSuiteJob] Project root: {project_root}" )
 
         try:
+            # Exclusivity preflight (bug caf58f71): fail loud BEFORE the first
+            # suite if a non-test agentic job is inflight on the shared
+            # lupin_db_test — a concurrent writer would contaminate this sweep.
+            # NO-OP off the test DB / when the running queue is unreachable.
+            self._preflight_assert_exclusive_test_db()
+
             await voice_io.notify(
                 f"Starting test suite run: {', '.join( self.test_types )}",
                 priority="medium",
@@ -695,6 +701,72 @@ class TestSuiteJob( AgenticJobBase ):
             - NEVER a trailing pair after the last suite (no reset-after-last)
         """
         return [ ( suites[ i - 1 ], suites[ i ] ) for i in range( 1, len( suites ) ) ]
+
+    def _preflight_assert_exclusive_test_db( self ) -> None:
+        """
+        Fail loud if a non-test agentic job is inflight on the shared test DB at
+        the moment this merge-gate sweep starts (bug caf58f71 — concurrent-writer
+        contamination).
+
+        The sweep is monopolize-mode, but `monopolize` is currently an unenforced
+        placeholder (queue_consumer.py), so nothing structurally prevents another
+        fleet agentic job from riding the same agentic pool and writing
+        lupin_db_test concurrently. This preflight converts that silent
+        contamination into an explicit, diagnosable startup failure. It is
+        DETECTION, not prevention (see option-(a) true-monopoly follow-on): it
+        catches writers already inflight at sweep start — the shape the evidence
+        shows — but cannot see jobs dispatched later in the window.
+
+        SAFETY (mirrors _reset_state_between_suites): gated to lupin_db_test. On
+        any other engine (a sweep aimed at :7999 dev, where coexisting fleet jobs
+        are legitimate) this is a logged NO-OP. If the running-queue singleton is
+        unreachable or not yet initialised (unit context, alternate host) it is
+        also a logged NO-OP — the ONLY raise is the loud-fail.
+
+        Requires:
+            - self.id_hash is this sweep's pool key (excluded from the count)
+
+        Ensures:
+            - on lupin_db_test with >=1 non-test inflight agentic job: raises
+              RuntimeError naming the offenders — aborts the sweep before any suite
+            - on lupin_db_test with none: logs the PASS and returns
+            - off the test DB, or with no reachable running queue: logged NO-OP
+
+        Raises:
+            - RuntimeError when a foreign inflight writer shares lupin_db_test
+        """
+        from cosa.rest.db import database as db_module
+
+        db_url = str( db_module.engine.url )
+        if "lupin_db_test" not in db_url:
+            print( "[TestSuiteJob] preflight exclusivity SKIPPED: engine is not lupin_db_test — "
+                   "coexisting jobs are legitimate off the test DB" )
+            return
+
+        try:
+            import lupin_app.main as main_module
+            running_queue = main_module.jobs_run_queue
+        except ( ImportError, AttributeError ) as e:
+            print( f"[TestSuiteJob] preflight exclusivity SKIPPED: running queue unavailable "
+                   f"({type( e ).__name__}: {e})" )
+            return
+
+        if running_queue is None:
+            print( "[TestSuiteJob] preflight exclusivity SKIPPED: running queue not yet initialised" )
+            return
+
+        offenders = running_queue.get_non_test_inflight_agentic_jobs( exclude_id_hash=self.id_hash )
+        if offenders:
+            detail = ", ".join( f"{o[ 'id_hash' ]}({o[ 'job_type' ]})" for o in offenders )
+            raise RuntimeError(
+                f"Merge-gate sweep preflight FAILED (bug caf58f71): {len( offenders )} non-test "
+                f"agentic job(s) inflight on shared lupin_db_test — concurrent writers will "
+                f"contaminate this sweep. Offenders: {detail}. Quiesce the agentic pool so "
+                f":8000 is idle before scheduling the sweep."
+            )
+
+        print( "[TestSuiteJob] ✓ preflight exclusivity PASSED: no non-test inflight agentic "
+               "jobs on lupin_db_test" )
 
     def _reset_state_between_suites( self, prev_suite: str, next_suite: str ) -> None:
         """

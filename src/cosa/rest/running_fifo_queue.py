@@ -21,7 +21,7 @@ import traceback
 import pprint
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from typing import Optional, Any
+from typing import Optional, Any, List, Dict
 
 # Notification service imports for async correctness verification
 from lupin_cli.notifications.notify_user_sync import notify_user_sync
@@ -830,6 +830,52 @@ class RunningFifoQueue( FifoQueue ):
             payload[ "api_resource_manager" ] = { "state": "error", "detail": str( e )[ :200 ] }
 
         return payload
+
+    def get_non_test_inflight_agentic_jobs( self, exclude_id_hash: Optional[ str ] = None ) -> List[ Dict ]:
+        """
+        List inflight (submitted-but-not-done) agentic jobs whose backing job is
+        NOT a test_suite job. Backs the merge-gate sweep exclusivity preflight
+        (bug caf58f71 — concurrent-writer contamination).
+
+        A monopolize-mode test_suite sweep and ANY other agentic job share the
+        same lupin_db_test on :8000; a concurrent non-test writer corrupts the
+        in-flight suite's DB expectations (the refresh_tokens duplicate-jti
+        flood). `monopolize` is an unenforced no-op placeholder
+        (queue_consumer.py), so nothing structurally prevents the overlap — this
+        classifier surfaces the concurrent writers so the sweep can fail loud.
+
+        Requires:
+            - _agentic_futures / queue_dict initialised (always true post-__init__)
+
+        Ensures:
+            - returns one { "id_hash", "job_type" } dict per inflight non-test
+              agentic job (Future present AND not done)
+            - the future named by exclude_id_hash (the sweep's own) is skipped
+            - a future whose backing job is absent from queue_dict is reported
+              with job_type "unknown" — fail-loud on the unclassifiable, it is
+              still a writer we cannot vouch for
+            - inflight snapshot is taken under _agentic_futures_lock; classifi-
+              cation never raises
+
+        Args:
+            exclude_id_hash: id_hash of the calling sweep, excluded from the count
+
+        Returns:
+            list of { "id_hash": str, "job_type": str } for foreign inflight writers
+        """
+        with self._agentic_futures_lock:
+            inflight_hashes = [ h for h, f in self._agentic_futures.items() if not f.done() ]
+
+        offenders = [ ]
+        for id_hash in inflight_hashes:
+            if id_hash == exclude_id_hash:
+                continue
+            job      = self.get_by_id_hash( id_hash ) if id_hash in self.queue_dict else None
+            job_type = job.job_type if job is not None else "unknown"
+            if job_type == "test_suite":
+                continue
+            offenders.append( { "id_hash": id_hash, "job_type": job_type } )
+        return offenders
 
     def _ghost_job_sweep( self ) -> None:
         """

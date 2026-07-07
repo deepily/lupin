@@ -452,6 +452,78 @@ class TestGetPoolStatus( _RFQBase ):
         self.assertEqual( out[ "api_resource_manager" ][ "state" ], "error" )
 
 
+# ── get_non_test_inflight_agentic_jobs (bug caf58f71 — concurrent-writer classifier)
+class TestNonTestInflightClassifier( _RFQBase ):
+    """The merge-gate sweep exclusivity classifier: which inflight agentic jobs
+    are NON-test writers on the shared lupin_db_test, so the sweep can fail loud."""
+
+    @staticmethod
+    def _future( done ):
+        f = MagicMock( name="future" ); f.done.return_value = done; return f
+
+    def test_done_futures_are_not_offenders( self ):
+        """A completed (done) future is not inflight — never an offender, even
+        for a non-test job."""
+        rq  = self.build()
+        job = _AgenticFake( id_hash="d1", job_type="deep_research" )
+        self._enqueue( rq, job )
+        rq._agentic_futures = { "d1": self._future( done=True ) }
+        self.assertEqual( rq.get_non_test_inflight_agentic_jobs(), [ ] )
+
+    def test_self_is_excluded_by_id_hash( self ):
+        """The sweep's OWN inflight future must be skipped via exclude_id_hash."""
+        rq  = self.build()
+        job = _AgenticFake( id_hash="sweep", job_type="test_suite" )
+        self._enqueue( rq, job )
+        rq._agentic_futures = { "sweep": self._future( done=False ) }
+        self.assertEqual(
+            rq.get_non_test_inflight_agentic_jobs( exclude_id_hash="sweep" ), [ ]
+        )
+
+    def test_other_test_suite_job_is_not_an_offender( self ):
+        """Another test_suite job (job_type == 'test_suite') is not a foreign
+        writer — skipped even without exclude_id_hash."""
+        rq  = self.build()
+        job = _AgenticFake( id_hash="ts2", job_type="test_suite" )
+        self._enqueue( rq, job )
+        rq._agentic_futures = { "ts2": self._future( done=False ) }
+        self.assertEqual( rq.get_non_test_inflight_agentic_jobs(), [ ] )
+
+    def test_inflight_non_test_job_is_an_offender( self ):
+        """An inflight non-test agentic job IS a concurrent writer → offender,
+        reported with its id_hash and job_type."""
+        rq  = self.build()
+        job = _AgenticFake( id_hash="dr1", job_type="deep_research" )
+        self._enqueue( rq, job )
+        rq._agentic_futures = { "dr1": self._future( done=False ) }
+        out = rq.get_non_test_inflight_agentic_jobs( exclude_id_hash="sweep" )
+        self.assertEqual( out, [ { "id_hash": "dr1", "job_type": "deep_research" } ] )
+
+    def test_inflight_future_without_backing_job_is_unknown_offender( self ):
+        """A future present + inflight but whose job is gone from queue_dict is
+        fail-loud 'unknown' — an unclassifiable writer we cannot vouch for."""
+        rq = self.build()
+        rq._agentic_futures = { "ghost": self._future( done=False ) }  # not enqueued
+        out = rq.get_non_test_inflight_agentic_jobs()
+        self.assertEqual( out, [ { "id_hash": "ghost", "job_type": "unknown" } ] )
+
+    def test_mixed_pool_reports_only_foreign_inflight_writers( self ):
+        """Full mix: self (excluded), a done non-test (not inflight), another
+        test_suite (skipped), and one live foreign writer → only the last."""
+        rq = self.build()
+        for h, jt in [ ( "sweep", "test_suite" ), ( "ts2", "test_suite" ),
+                       ( "dr_done", "deep_research" ), ( "pod_live", "podcast" ) ]:
+            self._enqueue( rq, _AgenticFake( id_hash=h, job_type=jt ) )
+        rq._agentic_futures = {
+            "sweep"   : self._future( done=False ),
+            "ts2"     : self._future( done=False ),
+            "dr_done" : self._future( done=True ),
+            "pod_live": self._future( done=False ),
+        }
+        out = rq.get_non_test_inflight_agentic_jobs( exclude_id_hash="sweep" )
+        self.assertEqual( out, [ { "id_hash": "pod_live", "job_type": "podcast" } ] )
+
+
 # ── _ghost_job_sweep + loop ─────────────────────────────────────────────────
 class TestGhostSweep( _RFQBase ):
 
