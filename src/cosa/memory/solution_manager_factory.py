@@ -147,17 +147,17 @@ class SolutionSnapshotManagerFactory:
               OR config["gcs_uri"] (gcs backend)
 
         Ensures:
-            - Returns LanceDBSolutionManager instance
+            - Returns SolutionSnapshotManager instance
             - Manager configured with provided database settings
             
         Raises:
-            - ImportError if LanceDBSolutionManager not available
+            - ImportError if SolutionSnapshotManager not available
             - KeyError if required config keys missing
         """
         try:
-            from cosa.memory.lancedb_solution_manager import LanceDBSolutionManager
+            from cosa.memory.lancedb_solution_manager import SolutionSnapshotManager
         except ImportError as e:
-            raise ImportError( f"LanceDBSolutionManager not available: {e}" )
+            raise ImportError( f"SolutionSnapshotManager not available: {e}" )
         
         # Validate required configuration. table_name is always required; the
         # storage location may be a local db_path OR a gcs_uri. gcs configs carry
@@ -170,7 +170,7 @@ class SolutionSnapshotManagerFactory:
         if missing_keys:
             raise KeyError( f"Missing required config keys for lancedb manager: {missing_keys}" )
 
-        return LanceDBSolutionManager( config, debug, verbose )
+        return SolutionSnapshotManager( config, debug, verbose )
     
     @staticmethod
     def get_available_types() -> List[str]:

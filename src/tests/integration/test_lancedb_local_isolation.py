@@ -40,7 +40,7 @@ src_path = os_sys.path.join( lupin_root, 'src' )
 if src_path not in sys.path:
     sys.path.insert( 0, src_path )
 
-from cosa.memory.lancedb_solution_manager import LanceDBSolutionManager
+from cosa.memory.lancedb_solution_manager import SolutionSnapshotManager
 from cosa.memory.solution_snapshot import SolutionSnapshot
 
 
@@ -74,7 +74,7 @@ class TestLanceDBLocalIsolation:
         Create LanceDB manager with LOCAL backend for isolation testing.
         Uses temporary directory to avoid conflicts.
         """
-        manager = LanceDBSolutionManager( local_config, debug=True, verbose=False )
+        manager = SolutionSnapshotManager( local_config, debug=True, verbose=False )
         manager.initialize()
 
         yield manager
@@ -138,7 +138,7 @@ class TestLanceDBLocalIsolation:
 
         # Create first manager instance and insert data
         print( "Creating first manager instance..." )
-        manager1 = LanceDBSolutionManager( local_config, debug=True )
+        manager1 = SolutionSnapshotManager( local_config, debug=True )
         manager1.initialize()
 
         snapshot = SolutionSnapshot(
@@ -157,7 +157,7 @@ class TestLanceDBLocalIsolation:
 
         # Create second manager instance
         print( "Creating second manager instance..." )
-        manager2 = LanceDBSolutionManager( local_config, debug=True )
+        manager2 = SolutionSnapshotManager( local_config, debug=True )
         manager2.initialize()
 
         # Search for the persisted data
@@ -315,7 +315,7 @@ def run_standalone_tests():
     try:
         # Create manager
         print( "\nInitializing LanceDB manager with LOCAL backend..." )
-        manager = LanceDBSolutionManager( local_config, debug=True, verbose=False )
+        manager = SolutionSnapshotManager( local_config, debug=True, verbose=False )
         manager.initialize()
         print( f"✓ Manager initialized at: {db_path}" )
 

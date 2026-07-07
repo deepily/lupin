@@ -1,6 +1,6 @@
 """
 SolutionSnapshotRepository — Postgres+pgvector storage for the
-``solution_snapshots`` table (LanceDB source: LanceDBSolutionManager).
+``solution_snapshots`` table (LanceDB source: SolutionSnapshotManager).
 
 DISTINCT from ``input_and_output``. Two of its seven vector columns are
 ANN-searched (HNSW dot): ``question_embedding`` + ``code_embedding``

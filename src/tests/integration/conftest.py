@@ -493,7 +493,7 @@ def gcs_credentials_available():
         @pytest.fixture
         def gcs_manager(gcs_credentials_available):
             # gcs_credentials_available validates before this runs
-            manager = LanceDBSolutionManager( gcs_config )
+            manager = SolutionSnapshotManager( gcs_config )
             manager.initialize()  # Won't fail due to auth
             return manager
 

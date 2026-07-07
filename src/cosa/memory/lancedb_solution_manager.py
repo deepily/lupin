@@ -45,7 +45,7 @@ _SNAPSHOT_RECORD_COLUMNS = (
 )
 
 
-class LanceDBSolutionManager( SolutionSnapshotManagerInterface ):
+class SolutionSnapshotManager( SolutionSnapshotManagerInterface ):
     """
     LanceDB-based solution snapshot manager with native vector search.
 
@@ -89,7 +89,7 @@ class LanceDBSolutionManager( SolutionSnapshotManagerInterface ):
         required_keys = ["table_name"]
         missing_keys = [key for key in required_keys if key not in config]
         if missing_keys:
-            raise KeyError( f"LanceDBSolutionManager requires {missing_keys} in configuration" )
+            raise KeyError( f"SolutionSnapshotManager requires {missing_keys} in configuration" )
 
         # Store backend type and table name
         self.storage_backend = config.get( "storage backend", "local" )
@@ -126,7 +126,7 @@ class LanceDBSolutionManager( SolutionSnapshotManagerInterface ):
         self._use_postgres = is_postgres_backend()
 
         if self.debug:
-            print( f"LanceDBSolutionManager configured:" )
+            print( f"SolutionSnapshotManager configured:" )
             print( f"       Backend: {self.storage_backend}" )
             print( f"      Database: {self.db_path}" )
             print( f"         Table: {self.table_name}" )
@@ -681,7 +681,7 @@ class LanceDBSolutionManager( SolutionSnapshotManagerInterface ):
         if self._use_postgres: return self._pg_reload()
 
         if not self._initialized:
-            raise RuntimeError( "LanceDBSolutionManager must be initialized before reload" )
+            raise RuntimeError( "SolutionSnapshotManager must be initialized before reload" )
 
         if self.debug:
             print( f"Reloading LanceDB solution manager from {self.db_path}..." )
@@ -1917,7 +1917,7 @@ class LanceDBSolutionManager( SolutionSnapshotManagerInterface ):
             - sets _initialized True; lookups query pgvector per-call (no full-table scan)
         """
         self._initialized = True
-        if self.debug: print( "✓ LanceDBSolutionManager initialized (postgres backend, cache bypass)" )
+        if self.debug: print( "✓ SolutionSnapshotManager initialized (postgres backend, cache bypass)" )
 
     def _pg_reload( self ) -> None:
         """
@@ -1933,7 +1933,7 @@ class LanceDBSolutionManager( SolutionSnapshotManagerInterface ):
             - RuntimeError if not initialized
         """
         if not self._initialized:
-            raise RuntimeError( "LanceDBSolutionManager must be initialized before reload" )
+            raise RuntimeError( "SolutionSnapshotManager must be initialized before reload" )
         if self.debug: print( "Postgres backend reload is a no-op (cache bypass — pgvector queried live)" )
 
     def _pg_save_snapshot( self, snapshot: SolutionSnapshot ) -> bool:
@@ -2345,13 +2345,13 @@ class LanceDBSolutionManager( SolutionSnapshotManagerInterface ):
 
 def quick_smoke_test():
     """Test the LanceDB manager interface implementation."""
-    du.print_banner( "LanceDBSolutionManager Smoke Test", prepend_nl=True )
+    du.print_banner( "SolutionSnapshotManager Smoke Test", prepend_nl=True )
     
     try:
         # Test configuration validation
         print( "Testing configuration validation..." )
         try:
-            manager = LanceDBSolutionManager( {}, debug=False )
+            manager = SolutionSnapshotManager( {}, debug=False )
             print( "✗ Empty config was accepted" )
         except KeyError:
             print( "✓ Empty config properly rejected" )
@@ -2363,8 +2363,8 @@ def quick_smoke_test():
         }
         
         print( f"\nTesting manager creation with database: {config['db_path']}" )
-        manager = LanceDBSolutionManager( config, debug=True, verbose=False )
-        print( "✓ LanceDBSolutionManager created successfully" )
+        manager = SolutionSnapshotManager( config, debug=True, verbose=False )
+        print( "✓ SolutionSnapshotManager created successfully" )
         
         # Test health check before initialization
         print( "\nTesting health check (before initialization)..." )
@@ -2446,11 +2446,11 @@ def quick_smoke_test():
         # Cleanup test record
         manager.delete_snapshot( "concurrent test question" )
 
-        print( "\n✓ LanceDBSolutionManager smoke test completed successfully" )
+        print( "\n✓ SolutionSnapshotManager smoke test completed successfully" )
 
     except Exception as e:
         print( f"✗ Error during smoke test: {e}" )
-        du.print_stack_trace( e, explanation="LanceDBSolutionManager smoke test failed", caller="quick_smoke_test()" )
+        du.print_stack_trace( e, explanation="SolutionSnapshotManager smoke test failed", caller="quick_smoke_test()" )
 
 
 if __name__ == "__main__":

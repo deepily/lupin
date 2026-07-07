@@ -29,7 +29,7 @@ from typing import List, Dict, Any
 
 import cosa.utils.util as du
 from cosa.memory.solution_snapshot_mgr import SolutionSnapshotManager
-from cosa.memory.lancedb_solution_manager import LanceDBSolutionManager
+from cosa.memory.lancedb_solution_manager import SolutionSnapshotManager
 from cosa.memory.solution_snapshot import SolutionSnapshot
 
 
@@ -157,7 +157,7 @@ def main():
         "db_path": du.get_project_root() + "/src/conf/long-term-memory/lupin.lancedb",
         "table_name": "solution_snapshots"
     }
-    lance_manager = LanceDBSolutionManager(lance_config, debug=False, verbose=False)
+    lance_manager = SolutionSnapshotManager(lance_config, debug=False, verbose=False)
     
     # Run benchmarks
     print("\n⏱️  Running benchmarks (this may take a minute)...")

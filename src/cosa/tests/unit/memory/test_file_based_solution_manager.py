@@ -2,7 +2,7 @@
 Unit tests for cosa.memory.file_based_solution_manager.FileBasedSolutionManager.
 
 NEW FILE 2026-05-31 by Rio ⚡ (CoSA coverage campaign, memory lane). The module is
-@DEPRECATED (file-based backend, superseded by LanceDBSolutionManager) but still
+@DEPRECATED (file-based backend, superseded by SolutionSnapshotManager) but still
 in-tree and subject to the Lupin-wide 100% coverage mandate.
 
 These tests drive the FULL surface — construction + path validation, initialize/
