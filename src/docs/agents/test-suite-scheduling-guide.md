@@ -112,6 +112,37 @@ flowchart LR
     Watchdog -->|no| Idle[Wait for next<br/>TestSuiteJob]
 ```
 
+### Between-suites DB isolation (invariant — bug 8bd20375)
+
+When a single `TestSuiteJob` runs **multiple** suites (`test_types=["all"]` →
+`unit → smoke → websocket → integration → e2e`, or any explicit multi-suite
+list), all legs execute back-to-back against **one shared** `lupin_db_test`.
+The per-test `clean_test_db` fixture cannot defend a later suite against the
+**residue** an earlier suite left in the DB — most acutely `refresh_tokens`,
+whose duplicate `jti` makes the next suite's login fail `500 "Token already
+exists"` (the e2e→integration flood, RED `ts-2230937c`).
+
+**Invariant**: the sweep loop (`_execute`) calls `_reset_state_between_suites()`
+**in every gap between adjacent suites — before each suite after the first,
+never before the first, never after the last, and never at all for a
+single-suite run** (`_between_suite_pairs()` yields exactly `len(suites)-1`
+seams). Each reset deletes non-protected users and TRUNCATEs the residue tables
+(the `_BETWEEN_SUITE_TRUNCATE_TABLES` superset, which **includes
+`refresh_tokens`**); protected companion rows survive.
+
+A literal container bounce is impossible here — the sweep runs *inside* the
+test container, so bouncing it would self-kill the job. The reset is therefore
+an **in-process** truncate against the hot-swapped test engine, guarded by the
+same `lupin_db_test`-only safety assert as `clean_test_db`: on any non-test DB
+(e.g. a multi-suite run submitted to the `:7999` dev server) it is a logged
+**NO-OP**, never a destructive op on dev data. A reset failure is non-fatal —
+the per-test `clean_test_db` (which also TRUNCATEs `refresh_tokens`) is the
+finer-grained backstop.
+
+> The concurrent-fleet-writer class — other agentic jobs writing
+> `lupin_db_test` *during* a suite (not at the seam) — is a **separate** bug
+> (`caf58f71`); between-suites isolation does not close it.
+
 ---
 
 ## 4. The `/schedule-tests` Skill

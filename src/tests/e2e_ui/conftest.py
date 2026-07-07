@@ -524,7 +524,7 @@ def clean_test_db():
         conn.execute( text( "DELETE FROM users WHERE NOT is_protected" ) )
         conn.execute( text(
             "TRUNCATE TABLE auth_audit_log, failed_login_attempts, "
-            "job_history, proxy_decisions, trust_states"
+            "job_history, proxy_decisions, trust_states, refresh_tokens"
         ) )
 
     with engine.connect() as conn:

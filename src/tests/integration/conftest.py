@@ -159,7 +159,7 @@ def clean_test_db():
         conn.execute( text(
             "TRUNCATE TABLE auth_audit_log, failed_login_attempts, "
             "job_history, proxy_decisions, trust_states, "
-            "task_items, task_events, fcm_tokens"
+            "task_items, task_events, fcm_tokens, refresh_tokens"
         ) )
 
     with engine.connect() as conn:

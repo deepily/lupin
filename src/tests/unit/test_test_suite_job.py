@@ -824,3 +824,145 @@ class TestJunitFlagGating:
         """Empty-string path treated same as None (non-pytest suites)."""
         result = TestSuiteJob._parse_junit_xml( "" )
         assert result == { "passed": 0, "failed": 0, "skipped": 0, "errors": 0 }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Between-suites DB-reset orchestration (bug 8bd20375)
+#
+# The merge-gate sweep runs suites back-to-back on ONE shared :8000 DB. Without
+# a reset at the seam, the earlier suite's residue (refresh_tokens; e2e→integration
+# "Token already exists" flood) poisons the later suite's auth fixtures. A literal
+# container bounce is impossible from INSIDE the sweep job (self-kill), so the
+# equivalent isolation is an in-job DB hard-reset invoked BETWEEN suites only.
+# These tests pin condition 2 of Tiberius's ruling: the reset fires in every gap,
+# NEVER before the first suite, NEVER after the last, NEVER for a single-suite run.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestBetweenSuiteResetBoundaries:
+    """Pure semantics of the between-suites reset seam — proves not-after-last
+    + single-suite-skip without a DB or container."""
+
+    def test_empty_suite_list_has_no_reset( self ):
+        assert TestSuiteJob._between_suite_pairs( [ ] ) == [ ]
+
+    def test_single_suite_skips_reset( self ):
+        # one suite = zero gaps = zero resets (single-suite-skip)
+        assert TestSuiteJob._between_suite_pairs( [ "integration" ] ) == [ ]
+
+    def test_pair_resets_once_between_the_two( self ):
+        pairs = TestSuiteJob._between_suite_pairs( [ "e2e", "integration" ] )
+        assert pairs == [ ( "e2e", "integration" ) ]
+
+    def test_full_pyramid_resets_in_every_gap_never_after_last( self ):
+        suites = list( ALL_SUITE_COMPONENTS )   # unit, smoke, websocket, integration, e2e
+        pairs  = TestSuiteJob._between_suite_pairs( suites )
+        # exactly one reset per gap → N-1 resets
+        assert len( pairs ) == len( suites ) - 1
+        # each pair is an adjacent (prev, next) in original order
+        assert pairs == [ ( suites[ i - 1 ], suites[ i ] ) for i in range( 1, len( suites ) ) ]
+        # NEVER a reset AFTER the last suite: the last suite never opens a gap
+        assert all( prev != suites[ -1 ] for prev, _ in pairs )
+
+
+class TestSweepResetsBetweenSuites:
+    """The sweep loop invokes _reset_state_between_suites in each between-suite
+    gap — proven by call ORDER (interleaved), not merely count."""
+
+    _CANNED = {
+        "passed"    : 1,
+        "failed"    : 0,
+        "skipped"   : 0,
+        "errors"    : 0,
+        "exit_code" : 0,
+        "log_path"  : None,
+        "duration"  : 0.1,
+    }
+
+    @patch( "cosa.agents.test_suite.job.cu.get_project_root" )
+    @patch( "cosa.agents.test_suite.voice_io" )
+    def test_reset_fires_between_suites_in_order( self, mock_voice_io, mock_root, job, tmp_path ):
+        """job fixture = ["integration","e2e"] → exactly ONE reset, and it lands
+        AFTER integration's run and BEFORE e2e's run (interleaved at the gap)."""
+        mock_root.return_value    = str( tmp_path )
+        mock_voice_io.reconfigure = MagicMock()
+        mock_voice_io.set_job_id  = MagicMock()
+        mock_voice_io.clear_job_id = MagicMock()
+        mock_voice_io.notify      = AsyncMock()
+
+        order = [ ]
+        def _run( suite_type, project_root ):
+            order.append( f"run:{suite_type}" )
+            return dict( self._CANNED )
+        def _reset( prev, nxt ):
+            order.append( f"reset:{prev}->{nxt}" )
+
+        with patch.object( TestSuiteJob, "_run_suite", side_effect=_run ), \
+             patch.object( TestSuiteJob, "_reset_state_between_suites", side_effect=_reset, create=True ):
+            job.do_all()
+
+        assert order == [ "run:integration", "reset:integration->e2e", "run:e2e" ]
+
+    @patch( "cosa.agents.test_suite.job.cu.get_project_root" )
+    @patch( "cosa.agents.test_suite.voice_io" )
+    def test_single_suite_never_resets( self, mock_voice_io, mock_root, single_suite_job, tmp_path ):
+        """A single-suite run has no gap → the reset must never fire."""
+        mock_root.return_value    = str( tmp_path )
+        mock_voice_io.reconfigure = MagicMock()
+        mock_voice_io.set_job_id  = MagicMock()
+        mock_voice_io.clear_job_id = MagicMock()
+        mock_voice_io.notify      = AsyncMock()
+
+        with patch.object( TestSuiteJob, "_run_suite", return_value=dict( self._CANNED ) ), \
+             patch.object( TestSuiteJob, "_reset_state_between_suites", create=True ) as spy_reset:
+            single_suite_job.do_all()
+
+        spy_reset.assert_not_called()
+
+
+class TestResetStateBetweenSuitesBody:
+    """The reset body (bug 8bd20375): truncates residue ONLY on lupin_db_test,
+    NO-OPs off the test DB (dev-data safety), and never raises."""
+
+    @staticmethod
+    def _mock_engine( url ):
+        conn = MagicMock()
+        executed = [ ]
+        conn.execute.side_effect = lambda stmt: executed.append( str( stmt ) )
+        cm = MagicMock()
+        cm.__enter__.return_value = conn
+        cm.__exit__.return_value  = False
+        engine = MagicMock()
+        engine.url            = url
+        engine.begin.return_value = cm
+        return engine, executed
+
+    def test_truncates_and_deletes_on_test_db( self, job ):
+        """On lupin_db_test: non-protected users DELETEd + residue TRUNCATEd,
+        and refresh_tokens is in the truncate — the flood-killing residue."""
+        engine, executed = self._mock_engine( "postgresql://u@h/lupin_db_test" )
+        with patch( "cosa.rest.db.database.engine", engine ):
+            job._reset_state_between_suites( "e2e", "integration" )
+        joined = " ".join( executed )
+        assert "DELETE FROM users WHERE NOT is_protected" in joined
+        assert "TRUNCATE TABLE" in joined
+        assert "refresh_tokens" in joined
+        engine.begin.assert_called_once()
+
+    def test_skips_off_test_db_no_destructive_op( self, job ):
+        """Against a NON-test DB (e.g. dev), the reset must NOT open a
+        transaction or execute anything — dev-data safety."""
+        engine, executed = self._mock_engine( "postgresql://u@h/lupin_db_dev" )
+        with patch( "cosa.rest.db.database.engine", engine ):
+            job._reset_state_between_suites( "e2e", "integration" )
+        engine.begin.assert_not_called()
+        assert executed == [ ]
+
+    def test_reset_failure_is_non_fatal( self, job ):
+        """A DB error during the reset is swallowed (logged) — it must never
+        abort the surrounding sweep; the per-test clean_test_db is the backstop."""
+        engine = MagicMock()
+        engine.url = "postgresql://u@h/lupin_db_test"
+        engine.begin.side_effect = RuntimeError( "connection refused" )
+        with patch( "cosa.rest.db.database.engine", engine ):
+            # Must not raise
+            job._reset_state_between_suites( "e2e", "integration" )

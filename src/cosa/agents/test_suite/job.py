@@ -367,6 +367,18 @@ class TestSuiteJob( AgenticJobBase ):
             if self.debug and suites_to_run != list( self.test_types ):
                 print( f"[TestSuiteJob] Expanded {self.test_types} -> {suites_to_run}" )
 
+            # Between-suites reset seams (bug 8bd20375): _between_suite_pairs is
+            # the SINGLE source of truth for WHERE the shared-DB reset fires —
+            # one (prev, next) per gap. Map each non-first suite to its
+            # predecessor so the loop CONSUMES that spec rather than re-deriving
+            # it (suites_to_run is deduped by _expand_all, so each suite name is
+            # a unique key). A suite present as a key opens a seam; the first
+            # suite never is → no reset before it, none after the last, none at
+            # all for a single-suite run.
+            reset_predecessor = {
+                nxt: prev for prev, nxt in self._between_suite_pairs( suites_to_run )
+            }
+
             for suite_type in suites_to_run:
                 if self._cancel_requested:
                     await voice_io.notify(
@@ -375,6 +387,14 @@ class TestSuiteJob( AgenticJobBase ):
                         queue_name="run"
                     )
                     break
+
+                # Reset shared test-DB state BETWEEN suites so the earlier
+                # suite's residue (refresh_tokens → 'Token already exists'
+                # flood) can't cross the e2e→integration seam on the shared
+                # :8000 DB. Fires iff this suite opens a seam.
+                seam_prev = reset_predecessor.get( suite_type )
+                if seam_prev is not None:
+                    self._reset_state_between_suites( seam_prev, suite_type )
 
                 await voice_io.notify(
                     f"Starting {suite_type} tests...",
@@ -649,6 +669,84 @@ class TestSuiteJob( AgenticJobBase ):
 
         finally:
             voice_io.clear_job_id()
+
+    # Residue tables cleared at the between-suites seam (bug 8bd20375). Superset
+    # of the per-test clean_test_db TRUNCATE list PLUS refresh_tokens — the
+    # residue whose duplicate-jti survival across the e2e→integration seam
+    # produced the "Token already exists" flood.
+    _BETWEEN_SUITE_TRUNCATE_TABLES = (
+        "auth_audit_log", "failed_login_attempts", "job_history",
+        "proxy_decisions", "trust_states", "task_items", "task_events",
+        "fcm_tokens", "refresh_tokens",
+    )
+
+    @staticmethod
+    def _between_suite_pairs( suites: List[ str ] ) -> List[ tuple ]:
+        """
+        Ordered (prev, next) adjacency pairs marking the BETWEEN-suite reset
+        seams (bug 8bd20375).
+
+        Requires:
+            - suites is an ordered list of suite-type strings (possibly empty)
+
+        Ensures:
+            - returns one (suites[i-1], suites[i]) pair per gap → len(suites)-1 pairs
+            - empty for 0 or 1 suite (single-suite-skip)
+            - NEVER a trailing pair after the last suite (no reset-after-last)
+        """
+        return [ ( suites[ i - 1 ], suites[ i ] ) for i in range( 1, len( suites ) ) ]
+
+    def _reset_state_between_suites( self, prev_suite: str, next_suite: str ) -> None:
+        """
+        Hard-reset the shared test DB at the seam between two suites (bug 8bd20375).
+
+        The merge-gate sweep runs suites back-to-back on ONE shared :8000 DB
+        (lupin_db_test). Without a reset here, the earlier suite's residue —
+        notably refresh_tokens, whose duplicate jti collides with the login
+        "Token already exists" 500 — survives into the next suite's auth
+        fixtures (the e2e→integration flood, RED ts-2230937c). A literal
+        container bounce is impossible from inside this job (self-kill), so the
+        equivalent isolation is an in-process residue truncate against the
+        hot-swapped test engine.
+
+        SAFETY: mirrors clean_test_db — refuses to touch anything but
+        lupin_db_test. When the live engine is NOT the test DB (e.g. a
+        multi-suite run submitted against the :7999 dev server), this is a
+        logged NO-OP, never a destructive op on dev data.
+
+        Requires:
+            - prev_suite / next_suite name the adjacent suites (logging only)
+
+        Ensures:
+            - on lupin_db_test: non-protected users deleted + residue TRUNCATEd
+              (incl. refresh_tokens); protected companion rows survive
+            - on any other DB: no destructive op; logs the skip
+            - never raises — a reset failure logs loudly but does NOT abort the
+              sweep (per-test clean_test_db is the finer-grained backstop)
+        """
+        from cosa.rest.db import database as db_module
+        from sqlalchemy import text
+
+        try:
+            engine = db_module.engine
+            db_url = str( engine.url )
+            if "lupin_db_test" not in db_url:
+                print( f"[TestSuiteJob] between-suites reset SKIPPED ({prev_suite}->{next_suite}): "
+                       f"engine is not lupin_db_test — no destructive op off the test DB" )
+                return
+
+            table_list = ", ".join( self._BETWEEN_SUITE_TRUNCATE_TABLES )
+            with engine.begin() as conn:
+                conn.execute( text( "DELETE FROM users WHERE NOT is_protected" ) )
+                conn.execute( text( f"TRUNCATE TABLE {table_list}" ) )
+            print( f"[TestSuiteJob] ✓ between-suites DB reset ({prev_suite}->{next_suite}): "
+                   f"non-protected users + residue cleared on lupin_db_test ({table_list})" )
+
+        except Exception as reset_err:
+            # Non-fatal: the per-test clean_test_db remains the backstop. A reset
+            # hiccup must never vaporize the rest of the sweep.
+            print( f"[TestSuiteJob] ⚠️ between-suites reset FAILED ({prev_suite}->{next_suite}), "
+                   f"non-fatal: {reset_err}" )
 
     def _run_suite( self, suite_type: str, project_root: str ) -> Dict:
         """
