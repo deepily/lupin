@@ -19,6 +19,7 @@ from lupin_arbiter_app.health_watcher import HealthWatcherLoop
 from lupin_arbiter_app.fleet_arbiter_loop import FleetArbiterLoop
 from lupin_arbiter_app.context_pressure_writer import ContextPressureWriterLoop
 from lupin_arbiter_app.local_snapshot_store import LocalSnapshotStore
+from cosa.agents.heartbeat_arbiter.turn_age_watchdog import TurnAgeWatchdog
 
 
 UTC = datetime.timezone.utc
@@ -107,6 +108,16 @@ def test_lifespan_starts_and_stops_all_three_loops():
     assert a.stopped is True and b.stopped is True and c.stopped is True
 
 
+def test_lifespan_starts_and_stops_turn_age_watchdog_loop():
+    """The turn-age watchdog (wedge fix f1a21917 lever ii) is the fourth lifespan-managed loop."""
+    a, b, c, d = _FakeLoop(), _FakeLoop(), _FakeLoop(), _FakeLoop()
+    with TestClient( create_app( health_loop=a, fleet_arbiter_loop=b,
+                                 context_pressure_loop=c, turn_age_watchdog_loop=d ) ) as client:
+        assert a.started and b.started and c.started and d.started
+        assert client.app.state.turn_age_watchdog_loop is d
+    assert a.stopped and b.stopped and c.stopped and d.stopped
+
+
 class _FakeCfg:
     """Fake ConfigurationManager for assemble_app's enable-gate branches."""
     def __init__( self, enabled, context_enabled=True ):
@@ -157,6 +168,15 @@ def test_assemble_app_context_watch_disabled_wires_no_writer( capsys ):
     assert isinstance( app.state.health_loop, HealthWatcherLoop )
     assert isinstance( app.state.fleet_arbiter_loop, FleetArbiterLoop )
     assert "context_pressure_writer_disabled" in capsys.readouterr().out
+
+
+def test_assemble_app_wires_turn_age_watchdog_in_both_paths():
+    """The turn-age watchdog is ALWAYS wired (both the health-enabled final path and
+    the health-disabled early-return path) — self-gating on its own INI flag."""
+    app_enabled  = assemble_app( _FakeCfg( enabled=True ),  _FakeGateway() )
+    app_disabled = assemble_app( _FakeCfg( enabled=False ), _FakeGateway() )
+    assert isinstance( app_enabled.state.turn_age_watchdog_loop, TurnAgeWatchdog )
+    assert isinstance( app_disabled.state.turn_age_watchdog_loop, TurnAgeWatchdog )
 
 
 def test_build_context_pressure_loop_reads_budget_policy_and_cadence():

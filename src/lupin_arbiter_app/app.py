@@ -41,6 +41,7 @@ def create_app(
     health_loop           : Optional[ Any ]                = None,
     fleet_arbiter_loop    : Optional[ Any ]                = None,
     context_pressure_loop : Optional[ Any ]                = None,
+    turn_age_watchdog_loop : Optional[ Any ]               = None,
 ) -> FastAPI:
     """
     Build the lupin-arbiter-app FastAPI app.
@@ -48,8 +49,8 @@ def create_app(
     Requires:
         - now_fn (if provided) is a 0-arg callable returning an aware datetime
         - started_at (if provided) is an aware datetime
-        - health_loop / fleet_arbiter_loop / context_pressure_loop (if provided)
-          expose start() / stop()
+        - health_loop / fleet_arbiter_loop / context_pressure_loop /
+          turn_age_watchdog_loop (if provided) expose start() / stop()
 
     Ensures:
         - returns a FastAPI app exposing GET /health
@@ -66,20 +67,21 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan( _app: FastAPI ):
-        for lp in ( health_loop, fleet_arbiter_loop, context_pressure_loop ):
+        for lp in ( health_loop, fleet_arbiter_loop, context_pressure_loop, turn_age_watchdog_loop ):
             if lp is not None:
                 lp.start()
         yield
-        for lp in ( context_pressure_loop, fleet_arbiter_loop, health_loop ):   # stop in reverse start order
+        for lp in ( turn_age_watchdog_loop, context_pressure_loop, fleet_arbiter_loop, health_loop ):   # stop in reverse start order
             if lp is not None:
                 lp.stop()
 
     app = FastAPI( title="lupin-arbiter-app", version=__version__, lifespan=lifespan )
-    app.state.snapshot_store        = store
-    app.state.started_at            = started_at
-    app.state.health_loop           = health_loop
-    app.state.fleet_arbiter_loop    = fleet_arbiter_loop
-    app.state.context_pressure_loop = context_pressure_loop
+    app.state.snapshot_store         = store
+    app.state.started_at             = started_at
+    app.state.health_loop            = health_loop
+    app.state.fleet_arbiter_loop     = fleet_arbiter_loop
+    app.state.context_pressure_loop  = context_pressure_loop
+    app.state.turn_age_watchdog_loop = turn_age_watchdog_loop
 
     @app.get( "/health" )
     def health() -> dict:
@@ -240,7 +242,9 @@ def assemble_app(
     from lupin_arbiter_app.health_watcher import HealthWatcherLoop, docker_inspect_health
     from lupin_arbiter_app.fleet_arbiter_loop import (
         FleetArbiterLoop, build_fleet_arbiter_job_factory, make_follow_through_watcher_factory,
+        make_escalation_notify_fn,
     )
+    from cosa.agents.heartbeat_arbiter.turn_age_watchdog import TurnAgeWatchdog
     from cosa.agents.heartbeat_arbiter.arbiter_journal import make_log_fn
     # Relocated 2026-06-11 (fleet-roster reserve-from-random): the roster
     # reader lives with its env-var siblings in voice_persona_helpers now
@@ -350,11 +354,29 @@ def assemble_app(
     # ── context-headroom writer: gated on `arbiter context watch enabled` ──
     context_pressure_loop = _build_context_pressure_loop( cfg, store, clock=clock, log_fn=cp_log_fn )
 
+    # ── turn-age watchdog (wedge fix f1a21917 lever (ii)): the held-turn DETECTOR ──
+    # A standalone daemon (NO ArbiterConsumerJob coupling — it reads transcripts +
+    # panes directly) that flags a CC session whose last tool_use has gone
+    # un-resulted past `arbiter turn age watchdog threshold seconds` while its pane
+    # is idle → ONE operator advisory on the SAME rail as manager-stale (the durable
+    # fleet-escalations post + best-effort live push), one-shot per (session,
+    # tool_use). Self-gates on `arbiter turn age watchdog enabled` (default false):
+    # start() is a no-op and sweep_once does zero IO until the flag flips, so wiring
+    # it in is behavior-neutral. Its session-lister / transcript-reader / pane-oracle
+    # default to the real IO boundaries inside the watchdog; only the advisory sink
+    # is injected here to route onto the arbiter's outreach rail. Design:
+    # src/rnd/v0.1.9/2026.07.03-notify-turn-hold-fix-design.md §3 (lever ii).
+    turn_age_watchdog_loop = TurnAgeWatchdog(
+        cfg,
+        advisory_fn = make_escalation_notify_fn( gateway, live_notify_fn=live_notify_fn, log_fn=arbiter_log_fn ),
+    )
+
     # ── health watcher (L2): gated on the master enable ──
     if not cfg.get( "arbiter health watch enabled", default=True, return_type="boolean" ):
         log_fn( "health_watcher_disabled", reason="arbiter health watch enabled = false" )
         return create_app( snapshot_store=store, health_loop=None, fleet_arbiter_loop=fleet_arbiter_loop,
-                           context_pressure_loop=context_pressure_loop )
+                           context_pressure_loop=context_pressure_loop,
+                           turn_age_watchdog_loop=turn_age_watchdog_loop )
 
     def _csv( key, default ):
         raw = cfg.get( key, default=default ) or default
@@ -373,7 +395,8 @@ def assemble_app(
         blind_threshold_polls = int( cfg.get( "arbiter health blind threshold polls", default=3, return_type="int" ) ),
     )
     return create_app( snapshot_store=store, health_loop=health_loop, fleet_arbiter_loop=fleet_arbiter_loop,
-                       context_pressure_loop=context_pressure_loop )
+                       context_pressure_loop=context_pressure_loop,
+                       turn_age_watchdog_loop=turn_age_watchdog_loop )
 
 
 def _pending_ledger_path( cfg ):
