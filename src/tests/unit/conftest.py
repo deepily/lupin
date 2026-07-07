@@ -41,3 +41,25 @@ def _isolate_heartbeat_events_dir( tmp_path, monkeypatch ):
     monkeypatch.setattr(
         heartbeat_events, "FLEET_EVENTS_DIR", tmp_path / "heartbeat-events"
     )
+
+
+@pytest.fixture( autouse=True )
+def _isolate_hook_log_dir( tmp_path, monkeypatch ):
+    """
+    Redirect the hook-event log dir (hook_common._logs_dir) to a per-test tmp dir
+    via LUPIN_HOOK_LOG_DIR — the Lever-P SET site (item 6fc8d78d, 2026-07-07).
+
+    Why (the sibling of the FLEET-dir isolation above): once the Stop hook is LIVE,
+    ANY unit test driving log_to_stream / log_payload (the Branch-C _run_heartbeat
+    path, the oracle `heartbeat_oracle` line, etc.) appended to the REAL production
+    io/claude_code_hooks/logs/hook-events.jsonl. test_heartbeat_integration —
+    which monkeypatches the persona to "Mr. Radio 🦉" and drives synthetic session
+    ids sidC2/sidC3/sidC6b — thereby wrote 1,259+ synthetic `sidC*` rows into the
+    prod log, manufacturing a false "Mr-Radio-only" arbiter false-poke signature
+    that María's overnight watch counted as 336 spurious pokes.
+
+    hook_common._logs_dir resolves the dir at CALL time and honors this env var, so
+    the redirect holds regardless of import order. Tests that need the production
+    default (env UNSET) monkeypatch.delenv it locally.
+    """
+    monkeypatch.setenv( "LUPIN_HOOK_LOG_DIR", str( tmp_path / "hook-logs" ) )

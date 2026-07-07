@@ -72,10 +72,25 @@ import lupin_cli.claude_code.hooks.stop as stop
 from lupin_cli.claude_code.hooks.lib import heartbeat_events, heartbeat_poke_cap, heartbeat_hold
 from lupin_cli.claude_code.hooks.lib import heartbeat_user_gates as _ug
 from lupin_cli.claude_code.hooks.lib.heartbeat_decision import (
-    DECLARED_OWED_REASON, OUTCOME_POKE, OUTCOME_HONORED,
+    OUTCOME_POKE, OUTCOME_HONORED,
     OUTCOME_NOT_OWED, OUTCOME_CAP_REACHED,
+    OUTCOME_SUPPRESSED_STALE_DECLARED_OWED,
 )
 from lupin_cli.claude_code.hooks.lib.heartbeat_events import EVENT_IDLE
+
+
+def _read_oracle_rows( tmp_path, session_id ):
+    """Read the heartbeat_oracle log rows for a session from the conftest-redirected
+    hook-events.jsonl (Lever P: the autouse _isolate_hook_log_dir fixture points
+    LUPIN_HOOK_LOG_DIR at tmp_path/'hook-logs'). Proves both the Lever-P redirect
+    AND the Lever-A observable outcome in one read."""
+    import json
+    log = tmp_path / "hook-logs" / "hook-events.jsonl"
+    if not log.exists():
+        return [ ]
+    rows = [ json.loads( ln ) for ln in log.read_text().splitlines() if ln.strip() ]
+    return [ r for r in rows if r.get( "phase" ) == "heartbeat_oracle"
+             and r.get( "session_id" ) == session_id ]
 
 UTC = datetime.timezone.utc
 
@@ -488,17 +503,25 @@ class TestGroupCHoldOraclePrecedence:
         assert rec[ "outcome" ]  == OUTCOME_HONORED
         assert rec[ "awaiting" ] == "peer:Rachel"              # dependency-graph edge in the exhaust
 
-    def test_c2_stale_declared_owed_empty_oracle_pokes_declared_reason( self, roots ):
-        """Stale hold work_owed=True + EMPTY oracle → declared-owed drives poke with DECLARED_OWED_REASON."""
+    def test_c2_stale_declared_owed_empty_oracle_suppressed( self, roots, tmp_path ):
+        """Lever A (item 6fc8d78d): stale hold work_owed=True + EMPTY oracle is the
+        production FALSE POKE — now SUPPRESSED. No poke returned, counter unmoved,
+        NOT on the fleet rail (emit_outcome self-filters it); the OBSERVABLE distinct
+        outcome DOES ride the oracle log line so María's FP watch can audit the gate."""
         roots.enable()
         sid = "sidC2"
         roots.seed_hold( sid, reason="was holding", work_owed=True, fresh=False, awaiting="none" )
         tp  = roots.task_transcript( _EMPTY )                  # oracle NOT owed
 
         out, _ = stop._run_heartbeat( sid, tp )
-        assert out[ "decision" ] == "block"
-        assert out[ "reason" ]   == DECLARED_OWED_REASON       # declared (not oracle) reason text
-        assert roots.events( sid )[ -1 ][ "work_owed" ] is False   # oracle verdict is the emitted bool
+        assert out is None                                     # suppressed ⇒ no poke returned
+        assert roots.poke_count( sid ) == 0                    # never incremented
+        assert roots.events( sid ) == [ ]                      # NOT emitted to the fleet rail
+        # OBSERVABLE (rider ii) + Lever-P redirect proof: the distinct suppressed
+        # outcome reaches the oracle log line (with the real oracle work_owed=False).
+        rows = _read_oracle_rows( tmp_path, sid )
+        assert rows and rows[ -1 ][ "outcome" ]   == OUTCOME_SUPPRESSED_STALE_DECLARED_OWED
+        assert rows[ -1 ][ "work_owed" ] is False
 
     def test_c2b_stale_declared_owed_with_oracle_uses_oracle_reason( self, roots ):
         """Stale hold work_owed=True + OWED oracle → poke, but reason quotes the ORACLE specifics."""
@@ -512,16 +535,20 @@ class TestGroupCHoldOraclePrecedence:
         assert "in-progress" in out[ "reason" ]                # oracle specifics win the reason text
         assert roots.events( sid )[ -1 ][ "work_owed" ] is True
 
-    def test_c3_fresh_reasonless_hold_not_honored( self, roots ):
-        """Fresh but REASONLESS hold → not honored → falls to work-owed (declared True → poke)."""
+    def test_c3_fresh_reasonless_hold_empty_oracle_suppressed( self, roots ):
+        """Fresh but REASONLESS hold → not honored (is_honored False) → declared-owed
+        path. With an EMPTY oracle that is the FALSE POKE → SUPPRESSED (Lever A), not
+        poked. (A reasonless hold is not a defended quiescence, but nor is it owed work
+        the oracle can see.)"""
         roots.enable()
         sid = "sidC3"
         roots.seed_hold( sid, reason="", work_owed=True, fresh=True )
         tp  = roots.task_transcript( _EMPTY )
 
         out, _ = stop._run_heartbeat( sid, tp )
-        assert out is not None and out[ "decision" ] == "block"   # reasonless ⇒ not a defended quiescence
-        assert roots.events( sid )[ -1 ][ "outcome" ] == OUTCOME_POKE
+        assert out is None                                        # suppressed ⇒ no poke
+        assert roots.poke_count( sid ) == 0
+        assert roots.events( sid ) == [ ]                         # not on the fleet rail
 
     def test_c4_stale_declared_done_beats_oracle_owed( self, roots ):
         """Stale hold work_owed=False + owed transcript → declared-done wins → NOT_OWED, no poke."""
@@ -556,15 +583,18 @@ class TestGroupCHoldOraclePrecedence:
         assert outcomes == [ OUTCOME_HONORED ]                 # honored, NOT idle
         assert EVENT_IDLE not in outcomes
 
-    def test_c6b_declared_owed_empty_taskset_pokes( self, roots ):
-        """Rachel #5: hold work_owed=True + EMPTY oracle (stale/reasonless) → poke even with empty Task* set."""
+    def test_c6b_declared_owed_empty_taskset_suppressed( self, roots ):
+        """Rachel #5, re-ruled by Lever A (item 6fc8d78d): hold work_owed=True +
+        EMPTY oracle (stale/reasonless) with an empty Task* set is the production
+        FALSE POKE → SUPPRESSED, not poked."""
         roots.enable()
         sid = "sidC6b"
         roots.seed_hold( sid, reason="", work_owed=True, fresh=True )   # reasonless ⇒ not honored
         tp  = roots.task_transcript( _EMPTY )
         out, _ = stop._run_heartbeat( sid, tp )
-        assert out[ "decision" ] == "block"
-        assert out[ "reason" ]   == DECLARED_OWED_REASON
+        assert out is None                                        # suppressed ⇒ no poke
+        assert roots.poke_count( sid ) == 0
+        assert roots.events( sid ) == [ ]
 
 
 # ═════════════════════════════════════════════════════════════════════════════

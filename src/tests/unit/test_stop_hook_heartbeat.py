@@ -41,6 +41,7 @@ from lupin_cli.claude_code.hooks.stop import (
 from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import TODO_IN_PROGRESS
 from lupin_cli.claude_code.hooks.lib.heartbeat_decision import (
     DECLARED_OWED_REASON, OUTCOME_POKE, OUTCOME_NOT_OWED,
+    OUTCOME_SUPPRESSED_STALE_DECLARED_OWED,
 )
 from lupin_cli.notifications.notification_models import NotificationPriority
 
@@ -183,22 +184,22 @@ class TestRunHeartbeat:
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient" )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
             return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False, "verification_threshold_seconds": 600 } )
-    def test_v1_preserved_stale_declared_hold_pokes( self, mock_load, mock_read, mock_count, mock_incr ):
-        """v1 preserved: stale self-declared-owed hold pokes even with no owed Task*."""
-        mock_read.return_value       = _stale_owed_hold()
+    def test_stale_declared_hold_empty_oracle_suppressed( self, mock_load, mock_read, mock_count, mock_incr ):
+        """Lever A (item 6fc8d78d): a stale self-declared-owed hold with NO owed
+        Task* (oracle empty) is the production FALSE POKE — now SUPPRESSED, not
+        poked. No block, no increment, no §4 breadcrumb; the OBSERVABLE distinct
+        outcome rides the emit so the FP watch can audit the gate."""
+        mock_read.return_value        = _stale_owed_hold()
         self.mock_replay.return_value = _EMPTY_STATE
         out, _ = _run_heartbeat( "sid", "/t.jsonl" )
-        # role-goals Phase 2-3: the self-declared poke still OPENS with the v1
-        # DECLARED_OWED_REASON (intent preserved); the role-selected goal echo is
-        # APPENDED as a trailing blank-line-separated block. The "\n\n" suffix proves
-        # the append happened WITHOUT pinning the goal-line wording (D4 protection).
-        assert out[ "decision" ] == "block"
-        assert out[ "reason" ].startswith( DECLARED_OWED_REASON + "\n\n" )
-        mock_incr.assert_called_once_with( "sid" )
-        # §4 breadcrumb: declared-owed poke has no Task* count → self-declared text
-        self.mock_notify.assert_called_once()
-        crumb = self.mock_notify.call_args[ 0 ][ 0 ]
-        assert crumb.message == "A worker stopped — work owed (self-declared), poked."
+        assert out is None                                       # suppressed ⇒ no poke returned
+        mock_incr.assert_not_called()                            # never counts toward cap
+        self.mock_notify.assert_not_called()                     # §4 breadcrumb rides ONLY OUTCOME_POKE
+        # OBSERVABLE (rider ii): the distinct suppressed outcome reaches the emit
+        # layer (and thus the oracle log line) — never conflated with idle/not_owed.
+        emits = [ c for c in self.mock_events.emit_outcome.call_args_list
+                  if c.args[ 2 ] == OUTCOME_SUPPRESSED_STALE_DECLARED_OWED ]
+        assert len( emits ) == 1
 
     # ── non-poke paths ──
 
@@ -389,6 +390,10 @@ class TestRunHeartbeat:
     def test_emit_persona_and_awaiting_from_hold( self, mock_load, mock_read, mock_count, mock_incr ):
         self.mock_persona.return_value = { "name": "Rachel" }
         mock_read.return_value         = _stale_owed_hold()      # awaiting="none"
+        # Oracle-owed so it POKES (Lever A: a stale declared hold with an EMPTY
+        # oracle is now suppressed; the persona/awaiting emit is exercised on the
+        # surviving oracle-owed poke path). awaiting still comes from the hold.
+        self.mock_replay.return_value = _OWED_STATE
         _run_heartbeat( "sid", "/t.jsonl" )
         poke_emits = [ c for c in self.mock_events.emit_outcome.call_args_list
                        if c.args[ 2 ] == OUTCOME_POKE ]

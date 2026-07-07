@@ -12,13 +12,16 @@ owns per the lane/test split (Tiberius-approved 2026-06-04); Rachel wires the
 **v1 scope (reconciled with Rachel 2026-06-04):** the adapter wires ONLY the
 hold-declared signal — `oracle_verdict=None`. So v1:
     - honors a fresh, reasoned hold (no poke),
-    - pokes a session that left a STALE / reasonless self-declared
-      `work_owed=True` hold,
+    - SUPPRESSES a session that left a STALE / reasonless self-declared
+      `work_owed=True` hold when the oracle is empty — Lever A (item 6fc8d78d,
+      2026-07-07): that exact shape (declared-owed + oracle-empty) was the
+      production false poke, so it now yields OUTCOME_SUPPRESSED_STALE_DECLARED_OWED
+      instead of a poke (was: "pokes … with DECLARED_OWED_REASON"),
     - never pokes a session with no hold (conservative).
 v1 does NOT catch the undeclared-lazy-stop FM-19 case (no hold → no poke) —
 that is v2, gated on María's §C.3 Q4 (authoritative TODO source + owned_by_me)
-which feeds a real `oracle_verdict`. When v2 lands, only the `None` below
-changes; this test's hold/cap lifecycle assertions still hold.
+which feeds a real `oracle_verdict`. The cap/reset lifecycle is now exercised via
+the surviving ORACLE-OWED poke path (scenario 5 passes a real verdict).
 
 Venue: :7999-eligible / local — pure module composition, tmp-dir only, no
 persistent state, no server, sub-second.
@@ -29,6 +32,7 @@ import os
 from lupin_cli.claude_code.hooks.lib import heartbeat_hold as hold_mod
 from lupin_cli.claude_code.hooks.lib import heartbeat_poke_cap as cap_mod
 from lupin_cli.claude_code.hooks.lib import heartbeat_decision as decision_mod
+from lupin_cli.claude_code.hooks.lib import heartbeat_work_owed as owed_mod
 
 
 UTC = datetime.timezone.utc
@@ -44,17 +48,18 @@ def _backdate_hold_mtime( base_dir, session_id, now, seconds=10_000 ):
     os.utime( path, ( old, old ) )
 
 
-def _v1_adapter_step( session_id, base_dir, now=None ):
+def _v1_adapter_step( session_id, base_dir, now=None, oracle_verdict=None ):
     """
     Mirror the v1 Branch-C adapter's side-effect shell (minus stop.py / notify).
 
-    Reads the hold + current poke count, calls decide_heartbeat with
-    oracle_verdict=None (v1), and applies the increment side-effect the
-    result declares. Returns the full result for assertion.
+    Reads the hold + current poke count, calls decide_heartbeat with the given
+    `oracle_verdict` (default None — the v1 hold-only contract; scenarios that need
+    the surviving oracle-owed poke pass a real verdict), and applies the increment
+    side-effect the result declares. Returns the full result for assertion.
     """
     hold   = hold_mod.read_hold( session_id, base_dir=base_dir )
     count  = cap_mod.get_poke_count( session_id, base_dir=base_dir )
-    result = decision_mod.decide_heartbeat( hold, None, count, CAP, now=now )   # v1: oracle None
+    result = decision_mod.decide_heartbeat( hold, oracle_verdict, count, CAP, now=now )
     if result[ "should_increment" ]:
         cap_mod.increment_poke_count( session_id, base_dir=base_dir )
     return result
@@ -97,9 +102,12 @@ def test_v1_hold_declares_done_not_owed( tmp_path ):
     assert cap_mod.get_poke_count( "s_done", base_dir=tmp_path ) == 0
 
 
-# ── Scenario 4 — stale self-declared-owed hold → poke up to the cap ───────────
+# ── Scenario 4 — stale self-declared-owed hold + EMPTY oracle → SUPPRESSED ─────
+# Lever A (item 6fc8d78d, 2026-07-07): with the oracle empty (v1's default
+# oracle_verdict=None) a stale declared-owed hold is the production FALSE POKE —
+# it is now suppressed, never poked, and the counter never moves.
 
-def test_v1_stale_owed_hold_pokes_to_cap_then_stops( tmp_path ):
+def test_v1_stale_owed_hold_empty_oracle_suppressed( tmp_path ):
     now   = datetime.datetime( 2026, 6, 4, 12, 0, 0, tzinfo=UTC )
     stale = ( now - datetime.timedelta( seconds=10_000 ) ).isoformat()
     hold_mod.write_hold(
@@ -108,45 +116,37 @@ def test_v1_stale_owed_hold_pokes_to_cap_then_stops( tmp_path ):
     )
     _backdate_hold_mtime( tmp_path, "s_stale", now )   # B1: stale via file mtime
 
-    # Pokes 1..CAP — each a block carrying the declared-owed reason
-    for expected_count in range( 1, CAP + 1 ):
+    # Every step suppresses: no block, no increment, no cap-notify — and the poke
+    # counter stays 0 no matter how many Stops fire (well past the old cap).
+    for _ in range( CAP + 2 ):
         r = _v1_adapter_step( "s_stale", base_dir=tmp_path, now=now )
-        assert r[ "outcome" ]                   == decision_mod.OUTCOME_POKE
-        assert r[ "hook_output" ][ "decision" ] == "block"
-        assert r[ "hook_output" ][ "reason" ]   == decision_mod.DECLARED_OWED_REASON
-        assert r[ "should_increment" ]          is True
-        assert cap_mod.get_poke_count( "s_stale", base_dir=tmp_path ) == expected_count
-
-    # At the cap → stop nudging + signal the notify
-    r = _v1_adapter_step( "s_stale", base_dir=tmp_path, now=now )
-    assert r[ "outcome" ]            == decision_mod.OUTCOME_CAP_REACHED
-    assert r[ "hook_output" ]        == { "continue": True }
-    assert r[ "should_notify_cap" ]  is True
-    assert r[ "should_increment" ]   is False
-    assert cap_mod.get_poke_count( "s_stale", base_dir=tmp_path ) == CAP   # unchanged at cap
+        assert r[ "outcome" ]           == decision_mod.OUTCOME_SUPPRESSED_STALE_DECLARED_OWED
+        assert r[ "hook_output" ]       == { "continue": True }
+        assert r[ "should_increment" ]  is False
+        assert r[ "should_notify_cap" ] is False
+    assert cap_mod.get_poke_count( "s_stale", base_dir=tmp_path ) == 0
 
 
 # ── Scenario 5 — reset (UserPromptSubmit) reopens the budget ──────────────────
+# Exercised via the surviving ORACLE-OWED poke path (Lever A suppressed the
+# oracle-empty declared-owed poke, so the cap/reset lifecycle rides a real verdict).
 
 def test_v1_reset_reopens_poke_budget( tmp_path ):
-    now   = datetime.datetime( 2026, 6, 4, 12, 0, 0, tzinfo=UTC )
-    stale = ( now - datetime.timedelta( seconds=10_000 ) ).isoformat()
-    hold_mod.write_hold(
-        "s_reset", "Tiffany 💍", "stale owed", work_owed=True,
-        ttl_seconds=900, held_at=stale, base_dir=tmp_path
-    )
-    _backdate_hold_mtime( tmp_path, "s_reset", now )   # B1: stale via file mtime
+    now    = datetime.datetime( 2026, 6, 4, 12, 0, 0, tzinfo=UTC )
+    owed_v = owed_mod.evaluate_work_owed(
+        todo_items=[ { "status": owed_mod.TODO_IN_PROGRESS, "owned_by_me": True } ] )
 
-    # Burn the budget to the cap
+    # Burn the budget to the cap (oracle-owed pokes; no hold)
     for _ in range( CAP ):
-        _v1_adapter_step( "s_reset", base_dir=tmp_path, now=now )
-    assert _v1_adapter_step( "s_reset", base_dir=tmp_path, now=now )[ "outcome" ] == decision_mod.OUTCOME_CAP_REACHED
+        _v1_adapter_step( "s_reset", base_dir=tmp_path, now=now, oracle_verdict=owed_v )
+    assert _v1_adapter_step( "s_reset", base_dir=tmp_path, now=now, oracle_verdict=owed_v )[ "outcome" ] \
+        == decision_mod.OUTCOME_CAP_REACHED
 
     # Simulate genuine user re-engagement → reset_poke_count (UserPromptSubmit)
     cap_mod.reset_poke_count( "s_reset", base_dir=tmp_path )
     assert cap_mod.get_poke_count( "s_reset", base_dir=tmp_path ) == 0
 
     # Next idle pokes again from a fresh budget
-    r = _v1_adapter_step( "s_reset", base_dir=tmp_path, now=now )
+    r = _v1_adapter_step( "s_reset", base_dir=tmp_path, now=now, oracle_verdict=owed_v )
     assert r[ "outcome" ] == decision_mod.OUTCOME_POKE
     assert cap_mod.get_poke_count( "s_reset", base_dir=tmp_path ) == 1

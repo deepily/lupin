@@ -30,7 +30,8 @@ from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import (
     evaluate_work_owed, build_poke_reason, TODO_IN_PROGRESS,
 )
 from lupin_cli.claude_code.hooks.lib.heartbeat_decision import (
-    decide_heartbeat, DECLARED_OWED_REASON, OUTCOME_POKE,
+    decide_heartbeat, OUTCOME_POKE,
+    OUTCOME_SUPPRESSED_STALE_DECLARED_OWED,
 )
 
 
@@ -74,15 +75,17 @@ class TestPureCoreGoalLine:
         assert r[ "outcome" ] == OUTCOME_POKE
         assert r[ "hook_output" ][ "reason" ].endswith( "\n\n" + _GOAL )
 
-    def test_decide_self_declared_appends_goal( self ):
+    def test_decide_self_declared_empty_oracle_suppressed( self ):
+        # Lever A (item 6fc8d78d): a self-declared-owed hold with an EMPTY oracle
+        # is the production FALSE POKE — now SUPPRESSED, so there is NO poke reason
+        # and thus no goal echo. The goal-append behavior lives on the surviving
+        # oracle-owed poke path (test_decide_oracle_owed_appends_goal above).
         now      = datetime.datetime( 2026, 6, 4, 12, 0, 0, tzinfo=datetime.timezone.utc )
         empty_v  = evaluate_work_owed()
         hold     = { "held_at": now.isoformat(), "ttl_seconds": 0, "reason": "x", "work_owed": True }
         r        = decide_heartbeat( hold, empty_v, 0, 3, now=now, goal_line=_GOAL )
-        assert r[ "outcome" ] == OUTCOME_POKE
-        reason = r[ "hook_output" ][ "reason" ]
-        assert reason.startswith( DECLARED_OWED_REASON )
-        assert reason.endswith( "\n\n" + _GOAL )
+        assert r[ "outcome" ]     == OUTCOME_SUPPRESSED_STALE_DECLARED_OWED
+        assert r[ "hook_output" ] == { "continue": True }
 
     def test_decide_empty_goal_unchanged( self ):
         v = self._owed_verdict()
