@@ -23,11 +23,18 @@ from alembic.script import ScriptDirectory
 from cosa.rest.db.auto_migrate import build_alembic_config
 
 
-# The TRUE baseline (migration zero) and the current head.
+# The TRUE baseline (migration zero). The head is intentionally NOT pinned to a
+# revision literal: every new migration legitimately moves the head, so a literal
+# here RED-flags the whole unit suite on the next migration (bug a5bf3298). The
+# structural invariants below — exactly one head, the chain roots at the baseline,
+# and the historical span is preserved as a base-first prefix — catch the real
+# regressions without the per-migration re-pin churn.
 _BASELINE_REVISION = "000000000000"
-_HEAD_REVISION     = "c9d0e1f2a3b4"
 
-# The post-baseline span that MUST be preserved, base-first.
+# The historical post-baseline span, base-first — as it stood at the TRUE-baseline
+# rebase. It MUST remain an intact, in-order, base-first PREFIX of the live chain;
+# newer migrations (e.g. the pgvector drop-HNSW head e1f2a3b4c5d6) extend the chain
+# PAST this prefix and must never reorder or re-base any of it.
 _POST_BASELINE_CHAIN = [
     "000000000000",   # true baseline (schema.sql origin)
     "f0a1b2c3d4e5",   # task_store tables (rebase anchor)
@@ -64,10 +71,16 @@ def test_single_base_is_true_baseline():
 
 
 def test_single_head():
-    """The chain has EXACTLY ONE head (no forks / parallel branches)."""
+    """The chain has EXACTLY ONE head (no forks / parallel branches).
+
+    Asserts the COUNT, not a revision literal: every new migration moves the head,
+    so pinning a literal here just RED-flags the whole unit suite on the next
+    migration (bug a5bf3298). One head is the real invariant — a fork / second
+    branch is the regression this guards; the head's chain is validated structurally
+    by test_post_baseline_chain_is_linear_and_preserved."""
     script = _script_dir()
     heads  = list( script.get_heads() )
-    assert heads == [ _HEAD_REVISION ], f"expected single head {_HEAD_REVISION!r}, got {heads!r}"
+    assert len( heads ) == 1, f"expected exactly one head, got {heads!r}"
 
 
 def test_baseline_down_revision_is_none():
@@ -78,13 +91,25 @@ def test_baseline_down_revision_is_none():
 
 
 def test_post_baseline_chain_is_linear_and_preserved():
-    """Walking base->head yields exactly the preserved linear post-baseline chain."""
+    """Walking LIVE-head->base is linear, roots at the true baseline, and preserves
+    the historical span as an intact base-first prefix (newer migrations extend it).
+
+    Anchors on the ACTUAL head (get_heads()[0]), NOT a pinned literal, so a new
+    migration on top is covered automatically instead of RED-flagging the suite
+    (bug a5bf3298). Still catches: a re-based / reordered / removed historical
+    revision (prefix mismatch), or a chain that no longer roots at the baseline."""
     script = _script_dir()
+    head   = script.get_heads()[ 0 ]
     # iterate_revisions(head, "base") walks newest->oldest INCLUSIVE of the root;
     # reverse to base-first. ("base" is alembic's token for "down to the root".)
-    walked = [ rev.revision for rev in script.iterate_revisions( _HEAD_REVISION, "base" ) ]
+    walked = [ rev.revision for rev in script.iterate_revisions( head, "base" ) ]
     walked.reverse()
-    assert walked == _POST_BASELINE_CHAIN, f"chain drift: {walked!r}"
+    assert walked[ 0 ] == _BASELINE_REVISION, (
+        f"chain must root at the true baseline {_BASELINE_REVISION!r}, got {walked[ :1 ]!r}"
+    )
+    assert walked[ :len( _POST_BASELINE_CHAIN ) ] == _POST_BASELINE_CHAIN, (
+        f"historical prefix drift: {walked[ :len( _POST_BASELINE_CHAIN ) ]!r}"
+    )
 
 
 def test_task_store_rebased_onto_baseline():
