@@ -1721,7 +1721,14 @@ def _resolve_owed_state( session_id, transcript_path=None, cwd=None ):
         delegations, last_look_in_ts, now_epoch,
         threshold_seconds = settings[ "verification_threshold_seconds" ] )
     user_gates    = get_pending_user_gates( hold )
-    open_gates    = heartbeat_user_gates.open_gates( user_gates )      # owed set (any open)
+    open_gates    = heartbeat_user_gates.open_gates( user_gates )      # every not-answered gate (tracked; arbiter aged-backstop set)
+    # bug 75f392c0 relief valve: a gate deferred to a FUTURE scheduled chase (an
+    # offline user with a next_chase_ts) or one that spent its re-ask budget with
+    # no chase scheduled is NOT eligible to poke this Stop — pokeable_gates strips
+    # those out. due_gates already filters through it (re-ask cadence on top); Face
+    # B's re-surface debounce below is fed pokeable so a deferred gate never
+    # re-triggers the surface either. open_gates stays the tracked/observability set.
+    pokeable_gates = heartbeat_user_gates.pokeable_gates( user_gates, now_epoch )  # relief-valve-eligible
     due_gates     = heartbeat_user_gates.due_gates( user_gates, now_epoch )  # re-ask NOW (poke detail)
     # ── Proactive-manager mechanism (fcb5dbc0, A1) — TWO new debounced signals ──
     # Both ride the SAME pure-debounce shape as the 6929f4ac inward twin, gated on
@@ -1746,8 +1753,20 @@ def _resolve_owed_state( session_id, transcript_path=None, cwd=None ):
         threshold_seconds = pm_config[ "spinup_threshold_s" ],
         backlog_min_n     = pm_config[ "spinup_backlog_min" ] )
     needs_question_surface = manager_needs_question_surface(
-        open_gates, last_surfaced_ts, now_epoch,
+        pokeable_gates, last_surfaced_ts, now_epoch,   # 75f392c0: deferred/capped gates don't re-surface
         threshold_seconds = pm_config[ "surface_threshold_s" ] )
+    # Relief-valve observability (75f392c0): greppable count of gates suppressed
+    # this Stop (open but not pokeable — deferred to a future chase or budget-spent)
+    # so the "why isn't it re-asking?" question is answerable from the log stream.
+    _deferred_gate_count = len( open_gates ) - len( pokeable_gates )
+    if _deferred_gate_count:
+        log_to_stream( "stop", {}, extra={
+            "phase"                : "heartbeat_gate_relief_valve",
+            "session_id"           : session_id,
+            "open_user_gates"      : len( open_gates ),
+            "pokeable_user_gates"  : len( pokeable_gates ),
+            "deferred_user_gates"  : _deferred_gate_count,
+        } )
     verdict    = evaluate_work_owed(
         todo_items                   = owed_items,
         unanswered_inbound_questions = open_inbound,

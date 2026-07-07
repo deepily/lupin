@@ -1029,3 +1029,47 @@ class TestGroupHReceiptsOfProgress:
         tp = roots.task_transcript( _EMPTY )
         assert stop._run_heartbeat( "sidH4", tp )[ 0 ] is None    # honored → no poke
         assert roots.poke_count( "sidH4" ) == 0
+
+    def test_h5_deferred_user_gate_leaves_fresh_hold_honored( self, roots ):
+        """RELIEF VALVE e2e (bug 75f392c0): a gate blocked on an OFFLINE user with a
+        FUTURE next_chase_ts is deferred → due_gates empty → no outstanding_user_gate
+        override → the fresh reasoned hold is HONORED → NO poke. This is the exact
+        storm the fix kills (a stale-but-deferred gate no longer re-asks every turn).
+        Covers the stop.py relief-valve wiring (Face B fed pokeable + the deferred
+        observability branch: open=1, pokeable=0)."""
+        roots.enable( cap=3 )
+        future = _iso( datetime.datetime.now( UTC ) + datetime.timedelta( hours=3 ) )
+        gate = _ug.make_gate( "7d50a03a", "Proceed with the prod deploy?", "ask_yes_no",
+                              last_asked_ts=self._stale(), next_chase_ts=future )
+        self._write_hold( roots, "sidH5", pending_user_gates=[ gate ] )
+        tp = roots.task_transcript( _EMPTY )                  # gate is the sole would-be signal
+        assert stop._run_heartbeat( "sidH5", tp )[ 0 ] is None    # deferred → honored → no poke
+        assert roots.poke_count( "sidH5" ) == 0
+
+    def test_h6_reask_capped_gate_leaves_fresh_hold_honored( self, roots ):
+        """RELIEF VALVE e2e (bug 75f392c0 fix #2): a gate that spent its re-ask
+        budget with NO chase scheduled goes quiet → due_gates empty → the fresh
+        reasoned hold is HONORED → no poke (the no-chase safety net; the arbiter
+        aged-backstop resurfaces it later)."""
+        roots.enable( cap=3 )
+        gate = _ug.make_gate( "capped1", "Proceed?", "ask_yes_no",
+                              last_asked_ts=self._stale(),
+                              reask_count=_ug.DEFAULT_REASK_CAP, reask_cap=_ug.DEFAULT_REASK_CAP )
+        self._write_hold( roots, "sidH6", pending_user_gates=[ gate ] )
+        tp = roots.task_transcript( _EMPTY )
+        assert stop._run_heartbeat( "sidH6", tp )[ 0 ] is None    # capped → honored → no poke
+        assert roots.poke_count( "sidH6" ) == 0
+
+    def test_h7_past_chase_gate_resumes_and_pokes( self, roots ):
+        """RELIEF VALVE resume e2e: once the scheduled chase time ARRIVES (past
+        next_chase_ts) a stale gate becomes due again → outstanding_user_gate
+        overrides the fresh hold → poke (quiet-until-chase, then re-engage)."""
+        roots.enable( cap=3 )
+        past = _iso( datetime.datetime.now( UTC ) - datetime.timedelta( minutes=1 ) )
+        gate = _ug.make_gate( "resume1", "Proceed?", "ask_yes_no",
+                              last_asked_ts=self._stale(), next_chase_ts=past )
+        self._write_hold( roots, "sidH7", pending_user_gates=[ gate ] )
+        tp = roots.task_transcript( _EMPTY )
+        out, _ = stop._run_heartbeat( "sidH7", tp )
+        assert out[ "decision" ] == "block" and "user-gate" in out[ "reason" ]
+        assert roots.poke_count( "sidH7" ) == 1
