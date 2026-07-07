@@ -31,6 +31,7 @@ import { createApiClient } from "./api/ApiClient";
 import { createTransports } from "./transport";
 import { createStores, DEFAULT_HISTORY_WINDOW_HOURS } from "./stores";
 import type { ServerSenderHydrationRecord, SchedulableAudioContext } from "./stores";
+import { createStripReconnectRehydrator } from "./stores/StripReconnectRehydrator";
 import { wireNotificationTtsIntent } from "./wireTtsIntent";
 import { wireTtsPlayback } from "./wireTtsPlayback";
 import {
@@ -492,6 +493,20 @@ function bootMultiplexer(): void {
       })
       .catch(() => { /* best-effort cold-reload hydration; live events still populate */ });
   }
+  // v0.1.9 focus-bar eager re-hydrate (option 2) — the cold hydrate above runs
+  // ONCE at boot; after a long silent window the host prune reaps stale sessions
+  // and the strip only lazily refills (~15-20min) as sessions re-announce a
+  // persona. This subscriber re-runs the SAME idempotent hydrate on the queue
+  // socket's genuine reconnect edge (reconnecting->connected), refilling the
+  // strip immediately. Self-contained (no store/renderer surgery); mirrors
+  // ActionRequiredStore's connected-edge pattern.
+  // Design: src/rnd/v0.1.9/2026.07.07-focus-bar-repopulation-ux-design.md
+  createStripReconnectRehydrator({
+    bus      : eventBus,
+    api      : apiClient,
+    stores   : { sessionStrip: stores.sessionStrip, senders: stores.senders },
+    getEmail : () => authManager.getCurrentUserEmail(),
+  });
   // Lane C WP4+WP5 — master-detail Reading Pane renderer. Mounts on the
   // `.content-shell` root (contains .left-column + #content-pane* + splitter +
   // #layout-mode-toggle). Reads the readingPane store (gesture/AR-driven) and
