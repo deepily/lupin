@@ -171,7 +171,7 @@ _COLOR_STATES = {
 def test_fleet_unreachable_shows_offline_banner( page ):
     _open_with_fleet( page, _UNREACHABLE )
     page.wait_for_selector( ".fleet-status-container .fleet-status-offline", timeout=3000 )
-    assert page.locator( ".fleet-status-count" ).text_content() == "0"
+    assert page.locator( '[data-testid="multiplexer-fleet-status-count"]' ).text_content() == "0"
 
 
 def test_fleet_auth_required_shows_signin_banner( page ):
@@ -204,7 +204,7 @@ def test_fleet_populated_renders_grouped_table_with_context_columns( page ):
     assert page.locator( ".fleet-row-manager" ).count() == 1
     assert page.locator( ".fleet-row-worker" ).count() == 1   # Ghost is offline → hidden
     # Live-only count excludes the offline Ghost (2 live of 3).
-    assert page.locator( ".fleet-status-count" ).text_content() == "2"
+    assert page.locator( '[data-testid="multiplexer-fleet-status-count"]' ).text_content() == "2"
     # Context columns joined per-persona for Tiberius.
     row = page.locator( "tbody .fleet-row-manager" )
     assert row.locator( ".fleet-col-window-pct" ).text_content() == "33.3%"
@@ -235,7 +235,7 @@ def test_fleet_offline_toggle_reveals_hidden_sessions( page ):
         timeout=2000,
     )
     assert "Hide offline (1)" in page.locator( ".fleet-offline-toggle-btn" ).text_content()
-    assert page.locator( ".fleet-status-count" ).text_content() == "3"
+    assert page.locator( '[data-testid="multiplexer-fleet-status-count"]' ).text_content() == "3"
 
 
 def test_fleet_all_offline_shows_no_live_sessions_with_toggle( page ):
@@ -243,7 +243,7 @@ def test_fleet_all_offline_shows_no_live_sessions_with_toggle( page ):
     page.wait_for_selector( ".fleet-status-container .fleet-status-empty", timeout=3000 )
     assert page.locator( ".fleet-status-empty" ).text_content() == "No live sessions."
     assert page.locator( ".fleet-offline-toggle-btn" ).count() == 1
-    assert page.locator( ".fleet-status-count" ).text_content() == "0"
+    assert page.locator( '[data-testid="multiplexer-fleet-status-count"]' ).text_content() == "0"
 
 
 # ---------------------------------------------------------------------------

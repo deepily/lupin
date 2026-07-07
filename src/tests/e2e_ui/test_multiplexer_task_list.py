@@ -146,7 +146,7 @@ def test_task_list_populated_renders_grouped_table( page ):
     page.wait_for_selector( ".task-list-table", timeout=3000 )
 
     # Open-only count: done excluded → 3 of 4.
-    assert page.locator( ".task-list-count" ).text_content() == "3"
+    assert page.locator( '[data-testid="multiplexer-task-list-count"]' ).text_content() == "3"
 
     # Owner group header for amy + the Unassigned bucket.
     headers = page.locator( ".task-group-header" )
@@ -174,14 +174,14 @@ def test_task_list_all_terminal_shows_no_open_tasks( page ):
     _open_with_tasks( page, _ALL_TERMINAL )
     el = page.wait_for_selector( ".task-list-container .task-list-empty", timeout=3000 )
     assert el.text_content() == "✅ No open tasks."
-    assert page.locator( ".task-list-count" ).text_content() == "0"
+    assert page.locator( '[data-testid="multiplexer-task-list-count"]' ).text_content() == "0"
 
 
 def test_task_list_unreachable_shows_indicator_not_blank( page ):
     _open_with_tasks( page, _UNREACHABLE )
     # Never blank: the unreachable indicator is shown.
     page.wait_for_selector( ".task-list-container .task-list-unreachable", timeout=3000 )
-    assert page.locator( ".task-list-count" ).text_content() == "0"
+    assert page.locator( '[data-testid="multiplexer-task-list-count"]' ).text_content() == "0"
 
 
 def test_task_list_auth_required_shows_signin_banner( page ):
@@ -214,7 +214,7 @@ def test_task_list_degrades_to_last_known_on_unreachable( page ):
     page.goto( MULTIPLEXER_URL, wait_until="networkidle", timeout=15_000 )
     _wait_for_test_hook( page )
     page.wait_for_selector( ".task-list-table", timeout=3000 )
-    assert page.locator( ".task-list-count" ).text_content() == "3"
+    assert page.locator( '[data-testid="multiplexer-task-list-count"]' ).text_content() == "3"
 
     # Flip to unreachable, click refresh → indicator appears BUT last-known rows
     # remain (graceful degradation — never blank).
@@ -223,7 +223,7 @@ def test_task_list_degrades_to_last_known_on_unreachable( page ):
     page.wait_for_selector( ".task-list-unreachable", timeout=3000 )
     time.sleep( 0.2 )
     assert page.locator( ".task-list-table" ).count() == 1, "last-known rows still rendered"
-    assert page.locator( ".task-list-count" ).text_content() == "3", "count holds at last-known"
+    assert page.locator( '[data-testid="multiplexer-task-list-count"]' ).text_content() == "3", "count holds at last-known"
 
 
 # ---------------------------------------------------------------------------

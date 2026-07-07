@@ -72,6 +72,49 @@ def _login_tokens() -> tuple[ str, str, str ]:
     return tokens[ "access_token" ], tokens[ "refresh_token" ], email
 
 
+def _uid_from_access_token( access: str ) -> str:
+    """Decode the JWT `sub` (uid) from a RAW access token — no page needed.
+
+    Mirrors conftest.get_user_id_from_page but works off the token string
+    directly, so job_history can be seeded BEFORE navigation (the boot
+    hydration fetch must see the row).
+    """
+    import base64
+
+    payload  = access.split( "." )[ 1 ]
+    payload += "=" * ( -len( payload ) % 4 )   # restore base64 padding
+    return json.loads( base64.b64decode( payload ) )[ "sub" ]
+
+
+def _seed_one_job_history( access: str, email: str ) -> None:
+    """Seed ONE terminal job_history row for the logged-in user so the boot
+    hydration path has a real row to surface (`history_n >= 1`).
+
+    Closes the SEED-GAP leg of the E2E-gate classification (item 6aa7a7ef):
+    `test_boot_has_zero_4xx_and_jobs_pane_hydrates` asserted a hydrated Jobs
+    pane but nothing seeded /api/job-history for the FIXED test user, so
+    `history_n` was 0 on a bounce-fresh single-suite run.
+
+    A UNIQUE `id_suffix` per run avoids the `id_hash` PRIMARY-KEY collision
+    that a fixed suffix would hit on repeat runs against the shared fixed test
+    user (the `seeded_*_page` fixtures dodge this by registering a fresh user
+    per test; this test reuses the standing e2e credentials, so we make the
+    row unique ourselves). COMPLETED status → the row lands in the terminal
+    "history" bucket the assertion reads.
+
+    Writes via the test-process engine (lupin_db_test under the :8000 runner —
+    the SAME DB the server reads), the identical path the conftest
+    `seeded_history_page` fixture already uses.
+    """
+    from tests.helpers.job_history_seed import seed_job_history_records
+
+    user_id = _uid_from_access_token( access )
+    seed_job_history_records(
+        user_id, email,
+        [ { "id_suffix": f"coldload-{ uuid.uuid4().hex[ :8 ] }" } ],
+    )
+
+
 def _open( page, access: str, refresh: str, stub_routes: bool = False,
            hydration_records: list[ dict ] | None = None,
            conversations: dict[ str, dict ] | None = None ):
@@ -309,7 +352,14 @@ def test_boot_has_zero_4xx_and_jobs_pane_hydrates( page ):
         - fail-loud assertions on both the negative (no 4xx) and positive
           (store hydrated with rows) sides of the contract.
     """
-    access, refresh, _email = _login_tokens()
+    access, refresh, email = _login_tokens()
+
+    # SEED-GAP fix (item 6aa7a7ef): the boot Jobs-pane hydration asserts
+    # `history_n >= 1`, but nothing seeded /api/job-history for the fixed test
+    # user → the bounce-fresh single-suite run reported history_n=0. Seed one
+    # terminal row (unique id_hash per run) BEFORE navigation so the boot fetch
+    # surfaces it.
+    _seed_one_job_history( access, email )
 
     # Capture every response status seen during the load. page.on("response")
     # fires for the document, every XHR/fetch, and every static asset — exactly
