@@ -69,6 +69,7 @@ CREATE TABLE task_items (
     next_chase_ts       TEXT,
     gate_class          TEXT NOT NULL DEFAULT 'none',
     priority            TEXT NOT NULL DEFAULT 'P2',
+    urgency             TEXT NOT NULL DEFAULT 'normal',
     source_qid          TEXT,
     correlation_key     TEXT,
     created_ts          TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -264,3 +265,29 @@ def test_reheal_no_table_is_noop( monkeypatch, make_engine ):
 def test_downgrade_is_noop():
     module = _load_migration_module()
     assert module.downgrade() is None   # pure pass — no DB touch, no raise
+
+
+# ---------------------------------------------------------------------------
+# DDL drift guard (bug 6e9a8520): the hand-rolled portable DDL MUST carry EXACTLY
+# the ORM model's columns — else the real-repository INSERT fails cryptically.
+# ---------------------------------------------------------------------------
+
+def test_portable_ddl_matches_orm_columns( make_engine ):
+    """The portable task_items / task_events DDL mirrors the ORM models column-for-
+    column. Guards the exact drift that made these tests look env-flaky (6e9a8520):
+    `urgency` was added to postgres_models.TaskItem (2c8ed5ac, 2026-06-23) the day
+    AFTER this DDL was written, without mirroring it here — so create_item's INSERT
+    hit "no column named urgency" buried in a stack trace, deterministic on any
+    current tree. This asserts the column SETS match, failing LOUDLY and NAMING the
+    drifted column the moment a model column is added without updating the DDL."""
+    from cosa.rest.postgres_models import TaskItem, TaskEvent
+
+    engine = make_engine( with_schema=True )
+    insp   = sa.inspect( engine )
+    for model in ( TaskItem, TaskEvent ):
+        ddl_cols   = { c[ "name" ] for c in insp.get_columns( model.__tablename__ ) }
+        model_cols = { c.name for c in model.__table__.columns }
+        assert ddl_cols == model_cols, (
+            f"{model.__tablename__} portable-DDL drift vs ORM model: "
+            f"missing={sorted( model_cols - ddl_cols )}, extra={sorted( ddl_cols - model_cols )}"
+        )
