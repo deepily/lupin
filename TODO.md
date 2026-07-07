@@ -6,6 +6,12 @@
 
 ---
 
+## 🗓️ STATUS 2026-07-06 (Tiberius 👑, session a6553139) — evening: notification-flood P1 shipped + full board sweep (8 items)
+
+Rick's 3000+ digest-flood question root-caused (arbiter re-announce × persist-on-fail × no idempotency; bug `e1bbe011`) and FIXED same evening (`87a1de61`, persist=false flood-guard, LIVE via arbiter bounce). Crew of 4 (Tiffany/Krishna/Rachel/Clayton) closed **8 store items** with git-verified receipts incl. the corrected E2E-gate classification (10 mux-introduced now fixed · **5** truly pre-existing · 0 functional regressions) and the between-suites DB-isolation hardening (`ea0e4428`). All crew reaped w/ mementos. **Rick's open card: 4.7k flood-row purge** (asks expired unanswered — no purge executed; re-offer on engagement). Deferred: `caf58f71` (P3 concurrent-writer class), `ee23fca8`/`603d9275` (by design). **Hygiene: TODO.md at ~2,250 lines — run `/plan-todo archive` (horizon sweep) next session.**
+
+---
+
 ## 🗓️ STATUS 2026-07-06 (Mr. Radio 🦉, session 2352acab) — evening: 2 bug lanes shipped, 2 gates executed, arbiter payloads live
 
 Both worker lanes DONE same-evening: **75f392c0** Stop-hook poke-storm relief valve (Cheech, merged `ecae99a0` + doctrine §8 `de355d84`) and **f1a21917** wedge remediation (Rio, merged `7b7f2977` — `MCP_TOOL_TIMEOUT=660000` for all new spawns + turn-age watchdog). Rick-gates executed: `7d50a03a`+`c90f24f4` (pgvector → `src/cosa/.venv`, 93/93 green) + wedge ratification. Arbiter double-bounced w/ Tiberius (Rick broadcast bcea4232 re-affirmed manager bounce authority): **Tiffany's flood fix + turn-age watchdog both LIVE**, first sweeps clean. `63c5d913` closed-verified (`--model` flag injects; stale-process root cause). History archived (22.5k→6.9k). Rick's still-open card: arbiter flood-row purge (on Tiberius's ask). María's `6fc8d78d` (P1 spurious-poke root-cause) remains hers.
