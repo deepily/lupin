@@ -10,10 +10,17 @@ patched. ZERO real threads, ZERO sleeps.
 
 Covers: stall-threshold parse (numeric / non-numeric except), idle-wake derive,
 _tick_heartbeat (success / AttributeError), outer-loop-not-entered, job path
-(monopolize+debug / websocket_mgr present / _process_job present), job path
-(no websocket_mgr / no _process_job warn / monopolize-false / debug-false),
-empty-queue wait, items-scheduled-future wait, items-all-paused wait, and the
-top-level except (with debug traceback) — to genuine 100% line + branch + function.
+(websocket_mgr present / _process_job present), job path (no websocket_mgr /
+no _process_job warn / monopolize-false / debug-false), empty-queue wait,
+items-scheduled-future wait, items-all-paused wait, the top-level except (with
+debug traceback), and option-(a) true-monopoly (bug 30398595): Gate B intake
+hold, Gate A drain-clean dispatch, Gate A drain-timeout dead-letter, kill-switch
+disabled skip — to genuine 100% line + branch + function.
+
+Every `running` mock sets `_monopolize_active = None` so Gate B (the honest
+`_monopolize_active is not None` predicate) reads inactive; the dedicated
+monopoly tests set it explicitly. `_is_monopolize_enabled` is a fresh gate-time
+read on the real queue — mocked per-test here.
 """
 
 import unittest
@@ -57,6 +64,8 @@ class TestJobFullPath( _ConsumerTestBase ):
         todo.pop_next_eligible.return_value = _job()
         running = Mock()
         running._consumer_stall_threshold_seconds = 120     # numeric → int() success arc
+        running._monopolize_active = None                   # Gate B inactive
+        running.await_monopolize_pool_drain.return_value = [ ]   # Gate A drains clean
         running._process_job.side_effect = lambda job: setattr( todo, "consumer_running", False )
         emit = self._drive( todo, running )
         running.push.assert_called_once()
@@ -71,8 +80,9 @@ class TestJobDegradedPath( _ConsumerTestBase ):
         job.monopolize = False
         todo.pop_next_eligible.return_value = job
         running = Mock( spec=[ "push", "last_consumer_heartbeat_at",
-                               "_consumer_stall_threshold_seconds" ] )
+                               "_consumer_stall_threshold_seconds", "_monopolize_active" ] )
         running._consumer_stall_threshold_seconds = 120
+        running._monopolize_active = None                   # Gate B inactive (monopolize=False → Gate A skipped)
         running.push.side_effect = lambda job: setattr( todo, "consumer_running", False )
         emit = self._drive( todo, running )
         running.push.assert_called_once()
@@ -86,6 +96,7 @@ class TestEmptyQueueWait( _ConsumerTestBase ):
         todo.is_empty.return_value = True
         todo.condition.wait.side_effect = lambda *a, **k: setattr( todo, "consumer_running", False )
         running = Mock()      # _consumer_stall_threshold_seconds is a Mock → int() raises → except → 120
+        running._monopolize_active = None                   # Gate B inactive
         self._drive( todo, running )
         todo.condition.wait.assert_called()
 
@@ -95,6 +106,7 @@ class TestHeartbeatAttributeError( _ConsumerTestBase ):
         class _NoHeartbeat:
             __slots__ = ()                                  # assigning any attr → AttributeError
             _consumer_stall_threshold_seconds = 120
+            _monopolize_active                = None        # Gate B inactive (class attr — no slot needed)
             def push( self, job ): pass
             def _process_job( self, job ): pass
         todo = _todo()
@@ -113,6 +125,7 @@ class TestScheduledFutureWait( _ConsumerTestBase ):
         todo.condition.wait.side_effect = lambda *a, **k: setattr( todo, "consumer_running", False )
         running = Mock()
         running._consumer_stall_threshold_seconds = 120
+        running._monopolize_active = None                   # Gate B inactive
         self._drive( todo, running )
         todo.condition.wait.assert_called()
 
@@ -126,6 +139,7 @@ class TestAllPausedWait( _ConsumerTestBase ):
         todo.condition.wait.side_effect = lambda *a, **k: setattr( todo, "consumer_running", False )
         running = Mock()
         running._consumer_stall_threshold_seconds = 120
+        running._monopolize_active = None                   # Gate B inactive
         self._drive( todo, running )
         todo.condition.wait.assert_called()
 
@@ -136,6 +150,7 @@ class TestBodyExceptionHandled( _ConsumerTestBase ):
         todo.pop_next_eligible.return_value = _job()
         running = Mock()
         running._consumer_stall_threshold_seconds = 120
+        running._monopolize_active = None                   # Gate B inactive
 
         def _push_then_die( job ):
             todo.consumer_running = False                    # ensure outer loop exits after
@@ -150,6 +165,7 @@ class TestBodyExceptionHandled( _ConsumerTestBase ):
         todo.pop_next_eligible.return_value = _job()
         running = Mock()
         running._consumer_stall_threshold_seconds = 120
+        running._monopolize_active = None                   # Gate B inactive
 
         def _push_then_die( job ):
             todo.consumer_running = False
@@ -157,6 +173,118 @@ class TestBodyExceptionHandled( _ConsumerTestBase ):
         running.push.side_effect = _push_then_die
         self._drive( todo, running )
         running.push.assert_called_once()
+
+
+# ── Option (a) true-monopoly (bug 30398595) — Gate B intake hold ────────────
+class TestGateBIntakeHold( _ConsumerTestBase ):
+    """While a monopolize job holds the pool, the consumer defers ALL intake —
+    without popping, so the todo queue stays FIFO-intact."""
+
+    def test_hold_defers_all_intake_without_popping( self ):
+        todo = _todo()                                      # debug=True → Gate B print arc
+        todo.condition.wait.side_effect = lambda *a, **k: setattr( todo, "consumer_running", False )
+        running = Mock()
+        running._consumer_stall_threshold_seconds = 120
+        running._monopolize_active = "held-hash"            # a real hold
+        running._is_monopolize_enabled.return_value = True
+        self._drive( todo, running )
+        todo.pop_next_eligible.assert_not_called()          # nothing popped → FIFO preserved
+        running.push.assert_not_called()
+        running._process_job.assert_not_called()
+        todo.condition.wait.assert_called()
+
+    def test_hold_defers_debug_false( self ):
+        todo = _todo( debug=False )                         # Gate B print skipped arc
+        todo.condition.wait.side_effect = lambda *a, **k: setattr( todo, "consumer_running", False )
+        running = Mock()
+        running._consumer_stall_threshold_seconds = 120
+        running._monopolize_active = "held-hash"
+        running._is_monopolize_enabled.return_value = True
+        self._drive( todo, running )
+        todo.pop_next_eligible.assert_not_called()
+
+    def test_kill_switch_off_lifts_the_hold( self ):
+        """Flag flipped off mid-hold → Gate B stops deferring live (gate-time read)."""
+        todo = _todo()
+        todo.pop_next_eligible.return_value = None           # fall through to empty-wait
+        todo.is_empty.return_value = True
+        todo.condition.wait.side_effect = lambda *a, **k: setattr( todo, "consumer_running", False )
+        running = Mock()
+        running._consumer_stall_threshold_seconds = 120
+        running._monopolize_active = "held-hash"             # hold set...
+        running._is_monopolize_enabled.return_value = False  # ...but kill-switch OFF
+        self._drive( todo, running )
+        todo.pop_next_eligible.assert_called()               # Gate B did NOT defer
+
+    def test_second_monopolize_job_serializes_after_hold_clears( self ):
+        """FIFO + back-to-back (D4): a second monopolize job waits at Gate B while
+        the first holds, then dispatches first (in order) once the hold clears."""
+        todo = _todo()
+        job2 = _job()                                        # monopolize=True (the 2nd sweep)
+        todo.pop_next_eligible.return_value = job2
+        running = Mock()
+        running._consumer_stall_threshold_seconds = 120
+        running._monopolize_active = "first-sweep"           # first monopolize job holds
+        running._is_monopolize_enabled.return_value = True
+        running._monopolize_drain_timeout_seconds = 300
+        running.await_monopolize_pool_drain.return_value = [ ]   # pool clean when it finally dispatches
+        def _clear_hold( *a, **k ):
+            running._monopolize_active = None                # first sweep completes → hold clears
+        todo.condition.wait.side_effect = _clear_hold
+        running._process_job.side_effect = lambda j: setattr( todo, "consumer_running", False )
+        self._drive( todo, running )
+        todo.condition.wait.assert_called()                  # deferred at least once (serialized)
+        running._process_job.assert_called_once_with( job2 ) # then dispatched, in order
+
+
+# ── Option (a) true-monopoly (bug 30398595) — Gate A pool drain ─────────────
+class TestGateAPoolDrain( _ConsumerTestBase ):
+    """Before a monopolize job takes the pool, Gate A drains foreign writers;
+    on timeout it dead-letters (fail loud) rather than run onto a dirty DB."""
+
+    def _mono_running( self, enabled=True ):
+        r = Mock()
+        r._consumer_stall_threshold_seconds = 120
+        r._monopolize_active = None                          # Gate B inactive
+        r._monopolize_drain_timeout_seconds = 300
+        r._is_monopolize_enabled.return_value = enabled
+        return r
+
+    def test_drain_clean_then_dispatches( self ):
+        todo = _todo()
+        todo.pop_next_eligible.return_value = _job()         # monopolize=True
+        running = self._mono_running()
+        running.await_monopolize_pool_drain.return_value = [ ]   # drained clean
+        running._process_job.side_effect = lambda job: setattr( todo, "consumer_running", False )
+        self._drive( todo, running )
+        running.await_monopolize_pool_drain.assert_called_once()
+        running._process_job.assert_called_once()
+        running._transition_to_dead.assert_not_called()
+
+    def test_drain_timeout_dead_letters_naming_offenders( self ):
+        todo = _todo()
+        todo.pop_next_eligible.return_value = _job()
+        running = self._mono_running()
+        running.await_monopolize_pool_drain.return_value = [
+            { "id_hash": "dr-abc", "job_type": "deep_research" }
+        ]
+        running._transition_to_dead.side_effect = lambda job, cause: setattr( todo, "consumer_running", False )
+        self._drive( todo, running )
+        running._transition_to_dead.assert_called_once()
+        cause = running._transition_to_dead.call_args[ 0 ][ 1 ]
+        self.assertIn( "dr-abc", cause )
+        self.assertIn( "deep_research", cause )
+        self.assertIn( "30398595", cause )
+        running._process_job.assert_not_called()             # never ran onto a dirty DB
+
+    def test_kill_switch_disabled_skips_drain( self ):
+        todo = _todo()
+        todo.pop_next_eligible.return_value = _job()         # monopolize=True
+        running = self._mono_running( enabled=False )        # kill-switch OFF
+        running._process_job.side_effect = lambda job: setattr( todo, "consumer_running", False )
+        self._drive( todo, running )
+        running.await_monopolize_pool_drain.assert_not_called()   # Gate A skipped
+        running._process_job.assert_called_once()
 
 
 def isolated_unit_test():

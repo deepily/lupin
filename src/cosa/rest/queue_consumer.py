@@ -61,6 +61,12 @@ def start_todo_producer_run_consumer_thread( todo_queue: Any, running_queue: Any
             stall_threshold_secs = 120
         idle_wake_interval_secs = max( 5, stall_threshold_secs // 4 )
 
+        # Option (a) true-monopoly (bug 30398595): poll interval for the Gate-A
+        # pool-drain wait AND the Gate-B intake-hold wait. Short enough to resume
+        # intake promptly when a monopolize job clears; the per-iteration
+        # heartbeat keeps stall detection healthy either way.
+        monopolize_poll_secs = 1.0
+
         def _tick_heartbeat() -> None:
             """Refresh the consumer heartbeat. Tolerates Mock running_queue."""
             try:
@@ -85,6 +91,18 @@ def start_todo_producer_run_consumer_thread( todo_queue: Any, running_queue: Any
                         # job, every wait() return ticks this. Ensures a
                         # bounded idle wait keeps the heartbeat fresh.
                         _tick_heartbeat()
+
+                        # Option (a) true-monopoly (bug 30398595) — Gate B: while a
+                        # monopolize job holds the pool, defer ALL intake. Do NOT
+                        # pop — the todo queue stays FIFO-intact so the deferred
+                        # head dispatches first once the hold clears. Bounded wait
+                        # keeps the heartbeat fresh (no busy-loop). The hold check
+                        # is short-circuited first (cheap) then re-reads the master
+                        # kill-switch fresh so an INI flip lifts the hold live.
+                        if running_queue._monopolize_active is not None and running_queue._is_monopolize_enabled():
+                            if todo_queue.debug: print( "[CONSUMER] Monopoly hold active — deferring all intake" )
+                            todo_queue.condition.wait( timeout=monopolize_poll_secs )
+                            continue
 
                         now = datetime.now()
                         job = todo_queue.pop_next_eligible( now )
@@ -122,11 +140,22 @@ def start_todo_producer_run_consumer_thread( todo_queue: Any, running_queue: Any
                         break
 
                 if job:  # pragma: no branch - L124 is reached only when consumer_running stayed True at L121 (via the job-found break at L93), so job is always truthy here; the falsy arc back to the outer loop is unreachable
-                    # Monopolize placeholder (no-op in serial mode)
-                    # When Hybrid Fast Lane adds ThreadPoolExecutor, this will wait for
-                    # running_queue to drain before processing the monopolize job.
-                    if getattr( job, 'monopolize', False ) and todo_queue.debug:
-                        print( f"[CONSUMER] Monopolize job detected: {job.id_hash}" )
+                    # Option (a) true-monopoly (bug 30398595) — Gate A: before a
+                    # monopolize job takes the pool, drain it of foreign (non-test)
+                    # inflight writers so the sweep gets exclusive use of the shared
+                    # test DB (the placeholder's original promise, now wired). On
+                    # timeout the sweep is dead-lettered — a contaminated gate must
+                    # NEVER run. Non-monopolize jobs skip the gate.
+                    monopolize_drain_offenders = None
+                    drain_timeout              = None
+                    if getattr( job, 'monopolize', False ) and running_queue._is_monopolize_enabled():
+                        drain_timeout = running_queue._monopolize_drain_timeout_seconds
+                        monopolize_drain_offenders = running_queue.await_monopolize_pool_drain(
+                            job,
+                            timeout_seconds = drain_timeout,
+                            poll_seconds    = monopolize_poll_secs,
+                            heartbeat_fn    = _tick_heartbeat,
+                        )
 
                     if todo_queue.debug:
                         print( f"[CONSUMER] Processing job: {job.last_question_asked}" )
@@ -149,8 +178,18 @@ def start_todo_producer_run_consumer_thread( todo_queue: Any, running_queue: Any
                     # Move to running queue
                     running_queue.push( job )  # Auto-emits 'run_update'
 
+                    if monopolize_drain_offenders:
+                        # Gate A timeout: fail loud. Dead-letter the sweep with a
+                        # reason that NAMES the offenders (classifier output verbatim)
+                        # — do not run onto a contaminated DB (option (c) is the belt).
+                        detail = ", ".join( f"{o[ 'id_hash' ]}({o[ 'job_type' ]})" for o in monopolize_drain_offenders )
+                        cause  = ( f"Monopolize drain TIMEOUT after {drain_timeout}s (bug 30398595): foreign "
+                                   f"agentic writer(s) still inflight on the shared test DB — contaminated gate "
+                                   f"refused, sweep dead-lettered. Offenders: {detail}." )
+                        print( f"[CONSUMER] {cause}" )
+                        running_queue._transition_to_dead( job, cause )
                     # Process the job (new method we'll add to RunningFifoQueue)
-                    if hasattr( running_queue, '_process_job' ):
+                    elif hasattr( running_queue, '_process_job' ):
                         running_queue._process_job( job )
                     else:
                         print( "[CONSUMER] Warning: RunningFifoQueue missing _process_job method" )

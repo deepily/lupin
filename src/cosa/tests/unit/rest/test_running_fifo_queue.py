@@ -1055,6 +1055,169 @@ class TestHandleAgenticJob( _RFQBase ):
         self.assertEqual( job.state, JobState.FAILED )
 
 
+# ── Option (a) true-monopoly (bug 30398595): kill-switch + hold lifecycle ────
+class TestMonopolyKillSwitch( _RFQBase ):
+    """The master kill-switch is read FRESH at gate-time (hot-reload, no bounce),
+    gating all three surfaces atomically."""
+
+    def test_enabled_reads_config_true_by_default( self ):
+        self.assertTrue( self.build()._is_monopolize_enabled() )
+
+    def test_enabled_reads_config_false_when_flipped( self ):
+        rq = self.build( **{ "cj flow monopolize enabled": False } )
+        self.assertFalse( rq._is_monopolize_enabled() )
+
+    def test_enabled_none_config_defaults_true( self ):
+        self.assertTrue( self.build( config_mgr=None )._is_monopolize_enabled() )
+
+    def test_reads_fresh_each_call_no_init_cache( self ):
+        """A mid-run INI flip is honored on the NEXT gate read (no __init__ cache)."""
+        cfg   = self._cfg()
+        state = { "on": True }
+        cfg.get.side_effect = lambda key, default=None, return_type=None: (
+            state[ "on" ] if key == "cj flow monopolize enabled" else default
+        )
+        rq = self.build( config_mgr=cfg )
+        self.assertTrue( rq._is_monopolize_enabled() )
+        state[ "on" ] = False                              # operator flips the INI
+        self.assertFalse( rq._is_monopolize_enabled() )    # picked up live
+
+
+class TestMonopolyHoldLifecycle( _RFQBase ):
+    """The monopoly-hold flag: init default, SET on dispatch (kill-switch gated),
+    and RELEASE from every terminal path incl. the ghost sweeper."""
+
+    def test_init_defaults( self ):
+        rq = self.build()
+        self.assertIsNone( rq._monopolize_active )
+        self.assertEqual( rq._monopolize_drain_timeout_seconds, 300 )
+
+    def test_init_none_config_drain_default( self ):
+        self.assertEqual( self.build( config_mgr=None )._monopolize_drain_timeout_seconds, 300 )
+
+    def test_init_drain_timeout_override( self ):
+        rq = self.build( **{ "cj flow monopolize drain timeout seconds": 45 } )
+        self.assertEqual( rq._monopolize_drain_timeout_seconds, 45 )
+
+    def test_submit_sets_hold_for_monopolize_job( self ):
+        rq  = self.build()
+        rq._agentic_pool.submit.return_value = MagicMock( name="future" )
+        job = _AgenticFake( id_hash="m1", monopolize=True )
+        rq._submit_agentic_job( job )
+        self.assertEqual( rq._monopolize_active, "m1" )
+
+    def test_submit_does_not_set_hold_for_nonmonopolize_job( self ):
+        rq  = self.build()
+        rq._agentic_pool.submit.return_value = MagicMock( name="future" )
+        job = _AgenticFake( id_hash="n1", monopolize=False )
+        rq._submit_agentic_job( job )
+        self.assertIsNone( rq._monopolize_active )
+
+    def test_submit_leaves_hold_untouched_when_kill_switch_disabled( self ):
+        """ATOMICITY (Tiberius rider): flag=false → _monopolize_active stays None
+        end-to-end through a full submit — no half-state possible."""
+        rq  = self.build( **{ "cj flow monopolize enabled": False } )
+        rq._agentic_pool.submit.return_value = MagicMock( name="future" )
+        job = _AgenticFake( id_hash="m2", monopolize=True )
+        rq._submit_agentic_job( job )
+        self.assertIsNone( rq._monopolize_active )   # disabled → no-op set
+
+    def test_release_clears_only_matching_owner( self ):
+        rq = self.build()
+        rq._monopolize_active = "owner"
+        rq._release_monopolize_hold( "someone-else" )   # different id → no-op
+        self.assertEqual( rq._monopolize_active, "owner" )
+        rq._release_monopolize_hold( "owner" )          # owner → clears
+        self.assertIsNone( rq._monopolize_active )
+
+    def test_on_agentic_complete_releases_hold( self ):
+        rq = self.build(); rq._transition_to_done = MagicMock()
+        job = _AgenticFake( id_hash="m3", monopolize=True )
+        rq._monopolize_active = "m3"
+        fut = MagicMock(); fut.exception.return_value = None; fut.result.return_value = "out"
+        rq._on_agentic_complete( job, fut )
+        self.assertIsNone( rq._monopolize_active )      # released on completion
+
+    def test_ghost_sweep_dead_letter_releases_hold( self ):
+        """ADDED HAZARD: a ghost-swept monopolize job MUST release the hold, else
+        a wedged sweep freezes ALL intake permanently."""
+        rq = self.build(); rq._transition_to_dead = MagicMock()
+        job = _AgenticFake( id_hash="g1", monopolize=True ); self._enqueue( rq, job )
+        fut = MagicMock(); fut.done.return_value = True; fut.exception.return_value = None
+        rq._agentic_futures = { "g1": fut }
+        rq._monopolize_active = "g1"
+        rq._ghost_job_sweep()
+        rq._transition_to_dead.assert_called_once()
+        self.assertIsNone( rq._monopolize_active )      # intake can resume
+
+    def test_ghost_sweep_already_transitioned_releases_hold( self ):
+        """The already-transitioned cleanup arc (job gone from queue_dict) also
+        releases the hold — idempotent belt."""
+        rq = self.build()
+        fut = MagicMock(); fut.done.return_value = True
+        rq._agentic_futures = { "g2": fut }              # NOT enqueued → get_by_id_hash None
+        rq._monopolize_active = "g2"
+        rq._ghost_job_sweep()
+        self.assertIsNone( rq._monopolize_active )
+
+
+# ── Option (a) Gate-A drain oracle: await_monopolize_pool_drain ──────────────
+class TestAwaitMonopolizePoolDrain( _RFQBase ):
+
+    def test_returns_empty_when_pool_already_clean( self ):
+        rq  = self.build()
+        rq._agentic_futures = { }                        # no foreign inflight
+        job = _AgenticFake( id_hash="sweep" )
+        self.assertEqual(
+            rq.await_monopolize_pool_drain( job, timeout_seconds=5 ), [ ]
+        )
+
+    def test_waits_then_returns_empty_once_drained( self ):
+        """Foreign writer present on the first probe, gone on the second →
+        returns [] after one poll; heartbeat ticked during the wait."""
+        rq  = self.build()
+        job = _AgenticFake( id_hash="sweep" )
+        rq.get_non_test_inflight_agentic_jobs = MagicMock(
+            side_effect=[ [ { "id_hash": "dr1", "job_type": "deep_research" } ], [ ] ]
+        )
+        hb = MagicMock()
+        with patch.object( rfq.time, "sleep" ) as slp:
+            out = rq.await_monopolize_pool_drain(
+                job, timeout_seconds=100, poll_seconds=0.01, heartbeat_fn=hb
+            )
+        self.assertEqual( out, [ ] )
+        hb.assert_called_once()                          # ticked once during the wait
+        slp.assert_called_once_with( 0.01 )
+
+    def test_returns_offenders_on_timeout( self ):
+        """Deadline already passed → the loop body never runs; the initial
+        offender probe is returned so the caller fails loud."""
+        rq  = self.build()
+        job = _AgenticFake( id_hash="sweep" )
+        offenders = [ { "id_hash": "dr1", "job_type": "deep_research" } ]
+        rq.get_non_test_inflight_agentic_jobs = MagicMock( return_value=offenders )
+        hb = MagicMock()
+        with patch.object( rfq.time, "monotonic", side_effect=[ 1000.0, 2000.0 ] ), \
+             patch.object( rfq.time, "sleep" ) as slp:
+            out = rq.await_monopolize_pool_drain(
+                job, timeout_seconds=0, poll_seconds=1.0, heartbeat_fn=hb
+            )
+        self.assertEqual( out, offenders )
+        hb.assert_not_called()                           # loop body never entered
+        slp.assert_not_called()
+
+    def test_no_heartbeat_fn_is_tolerated( self ):
+        """heartbeat_fn is optional — the None arc must not raise."""
+        rq  = self.build()
+        job = _AgenticFake( id_hash="sweep" )
+        rq.get_non_test_inflight_agentic_jobs = MagicMock(
+            side_effect=[ [ { "id_hash": "x", "job_type": "podcast" } ], [ ] ]
+        )
+        with patch.object( rfq.time, "sleep" ):
+            out = rq.await_monopolize_pool_drain( job, timeout_seconds=100, poll_seconds=0.01 )
+        self.assertEqual( out, [ ] )
+
+
 def isolated_unit_test():
     """
     Run the running_fifo_queue unit tests in isolation.

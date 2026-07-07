@@ -89,6 +89,12 @@ class TestConsumerTimed:
         """Start consumer with a mock running queue that tracks processed jobs."""
         running_queue = Mock()
         running_queue.websocket_mgr = None
+        # Option (a) true-monopoly (bug 30398595): no hold active, and a clean
+        # pool-drain so monopolize jobs (test_monopolize_*) still dispatch here.
+        running_queue._monopolize_active = None
+        running_queue._is_monopolize_enabled.return_value = True
+        running_queue._monopolize_drain_timeout_seconds = 300
+        running_queue.await_monopolize_pool_drain.return_value = [ ]
 
         def mock_process( job ):
             processed_jobs.append( job.id_hash )
