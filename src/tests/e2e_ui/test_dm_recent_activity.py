@@ -179,6 +179,12 @@ class TestDmRecentActivityVisualBaseline:
         row = page.locator( '[data-testid="visual-baseline-dm-row"]' )
         row.wait_for( state="visible", timeout=5000 )
 
+        # fonts.ready + 2 RAFs so the NotoColorEmoji persona-icon glyph (🌸) in
+        # the captured DM row is fully loaded before the pixel snapshot — the
+        # same emoji font-race the Gate D fix closed (3c7e0aab / task_editing.py).
+        page.evaluate( "() => document.fonts.ready" )
+        page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
+
         # Snapshot ONLY the DM entry row — narrowest deterministic surface
         screenshot = row.screenshot()
         assert_snapshot( screenshot, name="dm-badge-recent-activity" )
