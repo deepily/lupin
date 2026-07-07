@@ -1,5 +1,5 @@
 """
-Unit tests for cosa.memory.lancedb_solution_manager.LanceDBSolutionManager.
+Unit tests for cosa.memory.lancedb_solution_manager.SolutionSnapshotManager.
 
 REWRITTEN 2026-05-31 by Sam 🎙️ (memory takeover, CoSA coverage campaign) — the
 prior tests targeted a stale API: they constructed the manager with no `config`
@@ -23,7 +23,7 @@ from unittest.mock import Mock, MagicMock, patch
 
 import pandas as pd
 
-from cosa.memory.lancedb_solution_manager import LanceDBSolutionManager
+from cosa.memory.lancedb_solution_manager import SolutionSnapshotManager
 
 
 _CONFIG = { "table_name": "test_solutions", "db_path": "/tmp/__sam_lancedb_test__", "storage backend": "local" }
@@ -31,16 +31,21 @@ _CONFIG = { "table_name": "test_solutions", "db_path": "/tmp/__sam_lancedb_test_
 
 def _make_manager( debug=False, verbose=False ):
     """
-    Construct a LanceDBSolutionManager with its construction-time deps mocked
+    Construct a SolutionSnapshotManager with its construction-time deps mocked
     (QuestionEmbeddingsTable + db-path resolution), then mark it initialized
     with a mock table so the search/retrieval gates pass.
     """
     with patch( "cosa.memory.lancedb_solution_manager.QuestionEmbeddingsTable" ), \
-         patch.object( LanceDBSolutionManager, "_resolve_db_path", return_value=_CONFIG[ "db_path" ] ):
-        mgr = LanceDBSolutionManager( _CONFIG, debug=debug, verbose=verbose )
-    mgr._initialized = True
+         patch.object( SolutionSnapshotManager, "_resolve_db_path", return_value=_CONFIG[ "db_path" ] ):
+        mgr = SolutionSnapshotManager( _CONFIG, debug=debug, verbose=verbose )
+    # Pin lancedb-mode hermetically (v0.2.0 §6 backend flag): post-cutover the INI
+    # default resolved to `postgres`, so without this these lancedb-path tests would
+    # dispatch into the _pg_* helpers and hit a live backend. _pg_manager() re-flips
+    # this to True. Mirrors the convention at test_canonical_synonyms_delete.py:24.
+    mgr._use_postgres  = False
+    mgr._initialized   = True
     mgr.is_initialized = Mock( return_value=True )
-    mgr._table = MagicMock()
+    mgr._table         = MagicMock()
     return mgr
 
 
@@ -281,7 +286,7 @@ class TestInitAndConfig( unittest.TestCase ):
     def test_missing_table_name_raises_keyerror( self ):
         """A config without 'table_name' fails fast with KeyError (before any I/O)."""
         with self.assertRaises( KeyError ):
-            LanceDBSolutionManager( { "db_path": "/tmp/x", "storage backend": "local" } )
+            SolutionSnapshotManager( { "db_path": "/tmp/x", "storage backend": "local" } )
 
     def test_debug_construction_sets_attributes( self ):
         """debug=True construction prints config AND wires backend/table/embedding_dim."""

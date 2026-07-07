@@ -293,10 +293,10 @@ async def reset_prediction_engine( drop_table: bool = True ):
         engine = get_prediction_engine( config_mgr=config_mgr )
 
         return {
-            "status"        : "success",
-            "lancedb_table" : engine.lancedb_table,
-            "table_dropped" : table_dropped,
-            "timestamp"     : du.get_current_datetime_iso()
+            "status"           : "success",
+            "prediction_table" : engine.lancedb_table,
+            "table_dropped"    : table_dropped,
+            "timestamp"        : du.get_current_datetime_iso()
         }
     except Exception as e:
         return {

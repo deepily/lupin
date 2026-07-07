@@ -1,5 +1,5 @@
 """
-Integration tests for LanceDBSolutionManager with real GCS bucket.
+Integration tests for SolutionSnapshotManager with real GCS bucket.
 
 Tests end-to-end GCS operations including manager initialization,
 CRUD operations, question-based search, and data persistence.
@@ -44,7 +44,7 @@ src_path = os.path.join( lupin_root, 'src' )
 if src_path not in sys.path:
     sys.path.insert( 0, src_path )
 
-from cosa.memory.lancedb_solution_manager import LanceDBSolutionManager
+from cosa.memory.lancedb_solution_manager import SolutionSnapshotManager
 from cosa.memory.solution_snapshot import SolutionSnapshot
 from cosa.config.configuration_manager import ConfigurationManager
 
@@ -117,7 +117,7 @@ class TestLanceDBGCSIntegration:
         Requires:
             gcs_credentials_available: Ensures GCS auth validated before initialization
         """
-        manager = LanceDBSolutionManager( gcs_config, debug=True, verbose=False )
+        manager = SolutionSnapshotManager( gcs_config, debug=True, verbose=False )
         manager.initialize()
 
         yield manager
@@ -181,7 +181,7 @@ class TestLanceDBGCSIntegration:
         Test that data persists in GCS across manager instances.
         """
         # Create first manager instance and insert data
-        manager1 = LanceDBSolutionManager( gcs_config, debug=False )
+        manager1 = SolutionSnapshotManager( gcs_config, debug=False )
         manager1.initialize()
 
         snapshot = SolutionSnapshot(
@@ -197,7 +197,7 @@ class TestLanceDBGCSIntegration:
         time.sleep( 2 )  # GCS consistency delay
 
         # Create second manager instance
-        manager2 = LanceDBSolutionManager( gcs_config, debug=False )
+        manager2 = SolutionSnapshotManager( gcs_config, debug=False )
         manager2.initialize()
 
         # Search for the persisted data

@@ -1,5 +1,5 @@
 """
-RIDER-1 equivalence harness — LanceDBSolutionManager postgres backend on a REAL,
+RIDER-1 equivalence harness — SolutionSnapshotManager postgres backend on a REAL,
 disposable pgvector database (inherits the Lane-B conftest: db_session / pg_engine,
 honest-skip when no pgvector Postgres is reachable).
 
@@ -43,7 +43,7 @@ def _vec( *first ):
 
 def _make_pg_manager( db_session, monkeypatch ):
     """
-    Build a LanceDBSolutionManager flipped into postgres mode, with get_db routed to
+    Build a SolutionSnapshotManager flipped into postgres mode, with get_db routed to
     the test's transactional db_session and QuestionEmbeddingsTable stubbed (no I/O).
     """
     from cosa.memory import lancedb_solution_manager as lsm
@@ -59,9 +59,9 @@ def _make_pg_manager( db_session, monkeypatch ):
     monkeypatch.setattr( "cosa.rest.db.database.get_db", _fake_get_db )
 
     config = { "table_name": "solution_snapshots", "db_path": "/tmp/pg_equiv", "storage backend": "local" }
-    with patch.object( lsm.LanceDBSolutionManager, "_resolve_db_path", return_value="/tmp/pg_equiv" ), \
+    with patch.object( lsm.SolutionSnapshotManager, "_resolve_db_path", return_value="/tmp/pg_equiv" ), \
          patch.object( lsm, "QuestionEmbeddingsTable" ):
-        mgr = lsm.LanceDBSolutionManager( config, debug=False )
+        mgr = lsm.SolutionSnapshotManager( config, debug=False )
     return mgr
 
 

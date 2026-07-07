@@ -1591,7 +1591,7 @@ class RunningFifoQueue( FifoQueue ):
 
         Ensures:
             - Does NOT block the pipeline
-            - Thread-safe via LanceDBSolutionManager._save_lock
+            - Thread-safe via SolutionSnapshotManager._save_lock
             - Updates snapshot in LanceDB on yes/no response
         """
         def _ask_and_update():

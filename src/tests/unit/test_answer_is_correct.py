@@ -100,8 +100,8 @@ class TestAnswerIsCorrectLanceDB:
 
     @pytest.fixture
     def manager( self ):
-        """Create a LanceDBSolutionManager with a temporary database."""
-        from cosa.memory.lancedb_solution_manager import LanceDBSolutionManager
+        """Create a SolutionSnapshotManager with a temporary database."""
+        from cosa.memory.lancedb_solution_manager import SolutionSnapshotManager
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             config = {
@@ -109,7 +109,7 @@ class TestAnswerIsCorrectLanceDB:
                 "db_path"         : f"{tmp_dir}/test.lancedb",
                 "table_name"      : "test_snapshots"
             }
-            mgr = LanceDBSolutionManager( config, debug=False )
+            mgr = SolutionSnapshotManager( config, debug=False )
             mgr.initialize()
             yield mgr
 

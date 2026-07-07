@@ -200,6 +200,9 @@ class TestResetPredictionEngine( unittest.IsolatedAsyncioTestCase ):
         pe_cls.reset.assert_called_once()
         self.assertEqual( result[ "status" ], "success" )
         self.assertTrue( result[ "table_dropped" ] )
+        # v0.2.0 teardown-prep: response key renamed lancedb_table -> prediction_table (backend-neutral)
+        self.assertEqual( result[ "prediction_table" ], "prediction_decisions" )
+        self.assertNotIn( "lancedb_table", result )
 
     async def test_table_absent_no_drop( self ):
         db = Mock()

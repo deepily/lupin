@@ -23,7 +23,7 @@ if src_path not in sys.path:
     sys.path.insert( 0, src_path )
 
 import cosa.utils.util as cu
-from cosa.memory.lancedb_solution_manager import LanceDBSolutionManager
+from cosa.memory.lancedb_solution_manager import SolutionSnapshotManager
 from cosa.memory.solution_snapshot import SolutionSnapshot
 
 def run_gcs_tests():
@@ -46,7 +46,7 @@ def run_gcs_tests():
 
     # Initialize manager
     print( "Initializing GCS manager..." )
-    manager = LanceDBSolutionManager( gcs_config, debug=True, verbose=False )
+    manager = SolutionSnapshotManager( gcs_config, debug=True, verbose=False )
     manager.initialize()
     print( f"✓ Manager initialized\n" )
 
