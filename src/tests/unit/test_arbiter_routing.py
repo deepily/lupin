@@ -144,13 +144,14 @@ def test_operator_gate_routes_rick_only():
     assert tier_for( CASE_OPERATOR_GATE ) == TIER_RICK_ONLY
 
 
-def test_l1_store_aware_advisory_cases_route_rick_and_managers():
-    """L1 (2026-06-17): the two store-aware advisories that REPLACE a false
-    MANAGER-DOWN both fan to Rick + all active managers — Rick unblocks the
-    awaiting-user case; managers decide the reap for the done case."""
+def test_l1_store_aware_advisory_cases_route_per_design():
+    """L1 (2026-06-17) + f48f089d (2026-07-08): the awaiting-user advisory fans to
+    Rick + all active managers (Rick unblocks; the crew is parked). The MANAGER-DONE
+    advisory is RICK-ONLY — its "consider reaping it" directive is a manager-lifecycle
+    action only Rick actuates, never a peer manager's (mirror ff91cff4 case 20)."""
     assert CASE_MANAGER_AWAITING_USER == 16 and CASE_MANAGER_DONE_ADVISORY == 17
     assert tier_for( CASE_MANAGER_AWAITING_USER ) == TIER_RICK_AND_MANAGERS
-    assert tier_for( CASE_MANAGER_DONE_ADVISORY ) == TIER_RICK_AND_MANAGERS
+    assert tier_for( CASE_MANAGER_DONE_ADVISORY ) == TIER_RICK_ONLY
 
 
 def test_auto_poke_reap_rec_routes_rick_and_managers():

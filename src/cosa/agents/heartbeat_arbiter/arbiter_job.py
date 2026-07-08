@@ -2487,6 +2487,15 @@ class ArbiterConsumerJob( AgenticJobBase ):
         groups = { }                                 # manager_persona -> [view, ...]
         for view in attention:
             if self._subject_is_manager( view ):
+                # bug e5e33795: a manager-SUBJECT whose own session-bridge is FRESH is
+                # demonstrably alive (took a real turn within the window) — event-stale
+                # but NOT wedged. Mirror the _auto_poke veto (arbiter_job.py:3801) on
+                # this parallel advisory path: drop it BEFORE routing the Rick-only
+                # stuck advisory. `_session_bridge_fresh` emits the arbiter_stuck_bridge_veto
+                # journal event on suppress and is fail-safe (bridge_mtimes None/unwired →
+                # False → today's behavior; suppress ONLY on positive fresh-bridge evidence).
+                if self._session_bridge_fresh( view.get( "persona" ), now, bridge_mtimes ):
+                    continue
                 subject = view.get( "persona" ) or view.get( "session_id" )
                 tap_key = "stuck-mgr:" + str( subject )
                 sig     = ( "stuck_manager", subject )
@@ -3125,11 +3134,10 @@ class ArbiterConsumerJob( AgenticJobBase ):
                         self._log_manager_ack_diagnostic( "manager_done", manager, cls,   # de3c5b87 ground-truth capture
                                                           owed_items, fleet_view, now, tapped_at, last_activity )
                         self._route(
-                            CASE_MANAGER_DONE_ADVISORY,
+                            CASE_MANAGER_DONE_ADVISORY,                # f48f089d: → Rick only (mirror case 20)
                             f"MANAGER-DONE (advisory, NOT manager-down): {manager} owes NO "
                             f"non-terminal work — it appears finished/idle. Consider reaping "
                             f"it (the arbiter never reaps — redline). One-time notice.",
-                            active_managers=active_managers
                         )
                 continue
             # 33949e83 STORE-HEALTH GATE: when the arbiter's OWN owed read is degraded
@@ -4118,13 +4126,11 @@ class ArbiterConsumerJob( AgenticJobBase ):
                     if not self._advisory_cooldown_blocks( "done", persona, now ):      # bug 58660c64 ping-pong guard
                         self._stamp_advisory_cooldown( "done", persona, now )
                         self._route(
-                            CASE_MANAGER_DONE_ADVISORY,
+                            CASE_MANAGER_DONE_ADVISORY,               # f48f089d: → Rick only (mirror case 20)
                             f"MANAGER-DONE (advisory, NOT manager-stale): {persona} is silent "
                             f"{_fmt_minutes( age )} and owes NO non-terminal work — it appears "
                             f"finished/idle. Consider reaping it (the arbiter never reaps). "
                             f"One-time notice, no poke.",
-                            active_managers=active_managers,
-                            exclude_persona=persona,                 # b9911943: not to the subject itself
                         )
                 continue
             # item 285c0343 Lever A — HOLD-GATING (the hold-side dual of the owed_class

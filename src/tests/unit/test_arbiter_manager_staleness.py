@@ -793,9 +793,12 @@ def test_case16_blocked_subject_excluded_from_own_advisory():
     assert ( "OtherMgr", awaiting[ 0 ] ) in gw.sent           # peer served
 
 
-def test_case17_done_subject_excluded_from_own_advisory():
-    """b9911943 sibling (case 17, NO poke): a DONE subject in active_managers does
-    NOT receive its own MANAGER-DONE advisory; a peer manager and Rick do."""
+def test_case17_done_advisory_is_rick_only_no_peer_fanout():
+    """f48f089d (2026-07-08): a DONE manager's MANAGER-DONE advisory routes RICK-ONLY
+    (case 20 twin) — its "consider reaping it" directive reaches NEITHER the subject
+    NOR any peer manager; only Rick, who actuates the reap. Supersedes the b9911943
+    subject-exclusion shape (the whole manager fan-out is gone now, not just the
+    subject)."""
     gw, escal = _GW(), [ ]
     job  = _job( gw, notify=lambda m, *a, **k: escal.append( m ) )
     snap = _snap( _row( "m1", "manager", 3000, persona="Rachel" ) )
@@ -803,10 +806,9 @@ def test_case17_done_subject_excluded_from_own_advisory():
                                           active_managers=[ "Rachel", "OtherMgr" ],
                                           owed_class={ "Rachel": CLASS_DONE } )
     assert fired == 0
-    assert [ s for s in gw.sent if s[ 0 ] == "Rachel" ] == [ ]    # subject gets NOTHING
     done = _done_adv( escal )
-    assert len( done ) == 1
-    assert ( "OtherMgr", done[ 0 ] ) in gw.sent
+    assert len( done ) == 1                                       # Rick advised exactly once
+    assert gw.sent == [ ]                                         # NO manager DM — not the subject, not a peer
 
 
 def test_case14_no_regression_when_subject_absent_everyone_served():
