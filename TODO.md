@@ -1,5 +1,15 @@
 # TODO
 
+## 📥 BACKLOG 2026-07-07 PM (Tiberius 👑, session 4e12c586) — post-switchover live-voice E2E pulled off the board (Rick voice order)
+
+**Rick (voice, 2026-07-07 ~22:35 EDT): "push this task item into the to-do queue — it does not belong on the board: ee23fca8."** Store item `ee23fca8` DROPPED with this backlog entry as its durable landing pad. Context: the item was the post-switchover live-voice E2E for `766bb609` (persona voice_id honored per session), blocked on the lane-1 flip; Rick killed the flip the same evening with a global multiplexer-parity verdict ("still ugly, still incomplete for the MVP" — logged HIGH in intake `603d9275`), so the E2E has no near-term trigger.
+
+**Resume-when**: the multiplexer reaches Rick's MVP layout/functionality-parity bar AND the lane-1 flip (multiplexer = live TTS client) actually lands.
+
+**Scope at resume (verbatim from the store item)**: E2E driving ≥2 sessions with distinct voice personas; assert each `/api/get-speech-elevenlabs` POST carries that session's `voice_id` (present→honored) and a persona-less notification omits the key → server default voice, consuming server seam `speech.py:558`. Cite reviewed commit `76946d9a` + merge `a9dd6f41`. Prereq receipt: playback consumer `4f14d38f` is DONE. Also-owed cosmetic sweep bundled in the old item body: `wireTtsPlayback` comment names default voice "(Sam)" but the real default is config key `elevenlabs tts default voice id` — comment-only.
+
+---
+
 ## ✅ EXECUTED 2026-07-07 AM (Mr. Radio 🦉, session 17e81460) — v0.2.0 pgvector migration swap-chain + CUTOVER LIVE
 
 **Rick's morning GO ("finish the migration… coast is clear" + manager carte blanche) executed end-to-end, commit `0901984d`**: dev+test recreated onto `lupin:1.1.1-pgvector-candidate` → LIVE backfill 202,081 + 35 + 57 (truncate-then-load, twice: main + straggler re-run) → equivalence PASS (exact-scan PG == LanceDB byte-faithful) → **exact-scan ruling** (Rick ask: keystone is 97.2% duplicate vectors → HNSW recall pathologically broken; migration `e1f2a3b4c5d6` drops the index; exact `<#>` scan = guaranteed parity AND 2.7× faster than legacy ~1,293ms) → **INI `vector store backend = postgres` LIVE on BOTH servers** (Rick ask: flip now) → live-pipeline + WS smokes green; integration gate `ts-c94c514d` = final proof. Full record: `src/rnd/v0.2.0/2026.07.07-pgvector-swap-chain-execution.md`. **Open tails**: soak watch → LanceDB teardown (post-soak, P5); post-hoc adversarial review of `0901984d` (crew spin-up was Rick-held); GCP leg task `c845346a` (Rick-HELD until his GO); boot-log LanceDB banner cleanup (cosmetic).
