@@ -147,12 +147,21 @@ class TestAskMultipleChoiceDefault:
         }
     ]
 
-    def _mock_response( self, exit_code=0, response_value=None, status="" ):
-        """Create a mock NotificationResponse."""
+    def _mock_response( self, exit_code=0, response_value=None, status="", is_timeout=None ):
+        """Create a mock NotificationResponse.
+
+        is_timeout defaults to (exit_code == 2) to mirror notify_user_sync's real
+        wiring, but the caller can force it True (e.g. the exit_code==1 /
+        "expired_no_default" expiry path, which IS a timeout) or False (a genuine
+        transport error at exit_code==1).
+        """
+        if is_timeout is None:
+            is_timeout = ( exit_code == 2 )
         mock                = MagicMock()
         mock.exit_code      = exit_code
         mock.response_value = response_value
         mock.status         = status
+        mock.is_timeout     = is_timeout
         return mock
 
     @patch( "lupin_mcp.cosa_voice_mcp.NotificationRequest" )
@@ -240,3 +249,178 @@ class TestAskMultipleChoiceDefault:
         assert "error" in result_b
         assert "default validation error" in result_b[ "error" ]
         assert "Telemetry" in result_b[ "error" ]
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Bug d13a3a30 regression — the REAL expiry path returns exit_code==1 with
+    # status "expired_no_default" (is_timeout=True), NOT exit_code==2. The
+    # MULTIPLE_CHOICE request never plumbs a server-side response_default, so a
+    # genuine expiry ALWAYS lands on exit_code==1. Keying default application on
+    # exit_code==2 alone dropped the caller's `default` on every real expiry and
+    # leaked {"error": "error: expired_no_default"} — the exact live failures
+    # observed 2026-07-07 (Tiberius). Discriminate on is_timeout instead.
+    # ─────────────────────────────────────────────────────────────────────────
+
+    UNICODE_QUESTION = [
+        {
+            "question"    : "How should the merge gate resolve?",
+            "header"      : "Merge gate",
+            "multiSelect" : False,
+            "options"     : [
+                { "label": "Not mine — hold" },   # em-dash (U+2014) in the label
+                { "label": "Take it" }
+            ]
+        }
+    ]
+
+    @patch( "lupin_mcp.cosa_voice_mcp.NotificationRequest" )
+    @patch( "lupin_mcp.cosa_voice_mcp._normalize_abstract", return_value=None )
+    @patch( "lupin_mcp.cosa_voice_mcp._wait_for_sender_id", return_value="claude.code@lupin.deepily.ai#test1234" )
+    @patch( "lupin_mcp.cosa_voice_mcp.notify_user_sync" )
+    def test_expired_no_default_exit1_with_default_returns_answers(
+        self, mock_notify, mock_sender, mock_abstract, mock_request
+    ):
+        """THE BUG: real expiry (exit_code=1, status='expired_no_default',
+        is_timeout=True) with a valid default must return {"answers": <default>},
+        NOT {"error": "error: expired_no_default"}."""
+        mock_notify.return_value = self._mock_response(
+            exit_code=1, status="expired_no_default", is_timeout=True
+        )
+
+        result = ask_multiple_choice.fn(
+            questions = self.SINGLE_QUESTION,
+            default   = { "Database": "PostgreSQL" }
+        )
+        assert result == { "answers": { "Database": "PostgreSQL" } }
+
+    @patch( "lupin_mcp.cosa_voice_mcp.NotificationRequest" )
+    @patch( "lupin_mcp.cosa_voice_mcp._normalize_abstract", return_value=None )
+    @patch( "lupin_mcp.cosa_voice_mcp._wait_for_sender_id", return_value="claude.code@lupin.deepily.ai#test1234" )
+    @patch( "lupin_mcp.cosa_voice_mcp.notify_user_sync" )
+    def test_expired_no_default_exit1_without_default_returns_timeout_error(
+        self, mock_notify, mock_sender, mock_abstract, mock_request
+    ):
+        """Real expiry WITHOUT a default returns the friendly timeout error, not
+        the raw internal status string."""
+        mock_notify.return_value = self._mock_response(
+            exit_code=1, status="expired_no_default", is_timeout=True
+        )
+
+        result = ask_multiple_choice.fn( questions=self.SINGLE_QUESTION )
+        assert result == { "error": "timeout - no response received", "timeout": True }
+
+    @patch( "lupin_mcp.cosa_voice_mcp.NotificationRequest" )
+    @patch( "lupin_mcp.cosa_voice_mcp._normalize_abstract", return_value=None )
+    @patch( "lupin_mcp.cosa_voice_mcp._wait_for_sender_id", return_value="claude.code@lupin.deepily.ai#test1234" )
+    @patch( "lupin_mcp.cosa_voice_mcp.notify_user_sync" )
+    def test_genuine_error_not_timeout_returns_error_dict(
+        self, mock_notify, mock_sender, mock_abstract, mock_request
+    ):
+        """A genuine transport error (exit_code=1, is_timeout=False) must NOT be
+        treated as an expiry — even with a default present, it surfaces the
+        status error dict so real failures stay visible."""
+        mock_notify.return_value = self._mock_response(
+            exit_code=1, status="connection_error", is_timeout=False
+        )
+
+        result = ask_multiple_choice.fn(
+            questions = self.SINGLE_QUESTION,
+            default   = { "Database": "PostgreSQL" }
+        )
+        assert result == { "error": "error: connection_error" }
+
+    @patch( "lupin_mcp.cosa_voice_mcp.NotificationRequest" )
+    @patch( "lupin_mcp.cosa_voice_mcp._normalize_abstract", return_value=None )
+    @patch( "lupin_mcp.cosa_voice_mcp._wait_for_sender_id", return_value="claude.code@lupin.deepily.ai#test1234" )
+    @patch( "lupin_mcp.cosa_voice_mcp.notify_user_sync" )
+    def test_request_timeout_exit2_with_default_returns_answers(
+        self, mock_notify, mock_sender, mock_abstract, mock_request
+    ):
+        """The other timeout shape (exit_code=2 request_timeout, is_timeout=True)
+        with a default also returns {"answers": <default>} — no regression."""
+        mock_notify.return_value = self._mock_response(
+            exit_code=2, status="request_timeout"
+        )
+
+        result = ask_multiple_choice.fn(
+            questions = self.SINGLE_QUESTION,
+            default   = { "Database": "PostgreSQL" }
+        )
+        assert result == { "answers": { "Database": "PostgreSQL" } }
+
+    def test_unicode_emdash_label_default_validates_at_call_time(
+        self
+    ):
+        """An em-dash (unicode) option label matched EXACTLY by the default passes
+        call-time validation — exact-string match is codepoint-correct, so the
+        em-dash is not a silent mismatch."""
+        # No timeout needed — validation is pre-call. A mismatch would return an
+        # error dict here; an exact match falls through to the notify path.
+        result = _validate_multiple_choice_default(
+            { "Merge gate": "Not mine — hold" }, self.UNICODE_QUESTION
+        )
+        assert result is None
+
+    @patch( "lupin_mcp.cosa_voice_mcp.NotificationRequest" )
+    @patch( "lupin_mcp.cosa_voice_mcp._normalize_abstract", return_value=None )
+    @patch( "lupin_mcp.cosa_voice_mcp._wait_for_sender_id", return_value="claude.code@lupin.deepily.ai#test1234" )
+    @patch( "lupin_mcp.cosa_voice_mcp.notify_user_sync" )
+    def test_unicode_emdash_label_applied_on_expiry(
+        self, mock_notify, mock_sender, mock_abstract, mock_request
+    ):
+        """The em-dash default survives the full expiry path and is returned
+        verbatim in {"answers": ...} — mirrors the observed call-2 failure."""
+        mock_notify.return_value = self._mock_response(
+            exit_code=1, status="expired_no_default", is_timeout=True
+        )
+
+        result = ask_multiple_choice.fn(
+            questions = self.UNICODE_QUESTION,
+            default   = { "Merge gate": "Not mine — hold" }
+        )
+        assert result == { "answers": { "Merge gate": "Not mine — hold" } }
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Full-branch coverage of ask_multiple_choice (touched function → 100%)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def test_empty_questions_returns_error( self ):
+        """Empty / non-list questions is rejected before any notify."""
+        assert ask_multiple_choice.fn( questions=[] ) == {
+            "error": "questions must be a non-empty list"
+        }
+
+    def test_non_dict_default_returns_error( self ):
+        """A default that isn't a dict is rejected at call time with a type error."""
+        result = ask_multiple_choice.fn(
+            questions = self.SINGLE_QUESTION,
+            default   = "PostgreSQL"  # must be a dict keyed by header
+        )
+        assert result == { "error": "default must be a dict, got str" }
+
+    @patch( "lupin_mcp.cosa_voice_mcp._normalize_abstract", return_value=None )
+    @patch( "lupin_mcp.cosa_voice_mcp._wait_for_sender_id", return_value="claude.code@lupin.deepily.ai#test1234" )
+    @patch( "lupin_mcp.cosa_voice_mcp.NotificationRequest", side_effect=ValueError( "bad request" ) )
+    def test_notification_request_construction_error_returns_validation_error(
+        self, mock_request, mock_sender, mock_abstract
+    ):
+        """A NotificationRequest build failure surfaces as a validation error dict."""
+        result = ask_multiple_choice.fn( questions=self.SINGLE_QUESTION )
+        assert "error" in result
+        assert "validation error" in result[ "error" ]
+        assert "bad request" in result[ "error" ]
+
+    @patch( "lupin_mcp.cosa_voice_mcp.NotificationRequest" )
+    @patch( "lupin_mcp.cosa_voice_mcp._normalize_abstract", return_value=None )
+    @patch( "lupin_mcp.cosa_voice_mcp._wait_for_sender_id", return_value="claude.code@lupin.deepily.ai#test1234" )
+    @patch( "lupin_mcp.cosa_voice_mcp.notify_user_sync" )
+    def test_success_exit0_parses_response(
+        self, mock_notify, mock_sender, mock_abstract, mock_request
+    ):
+        """A real user response (exit_code=0) is parsed and returned as answers."""
+        mock_notify.return_value = self._mock_response(
+            exit_code      = 0,
+            response_value = '{"answers": {"Database": "MongoDB"}}'
+        )
+
+        result = ask_multiple_choice.fn( questions=self.SINGLE_QUESTION )
+        assert result == { "answers": { "Database": "MongoDB" } }

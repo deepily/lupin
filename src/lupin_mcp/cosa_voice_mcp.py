@@ -1583,12 +1583,27 @@ def ask_multiple_choice(
 
     if response.exit_code == 0:
         return _parse_multiple_choice_response( response.response_value )
-    elif response.exit_code == 2:
+
+    # Timeout / expiry — the user did not answer within the window. This must
+    # cover BOTH notify_user_sync outcomes that mean "no answer in time":
+    #   * exit_code == 2 (request_timeout, or a server-side expired-with-default)
+    #   * exit_code == 1 with status "expired_no_default" — the MULTIPLE_CHOICE
+    #     path NEVER plumbs a server-side response_default, so a genuine expiry
+    #     ALWAYS lands here (is_timeout=True). Keying default application on
+    #     exit_code == 2 alone (the original bug d13a3a30) dropped the caller's
+    #     `default` dict on every real expiry and leaked
+    #     {"error": "error: expired_no_default"} — the documented contract
+    #     promised {"answers": <default>}. response.is_timeout is True for every
+    #     timeout/expiry and False for genuine transport/server errors, so it is
+    #     the correct discriminator across both exit codes.
+    if response.is_timeout:
         if default is not None:
             return { "answers": default }
         return { "error": "timeout - no response received", "timeout": True }
-    else:
-        return { "error": f"error: {response.status}" }
+
+    # Genuine error (connection, HTTP, stream, unexpected) — surface the status
+    # so real failures stay visible rather than being masked by the default.
+    return { "error": f"error: {response.status}" }
 
 
 def _validate_multiple_choice_default( default: dict, questions: list ) -> None:
