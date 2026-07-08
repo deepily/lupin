@@ -586,6 +586,133 @@ def test_done_then_freshens_rearms_case17():
     assert len( _done_adv( escal ) ) == 2
 
 
+# ── bug 58660c64: cross-detector ping-pong cooldown (advisory loop-fire fix) ──
+#    _check_manager_acks re-arms (discards) the SHARED _manager_blocked_advised
+#    flag on ANY liveness activity (:3085); the staleness path then re-fires the
+#    case-16/17 advisory every poll while the union age reads stale (the 26dd3afb
+#    bridge-vs-union divergence). A per-(family, persona) COOLDOWN caps the fire
+#    rate independent of the flappy flag. RED-first: pre-fix these re-fire N times.
+
+def _cooldown_sup_logs( logs ):
+    return [ ( ev, f ) for ev, f in logs if ev == "arbiter_advisory_suppressed_cooldown" ]
+
+
+def test_case16_cooldown_suppresses_pingpong_refire():
+    """The case-16 advisory must fire ONCE across a multi-poll ping-pong: each poll
+    the acks-path liveness re-arm discards the shared flag (simulated via discard —
+    exactly the :3085 effect for a parked-but-alive manager) while the staleness
+    view still reads the union stale. Cooldown → one advisory + an observable
+    suppression journal event per suppressed re-fire."""
+    gw, escal, logs = _GW(), [ ], [ ]
+    job  = _job( gw, notify=lambda m, *a, **k: escal.append( m ),
+                 log_fn=lambda e, **k: logs.append( ( e, k ) ) )
+    snap = _snap( _row( "m1", "manager", 3000, persona="Tiberius" ) )
+    bl   = { "Tiberius": CLASS_BLOCKED_ON_USER }
+    for k in range( 3 ):
+        job._manager_blocked_advised.discard( "Tiberius" )     # acks-path :3085 liveness re-arm
+        job._check_manager_staleness( snap, NOW + datetime.timedelta( seconds=k * 60 ),
+                                      active_managers=[ ], owed_class=bl )
+    assert len( _awaiting( escal ) ) == 1                      # ONE, not 3 (the loop-fire is dead)
+    sup = _cooldown_sup_logs( logs )
+    assert len( sup ) == 2                                     # the 2 suppressed re-fires are observable
+    assert sup[ 0 ][ 1 ][ "persona" ] == "Tiberius" and sup[ 0 ][ 1 ][ "family" ] == "blocked"
+    assert sup[ 1 ][ 1 ][ "suppressed_count" ] == 2            # running count in the journal
+
+
+def test_case17_cooldown_suppresses_pingpong_refire():
+    """The DONE (case-17) advisory gets the same cooldown protection."""
+    gw, escal, logs = _GW(), [ ], [ ]
+    job  = _job( gw, notify=lambda m, *a, **k: escal.append( m ),
+                 log_fn=lambda e, **k: logs.append( ( e, k ) ) )
+    snap = _snap( _row( "m1", "manager", 3000, persona="Rachel" ) )
+    dn   = { "Rachel": CLASS_DONE }
+    for k in range( 3 ):
+        job._manager_done_advised.discard( "Rachel" )
+        job._check_manager_staleness( snap, NOW + datetime.timedelta( seconds=k * 60 ),
+                                      active_managers=[ ], owed_class=dn )
+    assert len( _done_adv( escal ) ) == 1
+    sup = _cooldown_sup_logs( logs )
+    assert len( sup ) == 2 and sup[ 0 ][ 1 ][ "family" ] == "done"
+
+
+def test_case16_cooldown_expires_allows_one_more():
+    """After the cooldown window elapses on a still-parked manager, exactly ONE
+    more advisory is allowed (bounded re-notify, not silence-forever)."""
+    gw, escal = _GW(), [ ]
+    job  = _job( gw, notify=lambda m, *a, **k: escal.append( m ) )
+    snap = _snap( _row( "m1", "manager", 3000, persona="Tiberius" ) )
+    bl   = { "Tiberius": CLASS_BLOCKED_ON_USER }
+    job._check_manager_staleness( snap, NOW, [ ], owed_class=bl )                    # fire #1
+    job._manager_blocked_advised.discard( "Tiberius" )                              # acks re-arm
+    past = NOW + datetime.timedelta( seconds=job.manager_advisory_cooldown_seconds + 60 )
+    job._check_manager_staleness( snap, past, [ ], owed_class=bl )                   # cooldown expired → fire #2
+    assert len( _awaiting( escal ) ) == 2
+
+
+def test_advisory_cooldown_defaults_to_staleness_threshold():
+    """The cooldown default ties to the staleness threshold (~45m) — one number."""
+    job = _job()
+    assert job.manager_advisory_cooldown_seconds == job.manager_stale_poke_threshold_seconds
+
+
+def test_advisory_cooldown_zero_disables_gate_fires_every_tick():
+    """cooldown=0 DISABLES the gate → legacy per-tick behavior (the escape hatch).
+    Covers the disabled branches of _advisory_cooldown_blocks + _stamp_advisory_cooldown."""
+    gw, escal = _GW(), [ ]
+    job  = _job( gw, notify=lambda m, *a, **k: escal.append( m ),
+                 manager_advisory_cooldown_seconds=0 )
+    snap = _snap( _row( "m1", "manager", 3000, persona="Tiberius" ) )
+    bl   = { "Tiberius": CLASS_BLOCKED_ON_USER }
+    for k in range( 3 ):
+        job._manager_blocked_advised.discard( "Tiberius" )
+        job._check_manager_staleness( snap, NOW + datetime.timedelta( seconds=k * 60 ),
+                                      active_managers=[ ], owed_class=bl )
+    assert len( _awaiting( escal ) ) == 3                       # disabled → fires every tick
+    assert job._advisory_cooldown_until == { }                 # stamp is a no-op when disabled
+
+
+def test_holdgate_case16_cooldown_suppresses_pingpong():
+    """Site E (the _session_awaiting_user hold-gate case-16) is cooldown-guarded too:
+    a parked manager whose hold declares awaiting-user re-fires ONCE, not per tick."""
+    gw, escal, logs = _GW(), [ ], [ ]
+    job = _job( gw, notify=lambda m, *a, **k: escal.append( m ),
+                log_fn=lambda ev, **k: logs.append( ( ev, k ) ),
+                hold_reader_fn=lambda sid: _honored_awaiting_user_hold() )
+    snap = _snap( _row( "m1", "manager", 3000, persona="mr radio" ) )
+    oc   = { "mr radio": CLASS_ACTIVE }                         # ACTIVE → reaches the hold-gate branch
+    for k in range( 3 ):
+        job._manager_blocked_advised.discard( "mr radio" )     # acks-path liveness re-arm
+        job._check_manager_staleness( snap, NOW + datetime.timedelta( seconds=k * 60 ),
+                                      active_managers=[ ], owed_class=oc )
+    assert len( _awaiting( escal ) ) == 1
+    assert len( _cooldown_sup_logs( logs ) ) == 2
+
+
+def test_acks_path_case16_case17_cooldown_suppress():
+    """The acks-path (#9 _check_manager_acks) case-16 AND case-17 emit sites are
+    cooldown-guarded: with the shared flag cleared but the cooldown armed, neither
+    re-fires — covering the acks-path suppress branches + their journal events."""
+    late = NOW + datetime.timedelta( seconds=1000 )            # past the ack window (~600s) but within the 2700s cooldown
+    # case-16 (BLOCKED): cooldown pre-armed, flag clear → suppressed, no advisory
+    gw, escal, logs = _GW(), [ ], [ ]
+    job  = _job( gw, notify=lambda m, *a, **k: escal.append( m ),
+                 log_fn=lambda ev, **k: logs.append( ( ev, k ) ) )
+    job._last_tap_at[ "Tiberius" ] = NOW
+    job._stamp_advisory_cooldown( "blocked", "Tiberius", NOW )
+    job._check_manager_acks( late, [ ], None, [ ], owed_class={ "Tiberius": CLASS_BLOCKED_ON_USER } )
+    assert _awaiting( escal ) == [ ]                           # cooldown suppressed the acks-path advisory
+    assert any( f[ "family" ] == "blocked" for _e, f in _cooldown_sup_logs( logs ) )
+    # case-17 (DONE): same, other family
+    gw2, escal2, logs2 = _GW(), [ ], [ ]
+    job2 = _job( gw2, notify=lambda m, *a, **k: escal2.append( m ),
+                 log_fn=lambda ev, **k: logs2.append( ( ev, k ) ) )
+    job2._last_tap_at[ "Rachel" ] = NOW
+    job2._stamp_advisory_cooldown( "done", "Rachel", NOW )
+    job2._check_manager_acks( late, [ ], None, [ ], owed_class={ "Rachel": CLASS_DONE } )
+    assert _done_adv( escal2 ) == [ ]
+    assert any( f[ "family" ] == "done" for _e, f in _cooldown_sup_logs( logs2 ) )
+
+
 def test_cross_detector_dedup_blocked_advised_already_set():
     """CROSS-DETECTOR DE-DUPE: if _check_manager_acks already fired the case-16
     advisory (persona in the SHARED _manager_blocked_advised), the staleness path

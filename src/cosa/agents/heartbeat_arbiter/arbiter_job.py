@@ -614,6 +614,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         manager_stale_poke_threshold_seconds : int      = 2700,   # post-game F2 (~45 min; 0 disables)
         manager_stale_poke_max_age_seconds : int        = 7200,   # corpse ceiling (~2h; must be > threshold)
         manager_stale_velocity_suppress_streak : int    = 2,      # item 285c0343 Lever B: >= N consecutive episodes whose last-signal ADVANCED ⇒ alive-on-a-cadence ⇒ suppress the staleness poke; 0 disables. Ctor default (NOT INI day-one — a tunable, not a safety switch; INI promotion is the follow-on IF live tuning is wanted).
+        manager_advisory_cooldown_seconds : int          = None,   # bug 58660c64: min seconds between case-16/17 advisories for the SAME (family, persona), independent of the flappy shared advised flag — kills the cross-detector ping-pong loop-fire. None → default to manager_stale_poke_threshold_seconds (one advisory per blocked-episode window). 0 disables the cooldown (legacy per-tick behavior). Ctor default, INI-promotable.
         # Role-goal poke echoes (role-goals Phase 2-3, 2026-06-24). The role-selected
         # north-star goal lines APPENDED to the stuck-poke + manager-staleness poke
         # bodies. Default None = inert (legacy in-pool construction unchanged); the
@@ -932,6 +933,14 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # item 285c0343 Lever B: consecutive-advancing-episode streak at/above which the
         # manager-staleness poke is suppressed as alive-on-a-cadence (0 disables).
         self.manager_stale_velocity_suppress_streak = manager_stale_velocity_suppress_streak
+        # bug 58660c64: case-16/17 advisory cooldown. None → tie to the staleness
+        # threshold (one advisory per blocked-episode window). The cooldown is the
+        # hard ceiling the cross-detector flag ping-pong cannot bypass (the acks-path
+        # liveness re-arm discards the shared advised flag, but NOT this cooldown).
+        self.manager_advisory_cooldown_seconds = (
+            manager_advisory_cooldown_seconds if manager_advisory_cooldown_seconds is not None
+            else manager_stale_poke_threshold_seconds
+        )
         # Role-goal poke echoes (role-goals Phase 2-3): the role-selected north-star
         # goal lines appended to the stuck-poke (_format_poke, via view["role"]) and
         # the manager-staleness poke (_format_manager_stale_poke, always Manager).
@@ -1041,6 +1050,12 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # together when the manager shows liveness after its tap (re-arm).
         self._manager_blocked_advised = set()   # awaiting-Rick advisory already fired
         self._manager_done_advised    = set()   # consider-reaping advisory already fired
+        # bug 58660c64: per-(family, persona) advisory cooldown state (in-memory, NO
+        # persistence — a single extra advisory after an :8001 restart is acceptable).
+        # `_until` gates re-fire; `_suppressed` is the running suppression count fed to
+        # the arbiter_advisory_suppressed_cooldown journal event (observability rider).
+        self._advisory_cooldown_until     = { }   # (family, persona) -> datetime the cooldown expires
+        self._advisory_suppressed_count   = { }   # (family, persona) -> count of re-fires suppressed this window
         # v2.2 B3 state: decision-needed tail cursor (ISO ts; baselined on first
         # poll so a pre-arbiter backlog isn't re-escalated) + whole-fleet-stall
         # progress tracking (last PROGRESS signature + when it last advanced +
@@ -3091,27 +3106,31 @@ class ArbiterConsumerJob( AgenticJobBase ):
             if cls == CLASS_BLOCKED_ON_USER:
                 if manager not in self._manager_blocked_advised:    # L1 §3.1 advisory-once
                     self._manager_blocked_advised.add( manager )
-                    self._route(
-                        CASE_MANAGER_AWAITING_USER,
-                        f"MANAGER-AWAITING-RICK (advisory, NOT manager-down): {manager} is "
-                        f"correctly BLOCKED on Rick — every owed item is Rick-gated. No "
-                        f"tap-ACK is expected while it waits; this is a one-time notice, "
-                        f"not a repeating escalation.",
-                        active_managers=active_managers
-                    )
+                    if not self._advisory_cooldown_blocks( "blocked", manager, now ):   # bug 58660c64 ping-pong guard
+                        self._stamp_advisory_cooldown( "blocked", manager, now )
+                        self._route(
+                            CASE_MANAGER_AWAITING_USER,
+                            f"MANAGER-AWAITING-RICK (advisory, NOT manager-down): {manager} is "
+                            f"correctly BLOCKED on Rick — every owed item is Rick-gated. No "
+                            f"tap-ACK is expected while it waits; this is a one-time notice, "
+                            f"not a repeating escalation.",
+                            active_managers=active_managers
+                        )
                 continue
             if cls == CLASS_DONE:
                 if manager not in self._manager_done_advised:       # L1 §3.2 advisory-once
                     self._manager_done_advised.add( manager )
-                    self._log_manager_ack_diagnostic( "manager_done", manager, cls,   # de3c5b87 ground-truth capture
-                                                      owed_items, fleet_view, now, tapped_at, last_activity )
-                    self._route(
-                        CASE_MANAGER_DONE_ADVISORY,
-                        f"MANAGER-DONE (advisory, NOT manager-down): {manager} owes NO "
-                        f"non-terminal work — it appears finished/idle. Consider reaping "
-                        f"it (the arbiter never reaps — redline). One-time notice.",
-                        active_managers=active_managers
-                    )
+                    if not self._advisory_cooldown_blocks( "done", manager, now ):      # bug 58660c64 ping-pong guard
+                        self._stamp_advisory_cooldown( "done", manager, now )
+                        self._log_manager_ack_diagnostic( "manager_done", manager, cls,   # de3c5b87 ground-truth capture
+                                                          owed_items, fleet_view, now, tapped_at, last_activity )
+                        self._route(
+                            CASE_MANAGER_DONE_ADVISORY,
+                            f"MANAGER-DONE (advisory, NOT manager-down): {manager} owes NO "
+                            f"non-terminal work — it appears finished/idle. Consider reaping "
+                            f"it (the arbiter never reaps — redline). One-time notice.",
+                            active_managers=active_managers
+                        )
                 continue
             # 33949e83 STORE-HEALTH GATE: when the arbiter's OWN owed read is degraded
             # this poll (raised/timed out), the missing tap-ACK liveness is an infra
@@ -3856,6 +3875,52 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # the Manager goal echo (inert when unconfigured).
         return self._append_goal_line( body, "manager" )
 
+    def _advisory_cooldown_blocks( self, family, persona, now ):
+        """
+        bug 58660c64: return True iff a case-16/17 advisory for (family, persona) is
+        still within its cooldown window and must be SUPPRESSED — the cross-detector
+        ping-pong guard. On suppression, emit the observable
+        arbiter_advisory_suppressed_cooldown journal event carrying a running
+        suppressed_count (Tiberius rider 2). A cooldown of 0 disables the gate.
+
+        Requires:
+            - family is "blocked" or "done"; persona is the subject; now is tz-aware
+
+        Ensures:
+            - returns True (and logs) when the (family, persona) cooldown has not
+              yet expired; False otherwise (or when the cooldown is disabled)
+            - never raises
+        """
+        if self.manager_advisory_cooldown_seconds <= 0:
+            return False
+        key   = ( family, persona )
+        until = self._advisory_cooldown_until.get( key )
+        if until is not None and now < until:
+            count = self._advisory_suppressed_count.get( key, 0 ) + 1
+            self._advisory_suppressed_count[ key ] = count
+            self._log( "arbiter_advisory_suppressed_cooldown",
+                       persona=persona, family=family, suppressed_count=count,
+                       cooldown_until=until.isoformat() )
+            return True
+        return False
+
+    def _stamp_advisory_cooldown( self, family, persona, now ):
+        """Arm the (family, persona) advisory cooldown from `now`; reset its
+        suppression count. No-op when the cooldown is disabled (0)."""
+        if self.manager_advisory_cooldown_seconds <= 0:
+            return
+        key = ( family, persona )
+        self._advisory_cooldown_until[ key ]   = now + datetime.timedelta( seconds=self.manager_advisory_cooldown_seconds )
+        self._advisory_suppressed_count[ key ] = 0
+
+    def _clear_advisory_cooldown( self, family, persona ):
+        """Clear the (family, persona) advisory cooldown on a GENUINE episode end
+        (the staleness freshen re-arm) so a real new blocked/done episode re-advises
+        at once. NOT called on the acks-path liveness discard — that discard is the
+        ping-pong the cooldown exists to absorb (bug 58660c64)."""
+        self._advisory_cooldown_until.pop( ( family, persona ), None )
+        self._advisory_suppressed_count.pop( ( family, persona ), None )
+
     def _check_manager_staleness( self, snapshot, now, active_managers, owed_class=None, store_read_degraded=False, bridge_mtimes=None ):
         """
         F2: the SECOND, role-gated pokeable criterion — a MANAGER-role session
@@ -4016,8 +4081,10 @@ class ArbiterConsumerJob( AgenticJobBase ):
             kind, persona = self._mgr_stale_suppressed.pop( sid )
             if kind == CLASS_BLOCKED_ON_USER:
                 self._manager_blocked_advised.discard( persona )
+                self._clear_advisory_cooldown( "blocked", persona )   # bug 58660c64: genuine episode end re-arms the cooldown too
             else:
                 self._manager_done_advised.discard( persona )
+                self._clear_advisory_cooldown( "done", persona )
 
         fired = 0
         for sid, ( row, age ) in eligible.items():
@@ -4032,29 +4099,33 @@ class ArbiterConsumerJob( AgenticJobBase ):
                 if persona not in self._manager_blocked_advised:
                     self._manager_blocked_advised.add( persona )
                     self._mgr_stale_suppressed[ sid ] = ( CLASS_BLOCKED_ON_USER, persona )
-                    self._route(
-                        CASE_MANAGER_AWAITING_USER,
-                        f"MANAGER-AWAITING-RICK (advisory, NOT manager-stale): {persona} is "
-                        f"silent {_fmt_minutes( age )} but correctly BLOCKED on Rick — every "
-                        f"owed item is Rick-gated. The silence IS the expected state, not a "
-                        f"stall; one-time notice, no poke.",
-                        active_managers=active_managers,
-                        exclude_persona=persona,                     # b9911943: not to the subject itself
-                    )
+                    if not self._advisory_cooldown_blocks( "blocked", persona, now ):   # bug 58660c64 ping-pong guard
+                        self._stamp_advisory_cooldown( "blocked", persona, now )
+                        self._route(
+                            CASE_MANAGER_AWAITING_USER,
+                            f"MANAGER-AWAITING-RICK (advisory, NOT manager-stale): {persona} is "
+                            f"silent {_fmt_minutes( age )} but correctly BLOCKED on Rick — every "
+                            f"owed item is Rick-gated. The silence IS the expected state, not a "
+                            f"stall; one-time notice, no poke.",
+                            active_managers=active_managers,
+                            exclude_persona=persona,                 # b9911943: not to the subject itself
+                        )
                 continue
             if cls == CLASS_DONE:
                 if persona not in self._manager_done_advised:
                     self._manager_done_advised.add( persona )
                     self._mgr_stale_suppressed[ sid ] = ( CLASS_DONE, persona )
-                    self._route(
-                        CASE_MANAGER_DONE_ADVISORY,
-                        f"MANAGER-DONE (advisory, NOT manager-stale): {persona} is silent "
-                        f"{_fmt_minutes( age )} and owes NO non-terminal work — it appears "
-                        f"finished/idle. Consider reaping it (the arbiter never reaps). "
-                        f"One-time notice, no poke.",
-                        active_managers=active_managers,
-                        exclude_persona=persona,                     # b9911943: not to the subject itself
-                    )
+                    if not self._advisory_cooldown_blocks( "done", persona, now ):      # bug 58660c64 ping-pong guard
+                        self._stamp_advisory_cooldown( "done", persona, now )
+                        self._route(
+                            CASE_MANAGER_DONE_ADVISORY,
+                            f"MANAGER-DONE (advisory, NOT manager-stale): {persona} is silent "
+                            f"{_fmt_minutes( age )} and owes NO non-terminal work — it appears "
+                            f"finished/idle. Consider reaping it (the arbiter never reaps). "
+                            f"One-time notice, no poke.",
+                            active_managers=active_managers,
+                            exclude_persona=persona,                 # b9911943: not to the subject itself
+                        )
                 continue
             # item 285c0343 Lever A — HOLD-GATING (the hold-side dual of the owed_class
             # BLOCKED_ON_USER branch above). owed_class reads the STORE, where the
@@ -4082,14 +4153,16 @@ class ArbiterConsumerJob( AgenticJobBase ):
                 if persona not in self._manager_blocked_advised:
                     self._manager_blocked_advised.add( persona )
                     self._mgr_stale_suppressed[ sid ] = ( CLASS_BLOCKED_ON_USER, persona )
-                    self._route(
-                        CASE_MANAGER_AWAITING_USER,
-                        f"MANAGER-AWAITING-RICK (advisory, NOT manager-stale): {persona} is "
-                        f"silent {_fmt_minutes( age )} but its honored hold declares it PARKED "
-                        f"awaiting Rick — defended quiescence, not a stall. One-time notice, no poke.",
-                        active_managers=active_managers,
-                        exclude_persona=persona,                     # b9911943: not to the subject itself
-                    )
+                    if not self._advisory_cooldown_blocks( "blocked", persona, now ):   # bug 58660c64 ping-pong guard
+                        self._stamp_advisory_cooldown( "blocked", persona, now )
+                        self._route(
+                            CASE_MANAGER_AWAITING_USER,
+                            f"MANAGER-AWAITING-RICK (advisory, NOT manager-stale): {persona} is "
+                            f"silent {_fmt_minutes( age )} but its honored hold declares it PARKED "
+                            f"awaiting Rick — defended quiescence, not a stall. One-time notice, no poke.",
+                            active_managers=active_managers,
+                            exclude_persona=persona,                 # b9911943: not to the subject itself
+                        )
                 continue
             # ACTIVE / UNKNOWN → today's case-14 poke + Rick advisory (UNKNOWN = fail-SAFE)
             # 33949e83 STORE-HEALTH GATE: a self-observed degraded owed read this poll
