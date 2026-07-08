@@ -10,13 +10,14 @@ for completion, and validates:
     4. Decision metadata contains expected fields
 
 Requires:
-    - FastAPI server running on localhost:7999
+    - FastAPI server running on localhost:8000 (:8000 test venue; override via LUPIN_TEST_BASE_URL)
     - LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL and _PASSWORD set
     - PostgreSQL running with proxy_decisions table
 
 Session 268: Work Item 2, Step 2.4.
 """
 
+import math
 import os
 import time
 
@@ -25,6 +26,73 @@ import requests
 
 # Server configuration
 BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
+
+
+# --- Shared-agentic-pool wait budget (bug 67473d91) --------------------------
+# The :8000 integration venue shares ONE agentic pool across ALL suites, and a
+# post-bounce cold-start adds startup latency. 7 heavy SWE dry-run jobs serialize
+# through that pool, so a flat 120s per-test budget structurally under-counts →
+# false-red even though every job COMPLETES (jobs finish LATE, not failed). The
+# budget is sized to the LIVE pool width so it survives a worker-count change.
+# Pairs with the landing-run auto_fix_on_failure=False convention (facet 3), which
+# removes the self-inflicted TestFixExpediter pool contention that worsened it.
+_SWE_HEAVY_JOB_COUNT = 7    # heavy dry-run jobs contending for the pool this module
+_PER_JOB_BUDGET_S    = 60   # generous per-heavy-job wall-clock (submit → done + proxy decisions)
+_COLD_START_MARGIN_S = 90   # post-bounce fresh-container model/agent cold-start
+
+
+def _agentic_pool_workers( auth_headers ):
+    """
+    Read max_agentic_workers from GET /api/queue/pool-status (JWT).
+
+    FAIL-LOUD (Mr. Radio rider, bug 67473d91): a harness whose pool-status is
+    unreachable must SCREAM, not silently guess a worker count — a wrong guess
+    reintroduces the exact false-red this fixes. LUPIN_TEST_SWE_BUDGET_S is the
+    explicit escape hatch (see swe_wait_budget_s), NOT a silent fallback here.
+
+    Requires:
+        - auth_headers carries a valid Bearer token
+
+    Ensures:
+        - returns a positive int max_agentic_workers
+
+    Raises:
+        - AssertionError if pool-status is unreachable / malformed
+    """
+    resp = requests.get( f"{BASE_URL}/api/queue/pool-status", headers=auth_headers, timeout=10 )
+    assert resp.status_code == 200, (
+        f"pool-status unreachable ({resp.status_code}) — cannot size the SWE wait "
+        f"budget; set LUPIN_TEST_SWE_BUDGET_S to override"
+    )
+    workers = resp.json().get( "max_agentic_workers" )
+    assert isinstance( workers, int ) and workers > 0, (
+        f"pool-status returned invalid max_agentic_workers={workers!r}"
+    )
+    return workers
+
+
+def swe_wait_budget_s( auth_headers ):
+    """
+    Per-test wait budget (seconds) for a heavy SWE dry-run job, sized to the LIVE
+    agentic-pool width (bug 67473d91):
+
+        budget = COLD_START_MARGIN + ceil( N_SWE_HEAVY_JOBS / workers ) * PER_JOB_BUDGET
+
+    LUPIN_TEST_SWE_BUDGET_S (int seconds), when set, is the explicit escape hatch:
+    it short-circuits the pool-status query entirely.
+
+    Requires:
+        - auth_headers carries a valid Bearer token (unless the env override is set)
+
+    Ensures:
+        - returns a positive int budget in seconds
+    """
+    override = os.environ.get( "LUPIN_TEST_SWE_BUDGET_S" )
+    if override is not None:
+        return int( override )
+    workers = _agentic_pool_workers( auth_headers )
+    waves   = math.ceil( _SWE_HEAVY_JOB_COUNT / workers )
+    return _COLD_START_MARGIN_S + waves * _PER_JOB_BUDGET_S
 
 
 # =============================================================================
@@ -74,13 +142,19 @@ def ws_session_id( auth_headers ):
     return "test-pipeline"
 
 
-def submit_and_wait( task_text, auth_headers, ws_session_id, timeout=120 ):
+def submit_and_wait( task_text, auth_headers, ws_session_id, timeout=None ):
     """
     Submit a dry-run SWE team task and poll until done.
+
+    timeout=None (default) sizes the wait budget to the live agentic-pool width
+    via swe_wait_budget_s() — see bug 67473d91.
 
     Returns:
         ( job_id, job_data ) on success, or pytest.fail on error
     """
+    if timeout is None:
+        timeout = swe_wait_budget_s( auth_headers )
+
     resp = requests.post(
         f"{BASE_URL}/api/swe-team/submit",
         json={
@@ -236,9 +310,10 @@ class TestSweTeamDryRunPipeline:
         job_id = data[ "job_id" ]
         assert job_id.startswith( "swe-" )
 
-        # Poll until complete
+        # Poll until complete (shared-pool-aware budget — bug 67473d91)
+        budget  = swe_wait_budget_s( auth_headers )
         elapsed = 0
-        while elapsed < 120:
+        while elapsed < budget:
             done_resp = requests.get(
                 f"{BASE_URL}/api/get-queue/done",
                 headers=auth_headers,
@@ -252,7 +327,7 @@ class TestSweTeamDryRunPipeline:
             time.sleep( 2 )
             elapsed += 2
 
-        pytest.fail( f"Job {job_id} never appeared in done queue" )
+        pytest.fail( f"Job {job_id} never appeared in done queue within {budget}s" )
 
     def test_dry_run_confidence_values_are_valid( self, auth_headers, ws_session_id ):
         """All proxy decision confidence values should be between 0.0 and 1.0."""
