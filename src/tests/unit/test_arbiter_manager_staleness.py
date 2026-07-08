@@ -776,10 +776,12 @@ def test_case14_subject_exclusion_is_canonical_key_tolerant():
     assert ( "OtherMgr", advisory ) in gw.sent                             # peer still served
 
 
-def test_case16_blocked_subject_excluded_from_own_advisory():
-    """b9911943 sibling (case 16, NO poke): a BLOCKED_ON_USER subject in
-    active_managers does NOT receive its own MANAGER-AWAITING-RICK advisory; a peer
-    manager and Rick do."""
+def test_case16_blocked_advisory_is_rick_only_no_peer_fanout():
+    """f48f089d (2026-07-08): a BLOCKED_ON_USER manager's MANAGER-AWAITING-RICK
+    advisory routes RICK-ONLY (case 20 twin) — the subject is alive and still OWNS
+    its crew, only Rick unblocks it, so NEITHER the subject NOR any peer manager is
+    DM'd. Supersedes the b9911943 subject-exclusion shape (the whole manager fan-out
+    is gone now, not just the subject); mirrors the case-17 done-advisory flip."""
     gw, escal = _GW(), [ ]
     job  = _job( gw, notify=lambda m, *a, **k: escal.append( m ) )
     snap = _snap( _row( "m1", "manager", 3000, persona="Tiberius" ) )
@@ -787,10 +789,9 @@ def test_case16_blocked_subject_excluded_from_own_advisory():
                                           active_managers=[ "Tiberius", "OtherMgr" ],
                                           owed_class={ "Tiberius": CLASS_BLOCKED_ON_USER } )
     assert fired == 0                                          # case 16 emits no poke
-    assert [ s for s in gw.sent if s[ 0 ] == "Tiberius" ] == [ ]   # subject gets NOTHING
     awaiting = _awaiting( escal )
     assert len( awaiting ) == 1                                # one Rick advisory
-    assert ( "OtherMgr", awaiting[ 0 ] ) in gw.sent           # peer served
+    assert gw.sent == [ ]                                      # NO manager DM — not the subject, not a peer
 
 
 def test_case17_done_advisory_is_rick_only_no_peer_fanout():
@@ -1179,6 +1180,25 @@ class TestLeverA_AwaitingUserHoldGating:
         assert "mr radio" in job._manager_blocked_advised
         assert len( _await_sup_logs( logs ) ) == 1             # distinct, observable
         assert _await_sup_logs( logs )[ 0 ][ 1 ][ "awaiting" ] == "user:rick"   # Q1 rider: awaiting stamped
+
+    def test_awaiting_user_hold_advisory_is_rick_only_no_peer_fanout( self ):
+        """f48f089d (2026-07-08): the hold-gate (~line 4159) case-16 emitter is
+        RICK-ONLY too — with a PEER manager present in active_managers, an honored
+        awaiting-user hold advises Rick ONCE and DMs NO peer (the whole manager
+        fan-out is gone, mirror case 20). Distinguishes the flip from the empty-
+        active_managers Lever-A cases above, which are peer-silent only by vacuity;
+        here a real peer is offered and still gets nothing. RED on pre-flip routing:
+        gw.sent == [("OtherMgr", <awaiting body>)]."""
+        gw, escal = _GW(), [ ]
+        job = _job( gw, notify=lambda m, *a, **k: escal.append( m ),
+                    hold_reader_fn=lambda sid: _honored_awaiting_user_hold() )
+        snap  = _snap( _row( "m1", "manager", 3000, persona="mr radio" ) )
+        fired = job._check_manager_staleness( snap, NOW,
+                                              active_managers=[ "OtherMgr", "mr radio" ],
+                                              owed_class={ "mr radio": CLASS_ACTIVE } )
+        assert fired == 0
+        assert len( _awaiting( escal ) ) == 1                  # Rick advised exactly once
+        assert gw.sent == [ ]                                  # NO peer DM (case 20 twin)
 
     def test_seam_off_same_scenario_still_pokes( self ):
         """FAIL-SAFE / RED-equivalence: hold_reader_fn=None (main behavior) → Lever A

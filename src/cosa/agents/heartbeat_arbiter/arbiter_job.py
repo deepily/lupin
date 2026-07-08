@@ -3118,12 +3118,11 @@ class ArbiterConsumerJob( AgenticJobBase ):
                     if not self._advisory_cooldown_blocks( "blocked", manager, now ):   # bug 58660c64 ping-pong guard
                         self._stamp_advisory_cooldown( "blocked", manager, now )
                         self._route(
-                            CASE_MANAGER_AWAITING_USER,
+                            CASE_MANAGER_AWAITING_USER,                 # f48f089d: → Rick only (mirror case 20)
                             f"MANAGER-AWAITING-RICK (advisory, NOT manager-down): {manager} is "
                             f"correctly BLOCKED on Rick — every owed item is Rick-gated. No "
                             f"tap-ACK is expected while it waits; this is a one-time notice, "
-                            f"not a repeating escalation.",
-                            active_managers=active_managers
+                            f"not a repeating escalation."
                         )
                 continue
             if cls == CLASS_DONE:
@@ -4110,13 +4109,11 @@ class ArbiterConsumerJob( AgenticJobBase ):
                     if not self._advisory_cooldown_blocks( "blocked", persona, now ):   # bug 58660c64 ping-pong guard
                         self._stamp_advisory_cooldown( "blocked", persona, now )
                         self._route(
-                            CASE_MANAGER_AWAITING_USER,
+                            CASE_MANAGER_AWAITING_USER,               # f48f089d: → Rick only (mirror case 20)
                             f"MANAGER-AWAITING-RICK (advisory, NOT manager-stale): {persona} is "
                             f"silent {_fmt_minutes( age )} but correctly BLOCKED on Rick — every "
                             f"owed item is Rick-gated. The silence IS the expected state, not a "
-                            f"stall; one-time notice, no poke.",
-                            active_managers=active_managers,
-                            exclude_persona=persona,                 # b9911943: not to the subject itself
+                            f"stall; one-time notice, no poke."
                         )
                 continue
             if cls == CLASS_DONE:
@@ -4162,12 +4159,10 @@ class ArbiterConsumerJob( AgenticJobBase ):
                     if not self._advisory_cooldown_blocks( "blocked", persona, now ):   # bug 58660c64 ping-pong guard
                         self._stamp_advisory_cooldown( "blocked", persona, now )
                         self._route(
-                            CASE_MANAGER_AWAITING_USER,
+                            CASE_MANAGER_AWAITING_USER,               # f48f089d: → Rick only (mirror case 20)
                             f"MANAGER-AWAITING-RICK (advisory, NOT manager-stale): {persona} is "
                             f"silent {_fmt_minutes( age )} but its honored hold declares it PARKED "
-                            f"awaiting Rick — defended quiescence, not a stall. One-time notice, no poke.",
-                            active_managers=active_managers,
-                            exclude_persona=persona,                 # b9911943: not to the subject itself
+                            f"awaiting Rick — defended quiescence, not a stall. One-time notice, no poke."
                         )
                 continue
             # ACTIVE / UNKNOWN → today's case-14 poke + Rick advisory (UNKNOWN = fail-SAFE)

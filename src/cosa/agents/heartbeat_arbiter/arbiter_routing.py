@@ -80,8 +80,12 @@ CASE_FLEET_DARK             = 15
 # and NOT a stall — instead of the repeating MANAGER-DOWN / WHOLE-FLEET-STALL
 # loop, the arbiter emits at most ONE of these advisories per un-acked tap.
 #   16  MANAGER-AWAITING-USER advisory — a tapped manager correctly BLOCKED on
-#       Rick (every owed item operator-gated or blocked-on-user). Rick + ALL active
-#       managers: Rick is the one who unblocks; managers see the crew is parked.
+#       Rick (every owed item operator-gated or blocked-on-user). RICK ONLY as of
+#       f48f089d (2026-07-08): the subject manager is ALIVE and still OWNS its crew,
+#       and only Rick unblocks it — a peer manager has zero legitimate action (it
+#       can't adopt an owned, alive crew, unlike the case-14 orphaned-crew path).
+#       Completing the ff91cff4 sweep, this mirrors case 20/17 (alive/done/stuck
+#       MANAGER subject → Rick only); the arbiter never reaps (the redline holds).
 #   17  MANAGER-DONE advisory — a tapped manager with ZERO non-terminal owed work
 #       (consider reaping). RICK ONLY as of f48f089d (2026-07-08): the advisory
 #       carries an actionable manager-lifecycle directive ("consider reaping it"),
@@ -136,7 +140,7 @@ CASE_TIERS = {
     CASE_AUTO_POKE_REAP_REC : TIER_RICK_AND_MANAGERS,   # 2b-3 auto-poke escalation
     CASE_MANAGER_STALE_ADVISORY : TIER_RICK_AND_MANAGERS,   # post-game F2 (2026-06-11)
     CASE_FLEET_DARK             : TIER_RICK_ONLY,           # post-game F3 (2026-06-11)
-    CASE_MANAGER_AWAITING_USER  : TIER_RICK_AND_MANAGERS,   # L1 (2026-06-17) blocked-on-Rick advisory
+    CASE_MANAGER_AWAITING_USER  : TIER_RICK_ONLY,          # f48f089d (2026-07-08) awaiting-user manager-subject FYI → Rick only (D1; mirror case 20/17)
     CASE_MANAGER_DONE_ADVISORY  : TIER_RICK_ONLY,           # f48f089d (2026-07-08) consider-reaping → Rick only (mirror case 20)
     CASE_USER_GATE_RESURFACE    : TIER_RICK_ONLY,           # 6929f4ac (2026-06-22) dark-session gate → Rick
     CASE_OPERATOR_GATE          : TIER_RICK_ONLY,           # A2/A3 (fcb5dbc0) operator-gate urgency routing → Rick
@@ -176,10 +180,11 @@ def quick_smoke_test():
     # is Rick-only (no managers remain by definition)
     assert tier_for( CASE_MANAGER_STALE_ADVISORY ) == TIER_RICK_AND_MANAGERS
     assert tier_for( CASE_FLEET_DARK )             == TIER_RICK_ONLY
-    # L1 (2026-06-17): the awaiting-user advisory fans to Rick + managers; the
-    # done advisory is RICK-ONLY as of f48f089d (2026-07-08) — its "consider
-    # reaping it" directive is Rick's to actuate, never a peer manager's (case 20 twin)
-    assert tier_for( CASE_MANAGER_AWAITING_USER ) == TIER_RICK_AND_MANAGERS
+    # L1 (2026-06-17): the awaiting-user and done advisories are BOTH RICK-ONLY as
+    # of f48f089d (2026-07-08) — an alive AWAITING-USER manager still owns its crew
+    # (only Rick unblocks) and a DONE manager's "consider reaping it" directive is
+    # Rick's to actuate, never a peer manager's (case 20 twin)
+    assert tier_for( CASE_MANAGER_AWAITING_USER ) == TIER_RICK_ONLY
     assert tier_for( CASE_MANAGER_DONE_ADVISORY ) == TIER_RICK_ONLY
     # the three tiers + two cuts land where Part 6 says
     assert tier_for( 1 ) == tier_for( 2 ) == tier_for( 3 ) == TIER_RICK_ONLY
