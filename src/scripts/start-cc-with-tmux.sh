@@ -119,6 +119,11 @@ PERSONA_ENV_FLAGS=(
     # Static always-on for every session this script launches (interactive +
     # headless/spawned).
     -e "CLAUDE_CODE_DISABLE_MOUSE=1"
+    # This switches Claude Code back to the "classic" inline renderer, which keeps the conversation in your terminal's
+    # native scrollback buffer instead of the alternate screen. That restores normal scroll-back, Cmd+F search, and
+    # tmux copy-mode over the session output. The full-screen behavior you're fighting is the newer default renderer
+    # (CLAUDE_CODE_NO_FLICKER=1 is the inverse toggle that force-enables it).
+    -e "CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1"
     # Bound EVERY MCP tool call end-to-end (wedge fix f1a21917 lever (i-a), Rick-
     # ratified 2026-07-06). Claude Code honors MCP_TOOL_TIMEOUT (milliseconds) as
     # an upper bound on MCP tool-call execution, so a stalled MCP server response
