@@ -4,6 +4,8 @@
 **Branch**: `wip-v0.1.9-2026.06.21-bug-fix-implementation`
 **Status**: 🔝 **#1 PRIORITY for the current bug-fix dev branch** (Rick, 2026-06-26)
 
+> **Current authority (Rick, 2026-07-01)**: doc [`06` — consolidation build plan](06-consolidation-build-plan.md) is the live master plan. Rick **narrowed scope to finish + prove the 6 built accordions** (D1), **revert the modern skin → legacy uniform-light** (D2), and **dropped the menu-bar item** (present after all, D3). This **supersedes** the earlier "TOTAL 13/13 PARITY / port ALL 7 absent" ratification captured in §Master accordion inventory (design call (g), 2026-06-26).
+
 ## Purpose
 
 A single holder for **every discrepancy** found between the legacy notifications client (`/app/notifications`, `notifications.js` + `notifications.html`) and the multiplexer reimplementation (`/app/multiplexer`, `multiplexer/**/*.ts` + `multiplexer.html`). The goal is to drive the multiplexer to **real layout-level parity** with the notifications client. Each discrepancy gets documented here (analysis → remediation → verification) until the two surfaces match.
@@ -17,6 +19,8 @@ A single holder for **every discrepancy** found between the legacy notifications
 | 02 | [Reconciliation with in-flight parity work](02-reconciliation-with-in-flight-parity-work.md) | B1–B5 vs the 06.22/06.24 builds: what's already done (`4b33ceb7`), what's net-new, and the **B1 ↔ `4b33ceb7` sibling-mount conflict** |
 | 03 | [Interactive defects + visual-parity checklist](03-interactive-defects-progress-group-and-reading-pane.md) | **SWE remediation brief** (2026-06-30 A/B drill-down): 🐞 progress-group head rendered 176× per card (`notificationItem.ts:85`) + 🐞 Reading-Pane `URIError` on `%`-bearing abstracts (`ReadingPaneRenderer.ts:428`); **§5 15-row visual-parity checklist** — mux reads as unstyled scaffolding; **Action-Required (blue) + Playing (green) panels MVP-mandatory**, cramped headers / orphaned controls / missing CC-card chrome. Toggles + accordions verified GREEN. |
 | 04 | [Remaining-accordions audit](04-remaining-accordions-audit.md) | source-level verdicts for the **other 12 accordions** (2 faithful ports · 3 partial/remapped · 7 absent) + new design calls (d)–(g) |
+| 05 | [Adversarial parity gap matrix (2026-07-01, Sam 🎙️)](../2026.07.01-mux-vs-legacy-adversarial-parity-gap-matrix.md) | reconciliation of docs 00–04 vs **current wip `2a8defa0`** (post L1–L4): what's actually at parity now, confirmed residual gaps (R5 topic · H2 env/clock · R4 persona-name · R16 toolbar), the **verification-integrity crux** (snapshots rebaselined against the mux itself → tautological; Oracle Tier-2/3 vs legacy never run), and the 6-of-13 accordion scope-truncation |
+| 06 | [Consolidation build plan (2026-07-01) — MASTER](06-consolidation-build-plan.md) | 🟡 DRAFT master plan superseding the Jul-1 decision brief. Rick's ratified **D1 finish+prove the 6 built accordions · D2 revert skin→legacy light · D3 menu-bar dropped**. Six lanes (0a header chrome · 0b layout-mode toggle · 0c ordering & default-visibility · 1 finish · 2 skin revert · 3 prove) with file/line anchors, ACs, test/venue matrix; **4 open questions** awaiting Rick's ruling. Narrows the 13/13 scope above. |
 
 ## Running discrepancy ledger
 

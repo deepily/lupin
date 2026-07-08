@@ -1,5 +1,16 @@
 # TODO
 
+## 📋 DECISIONS LOG 2026-07-07 PM (Mr. Radio 🦉, session 17e81460) — day rulings banked at session-end
+
+- **No GPU-less GCP instance, EVER** (Rick, voice): the e2 downgrade path is dead; item `b8fa9b7d` dropped `user_direct`. Standing companion: **15-min stockout-retry reflex** on `ZONE_RESOURCE_POOL_EXHAUSTED` (g2 VM starts) — persistent duty, currently seeded in Clayton's memento.
+- **Classifier reference case (5 walls today, 0 bypasses)**: the auto-mode classifier accepts user intent ONLY from Rick's own artifacts (settings rules, his shell) — never relayed words, ask-answers, or broadcasts. Walls hit: AR push ×2, VM start, Clayton ssh-read, TFE cancel-API. Delegation-to-manager requires ONE-TIME harness enactment via settings; Rick's 4-rule VM set (settings.local.json:500-503) is action-scoped only.
+- **Phase-2 LanceDB FULL teardown (`4955d0b9`)**: Rick ruled TOMORROW after the 24h soak — the 2026-07-08 13:00Z chase is a **FIRE TIME, not a re-ask** (verify soak green → staff a FRESH author → go). Spec = `src/rnd/v0.2.0/2026.07.07-lancedb-teardown-prep-scoping.md` §4/§7/§5a; Phase-1 symbol rename already landed (`d1a681af`) — do NOT re-rename. Part-2 HNSW stays additionally gated on the flood-purge card.
+- **Tiffany reaped no-respin** (Rick confirmed ask 22:30; unsubmitted-pane-text doctrine applied — surfaced before acting).
+- **TFE `tfe-130826c7` completed naturally** — Rick's unexecuted kill MOOT; :8000 pool freed ~22:04.
+- **67473d91 disposition**: DONE on unit-tier receipts (`d4aa722c`, 12/12); the :8000 E2E confirm is DEFERRED post-`30398595` — live-fire evidence tonight proved the monopoly-hold deadlock (ts-ad4670ec: the run's 7 spawned swe- jobs deferred by `[CONSUMER] Monopoly hold active`, all timed out → RED regardless of budget). NOTE: contradicts caf58f71's "monopolize=True is a no-op" finding — the hold IS active in the consumer (`[CONSUMER] Monopoly hold active` ×1916 in the run window; started_at flipped ONLY after monopoly release 22:43:23 → smoking gun). 30398595 turned out terminal(done) so the amend correctly 422'd — evidence filed as durable **bug `3a14292b`** (P2, accountable mr radio) w/ all receipts + cross-links (Clayton firsthand re-derive: RED 0/7).
+
+---
+
 ## 📥 BACKLOG 2026-07-07 PM (Tiberius 👑, session 4e12c586) — post-switchover live-voice E2E pulled off the board (Rick voice order)
 
 **Rick (voice, 2026-07-07 ~22:35 EDT): "push this task item into the to-do queue — it does not belong on the board: ee23fca8."** Store item `ee23fca8` DROPPED with this backlog entry as its durable landing pad. Context: the item was the post-switchover live-voice E2E for `766bb609` (persona voice_id honored per session), blocked on the lane-1 flip; Rick killed the flip the same evening with a global multiplexer-parity verdict ("still ugly, still incomplete for the MVP" — logged HIGH in intake `603d9275`), so the E2E has no near-term trigger.
