@@ -43,6 +43,31 @@ class TestCanonicalPersonaKey:
         (exactly the store form — NOT the space-stripped "mrradio")."""
         assert canonical_persona_key( "Mr. Radio" ) == "mr radio"
 
+    def test_separator_becomes_space_not_deleted_bug_951a22be( self ):
+        """bug 951a22be: a slug-form separator ("_"/"-") must map to a word-boundary
+        SPACE, not VANISH. María filed a P1 with owner_persona="mr_radio"; the prior
+        r"[^a-z0-9 ]" DELETE fused it to the unmatchable "mrradio", so every scoped
+        query (owner_persona="mr radio") missed it and the P1 sat invisible.
+        FLIP: revert the regex to the delete form and both asserts re-fuse to
+        "mrradio" and fail."""
+        assert canonical_persona_key( "mr_radio" ) == "mr radio"
+        assert canonical_persona_key( "mr-radio" ) == "mr radio"
+
+    def test_repeated_and_mixed_separators_collapse_to_one_space_bug_951a22be( self ):
+        """A RUN of separators (and separator+space mixes) collapses to ONE space —
+        never a fused token, never a double space. FLIP: the delete form fuses
+        "mr__radio" -> "mrradio"."""
+        assert canonical_persona_key( "mr__radio" )     == "mr radio"
+        assert canonical_persona_key( "mr - radio" )    == "mr radio"
+        assert canonical_persona_key( "deep_research" ) == "deep research"
+
+    def test_idempotent_on_separator_inputs_bug_951a22be( self ):
+        """The canonicalized separator form is a fixed point — a second pass over
+        the already-spaced key must not drift."""
+        for raw in ( "mr_radio", "mr-radio", "mr__radio", "deep_research" ):
+            once = canonical_persona_key( raw )
+            assert canonical_persona_key( once ) == once
+
     def test_clean_ascii_just_lowercases( self ):
         assert canonical_persona_key( "Clayton" )  == "clayton"
         assert canonical_persona_key( "Tiberius" ) == "tiberius"
@@ -144,11 +169,11 @@ class TestPersonaSlug:
 class TestCrossPrimitiveConsistency:
     """The three primitives must share ONE root, differing only in space handling."""
 
-    @pytest.mark.parametrize( "name", [ "María", "Mr. Radio", "Tiberius", "sam" ] )
+    @pytest.mark.parametrize( "name", [ "María", "Mr. Radio", "Tiberius", "sam", "mr_radio", "mr-radio" ] )
     def test_match_is_key_without_spaces( self, name ):
         assert normalize_for_match( name ) == canonical_persona_key( name ).replace( " ", "" )
 
-    @pytest.mark.parametrize( "name", [ "María", "Mr. Radio", "Tiberius", "sam" ] )
+    @pytest.mark.parametrize( "name", [ "María", "Mr. Radio", "Tiberius", "sam", "mr_radio", "mr-radio" ] )
     def test_slug_is_key_with_sep( self, name ):
         key = canonical_persona_key( name )
         assert persona_slug( name, sep="-" ) == key.replace( " ", "-" )
