@@ -58,9 +58,12 @@ def canonical_persona_key( name ) -> str:
 
     Ensures:
         - None / non-string / empty / whitespace-only -> "" (unmatchable sentinel)
-        - otherwise: NFKD-decomposed, combining marks dropped, lowercased,
-          reduced to [a-z0-9 ] (punctuation/emoji removed, single spaces kept),
-          internal runs of whitespace collapsed to one space, ends trimmed
+        - otherwise: NFKD-decomposed, combining marks dropped, lowercased, then
+          every run of non-[a-z0-9] characters (punctuation, emoji, AND word
+          separators like "_"/"-") collapsed to a SINGLE space, ends trimmed.
+          Separators become spaces rather than VANISHING (bug 951a22be), so a
+          slug-form boundary survives: "mr_radio"/"mr-radio" -> "mr radio"
+          (NOT the fused "mrradio" the prior delete produced).
         - IDEMPOTENT: canonical_persona_key( canonical_persona_key( x ) ) == canonical_persona_key( x )
 
     Args:
@@ -73,8 +76,16 @@ def canonical_persona_key( name ) -> str:
         return ""
     decomposed = unicodedata.normalize( "NFKD", name )
     ascii_only = "".join( c for c in decomposed if not unicodedata.combining( c ) )
-    stripped   = re.sub( r"[^a-z0-9 ]", "", ascii_only.lower() )
-    return re.sub( r"\s+", " ", stripped ).strip()
+    # bug 951a22be: map every run of non-[a-z0-9] chars (punctuation, emoji, AND
+    # word separators "_"/"-") to a SINGLE space rather than DELETING it, so a
+    # boundary a caller encoded as a separator survives as a space instead of
+    # FUSING the words — "mr_radio"/"mr-radio" -> "mr radio" (NOT "mrradio").
+    # The prior r"[^a-z0-9 ]" delete silently mapped near-canonical slug input to
+    # an unmatchable store key (a P1 owner_persona sat invisible to every query).
+    # A run includes runs of spaces too, so this also collapses internal
+    # whitespace in one pass; .strip() trims the ends.
+    spaced = re.sub( r"[^a-z0-9]+", " ", ascii_only.lower() )
+    return spaced.strip()
 
 
 def normalize_for_match( name ) -> str:
@@ -121,14 +132,17 @@ def persona_slug( name, sep="-" ) -> str:
     unlike the prior inline `re.sub` sluggers), differing only in the final
     space->separator substitution.
 
-    Idempotency (bug 9980dd9a): `canonical_persona_key` strips ALL punctuation,
-    including the separator itself, so naively re-slugging an already-slugged
-    value FUSES its words — `persona_slug( "mr-radio", "-" )` would key as
-    "mrradio" and return "mrradio", losing the word boundary and breaking the
-    round-trip. The fix substitutes `sep` back to a space BEFORE
-    canonicalization, so a boundary a prior slug encoded as `sep` survives the
-    punctuation strip and re-slugging reproduces the original. Holds for any
-    single fixed `sep` a caller round-trips through (e.g. "-" and "_").
+    Idempotency (bug 9980dd9a): historically `canonical_persona_key` DELETED all
+    punctuation including the separator itself, so naively re-slugging an
+    already-slugged value FUSED its words — `persona_slug( "mr-radio", "-" )`
+    keyed as "mrradio" and returned "mrradio", losing the word boundary and
+    breaking the round-trip. As of bug 951a22be the root now maps separator runs
+    to a SINGLE SPACE rather than deleting them, so `canonical_persona_key(
+    "mr-radio" )` is already "mr radio" and re-slugging round-trips on its own.
+    The `sep`->space substitution below is therefore now BELT-AND-SUSPENDERS —
+    retained because it keeps the round-trip explicit and independent of the
+    root's separator handling. Holds for any single fixed `sep` a caller
+    round-trips through (e.g. "-" and "_").
 
     Requires:
         - name is a string or None
