@@ -45,6 +45,13 @@ VALID_URGENCIES        = ( "urgent", "normal", "low" )
 VALID_AUTHORITIES      = ( "standing", "user_direct", "manager_relay" )
 VALID_BLOCKED_BY_KINDS = ( "item", "persona", "user" )
 
+# Class-scoped owner guard (persona-key follow-on policy, 2026-07-11 / task
+# c03d1870). The OWNED-WORK item classes: an omitted owner_persona on CREATE
+# defaults to the creator's persona (see persona_from_created_by) — forgiving,
+# never a hard 422. The operator-queue classes (decision/gate) stay ownerless
+# BY DESIGN (Rick's court), so they are DELIBERATELY excluded here.
+DEFAULT_OWNER_CLASSES  = ( "task", "bug", "review_request" )
+
 # Legal-transition graph (Phase 2.1, ratified 2026-06-15). The RATIFIED graph:
 # every NON-terminal status may move to every OTHER status; terminal statuses
 # (done/dropped) have NO out-edges (append-only finality); same->same is a no-op.
@@ -388,6 +395,156 @@ def soft_guard_title( title, body, cap=TITLE_SOFT_CAP ):
         "overflow_moved_to_body": body_is_empty,
     }
     return ( trimmed, overflow, advisory ) if body_is_empty else ( trimmed, body, advisory )
+
+
+# ---------------------------------------------------------------------------
+# Persona roster + policy helpers (persona-key follow-on policy, 2026-07-11)
+# ---------------------------------------------------------------------------
+#
+# Two soft, non-blocking policies spun out of bug 951a22be (design note
+# src/rnd/v0.1.9/2026.07.11-persona-key-followon-policy.md):
+#
+#   (1) UNKNOWN-PERSONA SOFT-FLAG: an owner_persona / accountable_manager that
+#       matches NO known persona earns a log-warn + advisory — NEVER a 422 (new
+#       / cross-project personas are legitimately absent from any roster).
+#   (2) CLASS-SCOPED OWNER DEFAULT: an owned-work item (task/bug/review_request)
+#       created without an owner_persona defaults to the creator's persona.
+#
+# The roster is config-derived, so it is exposed to this pure module by the SAME
+# lazy-singleton-with-injectable-override pattern receipt validation already uses
+# (_get_default_scope_roots + the scope_roots= param): _get_known_persona_keys()
+# builds once from the voice-persona pool; build_persona_advisory takes a
+# known_keys= override so every policy branch is unit-testable WITHOUT live config.
+
+_KNOWN_PERSONA_KEYS: Optional[set] = None  # lazy singleton — None means "not built yet"
+
+# A session-id tail on a bridge-stamped created_by ("<persona> <8-hex sid>",
+# task_store_tools.py) is >=6 lowercase-hex chars. The >=6 floor keeps a short
+# hex-looking persona WORD (e.g. "beef", 4 chars) from being mistaken for a sid
+# and stripped off the persona.
+_SESSION_ID_TAIL_PATTERN = re.compile( r"[0-9a-f]{6,}" )
+
+
+def _get_known_persona_keys() -> set:
+    """
+    Build (once per process) the set of canonical keys for every KNOWN persona,
+    reusing the voice-persona pool loader (design D1: the pool loader in
+    voice_persona_helpers IS the roster accessor — no second INI reader).
+
+    Twins _get_default_scope_roots: a lazy config-backed singleton, lazily
+    importing the config dependency so this pure module stays import-light.
+
+    Requires:
+        - ConfigurationManager singleton is constructible (server context)
+
+    Ensures:
+        - returns a set of canonical_persona_key values for the allocatable pool
+          PLUS the overflow persona (each name canonicalized to the store key —
+          the INI keeps mixed case "Rachel"/"Tiberius", the store key is lower)
+        - built exactly once; subsequent calls return the cached set
+    """
+    global _KNOWN_PERSONA_KEYS
+    if _KNOWN_PERSONA_KEYS is None:
+        from cosa.rest.dependencies.config import get_config_manager
+        from cosa.rest.voice_persona_helpers import (
+            load_persona_pool_from_config,
+            load_overflow_persona_from_config,
+        )
+
+        config_mgr = get_config_manager()
+        keys       = set()
+        for persona in load_persona_pool_from_config( config_mgr ):
+            key = canonical_persona_key( persona[ "name" ] )
+            if key:
+                keys.add( key )
+        overflow = load_overflow_persona_from_config( config_mgr )
+        if overflow is not None:
+            overflow_key = canonical_persona_key( overflow[ "name" ] )
+            if overflow_key:
+                keys.add( overflow_key )
+        _KNOWN_PERSONA_KEYS = keys
+    return _KNOWN_PERSONA_KEYS
+
+
+def persona_from_created_by( created_by ) -> str:
+    """
+    Extract the canonical persona key from a bridge-stamped created_by string.
+
+    created_by is contract-stamped "<persona> <8-hex session id>"
+    (task_store_tools.py, e.g. "mr radio 372f9dc9"). The class-scoped owner
+    default (policy 2) needs the persona WITHOUT the session-id tail — but the
+    persona itself may contain spaces, so a plain split is wrong. This strips a
+    trailing session-id-shaped token (>=6 lowercase-hex chars) and canonicalizes
+    the remainder; a created_by with no such tail canonicalizes whole.
+
+    Requires:
+        - created_by is the candidate value (any type; only a non-empty str is
+          transformed)
+
+    Ensures:
+        - None / non-string / empty -> "" (canonical_persona_key's unmatchable
+          sentinel — the caller treats "" as "no derivable owner")
+        - "<persona> <hex sid>" -> canonical_persona_key( "<persona>" )
+          ("mr radio 372f9dc9" -> "mr radio")
+        - a value with no session-id-shaped tail -> canonical_persona_key( whole )
+          ("krishna" -> "krishna")
+    """
+    if not created_by or not isinstance( created_by, str ):
+        return ""
+    parts = created_by.rsplit( " ", 1 )
+    if len( parts ) == 2 and _SESSION_ID_TAIL_PATTERN.fullmatch( parts[ 1 ] ):
+        candidate = parts[ 0 ]
+    else:
+        candidate = created_by
+    return canonical_persona_key( candidate )
+
+
+def build_persona_advisory( owner_persona, accountable_manager, known_keys=None ):
+    """
+    Flag off-roster persona fields (policy 1) — the pure roster check + advisory
+    + folded-marker assembly, shared by the create and reassign (PATCH) paths.
+
+    Each of owner_persona / accountable_manager is canonicalized and tested for
+    roster membership; a value matching no known persona is flagged. This NEVER
+    rejects — the router attaches the advisory to the response, logs a warn, and
+    folds the marker into the event reason, but the write always proceeds.
+
+    Requires:
+        - owner_persona / accountable_manager are the candidate values (str or
+          None; already canonical from the router's _canon_persona, but this
+          re-canonicalizes defensively — idempotent — so it is correct on a raw
+          display value too)
+        - known_keys is an explicit roster set to test against, or None to use
+          the process-default _get_known_persona_keys() singleton (tests inject
+          a fixed set; server uses the config-derived default)
+
+    Ensures:
+        - returns ( None, None ) when neither field is a non-empty off-roster key
+          (an absent / blank / on-roster persona is NOT flagged)
+        - otherwise returns ( advisory, marker ):
+            * advisory = { field_name: canonical_key } for each off-roster field
+              (owner_persona and/or accountable_manager)
+            * marker   = a compact "[persona_flag: owner 'x', manager 'y'
+              off-roster]" string for folding into the audit-event reason
+        - never raises
+    """
+    roster  = known_keys if known_keys is not None else _get_known_persona_keys()
+    flagged = { }
+    for field_name, value in ( ( "owner_persona", owner_persona ), ( "accountable_manager", accountable_manager ) ):
+        key = canonical_persona_key( value )
+        if key and key not in roster:
+            flagged[ field_name ] = key
+
+    if not flagged:
+        return None, None
+
+    parts = [ ]
+    if "owner_persona" in flagged:
+        parts.append( f"owner '{flagged[ 'owner_persona' ]}'" )
+    if "accountable_manager" in flagged:
+        parts.append( f"manager '{flagged[ 'accountable_manager' ]}'" )
+    marker = f"[persona_flag: {', '.join( parts )} off-roster]"
+    return flagged, marker
 
 
 def validate_transition(

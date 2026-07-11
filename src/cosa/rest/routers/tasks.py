@@ -383,6 +383,27 @@ def create_task(
     # Fail-open: the write is never rejected for title length.
     guarded_title, guarded_body, title_guard = rules.soft_guard_title( payload.title, payload.body )
 
+    owner_persona       = _canon_persona( payload.owner_persona )
+    accountable_manager = _canon_persona( payload.accountable_manager )
+
+    # Class-scoped owner default (policy 2, task c03d1870): an owned-work class
+    # created WITHOUT an owner_persona defaults to the creator's persona (derived
+    # from the bridge-stamped created_by) — forgiving, never a 422. decision/gate
+    # operator-queue rows are NOT in DEFAULT_OWNER_CLASSES, so they stay ownerless.
+    if owner_persona is None and payload.item_class in rules.DEFAULT_OWNER_CLASSES:
+        owner_persona = rules.persona_from_created_by( payload.created_by ) or None
+
+    # Unknown-persona soft-flag (policy 1): an off-roster owner/manager earns a
+    # log-warn + a persona_flag response advisory + a compact marker folded into
+    # the ->queued event reason — NEVER a rejection (cross-project personas are
+    # legitimately absent from the local roster).
+    persona_flag, flag_marker = rules.build_persona_advisory( owner_persona, accountable_manager )
+    if persona_flag:
+        print(
+            f"[task WARN] off-roster persona on {payload.item_class} create: {persona_flag} — "
+            f"not in known roster; advisory attached, write NOT blocked"
+        )
+
     with get_db() as session:
         repo = TaskRepository( session )
         item = repo.create_item(
@@ -392,16 +413,18 @@ def create_task(
             created_by          = payload.created_by,
             authority           = payload.authority,
             body                = guarded_body,
-            owner_persona       = _canon_persona( payload.owner_persona ),
-            accountable_manager = _canon_persona( payload.accountable_manager ),
+            owner_persona       = owner_persona,
+            accountable_manager = accountable_manager,
             gate_class          = payload.gate_class,
             priority            = payload.priority,
             urgency             = payload.urgency,
             source_qid          = payload.source_qid,
             correlation_key     = payload.correlation_key,
+            flag_suffix         = flag_marker,
         )
         result = _serialize_item( item )
-        result[ "title_guard" ] = title_guard
+        result[ "title_guard" ]  = title_guard
+        result[ "persona_flag" ] = persona_flag
         return result
 
 
@@ -637,6 +660,20 @@ def patch_task(
         errors.append( f"authority '{payload.authority}' must be one of {rules.VALID_AUTHORITIES}" )
     _reject_if_errors( errors )
 
+    # Unknown-persona soft-flag (policy 1) on the reassign path: a PATCH re-owning
+    # an item to an off-roster persona earns the same log-warn + persona_flag
+    # advisory + folded marker as create — NEVER a rejection. The fields are
+    # already canonical (normalize_patch_fields above); an absent persona field
+    # (a non-reassign PATCH) canonicalizes to None and is not flagged.
+    persona_flag, flag_marker = rules.build_persona_advisory(
+        fields.get( "owner_persona" ), fields.get( "accountable_manager" )
+    )
+    if persona_flag:
+        print(
+            f"[task WARN] off-roster persona on task {task_id} patch: {persona_flag} — "
+            f"not in known roster; advisory attached, write NOT blocked"
+        )
+
     with get_db() as session:
         repo = TaskRepository( session )
         item = repo.get_by_id_for_update( task_id )
@@ -645,8 +682,11 @@ def patch_task(
         if item.status in rules.TERMINAL_STATUSES:
             _reject_if_errors( [ f"item is terminal ('{item.status}') — no edits to closed history" ] )
 
-        event = repo.apply_patch( item, fields, actor=payload.actor, authority=payload.authority, reason=payload.reason )
-        return { "item": _serialize_item( item ), "event": _serialize_event( event ) }
+        event = repo.apply_patch(
+            item, fields, actor=payload.actor, authority=payload.authority,
+            reason=payload.reason, flag_suffix=flag_marker,
+        )
+        return { "item": _serialize_item( item ), "event": _serialize_event( event ), "persona_flag": persona_flag }
 
 
 @router.get(

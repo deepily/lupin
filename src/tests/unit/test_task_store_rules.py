@@ -672,5 +672,101 @@ class TestUnscopedGuardRules:
         assert isinstance( rules.NONTERSE_WARN_THRESHOLD, int ) and rules.NONTERSE_WARN_THRESHOLD > 0
 
 
+# ---------------------------------------------------------------------------
+# Persona-key follow-on policy (2026-07-11, task c03d1870) — DEFAULT_OWNER_CLASSES,
+# persona_from_created_by, build_persona_advisory, _get_known_persona_keys.
+# Design: src/rnd/v0.1.9/2026.07.11-persona-key-followon-policy.md
+# ---------------------------------------------------------------------------
+
+def test_default_owner_classes_are_the_owned_work_triple():
+    assert rules.DEFAULT_OWNER_CLASSES == ( "task", "bug", "review_request" )
+    # operator-queue classes are DELIBERATELY excluded (ownerless by design)
+    assert "decision" not in rules.DEFAULT_OWNER_CLASSES
+    assert "gate" not in rules.DEFAULT_OWNER_CLASSES
+
+
+@pytest.mark.parametrize( "created_by, expected", [
+    ( "mr radio 372f9dc9", "mr radio"    ),   # persona-with-space + 8-hex sid tail stripped
+    ( "krishna 38d15e3b",  "krishna"     ),
+    ( "María 1a2b3c4d",    "maria"       ),    # accent folded, sid stripped
+    ( "krishna",           "krishna"     ),    # no sid tail — canonicalized whole
+    ( "agent beef",        "agent beef"  ),    # "beef" is 4 hex (<6 floor) — NOT a sid, kept
+    ( "agent 12ab",        "agent 12ab"  ),    # 4-char hex tail below the >=6 floor — kept
+] )
+def test_persona_from_created_by_strips_sid_tail( created_by, expected ):
+    assert rules.persona_from_created_by( created_by ) == expected
+
+
+@pytest.mark.parametrize( "bad", [ None, "", "   ", "!!!", 123, [ ] ] )
+def test_persona_from_created_by_unusable_input_is_empty( bad ):
+    assert rules.persona_from_created_by( bad ) == ""
+
+
+_ROSTER = { "krishna", "mr radio", "tiberius" }
+
+
+def test_advisory_none_when_both_on_roster():
+    assert rules.build_persona_advisory( "krishna", "tiberius", known_keys=_ROSTER ) == ( None, None )
+
+
+def test_advisory_none_when_fields_absent():
+    assert rules.build_persona_advisory( None, None, known_keys=_ROSTER ) == ( None, None )
+
+
+def test_advisory_flags_off_roster_owner_only():
+    advisory, marker = rules.build_persona_advisory( "María", "krishna", known_keys=_ROSTER )
+    assert advisory == { "owner_persona": "maria" }
+    assert marker == "[persona_flag: owner 'maria' off-roster]"
+
+
+def test_advisory_flags_off_roster_manager_only():
+    advisory, marker = rules.build_persona_advisory( "krishna", "Ziggy Stardust", known_keys=_ROSTER )
+    assert advisory == { "accountable_manager": "ziggy stardust" }
+    assert marker == "[persona_flag: manager 'ziggy stardust' off-roster]"
+
+
+def test_advisory_flags_both_off_roster():
+    advisory, marker = rules.build_persona_advisory( "María", "Ziggy", known_keys=_ROSTER )
+    assert advisory == { "owner_persona": "maria", "accountable_manager": "ziggy" }
+    assert marker == "[persona_flag: owner 'maria', manager 'ziggy' off-roster]"
+
+
+def test_advisory_uses_singleton_when_known_keys_none( monkeypatch ):
+    # known_keys=None falls through to the lazy roster singleton (no live config).
+    monkeypatch.setattr( rules, "_KNOWN_PERSONA_KEYS", { "krishna" } )
+    assert rules.build_persona_advisory( "krishna", None ) == ( None, None )
+    advisory, marker = rules.build_persona_advisory( "ghost", None )
+    assert advisory == { "owner_persona": "ghost" } and "ghost" in marker
+
+
+def _mock_config_loaders( monkeypatch, pool, overflow ):
+    """Point _get_known_persona_keys's lazy-imported loaders at fixed fakes."""
+    import cosa.rest.voice_persona_helpers as vph
+    import cosa.rest.dependencies.config as cfg
+    monkeypatch.setattr( rules, "_KNOWN_PERSONA_KEYS", None )
+    monkeypatch.setattr( cfg, "get_config_manager", lambda: object() )
+    monkeypatch.setattr( vph, "load_persona_pool_from_config", lambda cm: pool )
+    monkeypatch.setattr( vph, "load_overflow_persona_from_config", lambda cm: overflow )
+
+
+def test_known_persona_keys_build_once_and_cache( monkeypatch ):
+    # pool: one real name + one all-punctuation entry (canon "" → skipped).
+    _mock_config_loaders( monkeypatch, [ { "name": "Rachel" }, { "name": "!!!" } ], { "name": "sam" } )
+    first  = rules._get_known_persona_keys()
+    second = rules._get_known_persona_keys()
+    assert first == { "rachel", "sam" }                       # punctuation entry skipped
+    assert second is first                                    # cached, not rebuilt
+
+
+def test_known_persona_keys_overflow_none( monkeypatch ):
+    _mock_config_loaders( monkeypatch, [ { "name": "Tiberius" } ], None )
+    assert rules._get_known_persona_keys() == { "tiberius" }
+
+
+def test_known_persona_keys_overflow_empty_key_skipped( monkeypatch ):
+    _mock_config_loaders( monkeypatch, [ { "name": "Rio" } ], { "name": "!!!" } )
+    assert rules._get_known_persona_keys() == { "rio" }
+
+
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )
