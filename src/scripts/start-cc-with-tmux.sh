@@ -109,7 +109,7 @@ INNER+="$CLAUDE_CMD"
 # Chain syntax (2026-06-11, Rick): ordered comma-separated names; `*` means
 # "then take anything free"; no `*` = strict, loud fail on exhaustion.
 PERSONA_ENV_FLAGS=(
-    -e "COSA_VOICE_PREFERRED_PERSONA__LUPIN=Mr. Radio,Tiberius,*"
+    -e "COSA_VOICE_PREFERRED_PERSONA__LUPIN=Mr. Radio,Clayton,*"
     -e "COSA_VOICE_PREFERRED_PERSONA__LUPIN_MOBILE=Tiffany,*"
     -e "COSA_VOICE_PREFERRED_PERSONA__PLAN=María,*"
     -e "COSA_VOICE_PREFERRED_PERSONA__LOOKML=Sam,*"
