@@ -35,6 +35,7 @@ def _make_running_queue_stub( hb_at, threshold_secs=120 ):
     rq._agentic_futures      = { }
     rq._agentic_futures_lock = threading.RLock()
     rq._pool_max_workers     = 3
+    rq._monopolize_active    = None   # Shape-B (bug fe375cf6): get_pool_status reads this to exclude the out-of-pool monopolizer
     rq.last_consumer_heartbeat_at        = hb_at
     rq._consumer_stall_threshold_seconds = threshold_secs
     return rq

@@ -76,6 +76,8 @@ class _ProbeJob( AgenticJobBase ):
 class TestMonopolizeLineageInProcess( unittest.TestCase ):
     """End-to-end assembly proof of the lineage pass-through fix (bug 3a14292b)."""
 
+    POOL_WIDTH = 3   # shared-pool width; the Shape-B subclass overrides to 1
+
     def setUp( self ):
         # Boundary-patch ONLY the heavy DB/notification collaborators + emit.
         # ThreadPoolExecutor is deliberately NOT patched → a REAL pool.
@@ -91,7 +93,7 @@ class TestMonopolizeLineageInProcess( unittest.TestCase ):
         vals = {
             "debug auto": False, "debug inject bugs": False, "app debug": False,
             "app verbose": False, "similarity threshold confirmation": 90.0,
-            "cj flow max concurrent agentic jobs": 3,          # room for parent + child
+            "cj flow max concurrent agentic jobs": self.POOL_WIDTH,   # Shape-B subclass drops to 1
             "cj flow monopolize enabled": True,
             "cj flow consumer stall threshold seconds": 20,    # idle-wake = max(5, 5) = 5s
             "cj flow ghost job sweep interval seconds": 3600,  # sweeper never fires in-test
@@ -202,11 +204,35 @@ class TestMonopolizeLineageInProcess( unittest.TestCase ):
                            "monopoly hold must be cleared after the parent completes" )
 
 
+class TestMonopolizeOutsidePoolWidthOne( TestMonopolizeLineageInProcess ):
+    """Shape-B (bug fe375cf6): the SAME end-to-end assembly proof re-run on a
+    pool_max==1 SHARED pool — the width Shape-A's belt refuses because it DEADLOCKS
+    pre-Shape-B (the in-pool monopolizer holds the only worker, so its lineage child
+    can never acquire a slot; Gate B admits the child through intake but cannot conjure
+    a pool slot).
+
+    Under Shape-B the monopolizer runs on the DEDICATED single-worker executor, so the
+    sole shared-pool worker stays free for the child: the child dispatches DURING the
+    hold, the foreign job defers, and the release path is intact — dispatch order still
+    parent→child→foreign. If the child dispatches during the hold at width 1, the
+    monopolizer provably occupied ZERO shared-pool slots. This is the deterministic
+    regression guard standing in for the (retained-for-now) pool_max==1 belt.
+
+    RED-first: on the pre-Shape-B source (monopolizer in the shared pool) this same
+    test hangs the child until the parent exits → child_dispatched_during_hold=False →
+    the inherited assertions fail. Confirmed RED before the fix, GREEN after."""
+
+    POOL_WIDTH = 1
+
+
 def isolated_unit_test():
     """Run this assembly test in isolation; returns (success, duration, message)."""
     import time
     start = time.time()
-    suite  = unittest.TestLoader().loadTestsFromTestCase( TestMonopolizeLineageInProcess )
+    loader = unittest.TestLoader()
+    suite  = unittest.TestSuite()
+    for tc in ( TestMonopolizeLineageInProcess, TestMonopolizeOutsidePoolWidthOne ):
+        suite.addTests( loader.loadTestsFromTestCase( tc ) )
     result = unittest.TextTestRunner( verbosity=2 ).run( suite )
     duration = time.time() - start
     success  = result.wasSuccessful()

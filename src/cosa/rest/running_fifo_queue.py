@@ -83,7 +83,19 @@ class RunningFifoQueue( FifoQueue ):
             max_workers        = self._pool_max_workers,
             thread_name_prefix = "AgenticPool"
         )
-        self._agentic_futures        = { }                   # { id_hash : Future }
+        # Shape-B hardening (bug fe375cf6): a DEDICATED single-worker executor for
+        # monopolize jobs, separate from the shared agentic pool. A monopolizer runs
+        # HERE so it no longer consumes a shared-pool worker — the full width N stays
+        # free for its own spawned (lineage) children. This makes pool_max==1
+        # deadlock-safe and 67473d91's budget math exact. Eager (D2): symmetric with
+        # _agentic_pool, no lazy-init race, one idle thread. Its Futures are tracked
+        # in the SAME _agentic_futures dict below, so the completion callback + ghost
+        # sweeper cover both executors with one scan / one lock (invariants I1-I3).
+        self._monopolize_pool        = ThreadPoolExecutor(
+            max_workers        = 1,                          # Gate B already serializes monopolizers at intake
+            thread_name_prefix = "MonopolizePool"
+        )
+        self._agentic_futures        = { }                   # { id_hash : Future } (BOTH executors)
         # RLock (not Lock): when a Future completes before add_done_callback
         # returns — possible for fast-running work — the callback fires
         # synchronously on the SAME thread inside add_done_callback. That thread
@@ -388,14 +400,25 @@ class RunningFifoQueue( FifoQueue ):
             - Future has _on_agentic_complete registered as done_callback
         """
         with self._agentic_futures_lock:
-            future = self._agentic_pool.submit( self._execute_agentic_in_pool, job )
+            # Shape-B (bug fe375cf6): route a monopolize job to the DEDICATED
+            # single-worker executor so it does NOT consume a shared-pool slot —
+            # the full width N stays free for its lineage children. Non-monopolize
+            # jobs use the shared pool (unchanged). The executor pick is the ONLY
+            # new behavior; everything below (track in the SAME _agentic_futures
+            # dict, set the hold, register the callback) is identical for both, so
+            # invariants I1-I3 (atomic track, release-before-transition, ghost
+            # sweep) hold regardless of which executor produced the Future.
+            is_mono = getattr( job, "monopolize", False ) and self._is_monopolize_enabled()
+            pool    = self._monopolize_pool if is_mono else self._agentic_pool
+            future  = pool.submit( self._execute_agentic_in_pool, job )
             self._agentic_futures[ job.id_hash ] = future
             # Option (a) true-monopoly (bug 30398595): a monopolize job now holds
-            # the pool → Gate B (queue_consumer) defers ALL further intake until
-            # it clears. Set under the same lock as the futures dict so the flag
-            # and the future land atomically. Gated by the master kill-switch
-            # (read fresh): when disabled the hold is never SET → old no-op.
-            if getattr( job, "monopolize", False ) and self._is_monopolize_enabled():
+            # the pool → Gate B (queue_consumer) defers foreign intake (admitting
+            # lineage children) until it clears. Set under the same lock as the
+            # futures dict so the flag and the future land atomically. Gated by the
+            # master kill-switch (read fresh via is_mono): when disabled the hold is
+            # never SET → old no-op AND the job routes to the shared pool.
+            if is_mono:
                 self._monopolize_active = job.id_hash
             future.add_done_callback(
                 lambda f, j=job: self._on_agentic_complete( j, f )
@@ -816,16 +839,29 @@ class RunningFifoQueue( FifoQueue ):
               when the singleton is initialised; omitted with a marker if not
         """
         with self._agentic_futures_lock:
-            inflight = sum( 1 for f in self._agentic_futures.values() if not f.done() )
+            # Shape-B (bug fe375cf6): the monopolizer runs on the DEDICATED executor,
+            # not the shared pool, so exclude its Future from the shared-pool counts —
+            # otherwise inflight_agentic_jobs (documented observability, CLAUDE.md
+            # §CJ Flow) would silently count a non-pool job and the UI's
+            # running = inflight - pending invariant would break. At most ONE
+            # monopolizer can be present (Gate B defers a 2nd at intake before it
+            # ever reaches _agentic_futures), so a single mono_id exclusion is complete.
+            mono_id  = self._monopolize_active
+            inflight = sum(
+                1 for h, f in self._agentic_futures.items()
+                if not f.done() and h != mono_id
+            )
             pending  = sum(
-                1 for f in self._agentic_futures.values()
-                if not f.running() and not f.done()
+                1 for h, f in self._agentic_futures.items()
+                if not f.running() and not f.done() and h != mono_id
             )
 
         payload = {
-            "inflight_agentic_jobs" : inflight,
+            "inflight_agentic_jobs" : inflight,                 # shared pool only — meaning UNCHANGED
             "max_agentic_workers"   : self._pool_max_workers,
             "pending_in_pool"       : pending,
+            "monopolize_inflight"   : mono_id is not None,      # Shape-B: the out-of-pool monopolizer
+            "monopolize_id"         : mono_id,                  # None when no monopolizer holds
         }
 
         # WG-8 (2026-04-28): consumer-thread heartbeat for stall detection.
@@ -1132,6 +1168,9 @@ class RunningFifoQueue( FifoQueue ):
             print( "[AGENTIC-POOL] Warning: ghost-job sweeper did not exit within 5s" )
 
         self._agentic_pool.shutdown( wait=False, cancel_futures=False )
+        # Shape-B (bug fe375cf6): the dedicated monopolize executor shuts down on the
+        # same no-new-work flag as the shared pool.
+        self._monopolize_pool.shutdown( wait=False, cancel_futures=False )
         print( "[AGENTIC-POOL] shutdown_pool accepted no-new-work flag" )
 
         if not wait:

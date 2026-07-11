@@ -130,6 +130,11 @@ class _RFQBase( unittest.TestCase ):
         self.emit      = _p( "emit_job_state_transition" )
         self.notify_fn = _p( "notify_user_sync" )
         self.pool_cls  = _p( "ThreadPoolExecutor" )
+        # Shape-B (bug fe375cf6): RunningFifoQueue now builds TWO executors — the
+        # shared _agentic_pool and the dedicated _monopolize_pool. Return a DISTINCT
+        # mock per construction so the two are separable (e.g. shutdown asserts each
+        # once; routing asserts submit lands on the right one).
+        self.pool_cls.side_effect = lambda *a, **k: MagicMock( name="ThreadPoolExecutor()" )
 
         self._thread_patch = patch.object( rfq.threading, "Thread", _FakeThread )
         self._thread_patch.start(); self._patchers.append( self._thread_patch )
@@ -200,6 +205,34 @@ class TestSubmitAgentic( _RFQBase ):
         self.assertIs( rq._agentic_futures[ "aj1" ], fut )
         rq._agentic_pool.submit.assert_called_once()
         fut.add_done_callback.assert_called_once()
+
+    def test_monopolize_routes_to_dedicated_executor_plain_to_shared( self ):
+        """Shape-B (bug fe375cf6): a monopolize job submits to the DEDICATED
+        _monopolize_pool (and sets the hold); a plain job submits to the shared
+        _agentic_pool (no hold). Both are tracked in the SAME _agentic_futures dict."""
+        rq = self.build()
+        plain = _AgenticFake( id_hash="plain", monopolize=False )
+        rq._submit_agentic_job( plain )
+        rq._agentic_pool.submit.assert_called_once()
+        rq._monopolize_pool.submit.assert_not_called()
+        self.assertIn( "plain", rq._agentic_futures )
+        self.assertIsNone( rq._monopolize_active )
+        mono = _AgenticFake( id_hash="mono", monopolize=True )
+        rq._submit_agentic_job( mono )
+        rq._monopolize_pool.submit.assert_called_once()          # dedicated executor
+        rq._agentic_pool.submit.assert_called_once()             # shared pool NOT re-used
+        self.assertIn( "mono", rq._agentic_futures )             # SAME dict → ghost-sweep/callback cover it
+        self.assertEqual( rq._monopolize_active, "mono" )        # hold set
+
+    def test_monopolize_disabled_kill_switch_routes_to_shared_no_hold( self ):
+        """When the master kill-switch is OFF, a monopolize job routes to the SHARED
+        pool and sets no hold (is_mono is False) — the old no-op behavior."""
+        rq = self.build( **{ "cj flow monopolize enabled": False } )
+        mono = _AgenticFake( id_hash="mono2", monopolize=True )
+        rq._submit_agentic_job( mono )
+        rq._agentic_pool.submit.assert_called_once()
+        rq._monopolize_pool.submit.assert_not_called()
+        self.assertIsNone( rq._monopolize_active )
 
     def test_execute_in_pool_calls_do_all( self ):
         rq = self.build()
@@ -430,6 +463,38 @@ class TestGetPoolStatus( _RFQBase ):
         self.assertFalse( out[ "consumer_stalled" ] )
         self.assertEqual( out[ "api_resource_manager" ], { "x": 1 } )
 
+    def test_status_excludes_monopolizer_and_reports_fields( self ):
+        """Shape-B (bug fe375cf6): the active monopolizer's Future is in
+        _agentic_futures but EXCLUDED from the shared-pool inflight/pending counts
+        (it runs on the dedicated executor, not a shared-pool worker); surfaced via
+        the additive monopolize_inflight/monopolize_id fields."""
+        rq = self.build()
+        f_mono  = MagicMock(); f_mono.done.return_value=False;  f_mono.running.return_value=True
+        f_child = MagicMock(); f_child.done.return_value=False; f_child.running.return_value=False
+        rq._agentic_futures = { "mono": f_mono, "child": f_child }
+        rq._monopolize_active = "mono"
+        with patch( "cosa.utils.api_resource_manager.get_arm" ) as ga:
+            ga.return_value.get_status.return_value = {}
+            out = rq.get_pool_status()
+        self.assertEqual( out[ "inflight_agentic_jobs" ], 1 )   # child only; monopolizer excluded
+        self.assertEqual( out[ "pending_in_pool" ], 1 )         # child pending (not running); mono excluded
+        self.assertTrue( out[ "monopolize_inflight" ] )
+        self.assertEqual( out[ "monopolize_id" ], "mono" )
+
+    def test_status_no_monopolizer_reports_false_none( self ):
+        """No monopolizer → monopolize_inflight False, monopolize_id None, and the
+        shared-pool counts include everything (nothing excluded)."""
+        rq = self.build()
+        f = MagicMock(); f.done.return_value=False; f.running.return_value=True
+        rq._agentic_futures = { "a": f }
+        rq._monopolize_active = None
+        with patch( "cosa.utils.api_resource_manager.get_arm" ) as ga:
+            ga.return_value.get_status.return_value = {}
+            out = rq.get_pool_status()
+        self.assertEqual( out[ "inflight_agentic_jobs" ], 1 )
+        self.assertFalse( out[ "monopolize_inflight" ] )
+        self.assertIsNone( out[ "monopolize_id" ] )
+
     def test_status_heartbeat_present_and_stalled( self ):
         from datetime import datetime, timedelta
         rq = self.build()
@@ -644,6 +709,7 @@ class TestShutdownPool( _RFQBase ):
         rq = self.build()
         rq.shutdown_pool( wait=False )
         rq._agentic_pool.shutdown.assert_called_once()
+        rq._monopolize_pool.shutdown.assert_called_once()   # Shape-B: dedicated executor shuts down too
 
     def test_shutdown_sweeper_still_alive_warns( self ):
         rq = self.build()
