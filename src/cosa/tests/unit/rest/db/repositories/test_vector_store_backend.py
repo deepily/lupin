@@ -63,9 +63,17 @@ def test_is_postgres_backend_propagates_valueerror():
 
 
 def test_none_config_mgr_builds_real_manager_and_reads_default():
-    # Exercises the `config_mgr is None` branch against the real INI.
-    # The committed default is 'lancedb' (old path preserved pre-cutover).
-    assert get_vector_store_backend() == LANCEDB
+    """Exercises the `config_mgr is None` branch against the real INI.
+
+    Regression guard (bug 236c70ba): the committed default is now POSTGRES, per
+    the RATIFIED v0.2.0 Lane C LanceDB->pgvector migration (commit 6d4ca864 —
+    `vector store backend = postgres` in [Lupin: Baseline]). This assertion is a
+    tripwire against a silent default-flip back to the pre-cutover LANCEDB path:
+    if it ever reads 'lancedb' again, the migration has been regressed. (Was
+    asserting LANCEDB pre-cutover; flipped 2026-07-11 after the merged tree read
+    'postgres' — the stale assertion surfaced during the 3a14292b post-merge sweep.)
+    """
+    assert get_vector_store_backend() == POSTGRES
 
 
 # ---------------------------------------------------------------------------
