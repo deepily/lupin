@@ -62,6 +62,7 @@ class AgenticJobBase( ABC ):
         session_id: str,
         scheduled_at: str = None,
         monopolize: bool = False,
+        spawned_by_id_hash: str = None,
         debug: bool = False,
         verbose: bool = False
     ) -> None:
@@ -114,6 +115,14 @@ class AgenticJobBase( ABC ):
         # Scheduling attributes (CJ Flow timed execution + monopolize)
         self.scheduled_at          = scheduled_at   # ISO datetime string or None (immediate)
         self.monopolize            = monopolize      # Exclusive execution flag
+
+        # Lineage (bug 3a14292b): id_hash of the monopolize job that SPAWNED this
+        # job, or None. When set AND equal to the pool's active monopolizer, the
+        # consumer's Gate B admits this child THROUGH the intake hold instead of
+        # deferring it as a foreign writer — the sweep's own children are part of
+        # its exclusive window, not contaminants. Set post-construction by the
+        # child-spawn seam (e.g. routers/swe_team.py from parent_id_hash).
+        self.spawned_by_id_hash    = spawned_by_id_hash
 
         # CJ Flow persistence fields — populated by agentic_job_factory.create_agentic_job()
         # so job_history persists routing_command and the exact args the job was submitted with.

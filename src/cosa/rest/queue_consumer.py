@@ -92,15 +92,35 @@ def start_todo_producer_run_consumer_thread( todo_queue: Any, running_queue: Any
                         # bounded idle wait keeps the heartbeat fresh.
                         _tick_heartbeat()
 
-                        # Option (a) true-monopoly (bug 30398595) — Gate B: while a
-                        # monopolize job holds the pool, defer ALL intake. Do NOT
-                        # pop — the todo queue stays FIFO-intact so the deferred
-                        # head dispatches first once the hold clears. Bounded wait
-                        # keeps the heartbeat fresh (no busy-loop). The hold check
-                        # is short-circuited first (cheap) then re-reads the master
-                        # kill-switch fresh so an INI flip lifts the hold live.
+                        # Option (a) true-monopoly (bug 30398595 + 3a14292b) — Gate B:
+                        # while a monopolize job holds the pool, defer FOREIGN intake
+                        # but ADMIT the monopolizer's OWN lineage children — they are
+                        # part of its exclusive window, not contaminants (without this
+                        # the sweep's pytest-spawned children starve for the whole run:
+                        # 1916 "deferring all intake" receipts on ts-ad4670ec). Foreign
+                        # jobs stay FIFO-intact so the deferred head dispatches first
+                        # once the hold clears. Bounded wait keeps the heartbeat fresh
+                        # (no busy-loop). The hold check short-circuits first (cheap)
+                        # then re-reads the master kill-switch fresh so an INI flip lifts
+                        # the hold live.
                         if running_queue._monopolize_active is not None and running_queue._is_monopolize_enabled():
-                            if todo_queue.debug: print( "[CONSUMER] Monopoly hold active — deferring all intake" )
+                            parent = running_queue._monopolize_active
+                            def _is_admissible_child( j ):
+                                # A child is admissible iff it was spawned BY the active
+                                # monopolizer (explicit lineage, NEVER job_type sniffing)
+                                # AND does not itself monopolize (a nested monopolizer
+                                # needs its own exclusive window → defer it like a foreign
+                                # job). getattr with None/False defaults: the todo queue is
+                                # heterogeneous (AgentBase / SolutionSnapshot never carry
+                                # the AgenticJobBase lineage field) — this is the legitimate
+                                # "attribute absent on this class" guard, not defensive
+                                # fishing for an attribute that ought to exist.
+                                return ( getattr( j, "spawned_by_id_hash", None ) == parent
+                                         and not getattr( j, "monopolize", False ) )
+                            job = todo_queue.pop_next_eligible( predicate=_is_admissible_child )
+                            if job is not None:
+                                break  # admitted a lineage child — dispatch it normally
+                            if todo_queue.debug: print( "[CONSUMER] Monopoly hold active — deferring FOREIGN intake (lineage children pass)" )
                             todo_queue.condition.wait( timeout=monopolize_poll_secs )
                             continue
 
@@ -139,13 +159,15 @@ def start_todo_producer_run_consumer_thread( todo_queue: Any, running_queue: Any
                     if not todo_queue.consumer_running:
                         break
 
-                if job:  # pragma: no branch - L124 is reached only when consumer_running stayed True at L121 (via the job-found break at L93), so job is always truthy here; the falsy arc back to the outer loop is unreachable
+                if job:  # pragma: no branch - reached only after the inner while breaks WITH a job in hand: either the normal eligible-job break or the Gate-B lineage-child admit break (bug 3a14292b) — BOTH assign job a non-None value. The only other inner-loop exit is consumer_running going False, caught by the `if not ...: break` immediately above. So job is always truthy here; the falsy arc back to the outer loop is unreachable.
                     # Option (a) true-monopoly (bug 30398595) — Gate A: before a
                     # monopolize job takes the pool, drain it of foreign (non-test)
                     # inflight writers so the sweep gets exclusive use of the shared
-                    # test DB (the placeholder's original promise, now wired). On
-                    # timeout the sweep is dead-lettered — a contaminated gate must
-                    # NEVER run. Non-monopolize jobs skip the gate.
+                    # test DB (bug 30398595 wired the formerly-inert monopolize flag
+                    # into this enforced two-gate monopoly — it is no longer a no-op).
+                    # On timeout the sweep is dead-lettered — a contaminated gate must
+                    # NEVER run. Non-monopolize jobs skip the gate. The drain classifier
+                    # exempts the sweep's own lineage children (bug 3a14292b).
                     monopolize_drain_offenders = None
                     drain_timeout              = None
                     if getattr( job, 'monopolize', False ) and running_queue._is_monopolize_enabled():

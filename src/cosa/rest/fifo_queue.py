@@ -201,20 +201,26 @@ class FifoQueue:
                 result = self.queue_list.pop( 0 )
                 return result
 
-    def pop_next_eligible( self, now=None ) -> Optional[Any]:
+    def pop_next_eligible( self, now=None, predicate=None ) -> Optional[Any]:
         """
         Remove and return the first eligible job from the queue.
 
-        A job is eligible if: not paused AND (scheduled_at is None OR scheduled_at <= now).
+        A job is eligible if: not paused AND (scheduled_at is None OR scheduled_at <= now)
+        AND (predicate is None OR predicate( job ) is True).
         Non-eligible jobs remain in their original queue positions.
 
         Requires:
             - now is a datetime or None (defaults to datetime.now())
+            - predicate is None or a callable job -> bool
 
         Ensures:
             - Returns first eligible job (removed from both queue_list and queue_dict)
             - Returns None if no eligible jobs exist
             - Non-eligible jobs stay in the queue unchanged
+            - When predicate is supplied, jobs it rejects stay queued in place
+              (FIFO-intact) — the consumer's monopoly Gate B uses this to admit
+              ONLY the active monopolizer's lineage children (bug 3a14292b) while
+              foreign jobs remain deferred
 
         Raises:
             - None
@@ -244,6 +250,13 @@ class FifoQueue:
                             continue  # Not yet eligible
                     except ( ValueError, TypeError ):
                         pass  # Unparseable → treat as immediate
+
+                # Optional caller predicate (bug 3a14292b): an otherwise-eligible
+                # job must ALSO satisfy predicate( job ) to be returned. Rejected
+                # jobs stay queued in place — the queue stays FIFO-intact so the
+                # deferred head still dispatches first once the predicate lifts.
+                if predicate is not None and not predicate( job ):
+                    continue
 
                 # This job is eligible — remove and return it
                 if job.id_hash not in self.queue_dict:

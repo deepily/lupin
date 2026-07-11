@@ -27,6 +27,7 @@ import cosa.rest.routers.test_suite as M
 from cosa.rest.routers.test_suite import (
     router,
     get_todo_queue,
+    get_running_queue,
     submit_test_suite,
     TestSuiteSubmitRequest,
     TestSuiteSubmitResponse,
@@ -69,6 +70,18 @@ class TestGetTodoQueueDependency( unittest.TestCase ):
 
         self.assertIs( result, sentinel_queue )
 
+    def test_get_running_queue_returns_main_module_queue( self ):
+        """get_running_queue() reads jobs_run_queue off lupin_app.main (bug 3a14292b belt)."""
+        sentinel_queue           = Mock( name="jobs_run_queue" )
+        fake_main                = types.ModuleType( "lupin_app.main" )
+        fake_main.jobs_run_queue = sentinel_queue
+        fake_pkg                 = types.ModuleType( "lupin_app" )
+
+        with patch.dict( sys.modules, { "lupin_app": fake_pkg, "lupin_app.main": fake_main } ):
+            result = get_running_queue()
+
+        self.assertIs( result, sentinel_queue )
+
 
 class TestSubmitTestSuiteEndpoint( unittest.TestCase ):
     """
@@ -86,13 +99,20 @@ class TestSubmitTestSuiteEndpoint( unittest.TestCase ):
     def setUp( self ):
         self.todo_queue                   = Mock( name="todo_queue" )
         self.todo_queue.size.return_value = 3
+        # Running queue for the Shape-B belt (bug 3a14292b). Default: capacity OK
+        # (>= 2 workers) so the guard is a no-op; the 422 test overrides side_effect.
+        # unsafe=True: the method name starts with "assert", which Mock otherwise
+        # guards as a testing-assertion helper.
+        self.running_queue = Mock( name="running_queue", unsafe=True )
+        self.running_queue.assert_monopolize_pool_capacity.return_value = None
 
     def _run( self, request_body, user=None ):
         """Drive the async endpoint synchronously."""
         if user is None:
             user = _valid_user()
         return asyncio.run(
-            submit_test_suite( request_body=request_body, current_user=user, todo_queue=self.todo_queue )
+            submit_test_suite( request_body=request_body, current_user=user,
+                               todo_queue=self.todo_queue, running_queue=self.running_queue )
         )
 
     def _patched( self, job="default", scoped_id="ts-scoped" ):
@@ -118,6 +138,38 @@ class TestSubmitTestSuiteEndpoint( unittest.TestCase ):
     def test_router_is_apirouter_with_tag( self ):
         """The module exposes a configured APIRouter (cheap import/structure guard)."""
         self.assertIn( "test-suite", router.tags )
+
+    def test_pool_width_one_refuses_monopolize_422( self ):
+        """bug 3a14292b Shape-B belt: a width-1 agentic pool hard-deadlocks a
+        spawning monopolize sweep → refuse LOUD with 422 (never a silent wedge).
+        The guard runs BEFORE job creation, so the factory is never called."""
+        mock_factory, _ = self._patched()
+        self.running_queue.assert_monopolize_pool_capacity.side_effect = RuntimeError(
+            "Monopolize job refused: agentic pool width is 1 (< 2) — bug 3a14292b hard-deadlock."
+        )
+        with self.assertRaises( HTTPException ) as ctx:
+            self._run( TestSuiteSubmitRequest() )
+        self.assertEqual( ctx.exception.status_code, 422 )
+        self.assertIn( "3a14292b", ctx.exception.detail )
+        mock_factory.assert_not_called()                 # refused before any job was built
+        self.todo_queue.push.assert_not_called()
+
+    def test_malformed_submission_maps_valueerror_to_400( self ):
+        """A ValueError raised inside the try (e.g. unbalanced quotes in
+        pytest_args surfacing from create_agentic_job) maps to HTTP 400 — a loud
+        client error, never a silent 500. Covers the except-ValueError arm."""
+        factory_cm = patch.object( M, "create_agentic_job",
+                                   side_effect=ValueError( "unbalanced quote in pytest_args" ) )
+        tracker_cm = patch.object( M, "user_job_tracker" )
+        factory_cm.start()
+        tracker_cm.start()
+        self.addCleanup( factory_cm.stop )
+        self.addCleanup( tracker_cm.stop )
+        with self.assertRaises( HTTPException ) as ctx:
+            self._run( TestSuiteSubmitRequest( pytest_args='-k "auth or' ) )
+        self.assertEqual( ctx.exception.status_code, 400 )
+        self.assertIn( "Invalid test suite submission", ctx.exception.detail )
+        self.todo_queue.push.assert_not_called()
 
     def test_happy_path_minimal_request( self ):
         mock_factory, _ = self._patched( scoped_id="ts-scoped-01" )

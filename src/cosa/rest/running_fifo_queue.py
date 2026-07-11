@@ -869,17 +869,25 @@ class RunningFifoQueue( FifoQueue ):
         A monopolize-mode test_suite sweep and ANY other agentic job share the
         same lupin_db_test on :8000; a concurrent non-test writer corrupts the
         in-flight suite's DB expectations (the refresh_tokens duplicate-jti
-        flood). `monopolize` is an unenforced no-op placeholder
-        (queue_consumer.py), so nothing structurally prevents the overlap — this
-        classifier surfaces the concurrent writers so the sweep can fail loud.
+        flood). `monopolize` is ENFORCED (bug 30398595): the consumer's Gate A
+        (drain-before-dispatch) uses this classifier as its drain oracle and
+        Gate B holds foreign intake for the sweep's duration. This method
+        surfaces the FOREIGN concurrent writers — it EXEMPTS the sweep's own
+        lineage children (bug 3a14292b): a job whose `spawned_by_id_hash` equals
+        `exclude_id_hash` was spawned BY the sweep and is part of its exclusive
+        window, not a contaminant. Exemption is keyed on explicit lineage, never
+        on `job_type`, so a future monopolizer spawning non-swe children is
+        covered too.
 
         Requires:
             - _agentic_futures / queue_dict initialised (always true post-__init__)
 
         Ensures:
-            - returns one { "id_hash", "job_type" } dict per inflight non-test
+            - returns one { "id_hash", "job_type" } dict per inflight FOREIGN
               agentic job (Future present AND not done)
             - the future named by exclude_id_hash (the sweep's own) is skipped
+            - a job whose spawned_by_id_hash == exclude_id_hash (a lineage child
+              of the sweep) is skipped — spawned BY the sweep is not foreign TO it
             - a future whose backing job is absent from queue_dict is reported
               with job_type "unknown" — fail-loud on the unclassifiable, it is
               still a writer we cannot vouch for
@@ -888,6 +896,7 @@ class RunningFifoQueue( FifoQueue ):
 
         Args:
             exclude_id_hash: id_hash of the calling sweep, excluded from the count
+                (also the lineage key: its children are exempted)
 
         Returns:
             list of { "id_hash": str, "job_type": str } for foreign inflight writers
@@ -900,6 +909,12 @@ class RunningFifoQueue( FifoQueue ):
             if id_hash == exclude_id_hash:
                 continue
             job      = self.get_by_id_hash( id_hash ) if id_hash in self.queue_dict else None
+            # Lineage exemption (bug 3a14292b): a job SPAWNED BY the sweep is not
+            # foreign TO the sweep. Guarded on exclude_id_hash is not None so a
+            # None sweep key never matches a job's default-None lineage field.
+            if ( exclude_id_hash is not None and job is not None
+                 and job.spawned_by_id_hash == exclude_id_hash ):
+                continue
             job_type = job.job_type if job is not None else "unknown"
             if job_type == "test_suite":
                 continue
@@ -987,6 +1002,40 @@ class RunningFifoQueue( FifoQueue ):
             time.sleep( poll_seconds )
             offenders = self.get_non_test_inflight_agentic_jobs( exclude_id_hash=job.id_hash )
         return offenders
+
+    def assert_monopolize_pool_capacity( self ) -> None:
+        """
+        Raise if the agentic pool is too narrow for a monopolize job that spawns
+        pool children (bug 3a14292b — Shape-B pool_max==1 belt).
+
+        A monopolize job occupies ONE pool worker for its whole run. If it then
+        spawns child agentic jobs that need the SAME pool — as the integration
+        test_suite sweep does via pytest → POST /api/swe-team/submit — a
+        single-worker pool HARD-deadlocks: the parent holds the only slot, the
+        children can never acquire one, and the parent blocks forever waiting on
+        them. Gate B's lineage pass-through admits the children through INTAKE but
+        cannot conjure a free pool slot. So on a width-1 pool a spawning
+        monopolizer is refused LOUD at submit time — never silently downgraded to
+        non-monopolize, never a run that wedges the queue.
+
+        Requires:
+            - _pool_max_workers set in __init__ (always true post-__init__)
+
+        Ensures:
+            - returns None when _pool_max_workers >= 2 (room for >= 1 child)
+            - raises RuntimeError naming the deadlock when _pool_max_workers < 2
+
+        Raises:
+            - RuntimeError when the pool is too narrow for a spawning monopolizer
+        """
+        if self._pool_max_workers < 2:
+            raise RuntimeError(
+                f"Monopolize job refused: agentic pool width is {self._pool_max_workers} "
+                f"(< 2) — too narrow for a monopolize sweep that spawns pool children. "
+                f"The parent holds the only worker and its children can never dispatch "
+                f"(bug 3a14292b hard-deadlock). Raise 'cj flow max concurrent agentic "
+                f"jobs' to >= 2 before scheduling a monopolize sweep."
+            )
 
     def _ghost_job_sweep( self ) -> None:
         """

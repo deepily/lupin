@@ -708,14 +708,15 @@ class TestSuiteJob( AgenticJobBase ):
         the moment this merge-gate sweep starts (bug caf58f71 — concurrent-writer
         contamination).
 
-        The sweep is monopolize-mode, but `monopolize` is currently an unenforced
-        placeholder (queue_consumer.py), so nothing structurally prevents another
-        fleet agentic job from riding the same agentic pool and writing
-        lupin_db_test concurrently. This preflight converts that silent
-        contamination into an explicit, diagnosable startup failure. It is
-        DETECTION, not prevention (see option-(a) true-monopoly follow-on): it
-        catches writers already inflight at sweep start — the shape the evidence
-        shows — but cannot see jobs dispatched later in the window.
+        The sweep is monopolize-mode. `monopolize` IS enforced now (bug 30398595:
+        the consumer's Gate A drains foreign writers before dispatch and Gate B
+        holds foreign intake for the run; bug 3a14292b exempts the sweep's own
+        lineage children from both). This preflight is the belt to that
+        suspenders — a same-instant DETECTION guard that converts any foreign
+        writer already inflight AT sweep start into an explicit, diagnosable
+        startup failure. It catches writers inflight at start (the shape the
+        evidence shows) but, being a one-shot preflight, cannot see jobs
+        dispatched later in the window — that is Gate B's job.
 
         SAFETY (mirrors _reset_state_between_suites): gated to lupin_db_test. On
         any other engine (a sweep aimed at :7999 dev, where coexisting fleet jobs
@@ -940,6 +941,15 @@ class TestSuiteJob( AgenticJobBase ):
                     # lives on internal port 7999 (host :8000 mapping is inaccessible
                     # from within the container). Honor any caller-set value first.
                     "LUPIN_TEST_BASE_URL" : os.environ.get( "LUPIN_TEST_BASE_URL", f"http://localhost:{os.environ.get( 'PORT', '7999' )}" ),
+                    # Lineage token (bug 3a14292b): this sweep's own id_hash, exposed to
+                    # the pytest subprocess so any child job it spawns (e.g. a swe_team
+                    # dry-run via POST /api/swe-team/submit) can echo it back as
+                    # parent_id_hash. The consumer's Gate B then admits those children
+                    # THROUGH the monopoly intake hold instead of starving them. Always
+                    # injected — harmless when this sweep is not monopolize (Gate B never
+                    # fires, so nothing consults it). LUPIN_TEST_ prefix matches the
+                    # subprocess env-allowlist convention.
+                    "LUPIN_TEST_MONOPOLIZE_PARENT_ID" : self.id_hash,
                     # Caller-supplied env (allowlist-filtered in __init__) overrides defaults.
                     **self.env_vars,
                 }
