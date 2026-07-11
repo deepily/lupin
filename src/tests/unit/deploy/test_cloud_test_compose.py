@@ -86,10 +86,18 @@ def test_lupin_rest_cloud_backed_flag( services ):
         "cloud-test app must run the Testing-GCS config block"
 
 
-def test_lupin_rest_mount_model_bind( services ):
+def test_lupin_rest_no_src_mount_shadow( services ):
+    """Baked-runtime model: ./src must NOT be bind-mounted over the image.
+
+    Commit 84d81d39 ("remove ./src mount-shadow (baked -r3 runtime)")
+    retired the on-VM-checkout mount model — the cloud-test container now
+    runs the code baked into the image, not a live ./src shadow. This guard
+    fails loud if the mount-shadow is ever reintroduced (regression guard,
+    same pattern as the 490fe5db stale-test reversal).
+    """
     mounts = services[ "lupin-rest" ][ "volumes" ]
-    assert any( m.startswith( "./src:/var/lupin/src" ) for m in mounts ), \
-        "mount model requires bind-mounting the on-VM checkout's ./src"
+    assert not any( m.startswith( "./src:/var/lupin/src" ) for m in mounts ), \
+        "baked-runtime model forbids bind-mounting ./src over /var/lupin/src (84d81d39)"
 
 
 def test_lupin_rest_depends_on_proxy_healthy( services ):

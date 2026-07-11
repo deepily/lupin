@@ -94,20 +94,20 @@ class TestParseAnalysisResponse:
         sections = parse_analysis_response( wrapped )
         assert len( sections ) == 4
 
-    def test_malformed_input( self ):
-        """Returns empty list for non-JSON input."""
-        sections = parse_analysis_response( "This is not JSON at all" )
-        assert sections == []
+    def test_malformed_input_raises( self ):
+        """D6-STRICT: non-JSON input raises ValueError (was: returned [])."""
+        with pytest.raises( ValueError ):
+            parse_analysis_response( "This is not JSON at all" )
 
-    def test_empty_sections( self ):
-        """Returns empty list when sections key is empty."""
-        sections = parse_analysis_response( json.dumps( { "sections": [] } ) )
-        assert sections == []
+    def test_empty_sections_raises( self ):
+        """D6-STRICT: empty 'sections' raises ValueError (was: returned [])."""
+        with pytest.raises( ValueError ):
+            parse_analysis_response( json.dumps( { "sections": [] } ) )
 
-    def test_missing_sections_key( self ):
-        """Returns empty list when sections key is absent."""
-        sections = parse_analysis_response( json.dumps( { "other": "data" } ) )
-        assert sections == []
+    def test_missing_sections_key_raises( self ):
+        """D6-STRICT: absent 'sections' key raises ValueError (was: returned [])."""
+        with pytest.raises( ValueError ):
+            parse_analysis_response( json.dumps( { "other": "data" } ) )
 
     def test_invalid_arc_position_defaults( self ):
         """Unknown arc position defaults to 'argument'."""
