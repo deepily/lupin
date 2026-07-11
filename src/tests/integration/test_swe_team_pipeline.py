@@ -28,6 +28,37 @@ import requests
 BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
 
 
+def _swe_submit_body( task_text, ws_session_id ):
+    """
+    Build the POST /api/swe-team/submit JSON body, threading the lineage token
+    (bug 3a14292b) when present.
+
+    When this suite runs INSIDE a monopolize test_suite sweep, that sweep exports
+    its own id_hash as LUPIN_TEST_MONOPOLIZE_PARENT_ID. Echoing it back as
+    parent_id_hash marks each swe_team child as the sweep's own lineage, so the
+    consumer's Gate B admits it THROUGH the monopoly intake hold instead of
+    starving it (the ts-ad4670ec deadlock). Absent the env var (a plain
+    :7999/:8000 run with no monopolizing parent) no lineage is sent and behavior
+    is unchanged.
+
+    Requires:
+        - task_text and ws_session_id are strings
+
+    Ensures:
+        - returns a dict with task/dry_run/websocket_id
+        - includes parent_id_hash iff LUPIN_TEST_MONOPOLIZE_PARENT_ID is set
+    """
+    body = {
+        "task"         : task_text,
+        "dry_run"      : True,
+        "websocket_id" : ws_session_id,
+    }
+    parent_id = os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" )
+    if parent_id:
+        body[ "parent_id_hash" ] = parent_id
+    return body
+
+
 # --- Shared-agentic-pool wait budget (bug 67473d91) --------------------------
 # The :8000 integration venue shares ONE agentic pool across ALL suites, and a
 # post-bounce cold-start adds startup latency. 7 heavy SWE dry-run jobs serialize
@@ -157,11 +188,7 @@ def submit_and_wait( task_text, auth_headers, ws_session_id, timeout=None ):
 
     resp = requests.post(
         f"{BASE_URL}/api/swe-team/submit",
-        json={
-            "task"         : task_text,
-            "dry_run"      : True,
-            "websocket_id" : ws_session_id,
-        },
+        json=_swe_submit_body( task_text, ws_session_id ),
         headers=auth_headers,
         timeout=60
     )
@@ -293,11 +320,7 @@ class TestSweTeamDryRunPipeline:
         # Submit
         resp = requests.post(
             f"{BASE_URL}/api/swe-team/submit",
-            json={
-                "task"         : "Fix the pagination off-by-one error",
-                "dry_run"      : True,
-                "websocket_id" : ws_session_id,
-            },
+            json=_swe_submit_body( "Fix the pagination off-by-one error", ws_session_id ),
             headers=auth_headers,
             timeout=60
         )

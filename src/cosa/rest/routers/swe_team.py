@@ -35,6 +35,7 @@ class SweTeamSubmitRequest( BaseModel ):
     trust_mode    : Optional[ str ] = Field( None, description="Trust mode: disabled, shadow, suggest, active (None = use server default)" )
     scheduled_at  : Optional[ str ] = Field( None, description="ISO datetime for deferred execution (None = immediate)" )
     monopolize    : bool            = Field( False, description="Run exclusively, block all other jobs until complete" )
+    parent_id_hash: Optional[ str ] = Field( None, description="Lineage token (bug 3a14292b): id_hash of a monopolize job that SPAWNED this child. When it matches the pool's active monopolizer, the consumer's Gate B admits this child THROUGH the intake hold instead of deferring it as a foreign writer. Set by a monopolize sweep's pytest from LUPIN_TEST_MONOPOLIZE_PARENT_ID." )
 
 
 class SweTeamSubmitResponse( BaseModel ):
@@ -152,6 +153,9 @@ async def submit_swe_team_task(
         # Scheduling attributes pass-through (CJ Flow timed execution + monopolize)
         if request_body.scheduled_at: job.scheduled_at = request_body.scheduled_at
         if request_body.monopolize:   job.monopolize   = request_body.monopolize
+        # Lineage pass-through (bug 3a14292b): stamp the spawning monopolizer's id so
+        # Gate B admits this child through the monopoly intake hold.
+        if request_body.parent_id_hash: job.spawned_by_id_hash = request_body.parent_id_hash
 
         # Atomic: scope ID + index for user filtering BEFORE push (race condition prevention)
         job.id_hash = user_job_tracker.register_scoped_job( job.id_hash, user_id, session_id )

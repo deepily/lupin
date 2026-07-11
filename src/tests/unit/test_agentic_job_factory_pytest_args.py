@@ -85,10 +85,19 @@ class TestSubmitEndpointMapsValueErrorTo400:
         from cosa.rest.auth import get_current_user
         from cosa.rest.routers import test_suite as test_suite_router
 
+        # Running queue for the Shape-B pool-capacity belt (bug 3a14292b): a stub
+        # whose assert_monopolize_pool_capacity is a no-op so the belt passes and
+        # the ValueError->400 path under test is reached. unsafe=True: the method
+        # name starts with "assert", which Mock otherwise guards.
+        from unittest.mock import Mock
+        stub_running_queue = Mock( name="running_queue", unsafe=True )
+        stub_running_queue.assert_monopolize_pool_capacity.return_value = None
+
         app = FastAPI()
         app.include_router( test_suite_router.router )
         app.dependency_overrides[ get_current_user ] = lambda: { "uid": "uid-1", "email": "test@lupin" }
         app.dependency_overrides[ test_suite_router.get_todo_queue ] = lambda: object()
+        app.dependency_overrides[ test_suite_router.get_running_queue ] = lambda: stub_running_queue
         return TestClient( app )
 
     def test_unbalanced_quotes_return_400_with_context( self, client ):

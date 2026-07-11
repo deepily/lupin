@@ -155,6 +155,17 @@ class TestSubmitSweTeamTask( unittest.TestCase ):
         self.assertEqual( job.scheduled_at, "2026-01-01T00:00:00" )
         self.assertTrue( job.monopolize )
 
+    def test_parent_id_hash_stamps_lineage( self ):
+        """bug 3a14292b: parent_id_hash threads onto job.spawned_by_id_hash so the
+        consumer's Gate B admits this child through the monopoly intake hold."""
+        tracker = MagicMock()
+        tracker.register_scoped_job.return_value = "swe-lin"
+        job = _job()
+        with patch( "cosa.rest.routers.swe_team.create_agentic_job", return_value=job ), \
+             patch( "cosa.rest.routers.swe_team.user_job_tracker", tracker ):
+            self._call( SweTeamSubmitRequest( task="child task", parent_id_hash="ts-parent" ) )
+        self.assertEqual( job.spawned_by_id_hash, "ts-parent" )
+
     def test_factory_none_500( self ):
         """Ensures: create_agentic_job None → 500 (re-raised cleanly through except HTTPException)."""
         with patch( "cosa.rest.routers.swe_team.create_agentic_job", return_value=None ), \

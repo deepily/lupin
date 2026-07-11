@@ -73,6 +73,7 @@ class _AgentBaseFake( _Job ): pass
 class _AgenticFake( _Job ):
     def __init__( self, **kw ):
         kw.setdefault( "JOB_TYPE", "AgenticType" )
+        kw.setdefault( "spawned_by_id_hash", None )   # mirror AgenticJobBase (bug 3a14292b)
         super().__init__( **kw )
 class _SnapFake( _Job ):
     @classmethod
@@ -522,6 +523,57 @@ class TestNonTestInflightClassifier( _RFQBase ):
         }
         out = rq.get_non_test_inflight_agentic_jobs( exclude_id_hash="sweep" )
         self.assertEqual( out, [ { "id_hash": "pod_live", "job_type": "podcast" } ] )
+
+    def test_lineage_child_of_sweep_is_exempted( self ):
+        """bug 3a14292b: an inflight job SPAWNED BY the sweep (spawned_by_id_hash ==
+        exclude_id_hash) is not foreign TO the sweep — exempted even though its
+        job_type is not test_suite."""
+        rq    = self.build()
+        child = _AgenticFake( id_hash="swe1", job_type="swe_team", spawned_by_id_hash="sweep" )
+        self._enqueue( rq, child )
+        rq._agentic_futures = { "swe1": self._future( done=False ) }
+        self.assertEqual(
+            rq.get_non_test_inflight_agentic_jobs( exclude_id_hash="sweep" ), [ ]
+        )
+
+    def test_lineage_of_other_parent_is_still_foreign( self ):
+        """A child of a DIFFERENT parent (spawned_by_id_hash != exclude_id_hash) is
+        still a foreign writer — the exemption is lineage-scoped, not blanket."""
+        rq    = self.build()
+        other = _AgenticFake( id_hash="swe2", job_type="swe_team", spawned_by_id_hash="other-sweep" )
+        self._enqueue( rq, other )
+        rq._agentic_futures = { "swe2": self._future( done=False ) }
+        out = rq.get_non_test_inflight_agentic_jobs( exclude_id_hash="sweep" )
+        self.assertEqual( out, [ { "id_hash": "swe2", "job_type": "swe_team" } ] )
+
+    def test_no_exclude_id_hash_does_not_exempt_lineage( self ):
+        """With exclude_id_hash None, a job's default-None lineage must NOT match
+        (None == None) and wrongly exempt it — the guard keys on a real sweep id."""
+        rq  = self.build()
+        job = _AgenticFake( id_hash="dr9", job_type="deep_research" )   # spawned_by_id_hash defaults None
+        self._enqueue( rq, job )
+        rq._agentic_futures = { "dr9": self._future( done=False ) }
+        out = rq.get_non_test_inflight_agentic_jobs()                    # exclude_id_hash=None
+        self.assertEqual( out, [ { "id_hash": "dr9", "job_type": "deep_research" } ] )
+
+
+# ── assert_monopolize_pool_capacity (bug 3a14292b — Shape-B pool_max==1 belt) ─
+class TestMonopolizePoolCapacityGuard( _RFQBase ):
+    """A monopolize sweep that spawns pool children hard-deadlocks on a width-1
+    pool; the guard refuses it LOUD (raises) so the router can 422."""
+
+    def test_width_one_raises_naming_deadlock( self ):
+        rq = self.build( **{ "cj flow max concurrent agentic jobs": 1 } )
+        with self.assertRaises( RuntimeError ) as ctx:
+            rq.assert_monopolize_pool_capacity()
+        msg = str( ctx.exception )
+        self.assertIn( "3a14292b", msg )
+        self.assertIn( "1", msg )                          # names the offending width
+        self.assertIn( "cj flow max concurrent agentic jobs", msg )
+
+    def test_width_two_or_more_passes( self ):
+        rq = self.build( **{ "cj flow max concurrent agentic jobs": 3 } )
+        self.assertIsNone( rq.assert_monopolize_pool_capacity() )   # no raise → room for children
 
 
 # ── _ghost_job_sweep + loop ─────────────────────────────────────────────────

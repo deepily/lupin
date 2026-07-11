@@ -175,59 +175,103 @@ class TestBodyExceptionHandled( _ConsumerTestBase ):
         running.push.assert_called_once()
 
 
-# ── Option (a) true-monopoly (bug 30398595) — Gate B intake hold ────────────
+# ── Option (a) true-monopoly (bug 30398595 + 3a14292b) — Gate B intake hold ──
 class TestGateBIntakeHold( _ConsumerTestBase ):
-    """While a monopolize job holds the pool, the consumer defers ALL intake —
-    without popping, so the todo queue stays FIFO-intact."""
+    """While a monopolize job holds the pool, the consumer defers FOREIGN intake
+    but ADMITS the monopolizer's own lineage children (bug 3a14292b). Foreign
+    jobs stay queued (the real queue's predicate rejects them, modeled here as
+    pop_next_eligible returning None); lineage children are popped + dispatched."""
 
-    def test_hold_defers_all_intake_without_popping( self ):
+    def _held_running( self, enabled=True, active="held-hash" ):
+        r = Mock()
+        r._consumer_stall_threshold_seconds = 120
+        r._monopolize_active = active
+        r._is_monopolize_enabled.return_value = enabled
+        r._monopolize_drain_timeout_seconds = 300
+        return r
+
+    def test_hold_defers_when_no_admissible_child( self ):
+        """No lineage child eligible → Gate B's predicate admits nobody → defer (wait)."""
         todo = _todo()                                      # debug=True → Gate B print arc
+        todo.pop_next_eligible.return_value = None           # predicate admits nobody
         todo.condition.wait.side_effect = lambda *a, **k: setattr( todo, "consumer_running", False )
-        running = Mock()
-        running._consumer_stall_threshold_seconds = 120
-        running._monopolize_active = "held-hash"            # a real hold
-        running._is_monopolize_enabled.return_value = True
+        running = self._held_running()
         self._drive( todo, running )
-        todo.pop_next_eligible.assert_not_called()          # nothing popped → FIFO preserved
-        running.push.assert_not_called()
+        todo.pop_next_eligible.assert_called_once()          # consulted WITH a predicate...
+        self.assertIn( "predicate", todo.pop_next_eligible.call_args.kwargs )
+        running.push.assert_not_called()                     # ...admitted nobody → nothing dispatched
         running._process_job.assert_not_called()
-        todo.condition.wait.assert_called()
+        todo.condition.wait.assert_called()                  # deferred
 
     def test_hold_defers_debug_false( self ):
         todo = _todo( debug=False )                         # Gate B print skipped arc
+        todo.pop_next_eligible.return_value = None
         todo.condition.wait.side_effect = lambda *a, **k: setattr( todo, "consumer_running", False )
-        running = Mock()
-        running._consumer_stall_threshold_seconds = 120
-        running._monopolize_active = "held-hash"
-        running._is_monopolize_enabled.return_value = True
+        running = self._held_running()
         self._drive( todo, running )
-        todo.pop_next_eligible.assert_not_called()
+        running.push.assert_not_called()
+
+    def test_hold_admits_lineage_child( self ):
+        """A lineage child is admitted THROUGH the hold and dispatched (Gate A skipped
+        because the child never monopolizes)."""
+        todo  = _todo()
+        child = _job()
+        child.monopolize        = False                     # child never monopolizes
+        child.spawned_by_id_hash = "held-hash"              # lineage matches the active monopolizer
+        todo.pop_next_eligible.return_value = child
+        running = self._held_running()
+        running._process_job.side_effect = lambda j: setattr( todo, "consumer_running", False )
+        self._drive( todo, running )
+        running.push.assert_called_once_with( child )
+        running._process_job.assert_called_once_with( child )
+        running.await_monopolize_pool_drain.assert_not_called()   # child.monopolize False → Gate A skipped
+
+    def test_gate_b_predicate_admits_lineage_rejects_foreign_and_nested( self ):
+        """The Gate-B admissibility predicate: spawned_by == active monopolizer AND
+        NOT itself monopolize. Keyed on lineage, never job_type."""
+        captured = { }
+        todo = _todo()
+        def _capture( *a, **k ):
+            captured[ "predicate" ] = k[ "predicate" ]
+            todo.consumer_running = False                    # exit after one probe
+            return None
+        todo.pop_next_eligible.side_effect = _capture
+        todo.condition.wait.side_effect   = lambda *a, **k: None
+        running = self._held_running()
+        self._drive( todo, running )
+        pred = captured[ "predicate" ]
+        self.assertTrue ( pred( Mock( spawned_by_id_hash="held-hash", monopolize=False ) ) )  # own child → admit
+        self.assertFalse( pred( Mock( spawned_by_id_hash=None,        monopolize=False ) ) )  # no lineage → defer
+        self.assertFalse( pred( Mock( spawned_by_id_hash="other",     monopolize=False ) ) )  # other parent → defer
+        self.assertFalse( pred( Mock( spawned_by_id_hash="held-hash", monopolize=True  ) ) )  # nested monopolizer → defer
 
     def test_kill_switch_off_lifts_the_hold( self ):
-        """Flag flipped off mid-hold → Gate B stops deferring live (gate-time read)."""
+        """Flag flipped off mid-hold → Gate B stops gating live (gate-time read):
+        the normal (predicate-less) pop path runs."""
         todo = _todo()
         todo.pop_next_eligible.return_value = None           # fall through to empty-wait
         todo.is_empty.return_value = True
         todo.condition.wait.side_effect = lambda *a, **k: setattr( todo, "consumer_running", False )
-        running = Mock()
-        running._consumer_stall_threshold_seconds = 120
-        running._monopolize_active = "held-hash"             # hold set...
-        running._is_monopolize_enabled.return_value = False  # ...but kill-switch OFF
+        running = self._held_running( enabled=False )        # hold set... but kill-switch OFF
         self._drive( todo, running )
-        todo.pop_next_eligible.assert_called()               # Gate B did NOT defer
+        todo.pop_next_eligible.assert_called()               # Gate B did NOT gate
+        self.assertNotIn( "predicate", todo.pop_next_eligible.call_args.kwargs )  # normal pop, no predicate
 
     def test_second_monopolize_job_serializes_after_hold_clears( self ):
-        """FIFO + back-to-back (D4): a second monopolize job waits at Gate B while
-        the first holds, then dispatches first (in order) once the hold clears."""
+        """FIFO + back-to-back (D4): a second monopolize job is NOT a lineage child,
+        so Gate B's predicate rejects it (modeled as None while held); it dispatches
+        once the hold clears, in order."""
         todo = _todo()
         job2 = _job()                                        # monopolize=True (the 2nd sweep)
-        todo.pop_next_eligible.return_value = job2
-        running = Mock()
-        running._consumer_stall_threshold_seconds = 120
-        running._monopolize_active = "first-sweep"           # first monopolize job holds
-        running._is_monopolize_enabled.return_value = True
-        running._monopolize_drain_timeout_seconds = 300
+        running = self._held_running( active="first-sweep" )  # first monopolize job holds
         running.await_monopolize_pool_drain.return_value = [ ]   # pool clean when it finally dispatches
+        def _pop( *a, **k ):
+            # While held, Gate B passes a predicate; job2 monopolizes → not admissible
+            # → real queue returns None. Once cleared, the normal pop returns job2.
+            if running._monopolize_active is not None:
+                return None
+            return job2
+        todo.pop_next_eligible.side_effect = _pop
         def _clear_hold( *a, **k ):
             running._monopolize_active = None                # first sweep completes → hold clears
         todo.condition.wait.side_effect = _clear_hold

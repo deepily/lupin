@@ -150,6 +150,54 @@ class TestPopNextEligible( unittest.TestCase ):
         self.assertEqual( job.id_hash, "sched" )
 
 
+class TestPopNextEligiblePredicate( unittest.TestCase ):
+    """
+    Exercises `pop_next_eligible( predicate= )` — bug 3a14292b selective admit.
+
+    Ensures:
+        - the first eligible job satisfying the predicate is returned + removed
+        - predicate-rejected jobs stay queued in place (FIFO-intact)
+        - no match returns None and removes nothing
+        - predicate=None (default) is unfiltered (unchanged behavior)
+        - eligibility (paused/scheduled) still gates BEFORE the predicate
+    """
+
+    def setUp( self ):
+        self.q = FifoQueue()
+
+    def test_predicate_selects_match_leaves_others_queued( self ):
+        self.q.push( _job( "foreign1" ) )
+        self.q.push( _job( "child" ) )
+        self.q.push( _job( "foreign2" ) )
+        got = self.q.pop_next_eligible( predicate=lambda j: j.id_hash == "child" )
+        self.assertIsNotNone( got )
+        self.assertEqual( got.id_hash, "child" )
+        # rejected jobs remain, in original order (FIFO-intact) + still in queue_dict
+        self.assertEqual( [ j.id_hash for j in self.q.queue_list ], [ "foreign1", "foreign2" ] )
+        self.assertNotIn( "child", self.q.queue_dict )
+        self.assertIn( "foreign1", self.q.queue_dict )
+
+    def test_predicate_no_match_returns_none_nothing_removed( self ):
+        self.q.push( _job( "a" ) )
+        self.q.push( _job( "b" ) )
+        got = self.q.pop_next_eligible( predicate=lambda j: j.id_hash == "nope" )
+        self.assertIsNone( got )
+        self.assertEqual( [ j.id_hash for j in self.q.queue_list ], [ "a", "b" ] )
+
+    def test_predicate_none_default_unfiltered( self ):
+        self.q.push( _job( "first" ) )
+        got = self.q.pop_next_eligible( predicate=None )
+        self.assertEqual( got.id_hash, "first" )
+
+    def test_eligibility_gates_before_predicate( self ):
+        # a paused job that WOULD satisfy the predicate is still skipped —
+        # eligibility (paused / scheduled) is checked before the predicate.
+        self.q.push( _job( "paused", state=JobState.PAUSED ) )
+        self.q.push( _job( "ready" ) )
+        got = self.q.pop_next_eligible( predicate=lambda j: True )
+        self.assertEqual( got.id_hash, "ready" )
+
+
 class TestEarliestScheduledAt( unittest.TestCase ):
     """
     Exercises `earliest_scheduled_at`.

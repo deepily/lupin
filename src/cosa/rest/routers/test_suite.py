@@ -63,6 +63,17 @@ def get_todo_queue():
     return main_module.jobs_todo_queue
 
 
+def get_running_queue():
+    """
+    Dependency to get the running queue from main module.
+
+    Returns:
+        RunningFifoQueue: The running queue instance (holds the agentic pool)
+    """
+    import lupin_app.main as main_module
+    return main_module.jobs_run_queue
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Job Submission Endpoint
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -76,7 +87,8 @@ def get_todo_queue():
 async def submit_test_suite(
     request_body: TestSuiteSubmitRequest,
     current_user: dict = Depends( get_current_user ),
-    todo_queue = Depends( get_todo_queue )
+    todo_queue = Depends( get_todo_queue ),
+    running_queue = Depends( get_running_queue )
 ):
     """
     Submit a test suite job to run in the background.
@@ -132,6 +144,16 @@ async def submit_test_suite(
 
     if not user_email:
         raise HTTPException( status_code=400, detail="User email not found in authentication token" )
+
+    # Shape-B belt (bug 3a14292b): a test_suite sweep is ALWAYS monopolize=True and
+    # spawns pool children via pytest. On a width-1 agentic pool that hard-deadlocks
+    # (parent holds the only worker, children can never dispatch). Refuse LOUD here —
+    # 422 naming the deadlock — never a silent run that wedges the queue. Fires only
+    # on a pool_max==1 deployment (prod); the :7999/:8000 test venues run width-3.
+    try:
+        running_queue.assert_monopolize_pool_capacity()
+    except RuntimeError as e:
+        raise HTTPException( status_code=422, detail=str( e ) )
 
     # Use provided websocket_id or fall back to a default
     session_id = request_body.websocket_id or f"api-{user_id[ :8 ]}"
