@@ -21,7 +21,8 @@ import pytest
 
 from cosa.agents.heartbeat_arbiter.dependency_graph import (
     build_wait_edges, find_deadlock_cycles, build_graph,
-    build_store_wait_edges, cycle_is_store_backed, hold_is_stale, quick_smoke_test,
+    build_store_wait_edges, build_store_blocked_item_index,
+    cycle_is_store_backed, hold_is_stale, quick_smoke_test,
     hold_contradicts_peer_edge, session_is_stale,
     _parse_peer_target,
 )
@@ -180,6 +181,62 @@ class TestBuildStoreWaitEdges:
     def test_item_without_blocked_by_makes_no_edge( self ):
         owed = { "Ann": [ { "id": "t1", "status": "running" } ] }   # no blocked_by key → no edge
         assert build_store_wait_edges( owed ) == { }
+
+
+# ── STORE ITEM INDEX: per-edge blocked task-ids (bug ce13b134 blocker-cc key) ────
+
+class TestBuildStoreBlockedItemIndex:
+    def test_persona_kind_edge_carries_holder_item_id( self ):
+        owed = {
+            "Rio": [ { "id": "99399723", "blocked_by": [ { "kind": "persona", "id": "Sam" } ] } ],
+        }
+        assert build_store_blocked_item_index( owed ) == {
+            ( "rio", "sam" ): frozenset( { "99399723" } ) }
+
+    def test_item_kind_resolved_to_owner_edge_keeps_item_id( self ):
+        owed = {
+            "Ann": [ { "id": "t1", "blocked_by": [ { "kind": "item", "id": "t2" } ] } ],
+            "Bob": [ { "id": "t2", "blocked_by": [ ] } ],
+        }
+        assert build_store_blocked_item_index( owed ) == {
+            ( "ann", "bob" ): frozenset( { "t1" } ) }
+
+    def test_two_items_same_edge_union_of_ids( self ):
+        owed = {
+            "Rio": [
+                { "id": "A", "blocked_by": [ { "kind": "persona", "id": "Sam" } ] },
+                { "id": "B", "blocked_by": [ { "kind": "persona", "id": "Sam" } ] },
+            ],
+        }
+        assert build_store_blocked_item_index( owed ) == {
+            ( "rio", "sam" ): frozenset( { "A", "B" } ) }
+
+    def test_malformed_refs_user_and_unresolvable_omitted( self ):
+        owed = {
+            "Sam": [ { "id": "s1", "blocked_by": [
+                { "kind": "persona", "id": "Dot" },        # kept
+                { "kind": "persona", "id": 999 },          # non-str persona id → ignored
+                { "kind": "item",    "id": "missing" },    # unresolvable item → omitted
+                { "kind": "item",    "id": None },         # item id None → skipped
+                { "kind": "user",    "id": "Rick" },       # user gate → ignored
+                "not-a-dict",                              # malformed ref → skipped
+            ] } ],
+        }
+        assert build_store_blocked_item_index( owed ) == {
+            ( "sam", "dot" ): frozenset( { "s1" } ) }
+
+    def test_self_edge_and_non_list_non_dict_and_idless_skipped( self ):
+        owed = {
+            "Ann": [ { "id": "t1", "blocked_by": [ { "kind": "item", "id": "t1" } ] } ],  # own item → self-edge dropped
+            "Bob": "not-a-list",                                                          # non-list → skipped
+            "Cal": [ "not-a-dict", { "id": None, "blocked_by": [ { "kind": "persona", "id": "Sam" } ] } ],  # non-dict + id None (no item id → skipped)
+        }
+        assert build_store_blocked_item_index( owed ) == { }
+
+    def test_none_and_non_dict_input( self ):
+        assert build_store_blocked_item_index( None ) == { }
+        assert build_store_blocked_item_index( "x" )  == { }
+        assert build_store_blocked_item_index( { } )  == { }
 
 
 # ── STORE-CORROBORATION: ring corroboration predicate ───────────────────────────

@@ -110,6 +110,8 @@ Inputs 2 and 3 are **local / store-independent** and must keep poking even durin
 
 **Delivery**: the arbiter can inject directly into a dormant session's tmux (`cc_notification_listener._inject_via_tmux`) — this is the reliable external wake. It also posts advisories to the human (`live_notify`).
 
+**Outreach idempotency + ack channel** (bug `ce13b134`): the Part-6 #4 blocker detector re-pings a silent blocker on an escalating backoff, but the owning-manager *cc* ("X is blocking worker Y") is deduped on a `(blocker, blocked_item, recipient)` cooldown (reusing the `58660c64` advisory-cooldown machinery) so a persistent block cc's the manager at most once per window, while a genuinely-new block (different `blocked_item`) still announces once. The arbiter is a **headless observer with no DM inbox** — the canonical channel for a chase-ack back to the arbiter is a **commons `system-events` post**, not a DM reply (ratified: no inbound inbox is added to the observe-only service).
+
 > **Known gaps (follow-ups)**: the manager tap-ACK (600s) is tighter than any practical management loop, and neither tap-ACK nor whole-fleet-stall is **blocked-on-user / done-aware** — so an idle-but-finished or legitimately Rick-gated manager gets false MANAGER-DOWN / whole-fleet-stall escalations (relates `332af094`). Mitigations in use: keep management loops < 40 min; represent user-gated work as a `gate_class=ricks_court` item transitioned to `blocked_by:[{kind:user}]`.
 
 ---

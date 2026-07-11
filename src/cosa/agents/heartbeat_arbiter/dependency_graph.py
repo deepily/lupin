@@ -456,6 +456,70 @@ def build_store_wait_edges( owed_by_persona ):
     return edges
 
 
+def build_store_blocked_item_index( owed_by_persona ):
+    """
+    The item-preserving companion to build_store_wait_edges: for each owner→owner
+    wait edge, the SET of the holder's blocked task-ids that produced it.
+
+    build_store_wait_edges collapses every (holder, awaited) edge to a bare
+    persona pair, DROPPING which task item is blocked. The blocker-cc idempotency
+    key (bug ce13b134) needs that item identity: two SEQUENTIAL blocks with the
+    SAME (blocker, blocked_worker, recipient) but DIFFERENT blocked items are
+    genuinely-distinct announcements — each must go out exactly once, not be
+    suppressed as a dup of the other. This index supplies the blocked_item leg of
+    that (blocker, blocked_item, recipient) key.
+
+    Requires:
+        - owed_by_persona is the arbiter's per-poll non-terminal owed read,
+          { persona: [ { id, status, gate_class, blocked_by }, ... ] }, or None
+          (same shape build_store_wait_edges consumes)
+
+    Ensures:
+        - returns { ( canonical_holder, canonical_awaited ): frozenset( item_ids ) }
+          where item_ids are STR ids of the HOLDER's items whose blocked_by
+          resolves to `awaited` (item-kind refs resolved to owner via the same
+          id→owner map; unresolvable/terminal-owner refs omitted, mirroring
+          build_store_wait_edges' v1 scope limit)
+        - self-edges dropped (a holder blocked on its own item is not a peer edge)
+        - personas are canonical_persona_key-normalized so lookups match the
+          (canonicalized) ping-edge keys
+        - None / malformed input → {}; never raises (pure)
+    """
+    owed = owed_by_persona or { }
+    if not isinstance( owed, dict ):
+        return { }
+    id_to_owner = { }
+    for persona, items in owed.items():
+        if not isinstance( items, list ):
+            continue
+        owner = canonical_persona_key( persona ) or persona
+        for it in items:
+            if isinstance( it, dict ) and it.get( "id" ) is not None:
+                id_to_owner[ str( it.get( "id" ) ) ] = owner
+    index = { }
+    for persona, items in owed.items():
+        if not isinstance( items, list ):
+            continue
+        holder = canonical_persona_key( persona ) or persona
+        for it in items:
+            if not isinstance( it, dict ) or it.get( "id" ) is None:
+                continue
+            item_id = str( it.get( "id" ) )
+            for ref in ( it.get( "blocked_by" ) or [ ] ):
+                if not isinstance( ref, dict ):
+                    continue
+                kind    = ref.get( "kind" )
+                rid     = ref.get( "id" )
+                awaited = None
+                if kind == "persona" and isinstance( rid, str ):
+                    awaited = canonical_persona_key( rid ) or rid
+                elif kind == "item" and rid is not None:
+                    awaited = id_to_owner.get( str( rid ) )      # None if unresolvable → edge omitted
+                if awaited and awaited != holder:
+                    index.setdefault( ( holder, awaited ), set() ).add( item_id )
+    return { edge: frozenset( ids ) for edge, ids in index.items() }
+
+
 def cycle_is_store_backed( cycle, store_edges ):
     """
     True iff EVERY consecutive holder→awaited edge of a derived persona ring is

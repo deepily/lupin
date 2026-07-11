@@ -406,6 +406,92 @@ def test_blocker_cc_resolver_exception_degrades_to_no_cc():
     assert len( gw.sent ) == 1 and gw.sent[ 0 ][ 0 ] == "Bob"        # ping fired, no cc, no raise
 
 
+# ── bug ce13b134: blocker-cc idempotency (the manager cc must not re-fire per ping) ──
+
+def _cc_job( gw, **overrides ):
+    """A #4 job whose blocker 'bob-sid' resolves to owning manager MgrB (else none)."""
+    return _job( gw, resolve_manager_fn=lambda sid, declared_manager=None: {
+                     "manager_persona": "MgrB", "source": "lineage" } if sid == "bob-sid" else {
+                     "manager_persona": None, "source": "unresolved" }, **overrides )
+
+
+def test_blocker_cc_deduped_within_cooldown_window():
+    """bug ce13b134: the blocker PING re-fires on its escalating backoff (60/300/…
+    — a silent blocker SHOULD keep being nudged), but the owning-manager cc is
+    deduped to at most once per cooldown window while the block persists. Kills the
+    3-identical-'X is blocking worker Y'-DMs-in-6-min flood (each a fresh thread)."""
+    gw  = _GW()
+    job = _cc_job( gw )                                              # default cooldown = 2700s window
+    p2s = { "Bob": "bob-sid" }
+    job._auto_ping( { "Alice": "Bob" }, NOW, persona_to_sid=p2s )                                    # t0:   ping + cc
+    job._auto_ping( { "Alice": "Bob" }, NOW + datetime.timedelta( seconds=60  ), persona_to_sid=p2s )  # +60:  ping, cc suppressed
+    job._auto_ping( { "Alice": "Bob" }, NOW + datetime.timedelta( seconds=360 ), persona_to_sid=p2s )  # +300: ping, cc suppressed
+    blocker_dms = [ s for s in gw.sent if s[ 0 ] == "Bob" ]
+    mgr_ccs     = [ s for s in gw.sent if s[ 0 ] == "MgrB" ]
+    assert len( blocker_dms ) == 3          # the silent blocker keeps getting nudged (backoff untouched)
+    assert len( mgr_ccs )     == 1          # the manager is cc'd ONCE, not per-ping
+
+
+def test_blocker_cc_refires_after_cooldown_expires():
+    """A genuinely-persistent block eventually re-cc's the manager once the cooldown
+    lapses (idempotency window, not permanent suppression)."""
+    gw  = _GW()
+    job = _cc_job( gw, manager_advisory_cooldown_seconds=100 )       # short window for the test
+    p2s = { "Bob": "bob-sid" }
+    job._auto_ping( { "Alice": "Bob" }, NOW, persona_to_sid=p2s )                                    # t0:   cc (stamp until t0+100)
+    job._auto_ping( { "Alice": "Bob" }, NOW + datetime.timedelta( seconds=60  ), persona_to_sid=p2s )  # +60:  cc within 100 → suppressed
+    job._auto_ping( { "Alice": "Bob" }, NOW + datetime.timedelta( seconds=360 ), persona_to_sid=p2s )  # +300: cc past 100 → re-cc
+    mgr_ccs = [ s for s in gw.sent if s[ 0 ] == "MgrB" ]
+    assert len( mgr_ccs ) == 2
+
+
+def test_blocker_cc_reannounces_when_blocked_item_changes():
+    """Mr. Radio's positive case (ce13b134): two SEQUENTIAL blocks with the SAME
+    (blocker, blocked_worker, recipient) but a DIFFERENT blocked item each announce
+    exactly once — the item id is in the idempotency key, so instance 2 (a new item)
+    is NOT suppressed as a dup of instance 1. A persona-only key would over-suppress
+    it (RED against that)."""
+    gw  = _GW()
+    job = _cc_job( gw )
+    p2s    = { "Bob": "bob-sid" }
+    items1 = { ( "alice", "bob" ): frozenset( { "item-99399723" } ) }   # instance 1's blocked item
+    items2 = { ( "alice", "bob" ): frozenset( { "item-ca8d6a19" } ) }   # instance 2's DIFFERENT blocked item
+    job._auto_ping( { "Alice": "Bob" }, NOW, persona_to_sid=p2s, edge_items=items1 )                                   # cc (item-1)
+    job._auto_ping( { "Alice": "Bob" }, NOW + datetime.timedelta( seconds=60  ), persona_to_sid=p2s, edge_items=items1 )  # echo → suppressed
+    job._auto_ping( { "Alice": "Bob" }, NOW + datetime.timedelta( seconds=360 ), persona_to_sid=p2s, edge_items=items2 )  # NEW item → cc again
+    mgr_ccs = [ s for s in gw.sent if s[ 0 ] == "MgrB" ]
+    assert len( mgr_ccs ) == 2              # each distinct blocked item announces exactly once
+
+
+def test_blocker_cc_cooldown_cleared_on_edge_resume():
+    """When the block resolves, the blocker-cc cooldown is dropped so a NEW block on
+    the same edge re-cc's the manager immediately (mirrors the ping-ledger
+    clear-on-resume)."""
+    gw  = _GW()
+    job = _cc_job( gw )
+    p2s = { "Bob": "bob-sid" }
+    job._auto_ping( { "Alice": "Bob" }, NOW, persona_to_sid=p2s )                                    # cc fired + cooldown stamped
+    assert ( "blocker-cc", "bob|alice|" ) in job._advisory_cooldown_until                            # canonical, empty item-sig
+    job._auto_ping( { }, NOW + datetime.timedelta( seconds=10 ), persona_to_sid=p2s )                # edge gone → clear-on-resume
+    assert ( "blocker-cc", "bob|alice|" ) not in job._advisory_cooldown_until
+    job._auto_ping( { "Alice": "Bob" }, NOW + datetime.timedelta( seconds=20 ), persona_to_sid=p2s )  # new block → cc again at once
+    mgr_ccs = [ s for s in gw.sent if s[ 0 ] == "MgrB" ]
+    assert len( mgr_ccs ) == 2
+
+
+def test_blocker_cc_cooldown_disabled_ccs_every_ping():
+    """manager_advisory_cooldown_seconds=0 is a deliberate opt-out → the legacy
+    per-ping cc behaviour is restored (every blocker ping re-cc's), same disable
+    semantics as the case-16/17 advisory cooldown."""
+    gw  = _GW()
+    job = _cc_job( gw, manager_advisory_cooldown_seconds=0 )
+    p2s = { "Bob": "bob-sid" }
+    job._auto_ping( { "Alice": "Bob" }, NOW, persona_to_sid=p2s )
+    job._auto_ping( { "Alice": "Bob" }, NOW + datetime.timedelta( seconds=60 ), persona_to_sid=p2s )
+    mgr_ccs = [ s for s in gw.sent if s[ 0 ] == "MgrB" ]
+    assert len( mgr_ccs ) == 2              # gate disabled → cc rides every ping
+
+
 def test_decision_cc_owning_manager_when_sender_resolves():
     """#10: decision-needed → Rick (notify) + cc owning manager when the sender resolves."""
     gw, notes = _GW(), [ ]

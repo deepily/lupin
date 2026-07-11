@@ -47,7 +47,8 @@ from cosa.agents.heartbeat_arbiter.arbiter_state import (
 )
 from cosa.agents.heartbeat_arbiter.fleet_data_model import build_fleet_view
 from cosa.agents.heartbeat_arbiter.dependency_graph import (
-    build_graph, build_store_wait_edges, cycle_is_store_backed, hold_is_stale,
+    build_graph, build_store_wait_edges, build_store_blocked_item_index,
+    cycle_is_store_backed, hold_is_stale,
     hold_contradicts_peer_edge, build_wait_edges, find_deadlock_cycles, session_is_stale,
     edge_is_store_backed,
 )
@@ -1283,7 +1284,12 @@ class ArbiterConsumerJob( AgenticJobBase ):
         else:
             ping_edges = { h: a for h, a in live_edges.items()
                            if edge_is_store_backed( h, a, store_edges ) }
-        pings_fired = self._auto_ping( ping_edges, now, persona_to_sid )  # #4 blocker + cc mgr (store-backed only)
+        # bug ce13b134: the blocked-ITEM leg of the blocker-cc idempotency key —
+        # { (canonical_holder, canonical_awaited): frozenset(item_ids) } from the SAME
+        # per-poll owed read (empty when the store read failed → the cc dedup falls
+        # back to a persona-only key + clear-on-resume).
+        edge_items  = build_store_blocked_item_index( owed_items )
+        pings_fired = self._auto_ping( ping_edges, now, persona_to_sid, edge_items )  # #4 blocker + cc mgr (store-backed only)
         roster      = build_roster( fleet_view, now, self.quiet_threshold_seconds,
                                      alive_threshold_seconds=self.alive_threshold_seconds )  # free-count fix: live-idle only (session_is_stale gate)
         # #6 roster broadcast DROPPED (Part-6 cut) — the fleet roster is PULL-state,
@@ -2105,7 +2111,27 @@ class ArbiterConsumerJob( AgenticJobBase ):
                     self._log( "outreach_ledger_error", outreach_id=outreach_id, error=str( oe ) )
         return attempts_fired
 
-    def _auto_ping( self, edges, now, persona_to_sid=None ):
+    @staticmethod
+    def _blocker_cc_key( holder, awaited, edge_items ):
+        """
+        bug ce13b134: the blocker-cc idempotency key — (blocker, blocked_item,
+        recipient) rendered as "canonical_awaited|canonical_holder|item_sig". The
+        recipient (owning manager) is deterministic from the blocker's lineage, so
+        (blocker, blocked_item) carries it implicitly. `item_sig` is the sorted,
+        "+"-joined blocked task-ids for this edge (build_store_blocked_item_index);
+        empty when the store read was UNKNOWN → the key degrades to a persona-only
+        pair, and clear-on-resume distinguishes sequential blocks instead.
+
+        Ensures:
+            - returns a stable str key; personas canonicalized so it matches across
+              view-persona spelling variants; never raises
+        """
+        ch  = canonical_persona_key( holder )  or holder
+        ca  = canonical_persona_key( awaited ) or awaited
+        sig = "+".join( sorted( ( edge_items or { } ).get( ( ch, ca ), () ) ) )
+        return f"{ca}|{ch}|{sig}"
+
+    def _auto_ping( self, edges, now, persona_to_sid=None, edge_items=None ):
         """
         Auto-ping each blocker, throttled + per-edge backoff + global cap, then
         clear-on-resume (§6.1). Part-6 #4: DM the blocker AND cc its owning manager.
@@ -2115,6 +2141,9 @@ class ArbiterConsumerJob( AgenticJobBase ):
               `holder` is the BLOCKED worker waiting on `awaited`, the BLOCKER)
             - now is an aware datetime
             - persona_to_sid maps persona → session_id (for the manager cc) or None
+            - edge_items is build_store_blocked_item_index output
+              { (canonical_holder, canonical_awaited): frozenset(item_ids) } or None
+              — the blocked_item leg of the cc idempotency key (bug ce13b134)
 
         Ensures:
             - pings at most one DM per (holder, awaited) edge per backoff window,
@@ -2123,8 +2152,15 @@ class ArbiterConsumerJob( AgenticJobBase ):
               (holder) + the ask (Part-6 #4 rewrite), AND cc's the blocker's owning
               manager (resolved via lineage) when resolvable — so the manager chases
               if the blocker stays silent
+            - the manager cc is idempotency-gated (bug ce13b134): while the BLOCKER
+              keeps getting nudged on its escalating backoff, the manager is cc'd at
+              most once per manager_advisory_cooldown_seconds window per
+              (blocker, blocked_item, recipient) key — a NEW block (different item)
+              re-cc's exactly once; the cooldown clears on edge-resume so a fresh
+              block re-announces immediately. cooldown 0 restores legacy per-ping cc
             - records each ping in the ledger + attempt counter
-            - drops ledger + attempt state for edges no longer active (resume)
+            - drops ledger + attempt state (AND the blocker-cc cooldown) for edges
+              no longer active (resume)
             - returns the count of pings fired this poll
         """
         self._prune_recent_pings( now )
@@ -2146,6 +2182,19 @@ class ArbiterConsumerJob( AgenticJobBase ):
             under_cap = ping_throttle.under_global_cap( len( self._recent_pings ), self.ping_global_cap )
             if under_cap and ping_throttle.should_ping( self._ledger.get_last( key ), now, backoff ):
                 manager, cc_msg = self._blocker_manager_cc( awaited, holder, persona_to_sid )
+                # bug ce13b134: the blocker PING re-fires on its escalating backoff
+                # (a silent blocker SHOULD keep being nudged), but the owning-manager
+                # cc must NOT re-fire every ping — that flooded the manager with
+                # identical "X is blocking worker Y" DMs (3 in 6 min, each a fresh
+                # thread). Gate the cc on the (blocker, blocked_item, recipient)
+                # cooldown, reusing the 58660c64 advisory-cooldown machinery; the
+                # blocker ping itself is untouched.
+                if cc_msg is not None:
+                    cc_key = self._blocker_cc_key( holder, awaited, edge_items )
+                    if self._advisory_cooldown_blocks( "blocker-cc", cc_key, now ):
+                        cc_msg = None                                     # suppress cc; blocker ping still fires
+                    else:
+                        self._stamp_advisory_cooldown( "blocker-cc", cc_key, now )
                 self._route( 4, PING_MESSAGE_TEMPLATE.format( holder=holder ),   # Part-6 #4
                              blocker=awaited, owning_manager=manager, cc_message=cc_msg )
                 self._ledger.record_ping( key, now )
@@ -2157,6 +2206,15 @@ class ArbiterConsumerJob( AgenticJobBase ):
         self._ledger.clear_resolved( active_keys )
         for stale in [ k for k in self._ping_attempts if k not in active_keys ]:
             del self._ping_attempts[ stale ]
+        # bug ce13b134: also drop the blocker-cc cooldown for edges no longer active
+        # so a genuinely-new block on the same edge re-cc's the manager at once
+        # (mirrors the ping clear-on-resume; the 58660c64 _clear_advisory_cooldown
+        # intent). A resolved-then-reformed edge whose blocked_item changed already
+        # keys differently; this also covers the same-item reform after a real gap.
+        active_cc_keys = { self._blocker_cc_key( h, a, edge_items ) for h, a in edges.items() }
+        for stale in [ k for k in self._advisory_cooldown_until
+                       if k[ 0 ] == "blocker-cc" and k[ 1 ] not in active_cc_keys ]:
+            self._clear_advisory_cooldown( "blocker-cc", stale[ 1 ] )
         return fired
 
     def _blocker_manager_cc( self, blocker, blocked_worker, persona_to_sid ):
@@ -3884,14 +3942,17 @@ class ArbiterConsumerJob( AgenticJobBase ):
 
     def _advisory_cooldown_blocks( self, family, persona, now ):
         """
-        bug 58660c64: return True iff a case-16/17 advisory for (family, persona) is
-        still within its cooldown window and must be SUPPRESSED — the cross-detector
+        bug 58660c64: return True iff an advisory for (family, persona) is still
+        within its cooldown window and must be SUPPRESSED — the cross-detector
         ping-pong guard. On suppression, emit the observable
         arbiter_advisory_suppressed_cooldown journal event carrying a running
         suppressed_count (Tiberius rider 2). A cooldown of 0 disables the gate.
 
         Requires:
-            - family is "blocked" or "done"; persona is the subject; now is tz-aware
+            - family is "blocked" / "done" (case-16/17 manager advisories) or
+              "blocker-cc" (bug ce13b134: the Part-6 #4 blocker→manager cc, keyed on
+              the (blocker, blocked_item, recipient) string); persona is the subject
+              (for "blocker-cc", the blocker-cc key string); now is tz-aware
 
         Ensures:
             - returns True (and logs) when the (family, persona) cooldown has not
