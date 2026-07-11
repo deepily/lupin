@@ -353,6 +353,20 @@ COPY --chown=rruiz:rruiz src/conf/long-term-memory/*.db    /var/lupin/src/conf/l
 COPY --chown=rruiz:rruiz docker/lupin/claude-config/settings.json /home/rruiz/.claude/settings.json
 COPY --chown=rruiz:rruiz docker/lupin/claude-config/mcp.json      /home/rruiz/.claude/.mcp.json
 
+# ----------------------------------------------------------------------------
+# agy — Google Antigravity CLI (v1.1.1), baked as one of the LAST layers so it
+# stays cache-cheap. Claude Code running inside this container shells out to
+# `agy` as a subprocess to hand off grunt / token-burning work to Gemini.
+# Installed at /usr/local/bin so it is callable from any WORKDIR. The 173MB
+# binary is staged OUTSIDE git at docker/lupin/bin/agy (.gitignore'd; NOT
+# .dockerignore'd, so it rides the build context). Writing to /usr/local/bin
+# needs root — the tail runs as USER rruiz — so briefly switch to root for the
+# COPY, then back to rruiz.
+# ----------------------------------------------------------------------------
+USER root
+COPY --chmod=0755 docker/lupin/bin/agy /usr/local/bin/agy
+USER rruiz
+
 WORKDIR /var/lupin/src
 
 CMD [ "/bin/bash", "/var/lupin/src/scripts/run-fastapi-lupin.sh" ]

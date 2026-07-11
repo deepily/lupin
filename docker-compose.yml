@@ -125,7 +125,7 @@ services:
   # Always runs [Lupin: Development] config with lupin_db_dev.
   # uvicorn --reload enabled for live code changes during development.
   lupin-rest-dev:
-    image: lupin:1.1.1-pgvector-candidate    # 2026-07-07: v0.2.0 pgvector swap (gate d93a1edb, Rick GO). Rollback: lupin:1.1.0. Prior: 1.1.0 soak (SDK 0.2.88 + bundled-CLI).
+    image: lupin:1.1.2-agy-candidate    # 2026-07-11: agy (Antigravity CLI) baked in (Rio, Rick user_direct). Rollback: lupin:1.1.1-pgvector-candidate. Prior: 1.1.1-pgvector-candidate (v0.2.0 pgvector swap, gate d93a1edb).
     container_name: lupin-rest-dev
     restart: unless-stopped
     user: "1001:1001"
@@ -207,7 +207,7 @@ services:
   # Companion credentials (admin user + API key) auto-seeded from dev DB
   # on every startup via seed_test_companions.py.
   lupin-rest-test:
-    image: lupin:1.1.1-pgvector-candidate    # 2026-07-07: v0.2.0 pgvector swap, test rides same version as dev (Rick ask). Rollback: lupin:1.1.0. Prior: 1.1.0 soak.
+    image: lupin:1.1.2-agy-candidate    # 2026-07-11: agy (Antigravity CLI) baked in (Rio, Rick user_direct); test rides same version as dev. Rollback: lupin:1.1.1-pgvector-candidate. Prior: 1.1.1-pgvector-candidate.
     container_name: lupin-rest-test
     restart: unless-stopped
     user: "1001:1001"

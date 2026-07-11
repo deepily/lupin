@@ -17,23 +17,16 @@ def _read( rel_path ):
         return f.read()
 
 
-def test_deploy_script_uses_var_lupin_root():
-    text = _read( "src/scripts/cloud-run-deploy.sh" )
-    assert "LUPIN_ROOT=/app" not in text
-    assert "LUPIN_ROOT=/var/lupin" in text
+# NOTE (2026-07-11, Rio): test_deploy_script_uses_var_lupin_root removed —
+# src/scripts/cloud-run-deploy.sh was retired (monolith-on-Cloud-Run path, Rick
+# ruled; triggered by audit finding F1). The build script + Dockerfile checks below
+# remain the live regression locks.
 
 
 def test_build_script_uses_var_lupin_root():
     text = _read( "src/scripts/cloud-run-build.sh" )
     assert "LUPIN_ROOT=/app" not in text
     assert "LUPIN_ROOT=/var/lupin" in text
-
-
-def test_deploy_config_mgr_args_have_var_lupin_prefix():
-    text = _read( "src/scripts/cloud-run-deploy.sh" )
-    assert "/var/lupin/src/conf/" in text
-    # No bare /src/conf/ in the CONFIG_MGR args line (the latent path defect).
-    assert "config_path=/src/conf/" not in text
 
 
 def test_dockerfile_config_mgr_args_have_var_lupin_prefix():

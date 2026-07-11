@@ -11,7 +11,8 @@
 # This build produces a MULTI-ENVIRONMENT CAPABLE image. The same
 # image can be deployed to development, testing, or production by
 # overriding the LUPIN_CONFIG_MGR_CLI_ARGS environment variable
-# at runtime (see cloud-run-deploy.sh).
+# at runtime (set by the deployer; the monolith cloud-run-deploy.sh
+# path was retired 2026-07-11 — deploy via terraform src/terraform/envs/test).
 #
 # No environment-specific configuration is baked into the image!
 #
@@ -125,9 +126,9 @@ echo "  Image: $IMAGE_NAME"
 echo "  Tag: $VERSION"
 echo "  Full path: $REGISTRY/$PROJECT_ID/$AR_REPO/$IMAGE_NAME:$VERSION"
 echo ""
-echo "This image is MULTI-ENVIRONMENT CAPABLE and can be deployed to:"
-echo "  • Testing: ./src/scripts/cloud-run-deploy.sh $VERSION 8080 testing"
-echo "  • Production: ./src/scripts/cloud-run-deploy.sh $VERSION 8080 production"
+echo "This image is MULTI-ENVIRONMENT CAPABLE (config selected at runtime via"
+echo "LUPIN_CONFIG_MGR_CLI_ARGS). The monolith cloud-run-deploy.sh path is RETIRED"
+echo "(2026-07-11) — deploy via terraform: src/terraform/envs/test."
 echo ""
 echo "Configuration is selected at runtime via environment variables."
 echo ""
