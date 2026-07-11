@@ -2870,7 +2870,8 @@ def _derive_dm_topic( recipient: str ) -> str:
     that previously preserved exact unicode spelling ("María" → "dm-maría",
     "中文" → "dm-中文", "jean-luc" → "dm-jean-luc"). Under the canonical root,
     accents strip ("dm-maria"), non-Latin scripts reduce to "" ("中文" →
-    "dm-"), and internal hyphens are dropped ("jean-luc" → "dm-jeanluc"). This
+    "dm-"), and internal separators map to a single underscore boundary
+    ("jean-luc" → "dm-jean_luc", bug 951a22be — they are NOT dropped). This
     is intentional for real personas (all ASCII/accented-Latin pool names), but
     it is a contract change on arbitrary input — see the Phase 3 flag.
 

@@ -11,7 +11,9 @@ recipient's canonical persona key with spaces → `_`. This REVERSES the
 asserted. Under the canonical root:
   - accents strip:           "María" → "dm-maria"   (was "dm-maría")
   - non-Latin scripts drop:  "中文"  → "dm-"         (was "dm-中文")   ← degenerate
-  - internal hyphens drop:   "jean-luc" → "dm-jeanluc" (was "dm-jean-luc")
+  - internal separators → _: "jean-luc" → "dm-jean_luc"  (bug 951a22be: a
+                             separator run maps to ONE underscore boundary,
+                             NOT dropped — was "dm-jeanluc" under drop-separators)
   - emoji/punct strip:       "maria🌸" → "dm-maria" (was "dm-maria_")
 This is correct for REAL personas (every voice-pool name is ASCII/accented-Latin
 and is keyed canonically in the store), but it is a genuine contract change on
@@ -65,16 +67,19 @@ class TestDeriveDmTopic:
         collapses runs of whitespace before the space→`_` substitution)."""
         assert _derive_dm_topic( "Dr   X" ) == "dm-dr_x"
 
-    def test_punctuation_dropped_then_space_to_underscore( self ):
-        """CONTRACT CHANGE: punctuation (period AND internal hyphen) is now
-        DROPPED by the canonical root, not preserved. "Dr. Strange-Love" →
-        "dr strangelove" → "dm-dr_strangelove" (was "dm-dr_strange-love")."""
-        assert _derive_dm_topic( "Dr. Strange-Love" ) == "dm-dr_strangelove"
+    def test_punctuation_and_hyphen_become_underscore( self ):
+        """CONTRACT CHANGE (bug 951a22be): every run of non-alphanumerics —
+        period, space, AND internal hyphen — now maps to a SINGLE underscore
+        boundary via the shared canonical root, rather than being dropped.
+        "Dr. Strange-Love" → "dr strange love" → "dm-dr_strange_love"
+        (was "dm-dr_strangelove" under the drop-separators contract)."""
+        assert _derive_dm_topic( "Dr. Strange-Love" ) == "dm-dr_strange_love"
 
-    def test_internal_hyphen_dropped( self ):
-        """CONTRACT CHANGE: internal hyphens are stripped as punctuation.
-        "jean-luc" → "dm-jeanluc" (was "dm-jean-luc")."""
-        assert _derive_dm_topic( "jean-luc" ) == "dm-jeanluc"
+    def test_internal_hyphen_becomes_underscore( self ):
+        """CONTRACT CHANGE (bug 951a22be): an internal hyphen is a separator run
+        → mapped to a SINGLE underscore (a preserved word boundary), NOT dropped.
+        "jean-luc" → "jean luc" → "dm-jean_luc" (was "dm-jeanluc")."""
+        assert _derive_dm_topic( "jean-luc" ) == "dm-jean_luc"
 
     # ── Accents now strip (FIXES the prior accent-blind contract) ──
 
@@ -103,22 +108,36 @@ class TestDeriveDmTopic:
         (was "dm-maria_" — the trailing underscore is gone)."""
         assert _derive_dm_topic( "maria🌸" ) == "dm-maria"
 
-    # ── Path-safety (still holds — path chars are punctuation, dropped) ──
+    # ── Path-safety (still holds — the raw separator char NEVER survives; under
+    #    bug 951a22be it maps to an underscore boundary instead of being dropped) ──
 
     def test_path_separator_never_survives( self ):
-        """Defense-in-depth: forward slash is punctuation → dropped (not even an
-        underscore survives). "evil/path" → "dm-evilpath" (was "dm-evil_path")."""
-        assert _derive_dm_topic( "evil/path" ) == "dm-evilpath"
+        """Defense-in-depth (bug 951a22be): a forward slash is a separator run →
+        mapped to an underscore boundary, so the raw "/" NEVER survives into the
+        output. "evil/path" → "dm-evil_path" (was "dm-evilpath" when separators
+        were dropped). The safety invariant is asserted EXPLICITLY and
+        independently of the exact value — no "/" may appear regardless."""
+        result = _derive_dm_topic( "evil/path" )
+        assert result == "dm-evil_path"
+        assert "/" not in result
 
     def test_backslash_never_survives( self ):
-        assert _derive_dm_topic( "evil\\path" ) == "dm-evilpath"
+        """Defense-in-depth (bug 951a22be): a backslash is a separator run →
+        underscore boundary; the raw backslash NEVER survives. "evil\\path" →
+        "dm-evil_path" (was "dm-evilpath"). Safety invariant asserted explicitly."""
+        result = _derive_dm_topic( "evil\\path" )
+        assert result == "dm-evil_path"
+        assert "\\" not in result
 
-    def test_control_chars_dropped( self ):
-        """CONTRACT CHANGE: the canonical key keeps ONLY the literal space char in
-        [a-z0-9 ]; other whitespace (newline, tab) is punctuation → DROPPED before
-        the whitespace-collapse step. "name\\nwith\\tcontrol" → "namewithcontrol"
-        → "dm-namewithcontrol" (was "dm-name_with_control")."""
-        assert _derive_dm_topic( "name\nwith\tcontrol" ) == "dm-namewithcontrol"
+    def test_control_chars_become_underscore( self ):
+        """CONTRACT CHANGE (bug 951a22be): control whitespace (newline, tab) is a
+        non-alphanumeric run → mapped to a SINGLE underscore boundary, NOT dropped.
+        "name\\nwith\\tcontrol" → "name with control" → "dm-name_with_control"
+        (was "dm-namewithcontrol"). Safety invariant asserted explicitly: no raw
+        control char may survive into the output regardless of the example."""
+        result = _derive_dm_topic( "name\nwith\tcontrol" )
+        assert result == "dm-name_with_control"
+        assert "\n" not in result and "\t" not in result
 
     def test_all_invalid_input_yields_bare_prefix( self ):
         """CONTRACT CHANGE: whitespace/punct-only input canonicalizes to "" →
