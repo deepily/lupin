@@ -1039,40 +1039,6 @@ class RunningFifoQueue( FifoQueue ):
             offenders = self.get_non_test_inflight_agentic_jobs( exclude_id_hash=job.id_hash )
         return offenders
 
-    def assert_monopolize_pool_capacity( self ) -> None:
-        """
-        Raise if the agentic pool is too narrow for a monopolize job that spawns
-        pool children (bug 3a14292b — Shape-B pool_max==1 belt).
-
-        A monopolize job occupies ONE pool worker for its whole run. If it then
-        spawns child agentic jobs that need the SAME pool — as the integration
-        test_suite sweep does via pytest → POST /api/swe-team/submit — a
-        single-worker pool HARD-deadlocks: the parent holds the only slot, the
-        children can never acquire one, and the parent blocks forever waiting on
-        them. Gate B's lineage pass-through admits the children through INTAKE but
-        cannot conjure a free pool slot. So on a width-1 pool a spawning
-        monopolizer is refused LOUD at submit time — never silently downgraded to
-        non-monopolize, never a run that wedges the queue.
-
-        Requires:
-            - _pool_max_workers set in __init__ (always true post-__init__)
-
-        Ensures:
-            - returns None when _pool_max_workers >= 2 (room for >= 1 child)
-            - raises RuntimeError naming the deadlock when _pool_max_workers < 2
-
-        Raises:
-            - RuntimeError when the pool is too narrow for a spawning monopolizer
-        """
-        if self._pool_max_workers < 2:
-            raise RuntimeError(
-                f"Monopolize job refused: agentic pool width is {self._pool_max_workers} "
-                f"(< 2) — too narrow for a monopolize sweep that spawns pool children. "
-                f"The parent holds the only worker and its children can never dispatch "
-                f"(bug 3a14292b hard-deadlock). Raise 'cj flow max concurrent agentic "
-                f"jobs' to >= 2 before scheduling a monopolize sweep."
-            )
-
     def _ghost_job_sweep( self ) -> None:
         """
         Scan _agentic_futures for entries whose Future is done but whose job

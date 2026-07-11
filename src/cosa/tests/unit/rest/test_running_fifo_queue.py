@@ -622,25 +622,6 @@ class TestNonTestInflightClassifier( _RFQBase ):
         self.assertEqual( out, [ { "id_hash": "dr9", "job_type": "deep_research" } ] )
 
 
-# ── assert_monopolize_pool_capacity (bug 3a14292b — Shape-B pool_max==1 belt) ─
-class TestMonopolizePoolCapacityGuard( _RFQBase ):
-    """A monopolize sweep that spawns pool children hard-deadlocks on a width-1
-    pool; the guard refuses it LOUD (raises) so the router can 422."""
-
-    def test_width_one_raises_naming_deadlock( self ):
-        rq = self.build( **{ "cj flow max concurrent agentic jobs": 1 } )
-        with self.assertRaises( RuntimeError ) as ctx:
-            rq.assert_monopolize_pool_capacity()
-        msg = str( ctx.exception )
-        self.assertIn( "3a14292b", msg )
-        self.assertIn( "1", msg )                          # names the offending width
-        self.assertIn( "cj flow max concurrent agentic jobs", msg )
-
-    def test_width_two_or_more_passes( self ):
-        rq = self.build( **{ "cj flow max concurrent agentic jobs": 3 } )
-        self.assertIsNone( rq.assert_monopolize_pool_capacity() )   # no raise → room for children
-
-
 # ── _ghost_job_sweep + loop ─────────────────────────────────────────────────
 class TestGhostSweep( _RFQBase ):
 
