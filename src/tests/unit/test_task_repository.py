@@ -760,5 +760,77 @@ def test_apply_amendment_auto_marker_reason_when_absent( repo, session ):
     assert event.authority == "manager_relay"
 
 
+# ---------------------------------------------------------------------------
+# Persona-key follow-on policy (2026-07-11, task c03d1870) — flag_suffix folds
+# the off-roster persona marker into the EXISTING creation / patched event reason
+# (zero schema, zero new events). Design:
+# src/rnd/v0.1.9/2026.07.11-persona-key-followon-policy.md
+# ---------------------------------------------------------------------------
+
+def test_create_item_folds_flag_suffix_into_queued_event_reason( repo, session ):
+    repo.create_item(
+        item_class  = "task",
+        title       = "t",
+        project     = "lupin",
+        created_by  = "ziggy 5a1f17f8",
+        authority   = "standing",
+        flag_suffix = "[persona_flag: owner 'ziggy' off-roster]",
+    )
+    event = _added_instances( session, TaskEvent )[ 0 ]
+    assert event.transition == "->queued"
+    assert event.reason     == "[persona_flag: owner 'ziggy' off-roster]"
+
+
+def test_create_item_no_flag_suffix_leaves_reason_none( repo, session ):
+    repo.create_item(
+        item_class = "task",
+        title      = "t",
+        project    = "lupin",
+        created_by = "krishna 38d15e3b",
+        authority  = "standing",
+    )
+    event = _added_instances( session, TaskEvent )[ 0 ]
+    assert event.reason is None                                # unchanged default — no marker
+
+
+def test_apply_patch_appends_flag_suffix_to_field_delta( repo ):
+    item  = _item( owner_persona="krishna" )
+    event = repo.apply_patch(
+        item        = item,
+        fields      = { "owner_persona": "ziggy stardust" },
+        actor       = "mr radio 372f9dc9",
+        authority   = "standing",
+        flag_suffix = "[persona_flag: owner 'ziggy stardust' off-roster]",
+    )
+    # field-delta PRESERVED, marker appended after it (both survive on one event)
+    assert "owner_persona: 'krishna' -> 'ziggy stardust'" in event.reason
+    assert event.reason.endswith( "[persona_flag: owner 'ziggy stardust' off-roster]" )
+
+
+def test_apply_patch_appends_flag_suffix_to_caller_reason( repo ):
+    item  = _item( owner_persona="krishna" )
+    event = repo.apply_patch(
+        item        = item,
+        fields      = { "owner_persona": "ziggy" },
+        actor       = "a b",
+        authority   = "standing",
+        reason      = "manager handoff",
+        flag_suffix = "[persona_flag: owner 'ziggy' off-roster]",
+    )
+    assert event.reason == "manager handoff [persona_flag: owner 'ziggy' off-roster]"
+
+
+def test_apply_patch_none_flag_suffix_is_noop( repo ):
+    item  = _item( title="old", priority="P2" )
+    event = repo.apply_patch(
+        item      = item,
+        fields    = { "priority": "P0" },
+        actor     = "a b",
+        authority = "standing",
+    )
+    assert "[persona_flag" not in event.reason
+    assert "priority: 'P2' -> 'P0'" in event.reason
+
+
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )

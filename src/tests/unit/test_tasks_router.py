@@ -95,6 +95,18 @@ def client( repo ):
     return TestClient( app )
 
 
+@pytest.fixture( autouse=True )
+def _seed_known_personas( monkeypatch ):
+    # Hermetic roster for the unknown-persona soft-flag (policy 1, task c03d1870):
+    # seed the lazy singleton so build_persona_advisory never reads live config.
+    # Every persona the on-roster tests reference is included; off-roster tests
+    # use a name NOT in this set ("ziggy stardust" / "ziggy").
+    monkeypatch.setattr(
+        tasks.rules, "_KNOWN_PERSONA_KEYS",
+        { "krishna", "tiberius", "mr radio", "maria", "rachel", "sam" },
+    )
+
+
 _CREATE_BODY = {
     "item_class" : "task",
     "title"      : "build the store",
@@ -126,7 +138,11 @@ def test_create_defaults_flow_to_repository( client, repo ):
     client.post( "/api/tasks", json=_CREATE_BODY )
     kwargs = repo.create_item.call_args.kwargs
     assert kwargs[ "authority" ] == "standing" and kwargs[ "gate_class" ] == "none"
-    assert kwargs[ "priority" ] == "P2" and kwargs[ "owner_persona" ] is None
+    assert kwargs[ "priority" ] == "P2"
+    # Class-scoped owner default (policy 2, task c03d1870): an owned-work class
+    # (task) created WITHOUT an owner defaults to the creator's persona parsed
+    # from created_by ("krishna 38d15e3b" -> "krishna") — was None pre-policy.
+    assert kwargs[ "owner_persona" ] == "krishna"
 
 
 def test_create_under_cap_title_guard_is_none( client, repo ):
@@ -859,8 +875,10 @@ def test_create_canonicalizes_owner_and_manager_FLIP( client, repo ):
 def test_create_blank_persona_stays_none( client, repo ):
     # A blank owner canonicalizes to None (a falsy create field stays falsy —
     # never the "" sentinel) so it does not turn into an empty-string owner.
+    # Uses a NON-owned class (decision) so the policy-2 class-scoped owner default
+    # does not fill it — isolating the _canon_persona blank->None behavior guarded.
     repo.create_item.return_value = make_item()
-    client.post( "/api/tasks", json=dict( _CREATE_BODY, owner_persona="  !!  " ) )
+    client.post( "/api/tasks", json=dict( _CREATE_BODY, item_class="decision", owner_persona="  !!  " ) )
     assert repo.create_item.call_args.kwargs[ "owner_persona" ] is None
 
 
@@ -1041,6 +1059,101 @@ def test_amend_rejects_overlong_fields( client, repo, field, limit ):
     r = client.post( f"/api/tasks/{uuid.uuid4()}/amend",
                      json={ **_AMEND_BODY, field: "x" * ( limit + 1 ) } )
     assert r.status_code == 422   # Pydantic max_length — never a DB error
+
+
+# ---------------------------------------------------------------------------
+# Persona-key follow-on policy (2026-07-11, task c03d1870):
+#   (2) class-scoped owner default on CREATE, and
+#   (1) unknown-persona soft-flag on the CREATE and reassign(PATCH) paths.
+# Design: src/rnd/v0.1.9/2026.07.11-persona-key-followon-policy.md
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize( "ownerless_class", [ "decision", "gate" ] )
+def test_create_ownerless_classes_do_not_default_owner( client, repo, ownerless_class ):
+    # decision/gate are operator-queue rows — ownerless BY DESIGN, so an omitted
+    # owner is NOT defaulted (they are not in DEFAULT_OWNER_CLASSES).
+    repo.create_item.return_value = make_item()
+    client.post( "/api/tasks", json=dict( _CREATE_BODY, item_class=ownerless_class ) )
+    assert repo.create_item.call_args.kwargs[ "owner_persona" ] is None
+
+
+@pytest.mark.parametrize( "owned_class", [ "task", "bug", "review_request" ] )
+def test_create_owned_classes_default_owner_to_creator( client, repo, owned_class ):
+    repo.create_item.return_value = make_item()
+    client.post( "/api/tasks", json=dict( _CREATE_BODY, item_class=owned_class ) )
+    assert repo.create_item.call_args.kwargs[ "owner_persona" ] == "krishna"
+
+
+def test_create_explicit_owner_not_overridden_by_default( client, repo ):
+    # An explicit owner is kept as-is; the default only fills an OMITTED owner.
+    repo.create_item.return_value = make_item()
+    client.post( "/api/tasks", json=dict( _CREATE_BODY, owner_persona="Tiberius" ) )
+    assert repo.create_item.call_args.kwargs[ "owner_persona" ] == "tiberius"
+
+
+def test_create_on_roster_owner_no_flag( client, repo ):
+    repo.create_item.return_value = make_item()
+    r = client.post( "/api/tasks", json=dict( _CREATE_BODY, owner_persona="krishna" ) )
+    assert r.json()[ "persona_flag" ] is None
+    assert repo.create_item.call_args.kwargs[ "flag_suffix" ] is None
+
+
+def test_create_off_roster_owner_soft_flagged( client, repo ):
+    repo.create_item.return_value = make_item()
+    r = client.post( "/api/tasks", json=dict( _CREATE_BODY, owner_persona="Ziggy Stardust" ) )
+    assert r.status_code == 201                                # soft-flag, NEVER a 422
+    assert r.json()[ "persona_flag" ] == { "owner_persona": "ziggy stardust" }
+    assert repo.create_item.call_args.kwargs[ "flag_suffix" ] == "[persona_flag: owner 'ziggy stardust' off-roster]"
+
+
+def test_create_off_roster_default_owner_flagged( client, repo ):
+    # A NEW persona (off-roster) filing its own founding item: the DEFAULTED owner
+    # is itself off-roster and gets flagged — but the write still succeeds (María's
+    # founding-P1 scenario: soft-flag, not a hard gate that would have blocked it).
+    repo.create_item.return_value = make_item()
+    r = client.post( "/api/tasks", json=dict( _CREATE_BODY, created_by="ziggy 5a1f17f8" ) )
+    assert r.status_code == 201
+    assert r.json()[ "persona_flag" ] == { "owner_persona": "ziggy" }
+    assert repo.create_item.call_args.kwargs[ "owner_persona" ] == "ziggy"
+
+
+def test_create_off_roster_manager_flagged( client, repo ):
+    repo.create_item.return_value = make_item()
+    r = client.post( "/api/tasks", json=dict( _CREATE_BODY, accountable_manager="Ziggy" ) )
+    assert r.json()[ "persona_flag" ] == { "accountable_manager": "ziggy" }
+    assert repo.create_item.call_args.kwargs[ "flag_suffix" ] == "[persona_flag: manager 'ziggy' off-roster]"
+
+
+def test_patch_off_roster_owner_soft_flagged( client, repo ):
+    item = make_item()
+    repo.get_by_id_for_update.return_value = item
+    repo.apply_patch.return_value = make_event( item.id, transition="patched" )
+    r = client.patch( f"/api/tasks/{item.id}",
+                      json={ "owner_persona": "Ziggy Stardust", "actor": "mr radio 372f9dc9" } )
+    assert r.status_code == 200                                # soft-flag, NEVER a 422
+    assert r.json()[ "persona_flag" ] == { "owner_persona": "ziggy stardust" }
+    assert repo.apply_patch.call_args.kwargs[ "flag_suffix" ] == "[persona_flag: owner 'ziggy stardust' off-roster]"
+
+
+def test_patch_on_roster_owner_no_flag( client, repo ):
+    item = make_item()
+    repo.get_by_id_for_update.return_value = item
+    repo.apply_patch.return_value = make_event( item.id, transition="patched" )
+    r = client.patch( f"/api/tasks/{item.id}",
+                      json={ "owner_persona": "tiberius", "actor": "mr radio 372f9dc9" } )
+    assert r.json()[ "persona_flag" ] is None
+    assert repo.apply_patch.call_args.kwargs[ "flag_suffix" ] is None
+
+
+def test_patch_non_persona_field_not_flagged( client, repo ):
+    # A PATCH touching no persona field never flags (owner/manager absent → None).
+    item = make_item()
+    repo.get_by_id_for_update.return_value = item
+    repo.apply_patch.return_value = make_event( item.id, transition="patched" )
+    r = client.patch( f"/api/tasks/{item.id}",
+                      json={ "priority": "P0", "actor": "mr radio 372f9dc9" } )
+    assert r.json()[ "persona_flag" ] is None
+    assert repo.apply_patch.call_args.kwargs[ "flag_suffix" ] is None
 
 
 if __name__ == "__main__":

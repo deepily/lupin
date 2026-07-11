@@ -98,6 +98,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         urgency             : str = "normal",
         source_qid          : Optional[str] = None,
         correlation_key     : Optional[str] = None,
+        flag_suffix         : Optional[str] = None,
     ) -> TaskItem:
         """
         Create a new task item plus its "->queued" creation event.
@@ -106,12 +107,17 @@ class TaskRepository( BaseRepository[TaskItem] ):
             - item_class/gate_class/priority/authority already validated by
               task_store_rules.validate_create (router responsibility)
             - title, project, created_by are non-empty strings
+            - flag_suffix is an OPTIONAL advisory marker (e.g. the persona-flag
+              "[persona_flag: … off-roster]") the router folds into the creation
+              event's reason; None means no marker (the reason stays None)
 
         Ensures:
             - item created with status='queued' (creation is ALWAYS queued;
               transitions move it from there)
             - exactly one TaskEvent with transition='->queued' appended,
-              actor = created_by (the creator IS the creation actor)
+              actor = created_by (the creator IS the creation actor), reason =
+              flag_suffix (None unless the router flagged an off-roster persona —
+              zero schema, zero new events; the marker rides the existing event)
             - flush() called so item.id is populated
             - commit NOT called (caller's get_db() commits)
 
@@ -134,7 +140,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
             source_qid          = source_qid,
             correlation_key     = correlation_key,
         )
-        self._append_event( item.id, created_by, "->queued", authority, receipt_refs=None )
+        self._append_event( item.id, created_by, "->queued", authority, receipt_refs=None, reason=flag_suffix )
         return item
 
     def apply_transition(
@@ -217,11 +223,12 @@ class TaskRepository( BaseRepository[TaskItem] ):
 
     def apply_patch(
         self,
-        item      : TaskItem,
-        fields    : dict,
-        actor     : str,
-        authority : str,
-        reason    = None,
+        item        : TaskItem,
+        fields      : dict,
+        actor       : str,
+        authority   : str,
+        reason      = None,
+        flag_suffix = None,
     ) -> TaskEvent:
         """
         Apply an ALREADY-VALIDATED item-field edit + append a 'patched' event.
@@ -239,6 +246,9 @@ class TaskRepository( BaseRepository[TaskItem] ):
               already wire-checked by the TaskPatchIn Pydantic model
             - reason is an OPTIONAL caller-supplied justification (e.g. why a
               task was reassigned); None / "" means "auto-describe the edit"
+            - flag_suffix is an OPTIONAL advisory marker (the persona-flag
+              "[persona_flag: … off-roster]") appended to the resolved event
+              reason; None means no marker (the reason is unchanged)
 
         Ensures:
             - each provided field whose value differs is written onto the item
@@ -246,7 +256,9 @@ class TaskRepository( BaseRepository[TaskItem] ):
               receipt_refs=None, reason = the caller-supplied `reason` when it is
               non-empty, else the field delta ("k: old -> new; ...") or a no-op
               marker when nothing actually changed (R3 — the edit is auditable
-              either way)
+              either way), with flag_suffix appended when present (so the
+              off-roster marker rides the existing event — zero schema churn,
+              field-delta preserved)
             - flush() called; commit NOT called (caller's get_db() commits)
 
         Returns:
@@ -262,6 +274,10 @@ class TaskRepository( BaseRepository[TaskItem] ):
         # Caller-supplied reason wins (the manager's "why" for a reassignment);
         # otherwise auto-describe the field delta so the event is never blank.
         event_reason = reason if reason else ( "; ".join( changes ) if changes else "no-op patch (no field changed)" )
+        # Fold the persona-flag marker into the resolved reason (policy 1) —
+        # AFTER the field-delta is composed, so both survive on the one event.
+        if flag_suffix:
+            event_reason = f"{event_reason} {flag_suffix}"
         return self._append_event( item.id, actor, "patched", authority, receipt_refs=None, reason=event_reason )
 
     def apply_amendment(
