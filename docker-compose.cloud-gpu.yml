@@ -32,10 +32,16 @@ services:
   # The proxy image runs as nonroot uid 65532 and cannot mkdir inside a fresh
   # (root-owned) named volume; chown it first so both the proxy and lupin-rest
   # (uid 1001) can use the shared socket dir.
+  # Also rm any STALE .s.PGSQL.5432 left on the persistent volume by a prior
+  # boot: on a VM stop/suspend the socket file survives shutdown, and the proxy
+  # then crash-loops "bind address already in use" on unsuspend (bug 300bc7ca —
+  # recurs on every resume under suspended-by-default). The proxy re-creates the
+  # socket at /cloudsql/<CONN>/.s.PGSQL.5432, so the glob clears it idempotently
+  # (rm -f no-ops when the glob doesn't match, e.g. first-ever bring-up).
   cloudsql-socket-init:
     image: busybox:1.36
     container_name: lupin-cloudsql-socket-init
-    command: ["sh", "-c", "chown 65532:65532 /cloudsql && chmod 0777 /cloudsql"]
+    command: ["sh", "-c", "rm -f /cloudsql/*/.s.PGSQL.5432 /cloudsql/.s.PGSQL.5432 && chown 65532:65532 /cloudsql && chmod 0777 /cloudsql"]
     restart: "no"
     volumes:
       - cloudsql-socket:/cloudsql
