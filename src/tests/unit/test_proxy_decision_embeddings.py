@@ -261,14 +261,22 @@ class TestProxyDecisionEmbeddings:
             store._table = broken
             assert store.exists( "x" ) is False
 
-    def test_find_similar_failure_returns_empty( self ):
-        """find_similar with bad store returns empty list."""
-        store = ProxyDecisionEmbeddings(
-            db_path="/nonexistent/path/that/should/not/exist",
-            table_name="test_error",
-            debug=True,
-        )
+    def test_find_similar_failure_returns_empty( self, monkeypatch ):
+        """find_similar returns [] when the Postgres repository layer raises.
 
+        Retargeted 2026-07-11 (bug cfcbb703 Family B): the original test passed a
+        bogus db_path expecting the LanceDB open to fail → []. Under the Postgres
+        backend db_path is inert, so that premise is dead. This exercises the real
+        best-effort contract: `_pg_find_similar` swallows any repository exception
+        and returns [] (proxy_decision_embeddings.py).
+        """
+        from cosa.rest.db.repositories.prediction_decision_repository import PredictionDecisionRepository
+
+        def _raise( self, *args, **kwargs ):
+            raise RuntimeError( "simulated pg failure" )
+        monkeypatch.setattr( PredictionDecisionRepository, "find_similar", _raise )
+
+        store   = ProxyDecisionEmbeddings( db_path="/unused/under/postgres", table_name="test_error", debug=True )
         results = store.find_similar( _make_embedding( seed=7 ), threshold=0.50 )
         assert results == []
 
