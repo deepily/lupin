@@ -128,6 +128,19 @@ export interface SessionStripStore {
    * a sender_id) are skipped.
    */
   hydrate(records: ReadonlyArray<ServerSenderHydrationRecord>): void;
+  /**
+   * Reconnect-path re-hydrate with prune (bug 0b2783ef, option 1). Same
+   * additive upsert as `hydrate`, PLUS it removes any tracked session the
+   * snapshot AUTHORITATIVELY reports as persona-less (present with a
+   * null/released persona) — a stale reaped card whose live `session_reaped`
+   * was missed while the socket was down. Emits a "removed" per pruned session
+   * (so the renderer's focus-auto-exit fires exactly as on a live reap), then a
+   * single "hydrated". A session ABSENT from the snapshot (a
+   * live-assigned-not-yet-persisted one) is NEVER pruned, preserving the
+   * additive/live-event safety `hydrate` was built around. Cold-boot uses
+   * `hydrate` (additive-only) — the prune is confined to the reconnect path.
+   */
+  reconcile(records: ReadonlyArray<ServerSenderHydrationRecord>): void;
   /** Test/cleanup helper: detach EventBus listeners. */
   disposeForTesting(): void;
 }
@@ -251,18 +264,49 @@ class SessionStripStoreImpl implements SessionStripStore {
     return "added";
   }
 
-  hydrate(records: ReadonlyArray<ServerSenderHydrationRecord>): void {
+  // Shared upsert for both hydrate (additive) and reconcile (additive + prune).
+  // Upserts every persona-carrying record; RETURNS the set of sender_ids the
+  // snapshot reports as persona-less (null or released) — reconcile prunes those,
+  // hydrate ignores them. A record without a sender_id is skipped entirely.
+  private upsertRecords(records: ReadonlyArray<ServerSenderHydrationRecord>): Set<string> {
+    const nullPersona = new Set<string>();
     for (const rec of records) {
       const senderId = rec.sender_id;
       if (!senderId) continue;
       const persona = rec.voice_persona;
       // Cold-reload: only sessions WITH a persona get a strip icon (mirrors the
       // live-assign requirement); a null/released persona means inactive/no-icon.
-      if (!persona || persona.released === true) continue;
+      if (!persona || persona.released === true) {
+        nullPersona.add(senderId);
+        continue;
+      }
       const managerPersona = this.normalizeManagerPersona(rec.manager_persona);
       this.applyAssignment(senderId, persona, managerPersona);
     }
+    return nullPersona;
+  }
+
+  hydrate(records: ReadonlyArray<ServerSenderHydrationRecord>): void {
+    this.upsertRecords(records);   // additive — the null-persona set is not pruned (cold-boot stays additive)
     // Single emission for the whole snapshot — renderer reconciles from list().
+    this.emit("hydrated");
+  }
+
+  reconcile(records: ReadonlyArray<ServerSenderHydrationRecord>): void {
+    const nullPersona = this.upsertRecords(records);
+    // Prune the sessions the snapshot AUTHORITATIVELY reports as persona-less
+    // (a missed reap, or a released-but-alive session). Map.delete() returns
+    // true only when the session was tracked — so a null-persona sender we never
+    // held emits no spurious "removed". The per-session "removed" makes the
+    // renderer's focus-auto-exit fire exactly as on a live reap. Sessions ABSENT
+    // from the snapshot (a live-assigned-not-yet-persisted one) are NOT in this
+    // set → never pruned (live-event safety preserved).
+    for (const senderId of nullPersona) {
+      if (this.sessions.delete(senderId)) {
+        this.emit("removed", senderId);
+      }
+    }
+    // Single reconcile emission for the whole snapshot (mirrors hydrate).
     this.emit("hydrated");
   }
 

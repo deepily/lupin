@@ -61,18 +61,18 @@ function makeApi(): ApiCtx {
 
 interface StoreCtx {
   stores      : StripRehydrateStores;
-  stripHydrate: ServerSenderHydrationRecord[][];
+  stripReconcile: ServerSenderHydrationRecord[][];
   sendHydrate : ServerSenderHydrationRecord[][];
 }
 
 function makeStores(): StoreCtx {
-  const stripHydrate: ServerSenderHydrationRecord[][] = [];
+  const stripReconcile: ServerSenderHydrationRecord[][] = [];
   const sendHydrate : ServerSenderHydrationRecord[][] = [];
   const stores: StripRehydrateStores = {
-    sessionStrip : { hydrate: ( r ) => { stripHydrate.push( r as ServerSenderHydrationRecord[] ); } },
+    sessionStrip : { reconcile: ( r ) => { stripReconcile.push( r as ServerSenderHydrationRecord[] ); } },
     senders      : { hydrate: ( r ) => { sendHydrate.push( r as ServerSenderHydrationRecord[] ); } },
   };
-  return { stores, stripHydrate, sendHydrate };
+  return { stores, stripReconcile, sendHydrate };
 }
 
 function emitConn(
@@ -111,9 +111,9 @@ test( "reconnect edge (queue, reconnecting->connected) re-hydrates both stores w
   emitConn( bus, { state: "connected", prev: "reconnecting" } );
   await tick();
   assert.deepEqual( apiCtx.getCalls, [ "/api/notifications/senders-visible/a%2Bb%40x.com" ] );
-  assert.equal( storeCtx.stripHydrate.length, 1 );
+  assert.equal( storeCtx.stripReconcile.length, 1 );
   assert.equal( storeCtx.sendHydrate.length, 1 );
-  assert.deepEqual( storeCtx.stripHydrate[ 0 ], RECORDS );
+  assert.deepEqual( storeCtx.stripReconcile[ 0 ], RECORDS );
   assert.deepEqual( storeCtx.sendHydrate[ 0 ], RECORDS );
 } );
 
@@ -122,7 +122,7 @@ test( "ignores a non-queue transport reconnect (audio socket)", async () => {
   emitConn( bus, { state: "connected", prev: "reconnecting", transport: "AudioTransport" } );
   await tick();
   assert.deepEqual( apiCtx.getCalls, [] );
-  assert.equal( storeCtx.stripHydrate.length, 0 );
+  assert.equal( storeCtx.stripReconcile.length, 0 );
 } );
 
 test( "ignores a transition that is not INTO connected", async () => {
@@ -159,7 +159,7 @@ test( "a failed fetch does not throw, does not hydrate, and resets in-flight for
   emitConn( bus, { state: "connected", prev: "reconnecting" } );
   await tick();
   assert.equal( apiCtx.getCalls.length, 1 );
-  assert.equal( storeCtx.stripHydrate.length, 0 );
+  assert.equal( storeCtx.stripReconcile.length, 0 );
   assert.equal( storeCtx.sendHydrate.length, 0 );
 
   // in-flight reset in finally → a subsequent good edge fetches + hydrates.
@@ -167,7 +167,7 @@ test( "a failed fetch does not throw, does not hydrate, and resets in-flight for
   emitConn( bus, { state: "connected", prev: "reconnecting" } );
   await tick();
   assert.equal( apiCtx.getCalls.length, 2 );
-  assert.equal( storeCtx.stripHydrate.length, 1 );
+  assert.equal( storeCtx.stripReconcile.length, 1 );
 } );
 
 test( "debounces overlapping reconnect edges — only one fetch while a fetch is in flight", async () => {
@@ -181,7 +181,7 @@ test( "debounces overlapping reconnect edges — only one fetch while a fetch is
 
   apiCtx.resolveDeferred();
   await tick();
-  assert.equal( storeCtx.stripHydrate.length, 1 );
+  assert.equal( storeCtx.stripReconcile.length, 1 );
   assert.equal( storeCtx.sendHydrate.length, 1 );
 
   // After settle, a fresh edge fetches again (guard released).

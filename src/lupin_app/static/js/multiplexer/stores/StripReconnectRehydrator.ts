@@ -41,11 +41,15 @@ export interface StripRehydrateApiClient {
   get<T>( path: string ): Promise<T>;
 }
 
-// The two stores boot fans the senders-visible snapshot out to (boot.ts:485-486),
-// narrowed to just `hydrate()` — no store surgery (gate condition c). Both
-// hydrate methods are already idempotent upsert-merges.
+// The two stores boot fans the senders-visible snapshot out to (boot.ts:485-486).
+// The strip uses `reconcile()` (bug 0b2783ef, option 1) — additive upsert PLUS a
+// prune of snapshot-reported persona-less sessions, so a stale reaped card whose
+// live `session_reaped` was missed while the socket was down is cleared on
+// reconnect instead of surviving until a manual refresh. `senders` keeps its
+// additive `hydrate()`. Both remain idempotent upsert-merges; the prune is
+// confined to the strip's reconnect path (cold-boot `hydrate` stays additive).
 export interface StripRehydrateStores {
-  sessionStrip : { hydrate( records: ReadonlyArray<ServerSenderHydrationRecord> ): void };
+  sessionStrip : { reconcile( records: ReadonlyArray<ServerSenderHydrationRecord> ): void };
   senders      : { hydrate( records: ReadonlyArray<ServerSenderHydrationRecord> ): void };
 }
 
@@ -113,8 +117,9 @@ class StripReconnectRehydratorImpl implements StripReconnectRehydrator {
       const path    = `/api/notifications/senders-visible/${ encodeURIComponent( email ) }`;
       const records = await this.api.get<ServerSenderHydrationRecord[]>( path );
       // SAME fan-out as boot.ts:485-486 — idempotent merge with any live events
-      // that arrived first.
-      this.stores.sessionStrip.hydrate( records );
+      // that arrived first. The strip RECONCILES (upsert + prune stale reaped
+      // cards, bug 0b2783ef); senders stays additive.
+      this.stores.sessionStrip.reconcile( records );
       this.stores.senders.hydrate( records );
     } catch {
       // Best-effort re-hydrate (mirrors boot's `.catch`): a failed reconnect
