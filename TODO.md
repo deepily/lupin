@@ -1,6 +1,14 @@
 # TODO
 
-Last updated: 2026-07-11 (Session 372f9dc9, Mr. Radio 🦉 — horizon sweep)
+Last updated: 2026-07-12 (Session 372f9dc9, Mr. Radio 🦉 — evening re-spin arc session-end)
+
+## 📋 DECISIONS LOG 2026-07-11/12 EVENING (Mr. Radio 🦉, session 372f9dc9 re-spin) — arbiter-accuracy arc rulings
+
+- **Arbiter-accuracy 3-layer stack**: L1 dedup (`ce13b134`→`ad0f6199`) + L2 designed-hold suppression (`cec10ef9`→`73378b09`) both LIVE via :8001 bounces; L3 stale holding_on-edge FPs (`1ff7be20`) PARKED overnight — the quiet advisory stream IS its verify-first evidence; staff morning 2026-07-12 w/ the overnight journal as first artifact.
+- **Classifier wall ≠ authority ruling (Rick, direct)**: arbiter bounce is standing manager authority; a permission-layer denial whose rationale contradicts the manifest is a finding to surface, NEVER grounds to mint a Rick-gate. Memory `feedback_classifier_wall_is_not_an_authority_ruling` banked.
+- **Wake-path is NOT a guarantee in either direction**: Krishna's review DM + 3 arbiter nudges buffered ~55 min without re-invoking me (manager side); Clayton's APPROVE staged Enter-immune (worker side, recovery: Escape→C-u→retype fresh→Enter). Sweep `dm_list` on every wake; memory corrected.
+- **Suppression design invariant (ruled)**: fail-safe-to-ROSTER — every uncertain path (store hiccup / dead operator / mixed owed / deadlock cycle) keeps rostering; never hide a real stall. Uniform rule on both announce legs.
+- **Stale-pending disposition review remains open**: 359 open bullets rode the TODO horizon sweep by AGE into `todo-history/2026-04-15-to-2026-06-16-todo.md` — item-level disposition pending Rick's convenience.
 
 ## 📋 DECISIONS LOG 2026-07-11 (Mr. Radio 🦉, session 372f9dc9) — lunch-window arc rulings banked at session-end
 
