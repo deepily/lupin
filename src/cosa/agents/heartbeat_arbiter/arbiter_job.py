@@ -1294,7 +1294,8 @@ class ArbiterConsumerJob( AgenticJobBase ):
                                      alive_threshold_seconds=self.alive_threshold_seconds )  # free-count fix: live-idle only (session_is_stale gate)
         # #6 roster broadcast DROPPED (Part-6 cut) — the fleet roster is PULL-state,
         # served by /state via the snapshot below; no per-tick commons post.
-        taps_fired    = self._tap_managers( fleet_view, graph, roster, now, active_managers, bridge_mtimes=manager_bridge_mtimes )  # #7 / #8 (bug bf8c5cbb: bridge-fresh peers count alive in the blocked-roster)
+        designed_holds = self._designed_hold_personas( owed_items )  # cec10ef9: store-backed review-gate-hold suppression (reuses the per-poll owed read @ :1236)
+        taps_fired    = self._tap_managers( fleet_view, graph, roster, now, active_managers, bridge_mtimes=manager_bridge_mtimes, designed_hold_personas=designed_holds )  # #7 / #8 (bug bf8c5cbb: bridge-fresh peers count alive in the blocked-roster; cec10ef9 designed-hold suppression)
         managers_down = self._check_manager_acks( now, who_rows, fleet_view, active_managers, owed_class=owed_class, count_dm=count_dm, owed_items=owed_items, store_read_degraded=store_degraded )  # #9 (L1 store-aware, 5-signal ACK; owed_items → de3c5b87/33949e83 diagnostics; store gate)
         decisions     = self._check_decision_needed( now )          # #10 Rick (+owning mgr if known)
         stalled       = self._check_fleet_stall( fleet_view, now, active_managers, owed_class=owed_class )  # #11 (L1 store-aware)
@@ -2323,7 +2324,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
 
     # ── v2.2 B2: active manager-tap (DM-push, per-group, throttled) ─────────────
 
-    def _attention_workers( self, fleet_view, graph, now=None, bridge_mtimes=None ):
+    def _attention_workers( self, fleet_view, graph, now=None, bridge_mtimes=None, designed_hold_personas=None ):
         """
         The workers needing a manager's attention: STUCK sessions ∪ holders
         blocked on a peer (the §4 blocked-edge holders).
@@ -2381,16 +2382,37 @@ class ArbiterConsumerJob( AgenticJobBase ):
                 if mt is not None and 0 <= ( now_epoch - mt ) <= self.manager_stale_poke_threshold_seconds:
                     alive_personas.add( p )
         cycle_personas = { p for cycle in graph[ "cycles" ] for p in cycle }
+        # bug cec10ef9: the UNIFORM designed-review-gate-hold suppression seam. A worker
+        # whose owed work is entirely a store-backed hold blocked_by a peer OPERATOR,
+        # when ≥1 operator is ALIVE, is holding BY DESIGN — not a stall — so it is
+        # excluded from the attention roster on BOTH announce legs (the stuck
+        # short-circuit AND the blocked-edge path; Mr. Radio ruling Q1, 2026-07-11).
+        # designed_hold_personas is { canonical_persona_key: frozenset(canonical operator
+        # keys) } (from _designed_hold_personas over the per-poll authoritative owed read);
+        # None → {} → no suppression = today's behavior (FAIL-SAFE, store hiccup/unwired).
+        # alive_keys canonicalizes the alive set (incl. the bridge-fresh augmentation) so
+        # the operator-liveness test is case/spacing-robust vs the store's persona ids.
+        alive_keys     = { canonical_persona_key( p ) for p in alive_personas if p }
+        dhp            = designed_hold_personas or { }
         out            = [ ]
         for view in fleet_view.values():
             if not isinstance( view, dict ):
                 continue
             if view.get( "alive" ) is not True:
                 continue                                  # reaped/offline-prune (lane 4)
+            persona = view.get( "persona" )
+            # cec10ef9 suppression: a designed hold on a LIVE operator, EXCEPT a deadlock
+            # cycle member (a mutual stall stays load-bearing) — a dead operator leaves
+            # `operators & alive_keys` empty → NOT suppressed → rostered (real stall).
+            if persona and persona not in cycle_personas:
+                operators = dhp.get( canonical_persona_key( persona ) )
+                if operators and ( operators & alive_keys ):
+                    self._log( "arbiter_designed_hold_suppressed", persona=persona,
+                               operators=sorted( operators & alive_keys ) )
+                    continue
             if view.get( "stuck" ):
                 out.append( view )                        # a stuck session always needs attention
                 continue
-            persona = view.get( "persona" )
             if persona not in holders:
                 continue                                  # neither stuck nor a blocked-edge holder
             # blocked-edge holder: KEEP only on a real stall — the holder is in a
@@ -2504,7 +2526,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
             f"worker(s) fleet-wide. (Recommendation only — I do not reap.)"
         )
 
-    def _tap_managers( self, fleet_view, graph, roster, now, active_managers=None, bridge_mtimes=None ):
+    def _tap_managers( self, fleet_view, graph, roster, now, active_managers=None, bridge_mtimes=None, designed_hold_personas=None ):
         """
         Actively TAP each manager-on-duty with their crew's actionable ADVISORY
         summary (DM-push), throttled tap-on-change + min-interval (B2 / D1).
@@ -2524,7 +2546,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
               managers
             - returns the count of manager DMs fired this poll; never raises
         """
-        attention = self._attention_workers( fleet_view, graph, now=now, bridge_mtimes=bridge_mtimes )   # bug bf8c5cbb: bridge-fresh peers count alive
+        attention = self._attention_workers( fleet_view, graph, now=now, bridge_mtimes=bridge_mtimes, designed_hold_personas=designed_hold_personas )   # bug bf8c5cbb: bridge-fresh peers count alive; cec10ef9: designed-hold suppression
         if not attention:
             return 0
 
@@ -2711,6 +2733,73 @@ class ArbiterConsumerJob( AgenticJobBase ):
                 if isinstance( ref, dict ) and ref.get( "kind" ) == "user":
                     return True
         return False
+
+    @staticmethod
+    def _item_is_review_gate_hold( item ):
+        """
+        bug cec10ef9: is a single non-terminal owed item a DESIGNED review-gate hold —
+        a worker legitimately blocked on a PEER operator (reviewer/tester), holding for
+        double-green?
+
+        TRUE iff status=="blocked" AND blocked_by carries ≥1 typed ref
+        {kind: "persona"} (a peer operator). Deliberately NARROW and SEPARATE from
+        _item_is_user_gated (the Rick-gate predicate — kind=="user" / operator gate): a
+        peer review-gate hold is NOT a human gate, and conflating the two would let this
+        suppression reach into the human-domain routing. Left untouched here.
+
+        Ensures:
+            - returns a bool; a non-dict / malformed item / non-"blocked" status / no
+              persona-kind blocked_by ref → False; never raises
+        """
+        if not isinstance( item, dict ):
+            return False
+        if item.get( "status" ) != "blocked":
+            return False
+        for ref in ( item.get( "blocked_by" ) or [ ] ):
+            if isinstance( ref, dict ) and ref.get( "kind" ) == "persona":
+                return True
+        return False
+
+    @staticmethod
+    def _designed_hold_personas( owed_items ):
+        """
+        bug cec10ef9: the personas whose owed work is ENTIRELY a designed review-gate
+        hold, mapped to their operator-blocker keys →
+        { canonical_persona_key : frozenset( canonical operator keys ) }.
+
+        A persona qualifies iff it has ≥1 non-terminal owed item AND EVERY such item is
+        a review-gate hold (_item_is_review_gate_hold). Mirrors the _classify_owed
+        "every owed item" idiom: a persona with ANY non-hold owed item is EXCLUDED, so a
+        real stall on that other work is never hidden. The operator keys are the union
+        of all persona-kind blocked_by ids across that persona's hold items — the
+        announce path (_attention_workers) checks THEIR liveness before suppressing, so
+        a dead operator ⇒ real stall ⇒ keep rostering. A hold item carrying no operator
+        id contributes no key; a persona with ONLY id-less holds is omitted (no operator
+        to liveness-check → fail-safe roster).
+
+        FAIL-SAFE: owed_items None (store read failed / seam unwired) or empty → {} (no
+        suppression = today's behavior, the observer invariant — never manufacture
+        suppression from a failed read).
+
+        Ensures:
+            - returns { canonical_persona_key : frozenset( canonical operator keys ) }
+              for every all-holds persona with ≥1 known operator; {} when owed_items is
+              falsy or no persona qualifies; never raises
+        """
+        out = { }
+        for persona, items in ( owed_items or { } ).items():
+            if not items:
+                continue
+            if not all( ArbiterConsumerJob._item_is_review_gate_hold( it ) for it in items ):
+                continue
+            operators = set()
+            for it in items:
+                for ref in ( it.get( "blocked_by" ) or [ ] ):
+                    if isinstance( ref, dict ) and ref.get( "kind" ) == "persona" and ref.get( "id" ):
+                        operators.add( canonical_persona_key( str( ref[ "id" ] ) ) )
+            if operators:
+                out[ canonical_persona_key( str( persona ) ) ] = frozenset( operators )
+        return out
 
     def _read_owed( self, personas ):
         """
