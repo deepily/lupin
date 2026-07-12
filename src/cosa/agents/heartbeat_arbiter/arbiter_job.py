@@ -1295,7 +1295,13 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # #6 roster broadcast DROPPED (Part-6 cut) — the fleet roster is PULL-state,
         # served by /state via the snapshot below; no per-tick commons post.
         designed_holds = self._designed_hold_personas( owed_items )  # cec10ef9: store-backed review-gate-hold suppression (reuses the per-poll owed read @ :1236)
-        taps_fired    = self._tap_managers( fleet_view, graph, roster, now, active_managers, bridge_mtimes=manager_bridge_mtimes, designed_hold_personas=designed_holds )  # #7 / #8 (bug bf8c5cbb: bridge-fresh peers count alive in the blocked-roster; cec10ef9 designed-hold suppression)
+        # bug 1ff7be20: the blocked-edge ROSTER leg gets the same store corroboration the
+        # PING leg already has (d44b7068 @ :1285) — the SAME per-poll store wait-graph, no
+        # re-query. owed_items None ⇒ the read FAILED/is unwired ⇒ backing UNKNOWN ⇒ pass
+        # None ⇒ NO filtering (FAIL-SAFE to ROSTER: a store outage never silences a real
+        # block). Mirrors ping_edges' fail-safe branch exactly.
+        tap_store_edges = None if owed_items is None else store_edges
+        taps_fired    = self._tap_managers( fleet_view, graph, roster, now, active_managers, bridge_mtimes=manager_bridge_mtimes, designed_hold_personas=designed_holds, store_edges=tap_store_edges )  # #7 / #8 (bug bf8c5cbb: bridge-fresh peers count alive in the blocked-roster; cec10ef9 designed-hold suppression; 1ff7be20 store-corroborated blocked-edge roster)
         managers_down = self._check_manager_acks( now, who_rows, fleet_view, active_managers, owed_class=owed_class, count_dm=count_dm, owed_items=owed_items, store_read_degraded=store_degraded )  # #9 (L1 store-aware, 5-signal ACK; owed_items → de3c5b87/33949e83 diagnostics; store gate)
         decisions     = self._check_decision_needed( now )          # #10 Rick (+owning mgr if known)
         stalled       = self._check_fleet_stall( fleet_view, now, active_managers, owed_class=owed_class )  # #11 (L1 store-aware)
@@ -2324,7 +2330,8 @@ class ArbiterConsumerJob( AgenticJobBase ):
 
     # ── v2.2 B2: active manager-tap (DM-push, per-group, throttled) ─────────────
 
-    def _attention_workers( self, fleet_view, graph, now=None, bridge_mtimes=None, designed_hold_personas=None ):
+    def _attention_workers( self, fleet_view, graph, now=None, bridge_mtimes=None, designed_hold_personas=None,
+                            store_edges=None ):
         """
         The workers needing a manager's attention: STUCK sessions ∪ holders
         blocked on a peer (the §4 blocked-edge holders).
@@ -2354,11 +2361,43 @@ class ArbiterConsumerJob( AgenticJobBase ):
         dead/unknown blocker). Fail-safe: an awaited peer absent from the fleet
         is treated as NOT alive → the holder is kept (never hide a live block).
 
+        STORE-CORROBORATED BLOCKED-EDGE ROSTER (bug 1ff7be20, 2026-07-12): the
+        blocked-edge leg above trusted the derived `holding_on: peer:X` edge with NO
+        store check — and that edge is minted straight off the session's most-recent
+        heartbeat `awaiting` field (fleet_data_model), which is STICKY: it survives on
+        the view row until a later activity record overwrites it, so an ACTIVE worker
+        can carry a hours-stale wait (bridge freshness does NOT age it out). Live at
+        00:28:48 EDT: maria's record still read `awaiting: "peer:sam-and-reviewers"`
+        (a free-form label naming NO fleet persona) with `work_owed: False`; the absent
+        "peer" is NOT alive, so the dead-peer fail-safe above KEPT her → a false
+        "Blocked: maria" advisory to her manager while the store held ZERO non-terminal
+        rows for her (3rd such FP, 2 personas, this one on fully-patched code).
+        The fix closes an ASYMMETRY rather than adding a new idea: the sibling PING leg
+        is ALREADY store-corroborated (edge_is_store_backed / build_store_wait_edges,
+        bug d44b7068) and on that very poll fired ZERO pings off the SAME edge
+        (arbiter_poll_activity: edges=1, pings_fired=0, taps_fired=1). The roster leg now
+        consults the SAME per-poll authoritative store wait-graph: an edge with no store
+        `blocked_by` backing does not roster its holder.
+        FAIL-SAFE-to-ROSTER in every uncertain direction: store_edges None (read
+        failed / seam unwired ⇒ backing UNKNOWN) → NO filtering = today's behavior; a
+        deadlock-cycle member → always kept (mutual stall stays load-bearing); personas
+        canonicalized on both sides so a spelling difference never fakes "unbacked".
+        SCOPE FENCE: the `stuck` leg is UNTOUCHED — a stuck session is rostered on its
+        own axis (the activity-derived stuck-episode flag), a DISTINCT root; gating it
+        on store rows would hide a genuinely wedged worker.
+
+        Requires:
+            - store_edges is build_store_wait_edges output { canonical_holder:
+              set(canonical_awaited) } from THIS poll's authoritative owed read, or
+              None when that read FAILED / is unwired (backing UNKNOWN)
+
         Ensures:
             - returns a list of ALIVE view dicts: every stuck session, plus every
               blocked-edge holder whose awaited peer is NOT alive OR that sits in
               a deadlock cycle; reaped/offline views and holders waiting only on a
-              live peer are excluded; never raises
+              live peer are excluded; a blocked-edge holder whose edge is NOT
+              store-backed (when store_edges is an authoritative read) is excluded;
+              never raises
         """
         holders        = set( graph[ "edges" ].keys() )
         alive_personas = { v.get( "persona" ) for v in fleet_view.values()
@@ -2419,6 +2458,15 @@ class ArbiterConsumerJob( AgenticJobBase ):
             # deadlock cycle, OR its awaited peer is not alive. A wait on a LIVE
             # peer is a legit in-flight dependency → EXCLUDE (bug bbce7e2f).
             if persona in cycle_personas or graph[ "edges" ].get( persona ) not in alive_personas:
+                # bug 1ff7be20: STORE-CORROBORATION of the blocked-edge roster — the
+                # sibling of the ping leg's d44b7068 gate (:1285). A cycle member is
+                # exempt (mutual stall stays load-bearing); store_edges None ⇒ backing
+                # UNKNOWN ⇒ no filtering (FAIL-SAFE to ROSTER).
+                awaited = graph[ "edges" ].get( persona )
+                if ( store_edges is not None and persona not in cycle_personas
+                     and not edge_is_store_backed( persona, awaited, store_edges ) ):
+                    self._log( "arbiter_unbacked_edge_suppressed", persona=persona, awaited=awaited )
+                    continue
                 out.append( view )
         return out
 
@@ -2526,7 +2574,8 @@ class ArbiterConsumerJob( AgenticJobBase ):
             f"worker(s) fleet-wide. (Recommendation only — I do not reap.)"
         )
 
-    def _tap_managers( self, fleet_view, graph, roster, now, active_managers=None, bridge_mtimes=None, designed_hold_personas=None ):
+    def _tap_managers( self, fleet_view, graph, roster, now, active_managers=None, bridge_mtimes=None, designed_hold_personas=None,
+                       store_edges=None ):
         """
         Actively TAP each manager-on-duty with their crew's actionable ADVISORY
         summary (DM-push), throttled tap-on-change + min-interval (B2 / D1).
@@ -2546,7 +2595,8 @@ class ArbiterConsumerJob( AgenticJobBase ):
               managers
             - returns the count of manager DMs fired this poll; never raises
         """
-        attention = self._attention_workers( fleet_view, graph, now=now, bridge_mtimes=bridge_mtimes, designed_hold_personas=designed_hold_personas )   # bug bf8c5cbb: bridge-fresh peers count alive; cec10ef9: designed-hold suppression
+        attention = self._attention_workers( fleet_view, graph, now=now, bridge_mtimes=bridge_mtimes, designed_hold_personas=designed_hold_personas,
+                                             store_edges=store_edges )   # bug bf8c5cbb: bridge-fresh peers count alive; cec10ef9: designed-hold suppression; 1ff7be20: store-corroborated blocked-edge roster
         if not attention:
             return 0
 
