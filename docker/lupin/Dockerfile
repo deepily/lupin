@@ -31,6 +31,46 @@
 # ============================================================================
 
 # ============================================================================
+# CODE DELIVERY — BAKE_CODE build arg (added 2026-07-12, Rick's voice ruling)
+#
+# DOCTRINE: containers shipped to TESTING carry NO application code. The image
+# is dependencies + runtime environment ONLY; the code a testing container runs
+# is a bind-mounted static snapshot of a committed ref, materialized at deploy
+# time and refreshable by re-materializing + restart — never by an image rebuild.
+# "Not shadowed — ABSENT." Production is explicitly OUT OF SCOPE (postponed).
+# Plan of record: src/rnd/2026.07.12-gcp-bind-mount-revert-plan.md §3b + §4b.
+#
+#   BAKE_CODE=off  (DEFAULT) → codeless image. /var/lupin/src is an EMPTY
+#                              mountpoint. Deps venv, HF models, playwright,
+#                              CLI tooling all present. Requires a ./src bind
+#                              mount to run — see FAIL-LOUD below.
+#   BAKE_CODE=on             → legacy baked tree (the pre-2026-07-12 layout),
+#                              preserved for the postponed production decision.
+#                              Build with: docker build --build-arg BAKE_CODE=on
+#
+# Docker has no conditional COPY, so the flag is implemented as a FROM-selector:
+# two variant stages over a shared `runtime-base`, and `FROM code-${BAKE_CODE}`
+# picks one. BuildKit prunes the unselected stage, so a codeless build also skips
+# the multiplexer-builder stage entirely (nothing references it).
+#
+# FAIL-LOUD (intended contract, not a defect): with BAKE_CODE=off and no ./src
+# bind mount, CMD runs a script that does not exist → bash exits 127 immediately
+# ("No such file or directory"). A missing or mis-pointed mount is now a loud,
+# instant failure instead of a silent run against stale baked code — the exact
+# mount-shadow trap this ruling exists to close. The mount is MANDATORY.
+#
+# MOUNT SOURCES MUST CARRY THE MUX BUNDLE: with no baked code, the cross-stage
+# COPY of the multiplexer dist/ (see the code-on stage) does not run, so the
+# bind-mount SOURCE must already contain src/lupin_app/static/dist/multiplexer/.
+# dist/ is BOTH .gitignore'd and .dockerignore'd, so a `git archive`-based deploy
+# will NOT carry it — the deploy step must run src/scripts/build-multiplexer.sh
+# against the mount source (or rsync a locally-built dist/ alongside the archive)
+# or the multiplexer 404s on boot. Local dev/test are unaffected: they mount the
+# live working tree, which holds a built dist/.
+# ============================================================================
+ARG BAKE_CODE=off
+
+# ============================================================================
 # STAGE 0 — multiplexer bundle builder (Node + esbuild → dist/)
 #
 # Produces src/lupin_app/static/dist/multiplexer/{boot.js, boot.<hash>.js,
@@ -62,7 +102,10 @@ COPY src/lupin_app/static/js/multiplexer ./src/lupin_app/static/js/multiplexer
 RUN npm run build
 
 # ============================================================================
-FROM nvidia/cuda:12.4.1-base-ubuntu22.04
+# RUNTIME BASE — dependencies + runtime environment ONLY. No application code
+# is ever added in this stage; both BAKE_CODE variants build on top of it.
+# ============================================================================
+FROM nvidia/cuda:12.4.1-base-ubuntu22.04 AS runtime-base
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=UTC
@@ -309,11 +352,26 @@ ENV LUPIN_ROOT=/var/lupin
 # → app wouldn't boot. Baked default must be self-consistent (boots with no crutch).
 ENV LUPIN_CONFIG_MGR_CLI_ARGS="config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development"
 
-# ----------------------------------------------------------------------------
-# Application source code (most-volatile layers last for cache reuse).
-# All COPYs use --chown=rruiz:rruiz so files land with the correct ownership
-# at write time — no later chown layer needed.
-# ----------------------------------------------------------------------------
+# ============================================================================
+# CODE VARIANT: code-off (DEFAULT) — the CODELESS image.
+#
+# Deliberately empty: NO application source is added. /var/lupin/src exists only
+# as the empty mountpoint the final stage's WORKDIR creates, to be filled by the
+# ./src bind mount at (re)spin time. Without that mount the container fails loud
+# at CMD (exit 127) — the intended contract. See the BAKE_CODE header block.
+# ============================================================================
+FROM runtime-base AS code-off
+
+# ============================================================================
+# CODE VARIANT: code-on — the LEGACY BAKED tree (pre-2026-07-12 layout).
+#
+# Preserved verbatim behind the build arg for the postponed production decision
+# (plan doc §6). Application source code, most-volatile layers last for cache
+# reuse. All COPYs use --chown=rruiz:rruiz so files land with the correct
+# ownership at write time — no later chown layer needed.
+# ============================================================================
+FROM runtime-base AS code-on
+
 COPY --chown=rruiz:rruiz src/cosa         /var/lupin/src/cosa
 COPY --chown=rruiz:rruiz src/lupin_app  /var/lupin/src/lupin_app
 # Multiplexer production bundle — layered on top of src/lupin_app from the
@@ -350,6 +408,16 @@ COPY --chown=rruiz:rruiz src/conf/long-term-memory/*.db    /var/lupin/src/conf/l
 # (./src in docker-compose.yml) or GCS-FUSE in production (Tier 3).
 # Was 41 GB of dead weight in lupin:0.9.0 (overlaid by the same bind-mount anyway).
 
+# ============================================================================
+# FINAL — selects the code variant via the BAKE_CODE build arg (default: off).
+# Everything below is code-INDEPENDENT: container tooling config, the agy CLI,
+# the workdir/mountpoint, and the entrypoint. Both variants share it verbatim.
+# ============================================================================
+FROM code-${BAKE_CODE} AS final
+
+# Container tooling config for the in-container Claude Code CLI. NOT application
+# source — a sanctioned residual under the codeless doctrine (it configures the
+# tool, it is not code the app runs).
 COPY --chown=rruiz:rruiz docker/lupin/claude-config/settings.json /home/rruiz/.claude/settings.json
 COPY --chown=rruiz:rruiz docker/lupin/claude-config/mcp.json      /home/rruiz/.claude/.mcp.json
 
@@ -367,6 +435,13 @@ USER root
 COPY --chmod=0755 docker/lupin/bin/agy /usr/local/bin/agy
 USER rruiz
 
+# Creates /var/lupin/src when BAKE_CODE=off — the EMPTY mountpoint the ./src
+# bind mount lands on. (Deliberately not added to the root-block mkdir: that
+# layer sits above ~31 GB of deps/model layers and touching it would invalidate
+# all of them for zero functional gain.)
 WORKDIR /var/lupin/src
 
+# FAIL-LOUD: under BAKE_CODE=off with no ./src mount, this script does not exist
+# → bash exits 127 immediately. That is the contract, not a bug: a missing or
+# mis-pointed mount must fail instantly rather than silently run stale code.
 CMD [ "/bin/bash", "/var/lupin/src/scripts/run-fastapi-lupin.sh" ]
