@@ -1114,15 +1114,60 @@ if __name__ == "__main__":
     # long-term-memory store), causing repeated 12-18s server restarts whenever
     # any of those files was touched — surfacing in the browser as
     # ERR_CONNECTION_REFUSED for 30s-2min at a time.
+    #
+    # Bug 5b654a15 (2026-07-13): the whitelist above was NOT sufficient. `cosa` was
+    # watched wholesale, and `src/cosa/tests/` lives INSIDE it — 476 test files, half
+    # the watched tree. So every test-file write tripped StatReload: writing a pure
+    # test file, touching nothing the server imports at runtime, took the server down
+    # for the entire fleet.
+    #
+    # Why not `reload_excludes`? Because it is INERT here. Verbatim from
+    # uvicorn/supervisors/statreload.py:
+    #
+    #     if config.reload_excludes or config.reload_includes:
+    #         logger.warning("--reload-include and --reload-exclude have no effect
+    #                         unless watchfiles is installed.")
+    #
+    # watchfiles is NOT in this image, so uvicorn falls back to StatReload, which
+    # rglobs every reload_dir and ignores the exclude list entirely. Passing excludes
+    # here would look like a fix, log a warning nobody reads, and change nothing.
+    #
+    # The mechanism that DOES work under StatReload is narrowing the watch set: name
+    # cosa's runtime subpackages explicitly and leave tests/ + rnd/ + docs/ + history/
+    # out of it. (Installing watchfiles and using reload_excludes is the tidier
+    # long-term option — noted in the R&D doc as a follow-on, deliberately not bundled
+    # into a P0 hotfix that would require an image rebuild.)
+    #
+    # Known, accepted consequence: `cosa/__init__.py` sits at the cosa root and is no
+    # longer watched. It is near-static; editing it needs a container restart.
     reload_kwargs = {}
     if not is_production_or_test:
-        reload_kwargs[ "reload" ] = True
-        reload_kwargs[ "reload_dirs" ] = [ "lupin_app", "cosa", "lib", "lupin_cli", "lupin_mcp" ]
+        reload_kwargs[ "reload" ]      = True
+        reload_kwargs[ "reload_dirs" ] = [
+            "lupin_app", "lib", "lupin_cli", "lupin_mcp",
+            # cosa RUNTIME subpackages only — NOT cosa/tests, cosa/rnd, cosa/docs, cosa/history
+            "cosa/agents", "cosa/config", "cosa/crud_for_dataframes", "cosa/io",
+            "cosa/memory", "cosa/orchestration", "cosa/repo", "cosa/rest",
+            "cosa/tools", "cosa/training", "cosa/utils",
+        ]
+
     uvicorn.run(
         "lupin_app.main:app",
         host="0.0.0.0",
         port=port,
         workers=1,  # Single worker required for in-memory notification state (pending_responses dict)
         log_level="info",
+        # Bug 5b654a15 — THE fleet-outage fix. On reload (or any shutdown) uvicorn waits
+        # for open connections to drain. Lupin holds long-lived WebSockets (the browser UI
+        # plus every `cc-listener-*` session), which NEVER drain on their own — so uvicorn
+        # blocked forever at "Waiting for connections to close", the new worker never
+        # booted, and the server stayed down for the WHOLE FLEET until a human ran
+        # `docker restart`. On 2026-07-13 that was 4 manual restarts in ~25 minutes.
+        #
+        # This bounds the drain wait: after 5s uvicorn force-closes the stragglers and
+        # completes the restart. It converts an unbounded hang into a blip. Clients
+        # reconnect on their own. Applies to reload AND to ordinary shutdown, so it is
+        # correct even once the excludes above make reloads rare.
+        timeout_graceful_shutdown=5,
         **reload_kwargs
     )
