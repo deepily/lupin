@@ -2397,6 +2397,8 @@ class ArbiterConsumerJob( AgenticJobBase ):
               a deadlock cycle; reaped/offline views and holders waiting only on a
               live peer are excluded; a blocked-edge holder whose edge is NOT
               store-backed (when store_edges is an authoritative read) is excluded;
+              a STUCK session whose session-bridge is FRESH (demonstrably taking
+              turns — bug 3287ee1e) is excluded unless it sits in a deadlock cycle;
               never raises
         """
         holders        = set( graph[ "edges" ].keys() )
@@ -2450,6 +2452,25 @@ class ArbiterConsumerJob( AgenticJobBase ):
                                operators=sorted( operators & alive_keys ) )
                     continue
             if view.get( "stuck" ):
+                # bug 3287ee1e: the WORKER-subject stuck advisory gets the SAME bridge-fresh
+                # veto the POKE leg (92c7ab1d, :4005) and the MANAGER-subject advisory leg
+                # (e5e33795, :2627) already have — worker subjects were simply never covered.
+                # Live 2026-07-11 21:12:20 EDT, ONE poll emitted BOTH:
+                #   arbiter_stuck_bridge_veto persona=sam bridge_age_s=8.6   ("don't poke — alive")
+                #   tap → manager: "1 stuck/dead"                            ("sam is STUCK")
+                # i.e. the arbiter refused to poke sam BECAUSE he was demonstrably taking turns,
+                # then told his manager he was wedged anyway. `_session_bridge_fresh` only ever
+                # suppresses on POSITIVE liveness evidence, so this is FAIL-SAFE to ROSTER:
+                # unwired seam / absent persona / STALE or future-skewed bridge / now=None →
+                # no veto → still announced. A genuinely wedged session stops emitting hook
+                # stamps (at cap the self-poke nudge halts), so its bridge goes stale and the
+                # true positive is preserved. A deadlock-cycle member is exempt (mutual stall
+                # stays load-bearing). NOTE the `stuck` FLAG itself is untouched here — its
+                # cap-consumption semantics are a SHARED signal (render/poke/snapshot/UI) and
+                # are tracked separately (Mr. Radio's board, split from this bug).
+                if ( persona and now is not None and persona not in cycle_personas
+                     and self._session_bridge_fresh( persona, now, bridge_mtimes ) ):
+                    continue
                 out.append( view )                        # a stuck session always needs attention
                 continue
             if persona not in holders:
@@ -2617,15 +2638,16 @@ class ArbiterConsumerJob( AgenticJobBase ):
         groups = { }                                 # manager_persona -> [view, ...]
         for view in attention:
             if self._subject_is_manager( view ):
-                # bug e5e33795: a manager-SUBJECT whose own session-bridge is FRESH is
-                # demonstrably alive (took a real turn within the window) — event-stale
-                # but NOT wedged. Mirror the _auto_poke veto (arbiter_job.py:3801) on
-                # this parallel advisory path: drop it BEFORE routing the Rick-only
-                # stuck advisory. `_session_bridge_fresh` emits the arbiter_stuck_bridge_veto
-                # journal event on suppress and is fail-safe (bridge_mtimes None/unwired →
-                # False → today's behavior; suppress ONLY on positive fresh-bridge evidence).
-                if self._session_bridge_fresh( view.get( "persona" ), now, bridge_mtimes ):
-                    continue
+                # bug e5e33795's manager-SUBJECT bridge-fresh veto USED to sit here. It is
+                # now SUBSUMED, byte-for-byte in outcome, by the same veto applied ONE LAYER
+                # UP in `_attention_workers`' stuck leg (bug 3287ee1e) — which covers EVERY
+                # subject, manager and worker alike, so a bridge-fresh stuck session never
+                # reaches this loop at all. Keeping a second copy here would be two owners
+                # for one rule. The e5e33795 SEMANTICS are unchanged (same veto, same
+                # arbiter_stuck_bridge_veto journal event, same fail-safe); only its WORKER-
+                # exclusion is retired — that exclusion WAS the 3287ee1e defect, and it left
+                # the advisory path disagreeing with the POKE path, which has always vetoed
+                # every role (see _auto_poke's `pokeable` filter).
                 subject = view.get( "persona" ) or view.get( "session_id" )
                 tap_key = "stuck-mgr:" + str( subject )
                 sig     = ( "stuck_manager", subject )

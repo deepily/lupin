@@ -171,16 +171,41 @@ def test_stuck_manager_advisory_future_bridge_does_not_veto():
     assert fired == 1 and len( _advisory( escal ) ) == 1
 
 
-def test_stuck_worker_advisory_never_vetoed_by_bridge():
-    """SCOPE PIN: the bridge-veto is a MANAGER-SUBJECT guard only. A stuck WORKER
-    (not a declared manager) is grouped under its owning manager (case-7 tap) and is
-    NEVER touched by the veto, even with a fresh bridge."""
+def test_stuck_worker_advisory_IS_vetoed_by_fresh_bridge():
+    """SCOPE PIN — INVERTED by bug 3287ee1e (2026-07-12), superseding e5e33795's
+    manager-subject-only scope.
+
+    e5e33795 pinned the bridge-veto as a MANAGER-SUBJECT guard only, leaving a stuck
+    WORKER announced even with a fresh bridge. That exclusion WAS the defect: live on
+    2026-07-11 at 21:12:20 EDT a single poll emitted BOTH `arbiter_stuck_bridge_veto
+    persona=sam bridge_age_s=8.6` (the POKE leg refusing to poke sam — demonstrably
+    alive) AND a "1 stuck/dead" tap naming him to his manager. The advisory path
+    disagreed with the poke path, which has ALWAYS vetoed every role.
+
+    The veto now lives ONE layer up in `_attention_workers` and covers every subject:
+    a stuck WORKER with a fresh bridge is demonstrably taking turns ⇒ NOT wedged ⇒ no
+    advisory. Fail-safe is unchanged — a stale/absent/future bridge still rosters."""
     gw = _GW()
     job = _job( gw, declared_managers=[ "Tiberius", "Mr. Radio" ],
                 resolve_manager_fn=lambda sid, declared_manager=None: { "manager_persona": "Mr. Radio" } )
     fleet  = _live_stuck( sid="rio", persona="Rio" )               # a worker
     graph  = { "edges": { }, "cycles": [ ] }
-    bridge = { _bridge_key( "Rio" ): NOW.timestamp() - 15 }        # fresh, but irrelevant for a worker
+    bridge = { _bridge_key( "Rio" ): NOW.timestamp() - 15 }        # FRESH → demonstrably alive
+    fired  = job._tap_managers( fleet, graph, roster=[ ], now=NOW,
+                                active_managers=[ "Mr. Radio" ], bridge_mtimes=bridge )
+    assert fired == 0 and gw.sent == [ ]
+
+
+def test_stuck_worker_advisory_still_fires_on_STALE_bridge():
+    """FAIL-SAFE companion to the inverted pin: the true positive is preserved — a stuck
+    WORKER whose bridge is STALE (no recent turns = genuinely wedged) is STILL grouped
+    under its owning manager and announced (case-7 tap)."""
+    gw = _GW()
+    job = _job( gw, declared_managers=[ "Tiberius", "Mr. Radio" ],
+                resolve_manager_fn=lambda sid, declared_manager=None: { "manager_persona": "Mr. Radio" } )
+    fleet  = _live_stuck( sid="rio", persona="Rio" )
+    graph  = { "edges": { }, "cycles": [ ] }
+    bridge = { _bridge_key( "Rio" ): NOW.timestamp() - ( job.manager_stale_poke_threshold_seconds + 60 ) }
     fired  = job._tap_managers( fleet, graph, roster=[ ], now=NOW,
                                 active_managers=[ "Mr. Radio" ], bridge_mtimes=bridge )
     assert fired == 1 and [ s[ 0 ] for s in gw.sent ] == [ "Mr. Radio" ]
