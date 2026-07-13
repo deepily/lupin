@@ -313,7 +313,8 @@ class TestMain( unittest.TestCase ):
         import argparse
         ns = argparse.Namespace(
             repo_path=_EXTERNAL_REPO, repo_name=None, today=False, since=None,
-            branch=None, until=None, base="main", include_merges=False, author=None,
+            branch=None, until=None, base="main", all_branches=False,
+            include_merges=False, author=None,
             output="bogus", save_output=None, plot=False, plot_output=None,
             verbose=False, debug=False,
         )
@@ -323,6 +324,55 @@ class TestMain( unittest.TestCase ):
             rc, out, err = _capture( rgld.main, [] )
         self.assertEqual( rc, 1 )
         self.assertIn( "Unknown --output", err )
+
+    def test_coverage_mismatch_warning_is_surfaced_on_stderr( self ):
+        """
+        The guard is worthless if its warning is swallowed. When the analyzer reports an
+        unreconciled window, the CLI must print it — LOUDLY, to stderr. bbff93a3 survived
+        for weeks precisely because nothing complained about a silent coverage gap.
+        """
+        result = _result()
+        result[ "coverage" ] = {
+            "repo":       "cosa",
+            "reconciled": False,
+            "expected":   9,
+            "counted":    7,
+            "uncounted":  [ "aaaa1111", "bbbb2222" ],
+            "unexpected": [],
+            "warning":    "⚠️  COVERAGE MISMATCH — cosa: git reports 9 commit(s); we counted 7.",
+        }
+        self.analyzer.analyze.return_value = result
+
+        with patch( "cosa.repo.run_git_loc_delta.format_console", return_value="x" ):
+            rc, out, err = _capture( rgld.main, [ "--repo-path", _EXTERNAL_REPO ] )
+        self.assertEqual( rc, 0 )
+        self.assertIn( "COVERAGE MISMATCH", err )
+
+    def test_reconciled_coverage_emits_no_warning( self ):
+        result = _result()
+        result[ "coverage" ] = {
+            "repo": "cosa", "reconciled": True, "expected": 7, "counted": 7,
+            "uncounted": [], "unexpected": [], "warning": None,
+        }
+        self.analyzer.analyze.return_value = result
+
+        with patch( "cosa.repo.run_git_loc_delta.format_console", return_value="x" ):
+            rc, out, err = _capture( rgld.main, [ "--repo-path", _EXTERNAL_REPO ] )
+        self.assertEqual( rc, 0 )
+        self.assertNotIn( "COVERAGE MISMATCH", err )
+
+    def test_all_branches_rejected_in_branch_mode( self ):
+        """
+        A branch delta (base..branch) already names its endpoints — widening the walk
+        to every local ref would answer a different question. Guard added 2026-07-13
+        with bug bbff93a3: keeping the two questions ("how far ahead is this branch?"
+        vs "what work happened in window W?") from silently drifting back together.
+        """
+        rc, out, err = _capture(
+            rgld.main, [ "--branch", "wip", "--all-branches", "--repo-path", _EXTERNAL_REPO ]
+        )
+        self.assertEqual( rc, 1 )
+        self.assertIn( "not valid with --branch", err )
 
     def test_plot_failure_propagates_exit_code( self ):
         with patch( "cosa.repo.run_git_loc_delta.format_console", return_value="x" ), \

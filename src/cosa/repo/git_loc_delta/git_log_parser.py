@@ -46,6 +46,7 @@ class GitLogParser:
         since:          Optional[str] = None,
         until:          Optional[str] = None,
         rev_range:      Optional[str] = None,
+        all_branches:   bool          = False,
         include_merges: bool          = False,
         author:         Optional[str] = None,
         timeout:        int           = 60,
@@ -59,16 +60,24 @@ class GitLogParser:
             - repo_path is a string pointing at a directory (validated by git)
             - since / until are ISO date strings or None
             - rev_range is a git rev-spec like "main..HEAD" or None
+            - all_branches and rev_range are mutually exclusive in practice: a
+              rev-range already names its endpoints, so `--branches` alongside it
+              would widen the walk past the range the caller asked for. The
+              analyzer never sets both; this class does not police it.
             - timeout is a positive integer
 
         Ensures:
             - Parser ready to call iter_changes()
             - Date range and rev_range can coexist; both are passed to git log
+            - all_branches=True walks the union of ALL local branch refs
+              (--branches), de-duplicated by git's DAG walk — each commit is
+              emitted exactly once even when reachable from several branches
         """
         self.repo_path      = repo_path
         self.since          = since
         self.until          = until
         self.rev_range      = rev_range
+        self.all_branches   = all_branches
         self.include_merges = include_merges
         self.author         = author
         self.timeout        = timeout
@@ -82,19 +91,30 @@ class GitLogParser:
         Ensures:
             - Returns a list of command tokens ready for subprocess.run
             - Always uses --date=short for stable ISO date parsing
-            - Custom --pretty marker COMMIT|<sha>|<ad>|<aE>| distinguishes commit rows
+            - Custom --pretty marker COMMIT|<sha>|<cd>|<aE>| distinguishes commit rows
+            - all_branches appends `--branches` (union of local branch refs)
+
+        Date basis (load-bearing — 2026-07-13, bug 37a8beeb):
+            The date field is `%cd` (COMMITTER date), NOT `%ad` (author date),
+            because `git log --since/--until` filters on the COMMITTER date. Using
+            author date to label a row that a committer-date filter selected lets a
+            rebased or cherry-picked commit land in a day-bucket outside the very
+            window that selected it — and would make the coverage guard false-warn.
+            The filter basis and the bucket basis MUST be the same field.
         """
         cmd = [
             "git", "log",
             "--numstat",
             "--date=short",
-            "--pretty=format:COMMIT|%H|%ad|%aE",
+            "--pretty=format:COMMIT|%H|%cd|%aE",
         ]
         if not self.include_merges:
             cmd.append( "--no-merges" )
         if self.since: cmd.append( f"--since={self.since}" )
         if self.until: cmd.append( f"--until={self.until}" )
         if self.author: cmd.append( f"--author={self.author}" )
+        if self.all_branches:
+            cmd.append( "--branches" )
         if self.rev_range:
             cmd.append( self.rev_range )
         return cmd

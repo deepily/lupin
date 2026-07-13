@@ -59,13 +59,34 @@ class TestBuildCommand:
         assert cmd[ :2 ] == [ "git", "log" ]
         assert "--numstat" in cmd
         assert "--date=short" in cmd
-        assert "--pretty=format:COMMIT|%H|%ad|%aE" in cmd
+        assert "--pretty=format:COMMIT|%H|%cd|%aE" in cmd
         assert "--no-merges" in cmd          # include_merges defaults False
+
+    def test_date_basis_is_committer_date_not_author_date( self ):
+        """
+        Load-bearing (2026-07-13, bug 37a8beeb). `git log --since/--until` filters on the
+        COMMITTER date, so the row label must be `%cd` — not `%ad`. Labelling with author
+        date lets a rebased or cherry-picked commit land in a day-bucket outside the very
+        window that selected it, and makes the coverage guard false-warn. The filter basis
+        and the bucket basis MUST be the same field.
+        """
+        cmd = GitLogParser( since="2026-07-08", until="2026-07-14" )._build_command()
+        assert "--pretty=format:COMMIT|%H|%cd|%aE" in cmd
+        assert "%ad" not in " ".join( cmd )
 
     def test_include_merges_drops_no_merges( self ):
         """Ensures: include_merges=True omits the --no-merges flag."""
         cmd = GitLogParser( include_merges=True )._build_command()
         assert "--no-merges" not in cmd
+
+    def test_all_branches_appends_branches_flag( self ):
+        """
+        all_branches=True walks the union of ALL local branch refs (bug bbff93a3).
+        Git de-dupes the DAG walk, so a commit reachable from several branches is
+        emitted exactly once.
+        """
+        assert "--branches" not in GitLogParser()._build_command()
+        assert "--branches" in     GitLogParser( all_branches=True )._build_command()
 
     def test_since_until_author_and_rev_range_appended( self ):
         """Ensures: since/until/author/rev_range each contribute their token when set."""

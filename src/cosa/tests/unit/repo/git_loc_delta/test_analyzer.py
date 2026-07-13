@@ -40,6 +40,20 @@ class TestInit:
         with pytest.raises( ValueError ):
             GitLogLocDeltaAnalyzer( mode="weekly" )
 
+    def test_all_branches_rejected_in_branch_mode( self ):
+        """
+        The two questions must not silently drift back together (bug bbff93a3):
+        "how far ahead is this branch?" (base..branch) vs "what work happened in
+        window W?" (date-windowed + all_branches). A branch delta already names its
+        endpoints, so widening the walk to every local ref answers neither cleanly.
+        """
+        with pytest.raises( ValueError, match="not valid in 'branch' mode" ):
+            GitLogLocDeltaAnalyzer( mode="branch", branch="wip", all_branches=True )
+
+    def test_all_branches_allowed_in_window_modes( self ):
+        assert GitLogLocDeltaAnalyzer( mode="explicit", since="2026-07-08", all_branches=True ).all_branches
+        assert GitLogLocDeltaAnalyzer( mode="today", all_branches=True ).all_branches
+
     def test_valid_construction_captures_flags( self ):
         a = GitLogLocDeltaAnalyzer(
             repo_path=_EXTERNAL, mode="branch", branch="wip", base="develop",
@@ -136,9 +150,15 @@ class TestAnalyze:
         with ctx:
             result = a.analyze()
         assert set( result.keys() ) == {
-            "since", "until", "branch", "rev_range", "repo_path", "repo_name",
-            "summary", "daily", "by_type",
+            "since", "until", "branch", "rev_range", "all_branches", "repo_path",
+            "repo_name", "summary", "daily", "by_type", "shas",
         }
+        # `shas` (2026-07-13, bug 37a8beeb) is the ONLY honest basis for a commit
+        # count — the per-(date, file_type) buckets overlap and must never be summed.
+        assert result[ "shas" ] == { "sha1", "sha2" }
+        assert result[ "summary" ][ "total_commits" ] == len( result[ "shas" ] )
+        # `coverage` is absent unless reconcile=True (it costs an extra git call).
+        assert "coverage" not in result
         assert result[ "since" ] == "2026-05-16"
         assert result[ "repo_path" ] == _EXTERNAL
         assert result[ "repo_name" ] == "cosa"
