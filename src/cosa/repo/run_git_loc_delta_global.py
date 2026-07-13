@@ -188,6 +188,55 @@ def _is_git_repo( repo_path: str ) -> bool:
     return os.path.exists( os.path.join( repo_path, ".git" ) )
 
 
+def _git_common_dir( repo_path: str, timeout: int = 30 ) -> Optional[str]:
+    """
+    Return the absolute `--git-common-dir` for `repo_path`, or None if git can't say.
+
+    THIS IS THE REPO'S IDENTITY. Two paths that resolve to the same common dir share an
+    object database and a ref namespace — they are the SAME REPOSITORY seen from two
+    places, no matter how different the working directories look.
+
+    Why it matters (bug found 2026-07-13, after the first fix shipped): lupin has **13
+    worktrees**. A worktree's `.git` is a FILE, not a directory, and it shares the parent's
+    objects and refs — so a date-windowed, branch-agnostic walk inside a worktree returns
+    THE PARENT'S COMMITS, in full. Hand the roll-up `lupin` plus one worktree and it
+    reports lupin's work TWICE, under two different names:
+
+        --repos lupin                     -> +11,407 / 40 commits
+        --repos lupin lupin-wt-<lane>     -> +22,814 / 80 commits   (exactly doubled)
+
+    With all 13 worktrees discovered, lupin's LoC would be multiplied by ~14. That is the
+    same silent-confidently-wrong failure this module was rewritten to kill, inverted: I
+    would have traded an under-count for a far worse over-count.
+
+    Deduping on the common dir is a MECHANISM, not a special case. A "`.git` must be a
+    directory" check would also work for worktrees, but it is a rule about one filesystem
+    layout; this is a rule about repository IDENTITY, so it also catches symlinked roots,
+    bind-mounted duplicates, and `--repos . $(pwd)` — every way the same repo can arrive
+    twice under two names.
+
+    Ensures:
+        - Returns an absolute path string, or None if the command fails
+        - Never raises (a failure here degrades to "can't prove aliasing", not a crash)
+    """
+    try:
+        result = subprocess.run(
+            [ "git", "rev-parse", "--path-format=absolute", "--git-common-dir" ],
+            capture_output = True,
+            text           = True,
+            timeout        = timeout,
+            cwd            = repo_path,
+        )
+    except ( subprocess.TimeoutExpired, FileNotFoundError, OSError ):
+        return None
+
+    if result.returncode != 0:
+        return None
+
+    common = result.stdout.strip()
+    return os.path.realpath( common ) if common else None
+
+
 def _has_any_commits( repo_path: str, timeout: int = 30 ) -> bool:
     """
     Return True iff the repo has at least one commit on any ref.
@@ -295,6 +344,11 @@ def _analyze_repos(
 
     repo_names = _resolve_repo_names( repo_paths )
 
+    # Repo IDENTITY -> the first path that claimed it. A second path resolving to the same
+    # git-common-dir is an ALIAS (worktree / symlink / duplicate roster entry), not another
+    # repo, and counting it again multiplies that repo's LoC. See _git_common_dir.
+    seen_identities: Dict[str, str] = {}
+
     for repo_path in repo_paths:
         repo_name = repo_names[ repo_path ]
 
@@ -306,6 +360,21 @@ def _analyze_repos(
                 file = sys.stderr,
             )
             continue
+
+        identity = _git_common_dir( repo_path )
+        if identity is not None and identity in seen_identities:
+            first = seen_identities[ identity ]
+            skipped_repos.append( repo_path )
+            print(
+                f"Warning: {repo_path} is the SAME REPOSITORY as {first} "
+                f"(shared git dir: {identity}) — skipped to avoid DOUBLE-COUNTING its commits. "
+                f"A worktree shares its parent's objects and refs, so analyzing both would "
+                f"report that repo's work twice.",
+                file = sys.stderr,
+            )
+            continue
+        if identity is not None:
+            seen_identities[ identity ] = repo_path
 
         if not _has_any_commits( repo_path ):
             # A fresh `git init` with no commits yet. Legitimate; report it, don't die.

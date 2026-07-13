@@ -413,6 +413,123 @@ class TestFreshRepoWithNoCommits( _GitRepoFixtureMixin, unittest.TestCase ):
         self.assertTrue(  g._has_any_commits( full  ) )
 
 
+class TestRepoIdentityDedup( _GitRepoFixtureMixin, unittest.TestCase ):
+    """
+    A WORKTREE IS NOT A REPO — it is a second view of one.
+
+    Found 2026-07-13 AFTER the first fix shipped, from María's PIP-side discovery work.
+    lupin has 13 worktrees. A worktree's `.git` is a FILE and it shares the parent's object
+    DB and refs, so a date-windowed --branches walk inside one returns THE PARENT'S
+    COMMITS, in full. Probed against the live repo:
+
+        --repos lupin                  -> +11,407 / 40 commits
+        --repos lupin <one worktree>   -> +22,814 / 80 commits   (EXACTLY DOUBLED)
+
+    With all 13 discovered, lupin's LoC multiplies ~14x. I would have traded the original
+    under-count for a far worse over-count — the same silent-confidently-wrong failure,
+    inverted.
+
+    The guard is repo IDENTITY (`git rev-parse --git-common-dir`), not a `.git`-is-a-file
+    check: identity also catches symlinked roots, bind-mounted duplicates, and
+    `--repos . $(pwd)`. A mechanism, not a special case for one filesystem layout.
+    """
+
+    def _repo_with_worktree( self ):
+        repo = self.init_repo( "parent" )
+        self.commit( repo, { "a.py": self.lines( "x", 9 ) }, "the only work" )
+        wt = os.path.join( self.workdir, "parent-wt-lane" )
+        self._git( repo, "worktree", "add", "-q", "-b", "lane", wt )
+        return repo, wt
+
+    def test_worktree_alone_sees_the_parents_commits( self ):
+        """The premise: a worktree is NOT an empty/independent repo."""
+        repo, wt = self._repo_with_worktree()
+        df, commits, *_ = _analyze( [ wt ] )
+        self.assertEqual( g._build_summary( df, commits )[ "total_added" ], 9 )
+
+    def test_parent_plus_worktree_does_not_double_count( self ):
+        repo, wt = self._repo_with_worktree()
+
+        err = io.StringIO()
+        with redirect_stderr( err ):
+            df, commits, cov, empty, skipped = _analyze( [ repo, wt ] )
+        summary = g._build_summary( df, commits )
+
+        self.assertEqual( summary[ "total_added"   ], 9, "DOUBLE-COUNT: worktree counted as a 2nd repo" )
+        self.assertEqual( summary[ "total_commits" ], 1 )
+        self.assertEqual( summary[ "repos" ], [ "parent" ] )
+        self.assertEqual( skipped, [ wt ] )
+        self.assertIn( "SAME REPOSITORY", err.getvalue() )
+
+    def test_many_worktrees_still_count_once( self ):
+        """The real shape: lupin has 13 of them."""
+        repo = self.init_repo( "parent" )
+        self.commit( repo, { "a.py": self.lines( "x", 9 ) }, "the only work" )
+        wts = []
+        for i in range( 5 ):
+            wt = os.path.join( self.workdir, f"parent-wt-{i}" )
+            self._git( repo, "worktree", "add", "-q", "-b", f"lane{i}", wt )
+            wts.append( wt )
+
+        with redirect_stderr( io.StringIO() ):
+            df, commits, cov, empty, skipped = _analyze( [ repo, *wts ] )
+
+        self.assertEqual( g._build_summary( df, commits )[ "total_added" ], 9 )
+        self.assertEqual( len( skipped ), 5 )
+
+    def test_same_repo_passed_twice_counts_once( self ):
+        """Identity dedup is general — it also catches a duplicated roster entry."""
+        repo = self.init_repo( "dup" )
+        self.commit( repo, { "a.py": self.lines( "x", 4 ) }, "work" )
+
+        with redirect_stderr( io.StringIO() ):
+            df, commits, cov, empty, skipped = _analyze( [ repo, repo ] )
+
+        self.assertEqual( g._build_summary( df, commits )[ "total_added" ], 4 )
+        self.assertEqual( skipped, [ repo ] )
+
+    def test_distinct_repos_are_not_deduped( self ):
+        """No false positives: two genuinely separate repos both count."""
+        a = self.init_repo( "a" )
+        b = self.init_repo( "b" )
+        self.commit( a, { "a.py": self.lines( "a", 3 ) }, "a" )
+        self.commit( b, { "b.py": self.lines( "b", 5 ) }, "b" )
+
+        df, commits, cov, empty, skipped = _analyze( [ a, b ] )
+        self.assertEqual( g._build_summary( df, commits )[ "total_added" ], 8 )
+        self.assertEqual( skipped, [] )
+
+    def test_git_common_dir_shared_by_worktree_and_parent( self ):
+        repo, wt = self._repo_with_worktree()
+        self.assertEqual( g._git_common_dir( repo ), g._git_common_dir( wt ) )
+
+    def test_git_common_dir_returns_none_on_non_repo( self ):
+        self.assertIsNone( g._git_common_dir( self.not_a_repo() ) )
+
+    def test_git_common_dir_returns_none_when_git_unavailable( self ):
+        with patch( "subprocess.run", side_effect=FileNotFoundError() ):
+            self.assertIsNone( g._git_common_dir( "/tmp" ) )
+
+    def test_git_common_dir_returns_none_on_timeout( self ):
+        with patch( "subprocess.run", side_effect=subprocess.TimeoutExpired( cmd="git", timeout=1 ) ):
+            self.assertIsNone( g._git_common_dir( "/tmp" ) )
+
+    def test_git_common_dir_returns_none_on_empty_stdout( self ):
+        fake = MagicMock( returncode=0, stdout="  \n", stderr="" )
+        with patch( "subprocess.run", return_value=fake ):
+            self.assertIsNone( g._git_common_dir( "/tmp" ) )
+
+    def test_unresolvable_identity_does_not_block_analysis( self ):
+        """If git can't name the identity, degrade to analyzing — never silently drop a repo."""
+        repo = self.init_repo( "r" )
+        self.commit( repo, { "a.py": self.lines( "x", 6 ) }, "work" )
+
+        with patch.object( g, "_git_common_dir", return_value=None ):
+            df, commits, cov, empty, skipped = _analyze( [ repo ] )
+        self.assertEqual( g._build_summary( df, commits )[ "total_added" ], 6 )
+        self.assertEqual( skipped, [] )
+
+
 class TestDuplicateRepoBasenames( _GitRepoFixtureMixin, unittest.TestCase ):
     """
     Repo identity keys the commit-count map. Two roster entries sharing a basename
