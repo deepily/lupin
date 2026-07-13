@@ -54,6 +54,22 @@ _STATE_BY_OUTCOME = {
 # episodes in the accumulated tail. A single cap-reach isn't yet "stuck".
 STUCK_REPEAT_THRESHOLD = 2
 
+# bug 52b8ed6b: the RECOVERY CLASS — the outcomes that CONSUME prior cap_reached
+# evidence. MEMBERSHIP RULE (Mr. Radio's ruling, 2026-07-12 — apply it to classify any
+# future addition to the outcome vocabulary): a recovery outcome is a liveness beacon
+# THE SESSION ITSELF EMITS, asserting it is not wedged.
+#   • honored — a fresh declared hold: defended quiescence (the original 5a1f17f8 rule).
+#   • idle    — the explicit "nothing owed" beacon (work_owed=false), written only on the
+#               TRANSITION into idle. ADDED here: without it, a session that recovered by
+#               going idle consumed NOTHING and stayed flagged `stuck` FOREVER (sam, live:
+#               announced LIVE STUCK at 21:49 EDT while idle, owing nothing, bridge 0s
+#               fresh — from caps he had recovered from 8 hours earlier).
+# EXCLUDED, deliberately: `poked` (owed + under cap — the session is still IN the wedge);
+# `not_owed` (dead vocabulary — never written; the writer emits `idle` instead, see
+# heartbeat_events.py:441); `suppressed_stale_declared_owed` (an ARBITER-side suppression
+# marker, not a session-emitted beacon — it fails the membership rule).
+RECOVERY_OUTCOMES = frozenset( { OUTCOME_HONORED, EVENT_IDLE } )
+
 
 def _parse_iso( value ):
     """Parse an ISO-8601 timestamp → aware datetime, or None. Never raises."""
@@ -150,10 +166,27 @@ def _count_stuck_episodes( events ):
     """Count LIVE cap_reached+owed records in the accumulated tail — those NOT
     consumed by a later recovery.
 
-    5a1f17f8 (a): a cap_reached is CONSUMED when a `honored` outcome appears LATER in
+    5a1f17f8 (a): a cap_reached is CONSUMED when a RECOVERY outcome appears LATER in
     the ordered (oldest→newest) tail — the session moved to defended quiescence (or
     resumed), so that prior wedge no longer stands. Only cap_reached+owed AFTER the
-    last honored count as live stuck evidence.
+    last recovery count as live stuck evidence.
+
+    bug 52b8ed6b: the recovery class is `RECOVERY_OUTCOMES` = { honored, idle }, NOT
+    `honored` alone. An `idle` recovery (the session's explicit "nothing owed" beacon)
+    previously consumed NOTHING, so a recovered session stayed flagged `stuck` until the
+    events tail rolled off — PERMANENT LIVE-STUCK (sam: still announced stuck at 21:49
+    EDT while idle, owing nothing, bridge 0s fresh, from caps recovered 8h earlier).
+
+    MONOTONE + SAFE: broadening the recovery class can only CONSUME MORE caps, so the
+    derived `stuck` flag can only flip True→False, NEVER False→True. No consumer of the
+    flag (attention roster · poke gate · /state snapshot · terminal render · UI table)
+    can ever see a NEW stuck session — only fewer.
+
+    TRUE POSITIVE PRESERVED BY CONSTRUCTION: a genuinely wedged session OWES work
+    (`work_owed: True`) and therefore can NEVER emit `idle` (which is written only when
+    work_owed is false) — its caps are never consumed, it stays stuck, and it is still
+    poked and still announced. Recovery consumes the PAST; it grants no immunity — a
+    session that recovers and then wedges again re-arms on its new caps.
 
     Why: the offset-reset replay (a :8001 restart re-reads the events file from byte 0,
     bug 5a1f17f8 root cause) re-surfaces HISTORICAL cap_reached as if fresh. In the real
@@ -168,7 +201,7 @@ def _count_stuck_episodes( events ):
     """
     last_recovery = -1
     for i, e in enumerate( events ):
-        if isinstance( e, dict ) and e.get( "outcome" ) == OUTCOME_HONORED:
+        if isinstance( e, dict ) and e.get( "outcome" ) in RECOVERY_OUTCOMES:   # 52b8ed6b: { honored, idle }
             last_recovery = i
     return sum(
         1 for i, e in enumerate( events )
