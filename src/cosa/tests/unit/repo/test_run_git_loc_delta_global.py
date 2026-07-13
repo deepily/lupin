@@ -519,15 +519,109 @@ class TestRepoIdentityDedup( _GitRepoFixtureMixin, unittest.TestCase ):
         with patch( "subprocess.run", return_value=fake ):
             self.assertIsNone( g._git_common_dir( "/tmp" ) )
 
-    def test_unresolvable_identity_does_not_block_analysis( self ):
-        """If git can't name the identity, degrade to analyzing — never silently drop a repo."""
+    def test_unresolvable_identity_on_a_real_root_analyzes_but_WARNS( self ):
+        """
+        Never silently drop a genuine repo — but never SILENTLY analyze an un-nameable one
+        either. A dedup guard that fails open fails toward the OVER-count.
+        """
         repo = self.init_repo( "r" )
         self.commit( repo, { "a.py": self.lines( "x", 6 ) }, "work" )
 
-        with patch.object( g, "_git_common_dir", return_value=None ):
+        err = io.StringIO()
+        with patch.object( g, "_git_common_dir", return_value=None ), redirect_stderr( err ):
             df, commits, cov, empty, skipped = _analyze( [ repo ] )
+
         self.assertEqual( g._build_summary( df, commits )[ "total_added" ], 6 )
         self.assertEqual( skipped, [] )
+        self.assertIn( "could not resolve its identity", err.getvalue() )
+        self.assertIn( "COUNTED TWICE",                  err.getvalue() )
+
+
+class TestOrphanedWorktreeAndTheDangerousQuadrant( _GitRepoFixtureMixin, unittest.TestCase ):
+    """
+    Raised by María 🌸 (2026-07-13) AFTER `d98d6144` shipped.
+
+    The identity guard's fail-open branch was safe only by COINCIDENCE. lupin has 7 ORPHANED
+    worktrees (admin dir pruned): `git rev-parse --git-common-dir` FATALS on them — and so
+    does `git log`. They contribute zero because **two independent failures coincide**, not
+    because anything in the design guarantees it. Reproduced exactly:
+
+        healthy worktree  -> --git-common-dir OK,    git log OK
+        orphaned worktree -> --git-common-dir FATAL, git log FATAL
+
+    **The dangerous quadrant is: identity unknowable, but `git log` WORKS.** Empty today;
+    reachable in principle (older git, permissions quirk, copied-not-cloned tree). There,
+    fail-open means analyze-the-duplicate → DOUBLE-COUNT.
+
+    A DEDUP guard that fails open fails toward the OVER-COUNT — the invisible error.
+    Dropping a repo is visible (a missing row); double-counting one is silent and
+    confidently wrong. Discovery and de-duplication have OPPOSITE safe directions.
+    """
+
+    def _orphaned_worktree( self ):
+        """A worktree whose admin dir has been pruned — María's 7."""
+        parent = self.init_repo( "parent" )
+        self.commit( parent, { "a.py": self.lines( "x", 9 ) }, "work" )
+        wt = os.path.join( self.workdir, "orphan_wt" )
+        self._git( parent, "worktree", "add", "-q", "-b", "lane", wt )
+        import shutil
+        shutil.rmtree( os.path.join( parent, ".git", "worktrees" ) )   # orphan it
+        return parent, wt
+
+    def test_orphaned_worktree_identity_is_unknowable( self ):
+        """The premise, pinned: git cannot name an orphan."""
+        parent, wt = self._orphaned_worktree()
+        self.assertIsNone( g._git_common_dir( wt ) )
+        self.assertTrue( g._is_linked_checkout( wt ) )   # but the FILESYSTEM still can
+
+    def test_orphaned_worktree_is_skipped_not_analyzed( self ):
+        parent, wt = self._orphaned_worktree()
+
+        err = io.StringIO()
+        with redirect_stderr( err ):
+            df, commits, cov, empty, skipped = _analyze( [ parent, wt ] )
+
+        self.assertEqual( g._build_summary( df, commits )[ "total_added" ], 9 )
+        self.assertEqual( skipped, [ wt ] )
+        self.assertIn( "LINKED CHECKOUT", err.getvalue() )
+
+    def test_THE_DANGEROUS_QUADRANT_identity_unknowable_but_git_log_works( self ):
+        """
+        The quadrant that is empty by luck: a LIVE worktree (git log works fine) whose
+        identity git cannot name. Fail-open here would DOUBLE-COUNT the parent.
+
+        The git-free `.git`-is-a-FILE fallback (María's GUARD 1) closes it.
+        """
+        parent = self.init_repo( "parent" )
+        self.commit( parent, { "a.py": self.lines( "x", 9 ) }, "work" )
+        wt = os.path.join( self.workdir, "live_wt" )
+        self._git( parent, "worktree", "add", "-q", "-b", "lane", wt )
+
+        # git log WORKS here — only the identity probe is blinded.
+        real_common_dir = g._git_common_dir
+
+        def blind_on_worktree( path, timeout=30 ):
+            return None if path == wt else real_common_dir( path, timeout )
+
+        err = io.StringIO()
+        with patch.object( g, "_git_common_dir", side_effect=blind_on_worktree ), redirect_stderr( err ):
+            df, commits, cov, empty, skipped = _analyze( [ parent, wt ] )
+
+        summary = g._build_summary( df, commits )
+        self.assertEqual( summary[ "total_added"   ], 9, "DOUBLE-COUNT in the dangerous quadrant" )
+        self.assertEqual( summary[ "total_commits" ], 1 )
+        self.assertEqual( skipped, [ wt ] )
+        self.assertIn( "LINKED CHECKOUT", err.getvalue() )
+
+    def test_is_linked_checkout( self ):
+        parent = self.init_repo( "p" )
+        self.commit( parent, { "a.py": "x\n" }, "c" )
+        wt = os.path.join( self.workdir, "w" )
+        self._git( parent, "worktree", "add", "-q", "-b", "lane", wt )
+
+        self.assertTrue(  g._is_linked_checkout( wt ) )      # .git is a FILE
+        self.assertFalse( g._is_linked_checkout( parent ) )  # .git is a DIR
+        self.assertFalse( g._is_linked_checkout( self.not_a_repo() ) )
 
 
 class TestDuplicateRepoBasenames( _GitRepoFixtureMixin, unittest.TestCase ):

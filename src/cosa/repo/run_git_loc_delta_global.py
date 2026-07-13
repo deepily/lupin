@@ -180,12 +180,34 @@ def create_parser() -> argparse.ArgumentParser:
 
 def _is_git_repo( repo_path: str ) -> bool:
     """
-    Return True iff `repo_path` is a git repository root.
+    Return True iff `repo_path` is a git repository root OR a linked checkout.
 
     Ensures:
         - True iff `{repo_path}/.git` exists (dir for a normal clone, file for a worktree)
     """
     return os.path.exists( os.path.join( repo_path, ".git" ) )
+
+
+def _is_linked_checkout( repo_path: str ) -> bool:
+    """
+    Return True iff `{repo_path}/.git` is a FILE rather than a directory.
+
+    A `.git` FILE means this is a **linked checkout** — a worktree or submodule whose
+    real git dir lives elsewhere. By construction it **shares another repository's object
+    database and refs**, so it can NEVER be a distinct repo for roll-up purposes.
+
+    Credit: María 🌸 (PIP) — this is her GUARD 1, and it is NOT redundant with
+    `_git_common_dir`. It is a **pure filesystem test that needs no git command to
+    succeed**, so it holds exactly where the identity probe cannot: on an ORPHANED
+    worktree whose admin dir has been pruned, `git rev-parse --git-common-dir` FATALS.
+    The two are complements — identity is stronger wherever git answers; this one works
+    when git won't.
+
+    Ensures:
+        - True iff `{repo_path}/.git` exists and is a regular file
+        - Never raises; never shells out
+    """
+    return os.path.isfile( os.path.join( repo_path, ".git" ) )
 
 
 def _git_common_dir( repo_path: str, timeout: int = 30 ) -> Optional[str]:
@@ -362,19 +384,66 @@ def _analyze_repos(
             continue
 
         identity = _git_common_dir( repo_path )
-        if identity is not None and identity in seen_identities:
-            first = seen_identities[ identity ]
-            skipped_repos.append( repo_path )
+
+        if identity is not None:
+            if identity in seen_identities:
+                first = seen_identities[ identity ]
+                skipped_repos.append( repo_path )
+                print(
+                    f"Warning: {repo_path} is the SAME REPOSITORY as {first} "
+                    f"(shared git dir: {identity}) — skipped to avoid DOUBLE-COUNTING its commits. "
+                    f"A worktree shares its parent's objects and refs, so analyzing both would "
+                    f"report that repo's work twice.",
+                    file = sys.stderr,
+                )
+                continue
+            seen_identities[ identity ] = repo_path
+
+        else:
+            # IDENTITY UNKNOWABLE. This branch used to fail OPEN silently — analyze and say
+            # nothing. That was wrong, and it was safe only by COINCIDENCE (bug raised by
+            # María 🌸, 2026-07-13, after `d98d6144` shipped).
+            #
+            # The reasoning behind the old fail-open — "never silently drop a real repo" — is
+            # correct for a DISCOVERY filter. But this is a DE-DUPLICATION guard, and the two
+            # have OPPOSITE safe directions:
+            #
+            #     drop a repo      -> VISIBLE   (a name missing from a 4-row table)
+            #     double-count one -> INVISIBLE (silent, self-consistent, confidently wrong)
+            #
+            # A dedup guard that fails open fails toward the OVER-count — the worse error, and
+            # the exact error this module has now shipped in BOTH directions in one day.
+            #
+            # Today all 7 orphaned worktrees contribute zero, but only because
+            # `git rev-parse` AND `git log` happen to fail on the same paths — two independent
+            # failures coinciding, not a property of the design. The dangerous quadrant
+            # (identity unknowable, but `git log` works) is empty by luck and reachable in
+            # principle: an older git, a permissions quirk, a copied-not-cloned tree.
+            #
+            # So: fall back to the git-FREE test. A `.git` FILE is a linked checkout, which by
+            # construction shares another repo's refs and can never be distinct — skip it. A
+            # `.git` DIRECTORY is a genuine root — analyze it, but SAY OUT LOUD that identity
+            # was unverifiable, so an un-nameable path can never quietly become a duplicate.
+            if _is_linked_checkout( repo_path ):
+                skipped_repos.append( repo_path )
+                print(
+                    f"Warning: {repo_path} — git could not resolve its identity "
+                    f"(--git-common-dir failed; likely an ORPHANED worktree whose admin dir was "
+                    f"pruned), but its `.git` is a FILE, i.e. a LINKED CHECKOUT. A linked "
+                    f"checkout shares another repository's objects and refs and can never be a "
+                    f"distinct repo — skipped to avoid DOUBLE-COUNTING.",
+                    file = sys.stderr,
+                )
+                continue
+
             print(
-                f"Warning: {repo_path} is the SAME REPOSITORY as {first} "
-                f"(shared git dir: {identity}) — skipped to avoid DOUBLE-COUNTING its commits. "
-                f"A worktree shares its parent's objects and refs, so analyzing both would "
-                f"report that repo's work twice.",
+                f"Warning: {repo_path} — git could not resolve its identity "
+                f"(--git-common-dir failed), so it CANNOT be checked for duplication against the "
+                f"rest of the roster. Its `.git` is a directory, so it is being analyzed as a "
+                f"distinct repo. If it is in fact an alias of another roster entry, its commits "
+                f"are being COUNTED TWICE — verify before trusting these totals.",
                 file = sys.stderr,
             )
-            continue
-        if identity is not None:
-            seen_identities[ identity ] = repo_path
 
         if not _has_any_commits( repo_path ):
             # A fresh `git init` with no commits yet. Legitimate; report it, don't die.
