@@ -109,10 +109,10 @@ INNER+="$CLAUDE_CMD"
 # Chain syntax (2026-06-11, Rick): ordered comma-separated names; `*` means
 # "then take anything free"; no `*` = strict, loud fail on exhaustion.
 PERSONA_ENV_FLAGS=(
-    -e "COSA_VOICE_PREFERRED_PERSONA__LUPIN=Mr. Radio,Clayton,*"
+    -e "COSA_VOICE_PREFERRED_PERSONA__LUPIN=Mr. Radio,Cheech,*"
     -e "COSA_VOICE_PREFERRED_PERSONA__LUPIN_MOBILE=Tiffany,*"
     -e "COSA_VOICE_PREFERRED_PERSONA__PLAN=María,*"
-    -e "COSA_VOICE_PREFERRED_PERSONA__LOOKML=Sam,*"
+    -e "COSA_VOICE_PREFERRED_PERSONA__SKILLS_DISTILLATION=Sam,*"
     # Disable Claude Code's terminal mouse capture inside tmux panes (Rick,
     # 2026-06-26). Forwarded via -e so it crosses the tmux boundary regardless of
     # the tmux server's frozen env (a bare parent export would NOT reach `claude`).
