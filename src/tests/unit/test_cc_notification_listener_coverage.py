@@ -875,11 +875,13 @@ class TestResolveCredentials:
 
 class TestMain:
 
-    def _argv_ns( self, verbose, accepted_ids ):
+    def _argv_ns( self, verbose, accepted_ids, owner_pid=None ):
+        # owner_pid mirrors parse_args()'s --owner-pid (owner watchdog, 2026-07-14).
         return Namespace(
             session_id="abc12345", accepted_ids=accepted_ids, buffer_path=None,
             tmux_session=None, host="localhost", port=7999, email=None, password=None,
             debug=False, verbose=verbose, log_file=None, centralized_log=None,
+            owner_pid=owner_pid, memory_trace=False,
         )
 
     def _run_main( self ):

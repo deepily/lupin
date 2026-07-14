@@ -175,6 +175,44 @@ def _record_listener_pid( session_data, session_file, listener_pid ):
             pass  # Best-effort
 
 
+def _resolve_owner_pid( session_data, session_file ):
+    """
+    Resolve the owning Claude Code PID to hand the listener for self-reaping.
+
+    _spawn_listener is called with `session_data if session_id else None`, so on the
+    session_id-less path the in-memory dict is absent — but the bridge file on disk
+    still carries cc_pid. Reading it back closes that hole; without the fallback that
+    path would spawn a listener with NO watchdog, silently preserving the strand bug
+    on exactly the branch nobody looks at.
+
+    Requires:
+        - session_data is a dict carrying "cc_pid", or None
+        - session_file is a path to the bridge JSON, or None
+
+    Ensures:
+        - Returns the cc_pid as an int when resolvable from either source
+        - Returns None when neither source yields one (watchdog disabled, and the
+          listener logs that loudly at startup)
+
+    Args:
+        session_data: In-memory bridge dict, or None
+        session_file: Path to the on-disk bridge JSON
+
+    Returns:
+        int or None: PID of the owning Claude Code process
+    """
+    cc_pid = ( session_data or {} ).get( "cc_pid" )
+
+    if not cc_pid and session_file:
+        try:
+            with open( session_file ) as fh:
+                cc_pid = json.load( fh ).get( "cc_pid" )
+        except ( OSError, ValueError ):
+            return None
+
+    return int( cc_pid ) if cc_pid else None
+
+
 def _spawn_listener( session_id, session_data, session_file, accepted_ids=None ):
     """
     Spawn the CC Notification Listener as a background subprocess.
@@ -266,6 +304,15 @@ def _spawn_listener_locked( session_id, session_data, session_file, accepted_ids
         "--session-id", short_id,
     ]
 
+    # Hand the listener its owner's PID so it can self-reap. The listener is spawned
+    # detached (start_new_session=True, below), so tmux's SIGHUP never reaches it and
+    # session_end.py — the only other reaper — cannot run on an abrupt death. Without
+    # this the listener outlives its session forever, still wired to the notifications
+    # UI. See cc_notification_listener._watch_owner().
+    owner_pid = _resolve_owner_pid( session_data, session_file )
+    if owner_pid:
+        cmd.extend( [ "--owner-pid", str( owner_pid ) ] )
+
     # Pass accepted IDs for multi-hash filtering
     # On first start, stable_session_id == session_id, so this deduplicates to one entry.
     # On subsequent lifecycle events (compact, clear), they diverge and both are needed.
@@ -278,6 +325,11 @@ def _spawn_listener_locked( session_id, session_data, session_file, accepted_ids
 
     if os.environ.get( "LUPIN_CC_HOOK_LISTENER_VERBOSE", "" ).strip().lower() == "true":
         cmd.append( "--verbose" )
+
+    # Opt-in memory sampler — set LUPIN_CC_LISTENER_MEMTRACE=true to arm tracemalloc
+    # on spawned listeners (for catching the 684 MB leak, 2026-07-14). Off by default.
+    if os.environ.get( "LUPIN_CC_LISTENER_MEMTRACE", "" ).strip().lower() == "true":
+        cmd.append( "--memory-trace" )
 
     # Always write per-session log files (backward compat) + centralized log
     log_dir          = os.path.expanduser( "~/.claude/sessions" )

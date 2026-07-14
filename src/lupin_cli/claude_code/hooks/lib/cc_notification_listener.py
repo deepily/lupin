@@ -35,6 +35,7 @@ import signal
 import subprocess
 import sys
 import time
+import tracemalloc
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -94,6 +95,122 @@ IDLE_PROMPT_DIVIDER   = "─" * 40          # "────…" (40×)
 # classify idle before injecting.
 PANE_PROBE_RECHECK_SECONDS = 0.3
 
+# How often the owner watchdog asks "is the Claude Code process that owns me still
+# alive?". The listener is spawned with start_new_session=True (setsid), so it is
+# reparented to init and NEVER receives the SIGHUP tmux sends its panes when the
+# tmux server dies. Its only other reaper is the SessionEnd hook, which by
+# definition cannot run when the session is killed abruptly. Without this poll a
+# hard death (tmux kill-server, crash, SIGKILL) strands the listener forever,
+# still authenticated and still holding its WebSocket to the notifications UI.
+OWNER_WATCHDOG_INTERVAL_SECONDS = 30
+
+# Memory sampler (opt-in, --memory-trace). On 2026-07-14 two orphaned listeners held
+# 684 MB each against a ~35 MB baseline while logging only ~13 notifications — a
+# one-time large allocation, not message accumulation. The orphans were reaped before
+# they could be profiled, so the leak has no root cause yet. This sampler exists to
+# catch the NEXT one with a real allocation traceback instead of archaeology. It is
+# OFF by default (zero tracemalloc overhead) and only arms under the flag.
+MEMORY_SAMPLE_INTERVAL_SECONDS = 60
+# Log a tracemalloc top-N dump when RSS grows by at least this much since the last dump.
+MEMORY_GROWTH_DUMP_THRESHOLD_MB = 100
+MEMORY_TOP_ALLOCATIONS          = 10
+
+
+def read_self_rss_mb():
+    """
+    This process's resident set size in MB, from /proc/self/status.
+
+    Ensures:
+        - Returns RSS in MB as a float, or None if /proc is unreadable
+    """
+    try:
+        with open( "/proc/self/status" ) as fh:
+            for line in fh:
+                if line.startswith( "VmRSS:" ):
+                    return int( line.split()[ 1 ] ) / 1024.0
+    except ( OSError, ValueError, IndexError ):
+        return None
+    return None
+
+
+# ── Owner liveness (PID-reuse safe) ───────────────────────────────────────────
+
+def read_proc_starttime( pid ):
+    """
+    Read a process's start-time (field 22 of /proc/<pid>/stat) as a string.
+
+    This is the PID-reuse guard. A bare os.kill( pid, 0 ) is not sufficient: if the
+    owner dies and the kernel recycles its PID onto an unrelated process, the naive
+    check reports "alive" forever and the listener never reaps itself — the exact bug
+    this watchdog exists to close. Start-time pins the identity: a recycled PID always
+    carries a different start-time.
+
+    Requires:
+        - pid is a positive integer
+
+    Ensures:
+        - Returns the start-time field as a string, or None if the process is gone
+          or /proc is unreadable
+
+    Args:
+        pid: Process ID to inspect
+
+    Returns:
+        str or None: start-time (clock ticks since boot), or None if unreadable
+    """
+    try:
+        with open( f"/proc/{pid}/stat" ) as fh:
+            data = fh.read()
+    except ( FileNotFoundError, ProcessLookupError, PermissionError, OSError ):
+        return None
+
+    # Format: pid (comm) state ppid ... — comm can itself contain spaces and parens,
+    # so split AFTER the final ')'. fields_after_comm[0] is state (field 3), hence
+    # start-time (field 22) sits at index 19.
+    close_paren = data.rfind( ")" )
+    if close_paren == -1:
+        return None
+
+    fields_after_comm = data[ close_paren + 2 : ].split()
+    if len( fields_after_comm ) < 20:
+        return None
+
+    return fields_after_comm[ 19 ]
+
+
+def owner_is_alive( owner_pid, owner_starttime ):
+    """
+    Is the Claude Code process that owns this listener still running?
+
+    Requires:
+        - owner_pid is a positive integer
+        - owner_starttime is the start-time captured when the listener booted, or
+          None if it could not be captured
+
+    Ensures:
+        - Returns False when the PID is gone
+        - Returns False when the PID exists but carries a DIFFERENT start-time
+          (the PID was recycled onto a new process — the owner is still dead)
+        - Returns True only when the PID exists AND its start-time matches
+
+    Args:
+        owner_pid: PID of the owning Claude Code process
+        owner_starttime: start-time pinned at listener startup
+
+    Returns:
+        bool: True if the original owner process is still alive
+    """
+    current = read_proc_starttime( owner_pid )
+    if current is None:
+        return False
+
+    # No pinned start-time (couldn't read /proc at boot) — fall back to bare
+    # existence. Weaker, but strictly better than never checking at all.
+    if owner_starttime is None:
+        return True
+
+    return current == owner_starttime
+
 
 # ── Listener ──────────────────────────────────────────────────────────────────
 
@@ -131,6 +248,8 @@ class CCNotificationListener( BaseWebSocketListener ):
         verbose              = False,
         log_file_path        = None,
         centralized_log_path = None,
+        owner_pid            = None,
+        memory_trace         = False,
     ):
         """
         Initialize the CC Notification Listener.
@@ -159,6 +278,11 @@ class CCNotificationListener( BaseWebSocketListener ):
             verbose: Enable verbose output (implies debug)
             log_file_path: Optional path to tee all output to a log file
             centralized_log_path: Path to centralized log (default: CENTRALIZED_LOG)
+            owner_pid: PID of the owning Claude Code process. When given, the listener
+                reaps ITSELF once that process dies — the only cleanup path that
+                survives an abrupt death (tmux kill-server, crash, SIGKILL), because
+                the SessionEnd hook cannot run in those cases. None disables the
+                watchdog and is logged loudly at startup.
         """
         ws_session_name = f"cc-listener-{session_id_hash}"
 
@@ -184,6 +308,13 @@ class CCNotificationListener( BaseWebSocketListener ):
         self._centralized_log_path = Path( centralized_log_path ) if centralized_log_path else CENTRALIZED_LOG
         self._centralized_log      = None
         self._message_count        = 0
+
+        # Pin the owner's identity NOW, while it is certainly alive. Comparing this
+        # start-time on every poll is what makes the watchdog safe against PID reuse.
+        self.owner_pid             = owner_pid
+        self._owner_starttime      = read_proc_starttime( owner_pid ) if owner_pid else None
+
+        self.memory_trace          = memory_trace
 
     def _default_buffer_path( self ) -> Path:
         """
@@ -1018,6 +1149,111 @@ class CCNotificationListener( BaseWebSocketListener ):
         self._log( f"  {'─' * 40}" )
         self._log( "" )
 
+    async def _watch_owner( self ):
+        """
+        Reap this listener once its owning Claude Code process dies.
+
+        This is the ONLY cleanup path that survives an abrupt session death. The
+        listener is setsid'd (start_new_session=True in register_session.py), so the
+        SIGHUP tmux sends its panes never reaches it, and session_end.py — the only
+        other reaper — runs only on a GRACEFUL exit. A tmux kill-server, a crash, or a
+        SIGKILL therefore left the listener alive forever, reconnecting on a loop and
+        still holding its WebSocket to the notifications UI.
+
+        Requires:
+            - self.owner_pid is a positive integer (no-op when None)
+
+        Ensures:
+            - Polls owner liveness every OWNER_WATCHDOG_INTERVAL_SECONDS
+            - Calls self.stop() exactly once when the owner is gone, which unwinds the
+              restart loop in run() the same way SIGTERM does
+            - Returns immediately (watchdog disabled) when no owner_pid was supplied
+        """
+        if not self.owner_pid:
+            self._log(
+                f"{self.LOG_PREFIX} WARNING: no --owner-pid given; owner watchdog is "
+                f"DISABLED. This listener will NOT self-reap if its session dies abruptly."
+            )
+            return
+
+        self._log(
+            f"{self.LOG_PREFIX} Owner watchdog armed: pid={self.owner_pid} "
+            f"starttime={self._owner_starttime} interval={OWNER_WATCHDOG_INTERVAL_SECONDS}s"
+        )
+
+        while self._running:
+            await asyncio.sleep( OWNER_WATCHDOG_INTERVAL_SECONDS )
+
+            if not self._running:
+                break
+
+            if not owner_is_alive( self.owner_pid, self._owner_starttime ):
+                self._log(
+                    f"{self.LOG_PREFIX} Owner (pid {self.owner_pid}) is GONE — "
+                    f"self-reaping to avoid stranding a listener on the notifications UI."
+                )
+                self._log_central(
+                    f"=== LISTENER SELF-REAPED (owner pid {self.owner_pid} died) ==="
+                )
+                await self.stop()
+                return
+
+    async def _sample_memory( self ):
+        """
+        Opt-in RSS + tracemalloc sampler to catch the next listener memory leak.
+
+        Off unless self.memory_trace is set (--memory-trace / LUPIN_CC_LISTENER_MEMTRACE).
+        When on: starts tracemalloc, logs RSS every MEMORY_SAMPLE_INTERVAL_SECONDS, and
+        when RSS has grown by MEMORY_GROWTH_DUMP_THRESHOLD_MB since the last dump, logs a
+        tracemalloc top-N by allocation size — the allocation traceback the 2026-07-14
+        post-mortem lacked because the leaking processes were reaped before profiling.
+
+        Requires:
+            - safe to call always; returns immediately when memory_trace is False
+
+        Ensures:
+            - Never raises into the run loop; tracemalloc is stopped on exit
+            - Emits a growth dump at most once per threshold crossing
+        """
+        if not self.memory_trace:
+            return
+
+        tracemalloc.start( 25 )
+        baseline = read_self_rss_mb()
+        last_dump_rss = baseline or 0.0
+        self._log(
+            f"{self.LOG_PREFIX} Memory sampler armed: baseline RSS={baseline:.1f}MB "
+            f"interval={MEMORY_SAMPLE_INTERVAL_SECONDS}s dump_threshold={MEMORY_GROWTH_DUMP_THRESHOLD_MB}MB"
+        )
+
+        try:
+            while self._running:
+                await asyncio.sleep( MEMORY_SAMPLE_INTERVAL_SECONDS )
+                if not self._running:
+                    break
+
+                rss = read_self_rss_mb()
+                if rss is None:
+                    continue
+                self._log( f"{self.LOG_PREFIX} [mem] RSS={rss:.1f}MB (baseline {baseline:.1f}MB)" )
+
+                if rss - last_dump_rss >= MEMORY_GROWTH_DUMP_THRESHOLD_MB:
+                    last_dump_rss = rss
+                    self._dump_top_allocations( rss )
+        finally:
+            tracemalloc.stop()
+
+    def _dump_top_allocations( self, rss ):
+        """Log the tracemalloc top-N allocations — the traceback that names the leak."""
+        snapshot = tracemalloc.take_snapshot()
+        stats    = snapshot.statistics( "lineno" )
+        self._log(
+            f"{self.LOG_PREFIX} [mem] GROWTH DUMP at RSS={rss:.1f}MB — top "
+            f"{MEMORY_TOP_ALLOCATIONS} allocations:"
+        )
+        for stat in stats[ :MEMORY_TOP_ALLOCATIONS ]:
+            self._log( f"{self.LOG_PREFIX} [mem]   {stat}" )
+
     async def run( self ):
         """
         Start the listener with logging setup, shutdown stats, and infinite restart.
@@ -1060,6 +1296,13 @@ class CCNotificationListener( BaseWebSocketListener ):
         restart_cooldown = 60  # seconds
         self._running    = True
 
+        # Arm the owner watchdog alongside the restart loop. It runs for the whole
+        # life of the listener and is the thing that ends it when the session dies
+        # without a graceful SessionEnd.
+        watchdog = asyncio.ensure_future( self._watch_owner() )
+        # Opt-in memory sampler (no-op unless --memory-trace). Same lifetime as the loop.
+        mem_sampler = asyncio.ensure_future( self._sample_memory() )
+
         try:
             while self._running:
                 restart_cycle += 1
@@ -1085,6 +1328,8 @@ class CCNotificationListener( BaseWebSocketListener ):
                     await asyncio.sleep( restart_cooldown )
 
         finally:
+            watchdog.cancel()
+            mem_sampler.cancel()
             self._log_central( "=== LISTENER STOPPED ===" )
             self._print_stats()
             if self._centralized_log:
@@ -1129,6 +1374,19 @@ def parse_args():
         "--tmux-session",
         default = None,
         help    = "Explicit tmux session name for Enter trigger (default: auto-resolve from session bridge)"
+    )
+    parser.add_argument(
+        "--owner-pid",
+        type    = int,
+        default = None,
+        help    = "PID of the owning Claude Code process. The listener self-reaps when it dies "
+                  "(survives tmux kill-server / crash / SIGKILL, where SessionEnd cannot run)."
+    )
+    parser.add_argument(
+        "--memory-trace",
+        action  = "store_true",
+        help    = "Arm the opt-in RSS + tracemalloc sampler (catches the listener memory leak "
+                  "with an allocation traceback). Off by default; adds tracemalloc overhead."
     )
     parser.add_argument(
         "--host",
@@ -1237,6 +1495,8 @@ async def main():
         verbose              = args.verbose,
         log_file_path        = args.log_file,
         centralized_log_path = args.centralized_log,
+        owner_pid            = args.owner_pid,
+        memory_trace         = args.memory_trace,
     )
 
     # Graceful shutdown on SIGTERM
