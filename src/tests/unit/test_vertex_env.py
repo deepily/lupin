@@ -19,6 +19,10 @@ import cosa.utils.vertex_env as vertex_env
 
 from cosa.utils.vertex_env import (
     ADMISSIBLE_REGION_ORACLES,
+    SERVER_TAINT_REFUSAL_KEYS,
+    assert_server_env_is_vertex_free,
+    pane_guard,
+    parse_tmux_global_env,
     ASSERTABLE_MODEL_OVERRIDES,
     ASSERTABLE_PROJECT_OVERRIDES,
     CERTIFIED_VERTEX_REGIONS,
@@ -669,6 +673,243 @@ def test_quick_smoke_test_actually_executes( capsys ):
     assert "refuses to launch on GOOGLE_APPLICATION_CREDENTIALS" in out
     assert "refuses to launch on project disagreement"          in out
     assert "refuses to launch with no project"                  in out
+
+
+# ---------------------------------------------------------------------------
+# C1 / OSQ-6 — the guards in the RIGHT PROCESS, unit half.
+#
+# Rio's C1 exploit, restated as the spec these tests enforce: a tainted server
+# env holding VERTEX_REGION_CLAUDE_4_8_OPUS=us-east5 → the launcher shell is
+# clean → assert_no_hostile_env PASSES (wrong process) → `-e` adds and subtracts
+# nothing → the pane inherits it → Opus alone routes to us-east5, runs, bills,
+# logs nothing. The guard was green because it was checking a room the model
+# was never in. These functions are the two rooms the model IS in: the tmux
+# SERVER's global env (OSQ-6) and the PANE's own env (§5c row 2).
+# ---------------------------------------------------------------------------
+
+def test_parse_reads_key_value_lines():
+    parsed = parse_tmux_global_env( "PATH=/usr/bin\nCLAUDE_CODE_USE_VERTEX=1\n" )
+    assert parsed == { "PATH": "/usr/bin", "CLAUDE_CODE_USE_VERTEX": "1" }
+
+
+def test_parse_excludes_unset_markers():
+    """`-KEY` is the server saying "unset" — exactly the state the guard wants."""
+    parsed = parse_tmux_global_env( "-CLAUDE_CODE_USE_VERTEX\nPATH=/usr/bin\n" )
+    assert "CLAUDE_CODE_USE_VERTEX" not in parsed
+    assert parsed == { "PATH": "/usr/bin" }
+
+
+def test_parse_preserves_values_containing_equals():
+    """An env value may itself carry '=' — split once, keep the rest intact."""
+    parsed = parse_tmux_global_env( "LESS=-R --mouse=on\nA=b=c=d" )
+    assert parsed[ "LESS" ] == "-R --mouse=on"
+    assert parsed[ "A" ]    == "b=c=d"
+
+
+def test_parse_fails_loud_on_an_unparseable_line():
+    """
+    A line that is neither KEY=value nor -KEY is an INSTRUMENT failure. Silently
+    skipping it would wave a hostile variable through the OSQ-6 check — "I could
+    not parse" must never be reported as "the server is clean."
+    """
+    with pytest.raises( VertexEnvError ) as exc:
+        parse_tmux_global_env( "GARBAGE WITHOUT ANY DELIMITER" )
+    assert "Cannot parse" in str( exc.value )
+
+
+def test_parse_of_empty_output_is_an_empty_mapping():
+    """
+    Empty output parses to {} — but whether emptiness is TRUSTWORTHY is the
+    caller's burden (a failed tmux command and a clean server both print
+    nothing). The docstring says so; the launcher must check the exit status.
+    """
+    assert parse_tmux_global_env( "" ) == {}
+
+
+def test_a_clean_server_env_passes():
+    """POSITIVE CONTROL — a guard that refuses everything is indistinguishable from a broken one."""
+    assert assert_server_env_is_vertex_free( { "PATH": "/usr/bin", "SHELL": "/bin/bash" } ) is None
+
+
+@pytest.mark.parametrize( "taint_key", SERVER_TAINT_REFUSAL_KEYS )
+def test_every_refusal_key_in_the_server_env_refuses( taint_key ):
+    """Parametrized over the WHOLE refusal set — a listed-but-unguarded key is impossible."""
+    with pytest.raises( VertexEnvError ) as exc:
+        assert_server_env_is_vertex_free( { taint_key: "anything" } )
+    assert taint_key in str( exc.value )
+
+
+def test_rios_exploit_is_dead_a_frozen_per_model_override_refuses():
+    """
+    THE C1 EXPLOIT, VERBATIM: VERTEX_REGION_CLAUDE_4_8_OPUS=us-east5 frozen into
+    the server env — launcher shell clean, every launcher-side guard green —
+    must now refuse AT THE SERVER CHECK, naming the key.
+    """
+    with pytest.raises( VertexEnvError ) as exc:
+        assert_server_env_is_vertex_free( { "VERTEX_REGION_CLAUDE_4_8_OPUS": "us-east5" } )
+    message = str( exc.value )
+    assert "VERTEX_REGION_CLAUDE_4_8_OPUS" in message
+    assert "TAINTED" in message
+
+
+def test_all_server_offenders_are_named_not_just_the_first():
+    with pytest.raises( VertexEnvError ) as exc:
+        assert_server_env_is_vertex_free( {
+            "CLAUDE_CODE_USE_VERTEX"    : "1",
+            "ANTHROPIC_VERTEX_BASE_URL" : "https://evil",
+        } )
+    message = str( exc.value )
+    assert "CLAUDE_CODE_USE_VERTEX" in message and "ANTHROPIC_VERTEX_BASE_URL" in message
+
+
+def test_server_remediation_is_surgical_never_a_kill():
+    """
+    The remediation must be per-key `set-environment -g -u` — NEVER kill-server.
+    This fleet died five times on 2026-07-14 from a kill that "knew" its target.
+    An error message that teaches the reader to reach for kill-server is a
+    fleet-killer with good intentions.
+    """
+    with pytest.raises( VertexEnvError ) as exc:
+        assert_server_env_is_vertex_free( { "CLAUDE_CODE_USE_VERTEX": "1" } )
+    message = str( exc.value )
+    assert "tmux set-environment -g -u CLAUDE_CODE_USE_VERTEX" in message
+    assert "kill-server" not in message
+
+
+def test_server_blast_radius_is_stated_in_the_error():
+    """
+    Mr. Radio's rider (2026-07-15): the tainted-server refusal blocks EVERY
+    launch on the socket until cleansed — that consequence must be IN the error
+    text, visible at firing time, not discovered by the third blocked session.
+    """
+    with pytest.raises( VertexEnvError ) as exc:
+        assert_server_env_is_vertex_free( { "CLAUDE_CODE_USE_VERTEX": "1" } )
+    assert "BLAST RADIUS" in str( exc.value )
+
+
+def test_an_empty_valued_server_key_is_not_an_offender():
+    """
+    KEY= (present, empty) follows the module's established truthiness convention
+    (assert_no_hostile_env, same choice): an empty value is absence wearing a
+    value's clothing, and refusing on it would fire on a var someone explicitly
+    blanked to DISABLE the toggle.
+    """
+    assert assert_server_env_is_vertex_free( { "CLAUDE_CODE_USE_VERTEX": "" } ) is None
+
+
+def test_the_refusal_set_is_derived_and_disjoint():
+    """SERVER_TAINT_REFUSAL_KEYS is toggle + hostile, no duplicates — derived, not restated."""
+    assert SERVER_TAINT_REFUSAL_KEYS == VERTEX_SESSION_KEYS + HOSTILE_ENV_KEYS
+    assert len( SERVER_TAINT_REFUSAL_KEYS ) == len( set( SERVER_TAINT_REFUSAL_KEYS ) )
+
+
+# A pane env exactly as a faithful launcher builds it: everything compose emits,
+# nothing else. Derived from compose itself — never restated.
+def _faithful_vertex_pane():
+    return dict( compose_vertex_env( env=CLEAN_ENV ) )
+
+
+def test_the_vertex_pane_guard_passes_on_a_faithful_pane():
+    """POSITIVE CONTROL FIRST — no refusal below is attributable until this passes."""
+    assert pane_guard( env=_faithful_vertex_pane(), vertex_path=True ) is None
+
+
+def test_the_max_pane_guard_passes_on_a_clean_pane():
+    assert pane_guard( env={ "PATH": "/usr/bin" }, vertex_path=False ) is None
+
+
+def test_the_pane_guard_catches_the_silent_scrub_failure():
+    """
+    ARNOLD'S F4, CLOSED: the launcher derives the unset list behind 2>/dev/null —
+    if that derivation silently dies, the pane is never scrubbed and nothing
+    notices. The guard runs in the SAME shell after the unset, so a surviving
+    key has exactly one meaning: the scrub did not happen.
+    """
+    tainted = { **_faithful_vertex_pane(), "GOOGLE_APPLICATION_CREDENTIALS": "/tmp/other.json" }
+    with pytest.raises( VertexEnvError ) as exc:
+        pane_guard( env=tainted, vertex_path=True )
+    message = str( exc.value )
+    assert "GOOGLE_APPLICATION_CREDENTIALS" in message
+    assert "scrub" in message.lower()
+
+
+def test_the_max_pane_guard_catches_the_toggle_key():
+    """
+    OSQ-6'S VICTIM, GUARDED AT LAST: a Max pane carrying CLAUDE_CODE_USE_VERTEX=1
+    (frozen server env, failed scrub) dies HERE — before the first metered token —
+    instead of being silently billed for a toggle it never asked for.
+    """
+    with pytest.raises( VertexEnvError ) as exc:
+        pane_guard( env={ "CLAUDE_CODE_USE_VERTEX": "1" }, vertex_path=False )
+    assert "CLAUDE_CODE_USE_VERTEX" in str( exc.value )
+
+
+def test_the_max_pane_guard_catches_a_forged_model_pin():
+    """C5's forgery, at runtime: a stale pin on a MAX pane is a silent model substitution."""
+    with pytest.raises( VertexEnvError ) as exc:
+        pane_guard( env={ "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-4-0" }, vertex_path=False )
+    assert "ANTHROPIC_DEFAULT_OPUS_MODEL" in str( exc.value )
+
+
+@pytest.mark.parametrize( "toggle_key", VERTEX_SESSION_KEYS )
+def test_the_vertex_pane_guard_is_the_p0_detector( toggle_key ):
+    """
+    THE P0 AS A RUNTIME GUARD, per missing key: a --vertex pane whose toggle key
+    never arrived (the -e forward failed, or the scrub ate it — the seam defect)
+    REFUSES TO START instead of running on Max under a metered-billing banner.
+    """
+    pane = _faithful_vertex_pane()
+    del pane[ toggle_key ]
+    with pytest.raises( VertexEnvError ) as exc:
+        pane_guard( env=pane, vertex_path=True )
+    assert toggle_key in str( exc.value )
+
+
+def test_the_vertex_pane_guard_rejects_a_toggle_value_compose_never_emitted():
+    """compose emits exactly '1'. Any other value has foreign provenance — refuse it."""
+    pane = { **_faithful_vertex_pane(), "CLAUDE_CODE_USE_VERTEX": "true" }
+    with pytest.raises( VertexEnvError ) as exc:
+        pane_guard( env=pane, vertex_path=True )
+    assert "compose_vertex_env" in str( exc.value )
+
+
+def test_the_vertex_pane_guard_rejects_an_uncertified_region():
+    """A pane whose CLOUD_ML_REGION is the dead region must refuse — same allowlist, right process."""
+    pane = { **_faithful_vertex_pane(), "CLOUD_ML_REGION": "us-central1" }
+    with pytest.raises( VertexEnvError ) as exc:
+        pane_guard( env=pane, vertex_path=True )
+    assert "not a CERTIFIED Vertex region" in str( exc.value )
+
+
+def test_the_vertex_pane_guard_rejects_an_altered_model_pin():
+    """A --vertex pane running an unpinned or re-pinned model is a silent substitution."""
+    pane = { **_faithful_vertex_pane(), "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-4-7" }
+    with pytest.raises( VertexEnvError ) as exc:
+        pane_guard( env=pane, vertex_path=True )
+    assert "ANTHROPIC_DEFAULT_OPUS_MODEL" in str( exc.value )
+
+
+def test_the_vertex_pane_guard_rejects_a_missing_model_pin():
+    """Absence and alteration are the same defect: the pane is not what compose built."""
+    pane = _faithful_vertex_pane()
+    del pane[ "ANTHROPIC_DEFAULT_HAIKU_MODEL" ]
+    with pytest.raises( VertexEnvError ) as exc:
+        pane_guard( env=pane, vertex_path=True )
+    assert "ANTHROPIC_DEFAULT_HAIKU_MODEL" in str( exc.value )
+
+
+def test_the_pane_guard_defaults_to_the_real_process_environment( monkeypatch ):
+    """
+    The env=None default is the PRODUCTION path — the pane passes nothing. Prove
+    it reads os.environ by making os.environ hostile and watching it fire.
+    """
+    for key in MAX_PANE_UNSET_KEYS:
+        monkeypatch.delenv( key, raising=False )
+    assert pane_guard( vertex_path=False ) is None
+
+    monkeypatch.setenv( "CLAUDE_CODE_USE_VERTEX", "1" )
+    with pytest.raises( VertexEnvError ):
+        pane_guard( vertex_path=False )
 
 
 @pytest.mark.parametrize( "disarm,replacement,expected", [

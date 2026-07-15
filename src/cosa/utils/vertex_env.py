@@ -327,6 +327,21 @@ MODEL_PINS = {
 # JUST FORWARDED. The path-dependence is the whole design, and it now covers every emitted key.
 MAX_PANE_UNSET_KEYS = PANE_UNSET_KEYS + VERTEX_SESSION_KEYS + tuple( MODEL_PINS )
 
+# OSQ-6 (restated, rev. 4): "Assert the tmux server env is Vertex-free — and, if NO
+# server exists, that the one we create is BORN CLEAN." The launcher ships the
+# born-clean half (the SERVER_SCRUB on `tmux new-session`). This constant is the
+# EXISTING-server half's refusal set: what may never sit in a tmux server's global
+# env, because every session on that socket inherits it — the toggle keys (a Max
+# session that never asked gets billed) and the hostile set (Rio's C1 exploit: a
+# frozen VERTEX_REGION_CLAUDE_4_8_OPUS routes Opus alone to another region, where
+# it runs, bills, and logs nothing, while every launcher-shell guard stays green).
+#
+# The ASSERTABLE sets are deliberately NOT here: a GOOGLE_CLOUD_PROJECT frozen into
+# a server is neutralized in the pane by the unset (PANE_UNSET_KEYS), and refusing
+# on a key that some other, non-Lupin workflow legitimately parks in the server env
+# is the guard-that-fires-on-a-valid-configuration bug (C4's lesson, one process over).
+SERVER_TAINT_REFUSAL_KEYS = VERTEX_SESSION_KEYS + HOSTILE_ENV_KEYS
+
 
 class VertexEnvError( RuntimeError ):
     """Raised when the Vertex environment cannot be composed safely. Fail loud."""
@@ -609,6 +624,176 @@ def pane_unset_keys( vertex_path ):
     if vertex_path:
         return PANE_UNSET_KEYS
     return MAX_PANE_UNSET_KEYS
+
+
+def parse_tmux_global_env( show_environment_output ):
+    """
+    Parse `tmux show-environment -g` output into a mapping.
+
+    tmux emits exactly two line shapes: `KEY=value` (set in the server's global
+    env) and `-KEY` (marked unset). Anything else is an INSTRUMENT failure — for
+    example a value carrying a newline, which line-parsing cannot attribute — and
+    it fails LOUD rather than silently skipping: a line dropped here is a hostile
+    variable silently waved through the OSQ-6 server check, and "I could not
+    parse" must never be reported as "the server is clean."
+
+    Requires:
+        - show_environment_output is a string (possibly empty — an EMPTY string
+          parses to an empty mapping; whether emptiness is trustworthy is the
+          CALLER's burden: it must check the tmux exit status, because a failed
+          command and a clean server both print nothing)
+
+    Ensures:
+        - returns a dict of the KEY=value entries
+        - `-KEY` unset markers are excluded (the server saying "unset" is
+          exactly the state the guard wants)
+
+    Raises:
+        - VertexEnvError on a line that is neither `KEY=value` nor `-KEY`
+    """
+    server_env = {}
+    for line in show_environment_output.splitlines():
+        if not line or line.startswith( "-" ):
+            continue
+        if "=" not in line:
+            raise VertexEnvError(
+                f"Cannot parse `tmux show-environment -g` line {line!r}: it is neither "
+                f"KEY=value nor -KEY. Refusing to guess — a mis-parsed line here is a "
+                f"hostile variable silently waved through the server-env check."
+            )
+        key, _, value = line.partition( "=" )
+        server_env[ key ] = value
+    return server_env
+
+
+def assert_server_env_is_vertex_free( server_env ):
+    """
+    OSQ-6, the EXISTING-server half: refuse when the tmux server's global env
+    carries any Vertex toggle or hostile key.
+
+    The pane unset cannot fix this: it cleanses ONE pane's shell, while the
+    server's frozen env keeps handing the same keys to every OTHER session on
+    the socket — including ones not launched through the guarded launcher.
+    Silently scrubbing around a tainted server moves the failure to whoever
+    looks last (C1: the guard was green because it was checking a room the
+    model was never in).
+
+    BLAST RADIUS, deliberate: while the server env is tainted, EVERY launch on
+    this socket refuses — Max ones included — until it is cleansed. That is the
+    point: a tainted server mis-bills sessions that never asked, so the loud
+    failure belongs to the one person who can fix it once, not to the N future
+    sessions that would each inherit it silently.
+
+    Requires:
+        - server_env is a mapping (parse_tmux_global_env of the -g output)
+
+    Ensures:
+        - returns None when no refusal key carries a truthy value
+
+    Raises:
+        - VertexEnvError naming EVERY offender, with per-key surgical
+          remediation (`tmux set-environment -g -u <KEY>` — never a server
+          kill; this fleet has died five times from a kill that "knew" its
+          target)
+    """
+    offenders = sorted( key for key in SERVER_TAINT_REFUSAL_KEYS if server_env.get( key ) )
+    if offenders:
+        remedies = "; ".join( f"tmux set-environment -g -u {key}" for key in offenders )
+        raise VertexEnvError(
+            f"Refusing to launch: the EXISTING tmux server's global env is TAINTED — "
+            f"{', '.join( offenders )}. Every session on this socket inherits these keys "
+            f"(OSQ-6): a Max session gets billed for a toggle it never asked for, or a "
+            f"single model is routed to another region where it runs, bills, and logs "
+            f"nothing. NOTE THE BLAST RADIUS: every launch on this socket will refuse "
+            f"until the server env is cleansed — deliberately, because the alternative "
+            f"is N sessions inheriting the taint silently. Cleanse surgically (no server "
+            f"kill): {remedies}."
+        )
+
+
+def pane_guard( env=None, vertex_path=False ):
+    """
+    §5c guard-table row 2 — the clear-or-assert set, executed IN THE PANE.
+
+    C1: every earlier revision ran its checks in the LAUNCHER's shell, and
+    `claude` does not run there — it runs in the pane, on the frozen tmux
+    server env the launcher never saw. A guard that fires in the wrong process
+    is not a guard (F-A10). The launcher writes THIS call into the pane command
+    AFTER the unset and BEFORE `claude` (post `-e`, pre `claude`), so the pane
+    dies non-zero — before the first token — when it is not the environment its
+    banner claims.
+
+    Two jobs, both directions:
+
+    SCRUB VERIFICATION (both paths). Every key the pane was told to unset must
+    actually be GONE. The unset and this check run in the same shell, so the
+    only way to fail is the class Arnold's F4 named: the scrub silently did not
+    happen (an empty derivation, a 2>/dev/null eating the error). The scrub's
+    postcondition is asserted, never assumed.
+
+    TOGGLE VERIFICATION.
+      VERTEX path — the three toggle keys must be PRESENT and exact, the region
+      certified, every model pin exactly the pin. This is the P0 as a runtime
+      guard: a --vertex pane that is not actually on Vertex REFUSES TO START
+      instead of running on Max under a metered-billing banner. The banner can
+      no longer lie quietly.
+      MAX path — covered by scrub verification: MAX_PANE_UNSET_KEYS includes the
+      toggle keys, so a Max pane carrying CLAUDE_CODE_USE_VERTEX dies here
+      instead of being silently billed (OSQ-6's victim, guarded at last).
+
+    Requires:
+        - env is a mapping (defaults to os.environ — the pane's REAL env, which
+          is the whole point)
+        - vertex_path is a bool: True on the --vertex path, False on the Max path
+
+    Ensures:
+        - returns None when the pane env matches what its path promises
+
+    Raises:
+        - VertexEnvError naming every offending key, before `claude` starts
+    """
+    if env is None:
+        env = os.environ
+
+    survivors = sorted( key for key in pane_unset_keys( vertex_path ) if env.get( key ) )
+    if survivors:
+        raise VertexEnvError(
+            f"Refusing to start claude: the pane scrub DID NOT HAPPEN (or did not cover) — "
+            f"{', '.join( survivors )} survived into the pane env. The unset runs in this "
+            f"same shell, so a survivor means the scrub list silently failed to derive or "
+            f"apply (the F4 class). Fix the scrub; do not launch around it."
+        )
+
+    if vertex_path:
+        missing = sorted( key for key in VERTEX_SESSION_KEYS if not env.get( key ) )
+        if missing:
+            raise VertexEnvError(
+                f"Refusing to start claude: this pane claims --vertex but "
+                f"{', '.join( missing )} never arrived. The `-e` forward failed or was "
+                f"scrubbed (the P0: a metered-billing banner over a session running on "
+                f"Max). The banner is what a human trusts — it does not get to lie."
+            )
+
+        if env[ "CLAUDE_CODE_USE_VERTEX" ] != "1":
+            raise VertexEnvError(
+                f"Refusing to start claude: CLAUDE_CODE_USE_VERTEX="
+                f"{env[ 'CLAUDE_CODE_USE_VERTEX' ]!r} is not the '1' compose emits — this "
+                f"value did not come from compose_vertex_env(), so its provenance is the "
+                f"frozen server env or a tamper, not the launcher."
+            )
+
+        assert_region_is_certified( env[ "CLOUD_ML_REGION" ] )
+
+        wrong_pins = sorted(
+            pin for pin in MODEL_PINS if env.get( pin ) != MODEL_PINS[ pin ]
+        )
+        if wrong_pins:
+            raise VertexEnvError(
+                f"Refusing to start claude: {', '.join( wrong_pins )} disagree(s) with the "
+                f"shipped MODEL_PINS. A --vertex pane whose pins are absent or altered runs "
+                f"a model nobody authorized or priced — a SILENT MODEL SUBSTITUTION (C5), "
+                f"quieter than a billing leak and harder to notice."
+            )
 
 
 def compose_vertex_env( env=None, project_id=None, region=None ):

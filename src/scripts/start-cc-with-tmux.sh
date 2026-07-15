@@ -124,22 +124,10 @@ except VertexEnvError as error:
     #
     # It also only ever ran on the --vertex path, which is backwards: the MAX path is the
     # one that births a server from an unscrubbed shell. The scrub now runs on BOTH.
-
-    # C1 — THE SCRUB THAT ACTUALLY MATTERS. The born-clean scrub fires only when
-    # WE create the server: the RARE path. The NORMAL path is a server that already
-    # exists, carrying a frozen env this launcher never saw and cannot vouch for — and
-    # `claude` runs THERE, not here. A stale GOOGLE_CLOUD_PROJECT on that server TAKES
-    # PRECEDENCE over ANTHROPIC_VERTEX_PROJECT_ID and bills the WRONG GCP PROJECT,
-    # silently, with every launcher-side guard green.
     #
-    # So we unset the whole set INSIDE THE PANE, in the command `claude` is launched by.
-    # A guard that fires in the wrong process is not a guard (F-A10).
-    VERTEX_PANE_UNSET="$(
-        PYTHONPATH="$LUPIN_ROOT/src:${PYTHONPATH:-}" python3 -c '
-from cosa.utils.vertex_env import PANE_UNSET_KEYS
-print( " ".join( PANE_UNSET_KEYS ) )
-'
-    )"
+    # (R2, Rio 2026-07-15: a DEAD `VERTEX_PANE_UNSET` derivation also lived here — computed,
+    # never consumed; the live scrub is the path-dependent PANE_UNSET_LIST below. Removed.
+    # A dead guard that looks alive is worse than none: the next reader trusts it.)
 
     cat >&2 <<BANNER
 
@@ -217,12 +205,17 @@ INNER=""
 #             arrive via -e, which sets the SESSION env and outranks the frozen server env.
 #
 #   SCRUB ALWAYS WHAT IS HOSTILE. NEVER SCRUB WHAT YOU JUST FORWARDED.
+# R3 (Arnold F4, Rio 2026-07-15): this derivation used to run under 2>/dev/null — it
+# failed CLOSED (set -e kills the script on a non-zero substitution) but SILENTLY: the
+# operator saw a wordless death with the diagnosis eaten. The silencer is gone; a broken
+# derivation now says what broke. And the pane no longer takes the scrub on faith either
+# way — pane_guard (below) asserts the scrub's postcondition IN THE PANE.
 PANE_UNSET_LIST="$(
     PYTHONPATH="$LUPIN_ROOT/src:${PYTHONPATH:-}" VERTEX_PATH="$VERTEX" python3 -c '
 import os
 from cosa.utils.vertex_env import pane_unset_keys
 print( " ".join( pane_unset_keys( vertex_path=os.environ.get( "VERTEX_PATH" ) == "1" ) ) )
-' 2>/dev/null
+'
 )"
 if [[ -n "$PANE_UNSET_LIST" ]]; then
     INNER+="unset $PANE_UNSET_LIST; "
@@ -241,6 +234,16 @@ INNER+="export PYTHONPATH=$(printf '%q' "$LUPIN_ROOT/src:${PYTHONPATH:-}"); "
 if [[ -f "$VENV_ACTIVATE" ]]; then
     INNER+="source $(printf '%q' "$VENV_ACTIVATE"); "
 fi
+# ── C1 / §5c row 2 — THE GUARD IN THE RIGHT PROCESS, AT LAST ─────────────────────────
+# pane_guard() runs HERE: inside the pane, post `-e` (the session env is already
+# applied when this shell starts), post-unset, pre-`claude` — and dies NON-ZERO before
+# the first token when the pane is not what its path promises. It asserts the scrub's
+# postcondition (every unset key actually gone — the F4 class), and on --vertex that
+# the toggle trio ARRIVED intact (the P0 as a runtime guard: the banner cannot lie
+# quietly again). Every earlier revision ran these checks in the launcher's shell;
+# `claude` does not run there (F-A10).
+if [[ "$VERTEX" == "1" ]]; then PANE_GUARD_ARG="True"; else PANE_GUARD_ARG="False"; fi
+INNER+="python3 -c 'from cosa.utils.vertex_env import pane_guard; pane_guard( vertex_path=$PANE_GUARD_ARG )' || exit 1; "
 INNER+="$CLAUDE_CMD"
 
 # Per-project persona CHAINS. Forwarded into the tmux session via -e so the
@@ -377,6 +380,34 @@ from cosa.utils.vertex_env import MAX_PANE_UNSET_KEYS
 print( "\n".join( MAX_PANE_UNSET_KEYS ) )
 '
 )
+
+# ── OSQ-6, THE EXISTING-SERVER HALF (C1's close) ─────────────────────────────────────
+# "Assert the tmux server env is Vertex-free — and, if NO server exists, that the one
+# we create is BORN CLEAN." SERVER_SCRUB below is the born-clean half. THIS is the
+# other half: if a server is already alive on this socket, its FROZEN env is what every
+# pane — this one and every later one — inherits, and the launcher shell's own guards
+# never saw it (a guard that fires in the wrong process is not a guard, F-A10). Read
+# the server's global env and REFUSE, naming every offender, if it carries the toggle
+# or hostile set. BLAST RADIUS (deliberate, stated in the error too): while the server
+# is tainted, EVERY launch on this socket refuses until it is cleansed surgically
+# (`tmux set-environment -g -u <KEY>` — never a server kill).
+#
+# `show-environment -g` failing means NO REACHABLE SERVER (it cannot enumerate what
+# does not exist) — that is NOT read as "clean"; it routes to the born-clean path,
+# where SERVER_SCRUB guards the birth. The failure is SAID, not swallowed (R3's rule).
+if TMUX_GLOBAL_ENV="$( tmux show-environment -g 2>/dev/null )"; then
+    printf '%s\n' "$TMUX_GLOBAL_ENV" | PYTHONPATH="$LUPIN_ROOT/src:${PYTHONPATH:-}" python3 -c '
+import sys
+from cosa.utils.vertex_env import VertexEnvError, assert_server_env_is_vertex_free, parse_tmux_global_env
+try:
+    assert_server_env_is_vertex_free( parse_tmux_global_env( sys.stdin.read() ) )
+except VertexEnvError as error:
+    sys.stderr.write( f"\n[OSQ-6] REFUSING TO LAUNCH: {error}\n\n" )
+    sys.exit( 1 )
+' || exit 1
+else
+    echo "No existing tmux server on this socket — the session below births it under SERVER_SCRUB (born clean)." >&2
+fi
 
 # Check if session already exists
 if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then

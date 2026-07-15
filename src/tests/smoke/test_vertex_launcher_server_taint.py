@@ -40,7 +40,12 @@ from pathlib import Path
 import pytest
 
 import cosa.utils.util as cu
-from cosa.utils.vertex_env import MAX_PANE_UNSET_KEYS, VERTEX_SESSION_KEYS
+from cosa.utils.vertex_env import (
+    MAX_PANE_UNSET_KEYS,
+    MODEL_PINS,
+    VERTEX_REGION_ENV_KEY,
+    VERTEX_SESSION_KEYS,
+)
 from tests.smoke.tmux_isolation import TMUX_ISOLATION_STRIP_KEYS
 
 
@@ -79,12 +84,22 @@ def _launch( launcher, socket_dir, fake_bin, tainted, session_name, vertex=False
     env = dict( os.environ )
     for key in TMUX_ISOLATION_STRIP_KEYS:
         env.pop( key, None )    # do NOT inherit the pane's server socket — $TMUX beats TMUX_TMPDIR (plan §2.5)
+    for key in MAX_PANE_UNSET_KEYS:
+        env.pop( key, None )    # start CLEAN of everything this suite reasons about — only DELIBERATE taint below
     env[ "TMUX_TMPDIR" ] = str( socket_dir )
     env[ "PATH" ]        = f"{fake_bin}:{env['PATH']}"
     env[ "LUPIN_ROOT" ]  = cu.get_project_root()
     env.update( TAINT if tainted else {} )
     for key in ( [] if tainted else TAINT ):
         env.pop( key, None )
+    if vertex:
+        # Synthetic compose inputs: --vertex must compose DETERMINISTICALLY, not skip
+        # when the developer's shell happens to lack GCP config. Zero GCP contact —
+        # compose_vertex_env() is pure env composition and the fake `claude` parks.
+        # (This closed a skip-wearing-a-pass: the P0's own E2E silently skipped in any
+        # environment without LUPIN_GCP_PROJECT_ID — found on the 2026-07-15 baseline.)
+        env[ "LUPIN_GCP_PROJECT_ID" ] = "probe-project-nobody-bills"
+        env[ VERTEX_REGION_ENV_KEY ]  = "global"
 
     args = [ "bash", str( launcher ), "--headless" ] + ( [ "--vertex" ] if vertex else [] ) + [ session_name ]
     return subprocess.run( args, capture_output=True, text=True, env=env, timeout=120 )
@@ -104,8 +119,14 @@ def rig( tmp_path ):
     socket_dir.mkdir()
     fake_bin.mkdir()
 
+    # The fake claude DUMPS ITS OWN ENV before parking (R1, Rio 2026-07-15): the dump is
+    # the pane-PROCESS oracle — what the process sitting in claude's seat actually READ.
+    # The session-table (`show-environment -t`) is NOT that oracle: it happily lists a
+    # `-e`-forwarded key that the pane's own `unset` already deleted from the process —
+    # green on the exact P0 mutant. The dump cannot be: no process, no file; scrubbed
+    # key, no line.
     fake_claude = fake_bin / "claude"
-    fake_claude.write_text( "#!/usr/bin/env bash\nsleep 20\n" )
+    fake_claude.write_text( f'#!/usr/bin/env bash\nenv > "{tmp_path / "claude-env-dump.txt"}"\nsleep 20\n' )
     fake_claude.chmod( 0o755 )
 
     yield socket_dir, fake_bin
@@ -173,29 +194,107 @@ def test_the_probe_can_actually_detect_a_tainted_server( rig, tmp_path ):
 
 
 @pytest.mark.skipif( not shutil.which( "tmux" ), reason="tmux is not installed" )
-def test_the_vertex_path_still_reaches_the_pane_despite_the_server_scrub( rig ):
+def test_the_vertex_path_still_reaches_the_pane_despite_the_server_scrub( rig, tmp_path ):
     """
     THE P0, GUARDED FROM THE OTHER SIDE. We now scrub the toggle keys from the SERVER-BIRTH
     env even under --vertex. That must NOT kill the feature: `-e` sets the SESSION environment,
-    which outranks the frozen server env, so the session still carries the toggle.
+    which outranks the frozen server env, so the toggle must reach THE PROCESS IN CLAUDE'S SEAT.
 
     If this ever goes red, --vertex has become a lie again — a metered-billing banner over a
     session running on Max. It failed safe last time. The banner did not.
+
+    TWO ORACLE FIXES (2026-07-15):
+
+    🔴 R1 (Rio) — the old oracle was `show-environment -t vertex-sess`, the SESSION TABLE.
+    That table lists what `-e` registered, NOT what the pane process reads: on the exact P0
+    mutant (the pane's own `unset` eating the just-forwarded keys) the table still says
+    CLAUDE_CODE_USE_VERTEX=1 while claude runs on Max — GREEN ON THE BUG IT EXISTS TO CATCH.
+    The oracle is now the fake claude's own env dump: what the process actually READ. No
+    process → no file; scrubbed key → no line. It can come out otherwise.
+
+    🔴 The skip-wearing-a-pass — this test used to `pytest.skip` when compose refused (no
+    LUPIN_GCP_PROJECT_ID in the developer's shell), so the P0's OWN E2E silently did not run
+    in exactly the environments most CI-like. _launch now seeds synthetic compose inputs
+    (zero GCP contact); a refusal is a FAILURE, never a skip.
     """
     socket_dir, fake_bin = rig
 
     result = _launch(
         LAUNCHER, socket_dir, fake_bin, tainted=False, session_name="vertex-sess", vertex=True
     )
-    if result.returncode != 0:
-        pytest.skip( f"--vertex refused to compose in this environment: {result.stderr.strip()[:200]}" )
+    assert result.returncode == 0, (
+        f"--vertex refused to launch with synthetic compose inputs on a private socket — "
+        f"there is nothing environmental left to blame. stderr: {result.stderr.strip()[:400]}"
+    )
 
-    time.sleep( 1.0 )
-    session_env = _tmux( socket_dir, "show-environment", "-t", "vertex-sess" ).stdout
+    # The pane-PROCESS oracle: wait (bounded, condition-driven — no blind sleep) for the
+    # process in claude's seat to have dumped the env it was actually born with.
+    dump     = tmp_path / "claude-env-dump.txt"
+    deadline = time.time() + 15.0
+    while time.time() < deadline and not dump.exists():
+        time.sleep( 0.2 )
+    assert dump.exists(), (
+        "fake claude NEVER RAN: the pane died before reaching claude (a pane_guard refusal, "
+        "a broken INNER, or the session never spawned). The session-table oracle would have "
+        "happily gone green here — this is why the dump is the oracle."
+    )
 
-    assert "CLAUDE_CODE_USE_VERTEX=1" in session_env, (
-        "--vertex did not put the toggle on the SESSION. The server scrub has eaten the feature "
-        "it protects — the P0, reintroduced from the other end."
+    pane_process_env = dump.read_text()
+    for key, value in ( ( "CLAUDE_CODE_USE_VERTEX", "1" ), ):
+        assert f"{key}={value}" in pane_process_env, (
+            f"--vertex did not put {key}={value} in front of THE PROCESS IN CLAUDE'S SEAT. "
+            f"The scrub has eaten the feature it protects — the P0, reintroduced. (The session "
+            f"TABLE may still list it; the table is not where claude reads.)"
+        )
+    for pin, pinned_model in MODEL_PINS.items():
+        assert f"{pin}={pinned_model}" in pane_process_env, (
+            f"{pin} did not reach the pane process — a --vertex session running an unpinned "
+            f"model resolves `opus` to an OLDER Opus, silently."
+        )
+
+
+@pytest.mark.skipif( not shutil.which( "tmux" ), reason="tmux is not installed" )
+def test_the_pane_process_oracle_goes_red_on_the_p0_mutant( rig, tmp_path ):
+    """
+    🔴 THE NEGATIVE CONTROL FOR R1 — the reason the dump oracle is admissible at all.
+
+    Reintroduce the P0 in a COPY of the launcher: force the MAX scrub set onto the
+    --vertex path (VERTEX_PATH="0" in the derivation), so the pane's first act deletes
+    the toggle keys `-e` just forwarded. Against that mutant the old session-table
+    oracle stayed GREEN — the table lists what -e registered, and -e did register the
+    keys before the pane ate them. The pane-process oracle must come out OTHERWISE:
+    either pane_guard kills the pane before claude ever runs (no dump file), or — if
+    the guard were somehow quiet — the dump exists but lacks the toggle. Both readings
+    are RED. An oracle that cannot go red on the bug it exists to catch is decoration.
+    """
+    socket_dir, fake_bin = rig
+
+    source = LAUNCHER.read_text()
+    assert 'VERTEX_PATH="$VERTEX"' in source, (
+        "cannot find the path-dependent scrub derivation to mutate — the control cannot "
+        "mutate what it cannot find (did the derivation move or get renamed?)"
+    )
+    mutant = tmp_path / "p0-mutant-launcher.sh"
+    mutant.write_text( source.replace( 'VERTEX_PATH="$VERTEX"', 'VERTEX_PATH="0"' ) )
+
+    result = _launch(
+        mutant, socket_dir, fake_bin, tainted=False, session_name="p0-mutant-sess", vertex=True
+    )
+    assert result.returncode == 0, f"the P0 mutant failed to launch at all: {result.stderr[:400]}"
+
+    # Bounded, condition-driven wait sized by the positive path (test above: dump lands
+    # well under 2s). If nothing has appeared by 6s, the pane died pre-claude — which is
+    # pane_guard doing its job, and a RED reading for the mutant either way.
+    dump     = tmp_path / "claude-env-dump.txt"
+    deadline = time.time() + 6.0
+    while time.time() < deadline and not dump.exists():
+        time.sleep( 0.2 )
+
+    oracle_saw_the_toggle = dump.exists() and "CLAUDE_CODE_USE_VERTEX=1" in dump.read_text()
+    assert not oracle_saw_the_toggle, (
+        "THE ORACLE IS BLIND: the P0 mutant scrubbed the toggle out of its own pane, yet "
+        "the pane-process dump still reads CLAUDE_CODE_USE_VERTEX=1. Until this control "
+        "goes red on the mutant, the green above is worth nothing."
     )
 
 
