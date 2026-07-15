@@ -1,6 +1,31 @@
 # TODO
 
-Last updated: 2026-07-12 (Session 446ce8a0, Mr. Radio 🦉 — GCP code-delivery + arbiter-trilogy session-end)
+Last updated: 2026-07-15 (session bf549da1, Mr. Radio 🦉 — tmux fleet-killer cascade COMPLETE: Step 8+9 executed, OSQ-1 Rick-confirmed, SWE-team implementation phase next)
+
+---
+
+## 📋 DECISIONS LOG 2026-07-15 (Mr. Radio 🦉, session bf549da1) — tmux fleet-killer cascade close-out
+
+- **Cascade `cascade-tmux-fleet-killer` COMPLETE** (the P0 below, EXECUTED): 3 sections × 3 stages, 34 findings (0 foundational, 0 votes, 0 user escalations), ~55 min. Plan final-current on disk; Step-9 revision-handoff doc: `src/rnd/v0.1.9/2026.07.15-cascade-tmux-fleet-killer-revision-handoff.md`.
+- **OSQ-1 CONFIRMED (Rick, /plan-decide one-touch, 03:26Z)**: execve kill-tracer ships, ordered LAST in §10 — install-only-on-request preserves the sudo gate.
+- **Implementation = FULL SWE-team workflow (Rick, voice, via María relay 03:27Z)**: `/spin-up-swe-team` crew (Implementer + Reviewer + Tester), implementer seat cold-context-briefed on the handoff doc + plan ONLY.
+- **OSQ-4 ruled by concurrence**: env-strip sufficient, `-S`/`-L` NOT adopted; AC5 = standing precedence canary. **OSQ-5**: vertex WIP lane orphaned (creator c8a18353 died 9 s after launching its own killer pytest) — cleared for edit+restore; vertex-lane continuity store task `bd0b728b` minted.
+- [ ] **v1.N candidate: cascade-tmux-fleet-killer workflow-guidance batch (19 items)** (cascade cascade-tmux-fleet-killer, Manager Mr. Radio 🦉, filed 2026-07-15). Five manager moves ran ahead of the codified playbook (forward cross-section folds under a ratified ownership map · ownership-map-at-ratification · conditional ratify-by-concurrence · carried-items handoff field · probe-before-declare with delivery-clock); full 19-item all-seats index in handoff doc §6. Proposed fold targets: plan-review-cascaded.md §Step 5/§decomposition, common.md §Step 5/§Heartbeat Handling, defaults.md §Severity-tag metadata schema. Source: kind: manager_self_audit_sweep post on cascade-tmux-fleet-killer at 2026-07-15T03:33:43Z.
+
+## ✅ P0 EXECUTED 2026-07-15 — cascaded review of the tmux fleet-killer fix plan (kept for the record)
+
+**Priority: 0 (HIGHEST). Assignee: Mr. Radio. Filed: 2026-07-14 (session 2474504f, Rick voice directive).**
+
+- **[LUPIN] Stand up a cascaded plan-review team — with María on it — to review the tmux fleet-killer fix plan.**
+  - **Plan under review**: `src/rnd/v0.1.9/2026.07.14-tmux-fleet-killer-vertex-taint-test-isolation-leak-fix-plan.md`
+  - **Why P0**: the shared user tmux server died **5× on 2026-07-14** (14:12, 14:55, 19:21, 20:04, 21:13 EDT), each death **atomically killing every Claude Code session across all three projects** (lupin, planning-is-prompting, google-skills-distillation). This is an active, recurring fleet-wide outage.
+  - **Root cause (proven, in the plan)**: `src/tests/smoke/test_vertex_launcher_server_taint.py`'s fixture teardown runs `tmux kill-server`; its `_tmux()`/`_launch()` inherit `$TMUX` from the pane, and on **tmux 3.2a `$TMUX` beats `TMUX_TMPDIR`** for socket selection (verified live via a read-only precedence probe — the file-history "TMUX_TMPDIR beats $TMUX" note was a non-pane false-green). So the "isolated" kill-server actually nukes the fleet's DEFAULT socket every time the test runs from inside a pane.
+  - **Interim mitigation already in place**: the test is **quarantined** out of the collectable tree → `src/tmp/test_vertex_launcher_server_taint.py.QUARANTINED-2026.07.14` (gitignored, non-`.py`, pytest-uncollectable). It stops the bleeding but is NOT the fix. The latent class hazard (any bare `tmux` verb from a pane hits the default socket) persists until the conftest guard lands.
+  - **Review shape**: sequential cascaded plan-review (REUSE → Pass 1 correctness → **Pass 2 ownership audit = María's lane**). The plan's §8 Q1–Q5 are the review agenda (attribution residual, other-tree guards, conftest shape, `-S`/`-L` defense-in-depth, and the ownership/collision check on the untracked peer-WIP test file).
+  - **Rick's plan**: he will **kill this session and restart a fresh one under tmux + the cosa-voice MCP**, then **kick off the review himself** so he can manage it remotely via the notifications client. Mr. Radio's job is to have the review **team stood up (with María)** and ready to run.
+  - **Hard gate**: **NO fix code until the cascaded review clears.** Diagnosis + plan + quarantine only, so far.
+
+---
 
 ## 📋 DECISIONS LOG 2026-07-12 EVENING (Mr. Radio 🦉, session 446ce8a0) — GCP code-delivery doctrine + arbiter trilogy
 
