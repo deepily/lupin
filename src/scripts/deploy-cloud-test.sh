@@ -109,7 +109,11 @@ deploy_code() {
 deploy_deps() {
     local tag="1.$(date -u +%Y%m%d%H%M)"   # candidate tag, never 'latest'
     log "AXIS-B: building image $tag (deps changed) via cloud-run-build.sh"
-    export LUPIN_GCP_PROJECT_ID="${LUPIN_GCP_PROJECT_ID:-hello-world-foo-423219}"
+    # Fail loud — a `:-` default hands a caller a project they never chose, and
+    # GOOGLE_CLOUD_PROJECT/GCLOUD_PROJECT outrank ANTHROPIC_VERTEX_PROJECT_ID, so a
+    # silent default here can bill the wrong project while every guard reports green.
+    : "${LUPIN_GCP_PROJECT_ID:?Set LUPIN_GCP_PROJECT_ID (no sandbox default — copy src/scripts/cloud-run.env.example to cloud-run.env)}"
+    export LUPIN_GCP_PROJECT_ID
     export LUPIN_GCP_AR_REPO="${LUPIN_GCP_AR_REPO:-lupin-images}"
     printf 'n\nn\n' | ./src/scripts/cloud-run-build.sh "$tag"
     log "on-VM: AR login, bump LUPIN_IMAGE -> $tag, pull, force-recreate"

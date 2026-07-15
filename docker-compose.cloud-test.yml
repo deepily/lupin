@@ -11,7 +11,7 @@
 #                (src/cosa/rest/db/database.py:90) → REQUIRES the Cloud SQL Auth Proxy.
 #
 # Required env on the VM (e.g. a git-ignored cloud-test.env, or `--env-file`):
-#   CLOUD_SQL_CONNECTION_NAME=hello-world-foo-423219:us-central1:lupin-pg16-test
+#   CLOUD_SQL_CONNECTION_NAME=<your-gcp-project-id>:us-central1:lupin-pg16-test
 #   DB_PASSWORD=<from Secret Manager `lupin-db-password` at deploy>
 #   LUPIN_IMAGE=<AR path>/lupin:1.1.0      (or local `lupin:1.1.0`)
 # Optional (defaults shown):

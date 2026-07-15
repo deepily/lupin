@@ -51,7 +51,7 @@ from cosa.utils.vertex_logging import (
 )
 
 
-PROJECT = "hello-world-foo-423219"
+PROJECT = "unit-test-project-000000"
 
 
 class StubReadout:

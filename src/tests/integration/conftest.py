@@ -20,9 +20,16 @@ import os
 # This ensures config_mgr singleton initializes with Testing block
 os.environ["LUPIN_CONFIG_MGR_CLI_ARGS"] = "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing"
 
-# Set GCS environment variables for LanceDB GCS integration tests
-os.environ["GOOGLE_CLOUD_PROJECT"] = "hello-world-foo-423219"
-os.environ["GOOGLE_CLOUD_LOCATION"] = "us-central1"
+# GCS (LanceDB) integration tests resolve the project through google.auth.default(),
+# which reads ADC — see gcs_utils.py. They do NOT need GOOGLE_CLOUD_PROJECT, and
+# hardcoding it here is actively dangerous: GOOGLE_CLOUD_PROJECT OUTRANKS
+# ANTHROPIC_VERTEX_PROJECT_ID for Vertex clients, so a literal here can silently
+# redirect metered Vertex traffic to the wrong project and defeat the project guard.
+# Honor an operator-set project; otherwise leave unset and let ADC decide.
+_gcp_project = os.environ.get( "LUPIN_GCP_PROJECT_ID" )
+if _gcp_project:
+    os.environ[ "GOOGLE_CLOUD_PROJECT" ]  = _gcp_project
+    os.environ[ "GOOGLE_CLOUD_LOCATION" ] = os.environ.get( "LUPIN_GCP_REGION", "us-central1" )
 
 import pytest
 import requests

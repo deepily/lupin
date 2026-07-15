@@ -35,9 +35,12 @@ def _read( rel_path ):
         return f.read()
 
 
-def test_no_hardcoded_sandbox_project():
-    for rel in CLOUD_RUN_SCRIPTS:
-        assert "hello-world-foo-423219" not in _read( rel ), f"sandbox project hardcoded in {rel}"
+# test_no_hardcoded_sandbox_project() RETIRED 2026-07-13 — superseded by
+# src/tests/unit/test_no_hardcoded_gcp_identifiers.py. It grepped the hardcoded
+# CLOUD_RUN_SCRIPTS list above (3 files) while 28 tracked files carried the literal,
+# so it passed vacuously and was cited as proof the rule was "enforced forever."
+# A hardcoded allowlist is a BOUNDED check and cannot support a completeness claim.
+# The replacement inverts it: glob over `git ls-files`, so nothing has to be remembered.
 
 
 def test_scripts_source_shared_resolver():

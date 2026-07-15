@@ -37,7 +37,7 @@ def _load_runner():
 
 runner_module = _load_runner()
 
-PROJECT = "hello-world-foo-423219"
+PROJECT = "unit-test-project-000000"
 BASE    = [ "--project-id", PROJECT ]
 
 SCRIPT_PATH = os.path.join( os.environ[ "LUPIN_ROOT" ], "src", "scripts", "verify_vertex_logging.py" )

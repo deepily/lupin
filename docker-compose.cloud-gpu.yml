@@ -17,7 +17,7 @@
 #
 # Required env on the VM (e.g. a git-ignored cloud-gpu.env, or `--env-file`):
 #   LUPIN_MODEL_SERVER_URL=https://lupin-model-server-XXXX.run.app   # Cloud Run output
-#   CLOUD_SQL_CONNECTION_NAME=hello-world-foo-423219:us-central1:lupin-pg16-test
+#   CLOUD_SQL_CONNECTION_NAME=<your-gcp-project-id>:us-central1:lupin-pg16-test
 #   DB_PASSWORD=<from Secret Manager `lupin-db-password` at deploy>
 #   LUPIN_IMAGE=<AR path>/lupin:1.1.0      (or local `lupin:1.1.0`)
 # Optional (defaults shown):
