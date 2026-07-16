@@ -1612,6 +1612,23 @@ The notification UI groups notifications into conversations using the sender ID:
 - Used by the frontend to implement efficient pagination
 - Loads only the dates the user scrolls to
 
+**Reaped-Sender Roster Eviction** (`GET /api/notifications/senders-visible/{email}` — the focus-bar roster; bug `ee59d5ed`):
+- The visible-senders roster **durably excludes** any `sender_id` that has a persisted
+  `type="session_reaped"` marker row for the recipient. When a session is reaped —
+  by a normal `dismiss_sessions` **or** by the heartbeat-arbiter orphan-bridge sweep —
+  a `session_reaped` notification is persisted, and from then on that sender is absent
+  from the roster, **including across a page refresh** (`get_visible_senders` →
+  `NotificationRepository.get_sender_last_activities_visible`).
+- This is **roster-only** and **history-preserving**: the Conversation View,
+  Date Grouping, and Sender-Dates endpoints above are **unaffected** — a reaped
+  sender's notifications remain fully readable in history/audit. The eviction is a
+  roster-query exclusion, **not** an `is_hidden` soft-delete (`is_hidden=True` would
+  also hide the rows from every history view — that is the user's clear-conversation
+  action, deliberately NOT used here).
+- Roster is a *liveness* view (a reaped session is gone); history is the *durable
+  record* (the reaped session's messages stay). Re-spawn-safe: a new session has a new
+  `sender_id` (8-hex session suffix), so it is never masked by a prior session's marker.
+
 ### 7.6 Session Routing
 
 Session IDs enable multiple Claude Code sessions working on the same project to maintain
