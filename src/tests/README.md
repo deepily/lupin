@@ -35,6 +35,14 @@ pytest src/tests/unit/test_jwt_service.py
 pytest src/tests/unit/test_jwt_service.py::test_create_access_token_valid_user
 ```
 
+**Bare-run env** (bug 9fe8b80f): only `LUPIN_ROOT` must be exported —
+`LUPIN_ROOT=/path/to/lupin pytest src/tests/unit/`. The top-level
+`src/tests/conftest.py` floors `LUPIN_CONFIG_MGR_CLI_ARGS` to the
+`Lupin: Development` block (via `os.environ.setdefault`), so files that
+instantiate `ConfigurationManager` at import time collect cleanly without a
+manual export. Export `LUPIN_CONFIG_MGR_CLI_ARGS` yourself to override the
+block (e.g. `Lupin: Testing`); an explicit value always wins over the floor.
+
 ---
 
 ### 2. Smoke Tests (Inline `quick_smoke_test()` Functions)
