@@ -9,7 +9,7 @@ from typing import Optional, List, Dict
 from datetime import datetime, timedelta, timezone
 import uuid
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 from sqlalchemy import func, desc, case
 
 from cosa.rest.postgres_models import Notification
@@ -945,11 +945,18 @@ class NotificationRepository( BaseRepository[Notification] ):
         # (that session is dead). Collision window: a NEW live session reusing an
         # already-reaped 8-hex suffix is ~1/2**32 — negligible, accepted explicitly.
         # The type + sender_id + recipient_id single-column indexes back the subquery.
-        reaped_sender_ids = self.session.query( Notification.sender_id ).filter(
-            Notification.recipient_id == recipient_id,
-            Notification.type         == "session_reaped"
+        # Correlated NOT EXISTS (null-safe): NOT-IN would empty the whole roster if the
+        # subquery ever yielded a NULL sender_id (SQL `x NOT IN (…, NULL)` → NULL → no
+        # rows). sender_id is the NOT-NULL routing key so it is theoretical, but
+        # NOT EXISTS is the robust idiom and degrades gracefully.
+        reaped_marker = aliased( Notification )
+        query = query.filter(
+            ~self.session.query( reaped_marker ).filter(
+                reaped_marker.sender_id   == Notification.sender_id,   # correlate to the outer row
+                reaped_marker.recipient_id == recipient_id,
+                reaped_marker.type         == "session_reaped",
+            ).exists()
         )
-        query = query.filter( ~Notification.sender_id.in_( reaped_sender_ids ) )
 
         results = query.group_by(
             Notification.sender_id

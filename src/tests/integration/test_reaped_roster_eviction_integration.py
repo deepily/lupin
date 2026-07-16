@@ -74,10 +74,17 @@ def test_reaped_sender_evicted_from_roster_but_history_preserved():
                 "reaped sender MUST be durably evicted from the roster (across refresh)"
 
             # ── AC-3: history for the reaped sender is PRESERVED (not hidden) ──
+            # The real history getter returns the reaped sender's rows (ORM objects).
             convo = repo.get_sender_conversation( _REAPED_SENDER, rid_uuid )
             assert len( convo ) >= 1, "reaped sender's notification history must be preserved (audit)"
-            # its work message is still readable in history
-            assert any( "probe task" in ( n.get( "message" ) or "" ) for n in convo ), convo
+            # And its non-marker 'task' work row is still visible (is_hidden=false) —
+            # a raw-SQL check (robust against ORM detachment) that the roster eviction
+            # did NOT hide the reaped sender's actual history.
+            visible_task = session.execute(
+                text( "SELECT count(*) FROM notifications WHERE id = :pid AND is_hidden = false" ),
+                { "pid": _ID_REAPED_TASK },
+            ).scalar()
+            assert visible_task == 1, "reaped sender's work notification must remain visible in history"
 
             # ── rider 1: the session_reaped marker ROW exists (the durability) ──
             session.expire_all()
