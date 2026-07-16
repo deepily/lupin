@@ -1,6 +1,17 @@
 # TODO
 
-Last updated: 2026-07-15 (session bf549da1, Mr. Radio 🦉 — tmux fleet-killer cascade COMPLETE: Step 8+9 executed, OSQ-1 Rick-confirmed, SWE-team implementation phase next)
+Last updated: 2026-07-16 (session da517b03, Mr. Radio 🦉 — GCP deployment arc + 4-merge bug-fix sprint; end-of-session commit+push)
+
+---
+
+## 📋 DECISIONS LOG 2026-07-15 EVENING (Mr. Radio 🦉, session da517b03) — GCP deployment arc + bug-fix sprint
+
+- **⏳ GCP Cloud-VM config-block naming — DECIDED, IMPLEMENTATION DEFERRED TO MORNING (Rick, voice, 2026-07-15 ~22:30 EDT).** Two named blocks: **`[Lupin: Cloud VM Development]`** for daily dev on **:7999** (the current cloud-gpu stack) · **`[Lupin: Cloud VM Testing]`** for **:8000** (future, when the test stack is stood up). **Impl plan (NOT YET DONE — first thing AM):** add `[Lupin: Cloud VM Development]` to `src/conf/lupin-app.ini` inheriting `Lupin: Testing-GCS` + overriding ONE key `model server url = https://lupin-model-server-um6r4fv7nq-uc.a.run.app` (Cloud Run; https ⇒ port 443 implicit, no separate port key); repoint `docker-compose.cloud-gpu.yml` `config_block_id` → **`Lupin:+Cloud+VM+Development`** (⚠️ ConfigurationManager decodes `+`→space at `src/cosa/config/configuration_manager.py:151`, so spaces in the block name become `+` in the CLI arg) AND **drop** its `LUPIN_MODEL_SERVER_URL: ${...:?...}` env line (env wins over INI — the override must go for the block to be authoritative). `cloud-test` stays on `Testing-GCS` until the :8000 work reconceptualizes it as Cloud VM Testing (tracked `f3b5ecf3`). Full runbook + ground truth: `src/rnd/v0.1.9/2026.07.15-gcp-vm-getting-started-runbook.md` §0.5/§3.
+- **GCP architecture confirmed (verified live):** two deployment targets — Cloud Run `lupin-model-server` (1 GPU, `minScale:0`/`maxScale:1` scale-to-zero → $0 GPU when idle; cold-starts on call) + VM `lupin-host-test` FastAPI on :7999 (**no GPU** — e2-standard-8; offloads inference to Cloud Run via `LUPIN_MODEL_SERVER_URL`). Rick's work CC routes through an **InTraffic adapter → Model-Garden Opus 4.8** (a Vertex path) — so the bare-slug Opus clamps ARE on the critical path; ⚠️ the $50/day clamp (500 out-TPM) will throttle that same traffic once granted → size to real work throughput. Readiness review: `src/rnd/v0.1.9/2026.07.15-gcp-pilot-readiness-review.md`.
+- **Bug-fix sprint — 4 merges landed (local → pushed at session-end):** `ef10c5b6` focus-bar invisibility durable fix (Cheech) · `ee59d5ed` orphan-bridge reap-survival (Cheech; Change 2 arbiter sweep **DEFAULT-OFF** — Rick flips `arbiter orphan bridge sweep enabled` + restarts `lupin-arbiter-app.service` to activate fleet-wide) · `260dba16` vertex GCP-id guard greened, 3 offenders (Clayton) · `9fe8b80f` bare-unit/smoke config-collection floor in the parent conftest (Clayton). `ee59d5ed` CLOSED end-to-end (:8000 gate true-green, ts-1956de25).
+- **Banked (optional):** Cheech's by-id AC-3 strengthening (`bcd34ba6`) — gate already honest+green; fold in next time the integration test is touched.
+- **GCP deploy gaps tracked:** `f3b5ecf3` (bring up :8000 test server on VM — remap cloud-test to `8000:7999`) · `53bac23a` (provision + actuate :8001 arbiter on the VM, `provision-arbiter-on-vm.sh`).
+- **Pending (Rick's action / gates):** flip the arbiter orphan-sweep flag (activates ee59d5ed Change 2) · part-2 bare-slug clamp paste · enforcement+cost canary · VM re-suspend · coexist-vs-single-stack on the VM · clamp sizing vs Model-Garden throughput · the config-block impl above.
 
 ---
 
