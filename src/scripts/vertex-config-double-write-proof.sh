@@ -5,7 +5,7 @@
 # THE CLAIM UNDER TEST: §4d's "setPublisherModelConfig is retry-safe by construction"
 # was an INFERENCE from a gap in the schema (no updateMask ⇒ full-object SET ⇒ a
 # repeat of the same payload should be a no-op). Now that a config EXISTS on
-# hello-world-foo-423219 (LRO 847218789178146816), the claim is PROVABLE:
+# the sandbox project (LRO 847218789178146816), the claim is PROVABLE:
 #   read config → re-POST the IDENTICAL object → poll the LRO to done →
 #   assert no error → read back → diff unchanged.
 #

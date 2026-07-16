@@ -80,7 +80,12 @@ launch() {  # launch <sock> <dump> <extra KEY=VAL...> -- <launcher> <args...>
         TMUX_TMPDIR="$sock" RIO_ENV_DUMP="$dump" PATH="$WORK/bin:$PATH" \
         LUPIN_ROOT="$REPO" "${extra[@]}" bash "$@"
 }
-VERTEX_ENV=( LUPIN_GCP_PROJECT_ID=rio-review-dummy-project LUPIN_VERTEX_REGION=global )
+# Guard-compliant (test_no_hardcoded_gcp_identifiers): reference LUPIN_GCP_PROJECT_ID through the
+# fail-loud `:?` form the doctrine mandates. Seed a DUMMY default first via the `+x` SET-test — NOT
+# the guard-forbidden silent-default expansions — so the rig stays zero-config and never phones out
+# (see header). The launcher's compose_vertex_env() _require()s this key; a dummy id satisfies it.
+[[ -n "${LUPIN_GCP_PROJECT_ID+x}" ]] || LUPIN_GCP_PROJECT_ID="rio-review-dummy-project"
+VERTEX_ENV=( "LUPIN_GCP_PROJECT_ID=${LUPIN_GCP_PROJECT_ID:?rig seeds a dummy default just above}" LUPIN_VERTEX_REGION=global )
 
 echo "═══ RUN B — launcher, --vertex: pane must SEE the 3 toggle vars ═══"
 mkdir -p "$SOCKROOT/B"

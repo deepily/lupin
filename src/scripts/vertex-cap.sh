@@ -36,7 +36,12 @@
 #
 set -euo pipefail
 
-PROJECT="hello-world-foo-423219"
+# Resolve the GCP project through the shared fail-loud resolver (cloud-run-config.sh): it reads the
+# git-ignored src/scripts/cloud-run.env, honors an env override, and FAILS LOUD if LUPIN_GCP_PROJECT_ID
+# is unset — no sandbox default can silently leak onto this LIVE-quota tool (the wrong id would clamp
+# the wrong project). cloud-run.env already carries the id, so vertex-cap stays zero-config for Rick.
+source "$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )/cloud-run-config.sh"
+PROJECT="${PROJECT_ID}"
 API="https://cloudquotas.googleapis.com/v1"
 PARENT="projects/${PROJECT}/locations/global"
 CONTACT_EMAIL="ricardo.felipe.ruiz@gmail.com"
