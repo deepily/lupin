@@ -1043,6 +1043,38 @@ def test_worktree_janitor_hiccup_is_swallowed( tmp_path ):
     assert summary[ "worktrees_swept" ] == 0     # demoted to 0, poll completes
 
 
+# ── ee59d5ed ORPHAN-BRIDGE JANITOR: per-poll lineage-independent reap seam ───────
+
+def test_bridge_sweep_inert_by_default( tmp_path ):
+    # None seam → no sweep, byte-identical to today; summary reports 0.
+    summary = _make_job( tmp_path )._poll_once()
+    assert summary[ "bridges_reaped" ] == 0
+
+
+def test_bridge_sweep_fires_when_wired( tmp_path ):
+    calls = []
+    def sweep():
+        calls.append( 1 )
+        return { "reaped": [ { "session_id": "s-1" }, { "session_id": "s-2" } ],
+                 "skipped": [], "errors": [] }
+    summary = _make_job( tmp_path, bridge_sweep_fn=sweep )._poll_once()
+    assert calls == [ 1 ]                         # invoked exactly once per poll
+    assert summary[ "bridges_reaped" ] == 2       # reaped-count surfaced to the journal
+
+
+def test_bridge_sweep_hiccup_is_swallowed( tmp_path ):
+    # Observer invariant: a sweep exception must NOT kill the poll.
+    def sweep(): raise RuntimeError( "sweep boom" )
+    summary = _make_job( tmp_path, bridge_sweep_fn=sweep )._poll_once()
+    assert summary[ "bridges_reaped" ] == 0       # demoted to 0, poll completes
+
+
+def test_bridge_sweep_non_dict_return_counts_zero( tmp_path ):
+    # A seam returning a non-dict (contract violation) is demoted to 0, not crashed.
+    summary = _make_job( tmp_path, bridge_sweep_fn=lambda: None )._poll_once()
+    assert summary[ "bridges_reaped" ] == 0
+
+
 # ── 8a450183 PERSONA-COLLAPSE: dead session's stale edge on a live persona ───────
 
 def test_poll_once_dead_session_same_persona_no_phantom_ping( tmp_path ):

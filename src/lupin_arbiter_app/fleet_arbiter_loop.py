@@ -325,6 +325,12 @@ def build_fleet_arbiter_job_factory(
     # wired, the `follow through escalation enabled`=False flag keeps sweep_once a
     # no-op until a deliberate flip — zero runtime behavior change on wiring-in.
     follow_through_watcher_factory : Optional[ Callable ] = None,
+    # ee59d5ed orphan-bridge janitor: default-OFF because it CHANGES fleet-wide reap
+    # semantics (every reaped session now durably drops off the operator focus bar).
+    # Off → the sweep seam is never wired (None → INERT), zero runtime change on
+    # merge; Rick flips `arbiter orphan bridge sweep enabled`=True to activate.
+    orphan_bridge_sweep_enabled       : bool = False,
+    orphan_bridge_sweep_debounce_polls : int = 2,   # N consecutive dead polls before a reap (safety debounce)
 ) -> Callable[ [ ], ArbiterConsumerJob ]:
     """
     Build the recycle factory: each call returns a FRESH ArbiterConsumerJob wired
@@ -367,8 +373,21 @@ def build_fleet_arbiter_job_factory(
     def factory() -> ArbiterConsumerJob:
         job_start     = clock.now()
         warmup_notify = make_warmup_notify_fn( escalation_notify, job_start, start_period_seconds, clock, log_fn )
+        # ee59d5ed orphan-bridge sweep seam. The debounce-state dict is created ONCE
+        # per job here and captured by the closure, so the {session_id: consecutive-
+        # dead-polls} counter PERSISTS across this job's polls (a recycle resets it —
+        # the accepted trade for all arbiter cross-poll state). None when the flag is
+        # off → the poll-loop seam stays inert.
+        bridge_sweep_fn = None
+        if orphan_bridge_sweep_enabled:
+            from cosa.agents.shared.orphan_bridge_reaper import reconcile_orphan_bridges
+            bridge_dead_polls: dict = { }
+            bridge_sweep_fn = lambda: reconcile_orphan_bridges(
+                bridge_dead_polls, debounce_threshold=orphan_bridge_sweep_debounce_polls
+            )
         return ArbiterConsumerJob(
             commons                    = gateway,
+            bridge_sweep_fn            = bridge_sweep_fn,                           # ee59d5ed orphan-bridge janitor (default-off flag)
             owed_work_fn               = owed_work_fn,                              # L1 store-aware seam
             known_owners_fn            = known_owners_fn,                           # 262c59f6 (A) known-persona fail-safe seam
             hold_reader_fn             = hold_reader_fn,                            # 6929f4ac outward-twin backstop

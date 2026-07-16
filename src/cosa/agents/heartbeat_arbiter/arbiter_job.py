@@ -659,6 +659,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         operator_gates_fn        : Optional[ Callable ] = None,   # A2/A3 (fcb5dbc0): fleet-wide open-operator-gate store read () -> [gate-dict] (None → inert: operator-gate routing never fires)
         operator_digest_cadence_seconds : int           = DEFAULT_DIGEST_CADENCE_SECONDS,  # A2/A3: NORMAL-urgency operator-gate digest cadence (30 min)
         worktree_janitor_fn      : Optional[ Callable ] = None,   # §4b janitor: per-poll abandoned-worktree reconcile (None → INERT, no sweep; the :8001 factory wires worktree_reaper.reconcile_worktrees)
+        bridge_sweep_fn          : Optional[ Callable ] = None,   # ee59d5ed: per-poll orphan-bridge reconcile () -> {reaped:[...]} (None → INERT; the :8001 factory wires orphan_bridge_reaper.reconcile_orphan_bridges bound to a persistent debounce-state dict)
         count_dm_as_liveness_fn  : Optional[ Callable ] = None,   # DM-toggle: per-poll INI re-read (None → lambda True; runtime-tunable)
         dm_activity_fn           : Optional[ Callable ] = None,   # DM-toggle: per-poll SENT-DM store read (None → inert; dm_ts None everywhere)
         bridge_mtimes_fn         : Optional[ Callable ] = None,   # bug 26dd3afb: () -> {canonical_persona_key: freshest bridge mtime}; None → MANAGER-STALE veto INERT (fail-safe, today's behavior)
@@ -894,6 +895,10 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # sandbox worktrees; preserves WIP + keeps branches; never pushes). A
         # None seam is visibly inert, never a hidden behavior change.
         self._worktree_janitor_fn     = worktree_janitor_fn
+        # ee59d5ed orphan-bridge janitor: per-poll lineage-independent reap of
+        # CONFIRMED-dead orphan bridges (dual-confirm + debounce inside the seam).
+        # None → visibly inert (today's behavior); the :8001 factory wires it.
+        self._bridge_sweep_fn         = bridge_sweep_fn
         # v1.4 integrator seam: bridge discovery → {sid: persona} folded into the
         # build_fleet_view UNION roster (impure IO lives here, not in the leaf).
         self._bridge_discovery_fn = bridge_discovery_fn if bridge_discovery_fn is not None else _default_bridge_discovery
@@ -1346,6 +1351,20 @@ class ArbiterConsumerJob( AgenticJobBase ):
             except Exception:
                 worktrees_swept = 0
 
+        # ee59d5ed orphan-bridge janitor: reap CONFIRMED-dead orphan bridges whose
+        # dead spawner left them unreachable by any dismiss (lineage-independent).
+        # The seam owns dual-confirm (PID-dead AND tmux-gone) + the N-poll debounce
+        # + all reap emits; here we only invoke + count. Doubly inert (None seam →
+        # no work) and swallow-safe per the observer invariant — a sweep hiccup is
+        # demoted, never kills the poll.
+        bridges_reaped = 0
+        if self._bridge_sweep_fn is not None:
+            try:
+                br = self._bridge_sweep_fn()
+                bridges_reaped = len( br.get( "reaped", [] ) ) if isinstance( br, dict ) else 0
+            except Exception:
+                bridges_reaped = 0
+
         self._poll_count += 1
         summary = {
             "sessions"            : len( fleet_view ),
@@ -1361,6 +1380,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
             "manager_stale_pokes" : manager_stale_pokes,
             "fleet_dark"          : fleet_dark,
             "gates_resurfaced"    : gates_resurfaced,         # 6929f4ac outward-twin backstop
+            "bridges_reaped"      : bridges_reaped,            # ee59d5ed orphan-bridge janitor
             "operator_gates_routed" : operator_gates_routed,  # A2/A3 operator-gate urgency routing (fcb5dbc0)
             "outreach_acks"       : outreach_acks,
             "reannounces"         : reannounces,

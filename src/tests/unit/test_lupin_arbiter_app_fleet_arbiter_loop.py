@@ -122,6 +122,36 @@ def test_build_factory_wires_sink_and_warmup_escalation():
     assert gw.posts == [ ( "fleet-escalations", "late" ) ]
 
 
+def test_orphan_bridge_sweep_inert_by_default():
+    # Default (flag off) → the sweep seam is never wired → job._bridge_sweep_fn is None.
+    gw, store, clock = FakeGateway(), LocalSnapshotStore(), SettableClock( T0 )
+    factory = build_fleet_arbiter_job_factory( gw, store, clock=clock, log_fn=lambda *a, **k: None )
+    assert factory()._bridge_sweep_fn is None
+
+
+def test_orphan_bridge_sweep_wired_when_flag_on( monkeypatch ):
+    # Flag on → a callable sweep seam is wired, bound to a per-job persistent
+    # debounce-state dict. We stub reconcile_orphan_bridges to capture the call
+    # (real sweep behavior is covered exhaustively in test_orphan_bridge_reaper).
+    import cosa.agents.shared.orphan_bridge_reaper as reaper
+    seen = { }
+    def _stub( state, debounce_threshold=2 ):
+        seen[ "call" ] = ( state, debounce_threshold )
+        return { "reaped": [] }
+    monkeypatch.setattr( reaper, "reconcile_orphan_bridges", _stub )
+    gw, store, clock = FakeGateway(), LocalSnapshotStore(), SettableClock( T0 )
+    factory = build_fleet_arbiter_job_factory(
+        gw, store, clock=clock, log_fn=lambda *a, **k: None,
+        orphan_bridge_sweep_enabled=True, orphan_bridge_sweep_debounce_polls=3,
+    )
+    sweep_fn = factory()._bridge_sweep_fn
+    assert callable( sweep_fn )
+    result = sweep_fn()
+    assert result == { "reaped": [] }
+    assert seen[ "call" ][ 1 ] == 3                      # debounce threshold threaded from the flag
+    assert isinstance( seen[ "call" ][ 0 ], dict )       # a persistent state dict was bound
+
+
 # ── FleetArbiterLoop recycle supervisor ─────────────────────────────────────
 
 def test_runner_recycles_until_stop():

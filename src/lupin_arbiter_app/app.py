@@ -307,6 +307,9 @@ def assemble_app(
         stall_window         = int( cfg.get( "arbiter fleet stall window seconds", default=1800, return_type="int" ) ),
         poll_error_escalate_threshold = int( cfg.get( "arbiter poll error escalate threshold", default=3, return_type="int" ) ),
         auto_poke_enabled    = cfg.get( "arbiter auto poke enabled", default=True, return_type="boolean" ),
+        # ee59d5ed orphan-bridge janitor — DEFAULT-OFF (fleet-wide reap-semantics change; flip on for Rick's awareness)
+        orphan_bridge_sweep_enabled = cfg.get( "arbiter orphan bridge sweep enabled", default=False, return_type="boolean" ),
+        orphan_bridge_sweep_debounce_polls = int( cfg.get( "arbiter orphan bridge sweep debounce polls", default=2, return_type="int" ) ),
         poke_stall_threshold = int( cfg.get( "arbiter poke stall threshold seconds", default=720, return_type="int" ) ),
         poke_max_per_episode = int( cfg.get( "arbiter poke max per episode", default=3, return_type="int" ) ),
         stuck_poke_min_interval_seconds = int( cfg.get( "arbiter stuck poke min interval seconds", default=0, return_type="int" ) ),   # bug 5a1f17f8 (c)
