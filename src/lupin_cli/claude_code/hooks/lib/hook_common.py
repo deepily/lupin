@@ -14,6 +14,7 @@ Usage from hook scripts:
         is_tts_enabled, build_progress_group_id
     )
 """
+import configparser
 import json
 import os
 import subprocess
@@ -218,21 +219,104 @@ def get_timestamp():
     return now.strftime( "%Y.%m.%d @ %H:%M %S" ) + f",{now.microsecond // 1000:03d}ms"
 
 
-def get_target_email():
+def _config_file_path():
     """
-    Resolve notification target email from LUPIN_DEV_EMAIL environment variable.
+    Resolve the path to the ~/.lupin/config fallback file (bug ef10c5b6).
+
+    Resolved at CALL time — not an import-time constant — so a test fixture
+    setting LUPIN_CONFIG_FILE is honored regardless of import order (same
+    hermetic-override pattern as _logs_dir / LUPIN_HOOK_LOG_DIR above).
 
     Requires:
-        - LUPIN_DEV_EMAIL environment variable is set
+        - (none)
 
     Ensures:
-        - Returns email string if env var is set
-        - Returns None if env var is not set
+        - LUPIN_CONFIG_FILE set (non-empty) → Path( that )  (test-hermetic override)
+        - else → ~/.lupin/config  (production default)
+        - Never raises
+
+    Returns:
+        Path: The config file location (may not exist on disk)
+    """
+    override = os.environ.get( "LUPIN_CONFIG_FILE" )
+    if override:
+        return Path( override )
+    return Path.home() / ".lupin" / "config"
+
+
+def _read_email_from_config_file():
+    """
+    Resolve the notification target email from the ~/.lupin/config fallback file.
+
+    ~/.lupin/config is the host's INI-format Lupin config (the same file the
+    cosa-voice tooling reads). The operator's notification recipient lives at
+    `[<active-env>] global_notification_recipient`, where the active environment
+    name is the value of `[environments] default`. This is the defense-in-depth
+    backstop for get_target_email() (bug ef10c5b6): env keeps precedence, so this
+    runs ONLY when LUPIN_DEV_EMAIL is absent/empty.
+
+    Requires:
+        - (none)
+
+    Ensures:
+        - Returns the active environment's global_notification_recipient
+          (stripped) when the file parses and that env pointer + section + key
+          all resolve to a non-empty value
+        - Returns None when the file is missing/unreadable, the [environments]
+          default pointer is absent/empty, or the target recipient is
+          absent/empty
+        - Never raises (a missing, binary, or malformed file degrades to None)
+
+    Returns:
+        str or None: Configured notification recipient email
+    """
+    parser = configparser.ConfigParser()
+    try:
+        if not parser.read( _config_file_path(), encoding="utf-8" ):
+            return None  # file missing/unreadable → read() returns [] (no raise)
+        env_name = parser.get( "environments", "default", fallback="" ).strip()
+        if not env_name:
+            return None
+        recipient = parser.get( env_name, "global_notification_recipient", fallback="" ).strip()
+        return recipient or None
+    except ( configparser.Error, UnicodeDecodeError ):
+        return None  # malformed / binary config → no fallback available
+
+
+def get_target_email():
+    """
+    Resolve the notification target email, env-first with a file fallback.
+
+    Resolution order (first non-empty hit wins; the environment keeps
+    precedence):
+        1. LUPIN_DEV_EMAIL environment variable
+        2. ~/.lupin/config INI — `[<active-env>] global_notification_recipient`,
+           where the active env is `[environments] default`  (file fallback)
+
+    Why the file fallback exists (bug ef10c5b6, 2026-07-15): the SessionStart
+    hello-world notification is a fresh session's ONLY birth certificate on the
+    operator's focus bar, and send_tts() no-ops SILENTLY when this returns None.
+    A tmux-server restart froze a non-login global env with no LUPIN_DEV_EMAIL,
+    so every new session went invisible until it happened to push an MCP-side
+    notification. The file fallback means a lost env can never again silence
+    registration; the env var still wins whenever it is present.
+
+    Requires:
+        - (none)
+
+    Ensures:
+        - Returns the env value (stripped) when LUPIN_DEV_EMAIL is set non-empty
+        - Else returns the file-configured email when ~/.lupin/config supplies one
+        - Returns None when neither source yields a non-empty email
+        - Never raises
 
     Returns:
         str or None: Target email address
     """
-    return os.environ.get( "LUPIN_DEV_EMAIL" )
+    env_email = os.environ.get( "LUPIN_DEV_EMAIL" )
+    if env_email and env_email.strip():
+        return env_email.strip()
+    return _read_email_from_config_file()
 
 
 def is_tts_enabled():

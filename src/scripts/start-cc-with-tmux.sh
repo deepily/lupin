@@ -231,6 +231,29 @@ fi
 INNER+="export LUPIN_ROOT=$(printf '%q' "$LUPIN_ROOT"); "
 INNER+="export PLANNING_IS_PROMPTING_ROOT=$(printf '%q' "${PLANNING_IS_PROMPTING_ROOT:-}"); "
 INNER+="export PYTHONPATH=$(printf '%q' "$LUPIN_ROOT/src:${PYTHONPATH:-}"); "
+# ── Forward LUPIN_DEV_EMAIL (+ HOOK_TTS_ENABLED when set) — bug ef10c5b6 ───────
+# The SessionStart hello-world notification is a fresh session's ONLY birth
+# certificate on the operator's focus bar, and send_tts() no-ops SILENTLY when
+# get_target_email() cannot resolve a target. A tmux-server restart froze a
+# non-login global env with NO LUPIN_DEV_EMAIL, so every new session went
+# invisible until it happened to push an MCP notification (server-side creds,
+# env-independent). Forwarding the launcher's own value per-pane makes the
+# launcher shell (Rick's login env, via the `cctmx` alias) the source of truth,
+# so a server restart can never again silence registration — RESTART-PROOF where
+# the `tmux set-environment -g` seed mitigation dies with the server.
+# GUARDED (mirrors the COSA_VOICE_SPAWNED_BY forward below): export ONLY when the
+# launcher actually carries the var non-empty. An unconditional export of an
+# empty value would CLOBBER a good value the pane would otherwise inherit from
+# the server's frozen global env (e.g. the set-environment -g seed), and would
+# also override a deliberate per-session HOOK_TTS_ENABLED=false disable. When the
+# launcher lacks it too, the hook's ~/.lupin/config file fallback is the final
+# backstop (defense-in-depth, same bug).
+if [[ -n "${LUPIN_DEV_EMAIL:-}" ]]; then
+    INNER+="export LUPIN_DEV_EMAIL=$(printf '%q' "$LUPIN_DEV_EMAIL"); "
+fi
+if [[ -n "${HOOK_TTS_ENABLED:-}" ]]; then
+    INNER+="export HOOK_TTS_ENABLED=$(printf '%q' "$HOOK_TTS_ENABLED"); "
+fi
 if [[ -f "$VENV_ACTIVATE" ]]; then
     INNER+="source $(printf '%q' "$VENV_ACTIVATE"); "
 fi
