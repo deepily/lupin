@@ -928,6 +928,29 @@ class NotificationRepository( BaseRepository[Notification] ):
                 ~Notification.job_id.in_( exclude_job_ids ) if exclude_job_ids else True
             )
 
+        # Reaped-sender exclusion (bug ee59d5ed — durable, HISTORY-SAFE roster eviction).
+        # A `session_reaped` state-update is persisted as a Notification row
+        # (session_spawner._default_emit_reap POSTs it; /api/notify persist defaults
+        # True). The operator focus bar (this roster query) must DURABLY drop a
+        # reaped sender across a page refresh — but WITHOUT destroying its history.
+        # is_hidden=True would over-hide: every history/conversation getter filters
+        # is_hidden==False, so it is the user's clear-conversation soft-delete. So we
+        # evict at the ROSTER query ONLY: exclude any sender_id that has >=1 persisted
+        # `session_reaped` row for THIS recipient. Every history/conversation query is
+        # untouched → full audit trail preserved. Shared by construction across both
+        # reap paths (normal dismiss_sessions AND the orphan-bridge arbiter sweep both
+        # emit the same persisted marker). Re-spawn-safe: sender_id carries the 8-hex
+        # session suffix (…deepily.ai#<session8>), so a re-spawn is a NEW sender_id,
+        # unaffected by a prior session's marker; a once-reaped sender_id stays excluded
+        # (that session is dead). Collision window: a NEW live session reusing an
+        # already-reaped 8-hex suffix is ~1/2**32 — negligible, accepted explicitly.
+        # The type + sender_id + recipient_id single-column indexes back the subquery.
+        reaped_sender_ids = self.session.query( Notification.sender_id ).filter(
+            Notification.recipient_id == recipient_id,
+            Notification.type         == "session_reaped"
+        )
+        query = query.filter( ~Notification.sender_id.in_( reaped_sender_ids ) )
+
         results = query.group_by(
             Notification.sender_id
         ).order_by(
