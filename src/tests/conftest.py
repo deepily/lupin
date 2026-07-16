@@ -24,6 +24,28 @@ src_path = os.path.join( lupin_root, 'src' )
 if src_path not in sys.path:
     sys.path.insert( 0, src_path )
 
+# ── Bare-run config floor (bug 9fe8b80f) ──────────────────────────────────────
+# Modules like cosa/rest/jwt_service.py instantiate ConfigurationManager at
+# MODULE-IMPORT time, so a test file that imports one needs LUPIN_CONFIG_MGR_CLI_ARGS
+# set at COLLECTION time — BEFORE any fixture runs. The hermetic_config_module_boundary
+# fixture below documents the "canonical values" invariant, but it runs at EXECUTION
+# time, far too late to satisfy a collection-time import; the run-scripts + container set
+# the env, but a bare `pytest src/tests/unit/` (or smoke) on the host had nothing seeding
+# it, so 4 unit + 1 smoke file died at collection with `[LUPIN_CONFIG_MGR_CLI_ARGS] is
+# NOT set`.
+#
+# setdefault (NOT a hard set) makes this a FLOOR only: an explicit export — CI, the
+# container, or the integration/e2e_ui conftests that pin config_block_id=Lupin:+Testing
+# — still WINS. The path is ROOT-RELATIVE (/src/conf/...) because ConfigurationManager
+# prepends the project root itself; an absolute host path would be doubled.
+#
+# DO NOT refactor this into a fixture: fixtures run at execution time, after the
+# collection-time imports that need it — moving it there would re-break bare collection.
+os.environ.setdefault(
+    "LUPIN_CONFIG_MGR_CLI_ARGS",
+    "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development",
+)
+
 # Now cosa is importable - other test files can just: import cosa.utils.util as du
 
 
@@ -56,7 +78,10 @@ def hermetic_config_module_boundary():
     Requires:
         - cosa.config.configuration_manager importable (path bootstrap above)
         - LUPIN_CONFIG_MGR_CLI_ARGS / LUPIN_ROOT hold canonical values when
-          a module starts (suite invariant)
+          a module starts (suite invariant). LUPIN_CONFIG_MGR_CLI_ARGS is
+          floored at module level above (bug 9fe8b80f) so a bare `pytest
+          src/tests/unit/` (or smoke) satisfies this invariant without an
+          external export.
 
     Ensures:
         - The CM singleton registry entry is dropped before AND after each
