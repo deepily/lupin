@@ -37,6 +37,7 @@ from lupin_cli.claude_code.hooks.stop import (
     _poke_sentence, _announce_poke, _has_pending_voice,
     _compose_poke_abstract, _build_poke_abstract_safe, _format_inbound, _receipt_lines,
     _owed_count_from_store, _synthesize_owed_items, STORE_OWED_STATUSES,
+    _resolve_owed_state,
 )
 from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import TODO_IN_PROGRESS
 from lupin_cli.claude_code.hooks.lib.heartbeat_decision import (
@@ -1677,3 +1678,48 @@ class TestResolveProactiveManagerConfig:
             cfg = _resolve_proactive_manager_config()
             assert cfg == { "spinup_threshold_s": 600, "surface_threshold_s": 600,
                             "spinup_backlog_min": 3, "spawn_cap": 8 }
+
+
+# ── scoped loud-at-read wiring (2026-07-16) ───────────────────────────────────
+# The four-week silence: absent/unusable ttl → is_fresh False → is_honored False →
+# the session is POKED despite holding, and nothing ever said so. The warn DECISION
+# (rate-limiting, once-per-hold-version) is 100%-covered in test_heartbeat_hold_warn;
+# these two tests cover only stop.py's WIRING of it — that it fires, and that it
+# stays quiet on the healthy path.
+
+class TestHoldTtlUnusableWarning:
+
+    _HOLD = { "session_id": "sid", "reason": "holding", "ttl_seconds": None }
+
+    def _resolve( self, warn ):
+        settings = { "enabled": True, "poke_cap": 3,
+                     "count_inbound_questions_as_owed" : False,
+                     "owed_source_from_store"          : False,
+                     "verification_threshold_seconds"  : 600 }
+        with patch( f"{_STOP}.load_heartbeat_settings", return_value=settings ), \
+             patch( f"{_STOP}.read_hold_resilient", return_value=self._HOLD ), \
+             patch( f"{_STOP}.should_warn_unusable_ttl", return_value=warn ) as mock_warn, \
+             patch( f"{_STOP}.log_to_stream" ) as mock_log, \
+             patch( f"{_STOP}.replay_task_state", return_value=MagicMock() ), \
+             patch( f"{_STOP}.get_poke_count", return_value=0 ), \
+             patch( f"{_STOP}._gather_outstanding_delegations", return_value=[ ] ), \
+             patch( f"{_STOP}._gather_unanswered_inbound_questions",
+                    return_value={ "owed": [ ], "stale": [ ] } ):
+            _resolve_owed_state( "sid", "/t.jsonl" )
+        return mock_warn, mock_log
+
+    def test_warns_once_when_the_hold_cannot_defend_the_session( self ):
+        mock_warn, mock_log = self._resolve( warn=True )
+        mock_warn.assert_called_once_with( "sid", self._HOLD )
+        warnings = [ c for c in mock_log.call_args_list
+                     if c.kwargs.get( "extra", { } ).get( "phase" ) == "heartbeat_hold_ttl_unusable" ]
+        assert len( warnings ) == 1
+        assert warnings[ 0 ].kwargs[ "extra" ][ "session_id" ]  == "sid"
+        assert warnings[ 0 ].kwargs[ "extra" ][ "ttl_seconds" ] is None
+
+    def test_stays_silent_when_the_rate_limiter_says_already_warned( self ):
+        # PRESENCE-control: the emit is capable of NOT happening, so its happening
+        # above is evidence of the branch and not of an unconditional log line.
+        _mock_warn, mock_log = self._resolve( warn=False )
+        assert not [ c for c in mock_log.call_args_list
+                     if c.kwargs.get( "extra", { } ).get( "phase" ) == "heartbeat_hold_ttl_unusable" ]

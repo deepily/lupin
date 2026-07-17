@@ -10,6 +10,7 @@ Design authority: planning-is-prompting →
 All tests inject `base_dir` (tmp_path) or `now` so they are hermetic and
 never touch the real project root.
 """
+import os
 import json
 import datetime
 
@@ -281,6 +282,494 @@ def test_prune_unlink_oserror_is_skipped( tmp_path, monkeypatch ):
     monkeypatch.setattr( pathlib.Path, "unlink", _boom )
     pruned = hh.prune_stale_hold_files( base_dir=tmp_path, now=_PRUNE_NOW )
     assert pruned == [ ]                                   # unlink failed → not reported pruned
+
+
+# ── multi-root recursive sweep (2026-07-16) ───────────────────────────────────
+# The janitor swept ONE directory, non-recursively, while holds land wherever a
+# session's cwd happened to be. NOTE: not one assertion here hardcodes a corpus
+# census — the live count went 41 → 43 → 44 → 45 across five honest measurements
+# by four seats in one evening, with zero errors anywhere. A fixed count is a test
+# of a moving target and will flake. Assert on PROPERTIES.
+
+def test_sweep_is_recursive_within_a_root( tmp_path ):
+    """Root-only globbing missed strays — a real hold lives under
+    lupin/src/migrations/versions/, deposited by a session whose cwd was a subdir."""
+    deep = tmp_path / "src" / "migrations" / "versions"
+    deep.mkdir( parents=True )
+    _hold_file( tmp_path, "atroot",  age_seconds=0 )
+    _hold_file( deep,     "instray", age_seconds=0 )
+
+    roots, unreachable, paths, skipped = hh._iter_hold_paths( base_dirs=[ tmp_path ] )
+
+    assert { p.name for p in paths } == { ".heartbeat-hold-atroot.json",
+                                          ".heartbeat-hold-instray.json" }
+    assert roots == [ str( tmp_path ) ] and unreachable == [ ] and skipped == [ ]
+
+
+def test_sweep_legacy_single_root_mode_is_NOT_recursive( tmp_path ):
+    """base_dirs=None preserves the exact legacy behavior every existing caller
+    depends on: one directory, non-recursive."""
+    deep = tmp_path / "sub"
+    deep.mkdir()
+    _hold_file( tmp_path, "atroot",  age_seconds=0 )
+    _hold_file( deep,     "instray", age_seconds=0 )
+
+    _roots, _unreachable, paths, _skipped = hh._iter_hold_paths( base_dir=tmp_path )
+
+    assert { p.name for p in paths } == { ".heartbeat-hold-atroot.json" }   # stray NOT reached
+
+
+def test_sweep_multi_root_dedups_and_reports_unreachable( tmp_path ):
+    root_a = tmp_path / "a"; root_a.mkdir()
+    root_b = tmp_path / "b"; root_b.mkdir()
+    _hold_file( root_a, "ha", age_seconds=0 )
+    _hold_file( root_b, "hb", age_seconds=0 )
+    missing = tmp_path / "does-not-exist-on-this-host"      # the container-path trap
+
+    roots, unreachable, paths, _skipped = hh._iter_hold_paths(
+        base_dirs=[ root_a, root_b, root_a, missing ] )     # root_a listed TWICE
+
+    assert roots == [ str( root_a ), str( root_b ) ]        # swept once each
+    assert len( paths ) == 2
+    assert unreachable == [ { "root": str( missing ), "error": "not_a_directory" } ]
+
+
+def test_sweep_root_is_a_file_not_a_directory_is_unreachable( tmp_path ):
+    not_a_dir = tmp_path / "file.txt"
+    not_a_dir.write_text( "x" )
+    roots, unreachable, _paths, _skipped = hh._iter_hold_paths( base_dirs=[ not_a_dir ] )
+    assert roots == [ ] and unreachable[ 0 ][ "error" ] == "not_a_directory"
+
+
+def test_sweep_root_is_dir_oserror_is_unreachable( tmp_path, monkeypatch ):
+    import pathlib
+    def _boom( self ): raise OSError( "permission denied" )
+    monkeypatch.setattr( pathlib.Path, "is_dir", _boom )
+    roots, unreachable, _paths, _skipped = hh._iter_hold_paths( base_dirs=[ tmp_path ] )
+    assert roots == [ ] and len( unreachable ) == 1
+
+
+def test_sweep_depth_bound_stops_descending( tmp_path ):
+    deep = tmp_path / "a" / "b" / "c" / "d" / "e"
+    deep.mkdir( parents=True )
+    _hold_file( deep, "toodeep", age_seconds=0 )
+    _roots, _unreachable, paths, _skipped = hh._iter_hold_paths( base_dirs=[ tmp_path ], max_depth=2 )
+    assert paths == [ ]
+    # PRESENCE-assertion: a deeper bound DOES reach it — the bound is what stopped
+    # the sweep, not an inability to find anything.
+    _r, _u, paths_deep, _s = hh._iter_hold_paths( base_dirs=[ tmp_path ], max_depth=5 )
+    assert [ p.name for p in paths_deep ] == [ ".heartbeat-hold-toodeep.json" ]
+
+
+def test_sweep_skips_listed_dirs_but_SURFACES_the_holds_it_stepped_over( tmp_path ):
+    """A skip-list that silently swallows a hold-bearing dir reports 'nothing there'.
+    Measured: a hold lives under lupin/.claude/worktrees/cheech-orphan-bridge."""
+    venv = tmp_path / ".venv"; venv.mkdir()
+    _hold_file( venv, "invenv", age_seconds=0 )
+    wt = tmp_path / ".claude" / "worktrees" / "cheech-orphan-bridge"
+    wt.mkdir( parents=True )
+    _hold_file( wt, "inworktree", age_seconds=0 )
+
+    _roots, _unreachable, paths, skipped = hh._iter_hold_paths( base_dirs=[ tmp_path ] )
+
+    assert paths == [ ]                                    # correctly NOT swept
+    # Reported at the SKIP BOUNDARY — the dir the sweep refused to enter — with the
+    # count found beneath it. The worktree hold is 2 levels below .claude/worktrees;
+    # what matters is that its existence is accounted for, not swallowed.
+    skipped_dirs = { s[ "dir" ]: s[ "hold_count" ] for s in skipped }
+    assert skipped_dirs == { str( venv ): 1,
+                             str( tmp_path / ".claude" / "worktrees" ): 1 }
+
+
+def test_sweep_ignores_ordinary_non_hold_files( tmp_path ):
+    """The overwhelmingly common case, and the one the first draft of these tests
+    missed entirely: a real project root is mostly NOT hold files. Only
+    `.heartbeat-hold-*.json` is a candidate — everything else is invisible."""
+    ( tmp_path / "README.md"                    ).write_text( "x" )
+    ( tmp_path / "settings.json"                ).write_text( "{}" )
+    ( tmp_path / ".heartbeat-hold-real.json.tmp" ).write_text( "{}" )   # atomic-write artifact
+    _hold_file( tmp_path, "real", age_seconds=0 )
+
+    _roots, _unreachable, paths, _skipped = hh._iter_hold_paths( base_dirs=[ tmp_path ] )
+
+    assert [ p.name for p in paths ] == [ ".heartbeat-hold-real.json" ]
+
+
+def test_probe_of_a_skipped_dir_ignores_ordinary_files( tmp_path ):
+    venv = tmp_path / ".venv"; venv.mkdir()
+    ( venv / "pyvenv.cfg" ).write_text( "x" )      # non-hold file inside a skipped dir
+    _roots, _unreachable, _paths, skipped = hh._iter_hold_paths( base_dirs=[ tmp_path ] )
+    assert skipped == [ ]                           # ordinary files are not holds → not news
+
+
+def test_sweep_skipped_dir_without_holds_is_not_reported( tmp_path ):
+    ( tmp_path / "node_modules" ).mkdir()                   # empty → not news
+    _roots, _unreachable, _paths, skipped = hh._iter_hold_paths( base_dirs=[ tmp_path ] )
+    assert skipped == [ ]
+
+
+def test_sweep_probe_does_not_descend_into_nested_skipped_dirs( tmp_path ):
+    outer = tmp_path / ".venv"; outer.mkdir()
+    inner = outer / "node_modules"; inner.mkdir()
+    _hold_file( inner, "buried", age_seconds=0 )
+    _roots, _unreachable, _paths, skipped = hh._iter_hold_paths( base_dirs=[ tmp_path ] )
+    assert skipped == [ ]                                   # nested skip → not probed
+
+
+def test_sweep_unreadable_directory_is_skipped_not_fatal( tmp_path, monkeypatch ):
+    _hold_file( tmp_path, "h", age_seconds=0 )
+    def _boom( path ): raise OSError( "permission denied" )
+    monkeypatch.setattr( hh.os, "scandir", _boom )
+    _roots, _unreachable, paths, _skipped = hh._iter_hold_paths( base_dirs=[ tmp_path ] )
+    assert paths == [ ]                                     # swallowed, never raised
+
+
+def test_sweep_entry_is_dir_oserror_is_skipped( tmp_path, monkeypatch ):
+    _hold_file( tmp_path, "h", age_seconds=0 )
+    class _BadEntry:
+        name = ".heartbeat-hold-h.json"
+        path = str( tmp_path / ".heartbeat-hold-h.json" )
+        def is_dir( self, follow_symlinks=True ): raise OSError( "stat failed" )
+    monkeypatch.setattr( hh.os, "scandir", lambda p: [ _BadEntry() ] )
+    _roots, _unreachable, paths, _skipped = hh._iter_hold_paths( base_dirs=[ tmp_path ] )
+    assert paths == [ ]
+
+
+def test_probe_entry_is_dir_oserror_is_skipped( tmp_path, monkeypatch ):
+    class _BadEntry:
+        name = "whatever"
+        path = "/x/whatever"
+        def is_dir( self, follow_symlinks=True ): raise OSError( "stat failed" )
+    monkeypatch.setattr( hh.os, "scandir", lambda p: [ _BadEntry() ] )
+    assert hh._probe_dir_for_holds( tmp_path, 3 ) == [ ]
+
+
+def test_probe_unreadable_dir_returns_empty( tmp_path, monkeypatch ):
+    def _boom( path ): raise OSError( "denied" )
+    monkeypatch.setattr( hh.os, "scandir", _boom )
+    assert hh._probe_dir_for_holds( tmp_path, 3 ) == [ ]
+
+
+def test_is_skipped_dir_names_and_claude_worktrees( tmp_path ):
+    assert hh._is_skipped_dir( tmp_path / ".venv", hh.SWEEP_SKIP_DIR_NAMES )  is True
+    assert hh._is_skipped_dir( tmp_path / ".git",  hh.SWEEP_SKIP_DIR_NAMES )  is True
+    assert hh._is_skipped_dir( tmp_path / ".claude" / "worktrees",
+                               hh.SWEEP_SKIP_DIR_NAMES ) is True
+    # A dir merely NAMED worktrees, not under .claude, is NOT skipped — the rule is
+    # about the .claude/worktrees tree specifically, not the word.
+    assert hh._is_skipped_dir( tmp_path / "worktrees", hh.SWEEP_SKIP_DIR_NAMES ) is False
+    assert hh._is_skipped_dir( tmp_path / "src",       hh.SWEEP_SKIP_DIR_NAMES ) is False
+
+
+def test_prune_multi_root_recursive_reaps_across_roots( tmp_path ):
+    root_a = tmp_path / "a"; ( root_a / "deep" ).mkdir( parents=True )
+    root_b = tmp_path / "b"; root_b.mkdir()
+    _hold_file( root_a / "deep", "ancient_a", age_seconds=900 + 21600 + 100 )
+    _hold_file( root_b,          "ancient_b", age_seconds=900 + 21600 + 100 )
+    _hold_file( root_b,          "fresh_b",   age_seconds=0 )
+
+    pruned = hh.prune_stale_hold_files( base_dirs=[ root_a, root_b ], now=_PRUNE_NOW )
+
+    assert set( pruned ) == { str( root_a / "deep" / ".heartbeat-hold-ancient_a.json" ),
+                              str( root_b / ".heartbeat-hold-ancient_b.json" ) }
+    assert ( root_b / ".heartbeat-hold-fresh_b.json" ).exists()      # control: fresh survives
+
+
+# ── classify_hold_file ────────────────────────────────────────────────────────
+
+def test_classify_prunable_ancient( tmp_path ):
+    _hold_file( tmp_path, "ancient", age_seconds=900 + 21600 + 100, persona="María 🌸" )
+    row = hh.classify_hold_file( tmp_path / ".heartbeat-hold-ancient.json", now=_PRUNE_NOW )
+    assert row[ "verdict" ]           == hh.VERDICT_PRUNABLE
+    assert row[ "reason" ]            == hh.VERDICT_PRUNABLE
+    assert row[ "session_id" ]        == "ancient"
+    assert row[ "persona" ]           == "María 🌸"
+    assert row[ "ttl_usable" ]        is True
+    assert row[ "threshold_seconds" ] == 900 + 21600
+    assert row[ "held_at_age_seconds" ] > 0 and row[ "mtime_age_seconds" ] is not None
+
+
+def test_classify_keep_reasons_name_the_guard( tmp_path ):
+    ( tmp_path / ".heartbeat-hold-garbage.json" ).write_text( "{not json" )
+    ( tmp_path / ".heartbeat-hold-list.json"    ).write_text( "[]" )
+    _hold_file( tmp_path, "live",   age_seconds=999999 )
+    _hold_file( tmp_path, "nottl",  age_seconds=999999, ttl="nope" )
+    _hold_file( tmp_path, "recent", age_seconds=900 + 60 )
+    def _c( sid, **kw ):
+        return hh.classify_hold_file( tmp_path / f".heartbeat-hold-{sid}.json", now=_PRUNE_NOW, **kw )
+
+    assert _c( "garbage" )[ "reason" ] == hh.KEEP_UNREADABLE
+    assert _c( "list"    )[ "reason" ] == hh.KEEP_NOT_AN_OBJECT
+    assert _c( "live", live_session_ids=[ "live" ] )[ "reason" ] == hh.KEEP_LIVE_SESSION
+    assert _c( "nottl"   )[ "reason" ] == hh.KEEP_NO_PROVABLE_AGE
+    assert _c( "recent"  )[ "reason" ] == hh.KEEP_WITHIN_THRESHOLD
+    for sid in ( "garbage", "list", "live", "nottl", "recent" ):
+        assert ( tmp_path / f".heartbeat-hold-{sid}.json" ).exists()   # classify deletes NOTHING
+
+
+def test_classify_missing_held_at_is_no_provable_age( tmp_path ):
+    ( tmp_path / ".heartbeat-hold-noheld.json" ).write_text( json.dumps(
+        { "session_id": "noheld", "ttl_seconds": 900, "reason": "x" } ) )
+    row = hh.classify_hold_file( tmp_path / ".heartbeat-hold-noheld.json", now=_PRUNE_NOW )
+    assert row[ "reason" ] == hh.KEEP_NO_PROVABLE_AGE
+    assert row[ "held_at_age_seconds" ] is None and row[ "ttl_usable" ] is True
+
+
+def test_classify_missing_file_is_unreadable_with_no_mtime( tmp_path ):
+    row = hh.classify_hold_file( tmp_path / ".heartbeat-hold-ghost.json", now=_PRUNE_NOW )
+    assert row[ "reason" ] == hh.KEEP_UNREADABLE and row[ "mtime_age_seconds" ] is None
+
+
+def test_classify_flags_cargo_bearing( tmp_path ):
+    _hold_file( tmp_path, "memento", age_seconds=0,
+                note_to_my_successor="the only copy", board=[ "x" ] )
+    row = hh.classify_hold_file( tmp_path / ".heartbeat-hold-memento.json", now=_PRUNE_NOW )
+    assert row[ "cargo_bearing" ] is True
+    assert row[ "cargo_keys" ]    == [ "board", "note_to_my_successor" ]
+
+
+def test_classify_authoritative_dead_drops_grace_but_no_sid_stays_conservative( tmp_path ):
+    _hold_file( tmp_path, "deadsid", age_seconds=900 + 60 )          # past TTL, inside grace
+    ( tmp_path / ".heartbeat-hold-nosid.json" ).write_text( json.dumps(
+        { "held_at": ( _PRUNE_NOW - datetime.timedelta( seconds=900 + 60 ) ).isoformat(),
+          "ttl_seconds": 900, "reason": "x" } ) )                    # no session_id
+    dead  = hh.classify_hold_file( tmp_path / ".heartbeat-hold-deadsid.json",
+                                   now=_PRUNE_NOW, live_session_ids=[ "someone-else" ] )
+    nosid = hh.classify_hold_file( tmp_path / ".heartbeat-hold-nosid.json",
+                                   now=_PRUNE_NOW, live_session_ids=[ "someone-else" ] )
+    assert dead[ "verdict" ] == hh.VERDICT_PRUNABLE and dead[ "threshold_seconds" ] == 900
+    # bias-to-keep: no session_id ⇒ no positive-dead reading ⇒ conservative TTL+grace
+    assert nosid[ "verdict" ] == hh.VERDICT_KEEP and nosid[ "threshold_seconds" ] == 900 + 21600
+
+
+def test_classify_flags_anchor_disagreement_between_the_two_readers( tmp_path ):
+    """The janitor ages on held_at; the HOOK's is_fresh anchors on the file's mtime
+    (B1 — "agents have no reliable wall-clock"). Where they disagree, a hold the
+    fleet is actively HONORING classifies as prunable. Reported as data, not acted
+    on. Observed 0/45 on the live corpus at build time — which is why it is flagged
+    rather than claimed."""
+    _hold_file( tmp_path, "disagree", age_seconds=900 + 21600 + 100 )   # ancient held_at
+    path = tmp_path / ".heartbeat-hold-disagree.json"
+    fresh_epoch = _PRUNE_NOW.timestamp() - 10                            # ...but JUST written
+    os.utime( path, ( fresh_epoch, fresh_epoch ) )
+
+    row = hh.classify_hold_file( path, now=_PRUNE_NOW )
+    assert row[ "verdict" ] == hh.VERDICT_PRUNABLE       # janitor: delete it
+    assert row[ "anchor_disagreement" ] is True          # hook: it's fresh. Flagged.
+    # PRESENCE-control: an ancient file with an ancient mtime does NOT get flagged.
+    _hold_file( tmp_path, "agree", age_seconds=900 + 21600 + 100 )
+    old_epoch = _PRUNE_NOW.timestamp() - ( 900 + 21600 + 100 )
+    os.utime( tmp_path / ".heartbeat-hold-agree.json", ( old_epoch, old_epoch ) )
+    agreed = hh.classify_hold_file( tmp_path / ".heartbeat-hold-agree.json", now=_PRUNE_NOW )
+    assert agreed[ "verdict" ] == hh.VERDICT_PRUNABLE and agreed[ "anchor_disagreement" ] is False
+
+
+def test_classify_defaults_now_to_current_time( tmp_path ):
+    # Anchored on REAL now, not _PRUNE_NOW — the now=None path measures against the
+    # wall clock, so a fixture-dated hold would read as a year stale.
+    hh.write_hold( "fresh", "p", "r", ttl_seconds=900, base_dir=tmp_path )
+    row = hh.classify_hold_file( tmp_path / ".heartbeat-hold-fresh.json" )   # now=None path
+    assert row[ "verdict" ] == hh.VERDICT_KEEP
+
+
+# ── report_hold_files — REACH and CLASSIFY, delete nothing ────────────────────
+
+def test_report_SWEPT_ZERO_ROOTS_is_distinguishable_from_FOUND_ZERO_PRUNABLE( tmp_path ):
+    """THE distinction the acceptance evidence turns on. A janitor pointed at roots
+    that do not exist on this host (the config-derived /var/external-projects trap)
+    reaches nothing — and must NOT look identical to a clean sweep that found
+    nothing to reap. A lone zero cannot tell those apart; these two reports can."""
+    missing = tmp_path / "not-on-this-host"
+    swept_nothing = hh.report_hold_files( base_dirs=[ missing ], now=_PRUNE_NOW )
+
+    _hold_file( tmp_path, "fresh", age_seconds=0 )
+    found_nothing = hh.report_hold_files( base_dirs=[ tmp_path ], now=_PRUNE_NOW )
+
+    # Both have prunable == 0. That is the whole trap.
+    assert swept_nothing[ "counts" ][ "prunable" ] == found_nothing[ "counts" ][ "prunable" ] == 0
+    # But they are NOT the same fact, and the report says so:
+    assert swept_nothing[ "roots_swept" ] == [ ]                 # reached NOTHING
+    assert swept_nothing[ "roots_unreachable" ] == [ { "root": str( missing ),
+                                                       "error": "not_a_directory" } ]
+    assert swept_nothing[ "files_found" ] == 0
+    assert found_nothing[ "roots_swept" ] == [ str( tmp_path ) ] # reached a root
+    assert found_nothing[ "files_found" ] == 1                   # ...and SAW a file
+
+
+def test_report_never_deletes_even_a_provably_ancient_file( tmp_path ):
+    """The absolute invariant of this milestone: hold files carry irreplaceable
+    memento cargo, so the report classifies and keeps its hands off. Deletion is a
+    separate, gated step that runs only after the cargo is triaged out."""
+    _hold_file( tmp_path, "ancient", age_seconds=900 + 21600 + 100,
+                note_to_my_successor="irreplaceable" )
+    report = hh.report_hold_files( base_dirs=[ tmp_path ], now=_PRUNE_NOW )
+    assert report[ "counts" ][ "prunable" ] == 1                 # it KNOWS it could
+    assert report[ "deleted" ] == 0                              # and it did NOT
+    assert ( tmp_path / ".heartbeat-hold-ancient.json" ).exists()
+
+
+def test_report_counts_and_kept_reason_tally( tmp_path ):
+    _hold_file( tmp_path, "ancient", age_seconds=900 + 21600 + 100 )
+    _hold_file( tmp_path, "recent",  age_seconds=900 + 60 )
+    _hold_file( tmp_path, "nottl",   age_seconds=999999, ttl="nope" )
+    _hold_file( tmp_path, "memento", age_seconds=0, note_to_my_successor="x" )
+
+    report = hh.report_hold_files( base_dirs=[ tmp_path ], now=_PRUNE_NOW )
+    counts = report[ "counts" ]
+
+    assert counts[ "prunable" ]      == 1
+    assert counts[ "keep" ]          == 3
+    assert counts[ "cargo_bearing" ] == 1
+    assert counts[ "ttl_unusable" ]  == 1
+    assert counts[ "reachable_but_kept_reasons" ] == {
+        hh.KEEP_WITHIN_THRESHOLD : 2,      # recent + memento
+        hh.KEEP_NO_PROVABLE_AGE  : 1,      # nottl
+    }
+
+
+def test_report_surfaces_skipped_dirs_and_requested_roots( tmp_path ):
+    wt = tmp_path / ".claude" / "worktrees" / "orphan"
+    wt.mkdir( parents=True )
+    _hold_file( wt, "inworktree", age_seconds=0 )
+    missing = tmp_path / "gone"
+    report  = hh.report_hold_files( base_dirs=[ tmp_path, missing ], now=_PRUNE_NOW )
+    assert report[ "roots_requested" ] == [ str( tmp_path ), str( missing ) ]
+    assert report[ "skipped_dirs_with_holds" ] == [
+        { "dir": str( tmp_path / ".claude" / "worktrees" ), "hold_count": 1 } ]
+
+
+def test_report_legacy_single_root_mode_reports_that_root( tmp_path ):
+    _hold_file( tmp_path, "h", age_seconds=0 )
+    report = hh.report_hold_files( base_dir=tmp_path, now=_PRUNE_NOW )
+    assert report[ "roots_swept" ] == [ str( tmp_path ) ]
+    assert report[ "roots_requested" ] == [ str( tmp_path ) ]     # mirrors swept in legacy mode
+    assert report[ "files_found" ] == 1
+
+
+def test_report_legacy_glob_oserror_reports_unreachable_root( monkeypatch ):
+    class _BadBase:
+        def glob( self, pattern ): raise OSError( "boom" )
+    monkeypatch.setattr( hh, "_resolve_base_dir", lambda b: _BadBase() )
+    report = hh.report_hold_files( base_dir="anything", now=_PRUNE_NOW )
+    assert report[ "roots_swept" ] == [ ]
+    assert report[ "roots_unreachable" ][ 0 ][ "error" ] == "glob_failed"
+
+
+def test_report_defaults_now_to_current_time( tmp_path ):
+    _hold_file( tmp_path, "fresh", age_seconds=0 )
+    assert hh.report_hold_files( base_dirs=[ tmp_path ] )[ "files_found" ] == 1
+
+
+# ── NEGATIVE CONTROL (R-3, non-negotiable) ────────────────────────────────────
+# "The check existing is not the check working." An absence-assertion with no
+# presence-assertion beside it cannot distinguish "the guard held" from "the sweep
+# never ran" — the exact defect class this milestone was made of. Every survival
+# claim below is paired, in ONE test, with a reaping claim on the same call.
+
+def test_NEGATIVE_CONTROL_fresh_hold_survives_the_same_sweep_that_reaps_an_ancient_one( tmp_path ):
+    """The mandated control. A FRESH hold must SURVIVE the very sweep that PROVES
+    it can delete by reaping an ancient one beside it. Without the reaping half,
+    'the fresh file still exists' is equally consistent with a janitor that did
+    nothing at all."""
+    _hold_file( tmp_path, "fresh",   age_seconds=0 )
+    _hold_file( tmp_path, "ancient", age_seconds=900 + 21600 + 100 )
+
+    pruned = hh.prune_stale_hold_files( base_dir=tmp_path, now=_PRUNE_NOW )
+
+    # PRESENCE-assertion: the sweep provably CAN delete — it just did.
+    assert pruned == [ str( tmp_path / ".heartbeat-hold-ancient.json" ) ]
+    assert not ( tmp_path / ".heartbeat-hold-ancient.json" ).exists()
+    # ABSENCE-assertion: and it spared the fresh one. Now this means something.
+    assert ( tmp_path / ".heartbeat-hold-fresh.json" ).exists()
+
+
+def test_NEGATIVE_CONTROL_fresh_ttl_unusable_hold_survives_beside_a_reaped_ancient( tmp_path ):
+    """A2's mandated control, applied to the ttl-unusable population: a hold with NO
+    usable ttl and a FRESH mtime must SURVIVE — proven against a same-sweep reap."""
+    # ttl-unusable + fresh → the janitor cannot prove age → KEEP
+    ( tmp_path / ".heartbeat-hold-nottl.json" ).write_text( json.dumps(
+        { "session_id": "nottl", "held_at": _PRUNE_NOW.isoformat(), "reason": "x",
+          "note_to_my_successor": "irreplaceable" } ) )
+    _hold_file( tmp_path, "ancient", age_seconds=900 + 21600 + 100 )
+
+    pruned = hh.prune_stale_hold_files( base_dir=tmp_path, now=_PRUNE_NOW )
+
+    assert pruned == [ str( tmp_path / ".heartbeat-hold-ancient.json" ) ]   # the check CAN fire
+    assert ( tmp_path / ".heartbeat-hold-nottl.json" ).exists()             # ...and it spared this
+
+
+def test_NEGATIVE_CONTROL_report_classifies_fresh_keep_and_ancient_prunable_together( tmp_path ):
+    """The report's control: the SAME call must yield BOTH verdicts. A report that
+    only ever says 'keep' is indistinguishable from a report that never looked."""
+    _hold_file( tmp_path, "fresh",   age_seconds=0 )
+    _hold_file( tmp_path, "ancient", age_seconds=900 + 21600 + 100 )
+
+    report   = hh.report_hold_files( base_dirs=[ tmp_path ], now=_PRUNE_NOW )
+    verdicts = { row[ "session_id" ]: row[ "verdict" ] for row in report[ "files" ] }
+
+    assert verdicts == { "fresh": hh.VERDICT_KEEP, "ancient": hh.VERDICT_PRUNABLE }
+    assert report[ "counts" ][ "prunable" ] == 1 and report[ "counts" ][ "keep" ] == 1
+    # ...and the report kept its hands off BOTH regardless of verdict.
+    assert ( tmp_path / ".heartbeat-hold-ancient.json" ).exists()
+    assert report[ "deleted" ] == 0
+
+
+# ── ttl_is_usable ─────────────────────────────────────────────────────────────
+
+def test_ttl_is_usable_true_for_numbers():
+    assert hh.ttl_is_usable( { "ttl_seconds": 900 } )   is True
+    assert hh.ttl_is_usable( { "ttl_seconds": 1.5 } )   is True
+
+
+def test_ttl_is_usable_false_for_missing_hold_absent_null_bool_and_string():
+    assert hh.ttl_is_usable( None )                     is False   # no hold
+    assert hh.ttl_is_usable( { } )                      is False   # falsy dict
+    assert hh.ttl_is_usable( { "reason": "x" } )        is False   # key ABSENT (22 of 45 on disk)
+    assert hh.ttl_is_usable( { "ttl_seconds": None } )  is False   # literal null (0 on disk)
+    assert hh.ttl_is_usable( { "ttl_seconds": True } )  is False   # bool must never read as 1
+    assert hh.ttl_is_usable( { "ttl_seconds": "900" } ) is False   # string
+
+
+# ── hold_cargo_keys ───────────────────────────────────────────────────────────
+
+def test_hold_cargo_keys_empty_for_pure_schema_hold( tmp_path ):
+    hold = hh.write_hold( "sid1", "María 🌸", "r", base_dir=tmp_path )
+    assert hh.hold_cargo_keys( hold ) == [ ]
+
+
+def test_hold_cargo_keys_returns_sorted_non_schema_keys_and_ignores_annotations():
+    hold = { "session_id": "s", "ttl_seconds": 900,
+             "note_to_my_successor": "...", "board": [ ], "krishna_must_know": "...",
+             hh.HOLD_MTIME_ANNOTATION: 123.0 }          # `_`-prefixed → NOT cargo
+    assert hh.hold_cargo_keys( hold ) == [ "board", "krishna_must_know", "note_to_my_successor" ]
+
+
+def test_hold_cargo_keys_non_dict_is_empty():
+    assert hh.hold_cargo_keys( None ) == [ ]
+    assert hh.hold_cargo_keys( "nope" ) == [ ]
+
+
+# ── write_hold ttl validation (loud at write) ─────────────────────────────────
+
+def test_write_hold_rejects_none_bool_and_string_ttl( tmp_path ):
+    # The asymmetry this fixes: held_at=None → _now() and pending_user_gates=None →
+    # [] were normalized; ttl_seconds=None alone went to disk as a null.
+    for bad in ( None, True, False, "900", [ 900 ] ):
+        with pytest.raises( ValueError, match="positive number" ):
+            hh.write_hold( "sid", "p", "r", ttl_seconds=bad, base_dir=tmp_path )
+    assert not ( tmp_path / ".heartbeat-hold-sid.json" ).exists()   # nothing was written
+
+
+def test_write_hold_rejects_non_positive_ttl( tmp_path ):
+    for bad in ( 0, -1, -0.5 ):
+        with pytest.raises( ValueError, match="POSITIVE" ):
+            hh.write_hold( "sid", "p", "r", ttl_seconds=bad, base_dir=tmp_path )
+
+
+def test_write_hold_accepts_valid_ttl_including_float( tmp_path ):
+    # PRESENCE-assertion beside the rejections above: the guard is not a brick wall.
+    assert hh.write_hold( "sid", "p", "r", ttl_seconds=900, base_dir=tmp_path )[ "ttl_seconds" ] == 900
+    assert hh.write_hold( "sid", "p", "r", ttl_seconds=1.5, base_dir=tmp_path )[ "ttl_seconds" ] == 1.5
 
 
 # ── is_fresh ──────────────────────────────────────────────────────────────────

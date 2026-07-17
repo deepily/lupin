@@ -64,6 +64,7 @@ the 3-way shared-substrate seam review with Rachel + María.
 import os
 import json
 import datetime
+from fnmatch import fnmatch
 from pathlib import Path
 
 
@@ -80,6 +81,28 @@ HOLD_GLOB              = ".heartbeat-hold-*.json"
 # BEYOND its own ttl before it is prunable — 6h is far past any plausible live or
 # long-single-turn session, so the janitor can never reap a hold still in use.
 DEFAULT_PRUNE_GRACE_SECONDS = 21600
+
+# Multi-root sweep (2026-07-16). The janitor was called with NO base_dir → it
+# resolved to LUPIN_ROOT and swept exactly ONE directory, non-recursively, while
+# holds land wherever a session's cwd happened to be (measured: 7 distinct dirs
+# across 3 project trees, incl. lupin/src/migrations/versions/). The sweep now
+# accepts a ROOT LIST — supplied by the CALLER, never looked up here: where the
+# fleet's roots come from is an OPEN design question and this module must not
+# manufacture an answer (a config-derived list resolves to CONTAINER paths that
+# do not exist on the host, where the arbiter actually runs).
+DEFAULT_SWEEP_MAX_DEPTH = 4
+SWEEP_SKIP_DIR_NAMES    = ( ".venv", "node_modules", ".git", "__pycache__" )
+
+# Classification vocabulary (report mode). The verdict is what the janitor WOULD
+# do; the reason is WHY — a kept file always says which guard kept it, so an empty
+# prune list is never mistaken for an unexamined one.
+VERDICT_PRUNABLE          = "prunable"
+VERDICT_KEEP              = "keep"
+KEEP_UNREADABLE           = "unreadable"
+KEEP_NOT_AN_OBJECT        = "not_an_object"
+KEEP_LIVE_SESSION         = "live_session"
+KEEP_NO_PROVABLE_AGE      = "no_provable_age"
+KEEP_WITHIN_THRESHOLD     = "within_threshold"
 
 # 6929f4ac field names (single-source so readers/writers never drift)
 PENDING_USER_GATES_FIELD = "pending_user_gates"
@@ -257,8 +280,28 @@ def write_hold( session_id, persona, reason, work_owed=True,
         - Returns the hold dict that was written
 
     Raises:
+        - ValueError if ttl_seconds is not a positive, non-bool number — the
+          "Requires: ttl_seconds is a positive int" contract above was prose
+          enforced by NOTHING: `write_hold( ttl_seconds=None )` emitted a null
+          ttl straight to disk while its SIBLING defaults were normalized
+          (held_at=None → _now(), pending_user_gates=None → []). An unusable ttl
+          makes is_fresh False ⇒ is_honored False ⇒ the session is poked forever
+          despite having declared a hold. Fail at the write, loudly, rather than
+          mint a hold that silently cannot defend anything.
         - OSError if the target directory is not writable / does not exist
     """
+    if isinstance( ttl_seconds, bool ) or not isinstance( ttl_seconds, ( int, float ) ):
+        raise ValueError(
+            f"ttl_seconds must be a positive number, got {ttl_seconds!r} — a hold with an "
+            f"unusable ttl is never fresh, so it is never honored, so the session it was "
+            f"written to defend gets poked anyway."
+        )
+    if ttl_seconds <= 0:
+        raise ValueError(
+            f"ttl_seconds must be POSITIVE, got {ttl_seconds!r} — a non-positive freshness "
+            f"window expires the hold the instant it is written."
+        )
+
     if held_at is None:
         held_at = _now().isoformat( timespec="seconds" )
 
@@ -418,9 +461,377 @@ def clear_hold( session_id, base_dir=None ):
         pass
 
 
+def ttl_is_usable( hold ):
+    """
+    Can this hold's `ttl_seconds` actually anchor a freshness window?
+
+    The single discriminator behind BOTH loud paths: is_fresh returns False for an
+    unusable ttl (⇒ is_honored False ⇒ the session is poked despite its hold), and
+    the janitor refuses to age a file it cannot prove old. Measured on the live
+    corpus: 22 files carry NO ttl key at all and ZERO carry a literal null — so any
+    check written as `hold.get("ttl_seconds") is None` cannot tell "absent" from
+    "null" from "present-and-fine", which is exactly how the population was
+    mis-diagnosed three times. This helper asks the only question that matters —
+    *is it usable* — and is blind to how it got that way.
+
+    Requires:
+        - hold is a dict or None
+
+    Ensures:
+        - Returns True iff hold["ttl_seconds"] is a non-bool int/float
+          (bool is rejected explicitly: True must never read as 1)
+        - Returns False for a missing hold / absent key / null / non-numeric
+        - Never raises
+    """
+    if not hold:
+        return False
+    ttl = hold.get( "ttl_seconds" )
+    return not isinstance( ttl, bool ) and isinstance( ttl, ( int, float ) )
+
+
+def hold_cargo_keys( hold ):
+    """
+    The NON-schema keys a hold file carries — its "cargo".
+
+    Why this exists: hold files are being hand-written with continuity payload the
+    schema has no room for (`note_to_my_successor`,
+    `the_lesson_that_should_outlive_this_session`, `board`, `harvest_state`,
+    `the_nights_finding`). Those files are MEMENTOS wearing a hold's filename, and
+    they are irreplaceable. The janitor must be able to SAY SO before anything is
+    ever deleted — a report that cannot distinguish a husk from a memento is not
+    evidence, it is a countdown.
+
+    Requires:
+        - hold is a dict or None
+
+    Ensures:
+        - Returns the sorted list of keys not in HOLD_SCHEMA_FIELDS, excluding
+          `_`-prefixed in-memory annotations (HOLD_MTIME_ANNOTATION is stamped by
+          the reader and is not cargo)
+        - Returns [] for a missing / non-dict hold
+        - Never raises
+    """
+    if not isinstance( hold, dict ):
+        return [ ]
+    return sorted( k for k in hold
+                   if k not in HOLD_SCHEMA_FIELDS and not str( k ).startswith( "_" ) )
+
+
+def _is_skipped_dir( path, skip_dir_names ):
+    """
+    Should the recursive sweep refuse to descend into this directory?
+
+    Requires:
+        - path is a Path; skip_dir_names is a container of directory names
+
+    Ensures:
+        - Returns True for a dir named in skip_dir_names, OR for the
+          `.claude/worktrees` tree specifically (a worktree's holds belong to the
+          worktree's own lineage, not the main tree's sweep)
+        - Never raises
+    """
+    if path.name in skip_dir_names:
+        return True
+    return path.name == "worktrees" and path.parent.name == ".claude"
+
+
+def _probe_dir_for_holds( root, max_depth ):
+    """
+    Count hold files inside a directory the sweep is SKIPPING — depth-bounded.
+
+    A skip-list that silently swallows hold-bearing directories reports "0 found"
+    and reads as "nothing there." Measured: a hold lives under
+    `lupin/.claude/worktrees/cheech-orphan-bridge`, which the skip-list excludes.
+    The sweep still refuses to descend — but it SAYS what it stepped over, so an
+    unreachable hold is a visible number instead of a silence.
+
+    Requires:
+        - root is a Path; max_depth is a non-negative int
+
+    Ensures:
+        - Returns the list of hold-file Paths found under root within max_depth
+        - Never descends into a nested skipped dir; never raises (OSError → [])
+    """
+    found = [ ]
+    stack = [ ( root, 0 ) ]
+    while stack:
+        current, depth = stack.pop()
+        try:
+            entries = list( os.scandir( current ) )
+        except OSError:
+            continue                                   # unreadable → nothing to report here
+        for entry in entries:
+            try:
+                is_dir = entry.is_dir( follow_symlinks=False )
+            except OSError:
+                continue
+            if is_dir:
+                if depth < max_depth and not _is_skipped_dir( Path( entry.path ), SWEEP_SKIP_DIR_NAMES ):
+                    stack.append( ( Path( entry.path ), depth + 1 ) )
+            elif fnmatch( entry.name, HOLD_GLOB ):
+                found.append( Path( entry.path ) )
+    return found
+
+
+def _walk_hold_files( root, max_depth, skip_dir_names ):
+    """
+    Depth-bounded recursive scan of ONE root for hold files.
+
+    Requires:
+        - root is a Path; max_depth is a non-negative int; skip_dir_names is a
+          container of directory names
+
+    Ensures:
+        - Returns ( hold_paths, skipped_dirs ) where skipped_dirs is a list of
+          { "dir": str, "hold_count": int } for skip-listed dirs that CONTAIN holds
+          (a skipped EMPTY dir is not reported — only a swallowed hold is news)
+        - Follows no symlinked directories; a per-directory OSError skips that
+          directory only
+        - Never raises
+    """
+    found, skipped = [ ], [ ]
+    stack = [ ( root, 0 ) ]
+    while stack:
+        current, depth = stack.pop()
+        try:
+            entries = list( os.scandir( current ) )
+        except OSError:
+            continue                                   # unreadable dir → skip it, keep sweeping
+        for entry in entries:
+            try:
+                is_dir = entry.is_dir( follow_symlinks=False )
+            except OSError:
+                continue
+            if is_dir:
+                child = Path( entry.path )
+                if _is_skipped_dir( child, skip_dir_names ):
+                    holds = _probe_dir_for_holds( child, max_depth )
+                    if holds:
+                        skipped.append( { "dir": str( child ), "hold_count": len( holds ) } )
+                elif depth < max_depth:
+                    stack.append( ( child, depth + 1 ) )
+            elif fnmatch( entry.name, HOLD_GLOB ):
+                found.append( Path( entry.path ) )
+    return found, skipped
+
+
+def _iter_hold_paths( base_dir=None, base_dirs=None, max_depth=DEFAULT_SWEEP_MAX_DEPTH,
+                      skip_dir_names=SWEEP_SKIP_DIR_NAMES ):
+    """
+    Enumerate hold files across one or many roots — the shared sweep front-end.
+
+    Requires:
+        - base_dir is path-like / str / None (LEGACY single-root mode)
+        - base_dirs is an iterable of path-like roots, or None
+        - max_depth is a non-negative int; skip_dir_names is a container of names
+
+    Ensures:
+        - base_dirs is None → LEGACY mode: the single resolved base_dir, glob'd
+          NON-recursively, byte-for-byte the pre-multi-root behavior every existing
+          caller depends on (a glob OSError yields no paths)
+        - base_dirs provided → each root de-duplicated by path, swept RECURSIVELY
+          (depth-bounded, skip-listed); a root that is not an existing directory is
+          reported in roots_unreachable rather than silently contributing nothing
+        - Returns ( roots_swept, roots_unreachable, paths, skipped_dirs ) with paths
+          sorted deterministically
+        - Never raises
+    """
+    if base_dirs is None:
+        base = _resolve_base_dir( base_dir )
+        try:
+            return [ str( base ) ], [ ], sorted( base.glob( HOLD_GLOB ) ), [ ]
+        except OSError:
+            return [ ], [ { "root": str( base ), "error": "glob_failed" } ], [ ], [ ]
+
+    roots_swept, roots_unreachable, paths, skipped = [ ], [ ], [ ], [ ]
+    seen = set()
+    for raw in base_dirs:
+        root = Path( raw )
+        key  = str( root )
+        if key in seen:
+            continue                                   # same root twice → sweep once
+        seen.add( key )
+        try:
+            reachable = root.is_dir()
+        except OSError:
+            reachable = False
+        if not reachable:
+            roots_unreachable.append( { "root": key, "error": "not_a_directory" } )
+            continue
+        found, skipped_here = _walk_hold_files( root, max_depth, skip_dir_names )
+        roots_swept.append( key )
+        paths.extend( found )
+        skipped.extend( skipped_here )
+    return roots_swept, roots_unreachable, sorted( paths ), skipped
+
+
+def classify_hold_file( path, now=None, grace_seconds=DEFAULT_PRUNE_GRACE_SECONDS,
+                        live_session_ids=None ):
+    """
+    Decide what the janitor WOULD do with one hold file — and never touch it.
+
+    This is the SINGLE decision rule: `prune_stale_hold_files` acts on this
+    verdict, `report_hold_files` only prints it. One rule, two consumers ⇒ the
+    report cannot drift from the deletion it is evidence for.
+
+    Requires:
+        - path is a Path to a candidate hold file
+        - now is an aware datetime or None; grace_seconds >= 0
+        - live_session_ids is an iterable of live session-id strings, or None
+          (no authoritative live-set — see prune_stale_hold_files' BIAS-TO-KEEP)
+
+    Ensures:
+        - Returns a row dict: path · verdict (VERDICT_PRUNABLE|VERDICT_KEEP) ·
+          reason · session_id · persona · ttl_seconds · ttl_usable ·
+          held_at_age_seconds · mtime_age_seconds · threshold_seconds ·
+          cargo_bearing · cargo_keys · anchor_disagreement
+        - CONSERVATIVE BY CONSTRUCTION: unreadable / non-object / live-session /
+          unprovable-age / within-threshold all yield VERDICT_KEEP with the reason
+          naming the guard that kept it
+        - anchor_disagreement flags a file the janitor would prune on its `held_at`
+          age while the HOOK would still call it fresh on the file's mtime (B1).
+          The two readers anchor on different clocks; where they disagree, a hold
+          the fleet is actively honoring looks deletable. Reported as DATA, not
+          acted on — the deletion path is out of this milestone's scope.
+        - Deletes nothing. Never raises.
+    """
+    if now is None:
+        now = _now()
+    authoritative = live_session_ids is not None
+    live          = set( live_session_ids or ( ) )
+
+    row = {
+        "path"                 : str( path ),
+        "verdict"              : VERDICT_KEEP,
+        "reason"               : KEEP_UNREADABLE,
+        "session_id"           : None,
+        "persona"              : None,
+        "ttl_seconds"          : None,
+        "ttl_usable"           : False,
+        "held_at_age_seconds"  : None,
+        "mtime_age_seconds"    : None,
+        "threshold_seconds"    : None,
+        "cargo_bearing"        : False,
+        "cargo_keys"           : [ ],
+        "anchor_disagreement"  : False,
+    }
+
+    mtime = _file_mtime( path )
+    if mtime is not None:
+        row[ "mtime_age_seconds" ] = now.timestamp() - mtime
+
+    try:
+        hold = json.loads( path.read_text() )
+    except ( OSError, ValueError ):
+        return row                                     # unreadable/garbage → KEEP
+    if not isinstance( hold, dict ):
+        row[ "reason" ] = KEEP_NOT_AN_OBJECT
+        return row
+
+    sid                    = hold.get( "session_id" )
+    row[ "session_id" ]    = sid
+    row[ "persona" ]       = hold.get( "persona" )
+    row[ "ttl_seconds" ]   = hold.get( "ttl_seconds" )
+    row[ "ttl_usable" ]    = ttl_is_usable( hold )
+    row[ "cargo_keys" ]    = hold_cargo_keys( hold )
+    row[ "cargo_bearing" ] = bool( row[ "cargo_keys" ] )
+
+    held_dt = _parse_iso( hold.get( "held_at" ) )
+    if held_dt is not None:
+        row[ "held_at_age_seconds" ] = ( now - held_dt ).total_seconds()
+
+    if sid in live:
+        row[ "reason" ] = KEEP_LIVE_SESSION
+        return row                                     # live session → never reap
+    if held_dt is None or not row[ "ttl_usable" ]:
+        row[ "reason" ] = KEEP_NO_PROVABLE_AGE
+        return row                                     # can't prove age → KEEP
+
+    ttl                        = hold[ "ttl_seconds" ]
+    threshold                  = ttl if ( authoritative and sid ) else ttl + grace_seconds
+    row[ "threshold_seconds" ] = threshold
+    if row[ "held_at_age_seconds" ] >= threshold:
+        row[ "verdict" ] = VERDICT_PRUNABLE
+        row[ "reason" ]  = VERDICT_PRUNABLE
+        mtime_age = row[ "mtime_age_seconds" ]
+        row[ "anchor_disagreement" ] = mtime_age is not None and mtime_age < ttl
+    else:
+        row[ "reason" ] = KEEP_WITHIN_THRESHOLD
+    return row
+
+
+def report_hold_files( base_dir=None, base_dirs=None, now=None,
+                       grace_seconds=DEFAULT_PRUNE_GRACE_SECONDS,
+                       live_session_ids=None, max_depth=DEFAULT_SWEEP_MAX_DEPTH,
+                       skip_dir_names=SWEEP_SKIP_DIR_NAMES ):
+    """
+    REACH and CLASSIFY every hold file — and DELETE NOTHING. Ever.
+
+    This function contains no unlink and calls nothing that does. That is
+    structural, not a flag: the acceptance test for the widened sweep is that the
+    janitor can REACH and CLASSIFY the existing corpus — it is NOT that it can
+    delete it. Reclamation is a SEPARATE, gated step that runs only after the
+    cargo-bearing files have been triaged, because a hold file's non-schema keys
+    are the only copy of a reaped session's continuity record.
+
+    This report is also the NEGATIVE CONTROL on the multi-root sweep itself: a
+    janitor pointed at the wrong roots produces an EMPTY report, and an empty
+    report is how we learn the root list is wrong. `roots_swept: []` is therefore
+    reported distinctly from `prunable: 0` — "I swept nothing" and "I swept
+    everything and there was nothing to reap" are opposite facts that a lone zero
+    cannot tell apart.
+
+    Requires:
+        - base_dir / base_dirs / max_depth / skip_dir_names per _iter_hold_paths
+        - now is an aware datetime or None; grace_seconds >= 0
+        - live_session_ids is an iterable of live session ids, or None
+
+    Ensures:
+        - Returns { roots_requested, roots_swept, roots_unreachable,
+                    skipped_dirs_with_holds, files_found, files, counts, deleted }
+        - counts carries prunable · keep · cargo_bearing · ttl_unusable ·
+          anchor_disagreement · reachable_but_kept_reasons (per-guard tally)
+        - deleted is ALWAYS 0 — the field exists so a reader never has to infer it
+        - Never raises
+    """
+    if now is None:
+        now = _now()
+    roots_requested = [ str( r ) for r in base_dirs ] if base_dirs is not None else None
+    roots_swept, roots_unreachable, paths, skipped = _iter_hold_paths(
+        base_dir=base_dir, base_dirs=base_dirs, max_depth=max_depth, skip_dir_names=skip_dir_names
+    )
+
+    files  = [ classify_hold_file( p, now=now, grace_seconds=grace_seconds,
+                                   live_session_ids=live_session_ids ) for p in paths ]
+    reasons = { }
+    for row in files:
+        if row[ "verdict" ] == VERDICT_KEEP:
+            reasons[ row[ "reason" ] ] = reasons.get( row[ "reason" ], 0 ) + 1
+
+    return {
+        "roots_requested"         : roots_requested if roots_requested is not None else roots_swept,
+        "roots_swept"             : roots_swept,
+        "roots_unreachable"       : roots_unreachable,
+        "skipped_dirs_with_holds" : skipped,
+        "files_found"             : len( files ),
+        "files"                   : files,
+        "counts"                  : {
+            "prunable"                 : sum( 1 for r in files if r[ "verdict" ] == VERDICT_PRUNABLE ),
+            "keep"                     : sum( 1 for r in files if r[ "verdict" ] == VERDICT_KEEP ),
+            "cargo_bearing"            : sum( 1 for r in files if r[ "cargo_bearing" ] ),
+            "ttl_unusable"             : sum( 1 for r in files if not r[ "ttl_usable" ] ),
+            "anchor_disagreement"      : sum( 1 for r in files if r[ "anchor_disagreement" ] ),
+            "reachable_but_kept_reasons" : reasons,
+        },
+        "deleted"                 : 0,                 # structural: this path cannot delete
+    }
+
+
 def prune_stale_hold_files( base_dir=None, now=None,
                             grace_seconds=DEFAULT_PRUNE_GRACE_SECONDS,
-                            live_session_ids=None ):
+                            live_session_ids=None, base_dirs=None,
+                            max_depth=DEFAULT_SWEEP_MAX_DEPTH,
+                            skip_dir_names=SWEEP_SKIP_DIR_NAMES ):
     """
     Reclaim hold artifacts that have been EXPIRED far longer than any plausible
     live session — the accumulating `.heartbeat-hold-*.json` cruft in the project
@@ -453,49 +864,41 @@ def prune_stale_hold_files( base_dir=None, now=None,
     dict, missing/unparseable held_at, or carrying a non-numeric ttl is KEPT: the
     janitor only ever deletes a hold it can PROVE is ancient.
 
+    MULTI-ROOT (2026-07-16): `base_dirs` sweeps a CALLER-SUPPLIED list of roots
+    RECURSIVELY (depth-bounded + skip-listed), while `base_dir` alone preserves the
+    exact legacy single-root, non-recursive behavior for every existing caller. The
+    root list is never derived here — see the module's multi-root note.
+
     Requires:
         - base_dir is path-like / str / None; now is an aware datetime or None;
           grace_seconds >= 0; live_session_ids is an iterable of session-id
           strings (AUTHORITATIVE live-set) or None (no authoritative set)
+        - base_dirs is an iterable of roots (recursive multi-root mode) or None
+          (legacy single-root mode); max_depth / skip_dir_names bound the recursion
 
     Ensures:
         - deletes only provably-stale hold files (conservative TTL+grace, OR TTL on
           a positive-dead reading); returns the sorted list of pruned paths (strings)
+        - the KEEP/PRUNE decision is classify_hold_file's — one rule shared with
+          report_hold_files, so the dry-run evidence cannot drift from the act
         - never raises (a per-file OSError / JSON error skips that file)
     """
     if now is None:
         now = _now()
-    authoritative = live_session_ids is not None           # a positive-dead source was supplied
-    live   = set( live_session_ids or ( ) )
-    base   = _resolve_base_dir( base_dir )
+    _roots, _unreachable, candidates, _skipped = _iter_hold_paths(
+        base_dir=base_dir, base_dirs=base_dirs, max_depth=max_depth, skip_dir_names=skip_dir_names
+    )
     pruned = [ ]
-    try:
-        candidates = sorted( base.glob( HOLD_GLOB ) )
-    except OSError:
-        return pruned
     for path in candidates:
-        try:
-            hold = json.loads( path.read_text() )
-        except ( OSError, ValueError ):
-            continue                                       # unreadable/garbage → KEEP
-        if not isinstance( hold, dict ):
+        row = classify_hold_file( path, now=now, grace_seconds=grace_seconds,
+                                  live_session_ids=live_session_ids )
+        if row[ "verdict" ] != VERDICT_PRUNABLE:
             continue
-        sid = hold.get( "session_id" )
-        if sid in live:
-            continue                                       # live session → never reap
-        held_dt = _parse_iso( hold.get( "held_at" ) )
-        ttl     = hold.get( "ttl_seconds" )
-        if held_dt is None or isinstance( ttl, bool ) or not isinstance( ttl, ( int, float ) ):
-            continue                                       # can't prove age → KEEP
-        # POSITIVE-dead reading (authoritative live-set + a real session_id absent
-        # from it) drops the +grace shortcut → prune at TTL; else stay conservative.
-        threshold = ttl if ( authoritative and sid ) else ttl + grace_seconds
-        if ( now - held_dt ).total_seconds() >= threshold:
-            try:
-                path.unlink()
-                pruned.append( str( path ) )
-            except OSError:
-                pass                                       # racing delete → fine
+        try:
+            path.unlink()
+            pruned.append( str( path ) )
+        except OSError:
+            pass                                           # racing delete → fine
     return pruned
 
 

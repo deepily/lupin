@@ -61,6 +61,10 @@ from lupin_cli.claude_code.hooks.lib.heartbeat_hold import (
     read_hold_resilient, get_pending_user_gates, get_last_looked_in_ts,
     get_last_spinup_check_ts, get_last_surfaced_questions_ts,
 )
+# Scoped loud-at-read: this session's OWN hold declares a ttl that cannot make it
+# fresh ⇒ it is never honored ⇒ it is being poked despite holding. One warning,
+# once per hold-version. See heartbeat_hold_warn for the cardinality argument.
+from lupin_cli.claude_code.hooks.lib.heartbeat_hold_warn import should_warn_unusable_ttl
 # 6929f4ac receipts-of-progress — the pure gate-row transforms (outward twin).
 from lupin_cli.claude_code.hooks.lib import heartbeat_user_gates
 from lupin_cli.claude_code.hooks.lib.heartbeat_poke_cap import (
@@ -1633,6 +1637,18 @@ def _resolve_owed_state( session_id, transcript_path=None, cwd=None ):
     # cwd is a git worktree wrote its hold under LUPIN_ROOT but the cwd-only read
     # missed it → relentless false re-pokes despite a fresh honored hold.
     hold       = read_hold_resilient( session_id, cwd=cwd )
+    # A hold whose ttl_seconds is absent/unusable can NEVER be fresh ⇒ never
+    # honored ⇒ this session gets poked anyway, silently, forever. Say so — ONCE
+    # per hold-version, to this session only, about its OWN file (the hook reads
+    # exactly one hold; the 40+ others are the JANITOR's glob and stay silent).
+    if should_warn_unusable_ttl( session_id, hold ):
+        log_to_stream( "stop", {}, extra={
+            "phase"      : "heartbeat_hold_ttl_unusable",
+            "session_id" : session_id,
+            "ttl_seconds": hold.get( "ttl_seconds" ),
+            "warning"    : ( "This hold declares no usable ttl_seconds — it is NOT honored and this "
+                             "session is being poked despite holding. Re-declare via write_hold." ),
+        } )
     poke_count = get_poke_count( session_id )
     # v2: REAL work-owed verdict from the session's own Task* state, replayed
     # from its transcript (§0.3). owned_by_me TRUE by construction; :7999-free;

@@ -24,6 +24,32 @@ UTC = datetime.timezone.utc
 T0  = datetime.datetime( 2026, 6, 7, 12, 0, 0, tzinfo=UTC )
 
 
+def _report( files_found=0, roots_swept=( "/projects/lupin", ), prunable=0, keep=0,
+             cargo_bearing=0, ttl_unusable=0, anchor_disagreement=0, kept_reasons=None,
+             roots_unreachable=(), skipped=(), roots_requested=None ):
+    """A report_hold_files-shaped result. The supervisor consumes the REPORT contract
+    (classify + count), never a prune list — it cannot delete a hold file."""
+    return {
+        "roots_requested"         : list( roots_requested if roots_requested is not None else roots_swept ),
+        "roots_swept"             : list( roots_swept ),
+        "roots_unreachable"       : list( roots_unreachable ),
+        "skipped_dirs_with_holds" : list( skipped ),
+        "files_found"             : files_found,
+        "files"                   : [ ],
+        "counts"                  : { "prunable": prunable, "keep": keep,
+                                      "cargo_bearing": cargo_bearing,
+                                      "ttl_unusable": ttl_unusable,
+                                      "anchor_disagreement": anchor_disagreement,
+                                      "reachable_but_kept_reasons": kept_reasons or { } },
+        "deleted"                 : 0,
+    }
+
+
+def _noop_report( **kwargs ):
+    """Keeps the hold sweep out of the way of the recycle/threading tests."""
+    return _report()
+
+
 class SettableClock:
     def __init__( self, t ): self.t = t
     def now( self ): return self.t
@@ -44,10 +70,13 @@ class Recorder:
 
 class FakeJob:
     """Stands in for ArbiterConsumerJob in runner tests (no real arbiter run)."""
-    def __init__( self, result="hard-cap", raises=False, block=None, cancel_raises=False ):
+    def __init__( self, result="hard-cap", raises=False, block=None, cancel_raises=False,
+                  started=None ):
         self.result = result; self.raises = raises; self.block = block
         self.cancel_raises = cancel_raises; self.cancelled = False
+        self.started = started            # signalled on entry to do_all (start/stop race)
     def do_all( self ):
+        if self.started is not None: self.started.set()
         if self.block is not None: self.block.wait( timeout=5 )
         if self.raises: raise RuntimeError( "job boom" )
         return self.result
@@ -162,7 +191,7 @@ def test_runner_recycles_until_stop():
         n[ "c" ] += 1
         if n[ "c" ] >= 2: runner._stop.set()       # stop AT the 2nd job (after its do_all)
         return FakeJob( result="hard-cap" )
-    runner = FleetArbiterLoop( factory, log_fn=rec.log, hold_janitor_fn=lambda: [ ] )
+    runner = FleetArbiterLoop( factory, log_fn=rec.log, hold_janitor_fn=_noop_report )
     runner.run()
     assert runner.cycles == 2
     assert len( [ e for e, _ in rec.logs if e == "fleet_arbiter_recycle" ] ) == 1     # one relaunch
@@ -175,51 +204,168 @@ def test_runner_swallows_job_error():
     def factory():
         runner._stop.set()                          # stop after this one job
         return FakeJob( raises=True )
-    runner = FleetArbiterLoop( factory, log_fn=rec.log, hold_janitor_fn=lambda: [ ] )
+    runner = FleetArbiterLoop( factory, log_fn=rec.log, hold_janitor_fn=_noop_report )
     runner.run()
     assert runner.cycles == 1
     assert any( e == "fleet_arbiter_job_error" for e, _ in rec.logs )
 
 
 def test_runner_start_stop_thread():
-    rec = Recorder()
-    ev  = threading.Event()
-    job = FakeJob( block=ev )
-    runner = FleetArbiterLoop( lambda: job, log_fn=rec.log, hold_janitor_fn=lambda: [ ] )
+    rec     = Recorder()
+    ev      = threading.Event()
+    started = threading.Event()
+    job     = FakeJob( block=ev, started=started )
+    # ALL THREE sweep seams injected: the real hold_roots_fn / live_session_ids_fn do
+    # genuine IO (project-root resolve + a PID-checked bridge scan) on the supervisor
+    # thread BEFORE the first job is built. Harmless in production (once per ~12h
+    # cycle) but it loses this start/stop race, so the sweep is stubbed out entirely.
+    runner = FleetArbiterLoop( lambda: job, log_fn=rec.log, hold_janitor_fn=_noop_report,
+                               hold_roots_fn=lambda: [ ], live_session_ids_fn=lambda: set() )
     runner.start()
+    started.wait( timeout=5 )                       # the job is in do_all → _current_job is set
     runner.stop()                                   # _stop + request_cancel → ev.set → do_all returns → break → join
     assert job.cancelled is True
     assert runner._thread is not None
 
 
-def test_runner_janitor_logs_when_pruned():
-    # b39562e4 pt2: janitor runs each cycle; a non-empty prune is logged with a count
-    rec = Recorder()
+def _one_cycle( rec, **loop_kwargs ):
+    """Run the supervisor for exactly one cycle and return it."""
     runner = None
     def factory():
         runner._stop.set()
         return FakeJob( result="hard-cap" )
-    runner = FleetArbiterLoop( factory, log_fn=rec.log,
-                               hold_janitor_fn=lambda: [ "/x/.heartbeat-hold-a.json",
-                                                         "/x/.heartbeat-hold-b.json" ] )
+    runner = FleetArbiterLoop( factory, log_fn=rec.log, **loop_kwargs )
     runner.run()
-    janitor_logs = [ kw for e, kw in rec.logs if e == "fleet_arbiter_hold_janitor" ]
-    assert janitor_logs and janitor_logs[ 0 ][ "pruned_count" ] == 2
+    return runner
 
 
-def test_runner_janitor_exception_swallowed():
-    # janitor blow-up must NOT kill the supervisor — logged + cycle proceeds
+def test_sweep_passes_BOTH_roots_and_live_session_ids():
+    """The root-cause line: `self._hold_janitor_fn()` passed NOTHING. No base_dir ⇒
+    LUPIN_ROOT ⇒ one directory, blind to every other tree. No live_session_ids ⇒
+    `authoritative` always False ⇒ the janitor's entire positive-dead branch was
+    UNREACHABLE in production — dead code that only ever ran in tests."""
+    rec  = Recorder()
+    seen = { }
+    def _spy( **kwargs ):
+        seen.update( kwargs )
+        return _report()
+    _one_cycle( rec, hold_janitor_fn=_spy,
+                hold_roots_fn=lambda: [ "/projects/lupin", "/projects/pip" ],
+                live_session_ids_fn=lambda: { "live-1", "live-2" } )
+    assert seen[ "base_dirs" ]        == [ "/projects/lupin", "/projects/pip" ]
+    assert seen[ "live_session_ids" ] == { "live-1", "live-2" }
+
+
+def test_sweep_emits_UNCONDITIONALLY_even_when_nothing_is_prunable():
+    """Rio's defect: the old line was `if pruned:` — it logged ONLY on a non-empty
+    result. So a sweep that reached NOTHING and a sweep that found nothing to reap
+    were both SILENT, and both identical to a healthy tick. This report IS the
+    milestone's acceptance evidence; built on that line, the evidence for a
+    total-failure sweep was an empty log. A check that cannot fail is not a check."""
     rec = Recorder()
-    runner = None
-    def factory():
-        runner._stop.set()
-        return FakeJob( result="hard-cap" )
-    def _boom():
+    _one_cycle( rec, hold_janitor_fn=lambda **kw: _report( files_found=12, prunable=0, keep=12 ) )
+    reports = [ kw for e, kw in rec.logs if e == "fleet_arbiter_hold_report" ]
+    assert len( reports ) == 1                       # emitted despite prunable == 0
+    assert reports[ 0 ][ "files_seen" ] == 12
+    assert reports[ 0 ][ "prunable" ]   == 0
+    assert reports[ 0 ][ "deleted" ]    == 0
+
+
+def test_sweep_SWEPT_ZERO_ROOTS_fires_a_DISTINCT_event_from_found_zero_prunable():
+    """'I reached no roots' and 'I reached everything and there was nothing to reap'
+    are opposite facts. A lone zero cannot tell them apart — so the no-roots case
+    gets its own event. This is the negative control on the multi-root fix itself:
+    a janitor pointed at the wrong roots (the /var/external-projects container paths
+    that do not exist on the host) produces an empty report, and THAT is how we
+    learn the root list is wrong instead of reading it as success."""
+    rec = Recorder()
+    _one_cycle( rec, hold_janitor_fn=lambda **kw: _report(
+        roots_swept=(), roots_requested=[ "/var/external-projects/skills-distillation" ],
+        roots_unreachable=[ { "root": "/var/external-projects/skills-distillation",
+                              "error": "not_a_directory" } ] ) )
+    no_roots = [ kw for e, kw in rec.logs if e == "fleet_arbiter_hold_report_no_roots" ]
+    assert len( no_roots ) == 1
+    assert no_roots[ 0 ][ "roots_requested" ]   == [ "/var/external-projects/skills-distillation" ]
+    assert no_roots[ 0 ][ "roots_unreachable" ][ 0 ][ "error" ] == "not_a_directory"
+    # ...and the full report still lands too — the loud event ADDS, never replaces.
+    assert len( [ kw for e, kw in rec.logs if e == "fleet_arbiter_hold_report" ] ) == 1
+
+
+def test_sweep_healthy_roots_do_NOT_fire_the_no_roots_event():
+    """PRESENCE-control on the test above: the no-roots alarm must be capable of
+    staying quiet, or its firing proves nothing."""
+    rec = Recorder()
+    _one_cycle( rec, hold_janitor_fn=lambda **kw: _report( roots_swept=( "/projects/lupin", ) ) )
+    assert not [ e for e, _ in rec.logs if e == "fleet_arbiter_hold_report_no_roots" ]
+
+
+def test_sweep_report_carries_the_cargo_and_classification_tallies():
+    rec = Recorder()
+    _one_cycle( rec, hold_janitor_fn=lambda **kw: _report(
+        files_found=45, prunable=20, keep=25, cargo_bearing=33, ttl_unusable=22,
+        anchor_disagreement=1, kept_reasons={ "no_provable_age": 22 },
+        skipped=[ { "dir": "/projects/lupin/.claude/worktrees", "hold_count": 1 } ] ) )
+    r = [ kw for e, kw in rec.logs if e == "fleet_arbiter_hold_report" ][ 0 ]
+    assert r[ "cargo_bearing" ]           == 33      # the population deletion must not touch
+    assert r[ "ttl_unusable" ]            == 22
+    assert r[ "anchor_disagreement" ]     == 1
+    assert r[ "kept_reasons" ]            == { "no_provable_age": 22 }
+    assert r[ "skipped_dirs_with_holds" ] == [ { "dir": "/projects/lupin/.claude/worktrees",
+                                                 "hold_count": 1 } ]
+
+
+def test_sweep_roots_fn_returning_none_is_tolerated():
+    rec = Recorder()
+    seen = { }
+    def _spy( **kwargs ):
+        seen.update( kwargs )
+        return _report()
+    _one_cycle( rec, hold_janitor_fn=_spy, hold_roots_fn=lambda: None )
+    assert seen[ "base_dirs" ] == [ ]
+
+
+def test_sweep_exception_swallowed():
+    # sweep blow-up must NOT kill the supervisor — logged + cycle proceeds
+    rec = Recorder()
+    def _boom( **kwargs ):
         raise OSError( "janitor exploded" )
-    runner = FleetArbiterLoop( factory, log_fn=rec.log, hold_janitor_fn=_boom )
-    runner.run()
+    runner = _one_cycle( rec, hold_janitor_fn=_boom )
     assert runner.cycles == 1
     assert any( e == "fleet_arbiter_hold_janitor_error" for e, _ in rec.logs )
+
+
+def test_sweep_roots_fn_exception_swallowed():
+    rec = Recorder()
+    def _boom():
+        raise OSError( "root resolution exploded" )
+    runner = _one_cycle( rec, hold_janitor_fn=_noop_report, hold_roots_fn=_boom )
+    assert runner.cycles == 1
+    assert any( e == "fleet_arbiter_hold_janitor_error" for e, _ in rec.logs )
+
+
+def test_supervisor_CANNOT_delete_a_hold_file():
+    """The absolute invariant of this milestone, asserted structurally rather than
+    trusted: hold files carry hand-written memento cargo (note_to_my_successor,
+    the_lesson_that_should_outlive_this_session), and a measured 10 of them are
+    ALREADY reapable the moment the sweep widens. Deletion stays disabled until the
+    cargo is triaged OUT — so the supervisor's sweep path contains no unlink and
+    calls nothing that does."""
+    import ast, inspect
+    from lupin_cli.claude_code.hooks.lib import heartbeat_hold as hh
+
+    def attrs_of( fn ):
+        return { n.attr for n in ast.walk( ast.parse( inspect.getsource( fn ).lstrip() ) )
+                 if isinstance( n, ast.Attribute ) }
+
+    for fn in ( FleetArbiterLoop._sweep_hold_files, hh.report_hold_files,
+                hh.classify_hold_file, hh._iter_hold_paths, hh._walk_hold_files,
+                hh._probe_dir_for_holds ):
+        assert "unlink" not in attrs_of( fn ), f"REACHABLE unlink in {fn.__name__}"
+
+    # POSITIVE CONTROL — this check is not vacuous: it DOES detect the real thing.
+    assert "unlink" in attrs_of( hh.prune_stale_hold_files )
+    # ...and the supervisor is wired to the report fn, not the destructive one.
+    assert FleetArbiterLoop( lambda: None )._hold_janitor_fn is hh.report_hold_files
 
 
 def test_runner_stop_cancel_error_swallowed():

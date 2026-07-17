@@ -46,8 +46,15 @@ from cosa.agents.heartbeat_arbiter.operator_gate_routing import DEFAULT_DIGEST_C
 # real here so the :8001 service actually resurfaces a dark session's aged user-gate
 # to Rick (without this wiring the seam stays None → the backstop is decorative).
 from lupin_cli.claude_code.hooks.lib.heartbeat_hold import read_hold as _default_hold_reader
-from lupin_cli.claude_code.hooks.lib.heartbeat_hold import prune_stale_hold_files as _default_hold_janitor
+# REPORT-ONLY janitor (2026-07-16). NOT prune_stale_hold_files: hold files carry
+# hand-written memento cargo (note_to_my_successor / the_lesson_that_should_outlive_
+# this_session / board), and a measured 10 of them are ALREADY reapable by the
+# existing rule the moment the sweep widens. Deletion stays disabled until the cargo
+# has been triaged OUT — so the supervisor is wired to a function that structurally
+# CANNOT delete, rather than to a destructive one behind a flag.
+from lupin_cli.claude_code.hooks.lib.heartbeat_hold import report_hold_files as _default_hold_reporter
 from lupin_cli.claude_code.hooks.lib.session_bridge import find_active_voice_persona_sessions as _find_active_voice_persona_sessions
+from lupin_cli.claude_code.hooks.lib.session_bridge import find_active_sessions as _find_active_sessions
 from lupin_mcp.persona_normalization import canonical_persona_key
 from cosa.agents.heartbeat_arbiter.arbiter_journal import make_log_fn
 
@@ -89,6 +96,62 @@ def _default_manager_bridge_mtimes():   # pragma: no cover - production bridge-s
         if key not in result or mtime > result[ key ]:
             result[ key ] = mtime
     return result
+
+
+def _default_hold_roots():   # pragma: no cover - production project-root IO boundary
+    """
+    The root list the hold sweep is pointed at — the session's OWN project root.
+
+    ⚠️ THIS IS NOT THE FLEET'S ROOT LIST, and it must not be mistaken for one.
+    Where the janitor learns the fleet's roots is an OPEN, UNRULED design question,
+    so this module REFUSES to invent an answer: the roots arrive as an injected
+    seam, and this default only makes today's implicit reach EXPLICIT (the janitor
+    was called with no base_dir → LUPIN_ROOT → one directory, non-recursively).
+
+    Two verified traps for whoever rules that question:
+      • the `external repo * path` config entries are CONTAINER paths
+        (/var/external-projects/…) that DO NOT EXIST on the host — and the arbiter
+        runs on the HOST. A config-derived root list resolves to nothing, reaching
+        ZERO hold files while looking perfectly reasonable.
+      • at least one hold-bearing project is not registered anywhere.
+    A root list that reaches nothing is now VISIBLE (roots_swept + files_seen are
+    emitted every tick, empty or not) rather than silent.
+
+    Ensures:
+        - returns [ project root ] — recursive within it, so the strays under
+          src/migrations/versions/ and src/lupin-mobile/ are reached
+    """
+    import cosa.utils.util as cu
+    return [ cu.get_project_root() ]
+
+
+def _default_live_session_ids():   # pragma: no cover - production bridge-scan IO boundary
+    """
+    The AUTHORITATIVE live-session set for the hold sweep — the belt-and-suspenders
+    that stops a live session's hold from ever being read as positive-dead.
+
+    ⚠️ `find_active_voice_persona_sessions` is imported one line up, it is the
+    obvious choice, and it is the WRONG one. It delegates to
+    find_active_sessions( require_persona=True ) — persona'd sessions ONLY. A LIVE
+    but persona-LESS session (one that booted when the persona pool was exhausted,
+    or whose allocation raced/failed — bug d57dbfea's black hole) would be ABSENT
+    from that set, read as POSITIVE-DEAD, and have its hold reaped at TTL with NO
+    grace. That is the forbidden relaxation of bias-to-keep, and it names its
+    victim: a pool-exhausted worker's live hold.
+
+    require_persona=False is the honest liveness set — d57dbfea's own lesson,
+    applied one layer over.
+
+    Ensures:
+        - returns the set of live session ids INCLUDING persona-less sessions
+        - degrade-safe: any scan failure yields None (NO authoritative set) rather
+          than a PARTIAL one — a half-enumerated live-set is worse than none, since
+          absence from it is what licenses the no-grace prune
+    """
+    try:
+        return { sid for _path, sid, _persona in _find_active_sessions( require_persona=False ) }
+    except Exception:
+        return None
 
 
 # Item A (2026.06.11 receipts design §2.3): the line shape has ONE owner —
@@ -448,17 +511,23 @@ class FleetArbiterLoop:
 
     def __init__(
         self,
-        job_factory     : Callable[ [ ], ArbiterConsumerJob ],
+        job_factory          : Callable[ [ ], ArbiterConsumerJob ],
         *,
-        log_fn          : Optional[ Callable ] = None,
-        hold_janitor_fn : Optional[ Callable ] = None,
+        log_fn               : Optional[ Callable ] = None,
+        hold_janitor_fn      : Optional[ Callable ] = None,
+        hold_roots_fn        : Optional[ Callable ] = None,
+        live_session_ids_fn  : Optional[ Callable ] = None,
     ) -> None:
         self._job_factory    = job_factory
         self._log_fn         = log_fn if log_fn is not None else _default_log_fn
-        # b39562e4 pt2: prune ancient .heartbeat-hold-* cruft once per supervisor
-        # cycle (each arbiter start + ~12h recycle). Injectable so tests never touch
-        # the real project root. Conservative by construction (6h grace).
-        self._hold_janitor_fn = hold_janitor_fn if hold_janitor_fn is not None else _default_hold_janitor
+        # b39562e4 pt2 → 2026-07-16: the hold sweep, REPORT-ONLY. Runs once per
+        # supervisor cycle (each arbiter start + ~12h recycle). All three seams are
+        # injectable so tests never touch the real project root, and so the two
+        # UNRULED questions (which roots? which live-set?) are answered by the
+        # caller rather than assumed here.
+        self._hold_janitor_fn     = hold_janitor_fn if hold_janitor_fn is not None else _default_hold_reporter
+        self._hold_roots_fn       = hold_roots_fn if hold_roots_fn is not None else _default_hold_roots
+        self._live_session_ids_fn = live_session_ids_fn if live_session_ids_fn is not None else _default_live_session_ids
         self._stop           = threading.Event()
         self._current_job    = None
         self._thread         = None
@@ -475,7 +544,7 @@ class FleetArbiterLoop:
             - never raises
         """
         while not self._stop.is_set():
-            self._reap_stale_holds()             # b39562e4 pt2: janitor — clear ancient hold-file cruft
+            self._sweep_hold_files()             # b39562e4 pt2: hold janitor — REPORT-ONLY (deletes nothing)
             job = self._job_factory()
             self._current_job = job
             self.cycles += 1
@@ -489,19 +558,64 @@ class FleetArbiterLoop:
                 break
             self._log_fn( "fleet_arbiter_recycle", reason="clean cap-exit — relaunching", summary=summary )
 
-    def _reap_stale_holds( self ) -> None:
+    def _sweep_hold_files( self ) -> None:
         """
-        Prune ancient `.heartbeat-hold-*` cruft (bug b39562e4 pt2). Never raises —
-        the janitor is best-effort housekeeping and must never kill the supervisor.
+        REACH and CLASSIFY every `.heartbeat-hold-*` file, and DELETE NOTHING.
+
+        Renamed from `_reap_stale_holds`: it no longer reaps, and a method whose
+        name promises deletion while its body reports is exactly the kind of false
+        claim that becomes the next reader's ground truth.
+
+        Two defects this method used to embody, both fixed here:
+
+        1. **It passed NOTHING.** `self._hold_janitor_fn()` — no base_dir (⇒
+           LUPIN_ROOT ⇒ one directory, non-recursively, blind to every other tree)
+           and no live_session_ids (⇒ `authoritative` always False ⇒ the entire
+           positive-dead branch of the janitor was UNREACHABLE in production —
+           dead code that only ever ran in tests).
+
+        2. **`if pruned:` made failure look like success.** It logged ONLY on a
+           non-empty result, so "I swept zero roots and reached nothing" and "I
+           swept everything and there was nothing to reap" were both SILENT and
+           both indistinguishable from a healthy tick. The sweep report is this
+           milestone's acceptance evidence; built on that line, the evidence for a
+           total-failure sweep was an empty log. A check that cannot fail is not a
+           check. **The emit is now UNCONDITIONAL.**
 
         Ensures:
-            - calls the injected hold-janitor; logs a count when anything is pruned
-            - swallows + logs any janitor exception
+            - calls the injected report fn with BOTH the injected roots AND the
+              injected live-set; emits `fleet_arbiter_hold_report` EVERY tick with
+              roots_swept / files_seen / the classification tallies — empty or not
+            - emits `fleet_arbiter_hold_report_no_roots` (distinctly!) when the
+              sweep reached ZERO roots — "swept nothing" is the opposite fact from
+              "found nothing", and a lone zero cannot tell them apart
+            - surfaces skipped-but-hold-bearing dirs + unreachable roots rather
+              than silently omitting them
+            - deletes nothing; swallows + logs any exception (the janitor must
+              never kill the supervisor)
         """
         try:
-            pruned = self._hold_janitor_fn()
-            if pruned:
-                self._log_fn( "fleet_arbiter_hold_janitor", pruned_count=len( pruned ) )
+            roots  = list( self._hold_roots_fn() or [ ] )
+            live   = self._live_session_ids_fn()
+            report = self._hold_janitor_fn( base_dirs=roots, live_session_ids=live )
+            counts = report[ "counts" ]
+            if not report[ "roots_swept" ]:
+                # LOUD: reached no roots at all. Not the same fact as "nothing to reap".
+                self._log_fn( "fleet_arbiter_hold_report_no_roots",
+                              roots_requested   = report[ "roots_requested" ],
+                              roots_unreachable = report[ "roots_unreachable" ] )
+            self._log_fn( "fleet_arbiter_hold_report",
+                          roots_swept             = report[ "roots_swept" ],
+                          roots_unreachable       = report[ "roots_unreachable" ],
+                          files_seen              = report[ "files_found" ],
+                          prunable                = counts[ "prunable" ],
+                          kept                    = counts[ "keep" ],
+                          cargo_bearing           = counts[ "cargo_bearing" ],
+                          ttl_unusable            = counts[ "ttl_unusable" ],
+                          anchor_disagreement     = counts[ "anchor_disagreement" ],
+                          kept_reasons            = counts[ "reachable_but_kept_reasons" ],
+                          skipped_dirs_with_holds = report[ "skipped_dirs_with_holds" ],
+                          deleted                 = report[ "deleted" ] )
         except Exception as e:                   # janitor must never kill the supervisor
             self._log_fn( "fleet_arbiter_hold_janitor_error", error=str( e ) )
 
