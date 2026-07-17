@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-07-16 (session 1a52ceb2, Mr. Radio 🦉 — heartbeat-hold janitor arc: Q1 root source + F-C #3 + deepseek probe + board catalog & self-refutation; end-of-session backup + push)
+Last updated: 2026-07-17 (session b526cb36, Mr. Radio 🦉 — M1 demo shipped + board cleanup via Rick's guided walkthrough; catalog refuted 2nd time by Rick's no-chasing experiment; end-of-session backup + push)
 
 ---
 
@@ -17,6 +17,24 @@ Last updated: 2026-07-16 (session 1a52ceb2, Mr. Radio 🦉 — heartbeat-hold ja
   - **Findings that SURVIVE the refutation** (these are the real work): **C1** zombie items N≥4 (owner already reaped at mint time) · **C3** chase-expired ≥7 · **C4/C5** · **C7: 41 P1 / 65% — priority carries no information** · **the Stop-hook owed-work oracle LIES** (told me "2 in-progress" when the store said 0; told María "10" when the store said 2 — N=2, two seats, one hour) · **THE FILTER DEFECT: §6 mandates scoped queries, and a scoped query CANNOT show you that half the board is someone else's. I declared "board clean" 3× — each TRUE OF MY FILTER.** (María owns the §6 fix; finding is mine.)
   - **The meta-lesson, banked**: *a finding that CONFIRMS the boss's suspicion passes a checkpoint that a contradicting one never would.* Rick was angry; my catalog agreed; I never ran the one number my own report called "the number that actually proves it." María sent it back. **Agreement is not a checkpoint — it is the absence of one.**
   - **Next actions**: (1) drive the surviving findings (C1/C3/C7 + the Stop-hook oracle + the filter defect) to filed, owned store items; (2) reconcile with María's workflow analysis — this doc was written *for* her lane; (3) decide whether the retracted framing needs a correction anywhere it was already relayed.
+
+---
+
+## 📋 DECISIONS LOG 2026-07-17 (Mr. Radio 🦉, session b526cb36) — M1 demo shipped + board cleanup via Rick's guided walkthrough
+
+- **GCP work DEMOTED from P0 (Rick, 2026-07-17 ~10:20 EDT).** *"Until the 2 Monday-07-20 demos are ready, skills-distillation + a new demo TBD are the ONLY focus. Only Rick lifts the mandate."* GCP readiness (`97c12d68`) + dependents (`53bac23a`, `f3b5ecf3`, `1b6331b8`) PARKED. Body-amended; the priority FIELD still reads P0 — Rick demotes via admin UI. (Finding: no MCP verb demotes priority, but `PATCH /api/tasks` does — the mechanical root of C7's P1-inflation.)
+- **M1 skills-distillation demo = the sole P0, SHIPPED.** `df3f80c9` done, commit `0d01cbe` (verified firsthand). Converged recommendation: `src/rnd/v0.1.9/2026.07.17-converged-p0-demo-recommendation.md`. **POC-2 undefined — Rick's input pending; both POCs must be demo-ready before Rick lifts the mandate.**
+- **Backlog cleanup — Rick's GUIDED WALKTHROUGH (D1–D5 + 9318af31); María ran it, Mr. Radio implemented.** Decisions doc: `plan/src/rnd/2026.07.17-backlog-clear-decisions-for-signoff.md`.
+  - **D1** drop C6 records after re-home → **collapsed to ZERO drops** on body-read (all live doctrine / real bugs / others'-owned).
+  - **D2** drop clean dups/superseded; `c9dd0cc3` = Rick closes his own gate.
+  - **9318af31 = SCOPE-SPLIT (Rick, informed re-ask on Mr Radio's firsthand dig)**: PRESERVE the *"route GCP via Mr Radio"* spend-coordination rule (do NOT retire — fleet's only soft coordination point on real GCP spend, more relevant with 2 POCs going live); DROP only the dead CoT half (witnessed safe on the wire, `d84d60e`). Its title still mis-describes it (5a8aa45b) — a clean re-title/re-file is the follow-up.
+  - **D3** reconcile 3 zombies → dropped w/ reap-reason receipts (`4e20520d`, `2695f5ad`, Sam's `06a3f031`).
+  - **D4** NO demotes (hide-work risk; drops do the real reduction).
+  - **D5** Sam's records → his own harvest.
+  - **Net board reduction = 3 zombie reconciles.** Finding: the catalog's *"~60 noisy rows"* was over-counted from TITLES — bodies show live work, not a graveyard. **Both drafts title-listed live doctrine as droppable; the body-read rule (`73f397d2`) caught it on both sides.**
+- **Board catalog's §4#3 UN-RETRACTED** — Rick's no-chasing experiment is the control arm the report lacked; María's receipt: **closure 0.98→0.725 when Rick withdrew 07-14.** The backpressure hole is at *filing*; Rick was plugging it by hand.
+- **Kept-as-bug** (real defects, no seat can fix, `c191be39` shape): `6f8adc13` (auto-mode classifier wedge) + `74a3ff4d` (offline-user rule prescribes unbuilt `defer_to_chase`/`make_gate`).
+- **Held live doctrine (NOT dropped)**: `73f397d2` (graduation-eligible, held for Rick's wording review) · `2ce26609` (pattern-watch) · `5a8aa45b`+`74c16374` (Sam's s-d, held per POC-2 margin).
 
 ---
 
