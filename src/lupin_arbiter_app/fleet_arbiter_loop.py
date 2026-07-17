@@ -63,7 +63,7 @@ from cosa.agents.heartbeat_arbiter.arbiter_journal import make_log_fn
 ESCALATION_TOPIC = "fleet-escalations"
 
 
-def _default_manager_bridge_mtimes():   # pragma: no cover - production bridge-scan IO boundary
+def _default_manager_bridge_mtimes( find_fn=None ):
     """
     bug 26dd3afb: scan the LIVE persona'd bridge files → { canonical_persona_key :
     freshest bridge-file mtime (epoch) } — the real reader wired into the MANAGER-
@@ -71,10 +71,29 @@ def _default_manager_bridge_mtimes():   # pragma: no cover - production bridge-s
 
     Keyed by PERSONA (not session_id) so a re-spun twin's fresh bridge (a NEW
     session_id) still vetoes the superseded row's stale poke — the always-present
-    analog of the sid-keyed union signal. Reuses find_active_voice_persona_sessions
-    (PID-alive + persona-required projection) rather than hand-globbing. Exercised
-    at the :8001 integration tier like the other _default_* IO boundaries; unit
-    tests inject a fake, so this boundary is no-cover.
+    analog of the sid-keyed union signal.
+
+    ⚠️ `find_active_voice_persona_sessions` (require_persona=True) is CORRECT HERE,
+    and that is NOT the F-B defect one line down — do not "fix" it to
+    require_persona=False. F-B's victim was the LIVENESS set, where a persona-LESS
+    live session read as positive-dead and lost its hold. This map is keyed BY
+    PERSONA: a persona-less session has no key, contributes nothing, and cannot veto
+    anything. Persona-required is the whole point of the projection, not an oversight.
+    (Same import, opposite ruling — which is exactly why F-B says never let a
+    convenient import decide the semantics. Check the predicate, not the precedent.)
+
+    NOT pragma'd (F-C third instance, bug 3cd0d4c1, fixed 2026-07-16): this carried
+    `# pragma: no cover - production bridge-scan IO boundary` and the claim "unit
+    tests inject a fake, so this boundary is no-cover" — but the function is
+    REACHABLE and cheap: executing it returns the map in ~0.00s. A pragma'd function
+    is EXEMPT FROM THE INSTRUMENT — coverage reports green over code nobody has
+    proven runs, which is this milestone's own defect shape (a mechanism that reports
+    success while doing nothing) sitting inside the module the milestone is about.
+    An IO-boundary LABEL is not a coverage exemption.
+
+    Requires:
+        - find_fn is None (⇒ the real persona'd bridge scan) or
+          () -> iterable of ( path, session_id, persona_dict )
 
     Ensures:
         - returns { canonical_persona_key : max bridge mtime } across live persona'd
@@ -82,18 +101,25 @@ def _default_manager_bridge_mtimes():   # pragma: no cover - production bridge-s
         - skips bridges with no persona name / unreadable mtime; never raises here
           (the arbiter's swallow-safe _read_manager_bridge_mtimes wraps it anyway)
     """
+    if find_fn is None:
+        find_fn = _find_active_voice_persona_sessions
     result = { }
-    for path, _sid, persona in _find_active_voice_persona_sessions():
-        name = ( persona or { } ).get( "name" )
-        if not name:
-            continue
-        key = canonical_persona_key( name )
+    for path, _sid, persona in find_fn():
+        # ONE key guard, not two. `canonical_persona_key` DECLARES `Requires: name is a
+        # string or None` and GUARANTEES `None / non-string / empty / whitespace-only ->
+        # ""` — so a missing/blank/unkeyable name arrives here as the falsy sentinel and is
+        # skipped below. A preceding `if not name: continue` was REDUNDANT BY CONTRACT
+        # (deleted 2026-07-16): it could never change the output, which made it an
+        # equivalent mutant — unkillable by any test that could ever be written, i.e. a
+        # guard that cannot fail, wearing safety's costume. That is the shape this module
+        # exists to delete, so it does not get to live here.
+        key = canonical_persona_key( ( persona or { } ).get( "name" ) )
         if not key:
-            continue
+            continue                               # no name / unkeyable → no key → cannot veto anything
         try:
             mtime = os.path.getmtime( path )
         except OSError:
-            continue
+            continue                               # unreadable bridge → contributes nothing
         if key not in result or mtime > result[ key ]:
             result[ key ] = mtime
     return result

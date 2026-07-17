@@ -21,6 +21,7 @@ from lupin_arbiter_app.fleet_arbiter_loop import (
     _default_log_fn,
     _default_hold_roots,
     _default_live_session_ids,
+    _default_manager_bridge_mtimes,
     _compute_hold_roots,
     _registry_container_paths,
     _derive_container_host_prefix,
@@ -946,6 +947,95 @@ def test_default_live_session_ids_degrades_to_None_not_a_partial_set():
     def boom( require_persona=True ):
         raise RuntimeError( "bridge scan exploded" )
     assert _default_live_session_ids( find_fn=boom ) is None      # NO authoritative set
+
+
+# ---- F-C third instance (bug 3cd0d4c1): the last pragma comes OFF ----------
+
+def test_default_manager_bridge_mtimes_executes_the_real_production_path():
+    """
+    F-C #3. This carried `# pragma: no cover - production bridge-scan IO boundary`
+    and the claim "unit tests inject a fake, so this boundary is no-cover". It RUNS
+    (~0.00s) — so the pragma was invalid. A pragma'd function is EXEMPT FROM THE
+    INSTRUMENT: coverage reports green over code nobody has proven runs.
+    Properties only — the live fleet's persona set is not assertable as a count.
+    """
+    mtimes = _default_manager_bridge_mtimes()
+    assert isinstance( mtimes, dict )
+    assert all( isinstance( k, str ) and isinstance( v, float ) for k, v in mtimes.items() )
+
+
+def test_manager_bridge_mtimes_keeps_the_FRESHEST_mtime_per_persona( tmp_path ):
+    """One persona, several live sessions → the freshest bridge wins (the re-spun twin)."""
+    stale, fresh = tmp_path / "stale.json", tmp_path / "fresh.json"
+    stale.write_text( "{}" ); fresh.write_text( "{}" )
+    os.utime( stale, ( 1000, 1000 ) )
+    os.utime( fresh, ( 9000, 9000 ) )
+
+    def fake_find():
+        return [ ( str( stale ), "sid-old", { "name": "rio" } ),
+                 ( str( fresh ), "sid-new", { "name": "rio" } ) ]
+
+    assert _default_manager_bridge_mtimes( find_fn=fake_find ) == { "rio": 9000.0 }
+
+
+def test_manager_bridge_mtimes_freshest_wins_regardless_of_scan_order( tmp_path ):
+    """The max must not depend on which bridge the scan happens to yield first."""
+    stale, fresh = tmp_path / "stale.json", tmp_path / "fresh.json"
+    stale.write_text( "{}" ); fresh.write_text( "{}" )
+    os.utime( stale, ( 1000, 1000 ) )
+    os.utime( fresh, ( 9000, 9000 ) )
+    reversed_order = lambda: [ ( str( fresh ), "s1", { "name": "rio" } ),
+                               ( str( stale ), "s2", { "name": "rio" } ) ]
+    assert _default_manager_bridge_mtimes( find_fn=reversed_order ) == { "rio": 9000.0 }
+
+
+def test_manager_bridge_mtimes_skips_nameless_unkeyable_and_unreadable( tmp_path ):
+    """
+    Every skip branch: no persona · blank name · unkeyable name · unreadable mtime.
+
+    ⚠️ EACH ENTRY IS ISOLATED ON A REAL, READABLE FILE — that is load-bearing. A first
+    draft pointed the nameless/unkeyable entries at MISSING paths, so the OSError skip
+    MASKED the name skips: those entries died on the missing file no matter what any
+    name guard did. The branches were 100% COVERED and still pinned NOTHING. Coverage
+    is not discrimination — it says the line RAN, not that this test would NOTICE if
+    it were WRONG.
+
+    WHAT THIS TEST PINS, precisely — and no more. Each verified KILLED by a runtime
+    mutant on a harness whose canary died first (so the injection is proven to land):
+      • `if not key: continue` — drop it and the nameless/blank/unkeyable entries land
+        under a "" key ⇒ the equality assert goes RED.
+      • the freshest-mtime rule — take-first or flip `>` to `<` ⇒ RED.
+      • the OSError skip — remove it and the missing-file entry lands ⇒ RED.
+
+    ⛔ WHAT NO TEST CAN PIN — stated here because the honest limit belongs in the
+    record, not a claim nobody can cash: there is NO independent blank-name guard to
+    pin, BY DESIGN. `canonical_persona_key` DECLARES `Requires: name is a string or
+    None` and GUARANTEES `None / non-string / empty / whitespace-only -> ""`, so the
+    single key guard covers every nameless case BY CONTRACT. The redundant
+    `if not name: continue` that used to precede it was an EQUIVALENT MUTANT —
+    deleting it was behavior-preserving, so NOTHING could ever kill it. It is now
+    deleted rather than described. (An earlier version of this docstring claimed
+    "dropping any name guard ⇒ RED". That was FALSE for the blank-name guard, and it
+    was the one sentence a future seat would trust instead of re-deriving.)
+    """
+    named, blank, unkeyable, nameless = ( tmp_path / f"{n}.json"
+                                          for n in ( "named", "blank", "unkeyable", "nameless" ) )
+    for f in ( named, blank, unkeyable, nameless ):
+        f.write_text( "{}" )
+        os.utime( f, ( 5000, 5000 ) )                   # ALL readable → only the name guards can skip them
+
+    def fake_find():
+        return [ ( str( nameless ),   "s1", None ),                 # no persona dict
+                 ( str( blank ),      "s2", { "name": "" } ),       # blank name
+                 ( str( unkeyable ),  "s3", { "name": "!!!" } ),    # unkeyable → canonical key falsy
+                 ( "/nope/gone.json", "s4", { "name": "rio" } ),    # name OK, file MISSING → OSError
+                 ( str( named ),      "s5", { "name": "sam" } ) ]   # the only survivor
+
+    assert _default_manager_bridge_mtimes( find_fn=fake_find ) == { "sam": 5000.0 }
+
+
+def test_manager_bridge_mtimes_of_an_empty_fleet():
+    assert _default_manager_bridge_mtimes( find_fn=lambda: [ ] ) == { }
 
 
 # ---- the invariant that outranks all of the above ---------------------------
