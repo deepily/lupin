@@ -8,7 +8,10 @@ docker, no commons IO). Coverage target: 100% line+branch+function on fleet_arbi
 """
 import datetime
 import json
+import os
+import subprocess
 import threading
+from pathlib import Path
 
 from lupin_arbiter_app.fleet_arbiter_loop import (
     FleetArbiterLoop,
@@ -16,6 +19,14 @@ from lupin_arbiter_app.fleet_arbiter_loop import (
     make_escalation_notify_fn,
     make_warmup_notify_fn,
     _default_log_fn,
+    _default_hold_roots,
+    _default_live_session_ids,
+    _compute_hold_roots,
+    _registry_container_paths,
+    _derive_container_host_prefix,
+    _translate_container_root,
+    _scan_parent_for_repo_roots,
+    _is_repo_root,
 )
 from lupin_arbiter_app.local_snapshot_store import LocalSnapshotStore
 
@@ -547,3 +558,417 @@ def test_build_factory_default_no_follow_through_watcher():
     gw, store = FakeGateway(), LocalSnapshotStore()
     job = build_fleet_arbiter_job_factory( gw, store, log_fn=lambda *a, **k: None )()
     assert job._follow_through_watcher is None                   # default → inert
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Q1 ROOT SOURCE — "config + host-path translation + parent scan" (Rick, 2026-07-16)
+#
+# NO TEST HERE ASSERTS A CENSUS COUNT. The hold corpus is LIVE — it measured
+# 41 → 43 → 44 → 45 across five honest measurements with zero errors anywhere,
+# because sessions write holds while you are counting them. Every assertion below
+# is on a PROPERTY.
+# ─────────────────────────────────────────────────────────────────────────────
+
+class FakeConfigMgr:
+    """A ConfigurationManager-shaped stub: only .get( key, default, return_type )."""
+
+    def __init__( self, repos=(), paths=None ):
+        self._repos = list( repos )
+        self._paths = dict( paths or { } )
+
+    def get( self, key, default=None, return_type=None ):
+        if key == "external repos":
+            return list( self._repos )
+        if key.startswith( "external repo " ) and key.endswith( " path" ):
+            return self._paths.get( key[ len( "external repo " ) : -len( " path" ) ], default )
+        return default
+
+
+def _git( *args, cwd ):
+    """Run a git command in cwd, quietly. Raises on failure — a broken fixture must be LOUD."""
+    subprocess.run( [ "git", *args ], cwd=str( cwd ), check=True,
+                    capture_output=True, text=True, timeout=30 )
+
+
+def _git_common_dir( path ):
+    """The REPO identity of a tree — what the refuted dedupe rule would have keyed on."""
+    out = subprocess.run( [ "git", "-C", str( path ), "rev-parse",
+                            "--path-format=absolute", "--git-common-dir" ],
+                          capture_output=True, text=True, timeout=30 )
+    return os.path.realpath( out.stdout.strip() )
+
+
+def _git_init_with_worktree( main, worktree ):
+    """
+    A REAL main repo + a REAL linked worktree — two distinct trees that genuinely
+    share one git-common-dir. Hand-faking a `.git` file does not reproduce this.
+    """
+    main.mkdir( parents=True )
+    _git( "init", "-q", cwd=main )
+    _git( "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q",
+          "--allow-empty", "-m", "seed", cwd=main )
+    _git( "worktree", "add", "-q", "--detach", str( worktree ), cwd=main )
+
+
+def _make_projects_tree( tmp_path ):
+    """
+    A miniature of the real host layout: a projects parent holding registered repos,
+    a NON-repo grouping dir (google/), and an UNREGISTERED repo one level under it —
+    which is `google/harvey-labs`, the case the parent scan exists for.
+    """
+    projects = tmp_path / "projects"
+    for rel in ( "lupin", "planning-is-prompting", "google/skills-distillation",
+                 "google/harvey-labs" ):
+        ( projects / rel / ".git" ).mkdir( parents=True )
+    ( projects / "not-a-repo" ).mkdir()                          # no .git → not a root
+    return projects
+
+
+# ---- the negative control: the bug the ruling exists to fix ----------------
+
+def test_NEGATIVE_CONTROL_untranslated_container_paths_reach_nothing( tmp_path ):
+    """
+    THE BUG, PINNED. Rick's first ruling — "just reuse the registered-project
+    config" — hands back CONTAINER paths (/var/external-projects/…) while the
+    arbiter runs on the HOST, where they do not exist. The root list looks
+    perfectly reasonable and reaches ZERO holds.
+
+    This test asserts the FAILURE is LOUD: every untranslated root must be
+    REPORTED (is_dir() False → roots_unreachable downstream), never silently
+    skipped. It is the control that MUST fail — delete the translation and
+    `test_translation_is_what_reaches_the_holds` goes RED while this one stays
+    green, which is exactly how you tell "swept 0 roots" from "found 0 prunable".
+    """
+    projects  = _make_projects_tree( tmp_path )
+    container = [ "/var/external-projects/lupin", "/var/external-projects/google/skills-distillation" ]
+
+    for raw in container:
+        assert not Path( raw ).is_dir()                          # host truth: they do not exist
+        # …and no anchor can be derived against a host root, so nothing translates:
+        assert _translate_container_root( raw, None ) is None
+
+    # The whole point: a config-derived list, untranslated, reaches nothing.
+    roots = _compute_hold_roots( FakeConfigMgr( repos=[ "cosa-voice" ],
+                                                paths={ "cosa-voice": "/var/external-projects/cosa-voice" } ),
+                                 host_root=str( projects / "lupin" ),
+                                 scan_fn=lambda: [ ] )
+    untranslatable = [ r for r in roots if not Path( r ).is_dir() ]
+    assert untranslatable == [ "/var/external-projects/cosa-voice" ]   # PASSED THROUGH, not dropped
+    #     ^ emitted on purpose so the sweep reports it in roots_unreachable:
+    #       the gap stays a NUMBER instead of a silence.
+
+
+def test_translation_is_what_reaches_the_holds( tmp_path ):
+    """
+    THE POSITIVE CONTROL, paired with the negative one above — proving the check
+    is non-vacuous. Same config, same host tree; the ONLY difference is that an
+    anchor exists, so translation happens. Measured on the real corpus, this is
+    the difference between reaching 4 holds and reaching 44.
+    """
+    projects = _make_projects_tree( tmp_path )
+    cfg      = FakeConfigMgr(
+        repos=[ "lupin", "skills-distillation" ],
+        paths={ "lupin"               : "/var/external-projects/lupin",
+                "skills-distillation" : "/var/external-projects/google/skills-distillation" } )
+
+    roots = _compute_hold_roots( cfg, host_root=str( projects / "lupin" ), scan_fn=lambda: [ ] )
+
+    assert str( projects / "google" / "skills-distillation" ) in roots   # container → host
+    assert all( not r.startswith( "/var/" ) for r in roots )             # nothing left untranslated
+    assert all( Path( r ).is_dir() for r in roots )                      # every root REACHES
+
+
+# ---- anchor derivation ------------------------------------------------------
+
+def test_anchor_pair_derives_the_prefix_map_without_a_hardcoded_swap():
+    pair = _derive_container_host_prefix( [ "/var/external-projects/lupin" ], "/mnt/DATA01/projects/lupin" )
+    assert pair == ( "/var/external-projects", "/mnt/DATA01/projects" )
+
+
+def test_anchor_self_calibrates_when_the_mount_moves():
+    """Re-mount the tree and the mapping follows — no edit to the module."""
+    pair = _derive_container_host_prefix( [ "/somewhere/else/lupin" ], "/new/host/root/lupin" )
+    assert pair == ( "/somewhere/else", "/new/host/root" )
+
+
+def test_no_anchor_when_no_config_entry_matches_this_project():
+    assert _derive_container_host_prefix( [ "/var/external-projects/other" ], "/host/lupin" ) is None
+
+
+def test_no_anchor_from_a_bare_root_level_path():
+    """A path with no prefix to strip is not an anchor (would map "/" → everything)."""
+    assert _derive_container_host_prefix( [ "/lupin" ], "/host/lupin" ) is None
+
+
+def test_anchorless_config_translates_nothing_but_stays_loud( tmp_path ):
+    """No anchor ⇒ every config root passes through untranslated ⇒ all reported."""
+    cfg   = FakeConfigMgr( repos=[ "a" ], paths={ "a": "/var/external-projects/a" } )
+    roots = _compute_hold_roots( cfg, host_root=str( tmp_path ), scan_fn=lambda: [ ] )
+    assert "/var/external-projects/a" in roots                   # untranslated → reported downstream
+
+
+# ---- translation ------------------------------------------------------------
+
+def test_translate_rejects_a_path_outside_the_mapped_mount( tmp_path ):
+    """`/var/lupin/src/lupin-mobile` shares no prefix with `/var/external-projects`."""
+    assert _translate_container_root( "/var/lupin/src/lupin-mobile",
+                                      ( "/var/external-projects", str( tmp_path ) ) ) is None
+
+
+def test_translate_rejects_a_prefix_that_only_looks_like_a_match( tmp_path ):
+    """`/var/external-projects-backup` must NOT match the `/var/external-projects` mount."""
+    assert _translate_container_root( "/var/external-projects-backup/x",
+                                      ( "/var/external-projects", str( tmp_path ) ) ) is None
+
+
+def test_translate_rejects_a_translation_that_does_not_exist( tmp_path ):
+    """Selection is a hypothesis; EXISTENCE is the verification."""
+    assert _translate_container_root( "/var/external-projects/ghost",
+                                      ( "/var/external-projects", str( tmp_path ) ) ) is None
+
+
+def test_translate_of_the_mount_root_itself( tmp_path ):
+    assert _translate_container_root( "/var/external-projects",
+                                      ( "/var/external-projects", str( tmp_path ) ) ) == str( tmp_path )
+
+
+def test_translate_survives_an_oserror( monkeypatch, tmp_path ):
+    def boom( self ):
+        raise OSError( "stat exploded" )
+    monkeypatch.setattr( Path, "is_dir", boom )
+    assert _translate_container_root( "/var/external-projects/x",
+                                      ( "/var/external-projects", str( tmp_path ) ) ) is None
+
+
+def test_translate_without_an_anchor_is_none():
+    assert _translate_container_root( "/var/external-projects/x", None ) is None
+
+
+# ---- the parent scan (the safety net) --------------------------------------
+
+def test_parent_scan_finds_the_UNREGISTERED_repo_the_config_forgot( tmp_path ):
+    """
+    google/harvey-labs: a real repo, holding a real hold, with ZERO config mentions.
+    Without this scan it is unreachable forever — a registry cannot report what was
+    never written into it.
+    """
+    projects = _make_projects_tree( tmp_path )
+    found    = _scan_parent_for_repo_roots( projects )
+    assert str( projects / "google" / "harvey-labs" ) in found   # depth 2, under a non-repo dir
+    assert str( projects / "lupin" ) in found                    # depth 1
+    assert str( projects / "not-a-repo" ) not in found           # no .git → not a root
+    assert str( projects / "google" ) not in found               # grouping dir → descended, not a root
+
+
+def test_parent_scan_stops_at_a_repo_and_does_not_descend_into_it( tmp_path ):
+    """A repo IS a root — the hold sweep recurses inside it; walking in here duplicates work."""
+    projects = _make_projects_tree( tmp_path )
+    ( projects / "lupin" / "nested" / ".git" ).mkdir( parents=True )
+    found = _scan_parent_for_repo_roots( projects, max_depth=3 )
+    assert str( projects / "lupin" ) in found
+    assert str( projects / "lupin" / "nested" ) not in found     # not descended into
+
+
+def test_parent_scan_respects_max_depth( tmp_path ):
+    projects = _make_projects_tree( tmp_path )
+    assert str( projects / "google" / "harvey-labs" ) not in _scan_parent_for_repo_roots( projects, max_depth=1 )
+
+
+def test_parent_scan_ignores_files_and_unreadable_dirs( tmp_path ):
+    projects = _make_projects_tree( tmp_path )
+    ( projects / "a-file.txt" ).write_text( "not a dir" )
+    assert _scan_parent_for_repo_roots( projects )               # still finds the repos
+    assert _scan_parent_for_repo_roots( tmp_path / "does-not-exist" ) == [ ]   # OSError → []
+
+
+def test_parent_scan_skips_an_entry_whose_type_cannot_be_read( tmp_path, monkeypatch ):
+    projects = _make_projects_tree( tmp_path )
+    real_scandir = os.scandir
+
+    class Exploding:
+        def __init__( self, entry ): self.path = entry.path; self.name = entry.name
+        def is_dir( self, follow_symlinks=True ): raise OSError( "type unreadable" )
+
+    monkeypatch.setattr( os, "scandir",
+                         lambda p: [ Exploding( e ) for e in real_scandir( p ) ] )
+    assert _scan_parent_for_repo_roots( projects ) == [ ]        # every entry skipped, no raise
+
+
+def test_is_repo_root_survives_an_oserror( monkeypatch, tmp_path ):
+    def boom( self ):
+        raise OSError( "stat exploded" )
+    monkeypatch.setattr( Path, "exists", boom )
+    assert _is_repo_root( tmp_path ) is False
+
+
+# ---- the union + realpath dedupe -------------------------------------------
+
+def test_union_covers_both_halves_blind_spots( tmp_path ):
+    """Config names what the scan's depth misses; the scan catches what config forgot."""
+    projects = _make_projects_tree( tmp_path )
+    deep     = projects / "a" / "b" / "c" / "registered-but-deep"
+    ( deep / ".git" ).mkdir( parents=True )
+    cfg = FakeConfigMgr( repos=[ "lupin", "deep" ],
+                         paths={ "lupin": "/var/external-projects/lupin",
+                                 "deep" : "/var/external-projects/a/b/c/registered-but-deep" } )
+
+    roots = _compute_hold_roots( cfg, host_root=str( projects / "lupin" ) )   # REAL scan
+
+    assert str( deep ) in roots                                  # config half: too deep to scan
+    assert str( projects / "google" / "harvey-labs" ) in roots   # scan half: unregistered
+
+
+def test_dedupe_is_on_realpath_so_the_same_tree_is_swept_once( tmp_path ):
+    """A symlinked spelling of a root is the SAME TREE — sweep it once."""
+    projects = _make_projects_tree( tmp_path )
+    link     = tmp_path / "lupin-link"
+    link.symlink_to( projects / "lupin" )
+    cfg = FakeConfigMgr( repos=[ "lupin" ], paths={ "lupin": "/var/external-projects/lupin" } )
+
+    roots = _compute_hold_roots( cfg, host_root=str( projects / "lupin" ),
+                                 scan_fn=lambda: [ str( link ) ] )
+
+    identities = [ os.path.realpath( r ) for r in roots ]
+    assert len( identities ) == len( set( identities ) )         # no tree swept twice
+    assert str( link ) not in roots                              # the dupe spelling dropped
+
+
+def test_dedupe_does_NOT_collapse_a_worktree_into_its_main_repo( tmp_path ):
+    """
+    🔴 THE REFUTED INSTRUCTION, PINNED AS A TEST — on a REAL git worktree.
+
+    Deduping on `git --git-common-dir` would treat a worktree and its main repo as
+    ONE identity and DROP a root that demonstrably holds a hold today
+    (lupin/.claude/worktrees/cheech-orphan-bridge). git-common-dir is the identity
+    of a REPO; these are two TREES with different files.
+
+    ⚠️ THE FIXTURE IS THE TEST. A hand-faked `.git` text file does NOT work here:
+    `git rev-parse` errors on it and falls back to realpath, so the test passes
+    under BOTH dedupe rules and pins NOTHING. It has to be a real worktree, or this
+    is decoration. (It was decoration when first written — a faithful
+    git-common-dir mutant survived it. Verified dead only after this rewrite.)
+    """
+    projects = _make_projects_tree( tmp_path )
+    main     = projects / "real-repo"
+    worktree = projects / "real-worktree"
+    _git_init_with_worktree( main, worktree )
+
+    # The fixture's own precondition: the two trees DO share a git-common-dir.
+    # If this ever stops holding, the test below is vacuous again and must be fixed.
+    assert _git_common_dir( main ) == _git_common_dir( worktree )
+
+    roots = _compute_hold_roots( FakeConfigMgr(), host_root=str( projects / "lupin" ),
+                                 scan_fn=lambda: [ str( main ), str( worktree ) ] )
+
+    assert str( main ) in roots
+    assert str( worktree ) in roots                              # SAME repo, DIFFERENT tree → kept
+
+
+def test_host_root_is_always_present_even_with_an_empty_config( tmp_path ):
+    roots = _compute_hold_roots( FakeConfigMgr(), host_root=str( tmp_path ), scan_fn=lambda: [ ] )
+    assert roots == [ str( tmp_path ) ]
+
+
+def test_config_order_first_then_scan_order( tmp_path ):
+    projects = _make_projects_tree( tmp_path )
+    cfg      = FakeConfigMgr( repos=[ "lupin", "pip" ],
+                              paths={ "lupin": "/var/external-projects/lupin",          # the anchor
+                                      "pip"  : "/var/external-projects/planning-is-prompting" } )
+    roots    = _compute_hold_roots( cfg, host_root=str( projects / "lupin" ),
+                                    scan_fn=lambda: [ str( projects / "google" / "harvey-labs" ) ] )
+    assert roots == [ str( projects / "lupin" ),                 # host_root first (config's lupin dedupes)
+                      str( projects / "planning-is-prompting" ),  # …then config order
+                      str( projects / "google" / "harvey-labs" ) ]   # …then scan order
+
+
+# ---- the raw config read ----------------------------------------------------
+
+def test_registry_container_paths_reads_raw_untranslated_values():
+    cfg = FakeConfigMgr( repos=[ "a", "b" ],
+                         paths={ "a": "/var/external-projects/a", "b": "/var/lupin/src/b" } )
+    assert _registry_container_paths( cfg ) == [ "/var/external-projects/a", "/var/lupin/src/b" ]
+
+
+def test_registry_container_paths_drops_blank_and_missing_entries():
+    cfg = FakeConfigMgr( repos=[ "a", "  ", "no-path", "blank" ],
+                         paths={ "a": "  /var/x/a  ", "blank": "   " } )
+    assert _registry_container_paths( cfg ) == [ "/var/x/a" ]    # stripped; blanks/missing dropped
+
+
+def test_registry_container_paths_of_an_empty_registry():
+    assert _registry_container_paths( FakeConfigMgr() ) == [ ]
+
+
+# ---- F-C: the pragmas come OFF — these functions are REACHABLE -------------
+
+def test_default_hold_roots_executes_the_real_production_path():
+    """
+    F-C: this carried `# pragma: no cover - production project-root IO boundary`.
+    It RUNS — so the pragma was invalid under the 100% mandate. Properties only;
+    the fleet's root list is live and unassertable as a count.
+    """
+    roots = _default_hold_roots()
+    assert isinstance( roots, list ) and roots
+    assert all( isinstance( r, str ) for r in roots )
+    import cosa.utils.util as cu
+    assert cu.get_project_root() in roots                        # own project always reachable
+    identities = [ os.path.realpath( r ) for r in roots ]
+    assert len( identities ) == len( set( identities ) )         # deduped on tree identity
+
+
+def test_default_live_session_ids_executes_and_includes_persona_less_sessions():
+    """F-C: also pragma'd, also reachable — it returns the live set in ~0.00s."""
+    live = _default_live_session_ids()
+    assert live is None or isinstance( live, set )
+
+
+def test_default_live_session_ids_uses_require_persona_FALSE():
+    """
+    F-B, pinned. `find_active_voice_persona_sessions` is imported one line up and is
+    the WRONG source: persona'd sessions ONLY ⇒ a live but persona-LESS session
+    (pool-exhausted — bug d57dbfea) reads as POSITIVE-DEAD and loses its hold at TTL
+    with no grace. That is the forbidden relaxation of bias-to-keep.
+    """
+    seen = { }
+
+    def fake_find( require_persona=True ):
+        seen[ "require_persona" ] = require_persona
+        return [ ( "/p/a", "sid-persona'd", { "name": "rio" } ),
+                 ( "/p/b", "sid-persona-LESS", None ) ]
+
+    live = _default_live_session_ids( find_fn=fake_find )
+    assert seen[ "require_persona" ] is False
+    assert live == { "sid-persona'd", "sid-persona-LESS" }        # the persona-less one SURVIVES
+
+
+def test_default_live_session_ids_degrades_to_None_not_a_partial_set():
+    """A half-enumerated live-set is WORSE than none — absence licenses the no-grace prune."""
+    def boom( require_persona=True ):
+        raise RuntimeError( "bridge scan exploded" )
+    assert _default_live_session_ids( find_fn=boom ) is None      # NO authoritative set
+
+
+# ---- the invariant that outranks all of the above ---------------------------
+
+def test_the_ruled_root_source_still_CANNOT_delete_anything():
+    """
+    The sweep got ~10× wider tonight. Width is exactly what makes a deletion bug
+    catastrophic — so the no-unlink invariant is re-asserted against the NEW root
+    source, not assumed to have survived it.
+    """
+    import ast, inspect
+    import lupin_arbiter_app.fleet_arbiter_loop as mod
+
+    tree     = ast.parse( inspect.getsource( mod ) )
+    unlinks  = [ n for n in ast.walk( tree )
+                 if isinstance( n, ast.Attribute ) and n.attr in ( "unlink", "rmtree", "remove", "rmdir" ) ]
+    assert unlinks == [ ]                                        # not one deletion call in the module
+
+    # POSITIVE CONTROL — the AST check is non-vacuous: it DOES find an unlink when
+    # one is there. (A guard that cannot fail is the exact defect this milestone is
+    # about; my predecessor wrote one INSIDE the fix for it — his grep matched the
+    # word "unlink" in a DOCSTRING.)
+    import lupin_cli.claude_code.hooks.lib.heartbeat_hold as hold_mod
+    hold_tree = ast.parse( inspect.getsource( hold_mod ) )
+    assert [ n for n in ast.walk( hold_tree )
+             if isinstance( n, ast.Attribute ) and n.attr == "unlink" ]   # prune_stale_hold_files has one

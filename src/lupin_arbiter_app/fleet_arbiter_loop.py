@@ -37,6 +37,7 @@ import datetime
 import json
 import os
 import threading
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Optional
 
 from lupin_arbiter_app.health_watcher import SystemClock
@@ -98,34 +99,267 @@ def _default_manager_bridge_mtimes():   # pragma: no cover - production bridge-s
     return result
 
 
-def _default_hold_roots():   # pragma: no cover - production project-root IO boundary
+# Q1 RULING (Rick, 2026-07-16): "Config + host-path translation + parent scan."
+# The registered-project config is the known-good list; the parent scan is the
+# SAFETY NET for roots the registry does not enumerate (verified: google/harvey-labs
+# holds a hold and has zero config mentions). Depth 2 is what that costs — the
+# unregistered repos live one level under a non-repo grouping dir (google/).
+_HOLD_ROOT_SCAN_MAX_DEPTH = 2
+
+
+def _registry_container_paths( config_mgr ):
     """
-    The root list the hold sweep is pointed at — the session's OWN project root.
+    The `external repo <name> path` values from the registered-project config —
+    verbatim, UNTRANSLATED, exactly as configured.
 
-    ⚠️ THIS IS NOT THE FLEET'S ROOT LIST, and it must not be mistaken for one.
-    Where the janitor learns the fleet's roots is an OPEN, UNRULED design question,
-    so this module REFUSES to invent an answer: the roots arrive as an injected
-    seam, and this default only makes today's implicit reach EXPLICIT (the janitor
-    was called with no base_dir → LUPIN_ROOT → one directory, non-recursively).
+    ⚠️ Deliberately does NOT reuse `_scope_registry.build_scope_registry`, which
+    DROPS any scope whose path does not exist on disk. Every one of these paths is
+    a CONTAINER path, so on the host that helper returns an EMPTY registry — it
+    would hand back a clean, confident, totally empty answer. This reads the raw
+    keys so the translation layer below gets something to translate.
 
-    Two verified traps for whoever rules that question:
-      • the `external repo * path` config entries are CONTAINER paths
-        (/var/external-projects/…) that DO NOT EXIST on the host — and the arbiter
-        runs on the HOST. A config-derived root list resolves to nothing, reaching
-        ZERO hold files while looking perfectly reasonable.
-      • at least one hold-bearing project is not registered anywhere.
-    A root list that reaches nothing is now VISIBLE (roots_swept + files_seen are
-    emitted every tick, empty or not) rather than silent.
+    Requires:
+        - config_mgr exposes .get( key, default=..., return_type=... )
 
     Ensures:
-        - returns [ project root ] — recursive within it, so the strays under
-          src/migrations/versions/ and src/lupin-mobile/ are reached
+        - returns the configured path strings in `external repos` order
+        - a name with no/blank path key drops out; never raises
+    """
+    names = config_mgr.get( "external repos", default=[ ], return_type="list-string" )
+    paths = [ ]
+    for raw_name in names:
+        name = raw_name.strip()
+        if not name:
+            continue
+        value = config_mgr.get( f"external repo {name} path", default=None )
+        if value is None:
+            continue
+        path = str( value ).strip()
+        if path:
+            paths.append( path )
+    return paths
+
+
+def _derive_container_host_prefix( container_paths, host_root ):
+    """
+    Derive the container→host path mapping from a VERIFIED ANCHOR PAIR, rather
+    than hardcoding a string swap.
+
+    THE WHOLE REASON THIS EXISTS: the config's paths are container-side
+    (/var/external-projects/…) and DO NOT EXIST on the host — and the arbiter runs
+    on the HOST. The first ruling ("just reuse the config") reached ZERO of 45 holds
+    for exactly this reason, while looking perfectly reasonable. Translation is the
+    difference between a root list and a root list that reaches something.
+
+    The anchor is not a guess: we already KNOW one (container, host) pair for the
+    same repo — the config entry for THIS project vs `cu.get_project_root()`. Strip
+    the shared trailing component and the prefix mapping falls out
+    (/var/external-projects → <host projects parent>). It self-calibrates: move the
+    projects tree, or re-mount it elsewhere, and the mapping follows with no edit
+    here. The docker-compose bind-mount this reconstructs is the ground truth
+    (`/mnt/DATA01/…/projects:/var/external-projects:ro`).
+
+    The anchor is matched on the trailing component but is NOT trusted on that
+    basis: every translated path is independently confirmed to be a real directory
+    in `_translate_container_root` before it is used, and an unconfirmed one is
+    passed through untranslated so it surfaces as an UNREACHABLE root. Selection
+    here is a hypothesis; existence there is the verification.
+
+    Requires:
+        - container_paths is an iterable of configured path strings
+        - host_root is an absolute host path to this project
+
+    Ensures:
+        - returns ( container_prefix, host_prefix ) from the first entry whose
+          trailing component matches host_root's, or None when no anchor exists
+          (⇒ nothing is translated and every config root reports unreachable —
+          loudly wrong, never silently empty)
+    """
+    host = Path( host_root )
+    for raw in container_paths:
+        container = PurePosixPath( str( raw ) )
+        if container.name != host.name:
+            continue
+        container_prefix = str( container.parent )
+        if container_prefix in ( "", ".", "/" ):
+            continue                                   # no prefix to strip → not an anchor
+        return ( container_prefix, str( host.parent ) )
+    return None
+
+
+def _translate_container_root( raw, prefix_pair ):
+    """
+    Translate ONE configured container path to its host path — and confirm it.
+
+    Requires:
+        - raw is a configured path string; prefix_pair is ( container_prefix,
+          host_prefix ) or None
+
+    Ensures:
+        - returns the host path ONLY when the translation names a real directory
+        - returns None when there is no anchor, the path is outside the mapped
+          prefix, or the translated path is not a directory. The caller passes a
+          None-translated root through UNTRANSLATED so it is REPORTED as
+          unreachable rather than silently dropped.
+        - never raises
+    """
+    if prefix_pair is None:
+        return None
+    container_prefix, host_prefix = prefix_pair
+    path = str( raw )
+    stem = container_prefix.rstrip( "/" )
+    if path != stem and not path.startswith( stem + "/" ):
+        return None                                    # outside the mapped mount
+    relative  = path[ len( stem ) : ].lstrip( "/" )
+    candidate = Path( host_prefix ) / relative if relative else Path( host_prefix )
+    try:
+        if candidate.is_dir():
+            return str( candidate )
+    except OSError:
+        pass
+    return None
+
+
+def _is_repo_root( path ):
+    """
+    Is this directory a repository root (does it hold a `.git`)?
+
+    Requires:
+        - path is a Path
+
+    Ensures:
+        - returns True iff `<path>/.git` exists; an OSError yields False
+    """
+    try:
+        return ( path / ".git" ).exists()
+    except OSError:
+        return False
+
+
+def _scan_parent_for_repo_roots( parent, max_depth=_HOLD_ROOT_SCAN_MAX_DEPTH ):
+    """
+    THE SAFETY NET half of the Q1 ruling: find repo roots the registry does not
+    enumerate, by scanning the projects parent.
+
+    Verified need, not a hypothetical: `google/harvey-labs` is a git repo, it holds
+    a hold, and it has ZERO mentions anywhere in the config. Without this scan it is
+    unreachable FOREVER — and the registry would never say so, because a registry
+    cannot report what was never written into it. The config is the known-good list;
+    this is what catches what the list forgot.
+
+    Depth 2 is derived from that same case: unregistered repos sit one level under a
+    non-repo grouping directory (`google/`). Descent STOPS at a repo — a repo IS a
+    root, and the hold sweep recurses inside it on its own; walking into it here
+    would only duplicate that work.
+
+    Requires:
+        - parent is a path-like directory; max_depth is a positive int
+
+    Ensures:
+        - returns the repo-root paths found within max_depth of parent
+        - follows no symlinked directories; a per-directory OSError skips that
+          directory only; never raises
+    """
+    found = [ ]
+    stack = [ ( Path( parent ), 0 ) ]
+    while stack:
+        current, depth = stack.pop()
+        try:
+            entries = list( os.scandir( current ) )
+        except OSError:
+            continue                                   # unreadable dir → skip it, keep scanning
+        for entry in entries:
+            try:
+                is_dir = entry.is_dir( follow_symlinks=False )
+            except OSError:
+                continue
+            if not is_dir:
+                continue
+            child = Path( entry.path )
+            if _is_repo_root( child ):
+                found.append( str( child ) )           # a repo IS a root — do not descend
+            elif depth + 1 < max_depth:
+                stack.append( ( child, depth + 1 ) )
+    return found
+
+
+def _compute_hold_roots( config_mgr, host_root, scan_fn=None ):
+    """
+    Q1's ruled root source: CONFIG + HOST-PATH TRANSLATION + PARENT SCAN, unioned.
+
+    Rick ruled his original (a) PLUS the (c) he had rejected, as a SAFETY NET and
+    not a replacement — so this is a union, and each half covers the other's proven
+    blind spot: the config names repos the scan's depth would miss, and the scan
+    catches repos (harvey-labs) the config never knew about.
+
+    DEDUPE IS ON RESOLVED REALPATH, NOT ON `git --git-common-dir` (ruled 2026-07-16
+    after the git-common-dir instruction was refuted and withdrawn). git-common-dir
+    is the identity of a REPO, not of a TREE: a worktree and its main repo SHARE one
+    while being different directories holding different files, so deduping on it
+    would silently DROP a worktree root — and a hold lives in a worktree today
+    (lupin/.claude/worktrees/cheech-orphan-bridge). It also returns a RELATIVE path
+    (".git"), which naively compared collides every repo into a single identity.
+    Realpath is the honest identity for "the same tree reached two ways", which is
+    the only dupe this union can actually produce.
+
+    Requires:
+        - config_mgr exposes .get(...); host_root is this project's host path
+        - scan_fn is None (⇒ real parent scan) or () -> iterable of root paths
+
+    Ensures:
+        - returns the union: translated config roots + scanned repo roots, with
+          host_root always present, deduped on realpath, order-stable
+          (config order first, then scan order)
+        - a config root that CANNOT be translated/confirmed is emitted UNTRANSLATED
+          on purpose: the sweep then reports it in roots_unreachable, keeping the
+          gap a NUMBER instead of a silence (invariant: never silently skipped)
+        - never raises
+    """
+    if scan_fn is None:
+        scan_fn = lambda: _scan_parent_for_repo_roots( Path( host_root ).parent )
+
+    container_paths = _registry_container_paths( config_mgr )
+    prefix_pair     = _derive_container_host_prefix( container_paths, host_root )
+
+    candidates = [ str( host_root ) ]
+    for raw in container_paths:
+        translated = _translate_container_root( raw, prefix_pair )
+        candidates.append( translated if translated is not None else str( raw ) )
+    candidates.extend( str( root ) for root in scan_fn() )
+
+    roots, seen = [ ], set()
+    for candidate in candidates:
+        identity = os.path.realpath( candidate )
+        if identity in seen:
+            continue                                   # same tree reached twice → sweep once
+        seen.add( identity )
+        roots.append( candidate )
+    return roots
+
+
+def _default_hold_roots():
+    """
+    The root list the hold sweep is pointed at — Q1's ruled source, wired to the
+    real config and the real host root.
+
+    This is the production wiring ONLY; every decision lives in `_compute_hold_roots`
+    behind injected seams. It is thin BY DESIGN and NOT pragma'd: it is genuinely
+    reachable and executes in the test suite. (Its predecessor carried
+    `# pragma: no cover - production project-root IO boundary` — invalid under the
+    100%-coverage mandate for a function that runs fine when called; an IO-boundary
+    label is not a coverage exemption.)
+
+    Ensures:
+        - returns the unioned config+scan root list (see `_compute_hold_roots`)
     """
     import cosa.utils.util as cu
-    return [ cu.get_project_root() ]
+    from cosa.config.configuration_manager import ConfigurationManager
+
+    return _compute_hold_roots( ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ),
+                                cu.get_project_root() )
 
 
-def _default_live_session_ids():   # pragma: no cover - production bridge-scan IO boundary
+def _default_live_session_ids( find_fn=None ):
     """
     The AUTHORITATIVE live-session set for the hold sweep — the belt-and-suspenders
     that stops a live session's hold from ever being read as positive-dead.
@@ -142,14 +376,27 @@ def _default_live_session_ids():   # pragma: no cover - production bridge-scan I
     require_persona=False is the honest liveness set — d57dbfea's own lesson,
     applied one layer over.
 
+    NOT pragma'd (F-C, fixed 2026-07-16): this carried
+    `# pragma: no cover - production bridge-scan IO boundary`, but it is REACHABLE —
+    executing it returns the live set in ~0.00s. An IO-boundary label is not a
+    coverage exemption under the 100% mandate, and a bias-to-keep guard is the last
+    thing that should go untested. The `find_fn` seam makes the degrade-safe path
+    testable without monkeypatching a module global.
+
+    Requires:
+        - find_fn is None (⇒ the real bridge scan) or
+          ( require_persona=... ) -> iterable of ( path, session_id, persona )
+
     Ensures:
         - returns the set of live session ids INCLUDING persona-less sessions
         - degrade-safe: any scan failure yields None (NO authoritative set) rather
           than a PARTIAL one — a half-enumerated live-set is worse than none, since
           absence from it is what licenses the no-grace prune
     """
+    if find_fn is None:
+        find_fn = _find_active_sessions
     try:
-        return { sid for _path, sid, _persona in _find_active_sessions( require_persona=False ) }
+        return { sid for _path, sid, _persona in find_fn( require_persona=False ) }
     except Exception:
         return None
 
