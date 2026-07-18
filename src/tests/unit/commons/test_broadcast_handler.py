@@ -18,6 +18,7 @@ from lupin_mcp.broadcast_handler import (
     _directive_mentions,
     _parse_body,
     _post_ack,
+    _prose_contaminated_mention,
     handle_broadcast,
 )
 from lupin_mcp.commons_store import CommonsStore
@@ -509,9 +510,19 @@ def test_regression_rick_afk_broadcast_reaches_addressed_managers(
             store             = store,
             sender_session_id = f"sess-{persona[ 'name' ]}",
         )
-        assert result[ "status" ] == "completed", f"{persona[ 'name' ]} must receive, not skip"
+        # 2026-07-18: status TIGHTENED from a bare "completed". Line 2 of this
+        # broadcast ("@Rachel @Cheech @Krishna: ...") IS legitimately withheld from
+        # both managers, and the ack now SAYS SO instead of reporting a bare success.
+        # Asserting the exact withheld status pins that behavior rather than loosening
+        # the check — a plain "completed" here would now be a BUG (a drop reporting
+        # success), which is the defect this module shipped for two nights.
+        assert result[ "status" ] == "completed-with-withheld", (
+            f"{persona[ 'name' ]} must receive, not skip — and the withheld line must be declared"
+        )
+        assert result[ "withheld_count" ] == 1
         assert len( captured_injections ) == 1
         assert "a new directive" in captured_injections[ 0 ]
+        assert "DIVERGENCE NOTICE" in captured_injections[ 0 ]
 
 
 def test_regression_multi_addressee_directive_matches_each(
@@ -728,3 +739,304 @@ def test_directive_to_offline_persona_delivers_as_prose( store, maria_persona, i
     )
     assert r[ "status" ] == "completed"
     assert "@Cheech: do X" in captured_injections[ 0 ]
+
+
+# ---------------------------------------------------------------------------
+# 2026-07-18 — PROSE-CONTAMINATED MENTION (bug ddd98ff2, parent 841b3d21).
+#
+# MEASURED, not hypothesized. Both lines below are VERBATIM from delivery records
+# on disk. Broadcast 2159408c fanned out THREE distinct payloads to 7 sessions from
+# ONE broadcast_id; the second line reached 1 of 7.
+#
+# THE DEFECT IS ORIGINAL, NOT A REGRESSION FROM MULTI-ADDRESSEE: the spec-era parser
+# (commit 26898e1e, 2026-05-29) delivered BOTH of these to NOBODY (0/7) — verified
+# independently by Rio and by Rachel, who AST-extracted and executed the original
+# function. The @-split and `_MAX_PERSONA_TOKEN_LEN` took it 0/7 -> 1/7. They
+# mitigated; they never fixed.
+#
+# WHY THE EXISTING SUITE MISSED IT: `_RICK_AFK_BROADCAST` line 1 is THE SAME SHAPE in
+# its LONG form — its swallowed token exceeds 40 chars AND carries commas, so the prose
+# guard catches it. These cases are the SHORT form: 38 and 18 chars, no sentence
+# punctuation. They clear every guard. The guard was never a fix, only a filter, and
+# the band beneath it was never tested.
+#
+# ⚠️ SCOPE OF THIS FIX — ROSTER-POPULATED ONLY. Measured at all three roster states
+# (Rachel, independently): roster POPULATED -> fixed; roster [] -> everything fans out;
+# roster None -> DEFECT SURVIVES INTACT, since the gate is conditioned on
+# `known_personas is not None`. The None path is LATENT + UNMEASURED in production and
+# is DISCLOSED, NOT FIXED, per María's 2026-07-18 ruling. See the final test.
+# ---------------------------------------------------------------------------
+
+_ROSTER_7 = [ "Maria", "Tiberius", "Mr. Radio", "Krishna", "Rachel", "Cheech", "Rio" ]
+
+# Verbatim from bf120f59 / 1a52ceb2 delivery records, broadcast 2159408c.
+_CONTAMINATED_PREAMBLE = "@maria @mr radio it is Maria's contention that: \"...The whole build is five items:"
+# Verbatim from a second broadcast, a different night. Reached Tiberius ONLY, 1 of 7.
+_CONTAMINATED_ATTENTION = "@Tiberius @mr radio Attention: @Cheech and @Krishna need to be respun. What is the ETA?"
+
+
+def test_prose_contaminated_mention_detects_glued_prose():
+    """'mr radio it is Maria's contention that' = a REAL persona + glued prose."""
+    assert _prose_contaminated_mention( "mr radio it is Maria's contention that", _ROSTER_7 ) == "Mr. Radio"
+    assert _prose_contaminated_mention( "mr radio Attention", _ROSTER_7 ) == "Mr. Radio"
+
+
+def test_prose_contaminated_mention_ignores_clean_and_unknown():
+    """NEGATIVE CONTROL — the predicate must NOT fire on a clean name or an unknown
+    addressee. Without this, a predicate returning truthy for everything would pass the
+    positive test above and silently fan out every directive in the system."""
+    assert _prose_contaminated_mention( "mr radio", _ROSTER_7 )  is None    # clean whole token
+    assert _prose_contaminated_mention( "Maria", _ROSTER_7 )     is None    # clean whole token
+    assert _prose_contaminated_mention( "bogus", _ROSTER_7 )     is None    # unknown addressee
+    assert _prose_contaminated_mention( "here goes", _ROSTER_7 ) is None    # prose, no roster prefix
+
+
+def test_contaminated_preamble_now_reaches_everyone():
+    """INSTANCE 1 (broadcast 2159408c). Pre-fix: delivered to `maria` ALONE and silently
+    dropped for the man it NAMES. Post-fix: prose -> default -> every seat."""
+    for who in _ROSTER_7:
+        default, matched, non_match = _parse_body( _CONTAMINATED_PREAMBLE, who, _ROSTER_7 )
+        assert default   == [ _CONTAMINATED_PREAMBLE ], f"{who} must receive the line"
+        assert matched   == [ ]
+        assert non_match == 0
+
+
+def test_contaminated_attention_now_reaches_everyone():
+    """INSTANCE 2. Pre-fix: reached Tiberius ONLY (1/7). '@Cheech'/'@Krishna' sit AFTER
+    the colon and route nothing — they are body text, which is its own hazard."""
+    for who in _ROSTER_7:
+        default, matched, non_match = _parse_body( _CONTAMINATED_ATTENTION, who, _ROSTER_7 )
+        assert default   == [ _CONTAMINATED_ATTENTION ], f"{who} must receive the line"
+        assert non_match == 0
+
+
+def test_unknown_addressee_run_still_routes_unchanged():
+    """⚠️ BOTH POLARITIES / NO OVER-DELIVERY. The fix must NOT collapse into 'deliver
+    everything'. '@bogus @Maria: sync' keeps targeting Maria alone — existing DELIBERATE
+    behavior (test_parse_body_roster_mixed_bogus_and_real_mention_stays_directive).
+    ⚠️ OPEN DECISION: María's (B) ruling ('every segment must resolve') WOULD flip this;
+    Rachel measured the collision and it is with María. This pins TODAY's behavior so the
+    flip, if ruled, is a visible one-line change and never a silent one."""
+    default, matched, non_match = _parse_body( "@bogus @Maria: sync", "Maria", _ROSTER_7 )
+    assert default   == [ ]
+    assert matched   == [ "@bogus @Maria: sync" ]
+    assert non_match == 0
+    # ...and it must still be WITHHELD from a non-addressee, not fanned out.
+    default, matched, non_match = _parse_body( "@bogus @Maria: sync", "Krishna", _ROSTER_7 )
+    assert default == [ ] and matched == [ ] and non_match == 1
+
+
+def test_genuine_targeted_directive_still_targets():
+    """NO OVER-DELIVERY — the polarity Rachel weights heaviest. A clean directive must
+    still route to exactly one seat and be withheld from the rest."""
+    for who in _ROSTER_7:
+        default, matched, non_match = _parse_body( "@Tiberius: only the boss", who, _ROSTER_7 )
+        if who == "Tiberius":
+            assert matched == [ "@Tiberius: only the boss" ]
+        else:
+            assert matched == [ ] and non_match == 1, f"{who} must NOT receive a targeted line"
+
+
+def test_multi_addressee_still_routes_to_both():
+    """The feature a strict-spec (A) reading would have silently deleted."""
+    for who in ( "Maria", "Rachel" ):
+        _, matched, _ = _parse_body( "@Maria @Rachel: check the gate", who, _ROSTER_7 )
+        assert matched == [ "@Maria @Rachel: check the gate" ], f"{who} must be routed"
+    _, matched, non_match = _parse_body( "@Maria @Rachel: check the gate", "Krishna", _ROSTER_7 )
+    assert matched == [ ] and non_match == 1
+
+
+def test_withheld_drop_is_declared_to_recipient():
+    """⭐ REFUSE-LEVEL (María + Rachel, independently). The drop must be LOUD.
+    A drop that reports success IS the defect; this asserts it cannot recur."""
+    diagnostics = [ ]
+    _parse_body( "@Tiberius: only the boss", "Maria", _ROSTER_7, diagnostics )
+    assert [ d[ "kind" ] for d in diagnostics ] == [ "withheld_directive" ]
+    reminder = _build_reminder( "bid-x", "body text", withheld_count=1 )
+    assert "DIVERGENCE NOTICE" in reminder
+    assert "YOU DID NOT RECEIVE THE WHOLE BROADCAST" in reminder
+    # NEGATIVE CONTROL: silence when nothing was withheld (no false alarms).
+    assert "DIVERGENCE NOTICE" not in _build_reminder( "bid-x", "body text", withheld_count=0 )
+
+
+def test_unresolved_mention_is_declared_to_sender():
+    """The signal that would have caught the original bug in seconds instead of two
+    nights: the ack NAMES the @-token that matched no live persona."""
+    diagnostics = [ ]
+    _parse_body( _CONTAMINATED_PREAMBLE, "Maria", _ROSTER_7, diagnostics )
+    assert [ d[ "kind" ] for d in diagnostics ] == [ "prose_contaminated_mention" ]
+    assert diagnostics[ 0 ][ "personas" ] == [ "Mr. Radio" ]
+
+
+def test_fix_scope_all_three_roster_states():
+    """⚠️ Rachel's §3, and the honest boundary of this fix. Measured at ALL THREE roster
+    states rather than only the populated one.
+      POPULATED -> FIXED (line fans out)
+      []        -> fans out (roster known-empty => every run is prose; pre-existing)
+      None      -> DEFECT SURVIVES INTACT — the gate is conditioned on
+                   `known_personas is not None`, so it is skipped entirely.
+    The None path is LATENT + UNMEASURED in production and is DISCLOSED, NOT FIXED, per
+    María's ruling: measure it or disclose it, never fix it blind."""
+    # populated -> fixed
+    default, _, _ = _parse_body( _CONTAMINATED_ATTENTION, "Mr. Radio", _ROSTER_7 )
+    assert default == [ _CONTAMINATED_ATTENTION ]
+    # empty roster -> prose-to-all (pre-existing behavior, unchanged by this fix)
+    default, _, _ = _parse_body( _CONTAMINATED_ATTENTION, "Mr. Radio", [ ] )
+    assert default == [ _CONTAMINATED_ATTENTION ]
+    # None -> STILL DROPPED. This assertion documents an UNFIXED gap ON PURPOSE.
+    default, matched, non_match = _parse_body( _CONTAMINATED_ATTENTION, "Mr. Radio", None )
+    assert default == [ ] and matched == [ ] and non_match == 1
+
+
+def test_prose_first_glue_residual_is_ANNOUNCED_not_silent():
+    """⚠️ KNOWN RESIDUAL, PINNED DELIBERATELY (ruled a disclosure 2026-07-18).
+
+    Prose PRECEDING a resolving name is indistinguishable from a typo'd/offline
+    addressee — "@Attention all hands @Maria:" is structurally identical to
+    "@bogus @Maria:" and no predicate separates them. So it still ROUTES rather than
+    broadcasts. That tolerance is defensible ONLY because it is ANNOUNCED at BOTH ends:
+    the withheld seats get a DIVERGENCE NOTICE, and the SENDER is told which @-token
+    matched nobody. If either signal regresses, the residual becomes silent — and a
+    silent mis-route is the original defect. This test guards the announcement, NOT
+    the routing."""
+    line = "@Attention all hands @Maria: sync"
+    # still routes to Maria alone (residual behavior, pinned)
+    diags_maria = [ ]
+    _, matched, _ = _parse_body( line, "Maria", _ROSTER_7, diags_maria )
+    assert matched == [ line ]
+    # SENDER-side: the unresolvable token is NAMED, not swallowed
+    assert [ d[ "kind" ] for d in diags_maria ] == [ "unresolved_mention" ]
+    assert diags_maria[ 0 ][ "mentions" ] == [ "Attention all hands" ]
+    # RECIPIENT-side: a withheld seat is TOLD it did not get the whole broadcast
+    diags_other = [ ]
+    _, _, non_match = _parse_body( line, "Krishna", _ROSTER_7, diags_other )
+    assert non_match == 1
+    assert "withheld_directive" in [ d[ "kind" ] for d in diags_other ]
+    assert "YOU DID NOT RECEIVE THE WHOLE BROADCAST" in _build_reminder( "b", "x", non_match )
+
+
+def test_bogus_addressee_is_also_announced():
+    """:672's spared case must be announced too — the tolerance is bought with
+    visibility, so visibility is what must never regress."""
+    diags = [ ]
+    _parse_body( "@bogus @Maria: sync", "Maria", _ROSTER_7, diags )
+    assert [ d[ "kind" ] for d in diags ] == [ "unresolved_mention" ]
+    assert diags[ 0 ][ "mentions" ] == [ "bogus" ]
+
+
+def test_loudness_contract_is_pinned_independently(
+    store, maria_persona, inject_fn, captured_injections
+):
+    """⭐ DEDICATED LOUDNESS PIN — Rachel's ship condition, 2026-07-18.
+
+    Before this test, `"completed-with-withheld"` was asserted in exactly ONE place
+    (inside the tightened AFK regression fixture), so the sender-side status AND the
+    recipient-side withheld count BOTH hung on a single assertion in a single edited
+    test. Correct, but single-pinned in the one place it must not be: María's `:672`
+    ruling explicitly rests on loudness EXISTING — she kept a deliberate feature
+    because the mis-route is announced. Weaken or delete that one fixture and both
+    loudness paths lose their pin SILENTLY.
+
+    This asserts the loudness CONTRACT directly, off its own minimal fixture:
+      · sender-side  — ack status + the withheld count in the returned dict
+      · recipient-side — the DIVERGENCE NOTICE actually reaches the injected text
+      · NEGATIVE CONTROL — a broadcast with nothing withheld stays plain "completed"
+        and carries NO notice, so the signal cannot be a constant.
+    """
+    # --- POSITIVE: one line withheld (addressed to Tiberius, we are Maria) ---
+    notif = { "payload": {
+        "broadcast_id" : "bid-loud",
+        "body"         : "shared line\n@Tiberius: only the boss",
+    } }
+    captured_injections.clear()
+    result = handle_broadcast(
+        notification      = notif,
+        local_persona     = maria_persona,
+        inject_fn         = inject_fn,
+        store             = store,
+        sender_session_id = "sess-maria",
+        persona_roster    = [ "Maria", "Tiberius" ],
+    )
+    assert result[ "status" ]         == "completed-with-withheld"
+    assert result[ "withheld_count" ] == 1
+    assert result[ "ack_entry" ][ "metadata" ][ "status" ] == "completed-with-withheld"
+    assert "withheld" in result[ "ack_entry" ][ "metadata" ][ "body_summary" ]
+    assert "DIVERGENCE NOTICE" in captured_injections[ 0 ]
+    assert "shared line" in captured_injections[ 0 ]
+    assert "only the boss" not in captured_injections[ 0 ]      # genuinely withheld
+
+    # --- NEGATIVE CONTROL: nothing withheld -> plain completed, NO notice ---
+    captured_injections.clear()
+    clean = handle_broadcast(
+        notification      = { "payload": { "broadcast_id": "bid-clean", "body": "shared line only" } },
+        local_persona     = maria_persona,
+        inject_fn         = inject_fn,
+        store             = store,
+        sender_session_id = "sess-maria",
+        persona_roster    = [ "Maria", "Tiberius" ],
+    )
+    assert clean[ "status" ]         == "completed"
+    assert clean[ "withheld_count" ] == 0
+    assert "DIVERGENCE NOTICE" not in captured_injections[ 0 ]
+
+
+def test_unresolved_mention_reaches_the_ack_summary(
+    store, maria_persona, inject_fn, captured_injections
+):
+    """The sender-side signal that would have caught the original bug in seconds:
+    the ack NAMES the @-token that resolved to nobody. Pinned independently of the
+    parse-level diagnostic test so the END-TO-END path cannot regress unnoticed."""
+    notif = { "payload": {
+        "broadcast_id" : "bid-unres",
+        "body"         : _CONTAMINATED_PREAMBLE,
+    } }
+    result = handle_broadcast(
+        notification      = notif,
+        local_persona     = maria_persona,
+        inject_fn         = inject_fn,
+        store             = store,
+        sender_session_id = "sess-maria",
+        persona_roster    = _ROSTER_7,
+    )
+    summary = result[ "ack_entry" ][ "metadata" ][ "body_summary" ]
+    assert "UNRESOLVED @-MENTION" in summary
+    assert result[ "status" ] == "completed-with-withheld"
+    # ⚠️ ASSERT ON THE ANNOUNCEMENT PREFIX, NOT ON THE WHOLE SUMMARY.
+    # A bare `token in summary` CANNOT FAIL here: the contaminated line is demoted to a
+    # DEFAULT line and therefore DELIVERED, so its text lands in `effective_body` and
+    # thus in the summary WHETHER OR NOT the announcement names it. Rachel proved it —
+    # she emptied the token join and the suite stayed 69/69 green. Scoping to the prefix
+    # is what turns this from a tautology into a measurement.
+    announcement = summary.split( "]" )[ 0 ]
+    assert "mr radio it is Maria's contention that" in announcement
+
+
+def test_unresolved_token_named_on_the_BOGUS_path(
+    store, maria_persona, inject_fn, captured_injections
+):
+    """⭐ Rachel's second condition — the OTHER announcement path, 2026-07-18.
+
+    `@bogus @Maria: sync` travels the `unresolved_mention` path (the run STAYS a
+    directive and routes), whereas `_CONTAMINATED_PREAMBLE` travels the
+    `prose_contaminated_mention` path (the run is demoted and fans out). Both feed the
+    same summary prefix, but only the contaminated one was pinned — so emptying the
+    token join left this path unguarded.
+
+    THIS IS THE PATH MARÍA'S `:672` RULING RESTS ON. She kept the bogus-addressee
+    tolerance because the mis-route is ANNOUNCED ("announced beats deleted"). If the
+    announcement stops naming WHICH mention failed, the tolerance loses the thing that
+    justified it. Asserted on the PREFIX for the same reason as above — "bogus" also
+    appears in the delivered line itself, so a whole-summary check could not fail."""
+    result = handle_broadcast(
+        notification      = { "payload": { "broadcast_id": "bid-bogus", "body": "@bogus @Maria: sync" } },
+        local_persona     = maria_persona,
+        inject_fn         = inject_fn,
+        store             = store,
+        sender_session_id = "sess-maria",
+        persona_roster    = _ROSTER_7,
+    )
+    summary      = result[ "ack_entry" ][ "metadata" ][ "body_summary" ]
+    announcement = summary.split( "]" )[ 0 ]
+    assert "UNRESOLVED @-MENTION" in announcement
+    assert "@bogus" in announcement, "the failing mention must be NAMED, not merely flagged"
+    assert result[ "status" ] == "completed-with-withheld"
