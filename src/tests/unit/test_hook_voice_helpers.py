@@ -617,6 +617,16 @@ class TestBrevityRiders:
         assert "ONLY WHEN ASKED" in BREVITY_TAG
         assert "content requires" not in BREVITY_TAG.lower()
 
+    def test_tag_carries_all_four_acronyms( self ):
+        """
+        The mandate is four acronyms, not three — NoAA (No Aphorisms or Apologies)
+        was ratified ~20 min after the first three (canonical c64aed1). Pinned by
+        name so a future trim cannot silently drop one to buy bytes: the ceiling is
+        bought by cutting PROSE, never by dropping an acronym.
+        """
+        for acronym in ( "KISS", "3LoL", "NoMC C2C", "NoAA" ):
+            assert acronym in BREVITY_TAG, f"{acronym} missing from the tag"
+
     def test_peer_dm_reply_affordance_carries_brevity_rider( self ):
         """A bidirectional peer DM carries the rider (task 314671cd)."""
         block = build_peer_dm_reminder( "status?", persona="maría", icon="🌸",

@@ -534,7 +534,7 @@ PEER_DM_FRAME_PREFIX = "PEER DM from "
 # assessed exception hands length-discretion back to the verbose author, which
 # makes the rule a receipt rather than a control. Do NOT soften this string.
 BREVITY_TAG = (
-    "[KISS · 3LoL · NoMC C2C — verdict first, 3 lines or less; "
+    "[KISS · 3LoL · NoMC C2C · NoAA — verdict first, 3 lines or less; "
     "longer ONLY WHEN ASKED. Detail → abstract.]"
 )
 
