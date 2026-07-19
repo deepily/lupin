@@ -33,8 +33,53 @@ from lupin_cli.claude_code.hooks.lib.hook_common import (
     _speakerphone_reminder_body,
     _brevity_rules,
     _routing_reminder,
+    spoken_word_budget,
+    _SPOKEN_CHARS_PER_WORD,
     _SPEAKERPHONE_WRAP_SENTINEL,
 )
+
+
+# ── spoken_word_budget ────────────────────────────────────────────────────────
+
+class TestSpokenWordBudget:
+    """
+    The char-cap → word-budget derivation (Rick 2026-07-19: "LLMs suck at
+    counting characters, but they know what words are").
+
+    Enforcement stays in CHARACTERS server-side; this is the guidance
+    denomination. So the load-bearing property is not "is the arithmetic right"
+    but "can a reply that OBEYS the stated budget still be REJECTED" — that is
+    the silent failure the whole rider exists to prevent.
+    """
+
+    def test_default_cap_yields_ricks_number( self ):
+        assert spoken_word_budget( 500 ) == 60
+
+    def test_budget_scales_with_the_cap( self ):
+        assert spoken_word_budget( 777 ) == 93
+        assert spoken_word_budget( 300 ) == 36
+
+    def test_budget_is_never_zero_or_negative( self ):
+        # A zero budget would be an impossible instruction; floor at 1.
+        for cap in ( 10, 5, 1 ):
+            assert spoken_word_budget( cap ) >= 1
+
+    def test_a_compliant_reply_cannot_breach_the_real_cap( self ):
+        # THE PROPERTY THAT MATTERS. Spoken English runs ~6 chars/word including
+        # the space; the budget is struck at 8.3 precisely so obedience implies
+        # safety. If this ever goes red, the rider is licensing silent rejects.
+        REALISTIC_CHARS_PER_WORD = 6.0
+        for cap in ( 100, 300, 500, 777, 1000 ):
+            projected = spoken_word_budget( cap ) * REALISTIC_CHARS_PER_WORD
+            assert projected < cap, (
+                f"cap={cap}: a compliant {spoken_word_budget( cap )}-word reply "
+                f"projects to ~{projected:.0f} chars and would be REJECTED"
+            )
+
+    def test_derivation_ratio_is_pessimistic_by_construction( self ):
+        # Guards the constant itself: if someone "optimises" it down toward the
+        # real average, the headroom above disappears and rejects start landing.
+        assert _SPOKEN_CHARS_PER_WORD > 6.0
 
 
 # ── sanitize_for_wrap ─────────────────────────────────────────────────────────
@@ -241,9 +286,14 @@ class TestSlimRiderUnconditional:
     def test_body_contains_sentinel_and_catastrophic_cap_rule( self, mock_cap ):
         body = _speakerphone_reminder_body( "voice" )
         assert _SPEAKERPHONE_WRAP_SENTINEL in body
-        # The one catastrophic rule (the reject cap) stays spelled out.
-        assert "≤500 chars" in body
-        assert "REJECTED" in body
+        # The one catastrophic rule stays spelled out — but denominated in WORDS
+        # (Rick 2026-07-19: an LLM cannot count chars, so a char figure is an
+        # unactionable instruction dressed as a precise one).
+        assert "≤60 words" in body
+        assert "REJECTED"  in body
+        # And the char figure must be GONE from the rider, or we shipped both
+        # denominations and taught the reader to ignore one.
+        assert "chars" not in body
 
     @patch( "cosa.utils.util.get_spoken_char_cap", return_value=500 )
     def test_brevity_acronyms_are_present_and_lead_the_bullet_list( self, mock_cap ):
@@ -267,8 +317,8 @@ class TestSlimRiderUnconditional:
         # rides on the acronym bullet itself.
         body  = _speakerphone_reminder_body( "voice" )
         first = [ ln for ln in body.split( "\n" ) if ln.startswith( "•" ) ][ 0 ]
-        assert "≤500 chars" in first
-        assert "REJECTED"   in first
+        assert "≤60 words" in first
+        assert "REJECTED"  in first
 
     @patch( "cosa.utils.util.get_spoken_char_cap", return_value=500 )
     def test_retired_mechanical_cap_prose_is_gone( self, mock_cap ):
@@ -307,9 +357,17 @@ class TestSlimRiderUnconditional:
 
     @patch( "cosa.utils.util.get_spoken_char_cap", return_value=777 )
     def test_cap_is_single_sourced( self, mock_cap ):
-        # The named cap tracks cu.get_spoken_char_cap() — no hardcoded literal.
+        # The stated budget still TRACKS cu.get_spoken_char_cap() — the switch to
+        # words is a change of DENOMINATION, not a decoupling. 777/8.3 = 93.
         body = _speakerphone_reminder_body( "voice" )
-        assert "≤777 chars" in body
+        assert "≤93 words" in body
+        assert "≤60 words" not in body   # the default must not be frozen in
+
+    @patch( "cosa.utils.util.get_spoken_char_cap", return_value=500 )
+    def test_word_budget_matches_ricks_stated_number_at_default_cap( self, mock_cap ):
+        # Rick specified "≤60 words" against the 500-char cap; the derivation is
+        # calibrated to reproduce exactly that, so deriving cost us nothing.
+        assert "≤60 words" in _speakerphone_reminder_body( "voice" )
 
     @patch( "cosa.utils.util.get_tts_interaction_mode" )
     @patch( "lupin_cli.claude_code.hooks.lib.session_bridge.get_speakerphone" )

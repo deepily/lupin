@@ -1392,6 +1392,45 @@ _SANITIZE_MARKERS = ( "</voice-message", "<system-reminder" )
 # The slim rider always contains this phrase, so the check is universal.
 _SPEAKERPHONE_WRAP_SENTINEL = "TTS contract ACTIVE"
 
+# Chars-per-word used to convert the server's CHARACTER reject cap into the WORD
+# budget the rider actually states (Rick, 2026-07-19: "LLMs suck at counting
+# characters, but they know what words are").
+#
+# 8.3 is DELIBERATELY PESSIMISTIC. Spoken English averages ~6 chars/word incl.
+# the space; budgeting at 8.3 means a compliant reply lands ~360 chars against a
+# 500-char cap — roughly 28% headroom. The asymmetry is intentional: overshooting
+# the char cap fails SILENTLY (the whole notify/ask is rejected and reads as the
+# assistant going mute), while undershooting merely costs a few words. Round the
+# error toward the recoverable side.
+#
+# Calibrated so the default cap (500) yields Rick's stated budget of 60 words.
+_SPOKEN_CHARS_PER_WORD = 8.3
+
+
+def spoken_word_budget( char_cap ):
+    """
+    Convert the server's spoken CHARACTER reject cap into a WORD budget.
+
+    The enforcement threshold is and remains CHARACTERS — this is the guidance
+    denomination only. It exists because the consumer of the rider (an LLM)
+    cannot reliably count characters but counts words well, so a char figure is
+    an unactionable instruction dressed as a precise one.
+
+    Deriving rather than hardcoding keeps the single-source invariant intact: if
+    cu.get_spoken_char_cap() ever moves, the stated word budget moves with it and
+    cannot silently drift into permitting a payload the server will reject.
+
+    Requires:
+        - char_cap is a positive number
+
+    Ensures:
+        - returns a positive int, floored at 1 (never a zero/negative budget)
+        - the budget is CONSERVATIVE: budget * average-real-chars-per-word stays
+          comfortably under char_cap (see _SPOKEN_CHARS_PER_WORD)
+        - never raises on a positive numeric input
+    """
+    return max( 1, int( char_cap / _SPOKEN_CHARS_PER_WORD ) )
+
 
 def sanitize_for_wrap( text ):
     """
@@ -1542,11 +1581,12 @@ def _speakerphone_reminder_body( source ):
         str: System-reminder body text (the slim per-turn rider)
     """
     cap      = cu.get_spoken_char_cap()
+    words    = spoken_word_budget( cap )
     modality = "voice(distance)" if source == "voice" else "typed"
     return (
         f"[turn-state] input={modality}\n"
         "TTS contract ACTIVE — full rules in session instructions. This turn:\n"
-        f"• KISS · 3LoL · NoMC C2C · NoAA — verdict first, ≤3 sentences AND ≤{cap} chars; OVER = whole call REJECTED (silent fail). Longer ONLY WHEN ASKED\n"
+        f"• KISS · 3LoL · NoMC C2C · NoAA — verdict first, ≤3 sentences AND ≤{words} words; OVER = whole call REJECTED (silent fail). Longer ONLY WHEN ASKED\n"
         "• after replying, call notify(message=<reply>, suppress_ding=True, priority='high')\n"
         "• recraft for speech — no markdown/paths/JSON/URLs\n"
         "• rich detail → abstract (not length-capped)\n"
