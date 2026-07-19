@@ -2098,15 +2098,22 @@ def _persona_error_detail( resp ) -> dict:
         return { }
 
 
-def _request_persona( name: str ) -> dict:
+def _request_persona( name: Optional[ str ] = None ) -> dict:
     """
-    Internal helper: request (or swap to) a named voice persona for this session.
+    Internal helper: request a named voice persona, or let the server pick one.
 
     Routes through the canonical allocate endpoint POST
-    /api/cosa-voice/voice-persona/{session_id}/allocate with the strict
-    `requested_persona_name` query parameter. The server swaps this session's
-    persona atomically under its `_voice_persona_lock` and broadcasts a
-    `voice_persona_assigned` WebSocket event so connected browser tabs re-badge.
+    /api/cosa-voice/voice-persona/{session_id}/allocate. Two paths:
+
+      - `name` supplied -> sends `requested_persona_name` (strict request-or-swap)
+      - `name` omitted  -> sends NO `requested_persona_name`, reaching the
+                           endpoint's auto-pick mode, which selects uniformly at
+                           random from the unallocated pool
+
+    The auto-pick path exists so a session holding `voice_persona: null` can be
+    healed without guessing a specific free name. Previously the parameter was
+    sent unconditionally, leaving auto-pick unreachable from the MCP surface
+    even though the server implemented it.
 
     There is intentionally NO degraded bridge-write fallback (unlike
     `_flip_speakerphone`): persona allocation must pass through the server's
@@ -2117,7 +2124,7 @@ def _request_persona( name: str ) -> dict:
     falling back to session_id then the SESSION_ID prefix.
 
     Requires:
-        - name is a string
+        - name is a non-empty string, or None to request auto-pick
 
     Ensures:
         - On HTTP 200: returns {status:"ok", session_id, voice_persona, swapped,
@@ -2129,10 +2136,16 @@ def _request_persona( name: str ) -> dict:
           {status:"error", reason, ...}
         - Never raises exceptions
     """
-    # Client-side guard — skip the round-trip on an empty/whitespace name.
-    if not isinstance( name, str ) or not name.strip():
-        return { "status": "error", "reason": "persona name must be a non-empty string" }
-    requested = name.strip()
+    # An explicitly supplied name must be a usable string — an empty or
+    # whitespace-only value is a caller error, NOT a request for auto-pick.
+    # Auto-pick is reached by omitting the argument entirely, so that a bug
+    # producing "" cannot silently allocate an arbitrary persona.
+    if name is None:
+        requested = None
+    else:
+        if not isinstance( name, str ) or not name.strip():
+            return { "status": "error", "reason": "persona name must be a non-empty string" }
+        requested = name.strip()
 
     try:
         cc_meta = _get_cc_metadata()
@@ -2159,10 +2172,14 @@ def _request_persona( name: str ) -> dict:
 
         access_token = login_resp.json()[ "tokens" ][ "access_token" ]
 
-        # Strict request-or-swap path on the canonical allocate endpoint.
+        # Request-or-swap on the canonical allocate endpoint. Omitting
+        # `requested_persona_name` entirely is what selects the server's
+        # auto-pick mode — sending it as None/"" would not.
+        alloc_params = { } if requested is None else { "requested_persona_name": requested }
+
         alloc_resp = requests.post(
             f"{SERVER_URL}/api/cosa-voice/voice-persona/{sid}/allocate",
-            params  = { "requested_persona_name": requested },
+            params  = alloc_params,
             headers = { "Authorization": f"Bearer {access_token}" },
             timeout = 5
         )
@@ -2170,7 +2187,9 @@ def _request_persona( name: str ) -> dict:
         if alloc_resp.status_code == 200:
             body    = alloc_resp.json()
             persona = body.get( "voice_persona" ) or { }
-            display = persona.get( "display_name" ) or persona.get( "name" ) or requested
+            # On the auto-pick path `requested` is None, so the server's
+            # returned name is the only source for the message.
+            display = persona.get( "display_name" ) or persona.get( "name" ) or requested or "unnamed"
             return {
                 "status"        : "ok",
                 "session_id"    : sid,
@@ -2211,15 +2230,28 @@ def _request_persona( name: str ) -> dict:
 
 
 @mcp.tool
-def request_persona( name: str ) -> dict:
+def request_persona( name: Optional[ str ] = None ) -> dict:
     """
-    Request (or swap to) a named voice persona for this session.
+    Request a named voice persona for this session, or let the server pick one.
 
     USER-INITIATED ONLY (HARD RULE): Call this ONLY in direct response to an
     explicit user instruction — e.g. "become Mr. Radio", "switch my voice to
     Rachel", or a request to reclaim a persona that was lost after a context
     compaction. NEVER call it on your own initiative. The persona pool is a
     shared resource and the voice is the user's to assign, not yours to grab.
+
+    USER-INITIATED ONLY APPLIES EQUALLY TO THE NO-ARGUMENT FORM. Calling
+    `request_persona()` with no name is NOT a self-service path — it still
+    requires the user to have asked for a persona; it only surrenders the
+    CHOICE OF NAME to the server, which the user is not exercising when the
+    session is unnamed. Do not call it to fix your own null persona on your own
+    initiative. Ask the user first, every time.
+
+    (Historical note, so the rule is not mistaken for boilerplate: `name` used
+    to be a required argument. That requirement was doing double duty as an
+    accidental guard — self-allocating meant guessing a specific free pool name,
+    and the friction discouraged it. The no-argument form removes that friction,
+    so this instruction is now the only thing standing in its place.)
 
     Routes through the canonical allocate endpoint, which swaps this session's
     persona atomically under a server-side lock and broadcasts a
@@ -2231,6 +2263,11 @@ def request_persona( name: str ) -> dict:
     Args:
         name: The persona name to request (e.g. "Mr. Radio", "rachel",
               "Tiberius"). Server-side resolution is case-insensitive.
+              OMIT ENTIRELY to have the server pick uniformly at random from
+              the unallocated pool — the path for healing a session whose
+              `voice_persona` is null, where no specific name is wanted.
+              Passing "" or "   " is a caller error, not a request for
+              auto-pick; only omission selects it.
 
     Returns:
         dict — one of:
@@ -2243,6 +2280,7 @@ def request_persona( name: str ) -> dict:
     Examples:
         request_persona("Mr. Radio")   # reclaim after a bad compaction re-roll
         request_persona("Rachel")      # deliberate voice swap
+        request_persona()              # user asked for a persona, any free one
     """
     return _request_persona( name )
 

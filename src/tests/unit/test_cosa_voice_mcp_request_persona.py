@@ -95,16 +95,34 @@ class TestPersonaErrorDetail:
 class TestRequestPersonaInputGuards:
 
     def test_non_string_name_returns_error( self ):
-        """A non-string name short-circuits to status=error with no HTTP call."""
+        """A non-string, non-None name short-circuits to status=error with no HTTP call.
+
+        CONTRACT CHANGE 2026-07-19: this test previously passed None here and
+        asserted an error. None now means "let the server auto-pick", so the
+        non-string guard is exercised with an int instead. See
+        test_none_name_selects_autopick for the new None behavior.
+        """
         from lupin_mcp import cosa_voice_mcp
-        result = cosa_voice_mcp._request_persona( None )
+        result = cosa_voice_mcp._request_persona( 12345 )
         assert result[ "status" ] == "error"
         assert "non-empty string" in result[ "reason" ]
 
     def test_whitespace_name_returns_error( self ):
-        """A whitespace-only name short-circuits to status=error."""
+        """A whitespace-only name short-circuits to status=error.
+
+        Deliberately NOT treated as a request for auto-pick: only omitting the
+        argument selects that, so a bug producing "" cannot silently allocate
+        an arbitrary persona.
+        """
         from lupin_mcp import cosa_voice_mcp
         result = cosa_voice_mcp._request_persona( "   " )
+        assert result[ "status" ] == "error"
+        assert "non-empty string" in result[ "reason" ]
+
+    def test_empty_string_name_returns_error( self ):
+        """An empty-string name errors rather than falling through to auto-pick."""
+        from lupin_mcp import cosa_voice_mcp
+        result = cosa_voice_mcp._request_persona( "" )
         assert result[ "status" ] == "error"
         assert "non-empty string" in result[ "reason" ]
 
@@ -294,6 +312,118 @@ class TestRequestPersonaTool:
         """request_persona is registered as a FastMCP FunctionTool."""
         from lupin_mcp import cosa_voice_mcp
         assert "FunctionTool" in str( type( cosa_voice_mcp.request_persona ) )
+
+    def test_tool_callable_with_no_arguments( self ):
+        """The @mcp.tool wrapper accepts a bare call and delegates None through.
+
+        This is the surface a null-persona session actually reaches for; if the
+        signature regressed to a required arg, this raises TypeError.
+        """
+        from lupin_mcp import cosa_voice_mcp
+        tool_fn = cosa_voice_mcp.request_persona.fn \
+            if hasattr( cosa_voice_mcp.request_persona, "fn" ) \
+            else cosa_voice_mcp.request_persona
+
+        with patch( "lupin_mcp.cosa_voice_mcp._request_persona", return_value={ "status": "ok" } ) as helper:
+            result = tool_fn()
+
+        helper.assert_called_once_with( None )
+        assert result == { "status": "ok" }
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# _request_persona — auto-pick (name omitted -> server-side Mode 1)
+#
+# The allocate endpoint picks uniformly at random from the unallocated pool
+# when `requested_persona_name` is ABSENT. Sending it as None or "" does not
+# select that mode, so these tests assert on the params dict itself rather than
+# on the response — the response would look identical either way.
+#
+# ⚠️ Every test here MUST mock requests.post. Before the contract change, a
+# None name short-circuited before any HTTP call, so the guard tests needed no
+# mocks; None now proceeds to a real request. An unmocked test in this class
+# performs a LIVE persona allocation against the running server.
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestRequestPersonaAutoPick:
+
+    def test_name_omitted_sends_no_requested_persona_name( self ):
+        """Omitting the name must leave `requested_persona_name` out of params entirely."""
+        from lupin_mcp import cosa_voice_mcp
+        alloc_resp = _make_response( 200, {
+            "voice_persona" : { "name": "rachel", "display_name": "Rachel" },
+            "swapped"       : False
+        } )
+        with patch( "lupin_mcp.cosa_voice_mcp._get_cc_metadata", return_value=_FAKE_META ), \
+             patch( "lupin_mcp.cosa_voice_mcp.requests.post", side_effect=[ _login_ok(), alloc_resp ] ) as mp, \
+             patch( _CREDS_PATCH, return_value=_CREDS ):
+            result = cosa_voice_mcp._request_persona()
+
+        alloc_kwargs = mp.call_args_list[ 1 ].kwargs
+        assert "requested_persona_name" not in alloc_kwargs[ "params" ]
+        assert alloc_kwargs[ "params" ] == { }
+        assert result[ "status" ]  == "ok"
+        assert result[ "message" ] == "You are now Rachel."
+
+    def test_name_supplied_sends_requested_persona_name( self ):
+        """Supplying a name must send it — the strict request-or-swap path is unchanged."""
+        from lupin_mcp import cosa_voice_mcp
+        alloc_resp = _make_response( 200, {
+            "voice_persona" : { "name": "tiberius", "display_name": "Tiberius" },
+            "swapped"       : False
+        } )
+        with patch( "lupin_mcp.cosa_voice_mcp._get_cc_metadata", return_value=_FAKE_META ), \
+             patch( "lupin_mcp.cosa_voice_mcp.requests.post", side_effect=[ _login_ok(), alloc_resp ] ) as mp, \
+             patch( _CREDS_PATCH, return_value=_CREDS ):
+            result = cosa_voice_mcp._request_persona( "Tiberius" )
+
+        alloc_kwargs = mp.call_args_list[ 1 ].kwargs
+        assert alloc_kwargs[ "params" ] == { "requested_persona_name": "Tiberius" }
+        assert result[ "status" ] == "ok"
+
+    def test_none_name_selects_autopick_not_error( self ):
+        """Explicit None is auto-pick, NOT the non-empty-string error.
+
+        Pins the contract change directly: None used to short-circuit to
+        status=error, and callers relying on that would now silently allocate.
+        """
+        from lupin_mcp import cosa_voice_mcp
+        alloc_resp = _make_response( 200, {
+            "voice_persona" : { "name": "sam", "display_name": "Sam" },
+            "swapped"       : False
+        } )
+        with patch( "lupin_mcp.cosa_voice_mcp._get_cc_metadata", return_value=_FAKE_META ), \
+             patch( "lupin_mcp.cosa_voice_mcp.requests.post", side_effect=[ _login_ok(), alloc_resp ] ), \
+             patch( _CREDS_PATCH, return_value=_CREDS ):
+            result = cosa_voice_mcp._request_persona( None )
+
+        assert result[ "status" ] != "error"
+        assert result[ "status" ] == "ok"
+
+    def test_autopick_message_falls_back_when_server_returns_no_name( self ):
+        """With no name requested and none returned, the message must not render None."""
+        from lupin_mcp import cosa_voice_mcp
+        alloc_resp = _make_response( 200, { "voice_persona": { }, "swapped": False } )
+        with patch( "lupin_mcp.cosa_voice_mcp._get_cc_metadata", return_value=_FAKE_META ), \
+             patch( "lupin_mcp.cosa_voice_mcp.requests.post", side_effect=[ _login_ok(), alloc_resp ] ), \
+             patch( _CREDS_PATCH, return_value=_CREDS ):
+            result = cosa_voice_mcp._request_persona()
+
+        assert result[ "status" ] == "ok"
+        assert "None" not in result[ "message" ]
+        assert result[ "message" ] == "You are now unnamed."
+
+    def test_autopick_422_reports_requested_as_none( self ):
+        """A 422 on the auto-pick path carries requested=None rather than crashing."""
+        from lupin_mcp import cosa_voice_mcp
+        alloc_422 = _make_response( 422, { "detail": { "available": [ ] } } )
+        with patch( "lupin_mcp.cosa_voice_mcp._get_cc_metadata", return_value=_FAKE_META ), \
+             patch( "lupin_mcp.cosa_voice_mcp.requests.post", side_effect=[ _login_ok(), alloc_422 ] ), \
+             patch( _CREDS_PATCH, return_value=_CREDS ):
+            result = cosa_voice_mcp._request_persona()
+
+        assert result[ "status" ]    == "not_in_pool"
+        assert result[ "requested" ] is None
 
 
 # ── Standalone ───────────────────────────────────────────────────────────────
