@@ -525,6 +525,48 @@ VOICE_LINE_PREFIX = "[Voice]: "
 PEER_DM_FRAME_PREFIX = "PEER DM from "
 
 
+# Rick's brevity mandate, 2026-07-19 (canonical: planning-is-prompting →
+# workflow/brevity-mandate.md). The compact carrier form of KISS · Say 3LoL ·
+# NoMC C2C, shared by BOTH injection riders below.
+#
+# The escape clause reads "ONLY WHEN ASKED" — never "when the content requires
+# it". That earlier wording was drafted and rejected the same hour: a self-
+# assessed exception hands length-discretion back to the verbose author, which
+# makes the rule a receipt rather than a control. Do NOT soften this string.
+BREVITY_TAG = (
+    "[KISS · 3LoL · NoMC C2C — verdict first, 3 lines or less; "
+    "longer ONLY WHEN ASKED. Detail → abstract.]"
+)
+
+
+# The human-voice TTS-acknowledge rider (appended by enrich_voice_context when a
+# drained message is human voice). Hoisted to a module constant so its BYTE COST
+# is visible at the top of the file — this string rides EVERY spoken utterance.
+#
+# Sized deliberately (task 6a3941b8 × the pre-existing micro-prompt-reduction
+# ask): the brevity tag was folded in while the rider was CUT from 325 chars /
+# 47 words to 215 / 37 — a net-SMALLER payload that happens to carry the tag,
+# never a straight addition. Any future edit must keep that ratchet: measure
+# before and after, and do not let this grow back.
+VOICE_ACK_RIDER = (
+    "IMPORTANT: ack by voice — notify() or converse(), priority=high. "
+    "The user is listening, not reading the terminal. "
+    f"{BREVITY_TAG}"
+)
+
+
+# The peer-DM brevity rider (task 314671cd). Peer-to-peer DMs are the fleet's
+# worst bloat surface — informality invites courtesy, context-setting, and mutual
+# appreciation the recipient pays for and does not need. Session-boot CLAUDE.md
+# decays into back-of-context; this rider is read fresh at the moment of
+# composing a reply, which is where the leverage is.
+#
+# Scoped to the REPLY affordance on purpose: it governs how you answer, so it is
+# suppressed on one_way=True advisories (no reply is possible — see
+# build_peer_dm_reminder's bug 8894e597 branch).
+PEER_DM_BREVITY_RIDER = f"↳ {BREVITY_TAG}"
+
+
 def build_peer_dm_reminder( body, persona=None, icon=None, msg_id=None, thread_id=None, one_way=False ):
     """
     Build the peer-DM <system-reminder> block — the SINGLE source of peer-DM
@@ -560,9 +602,12 @@ def build_peer_dm_reminder( body, persona=None, icon=None, msg_id=None, thread_i
     Ensures:
         - Returns a complete "<system-reminder>...</system-reminder>" block
         - Missing persona falls back to "a peer session"; missing icon/ids → ""
-        - one_way=False → the dm_send reply affordance (bidirectional peer DM)
-        - one_way=True  → an honest one-way notice (no dm_send line); resuming
-          work is named as the acknowledgment
+        - one_way=False → the dm_send reply affordance (bidirectional peer DM),
+          followed by PEER_DM_BREVITY_RIDER (task 314671cd — the rider governs
+          how you REPLY, so it rides the reply affordance)
+        - one_way=True  → an honest one-way notice (no dm_send line, and NO
+          brevity rider — no reply is possible, so a reply-shaping rider would
+          be pure byte cost); resuming work is named as the acknowledgment
 
     Args:
         body: The inline DM body
@@ -591,7 +636,8 @@ def build_peer_dm_reminder( body, persona=None, icon=None, msg_id=None, thread_i
     else:
         reply_affordance = (
             f'↳ Reply via dm_send( recipient="{persona}", body="<your reply>", '
-            f'reply_to="{msg_id}", thread_id="{thread_id}" )'
+            f'reply_to="{msg_id}", thread_id="{thread_id}" )\n'
+            f'{PEER_DM_BREVITY_RIDER}'
         )
     reminder_body = (
         f"{PEER_DM_FRAME_PREFIX}{sender_label} (message_id {msg_id}, thread {thread_id}):\n\n"
@@ -776,14 +822,7 @@ def enrich_voice_context( voice_ctx, messages=None ):
     if not _context_has_human_voice( messages ):
         # Pure peer-DM context (or no human voice) — no TTS-ack rider (§6a).
         return voice_ctx
-    return (
-        f"{voice_ctx}\n\n"
-        "IMPORTANT: You MUST acknowledge the user's voice message by sending "
-        "a high-priority notification via mcp__cosa-voice__notify() or "
-        "mcp__cosa-voice__converse() so the user receives immediate audio "
-        "feedback that their query is being attended to. Do NOT rely on "
-        "terminal text output alone — the user is not watching the terminal."
-    )
+    return f"{voice_ctx}\n\n{VOICE_ACK_RIDER}"
 
 
 def build_voice_deny_response( voice_ctx, messages=None ):

@@ -217,7 +217,11 @@ class TestUserPromptSubmitHook:
 
             ctx = result[ "hookSpecificOutput" ][ "additionalContext" ]
             assert "IMPORTANT:" in ctx
-            assert "mcp__cosa-voice__notify()" in ctx
+            from lupin_cli.claude_code.hooks.lib.hook_common import VOICE_ACK_RIDER
+            # Assert against the SHARED constant, never a re-typed literal (46a17f5a
+            # literal-drift lesson) — the rider's wording is deliberately churned to
+            # keep its byte cost down; a hardcoded copy here would rot on every trim.
+            assert VOICE_ACK_RIDER in ctx
 
     def test_no_voice_no_reminder_emits_empty( self ):
         """else branch: empty buffer AND empty rider → emit {} (no additionalContext)."""
