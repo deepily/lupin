@@ -252,25 +252,46 @@ def _count_on_connection( connection, path_with_query, api_key ):
     return True, count
 
 
-def query_owed( settings, api_key, owner_persona, statuses, project=None, timeout=None,
+def query_owed( settings, api_key, owner_persona, project=None, timeout=None,
                 owner_field="owner_persona" ):
     """
     GET /api/tasks owed-row COUNT for one owner (Spine Step-2 store-count seam).
 
-    The flag-gated replacement for the Stop hook's transcript-replay owed
-    source. `GET /api/tasks` filters ONE status per call, so this sums the
-    server-computed `count` across each owed status. Each call rides
-    `count_only=true` (O2 / §G): the server returns a true SQL COUNT(*) WITHOUT
-    serializing a single row, so the count is the genuine total — it can NEVER
-    saturate at the endpoint's page `limit` the way the default `len(page)`
-    "count" does once a status exceeds 100 rows.
+    ONE request, `owed_only=true` — the server defines the owed set.
 
-    O3 (cascade review §D residue): all per-status queries ride ONE reused
-    http.client connection (open once, close in `finally`) instead of a fresh
-    urllib socket per status — the TCP handshake is paid once per Stop, not once
-    per owed status. Bounded by an AGGRESSIVE per-operation socket timeout (the
-    Stop hook fires every turn — a slow `:7999` must never stall turn-end;
-    cascade review §C).
+    PARKED-STATUS (2026-07-19) REWRITE. This used to take a `statuses` tuple,
+    fire one count_only request PER status, and SUM. That shape is now
+    unbuildable, for two independent reasons:
+
+      1. It CANNOT see a park-expiry rejoin. Park-expiry is computed at READ
+         time and never written back, so an EXPIRED parked row still carries
+         status="parked" in the column — it matches neither "queued" nor
+         "in_progress" and would stay silent forever. Parking would buy
+         PERMANENT silence from the one reader that fires the pokes, which is
+         the exact defect this build exists to kill.
+      2. Server-side admission + a per-status loop DOUBLE-COUNTS: an expired
+         parked row would be admitted on the queued call AND again on the
+         in_progress call. Parking a row and letting it expire would make the
+         board look BUSIER than never parking it — the feature inverts.
+
+    So the status set moved SERVER-side behind a single `owed_only` flag:
+    queued U in_progress U (parked AND NOT park-active). No caller holds a
+    status tuple any more, which is what makes it fail-CLOSED — there is no
+    second thing to remember to pair. STORE_OWED_STATUSES is DELETED from
+    stop.py and task_store_drain.py rather than re-pointed: a constant that no
+    longer exists cannot drift, and it had already forked into 4 copies.
+
+    Membership is UNCHANGED apart from park: blocked / claimed / review are
+    still NOT owed to this reader, exactly as before. Park is legal ONLY from
+    ("queued","in_progress"), so every expired-parked row provably came from
+    the set this reader already counted — exact RESTORATION, not a widening.
+
+    `count_only=true` (O2 / §G) returns a true SQL COUNT(*) without serializing
+    a row, so the count can NEVER saturate at the endpoint's page `limit`.
+    Bounded by an AGGRESSIVE socket timeout (the Stop hook fires every turn — a
+    slow `:7999` must never stall turn-end; cascade review §C). The O3 reused
+    connection is retained but now carries a single request; it costs one
+    handshake either way and keeps the timeout/close discipline in one place.
 
     Requires:
         - settings is the load_task_store_settings() dict (provides api_base_url)
@@ -278,7 +299,6 @@ def query_owed( settings, api_key, owner_persona, statuses, project=None, timeou
         - owner_persona is the persona string filtered on (lowercased canonical
           key): by default the row's owner (the PostToolUse mirror stamp), or the
           accountable_manager when owner_field="accountable_manager"
-        - statuses is an iterable of store status strings (the owed set)
         - project is the resolve_project_name() scope, or None to omit the filter
         - timeout overrides DEFAULT_OWED_TIMEOUT_SECONDS (seconds, per request)
         - owner_field selects WHICH persona column the value filters: the default
@@ -287,44 +307,36 @@ def query_owed( settings, api_key, owner_persona, statuses, project=None, timeou
 
     Ensures:
         - Returns ( ok, count ):
-            ok    : True iff EVERY per-status query returned a 2xx whose body
-                    carried an integer `count`
-            count : the summed owed-row count across `statuses` (0 when ok is
-                    False, or when `statuses` is empty)
-        - An empty `statuses` set short-circuits to ( True, 0 ) WITHOUT opening
-          a connection (genuinely no owed work — no IO)
+            ok    : True iff the query returned a 2xx whose body carried an
+                    integer `count`
+            count : the server-computed owed-row count (0 when ok is False)
         - ANY transport failure / non-2xx / malformed body (missing or non-int
           `count`) / unresolvable base URL → ( False, 0 ) — the §C fail-safe:
           the caller does NOT poke on a not-ok read (never guess when the store
           can't be reached)
-        - The reused connection is ALWAYS closed (success or short-circuit)
+        - The connection is ALWAYS closed
         - NEVER raises
     """
     if timeout is None:
         timeout = DEFAULT_OWED_TIMEOUT_SECONDS
-
-    statuses = list( statuses )
-    if not statuses:
-        return True, 0                       # genuinely no owed work — no IO, no socket
 
     connection = _open_owed_connection( settings[ "api_base_url" ], timeout )
     if connection is None:
         return False, 0                      # bad base URL → fail safe (never raise)
 
     try:
-        total = 0
-        for status in statuses:
-            # count_only=true (O2): true COUNT(*), never a page-length saturating
-            # at the endpoint's limit cap — a session with >100 owed rows counts
-            # exactly. All statuses ride the SAME socket (O3).
-            params = { owner_field: owner_persona, "status": status, "count_only": "true" }
-            if project:
-                params[ "project" ] = project
-            path = f"/api/tasks?{urllib.parse.urlencode( params )}"
-            ok, count = _count_on_connection( connection, path, api_key )
-            if not ok:
-                return False, 0
-            total += count
-        return True, total
+        # count_only=true (O2): true COUNT(*), never a page-length saturating at
+        # the endpoint's limit cap — a session with >100 owed rows counts exactly.
+        # owed_only=true: the server owns the status set (see the docstring —
+        # a per-status loop here could neither SEE a park-expiry rejoin nor avoid
+        # double-counting one).
+        params = { owner_field: owner_persona, "owed_only": "true", "count_only": "true" }
+        if project:
+            params[ "project" ] = project
+        path = f"/api/tasks?{urllib.parse.urlencode( params )}"
+        ok, count = _count_on_connection( connection, path, api_key )
+        if not ok:
+            return False, 0
+        return True, count
     finally:
         connection.close()                   # release the socket (close is idempotent)

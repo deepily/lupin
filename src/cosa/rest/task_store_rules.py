@@ -33,9 +33,27 @@ from lupin_mcp.persona_normalization import canonical_persona_key
 # Enums (design §2.1) — plain tuples, app-validated (house style: no PG ENUM)
 # ---------------------------------------------------------------------------
 
-VALID_STATUSES         = ( "queued", "claimed", "in_progress", "blocked", "review", "done", "dropped" )
+VALID_STATUSES         = ( "queued", "claimed", "in_progress", "blocked", "parked", "review", "done", "dropped" )
 TERMINAL_STATUSES      = ( "done", "dropped" )
 VALID_ITEM_CLASSES     = ( "task", "decision", "review_request", "bug", "gate" )
+
+# The deliberate-hold status (2026-07-19). A row is `parked` when a HUMAN ruled it
+# not-now: approved, not abandoned, not blocked on anything. `queued` then means,
+# honestly, "actually workable now". NON-terminal by design — parking buys bounded,
+# self-expiring silence, never an exit.
+#
+# The VOCABULARY lives here with the other enums (one home for the store's words);
+# the READ-TIME predicate over it lives in `task_store_owed`, which imports these.
+# The dependency runs owed -> rules and never back, so `task_store_rules` keeps its
+# purity contract ("no DB, no HTTP") while the SQLAlchemy twin stays out of it.
+PARK_STATUS              = "parked"
+
+# Park is legal ONLY from these statuses. This is what makes re-admitting expired-
+# parked rows to the owed set an exact RESTORATION rather than a widening: such a
+# row provably came from queued/in_progress, so it can never drag in a
+# blocked/claimed/review row. A `parked_from_status` COLUMN was rejected — Rick's
+# standing rule, a new field where a rule suffices.
+PARK_LEGAL_FROM_STATUSES = ( "queued", "in_progress" )
 VALID_GATE_CLASSES     = ( "none", "manager", "operator" )
 VALID_PRIORITIES       = ( "P0", "P1", "P2", "P3" )
 # proactive-manager A2 (fcb5dbc0): operator-gate TIME-SENSITIVITY, distinct from the
@@ -556,6 +574,7 @@ def validate_transition(
     blocked_by    = None,
     reason        = None,
     scope_roots   : Optional[dict] = None,
+    park_reason   = None,
 ) -> list:
     """
     Validate one state transition against the Phase-1/2 structural rules.
@@ -625,7 +644,91 @@ def validate_transition(
         errors.extend( validate_blocked_by_refs( blocked_by ) )
     if to_status == "dropped" and ( not isinstance( reason, str ) or not reason.strip() ):
         errors.append( "reason is REQUIRED (non-blank) when transitioning to 'dropped' (C12 — the escape hatch carries its justification)" )
+    if to_status == PARK_STATUS:
+        errors.extend( validate_park( from_status, next_chase_ts, park_reason ) )
 
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Park rules (2026-07-19 — src/rnd/v0.1.9/2026.07.19-parked-status-board-hygiene.md)
+# ---------------------------------------------------------------------------
+#
+# `parked` says a HUMAN ruled this row not-now: approved, not abandoned, not
+# blocked on anything. The two required fields are what keep it from becoming a
+# quiet graveyard, and each mirrors an existing rule rather than inventing one:
+#
+#   next_chase_ts — the SAME field ->blocked already requires (I3, "no 'pending
+#                   X' graves"). Reused, never duplicated: Rick overruled a
+#                   proposed `unpark_when` because the chase already exists.
+#                   Expiry is computed at READ time (task_store_owed), so a
+#                   passed chase rejoins the owed count with no daemon and no
+#                   write-back. An unbounded hold is therefore structurally
+#                   unrepresentable — any timestamp eventually passes.
+#   park_reason   — MUST quote the row's own decisive sentence. Two catalogs
+#                   mis-counted this board by reading titles; the quote is what
+#                   makes a park decision refutable by the next reader.
+#
+# An indefinite hold is NOT a park — it is `dropped` with a reason, because
+# dropping is VISIBLE.
+
+def is_park_legal_from( from_status ) -> bool:
+    """
+    True iff a row may be parked FROM `from_status`.
+
+    The guarantee this buys: expired-parked ⊆ ex-queued/in_progress, BY
+    CONSTRUCTION. That is what lets the owed-set admission take the entire
+    expired-parked set without widening any reader's owed definition.
+
+    Requires:
+        - from_status is the row's CURRENT status (any value accepted)
+
+    Ensures:
+        - True iff from_status is in PARK_LEGAL_FROM_STATUSES
+        - False for every other status, including already-`parked` and the
+          terminal states
+        - never raises
+    """
+    return from_status in PARK_LEGAL_FROM_STATUSES
+
+
+def validate_park( from_status, next_chase_ts, park_reason ) -> list:
+    """
+    Validate a ->parked transition's source status and required fields.
+
+    Requires:
+        - from_status is the item's CURRENT status
+        - next_chase_ts / park_reason are the candidate payload fields
+
+    Ensures:
+        - returns [] iff ALL hold:
+            from_status is in PARK_LEGAL_FROM_STATUSES (queued / in_progress)
+            next_chase_ts is present
+            park_reason is a non-blank string
+        - the source-status rule is what makes the owed-set restoration exact:
+          an expired-parked row provably came from queued/in_progress, so
+          re-admitting the whole expired-parked set can never drag in a
+          blocked/claimed/review row (design §4.2). A `parked_from_status`
+          column was REJECTED — a new field where a rule suffices.
+        - one error string per violation; never raises
+    """
+    errors = [ ]
+    if not is_park_legal_from( from_status ):
+        errors.append(
+            f"cannot park from '{from_status}' — park is legal ONLY from "
+            f"{PARK_LEGAL_FROM_STATUSES} (this is what keeps the owed-set "
+            f"restoration exact rather than widening)"
+        )
+    if next_chase_ts is None:
+        errors.append(
+            "next_chase_ts is REQUIRED when transitioning to 'parked' (the chase "
+            "IS the un-park — parking buys bounded, self-expiring silence, never an exit)"
+        )
+    if not isinstance( park_reason, str ) or not park_reason.strip():
+        errors.append(
+            "park_reason is REQUIRED (non-blank) when transitioning to 'parked' — "
+            "it MUST quote the row's own decisive sentence, so the park is refutable"
+        )
     return errors
 
 

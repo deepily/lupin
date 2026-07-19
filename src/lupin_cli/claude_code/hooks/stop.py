@@ -1352,10 +1352,16 @@ def _gather_unanswered_inbound_questions( session_id ):
 
 
 # ── Spine Step-2 (store-canonical task management) store-count seam ───────────
-# The owed store-statuses queried for the work-owed verdict. The store's
-# {queued, in_progress} == the owed set (cascade review §B); a module constant
-# is the single source of truth (one-name rule).
-STORE_OWED_STATUSES = ( "queued", "in_progress" )
+# STORE_OWED_STATUSES was DELETED here on 2026-07-19 (PARKED-STATUS). It named
+# the owed set locally, and had already forked into 4 copies (here,
+# task_store_drain.py, the arbiter, rules.py). The owed set now lives SERVER-side
+# behind query_owed's `owed_only=true`: queued U in_progress U (parked AND NOT
+# park-active). Deleted rather than re-pointed — a constant that no longer exists
+# cannot drift, and a status tuple held HERE could neither see a park-expiry
+# rejoin (an expired parked row still reads status="parked") nor avoid
+# double-counting one across a per-status loop.
+# Membership is otherwise UNCHANGED: blocked / claimed / review are still not
+# owed to this reader. Design: src/rnd/v0.1.9/2026.07.19-parked-status-board-hygiene.md
 
 
 def _owed_count_from_store( session_id ):
@@ -1389,7 +1395,7 @@ def _owed_count_from_store( session_id ):
         # Idempotent → safe whether the bridge holds the display or pool form.
         persona_key = canonical_persona_key( persona.get( "name" ) if isinstance( persona, dict ) else None ) or "unknown"
         project  = resolve_project_name()
-        ok, count = query_owed( settings, api_key, persona_key, STORE_OWED_STATUSES, project=project )
+        ok, count = query_owed( settings, api_key, persona_key, project=project )
         return count, ok
     except Exception:
         return 0, False
@@ -1450,7 +1456,7 @@ def _backlog_count_from_store( session_id ):
         persona     = get_voice_persona( session_id )
         persona_key = canonical_persona_key( persona.get( "name" ) if isinstance( persona, dict ) else None ) or "unknown"
         project     = resolve_project_name()
-        ok, count   = query_owed( settings, api_key, persona_key, STORE_OWED_STATUSES,
+        ok, count   = query_owed( settings, api_key, persona_key,
                                   project=project, owner_field="accountable_manager" )
         return count, ok
     except Exception:

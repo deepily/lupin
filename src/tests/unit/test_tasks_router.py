@@ -1156,5 +1156,57 @@ def test_patch_non_persona_field_not_flagged( client, repo ):
     assert repo.apply_patch.call_args.kwargs[ "flag_suffix" ] is None
 
 
+# ---------------------------------------------------------------------------
+# PARKED-STATUS (2026-07-19) — R1 WIRING guards (Krishna, seat 2)
+# ---------------------------------------------------------------------------
+#
+# These live HERE, not in Rachel's parity gate, for a structural reason: her
+# harness proves the PREDICATE against in-memory SQLite and never builds a
+# router call, so a wiring DEFAULT is invisible to it. Mutant (a) is the one we
+# most risked each assuming the other covered — it is a default, the easiest
+# thing in this diff to flip by accident and the hardest to notice, because
+# flipping it leaves every predicate test green while park-active rows silently
+# return to the board (the entire user-visible point of the feature).
+
+def test_query_defaults_to_hiding_park_active_rows( client, repo ):
+    """MUTANT GUARD (a): flip the router's hide_parked default True->False and
+    this goes RED. Nothing else in the suite would."""
+    repo.query_tasks.return_value = [ ]
+    client.get( "/api/tasks?owner_persona=krishna" )
+    assert repo.query_tasks.call_args.kwargs[ "hide_parked" ] is True, (
+        "park-ACTIVE rows must be hidden by DEFAULT — a flipped default silently "
+        "returns them to the board while every predicate test stays green"
+    )
+
+
+def test_count_only_path_also_defaults_to_hiding_park_active( client, repo ):
+    """The COUNT(*) seam must carry the SAME default as the page. Asserted even
+    though _apply_owed_filter is shared by both: a shared helper is not proof
+    that both callers actually reached it."""
+    repo.count_tasks.return_value = 0
+    client.get( "/api/tasks?owner_persona=krishna&count_only=true" )
+    assert repo.count_tasks.call_args.kwargs[ "hide_parked" ] is True
+
+
+def test_include_parked_false_surfaces_park_active_rows( client, repo ):
+    """The audit surface: hide_parked=false must reach the repository, so
+    task_query(include_parked=True) can see what is parked and why."""
+    repo.query_tasks.return_value = [ ]
+    client.get( "/api/tasks?owner_persona=krishna&hide_parked=false" )
+    assert repo.query_tasks.call_args.kwargs[ "hide_parked" ] is False
+
+
+def test_owed_only_defaults_off_and_forwards_when_asked( client, repo ):
+    """owed_only is OPT-IN and must never become the board's default: it would
+    narrow the UI to queued/in_progress/expired-parked and silently vanish every
+    blocked / claimed / review row — the same widening class rejected at the
+    Stop-hook seam, arriving through the opposite door."""
+    repo.query_tasks.return_value = [ ]
+    client.get( "/api/tasks?owner_persona=krishna" )
+    assert repo.query_tasks.call_args.kwargs[ "owed_only" ] is False
+    client.get( "/api/tasks?owner_persona=krishna&owed_only=true" )
+    assert repo.query_tasks.call_args.kwargs[ "owed_only" ] is True
+
+
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )

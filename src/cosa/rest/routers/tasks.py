@@ -715,6 +715,8 @@ def query_tasks(
     terse               : bool = False,
     include_terminal    : bool = False,
     unscoped_audit      : bool = False,
+    owed_only           : bool = False,
+    hide_parked         : bool = True,
     limit               : int = Query( default=100, ge=0, le=500 ),
     offset              : int = Query( default=0, ge=0 ),
 ):
@@ -745,6 +747,21 @@ def query_tasks(
           status / blocked_by / next_chase_ts / priority — `body` and the other
           full-row fields dropped), so an on-demand "see my list" query over MCP
           costs a fraction of the full-row token weight.
+        - owed_only=True (PARKED-STATUS 2026-07-19) selects the OWED set —
+          queued U in_progress U (parked AND NOT park-active) — computed
+          SERVER-SIDE. Park-expiry is evaluated at READ time and never written
+          back, so a status-enumerating caller CANNOT reconstruct this: an
+          expired parked row still carries status="parked" in the column.
+          Callers pass this ONE flag and never put "parked" in a status tuple;
+          that is what makes it fail-CLOSED (there is no second thing to forget).
+          Honors an explicit `status` filter by narrowing within it.
+        - hide_parked=True (DEFAULT — the board-hygiene behavior) suppresses
+          park-ACTIVE rows without touching the status set, so blocked/claimed/
+          review rows stay on the board exactly as today. EXPIRED parked rows
+          remain VISIBLE: they have rejoined, and a row that pokes you while
+          staying invisible on the board is the incoherence this build removes.
+          Pass status="parked" (or hide_parked=false) to surface the parked set —
+          that is the audit surface.
     """
     errors = [ ]
     if status is not None and status not in rules.VALID_STATUSES:
@@ -786,6 +803,8 @@ def query_tasks(
                 item_class          = item_class,
                 correlation_key     = correlation_key,
                 include_terminal    = include_terminal,
+                owed_only           = owed_only,
+                hide_parked         = hide_parked,
             )
             return { "count": count }
         # The unscoped-query guard (design 2026.07.07) is a repository-layer raise;
@@ -806,6 +825,8 @@ def query_tasks(
                 offset              = offset,
                 include_terminal    = include_terminal,
                 unscoped_audit      = unscoped_audit,
+                owed_only           = owed_only,
+                hide_parked         = hide_parked,
             )
         except rules.UnscopedQueryError as e:
             raise HTTPException(

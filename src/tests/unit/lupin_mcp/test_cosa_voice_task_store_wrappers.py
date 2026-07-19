@@ -190,6 +190,7 @@ class TestTaskQueryWrapper:
             "terse"               : False,                     # §G: defaults off (full rows)
             "include_terminal"    : False,                     # guard: exclude done/dropped by default
             "unscoped_audit"      : False,                     # guard: no deliberate-audit escape by default
+            "include_parked"      : False,                     # PARKED-STATUS: park-ACTIVE rows hidden by default
         }
 
     def test_filters_pass_through( self, stamped_identity, monkeypatch ):

@@ -773,3 +773,65 @@ class TestManagerDownStoreHealthGate:
                                         owed_items=None, store_read_degraded=True ) == 0
         assert job._check_manager_acks( LATE, [ ], { }, [ ], owed_class={ "Mgr": CLASS_ACTIVE },
                                         owed_items={ "Mgr": [ _normal() ] }, store_read_degraded=False ) == 1
+
+
+# ---------------------------------------------------------------------------
+# PARKED-STATUS (2026-07-19) — R3 WIRING guard (Krishna, seat 2)
+# ---------------------------------------------------------------------------
+#
+# Rachel's parity gate proves the PREDICATE against in-memory SQLite; it never
+# builds an arbiter poll, so this wiring choice is structurally invisible to it.
+# The mutant guarded here READS LIKE A TIGHTENING and is a silent catastrophe:
+# swapping hide_parked=True for owed_only=True narrows the arbiter to
+# queued/in_progress and blinds it to every `blocked` row — and the blocked rows
+# are exactly what its deadlock-corroboration ring is built from.
+class TestDefaultOwedWorkFnParkWiring:
+
+    @staticmethod
+    def _capture( monkeypatch ):
+        """Patch the repo + get_db seams; return the list of query_tasks kwargs."""
+        from contextlib import contextmanager
+        import cosa.rest.db.repositories.task_repository as repo_mod
+        import cosa.rest.db.database as db_mod
+        calls = [ ]
+
+        class _FakeRepo:
+            def __init__( self, session ): pass
+            def query_tasks( self, **kwargs ):
+                calls.append( kwargs )
+                return [ ]
+
+        @contextmanager
+        def _fake_get_db():
+            yield object()
+
+        monkeypatch.setattr( db_mod, "get_db", _fake_get_db )
+        monkeypatch.setattr( repo_mod, "TaskRepository", _FakeRepo )
+        return calls
+
+    def test_suppresses_park_active_without_narrowing_the_status_set( self, monkeypatch ):
+        """MUTANT GUARD (b): swap hide_parked=True for owed_only=True and this
+        goes RED. The arbiter selects ALL non-terminal rows, which already
+        contains parked ones, so SUPPRESSION alone is both sufficient and
+        correct — admission would drop the blocked rows it reasons over."""
+        from cosa.agents.heartbeat_arbiter.arbiter_job import _default_owed_work_fn
+        calls = self._capture( monkeypatch )
+        _default_owed_work_fn( [ "Krishna" ] )
+        assert calls, "expected one query_tasks call per persona"
+        assert calls[ 0 ][ "hide_parked" ] is True
+        assert calls[ 0 ].get( "owed_only", False ) is False, (
+            "the arbiter must NOT use owed_only — it would blind the deadlock "
+            "ring to every `blocked` row while reading like a tightening"
+        )
+
+    def test_one_clock_is_shared_across_every_persona_in_the_poll( self, monkeypatch ):
+        """A per-persona clock read could classify two personas against different
+        instants and straddle a park-expiry boundary mid-poll, making readers 2
+        and 3 disagree for a reason no test reproduces and no log explains."""
+        from cosa.agents.heartbeat_arbiter.arbiter_job import _default_owed_work_fn
+        calls = self._capture( monkeypatch )
+        _default_owed_work_fn( [ "Krishna", "Rachel", "Clayton" ] )
+        assert len( calls ) == 3
+        stamps = { c[ "now" ] for c in calls }
+        assert len( stamps ) == 1, f"expected ONE shared instant, got {stamps}"
+        assert next( iter( stamps ) ).tzinfo is not None, "the shared clock must be tz-aware UTC"

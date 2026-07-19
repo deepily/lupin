@@ -1340,6 +1340,15 @@ class TaskItem( Base ):
         DateTime( timezone=True ),
         nullable=True
     )
+    park_reason: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True
+    )  # REQUIRED when status='parked' (CHECK below); MUST quote the row's own
+       # decisive sentence. A real COLUMN rather than the transition `reason`,
+       # which lands only on the TaskEvent trail: a parked row is hidden by
+       # default, so surfacing one to read WHY it is parked would cost an
+       # event-trail fetch per row, and the terse projection could not carry it
+       # at all. Nullable — rows that were never parked have none.
     gate_class: Mapped[str] = mapped_column(
         String( 32 ),
         nullable=False,
@@ -1405,6 +1414,19 @@ class TaskItem( Base ):
         CheckConstraint(
             "status != 'blocked' OR next_chase_ts IS NOT NULL",
             name="ck_task_items_blocked_requires_chase_ts"
+        ),
+        # Park's two required fields, mirroring the blocked rule above. TWO
+        # separate CHECKs rather than one conjunction, so a violation names WHICH
+        # field is missing. These are what give the rejection tests teeth BELOW
+        # Pydantic — a hand-written INSERT or a future non-ORM writer cannot
+        # create a park that never expires or a park with no stated reason.
+        CheckConstraint(
+            "status != 'parked' OR next_chase_ts IS NOT NULL",
+            name="ck_task_items_parked_requires_chase_ts"
+        ),
+        CheckConstraint(
+            "status != 'parked' OR park_reason IS NOT NULL",
+            name="ck_task_items_parked_requires_reason"
         ),
     )
 

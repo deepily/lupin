@@ -254,9 +254,15 @@ def _default_owed_work_fn( personas ):   # pragma: no cover - production store-r
         - raising is acceptable here — the caller (_classify_owed) swallows any
           exception into the fail-SAFE UNKNOWN path (observer invariant)
     """
+    from datetime import datetime, timezone
     from cosa.rest.db.database import get_db
     from cosa.rest.db.repositories.task_repository import TaskRepository
     _TERMINAL = ( "done", "dropped" )
+    # PARKED-STATUS (2026-07-19): ONE clock for the whole poll. A per-persona
+    # clock read could classify two personas against different instants and
+    # straddle a park-expiry boundary mid-poll — reader #2 and reader #3 would
+    # then disagree about a row for reasons no test could reproduce.
+    now = datetime.now( timezone.utc )
     out = { }
     with get_db() as session:
         repo = TaskRepository( session )
@@ -267,7 +273,18 @@ def _default_owed_work_fn( personas ):   # pragma: no cover - production store-r
             # of the store's "maria"/"mr radio" rows (the 2026-06-18 false-idle).
             # The OUTPUT key stays the original `persona` so the caller's
             # roster-keyed lookups are unchanged.
-            items = repo.query_tasks( owner_persona=canonical_persona_key( persona ) or persona )
+            #
+            # hide_parked=True (NOT owed_only): this reader selects ALL non-terminal
+            # rows, which ALREADY contains parked ones, so SUPPRESSION alone is both
+            # sufficient and correct — owed_only would wrongly narrow the arbiter to
+            # queued/in_progress and drop the blocked rows its deadlock-corroboration
+            # ring is built from. Expired-parked rows stay VISIBLE here: they have
+            # rejoined, and the arbiter must see what the Stop hook is being poked about.
+            items = repo.query_tasks(
+                owner_persona = canonical_persona_key( persona ) or persona,
+                hide_parked   = True,
+                now           = now,
+            )
             out[ persona ] = [
                 { "id"         : str( it.id ),
                   "status"     : it.status,

@@ -36,7 +36,7 @@ from lupin_cli.claude_code.hooks.stop import (
     main, _run_heartbeat, _emit_genuine_idle, _notify_cap_reached,
     _poke_sentence, _announce_poke, _has_pending_voice,
     _compose_poke_abstract, _build_poke_abstract_safe, _format_inbound, _receipt_lines,
-    _owed_count_from_store, _synthesize_owed_items, STORE_OWED_STATUSES,
+    _owed_count_from_store, _synthesize_owed_items,
     _resolve_owed_state,
 )
 from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import TODO_IN_PROGRESS
@@ -1356,11 +1356,17 @@ class TestOwedCountFromStore:
         self.vp.return_value = { "name": "Krishna" }
         self.qo.return_value = ( True, 4 )
         assert _owed_count_from_store( "sid" ) == ( 4, True )
-        # owner lowercased; owed statuses + project threaded through
+        # owner lowercased; project threaded through
         _args, kwargs = self.qo.call_args
         assert _args[ 2 ] == "krishna"
-        assert _args[ 3 ] == STORE_OWED_STATUSES
         assert kwargs[ "project" ] == "lupin"
+        # PARKED-STATUS (2026-07-19): the caller no longer passes a status tuple.
+        # The owed SET moved server-side behind query_owed's owed_only=true —
+        # a status tuple HERE could neither see a park-expiry rejoin (an expired
+        # parked row still reads status="parked") nor avoid double-counting one
+        # across the old per-status SUM loop. Asserting its ABSENCE is the guard:
+        # re-introduce a 4th positional and this test goes red.
+        assert len( _args ) == 3, f"query_owed must take no status tuple; got {_args!r}"
 
     def test_accented_persona_queries_canonical_key_FLIP( self ):
         """FACET-1 FLIP (the persona-axis false-idle): a persona whose name carries

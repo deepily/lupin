@@ -11,7 +11,7 @@ Canonical design: planning-is-prompting ->
 src/rnd/2026.06.11-unified-task-store-design.md (v0.4) §2.1-§2.2.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 import uuid
 
@@ -26,6 +26,12 @@ from cosa.rest.task_store_rules import (
     UnscopedQueryError,
     is_unscoped,
 )
+# PARKED-STATUS (2026-07-19) — the ONE canonical owed definition. This repository
+# is the choke point all three readers funnel through (task_query / the Stop-hook
+# COUNT(*) seam / the :8001 arbiter), so applying the clause HERE is what makes
+# "three readers, one definition" true rather than aspirational. NEVER re-derive
+# park-expiry locally — import it. Design: src/rnd/v0.1.9/2026.07.19-parked-status-board-hygiene.md
+from cosa.rest.task_store_owed import PARK_STATUS, owed_clause, owed_status_clause
 
 
 class TaskRepository( BaseRepository[TaskItem] ):
@@ -407,6 +413,9 @@ class TaskRepository( BaseRepository[TaskItem] ):
         offset              : int = 0,
         include_terminal    : bool = False,
         unscoped_audit      : bool = False,
+        owed_only           : bool = False,
+        hide_parked         : bool = False,
+        now                 : Optional[datetime] = None,
     ) -> List[TaskItem]:
         """
         The deterministic owed-work query (design R4) — identical for every caller.
@@ -430,6 +439,9 @@ class TaskRepository( BaseRepository[TaskItem] ):
               unscoped_audit is False. The count is a cheap COUNT(*) (count_tasks),
               never a row materialization. A SCOPED query skips the guard entirely
               (zero overhead on the common path).
+            - owed_only=True (PARKED-STATUS 2026-07-19) selects the OWED set:
+              queued U in_progress U (parked AND NOT park-active). It REPLACES the
+              status filter rather than narrowing it — see _apply_owed_filter.
             - returns items matching ALL provided filters (AND semantics)
             - ordered by created_ts descending (newest first), then id for
               a stable total order
@@ -458,7 +470,12 @@ class TaskRepository( BaseRepository[TaskItem] ):
         # opt-in, is rejected BEFORE any row is fetched. Count is always NON-terminal
         # (the default payload shape) via the cheap COUNT(*) — no rows materialized.
         if not unscoped_audit and is_unscoped( filters ):
-            non_terminal = self.count_tasks( include_terminal=False, **filters )
+            # owed_only/now are threaded into the guard's count so it measures the
+            # payload this query will ACTUALLY return (PARKED-STATUS 2026-07-19).
+            # Without them the guard counts every non-terminal row and could reject
+            # an owed_only query whose real result is well under threshold —
+            # rejecting a small answer because a big one was hypothetically possible.
+            non_terminal = self.count_tasks( include_terminal=False, owed_only=owed_only, hide_parked=hide_parked, now=now, **filters )
             if non_terminal > UNSCOPED_QUERY_THRESHOLD:
                 raise UnscopedQueryError( non_terminal, UNSCOPED_QUERY_THRESHOLD )
 
@@ -472,13 +489,85 @@ class TaskRepository( BaseRepository[TaskItem] ):
         if project is not None:             query = query.filter( TaskItem.project == project )
         if item_class is not None:          query = query.filter( TaskItem.item_class == item_class )
         if correlation_key is not None:     query = query.filter( TaskItem.correlation_key == correlation_key )
+        query = self._apply_owed_filter( query, owed_only, hide_parked, status, include_terminal, now )
+
+        return query.order_by( TaskItem.created_ts.desc(), TaskItem.id ).limit( limit ).offset( offset ).all()
+
+    @staticmethod
+    def _apply_owed_filter( query, owed_only, hide_parked, status, include_terminal, now ):
+        """
+        The ONE place status/terminal/park selection is decided — shared VERBATIM by
+        query_tasks and count_tasks (PARKED-STATUS 2026-07-19).
+
+        Extracted deliberately. These two methods carried byte-identical filter
+        blocks maintained by copy-paste; the COUNT(*) seam is precisely where the
+        Stop-hook oracle diverges from what the UI shows, and a divergence there is
+        invisible to every predicate-level test. One helper means the count and the
+        page CANNOT disagree about what "owed" means.
+
+        TWO selection policies, ONE clause. Both call owed_clause; they differ only
+        in whether the STATUS ADMISSION also happens. The distinction is real and
+        each reader genuinely needs its own:
+
+          hide_parked=True (task_query R1, arbiter R3) — SUPPRESSION ONLY. These
+            readers already select "all non-terminal", which ALREADY contains parked
+            rows, so suppressing park-active ones is sufficient and an admission
+            would WRONGLY narrow them (it would drop blocked/claimed/review off the
+            board entirely).
+          owed_only=True (Stop-hook R2) — SUPPRESSION **plus** STATUS ADMISSION.
+            R2 selects only queued/in_progress, which never contained parked rows at
+            all, so suppression alone can NEVER re-admit an expired one: parking
+            MOVED the status out of "queued", and subtraction cannot restore a row
+            that was never in the set. That asymmetry is the defect that made the
+            purely-additive shape unbuildable.
+
+        Requires:
+            - query is a SQLAlchemy Query over TaskItem
+            - owed_only / hide_parked are bools; status is a status string or None
+            - now is a tz-aware datetime, or None to resolve it here (the IO
+              boundary owns the clock so the predicates never read one — Rachel's
+              boundary test needs `now` injectable without patching module state)
+
+        Ensures:
+            - owed_only=True selects queued U in_progress U (parked AND NOT
+              park-active). Exact RESTORATION, never a widening: park is legal ONLY
+              from OWED_BASE_STATUSES, so every expired-parked row provably came
+              from that same set. An explicit `status` filter is applied upstream
+              and is honored — owed_only then narrows within it.
+            - hide_parked=True suppresses park-active rows WITHOUT touching the
+              status set. Expired-parked rows stay VISIBLE — they have rejoined, and
+              a row that pokes you while staying invisible on the board is the exact
+              incoherence this build exists to remove.
+            - an EXPLICIT status="parked" filter DISABLES suppression entirely: you
+              asked for parked, you get all of them. This is the audit surface.
+            - owed_only takes precedence over hide_parked (it is the stricter,
+              fail-CLOSED policy); neither flag preserves the pre-existing
+              terminal-exclusion default EXACTLY when both are False
+            - never mutates the caller's query in place
+        """
+        if owed_only or ( hide_parked and status != PARK_STATUS ):
+            if now is None:
+                now = datetime.now( timezone.utc )
+            if owed_only and status is None:
+                # owed_status_clause is the CANONICAL one-call admission:
+                # queued U in_progress U (parked AND NOT park-active). Composing
+                # it here from parts would re-derive the rule in a reader, which
+                # is precisely what this build removes.
+                return query.filter( owed_status_clause( TaskItem, now ) )
+            # hide_parked (or owed_only narrowed by an explicit status): SUPPRESS
+            # park-active rows without touching the status set. owed_clause alone
+            # on a queued/in_progress filter would NOT re-admit expired-parked
+            # rows — correct here precisely because these callers already select
+            # the parked status themselves (all-non-terminal / explicit filter).
+            if not include_terminal and status is None:
+                query = query.filter( TaskItem.status.notin_( TERMINAL_STATUSES ) )
+            return query.filter( owed_clause( TaskItem, now ) )
         # Terminal-exclusion default: an un-status'd query drops done/dropped unless
         # the caller opts in via include_terminal. An explicit `status` filter (incl.
         # status=done/dropped) governs on its own — no double-filtering.
         if not include_terminal and status is None:
             query = query.filter( TaskItem.status.notin_( TERMINAL_STATUSES ) )
-
-        return query.order_by( TaskItem.created_ts.desc(), TaskItem.id ).limit( limit ).offset( offset ).all()
+        return query
 
     def count_tasks(
         self,
@@ -491,6 +580,9 @@ class TaskRepository( BaseRepository[TaskItem] ):
         item_class          : Optional[str] = None,
         correlation_key     : Optional[str] = None,
         include_terminal    : bool = False,
+        owed_only           : bool = False,
+        hide_parked         : bool = False,
+        now                 : Optional[datetime] = None,
     ) -> int:
         """
         True COUNT(*) over the SAME filter set as query_tasks — no row materialization.
@@ -512,6 +604,11 @@ class TaskRepository( BaseRepository[TaskItem] ):
               with query_tasks so the guard's count matches the payload it guards.
               The Stop-hook owed-count seam always passes a (non-terminal) `status`
               filter, so this default is behavior-neutral for it.
+            - owed_only=True applies the IDENTICAL selection as query_tasks via the
+              shared _apply_owed_filter, so the COUNT can never disagree with the
+              page it counts (PARKED-STATUS 2026-07-19). This is the seam the
+              Stop-hook oracle reads and the one place a silent divergence between
+              "what pokes you" and "what you can see" would live.
             - returns the integer count of items matching ALL provided filters
             - no ORDER BY / LIMIT / OFFSET — a count is order- and page-independent
         """
@@ -525,8 +622,10 @@ class TaskRepository( BaseRepository[TaskItem] ):
         if project is not None:             query = query.filter( TaskItem.project == project )
         if item_class is not None:          query = query.filter( TaskItem.item_class == item_class )
         if correlation_key is not None:     query = query.filter( TaskItem.correlation_key == correlation_key )
-        if not include_terminal and status is None:
-            query = query.filter( TaskItem.status.notin_( TERMINAL_STATUSES ) )
+        # The SAME helper query_tasks uses — this is the COUNT(*)/page parity seam
+        # the Stop-hook oracle reads. Rachel's gate asserts
+        # count_tasks(owed_only=True) == len(query_tasks(owed_only=True)).
+        query = self._apply_owed_filter( query, owed_only, hide_parked, status, include_terminal, now )
 
         return query.scalar()
 

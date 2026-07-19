@@ -3557,6 +3557,7 @@ def task_query(
     terse               : bool            = False,
     include_terminal    : bool            = False,
     unscoped_audit      : bool            = False,
+    include_parked      : bool            = False,
 ) -> dict:
     """
     **[READ — always allowed, no user permission needed]** Query the task store.
@@ -3581,6 +3582,17 @@ def task_query(
     dropped) rows are excluded by default; pass `include_terminal=True` to
     include them on an un-status'd query.
 
+    PARKED ROWS (2026-07-19): a `parked` row is one a human deliberately ruled
+    not-now, carrying a `park_reason` quoting the row's own decisive sentence.
+    Park-ACTIVE rows are HIDDEN from this query by default, so `queued` now
+    means "actually workable now" and the burn-down number stops being fiction.
+    Parking is BOUNDED and SELF-EXPIRING, never an exit: a parked row whose
+    `next_chase_ts` has PASSED is no longer parked — it rejoins the owed count
+    automatically and stays VISIBLE here. Nothing sweeps it; expiry is computed
+    at READ time. An INDEFINITE hold is not parked, it is `dropped` with a
+    reason (dropping is visible). Pass `include_parked=True` (or
+    `status="parked"`) to audit what is currently parked and why.
+
     Examples:
         # My owed work (terse list) — the everyday scoped query:
         task_query(owner_persona="sam", status="in_progress", terse=True)
@@ -3590,6 +3602,9 @@ def task_query(
 
         # Deliberate full-store audit (past the guard, incl. terminal rows):
         task_query(unscoped_audit=True, include_terminal=True, terse=True)
+
+        # What is currently parked, and why (the audit surface):
+        task_query(status="parked", terse=True)
 
     Args:
         owner_persona: Filter by who owes the work
@@ -3610,6 +3625,10 @@ def task_query(
         unscoped_audit: True → the deliberate-full-sweep escape past the
             unscoped-size guard (default False → a bare over-threshold pull is
             rejected as an error-dict)
+        include_parked: True → also return park-ACTIVE rows (default False hides
+            them). EXPIRED parked rows are returned either way — they have
+            rejoined the owed count and hiding them would make a row that pokes
+            you invisible on the board.
 
     Returns:
         { tasks: [...], count } verbatim (terse rows when terse=True), or an
@@ -3632,6 +3651,7 @@ def task_query(
         terse               = terse,
         include_terminal    = include_terminal,
         unscoped_audit      = unscoped_audit,
+        include_parked      = include_parked,
     )
 
 

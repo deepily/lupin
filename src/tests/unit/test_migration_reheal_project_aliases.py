@@ -67,6 +67,7 @@ CREATE TABLE task_items (
     status              TEXT NOT NULL DEFAULT 'queued',
     blocked_by          TEXT NOT NULL DEFAULT '[]',
     next_chase_ts       TEXT,
+    park_reason         TEXT,
     gate_class          TEXT NOT NULL DEFAULT 'none',
     priority            TEXT NOT NULL DEFAULT 'P2',
     urgency             TEXT NOT NULL DEFAULT 'normal',

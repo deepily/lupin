@@ -338,6 +338,7 @@ def task_query_impl(
     terse               = False,
     include_terminal    = False,
     unscoped_audit      = False,
+    include_parked      = False,
 ):
     """
     GET /api/tasks — the deterministic owed-work query (design R4).
@@ -362,6 +363,15 @@ def task_query_impl(
           `_PROJECT_ALIASES` map (mirror of the write seam) so an agent-facing
           query by the raw repo name still matches the canonically-stored rows
           (read == write; the same alias the oracle applies — bug c6751cf8)
+        - PARKED-STATUS (2026-07-19): park-ACTIVE rows are HIDDEN by default —
+          the server suppresses them (hide_parked defaults true). A parked row
+          whose next_chase_ts has PASSED is NOT parked any more and stays
+          VISIBLE: it has rejoined the owed count, and a row that pokes you
+          while staying invisible on the board is the exact incoherence this
+          build removes. Surface the parked set with include_parked=True or by
+          asking for status="parked" directly (the audit surface). Forwarded
+          ONLY when truthy, as the canonical lowercase "true" (mirror of terse),
+          so a pre-parked server ignores the unknown param.
     """
     filters = {
         "owner_persona"       : owner_persona,
@@ -379,4 +389,7 @@ def task_query_impl(
     if terse:            params[ "terse" ]            = "true"
     if include_terminal: params[ "include_terminal" ] = "true"
     if unscoped_audit:   params[ "unscoped_audit" ]   = "true"
+    # include_parked flips the server-side default OFF; only sent when asked, so
+    # an older server (no such param) keeps today's behavior rather than 400ing.
+    if include_parked:   params[ "hide_parked" ]       = "false"
     return task_store_request( "GET", "/api/tasks", api_base_url, api_key, params=params )
