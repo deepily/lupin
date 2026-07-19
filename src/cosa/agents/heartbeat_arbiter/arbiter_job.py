@@ -186,6 +186,15 @@ CLASS_DONE            = "done"              # zero non-terminal owed items → c
 CLASS_ACTIVE          = "active"           # has ≥1 normal (non-Rick-gated) owed item → today's behavior
 CLASS_UNKNOWN         = "unknown"          # store read failed / seam unwired → FAIL SAFE (today's behavior)
 
+# ── audience-scoped poke gating (2026-07-19, Rick via María) ─────────────────
+# The arbiter's outreach has THREE audiences, each independently silenceable
+# under the `auto_poke_enabled` master. Audience is derived from the TARGET's
+# `role` (see AutoPokeMixin.audience_for_role) for the two session-directed
+# tiers; OPERATOR names the Rick-directed advisory stream the poke tiers emit.
+AUDIENCE_WORKER   = "worker"     # stuck-tier poke at a non-manager session
+AUDIENCE_MANAGER  = "manager"    # stuck-tier poke at a manager + the manager-staleness tier
+AUDIENCE_OPERATOR = "operator"   # the poke subsystem's Rick-directed advisories (case 14 + reap-recommendation)
+
 # Sentinel: distinguishes "_classify_owed must do its own owed read" (default)
 # from "a pre-read owed dict (possibly None) was threaded in by the caller" — so
 # the per-poll one-read can be SHARED with the deadlock corroboration source
@@ -609,6 +618,13 @@ class ArbiterConsumerJob( AgenticJobBase ):
         fleet_stall_window_seconds : int                = 1800,
         poll_error_escalate_threshold : int             = 3,
         auto_poke_enabled        : bool                 = True,
+        # AUDIENCE SCALPEL (2026-07-19, Rick via María): three audience-scoped gates
+        # UNDER the `auto_poke_enabled` master. Master off ⇒ all silent (the panic
+        # button); master on ⇒ each audience is independently silenceable (the
+        # scalpel). All default True ⇒ behavior-neutral when unconfigured.
+        poke_workers_enabled     : bool                 = True,
+        poke_managers_enabled    : bool                 = True,
+        poke_operator_enabled    : bool                 = True,
         poke_stall_threshold_seconds : int              = 720,    # ~12 min
         poke_max_per_episode     : int                  = 3,
         stuck_poke_min_interval_seconds : int           = 0,      # bug 5a1f17f8 (c): min seconds between consecutive stuck-pokes to one session; 0 → disabled (poll-cadence, today's behavior)
@@ -924,6 +940,10 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # 2b-3 auto-poke (Rick redline-narrowing confirmed): bounded, non-destructive
         # wake-nudge at genuinely-stuck LIVE sessions, then a reap-RECOMMENDATION.
         self.auto_poke_enabled             = auto_poke_enabled
+        # audience scalpel (2026-07-19): AND-gated UNDER auto_poke_enabled
+        self.poke_workers_enabled          = poke_workers_enabled
+        self.poke_managers_enabled         = poke_managers_enabled
+        self.poke_operator_enabled         = poke_operator_enabled
         self.poke_stall_threshold_seconds  = poke_stall_threshold_seconds
         self.poke_max_per_episode          = poke_max_per_episode
         self.stuck_poke_min_interval_seconds = stuck_poke_min_interval_seconds     # bug 5a1f17f8 (c) fire-throttle
@@ -3709,6 +3729,55 @@ class ArbiterConsumerJob( AgenticJobBase ):
             and v.get( "alive" ) is True and v.get( "stuck" ) is True
         }
 
+    # ── audience scalpel (2026-07-19): the poke-routing predicate ───────────────
+
+    @staticmethod
+    def audience_for_role( role ):
+        """
+        The poke AUDIENCE for a target session's role — the single derivation used
+        by every audience gate.
+
+        DESIGN CALL (Mr. Radio 2026-07-19): audience is derived from the TARGET's
+        `role` field on the fleet_view / snapshot row — the SAME field four existing
+        gates already key on (_format_poke, _append_goal_line, _stale_gate_why_not,
+        _maybe_poke_stale_managers). Deriving it from the bridge (or anywhere else)
+        would create a SECOND oracle for a question the row already answers, free to
+        diverge from the role that shaped the poke's own body text.
+
+        Ensures:
+            - returns AUDIENCE_MANAGER iff role case/space-insensitively == "manager"
+            - every other value (incl. None / "" / "worker" / junk) → AUDIENCE_WORKER,
+              matching _append_goal_line's manager-or-else fork; never raises
+        """
+        is_manager = ( role or "" ).strip().lower() == "manager"
+        return AUDIENCE_MANAGER if is_manager else AUDIENCE_WORKER
+
+    def _poke_audience_enabled( self, audience ):
+        """
+        The audience gate: may the arbiter emit to `audience` this poll?
+
+        The master `auto_poke_enabled` AND-gates all three audiences — Job 1's
+        panic button stays absolute (master off ⇒ every audience silent), while
+        each audience is independently silenceable underneath it (the scalpel).
+
+        Requires:
+            - audience is one of AUDIENCE_WORKER | AUDIENCE_MANAGER | AUDIENCE_OPERATOR
+
+        Ensures:
+            - returns False when the master is off, regardless of audience flags
+            - else returns the audience's own flag
+            - an UNKNOWN audience returns False (fail-SILENT, not fail-loud: an
+              unrecognized audience must never become an unscoped poke channel);
+              never raises
+        """
+        if not self.auto_poke_enabled:
+            return False
+        return {
+            AUDIENCE_WORKER   : self.poke_workers_enabled,
+            AUDIENCE_MANAGER  : self.poke_managers_enabled,
+            AUDIENCE_OPERATOR : self.poke_operator_enabled,
+        }.get( audience, False )
+
     def _append_goal_line( self, body, role ):
         """
         Append the role-selected north-star goal echo (role-goals Phase 2-3) to a
@@ -4046,6 +4115,13 @@ class ArbiterConsumerJob( AgenticJobBase ):
                      and not owed_class_suppresses( owed_class.get( v.get( "persona" ) ) )
                      and not self._session_bridge_fresh( v.get( "persona" ), now, bridge_mtimes ) }
 
+        # AUDIENCE SCALPEL (2026-07-19): drop sessions whose audience is silenced.
+        # Placed with the other suppressors so a silenced session's episode state is
+        # cleared by the loop below exactly like any other de-pokeable session — the
+        # cap re-arms cleanly if its audience is re-enabled mid-episode.
+        pokeable = { sid: v for sid, v in pokeable.items()
+                     if self._poke_audience_enabled( self.audience_for_role( v.get( "role" ) ) ) }
+
         # episode bookkeeping: a session no longer pokeable ended its episode →
         # clear its state so the cap re-arms (clear-on-resume, mirrors _auto_ping).
         for sid in [ s for s in self._poke_stuck_since if s not in pokeable ]:
@@ -4088,7 +4164,11 @@ class ArbiterConsumerJob( AgenticJobBase ):
                 self._poke_count[ sid ] += 1
                 self._poke_last_at[ sid ] = now                   # bug 5a1f17f8 (c): stamp for the fire-throttle
                 fired += 1
-            elif sid not in self._poke_escalated:
+            # OPERATOR audience (2026-07-19): the reap-RECOMMENDATION is Rick-directed
+            # (case 13 fans to peer managers too, but Rick is the decider on every
+            # tier). Gated on operator so a crew-silenced fleet still surfaces "this
+            # session stayed stuck through N pokes" to the human who decides the reap.
+            elif sid not in self._poke_escalated and self._poke_audience_enabled( AUDIENCE_OPERATOR ):
                 self._poke_escalated.add( sid )
                 # ff91cff4: a stuck/dead MANAGER subject escalates its reap-rec to
                 # RICK ONLY (case 20) — never fanned to peer managers (managers
@@ -4229,6 +4309,21 @@ class ArbiterConsumerJob( AgenticJobBase ):
             - returns the count of staleness pokes fired this poll; never raises
         """
         if self.manager_stale_poke_threshold_seconds <= 0:
+            return 0
+
+        # MASTER-GATE HOLE, closed 2026-07-19 (Mr. Radio). This tier read ONLY its
+        # own threshold — `auto_poke_enabled = false` silenced the STUCK tier while
+        # manager-staleness pokes kept firing, so the documented "auto-poke master
+        # gate" was never actually master. Checking the master here makes Job 1's
+        # panic button absolute as advertised.
+        #
+        # The MASTER only — deliberately NOT the manager audience. This tier emits to
+        # TWO audiences: the manager-directed poke (AUDIENCE_MANAGER, gated at its
+        # emission below) and Rick's MANAGER-STALE advisory (AUDIENCE_OPERATOR, gated
+        # at its own emission). Returning early on managers-off would silence Rick's
+        # "your manager went dark" advisory too — precisely the signal he asked to
+        # KEEP while silencing the crew. Audience gating belongs at each emission.
+        if not self.auto_poke_enabled:
             return 0
 
         owed_class = owed_class or { }
@@ -4446,7 +4541,10 @@ class ArbiterConsumerJob( AgenticJobBase ):
                            session_id=sid, persona=persona, freshest_age_s=age,
                            advancing_streak=self._mgr_velocity_streak.get( persona, 0 ) )
                 continue
-            if sid not in self._mgr_advised:                      # Rick advisory: FIRST crossing, same poll as poke #1
+            # Rick advisory: FIRST crossing, same poll as poke #1. OPERATOR audience
+            # (2026-07-19) — survives `poke managers enabled = false`, so silencing
+            # the crew never blinds Rick to a manager going dark.
+            if sid not in self._mgr_advised and self._poke_audience_enabled( AUDIENCE_OPERATOR ):
                 self._mgr_advised.add( sid )
                 # age is never None here — the corpse-ceiling eligibility gate
                 # excludes None-age rows, so last_seen is always computable.
@@ -4460,7 +4558,10 @@ class ArbiterConsumerJob( AgenticJobBase ):
                     active_managers=active_managers,
                     exclude_persona=persona,                         # b9911943: not to the subject itself
                 )
-            if self._mgr_poke_count[ sid ] < self.poke_max_per_episode:
+            # MANAGER audience (2026-07-19): the manager-DIRECTED half of this tier.
+            # Silenced independently of the Rick advisory above.
+            if ( self._mgr_poke_count[ sid ] < self.poke_max_per_episode
+                 and self._poke_audience_enabled( AUDIENCE_MANAGER ) ):
                 # observability (Mr Radio's handoff ask): log the FULL per-component
                 # liveness breakdown of every row we actually poke, so a future
                 # false-positive is self-diagnosing (the dead component is visible
@@ -4726,12 +4827,18 @@ class ArbiterConsumerJob( AgenticJobBase ):
         Ensures:
             - returns [] iff a stuck-tier poke would fire; else the failed
               preconditions in evaluation order, from
-              { disabled, not_alive, not_stuck, below_threshold, capped,
-                already_escalated }; never raises
+              { disabled, audience_disabled, not_alive, not_stuck, below_threshold,
+                capped, already_escalated }; never raises
+            - `disabled` is the MASTER gate; `audience_disabled` is this session's
+              audience (worker|manager) being silenced under a live master — kept
+              DISTINCT so an outreach silence names which knob caused it
         """
         why = [ ]
         if not self.auto_poke_enabled:
             why.append( "disabled" )
+        elif not self._poke_audience_enabled(
+                self.audience_for_role( view.get( "role" ) if isinstance( view, dict ) else None ) ):
+            why.append( "audience_disabled" )
         if not isinstance( view, dict ) or view.get( "alive" ) is not True:
             why.append( "not_alive" )
         if not isinstance( view, dict ) or view.get( "stuck" ) is not True:
@@ -4752,8 +4859,13 @@ class ArbiterConsumerJob( AgenticJobBase ):
 
         Ensures:
             - returns [] iff a staleness poke would fire; else the failed
-              preconditions from { tier_disabled, not_manager, no_signal,
-                not_stale, beyond_max_age, mgr_capped }; never raises
+              preconditions from { tier_disabled, disabled, audience_disabled,
+                not_manager, no_signal, not_stale, beyond_max_age, mgr_capped };
+              never raises
+            - `disabled` (master) / `audience_disabled` (manager audience) report the
+              2026-07-19 gates; note this vector describes the manager-DIRECTED poke,
+              which is the half those knobs silence — Rick's case-14 advisory rides
+              the OPERATOR audience and can still fire when this reads audience_disabled
             - corpse-ceiling fix (2026-06-11): a None age reads `no_signal`
               (corpse/malformed — flipped from eligible) and an age past the
               ceiling reads `beyond_max_age` (a corpse resurfaced by the
@@ -4762,6 +4874,10 @@ class ArbiterConsumerJob( AgenticJobBase ):
         why = [ ]
         if self.manager_stale_poke_threshold_seconds <= 0:
             why.append( "tier_disabled" )
+        if not self.auto_poke_enabled:
+            why.append( "disabled" )
+        elif not self._poke_audience_enabled( AUDIENCE_MANAGER ):
+            why.append( "audience_disabled" )
         if not isinstance( row, dict ) or row.get( "role" ) != "manager":
             why.append( "not_manager" )
         if why:

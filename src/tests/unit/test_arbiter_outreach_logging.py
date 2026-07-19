@@ -238,7 +238,14 @@ def test_gate_disabled_and_tier_disabled_and_mgr_capped_and_not_stale():
     job._emit_poke_gates( fleet, snap, NOW )
     g = log.of( "arbiter_poke_gate" )[ 0 ]
     assert g[ "stuck_why_not" ] == [ "disabled", "not_alive", "not_stuck" ]
-    assert g[ "stale_why_not" ] == [ "tier_disabled" ]
+    # EXPECTATION UPDATED 2026-07-19 (master-gate hole, Mr. Radio): `disabled` now
+    # joins `tier_disabled` here. The staleness tier used to read ONLY its own
+    # threshold, so `auto_poke_enabled=False` left manager-staleness pokes firing
+    # while the stuck tier went quiet — this assertion RATIFIED that hole by
+    # omitting `disabled` from the stale vector under a dead master. The master now
+    # gates BOTH tiers. Retired-by-decision, never by drift. Receipts:
+    # src/tests/unit/test_arbiter_poke_audience.py::test_master_off_silences_the_STALENESS_tier_too
+    assert g[ "stale_why_not" ] == [ "tier_disabled", "disabled" ]
     # a live manager below the threshold reads not_stale; a poke-capped one mgr_capped
     job2  = _job( _GW(), log=( log2 := _Log() ), poke_max_per_episode=1 )
     job2._poll_count = 1

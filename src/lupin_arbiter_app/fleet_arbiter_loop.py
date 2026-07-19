@@ -598,6 +598,10 @@ def build_fleet_arbiter_job_factory(
     stall_window         : int                  = 1800,
     poll_error_escalate_threshold : int         = 3,
     auto_poke_enabled    : bool                 = True,
+    # audience scalpel (2026-07-19): AND-gated under auto_poke_enabled
+    poke_workers_enabled : bool                 = True,
+    poke_managers_enabled: bool                 = True,
+    poke_operator_enabled: bool                 = True,
     poke_stall_threshold : int                  = 720,
     poke_max_per_episode : int                  = 3,
     stuck_poke_min_interval_seconds : int       = 0,            # bug 5a1f17f8 (c) fire-throttle (0 → disabled)
@@ -743,6 +747,9 @@ def build_fleet_arbiter_job_factory(
             fleet_stall_window_seconds = stall_window,
             poll_error_escalate_threshold = poll_error_escalate_threshold,
             auto_poke_enabled            = auto_poke_enabled,
+            poke_workers_enabled         = poke_workers_enabled,      # audience scalpel (2026-07-19)
+            poke_managers_enabled        = poke_managers_enabled,
+            poke_operator_enabled        = poke_operator_enabled,
             poke_stall_threshold_seconds = poke_stall_threshold,
             poke_max_per_episode         = poke_max_per_episode,
             stuck_poke_min_interval_seconds = stuck_poke_min_interval_seconds,      # bug 5a1f17f8 (c) fire-throttle

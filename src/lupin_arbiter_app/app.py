@@ -282,6 +282,24 @@ def assemble_app(
     declared_managers = pick_declared_managers_from_env( _arbiter_project )
     log_fn( "declared_managers_resolved", project=_arbiter_project, managers=declared_managers )
 
+    # ── audience scalpel: the EFFECTIVE poke-audience configuration, logged once at
+    # startup. The per-session `arbiter_poke_gate` event covers the two
+    # session-directed tiers (worker/manager) via its why_not vectors, but the
+    # OPERATOR audience is subsystem-level — it has no per-session row, so a
+    # Rick-side silence was NOT diagnosable from production telemetry at all
+    # (found 2026-07-19 when María asked for live proof of the operator path and
+    # there was none to give). This line makes all three observable at the same
+    # place the arbiter logs its other boot-time resolutions, so "why did I stop
+    # hearing from the arbiter" is answerable from the journal alone.
+    _poke_master = cfg.get( "arbiter auto poke enabled", default=True, return_type="boolean" )
+    log_fn( "arbiter_poke_audience_config",
+            master   = _poke_master,
+            workers  = cfg.get( "arbiter auto poke workers enabled",  default=True, return_type="boolean" ),
+            managers = cfg.get( "arbiter auto poke managers enabled", default=True, return_type="boolean" ),
+            operator = cfg.get( "arbiter auto poke operator enabled", default=True, return_type="boolean" ),
+            note     = ( "master OFF — every audience silent regardless of the three below"
+                         if not _poke_master else "master ON — each audience answers for itself" ) )
+
     # ── eng#7 (2026-06-17): the follow-through aged-escalation watcher factory.
     # Built here (cfg + gateway in hand) and threaded into every recycled job so
     # the watcher rides the arbiter poll loop (build-plan §3b). REUSES the job's
@@ -307,6 +325,13 @@ def assemble_app(
         stall_window         = int( cfg.get( "arbiter fleet stall window seconds", default=1800, return_type="int" ) ),
         poll_error_escalate_threshold = int( cfg.get( "arbiter poll error escalate threshold", default=3, return_type="int" ) ),
         auto_poke_enabled    = cfg.get( "arbiter auto poke enabled", default=True, return_type="boolean" ),
+        # AUDIENCE SCALPEL (2026-07-19, Rick via María): three audience-scoped gates
+        # UNDER the master above. Master off ⇒ all silent (panic button); master on ⇒
+        # silence the crew while Rick keeps his own stream (scalpel). Default True ⇒
+        # unconfigured behaves exactly as before.
+        poke_workers_enabled  = cfg.get( "arbiter auto poke workers enabled",  default=True, return_type="boolean" ),
+        poke_managers_enabled = cfg.get( "arbiter auto poke managers enabled", default=True, return_type="boolean" ),
+        poke_operator_enabled = cfg.get( "arbiter auto poke operator enabled", default=True, return_type="boolean" ),
         # ee59d5ed orphan-bridge janitor — DEFAULT-OFF (fleet-wide reap-semantics change; flip on for Rick's awareness)
         orphan_bridge_sweep_enabled = cfg.get( "arbiter orphan bridge sweep enabled", default=False, return_type="boolean" ),
         orphan_bridge_sweep_debounce_polls = int( cfg.get( "arbiter orphan bridge sweep debounce polls", default=2, return_type="int" ) ),
