@@ -53,6 +53,38 @@ in every instance, the instrument said yes about a path nothing had run.)
 ⇒ Rows in this file are shapes the PREDICATE must survive, NOT shapes the
   DATABASE can hold. Never cite a green here as evidence about the latter.
 
+WHY ASSERTING ON UNREACHABLE SHAPES IS STILL CORRECT (seat 1's caveat, routed
+here because their matrix is a scratchpad harness and this file is what later
+readers actually meet): the predicate must be TOTAL over its INPUT DOMAIN, and
+that domain is wider than the table. `park_reason_is_stale` is called on plain
+dicts decoded from an HTTP body and on in-memory rows, not only on rows that
+survived a CHECK — no constraint travels with those callers. So "parked + NULL
+capture is handled" must never be read as "parked + NULL capture happens."
+
+IS THE PROJECTION NULL REACHABLE IN PRODUCTION? NO — derived here rather than
+assumed, because the answer changes what the projection arm is FOR:
+
+  · `updated_ts` is `nullable=False` with a server_default (postgres_models.py).
+  · `park_reason_captured_at` is nullable, BUT the CHECK
+    `status != 'parked' OR park_reason_captured_at IS NOT NULL`
+    (migration d47487369407) forbids NULL on exactly the rows whose comparison
+    the clause evaluates.
+  · SQL three-valued logic does the rest: `FALSE AND NULL` is FALSE, so a
+    NON-parked row cannot project NULL even with the guards dropped. Only
+    `TRUE AND NULL` — a PARKED row with a NULL operand — yields NULL.
+
+  ⇒ The two conditions that jointly produce a NULL are unreachable on a real
+    `task_items` row. The NULL the projection mutant produces below comes from a
+    matrix row the CHECK forbids.
+
+⇒ SO THE NULL GUARDS ARE, IN PRODUCTION, UNREACHABLE DEFENSIVE CODE, and the
+  projection arm proves them TOTAL for the non-DB callers — NOT that it prevents
+  a live `park_reason_stale: None` on the wire. Stated because the arm was added
+  under the belief that a live None was possible; it is not, on any shape the
+  table can hold. The arm still earns its place: a filter-shaped gate cannot see
+  those guards AT ALL, and the day someone relaxes that CHECK they become
+  load-bearing with nothing else watching them.
+
 WHY SQLITE
 ----------
 `park_reason_is_stale_clause` takes `model` as a parameter, so the SQL twin runs
@@ -220,10 +252,39 @@ def _python_side( predicate=None ):
 
 
 def _sql_side( session, clause_builder=None ):
-    """Ids the SQL twin calls stale. `clause_builder` is injectable for mutants."""
+    """
+    Ids the SQL twin calls stale, in FILTER shape. Injectable for mutants.
+
+    ⚠️ FILTER SHAPE IS BLIND TO THE NULL GUARDS — see `_sql_projection` below.
+    """
     clause_builder = clause_builder or park_reason_is_stale_clause
     rows = session.query( StalenessRow ).filter( clause_builder( StalenessRow ) ).all()
     return { r.id for r in rows }
+
+
+def _sql_projection( session, clause_builder=None ):
+    """
+    The clause's VALUE per row — `{ id: True | False | None }`. Injectable for mutants.
+
+    ⚠️ WHY THIS EXISTS, AND WHY A FILTER-ONLY GATE FALSE-GREENS (seat 1, 15474267):
+    in a WHERE clause `updated_ts > captured_at` with a NULL operand evaluates to
+    NULL, and the engine DISCARDS the row — which is the same OBSERVABLE OUTCOME
+    as an explicit `isnot(None)` guard excluding it. So the null guards are
+    INVISIBLE to any filter-shaped test: drop them and the selected row set does
+    not move. Seat 1's first gate ran 3/4 with the drop-null-guards mutant
+    SURVIVING, and they ran it to ground as "my gate has the wrong shape" rather
+    than "the mutant is inert" — which is the call that found it.
+
+    In PROJECTION the difference is loud: the guarded clause returns FALSE, the
+    unguarded one returns NULL. §3.3 surfaces `park_reason_stale` as a BOOL on
+    every parked row, so projection — not membership — is the shape the feature
+    actually ships in. A `None` there is exactly what §3.3 promises it is not.
+    """
+    clause_builder = clause_builder or park_reason_is_stale_clause
+    rows = session.query(
+        StalenessRow.id, clause_builder( StalenessRow ).label( "stale" )
+    ).all()
+    return { row.id: row.stale for row in rows }
 
 
 # ===========================================================================
@@ -512,11 +573,34 @@ def _mutant_clause_null_arm_inverted( model ):
     )
 
 
+def _mutant_clause_drop_null_guards( model ):
+    """
+    MUTANT (SQL): both `isnot( None )` guards DROPPED.
+
+    ⚠️ THE ONE A FILTER CANNOT SEE. `updated_ts > captured_at` with a NULL operand
+    is NULL; a WHERE clause discards the row, which is indistinguishable from the
+    guard excluding it. Identical row set, different VALUE — NULL where the twin
+    says False. Killable only in projection.
+    """
+    from sqlalchemy import and_
+    return and_(
+        model.status == PARK_STATUS,
+        model.updated_ts > model.park_reason_captured_at,
+    )
+
+
 MUTANTS_SQL = [
     ( "SQL boundary >= instead of >",  _mutant_clause_boundary_inclusive ),
     ( "SQL boundary < instead of >",   _mutant_clause_boundary_reversed ),
     ( "SQL status guard dropped",      _mutant_clause_no_status_guard ),
     ( "SQL null capture arm inverted", _mutant_clause_null_arm_inverted ),
+]
+
+# Swept ONLY in projection — see `_sql_projection`. Listed separately rather than
+# folded in, because adding it to MUTANTS_SQL would make the filter sweep report a
+# SURVIVOR and invite someone to "fix" it by deleting the mutant.
+MUTANTS_SQL_PROJECTION_ONLY = [
+    ( "SQL null guards dropped", _mutant_clause_drop_null_guards ),
 ]
 
 
@@ -535,6 +619,63 @@ def test_sql_mutant_breaks_parity( session, name, mutant ):
     assert _python_side() != _sql_side( session, mutant ), (
         f"MUTANT SURVIVED: {name!r} — the parity gate cannot detect it, so the "
         f"guard it targets is decorative"
+    )
+
+
+def test_twins_agree_in_PROJECTION_and_the_sql_side_is_never_null( session ):
+    """
+    AC6 in the shape the feature SHIPS in: value-per-row, not membership.
+
+    §3.3 surfaces `park_reason_stale` as a BOOL on every parked row. So the SQL
+    twin must return an actual False — never NULL — for every row the Python twin
+    calls not-stale. Three-valued logic leaking to the wire is precisely what
+    §3.3 promises does not happen.
+    """
+    py         = _python_side()
+    projection = _sql_projection( session )
+
+    assert len( projection ) == len( MATRIX ), "projection dropped rows — it must value EVERY row"
+
+    for row_id, value in projection.items():
+        assert value is not None, (
+            f"row {row_id} projects NULL — the null guards are not doing their job "
+            f"and `park_reason_stale` would reach the wire as None, not a bool (§3.3)"
+        )
+        assert bool( value ) == ( row_id in py ), (
+            f"row {row_id}: projection={value!r} disagrees with the Python twin"
+        )
+
+
+@pytest.mark.parametrize(
+    "name,mutant", MUTANTS_SQL_PROJECTION_ONLY, ids=[ m[ 0 ] for m in MUTANTS_SQL_PROJECTION_ONLY ]
+)
+def test_projection_only_mutant_is_invisible_to_filter_and_dies_in_projection( session, name, mutant ):
+    """
+    AC9's blind spot, closed — and the control that PROVES it was a blind spot.
+
+    Asserts BOTH halves, because either alone is misleading:
+      1. the mutant SURVIVES the filter gate (identical row set) — which is why a
+         filter-only sweep reports a clean green over a real defect;
+      2. the mutant DIES in projection (NULL where the twin says False).
+
+    Half 1 is not a formality. If it ever starts failing, the filter shape has
+    become able to see this class and the projection arm may be redundant — but
+    until then, half 1 is the evidence that the arm earns its place.
+    """
+    assert _sql_side( session, mutant ) == _sql_side( session ), (
+        f"{name!r} is visible to the FILTER gate — the premise of this test is "
+        f"wrong and the projection arm may not be needed for it"
+    )
+
+    mutated  = _sql_projection( session, mutant )
+    baseline = _sql_projection( session )
+
+    assert mutated != baseline, (
+        f"MUTANT SURVIVED BOTH SHAPES: {name!r} — the null guards are decorative"
+    )
+    assert any( v is None for v in mutated.values() ), (
+        f"{name!r} did not produce a NULL — the three-valued-logic mechanism this "
+        f"test exists to catch is not being exercised"
     )
 
 

@@ -384,19 +384,44 @@ def test_staleness_is_visible_in_the_terse_projection( test_api_key, persona ):
     _park( api_key, row[ "id" ], "quote to be invalidated" )
     _amend( api_key, row[ "id" ], body="invalidated" )
 
+    # ⚠️ `hide_parked=false`, NOT `include_parked=true`. The HTTP endpoint's param
+    # is `hide_parked` (default True); `include_parked` is the MCP TOOL's spelling
+    # of the same idea and does not exist on the wire. FastAPI SILENTLY IGNORES
+    # unknown query params — so the wrong name is not a 422, it is a default-True
+    # hide_parked, an empty result, and a failure that reads as "the parked row is
+    # missing from its own query." Verified against routers/tasks.py query_tasks.
     r = requests.get(
-        f"{ENDPOINT}?owner_persona={persona}&status=parked&terse=true&include_parked=true",
+        f"{ENDPOINT}?owner_persona={persona}&status=parked&terse=true&hide_parked=false",
         headers=_headers( api_key ), timeout=15,
     )
     assert r.status_code == 200, f"{r.status_code}: {r.text}"
 
-    items = r.json()[ "items" ] if isinstance( r.json(), dict ) else r.json()
-    subject = [ i for i in items if i[ "id" ] == row[ "id" ] ]
+    # The envelope is { tasks: [...], count } — verified against the endpoint's
+    # own contract (routers/tasks.py query_tasks), NOT guessed. This line
+    # originally read `r.json()["items"] if isinstance(...) else r.json()`: a
+    # defensive fallback over a key that DOES NOT EXIST, which would have
+    # KeyError'd inside the monopolize window and read as a staleness failure.
+    # House rule — fail loudly on the real shape, never hedge across two.
+    body    = r.json()
+    subject = [ t for t in body[ "tasks" ] if t[ "id" ] == row[ "id" ] ]
     assert subject, "the parked row is absent from its own terse query"
     assert "park_reason_stale" in subject[ 0 ], (
         "terse projection omits park_reason_stale — the flag exists but nobody sees it"
     )
-    assert subject[ 0 ][ "park_reason_stale" ] is True
+
+    flag = subject[ 0 ][ "park_reason_stale" ]
+
+    # ⚠️ TYPE FIRST, VALUE SECOND — and the order matters. The SQL twin's null
+    # guards are INVISIBLE to a filter (a NULL comparison is discarded exactly as
+    # a guard would exclude it), so a dropped guard reaches the wire as `None`
+    # rather than `False`. `None` is FALSY: a truthiness assertion, and even
+    # `is not True`, passes straight over the defect. §3.3 promises a BOOL.
+    # (Class found by seat 1, 15474267, on the unit twins; asserted here on the wire.)
+    assert isinstance( flag, bool ), (
+        f"park_reason_stale reached the wire as {type( flag ).__name__} ({flag!r}), not bool — "
+        f"three-valued logic is leaking through the projection (§3.3)"
+    )
+    assert flag is True
 
 
 # ===========================================================================
