@@ -40,7 +40,7 @@ needs a Postgres-backed integration run on :8000 — tracked, not silently assum
 See test_tz_fidelity_limit_is_documented_not_assumed.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import Column, DateTime, Integer, String, and_, create_engine, not_, or_
@@ -815,3 +815,66 @@ def test_owed_clause_suppresses_without_admitting( session ):
     for row_id, status, _c in MATRIX:
         if status in ( "blocked", "done" ):
             assert row_id in suppressed, "suppression-only wrongly dropped a non-parked row"
+
+
+# ===========================================================================
+# COVERAGE — `owed_status_row`'s OWN coercion arms
+# ===========================================================================
+#
+# Added 2026-07-19 by the park_reason-staleness build (row 4ce27ba1), closing a
+# pre-existing gap rather than a new one: `task_store_owed` measured 94% with
+# lines 532-535 and branches 226->228 / 539->541 unreached. Seat 1's staleness
+# work is provably not the cause — that diff is 3 hunks, purely additive, 0
+# deletions, and touches neither function's body.
+#
+# ⚠️ WHY THE GAP EXISTED, because it will re-open otherwise: `owed_status_row`
+# does its OWN coercion and does NOT call `park_is_active` — that INDEPENDENCE is
+# deliberate and load-bearing (it is what lets the mutant sweep move one side).
+# But independence DUPLICATES THE COVERAGE DUTY, and only `park_is_active`'s arms
+# had tests. The string and tz arms above prove nothing about the twin below.
+# Every future arm added to one of these functions needs its own test in both.
+
+def test_owed_status_row_accepts_iso_string_chases():
+    """The admission twin takes ISO strings off the wire, exactly as `park_is_active` does."""
+    future_iso = ( NOW + timedelta( hours=6 ) ).isoformat()
+    past_iso   = ( NOW - timedelta( hours=6 ) ).isoformat()
+
+    assert owed_status_row( PARK_STATUS, future_iso, NOW ) is False   # still silenced
+    assert owed_status_row( PARK_STATUS, past_iso, NOW )   is True    # chase came due
+    assert owed_status_row( PARK_STATUS, future_iso.replace( "+00:00", "Z" ), NOW ) is False
+
+
+def test_owed_status_row_fails_toward_owed_on_junk():
+    """
+    A malformed or non-timestamp chase makes the row OWED on the admission twin —
+    the same fail-loud direction `park_is_active` takes, asserted here because
+    the two functions share no code and one cannot vouch for the other.
+    """
+    assert owed_status_row( PARK_STATUS, "not-a-date", NOW ) is True
+    assert owed_status_row( PARK_STATUS, 12345, NOW )        is True
+
+
+def test_owed_status_row_handles_an_already_aware_chase():
+    """
+    An aware chase takes the other arm of the tz normalization — the arm the
+    all-naive matrix never reaches.
+    """
+    aware_future = ( NOW + timedelta( hours=6 ) ).replace( tzinfo=timezone.utc )
+    aware_past   = ( NOW - timedelta( hours=6 ) ).replace( tzinfo=timezone.utc )
+
+    assert owed_status_row( PARK_STATUS, aware_future, NOW ) is False
+    assert owed_status_row( PARK_STATUS, aware_past, NOW )   is True
+
+
+def test_park_is_active_handles_an_already_aware_now():
+    """
+    An aware `now` takes the else-arm of the comparison-instant ternary. Both
+    sides of that ternary must be exercised: a reader passing an aware `now` is
+    the normal case on the live board, where timestamps come back tz-aware from
+    Postgres, and the naive case is the one the fixtures happen to use.
+    """
+    aware_now    = NOW.replace( tzinfo=timezone.utc )
+    aware_future = ( NOW + timedelta( hours=6 ) ).replace( tzinfo=timezone.utc )
+
+    assert park_is_active( PARK_STATUS, aware_future, aware_now ) is True
+    assert owed_status_row( PARK_STATUS, aware_future, aware_now ) is False
