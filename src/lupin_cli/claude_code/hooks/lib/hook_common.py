@@ -1501,6 +1501,18 @@ def _speakerphone_reminder_body( source ):
     Per src/rnd/v0.1.9/2026.06.27-cosa-voice-rider-slim.md (Rick-approved
     2026-06-27): the rider carries ONLY what is true-now-and-changed — the live
     input modality plus the one catastrophic rule (the spoken-char reject cap).
+
+    BREVITY ACRONYMS PROMOTED TO BULLET 1 (Rick, 2026-07-19, direct order): the
+    rider previously stated the cap MECHANICALLY ("spoken ≤3 sentences AND ≤N
+    chars … cut to a headline") and never named the mandate the fleet is
+    actually drilled on. Rick: "What's missing? The entire notion of KISS 3LoL,
+    NoAA, etc." The acronyms now LEAD the list and carry the cap with them —
+    substitution, not addition, so the rider does not grow. The reject-cap fact
+    is KEPT on that same bullet deliberately: it is the one rule whose breach
+    fails SILENTLY (the whole notify is rejected, read as the assistant going
+    mute), so dropping it to seat the acronyms would trade a catastrophic
+    warning for a mnemonic. Acronym text mirrors the peer-DM/STT riders
+    (ac661631, bc2b5fe9) so all three surfaces read identically.
     The full standing TTS contract lives once in the cosa-voice MCP server's
     `instructions` payload, not repeated turn-to-turn. The predecessor
     4-variant matrix (solo/chorus framing + speakerphone-state branching) is
@@ -1534,9 +1546,9 @@ def _speakerphone_reminder_body( source ):
     return (
         f"[turn-state] input={modality}\n"
         "TTS contract ACTIVE — full rules in session instructions. This turn:\n"
+        f"• KISS · 3LoL · NoMC C2C · NoAA — verdict first, ≤3 sentences AND ≤{cap} chars; OVER = whole call REJECTED (silent fail). Longer ONLY WHEN ASKED\n"
         "• after replying, call notify(message=<reply>, suppress_ding=True, priority='high')\n"
         "• recraft for speech — no markdown/paths/JSON/URLs\n"
-        f"• spoken ≤3 sentences AND ≤{cap} chars — OVER = whole call REJECTED (silent fail); cut to a headline\n"
         "• rich detail → abstract (not length-capped)\n"
         "• questions → cosa-voice ask_yes_no / ask_multiple_choice / converse / ask_open_ended_batch — never AskUserQuestion\n"
         "• ack receipt in 1 line before tool calls"

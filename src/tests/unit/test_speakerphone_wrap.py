@@ -246,6 +246,38 @@ class TestSlimRiderUnconditional:
         assert "REJECTED" in body
 
     @patch( "cosa.utils.util.get_spoken_char_cap", return_value=500 )
+    def test_brevity_acronyms_are_present_and_lead_the_bullet_list( self, mock_cap ):
+        # Rick 2026-07-19: the rider stated the cap mechanically and never named
+        # the mandate the fleet is drilled on. All four acronyms, on bullet ONE.
+        body    = _speakerphone_reminder_body( "voice" )
+        bullets = [ ln for ln in body.split( "\n" ) if ln.startswith( "•" ) ]
+        assert bullets, "rider must still be a bullet list"
+        first = bullets[ 0 ]
+        for acronym in ( "KISS", "3LoL", "NoMC C2C", "NoAA" ):
+            assert acronym in first, f"{acronym} missing from the leading bullet"
+        # PROMOTION is the ask — assert POSITION, not mere presence. Without this
+        # the test passes with the acronyms buried at the bottom.
+        for ln in bullets[ 1: ]:
+            assert "KISS" not in ln, "acronyms must appear once, on the FIRST bullet"
+
+    @patch( "cosa.utils.util.get_spoken_char_cap", return_value=500 )
+    def test_acronym_bullet_still_carries_the_silent_fail_cap( self, mock_cap ):
+        # The substitution must NOT trade the catastrophic rule for a mnemonic:
+        # breaching the cap fails SILENTLY (whole notify rejected), so the cap
+        # rides on the acronym bullet itself.
+        body  = _speakerphone_reminder_body( "voice" )
+        first = [ ln for ln in body.split( "\n" ) if ln.startswith( "•" ) ][ 0 ]
+        assert "≤500 chars" in first
+        assert "REJECTED"   in first
+
+    @patch( "cosa.utils.util.get_spoken_char_cap", return_value=500 )
+    def test_retired_mechanical_cap_prose_is_gone( self, mock_cap ):
+        # The pre-2026-07-19 wording was SUBSTITUTED, not supplemented — if this
+        # string survives, the rider grew instead of swapping.
+        body = _speakerphone_reminder_body( "voice" )
+        assert "cut to a headline" not in body
+
+    @patch( "cosa.utils.util.get_spoken_char_cap", return_value=500 )
     def test_body_carries_closing_notify_and_routing_pointer( self, mock_cap ):
         body = _speakerphone_reminder_body( "terminal-typed" )
         assert "notify(message=<reply>" in body
