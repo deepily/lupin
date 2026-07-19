@@ -1349,6 +1349,18 @@ class TaskItem( Base ):
        # default, so surfacing one to read WHY it is parked would cost an
        # event-trail fetch per row, and the terse projection could not carry it
        # at all. Nullable — rows that were never parked have none.
+    park_reason_captured_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime( timezone=True ),
+        nullable=True
+    )  # WHEN the park_reason quote was frozen. Set at park time to the POST-write
+       # `updated_ts` — the value the park write itself stamps, read back in the
+       # same transaction. NOT now() (races the stamp) and NOT the pre-write value
+       # (that makes captured_at < updated_ts the instant park commits, i.e. every
+       # row BORN STALE — the trap the design's own §3.4 prescribed in draft).
+       # Invariant immediately after park: park_reason_captured_at == updated_ts,
+       # EXACTLY. Any later amendment bumps updated_ts strictly greater, and
+       # task_store_owed.park_reason_is_stale reads that gap as the quote having
+       # expired. Design: src/rnd/v0.1.9/2026.07.19-park-reason-staleness-detection.md
     gate_class: Mapped[str] = mapped_column(
         String( 32 ),
         nullable=False,
@@ -1427,6 +1439,16 @@ class TaskItem( Base ):
         CheckConstraint(
             "status != 'parked' OR park_reason IS NOT NULL",
             name="ck_task_items_parked_requires_reason"
+        ),
+        # A park_reason with no capture time cannot be checked for staleness — it
+        # is a frozen quote with no frozen-at, which reads as permanently fresh.
+        # Same two-CHECK shape as above, for the same reason: name WHICH field is
+        # missing. Rows parked BEFORE this shipped are backfilled by the migration
+        # (captured_at = updated_ts) rather than exempted, so this holds over the
+        # whole table with no NOT VALID carve-out and no model/migration divergence.
+        CheckConstraint(
+            "status != 'parked' OR park_reason_captured_at IS NOT NULL",
+            name="ck_task_items_parked_requires_captured_at"
         ),
     )
 

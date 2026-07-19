@@ -154,6 +154,8 @@ __all__ = [
     "is_park_legal_from",
     "park_is_active",
     "is_owed",
+    "park_reason_is_stale",
+    "park_reason_is_stale_clause",
     "park_is_active_clause",
     "owed_clause",
     "owed_status_clause",
@@ -253,6 +255,91 @@ def is_owed( status, next_chase_ts, now ) -> bool:
     return not park_is_active( status, next_chase_ts, now )
 
 
+def park_reason_is_stale( status, park_reason_captured_at, updated_ts ) -> bool:
+    """
+    True iff the row's `park_reason` quote is provably OLDER than the row itself.
+
+    `park_reason` is a FROZEN QUOTE captured at park time. Amend the row afterward
+    and the quote stays syntactically valid while it stops being true, and NOTHING
+    GOES RED. This predicate is the red: it does not stop prose going stale, it
+    makes the divergence VISIBLE (design
+    src/rnd/v0.1.9/2026.07.19-park-reason-staleness-detection.md §3.2).
+
+    READS NO CLOCK — deliberately, and unlike `park_is_active`. Staleness is a
+    comparison of two values ALREADY ON THE ROW; `now` has no part in it. A `now`
+    parameter here would be an invitation to write `now() > captured_at`, which is
+    true of every parked row the instant after it is parked.
+
+    THE ORDERING THIS DEPENDS ON (§3.4 — read it before changing the writer):
+    `park_reason_captured_at` is set at park time to the POST-write `updated_ts`,
+    the value the park write itself stamps. So immediately after park
+    `captured_at == updated_ts` EXACTLY, and this returns False. Capture the
+    PRE-write value instead and `captured_at < updated_ts` the instant park
+    commits — every row born STALE, the trap this plan's own §3.4 prescribed in
+    draft. Capture `now()` and it races the `updated_ts` stamp.
+
+    WHICH WAY THIS INSTRUMENT LIES: every ambiguous arm returns False
+    (NOT-stale) — the OPPOSITE direction from `park_is_active`'s
+    fail-loud-toward-owed, and deliberately so. Staleness is ADVISORY (§3.3): it
+    changes no owed-ness and blocks nothing, so a false STALE has no mechanism to
+    correct it — it merely defames a correct quote and teaches readers to ignore
+    the flag, which disarms the feature permanently. A false FRESH is exactly the
+    status quo this change improves on. Silence is recoverable here; a crying wolf
+    is not.
+
+    Requires:
+        - status is the row's status string (any value accepted)
+        - park_reason_captured_at is an ISO-8601 string, a datetime, or None
+        - updated_ts is an ISO-8601 string, a datetime, or None
+        - naive datetimes on either side are interpreted as UTC
+
+    Ensures:
+        - status != PARK_STATUS                     -> False (checked FIRST; a
+          non-parked row is never stale whatever its timestamps say — AC5)
+        - park_reason_captured_at is None           -> False (a row parked before
+          this shipped has no capture time; we cannot know what its quote
+          described, so we do not accuse it — §7, no backfill)
+        - updated_ts is None                        -> False (no evidence of any
+          write after capture)
+        - either side unparseable                   -> False (same rationale)
+        - updated_ts >  park_reason_captured_at     -> True  (STALE — the row was
+          amended after its quote was frozen, AC4)
+        - updated_ts == park_reason_captured_at     -> False (the freshly-parked
+          state, AC3 — the boundary, and the one the ordering trap turns on)
+        - updated_ts <  park_reason_captured_at     -> False
+        - never raises
+    """
+    if status != PARK_STATUS:
+        return False
+
+    if isinstance( park_reason_captured_at, datetime ):
+        captured_ts = park_reason_captured_at
+    elif isinstance( park_reason_captured_at, str ):
+        try:
+            captured_ts = datetime.fromisoformat( park_reason_captured_at.strip().replace( "Z", "+00:00" ) )
+        except ValueError:
+            return False
+    else:
+        return False
+
+    if isinstance( updated_ts, datetime ):
+        amended_ts = updated_ts
+    elif isinstance( updated_ts, str ):
+        try:
+            amended_ts = datetime.fromisoformat( updated_ts.strip().replace( "Z", "+00:00" ) )
+        except ValueError:
+            return False
+    else:
+        return False
+
+    if captured_ts.tzinfo is None:
+        captured_ts = captured_ts.replace( tzinfo=timezone.utc )
+    if amended_ts.tzinfo is None:
+        amended_ts = amended_ts.replace( tzinfo=timezone.utc )
+
+    return amended_ts > captured_ts
+
+
 # ---------------------------------------------------------------------------
 # The predicate (SQLAlchemy) — twin (b)
 # ---------------------------------------------------------------------------
@@ -287,6 +374,44 @@ def park_is_active_clause( model, now ):
         model.status == PARK_STATUS,
         model.next_chase_ts.isnot( None ),
         model.next_chase_ts > comparison_now,
+    )
+
+
+def park_reason_is_stale_clause( model ):
+    """
+    The SQL twin of `park_reason_is_stale`: a SQLAlchemy boolean expression true
+    for exactly the rows the Python predicate calls stale.
+
+    Self-contained BY DESIGN. Does not call twin (a); shares no helper with it.
+    That duplication is LICENSED (module docstring): the parity gate proves the
+    two identical by perturbing ONE side and requiring RED, which a pair sharing
+    an implementation cannot support.
+
+    NO `now` PARAMETER, matching twin (a) — staleness compares two columns of the
+    same row, and a clock has no part in it.
+
+    Requires:
+        - model is the mapped TaskItem class (or an alias) exposing `status`,
+          `park_reason_captured_at` and `updated_ts`
+
+    Ensures:
+        - returns a SQLAlchemy boolean expression, never a Python bool
+        - TRUE iff status == PARK_STATUS
+                  AND park_reason_captured_at IS NOT NULL
+                  AND updated_ts             IS NOT NULL
+                  AND updated_ts > park_reason_captured_at
+        - a NULL on EITHER timestamp yields FALSE, not NULL — three-valued logic
+          would drop the row from BOTH sides of a filter, and it must land on the
+          NOT-STALE side, matching twin (a)'s null arms
+        - the status test is the FIRST conjunct, mirroring twin (a)'s guard
+    """
+    from sqlalchemy import and_
+
+    return and_(
+        model.status == PARK_STATUS,
+        model.park_reason_captured_at.isnot( None ),
+        model.updated_ts.isnot( None ),
+        model.updated_ts > model.park_reason_captured_at,
     )
 
 
@@ -477,6 +602,38 @@ def quick_smoke_test():
         assert owed_status_row( "review",      None,   now ) is False
         assert owed_status_row( "done",        None,   now ) is False
         print( "✓ admission = queued ∪ in_progress ∪ expired-parked, nothing widened" )
+
+        print( "Testing park_reason STALENESS (amendment-relative, no clock)..." )
+        captured = now
+        amended  = now + timedelta( minutes=5 )
+        assert park_reason_is_stale( "parked", captured, amended  ) is True    # AC4
+        assert park_reason_is_stale( "parked", captured, captured ) is False   # AC3 boundary
+        assert park_reason_is_stale( "parked", amended,  captured ) is False
+        print( "✓ a row amended after its quote was frozen is STALE; equal is NOT" )
+
+        print( "Testing staleness is status-gated (AC5)..." )
+        for other in ( "queued", "in_progress", "blocked", "claimed", "review", "done", "dropped" ):
+            assert park_reason_is_stale( other, captured, amended ) is False
+        print( "✓ no non-parked status ever reports stale, whatever the timestamps say" )
+
+        print( "Testing the null arms (fail-QUIET, opposite of park_is_active)..." )
+        assert park_reason_is_stale( "parked", None,         amended ) is False
+        assert park_reason_is_stale( "parked", captured,     None    ) is False
+        assert park_reason_is_stale( "parked", "not-a-date", amended ) is False
+        assert park_reason_is_stale( "parked", captured, "not-a-date" ) is False
+        print( "✓ an unknown capture time is never an accusation — an advisory flag must not cry wolf" )
+
+        print( "Testing staleness reads ISO strings and naive datetimes..." )
+        assert park_reason_is_stale( "parked", captured.isoformat(), amended.isoformat() ) is True
+        assert park_reason_is_stale( "parked", captured.replace( tzinfo=None ), amended ) is True
+        print( "✓ string and naive-UTC inputs agree with the datetime path" )
+
+        print( "Testing staleness is ADVISORY — owed-ness untouched (AC7)..." )
+        assert park_is_active(   "parked", future, now ) is True
+        assert owed_status_row(  "parked", future, now ) is False
+        assert park_is_active(   "parked", past,   now ) is False
+        assert owed_status_row(  "parked", past,   now ) is True
+        print( "✓ a stale quote changes no owed-ness, unparks nothing, blocks nothing" )
 
         print( "Testing park legality..." )
         assert is_park_legal_from( "queued" )      is True
