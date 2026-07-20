@@ -491,7 +491,7 @@ def _mutant_clause_drop_null_guard( model, now ):
     The arm's entire protective value lives in the NEGATED path —
     `not_( and_( TRUE, NULL ) )` is NULL, which drops the row from the owed set
     AND the board simultaneously. On a board where NULL is the modal chase value,
-    that is a silent fleet-wide blackout.
+    that suppresses every row on the board, not one.
 
     ⇒ A parity gate that only tests the POSITIVE direction cannot see this class
     of defect at all. That is why the suppression/admission assertion below is a
@@ -614,11 +614,11 @@ def test_the_fixture_contains_a_row_that_would_move( session ):
     ☠️ THE DISCRIMINATION CHECK — does this fixture contain a row whose
     membership DEPENDS on the behaviour under test?
 
-    Krishna 🦚 nearly banked a live probe that scoped to a persona with one queued
-    row and no blocked rows: "honored" and "ignored" both returned 1, so the
-    control matched the treatment and the probe proved nothing while looking
-    rigorous. A fixture with no discriminating row cannot discriminate, however
-    careful the control around it.
+    Reference case (Krishna 🦚, 2026-07-19): a live probe scoped to a persona with
+    one queued row and no blocked rows returned 1 whether the flag was honored or
+    ignored, so the control matched the treatment and the probe proved nothing.
+    A fixture with no discriminating row cannot discriminate, however careful the
+    control around it.
 
     So: assert the matrix contains at least one row of EACH kind whose
     classification would flip under a wrong implementation.
