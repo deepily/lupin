@@ -446,6 +446,35 @@ async def lifespan( app: FastAPI ):
     run_migrations_to_head( debug=app_debug )
     print( "✓ Database schema is at migration head." )
 
+    # ORM/database drift alarm — FAIL-OPEN. Detects a mapped_column that reached
+    # the tree ahead of its migration: on :7999 uvicorn runs with --reload, so the
+    # model edit IS the deploy, and the ORM immediately SELECTs a column the DB
+    # lacks. Measured incident 2026-07-19: task_items.park_reason_captured_at, 12
+    # live 500s on /api/tasks — the owed-work oracle the Stop-hook and arbiter
+    # both read, so the outage was fleet-wide, not local.
+    #
+    # Placed AFTER auto-migrate deliberately: `upgrade head` cannot fabricate a
+    # migration for a column that has none, so the target defect survives it
+    # untouched and is fully visible here. Running BEFORE would instead alarm on
+    # every legitimately-pending migration — a false alarm on every boot after any
+    # new migration lands, which is how a detector gets ignored into uselessness.
+    #
+    # This call is structurally incapable of raising or blocking: no network, no
+    # await, every exception swallowed internally. On drift it writes a CRITICAL
+    # alarm to stderr naming model, table, column, and both revisions — stderr is
+    # the alarm of record because it has no dependencies — and the server SERVES
+    # ANYWAY. Fail-open is load-bearing: refusing boot would take down the box
+    # carrying the MCP transport, the task store, and the owed-work oracle,
+    # turning a partial outage into a total one. Worst case is a false alarm,
+    # which is the correct price.
+    #
+    # No notify() here, by design: /api/notify requires auth plus a target_user,
+    # and pre-yield this very server accepts no connections — the alarm's
+    # transport would be the thing that is still booting. Richer routing is a
+    # separate seam, deliberately absent rather than half-built.
+    from cosa.rest.db.schema_drift import emit_startup_drift_alarm
+    emit_startup_drift_alarm( debug=app_debug )
+
     # Suppress LanceDB cosmetic warnings if configured
     # These warnings are non-functional - queries execute correctly regardless
     # Warnings occur when using .search() for metadata filtering (not vector similarity)
