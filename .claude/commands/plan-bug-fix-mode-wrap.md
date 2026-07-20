@@ -6,6 +6,10 @@
 
 ---
 
+> **⚠️ Note**: This command's canonical workflow uses cosa-voice notifications and includes a commit-approval gate. In conversation mode (`get_session_info().conversation_mode_active=true`), all gates are voice-driven AND spoken responses follow the **TTS Brevity Mandate** — re-crafted conversational prose, NOT verbatim copies of markdown terminal replies. Speak the 1-line commit subject only; full body and file list stay in `abstract`. See `workflow/cosa-voice-integration.md` §Conversation Mode for full rules.
+
+---
+
 ## Related Commands
 
 - `/plan-bug-fix-mode-start` - Initialize new bug fix session
@@ -19,21 +23,11 @@
 
 `/plan-bug-fix-mode-wrap` - Wrap up a completed bug fix with documentation and commit
 
-**Natural language triggers** (any of these should invoke THIS command):
-- "Wrap up this bug"
-- "Wrap this bug"
+**Natural language triggers**:
 - "Bug fixed, wrap it"
-- "Let's wrap up this bug"
-- "Done with the fix, wrap up"
 - "Bug fixed, update all appropriate documentation and commit"
-- "Wrap the fix"
-- "Commit this fix"
-
-**⚠️ DISAMBIGUATION — do NOT confuse with `/plan-session-end`**:
-- This command wraps a **single bug fix** (document + commit one fix, stay in session)
-- `/plan-session-end` ends the **entire work session** (history archive, full commit, session close)
-- Key signal: if the user mentions "bug", "fix", or "this" → use THIS command
-- Key signal: if the user mentions "session", "done for the day", "calling it" → use `/plan-session-end`
+- "Done with the fix, wrap up"
+- "Wrap this bug"
 
 ---
 

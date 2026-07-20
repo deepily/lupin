@@ -6,12 +6,17 @@
 
 ---
 
+> **⚠️ Note**: This command's canonical workflow uses cosa-voice notifications and emits per-bug status updates throughout the lifecycle. In conversation mode (`get_session_info().conversation_mode_active=true`), all gates are voice-driven AND spoken responses follow the **TTS Brevity Mandate** — re-crafted conversational prose, NOT verbatim copies of markdown terminal replies (per-bug updates spoken as "bug N fixed, smoke tests green", not the full diff). See `workflow/cosa-voice-integration.md` §Conversation Mode for full rules.
+
+---
+
 ## Related Commands
 
-This command supports all three modes via arguments. For discoverability in the slash command menu, use the mode-specific variants:
+This command supports all four modes via arguments. For discoverability in the slash command menu, use the mode-specific variants:
 
 - `/plan-bug-fix-mode-start` - Initialize new bug fix session
 - `/plan-bug-fix-mode-continue` - Resume after context clear
+- `/plan-bug-fix-mode-wrap` - Wrap up completed fix (document + commit)
 - `/plan-bug-fix-mode-close` - End bug fix session for the day
 
 **Note**: This command (`/plan-bug-fix-mode`) defaults to `start` mode for backward compatibility.
@@ -37,6 +42,7 @@ This command supports all three modes via arguments. For discoverability in the 
 3. **MUST determine the mode from arguments**:
    - `start` (default) - Initialize new bug fix session
    - `continue` - Resume after context clear
+   - `wrap` - Wrap up completed fix (document + commit)
    - `close` - End bug fix session for the day
 
 4. **MUST execute the complete workflow for the selected mode**:
@@ -56,6 +62,9 @@ This command supports all three modes via arguments. For discoverability in the 
 
 # Resume after context clear
 /plan-bug-fix-mode continue
+
+# Wrap up completed fix (document + commit)
+/plan-bug-fix-mode wrap
 
 # End bug fix session for the day
 /plan-bug-fix-mode close
@@ -80,6 +89,19 @@ Resume after context clear:
 - Reads `history.md` for session context
 - Presents continuation options
 - Does NOT re-initialize session ownership
+
+### `wrap` Mode
+
+Wrap up a completed bug fix (document + commit):
+- Validates wrap conditions (queue exists, session ownership, files tracked)
+- Documents fix in `history.md`
+- Updates `bug-fix-queue.md` (moves bug to Completed)
+- Checks/updates `TODO.md` for related items
+- Stages files and commits **WITHOUT ASKING FOR APPROVAL**
+- Closes GitHub issue (if applicable)
+- Presents next action options
+
+**Key**: By invoking wrap mode, user has already approved the commit.
 
 ### `close` Mode
 

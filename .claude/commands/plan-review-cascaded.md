@@ -1,7 +1,7 @@
 # Cascaded Plan-Review
 
-**Project**: Planning is Prompting
-**Prefix**: [PLAN]
+**Project**: Lupin
+**Prefix**: [LUPIN]
 **Version**: 1.0
 
 ---
@@ -11,7 +11,7 @@
 **On every invocation of this command:**
 
 1. **MUST use the following project-specific configuration**:
-   - **[SHORT_PROJECT_PREFIX]**: [PLAN]
+   - **[SHORT_PROJECT_PREFIX]**: [LUPIN]
    - **Optional invocation overrides**: any flags passed after the command (e.g., `--turn-cap=5 --persona-activation=hybrid`). See `plan-review-cascaded-defaults.md` for the full key list and override conventions.
    - Do NOT proceed without [SHORT_PROJECT_PREFIX]
 

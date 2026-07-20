@@ -1,7 +1,7 @@
 # Backup Command - Write Mode (EXECUTE)
 
-**Project**: Planning is Prompting
-**Prefix**: [PLAN]
+**Project**: Lupin
+**Prefix**: [LUPIN]
 **Version**: 1.0
 
 ---
@@ -62,7 +62,7 @@ Execute the project's backup script located at `src/scripts/backup.sh` in **writ
   Planning is Prompting Backup Sync
 ========================================
 Mode: WRITE MODE
-Source: /mnt/DATA01/include/www.deepily.ai/projects/planning-is-prompting/
+Source: /mnt/DATA01/include/www.deepily.ai/projects/lupin/
 Destination: /mnt/DATA02/include/www.deepily.ai/projects/planning-is-prompting/
 Exclusions: src/scripts/conf/rsync-exclude.txt
 ========================================

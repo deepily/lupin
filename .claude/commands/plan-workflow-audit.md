@@ -1,7 +1,7 @@
 # Workflow Execution Audit
 
-**Project**: Planning is Prompting
-**Prefix**: [PLAN]
+**Project**: Lupin
+**Prefix**: [LUPIN]
 **Version**: 1.0
 
 ---
@@ -11,7 +11,7 @@
 **On every invocation of this command:**
 
 1. **MUST use the following project-specific configuration**:
-   - **[SHORT_PROJECT_PREFIX]**: [PLAN]
+   - **[SHORT_PROJECT_PREFIX]**: [LUPIN]
    - Do NOT proceed without this parameter
 
 2. **MUST read the canonical workflow document**:

@@ -7,8 +7,8 @@ version: 1.0
 # Planning is Prompting - About
 
 **Purpose**: Display installed workflows with version comparison
-**Project**: Planning is Prompting
-**Prefix**: [PLAN]
+**Project**: Lupin
+**Prefix**: [LUPIN]
 **Version**: 1.0
 
 ---
@@ -18,7 +18,7 @@ version: 1.0
 **On every invocation of this command:**
 
 1. **MUST use the following project-specific configuration**:
-   - **[SHORT_PROJECT_PREFIX]**: Detect from installed workflows (or use [PLAN] as default)
+   - **[SHORT_PROJECT_PREFIX]**: Detect from installed workflows (or use [LUPIN] as default)
    - **Installation directory**: ./.claude/commands
    - Do NOT proceed without detecting project configuration
 

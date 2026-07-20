@@ -2,7 +2,7 @@
 
 **Purpose**: Walk the user through their pending decisions one at a time — each with pros, cons, and a recommendation — via the cosa-voice `ask_multiple_choice` method, in descending priority.
 
-**Project**: lupin
+**Project**: lupin (installed from planning-is-prompting)
 **Version**: 1.0
 
 ---

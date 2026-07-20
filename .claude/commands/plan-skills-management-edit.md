@@ -1,6 +1,6 @@
 # Skills Management - Edit Mode
 
-**Project**: LUPIN
+**Project**: Lupin
 **Prefix**: [LUPIN]
 **Version**: 1.0
 
@@ -10,7 +10,7 @@
 
 - `/plan-skills-management-discover` - Find skill candidates
 - `/plan-skills-management-create` - Build new skill from documentation
-- `/plan-skills-management-edit` - Update existing skill <- **You are here**
+- `/plan-skills-management-edit` - Update existing skill ← **You are here**
 - `/plan-skills-management-audit` - Check skills health against documentation
 - `/plan-skills-management-delete` - Remove obsolete skill
 
@@ -44,7 +44,7 @@
    - Do NOT proceed without these parameters
 
 2. **MUST read the canonical workflow document**:
-   - Location: planning-is-prompting -> workflow/skills-management.md
+   - Location: planning-is-prompting → workflow/skills-management.md
    - This is the ONLY authoritative source for ALL skills management steps
    - Do NOT proceed without reading this document in full
 

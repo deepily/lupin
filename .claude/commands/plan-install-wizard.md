@@ -2,7 +2,7 @@
 
 **Purpose**: Interactive wizard for installing or updating planning-is-prompting workflows in any project.
 
-**Project**: planning-is-prompting (meta-repository)
+**Project**: lupin (installed from planning-is-prompting)
 **Version**: 1.0
 
 ---
@@ -12,6 +12,10 @@
 **mode** (optional): Operation mode
 - `install` (default): Run installation wizard for new or additional workflows
 - `update`: Run update mode for existing workflows (version detection, selective updates, config preservation)
+
+---
+
+> **⚠️ Note**: This command's canonical workflow is a long multi-phase wizard with many user-decision gates. In conversation mode (`get_session_info().conversation_mode_active=true`), the entire wizard becomes voice-driven; the **TTS Brevity Mandate** applies — never read the workflow catalog aloud, speak categories and put the detailed catalog in `abstract`. See `workflow/cosa-voice-integration.md` §Conversation Mode for full rules.
 
 ---
 
