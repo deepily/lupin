@@ -69,10 +69,18 @@ Named limits (this detector is partial, and is not sold as complete)
   base are invisible to it.
 """
 
+import asyncio
 import sys
 import traceback
 
 from sqlalchemy import create_engine, inspect
+
+
+# How long the post-startup notification may take before it is abandoned. Short
+# by design: the notify is the SECOND channel and the CRITICAL log has already
+# fired, so a slow delivery must never linger. Not a config key — one knob for
+# the recipient is the ratified surface; a timeout knob would be noise.
+NOTIFY_TIMEOUT_SECONDS = 5.0
 
 
 # Drift kinds, so callers/tests match on a constant rather than a magic string.
@@ -346,4 +354,183 @@ def emit_startup_drift_alarm( database_url=None, debug=False ):
             traceback.print_exc( file=sys.stderr )
         except Exception:  # pragma: no cover - stderr itself is unwritable; nothing left to report with
             pass
+        return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The notification leg — the SECOND channel, never the first.
+#
+# Ratified by Rick 2026-07-19: one INI key naming the recipient, EMPTY DEFAULT.
+# Empty means the notify is not attempted at all and the CRITICAL log stands
+# alone. That default is the load-bearing part: an unconfigured deployment
+# degrades to log-only rather than misdelivering the alarm to a guessed
+# identity. There is no fallback recipient, and inventing one would be the bug.
+#
+# Every constraint from the lifespan contract still binds here:
+#   - nothing in this section is awaited in the pre-yield critical path
+#   - delivery is scheduled as a task that cannot begin until the app is serving
+#   - the whole path is timeout-bounded and every exception is swallowed
+#   - stderr CRITICAL has ALREADY fired before any of this runs
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def build_drift_notification( report ):
+    """
+    Render the spoken message and the detail card for the drift notification.
+
+    Ensures:
+        - the spoken line is short enough for TTS and names the count, not the
+          inventory; the per-column detail goes in the abstract
+        - the abstract names model, table, and column for every finding
+
+    Args:
+        report: the dict returned by check_schema_drift()
+
+    Returns:
+        tuple( message: str, abstract: str )
+    """
+    drift   = report[ "drift" ]
+    plural  = "s" if len( drift ) != 1 else ""
+    message = (
+        f"Schema drift detected at startup: {len( drift )} finding{plural}. "
+        "The server is serving anyway. Check the container log for the critical alarm."
+    )
+    abstract = format_drift_alarm( drift, report[ "db_revision" ], report[ "head_revision" ] )
+    return ( message, abstract )
+
+
+def push_drift_notification( report, recipient_email, notification_queue ):
+    """
+    Resolve the configured recipient and enqueue the drift notification.
+
+    Synchronous and blocking (a DB lookup plus a queue push), so callers run it
+    off the event loop. Separated from the async wrapper purely so the resolution
+    logic is directly testable without an event loop.
+
+    Requires:
+        - recipient_email is a non-empty string
+        - notification_queue exposes push_notification()
+
+    Ensures:
+        - returns True when a notification was enqueued
+        - returns False when the configured recipient does not resolve to a user,
+          having warned on stderr — a MISCONFIGURED key must be visible, because
+          push_notification() itself accepts an unknown user_id silently and the
+          alarm would otherwise vanish without trace
+
+    Args:
+        report:             the drift report
+        recipient_email:    the configured recipient address
+        notification_queue: the live NotificationFifoQueue
+
+    Returns:
+        bool
+    """
+    from cosa.rest.db.database import get_db
+    from cosa.rest.db.repositories.user_repository import UserRepository
+
+    db = next( get_db() )
+    try:
+        user = UserRepository( db ).get_by_email( recipient_email )
+    finally:
+        db.close()
+
+    if user is None:
+        # Deliberately loud. A silent skip here would look identical to a clean
+        # boot, which is the failure mode the whole detector exists to remove.
+        print(
+            f"[schema-drift] WARNING: configured alarm recipient '{recipient_email}' "
+            "does not resolve to a user; drift notification NOT sent. The CRITICAL "
+            "log above stands as the alarm of record.",
+            file  = sys.stderr,
+            flush = True
+        )
+        return False
+
+    message, abstract = build_drift_notification( report )
+    notification_queue.push_notification(
+        message  = message,
+        type     = "alert",
+        priority = "urgent",
+        user_id  = str( user.id ),
+        abstract = abstract,
+        source   = "schema_drift_alarm"
+    )
+    return True
+
+
+async def deliver_drift_notification( report, recipient_email, notification_queue,
+                                      timeout_seconds=NOTIFY_TIMEOUT_SECONDS ):
+    """
+    Deliver the drift notification, bounded and non-fatal.
+
+    Ensures:
+        - the blocking work runs in a worker thread, so a slow DB lookup cannot
+          stall the event loop of a server that is already accepting traffic
+        - abandoned after timeout_seconds
+        - NEVER raises: a delivery failure is reported to stderr and swallowed,
+          because the alarm of record has already fired and the second channel
+          must not be able to damage the first
+
+    Args:
+        report:             the drift report
+        recipient_email:    the configured recipient address
+        notification_queue: the live NotificationFifoQueue
+        timeout_seconds:    delivery deadline
+
+    Returns:
+        bool — True when a notification was enqueued, False otherwise
+    """
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread( push_drift_notification, report, recipient_email, notification_queue ),
+            timeout = timeout_seconds
+        )
+    except Exception:
+        print( "[schema-drift] WARNING: drift notification failed; CRITICAL log stands.", file=sys.stderr )
+        traceback.print_exc( file=sys.stderr )
+        return False
+
+
+def schedule_drift_notification( report, recipient_email, notification_queue,
+                                 timeout_seconds=NOTIFY_TIMEOUT_SECONDS ):
+    """
+    Schedule the drift notification to run once the app is serving.
+
+    This is the whole "post-yield" mechanism. asyncio.create_task() does not
+    begin executing the coroutine — it only queues it on the loop, which cannot
+    resume until the lifespan generator yields. So calling this pre-yield is
+    correct AND non-blocking, whereas awaiting delivery pre-yield would dial a
+    server that is not yet accepting connections.
+
+    NOTE: main.py has exactly ONE yield and everything after it is SHUTDOWN, so a
+    literal post-yield call site would fire this alarm as the server goes DOWN.
+
+    Ensures:
+        - returns None without scheduling anything when there is no drift, no
+          recipient configured (the EMPTY DEFAULT — the common case), or no queue
+        - returns the created Task otherwise
+        - NEVER raises, including when there is no running event loop
+
+    Args:
+        report:             the drift report, or None when there is no drift
+        recipient_email:    configured recipient, or "" / None when unconfigured
+        notification_queue: the live NotificationFifoQueue, or None
+        timeout_seconds:    delivery deadline
+
+    Returns:
+        asyncio.Task | None
+    """
+    if report is None or not recipient_email or notification_queue is None:
+        return None
+
+    coroutine = deliver_drift_notification( report, recipient_email, notification_queue, timeout_seconds )
+    try:
+        return asyncio.create_task( coroutine )
+    except Exception:
+        # Close the orphaned coroutine explicitly. Left dangling it raises
+        # "coroutine was never awaited" from the GC at an arbitrary later point,
+        # attributing a warning to whatever code happens to be running then.
+        coroutine.close()
+        print( "[schema-drift] WARNING: could not schedule drift notification; CRITICAL log stands.", file=sys.stderr )
         return None

@@ -346,3 +346,196 @@ class TestEmitStartupDriftAlarm:
         """Nothing in the pre-yield critical path may be awaited."""
         import inspect as _inspect
         assert not _inspect.iscoroutinefunction( emit_startup_drift_alarm )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The notification leg — the SECOND channel.
+#
+# Ratified by Rick 2026-07-19: one INI key, EMPTY DEFAULT. The empty-default
+# path gets the most attention here because it is the configuration every
+# unconfigured deployment actually runs.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class FakeUser:
+    def __init__( self, user_id="u-123" ):
+        self.id = user_id
+
+
+class RecordingQueue:
+    """Stands in for NotificationFifoQueue, recording what it was handed."""
+
+    def __init__( self ):
+        self.pushed = []
+
+    def push_notification( self, **kwargs ):
+        self.pushed.append( kwargs )
+
+
+REPORT = {
+    "drift": [ {
+        "table"  : "task_items",
+        "column" : "park_reason_captured_at",
+        "model"  : "TaskItem",
+        "kind"   : KIND_MISSING_COLUMN
+    } ],
+    "db_revision"   : "d47487369407",
+    "head_revision" : "d47487369407"
+}
+
+
+def _patch_user_lookup( monkeypatch, user ):
+    """Patch the DB seam only — the resolution logic under test is untouched."""
+    class FakeSession:
+        def close( self ): pass
+
+    class FakeRepo:
+        def __init__( self, db ): pass
+        def get_by_email( self, email ): return user
+
+    monkeypatch.setattr( "cosa.rest.db.database.get_db", lambda: iter( [ FakeSession() ] ) )
+    monkeypatch.setattr( "cosa.rest.db.repositories.user_repository.UserRepository", FakeRepo )
+
+
+class TestBuildDriftNotification:
+
+    def test_spoken_line_gives_the_count_not_the_inventory( self ):
+        message, abstract = schema_drift.build_drift_notification( REPORT )
+        assert "1 finding" in message
+        assert "serving anyway" in message.lower()
+        # The per-column detail belongs in the card, never in the spoken line.
+        assert "park_reason_captured_at" not in message
+        assert "park_reason_captured_at" in abstract
+
+    def test_pluralises_correctly( self ):
+        two = dict( REPORT, drift=REPORT[ "drift" ] * 2 )
+        assert "2 findings" in schema_drift.build_drift_notification( two )[ 0 ]
+
+
+class TestPushDriftNotification:
+
+    def test_enqueues_for_a_resolvable_recipient( self, monkeypatch ):
+        _patch_user_lookup( monkeypatch, FakeUser() )
+        queue = RecordingQueue()
+
+        assert schema_drift.push_drift_notification( REPORT, "rick@example.com", queue ) is True
+        assert len( queue.pushed ) == 1
+        assert queue.pushed[ 0 ][ "user_id" ]  == "u-123"
+        assert queue.pushed[ 0 ][ "priority" ] == "urgent"
+        assert "park_reason_captured_at" in queue.pushed[ 0 ][ "abstract" ]
+
+    def test_unresolvable_recipient_warns_loudly_and_skips( self, monkeypatch, capsys ):
+        """push_notification() accepts an unknown user_id SILENTLY, so a
+        misconfigured key would otherwise vanish without trace — indistinguishable
+        from a clean boot, which is the failure mode this detector exists to
+        remove. It must be loud."""
+        _patch_user_lookup( monkeypatch, None )
+        queue = RecordingQueue()
+
+        assert schema_drift.push_drift_notification( REPORT, "ghost@example.com", queue ) is False
+        assert queue.pushed == []
+        err = capsys.readouterr().err
+        assert "does not resolve to a user" in err
+        assert "ghost@example.com" in err
+        assert "alarm of record" in err
+
+
+class TestDeliverDriftNotification:
+
+    @pytest.mark.asyncio
+    async def test_delivers_successfully( self, monkeypatch ):
+        _patch_user_lookup( monkeypatch, FakeUser() )
+        queue = RecordingQueue()
+        assert await schema_drift.deliver_drift_notification( REPORT, "rick@example.com", queue ) is True
+
+    @pytest.mark.asyncio
+    async def test_delivery_failure_is_swallowed( self, monkeypatch, capsys ):
+        """The second channel must never be able to damage the first."""
+        def boom( *args, **kwargs ):
+            raise RuntimeError( "notification backend down" )
+
+        monkeypatch.setattr( schema_drift, "push_drift_notification", boom )
+
+        assert await schema_drift.deliver_drift_notification( REPORT, "rick@example.com", RecordingQueue() ) is False
+        assert "CRITICAL log stands" in capsys.readouterr().err
+
+    @pytest.mark.asyncio
+    async def test_slow_delivery_is_abandoned_at_the_timeout( self, monkeypatch, capsys ):
+        import time as _time
+
+        def slow( *args, **kwargs ):
+            _time.sleep( 2.0 )
+            return True
+
+        monkeypatch.setattr( schema_drift, "push_drift_notification", slow )
+
+        result = await schema_drift.deliver_drift_notification(
+            REPORT, "rick@example.com", RecordingQueue(), timeout_seconds=0.05
+        )
+        assert result is False
+        assert "CRITICAL log stands" in capsys.readouterr().err
+
+
+class TestScheduleDriftNotification:
+    """The pre-yield call site: must schedule without blocking, or no-op."""
+
+    @pytest.mark.asyncio
+    async def test_schedules_a_task_when_configured_and_drifted( self, monkeypatch ):
+        _patch_user_lookup( monkeypatch, FakeUser() )
+        queue = RecordingQueue()
+
+        task = schema_drift.schedule_drift_notification( REPORT, "rick@example.com", queue )
+        assert task is not None
+        # Nothing has run yet: create_task only QUEUES the coroutine. This is the
+        # whole "post-yield" mechanism — the loop must resume before it executes.
+        assert queue.pushed == []
+
+        await task
+        assert len( queue.pushed ) == 1
+
+    @pytest.mark.asyncio
+    async def test_no_drift_schedules_nothing( self ):
+        assert schema_drift.schedule_drift_notification( None, "rick@example.com", RecordingQueue() ) is None
+
+    @pytest.mark.asyncio
+    async def test_missing_queue_schedules_nothing( self ):
+        assert schema_drift.schedule_drift_notification( REPORT, "rick@example.com", None ) is None
+
+    def test_no_running_loop_is_survivable( self, capsys ):
+        """Called outside an event loop it must warn and return, never raise —
+        a scheduling failure cannot be allowed to abort boot."""
+        assert schema_drift.schedule_drift_notification( REPORT, "rick@example.com", RecordingQueue() ) is None
+        assert "CRITICAL log stands" in capsys.readouterr().err
+
+
+class TestEmptyRecipientDefault:
+    """🔴 THE DEFAULT CONFIGURATION — the one every unconfigured server runs.
+
+    Rick's ratified spec: empty key ⇒ the notification is NOT attempted and the
+    CRITICAL log still fires. Both halves are asserted. A test asserting only
+    'no notify' would pass just as happily if the entire alarm had gone silent,
+    which is the exact failure this pair exists to exclude."""
+
+    @pytest.mark.asyncio
+    async def test_empty_recipient_attempts_no_notification( self ):
+        queue = RecordingQueue()
+        assert schema_drift.schedule_drift_notification( REPORT, "", queue ) is None
+        assert queue.pushed == []
+
+    @pytest.mark.asyncio
+    async def test_none_recipient_attempts_no_notification( self ):
+        queue = RecordingQueue()
+        assert schema_drift.schedule_drift_notification( REPORT, None, queue ) is None
+        assert queue.pushed == []
+
+    def test_critical_log_still_fires_with_no_recipient_configured( self, sqlite_url, monkeypatch, capsys ):
+        """The other half: log-only is a DEGRADED channel, not a silent one."""
+        monkeypatch.setattr( "cosa.rest.postgres_models.Base", SampleBase )
+        queue  = RecordingQueue()
+
+        report = emit_startup_drift_alarm( database_url=sqlite_url )
+        schema_drift.schedule_drift_notification( report, "", queue )
+
+        assert report is not None
+        assert queue.pushed == []
+        assert "CRITICAL" in capsys.readouterr().err

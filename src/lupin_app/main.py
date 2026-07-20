@@ -472,8 +472,11 @@ async def lifespan( app: FastAPI ):
     # and pre-yield this very server accepts no connections — the alarm's
     # transport would be the thing that is still booting. Richer routing is a
     # separate seam, deliberately absent rather than half-built.
+    # The report is captured so the SECOND channel (a UI notification) can be
+    # scheduled later, once the notification queue exists. The alarm of record
+    # has already fired synchronously by the time this returns.
     from cosa.rest.db.schema_drift import emit_startup_drift_alarm
-    emit_startup_drift_alarm( debug=app_debug )
+    schema_drift_report = emit_startup_drift_alarm( debug=app_debug )
 
     # Suppress LanceDB cosmetic warnings if configured
     # These warnings are non-functional - queries execute correctly regardless
@@ -899,8 +902,28 @@ async def lifespan( app: FastAPI ):
     from cosa.rest.arbiter_bootstrap import submit_arbiter_if_enabled
     submit_arbiter_if_enabled( jobs_todo_queue, jobs_run_queue, config_mgr )
 
+    # Schema-drift SECOND channel. Scheduled here — not at detection time —
+    # because the notification queue does not exist yet when the check runs, and
+    # not after `yield` because everything after `yield` is SHUTDOWN.
+    #
+    # create_task() only QUEUES the coroutine; it cannot begin executing until
+    # the loop resumes, which happens after this generator yields. So the network
+    # work provably lands post-startup while the call itself blocks nothing —
+    # awaiting delivery here would dial a server not yet accepting connections.
+    #
+    # No-ops entirely when there is no drift or no recipient is configured. The
+    # recipient key is EMPTY by default (ratified by Rick 2026-07-19): an
+    # unconfigured server degrades to log-only rather than misdelivering to a
+    # guessed identity. The CRITICAL stderr log remains the alarm of record.
+    from cosa.rest.db.schema_drift import schedule_drift_notification
+    schedule_drift_notification(
+        schema_drift_report,
+        config_mgr.get( "schema drift alarm recipient email", default="" ),
+        jobs_notification_queue
+    )
+
     print( f"FastAPI startup complete at {datetime.now()}" )
-    
+
     yield
     
     # Shutdown
