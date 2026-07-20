@@ -229,6 +229,32 @@ class TestTaskQueryWrapper:
         assert captured[ "include_terminal" ] is True
 
 
+class TestTaskGetWrapper:
+    """task_get (4288dd53) — the single-row fetch-by-id READ verb."""
+
+    def test_task_id_and_server_context_pass_through( self, stamped_identity, monkeypatch ):
+        captured = { }
+        monkeypatch.setattr( cv, "task_get_impl", lambda **kwargs: captured.update( kwargs ) or SENTINEL )
+
+        result = cv.task_get.fn( task_id="4288dd53-6779-460a-88bd-a7365fb734b2" )
+
+        assert result is SENTINEL
+        assert captured == {
+            "api_base_url" : "http://stub:7999",
+            "api_key"      : "ck_live_stub",
+            "task_id"      : "4288dd53-6779-460a-88bd-a7365fb734b2",
+        }
+
+    def test_is_a_read_verb_no_actor_stamp( self, stamped_identity, monkeypatch ):
+        # READ tier, exactly like task_query: it must NOT bridge-stamp `actor`.
+        # A read verb that carried an identity would imply a self-disclosure it
+        # does not make — and `task_get_impl` has no `actor` param to receive one.
+        captured = { }
+        monkeypatch.setattr( cv, "task_get_impl", lambda **kwargs: captured.update( kwargs ) or SENTINEL )
+        cv.task_get.fn( task_id="abc" )
+        assert "actor" not in captured
+
+
 class TestTaskReassignWrapper:
 
     def test_stamps_actor_and_passes_through( self, stamped_identity, monkeypatch ):

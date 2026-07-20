@@ -3430,7 +3430,7 @@ def dm_list(
 # — a session cannot impersonate. Day-to-day practice: planning-is-prompting
 # workflow/task-store-discipline.md.
 
-from lupin_mcp.task_store_tools import task_create_impl, task_transition_impl, task_correlate_impl, task_query_impl, task_reassign_impl, task_amend_impl
+from lupin_mcp.task_store_tools import task_create_impl, task_transition_impl, task_correlate_impl, task_query_impl, task_reassign_impl, task_amend_impl, task_get_impl
 
 
 def _task_store_identity() -> str:
@@ -3791,6 +3791,47 @@ def task_query(
         include_terminal    = include_terminal,
         unscoped_audit      = unscoped_audit,
         include_parked      = include_parked,
+    )
+
+
+@mcp.tool
+def task_get( task_id: str ) -> dict:
+    """
+    **[READ — always allowed, no user permission needed]** Fetch ONE store row
+    by its UUID.
+
+    THE FAILURE THIS PREVENTS: a filtered query's empty result is NOT evidence a
+    row is absent — use this to ask about a row DIRECTLY. `task_query` can only
+    ask a filter and scan a page; a row sitting at offset=15 of a limit=15 page
+    reads as gone, and an absence in a filtered page becomes a false fact about
+    the world. This asks about the specific row instead of inferring it from a
+    page's silence.
+
+    Returns the FULL item including `body` (not the terse projection) — you
+    asked for the row, you get the row. An absent id is a 404 → error dict
+    carrying "task {id} not found" verbatim, NEVER an empty success or None: a
+    missing row rendered as a silent nothing is the exact confusion this verb
+    exists to kill.
+
+    Example:
+        # Open one row by id (e.g. from a terse list's `id` field):
+        task_get(task_id="4288dd53-6779-460a-88bd-a7365fb734b2")
+
+    Args:
+        task_id: The item's UUID string. A malformed id is the server's reject
+            to surface (422), never pre-checked here.
+
+    Returns:
+        The full serialized item (200 body) verbatim on success, or an error
+        dict — a 404 carries "task {id} not found" verbatim under "detail"; a
+        malformed UUID carries the server's 422 detail verbatim; auth/transport
+        failures carry the shared missing_auth_header / server_unreachable
+        contract. NEVER an empty success, NEVER None.
+    """
+    return task_get_impl(
+        api_base_url = _get_server_url(),
+        api_key      = _mcp_outbound_api_key(),
+        task_id      = task_id,
     )
 
 

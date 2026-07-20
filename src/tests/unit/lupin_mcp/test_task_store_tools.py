@@ -10,6 +10,8 @@ deliberately NOT re-tested here.
 Venue: :7999-eligible (pure unit, requests fully mocked, no server, no state).
 """
 
+import inspect
+
 import pytest
 import requests
 
@@ -22,6 +24,7 @@ from lupin_mcp.task_store_tools import (
     task_reassign_impl,
     task_amend_impl,
     task_query_impl,
+    task_get_impl,
 )
 
 BASE_URL = "http://localhost:7999"
@@ -550,3 +553,104 @@ class TestTaskAmendImpl:
             note    = "n",
         )
         assert result == { "status": "error", "http_status": 422, "detail": detail }
+
+
+class TestTaskGetImpl:
+    """
+    task_get (4288dd53) — the single-row fetch-by-id transport. Thin proxy over
+    GET /api/tasks/{task_id}; no server change (AC7). Transport only, so the
+    error contract is inherited from task_store_request and re-pinned here at
+    the by-id route.
+    """
+
+    def test_route_is_the_single_row_get( self, capture_request ):
+        # AC1: a valid id → the FULL serialized item verbatim, via a GET to the
+        # by-id route (no body, no params — nothing to shape).
+        item  = { "id": "4288dd53-6779-460a-88bd-a7365fb734b2", "body": "x" * 8395 }
+        calls = capture_request( FakeResponse( 200, json_body=item ) )
+        result = task_get_impl( BASE_URL, API_KEY, "4288dd53-6779-460a-88bd-a7365fb734b2" )
+        assert result == item                                          # full row, body included
+        assert calls[ "method" ] == "GET"
+        assert calls[ "url" ]     == f"{BASE_URL}/api/tasks/4288dd53-6779-460a-88bd-a7365fb734b2"
+        assert calls[ "json" ]    is None                              # no request body
+        assert calls[ "params" ]  is None                              # no query params
+        assert calls[ "headers" ] == { "X-API-Key": API_KEY }
+
+    def test_404_absent_row_is_error_dict_not_empty_success( self, capture_request ):
+        # AC2: an absent row → error dict carrying the server's detail verbatim.
+        # NEVER an empty success, NEVER None — a silent nothing is the confusion
+        # this verb exists to kill.
+        detail = "task 00000000-0000-0000-0000-000000000000 not found"
+        capture_request( FakeResponse( 404, json_body={ "detail": detail } ) )
+        result = task_get_impl( BASE_URL, API_KEY, "00000000-0000-0000-0000-000000000000" )
+        assert result == { "status": "error", "http_status": 404, "detail": detail }
+        assert result is not None and result != { }                   # not a silent nothing
+
+    def test_malformed_uuid_surfaces_server_422_not_client_raise( self, capture_request ):
+        # AC3: a malformed id is the SERVER's 422 to report — never pre-checked
+        # or raised client-side (transport only, no rule duplication).
+        fastapi_detail = [ { "loc": [ "path", "task_id" ], "msg": "value is not a valid uuid" } ]
+        capture_request( FakeResponse( 422, json_body={ "detail": fastapi_detail } ) )
+        result = task_get_impl( BASE_URL, API_KEY, "not-a-uuid" )
+        assert result == { "status": "error", "http_status": 422, "detail": fastapi_detail }
+
+    def test_missing_auth_is_error_dict_not_exception( self, capture_request ):
+        # AC4: auth failure surfaces as an error dict; no HTTP attempt is made.
+        calls  = capture_request( RuntimeError( "must not be called" ) )
+        result = task_get_impl( BASE_URL, api_key=None, task_id="abc" )
+        assert result == {
+            "status" : "error",
+            "reason" : "missing_auth_header",
+            "detail" : result[ "detail" ],                            # exact text pinned in TestTaskStoreRequest
+        }
+        assert calls == { }                                           # never reached the wire
+
+    def test_server_unreachable_is_error_dict_never_raises( self, capture_request ):
+        # AC4 (transport arm): a hung/refused store surfaces as an error dict.
+        capture_request( requests.exceptions.ConnectionError( "refused" ) )
+        result = task_get_impl( BASE_URL, API_KEY, "abc" )
+        assert result[ "status" ] == "error" and result[ "reason" ] == "server_unreachable"
+
+
+class TestFetchByIdNegativeControl:
+    """
+    🔴 AC5 — THE NEGATIVE CONTROL. Prove the PRE-CHANGE MCP surface CANNOT fetch
+    a row by id, so `task_get` is shown to close a real gap rather than merely
+    pass a test that would pass anyway.
+
+    The pre-change read surface was `task_query_impl` ALONE. The gap is
+    structural and asserted on the SPECIFIC mechanism, not on mere absence
+    (Plan-1 AC8a lesson: a control must name the exact wrong shape): the query
+    verb has no id parameter, and its route is the LIST endpoint, so "give me
+    row X" is not expressible — you can only ask a filter and scan a page, and a
+    page's silence is not an answer.
+    """
+
+    def test_pre_change_query_verb_has_no_id_parameter( self ):
+        # The concrete gap: task_query_impl accepts filters, NONE of which is an
+        # id. A caller literally cannot pass the row's id to the pre-change verb.
+        params = inspect.signature( task_query_impl ).parameters
+        assert "task_id" not in params and "id" not in params and "ids" not in params, (
+            "the pre-change query verb grew an id parameter — fetch-by-id belongs "
+            "in task_get, not folded into the list query (plan §5 option (a))" )
+
+    def test_pre_change_query_verb_hits_the_LIST_route_never_a_by_id_route( self, capture_request ):
+        # Even fully specified, task_query_impl issues a GET to the LIST endpoint
+        # (/api/tasks) and returns a {tasks, count} envelope — never /api/tasks/{id}.
+        # So the only pre-change way to "find row X" is to scan a page, which is
+        # exactly the failure (an absence in a page read as a fact about the world).
+        calls  = capture_request( FakeResponse( 200, json_body={ "tasks": [ ], "count": 0 } ) )
+        result = task_query_impl( BASE_URL, API_KEY, owner_persona="sam" )
+        assert calls[ "url" ] == f"{BASE_URL}/api/tasks"                       # the LIST route, exactly
+        assert not calls[ "url" ].startswith( f"{BASE_URL}/api/tasks/" )       # NOT a by-id route
+        assert set( result.keys() ) == { "tasks", "count" }                   # a LIST envelope, never one row
+
+    def test_task_get_closes_the_gap_it_names( self, capture_request ):
+        # The positive contrast, on the SAME axis the control measures: task_get
+        # DOES take an id and DOES hit the by-id route. The gap is real and this
+        # is what closes it.
+        get_params = inspect.signature( task_get_impl ).parameters
+        assert "task_id" in get_params
+        calls = capture_request( FakeResponse( 200, json_body={ "id": "abc" } ) )
+        task_get_impl( BASE_URL, API_KEY, "abc" )
+        assert calls[ "url" ] == f"{BASE_URL}/api/tasks/abc"                   # the by-id route

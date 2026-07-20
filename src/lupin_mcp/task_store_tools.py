@@ -408,3 +408,40 @@ def task_query_impl(
     # an older server (no such param) keeps today's behavior rather than 400ing.
     if include_parked:   params[ "hide_parked" ]       = "false"
     return task_store_request( "GET", "/api/tasks", api_base_url, api_key, params=params )
+
+
+def task_get_impl( api_base_url, api_key, task_id ):
+    """
+    GET /api/tasks/{task_id} — fetch ONE store row by its UUID (4288dd53).
+
+    The failure this closes, named because the MCP docstring is the only doc
+    most seats read: a filtered query's empty result is NOT evidence a row is
+    absent — a row can be sitting at offset=15 of a limit=15 page and read as
+    gone. `task_query` can only ASK A FILTER and scan its results, so "does row
+    X exist / what does it say" has to be inferred from a page's silence, and
+    silence is not an answer. This asks about ONE row directly.
+
+    THIN PROXY — no server change. The route (routers/tasks.py get_task) is
+    already live and authenticated; this exposes it to the MCP surface and does
+    nothing else. Same auth/transport/error contract as every other store verb,
+    because it rides the same `task_store_request` transport:
+
+    Requires:
+        - task_id is the item's UUID string. A malformed id is the SERVER's
+          reject to surface (422), never pre-checked here — transport only, no
+          rule duplication (spec §1).
+
+    Ensures:
+        - 200 → the FULL serialized item verbatim (including `body`, never the
+          terse projection) — this is the whole point: you asked for the row,
+          you get the row
+        - 404 → an ERROR DICT carrying the server's detail verbatim
+          ("task {id} not found"). NEVER an empty success, NEVER None: an absent
+          row rendered as a silent nothing is the exact confusion this verb
+          exists to kill
+        - 422 (malformed UUID) → the server's detail verbatim, not a client-side
+          raise
+        - api_key None / server unreachable → the shared error-dict contract
+          (missing_auth_header / server_unreachable); NEVER raises
+    """
+    return task_store_request( "GET", f"/api/tasks/{task_id}", api_base_url, api_key )
