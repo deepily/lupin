@@ -1,8 +1,8 @@
 # Session-End Ritual for Lupin Project
 
-**Project**: Lupin (Genie-in-the-Box)
+**Project**: Lupin
 **Prefix**: [LUPIN]
-**Version**: 1.1
+**Version**: 1.0
 
 ---
 
@@ -19,11 +19,6 @@
    - **History file**: /mnt/DATA01/include/www.deepily.ai/projects/lupin/history.md
    - **Planning documents**: /mnt/DATA01/include/www.deepily.ai/projects/lupin/src/rnd/
    - **Archive directory**: /mnt/DATA01/include/www.deepily.ai/projects/lupin/history/
-   - **Nested repositories**: /src/cosa/, /src/lupin-plugin-firefox/, /src/lupin-mobile/
-   - **Nested repository descriptions**:
-     * `/src/cosa/` - CoSA framework (git@github.com:deepily/cosa.git)
-     * `/src/lupin-plugin-firefox/` - Firefox plugin sub-repository
-     * `/src/lupin-mobile/` - Mobile app sub-repository
    - Do NOT proceed without these parameters
 
 2. **MUST read the canonical workflow document**:
@@ -58,28 +53,13 @@
 ## Usage
 
 ```bash
-/plan-session-end                             # default: full ritual including LoC Delta Summary + baseline
-/plan-session-end --no-summary                # skip Step 6 entirely (fast wrap-up)
-/plan-session-end --no-baseline               # render summary without repo-baseline comparison
+/plan-session-end                          # default: full ritual including LoC Delta Summary + baseline
+/plan-session-end --no-summary             # skip Step 6 entirely (fast wrap-up)
+/plan-session-end --no-baseline            # render summary without repo-baseline comparison
 /plan-session-end --no-summary --no-baseline  # equivalent to --no-summary alone
 ```
 
-Invoked when ending the **entire work session** for the day.
-
-**Natural language triggers** (any of these should invoke THIS command):
-- "Let's end the session"
-- "Session end"
-- "Wrap up the session"
-- "Done for the day"
-- "Calling it for today"
-- "Close out the session"
-- "That's it for today"
-
-**⚠️ DISAMBIGUATION — do NOT confuse with `/plan-bug-fix-mode-wrap`**:
-- This command ends the **entire work session** (history archive, full commit, session close)
-- `/plan-bug-fix-mode-wrap` wraps a **single bug fix** (document + commit one fix, stay in session)
-- Key signal: if the user mentions "session", "done for the day", "calling it" → use THIS command
-- Key signal: if the user mentions "bug", "fix", or "this" → use `/plan-bug-fix-mode-wrap`
+Invoked when wrapping up a work session to ensure all documentation, history, and commits are properly managed.
 
 ---
 
