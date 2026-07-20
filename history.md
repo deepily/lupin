@@ -2,6 +2,26 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-28 to 06-16](history/2026-05-28-to-06-16-history.md). History health: ✅ **HEALTHY at ~6.9k tokens (28% of 25k)** — archived 2026-07-06 by Mr. Radio 🦉 (session 2352acab), ~16k tokens moved to archive.
 
+### 2026.07.20 - Session 1c295071 (Arnold 🪨) | `204911ca` §9(a) transport budgets LANDED (`359eb9a3` shipped RED, `25f680c2` repaired it, origin verified green) · inventory 10 → 21 sites · 35 commits pushed (I'd said 11) · §9(b) parked on Rick
+
+**Accomplishments** (sole manager from 00:30; seats Cheech 🌿 `81a50925` + Clayton 😎 `d8a05a85`, both reaped with mementos):
+1. **`204911ca` §9(a) closed with receipts.** `:7999` runs `uvicorn --reload`; the reloader **parent holds the listening socket**, so the kernel **accepts a connection nothing answers** — callers hang instead of getting `ConnectionRefused`. Window n=143, max **18.76s**. Budgets → ~30s = **1.60× the max**, stated as a multiplier with headroom, never a coverage %. Trade stated: a hung server now takes ~30s to report, not ~2s.
+2. **Inventory grew 10 → 21, every increment from distrusting a handed-down list.** Cheech re-grepped his own applied pattern and found sites **in files he'd just edited** (`cosa_voice_mcp` had 9, the list said 5). I found `sync_notify` is dual-mode. Clayton found the class none of us had: **the budget as a Pydantic constructor arg**, invisible to call-site greps. ⇒ the advertised drift control was **false in 9 files**; now two searches.
+3. **Five sites dropped.** Clayton confirmed **from uvicorn source** that connect succeeds and only the read leg hangs ⇒ exposure is *"a READ budget shorter than the window"*, not *"has a timeout"*. Split tuples were never exposed. Three left short with falsifiable in-line reasons.
+4. **Controls: every arm RED before green** — blackhole socket for the timeout arm (not a closed port, which refuses instantly). Clayton ran the new guard's needle against **pre-fix blobs** to prove it *would have caught the original defect*, not merely that it passes today.
+
+**🔴 MY ERRORS — six, every one caught by someone else:**
+- **Pushed a RED commit.** Staged at 02:07 against a 02:05 fingerprint, across a live two-file edit ⇒ captured one file's new value with the other's old — **a state that never existed as a whole**. `git status` read clean because staging absorbed it. **The stability instrument Clayton held for the review is the one I skipped at commit time.**
+- **"11 commits held" was 34.** Carried from my memento, never diffed against `origin`.
+- **Wrote "any module with a `__main__.py` is dual-mode," then verified `swe_team` by asking *who imports it*** — the one question that cannot see a package's own entry point. It confirmed what I expected, which is when my own rule says to audit.
+- **Told the reviewer `app.py` went unnarrated. It was in Cheech's doc.** I had its absence from a *DM*; Cheech confirmed my framing back; neither of us opened the artifact.
+- **F2**: each ladder attempt makes **two** calls ⇒ ceiling **60s not 30s**, old ladder **28s not 14s**. Cheech and I both verified "no backoff sleep" — right multiplier, wrong factor. The plan's premise was wrong *in the direction that flattered the change*.
+- **My "240 INI keys" is not a population** — the INI is six-sectioned, and wrapper/f-string-constructed keys evade the grep entirely.
+
+**THE NIGHT'S PATTERN — five instances, and it survived being named.** *Fixed in code, stale in the record*: F5 (warned in `hook_common`, armed in the listener) → ladder numbers (comment fixed, doc stale) → the drift-control claim (killed in 9 files, alive in the doc) → **my own guard comment claiming to cover "either budget" while covering one — written inside the fix for the previous instance.** Cheech's diagnosis, which I took over my own: *"each happened when I'd just solved something. The comment gets the reasoning; the doc gets what I remember afterward. **Relief is when the record slips.**"* Countermeasure banked: **after fixing anything, grep the DOCS for the claim you just changed, not only the code.**
+
+**Files**: 19 modified + 2 new suites + 3 R&D docs across `359eb9a3` + `25f680c2`. **Store**: `204911ca` done · `94f4b052` §9(b) **parked, self-expiring chase 07-20 14:00** · `a2113fd5` + `37d8a3c6` filed. **Pushed** `eaef6537..25f680c2` (35 commits, 0 remaining) on Rick's word; backup 4.59 GB → DATA02 first. **Carry-over**: §9(b) needs image rebuild + reloader restart (Rick) · §9(c)/(d) **UNRULED** · the dual-semantics field split (`timeout` means "total retry budget" *and* "per-attempt budget") deferred to its own row · `1c84dbdf` unowned · `8abe6afe` + `89ade8af` await Rick. ⚠️ **history.md ~23k tokens — past the 19k critical threshold; archival due.**
+
 ### 2026.07.19 - Session 8268eff9 (Mr. Radio 🦉) | `86aa79ac` persona-null DIAGNOSED + closed (hook-stderr instrument found) · a chain 3 seats analyzed that NEVER RAN · store cannot express "blocked, chase unknown" (I3) · `6b61a22c` found already-built, nearly rebuilt · commit HELD, no push (Arnold live in tree)
 
 **Accomplishments** (store-driven triage, no plan — 7 owed rows inherited from reaped seats; board 7 → 3):
