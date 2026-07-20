@@ -331,11 +331,13 @@ def test_transition_to_done_accepts_valid_receipts( scope_roots ):
     assert errors == [ ]
 
 
-def test_transition_to_blocked_requires_chase_ts_and_refs():
+def test_transition_to_blocked_bare_requires_refs_but_no_chase_without_persona():
+    # I3 kind-aware (eab1d7da): a bare ->blocked (no blocked_by, no chase) is
+    # rejected for the MISSING REFS only. With no persona in blocked_by, no chase
+    # is required — the old global "chase always" rule is gone. (Was 2 errors.)
     errors = rules.validate_transition( "in_progress", "blocked", "standing" )
-    assert len( errors ) == 2
-    assert any( "next_chase_ts" in e for e in errors )
     assert any( "blocked_by" in e for e in errors )
+    assert not any( "chase" in e for e in errors ), "no persona ⇒ no chase requirement"
 
 
 def test_transition_to_blocked_accepts_chase_ts_plus_typed_refs():
@@ -346,6 +348,77 @@ def test_transition_to_blocked_accepts_chase_ts_plus_typed_refs():
         blocked_by    = [ { "kind": "user", "id": "rick" } ],
     )
     assert errors == [ ]
+
+
+# ---------------------------------------------------------------------------
+# I3 kind-aware chase requirement (eab1d7da) — blocked_by_has_persona +
+# the persona-gated chase rule in validate_transition
+# ---------------------------------------------------------------------------
+
+class TestBlockedByHasPersona:
+    """The app-layer twin of the CHECK's `blocked_by @> '[{"kind":"persona"}]'`."""
+
+    @pytest.mark.parametrize( "value", [
+        None, "not-a-list", 42, { "kind": "persona" },   # non-list → False, never raises
+        [ ],                                              # empty → False
+        [ { "kind": "user", "id": "rick" } ],             # user only
+        [ { "kind": "item", "id": "X" } ],                # item only
+        [ { "kind": "user", "id": "rick" }, { "kind": "item", "id": "X" } ],
+        [ "garbage", { "no": "kind" } ],                  # malformed refs ignored, no raise
+    ] )
+    def test_false_when_no_persona_ref( self, value ):
+        assert rules.blocked_by_has_persona( value ) is False
+
+    @pytest.mark.parametrize( "value", [
+        [ { "kind": "persona", "id": "sam" } ],
+        [ { "kind": "user", "id": "rick" }, { "kind": "persona", "id": "sam" } ],
+        [ "garbage", { "kind": "persona", "id": "sam" } ],   # survives a malformed sibling
+    ] )
+    def test_true_when_any_persona_ref( self, value ):
+        assert rules.blocked_by_has_persona( value ) is True
+
+
+class TestKindAwareChaseRule:
+    """
+    validate_transition's ->blocked chase requirement is now gated on blocker KIND.
+    AC2's both-agree contract: the PERSONA case must FAIL and the USER/ITEM-only
+    case must PASS the rules layer — a rule rejecting "any blocker" would go red on
+    the persona row too and hide a divergence from the CHECK (which rejects only
+    persona). This class asserts both arms.
+    """
+
+    def test_persona_blocker_null_chase_rejected_naming_the_kind( self ):
+        errors = rules.validate_transition(
+            "in_progress", "blocked", "standing",
+            blocked_by = [ { "kind": "persona", "id": "sam" } ], next_chase_ts=None )
+        # NAMES the kind (María's review gate) — not the old generic message.
+        assert any( "persona blocker requires a chase" in e for e in errors )
+
+    def test_persona_blocker_with_chase_passes( self ):
+        from datetime import datetime, timezone
+        errors = rules.validate_transition(
+            "in_progress", "blocked", "standing",
+            blocked_by    = [ { "kind": "persona", "id": "sam" } ],
+            next_chase_ts = datetime( 2026, 7, 22, 9, 0, tzinfo=timezone.utc ) )
+        assert errors == [ ]
+
+    @pytest.mark.parametrize( "kind,ident", [ ( "user", "rick" ), ( "item", "550e8400-e29b-41d4-a716-446655440000" ) ] )
+    def test_user_or_item_only_null_chase_PASSES_the_rules_layer( self, kind, ident ):
+        # THE both-agree arm: this is what makes "blocked on Rick, no schedulable
+        # chase" expressible — and what catches a rules layer that rejects on ANY
+        # blocker while the CHECK rejects only on persona.
+        errors = rules.validate_transition(
+            "in_progress", "blocked", "standing",
+            blocked_by = [ { "kind": kind, "id": ident } ], next_chase_ts=None )
+        assert errors == [ ], f"a {kind}-only null-chase block must pass the rules layer"
+
+    def test_mixed_user_plus_persona_null_chase_rejected( self ):
+        # A persona anywhere in the list triggers the requirement (mirrors @> containment).
+        errors = rules.validate_transition(
+            "in_progress", "blocked", "standing",
+            blocked_by = [ { "kind": "user", "id": "rick" }, { "kind": "persona", "id": "sam" } ],
+            next_chase_ts=None )
+        assert any( "persona blocker requires a chase" in e for e in errors )
 
 
 def test_transition_happy_path_plain_move():

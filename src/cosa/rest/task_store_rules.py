@@ -322,6 +322,39 @@ def validate_blocked_by_refs( blocked_by ) -> list:
     return errors
 
 
+def blocked_by_has_persona( blocked_by ) -> bool:
+    """
+    True iff `blocked_by` contains at least one {kind: "persona"} ref (I3 kind-aware
+    chase rule, eab1d7da).
+
+    The application-layer twin of the DB CHECK's `blocked_by @> '[{"kind":"persona"}]'`
+    jsonb-containment test: a chase time is REQUIRED for a persona blocker (a peer is
+    chaseable, so a chase is honest) and NOT for a user/item-only block (you cannot
+    schedule Rick; an item resolves on its own edge). Kept a separate predicate rather
+    than inlined so the rule and the CHECK are each expressed once and can be pinned to
+    agree by test.
+
+    Deliberately SHAPE-TOLERANT: it reads only well-formed persona refs and ignores
+    everything else, because malformed `blocked_by` is `validate_blocked_by_refs`'s
+    reject to surface — this predicate must never raise on the same input that function
+    is about to reject, or a bad ref would 500 instead of 422.
+
+    Requires:
+        - blocked_by is the candidate value (any type accepted; non-list → False)
+
+    Ensures:
+        - True iff blocked_by is a list containing a dict ref whose kind == "persona"
+        - False for None, non-list, empty list, or a list with no persona ref
+        - never raises
+    """
+    if not isinstance( blocked_by, list ):
+        return False
+    return any(
+        isinstance( ref, dict ) and ref.get( "kind" ) == "persona"
+        for ref in blocked_by
+    )
+
+
 # ---------------------------------------------------------------------------
 # Creation + transition rules
 # ---------------------------------------------------------------------------
@@ -639,8 +672,16 @@ def validate_transition(
     if to_status == "done" or receipt_refs is not None:
         errors.extend( validate_receipt_refs( receipt_refs, scope_roots ) )
     if to_status == "blocked":
-        if next_chase_ts is None:
-            errors.append( "next_chase_ts is REQUIRED when transitioning to 'blocked' (I3 — no 'pending X' graves)" )
+        # I3 kind-aware chase requirement (eab1d7da): a chase time is REQUIRED
+        # only when a PERSONA blocks — a peer is chaseable, so a chase is honest.
+        # A user/item-only block needs no chase (you cannot schedule Rick; an item
+        # resolves on its own edge), which is what makes "blocked on Rick, no
+        # schedulable chase" EXPRESSIBLE instead of dying in `queued` prose. The
+        # message NAMES the kind so a user filing a user-blocked row that trips an
+        # UNRELATED check never reads the wrong error (María, review gate). This is
+        # the app-layer twin of the DB CHECK; the two are pinned to agree by test.
+        if next_chase_ts is None and blocked_by_has_persona( blocked_by ):
+            errors.append( "a persona blocker requires a chase time: next_chase_ts is REQUIRED when blocked_by contains a {kind:persona} ref (I3 — a peer is chaseable)" )
         errors.extend( validate_blocked_by_refs( blocked_by ) )
     if to_status == "dropped" and ( not isinstance( reason, str ) or not reason.strip() ):
         errors.append( "reason is REQUIRED (non-blank) when transitioning to 'dropped' (C12 — the escape hatch carries its justification)" )

@@ -1423,8 +1423,18 @@ class TaskItem( Base ):
     __table_args__ = (
         Index( 'idx_task_items_owner_status', 'owner_persona', 'status' ),  # the oracle query shape
         Index( 'idx_task_items_correlation_key', 'correlation_key' ),
+        # I3 kind-aware chase requirement (eab1d7da, 2026-07-20). A chase time is
+        # required only when a PERSONA blocks (a peer is chaseable); a user/item-only
+        # block needs none — you cannot schedule Rick, and an item resolves on its
+        # own edge. `@>` (jsonb containment) is IMMUTABLE, so it is legal in a CHECK.
+        # This predicate is WEAKER than the old global rule (a superset of permitted
+        # rows), so ZERO existing rows violate it — no backfill needed (plan §3).
+        # ⚠️ This literal MUST match the Alembic migration string VERBATIM
+        # (i3_kind_aware_blocked_chase); a parity test asserts the two agree, because
+        # a model/migration divergence here is a CHECK that silently means two
+        # different things on a fresh-from-metadata DB vs a migrated one.
         CheckConstraint(
-            "status != 'blocked' OR next_chase_ts IS NOT NULL",
+            "status != 'blocked' OR next_chase_ts IS NOT NULL OR NOT (blocked_by @> '[{\"kind\": \"persona\"}]'::jsonb)",
             name="ck_task_items_blocked_requires_chase_ts"
         ),
         # Park's two required fields, mirroring the blocked rule above. TWO
