@@ -5,6 +5,8 @@ Tests the consumer loop's interaction with pop_next_eligible(), dynamic
 timeout calculation, and wake-up behavior for scheduled/paused jobs.
 
 Session 381: Initial implementation.
+Bug 84db12a0 (2026-07-19): sleep-as-thread-sync replaced with real
+synchronization edges — see wait_for()/still_before() below.
 """
 
 import pytest
@@ -15,6 +17,62 @@ from unittest.mock import Mock, MagicMock
 from cosa.rest.fifo_queue import FifoQueue
 from cosa.rest.job_state import JobState
 from cosa.rest.queue_consumer import start_todo_producer_run_consumer_thread
+
+
+# Far-future offset for jobs that must NOT become eligible during a test.
+# Generous by design: the margin is what keeps a starved box from turning a
+# "still waiting" assertion into a false RED.
+FAR_FUTURE_SECONDS = 30.0
+
+# Offset for jobs that SHOULD become eligible mid-test.
+SCHEDULED_SECONDS  = 0.3
+
+
+def wait_for( predicate, timeout=5.0, interval=0.005 ):
+    """
+    Poll until predicate() is truthy or the timeout elapses.
+
+    Replaces bare time.sleep() as a thread-synchronization primitive. A sleep
+    is a wall-clock bet, not a happens-before edge: under full-suite CPU
+    contention the consumer thread may simply not have run yet, which made
+    this class a false-RED generator (bug 84db12a0). Waiting on STATE is
+    load-insensitive; waiting on the clock is not.
+
+    Requires:
+        - predicate is a zero-argument callable
+        - timeout and interval are positive floats with interval < timeout
+
+    Ensures:
+        - returns True as soon as predicate() is truthy
+        - returns False only after the full timeout has elapsed
+        - re-checks predicate() once after the deadline before returning False,
+          so a predicate satisfied during the final interval is not missed
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate(): return True
+        time.sleep( interval )
+    return bool( predicate() )
+
+
+def still_before( t0, offset_seconds ):
+    """
+    Report whether the wall clock is provably still before t0 + offset_seconds.
+
+    Guards "not yet processed" assertions. Such a claim is only CHECKABLE
+    while the job's scheduled time has not arrived. If the box starved and the
+    deadline slipped past while we were descheduled, the assertion is
+    unverifiable rather than false — skipping it is honest; failing it is a
+    false RED, and asserting it anyway is what bug 84db12a0 was filed for.
+
+    Requires:
+        - t0 is a time.monotonic() reading taken before the job was pushed
+        - offset_seconds is a positive float
+
+    Ensures:
+        - returns True only while ( monotonic() - t0 ) < offset_seconds
+    """
+    return ( time.monotonic() - t0 ) < offset_seconds
 
 
 class MockSchedulableJob:
@@ -102,7 +160,7 @@ class TestConsumerTimed:
         running_queue._process_job = mock_process
 
         thread = start_todo_producer_run_consumer_thread( todo_queue, running_queue )
-        time.sleep( 0.05 )  # Let consumer thread start
+        assert wait_for( thread.is_alive ), "Consumer thread failed to start"
         return thread
 
     def test_consumer_processes_immediate_job( self ):
@@ -113,50 +171,50 @@ class TestConsumerTimed:
 
         job = MockSchedulableJob( "imm-1" )
         todo_queue.push_with_notify( job )
-        time.sleep( 0.2 )
 
-        assert "imm-1" in processed
+        assert wait_for( lambda: "imm-1" in processed ), "Immediate job was never processed"
+
         todo_queue.shutdown()
         thread.join( timeout=1.0 )
 
     def test_consumer_sleeps_until_scheduled( self ):
-        """Push job at now+0.3s, verify ~0.3s delay."""
+        """Push job at now+0.3s, verify it waits then processes."""
         todo_queue = MockTodoQueue()
         processed = []
         thread = self._start_consumer( todo_queue, processed )
 
-        scheduled = ( datetime.now() + timedelta( seconds=0.3 ) ).isoformat()
-        job = MockSchedulableJob( "timed-1", scheduled_at=scheduled )
+        t0        = time.monotonic()
+        scheduled = ( datetime.now() + timedelta( seconds=SCHEDULED_SECONDS ) ).isoformat()
+        job       = MockSchedulableJob( "timed-1", scheduled_at=scheduled )
         todo_queue.push_with_notify( job )
 
-        # Should NOT be processed immediately
-        time.sleep( 0.1 )
-        assert "timed-1" not in processed
+        # Should NOT be processed before its scheduled time. Only assertable
+        # while we are provably still before that time.
+        if still_before( t0, SCHEDULED_SECONDS * 0.5 ):
+            assert "timed-1" not in processed, "Timed job ran before its scheduled time"
 
-        # Should be processed after ~0.3s
-        time.sleep( 0.4 )
-        assert "timed-1" in processed
+        assert wait_for( lambda: "timed-1" in processed ), "Timed job never ran after its scheduled time"
 
         todo_queue.shutdown()
         thread.join( timeout=1.0 )
 
     def test_earlier_job_wakes_consumer( self ):
-        """Sleeping for T+5s, push immediate job, wakes and processes immediately."""
+        """Sleeping for a far-future job, push immediate job, wakes and processes."""
         todo_queue = MockTodoQueue()
         processed = []
         thread = self._start_consumer( todo_queue, processed )
 
-        # Push far-future job — consumer sleeps for ~5s
-        future = ( datetime.now() + timedelta( seconds=5 ) ).isoformat()
+        # Push far-future job — consumer sleeps until it is eligible
+        future = ( datetime.now() + timedelta( seconds=FAR_FUTURE_SECONDS ) ).isoformat()
         todo_queue.push_with_notify( MockSchedulableJob( "future-1", scheduled_at=future ) )
-        time.sleep( 0.1 )
 
         # Push immediate job — should wake consumer
         todo_queue.push_with_notify( MockSchedulableJob( "immediate-1" ) )
-        time.sleep( 0.2 )
 
-        assert "immediate-1" in processed
-        assert "future-1" not in processed  # Still waiting
+        assert wait_for( lambda: "immediate-1" in processed ), "Immediate job did not wake the consumer"
+        # Positive assertion above is the control: the consumer demonstrably ran,
+        # so this negative cannot pass vacuously.
+        assert "future-1" not in processed, "Far-future job ran early"
 
         todo_queue.shutdown()
         thread.join( timeout=1.0 )
@@ -167,17 +225,15 @@ class TestConsumerTimed:
         processed = []
         thread = self._start_consumer( todo_queue, processed )
 
-        future = ( datetime.now() + timedelta( seconds=5 ) ).isoformat()
+        future = ( datetime.now() + timedelta( seconds=FAR_FUTURE_SECONDS ) ).isoformat()
         todo_queue.push_with_notify( MockSchedulableJob( "future-del", scheduled_at=future ) )
-        time.sleep( 0.1 )
 
         # Delete the job — delete_by_id_hash calls condition.notify()
-        todo_queue.delete_by_id_hash( "future-del" )
-        time.sleep( 0.2 )
+        assert wait_for( lambda: todo_queue.delete_by_id_hash( "future-del" ) ), "Job never became deletable"
 
         # Queue is now empty, consumer should be waiting (not stuck)
-        assert todo_queue.is_empty()
-        assert "future-del" not in processed
+        assert wait_for( todo_queue.is_empty ), "Queue did not drain after delete"
+        assert "future-del" not in processed, "Deleted job was processed anyway"
 
         todo_queue.shutdown()
         thread.join( timeout=1.0 )
@@ -187,16 +243,15 @@ class TestConsumerTimed:
         todo_queue = MockTodoQueue()
         processed = []
         thread = self._start_consumer( todo_queue, processed )
-        time.sleep( 0.1 )  # Consumer is waiting on empty queue
 
-        scheduled = ( datetime.now() + timedelta( seconds=0.3 ) ).isoformat()
+        t0        = time.monotonic()
+        scheduled = ( datetime.now() + timedelta( seconds=SCHEDULED_SECONDS ) ).isoformat()
         todo_queue.push_with_notify( MockSchedulableJob( "timed-2", scheduled_at=scheduled ) )
 
-        time.sleep( 0.1 )
-        assert "timed-2" not in processed  # Not yet
+        if still_before( t0, SCHEDULED_SECONDS * 0.5 ):
+            assert "timed-2" not in processed, "Timed job ran before its scheduled time"
 
-        time.sleep( 0.4 )
-        assert "timed-2" in processed  # Now eligible
+        assert wait_for( lambda: "timed-2" in processed ), "Timed job never became eligible"
 
         todo_queue.shutdown()
         thread.join( timeout=1.0 )
@@ -207,12 +262,15 @@ class TestConsumerTimed:
         processed = []
         thread = self._start_consumer( todo_queue, processed )
 
-        future = ( datetime.now() + timedelta( seconds=5 ) ).isoformat()
+        future = ( datetime.now() + timedelta( seconds=FAR_FUTURE_SECONDS ) ).isoformat()
         todo_queue.push_with_notify( MockSchedulableJob( "future-2", scheduled_at=future ) )
         todo_queue.push_with_notify( MockSchedulableJob( "immediate-2" ) )
-        time.sleep( 0.3 )
 
-        assert processed[ 0 ] == "immediate-2"
+        # Wait for SOMETHING to be processed before indexing — the original
+        # bare sleep(0.3) indexed processed[0] on a list the consumer had not
+        # yet appended to under load. That is bug 84db12a0's exact failure.
+        assert wait_for( lambda: len( processed ) >= 1 ), "Nothing was processed"
+        assert processed[ 0 ] == "immediate-2", f"Expected immediate job first, got {processed[ 0 ]}"
 
         todo_queue.shutdown()
         thread.join( timeout=1.0 )
@@ -225,9 +283,8 @@ class TestConsumerTimed:
 
         job = MockSchedulableJob( "mono-1", monopolize=True )
         todo_queue.push_with_notify( job )
-        time.sleep( 0.2 )
 
-        assert "mono-1" in processed
+        assert wait_for( lambda: "mono-1" in processed ), "Monopolize job was never processed"
 
         todo_queue.shutdown()
         thread.join( timeout=1.0 )
@@ -238,15 +295,15 @@ class TestConsumerTimed:
         processed = []
         thread = self._start_consumer( todo_queue, processed )
 
-        scheduled = ( datetime.now() + timedelta( seconds=0.3 ) ).isoformat()
-        job = MockSchedulableJob( "mono-timed", scheduled_at=scheduled, monopolize=True )
+        t0        = time.monotonic()
+        scheduled = ( datetime.now() + timedelta( seconds=SCHEDULED_SECONDS ) ).isoformat()
+        job       = MockSchedulableJob( "mono-timed", scheduled_at=scheduled, monopolize=True )
         todo_queue.push_with_notify( job )
 
-        time.sleep( 0.1 )
-        assert "mono-timed" not in processed
+        if still_before( t0, SCHEDULED_SECONDS * 0.5 ):
+            assert "mono-timed" not in processed, "Timed monopolize job ran before its scheduled time"
 
-        time.sleep( 0.4 )
-        assert "mono-timed" in processed
+        assert wait_for( lambda: "mono-timed" in processed ), "Timed monopolize job never ran"
 
         todo_queue.shutdown()
         thread.join( timeout=1.0 )
@@ -257,18 +314,21 @@ class TestConsumerTimed:
         processed  = []
         thread     = self._start_consumer( todo_queue, processed )
 
-        scheduled = ( datetime.now() + timedelta( seconds=0.5 ) ).isoformat()
+        scheduled = ( datetime.now() + timedelta( seconds=SCHEDULED_SECONDS ) ).isoformat()
         job = MockSchedulableJob( "pause-sleep", scheduled_at=scheduled )
         todo_queue.push_with_notify( job )
-        time.sleep( 0.1 )
 
         # Pause the job — consumer should NOT process it even after scheduled time
         job.state = JobState.PAUSED
         with todo_queue.condition:
             todo_queue.condition.notify()  # Wake consumer to see paused state
-        time.sleep( 0.8 )  # Well past scheduled time
 
-        assert "pause-sleep" not in processed
+        # Wait well PAST the scheduled time, then assert it still has not run.
+        # wait_for returning False here is the success signal: the predicate we
+        # are hoping stays false is "was processed". Under load this only gets
+        # MORE conclusive (more wall clock elapses past the deadline).
+        ran = wait_for( lambda: "pause-sleep" in processed, timeout=SCHEDULED_SECONDS * 3 )
+        assert not ran, "Paused job was processed despite being paused"
 
         todo_queue.shutdown()
         thread.join( timeout=1.0 )
@@ -282,16 +342,16 @@ class TestConsumerTimed:
         job       = MockSchedulableJob( "resume-1" )
         job.state = JobState.PAUSED
         todo_queue.push_with_notify( job )
-        time.sleep( 0.2 )
-        assert "resume-1" not in processed  # Paused
+
+        ran = wait_for( lambda: "resume-1" in processed, timeout=0.3 )
+        assert not ran, "Paused job was processed before resume"
 
         # Resume
         job.state = JobState.QUEUED
         with todo_queue.condition:
             todo_queue.condition.notify()
-        time.sleep( 0.3 )
 
-        assert "resume-1" in processed
+        assert wait_for( lambda: "resume-1" in processed ), "Resumed job was never processed"
 
         todo_queue.shutdown()
         thread.join( timeout=1.0 )
