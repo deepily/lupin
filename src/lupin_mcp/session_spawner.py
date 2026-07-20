@@ -494,6 +494,17 @@ def _default_emit_reap( identity: Dict[ str, Any ], reason: str = "" ) -> None:
             return                          # can't route → skip (best-effort)
         persona = identity.get( "persona" ) if isinstance( identity.get( "persona" ), dict ) else { }
         name    = ( persona or { } ).get( "name" ) or "A worker"
+        # 🔴 DELIBERATELY LEFT SHORT — excluded from the ~30s reload-window bump
+        # (row 204911ca, 2026-07-20). Every other out-of-process `:7999` client
+        # was raised to _SERVER_TRANSPORT_TIMEOUT_SECONDS (30) so it can outlast
+        # a `uvicorn --reload` window. Not this one:
+        #
+        # The whole call is a best-effort notify inside `except: pass`, and it
+        # sits ON the reap path. A 30s budget would delay EVERY reap by 30s
+        # during a reload — the cost lands on the reap, which is real work, to
+        # rescue a "<name> reaped" announcement, which is not. The exposure is
+        # genuine; it is simply cheaper to lose the notification than to pay for
+        # it. Do not raise this to match the cohort.
         requests.post(
             f"{cfg[ 'api_url' ].rstrip( '/' )}/api/notify",
             params  = {

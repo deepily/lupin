@@ -541,6 +541,102 @@ def _cleanup_old_listener( old_session_data, new_session_id ):
                 pass  # Best-effort
 
 
+# Budget for the SessionStart banner's `/docs` reachability probe. Deliberately
+# SHORT — it runs on the boot path and its job is to LABEL the server's state,
+# not to outlast a reload. See _classify_server_probe_error for why the label,
+# not the number, is the fix at this site.
+#
+# 🔴 The two constants in this module are NOT interchangeable, and the split is
+# the point: this one buys a fast, correctly-worded LABEL; the one below buys
+# COMPLETION of a call whose result we cannot afford to lose. Sizing the probe
+# like a transaction would stall every session boot by ~30s whenever the server
+# is genuinely down.
+_BANNER_PROBE_TIMEOUT_SECONDS = 3
+
+# Transport budget for out-of-process calls to `:7999` whose RESULT is
+# load-bearing — here, voice-persona release (row 204911ca). ~30s = 1.60x the
+# observed maximum reload window of 18.76s: a multiplier with explicit headroom,
+# NOT a coverage guarantee. `:7999` runs `uvicorn --reload` and the reloader
+# parent holds the listening socket across a restart, so the kernel ACCEPTS a
+# request nothing is there to answer and the caller hangs rather than getting a
+# fast ConnectionRefused. The prior 2s failed every reload window it landed in
+# (measured n=143: min 6.59s, median 6.91s).
+#
+# Full derivation: src/rnd/v0.1.9/2026.07.19-dev-server-reload-availability.md §9(a).
+#
+# 🔴 DRIFT CONTROL — TWO SEARCHES, AND IT TOOK BOTH.
+# `grep -rn _SERVER_TRANSPORT_TIMEOUT_SECONDS` returns every DIRECT call site.
+# It does NOT return members whose budget is carried in a Pydantic FIELD rather
+# than passed at the call — `AsyncNotificationRequest( timeout=… )`, consumed at
+# `notify_user_async.py:197-201` as a bare `requests.post( timeout=request.timeout )`.
+# Two such members were missed on the first pass for exactly this reason.
+# The second search is: `grep -rn "AsyncNotificationRequest(" -A14 | grep timeout`.
+# Run BOTH, or the set you get back is the set the first grep can see.
+#
+# TRADE: a genuinely hung server now stalls persona release ~30s instead of ~2s.
+# Accepted — a leaked persona name is re-granted to a later worker and misdirects
+# them, which outlasts a slow teardown. Not free.
+_SERVER_TRANSPORT_TIMEOUT_SECONDS = 30
+
+
+def _classify_server_probe_error( exc, server_url, timeout_seconds ):
+    """
+    Map a `/docs` probe exception onto the status string the SessionStart banner
+    shows for the server.
+
+    🔴 THE WORDING IS THE POINT HERE, NOT DECORATION. The flat "unreachable"
+    string this replaces is what misdirected row 204911ca across two sessions: a
+    reader saw it and concluded the server was DOWN, when `:7999` was mid-reload
+    and would have answered a few seconds later.
+
+    The two conditions are genuinely distinguishable at the client, and they
+    demand opposite fixes:
+
+      - A STOPPED server REFUSES. Nothing holds the port, the kernel replies
+        RST, and urlopen raises URLError(ConnectionRefusedError) essentially
+        instantly. The fix is "start the server."
+      - A RESTARTING server ACCEPTS AND STALLS. `uvicorn --reload` keeps the
+        listening socket bound in the reloader PARENT across the restart, so the
+        kernel completes the handshake and queues a request that nothing is
+        there to answer yet. The probe exhausts its budget and raises
+        TimeoutError. The fix is "wait a few seconds."
+
+    Both behaviours were measured as controls on row 204911ca (§3), which is why
+    this split is observable rather than aspirational: C2 (a genuinely closed
+    port) refused in 0.0003s, and C1 (a blackhole socket — bound and listening,
+    never accept()ing) timed out at 15.02s with a bare TimeoutError.
+
+    Requires:
+        - exc is the exception raised by the probe
+        - server_url is a non-empty string
+        - timeout_seconds is the positive budget the probe was given
+
+    Ensures:
+        - returns a status string that NAMES the condition whenever this
+          function can identify it, never a bare "unreachable"
+        - treats an HTTP error status as REACHABLE — the server answered
+        - falls back to "unreachable" only for conditions it cannot identify,
+          and names the exception type even then
+    """
+    # The server ANSWERED, just not with 2xx — a HEAD on /docs may legitimately
+    # return 405. Answering at all is the thing this banner is asking about.
+    if isinstance( exc, urllib.error.HTTPError ):
+        return f"reachable ({server_url})"
+
+    # A timeout arrives in two shapes: urllib wraps connect-phase OSErrors in
+    # URLError, but a timeout while READING the response propagates bare (that
+    # is the C1 shape, and the reload case). Unwrap once, then test.
+    reason = exc.reason if isinstance( exc, urllib.error.URLError ) else exc
+
+    if isinstance( reason, TimeoutError ):
+        return f"no response in {timeout_seconds}s — may be restarting ({server_url})"
+
+    if isinstance( reason, ConnectionRefusedError ):
+        return f"not running — connection refused ({server_url})"
+
+    return f"unreachable — {type( reason ).__name__} ({server_url})"
+
+
 def _check_cosa_voice_status():
     """
     Quick non-blocking checks for cosa-voice prerequisites.
@@ -550,7 +646,9 @@ def _check_cosa_voice_status():
 
     Ensures:
         - Returns a formatted status block string (never raises)
-        - Each check has 1s timeout max to avoid blocking session start
+        - The reachability probe is capped at _BANNER_PROBE_TIMEOUT_SECONDS
+          so it cannot block session start; a reload is LABELLED as a
+          possible reload rather than reported as "unreachable"
     """
     checks = []
     sep    = "=" * 42
@@ -600,13 +698,21 @@ def _check_cosa_voice_status():
     hook_status = f"{hook_count}/8 active"
 
     # ── Check 4: Server reachable ────────────────────────────────────
+    # The budget stays SHORT on purpose. Covering the 18.76s observed reload
+    # maximum here would stall EVERY SessionStart boot by that much whenever the
+    # server is genuinely down — a bad trade for one status line. 3s absorbs
+    # ordinary jitter, and a reload is now NAMED as a possible reload instead of
+    # being mislabelled. The WORDING, not the budget, is the fix at this site;
+    # see _classify_server_probe_error.
     server_url = os.getenv( "LUPIN_APP_SERVER_URL", "http://localhost:7999" )
     try:
-        req  = urllib.request.Request( f"{server_url}/docs", method="HEAD" )
-        resp = urllib.request.urlopen( req, timeout=1 )
+        req = urllib.request.Request( f"{server_url}/docs", method="HEAD" )
+        urllib.request.urlopen( req, timeout=_BANNER_PROBE_TIMEOUT_SECONDS )
         server_status = f"reachable ({server_url})"
-    except Exception:
-        server_status = f"unreachable ({server_url})"
+    except Exception as e:
+        server_status = _classify_server_probe_error(
+            e, server_url, _BANNER_PROBE_TIMEOUT_SECONDS
+        )
 
     # ── Check 5: Config file ─────────────────────────────────────────
     config_path   = os.path.expanduser( "~/.lupin/config" )
@@ -628,18 +734,63 @@ def _check_cosa_voice_status():
 
 
 # Transport-budget retry ladder for voice-persona allocation (candidate A1,
-# 2026-07-19). One urlopen timeout per attempt, in seconds; the timeout IS the
-# inter-attempt delay, so worst case is the sum (~14s) inside the harness's 60s
-# SessionStart hook allowance.
+# 2026-07-19; resized for the reload window 2026-07-20, row 204911ca).
 #
-# 🔴 SCORE THIS HEDGE HONESTLY. On the incident that motivated it (86aa79ac) the
-# ladder buys NOTHING: the server was flatly unreachable — the same hook banner
-# printed "Server: unreachable" — and no budget saves a down server. It pays only
-# against a loaded-but-alive server, a mode this fleet has never observed.
+# SIZING: each RUNG is sized against the observed maximum reload window of
+# 18.76s. `:7999` runs `uvicorn --reload`; the reloader parent holds the
+# listening socket across a restart, so the kernel ACCEPTS a request that
+# nothing is there to answer. The client sees a late answer or a bare
+# TimeoutError, never ConnectionRefused. Measured over 8.4 days of container
+# logs (current-config clean-reload class, n=143): min 6.59s, median 6.91s,
+# max 18.76s — all 143 exceed 5s.
+#
+# 🔴 WALL-CLOCK CEILING IS 60s, NOT 30s. EACH ATTEMPT MAKES **TWO** CALLS —
+# `/auth/login` (:889) then `/allocate` (:920) — and BOTH take the SAME rung's
+# timeout. So the worst case is 2x the tuple sum: (5+5) + (10+10) + (15+15) =
+# **60s**, not the 30s an earlier revision of this comment claimed.
+#
+# There is NO backoff sleep between attempts (the loop re-enters immediately on
+# failure), so 60s is the true ceiling and not merely the sum of the budgets.
+# 60s sits far under the 600s harness allowance below, so nothing breaks.
+#
+# ⚠️ THE CONTRACT IS "COVER AN 18.76s WINDOW", NOT "FINISH INSIDE 30s".
+# The first attempt-pair alone spends 10s, and by the second pair the elapsed
+# time exceeds the observed maximum — so the window is covered well before the
+# ladder is spent. No per-attempt total deadline is enforced; if anyone wants
+# <=30s as a REAL contract, that is new control-flow and belongs on its own row
+# with its own control, not bolted on here.
+#
+# 🔴 CORRECTION TO THE PLAN'S PREMISE, RECORDED BECAUSE IT FLATTERED THIS CHANGE.
+# The plan argued the old (2, 4, 8) ladder "= 14s cumulative, under 18.76s" and
+# therefore could not cover the window. **That arithmetic was wrong the same
+# way**: two calls per attempt makes the old ladder **28s**, which already
+# exceeded 18.76s. The old ladder was not as broken as the premise claimed.
+# What the resize actually buys is per-rung headroom — under (2, 4, 8) no single
+# call could outlast a 6.59s minimum window, so success depended on the window
+# happening to end during a later rung. That is a real improvement, and it is a
+# smaller one than the plan asserted. Do not restate the 14s figure.
+#
+# HARNESS HEADROOM: SessionStart carries no `timeout` field in
+# ~/.claude/settings.json, so it runs at Claude Code's default for a command
+# handler — 600s. ⚠️ That 600s is DOC-DERIVED (code.claude.com/docs/en/hooks.md,
+# "Common fields"), NOT measured here; if it ever becomes load-bearing, measure
+# it. The `SYNC_TIMEOUT_SECONDS = 25  # 5s headroom under CC's 30s hook timeout`
+# comment in permission_request.py describes PermissionRequest's OWN configured
+# 30000ms and does not bind this caller.
+#
+# THE TRADE, stated plainly: a genuinely hung server now takes **~60s** to give
+# up, against ~28s before (both figures doubled for the two calls per attempt).
+# That cost was accepted knowingly — Arnold's ruling, 2026-07-20 — to stop
+# losing personas to a routine ~7s reload. It is not free, and the number is
+# 60s, not the 30s the tuple's sum suggests at a glance.
+#
+# 🔴 SCORE THIS HEDGE HONESTLY. On the incident that motivated the original
+# ladder (86aa79ac) it buys NOTHING: the server was flatly unreachable and no
+# budget saves a down server. It pays against a reload window.
 # ⚠️ THE TRAP: if nulls stop recurring after this lands, that is NOT evidence the
-# ladder fixed anything. The loud give-up below landed in the same commit and
+# ladder fixed anything. The loud give-up below landed in commit 77d64647 and
 # makes the same nulls visible. Do not credit the hedge with the alarm's result.
-_ALLOCATE_TIMEOUT_LADDER_SECONDS = ( 2, 4, 8 )
+_ALLOCATE_TIMEOUT_LADDER_SECONDS = ( 5, 10, 15 )
 
 
 def _allocate_voice_persona_via_http(
@@ -681,8 +832,11 @@ def _allocate_voice_persona_via_http(
           return left in this function
         - Never raises exceptions
         - Retries transport failures on the _ALLOCATE_TIMEOUT_LADDER_SECONDS
-          budget (2s, 4s, 8s); a server that ANSWERS with a wrong or empty
-          body is NOT retried, because retrying a definite answer is noise
+          budget (5s, 10s, 15s per rung). Each attempt makes TWO calls — login
+          then /allocate — and both take the rung's timeout, so the worst-case
+          wall clock is 2x the tuple sum = 60s, not 30s. A server that ANSWERS
+          with a wrong or empty body is NOT retried, because retrying a
+          definite answer is noise
         - When previous_persona_name is non-empty, threads it as a
           query-string param so the server pushes a "Voice re-assigned"
           announcement after the assigned broadcast
@@ -886,7 +1040,9 @@ def _release_voice_persona_via_http( server_url, project, stable_session_id ):
         - Returns True on successful POST /release (HTTP 2xx)
         - Returns False on any failure (logged to stderr)
         - Never raises exceptions
-        - Uses 2-second timeouts for both /auth/login and /release
+        - Uses _SERVER_TRANSPORT_TIMEOUT_SECONDS on both /auth/login and
+          /release — sized to outlast a `:7999` reload window rather than
+          fail inside one
 
     Args:
         server_url: Lupin server URL
@@ -908,7 +1064,7 @@ def _release_voice_persona_via_http( server_url, project, stable_session_id ):
             method  = "POST",
             headers = { "Content-Type": "application/json" }
         )
-        with urllib.request.urlopen( login_req, timeout=2 ) as resp:
+        with urllib.request.urlopen( login_req, timeout=_SERVER_TRANSPORT_TIMEOUT_SECONDS ) as resp:
             login_data = json.loads( resp.read().decode() )
         access_token = login_data.get( "tokens", {} ).get( "access_token" )
         if not access_token:
@@ -926,7 +1082,7 @@ def _release_voice_persona_via_http( server_url, project, stable_session_id ):
                 "Authorization" : f"Bearer {access_token}"
             }
         )
-        with urllib.request.urlopen( rel_req, timeout=2 ) as resp:
+        with urllib.request.urlopen( rel_req, timeout=_SERVER_TRANSPORT_TIMEOUT_SECONDS ) as resp:
             resp.read()  # drain
         return True
 

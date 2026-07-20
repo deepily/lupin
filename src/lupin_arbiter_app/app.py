@@ -530,7 +530,7 @@ def _build_arbiter_outreach_hops( cfg, gateway ):   # pragma: no cover - literal
     sender_id    = cfg.get( "arbiter live notify sender id",
                             default="heartbeat-arbiter@lupin.deepily.ai" ) or "heartbeat-arbiter@lupin.deepily.ai"
     dedup_window = int( cfg.get( "arbiter live notify dedup window seconds", default=900, return_type="int" ) )
-    timeout      = int( cfg.get( "arbiter live notify timeout seconds", default=5, return_type="int" ) )
+    timeout      = int( cfg.get( "arbiter live notify timeout seconds", default=30, return_type="int" ) )
 
     dm_push_fn = None
     if cfg.get( "arbiter outreach dm push enabled", default=True, return_type="boolean" ):

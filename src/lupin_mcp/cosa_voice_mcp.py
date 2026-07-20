@@ -322,7 +322,7 @@ def _validate_repo_account( project: str ) -> None:
         resp = requests.post(
             f"{SERVER_URL}/auth/login",
             json={ "email": email, "password": password },
-            timeout=5
+            timeout=_SERVER_TRANSPORT_TIMEOUT_SECONDS
         )
         if resp.status_code != 200:
             _ACCOUNT_VALIDATED = False
@@ -377,6 +377,31 @@ CANONICAL_PROJECT = _resolve_canonical_project( PROJECT )  # Config-mapped ident
 SESSION_ID        = get_claude_session_id()[:8]  # 8-char hex from session bridge (env > file > fallback)
 SENDER_ID         = _get_sender_id( CANONICAL_PROJECT, SESSION_ID )
 SERVER_URL        = _get_server_url()
+
+# Transport budget for out-of-process HTTP calls to SERVER_URL (row 204911ca,
+# 2026-07-20). ~30s = 1.60x the observed maximum `:7999` reload window of 18.76s
+# — a multiplier with explicit headroom, NOT a coverage guarantee.
+#
+# WHY THESE CALLS NEED IT. This MCP server runs in its OWN process, so a `:7999`
+# reload does not tear it down alongside the request. `:7999` runs
+# `uvicorn --reload`, and the reloader parent keeps the listening socket bound
+# across a restart — the kernel ACCEPTS a request that nothing is there to
+# answer, so the caller hangs and eventually raises TimeoutError rather than
+# getting a fast ConnectionRefused. Measured over 8.4 days of container logs
+# (current-config clean-reload class, n=143): min 6.59s, median 6.91s, max
+# 18.76s. All 143 exceed the 5s these call sites used to allow, so every one of
+# them failed on every reload it happened to land in.
+#
+# THE TRADE, stated plainly: a genuinely hung server now takes ~30s to report
+# instead of ~5s. Accepted knowingly — these are low-frequency calls (login,
+# speakerphone toggle, persona allocate) where a lost result is worse than a
+# slow one. It is not free.
+#
+# ⚠️ Applies to READ budgets on out-of-process calls only. A split
+# connect/read tuple is NOT exposed: connect SUCCEEDS during a reload (the
+# kernel accepted), so only the read leg can hang.
+_SERVER_TRANSPORT_TIMEOUT_SECONDS = 30
+
 _session_ready    = threading.Event()   # Gate: blocks tool calls until session ID resolved
 _session_failed   = False               # True if real ID never arrived (fallback only)
 
@@ -2013,7 +2038,7 @@ def _flip_speakerphone( active: bool ) -> dict:
         login_resp = requests.post(
             f"{SERVER_URL}/auth/login",
             json    = { "email": email, "password": password },
-            timeout = 5
+            timeout = _SERVER_TRANSPORT_TIMEOUT_SECONDS
         )
         if login_resp.status_code != 200:
             raise RuntimeError( f"login HTTP {login_resp.status_code}" )
@@ -2025,7 +2050,7 @@ def _flip_speakerphone( active: bool ) -> dict:
             f"{SERVER_URL}/api/cosa-voice/speakerphone/{sid}",
             json    = { "active": active },
             headers = { "Authorization": f"Bearer {access_token}" },
-            timeout = 5
+            timeout = _SERVER_TRANSPORT_TIMEOUT_SECONDS
         )
         if toggle_resp.status_code != 200:
             raise RuntimeError( f"endpoint HTTP {toggle_resp.status_code}: {toggle_resp.text[:200]}" )
@@ -2194,7 +2219,7 @@ def _request_persona( name: Optional[ str ] = None ) -> dict:
         login_resp = requests.post(
             f"{SERVER_URL}/auth/login",
             json    = { "email": email, "password": password },
-            timeout = 5
+            timeout = _SERVER_TRANSPORT_TIMEOUT_SECONDS
         )
         if login_resp.status_code != 200:
             return { "status": "error", "reason": f"login HTTP {login_resp.status_code}" }
@@ -2210,7 +2235,7 @@ def _request_persona( name: Optional[ str ] = None ) -> dict:
             f"{SERVER_URL}/api/cosa-voice/voice-persona/{sid}/allocate",
             params  = alloc_params,
             headers = { "Authorization": f"Bearer {access_token}" },
-            timeout = 5
+            timeout = _SERVER_TRANSPORT_TIMEOUT_SECONDS
         )
 
         if alloc_resp.status_code == 200:
@@ -3056,7 +3081,8 @@ def _dm_send_impl(
 
     url = f"{api_base_url}/api/dm/send"
     try:
-        resp = post_fn( url, json=payload, headers={ "X-API-Key": api_key }, timeout=10 )
+        resp = post_fn( url, json=payload, headers={ "X-API-Key": api_key },
+                        timeout=_SERVER_TRANSPORT_TIMEOUT_SECONDS )
     except Exception as e:
         return { "status": "error", "reason": "request_failed", "detail": str( e ) }
 
@@ -3194,7 +3220,8 @@ def _dm_respond_impl(
 
     url = f"{api_base_url}/api/dm/respond"
     try:
-        resp = post_fn( url, json=payload, headers={ "X-API-Key": api_key }, timeout=10 )
+        resp = post_fn( url, json=payload, headers={ "X-API-Key": api_key },
+                        timeout=_SERVER_TRANSPORT_TIMEOUT_SECONDS )
     except Exception as e:
         return { "status": "error", "reason": "request_failed", "detail": str( e ) }
 
@@ -3227,7 +3254,8 @@ def _dm_get_impl( *, message_id, api_base_url, api_key, get_fn ):
 
     url = f"{api_base_url}/api/dm/get"
     try:
-        resp = get_fn( url, params={ "message_id": message_id }, headers={ "X-API-Key": api_key }, timeout=10 )
+        resp = get_fn( url, params={ "message_id": message_id }, headers={ "X-API-Key": api_key },
+                       timeout=_SERVER_TRANSPORT_TIMEOUT_SECONDS )
     except Exception as e:
         return { "status": "error", "reason": "request_failed", "detail": str( e ) }
 
@@ -3264,7 +3292,8 @@ def _dm_list_impl( *, thread_id, since, limit, api_base_url, api_key, get_fn ):
 
     url = f"{api_base_url}/api/dm/list"
     try:
-        resp = get_fn( url, params=params, headers={ "X-API-Key": api_key }, timeout=10 )
+        resp = get_fn( url, params=params, headers={ "X-API-Key": api_key },
+                       timeout=_SERVER_TRANSPORT_TIMEOUT_SECONDS )
     except Exception as e:
         return { "status": "error", "reason": "request_failed", "detail": str( e ) }
 

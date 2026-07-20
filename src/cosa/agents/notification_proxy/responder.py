@@ -31,6 +31,34 @@ from cosa.agents.notification_proxy.config import (
 )
 import cosa.utils.util as cu
 
+# Transport budget for out-of-process HTTP calls to `:7999` (row 204911ca).
+# ~30s = 1.60x the observed maximum reload window of 18.76s — a multiplier with
+# explicit headroom, NOT a coverage guarantee. `:7999` runs `uvicorn --reload`
+# and the reloader parent holds the listening socket across a restart, so the
+# kernel ACCEPTS a request nothing is there to answer and the caller hangs
+# instead of getting a fast ConnectionRefused. The prior 10s sat under the
+# 18.76s observed max (measured n=143: min 6.59s, median 6.91s).
+#
+# EXPOSED VIA CLI MODE: `python -m cosa.agents.notification_proxy` runs this
+# responder in a SEPARATE OS process, so a `:7999` reload does not tear the
+# caller down alongside the request. That standalone mode is the documented,
+# actually-exercised one.
+#
+# Full derivation: src/rnd/v0.1.9/2026.07.19-dev-server-reload-availability.md §9(a).
+#
+# 🔴 DRIFT CONTROL — TWO SEARCHES, AND IT TOOK BOTH.
+# `grep -rn _SERVER_TRANSPORT_TIMEOUT_SECONDS` returns every DIRECT call site.
+# It does NOT return members whose budget is carried in a Pydantic FIELD rather
+# than passed at the call — `AsyncNotificationRequest( timeout=… )`, consumed at
+# `notify_user_async.py:197-201` as a bare `requests.post( timeout=request.timeout )`.
+# Two such members were missed on the first pass for exactly this reason.
+# The second search is: `grep -rn "AsyncNotificationRequest(" -A14 | grep timeout`.
+# Run BOTH, or the set you get back is the set the first grep can see.
+#
+# TRADE: a hung server now stalls a response POST ~30s instead of ~10s. Not free.
+_SERVER_TRANSPORT_TIMEOUT_SECONDS = 30
+
+
 
 class NotificationResponder:
     """
@@ -343,7 +371,7 @@ class NotificationResponder:
                 url,
                 json    = payload,
                 headers = { "Content-Type": "application/json" },
-                timeout = 10
+                timeout = _SERVER_TRANSPORT_TIMEOUT_SECONDS
             )
 
             if response.status_code == 200:

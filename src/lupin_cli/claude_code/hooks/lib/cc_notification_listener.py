@@ -55,6 +55,34 @@ SESSION_DIR       = Path.home() / ".claude" / "sessions"
 CENTRALIZED_LOG   = SESSION_DIR / "cc-listeners.log"
 SUBSCRIBED_EVENTS = [ "notification_queue_update" ]
 
+# Transport budget for this listener's out-of-process HTTP calls to `:7999`
+# (row 204911ca). ~30s = 1.60x the observed maximum reload window of 18.76s — a
+# multiplier with explicit headroom, NOT a coverage guarantee. `:7999` runs
+# `uvicorn --reload`; the reloader parent keeps the listening socket bound
+# across a restart, so the kernel ACCEPTS a request nothing is there to answer
+# and the caller hangs rather than getting a fast ConnectionRefused. The prior
+# 10.0s was the closest of the cohort but still under the 18.76s max.
+#
+# Full derivation: src/rnd/v0.1.9/2026.07.19-dev-server-reload-availability.md §9(a).
+#
+# 🔴 DRIFT CONTROL — TWO SEARCHES, AND IT TOOK BOTH.
+# `grep -rn _SERVER_TRANSPORT_TIMEOUT_SECONDS` returns every DIRECT call site.
+# It does NOT return members whose budget is carried in a Pydantic FIELD rather
+# than passed at the call — `AsyncNotificationRequest( timeout=… )`, consumed at
+# `notify_user_async.py:197-201` as a bare `requests.post( timeout=request.timeout )`.
+# Two such members were missed on the first pass for exactly this reason.
+# The second search is: `grep -rn "AsyncNotificationRequest(" -A14 | grep timeout`.
+# Run BOTH, or the set you get back is the set the first grep can see.
+#
+# ⚠️ SCOPE — this covers the HTTP user_id stamp calls ONLY. It does NOT apply to
+# the WebSocket read in base_listener.py, where a reload does not HANG the
+# connection, it KILLS it. That is a reconnect problem, not a budget problem;
+# bumping a timeout there fixes nothing.
+#
+# TRADE: a genuinely hung server stalls a stamp ~30s instead of ~10s. This is a
+# long-lived daemon with no latency pressure on these calls, so the cost is low.
+_SERVER_TRANSPORT_TIMEOUT_SECONDS = 30
+
 # ── Pane-idle probe sentinels (bug d1bb1456) ────────────────────────────────────
 # The pane-idle probe (`_pane_is_idle_at_prompt`) reads the RECIPIENT tmux pane's
 # real state to decide whether it is safe to inject/wake a peer DM. These sentinel
@@ -959,7 +987,7 @@ class CCNotificationListener( BaseWebSocketListener ):
                 priority          = NotificationPriority.LOW,
                 target_user       = target_email,
                 sender_id         = sender_id,
-                timeout           = 3
+                timeout           = _SERVER_TRANSPORT_TIMEOUT_SECONDS
             )
             notify_user_async( request=request )
             self._log( f"{self.LOG_PREFIX} Gist response sent: \"{gist}\"" )
@@ -1053,7 +1081,7 @@ class CCNotificationListener( BaseWebSocketListener ):
                 headers = { "Content-Type": "application/json" },
                 method  = "POST",
             )
-            with urllib.request.urlopen( req, timeout=10.0 ) as resp:
+            with urllib.request.urlopen( req, timeout=_SERVER_TRANSPORT_TIMEOUT_SECONDS ) as resp:
                 payload = json.loads( resp.read().decode( "utf-8" ) )
             user_id = payload.get( "user", { } ).get( "id" )
             if not user_id:
@@ -1115,7 +1143,7 @@ class CCNotificationListener( BaseWebSocketListener ):
                 headers = { "Content-Type": "application/json" },
                 method  = "POST",
             )
-            with urllib.request.urlopen( req, timeout=10.0 ) as resp:
+            with urllib.request.urlopen( req, timeout=_SERVER_TRANSPORT_TIMEOUT_SECONDS ) as resp:
                 payload = json.loads( resp.read().decode( "utf-8" ) )
             owner_user_id = payload.get( "user", { } ).get( "id" )
             if not owner_user_id:

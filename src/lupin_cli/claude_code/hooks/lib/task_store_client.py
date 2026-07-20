@@ -37,6 +37,24 @@ KEY_FILE_RELATIVE = "src/conf/keys/notification-api-claude-code-dev"
 # turn-end (cascade review §C). Deliberately tighter than the mirror's
 # DEFAULT_TIMEOUT_SECONDS (3.0s) — a 1s cap keeps the worst case (both owed-status
 # queries hang) at ~2s, the §C "≤1-2s" budget. Caller may override per-call.
+#
+# 🔴 DELIBERATELY EXCLUDED FROM THE ~30s RELOAD-WINDOW BUMP (row 204911ca,
+# 2026-07-20). Every other out-of-process `:7999` client in this repo was raised
+# to _SERVER_TRANSPORT_TIMEOUT_SECONDS (30) so it can outlast a `uvicorn
+# --reload` window. These two constants were left SHORT on purpose, and the
+# reason is not oversight:
+#
+#   - This read is on the Stop hot path and fires EVERY turn. A 30s budget would
+#     stall turn-end by 30s for the duration of any reload — paid by every
+#     session on the box, every turn, to rescue a single write.
+#   - It does not need rescuing. Transport failure here is the C8 SPOOL trigger:
+#     the write degrades to the spool and is reconciled later, rather than being
+#     lost. That is the correct shape for a hot-path call, and a longer budget
+#     would trade a cheap, already-handled degradation for a universal stall.
+#
+# So the short budget is LOAD-BEARING, not a leftover. If you are here because a
+# grep for reload-window exposure led you to it: the exposure is real and the
+# answer is still no. Do not raise these to match the cohort.
 DEFAULT_OWED_TIMEOUT_SECONDS = 1.0
 
 

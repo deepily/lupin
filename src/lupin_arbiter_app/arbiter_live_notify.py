@@ -141,7 +141,7 @@ def make_notify_transport(
     target_user     : str,
     sender_id       : str,
     api_key         : str,
-    timeout_seconds : int                  = 5,
+    timeout_seconds : int                  = 30,
     persist         : bool                 = True,
     http_post_fn    : Optional[ Callable ] = None,
     log_fn          : Optional[ Callable ] = None,
@@ -344,7 +344,7 @@ def make_dm_push_fn(
     base_url          : str,
     api_key           : str,
     sender_session_id  : str,
-    timeout_seconds   : int                  = 5,
+    timeout_seconds   : int                  = 30,
     http_post_json_fn : Optional[ Callable ] = None,
     log_fn            : Optional[ Callable ] = None,
 ) -> Callable[ [ str, str, str ], dict ]:
@@ -486,7 +486,7 @@ def make_tmux_push_fn(
 
 # ── the literal urllib IO boundaries ─────────────────────────────────────────
 
-def _http_post( url, headers, timeout_seconds=5 ):   # pragma: no cover - real urllib IO boundary (:7999 hop)
+def _http_post( url, headers, timeout_seconds=30 ):   # pragma: no cover - real urllib IO boundary (:7999 hop)
     """
     POST to `url` with `headers` (empty body); return ( status, parsed_body ).
 
@@ -507,7 +507,7 @@ def _http_post( url, headers, timeout_seconds=5 ):   # pragma: no cover - real u
         return resp.status, body
 
 
-def _http_post_json( url, headers, payload, timeout_seconds=5 ):   # pragma: no cover - real urllib IO boundary (:7999 hop)
+def _http_post_json( url, headers, payload, timeout_seconds=30 ):   # pragma: no cover - real urllib IO boundary (:7999 hop)
     """POST a JSON payload; return ( status, parsed_body ). Same boundary contract as _http_post."""
     import urllib.request
     data = json.dumps( payload ).encode( "utf-8" )

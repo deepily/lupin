@@ -76,6 +76,55 @@ MAX_STOP_BLOCKS = 3
 # Delay before tmux injection after stop block (seconds)
 TMUX_INJECTION_DELAY = 0.25
 
+# Transport budget for the FIELD-CARRIED notification path (row 204911ca, F1
+# 2026-07-20). Set to 6 — **deliberately NOT the cohort's 30.**
+#
+# 🔴 THIS MEMBER IS CARRIED IN A PYDANTIC FIELD, NOT PASSED AT THE CALL.
+# `AsyncNotificationRequest( timeout=… )` is consumed at
+# `notify_user_async.py:197-201` as a bare `requests.post( timeout=request.timeout )`
+# — bare governs BOTH the connect and the read leg, so the read leg is exposed
+# to a `:7999` reload just like a direct call site. The first pass raised the
+# direct `urlopen` sites in this package and left this one at 3s, because
+# `grep -rn _SERVER_TRANSPORT_TIMEOUT_SECONDS` cannot see a field assignment.
+# At 3s a reload silently dropped the notification — the caller swallows the
+# failure, so nothing observed the loss.
+#
+# 🔴 WHY 6 AND NOT 30 — THIS PATH RETRIES, AND THE SCHEDULE IS DERIVED FROM
+# THIS VERY NUMBER. `calculate_retry_intervals( request.timeout )`
+# (`notify_user_async.py:47`) builds the retry ladder FROM the timeout, so
+# raising it inflates BOTH the per-attempt budget AND the attempt count. The
+# cohort's 30 does not cost 30s here; it costs **267s**:
+#
+#   timeout │ attempt starts (s)        │ rides out an 18.76s reload? │ wall clock
+#   ────────┼───────────────────────────┼─────────────────────────────┼───────────
+#      3    │ 0, 4, 8                   │ NO — all inside the window  │   11s
+#      5    │ 0, 6, 12, 19              │ yes, by 0.24s               │   24s
+#    * 6 *  │ 0, 7, 14, 22              │ yes, TWO covering attempts  │   28s
+#     10    │ 0, 11, 22, 34, 46, 59     │ yes                         │   69s
+#     30    │ 0, 31, 63, …              │ yes                         │  267s
+#
+# These are fire-and-forget notifications on a HOOK path, wrapped in
+# `except: pass` precisely so a notification failure never blocks Claude Code.
+# A hook that stalls 267s is a far worse defect than a dropped best-effort
+# notification — so the cohort value is not merely oversized here, it is wrong.
+#
+# At 6 the RETRY LOOP rides out the window rather than any single fat timeout:
+# attempt 3 (14s→20s) is still open when a max-length window ends at 18.76s, and
+# attempt 4 starts at 22s after it. Two independent covering attempts, for 28s
+# worst case against the 11s this path already cost. That is the trade, and it
+# is 2.5x — not the 24x that copying the cohort would have bought.
+#
+# ⚠️ DO NOT "fix" this by aligning it to _SERVER_TRANSPORT_TIMEOUT_SECONDS. The
+# two numbers answer different questions: the cohort's covers ONE call with no
+# retry; this one covers a RETRY SCHEDULE it also generates. They are not the
+# same quantity and should not be made to match.
+#
+# Ceiling note: `AsyncNotificationRequest.timeout` is `Field( ge=1, le=30 )`
+# (`notification_models.py:620-625`), so 6 sits well inside the bound.
+#
+# Full derivation: src/rnd/v0.1.9/2026.07.19-dev-server-reload-availability.md §9(a).
+NOTIFY_TRANSPORT_TIMEOUT_SECONDS = 6
+
 
 # ── Core Functions ────────────────────────────────────────────────────────────
 
@@ -421,7 +470,7 @@ def send_tts( message, priority="low", sender_id=None, progress_group_id=None, s
             sender_id          = sender_id,
             progress_group_id  = progress_group_id,
             suppress_ding      = suppress_ding,
-            timeout            = 3
+            timeout            = NOTIFY_TRANSPORT_TIMEOUT_SECONDS
         )
 
         notify_user_async( request=request )
