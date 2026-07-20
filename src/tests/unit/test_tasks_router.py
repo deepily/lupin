@@ -377,8 +377,13 @@ def test_query_count_only_still_validates_enums( client, repo ):
 
 
 def test_query_terse_returns_glance_projection_only( client, repo ):
-    # §G: terse=true serializes the at-a-glance projection — EXACTLY the six
+    # §G: terse=true serializes the at-a-glance projection — EXACTLY the seven
     # glance keys, with `body` (and every other full-row field) dropped.
+    # park_reason_stale joined the projection 2026-07-19 (staleness §3.3): the
+    # terse shape is what a board glance actually reads, so a staleness flag
+    # carried ONLY by the full row would be a flag nobody sees. This assertion
+    # is an exact-set match on purpose — it is the guard that catches a field
+    # silently joining or leaving the token-sensitive projection.
     repo.query_tasks.return_value = [
         make_item( body="a multi-paragraph body that must NOT ride the wire", priority="P1" ),
     ]
@@ -387,8 +392,19 @@ def test_query_terse_returns_glance_projection_only( client, repo ):
     body = r.json()
     assert body[ "count" ] == 1
     row = body[ "tasks" ][ 0 ]
-    assert set( row.keys() ) == { "id", "title", "status", "blocked_by", "next_chase_ts", "priority" }
+    assert set( row.keys() ) == {
+        "id", "title", "status", "blocked_by", "next_chase_ts", "priority", "park_reason_stale",
+    }
     assert "body" not in row                                  # the token win — body dropped
+    # `is False`, not a truthiness check, and a type assertion beside it: the SQL
+    # twin of this predicate returns NULL (not False) on its null arms when run as
+    # a PROJECTION rather than a filter, and `None` is falsy — so `assert not
+    # row[...]` would pass straight over a nullable bool reaching the wire. §3.3
+    # promises a bool; this is what holds the projection to it. (Null-arm defect
+    # found by seat 1 in the SQL twin, 2026-07-19; the serializer uses the Python
+    # predicate and is unaffected — this assertion is what keeps that true.)
+    assert type( row[ "park_reason_stale" ] ) is bool         # TYPE FIRST — never None, on any arm
+    assert row[ "park_reason_stale" ] is False                # a never-parked row is never stale
     assert row[ "priority" ] == "P1" and row[ "status" ] == "queued"
     repo.query_tasks.assert_called_once()                    # rows ARE materialized (not count mode)
     repo.count_tasks.assert_not_called()

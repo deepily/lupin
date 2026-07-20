@@ -123,6 +123,7 @@ class TestTaskTransitionWrapper:
             "blocked_by"    : [ { "kind": "user", "id": "rick" } ],
             "reason"        : "waiting on Rick's gate",
             "authority"     : "user_direct",
+            "park_reason"   : None,          # park wiring (f68bc520) — always forwarded
         }
 
     def test_defaults_match_spec( self, stamped_identity, monkeypatch ):

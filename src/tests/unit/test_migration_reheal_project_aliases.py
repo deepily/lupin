@@ -68,6 +68,7 @@ CREATE TABLE task_items (
     blocked_by          TEXT NOT NULL DEFAULT '[]',
     next_chase_ts       TEXT,
     park_reason         TEXT,
+    park_reason_captured_at TEXT,
     gate_class          TEXT NOT NULL DEFAULT 'none',
     priority            TEXT NOT NULL DEFAULT 'P2',
     urgency             TEXT NOT NULL DEFAULT 'normal',

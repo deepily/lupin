@@ -238,6 +238,7 @@ class TestTaskTransitionImpl:
             "next_chase_ts" : None,
             "blocked_by"    : None,
             "reason"        : None,
+            "park_reason"   : None,          # park wiring (f68bc520) — always in the payload
         }
 
     def test_blocked_fields_pass_through( self, capture_request ):

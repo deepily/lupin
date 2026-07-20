@@ -35,6 +35,7 @@ from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
 from cosa.rest.db.database import get_db
 from cosa.rest.db.repositories.task_repository import TaskRepository
 from cosa.rest import task_store_rules as rules
+from cosa.rest.task_store_owed import park_reason_is_stale
 from cosa.agents.utils.sender_id import canonicalize_project_name
 from lupin_mcp.persona_normalization import canonical_persona_key
 
@@ -174,6 +175,7 @@ class TaskTransitionIn( BaseModel ):
     next_chase_ts : Optional[datetime]  = None
     blocked_by    : Optional[list]      = None
     reason        : Optional[str]       = Field( default=None, max_length=4000, description="free-text justification; REQUIRED non-blank for ->dropped (C12)" )
+    park_reason   : Optional[str]       = Field( default=None, max_length=4000, description="REQUIRED non-blank for ->parked; MUST quote the row's OWN decisive sentence, not a paraphrase" )
 
 
 class TaskCorrelateIn( BaseModel ):
@@ -250,6 +252,10 @@ def _serialize_item( item ) -> dict:
 
     Ensures:
         - returns a JSON-safe dict; nullable timestamps serialize as None
+        - `park_reason_stale` is DERIVED, never stored: the frozen-quote
+          divergence flag (design §3.3). ADVISORY ONLY — it changes no
+          owed-ness, unparks nothing, blocks nothing; it marks the quote
+          untrustworthy and stops there.
     """
     return {
         "id"                  : str( item.id ),
@@ -263,6 +269,9 @@ def _serialize_item( item ) -> dict:
         "status"              : item.status,
         "blocked_by"          : item.blocked_by,
         "next_chase_ts"       : item.next_chase_ts.isoformat() if item.next_chase_ts is not None else None,
+        "park_reason"         : item.park_reason,
+        "park_reason_captured_at" : item.park_reason_captured_at.isoformat() if item.park_reason_captured_at is not None else None,
+        "park_reason_stale"   : park_reason_is_stale( item.status, item.park_reason_captured_at, item.updated_ts ),
         "gate_class"          : item.gate_class,
         "priority"            : item.priority,
         "urgency"             : item.urgency,
@@ -281,25 +290,37 @@ def _serialize_item_terse( item ) -> dict:
     owed-work peek) needs the at-a-glance fields, NOT the full row — `body` in
     particular can be multi-paragraph, and the audit trail (/events) is already
     a separate surface. This projection drops `body` and every non-glance field,
-    keeping ONLY id / title / status / blocked_by / next_chase_ts / priority —
-    so a list query over MCP costs a fraction of the full-row token weight
-    (cosa-voice token-efficiency is goal #1). Field names are IDENTICAL to the
-    full shape (one name at every layer) — a terse row is a strict subset.
+    keeping ONLY id / title / status / blocked_by / next_chase_ts / priority /
+    park_reason_stale — so a list query over MCP costs a fraction of the
+    full-row token weight (cosa-voice token-efficiency is goal #1). Field names
+    are IDENTICAL to the full shape (one name at every layer) — a terse row is a
+    strict subset.
+
+    `park_reason_stale` is here DELIBERATELY, against the projection's own
+    minimalism: the terse shape is what a board glance actually reads, so a
+    staleness flag omitted from it is a flag nobody sees — which is design
+    option 3 (document the defect, detect nothing) wearing option 1's clothes
+    (§3.3). It costs one boolean per row. A row that was never parked reports
+    False, so the flag is silent on the overwhelming majority of rows.
 
     Requires:
         - item is a flushed TaskItem (id populated)
 
     Ensures:
-        - returns a JSON-safe dict with EXACTLY the six glance keys; nullable
+        - returns a JSON-safe dict with EXACTLY the seven glance keys; nullable
           next_chase_ts serializes as None
+        - park_reason_stale is DERIVED (never stored) and ADVISORY — identical
+          semantics to the full shape's, computed by the same predicate, so the
+          two projections can never disagree about staleness
     """
     return {
-        "id"            : str( item.id ),
-        "title"         : item.title,
-        "status"        : item.status,
-        "blocked_by"    : item.blocked_by,
-        "next_chase_ts" : item.next_chase_ts.isoformat() if item.next_chase_ts is not None else None,
-        "priority"      : item.priority,
+        "id"                : str( item.id ),
+        "title"             : item.title,
+        "status"            : item.status,
+        "blocked_by"        : item.blocked_by,
+        "next_chase_ts"     : item.next_chase_ts.isoformat() if item.next_chase_ts is not None else None,
+        "priority"          : item.priority,
+        "park_reason_stale" : park_reason_is_stale( item.status, item.park_reason_captured_at, item.updated_ts ),
     }
 
 
@@ -479,6 +500,7 @@ def transition_task(
             next_chase_ts = payload.next_chase_ts,
             blocked_by    = blocked_by,
             reason        = payload.reason,
+            park_reason   = payload.park_reason,
         ) )
 
         event = repo.apply_transition(
@@ -490,6 +512,7 @@ def transition_task(
             next_chase_ts = payload.next_chase_ts,
             blocked_by    = blocked_by,
             reason        = payload.reason,
+            park_reason   = payload.park_reason,
         )
         return { "item": _serialize_item( item ), "event": _serialize_event( event ) }
 
@@ -697,8 +720,9 @@ def patch_task(
                   "rejected (422), never silently empty. count_only=true returns "
                   "{count} as a true COUNT(*) without serializing any rows (the "
                   "owed-count token win, §G). terse=true returns the at-a-glance "
-                  "projection (id/title/status/blocked_by/next_chase_ts/priority "
-                  "— drops body) for cheap 'see my list' queries. Auth: X-API-Key "
+                  "projection (id/title/status/blocked_by/next_chase_ts/priority/"
+                  "park_reason_stale — drops body) for cheap 'see my list' "
+                  "queries. Auth: X-API-Key "
                   "or Bearer JWT."
 )
 def query_tasks(
@@ -744,9 +768,11 @@ def query_tasks(
           count_only takes precedence over terse (a count needs no rows at all).
         - terse=True (§G token win, count_only=False): returns { tasks: [...],
           count } where each row is the at-a-glance projection (id / title /
-          status / blocked_by / next_chase_ts / priority — `body` and the other
-          full-row fields dropped), so an on-demand "see my list" query over MCP
-          costs a fraction of the full-row token weight.
+          status / blocked_by / next_chase_ts / priority / park_reason_stale —
+          `body` and the other full-row fields dropped), so an on-demand "see my
+          list" query over MCP costs a fraction of the full-row token weight.
+          park_reason_stale rides the TERSE shape deliberately: a staleness flag
+          carried only by the full row is a flag nobody reads (§3.3).
         - owed_only=True (PARKED-STATUS 2026-07-19) selects the OWED set —
           queued U in_progress U (parked AND NOT park-active) — computed
           SERVER-SIDE. Park-expiry is evaluated at READ time and never written

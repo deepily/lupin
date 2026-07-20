@@ -3527,6 +3527,7 @@ def task_transition(
     blocked_by    : Optional[ list ] = None,
     reason        : Optional[ str ]  = None,
     authority     : str              = "standing",
+    park_reason   : Optional[ str ]  = None,
 ) -> dict:
     """
     **[SELF-DISCLOSURE]** Apply one state change to a task-store item.
@@ -3538,6 +3539,21 @@ def task_transition(
     id}) AND next_chase_ts; done/dropped are terminal. This tool does NOT
     pre-check any of that — a 422 carries the server's errors unedited.
 
+    `->parked` means A HUMAN RULED THIS NOT-NOW: approved, not abandoned, and
+    blocked on NOTHING. It REQUIRES BOTH `park_reason` (non-blank) AND
+    `next_chase_ts`, and is legal ONLY from queued / in_progress.
+      · `park_reason` MUST QUOTE the row's own decisive sentence, not
+        paraphrase it — the quote is what lets the next reader REFUTE the park
+        row-by-row instead of re-deriving the whole board.
+      · The chase IS the un-park. Expiry is computed at READ time: once
+        next_chase_ts passes, the row REJOINS the owed count automatically —
+        no daemon, no sweeper, no human action. Parking buys BOUNDED,
+        SELF-EXPIRING silence, never an exit.
+      · An INDEFINITE hold is NOT a park — that is `dropped` with a reason,
+        because dropping is VISIBLE.
+      · Leaving `parked` CLEARS park_reason: a quote must never outlive the
+        park it justified.
+
     Examples:
         # Close with receipts:
         task_transition(task_id="<uuid>", to_status="done",
@@ -3548,12 +3564,19 @@ def task_transition(
                         blocked_by=[{"kind": "persona", "id": "tiffany"}],
                         next_chase_ts="2026-06-13T09:00:00-04:00")
 
+        # Park a deliberately-held row, quoting its OWN decisive sentence:
+        task_transition(task_id="<uuid>", to_status="parked",
+                        park_reason="NOT TO BE WORKED per Rick's direct instruction",
+                        next_chase_ts="2026-07-22T09:00:00-04:00")
+
     Args:
         task_id: The item's UUID
         to_status: Target status (e.g. in_progress | blocked | done | dropped)
         receipt_refs: Receipt dict — REQUIRED server-side for ->done
         next_chase_ts: ISO-8601 chase time — REQUIRED server-side for ->blocked
         blocked_by: Typed refs [{kind, id}] — REQUIRED server-side for ->blocked
+        park_reason: The row's OWN decisive sentence, quoted (<=4000) —
+            REQUIRED server-side (non-blank) for ->parked; cleared on unpark
         reason: Free-text rationale (<=4000) — REQUIRED server-side (non-empty)
             for ->dropped once the Phase-2 write-path lands (C12 pull-forward);
             give one on every ->dropped regardless (task-store-discipline.md §4)
@@ -3577,6 +3600,7 @@ def task_transition(
         blocked_by    = blocked_by,
         reason        = reason,
         authority     = authority,
+        park_reason   = park_reason,
     )
 
 
@@ -3606,7 +3630,8 @@ def task_query(
 
     TOKEN-EFFICIENCY (goal #1): pass terse=True for any "see my list" / board
     glance. It returns the at-a-glance projection (id / title / status /
-    blocked_by / next_chase_ts / priority — `body` and the other full-row fields
+    blocked_by / next_chase_ts / priority / park_reason_stale — `body` and the
+    other full-row fields
     dropped), a fraction of the full-row token weight. Reach for the full shape
     (terse=False) ONLY when you actually need a row's body/audit context.
 
@@ -3630,6 +3655,24 @@ def task_query(
     at READ time. An INDEFINITE hold is not parked, it is `dropped` with a
     reason (dropping is visible). Pass `include_parked=True` (or
     `status="parked"`) to audit what is currently parked and why.
+
+    STALE PARK REASONS (2026-07-19): every row carries `park_reason_stale`
+    (bool) — in the TERSE projection too, not only the full row. A
+    `park_reason` is a FROZEN QUOTE of the row's decisive sentence, captured at
+    park time. Amend the row afterward and that quote stays syntactically valid
+    while it stops being true, and nothing goes red. `park_reason_stale=True`
+    IS that red: the row was written to AFTER its quote was frozen, so the
+    quote is no longer known to describe the row — read the row itself, not its
+    park_reason, and re-park to re-freeze the quote.
+
+    ADVISORY ONLY. Staleness changes NO owed-ness, unparks nothing, blocks
+    nothing. It marks a quote untrustworthy and stops there — deciding what to
+    do about it is a human's call, not this flag's.
+
+    It under-reports by design: a row parked before this shipped has no capture
+    time and reports False (we cannot know what its quote described), as does
+    any row never parked. So `True` is strong evidence and `False` is merely the
+    absence of evidence.
 
     Examples:
         # My owed work (terse list) — the everyday scoped query:

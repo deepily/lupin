@@ -154,6 +154,7 @@ def task_transition_impl(
     blocked_by    = None,
     reason        = None,
     authority     = "standing",
+    park_reason   = None,
 ):
     """
     POST /api/tasks/{task_id}/transition — one state change + one audit event.
@@ -170,6 +171,10 @@ def task_transition_impl(
         - `reason` passes through verbatim (spec amendment 2026-06-12 / Phase-2
           contract §1.11(B): server-REQUIRED non-empty for ->dropped once the
           C12 pull-forward lands; the pre-Phase-2 server ignores the field)
+        - `park_reason` passes through verbatim: server-REQUIRED non-blank for
+          ->parked, and it MUST quote the row's OWN decisive sentence rather
+          than paraphrase it (that quote is what makes a park refutable by the
+          next reader instead of re-derived)
     """
     payload = {
         "to_status"     : to_status,
@@ -179,6 +184,7 @@ def task_transition_impl(
         "next_chase_ts" : next_chase_ts,
         "blocked_by"    : blocked_by,
         "reason"        : reason,
+        "park_reason"   : park_reason,
     }
     return task_store_request( "POST", f"/api/tasks/{task_id}/transition", api_base_url, api_key, json_body=payload )
 
@@ -350,7 +356,8 @@ def task_query_impl(
         - `correlation_key` exact-match filter passes through (spec amendment
           2026-06-12 / Phase-2 contract §1.11(C); pre-Phase-2 server ignores it)
         - terse=True (§G token win) requests the at-a-glance projection
-          (id/title/status/blocked_by/next_chase_ts/priority — body dropped);
+          (id/title/status/blocked_by/next_chase_ts/priority/park_reason_stale
+          — body dropped);
           passed to the server as the canonical lowercase "true" (a pre-§G
           server simply ignores the unknown param and returns full rows)
         - include_terminal=True includes done/dropped rows on an un-status'd
@@ -372,6 +379,14 @@ def task_query_impl(
           asking for status="parked" directly (the audit surface). Forwarded
           ONLY when truthy, as the canonical lowercase "true" (mirror of terse),
           so a pre-parked server ignores the unknown param.
+        - PARK-REASON STALENESS (2026-07-19): every row carries
+          `park_reason_stale` (bool), in the TERSE projection as well as the
+          full shape — a flag only the full row carried would be a flag nobody
+          reads. True means the row was AMENDED AFTER its `park_reason` quote
+          was frozen, so the quote is no longer known to describe the row.
+          ADVISORY ONLY: it changes no owed-ness, unparks nothing, blocks
+          nothing. Re-park to re-freeze the quote. Rows parked before this
+          shipped, and rows never parked, report False.
     """
     filters = {
         "owner_persona"       : owner_persona,

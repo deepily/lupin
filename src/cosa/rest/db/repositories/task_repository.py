@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from typing import Optional, List
 import uuid
 
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from cosa.rest.postgres_models import TaskItem, TaskEvent
@@ -159,6 +159,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         next_chase_ts : Optional[datetime] = None,
         blocked_by    : Optional[list] = None,
         reason        : Optional[str] = None,
+        park_reason   : Optional[str] = None,
     ) -> TaskEvent:
         """
         Apply an ALREADY-VALIDATED transition: update the item + append the event.
@@ -170,11 +171,24 @@ class TaskRepository( BaseRepository[TaskItem] ):
 
         Ensures:
             - item.status set to to_status
-            - to_status == 'blocked': item.next_chase_ts + item.blocked_by set
-            - to_status != 'blocked': item.next_chase_ts cleared and
-              item.blocked_by emptied (an unblocked item is blocked on nothing)
+            - to_status == 'blocked': item.next_chase_ts + item.blocked_by set;
+              park_reason + park_reason_captured_at cleared
+            - to_status == 'parked': item.next_chase_ts set (the chase IS the
+              un-park — read-time expiry) + item.park_reason set; blocked_by
+              emptied (a parked item waits on nothing; a human ruled it not-now);
+              item.park_reason_captured_at AND item.updated_ts both stamped with
+              ONE DB-clock instant in a SINGLE statement, so they are equal by
+              construction (see _park_capture_ts — the §3.4 ordering, and why
+              the design's read-back sequence cannot commit)
+            - any OTHER status: item.next_chase_ts cleared, item.blocked_by
+              emptied, item.park_reason + item.park_reason_captured_at cleared
+              (an unblocked item is blocked on nothing; an unparked item carries
+              no park justification, and a capture time must not outlive the
+              quote it dates)
             - exactly one TaskEvent ("from->to") appended with receipt_refs
-              + authority + reason (reason non-None for ->dropped by rule)
+              + authority + reason (reason non-None for ->dropped by rule); on
+              ->parked that event's `ts` IS park_reason_captured_at, so the
+              column and the audit row record ONE instant, not two (AC10)
             - flush() called; commit NOT called (caller's get_db() commits)
 
         Returns:
@@ -184,13 +198,118 @@ class TaskRepository( BaseRepository[TaskItem] ):
 
         item.status = to_status
         if to_status == "blocked":
+            item.next_chase_ts           = next_chase_ts
+            item.blocked_by              = blocked_by
+            item.park_reason             = None
+            item.park_reason_captured_at = None
+        elif to_status == PARK_STATUS:
+            # PARK KEEPS ITS CHASE. `parked` used to fall into the else below,
+            # which NULLS next_chase_ts — and the parked CHECK constraint
+            # requires it, so every park would have 500'd on
+            # ck_task_items_parked_requires_chase_ts. The chase IS the un-park
+            # (read-time expiry, task_store_owed), so clearing it would also
+            # destroy the one field that makes a park self-expiring.
             item.next_chase_ts = next_chase_ts
-            item.blocked_by    = blocked_by
+            item.blocked_by    = [ ]
+            item.park_reason   = park_reason
+            # ONE instant, written to BOTH columns in THIS statement — see
+            # _park_capture_ts for why it cannot be a read-back-then-update.
+            captured                     = self._park_capture_ts()
+            item.updated_ts              = captured     # explicit => onupdate suppressed
+            item.park_reason_captured_at = captured
         else:
             item.next_chase_ts = None
             item.blocked_by    = [ ]
+            # LEAVING parked CLEARS the quote. A park_reason surviving an unpark
+            # is a stale justification on a row that is no longer parked, and
+            # NEITHER CHECK fires in that direction (both are guarded by
+            # `status != 'parked' OR ...`, vacuously true once the status moves).
+            # The capture time goes with it: a date on a deleted quote dates
+            # nothing, and leaving it would make a later re-park's equality
+            # invariant unreadable.
+            item.park_reason             = None
+            item.park_reason_captured_at = None
+
+        if to_status == PARK_STATUS:
+            return self._append_event(
+                item.id, actor, transition_label, authority, receipt_refs, reason=reason, ts=captured
+            )
 
         return self._append_event( item.id, actor, transition_label, authority, receipt_refs, reason=reason )
+
+    def _park_capture_ts( self ) -> datetime:
+        """
+        Read the DATABASE clock for the park write's single timestamp — the one
+        instant stamped into `updated_ts`, `park_reason_captured_at`, and the
+        park event's `ts`.
+
+        WHY NOT THE POST-WRITE READ-BACK THE DESIGN DESCRIBES (§3.4). The design
+        says "capture the post-write `updated_ts`, read back in the same
+        transaction," which reads as: flush the park, read `updated_ts`, then
+        UPDATE `park_reason_captured_at` to match. THAT SEQUENCE CANNOT COMMIT.
+        The first flush writes status='parked' with `park_reason_captured_at`
+        still NULL, and `ck_task_items_parked_requires_captured_at` is evaluated
+        PER STATEMENT, not at commit — so the park 500s on its own CHECK before
+        the second statement is ever reached. PostgreSQL cannot defer a CHECK
+        (only UNIQUE/PK/FK/EXCLUDE take DEFERRABLE), so there is no version of
+        the two-step that works. Verified end-to-end, not reasoned about: the
+        read-back implementation passed 156 unit tests and then 500'd on the
+        first real park through the API.
+
+        So the write is SINGLE-STATEMENT: take the timestamp first, assign it to
+        both columns, flush once. `updated_ts` is assigned EXPLICITLY, which
+        suppresses its `onupdate=func.now()` for this statement — otherwise the
+        column would advance past the capture we just wrote and every parked row
+        would be BORN STALE, which is the trap §3.4 exists to name.
+
+        This satisfies §3.4's INTENT exactly — `park_reason_captured_at` equals
+        the `updated_ts` this write leaves on the row — and pins it harder than
+        a read-back could: the equality is true by construction rather than by
+        the two values happening to agree.
+
+        WHY THE DB CLOCK AND NOT `datetime.now()`. Every other `updated_ts` in
+        this table is written by `onupdate=func.now()`, i.e. the DATABASE's
+        clock. Staleness compares a capture against a LATER `updated_ts` written
+        by that path, so a capture taken from the APPLICATION's clock would make
+        the comparison cross-clock, and any skew would show up as a false FRESH
+        — a parked row quietly failing to report a quote that has expired, which
+        is the exact defect this build exists to detect. One clock, one value.
+
+        On PostgreSQL `now()` is `transaction_timestamp()` and is stable across
+        the transaction, so this returns precisely the value `onupdate` would
+        have written — the explicit assignment changes the mechanism, not the
+        number.
+
+        Requires:
+            - an open session/transaction (the caller's; this reads, never writes)
+
+        Ensures:
+            - returns a tz-aware UTC datetime from the DB clock
+            - a naive return is converted to tz-aware UTC, so the value compares
+              correctly against the tz-aware column on every backend
+            - commit NOT called; nothing is written here
+
+        Returns:
+            The single timestamp for this park write
+        """
+        captured = self.session.execute( select( func.now() ) ).scalar_one()
+
+        # MEASURED, both backends, 2026-07-19 — not assumed:
+        #   PostgreSQL -> datetime(..., tzinfo=UTC)   (tz-aware)
+        #   SQLite     -> datetime(...)               (NAIVE, and a datetime —
+        #                                              NOT the string it is easy
+        #                                              to assume it returns)
+        # So exactly one normalization is needed and it is load-bearing on
+        # SQLite: a naive value compared against the tz-aware column raises
+        # TypeError. An earlier draft also carried an `isinstance( captured, str )`
+        # branch written on the ASSUMPTION that SQLite returns a string. It does
+        # not, so that branch was unreachable — a hedge marking where its author
+        # had declined to find out, and an uncoverable line under the 100% gate.
+        # Verified, then deleted.
+        if captured.tzinfo is None:
+            captured = captured.replace( tzinfo=timezone.utc )
+
+        return captured
 
     def apply_correlation(
         self,
@@ -700,6 +819,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         authority    : str,
         receipt_refs : Optional[dict],
         reason       : Optional[str] = None,
+        ts           : Optional[datetime] = None,
     ) -> TaskEvent:
         """
         Append one audit-trail event row (internal helper).
@@ -707,9 +827,18 @@ class TaskRepository( BaseRepository[TaskItem] ):
         Requires:
             - item_id references an item present in this session
             - actor/transition/authority are non-empty strings
+            - ts is an explicit event timestamp, or None for the column default
+              (func.now()). ONLY the park path passes it: the park event must
+              carry the SAME instant as park_reason_captured_at, because
+              rejecting design option 4 left us with two records of one fact and
+              AC10 requires them to AGREE. Passing the value rather than letting
+              both default to now() makes that agreement structural — it holds
+              on any backend, instead of riding PostgreSQL's transaction-stable
+              now(), which is the only reason the defaults would have matched.
 
         Ensures:
             - TaskEvent added + flushed (id populated); commit NOT called
+            - event.ts == ts when supplied, else the func.now() default
 
         Returns:
             The appended TaskEvent instance
@@ -722,6 +851,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
             authority    = authority,
             reason       = reason,
         )
+        if ts is not None: event.ts = ts
         self.session.add( event )
         self.session.flush()
         return event
