@@ -596,11 +596,147 @@ MUTANTS_SQL = [
     ( "SQL null capture arm inverted", _mutant_clause_null_arm_inverted ),
 ]
 
+# ── STRUCTURAL COMPLETION (seat 1's generator, folded 2026-07-19 post-run) ──
+#
+# ⚠️ THE LIST ABOVE WAS DERIVED FROM AC9's NAMED MINIMUM, AND THAT IS THE BUG.
+# AC9 wrote "at minimum" and it was read as a ceiling, so the sweep covered the
+# four mutations the AC happened to name and was SILENT about every guard it did
+# not. A missing mutant is invisible by construction: no rerun, and no amount of
+# rigor against the list you have, can report on a mutant that does not exist.
+#
+# ⇒ THE RULE, which replaces judgement with derivation: take the clause's
+#   STRUCTURE — it is a conjunction of 4 terms — and emit DROP each + NEGATE each,
+#   plus the operator variants on the one comparison. 4x2 + 3 = 11. A list built
+#   this way cannot be short by forgetting.
+#
+# ⇒ AND THE HALF THAT OUTRANKS THE COUNT: cross-referencing each mutant against
+#   REACHABILITY turns the sweep from pass/fail into a statement about what each
+#   guard IS —
+#       dies in every shape                      -> LIVE GUARD
+#       dies only in some shapes, REACHABLE rows -> SHAPE-SENSITIVE (a filter-only
+#                                                   gate false-greens on it)
+#       dies only on UNREACHABLE rows            -> FAIL-SAFE (keep it, but do not
+#                                                   call it a live defense)
+#       survives everywhere on reachable data    -> DEAD CODE or a blind gate
+#
+# Generator verdict on this clause (48 rows, 31 reachable):
+#   LIVE 9 · SHAPE-SENSITIVE 0 · FAIL-SAFE 2 · SURVIVES-EVERYWHERE 0
+# The two FAIL-SAFEs are the null-guard DROPs, identified mechanically rather than
+# by a human deciding. SURVIVES-EVERYWHERE=0 also answers "is any of this dead
+# code" — a question nobody had thought to ask.
+#
+# Tool: src/tmp/mutant-adequacy-generator-for-seat3-2026.07.19.py (seat 1, 15474267).
+# ⚠️ That path is GITIGNORED and will die. If the generator is kept it belongs
+# committed beside the suites it audits, with the classification table as its
+# output contract.
+#
+# NOTE the DROP/NEGATE asymmetry, which is why "invert the null arm" was never a
+# substitute for "drop" it: for the SAME guard, NEGATE lands LIVE (inverting ADDS
+# rows, so a filter sees it) while DROP lands FAIL-SAFE (deletion is invisible to
+# a filter). Opposite verdicts, same guard, purely from mutation direction.
+
+def _mutant_clause_negate_status_guard( model ):
+    """MUTANT: status guard NEGATED — every non-parked row becomes eligible."""
+    from sqlalchemy import and_
+    return and_(
+        model.status != PARK_STATUS,
+        model.park_reason_captured_at.isnot( None ),
+        model.updated_ts.isnot( None ),
+        model.updated_ts > model.park_reason_captured_at,
+    )
+
+
+def _mutant_clause_drop_ordering( model ):
+    """MUTANT: the comparison DROPPED — every parked row with both timestamps is stale."""
+    from sqlalchemy import and_
+    return and_(
+        model.status == PARK_STATUS,
+        model.park_reason_captured_at.isnot( None ),
+        model.updated_ts.isnot( None ),
+    )
+
+
+def _mutant_clause_negate_ordering( model ):
+    """MUTANT: comparison NEGATED — `updated <= captured`, the complement of stale."""
+    from sqlalchemy import and_
+    return and_(
+        model.status == PARK_STATUS,
+        model.park_reason_captured_at.isnot( None ),
+        model.updated_ts.isnot( None ),
+        model.updated_ts <= model.park_reason_captured_at,
+    )
+
+
+def _mutant_clause_negate_updated_notnull( model ):
+    """
+    MUTANT: the UPDATED null guard NEGATED — `updated_ts IS NULL`, which then
+    cannot satisfy the comparison. Selects nothing.
+
+    Caught by `test_the_mutant_list_is_STRUCTURALLY_complete` on its FIRST run:
+    I completed the list from the generator's table and still omitted this one.
+    The guard bit immediately, on its author, which is the only reason it is here.
+    """
+    from sqlalchemy import and_
+    return and_(
+        model.status == PARK_STATUS,
+        model.park_reason_captured_at.isnot( None ),
+        model.updated_ts.is_( None ),
+        model.updated_ts > model.park_reason_captured_at,
+    )
+
+
+def _mutant_clause_boundary_not_equal( model ):
+    """MUTANT: `!=` instead of `>` — a BACKDATED write reads stale too."""
+    from sqlalchemy import and_
+    return and_(
+        model.status == PARK_STATUS,
+        model.park_reason_captured_at.isnot( None ),
+        model.updated_ts.isnot( None ),
+        model.updated_ts != model.park_reason_captured_at,
+    )
+
+
+# The structural mutants the AC-derived list above was missing. All LIVE — each
+# moves the row set, so the filter gate sees every one.
+MUTANTS_SQL_STRUCTURAL = [
+    ( "SQL status guard NEGATED",       _mutant_clause_negate_status_guard ),
+    ( "SQL updated null guard NEGATED", _mutant_clause_negate_updated_notnull ),
+    ( "SQL ordering DROPPED",           _mutant_clause_drop_ordering ),
+    ( "SQL ordering NEGATED",           _mutant_clause_negate_ordering ),
+    ( "SQL boundary != instead of >",   _mutant_clause_boundary_not_equal ),
+]
+
+
+def _mutant_clause_drop_capture_notnull( model ):
+    """MUTANT: only the CAPTURE null guard dropped. FAIL-SAFE — projection-only."""
+    from sqlalchemy import and_
+    return and_(
+        model.status == PARK_STATUS,
+        model.updated_ts.isnot( None ),
+        model.updated_ts > model.park_reason_captured_at,
+    )
+
+
+def _mutant_clause_drop_updated_notnull( model ):
+    """MUTANT: only the UPDATED null guard dropped. FAIL-SAFE — projection-only."""
+    from sqlalchemy import and_
+    return and_(
+        model.status == PARK_STATUS,
+        model.park_reason_captured_at.isnot( None ),
+        model.updated_ts > model.park_reason_captured_at,
+    )
+
+
 # Swept ONLY in projection — see `_sql_projection`. Listed separately rather than
-# folded in, because adding it to MUTANTS_SQL would make the filter sweep report a
-# SURVIVOR and invite someone to "fix" it by deleting the mutant.
+# folded in, because adding these to MUTANTS_SQL would make the filter sweep report
+# SURVIVORS and invite someone to "fix" it by deleting the mutants.
+#
+# These are the FAIL-SAFE two: they die only on rows the CHECK forbids. Kept, and
+# labelled so nobody reports them as live defenses.
 MUTANTS_SQL_PROJECTION_ONLY = [
-    ( "SQL null guards dropped", _mutant_clause_drop_null_guards ),
+    ( "SQL null guards dropped",         _mutant_clause_drop_null_guards ),
+    ( "SQL capture null guard dropped",  _mutant_clause_drop_capture_notnull ),
+    ( "SQL updated null guard dropped",  _mutant_clause_drop_updated_notnull ),
 ]
 
 
@@ -613,12 +749,59 @@ def test_python_mutant_breaks_parity( session, name, mutant ):
     )
 
 
-@pytest.mark.parametrize( "name,mutant", MUTANTS_SQL, ids=[ m[ 0 ] for m in MUTANTS_SQL ] )
+@pytest.mark.parametrize(
+    "name,mutant",
+    MUTANTS_SQL + MUTANTS_SQL_STRUCTURAL,
+    ids=[ m[ 0 ] for m in MUTANTS_SQL + MUTANTS_SQL_STRUCTURAL ],
+)
 def test_sql_mutant_breaks_parity( session, name, mutant ):
     """AC9: each SQL-side mutant MUST diverge from the real Python twin."""
     assert _python_side() != _sql_side( session, mutant ), (
         f"MUTANT SURVIVED: {name!r} — the parity gate cannot detect it, so the "
         f"guard it targets is decorative"
+    )
+
+
+def test_the_mutant_list_is_STRUCTURALLY_complete():
+    """
+    THE GUARD AGAINST THE LIST GOING SHORT AGAIN — which is the defect that
+    actually happened here, and the one no amount of re-running could surface.
+
+    The SQL clause is a conjunction of 4 terms. A structurally-derived list emits
+    DROP each + NEGATE each (8), plus the operator variants on the single
+    comparison (3) = 11. This asserts the count we actually carry against that
+    derivation, so ADDING A CONJUNCT to the clause without adding its two mutants
+    fails HERE rather than passing silently forever.
+
+    ⚠️ A count is a weak check and it is deliberately paired with the naming
+    assertion below: 11 arbitrary mutants would satisfy an arithmetic test. What
+    makes it bite is that every conjunct must appear by NAME in both directions.
+    """
+    sql_mutants = MUTANTS_SQL + MUTANTS_SQL_STRUCTURAL + MUTANTS_SQL_PROJECTION_ONLY
+    names       = { name for name, _ in sql_mutants }
+
+    conjuncts = [ "status", "capture", "updated", "ordering" ]
+    op_variants = [ ">=", "<", "!=" ]
+
+    # Every conjunct mutated in BOTH directions. `_mutant_clause_drop_null_guards`
+    # drops capture+updated together, so the two individual drops carry those.
+    for term in conjuncts:
+        assert any( term in n.lower() and ( "drop" in n.lower() ) for n in names ), (
+            f"no DROP mutant for the {term!r} conjunct — a dropped guard is the "
+            f"INVISIBLE direction and the one that survived last time"
+        )
+        assert any( term in n.lower() and ( "negat" in n.lower() or "invert" in n.lower() ) for n in names ), (
+            f"no NEGATE mutant for the {term!r} conjunct"
+        )
+
+    for op in op_variants:
+        assert any( op in n for n in names ), f"no operator-variant mutant for {op!r}"
+
+    assert len( sql_mutants ) >= 11, (
+        f"SQL mutant list carries {len( sql_mutants )}, structural derivation "
+        f"requires >= 11 (4 conjuncts x DROP+NEGATE, plus 3 operator variants). "
+        f"A list derived from the AC table instead of the CODE goes short and is "
+        f"silent about it."
     )
 
 
