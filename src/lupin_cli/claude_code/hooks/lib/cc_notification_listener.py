@@ -83,6 +83,43 @@ SUBSCRIBED_EVENTS = [ "notification_queue_update" ]
 # long-lived daemon with no latency pressure on these calls, so the cost is low.
 _SERVER_TRANSPORT_TIMEOUT_SECONDS = 30
 
+# 🔴 F5 — THE FIELD-CARRIED BUDGET IS A SEPARATE NUMBER, NOT THE COHORT'S.
+# The gist notification at `_send_gist_response` does NOT pass its budget at the
+# call; it sets `AsyncNotificationRequest( timeout=… )`, which
+# `notify_user_async.py` consumes as a bare `requests.post( timeout=… )`. Two
+# things make the cohort constant the wrong value there:
+#
+#   1. THAT PATH RETRIES, and `calculate_retry_intervals( request.timeout )`
+#      derives the retry schedule FROM the number — so the cohort's 30 would
+#      cost **267s** of wall clock, not 30s, on a listener callback. 6 rides out
+#      the same 18.76s window in 28s. Full table in `hook_common.py`.
+#   2. THE FIELD IS BOUNDED. `AsyncNotificationRequest.timeout` is
+#      `Field( ge=1, le=30 )` (`notification_models.py:620-625`). Wiring the
+#      cohort constant in here armed a tripwire: a future re-measure raising it
+#      to, say, 45 would make the two `urlopen` sites take it correctly while
+#      THIS site threw ValidationError inside `except Exception: self._log(…)` —
+#      gist responses would stop SILENTLY, and the traceback would say
+#      "validation error", not "budget too high".
+#
+# The assert below is the guard, and it fails at import rather than at runtime.
+NOTIFY_TRANSPORT_TIMEOUT_SECONDS = 6
+
+# Fails loudly at import if THIS MODULE'S budget is pushed past the Pydantic bound
+# it has to fit through. A comment warning about this hazard is not a control;
+# this is.
+#
+# 🔴 SCOPE, stated because the earlier wording here said "either budget" and that was
+# FALSE: this assert guards `cc_notification_listener.NOTIFY_TRANSPORT_TIMEOUT_SECONDS`
+# and NOTHING ELSE. `hook_common.py` declares a same-named constant feeding the same
+# `Field( le=30 )` through the same swallowed-except consumer, and it carries its OWN
+# duplicate assert — because a guard in this module cannot run for that one. Raising
+# only one of the two is caught only by the guard beside it.
+assert NOTIFY_TRANSPORT_TIMEOUT_SECONDS <= 30, (
+    "NOTIFY_TRANSPORT_TIMEOUT_SECONDS exceeds AsyncNotificationRequest.timeout's "
+    "Field( le=30 ) — raise the field bound in notification_models.py first, or "
+    "this fails as an opaque ValidationError inside a swallowed except"
+)
+
 # ── Pane-idle probe sentinels (bug d1bb1456) ────────────────────────────────────
 # The pane-idle probe (`_pane_is_idle_at_prompt`) reads the RECIPIENT tmux pane's
 # real state to decide whether it is safe to inject/wake a peer DM. These sentinel
@@ -987,7 +1024,7 @@ class CCNotificationListener( BaseWebSocketListener ):
                 priority          = NotificationPriority.LOW,
                 target_user       = target_email,
                 sender_id         = sender_id,
-                timeout           = _SERVER_TRANSPORT_TIMEOUT_SECONDS
+                timeout           = NOTIFY_TRANSPORT_TIMEOUT_SECONDS
             )
             notify_user_async( request=request )
             self._log( f"{self.LOG_PREFIX} Gist response sent: \"{gist}\"" )

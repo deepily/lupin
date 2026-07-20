@@ -125,6 +125,21 @@ TMUX_INJECTION_DELAY = 0.25
 # Full derivation: src/rnd/v0.1.9/2026.07.19-dev-server-reload-availability.md §9(a).
 NOTIFY_TRANSPORT_TIMEOUT_SECONDS = 6
 
+# Fails loudly at import if THIS module's budget is pushed past the Pydantic bound
+# it has to fit through. A comment warning about the hazard is not a control; this is.
+#
+# This guard is deliberately DUPLICATED rather than shared with
+# cc_notification_listener.py's identical assert. The two constants are separate by
+# design (each module owns its own), so a guard in one module CANNOT protect the
+# other — importing the sibling to share it would reintroduce the cross-package
+# import edge on the hook boot path that this whole cohort exists to avoid.
+# Each exposure needs its own guard, at its own definition.
+assert NOTIFY_TRANSPORT_TIMEOUT_SECONDS <= 30, (
+    "NOTIFY_TRANSPORT_TIMEOUT_SECONDS exceeds AsyncNotificationRequest.timeout's "
+    "Field( le=30 ) — raise the field bound in notification_models.py first, or "
+    "this fails as an opaque ValidationError inside a swallowed except"
+)
+
 
 # ── Core Functions ────────────────────────────────────────────────────────────
 

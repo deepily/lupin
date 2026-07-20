@@ -41,21 +41,77 @@ sys.path.insert( 0, str( Path( __file__ ).resolve().parents[ 3 ] ) )
 from lupin_cli.claude_code.hooks.lib import hook_common
 from lupin_cli.claude_code.hooks.lib import cc_notification_listener
 from lupin_cli.notifications.notification_models import AsyncNotificationRequest
+from lupin_cli.notifications.notify_user_async import calculate_retry_intervals
 
 
 OBSERVED_MAX_RELOAD_SECONDS = 18.76      # row 204911ca §5.0, current-config slice, n=143
 FIELD_CEILING_SECONDS       = 30         # notification_models.py:620-625, Field( le=30 )
+HOOK_WALL_CLOCK_CEILING     = 40         # a hook path must not stall longer than this
+
+
+def _attempt_starts( budget ):
+    """When each attempt BEGINS, given the schedule this budget generates."""
+    delays, t, starts = [ 0 ] + calculate_retry_intervals( budget ), 0.0, []
+    for d in delays:
+        t += d
+        starts.append( t )
+        t += budget                      # a failed attempt consumes its whole budget
+    return starts
+
+
+def _rides_out_window( budget, window=OBSERVED_MAX_RELOAD_SECONDS ):
+    """True if any attempt is still open when a max-length reload window ends."""
+    return any( s + budget > window for s in _attempt_starts( budget ) )
+
+
+def _wall_clock( budget ):
+    """Worst-case total time the caller can block."""
+    intervals = calculate_retry_intervals( budget )
+    return sum( intervals ) + ( len( intervals ) + 1 ) * budget
 
 
 class TestFieldCarriedBudgets:
 
-    def test_hook_common_notify_budget_outlasts_the_reload_window( self ):
-        """`hook_common.py:424` — was 3s, silently dropped inside `except: pass`."""
-        assert hook_common.NOTIFY_TRANSPORT_TIMEOUT_SECONDS > OBSERVED_MAX_RELOAD_SECONDS
+    def test_hook_common_retry_schedule_rides_out_the_reload_window( self ):
+        """
+        🔴 COVERAGE HERE IS THE RETRY SCHEDULE'S JOB, NOT ONE FAT TIMEOUT.
 
-    def test_listener_gist_budget_outlasts_the_reload_window( self ):
-        """`cc_notification_listener.py:983` — the site F1 caught."""
-        assert cc_notification_listener._SERVER_TRANSPORT_TIMEOUT_SECONDS > OBSERVED_MAX_RELOAD_SECONDS
+        This path retries, and `calculate_retry_intervals( request.timeout )`
+        derives the schedule FROM the budget. So the question is not "is the
+        budget > 18.76s" — it is "does some attempt remain OPEN when a
+        max-length window ends". At 3s every attempt finished inside the window
+        and the notification was dropped; that was F1.
+        """
+        assert _rides_out_window( hook_common.NOTIFY_TRANSPORT_TIMEOUT_SECONDS )
+
+    def test_listener_retry_schedule_rides_out_the_reload_window( self ):
+        """`cc_notification_listener.py` gist response — the site F1 caught."""
+        assert _rides_out_window( cc_notification_listener.NOTIFY_TRANSPORT_TIMEOUT_SECONDS )
+
+    def test_budgets_do_not_stall_a_hook_path( self ):
+        """
+        🔴 THE INVERSE GUARD, and the reason this is 6 rather than the cohort's 30.
+
+        Raising the budget inflates the retry COUNT as well as each attempt, so
+        wall clock grows super-linearly: 3s→11s, 6s→28s, 30s→**267s**. These are
+        fire-and-forget notifications wrapped in `except: pass` specifically so
+        they never block Claude Code. A hook stalling 267s is a worse defect than
+        a dropped notification, so "align it with the cohort" must fail here.
+        """
+        for budget in ( hook_common.NOTIFY_TRANSPORT_TIMEOUT_SECONDS,
+                        cc_notification_listener.NOTIFY_TRANSPORT_TIMEOUT_SECONDS ):
+            assert _wall_clock( budget ) <= HOOK_WALL_CLOCK_CEILING, (
+                f"budget {budget}s costs {_wall_clock( budget )}s of wall clock on a hook path"
+            )
+
+    def test_field_carried_budget_is_deliberately_not_the_cohort_value( self ):
+        """
+        These answer different questions: the cohort budget covers ONE call with
+        no retry; this one covers a retry schedule it also generates. Pinned so
+        a future "make them consistent" tidy-up fails and reads this comment.
+        """
+        assert cc_notification_listener.NOTIFY_TRANSPORT_TIMEOUT_SECONDS != \
+            cc_notification_listener._SERVER_TRANSPORT_TIMEOUT_SECONDS
 
     def test_both_field_carried_members_agree_with_each_other( self ):
         """
@@ -64,7 +120,7 @@ class TestFieldCarriedBudgets:
         to prevent — and neither grep would report it as a problem.
         """
         assert hook_common.NOTIFY_TRANSPORT_TIMEOUT_SECONDS == \
-            cc_notification_listener._SERVER_TRANSPORT_TIMEOUT_SECONDS
+            cc_notification_listener.NOTIFY_TRANSPORT_TIMEOUT_SECONDS
 
 
 class TestFieldCeilingCoupling:
