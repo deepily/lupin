@@ -407,7 +407,14 @@ class TestQueryOwed:
     def test_https_scheme_uses_https_connection( self, conn_seq ):
         conn_seq[ "outcomes" ] = [ _count_resp( 4 ) ]
         https_settings = { "api_base_url": "https://secure-store:8443", "timeout_seconds": 3.0 }
-        ok, count = tc.query_owed( https_settings, "k", "p", ( "queued", ) )
+        # NOTE (2026-07-20): this call used to pass ( "queued", ) as positional
+        # arg 4 — residue of the `statuses` parameter DELETED on 2026-07-19.
+        # Arg 4 is now `project`, so it was silently passing a TUPLE as the
+        # project filter and going green because the mock never inspects it.
+        # test_stop_hook_heartbeat.py:1369 asserts len( _args ) == 3 to catch
+        # exactly this shape — but it guards stop.py's CALL SITE, not this
+        # suite's own calls, so the residue slipped under a guard built for it.
+        ok, count = tc.query_owed( https_settings, "k", "p" )
         assert ( ok, count ) == ( True, 4 )
         assert conn_seq[ "ctor" ][ 0 ][ "scheme" ] == "https"
         assert conn_seq[ "ctor" ][ 0 ][ "port" ] == 8443

@@ -451,9 +451,20 @@ def owed_status_clause( model, now ):
         queued ∪ in_progress ∪ (parked AND NOT park-active)
 
     This is the admission the Stop-hook oracle and the arbiter select on. It is
-    ONE clause rather than a per-status loop because `query_owed` SUMS per-status
-    counts — a per-status admission would count every expired-parked row TWICE,
-    making a parked board look BUSIER than an unparked one.
+    ONE clause because the owed set is SERVER-OWNED: no client holds a status
+    tuple, so there is no second thing to remember to pair, and the seam fails
+    CLOSED. A per-status admission would count every expired-parked row TWICE
+    (admitted on the queued call AND the in_progress call), making a parked board
+    look BUSIER than an unparked one — which inverts the feature.
+
+    ⚠️ CORRECTED 2026-07-20. This previously read "ONE clause rather than a
+    per-status loop BECAUSE `query_owed` SUMS per-status counts" — stale AND
+    backwards. `query_owed` stopped summing per-status on 2026-07-19; and the
+    causation ran the wrong way, naming the client loop as the REASON for the
+    server clause when the clause exists precisely so that no client loop is
+    needed. A reader reasoning from the old text could conclude the loop is
+    load-bearing and must be preserved. The double-count warning was always
+    correct; only its stated cause was wrong.
 
     Not a widening: `is_park_legal_from` restricts park to
     PARK_LEGAL_FROM_STATUSES, so the admitted expired-parked rows provably came
