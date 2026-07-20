@@ -81,7 +81,15 @@ def patched_main( monkeypatch ):
         "_resolve_cc_pid"                  : MagicMock( return_value=TEST_CC_PID ),
         "_find_tmux_session"               : MagicMock( return_value=None ),
         "_cleanup_old_listener"            : MagicMock(),
-        "_allocate_voice_persona_via_http" : MagicMock( return_value=None ),
+        # ( persona, failure ) since candidate A (2026-07-19): the give-up is
+        # structured so Phase 7 can route it into the session's boot context.
+        # Modelled as a REAL failure shape, not ( None, None ) — that tuple
+        # cannot occur in production and a fixture should not teach otherwise.
+        "_allocate_voice_persona_via_http" : MagicMock( return_value=(
+            None,
+            { "stage": "transport", "exception": "TimeoutError", "message": "timed out",
+              "attempts": 3, "server_url": "http://srv" }
+        ) ),
         "_release_voice_persona_via_http"  : MagicMock( return_value=False ),
         "send_tts"                         : MagicMock(),
         "_spawn_listener"                  : MagicMock( return_value=None ),
@@ -323,11 +331,12 @@ class TestAllocateHttpDeclaredManagersParam:
         import urllib.parse
         captured = [ ]
         self._patch_transport( monkeypatch, captured )
-        persona = register_session._allocate_voice_persona_via_http(
+        persona, failure = register_session._allocate_voice_persona_via_http(
             "http://srv", "lupin", "sid-1",
             declared_managers=[ "Mr. Radio", "Tiberius" ]
         )
         assert persona == { "name": "nora" }
+        assert failure is None
         query = urllib.parse.parse_qs( urllib.parse.urlsplit( self._alloc_url( captured ) ).query )
         assert query[ "declared_managers" ] == [ "Mr. Radio,Tiberius" ]
         assert "persona_chain" not in query
