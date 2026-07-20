@@ -761,11 +761,21 @@ def query_tasks(
           ALL provided filters, ordered created_ts descending, stable tiebreak
           on id. NOTE: `count` here is the PAGE length (len(tasks)) — it
           saturates at `limit`; use count_only for a true total.
-        - count_only=True (O2 / §G token win): returns { count } as a true
-          SQL COUNT(*) over the SAME filters — NO rows serialized, independent
-          of limit/offset (those params are ignored in this mode). The owed
-          source reads this so a session with >100 owed rows is counted exactly.
-          count_only takes precedence over terse (a count needs no rows at all).
+        - count_only=True (O2 / §G token win): returns { count, breakdown } —
+          `count` is a true SQL COUNT(*) over the SAME filters, NO rows
+          serialized, independent of limit/offset (those params are ignored in
+          this mode). The owed source reads this so a session with >100 owed
+          rows is counted exactly. count_only takes precedence over terse (a
+          count needs no rows at all).
+          `breakdown` (c191be39, 2026-07-20) is { status: count } over that same
+          admitted set via ONE GROUP BY — the status that used to die at this
+          seam, which made the Stop hook report every `queued` row as
+          "in-progress". Statuses with no rows are OMITTED, never zero-filled.
+          Under owed_only=true the `parked` key IS the expired-parked set (park-
+          active rows never survive admission). ALWAYS returned — no opt-in flag,
+          because a flag a caller can forget is the shape that caused the bug.
+          It appears ONLY in this branch: the full-row response is UNCHANGED, and
+          the multiplexer parses that one.
         - terse=True (§G token win, count_only=False): returns { tasks: [...],
           count } where each row is the at-a-glance projection (id / title /
           status / blocked_by / next_chase_ts / priority / park_reason_stale —
@@ -832,7 +842,38 @@ def query_tasks(
                 owed_only           = owed_only,
                 hide_parked         = hide_parked,
             )
-            return { "count": count }
+            # PER-STATUS BREAKDOWN (c191be39, 2026-07-20) — ALWAYS returned, no
+            # opt-in flag: a flag a caller can forget is the same failure shape
+            # that produced the bug this fixes (the Stop hook reported N `queued`
+            # rows as N in-progress because the status died at this seam).
+            #
+            # ⛔ SCOPED TO THIS BRANCH ON PURPOSE. /api/tasks is NOT internal-only —
+            # the multiplexer parses the FULL-ROW shape (render/taskListModel.ts,
+            # render/TaskListRenderer.ts, notifications.js:386, a 60s poll at
+            # multiplexer/boot.ts:586). This branch returns BEFORE any row is
+            # materialized, so `breakdown` provably cannot reach that shape.
+            # count_only has exactly ONE non-test consumer in the tree (the hook's
+            # query_owed), which is what makes always-return safe HERE and only here.
+            #
+            # A SECOND aggregate, deliberately NOT derived from `count` above:
+            # count == sum( breakdown.values() ) is then a real cross-check between
+            # two independent computations. Deriving one from the other would make
+            # the invariant unfalsifiable — a green assertion that could never fail
+            # and therefore never reports anything.
+            breakdown = repo.count_tasks_by_status(
+                owner_persona       = owner_persona,
+                status              = status,
+                gate_class          = gate_class,
+                urgency             = urgency,
+                accountable_manager = accountable_manager,
+                project             = project,
+                item_class          = item_class,
+                correlation_key     = correlation_key,
+                include_terminal    = include_terminal,
+                owed_only           = owed_only,
+                hide_parked         = hide_parked,
+            )
+            return { "count": count, "breakdown": breakdown }
         # The unscoped-query guard (design 2026.07.07) is a repository-layer raise;
         # map it to an educational HTTP 400 that names the two fixes (mirrors the
         # ?scope= teach-while-enforcing 400). A legitimate full sweep passes

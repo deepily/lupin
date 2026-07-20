@@ -43,7 +43,7 @@ See test_tz_fidelity_limit_is_documented_not_assumed.
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import Column, DateTime, Integer, String, and_, create_engine, not_, or_
+from sqlalchemy import Column, DateTime, Integer, String, and_, create_engine, func, not_, or_
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from cosa.rest.task_store_owed import (
@@ -437,6 +437,64 @@ def test_expired_park_is_counted_exactly_once( session ):
         if r.status == PARK_STATUS
     ]
     assert len( parked_in_owed ) == len( set( parked_in_owed ) ), "a parked row appears TWICE in the owed set"
+
+
+def test_group_by_breakdown_partitions_the_owed_set_exactly_once( session ):
+    """
+    🔴 THE DOUBLE-COUNT GUARD, EXTENDED TO THE BREAKDOWN (c191be39, 2026-07-20).
+
+    The Stop-hook seam now carries a PER-STATUS breakdown beside the count, which is
+    exactly the information the retired per-status loop produced. This proves we got
+    it the opposite way: ONE GROUP BY over the already-admitted set.
+
+    Why that is structurally safe where the loop was not — a GROUP BY PARTITIONS.
+    Every admitted row lands in exactly one bucket because a row has exactly one
+    status, so the double-count is UNREACHABLE rather than merely avoided. The loop
+    re-ran ADMISSION per status, and an expired-parked row satisfied the queued pass
+    AND the in_progress pass.
+
+    Asserted as an EXACT sum against the same known fixture the count guard uses —
+    never a delta, which passes at 2 when the baseline was also doubled.
+    """
+    clause    = owed_status_clause( ParityRow, NOW )
+    total     = session.query( ParityRow ).filter( clause ).count()
+    breakdown = dict(
+        session.query( ParityRow.status, func.count( ParityRow.id ) )
+        .filter( clause ).group_by( ParityRow.status ).all()
+    )
+
+    assert sum( breakdown.values() ) == total, (
+        f"breakdown sums to {sum( breakdown.values() )} but COUNT(*) says {total} — "
+        "the two aggregates disagree about the same admitted set" )
+
+    # The `parked` bucket needs NO extra filtering to BE the expired-parked set:
+    # park-ACTIVE rows never survive admission, so every parked row here has
+    # provably rejoined. That is why the client maps this bucket to `pending`
+    # rather than deriving an expiry it would have to recompute.
+    assert breakdown[ PARK_STATUS ] == 3, (
+        f"expected exactly 3 expired-parked rows (past / now / null chase), got "
+        f"{breakdown[ PARK_STATUS ]} — a park-active row leaked in, or one doubled" )
+    for base_status in OWED_BASE_STATUSES:
+        assert breakdown[ base_status ] == len( CHASE_SHAPES )
+
+
+def test_breakdown_buckets_are_disjoint_and_cover_the_owed_set( session ):
+    """
+    The partition property stated directly: the breakdown's keys are exactly the
+    statuses present in the owed set, and no row is in two buckets. If a future
+    change ever re-derives the breakdown per-status instead of by GROUP BY, the sum
+    inflates and this goes red alongside the guard above.
+    """
+    clause    = owed_status_clause( ParityRow, NOW )
+    rows      = session.query( ParityRow ).filter( clause ).all()
+    breakdown = dict(
+        session.query( ParityRow.status, func.count( ParityRow.id ) )
+        .filter( clause ).group_by( ParityRow.status ).all()
+    )
+
+    assert set( breakdown ) == { r.status for r in rows }
+    assert set( breakdown ) <= set( OWED_BASE_STATUSES ) | { PARK_STATUS }, \
+        "a status outside queued/in_progress/parked was admitted — this is a widening"
 
 
 # ===========================================================================

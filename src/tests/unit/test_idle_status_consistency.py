@@ -94,7 +94,7 @@ class TestOwedMapping( _Base ):
         with patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings", return_value=dict( _SETTINGS ) ), \
              patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None ), \
              patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 ), \
-             patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 1, True ) ), \
+             patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 1, True, { } ) ), \
              patch( "lupin_cli.claude_code.hooks.stop.decide_heartbeat",
                     return_value={ "outcome": outcome, "hook_output": { }, "should_increment": False, "should_notify_cap": False } ):
             state = _resolve_owed_state( "sid", "/t.jsonl", None )
@@ -112,7 +112,7 @@ class TestHoldAwareDesyncKiller( _Base ):
         with patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings", return_value=dict( _SETTINGS ) ), \
              patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=_fresh_reasoned_hold() ), \
              patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 ), \
-             patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 1, True ) ):
+             patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 1, True, { } ) ):
             state = _resolve_owed_state( "sid", "/t.jsonl", None )
         assert state[ "outcome" ] == OUTCOME_HONORED
         assert state[ "owed" ] is False
@@ -123,7 +123,7 @@ class TestHoldAwareDesyncKiller( _Base ):
         with patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings", return_value=dict( _SETTINGS ) ), \
              patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None ), \
              patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 ), \
-             patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 2, True ) ):
+             patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 2, True, { } ) ):
             state = _resolve_owed_state( "sid", "/t.jsonl", None )
         assert state[ "outcome" ] == OUTCOME_POKE
         assert state[ "owed" ] is True
@@ -135,7 +135,7 @@ class TestHoldAwareDesyncKiller( _Base ):
         with patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings", return_value=dict( _SETTINGS ) ), \
              patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None ), \
              patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=3 ), \
-             patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 1, True ) ):
+             patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 1, True, { } ) ):
             state = _resolve_owed_state( "sid", "/t.jsonl", None )
         assert state[ "outcome" ] == OUTCOME_CAP_REACHED
         assert state[ "owed" ] is True
@@ -171,7 +171,7 @@ class TestTotalOwedReferentClasses( _Base ):
                     return_value=dict( self._SETTINGS_INBOUND_ON ) ), \
              patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None ), \
              patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 ), \
-             patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, True ) ), \
+             patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, True, { } ) ), \
              patch( "lupin_cli.claude_code.hooks.stop._gather_outstanding_delegations",
                     return_value=list( delegations ) ), \
              patch( "lupin_cli.claude_code.hooks.stop._gather_unanswered_inbound_questions",
@@ -193,7 +193,7 @@ class TestTotalOwedReferentClasses( _Base ):
         with patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings", return_value=dict( _SETTINGS ) ), \
              patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None ), \
              patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 ), \
-             patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, True ) ), \
+             patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, True, { } ) ), \
              patch( "lupin_cli.claude_code.hooks.stop._gather_outstanding_delegations", return_value=[ ] ), \
              patch( "lupin_cli.claude_code.hooks.stop._gather_unanswered_inbound_questions",
                     return_value={ "owed": [ "q1" ], "stale": [ ] } ):
@@ -209,7 +209,7 @@ class TestOwedUnknown( _Base ):
         with patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings", return_value=dict( _SETTINGS ) ), \
              patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None ), \
              patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 ), \
-             patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, False ) ):
+             patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, False, { } ) ):
             state = _resolve_owed_state( "sid", "/t.jsonl", None )
         assert state[ "owed_unknown" ] is True
         # owed itself is False (no determinate owed signal) — the consumers gate on

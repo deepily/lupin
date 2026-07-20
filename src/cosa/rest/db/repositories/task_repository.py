@@ -688,6 +688,77 @@ class TaskRepository( BaseRepository[TaskItem] ):
             query = query.filter( TaskItem.status.notin_( TERMINAL_STATUSES ) )
         return query
 
+    def count_tasks_by_status(
+        self,
+        owner_persona       : Optional[str] = None,
+        status              : Optional[str] = None,
+        gate_class          : Optional[str] = None,
+        urgency             : Optional[str] = None,
+        accountable_manager : Optional[str] = None,
+        project             : Optional[str] = None,
+        item_class          : Optional[str] = None,
+        correlation_key     : Optional[str] = None,
+        include_terminal    : bool = False,
+        owed_only           : bool = False,
+        hide_parked         : bool = False,
+        now                 : Optional[datetime] = None,
+    ) -> dict:
+        """
+        The PER-STATUS breakdown of the SAME admitted set count_tasks totals — ONE
+        GROUP BY, never N queries (c191be39, 2026-07-20).
+
+        WHY THIS EXISTS: the Stop-hook store-count seam collapsed a multi-status owed
+        set into one integer and the IO shell re-inflated it as all-in_progress, so
+        every `queued` row reported to its owner as "in-progress" and the oracle's
+        `todo_unstarted` signal became unreachable dead code. The status has to
+        survive the seam, and the ONLY safe place to recover it is HERE — server-side,
+        over the already-admitted set.
+
+        ⛔ THIS IS NOT A LICENSE TO ENUMERATE STATUSES CLIENT-SIDE. The retired
+        per-status client loop (deleted 2026-07-19) is forbidden for two independent
+        reasons that this method does NOT reintroduce: it could not see a park-expiry
+        rejoin, and it DOUBLE-COUNTED expired-parked rows. A GROUP BY partitions one
+        admitted set — every row lands in exactly one bucket by construction, so the
+        double-count is structurally unreachable rather than merely avoided.
+
+        `parked` IS the expired-parked bucket, with no extra filtering: park-ACTIVE
+        rows are already excluded by owed_status_clause, so every parked row that
+        survives admission has provably rejoined. The key carries the RAW status
+        string the column holds — inventing a `parked_expired` key here would imply a
+        derivation that does not happen.
+
+        Requires:
+            - each filter is either None (no constraint) or an exact-match value
+            - the filter set is applied IDENTICALLY to count_tasks (same helper)
+
+        Ensures:
+            - returns { status: count } over ONLY the statuses actually present —
+              absent statuses are OMITTED, never zero-filled (a zero-filled key is a
+              claim about a status the query never saw)
+            - sum( result.values() ) == count_tasks( <same filters> ) — asserted as a
+              REAL parity gate between two independent computations, deliberately NOT
+              derived one from the other (an invariant true by construction cannot
+              fail, so it can never tell you anything)
+            - {} when nothing matches
+            - no ORDER BY / LIMIT / OFFSET — a breakdown is order- and page-independent
+        """
+        query = self.session.query( TaskItem.status, func.count( TaskItem.id ) )
+
+        if owner_persona is not None:       query = query.filter( TaskItem.owner_persona == owner_persona )
+        if status is not None:              query = query.filter( TaskItem.status == status )
+        if gate_class is not None:          query = query.filter( TaskItem.gate_class == gate_class )
+        if urgency is not None:             query = query.filter( TaskItem.urgency == urgency )
+        if accountable_manager is not None: query = query.filter( TaskItem.accountable_manager == accountable_manager )
+        if project is not None:             query = query.filter( TaskItem.project == project )
+        if item_class is not None:          query = query.filter( TaskItem.item_class == item_class )
+        if correlation_key is not None:     query = query.filter( TaskItem.correlation_key == correlation_key )
+        # The SAME helper count_tasks and query_tasks use — the breakdown MUST select
+        # the identical admitted set, or the sum-parity gate is comparing two
+        # different populations and its green means nothing.
+        query = self._apply_owed_filter( query, owed_only, hide_parked, status, include_terminal, now )
+
+        return { row_status : row_count for row_status, row_count in query.group_by( TaskItem.status ).all() }
+
     def count_tasks(
         self,
         owner_persona       : Optional[str] = None,

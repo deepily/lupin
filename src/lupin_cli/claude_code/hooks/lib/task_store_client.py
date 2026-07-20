@@ -191,13 +191,23 @@ def query_by_correlation_key( settings, api_key, correlation_key ):
 
 def _open_owed_connection( api_base_url, timeout ):
     """
-    Open ONE keep-alive HTTP(S) connection for the multi-status owed loop (O3).
+    Open ONE keep-alive HTTP(S) connection for the owed count request (O3).
 
-    `query_owed` issues one `count_only` GET per owed status. The previous
-    urllib.urlopen path opened a FRESH socket per status (urllib does no
-    connection pooling) — pure per-Stop latency, paid every turn. A single
-    http.client connection reused across the status loop amortizes the TCP
-    handshake to once per Stop (O3, cascade review §D residue). Scheme-aware:
+    ⚠️ THIS DOCSTRING DESCRIBED A DELETED MECHANISM UNTIL 2026-07-20. It said
+    "`query_owed` issues one `count_only` GET per owed status" — true before the
+    2026-07-19 PARKED-STATUS build, false after it, and stated in the present
+    tense for a day. It sits 77 lines above the `query_owed` docstring that
+    documents the deletion, so a top-down reader met the retired shape FIRST and
+    the correction second. Found while reviewing the plan whose §3 cites that
+    lower docstring to FORBID restoring the loop: the section defended against a
+    reviewer proposing it and not against THIS FILE proposing it.
+
+    `query_owed` now issues ONE `count_only` GET behind `owed_only=true`; the
+    owed status set is server-owned. The previous urllib.urlopen path opened a
+    FRESH socket per request (urllib does no connection pooling) — pure per-Stop
+    latency, paid every turn. A reused http.client connection still amortizes the
+    TCP handshake to once per Stop, which is why this helper survives the loop's
+    deletion (O3, cascade review §D residue). Scheme-aware:
     an https base resolves to HTTPSConnection (the hook lane is http `:7999`
     today, but the seam must not silently downgrade an https config).
 
@@ -222,13 +232,48 @@ def _open_owed_connection( api_base_url, timeout ):
         return None
 
 
+def _parse_breakdown( raw_breakdown ):
+    """
+    Coerce the response's `breakdown` object to a { status: int } dict (c191be39).
+
+    The breakdown is a REPORTING refinement of a count that is already trusted:
+    the count carries the fail-safe, and by the time this runs the server has
+    answered 2xx with an integer `count`. So a malformed/absent breakdown must
+    NOT fail the read — it degrades to {}, and the caller synthesizes against the
+    count alone (the pre-c191be39 behavior). Failing the whole read here would
+    make a cosmetic regression suppress the poke, which is strictly worse than
+    reporting the right total with a coarse status.
+
+    Requires:
+        - raw_breakdown is whatever `breakdown` decoded to (may be absent / any type)
+
+    Ensures:
+        - Returns { status: int } keeping ONLY str→non-bool-int pairs
+        - Non-dict input → {}
+        - bool values are REJECTED (bool subclasses int — a JSON true must never
+          read as 1), as are negative counts (a count cannot be negative; a
+          negative one means the wire is lying, not that a bucket is small)
+        - NEVER raises
+    """
+    if not isinstance( raw_breakdown, dict ):
+        return { }
+    parsed = { }
+    for key, value in raw_breakdown.items():
+        if not isinstance( key, str ):
+            continue
+        if isinstance( value, bool ) or not isinstance( value, int ) or value < 0:
+            continue
+        parsed[ key ] = value
+    return parsed
+
+
 def _count_on_connection( connection, path_with_query, api_key ):
     """
-    Issue ONE `count_only` GET on an existing connection; parse the count (O3).
+    Issue ONE `count_only` GET on an existing connection; parse count + breakdown.
 
     Reuses `connection`'s socket (HTTP/1.1 keep-alive). The response body is read
-    in FULL so the connection is left ready for the next status query on the
-    SAME socket (an unread response would wedge it as ResponseNotReady).
+    in FULL so the connection is left in a clean state (an unread response would
+    wedge it as ResponseNotReady).
 
     Requires:
         - connection is an open http.client.HTTP(S)Connection
@@ -236,12 +281,15 @@ def _count_on_connection( connection, path_with_query, api_key ):
         - api_key is a string (may be empty — server 401s it)
 
     Ensures:
-        - Returns ( ok, count ):
-            ok    : True iff a 2xx response carried an integer `count`
-            count : that integer (0 when ok is False)
+        - Returns ( ok, count, breakdown ):
+            ok        : True iff a 2xx response carried an integer `count`
+            count     : that integer (0 when ok is False)
+            breakdown : { status: int } from the response (c191be39), or {} when
+                        absent/malformed — see _parse_breakdown for why a bad
+                        breakdown degrades instead of failing the read
         - ANY transport error / non-2xx / unparseable-or-non-dict body / missing
           or non-int `count` (bool rejected — a JSON true/false must never read
-          as 1/0) → ( False, 0 )  (the §C fail-safe)
+          as 1/0) → ( False, 0, {} )  (the §C fail-safe)
         - NEVER raises
     """
     try:
@@ -251,23 +299,23 @@ def _count_on_connection( connection, path_with_query, api_key ):
         raw      = response.read().decode( "utf-8" )
     except Exception:
         # Transport failure (refused / timeout / DNS / socket reset) — fail safe.
-        return False, 0
+        return False, 0, { }
 
     if not ( 200 <= status < 300 ):
         # A received server verdict (4xx/5xx) is NOT a clean count — fail safe.
-        return False, 0
+        return False, 0, { }
     try:
         parsed = json.loads( raw )
     except json.JSONDecodeError:
-        return False, 0
+        return False, 0, { }
     if not isinstance( parsed, dict ):
-        return False, 0
+        return False, 0, { }
     count = parsed.get( "count" )
     # bool is a subclass of int — reject a JSON `true`/`false` count explicitly
     # so it never slips through as 1/0 (house no-defensive rule).
     if isinstance( count, bool ) or not isinstance( count, int ):
-        return False, 0
-    return True, count
+        return False, 0, { }
+    return True, count, _parse_breakdown( parsed.get( "breakdown" ) )
 
 
 def query_owed( settings, api_key, owner_persona, project=None, timeout=None,
@@ -311,6 +359,19 @@ def query_owed( settings, api_key, owner_persona, project=None, timeout=None,
     connection is retained but now carries a single request; it costs one
     handshake either way and keeps the timeout/close discipline in one place.
 
+    PER-STATUS BREAKDOWN (c191be39, 2026-07-20). The response now carries a
+    `breakdown` object beside the count, and this returns it as a THIRD element.
+    That third element is the whole point of the change: the count alone forced
+    the caller to invent a status, and it invented `in_progress` for every row,
+    so a board of `queued` rows reported to its owner as N in-progress items.
+
+    ⛔ THE BREAKDOWN IS COMPUTED SERVER-SIDE, ON THE SAME ADMITTED SET, IN ONE
+    GROUP BY. It is NOT a license to reinstate the per-status loop deleted on
+    2026-07-19 — restoring that shape resurrects both bugs described above (blind
+    to park-expiry rejoin; double-counts expired-parked rows). This function
+    still issues EXACTLY ONE request, and test_task_store_client.py asserts that
+    on the shape, not just the answer.
+
     Requires:
         - settings is the load_task_store_settings() dict (provides api_base_url)
         - api_key is a string (may be empty — server 401s it)
@@ -324,12 +385,19 @@ def query_owed( settings, api_key, owner_persona, project=None, timeout=None,
           counts a manager's chase-list (proactive-manager A1 Face A backlog)
 
     Ensures:
-        - Returns ( ok, count ):
-            ok    : True iff the query returned a 2xx whose body carried an
-                    integer `count`
-            count : the server-computed owed-row count (0 when ok is False)
+        - Returns ( ok, count, breakdown ):
+            ok        : True iff the query returned a 2xx whose body carried an
+                        integer `count`
+            count     : the server-computed owed-row count (0 when ok is False)
+            breakdown : { status: count } over that same admitted set — under
+                        owed_only the `parked` key IS the expired-parked set.
+                        {} when the server omitted it or it was malformed: a
+                        cosmetic regression must never suppress the poke, so the
+                        breakdown degrades while the count still governs.
+        - sum( breakdown.values() ) == count whenever the server supplied one —
+          two independently computed numbers, asserted rather than derived
         - ANY transport failure / non-2xx / malformed body (missing or non-int
-          `count`) / unresolvable base URL → ( False, 0 ) — the §C fail-safe:
+          `count`) / unresolvable base URL → ( False, 0, {} ) — the §C fail-safe:
           the caller does NOT poke on a not-ok read (never guess when the store
           can't be reached)
         - The connection is ALWAYS closed
@@ -340,7 +408,7 @@ def query_owed( settings, api_key, owner_persona, project=None, timeout=None,
 
     connection = _open_owed_connection( settings[ "api_base_url" ], timeout )
     if connection is None:
-        return False, 0                      # bad base URL → fail safe (never raise)
+        return False, 0, { }                 # bad base URL → fail safe (never raise)
 
     try:
         # count_only=true (O2): true COUNT(*), never a page-length saturating at
@@ -352,9 +420,9 @@ def query_owed( settings, api_key, owner_persona, project=None, timeout=None,
         if project:
             params[ "project" ] = project
         path = f"/api/tasks?{urllib.parse.urlencode( params )}"
-        ok, count = _count_on_connection( connection, path, api_key )
+        ok, count, breakdown = _count_on_connection( connection, path, api_key )
         if not ok:
-            return False, 0
-        return True, count
+            return False, 0, { }
+        return True, count, breakdown
     finally:
         connection.close()                   # release the socket (close is idempotent)

@@ -39,7 +39,9 @@ from lupin_cli.claude_code.hooks.stop import (
     _owed_count_from_store, _synthesize_owed_items,
     _resolve_owed_state,
 )
-from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import TODO_IN_PROGRESS
+from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import (
+    TODO_IN_PROGRESS, TODO_PENDING, evaluate_work_owed,
+)
 from lupin_cli.claude_code.hooks.lib.heartbeat_decision import (
     DECLARED_OWED_REASON, OUTCOME_POKE, OUTCOME_NOT_OWED,
     OUTCOME_SUPPRESSED_STALE_DECLARED_OWED,
@@ -1320,16 +1322,161 @@ class TestHasPendingVoice:
 # Spine Step-2 store-count seam — _synthesize_owed_items (pure)
 # ═════════════════════════════════════════════════════════════════════════════
 
+def _prefix_synthesize_owed_items( count ):
+    """
+    🔬 A RECONSTRUCTION of the PRE-FIX `_synthesize_owed_items` body (c191be39).
+
+    ⚠️ STATED PLAINLY, because it matters to what the control below proves: this is
+    a COPY of the defective one-liner as it stood at stop.py:1422 before 2026-07-20,
+    NOT the historical function itself. A control run against a reconstruction
+    proves the reconstruction is broken, which is only as good as the copy's
+    fidelity. The copy is one line and is reproduced verbatim:
+
+        return [ { "status": TODO_IN_PROGRESS, "owned_by_me": True } for _ in range( count ) ]
+
+    Its fidelity is further pinned by test_reconstruction_matches_the_shipped_degrade_path
+    below, which asserts it agrees exactly with the CURRENT function's no-breakdown
+    degrade path — the one branch that deliberately preserves the old behavior.
+    """
+    return [ { "status": TODO_IN_PROGRESS, "owned_by_me": True } for _ in range( count ) ]
+
+
+# The board the control is run against: 16 owed rows, only 2 of them actually
+# in-progress. Sized after Sam's real measurement on row c191be39 (oracle said 23,
+# in_progress axis 0, queued axis 22) — a board where nearly everything is queued
+# is the case the defect misreports most loudly.
+_MIXED_BREAKDOWN = { "in_progress": 2, "queued": 13, "parked": 1 }
+
+
 class TestSynthesizeOwedItems:
 
     def test_zero_count_empty_list( self ):
         assert _synthesize_owed_items( 0 ) == [ ]
 
-    def test_n_count_n_owed_items_in_oracle_shape( self ):
+    def test_no_breakdown_degrades_to_prefix_shape( self ):
+        """
+        The DEGRADE path (server omitted `breakdown`): count items, all in_progress.
+        Deliberately identical to the pre-fix behavior — a coarse status is the right
+        trade when the refinement is missing; suppressing the poke would not be.
+        """
         items = _synthesize_owed_items( 3 )
         assert len( items ) == 3
         # SAME shape owed_items_from_state emits → drops straight into the oracle
         assert all( i == { "status": TODO_IN_PROGRESS, "owned_by_me": True } for i in items )
+
+    def test_reconstruction_matches_the_shipped_degrade_path( self ):
+        """
+        FIDELITY PIN for the control's reconstruction. If the pre-fix copy above ever
+        drifts from the behavior it claims to reproduce, this goes red — so the
+        control cannot quietly become a test of a strawman.
+        """
+        for n in ( 0, 1, 16 ):
+            assert _prefix_synthesize_owed_items( n ) == _synthesize_owed_items( n )
+
+    def test_breakdown_stamps_each_item_its_real_status( self ):
+        """THE FIX: status survives the seam, per row, in the server's own partition."""
+        items = _synthesize_owed_items( 16, _MIXED_BREAKDOWN )
+        assert len( items ) == 16
+        assert all( i[ "owned_by_me" ] is True for i in items )
+
+        statuses = [ i[ "status" ] for i in items ]
+        assert statuses.count( TODO_IN_PROGRESS ) == 2
+        assert statuses.count( TODO_PENDING ) == 14          # 13 queued + 1 expired-parked
+
+    def test_expired_parked_maps_to_pending_and_is_counted_once( self ):
+        """
+        AC4 at the synthesis seam. An admitted `parked` row has PROVABLY expired
+        (park-active never survives owed admission), so it is owed and workable and
+        rides `pending` per Rick's ruling. Counted EXACTLY ONCE — the retired
+        per-status loop would have admitted it on the queued pass AND the in_progress
+        pass, making a parked board look BUSIER than an unparked one.
+        """
+        items = _synthesize_owed_items( 1, { "parked": 1 } )
+        assert items == [ { "status": TODO_PENDING, "owned_by_me": True } ]
+
+    def test_unknown_store_status_is_counted_not_dropped( self ):
+        """
+        A status this map does not name falls back to in_progress and is still
+        COUNTED. Over-reporting one row's urgency is recoverable; DROPPING it is a
+        session that goes quiet while owing work — the failure this whole build exists
+        to remove.
+        """
+        items = _synthesize_owed_items( 2, { "some_future_status": 2 } )
+        assert len( items ) == 2
+        assert all( i[ "status" ] == TODO_IN_PROGRESS for i in items )
+
+    def test_length_follows_the_breakdown_not_the_count( self ):
+        """
+        When both are present the breakdown governs the LIST, because it is the
+        server's own partition of the same admitted set. A disagreement means the two
+        server queries disagreed — surfaced by the sum-parity gates, not papered over
+        here by silently trusting the scalar.
+        """
+        assert len( _synthesize_owed_items( 999, { "queued": 3 } ) ) == 3
+
+
+class TestOwedStatusSeamNegativeControl:
+    """
+    🔴 AC8 / AC8a — THE NEGATIVE CONTROL for the owed-status seam.
+
+    A control that has never gone red is indistinguishable from one that cannot.
+    So this does not merely assert the fix works; it runs the PRE-FIX synthesis
+    through the SAME real oracle and pins the SPECIFIC WRONG VALUES it produces.
+
+    ⚠️ WHY THE SPECIFIC VALUES AND NOT "it failed": a control asserting only that
+    something went wrong is satisfied by a MALFORMED FIXTURE — it would pass while
+    proving nothing about the mechanism it guards. Precedent this is aimed at:
+    Clayton's homonym control (2026-07-18) counted per FILE, so two sites in one
+    file returned green while the mechanism was destroyed.
+
+    The oracle is the REAL `evaluate_work_owed`, unmodified and unmocked (AC6).
+    """
+
+    def test_prefix_source_produces_the_specific_wrong_verdict( self ):
+        """
+        THE CONTROL. Pre-fix source, 16 owed rows of which only 2 are in-progress.
+
+        Pinned exactly: 16 in-progress claimed, ZERO unstarted, and `todo_unstarted`
+        ABSENT from signals — the dead-code consequence that was invisible on the row
+        and is the second half of this defect.
+        """
+        verdict = evaluate_work_owed(
+            _prefix_synthesize_owed_items( 16 ), [ ], [ ], [ ], False, [ ], False, False )
+        specifics = verdict[ "specifics" ]
+
+        assert "16 in-progress TODO item(s) you own" in specifics, "fixture drift — the control is not exercising the defect"
+        assert "unstarted" not in specifics
+        assert verdict[ "signals" ] == [ "todo_in_progress" ]
+        assert "todo_unstarted" not in verdict[ "signals" ]
+
+    def test_fixed_source_produces_the_right_verdict_on_the_same_board( self ):
+        """
+        THE SAME BOARD through the fixed seam. Two signals, correct counts, and
+        `todo_unstarted` FIRING — for the first time in production history: the seam
+        guaranteed nothing could ever arrive carrying TODO_PENDING, so that branch
+        was unreachable dead code until this fix.
+        """
+        verdict = evaluate_work_owed(
+            _synthesize_owed_items( 16, _MIXED_BREAKDOWN ), [ ], [ ], [ ], False, [ ], False, False )
+        specifics = verdict[ "specifics" ]
+
+        assert "2 in-progress TODO item(s) you own" in specifics
+        assert "14 unstarted TODO item(s) you own" in specifics
+        assert verdict[ "signals" ] == [ "todo_in_progress", "todo_unstarted" ]
+
+    def test_the_two_paths_disagree_on_this_board( self ):
+        """
+        The control's CONNECTEDNESS check: pre-fix and fixed must produce DIFFERENT
+        verdicts on the same input. If they ever agree, the control has stopped
+        discriminating and both assertions above are decorative.
+        """
+        prefix = evaluate_work_owed( _prefix_synthesize_owed_items( 16 ), [ ], [ ], [ ], False, [ ], False, False )
+        fixed  = evaluate_work_owed( _synthesize_owed_items( 16, _MIXED_BREAKDOWN ), [ ], [ ], [ ], False, [ ], False, False )
+
+        assert prefix[ "specifics" ] != fixed[ "specifics" ]
+        assert prefix[ "signals" ]   != fixed[ "signals" ]
+        # Both still see the SAME total owed — the defect was never in the count.
+        assert len( _prefix_synthesize_owed_items( 16 ) ) == len( _synthesize_owed_items( 16, _MIXED_BREAKDOWN ) ) == 16
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1354,8 +1501,8 @@ class TestOwedCountFromStore:
 
     def test_persona_dict_scopes_query_and_returns_count( self ):
         self.vp.return_value = { "name": "Krishna" }
-        self.qo.return_value = ( True, 4 )
-        assert _owed_count_from_store( "sid" ) == ( 4, True )
+        self.qo.return_value = ( True, 4, { } )
+        assert _owed_count_from_store( "sid" ) == ( 4, True, { } )
         # owner lowercased; project threaded through
         _args, kwargs = self.qo.call_args
         assert _args[ 2 ] == "krishna"
@@ -1375,8 +1522,8 @@ class TestOwedCountFromStore:
         canonical_persona_key (revert to .lower()) and the asserted key flips to
         "maría" → this test fails → it genuinely guards the fix."""
         self.vp.return_value = { "name": "María" }
-        self.qo.return_value = ( True, 7 )
-        assert _owed_count_from_store( "sid" ) == ( 7, True )
+        self.qo.return_value = ( True, 7, { } )
+        assert _owed_count_from_store( "sid" ) == ( 7, True, { } )
         assert self.qo.call_args[ 0 ][ 2 ] == "maria"
 
     def test_punctuated_persona_keeps_internal_space_FLIP( self ):
@@ -1385,8 +1532,8 @@ class TestOwedCountFromStore:
         substituting _norm_persona, which would strip the space to "mrradio" and
         still miss every row."""
         self.vp.return_value = { "name": "Mr. Radio" }
-        self.qo.return_value = ( True, 2 )
-        assert _owed_count_from_store( "sid" ) == ( 2, True )
+        self.qo.return_value = ( True, 2, { } )
+        assert _owed_count_from_store( "sid" ) == ( 2, True, { } )
         assert self.qo.call_args[ 0 ][ 2 ] == "mr radio"
 
     def test_already_normalized_pool_name_is_idempotent( self ):
@@ -1394,31 +1541,31 @@ class TestOwedCountFromStore:
         form ("mr radio"); the canonical key is IDEMPOTENT so it still queries
         "mr radio" (no double-normalization breakage)."""
         self.vp.return_value = { "name": "mr radio" }
-        self.qo.return_value = ( True, 5 )
+        self.qo.return_value = ( True, 5, { } )
         _owed_count_from_store( "sid" )
         assert self.qo.call_args[ 0 ][ 2 ] == "mr radio"
 
     def test_persona_name_none_falls_back_to_unknown( self ):
         self.vp.return_value = { "name": None }
-        self.qo.return_value = ( True, 0 )
+        self.qo.return_value = ( True, 0, { } )
         _owed_count_from_store( "sid" )
         assert self.qo.call_args[ 0 ][ 2 ] == "unknown"
 
     def test_persona_not_dict_falls_back_to_unknown( self ):
         self.vp.return_value = None
-        self.qo.return_value = ( True, 1 )
+        self.qo.return_value = ( True, 1, { } )
         _owed_count_from_store( "sid" )
         assert self.qo.call_args[ 0 ][ 2 ] == "unknown"
 
     def test_query_not_ok_returns_not_ok( self ):
         self.vp.return_value = { "name": "Krishna" }
-        self.qo.return_value = ( False, 0 )
-        assert _owed_count_from_store( "sid" ) == ( 0, False )
+        self.qo.return_value = ( False, 0, { } )
+        assert _owed_count_from_store( "sid" ) == ( 0, False, { } )
 
     def test_exception_is_degrade_safe( self ):
         # e.g. load_task_store_settings raises ValueError on malformed config
         self.ts.side_effect = ValueError( "bad task_store config" )
-        assert _owed_count_from_store( "sid" ) == ( 0, False )
+        assert _owed_count_from_store( "sid" ) == ( 0, False, { } )
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1454,7 +1601,7 @@ class TestRunHeartbeatStoreSource:
     _STORE_ON = { "enabled": True, "poke_cap": 3, "count_inbound_questions_as_owed": False,
                   "owed_source_from_store": True, "verification_threshold_seconds": 600 }
 
-    @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 2, True ) )
+    @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 2, True, { } ) )
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
@@ -1471,7 +1618,7 @@ class TestRunHeartbeatStoreSource:
         # §B: task_state still replayed (for the genuine-idle beacon + abstract)
         self.mock_replay.assert_called_once()
 
-    @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, True ) )
+    @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, True, { } ) )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings", return_value=_STORE_ON )
@@ -1486,7 +1633,7 @@ class TestRunHeartbeatStoreSource:
         assert len( idle ) == 1
 
     @patch( "lupin_cli.claude_code.hooks.stop.log_to_stream" )
-    @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, False ) )
+    @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, False, { } ) )
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
@@ -1514,7 +1661,7 @@ class TestRunHeartbeatStoreSource:
         mock_incr.assert_not_called()
 
     @patch( "lupin_cli.claude_code.hooks.stop.log_to_stream" )
-    @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, False ) )
+    @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, False, { } ) )
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
@@ -1537,7 +1684,7 @@ class TestRunHeartbeatStoreSource:
         mock_incr.assert_called_once()
 
     @patch( "lupin_cli.claude_code.hooks.stop.log_to_stream" )
-    @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, False ) )
+    @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, False, { } ) )
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
@@ -1572,7 +1719,7 @@ class TestRunHeartbeatStoreSource:
         assert out[ "decision" ] == "block"
         mock_store.assert_not_called()
 
-    @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, True ) )
+    @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, True, { } ) )
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
@@ -1586,7 +1733,7 @@ class TestRunHeartbeatStoreSource:
         assert out[ "decision" ] == "block"
         assert "1 live worker(s) still out" in out[ "reason" ]
 
-    @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, True ) )
+    @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, True, { } ) )
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
@@ -1662,7 +1809,7 @@ class TestBacklogCountFromStore:
              patch( f"{_STOP}.read_api_key", return_value="k" ), \
              patch( f"{_STOP}.get_voice_persona", return_value={ "name": "Mr. Radio 🦉" } ), \
              patch( f"{_STOP}.resolve_project_name", return_value="lupin" ), \
-             patch( f"{_STOP}.query_owed", return_value=( True, 5 ) ) as q:
+             patch( f"{_STOP}.query_owed", return_value=( True, 5, { } ) ) as q:
             assert _backlog_count_from_store( "sid" ) == ( 5, True )
             assert q.call_args.kwargs.get( "owner_field" ) == "accountable_manager"
 

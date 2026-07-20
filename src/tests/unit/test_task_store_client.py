@@ -232,8 +232,16 @@ def conn_seq( monkeypatch ):
     return state
 
 
-def _count_resp( count ):
-    return FakeHTTPResponse( 200, json.dumps( { "count": count } ) )
+def _count_resp( count, breakdown=None ):
+    """
+    A count_only response. `breakdown=None` OMITS the key entirely — that is the
+    pre-c191be39 wire shape, and the tests that use it assert the DEGRADE path
+    (server without the breakdown ⇒ ( ok, count, {} ), poke still fires).
+    """
+    body = { "count": count }
+    if breakdown is not None:
+        body[ "breakdown" ] = breakdown
+    return FakeHTTPResponse( 200, json.dumps( body ) )
 
 
 class TestQueryOwed:
@@ -272,8 +280,8 @@ class TestQueryOwed:
         broken the moment one expires. Shape divergence is silent; this makes it loud.
         """
         conn_seq[ "outcomes" ] = [ _count_resp( 5 ) ]
-        ok, count = tc.query_owed( SETTINGS, "k", "krishna", project="lupin" )
-        assert ( ok, count ) == ( True, 5 )
+        ok, count, breakdown = tc.query_owed( SETTINGS, "k", "krishna", project="lupin" )
+        assert ( ok, count, breakdown ) == ( True, 5, { } )
 
         assert len( conn_seq[ "requests" ] ) == 1, "more than one request — the per-status loop is back"
         method, path, headers = conn_seq[ "requests" ][ 0 ]
@@ -297,8 +305,8 @@ class TestQueryOwed:
         reintroduced, the returned value diverges from the response the store gave.
         """
         conn_seq[ "outcomes" ] = [ _count_resp( 7 ) ]
-        ok, count = tc.query_owed( SETTINGS, "k", "p", project="lupin" )
-        assert ( ok, count ) == ( True, 7 ), "count is not the server's number verbatim — summation reintroduced?"
+        ok, count, breakdown = tc.query_owed( SETTINGS, "k", "p", project="lupin" )
+        assert ( ok, count, breakdown ) == ( True, 7, { } ), "count is not the server's number verbatim — summation reintroduced?"
         assert len( conn_seq[ "requests" ] ) == 1
 
     def test_single_request_one_socket_closed_once( self, conn_seq ):
@@ -324,22 +332,22 @@ class TestQueryOwed:
         # Face A (proactive-manager A1): owner_field="accountable_manager" counts a
         # manager's chase-list instead of its own owned rows.
         conn_seq[ "outcomes" ] = [ _count_resp( 6 ) ]
-        ok, count = tc.query_owed( SETTINGS, "k", "mr radio", project="lupin",
+        ok, count, breakdown = tc.query_owed( SETTINGS, "k", "mr radio", project="lupin",
                                    owner_field="accountable_manager" )
-        assert ( ok, count ) == ( True, 6 )
+        assert ( ok, count, breakdown ) == ( True, 6, { } )
         _method, path, _headers = conn_seq[ "requests" ][ 0 ]
         assert "accountable_manager=mr+radio" in path and "owner_persona" not in path
 
     def test_store_up_zero_rows_is_ok_zero( self, conn_seq ):
         conn_seq[ "outcomes" ] = [ _count_resp( 0 ) ]
-        assert tc.query_owed( SETTINGS, "k", "p" ) == ( True, 0 )
+        assert tc.query_owed( SETTINGS, "k", "p" ) == ( True, 0, { } )
 
     def test_count_only_true_on_the_owed_query( self, conn_seq ):
         # O2 / §G: the owed query rides count_only=true so the server returns a true
         # COUNT(*), never a page-length saturating at the endpoint's limit.
         conn_seq[ "outcomes" ] = [ _count_resp( 425 ) ]
-        ok, count = tc.query_owed( SETTINGS, "k", "p" )
-        assert ( ok, count ) == ( True, 425 )                 # >100 counted exactly, no saturation
+        ok, count, breakdown = tc.query_owed( SETTINGS, "k", "p" )
+        assert ( ok, count, breakdown ) == ( True, 425, { } )                 # >100 counted exactly, no saturation
         _method, path, _headers = conn_seq[ "requests" ][ 0 ]
         assert "count_only=true" in path
 
@@ -347,37 +355,37 @@ class TestQueryOwed:
         # The request raises (refused) → fail safe, and the connection is STILL
         # closed (finally). The old "short-circuit" half died with the loop.
         conn_seq[ "outcomes" ] = [ ConnectionRefusedError( "refused" ) ]
-        assert tc.query_owed( SETTINGS, "k", "p" ) == ( False, 0 )
+        assert tc.query_owed( SETTINGS, "k", "p" ) == ( False, 0, { } )
         assert conn_seq[ "closed" ] == 1                      # released even on failure
 
     def test_timeout_is_not_ok( self, conn_seq ):
         conn_seq[ "outcomes" ] = [ TimeoutError( "slow store" ) ]
-        assert tc.query_owed( SETTINGS, "k", "p" ) == ( False, 0 )
+        assert tc.query_owed( SETTINGS, "k", "p" ) == ( False, 0, { } )
 
     def test_http_error_is_not_ok( self, conn_seq ):
         conn_seq[ "outcomes" ] = [ FakeHTTPResponse( 500, '{"detail": "boom"}' ) ]
-        assert tc.query_owed( SETTINGS, "k", "p" ) == ( False, 0 )
+        assert tc.query_owed( SETTINGS, "k", "p" ) == ( False, 0, { } )
 
     def test_malformed_unparseable_body( self, conn_seq ):
         conn_seq[ "outcomes" ] = [ FakeHTTPResponse( 200, "not json" ) ]
-        assert tc.query_owed( SETTINGS, "k", "p" ) == ( False, 0 )
+        assert tc.query_owed( SETTINGS, "k", "p" ) == ( False, 0, { } )
 
     def test_malformed_non_dict_body( self, conn_seq ):
         conn_seq[ "outcomes" ] = [ FakeHTTPResponse( 200, "[1]" ) ]
-        assert tc.query_owed( SETTINGS, "k", "p" ) == ( False, 0 )
+        assert tc.query_owed( SETTINGS, "k", "p" ) == ( False, 0, { } )
 
     def test_malformed_missing_count( self, conn_seq ):
         conn_seq[ "outcomes" ] = [ FakeHTTPResponse( 200, '{"tasks": []}' ) ]
-        assert tc.query_owed( SETTINGS, "k", "p" ) == ( False, 0 )
+        assert tc.query_owed( SETTINGS, "k", "p" ) == ( False, 0, { } )
 
     def test_malformed_non_int_count( self, conn_seq ):
         conn_seq[ "outcomes" ] = [ FakeHTTPResponse( 200, '{"count": "5"}' ) ]
-        assert tc.query_owed( SETTINGS, "k", "p" ) == ( False, 0 )
+        assert tc.query_owed( SETTINGS, "k", "p" ) == ( False, 0, { } )
 
     def test_malformed_bool_count_rejected( self, conn_seq ):
         # JSON `true` is a bool (an int subclass) — must NOT slip through as 1
         conn_seq[ "outcomes" ] = [ FakeHTTPResponse( 200, '{"count": true}' ) ]
-        assert tc.query_owed( SETTINGS, "k", "p" ) == ( False, 0 )
+        assert tc.query_owed( SETTINGS, "k", "p" ) == ( False, 0, { } )
 
     def test_project_omitted_when_none( self, conn_seq ):
         conn_seq[ "outcomes" ] = [ _count_resp( 1 ) ]
@@ -414,15 +422,97 @@ class TestQueryOwed:
         # test_stop_hook_heartbeat.py:1369 asserts len( _args ) == 3 to catch
         # exactly this shape — but it guards stop.py's CALL SITE, not this
         # suite's own calls, so the residue slipped under a guard built for it.
-        ok, count = tc.query_owed( https_settings, "k", "p" )
-        assert ( ok, count ) == ( True, 4 )
+        ok, count, breakdown = tc.query_owed( https_settings, "k", "p" )
+        assert ( ok, count, breakdown ) == ( True, 4, { } )
         assert conn_seq[ "ctor" ][ 0 ][ "scheme" ] == "https"
         assert conn_seq[ "ctor" ][ 0 ][ "port" ] == 8443
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # PER-STATUS BREAKDOWN (c191be39, 2026-07-20) — the third return element
+    # ═════════════════════════════════════════════════════════════════════════
+
+    def test_breakdown_returned_verbatim_still_one_request( self, conn_seq ):
+        """
+        THE FIX, at the transport seam: the status survives the count.
+
+        ⚠️ NOTE THE REQUEST-COUNT ASSERTION. A breakdown is exactly what a
+        per-status client loop would ALSO produce, so this doubles as the guard
+        that we got it the forbidden shape's opposite way: ONE request, the
+        server's own GROUP BY, returned verbatim.
+        """
+        conn_seq[ "outcomes" ] = [ _count_resp( 16, { "in_progress": 2, "queued": 13, "parked": 1 } ) ]
+        ok, count, breakdown = tc.query_owed( SETTINGS, "k", "p", project="lupin" )
+
+        assert ( ok, count ) == ( True, 16 )
+        assert breakdown == { "in_progress": 2, "queued": 13, "parked": 1 }
+        assert len( conn_seq[ "requests" ] ) == 1, "more than one request — the per-status loop is back"
+
+    def test_count_equals_sum_of_breakdown( self, conn_seq ):
+        """
+        AC1 at this seam. `count` and `breakdown` come from TWO INDEPENDENT server
+        queries (a COUNT(*) and a GROUP BY), neither derived from the other — which
+        is what makes this assertion able to FAIL. Deriving one from the other would
+        make it true by construction: a green that could never go red, and therefore
+        one that reports nothing.
+        """
+        conn_seq[ "outcomes" ] = [ _count_resp( 16, { "in_progress": 2, "queued": 13, "parked": 1 } ) ]
+        _ok, count, breakdown = tc.query_owed( SETTINGS, "k", "p" )
+        assert sum( breakdown.values() ) == count
+
+    def test_absent_breakdown_degrades_to_empty_and_still_ok( self, conn_seq ):
+        """
+        A server that omits `breakdown` must NOT fail the read. The count carries the
+        fail-safe; the breakdown is a reporting refinement. Failing here would let a
+        cosmetic regression SUPPRESS the poke — strictly worse than reporting a right
+        total with a coarse status.
+        """
+        conn_seq[ "outcomes" ] = [ _count_resp( 9 ) ]                 # no breakdown key
+        assert tc.query_owed( SETTINGS, "k", "p" ) == ( True, 9, { } )
+
+    @pytest.mark.parametrize( "junk", [
+        "not-a-dict",                                                 # wrong type entirely
+        [ [ "queued", 3 ] ],                                          # a list, not an object
+        42,
+        None,
+    ] )
+    def test_malformed_breakdown_degrades_without_failing_the_read( self, conn_seq, junk ):
+        """A malformed breakdown degrades to {} — the count still governs."""
+        conn_seq[ "outcomes" ] = [ FakeHTTPResponse( 200, json.dumps( { "count": 3, "breakdown": junk } ) ) ]
+        assert tc.query_owed( SETTINGS, "k", "p" ) == ( True, 3, { } )
+
+    @pytest.mark.parametrize( "bad_pair,reason", [
+        ( { "queued": True }, "JSON true is a bool (int subclass) — must never read as 1" ),
+        ( { "queued": "13" }, "a string count is not a count" ),
+        ( { "queued": -1 },   "a negative count means the wire is lying, not a small bucket" ),
+        ( { "queued": None }, "null is not a count" ),
+    ] )
+    def test_breakdown_drops_bad_values_keeps_good_ones( self, conn_seq, bad_pair, reason ):
+        """
+        Per-ENTRY hygiene: one bad bucket is dropped, the rest survive. Rejecting the
+        WHOLE breakdown over one bad entry would discard true information; keeping the
+        bad entry would put a lie in the poke.
+        """
+        body = { "count": 5, "breakdown": { "in_progress": 5, **bad_pair } }
+        conn_seq[ "outcomes" ] = [ FakeHTTPResponse( 200, json.dumps( body ) ) ]
+        _ok, _count, breakdown = tc.query_owed( SETTINGS, "k", "p" )
+        assert breakdown == { "in_progress": 5 }, reason
+
+    def test_breakdown_drops_non_string_keys( self ):
+        """
+        A non-string key cannot name a status. JSON always gives string keys, so this
+        is the belt for any non-JSON caller of the parser.
+        """
+        assert tc._parse_breakdown( { 7: 1, "queued": 2 } ) == { "queued": 2 }
+
+    def test_transport_failure_returns_empty_breakdown( self, conn_seq ):
+        """The §C fail-safe extends to the third element: ( False, 0, {} )."""
+        conn_seq[ "outcomes" ] = [ ConnectionRefusedError( "refused" ) ]
+        assert tc.query_owed( SETTINGS, "k", "p" ) == ( False, 0, { } )
 
     def test_bad_base_url_fails_safe_no_request( self, conn_seq ):
         # A non-numeric port makes urlsplit.port raise ValueError → _open_owed_connection
         # returns None → fail safe ( False, 0 ), and NO request is ever issued.
         conn_seq[ "outcomes" ] = [ _count_resp( 9 ) ]
         bad_settings = { "api_base_url": "http://host:notaport", "timeout_seconds": 3.0 }
-        assert tc.query_owed( bad_settings, "k", "p" ) == ( False, 0 )
+        assert tc.query_owed( bad_settings, "k", "p" ) == ( False, 0, { } )
         assert conn_seq[ "requests" ] == [ ] and conn_seq[ "closed" ] == 0

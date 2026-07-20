@@ -38,6 +38,7 @@ def session():
     query.limit.return_value           = query
     query.offset.return_value          = query
     query.with_for_update.return_value = query
+    query.group_by.return_value        = query
     return mock
 
 
@@ -302,6 +303,97 @@ def test_count_tasks_filter_combinations( repo, session, kwargs, expected_filter
     # equals exactly the provided-filter count regardless of whether status is set.
     repo.count_tasks( include_terminal=True, **kwargs )
     assert query.filter.call_count == expected_filters
+
+
+# ---------------------------------------------------------------------------
+# count_tasks_by_status (c191be39 — the per-status breakdown, ONE GROUP BY)
+# ---------------------------------------------------------------------------
+
+def test_count_tasks_by_status_groups_once_no_pagination( repo, session ):
+    query = session.query.return_value
+    query.all.return_value = [ ( "in_progress", 2 ), ( "queued", 13 ), ( "parked", 1 ) ]
+
+    result = repo.count_tasks_by_status( owed_only=True )
+
+    assert result == { "in_progress": 2, "queued": 13, "parked": 1 }
+    # ⛔ ONE GROUP BY — not one query per status. The forbidden shape (deleted
+    # 2026-07-19) fired N queries and summed; it could not see a park-expiry rejoin
+    # and double-counted expired-parked rows. A GROUP BY partitions ONE admitted
+    # set, so every row lands in exactly one bucket by construction.
+    query.group_by.assert_called_once()
+    # a breakdown is order- and page-independent
+    query.order_by.assert_not_called()
+    query.limit.assert_not_called()
+    query.offset.assert_not_called()
+
+
+def test_count_tasks_by_status_empty_result_is_empty_dict( repo, session ):
+    session.query.return_value.all.return_value = [ ]
+    assert repo.count_tasks_by_status( owed_only=True ) == { }
+
+
+def test_count_tasks_by_status_omits_absent_statuses_never_zero_fills( repo, session ):
+    """
+    A zero-filled key is a CLAIM about a status the query never saw. Only statuses
+    actually present in the admitted set appear.
+    """
+    session.query.return_value.all.return_value = [ ( "queued", 4 ) ]
+    result = repo.count_tasks_by_status( owed_only=True )
+    assert result == { "queued": 4 }
+    assert "in_progress" not in result and "parked" not in result
+
+
+def test_count_tasks_by_status_applies_every_provided_filter( repo, session ):
+    query = session.query.return_value
+    query.all.return_value = [ ]
+    repo.count_tasks_by_status(
+        owner_persona       = "krishna",
+        status              = "in_progress",
+        gate_class          = "operator",
+        urgency             = "urgent",
+        accountable_manager = "tiberius",
+        project             = "lupin",
+        item_class          = "task",
+        correlation_key     = "cc-task:sid:5",
+    )
+    assert query.filter.call_count == 8                        # one per provided filter, AND semantics
+
+
+def test_count_tasks_by_status_filter_set_matches_count_tasks_exactly( repo, session ):
+    """
+    🔴 THE PARITY PRECONDITION. `count` and `breakdown` are two INDEPENDENT queries
+    whose sum must agree — which is only meaningful if they select the SAME
+    population. If one grows a filter the other lacks, the sum-parity gate silently
+    starts comparing two different boards and its green stops meaning anything.
+
+    Asserted on the filter COUNT for an identical kwargs set, which is what would
+    diverge if a filter were added to one method and not the other.
+    """
+    kwargs = {
+        "owner_persona"       : "krishna",
+        "status"              : "queued",
+        "gate_class"          : "operator",
+        "urgency"             : "urgent",
+        "accountable_manager" : "tiberius",
+        "project"             : "lupin",
+        "item_class"          : "task",
+        "correlation_key"     : "cc-task:sid:5",
+        "include_terminal"    : True,
+    }
+    query = session.query.return_value
+
+    query.scalar.return_value = 0
+    repo.count_tasks( **kwargs )
+    count_filters = query.filter.call_count
+
+    query.filter.reset_mock()
+    query.all.return_value = [ ]
+    repo.count_tasks_by_status( **kwargs )
+    breakdown_filters = query.filter.call_count
+
+    assert count_filters == breakdown_filters, (
+        "count_tasks and count_tasks_by_status no longer select the same population — "
+        "the sum-parity gate is comparing two different boards" )
 
 
 # ---------------------------------------------------------------------------

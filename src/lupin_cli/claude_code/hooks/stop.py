@@ -77,7 +77,7 @@ from lupin_cli.claude_code.hooks.lib.heartbeat_settings import load_heartbeat_se
 from lupin_cli.claude_code.hooks.lib import heartbeat_events
 # v2 Track-A — live work-owed oracle (Task* replay from the session transcript).
 from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import (
-    evaluate_work_owed, partition_inbound_by_age, TODO_IN_PROGRESS,
+    evaluate_work_owed, partition_inbound_by_age, TODO_IN_PROGRESS, TODO_PENDING,
     manager_needs_verification, manager_needs_spinup_check, manager_needs_question_surface,
     SPINUP_CHECK_DEBOUNCE_SECONDS, SURFACE_QUESTIONS_DEBOUNCE_SECONDS, SPINUP_BACKLOG_MIN_N,
 )
@@ -1378,11 +1378,14 @@ def _owed_count_from_store( session_id ):
         - session_id is the resolved stable session id string
 
     Ensures:
-        - Returns ( count, ok ): ok True iff the store answered every owed-status
-          query cleanly; count is the summed owed-row count (0 when not ok)
-        - store unreachable / timeout / malformed config or body → ( 0, False )
+        - Returns ( count, ok, breakdown ): ok True iff the store answered
+          cleanly; count is the server-computed owed-row count (0 when not ok);
+          breakdown is { status: count } over that same set (c191be39), or {}
+          when the server omitted it — see _synthesize_owed_items for how an
+          empty breakdown degrades
+        - store unreachable / timeout / malformed config or body → ( 0, False, {} )
           (§C fail-safe: the caller does NOT poke — never guess on a bad read)
-        - NEVER raises (degrade-safe IO shell — any error ⇒ ( 0, False ))
+        - NEVER raises (degrade-safe IO shell — any error ⇒ ( 0, False, {} ))
     """
     try:
         settings = load_task_store_settings()
@@ -1395,31 +1398,79 @@ def _owed_count_from_store( session_id ):
         # Idempotent → safe whether the bridge holds the display or pool form.
         persona_key = canonical_persona_key( persona.get( "name" ) if isinstance( persona, dict ) else None ) or "unknown"
         project  = resolve_project_name()
-        ok, count = query_owed( settings, api_key, persona_key, project=project )
-        return count, ok
+        ok, count, breakdown = query_owed( settings, api_key, persona_key, project=project )
+        return count, ok, breakdown
     except Exception:
-        return 0, False
+        return 0, False, { }
 
 
-def _synthesize_owed_items( count ):
+# The store's owed statuses, mapped onto the oracle's TODO vocabulary (c191be39).
+#
+# `parked` maps to PENDING (Rick's ruling, plan §4.3a): an admitted parked row has
+# provably EXPIRED — park-active rows never survive owed admission — so it is owed
+# and workable, but it is neither in_progress nor pending in the oracle's native
+# vocabulary. It rides `pending` because that bucket already means "owned, not
+# begun", which is the closest true statement available.
+#
+# ACCEPTED COST, named so nobody rediscovers it as a defect: a reader cannot
+# distinguish a never-started row from a rejoined one without opening it. Option
+# (b), restoring the pre-park status, is NOT AVAILABLE — verified 2026-07-20,
+# there is no pre-park status column (only park_reason + park_reason_captured_at);
+# recovering it would mean walking task_events per row, i.e. a per-row join on an
+# endpoint built as one cheap COUNT(*) that fires every turn.
+STORE_STATUS_TO_TODO_STATUS = {
+    "in_progress" : TODO_IN_PROGRESS,
+    "queued"      : TODO_PENDING,
+    "parked"      : TODO_PENDING,
+}
+
+
+def _synthesize_owed_items( count, breakdown=None ):
     """
-    Build a `todo_items` list of `count` synthetic owed entries for the oracle.
+    Build a `todo_items` list of synthetic owed entries CARRYING THEIR REAL STATUS.
 
-    The store-count seam yields a COUNT, but evaluate_work_owed consumes a LIST
-    of owned/in_progress dicts. Synthesize `count` owed items in the SAME shape
-    owed_items_from_state emits ({ status, owned_by_me }) so the verdict, the
-    oracle log's owed_items length, the §4 poke abstract, and total_owed all read
-    the store count transparently — no other call site changes.
+    The store-count seam yields a COUNT, but evaluate_work_owed consumes a LIST of
+    owned dicts. Synthesize them in the SAME shape owed_items_from_state emits
+    ({ status, owned_by_me }) so the verdict, the oracle log's owed_items length,
+    the §4 poke abstract, and total_owed all read the store transparently.
+
+    🔴 THIS FUNCTION WAS THE DEFECT (c191be39, fixed 2026-07-20). It took only a
+    count and stamped EVERY synthesized item TODO_IN_PROGRESS, so a session owning
+    16 `queued` rows was told it owned "16 in-progress TODO item(s)". Two
+    consequences, the second invisible: every queued row misreported, AND the
+    oracle's `todo_unstarted` signal became unreachable dead code, because nothing
+    could ever arrive carrying TODO_PENDING.
+
+    The status is NOT re-derived here. It is carried from the server's GROUP BY
+    over the same admitted set — the pure oracle (heartbeat_work_owed.py:203-206)
+    already partitions on real status and already emits two distinct signals. It
+    needed correct input, not new vocabulary; it is UNMODIFIED by this fix.
 
     Requires:
         - count is a non-negative int
+        - breakdown is { store_status: count } or None/{} (server omitted it)
 
     Ensures:
-        - Returns a list of length `count`, each
-          { "status": in_progress, "owned_by_me": True }
-        - count 0 → [] (genuinely no owed work)
+        - With a breakdown: returns one item per counted row, each stamped its
+          MAPPED todo status (queued/parked → pending, in_progress → in_progress).
+          Total length is sum( breakdown.values() ) — the server's own partition.
+        - An UNKNOWN store status (one this map does not name) falls back to
+          TODO_IN_PROGRESS and is still COUNTED. Deliberate: a new status must
+          never silently vanish from the owed list. Over-reporting its urgency is
+          recoverable; dropping it is a session that goes quiet while owing work.
+        - Without a breakdown ({} / None — server omitted or malformed): degrades
+          EXACTLY to the pre-fix shape, `count` items stamped in_progress. The
+          count still governs the poke; only its status detail is coarse.
+        - count 0 with an empty breakdown → [] (genuinely no owed work)
     """
-    return [ { "status": TODO_IN_PROGRESS, "owned_by_me": True } for _ in range( count ) ]
+    if not breakdown:
+        return [ { "status": TODO_IN_PROGRESS, "owned_by_me": True } for _ in range( count ) ]
+
+    items = [ ]
+    for store_status, status_count in breakdown.items():
+        todo_status = STORE_STATUS_TO_TODO_STATUS.get( store_status, TODO_IN_PROGRESS )
+        items.extend( { "status": todo_status, "owned_by_me": True } for _ in range( status_count ) )
+    return items
 
 
 # Proactive-manager mechanism (fcb5dbc0, Lane A1) — the spawn-cap default that
@@ -1456,8 +1507,12 @@ def _backlog_count_from_store( session_id ):
         persona     = get_voice_persona( session_id )
         persona_key = canonical_persona_key( persona.get( "name" ) if isinstance( persona, dict ) else None ) or "unknown"
         project     = resolve_project_name()
-        ok, count   = query_owed( settings, api_key, persona_key,
-                                  project=project, owner_field="accountable_manager" )
+        # The breakdown is DISCARDED here on purpose: Face A keys on the SIZE of
+        # the chase-list, not its status mix. Unpacked rather than sliced so a
+        # future arity change fails loudly at this line instead of silently
+        # rebinding `count` to a dict.
+        ok, count, _breakdown = query_owed( settings, api_key, persona_key,
+                                            project=project, owner_field="accountable_manager" )
         return count, ok
     except Exception:
         return 0, False
@@ -1710,7 +1765,7 @@ def _resolve_owed_state( session_id, transcript_path=None, cwd=None ):
     # outage (the poke is already suppressed by the §C fail-safe below).
     owed_unknown = False
     if settings[ "owed_source_from_store" ]:
-        store_count, store_ok = _owed_count_from_store( session_id )
+        store_count, store_ok, store_breakdown = _owed_count_from_store( session_id )
         if not store_ok:
             log_to_stream( "stop", {}, extra={
                 "phase"      : "heartbeat_store_unreachable",
@@ -1719,7 +1774,7 @@ def _resolve_owed_state( session_id, transcript_path=None, cwd=None ):
             owed_items   = [ ]
             owed_unknown = True
         else:
-            owed_items = _synthesize_owed_items( store_count )
+            owed_items = _synthesize_owed_items( store_count, store_breakdown )
     else:
         owed_items = owed_items_from_state( task_state )
     # ── 6929f4ac receipts-of-progress — TWO new owed signals off the hold ──────

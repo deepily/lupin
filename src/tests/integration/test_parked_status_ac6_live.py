@@ -225,8 +225,16 @@ def _owed_count( store_settings, api_key, persona ):
     silent, because both twins would agree the row is owed and the hook simply
     would never ask.
     """
-    ok, count = query_owed( store_settings, api_key, persona, project="lupin" )
+    ok, count, breakdown = query_owed( store_settings, api_key, persona, project="lupin" )
     assert ok, "R2 owed-count read failed — fail-safe returned not-ok"
+    # AC1 against a LIVE Postgres board (c191be39): `count` is a COUNT(*) and
+    # `breakdown` a GROUP BY, computed by two independent server queries. This is
+    # the one venue where that parity is exercised against real rows rather than a
+    # seeded mock — a divergence here means the two aggregates selected different
+    # populations.
+    assert sum( breakdown.values() ) == count, (
+        f"count={count} but breakdown sums to {sum( breakdown.values() )} — "
+        f"the two aggregates disagree: {breakdown}" )
     return count
 
 

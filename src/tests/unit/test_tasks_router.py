@@ -342,16 +342,18 @@ def test_query_returns_tasks_and_count( client, repo ):
 def test_query_count_only_returns_count_without_rows( client, repo ):
     # O2 / §G: count_only=true returns { count } (NO "tasks" key), via count_tasks
     # (the true COUNT(*)), and NEVER materializes rows through query_tasks.
-    repo.count_tasks.return_value = 273
+    repo.count_tasks.return_value            = 273
+    repo.count_tasks_by_status.return_value  = { "queued": 273 }
     r = client.get( "/api/tasks", params={ "count_only": "true" } )
     assert r.status_code == 200
-    assert r.json() == { "count": 273 }                      # >100, no page saturation
+    assert r.json() == { "count": 273, "breakdown": { "queued": 273 } }   # >100, no page saturation
     repo.count_tasks.assert_called_once()
     repo.query_tasks.assert_not_called()
 
 
 def test_query_count_only_forwards_filters_not_pagination( client, repo ):
-    repo.count_tasks.return_value = 0
+    repo.count_tasks.return_value           = 0
+    repo.count_tasks_by_status.return_value = { }
     r = client.get( "/api/tasks", params={
         "owner_persona" : "krishna",
         "status"        : "queued",
@@ -360,7 +362,7 @@ def test_query_count_only_forwards_filters_not_pagination( client, repo ):
         "limit"         : 7,                                  # ignored in count mode
         "offset"        : 3,                                  # ignored in count mode
     } )
-    assert r.status_code == 200 and r.json() == { "count": 0 }
+    assert r.status_code == 200 and r.json() == { "count": 0, "breakdown": { } }
     kwargs = repo.count_tasks.call_args.kwargs
     assert kwargs[ "owner_persona" ] == "krishna" and kwargs[ "status" ] == "queued"
     assert kwargs[ "project" ] == "lupin"
@@ -430,11 +432,85 @@ def test_query_terse_false_returns_full_rows( client, repo ):
 def test_query_count_only_precedes_terse( client, repo ):
     # count_only wins over terse — a count needs no rows at all, so query_tasks
     # is never called even when terse is also requested.
-    repo.count_tasks.return_value = 5
+    repo.count_tasks.return_value           = 5
+    repo.count_tasks_by_status.return_value = { "queued": 5 }
     r = client.get( "/api/tasks", params={ "count_only": "true", "terse": "true" } )
-    assert r.status_code == 200 and r.json() == { "count": 5 }
+    assert r.status_code == 200 and r.json() == { "count": 5, "breakdown": { "queued": 5 } }
     repo.count_tasks.assert_called_once()
     repo.query_tasks.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# breakdown on the count_only path (c191be39, 2026-07-20)
+# ---------------------------------------------------------------------------
+
+def test_count_only_returns_breakdown_beside_count( client, repo ):
+    """THE SERVER HALF OF THE FIX: the status the seam used to destroy."""
+    repo.count_tasks.return_value           = 16
+    repo.count_tasks_by_status.return_value = { "in_progress": 2, "queued": 13, "parked": 1 }
+
+    r = client.get( "/api/tasks", params={ "owed_only": "true", "count_only": "true" } )
+
+    assert r.status_code == 200
+    assert r.json() == { "count": 16, "breakdown": { "in_progress": 2, "queued": 13, "parked": 1 } }
+    repo.query_tasks.assert_not_called()                      # still no row materialization
+
+
+def test_count_only_count_equals_sum_of_breakdown( client, repo ):
+    """
+    AC1 at the endpoint. The two numbers come from two INDEPENDENT repository calls
+    (COUNT(*) and a GROUP BY), neither derived from the other — which is precisely
+    what lets this assertion fail. An invariant true by construction is not a gate.
+    """
+    repo.count_tasks.return_value           = 16
+    repo.count_tasks_by_status.return_value = { "in_progress": 2, "queued": 13, "parked": 1 }
+
+    body = client.get( "/api/tasks", params={ "owed_only": "true", "count_only": "true" } ).json()
+    assert sum( body[ "breakdown" ].values() ) == body[ "count" ]
+
+
+def test_breakdown_receives_the_same_filters_as_count( client, repo ):
+    """
+    The two aggregates MUST select the same population or the sum-parity gate is
+    comparing different boards. Asserted at the endpoint, where a forwarding
+    omission would live.
+    """
+    repo.count_tasks.return_value           = 0
+    repo.count_tasks_by_status.return_value = { }
+    client.get( "/api/tasks", params={
+        "owner_persona" : "krishna",
+        "status"        : "queued",
+        "project"       : "lupin",
+        "owed_only"     : "true",
+        "count_only"    : "true",
+    } )
+    assert repo.count_tasks.call_args.kwargs == repo.count_tasks_by_status.call_args.kwargs
+
+
+def test_breakdown_NEVER_reaches_the_full_row_response( client, repo ):
+    """
+    ⛔ THE BOUNDARY GUARD (plan §4.1a). /api/tasks is NOT internal-only — the
+    multiplexer parses the FULL-ROW shape (render/taskListModel.ts,
+    render/TaskListRenderer.ts, notifications.js:386, and a 60s poll at
+    multiplexer/boot.ts:586). `breakdown` is scoped to the count_only branch; if it
+    ever leaks into the list response it changes a shape with live frontend
+    consumers.
+    """
+    repo.query_tasks.return_value = [ ]
+    r = client.get( "/api/tasks", params={ "owner_persona": "krishna" } )   # count_only=False
+
+    assert r.status_code == 200
+    assert "breakdown" not in r.json(), "breakdown leaked into the full-row shape the multiplexer parses"
+    assert set( r.json().keys() ) == { "tasks", "count" }
+    repo.count_tasks_by_status.assert_not_called()             # not even computed off the count path
+
+
+def test_breakdown_not_computed_when_enum_validation_rejects( client, repo ):
+    """The enum gate fires BEFORE the count branch — a junk filter costs no queries."""
+    r = client.get( "/api/tasks", params={ "status": "finished", "count_only": "true" } )
+    assert r.status_code == 422
+    repo.count_tasks.assert_not_called()
+    repo.count_tasks_by_status.assert_not_called()
 
 
 def test_query_passes_all_filters_through( client, repo ):
