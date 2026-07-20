@@ -234,8 +234,24 @@ def _amend( api_key, task_id, **fields ):
     left syntactically intact, and the thing the quote described has changed
     underneath it. That is precisely "the quote stops being true and NOTHING GOES
     RED" (§1). `updated_ts` bumps; `park_reason_captured_at` does not.
+
+    ⚠️ `actor` IS REQUIRED and was MISSING here on run ts-6fb8e966 — 4 of 5 tests
+    died at this call with a 422, never reaching a line of staleness code.
+    `TaskPatchIn.actor` is `Field( ..., min_length=1 )` (routers/tasks.py:236),
+    and the sibling write models require it too: `TaskTransitionIn` (:172),
+    `TaskCorrelateIn` (:191), `TaskAmendIn` (:208). It stamps the AUDIT EVENT,
+    not the item.
+
+    NOTE the two distinct seams, which are easy to conflate: PATCH `body`
+    OVERWRITES, while POST /amend APPENDS (`note`, preserving prior text). This
+    fixture wants OVERWRITE — the point is that the row's content moved out from
+    under a quote that stayed put.
+
+    `TaskPatchIn` is `extra='forbid'`, so every key sent here must be on its
+    whitelist; an unknown key is a 422, never a silent drop.
     """
-    r = requests.patch( f"{ENDPOINT}/{task_id}", json=fields,
+    payload = { "actor": "seat3 ac3", **fields }
+    r = requests.patch( f"{ENDPOINT}/{task_id}", json=payload,
                         headers=_headers( api_key ), timeout=15 )
     assert r.status_code == 200, f"amend failed {r.status_code}: {r.text}"
     return r.json()
