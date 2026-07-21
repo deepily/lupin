@@ -1107,6 +1107,19 @@ def _outbox_has_backlog():
         return False
 
 
+# The ONE marker naming a value the USER DID NOT CHOOSE (row e5f21fff).
+#
+# `converse` has carried this prefix since before the row was filed and is the
+# ruled reference (D3): the marker is STRUCTURAL — you cannot read the value
+# without reading it — which is why it beats a sibling flag a consumer can
+# ignore. `ask_yes_no` returns a bare string and therefore has nowhere to put a
+# flag; it uses this same marker rather than inventing a third convention.
+#
+# Defined once so the two verbs cannot drift into two spellings of the same
+# claim. Dict-returning verbs use `_stamp_answer_provenance` instead.
+DEFAULT_USED_MARKER = "[default used] "
+
+
 @mcp.tool
 def converse(
     message: str,
@@ -1171,7 +1184,7 @@ def converse(
     response: NotificationResponse = notify_user_sync( request=request, debug=False )
 
     if response.exit_code == 0:
-        prefix = "[default used] " if response.default_used else ""
+        prefix = DEFAULT_USED_MARKER if response.default_used else ""
         return f"{prefix}{response.response_value or ''}"
     elif response.exit_code == 2:
         if response_default is not None:
@@ -1440,7 +1453,15 @@ def ask_yes_no(
         - returns one of:
           * "yes", "no", "neither"
           * "yes [comment: ...]", "no [comment: ...]", "neither [comment: ...]"
-        - returns the default value (as string) on timeout or error
+        - on ANY non-answer — timeout, expiry, user offline, transport error,
+          server error, or a request-validation failure — returns the default
+          PREFIXED with "[default used] ". It is deliberately NOT bare, because
+          a bare default is indistinguishable from a keypress (row e5f21fff) and
+          this verb has no error shape at all: every failure mode lands on the
+          same return. The prefix matches `converse`, and this verb's contract
+          already promises an ANNOTATED string (see the qualifier form above)
+        - a genuine keypress is returned CLEAN, with no prefix — that is what
+          makes the prefix mean something
         - On "neither", Claude should treat the response as a signal that the
           question needs re-framing rather than as a soft yes or no — read the
           comment (if present) and ask a clearer follow-up question
@@ -1457,8 +1478,11 @@ def ask_yes_no(
             in `abstract` (not length-limited), not the spoken/TTS channel.
 
     Returns:
-        Annotated string: one of "yes", "no", "neither",
-        optionally suffixed with "[comment: ...]"
+        Annotated string: one of "yes", "no", "neither", optionally suffixed
+        with "[comment: ...]", and PREFIXED with "[default used] " when the value
+        is a substituted default rather than something the user chose.
+
+        ⚠️ A prefixed value is NOT a ruling. Do not treat it as authorization.
 
     Examples:
         response = ask_yes_no("Delete the old backups?")
@@ -1483,7 +1507,7 @@ def ask_yes_no(
             job_id=job_id
         )
     except ( ValidationError, ValueError ):
-        return default
+        return f"{DEFAULT_USED_MARKER}{default}"
 
     response: NotificationResponse = notify_user_sync( request=request, debug=False )
 
@@ -1492,15 +1516,35 @@ def ask_yes_no(
         answer, qualifier = extract_qualifier_comment( raw_value )
         result = format_qualified_response( answer, qualifier ) if qualifier else raw_value
         log_to_stream( "mcp_ask_yes_no", {}, extra={
-            "raw_value"  : raw_value,
-            "answer"     : answer,
-            "qualifier"  : qualifier,
-            "enriched"   : bool( qualifier ),
-            "return_len" : len( result )
+            "raw_value"    : raw_value,
+            "answer"       : answer,
+            "qualifier"    : qualifier,
+            "enriched"     : bool( qualifier ),
+            "default_used" : bool( response.default_used ),
+            "return_len"   : len( result )
         } )
+        # exit_code == 0 is NOT proof a human acted (row e5f21fff): an OfflineEvent
+        # lands here with default_used=True (notify_user_sync.py:295-303), and the
+        # server can flag a substitution on a RespondedEvent. Mark it.
+        if response.default_used:
+            return f"{DEFAULT_USED_MARKER}{result}"
         return result
 
-    return default
+    # 🔴 THE CATCH-ALL, and it is why this verb is worse than the one row
+    # e5f21fff is titled after. It swallows timeout, expiry, offline-without-a-
+    # value, transport error and server error alike — there is NO error shape —
+    # and returned the default as a bare "yes"/"no" indistinguishable from a
+    # keypress. This verb returns a STRING, so a `default_used` flag has nowhere
+    # to live without changing the return TYPE; the marker is the converse
+    # pattern (:1174), and it stays inside this verb's OWN documented contract,
+    # which already promises an ANNOTATED string ("yes [comment: ...]").
+    #
+    # ⚠️ That a genuine ERROR is still indistinguishable from a timeout here is a
+    # SEPARATE defect and is NOT fixed: converse returns "[error: <status>]" and
+    # never substitutes a default, so making these agree would change what this
+    # verb returns on failure — a breaking contract change on a live surface.
+    # Recorded on the row for Rick's ruling, deliberately not smuggled in here.
+    return f"{DEFAULT_USED_MARKER}{default}"
 
 
 @mcp.tool
@@ -1540,8 +1584,12 @@ def ask_multiple_choice(
         abstract: Optional supplementary context (plan details, URLs, markdown)
         job_id: Optional agentic job ID for routing to job cards (e.g., "dr-a1b2c3d4")
         default: Optional dict keyed by question header. When provided, a timeout
-            returns ``{"answers": <default>}`` instead of the error dict — same
-            shape as a successful response. Keys must match question headers;
+            returns ``{"answers": <default>, "default_used": True,
+            "answered": False}`` instead of the error dict. It is DELIBERATELY
+            NOT the same shape as a successful response — that identity was the
+            defect (row e5f21fff): an unanswered question read as a ruling, and
+            five ratified decisions carry a permanent provenance caveat because
+            of it. Keys must match question headers;
             values must be option labels (string for single-select, list of
             strings for multi-select). Validated at call time; mismatches
             return an error dict before the notification fires.
@@ -1552,13 +1600,26 @@ def ask_multiple_choice(
             belongs in `abstract` (not length-limited), not the spoken/TTS channel.
 
     Returns:
-        dict with answers keyed by header:
+        dict with answers keyed by header, PLUS the provenance of those answers:
         {
             "answers": {
                 "Auth method": "OAuth",
                 "Features": ["Dark mode", "Notifications"]
-            }
+            },
+            "default_used": False,   # True => nobody chose this; it was substituted
+            "answered":     True     # the affirmative twin, so the common check reads positive
         }
+
+        ⚠️ READ `answered` BEFORE TREATING THIS AS A DECISION. Both keys are
+        ALWAYS present, including an explicit "default_used": False on a genuine
+        selection — an absent key would leave you unable to tell a real answer
+        from an older server that never sent the field. `default_used` is True
+        when the user TIMED OUT (the caller's `default` was substituted here) and
+        when the user was OFFLINE (the server substituted, and that path returns
+        through the success branch, not the timeout one).
+
+        This is a DETECTION aid, not prevention: reading `answers` while ignoring
+        `answered` still turns silence into consent.
 
     Examples:
         # Single question, single select
@@ -1636,7 +1697,19 @@ def ask_multiple_choice(
     response: NotificationResponse = notify_user_sync( request=request, debug=False )
 
     if response.exit_code == 0:
-        return _parse_multiple_choice_response( response.response_value )
+        # 🔴 DROP SITE 1 of 2 (row e5f21fff) — and the one nobody filed.
+        # exit_code == 0 is NOT proof a human acted. notify_user_sync.py:295-303
+        # maps an OfflineEvent to exit_code=0 / default_used=True, commented
+        # "Offline with default = success", so a PROVABLY ABSENT user returns
+        # through this success branch, is parsed as an answer, and never reaches
+        # the is_timeout branch below. The filed one-line fix at that branch
+        # cannot touch this path. A RespondedEvent can also carry a server-side
+        # default_used=True. `response.default_used` is the server's truth here
+        # and it is the right one to forward.
+        return _stamp_answer_provenance(
+            _parse_multiple_choice_response( response.response_value ),
+            default_used = bool( response.default_used ),
+        )
 
     # Timeout / expiry — the user did not answer within the window. This must
     # cover BOTH notify_user_sync outcomes that mean "no answer in time":
@@ -1652,12 +1725,62 @@ def ask_multiple_choice(
     #     the correct discriminator across both exit codes.
     if response.is_timeout:
         if default is not None:
-            return { "answers": default }
+            # 🔴 DROP SITE 2 of 2 (row e5f21fff) — the filed one.
+            # `default_used=True` here is a CLIENT-side truth: THIS function is
+            # substituting the caller's `default` dict. It is deliberately NOT
+            # `response.default_used`, which is FALSE on this path — the
+            # MULTIPLE_CHOICE path never plumbs a server-side response_default
+            # (see the comment above), so the server never substituted anything
+            # and its flag says so. Forwarding the server's False here would
+            # stamp `default_used: false` onto a defaulted answer, which is worse
+            # than dropping it: it would assert the opposite of what happened.
+            return { "answers": default, "default_used": True, "answered": False }
         return { "error": "timeout - no response received", "timeout": True }
 
     # Genuine error (connection, HTTP, stream, unexpected) — surface the status
     # so real failures stay visible rather than being masked by the default.
     return { "error": f"error: {response.status}" }
+
+
+def _stamp_answer_provenance( payload: dict, default_used: bool ) -> dict:
+    """
+    Stamp a dict-shaped ask response with whether a HUMAN actually answered.
+
+    Row `e5f21fff`: a substituted default returned in the same shape as a real
+    selection launders silence into consent. `default_used` is the only bit that
+    separates "the user decided" from "the user was not there", and both MCP
+    return sites discarded it — so a timeout, and an offline user, each read as a
+    ruling. Five ratified decisions in one morning carry a permanent provenance
+    caveat because the information was gone by the time anyone asked.
+
+    Both keys are ALWAYS present on an answer-bearing payload, including an
+    explicit `default_used: False` on a genuine selection (D4). An ABSENT key
+    would leave a caller reading `.get("default_used")` unable to tell "the user
+    answered" from "an older server that never sent the field" — a null that
+    reads like a negative.
+
+    `answered` is the affirmative twin, so the common check is a positive read
+    (`if result["answered"]`) rather than a negation a reader can drop.
+
+    ⚠️ THIS IS A DETECTION AID, NOT A PREVENTION. A consumer that ignores both
+    keys still reads `answers` and still launders. Making a non-answer
+    STRUCTURALLY un-mistakable — the answer key absent entirely — is a breaking
+    contract change on a live agent-facing surface and is Rick's to rule.
+
+    Requires:
+        - payload is the dict returned by a response parser
+        - default_used is a bool
+
+    Ensures:
+        - an error payload (carrying "error") is returned UNTOUCHED — provenance
+          describes an answer, and an error is not one
+        - otherwise returns the payload with `default_used` and `answered` set,
+          `answered` always the negation of `default_used`
+        - never raises; the input dict is not mutated
+    """
+    if "error" in payload:
+        return payload
+    return { **payload, "default_used": default_used, "answered": not default_used }
 
 
 def _validate_multiple_choice_default( default: dict, questions: list ) -> None:
