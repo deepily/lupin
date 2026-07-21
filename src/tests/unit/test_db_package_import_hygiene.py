@@ -44,6 +44,87 @@ def _clean_env():
     return root, env
 
 
+# Generous on purpose. These children take ~1-6s unloaded; the cap exists to convert a
+# HANG into a message, not to police latency. Tight enough that a wedged child cannot
+# stall the suite, loose enough that a merely-busy box never trips it.
+_CHILD_TIMEOUT_SECONDS = 300
+
+
+def _run_child( argv, env, cwd=None, what="child process" ):
+    """
+    Run a child and return its CompletedProcess — or fail with a message that says
+    TIMED OUT and nothing else.
+
+    WHY THIS EXISTS (bug 4938a829, Rachel 2026-07-21). Every test in this file shells out
+    to a fresh interpreter or a nested pytest, and none of them used to pass a `timeout=`
+    — `pytest-timeout` is not installed either, so there was no ambient backstop. A child
+    starved, OOM-killed or wedged under box load surfaced as a bare non-zero returncode
+    with possibly-empty output, through the SAME assertion a real regression trips.
+
+    That is fatal for `test_eager_cov_module_form_collects_clean` specifically, because
+    that test's entire job is to be the regression oracle for bug 1b8ec2b9 ("RED on the
+    pre-fix tree; GREEN after"). An oracle that also goes RED because the box was busy
+    cannot answer the only question it is asked. Row 1ec38d18 caught it doing exactly
+    that: RED in one of two SIMULTANEOUS full-suite runs, green in three solo runs of the
+    same tree, same commit.
+
+    So the two outcomes are made distinguishable IN THE FAILURE TEXT, which is all a
+    future reader gets: a timeout says TIMED OUT and names the load hypothesis; a real
+    regression says what it always said. Never fold the two into one message again.
+    """
+    try:
+        return subprocess.run( argv, env=env, cwd=cwd, capture_output=True, text=True,
+                               timeout=_CHILD_TIMEOUT_SECONDS )
+    except subprocess.TimeoutExpired:
+        pytest.fail(
+            f"TIMED OUT after {_CHILD_TIMEOUT_SECONDS}s waiting for {what} — this is a LOAD "
+            f"symptom, NOT evidence of the regression this test guards. Re-run on a quiet box "
+            f"before filing anything. (Concurrent full suites on one machine: rows 1ec38d18, "
+            f"84db12a0, 4ae91da3.)"
+        )
+
+
+# ---------------------------------------------------------------------------
+# The timeout path, FIRED ON PURPOSE (bug 4938a829)
+# ---------------------------------------------------------------------------
+
+def test_run_child_reports_a_timeout_as_a_timeout_not_as_a_regression( monkeypatch ):
+    """
+    A hard-fail that has never fired once is a hard-fail nobody knows works.
+
+    This is the whole point of the row: the failure TEXT must distinguish "the box was
+    busy" from "the regression came back", because that text is all a future reader gets.
+    So the timeout is provoked against a deliberately-slow child and the message asserted
+    — both that it SAYS timed out, and that it does NOT wear the vocabulary of the real
+    regression it sits next to.
+    """
+    monkeypatch.setattr( sys.modules[ __name__ ], "_CHILD_TIMEOUT_SECONDS", 1 )
+    _root, env = _clean_env()
+
+    # `pytest.fail` raises `Failed`, which derives from BaseException — NOT Exception. A
+    # `pytest.raises( Exception )` here does not catch it, and the timeout then propagates
+    # as this test's own failure: the mechanism fires correctly and the test reports RED
+    # anyway. Caught on the first run of this very test, which is the argument for firing
+    # a hard-fail on purpose rather than trusting that it would have worked.
+    with pytest.raises( pytest.fail.Exception ) as exc:
+        _run_child( [ sys.executable, "-c", "import time; time.sleep(30)" ], env,
+                    what="deliberately slow child" )
+
+    message = str( exc.value )
+    assert "TIMED OUT"                in message
+    assert "deliberately slow child"  in message, "the message must name WHICH child hung"
+    assert "LOAD symptom"             in message
+    assert "already registered"   not in message, "a timeout must not borrow the regression's vocabulary"
+
+
+def test_run_child_returns_the_completed_process_when_the_child_behaves( ):
+    """The negative control: the wrapper is a pass-through on the happy path, not a filter."""
+    _root, env = _clean_env()
+    out = _run_child( [ sys.executable, "-c", "print('ok')" ], env, what="fast child" )
+    assert out.returncode == 0
+    assert out.stdout.strip() == "ok"
+
+
 # ---------------------------------------------------------------------------
 # RED-first: the spec-lookup invariant (the actual bug mechanism)
 # ---------------------------------------------------------------------------
@@ -62,7 +143,7 @@ def test_find_spec_on_repository_module_imports_no_sqlalchemy():
         "importlib.util.find_spec('cosa.rest.db.repositories.task_repository');"
         "print(len([m for m in sys.modules if m.startswith('sqlalchemy')]))"
     )
-    out = subprocess.run( [ sys.executable, "-c", code ], env=env, capture_output=True, text=True )
+    out = _run_child( [ sys.executable, "-c", code ], env, what="find_spec probe interpreter" )
     assert out.returncode == 0, out.stderr
     assert out.stdout.strip() == "0", f"find_spec imported sqlalchemy: {out.stdout!r}"
 
@@ -78,7 +159,7 @@ def test_importing_db_packages_imports_no_sqlalchemy():
         "import sys, cosa.rest.db, cosa.rest.db.repositories;"
         "print(len([m for m in sys.modules if m.startswith('sqlalchemy')]))"
     )
-    out = subprocess.run( [ sys.executable, "-c", code ], env=env, capture_output=True, text=True )
+    out = _run_child( [ sys.executable, "-c", code ], env, what="package-import probe interpreter" )
     assert out.returncode == 0, out.stderr
     assert out.stdout.strip() == "0", f"package import pulled sqlalchemy: {out.stdout!r}"
 
@@ -92,12 +173,12 @@ def test_eager_cov_module_form_collects_clean():
     collection); GREEN after.
     """
     root, env = _clean_env()
-    out = subprocess.run(
+    out = _run_child(
         [ sys.executable, "-m", "pytest",
           "src/tests/unit/test_task_repository.py",
           "--cov=cosa.rest.db.repositories.task_repository",
           "--collect-only", "-q", "-p", "no:cacheprovider" ],
-        cwd=root, env=env, capture_output=True, text=True,
+        env, cwd=root, what="nested pytest --collect-only child",
     )
     combined = out.stdout + out.stderr
     assert "already registered" not in combined, combined
