@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from typing import Optional, List
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, cast, String
 from sqlalchemy.orm import Session
 
 from cosa.rest.postgres_models import TaskItem, TaskEvent
@@ -89,6 +89,45 @@ class TaskRepository( BaseRepository[TaskItem] ):
             .filter( TaskItem.id == id )
             .with_for_update()
             .first()
+        )
+
+    def find_by_id_prefix( self, compact_prefix: str, limit: int = 10 ) -> List[ TaskItem ]:
+        """
+        Find items whose id starts with a compact (hyphen-free) hex prefix.
+
+        Supports the 8-hex form every brief in this fleet writes (f45b37a9 leg 1).
+        READ path only — the mutating routes keep strict UUID typing, because a
+        prefix that resolves wrong on a read is merely wrong while on a write it
+        would move a row nobody named.
+
+        Requires:
+            - compact_prefix is lowercase hex with hyphens ALREADY stripped
+              (task_store_rules.classify_task_ref produces exactly this shape);
+              this method does not re-validate caller text
+            - limit bounds the scan
+
+        Ensures:
+            - returns items whose canonical hyphenated id starts with the
+              prefix, at most `limit` of them. BOUNDED deliberately: the caller
+              only needs to distinguish none / one / more-than-one, and an
+              unbounded LIKE on a table that only grows is the unscoped-query
+              defect in another costume
+            - the compact prefix is re-hyphenated to canonical UUID positions
+              before matching, so a prefix longer than 8 chars (which spans a
+              hyphen) still matches the stored rendering
+        """
+        # Re-insert canonical hyphens at 8-4-4-4-12 boundaries, truncated to the
+        # supplied length — a bare LIKE on the compact form would never match a
+        # prefix long enough to cross a hyphen.
+        chunks   = [ ( 0, 8 ), ( 8, 12 ), ( 12, 16 ), ( 16, 20 ), ( 20, 32 ) ]
+        parts    = [ compact_prefix[ start:end ] for start, end in chunks if compact_prefix[ start:end ] ]
+        hyphened = "-".join( parts )
+
+        return (
+            self.session.query( TaskItem )
+            .filter( cast( TaskItem.id, String ).like( f"{hyphened}%" ) )
+            .limit( limit )
+            .all()
         )
 
     def create_item(

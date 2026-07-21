@@ -24,6 +24,7 @@ log_line shape = "<scope>/<rel-path>:<lineno>" with exists check.
 
 import os
 import re
+import uuid
 from typing import Optional
 
 from lupin_mcp.persona_normalization import canonical_persona_key
@@ -399,6 +400,72 @@ def validate_blocked_fields( blocked_by, next_chase_ts ) -> list:
         errors.append( "a persona blocker requires a chase time: next_chase_ts is REQUIRED when blocked_by contains a {kind:persona} ref (I3 — a peer is chaseable)" )
     errors.extend( validate_blocked_by_refs( blocked_by ) )
     return errors
+
+
+# ---------------------------------------------------------------------------
+# Task-reference classification — 8-hex prefix support (f45b37a9 leg 1)
+# ---------------------------------------------------------------------------
+#
+# THE DEFECT: every brief, DM and cross-reference in this fleet names rows by
+# 8-hex prefix, and NO READ VERB ACCEPTED THAT FORM. `task_get("86ce4c43")`
+# returned a 422 uuid_parsing error, so the identifier the fleet actually
+# communicates in could not fetch the thing it names.
+#
+# ⚠️ READS ONLY. The mutating routes keep strict uuid.UUID typing. A prefix that
+# resolves to the wrong row on a READ is merely wrong; on a transition it is
+# DESTRUCTIVE — it would move a row nobody named. The convenience is worth
+# having exactly where the blast radius is zero, and a test asserts the fence.
+
+TASK_REF_FULL    = "full"
+TASK_REF_PREFIX  = "prefix"
+TASK_REF_INVALID = "invalid"
+
+# A ref must be at least this many hex chars to be a usable prefix. One or two
+# characters would match a large fraction of a growing table and the resulting
+# "ambiguous" error would name too many candidates to be actionable — the
+# unscoped-query defect wearing a different hat.
+MIN_TASK_REF_PREFIX_LEN = 4
+
+
+def classify_task_ref( ref ) -> tuple:
+    """
+    Classify a caller-supplied task reference as a full UUID, a hex prefix, or
+    invalid. Pure — no DB, no HTTP.
+
+    Requires:
+        - ref is the raw caller value (any type; None and non-strings accepted
+          and classified INVALID rather than raising — errors are data)
+
+    Ensures:
+        - returns ( kind, value )
+        - a canonical UUID (any accepted UUID spelling) -> ( TASK_REF_FULL,
+          uuid.UUID instance )
+        - a hex string of >= MIN_TASK_REF_PREFIX_LEN chars, hyphens tolerated
+          (that is what a partially-copied UUID looks like), -> ( TASK_REF_PREFIX,
+          lowercased hex with hyphens stripped ). Lowercased because the stored
+          id renders lowercase and the comparison must not depend on how the
+          caller happened to paste it
+        - anything else -> ( TASK_REF_INVALID, None ). Junk must NEVER classify
+          as a prefix: a LIKE built from arbitrary caller text turns an id lookup
+          into a search surface
+    """
+    if not isinstance( ref, str ):
+        return ( TASK_REF_INVALID, None )
+
+    candidate = ref.strip()
+    if not candidate:
+        return ( TASK_REF_INVALID, None )
+
+    try:
+        return ( TASK_REF_FULL, uuid.UUID( candidate ) )
+    except ( ValueError, AttributeError, TypeError ):
+        pass
+
+    compact = candidate.replace( "-", "" ).lower()
+    if len( compact ) >= MIN_TASK_REF_PREFIX_LEN and all( c in "0123456789abcdef" for c in compact ):
+        return ( TASK_REF_PREFIX, compact )
+
+    return ( TASK_REF_INVALID, None )
 
 
 # ---------------------------------------------------------------------------

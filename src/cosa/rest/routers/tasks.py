@@ -1184,31 +1184,88 @@ def query_event_stream(
         return { "events": rows, "count": len( rows ) }
 
 
+def _resolve_task_ref( repo, task_ref: str ):
+    """
+    Resolve a caller-supplied task reference — a full UUID or an 8-hex prefix —
+    to exactly one item, or raise the HTTPException the caller should see.
+
+    THE DEFECT THIS CLOSES (f45b37a9 leg 1): every brief, DM and cross-reference
+    in this fleet names rows by 8-hex prefix, and no read verb accepted that
+    form — `task_get("86ce4c43")` 422'd on uuid parsing. The identifier the
+    fleet communicates in could not fetch the thing it names.
+
+    Requires:
+        - repo is a TaskRepository
+        - task_ref is the raw path value
+
+    Ensures:
+        - a full UUID goes STRAIGHT to get_by_id and never prefix-scans, so
+          every existing caller's behavior is unchanged
+        - a hex prefix resolving to exactly one item returns that item
+        - AMBIGUITY IS AN ERROR, NEVER A SILENT FIRST-MATCH: >1 match raises 422
+          NAMING every candidate id, so the caller can disambiguate. Picking one
+          silently would resolve an identifier to something other than what the
+          caller meant with nothing saying so — the very defect class this came
+          from
+        - no match raises 404 quoting the ref the caller actually typed
+        - an unparseable ref raises 422 WITHOUT touching the database
+    """
+    kind, value = rules.classify_task_ref( task_ref )
+
+    if kind == rules.TASK_REF_INVALID:
+        raise HTTPException(
+            status_code = 422,
+            detail      = f"task reference '{task_ref}' is neither a UUID nor a hex id prefix "
+                          f"of at least {rules.MIN_TASK_REF_PREFIX_LEN} characters"
+        )
+
+    if kind == rules.TASK_REF_FULL:
+        item = repo.get_by_id( value )
+        if item is None:
+            raise HTTPException( status_code=404, detail=f"task {task_ref} not found" )
+        return item
+
+    matches = repo.find_by_id_prefix( value )
+    if not matches:
+        raise HTTPException( status_code=404, detail=f"task {task_ref} not found" )
+    if len( matches ) > 1:
+        candidates = ", ".join( str( m.id ) for m in matches )
+        raise HTTPException(
+            status_code = 422,
+            detail      = f"task id prefix '{task_ref}' is ambiguous — it matches "
+                          f"{len( matches )} items: {candidates}. Supply more characters "
+                          f"or the full UUID."
+        )
+    return matches[ 0 ]
+
+
 @router.get(
     "/tasks/{task_id}",
     summary     = "Get one task-store item",
-    description = "Returns one item by UUID. Auth: X-API-Key or Bearer JWT."
+    description = "Returns one item by full UUID or by an 8-hex id prefix (the form every "
+                  "brief and cross-reference uses). An ambiguous prefix returns 422 naming "
+                  "every candidate — never a silent first match. Prefix resolution is READ-"
+                  "ONLY; mutating routes require a full UUID. Auth: X-API-Key or Bearer JWT."
 )
 def get_task(
-    task_id: uuid.UUID,
+    task_id: str,
     authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ]
 ):
     """
-    Get one item by id.
+    Get one item by full UUID or hex id prefix.
 
     Requires:
         - authenticated caller (X-API-Key or Bearer JWT)
-        - task_id is a valid UUID
+        - task_id is a full UUID or a hex prefix of >= 4 characters
 
     Ensures:
-        - 404 when the item does not exist
+        - 404 when nothing matches, 422 when the ref is junk or the prefix is
+          ambiguous (naming every candidate)
         - returns the serialized item otherwise
     """
     with get_db() as session:
         repo = TaskRepository( session )
-        item = repo.get_by_id( task_id )
-        if item is None:
-            raise HTTPException( status_code=404, detail=f"task {task_id} not found" )
+        item = _resolve_task_ref( repo, task_id )
         return _serialize_item( item )
 
 
