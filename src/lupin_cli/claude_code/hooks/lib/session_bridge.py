@@ -47,6 +47,84 @@ from typing import Optional, Tuple
 
 SESSION_DIR = Path.home() / ".claude" / "sessions"
 
+
+def atomic_write_json( path, data ):
+    """
+    Write `data` as JSON to `path` so a reader can only ever see the WHOLE old
+    document or the WHOLE new one — never a splice of both.
+
+    🔴 WHY THIS EXISTS — row 49b2c80b, measured from the bytes 2026-07-21.
+    Seat 3's bridge `cc-231749.json` was found on disk as ONE valid 1081-byte
+    document followed by 27 bytes that were the TAIL OF A LONGER, DIFFERENT
+    document. The seat stayed alive and working but became unaddressable by
+    `dm_send` for twenty minutes, because a bridge that will not parse is
+    invisible to every persona resolver (that was row e9822f8d — same bug).
+
+    `open(path,"w")` truncates, so ONE writer can never leave a tail. TWO can,
+    and the byte layout named the interleaving exactly:
+
+        W_long  opens (truncates to 0)
+        W_short opens (truncates to 0)
+        W_long  writes 1108 bytes at its own offset 0
+        W_short writes 1081 bytes at its own offset 0
+        on disk: W_short's 1081 bytes + W_long's bytes[1081:1108]
+
+    Both fds truncate at OPEN, so the second truncate cannot remove the first
+    writer's tail once both are past it, and the two fds keep independent
+    offsets. Every bridge write here is a read-modify-write that CAN shrink the
+    document (dropping `conversation_mode_active`, nulling `voice_persona`), so
+    "the new one is shorter than the old one" is routine, not exotic.
+
+    The bridge path is `cc-{cc_pid}.json` and the pid survives `/clear` while
+    the transient session_id does not — so the two racing writers are usually
+    the SAME SEAT either side of a lifecycle event.
+
+    ⚠️ This is a MECHANISM, not a rule: os.replace() is atomic on POSIX, so
+    concurrent writers degrade to last-writer-wins instead of producing a
+    corrupt hybrid, and no writer has to remember to do anything. A
+    discipline-based fix ("always write carefully") needs every future author
+    to know; this needs none of them to.
+
+    NOTE the temp file is created in the SAME DIRECTORY as the target. A temp
+    elsewhere (/tmp) can land on a different filesystem, where os.replace
+    raises OSError instead of being atomic.
+
+    Requires:
+        - path is a str or Path whose parent directory exists and is writable
+        - data is JSON-serializable
+
+    Ensures:
+        - Returns True when the new document is fully in place at path
+        - Returns False on any OSError/TypeError/ValueError, leaving whatever
+          was already at path untouched — a failed write never truncates
+        - A concurrent reader sees the complete old or the complete new
+          document; it never observes a partial or spliced file
+        - Leaves no temp file behind on the failure path
+        - Never raises
+
+    Args:
+        path: destination file
+        data: JSON-serializable object
+
+    Returns:
+        bool: True on success, False on failure
+    """
+    import tempfile
+
+    path = str( path )
+    tmp  = None
+    try:
+        fd, tmp = tempfile.mkstemp( dir=os.path.dirname( path ) or ".", suffix=".tmp" )
+        with os.fdopen( fd, "w" ) as f:
+            json.dump( data, f, indent=2 )
+        os.replace( tmp, path )
+        return True
+    except ( OSError, TypeError, ValueError ):
+        if tmp is not None:
+            try: os.unlink( tmp )
+            except OSError: pass
+        return False
+
 # Cache to avoid repeated file reads
 _cached_session_id: Optional[str] = None
 _fallback_session_id: str = uuid.uuid4().hex[:8]
@@ -1164,9 +1242,7 @@ def set_speakerphone( session_id, on ):
         # Drop the v1 field if it lingers from a pre-Phase-2 bridge, to avoid
         # two-source-of-truth ambiguity. The v2 field is now authoritative.
         data.pop( "conversation_mode_active", None )
-        with open( path, "w" ) as f:
-            json.dump( data, f, indent=2 )
-        return True
+        return atomic_write_json( path, data )
     except ( json.JSONDecodeError, OSError ):
         return False
 
@@ -1235,9 +1311,7 @@ def set_last_autonarrated_turn_id( session_id, turn_id ):
         with open( path ) as f:
             data = json.load( f )
         data[ "last_autonarrated_turn_id" ] = str( turn_id )
-        with open( path, "w" ) as f:
-            json.dump( data, f, indent=2 )
-        return True
+        return atomic_write_json( path, data )
     except ( json.JSONDecodeError, OSError ):
         return False
 
@@ -1286,9 +1360,7 @@ def set_owner_user_id( session_id, owner_user_id ):
         with open( path ) as f:
             data = json.load( f )
         data[ "owner_user_id" ] = str( owner_user_id )
-        with open( path, "w" ) as f:
-            json.dump( data, f, indent=2 )
-        return True
+        return atomic_write_json( path, data )
     except ( json.JSONDecodeError, OSError ):
         return False
 
@@ -1338,9 +1410,7 @@ def set_user_id( session_id, user_id ):
         with open( path ) as f:
             data = json.load( f )
         data[ "user_id" ] = str( user_id )
-        with open( path, "w" ) as f:
-            json.dump( data, f, indent=2 )
-        return True
+        return atomic_write_json( path, data )
     except ( json.JSONDecodeError, OSError ):
         return False
 
@@ -1425,9 +1495,7 @@ def set_voice_persona( session_id, persona ):
         with open( path ) as f:
             data = json.load( f )
         data[ "voice_persona" ] = persona
-        with open( path, "w" ) as f:
-            json.dump( data, f, indent=2 )
-        return True
+        return atomic_write_json( path, data )
     except ( json.JSONDecodeError, OSError ):
         return False
 
@@ -1526,9 +1594,7 @@ def set_idle_detection_field( session_id, **fields ):
             block = { }
         block.update( fields )
         data[ "idle_detection" ] = block
-        with open( path, "w" ) as f:
-            json.dump( data, f, indent=2 )
-        return True
+        return atomic_write_json( path, data )
     except ( json.JSONDecodeError, OSError ):
         return False
 
@@ -1573,8 +1639,8 @@ def clear_idle_waiter_pid( session_id ):
             return None
         block[ "waiter_pid" ] = None
         data[ "idle_detection" ] = block
-        with open( path, "w" ) as f:
-            json.dump( data, f, indent=2 )
+        if not atomic_write_json( path, data ):
+            return None
         return int( old_pid ) if isinstance( old_pid, int ) else None
     except ( json.JSONDecodeError, OSError, ValueError ):
         return None
@@ -1682,12 +1748,8 @@ def prune_dead_persona_bridges():
             continue
 
         data[ "voice_persona" ] = None
-        try:
-            with open( path, "w" ) as f:
-                json.dump( data, f, indent=2 )
+        if atomic_write_json( path, data ):
             pruned += 1
-        except OSError:
-            continue
 
     return pruned
 

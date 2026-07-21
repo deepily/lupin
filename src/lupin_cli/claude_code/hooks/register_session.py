@@ -43,7 +43,7 @@ import urllib.parse
 from lupin_cli.claude_code.hooks.lib.hook_common import (
     read_hook_input, log_payload, emit_json, send_tts
 )
-from lupin_cli.claude_code.hooks.lib.session_bridge import build_sender_id_for_cc
+from lupin_cli.claude_code.hooks.lib.session_bridge import atomic_write_json, build_sender_id_for_cc
 from lupin_cli.claude_code.hooks.lib.listener_processes import find_live_listener_pids, listener_spawn_lock
 from cosa.agents.utils.sender_id import detect_project
 from cosa.utils.notification_utils import is_known_project
@@ -168,11 +168,9 @@ def _record_listener_pid( session_data, session_file, listener_pid ):
     """
     if session_data is not None and session_file:
         session_data[ "listener_pid" ] = listener_pid
-        try:
-            with open( session_file, "w" ) as f:
-                json.dump( session_data, f, indent=2 )
-        except OSError:
-            pass  # Best-effort
+        # Atomic (row 49b2c80b): this write races the Phase-2 bridge write and
+        # the MCP-side updaters on the same cc-{pid}.json path.
+        atomic_write_json( session_file, session_data )  # best-effort, never raises
 
 
 def _resolve_owner_pid( session_data, session_file ):
@@ -1317,8 +1315,12 @@ def main():
                 except ( json.JSONDecodeError, OSError ):
                     existing = { }
             merged = { **existing, **session_data }
-            with open( session_file, "w" ) as f:
-                json.dump( merged, f, indent=2 )
+            # Atomic (row 49b2c80b). The stable-id lockfile twelve lines above
+            # is already O_EXCL against "the documented double-fire on
+            # --continue (two concurrent SessionStart hooks)" — that same
+            # concurrency reaches THIS write, which had no guard at all. The
+            # lock went on the id; the bridge got nothing.
+            atomic_write_json( session_file, merged )
         except OSError:
             pass  # Best-effort
 
