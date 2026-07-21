@@ -1092,7 +1092,7 @@ def list_spawned_sessions(
     out     = []
 
     # One scan for the whole roster — N rows must not mean N directory globs.
-    persona_index, unattributable = _scan_persona_by_tmux_session( session_dir )
+    persona_index, unattributable, corrupt_bridges = _scan_persona_by_tmux_session( session_dir )
     now = now_fn()
 
     for r in records:
@@ -1119,7 +1119,7 @@ def list_spawned_sessions(
             "age_seconds"       : age
         } )
 
-    warning = _build_identity_warning( out, unattributable )
+    warning = _build_identity_warning( out, unattributable, corrupt_bridges )
 
     return {
         "sessions"              : out,
@@ -1127,11 +1127,68 @@ def list_spawned_sessions(
         "count"                 : len( out ),
         "identity_complete"     : warning is None,
         "identity_warning"      : warning,
-        "unattributable_bridges": unattributable
+        "unattributable_bridges": unattributable,
+        "corrupt_bridges"       : corrupt_bridges
     }
 
 
-def _scan_persona_by_tmux_session( session_dir: Path ) -> Tuple[ Dict[ str, Dict[ str, Any ] ], int ]:
+def _recover_tmux_session( raw: str ) -> Optional[ str ]:
+    """
+    Best-effort: recover the `tmux_session` from a bridge whose JSON will not
+    load, so a corrupt bridge can NAME ITS SEAT instead of being an anonymous
+    count.
+
+    🔴 WHY THIS EXISTS (Rio ⚡ 2026-07-21, correcting his own ratified claim, and
+    mine by inheritance). The scan reported corrupt bridges as an unattributable
+    COUNT on the reasoning that "attribution requires reading the file." That is
+    false for the failure mode this fleet actually produces. A SPLICE — two
+    writers racing on one path — is A VALID DOCUMENT WITH GARBAGE AFTER IT, and
+    `raw_decode` stops at the end of the first object and hands it back whole.
+    Measured on the preserved specimen: `json.load` raised "Extra data", while
+    `raw_decode` returned tmux_session `cc-author-mr-radio-3` intact. That seat's
+    identity was in readable bytes the entire time the fleet called it
+    unattributable — including in the roster this function backs.
+
+    THE BOUNDARY, because a correction without one is just sloppiness in the
+    other direction: recoverable IFF THE FIRST OBJECT IS COMPLETE.
+        splice / short-write-over-long  → first object intact  → NAMEABLE
+        first object itself truncated   → crashed write, full disk → genuinely
+                                          nothing to name, and this returns None
+    Verified against real files on both sides of that line.
+
+    ⚠️ WHAT THIS DELIBERATELY DOES NOT DO: it does not return the persona, and
+    the caller does not put the recovered document into the index. A corrupt
+    bridge may be STALE — that is the whole basis of R-1 — so handing back a
+    persona name from it would trade an anonymous blind spot for a confidently
+    wrong one. This names the SEAT so a human can go repair the FILE; it does
+    not supply a value anyone should trust.
+
+    Requires:
+        - raw is the file's text (may be malformed)
+
+    Ensures:
+        - Returns the `tmux_session` string when the leading JSON object decodes
+          and carries a non-empty one
+        - Returns None when the first object is incomplete, is not a dict, or
+          has no usable tmux_session
+        - Never raises
+
+    Args:
+        raw: unparseable bridge file contents
+
+    Returns:
+        str|None: the named seat, or None when genuinely unattributable
+    """
+    try:
+        obj, _end = json.JSONDecoder().raw_decode( raw )
+    except ( json.JSONDecodeError, ValueError ):
+        return None
+    if not isinstance( obj, dict ): return None
+    named = obj.get( "tmux_session" )
+    return named.strip() if isinstance( named, str ) and named.strip() else None
+
+
+def _scan_persona_by_tmux_session( session_dir: Path ) -> Tuple[ Dict[ str, Dict[ str, Any ] ], int, List[ Dict[ str, str ] ] ]:
     """
     Scan the session-bridge directory once and index persona identity by the
     child's `tmux_session` name.
@@ -1150,8 +1207,15 @@ def _scan_persona_by_tmux_session( session_dir: Path ) -> Tuple[ Dict[ str, Dict
         - session_dir is a Path (need not exist)
 
     Ensures:
-        - Returns ( index, unattributable_bridge_count ) where index maps
-          tmux_session -> { "persona": str|None, "persona_state": str }
+        - Returns ( index, unattributable_bridge_count, corrupt_bridges ) where
+          index maps tmux_session -> { "persona": str|None, "persona_state": str }
+        - corrupt_bridges lists { tmux_session, path } for every unparseable
+          bridge whose SEAT could still be recovered (see _recover_tmux_session).
+          The count KEEPS ITS EXACT PRIOR MEANING — every unreadable file still
+          increments it, named or not — so identity_complete is unaffected by
+          the naming and a recovered name never reads as a repaired file
+        - a recovered document is NEVER merged into the index: a corrupt bridge
+          may be stale, so its persona is not trusted, only its seat is named
         - persona_state is PERSONA_STATE_ALLOCATED when voice_persona is a dict
           carrying a non-empty string name (persona is that name)
         - persona_state is PERSONA_STATE_NONE when voice_persona is absent or
@@ -1165,28 +1229,37 @@ def _scan_persona_by_tmux_session( session_dir: Path ) -> Tuple[ Dict[ str, Dict
         - Bridges with no `tmux_session` field are ignored (not attributable)
         - Bridges whose JSON is unreadable/corrupt increment the returned count
         - Buffer/listener sidecar files are skipped (they are not bridges)
-        - Never raises (an absent or unlistable session_dir yields ( {}, 0 ))
+        - Never raises (an absent or unlistable session_dir yields ( {}, 0, [] ))
 
     Args:
         session_dir: directory holding cc-*.json bridge files
 
     Returns:
-        tuple: ( { tmux_session: { persona, persona_state } }, unattributable_count )
+        tuple: ( { tmux_session: { persona, persona_state } }, unattributable_count,
+                 [ { tmux_session, path } ] )
     """
     index         : Dict[ str, Dict[ str, Any ] ] = { }
     unattributable = 0
+    corrupt        : List[ Dict[ str, str ] ] = [ ]
 
     try:
         candidates = sorted( session_dir.glob( "cc-*.json" ) )
     except OSError:
-        return index, unattributable
+        return index, unattributable, corrupt
 
     for path in candidates:
         if "buffer" in path.name or "listener" in path.name: continue
         try:
-            data = json.loads( path.read_text() )
-        except ( json.JSONDecodeError, OSError, ValueError ):
+            raw = path.read_text()
+        except OSError:
             unattributable += 1
+            continue
+        try:
+            data = json.loads( raw )
+        except ( json.JSONDecodeError, ValueError ):
+            unattributable += 1
+            named = _recover_tmux_session( raw )
+            if named: corrupt.append( { "tmux_session": named, "path": str( path ) } )
             continue
         if not isinstance( data, dict ):
             unattributable += 1
@@ -1209,12 +1282,13 @@ def _scan_persona_by_tmux_session( session_dir: Path ) -> Tuple[ Dict[ str, Dict
 
         index[ tmux_session ] = entry
 
-    return index, unattributable
+    return index, unattributable, corrupt
 
 
 def _build_identity_warning(
     rows                  : List[ Dict[ str, Any ] ],
-    unattributable_bridges: int
+    unattributable_bridges: int,
+    corrupt_bridges       : Optional[ List[ Dict[ str, str ] ] ] = None
 ) -> Optional[ str ]:
     """
     Compose the caller-facing sentence that REFUSES to let an all-green liveness
@@ -1289,7 +1363,21 @@ def _build_identity_warning(
     if unattributable_bridges:
         warning += (
             f" NOTE: the bridge scan skipped {unattributable_bridges} unreadable bridge file(s). "
-            "An unreadable bridge's tmux_session cannot be read, so it cannot be ruled out as "
+        )
+        named = [ c for c in ( corrupt_bridges or [ ] ) if c.get( "tmux_session" ) ]
+        if named:
+            # The seat IS recoverable from a spliced bridge, so say WHOSE it is
+            # rather than leaving a nameable seat anonymous — that anonymity is
+            # what let a live seat sit unaddressable while the fleet counted it
+            # as one faceless bad file.
+            warning += (
+                "Of those, " + str( len( named ) ) + " could still be attributed: "
+                + ", ".join( f"{c[ 'tmux_session' ]} ({c[ 'path' ]})" for c in named )
+                + " — the file is corrupt but the seat is known; repair it rather than guessing. "
+                  "The persona inside a corrupt bridge is NOT reported, because it may be stale. "
+            )
+        warning += (
+            "An unreadable bridge's tmux_session cannot always be read, so it cannot be ruled out as "
             "belonging to a seat listed here"
         )
         warning += (

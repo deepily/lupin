@@ -37,6 +37,7 @@ from lupin_mcp.session_spawner import (
     _read_manifest,
     _write_manifest,
     _capture_reap_identity,
+    _recover_tmux_session,
     _scan_persona_by_tmux_session,
     _build_identity_warning,
     _slug,
@@ -667,30 +668,30 @@ def _write_bridge( session_dir, filename, *, tmux_session=None, voice_persona="_
 
 class TestScanPersonaByTmuxSession:
     def test_missing_dir_yields_empty_scan( self, tmp_path ):
-        index, unattributable = _scan_persona_by_tmux_session( tmp_path / "does-not-exist" )
+        index, unattributable, corrupt = _scan_persona_by_tmux_session( tmp_path / "does-not-exist" )
         assert index == { } and unattributable == 0
 
     def test_allocated_reads_the_name( self, tmp_path ):
         _write_bridge( tmp_path, "cc-1.json", tmux_session="seat-a",
                        voice_persona={ "name": "Krishna", "voice_id": "v1" } )
-        index, _ = _scan_persona_by_tmux_session( tmp_path )
+        index, _, _c = _scan_persona_by_tmux_session( tmp_path )
         assert index[ "seat-a" ] == { "persona": "Krishna", "persona_state": PERSONA_STATE_ALLOCATED }
 
     def test_allocated_name_is_stripped( self, tmp_path ):
         _write_bridge( tmp_path, "cc-1.json", tmux_session="seat-a", voice_persona={ "name": "  Rio  " } )
-        index, _ = _scan_persona_by_tmux_session( tmp_path )
+        index, _, _c = _scan_persona_by_tmux_session( tmp_path )
         assert index[ "seat-a" ][ "persona" ] == "Rio"
 
     def test_explicit_null_persona_is_none_not_unknown( self, tmp_path ):
         # THE distinction the row turns on: this child BOOTED and got nothing.
         # It must not read the same as a child with no bridge on disk at all.
         _write_bridge( tmp_path, "cc-1.json", tmux_session="seat-a", voice_persona=None )
-        index, _ = _scan_persona_by_tmux_session( tmp_path )
+        index, _, _c = _scan_persona_by_tmux_session( tmp_path )
         assert index[ "seat-a" ] == { "persona": None, "persona_state": PERSONA_STATE_NONE }
 
     def test_absent_persona_key_is_none( self, tmp_path ):
         _write_bridge( tmp_path, "cc-1.json", tmux_session="seat-a" )
-        index, _ = _scan_persona_by_tmux_session( tmp_path )
+        index, _, _c = _scan_persona_by_tmux_session( tmp_path )
         assert index[ "seat-a" ][ "persona_state" ] == PERSONA_STATE_NONE
 
     @pytest.mark.parametrize( "bad", [ "Krishna", 42, [ "Krishna" ], { }, { "name": "" },
@@ -699,7 +700,7 @@ class TestScanPersonaByTmuxSession:
         # A record we FOUND but cannot read is an instrument failure, not an
         # absent persona — collapsing it into "none" would invent a fact.
         _write_bridge( tmp_path, "cc-1.json", tmux_session="seat-a", voice_persona=bad )
-        index, _ = _scan_persona_by_tmux_session( tmp_path )
+        index, _, _c = _scan_persona_by_tmux_session( tmp_path )
         assert index[ "seat-a" ] == { "persona": None, "persona_state": PERSONA_STATE_UNREADABLE }
 
     def test_corrupt_json_is_counted_not_silently_skipped( self, tmp_path ):
@@ -707,12 +708,12 @@ class TestScanPersonaByTmuxSession:
         # unattributable — but the scan must confess it was partially blind.
         _write_bridge( tmp_path, "cc-bad.json", raw="{ not json" )
         _write_bridge( tmp_path, "cc-1.json", tmux_session="seat-a", voice_persona={ "name": "Rio" } )
-        index, unattributable = _scan_persona_by_tmux_session( tmp_path )
+        index, unattributable, _c = _scan_persona_by_tmux_session( tmp_path )
         assert unattributable == 1 and index[ "seat-a" ][ "persona" ] == "Rio"
 
     def test_non_dict_json_is_counted( self, tmp_path ):
         _write_bridge( tmp_path, "cc-list.json", raw="[1, 2, 3]" )
-        _, unattributable = _scan_persona_by_tmux_session( tmp_path )
+        _, unattributable, _c = _scan_persona_by_tmux_session( tmp_path )
         assert unattributable == 1
 
     def test_unreadable_file_is_counted( self, tmp_path, monkeypatch ):
@@ -721,23 +722,112 @@ class TestScanPersonaByTmuxSession:
             if self == path: raise OSError( "permission denied" )
             return "{}"
         monkeypatch.setattr( Path, "read_text", _boom )
-        _, unattributable = _scan_persona_by_tmux_session( tmp_path )
+        _, unattributable, _c = _scan_persona_by_tmux_session( tmp_path )
         assert unattributable == 1
 
     def test_glob_oserror_yields_empty_scan( self, tmp_path, monkeypatch ):
         monkeypatch.setattr( Path, "glob", lambda self, pat: ( _ for _ in () ).throw( OSError( "nope" ) ) )
-        assert _scan_persona_by_tmux_session( tmp_path ) == ( { }, 0 )
+        assert _scan_persona_by_tmux_session( tmp_path ) == ( { }, 0, [ ] )
 
     def test_buffer_and_listener_sidecars_are_skipped( self, tmp_path ):
         _write_bridge( tmp_path, "cc-buffer-x.json", raw="{ not json" )
         _write_bridge( tmp_path, "cc-listener-x.json", raw="{ not json" )
-        assert _scan_persona_by_tmux_session( tmp_path ) == ( { }, 0 )
+        assert _scan_persona_by_tmux_session( tmp_path ) == ( { }, 0, [ ] )
 
     @pytest.mark.parametrize( "tmux", [ None, "", 42 ] )
     def test_bridge_without_usable_tmux_session_is_ignored( self, tmp_path, tmux ):
         _write_bridge( tmp_path, "cc-1.json", tmux_session=tmux, voice_persona={ "name": "Rio" } )
-        index, unattributable = _scan_persona_by_tmux_session( tmp_path )
+        index, unattributable, _c = _scan_persona_by_tmux_session( tmp_path )
         assert index == { } and unattributable == 0
+
+
+class TestCorruptBridgeAttribution:
+    """
+    Remedy (a) for row 31051d63 (Rio ⚡, correcting his own ratified claim and
+    mine by inheritance): the scan reported corrupt bridges as an ANONYMOUS
+    COUNT on the reasoning that attribution requires reading the file. False for
+    the failure mode this fleet produces — a SPLICE is a valid document with
+    garbage after it, so `raw_decode` hands the first object back whole.
+
+    A live seat sat unaddressable for 20+ minutes while the fleet counted it as
+    one faceless bad file, and its tmux_session was in readable bytes the whole
+    time. Cross-checked against Rio's INDEPENDENT oracle in
+    test_corrupt_bridge_attribution.py, written before he saw this diff.
+    """
+    def test_splice_names_the_seat( self, tmp_path ):
+        long_doc  = json.dumps( { "tmux_session": "seat-a", "session_id": "931e9dae", "pad": "x" * 80 }, indent=2 )
+        short_doc = json.dumps( { "tmux_session": "seat-a", "session_id": "d43421a6" }, indent=2 )
+        _write_bridge( tmp_path, "cc-splice.json", raw=short_doc + long_doc[ len( short_doc ): ] )
+        _, unattributable, corrupt = _scan_persona_by_tmux_session( tmp_path )
+        assert unattributable == 1                       # count keeps its EXACT prior meaning
+        assert corrupt == [ { "tmux_session": "seat-a", "path": str( tmp_path / "cc-splice.json" ) } ]
+
+    def test_recovers_the_SURVIVING_write_not_the_residue( self ):
+        # With two documents in one file it is possible to recover the WRONG
+        # one. raw_decode stops at the first complete object, which is the
+        # surviving write — this is the assertion that would catch a regression.
+        long_doc  = json.dumps( { "tmux_session": "loser",  "pad": "x" * 80 }, indent=2 )
+        short_doc = json.dumps( { "tmux_session": "winner" }, indent=2 )
+        assert _recover_tmux_session( short_doc + long_doc[ len( short_doc ): ] ) == "winner"
+
+    def test_truncated_first_document_is_genuinely_unnameable( self, tmp_path ):
+        # THE BOUNDARY. A crashed write / full disk leaves nothing to name, and
+        # the fix must not pretend otherwise.
+        _write_bridge( tmp_path, "cc-trunc.json", raw='{"tmux_session":"seat-a","voice_persona":{"na' )
+        _, unattributable, corrupt = _scan_persona_by_tmux_session( tmp_path )
+        assert unattributable == 1 and corrupt == [ ]
+
+    @pytest.mark.parametrize( "raw", [ "[]", "[] trailing", "", "   ", '"a string"', "42" ] )
+    def test_documents_that_name_nobody_are_never_attributed( self, tmp_path, raw ):
+        # `[]` is the one most likely to slip through, because json.load SUCCEEDS
+        # on it — R-1's free finding. Parsed-but-nameless is not attributable.
+        _write_bridge( tmp_path, "cc-x.json", raw=raw )
+        _, unattributable, corrupt = _scan_persona_by_tmux_session( tmp_path )
+        assert corrupt == [ ]
+        assert unattributable == 1
+
+    def test_healthy_bridge_never_lands_in_corrupt_bridges( self, tmp_path ):
+        # The recover path must not be reachable for a file that parses — a
+        # healthy seat appearing in a corruption report would be a false alarm.
+        _write_bridge( tmp_path, "cc-ok.json", tmux_session="seat-ok", voice_persona={ "name": "Rio" } )
+        index, unattributable, corrupt = _scan_persona_by_tmux_session( tmp_path )
+        assert index[ "seat-ok" ][ "persona" ] == "Rio"
+        assert unattributable == 0 and corrupt == [ ]
+
+    def test_recovered_persona_is_NOT_trusted_into_the_index( self, tmp_path ):
+        # A corrupt bridge may be STALE — that is R-1's whole basis. Naming the
+        # seat is the fix; importing its persona would trade an anonymous blind
+        # spot for a confidently wrong one.
+        doc   = json.dumps( { "tmux_session": "seat-a", "voice_persona": { "name": "Stale" }, "pad": "x" * 80 }, indent=2 )
+        short = json.dumps( { "tmux_session": "seat-a", "voice_persona": { "name": "Stale" } }, indent=2 )
+        _write_bridge( tmp_path, "cc-splice.json", raw=short + doc[ len( short ): ] )
+        index, _, corrupt = _scan_persona_by_tmux_session( tmp_path )
+        assert corrupt and corrupt[ 0 ][ "tmux_session" ] == "seat-a"
+        assert "seat-a" not in index, "a corrupt bridge's persona must never enter the index"
+
+    def test_warning_names_the_corrupt_seat_instead_of_a_bare_count( self ):
+        rows = [ { "session_name": "seat-a", "persona_state": PERSONA_STATE_UNKNOWN, "age_seconds": 1200 } ]
+        w = _build_identity_warning( rows, 1, [ { "tmux_session": "seat-a", "path": "/s/cc-1.json" } ] )
+        assert "could still be attributed" in w
+        assert "seat-a (/s/cc-1.json)" in w
+        assert "may be stale" in w                       # the persona is withheld, and says why
+
+    def test_warning_unchanged_when_nothing_was_recoverable( self ):
+        rows = [ { "session_name": "seat-a", "persona_state": PERSONA_STATE_UNKNOWN, "age_seconds": 1 } ]
+        w = _build_identity_warning( rows, 1, [ ] )
+        assert "skipped 1 unreadable bridge file" in w
+        assert "could still be attributed" not in w
+
+    def test_roster_surfaces_corrupt_bridges( self, tmp_path ):
+        _write_manifest( _manifest_path( "mgr", tmp_path ), [ { "session_name": "seat-a" } ] )
+        long_doc  = json.dumps( { "tmux_session": "seat-a", "pad": "x" * 80 }, indent=2 )
+        short_doc = json.dumps( { "tmux_session": "seat-a" }, indent=2 )
+        _write_bridge( tmp_path, "cc-splice.json", raw=short_doc + long_doc[ len( short_doc ): ] )
+        res = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ), session_dir=tmp_path )
+        assert res[ "corrupt_bridges" ] == [ { "tmux_session": "seat-a",
+                                               "path": str( tmp_path / "cc-splice.json" ) } ]
+        assert res[ "identity_complete" ] is False       # naming it does not repair it
+        assert "seat-a" in res[ "identity_warning" ]
 
 
 class TestBuildIdentityWarning:
