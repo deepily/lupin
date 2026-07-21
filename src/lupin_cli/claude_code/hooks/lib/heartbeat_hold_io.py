@@ -217,6 +217,12 @@ EXIT_NOT_HONORED = 3
 EXIT_NO_HOLD     = 4
 EXIT_ORPHAN      = 5
 EXIT_CARGO       = 6
+# 39219cc1 F1 — the exact delete SUCCEEDED and the caller is STILL HELD, because
+# this id still resolves to a hold through the reader's prefix fallback. Distinct
+# from EXIT_ORPHAN on purpose: that one means "I deleted NOTHING because I will
+# not guess"; this one means "I deleted MINE and you are not released". Collapsing
+# them would tell a caller who still holds the same thing as a caller who does not.
+EXIT_STILL_HELD  = 7
 
 
 def cmd_write( args ):
@@ -353,6 +359,28 @@ def cmd_write( args ):
     print( f"ttl      {hold[ 'ttl_seconds' ]}s   awaiting: {hold[ 'awaiting' ]}   "
            f"work_owed: {hold[ 'work_owed' ]}" )
     print(  "honored  yes (read back through the reader the hook uses)" )
+
+    # 39219cc1 F3 — NAME THE DUPLICATE THIS CALL JUST MINTED. One session declaring
+    # under both its id forms (the short bridge id `get_session_info` hands it, and
+    # the full stable id the hook reads with) gets TWO hold files, each honored,
+    # each answering a different reader. That is the unaccountable-hold corpus
+    # arriving BY THE PAVED ROAD — a worse class than the hand-written ones, which
+    # at least imply an author who chose to skip the mechanism.
+    #
+    # WARN, DO NOT REFUSE — the line held on Mr Radio's ruling. Losing a hold is
+    # worse than owning a duplicate: a session that cannot declare a hold is poked
+    # forever, which is exactly what 8abdcbbf did an hour ago. And this verb will
+    # not delete or overwrite the sibling either: it may be ANOTHER session's live
+    # hold, and destroying it is C2 from this row's reversal.
+    siblings = _prefix_siblings( args.session_id, base_dir=args.base_dir )
+    if siblings:
+        print( f"WARNING: {len( siblings )} other hold file(s) share this ID PREFIX — this "
+               f"session may now be holding under more than one id form:", file=sys.stderr )
+        for sibling in siblings:
+            print( f"           {sibling}", file=sys.stderr )
+        print(  "         Each is read by a different id form and each is honored separately. "
+                "If they are yours, `clear` the one you no longer want — naming its OWN id.",
+                file=sys.stderr )
     return EXIT_OK
 
 
@@ -505,6 +533,30 @@ def cmd_clear( args ):
         if cargo:
             print( f"         ...including {len( cargo )} non-schema field(s) that are now "
                    f"GONE: {', '.join( cargo )}", file=sys.stderr )
+
+        # 39219cc1 F1 — DID THAT ACTUALLY RELEASE THE CALLER? The delete is exact;
+        # the READER is prefix-tolerant. So this id can still resolve to a hold —
+        # a sibling written under the session's other id form — and the caller who
+        # was just told CLEARED walks away STILL HONORED, still defending a
+        # quiescence it has left. That is the false success this verb exists to
+        # kill, surviving in the branch nobody checked: the sibling test below ran
+        # ONLY when the exact path was absent, so the delete path never asked.
+        #
+        # ASK THE READER THE HOOK USES, rather than inferring the answer from the
+        # file list — the verdict a caller cares about is "am I still held", and
+        # that is a question only the resolver can answer. Nothing further is
+        # deleted: the survivor may be another session's live hold (C2).
+        if read_hold( args.session_id, base_dir=args.base_dir ) is not None:
+            still = _prefix_siblings( args.session_id, base_dir=args.base_dir )
+            print( f"STILL HELD: {exact.name} is gone, but this session id STILL RESOLVES to a "
+                   f"hold and is still honored:", file=sys.stderr )
+            for sibling in still:
+                print( f"           {sibling}", file=sys.stderr )
+            print(  "         You are NOT released. That file is read by your other id form; "
+                    "clear it by naming ITS id.", file=sys.stderr )
+            print(  "         Nothing else was deleted — it may belong to another session, and "
+                    "this verb will not guess at a deletion.", file=sys.stderr )
+            return EXIT_STILL_HELD
         return EXIT_OK
 
     siblings = _prefix_siblings( args.session_id, base_dir=args.base_dir )

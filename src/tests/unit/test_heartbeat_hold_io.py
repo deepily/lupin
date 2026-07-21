@@ -691,3 +691,123 @@ def test_cargo_at_the_exact_path_refuses_even_beside_a_clean_sibling( tmp_path )
     assert hio.main( _write_argv( tmp_path, sid=FULL_SID ) ) == hio.EXIT_OK   # clean sibling
     _cargo_hold_at( tmp_path, SHORT_SID )                                     # cargo at exact
     assert hio.main( _write_argv( tmp_path, sid=SHORT_SID ) ) == hio.EXIT_CARGO
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 39219cc1 F1 + F3 — WHERE READ AND WRITE/CLEAR DISAGREE, SAY SO.
+#
+# The prefix fallback STAYS (it closes c121037b facet 2), and write/clear stay
+# EXACT — the reversal on this row settled that: a delete decided by a wildcard
+# can destroy a live peer's honored hold (C2) and orphans the rest on multiple
+# matches (C3). Nothing below deletes or overwrites anything it was not named.
+#
+# What is left is the seam itself, and the rule is: NEITHER VERB MAY REPORT A
+# RESULT ITS OWN READER CONTRADICTS.
+#
+#   F1  clear --session-id <short>  -> "CLEARED", exit 0
+#       read  --session-id <short>  -> "honored yes"      (surviving sibling)
+#       The exact delete SUCCEEDED and the caller is STILL HELD. Reporting that
+#       as a plain success is the false success this verb was written to kill,
+#       hiding in its other branch: the sibling check only ran when the exact
+#       path was ABSENT, so the delete path never asked whether the id still
+#       resolved to a hold.
+#
+#   F3  two writes by one session under its two id forms mint two files, and
+#       nothing says so. Not refused — losing a hold is worse than owning a
+#       duplicate, and refusing is precisely what 8abdcbbf did wrong — but the
+#       second file is the corpus growth this surface exists to stop, arriving
+#       BY THE PAVED ROAD rather than by hand.
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _both_forms( base ):
+    """Ensures: one session holds under BOTH id forms — two files, one session."""
+    assert hio.main( _write_argv( base, sid=FULL_SID ) ) == hio.EXIT_OK
+    assert hio.main( _write_argv( base, sid=SHORT_SID ) ) == hio.EXIT_OK
+
+
+# ── F1: a clear that leaves you held is not a success ─────────────────────────
+
+def test_clear_that_leaves_the_session_still_held_is_not_exit_ok( tmp_path ):
+    _both_forms( tmp_path )
+    assert hio.main( [ "clear", "--session-id", SHORT_SID,
+                       "--base-dir", str( tmp_path ) ] ) == hio.EXIT_STILL_HELD
+
+
+def test_the_still_held_verdict_is_read_back_not_asserted( tmp_path ):
+    """The claim the exit code makes — you are still held — is exactly what the
+    reader the hook uses reports. The verdict is measured, not declared."""
+    _both_forms( tmp_path )
+    hio.main( [ "clear", "--session-id", SHORT_SID, "--base-dir", str( tmp_path ) ] )
+    assert is_honored( read_hold( SHORT_SID, base_dir=tmp_path ) ) is True
+
+
+def test_still_held_names_the_file_that_is_still_holding( tmp_path, capsys ):
+    """A caller told "still held" without being told BY WHAT cannot act on it —
+    the null that did not name its directory, one verb over."""
+    _both_forms( tmp_path )
+    hio.main( [ "clear", "--session-id", SHORT_SID, "--base-dir", str( tmp_path ) ] )
+    assert str( hold_path( FULL_SID, base_dir=tmp_path ) ) in capsys.readouterr().err
+
+
+def test_a_still_held_clear_deletes_ONLY_its_own_file( tmp_path ):
+    """THE REVERSAL, honored: report, never guess. The survivor may be another
+    session's live hold — deleting it is C2, the ping-storm caused by the fix for
+    the ping-storm."""
+    _both_forms( tmp_path )
+    hio.main( [ "clear", "--session-id", SHORT_SID, "--base-dir", str( tmp_path ) ] )
+    assert hold_path( SHORT_SID, base_dir=tmp_path ).exists() is False   # mine: gone
+    assert hold_path( FULL_SID,  base_dir=tmp_path ).exists() is True    # not mine: intact
+
+
+def test_a_clean_clear_is_still_a_plain_success( tmp_path, capsys ):
+    """CONTROL — with no sibling, clear stays exit 0 and says CLEARED. The new arm
+    must cost the ordinary release nothing, or it becomes noise and the real
+    signal goes unread."""
+    assert hio.main( _write_argv( tmp_path, sid=FULL_SID ) ) == hio.EXIT_OK
+    assert hio.main( [ "clear", "--session-id", FULL_SID,
+                       "--base-dir", str( tmp_path ) ] ) == hio.EXIT_OK
+    assert "CLEARED" in capsys.readouterr().out
+
+
+def test_the_exact_absent_orphan_branch_is_unchanged( tmp_path ):
+    """CONTROL — the OTHER sibling branch (nothing at my path, siblings exist)
+    still refuses at EXIT_ORPHAN, deleting nothing. Two distinct outcomes keep two
+    distinct codes: "I deleted mine and you are still held" is not "I deleted
+    nothing because I will not guess"."""
+    assert hio.main( _write_argv( tmp_path, sid=FULL_SID ) ) == hio.EXIT_OK
+    assert hio.main( [ "clear", "--session-id", SHORT_SID,
+                       "--base-dir", str( tmp_path ) ] ) == hio.EXIT_ORPHAN
+    assert hold_path( FULL_SID, base_dir=tmp_path ).exists() is True
+
+
+# ── F3: minting a second file for one session is named, never silent ──────────
+
+def test_write_names_the_sibling_it_just_minted_a_duplicate_beside( tmp_path, capsys ):
+    _both_forms( tmp_path )
+    assert str( hold_path( FULL_SID, base_dir=tmp_path ) ) in capsys.readouterr().err
+
+
+def test_the_duplicate_write_still_LANDS( tmp_path ):
+    """NOT A REFUSAL, and this is the line to hold. Losing a hold is worse than
+    owning a duplicate: a session that cannot declare a hold is poked forever,
+    which is exactly what 8abdcbbf did."""
+    _both_forms( tmp_path )
+    assert is_honored( read_hold( SHORT_SID, base_dir=tmp_path ) )
+    assert hold_path( SHORT_SID, base_dir=tmp_path ).exists()
+
+
+def test_a_lone_write_says_nothing_about_siblings( tmp_path, capsys ):
+    """CONTROL — the ordinary write stays quiet. A warning on every write is noise,
+    and noise is how the real one gets missed."""
+    assert hio.main( _write_argv( tmp_path, sid=FULL_SID ) ) == hio.EXIT_OK
+    assert "PREFIX" not in capsys.readouterr().err.upper()
+
+
+def test_a_refresh_of_the_same_id_is_not_a_duplicate( tmp_path, capsys ):
+    """CONTROL — rewriting your OWN hold is a refresh, not a second file. The
+    warning keys on OTHER files sharing the prefix, so the commonest call in the
+    system (a session re-declaring) stays silent."""
+    assert hio.main( _write_argv( tmp_path, sid=FULL_SID ) ) == hio.EXIT_OK
+    capsys.readouterr()
+    assert hio.main( _write_argv( tmp_path, sid=FULL_SID ) ) == hio.EXIT_OK
+    assert "PREFIX" not in capsys.readouterr().err.upper()
