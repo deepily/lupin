@@ -6,13 +6,15 @@ timeout calculation, and wake-up behavior for scheduled/paused jobs.
 
 Session 381: Initial implementation.
 Bug 84db12a0 (2026-07-19): sleep-as-thread-sync replaced with real
-synchronization edges — see wait_for()/still_before() below.
+synchronization edges — see wait_for() below.
+Row 02bdbb4b (2026-07-21): the wall-clock guard that replaced it could skip an
+absence claim SILENTLY under load. Absence is now made deterministic by
+MockTodoQueue's eligibility gate — see the block above MockSchedulableJob.
 """
 
 import pytest
 import threading
 import time
-import warnings
 from datetime import datetime, timedelta
 from unittest.mock import Mock, MagicMock
 from cosa.rest.fifo_queue import FifoQueue
@@ -56,60 +58,52 @@ def wait_for( predicate, timeout=5.0, interval=0.005 ):
     return bool( predicate() )
 
 
-def still_before( t0, offset_seconds, what="an absence claim" ):
-    """
-    Report whether the wall clock is provably still before t0 + offset_seconds,
-    WARNING when it is not, because the caller is about to skip a check.
-
-    Guards "not yet processed" assertions. Such a claim is only CHECKABLE
-    while the job's scheduled time has not arrived. If the box starved and the
-    deadline slipped past while we were descheduled, the assertion is
-    unverifiable rather than false — skipping it is honest; failing it is a
-    false RED, and asserting it anyway is what bug 84db12a0 was filed for.
-
-    ⚠️ SKIPPING SILENTLY IS THE DEFECT THIS WARNING CLOSES (row d2788869, Rachel
-    🕊️ 2026-07-21; the announced form is hers). The first fix traded a LOUD wrong
-    answer for a QUIET one: when the window slips, the `if` is simply false, the
-    absence assertion never runs, and the test reports PASSED — byte-identically
-    to a run that checked and verified. Measured standalone: a test whose property
-    was VIOLATED (`processed == ["timed-1"]`) still reported PASSED because the
-    guard had already gone false. **A green cannot be distinguished from a
-    verified property by reading the output.** And it is quietest exactly when it
-    is most wrong: under the concurrent-suite load 84db12a0 documents, these
-    assertions are the likeliest to be skipped AND the likeliest to be violated.
-
-    DELIBERATELY `warnings.warn`, NOT `pytest.skip` (Rachel's reasoning, kept):
-    skip aborts the whole test and discards the POSITIVE assertions after it,
-    which remain perfectly checkable. The claim is narrow — *this one assertion
-    could not be evaluated* — so the signal must be equally narrow.
-
-    THIS IS A VISIBILITY PATCH, NOT THE FIX. The fix is a deterministic/injected
-    clock, which removes the box from the equation instead of reporting on it;
-    filed as its own row. Note that `:330` and `:346` in this file already assert
-    absence the load-SAFE way — a bounded `wait_for(...)` plus `assert not ran`,
-    where contention only ever makes the verdict MORE conclusive. That is the
-    pattern the clock fix should converge on; it is twelve lines away.
-
-    Requires:
-        - t0 is a time.monotonic() reading taken before the job was pushed
-        - offset_seconds is a positive float
-        - what names the assertion being guarded, for the warning text
-
-    Ensures:
-        - returns True only while ( monotonic() - t0 ) < offset_seconds
-        - emits a UserWarning naming `what` when it returns False, so a skipped
-          absence claim is legible in the run output instead of invisible
-        - emits NOTHING when it returns True (the quiet-box negative control)
-    """
-    ok = ( time.monotonic() - t0 ) < offset_seconds
-    if not ok:
-        warnings.warn(
-            f"UNVERIFIED under load: {what} — the clock window slipped before the "
-            f"absence claim could be checked, so this test passed WITHOUT testing it "
-            f"(84db12a0 / d2788869 family).",
-            stacklevel=2
-        )
-    return ok
+# ── ABSENCE CLAIMS: WHY THERE IS NO CLOCK GUARD HERE ANYMORE (row 02bdbb4b) ──
+#
+# Three tests below assert a NEGATIVE — "this job must NOT have run yet". You
+# cannot Event.wait() for something that must never fire, so the first fix
+# (97fe3ec6, row 84db12a0) guarded those assertions with a wall-clock window:
+#
+#     if still_before( t0, SCHEDULED_SECONDS * 0.5 ):
+#         assert "timed-1" not in processed
+#
+# That traded a LOUD wrong answer for a QUIET one. When the box starved and the
+# window slipped, the `if` was simply false, the assertion never ran, and the
+# test reported PASSED — byte-identically to a run that checked and verified.
+# Rachel 🕊️ (row d2788869) measured it standalone and then made the skip
+# ANNOUNCE itself (8777d4e9); she also measured the real margin at ~1500x, which
+# is why this landed as hygiene rather than under time pressure.
+#
+# THE REMEDY IS TO REMOVE THE CLOCK FROM THE CLAIM, not to describe the slip
+# better. `MockTodoQueue` now owns an explicit eligibility gate, so while the
+# gate is closed the job CANNOT become eligible no matter how long the test
+# takes. The absence is PERMANENT rather than time-boxed, which is exactly the
+# precondition the load-safe pattern already used further down this file needs:
+#
+#     ran = wait_for( lambda: "timed-1" in processed, timeout=... )
+#     assert not ran, "..."
+#
+# ⚠️ THE PRECEDENT DOES NOT TRANSPLANT ON ITS OWN — this is the trap worth
+# naming. That pattern is load-safe at the two paused-job sites because a PAUSED
+# job's absence is permanent: extra wall clock under contention only makes the
+# verdict MORE conclusive. A SCHEDULED job's absence expires on its own at
+# t0+0.3s, so copying the shape without the gate would have re-introduced the
+# false-RED of 84db12a0 — a starved box overruns the timeout, the job becomes
+# legitimately eligible, and `assert not ran` fails on a correct system. The gate
+# is what converts the temporary absence into a permanent one; the pattern is
+# what is safe to copy ONCE it is.
+#
+# WHAT MOVED, stated plainly rather than papered over: these three tests now
+# assert the CONSUMER's property ("it never dispatches a job the queue reports
+# ineligible, and dispatches it once it does"). The scheduled_at-vs-now
+# arithmetic itself belongs to FifoQueue.pop_next_eligible and is covered by that
+# unit's own tests. Each job below still carries a real future scheduled_at, so
+# the consumer's earliest_scheduled_at() sleep path is still exercised.
+#
+# `still_before` is GONE, not deprecated: with these three sites converted it had
+# zero call sites repo-wide (verified 2026-07-21), and a helper nothing calls is
+# dead code, not a safety net. Rachel's warning form did its job — it made the
+# invisible gap visible long enough to close it.
 
 
 class MockSchedulableJob:
@@ -155,6 +149,38 @@ class MockTodoQueue( FifoQueue ):
         self.condition        = threading.Condition()
         self.consumer_running = True
         self.debug            = False
+        # Eligibility gate (row 02bdbb4b) — OPEN by default so every test that
+        # does not care about absence behaves exactly as before.
+        self._eligible        = threading.Event()
+        self._eligible.set()
+
+    def pop_next_eligible( self, now=None, predicate=None ):
+        """
+        Deterministic eligibility: nothing is eligible while the gate is closed.
+
+        This is the injected clock in its useful form. The test, not the box,
+        decides when the job becomes eligible, so an absence claim made while
+        the gate is closed cannot expire under load.
+
+        Requires:
+            - now is a datetime or None; predicate is None or callable
+
+        Ensures:
+            - returns None while the gate is closed, whatever the wall clock says
+            - delegates unchanged to FifoQueue.pop_next_eligible when open
+        """
+        if not self._eligible.is_set(): return None
+        return super().pop_next_eligible( now, predicate )
+
+    def withhold_eligibility( self ):
+        """Close the gate. Call BEFORE pushing the job the consumer must not run."""
+        self._eligible.clear()
+
+    def release_eligibility( self ):
+        """Open the gate and wake the consumer — the edge an absence claim lacks."""
+        with self.condition:
+            self._eligible.set()
+            self.condition.notify()
 
     def push_with_notify( self, job ):
         """Push a job and notify the consumer (mimics TodoFifoQueue.push)."""
@@ -220,17 +246,20 @@ class TestConsumerTimed:
         processed = []
         thread = self._start_consumer( todo_queue, processed )
 
-        t0        = time.monotonic()
         scheduled = ( datetime.now() + timedelta( seconds=SCHEDULED_SECONDS ) ).isoformat()
         job       = MockSchedulableJob( "timed-1", scheduled_at=scheduled )
+        todo_queue.withhold_eligibility()
         todo_queue.push_with_notify( job )
 
-        # Should NOT be processed before its scheduled time. Only assertable
-        # while we are provably still before that time.
-        if still_before( t0, SCHEDULED_SECONDS * 0.5, "timed-1 must not run before its scheduled time" ):
-            assert "timed-1" not in processed, "Timed job ran before its scheduled time"
+        # ABSENCE CLAIM — always evaluated, never skipped. The gate keeps the job
+        # ineligible for as long as this takes, so contention only buys the
+        # consumer MORE chances to wrongly dispatch it: load makes this MORE
+        # conclusive, never less.
+        ran = wait_for( lambda: "timed-1" in processed, timeout=SCHEDULED_SECONDS * 2 )
+        assert not ran, "Timed job was dispatched while the queue reported it ineligible"
 
-        assert wait_for( lambda: "timed-1" in processed ), "Timed job never ran after its scheduled time"
+        todo_queue.release_eligibility()
+        assert wait_for( lambda: "timed-1" in processed ), "Timed job never ran once eligible"
 
         todo_queue.shutdown()
         thread.join( timeout=1.0 )
@@ -281,13 +310,14 @@ class TestConsumerTimed:
         processed = []
         thread = self._start_consumer( todo_queue, processed )
 
-        t0        = time.monotonic()
         scheduled = ( datetime.now() + timedelta( seconds=SCHEDULED_SECONDS ) ).isoformat()
+        todo_queue.withhold_eligibility()
         todo_queue.push_with_notify( MockSchedulableJob( "timed-2", scheduled_at=scheduled ) )
 
-        if still_before( t0, SCHEDULED_SECONDS * 0.5, "timed-2 must not run before its scheduled time" ):
-            assert "timed-2" not in processed, "Timed job ran before its scheduled time"
+        ran = wait_for( lambda: "timed-2" in processed, timeout=SCHEDULED_SECONDS * 2 )
+        assert not ran, "Timed job was dispatched while the queue reported it ineligible"
 
+        todo_queue.release_eligibility()
         assert wait_for( lambda: "timed-2" in processed ), "Timed job never became eligible"
 
         todo_queue.shutdown()
@@ -332,14 +362,15 @@ class TestConsumerTimed:
         processed = []
         thread = self._start_consumer( todo_queue, processed )
 
-        t0        = time.monotonic()
         scheduled = ( datetime.now() + timedelta( seconds=SCHEDULED_SECONDS ) ).isoformat()
         job       = MockSchedulableJob( "mono-timed", scheduled_at=scheduled, monopolize=True )
+        todo_queue.withhold_eligibility()
         todo_queue.push_with_notify( job )
 
-        if still_before( t0, SCHEDULED_SECONDS * 0.5, "mono-timed must not run before its scheduled time" ):
-            assert "mono-timed" not in processed, "Timed monopolize job ran before its scheduled time"
+        ran = wait_for( lambda: "mono-timed" in processed, timeout=SCHEDULED_SECONDS * 2 )
+        assert not ran, "Timed monopolize job was dispatched while the queue reported it ineligible"
 
+        todo_queue.release_eligibility()
         assert wait_for( lambda: "mono-timed" in processed ), "Timed monopolize job never ran"
 
         todo_queue.shutdown()
