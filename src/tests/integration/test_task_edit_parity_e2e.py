@@ -42,8 +42,8 @@ fields; EVERYTHING else forwards — invariant-7 + empty{} + enum-illegal → se
 422, and a smuggled actor is stamped-over (edit succeeds, bridge actor wins).
 Re-verify against his committed build before submitting to :8000.
 
-Base URL parameterized via LUPIN_TASK_EDIT_BASE_URL (default the :7999 dev
-server; the :8000 test-suite runner targets its own in-container server).
+Base URL parameterized via LUPIN_TEST_BASE_URL (default :8000 — the canonical var
+run-integration-tests.sh exports, matching test_task_store_integration.py).
 """
 
 import os
@@ -60,7 +60,7 @@ from lupin_mcp.task_store_tools import (
 )
 
 
-BASE_URL = os.environ.get( "LUPIN_TASK_EDIT_BASE_URL", "http://localhost:7999" )
+BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )   # runner exports LUPIN_TEST_BASE_URL=:8000
 ACTOR    = "tiffany 2e399fd9"   # test actor (prod stamps the bridge identity; here a plain param)
 
 # task_edit's FREE-EDIT set (5 — post-amendment; owner/manager REMOVED).
