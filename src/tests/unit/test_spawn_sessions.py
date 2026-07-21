@@ -1267,6 +1267,32 @@ class TestDismissSessionsWrapperCoercion:
         asyncio.run( cv_mcp.dismiss_sessions.run( {} ) )
         assert captured[ "reconcile_items_fn" ] is ss._default_reconcile_store_items
 
+    def test_respin_personas_schema_is_array_of_strings( self, cv_mcp ):
+        """4dfb2f3b: the param that lets a caller distinguish a RE-SPIN from a REAP
+        must be typed — an untyped param arrives uncoerced (the same class of bug
+        the session_names lock above caught), and an uncoerced name matches no
+        persona slug, so retention would silently do nothing."""
+        rp = cv_mcp.dismiss_sessions.parameters[ "properties" ][ "respin_personas" ]
+        assert "array" in _type_options( rp ), f"respin_personas must allow array, got {rp}"
+        array_branch = rp if rp.get( "type" ) == "array" else next(
+            b for b in rp.get( "anyOf", [] ) if b.get( "type" ) == "array"
+        )
+        assert array_branch[ "items" ][ "type" ] == "string"
+
+    def test_wrapper_threads_respin_personas( self, cv_mcp, monkeypatch ):
+        """4dfb2f3b: the LIVE reap entrypoint must forward the caller's re-spin
+        declaration — a manager who names a returning seat and has it dropped on
+        the floor gets the un-assignment this fix exists to prevent."""
+        captured = {}
+        self._patch_wrapper_deps( cv_mcp, monkeypatch, captured )
+        import lupin_mcp.session_spawner as ss
+        def _spy_dismiss( manager_session_id, *, respin_personas=None, **_kw ):
+            captured[ "respin_personas" ] = respin_personas
+            return { "dismissed": [], "remaining": [], "manager_session_id": manager_session_id }
+        monkeypatch.setattr( ss, "dismiss_sessions", _spy_dismiss )
+        asyncio.run( cv_mcp.dismiss_sessions.run( { "respin_personas": [ "cheech", "rio" ] } ) )
+        assert captured[ "respin_personas" ] == [ "cheech", "rio" ]   # a real list, not char-iterated
+
 
 # ── MCP-WRAPPER LAYER: spawn_sessions model-directive (2026-07-02) ────────────
 #

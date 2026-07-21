@@ -2572,7 +2572,7 @@ def spawn_sessions(
 
 
 @mcp.tool
-def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str = "", write_memento: Optional[ bool ] = None ) -> dict:
+def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str = "", write_memento: Optional[ bool ] = None, respin_personas: Optional[ List[ str ] ] = None ) -> dict:
     """
     **[REAP — host-side]** Tear down reviewer sessions THIS manager spawned.
 
@@ -2585,13 +2585,29 @@ def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str
     `io/mementos/<persona>-<timestamp>.md`) before kill, so its specialization
     survives a future re-spawn (pass that path back as `seed_memento`).
 
+    ⚠️ **A REAP UN-ASSIGNS THE WORKER'S STORE ROWS. A RE-SPIN MUST SAY SO.**
+    By default every reaped worker's non-terminal rows are reconciled away from
+    them (closed-if-receipt, else reassigned to the accountable/reaping manager)
+    so nothing is left owned by a persona with no live session. When you are
+    re-spinning a persona straight back, that is WRONG: the memento carries the
+    context forward but ownership does not follow it, so the store stops showing
+    anyone on the lane — and it is self-concealing, because the rows land on YOU,
+    making your board look fuller while a worked lane reads as unworked.
+
+    **Pass `respin_personas=["cheech","rio"]` for every seat you are bringing
+    back.** Those rows keep their owner. The result echoes
+    `retained_owner_personas` (actually skipped) and `retained_unmatched` (named
+    but not reaped in this batch — a typo protects nothing, so check it).
+
     Args:
         session_names: explicit tmux session names, or None = all mine
         reason: recorded teardown reason
         write_memento: None → use INI default; else explicit bool
+        respin_personas: personas coming straight back — keep their row ownership
 
     Returns:
-        dict: { dismissed:[{session_name, status}], remaining, ... }
+        dict: { dismissed:[{session_name, status}], remaining,
+                retained_owner_personas, retained_unmatched, ... }
     """
     _wait_for_sender_id()
     from lupin_mcp import session_spawner
@@ -2605,7 +2621,8 @@ def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str
     # THIS is the production entrypoint that opts into the mutation.
     return session_spawner.dismiss_sessions(
         sid, session_names=session_names, reason=reason, write_memento=wm,
-        reconcile_items_fn=session_spawner._default_reconcile_store_items )
+        reconcile_items_fn=session_spawner._default_reconcile_store_items,
+        respin_personas=respin_personas )
 
 
 @mcp.tool

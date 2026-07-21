@@ -805,7 +805,8 @@ def dismiss_sessions(
     emit_reap_fn       : Optional[ Callable ] = None,
     emit_reaped_fn     : Optional[ Callable ] = None,
     clear_hold_fn      : Optional[ Callable ] = None,
-    reconcile_items_fn : Optional[ Callable ] = None
+    reconcile_items_fn : Optional[ Callable ] = None,
+    respin_personas    : Optional[ List[ str ] ] = None
 ) -> Dict[ str, Any ]:
     """
     Reap reviewer sessions this manager spawned: kill their tmux sessions and
@@ -827,7 +828,17 @@ def dismiss_sessions(
           kill — is handled by the MCP wrapper's pre-kill DM; this function does
           the teardown)
         - Returns { dismissed: [ {session_name, status} ], manager_session_id,
-                    reason, write_memento, remaining, reconciliation }
+                    reason, write_memento, remaining, reconciliation,
+                    retained_owner_personas, retained_unmatched }
+        - RE-SPIN RETENTION (4dfb2f3b): a persona named in `respin_personas` is
+          reaped normally (tmux kill, bridge unlink, tombstone, hold-clear) but
+          its store rows are NOT reconciled — the reconciler is not called for it
+          at all, so ownership survives into the re-spun session. Surfaced, never
+          silent: `retained_owner_personas` lists the slugs actually skipped and
+          `retained_unmatched` lists requested slugs that matched no reaped
+          persona (a stale/typo'd name protects nothing — the row reconciles as
+          before, which is fail-safe, but the miss is NAMED rather than inferred
+          from an absence).
         - reap-RECONCILE (d647b531): when `reconcile_items_fn` is provided, each
           reaped session's NON-TERMINAL store items are reconciled (close-if-
           receipt / reassign-to-live-manager / surface) and the per-session
@@ -848,6 +859,9 @@ def dismiss_sessions(
         reconcile_items_fn: per-reaped-session store reconciler
             (identity, dead_owner_slugs, reaping_manager, reason) -> summary dict;
             None = skip reconcile (hermetic default)
+        respin_personas: persona names coming straight back in a re-spin — their
+            rows keep their owner (slug-tolerant matching); None/[] = every reaped
+            session is a true reap and reconciles as before
 
     Returns:
         dict: dismissal result
@@ -915,6 +929,27 @@ def dismiss_sessions(
             if name_persona:
                 dead_owner_slugs.add( persona_slug( name_persona ) )
 
+    # RE-SPIN RETENTION (4dfb2f3b): the reconciliation above exists to stop a reaped
+    # worker's rows orphaning on a persona with no live session (d647b531) — real,
+    # and untouched. A RE-SPIN is the one case where that premise is FALSE: the same
+    # persona is coming straight back, so reassigning its rows to the manager makes a
+    # worked lane read as un-owned, and does it SELF-CONCEALINGLY (the rows land on
+    # the manager who ordered the reap, so his board only looks fuller). The caller
+    # has always known which it is; this is the parameter that lets it say so.
+    #   • retention is PER-PERSONA, not per-batch — a real reap mixes both.
+    #   • a retained persona STAYS in `dead_owner_slugs`: that set answers a different
+    #     question (may ANOTHER worker's row be reassigned TO this persona now?) and
+    #     for a seat not yet re-sitting the answer is still no. Not widened.
+    #   • both outcomes are SURFACED below — a retention you cannot see is the same
+    #     class of defect as the reassignment it replaces.
+    respin_slugs     = { persona_slug( p ) for p in ( respin_personas or [] ) if p and persona_slug( p ) }
+    retained_slugs   = []
+    for name in reaped_names:
+        name_persona = _identity_persona_name( identities.get( name ) )
+        if name_persona and persona_slug( name_persona ) in respin_slugs:
+            retained_slugs.append( persona_slug( name_persona ) )
+    retained_unmatched = sorted( respin_slugs - set( retained_slugs ) )
+
     for name in reaped_names:
         ident = identities.get( name )
         if not ident:
@@ -951,7 +986,7 @@ def dismiss_sessions(
         # Reap-reconcile (d647b531): reconcile this worker's non-terminal store
         # items, aggregating the summary. Fail-safe — a raising reconciler NEVER
         # breaks the reap (same posture as the bridge unlink / emit / hold-clear).
-        if reconcile_items_fn is not None:
+        if reconcile_items_fn is not None and persona_slug( _identity_persona_name( ident ) or "" ) not in respin_slugs:
             try:
                 summary = reconcile_items_fn( ident, dead_owner_slugs, reaping_manager, reason )
                 if isinstance( summary, dict ):
@@ -968,7 +1003,9 @@ def dismiss_sessions(
         "remaining"          : [ r[ "session_name" ] for r in remaining ],
         "bridges_deleted"    : bridges_deleted,
         "holds_cleared"      : holds_cleared,
-        "reconciliation"     : reconciliation
+        "reconciliation"     : reconciliation,
+        "retained_owner_personas" : sorted( set( retained_slugs ) ),
+        "retained_unmatched"      : retained_unmatched
     }
 
 

@@ -1000,3 +1000,172 @@ def test_default_reconcile_config_failure_is_noop( monkeypatch ):
     assert ss._default_reconcile_store_items(
         { "persona": { "name": "Tiffany" } }, dead_owner_slugs={ "tiffany" }, reaping_manager="Mr Radio" ) == \
         { "closed": [], "reassigned": [], "unclassifiable": [] }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RE-SPIN RETENTION (4dfb2f3b) — a re-spin must NOT un-assign the worker's rows.
+#
+# WHAT THE RECONCILIATION WAS PROTECTING (d647b531, established before narrowing
+# it): a reaped worker's non-terminal rows orphaning on a persona that no longer
+# has a live session — outstanding work owned by nobody alive, reported by
+# nothing. That case is REAL and stays reconciled; the control tests below prove
+# it still fires.
+#
+# WHY A RE-SPIN IS THE EXCEPTION: the persona comes straight back, so the premise
+# ("owner has no live session") is FALSE. Reassigning anyway makes the lane read
+# as un-owned — indistinguishable from a lane nobody is working — and it is
+# SELF-CONCEALING, because the rows land on the manager who ordered the reap, so
+# his board only looks fuller. Measured twice on 2026-07-21 (Cheech, Rio).
+#
+# THE CALLER KNOWS WHICH IT IS; the tool could not express it. `respin_personas`
+# is that expression. It is SURFACED, never silent: `retained_owner_personas`
+# echoes what was actually skipped and `retained_unmatched` names a request that
+# matched no reaped persona (a typo protects nothing — old behaviour still runs,
+# which is fail-safe, but it must be VISIBLE, not inferred).
+#
+# DELIBERATELY NOT WIDENED: a re-spun persona STAYS in `dead_owner_slugs`. That
+# set answers a different question — "may another worker's row be reassigned TO
+# this persona right now?" — and at reconcile time the answer is still no. The
+# conservative direction preserves today's escalate-to-manager behaviour for
+# OTHER workers' rows; widening it would let rows land on a seat that is not yet
+# sitting.
+# ══════════════════════════════════════════════════════════════════════════════
+
+def test_respin_persona_is_not_reconciled_and_is_surfaced():
+    """THE DEFECT: reaping a persona that is coming straight back must NOT touch
+    its rows — and the retention must be visible in the result."""
+    with tempfile.TemporaryDirectory() as tmp:
+        sd, mgr, bridge = _setup( tmp )
+        seen = []
+        res  = ss.dismiss_sessions(
+            mgr, session_names=[ "cc-author-x-1" ], runner=_OK_RUNNER, session_dir=sd,
+            emit_reap_fn=lambda i, reason="": None, emit_reaped_fn=lambda i: None,
+            clear_hold_fn=lambda i: True,
+            reconcile_items_fn=lambda ident, dead, mgr_p, reason="": seen.append( ident ) or
+                { "closed": [], "reassigned": [ "t-1" ], "unclassifiable": [] },
+            respin_personas=[ "Tiffany" ] )
+        assert seen == []                                        # reconciler never ran for a re-spin
+        assert res[ "reconciliation" ] == { "closed": [], "reassigned": [], "unclassifiable": [] }
+        assert res[ "retained_owner_personas" ] == [ "tiffany" ] # surfaced, not silent
+        assert res[ "retained_unmatched" ]      == []
+
+
+def test_respin_persona_matching_is_slug_tolerant():
+    """A manager types the persona as displayed ("Tiffany 💍") — resolution is the
+    same accent/punctuation-tolerant slug used everywhere else."""
+    with tempfile.TemporaryDirectory() as tmp:
+        sd, mgr, bridge = _setup( tmp )
+        seen = []
+        res  = ss.dismiss_sessions(
+            mgr, session_names=[ "cc-author-x-1" ], runner=_OK_RUNNER, session_dir=sd,
+            emit_reap_fn=lambda i, reason="": None, emit_reaped_fn=lambda i: None,
+            clear_hold_fn=lambda i: True,
+            reconcile_items_fn=lambda *a, **k: seen.append( 1 ) or {},
+            respin_personas=[ "  TIFFANY  " ] )
+        assert seen == []
+        assert res[ "retained_owner_personas" ] == [ "tiffany" ]
+
+
+def test_respin_retention_is_per_persona_not_per_batch():
+    """A mixed batch is the normal case: some seats come back, some do not. Only
+    the named persona is retained; the other is still reconciled."""
+    with tempfile.TemporaryDirectory() as tmp:
+        sd  = Path( tmp )
+        mgr = "mgr-abc12345"
+        ss._write_manifest( ss._manifest_path( mgr, sd ),
+            [ { "session_name": "cc-a-1", "session_id": "s1" },
+              { "session_name": "cc-b-2", "session_id": "s2" } ] )
+        for tmux, sid8, who in ( ( "cc-a-1", "aaaa1111", "Cheech" ), ( "cc-b-2", "bbbb2222", "Rachel" ) ):
+            ( sd / f"cc-{sid8}.json" ).write_text( json.dumps( {
+                "tmux_session": tmux, "stable_session_id": sid8,
+                "voice_persona": { "name": who } } ) )
+        seen = []
+        def recon( ident, dead, mgr_p, reason="" ):
+            seen.append( ident[ "persona" ][ "name" ] )
+            return { "closed": [], "reassigned": [ "r-1" ], "unclassifiable": [] }
+        res = ss.dismiss_sessions(
+            mgr, runner=_OK_RUNNER, session_dir=sd,
+            emit_reap_fn=lambda i, reason="": None, emit_reaped_fn=lambda i: None,
+            clear_hold_fn=lambda i: True, reconcile_items_fn=recon,
+            respin_personas=[ "Cheech" ] )
+        assert seen == [ "Rachel" ]                              # ONLY the true reap reconciled
+        assert res[ "reconciliation" ][ "reassigned" ] == [ "r-1" ]
+        assert res[ "retained_owner_personas" ] == [ "cheech" ]
+
+
+def test_true_reap_still_reconciles_control():
+    """CONTROL — the orphan case the reconciliation exists for MUST still fire.
+    Same reap, no respin_personas: the reconciler runs and reassigns. If this
+    ever goes green-by-skipping, the narrowing has eaten the guard it narrowed."""
+    with tempfile.TemporaryDirectory() as tmp:
+        sd, mgr, bridge = _setup( tmp )
+        seen = []
+        res  = ss.dismiss_sessions(
+            mgr, session_names=[ "cc-author-x-1" ], runner=_OK_RUNNER, session_dir=sd,
+            emit_reap_fn=lambda i, reason="": None, emit_reaped_fn=lambda i: None,
+            clear_hold_fn=lambda i: True,
+            reconcile_items_fn=lambda ident, dead, mgr_p, reason="": seen.append( ident ) or
+                { "closed": [], "reassigned": [ "t-1" ], "unclassifiable": [] } )
+        assert len( seen ) == 1                                  # reconcile STILL fires on a true reap
+        assert res[ "reconciliation" ][ "reassigned" ] == [ "t-1" ]
+        assert res[ "retained_owner_personas" ] == []
+
+
+def test_respin_naming_a_persona_not_in_this_batch_is_surfaced_not_silent():
+    """A typo/stale name protects nothing — the reap reconciles exactly as before
+    (fail-safe toward the old behaviour), but the miss is NAMED rather than left
+    for the manager to infer from an absence."""
+    with tempfile.TemporaryDirectory() as tmp:
+        sd, mgr, bridge = _setup( tmp )
+        seen = []
+        res  = ss.dismiss_sessions(
+            mgr, session_names=[ "cc-author-x-1" ], runner=_OK_RUNNER, session_dir=sd,
+            emit_reap_fn=lambda i, reason="": None, emit_reaped_fn=lambda i: None,
+            clear_hold_fn=lambda i: True,
+            reconcile_items_fn=lambda ident, dead, mgr_p, reason="": seen.append( ident ) or
+                { "closed": [], "reassigned": [ "t-1" ], "unclassifiable": [] },
+            respin_personas=[ "Nobody" ] )
+        assert len( seen ) == 1                                  # unchanged: still reconciled
+        assert res[ "reconciliation" ][ "reassigned" ] == [ "t-1" ]
+        assert res[ "retained_owner_personas" ] == []
+        assert res[ "retained_unmatched" ]      == [ "nobody" ]  # the miss is loud
+
+
+def test_respin_persona_stays_in_dead_owner_slugs():
+    """NOT WIDENED: `dead_owner_slugs` answers a DIFFERENT question — may another
+    worker's row be reassigned TO this persona right now — and the answer for a
+    seat that is not yet re-sitting is still no. A retained persona must remain in
+    the dead set so other rows keep escalating to the manager."""
+    with tempfile.TemporaryDirectory() as tmp:
+        sd  = Path( tmp )
+        mgr = "mgr-abc12345"
+        ss._write_manifest( ss._manifest_path( mgr, sd ),
+            [ { "session_name": "cc-a-1", "session_id": "s1" },
+              { "session_name": "cc-b-2", "session_id": "s2" } ] )
+        for tmux, sid8, who in ( ( "cc-a-1", "aaaa1111", "Cheech" ), ( "cc-b-2", "bbbb2222", "Rachel" ) ):
+            ( sd / f"cc-{sid8}.json" ).write_text( json.dumps( {
+                "tmux_session": tmux, "stable_session_id": sid8,
+                "voice_persona": { "name": who } } ) )
+        got = {}
+        def recon( ident, dead, mgr_p, reason="" ):
+            got[ "dead" ] = dead
+            return { "closed": [], "reassigned": [], "unclassifiable": [] }
+        ss.dismiss_sessions(
+            mgr, runner=_OK_RUNNER, session_dir=sd,
+            emit_reap_fn=lambda i, reason="": None, emit_reaped_fn=lambda i: None,
+            clear_hold_fn=lambda i: True, reconcile_items_fn=recon,
+            respin_personas=[ "Cheech" ] )
+        assert "cheech" in got[ "dead" ]                         # retained ≠ alive-as-a-target
+        assert "rachel" in got[ "dead" ]
+
+
+def test_respin_default_none_changes_nothing():
+    """Default (no respin_personas) is byte-identical to the pre-fix contract."""
+    with tempfile.TemporaryDirectory() as tmp:
+        sd, mgr, bridge = _setup( tmp )
+        res = ss.dismiss_sessions(
+            mgr, session_names=[ "cc-author-x-1" ], runner=_OK_RUNNER, session_dir=sd,
+            emit_reap_fn=lambda i, reason="": None, emit_reaped_fn=lambda i: None,
+            clear_hold_fn=lambda i: True )
+        assert res[ "retained_owner_personas" ] == []
+        assert res[ "retained_unmatched" ]      == []
