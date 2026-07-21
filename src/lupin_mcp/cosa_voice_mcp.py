@@ -2599,6 +2599,17 @@ def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str
     `retained_owner_personas` (actually skipped) and `retained_unmatched` (named
     but not reaped in this batch — a typo protects nothing, so check it).
 
+    ⚠️ **Two known limits, both real, neither hidden:**
+    1. **Retention is an unverified claim.** Nothing checks that the re-spin
+       actually happens. Name a seat and fail to bring it back and its rows sit
+       on a persona with no live session — the exact orphan the reconciliation
+       exists to prevent, now indistinguishable from a live-owned lane. The claim
+       is yours to keep.
+    2. **It is keyed on the persona NAME, and a name is not a seat.** A name can
+       be held by more than one live session, and freed names are re-granted
+       after a reap — so a claim naming a re-granted name can retain the WRONG
+       seat's rows. Prefer reaping-and-respinning in one batch you control.
+
     Args:
         session_names: explicit tmux session names, or None = all mine
         reason: recorded teardown reason

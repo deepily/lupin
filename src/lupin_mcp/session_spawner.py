@@ -937,9 +937,26 @@ def dismiss_sessions(
     # the manager who ordered the reap, so his board only looks fuller). The caller
     # has always known which it is; this is the parameter that lets it say so.
     #   • retention is PER-PERSONA, not per-batch — a real reap mixes both.
-    #   • a retained persona STAYS in `dead_owner_slugs`: that set answers a different
-    #     question (may ANOTHER worker's row be reassigned TO this persona now?) and
-    #     for a seat not yet re-sitting the answer is still no. Not widened.
+    #   • a retained persona STAYS in `dead_owner_slugs`. That set answers a DIFFERENT
+    #     question — may ANOTHER worker's row be reassigned TO this persona now? —
+    #     and the reason not to widen it is TRUST SCOPE, not timing (Rio ⚡, review
+    #     of 4e922b20; my original timing argument is struck, because "he'll be
+    #     sitting before anyone reads the row" defeats it in about four seconds).
+    #     `respin_personas` is an UNVERIFIED CALLER CLAIM. Price a FALSE one:
+    #     narrow, it strands the claimant's OWN rows on a dead persona — the
+    #     d647b531 orphan, confined to the lane that made the claim. Widened, that
+    #     same false claim ALSO drags a THIRD PARTY's rows onto the dead persona.
+    #     ⇒ widening multiplies the blast radius of an unverified claim from the
+    #     claimant's lane into other workers' lanes, and that holds whether or not
+    #     the seat is sitting. The "loss" is not one: escalating to the reaping
+    #     manager parks the row on a live, addressable, accountable owner who can
+    #     hand it over in one call the moment the seat is genuinely occupied.
+    #   ⚠️ NAME-KEYED, AND THE KEY IS NOT SOUND TODAY. Retention matches on persona
+    #     SLUG, but a persona name can be held by more than one live session (2026-
+    #     07-21: `arnold` on two, one with an unresolvable bridge) and freed names
+    #     are re-granted after a reap. A claim naming a re-granted name can retain
+    #     the WRONG seat's rows. Not fixed here — the sound key is a session id, and
+    #     that is a change to the whole spawn/reap surface, not to this parameter.
     #   • both outcomes are SURFACED below — a retention you cannot see is the same
     #     class of defect as the reassignment it replaces.
     respin_slugs     = { persona_slug( p ) for p in ( respin_personas or [] ) if p and persona_slug( p ) }
