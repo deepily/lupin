@@ -143,7 +143,8 @@ class NotificationRepository( BaseRepository[Notification] ):
         thread_id: str,
         recipient_id: uuid.UUID,
         since: Optional[datetime] = None,
-        limit: int = 200
+        limit: int = 200,
+        recipient_session: Optional[str] = None
     ) -> List[Notification]:
         """
         Load one peer-DM conversation thread (the `/api/dm/list?thread_id=` read).
@@ -153,15 +154,25 @@ class NotificationRepository( BaseRepository[Notification] ):
         thread in chronological (ascending) order — the natural read order for a
         conversation — optionally tailing only messages newer than `since` (poll).
 
+        ⚠️ `recipient_id` IS NOT A RECIPIENT ON THIS PATH. Peer DMs are persisted
+        with `recipient_user_id = <the SENDER's own authenticated account>` (see
+        routers/dm.py), so this column scopes to a USER — every session sharing
+        one service account shares one pool. `recipient_session` is the addressee
+        filter; see get_dm_inbox for the full note on the job_id overload.
+
         Requires:
             - thread_id: the conversation id (Notification.thread_id)
             - recipient_id: Valid user UUID (same-user scoping — peer DMs land on the
               sender's own user, so this is always the authenticated user's uuid)
             - since: None (whole thread) or a datetime (only created_at > since)
             - limit: positive int cap on rows returned
+            - recipient_session: None (whole thread as before) or an 8-char session
+              hash restricting rows to those ADDRESSED to that session
 
         Ensures:
             - returns ai_to_ai, non-hidden rows for this thread + recipient
+            - when recipient_session is given, only rows whose job_id equals it
+            - when recipient_session is None, behavior is UNCHANGED (account-wide)
             - when since is set, only rows strictly newer than `since`
             - ordered by created_at ascending (oldest first — conversation order)
             - honors limit
@@ -175,6 +186,8 @@ class NotificationRepository( BaseRepository[Notification] ):
             Notification.direction    == "ai_to_ai",
             Notification.is_hidden    == False
         )
+        if recipient_session is not None:
+            query = query.filter( Notification.job_id == recipient_session )
         if since is not None:
             query = query.filter( Notification.created_at > since )
         return query.order_by(
@@ -185,22 +198,63 @@ class NotificationRepository( BaseRepository[Notification] ):
         self,
         recipient_id: uuid.UUID,
         since: Optional[datetime] = None,
-        limit: int = 50
+        limit: int = 50,
+        recipient_session: Optional[str] = None
     ) -> List[Notification]:
         """
         Load the peer-DM inbox (the `/api/dm/list` no-thread read / poll).
 
-        All of a user's received peer DMs (direction='ai_to_ai'), newest first — the
-        cross-thread inbox view. Optionally tails only messages newer than `since`
-        for a lightweight poll.
+        Peer DMs (direction='ai_to_ai') newest first — optionally tailing only
+        messages newer than `since` for a lightweight poll.
+
+        ⚠️ WHAT "INBOX" MEANS HERE — read this before trusting the word.
+        `recipient_id` DOES NOT HOLD A RECIPIENT on this path. routers/dm.py
+        persists every peer DM with `recipient_user_id = <the SENDER's own
+        authenticated account>`, so this column scopes to a SERVICE ACCOUNT —
+        not to a session and not to an addressee. Without `recipient_session`
+        this returns EVERY DM sent by ANY session on that account, including
+        conversations the caller is not party to. Measured 2026-07-21: one
+        session's unfiltered read returned 50 messages across 7 sender sessions
+        and 7 threads, ZERO of them addressed to it; a second session's returned
+        200+ across 12 personas.
+
+        DO NOT assume accounts partition the fleet by project. They do not, in
+        practice: the DM write path stamps `@lupin` for EVERY session regardless
+        of its actual project (a `plan` session's DMs are written as `@lupin`),
+        so today one pool holds the whole fleet and `recipient_id` partitions
+        NOTHING. That is a separate upstream defect; it is recorded here only so
+        no future reader rebuilds a scoping assumption on a per-project split
+        that the data does not contain. `recipient_session` is the ONLY predicate
+        here that actually narrows to an addressee.
+
+        THE ADDRESSEE lives in `job_id` — written at routers/dm.py as
+        `job_id = target_session_id[ :8 ]` and used to route delivery to the
+        recipient's cc-listener. `recipient_session` filters on it.
+
+        🔴 TWO PROPERTIES OF THAT PREDICATE, STATED SO THE NEXT READER HAS THEM:
+          1. `job_id` is OVERLOADED. For other notification types it carries a
+             real agentic job id (e.g. "dr-a1b2c3d4"); only for direction
+             'ai_to_ai' does it carry a recipient session. This filter is sound
+             ONLY in combination with the direction=='ai_to_ai' clause above.
+             Do not lift it to a query that lacks that clause.
+          2. It is TRUNCATED to 8 characters, so this is a PREFIX MATCH, NOT AN
+             ID MATCH. Two sessions whose ids share their first 8 hex chars
+             would be indistinguishable here. Collisions are unlikely, NOT
+             impossible — this is a known, accepted limitation of scoping on a
+             borrowed column rather than a dedicated recipient_session_id.
 
         Requires:
-            - recipient_id: Valid user UUID (same-user scoping)
+            - recipient_id: Valid user UUID (same-ACCOUNT scoping — see above)
             - since: None (whole inbox) or a datetime (only created_at > since)
             - limit: positive int cap on rows returned
+            - recipient_session: None (account-wide, the legacy behavior) or an
+              8-char session hash restricting rows to those addressed to it
 
         Ensures:
-            - returns ai_to_ai, non-hidden rows for this recipient
+            - returns ai_to_ai, non-hidden rows for this account
+            - when recipient_session is given, only rows whose job_id equals it
+            - when recipient_session is None, behavior is UNCHANGED (account-wide),
+              which is what keeps the existing client-side-filtering hook working
             - when since is set, only rows strictly newer than `since`
             - ordered by created_at descending (newest first — inbox order)
             - honors limit
@@ -213,6 +267,8 @@ class NotificationRepository( BaseRepository[Notification] ):
             Notification.direction    == "ai_to_ai",
             Notification.is_hidden    == False
         )
+        if recipient_session is not None:
+            query = query.filter( Notification.job_id == recipient_session )
         if since is not None:
             query = query.filter( Notification.created_at > since )
         return query.order_by(

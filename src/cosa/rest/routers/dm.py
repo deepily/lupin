@@ -19,7 +19,7 @@ Design:
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from typing import Optional, Annotated
+from typing import Optional, Annotated, Literal
 import asyncio
 import uuid
 from datetime import datetime
@@ -359,19 +359,41 @@ def _serialize_dm( notification ):
         - returns a JSON-safe dict; created_at is ISO 8601 (or None)
         - the body is exposed as "body" (the message column) to match the
           dm_send/dm_respond request vocabulary
+        - `recipient_session_hash8` names the ADDRESSEE explicitly. It is the same
+          value as `job_id` (which on an ai_to_ai row IS the recipient's 8-char
+          session hash), surfaced under a name that says what it is. Before this,
+          a reader had to know that a field called "job_id" meant "who this was
+          sent to" — and a reader who did NOT know it could conclude only that a
+          DM was VISIBLE to them, never that it was ADDRESSED to them. That gap
+          produced a false cross-session finding on 2026-07-16 (row 2565956b).
+        - 🔴 THE NAME CARRIES ITS SHAPE ON PURPOSE. `execute_dm_send` returns a
+          key called `recipient_session` holding the FULL session id, while what
+          is PERSISTED is `target_session_id[ :8 ]`. Calling this field
+          `recipient_session` too would have given one well-chosen name two value
+          shapes — a consumer comparing them would never match, and feeding the
+          send receipt back as a list filter would silently return zero rows.
+          This row exists because a column named `recipient_id` does not hold a
+          recipient; shipping a second name that means two things would have been
+          the same defect in miniature. The `_hash8` suffix makes the shape part
+          of the name. (The send response is deliberately NOT truncated to match:
+          narrowing a field this fix does not own would discard information its
+          consumers may rely on.)
+        - `job_id` is retained unchanged for the existing consumers that already
+          filter on it; this is an added name, not a rename.
     """
     return {
-        "message_id"     : str( notification.id ),
-        "thread_id"      : notification.thread_id,
-        "reply_to"       : notification.reply_to,
-        "sender_id"      : notification.sender_id,
-        "sender_persona" : notification.sender_persona,
-        "sender_icon"    : notification.sender_icon,
-        "body"           : notification.message,
-        "direction"      : notification.direction,
-        "state"          : notification.state,
-        "job_id"         : notification.job_id,
-        "created_at"     : notification.created_at.isoformat() if notification.created_at is not None else None,
+        "message_id"              : str( notification.id ),
+        "thread_id"               : notification.thread_id,
+        "reply_to"                : notification.reply_to,
+        "sender_id"               : notification.sender_id,
+        "sender_persona"          : notification.sender_persona,
+        "sender_icon"             : notification.sender_icon,
+        "body"                    : notification.message,
+        "direction"               : notification.direction,
+        "state"                   : notification.state,
+        "job_id"                  : notification.job_id,
+        "recipient_session_hash8" : notification.job_id,
+        "created_at"              : notification.created_at.isoformat() if notification.created_at is not None else None,
     }
 
 
@@ -447,26 +469,127 @@ async def get_dm(   # pragma: no cover
 _DM_LIST_MAX_LIMIT = 200
 
 
-def execute_dm_list( *, thread_id, since, limit, authenticated_user_id, thread_fn, inbox_fn ):
+DM_LIST_SCOPES = ( "session", "account" )
+
+# The persisted addressee is `target_session_id[ :8 ]`, so every predicate built
+# from a caller-supplied id must be cut to the same width before it is compared.
+_SESSION_HASH_WIDTH = 8
+
+
+def resolve_dm_list_scope( session_id, scope ):
+    """
+    Decide the effective addressee filter for a /api/dm/list read.
+
+    The route authenticates a USER, not a session — that is the whole reason this
+    resolution exists. The caller must TELL us which session it is; the server
+    cannot derive it from the credential. Absence therefore means "I did not ask
+    to be scoped", which must stay account-wide so the pre-existing
+    client-side-filtering consumer keeps working untouched.
+
+    🔴 NORMALIZES THE WIDTH, AND THAT IS THE POINT. The addressee is persisted as
+    an 8-char prefix, but the most natural thing a caller has in hand is a FULL
+    session id — `execute_dm_send` hands one back under `recipient_session`.
+    Comparing a full uuid against an 8-char column matches nothing, so the
+    obvious move (feed the send receipt back in) would return ZERO ROWS and look
+    like "no DMs" rather than like a mistake. Truncating here makes both widths
+    work. A filter that silently returns nothing for a well-formed input is worse
+    than one that rejects it, and this one cannot tell the difference — so it
+    accepts both instead of failing quietly on one.
+
+    🔴 AND WHAT IT CANNOT NORMALIZE, IT REJECTS OUT LOUD. An id SHORTER than the
+    persisted width can never equal an 8-char column value, so filtering on it
+    would return zero rows — and a silent zero is indistinguishable from "you
+    have no messages." That is the same failure shape as the row itself: a
+    plausible small answer to a question the resolver never understood. So a
+    too-short id is a 400, not an empty list. The caller learns it asked wrong
+    instead of concluding its inbox is empty.
+
+    Requires:
+        - session_id: the caller's session id (full or 8-char), or None/""
+        - scope: "session" (default), "account", or None
+
+    Ensures:
+        - Returns ( recipient_session|None, effective_scope_label, error|None )
+        - a supplied session_id is stripped and TRUNCATED to 8 chars, so a full
+          uuid and its own 8-char prefix resolve identically
+        - a stripped session_id SHORTER than 8 chars returns an error string —
+          it cannot match, and must not fail as an empty result
+        - scope="account" ALWAYS yields None — an explicit, auditable wide read
+        - a missing/blank session_id yields None regardless of scope, and the
+          label reports "account", never a session scope the server did not apply
+          (the label must never claim a narrowing that did not happen)
+        - Never raises
+
+    Args:
+        session_id: caller-supplied session id, any width
+        scope: requested scope label
+
+    Returns:
+        tuple: ( recipient_session|None, "session"|"account", error|None )
+    """
+    if scope == "account":                       return None, "account", None
+    if session_id is None or not str( session_id ).strip(): return None, "account", None
+
+    cleaned = str( session_id ).strip()
+    if len( cleaned ) < _SESSION_HASH_WIDTH:
+        return None, "session", (
+            f"invalid 'session_id': {session_id!r} is shorter than the {_SESSION_HASH_WIDTH}-char "
+            f"session hash addressees are stored under, so it can never match. Pass a full session "
+            f"id or its first {_SESSION_HASH_WIDTH} characters."
+        )
+    return cleaned[ :_SESSION_HASH_WIDTH ], "session", None
+
+
+def execute_dm_list( *, thread_id, since, limit, authenticated_user_id, thread_fn, inbox_fn,
+                     session_id=None, scope="session" ):
     """
     Pure-logic core for GET /api/dm/list — list/poll a thread or the inbox.
+
+    ⚠️ SCOPING, STATED PLAINLY BECAUSE THE OLD DOCSTRING'S "INBOX" WAS FALSE.
+    `authenticated_user_id` scopes to a SERVICE ACCOUNT, not a session: peer DMs
+    persist with `recipient_user_id = <the sender's own account>`, so every
+    session on one account shares one pool — and since the write path currently
+    stamps one and the same account for the entire fleet, that pool is the whole
+    fleet's traffic. Passing `session_id` narrows to the DMs actually ADDRESSED
+    to that session (see get_dm_inbox for the job_id overload + 8-char-prefix
+    caveats). Omitting it keeps the legacy account-wide read, which is what the
+    existing client-side-filtering hook relies on.
 
     Requires:
         - thread_id: a conversation id (thread view) OR None/"" (inbox view)
         - since: None, or an ISO-8601 timestamp string (poll — rows strictly newer)
         - limit: requested row cap (clamped to [1, 200])
         - authenticated_user_id: the caller's user uuid (string)
-        - thread_fn(thread_id, recipient_id, since, limit) -> List[Notification]  (asc)
-        - inbox_fn(recipient_id, since, limit) -> List[Notification]  (desc)
+        - thread_fn(thread_id, recipient_id, since, limit, recipient_session) (asc)
+        - inbox_fn(recipient_id, since, limit, recipient_session) (desc)
+        - session_id: caller's 8-char session hash, or None
+        - scope: "session" (default) or "account" (explicit wide read)
 
     Ensures:
         - 400 if `since` is a non-ISO string
         - thread view when thread_id is truthy, else inbox view
-        - 200 with {thread_id, since, count, messages:[serialized...]}
+        - 400 if `session_id` is too short to ever match an addressee — a filter
+          that cannot match must say so, not return an empty list that reads as
+          "no messages"
+        - 400 if `scope` is not one of DM_LIST_SCOPES — an unrecognized scope is
+          REJECTED, never silently treated as "session". A caller who spells the
+          wide read "all" must not receive a narrow one under a label saying
+          "session"; that would be a quiet wrong answer to a well-formed request
+        - the addressee filter is resolved by resolve_dm_list_scope; an
+          account-wide read requires either scope="account" or an absent
+          session_id — a wide view is never the silent outcome of a session read
+        - the response ECHOES the scope actually applied, so a caller can tell
+          whether it was narrowed rather than assuming it was
+        - 200 with {thread_id, since, count, scope, recipient_session_hash8,
+          messages}
 
     Raises:
         - None (DB errors propagate from the fns to the route)
     """
+    if scope is not None and scope not in DM_LIST_SCOPES:
+        return { "http_status": 400,
+                 "detail": f"invalid 'scope': {scope!r} (expected one of {list( DM_LIST_SCOPES )})" }
+
     since_dt = None
     if since is not None:
         try:
@@ -477,40 +600,60 @@ def execute_dm_list( *, thread_id, since, limit, authenticated_user_id, thread_f
     effective_limit = max( 1, min( int( limit ), _DM_LIST_MAX_LIMIT ) )
     recipient_uuid  = uuid.UUID( authenticated_user_id )
 
+    recipient_session, effective_scope, scope_error = resolve_dm_list_scope( session_id, scope )
+    if scope_error is not None:
+        return { "http_status": 400, "detail": scope_error }
+
     if thread_id:
         rows = thread_fn(
-            thread_id    = thread_id,
-            recipient_id = recipient_uuid,
-            since        = since_dt,
-            limit        = effective_limit,
+            thread_id         = thread_id,
+            recipient_id      = recipient_uuid,
+            since             = since_dt,
+            limit             = effective_limit,
+            recipient_session = recipient_session,
         )
     else:
         rows = inbox_fn(
-            recipient_id = recipient_uuid,
-            since        = since_dt,
-            limit        = effective_limit,
+            recipient_id      = recipient_uuid,
+            since             = since_dt,
+            limit             = effective_limit,
+            recipient_session = recipient_session,
         )
 
     messages = [ _serialize_dm( row ) for row in rows ]
     return {
-        "http_status" : 200,
-        "thread_id"   : thread_id,
-        "since"       : since,
-        "count"       : len( messages ),
-        "messages"    : messages,
+        "http_status"             : 200,
+        "thread_id"               : thread_id,
+        "since"                   : since,
+        "count"                   : len( messages ),
+        "scope"                   : effective_scope,
+        "recipient_session_hash8" : recipient_session,
+        "messages"                : messages,
     }
 
 
 @router.get(
     "/list",
     summary     = "List or poll peer DMs — a thread (thread_id) or the inbox",
-    description = "With `thread_id`, returns that conversation oldest-first; without it, returns the caller's peer-DM inbox newest-first. `since` (ISO 8601) tails only newer messages (poll); `limit` is clamped to [1, 200]. 400 if `since` is malformed.",
+    description = (
+        "With `thread_id`, returns that conversation oldest-first; without it, returns peer DMs newest-first. "
+        "SCOPING: the credential authenticates a USER (a per-project service account), NOT a session — pass "
+        "`session_id` (your 8-char session hash) to narrow to DMs actually ADDRESSED to you. WITHOUT it the read "
+        "is ACCOUNT-WIDE and returns every DM sent by any session on that account, including conversations you "
+        "are not party to. `scope=account` explicitly requests that wide read. The response echoes the `scope` "
+        "actually applied. `session_id` may be a FULL session id OR its 8-char prefix — it is normalized "
+        "server-side, so the `recipient_session` from a send receipt can be fed straight back. `since` "
+        "(ISO 8601) tails only newer messages (poll); `limit` is clamped to [1, 200]. "
+        "400 if `since` is malformed; 422 if `scope` is not session|account."
+    ),
 )
 async def list_dms(   # pragma: no cover
     authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
     thread_id: Optional[ str ] = None,
     since: Optional[ str ] = None,
     limit: int = 50,
+    session_id: Optional[ str ] = None,
+    scope: Literal[ "session", "account" ] = "session",
 ) -> JSONResponse:
     def _work():
         with get_db() as session:
@@ -522,6 +665,8 @@ async def list_dms(   # pragma: no cover
                 authenticated_user_id = authenticated_user_id,
                 thread_fn             = repo.get_dm_thread,
                 inbox_fn              = repo.get_dm_inbox,
+                session_id            = session_id,
+                scope                 = scope,
             )
 
     result = await asyncio.to_thread( _work )
