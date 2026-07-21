@@ -102,34 +102,57 @@ class TaskRepository( BaseRepository[TaskItem] ):
         gate_class          : str = "none",
         priority            : str = "P2",
         urgency             : str = "normal",
+        status              : str = "queued",
+        blocked_by          : Optional[list] = None,
+        next_chase_ts       : Optional[datetime] = None,
         source_qid          : Optional[str] = None,
         correlation_key     : Optional[str] = None,
         flag_suffix         : Optional[str] = None,
     ) -> TaskItem:
         """
-        Create a new task item plus its "->queued" creation event.
+        Create a new task item plus its "->{status}" creation event.
 
         Requires:
             - item_class/gate_class/priority/authority already validated by
               task_store_rules.validate_create (router responsibility)
+            - status is queued or blocked, already whitelist-validated by
+              task_store_rules.validate_create_status (router responsibility); a
+              blocked mint's blocked_by / next_chase_ts already satisfy the
+              ->blocked invariant (>=1 typed ref + kind-aware chase) — this method
+              never re-validates
             - title, project, created_by are non-empty strings
             - flag_suffix is an OPTIONAL advisory marker (e.g. the persona-flag
               "[persona_flag: … off-roster]") the router folds into the creation
               event's reason; None means no marker (the reason stays None)
 
         Ensures:
-            - item created with status='queued' (creation is ALWAYS queued;
-              transitions move it from there)
-            - exactly one TaskEvent with transition='->queued' appended,
-              actor = created_by (the creator IS the creation actor), reason =
-              flag_suffix (None unless the router flagged an off-roster persona —
-              zero schema, zero new events; the marker rides the existing event)
+            - item created with the given status (DEFAULT 'queued' — today's
+              behavior). This method OWNS the per-status field consistency, the
+              same way apply_transition does, so the store can never hold an
+              incoherent row regardless of caller:
+                * status == 'blocked' -> blocked_by is the given list (or [] when
+                  None) and next_chase_ts is the given value
+                * any other status (queued) -> blocked_by := [] and
+                  next_chase_ts := None, IGNORING any stray values (a queued row
+                  waits on nothing)
+            - exactly one TaskEvent with transition='->{status}' appended (so a
+              blocked mint stamps '->blocked'), actor = created_by (the creator IS
+              the creation actor), reason = flag_suffix (None unless the router
+              flagged an off-roster persona — zero schema, zero new events; the
+              marker rides the existing event)
             - flush() called so item.id is populated
             - commit NOT called (caller's get_db() commits)
 
         Returns:
             Created TaskItem instance (with id populated)
         """
+        if status == "blocked":
+            resolved_blocked_by    = blocked_by if blocked_by is not None else [ ]
+            resolved_next_chase_ts = next_chase_ts
+        else:
+            resolved_blocked_by    = [ ]
+            resolved_next_chase_ts = None
+
         item = self.create(
             item_class          = item_class,
             title               = title,
@@ -138,15 +161,16 @@ class TaskRepository( BaseRepository[TaskItem] ):
             owner_persona       = owner_persona,
             accountable_manager = accountable_manager,
             created_by          = created_by,
-            status              = "queued",
-            blocked_by          = [ ],
+            status              = status,
+            blocked_by          = resolved_blocked_by,
+            next_chase_ts       = resolved_next_chase_ts,
             gate_class          = gate_class,
             priority            = priority,
             urgency             = urgency,
             source_qid          = source_qid,
             correlation_key     = correlation_key,
         )
-        self._append_event( item.id, created_by, "->queued", authority, receipt_refs=None, reason=flag_suffix )
+        self._append_event( item.id, created_by, f"->{status}", authority, receipt_refs=None, reason=flag_suffix )
         return item
 
     def apply_transition(

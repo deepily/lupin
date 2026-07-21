@@ -161,10 +161,18 @@ class TestTaskStoreLifecycle:
             assert r.status_code == 200, f"->{to_status}: {r.status_code}: {r.text}"
         assert r.json()[ "item" ][ "status" ] == "in_progress"
 
-        # 5. blocked REQUIRES chase_ts + typed refs (I3 + gate ruling #5)
+        # 5. blocked is KIND-AWARE (I3, eab1d7da): a bare ->blocked (no refs) yields
+        #    exactly 1 error (empty typed-refs); the chase requirement fires ONLY when
+        #    a {kind:persona} ref is present. (Was 2 errors pre-migration.)
         bare = _transition( headers, task_id, to_status="blocked", actor=actor )
         assert bare.status_code == 422
-        assert len( bare.json()[ "detail" ][ "errors" ] ) == 2
+        assert len( bare.json()[ "detail" ][ "errors" ] ) == 1
+
+        # a persona blocker WITHOUT a chase time = exactly the chase error (still 1)
+        persona_no_chase = _transition( headers, task_id, to_status="blocked", actor=actor,
+                                        blocked_by=[ { "kind": "persona", "id": "tiffany" } ] )
+        assert persona_no_chase.status_code == 422
+        assert any( "chase" in e for e in persona_no_chase.json()[ "detail" ][ "errors" ] )
 
         blocked = _transition( headers, task_id,
                                to_status     = "blocked",
@@ -465,11 +473,19 @@ class TestTaskStoreWrapperE2E:
         task_transition_impl( api_base_url=BASE_URL, api_key=api_key, actor=actor,
                               task_id=task_id, to_status="in_progress" )
 
-        # blocked-gate: missing typed refs + chase ts → verbatim 422 (I3 — no "pending X" graves)
+        # blocked-gate KIND-AWARE (I3, eab1d7da): a bare ->blocked (no refs) → 1 error
+        # on the empty typed-refs; the chase requirement fires ONLY for a persona ref.
         bare = task_transition_impl( api_base_url=BASE_URL, api_key=api_key, actor=actor,
                                      task_id=task_id, to_status="blocked" )
         assert bare[ "status" ] == "error" and bare[ "http_status" ] == 422, bare
-        assert any( "next_chase_ts" in e for e in bare[ "errors" ] ), bare
+        assert any( "blocked_by" in e for e in bare[ "errors" ] ), bare
+
+        # a persona blocker WITHOUT a chase time surfaces the chase error verbatim
+        persona_no_chase = task_transition_impl( api_base_url=BASE_URL, api_key=api_key, actor=actor,
+                                                 task_id=task_id, to_status="blocked",
+                                                 blocked_by=[ { "kind": "persona", "id": "tiffany" } ] )
+        assert persona_no_chase[ "status" ] == "error" and persona_no_chase[ "http_status" ] == 422, persona_no_chase
+        assert any( "chase" in e for e in persona_no_chase[ "errors" ] ), persona_no_chase
 
         # blocked accepted with typed blocked_by + next_chase_ts
         ok = task_transition_impl( api_base_url=BASE_URL, api_key=api_key, actor=actor,

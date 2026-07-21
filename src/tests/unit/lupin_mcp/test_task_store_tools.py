@@ -162,9 +162,31 @@ class TestTaskCreateImpl:
             "gate_class"          : "none",
             "priority"            : "P2",
             "urgency"             : "normal",
+            "status"              : "queued",       # DEFAULT mint status (build 1b5483f4)
+            "blocked_by"          : None,
+            "next_chase_ts"       : None,
             "source_qid"          : None,
             "correlation_key"     : None,
         }
+
+    def test_blocked_mint_fields_pass_through( self, capture_request ):
+        # One-call blocked mint (Rick 2026-07-20): status/blocked_by/next_chase_ts
+        # ride the payload verbatim — transport only, no client-side pre-validation.
+        calls = capture_request( FakeResponse( 201, json_body={ } ) )
+        task_create_impl(
+            BASE_URL, API_KEY,
+            created_by    = "mr radio 372f9dc9",
+            item_class    = "task",
+            title         = "held on tiberius",
+            project       = "lupin",
+            status        = "blocked",
+            blocked_by    = [ { "kind": "persona", "id": "tiberius" } ],
+            next_chase_ts = "2026-06-12T09:00:00+00:00",
+        )
+        sent = calls[ "json" ]
+        assert sent[ "status" ]        == "blocked"
+        assert sent[ "blocked_by" ]    == [ { "kind": "persona", "id": "tiberius" } ]
+        assert sent[ "next_chase_ts" ] == "2026-06-12T09:00:00+00:00"
 
     def test_all_optionals_pass_through( self, capture_request ):
         calls = capture_request( FakeResponse( 201, json_body={ } ) )

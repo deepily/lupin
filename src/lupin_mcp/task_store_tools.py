@@ -102,12 +102,15 @@ def task_create_impl(
     gate_class          = "none",
     priority            = "P2",
     urgency             = "normal",
+    status              = "queued",
+    blocked_by          = None,
+    next_chase_ts       = None,
     source_qid          = None,
     correlation_key     = None,
     authority           = "standing",
 ):
     """
-    POST /api/tasks — create one obligation row (always status=queued).
+    POST /api/tasks — create one obligation row (DEFAULT status=queued).
 
     Requires:
         - created_by is the bridge-stamped identity ("<persona> <8-hex sid>");
@@ -117,6 +120,14 @@ def task_create_impl(
     Ensures:
         - returns the serialized item dict (201 body) verbatim on success
         - returns the task_store_request error contract otherwise
+        - `status` defaults to "queued" (today's behavior); pass "blocked" to
+          MINT an already-blocked row in one call (Rick 2026-07-20). A blocked
+          mint carries `blocked_by` (>=1 typed ref [{kind, id}]) and
+          `next_chase_ts` (ISO-8601 — REQUIRED when a {kind:persona} ref is
+          present, I3). Transport only: the status whitelist, the ->blocked
+          invariant, AND the MANAGER-ONLY guard are all enforced SERVER-side and
+          surface verbatim (a non-manager blocked mint is a 403, a bad status /
+          missing chase is a 422) — this layer NEVER pre-validates.
         - `project` is canonicalized through the shared `_PROJECT_ALIASES` map
           (e.g. "planning-is-prompting" -> "plan") at THIS write seam so the
           stored value matches what the owed-work oracle queries on READ
@@ -137,6 +148,9 @@ def task_create_impl(
         "gate_class"          : gate_class,
         "priority"            : priority,
         "urgency"             : urgency,
+        "status"              : status,
+        "blocked_by"          : blocked_by,
+        "next_chase_ts"       : next_chase_ts,
         "source_qid"          : source_qid,
         "correlation_key"     : correlation_key,
     }

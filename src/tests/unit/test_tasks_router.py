@@ -195,6 +195,93 @@ def test_create_rejects_empty_required_fields( client, repo ):
 
 
 # ---------------------------------------------------------------------------
+# POST /api/tasks — one-call BLOCKED mint (Rick's ruling 2026-07-20, build 1b5483f4)
+# ---------------------------------------------------------------------------
+
+_BLOCKED_BODY = dict(
+    _CREATE_BODY,
+    status        = "blocked",
+    blocked_by    = [ { "kind": "persona", "id": "tiberius" } ],
+    next_chase_ts = "2026-06-12T09:00:00+00:00",
+)
+
+
+@pytest.mark.parametrize( "bad_status", [ "done", "dropped", "parked", "claimed", "in_progress", "review" ] )
+def test_create_rejects_non_whitelisted_mint_status( client, repo, bad_status ):
+    # AC1 status whitelist: only queued|blocked are mintable. Every other status
+    # is a 422 (rules violation), rejected BEFORE any write. A true allow-list.
+    r = client.post( "/api/tasks", json=dict( _CREATE_BODY, status=bad_status ) )
+    assert r.status_code == 422
+    assert any( "cannot be minted at create" in e for e in r.json()[ "detail" ][ "errors" ] )
+    repo.create_item.assert_not_called()
+
+
+def test_create_blocked_mint_by_manager_succeeds( client, repo, monkeypatch ):
+    # AC2 ALLOW path: a MANAGER (is_manager_figure True) mints an already-blocked
+    # row in one call. status + blocked_by + next_chase_ts flow to the repository.
+    monkeypatch.setattr( tasks, "is_manager_figure", lambda sid: True )
+    repo.create_item.return_value = make_item(
+        status        = "blocked",
+        blocked_by    = [ { "kind": "persona", "id": "tiberius" } ],
+        next_chase_ts = NOW,
+    )
+    r = client.post( "/api/tasks", json=_BLOCKED_BODY )
+    assert r.status_code == 201
+    assert r.json()[ "status" ] == "blocked"
+    kwargs = repo.create_item.call_args.kwargs
+    assert kwargs[ "status" ] == "blocked"
+    assert kwargs[ "blocked_by" ] == [ { "kind": "persona", "id": "tiberius" } ]
+    assert kwargs[ "next_chase_ts" ] is not None
+
+
+def test_create_blocked_mint_by_non_manager_rejected_403( client, repo, monkeypatch ):
+    # AC2 REJECT path: a NON-manager (is_manager_figure False) is 403'd — no write.
+    monkeypatch.setattr( tasks, "is_manager_figure", lambda sid: False )
+    r = client.post( "/api/tasks", json=_BLOCKED_BODY )
+    assert r.status_code == 403
+    assert "only a manager may mint" in r.json()[ "detail" ]
+    repo.create_item.assert_not_called()
+
+
+def test_create_blocked_mint_unparseable_sid_rejected_403( client, repo, monkeypatch ):
+    # Fail-CLOSED: a created_by with no session-id tail yields no sid → REJECTED
+    # WITHOUT even consulting the predicate (short-circuit on session_id is None).
+    def _boom( sid ):                                          # must NOT be reached
+        raise AssertionError( "is_manager_figure consulted despite unparseable sid" )
+    monkeypatch.setattr( tasks, "is_manager_figure", _boom )
+    r = client.post( "/api/tasks", json=dict( _BLOCKED_BODY, created_by="nobody" ) )
+    assert r.status_code == 403
+    repo.create_item.assert_not_called()
+
+
+def test_create_blocked_mint_persona_ref_without_chase_is_422( client, repo, monkeypatch ):
+    # The blocked-invariant (I3) is enforced at CREATE via the SHARED validator: a
+    # {kind:persona} blocker with no next_chase_ts is a 422 — the SAME rule a
+    # transition applies, reused not forked. Whitelist/invariant (422) is checked
+    # BEFORE the manager guard (403), so a manager still gets the 422 here.
+    monkeypatch.setattr( tasks, "is_manager_figure", lambda sid: True )
+    r = client.post( "/api/tasks", json=dict( _BLOCKED_BODY, next_chase_ts=None ) )
+    assert r.status_code == 422
+    assert any( "persona blocker requires a chase time" in e for e in r.json()[ "detail" ][ "errors" ] )
+    repo.create_item.assert_not_called()
+
+
+def test_create_queued_default_never_consults_manager_guard( client, repo, monkeypatch ):
+    # G2 REGRESSION TRAP (Tiffany, sharpest): the manager check + the
+    # created_by→session_id parse must fire ONLY for a blocked mint. A queued
+    # create — even one whose created_by has NO parseable session id — must NOT
+    # touch the guard, or existing queued HTTP callers regress. Prove it by making
+    # is_manager_figure EXPLODE if consulted.
+    def _boom( sid ):
+        raise AssertionError( "manager guard consulted on the queued default path" )
+    monkeypatch.setattr( tasks, "is_manager_figure", _boom )
+    repo.create_item.return_value = make_item()
+    r = client.post( "/api/tasks", json=dict( _CREATE_BODY, created_by="no-sid-here" ) )
+    assert r.status_code == 201                                # queued path untouched
+    assert repo.create_item.call_args.kwargs[ "status" ] == "queued"
+
+
+# ---------------------------------------------------------------------------
 # POST /api/tasks/{id}/transition
 # ---------------------------------------------------------------------------
 
@@ -291,11 +378,31 @@ def test_transition_to_blocked_serializes_chase_ts( client, repo ):
     assert body[ "item" ][ "blocked_by" ] == refs
 
 
-def test_transition_rejects_blocked_without_chase_or_refs( client, repo ):
+def test_transition_rejects_blocked_without_refs( client, repo ):
+    # KIND-AWARE (eab1d7da / I3): a ->blocked with NO blocked_by is rejected for the
+    # empty-refs violation ALONE — with no {kind:persona} ref present, no chase is
+    # required, so the chase error does NOT co-fire. (Pre-migration this asserted 2
+    # errors "chase + refs at once"; that pairing is now structurally unreachable —
+    # a chase error needs a persona ref, and a persona ref makes the refs valid.)
     repo.get_by_id_for_update.return_value = make_item( status="in_progress" )
     r = client.post( f"/api/tasks/{uuid.uuid4()}/transition", json=_transition_body( to_status="blocked" ) )
     assert r.status_code == 422
-    assert len( r.json()[ "detail" ][ "errors" ] ) == 2             # chase_ts + blocked_by, all at once
+    errors = r.json()[ "detail" ][ "errors" ]
+    assert len( errors ) == 1 and "non-empty list of typed refs" in errors[ 0 ]
+
+
+def test_transition_rejects_blocked_persona_ref_without_chase( client, repo ):
+    # The reachable kind-aware rejection: a {kind:persona} blocker with no chase is
+    # a 422 naming the chase requirement (the refs themselves are valid, so this is
+    # the ONLY error). Same shared validate_blocked_fields the create-mint path uses.
+    repo.get_by_id_for_update.return_value = make_item( status="in_progress" )
+    r = client.post(
+        f"/api/tasks/{uuid.uuid4()}/transition",
+        json=_transition_body( to_status="blocked", blocked_by=[ { "kind": "persona", "id": "tiberius" } ] ),
+    )
+    assert r.status_code == 422
+    errors = r.json()[ "detail" ][ "errors" ]
+    assert len( errors ) == 1 and "persona blocker requires a chase time" in errors[ 0 ]
 
 
 def test_transition_rejects_junk_receipts_on_non_done( client, repo ):

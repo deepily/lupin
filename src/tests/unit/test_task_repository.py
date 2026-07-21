@@ -111,6 +111,62 @@ def test_create_item_passes_optional_fields_through( repo ):
     assert item.body == "details"
 
 
+# create_item — one-call BLOCKED mint (Rick's ruling 2026-07-20, build 1b5483f4)
+
+def test_create_item_blocked_mint_persists_fields_and_stamps_blocked_event( repo, session ):
+    # A blocked mint sets status='blocked', persists blocked_by + next_chase_ts,
+    # and the creation event's transition label is '->blocked' (not '->queued').
+    refs  = [ { "kind": "persona", "id": "tiberius" } ]
+    chase = datetime( 2026, 6, 12, 9, 0, tzinfo=timezone.utc )
+    item  = repo.create_item(
+        item_class    = "task",
+        title         = "held on tiberius",
+        project       = "lupin",
+        created_by    = "mr radio 372f9dc9",
+        authority     = "manager_relay",
+        status        = "blocked",
+        blocked_by    = refs,
+        next_chase_ts = chase,
+    )
+    assert item.status == "blocked"
+    assert item.blocked_by == refs and item.next_chase_ts == chase
+    event = _added_instances( session, TaskEvent )[ 0 ]
+    assert event.transition == "->blocked"                      # label follows the mint status
+
+
+def test_create_item_blocked_mint_none_blocked_by_defaults_to_empty( repo ):
+    # A blocked mint given blocked_by=None resolves to [] (the None→[] branch) —
+    # the DB CHECK still holds (a []-blocked row has no persona ref → no chase req).
+    item = repo.create_item(
+        item_class    = "task",
+        title         = "held, refs TBD",
+        project       = "lupin",
+        created_by    = "mr radio 372f9dc9",
+        authority     = "standing",
+        status        = "blocked",
+        blocked_by    = None,
+        next_chase_ts = None,
+    )
+    assert item.status == "blocked" and item.blocked_by == [ ] and item.next_chase_ts is None
+
+
+def test_create_item_queued_mint_ignores_stray_blocked_fields( repo ):
+    # The repository OWNS per-status consistency: a queued mint FORCES blocked_by=[]
+    # and next_chase_ts=None, dropping any stray values a caller passed (a queued
+    # row waits on nothing) — mirrors apply_transition's non-blocked field handling.
+    item = repo.create_item(
+        item_class    = "task",
+        title         = "just queued",
+        project       = "lupin",
+        created_by    = "krishna 38d15e3b",
+        authority     = "standing",
+        status        = "queued",
+        blocked_by    = [ { "kind": "persona", "id": "tiberius" } ],   # stray — must be dropped
+        next_chase_ts = datetime( 2026, 6, 12, 9, 0, tzinfo=timezone.utc ),
+    )
+    assert item.status == "queued" and item.blocked_by == [ ] and item.next_chase_ts is None
+
+
 # ---------------------------------------------------------------------------
 # apply_transition
 # ---------------------------------------------------------------------------

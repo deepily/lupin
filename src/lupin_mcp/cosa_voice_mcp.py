@@ -3451,15 +3451,18 @@ def task_create(
     item_class          : str,
     title               : str,
     project             : str,
-    body                : Optional[ str ] = None,
-    owner_persona       : Optional[ str ] = None,
-    accountable_manager : Optional[ str ] = None,
-    gate_class          : str             = "none",
-    priority            : str             = "P2",
-    urgency             : str             = "normal",
-    source_qid          : Optional[ str ] = None,
-    correlation_key     : Optional[ str ] = None,
-    authority           : str             = "standing",
+    body                : Optional[ str ]  = None,
+    owner_persona       : Optional[ str ]  = None,
+    accountable_manager : Optional[ str ]  = None,
+    gate_class          : str              = "none",
+    priority            : str              = "P2",
+    urgency             : str              = "normal",
+    status              : str              = "queued",
+    blocked_by          : Optional[ list ] = None,
+    next_chase_ts       : Optional[ str ]  = None,
+    source_qid          : Optional[ str ]  = None,
+    correlation_key     : Optional[ str ]  = None,
+    authority           : str              = "standing",
 ) -> dict:
     """
     **[SELF-DISCLOSURE]** Create a TYPED or CROSS-PERSONA item in the unified task store.
@@ -3545,6 +3548,15 @@ def task_create(
         urgency: urgent | normal | low (default "normal") — operator-gate TIME-
             sensitivity (NOT priority/importance); the arbiter routes a gate by it
             (urgent→interrupt, normal→digest, low→queue)
+        status: queued (default) | blocked. Pass "blocked" to MINT an already-
+            blocked row in ONE call (Rick 2026-07-20). MANAGER-ONLY server-side —
+            a non-manager blocked mint is a 403. Otherwise whitelisted to
+            queued|blocked (done/dropped/parked/claimed/in_progress/review are NOT
+            mintable — transition after create).
+        blocked_by: typed refs [{kind: item|persona|user, id}] — REQUIRED (>=1)
+            for a blocked mint; ignored for queued
+        next_chase_ts: ISO-8601 chase time — REQUIRED for a blocked mint whose
+            blocked_by names a {kind:persona} ref (I3 — a peer is chaseable)
         source_qid: Originating commons question_id, when DM-born
         correlation_key: Upsert key for hook-mirrored items
         authority: standing | user_direct | manager_relay (default "standing")
@@ -3570,6 +3582,9 @@ def task_create(
         gate_class          = gate_class,
         priority            = priority,
         urgency             = urgency,
+        status              = status,
+        blocked_by          = blocked_by,
+        next_chase_ts       = next_chase_ts,
         source_qid          = source_qid,
         correlation_key     = correlation_key,
         authority           = authority,

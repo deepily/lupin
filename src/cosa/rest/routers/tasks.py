@@ -38,6 +38,16 @@ from cosa.rest import task_store_rules as rules
 from cosa.rest.task_store_owed import park_reason_is_stale
 from cosa.agents.utils.sender_id import canonicalize_project_name
 from lupin_mcp.persona_normalization import canonical_persona_key
+# Manager-only blocked-mint guard (Rick 2026-07-20). REUSE the ONE canonical
+# manager-figure predicate — never a second copy of the role logic (G1). In the
+# server CONTAINER only its EXPLICIT source (bridge role=="manager") resolves: the
+# IMPLICIT source (the COSA_VOICE_PREFERRED_PERSONA__<PROJECT> env chain) is UNSET
+# in-container, so a session that is a manager ONLY by named-standing-persona is
+# treated here as a non-manager. Acceptable — the crew/fleet Managers who mint
+# blocked rows are spawned INTO role=manager (the explicit source). The bridge dir
+# is bind-mounted into the container (docker-compose ~/.claude/sessions), so the
+# explicit lookup is reachable server-side.
+from lupin_cli.claude_code.hooks.lib.manager_figure import is_manager_figure
 
 router = APIRouter( prefix="/api", tags=[ "tasks" ] )
 
@@ -137,24 +147,36 @@ class TaskCreateIn( BaseModel ):
     """
     Create body for POST /api/tasks.
 
-    Creation is ALWAYS status=queued (the creation event stamps "->queued");
+    Creation DEFAULTS to status=queued (the creation event stamps "->queued");
     enum membership for item_class/gate_class/priority/authority is validated
     by task_store_rules.validate_create in the handler (one rules home, not
     per-layer duplication).
+
+    ONE-CALL BLOCKED MINT (Rick's ruling 2026-07-20): `status` may also be
+    "blocked", minting an already-blocked row in a single call. A blocked mint
+    carries `blocked_by` (>=1 typed ref) and `next_chase_ts` (kind-aware — a
+    persona blocker requires it), enforced by rules.validate_create_status which
+    REUSES the same ->blocked invariant a transition applies. A blocked mint is
+    additionally MANAGER-ONLY (guarded in the handler via is_manager_figure).
+    `status` is otherwise whitelisted to queued|blocked — done/dropped/parked/
+    claimed/in_progress/review are NOT mintable.
     """
-    item_class          : str            = Field( ..., min_length=1 )
-    title               : str            = Field( ..., min_length=1 )
-    project             : str            = Field( ..., min_length=1, max_length=255 )
-    created_by          : str            = Field( ..., min_length=1, max_length=255, description="persona + session id of the creator" )
-    authority           : str            = Field( default="standing" )
-    body                : Optional[str]  = None
-    owner_persona       : Optional[str]  = Field( default=None, max_length=255 )
-    accountable_manager : Optional[str]  = Field( default=None, max_length=255 )
-    gate_class          : str            = Field( default="none" )
-    priority            : str            = Field( default="P2" )
-    urgency             : str            = Field( default="normal" )
-    source_qid          : Optional[str]  = Field( default=None, max_length=64 )
-    correlation_key     : Optional[str]  = Field( default=None, max_length=255 )
+    item_class          : str                = Field( ..., min_length=1 )
+    title               : str                = Field( ..., min_length=1 )
+    project             : str                = Field( ..., min_length=1, max_length=255 )
+    created_by          : str                = Field( ..., min_length=1, max_length=255, description="persona + session id of the creator" )
+    authority           : str                = Field( default="standing" )
+    body                : Optional[str]      = None
+    owner_persona       : Optional[str]      = Field( default=None, max_length=255 )
+    accountable_manager : Optional[str]      = Field( default=None, max_length=255 )
+    gate_class          : str                = Field( default="none" )
+    priority            : str                = Field( default="P2" )
+    urgency             : str                = Field( default="normal" )
+    status              : str                = Field( default="queued", description="mint status — queued (default) or blocked (manager-only, one-call blocked mint)" )
+    blocked_by          : Optional[list]     = Field( default=None, description="typed refs [{kind, id}] — REQUIRED (>=1) for a blocked mint; ignored for queued" )
+    next_chase_ts       : Optional[datetime] = Field( default=None, description="ISO-8601 chase time — REQUIRED for a blocked mint whose blocked_by names a {kind:persona} ref (I3)" )
+    source_qid          : Optional[str]      = Field( default=None, max_length=64 )
+    correlation_key     : Optional[str]      = Field( default=None, max_length=255 )
     # max_length values mirror the VARCHAR widths in postgres_models.TaskItem
     # (cold-review N5): overlong input is a 422 at the wire, never a DB
     # DataError surfacing as an authenticated 500.
@@ -398,6 +420,35 @@ def create_task(
     """
     _reject_if_errors( rules.validate_create( payload.item_class, payload.gate_class, payload.priority, payload.authority, payload.urgency ) )
 
+    # Mint-status whitelist (Rick 2026-07-20): a create may mint queued OR blocked.
+    # blocked_by persona refs are canonicalized to the store key BEFORE validate +
+    # persist (identity parity, same as the transition seam), so the value validated
+    # is the value written. A queued mint carries neither field — validate_create_status
+    # ignores them, and the repository forces []/None for a non-blocked mint.
+    blocked_by = _canon_blocked_by( payload.blocked_by )
+    _reject_if_errors( rules.validate_create_status( payload.status, blocked_by, payload.next_chase_ts ) )
+
+    # Manager-only guard for a blocked MINT — scoped ENTIRELY to status=="blocked"
+    # (G2): the queued default path never parses created_by, so existing queued
+    # creates (migration-test rows, HTTP callers with no parseable session id) do
+    # NOT regress. A blocked row is a deliberate hold minted on someone's behalf —
+    # ONLY a manager may mint one. Resolution REUSES the ONE canonical predicate
+    # is_manager_figure (G1), fail-CLOSED: a caller whose manager-hood cannot be
+    # established (predicate False OR no parseable session id) is REJECTED with 403
+    # (authenticated but not authorized — distinct from the 422 validation lane).
+    if payload.status == "blocked":
+        session_id = rules.session_id_from_created_by( payload.created_by )
+        if session_id is None or not is_manager_figure( session_id ):
+            raise HTTPException(
+                status_code = 403,
+                detail      = (
+                    "only a manager may mint a 'blocked' task at create — "
+                    "is_manager_figure is false or unresolved for the caller. Create "
+                    "the item queued and transition it to blocked, or have a manager "
+                    "mint it directly."
+                ),
+            )
+
     # Soft title guard (design 2026.06.29 §4.3 / handoff #1): trim an over-long
     # title to the shared cap and move the overflow into an empty body — at the
     # SERVER write path so EVERY caller (MCP wrapper, hook, raw POST) is covered.
@@ -439,6 +490,9 @@ def create_task(
             gate_class          = payload.gate_class,
             priority            = payload.priority,
             urgency             = payload.urgency,
+            status              = payload.status,
+            blocked_by          = blocked_by,
+            next_chase_ts       = payload.next_chase_ts,
             source_qid          = payload.source_qid,
             correlation_key     = payload.correlation_key,
             flag_suffix         = flag_marker,

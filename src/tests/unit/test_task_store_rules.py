@@ -23,6 +23,12 @@ if _src_path not in sys.path:
 
 from cosa.rest import task_store_rules as rules
 
+# A non-None chase sentinel for the blocked-mint tests. validate_blocked_fields
+# only tests `next_chase_ts is None`, so any tz-aware datetime stands in for a
+# real ISO-8601 chase time without coupling to a clock.
+from datetime import datetime as _dt, timezone as _tz
+NOW_TS = _dt( 2026, 6, 12, 9, 0, tzinfo=_tz.utc )
+
 
 @pytest.fixture
 def scope_roots( tmp_path ):
@@ -839,6 +845,81 @@ def test_known_persona_keys_overflow_none( monkeypatch ):
 def test_known_persona_keys_overflow_empty_key_skipped( monkeypatch ):
     _mock_config_loaders( monkeypatch, [ { "name": "Rio" } ], { "name": "!!!" } )
     assert rules._get_known_persona_keys() == { "rio" }
+
+
+# ---------------------------------------------------------------------------
+# One-call BLOCKED mint (Rick's ruling 2026-07-20, build 1b5483f4):
+# validate_create_status · validate_blocked_fields (shared) · session_id_from_created_by
+# ---------------------------------------------------------------------------
+
+def test_create_allowed_statuses_are_exactly_queued_and_blocked():
+    assert rules.CREATE_ALLOWED_STATUSES == ( "queued", "blocked" )
+
+
+def test_validate_create_status_queued_ignores_blocked_fields():
+    # A queued mint is valid with no blocked_by / next_chase_ts, AND ignores stray
+    # ones (they are dropped by the repository) — today's behavior preserved.
+    assert rules.validate_create_status( "queued", None, None ) == [ ]
+    assert rules.validate_create_status( "queued", [ { "kind": "persona", "id": "x" } ], None ) == [ ]
+
+
+@pytest.mark.parametrize( "bad", [ "done", "dropped", "parked", "claimed", "in_progress", "review", "bogus" ] )
+def test_validate_create_status_rejects_non_whitelisted( bad ):
+    errors = rules.validate_create_status( bad, None, None )
+    assert len( errors ) == 1 and "cannot be minted at create" in errors[ 0 ]
+
+
+def test_validate_create_status_blocked_happy_path():
+    # A blocked mint with >=1 typed ref + a chase (persona ref requires it) passes.
+    assert rules.validate_create_status(
+        "blocked", [ { "kind": "persona", "id": "tiberius" } ], NOW_TS
+    ) == [ ]
+
+
+def test_validate_create_status_blocked_persona_ref_requires_chase():
+    # I3 kind-aware: a {kind:persona} blocker with no chase is rejected — the SAME
+    # message validate_transition emits (proves the rule is shared, not forked).
+    errors = rules.validate_create_status( "blocked", [ { "kind": "persona", "id": "tiberius" } ], None )
+    assert any( "persona blocker requires a chase time" in e for e in errors )
+
+
+def test_validate_create_status_blocked_empty_refs_rejected():
+    errors = rules.validate_create_status( "blocked", [ ], NOW_TS )
+    assert any( "non-empty list of typed refs" in e for e in errors )
+
+
+def test_validate_create_status_blocked_user_ref_needs_no_chase():
+    # A user/item-only block needs NO chase (you cannot schedule Rick) — valid
+    # without next_chase_ts, exactly like the transition path.
+    assert rules.validate_create_status( "blocked", [ { "kind": "user", "id": "rick" } ], None ) == [ ]
+
+
+def test_validate_blocked_fields_matches_transition_blocked_branch():
+    # The shared helper IS what validate_transition's ->blocked branch calls, so a
+    # create-block and a transition-block agree by construction. Assert both agree
+    # on the same inputs (one home, no drift).
+    persona_no_chase = [ { "kind": "persona", "id": "maria" } ]
+    from_create     = rules.validate_blocked_fields( persona_no_chase, None )
+    from_transition = rules.validate_transition( "queued", "blocked", "standing", blocked_by=persona_no_chase )
+    # every blocked-field error the helper reports also appears in the transition's
+    assert from_create and all( e in from_transition for e in from_create )
+    # and both accept the same valid input
+    assert rules.validate_blocked_fields( persona_no_chase, NOW_TS ) == [ ]
+
+
+@pytest.mark.parametrize( "created_by, expected", [
+    ( "Cheech 4d376217",   "4d376217" ),   # 8-hex tail returned verbatim
+    ( "mr radio 372f9dc9", "372f9dc9" ),    # persona-with-space, tail parsed off the LAST space
+    ( "krishna",           None       ),    # no tail
+    ( "agent beef",        None       ),    # "beef" is 4 hex (<6 floor) — not a sid
+] )
+def test_session_id_from_created_by( created_by, expected ):
+    assert rules.session_id_from_created_by( created_by ) == expected
+
+
+@pytest.mark.parametrize( "bad", [ None, "", "   ", 123, [ ] ] )
+def test_session_id_from_created_by_unusable_input_is_none( bad ):
+    assert rules.session_id_from_created_by( bad ) is None
 
 
 if __name__ == "__main__":

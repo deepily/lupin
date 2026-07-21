@@ -355,9 +355,47 @@ def blocked_by_has_persona( blocked_by ) -> bool:
     )
 
 
+def validate_blocked_fields( blocked_by, next_chase_ts ) -> list:
+    """
+    The ->blocked structural invariant, expressed ONCE (I3 kind-aware chase +
+    >=1 typed ref). Shared VERBATIM by validate_transition's ->blocked branch AND
+    validate_create_status's blocked-MINT branch — one rule, one home, so a
+    transition-into-blocked and a create-as-blocked can never diverge (Rick's
+    one-call blocked-mint ruling 2026-07-20 reuses the SAME rule, never a fork).
+
+    Requires:
+        - blocked_by / next_chase_ts are the candidate payload fields (each any
+          type; None accepted — this NEVER raises on malformed input, it returns
+          the error strings the caller maps to 422)
+
+    Ensures:
+        - returns [] iff BOTH hold:
+            next_chase_ts is present WHEN blocked_by contains a {kind:persona}
+            ref (I3 — a peer is chaseable, so a chase is honest; a user/item-only
+            block needs none: you cannot schedule Rick, an item resolves on its
+            own edge)
+            blocked_by passes validate_blocked_by_refs (>=1 typed ref)
+        - returns every violation otherwise (both at once)
+    """
+    errors = [ ]
+    if next_chase_ts is None and blocked_by_has_persona( blocked_by ):
+        errors.append( "a persona blocker requires a chase time: next_chase_ts is REQUIRED when blocked_by contains a {kind:persona} ref (I3 — a peer is chaseable)" )
+    errors.extend( validate_blocked_by_refs( blocked_by ) )
+    return errors
+
+
 # ---------------------------------------------------------------------------
 # Creation + transition rules
 # ---------------------------------------------------------------------------
+
+# The statuses a CREATE may mint (Rick's ruling 2026-07-20). `queued` is the
+# default (today's behavior preserved); `blocked` mints an already-blocked row in
+# ONE call. Terminal (done/dropped) is rejected — those need receipts / a drop
+# reason and an audit history a fresh row has none of. `parked` is rejected — it
+# needs park_reason + captured_at and is legal ONLY from queued/in_progress (a
+# human ruling EXISTING work not-now), never at mint. `claimed`/`in_progress`/
+# `review` are transition-only lifecycle states, not mintable.
+CREATE_ALLOWED_STATUSES = ( "queued", "blocked" )
 
 def validate_create( item_class: str, gate_class: str, priority: str, authority: str,
                      urgency: str = "normal" ) -> list:
@@ -387,6 +425,48 @@ def validate_create( item_class: str, gate_class: str, priority: str, authority:
     if urgency not in VALID_URGENCIES:
         errors.append( f"urgency '{urgency}' must be one of {VALID_URGENCIES}" )
     return errors
+
+
+def validate_create_status( status, blocked_by, next_chase_ts ) -> list:
+    """
+    Validate the MINT status of a new item (Rick's one-call blocked-mint ruling,
+    2026-07-20). A create may mint status = queued OR blocked ONLY.
+
+    This is the STATUS-WHITELIST half of the ruling; the MANAGER-ONLY guard for a
+    blocked mint is enforced SEPARATELY in the router (create_task), because it
+    needs bridge IO to resolve the caller's role and this module is pure (no DB,
+    no HTTP). Keeping the two apart is deliberate: the whitelist is a data rule
+    (testable with no config), the guard is an authorization rule.
+
+    Requires:
+        - status is the candidate mint status (any string)
+        - blocked_by / next_chase_ts are the candidate payload fields (only read
+          when status == "blocked"); each any type, None accepted
+
+    Ensures:
+        - status not in CREATE_ALLOWED_STATUSES -> one error naming the whitelist
+          and WHY the rejected states are off it (done/dropped need receipts +
+          audit history; parked needs park_reason + is legal only from
+          queued/in_progress; claimed/in_progress/review are transition-only).
+          This SHORT-CIRCUITS — the blocked-field rules are meaningless without a
+          valid mint status (symmetry with validate_transition's to_status guard)
+        - status == "blocked" -> the SAME ->blocked invariant a transition enforces,
+          via validate_blocked_fields (>=1 typed ref AND a kind-aware chase) — the
+          rule is reused, NEVER forked
+        - status == "queued" -> [] (blocked_by / next_chase_ts are ignored — a
+          queued mint carries neither, preserving today's behavior exactly)
+        - never raises — every violation is a returned string the router maps to 422
+    """
+    if status not in CREATE_ALLOWED_STATUSES:
+        return [
+            f"status '{status}' cannot be minted at create — a create may mint only "
+            f"{CREATE_ALLOWED_STATUSES}. done/dropped need receipts + audit history, "
+            f"parked needs a park_reason and is legal only from queued/in_progress, "
+            f"and claimed/in_progress/review are transition-only. Transition after create."
+        ]
+    if status == "blocked":
+        return validate_blocked_fields( blocked_by, next_chase_ts )
+    return [ ]
 
 
 # ---------------------------------------------------------------------------
@@ -550,6 +630,36 @@ def persona_from_created_by( created_by ) -> str:
     return canonical_persona_key( candidate )
 
 
+def session_id_from_created_by( created_by ) -> Optional[str]:
+    """
+    Extract the SESSION-ID tail from a bridge-stamped created_by string — the
+    INVERSE of persona_from_created_by.
+
+    created_by is contract-stamped "<persona> <8-hex session id>"
+    (task_store_tools.py). The manager-only blocked-MINT guard (create_task) needs
+    the SID to resolve the caller's bridge role via is_manager_figure. Returns the
+    trailing session-id-shaped token (>=6 lowercase-hex chars), or None when
+    created_by carries no such tail — the guard then treats the caller as a
+    NON-manager (fail-CLOSED, the correct degrade for a WRITE authorization).
+
+    Requires:
+        - created_by is the candidate value (any type; only a non-empty str is
+          parsed)
+
+    Ensures:
+        - None / non-string / empty -> None
+        - "<persona> <hex sid>" -> the hex sid ("Cheech 4d376217" -> "4d376217")
+        - a value with no session-id-shaped tail -> None (there is no sid to give,
+          and fabricating one would defeat the guard)
+    """
+    if not created_by or not isinstance( created_by, str ):
+        return None
+    parts = created_by.rsplit( " ", 1 )
+    if len( parts ) == 2 and _SESSION_ID_TAIL_PATTERN.fullmatch( parts[ 1 ] ):
+        return parts[ 1 ]
+    return None
+
+
 def build_persona_advisory( owner_persona, accountable_manager, known_keys=None ):
     """
     Flag off-roster persona fields (policy 1) — the pure roster check + advisory
@@ -672,17 +782,13 @@ def validate_transition(
     if to_status == "done" or receipt_refs is not None:
         errors.extend( validate_receipt_refs( receipt_refs, scope_roots ) )
     if to_status == "blocked":
-        # I3 kind-aware chase requirement (eab1d7da): a chase time is REQUIRED
-        # only when a PERSONA blocks — a peer is chaseable, so a chase is honest.
-        # A user/item-only block needs no chase (you cannot schedule Rick; an item
-        # resolves on its own edge), which is what makes "blocked on Rick, no
-        # schedulable chase" EXPRESSIBLE instead of dying in `queued` prose. The
-        # message NAMES the kind so a user filing a user-blocked row that trips an
-        # UNRELATED check never reads the wrong error (María, review gate). This is
-        # the app-layer twin of the DB CHECK; the two are pinned to agree by test.
-        if next_chase_ts is None and blocked_by_has_persona( blocked_by ):
-            errors.append( "a persona blocker requires a chase time: next_chase_ts is REQUIRED when blocked_by contains a {kind:persona} ref (I3 — a peer is chaseable)" )
-        errors.extend( validate_blocked_by_refs( blocked_by ) )
+        # I3 kind-aware chase + >=1 typed ref — the ->blocked invariant, expressed
+        # ONCE in validate_blocked_fields and shared VERBATIM with the create-as-
+        # blocked mint path (Rick 2026-07-20). A chase time is REQUIRED only when a
+        # PERSONA blocks (a peer is chaseable, so a chase is honest); a user/item-only
+        # block needs none (you cannot schedule Rick; an item resolves on its own
+        # edge). This is the app-layer twin of the DB CHECK; the two agree by test.
+        errors.extend( validate_blocked_fields( blocked_by, next_chase_ts ) )
     if to_status == "dropped" and ( not isinstance( reason, str ) or not reason.strip() ):
         errors.append( "reason is REQUIRED (non-blank) when transitioning to 'dropped' (C12 — the escape hatch carries its justification)" )
     if to_status == PARK_STATUS:

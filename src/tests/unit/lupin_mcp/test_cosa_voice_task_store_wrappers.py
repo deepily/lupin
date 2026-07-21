@@ -80,6 +80,9 @@ class TestTaskCreateWrapper:
             "gate_class"          : "operator",
             "priority"            : "P1",
             "urgency"             : "normal",
+            "status"              : "queued",       # DEFAULT mint status (build 1b5483f4)
+            "blocked_by"          : None,
+            "next_chase_ts"       : None,
             "source_qid"          : "qid-1",
             "correlation_key"     : "corr-1",
             "authority"           : "manager_relay",
@@ -93,6 +96,26 @@ class TestTaskCreateWrapper:
         assert captured[ "priority" ]   == "P2"
         assert captured[ "authority" ]  == "standing"
         assert captured[ "body" ]       is None
+        # One-call blocked mint defaults (build 1b5483f4): status defaults queued,
+        # the two blocked fields default None (forwarded to the transport verbatim).
+        assert captured[ "status" ]        == "queued"
+        assert captured[ "blocked_by" ]    is None
+        assert captured[ "next_chase_ts" ] is None
+
+    def test_blocked_mint_passes_through( self, stamped_identity, monkeypatch ):
+        captured = { }
+        monkeypatch.setattr( cv, "task_create_impl", lambda **kwargs: captured.update( kwargs ) or SENTINEL )
+        cv.task_create.fn(
+            item_class    = "task",
+            title         = "held on tiberius",
+            project       = "lupin",
+            status        = "blocked",
+            blocked_by    = [ { "kind": "persona", "id": "tiberius" } ],
+            next_chase_ts = "2026-06-12T09:00:00+00:00",
+        )
+        assert captured[ "status" ]        == "blocked"
+        assert captured[ "blocked_by" ]    == [ { "kind": "persona", "id": "tiberius" } ]
+        assert captured[ "next_chase_ts" ] == "2026-06-12T09:00:00+00:00"
 
 
 class TestTaskTransitionWrapper:
