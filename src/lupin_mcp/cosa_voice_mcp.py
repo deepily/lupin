@@ -3302,10 +3302,20 @@ def dm_send(
 
     Returns:
         Success: {"status":"sent","message_id","thread_id","recipient_session",
-                  "recipient_persona","dispatched":True}.
+                  "recipient_session_hash8","recipient_persona","dispatched":True}.
         Recipient-resolution failure: {"status":"error",
                   "reason":"recipient_unresolved","detail":<RecipientResolutionError>}.
         Transport/auth failure: {"status":"error","reason":...,"detail":...}.
+
+    TWO WIDTHS, TWO NAMES — use the right one for the right job:
+      `recipient_session`       FULL session id. Feed this back as
+                                `recipient_session_id` for precise addressing on
+                                a SUBSEQUENT SEND.
+      `recipient_session_hash8` the 8-char form actually persisted, and the form
+                                `dm_list` reports as the addressee. Compare
+                                against `recipient_session_hash8` on listed DMs.
+    They are deliberately NOT the same value; comparing one to the other will
+    not match. (`dm_list`'s `session_id` filter accepts either — it normalizes.)
     """
     persona = _commons_persona_fields()
     return _dm_send_impl(
@@ -3510,10 +3520,20 @@ def dm_respond(
 
     Returns:
         Success: {"status":"sent","message_id","thread_id","recipient_session",
-                  "recipient_persona","dispatched":True}.
+                  "recipient_session_hash8","recipient_persona","dispatched":True}.
         Recipient-resolution failure: {"status":"error",
                   "reason":"recipient_unresolved","detail":<RecipientResolutionError>}.
         Transport/auth failure: {"status":"error","reason":...,"detail":...}.
+
+    TWO WIDTHS, TWO NAMES — use the right one for the right job:
+      `recipient_session`       FULL session id. Feed this back as
+                                `recipient_session_id` for precise addressing on
+                                a SUBSEQUENT SEND.
+      `recipient_session_hash8` the 8-char form actually persisted, and the form
+                                `dm_list` reports as the addressee. Compare
+                                against `recipient_session_hash8` on listed DMs.
+    They are deliberately NOT the same value; comparing one to the other will
+    not match. (`dm_list`'s `session_id` filter accepts either — it normalizes.)
     """
     persona = _commons_persona_fields()
     return _dm_respond_impl(

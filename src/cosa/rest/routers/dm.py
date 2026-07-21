@@ -140,7 +140,13 @@ def execute_dm_send(
         - 422 (recipient unresolved) is returned unchanged for AI self-correction
         - 201 persists + pushes the ai_to_ai notification (body EDT-prefixed in BOTH
           the persisted row and the pushed message) and returns
-          {http_status, message_id, thread_id, recipient_session, recipient_persona, dispatched}
+          {http_status, message_id, thread_id, recipient_session,
+           recipient_session_hash8, recipient_persona, dispatched}
+        - `recipient_session` is the FULL resolved session id (unchanged
+          contract — reusable as `recipient_session_id` on a subsequent send);
+          `recipient_session_hash8` is the 8-char form actually persisted and
+          the form `/api/dm/list` filters on. Both are returned so neither name
+          has to mean two shapes (row 2565956b, Rio's ruling 2026-07-21).
         - thread_id defaults to the fresh message_id when not supplied (new thread)
         - threading / reply_to / sender persona+icon metadata are UNTOUCHED — only
           the body string is prefixed
@@ -208,7 +214,19 @@ def execute_dm_send(
         "http_status"       : 201,
         "message_id"        : db_id or message_id,
         "thread_id"         : thread_id,
-        "recipient_session" : target_session_id,
+        # BOTH SHAPES, EACH UNDER ITS OWN NAME (Rio's ruling, 2026-07-21).
+        # `recipient_session` is the FULL id and is UNCHANGED — it is a
+        # documented agent-facing contract, and `dm_send` accepts
+        # `recipient_session_id` for precise addressing, so a caller
+        # round-tripping this receipt into a SUBSEQUENT SEND needs the full
+        # value. Truncating it to match the list side would have quietly cost
+        # that. `recipient_session_hash8` is the width actually PERSISTED
+        # (job_id) and the width `/api/dm/list` filters on — so a caller can
+        # feed the right shape to the right place without knowing that a field
+        # named "job_id" is the addressee. One name per shape, nothing
+        # discarded, and no name meaning two things. See row 2565956b.
+        "recipient_session"       : target_session_id,
+        "recipient_session_hash8" : job_id,
         "recipient_persona" : target_persona,
         "dispatched"        : True,
     }

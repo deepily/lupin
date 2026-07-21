@@ -142,6 +142,26 @@ class TestExecuteDmSend( unittest.TestCase ):
         self.persist.assert_not_called()
         self.queue.push_notification.assert_not_called()
 
+    def test_send_returns_BOTH_widths_each_under_its_own_name( self ):
+        # Rio's ruling (2026-07-21) on P2 of row 2565956b. The full id is a
+        # documented contract AND is reusable as recipient_session_id for
+        # precise addressing on a subsequent send, so it must not be truncated;
+        # the 8-char form is what is persisted and what dm_list filters on.
+        # Returning both means no name has to carry two shapes.
+        out = self._run( { "http_status": 200, "session_id": "abcdef1234567890", "persona_name": "María" } )
+        self.assertEqual( out[ "recipient_session" ],       "abcdef1234567890" )   # FULL, unchanged
+        self.assertEqual( out[ "recipient_session_hash8" ], "abcdef12" )           # persisted width
+        self.assertEqual( out[ "recipient_session_hash8" ],
+                          self.persist.call_args.kwargs[ "job_id" ] )              # == what was stored
+
+    def test_send_hash8_matches_what_dm_list_would_report_as_addressee( self ):
+        # The round-trip Rio's P2 was about: the value a caller compares against
+        # a listed DM's recipient_session_hash8 must be the one send hands back.
+        from cosa.rest.routers.dm import _serialize_dm
+        out    = self._run( { "http_status": 200, "session_id": "56a74d7b-4f9d-447f", "persona_name": "Rio" } )
+        listed = _serialize_dm( _notif( job_id=self.persist.call_args.kwargs[ "job_id" ] ) )
+        self.assertEqual( out[ "recipient_session_hash8" ], listed[ "recipient_session_hash8" ] )
+
     def test_happy_path_persists_and_pushes_ai_to_ai( self ):
         out = self._run( { "http_status": 200, "session_id": "abcdef1234567890", "persona_name": "María" } )
         self.assertEqual( out[ "http_status" ], 201 )
