@@ -1007,9 +1007,12 @@ def list_spawned_sessions(
           for legacy records predating spawn-time capture (honest absence, never
           a guess) — it is the EVIDENCE that separates a live spawn race from a
           SessionStart that ran and failed, both of which present as "no bridge"
-        - Top-level `identity_complete` is True iff EVERY row is "allocated";
-          `identity_warning` is None in that case and otherwise NAMES each
-          unverified seat, so a caller cannot read this dict as identity-verified
+        - Top-level `identity_complete` is True iff EVERY row is "allocated"
+          AND the bridge scan read every file it found (R-1, Rio 2026-07-21: a
+          blind scan is not a complete one — an unreadable bridge cannot be
+          ruled out as belonging to a seat listed here). `identity_warning` is
+          None in that case and otherwise NAMES each unverified seat and/or the
+          blindness, so a caller cannot read this dict as identity-verified
           unless the dict says so
         - `unattributable_bridges` reports bridge files the scan could not read —
           the instrument declaring its own blind spot
@@ -1163,9 +1166,26 @@ def _build_identity_warning(
     Compose the caller-facing sentence that REFUSES to let an all-green liveness
     roster be read as identity-verified.
 
-    Returns None when every seat's identity was established — the roster only
-    warns about what it genuinely could not answer, so the warning never becomes
-    background noise a caller learns to skip.
+    Returns None ONLY when every seat's identity was established AND the scan
+    read every bridge it found — the roster warns about exactly what it could
+    not answer, so the warning never becomes background noise a caller skips.
+
+    🔴 A BLIND SCAN IS NOT A COMPLETE ONE, EVEN WHEN EVERY ROW LOOKS ALLOCATED.
+    Found by Rio 2026-07-21 (R-1) against the first version of this function,
+    which returned early on "no unverified rows" and dropped the blindness count
+    on the floor — reporting identity_complete=True with unreadable bridges
+    sitting on disk. That was this commit's own thesis inverted: the roster
+    existed because an instrument sounded authoritative while silent on what it
+    could not answer.
+
+    WHY the blind case genuinely is incomplete, not merely surprising — the
+    reason is load-bearing, so do not "simplify" it back: a bridge is attributed
+    to a seat by the `tmux_session` field INSIDE it. When a bridge cannot be
+    read, its tmux_session is unknown, so it CANNOT BE RULED OUT as belonging to
+    a seat listed here — and a later-sorting bridge overwrites an earlier one in
+    the index. An unreadable file may therefore be the CURRENT bridge for a seat
+    this roster just reported as `allocated` under a stale name. Every row
+    looking answered does not establish that every row was answered CORRECTLY.
 
     Requires:
         - rows is the assembled roster list (each row has session_name,
@@ -1173,11 +1193,13 @@ def _build_identity_warning(
         - unattributable_bridges is a non-negative count from the bridge scan
 
     Ensures:
-        - Returns None iff every row's persona_state is PERSONA_STATE_ALLOCATED
-        - Otherwise returns a string naming EVERY unverified seat with its state,
-          plus its age in whole seconds when the manifest recorded a spawn time
-          (age is the evidence that separates a live race from a dead SessionStart)
-        - Appends a blindness note when the scan skipped unreadable bridge files
+        - Returns None IFF every row is PERSONA_STATE_ALLOCATED **AND**
+          unattributable_bridges is 0 — both conditions, one source for the flag
+        - Names EVERY unverified seat with its state, plus its age in whole
+          seconds when the manifest recorded a spawn time (age is the evidence
+          separating a live race from a dead SessionStart)
+        - Reports scan blindness WHETHER OR NOT any row was unverified, and says
+          which of the two situations the reader is in
         - Never raises
 
     Args:
@@ -1188,26 +1210,38 @@ def _build_identity_warning(
         str|None: the warning, or None when identity is fully established
     """
     unverified = [ r for r in rows if r[ "persona_state" ] != PERSONA_STATE_ALLOCATED ]
-    if not unverified: return None
+    if not unverified and not unattributable_bridges: return None
 
-    parts = []
-    for r in unverified:
-        age = r.get( "age_seconds" )
-        if age is None:
-            parts.append( f"{r[ 'session_name' ]} ({r[ 'persona_state' ]}, age unknown)" )
-        else:
-            parts.append( f"{r[ 'session_name' ]} ({r[ 'persona_state' ]}, {int( age )}s old)" )
+    if unverified:
+        parts = []
+        for r in unverified:
+            age = r.get( "age_seconds" )
+            if age is None:
+                parts.append( f"{r[ 'session_name' ]} ({r[ 'persona_state' ]}, age unknown)" )
+            else:
+                parts.append( f"{r[ 'session_name' ]} ({r[ 'persona_state' ]}, {int( age )}s old)" )
+        warning = (
+            f"{len( unverified )} of {len( rows )} seat(s) could NOT be identity-verified: "
+            + ", ".join( parts )
+            + ". This roster answers LIVENESS; a live row is not proof of who is in it. "
+              "Do not address these seats by persona name — confirm identity out of band."
+        )
+    else:
+        warning = (
+            f"Every one of {len( rows )} seat(s) resolved to a persona, but identity is NOT complete: "
+            "the bridge scan was partially blind."
+        )
 
-    warning = (
-        f"{len( unverified )} of {len( rows )} seat(s) could NOT be identity-verified: "
-        + ", ".join( parts )
-        + ". This roster answers LIVENESS; a live row is not proof of who is in it. "
-          "Do not address these seats by persona name — confirm identity out of band."
-    )
     if unattributable_bridges:
         warning += (
-            f" NOTE: the bridge scan skipped {unattributable_bridges} unreadable bridge file(s), "
-            "so an 'unknown_no_bridge' verdict here may be scan blindness rather than a missing bridge."
+            f" NOTE: the bridge scan skipped {unattributable_bridges} unreadable bridge file(s). "
+            "An unreadable bridge's tmux_session cannot be read, so it cannot be ruled out as "
+            "belonging to a seat listed here"
+        )
+        warning += (
+            " — an 'unknown_no_bridge' verdict above may be scan blindness rather than a missing bridge."
+            if unverified else
+            " — a seat reported as allocated may be named from a stale bridge the unreadable one supersedes."
         )
     return warning
 

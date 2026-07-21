@@ -764,6 +764,29 @@ class TestBuildIdentityWarning:
         assert "unreadable bridge file" not in _build_identity_warning( rows, 0 )
         assert "skipped 2 unreadable bridge file" in _build_identity_warning( rows, 2 )
 
+    # ── R-1 (Rio, 2026-07-21) ────────────────────────────────────────────────
+    # The first version returned early on "no unverified rows" and dropped the
+    # blindness count, reporting identity_complete=True with unreadable bridges
+    # on disk — this commit's own thesis inverted.
+    def test_all_allocated_but_blind_scan_still_warns( self ):
+        rows = [ { "session_name": "a", "persona_state": PERSONA_STATE_ALLOCATED, "age_seconds": 5 } ]
+        w = _build_identity_warning( rows, 1 )
+        assert w is not None, "a blind scan must not report a clean bill of health"
+        assert "identity is NOT complete" in w
+        assert "skipped 1 unreadable bridge file" in w
+
+    def test_blind_all_allocated_names_the_STALE_risk_not_the_missing_one( self ):
+        # The two situations need different explanations: with an unverified row
+        # the blindness may explain THAT row; with none, the risk is that an
+        # allocated seat is named from a bridge the unreadable one supersedes.
+        allocated = [ { "session_name": "a", "persona_state": PERSONA_STATE_ALLOCATED, "age_seconds": 5 } ]
+        unknown   = [ { "session_name": "b", "persona_state": PERSONA_STATE_UNKNOWN,   "age_seconds": 5 } ]
+        assert "stale bridge"       in _build_identity_warning( allocated, 1 )
+        assert "unknown_no_bridge"  in _build_identity_warning( unknown, 1 )
+
+    def test_empty_roster_with_blind_scan_still_warns( self ):
+        assert _build_identity_warning( [ ], 2 ) is not None
+
 
 class TestListSpawnedSessionsIdentity:
     def _seed_manifest( self, tmp_path, records ):
@@ -818,6 +841,36 @@ class TestListSpawnedSessionsIdentity:
         res = list_spawned_sessions( "mgr", runner=FakeRunner(), session_dir=tmp_path )
         assert res[ "count" ] == 0
         assert res[ "identity_complete" ] is True and res[ "identity_warning" ] is None
+
+    def test_R1_rio_repro_all_allocated_plus_one_corrupt_bridge( self, tmp_path ):
+        """
+        Rio's exact reproduction (2026-07-21), pinned end-to-end through the
+        roster rather than the helper: one healthy allocated seat beside one
+        corrupt bridge — a bridge half-written during SessionStart or truncated
+        by a crash. Before the fix this returned identity_complete=True with an
+        unreadable bridge sitting on disk, and warning=None.
+        """
+        _write_manifest( _manifest_path( "mgr", tmp_path ), [ { "session_name": "seat-a" } ] )
+        _write_bridge( tmp_path, "cc-seat-a.json", tmux_session="seat-a",
+                       voice_persona={ "name": "Rio" } )
+        _write_bridge( tmp_path, "cc-corrupt.json", raw="{ this is not json" )
+
+        res = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ), session_dir=tmp_path )
+
+        assert res[ "sessions" ][ 0 ][ "persona" ]       == "Rio"
+        assert res[ "sessions" ][ 0 ][ "persona_state" ] == PERSONA_STATE_ALLOCATED
+        assert res[ "unattributable_bridges" ] == 1
+        assert res[ "identity_complete" ] is False          # ← the fix
+        assert res[ "identity_warning" ] is not None
+        assert "skipped 1 unreadable bridge file" in res[ "identity_warning" ]
+
+    def test_non_dict_json_also_blocks_completeness_not_just_bad_syntax( self ):
+        # Rio's free finding: `unattributable` also increments when the JSON
+        # PARSES but is not a dict. Validating parseability alone would fix the
+        # narrow case and leave the class — so the flag folds in the count,
+        # which covers both.
+        rows = [ { "session_name": "a", "persona_state": PERSONA_STATE_ALLOCATED, "age_seconds": 1 } ]
+        assert _build_identity_warning( rows, 1 ) is not None
 
     def test_unattributable_bridges_surfaced_on_the_roster( self, tmp_path ):
         self._seed_manifest( tmp_path, [ { "session_name": "a" } ] )
