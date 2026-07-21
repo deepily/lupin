@@ -2,6 +2,21 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-28 to 06-16](history/2026-05-28-to-06-16-history.md). History health: ✅ **HEALTHY at ~6.9k tokens (28% of 25k)** — archived 2026-07-06 by Mr. Radio 🦉 (session 2352acab), ~16k tokens moved to archive.
 
+### 2026.07.20 - Session 26409c0c (Mr. Radio 🦉) | `task_edit` MCP verb SHIPPED + LIVE (plan→review→build→test→commit→proven, ~50 min) · review killed 2 defects pre-commit · board 18→17 · "zombie" diagnosed as permission-blocked, not runaway
+
+**Accomplishments** (SWE crew Clayton 😎 `10b141ea` / Krishna 🦚 `b363d94c` / Tiffany 💍 `2e399fd9`, all reaped with mementos; María 🌸 plan-gate + post-game):
+1. **`task_edit` shipped and LIVE** — generalized field-edit parity over the existing `PATCH /api/tasks`. Full gate: María plan-PASS → Clayton build (81 unit, 100% new-func) → Krishna adversarial PASS (ran every claim) → Tiffany integration **17/17**, suite 366/0 → committed → **proven post-bounce with real calls** (priority demote + retitle atomic; owner-refusal fired). Closes the C7 gap where no MCP verb could demote priority.
+2. **The review gate earned its keep — two real defects died before commit.** Krishna found an **actor dict-smuggle spoof** by reading the server's `model_dump` exclude-set (not the spec): `updates={"actor":…}` would have overridden the bridge identity. María found the **owner-field reason-free reassignment backdoor** — `task_reassign` mandates a reason, `task_edit` didn't. Verb narrowed 7→5 editable fields as a result.
+3. **A premise correction shrank the build before it started**: `task_amend` is APPEND-ONLY (not a field setter — overloading it would have destroyed the audit-append), and a generic field editor **already existed over REST**. The gap was MCP parity only ⇒ **zero server diff (AC9), no migration**.
+4. **Rick descoped the spoof guard on deadline; owner-refusal was KEPT** — it makes the verb do *less*, both reviewers had approved it, and the tester already covered it, so it was the *faster* path, not gold-plating.
+5. **A memento landed-check caught a phantom.** Krishna's "memento written" was **true-but-misdirected** — it went to a stray sibling `src/cosa/rest/io/mementos/` dir, so a slug-write matched the NEAREST dir, not the canonical root. Only verifying-on-disk caught it; filed `af0c5700`.
+
+**Also**: board swept 18→17 with María (nothing falsely closed — `c191be39` done `ab541611`, `3b0f3923` dropped stale, 3 kept as honestly-unverified). `062659f2` **could not close**: a `~/.claude` edit has NO whitelisted receipt — logged as a live dated instance on `86ce4c43` rather than caveat-closed. "Zombie" Rachel `6826b618` is **blocked on an unanswered permission prompt** (`claude agents --json` → `state: blocked`), not runaway; process-kill is not durable (the `claude daemon` respawns her).
+
+**Files**: `src/lupin_mcp/cosa_voice_mcp.py` · `src/lupin_mcp/task_store_tools.py` · `src/tests/unit/lupin_mcp/test_cosa_voice_task_store_wrappers.py` · `src/tests/unit/lupin_mcp/test_task_store_tools.py` · `src/tests/integration/test_task_edit_parity_e2e.py` · `src/rnd/v0.1.9/2026.07.20-generalized-task-field-edit-mcp-parity.md` · `src/rnd/v0.1.9/2026.07.20-task-edit-mcp-parity-post-game.md`
+
+**Checkpoint**: `3ac79d1d` + `27d14cb3` (task_edit + e2e base-URL fix); crew reaped 0 orphans; post-game landed; ⚠️ history.md crosses the 17k WARNING threshold with this entry — **archival due next session**.
+
 ### 2026.07.20 - Session 1c295071 (Arnold 🪨) | `204911ca` §9(a) transport budgets LANDED (`359eb9a3` shipped RED, `25f680c2` repaired it, origin verified green) · inventory 10 → 21 sites · 35 commits pushed (I'd said 11) · §9(b) parked on Rick
 
 **Accomplishments** (sole manager from 00:30; seats Cheech 🌿 `81a50925` + Clayton 😎 `d8a05a85`, both reaped with mementos):

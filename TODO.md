@@ -4,6 +4,30 @@ Last updated: 2026-07-17 (session b526cb36, Mr. Radio 🦉 — M1 demo shipped +
 
 ---
 
+## 📋 DECISIONS LOG 2026-07-20 evening (Mr. Radio 🦉, session 26409c0c) — `task_edit` shipped; two defects killed at the gate
+
+- **Rick ratified the verb shape: Option A — `task_edit(task_id, updates={field: value, …})`**, a dict of fields (atomic multi-field, one `patched` event). Option B (one field per call) is a strict subset; Option C (overload `task_amend`) was REJECTED — `task_amend` is append-only, and overloading it would collide an immutable audit-append with a mutable overwrite.
+- **Rick DESCOPED the audit-identity dict-smuggle guard on deadline grounds** — *"I don't care about that, we gotta ship."* The basic actor stamp-last is retained (free, already built); the `authority`/`reason` smuggle-reject arms were NOT built. Any future hardening needs its own row.
+- **Owner-refusal KEPT despite the descope** (María required, Krishna concurred): `task_edit` refuses `owner_persona`/`accountable_manager` → `task_reassign`. Rationale accepted — it makes the verb do *less*, both reviewers had approved it, and the tester already covered it, so keeping it was the FASTER path. ⚠️ It is an **MCP-layer** guard, NOT inherited: a raw PATCH still accepts owner fields.
+- **`062659f2` will NOT be closed on measurement alone.** A `~/.claude/…/MEMORY.md` edit has **no whitelisted receipt** (no commit; `doc_path`/`log_line` reject on scope), so "done, verified by measurement, no repo artifact" is unexpressible. Ruled: leave queued for a deliberate trim; the wall was logged as a live dated instance on `86ce4c43` rather than papered over with a caveat-close.
+- **`3b0f3923` DROPPED as stale** — the mandate to seed every Krishna spawn with `krishna-ff761722.md` is superseded; he was spawned unseeded tonight, ran a full adversarial review, and wrote a fresh memento.
+
+---
+
+## 📋 DECISIONS LOG 2026-07-20 (Mr. Radio 🦉, session 65a43c6c) — three-plan arc + a provenance defect in our own decision channel
+
+- **Rick ordered three fixes, in order, each with its own plan → review gate → full SWE team**: `c191be39` (Stop-hook owed-status seam) → `4288dd53` (fetch-by-ID) → `eab1d7da` (I3 kind-differentiated chase). **Three separate plans ruled**, not one unified.
+- **Rulings banked (8)**: three separate plans · fix the seam AND revive `todo_unstarted` · expired-parked reports as `pending` · `breakdown` always-returned (scoped to the `count_only` branch, grounded in a caller census on Rick's instruction) · `c191be39` raised P2→P1 · I3 remedy = **chase required only for PEER blockers**, not user/item · `eab1d7da` kept third **on honesty grounds, explicitly NOT poke reduction** · fetch-by-ID = **single-row `task_get` only**, no batch filter.
+- **Plan 1 APPROVED for build** (María, source-verified independently). Plans 2 + 3 drafted/drafting.
+- **🔴 `eab1d7da`'s headline benefit was RETRACTED before it could mislead the build** (amendment, event `3829`): arbiter suppression is `all`, not `any` — `arbiter_job.py:3088` suppresses a persona only when **every** non-terminal row they own is user-gated. Typing 4-5 rows correctly on a board of 16 changes the poke cadence **not at all**. The schema fix makes the board honest; it does not make the pokes stop.
+- **⚠️ ROUTED FROM RIO ⚡ — `ask_multiple_choice` discards the answered-vs-defaulted signal.** `src/lupin_mcp/cosa_voice_mcp.py:1653` returns a bare `{"answers": default}` on timeout — **byte-identical in shape to a real selection**. `converse` sets the correct precedent at `:1174` (`"[default used] "` prefix). The response object carries **both** `default_used` and `is_timeout`; the multiple-choice path throws them away. Proposed one-line additive fix: `return { "answers": default, "default_used": True }`. Leads (unverified by Rio): `ask_yes_no` `:1419` and `ask_open_ended_batch` may share the pattern.
+  - **Cost already paid**: Rio's 5-decision walkthrough for Rick this morning — every ask backgrounded at 120s and returned the recommended label, which was also his default. `parallel-search/TODO.md` now carries a **provenance caveat on five ratified rulings**, unrecoverable after the fact.
+  - **This session's 8 rulings are NOT affected, and the reason is mechanical, not hopeful**: no `default` was passed on any ask, so a timeout returns `{"error": "timeout", "timeout": true}` — structurally distinguishable. **The control fired live**: ask `kcmn92g1r` timed out and surfaced exactly that error dict. Every other ruling returned `{"answers": …}`, which under this call shape can only come from a keypress.
+  - **Standing practice until fixed**: do NOT pass `default` to `ask_multiple_choice` when the answer will be treated as a ruling. A default converts an unanswered question into an unfalsifiable answer.
+- **🔴 STALE-RECORD PATTERN, 2nd instance, banked**: María's 07-19 loop deletion left three artifacts describing the deleted mechanism in the present tense — one of them (`task_store_client.py:196`) sat **77 lines above** the docstring that documents the deletion, so a top-down reader met the retired shape first. Candidate rule: **when deleting a mechanism, grep for its BEHAVIOUR DESCRIPTION, not just its call sites.** All three fixed + green (198 passed) before implementation. Related generalization (mine): **a plan section citing a docstring as authority inherits every other docstring in that file as a competing authority.**
+
+---
+
 ## 🔴 P0 FOR TOMORROW (2026-07-17) — Task-board state classification: finish the analysis
 
 **Priority: 0 (HIGHEST). Assignee: Mr. Radio 🦉. Filed: 2026-07-16 (session 1a52ceb2, Rick's session-end directive).**
