@@ -44,7 +44,8 @@ class TestExecuteDmSend( unittest.TestCase ):
         self.execute_dm_send = execute_dm_send
         self.queue       = MagicMock()
         self.persist     = MagicMock( return_value="db-123" )
-        self.build_sender = lambda s: f"sender::{s}"
+        # 2-arg seam (row 12b5a766): the core now hands the CALLER's project through.
+        self.build_sender = lambda s, project=None: f"sender::{s}"
 
     def _run( self, resolve_result, body=None, new_id="fixed-msg-id", now_fn=None ):
         return self.execute_dm_send(

@@ -59,6 +59,16 @@ class DmSendRequest( BaseModel ):
     sender_icon          : Optional[ str ] = Field( default=None, max_length=16 )
     reply_to             : Optional[ str ] = Field( default=None, max_length=64 )
     thread_id            : Optional[ str ] = Field( default=None, max_length=64 )
+    # The CALLER's project, for the `sender_id` stamp (row 12b5a766). The server
+    # cannot derive it: the host-shaped resolver it used degrades, inside the
+    # container, to "what project am I?" — the server's own cwd — which answers
+    # "lupin" correctly and for the wrong question. The caller already knows
+    # (the MCP resolves it host-side at module load) and now sends it.
+    # OPTIONAL BY TRANSITION, NOT BY DESIGN: step 1 accepts an absent value and
+    # stamps as before while COUNTING the omission; the flip to a hard reject is
+    # step 2, gated on every live MCP process being respawned onto a client that
+    # sends it (editing the client does not reach a running one).
+    sender_project       : Optional[ str ] = Field( default=None, min_length=1, max_length=64 )
 
 
 def _persist_dm_send_sync(
@@ -99,6 +109,143 @@ def _persist_dm_send_sync(
         return str( db_notification.id )
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Un-projected-DM audit (row 12b5a766, step 1 of 2)
+#
+# Step 2 flips an absent `sender_project` from accepted-and-stamped-as-before to
+# rejected. That flip must be a MEASUREMENT, not a guess about who has respawned
+# — so every DM that reaches the stamp is counted on both sides of the seam, and
+# the audit line ALWAYS prints both numbers.
+#
+# PRINTING THE ZERO IS THE POINT. A log that says nothing when no un-projected
+# DM arrives is indistinguishable from a log that was never wired, and the
+# second one reads as reassuring. `un_projected=0` has to be a line somebody can
+# read before the flip.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_dm_project_audit = {
+    "projected"            : 0,
+    "un_projected"         : 0,
+    "un_projected_senders" : [],
+    "since"                : datetime.now().isoformat( timespec="seconds" ),
+}
+
+# Cap on distinct remembered offender sessions — the audit is a liveness signal
+# for one flip decision, not an unbounded log. Overflow is reported by the count,
+# which keeps rising, so a truncated sender list never reads as a smaller problem.
+_DM_AUDIT_SENDER_CAP = 50
+
+
+def reset_dm_project_audit():
+    """
+    Reset the un-projected-DM counters and re-stamp the `since` instant.
+
+    Ensures:
+        - both counters are 0, the sender list is empty, `since` is now
+        - callers (tests, an operator re-baselining before a respin) get a clean
+          window whose start is explicit rather than implied
+    """
+    _dm_project_audit[ "projected" ]            = 0
+    _dm_project_audit[ "un_projected" ]         = 0
+    _dm_project_audit[ "un_projected_senders" ] = []
+    _dm_project_audit[ "since" ]                = datetime.now().isoformat( timespec="seconds" )
+
+
+def get_dm_project_audit():
+    """
+    Snapshot of the un-projected-DM audit.
+
+    Ensures:
+        - returns a COPY (the sender list included), so a reader cannot mutate
+          the live counters by holding the result
+    """
+    snapshot = dict( _dm_project_audit )
+    snapshot[ "un_projected_senders" ] = list( _dm_project_audit[ "un_projected_senders" ] )
+    return snapshot
+
+
+def format_dm_project_audit_line():
+    """
+    One readable line carrying BOTH counts — including the zeros.
+
+    Ensures:
+        - contains `projected=<n>` and `un_projected=<n>` unconditionally
+        - names the window start, so "0 un-projected" is scoped to a period
+          rather than to all of history
+    """
+    return (
+        f"[dm-project-audit] since {_dm_project_audit[ 'since' ]}: "
+        f"projected={_dm_project_audit[ 'projected' ]} "
+        f"un_projected={_dm_project_audit[ 'un_projected' ]} "
+        f"offenders={len( _dm_project_audit[ 'un_projected_senders' ] )}"
+    )
+
+
+def _make_sender_id_builder( host_builder ):
+    """
+    Adapt the host-shaped `build_sender_id_for_cc` into the two-argument seam
+    `execute_dm_send` calls.
+
+    When the caller SENT its project, the stamp is built from that project
+    directly — `build_sender_id_for_cc` is never consulted, because its whole
+    resolution chain answers "what project is THIS PROCESS in?" and this process
+    is the server. When the caller sent nothing, the host builder runs exactly as
+    it does today (the step-1 transition contract).
+
+    Requires:
+        - host_builder( session_id ) -> sender_id str (the legacy 1-arg helper)
+
+    Ensures:
+        - returns a callable ( session_id, project=None ) -> sender_id str
+        - a supplied project produces `claude.code@<project>.deepily.ai#<sid>`
+          via the SHARED build_sender_id formatter — never a locally-formatted
+          string, so the one format stays owned in one place
+        - an absent project delegates to host_builder unchanged
+    """
+    from cosa.agents.utils.sender_id import build_sender_id as _build_sender_id
+
+    def _build( session_id, project=None ):
+        if project is None:
+            return host_builder( session_id )
+        return _build_sender_id( "claude.code", project=project, suffix=session_id )
+
+    return _build
+
+
+def _record_dm_project( sender_session_id, sender_project ):
+    """
+    Count one DM on whichever side of the caller-supplied-project seam it lands,
+    and emit the audit line.
+
+    Requires:
+        - sender_session_id is the caller's session id (named in the warning so
+          an operator can identify WHICH seat still needs a respawn)
+        - sender_project is the caller-supplied project, or None
+
+    Ensures:
+        - increments exactly one counter
+        - an absent project ALSO prints a warning naming the session and the
+          project the stamp will fall back to — accept-and-warn, never silent
+        - the remembered offender list holds distinct sessions up to
+          `_DM_AUDIT_SENDER_CAP`; the counter keeps rising past the cap
+    """
+    if sender_project is None:
+        _dm_project_audit[ "un_projected" ] += 1
+        senders = _dm_project_audit[ "un_projected_senders" ]
+        if sender_session_id not in senders and len( senders ) < _DM_AUDIT_SENDER_CAP:
+            senders.append( sender_session_id )
+        print(
+            f"[dm-project-audit] WARNING: DM from session '{sender_session_id}' carried no "
+            f"sender_project — stamping from the SERVER's project, which is only correct when "
+            f"the caller happens to be a lupin session (row 12b5a766). This caller needs a "
+            f"respawn onto a client that sends it."
+        )
+    else:
+        _dm_project_audit[ "projected" ] += 1
+
+    print( format_dm_project_audit_line() )
+
+
 def execute_dm_send(
     *,
     authenticated_user_id,
@@ -130,7 +277,13 @@ def execute_dm_send(
         - resolve_recipient_fn( recipient_session_id, recipient_persona,
           authenticated_user_id ) -> {"http_status":200,"session_id","persona_name"}
           OR {"http_status":422,"detail"}
-        - build_sender_id( sender_session_id ) -> sender_id str
+        - build_sender_id( sender_session_id, sender_project ) -> sender_id str,
+          where `sender_project` is the CALLER-supplied project or None. Two
+          arguments, not one: the server cannot answer "what project is the
+          caller?" from inside its own container, so the caller supplies it
+          (row 12b5a766). None means the caller did not send one — the builder
+          then falls back to today's server-side resolution and the omission is
+          counted by `_record_dm_project`.
         - persist_fn( ... ) -> db notification id str
         - now_fn (if given) is a 0-arg callable returning an aware datetime — a
           TEST-ONLY seam for a deterministic stamp; production leaves it None and
@@ -167,7 +320,12 @@ def execute_dm_send(
 
     target_session_id = resolution[ "session_id" ]
     target_persona    = resolution.get( "persona_name" )
-    sender_id         = build_sender_id( body.sender_session_id )
+    # The CALLER's project drives the stamp when it sent one (row 12b5a766).
+    # `build_sender_id` takes it as a second argument rather than resolving it:
+    # asking the server to resolve the caller's project is the defect, not the
+    # implementation of it.
+    _record_dm_project( body.sender_session_id, body.sender_project )
+    sender_id         = build_sender_id( body.sender_session_id, body.sender_project )
     job_id            = target_session_id[ :8 ]
 
     message_id = new_id_fn()
@@ -272,7 +430,7 @@ async def post_dm_send(
         body                  = body,
         notification_queue    = notification_queue,
         resolve_recipient_fn  = _resolve,
-        build_sender_id       = build_sender_id_for_cc,
+        build_sender_id       = _make_sender_id_builder( build_sender_id_for_cc ),
         persist_fn            = _persist_dm_send_sync,
     )
     http_status = result.pop( "http_status" )
@@ -315,6 +473,10 @@ class DmRespondRequest( BaseModel ):
     recipient_persona    : Optional[ str ] = Field( default=None, min_length=1, max_length=64 )
     sender_persona       : Optional[ str ] = Field( default=None, max_length=64 )
     sender_icon          : Optional[ str ] = Field( default=None, max_length=16 )
+    # Same caller-supplied project as DmSendRequest — respond shares the execution
+    # core, so it must share the stamp fix or the reply path keeps stamping the
+    # server's project (row 12b5a766).
+    sender_project       : Optional[ str ] = Field( default=None, min_length=1, max_length=64 )
 
 
 @router.post(
@@ -352,7 +514,7 @@ async def post_dm_respond(
         body                  = body,
         notification_queue    = notification_queue,
         resolve_recipient_fn  = _resolve,
-        build_sender_id       = build_sender_id_for_cc,
+        build_sender_id       = _make_sender_id_builder( build_sender_id_for_cc ),
         persist_fn            = _persist_dm_send_sync,
     )
     http_status = result.pop( "http_status" )

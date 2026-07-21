@@ -161,6 +161,12 @@ class LupinCommonsGateway:
                     "recipient_persona" : recipient.identifier,
                     "body"              : body,
                     "thread_id"         : qid,
+                    # The arbiter's project, stated rather than left to the server
+                    # to guess (row 12b5a766). "lupin" is genuinely this poker's
+                    # project — unlike the server-side fallback, which returns
+                    # "lupin" for every caller regardless of whose DM it is, and
+                    # so happens to be right here for the wrong reason.
+                    "sender_project"    : "lupin",
                 },
                 headers = { "X-API-Key": self._api_key },
                 timeout = 5,

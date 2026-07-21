@@ -3233,6 +3233,7 @@ def _dm_send_impl(
     session_id,
     sender_persona,
     sender_icon,
+    sender_project,
     api_base_url,
     api_key,
     post_fn,
@@ -3242,6 +3243,10 @@ def _dm_send_impl(
     need no live server.
 
     Requires:
+        - sender_project is THIS process's resolved project (CANONICAL_PROJECT).
+          Required, never defaulted: the server cannot derive the caller's project
+          from inside its own container and silently stamps @lupin when nobody
+          tells it (row 12b5a766)
         - recipient (persona) OR recipient_session_id identifies the target
         - post_fn(url, json=, headers=, timeout=) -> response with .status_code,
           .json(), .text (the requests.post contract)
@@ -3264,6 +3269,12 @@ def _dm_send_impl(
         "sender_icon"       : sender_icon,
         "reply_to"          : reply_to,
         "thread_id"         : thread_id,
+        # The server CANNOT derive this: inside the container its resolver answers
+        # "what project am I?" and stamps @lupin for every caller (row 12b5a766).
+        # This process resolved the real answer host-side at module load; sending
+        # it is the fix. `sender_project` is a REQUIRED argument of this core, not
+        # a defaulted one — an omission that could be silent is the defect itself.
+        "sender_project"    : sender_project,
     }
     if recipient_session_id:
         payload[ "recipient_session_id" ] = recipient_session_id
@@ -3355,6 +3366,7 @@ def dm_send(
         session_id           = SESSION_ID,
         sender_persona       = persona[ "persona_name" ],
         sender_icon          = persona[ "persona_icon" ],
+        sender_project       = CANONICAL_PROJECT,
         api_base_url         = os.environ.get( "LUPIN_API_URL", "http://localhost:7999" ),
         api_key              = _mcp_outbound_api_key(),
         post_fn              = requests.post,
@@ -3385,6 +3397,7 @@ def _dm_respond_impl(
     session_id,
     sender_persona,
     sender_icon,
+    sender_project,
     api_base_url,
     api_key,
     post_fn,
@@ -3394,6 +3407,12 @@ def _dm_respond_impl(
 
     Identical contract to `_dm_send_impl` but targets /api/dm/respond and carries
     the mandatory `reply_to` + `thread_id`. HTTP is injected via `post_fn`.
+
+    Requires:
+        - sender_project is THIS process's resolved project (CANONICAL_PROJECT).
+          Required, never defaulted — same reason as `_dm_send_impl`: the reply
+          path shares the server's execution core, so an un-projected reply is
+          stamped @lupin exactly like an un-projected send (row 12b5a766)
 
     Ensures:
         - missing api_key short-circuits to {"status":"error","reason":"missing_auth_header"}
@@ -3413,6 +3432,12 @@ def _dm_respond_impl(
         "sender_icon"       : sender_icon,
         "reply_to"          : reply_to,
         "thread_id"         : thread_id,
+        # The server CANNOT derive this: inside the container its resolver answers
+        # "what project am I?" and stamps @lupin for every caller (row 12b5a766).
+        # This process resolved the real answer host-side at module load; sending
+        # it is the fix. `sender_project` is a REQUIRED argument of this core, not
+        # a defaulted one — an omission that could be silent is the defect itself.
+        "sender_project"    : sender_project,
     }
     if recipient_session_id:
         payload[ "recipient_session_id" ] = recipient_session_id
@@ -3573,6 +3598,7 @@ def dm_respond(
         session_id           = SESSION_ID,
         sender_persona       = persona[ "persona_name" ],
         sender_icon          = persona[ "persona_icon" ],
+        sender_project       = CANONICAL_PROJECT,
         api_base_url         = os.environ.get( "LUPIN_API_URL", "http://localhost:7999" ),
         api_key              = _mcp_outbound_api_key(),
         post_fn              = requests.post,
