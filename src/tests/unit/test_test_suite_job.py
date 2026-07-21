@@ -678,7 +678,10 @@ class TestAllExpansion:
 
     def test_all_components_order( self ):
         """Canonical pyramid order: unit → smoke → websocket → integration → e2e."""
-        assert ALL_SUITE_COMPONENTS == [ "unit", "smoke", "websocket", "integration", "e2e" ]
+        # "typescript" joined the pyramid 2026-07-21 (row 36e479ed, Rick's ruling on
+        # gate 07a5460d). Before that, `all` ran every Python tier and silently
+        # skipped the entire TypeScript suite.
+        assert ALL_SUITE_COMPONENTS == [ "unit", "typescript", "smoke", "websocket", "integration", "e2e" ]
 
     def test_expand_all_fans_out( self ):
         assert _expand_all( [ "all" ] ) == ALL_SUITE_COMPONENTS

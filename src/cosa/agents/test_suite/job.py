@@ -82,17 +82,15 @@ SUITE_TIMEOUT_DEFAULT_SECONDS = 600  # 10 min fallback for unknown types
 # when one suite times out or crashes (pre-fix behavior was a single
 # monolithic "all" subprocess whose timeout vaporized every other suite's output).
 # Order matches src/tests/run-all-tests.sh's sequential pyramid.
-# "typescript" is deliberately ABSENT pending the exclusion ruling on row
-# 36e479ed. It IS schedulable on demand via SUITE_SCRIPTS — the gap is
-# enumerated, not silent. Measured 2026-07-21: the TS suite passes 2245/2245
-# but scores 93.19% statements against the mandate's 100%, and the ENTIRE gap
-# is three exempt-shaped file categories (boot.ts entry points, types.ts
-# type-only modules, index.ts barrels). Whether those are legitimately excluded
-# changes what "100%" means, so it is a ruling, not a default. Adding
-# "typescript" here before that ruling would make every `all` run red for a
-# known reason — and a gate that always fails for a known reason gets ignored,
-# which is how the original defect survived.
-ALL_SUITE_COMPONENTS = [ "unit", "smoke", "websocket", "integration", "e2e" ]
+# "typescript" joined the pyramid 2026-07-21 (row 36e479ed) once Rick ratified
+# the denominator exclusions on gate 07a5460d. Before that the TS suite was
+# reachable by NOTHING — no runner, no test-type, no hook, no CI — so the
+# 100%-lines/branches/functions TypeScript mandate in CLAUDE.md was enforced
+# only by a human remembering to type a command. The exclusions (boot.ts /
+# types.ts / index.ts, each with a dated reason) live in
+# src/tests/run-typescript-tests.sh; that file is where the denominator is
+# defined and audited, not here.
+ALL_SUITE_COMPONENTS = [ "unit", "typescript", "smoke", "websocket", "integration", "e2e" ]
 
 
 def _expand_all( test_types: List[ str ] ) -> List[ str ]:

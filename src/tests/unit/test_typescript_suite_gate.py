@@ -59,27 +59,115 @@ def test_the_runner_exists_and_is_executable():
     assert runner.stat().st_mode & stat.S_IXUSR, "runner is not executable — SUITE_SCRIPTS would fail to launch it"
 
 
-def test_typescript_is_held_out_of_the_all_pyramid_pending_a_ruling():
+def test_typescript_rides_the_all_pyramid():
     """
-    HELD OUT ON PURPOSE, and this test is the marker that keeps it visible.
+    The TS suite is IN `all` — the ruling landed and the hold-out is over.
 
-    Measured 2026-07-21: the TS suite passes 2245/2245 but scores 93.19%
-    statements against the mandate's 100%. The entire gap is three
-    exempt-shaped categories — `boot.ts` entry points, `types.ts` type-only
-    modules, `index.ts` barrels. Whether those are legitimately excluded from
-    the denominator changes what "100%" means, so it is a ruling (row
-    36e479ed), not a default I get to pick.
+    Rick ratified the denominator exclusions on gate 07a5460d (2026-07-21,
+    answered live; the timeout default was NO). Before that this assertion ran
+    inverted, as a tripwire on a deliberate interim.
 
-    Wiring it into `all` before that ruling would make every `all` run red for
-    a known reason, and a gate that always fails for a known reason gets
-    ignored — which is how the original gap survived in the first place.
-
-    WHEN THE RULING LANDS: flip this assertion to `in`, and delete the
-    hold-out comments in job.py and run-all-tests.sh. The test failing after
-    that flip is the point — it will not let the hold-out be forgotten.
+    `all` silently skipping the TS suite is how the gap survived: 113 test
+    files reachable by no runner, no test-type, no hook, and no CI, under a
+    CLAUDE.md mandate that reads as enforced.
     """
-    assert "typescript" not in ALL_SUITE_COMPONENTS
-    assert "typescript" in SUITE_SCRIPTS, "held out of `all`, but it MUST stay schedulable on demand"
+    assert "typescript" in ALL_SUITE_COMPONENTS
+    assert "typescript" in SUITE_SCRIPTS, "in `all`, so it MUST also be schedulable on demand"
+
+
+# The exclusions are the load-bearing half now. A 100% threshold over a
+# denominator anyone can quietly narrow is decorative, so these assertions
+# guard the RATIFIED set — not that exclusions exist, but that these three and
+# only these three do, each with its ruling recorded.
+
+RATIFIED_EXCLUSIONS = ( "**/boot.ts", "**/types.ts", "**/index.ts" )
+
+
+def _command_exclusions( source ):
+    """
+    The `--exclude` patterns c8 actually RECEIVES — comment lines excluded.
+
+    This distinction is load-bearing and was nearly missed. The runner
+    documents each exclusion in a comment block that repeats the flag verbatim,
+    so a naive scan of the whole file sees every pattern twice: once where it
+    takes effect and once where it is merely described. Set semantics hid the
+    duplication, and the test passed for the wrong reason.
+
+    The failure that would have slipped through: DELETE a real `--exclude` and
+    leave its comment behind. The denominator silently widens or narrows, the
+    documentation still asserts the ruling, and a whole-file scan still finds
+    the pattern — a green from evidence that is only prose.
+
+    Requires:
+        - source is the runner script's full text
+
+    Ensures:
+        - returns patterns from executable lines only
+        - a pattern appearing solely in a comment is NOT returned
+    """
+    executable = [ ln for ln in source.splitlines() if not ln.lstrip().startswith( "#" ) ]
+    return set( re.findall( r"--exclude='([^']+)'", "\n".join( executable ) ) )
+
+
+@pytest.mark.parametrize( "pattern", RATIFIED_EXCLUSIONS )
+def test_each_ratified_exclusion_is_present( runner_source, pattern ):
+    """Present on an EXECUTABLE line — a comment describing it is not the thing."""
+    assert pattern in _command_exclusions( runner_source )
+
+
+def test_comment_only_exclusions_do_not_count( runner_source ):
+    """
+    The comment block must not be able to satisfy the equality check alone.
+
+    Positive control for `_command_exclusions`: strip every executable line and
+    the set must collapse to empty, proving the parser reads the command and
+    not the prose that documents it. Without this, the helper could silently
+    devolve into a whole-file scan and nothing would notice.
+    """
+    comments_only = "\n".join(
+        ln for ln in runner_source.splitlines() if ln.lstrip().startswith( "#" )
+    )
+
+    assert "--exclude=" in comments_only, "the runner should document its exclusions in comments"
+    assert _command_exclusions( comments_only ) == set()
+
+
+def test_no_exclusion_beyond_the_ratified_set( runner_source ):
+    """
+    A FOURTH exclusion must fail here until someone widens this literal.
+
+    This is the whitelist-EQUALITY shape rather than a name-list: it asserts
+    the exclusion set EQUALS the ratified set, so a new `--exclude` cannot be
+    slipped in and quietly shrink the denominator. A test that merely
+    enumerated the three would pass while a fourth rode along beside them —
+    that is the exact failure this fleet hit today, where a refusal test named
+    three flags, a fourth was added, and it passed.
+    """
+    found = _command_exclusions( runner_source )
+    expected = set( RATIFIED_EXCLUSIONS ) | { "**/*.test.ts" }   # test files are never a denominator
+
+    assert found == expected, (
+        "the c8 exclusion set drifted from the ratified set.\n"
+        f"  unexpected (narrows the denominator without a ruling): {sorted( found - expected )}\n"
+        f"  missing (ruled but absent): {sorted( expected - found )}\n"
+        "Every exclusion needs a dated ruling in run-typescript-tests.sh."
+    )
+
+
+def test_the_ruling_and_its_cost_are_recorded_in_the_runner( runner_source ):
+    """
+    The measured numbers must travel WITH the exclusion that was bought by them.
+
+    Without this, a future reader sees three excludes and no way to judge them
+    short of re-running a nine-minute suite.
+    """
+    assert "07a5460d" in runner_source, "the ratifying gate id is not recorded"
+    assert "93.19" in runner_source, "the measured pre-exclusion coverage is not recorded"
+    for pattern in RATIFIED_EXCLUSIONS:
+        stem = pattern.replace( "**/", "" )
+        assert re.search( rf"{re.escape( stem )}.*2026-07-21", runner_source ), (
+            f"exclusion {stem} carries no dated reason"
+        )
 
 
 def test_run_all_tests_script_agrees_with_all_suite_components():
