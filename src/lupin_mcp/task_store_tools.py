@@ -24,6 +24,15 @@ from cosa.agents.utils.sender_id import canonicalize_project_name
 # must surface as a `server_unreachable` error dict, never a hung tool call.
 TASK_STORE_TIMEOUT_SECONDS = 10.0
 
+# task_edit exposes 5 of the server's 7 PATCH_EDITABLE_FIELDS: the two OWNER
+# fields are deliberately excluded so owner-change stays on the single
+# mandatory-reason `task_reassign` path. A raw PATCH would ACCEPT owner fields —
+# the MCP-layer refusal below is the ONLY thing barring them, asserted at this
+# boundary, never a server 422. Invariant-bearing fields remain refused by the
+# server's `extra="forbid"` (inherited); actor/authority/reason are neutralized
+# by stamping them LAST (a caller key cannot shadow the bridge identity).
+TASK_EDIT_OWNER_FIELDS = ( "owner_persona", "accountable_manager" )
+
 
 def task_store_request( method, path, api_base_url, api_key, json_body=None, params=None, timeout=TASK_STORE_TIMEOUT_SECONDS ):
     """
@@ -340,6 +349,68 @@ def task_amend_impl(
         "authority" : authority,
     }
     return task_store_request( "POST", f"/api/tasks/{task_id}/amend", api_base_url, api_key, json_body=payload )
+
+
+def task_edit_impl(
+    api_base_url,
+    api_key,
+    actor,
+    task_id,
+    updates,
+    reason    = None,
+    authority = "standing",
+):
+    """
+    PATCH /api/tasks/{task_id} — edit one or more of the 5 FREE-EDIT fields
+    (`title` · `body` · `priority` · `gate_class` · `urgency`) of a NON-terminal
+    item, atomically, in one txn + one audit event.
+
+    The thin transport behind the `task_edit` MCP verb (design §4, MCP parity for
+    PATCH), riding the SAME `/api/tasks/{id}` endpoint `task_reassign` uses. It
+    carries ONE piece of new logic: an OWNER-FIELD REFUSAL. `task_edit`'s set (5)
+    is a deliberate SUBSET of the server's 7-key `PATCH_EDITABLE_FIELDS` — the two
+    owner fields (`owner_persona`, `accountable_manager`) are excluded so
+    owner-change stays on the single mandatory-reason `task_reassign` path. A raw
+    PATCH would ACCEPT owner fields, so this refusal MUST happen HERE, at the MCP
+    boundary — it is not an inherited server 422.
+
+    Everything else stays inherited/thin:
+      - invariant fields (`status`, `blocked_by`, `next_chase_ts`, `park_reason`,
+        `park_reason_captured_at`, `receipt_refs`, `correlation_key`) are refused
+        by the server's `extra="forbid"` → 422 (not pre-checked here);
+      - `actor`/`authority`/`reason` are stamped LAST, so a caller key of the same
+        name in `updates` cannot shadow the bridge identity (basic anti-spoof);
+      - value validation (bad enum / empty title) stays server-side (validate_patch).
+
+    Requires:
+        - actor is the bridge-stamped identity ("<persona> <8-hex sid>"); the
+          CALLER (cosa_voice_mcp) stamps it — never a tool param, so a session
+          cannot impersonate (spec §4, same lane as task_reassign's actor)
+        - task_id is the item's UUID string (a malformed id is the server's 422
+          to report, not ours — transport only)
+        - updates is a dict of {field: value} (the verb enforces non-empty-dict
+          before this is reached)
+
+    Ensures:
+        - an OWNER field in `updates` aborts with an error dict BEFORE any
+          round-trip: {"status":"error","reason":"owner_field_refused",
+          "detail":<points to task_reassign>}
+        - otherwise: PATCH body is the `updates` dict PLUS bridge-stamped
+          authority + reason + actor, with `actor` stamped LAST
+        - returns { item, event } (200 body) verbatim on success
+        - 404 surfaces "task {id} not found" verbatim
+        - 422 surfaces the server's detail VERBATIM (invariant field via
+          extra=forbid / bad enum / empty title / terminal item — the server's reject)
+    """
+    for key in updates:
+        if key in TASK_EDIT_OWNER_FIELDS:
+            return { "status" : "error", "reason" : "owner_field_refused",
+                     "detail" : f"task_edit cannot change '{key}' — use task_reassign (the owner-change path, with a mandatory reason + manager_relay authority)" }
+    payload = dict( updates )
+    payload[ "authority" ] = authority
+    payload[ "reason" ]    = reason
+    payload[ "actor" ]     = actor    # stamped LAST — a caller key cannot shadow the bridge identity
+    return task_store_request( "PATCH", f"/api/tasks/{task_id}", api_base_url, api_key, json_body=payload )
 
 
 def task_query_impl(

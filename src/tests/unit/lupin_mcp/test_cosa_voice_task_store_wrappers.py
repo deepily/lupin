@@ -364,3 +364,51 @@ class TestTaskAmendWrapper:
         cv.task_amend.fn( task_id="abc", note="n" )
         assert captured[ "authority" ] == "standing"
         assert captured[ "reason" ]    is None
+
+
+class TestTaskEditWrapper:
+
+    def test_stamps_actor_and_passes_through( self, stamped_identity, monkeypatch ):
+        captured = { }
+        monkeypatch.setattr( cv, "task_edit_impl", lambda **kwargs: captured.update( kwargs ) or SENTINEL )
+
+        result = cv.task_edit.fn(
+            task_id   = "abc-uuid",
+            updates   = { "priority": "P3", "urgency": "low" },
+            reason    = "demote over-inflated priority",
+            authority = "user_direct",
+        )
+
+        assert result is SENTINEL
+        assert captured == {
+            "api_base_url" : "http://stub:7999",
+            "api_key"      : "ck_live_stub",
+            "actor"        : "krishna 38d15e3b",
+            "task_id"      : "abc-uuid",
+            "updates"      : { "priority": "P3", "urgency": "low" },
+            "reason"       : "demote over-inflated priority",
+            "authority"    : "user_direct",
+        }
+
+    def test_defaults_standing_authority_and_none_reason( self, stamped_identity, monkeypatch ):
+        captured = { }
+        monkeypatch.setattr( cv, "task_edit_impl", lambda **kwargs: captured.update( kwargs ) or SENTINEL )
+        cv.task_edit.fn( task_id="abc", updates={ "title": "t" } )
+        assert captured[ "authority" ] == "standing"
+        assert captured[ "reason" ]    is None
+
+    def test_empty_updates_rejected_without_round_trip( self, stamped_identity, monkeypatch ):
+        # A non-empty dict is verb-enforced: an empty dict returns the
+        # empty_updates error and the transport is NEVER called.
+        def must_not_call( **kwargs ):
+            raise AssertionError( "task_edit_impl must not be called on empty updates" )
+        monkeypatch.setattr( cv, "task_edit_impl", must_not_call )
+
+        result = cv.task_edit.fn( task_id="abc", updates={ } )
+        assert result[ "reason" ] == "empty_updates"
+
+    def test_non_dict_updates_rejected_without_round_trip( self, stamped_identity, monkeypatch ):
+        monkeypatch.setattr( cv, "task_edit_impl",
+                             lambda **kwargs: ( _ for _ in () ).throw( AssertionError( "must not call" ) ) )
+        result = cv.task_edit.fn( task_id="abc", updates=[ "priority", "P3" ] )
+        assert result[ "reason" ] == "empty_updates"

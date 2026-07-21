@@ -23,6 +23,7 @@ from lupin_mcp.task_store_tools import (
     task_correlate_impl,
     task_reassign_impl,
     task_amend_impl,
+    task_edit_impl,
     task_query_impl,
     task_get_impl,
 )
@@ -403,6 +404,124 @@ class TestTaskReassignImpl:
             task_id           = "abc",
             new_owner_persona = "marcus",
             reason            = "whatever",
+        )
+        assert result == { "status": "error", "http_status": 404, "detail": "task abc not found" }
+
+
+class TestTaskEditImpl:
+    """Transport for task_edit — PATCH /api/tasks/{id} with a partial-field
+    `updates` dict. Carries ONE new bit of logic: OWNER-field refusal at the MCP
+    boundary (task_edit's 5-field set is a subset of the server's 7; a raw PATCH
+    would accept owner fields). Invariant fields stay refused by the server's
+    extra=forbid; actor/authority/reason are stamped LAST (basic anti-spoof)."""
+
+    def test_payload_and_route_single_field( self, capture_request ):
+        # The C7 P1-inflation fix: demote priority via one PATCH. The updates
+        # dict is spread into the body + bridge actor/authority/reason appended.
+        body  = { "item": { "id": "abc" }, "event": { "transition": "patched" } }
+        calls = capture_request( FakeResponse( 200, json_body=body ) )
+        result = task_edit_impl(
+            BASE_URL, API_KEY,
+            actor   = "clayton 10b141ea",
+            task_id = "abc-def",
+            updates = { "priority": "P3" },
+            reason  = "over-inflated at mint",
+        )
+        assert result == body
+        assert calls[ "method" ] == "PATCH"
+        assert calls[ "url" ]    == f"{BASE_URL}/api/tasks/abc-def"
+        assert calls[ "json" ]   == {
+            "priority"  : "P3",
+            "actor"     : "clayton 10b141ea",
+            "authority" : "standing",
+            "reason"    : "over-inflated at mint",
+        }
+
+    def test_all_five_free_edit_fields_pass_through( self, capture_request ):
+        # AC2: every one of the 5 free-edit fields is settable, atomically.
+        calls   = capture_request( FakeResponse( 200, json_body={ } ) )
+        updates = { "title": "Retitled", "body": "b", "priority": "P1", "gate_class": "operator", "urgency": "low" }
+        task_edit_impl(
+            BASE_URL, API_KEY,
+            actor   = "clayton 10b141ea",
+            task_id = "abc",
+            updates = updates,
+        )
+        for k, v in updates.items():
+            assert calls[ "json" ][ k ] == v
+
+    def test_actor_authority_reason_stamped_last_override_caller_keys( self, capture_request ):
+        # Basic anti-spoof: a caller "actor"/"authority"/"reason" key in `updates`
+        # is OVERWRITTEN by the bridge/param values (stamped after the spread).
+        calls = capture_request( FakeResponse( 200, json_body={ } ) )
+        task_edit_impl(
+            BASE_URL, API_KEY,
+            actor     = "clayton 10b141ea",
+            task_id   = "abc",
+            updates   = { "priority": "P3", "actor": "rick (spoofed)", "authority": "spoofed", "reason": "spoofed" },
+            reason    = "the real reason",
+            authority = "user_direct",
+        )
+        assert calls[ "json" ][ "actor" ]     == "clayton 10b141ea"
+        assert calls[ "json" ][ "authority" ] == "user_direct"
+        assert calls[ "json" ][ "reason" ]    == "the real reason"
+
+    def test_reason_defaults_none( self, capture_request ):
+        calls = capture_request( FakeResponse( 200, json_body={ } ) )
+        task_edit_impl(
+            BASE_URL, API_KEY,
+            actor   = "clayton 10b141ea",
+            task_id = "abc",
+            updates = { "body": "new body" },
+        )
+        assert calls[ "json" ][ "reason" ] is None
+
+    @pytest.mark.parametrize( "owner_field", [ "owner_persona", "accountable_manager" ] )
+    def test_owner_field_refused_at_mcp_boundary( self, capture_request, owner_field ):
+        # AC8: owner fields are refused HERE (not a server 422 — a raw PATCH would
+        # accept them) with a pointer to task_reassign. NO round-trip.
+        calls  = capture_request( FakeResponse( 200, json_body={ } ) )
+        result = task_edit_impl(
+            BASE_URL, API_KEY,
+            actor   = "clayton 10b141ea",
+            task_id = "abc",
+            updates = { owner_field: "marcus" },
+        )
+        assert result[ "reason" ] == "owner_field_refused"
+        assert "task_reassign" in result[ "detail" ]
+        assert calls == { }    # never reached the wire
+
+    def test_mixed_valid_and_owner_key_aborts_whole_call( self, capture_request ):
+        # Reject-loud: one owner key aborts the entire edit — no partial PATCH.
+        calls  = capture_request( FakeResponse( 200, json_body={ } ) )
+        result = task_edit_impl(
+            BASE_URL, API_KEY,
+            actor   = "clayton 10b141ea",
+            task_id = "abc",
+            updates = { "priority": "P3", "owner_persona": "marcus" },
+        )
+        assert result[ "reason" ] == "owner_field_refused"
+        assert calls == { }
+
+    def test_invariant_field_forwarded_to_server_422( self, capture_request ):
+        # Invariant fields are NOT client-refused — they forward and the server's
+        # extra=forbid 422s them (inherited wall, not re-implemented in the MCP layer).
+        capture_request( FakeResponse( 422, json_body={ "detail": [ { "loc": [ "body", "status" ], "msg": "extra fields not permitted" } ] } ) )
+        result = task_edit_impl(
+            BASE_URL, API_KEY,
+            actor   = "clayton 10b141ea",
+            task_id = "abc",
+            updates = { "status": "done" },
+        )
+        assert result[ "http_status" ] == 422
+
+    def test_404_surfaces_detail_verbatim( self, capture_request ):
+        capture_request( FakeResponse( 404, json_body={ "detail": "task abc not found" } ) )
+        result = task_edit_impl(
+            BASE_URL, API_KEY,
+            actor   = "clayton 10b141ea",
+            task_id = "abc",
+            updates = { "priority": "P3" },
         )
         assert result == { "status": "error", "http_status": 404, "detail": "task abc not found" }
 

@@ -3430,7 +3430,7 @@ def dm_list(
 # — a session cannot impersonate. Day-to-day practice: planning-is-prompting
 # workflow/task-store-discipline.md.
 
-from lupin_mcp.task_store_tools import task_create_impl, task_transition_impl, task_correlate_impl, task_query_impl, task_reassign_impl, task_amend_impl, task_get_impl
+from lupin_mcp.task_store_tools import task_create_impl, task_transition_impl, task_correlate_impl, task_query_impl, task_reassign_impl, task_amend_impl, task_edit_impl, task_get_impl
 
 
 def _task_store_identity() -> str:
@@ -4012,6 +4012,80 @@ def task_amend(
         actor        = _task_store_identity(),
         task_id      = task_id,
         note         = note,
+        reason       = reason,
+        authority    = authority,
+    )
+
+
+@mcp.tool
+def task_edit(
+    task_id   : str,
+    updates   : dict,
+    reason    : Optional[ str ] = None,
+    authority : str             = "standing",
+) -> dict:
+    """
+    **[SELF-DISCLOSURE]** Edit one or more of the 5 FREE-EDIT fields of a
+    task-store item.
+
+    The last-mile "change field X to value Y" seam (design §4) — most concretely,
+    DEMOTE a mis-inflated `priority`. A thin MCP wrapper over `PATCH /api/tasks/
+    {id}`: it OVERWRITES the named fields atomically (one txn, one `patched` audit
+    event). Value validation stays server-side (Pydantic + `validate_patch`).
+
+    EDITABLE (5 fields) — pass any subset in `updates`:
+        title · body · priority · gate_class · urgency
+
+    REFUSED at the MCP layer — OWNER fields `owner_persona` · `accountable_manager`
+    → use `task_reassign` (the single owner-change path, with a mandatory reason).
+    Editing owner via a bare `task_edit` would be a reason-free reassignment
+    backdoor; a raw PATCH would accept them, so this refusal is MCP-side.
+
+    REFUSED by the server (`extra="forbid"` → 422) — invariant-bearing fields; use
+    `task_transition`, which moves the coupled fields together:
+        status · blocked_by · next_chase_ts · park_reason ·
+        park_reason_captured_at · receipt_refs · correlation_key
+
+    A bad enum (`priority` not P0–P3, `gate_class` not none/manager/operator,
+    `urgency` not urgent/normal/low) or empty `title` → 422 from the server, no
+    row mutation. Terminal (done/dropped) items are rejected server-side.
+
+    Examples:
+        # Demote a mis-inflated priority (the C7 P1-inflation fix):
+        task_edit(task_id="<uuid>", updates={"priority": "P3"},
+                  reason="over-inflated at mint; not user-blocking")
+
+        # Multi-field atomic edit in one txn/event:
+        task_edit(task_id="<uuid>",
+                  updates={"title": "Retitled", "urgency": "low"})
+
+    Args:
+        task_id: The item's UUID
+        updates: Dict of {field: value} to overwrite — non-empty; owner keys are
+            refused with a pointer to task_reassign, invariant keys 422 server-side
+        reason: Optional justification stamping the 'patched' audit event; when
+            omitted the event records the field delta
+        authority: standing | user_direct | manager_relay (default "standing")
+
+    Returns:
+        { item, event } (server 200 body) verbatim, or an error dict:
+        {"reason": "empty_updates"} when `updates` is empty/not-a-dict (verb-
+        enforced, no round-trip); {"reason": "owner_field_refused"} → task_reassign;
+        a 404 carries "task {id} not found" verbatim; a 422 (invariant field / bad
+        enum / empty title / terminal item) carries the server's detail verbatim.
+
+    `actor` is NOT a parameter — bridge-stamped like task_transition's actor
+    (anti-impersonation; stamped LAST, so an `updates` "actor" key cannot shadow it).
+    """
+    if not isinstance( updates, dict ) or not updates:
+        return { "status": "error", "reason": "empty_updates",
+                 "detail": "task_edit requires a non-empty `updates` dict of {field: value} (the fields to overwrite)" }
+    return task_edit_impl(
+        api_base_url = _get_server_url(),
+        api_key      = _mcp_outbound_api_key(),
+        actor        = _task_store_identity(),
+        task_id      = task_id,
+        updates      = updates,
         reason       = reason,
         authority    = authority,
     )
