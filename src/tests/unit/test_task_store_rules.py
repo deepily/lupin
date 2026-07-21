@@ -948,5 +948,104 @@ def test_session_id_from_created_by_unusable_input_is_none( bad ):
     assert rules.session_id_from_created_by( bad ) is None
 
 
+# ---------------------------------------------------------------------------
+# validate_park THROUGH validate_transition (Tiffany's finding, 2026-07-21)
+# ---------------------------------------------------------------------------
+#
+# THE GAP WAS THE WIRING, NOT THE RULE. Measured before writing a line: this suite ran
+# 253 green while `task_store_rules.py` reported line 853 — `errors.extend( validate_park(
+# ... ) )` inside validate_transition — and lines 920-937 — every error body inside
+# validate_park — as NEVER EXECUTED. So all three park rules were unreachable from the
+# only function the API actually calls, and the board's park semantics rested on code no
+# test had run.
+#
+# That is a different failure from "validate_park is untested": a directly-tested helper
+# that nothing routes to is worse, because the green reads as coverage of the FEATURE
+# while the feature's only entry point is dark. Every test below therefore goes through
+# `validate_transition` — the caller — and never calls `validate_park` directly.
+#
+# The park contract, for a reader who lands here first: `parked` means a HUMAN ruled this
+# row not-now. It is bounded and self-expiring by construction — `next_chase_ts` is
+# REQUIRED, so any hold eventually rejoins the owed set at read time, and an indefinite
+# hold is structurally unrepresentable. `park_reason` is REQUIRED and must quote the row's
+# own decisive sentence, so the park stays refutable by the next reader.
+
+_CHASE = _dt( 2026, 8, 1, 9, 0, tzinfo=_tz.utc )       # this module imports datetime aliased
+_REASON = "parked past the Thursday demo — off the demo path entirely"
+
+
+@pytest.mark.parametrize( "from_status", list( rules.PARK_LEGAL_FROM_STATUSES ) )
+def test_transition_to_parked_is_accepted_from_every_legal_source( from_status ):
+    """
+    The happy path, once per legal source. This is the test that first executes line 853;
+    without it the entire park branch of validate_transition is unreachable.
+    """
+    errors = rules.validate_transition( from_status, rules.PARK_STATUS, "standing",
+                                        next_chase_ts=_CHASE, park_reason=_REASON )
+    assert errors == [ ], errors
+
+
+@pytest.mark.parametrize( "from_status", [ "blocked", "claimed", "review", "parked" ] )
+def test_transition_to_parked_is_refused_from_an_illegal_source( from_status ):
+    """
+    The source-status rule is what keeps the owed-set restoration EXACT: because an
+    expired-parked row provably came from queued/in_progress, re-admitting the whole
+    expired-parked set can never drag in a blocked/claimed/review row. Parking a
+    `blocked` row would silently widen every reader's owed definition.
+
+    `parked` itself is in this list on purpose — re-parking is not a refresh.
+    """
+    errors = rules.validate_transition( from_status, rules.PARK_STATUS, "standing",
+                                        next_chase_ts=_CHASE, park_reason=_REASON )
+    assert any( "cannot park from" in e for e in errors ), errors
+
+
+def test_transition_to_parked_requires_a_chase_time():
+    """
+    No chase means an unbounded hold, and an unbounded hold is what `dropped` is for —
+    because dropping is VISIBLE. The chase IS the un-park.
+    """
+    errors = rules.validate_transition( "queued", rules.PARK_STATUS, "standing",
+                                        next_chase_ts=None, park_reason=_REASON )
+    assert any( "next_chase_ts is REQUIRED" in e for e in errors ), errors
+
+
+@pytest.mark.parametrize( "bad_reason", [ None, "", "   ", "\n\t ", 123, [ ] ] )
+def test_transition_to_parked_requires_a_non_blank_string_reason( bad_reason ):
+    """
+    Blank-but-present is the interesting half: `park_reason=""` satisfies a presence check
+    and says nothing, which is exactly how two catalogs mis-counted this board by reading
+    titles. Non-string types are included because the field arrives off the wire.
+    """
+    errors = rules.validate_transition( "queued", rules.PARK_STATUS, "standing",
+                                        next_chase_ts=_CHASE, park_reason=bad_reason )
+    assert any( "park_reason is REQUIRED" in e for e in errors ), errors
+
+
+def test_transition_to_parked_reports_every_violation_at_once():
+    """
+    One error per violation, not first-wins. A caller fixing a park payload should learn
+    everything wrong with it in one round trip rather than discovering the next problem
+    after fixing the last — and this is also what pins "never raises".
+    """
+    errors = rules.validate_transition( "blocked", rules.PARK_STATUS, "standing",
+                                        next_chase_ts=None, park_reason="  " )
+    assert len( errors ) == 3, errors
+    assert any( "cannot park from"        in e for e in errors )
+    assert any( "next_chase_ts is REQUIRED" in e for e in errors )
+    assert any( "park_reason is REQUIRED"   in e for e in errors )
+
+
+def test_park_rules_do_not_fire_on_transitions_that_are_not_parks():
+    """
+    THE NEGATIVE CONTROL. A guard that fires everywhere is an outage — and a park rule
+    leaking onto ordinary transitions would demand a chase time and a reason on every
+    queued->in_progress move in the fleet. Same payload shape, different destination.
+    """
+    errors = rules.validate_transition( "queued", "in_progress", "standing",
+                                        next_chase_ts=None, park_reason=None )
+    assert not any( "park" in e for e in errors ), errors
+
+
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )
