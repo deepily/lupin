@@ -180,6 +180,83 @@ def test_an_unhonorable_reason_cannot_destroy_a_live_hold( tmp_path, capsys ):
     assert after[ "ttl_seconds" ] == before[ "ttl_seconds" ] == 14400
 
 
+def test_write_refuses_to_destroy_a_hold_carrying_cargo( tmp_path, capsys ):
+    """
+    Row 955f7eb4 (María 🌸). `write_hold` persists EXACTLY the schema through an
+    `os.replace`, so refreshing a hold that carries `blocked_rows` /
+    `note_to_my_successor` DESTROYED them — at exit 0, under a success banner.
+    That is A-1's shape on the SUCCESS path, where nothing signals it.
+
+    Found by running the prescribed command against a real hold, not by reading
+    the code: the verb built to stop the corpus would have destroyed the payload
+    in every member of it on first use.
+    """
+    path = hold_path( SID, base_dir=tmp_path )
+    path.write_text( json.dumps( {
+        "session_id": SID, "persona": "María 🌸", "held_at": "2026-07-21T12:00:00+00:00",
+        "ttl_seconds": 14400, "work_owed": True, "reason": "holding", "awaiting": "user:rick",
+        "blocked_rows": [ "955f7eb4" ], "note_to_my_successor": "irreplaceable",
+    }, indent=2 ) )
+    before = path.read_bytes()
+
+    assert hio.main( _write_argv( tmp_path ) ) == hio.EXIT_CARGO
+    assert path.read_bytes() == before, "the cargo-bearing hold must be untouched"
+
+    err = capsys.readouterr().err
+    assert "blocked_rows" in err and "note_to_my_successor" in err, "every field must be NAMED"
+    assert "memento_io.py" in err, "and the caller told where continuity actually belongs"
+
+
+def test_write_accepts_exactly_these_flags_and_no_others():
+    """
+    There is deliberately no escape from the cargo guard: an escape you can take
+    silently is not a gate, and the payload is irreplaceable.
+
+    ASSERTED AS A WHITELIST, NOT A BLACKLIST — finding C-1 (Rio ⚡, 2026-07-21),
+    proved by adding an escape. The first version of this test read
+    `assert not { "--force", "--discard-cargo", "--overwrite" } & flags`; he
+    injected `--allow-cargo` into the subparser and it reported **1 passed**. A
+    future author using any spelling outside those three would ship an escape
+    under a green test whose NAME promised there was none.
+
+    The irony he named: `hold_cargo_keys` is a COMPLEMENT predicate
+    (`k not in HOLD_SCHEMA_FIELDS`) — confirmed by execution, an unseen key
+    `zzz_never_seen_before` still exits 6. **The guard enumerates nothing; its
+    test enumerated three.** So the test is inverted to match the guard: any new
+    flag fails here until someone deliberately widens this set, which is a diff a
+    reviewer sees rather than an addition that hides behind a green.
+    """
+    write_parser = hio.build_parser()._subparsers._group_actions[ 0 ].choices[ "write" ]
+    flags        = { option for action in write_parser._actions for option in action.option_strings }
+
+    assert flags == {
+        "-h", "--help",
+        "--session-id", "--base-dir",
+        "--persona", "--reason", "--ttl-seconds", "--awaiting",
+        "--work-owed", "--no-work-owed",
+    }, "a flag was added to `write` — if it is an escape from the cargo guard, it does not belong"
+
+
+def test_a_schema_only_hold_is_not_cargo_bearing( tmp_path, capsys ):
+    """PRESENCE-assertion: the guard must not block an ordinary refresh."""
+    hio.main( _write_argv( tmp_path, **{ "--ttl-seconds": 60 } ) )
+    capsys.readouterr()
+    assert hio.main( _write_argv( tmp_path, **{ "--ttl-seconds": 120 } ) ) == hio.EXIT_OK
+    assert read_hold( SID, base_dir=tmp_path )[ "ttl_seconds" ] == 120
+
+
+@pytest.mark.parametrize( "verb", [ "read", "clear" ] )
+def test_a_not_found_says_WHERE_it_looked( tmp_path, verb, capsys ):
+    """
+    A null that does not name its search directory is not evidence. This exact
+    message read "no hold found" to a `plan` session whose hold was alive one
+    directory over — `--base-dir` defaults to LUPIN_ROOT, which is right for a
+    lupin session and wrong for every other (María, 2026-07-21).
+    """
+    assert hio.main( [ verb, "--session-id", SID, "--base-dir", str( tmp_path ) ] ) == hio.EXIT_NO_HOLD
+    assert str( tmp_path ) in capsys.readouterr().err, "the null must name the directory searched"
+
+
 def test_a_hold_that_lands_but_would_not_be_honored_is_not_a_success( tmp_path, monkeypatch, capsys ):
     """
     Verify-by-execution, proven by defeating it: the write succeeds, but the reader
@@ -322,6 +399,42 @@ def test_clear_removes_the_hold( tmp_path, capsys ):
     assert hio.main( [ "clear", "--session-id", SID, "--base-dir", str( tmp_path ) ] ) == hio.EXIT_OK
     assert not hold_path( SID, base_dir=tmp_path ).exists()
     assert "CLEARED" in capsys.readouterr().out
+
+
+def test_clear_names_the_cargo_it_destroys( tmp_path, capsys ):
+    """
+    C-2 (Rio ⚡). `write` refuses to drop cargo and routes the caller HERE —
+    "deleting it should be an act you can point at". A `clear` that removes an
+    irreplaceable payload without saying so is not pointable-at, which would make
+    write's refusal text a cheque this verb did not honor.
+
+    The deletion is still ALLOWED — deliberate removal is the whole point of the
+    verb. It just stops being silent.
+    """
+    path = hold_path( SID, base_dir=tmp_path )
+    path.write_text( json.dumps( {
+        "session_id": SID, "persona": "P", "held_at": "2026-07-21T12:00:00+00:00",
+        "ttl_seconds": 900, "work_owed": True, "reason": "r", "awaiting": "none",
+        "blocked_rows": [ "955f7eb4" ], "note_to_my_successor": "irreplaceable",
+    }, indent=2 ) )
+
+    assert hio.main( [ "clear", "--session-id", SID, "--base-dir", str( tmp_path ) ] ) == hio.EXIT_OK
+    assert not path.exists(), "a deliberate clear must still delete"
+
+    captured = capsys.readouterr()
+    assert "CLEARED" in captured.out
+    assert "blocked_rows" in captured.err and "note_to_my_successor" in captured.err, \
+        "every destroyed field must be named"
+    assert "GONE" in captured.err
+
+
+def test_clear_of_a_schema_only_hold_says_nothing_about_cargo( tmp_path, capsys ):
+    """The quiet path stays quiet — no cargo, no cargo line."""
+    hio.main( _write_argv( tmp_path ) )
+    capsys.readouterr()
+
+    assert hio.main( [ "clear", "--session-id", SID, "--base-dir", str( tmp_path ) ] ) == hio.EXIT_OK
+    assert "GONE" not in capsys.readouterr().err
 
 
 def test_clear_of_an_absent_hold_says_so_rather_than_claiming_success( tmp_path, capsys ):

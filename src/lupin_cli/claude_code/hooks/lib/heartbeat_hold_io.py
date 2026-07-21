@@ -109,6 +109,49 @@ A redundancy is not the defect — an UNISOLATED redundancy is. Keep both, and k
 B and C runnable: the day detector 2 stops having its own killing mutation is the
 day it has become decoration.
 
+CARGO — THE VERB REFUSES TO DESTROY WHAT IT CANNOT CARRY (María 🌸, 2026-07-21,
+row 955f7eb4). `write_hold` persists EXACTLY `HOLD_SCHEMA_FIELDS` through an
+`os.replace`, so writing over a hold that carries non-schema fields —
+`note_to_my_successor`, `board`, `harvest_state`, `blocked_rows` — destroys them.
+Measured on this verb before the guard:
+
+    cargo BEFORE : ['blocked_rows', 'note_to_my_successor']
+    $ write --session-id <same> --reason "still holding"
+    HOLD … / honored yes / exit 0          ← success banner
+    cargo AFTER  : []
+
+**Exit 0. A-1 and A-4's shape on the SUCCESS path**, which is the worst of the
+three: nothing signals it, so there is no moment at which the caller could
+notice. And it was found the way the other two were — María ran the prescribed
+command against her own live hold and watched her `blocked_rows` ledger vanish.
+**A remedy that manufactures the thing it replaces**: this verb exists because 56
+hand-written holds accumulated, and prescribing it would have destroyed the
+payload in each one on first use, sending the author straight back to hand-editing.
+
+So `write` REFUSES when the existing hold carries cargo, names every field, and
+exits 6. There is deliberately NO `--force`: an escape you can take silently is
+not a gate, and the payload is irreplaceable. The two ways forward are both acts
+you can point at afterwards — move it to a memento (`memento_io.py write`), or
+`clear` first if you are genuinely done with it.
+
+THE SPLIT IS DOCTRINE, AND IT IS RIGHT: **a hold is a LIVENESS artifact with a
+TTL; a memento is the CONTINUITY record.** Continuity does not belong behind an
+expiry — that is precisely how these files became irreplaceable, and why the
+95b2ed7f rescue was needed. The verb stays narrow; it takes no cargo parameter
+and should not grow one. But narrow is not the same as blind: refusing loudly is
+what keeps the narrowness from being paid for by the caller's data.
+
+WHERE THE HOLD LANDS, SAID OUT LOUD (María, same day). `--base-dir` defaults to
+`write_hold`'s own default, `cu.get_project_root()` = **LUPIN_ROOT** — correct for
+a lupin session and wrong for every other. Measured from a `plan` session:
+`read --session-id <mine>` → "no hold found", while the same id with
+`--base-dir <PIP root>` → "honored yes". Same file, same session, opposite
+verdicts. The default is NOT changed here — diverging from the writer's default
+would mint a second write semantics, which is the drift item 2 above forbids — but
+every path this verb prints now NAMES THE DIRECTORY, and a not-found says WHERE IT
+LOOKED. A null that does not say where it searched is not evidence, and that is
+the form in which this one presented.
+
 Invocation (both forms work; the second needs PYTHONPATH to carry `src`):
 
     python3 $LUPIN_ROOT/src/lupin_cli/claude_code/hooks/lib/heartbeat_hold_io.py \
@@ -125,6 +168,8 @@ Exit codes (distinct, so a caller never has to parse the message):
     4  `read`/`clear`: no hold found for that session
     5  `clear`: a hold exists under a MATCHING ID PREFIX but not at this session's
        own path — named, not deleted (see cmd_clear; row 39219cc1 owns the cure)
+    6  `write`: the existing hold carries non-schema CARGO this verb cannot
+       preserve — named, not destroyed (see the CARGO section below)
 """
 import argparse
 import json
@@ -161,7 +206,7 @@ _bootstrap_sys_path()
 
 from lupin_cli.claude_code.hooks.lib.heartbeat_hold import (   # noqa: E402 — after bootstrap
     AWAITING_NONE, DEFAULT_TTL_SECONDS, HOLD_FILENAME_TEMPLATE, _resolve_base_dir,
-    clear_hold, hold_path, is_honored, read_hold, write_hold,
+    clear_hold, hold_cargo_keys, hold_path, is_honored, read_hold, write_hold,
 )
 
 
@@ -170,6 +215,7 @@ EXIT_REFUSED     = 2
 EXIT_NOT_HONORED = 3
 EXIT_NO_HOLD     = 4
 EXIT_ORPHAN      = 5
+EXIT_CARGO       = 6
 
 
 def cmd_write( args ):
@@ -253,6 +299,25 @@ def cmd_write( args ):
         prior_bytes = path.read_bytes()
         prior_times = ( stat_result.st_atime, stat_result.st_mtime )
 
+    # CARGO GUARD — see the module docstring. Refuse BEFORE write_hold touches
+    # anything: this is the only point at which the payload still exists.
+    cargo = hold_cargo_keys( read_hold( args.session_id, base_dir=args.base_dir ) )
+    if cargo:
+        print( f"REFUSED: the hold at {path} carries {len( cargo )} field(s) this verb does "
+               f"not own and cannot preserve:", file=sys.stderr )
+        for key in cargo:
+            print( f"           {key}", file=sys.stderr )
+        print(  "         Writing would REPLACE the file with the hold schema alone and those "
+                "fields would be gone — at exit 0, under a success banner.", file=sys.stderr )
+        print(  "         A hold is a LIVENESS artifact with a TTL; a memento is the CONTINUITY "
+                "record. Continuity does not belong behind an expiry.", file=sys.stderr )
+        print(  "         Move it first, then re-run this write:", file=sys.stderr )
+        print(  "           python3 $PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py "
+                "write --persona <you> --session-id <id>", file=sys.stderr )
+        print(  "         Genuinely finished with it? `clear` first — deleting it should be an "
+                "act you can point at, not a side effect of declaring a hold.", file=sys.stderr )
+        return EXIT_CARGO
+
     hold = write_hold(
         args.session_id, args.persona, args.reason,
         work_owed=args.work_owed, ttl_seconds=args.ttl_seconds,
@@ -294,7 +359,11 @@ def cmd_read( args ):
     """
     hold = read_hold( args.session_id, base_dir=args.base_dir )
     if hold is None:
-        print( f"no hold found for session {args.session_id}", file=sys.stderr )
+        # NAME THE DIRECTORY. A not-found that does not say where it looked is an
+        # unproven null — and this exact message read "no hold found" to a plan
+        # session whose hold was alive one directory over (María, 2026-07-21).
+        print( f"no hold found for session {args.session_id} in "
+               f"{_resolve_base_dir( args.base_dir )}", file=sys.stderr )
         return EXIT_NO_HOLD
     print( json.dumps( hold, indent=2, ensure_ascii=False ) )
     print( f"honored  {'yes' if is_honored( hold ) else 'NO'}", file=sys.stderr )
@@ -408,8 +477,17 @@ def cmd_clear( args ):
     # ONE RESOLUTION FOR THE GUARD AND THE ACTION — that split IS A-4. Decide on the
     # exact path, act on the exact path; nothing here consults the prefix resolver.
     if exact.exists():
+        # NAME WHAT IS BEING DESTROYED (C-2, Rio ⚡). `write` refuses to drop cargo
+        # and routes the caller HERE — "deleting it should be an act you can point
+        # at". A clear that does not say what it removed is not pointable-at, so
+        # the sentence in write's refusal would have been writing a cheque this
+        # verb didn't honor. Deliberate deletion stays allowed; it stops being silent.
+        cargo = hold_cargo_keys( read_hold( args.session_id, base_dir=args.base_dir ) )
         clear_hold( args.session_id, base_dir=args.base_dir )
         print( f"CLEARED  {exact}" )
+        if cargo:
+            print( f"         ...including {len( cargo )} non-schema field(s) that are now "
+                   f"GONE: {', '.join( cargo )}", file=sys.stderr )
         return EXIT_OK
 
     siblings = _prefix_siblings( args.session_id, base_dir=args.base_dir )
@@ -423,7 +501,8 @@ def cmd_clear( args ):
         print(  "         Re-run with the session id a hold actually names.", file=sys.stderr )
         return EXIT_ORPHAN
 
-    print( f"no hold found for session {args.session_id}", file=sys.stderr )
+    print( f"no hold found for session {args.session_id} in "
+           f"{_resolve_base_dir( args.base_dir )}", file=sys.stderr )
     return EXIT_NO_HOLD
 
 
