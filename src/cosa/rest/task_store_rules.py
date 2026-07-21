@@ -964,6 +964,58 @@ def build_persona_advisory( owner_persona, accountable_manager, known_keys=None 
     return flagged, marker
 
 
+def is_blocker_repoint( from_status, to_status, blocked_by, next_chase_ts,
+                        current_blocked_by, current_next_chase_ts ):
+    """
+    Is this `blocked`->`blocked` a genuine RE-POINT (the blocker or its chase
+    actually moved), as opposed to a true no-op?
+
+    THE DEFECT THIS OPENS THE DOOR FOR (bee6856a). There was no legal way to
+    change WHO a blocked row is blocked on: this edge was refused, `task_edit`
+    refuses the invariant-bearing fields, and `task_amend` is body-only. The
+    only way through was `blocked -> in_progress -> blocked`, which writes a
+    `blocked->in_progress` event asserting work RESUMED on a row where none did.
+    A reason string on that event is a mitigation, not a fix — it makes a human
+    read prose to un-learn what the structured field says, and any tooling
+    counting in_progress transitions is simply lied to. Re-pointing is routine
+    (a manager re-spins, a blocking peer is reaped, a decision escalates to the
+    user), so the false event recurs by design rather than by accident.
+
+    WHAT THE OLD REJECTION WAS GUARDING: nothing designed. LEGAL_TRANSITIONS is
+    derived by `dst != src`, and its header calls that BEHAVIOR-PRESERVING — it
+    made the Phase-1 IMPLICIT graph explicit "so a future TIGHTENING has one
+    home". Nobody chose to forbid this edge; it was not callable in Phase 1, and
+    making the graph explicit froze an accident into a rule.
+
+    ⇒ SCOPED TO `blocked` ALONE, DELIBERATELY. The risk here is WIDENING, not
+    un-guarding: a general "permit same-status when the payload differs" would
+    silently open queued->queued, in_progress->in_progress, review->review and
+    parked->parked — four edges that each write an audit event and mean nothing.
+    The graph itself is NOT modified, so the mirror-edge regression and both
+    graph-shape tests hold unchanged; this is a carve-out at the point of use.
+
+    Requires:
+        - from_status / to_status are valid statuses
+        - blocked_by / next_chase_ts are the CANDIDATE payload values
+        - current_* are the row's values BEFORE this transition (VALUES, never
+          the ORM item — this module is pure and must not import the model)
+
+    Ensures:
+        - returns True iff from_status == to_status == "blocked" AND at least
+          one of (blocked_by, next_chase_ts) differs from its current value
+        - returns False when the current values are absent — a caller that does
+          not supply them gets the old behaviour, so the carve-out can never
+          fire on absence of evidence (fail CLOSED)
+        - returns False for every other status pair, including every other
+          same-status pair
+        - NEVER relaxes the ->blocked payload rules: this opens an EDGE, and
+          validate_blocked_fields still runs on the result
+    """
+    if from_status != "blocked" or to_status != "blocked":           return False
+    if current_blocked_by is None and current_next_chase_ts is None: return False
+    return blocked_by != current_blocked_by or next_chase_ts != current_next_chase_ts
+
+
 def validate_transition(
     from_status   : str,
     to_status     : str,
@@ -974,6 +1026,8 @@ def validate_transition(
     reason        = None,
     scope_roots   : Optional[dict] = None,
     park_reason   = None,
+    current_blocked_by    = None,
+    current_next_chase_ts = None,
 ) -> list:
     """
     Validate one state transition against the Phase-1/2 structural rules.
@@ -1032,7 +1086,8 @@ def validate_transition(
     # payload rules below are PREPENDED-to, never replaced.
     if from_status in TERMINAL_STATUSES:
         errors.append( f"item is terminal ('{from_status}') — done/dropped are append-only, no transitions out" )
-    elif to_status not in LEGAL_TRANSITIONS[ from_status ]:
+    elif to_status not in LEGAL_TRANSITIONS[ from_status ] and not is_blocker_repoint(
+        from_status, to_status, blocked_by, next_chase_ts, current_blocked_by, current_next_chase_ts ):
         errors.append( f"no-op transition '{from_status}'->'{to_status}' rejected — not a legal edge" )
 
     if to_status == "done" or receipt_refs is not None:

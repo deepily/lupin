@@ -635,6 +635,13 @@ def transition_task(
             blocked_by    = blocked_by,
             reason        = payload.reason,
             park_reason   = payload.park_reason,
+            # bee6856a — the row's CURRENT coupled fields, so a genuine
+            # blocked->blocked RE-POINT is legal while a true no-op stays
+            # rejected. Read off the SAME row-locked item as from_status, so the
+            # values compared are the committed ones; passing VALUES (not the
+            # item) keeps task_store_rules free of any model import.
+            current_blocked_by    = item.blocked_by,
+            current_next_chase_ts = item.next_chase_ts,
         ) )
 
         event = repo.apply_transition(

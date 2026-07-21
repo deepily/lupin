@@ -1047,5 +1047,115 @@ def test_park_rules_do_not_fire_on_transitions_that_are_not_parks():
     assert not any( "park" in e for e in errors ), errors
 
 
+# ---------------------------------------------------------------------------
+# bee6856a — re-pointing a blocker must not require a false in_progress hop
+# ---------------------------------------------------------------------------
+#
+# THE DEFECT: there was no legal way to change WHO a blocked row is blocked on.
+# `blocked->blocked` was refused, `task_edit` refuses the invariant-bearing
+# fields, and `task_amend` is body-only — so the only way through was the detour
+# `blocked -> in_progress -> blocked`, which writes a `blocked->in_progress`
+# event asserting work resumed on a row where none did (events 4082/4083 on
+# 36e479ed are the receipt). A reason string is a mitigation, not a fix: it
+# makes a human read prose to un-learn what the structured field says.
+#
+# WHAT THE OLD REJECTION WAS GUARDING: nothing designed. LEGAL_TRANSITIONS is
+# derived by `dst != src`, and its header calls the construct BEHAVIOR-
+# PRESERVING — it made the Phase-1 IMPLICIT graph explicit "so a future
+# TIGHTENING has one home". `blocked->blocked` was simply not callable in
+# Phase 1; making the graph explicit froze an accident into a rule.
+#
+# ⇒ The risk here is WIDENING, not un-guarding. The carve-out is therefore
+#   scoped to `blocked` ALONE, and the third test below is the fence on that:
+#   it asserts the hole is EXACTLY ONE STATUS WIDE. Without it, "permit
+#   same-status when the payload differs" would silently open queued->queued,
+#   in_progress->in_progress, review->review and parked->parked — four legal
+#   edges that each write an audit event and mean nothing. That widening would
+#   be silent AND green, which is the failure mode this row exists to stop.
+
+_CHASE_A = "2026-07-22T09:00:00-04:00"
+_CHASE_B = "2026-07-23T09:00:00-04:00"
+
+
+def test_repoint_permitted_when_the_blocker_actually_changes():
+    # The row's reason for existing: re-point `blocked_by` with NO status detour.
+    errors = rules.validate_transition(
+        "blocked", "blocked", "standing",
+        next_chase_ts         = _CHASE_A,
+        blocked_by            = [ { "kind": "user", "id": "rick" } ],
+        current_blocked_by    = [ { "kind": "persona", "id": "mr radio" } ],
+        current_next_chase_ts = _CHASE_A,
+    )
+    assert errors == [ ], errors
+
+
+def test_repoint_permitted_when_only_the_chase_time_changes():
+    # Re-scheduling the chase on an unchanged blocker is the same act: a real
+    # payload change, no work resumed, no in_progress event owed.
+    errors = rules.validate_transition(
+        "blocked", "blocked", "standing",
+        next_chase_ts         = _CHASE_B,
+        blocked_by            = [ { "kind": "persona", "id": "arnold" } ],
+        current_blocked_by    = [ { "kind": "persona", "id": "arnold" } ],
+        current_next_chase_ts = _CHASE_A,
+    )
+    assert errors == [ ], errors
+
+
+def test_true_no_op_blocked_to_blocked_is_still_rejected():
+    # The part of the OLD behaviour worth keeping. Same blocker, same chase =>
+    # nothing changed, so the event would be pure noise in the audit trail.
+    errors = rules.validate_transition(
+        "blocked", "blocked", "standing",
+        next_chase_ts         = _CHASE_A,
+        blocked_by            = [ { "kind": "persona", "id": "arnold" } ],
+        current_blocked_by    = [ { "kind": "persona", "id": "arnold" } ],
+        current_next_chase_ts = _CHASE_A,
+    )
+    assert len( errors ) == 1 and "no-op transition" in errors[ 0 ], errors
+
+
+def test_blocked_to_blocked_without_current_values_is_still_rejected():
+    # A caller that does NOT supply the current values gets the old behaviour —
+    # fail CLOSED. The carve-out must never fire on absence of evidence.
+    errors = rules.validate_transition(
+        "blocked", "blocked", "standing",
+        next_chase_ts = _CHASE_A,
+        blocked_by    = [ { "kind": "persona", "id": "arnold" } ],
+    )
+    assert any( "no-op transition" in e for e in errors ), errors
+
+
+@pytest.mark.parametrize( "status", [ s for s in rules.VALID_STATUSES
+                                      if s not in rules.TERMINAL_STATUSES and s != "blocked" ] )
+def test_the_carve_out_is_exactly_one_status_wide( status ):
+    # THE FENCE (Arnold 5bcd3ad6, and the reason this row's real risk is in the
+    # legal-graph rather than the signature): every OTHER non-terminal self-edge
+    # stays rejected even when the payload differs. If this goes green for any
+    # status other than `blocked`, the carve-out has widened past its warrant.
+    errors = rules.validate_transition(
+        status, status, "standing",
+        next_chase_ts         = _CHASE_B,
+        blocked_by            = [ { "kind": "user", "id": "rick" } ],
+        current_blocked_by    = [ { "kind": "persona", "id": "mr radio" } ],
+        current_next_chase_ts = _CHASE_A,
+    )
+    assert any( "no-op transition" in e for e in errors ), f"{status}->{status} must stay illegal: {errors}"
+
+
+def test_repoint_still_enforces_the_blocked_payload_invariant():
+    # The carve-out opens an EDGE; it does not relax ->blocked's payload rules.
+    # A re-point with an empty blocked_by is still refused by I3 / ruling #5.
+    errors = rules.validate_transition(
+        "blocked", "blocked", "standing",
+        next_chase_ts         = _CHASE_B,
+        blocked_by            = [ ],
+        current_blocked_by    = [ { "kind": "persona", "id": "mr radio" } ],
+        current_next_chase_ts = _CHASE_A,
+    )
+    assert errors, "an empty blocked_by must still fail the ->blocked invariant"
+    assert not any( "no-op transition" in e for e in errors ), errors
+
+
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )
