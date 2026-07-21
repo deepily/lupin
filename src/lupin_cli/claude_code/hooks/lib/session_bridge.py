@@ -93,10 +93,32 @@ def atomic_write_json( path, data ):
         - path is a str or Path whose parent directory exists and is writable
         - data is JSON-serializable
 
+    🔎 A FAILURE IS WITNESSED ON STDERR, and the witness lives HERE rather than
+    at the call sites. Clayton 😎, reviewing this fix, enumerated all ten
+    consumers: the SERVER sites turn False into an HTTPException(500) and are
+    already loud, but SIX HOOK SITES IGNORE THE RETURN ENTIRELY. Without a line
+    here, a failed bridge write leaves no log, no counter and no exit code — the
+    field silently never persists and the seat looks healthy. That is the same
+    "reports healthy while blind" family as the corruption this function exists
+    to prevent, one layer up. Swallowing the exception is right in a hook (a
+    raising SessionStart is how you get a seat with NO bridge at all, row
+    e9822f8d); the SILENCE is the part that needed a witness.
+
+    One witness at the mechanism beats six at the callers, for the same reason
+    os.replace beats "write carefully" — nobody has to remember it. stderr is
+    the correct channel: hooks emit there without polluting Claude's context
+    (precedent: register_session.py's lockfile-read warning).
+
+    Requires:
+        - path is a str or Path whose parent directory exists and is writable
+        - data is JSON-serializable
+
     Ensures:
         - Returns True when the new document is fully in place at path
         - Returns False on any OSError/TypeError/ValueError, leaving whatever
           was already at path untouched — a failed write never truncates
+        - Names the path and the error on stderr when it returns False, and
+          emits NOTHING on success (a witness that fires on success is noise)
         - A concurrent reader sees the complete old or the complete new
           document; it never observes a partial or spliced file
         - Leaves no temp file behind on the failure path
@@ -119,10 +141,13 @@ def atomic_write_json( path, data ):
             json.dump( data, f, indent=2 )
         os.replace( tmp, path )
         return True
-    except ( OSError, TypeError, ValueError ):
+    except ( OSError, TypeError, ValueError ) as e:
         if tmp is not None:
             try: os.unlink( tmp )
             except OSError: pass
+        print( f"[atomic_write_json] WARNING: bridge write FAILED for {path}: {e!r} "
+               f"— the field did NOT persist; this seat may look healthier than it is",
+               file=sys.stderr )
         return False
 
 # Cache to avoid repeated file reads

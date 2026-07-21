@@ -142,6 +142,48 @@ class TestAtomicWriteJson:
 
         assert json.loads( p.read_text() ) == LONG_DOC
 
+    def test_os_replace_failure_returns_False_spares_target_and_leaks_no_temp( self, tmp_path ):
+        """
+        The ONLY failure path that leaves a COMPLETE temp file behind.
+
+        Written by Clayton 😎 reviewing a0062cf6, and it closes a real coverage
+        hole rather than a hypothetical: every other covered failure
+        (unserializable payload, unwritable dir) aborts BEFORE os.replace, so
+        none of them exercises cleanup of a fully-written temp. The docstring's
+        cross-filesystem claim is about the OS; THIS is the part that lives in
+        our code — EXDEV arrives as an OSError from os.replace.
+        """
+        p = tmp_path / "cc-x.json"
+        assert atomic_write_json( p, LONG_DOC )
+
+        real_replace = os.replace
+        os.replace = lambda *a, **kw: ( _ for _ in () ).throw( OSError( 18, "Invalid cross-device link" ) )
+        try:
+            assert atomic_write_json( p, SHORT_DOC ) is False
+        finally:
+            os.replace = real_replace
+
+        assert json.loads( p.read_text() ) == LONG_DOC
+        assert [ f for f in os.listdir( tmp_path ) if f.endswith( ".tmp" ) ] == [ ]
+
+    def test_failure_is_witnessed_on_stderr( self, capsys, tmp_path ):
+        """
+        A silent no-op is the defect family this whole fix is about.
+
+        Six hook call sites IGNORE the return value, so without this line a
+        failed bridge write leaves no log, no counter and no exit code — the
+        seat looks healthy while a field never persisted. Same shape as
+        49b2c80b itself, one layer up.
+        """
+        assert atomic_write_json( tmp_path / "cc-6.json", { "bad": object() } ) is False
+        err = capsys.readouterr().err
+        assert "atomic_write_json" in err and "cc-6.json" in err
+
+    def test_success_is_silent( self, capsys, tmp_path ):
+        """The negative control: a witness that fires on success is noise."""
+        assert atomic_write_json( tmp_path / "cc-7.json", SHORT_DOC )
+        assert capsys.readouterr().err == ""
+
     def test_unwritable_directory_returns_False( self, tmp_path ):
         assert atomic_write_json( tmp_path / "no" / "such" / "dir" / "cc-4.json", SHORT_DOC ) is False
 
