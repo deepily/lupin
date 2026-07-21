@@ -49,6 +49,7 @@ if src_path not in sys.path:
 # valid" check — fails loud and immediate on the /app-vs-/var/lupin path drift
 # instead of cryptically later at config load. (No defensive fallback.)
 from lupin_app.bootstrap_helpers import assert_lupin_root_valid
+from cosa.rest.error_envelope import make_unhandled_exception_handler
 assert_lupin_root_valid( lupin_root )
 
 # Reduce CUDA memory fragmentation (prevents periodic OOM on Whisper inference)
@@ -1027,6 +1028,18 @@ app = FastAPI(
     version="0.6.0",
     lifespan=lifespan
 )
+
+# Unhandled-exception envelope (row b101a60b). SERVER_STARTED_AT is stamped HERE,
+# at module import, which is exactly what makes it useful: uvicorn's --reload
+# re-imports this module, so a caller seeing a start instant a few seconds old
+# knows it hit a reload window rather than a bug in its own request. Paired with
+# `exception_class`, a 500 now explains itself AT THE CALLER — previously the
+# body was the 21-byte string "Internal Server Error" and the class lived only in
+# the container log, where nobody diagnosing a failed call was looking.
+# Deliberately carries no `str(e)`: unaudited for what it exposes (see the module
+# docstring). Raised HTTPExceptions keep FastAPI's own handling, untouched.
+SERVER_STARTED_AT = datetime.now().isoformat( timespec="seconds" )
+app.add_exception_handler( Exception, make_unhandled_exception_handler( SERVER_STARTED_AT ) )
 
 # Add CORS middleware to allow Flutter web app to access API endpoints
 app.add_middleware(
