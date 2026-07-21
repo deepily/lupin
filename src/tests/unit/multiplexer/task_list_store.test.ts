@@ -111,6 +111,12 @@ test("endpoint carries the unscoped-guard escape params", () => {
   assert.ok(TASK_LIST_ENDPOINT.includes("unscoped_audit=true"), "must pass unscoped_audit=true");
   assert.ok(TASK_LIST_ENDPOINT.includes("include_terminal=true"), "must pass include_terminal=true");
   assert.ok(TASK_LIST_ENDPOINT.includes("limit=500"), "still caps at 500");
+  // mini-plan 02 (2026-07-21): the server also enforces a response BYTE budget,
+  // and under its 100k default this poll measured 30 of 1100 available rows. The
+  // card's own invariant is that the human's view is never SILENTLY truncated,
+  // so the deliberate sweep must name the escape — exactly as it names the
+  // unscoped-size escape above.
+  assert.ok(TASK_LIST_ENDPOINT.includes("char_budget=0"), "must opt out of the response byte budget");
 });
 
 test("refresh: a large all-status board is cached in full — no truncation", async () => {

@@ -435,7 +435,12 @@ def task_query_impl(
     GET /api/tasks — the deterministic owed-work query (design R4).
 
     Ensures:
-        - returns { tasks, count } verbatim on success
+        - returns { tasks, count, total, has_more, truncated, warnings } verbatim
+          on success — a THIN PROXY, so the truthful-envelope fields (mini-plan
+          02, 2026-07-21) reach the agent rather than dying at this seam. `count`
+          is the PAGE length and saturates at `limit`; `total` is the true
+          filter-matching count and `has_more` is the field to branch on. A
+          pre-mini-plan-02 server simply returns the two-key shape
         - omits unset filters entirely (server defaults apply), so a no-arg
           call is "everything, newest first" — the manager board glance
         - `correlation_key` exact-match filter passes through (spec amendment

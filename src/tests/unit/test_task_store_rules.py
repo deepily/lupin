@@ -681,20 +681,46 @@ class TestSoftGuardTitle:
         assert new_body  == title[ rules.TITLE_SOFT_CAP: ]
         assert advisory[ "overflow_moved_to_body" ] is True
 
-    def test_over_cap_nonempty_body_trims_title_only( self ):
-        # Over-cap + NON-empty body: title trimmed, body left UNTOUCHED (the
-        # ruled tradeoff — an existing body always wins; overflow is dropped).
+    def test_over_cap_nonempty_body_RELOCATES_overflow_above_the_body( self ):
+        # bug 28fc1fb4. This test previously asserted the DEFECT as correct: it
+        # required new_body == body and overflow_moved_to_body == False — i.e. it
+        # pinned the silent discard in place and went green on every run. The
+        # "ruled tradeoff" it cited forbade CLOBBERING a body; it never licensed
+        # deleting the title's remainder, and prepending is not clobbering.
         title = "Q" * 75
         body  = "important pre-existing detail"
         new_title, new_body, advisory = rules.soft_guard_title( title, body )
+
         assert new_title == title[ :rules.TITLE_SOFT_CAP ]
-        assert new_body == body                                 # never clobbered
+        assert body in new_body                                  # still never clobbered...
+        assert new_body.endswith( body )                         # ...and still last, verbatim
+        assert rules.TITLE_OVERFLOW_MARKER in new_body           # findable by grep, store-wide
+        assert title[ rules.TITLE_SOFT_CAP: ] in new_body        # the overflow SURVIVED
         assert advisory == {
             "trimmed"               : True,
             "original_length"       : 75,
             "cap"                   : rules.TITLE_SOFT_CAP,
-            "overflow_moved_to_body": False,
+            "overflow_moved_to_body": True,
         }
+
+    def test_over_cap_nonempty_body_ROUND_TRIPS_the_original_title_exactly( self ):
+        """
+        THE AC THAT CANNOT PASS ON A PLAUSIBLE-BUT-LOSSY IMPLEMENTATION.
+
+        Reconstruct the original title from what was stored: the trimmed title plus
+        the overflow line lifted back out of the body must equal the input EXACTLY,
+        character for character. An implementation that ellipsised, stripped, or
+        word-wrapped the remainder would satisfy every "the overflow is in there
+        somewhere" assertion and fail this one.
+        """
+        title = "A standing order that will not fit: route ALL GCP calls through the Mr Radio role"
+        body  = "pre-existing body text\nwith a second line"
+        new_title, new_body, _ = rules.soft_guard_title( title, body )
+
+        marker_line, overflow_line, _blank, *rest = new_body.split( "\n" )
+        assert marker_line == rules.TITLE_OVERFLOW_MARKER
+        assert new_title + overflow_line == title                # EXACT reconstruction
+        assert "\n".join( rest ) == body                         # the body, verbatim, intact
 
     def test_custom_cap_is_honored( self ):
         # The cap is parameterizable — proves the guard is not hard-wired to 60.

@@ -26,6 +26,7 @@ src/rnd/2026.06.11-unified-task-store-design.md (v0.4, Rick-ruled §3.1).
 
 from datetime import datetime, timezone
 from typing import Annotated, Optional
+import json
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -344,6 +345,60 @@ def _serialize_item_terse( item ) -> dict:
         "priority"          : item.priority,
         "park_reason_stale" : park_reason_is_stale( item.status, item.park_reason_captured_at, item.updated_ts ),
     }
+
+
+def _serialize_within_char_budget( items, serialize, budget: int ):
+    """
+    Serialize rows until the accumulated payload reaches a CHARACTER budget.
+
+    THE SECOND BOUND (mini-plan 02 T3). `limit` caps ROWS, and a row cap is not a
+    size cap: the same 100-row page measured 21,379 chars terse and 424,209 chars
+    full on 2026-07-21, because rows carry multi-KB bodies. This bound governs the
+    quantity that actually costs the caller — bytes — and it is INDEPENDENT of the
+    row bound: whichever binds first wins, and the caller is TOLD which.
+
+    A stop is NEVER silent: the second return value is the flag the response
+    publishes as `truncated`, and the caller always also receives the honest
+    `total`. A degraded response that does not announce its degradation is worse
+    than an error.
+
+    The FIRST row is admitted unconditionally, even when it alone exceeds the
+    budget. A budget that can return zero rows for a non-empty result set is a
+    pagination dead end — the caller advances `offset` forever and never makes
+    progress. One oversized row plus `truncated: true` is honest AND advanceable.
+
+    Requires:
+        - items is an iterable of TaskItem
+        - serialize is a callable TaskItem -> JSON-safe dict
+        - budget is a non-negative integer character count (0 == unbounded)
+
+    Ensures:
+        - budget == 0 means UNBOUNDED (the explicit caller opt-out); every item is
+          serialized and truncated is False
+        - returns ( rows, truncated ) where rows is a prefix of the serialized
+          items, in the order given
+        - truncated is True IFF at least one item was left unserialized
+        - len( rows ) >= 1 whenever items is non-empty
+        - truncated is False whenever every item was serialized
+    """
+    rows      = [ ]
+    truncated = False
+    used      = 0
+
+    for item in items:
+        row  = serialize( item )
+        size = len( json.dumps( row, default=str ) )
+        # budget == 0 is UNBOUNDED, not "a budget of zero". A zero-char budget can
+        # only ever mean "one row, then truncate", which is useless as a setting
+        # and useful as an escape — so 0 is the caller's explicit opt-out, and the
+        # `truncated` it reports is then honestly False.
+        if budget and rows and used + size > budget:
+            truncated = True
+            break
+        rows.append( row )
+        used += size
+
+    return rows, truncated
 
 
 def _serialize_event( event ) -> dict:
@@ -719,8 +774,13 @@ def patch_task(
         - 422 when the item is terminal (no edits to closed history)
         - row-locked read (N3 parity) so the terminal check cannot be raced
           by a concurrent ->done/->dropped transition
+        - an over-cap `title` is soft-guarded by the SAME rules.soft_guard_title
+          create uses (bug 28fc1fb4): trimmed to the cap with the overflow
+          relocated into the body being written — never discarded, never a
+          rejection. `title_guard` carries the advisory (None when the title was
+          not touched, exactly as create reports it)
         - field update + 'patched' event append are atomic (one transaction)
-        - returns { item, event } serialized
+        - returns { item, event, persona_flag, title_guard } serialized
     """
     fields = payload.model_dump( exclude_unset=True, exclude={ "actor", "authority", "reason" } )
 
@@ -759,11 +819,41 @@ def patch_task(
         if item.status in rules.TERMINAL_STATUSES:
             _reject_if_errors( [ f"item is terminal ('{item.status}') — no edits to closed history" ] )
 
+        # ONE HELPER, BOTH DOORS (bug 28fc1fb4, 2026-07-21). This path used to set
+        # `title` with NO cap, NO guard and NO advisory, while create silently cut
+        # the identical string at 60 — two write paths with two contradictory
+        # contracts, neither announced, and the rules-module comment claiming one
+        # cap "at every layer" was false for as long as both existed. The door
+        # widened when task_edit (3ac79d1d, 2026-07-21) shipped over PATCH.
+        #
+        # The overflow relocates into the body the PATCH is actually writing: the
+        # incoming body when this same call sets one, else the row's current body.
+        # Guarding against a body the caller is simultaneously replacing would file
+        # the overflow into text about to be overwritten — a relocation that loses
+        # the thing it just saved.
+        title_guard = None
+        if "title" in fields:
+            effective_body = fields[ "body" ] if "body" in fields else item.body
+            fields[ "title" ], guarded_body, title_guard = rules.soft_guard_title(
+                fields[ "title" ], effective_body
+            )
+            # Only write the body back when the guard actually moved something.
+            # An untouched PATCH must not manufacture a body delta in the audit
+            # event — a `patched` row claiming a body change that never happened
+            # is the audit trail lying about what it recorded.
+            if title_guard is not None:
+                fields[ "body" ] = guarded_body
+
         event = repo.apply_patch(
             item, fields, actor=payload.actor, authority=payload.authority,
             reason=payload.reason, flag_suffix=flag_marker,
         )
-        return { "item": _serialize_item( item ), "event": _serialize_event( event ), "persona_flag": persona_flag }
+        return {
+            "item"        : _serialize_item( item ),
+            "event"       : _serialize_event( event ),
+            "persona_flag": persona_flag,
+            "title_guard" : title_guard,
+        }
 
 
 @router.get(
@@ -797,6 +887,7 @@ def query_tasks(
     hide_parked         : bool = True,
     limit               : int = Query( default=100, ge=0, le=500 ),
     offset              : int = Query( default=0, ge=0 ),
+    char_budget         : Optional[int] = Query( default=None, ge=0 ),
 ):
     # limit/offset bounds (cold-review N4): Postgres rejects a negative LIMIT
     # with InvalidRowCountInLimitClause — unbounded params turned that into an
@@ -811,10 +902,21 @@ def query_tasks(
           an honest-looking empty result
 
     Ensures:
-        - count_only=False (default): returns { tasks: [...], count } matching
-          ALL provided filters, ordered created_ts descending, stable tiebreak
-          on id. NOTE: `count` here is the PAGE length (len(tasks)) — it
-          saturates at `limit`; use count_only for a true total.
+        - count_only=False (default): returns
+          { tasks, count, total, has_more, truncated, warnings } matching ALL
+          provided filters, ordered created_ts descending, stable tiebreak on id.
+          `count` is the PAGE length (len(tasks)) — UNCHANGED meaning, it
+          saturates at `limit`. The four keys beside it (mini-plan 02, 2026-07-21)
+          exist because `count` alone was being read as the SIZE OF THE RESULT and
+          never was: measured, a scoped query reported count:100 while offset=100
+          returned 100 more rows, with no total / has_more / truncated to say so.
+          `total` is a true COUNT(*) over the SAME filters, page-independent (NOT
+          derived from len(tasks)); `has_more` = offset + count < total;
+          `truncated` is True when the RESPONSE_CHAR_BUDGET bound stopped
+          serialization before the row bound did; `warnings` carries the
+          heavy-pull nudge and the truncation notice to the CALLER (they were
+          stdout-only, an audience that cannot act on them). ADDED keys only —
+          the multiplexer parses this shape (see the count_only branch comment).
         - count_only=True (O2 / §G token win): returns { count, breakdown } —
           `count` is a true SQL COUNT(*) over the SAME filters, NO rows
           serialized, independent of limit/offset (those params are ignored in
@@ -962,16 +1064,75 @@ def query_tasks(
             )
         # terse → the at-a-glance projection (§G); else the full wire shape.
         serialize = _serialize_item_terse if terse else _serialize_item
-        tasks = [ serialize( item ) for item in items ]
+        # THE DELIBERATE-SWEEP ESCAPE, mirroring unscoped_audit. The byte budget
+        # protects the caller who did not know to ask — an agent pulling 97k tokens
+        # into a context. It must NOT quietly shrink a caller who asked for the
+        # whole board ON PURPOSE: the multiplexer's dashboard poll (limit=500 +
+        # unscoped_audit=true) documents its own invariant in TaskListStore.ts as
+        # "the human's view is never silently truncated", and the default budget
+        # cut it from 1100 available rows to 30 (measured 2026-07-21). An explicit
+        # char_budget=0 opts out; any other value overrides. Same shape as the
+        # unscoped-size guard: protective by default, escapable by a caller who
+        # names the escape, never escapable by accident.
+        budget           = rules.RESPONSE_CHAR_BUDGET if char_budget is None else char_budget
+        tasks, truncated = _serialize_within_char_budget( items, serialize, budget )
+        # T1 (mini-plan 02): `total` is a TRUE COUNT(*) over the same filters, NOT
+        # len(tasks) and NOT derived from the page. Two independent computations
+        # keep `total` vs the count_only branch's `count` a real cross-check; a
+        # `total` derived from the page could never disagree with it, which is an
+        # unfalsifiable green — an assertion that can never fail reports nothing.
+        # limit/offset are deliberately NOT forwarded: a total is page-independent.
+        total = repo.count_tasks(
+            owner_persona       = owner_persona,
+            status              = status,
+            gate_class          = gate_class,
+            urgency             = urgency,
+            accountable_manager = accountable_manager,
+            project             = project,
+            item_class          = item_class,
+            correlation_key     = correlation_key,
+            include_terminal    = include_terminal,
+            owed_only           = owed_only,
+            hide_parked         = hide_parked,
+        )
+        warnings = [ ]
         # Warn-not-fail (María #3): a heavy NON-terse pull earns an OBSERVABLE log
         # line nudging toward terse=True — never a rejection, rows still returned.
         if not terse and len( tasks ) > rules.NONTERSE_WARN_THRESHOLD:
-            print(
-                f"[task_query WARN] non-terse pull returned {len( tasks )} full rows "
+            heavy_notice = (
+                f"non-terse pull returned {len( tasks )} full rows "
                 f"(> {rules.NONTERSE_WARN_THRESHOLD}) — pass terse=true for the "
                 f"at-a-glance projection to cut token weight"
             )
-        return { "tasks": tasks, "count": len( tasks ) }
+            # T2 (mini-plan 02): the log line SURVIVES, but stdout was the wrong
+            # audience — the server operator is not the party paying the token
+            # weight, and the caller about to be charged for it never saw this.
+            # Same trigger, audience corrected: it now ALSO rides the response body.
+            print( f"[task_query WARN] {heavy_notice}" )
+            warnings.append( heavy_notice )
+        if truncated:
+            truncation_notice = (
+                f"response truncated at the {rules.RESPONSE_CHAR_BUDGET}-char budget — "
+                f"{len( tasks )} of {total} matching rows serialized; page with "
+                f"offset, or pass terse=true"
+            )
+            print( f"[task_query WARN] {truncation_notice}" )
+            warnings.append( truncation_notice )
+        # ⚠️ ADDED KEYS ONLY. `count` KEEPS ITS EXACT PRIOR MEANING (the length of
+        # THIS page) — /api/tasks is NOT internal-only and the multiplexer parses
+        # this shape on a 60s poll (see the standing comment on the count_only
+        # branch). Renaming or removing `count` breaks a live consumer; adding
+        # beside it does not. What changes is that the page length is no longer the
+        # ONLY number published — it was being read as the size of the result, and
+        # it never was.
+        return {
+            "tasks"     : tasks,
+            "count"     : len( tasks ),
+            "total"     : total,
+            "has_more"  : offset + len( tasks ) < total,
+            "truncated" : truncated,
+            "warnings"  : warnings,
+        }
 
 
 @router.get(

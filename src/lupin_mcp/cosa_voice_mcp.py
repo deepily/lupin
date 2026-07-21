@@ -2488,11 +2488,51 @@ def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str
 @mcp.tool
 def list_spawned_sessions() -> dict:
     """
-    **[READ — host-side]** List the reviewer sessions THIS manager spawned, each
-    with live/dead status probed from tmux.
+    **[READ — host-side]** List the sessions THIS manager spawned, on TWO axes:
+    LIVENESS (probed from tmux) and IDENTITY (read from each child's bridge).
+
+    ⚠️ THIS IS NOT A GENERAL HEALTH CHECK, and a live row is NOT proof of who is
+    sitting in it. The persona is written by the CHILD's SessionStart into the
+    child's own bridge file, well after the parent recorded the seat — so a seat
+    can be genuinely alive and genuinely nameless at the same time. Before you
+    address a seat by persona name, read `identity_complete`; if it is False,
+    `identity_warning` names every seat you must NOT address by name.
+
+    Per row, `persona_state` is one of:
+        "allocated"         — bridge found, persona named; `persona` is that name
+        "none"              — bridge found, persona explicitly null. The child
+                              wrote a bridge but has no persona in it.
+        "unknown_no_bridge" — no bridge on disk at all. Either the child is
+                              mid-boot (a real race — the parent writes the seat
+                              before the child writes its bridge) or its
+                              SessionStart never completed.
+
+    ⏱️ NEITHER of those two is a failure verdict by itself. Measured on a live
+    spawn: a HEALTHY child goes unknown_no_bridge → none → allocated in about
+    one second. Both states are normal at one second old and damning at forty
+    minutes old, and nothing on disk can tell those apart — so read them WITH
+    `age_seconds`. The state reports what is on disk; the age is your evidence.
+
+    📍 WHAT THIS ANSWERS, AND WHAT IT DOES NOT. This repairs the ROSTER's
+    identity axis only. A persona-less session is inconsistently visible across
+    the identity-bearing surfaces, and they contradict each other — measured on
+    one live session, simultaneously: this roster said alive/live, `dm_send`
+    said recipient_unresolved (listing 7 live peers and omitting it), and no
+    bridge existed for it at all. An identity-verified row here is NOT a promise
+    that the session is addressable by DM, and `identity_complete: true` says
+    nothing about the other surfaces. Do not read this tool as the fleet's
+    source of truth for identity; there isn't one.
+        "unreadable"        — bridge found but the persona record is malformed.
+                              Instrument failure, NOT an absent persona.
+    `persona` is null for every state but "allocated" — a name is only ever
+    returned when it was actually read, and a null persona always arrives with a
+    state explaining why.
 
     Returns:
-        dict: { sessions:[{session_name, requested_role, status, alive, model}], count, ... }
+        dict: { sessions:[{session_name, requested_role, status, alive, model,
+                           persona, persona_state, identity_verified, age_seconds}],
+                count, identity_complete, identity_warning,
+                unattributable_bridges, manager_session_id }
     """
     _wait_for_sender_id()
     from lupin_mcp import session_spawner
@@ -3268,13 +3308,22 @@ def _dm_get_impl( *, message_id, api_base_url, api_key, get_fn ):
     return { "status": "error", "reason": f"http_{resp.status_code}", "detail": resp.text[ :200 ] }
 
 
-def _dm_list_impl( *, thread_id, since, limit, api_base_url, api_key, get_fn ):
+def _dm_list_impl( *, thread_id, since, limit, api_base_url, api_key, get_fn,
+                   session_id=None, scope="session" ):
     """
     Testable core for `dm_list` — GET /api/dm/list (list/poll a thread or inbox).
+
+    Sends this session's own id so the server can scope the read to DMs actually
+    ADDRESSED here. The server authenticates a USER, not a session, so it cannot
+    derive that on its own — if the caller does not say who it is, the read is
+    account-wide and returns the whole fleet's traffic.
 
     Ensures:
         - missing api_key short-circuits to {"status":"error","reason":"missing_auth_header"}
         - params carry thread_id/since only when provided; limit always sent
+        - session_id is sent whenever known, so the DEFAULT read is session-scoped
+        - scope is sent only when it is "account" (the explicit wide read), so an
+          audit-width read is always an affirmative request, never a silent default
         - 200 → {"status":"ok", **list_json}
         - 400 → {"status":"error","reason":"bad_request","detail":...}
         - other status → {"status":"error","reason":"http_<code>","detail":...}
@@ -3289,6 +3338,10 @@ def _dm_list_impl( *, thread_id, since, limit, api_base_url, api_key, get_fn ):
         params[ "thread_id" ] = thread_id
     if since:
         params[ "since" ] = since
+    if session_id:
+        params[ "session_id" ] = session_id
+    if scope == "account":
+        params[ "scope" ] = "account"
 
     url = f"{api_base_url}/api/dm/list"
     try:
@@ -3388,22 +3441,58 @@ def dm_list(
     thread_id : Optional[ str ] = None,
     since     : Optional[ str ] = None,
     limit     : int             = 50,
+    scope     : str             = "session",
 ) -> dict:
     """
-    **[READ]** List or poll peer DMs — a thread or your inbox.
+    **[READ]** List or poll peer DMs addressed to THIS session — or, on request,
+    every DM on the account.
 
     With `thread_id`, returns that conversation oldest-first (read order). Without
-    it, returns your peer-DM inbox newest-first. `since` (an ISO-8601 timestamp)
-    tails only messages newer than that instant — the lightweight poll for new
-    replies. `limit` is clamped server-side to [1, 200].
+    it, returns your DMs newest-first. `since` (an ISO-8601 timestamp) tails only
+    messages newer than that instant — the lightweight poll for new replies.
+    `limit` is clamped server-side to [1, 200].
+
+    ⚠️ THIS TOOL USED TO SAY "your peer-DM inbox," AND THAT WAS FALSE. The
+    underlying store scopes DMs to a SERVICE ACCOUNT, not to a session, and the
+    write path currently stamps one account for the whole fleet — so an
+    unscoped read returns every session's traffic. Measured 2026-07-21: one
+    session's unscoped read returned 50 messages across 7 sender sessions with
+    ZERO addressed to it; another returned 200+ across 12 personas. On
+    2026-07-16 a careful seat read that output as her own mail and filed a
+    false cross-session finding within minutes. The label licensed a claim the
+    payload could not support (row 2565956b).
+
+    ⇒ `scope="session"` (the DEFAULT) now asks the server to return only DMs
+      ADDRESSED to this session, so the name and the payload finally agree.
+    ⇒ `scope="account"` is the deliberate wide read for audit/forensics. It is
+      never the silent outcome of a normal call — you have to ask for it.
+
+    🔎 READ THE RESPONSE'S `scope` FIELD, DO NOT ASSUME IT. If this session's id
+    cannot be resolved, the server CANNOT narrow the read and returns
+    `scope:"account"` — a wide result, honestly labelled. Presence of a DM in an
+    account-scoped result says only that it EXISTS, never that it was sent to
+    you. Each message carries `recipient_session_hash8` (the addressee) — use
+    that field to answer "was this for me?", never mere presence in the list.
+
+    ⚠️ NOTE THE `_hash8` SUFFIX — it is load-bearing. The addressee is persisted
+    as the recipient's FIRST 8 CHARACTERS, while `dm_send` returns a key called
+    `recipient_session` holding the FULL id. They are deliberately named
+    differently because they are different widths; comparing them directly will
+    not match. (You may still pass a full id as a filter — the server truncates
+    it for you.)
 
     Args:
         thread_id: a conversation id (thread view) or omit for the inbox view.
         since: ISO-8601 timestamp — return only messages created after it (poll).
         limit: max messages to return (default 50, capped at 200).
+        scope: "session" (default — only DMs addressed here) or "account"
+            (every DM on the account; an explicit, auditable wide read).
+            Anything else is REJECTED (422), never silently narrowed.
 
     Returns:
-        Success: {"status":"ok","thread_id","since","count","messages":[ ... ]}.
+        Success: {"status":"ok","thread_id","since","count","scope",
+                  "recipient_session_hash8",
+                  "messages":[ {... ,"recipient_session_hash8"} ]}.
         Bad `since`: {"status":"error","reason":"bad_request","detail":...}.
         Transport/auth failure: {"status":"error","reason":...,"detail":...}.
     """
@@ -3414,6 +3503,8 @@ def dm_list(
         api_base_url = os.environ.get( "LUPIN_API_URL", "http://localhost:7999" ),
         api_key      = _mcp_outbound_api_key(),
         get_fn       = requests.get,
+        session_id   = SESSION_ID,
+        scope        = scope,
     )
 
 
@@ -3785,9 +3876,25 @@ def task_query(
             you invisible on the board.
 
     Returns:
-        { tasks: [...], count } verbatim (terse rows when terse=True), or an
-        error dict — an unscoped over-threshold pull without unscoped_audit
-        surfaces { status: "error", http_status: 400, detail: <the two fixes> }.
+        { tasks, count, total, has_more, truncated, warnings } verbatim (terse
+        rows when terse=True), or an error dict — an unscoped over-threshold pull
+        without unscoped_audit surfaces { status: "error", http_status: 400,
+        detail: <the two fixes> }.
+
+        ⚠️ READ `total`, NOT `count`. `count` is the length of THIS PAGE and
+        saturates at `limit` (default 100). It was being read as the size of the
+        result and never was: measured 2026-07-21, a properly-SCOPED query
+        reported count:100 while offset=100 returned 100 more rows. `total` is the
+        true count of rows matching your filters, page-independent. `has_more`
+        (= offset + count < total) is the one field to branch on before concluding
+        you have seen everything.
+
+        `truncated` is True when a CHARACTER budget — not the row limit — stopped
+        serialization early, because a row cap is not a size cap: the same 100-row
+        page measures ~21k chars terse and ~424k full. `warnings` carries those
+        notices to YOU rather than to the server's stdout, which is where they
+        used to go — an audience that is not the one paying the token weight.
+        Both truncation and page-saturation are announced; neither is ever silent.
     """
     return task_query_impl(
         api_base_url        = _get_server_url(),

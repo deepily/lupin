@@ -59,7 +59,14 @@ export interface TaskMutation {
 // than 400ing once the store exceeds the threshold. include_terminal=true:
 // preserve the documented "any status" composite (the renderer, not the server,
 // filters to open) — the human's view is never silently truncated.
-export const TASK_LIST_ENDPOINT         = "/api/tasks?limit=500&unscoped_audit=true&include_terminal=true";
+// char_budget=0: the explicit opt-out from the server's response BYTE budget
+// (mini-plan 02, 2026-07-21). That budget defaults to 100k chars and exists to
+// protect an agent from pulling ~97k tokens into a context — but this poll is
+// the human's deliberate full-board sweep, and it measured 30 of 1100 rows
+// under the default. The invariant three lines above ("never silently
+// truncated") is the reason this escape is named here rather than the budget
+// being widened for everyone.
+export const TASK_LIST_ENDPOINT         = "/api/tasks?limit=500&unscoped_audit=true&include_terminal=true&char_budget=0";
 export const TASK_LIST_POLL_INTERVAL_MS = 60000;   // 60s auto-poll (fleet parity)
 
 export interface TaskListStore {

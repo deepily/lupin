@@ -107,6 +107,23 @@ UNSCOPED_QUERY_THRESHOLD = 50
 # non-terse WEIGHT), same number by coincidence, not by coupling.
 NONTERSE_WARN_THRESHOLD = 50
 
+# The RESPONSE BYTE BUDGET (mini-plan 02 T3, 2026-07-21). `limit` caps ROWS, and a
+# row cap is NOT a size cap: measured 2026-07-21, the SAME 100-row default page is
+# 21,379 chars terse and 424,209 chars full, because rows carry multi-KB bodies with
+# stacked amendments. The one knob that existed governed the wrong quantity, so a
+# properly-SCOPED query (owner_persona="mr radio" + include_terminal) still returned
+# 387,119 chars ~= 97k tokens into a caller's context.
+#
+# Serialization stops once the accumulated payload reaches this many characters and
+# the response says so (`truncated: true`) alongside the honest `total`. It is a
+# SECOND, independent bound beside `limit` — neither subsumes the other, and NEITHER
+# may ever stop silently.
+#
+# 100,000 chars ~= 25k tokens: comfortably above the heaviest measured TERSE page
+# (21,379), so the cheap shape is never truncated, while the expensive shape is
+# capped at roughly a quarter of the blowup that motivated this.
+RESPONSE_CHAR_BUDGET = 100_000
+
 # "scoped" = ANY genuinely-narrowing filter present. Broadened past María's literal
 # four (owner_persona/status/item_class/project) to also protect the arbiter's
 # operator-gate sweep (gate_class), manager board-audits (accountable_manager), and
@@ -476,7 +493,21 @@ def validate_create_status( status, blocked_by, next_chase_ts ) -> list:
 # The soft title-length cap (handoff #5 / D4): ~60 chars, applied IDENTICALLY to
 # this store-side guard AND each client's render-truncation backstop (one number
 # at every layer). Tune later if real rows warrant.
+#
+# ⚠️ "One number at every layer" was FALSE from the day PATCH /api/tasks/{id}
+# gained an editable `title` until 2026-07-21: that path never called this guard,
+# so the same string was capped at 60 through create and unbounded through PATCH.
+# Both write paths now route through soft_guard_title (bug 28fc1fb4). The claim is
+# true again — it is recorded here rather than quietly corrected because a comment
+# that was wrong for months is evidence about how this file gets maintained.
 TITLE_SOFT_CAP = 60
+
+# The marker the relocated title overflow is filed under when the body is NOT
+# empty (bug 28fc1fb4, 2026-07-21). It is a literal, greppable line rather than
+# a bare prepend so the overflow is recoverable BY SEARCH across the whole store
+# — a reader who never saw the write can still find every row whose title was
+# cut, and reconstruct the original from `title + overflow`.
+TITLE_OVERFLOW_MARKER = "[title overflow — the stored title was trimmed at the cap; the original continues here]"
 
 
 def soft_guard_title( title, body, cap=TITLE_SOFT_CAP ):
@@ -497,19 +528,44 @@ def soft_guard_title( title, body, cap=TITLE_SOFT_CAP ):
         - body is the candidate body value — a string or None
         - cap is a positive int (the shared ~60 char limit)
 
+    THE OVERFLOW IS NEVER DISCARDED (bug 28fc1fb4, fixed 2026-07-21). It used to
+    be relocated ONLY when the body was empty; a non-empty body meant the
+    remainder was dropped at exit 0, with `overflow_moved_to_body: false` as the
+    sole record that anything was lost. That condition ran BACKWARDS AGAINST NEED:
+    it preserved the overflow for title-only rows — where the title IS the content
+    and least is at stake — and discarded it for every row carrying a body, which
+    is every substantive filing in the store. Sam recorded the same fact from the
+    other side without naming it as the mechanism: "the bodies survived only
+    because I habitually put everything in the body." The guard protected the
+    careless filer and robbed the careful one.
+
+    The original ruling — "an existing body always wins" — forbade CLOBBERING a
+    body, and it still holds: the pre-existing body is preserved verbatim, in
+    full, and the overflow is filed ABOVE it under TITLE_OVERFLOW_MARKER. Adding
+    to a body is not overwriting one, so nothing about that ruling is reversed.
+
+    Requires:
+        - title is a non-empty string (the column is NOT NULL; the wire model
+          already rejects an empty title)
+        - body is the candidate body value — a string or None
+        - cap is a positive int (the shared ~60 char limit)
+
     Ensures:
         - title length <= cap -> returns ( title, body, None ): a strict no-op,
-          nothing trimmed, no advisory
+          nothing trimmed, no advisory, body byte-for-byte unchanged
         - title length  > cap -> returns ( title[:cap], new_body, advisory ):
             * the stored title is trimmed to EXACTLY cap chars
-            * when body is empty (None / whitespace-only): the overflow
-              (title[cap:]) is moved into body, so trimmed-title + body
-              reconstructs the original — NOTHING is lost
-            * when body is non-empty: body is left UNTOUCHED (never clobbered);
-              the overflow is dropped from the title only (the ruled tradeoff —
-              an existing body always wins)
-            * advisory is a dict { trimmed, original_length, cap,
-              overflow_moved_to_body } describing what happened
+            * when body is empty (None / whitespace-only): new_body IS the
+              overflow (title[cap:]) — unmarked, because there is nothing for it
+              to be distinguished FROM
+            * when body is non-empty: new_body is the marker line + the overflow
+              + the ORIGINAL BODY VERBATIM, in that order. The pre-existing body
+              is never truncated, reordered, or rewritten
+            * `title + <the overflow substring of new_body>` reconstructs the
+              original title EXACTLY, on BOTH arms — nothing is ever lost
+            * advisory is { trimmed, original_length, cap,
+              overflow_moved_to_body }, and overflow_moved_to_body is now True
+              on BOTH arms because both arms relocate
         - never raises; never returns a title longer than cap
     """
     if len( title ) <= cap:
@@ -523,9 +579,11 @@ def soft_guard_title( title, body, cap=TITLE_SOFT_CAP ):
         "trimmed"               : True,
         "original_length"       : len( title ),
         "cap"                   : cap,
-        "overflow_moved_to_body": body_is_empty,
+        "overflow_moved_to_body": True,
     }
-    return ( trimmed, overflow, advisory ) if body_is_empty else ( trimmed, body, advisory )
+    if body_is_empty:
+        return trimmed, overflow, advisory
+    return trimmed, f"{TITLE_OVERFLOW_MARKER}\n{overflow}\n\n{body}", advisory
 
 
 # ---------------------------------------------------------------------------

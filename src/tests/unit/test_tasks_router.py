@@ -76,6 +76,11 @@ def make_event( item_id, **overrides ):
 def repo( monkeypatch ):
     """Patch the router's get_db + TaskRepository seams; return the fake repo."""
     fake = MagicMock()
+    # `total` (mini-plan 02 T1) is a REAL int on the list path — a bare MagicMock
+    # would make `offset + count < total` a TypeError. Deliberately NOT derived
+    # from query_tasks.return_value: a fixture that computed the total from the
+    # page would hard-code the very identity these tests exist to falsify.
+    fake.count_tasks.return_value = 0
 
     @contextmanager
     def _fake_get_db():
@@ -169,15 +174,20 @@ def test_create_over_cap_title_trimmed_overflow_to_empty_body( client, repo ):
     assert kwargs[ "title" ] == "T" * 60 and kwargs[ "body" ] == "T" * 30   # overflow → body
 
 
-def test_create_over_cap_title_with_body_trims_only( client, repo ):
-    # Over-cap title + existing body: title trimmed, body left UNTOUCHED.
+def test_create_over_cap_title_with_body_RELOCATES_overflow( client, repo ):
+    # bug 28fc1fb4 — this asserted `overflow_moved_to_body is False` and passed,
+    # which is how a silent data-loss path kept a green test beside it. The
+    # overflow now survives ABOVE the pre-existing body, which is preserved whole.
     repo.create_item.return_value = make_item()
     r = client.post( "/api/tasks", json=dict( _CREATE_BODY, title="W" * 80, body="keep me" ) )
     assert r.status_code == 201
     guard = r.json()[ "title_guard" ]
-    assert guard[ "overflow_moved_to_body" ] is False
+    assert guard[ "overflow_moved_to_body" ] is True
     kwargs = repo.create_item.call_args.kwargs
-    assert kwargs[ "title" ] == "W" * 60 and kwargs[ "body" ] == "keep me"   # body never clobbered
+    assert kwargs[ "title" ] == "W" * 60
+    assert kwargs[ "body" ].endswith( "keep me" )                # body never clobbered
+    assert "W" * 20 in kwargs[ "body" ]                          # ...and the overflow survived
+    assert kwargs[ "title" ] + "W" * 20 == "W" * 80              # round-trips to the original
 
 
 def test_create_rejects_bad_enums_with_all_violations( client, repo ):
@@ -516,7 +526,6 @@ def test_query_terse_returns_glance_projection_only( client, repo ):
     assert row[ "park_reason_stale" ] is False                # a never-parked row is never stale
     assert row[ "priority" ] == "P1" and row[ "status" ] == "queued"
     repo.query_tasks.assert_called_once()                    # rows ARE materialized (not count mode)
-    repo.count_tasks.assert_not_called()
 
 
 def test_query_terse_serializes_nullable_next_chase_ts( client, repo ):
@@ -608,7 +617,11 @@ def test_breakdown_NEVER_reaches_the_full_row_response( client, repo ):
 
     assert r.status_code == 200
     assert "breakdown" not in r.json(), "breakdown leaked into the full-row shape the multiplexer parses"
-    assert set( r.json().keys() ) == { "tasks", "count" }
+    # The exact-set match SURVIVES mini-plan 02 — it just grew by the four ADDED
+    # keys. `tasks` and `count` are still here, still meaning exactly what they
+    # meant, which is the half of this guard the multiplexer depends on; the
+    # exactness is the half that catches the next unannounced key.
+    assert set( r.json().keys() ) == { "tasks", "count", "total", "has_more", "truncated", "warnings" }
     repo.count_tasks_by_status.assert_not_called()             # not even computed off the count path
 
 
@@ -634,7 +647,9 @@ def test_query_passes_all_filters_through( client, repo ):
         "limit"               : 7,
         "offset"              : 3,
     } )
-    assert r.status_code == 200 and r.json() == { "tasks": [ ], "count": 0 }
+    assert r.status_code == 200 and r.json() == {
+        "tasks": [ ], "count": 0, "total": 0, "has_more": False, "truncated": False, "warnings": [ ],
+    }
     kwargs = repo.query_tasks.call_args.kwargs
     assert kwargs[ "owner_persona" ] == "krishna" and kwargs[ "gate_class" ] == "operator"
     assert kwargs[ "urgency" ] == "urgent"
@@ -723,6 +738,235 @@ def test_query_no_warn_on_small_nonterse_pull( client, repo, capsys ):
     repo.query_tasks.return_value = [ make_item(), make_item() ]
     client.get( "/api/tasks" )
     assert "[task_query WARN]" not in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# GET /api/tasks — TRUTHFUL ENVELOPE (mini-plan 02, 2026-07-21)
+#
+# The defect: `count` is the length of THIS PAGE, published under a name every
+# caller reads as the SIZE OF THE RESULT. Measured live on 2026-07-21 — a scoped
+# query (owner_persona="mr radio" + include_terminal) reported count:100 while
+# offset=100 returned 100 more rows, with no total / has_more / truncated to say
+# so. A caller who read it and stopped had been told a false fact about the world.
+# ---------------------------------------------------------------------------
+
+def test_ARM_H_scoped_query_that_misreported_now_admits_more_rows_exist( client, repo ):
+    """
+    AC-1 — THE REGRESSION TEST FOR THE WHOLE ROW.
+
+    This is the EXACT query that misreported on 2026-07-21: owner_persona="mr radio"
+    + include_terminal, full rows, saturating the 100-row default page against a
+    store holding more. It used to answer `count: 100` and nothing else. It now has
+    to admit that more rows exist.
+    """
+    repo.query_tasks.return_value  = [ make_item( owner_persona="mr radio" ) for _ in range( 100 ) ]
+    repo.count_tasks.return_value  = 387                       # the store holds far more than one page
+
+    r = client.get( "/api/tasks", params={ "owner_persona": "mr radio", "include_terminal": "true" } )
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body[ "has_more" ] is True                           # the fact the old envelope withheld
+    assert body[ "total" ] == 387
+    assert body[ "total" ] > body[ "count" ]                    # count was NEVER the size of the result
+    assert body[ "count" ] == 100                               # ...and it still means EXACTLY what it did
+
+
+def test_result_that_fits_one_page_reports_no_more( client, repo ):
+    # AC-2. The honest negative arm: when the page IS the result, has_more is False
+    # and total == count. Without this the fix could be a constant `true` and pass.
+    repo.query_tasks.return_value = [ make_item(), make_item(), make_item() ]
+    repo.count_tasks.return_value = 3
+
+    body = client.get( "/api/tasks", params={ "owner_persona": "krishna" } ).json()
+
+    assert body[ "has_more" ] is False
+    assert body[ "total" ] == body[ "count" ] == 3
+    assert body[ "truncated" ] is False
+
+
+def test_has_more_accounts_for_offset( client, repo ):
+    # has_more = offset + count < total, NOT count < total: page 2 of 3 pages must
+    # still say "more", and the LAST page must not.
+    repo.query_tasks.return_value = [ make_item() for _ in range( 10 ) ]
+    repo.count_tasks.return_value = 25
+
+    mid = client.get( "/api/tasks", params={ "owner_persona": "krishna", "offset": 10 } ).json()
+    assert mid[ "has_more" ] is True                            # 10 + 10 < 25
+
+    repo.query_tasks.return_value = [ make_item() for _ in range( 5 ) ]
+    last = client.get( "/api/tasks", params={ "owner_persona": "krishna", "offset": 20 } ).json()
+    assert last[ "has_more" ] is False                          # 20 + 5 == 25, nothing beyond
+
+
+def test_total_is_a_true_count_NOT_derived_from_the_page( client, repo ):
+    """
+    The anti-tautology guard. `total` must come from a COUNT(*) over the same
+    filters — page-independent, limit/offset deliberately NOT forwarded. A `total`
+    derived from len(tasks) would make has_more permanently False and every
+    assertion above an unfalsifiable green.
+    """
+    repo.query_tasks.return_value = [ make_item() for _ in range( 4 ) ]
+    repo.count_tasks.return_value = 91                          # deliberately unrelated to the page
+
+    body = client.get( "/api/tasks", params={ "owner_persona": "krishna", "limit": 4, "offset": 8 } ).json()
+
+    assert body[ "total" ] == 91 and body[ "count" ] == 4       # the two numbers are INDEPENDENT
+    kwargs = repo.count_tasks.call_args.kwargs
+    assert "limit" not in kwargs and "offset" not in kwargs      # a total is page-independent
+    assert kwargs[ "owner_persona" ] == "krishna"                # ...over the SAME filter set
+
+
+def test_total_forwards_the_identical_filter_set_as_the_page_query( client, repo ):
+    # `total` counts what the page selected FROM. A filter that reaches query_tasks
+    # but not count_tasks would produce a total for a different question entirely.
+    repo.query_tasks.return_value = [ ]
+    client.get( "/api/tasks", params={
+        "owner_persona"       : "krishna",
+        "status"              : "queued",
+        "gate_class"          : "operator",
+        "urgency"             : "urgent",
+        "accountable_manager" : "tiberius",
+        "project"             : "lupin",
+        "item_class"          : "task",
+        "correlation_key"     : "cc-task:sid:5",
+        "include_terminal"    : "true",
+        "owed_only"           : "true",
+        "hide_parked"         : "false",
+    } )
+    page  = repo.query_tasks.call_args.kwargs
+    total = repo.count_tasks.call_args.kwargs
+    shared = set( total.keys() )
+    assert shared, "count_tasks was called with no filters at all"
+    for key in shared:
+        assert total[ key ] == page[ key ], f"filter '{key}' differs between the page and its total"
+
+
+def test_heavy_pull_notice_reaches_the_CALLER_and_the_log_survives( client, repo, capsys ):
+    """
+    AC-4 (T2). The heavy-pull nudge used to go to the server's STDOUT — an audience
+    that is not the party paying the token weight and cannot act on it. A warning
+    delivered to someone who cannot act on it is not a warning. It now rides the
+    response body TOO; the log line is kept, not moved.
+    """
+    over = tasks.rules.NONTERSE_WARN_THRESHOLD + 1
+    repo.query_tasks.return_value = [ make_item() for _ in range( over ) ]
+
+    body = client.get( "/api/tasks", params={ "owner_persona": "krishna" } ).json()
+
+    assert any( "terse=true" in w for w in body[ "warnings" ] )   # the CALLER is told
+    assert "[task_query WARN]" in capsys.readouterr().out          # the operator still is too
+    assert body[ "count" ] == over                                # warn-not-fail: rows still returned
+
+
+def test_no_warnings_on_a_small_terse_pull( client, repo ):
+    # The quiet arm — `warnings` is an empty list, never absent, never chatty.
+    repo.query_tasks.return_value = [ make_item(), make_item() ]
+    body = client.get( "/api/tasks", params={ "terse": "true" } ).json()
+    assert body[ "warnings" ] == [ ]
+
+
+def test_byte_budget_truncates_LOUDLY_with_the_honest_total( client, repo, monkeypatch, capsys ):
+    """
+    AC-5 (T3). `limit` caps ROWS, and a row cap is not a size cap — the same 100-row
+    page measured 21,379 chars terse and 424,209 full. The byte bound stops
+    serialization early, and the stop is NEVER silent: `truncated` is true, the
+    warning names the budget, and `total` still reports every matching row.
+    """
+    repo.query_tasks.return_value = [ make_item( body="x" * 400 ) for _ in range( 50 ) ]
+    repo.count_tasks.return_value = 50
+    monkeypatch.setattr( tasks.rules, "RESPONSE_CHAR_BUDGET", 3_000 )
+
+    body = client.get( "/api/tasks", params={ "owner_persona": "krishna" } ).json()
+
+    assert body[ "truncated" ] is True
+    assert body[ "count" ] < 50                                  # rows WERE dropped
+    assert body[ "total" ] == 50                                 # ...and the response says how many exist
+    assert body[ "has_more" ] is True
+    assert any( "truncated" in w for w in body[ "warnings" ] )   # NEVER a silent stop
+    assert "[task_query WARN]" in capsys.readouterr().out
+
+
+def test_byte_budget_always_admits_at_least_one_oversized_row( client, repo, monkeypatch ):
+    # A budget that can return ZERO rows for a non-empty result is a pagination dead
+    # end — the caller advances offset forever and never makes progress. One
+    # oversized row plus truncated:true is honest AND advanceable.
+    repo.query_tasks.return_value = [ make_item( body="y" * 5_000 ), make_item() ]
+    repo.count_tasks.return_value = 2
+    monkeypatch.setattr( tasks.rules, "RESPONSE_CHAR_BUDGET", 10 )
+
+    body = client.get( "/api/tasks", params={ "owner_persona": "krishna" } ).json()
+
+    assert body[ "count" ] == 1 and body[ "truncated" ] is True
+
+
+def test_char_budget_zero_opts_the_DELIBERATE_SWEEP_out_of_truncation( client, repo, monkeypatch ):
+    """
+    THE ESCAPE, mirroring unscoped_audit. The multiplexer's dashboard poll
+    (limit=500 + unscoped_audit=true) documents its own invariant in
+    TaskListStore.ts — "the human's view is never silently truncated" — and the
+    default budget cut it from 1100 available rows to 30 (measured live,
+    2026-07-21). A protection that quietly shrinks the caller who asked for the
+    whole board ON PURPOSE has become the defect it was built to prevent.
+    """
+    repo.query_tasks.return_value = [ make_item( body="q" * 2_000 ) for _ in range( 30 ) ]
+    repo.count_tasks.return_value = 30
+    monkeypatch.setattr( tasks.rules, "RESPONSE_CHAR_BUDGET", 5_000 )
+
+    capped = client.get( "/api/tasks", params={ "unscoped_audit": "true" } ).json()
+    assert capped[ "truncated" ] is True and capped[ "count" ] < 30      # the default protects
+
+    swept = client.get( "/api/tasks", params={ "unscoped_audit": "true", "char_budget": 0 } ).json()
+    assert swept[ "truncated" ] is False and swept[ "count" ] == 30      # ...and the escape releases
+    assert swept[ "warnings" ] == [ ] or all( "truncated" not in w for w in swept[ "warnings" ] )
+
+
+def test_char_budget_override_is_honored_over_the_default( client, repo, monkeypatch ):
+    # A non-zero char_budget REPLACES the default in both directions — a caller can
+    # tighten it as well as loosen it. Escapable by a caller who names the escape,
+    # never escapable by accident (the default is what an unaware caller gets).
+    repo.query_tasks.return_value = [ make_item( body="w" * 1_000 ) for _ in range( 20 ) ]
+    repo.count_tasks.return_value = 20
+    monkeypatch.setattr( tasks.rules, "RESPONSE_CHAR_BUDGET", 1_000_000 )   # default would NOT truncate
+
+    body = client.get( "/api/tasks", params={ "owner_persona": "krishna", "char_budget": 2_500 } ).json()
+
+    assert body[ "truncated" ] is True and body[ "count" ] < 20
+
+
+def test_char_budget_rejects_a_negative_value( client, repo ):
+    # ge=0 at the wire — a negative budget is a caller bug surfaced as 422, never
+    # silently coerced into "unbounded" (which is what 0 means, deliberately).
+    r = client.get( "/api/tasks", params={ "owner_persona": "krishna", "char_budget": -1 } )
+    assert r.status_code == 422
+
+
+def test_small_narrow_query_is_unchanged_except_for_the_added_keys( client, repo ):
+    """
+    AC-6 — THE NEGATIVE CONTROL. The everyday scoped query must be byte-for-byte
+    what it was, plus the four new keys. If this arm ever truncates or drops a
+    field, the size cap has started charging the callers it was meant to protect.
+    """
+    items = [ make_item( body="a normal body" ), make_item( status="claimed" ) ]
+    repo.query_tasks.return_value = items
+    repo.count_tasks.return_value = 2
+
+    body = client.get( "/api/tasks", params={ "owner_persona": "krishna" } ).json()
+
+    assert body[ "tasks" ] == [ tasks._serialize_item( i ) for i in items ]   # rows IDENTICAL
+    assert body[ "count" ] == 2
+    assert body[ "truncated" ] is False and body[ "warnings" ] == [ ]
+
+
+def test_terse_page_at_the_measured_size_does_NOT_truncate( client, repo ):
+    # The budget was sized so the CHEAP shape is never the thing it punishes: the
+    # heaviest terse page measured 21,379 chars against a 100,000-char budget.
+    repo.query_tasks.return_value = [ make_item( body="z" * 4_000 ) for _ in range( 100 ) ]
+    repo.count_tasks.return_value = 100
+
+    body = client.get( "/api/tasks", params={ "owner_persona": "krishna", "terse": "true" } ).json()
+
+    assert body[ "truncated" ] is False and body[ "count" ] == 100
 
 
 @pytest.mark.parametrize( "params", [
@@ -930,6 +1174,113 @@ def test_patch_happy_path_returns_item_and_event( client, repo ):
     assert kwargs[ "actor" ] == "krishna a38ee857" and kwargs[ "authority" ] == "standing"
     repo.get_by_id_for_update.assert_called_once()               # N3 row-lock parity
     repo.get_by_id.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# PATCH — the SECOND write path (bug 28fc1fb4, 2026-07-21)
+#
+# This path whitelisted `title` and never called soft_guard_title, so the SAME
+# string was capped at 60 through create and unbounded through PATCH — two write
+# paths, two contradictory contracts, neither announced. The door widened when
+# task_edit (3ac79d1d, 2026-07-21) shipped over PATCH.
+# ---------------------------------------------------------------------------
+
+def test_patch_over_cap_title_is_guarded_by_THE_SAME_helper_as_create( client, repo ):
+    # ONE HELPER, BOTH DOORS. An over-cap PATCH title is trimmed to the cap and
+    # its overflow relocated into the body — identical treatment to create, and
+    # reported through the identical `title_guard` advisory.
+    item = make_item( title="old title", body="the existing body" )
+    repo.get_by_id_for_update.return_value = item
+    repo.apply_patch.return_value = make_event( item.id, transition="patched" )
+    long_title = "P" * 95
+
+    r = client.patch( f"/api/tasks/{item.id}", json={ "title": long_title, "actor": "krishna a38ee857" } )
+
+    assert r.status_code == 200
+    guard = r.json()[ "title_guard" ]
+    assert guard == {
+        "trimmed"               : True,
+        "original_length"       : 95,
+        "cap"                   : tasks.rules.TITLE_SOFT_CAP,
+        "overflow_moved_to_body": True,
+    }
+    fields = repo.apply_patch.call_args.args[ 1 ]
+    assert fields[ "title" ] == "P" * 60
+    assert fields[ "title" ] + "P" * 35 == long_title             # round-trips EXACTLY
+    assert fields[ "body" ].endswith( "the existing body" )       # the row's body, preserved
+
+
+def test_patch_relocates_overflow_into_the_body_THE_PATCH_IS_WRITING( client, repo ):
+    """
+    When one PATCH sets BOTH title and body, the overflow must land in the
+    INCOMING body — not the row's current one. Filing it into text the same call
+    is about to overwrite would be a relocation that loses the thing it saved.
+    """
+    item = make_item( title="old", body="about to be replaced" )
+    repo.get_by_id_for_update.return_value = item
+    repo.apply_patch.return_value = make_event( item.id, transition="patched" )
+
+    r = client.patch( f"/api/tasks/{item.id}", json={
+        "title": "R" * 70, "body": "the NEW body", "actor": "krishna a38ee857",
+    } )
+
+    fields = repo.apply_patch.call_args.args[ 1 ]
+    assert r.status_code == 200
+    assert "R" * 10 in fields[ "body" ]                           # overflow survived...
+    assert fields[ "body" ].endswith( "the NEW body" )            # ...above the INCOMING body
+    assert "about to be replaced" not in fields[ "body" ]         # never the stale one
+
+
+def test_patch_under_cap_title_is_a_strict_no_op( client, repo ):
+    # THE NEGATIVE CONTROL, byte-for-byte. A normal title edit must not acquire a
+    # body delta: a `patched` audit event claiming a body change that never
+    # happened is the audit trail lying about what it recorded.
+    item = make_item( title="old title", body="untouched body" )
+    repo.get_by_id_for_update.return_value = item
+    repo.apply_patch.return_value = make_event( item.id, transition="patched" )
+
+    r = client.patch( f"/api/tasks/{item.id}", json=_PATCH_BODY )
+
+    assert r.json()[ "title_guard" ] is None
+    fields = repo.apply_patch.call_args.args[ 1 ]
+    assert fields == { "title": "edited title" }                  # NO body key manufactured
+
+
+def test_patch_without_a_title_never_touches_the_body( client, repo ):
+    # A non-title PATCH must not route through the guard at all.
+    item = make_item( body="untouched body" )
+    repo.get_by_id_for_update.return_value = item
+    repo.apply_patch.return_value = make_event( item.id, transition="patched" )
+
+    r = client.patch( f"/api/tasks/{item.id}", json={ "priority": "P1", "actor": "krishna a38ee857" } )
+
+    assert r.json()[ "title_guard" ] is None
+    assert repo.apply_patch.call_args.args[ 1 ] == { "priority": "P1" }
+
+
+def test_create_and_patch_produce_THE_SAME_title_for_the_same_input( client, repo ):
+    """
+    THE CONTRACT-PARITY ASSERTION — the one that would have caught the split.
+
+    The defect was not that either path was wrong in isolation; it was that the
+    two disagreed, silently. This drives the identical over-cap title through
+    BOTH doors and requires the stored title and advisory to match. It goes red
+    the moment one path is changed without the other.
+    """
+    long_title = "S" * 88
+    shared_body = "a body on both paths"
+
+    repo.create_item.return_value = make_item()
+    created = client.post( "/api/tasks", json=dict( _CREATE_BODY, title=long_title, body=shared_body ) )
+
+    item = make_item( body=shared_body )
+    repo.get_by_id_for_update.return_value = item
+    repo.apply_patch.return_value = make_event( item.id, transition="patched" )
+    patched = client.patch( f"/api/tasks/{item.id}", json={ "title": long_title, "actor": "krishna a38ee857" } )
+
+    assert created.json()[ "title_guard" ] == patched.json()[ "title_guard" ]
+    assert repo.create_item.call_args.kwargs[ "title" ] == repo.apply_patch.call_args.args[ 1 ][ "title" ]
+    assert repo.create_item.call_args.kwargs[ "body" ]  == repo.apply_patch.call_args.args[ 1 ][ "body" ]
 
 
 def test_patch_empty_editable_set_rejected( client, repo ):
