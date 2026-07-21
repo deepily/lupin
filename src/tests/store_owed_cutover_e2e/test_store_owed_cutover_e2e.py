@@ -79,7 +79,11 @@ def drive_oracle( monkeypatch, e2e_server, tmp_path ):
         monkeypatch.setattr( stop, "resolve_project_name", lambda: project )
 
         # ── neutralize non-seam side-effects ───────────────────────────────────
-        monkeypatch.setattr( stop, "read_hold", lambda *a, **k: None )
+        # The hold seam MOVED: stop imports `read_hold_resilient` (bug 1789f197 —
+        # resolve across both the session cwd AND the project root), not the old
+        # `read_hold`. Patch follows the seam. `None` is the REAL return shape for
+        # "no hold on file", so this neutralizes without inventing a shape.
+        monkeypatch.setattr( stop, "read_hold_resilient", lambda *a, **k: None )
         monkeypatch.setattr( stop, "get_poke_count", lambda _sid: 0 )
         monkeypatch.setattr( stop, "increment_poke_count", _noop )
         monkeypatch.setattr( stop, "_notify_cap_reached", _noop )
@@ -156,13 +160,39 @@ def test_s1_store_is_the_source( clean_tasks, drive_oracle, tmp_path ):
 
     assert result[ "owed_items" ] == store_owed == 7
     assert result[ "work_owed" ] is True
-    # receipt assertions: count_only flowed over real HTTP for BOTH owed statuses
-    counts_only = [ r for r in result[ "http_new" ] if r[ "query" ].get( "count_only" ) == "true" ]
-    assert len( counts_only ) == 2, result[ "http_new" ]
-    assert { r[ "query" ][ "status" ] for r in counts_only } == { "queued", "in_progress" }
-    assert all( r[ "query" ][ "owner_persona" ] == persona for r in counts_only )
-    assert all( r[ "query" ][ "project" ] == project for r in counts_only )
+    # ── receipt assertions — scoped by OWNER FIELD, not by request count ───────
+    # SHAPE CHANGE (2026-07-19 PARKED build): the old "one count_only GET per
+    # owed status, summed client-side" loop is DELETED — query_owed now issues
+    # ONE request behind `owed_only=true` and the SERVER owns the status set
+    # (task_store_client.query_owed docstring). The second count_only request on
+    # the wire is NOT ours: it is Face A's manager-backlog read
+    # (_backlog_count_from_store, `accountable_manager=`), a different consumer.
+    #
+    # ⚠️ The assertion this replaces (`len( counts_only ) == 2`) went on PASSING
+    # across that change while measuring something else entirely — two CONSUMERS
+    # instead of two STATUSES. It is restated by owner field so it can no longer
+    # be satisfied by an unrelated caller appearing on the wire.
+    owner_counts = [ r for r in result[ "http_new" ]
+                     if r[ "query" ].get( "count_only" ) == "true"
+                     and "owner_persona" in r[ "query" ] ]
+    assert len( owner_counts ) == 1, result[ "http_new" ]
+    owner_q = owner_counts[ 0 ][ "query" ]
+    assert owner_q[ "owed_only" ]      == "true"
+    assert owner_q[ "owner_persona" ]  == persona
+    assert owner_q[ "project" ]        == project
+    # TRIPWIRE — NO DEMONSTRATED RED, and that is stated rather than implied.
+    # It guards a silent RESTORATION of the retired per-status client loop. Every
+    # mutant that re-adds a client-side `status=` was caught EARLIER by the count
+    # assertions above, because the server still HONORS status (measured: adding
+    # status=queued to an owed_only request dropped the count 7 -> 4). So this
+    # line can only fire in a future where the server stops honoring `status`
+    # while a client re-adds it — a scenario that cannot be simulated from the
+    # client today. Kept as a cheap tripwire, NOT counted as armed coverage.
+    assert "status" not in owner_q, \
+        "owed status set is SERVER-owned behind owed_only; a client-side status= is the deleted shape"
     assert len( result[ "sql_new" ] ) >= 2, "expected real COUNT(*) SQL on lupin_db_test"
+    assert any( "owner_persona" in s[ "statement" ] for s in result[ "sql_new" ] ), \
+        "the owed COUNT(*) must be owner-scoped SQL, not inferred from the backlog read"
 
 
 # ── S2 — transcript replay is DEAD under the flag (inverse) ─────────────────────
@@ -219,9 +249,17 @@ def test_s5_flag_off_negative_control( clean_tasks, drive_oracle, tmp_path ):
 
     assert result[ "owed_items" ] == transcript_owed == 5   # transcript replay IS the source under OFF
     assert result[ "work_owed" ] is True
-    # the store must NOT have been touched under the flag-OFF path
-    assert result[ "http_new" ] == [ ], "flag OFF must not hit the store over HTTP"
-    assert result[ "sql_new" ] == [ ], "flag OFF must not run a store COUNT"
+    # The store must not have been read FOR THE OWED COUNT under flag OFF.
+    # NOT "no HTTP at all": Face A's manager-backlog read
+    # (_backlog_count_from_store, `accountable_manager=`) is a DIFFERENT consumer
+    # and is deliberately NOT gated by owed_source_from_store — the flag governs
+    # the owed-count SOURCE, not every store read in the hook. The control is
+    # therefore stated by owner field: an owner_persona-scoped count IS the
+    # cutover read, and under OFF there must be none of them.
+    owner_http = [ r for r in result[ "http_new" ] if "owner_persona" in r[ "query" ] ]
+    assert owner_http == [ ], "flag OFF must not read the OWED COUNT from the store over HTTP"
+    owner_sql  = [ s for s in result[ "sql_new" ] if "owner_persona" in s[ "statement" ] ]
+    assert owner_sql == [ ], "flag OFF must not run an owner-scoped store COUNT"
 
 
 # ── S6 — lupin AND non-lupin/plan dimension (project-scoped read) ───────────────
