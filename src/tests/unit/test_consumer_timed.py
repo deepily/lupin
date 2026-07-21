@@ -12,6 +12,7 @@ synchronization edges — see wait_for()/still_before() below.
 import pytest
 import threading
 import time
+import warnings
 from datetime import datetime, timedelta
 from unittest.mock import Mock, MagicMock
 from cosa.rest.fifo_queue import FifoQueue
@@ -55,9 +56,10 @@ def wait_for( predicate, timeout=5.0, interval=0.005 ):
     return bool( predicate() )
 
 
-def still_before( t0, offset_seconds ):
+def still_before( t0, offset_seconds, what="an absence claim" ):
     """
-    Report whether the wall clock is provably still before t0 + offset_seconds.
+    Report whether the wall clock is provably still before t0 + offset_seconds,
+    WARNING when it is not, because the caller is about to skip a check.
 
     Guards "not yet processed" assertions. Such a claim is only CHECKABLE
     while the job's scheduled time has not arrived. If the box starved and the
@@ -65,14 +67,49 @@ def still_before( t0, offset_seconds ):
     unverifiable rather than false — skipping it is honest; failing it is a
     false RED, and asserting it anyway is what bug 84db12a0 was filed for.
 
+    ⚠️ SKIPPING SILENTLY IS THE DEFECT THIS WARNING CLOSES (row d2788869, Rachel
+    🕊️ 2026-07-21; the announced form is hers). The first fix traded a LOUD wrong
+    answer for a QUIET one: when the window slips, the `if` is simply false, the
+    absence assertion never runs, and the test reports PASSED — byte-identically
+    to a run that checked and verified. Measured standalone: a test whose property
+    was VIOLATED (`processed == ["timed-1"]`) still reported PASSED because the
+    guard had already gone false. **A green cannot be distinguished from a
+    verified property by reading the output.** And it is quietest exactly when it
+    is most wrong: under the concurrent-suite load 84db12a0 documents, these
+    assertions are the likeliest to be skipped AND the likeliest to be violated.
+
+    DELIBERATELY `warnings.warn`, NOT `pytest.skip` (Rachel's reasoning, kept):
+    skip aborts the whole test and discards the POSITIVE assertions after it,
+    which remain perfectly checkable. The claim is narrow — *this one assertion
+    could not be evaluated* — so the signal must be equally narrow.
+
+    THIS IS A VISIBILITY PATCH, NOT THE FIX. The fix is a deterministic/injected
+    clock, which removes the box from the equation instead of reporting on it;
+    filed as its own row. Note that `:330` and `:346` in this file already assert
+    absence the load-SAFE way — a bounded `wait_for(...)` plus `assert not ran`,
+    where contention only ever makes the verdict MORE conclusive. That is the
+    pattern the clock fix should converge on; it is twelve lines away.
+
     Requires:
         - t0 is a time.monotonic() reading taken before the job was pushed
         - offset_seconds is a positive float
+        - what names the assertion being guarded, for the warning text
 
     Ensures:
         - returns True only while ( monotonic() - t0 ) < offset_seconds
+        - emits a UserWarning naming `what` when it returns False, so a skipped
+          absence claim is legible in the run output instead of invisible
+        - emits NOTHING when it returns True (the quiet-box negative control)
     """
-    return ( time.monotonic() - t0 ) < offset_seconds
+    ok = ( time.monotonic() - t0 ) < offset_seconds
+    if not ok:
+        warnings.warn(
+            f"UNVERIFIED under load: {what} — the clock window slipped before the "
+            f"absence claim could be checked, so this test passed WITHOUT testing it "
+            f"(84db12a0 / d2788869 family).",
+            stacklevel=2
+        )
+    return ok
 
 
 class MockSchedulableJob:
@@ -190,7 +227,7 @@ class TestConsumerTimed:
 
         # Should NOT be processed before its scheduled time. Only assertable
         # while we are provably still before that time.
-        if still_before( t0, SCHEDULED_SECONDS * 0.5 ):
+        if still_before( t0, SCHEDULED_SECONDS * 0.5, "timed-1 must not run before its scheduled time" ):
             assert "timed-1" not in processed, "Timed job ran before its scheduled time"
 
         assert wait_for( lambda: "timed-1" in processed ), "Timed job never ran after its scheduled time"
@@ -248,7 +285,7 @@ class TestConsumerTimed:
         scheduled = ( datetime.now() + timedelta( seconds=SCHEDULED_SECONDS ) ).isoformat()
         todo_queue.push_with_notify( MockSchedulableJob( "timed-2", scheduled_at=scheduled ) )
 
-        if still_before( t0, SCHEDULED_SECONDS * 0.5 ):
+        if still_before( t0, SCHEDULED_SECONDS * 0.5, "timed-2 must not run before its scheduled time" ):
             assert "timed-2" not in processed, "Timed job ran before its scheduled time"
 
         assert wait_for( lambda: "timed-2" in processed ), "Timed job never became eligible"
@@ -300,7 +337,7 @@ class TestConsumerTimed:
         job       = MockSchedulableJob( "mono-timed", scheduled_at=scheduled, monopolize=True )
         todo_queue.push_with_notify( job )
 
-        if still_before( t0, SCHEDULED_SECONDS * 0.5 ):
+        if still_before( t0, SCHEDULED_SECONDS * 0.5, "mono-timed must not run before its scheduled time" ):
             assert "mono-timed" not in processed, "Timed monopolize job ran before its scheduled time"
 
         assert wait_for( lambda: "mono-timed" in processed ), "Timed monopolize job never ran"
