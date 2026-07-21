@@ -279,6 +279,46 @@ def test_s6a_lupin_session_reads_only_lupin_rows( clean_tasks, drive_oracle, tmp
     assert all( r[ "query" ][ "project" ] == "lupin" for r in result[ "http_new" ] if "project" in r[ "query" ] )
 
 
+def test_s7_queued_row_with_future_chase_still_counts_as_owed( clean_tasks, drive_oracle, tmp_path ):
+    """A SCHEDULED queued row is still OWED — the fence, ruled 2026-07-21.
+
+    THE GAP THIS CLOSES (found on row 9bb4debe, reported before it could bite):
+    every other scenario here seeds rows with a NULL chase, so this suite — the
+    instrument sitting closest to the owed oracle — was GREEN-BLIND to any change
+    on the chase axis. The `next_chase_ts` decoupling (Arnold, rows 86ce4c43 /
+    9bb4debe) makes a chase legal without a blocker, and the tempting way to
+    implement it is to copy the `parked` suppression clause onto `queued`.
+
+    THAT COPY IS THE DEFECT THIS TEST EXISTS TO CATCH. `parked` earns its
+    suppression because A HUMAN RULED THE ROW NOT-NOW and must quote a
+    park_reason; the chase is the bounded expiry on that ruling. A chase on a
+    queued row is a SCHEDULE WITH NOBODY'S RULING BEHIND IT — suppressing on it
+    would let any caller silence a row from the owed oracle with a timestamp, no
+    human in the loop and no reason to refute.
+
+    Ruled by Mr. Radio 2026-07-21: owed semantics are FENCED — a scheduled row
+    does NOT stop counting as owed.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    persona, project = "arnold", "lupin"
+    future = datetime.now( timezone.utc ) + timedelta( hours=6 )
+    store_owed = seed_store_rows( persona, project, n_queued=3, next_chase_ts=future )
+    tp = tmp_path / "s7.jsonl"
+    write_transcript( tp, n_owed=0 )
+
+    result = drive_oracle( flag=True, persona=persona, project=project, transcript_path=tp )
+    _report( "S7 scheduled-is-still-owed", flag=True, persona=persona, project=project,
+             store_owed=f"{store_owed} queued, chase {future.isoformat()}",
+             transcript_owed=0, expected=store_owed, result=result )
+
+    assert store_owed == 3
+    assert result[ "owed_items" ] == 3, \
+        "a queued row with a FUTURE chase must still count as owed — suppressing on the " \
+        "chase alone would let a bare timestamp silence a row no human ruled not-now"
+    assert result[ "work_owed" ] is True
+
+
 def test_s6b_plan_session_reads_only_plan_rows( clean_tasks, drive_oracle, tmp_path ):
     """Same cross-project store; a non-lupin/plan session reads its OWN rows.
 

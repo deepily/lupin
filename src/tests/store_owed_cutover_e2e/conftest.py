@@ -135,7 +135,7 @@ def clean_tasks():
     yield
 
 
-def seed_store_rows( owner_persona, project, n_queued=0, n_in_progress=0 ):
+def seed_store_rows( owner_persona, project, n_queued=0, n_in_progress=0, next_chase_ts=None ):
     """
     Seed real owed rows into lupin_db_test via a direct ORM INSERT (real commit).
 
@@ -143,12 +143,23 @@ def seed_store_rows( owner_persona, project, n_queued=0, n_in_progress=0 ):
     owed total this persona+project owes is (n_queued + n_in_progress). Seeding a
     MIX exercises query_owed's sum-across-statuses path with both non-zero.
 
+    `next_chase_ts` seeds a chase onto NON-blocked rows — the shape the WRITE
+    path cannot currently produce (task_repository.create_with_event:149-154
+    nulls it for any non-blocked mint; row 9bb4debe). Seeding via direct ORM
+    INSERT bypasses that normalizer ON PURPOSE: the fence being tested is what
+    the OWED ORACLE does with such a row, which is a separate question from
+    whether the write path will let you make one. No DB CHECK forbids it — the
+    constraints only require a chase on blocked/parked, never forbid one
+    elsewhere.
+
     Requires:
         - owner_persona / project are non-empty strings
         - n_queued, n_in_progress are non-negative ints
+        - next_chase_ts is a datetime or None
 
     Ensures:
         - inserts exactly n_queued queued + n_in_progress in_progress task rows
+        - every seeded row carries next_chase_ts verbatim (None unless given)
         - returns the total count seeded
     """
     from cosa.rest.db.database import get_db
@@ -167,6 +178,7 @@ def seed_store_rows( owner_persona, project, n_queued=0, n_in_progress=0 ):
                 created_by    = f"{owner_persona}@e2e-session",
                 owner_persona = owner_persona,
                 status        = status,
+                next_chase_ts = next_chase_ts,
             ) )
     return n_queued + n_in_progress
 
