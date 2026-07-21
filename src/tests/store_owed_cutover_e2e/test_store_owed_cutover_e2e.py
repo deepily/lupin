@@ -319,6 +319,61 @@ def test_s7_queued_row_with_future_chase_still_counts_as_owed( clean_tasks, driv
     assert result[ "work_owed" ] is True
 
 
+def test_s8_front_door_create_keeps_the_chase_and_the_row_is_owed( clean_tasks, e2e_server, drive_oracle, tmp_path ):
+    """FRONT DOOR: POST a queued row WITH a chase — it must survive the write.
+
+    Row 9bb4debe item 4. S7 pins what the ORACLE does with a scheduled row, but
+    seeds it by direct ORM INSERT because the write path could not produce one:
+    create_with_event nulled next_chase_ts for every non-blocked mint and said so
+    ("IGNORING any stray values"). This test comes through the REAL router →
+    repository → SQL, so it is the one that goes RED if that discard returns.
+
+    Measured before the fix (2026-07-21): two operator gates awaiting Rick were
+    minted with a chase and stored with null; across the complete operator-gate
+    population, 47 of 51 carried no chase and ZERO queued rows carried one.
+    """
+    import json
+    import urllib.request
+    from datetime import datetime, timedelta, timezone
+
+    persona, project = "arnold", "lupin"
+    future  = ( datetime.now( timezone.utc ) + timedelta( hours=6 ) ).replace( microsecond=0 )
+    payload = {
+        "item_class"    : "task",
+        "title"         : "s8 front-door chase",
+        "project"       : project,
+        "created_by"    : f"{persona}@e2e-session",
+        "owner_persona" : persona,
+        "status"        : "queued",
+        "next_chase_ts" : future.isoformat(),
+    }
+    req = urllib.request.Request(
+        f"{e2e_server[ 'base_url' ]}/api/tasks",
+        data    = json.dumps( payload ).encode(),
+        headers = { "Content-Type": "application/json", "X-API-Key": "e2e" },
+        method  = "POST",
+    )
+    with urllib.request.urlopen( req, timeout=5 ) as response:
+        created = json.loads( response.read() )
+
+    print( f"\n┌─ S8 front-door create " + "─" * 39 )
+    print( f"│ sent next_chase_ts={future.isoformat()}" )
+    print( f"│ got  next_chase_ts={created[ 'next_chase_ts' ]!r} status={created[ 'status' ]!r}" )
+    print( "└" + "─" * 61 )
+
+    assert created[ "status" ] == "queued"
+    assert created[ "next_chase_ts" ] is not None, \
+        "a queued create must PERSIST the chase it was given — a silent null here is 9bb4debe"
+    assert datetime.fromisoformat( created[ "next_chase_ts" ] ) == future
+
+    # ...and the scheduled row it just made still counts as owed (the S7 fence,
+    # reached through the front door instead of an ORM insert).
+    tp = tmp_path / "s8.jsonl"
+    write_transcript( tp, n_owed=0 )
+    result = drive_oracle( flag=True, persona=persona, project=project, transcript_path=tp )
+    assert result[ "owed_items" ] == 1, "a front-door scheduled row must still count as owed"
+
+
 def test_s6b_plan_session_reads_only_plan_rows( clean_tasks, drive_oracle, tmp_path ):
     """Same cross-project store; a non-lupin/plan session reads its OWN rows.
 
