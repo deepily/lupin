@@ -53,9 +53,13 @@ for arg in "$@"; do
 done
 
 # Suite sequence + runner scripts (pyramid order)
+# "typescript" is deliberately absent pending the exclusion ruling on row
+# 36e479ed — see the ALL_SUITE_COMPONENTS comment in cosa/agents/test_suite/job.py.
+# The suite is schedulable on demand: src/tests/run-typescript-tests.sh
 SUITES=( "unit" "smoke" "websocket" "integration" "e2e" )
 declare -A SCRIPTS=(
     [unit]="src/tests/run-unit-tests.sh"
+    [typescript]="src/tests/run-typescript-tests.sh"
     [smoke]="src/tests/run-smoke-tests.sh"
     [websocket]="src/scripts/run-websocket-smoke-tests.sh"
     [integration]="src/tests/run-integration-tests.sh"

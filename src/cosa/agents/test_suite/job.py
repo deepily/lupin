@@ -35,6 +35,7 @@ import cosa.utils.util as cu
 # Valid suite types and their script paths (relative to project root)
 SUITE_SCRIPTS = {
     "unit"         : "src/tests/run-unit-tests.sh",
+    "typescript"   : "src/tests/run-typescript-tests.sh",   # TS suite under c8 at an enforced 100% threshold (row 36e479ed)
     "smoke"        : "src/tests/run-smoke-tests.sh",
     "smoke_direct" : "src/tests/run-smoke-direct.sh",
     "pytest_direct": "src/tests/run-pytest-direct.sh",    # Arbitrary pytest file (doc 16 follow-up)
@@ -63,6 +64,7 @@ SUITES_SUPPORTING_JUNIT_XML = frozenset( {
 # Per-suite max execution timeout (seconds). Process is killed if exceeded.
 # Values based on observed worst-case runtimes + 2x buffer. Tunable.
 SUITE_TIMEOUTS_SECONDS = {
+    "typescript"   : 1500,   # 25 min (observed 8m19s for 2,245 tests on 2026-07-21 WITHOUT c8; c8 instrumentation adds overhead, so ~2.5x margin over the uninstrumented run)
     "unit"         : 300,    #  5 min (bumped from 180s on 2026-06-12: observed ~185s on ts-b51e63c9 — suite grew to ~6745 tests and the 180s budget killed it mid-run; ~1.6x margin over observed)
     "smoke"        : 3600,   # 60 min (bumped from 1800s on 2026-04-21: observed 2456s on ts-f55d172d — 160 tests + container_preflight adds overhead; ~1.46x margin over observed)
     "smoke_direct" : 1200,   # 20 min (longest: Phase D live ~10 min)
@@ -80,6 +82,16 @@ SUITE_TIMEOUT_DEFAULT_SECONDS = 600  # 10 min fallback for unknown types
 # when one suite times out or crashes (pre-fix behavior was a single
 # monolithic "all" subprocess whose timeout vaporized every other suite's output).
 # Order matches src/tests/run-all-tests.sh's sequential pyramid.
+# "typescript" is deliberately ABSENT pending the exclusion ruling on row
+# 36e479ed. It IS schedulable on demand via SUITE_SCRIPTS — the gap is
+# enumerated, not silent. Measured 2026-07-21: the TS suite passes 2245/2245
+# but scores 93.19% statements against the mandate's 100%, and the ENTIRE gap
+# is three exempt-shaped file categories (boot.ts entry points, types.ts
+# type-only modules, index.ts barrels). Whether those are legitimately excluded
+# changes what "100%" means, so it is a ruling, not a default. Adding
+# "typescript" here before that ruling would make every `all` run red for a
+# known reason — and a gate that always fails for a known reason gets ignored,
+# which is how the original defect survived.
 ALL_SUITE_COMPONENTS = [ "unit", "smoke", "websocket", "integration", "e2e" ]
 
 
@@ -1108,6 +1120,7 @@ class TestSuiteJob( AgenticJobBase ):
     # Map suite_type to canonical /tmp/<name>-latest.log symlink used across scripts
     _LOG_SYMLINKS = {
         "unit"         : "/tmp/unit-latest.log",
+        "typescript"   : "/tmp/typescript-latest.log",
         "smoke"        : "/tmp/smoke-latest.log",
         "smoke_direct" : "/tmp/smoke-direct-latest.log",
         "pytest_direct": "/tmp/pytest-direct-latest.log",
@@ -1248,6 +1261,47 @@ class TestSuiteJob( AgenticJobBase ):
         return result
 
     @staticmethod
+    def _parse_node_tap_summary( stdout: str ) -> Optional[ Dict ]:
+        """
+        Parse `node --test` TAP trailer counts emitted by the typescript suite.
+
+        Row 36e479ed. Without this the typescript suite would land in exactly
+        the state WG-7 found the websocket suite in: a green run classified as
+        a failure with metrics 0/0/0/0, because no junit-xml exists to parse.
+
+        The trailer looks like:
+            # tests 2245
+            # pass 2245
+            # fail 0
+            # skipped 0
+
+        Requires:
+            - stdout is the captured runner stdout (may be empty)
+
+        Ensures:
+            - returns passed/failed/skipped/errors when a `# pass` line is present
+            - returns None when the trailer is absent, so the caller keeps its
+              zero-count default and downstream classification is unchanged
+            - counts the LAST trailer, so a nested `# pass` inside test output
+              cannot shadow the run's real total
+        """
+        import re
+
+        passed_matches = re.findall( r"^# pass (\d+)$",    stdout, re.MULTILINE )
+        if not passed_matches:
+            return None
+
+        failed_matches  = re.findall( r"^# fail (\d+)$",    stdout, re.MULTILINE )
+        skipped_matches = re.findall( r"^# skipped (\d+)$", stdout, re.MULTILINE )
+
+        return {
+            "passed"  : int( passed_matches[ -1 ] ),
+            "failed"  : int( failed_matches[ -1 ] )  if failed_matches  else 0,
+            "skipped" : int( skipped_matches[ -1 ] ) if skipped_matches else 0,
+            "errors"  : 0,
+        }
+
+    @staticmethod
     def _parse_non_pytest_stdout( suite_type: str, stdout: str ) -> Optional[ Dict ]:
         """
         Parse the stdout of a non-pytest suite runner (e.g. the websocket smoke
@@ -1280,12 +1334,15 @@ class TestSuiteJob( AgenticJobBase ):
         Returns:
             dict | None: Parsed counts or None if format unrecognized.
         """
-        if suite_type != "websocket":
+        if suite_type not in ( "websocket", "typescript" ):
             return None
         if not stdout:
             return None
 
         import re
+
+        if suite_type == "typescript":
+            return TestSuiteJob._parse_node_tap_summary( stdout )
 
         total_match  = re.search( r"Total Tests:\s*(\d+)", stdout )
         passed_match = re.search( r"\bPassed:\s*(\d+)",   stdout )
