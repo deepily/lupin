@@ -206,7 +206,8 @@ _bootstrap_sys_path()
 
 from lupin_cli.claude_code.hooks.lib.heartbeat_hold import (   # noqa: E402 — after bootstrap
     AWAITING_NONE, DEFAULT_TTL_SECONDS, HOLD_FILENAME_TEMPLATE, _resolve_base_dir,
-    clear_hold, hold_cargo_keys, hold_path, is_honored, read_hold, write_hold,
+    clear_hold, hold_cargo_keys, hold_path, is_honored, read_hold,
+    read_hold_exact, write_hold,
 )
 
 
@@ -301,7 +302,18 @@ def cmd_write( args ):
 
     # CARGO GUARD — see the module docstring. Refuse BEFORE write_hold touches
     # anything: this is the only point at which the payload still exists.
-    cargo = hold_cargo_keys( read_hold( args.session_id, base_dir=args.base_dir ) )
+    #
+    # READ THE EXACT PATH, NOT THE RESOLVED ONE (bug 8abdcbbf — mine, shipped in
+    # 378f1499). This guard originally read through prefix-tolerant `read_hold`
+    # while `write_hold` replaces the EXACT path, so cargo in a prefix SIBLING —
+    # a file this call would never touch, and not guaranteed to be this session's
+    # — refused the session its hold at exit 6, naming a path that did not exist.
+    # A session that cannot write a hold is poked forever: the ping-storm this
+    # surface exists to prevent, caused by the guard against a different failure.
+    # `write_hold` replaces exactly one file, so that file's cargo is the ONLY
+    # cargo this call can destroy — and it is the only cargo the guard may object
+    # to. Same defect class as A-4, which is fixed eleven lines down in cmd_clear.
+    cargo = hold_cargo_keys( read_hold_exact( args.session_id, base_dir=args.base_dir ) )
     if cargo:
         print( f"REFUSED: the hold at {path} carries {len( cargo )} field(s) this verb does "
                f"not own and cannot preserve:", file=sys.stderr )
@@ -482,7 +494,12 @@ def cmd_clear( args ):
         # at". A clear that does not say what it removed is not pointable-at, so
         # the sentence in write's refusal would have been writing a cheque this
         # verb didn't honor. Deliberate deletion stays allowed; it stops being silent.
-        cargo = hold_cargo_keys( read_hold( args.session_id, base_dir=args.base_dir ) )
+        # Exact reader here too (8abdcbbf). This branch already proved `exact`
+        # exists, so `read_hold` would have resolved to the same file — but by
+        # CIRCUMSTANCE, not by construction. Naming what a delete destroys must
+        # read what the delete destroys; leaving that to a coincidence is how the
+        # split above survived review in the first place.
+        cargo = hold_cargo_keys( read_hold_exact( args.session_id, base_dir=args.base_dir ) )
         clear_hold( args.session_id, base_dir=args.base_dir )
         print( f"CLEARED  {exact}" )
         if cargo:

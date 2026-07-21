@@ -1232,3 +1232,53 @@ def test_get_last_surfaced_questions_ts_variants():
 
 def test_quick_smoke_test_passes():
     assert hh.quick_smoke_test() is True
+
+
+# ── read_hold_exact — the reader a GUARD must use (8abdcbbf) ──────────────────
+#
+# `read_hold` is prefix-tolerant because a READ that resolves to the wrong file
+# costs at worst a missed poke. `write_hold`/`clear_hold` act on the EXACT path,
+# so a guard resolving prefix-tolerantly objects to a file its action will never
+# touch — which refused a session its hold over cargo in a sibling, at exit 6,
+# against a path that did not exist.
+
+def test_read_hold_exact_ignores_a_prefix_sibling( tmp_path ):
+    """THE WHOLE POINT: `read_hold` finds the sibling, `read_hold_exact` does not.
+    Both are correct — for different questions."""
+    hh.write_hold( "c121037b-aaaa-1111-2222-3333", "Clayton", "holding", base_dir=tmp_path )
+    assert hh.read_hold( "c121037b", base_dir=tmp_path ) is not None        # tolerant: found
+    assert hh.read_hold_exact( "c121037b", base_dir=tmp_path ) is None      # exact: absent
+
+
+def test_read_hold_exact_reads_its_own_file( tmp_path ):
+    written = hh.write_hold( "sid-exact", "Clayton", "holding", base_dir=tmp_path )
+    assert hh.read_hold_exact( "sid-exact", base_dir=tmp_path ) == written
+
+
+def test_read_hold_exact_carries_no_mtime_annotation( tmp_path ):
+    """Freshness is a question about a RESOLVED hold; this reader resolves
+    nothing, so it must not imply an answer it did not compute."""
+    hh.write_hold( "sid-exact", "Clayton", "holding", base_dir=tmp_path )
+    assert hh.HOLD_MTIME_ANNOTATION not in hh.read_hold_exact( "sid-exact", base_dir=tmp_path )
+
+
+def test_read_hold_exact_corrupt_json_returns_none( tmp_path ):
+    hh.hold_path( "sid-bad", base_dir=tmp_path ).write_text( "{not json" )
+    assert hh.read_hold_exact( "sid-bad", base_dir=tmp_path ) is None
+
+
+def test_read_hold_exact_unreadable_file_returns_none( tmp_path, monkeypatch ):
+    """An OSError on read is a null, never a raise — a guard that explodes on a
+    permissions blip takes the session's hold down with it."""
+    hh.write_hold( "sid-oserr", "Clayton", "holding", base_dir=tmp_path )
+    def _boom( self, *a, **k ):
+        raise OSError( "permission denied" )
+    monkeypatch.setattr( "pathlib.Path.read_text", _boom )
+    assert hh.read_hold_exact( "sid-oserr", base_dir=tmp_path ) is None
+
+
+def test_read_hold_exact_non_object_json_returns_none( tmp_path ):
+    """A JSON array parses fine and is not a hold. `hold_cargo_keys` would treat
+    a non-dict as a shape it can inspect, so the reader rejects it here."""
+    hh.hold_path( "sid-list", base_dir=tmp_path ).write_text( "[1, 2, 3]" )
+    assert hh.read_hold_exact( "sid-list", base_dir=tmp_path ) is None

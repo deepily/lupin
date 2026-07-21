@@ -434,6 +434,46 @@ def read_hold( session_id, base_dir=None ):
     return data
 
 
+def read_hold_exact( session_id, base_dir=None ):
+    """
+    Read ONLY this session id's own hold file — no prefix fallback, ever.
+
+    FOR GUARDS THAT PROTECT A WRITE OR A DELETE (bug 8abdcbbf). `read_hold` is
+    deliberately prefix-tolerant so a hold written under the short bridge id is
+    still FOUND by a hook reading the full stable id — correct for a READ, where
+    resolving to the wrong file costs at worst a missed poke. It is the wrong
+    reader for a guard, because `write_hold`/`clear_hold` act on the EXACT path:
+    a guard that resolves prefix-tolerantly vouches for (or objects to) a file
+    its action will never touch. That split is what let the cargo guard refuse a
+    session its hold over cargo living in a DIFFERENT file — possibly another
+    session's — at exit 6, against a path that did not exist.
+
+    ⇒ Use this wherever the question is "what is in the file I am about to
+    replace or delete"; use `read_hold` where the question is "does this session
+    have a hold anywhere".
+
+    Requires:
+        - session_id is a string
+        - base_dir is a path-like / string / None
+
+    Ensures:
+        - Returns the hold dict at EXACTLY <base_dir>/.heartbeat-hold-<id>.json
+        - Returns None when that path is absent, unreadable, malformed, or parses
+          to a non-object — a prefix sibling is NEVER consulted
+        - Carries no mtime annotation: freshness is a question about a resolved
+          hold, and this reader deliberately resolves nothing
+        - Never raises
+    """
+    path = hold_path( session_id, base_dir=base_dir )
+    try:
+        if not path.exists():
+            return None
+        data = json.loads( path.read_text() )
+    except ( OSError, ValueError ):
+        return None
+    return data if isinstance( data, dict ) else None
+
+
 def read_hold_resilient( session_id, cwd=None ):
     """
     Read this session's hold, searching EVERY directory it could plausibly live

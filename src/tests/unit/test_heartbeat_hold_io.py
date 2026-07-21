@@ -350,7 +350,16 @@ def test_a_failed_verify_restores_an_already_unhonorable_prior_rather_than_delet
     path.write_text( json.dumps( { "session_id": SID, "note_to_my_successor": "irreplaceable" } ) )
     corpus_member = path.read_bytes()
 
-    monkeypatch.setattr( hio, "read_hold", lambda *a, **k: None )
+    # BOTH readers, deliberately (8abdcbbf). The subject here is the RESTORE, so
+    # the cargo guard has to be out of the way — and the guard now reads the
+    # EXACT path while the verify reads through the resolver, so one patch no
+    # longer stands the whole scenario up. This test previously disabled the
+    # guard as a SIDE EFFECT of patching the verify's reader; naming both is what
+    # that always meant. The guard's own behaviour is covered by the 8abdcbbf
+    # block below — this prior carries cargo only so the restore can be asserted
+    # byte-exact WITH cargo present.
+    monkeypatch.setattr( hio, "read_hold",       lambda *a, **k: None )
+    monkeypatch.setattr( hio, "read_hold_exact", lambda *a, **k: None )
     assert hio.main( _write_argv( tmp_path ) ) == hio.EXIT_NOT_HONORED
 
     assert path.exists(),                     "a hold this verb did not create must survive its refusal"
@@ -596,3 +605,89 @@ def test_bootstrap_without_lupin_root_is_a_no_op_not_a_raise( monkeypatch ):
 
 def test_quick_smoke_test_passes():
     assert hio.quick_smoke_test() is True
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 8abdcbbf — THE CARGO GUARD MUST READ THE FILE THE WRITE WILL REPLACE.
+#
+# Mine, shipped in 378f1499. `cmd_write`'s cargo guard read through `read_hold`,
+# which is PREFIX-TOLERANT, and then wrote the EXACT path. Guard and action
+# resolved differently — A-4's shape, eleven lines from where I fixed A-4 in
+# `cmd_clear`, in the same commit.
+#
+# MEASURED: one hold on disk under the FULL id carrying cargo, nothing at the
+# short id's own path. `write --session-id <short>` was REFUSED at exit 6 against
+# a path that does not exist, and the short hold was never written. The cargo was
+# in a different file — and a prefix sibling is not guaranteed to be yours. A
+# session that cannot write a hold IS POKED FOREVER: the ping-storm this surface
+# exists to prevent, caused by a guard against a different failure.
+#
+# The fix has no judgement call in it. `write_hold` replaces exactly ONE file, so
+# that file's cargo is the only cargo this call can destroy — the guard reads it
+# and nothing else. Both controls below must survive: cargo at the exact path
+# still refuses, and the banner names a path that exists.
+#
+# WHY NO EXISTING TEST CAUGHT IT: every test in this file uses a single session
+# id, so no prefix sibling ever reaches disk. A guard whose bug only appears with
+# two id forms cannot be caught by a suite that only ever writes one.
+# ══════════════════════════════════════════════════════════════════════════════
+
+FULL_SID  = "c121037b-aaaa-1111-2222-333344445555"
+SHORT_SID = "c121037b"
+
+
+def _cargo_hold_at( base, sid, key="note_to_my_successor", value="irreplaceable" ):
+    """Ensures: an honored hold at `sid`'s EXACT path, carrying one cargo field."""
+    assert hio.main( _write_argv( base, sid=sid ) ) == hio.EXIT_OK
+    path = hold_path( sid, base_dir=base )
+    data = json.loads( path.read_text() )
+    data[ key ] = value
+    path.write_text( json.dumps( data ) )
+    return path
+
+
+def test_cargo_in_a_prefix_sibling_does_not_deny_this_session_its_hold( tmp_path ):
+    """THE DEFECT: cargo living in ANOTHER file refused this session its hold
+    outright — exit 6, nothing written, poked forever."""
+    _cargo_hold_at( tmp_path, FULL_SID )                       # cargo lives HERE...
+    assert hio.main( _write_argv( tmp_path, sid=SHORT_SID ) ) == hio.EXIT_OK
+    assert is_honored( read_hold( SHORT_SID, base_dir=tmp_path ) )
+
+
+def test_the_prefix_siblings_cargo_is_left_untouched( tmp_path ):
+    """The point of the guard is that cargo is never destroyed — and the sibling's
+    cargo is no less irreplaceable for being in a file this write ignores."""
+    sibling = _cargo_hold_at( tmp_path, FULL_SID )
+    hio.main( _write_argv( tmp_path, sid=SHORT_SID ) )
+    assert json.loads( sibling.read_text() )[ "note_to_my_successor" ] == "irreplaceable"
+
+
+def test_cargo_AT_the_exact_path_still_refuses( tmp_path ):
+    """CONTROL — the guard being repaired is real and must not be eaten by its own
+    repair. If this ever goes green, the fix has removed the cargo guard."""
+    _cargo_hold_at( tmp_path, SHORT_SID )                      # cargo at its OWN path
+    assert hio.main( _write_argv( tmp_path, sid=SHORT_SID ) ) == hio.EXIT_CARGO
+
+
+def test_no_refusal_names_a_path_that_does_not_exist( tmp_path, capsys ):
+    """The banner named `.heartbeat-hold-c121037b.json` — a file that never
+    existed — and sent the caller to move cargo out of a file they cannot find.
+    That is the A-4 sentence ("CLEARED a path that never existed") one verb over.
+    Post-fix a refusal can only arise from the exact path, so the banner is
+    truthful BY CONSTRUCTION rather than by a second check."""
+    _cargo_hold_at( tmp_path, FULL_SID )
+    assert hio.main( _write_argv( tmp_path, sid=SHORT_SID ) ) == hio.EXIT_OK
+    err = capsys.readouterr().err
+    assert "REFUSED" not in err
+    assert str( hold_path( SHORT_SID, base_dir=tmp_path ) ) not in err
+
+
+def test_cargo_at_the_exact_path_refuses_even_beside_a_clean_sibling( tmp_path ):
+    """CONTROL, second direction. A clean prefix sibling must not talk the guard
+    OUT of a refusal it owes. (Pre-fix this already passed — `read_hold` prefers
+    the exact path when it exists, so both resolutions agreed here. It is kept
+    because the fix must not disturb the case where they agree, which is every
+    ordinary call.)"""
+    assert hio.main( _write_argv( tmp_path, sid=FULL_SID ) ) == hio.EXIT_OK   # clean sibling
+    _cargo_hold_at( tmp_path, SHORT_SID )                                     # cargo at exact
+    assert hio.main( _write_argv( tmp_path, sid=SHORT_SID ) ) == hio.EXIT_CARGO
