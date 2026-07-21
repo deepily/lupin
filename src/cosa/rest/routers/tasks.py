@@ -162,6 +162,16 @@ class TaskCreateIn( BaseModel ):
     `status` is otherwise whitelisted to queued|blocked — done/dropped/parked/
     claimed/in_progress/review are NOT mintable.
     """
+    # `extra='forbid'` — row 98854a4b. This model shipped on pydantic's DEFAULT
+    # (IGNORE), so an undeclared field vanished on a 201: measured live, a POST
+    # carrying `park_reason` + `nonsense` returned 201 with both gone and no
+    # warning. That is 9bb4debe's shape one level up — the caller who cared
+    # enough to send a field is the one least likely to re-read the response for
+    # it. SWEPT BEFORE FLIPPING: every in-repo write caller (6 MCP verbs, the
+    # hook-lane mirror + drain, the multiplexer's patch/transition) sends ONLY
+    # declared keys, so this turns no silence into an outage.
+    model_config = ConfigDict( extra="forbid" )
+
     item_class          : str                = Field( ..., min_length=1 )
     title               : str                = Field( ..., min_length=1 )
     project             : str                = Field( ..., min_length=1, max_length=255 )
@@ -191,6 +201,11 @@ class TaskTransitionIn( BaseModel ):
     typed blocked_by on ->blocked, non-blank reason on ->dropped) are
     validated by task_store_rules.validate_transition in the handler.
     """
+    # `extra='forbid'` — row 98854a4b, same rationale + same caller sweep as
+    # TaskCreateIn above: the store already treated this as a HARD wire-level
+    # invariant on TaskPatchIn, and applied it to ONE write surface in five.
+    model_config = ConfigDict( extra="forbid" )
+
     to_status     : str                 = Field( ..., min_length=1 )
     actor         : str                 = Field( ..., min_length=1, max_length=255, description="persona + session id performing the transition" )
     authority     : str                 = Field( default="standing" )
@@ -210,6 +225,11 @@ class TaskCorrelateIn( BaseModel ):
     Terminal items are rejected in the handler (no re-keying closed history);
     authority enum membership is validated there too (one rules home).
     """
+    # `extra='forbid'` — row 98854a4b, same rationale + same caller sweep as
+    # TaskCreateIn above: the store already treated this as a HARD wire-level
+    # invariant on TaskPatchIn, and applied it to ONE write surface in five.
+    model_config = ConfigDict( extra="forbid" )
+
     correlation_key : str = Field( ..., min_length=1, max_length=255 )
     actor           : str = Field( ..., min_length=1, max_length=255, description="persona + session id performing the re-correlation" )
     authority       : str = Field( default="standing" )
@@ -227,6 +247,11 @@ class TaskAmendIn( BaseModel ):
     stamps the audit event (mirrors the PATCH reason discipline), falling back to
     an auto-marker when absent. `actor`/`authority` stamp the event, not the item.
     """
+    # `extra='forbid'` — row 98854a4b, same rationale + same caller sweep as
+    # TaskCreateIn above: the store already treated this as a HARD wire-level
+    # invariant on TaskPatchIn, and applied it to ONE write surface in five.
+    model_config = ConfigDict( extra="forbid" )
+
     note      : str           = Field( ..., min_length=1, max_length=4000, description="the amendment text appended to the item body (original preserved verbatim)" )
     actor     : str           = Field( ..., min_length=1, max_length=255, description="persona + session id performing the amendment" )
     authority : str           = Field( default="standing" )
