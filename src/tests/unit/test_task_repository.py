@@ -150,11 +150,22 @@ def test_create_item_blocked_mint_none_blocked_by_defaults_to_empty( repo ):
     assert item.status == "blocked" and item.blocked_by == [ ] and item.next_chase_ts is None
 
 
-def test_create_item_queued_mint_ignores_stray_blocked_fields( repo ):
-    # The repository OWNS per-status consistency: a queued mint FORCES blocked_by=[]
-    # and next_chase_ts=None, dropping any stray values a caller passed (a queued
-    # row waits on nothing) — mirrors apply_transition's non-blocked field handling.
-    item = repo.create_item(
+def test_create_item_queued_mint_drops_stray_blocked_by_but_KEEPS_the_chase( repo ):
+    # CHANGED 2026-07-21 (86ce4c43 #2, Mr Radio GO). This test previously asserted
+    # that a queued mint nulled next_chase_ts too. That assertion encoded the
+    # DEFECT: a caller who scheduled a row got a 200 and an unscheduled row,
+    # silently, on the success path. Measured consequence — 47 of 51 operator
+    # gates carry no chase, and ZERO queued gates have one fleet-wide, all-time.
+    #
+    # The asymmetry below is the fix: blocked_by is a DEPENDENCY whose meaning is
+    # defined by the blocked status, so a queued row genuinely holds none. A chase
+    # is a SCHEDULE and is independent of status. "A queued row waits on nothing"
+    # is true about dependencies and says nothing about scheduling.
+    #
+    # Both paths now route through normalize_status_fields — see
+    # test_task_store_field_normalizer.py for the anti-divergence parity test.
+    chase = datetime( 2026, 6, 12, 9, 0, tzinfo=timezone.utc )
+    item  = repo.create_item(
         item_class    = "task",
         title         = "just queued",
         project       = "lupin",
@@ -162,9 +173,10 @@ def test_create_item_queued_mint_ignores_stray_blocked_fields( repo ):
         authority     = "standing",
         status        = "queued",
         blocked_by    = [ { "kind": "persona", "id": "tiberius" } ],   # stray — must be dropped
-        next_chase_ts = datetime( 2026, 6, 12, 9, 0, tzinfo=timezone.utc ),
+        next_chase_ts = chase,                                         # a SCHEDULE — must SURVIVE
     )
-    assert item.status == "queued" and item.blocked_by == [ ] and item.next_chase_ts is None
+    assert item.status == "queued" and item.blocked_by == [ ]
+    assert item.next_chase_ts == chase
 
 
 # ---------------------------------------------------------------------------

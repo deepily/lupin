@@ -25,6 +25,8 @@ from cosa.rest.task_store_rules import (
     UNSCOPED_QUERY_THRESHOLD,
     UnscopedQueryError,
     is_unscoped,
+    normalize_status_fields,
+    compose_drop_marker,
 )
 # PARKED-STATUS (2026-07-19) — the ONE canonical owed definition. This repository
 # is the choke point all three readers funnel through (task_query / the Stop-hook
@@ -127,31 +129,43 @@ class TaskRepository( BaseRepository[TaskItem] ):
 
         Ensures:
             - item created with the given status (DEFAULT 'queued' — today's
-              behavior). This method OWNS the per-status field consistency, the
-              same way apply_transition does, so the store can never hold an
-              incoherent row regardless of caller:
+              behavior). Per-status field consistency is DELEGATED to
+              task_store_rules.normalize_status_fields, which apply_transition
+              also calls — ONE implementation, so the two write paths cannot
+              drift (86ce4c43 #2). This method no longer owns those rules:
                 * status == 'blocked' -> blocked_by is the given list (or [] when
-                  None) and next_chase_ts is the given value
-                * any other status (queued) -> blocked_by := [] and
-                  next_chase_ts := None, IGNORING any stray values (a queued row
-                  waits on nothing)
+                  None)
+                * any other status -> blocked_by := [], dropping stray refs (a
+                  non-blocked row waits on nothing)
+                * next_chase_ts is the caller's value on EVERY status — a chase is
+                  a SCHEDULE, not a WAIT, and is no longer nulled outside
+                  blocked/parked
             - exactly one TaskEvent with transition='->{status}' appended (so a
               blocked mint stamps '->blocked'), actor = created_by (the creator IS
-              the creation actor), reason = flag_suffix (None unless the router
-              flagged an off-roster persona — zero schema, zero new events; the
-              marker rides the existing event)
+              the creation actor), reason = flag_suffix, EXTENDED with a
+              "[dropped: …]" marker naming any field the normalizer discarded, so
+              a discard is disclosed in the audit trail rather than swallowed on a
+              200 (zero schema, zero new events; both markers ride the existing
+              event reason)
             - flush() called so item.id is populated
             - commit NOT called (caller's get_db() commits)
 
         Returns:
             Created TaskItem instance (with id populated)
         """
-        if status == "blocked":
-            resolved_blocked_by    = blocked_by if blocked_by is not None else [ ]
-            resolved_next_chase_ts = next_chase_ts
-        else:
-            resolved_blocked_by    = [ ]
-            resolved_next_chase_ts = None
+        # SINGLE SOURCE (86ce4c43 #2): this method no longer implements the
+        # per-status rules itself — it and apply_transition route through ONE
+        # normalizer, so the two paths cannot drift into disagreeing about what
+        # a status implies. See normalize_status_fields for the full rationale.
+        resolved, dropped = normalize_status_fields( status, blocked_by, next_chase_ts )
+        resolved_blocked_by    = resolved[ "blocked_by" ]
+        resolved_next_chase_ts = resolved[ "next_chase_ts" ]
+        # A discard lands in the AUDIT TRAIL, not in a docstring. Reporting a
+        # dropped value to a caller that throws the report away is the same
+        # silence one layer up — this is what makes the no-silent-drop rule a
+        # mechanism rather than a convention. Rides the existing event reason:
+        # zero new schema, zero new events.
+        creation_reason = compose_drop_marker( dropped, flag_suffix )
 
         item = self.create(
             item_class          = item_class,
@@ -170,7 +184,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
             source_qid          = source_qid,
             correlation_key     = correlation_key,
         )
-        self._append_event( item.id, created_by, f"->{status}", authority, receipt_refs=None, reason=flag_suffix )
+        self._append_event( item.id, created_by, f"->{status}", authority, receipt_refs=None, reason=creation_reason )
         return item
 
     def apply_transition(
@@ -221,20 +235,27 @@ class TaskRepository( BaseRepository[TaskItem] ):
         transition_label = f"{item.status}->{to_status}"
 
         item.status = to_status
+        # SINGLE SOURCE (86ce4c43 #2): blocked_by / next_chase_ts are resolved by
+        # the SAME normalizer create_item uses, so the two write paths cannot
+        # drift into disagreeing about what a status implies. The park-only
+        # columns below stay here — they are park bookkeeping, not per-status
+        # field consistency, and one of them needs the DB clock.
+        _resolved, _dropped = normalize_status_fields( to_status, blocked_by, next_chase_ts )
+        item.blocked_by    = _resolved[ "blocked_by" ]
+        item.next_chase_ts = _resolved[ "next_chase_ts" ]
+        # Same disclosure as the create path — a discarded value is NAMED in the
+        # audit trail, never swallowed on a 200.
+        reason = compose_drop_marker( _dropped, reason )
+
         if to_status == "blocked":
-            item.next_chase_ts           = next_chase_ts
-            item.blocked_by              = blocked_by
             item.park_reason             = None
             item.park_reason_captured_at = None
         elif to_status == PARK_STATUS:
-            # PARK KEEPS ITS CHASE. `parked` used to fall into the else below,
-            # which NULLS next_chase_ts — and the parked CHECK constraint
-            # requires it, so every park would have 500'd on
-            # ck_task_items_parked_requires_chase_ts. The chase IS the un-park
-            # (read-time expiry, task_store_owed), so clearing it would also
-            # destroy the one field that makes a park self-expiring.
-            item.next_chase_ts = next_chase_ts
-            item.blocked_by    = [ ]
+            # PARK KEEPS ITS CHASE — now by the normalizer above, which returns
+            # the caller's chase on EVERY status. The parked CHECK constraint
+            # requires it (ck_task_items_parked_requires_chase_ts), and the chase
+            # IS the un-park (read-time expiry, task_store_owed), so losing it
+            # would destroy the one field that makes a park self-expiring.
             item.park_reason   = park_reason
             # ONE instant, written to BOTH columns in THIS statement — see
             # _park_capture_ts for why it cannot be a read-back-then-update.
@@ -242,8 +263,6 @@ class TaskRepository( BaseRepository[TaskItem] ):
             item.updated_ts              = captured     # explicit => onupdate suppressed
             item.park_reason_captured_at = captured
         else:
-            item.next_chase_ts = None
-            item.blocked_by    = [ ]
             # LEAVING parked CLEARS the quote. A park_reason surviving an unpark
             # is a stale justification on a row that is no longer parked, and
             # NEITHER CHECK fires in that direction (both are guarded by

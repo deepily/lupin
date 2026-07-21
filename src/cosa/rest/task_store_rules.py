@@ -402,6 +402,137 @@ def validate_blocked_fields( blocked_by, next_chase_ts ) -> list:
 
 
 # ---------------------------------------------------------------------------
+# Per-status field normalization — THE SINGLE SOURCE (86ce4c43 #2, 2026-07-21)
+# ---------------------------------------------------------------------------
+#
+# WHY THIS EXISTS AT ALL: `TaskRepository.create_item` and
+# `TaskRepository.apply_transition` used to implement these rules INDEPENDENTLY.
+# create_item's docstring admitted it — it owned per-status consistency "the same
+# way apply_transition does". Two implementations of one invariant by
+# acknowledged parallel construction, with NOTHING enforcing agreement: a
+# divergence produces a store where a value survives a create and dies on the
+# next transition, silently, and green. Both callers now route through here.
+#
+# THE BEHAVIOR CHANGE: `next_chase_ts` is NO LONGER nulled outside
+# blocked/parked. A chase is a SCHEDULE, not a WAIT. "A queued row waits on
+# nothing" is true about DEPENDENCIES and says nothing about SCHEDULING — and
+# conflating the two is what forced a seat to mark a merely-scheduled row
+# `blocked_by {kind:user, id:rick}`, asserting a false dependency on the
+# principal (86ce4c43 defect #2). The DB never forbade this: BOTH CHECK
+# constraints are one-directional implications that COMPEL a chase in two states
+# and forbid one nowhere, so this DELETES AN APPLICATION-LAYER DELETION rather
+# than adding a schema capability. No migration.
+#
+# ⚠️ THE ASYMMETRY IS DELIBERATE: `blocked_by` keeps its per-status clearing
+# while the chase does not. A blocked_by ref is a DEPENDENCY whose meaning is
+# defined by the blocked status, so a non-blocked row genuinely holds none. A
+# chase is independent of status. That distinction IS the fix.
+#
+# ⚠️ OUT OF SCOPE BY RULING (Mr Radio, 2026-07-21): a queued row with a FUTURE
+# chase STILL COUNTS AS OWED. The suppression shape exists in task_store_owed
+# (`park_is_active`) and was deliberately NOT copied — `parked` earns its
+# exclusion because a HUMAN ruled the row not-now and the chase bounds that
+# ruling, with a quoted park_reason the next reader can refute. A chase on a
+# queued row is a schedule with nobody's ruling behind it; copying the clause
+# would let any caller silence a row from the fleet's liveness oracle with a
+# timestamp and no human in the loop. Scheduled-not-owed needs its own
+# ratification with stop.py and the arbiter named as consumers.
+
+def normalize_status_fields( status, blocked_by, next_chase_ts ) -> tuple:
+    """
+    Resolve the status-dependent fields for a write, and REPORT what was dropped.
+
+    The single source of per-status field consistency for BOTH repository write
+    paths (create_item and apply_transition). Pure — no DB, no HTTP, no clock.
+
+    A normalizer that CANNOT silently drop (crew doctrine, Rachel 71061fb4): "a
+    rule that says 'be loud' is a rule someone forgets; a normalizer that cannot
+    silently drop is a mechanism." Anything discarded here is named in the second
+    return value, so a caller cannot fail to know it happened. That generalizes
+    past this fix to whatever field gets added next.
+
+    Requires:
+        - status is the TARGET status (already whitelist-validated by the caller;
+          this function normalizes, it does not validate)
+        - blocked_by is the candidate typed-ref list, or None
+        - next_chase_ts is the candidate chase time, or None
+
+    Ensures:
+        - returns ( resolved, dropped )
+        - resolved is a dict with EXACTLY the keys "blocked_by" and
+          "next_chase_ts"
+        - resolved["blocked_by"] is the given list when status == "blocked"
+          (None -> []), and [] for EVERY other status — a non-blocked row waits
+          on nothing
+        - resolved["next_chase_ts"] is ALWAYS the caller's value, on every
+          status. The caller alone determines the chase; supplying None means
+          None. This is what preserves every existing caller's behavior — the
+          only case that changes is the one where a caller supplied a chase and
+          it was thrown away
+        - dropped is a list of field names whose caller-supplied value was
+          DISCARDED — "blocked_by" appears iff a NON-EMPTY blocked_by was emptied
+        - dropped is [] (never None) when nothing was discarded, so a legitimate
+          zero is readable without a truthiness trap
+        - an already-empty blocked_by is NEVER reported as dropped: discarding []
+          to [] discards nothing, and reporting it would train readers to ignore
+          the list — which is how a real signal becomes noise
+    """
+    dropped = [ ]
+
+    if status == "blocked":
+        resolved_blocked_by = blocked_by if blocked_by is not None else [ ]
+    else:
+        # Every non-blocked status (including parked) waits on nothing.
+        resolved_blocked_by = [ ]
+        if blocked_by:
+            dropped.append( "blocked_by" )
+
+    return (
+        { "blocked_by" : resolved_blocked_by, "next_chase_ts" : next_chase_ts },
+        dropped,
+    )
+
+
+# The audit marker a discarded value leaves behind. Kept as a MODULE CONSTANT
+# prefix so a future reader can grep the audit trail for discards instead of
+# parsing free prose — the whole complaint 86ce4c43 makes about reason strings.
+DROPPED_MARKER_PREFIX = "[dropped: "
+
+
+def compose_drop_marker( dropped, existing_reason=None ) -> Optional[str]:
+    """
+    Fold a normalizer drop-list into an event reason, so a discard lands in the
+    AUDIT TRAIL rather than in a docstring nobody re-reads.
+
+    This is what makes "the normalizer cannot silently drop" a MECHANISM rather
+    than a convention: `normalize_status_fields` reporting a discard to a caller
+    that binds it to `_dropped` and throws it away is the same silence one layer
+    up. Both repository write paths compose their event reason through here.
+
+    Requires:
+        - dropped is the normalizer's second return value (a list of field
+          names; [] when nothing was discarded)
+        - existing_reason is the caller's own reason string, or None
+
+    Ensures:
+        - dropped is empty -> returns existing_reason UNCHANGED (including None).
+          A no-op discard must not manufacture an audit reason out of nothing,
+          or every row grows a marker and the marker stops meaning anything
+        - dropped is non-empty -> returns a string containing DROPPED_MARKER_PREFIX
+          followed by the comma-joined field names
+        - an existing reason is PRESERVED, never replaced — the caller's
+          justification and the machine's disclosure both survive
+    """
+    if not dropped:
+        return existing_reason
+
+    marker = f"{DROPPED_MARKER_PREFIX}{', '.join( dropped )}]"
+    if existing_reason:
+        return f"{existing_reason} {marker}"
+    return marker
+
+
+# ---------------------------------------------------------------------------
 # Creation + transition rules
 # ---------------------------------------------------------------------------
 
