@@ -37,8 +37,14 @@ from lupin_mcp.session_spawner import (
     _read_manifest,
     _write_manifest,
     _capture_reap_identity,
+    _scan_persona_by_tmux_session,
+    _build_identity_warning,
     _slug,
     DEFAULT_SPAWN_CAP,
+    PERSONA_STATE_ALLOCATED,
+    PERSONA_STATE_NONE,
+    PERSONA_STATE_UNKNOWN,
+    PERSONA_STATE_UNREADABLE,
 )
 
 
@@ -622,7 +628,9 @@ class TestListSpawnedSessions:
         res = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ), session_dir=tmp_path )
         assert res[ "count" ] == 2
         assert res[ "sessions" ][ 0 ] == { "session_name": "a", "requested_role": "author",
-                                           "status": "live", "alive": True, "model": None }
+                                           "status": "live", "alive": True, "model": None,
+                                           "persona": None, "persona_state": "unknown_no_bridge",
+                                           "identity_verified": False, "age_seconds": None }
         # default requested_role when missing
         assert res[ "sessions" ][ 1 ][ "requested_role" ] == "reviewer"
 
@@ -630,6 +638,320 @@ class TestListSpawnedSessions:
         _write_manifest( _manifest_path( "mgr", tmp_path ), [ { "session_name": "a" } ] )
         res = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=1 ), session_dir=tmp_path )
         assert res[ "sessions" ][ 0 ][ "status" ] == "dead" and res[ "sessions" ][ 0 ][ "alive" ] is False
+
+
+# ── list_spawned_sessions IDENTITY axis (row 6f8fd858) ────────────────────────
+#
+# The defect: the roster answered LIVENESS while presenting as a health check,
+# so a manager asking "who is in this seat?" got a green row and learned
+# nothing — then briefed the wrong session by name. These tests pin the four
+# identity states apart, and pin the roster's refusal to let a green liveness
+# row stand in for identity verification.
+#
+# Bridge files here are REAL files written to a real (tmp) session_dir and read
+# by the real scanner. Nothing about the persona lookup is mocked — a mocked
+# green is precisely the failure mode this row is about.
+
+def _write_bridge( session_dir, filename, *, tmux_session=None, voice_persona="__omit__", raw=None ):
+    """Write a real bridge file into session_dir; return its Path."""
+    path = session_dir / filename
+    if raw is not None:
+        path.write_text( raw )
+        return path
+    data = { }
+    if tmux_session is not None: data[ "tmux_session" ]  = tmux_session
+    if voice_persona != "__omit__": data[ "voice_persona" ] = voice_persona
+    path.write_text( json.dumps( data ) )
+    return path
+
+
+class TestScanPersonaByTmuxSession:
+    def test_missing_dir_yields_empty_scan( self, tmp_path ):
+        index, unattributable = _scan_persona_by_tmux_session( tmp_path / "does-not-exist" )
+        assert index == { } and unattributable == 0
+
+    def test_allocated_reads_the_name( self, tmp_path ):
+        _write_bridge( tmp_path, "cc-1.json", tmux_session="seat-a",
+                       voice_persona={ "name": "Krishna", "voice_id": "v1" } )
+        index, _ = _scan_persona_by_tmux_session( tmp_path )
+        assert index[ "seat-a" ] == { "persona": "Krishna", "persona_state": PERSONA_STATE_ALLOCATED }
+
+    def test_allocated_name_is_stripped( self, tmp_path ):
+        _write_bridge( tmp_path, "cc-1.json", tmux_session="seat-a", voice_persona={ "name": "  Rio  " } )
+        index, _ = _scan_persona_by_tmux_session( tmp_path )
+        assert index[ "seat-a" ][ "persona" ] == "Rio"
+
+    def test_explicit_null_persona_is_none_not_unknown( self, tmp_path ):
+        # THE distinction the row turns on: this child BOOTED and got nothing.
+        # It must not read the same as a child with no bridge on disk at all.
+        _write_bridge( tmp_path, "cc-1.json", tmux_session="seat-a", voice_persona=None )
+        index, _ = _scan_persona_by_tmux_session( tmp_path )
+        assert index[ "seat-a" ] == { "persona": None, "persona_state": PERSONA_STATE_NONE }
+
+    def test_absent_persona_key_is_none( self, tmp_path ):
+        _write_bridge( tmp_path, "cc-1.json", tmux_session="seat-a" )
+        index, _ = _scan_persona_by_tmux_session( tmp_path )
+        assert index[ "seat-a" ][ "persona_state" ] == PERSONA_STATE_NONE
+
+    @pytest.mark.parametrize( "bad", [ "Krishna", 42, [ "Krishna" ], { }, { "name": "" },
+                                       { "name": "   " }, { "name": 7 } ] )
+    def test_malformed_persona_is_unreadable_not_none( self, tmp_path, bad ):
+        # A record we FOUND but cannot read is an instrument failure, not an
+        # absent persona — collapsing it into "none" would invent a fact.
+        _write_bridge( tmp_path, "cc-1.json", tmux_session="seat-a", voice_persona=bad )
+        index, _ = _scan_persona_by_tmux_session( tmp_path )
+        assert index[ "seat-a" ] == { "persona": None, "persona_state": PERSONA_STATE_UNREADABLE }
+
+    def test_corrupt_json_is_counted_not_silently_skipped( self, tmp_path ):
+        # Bridge filenames key on pid, not tmux session, so a corrupt bridge is
+        # unattributable — but the scan must confess it was partially blind.
+        _write_bridge( tmp_path, "cc-bad.json", raw="{ not json" )
+        _write_bridge( tmp_path, "cc-1.json", tmux_session="seat-a", voice_persona={ "name": "Rio" } )
+        index, unattributable = _scan_persona_by_tmux_session( tmp_path )
+        assert unattributable == 1 and index[ "seat-a" ][ "persona" ] == "Rio"
+
+    def test_non_dict_json_is_counted( self, tmp_path ):
+        _write_bridge( tmp_path, "cc-list.json", raw="[1, 2, 3]" )
+        _, unattributable = _scan_persona_by_tmux_session( tmp_path )
+        assert unattributable == 1
+
+    def test_unreadable_file_is_counted( self, tmp_path, monkeypatch ):
+        path = _write_bridge( tmp_path, "cc-1.json", tmux_session="seat-a" )
+        def _boom( self, *a, **k ):
+            if self == path: raise OSError( "permission denied" )
+            return "{}"
+        monkeypatch.setattr( Path, "read_text", _boom )
+        _, unattributable = _scan_persona_by_tmux_session( tmp_path )
+        assert unattributable == 1
+
+    def test_glob_oserror_yields_empty_scan( self, tmp_path, monkeypatch ):
+        monkeypatch.setattr( Path, "glob", lambda self, pat: ( _ for _ in () ).throw( OSError( "nope" ) ) )
+        assert _scan_persona_by_tmux_session( tmp_path ) == ( { }, 0 )
+
+    def test_buffer_and_listener_sidecars_are_skipped( self, tmp_path ):
+        _write_bridge( tmp_path, "cc-buffer-x.json", raw="{ not json" )
+        _write_bridge( tmp_path, "cc-listener-x.json", raw="{ not json" )
+        assert _scan_persona_by_tmux_session( tmp_path ) == ( { }, 0 )
+
+    @pytest.mark.parametrize( "tmux", [ None, "", 42 ] )
+    def test_bridge_without_usable_tmux_session_is_ignored( self, tmp_path, tmux ):
+        _write_bridge( tmp_path, "cc-1.json", tmux_session=tmux, voice_persona={ "name": "Rio" } )
+        index, unattributable = _scan_persona_by_tmux_session( tmp_path )
+        assert index == { } and unattributable == 0
+
+
+class TestBuildIdentityWarning:
+    def test_all_allocated_yields_no_warning( self ):
+        rows = [ { "session_name": "a", "persona_state": PERSONA_STATE_ALLOCATED, "age_seconds": 5 } ]
+        assert _build_identity_warning( rows, 0 ) is None
+
+    def test_empty_roster_yields_no_warning( self ):
+        assert _build_identity_warning( [ ], 0 ) is None
+
+    def test_names_every_unverified_seat_with_state_and_age( self ):
+        rows = [ { "session_name": "a", "persona_state": PERSONA_STATE_ALLOCATED, "age_seconds": 5 },
+                 { "session_name": "b", "persona_state": PERSONA_STATE_UNKNOWN,   "age_seconds": 3.7 },
+                 { "session_name": "c", "persona_state": PERSONA_STATE_NONE,      "age_seconds": None } ]
+        w = _build_identity_warning( rows, 0 )
+        assert "2 of 3" in w
+        assert "b (unknown_no_bridge, 3s old)" in w
+        assert "c (none, age unknown)" in w
+        assert "a (" not in w                     # verified seats are not nagged about
+        assert "LIVENESS" in w                    # the refusal is stated, not implied
+
+    def test_blindness_note_only_when_scan_was_blind( self ):
+        rows = [ { "session_name": "b", "persona_state": PERSONA_STATE_UNKNOWN, "age_seconds": 1 } ]
+        assert "unreadable bridge file" not in _build_identity_warning( rows, 0 )
+        assert "skipped 2 unreadable bridge file" in _build_identity_warning( rows, 2 )
+
+
+class TestListSpawnedSessionsIdentity:
+    def _seed_manifest( self, tmp_path, records ):
+        _write_manifest( _manifest_path( "mgr", tmp_path ), records )
+
+    def test_three_states_are_distinguishable_in_one_roster( self, tmp_path ):
+        # The core acceptance: allocated / none / unknown_no_bridge, side by side,
+        # all three tmux-ALIVE. The old roster rendered these as identical greens.
+        self._seed_manifest( tmp_path, [ { "session_name": "seat-alloc" },
+                                         { "session_name": "seat-null" },
+                                         { "session_name": "seat-nobridge" } ] )
+        _write_bridge( tmp_path, "cc-1.json", tmux_session="seat-alloc", voice_persona={ "name": "Krishna" } )
+        _write_bridge( tmp_path, "cc-2.json", tmux_session="seat-null",  voice_persona=None )
+
+        res  = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ), session_dir=tmp_path )
+        rows = { s[ "session_name" ]: s for s in res[ "sessions" ] }
+
+        assert all( r[ "alive" ] is True for r in rows.values() )   # liveness identical…
+        assert rows[ "seat-alloc"    ][ "persona_state" ] == PERSONA_STATE_ALLOCATED
+        assert rows[ "seat-alloc"    ][ "persona" ]       == "Krishna"
+        assert rows[ "seat-null"     ][ "persona_state" ] == PERSONA_STATE_NONE
+        assert rows[ "seat-nobridge" ][ "persona_state" ] == PERSONA_STATE_UNKNOWN
+        # …identity is NOT. A null persona never arrives without a state saying why.
+        assert rows[ "seat-null" ][ "persona" ] is None and rows[ "seat-nobridge" ][ "persona" ] is None
+        assert rows[ "seat-null" ][ "persona_state" ] != rows[ "seat-nobridge" ][ "persona_state" ]
+
+    def test_identity_verified_tracks_allocated_only( self, tmp_path ):
+        self._seed_manifest( tmp_path, [ { "session_name": "a" }, { "session_name": "b" } ] )
+        _write_bridge( tmp_path, "cc-1.json", tmux_session="a", voice_persona={ "name": "Rio" } )
+        res  = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ), session_dir=tmp_path )
+        rows = { s[ "session_name" ]: s for s in res[ "sessions" ] }
+        assert rows[ "a" ][ "identity_verified" ] is True
+        assert rows[ "b" ][ "identity_verified" ] is False
+
+    def test_fully_identified_roster_declares_itself_complete( self, tmp_path ):
+        self._seed_manifest( tmp_path, [ { "session_name": "a" } ] )
+        _write_bridge( tmp_path, "cc-1.json", tmux_session="a", voice_persona={ "name": "Rio" } )
+        res = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ), session_dir=tmp_path )
+        assert res[ "identity_complete" ] is True and res[ "identity_warning" ] is None
+
+    def test_green_liveness_cannot_be_read_as_identity_verified( self, tmp_path ):
+        # (b) half of the done-condition: every row is alive/live — the caller
+        # must STILL be unable to read this dict as identity-verified.
+        self._seed_manifest( tmp_path, [ { "session_name": "seat-x" } ] )
+        res = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ), session_dir=tmp_path )
+        assert res[ "sessions" ][ 0 ][ "status" ] == "live"
+        assert res[ "sessions" ][ 0 ][ "alive" ] is True
+        assert res[ "identity_complete" ] is False
+        assert "seat-x" in res[ "identity_warning" ]
+
+    def test_empty_roster_claims_nothing_and_warns_about_nothing( self, tmp_path ):
+        res = list_spawned_sessions( "mgr", runner=FakeRunner(), session_dir=tmp_path )
+        assert res[ "count" ] == 0
+        assert res[ "identity_complete" ] is True and res[ "identity_warning" ] is None
+
+    def test_unattributable_bridges_surfaced_on_the_roster( self, tmp_path ):
+        self._seed_manifest( tmp_path, [ { "session_name": "a" } ] )
+        _write_bridge( tmp_path, "cc-bad.json", raw="{{{" )
+        res = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ), session_dir=tmp_path )
+        assert res[ "unattributable_bridges" ] == 1
+        assert "scan blindness" in res[ "identity_warning" ]
+
+    def test_age_seconds_computed_from_spawned_ts( self, tmp_path ):
+        self._seed_manifest( tmp_path, [ { "session_name": "a", "spawned_ts": 1000.0 } ] )
+        res = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ),
+                                     session_dir=tmp_path, now_fn=lambda: 1042.5 )
+        assert res[ "sessions" ][ 0 ][ "age_seconds" ] == pytest.approx( 42.5 )
+
+    @pytest.mark.parametrize( "bad_ts", [ None, "yesterday" ] )
+    def test_age_is_none_for_legacy_or_malformed_stamp( self, tmp_path, bad_ts ):
+        # Legacy records predate spawn-time capture: honest absence, never a guess.
+        rec = { "session_name": "a" }
+        if bad_ts is not None: rec[ "spawned_ts" ] = bad_ts
+        self._seed_manifest( tmp_path, [ rec ] )
+        res = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ),
+                                     session_dir=tmp_path, now_fn=lambda: 1042.5 )
+        assert res[ "sessions" ][ 0 ][ "age_seconds" ] is None
+
+    def test_age_separates_a_fresh_race_from_a_dead_sessionstart( self, tmp_path ):
+        # Both seats are "no bridge". Nothing on disk resolves the ambiguity, so
+        # the STATE stays ambiguous for both — age is the caller's evidence.
+        self._seed_manifest( tmp_path, [ { "session_name": "fresh", "spawned_ts": 1000.0 },
+                                         { "session_name": "stale", "spawned_ts": 0.0 } ] )
+        res  = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ),
+                                      session_dir=tmp_path, now_fn=lambda: 1003.0 )
+        rows = { s[ "session_name" ]: s for s in res[ "sessions" ] }
+        assert rows[ "fresh" ][ "persona_state" ] == PERSONA_STATE_UNKNOWN
+        assert rows[ "stale" ][ "persona_state" ] == PERSONA_STATE_UNKNOWN
+        assert rows[ "fresh" ][ "age_seconds" ] == pytest.approx( 3.0 )
+        assert rows[ "stale" ][ "age_seconds" ] == pytest.approx( 1003.0 )
+
+    def test_dead_seat_still_reports_identity_axis( self, tmp_path ):
+        # Liveness and identity are independent axes — a dead seat whose bridge
+        # survives still answers "who was in it?".
+        self._seed_manifest( tmp_path, [ { "session_name": "a" } ] )
+        _write_bridge( tmp_path, "cc-1.json", tmux_session="a", voice_persona={ "name": "Rachel" } )
+        res = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=1 ), session_dir=tmp_path )
+        assert res[ "sessions" ][ 0 ][ "alive" ] is False
+        assert res[ "sessions" ][ 0 ][ "persona" ] == "Rachel"
+        assert res[ "identity_complete" ] is True
+
+    def test_unreadable_state_reaches_the_roster( self, tmp_path ):
+        self._seed_manifest( tmp_path, [ { "session_name": "a" } ] )
+        _write_bridge( tmp_path, "cc-1.json", tmux_session="a", voice_persona="Krishna" )
+        res = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ), session_dir=tmp_path )
+        assert res[ "sessions" ][ 0 ][ "persona_state" ] == PERSONA_STATE_UNREADABLE
+        assert res[ "sessions" ][ 0 ][ "identity_verified" ] is False
+
+    def test_bridge_scan_runs_once_regardless_of_roster_size( self, tmp_path, monkeypatch ):
+        self._seed_manifest( tmp_path, [ { "session_name": f"s{i}" } for i in range( 6 ) ] )
+        calls = [ ]
+        real  = Path.glob
+        def _counting_glob( self, pat ):
+            calls.append( pat )
+            return real( self, pat )
+        monkeypatch.setattr( Path, "glob", _counting_glob )
+        list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ), session_dir=tmp_path )
+        assert calls.count( "cc-*.json" ) == 1
+
+
+class TestMeasuredBootSequence:
+    """
+    Replays the boot sequence MEASURED on a live spawn (2026-07-21, row 6f8fd858
+    verification): a healthy child walks unknown_no_bridge → none → allocated in
+    about one second, by writing its bridge first and its persona a beat later.
+
+    This is pinned because it is the empirical reason the roster does NOT treat
+    "none" or "unknown_no_bridge" as failure verdicts. If a future change makes
+    either state assert a failure, this test says why that is wrong.
+    """
+    def test_healthy_child_walks_all_three_states( self, tmp_path ):
+        _write_manifest( _manifest_path( "mgr", tmp_path ),
+                         [ { "session_name": "seat", "spawned_ts": 0.0 } ] )
+        runner   = FakeRunner( returncode=0 )
+        observed = [ ]
+
+        def _roster( t ):
+            res = list_spawned_sessions( "mgr", runner=runner, session_dir=tmp_path, now_fn=lambda: t )
+            observed.append( res[ "sessions" ][ 0 ][ "persona_state" ] )
+            return res
+
+        # t+0.00s — parent recorded the seat; the child has written nothing yet.
+        assert _roster( 0.00 )[ "identity_complete" ] is False
+        # t+0.77s — bridge lands, persona still null.
+        _write_bridge( tmp_path, "cc-1.json", tmux_session="seat", voice_persona=None )
+        assert _roster( 0.77 )[ "identity_complete" ] is False
+        # t+1.02s — SessionStart names the persona.
+        _write_bridge( tmp_path, "cc-1.json", tmux_session="seat", voice_persona={ "name": "Tiberius" } )
+        final = _roster( 1.02 )
+
+        assert observed == [ PERSONA_STATE_UNKNOWN, PERSONA_STATE_NONE, PERSONA_STATE_ALLOCATED ]
+        assert final[ "identity_complete" ] is True
+        assert final[ "sessions" ][ 0 ][ "persona" ] == "Tiberius"
+
+    def test_same_two_states_are_reported_identically_when_aged( self, tmp_path ):
+        # A 40-minute-old "none" is a dead child; a 1-second-old "none" is a
+        # healthy one. The STATE is deliberately the same for both — only the
+        # age differs — because nothing on disk distinguishes them.
+        _write_manifest( _manifest_path( "mgr", tmp_path ),
+                         [ { "session_name": "seat", "spawned_ts": 0.0 } ] )
+        _write_bridge( tmp_path, "cc-1.json", tmux_session="seat", voice_persona=None )
+        young = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ),
+                                       session_dir=tmp_path, now_fn=lambda: 1.0 )
+        old   = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ),
+                                       session_dir=tmp_path, now_fn=lambda: 2400.0 )
+        assert young[ "sessions" ][ 0 ][ "persona_state" ] == old[ "sessions" ][ 0 ][ "persona_state" ]
+        assert young[ "sessions" ][ 0 ][ "age_seconds" ] == pytest.approx( 1.0 )
+        assert old[ "sessions" ][ 0 ][ "age_seconds" ]   == pytest.approx( 2400.0 )
+        assert "1s old"    in young[ "identity_warning" ]
+        assert "2400s old" in old[ "identity_warning" ]
+
+
+class TestSpawnRecordsSpawnedTs:
+    def test_spawn_stamps_spawned_ts_into_the_manifest( self, tmp_path ):
+        spawn_sessions( 2, "brief", "mgr", script_path="/s.sh",
+                        runner=FakeRunner( returncode=0 ), session_dir=tmp_path,
+                        now_fn=lambda: 1234.5 )
+        records = _read_manifest( _manifest_path( "mgr", tmp_path ) )
+        assert [ r[ "spawned_ts" ] for r in records ] == [ 1234.5, 1234.5 ]
+
+    def test_spawned_ts_round_trips_into_age_seconds( self, tmp_path ):
+        # End-to-end on the stamp: spawn writes it, roster reads it back.
+        spawn_sessions( 1, "brief", "mgr", script_path="/s.sh",
+                        runner=FakeRunner( returncode=0 ), session_dir=tmp_path,
+                        now_fn=lambda: 100.0 )
+        res = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ),
+                                     session_dir=tmp_path, now_fn=lambda: 160.0 )
+        assert res[ "sessions" ][ 0 ][ "age_seconds" ] == pytest.approx( 60.0 )
 
 
 # ── module smoke body ─────────────────────────────────────────────────────────

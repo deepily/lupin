@@ -25,8 +25,9 @@ See: src/rnd/v0.1.7/2026.05.28-manager-spawned-reviewers.md
 import json
 import os
 import subprocess
+import time
 from pathlib import Path
-from typing  import Any, Callable, Dict, List, Optional
+from typing  import Any, Callable, Dict, List, Optional, Tuple
 
 from lupin_mcp.persona_normalization import persona_slug
 
@@ -37,6 +38,50 @@ DEFAULT_SPAWN_CAP = 8
 
 # Directory holding session bridge + manifest files (mirrors session_bridge.py).
 SESSION_DIR = Path.home() / ".claude" / "sessions"
+
+# ── Persona-state vocabulary for the spawn roster (row 6f8fd858) ──────────────
+#
+# The roster's liveness axis (`alive`/`status`) answers "is this tmux session
+# up?". It does NOT answer "who is sitting in it?" — the persona is written by
+# the CHILD's SessionStart into the child's own bridge file, long after the
+# PARENT wrote the manifest row. These four values are the identity axis, and
+# they exist so that a caller can never read a green liveness row as an answer
+# to the identity question.
+#
+# The critical distinction is between the last two: a child that BOOTED and got
+# no persona is a different animal from a child whose bridge is simply not on
+# disk yet (or never will be). Collapsing them into one reassuring word is the
+# defect this vocabulary exists to prevent.
+PERSONA_STATE_ALLOCATED = "allocated"           # bridge found, voice_persona names a persona
+PERSONA_STATE_NONE      = "none"                # bridge found, voice_persona explicitly null — booting, or booted and got nothing
+PERSONA_STATE_UNKNOWN   = "unknown_no_bridge"   # no bridge matches — mid-spawn RACE *or* dead SessionStart, AMBIGUOUS
+PERSONA_STATE_UNREADABLE= "unreadable"          # bridge found, voice_persona present but malformed — instrument failure, not absence
+
+# Measured on a live spawn, 2026-07-21 (row 6f8fd858 verification). A HEALTHY
+# child walks all three of the first states in about a second:
+#     t+0.00s  unknown_no_bridge   parent wrote the seat; child has written nothing
+#     t+0.77s  none                bridge on disk, voice_persona still null
+#     t+1.02s  allocated           persona named (Tiberius)
+# So NEITHER "unknown_no_bridge" NOR "none" is a failure verdict on its own —
+# both are normal for a child that is one second old, and both are damning for a
+# child that is forty minutes old. This is exactly why `age_seconds` is reported
+# next to the state and why the state itself never editorializes: the STATE says
+# what is on disk, the AGE is the evidence, and the caller draws the conclusion.
+# An instrument that guessed here would be repeating the row's original sin in a
+# new place — asserting a verdict it cannot actually establish.
+#
+# ⚠️ SCOPE OF THIS REPAIR — stated so it is not mistaken for more than it is.
+# A persona-less session is inconsistently visible across the identity-bearing
+# surfaces, and they disagree with each other. Measured 2026-07-21 on ONE live
+# session (cc-author-mr-radio-3), simultaneously:
+#     list_spawned_sessions   said alive:true / status:"live"      → healthy
+#     dm_send                 said recipient_unresolved/inactive,
+#                             listing 7 live peers and omitting it → gone
+#     the bridge-scan path    found no bridge for it               → nothing
+# Three surfaces, three different answers, one session, no shared source of
+# truth. THIS CHANGE REPAIRS ONLY THE FIRST. The DM resolver's blindness is a
+# separate defect on a separate path and is NOT fixed here; do not read a
+# now-honest roster as evidence that the other surfaces agree with it.
 
 
 # ── Subprocess runner (injectable) ───────────────────────────────────────────
@@ -252,7 +297,8 @@ def spawn_sessions(
     dry_run            : bool = False,
     model              : Optional[ str ] = None,
     runner             : Callable = default_runner,
-    session_dir        : Path = SESSION_DIR
+    session_dir        : Path = SESSION_DIR,
+    now_fn             : Callable = time.time
 ) -> Dict[ str, Any ]:
     """
     Spawn `count` headless reviewer sessions; record lineage to the manager's
@@ -288,9 +334,14 @@ def spawn_sessions(
           flag is passed and the child inherits the user default (today's fail-open
           behavior). The resolved model is echoed on EVERY roster entry and at the
           top level (spawn-ack verification → verify-allocated-MODEL).
-        - Returns { spawned: [ {session_name, requested_role, status, model, ...} ],
-                    manager_session_id, collection_topic, dry_run, requested,
-                    persona_preference, model }
+        - Stamps `spawned_ts` (epoch seconds, from now_fn) on EVERY spawn record,
+          persisted to the manifest. The roster reads it back as `age_seconds` to
+          distinguish a child mid-boot from a child whose SessionStart died — both
+          present on disk as "no bridge yet" (row 6f8fd858). Pre-existing manifest
+          records lack the key and surface age_seconds=None (honest absence).
+        - Returns { spawned: [ {session_name, requested_role, status, model,
+                    spawned_ts, ...} ], manager_session_id, collection_topic,
+                    dry_run, requested, persona_preference, model }
         - Never raises except the cap ValueError
 
     Args:
@@ -311,6 +362,7 @@ def spawn_sessions(
         name_prefix: tmux session name prefix
         runner: injected subprocess runner
         session_dir: injected session/manifest directory
+        now_fn: injected clock (epoch seconds) stamped onto each spawn record
 
     Returns:
         dict: spawn result roster
@@ -406,7 +458,13 @@ def spawn_sessions(
             "project"        : project,
             "status"         : "spawned" if ok else "failed",
             "dry_run"        : dry_run,
-            "model"          : model
+            "model"          : model,
+            # Spawn-time stamp (row 6f8fd858). The roster's identity axis has a
+            # genuinely ambiguous state — "no bridge on disk" is both a child
+            # mid-boot and a child whose SessionStart died. Age does not resolve
+            # the ambiguity (nothing on disk can), but it is the evidence that
+            # lets a caller tell a 3-second race from a 40-minute corpse.
+            "spawned_ts"     : now_fn()
         } )
 
     if not dry_run:
@@ -918,53 +976,240 @@ def list_spawned_sessions(
     manager_session_id : str,
     *,
     runner             : Callable = default_runner,
-    session_dir        : Path = SESSION_DIR
+    session_dir        : Path = SESSION_DIR,
+    now_fn             : Callable = time.time
 ) -> Dict[ str, Any ]:
     """
-    List the sessions this manager spawned, with live/dead status from tmux.
+    List the sessions this manager spawned, on TWO independent axes: liveness
+    (is the tmux session up?) and identity (who is sitting in it?).
+
+    Row 6f8fd858 — this roster used to answer only the first axis while reading
+    like a general health check. A manager asking "who took this seat?" got a
+    green row and learned nothing, then briefed the wrong session by name. The
+    liveness fields below keep their exact prior meaning; the identity fields
+    are added alongside, and the roster now states out loud when identity could
+    not be established rather than letting success stand in for verification.
 
     Requires:
         - manager_session_id is a non-empty string
         - runner is a callable(argv, env=None) -> CompletedProcess-like
+        - now_fn is a callable() -> epoch seconds
 
     Ensures:
-        - For each manifest entry, probes `tmux has-session -t <name>` via runner;
-          returncode 0 → "live", else "dead"
-        - Returns { sessions: [ {session_name, requested_role, status, alive, model} ],
-                    manager_session_id, count }
+        - LIVENESS (unchanged): probes `tmux has-session -t <name>` per manifest
+          entry; returncode 0 → alive=True/status="live", else dead
+        - IDENTITY: each row carries `persona` (the name, or None) and
+          `persona_state`, one of allocated / none / unknown_no_bridge /
+          unreadable — a null persona is NEVER emitted without a state saying why,
+          so a missing identity and an absent bridge can never read the same
+        - `identity_verified` per row is True iff persona_state is "allocated"
+        - `age_seconds` is seconds since the manifest recorded the spawn, or None
+          for legacy records predating spawn-time capture (honest absence, never
+          a guess) — it is the EVIDENCE that separates a live spawn race from a
+          SessionStart that ran and failed, both of which present as "no bridge"
+        - Top-level `identity_complete` is True iff EVERY row is "allocated";
+          `identity_warning` is None in that case and otherwise NAMES each
+          unverified seat, so a caller cannot read this dict as identity-verified
+          unless the dict says so
+        - `unattributable_bridges` reports bridge files the scan could not read —
+          the instrument declaring its own blind spot
+        - Returns { sessions, manager_session_id, count, identity_complete,
+                    identity_warning, unattributable_bridges }
         - model surfaces the persisted manifest model id (None when a pre-fix
           record predates model capture — honest absence, never a guess)
-        - Never raises (a missing manifest yields an empty list)
+        - Never raises (a missing manifest yields an empty list; an empty roster
+          is identity_complete=True with no warning — nothing was claimed)
 
     Args:
         manager_session_id: lineage key
         runner: injected subprocess runner
         session_dir: injected session/manifest directory
+        now_fn: injected clock (epoch seconds) for age computation
 
     Returns:
-        dict: roster with liveness
+        dict: roster with liveness AND identity, plus an explicit statement of
+              which identity questions it could not answer
     """
     path    = _manifest_path( manager_session_id, session_dir )
     records = _read_manifest( path )
     out     = []
 
+    # One scan for the whole roster — N rows must not mean N directory globs.
+    persona_index, unattributable = _scan_persona_by_tmux_session( session_dir )
+    now = now_fn()
+
     for r in records:
         name   = r[ "session_name" ]
         result = runner( [ "tmux", "has-session", "-t", name ] )
         alive  = getattr( result, "returncode", 1 ) == 0
+
+        # A seat absent from the index has NO bridge on disk. That is genuinely
+        # ambiguous — mid-spawn race or dead SessionStart — and is reported as
+        # ambiguous rather than smoothed into "this child has no persona".
+        identity   = persona_index.get( name, { "persona": None, "persona_state": PERSONA_STATE_UNKNOWN } )
+        spawned_ts = r.get( "spawned_ts" )
+        age        = ( now - spawned_ts ) if isinstance( spawned_ts, ( int, float ) ) else None
+
         out.append( {
-            "session_name"   : name,
-            "requested_role" : r.get( "requested_role", "reviewer" ),
-            "status"         : "live" if alive else "dead",
-            "alive"          : alive,
-            "model"          : r.get( "model" )
+            "session_name"      : name,
+            "requested_role"    : r.get( "requested_role", "reviewer" ),
+            "status"            : "live" if alive else "dead",
+            "alive"             : alive,
+            "model"             : r.get( "model" ),
+            "persona"           : identity[ "persona" ],
+            "persona_state"     : identity[ "persona_state" ],
+            "identity_verified" : identity[ "persona_state" ] == PERSONA_STATE_ALLOCATED,
+            "age_seconds"       : age
         } )
 
+    warning = _build_identity_warning( out, unattributable )
+
     return {
-        "sessions"           : out,
-        "manager_session_id" : manager_session_id,
-        "count"              : len( out )
+        "sessions"              : out,
+        "manager_session_id"    : manager_session_id,
+        "count"                 : len( out ),
+        "identity_complete"     : warning is None,
+        "identity_warning"      : warning,
+        "unattributable_bridges": unattributable
     }
+
+
+def _scan_persona_by_tmux_session( session_dir: Path ) -> Tuple[ Dict[ str, Dict[ str, Any ] ], int ]:
+    """
+    Scan the session-bridge directory once and index persona identity by the
+    child's `tmux_session` name.
+
+    This is the READ side of the identity axis. The parent never learns a
+    child's persona at spawn time — the child's SessionStart writes it into its
+    own bridge file afterwards — so the only honest way for a roster to answer
+    "who is in this seat?" is to go look at the bridges.
+
+    A bridge whose JSON will not parse cannot be attributed to any seat (bridge
+    filenames key on pid, not on tmux session), so it is COUNTED rather than
+    silently skipped: a scan that was partially blind must say so, otherwise a
+    resulting "no bridge" verdict overstates what the scan actually established.
+
+    Requires:
+        - session_dir is a Path (need not exist)
+
+    Ensures:
+        - Returns ( index, unattributable_bridge_count ) where index maps
+          tmux_session -> { "persona": str|None, "persona_state": str }
+        - persona_state is PERSONA_STATE_ALLOCATED when voice_persona is a dict
+          carrying a non-empty string name (persona is that name)
+        - persona_state is PERSONA_STATE_NONE when voice_persona is absent or
+          explicitly null — the child wrote a bridge but has no persona in it
+          (normal mid-boot; a failure only once aged — see the state vocabulary)
+        - persona_state is PERSONA_STATE_UNREADABLE when voice_persona is
+          present but malformed (not a dict, or a dict with no usable name);
+          the record was found but the identity cannot be read from it
+        - persona is None for every state except ALLOCATED — a name is only
+          ever emitted when it was actually read
+        - Bridges with no `tmux_session` field are ignored (not attributable)
+        - Bridges whose JSON is unreadable/corrupt increment the returned count
+        - Buffer/listener sidecar files are skipped (they are not bridges)
+        - Never raises (an absent or unlistable session_dir yields ( {}, 0 ))
+
+    Args:
+        session_dir: directory holding cc-*.json bridge files
+
+    Returns:
+        tuple: ( { tmux_session: { persona, persona_state } }, unattributable_count )
+    """
+    index         : Dict[ str, Dict[ str, Any ] ] = { }
+    unattributable = 0
+
+    try:
+        candidates = sorted( session_dir.glob( "cc-*.json" ) )
+    except OSError:
+        return index, unattributable
+
+    for path in candidates:
+        if "buffer" in path.name or "listener" in path.name: continue
+        try:
+            data = json.loads( path.read_text() )
+        except ( json.JSONDecodeError, OSError, ValueError ):
+            unattributable += 1
+            continue
+        if not isinstance( data, dict ):
+            unattributable += 1
+            continue
+
+        tmux_session = data.get( "tmux_session" )
+        if not tmux_session or not isinstance( tmux_session, str ): continue
+
+        raw = data.get( "voice_persona" )
+        if raw is None:
+            entry = { "persona": None, "persona_state": PERSONA_STATE_NONE }
+        elif isinstance( raw, dict ):
+            name  = raw.get( "name" )
+            if isinstance( name, str ) and name.strip():
+                entry = { "persona": name.strip(), "persona_state": PERSONA_STATE_ALLOCATED }
+            else:
+                entry = { "persona": None, "persona_state": PERSONA_STATE_UNREADABLE }
+        else:
+            entry = { "persona": None, "persona_state": PERSONA_STATE_UNREADABLE }
+
+        index[ tmux_session ] = entry
+
+    return index, unattributable
+
+
+def _build_identity_warning(
+    rows                  : List[ Dict[ str, Any ] ],
+    unattributable_bridges: int
+) -> Optional[ str ]:
+    """
+    Compose the caller-facing sentence that REFUSES to let an all-green liveness
+    roster be read as identity-verified.
+
+    Returns None when every seat's identity was established — the roster only
+    warns about what it genuinely could not answer, so the warning never becomes
+    background noise a caller learns to skip.
+
+    Requires:
+        - rows is the assembled roster list (each row has session_name,
+          persona_state, age_seconds)
+        - unattributable_bridges is a non-negative count from the bridge scan
+
+    Ensures:
+        - Returns None iff every row's persona_state is PERSONA_STATE_ALLOCATED
+        - Otherwise returns a string naming EVERY unverified seat with its state,
+          plus its age in whole seconds when the manifest recorded a spawn time
+          (age is the evidence that separates a live race from a dead SessionStart)
+        - Appends a blindness note when the scan skipped unreadable bridge files
+        - Never raises
+
+    Args:
+        rows: assembled roster rows
+        unattributable_bridges: bridges the scan could not parse or attribute
+
+    Returns:
+        str|None: the warning, or None when identity is fully established
+    """
+    unverified = [ r for r in rows if r[ "persona_state" ] != PERSONA_STATE_ALLOCATED ]
+    if not unverified: return None
+
+    parts = []
+    for r in unverified:
+        age = r.get( "age_seconds" )
+        if age is None:
+            parts.append( f"{r[ 'session_name' ]} ({r[ 'persona_state' ]}, age unknown)" )
+        else:
+            parts.append( f"{r[ 'session_name' ]} ({r[ 'persona_state' ]}, {int( age )}s old)" )
+
+    warning = (
+        f"{len( unverified )} of {len( rows )} seat(s) could NOT be identity-verified: "
+        + ", ".join( parts )
+        + ". This roster answers LIVENESS; a live row is not proof of who is in it. "
+          "Do not address these seats by persona name — confirm identity out of band."
+    )
+    if unattributable_bridges:
+        warning += (
+            f" NOTE: the bridge scan skipped {unattributable_bridges} unreadable bridge file(s), "
+            "so an 'unknown_no_bridge' verdict here may be scan blindness rather than a missing bridge."
+        )
+    return warning
 
 
 def reap_stale_spawned(
