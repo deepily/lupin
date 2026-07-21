@@ -772,6 +772,70 @@ def test_write_hold_accepts_valid_ttl_including_float( tmp_path ):
     assert hh.write_hold( "sid", "p", "r", ttl_seconds=1.5, base_dir=tmp_path )[ "ttl_seconds" ] == 1.5
 
 
+# ── write_hold reason validation (A-1, Rio ⚡ 2026-07-21) ──────────────────────
+
+@pytest.mark.parametrize( "bad", [ "", "   ", "\t\n", " ", None ] )
+def test_write_hold_rejects_an_unhonorable_reason( tmp_path, bad ):
+    """
+    The SECOND prose contract this function enforced with nothing. `is_honored`
+    requires a non-empty reason, so an empty one minted a hold that declared
+    quiescence and defended nothing — the 22-file corpus shape, produced by the
+    writer itself.
+
+    STRIPPED, not `== ""`: the params run past the empty string precisely because
+    a narrower guard would let "   " through and reopen the defect one keystroke
+    over. The non-breaking space is here because `str.strip()` removes it while a
+    hand-rolled equality check would not.
+    """
+    with pytest.raises( ValueError, match="non-empty" ):
+        hh.write_hold( "sid", "p", bad, base_dir=tmp_path )
+    assert not ( tmp_path / ".heartbeat-hold-sid.json" ).exists()   # nothing was written
+
+
+def test_write_hold_reason_guard_agrees_exactly_with_is_honored( tmp_path ):
+    """
+    THE ANTI-DRIFT ASSERTION, and the whole point of the finding: two checks on
+    one property must agree on the property, or the stricter one is just a smaller
+    version of the hole. For every candidate, "the writer accepts it" and "the
+    reader honors it" must be the SAME boolean — no value may pass the writer and
+    fail the reader, which is exactly what A-1 was.
+    """
+    for candidate in ( "", "   ", "\t\n", " ", "holding", " x ", "0" ):
+        try:
+            hh.write_hold( "agree", "p", candidate, base_dir=tmp_path )
+            writer_accepts = True
+        except ValueError:
+            writer_accepts = False
+        reader_honors = ( hh.is_honored( hh.read_hold( "agree", base_dir=tmp_path ) )
+                          if writer_accepts else False )
+        assert writer_accepts == reader_honors, \
+            f"writer/reader disagree on reason={candidate!r} — that gap IS finding A-1"
+
+
+def test_write_hold_accepts_a_real_reason( tmp_path ):
+    # PRESENCE-assertion beside the rejections: the guard is not a brick wall.
+    assert hh.write_hold( "sid", "p", "holding on the seam review",
+                          base_dir=tmp_path )[ "reason" ] == "holding on the seam review"
+
+
+def test_write_hold_reason_guard_precedes_the_write_so_a_refresh_is_safe( tmp_path ):
+    """
+    Ordering is load-bearing, not tidy: unlinking a bad hold still leaves the
+    session undefended, so the only repair that preserves a LIVE defense is
+    refusing before the overwrite ever happens.
+    """
+    hh.write_hold( "live", "p", "genuinely holding", ttl_seconds=14400, base_dir=tmp_path )
+    before = hh.read_hold( "live", base_dir=tmp_path )
+    assert hh.is_honored( before )
+
+    with pytest.raises( ValueError ):
+        hh.write_hold( "live", "p", "", ttl_seconds=14400, base_dir=tmp_path )
+
+    after = hh.read_hold( "live", base_dir=tmp_path )
+    assert hh.is_honored( after ),               "a refused write must not cost a live defense"
+    assert after[ "reason" ] == before[ "reason" ]
+
+
 # ── is_fresh ──────────────────────────────────────────────────────────────────
 
 def _hold( held_at, ttl_seconds=900, reason="r", work_owed=True ):

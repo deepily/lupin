@@ -288,8 +288,40 @@ def write_hold( session_id, persona, reason, work_owed=True,
           makes is_fresh False ⇒ is_honored False ⇒ the session is poked forever
           despite having declared a hold. Fail at the write, loudly, rather than
           mint a hold that silently cannot defend anything.
+        - ValueError if reason is empty or whitespace-only — the SECOND prose
+          contract this function enforced with nothing, found by adversarial
+          review (Rio ⚡, 2026-07-21, row 3ebc6c3d finding A-1) and reproduced
+          both ways. `is_honored` requires a non-empty reason, so an empty one
+          lands a hold that declares quiescence and defends nothing: EXACTLY the
+          22-file corpus this milestone exists to stop minting. Worse on a
+          REFRESH — measured, before/after: a live hold (`honored=True`,
+          reason='holding on the seam review', ttl 14400) was OVERWRITTEN by an
+          empty-reason write and came back `honored=False`, costing a running
+          session the defense it already had and restoring the ping-storm the
+          row's OUT-OF-SCOPE section names by name.
+
+          THE GUARD IS THE EXACT COMPLEMENT OF `is_honored`'s PREDICATE
+          (`bool( reason and str( reason ).strip() )`), deliberately and not
+          incidentally. A guard that rejected only `""` would let `"   "`
+          through — whitespace passes the writer, fails the reader, and mints
+          the same unhonorable hold through a narrower door. Two checks on one
+          property must agree on the property, or the stricter one is just a
+          smaller version of the hole.
         - OSError if the target directory is not writable / does not exist
+
+    BOTH RAISES PRECEDE EVERY FILESYSTEM TOUCH, and that ordering is load-bearing
+    rather than tidy: a refused write must leave a PRE-EXISTING hold exactly as it
+    found it. Validating after `os.replace` would make every refusal destructive
+    for the one caller who needed the old hold most — the live session refreshing
+    the hold that is currently defending it.
     """
+    if not ( reason and str( reason ).strip() ):
+        raise ValueError(
+            f"reason must be a non-empty, non-whitespace string, got {reason!r} — is_honored "
+            f"requires a reason, so a hold without one declares quiescence and defends "
+            f"nothing: it is never honored, and the session it was written to defend gets "
+            f"poked anyway."
+        )
     if isinstance( ttl_seconds, bool ) or not isinstance( ttl_seconds, ( int, float ) ):
         raise ValueError(
             f"ttl_seconds must be a positive number, got {ttl_seconds!r} — a hold with an "

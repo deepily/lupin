@@ -229,11 +229,25 @@ class _Chain:
             held_at = _iso( datetime.datetime.now( UTC ) )
         else:
             held_at = _iso( datetime.datetime.now( UTC ) - datetime.timedelta( seconds=10_000 ) )
+        # A REASONLESS HOLD IS HAND-WRITTEN BY DEFINITION (A-1 fix, 2026-07-21).
+        # `write_hold` now REFUSES an empty/whitespace reason, because a hold the
+        # reader cannot honor is the 22-file corpus this milestone exists to stop
+        # minting. The states below are still REAL — they are exactly what the
+        # corpus contains — so the fixture builds them the way the wild does: the
+        # schema comes from the writer, then the one field is set as a hand-editor
+        # would. The ASSERTIONS are unchanged; only the construction path is, and
+        # it is now more faithful to how these files actually appear on disk.
+        honorable = bool( reason and str( reason ).strip() )
         hold = heartbeat_hold.write_hold(
-            session_id, "María 🌸", reason, work_owed=work_owed,
-            ttl_seconds=ttl_seconds, awaiting=awaiting, held_at=held_at,
+            session_id, "María 🌸", reason if honorable else "placeholder — overwritten below",
+            work_owed=work_owed, ttl_seconds=ttl_seconds, awaiting=awaiting, held_at=held_at,
             base_dir=self.hold_dir,
         )
+        if not honorable:
+            hold[ "reason" ] = reason
+            ( self.hold_dir / f".heartbeat-hold-{session_id}.json" ).write_text(
+                json.dumps( hold, indent=2 )
+            )
         if not fresh:
             path = self.hold_dir / f".heartbeat-hold-{session_id}.json"
             old  = ( datetime.datetime.now( UTC ) - datetime.timedelta( seconds=10_000 ) ).timestamp()

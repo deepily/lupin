@@ -92,11 +92,21 @@ def test_v1_fresh_reasoned_hold_honored( tmp_path ):
 
 def test_v1_hold_declares_done_not_owed( tmp_path ):
     now = datetime.datetime( 2026, 6, 4, 12, 0, 0, tzinfo=UTC )
-    # work_owed False, fresh, empty reason → not honored (no reason) but declared done
-    hold_mod.write_hold(
-        "s_done", "Tiffany 💍", "", work_owed=False,
+    # work_owed False, fresh, empty reason → not honored (no reason) but declared done.
+    #
+    # HAND-WRITTEN ON PURPOSE (A-1 fix, 2026-07-21): `write_hold` now REFUSES an
+    # empty reason, because a hold the reader cannot honor is the corpus this
+    # milestone exists to stop minting. The STATE is still real — it is what the
+    # corpus contains — so it is built the way the wild builds it: schema from the
+    # writer, then the one field set as a hand-editor would. The assertion below
+    # is unchanged; it was always about the READER's verdict on this state.
+    import json
+    hold = hold_mod.write_hold(
+        "s_done", "Tiffany 💍", "placeholder — overwritten below", work_owed=False,
         ttl_seconds=900, held_at=now.isoformat(), base_dir=tmp_path
     )
+    hold[ "reason" ] = ""
+    ( tmp_path / ".heartbeat-hold-s_done.json" ).write_text( json.dumps( hold, indent=2 ) )
     r = _v1_adapter_step( "s_done", base_dir=tmp_path, now=now )
     assert r[ "outcome" ] == decision_mod.OUTCOME_NOT_OWED
     assert cap_mod.get_poke_count( "s_done", base_dir=tmp_path ) == 0
