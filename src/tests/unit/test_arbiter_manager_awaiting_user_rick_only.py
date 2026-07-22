@@ -3,7 +3,9 @@
 Arbiter manager-subject hardening, case-16 leg (D1 ratified): CASE_MANAGER_AWAITING_USER
 (16) -> TIER_RICK_ONLY. An AWAITING-USER manager is ALIVE and still OWNS its crew; only
 Rick unblocks, so a peer manager has zero action -> no peer fan-out (mirror case 20/17).
-Case 14 (MANAGER-STALE) stays Rick+managers (orphaned crew -> peer can adopt).
+Case 14 (MANAGER-STALE) ALSO went Rick-only on 2026-07-21 (mini-plan 04) -- this
+docstring formerly read "stays Rick+managers (orphaned crew -> peer can adopt)";
+that carve-out was reversed on the same reasoning (silence != absence).
 Design: src/rnd/v0.1.9/2026.07.08-arbiter-manager-subject-routing-hardening.md (D1)
 Venue: :7999-eligible / local -- pure + mocked, no server.
 """

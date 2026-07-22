@@ -164,12 +164,32 @@ def test_auto_poke_reap_rec_routes_rick_and_managers():
 
 
 def test_postgame_cases_route_per_design():
-    """Post-game (2026-06-11): the manager-stale advisory fans to Rick + all
-    active managers (the dark manager's crew is leaderless-in-waiting); the
-    fleet-dark advisory is Rick-ONLY (no managers remain by definition)."""
+    """Post-game (2026-06-11) + mini-plan 04 (2026-07-21): the manager-stale
+    advisory is RICK-ONLY. The 2026-06-11 peer fan-out ("the dark manager's crew
+    is leaderless-in-waiting") was REVERSED by Rick's ruling: case 14 fires on
+    inferred SILENCE, not measured ABSENCE — four false-positive suppressors exist
+    precisely because "silent past threshold" kept meaning "alive and working" — so
+    the subject's crew is OWNED and ALIVE, the one thing a peer manager has zero
+    action on (completing ff91cff4 case 20 / f48f089d cases 16-17). The fleet-dark
+    advisory is Rick-ONLY too (no managers remain by definition)."""
     assert CASE_MANAGER_STALE_ADVISORY == 14 and CASE_FLEET_DARK == 15
-    assert tier_for( CASE_MANAGER_STALE_ADVISORY ) == TIER_RICK_AND_MANAGERS
+    assert tier_for( CASE_MANAGER_STALE_ADVISORY ) == TIER_RICK_ONLY
     assert tier_for( CASE_FLEET_DARK )             == TIER_RICK_ONLY
+
+
+def test_case14_flip_did_not_widen_the_fleet_crisis_tier():
+    """AC-4 (mini-plan 04): the case-14 flip must not quietly drag its neighbours
+    with it. Cases 5 (deadlock), 8 (orphan WORKER), 9 (manager-down + HOLD),
+    11 (fleet-stall) and 13 (auto-poke reap-rec) ALL stay on Rick + managers.
+    Case 9 is the load-bearing one: it is case 14's near-twin in wording and was
+    put to Rick as a direct yes/no on 2026-07-21 — answer NO, do not flip. Its
+    basis is the DETECTOR, not the rationale: case 9 fires on a manager that is
+    DOWN and holding (measured absence, a genuine orphan), case 14 on 45m of
+    silence from a manager still in the roster (inferred, and wrong often enough
+    that four guards exist). Flipping 9 needs NEW evidence that its subject is
+    inferred too — not a re-reading of the two rationales."""
+    for case in ( 5, 8, 9, 11, CASE_AUTO_POKE_REAP_REC ):
+        assert tier_for( case ) == TIER_RICK_AND_MANAGERS, f"case {case} must NOT have flipped"
 
 
 def test_tier_for_unknown_case_raises():

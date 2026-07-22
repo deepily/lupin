@@ -65,9 +65,30 @@ CASE_AUTO_POKE_REAP_REC = 13
 # Post-game ADDITIONS (2026-06-11, missed-poke post-game — design
 # src/rnd/v0.1.8/2026.06.11-arbiter-missed-poke-postgame-and-outreach-logging.md):
 #   14  MANAGER-STALE advisory — a MANAGER-role session silent past the staleness
-#       threshold (F2). Rick + ALL active managers: the dark manager's crew is
-#       leaderless-in-waiting; any manager could step in. (The bounded staleness
-#       POKE itself is a direct send_to, like the stuck-tier wake-nudge.)
+#       threshold (F2). RICK ONLY as of mini-plan 04 (2026-07-21). (The bounded
+#       staleness POKE itself is a direct send_to, like the stuck-tier wake-nudge,
+#       and is UNCHANGED by this reversal.)
+#
+#       🔴 THIS REVERSES A CONSIDERED CARVE-OUT — do not re-derive the original
+#       rationale and revert it. The 2026-06-11 basis read "the dark manager's crew
+#       is leaderless-in-waiting; any manager could step in", and f48f089d's own
+#       case-16 comment below deliberately DISTINGUISHED case 14 while converting
+#       16/17. That distinction is now overturned on the merits, by Rick's ruling
+#       (2026-07-21): case 14 fires on SILENCE, not ABSENCE. Its eligibility path
+#       carries four false-positive suppressors — persona-twin (7c931b3a),
+#       bridge-mtime veto (26dd3afb), last-signal velocity streak (285c0343),
+#       store-health gate (33949e83) — every one of them added because "silent past
+#       threshold" kept meaning "alive and working". A manager silent 45m is
+#       overwhelmingly alive and STILL OWNS ITS CREW, which is exactly the
+#       "owned, alive crew" a peer manager has zero legitimate action on. The
+#       orphaned-crew premise belongs to a manager that is DEMONSTRABLY GONE —
+#       case 9's subject (measured absence), not case 14's (inferred silence).
+#       This completes ff91cff4 (case 20: manager SUBJECT → Rick only, "managers
+#       answer to Rick, not to each other") and f48f089d (cases 16/17 → Rick only).
+#       Case 9 STAYS on Rick+managers — ruled by Rick 2026-07-21, on the detector
+#       distinction above; flipping it needs NEW evidence that case 9's subject is
+#       inferred too, not a re-reading of the rationales. Design:
+#       src/rnd/v0.1.9/2026.07.21-mini-plan-04-manager-stale-peer-fanout.md
 #   15  FLEET-DARK — the published roster decayed to ZERO (F3). Rick ONLY: by
 #       definition no managers remain to fan out to.
 CASE_MANAGER_STALE_ADVISORY = 14
@@ -83,7 +104,9 @@ CASE_FLEET_DARK             = 15
 #       Rick (every owed item operator-gated or blocked-on-user). RICK ONLY as of
 #       f48f089d (2026-07-08): the subject manager is ALIVE and still OWNS its crew,
 #       and only Rick unblocks it — a peer manager has zero legitimate action (it
-#       can't adopt an owned, alive crew, unlike the case-14 orphaned-crew path).
+#       can't adopt an owned, alive crew). ⚠️ This comment originally read "unlike
+#       the case-14 orphaned-crew path"; that carve-out was REVERSED 2026-07-21
+#       (mini-plan 04, above) — case 14 is Rick-only too, on the same reasoning.
 #       Completing the ff91cff4 sweep, this mirrors case 20/17 (alive/done/stuck
 #       MANAGER subject → Rick only); the arbiter never reaps (the redline holds).
 #   17  MANAGER-DONE advisory — a tapped manager with ZERO non-terminal owed work
@@ -138,7 +161,7 @@ CASE_TIERS = {
     11 : TIER_RICK_AND_MANAGERS,
     12 : TIER_LOG_THEN_RICK,
     CASE_AUTO_POKE_REAP_REC : TIER_RICK_AND_MANAGERS,   # 2b-3 auto-poke escalation
-    CASE_MANAGER_STALE_ADVISORY : TIER_RICK_AND_MANAGERS,   # post-game F2 (2026-06-11)
+    CASE_MANAGER_STALE_ADVISORY : TIER_RICK_ONLY,           # mini-plan 04 (2026-07-21) REVERSAL of the 2026-06-11 carve-out → Rick only
     CASE_FLEET_DARK             : TIER_RICK_ONLY,           # post-game F3 (2026-06-11)
     CASE_MANAGER_AWAITING_USER  : TIER_RICK_ONLY,          # f48f089d (2026-07-08) awaiting-user manager-subject FYI → Rick only (D1; mirror case 20/17)
     CASE_MANAGER_DONE_ADVISORY  : TIER_RICK_ONLY,           # f48f089d (2026-07-08) consider-reaping → Rick only (mirror case 20)
@@ -176,10 +199,16 @@ def quick_smoke_test():
     # 6929f4ac (2026-06-22): the dark-session user-gate resurface is Rick-only
     assert tier_for( CASE_USER_GATE_RESURFACE ) == TIER_RICK_ONLY
     assert tier_for( CASE_AUTO_POKE_REAP_REC ) == TIER_RICK_AND_MANAGERS   # 2b-3
-    # post-game (2026-06-11): manager-stale fans to Rick + managers; fleet-dark
-    # is Rick-only (no managers remain by definition)
-    assert tier_for( CASE_MANAGER_STALE_ADVISORY ) == TIER_RICK_AND_MANAGERS
+    # post-game (2026-06-11) + mini-plan 04 (2026-07-21): the manager-stale
+    # advisory is RICK-ONLY — the 2026-06-11 peer fan-out was REVERSED (case 14
+    # fires on inferred silence, not measured absence, so the subject's crew is
+    # owned + alive; see the case-14 comment block). Fleet-dark is Rick-only too
+    # (no managers remain by definition).
+    assert tier_for( CASE_MANAGER_STALE_ADVISORY ) == TIER_RICK_ONLY
     assert tier_for( CASE_FLEET_DARK )             == TIER_RICK_ONLY
+    # the fleet-crisis tier did NOT widen: case 9 (manager-down, MEASURED absence)
+    # stays Rick+managers — ruled by Rick 2026-07-21 alongside the case-14 flip
+    assert tier_for( 9 ) == TIER_RICK_AND_MANAGERS
     # L1 (2026-06-17): the awaiting-user and done advisories are BOTH RICK-ONLY as
     # of f48f089d (2026-07-08) — an alive AWAITING-USER manager still owns its crew
     # (only Rick unblocks) and a DONE manager's "consider reaping it" directive is

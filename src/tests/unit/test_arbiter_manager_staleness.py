@@ -296,13 +296,21 @@ def test_stale_manager_poked_and_rick_advised_same_poll():
     assert fired == 1
     assert len( _stale_pokes( gw ) ) == 1 and _stale_pokes( gw )[ 0 ][ 0 ] == "Tiberius"
     assert "45m" in _stale_pokes( gw )[ 0 ][ 1 ]
+    # AC-3 (mini-plan 04): RICK STILL RECEIVES IT. A regression that silences the
+    # advisory entirely would satisfy "no peer got it" and fail the user, so the
+    # Rick hop is pinned explicitly on the SAME episode as the peer-silence check.
     advisories = [ m for m in escal if "MANAGER-STALE" in m ]
     assert len( advisories ) == 1
     assert "Tiberius" in advisories[ 0 ] and "45m" in advisories[ 0 ]
     # EDT-labeled wall time in the Rick-facing body (commons/journal are UTC)
     assert "EDT" in advisories[ 0 ] or "EST" in advisories[ 0 ]
-    # case-14 fanout: the advisory also reached the OTHER active manager
-    assert ( "OtherMgr", advisories[ 0 ] ) in gw.sent
+    # AC-2 (mini-plan 04): NO peer fan-out. Asserted on the RECIPIENT alone, never
+    # as "that (recipient, message) tuple is absent" — a tuple check passes the
+    # moment the message TEXT changes while the peer still receives a DM, and a
+    # control an unrelated edit can satisfy is not a control.
+    assert [ s for s in gw.sent if s[ 0 ] == "OtherMgr" ] == [ ]
+    # the ONLY gateway traffic is the poke, addressed TO the stale subject
+    assert [ s[ 0 ] for s in gw.sent ] == [ "Tiberius" ]
 
 
 def test_corpse_manager_age_none_not_eligible():
@@ -741,10 +749,12 @@ def _subject_advisories( gw, subject, marker ):
     return [ s for s in gw.sent if s[ 0 ] == subject and marker in s[ 1 ] ]
 
 
-def test_case14_stale_subject_gets_poke_not_self_advisory():
-    """THE b9911943 REPRO: the stale subject is itself an active manager. It
-    receives the POKE (addressed to it) but NOT the about-itself MANAGER-STALE
-    advisory; a PEER manager and Rick both still get the advisory."""
+def test_case14_stale_subject_gets_poke_and_nobody_is_advised_but_rick():
+    """THE b9911943 REPRO, SUPERSEDED BY mini-plan 04 (2026-07-21): the stale
+    subject is itself an active manager. It still receives the POKE (addressed to
+    it — unchanged), and now NOBODY on the gateway receives the advisory: not the
+    subject (the original b9911943 double-delivery) and not the peer (the whole
+    fan-out is gone, exactly as f48f089d did to cases 16/17). Rick still gets it."""
     gw, escal = _GW(), [ ]
     job  = _job( gw, notify=lambda m, *a, **k: escal.append( m ) )
     snap = _snap( _row( "m1", "manager", 2700, persona="Tiberius" ) )
@@ -756,24 +766,31 @@ def test_case14_stale_subject_gets_poke_not_self_advisory():
     assert len( pokes ) == 1 and pokes[ 0 ][ 0 ] == "Tiberius"
     # ...but NOT the about-itself advisory (the b9911943 double-delivery)
     assert _subject_advisories( gw, "Tiberius", "MANAGER-STALE:" ) == [ ]
-    # the PEER manager DID get the advisory
-    advisory = [ m for m in escal if "MANAGER-STALE" in m ][ 0 ]
-    assert ( "OtherMgr", advisory ) in gw.sent
-    # Rick got it exactly once
+    # AC-2: nor did the PEER manager — asserted on the recipient, not on a
+    # (recipient, message) tuple, so a message-text edit cannot satisfy it
+    assert [ s for s in gw.sent if s[ 0 ] == "OtherMgr" ] == [ ]
+    # AC-3: Rick got it exactly once (the flip must not silence the advisory)
     assert len( [ m for m in escal if "MANAGER-STALE" in m ] ) == 1
 
 
-def test_case14_subject_exclusion_is_canonical_key_tolerant():
-    """The exclusion matches by canonical persona key: a lowercase 'tiberius' in
-    active_managers is still recognized as the 'Tiberius' subject and dropped from
-    the fan-out (the poke still goes out on the real-id direct-send path)."""
+def test_case14_no_gateway_advisory_for_any_persona_key_variant():
+    """mini-plan 04 successor to the canonical-key-tolerance receipt: with the peer
+    fan-out gone there is no key to match against, so the invariant is stronger —
+    NO gateway recipient, in any casing, receives a MANAGER-STALE advisory. The
+    canonical-key exclusion itself is still exercised on case 5 by
+    test_route_exclude_persona_matches_by_canonical_key (test_arbiter_routing.py),
+    where the fan-out is live; it is NOT dead code."""
     gw, escal = _GW(), [ ]
     job  = _job( gw, notify=lambda m, *a, **k: escal.append( m ) )
     snap = _snap( _row( "m1", "manager", 2700, persona="Tiberius" ) )
     job._check_manager_staleness( snap, NOW, active_managers=[ "tiberius", "OtherMgr" ] )
-    assert _subject_advisories( gw, "tiberius", "MANAGER-STALE:" ) == [ ]   # case-variant dropped
-    advisory = [ m for m in escal if "MANAGER-STALE" in m ][ 0 ]
-    assert ( "OtherMgr", advisory ) in gw.sent                             # peer still served
+    # Anchored on the RECIPIENT LIST, not on an advisory-shaped text filter: a
+    # filter like `"MANAGER-STALE:" in s[1]` passes VACUOUSLY the moment the
+    # advisory is reworded (proven by an adversarial rename probe, 2026-07-21) —
+    # it would report "no advisory on the wire" while every peer still got a DM.
+    # The only legitimate gateway traffic is the poke, addressed TO the subject.
+    assert [ s[ 0 ] for s in gw.sent ] == [ "Tiberius" ]
+    assert len( [ m for m in escal if "MANAGER-STALE" in m ] ) == 1      # Rick still advised
 
 
 def test_case16_blocked_advisory_is_rick_only_no_peer_fanout():
@@ -812,16 +829,18 @@ def test_case17_done_advisory_is_rick_only_no_peer_fanout():
     assert gw.sent == [ ]                                         # NO manager DM — not the subject, not a peer
 
 
-def test_case14_no_regression_when_subject_absent_everyone_served():
-    """No-regression: when the subject is NOT among active_managers (the only shape
-    the old fixtures exercised), the default exclusion drops nobody — both listed
-    peers + Rick still receive the advisory exactly as before."""
+def test_case14_subject_absent_still_no_peer_advisory():
+    """mini-plan 04: the shape the old fixtures exercised — subject NOT among
+    active_managers, so the b9911943 exclusion drops nobody. Before the flip both
+    listed peers were served; now NEITHER is. This is the observed defect Rick
+    reported (peer managers interrupted about seats that are not theirs), pinned
+    on the multi-peer shape so a partial fan-out cannot slip back in."""
     gw, escal = _GW(), [ ]
     job  = _job( gw, notify=lambda m, *a, **k: escal.append( m ) )
     snap = _snap( _row( "m1", "manager", 2700, persona="Tiberius" ) )
     job._check_manager_staleness( snap, NOW, active_managers=[ "PeerA", "PeerB" ] )
-    advisory = [ m for m in escal if "MANAGER-STALE" in m ][ 0 ]
-    assert ( "PeerA", advisory ) in gw.sent and ( "PeerB", advisory ) in gw.sent
+    assert [ s for s in gw.sent if s[ 0 ] in ( "PeerA", "PeerB" ) ] == [ ]
+    assert len( [ m for m in escal if "MANAGER-STALE" in m ] ) == 1       # Rick still advised
 
 
 # ── persona-twin suppression (bug 7c931b3a, 2026-06-27) ──────────────────────
