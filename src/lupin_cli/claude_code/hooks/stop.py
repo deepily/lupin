@@ -414,7 +414,7 @@ def _idle_sentence( persona_name, owed_unknown=False, owed=False, total_owed=0 )
     return "Momentarily idle."
 
 
-def _announce_idle( session_id, persona_name, owed_unknown=False, owed=False, total_owed=0 ):
+def _announce_idle( session_id, persona_name, owed_unknown=False, owed=False, total_owed=0, muted=False ):
     """
     Fire ONE low-priority, non-blocking idle status notify for the
     `idle_announce` behavior. The persona "speaks" its own idle state.
@@ -438,10 +438,19 @@ def _announce_idle( session_id, persona_name, owed_unknown=False, owed=False, to
         - owed_unknown False → abstract "Heartbeat: idle — nothing owed."
         - owed_unknown True  → abstract "Heartbeat: owed status unknown (task
           store unreachable) — NOT idle; verify manually." (no "nothing owed")
+        - owed_unknown True AND muted True → the same NOT-idle verdict, but
+          named to its ACTUAL cause (pokes muted, lookup skipped) rather than
+          blaming the store. Both are "we did not measure"; only one is an
+          outage, and an operator who muted the fleet himself should not be sent
+          hunting a store that is fine.
         - NEVER raises / never blocks the Stop (try/except; mirrors the
           emit-outcome invariant)
     """
-    if owed_unknown:
+    if owed_unknown and muted:
+        abstract = ( "Heartbeat: pokes MUTED (heartbeat.poke_output_enabled = false) — the "
+                     "obligations lookup did not run, so owed status is UNKNOWN, not clear. "
+                     "Muting buys silence, not an all-clear." )
+    elif owed_unknown:
         abstract = "Heartbeat: owed status unknown (task store unreachable) — NOT idle; verify manually."
     elif owed:
         detail   = f"{total_owed} owed referent(s)" if total_owed > 0 else "work owed (referent-less signal)"
@@ -1669,7 +1678,20 @@ def _empty_owed_state( config_error, enabled, poke_muted=False, mute_message="",
         "mute_poke_cap"      : mute_poke_cap,
         "outcome"            : None,
         "owed"               : False,
-        "owed_unknown"       : False,
+        # ⚠️ MUTED ⇒ owed_unknown TRUE, and this is the whole point of the line.
+        # Two of the three mute outcomes (full silence, and cap-reached) return
+        # None from _run_heartbeat, so main() falls through to the idle-announce.
+        # The mute short-circuits BEFORE the hold read, the transcript replay and
+        # the store query — by design — so owed=False here is not a measurement,
+        # it is a default standing in for a lookup that never ran. Reported as
+        # owed_unknown=False it becomes "Heartbeat: idle — nothing owed." on the
+        # operator's card: the exact UNKNOWN-as-NOT-OWED conflation _announce_idle
+        # was written to kill after the :7999 outage whole-fleet false-idle.
+        # Muting must buy SILENCE, never a false all-clear.
+        # (config_error / heartbeat-disabled keep the legacy False — those are
+        # long-standing contracts the Stop-hook tests pin, and neither is a
+        # switch an operator flips across a live fleet expecting quiet.)
+        "owed_unknown"       : bool( poke_muted ),
         "total_owed"         : 0,
         "result"             : None,
         "verdict"            : None,
@@ -2259,7 +2281,8 @@ def main():
             _announce_idle( session_id, persona_name,
                             owed_unknown = idle_state[ "owed_unknown" ],
                             owed         = idle_state[ "owed" ],
-                            total_owed   = idle_state[ "total_owed" ] )
+                            total_owed   = idle_state[ "total_owed" ],
+                            muted        = idle_state.get( "poke_muted", False ) )
 
         # Speakerphone/chorus sessions skip ONLY the blocking "Anything else?"
         # prompt path below (it would interrupt the user's live voice
@@ -2350,7 +2373,8 @@ def main():
             _announce_idle( session_id, persona_name,
                             owed_unknown = idle_state[ "owed_unknown" ],
                             owed         = idle_state[ "owed" ],
-                            total_owed   = idle_state[ "total_owed" ] )
+                            total_owed   = idle_state[ "total_owed" ],
+                            muted        = idle_state.get( "poke_muted", False ) )
             emit_json( {} )  # allow stop — v2.1 owns liveness; this is a courtesy ping
         else:   # "none": silent allow-stop
             emit_json( {} )

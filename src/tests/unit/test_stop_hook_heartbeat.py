@@ -1107,8 +1107,13 @@ class TestMainSpeakerphonePokeMatrix:
             # bug aa403e03: state= threaded into the poke; owed-aware args into the announce.
             m[ "heartbeat" ].assert_called_once_with( "abc12345", None, None,
                                                       state=m[ "state_bundle" ] )   # no transcript/cwd keys
+            # muted=False rides along since 2026-07-22: a MUTED stop skips the
+            # obligations lookup, so its beacon must report UNKNOWN rather than
+            # "nothing owed". This unmuted case is the control — the lookup DID
+            # run, so the clean-board verdict here is a measurement.
             m[ "announce_idle" ].assert_called_once_with( "abc12345", "Rachel",
-                                                          owed_unknown=False, owed=False, total_owed=0 )
+                                                          owed_unknown=False, owed=False,
+                                                          total_owed=0, muted=False )
             m[ "emit" ].assert_called_once_with( {} )
 
     def test_speakerphone_blocking_ask_still_suppressed( self ):
@@ -1965,3 +1970,164 @@ class TestHoldTtlUnusableWarning:
         _mock_warn, mock_log = self._resolve( warn=False )
         assert not [ c for c in mock_log.call_args_list
                      if c.kwargs.get( "extra", { } ).get( "phase" ) == "heartbeat_hold_ttl_unusable" ]
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# MUTE × IDLE-BEACON — the false-idle a muted fleet reports to its operator
+#
+# Found in review of eb89b347 (Mr. Radio, 2026-07-22). The mute switch's own
+# unit tests all drive _run_heartbeat directly, so none of them observe what
+# main() does with its None return. Two of the three mute outcomes DO return
+# None — full-silence (empty substitute) and cap-reached — and main() then falls
+# through to the idle-announce.
+#
+# That announce publishes "Heartbeat: idle — nothing owed." But the mute
+# short-circuits BEFORE the hold read, the transcript replay and the store query
+# — by design, that is the feature. So owed=False is not a measurement, it is a
+# default standing in for a lookup that never ran.
+#
+# _announce_idle's own docstring names this exact conflation as a defect it was
+# written to fix: "the whole-fleet false-idle that fired during the :7999 outage
+# was exactly this" — UNKNOWN reported as NOT-OWED. The mute path reintroduces
+# it through a different door, and this door is one Rick flips ON deliberately,
+# across a live fleet, expecting only silence.
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestMutedIdleBeaconHonesty:
+
+    # ⚠️ THESE TESTS DRIVE THE REAL _resolve_owed_state, NOT A HAND-BUILT BUNDLE.
+    # The first draft constructed its own muted state dict and asserted against
+    # THAT — so it was testing its own fixture, and it stayed RED after the
+    # production fix landed because the fixed code never ran. A test that builds
+    # the value it then checks proves only that the test is self-consistent.
+
+    MUTED_SETTINGS = { "enabled": True, "poke_cap": 3, "owed_source_from_store": False,
+                       "verification_threshold_seconds": 600,
+                       "poke_output_enabled": False,
+                       "poke_disabled_message": "Pokes are muted. Carry on." }
+
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient" )
+    @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings" )
+    def test_muted_resolves_owed_as_UNKNOWN_not_clear( self, mock_load, mock_read ):
+        """
+        The mute short-circuit skips the hold read, the transcript replay and the
+        store query — by design. So owed-ness is UNMEASURED, and the bundle must
+        say UNKNOWN rather than defaulting to a clean board.
+        """
+        from lupin_cli.claude_code.hooks.stop import _resolve_owed_state
+        mock_load.return_value = dict( self.MUTED_SETTINGS )
+        state = _resolve_owed_state( "sid", "/t.jsonl" )
+        mock_read.assert_not_called()          # the lookup really was skipped
+        assert state[ "poke_muted" ] is True
+        assert state[ "owed_unknown" ] is True, (
+            "MUTED means the obligations lookup was SKIPPED, so owed-ness is UNKNOWN, "
+            "not False. owed_unknown=False makes _announce_idle publish 'Heartbeat: "
+            "idle - nothing owed.' about a board that was never read - the same "
+            "UNKNOWN-as-NOT-OWED conflation its docstring cites from the :7999 outage."
+        )
+
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient" )
+    @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings" )
+    def test_muted_full_silence_also_resolves_UNKNOWN( self, mock_load, mock_read ):
+        """Same on the empty-substitute path - the one Rick runs for total silence."""
+        from lupin_cli.claude_code.hooks.stop import _resolve_owed_state
+        mock_load.return_value = dict( self.MUTED_SETTINGS, poke_disabled_message="" )
+        state = _resolve_owed_state( "sid", "/t.jsonl" )
+        assert state[ "owed_unknown" ] is True
+
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient" )
+    @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings" )
+    def test_UNMUTED_disabled_keeps_its_legacy_False( self, mock_load, mock_read ):
+        """
+        THE DISCRIMINATOR. heartbeat-disabled also skips the lookup, but its
+        owed_unknown=False is a long-standing pinned contract. Without this the
+        fix could have been 'owed_unknown = True whenever we short-circuit',
+        which would have silently re-verdicted every disabled session too.
+        """
+        from lupin_cli.claude_code.hooks.stop import _resolve_owed_state
+        mock_load.return_value = dict( self.MUTED_SETTINGS, enabled=False )
+        state = _resolve_owed_state( "sid", "/t.jsonl" )
+        assert state[ "poke_muted" ] is False
+        assert state[ "owed_unknown" ] is False, "disabled keeps the legacy clean-board verdict"
+
+    def test_announce_idle_muted_names_the_mute_not_a_store_outage( self ):
+        """
+        An operator who muted the fleet himself must not be sent hunting a store
+        that is fine. Both states mean 'we did not measure'; only one is an outage.
+        """
+        from lupin_cli.claude_code.hooks.stop import _announce_idle
+        with patch( "lupin_cli.claude_code.hooks.stop.notify_user_async" ) as mock_notify:
+            _announce_idle( "sid", "Rachel", owed_unknown=True, muted=True )
+            abstract = mock_notify.call_args[ 0 ][ 0 ].abstract
+            assert "MUTED" in abstract
+            assert "unreachable" not in abstract.lower(), "must not blame the store"
+        with patch( "lupin_cli.claude_code.hooks.stop.notify_user_async" ) as mock_notify:
+            _announce_idle( "sid", "Rachel", owed_unknown=True, muted=False )
+            assert "unreachable" in mock_notify.call_args[ 0 ][ 0 ].abstract.lower()
+
+
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient" )
+    @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings" )
+    def test_muted_verdict_degrades_honestly_on_the_SECOND_consumer( self, mock_load, mock_read ):
+        """
+        María's pin, 2026-07-22, RE-CUT by me the same hour — the first version
+        could not fail.
+
+        _resolve_owed_state feeds TWO surfaces: the Stop idle-announce and
+        notification.py's beacon_idle_message (aa403e03 built the shared verdict
+        so the two can never disagree). The beacon needs no second edit: its
+        contract is already `owed_unknown True -> idle_msg`.
+
+        ⚠️ THE OBVIOUS PIN IS VACUOUS. Asserting that a muted verdict yields
+        idle_msg passes WITH OR WITHOUT the owed_unknown fix, because a muted
+        bundle also carries owed=False — and the not-owed fallthrough returns
+        idle_msg too. Both branches coincide on this input, so the assertion
+        cannot observe which one ran. Verified: reverting the fix left it green.
+        That is the FOURTH instance today of a check that cannot see the thing it
+        claims to check.
+
+        So this pins the property the mute path actually DEPENDS ON, on the input
+        where the branches diverge: UNKNOWN must outrank OWED. If someone
+        reorders that precedence, a muted-and-owed session starts asserting a
+        count nobody measured — and this goes red.
+        """
+        from lupin_cli.claude_code.hooks.stop import _resolve_owed_state
+        from lupin_cli.claude_code.hooks.notification import beacon_idle_message
+        IDLE = "Claude is waiting for input"
+
+        # (a) the real muted verdict reaches the neutral string
+        mock_load.return_value = dict( self.MUTED_SETTINGS )
+        state = _resolve_owed_state( "sid", "/t.jsonl" )
+        assert state[ "owed_unknown" ] is True
+        assert beacon_idle_message( state[ "owed" ], state[ "owed_unknown" ],
+                                    state[ "total_owed" ], IDLE ) == IDLE
+
+        # (b) THE FALSIFIABLE HALF — precedence, on the input that separates the
+        # branches. UNKNOWN wins over OWED, so no count is ever asserted about a
+        # board that was not read.
+        assert beacon_idle_message( True, True, 5, IDLE ) == IDLE, (
+            "UNKNOWN must outrank OWED — a muted session must never publish a "
+            "count derived from a lookup that never ran"
+        )
+        # control: with the unknown flag down, the owed branch DOES speak
+        assert beacon_idle_message( True, False, 5, IDLE ) == "Idle, but 5 items owed"
+
+    def test_main_threads_muted_into_the_beacon( self ):
+        """
+        The wiring. _run_heartbeat returns None on a capped/silent mute, main()
+        falls through to the announce, and the mute flag must arrive with it -
+        otherwise the honest verdict is computed and then dropped on the floor.
+        """
+        payload = { "stop_hook_active": False, "session_id": "abc12345" }
+        bundle  = _owed_bundle( owed_unknown=True )
+        bundle.update( { "enabled": False, "poke_muted": True,
+                         "mute_message": "", "mute_poke_cap": 3 } )
+        harness = TestMainSpeakerphonePokeMatrix()
+        stack, m = harness._patches( payload=payload, heartbeat_output=None,
+                                     persona={ "name": "Rachel" }, state_bundle=bundle )
+        with stack:
+            with pytest.raises( SystemExit ):
+                main()
+            m[ "announce_idle" ].assert_called_once_with( "abc12345", "Rachel",
+                                                          owed_unknown=True, owed=False,
+                                                          total_owed=0, muted=True )

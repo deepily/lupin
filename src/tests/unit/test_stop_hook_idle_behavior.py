@@ -184,7 +184,7 @@ class TestIdleBehaviorGate:
                     return_value={ "stop_hook_active": False, "session_id": "abc12345" } ):
             main()
             mock_announce.assert_called_once_with( "abc12345", "Rio",
-                                                   owed_unknown=False, owed=False, total_owed=0 )
+                                                   owed_unknown=False, owed=False, total_owed=0, muted=False )
             mock_emit.assert_called_once_with( {} )
             mock_arm.assert_not_called()
             mock_ask.assert_not_called()
@@ -210,7 +210,7 @@ class TestIdleBehaviorGate:
                     return_value={ "stop_hook_active": False, "session_id": "abc12345" } ):
             main()
             mock_announce.assert_called_once_with( "abc12345", "Rio",
-                                                   owed_unknown=False, owed=True, total_owed=2 )
+                                                   owed_unknown=False, owed=True, total_owed=2, muted=False )
             mock_emit.assert_called_once_with( {} )
 
     def test_store_unreachable_threads_owed_unknown_to_announce( self ):
@@ -234,7 +234,7 @@ class TestIdleBehaviorGate:
                     return_value={ "stop_hook_active": False, "session_id": "abc12345" } ):
             main()
             mock_announce.assert_called_once_with( "abc12345", "Rio",
-                                                   owed_unknown=True, owed=False, total_owed=0 )
+                                                   owed_unknown=True, owed=False, total_owed=0, muted=False )
             mock_emit.assert_called_once_with( {} )
 
     def test_ask_handles_invalid_idle_settings( self ):
@@ -279,7 +279,7 @@ class TestIdleBehaviorGate:
                     return_value={ "stop_hook_active": False, "session_id": "abc12345" } ):
             main()
             mock_announce.assert_called_once_with( "abc12345", None,
-                                                   owed_unknown=False, owed=False, total_owed=0 )   # None persona threaded
+                                                   owed_unknown=False, owed=False, total_owed=0, muted=False )   # None persona threaded
             mock_emit.assert_called_once_with( {} )
 
 
@@ -324,7 +324,7 @@ class TestSpeakerphoneIdleAnnounce:
         bubble) with the owed-aware args from the shared verdict (bug aa403e03)."""
         mock_announce = self._run_speakerphone_main( "idle_announce", { "name": "Rachel" } )
         mock_announce.assert_called_once_with( "abc12345", "Rachel",
-                                               owed_unknown=False, owed=False, total_owed=0 )
+                                               owed_unknown=False, owed=False, total_owed=0, muted=False )
 
     def test_speakerphone_idle_announce_owed_threads_args( self ):
         """bug aa403e03 (STRENGTHEN): speakerphone + idle_announce + an OWED shared
@@ -332,13 +332,13 @@ class TestSpeakerphoneIdleAnnounce:
         mock_announce = self._run_speakerphone_main( "idle_announce", { "name": "Rachel" },
                                                      bundle=_bundle( owed=True, total_owed=4 ) )
         mock_announce.assert_called_once_with( "abc12345", "Rachel",
-                                               owed_unknown=False, owed=True, total_owed=4 )
+                                               owed_unknown=False, owed=True, total_owed=4, muted=False )
 
     def test_speakerphone_idle_announce_missing_persona( self ):
         """speakerphone + idle_announce + no persona → _announce_idle fires with None threaded."""
         mock_announce = self._run_speakerphone_main( "idle_announce", None )
         mock_announce.assert_called_once_with( "abc12345", None,
-                                               owed_unknown=False, owed=False, total_owed=0 )
+                                               owed_unknown=False, owed=False, total_owed=0, muted=False )
 
     def test_speakerphone_ask_stays_fully_silent( self ):
         """speakerphone + ask → NO announce (blocking ask skipped, no silent-degrade per Rick)."""
