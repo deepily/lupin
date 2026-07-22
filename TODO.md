@@ -1,6 +1,18 @@
 # TODO
 
-Last updated: 2026-07-17 (session b526cb36, Mr. Radio 🦉 — M1 demo shipped + board cleanup via Rick's guided walkthrough; catalog refuted 2nd time by Rick's no-chasing experiment; end-of-session backup + push)
+Last updated: 2026-07-21 (session 56a74d7b, Mr. Radio 🦉 — fleet halved then wound to zero on Rick's burn order; arbiter peer-fanout fixed + live; history archived; backup + push)
+
+---
+
+## 📋 DECISIONS LOG 2026-07-21 (Mr. Radio 🦉, session 56a74d7b) — fleet burn cut to zero + the arbiter stopped CC-ing peer managers
+
+- **Rick: cut the fleet.** 9 seats → 0 across two waves. Wave 1 reaped 5 idle/blocked seats immediately; wave 2 let 4 finish the task in front of them, then stood down. Every seat mementoed, session-qualified where the persona name is re-grantable. **The default is finish-then-stop, not park.**
+- **RULED — case 9 STAYS `TIER_RICK_AND_MANAGERS`; only case 14 flips to Rick-only.** The two rationales are near-verbatim ("leaderless crew" / "leaderless-in-waiting"), so the basis is the **detector, not the wording**: case 9 fires on MEASURED ABSENCE (manager down + holding), case 14 on INFERRED SILENCE (45 min, still rostered, four false-positive suppressors in its own path). **Falsifier recorded**: if that distinction fails, case 9 flips too — case 14 does not stay.
+- **Mini-plan 04 REVERSES a considered carve-out, it does not complete a sweep.** My draft claimed the latter; `f48f089d`'s own author had named case 14 and deliberately distinguished it. Reversal still correct — Rick outranks the comment — but the doc argues it on merits so the next reader doesn't revert us with that sentence.
+- **🔴 DOCTRINE — a coverage gate CANNOT SEE a change to a data literal.** 100% on `arbiter_routing.py` with **zero** of the changed lines executable: the table entry is a dict-literal continuation counted as one statement, green for any value including garbage. Every table-driven routing/config/dispatch change in this repo is invisible to the 100% mandate. **Mutation is the only instrument that answers "would a wrong value be caught."**
+- **DOCTRINE — a peer-silence assertion keys on the RECIPIENT (`s[0]`), never the MESSAGE (`s[1]`).** A message-keyed absence check goes silent the moment the message is renamed, while the thing it forbids keeps happening. Found by an adversarial rename probe against our own new control.
+- **The arbiter bounce is MANAGER authority.** I asked Rick's permission and was corrected directly. Restart at discretion, announce after.
+- **Persona names are not project-scoped.** `b9f2f8e9` (project `parallel-search`) sat on a lupin board firing an open user-gate at Rick every tick because its `owner_persona` string matched mine. Dropped, not parked — a park would have kept it here with a timer.
 
 ---
 
