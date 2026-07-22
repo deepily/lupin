@@ -64,6 +64,19 @@ DEFAULT_OWED_SOURCE_FROM_STORE = False
 # this is the settings-overridable runtime value the stop.py shell passes in.
 DEFAULT_VERIFICATION_THRESHOLD_SECONDS = 600
 
+# Poke-output mute switch (Rick 2026-07-22): a RUNTIME toggle that silences the
+# stop-hook poke WITHOUT tearing down the heartbeat block. DEFAULT True = today's
+# behavior (the live-obligations lookup runs and pokes). Flip False in
+# settings.json to suppress the obligations lookup + its poke output; the hook is
+# a fresh process per Stop, so the flip takes effect on the VERY NEXT Stop — no
+# restart, toggleable mid-session.
+DEFAULT_POKE_OUTPUT_ENABLED = True
+
+# The substitute text emitted in place of the suppressed obligations poke. "" or
+# None ⇒ the hook emits NO output at all (full silence). Only consulted when
+# poke_output_enabled is False.
+DEFAULT_POKE_DISABLED_MESSAGE = ""
+
 
 def load_heartbeat_settings() -> dict:
     """
@@ -76,7 +89,9 @@ def load_heartbeat_settings() -> dict:
             "poke_cap" : int,   # > 0
             "count_inbound_questions_as_owed" : bool,  # Thread B; default False
             "owed_source_from_store" : bool,           # Step-2; default False
-            "verification_threshold_seconds" : int     # 6929f4ac; default 600 (>0)
+            "verification_threshold_seconds" : int,    # 6929f4ac; default 600 (>0)
+            "poke_output_enabled"    : bool,           # mute switch; default True
+            "poke_disabled_message"  : str | None      # substitute text; default ""
           }
         }
 
@@ -98,13 +113,19 @@ def load_heartbeat_settings() -> dict:
           path); non-bool → coerced to bool (Python truthiness)
         - "verification_threshold_seconds" missing → DEFAULT 600 (Rick's 10 min);
           non-positive-int → raises ValueError (fail-loud, like poke_cap)
-        - Returns dict with exactly five keys: "enabled" (bool), "poke_cap"
+        - "poke_output_enabled" missing → DEFAULT True (poke as today); non-bool →
+          coerced to bool (Python truthiness)
+        - "poke_disabled_message" missing → DEFAULT "" (no output when muted);
+          None → normalized to ""; non-str → raises ValueError (fail-loud: a
+          non-string substitute would be emitted verbatim into the worker)
+        - Returns dict with exactly seven keys: "enabled" (bool), "poke_cap"
           (int > 0), "count_inbound_questions_as_owed" (bool),
-          "owed_source_from_store" (bool), "verification_threshold_seconds" (int > 0)
+          "owed_source_from_store" (bool), "verification_threshold_seconds" (int > 0),
+          "poke_output_enabled" (bool), "poke_disabled_message" (str, possibly "")
 
     Raises:
         ValueError: malformed poke_cap or verification_threshold_seconds
-          (non-int, bool, or value <= 0)
+          (non-int, bool, or value <= 0), or a non-string poke_disabled_message
     """
     settings_path = Path( os.path.expanduser( "~/.claude/settings.json" ) )
 
@@ -131,9 +152,14 @@ def load_heartbeat_settings() -> dict:
                                               DEFAULT_OWED_SOURCE_FROM_STORE ) )
     verification_threshold = block.get( "verification_threshold_seconds",
                                         DEFAULT_VERIFICATION_THRESHOLD_SECONDS )
+    poke_output_enabled    = bool( block.get( "poke_output_enabled",
+                                              DEFAULT_POKE_OUTPUT_ENABLED ) )
+    poke_disabled_message  = block.get( "poke_disabled_message",
+                                        DEFAULT_POKE_DISABLED_MESSAGE )
 
     _validate_poke_cap( poke_cap )
     _validate_verification_threshold( verification_threshold )
+    poke_disabled_message = _normalize_poke_disabled_message( poke_disabled_message )
 
     return {
         "enabled"                        : enabled,
@@ -141,6 +167,8 @@ def load_heartbeat_settings() -> dict:
         "count_inbound_questions_as_owed": count_inbound,
         "owed_source_from_store"         : owed_source_from_store,
         "verification_threshold_seconds" : verification_threshold,
+        "poke_output_enabled"            : poke_output_enabled,
+        "poke_disabled_message"          : poke_disabled_message,
     }
 
 
@@ -152,6 +180,8 @@ def _defaults() -> dict:
         "count_inbound_questions_as_owed": DEFAULT_COUNT_INBOUND_AS_OWED,
         "owed_source_from_store"         : DEFAULT_OWED_SOURCE_FROM_STORE,
         "verification_threshold_seconds" : DEFAULT_VERIFICATION_THRESHOLD_SECONDS,
+        "poke_output_enabled"            : DEFAULT_POKE_OUTPUT_ENABLED,
+        "poke_disabled_message"          : DEFAULT_POKE_DISABLED_MESSAGE,
     }
 
 
@@ -205,6 +235,34 @@ def _validate_verification_threshold( value: Any ) -> None:
         )
 
 
+def _normalize_poke_disabled_message( value: Any ) -> str:
+    """
+    Normalize the mute-substitute message to a plain string.
+
+    None is the OTHER documented spelling of "emit nothing" (Rick: empty string
+    OR None ⇒ no output), so it normalizes to "" rather than raising. Any other
+    non-string is fail-loud: this text is emitted VERBATIM into the worker's
+    Stop-hook output, and a dict/int/list there would surface as garbage the
+    reader cannot distinguish from a real obligation.
+
+    Requires:
+        - value is anything (foreign settings data)
+
+    Ensures:
+        - None → ""
+        - str  → returned unchanged (including "")
+        - anything else → raises ValueError
+    """
+    if value is None:
+        return ""
+    if not isinstance( value, str ):
+        raise ValueError(
+            f"heartbeat.poke_disabled_message must be a string or null, "
+            f"got {type( value ).__name__}: {value!r}"
+        )
+    return value
+
+
 def quick_smoke_test():
     """
     Self-contained smoke test for heartbeat_settings.
@@ -218,7 +276,14 @@ def quick_smoke_test():
     assert d == { "enabled": False, "poke_cap": DEFAULT_POKE_CAP,
                   "count_inbound_questions_as_owed": False,
                   "owed_source_from_store": False,
-                  "verification_threshold_seconds": DEFAULT_VERIFICATION_THRESHOLD_SECONDS }, d
+                  "verification_threshold_seconds": DEFAULT_VERIFICATION_THRESHOLD_SECONDS,
+                  "poke_output_enabled": True,
+                  "poke_disabled_message": "" }, d
+
+    # Mute-substitute normalization: None and "" both mean "emit nothing"
+    assert _normalize_poke_disabled_message( None ) == ""
+    assert _normalize_poke_disabled_message( "" ) == ""
+    assert _normalize_poke_disabled_message( "carry on" ) == "carry on"
 
     # Valid poke_caps pass validation
     _validate_poke_cap( 1 )
@@ -243,6 +308,8 @@ def quick_smoke_test():
     assert isinstance( loaded[ "count_inbound_questions_as_owed" ], bool )
     assert isinstance( loaded[ "owed_source_from_store" ], bool )
     assert isinstance( loaded[ "verification_threshold_seconds" ], int ) and loaded[ "verification_threshold_seconds" ] > 0
+    assert isinstance( loaded[ "poke_output_enabled" ], bool )
+    assert isinstance( loaded[ "poke_disabled_message" ], str )
 
     return True
 

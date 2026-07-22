@@ -41,6 +41,7 @@ from lupin_cli.claude_code.hooks.stop import (
 )
 from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import (
     TODO_IN_PROGRESS, TODO_PENDING, evaluate_work_owed,
+    MUTE_PROMPT_SENTINEL, is_heartbeat_poke_prompt,
 )
 from lupin_cli.claude_code.hooks.lib.heartbeat_decision import (
     DECLARED_OWED_REASON, OUTCOME_POKE, OUTCOME_NOT_OWED,
@@ -158,6 +159,94 @@ class TestRunHeartbeat:
         mock_read.assert_not_called()
         self.mock_events.emit_outcome.assert_not_called()
         assert "heartbeat_settings_invalid" in [ c.kwargs[ "extra" ][ "phase" ] for c in mock_log.call_args_list ]
+
+    # ── runtime mute switch (Rick 2026-07-22) ──
+
+    @patch( "lupin_cli.claude_code.hooks.stop.log_to_stream" )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient" )
+    @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
+            return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False,
+                           "verification_threshold_seconds": 600,
+                           "poke_output_enabled": False, "poke_disabled_message": "" } )
+    def test_muted_empty_message_emits_nothing_and_skips_lookup( self, mock_load, mock_read, mock_log ):
+        """Muted + empty substitute → NO output at all, and no obligations lookup."""
+        assert _run_heartbeat( "sid", "/t.jsonl" )[ 0 ] is None
+        mock_read.assert_not_called()
+        self.mock_replay.assert_not_called()
+        self.mock_events.emit_outcome.assert_not_called()
+        self.mock_inject.assert_not_called()
+        self.mock_notify.assert_not_called()
+        assert "heartbeat_poke_muted" in [ c.kwargs[ "extra" ][ "phase" ] for c in mock_log.call_args_list ]
+
+    @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
+    @patch( "lupin_cli.claude_code.hooks.stop.log_to_stream" )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient" )
+    @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
+            return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False,
+                           "verification_threshold_seconds": 600,
+                           "poke_output_enabled": False,
+                           "poke_disabled_message": "Pokes are muted. Carry on." } )
+    def test_muted_with_message_blocks_injects_and_beacons( self, mock_load, mock_read, mock_log,
+                                                            mock_count, mock_incr ):
+        """Muted + substitute → block AND tmux inject AND an operator beacon carrying it verbatim."""
+        out, owed_unknown = _run_heartbeat( "sid", "/t.jsonl" )
+        assert out == { "decision": "block", "reason": "Pokes are muted. Carry on." }
+        assert owed_unknown is False
+        # Still no obligations lookup — the mute short-circuits upstream of every read.
+        mock_read.assert_not_called()
+        self.mock_replay.assert_not_called()
+        # Delivered like a real poke: verbatim keystroke, no speakerphone rider,
+        # and SENTINEL-PREFIXED so UserPromptSubmit does not mistake it for the
+        # user typing (which would reset the very cap that bounds it).
+        self.mock_inject.assert_called_once()
+        injected = self.mock_inject.call_args[ 0 ][ 1 ]
+        assert injected.startswith( MUTE_PROMPT_SENTINEL )
+        assert injected.endswith( "Pokes are muted. Carry on." )
+        assert is_heartbeat_poke_prompt( injected )
+        # Budgeted like a real poke.
+        mock_incr.assert_called_once_with( "sid" )
+        # Operator sees exactly what the worker sees.
+        self.mock_notify.assert_called_once()
+        request = self.mock_notify.call_args[ 0 ][ 0 ]
+        assert "Pokes are muted. Carry on." in request.abstract
+        assert "muted" in request.message.lower()
+
+    @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=3 )
+    @patch( "lupin_cli.claude_code.hooks.stop.log_to_stream" )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient" )
+    @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
+            return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False,
+                           "verification_threshold_seconds": 600,
+                           "poke_output_enabled": False,
+                           "poke_disabled_message": "Pokes are muted. Carry on." } )
+    def test_muted_at_cap_stops_injecting( self, mock_load, mock_read, mock_log,
+                                           mock_count, mock_incr ):
+        """At the cap the substitute stops firing — the loop that ran live 2026-07-22 is bounded."""
+        out, _ = _run_heartbeat( "sid", "/t.jsonl" )
+        assert out is None
+        self.mock_inject.assert_not_called()
+        self.mock_notify.assert_not_called()
+        mock_incr.assert_not_called()
+        capped_rows = [ c.kwargs[ "extra" ] for c in mock_log.call_args_list
+                        if c.kwargs[ "extra" ][ "phase" ] == "heartbeat_poke_muted" ]
+        assert capped_rows and capped_rows[ 0 ][ "capped" ] is True
+
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
+    @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
+    @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
+            return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False,
+                           "verification_threshold_seconds": 600,
+                           "poke_output_enabled": True, "poke_disabled_message": "unused" } )
+    def test_unmuted_still_pokes_normally( self, mock_load, mock_incr, mock_count, mock_read ):
+        """poke_output_enabled=True is a no-op: the owed Task* poke fires as before."""
+        self.mock_replay.return_value = { "t1": "in_progress" }
+        out, _ = _run_heartbeat( "sid", "/t.jsonl" )
+        assert out is not None and out[ "decision" ] == "block"
+        assert out[ "reason" ] != "unused"
+        self.mock_inject.assert_called_once()
 
     # ── poke paths ──
 

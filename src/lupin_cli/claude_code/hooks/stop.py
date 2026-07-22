@@ -68,7 +68,7 @@ from lupin_cli.claude_code.hooks.lib.heartbeat_hold_warn import should_warn_unus
 # 6929f4ac receipts-of-progress — the pure gate-row transforms (outward twin).
 from lupin_cli.claude_code.hooks.lib import heartbeat_user_gates
 from lupin_cli.claude_code.hooks.lib.heartbeat_poke_cap import (
-    get_poke_count, increment_poke_count,
+    get_poke_count, increment_poke_count, DEFAULT_POKE_CAP,
 )
 from lupin_cli.claude_code.hooks.lib.heartbeat_decision import (
     decide_heartbeat, OUTCOME_POKE, OUTCOME_NOT_OWED, OUTCOME_HONORED, OUTCOME_CAP_REACHED,
@@ -80,6 +80,7 @@ from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import (
     evaluate_work_owed, partition_inbound_by_age, TODO_IN_PROGRESS, TODO_PENDING,
     manager_needs_verification, manager_needs_spinup_check, manager_needs_question_surface,
     SPINUP_CHECK_DEBOUNCE_SECONDS, SURFACE_QUESTIONS_DEBOUNCE_SECONDS, SPINUP_BACKLOG_MIN_N,
+    MUTE_PROMPT_SENTINEL,
 )
 # Spine Step-2 (store-canonical task management) — the flag-gated store-count
 # owed source. DEFAULT-old (transcript replay) until the fleet cutover flips
@@ -458,6 +459,47 @@ def _announce_idle( session_id, persona_name, owed_unknown=False, owed=False, to
     except Exception as e:
         log_to_stream( "stop", {}, extra={
             "phase"      : "idle_announce_error",
+            "session_id" : session_id,
+            "error"      : str( e ),
+        } )
+
+
+def _announce_muted( session_id, persona_name, mute_message ):
+    """
+    Fire ONE low-priority beacon reporting the MUTED stop (heartbeat.
+    poke_output_enabled = false), carrying the substitute text VERBATIM.
+
+    Rick 2026-07-22: while pokes are muted the operator must see exactly what the
+    workers see. A bare "Momentarily idle." card hides the substitute entirely —
+    the operator then has no way to tell a muted fleet from a genuinely quiet one,
+    or to read the text every worker is actually being handed. So the beacon
+    speaks the mute state and puts the configured message, unedited, in the
+    abstract.
+
+    Requires:
+        - mute_message is the non-empty configured substitute (the empty/None
+          spelling never reaches here — it is the full-silence path)
+
+    Ensures:
+        - posts a LOW-priority AsyncNotificationRequest stamped with this
+          session's CC sender_id, so it renders as the persona
+        - the abstract carries the substitute VERBATIM (what workers receive)
+        - NEVER raises / never blocks the Stop (mirrors _announce_idle)
+    """
+    who = persona_name or "A worker"
+    try:
+        request = AsyncNotificationRequest(
+            message   = f"{who} stopped — pokes muted, default message injected.",
+            priority  = NotificationPriority.LOW,
+            sender_id = build_sender_id_for_cc( session_id ),
+            abstract  = ( "Heartbeat: pokes MUTED (heartbeat.poke_output_enabled = false) — no "
+                          "live-obligations lookup ran. Injected verbatim to this worker:\n\n"
+                          f"{mute_message}" ),
+        )
+        notify_user_async( request )
+    except Exception as e:
+        log_to_stream( "stop", {}, extra={
+            "phase"      : "muted_announce_error",
             "session_id" : session_id,
             "error"      : str( e ),
         } )
@@ -1605,7 +1647,7 @@ def _positive_int_or_default( value, default ):
     return ivalue if ivalue > 0 else default
 
 
-def _empty_owed_state( config_error, enabled ):
+def _empty_owed_state( config_error, enabled, poke_muted=False, mute_message="", mute_poke_cap=None ):
     """
     The fail-safe owed-state bundle for the short-circuit paths (malformed config
     or heartbeat-disabled) where _resolve_owed_state returns BEFORE doing any hold
@@ -1613,10 +1655,18 @@ def _empty_owed_state( config_error, enabled ):
     disabled" contract the Stop-hook tests pin. owed=False / owed_unknown=False /
     total_owed=0 ⇒ the idle consumers render a plain "Momentarily idle." (the
     legacy behavior on a disabled or misconfigured heartbeat).
+
+    poke_muted / mute_message carry the runtime mute switch (heartbeat.
+    poke_output_enabled = false): the obligations lookup is skipped exactly like
+    the disabled path, but _run_heartbeat still emits mute_message in the poke's
+    place when that text is non-empty.
     """
     return {
         "config_error"       : config_error,
         "enabled"            : enabled,
+        "poke_muted"         : poke_muted,
+        "mute_message"       : mute_message,
+        "mute_poke_cap"      : mute_poke_cap,
         "outcome"            : None,
         "owed"               : False,
         "owed_unknown"       : False,
@@ -1691,6 +1741,22 @@ def _resolve_owed_state( session_id, transcript_path=None, cwd=None ):
 
     if not settings[ "enabled" ]:
         return _empty_owed_state( config_error=False, enabled=False )
+
+    # ── Runtime poke MUTE (Rick 2026-07-22) ────────────────────────────────────
+    # A settings.json switch that silences the poke WITHOUT disabling the
+    # heartbeat block, re-read on every Stop (fresh hook process ⇒ toggling
+    # mid-session takes effect on the very next Stop). Short-circuits BEFORE the
+    # hold read / transcript replay / store query — muted means the live-
+    # obligations lookup does not run at all, so a noisy or wrong board cannot
+    # distract the worker. The substitute text (possibly "") rides out for
+    # _run_heartbeat to emit in the poke's place.
+    # .get() keeps a settings dict minted before this key existed working as
+    # before (the loader always supplies it; only stubs can omit it).
+    if not settings.get( "poke_output_enabled", True ):
+        return _empty_owed_state( config_error=False, enabled=False,
+                                  poke_muted=True,
+                                  mute_message=settings.get( "poke_disabled_message", "" ),
+                                  mute_poke_cap=settings.get( "poke_cap", DEFAULT_POKE_CAP ) )
 
     # Resolve the hold resiliently across BOTH the session's OWN cwd (facet 3,
     # threaded from the Stop payload) AND the project root where write_hold
@@ -1870,6 +1936,9 @@ def _resolve_owed_state( session_id, transcript_path=None, cwd=None ):
     return {
         "config_error"       : False,
         "enabled"            : True,
+        "poke_muted"         : False,
+        "mute_message"       : "",
+        "mute_poke_cap"      : None,
         "outcome"            : result[ "outcome" ],
         "owed"               : result[ "outcome" ] in ( OUTCOME_POKE, OUTCOME_CAP_REACHED ),
         "owed_unknown"       : owed_unknown,
@@ -1922,6 +1991,42 @@ def _run_heartbeat( session_id, transcript_path, cwd=None, state=None ):
           short-circuits before any hold/transcript/store IO)
     """
     state = state if state is not None else _resolve_owed_state( session_id, transcript_path, cwd )
+    # Runtime mute (heartbeat.poke_output_enabled = false): the obligations
+    # lookup was skipped upstream. A NON-EMPTY substitute is delivered exactly
+    # like a real poke — block + tmux inject (Rick 2026-07-22: the block alone is
+    # silent re-prompt context on a stopped session; the keystroke is what makes
+    # the worker actually receive it) — plus the operator beacon carrying the
+    # same text verbatim, so Rick sees what the workers see. An empty/None
+    # substitute is the full-silence path: no output, no inject, no beacon.
+    if state.get( "poke_muted" ):
+        mute_message = state.get( "mute_message" ) or ""
+        # The substitute is a POKE and is budgeted like one. Without the cap the
+        # inject re-fired every Stop forever: it creates a new turn, that turn
+        # ends in a Stop, which injects again — nobody typing, no bound (observed
+        # live 2026-07-22, two self-turns before it was caught). The cap file is
+        # shared with the real poke and is reopened only by genuine user typing,
+        # which is why the injected text carries MUTE_PROMPT_SENTINEL: without
+        # that marker UserPromptSubmit reads the substitute as user
+        # re-engagement and resets the very budget meant to bound it (c121037b).
+        poke_count = get_poke_count( session_id )
+        cap        = state.get( "mute_poke_cap" ) or DEFAULT_POKE_CAP
+        capped     = poke_count >= cap
+        log_to_stream( "stop", {}, extra={
+            "phase"       : "heartbeat_poke_muted",
+            "session_id"  : session_id,
+            "has_message" : bool( mute_message ),
+            "poke_count"  : poke_count,
+            "cap"         : cap,
+            "capped"      : capped,
+        } )
+        if mute_message and not capped:
+            increment_poke_count( session_id )
+            persona = get_voice_persona( session_id )
+            _announce_muted( session_id, persona.get( "name" ) if persona else None, mute_message )
+            inject_qualifier_via_tmux( session_id,
+                                       f"{MUTE_PROMPT_SENTINEL} {mute_message}", wrap=False )
+            return build_stop_block( mute_message ), False
+        return None, False
     if state[ "config_error" ] or not state[ "enabled" ]:
         return None, False
     settings           = state[ "settings" ]

@@ -110,6 +110,16 @@ POKE_PROMPT_SENTINEL = "Do not stop yet — you stopped with work owed"
 # user is away.
 ARBITER_POKE_SENTINEL = "Heartbeat arbiter ("
 
+# Muted-poke sentinel (2026-07-22) — the marker prefixed to the operator's
+# configured substitute text when heartbeat.poke_output_enabled is false and the
+# substitute is injected via tmux. Same c121037b failure mode as the two sentinels
+# above, reproduced live within minutes of shipping the mute: the substitute is
+# re-submitted as a prompt, UserPromptSubmit saw ordinary prose, classified it as
+# genuine user re-engagement, RESET the poke-cap — so the cap could never
+# accumulate and the injection re-fired every Stop with nobody typing. Matched as
+# a PREFIX (it opens the injected text, like POKE_PROMPT_SENTINEL).
+MUTE_PROMPT_SENTINEL = "[heartbeat: pokes muted]"
+
 # Poke reason template (rides the top-level `reason` field — NEVER systemMessage;
 # see 01-…-seam-analysis.md §ERRATA). The hold-write instruction names the FULL
 # hyphenated session id explicitly (c121037b facet 2): get_session_info hands an
@@ -168,13 +178,14 @@ def is_heartbeat_poke_prompt( prompt ):
 
     Ensures:
         - Returns True iff prompt (left-stripped) starts with POKE_PROMPT_SENTINEL
-          OR prompt contains ARBITER_POKE_SENTINEL
+          OR MUTE_PROMPT_SENTINEL, OR prompt contains ARBITER_POKE_SENTINEL
         - Returns False for None / non-string / empty / genuine user prompts
         - Never raises
     """
     if not isinstance( prompt, str ):
         return False
-    if prompt.lstrip().startswith( POKE_PROMPT_SENTINEL ):
+    stripped = prompt.lstrip()
+    if stripped.startswith( POKE_PROMPT_SENTINEL ) or stripped.startswith( MUTE_PROMPT_SENTINEL ):
         return True
     return ARBITER_POKE_SENTINEL in prompt
 
