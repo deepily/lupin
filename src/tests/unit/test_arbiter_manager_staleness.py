@@ -777,9 +777,16 @@ def test_case14_no_gateway_advisory_for_any_persona_key_variant():
     """mini-plan 04 successor to the canonical-key-tolerance receipt: with the peer
     fan-out gone there is no key to match against, so the invariant is stronger —
     NO gateway recipient, in any casing, receives a MANAGER-STALE advisory. The
-    canonical-key exclusion itself is still exercised on case 5 by
-    test_route_exclude_persona_matches_by_canonical_key (test_arbiter_routing.py),
-    where the fan-out is live; it is NOT dead code."""
+    canonical-key exclusion itself is exercised by the direct-_route unit tests at
+    test_arbiter_routing.py:212/223/233 (they pass exclude_persona on case 5).
+
+    ⚠️ State its status precisely (Extra 2 🪨, 2026-07-21): after this flip,
+    exclude_persona has exactly ONE production caller — arbiter_job.py:4576, case
+    14 — where it is now INERT, because a Rick-only tier has no fan-out to filter.
+    Cases 5/8/9/11/13 pass active_managers= and nothing else. So the param is
+    production-inert and test-exercised; do NOT write "still load-bearing for
+    5/8/9/11/13" anywhere — that is a claim the next reader greps and finds false.
+    It is kept, not removed, by the plan's explicit instruction."""
     gw, escal = _GW(), [ ]
     job  = _job( gw, notify=lambda m, *a, **k: escal.append( m ) )
     snap = _snap( _row( "m1", "manager", 2700, persona="Tiberius" ) )
