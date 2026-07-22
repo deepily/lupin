@@ -24,6 +24,13 @@ import vm from "node:vm";
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
+// The REAL shared constant, not a copy. notifications.js reads the query off
+// `window` (it is a classic script and cannot import), so the harness must stand
+// in for the <script type="module"> the page loads. Importing the actual module
+// rather than pasting the string keeps this test honest: if the constant changes,
+// the assertions below travel with it instead of pinning a stale literal.
+import { TASK_LIST_QUERY } from "../../../lupin_app/static/js/shared/task-list-query.js";
+
 const HERE = dirname( fileURLToPath( import.meta.url ) );
 const NOTIFICATIONS_JS = resolve( HERE, "../../../lupin_app/static/js/notifications.js" );
 
@@ -31,6 +38,11 @@ before( () => {
   if ( typeof globalThis.document === "undefined" ) {
     GlobalRegistrator.register();
   }
+  // Stand in for the page's module script. Without this every fetchTaskList call
+  // short-circuits to the `query_unavailable` deploy-defect branch — which is
+  // correct production behavior and exactly what broke 3 unrelated tests when the
+  // global was first introduced without a harness counterpart.
+  window.LUPIN_TASK_LIST_QUERY = TASK_LIST_QUERY;
   const fullSource = readFileSync( NOTIFICATIONS_JS, "utf8" );
   const initIdx    = fullSource.indexOf( "// Initialize when DOM is ready" );
   assert.ok( initIdx > 0, "bottom-of-file init marker must be found" );
@@ -794,18 +806,55 @@ test( "fetchTaskList: 200 ok → parsed { tasks, count }", async () => {
   assert.deepEqual( await ui.fetchTaskList(), body );
 } );
 
-test( "fetchTaskList: fetches the unscoped-guard escape endpoint (design 2026.07.07)", async () => {
-  // The board card is a DELIBERATE full-board sweep — its URL MUST carry the
-  // guard escape (unscoped_audit=true) or it 400s past the threshold, plus
-  // include_terminal=true so the human's all-status view is never truncated.
+test( "fetchTaskList: fetches the shared query — guard escapes in, terminal rows OUT", async () => {
+  // RE-CUT 2026-07-22. The old version of this test asserted
+  // `include_terminal=true` and its comment claimed that kept "the human's
+  // all-status view from ever being truncated". Measurement disproved both
+  // halves: include_terminal dragged done/dropped history in, inflating the
+  // result to 1,171 rows against a server `limit` hard-capped at 500, so 671
+  // rows were dropped with no indicator — and since ordering is newest-first,
+  // the evicted rows were the OPEN ones this panel exists to show. The comment
+  // promised an invariant the parameter was actively breaking.
   const ui = newUI();
   let seen = "";
   ui.authedFetch = async ( url: string ) => { seen = url; return fakeResponse( 200, true, { tasks: [], count: 0 } ); };
   await ui.fetchTaskList();
   assert.ok( seen.includes( "/api/tasks?" ), "hits the tasks endpoint" );
   assert.ok( seen.includes( "unscoped_audit=true" ), "passes unscoped_audit=true" );
-  assert.ok( seen.includes( "include_terminal=true" ), "passes include_terminal=true" );
   assert.ok( seen.includes( "limit=500" ), "still caps at 500" );
+  assert.ok( seen.includes( "char_budget=0" ), "opts out of the response byte budget" );
+  assert.ok( seen.includes( "hide_parked=false" ), "asks for parked rows the server hides by default" );
+  assert.ok( !seen.includes( "include_terminal" ), "must NOT request terminal rows — that was the truncation bug" );
+} );
+
+test( "fetchTaskList: uses the SHARED constant, not a private literal", async () => {
+  // The whole point of the shared module: one string, two consumers. If this
+  // panel ever grows its own copy again, the two will drift exactly as they did
+  // before (char_budget=0 in one, absent in the other) and a fix applied to one
+  // will leave the bug live in the other.
+  const ui = newUI();
+  let seen = "";
+  ui.authedFetch = async ( url: string ) => { seen = url; return fakeResponse( 200, true, { tasks: [], count: 0 } ); };
+  await ui.fetchTaskList();
+  assert.equal( seen, TASK_LIST_QUERY, "fetches exactly the shared constant" );
+} );
+
+test( "fetchTaskList: missing query module → query_unavailable, NOT unreachable", async () => {
+  // A 404 on the static module is a DEPLOY defect. It must not borrow the
+  // store's transport-error state: same blank board, different remedy, and the
+  // poll repeats every 60s, so collapsing them has an operator triaging a
+  // missing asset as an outage indefinitely.
+  const ui = newUI();
+  let fetched = false;
+  ui.authedFetch = async () => { fetched = true; return fakeResponse( 200, true, { tasks: [], count: 0 } ); };
+  const saved = window.LUPIN_TASK_LIST_QUERY;
+  delete window.LUPIN_TASK_LIST_QUERY;
+  try {
+    assert.deepEqual( await ui.fetchTaskList(), { status: "query_unavailable", tasks: null } );
+    assert.equal( fetched, false, "never hits the network without a query" );
+  } finally {
+    window.LUPIN_TASK_LIST_QUERY = saved;
+  }
 } );
 
 test( "fetchTaskList: 401 → auth_required", async () => {
@@ -1182,6 +1231,321 @@ test( "renderTaskList: wires accordion delegation + renders persisted-collapsed 
   assert.ok( rio.classList.contains( "collapsed" ), "persisted collapse honored on render" );
   const krishna = document.querySelector( 'tbody.task-group[data-owner="Krishna"]' )!;
   assert.ok( !krishna.classList.contains( "collapsed" ) );
+} );
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PARK-ACTIVE predicate — the browser twin of park_is_active()
+// (cosa/rest/task_store_owed.py). That module exists because divergence across
+// its readers "has bitten this fleet repeatedly", and this panel is now a
+// FOURTH reader. Every case below is lifted from the Python twin's own
+// contract so a drift on either side shows up here.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// FIXTURE MARGINS ARE DELIBERATE (audit rule, María 2026-07-22): a fixture's
+// distance from the boundary must be SMALLER than the largest quantity that
+// could mask the bug, or the assertion cannot fail. The first draft of this
+// block used ±6h and a mutation deleting the timezone normalization outright
+// SURVIVED it — a 4h local offset cannot flip a 6h margin.
+//
+// These two are ZONED (explicit Z), so no offset applies and the masking
+// quantity is any accidental skew — ms/seconds confusion, a hardcoded fudge.
+// Five minutes is tighter than any such slip, so anything of the kind flips
+// them. The zone-less pair below is sized differently and for a different
+// reason; see that test.
+const NOW_MS   = Date.parse( "2026-07-22T12:00:00Z" );
+const FUTURE   = "2026-07-22T12:05:00Z";
+const PAST     = "2026-07-22T11:55:00Z";
+const PARKED   = ( over: Record<string, unknown> = {} ) =>
+  ( { id: "p1", item_class: "task", title: "Deferred", status: "parked",
+      owner_persona: "Rio", park_reason: "waiting on Rick", next_chase_ts: FUTURE, ...over } );
+
+// The RENDER path calls _taskIsParked( task ) with no `now`, so it reads the
+// wall clock. Freeze it, or these tests quietly depend on the hour they run in.
+//
+// This helper exists because tightening the fixtures above EXPOSED that
+// dependence: with FUTURE at +6h the render tests passed only because 18:00Z was
+// still ahead of real time when they were written — a time bomb that would have
+// gone red on its own that evening and looked like a regression in the code.
+// The clock is now an input, not an ambient condition.
+function withFrozenNow<T>( atMs: number, fn: () => T ): T {
+  const realNow = Date.now;
+  Date.now = () => atMs;
+  try { return fn(); } finally { Date.now = realNow; }
+}
+
+test( "_taskIsParked: parked + FUTURE chase → park-active", () => {
+  assert.equal( newUI()._taskIsParked( PARKED(), NOW_MS ), true );
+} );
+
+test( "_taskIsParked: parked + PAST chase → NOT parked (expired, rejoined owed)", () => {
+  // Self-expiry is computed at read time and never written back. A row whose
+  // chase has passed is workable again and must render normally — dimming it
+  // forever is the failure mode the whole read-time rule exists to avoid.
+  assert.equal( newUI()._taskIsParked( PARKED( { next_chase_ts: PAST } ), NOW_MS ), false );
+} );
+
+test( "_taskIsParked: parked + chase EXACTLY now → NOT parked (the boundary)", () => {
+  // The Python twin pins `chase == now -> False` explicitly: the chase has COME
+  // DUE. Pinned here because an off-by-one to >= is invisible in every other case.
+  assert.equal( newUI()._taskIsParked( PARKED( { next_chase_ts: "2026-07-22T12:00:00Z" } ), NOW_MS ), false );
+} );
+
+test( "_taskIsParked: parked + NULL chase → NOT parked (fail-loud-toward-owed)", () => {
+  // ⚠️ THE COUNTER-INTUITIVE ONE, and the reason the first draft of this
+  // predicate was overruled. A malformed park is VISIBLE work: the store's
+  // is_owed( "parked", None, now ) is True. Dimming it would have the dashboard
+  // whisper "deferred, ignore me" over a row the store is actively counting as
+  // owed — the same masquerade the marking exists to prevent, pointed backwards.
+  assert.equal( newUI()._taskIsParked( PARKED( { next_chase_ts: null } ), NOW_MS ), false );
+} );
+
+test( "_taskIsParked: parked + unparseable chase → NOT parked", () => {
+  assert.equal( newUI()._taskIsParked( PARKED( { next_chase_ts: "not-a-date" } ), NOW_MS ), false );
+} );
+
+test( "_taskIsParked: keyed on STATUS, not on park_reason", () => {
+  // park_reason is not the marker — `parked` is a real status. A queued row that
+  // merely carries a reason is not parked, and a parked row is parked whether or
+  // not the reason survived.
+  assert.equal( newUI()._taskIsParked( PARKED( { status: "queued" } ), NOW_MS ), false );
+  assert.equal( newUI()._taskIsParked( PARKED( { park_reason: null } ), NOW_MS ), true );
+} );
+
+test( "_taskIsParked: a ZONE-LESS chase is read as UTC, matching the Python twin", () => {
+  // Cross-language trap: Python does chase.replace( tzinfo=utc ) for a naive
+  // value, while Date.parse( "…T14:00:00" ) resolves as LOCAL time. Untreated,
+  // the twins disagree by the operator's UTC offset — silently, and only for
+  // zone-less rows.
+  //
+  // ⚠️ THE TIMES ARE CHOSEN, NOT ARBITRARY — this test's FIRST draft used ±6h
+  // from `now` and a mutation that deleted the normalization entirely SURVIVED
+  // it: a 4-hour local offset cannot flip a 6-hour margin, so both assertions
+  // passed either way and the test proved nothing. Both instants below sit
+  // INSIDE one UTC offset of `now` (12:00Z), and they straddle it in opposite
+  // directions so the pair is sensitive to offsets of either sign:
+  //
+  //   09:00 naive → as UTC 09:00Z (before now → false)
+  //                 read LOCAL at a NEGATIVE offset it lands after now → flips
+  //   13:00 naive → as UTC 13:00Z (after now  → true)
+  //                 read LOCAL at a POSITIVE offset it lands before now → flips
+  //
+  // Any non-zero offset flips at least one. Only a UTC±0 machine passes both
+  // under the mutation — and there the two readings are genuinely identical.
+  const ui = newUI();
+  assert.equal( ui._taskIsParked( PARKED( { next_chase_ts: "2026-07-22T09:00:00" } ), NOW_MS ), false,
+    "09:00 zone-less is 09:00Z — BEFORE now, so not parked" );
+  assert.equal( ui._taskIsParked( PARKED( { next_chase_ts: "2026-07-22T13:00:00" } ), NOW_MS ), true,
+    "13:00 zone-less is 13:00Z — AFTER now, so still parked" );
+} );
+
+test( "_taskIsParked: junk input never throws", () => {
+  const ui = newUI();
+  for ( const junk of [ null, undefined, {}, { status: "parked" }, { status: "parked", next_chase_ts: 42 } ] ) {
+    assert.equal( ui._taskIsParked( junk, NOW_MS ), false );
+  }
+} );
+
+test( "_renderTaskRow: park-active row is dimmed + badged; expired park is NOT", () => {
+  const ui = newUI();
+  withFrozenNow( NOW_MS, () => {
+    const active = ui._renderTaskRow( PARKED() );
+    assert.ok( active.includes( "task-row-parked" ), "park-active row carries the dim class" );
+    assert.ok( active.includes( "task-parked-badge" ), "and the badge" );
+    assert.ok( active.includes( "waiting on Rick" ), "badge tooltip carries the operator's own reason" );
+
+    const expired = ui._renderTaskRow( PARKED( { next_chase_ts: PAST } ) );
+    assert.ok( !expired.includes( "task-row-parked" ), "expired park renders as ordinary workable row" );
+  } );
+} );
+
+test( "parked rows are NON-terminal and survive the open-status filter", () => {
+  // The path that can actually regress. With include_terminal gone the renderer
+  // never receives done/dropped at all, so terminal-parked is moot by
+  // construction — but a parked row MUST reach the table, or asking the server
+  // for it with hide_parked=false accomplishes nothing.
+  const ui = newUI();
+  assert.equal( ui.isTaskOpenStatus( "parked" ), true, "parked is non-terminal" );
+  buildPanelDOM();
+  withFrozenNow( NOW_MS, () => {
+    ui.renderTaskList( { tasks: [ PARKED() ], count: 1, total: 1, has_more: false } );
+  } );
+  assert.equal( document.getElementById( "task-list-count" )!.textContent, "1", "parked row is counted" );
+  assert.ok( document.querySelector( "tr.task-row-parked" ), "parked row is rendered, dimmed" );
+} );
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TRUNCATION BANNER — the LOUD half. The defect was the silence, not the number.
+// ═══════════════════════════════════════════════════════════════════════════
+
+test( "truncation banner: absent when the server reports a complete board", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  ui.renderTaskList( { tasks: [ T_QUEUED ], count: 1, total: 1, has_more: false } );
+  assert.ok( !document.querySelector( ".task-list-truncated" ), "no banner on a complete board" );
+} );
+
+test( "truncation banner: fires on has_more, naming shown / total / remainder", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  ui.renderTaskList( { tasks: [ T_QUEUED ], count: 500, total: 1171, has_more: true } );
+  const banner = document.querySelector( ".task-list-truncated" );
+  assert.ok( banner, "banner present" );
+  const text = banner!.textContent ?? "";
+  assert.match( text, /500/, "names how many are shown" );
+  assert.match( text, /1171/, "names how many exist" );
+  assert.match( text, /671/, "names the remainder — the number nobody could see before" );
+} );
+
+test( "truncation banner: count < total fires it even when has_more is absent", () => {
+  // Two independent ways to notice, so one missing field cannot restore silence.
+  const ui = newUI();
+  buildPanelDOM();
+  ui.renderTaskList( { tasks: [ T_QUEUED ], count: 500, total: 1171 } );
+  assert.ok( document.querySelector( ".task-list-truncated" ), "cross-check fires without has_more" );
+} );
+
+test( "truncation banner: rows that DID arrive are still rendered beneath it", () => {
+  // The banner supplements the board; it never replaces it. A truncated board is
+  // still worth reading.
+  const ui = newUI();
+  buildPanelDOM();
+  ui.renderTaskList( { tasks: [ T_BLOCKED, T_QUEUED ], count: 500, total: 1171, has_more: true } );
+  assert.ok( document.querySelector( ".task-list-truncated" ), "banner present" );
+  assert.ok( document.querySelectorAll( "tr.task-row" ).length >= 2, "table still rendered" );
+} );
+
+test( "truncation banner: fires on an EMPTY page that the server says is partial", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  ui.renderTaskList( { tasks: [], count: 0, total: 40, has_more: true } );
+  assert.ok( document.querySelector( ".task-list-truncated" ), "banner survives the empty branch" );
+  assert.ok( document.querySelector( ".task-list-empty" ), "empty message still shown" );
+} );
+
+test( "truncation banner: garbage / missing totals are treated as no claim", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  ui.renderTaskList( { tasks: [ T_QUEUED ], count: 1 } );
+  assert.ok( !document.querySelector( ".task-list-truncated" ), "absent total makes no claim" );
+  buildPanelDOM();
+  ui.renderTaskList( { tasks: [ T_QUEUED ], count: 1, total: "lots", has_more: "yes" } );
+  assert.ok( !document.querySelector( ".task-list-truncated" ), "non-numeric total makes no claim" );
+} );
+
+// ── Trigger 3: the one that survives `total` going missing ────────────────────
+// has_more and count<total BOTH key on `total`. One shared dependency, and its
+// absence restores the exact silence this banner removes. This trigger needs
+// neither field.
+
+test( "truncation banner: a FULL page with no total says UNKNOWN, not nothing", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  // 500 rows === the limit in the shared query, and no `total` to check it
+  // against. Legitimately-exactly-500 is possible, which is why the wording is
+  // UNKNOWN rather than a truncation claim — unknown-and-loud beats
+  // assumed-complete-and-quiet.
+  ui.renderTaskList( { tasks: [ T_QUEUED ], count: 500 } );
+  const banner = document.querySelector( ".task-list-truncated" );
+  assert.ok( banner, "full page + no total still raises a banner" );
+  assert.match( banner!.textContent ?? "", /UNKNOWN/, "says completeness is unknown" );
+} );
+
+test( "truncation banner: a full page WITH a matching total is silent", () => {
+  // The discriminator. Same 500 rows; the server accounted for them, so there is
+  // nothing to warn about. Without this the trigger would fire on every full
+  // healthy page and train the operator to ignore the banner.
+  const ui = newUI();
+  buildPanelDOM();
+  ui.renderTaskList( { tasks: [ T_QUEUED ], count: 500, total: 500, has_more: false } );
+  assert.ok( !document.querySelector( ".task-list-truncated" ), "accounted-for full page is silent" );
+} );
+
+test( "truncation banner: a SHORT page with no total is silent", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  ui.renderTaskList( { tasks: [ T_QUEUED ], count: 499 } );
+  assert.ok( !document.querySelector( ".task-list-truncated" ), "a page under the limit implies the end of the board" );
+} );
+
+test( "_taskListQueryLimit: read from the shared query, not hardcoded", () => {
+  // A hardcoded 500 would stop matching the day the query is edited, and the
+  // full-page trigger would quietly never fire again — a guard that cannot fire.
+  const ui = newUI();
+  assert.equal( ui._taskListQueryLimit(), 500, "parses the live constant" );
+  const saved = window.LUPIN_TASK_LIST_QUERY;
+  try {
+    window.LUPIN_TASK_LIST_QUERY = "/api/tasks?limit=750&unscoped_audit=true";
+    assert.equal( ui._taskListQueryLimit(), 750, "tracks an edited limit" );
+    buildPanelDOM();
+    ui.renderTaskList( { tasks: [ T_QUEUED ], count: 750 } );
+    assert.ok( document.querySelector( ".task-list-truncated" ), "full-page trigger follows the new limit" );
+    window.LUPIN_TASK_LIST_QUERY = "/api/tasks?unscoped_audit=true";
+    assert.ok( Number.isNaN( ui._taskListQueryLimit() ), "absent limit → NaN, trigger simply does not fire" );
+  } finally {
+    window.LUPIN_TASK_LIST_QUERY = saved;
+  }
+} );
+
+// ── Server warnings[] — verbatim, own line, never in the arithmetic ───────────
+
+test( "server warnings render VERBATIM on their own line", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  ui.renderTaskList( { tasks: [ T_QUEUED ], count: 1, total: 1, has_more: false,
+                       warnings: [ "non-terse pull returned 900 full rows" ] } );
+  const bar = document.querySelector( ".task-list-truncated" );
+  assert.ok( bar, "a warning alone raises the bar even on a complete board" );
+  assert.match( bar!.textContent ?? "", /non-terse pull returned 900 full rows/, "server text unedited" );
+} );
+
+test( "server warnings do NOT feed the shown/total arithmetic", () => {
+  // An unrecognized warning has no numbers. Inventing them would be worse than
+  // silence, so the count sentence and the warning line stay separate elements.
+  const ui = newUI();
+  buildPanelDOM();
+  ui.renderTaskList( { tasks: [ T_QUEUED ], count: 500, total: 1171, has_more: true,
+                       warnings: [ "something new the client has never seen" ] } );
+  const bars = document.querySelectorAll( ".task-list-truncated" );
+  assert.equal( bars.length, 2, "two separate lines: the count claim and the server's own words" );
+  assert.match( bars[ 0 ]!.textContent ?? "", /671 not displayed/, "arithmetic line unchanged by the warning" );
+  assert.match( bars[ 1 ]!.textContent ?? "", /something new the client has never seen/ );
+} );
+
+test( "server warnings: empty / non-array is silent", () => {
+  const ui = newUI();
+  for ( const w of [ [], undefined, null, "a string", 42 ] ) {
+    buildPanelDOM();
+    ui.renderTaskList( { tasks: [ T_QUEUED ], count: 1, total: 1, has_more: false, warnings: w } );
+    assert.ok( !document.querySelector( ".task-list-truncated" ), `no bar for ${JSON.stringify( w )}` );
+  }
+} );
+
+// ═══════════════════════════════════════════════════════════════════════════
+// query_unavailable render branch — a deploy defect wearing its own face
+// ═══════════════════════════════════════════════════════════════════════════
+
+test( "renderTaskList: query_unavailable names the missing FILE and is not an outage", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  ui.renderTaskList( { status: "query_unavailable", tasks: null } );
+  const el = document.querySelector( ".task-list-query-unavailable" );
+  assert.ok( el, "renders its own distinct state" );
+  assert.match( el!.textContent ?? "", /task-list-query\.js/, "names the file an operator must go look for" );
+  assert.ok( !document.querySelector( ".task-list-unreachable" ), "does NOT masquerade as a store outage" );
+  assert.equal( document.getElementById( "task-list-count" )!.textContent, "0" );
+} );
+
+test( "renderTaskList: query_unavailable does NOT replay last-known rows", () => {
+  // Deliberate contrast with the unreachable branch, which replays. A stale
+  // board under a deploy error invites the operator to believe the panel is
+  // working; the unreachable branch replays because the data was once real and
+  // the outage is expected to end.
+  const ui = newUI();
+  buildPanelDOM();
+  ui.renderTaskList( { tasks: [ T_BLOCKED, T_QUEUED ], count: 2, total: 2 } );
+  assert.ok( document.querySelectorAll( "tr.task-row" ).length >= 2, "good board first" );
+  ui.renderTaskList( { status: "query_unavailable", tasks: null } );
+  assert.equal( document.querySelectorAll( "tr.task-row" ).length, 0, "no stale rows under a deploy error" );
 } );
 
 if ( typeof process !== "undefined" && process.argv.includes( "--run" ) ) { /* node --test entry */ }

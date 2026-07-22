@@ -103,14 +103,28 @@ test("initial composite is null", () => {
 // ---------------------------------------------------------------------------
 // Unscoped-query guard escape (design 2026.07.07) — the board card is a
 // DELIBERATE full-board sweep, so its endpoint MUST carry the guard escape or
-// it 400s once the store grows past the threshold. Pin both params + prove the
-// full board (incl. terminal rows) is cached WITHOUT truncation (rider ii).
+// it 400s once the store grows past the threshold. Pin the params + prove the
+// page the server returns is cached WITHOUT client-side truncation (rider ii).
+//
+// ⚠️ SCOPE CORRECTION 2026-07-22. This block used to claim it proved "the
+// human's view is never silently truncated". It never could: the store caches
+// whatever ARRIVES, so it can only prove THIS LAYER drops nothing. The
+// truncation that actually bit us happened UPSTREAM, at the server's 500-row
+// cap, and no amount of faithful caching can see it. That gap is now covered
+// where it belongs — by the has_more/total banner in the notifications panel.
 // ---------------------------------------------------------------------------
 
 test("endpoint carries the unscoped-guard escape params", () => {
   assert.ok(TASK_LIST_ENDPOINT.includes("unscoped_audit=true"), "must pass unscoped_audit=true");
-  assert.ok(TASK_LIST_ENDPOINT.includes("include_terminal=true"), "must pass include_terminal=true");
   assert.ok(TASK_LIST_ENDPOINT.includes("limit=500"), "still caps at 500");
+  // RE-CUT 2026-07-22 — this line used to assert include_terminal=true on the
+  // stated ground that an all-status board kept the human's view "never
+  // truncated". It did the opposite: terminal history inflated the result to
+  // 1,171 rows against a server limit hard-capped at 500, silently dropping 671
+  // — newest-first, so the evicted rows were the OPEN ones the card exists to
+  // show. The panel now asks only for work that is still owed.
+  assert.ok(!TASK_LIST_ENDPOINT.includes("include_terminal"), "must NOT request terminal rows");
+  assert.ok(TASK_LIST_ENDPOINT.includes("hide_parked=false"), "must surface parked rows the server hides by default");
   // mini-plan 02 (2026-07-21): the server also enforces a response BYTE budget,
   // and under its 100k default this poll measured 30 of 1100 available rows. The
   // card's own invariant is that the human's view is never SILENTLY truncated,
@@ -119,9 +133,13 @@ test("endpoint carries the unscoped-guard escape params", () => {
   assert.ok(TASK_LIST_ENDPOINT.includes("char_budget=0"), "must opt out of the response byte budget");
 });
 
-test("refresh: a large all-status board is cached in full — no truncation", async () => {
-  // The human's view is never silently truncated: a board carrying MORE than the
-  // guard threshold, spanning open AND terminal statuses, round-trips unchanged.
+test("refresh: a large board round-trips into the cache with nothing dropped", async () => {
+  // What this DOES prove: the store is a faithful cache — a board larger than
+  // the guard threshold, spanning many statuses, arrives and is kept entire.
+  // What it does NOT prove (see the scope correction above): that the server
+  // sent everything. Terminal rows still appear in this fixture on purpose —
+  // the store must not editorialize by status even though the endpoint no
+  // longer asks for them.
   const statuses = ["queued", "in_progress", "blocked", "done", "dropped"];
   const bigBoard: TaskListComposite = {
     tasks: Array.from({ length: 120 }, (_, i) => ({

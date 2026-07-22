@@ -15,6 +15,7 @@ import type { EventBus } from "../shared/EventBus";
 import type { StoreTaskListChangedPayload } from "../shared/types";
 import type { TaskItem, TaskListComposite } from "../render/taskListModel";
 import { deriveTaskActor } from "../render/taskListModel";
+import { TASK_LIST_QUERY } from "../../shared/task-list-query.js";
 
 // Narrowed ApiClient surface. The production ApiClient.get throws ApiError
 // (carrying `.status`) on non-2xx; refresh() maps that to the display-only
@@ -54,19 +55,15 @@ export interface TaskMutation {
 // to `?owner_persona=<self>&status=<open>` by editing this one constant if a
 // per-session scope is later wanted (cascade §F left the exact param values to
 // the consumer).
-// unscoped_audit=true: this is a DELIBERATE full-board sweep (the human's
-// dashboard), so it passes the repository unscoped-size guard's escape rather
-// than 400ing once the store exceeds the threshold. include_terminal=true:
-// preserve the documented "any status" composite (the renderer, not the server,
-// filters to open) — the human's view is never silently truncated.
-// char_budget=0: the explicit opt-out from the server's response BYTE budget
-// (mini-plan 02, 2026-07-21). That budget defaults to 100k chars and exists to
-// protect an agent from pulling ~97k tokens into a context — but this poll is
-// the human's deliberate full-board sweep, and it measured 30 of 1100 rows
-// under the default. The invariant three lines above ("never silently
-// truncated") is the reason this escape is named here rather than the budget
-// being widened for everyone.
-export const TASK_LIST_ENDPOINT         = "/api/tasks?limit=500&unscoped_audit=true&include_terminal=true&char_budget=0";
+// The query STRING itself lives in ONE place — ../../shared/task-list-query.js —
+// because notifications.js polls the same endpoint from a different bundle and
+// the two literals had already drifted. Full param rationale is documented
+// there, including why `include_terminal` was REMOVED (2026-07-22): it inflated
+// the result past the server's 500-row cap, silently dropping 671 rows — and
+// since ordering is newest-first, the evicted rows were OPEN ones this card
+// exists to show. Re-exported under the historical name so importers are
+// unaffected.
+export const TASK_LIST_ENDPOINT         = TASK_LIST_QUERY;
 export const TASK_LIST_POLL_INTERVAL_MS = 60000;   // 60s auto-poll (fleet parity)
 
 export interface TaskListStore {

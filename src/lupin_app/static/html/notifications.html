@@ -1215,7 +1215,12 @@
     <script src="/static/js/tts-audio-cache.js"></script>
     <script src="/static/js/job-completion-cache.js"></script>
     <script src="/static/js/audio-recorder.js"></script>
-    <script src="/static/js/notifications.js?v=20260530d"></script>
+    <!-- The ONE task-list query string, shared with the TS multiplexer bundle.
+         A module so the same file can be `import`ed there; it publishes
+         window.LUPIN_TASK_LIST_QUERY for the classic script below, which reads
+         it at call time (the poll starts well after module execution). -->
+    <script type="module" src="/static/js/shared/task-list-query.js?v=20260722a"></script>
+    <script src="/static/js/notifications.js?v=20260722a"></script>
     <script src="/static/js/broadcast-panel.js?v=20260512a"></script>
     <script>
         // Accordion sections whose open/closed state survives page reloads.

@@ -13,7 +13,8 @@
    - Table:           .task-list-table · .task-group-header
                       (+ .task-group-unassigned) · .task-row · .task-col-* ·
                       .task-class-badge · .task-status-dot
-   - Banners:         .task-list-message (+ -unreachable / -empty / -signin)
+   - Banners:         .task-list-message (+ -unreachable / -empty / -signin /
+                      -truncated / -query-unavailable)
    - Color:           .task-status-{blocked,active,review,queued,done,
                       dropped,unknown} · .task-prio-{high,mid,low}
    ============================================================================ */
@@ -294,6 +295,37 @@ tbody.task-group.collapsed .task-row {
 .task-status-dropped .task-status-dot { background: var( --task-dropped ); }
 .task-status-unknown .task-status-dot { background: var( --task-unknown ); }
 
+/* ---- Parked rows (2026-07-22) ------------------------------------------------
+   A PARK-ACTIVE row (status "parked" with a chase still in the future) was
+   deliberately ruled not-now by a human. It is SHOWN, not hidden: the server
+   hides parked by default, which is why the dashboard used to report 30 fewer
+   rows than agents saw via task_query. Dimmed so it reads as deferred at a
+   glance, with the operator's own park_reason on the badge tooltip.
+
+   ⚠️ DIMMING IS FOR PARK-*ACTIVE* ONLY. A parked row whose chase has passed, or
+   that carries no chase at all, is NOT dimmed — the store counts it as OWED
+   ("fail-loud-toward-owed", task_store_owed.py), and dimming it would whisper
+   "ignore me" over live work. Predicate: _taskIsParked, the browser twin of
+   park_is_active(). */
+.task-row-parked td {
+    opacity: 0.55;
+    font-style: italic;
+}
+
+.task-parked-badge {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 0 5px;
+    border: 1px solid currentColor;
+    border-radius: 3px;
+    font-size: 0.75em;
+    font-style: normal;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    vertical-align: middle;
+    cursor: help;
+}
+
 /* Row left-edge accent (3px) on the first cell, keyed to the status class */
 .task-row.task-status-blocked td:first-child { box-shadow: inset 3px 0 0 var( --task-blocked ); }
 .task-row.task-status-active  td:first-child { box-shadow: inset 3px 0 0 var( --task-active ); }
@@ -345,4 +377,31 @@ tbody.task-group.collapsed .task-row {
     background: #f8d7da;
     color: #721c24;
     border: 1px solid #f5c6cb;
+}
+
+/* Board truncated (2026-07-22) — the server held rows back. Deliberately the
+   LOUDEST banner here: silent truncation is the defect this whole change exists
+   to kill, and a quiet notice about quietness would be self-defeating. Sits
+   ABOVE the table rather than replacing it, because the rows that DID arrive are
+   still worth reading. */
+.task-list-truncated {
+    background: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f1a7b0;
+    border-left: 4px solid #c82333;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+/* Query module failed to load — a DEPLOY defect, NOT a store outage. Visually
+   distinct from .task-list-unreachable (violet, not amber) so an operator does
+   not spend 60-second poll cycles triaging a missing static asset as downtime.
+   The two failures share a blank board and share nothing else. */
+.task-list-query-unavailable {
+    background: #ede7f6;
+    color: #4527a0;
+    border: 1px solid #d1c4e9;
+    border-left: 4px solid #5e35b1;
+    text-align: left;
+    line-height: 1.5;
 }

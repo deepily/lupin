@@ -14,9 +14,21 @@
     "resolveJsonModule"            : true,
     "isolatedModules"              : true,
     "verbatimModuleSyntax"         : true,
-    "rootDir"                      : "src/lupin_app/static/js/multiplexer",
+    "allowJs"                      : true,
+    "checkJs"                      : true,
+    "rootDir"                      : "src/lupin_app/static/js",
     "outDir"                       : "src/lupin_app/static/dist/multiplexer",
     "noEmit"                       : true
   },
-  "include" : [ "src/lupin_app/static/js/multiplexer/**/*.ts" ]
+  // `shared/` is OUTSIDE the multiplexer tree and was typechecked by nobody:
+  // TaskListStore.ts imports it, but neither the .js nor its hand-written .d.ts
+  // was in any project, so the declaration could drift from the implementation
+  // with nothing to catch it. A declaration nothing verifies is a promise, not a
+  // type. checkJs pins the pair (the .js is checked against its own JSDoc and
+  // the sibling .d.ts must describe what it actually exports).
+  "include" : [
+    "src/lupin_app/static/js/multiplexer/**/*.ts",
+    "src/lupin_app/static/js/shared/**/*.ts",
+    "src/lupin_app/static/js/shared/**/*.js"
+  ]
 }

@@ -9072,18 +9072,34 @@ class NotificationsUI {
          *     - this.authedFetch is available (handles JWT refresh)
          *
          * Ensures:
-         *     - Returns the parsed { tasks, count } body on 2xx
+         *     - Returns the parsed { tasks, count, total, has_more } body on 2xx
          *     - Returns { status: "auth_required" } on a hard 401
+         *     - Returns { status: "query_unavailable", tasks: null } when the shared
+         *       query module did not load (a DEPLOY defect, not a transport one)
          *     - Returns { status: "unreachable", tasks: null } on any network throw
          *       or non-2xx, non-401 status (never throws)
          */
         try {
-            // unscoped_audit=true: deliberate full-board sweep (the human's
-            // dashboard) — passes the repository unscoped-size guard's escape
-            // rather than 400ing once the store grows past the threshold.
-            // include_terminal=true: preserve the all-status board the renderer
-            // filters client-side, so the human's view is never truncated.
-            const response = await this.authedFetch( "/api/tasks?limit=500&unscoped_audit=true&include_terminal=true" );
+            // The query lives in ONE place — /static/js/shared/task-list-query.js,
+            // loaded as a module by this page and imported by the TS multiplexer's
+            // TaskListStore. Two hand-maintained copies had already drifted, and
+            // this one carried `include_terminal=true`, which pushed the result
+            // past the server's 500-row cap and silently dropped 671 rows.
+            // Read at CALL time (never at load time) so module execution order
+            // cannot matter; fail LOUD rather than fall back to a second literal —
+            // a fallback string is exactly the duplication this removes.
+            //
+            // A MISSING QUERY IS ITS OWN STATE, not "unreachable". The store being
+            // down and a static asset 404ing are different failures with different
+            // remedies, and this poll repeats every 60s — collapsing them would have
+            // an operator triaging a deploy defect as an outage, indefinitely, with
+            // the real cause visible only in a console line nobody is tailing.
+            const query = window.LUPIN_TASK_LIST_QUERY;
+            if ( !query ) {
+                this.log( "Task list query missing — /static/js/shared/task-list-query.js did not load" );
+                return { status: "query_unavailable", tasks: null };
+            }
+            const response = await this.authedFetch( query );
             if ( response.status === 401 ) {
                 return { status: "auth_required" };
             }
@@ -9416,12 +9432,20 @@ class NotificationsUI {
             ? `<span class="task-detail-emoji task-detail-empty" aria-disabled="true" title="No detail">📄</span>`
             : `<span class="task-detail-emoji" role="button" tabindex="0" title="View detail" data-task-id="${this._escapeTaskAttr( this._taskIdLabel( task ) )}" data-task-body="${this._escapeTaskAttr( task.body )}">📄</span>`;
 
+        // Parked rows are SHOWN, dimmed and badged — never dropped (Rick
+        // 2026-07-22). The server hides them by default; the dashboard asks for
+        // them explicitly so it reports the same board agents see via task_query.
+        const isParked    = this._taskIsParked( task );
+        const parkedBadge = isParked
+            ? `<span class="task-parked-badge" title="${this._escapeTaskAttr( task.park_reason )}">parked</span>`
+            : "";
+
         return `
-            <tr class="task-row ${statusClass}">
+            <tr class="task-row ${statusClass}${isParked ? " task-row-parked" : ""}">
                 <td class="task-col-id">${idLabel}</td>
                 <td class="task-col-title" title="${titleAttr}">${titleText}</td>
                 <td class="task-col-class"><span class="task-class-badge task-class-${classSlug}">${classBadge}</span></td>
-                <td class="task-col-status"><span class="task-status-dot"></span>${statusWord}</td>
+                <td class="task-col-status"><span class="task-status-dot"></span>${statusWord}${parkedBadge}</td>
                 <td class="task-col-blocked">${blocked}</td>
                 <td class="task-col-chase">${chase}</td>
                 <td class="task-col-accountable">${accountable}</td>
@@ -9429,6 +9453,67 @@ class NotificationsUI {
                 <td class="task-col-project">${project}</td>
                 <td class="task-col-detail">${detailCell}</td>
             </tr>`;
+    }
+
+    _taskIsParked( task, now ) {
+        /**
+         * PARK-ACTIVE — the browser twin of the store's canonical predicate
+         * `park_is_active()` (cosa/rest/task_store_owed.py:184).
+         *
+         *     park_is_active  ==  status == "parked" AND next_chase_ts > now
+         *
+         * THIS IS A FOURTH READER OF A CONTRACT THAT ALREADY HAS THREE, and that
+         * module exists precisely because divergence across them "has bitten this
+         * fleet repeatedly". So this mirrors it term for term rather than inventing
+         * a UI-local rule. Two consequences worth stating, because both are
+         * counter-intuitive and both were gotten wrong in the first draft:
+         *
+         *   1. KEYED ON `status`, NOT on `park_reason`. A present park_reason is
+         *      not the marker — `parked` is a real status in VALID_STATUSES, and
+         *      park_reason merely accompanies it. Keying on the reason would dim
+         *      rows the store does not consider parked at all.
+         *
+         *   2. A NULL / UNPARSEABLE / PAST CHASE IS *NOT* PARKED — deliberately,
+         *      and this is the term that inverts naive intuition. The store calls
+         *      it "fail-loud-toward-owed": a malformed park is VISIBLE work, and
+         *      `is_owed( "parked", None, now )` is True. Dimming such a row would
+         *      make the dashboard whisper "deferred, ignore it" about a row the
+         *      store is actively counting as owed — the exact masquerade this
+         *      marking exists to prevent, only pointed the other way.
+         *
+         * NAIVE TIMESTAMPS ARE UTC — a genuine cross-language trap. The Python
+         * twin does `chase_ts.replace( tzinfo=timezone.utc )` for a naive value,
+         * while `Date.parse( "2026-07-22T14:00:00" )` (no zone) resolves as LOCAL
+         * time. Left alone, the two twins would disagree by the operator's UTC
+         * offset — silently, and only for zone-less rows. Normalized below.
+         *
+         * Requires:
+         *     - task is a row object (foreign wire data; any shape tolerated)
+         *     - now is epoch-millis, or omitted to read the clock at call time
+         *
+         * Ensures:
+         *     - status !== "parked"            → false (checked FIRST, so chase
+         *       logic never touches a non-parked row)
+         *     - parked AND chase >  now        → true
+         *     - parked AND chase === now       → false (come due — rejoined owed)
+         *     - parked AND chase <  now        → false (expired — rejoined owed)
+         *     - parked AND chase null/unparsed → false (fail-loud-toward-owed)
+         *     - a zone-less chase is read as UTC, matching the Python twin
+         *     - Pure: no DOM, no side effects; never throws
+         */
+        if ( !task || task.status !== "parked" ) return false;
+        const raw = task.next_chase_ts;
+        if ( typeof raw !== "string" || raw.trim() === "" ) return false;
+
+        // Zone-less ⇒ UTC (Python-twin parity). Bare "YYYY-MM-DDTHH:MM(:SS(.fff))"
+        // with no trailing Z / ±HH:MM gets one appended before parsing.
+        const trimmed  = raw.trim();
+        const hasZone  = /(?:Z|[+-]\d{2}:?\d{2})$/.test( trimmed );
+        const chaseMs  = Date.parse( hasZone ? trimmed : `${trimmed}Z` );
+        if ( !Number.isFinite( chaseMs ) ) return false;
+
+        const nowMs = ( typeof now === "number" && Number.isFinite( now ) ) ? now : Date.now();
+        return chaseMs > nowMs;
     }
 
     _taskGroupOwnerKey( group ) {
@@ -9579,6 +9664,18 @@ class NotificationsUI {
             return;
         }
 
+        // A missing query module is a DEPLOY defect and says so, naming the file.
+        // Distinct from "unreachable" on purpose: same blank board, different
+        // remedy, and this branch never resolves on its own the way an outage does.
+        if ( composite && composite.status === "query_unavailable" ) {
+            container.innerHTML =
+                `<p class="task-list-message task-list-query-unavailable">🧩 Task-list query did not load` +
+                ` — /static/js/shared/task-list-query.js is missing or failed to parse.` +
+                ` This is a deploy problem, not a store outage.</p>`;
+            if ( countEl ) countEl.textContent = "0";
+            return;
+        }
+
         if ( !composite || composite.status === "unreachable" || !Array.isArray( composite.tasks ) ) {
             this._renderTaskListUnreachable( container, countEl );
             return;
@@ -9588,14 +9685,130 @@ class NotificationsUI {
         this._taskListLastGoodTasks = openTasks;
         if ( countEl ) countEl.textContent = String( openTasks.length );
 
+        const truncation = this._renderTaskListTruncationBanner( composite );
+
         if ( openTasks.length === 0 ) {
-            container.innerHTML = `<p class="task-list-message task-list-empty">✅ No open tasks.</p>`;
+            container.innerHTML = truncation + `<p class="task-list-message task-list-empty">✅ No open tasks.</p>`;
         } else {
             const model = this.groupTasksByOwner( openTasks );
-            container.innerHTML = this.renderTaskListTable( model, undefined, this.loadCollapsedTaskOwners() );
+            container.innerHTML = truncation + this.renderTaskListTable( model, undefined, this.loadCollapsedTaskOwners() );
         }
 
         if ( stampUpdated ) this._stampTaskListUpdated();
+    }
+
+    _renderTaskListTruncationBanner( composite ) {
+        /**
+         * The LOUD half of the truncation fix. Returns banner HTML when the server
+         * says it held rows back, or "" when it did not.
+         *
+         * WHY THIS EXISTS AND WHY IT IS NOT REDUNDANT WITH THE QUERY FIX. Dropping
+         * `include_terminal` took the board from 1,171 rows to 139 against a
+         * server `limit` hard-capped at 500 — but the DEFECT was never the number,
+         * it was the SILENCE. 139-under-500 is headroom, and headroom expires
+         * without telling anyone. At row 501 the same failure recurs, unannounced,
+         * and the next reader re-derives this whole investigation from scratch.
+         *
+         * The server already publishes the signal and both call sites were
+         * discarding it (tasks.py:1160-1167): `total` is a TRUE COUNT(*) over the
+         * same filters — deliberately NOT `len(tasks)`, so it CAN disagree with
+         * the page — and `has_more` is `offset + len(tasks) < total`.
+         *
+         * ⚠️ ROW-CAP OVERFLOW RAISES NEITHER `truncated` NOR A `warnings` ENTRY.
+         * Those fire only for the response CHAR budget (tasks.py:1145). So the
+         * row cap — the mode that actually bit us — is the one overflow path with
+         * no server-side indicator, which is why this reads has_more/total rather
+         * than trusting `truncated`. Follow-up filed against tasks.py to make the
+         * endpoint signal both modes alike; until then this banner is the only
+         * thing between the fleet and a silent truncation.
+         *
+         * THREE TRIGGERS, AND THE THIRD DEPENDS ON NEITHER OF THE FIRST TWO.
+         * `has_more` and `count < total` both key on `total`, so they share a
+         * single point of failure: any response that omits it (a `count_only`
+         * shape, an older deploy, a future branch) makes `has_more` undefined
+         * AND the comparison NaN-false, restoring exactly the silence this
+         * function exists to remove. The third trigger — a page that came back
+         * EXACTLY full with no total to check it against — needs neither field
+         * and says so honestly: completeness UNKNOWN, which is loud, rather than
+         * assumed-complete, which is quiet and wrong.
+         *
+         * Requires:
+         *     - composite is a 2xx body; any/all of has_more/total/count may be
+         *       absent (older server, or a shape change) — treated as "no claim"
+         *
+         * Ensures:
+         *     - Returns "" only when the server made no claim AND the page was
+         *       not exactly full
+         *     - Names shown / total / remainder when the numbers are known
+         *     - Says UNKNOWN, never "complete", when the page is full and no
+         *       total accompanies it
+         *     - Any server `warnings[]` entries render VERBATIM on their own
+         *       line and NEVER feed the arithmetic above
+         *     - Never throws on a missing/garbage field; pure (no DOM writes)
+         */
+        if ( !composite ) return "";
+
+        const total = Number( composite.total );
+        const shown = Number.isFinite( Number( composite.count ) )
+            ? Number( composite.count )
+            : ( Array.isArray( composite.tasks ) ? composite.tasks.length : NaN );
+
+        // has_more is the server's own claim and wins outright. The count<total
+        // comparison is the independent cross-check for a body that omits it.
+        const claimsMore  = composite.has_more === true;
+        const countsShort = Number.isFinite( total ) && Number.isFinite( shown ) && total > shown;
+
+        // Trigger 3: the page is exactly `limit` rows and carries no total. A
+        // full page is the signature of a cap being hit — it is possible to have
+        // exactly `limit` rows legitimately, which is why this says UNKNOWN and
+        // not "truncated". The limit is read off the shared query rather than
+        // hardcoded, so raising it there cannot leave a stale 500 here.
+        const limit      = this._taskListQueryLimit();
+        const pageIsFull = Number.isFinite( limit ) && Number.isFinite( shown ) && shown === limit;
+        const totalUnknown = !Number.isFinite( total );
+
+        // Server warnings ride out VERBATIM on their own line. char_budget=0 is
+        // why we expect this array empty, which is exactly what makes a warning
+        // here informative: something fired that our params were meant to take
+        // off the table. Deliberately NOT folded into the count sentence — an
+        // unrecognized warning has no numbers, and inventing them would be worse
+        // than saying nothing.
+        const warnings = Array.isArray( composite.warnings ) ? composite.warnings : [];
+        const warningLine = warnings.length > 0
+            ? `<p class="task-list-message task-list-truncated">⚠️ Server: ${warnings.map( w => this._escapeTaskAttr( String( w ) ) ).join( " · " )}</p>`
+            : "";
+
+        if ( !claimsMore && !countsShort && !( pageIsFull && totalUnknown ) ) return warningLine;
+
+        let detail;
+        if ( Number.isFinite( total ) && Number.isFinite( shown ) && total > shown ) {
+            detail = `showing ${shown} of ${total} — ${total - shown} not displayed`;
+        } else if ( pageIsFull && totalUnknown ) {
+            detail = `the page came back exactly full (${shown}) and the server reported no total — completeness UNKNOWN`;
+        } else {
+            detail = "the server held rows back — some work is not displayed";
+        }
+
+        return `<p class="task-list-message task-list-truncated">✂️ Board truncated: ${detail}.</p>` + warningLine;
+    }
+
+    _taskListQueryLimit() {
+        /**
+         * The `limit` this panel actually asked for, read off the shared query
+         * constant at call time.
+         *
+         * Parsed rather than hardcoded on purpose: a hardcoded 500 here would
+         * silently stop matching the day someone edits the query, and the
+         * full-page trigger it feeds would quietly never fire again — a guard
+         * that cannot fire, which is the failure mode this whole change is about.
+         *
+         * Ensures:
+         *     - Returns the numeric limit, or NaN when absent/unparseable
+         *     - Pure; never throws on a missing global
+         */
+        const query = ( typeof window !== "undefined" && window.LUPIN_TASK_LIST_QUERY ) || "";
+        const match = /[?&]limit=(\d+)/.exec( query );
+        return match ? Number( match[ 1 ] ) : NaN;
     }
 
     _renderTaskListUnreachable( container, countEl ) {
