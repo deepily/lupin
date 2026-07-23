@@ -430,8 +430,17 @@ done"
         require_project
         RCMD_INSTALL="set -e
 mkdir -p ~/.local/bin ~/.venvs
+echo '== python3 version =='
+python3 --version
+echo '== ensure venv + pip prerequisites (apt) =='
+# The base VM image ships python3 (>=3.10, which claude-agent-sdk requires) but NOT the
+# python3-venv stdlib package, so \`python3 -m venv\` fails with 'ensurepip is not available'.
+# Install the venv + pip packages for the running python3 (the unversioned meta-packages pull the
+# correct python3.X-venv). No NEW python needed — 3.10 is a fine default for the SDK.
+sudo apt-get update -qq
+sudo apt-get install -y python3-venv python3-pip
 echo '== Claude Agent SDK -> venv ~/.venvs/claude-agent-sdk =='
-python3 -m venv ~/.venvs/claude-agent-sdk
+python3 -m venv --clear ~/.venvs/claude-agent-sdk
 ~/.venvs/claude-agent-sdk/bin/pip install -q -U pip claude-agent-sdk
 echo '== symlink bundled claude -> ~/.local/bin/claude =='
 CLAUDE_BIN=\$(~/.venvs/claude-agent-sdk/bin/python -c 'import claude_agent_sdk as m, pathlib as p; print(p.Path(m.__file__).parent / \"_bundled\" / \"claude\")')
