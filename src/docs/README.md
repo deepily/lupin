@@ -38,6 +38,7 @@ These three features share a common foundation in `src/cosa/agents/shared/`.
 
 | Document | Topic |
 |----------|-------|
+| [lupin-claude-hooks-settings-reference.md](lupin-claude-hooks-settings-reference.md) | **`~/.claude/settings.json` Lupin runtime knobs** (`heartbeat`, `task_store`, `idle_detection`) read by the hook scripts — schema, defaults, ⚠️ provisional-location proviso + planned refactor |
 | [deployment-runtime-config-examples.md](deployment-runtime-config-examples.md) | Runtime config patterns and examples |
 | [database-migrations.md](database-migrations.md) | Database migration procedures |
 | [automated-interactive-testing.md](automated-interactive-testing.md) | Proxy auto-answer testing guide |
