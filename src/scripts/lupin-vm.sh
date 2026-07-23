@@ -8,8 +8,10 @@
 #   3. app service control   (svc up|down|restart|status|logs)  — docker compose on the VM
 #   4. local tunnel          (tunnel [PORT])                    — bind localhost:PORT -> VM :7999
 #
-# Access is IAP-only (no public IP), identical to deploy-cloud-test.sh. Rick's account already
-# holds the IAP grant that script relies on, so no new firewall/IAP setup is needed.
+# Access is IAP-only (no public IP), identical to deploy-cloud-test.sh for SSH. NOTE: the `tunnel`
+# subcommand forwards IAP TCP to port 7999, which needs a VPC firewall rule allowing the IAP range
+# 35.235.240.0/20 -> tcp:7999 (SSH works because tcp:22 already has one; 7999 may not). See runbook
+# §"Tunnel firewall" for the one-time `gcloud compute firewall-rules create`.
 #
 # Runbook: src/rnd/2026.07.22-lupin-host-test-ssh-tunnel-automation.md
 #
@@ -34,7 +36,10 @@ VM_ROOT="/mnt/lupin-data/lupin"                 # UID-1001-owned on-VM checkout 
 # docker-compose.cloud-gpu.yml + src/rnd/2026.07.08-cpu-vm-app-restore-runbook.md §3.
 COMPOSE_FILE="docker-compose.cloud-gpu.yml"     # CPU VM: Cloud Run model-server, no nvidia
 ENV_FILE="cloud-gpu.env"                         # requires LUPIN_MODEL_SERVER_URL (on the VM, git-ignored)
-REST_CONTAINER="lupin-rest-cloud-gpu"           # the REST container this topology runs
+# `docker compose logs/up <name>` take the SERVICE name, NOT the container_name. The service is
+# `lupin-rest` (container_name lupin-rest-cloud-gpu) — passing the container name gives
+# "no such service". Compose subcommands here use REST_SERVICE.
+REST_SERVICE="lupin-rest"                        # compose service name (container_name = lupin-rest-cloud-gpu)
 APP_PORT=7999                                    # in-VM app port
 
 DRY_RUN=0
@@ -61,8 +66,8 @@ App services (docker compose in $VM_ROOT):
   svc status             docker compose ps
   svc up                 up -d
   svc down               down
-  svc restart            up -d --force-recreate $REST_CONTAINER
-  svc logs               logs -f --tail=200 $REST_CONTAINER
+  svc restart            up -d --force-recreate $REST_SERVICE
+  svc logs               logs -f --tail=200 $REST_SERVICE
 
 Tunnel:
   tunnel [PORT]          bind localhost:PORT -> VM :$APP_PORT (default PORT=$APP_PORT)
@@ -155,8 +160,8 @@ case "$SUBCMD" in
             status)  remote_compose "ps" ;;
             up)      remote_compose "up -d" ;;
             down)    remote_compose "down" ;;
-            restart) remote_compose "up -d --force-recreate $REST_CONTAINER" ;;
-            logs)    remote_compose "logs -f --tail=200 $REST_CONTAINER" ;;
+            restart) remote_compose "up -d --force-recreate $REST_SERVICE" ;;
+            logs)    remote_compose "logs -f --tail=200 $REST_SERVICE" ;;
             *)       die "svc needs one of: status | up | down | restart | logs" ;;
         esac
         ;;
