@@ -101,6 +101,8 @@ Full deploy (bundle -> checkout -> restart BOTH servers -> verify) — RUN FROM 
                          /health on both. Neither server hot-reloads on the VM, so both are bounced.
                          Build the bundle here where the checkout + GitHub live; the other
                          subcommands (shell/tunnel/svc) are what the laptops run against the VM.
+                         COMMITTED work only — the bundle ships the branch's last commit, NOT your
+                         working tree. Commit first, or uncommitted/staged/untracked files stay behind.
 
 Env: LUPIN_GCP_PROJECT_ID (required), LUPIN_VM_NAME, LUPIN_VM_ZONE
 
@@ -153,6 +155,11 @@ remote_compose() {
 # arg 2 == "checkout") points the VM working tree at the branch. Single source of truth for the
 # sync: both `push-bundle` and `deploy` call it, so the plumbing never drifts between them.
 # MUST run from inside the lupin checkout (it builds a local `git bundle`), i.e. FROM THE DEV BOX.
+#
+# COMMITTED WORK ONLY: `git bundle create <file> <branch>` packs the branch's committed tip.
+# Working-tree edits, staged-but-uncommitted changes, and untracked files are EXCLUDED by
+# construction — nothing in-motion ever ships. ⇒ commit before you deploy, or the VM gets the
+# branch's LAST COMMIT, not your live editor state.
 #   $1 branch        (empty ⇒ this repo's current branch)
 #   $2 "checkout"    (anything else ⇒ fetch-only: refs update, working tree unchanged)
 do_push_bundle() {
