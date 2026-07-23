@@ -77,6 +77,11 @@ Firewall (one-time — the tunnel needs IAP allowed to :$APP_PORT):
   firewall status        list all VPC firewall rules (scan sourceRanges for 35.235.240.0/20)
   firewall open [PORT]   allow IAP range -> tcp:PORT (default $APP_PORT); network auto-derived
 
+Sibling repos (the VM has no git creds — archive+SCP a LOCAL checkout):
+  push-repo <local-path> [dest-name]
+                         copy a local git repo (tracked files @ HEAD) to /mnt/lupin-data/<dest-name>,
+                         a sibling of lupin. e.g. push-repo ../planning-is-prompting
+
 Env: LUPIN_GCP_PROJECT_ID (required), LUPIN_VM_NAME, LUPIN_VM_ZONE
 
 Self-contained: no repo dependencies — copy this one file to any machine with gcloud + IAP access.
@@ -212,6 +217,35 @@ case "$SUBCMD" in
                 ;;
             *) die "firewall needs: status | open [PORT]" ;;
         esac
+        ;;
+
+    push-repo)
+        # Copy a LOCAL git checkout onto the VM data disk as a sibling of lupin, via archive+SCP
+        # (the same auth-free pattern lupin itself was deployed with). The VM has no git creds /
+        # SSH key, so a direct `git clone` of a private repo can't work there — this side-steps that.
+        # Captures tracked files at HEAD (no .git, no untracked). Lands at /mnt/lupin-data/<name>.
+        LOCAL_PATH="${1:-}"
+        [ -n "$LOCAL_PATH" ] || die "push-repo needs a local repo path:  lupin-vm.sh push-repo /path/to/repo [dest-name]"
+        [ -d "$LOCAL_PATH/.git" ] || die "$LOCAL_PATH is not a git checkout (no .git)"
+        DEST_NAME="${2:-$( basename "$LOCAL_PATH" )}"
+        DATA_ROOT="/mnt/lupin-data"
+        require_project
+        TARBALL="$( mktemp -t "lupin-pushrepo-XXXXXX.tar.gz" )"
+        log "archiving $LOCAL_PATH @ HEAD -> $DEST_NAME.tar.gz"
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "(dry-run) would: git archive HEAD | gzip; gcloud compute scp -> VM:/tmp; sudo tar -xz -C $DATA_ROOT; chown 1001"
+        else
+            git -C "$LOCAL_PATH" archive --format=tar --prefix="$DEST_NAME/" HEAD | gzip > "$TARBALL" \
+                || die "git archive failed"
+            log "scp -> $VM_NAME:/tmp/$DEST_NAME.tar.gz"
+            gcloud compute scp "$TARBALL" "$VM_NAME:/tmp/$DEST_NAME.tar.gz" \
+                --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap
+            log "extracting on VM -> $DATA_ROOT/$DEST_NAME (owner 1001)"
+            gcloud compute ssh "$VM_NAME" \
+                --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
+                --command "sudo mkdir -p $DATA_ROOT && sudo rm -rf $DATA_ROOT/$DEST_NAME && sudo tar -xzf /tmp/$DEST_NAME.tar.gz -C $DATA_ROOT && sudo chown -R 1001:1001 $DATA_ROOT/$DEST_NAME && rm -f /tmp/$DEST_NAME.tar.gz && echo INSTALLED $DATA_ROOT/$DEST_NAME && ls -ld $DATA_ROOT/$DEST_NAME"
+            rm -f "$TARBALL"
+        fi
         ;;
 
     -h|--help|help)
