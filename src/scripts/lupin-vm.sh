@@ -82,6 +82,12 @@ Sibling repos (the VM has no git creds — archive+SCP a LOCAL checkout):
                          copy a local git repo (tracked files @ HEAD) to /mnt/lupin-data/<dest-name>,
                          a sibling of lupin. e.g. push-repo ../planning-is-prompting
 
+Update lupin ON the VM (refresh its bundle 'remote' from THIS dev checkout):
+  push-bundle [branch] [--checkout]
+                         rebuild /mnt/lupin-data/lupin-wip.bundle from this repo's <branch>
+                         (default: current branch) + git fetch on the VM. Add --checkout to also
+                         point the VM working tree at the branch (else refs update, tree unchanged).
+
 Env: LUPIN_GCP_PROJECT_ID (required), LUPIN_VM_NAME, LUPIN_VM_ZONE
 
 Self-contained: no repo dependencies — copy this one file to any machine with gcloud + IAP access.
@@ -245,6 +251,55 @@ case "$SUBCMD" in
                 --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
                 --command "sudo mkdir -p $DATA_ROOT && sudo rm -rf $DATA_ROOT/$DEST_NAME && sudo tar -xzf /tmp/$DEST_NAME.tar.gz -C $DATA_ROOT && sudo chown -R 1001:1001 $DATA_ROOT/$DEST_NAME && rm -f /tmp/$DEST_NAME.tar.gz && echo INSTALLED $DATA_ROOT/$DEST_NAME && ls -ld $DATA_ROOT/$DEST_NAME"
             rm -f "$TARBALL"
+        fi
+        ;;
+
+    push-bundle)
+        # Refresh the VM's git "remote" (a local bundle file) from THIS dev checkout, so a plain
+        # `git fetch`/`pull` on the VM sees current commits. The VM has no GitHub creds, so its origin
+        # is /mnt/lupin-data/lupin-wip.bundle — a portable, offline stand-in for a remote. We rebuild
+        # that file here (where GitHub + the current code live) and ship it over.
+        #
+        #   push-bundle [branch] [--checkout]
+        #     branch     defaults to this repo's current branch
+        #     --checkout ALSO points the VM working tree at the branch (git checkout -B). WITHOUT it,
+        #                the fetch only updates refs — the VM's working tree/branch is UNCHANGED
+        #                (answering "does the branch get checked out?": no, not unless you ask).
+        require_project
+        DO_CHECKOUT=0
+        BRANCH=""
+        for a in "$@"; do
+            case "$a" in
+                --checkout) DO_CHECKOUT=1 ;;
+                --*)        die "push-bundle: unknown flag $a" ;;
+                *)          [ -z "$BRANCH" ] && BRANCH="$a" ;;
+            esac
+        done
+        REPO_ROOT="$( git -C "$( dirname "${BASH_SOURCE[0]}" )" rev-parse --show-toplevel 2>/dev/null )" \
+            || die "push-bundle must run from inside the lupin git checkout"
+        [ -n "$BRANCH" ] || BRANCH="$( git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD )"
+        VM_BUNDLE="/mnt/lupin-data/lupin-wip.bundle"
+        SAFE="-c safe.directory=$VM_ROOT"        # root's gitconfig lacks the 1001-owned-repo exception
+        log "bundling branch '$BRANCH' from $REPO_ROOT"
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "(dry-run) git bundle create <tmp> $BRANCH; scp -> VM:/tmp; cp -> $VM_BUNDLE; sudo git fetch origin $BRANCH; chown 1001 .git$( [ "$DO_CHECKOUT" -eq 1 ] && echo "; sudo git checkout -B $BRANCH FETCH_HEAD; chown 1001 tree" )"
+        else
+            BUNDLE_TMP="$( mktemp -t lupin-bundle-XXXXXX.bundle )"
+            git -C "$REPO_ROOT" bundle create "$BUNDLE_TMP" "$BRANCH" || die "git bundle failed"
+            log "scp bundle -> $VM_NAME:/tmp/lupin-wip.bundle"
+            gcloud compute scp "$BUNDLE_TMP" "$VM_NAME:/tmp/lupin-wip.bundle" \
+                --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap
+            rm -f "$BUNDLE_TMP"
+            # Overwrite the bundle in place (admin owns the file), fetch as root with an inline
+            # safe.directory, restore .git ownership to 1001. Optional working-tree checkout.
+            RCMD="cp /tmp/lupin-wip.bundle $VM_BUNDLE && rm -f /tmp/lupin-wip.bundle && cd $VM_ROOT && sudo git $SAFE fetch origin $BRANCH && sudo chown -R 1001:1001 .git && echo FETCHED && git $SAFE log --oneline -1 FETCH_HEAD"
+            if [ "$DO_CHECKOUT" -eq 1 ]; then
+                RCMD="$RCMD && sudo git $SAFE checkout -B $BRANCH FETCH_HEAD && sudo chown -R 1001:1001 . && echo CHECKED_OUT && git $SAFE rev-parse --abbrev-ref HEAD"
+            fi
+            log "refreshing bundle + fetch on VM$( [ "$DO_CHECKOUT" -eq 1 ] && echo ' (+checkout)' )"
+            gcloud compute ssh "$VM_NAME" \
+                --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
+                --command "$RCMD"
         fi
         ;;
 
