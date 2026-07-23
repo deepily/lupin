@@ -2,6 +2,17 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-06-23 to 07-08](history/2026-06-23-to-07-08-history.md). History health: ✅ **HEALTHY at ~7.9k tokens (31% of 25k)** — archived 2026-07-21 by Mr. Radio 🦉 (session 56a74d7b), ~9.6k tokens moved to archive on Rick's ruling at the 17.5k WARNING threshold.
 
+### 2026.07.22 - Session 2c24d27b (Mr. Radio 🦉) | GCP test-VM made operator-usable: browser tunnel + arbiter live + repo-sync tooling
+
+**Accomplishments** (solo VM-ops session; all committed + pushed on `wip-v0.1.9`, `59418a7a`→`b4405dc5`):
+1. **`src/scripts/lupin-vm.sh`** — one self-contained wrapper (copies to non-dev laptops): `vm-start/stop/status`, `shell`/`run`, `svc up|down|restart|status|logs`, `firewall status|open`, `tunnel`, `push-repo`, `push-bundle`.
+2. **Browser tunnel proven end-to-end** — cleared a 6-error chain live: wrong compose (`cloud-test`→`cloud-gpu`, nvidia), stale cloudsql socket, compose service-vs-container name, IAP firewall gap (`4003`), macOS `::1` bad-fd (IPv4 pin), remote-DB user-not-seeded.
+3. **Arbiter LIVE on `:8001`** — active, container-reachable via `host.docker.internal`, survives a REST bounce; fixed two provisioner bugs (unquoted systemd `Environment=` → `KeyError` crash-loop; missing `pyyaml`) + stale cloud-test watch-list.
+4. **VM repo sync** — `planning-is-prompting` installed at `/mnt/lupin-data/planning-is-prompting`; `push-bundle` refreshes the VM's git bundle "remote" from the dev checkout (VM has no GitHub creds). Fetch-only by default; `--checkout` opt-in.
+5. **Docs**: SSH/tunnel runbook (cold-start + 6-gotcha table), arbiter bring-up plan, VM git-sync strategy decision doc.
+
+**Files**: `src/scripts/lupin-vm.sh`, `src/scripts/provision-arbiter-on-vm.sh`, `src/scripts/requirements-arbiter.txt`, `src/conf/lupin-app.ini`, `src/rnd/2026.07.22-{lupin-host-test-ssh-tunnel-automation,arbiter-bringup-on-lupin-host-test,vm-git-sync-strategy-decision}.md`, `src/rnd/README.md`.
+
 ### 2026.07.21 - Session 56a74d7b (Mr. Radio 🦉) | Fleet halved then wound to ZERO on Rick's order (9→0, every seat mementoed) · arbiter MANAGER-STALE peer-fanout FIXED + LIVE (`fe690d24`) · a coverage gate that CANNOT SEE a data-literal change · 6 of my own defects caught by peers
 
 **Accomplishments** (crew: María 🌸 plan-review · arnold 🪨 `39f5c9a8` implementer · extra 2 🪨 `a92441d4` reviewer — all reaped with session-qualified mementos):
