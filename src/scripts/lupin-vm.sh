@@ -390,13 +390,16 @@ export XDG_RUNTIME_DIR=/run/user/\$(id -u)
 systemctl --user restart $ARBITER_SERVICE || echo 'WARN: arbiter systemctl --user restart failed — may need an interactive login or loginctl enable-linger; check the :$ARBITER_PORT probe below'
 echo '== [3/3] verify =='
 echo -n 'HEAD: '; git -c safe.directory=$VM_ROOT rev-parse --short HEAD
+# Health window: :7999 lupin-rest is a SLOW boot (config + postgres + snapshot manager +
+# commons ~50-60s), so probe up to ~2min before calling it DOWN — a 30s window false-flagged a
+# healthy deploy. :8001 arbiter answers on the first try. 18 tries x 8s = 144s ceiling.
 for p in $APP_PORT $ARBITER_PORT; do
   st=DOWN
-  for i in 1 2 3 4 5 6; do
+  for i in \$(seq 1 18); do
     st=\$(python3 -c \"import urllib.request,sys; sys.stdout.write(str(urllib.request.urlopen('http://127.0.0.1:'+'\$p'+'/health', timeout=5).status))\" 2>/dev/null) && break
-    sleep 5
+    sleep 8
   done
-  echo \":\$p health -> \$st\"
+  echo \":\$p health -> \$st (after ~\$((i*8))s)\"
 done"
         if [ "$DRY_RUN" -eq 1 ]; then
             log "(dry-run) restart+verify on VM:"
