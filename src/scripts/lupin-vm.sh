@@ -73,6 +73,10 @@ Tunnel:
   tunnel [PORT]          bind localhost:PORT -> VM :$APP_PORT (default PORT=$APP_PORT)
                          leave running; browse http://localhost:PORT ; Ctrl-C to end
 
+Firewall (one-time — the tunnel needs IAP allowed to :$APP_PORT):
+  firewall status        list all VPC firewall rules (scan sourceRanges for 35.235.240.0/20)
+  firewall open [PORT]   allow IAP range -> tcp:PORT (default $APP_PORT); network auto-derived
+
 Env: LUPIN_GCP_PROJECT_ID (required), LUPIN_VM_NAME, LUPIN_VM_ZONE
 
 Self-contained: no repo dependencies — copy this one file to any machine with gcloud + IAP access.
@@ -173,6 +177,38 @@ case "$SUBCMD" in
         runit gcloud compute start-iap-tunnel "$VM_NAME" "$APP_PORT" \
             --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" \
             --local-host-port="localhost:$local_port"
+        ;;
+
+    firewall)
+        # IAP TCP forwarding to :7999 needs a VPC rule allowing the IAP range 35.235.240.0/20
+        # -> tcp:PORT. SSH works because tcp:22 already has one. The network is auto-derived from
+        # the VM (no manual --network paste); the rule is untagged so it applies to every instance
+        # in that network — safe, since the source range is only Google's IAP forwarders.
+        action="${1:-status}"
+        require_project
+        # read-only lookup of the VM's network (basename of the network URL); fine to run in dry-run
+        NETWORK="$( gcloud compute instances describe "$VM_NAME" \
+            --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" \
+            --format='value(networkInterfaces[0].network)' 2>/dev/null )"
+        NETWORK="${NETWORK##*/}"
+        case "$action" in
+            status)
+                # NOTE: no server-side sourceRanges filter — a CIDR like 35.235.240.0/20 is an
+                # invalid list-filter expression. List all rules; scan the sourceRanges column by eye.
+                runit gcloud compute firewall-rules list --project="$LUPIN_GCP_PROJECT_ID" \
+                    --format="table(name,network,direction,sourceRanges.list(),allowed[].map().firewall_rule().list(),targetTags.list())"
+                ;;
+            open)
+                port="${2:-$APP_PORT}"
+                [ -n "$NETWORK" ] || die "could not derive the VM network (is $VM_NAME running / correct project?)"
+                log "opening IAP -> tcp:$port on network '$NETWORK'"
+                runit gcloud compute firewall-rules create "lupin-iap-$port" \
+                    --project="$LUPIN_GCP_PROJECT_ID" --network="$NETWORK" \
+                    --direction=INGRESS --action=ALLOW --rules="tcp:$port" \
+                    --source-ranges=35.235.240.0/20
+                ;;
+            *) die "firewall needs: status | open [PORT]" ;;
+        esac
         ;;
 
     -h|--help|help)
