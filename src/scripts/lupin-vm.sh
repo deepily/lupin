@@ -104,6 +104,14 @@ Full deploy (bundle -> checkout -> restart BOTH servers -> verify) — RUN FROM 
                          COMMITTED work only — the bundle ships the branch's last commit, NOT your
                          working tree. Commit first, or uncommitted/staged/untracked files stay behind.
 
+Dev-box CLI parity (make the VM host feel like your dev box) — RUN FROM THE DEV BOX:
+  install-cli             install Claude Code + the Claude Agent SDK on the VM HOST cli (mirrors
+                          the Dockerfile: claude-agent-sdk venv + symlinked 'claude'). One-time
+                          OAuth login is a manual 'claude' run you do afterward. Idempotent.
+  push-env                sync your shell env: SCP ~/.bash_aliases + ~/.bash_aliases_to_uc.py to
+                          the VM, regenerate ~/.bash_aliases_uc there, wire ~/.bashrc to source
+                          both. Re-run whenever you change local aliases. Idempotent.
+
 Env: LUPIN_GCP_PROJECT_ID (required), LUPIN_VM_NAME, LUPIN_VM_ZONE
 
 Self-contained: no repo dependencies — copy this one file to any machine with gcloud + IAP access.
@@ -409,6 +417,69 @@ done"
             gcloud compute ssh "$VM_NAME" \
                 --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
                 --command "$RESTART_CMD"
+        fi
+        ;;
+
+    install-cli)
+        # Install Claude Code + the Claude Agent SDK on the VM's HOST command line (NOT inside the
+        # app container — the image has them, but that's unreachable for interactive host use).
+        # Mirrors docker/lupin/Dockerfile:337-341: pip-install claude-agent-sdk into a dedicated
+        # venv, then symlink ITS bundled `claude` binary onto PATH. One install yields BOTH the
+        # Agent SDK (the venv) and the interactive `claude` CLI (the symlink). Idempotent.
+        # OAuth is a one-time INTERACTIVE step you run yourself afterward: `claude`.
+        require_project
+        RCMD_INSTALL="set -e
+mkdir -p ~/.local/bin ~/.venvs
+echo '== Claude Agent SDK -> venv ~/.venvs/claude-agent-sdk =='
+python3 -m venv ~/.venvs/claude-agent-sdk
+~/.venvs/claude-agent-sdk/bin/pip install -q -U pip claude-agent-sdk
+echo '== symlink bundled claude -> ~/.local/bin/claude =='
+CLAUDE_BIN=\$(~/.venvs/claude-agent-sdk/bin/python -c 'import claude_agent_sdk as m, pathlib as p; print(p.Path(m.__file__).parent / \"_bundled\" / \"claude\")')
+ln -sf \"\$CLAUDE_BIN\" ~/.local/bin/claude
+echo '== ensure ~/.local/bin on PATH (append to ~/.bashrc if missing) =='
+grep -qxF 'export PATH=\"\$HOME/.local/bin:\$PATH\"' ~/.bashrc || echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc
+echo '== versions =='
+~/.local/bin/claude --version || echo '(claude installed; run it once interactively to OAuth login)'
+~/.venvs/claude-agent-sdk/bin/python -c 'import claude_agent_sdk as m; print(\"claude-agent-sdk\", getattr(m, \"__version__\", \"?\"))'
+echo 'NEXT (manual, interactive): open a fresh shell, run  claude  once, complete the OAuth login.'"
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "(dry-run) install Claude Code + Agent SDK on VM:"
+            printf '%s\n' "$RCMD_INSTALL" >&2
+        else
+            log "installing Claude Code + Agent SDK on $VM_NAME host"
+            gcloud compute ssh "$VM_NAME" \
+                --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
+                --command "$RCMD_INSTALL"
+        fi
+        ;;
+
+    push-env)
+        # Sync your dev-box shell environment to the VM host so both feel identical. SCPs your alias
+        # file + the uppercase generator, REGENERATES the uppercase aliases ON the VM (from the just-
+        # shipped .bash_aliases), and ensures the VM ~/.bashrc sources both. Re-run whenever you
+        # change local aliases. Idempotent (whole-line grep guards, no duplicate source lines).
+        require_project
+        ALIASES="$HOME/.bash_aliases"
+        UC_GEN="$HOME/.bash_aliases_to_uc.py"
+        [ -f "$ALIASES" ] || die "no $ALIASES on the dev box"
+        [ -f "$UC_GEN" ]  || die "no $UC_GEN on the dev box (the uppercase-alias generator)"
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "(dry-run) scp $ALIASES + $UC_GEN -> $VM_NAME:~/ ; then on VM: python3 ~/.bash_aliases_to_uc.py; ensure ~/.bashrc sources .bash_aliases + .bash_aliases_uc"
+        else
+            log "scp alias files -> $VM_NAME:~/"
+            gcloud compute scp "$ALIASES" "$UC_GEN" "$VM_NAME:~/" \
+                --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap
+            RCMD_ENV="set -e
+echo '== regenerate ~/.bash_aliases_uc on the VM (from the shipped .bash_aliases) =='
+python3 ~/.bash_aliases_to_uc.py
+echo '== ensure ~/.bashrc sources both alias files (whole-line, idempotent) =='
+grep -qxF 'source ~/.bash_aliases'    ~/.bashrc || echo 'source ~/.bash_aliases'    >> ~/.bashrc
+grep -qxF 'source ~/.bash_aliases_uc' ~/.bashrc || echo 'source ~/.bash_aliases_uc' >> ~/.bashrc
+echo '== done — open a fresh shell (or: source ~/.bashrc) to pick up the aliases =='"
+            log "regenerating uc aliases + wiring ~/.bashrc on VM"
+            gcloud compute ssh "$VM_NAME" \
+                --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
+                --command "$RCMD_ENV"
         fi
         ;;
 
