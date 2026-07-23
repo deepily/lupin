@@ -173,10 +173,13 @@ case "$SUBCMD" in
     tunnel)
         local_port="${1:-$APP_PORT}"
         require_project
-        log "tunnel: localhost:$local_port -> $VM_NAME:$APP_PORT  (Ctrl-C to end)"
+        # Bind IPv4 127.0.0.1, NOT localhost. On macOS `localhost` resolves to IPv6 ::1 first, and
+        # the IAP tunnel mishandles the ::1 local socket -> "OSError: [Errno 9] Bad file descriptor"
+        # on every browser connection. Pinning 127.0.0.1 avoids the IPv6 path. Browse http://127.0.0.1:PORT.
+        log "tunnel: 127.0.0.1:$local_port -> $VM_NAME:$APP_PORT  (browse http://127.0.0.1:$local_port ; Ctrl-C to end)"
         runit gcloud compute start-iap-tunnel "$VM_NAME" "$APP_PORT" \
             --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" \
-            --local-host-port="localhost:$local_port"
+            --local-host-port="127.0.0.1:$local_port"
         ;;
 
     firewall)
