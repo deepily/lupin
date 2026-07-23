@@ -28,9 +28,13 @@ set -euo pipefail
 VM_NAME="${LUPIN_VM_NAME:-lupin-host-test}"
 VM_ZONE="${LUPIN_VM_ZONE:-us-central1-a}"
 VM_ROOT="/mnt/lupin-data/lupin"                 # UID-1001-owned on-VM checkout (deploy-cloud-test.sh:31)
-COMPOSE_FILE="docker-compose.cloud-test.yml"    # deploy-cloud-test.sh:33
-ENV_FILE="cloud-test.env"                        # deploy-cloud-test.sh:34
-REST_CONTAINER="lupin-rest-cloud-test"          # deploy-cloud-test.sh:32
+# The CPU VM (post GPU→CPU downgrade) runs the cloud-GPU topology: model-server on Cloud Run,
+# NO local nvidia container. Using cloud-test.yml here recreates a local GPU model-server that
+# cannot start on the CPU VM ("could not select device driver nvidia"). Source of truth:
+# docker-compose.cloud-gpu.yml + src/rnd/2026.07.08-cpu-vm-app-restore-runbook.md §3.
+COMPOSE_FILE="docker-compose.cloud-gpu.yml"     # CPU VM: Cloud Run model-server, no nvidia
+ENV_FILE="cloud-gpu.env"                         # requires LUPIN_MODEL_SERVER_URL (on the VM, git-ignored)
+REST_CONTAINER="lupin-rest-cloud-gpu"           # the REST container this topology runs
 APP_PORT=7999                                    # in-VM app port
 
 DRY_RUN=0
