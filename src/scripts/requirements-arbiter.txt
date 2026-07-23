@@ -44,3 +44,9 @@ typing-extensions==4.15.0
 # --- cosa.config / configuration_manager support ---
 pytz==2026.1.post1
 regex==2026.4.4
+
+# --- unified task-store (commons_store) support ---
+# The arbiter gateway's from_environment() imports lupin_mcp/commons_store, which
+# reads/writes YAML. Added 2026-07-22 after a live ModuleNotFoundError('yaml') on
+# lupin-host-test — the import graph grew this dep after the 2026-06-10 freeze.
+pyyaml==6.0.3
