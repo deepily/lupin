@@ -161,9 +161,17 @@ remote_compose() {
 # construction — nothing in-motion ever ships. ⇒ commit before you deploy, or the VM gets the
 # branch's LAST COMMIT, not your live editor state.
 #   $1 branch        (empty ⇒ this repo's current branch)
-#   $2 "checkout"    (anything else ⇒ fetch-only: refs update, working tree unchanged)
+#   $2 mode:
+#        ""          fetch-only — refs update, working tree UNCHANGED (push-bundle default)
+#        "checkout"  git checkout -B — moves the tree, but ABORTS on any local drift (safe;
+#                    push-bundle --checkout). Nothing is discarded.
+#        "reset"     git reset --hard FETCH_HEAD then checkout -B — DRIFT-PROOF: forces the
+#                    tracked tree to the branch tip, discarding local edits to tracked files and
+#                    overwriting colliding untracked files. Does NOT `git clean`, so untracked
+#                    non-colliding files (data store, cloud-gpu.env, keys) are PRESERVED. This is
+#                    the deploy semantic — a deploy target must mirror the branch. (deploy)
 do_push_bundle() {
-    local branch="$1" do_checkout="$2"
+    local branch="$1" mode="$2"
     require_project
     local repo_root
     repo_root="$( git -C "$( dirname "${BASH_SOURCE[0]}" )" rev-parse --show-toplevel 2>/dev/null )" \
@@ -172,8 +180,13 @@ do_push_bundle() {
     local vm_bundle="/mnt/lupin-data/lupin-wip.bundle"
     local safe="-c safe.directory=$VM_ROOT"        # root's gitconfig lacks the 1001-owned-repo exception
     log "bundling branch '$branch' from $repo_root"
+    local move_desc=""
+    case "$mode" in
+        checkout) move_desc="; sudo git checkout -B $branch FETCH_HEAD; chown 1001 tree" ;;
+        reset)    move_desc="; sudo git reset --hard FETCH_HEAD; sudo git checkout -B $branch FETCH_HEAD; chown 1001 tree" ;;
+    esac
     if [ "$DRY_RUN" -eq 1 ]; then
-        log "(dry-run) git bundle create <tmp> $branch; scp -> VM:/tmp; cp -> $vm_bundle; sudo git fetch origin $branch; chown 1001 .git$( [ "$do_checkout" = checkout ] && echo "; sudo git checkout -B $branch FETCH_HEAD; chown 1001 tree" )"
+        log "(dry-run) git bundle create <tmp> $branch; scp -> VM:/tmp; cp -> $vm_bundle; sudo git fetch origin $branch; chown 1001 .git$move_desc"
         return 0
     fi
     local bundle_tmp
@@ -186,10 +199,17 @@ do_push_bundle() {
     # Overwrite the bundle in place (admin owns the file), fetch as root with an inline
     # safe.directory, restore .git ownership to 1001. Optional working-tree checkout.
     local rcmd="cp /tmp/lupin-wip.bundle $vm_bundle && rm -f /tmp/lupin-wip.bundle && cd $VM_ROOT && sudo git $safe fetch origin $branch && sudo chown -R 1001:1001 .git && echo FETCHED && git $safe log --oneline -1 FETCH_HEAD"
-    if [ "$do_checkout" = checkout ]; then
-        rcmd="$rcmd && sudo git $safe checkout -B $branch FETCH_HEAD && sudo chown -R 1001:1001 . && echo CHECKED_OUT && git $safe rev-parse --abbrev-ref HEAD"
-    fi
-    log "refreshing bundle + fetch on VM$( [ "$do_checkout" = checkout ] && echo ' (+checkout)' )"
+    case "$mode" in
+        checkout)
+            rcmd="$rcmd && sudo git $safe checkout -B $branch FETCH_HEAD && sudo chown -R 1001:1001 . && echo CHECKED_OUT && git $safe rev-parse --abbrev-ref HEAD" ;;
+        reset)
+            # DRIFT-PROOF: reset --hard forces the tracked tree to FETCH_HEAD (discards local
+            # tracked edits, overwrites colliding untracked), then checkout -B relabels HEAD onto
+            # the branch (now clean, so it can't abort). No `git clean` — untracked non-colliding
+            # files (data/env/keys) survive.
+            rcmd="$rcmd && sudo git $safe reset --hard FETCH_HEAD && sudo git $safe checkout -B $branch FETCH_HEAD && sudo chown -R 1001:1001 . && echo RESET_CHECKED_OUT && git $safe rev-parse --abbrev-ref HEAD" ;;
+    esac
+    log "refreshing bundle + fetch on VM$( [ -n "$mode" ] && echo " (+$mode)" )"
     gcloud compute ssh "$VM_NAME" \
         --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
         --command "$rcmd"
@@ -354,8 +374,10 @@ case "$SUBCMD" in
         #   deploy [branch]        branch defaults to this repo's current branch
         require_project
         DEPLOY_BRANCH="${1:-}"
-        # 1. sync code + move the working tree
-        do_push_bundle "$DEPLOY_BRANCH" "checkout"
+        # 1. sync code + FORCE the working tree to the branch (reset --hard; drift-proof, since a
+        #    deploy target must mirror the branch and may have drifted). Preserves untracked
+        #    data/env/keys — no git clean.
+        do_push_bundle "$DEPLOY_BRANCH" "reset"
         # 2-4. restart both servers, then verify. `systemctl --user` needs XDG_RUNTIME_DIR wired
         #      up for the non-interactive SSH session; the arbiter bounce is best-effort (a failure
         #      is warned, not fatal) and the :8001 /health probe is the real proof it came back.
