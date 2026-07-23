@@ -105,9 +105,10 @@ Full deploy (bundle -> checkout -> restart BOTH servers -> verify) — RUN FROM 
                          working tree. Commit first, or uncommitted/staged/untracked files stay behind.
 
 Dev-box CLI parity (make the VM host feel like your dev box) — RUN FROM THE DEV BOX:
-  install-cli             install Claude Code + the Claude Agent SDK on the VM HOST cli (mirrors
-                          the Dockerfile: claude-agent-sdk venv + symlinked 'claude'). One-time
-                          OAuth login is a manual 'claude' run you do afterward. Idempotent.
+  install-cli             install Claude Code + the Claude Agent SDK on the VM HOST cli. Uses uv to
+                          install Python 3.13 (matches the dev box + image), builds the SDK venv on
+                          it, symlinks the bundled 'claude'. One-time OAuth is a manual 'claude' run
+                          you do afterward. Idempotent.
   push-env                sync your shell env: SCP ~/.bash_aliases + ~/.bash_aliases_to_uc.py to
                           the VM, regenerate ~/.bash_aliases_uc there, wire ~/.bashrc to source
                           both. Re-run whenever you change local aliases. Idempotent.
@@ -423,31 +424,32 @@ done"
     install-cli)
         # Install Claude Code + the Claude Agent SDK on the VM's HOST command line (NOT inside the
         # app container — the image has them, but that's unreachable for interactive host use).
-        # Mirrors docker/lupin/Dockerfile:337-341: pip-install claude-agent-sdk into a dedicated
-        # venv, then symlink ITS bundled `claude` binary onto PATH. One install yields BOTH the
-        # Agent SDK (the venv) and the interactive `claude` CLI (the symlink). Idempotent.
-        # OAuth is a one-time INTERACTIVE step you run yourself afterward: `claude`.
+        # Uses uv (astral) to install Python 3.13 — the SAME python-build-standalone lineage the
+        # Docker image bakes (docker/lupin/Dockerfile:281) — so the VM host is COMMENSURATE with the
+        # dev box + image (both 3.13), not the VM's system 3.10. uv also sidesteps the base image's
+        # missing python3-venv/ensurepip. The SDK venv lands on 3.13; its bundled `claude` binary is
+        # symlinked onto PATH (mirrors Dockerfile:337-341). One install → Agent SDK + interactive
+        # `claude`. Idempotent. OAuth is a one-time INTERACTIVE step you run yourself: `claude`.
         require_project
         RCMD_INSTALL="set -e
 mkdir -p ~/.local/bin ~/.venvs
-echo '== python3 version =='
-python3 --version
-echo '== ensure venv + pip prerequisites (apt) =='
-# The base VM image ships python3 (>=3.10, which claude-agent-sdk requires) but NOT the
-# python3-venv stdlib package, so \`python3 -m venv\` fails with 'ensurepip is not available'.
-# Install the venv + pip packages for the running python3 (the unversioned meta-packages pull the
-# correct python3.X-venv). No NEW python needed — 3.10 is a fine default for the SDK.
-sudo apt-get update -qq
-sudo apt-get install -y python3-venv python3-pip
-echo '== Claude Agent SDK -> venv ~/.venvs/claude-agent-sdk =='
-python3 -m venv --clear ~/.venvs/claude-agent-sdk
-~/.venvs/claude-agent-sdk/bin/pip install -q -U pip claude-agent-sdk
+echo '== install uv (astral) =='
+curl -LsSf https://astral.sh/uv/install.sh | sh
+export PATH=\"\$HOME/.local/bin:\$PATH\"
+echo -n 'uv '; uv --version
+echo '== install Python 3.13 via uv (python-build-standalone — matches the image) =='
+uv python install 3.13
+echo '== create the Claude Agent SDK venv on 3.13 =='
+uv venv --python 3.13 ~/.venvs/claude-agent-sdk
+echo '== install claude-agent-sdk into the venv =='
+uv pip install --python ~/.venvs/claude-agent-sdk/bin/python -q claude-agent-sdk
 echo '== symlink bundled claude -> ~/.local/bin/claude =='
 CLAUDE_BIN=\$(~/.venvs/claude-agent-sdk/bin/python -c 'import claude_agent_sdk as m, pathlib as p; print(p.Path(m.__file__).parent / \"_bundled\" / \"claude\")')
 ln -sf \"\$CLAUDE_BIN\" ~/.local/bin/claude
 echo '== ensure ~/.local/bin on PATH (append to ~/.bashrc if missing) =='
 grep -qxF 'export PATH=\"\$HOME/.local/bin:\$PATH\"' ~/.bashrc || echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc
 echo '== versions =='
+echo -n 'python '; ~/.venvs/claude-agent-sdk/bin/python --version
 ~/.local/bin/claude --version || echo '(claude installed; run it once interactively to OAuth login)'
 ~/.venvs/claude-agent-sdk/bin/python -c 'import claude_agent_sdk as m; print(\"claude-agent-sdk\", getattr(m, \"__version__\", \"?\"))'
 echo 'NEXT (manual, interactive): open a fresh shell, run  claude  once, complete the OAuth login.'"
