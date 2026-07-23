@@ -1,0 +1,176 @@
+#!/usr/bin/env bash
+#
+# lupin-vm.sh — SSH / service-control / tunnel wrapper for the cloud-test VM (lupin-host-test).
+#
+# One wrapper over `gcloud` for the four things Rick does with the remote VM:
+#   1. instance lifecycle   (vm-status / vm-start / vm-stop)   — the VM is suspended-by-default
+#   2. interactive SSH       (shell / run)                      — over IAP (no public IP)
+#   3. app service control   (svc up|down|restart|status|logs)  — docker compose on the VM
+#   4. local tunnel          (tunnel [PORT])                    — bind localhost:PORT -> VM :7999
+#
+# Access is IAP-only (no public IP), identical to deploy-cloud-test.sh. Rick's account already
+# holds the IAP grant that script relies on, so no new firewall/IAP setup is needed.
+#
+# Runbook: src/rnd/2026.07.22-lupin-host-test-ssh-tunnel-automation.md
+#
+# Usage:
+#   src/scripts/lupin-vm.sh <subcommand> [args]
+#   src/scripts/lupin-vm.sh --dry-run <subcommand> [args]   # echo the gcloud line, run nothing
+#
+# Env:
+#   LUPIN_GCP_PROJECT_ID   REQUIRED — GCP project id (no default; abort if unset). e.g. hello-world-foo-423219
+#   LUPIN_VM_NAME          optional — instance name (default: lupin-host-test)
+#   LUPIN_VM_ZONE          optional — zone          (default: us-central1-a)
+
+set -euo pipefail
+
+# ---- config (overridable via env) ----------------------------------------
+VM_NAME="${LUPIN_VM_NAME:-lupin-host-test}"
+VM_ZONE="${LUPIN_VM_ZONE:-us-central1-a}"
+VM_ROOT="/mnt/lupin-data/lupin"                 # UID-1001-owned on-VM checkout (deploy-cloud-test.sh:31)
+COMPOSE_FILE="docker-compose.cloud-test.yml"    # deploy-cloud-test.sh:33
+ENV_FILE="cloud-test.env"                        # deploy-cloud-test.sh:34
+REST_CONTAINER="lupin-rest-cloud-test"          # deploy-cloud-test.sh:32
+APP_PORT=7999                                    # in-VM app port
+
+DRY_RUN=0
+
+log()  { echo "[lupin-vm] $*"; }
+die()  { echo "[lupin-vm] FATAL: $*" >&2; exit 1; }
+
+usage() {
+    cat >&2 <<EOF
+lupin-vm.sh — SSH / service / tunnel wrapper for $VM_NAME ($VM_ZONE)
+
+Usage: lupin-vm.sh [--dry-run] <subcommand> [args]
+
+Instance lifecycle:
+  vm-status              show RUNNING / STOPPED / SUSPENDED
+  vm-start               start the instance (needed before SSH; VM is suspended-by-default)
+  vm-stop                stop the instance (cost control)
+
+SSH:
+  shell                  interactive SSH session (over IAP)
+  run "<cmd>"            run one command remotely
+
+App services (docker compose in $VM_ROOT):
+  svc status             docker compose ps
+  svc up                 up -d
+  svc down               down
+  svc restart            up -d --force-recreate $REST_CONTAINER
+  svc logs               logs -f --tail=200 $REST_CONTAINER
+
+Tunnel:
+  tunnel [PORT]          bind localhost:PORT -> VM :$APP_PORT (default PORT=$APP_PORT)
+                         leave running; browse http://localhost:PORT ; Ctrl-C to end
+
+Env: LUPIN_GCP_PROJECT_ID (required), LUPIN_VM_NAME, LUPIN_VM_ZONE
+
+Self-contained: no repo dependencies — copy this one file to any machine with gcloud + IAP access.
+EOF
+}
+
+# ---- flags ---------------------------------------------------------------
+if [ "${1:-}" = "--dry-run" ]; then
+    DRY_RUN=1
+    shift
+fi
+
+SUBCMD="${1:-}"
+[ -n "$SUBCMD" ] || { usage; exit 2; }
+shift || true
+
+# ---- project id (fail loud — a silent default can act on the wrong project) ----
+# Mirrors deploy-cloud-test.sh:115. VM lifecycle + IAP both take an explicit --project so nothing
+# rides on the ambient `gcloud config` project, which may point elsewhere.
+require_project() {
+    : "${LUPIN_GCP_PROJECT_ID:?Set LUPIN_GCP_PROJECT_ID (e.g. export LUPIN_GCP_PROJECT_ID=hello-world-foo-423219)}"
+}
+
+# ---- run-or-echo ---------------------------------------------------------
+# Prints the exact command, then either runs it (normal) or stops (--dry-run).
+runit() {
+    log "+ $*"
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log "(dry-run) not executed"
+        return 0
+    fi
+    "$@"
+}
+
+# ---- remote compose helper ----------------------------------------------
+# Builds the `cd $VM_ROOT && sudo docker compose ...` command run over IAP SSH.
+remote_compose() {
+    local compose_args="$*"
+    require_project
+    runit gcloud compute ssh "$VM_NAME" \
+        --zone="$VM_ZONE" \
+        --project="$LUPIN_GCP_PROJECT_ID" \
+        --tunnel-through-iap \
+        --command "cd $VM_ROOT && sudo docker compose -f $COMPOSE_FILE --env-file $ENV_FILE $compose_args"
+}
+
+# ---- dispatch ------------------------------------------------------------
+case "$SUBCMD" in
+    vm-status)
+        require_project
+        runit gcloud compute instances describe "$VM_NAME" \
+            --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" \
+            --format='value(status)'
+        ;;
+
+    vm-start)
+        require_project
+        runit gcloud compute instances start "$VM_NAME" \
+            --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID"
+        ;;
+
+    vm-stop)
+        require_project
+        runit gcloud compute instances stop "$VM_NAME" \
+            --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID"
+        ;;
+
+    shell)
+        require_project
+        runit gcloud compute ssh "$VM_NAME" \
+            --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap
+        ;;
+
+    run)
+        [ -n "${1:-}" ] || die "run needs a command:  lupin-vm.sh run \"docker ps\""
+        require_project
+        runit gcloud compute ssh "$VM_NAME" \
+            --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
+            --command "$1"
+        ;;
+
+    svc)
+        action="${1:-}"
+        case "$action" in
+            status)  remote_compose "ps" ;;
+            up)      remote_compose "up -d" ;;
+            down)    remote_compose "down" ;;
+            restart) remote_compose "up -d --force-recreate $REST_CONTAINER" ;;
+            logs)    remote_compose "logs -f --tail=200 $REST_CONTAINER" ;;
+            *)       die "svc needs one of: status | up | down | restart | logs" ;;
+        esac
+        ;;
+
+    tunnel)
+        local_port="${1:-$APP_PORT}"
+        require_project
+        log "tunnel: localhost:$local_port -> $VM_NAME:$APP_PORT  (Ctrl-C to end)"
+        runit gcloud compute start-iap-tunnel "$VM_NAME" "$APP_PORT" \
+            --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" \
+            --local-host-port="localhost:$local_port"
+        ;;
+
+    -h|--help|help)
+        usage
+        ;;
+
+    *)
+        die "unknown subcommand: $SUBCMD  (try: lupin-vm.sh --help)"
+        ;;
+esac
