@@ -440,7 +440,7 @@ echo -n 'uv '; uv --version
 echo '== install Python 3.13 via uv (python-build-standalone — matches the image) =='
 uv python install 3.13
 echo '== create the Claude Agent SDK venv on 3.13 =='
-uv venv --python 3.13 ~/.venvs/claude-agent-sdk
+uv venv --clear --python 3.13 ~/.venvs/claude-agent-sdk
 echo '== install claude-agent-sdk into the venv =='
 uv pip install --python ~/.venvs/claude-agent-sdk/bin/python -q claude-agent-sdk
 echo '== symlink bundled claude -> ~/.local/bin/claude =='
