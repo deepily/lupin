@@ -30,6 +30,7 @@ set -euo pipefail
 VM_NAME="${LUPIN_VM_NAME:-lupin-host-test}"
 VM_ZONE="${LUPIN_VM_ZONE:-us-central1-a}"
 VM_ROOT="/mnt/lupin-data/lupin"                 # UID-1001-owned on-VM checkout (deploy-cloud-test.sh:31)
+VM_PIP_ROOT="/mnt/lupin-data/planning-is-prompting"  # sibling PIP checkout on the VM (push-env exports PLANNING_IS_PROMPTING_ROOT)
 # The CPU VM (post GPU→CPU downgrade) runs the cloud-GPU topology: model-server on Cloud Run,
 # NO local nvidia container. Using cloud-test.yml here recreates a local GPU model-server that
 # cannot start on the CPU VM ("could not select device driver nvidia"). Source of truth:
@@ -111,7 +112,8 @@ Dev-box CLI parity (make the VM host feel like your dev box) — RUN FROM THE DE
                           you do afterward. Idempotent.
   push-env                sync your shell env: SCP ~/.bash_aliases + ~/.bash_aliases_to_uc.py to
                           the VM, regenerate ~/.bash_aliases_uc there, wire ~/.bashrc to source
-                          both. Re-run whenever you change local aliases. Idempotent.
+                          both AND export VM-correct LUPIN_ROOT + PLANNING_IS_PROMPTING_ROOT, and
+                          create ~/.lupin/config (lupin CLI) if absent. Re-run anytime. Idempotent.
 
 Env: LUPIN_GCP_PROJECT_ID (required), LUPIN_VM_NAME, LUPIN_VM_ZONE
 
@@ -486,7 +488,25 @@ python3 ~/.bash_aliases_to_uc.py
 echo '== ensure ~/.bashrc sources both alias files (whole-line, idempotent) =='
 grep -qxF 'source ~/.bash_aliases'    ~/.bashrc || echo 'source ~/.bash_aliases'    >> ~/.bashrc
 grep -qxF 'source ~/.bash_aliases_uc' ~/.bashrc || echo 'source ~/.bash_aliases_uc' >> ~/.bashrc
-echo '== done — open a fresh shell (or: source ~/.bashrc) to pick up the aliases =='"
+echo '== export VM-correct project roots in ~/.bashrc (whole-line, idempotent) =='
+grep -qxF 'export LUPIN_ROOT=$VM_ROOT'                    ~/.bashrc || echo 'export LUPIN_ROOT=$VM_ROOT'                    >> ~/.bashrc
+grep -qxF 'export PLANNING_IS_PROMPTING_ROOT=$VM_PIP_ROOT' ~/.bashrc || echo 'export PLANNING_IS_PROMPTING_ROOT=$VM_PIP_ROOT' >> ~/.bashrc
+echo '== ensure ~/.lupin/config exists (lupin CLI: api_url + notification recipient) =='
+mkdir -p ~/.lupin
+if [ ! -f ~/.lupin/config ]; then
+  cat > ~/.lupin/config <<'LUPINCFG'
+[environments]
+default = local
+
+[local]
+api_url = http://localhost:7999
+global_notification_recipient = ricardo.felipe.ruiz@gmail.com
+LUPINCFG
+  echo '   created ~/.lupin/config'
+else
+  echo '   ~/.lupin/config already present — left as-is'
+fi
+echo '== done — open a fresh shell (or: source ~/.bashrc) to pick up aliases + roots =='"
             log "regenerating uc aliases + wiring ~/.bashrc on VM"
             gcloud compute ssh "$VM_NAME" \
                 --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
