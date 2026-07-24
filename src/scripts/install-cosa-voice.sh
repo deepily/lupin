@@ -101,18 +101,62 @@ else
     pass_check "LUPIN_ROOT = $LUPIN_ROOT"
 fi
 
-# 2. Python venv
-VENV_PYTHON="$LUPIN_ROOT/.venv/bin/python"
+# 2. CC-integration venv (LUPIN_CC_VENV)
+# The MCP server + the 7 python hooks run as the OPERATOR in their Claude Code
+# session — NOT as the app or the arbiter. They need a venv the operator OWNS,
+# holding just the host closure (fastmcp/requests/pydantic). On the dev box that
+# is $LUPIN_ROOT/.venv (operator-owned). On the GCP test VM, $LUPIN_ROOT/.venv is
+# a symlink -> .venv-arbiter (uid-1001, the arbiter's venv) — registering against
+# it mis-points the whole CC integration (missing deps + unwritable). So the venv
+# is resolved from LUPIN_CC_VENV (default $LUPIN_ROOT/.venv, per-machine override),
+# PROVISIONED here (create + install the closure), and guarded against a foreign
+# service venv. See task 81a24c93.
+CC_VENV_REQS="fastmcp==2.14.2 requests pydantic"   # minimal host closure — imports of cosa_voice_mcp.py + the 7 hooks (everything else is stdlib or in-repo via PYTHONPATH)
+LUPIN_CC_VENV="${LUPIN_CC_VENV:-$LUPIN_ROOT/.venv}"
+
+# Preflight: refuse a CC venv that is a symlink into a foreign-uid service venv
+# (catches the arbiter-symlink collision loudly instead of a cryptic permission /
+# ModuleNotFound failure at first hook fire).
+if [ -L "$LUPIN_CC_VENV" ]; then
+    link_target="$( readlink -f "$LUPIN_CC_VENV" )"
+    venv_uid="$( stat -c '%u' "$link_target" 2>/dev/null )"
+    if [ -n "$venv_uid" ] && [ "$venv_uid" != "$( id -u )" ]; then
+        fail_check "LUPIN_CC_VENV ($LUPIN_CC_VENV) is a symlink -> $link_target owned by uid $venv_uid (you are uid $( id -u ))"
+        echo ""
+        echo "    That is another service's venv (e.g. the arbiter's .venv-arbiter) — do NOT register against it."
+        echo "    Point LUPIN_CC_VENV at a venv you own and re-run:"
+        echo "      LUPIN_CC_VENV=\$HOME/.venv-lupin-mcp bash $0"
+        echo ""
+        exit 1
+    fi
+fi
+
+VENV_PYTHON="$LUPIN_CC_VENV/bin/python"
 if [ ! -f "$VENV_PYTHON" ]; then
-    fail_check "Python venv not found: $VENV_PYTHON"
-    echo ""
-    echo "    Create it:"
-    echo "      cd $LUPIN_ROOT/src/cosa && python3 -m venv .venv"
-    echo "      source .venv/bin/activate && pip install -r requirements.txt"
-    echo ""
-    exit 1
+    echo "  Provisioning CC venv at $LUPIN_CC_VENV (Python 3.13)..."
+    if command -v uv &> /dev/null; then
+        uv venv "$LUPIN_CC_VENV" --python 3.13          || { fail_check "uv venv failed for $LUPIN_CC_VENV"; exit 1; }
+        uv pip install --python "$VENV_PYTHON" $CC_VENV_REQS || { fail_check "CC venv dependency install failed"; exit 1; }
+    else
+        python3 -m venv "$LUPIN_CC_VENV"                 || { fail_check "python3 -m venv failed for $LUPIN_CC_VENV"; exit 1; }
+        "$VENV_PYTHON" -m pip install --quiet --upgrade pip
+        "$VENV_PYTHON" -m pip install $CC_VENV_REQS      || { fail_check "CC venv dependency install failed"; exit 1; }
+    fi
+    pass_check "CC venv provisioned: $LUPIN_CC_VENV"
 else
-    pass_check "Python venv found"
+    # Pre-existing venv — ensure the closure is present (idempotent, cheap no-op if satisfied).
+    if command -v uv &> /dev/null; then
+        uv pip install --python "$VENV_PYTHON" $CC_VENV_REQS > /dev/null 2>&1 || true
+    fi
+    pass_check "CC venv found: $LUPIN_CC_VENV"
+fi
+
+# Persist LUPIN_CC_VENV so hook subprocesses + fresh shells resolve the SAME
+# interpreter (the hooks fall back to $LUPIN_ROOT/.venv when it is unset). Only
+# when non-default, to keep the dev-box ~/.bashrc clean.
+if [ "$LUPIN_CC_VENV" != "$LUPIN_ROOT/.venv" ]; then
+    CC_VENV_EXPORT="export LUPIN_CC_VENV=$LUPIN_CC_VENV"
+    grep -qxF "$CC_VENV_EXPORT" "$HOME/.bashrc" 2>/dev/null || echo "$CC_VENV_EXPORT" >> "$HOME/.bashrc"
 fi
 
 # 3. MCP server file

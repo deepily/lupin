@@ -121,7 +121,7 @@ Dev-box CLI parity (make the VM host feel like your dev box) — RUN FROM THE DE
   push-env                sync your shell env: SCP ~/.bash_aliases + ~/.bash_aliases_to_uc.py to
                           the VM, regenerate ~/.bash_aliases_uc there, wire ~/.bashrc to source
                           both AND export VM-correct LUPIN_ROOT + PLANNING_IS_PROMPTING_ROOT +
-                          DEEPILY_PROJECTS_DIR, and
+                          DEEPILY_PROJECTS_DIR + LUPIN_CC_VENV (operator-owned CC venv), and
                           create ~/.lupin/config (lupin CLI) if absent. Re-run anytime. Idempotent.
 
 Env: LUPIN_GCP_PROJECT_ID (required), LUPIN_VM_NAME, LUPIN_VM_ZONE
@@ -512,6 +512,8 @@ echo '== export VM-correct project roots in ~/.bashrc (whole-line, idempotent) =
 grep -qxF 'export LUPIN_ROOT=$VM_ROOT'                    ~/.bashrc || echo 'export LUPIN_ROOT=$VM_ROOT'                    >> ~/.bashrc
 grep -qxF 'export PLANNING_IS_PROMPTING_ROOT=$VM_PIP_ROOT' ~/.bashrc || echo 'export PLANNING_IS_PROMPTING_ROOT=$VM_PIP_ROOT' >> ~/.bashrc
 grep -qxF 'export DEEPILY_PROJECTS_DIR=$VM_DEEPILY_PROJECTS_DIR' ~/.bashrc || echo 'export DEEPILY_PROJECTS_DIR=$VM_DEEPILY_PROJECTS_DIR' >> ~/.bashrc
+echo '== export LUPIN_CC_VENV (operator-owned CC venv; \$LUPIN_ROOT/.venv is the arbiters symlink on the VM) =='
+grep -qxF 'export LUPIN_CC_VENV=\$HOME/.venv-lupin-mcp' ~/.bashrc || echo 'export LUPIN_CC_VENV=\$HOME/.venv-lupin-mcp' >> ~/.bashrc
 echo '== ensure ~/.lupin/config exists (lupin CLI: api_url + notification recipient) =='
 mkdir -p ~/.lupin
 if [ ! -f ~/.lupin/config ]; then
