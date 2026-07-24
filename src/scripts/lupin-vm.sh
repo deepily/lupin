@@ -121,7 +121,8 @@ Dev-box CLI parity (make the VM host feel like your dev box) — RUN FROM THE DE
   push-env                sync your shell env: SCP ~/.bash_aliases + ~/.bash_aliases_to_uc.py to
                           the VM, regenerate ~/.bash_aliases_uc there, wire ~/.bashrc to source
                           both AND export VM-correct LUPIN_ROOT + PLANNING_IS_PROMPTING_ROOT +
-                          DEEPILY_PROJECTS_DIR + LUPIN_CC_VENV (operator-owned CC venv), and
+                          DEEPILY_PROJECTS_DIR + LUPIN_CC_VENV (operator-owned CC venv) +
+                          LUPIN_DEV_EMAIL (notify target-user), and
                           create ~/.lupin/config (lupin CLI) if absent. Re-run anytime. Idempotent.
 
 Env: LUPIN_GCP_PROJECT_ID (required), LUPIN_VM_NAME, LUPIN_VM_ZONE
@@ -514,6 +515,8 @@ grep -qxF 'export PLANNING_IS_PROMPTING_ROOT=$VM_PIP_ROOT' ~/.bashrc || echo 'ex
 grep -qxF 'export DEEPILY_PROJECTS_DIR=$VM_DEEPILY_PROJECTS_DIR' ~/.bashrc || echo 'export DEEPILY_PROJECTS_DIR=$VM_DEEPILY_PROJECTS_DIR' >> ~/.bashrc
 echo '== export LUPIN_CC_VENV (operator-owned CC venv; \$LUPIN_ROOT/.venv is the arbiters symlink on the VM) =='
 grep -qxF 'export LUPIN_CC_VENV=\$HOME/.venv-lupin-mcp' ~/.bashrc || echo 'export LUPIN_CC_VENV=\$HOME/.venv-lupin-mcp' >> ~/.bashrc
+echo '== export LUPIN_DEV_EMAIL (notify() target-user resolution; ~/.lupin/config global_notification_recipient is not read in the hook/MCP env) =='
+grep -qxF 'export LUPIN_DEV_EMAIL=ricardo.felipe.ruiz@gmail.com' ~/.bashrc || echo 'export LUPIN_DEV_EMAIL=ricardo.felipe.ruiz@gmail.com' >> ~/.bashrc
 echo '== ensure ~/.lupin/config exists (lupin CLI: api_url + notification recipient) =='
 mkdir -p ~/.lupin
 if [ ! -f ~/.lupin/config ]; then
