@@ -122,8 +122,7 @@ Dev-box CLI parity (make the VM host feel like your dev box) — RUN FROM THE DE
                           the VM, regenerate ~/.bash_aliases_uc there, wire ~/.bashrc to source
                           both AND export VM-correct LUPIN_ROOT + PLANNING_IS_PROMPTING_ROOT +
                           DEEPILY_PROJECTS_DIR + LUPIN_CC_VENV (operator-owned CC venv) +
-                          LUPIN_DEV_EMAIL (notify target-user) + LUPIN_API_KEY (notify
-                          X-API-Key, read from the local gitignored key file at runtime), and
+                          LUPIN_DEV_EMAIL (notify target-user), and
                           create ~/.lupin/config (lupin CLI) if absent. Re-run anytime. Idempotent.
 
 Env: LUPIN_GCP_PROJECT_ID (required), LUPIN_VM_NAME, LUPIN_VM_ZONE
@@ -498,14 +497,11 @@ echo 'NEXT (manual, interactive): open a fresh shell, run  claude  once, complet
         UC_GEN="$HOME/.bash_aliases_to_uc.py"
         [ -f "$ALIASES" ] || die "no $ALIASES on the dev box"
         [ -f "$UC_GEN" ]  || die "no $UC_GEN on the dev box (the uppercase-alias generator)"
-        # The notify() X-API-Key (ck_live_ format) lives in a gitignored 0600 file (src/conf/keys/**),
-        # so it never reaches the VM via checkout — that is the notify 401 on the VM. Read the VALUE
-        # here at runtime (NOT committed into this script) and export it on the VM as LUPIN_API_KEY,
-        # which load_api_key() accepts directly (bypasses the file + defaults the URL to :7999).
-        REPO_ROOT_LOCAL="${LUPIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
-        NOTIF_KEY_FILE="$REPO_ROOT_LOCAL/src/conf/keys/notification-api-claude-code-dev"
-        [ -f "$NOTIF_KEY_FILE" ] || die "no notification API key file at $NOTIF_KEY_FILE"
-        NOTIF_API_KEY="$( cat "$NOTIF_KEY_FILE" )"
+        # NOTE: LUPIN_API_KEY is NOT shipped by push-env. The notify() X-API-Key (ck_live_) is
+        # validated per-DATABASE (hash in the server's api_keys table). The VM runs its own test DB,
+        # so the dev-box key can never validate there — a VM key must be MINTED against the VM DB
+        # (create_service_account_postgres.py with LUPIN_ENV=testing) and set by hand. Shipping the
+        # dev key here would only clobber that manual VM key via bashrc ordering. See task backlog.
         if [ "$DRY_RUN" -eq 1 ]; then
             log "(dry-run) scp $ALIASES + $UC_GEN -> $VM_NAME:~/ ; then on VM: python3 ~/.bash_aliases_to_uc.py; ensure ~/.bashrc sources .bash_aliases + .bash_aliases_uc"
         else
@@ -526,8 +522,6 @@ echo '== export LUPIN_CC_VENV (operator-owned CC venv; \$LUPIN_ROOT/.venv is the
 grep -qxF 'export LUPIN_CC_VENV=\$HOME/.venv-lupin-mcp' ~/.bashrc || echo 'export LUPIN_CC_VENV=\$HOME/.venv-lupin-mcp' >> ~/.bashrc
 echo '== export LUPIN_DEV_EMAIL (notify() target-user resolution; ~/.lupin/config global_notification_recipient is not read in the hook/MCP env) =='
 grep -qxF 'export LUPIN_DEV_EMAIL=ricardo.felipe.ruiz@gmail.com' ~/.bashrc || echo 'export LUPIN_DEV_EMAIL=ricardo.felipe.ruiz@gmail.com' >> ~/.bashrc
-echo '== export LUPIN_API_KEY (notify() X-API-Key auth; the ck_live_ key file is gitignored, never checked out to the VM) =='
-grep -qxF 'export LUPIN_API_KEY=$NOTIF_API_KEY' ~/.bashrc || echo 'export LUPIN_API_KEY=$NOTIF_API_KEY' >> ~/.bashrc
 echo '== ensure ~/.lupin/config exists (lupin CLI: api_url + notification recipient) =='
 mkdir -p ~/.lupin
 if [ ! -f ~/.lupin/config ]; then
