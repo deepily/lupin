@@ -111,7 +111,7 @@ fi
 # is resolved from LUPIN_CC_VENV (default $LUPIN_ROOT/.venv, per-machine override),
 # PROVISIONED here (create + install the closure), and guarded against a foreign
 # service venv. See task 81a24c93.
-CC_VENV_REQS="fastmcp==2.14.2 requests pydantic"   # minimal host closure — imports of cosa_voice_mcp.py + the 7 hooks (everything else is stdlib or in-repo via PYTHONPATH)
+CC_VENV_REQS="fastmcp==2.14.2 requests pydantic regex pytz"   # host closure — cosa_voice_mcp.py + the 8 hooks + their TRANSITIVE in-repo chain (cosa.utils.util pulls regex; config/tz pulls pytz). Confirmed complete 2026-07-24 by MCP connecting (30 tools) on the VM. Everything else is stdlib or in-repo via PYTHONPATH.
 LUPIN_CC_VENV="${LUPIN_CC_VENV:-$LUPIN_ROOT/.venv}"
 
 # Preflight: refuse a CC venv that is a symlink into a foreign-uid service venv
