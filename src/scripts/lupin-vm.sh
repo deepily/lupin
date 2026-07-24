@@ -31,6 +31,7 @@ VM_NAME="${LUPIN_VM_NAME:-lupin-host-test}"
 VM_ZONE="${LUPIN_VM_ZONE:-us-central1-a}"
 VM_ROOT="/mnt/lupin-data/lupin"                 # UID-1001-owned on-VM checkout (deploy-cloud-test.sh:31)
 VM_PIP_ROOT="/mnt/lupin-data/planning-is-prompting"  # sibling PIP checkout on the VM (push-env exports PLANNING_IS_PROMPTING_ROOT)
+VM_DEEPILY_PROJECTS_DIR="/mnt/lupin-data"       # parent of the on-VM checkouts; push-env exports DEEPILY_PROJECTS_DIR (referenced by the shipped alias library)
 # The CPU VM (post GPU→CPU downgrade) runs the cloud-GPU topology: model-server on Cloud Run,
 # NO local nvidia container. Using cloud-test.yml here recreates a local GPU model-server that
 # cannot start on the CPU VM ("could not select device driver nvidia"). Source of truth:
@@ -119,7 +120,8 @@ Dev-box CLI parity (make the VM host feel like your dev box) — RUN FROM THE DE
                           you do afterward. Idempotent.
   push-env                sync your shell env: SCP ~/.bash_aliases + ~/.bash_aliases_to_uc.py to
                           the VM, regenerate ~/.bash_aliases_uc there, wire ~/.bashrc to source
-                          both AND export VM-correct LUPIN_ROOT + PLANNING_IS_PROMPTING_ROOT, and
+                          both AND export VM-correct LUPIN_ROOT + PLANNING_IS_PROMPTING_ROOT +
+                          DEEPILY_PROJECTS_DIR, and
                           create ~/.lupin/config (lupin CLI) if absent. Re-run anytime. Idempotent.
 
 Env: LUPIN_GCP_PROJECT_ID (required), LUPIN_VM_NAME, LUPIN_VM_ZONE
@@ -509,6 +511,7 @@ grep -qxF 'source ~/.bash_aliases_uc' ~/.bashrc || echo 'source ~/.bash_aliases_
 echo '== export VM-correct project roots in ~/.bashrc (whole-line, idempotent) =='
 grep -qxF 'export LUPIN_ROOT=$VM_ROOT'                    ~/.bashrc || echo 'export LUPIN_ROOT=$VM_ROOT'                    >> ~/.bashrc
 grep -qxF 'export PLANNING_IS_PROMPTING_ROOT=$VM_PIP_ROOT' ~/.bashrc || echo 'export PLANNING_IS_PROMPTING_ROOT=$VM_PIP_ROOT' >> ~/.bashrc
+grep -qxF 'export DEEPILY_PROJECTS_DIR=$VM_DEEPILY_PROJECTS_DIR' ~/.bashrc || echo 'export DEEPILY_PROJECTS_DIR=$VM_DEEPILY_PROJECTS_DIR' >> ~/.bashrc
 echo '== ensure ~/.lupin/config exists (lupin CLI: api_url + notification recipient) =='
 mkdir -p ~/.lupin
 if [ ! -f ~/.lupin/config ]; then
