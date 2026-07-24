@@ -42,6 +42,13 @@ ENV_FILE="cloud-gpu.env"                         # requires LUPIN_MODEL_SERVER_U
 # "no such service". Compose subcommands here use REST_SERVICE.
 REST_SERVICE="lupin-rest"                        # compose service name (container_name = lupin-rest-cloud-gpu)
 APP_PORT=7999                                    # in-VM app port (docker compose lupin-rest)
+# Keep idle SSH-over-IAP sessions alive. Without a keepalive, an idle interactive `shell` (or a
+# long `svc logs -f`) gets reaped by the IAP tunnel / NAT idle timeout -> "Failed to send all data
+# from [stdin]" + "Broken pipe" + exit 255 (a dropped session while you step away — NOT a stale
+# server-side idle value; the gap was a MISSING client keepalive). ssh sends a probe every 60s and
+# gives up after 3 unanswered (~3 min). `-oX=Y` is glued (no space) so each --ssh-flag value is a
+# single shell token — safe to word-split from the unquoted expansion below.
+SSH_KEEPALIVE="--ssh-flag=-oServerAliveInterval=60 --ssh-flag=-oServerAliveCountMax=3"
 # The :8001 arbiter is NOT a compose service — it runs HOST-side as a `systemd --user` unit
 # (provision-arbiter-on-vm.sh), out-of-band so an app-container bounce never takes it down.
 # It is reload=False by design (a watcher must not hot-reload itself), so a code refresh needs
@@ -158,6 +165,7 @@ remote_compose() {
         --zone="$VM_ZONE" \
         --project="$LUPIN_GCP_PROJECT_ID" \
         --tunnel-through-iap \
+        $SSH_KEEPALIVE \
         --command "cd $VM_ROOT && sudo docker compose -f $COMPOSE_FILE --env-file $ENV_FILE $compose_args"
 }
 
@@ -250,7 +258,8 @@ case "$SUBCMD" in
     shell)
         require_project
         runit gcloud compute ssh "$VM_NAME" \
-            --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap
+            --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
+            $SSH_KEEPALIVE
         ;;
 
     run)
@@ -258,6 +267,7 @@ case "$SUBCMD" in
         require_project
         runit gcloud compute ssh "$VM_NAME" \
             --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
+            $SSH_KEEPALIVE \
             --command "$1"
         ;;
 
