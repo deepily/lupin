@@ -2,6 +2,20 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-06-23 to 07-08](history/2026-06-23-to-07-08-history.md). History health: ✅ **HEALTHY at ~7.9k tokens (31% of 25k)** — archived 2026-07-21 by Mr. Radio 🦉 (session 56a74d7b), ~9.6k tokens moved to archive on Rick's ruling at the 17.5k WARNING threshold.
 
+### 2026.07.23 - Session 487f0265 (Mr. Radio 🦉) | VM host-CLI + direct Opus 4.8 via Vertex brought to parity; a 0/8-hooks gap closed at the source + full bring-up runbook
+
+**Accomplishments** (solo VM-ops session for Rick; all committed on `wip-v0.1.9`, `1f820857`→`12b45d4e`):
+1. **`install-cli` made idempotent** — `uv venv --clear` wipes a half-built SDK venv from a failed first run (`d90415a6`); the uv path installs its own Python 3.13, sidestepping the VM's broken system Python. Verified live: python 3.13.14, Claude Code 2.1.218, claude-agent-sdk 0.2.126.
+2. **`push-env` now ships env, not just aliases** — exports VM-correct `LUPIN_ROOT` + `PLANNING_IS_PROMPTING_ROOT` (aliases only *referenced* them; nothing defined them) and seeds `~/.lupin/config` (`5eb54324`). Var NAMES canonical/unchanged; only the values adapt to `/mnt/lupin-data/*`.
+3. **The 0/8-hooks gap closed at the source** — nothing in-repo installed the CC hooks (they lived only in the dev box's personal `~/.claude/settings.json`); the installer *counted* them but never wrote them. Added canonical `src/conf/claude-code-hooks.json` (8-hook block, env-var-relative so it ports verbatim) and taught `install-cosa-voice.sh` to MERGE it into `settings.json` (`12b45d4e`).
+4. **STT call chain audited** — verdict FUNNELED (browser → `:7999` → internal-ingress Cloud Run Whisper), config correct as-is; the wizard-suspected INI edit was a non-issue. Proved reachability end-to-end (in-container `/health` 200 after cold start).
+5. **Direct Opus 4.8 via Vertex diagnosed** — the setup wizard mis-reports a wrong-region failure as "permission denied"; the real config is three env vars (`CLAUDE_CODE_USE_VERTEX`, `ANTHROPIC_VERTEX_PROJECT_ID`, `CLOUD_ML_REGION=global` — Opus is global-only). Two principals: dev-box user grant ≠ VM service-account grant (`lupin-host-test-sa` needs its own `roles/aiplatform.user`).
+6. **Full new-instance bring-up runbook** — §7 of `2026.07.22-vm-git-sync-strategy-decision.md`: the ordered deploy→install-cli→push-env→install-cosa-voice→SA-grant→Vertex-env→OAuth sequence + every gotcha that cost a round-trip, so the next spin-up is one session.
+
+**Files**: `src/scripts/lupin-vm.sh`, `src/scripts/install-cosa-voice.sh`, `src/conf/claude-code-hooks.json`, `src/rnd/2026.07.22-vm-git-sync-strategy-decision.md`.
+
+**Note**: the classifier blocks the agent from state-changing `gcloud` (deploy/install-cli/push-env/IAM); Rick ran those from the dev box via `!`, agent built + verified from the read-only side.
+
 ### 2026.07.22 - Session 2c24d27b (Mr. Radio 🦉) | GCP test-VM made operator-usable: browser tunnel + arbiter live + repo-sync tooling
 
 **Accomplishments** (solo VM-ops session; all committed + pushed on `wip-v0.1.9`, `59418a7a`→`b4405dc5`):
