@@ -1,0 +1,95 @@
+{
+  "_comment": "Canonical cosa-voice Claude Code hooks block. Verbatim, env-var-relative ($LUPIN_ROOT / $PLANNING_IS_PROMPTING_ROOT) so it ports to any host where those are set. Installed into ~/.claude/settings.json by install-cosa-voice.sh. Source of truth \u2014 do NOT hardcode absolute paths here.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$LUPIN_ROOT/.venv/bin/python3\" \"$LUPIN_ROOT/src/lupin_cli/claude_code/hooks/register_session.py\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$LUPIN_ROOT/.venv/bin/python3\" \"$LUPIN_ROOT/src/lupin_cli/claude_code/hooks/post_tool_use.py\""
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$LUPIN_ROOT/.venv/bin/python3\" \"$LUPIN_ROOT/src/lupin_cli/claude_code/hooks/pre_tool_use.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"$PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_record_guard.py\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$LUPIN_ROOT/.venv/bin/python3\" \"$LUPIN_ROOT/src/lupin_cli/claude_code/hooks/stop.py\""
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$LUPIN_ROOT/.venv/bin/python3\" \"$LUPIN_ROOT/src/lupin_cli/claude_code/hooks/notification.py\""
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$LUPIN_ROOT/.venv/bin/python3\" \"$LUPIN_ROOT/src/lupin_cli/claude_code/hooks/user_prompt_submit.py\""
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$LUPIN_ROOT/.venv/bin/python3\" \"$LUPIN_ROOT/src/lupin_cli/claude_code/hooks/session_end.py\""
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$LUPIN_ROOT/.venv/bin/python3\" \"$LUPIN_ROOT/src/lupin_cli/claude_code/hooks/permission_request.py\"",
+            "timeout": 30000
+          }
+        ]
+      }
+    ]
+  }
+}

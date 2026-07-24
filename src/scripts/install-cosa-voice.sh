@@ -309,6 +309,36 @@ else
         exit 1
     fi
 
+    # ── Install the 8 CC hooks from the canonical in-repo template ────
+    # Merges src/conf/claude-code-hooks.json into ~/.claude/settings.json,
+    # overwriting ONLY the "hooks" key and preserving every other setting.
+    # Commands are $LUPIN_ROOT / $PLANNING_IS_PROMPTING_ROOT relative, so the
+    # SAME template ports to any host where those env vars are exported.
+    HOOKS_TEMPLATE="$LUPIN_ROOT/src/conf/claude-code-hooks.json"
+    echo "  Installing CC hooks (SessionStart, Stop, PreToolUse, ... 8 total)..."
+    if [ ! -f "$HOOKS_TEMPLATE" ]; then
+        warn_check "Hooks template missing: $HOOKS_TEMPLATE (skipping hook install)"
+    else
+        mkdir -p "$HOME/.claude"
+        [ -f "$SETTINGS_FILE" ] && cp "$SETTINGS_FILE" "$SETTINGS_FILE.bak-$(date +%s)"
+        if python3 -c "
+import json, os, sys
+tmpl = json.load( open( '$HOOKS_TEMPLATE' ) )[ 'hooks' ]
+cfg  = '$SETTINGS_FILE'
+existing = {}
+if os.path.exists( cfg ):
+    try:    existing = json.load( open( cfg ) )
+    except Exception: existing = {}
+existing[ 'hooks' ] = tmpl
+json.dump( existing, open( cfg, 'w' ), indent=2 )
+print( '  ✓ installed', len( tmpl ), 'hook event-types ->', cfg )
+"; then
+            pass_check "CC hooks installed (8/8)"
+        else
+            warn_check "CC hook install failed — merge $HOOKS_TEMPLATE into $SETTINGS_FILE manually"
+        fi
+    fi
+
     # ── End-to-end test notification ─────────────────────────────────
     if curl -s --head --max-time 2 "$SERVER_URL/docs" > /dev/null 2>&1; then
         echo ""
