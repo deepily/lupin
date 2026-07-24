@@ -328,7 +328,17 @@ Environment Variables:
 
         # Step 4: Write plaintext key to file
         print( "Step 4: Key File Creation" )
-        key_file = write_key_to_file( api_key, args.env )
+        try:
+            key_file = write_key_to_file( api_key, args.env )
+        except OSError as e:
+            # A read-only project mount (e.g. running inside the app container, where
+            # /var/lupin is bind-mounted read-only) must NOT lose the freshly-minted secret:
+            # the DB now holds only the bcrypt hash, so this file was the only plaintext copy.
+            # Warn and continue to Step 5, which prints the key for the operator to capture.
+            reason = getattr( e, "strerror", None ) or str( e )
+            key_file = f"<not written — {reason}; capture the printed key below>"
+            print( f"  ⚠ Could not write key file ({reason})." )
+            print( f"  ⚠ The plaintext key is printed in Step 5 — capture it NOW; it is not recoverable later." )
         print()
 
         # Step 5: Display success + key (ONCE)
