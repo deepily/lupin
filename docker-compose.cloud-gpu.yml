@@ -115,6 +115,64 @@ services:
         target: /home/rruiz/.claude/sessions
         bind:
           create_host_path: false
+      # ---------------------------------------------------------------- multi-repo doc viewer
+      # WITHOUT THESE, `[scope_registry] registered 0 external scope(s): []` and every
+      # /api/io/file and /api/docs/file request 404s. That is what happened on 2026-07-25:
+      # this file was written from the code-mount set only, and the two doc-viewer binds that
+      # docker-compose.yml has carried since 2026-05-12 (`:158-159`, `:244-245`) were never
+      # copied across. The container paths are FIXED by `lupin-app.ini § external repos`, so
+      # the compose file is the only place they can be satisfied.
+      #
+      # ENUMERATED, NOT GLOBBED. Dev binds ONE directory (`.../projects:/var/external-projects`)
+      # because that host directory holds nothing but repos. `/mnt/lupin-data` is NOT that
+      # directory — it is also the docker data-root, so the equivalent one-liner would expose
+      # `docker/volumes/lupin_claude-creds/_data` (the CC OAuth login) and the `*-wip.bundle`
+      # files inside the read surface. Four explicit binds, and no shortcut.
+      #
+      # `create_host_path: false` IS LOAD-BEARING HERE — and it is load-bearing ON THE VM
+      # SPECIFICALLY, which is the only reason this comment is trustworthy. Measured 2026-07-25
+      # with a negative control on BOTH machines, because they do not agree:
+      #
+      #                                    dev (compose v2.19.1)    VM (compose v5.3.1)
+      #   short  `- /host/x:/ctr/x:ro`     HOST DIR CREATED         HOST DIR CREATED
+      #   long,  no create_host_path       not created              HOST DIR CREATED   <-- differs
+      #   long + create_host_path: false   not created              not created
+      #
+      # On dev the long form alone is enough, so a probe run there says the key is redundant —
+      # and that conclusion is FALSE for the machine this file deploys to. The key is what stops
+      # the auto-create on the VM. (`docker compose config` renders `bind: {}` on both versions
+      # and shows the key on neither, so the rendered config cannot answer this question either.)
+      #
+      # WHY AUTO-CREATE IS THE FAILURE THAT MATTERS: an auto-created empty dir means the registry
+      # FINDS the path, registers the scope, and serves 404s for every file in it — with NO
+      # warning, because from the registry's side the path exists. The per-repo skip+WARNING is
+      # the fail-soft layer and it works; an auto-created empty dir is what robs it of the thing
+      # it tests for. Loud absence beats a scope that resolves to nothing.
+      #
+      # The OTHER eight scopes in the INI (cosa-voice, lupin-mobile, claude-plans, lookml,
+      # par-pacific, retail-ai-location-strategy, google-project-wonderwall, scratchpad) are
+      # genuinely absent from this VM. Their startup WARNINGs are CORRECT and expected — they
+      # are the registry reporting reality, not a defect to silence.
+      - type: bind
+        source: /mnt/lupin-data/lupin
+        target: /var/external-projects/lupin
+        read_only: true
+        bind: { create_host_path: false }
+      - type: bind
+        source: /mnt/lupin-data/planning-is-prompting
+        target: /var/external-projects/planning-is-prompting
+        read_only: true
+        bind: { create_host_path: false }
+      - type: bind
+        source: /mnt/lupin-data/google/skills-distillation
+        target: /var/external-projects/google/skills-distillation
+        read_only: true
+        bind: { create_host_path: false }
+      - type: bind
+        source: /mnt/lupin-data/google/parallel-search
+        target: /var/external-projects/google/parallel-search
+        read_only: true
+        bind: { create_host_path: false }
     environment:
       LUPIN_ROOT: /var/lupin
       LUPIN_ENV: testing
