@@ -81,6 +81,15 @@ services:
     container_name: lupin-rest-cloud-gpu
     restart: unless-stopped
     user: "1001:1001"                       # matches the image's rruiz UID/GID (Dockerfile:37-38)
+    # The HOST writes CC session bridges as its own uid (OS-Login, e.g. 1721846087);
+    # the container runs as 1001. Neither can read the other's files by owner, so both
+    # sides meet on a SHARED GROUP: the host dir is setgid + group-owned by this gid,
+    # bridges are written 0660 (session_bridge.atomic_write_json), and the container
+    # joins that gid here as a supplementary group. Parameterized — never hardcode the
+    # gid, it differs per VM/OS-Login account. See src/rnd/v0.1.9/2026.07.24-vm-persona-
+    # bridge-mount-uid-divergence.md (FINAL PLAN v3).
+    group_add:
+      - "${LUPIN_BRIDGE_GID:?set LUPIN_BRIDGE_GID (host gid owning ~/.claude/sessions; see 2026.07.24 R&D)}"
     ports:
       - "7999:7999"
     # host.docker.internal → host gateway so the in-container :7999 reverse-proxy
@@ -93,6 +102,19 @@ services:
       - ./src/conf/keys:/var/lupin/src/conf/keys:ro   # provider keys, out-of-band
       - cloudsql-socket:/cloudsql           # shared Auth-Proxy socket
       - claude-creds:/home/rruiz/.claude    # persistent CC OAuth login
+      # CC session bridges — the HOST hook writes these; the container reads/rewrites
+      # them via set_voice_persona(). Without this bind the claude-creds volume above
+      # SHADOWS the host's sessions dir and request_persona() 404s (root cause, 07-24).
+      # Nested deeper than claude-creds, so compose applies it after — verify with
+      # `docker inspect` that BOTH mounts are present after any recreate.
+      # Long form + create_host_path:false on purpose: a short ${HOME} bind silently
+      # CREATES an empty dir when HOME is wrong (root/automation) or the path is absent,
+      # which looks identical to "mounted but empty". Fail loud instead.
+      - type: bind
+        source: ${LUPIN_HOST_SESSIONS_DIR:?set LUPIN_HOST_SESSIONS_DIR (absolute path to the host's ~/.claude/sessions)}
+        target: /home/rruiz/.claude/sessions
+        bind:
+          create_host_path: false
     environment:
       LUPIN_ROOT: /var/lupin
       LUPIN_ENV: testing
