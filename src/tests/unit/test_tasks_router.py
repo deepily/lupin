@@ -81,6 +81,13 @@ def repo( monkeypatch ):
     # from query_tasks.return_value: a fixture that computed the total from the
     # page would hard-code the very identity these tests exist to falsify.
     fake.count_tasks.return_value = 0
+    # `statuses_for_ids` must return a REAL dict for the same reason `total` must be a
+    # real int (row 00a6bde2). A bare MagicMock is TRUTHY and supports no `in`, so
+    # `blocker_is_terminal` would either raise or — worse — be reached only by rows that
+    # happen to carry no item blocker, leaving the flag untested while the suite is green.
+    # An empty map is also the honest default: no blocker was resolved, so no row can be
+    # flagged, and any test that wants a finding sets this explicitly.
+    fake.statuses_for_ids.return_value = { }
 
     @contextmanager
     def _fake_get_db():
@@ -513,6 +520,12 @@ def test_query_terse_returns_glance_projection_only( client, repo ):
     row = body[ "tasks" ][ 0 ]
     assert set( row.keys() ) == {
         "id", "title", "status", "blocked_by", "next_chase_ts", "priority", "park_reason_stale",
+        # `blocker_terminal` joined 2026-07-25 (row 00a6bde2) on the SAME argument
+        # park_reason_stale joined on, and a stronger one: blocked rows are excluded
+        # from the workable-now count by design, so a stranded row is invisible in
+        # exactly the way a finished row is. A flag absent from the projection a board
+        # glance reads is a flag nobody sees.
+        "blocker_terminal",
     }
     assert "body" not in row                                  # the token win — body dropped
     # `is False`, not a truthiness check, and a type assertion beside it: the SQL
@@ -524,6 +537,8 @@ def test_query_terse_returns_glance_projection_only( client, repo ):
     # predicate and is unaffected — this assertion is what keeps that true.)
     assert type( row[ "park_reason_stale" ] ) is bool         # TYPE FIRST — never None, on any arm
     assert row[ "park_reason_stale" ] is False                # a never-parked row is never stale
+    assert type( row[ "blocker_terminal" ] ) is bool          # same TYPE-FIRST guard, same reason
+    assert row[ "blocker_terminal" ] is False                 # an unblocked row is never stranded
     assert row[ "priority" ] == "P1" and row[ "status" ] == "queued"
     repo.query_tasks.assert_called_once()                    # rows ARE materialized (not count mode)
 
@@ -1756,6 +1771,161 @@ def test_owed_only_defaults_off_and_forwards_when_asked( client, repo ):
     assert repo.query_tasks.call_args.kwargs[ "owed_only" ] is False
     client.get( "/api/tasks?owner_persona=krishna&owed_only=true" )
     assert repo.query_tasks.call_args.kwargs[ "owed_only" ] is True
+
+
+# ---------------------------------------------------------------------------
+# blocker_terminal + the unsatisfiable-blocker reject (store row 00a6bde2)
+# ---------------------------------------------------------------------------
+
+def _blocked_item( blocker_id, **overrides ):
+    return make_item( status="blocked",
+                      blocked_by=[ { "kind": "item", "id": str( blocker_id ) } ],
+                      next_chase_ts=NOW,
+                      **overrides )
+
+
+@pytest.mark.parametrize( "terse", [ True, False ] )
+@pytest.mark.parametrize( "blocker_status,expected", [ ( "done", True ), ( "dropped", True ), ( "queued", False ) ] )
+def test_blocker_terminal_rides_both_projections_and_they_agree( client, repo, terse, blocker_status, expected ):
+    """
+    The flag must reach BOTH shapes and mean the same thing in each. The terse
+    projection is what a board glance reads, and a stranded row is excluded from the
+    workable-now count by design — a flag carried only by the full row is a flag nobody
+    sees, on exactly the rows nobody looks at.
+    """
+    blocker_id = uuid.uuid4()
+    repo.query_tasks.return_value       = [ _blocked_item( blocker_id ) ]
+    repo.statuses_for_ids.return_value  = { str( blocker_id ): blocker_status }
+
+    r = client.get( "/api/tasks", params={ "owner_persona": "krishna", "terse": str( terse ).lower() } )
+
+    row = r.json()[ "tasks" ][ 0 ]
+    assert type( row[ "blocker_terminal" ] ) is bool         # TYPE FIRST — None is falsy
+    assert row[ "blocker_terminal" ] is expected
+
+
+def test_blocker_statuses_resolve_in_ONE_query_for_the_whole_page( client, repo ):
+    """
+    One query per PAGE, not per row: resolving inside the serializer would put an N+1
+    on the glance the terse projection exists to make cheap. Also pins the SCOPE — only
+    the page's own blockers are asked about, which is what keeps un-asked ids silent
+    rather than accidentally flagged.
+    """
+    a, b = uuid.uuid4(), uuid.uuid4()
+    repo.query_tasks.return_value      = [ _blocked_item( a ), _blocked_item( b ), make_item() ]
+    repo.statuses_for_ids.return_value = { str( a ): "done", str( b ): "queued" }
+
+    client.get( "/api/tasks", params={ "owner_persona": "krishna" } )
+
+    repo.statuses_for_ids.assert_called_once()
+    asked = list( repo.statuses_for_ids.call_args.args[ 0 ] )
+    assert sorted( asked ) == sorted( [ str( a ), str( b ) ] )   # the unblocked row adds nothing
+
+
+def test_get_one_task_carries_the_flag_too( client, repo ):
+    """
+    `task_get` is what row 00a6bde2's own body tells a builder to use to re-derive a
+    blocker's status by hand. A flag on the list surface but not here would send exactly
+    that reader to the one projection that cannot answer the question.
+    """
+    blocker_id = uuid.uuid4()
+    item       = _blocked_item( blocker_id )
+    repo.get_by_id.return_value        = item
+    repo.statuses_for_ids.return_value = { str( blocker_id ): "dropped" }
+
+    r = client.get( f"/api/tasks/{item.id}" )
+
+    assert r.status_code == 200
+    assert r.json()[ "blocker_terminal" ] is True
+
+
+@pytest.mark.parametrize( "blocker_status,fragment", [
+    ( "done",    "already done" ),
+    ( "dropped", "already dropped" ),
+    ( None,      "no such item" ),
+] )
+def test_transition_to_blocked_rejects_an_unsatisfiable_edge( client, repo, blocker_status, fragment ):
+    """
+    THE CHEAP HALF, at the seam where the mistake is made. Note what it does NOT reach:
+    all six live instances had blockers that went terminal LONG AFTER the edge was
+    written, so this 422 is structurally incapable of catching them. That is why the
+    read-side flag above is the load-bearing half.
+    """
+    blocker_id = uuid.uuid4()
+    repo.get_by_id_for_update.return_value = make_item( status="queued" )
+    repo.statuses_for_ids.return_value     = { str( blocker_id ): blocker_status }
+
+    r = client.post( f"/api/tasks/{uuid.uuid4()}/transition", json=_transition_body(
+        to_status     = "blocked",
+        blocked_by    = [ { "kind": "item", "id": str( blocker_id ) } ],
+        next_chase_ts = NOW.isoformat(),
+    ) )
+
+    assert r.status_code == 422
+    assert fragment in r.json()[ "detail" ]
+    repo.apply_transition.assert_not_called()
+
+
+def test_transition_to_blocked_on_a_LIVE_item_still_works( client, repo ):
+    """
+    THE CONTROL THAT MUST FAIL IF THE GATE IS INVERTED. A guard that blocks correct work
+    is an outage, and an outage gets disabled.
+    """
+    blocker_id = uuid.uuid4()
+    item       = make_item( status="queued" )
+    repo.get_by_id_for_update.return_value = item
+    repo.statuses_for_ids.return_value     = { str( blocker_id ): "in_progress" }
+    repo.apply_transition.return_value     = make_event( item.id, transition="queued->blocked" )
+
+    r = client.post( f"/api/tasks/{item.id}/transition", json=_transition_body(
+        to_status     = "blocked",
+        blocked_by    = [ { "kind": "item", "id": str( blocker_id ) } ],
+        next_chase_ts = NOW.isoformat(),
+    ) )
+
+    assert r.status_code == 200
+    repo.apply_transition.assert_called_once()
+
+
+def test_the_reject_names_EVERY_offending_id_not_just_the_first( client, repo ):
+    """
+    A caller fixing one edge should not have to submit again to discover the next —
+    same contract as _reject_if_errors, which carries every violation at once.
+    """
+    dead_a, dead_b, live = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    repo.get_by_id_for_update.return_value = make_item( status="queued" )
+    repo.statuses_for_ids.return_value     = {
+        str( dead_a ): "done", str( dead_b ): None, str( live ): "queued",
+    }
+
+    r = client.post( f"/api/tasks/{uuid.uuid4()}/transition", json=_transition_body(
+        to_status     = "blocked",
+        blocked_by    = [ { "kind": "item", "id": str( x ) } for x in ( dead_a, dead_b, live ) ],
+        next_chase_ts = NOW.isoformat(),
+    ) )
+
+    assert r.status_code == 422
+    detail = r.json()[ "detail" ]
+    assert str( dead_a ) in detail and str( dead_b ) in detail
+    assert str( live ) not in detail                         # a live blocker is not an offence
+
+
+@pytest.mark.parametrize( "ref", [ { "kind": "persona", "id": "sam" }, { "kind": "user", "id": "rick" } ] )
+def test_the_reject_never_fires_on_a_persona_or_user_ref( client, repo, ref ):
+    """
+    Neither arm has a resolvable lifecycle. Rejecting on one would block legitimate
+    writes on the strength of an instrument that does not exist (rows 6f8fd858 / 91067e47).
+    """
+    item = make_item( status="queued" )
+    repo.get_by_id_for_update.return_value = item
+    repo.apply_transition.return_value     = make_event( item.id, transition="queued->blocked" )
+
+    r = client.post( f"/api/tasks/{item.id}/transition", json=_transition_body(
+        to_status="blocked", blocked_by=[ ref ], next_chase_ts=NOW.isoformat(),
+    ) )
+
+    assert r.status_code == 200
+    repo.statuses_for_ids.assert_not_called()                # no item arm => no query at all
 
 
 if __name__ == "__main__":

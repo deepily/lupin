@@ -36,7 +36,7 @@ from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
 from cosa.rest.db.database import get_db
 from cosa.rest.db.repositories.task_repository import TaskRepository
 from cosa.rest import task_store_rules as rules
-from cosa.rest.task_store_owed import park_reason_is_stale
+from cosa.rest.task_store_owed import blocker_is_terminal, item_blocker_ids, park_reason_is_stale
 from cosa.agents.utils.sender_id import canonicalize_project_name
 from lupin_mcp.persona_normalization import canonical_persona_key
 # Manager-only blocked-mint guard (Rick 2026-07-20). REUSE the ONE canonical
@@ -290,13 +290,16 @@ class TaskPatchIn( BaseModel ):
 # Serialization
 # ---------------------------------------------------------------------------
 
-def _serialize_item( item ) -> dict:
+def _serialize_item( item, blocker_statuses=None ) -> dict:
     """
     Serialize a TaskItem to the wire shape (field names identical to the
     model — one name at every layer).
 
     Requires:
         - item is a flushed TaskItem (id/created_ts/updated_ts populated)
+        - blocker_statuses maps blocker-id -> status (or None for looked-up-and-absent);
+          omitted/None means NO blocker was resolved, and every row then reports
+          blocker_terminal False — a caller that did not look cannot make a finding
 
     Ensures:
         - returns a JSON-safe dict; nullable timestamps serialize as None
@@ -304,6 +307,12 @@ def _serialize_item( item ) -> dict:
           divergence flag (design §3.3). ADVISORY ONLY — it changes no
           owed-ness, unparks nothing, blocks nothing; it marks the quote
           untrustworthy and stops there.
+        - `blocker_terminal` is DERIVED, never stored (row 00a6bde2): the row is
+          `blocked` on an item that can never transition again, so the wait is
+          unsatisfiable. ADVISORY, exactly like park_reason_stale — the DISPOSITION
+          of a stranded row is split (a `done` blocker means the precondition
+          happened; a `dropped` one means somebody decided otherwise) and neither
+          arm is a serializer's business.
     """
     return {
         "id"                  : str( item.id ),
@@ -320,6 +329,7 @@ def _serialize_item( item ) -> dict:
         "park_reason"         : item.park_reason,
         "park_reason_captured_at" : item.park_reason_captured_at.isoformat() if item.park_reason_captured_at is not None else None,
         "park_reason_stale"   : park_reason_is_stale( item.status, item.park_reason_captured_at, item.updated_ts ),
+        "blocker_terminal"    : blocker_is_terminal( item.status, item.blocked_by, blocker_statuses or { } ),
         "gate_class"          : item.gate_class,
         "priority"            : item.priority,
         "urgency"             : item.urgency,
@@ -330,7 +340,7 @@ def _serialize_item( item ) -> dict:
     }
 
 
-def _serialize_item_terse( item ) -> dict:
+def _serialize_item_terse( item, blocker_statuses=None ) -> dict:
     """
     Serialize a TaskItem to the TERSE projection (§G token win).
 
@@ -351,15 +361,25 @@ def _serialize_item_terse( item ) -> dict:
     (§3.3). It costs one boolean per row. A row that was never parked reports
     False, so the flag is silent on the overwhelming majority of rows.
 
+    `blocker_terminal` rides here on the SAME argument, and the argument is stronger:
+    blocked rows are EXCLUDED from the workable-now count by design, so a stranded row
+    is invisible in exactly the way a finished row is — it costs nothing to look at and
+    yields nothing when looked at. The board's burn-down silently includes work that can
+    never move. A flag that is not in the projection a board glance reads is a flag
+    nobody sees. It costs one boolean per row, and every non-blocked row reports False.
+
     Requires:
         - item is a flushed TaskItem (id populated)
+        - blocker_statuses as per _serialize_item; omitted means no finding is possible
 
     Ensures:
-        - returns a JSON-safe dict with EXACTLY the seven glance keys; nullable
+        - returns a JSON-safe dict with EXACTLY the eight glance keys; nullable
           next_chase_ts serializes as None
         - park_reason_stale is DERIVED (never stored) and ADVISORY — identical
           semantics to the full shape's, computed by the same predicate, so the
           two projections can never disagree about staleness
+        - blocker_terminal is likewise DERIVED and ADVISORY, computed by the same
+          predicate as the full shape's, for the same reason
     """
     return {
         "id"                : str( item.id ),
@@ -369,7 +389,98 @@ def _serialize_item_terse( item ) -> dict:
         "next_chase_ts"     : item.next_chase_ts.isoformat() if item.next_chase_ts is not None else None,
         "priority"          : item.priority,
         "park_reason_stale" : park_reason_is_stale( item.status, item.park_reason_captured_at, item.updated_ts ),
+        "blocker_terminal"  : blocker_is_terminal( item.status, item.blocked_by, blocker_statuses or { } ),
     }
+
+
+def _reject_unsatisfiable_blockers( repo, blocked_by ):
+    """
+    422 a `blocked_by` naming an item that can NEVER satisfy the wait (row 00a6bde2).
+
+    THE CHEAP HALF OF THE FIX, at the seam where the mistake is made. Two ways an
+    item-kind edge is born dead:
+
+        TERMINAL  — the blocker is already `done`/`dropped`. Terminal is terminal: it
+                    can never transition again, so nothing will ever release this row.
+        ABSENT    — the id resolves to no row at all. Nothing can transition it either,
+                    and unlike the prose arm of this defect there is no ambiguity about
+                    what an unresolvable id in a TYPED `{kind:"item"}` field is.
+
+    ⚠️ THIS REACHES NONE OF THE SIX LIVE INSTANCES, and saying so is the point. All six
+    blockers went terminal LONG AFTER their edge was written — write-side validation is
+    structurally incapable of catching that, which is why the READ-side `blocker_terminal`
+    flag is the load-bearing half and this is the convenience. A fix that shipped only
+    this half would close the door on new instances while every existing one stayed
+    invisible, and would look complete.
+
+    PERSONA AND USER REFS ARE UNTOUCHED. Neither has a resolvable lifecycle — persona
+    liveness has no registry at all (rows 6f8fd858 / 91067e47) and `commons_who` reports
+    silence, not absence. Rejecting on an unresolvable persona would block legitimate
+    writes on the strength of an instrument that does not exist.
+
+    Requires:
+        - repo is a TaskRepository bound to the live session
+        - blocked_by is the caller's post-canonicalization value (any type)
+
+    Ensures:
+        - raises HTTPException(422) naming EVERY offending id and its reason, never
+          just the first — a caller fixing one edge should not have to submit again to
+          discover the next
+        - returns None when every item-kind ref resolves to a non-terminal row
+        - a value carrying no item-kind refs issues NO query and always passes
+    """
+    ref_ids = item_blocker_ids( blocked_by )
+    if not ref_ids: return
+
+    statuses = repo.statuses_for_ids( ref_ids )
+    offences = [ ]
+    for ref_id in ref_ids:
+        ref_status = statuses.get( ref_id )
+        if ref_status is None:
+            offences.append( f"{ref_id} (no such item)" )
+        elif ref_status in rules.TERMINAL_STATUSES:
+            offences.append( f"{ref_id} (already {ref_status})" )
+
+    if offences:
+        raise HTTPException(
+            status_code = 422,
+            detail      = (
+                f"blocked_by names {len( offences )} item(s) that can never satisfy the "
+                f"wait: {', '.join( offences )}. A terminal item cannot transition again, "
+                f"and an absent one cannot transition at all — a row blocked on either "
+                f"reads 'waiting' forever. Point the edge at a live row, or mint the "
+                f"precondition as its own item first."
+            ),
+        )
+
+
+def _resolve_blocker_statuses( repo, items ):
+    """
+    Resolve every item-kind blocker across a PAGE of rows in one query (row 00a6bde2).
+
+    ONE QUERY FOR THE PAGE. The alternative — resolving per row inside the serializer —
+    puts an N+1 on the board glance that the terse projection exists to make cheap.
+    Collected here, asked once, handed to the serializers as a plain dict.
+
+    SCOPED TO WHAT WAS ASKED, and that scoping is load-bearing rather than an
+    optimization: `statuses_for_ids` answers with an explicit None for an id it looked
+    up and did not find, and `blocker_is_terminal` reads a MISSING key as "no evidence".
+    So resolving only the page's own blockers keeps every un-asked id correctly silent
+    instead of accidentally flagged.
+
+    Requires:
+        - repo is a TaskRepository bound to the live session
+        - items is an iterable of TaskItem (may be empty)
+
+    Ensures:
+        - returns { blocker_id_str: status_or_None } covering every item-kind blocker id
+          appearing in `items`, and nothing else
+        - returns {} — issuing no query — when no row carries an item-kind blocker
+    """
+    ref_ids = [ ]
+    for item in items:
+        ref_ids.extend( item_blocker_ids( item.blocked_by ) )
+    return repo.statuses_for_ids( ref_ids )
 
 
 def _serialize_within_char_budget( items, serialize, budget: int ):
@@ -558,6 +669,10 @@ def create_task(
 
     with get_db() as session:
         repo = TaskRepository( session )
+        # A blocked MINT can be born stranded exactly like a transition (row 00a6bde2).
+        # Inside the transaction, and BEFORE create_item, so a rejected mint writes
+        # nothing at all.
+        _reject_unsatisfiable_blockers( repo, blocked_by )
         item = repo.create_item(
             item_class          = payload.item_class,
             title               = guarded_title,
@@ -626,6 +741,9 @@ def transition_task(
         # validated is the value persisted.
         blocked_by = _canon_blocked_by( payload.blocked_by )
 
+        # Structural rules first (shape), then the DB-backed liveness gate below (row
+        # 00a6bde2). Order matters: a malformed ref must report as malformed, not as
+        # an unresolvable id — the shape error is the one the caller can act on.
         _reject_if_errors( rules.validate_transition(
             from_status   = item.status,
             to_status     = payload.to_status,
@@ -643,6 +761,12 @@ def transition_task(
             current_blocked_by    = item.blocked_by,
             current_next_chase_ts = item.next_chase_ts,
         ) )
+
+        # ->blocked onto a dead edge (row 00a6bde2). Runs on the SAME row-locked
+        # transaction as the status validation, so the blocker statuses read here are
+        # the committed ones — a blocker going terminal concurrently cannot slip a
+        # stranded edge past this the way a read-then-write would.
+        _reject_unsatisfiable_blockers( repo, blocked_by )
 
         event = repo.apply_transition(
             item          = item,
@@ -1095,7 +1219,11 @@ def query_tasks(
                 ),
             )
         # terse → the at-a-glance projection (§G); else the full wire shape.
-        serialize = _serialize_item_terse if terse else _serialize_item
+        # Blocker statuses resolve ONCE for the page (row 00a6bde2) and are bound into
+        # the serializer, so `_serialize_within_char_budget` keeps its one-arg contract.
+        base_serialize    = _serialize_item_terse if terse else _serialize_item
+        blocker_statuses  = _resolve_blocker_statuses( repo, items )
+        serialize         = lambda item: base_serialize( item, blocker_statuses )
         # THE DELIBERATE-SWEEP ESCAPE, mirroring unscoped_audit. The byte budget
         # protects the caller who did not know to ask — an agent pulling 97k tokens
         # into a context. It must NOT quietly shrink a caller who asked for the
@@ -1298,7 +1426,11 @@ def get_task(
     with get_db() as session:
         repo = TaskRepository( session )
         item = _resolve_task_ref( repo, task_id )
-        return _serialize_item( item )
+        # Blocker resolution for the single-row read too (row 00a6bde2). `task_get` is
+        # what the row's own body tells a builder to use to re-derive a blocker's status
+        # by hand; a flag present on the list surface and absent here would send exactly
+        # that reader to the one projection that cannot answer the question.
+        return _serialize_item( item, _resolve_blocker_statuses( repo, [ item ] ) )
 
 
 @router.get(

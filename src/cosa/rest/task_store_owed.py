@@ -93,6 +93,7 @@ where that test goes flaky.
 from datetime import datetime, timezone
 
 from cosa.rest.task_store_rules import (
+    BLOCKED_STATUS,
     PARK_LEGAL_FROM_STATUSES,
     PARK_STATUS,
     TERMINAL_STATUSES,
@@ -375,6 +376,110 @@ def park_is_active_clause( model, now ):
         model.next_chase_ts.isnot( None ),
         model.next_chase_ts > comparison_now,
     )
+
+
+def item_blocker_ids( blocked_by ):
+    """
+    Every `{kind: "item"}` id in a `blocked_by` list, as strings.
+
+    THE KIND FILTER IS THE WHOLE POINT, not hygiene. Only the ITEM arm has an oracle:
+    an item id resolves against this store and returns a status. A `{kind: "persona"}`
+    ref resolves against a namespace that HAS NO REGISTRY — `list_spawned_sessions`
+    carries no persona field (row 6f8fd858) and `commons_who` is a posting log, so
+    absence there is evidence of SILENCE, not of departure. A `{kind: "user"}` ref has
+    no lifecycle at all. Scanning either arm here would mark live-but-quiet seats as
+    resolved-and-dead, which is a false finding on the one flag that has no correcting
+    mechanism (see `blocker_is_terminal`'s which-way-this-lies note).
+
+    Requires:
+        - blocked_by is the row's blocked_by value (any type; non-list yields [])
+
+    Ensures:
+        - returns a list of str ids for entries shaped {kind: "item", id: <non-empty str>}
+        - a malformed entry (not a dict, wrong kind, missing/blank/non-str id) is
+          SKIPPED, never raised on — this runs on the read path of every query
+        - order is the list's own; duplicates are preserved (the caller batches)
+        - never raises
+    """
+    if not isinstance( blocked_by, list ):
+        return [ ]
+
+    ids = [ ]
+    for ref in blocked_by:
+        if not isinstance( ref, dict ):                 continue
+        if ref.get( "kind" ) != "item":                 continue
+        ref_id = ref.get( "id" )
+        if not isinstance( ref_id, str ) or not ref_id: continue
+        ids.append( ref_id )
+    return ids
+
+
+def blocker_is_terminal( status, blocked_by, status_by_id ):
+    """
+    True iff this row's wait can never be satisfied by the mechanism it is relying on.
+
+    THE DEFECT THIS IS THE RED FOR (store row 00a6bde2). `task_transition(..., "blocked",
+    blocked_by=[{kind:"item", id:X}])` accepts X with no check that X is non-terminal, and
+    NOTHING re-examines the edge afterward. Transition X to `done` or `dropped` — both
+    TERMINAL, so X can never transition again — and every row blocked on X keeps reporting
+    `blocked` forever. The row is not waiting. It is STRANDED, and it looks identical to
+    waiting. Six live instances found by hand 2026-07-25, one of them unsatisfiable for
+    eight days.
+
+    ADVISORY, exactly like `park_reason_is_stale`: it changes no owed-ness, unblocks
+    nothing, transitions nothing. It makes an invisible state visible and stops there.
+    The disposition of a stranded row is a separate decision — and a SPLIT one:
+
+        blocker `done`    -> the precondition ACTUALLY HAPPENED; the row should have
+                             rejoined the moment it did. Mechanical, no ruling needed.
+        blocker `dropped` -> dropping was a DECISION. A silent rejoin would overturn it.
+                             Rick's call, and ONLY there.
+
+    ⚠️ TWO CAUSES, ONE FLAG, AND THE MERGE IS DELIBERATE. This returns True for a blocker
+    that is terminal AND for one that does not resolve at all. Both mean the same thing to
+    the row — the wait cannot be satisfied — and on a TYPED edge there is no ambiguity
+    about what an unresolvable id is. That is NOT true of the prose-scanning arm of the
+    same defect, where an 8-hex token in a body collides with commit shas and with the
+    session ids that every amendment header stamps; there, "absent" must land in its own
+    reported bucket rather than in the finding. The collision reasoning does not transfer
+    to a `{kind: "item", id: ...}` field, so it is not imported along with the rule.
+
+    WHICH WAY THIS INSTRUMENT LIES: toward NOT-flagged. An unresolved blocker id is only
+    flagged when the caller actually looked it up and got nothing — a status map that
+    simply lacks the key (the caller batched a different page, or resolution failed) is
+    treated as "no evidence", not as "dead". Same direction as `park_reason_is_stale`, and
+    for the same reason: a false STALE has no mechanism to correct it, it merely defames a
+    correct row and teaches readers to ignore the flag, which disarms the feature
+    permanently. A false FRESH is the status quo this improves on.
+
+    Requires:
+        - status is the row's status string (any value accepted)
+        - blocked_by is the row's blocked_by value (any type)
+        - status_by_id maps blocker-id str -> status str, with an explicit None value
+          for an id that was looked up and NOT FOUND. A key that is ABSENT from the map
+          was never looked up and yields no finding.
+
+    Ensures:
+        - status != BLOCKED_STATUS       -> False (checked FIRST; a queued row carrying a
+          leftover blocked_by is not stranded — it is not waiting at all)
+        - no {kind:"item"} blocker        -> False (persona/user arms have no oracle)
+        - ANY item blocker resolving to a TERMINAL status -> True
+        - ANY item blocker present in the map as None (looked up, absent) -> True
+        - every item blocker resolving to a NON-terminal status -> False
+        - an id ABSENT from status_by_id  -> contributes nothing either way
+        - one terminal + one live blocker -> True (a partial strand is a strand; the row
+          cannot proceed on the live half while the dead half still gates it)
+        - never raises
+    """
+    if status != BLOCKED_STATUS:
+        return False
+
+    for ref_id in item_blocker_ids( blocked_by ):
+        if ref_id not in status_by_id: continue
+        blocker_status = status_by_id[ ref_id ]
+        if blocker_status is None:                     return True
+        if blocker_status in TERMINAL_STATUSES:        return True
+    return False
 
 
 def park_reason_is_stale_clause( model ):

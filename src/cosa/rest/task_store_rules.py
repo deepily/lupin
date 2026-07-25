@@ -55,6 +55,17 @@ PARK_STATUS              = "parked"
 # blocked/claimed/review row. A `parked_from_status` COLUMN was rejected — Rick's
 # standing rule, a new field where a rule suffices.
 PARK_LEGAL_FROM_STATUSES = ( "queued", "in_progress" )
+
+# The waiting status (store row 00a6bde2, 2026-07-25). Named here for the same reason
+# PARK_STATUS is: the word belongs with the other enums, the READ-TIME predicate over
+# it (`blocker_is_terminal`) lives in `task_store_owed`.
+#
+# WHY IT EARNED A CONSTANT. `blocked` is the ONE status that cannot self-heal. A parked
+# row's chase expires at read time and it rejoins the owed count with no human action;
+# a blocked row's EDGE is never recomputed at all. So the only status with no
+# self-healing arm was also the only one with no staleness oracle — six rows sat
+# unsatisfiable for up to eight days before two seats found them by hand.
+BLOCKED_STATUS           = "blocked"
 VALID_GATE_CLASSES     = ( "none", "manager", "operator" )
 VALID_PRIORITIES       = ( "P0", "P1", "P2", "P3" )
 # proactive-manager A2 (fcb5dbc0): operator-gate TIME-SENSITIVITY, distinct from the

@@ -477,6 +477,20 @@ def task_query_impl(
           ADVISORY ONLY: it changes no owed-ness, unparks nothing, blocks
           nothing. Re-park to re-freeze the quote. Rows parked before this
           shipped, and rows never parked, report False.
+        - STRANDED BLOCKERS (2026-07-25, row 00a6bde2): every row also carries
+          `blocker_terminal` (bool), likewise in TERSE as well as the full shape.
+          True means this row is `blocked` on an ITEM that is already done or
+          dropped — or that no longer resolves at all — so the wait can never be
+          satisfied by the mechanism the row is relying on. The row is not
+          waiting, it is STRANDED, and it reads identically to waiting. Six live
+          instances were found BY HAND on 2026-07-25, one unsatisfiable for eight
+          days, because `blocked` is the one status that cannot self-heal and had
+          no staleness oracle. ADVISORY, exactly like park_reason_stale: it
+          transitions nothing. THE DISPOSITION IS SPLIT — a `done` blocker means
+          the precondition actually happened (the row should rejoin); a `dropped`
+          one means somebody decided otherwise (a silent rejoin would overturn
+          it). Persona- and user-kind blockers NEVER set this flag: neither has a
+          resolvable lifecycle, so an absence there is silence, not death.
     """
     filters = {
         "owner_persona"       : owner_persona,

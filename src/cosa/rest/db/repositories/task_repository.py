@@ -130,6 +130,60 @@ class TaskRepository( BaseRepository[TaskItem] ):
             .all()
         )
 
+    def statuses_for_ids( self, ref_ids ) -> dict:
+        """
+        Resolve blocker ids to statuses in ONE query — the read-side half of row 00a6bde2.
+
+        ONE QUERY PER PAGE, NOT ONE PER ROW. This runs on the read path of every
+        `task_query`, so a per-row lookup would put an N+1 on the board glance that the
+        terse projection exists to make cheap. The caller collects every item-kind blocker
+        id across the whole page and asks once.
+
+        ⚠️ AN ID THAT DOES NOT RESOLVE IS RETURNED AS AN EXPLICIT None, NOT OMITTED — and
+        that distinction is the entire contract. `blocker_is_terminal` treats a key present
+        with None as "looked up and ABSENT" (a finding: the edge points at nothing) and a
+        key MISSING as "never looked up" (no finding). Collapsing the two would make a
+        failed resolution indistinguishable from a blocker nobody asked about, which is the
+        same silent-bucket shape the row was filed about.
+
+        MALFORMED IDS ARE PART OF THE ANSWER, not an exception. `blocked_by` is app-typed
+        JSON, so an id that is not a UUID at all reached the column and must resolve to
+        None like any other dead reference — raising here would take down the whole query
+        over one bad edge.
+
+        Requires:
+            - ref_ids is an iterable of candidate id strings (duplicates fine, order
+              irrelevant, empty fine)
+
+        Ensures:
+            - returns { id_str: status_str_or_None } with EXACTLY one key per distinct
+              input id — every id asked about is answered
+            - a non-UUID / unparseable id maps to None (never raises, never omitted)
+            - an empty input returns {} and issues NO query
+        """
+        wanted = { str( ref_id ) for ref_id in ref_ids if ref_id }
+        if not wanted: return { }
+
+        resolved = { ref_id: None for ref_id in wanted }
+
+        parsed = { }
+        for ref_id in wanted:
+            try:
+                parsed[ uuid.UUID( ref_id ) ] = ref_id
+            except ( ValueError, AttributeError, TypeError ):
+                continue                                   # stays None: a dead reference
+
+        if parsed:
+            rows = (
+                self.session.query( TaskItem.id, TaskItem.status )
+                .filter( TaskItem.id.in_( list( parsed.keys() ) ) )
+                .all()
+            )
+            for row_id, row_status in rows:
+                resolved[ parsed[ row_id ] ] = row_status
+
+        return resolved
+
     def create_item(
         self,
         item_class          : str,
