@@ -1137,6 +1137,17 @@ def main():
 
     if session_id:
         os.makedirs( session_dir, exist_ok=True )
+        # Enforce setgid + group-rwx EXPLICITLY: makedirs' mode arg is umask-masked
+        # and ignored entirely when the dir already exists, so it cannot guarantee
+        # 2770. The setgid bit makes bridges written here inherit THIS dir's group,
+        # so a cross-uid writer (container uid 1001 ⇄ host) and reader share access
+        # regardless of who wrote last. See
+        # src/rnd/v0.1.9/2026.07.24-vm-persona-bridge-mount-uid-divergence.md.
+        try:
+            os.chmod( session_dir, 0o2770 )
+        except OSError as e:
+            print( f"[register_session] WARNING: could not set 2770 on {session_dir}: {e!r} "
+                   f"— cross-uid bridge sharing may fail", file=sys.stderr )
 
         hook_ppid    = os.getppid()
         cc_pid       = _resolve_cc_pid( hook_ppid )

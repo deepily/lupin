@@ -13,6 +13,7 @@ The seat stayed alive but became unaddressable by dm_send for twenty minutes.
 """
 import json
 import os
+import stat
 import pytest
 
 from lupin_cli.claude_code.hooks.lib.session_bridge import atomic_write_json
@@ -192,3 +193,38 @@ class TestAtomicWriteJson:
         assert atomic_write_json( str( p ), SHORT_DOC )
         assert atomic_write_json( p, LONG_DOC )
         assert json.loads( p.read_text() ) == LONG_DOC
+
+
+class TestBridgeIsGroupReadWrite:
+    """
+    Bridges must land group-rw (0o660), not mkstemp's default owner-only 0o600,
+    so a cross-uid reader/writer sharing the sessions dir's setgid group (the VM
+    container uid 1001 ⇄ host OS-Login uid) can read AND rewrite them. The mode is
+    set via os.fchmod on the temp fd BEFORE os.replace, so it is atomic with the
+    swap. See src/rnd/v0.1.9/2026.07.24-vm-persona-bridge-mount-uid-divergence.md.
+    """
+
+    def test_written_bridge_is_mode_0660( self, tmp_path ):
+        p = tmp_path / "cc-mode.json"
+        assert atomic_write_json( p, SHORT_DOC )
+        assert stat.S_IMODE( os.stat( p ).st_mode ) == 0o660
+
+    def test_mode_0660_survives_a_restrictive_umask( self, tmp_path ):
+        # fchmod sets the mode explicitly, so it must NOT be masked by a hostile
+        # umask (0o077 would otherwise strip every group bit). This is exactly the
+        # Blocker-1 failure mode the fchmod (vs relying on umask) defends against.
+        old = os.umask( 0o077 )
+        try:
+            p = tmp_path / "cc-umask.json"
+            assert atomic_write_json( p, LONG_DOC )
+            assert stat.S_IMODE( os.stat( p ).st_mode ) == 0o660
+        finally:
+            os.umask( old )
+
+    def test_rewrite_stays_0660( self, tmp_path ):
+        # The cross-writer path re-replaces an existing bridge; the new inode must
+        # also be 0o660, else the reverse reader loses access after a rewrite.
+        p = tmp_path / "cc-rewrite.json"
+        assert atomic_write_json( p, LONG_DOC )
+        assert atomic_write_json( p, SHORT_DOC )
+        assert stat.S_IMODE( os.stat( p ).st_mode ) == 0o660

@@ -2,6 +2,17 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-06-23 to 07-08](history/2026-06-23-to-07-08-history.md). History health: ✅ **HEALTHY at ~7.9k tokens (31% of 25k)** — archived 2026-07-21 by Mr. Radio 🦉 (session 56a74d7b), ~9.6k tokens moved to archive on Rick's ruling at the 17.5k WARNING threshold.
 
+### 2026.07.24 - Session b46c77e3 (Mr. Radio 🦉) | VM install debug: config guidance, permission promotion, global CLAUDE.md push, + persona-404 root cause & two-reviewer-approved fix (repo side landed)
+
+**Accomplishments** (solo VM-ops session for Rick; committed on `wip-v0.1.9`):
+1. **`~/.lupin/config` guidance** — clarified that the `[environments] default` only selects the notify client's api_url/key/recipient, NOT the server runtime profile (that's `lupin-app.ini`'s Development/Testing/Baseline via `LUPIN_CONFIG_MGR_CLI_ARGS`); env vars override the file entirely. Recommended `[local]`→`[testing]` rename + restoring the required `api_key_file` line.
+2. **Permissions promoted to the VM's user settings** — curated a portable, secret-free allowlist from the dev box's 500+-entry `settings.local.json` (dropped ~⅔ DATA01-pinned rules + all embedded creds), server-level `mcp__cosa-voice` rule kills the MCP prompts. SCP'd the merged `~/.claude/settings.json` to the VM (verified 99 rules, hooks/model preserved) — ended the per-tool permission storm.
+3. **Global `~/.claude/CLAUDE.md` pushed to the VM** (was absent) — closes the startup-procedure gap the VM session flagged.
+4. **VM persona-404 root-caused** — `request_persona` 404s because (a) `docker-compose.cloud-gpu.yml` mounts the whole `.claude` as the `claude-creds` named volume (OAuth persistence) with no `~/.claude/sessions` bind → the bridge dir is shadowed; (b) host OS-Login uid 1721846087 ≠ container uid 1001, bridges mode 600. `notify()` works because it's host-side. Works locally only because the dev host user *is* uid 1001.
+5. **Two-reviewer-approved fix, repo side implemented + green** — spawned an adversarial reviewer (Sam 🎙️) which caught a notify-outage regression + disproved (via a live VM test — `mkstemp` 0600 clamps the ACL mask to `---`) the zero-code ACL route; a second local-LLM expert approved the code route GO-WITH-CHANGES. Landed: `atomic_write_json` now `os.fchmod(fd, 0o660)` **before** `os.replace` (atomic, contract-preserving); `register_session.py` explicit `os.chmod(session_dir, 0o2770)` (setgid) after `makedirs`; 3 new mode tests (incl. restrictive-umask). **252 related unit tests green.** VM apply (compose bind-mount + `group_add` + parameterized GID/deploy-var + backfill + `--no-deps --force-recreate` + bidirectional cross-writer runtime test) is the **morning** step — nothing applied to the VM yet.
+
+**Files**: `src/rnd/v0.1.9/2026.07.24-vm-persona-bridge-mount-uid-divergence.md` (full design + both reviews + ACL-disproven receipt + FINAL PLAN v3), `src/lupin_cli/claude_code/hooks/lib/session_bridge.py`, `src/lupin_cli/claude_code/hooks/register_session.py`, `src/tests/unit/test_session_bridge_atomic_write.py`. VM-side (not in repo): pushed `~/.claude/settings.json` + `~/.claude/CLAUDE.md`; started the (plain, non-GPU) `lupin-host-test` instance.
+
 ### 2026.07.23 - Session 487f0265 (Mr. Radio 🦉) | VM host-CLI + direct Opus 4.8 via Vertex brought to parity; a 0/8-hooks gap closed at the source + full bring-up runbook
 
 **Accomplishments** (solo VM-ops session for Rick; all committed on `wip-v0.1.9`, `1f820857`→`12b45d4e`):

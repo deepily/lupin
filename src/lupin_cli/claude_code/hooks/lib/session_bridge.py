@@ -139,6 +139,15 @@ def atomic_write_json( path, data ):
         fd, tmp = tempfile.mkstemp( dir=os.path.dirname( path ) or ".", suffix=".tmp" )
         with os.fdopen( fd, "w" ) as f:
             json.dump( data, f, indent=2 )
+            f.flush()
+            # Widen to group-rw BEFORE the atomic replace so perms land with the
+            # swap (fchmod on the fd, not chmod on the path after os.replace — a
+            # post-replace failure would fire the stderr witness AFTER the doc
+            # already landed, and mkstemp's hardcoded 0600 masks any dir ACL to
+            # ---). Group-rw lets a cross-uid reader (container uid 1001 ⇄ host
+            # OS-Login uid, sharing the sessions dir's setgid group) read+rewrite
+            # the bridge. See src/rnd/v0.1.9/2026.07.24-vm-persona-bridge-mount-uid-divergence.md.
+            os.fchmod( f.fileno(), 0o660 )
         os.replace( tmp, path )
         return True
     except ( OSError, TypeError, ValueError ) as e:
