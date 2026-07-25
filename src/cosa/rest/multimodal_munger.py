@@ -92,7 +92,17 @@ class MultiModalMunger:
         self.punctuation            = du.get_file_as_dictionary( du.get_project_root() + "/src/conf/translation-dictionary.map", lower_case=True, debug=self.debug )
         self.domain_names           = du.get_file_as_dictionary( du.get_project_root() + "/src/conf/domain-names.map",           lower_case=True )
         self.numbers                = du.get_file_as_dictionary( du.get_project_root() + "/src/conf/numbers.map",                lower_case=True )
-        self.contact_info           = du.get_file_as_dictionary( du.get_project_root() + "/src/conf/contact-information.map",    lower_case=True )
+        # OPTIONAL BY CONSTRUCTION — unlike its four siblings here, this map is
+        # gitignored (.gitignore:65) because it holds personal contact details, so
+        # it is ABSENT on every fresh deploy until someone ships it out-of-band.
+        # Loading it eagerly held EVERY transcription hostage to a file that only
+        # contact-info commands need: on the GCP VM a perfectly good transcription
+        # 500'd with "No such file or directory: .../contact-information.map"
+        # (2026-07-25). Degrade to {} here — and see munge_multimodal_contact_info,
+        # which REFUSES loudly rather than answering "N/A" from an empty map. The
+        # other four maps stay strict: they are tracked, so a missing one is real
+        # misconfiguration and must fail loudly.
+        self.contact_info           = self._load_optional_contact_info()
         self.prompt_dictionary      = du.get_file_as_dictionary( du.get_project_root() + "/src/conf/prompt-dictionary.map",      lower_case=True )
         self.prompt                 = du.get_file_as_string( du.get_project_root() + self.prompt_dictionary.get( prompt_key, "generic" ) )
         self.command_strings        = self._get_command_strings()
@@ -933,6 +943,20 @@ class MultiModalMunger:
         # # There could be more words included here, but they're superfluous, we're only looking for the 1st word After three have been stripped out already.
         # contact_info_key = raw_transcription.split()[ 0 ]
         contact_info_key = raw_transcription
+
+        # REFUSE, don't degrade. The constructor tolerates a missing map so that
+        # ordinary transcription survives — but an empty map here would hand the
+        # caller "N/A" (the .get default below) or a bare KeyError (the "full all"
+        # branch), i.e. a plausible-looking wrong answer in place of a loud
+        # failure. Tolerance at LOAD time is only safe because USE time refuses.
+        if not self.contact_info:
+            raise RuntimeError(
+                f"contact-info command [{contact_info_key}] cannot be served: "
+                f"[{du.get_project_root() + self.CONTACT_INFO_PATH}] is missing. "
+                f"It is gitignored by design (personal data), so a fresh deploy "
+                f"never receives it — install it out-of-band, as with src/conf/keys."
+            )
+
         contact_info     = self.contact_info.get( contact_info_key, "N/A" )
         
         print( "contact_info_key:", contact_info_key )
@@ -1389,6 +1413,42 @@ class MultiModalMunger:
         
         return [ response ]
         
+    CONTACT_INFO_PATH = "/src/conf/contact-information.map"
+
+    def _load_optional_contact_info( self ) -> dict:
+        """
+        Load the contact-information map, tolerating its absence.
+
+        This map is gitignored (personal data), so it is legitimately missing on
+        a fresh deploy. Absence must NOT take down transcription, which is what
+        it did on the GCP VM 2026-07-25 — but absence must also never be papered
+        over, so this WARNS at load and munge_text_contact() refuses outright
+        rather than serving "N/A" from an empty dict.
+
+        Requires:
+            - nothing
+
+        Ensures:
+            - returns the parsed map when the file is present
+            - returns {} when the file is absent or unreadable, after printing a
+              warning that names the file AND the capability that is degraded
+            - never raises
+
+        Raises:
+            - nothing; a missing optional map is a degraded capability, not an
+              error, and the error belongs at the point of USE
+        """
+        path = du.get_project_root() + self.CONTACT_INFO_PATH
+        try:
+            return du.get_file_as_dictionary( path, lower_case=True )
+        except OSError:
+            print(
+                f"[WARN] optional contact map absent at [{path}] — transcription "
+                f"is UNAFFECTED; contact-info voice commands will refuse until it "
+                f"is installed (gitignored by design, ship it out-of-band)"
+            )
+            return {}
+
     def _get_command_strings( self ) -> list[str]:
         """
         Load command strings from configuration file.

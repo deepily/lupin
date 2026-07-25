@@ -1,6 +1,31 @@
 # TODO
 
-Last updated: 2026-07-24 (session b46c77e3, Mr. Radio 🦉 — VM install debug: persona-404 root cause + two-reviewer-approved code-route fix, repo side landed)
+Last updated: 2026-07-25 (session 43ff094e, Mr. Radio 🦉 — VM persona-404 APPLIED + verified; STT 401 root-caused + fixed; drift check shipped)
+
+---
+
+## 📥 BACKLOG 2026-07-25 (Rick's idea, captured by Mr. Radio 🦉 `43ff094e`) — ASR warm-up endpoint to pre-heat Cloud Run
+
+**Status**: possible FUTURE performance improvement. Not owed work, no store row, not scheduled. Rick's framing: *"I want to be able to warm up cloud run before I actually use the app. And a voice to text warm up endpoint would be great."*
+
+**The problem**: `lupin-model-server` is a scale-to-zero L4 Cloud Run service (`minScale=0`, deliberate — Rick 2026-07-25: *"cloud run should not be warm during the day… I don't want to pay for it sitting there doing nothing"*). So the FIRST voice interaction of a session eats the cold start. Measured today: **32.0s** wall clock for the first authenticated call, versus **4.1s** for a transcribe against an already-warm instance. That ~28s is paid by whoever speaks first.
+
+**Design note that makes this cheap — measured, not assumed.** The warm-up does NOT need to send audio. The model server eager-loads its pipelines at startup (`_load_whisper()`, "Eager-load distil-whisper pipeline to GPU 0"), so ANY request that causes an instance to start also loads the models. Receipt from today's cold start:
+```
+GET /health  →  HTTP 200 in 32.0s
+{"status":"ready","models_loaded":["whisper","code_rank_embed","nomic_embed_text_v1_5"],
+ "vram_used_mb":2496,"uptime_seconds":25,"load_errors":[]}
+```
+`uptime_seconds: 25` on a 32s call ⇒ that call STARTED the instance, and by the time it answered the models were already resident. **An authenticated `GET /health` is a complete warm-up.** No audio round-trip, no `/transcribe`, no upload — which also means the warm-up costs nothing beyond the instance-start it is deliberately buying.
+
+**Sketch** (whoever picks this up should re-derive, not trust this):
+- A Lupin endpoint (e.g. `POST /api/asr/warm`) that fires the authenticated `GET {LUPIN_MODEL_SERVER_URL}/health` and returns promptly — the caller wants "I started it", not "I waited for it".
+- Fire-and-forget / non-blocking, so the UI can trigger it on page load or on mic-button focus without stalling.
+- Idempotent + cheap to call repeatedly; a warm instance answers in ms.
+- Honest reporting: return whether the instance was already warm (`uptime_seconds`) vs just started, so the UI can say "ready" vs "warming, ~30s".
+- ⚠️ **Cost coupling** — this is the one thing to think hard about. A warm-up trigger wired to something automatic (page load, a poll, a heartbeat) re-creates by the back door exactly the always-warm billing Rick just rejected. It should be USER-INTENT-driven (mic focus, an explicit button) or explicitly rate-limited, and that constraint belongs in the design, not in a comment.
+
+**Related**: today's STT 401 (row `30198303`, closed) and `src/cosa/utils/secret_drift.py`. The warm-up path would exercise the same auth chain, so it doubles as an early-warning probe for key drift — but see the `unknown`-is-not-a-pass rule in that module before treating a warm-up failure as a health signal.
 
 ---
 
