@@ -139,6 +139,18 @@ services:
       - ./src:/var/lupin/src
       - ./io:/var/lupin/io
       - ./pytest.ini:/var/lupin/pytest.ini:ro
+      # Repo-root deploy artifacts the unit suite ASSERTS ABOUT (bug b5b6d252).
+      # Without these, 19 unit tests fail in-container with FileNotFoundError
+      # while passing on the host — the merge gate publishing environment noise
+      # as test failures, which trains readers to discount its red. Read-only:
+      # the tests only ever read them, and a writable mount would let a test
+      # rewrite the deploy config it is asserting about.
+      - ./docker-compose.yml:/var/lupin/docker-compose.yml:ro
+      - ./docker-compose.cloud-gpu.yml:/var/lupin/docker-compose.cloud-gpu.yml:ro
+      - ./docker-compose.cloud-test.yml:/var/lupin/docker-compose.cloud-test.yml:ro
+      - ./docker/lupin/Dockerfile:/var/lupin/docker/lupin/Dockerfile:ro
+      - ./.dockerignore:/var/lupin/.dockerignore:ro
+      - ./.docview.yml:/var/lupin/.docview.yml:ro
       - ./.git:/var/lupin/.git
       # TFE/BFE worktrees preserved under host project root so operator can
       # inspect agent commits after Phase 5 even across container rm.
@@ -222,6 +234,18 @@ services:
       - ./src:/var/lupin/src
       - ./io:/var/lupin/io
       - ./pytest.ini:/var/lupin/pytest.ini:ro
+      # Repo-root deploy artifacts the unit suite ASSERTS ABOUT (bug b5b6d252).
+      # Without these, 19 unit tests fail in-container with FileNotFoundError
+      # while passing on the host — the merge gate publishing environment noise
+      # as test failures, which trains readers to discount its red. Read-only:
+      # the tests only ever read them, and a writable mount would let a test
+      # rewrite the deploy config it is asserting about.
+      - ./docker-compose.yml:/var/lupin/docker-compose.yml:ro
+      - ./docker-compose.cloud-gpu.yml:/var/lupin/docker-compose.cloud-gpu.yml:ro
+      - ./docker-compose.cloud-test.yml:/var/lupin/docker-compose.cloud-test.yml:ro
+      - ./docker/lupin/Dockerfile:/var/lupin/docker/lupin/Dockerfile:ro
+      - ./.dockerignore:/var/lupin/.dockerignore:ro
+      - ./.docview.yml:/var/lupin/.docview.yml:ro
       - ./.git:/var/lupin/.git
       # TFE/BFE worktrees preserved under host project root so operator can
       # inspect agent commits after Phase 5 even across container rm.

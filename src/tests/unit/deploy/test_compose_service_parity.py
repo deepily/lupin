@@ -64,6 +64,40 @@ KNOWN_DIVERGENT_MOUNTS = {
         "cloud-test": "2026-07-26 — test-runner config; the cloud legs are not test venues.",
         "cloud-gpu" : "2026-07-26 — same.",
     },
+    # ── repo-root deploy artifacts the UNIT SUITE asserts about (bug b5b6d252) ──
+    # Mounted read-only into dev + test because 19 unit tests read them and were
+    # failing in-container with FileNotFoundError while passing on the host.
+    #
+    # The exemption is scoped to WHO RUNS THE UNIT SUITE, not to "cloud legs are
+    # different". That distinction is load-bearing: a blanket cloud-legs-differ
+    # reason would ALSO excuse a cloud leg losing a mount it genuinely needs,
+    # which is the KNOWN_DIVERGENT near-miss this file already carries once. If a
+    # cloud leg ever runs the unit suite, these entries must go, and the predicate
+    # says so rather than leaving it to memory.
+    "/var/lupin/docker-compose.yml": {
+        "cloud-test": "2026-07-26 — read by unit tests only; the cloud legs do not run the unit suite.",
+        "cloud-gpu" : "2026-07-26 — same.",
+    },
+    "/var/lupin/docker-compose.cloud-gpu.yml": {
+        "cloud-test": "2026-07-26 — see /var/lupin/docker-compose.yml.",
+        "cloud-gpu" : "2026-07-26 — see /var/lupin/docker-compose.yml.",
+    },
+    "/var/lupin/docker-compose.cloud-test.yml": {
+        "cloud-test": "2026-07-26 — see /var/lupin/docker-compose.yml.",
+        "cloud-gpu" : "2026-07-26 — see /var/lupin/docker-compose.yml.",
+    },
+    "/var/lupin/docker/lupin/Dockerfile": {
+        "cloud-test": "2026-07-26 — see /var/lupin/docker-compose.yml.",
+        "cloud-gpu" : "2026-07-26 — see /var/lupin/docker-compose.yml.",
+    },
+    "/var/lupin/.dockerignore": {
+        "cloud-test": "2026-07-26 — see /var/lupin/docker-compose.yml.",
+        "cloud-gpu" : "2026-07-26 — see /var/lupin/docker-compose.yml.",
+    },
+    "/var/lupin/.docview.yml": {
+        "cloud-test": "2026-07-26 — see /var/lupin/docker-compose.yml.",
+        "cloud-gpu" : "2026-07-26 — see /var/lupin/docker-compose.yml.",
+    },
     "/home/rruiz/.lora_env": {
         "cloud-test": "2026-07-26 — PEFT/LoRA training env, dev-box only.",
         "cloud-gpu" : "2026-07-26 — same.",
