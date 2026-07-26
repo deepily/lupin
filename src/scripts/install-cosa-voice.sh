@@ -203,12 +203,85 @@ else
     fi
 fi
 
+# 5a. Outbound X-API-Key readable BY THIS USER
+#
+# The MCP server reads this key to authenticate its outbound calls to
+# /api/dm/* and /api/tasks/*. It is gitignored (src/conf/keys/**), so on a
+# freshly provisioned host it is copied in out-of-band — and can land owned by
+# a different uid. On lupin-host-test (2026-07-25) it arrived mode 600 owned by
+# uid 1001 while the MCP server ran as the login user: the file EXISTED, so an
+# existence check would have passed, and every DM verb failed with
+# missing_auth_header. Test readability, not presence.
+API_KEY_FILE="$LUPIN_ROOT/src/conf/keys/notification-api-claude-code-dev"
+if [ ! -f "$API_KEY_FILE" ]; then
+    fail_check "outbound API key not found: $API_KEY_FILE"
+    echo ""
+    echo "    Without it the MCP server's DM and task-store verbs fail with"
+    echo "    missing_auth_header. Copy the key from a provisioned host:"
+    echo "      scp <host>:$API_KEY_FILE $API_KEY_FILE"
+    echo ""
+    exit 1
+elif [ ! -r "$API_KEY_FILE" ]; then
+    fail_check "outbound API key present but NOT READABLE by $(whoami) (uid $(id -u))"
+    echo ""
+    echo "    $( stat -c 'mode %a, owner uid %u' "$API_KEY_FILE" 2>/dev/null )"
+    echo ""
+    echo "    The MCP server runs as you — it cannot read this file, so DM and"
+    echo "    task-store verbs will fail with missing_auth_header. Remedy:"
+    echo "      sudo chmod 644 $API_KEY_FILE"
+    echo ""
+    exit 1
+else
+    pass_check "outbound API key readable"
+fi
+
 # 6. Server reachable (soft check)
 SERVER_URL="${LUPIN_APP_SERVER_URL:-http://localhost:7999}"
 if curl -s --head --max-time 2 "$SERVER_URL/docs" > /dev/null 2>&1; then
     pass_check "Lupin server reachable at $SERVER_URL"
+    SERVER_REACHABLE=1
 else
     warn_check "Lupin server not reachable at $SERVER_URL (start with run-fastapi-lupin.sh)"
+    SERVER_REACHABLE=0
+fi
+
+# 6a. Outbound X-API-Key ACCEPTED by that server
+#
+# Readability (5a) is necessary but not sufficient. API keys are registered
+# per-host in the server's own database, while `src/conf/keys/**` is gitignored
+# and therefore copied in by hand — so a host can end up holding a perfectly
+# readable key that belongs to a DIFFERENT deployment.
+#
+# That is precisely what lupin-host-test held on 2026-07-25: the dev box's key,
+# rsync'd in during provisioning, readable, correct in shape, and answered 401
+# "Invalid or inactive API key" by the test server. Two failures stacked — a
+# permission one hiding a wrong-value one — and fixing only the first moved the
+# error from missing_auth_header to 401 without restoring service.
+#
+# A deployment health check, which is the one sanctioned use of curl here.
+if [ "$SERVER_REACHABLE" = "1" ]; then
+    KEY_VALUE="$( tr -d '[:space:]' < "$API_KEY_FILE" )"
+    AUTH_CODE="$( curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
+                  -H "X-API-Key: $KEY_VALUE" "$SERVER_URL/api/dm/list?limit=1" 2>/dev/null )"
+    case "$AUTH_CODE" in
+        200)
+            pass_check "outbound API key accepted by $SERVER_URL"
+            ;;
+        401|403)
+            fail_check "outbound API key REJECTED by $SERVER_URL (HTTP $AUTH_CODE)"
+            echo ""
+            echo "    The key is readable but not registered/active on THIS server."
+            echo "    A key copied from another deployment reads fine and authenticates"
+            echo "    nowhere. Install this host's own key:"
+            echo "      sudo cp ~/.lupin/notification-api.key $API_KEY_FILE"
+            echo "      sudo chmod 644 $API_KEY_FILE"
+            echo ""
+            exit 1
+            ;;
+        *)
+            warn_check "outbound API key check inconclusive (HTTP ${AUTH_CODE:-none} from $SERVER_URL/api/dm/list)"
+            ;;
+    esac
 fi
 
 echo ""

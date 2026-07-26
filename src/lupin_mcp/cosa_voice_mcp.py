@@ -2702,6 +2702,7 @@ def list_spawned_sessions() -> dict:
 # Tools redundantly check `_commons_enabled()` at call-time as defense per AC12;
 # step 6/8 will wire the actual INI key.
 
+from lupin_mcp.outbound_api_key import load_outbound_api_key, outbound_key_failure_detail as _outbound_key_failure_detail
 from lupin_mcp.commons_store import CommonsStore, DEFAULT_PERSONA_NAME, DEFAULT_PERSONA_ICON, DEFAULT_PERSONA_COLOR
 from lupin_mcp.commons_ask import ask_sync as _commons_ask_sync_impl, ask_async as _commons_ask_async_impl
 from lupin_mcp.commons_archival import CommonsArchiver
@@ -2723,18 +2724,20 @@ def _mcp_outbound_api_key() -> Optional[ str ]:
     that env var was added in commit `9bbf298` (Inter-Session DM Phase 0)
     without matching set-side wiring, so it was always None and push-mode
     silently fell through to polling. Switching to the canonical helper
-    eliminates the wire-up gap entirely.
+    eliminated the wire-up gap entirely.
+
+    The load itself now lives in `lupin_mcp.outbound_api_key` so the failure
+    REASON survives — the bare `except Exception: return None` that used to sit
+    here erased a `PermissionError` on a mode-600 key file and left every caller
+    reporting a blank "X-API-Key unavailable" (lupin-host-test, 2026-07-25).
 
     Ensures:
         - Returns the key string if `src/conf/keys/notification-api-claude-code-dev` is readable
-        - Returns None on any error (silent fallback to polling)
+        - Returns None on any error, with a concrete cause recorded for
+          `_outbound_key_failure_detail()` to report
         - Never raises
     """
-    try:
-        import cosa.utils.util as du
-        return du.get_api_key( "notification-api-claude-code-dev" )
-    except Exception:
-        return None
+    return load_outbound_api_key()
 
 _commons_store_singleton:    Optional[ CommonsStore ]     = None
 _commons_archiver_singleton: Optional[ CommonsArchiver ]  = None
@@ -3260,7 +3263,7 @@ def _dm_send_impl(
     """
     if not api_key:
         return { "status": "error", "reason": "missing_auth_header",
-                 "detail": "MCP outbound X-API-Key unavailable; cannot reach /api/dm/send" }
+                 "detail": _outbound_key_failure_detail( "/api/dm/send" ) }
 
     payload = {
         "sender_session_id" : session_id,
@@ -3423,7 +3426,7 @@ def _dm_respond_impl(
     """
     if not api_key:
         return { "status": "error", "reason": "missing_auth_header",
-                 "detail": "MCP outbound X-API-Key unavailable; cannot reach /api/dm/respond" }
+                 "detail": _outbound_key_failure_detail( "/api/dm/respond" ) }
 
     payload = {
         "sender_session_id" : session_id,
@@ -3476,7 +3479,7 @@ def _dm_get_impl( *, message_id, api_base_url, api_key, get_fn ):
     """
     if not api_key:
         return { "status": "error", "reason": "missing_auth_header",
-                 "detail": "MCP outbound X-API-Key unavailable; cannot reach /api/dm/get" }
+                 "detail": _outbound_key_failure_detail( "/api/dm/get" ) }
 
     url = f"{api_base_url}/api/dm/get"
     try:
@@ -3517,7 +3520,7 @@ def _dm_list_impl( *, thread_id, since, limit, api_base_url, api_key, get_fn,
     """
     if not api_key:
         return { "status": "error", "reason": "missing_auth_header",
-                 "detail": "MCP outbound X-API-Key unavailable; cannot reach /api/dm/list" }
+                 "detail": _outbound_key_failure_detail( "/api/dm/list" ) }
 
     params = { "limit": limit }
     if thread_id:

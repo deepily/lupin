@@ -19,6 +19,7 @@ Failure contract (spec §4):
 import requests
 
 from cosa.agents.utils.sender_id import canonicalize_project_name
+from lupin_mcp.outbound_api_key import outbound_key_failure_detail
 
 # Transport timeout for /api/tasks/* calls. Deliberately finite: a hung store
 # must surface as a `server_unreachable` error dict, never a hung tool call.
@@ -49,7 +50,9 @@ def task_store_request( method, path, api_base_url, api_key, json_body=None, par
         - returns the parsed 2xx JSON body verbatim on success
         - returns {"status": "error", "reason": "missing_auth_header", ...}
           when api_key is None (key file unreadable — same failure surface as
-          the commons register-question lane)
+          the commons register-question lane), whose `detail` names the
+          concrete cause: absent file, or mode + owner uid when it is present
+          but unreadable by this process
         - returns {"status": "error", "reason": "server_unreachable", ...}
           on any connection/timeout/transport failure — NEVER raises
         - HTTP 422 -> {"status": "error", "http_status": 422,
@@ -65,7 +68,7 @@ def task_store_request( method, path, api_base_url, api_key, json_body=None, par
         return {
             "status" : "error",
             "reason" : "missing_auth_header",
-            "detail" : "outbound X-API-Key could not be loaded (src/conf/keys/notification-api-claude-code-dev unreadable?)",
+            "detail" : outbound_key_failure_detail( path ),
         }
 
     url     = f"{api_base_url}{path}"
