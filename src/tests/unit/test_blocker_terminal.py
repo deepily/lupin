@@ -115,14 +115,20 @@ def test_a_live_blocker_is_never_flagged( live_status ):
     assert blocker_is_terminal( BLOCKED_STATUS, [ _item_ref( "a" ) ], { "a": live_status } ) is False
 
 
-def test_an_id_looked_up_and_absent_is_flagged():
+def test_a_CANONICAL_id_looked_up_and_absent_is_flagged():
     """
-    Present-as-None means RESOLVED AND MISSING. On a typed {kind:"item"} field there is
-    no ambiguity about what an unresolvable id is — the collision reasoning that keeps
-    "absent" out of the finding bucket for PROSE scanning (8-hex tokens collide with
-    commit shas and amendment session ids) does not transfer to a typed edge.
+    Present-as-None means RESOLVED AND MISSING — a finding, but ONLY for a canonical id.
+
+    🔴 THIS TEST USED TO PASS `"a"` AND ASSERT True, and it was wrong in the direction that
+    matters. Its docstring reasoned that "on a typed {kind:'item'} field there is no
+    ambiguity about what an unresolvable id is" — true of hex/sha collisions, FALSE of
+    WIDTH. `"a"` is not a task id in any spelling, so the old assertion licensed condemning
+    every unresolvable string, which is precisely how a live prefix edge got condemned on
+    the real board (see the width section below). Fixed to the canonical form, which is the
+    only spelling whose non-resolution cannot be explained by abbreviation.
     """
-    assert blocker_is_terminal( BLOCKED_STATUS, [ _item_ref( "a" ) ], { "a": None } ) is True
+    dead = "00000000-0000-4000-8000-000000000000"
+    assert blocker_is_terminal( BLOCKED_STATUS, [ _item_ref( dead ) ], { dead: None } ) is True
 
 
 def test_an_id_never_looked_up_yields_no_finding():
@@ -189,8 +195,14 @@ def test_the_predicate_returns_a_real_bool_on_every_arm():
 # ---------------------------------------------------------------- repository contract
 
 class _FakeQuery:
+    """
+    Minimal SQLAlchemy Query stand-in. `limit` was added when `statuses_for_ids` grew its
+    prefix arm — without it the stub raised AttributeError, which is the fake drifting
+    behind the code it stands in for, not a defect in the code.
+    """
     def __init__( self, rows ): self._rows = rows
     def filter( self, *a, **k ):  return self
+    def limit(  self, *a, **k ):  return self
     def all( self ):              return self._rows
 
 
@@ -222,6 +234,9 @@ def test_statuses_for_ids_maps_a_non_uuid_to_none_rather_than_raising():
     """
     `blocked_by` is app-typed JSON, so a non-UUID id genuinely reached the column.
     Raising here would take the whole query down over one bad edge.
+
+    Post-width-fix this also runs the PREFIX arm: a non-UUID now gets a prefix lookup
+    before being given up on, and must still land as None when nothing matches.
     """
     repo   = _repo_with_rows( [ ] )
     result = repo.statuses_for_ids( [ "not-a-uuid", "" ] )
@@ -233,3 +248,90 @@ def test_statuses_for_ids_issues_no_query_when_there_is_nothing_to_ask():
     session = MagicMock()
     assert TaskRepository( session ).statuses_for_ids( [ ] ) == { }
     session.query.assert_not_called()
+
+
+# ---------------------------------------------------------------- the width defect
+#
+# María 🌸 (fae1bbc4) measured this on a live row within an hour of the flag shipping:
+# `91067e47` stores its blocker as the 8-char prefix "e2f11f6f"; the real row is
+# e2f11f6f-f3f8-4e73-ac94-e573f45da3ea, status `queued` — ALIVE. Exact-match lookup found
+# nothing, and the predicate read looked-up-and-missing as DEAD. It CONDEMNED A LIVE ROW,
+# inverting this function's own stated lie-direction, on the arm whose disposition is
+# "auto-rejoin, mechanical, no ruling needed".
+
+_FULL   = "e2f11f6f-f3f8-4e73-ac94-e573f45da3ea"
+_PREFIX = "e2f11f6f"
+
+
+@pytest.mark.parametrize( "value,expected", [
+    ( _FULL,                                  True  ),
+    ( _PREFIX,                                False ),
+    ( "e2f11f6ff3f84e73ac94e573f45da3ea",     False ),   # compact 32, no dashes
+    ( "not-a-uuid-at-all-not-even-close--",   False ),
+    ( None,                                   False ),
+    ( 12345,                                  False ),
+] )
+def test_is_canonical_uuid( value, expected ):
+    from cosa.rest.task_store_owed import is_canonical_uuid
+    assert is_canonical_uuid( value ) is expected
+
+
+def test_an_UNRESOLVED_PREFIX_blocker_is_NOT_condemned():
+    """
+    THE REGRESSION, stated as the live instance. A prefix that failed to resolve means
+    'I cannot tell' — never 'it is dead'.
+    """
+    assert blocker_is_terminal( BLOCKED_STATUS, [ _item_ref( _PREFIX ) ], { _PREFIX: None } ) is False
+
+
+def test_an_UNRESOLVED_FULL_UUID_blocker_IS_still_condemned():
+    """
+    THE NEGATIVE CONTROL — without it the fix could have been "never flag an unresolved
+    id", silently retiring the dead-edge finding this row exists for.
+    """
+    assert blocker_is_terminal( BLOCKED_STATUS, [ _item_ref( _FULL ) ], { _FULL: None } ) is True
+
+
+def test_a_PREFIX_that_RESOLVES_is_judged_on_its_status():
+    """Width gates only the UNRESOLVED arm."""
+    assert blocker_is_terminal( BLOCKED_STATUS, [ _item_ref( _PREFIX ) ], { _PREFIX: "dropped" } ) is True
+    assert blocker_is_terminal( BLOCKED_STATUS, [ _item_ref( _PREFIX ) ], { _PREFIX: "queued"  } ) is False
+
+
+def test_the_discriminating_pair_from_the_live_board():
+    """
+    María's fixture, verbatim: same truth ("the blocker is alive"), and before the fix
+    OPPOSITE flags, with ID WIDTH as the only variable.
+    """
+    prefix_edge = blocker_is_terminal( BLOCKED_STATUS, [ _item_ref( _PREFIX ) ], { _PREFIX: "queued" } )
+    full_edge   = blocker_is_terminal( BLOCKED_STATUS, [ _item_ref( _FULL   ) ], { _FULL:   "queued" } )
+    assert prefix_edge is False and full_edge is False
+    assert prefix_edge == full_edge, "id width must not change the verdict on a live blocker"
+
+
+def test_statuses_for_ids_resolves_a_prefix_the_way_task_get_does():
+    from cosa.rest.db.repositories.task_repository import TaskRepository
+
+    class _Row: status = "queued"
+
+    session = MagicMock()
+    session.query.return_value = _FakeQuery( [ ] )          # exact-match arm finds nothing
+    repo = TaskRepository( session )
+    repo.find_by_id_prefix = lambda p, limit=10: [ _Row() ]
+    assert repo.statuses_for_ids( [ _PREFIX ] ) == { _PREFIX: "queued" }
+
+
+def test_an_AMBIGUOUS_prefix_stays_unresolved_and_is_not_condemned():
+    """Two matches means the store cannot say which row the edge names."""
+    from cosa.rest.db.repositories.task_repository import TaskRepository
+
+    class _Row: status = "done"
+
+    session = MagicMock()
+    session.query.return_value = _FakeQuery( [ ] )
+    repo = TaskRepository( session )
+    repo.find_by_id_prefix = lambda p, limit=10: [ _Row(), _Row() ]
+
+    resolved = repo.statuses_for_ids( [ _PREFIX ] )
+    assert resolved == { _PREFIX: None }
+    assert blocker_is_terminal( BLOCKED_STATUS, [ _item_ref( _PREFIX ) ], resolved ) is False

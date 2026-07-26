@@ -266,3 +266,54 @@ def test_a_validated_ledger_carries_NO_warning( sweep_dir ):
     """The negative control — the warning must not fire on a correctly-armed ledger."""
     board_sweep.record_reviewed( "mr radio", [ "a" ], total_at_start=2, board_ids=[ "a", "b" ] )
     assert "UNVERIFIED" not in board_sweep.sweep_progress_line( "mr radio" )
+
+
+# ---------------------------------------------------------------- re-arm must not un-freeze
+#
+# María 🌸's third catch of the evening, and the sharpest: the first re-arm helper
+# INTERSECTED prior progress with the live board. A row reviewed-and-closed is terminal and
+# has left the live board, so it was discarded from `reviewed` AND the denominator
+# re-derived from the same shrunken list. Re-arming un-froze the freeze. Close ten of
+# seventy-one, re-arm, and the gate silently becomes 61.
+
+def test_rearm_carries_completed_rows_INTO_the_frozen_set( sweep_dir ):
+    """THE REGRESSION. A row that left the live board BY BEING REVIEWED still counts."""
+    board_sweep.record_reviewed( "maria", [ "closed-by-me", "a" ],
+                                 total_at_start=3, board_ids=[ "closed-by-me", "a", "b" ] )
+    live = [ "a", "b" ]                                   # `closed-by-me` is now terminal
+
+    ledger, carried, total = board_sweep.rearm( "maria", live )
+
+    assert total   == 3, "the denominator SHRANK — re-arming un-froze the freeze"
+    assert carried == 2, "completed work was discarded from the numerator"
+    assert "closed-by-me" in ledger[ "board_ids" ]
+    assert "2/3" in board_sweep.sweep_progress_line( "maria" )
+
+
+def test_rearm_admits_rows_that_are_NEW_on_the_live_board( sweep_dir ):
+    """Union in both directions — a row minted mid-sweep joins the set."""
+    board_sweep.record_reviewed( "maria", [ "a" ], total_at_start=2, board_ids=[ "a", "b" ] )
+    _, _, total = board_sweep.rearm( "maria", [ "a", "b", "freshly-minted" ] )
+    assert total == 3
+    board_sweep.record_reviewed( "maria", [ "freshly-minted" ] )     # accepted, not a stray
+
+
+def test_rearm_from_no_prior_ledger_is_just_a_start( sweep_dir ):
+    ledger, carried, total = board_sweep.rearm( "mr radio", [ "a", "b", "c" ] )
+    assert ( carried, total ) == ( 0, 3 )
+    assert "0/3" in board_sweep.sweep_progress_line( "mr radio" )
+
+
+def test_rearm_still_enforces_membership_afterwards( sweep_dir ):
+    """The re-armed ledger is a VALIDATED one — the junk floor survives a re-arm."""
+    board_sweep.rearm( "mr radio", [ "a" ] )
+    with pytest.raises( ValueError ):
+        board_sweep.record_reviewed( "mr radio", [ "deadbeef-0000-0000-0000-000000000000" ] )
+    assert "UNVERIFIED" not in board_sweep.sweep_progress_line( "mr radio" )
+
+
+def test_rearm_refuses_an_unreadable_prior_ledger( sweep_dir ):
+    """Silently starting over would erase a seat's whole sweep and report success."""
+    ( sweep_dir / "board-sweep-mr-radio.json" ).write_text( "{ broken", encoding="utf-8" )
+    with pytest.raises( ValueError ):
+        board_sweep.rearm( "mr radio", [ "a" ] )

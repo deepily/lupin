@@ -268,6 +268,62 @@ def record_reviewed( persona, task_ids, total_at_start=None, board_ids=None ):
     return ledger
 
 
+def rearm( persona, live_board_ids ):
+    """
+    Re-create a seat's ledger against a fresh board WITHOUT losing progress or un-freezing
+    the denominator.
+
+    🔴 THE DEFECT THIS EXISTS TO NOT HAVE (María 🌸, `fae1bbc4`, 2026-07-25 — the third time
+       in one evening she found the frozen-denominator property re-derived incorrectly one
+       layer out). The first re-arm helper did:
+
+           kept = [ r for r in prior["reviewed"] if r in set( live_ids ) ]   # INTERSECTION
+           total_at_start = len( live_ids )
+
+       A row you REVIEWED AND CLOSED is terminal, so it has left the live board. The
+       intersection discards it from `reviewed`, AND the denominator re-derives from that
+       same shrunken list. ⇒ RE-ARMING UN-FREEZES THE DENOMINATOR. Close ten rows, re-arm,
+       and a 71-row gate silently becomes 61 — the seat is PUNISHED FOR MAKING PROGRESS,
+       and the gate lets it stop having reviewed 61.
+
+       The freeze held only so long as nobody re-armed, and re-arming was the published
+       remedy for the previous defect. A property built correctly in one place and
+       re-derived in another is not a property.
+
+    ⇒ THE FIX IS ONE WORD: UNION, not intersection. The frozen set is everything on the
+      live board PLUS everything already reviewed — because a reviewed row that has left
+      the board left it BY BEING REVIEWED.
+
+    ⚠️ IT IS ALSO `blocker_terminal`'s SHAPE AGAIN, and that is the lesson worth keeping:
+       "absent from the live board" means BOTH "I closed it" and "it was never mine", and
+       the code cannot tell those apart. Both of tonight's flag bugs were an absence with
+       two meanings.
+
+    Requires:
+        - persona is the seat's display name
+        - live_board_ids is the CURRENT owed-row id set for that seat
+
+    Ensures:
+        - the frozen start-set is union( live_board_ids, prior reviewed ) — never an
+          intersection, so completed work can neither shrink the denominator nor be
+          discarded from the numerator
+        - prior `reviewed` entries are carried forward in full
+        - returns ( ledger, carried_forward_count, frozen_total )
+        - raises ValueError on an unreadable prior ledger rather than silently starting over
+    """
+    prior, error = read_ledger( persona )
+    if error: raise ValueError( f"refusing to re-arm over an unusable ledger: {error}" )
+
+    reviewed = [ str( r ) for r in ( prior or { } ).get( "reviewed", [ ] ) ]
+    frozen   = sorted( { str( b ) for b in live_board_ids } | set( reviewed ) )
+
+    path = ledger_path( persona )
+    if path is not None and path.exists(): path.unlink()
+
+    ledger = record_reviewed( persona, reviewed, total_at_start=len( frozen ), board_ids=frozen )
+    return ledger, len( reviewed ), len( frozen )
+
+
 def quick_smoke_test():
     """Self-contained smoke test — writes only inside a temp dir."""
     import tempfile

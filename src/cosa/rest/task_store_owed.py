@@ -90,6 +90,8 @@ resolve it at the boundary. An internally-sourced clock makes the boundary case
 where that test goes flaky.
 """
 
+import uuid
+
 from datetime import datetime, timezone
 
 from cosa.rest.task_store_rules import (
@@ -414,6 +416,30 @@ def item_blocker_ids( blocked_by ):
     return ids
 
 
+def is_canonical_uuid( value ):
+    """
+    True iff `value` is a full canonical UUID string.
+
+    THE DISCRIMINATOR THAT KEEPS `blocker_is_terminal` HONEST. An unresolved id may only be
+    called DEAD when it was spelled in the one form that could not have failed for width —
+    anything shorter is an abbreviation our own read verbs accept, so its non-resolution is
+    a fact about the lookup, not about the row.
+
+    Requires:
+        - value is any object
+
+    Ensures:
+        - True only for a 36-char dashed UUID string
+        - False for an 8-hex prefix, a compact 32-char form, a non-string, or junk
+        - never raises
+    """
+    if not isinstance( value, str ) or len( value ) != 36: return False
+    try:
+        return str( uuid.UUID( value ) ) == value.lower()
+    except ( ValueError, AttributeError, TypeError ):
+        return False
+
+
 def blocker_is_terminal( status, blocked_by, status_by_id ):
     """
     True iff this row's wait can never be satisfied by the mechanism it is relying on.
@@ -435,14 +461,36 @@ def blocker_is_terminal( status, blocked_by, status_by_id ):
         blocker `dropped` -> dropping was a DECISION. A silent rejoin would overturn it.
                              Rick's call, and ONLY there.
 
-    ⚠️ TWO CAUSES, ONE FLAG, AND THE MERGE IS DELIBERATE. This returns True for a blocker
-    that is terminal AND for one that does not resolve at all. Both mean the same thing to
-    the row — the wait cannot be satisfied — and on a TYPED edge there is no ambiguity
-    about what an unresolvable id is. That is NOT true of the prose-scanning arm of the
-    same defect, where an 8-hex token in a body collides with commit shas and with the
-    session ids that every amendment header stamps; there, "absent" must land in its own
-    reported bucket rather than in the finding. The collision reasoning does not transfer
-    to a `{kind: "item", id: ...}` field, so it is not imported along with the rule.
+    ⚠️ TWO CAUSES, ONE FLAG — BUT ONLY FOR A CANONICAL ID, AND THAT QUALIFIER WAS MISSING
+    IN THE FIRST VERSION. This returns True for a blocker that is terminal, and for one
+    that does not resolve WHEN ITS ID IS A FULL UUID. Both mean the same thing to the row:
+    the wait cannot be satisfied.
+
+    🔴 WHAT THE FIRST VERSION GOT WRONG (María 🌸, `fae1bbc4`, 2026-07-25 — measured, not
+       argued). The original text reasoned that "on a TYPED edge there is no ambiguity
+       about what an unresolvable id is", and excluded the prose arm's collision rule. That
+       exclusion is right about hex/sha collisions and WRONG ABOUT WIDTH.
+
+       `91067e47` stores its blocker as the 8-char prefix `"e2f11f6f"`. The real row is
+       `e2f11f6f-f3f8-4e73-ac94-e573f45da3ea`, status `queued` — ALIVE, a live decision
+       owed by Rick. The exact-match lookup found nothing, and this predicate read
+       looked-up-and-missing as DEAD. It CONDEMNED A LIVE ROW.
+
+       ⇒ A PREFIX BLOCKER ID IS INDISTINGUISHABLE FROM A DELETED ONE by string alone, and
+         our own verbs disagree about what an id is (`task_get` resolves an 8-char prefix;
+         `task_transition` 422s on one). A seat that reads with prefixes eventually writes
+         one into a `blocked_by`, and that edge is the proof it already happened.
+
+       ⇒ IT ALSO INVERTED THIS FUNCTION'S OWN STATED LIE-DIRECTION, which is the part worth
+         keeping. The "absent key ⇒ no finding" reasoning below is sound, but a prefix id is
+         never absent from the map — it is always looked-up-and-missing, i.e. the True arm.
+         The safe case and the dangerous case routed to opposite answers with ID WIDTH as
+         the only variable. And this is the direction with teeth: the done-arm disposition
+         is "auto-rejoin, mechanical, no ruling needed", so a false positive is the input to
+         an automatic unblock of a row genuinely waiting on a human.
+
+    The repository now resolves a prefix the way `task_get` does; an AMBIGUOUS or unmatched
+    prefix still arrives as None, and is NOT flagged here.
 
     WHICH WAY THIS INSTRUMENT LIES: toward NOT-flagged. An unresolved blocker id is only
     flagged when the caller actually looked it up and got nothing — a status map that
@@ -464,7 +512,9 @@ def blocker_is_terminal( status, blocked_by, status_by_id ):
           leftover blocked_by is not stranded — it is not waiting at all)
         - no {kind:"item"} blocker        -> False (persona/user arms have no oracle)
         - ANY item blocker resolving to a TERMINAL status -> True
-        - ANY item blocker present in the map as None (looked up, absent) -> True
+        - a CANONICAL-UUID blocker present in the map as None (looked up, absent) -> True
+        - a NON-canonical (prefix) blocker present as None -> False. Unresolvable-by-width
+          is "I cannot tell", never "it is dead" — the arm that condemned a live row
         - every item blocker resolving to a NON-terminal status -> False
         - an id ABSENT from status_by_id  -> contributes nothing either way
         - one terminal + one live blocker -> True (a partial strand is a strand; the row
@@ -477,8 +527,11 @@ def blocker_is_terminal( status, blocked_by, status_by_id ):
     for ref_id in item_blocker_ids( blocked_by ):
         if ref_id not in status_by_id: continue
         blocker_status = status_by_id[ ref_id ]
-        if blocker_status is None:                     return True
         if blocker_status in TERMINAL_STATUSES:        return True
+        # UNRESOLVED. Only a CANONICAL id may be condemned on this arm — see the
+        # width caveat above. A non-canonical id that failed to resolve means
+        # "I cannot tell", and this predicate lies toward NOT-flagged.
+        if blocker_status is None and is_canonical_uuid( ref_id ): return True
     return False
 
 

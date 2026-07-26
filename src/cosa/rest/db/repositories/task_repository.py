@@ -158,20 +158,25 @@ class TaskRepository( BaseRepository[TaskItem] ):
         Ensures:
             - returns { id_str: status_str_or_None } with EXACTLY one key per distinct
               input id — every id asked about is answered
-            - a non-UUID / unparseable id maps to None (never raises, never omitted)
-            - an empty input returns {} and issues NO query
+            - a full-UUID id that matches no row maps to None (a genuinely dead edge)
+            - an 8-hex-style PREFIX id resolves by prefix, exactly as `task_get` does, and
+              maps to that row's status when the prefix matches EXACTLY ONE row
+            - an AMBIGUOUS or unmatched prefix maps to None; the caller must not read that
+              as "dead" for a non-canonical id (see `blocker_is_terminal`)
+            - never raises; an empty input returns {} and issues NO query
         """
         wanted = { str( ref_id ) for ref_id in ref_ids if ref_id }
         if not wanted: return { }
 
         resolved = { ref_id: None for ref_id in wanted }
 
-        parsed = { }
+        parsed    = { }
+        unparsed  = [ ]
         for ref_id in wanted:
             try:
                 parsed[ uuid.UUID( ref_id ) ] = ref_id
             except ( ValueError, AttributeError, TypeError ):
-                continue                                   # stays None: a dead reference
+                unparsed.append( ref_id )
 
         if parsed:
             rows = (
@@ -181,6 +186,25 @@ class TaskRepository( BaseRepository[TaskItem] ):
             )
             for row_id, row_status in rows:
                 resolved[ parsed[ row_id ] ] = row_status
+
+        # PREFIX EDGES ARE REAL AND ALREADY IN THE DATA (María 🌸, 2026-07-25). `91067e47`
+        # stores its blocker as the 8-char `"e2f11f6f"` while the row's id is
+        # `e2f11f6f-f3f8-4e73-ac94-e573f45da3ea`. Resolving only the exact string made that
+        # LIVE, `queued` blocker resolve to nothing — and `blocker_is_terminal` reads
+        # looked-up-and-missing as DEAD, so it condemned a row genuinely waiting on Rick.
+        #
+        # ⚠️ A PREFIX BLOCKER ID IS INDISTINGUISHABLE FROM A DELETED ONE by string alone.
+        # The fleet's own verbs disagree about what an id is — `task_get` resolves an 8-char
+        # prefix, `task_transition` 422s on one — so a seat that READS with prefixes
+        # eventually WRITES one into a blocked_by, and that edge is the proof it happened.
+        #
+        # An AMBIGUOUS prefix stays None here and is handled at the predicate, which does not
+        # flag a non-canonical id it could not resolve: "I cannot tell" must never render as
+        # "it is dead".
+        for ref_id in unparsed:
+            matches = self.find_by_id_prefix( ref_id.replace( "-", "" ), limit=2 )
+            if len( matches ) == 1:
+                resolved[ ref_id ] = matches[ 0 ].status
 
         return resolved
 
