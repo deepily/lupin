@@ -45,14 +45,31 @@ _CONSERVATIVE = hh.DEFAULT_TTL_SECONDS + hh.DEFAULT_PRUNE_GRACE_SECONDS
 
 
 def _write_hold_file( base, sid, age_seconds, ttl=900, **cargo ):
-    """A hold whose held_at is `age_seconds` before _PRUNE_NOW, plus arbitrary
-    non-schema `cargo` keys (the hand-written-memento shape)."""
+    """A hold aged `age_seconds` before _PRUNE_NOW on BOTH CLOCKS, plus arbitrary
+    non-schema `cargo` keys (the hand-written-memento shape).
+
+    ⚠️ THIS HELPER USED TO AGE ONLY `held_at`, WHICH MADE EVERY FIXTURE IN THIS FILE
+    UNREALISTIC (store row `8670731d`). It left the file's mtime at real wall-clock
+    time — and because `_PRUNE_NOW` is frozen a MONTH EARLIER, that put every fixture's
+    mtime in the FUTURE relative to the `now` under test. No real hold file looks like
+    that: a genuinely dead session's hold is old on BOTH clocks, because the same write
+    that stamped `held_at` also set the mtime.
+
+    It went unnoticed for as long as the janitor read only `held_at`. The moment the
+    second clock became load-bearing, four tests broke — including the control that
+    proves the janitor can delete at all — and the defect was in the FIXTURES, not in
+    the guard. A helper that manufactures evidence decides what the whole suite is able
+    to detect; this one now ages both clocks together, the way a filesystem does.
+    """
     held_at = ( _PRUNE_NOW - datetime.timedelta( seconds=age_seconds ) ).isoformat()
     d = { "session_id" : sid, "held_at": held_at, "ttl_seconds": ttl,
           "work_owed"  : True, "reason": "x" }
     d.update( cargo )
-    ( base / f".heartbeat-hold-{sid}.json" ).write_text( json.dumps( d ) )
-    return base / f".heartbeat-hold-{sid}.json"
+    path = base / f".heartbeat-hold-{sid}.json"
+    path.write_text( json.dumps( d ) )
+    when = ( _PRUNE_NOW - datetime.timedelta( seconds=age_seconds ) ).timestamp()
+    os.utime( path, ( when, when ) )
+    return path
 
 
 def _has_cargo( path ):
@@ -153,15 +170,26 @@ def test_janitor_never_deletes_a_file_carrying_non_schema_cargo( tmp_path ):
         assert p.exists(), f"IRREPLACEABLE CARGO DESTROYED: {p.name} — {sorted( set( json.loads( p.read_text() ).keys() ) - set( hh.HOLD_SCHEMA_FIELDS ) ) if p.exists() else 'gone'}"
 
 
-# ── P0 #2 — TWO ANCHORS, ONE ARTIFACT (RED on main) ──────────────────────────
+# ── P0 #2 — TWO ANCHORS, ONE ARTIFACT (GREEN since 2026-07-26 — the guard landed) ──
+#
+# THE MARKER FIRED, AND IT IS DELETED CONSCIOUSLY — which is what strict was for.
+# `xfail(strict=True)` reported XPASS-as-FAILURE the moment the two-anchor guard landed
+# (store row `8670731d`): pruning now requires BOTH clocks to call a file ancient, and
+# where they disagree the file is KEPT with reason `anchor_disagreement`. The test body
+# is UNCHANGED and now guards the fix instead of documenting the hole.
+#
+# The marker's own words, preserved because they are the receipt for what was wrong:
+#   "P0/Rio: the janitor ages on held_at (:486/:493) while is_fresh ages on the FILE
+#    MTIME (:539). B1 exists BECAUSE agents stamp a stale held_at from a past receipt.
+#    So a LIVE session that refreshes its hold reads HONORED to the hook and PRUNABLE
+#    to the janitor. Executed: is_honored=True while the real janitor deleted the file.
+#    The janitor's docstring claims it 'only ever deletes a hold it can PROVE is
+#    ancient' — it proves it with the one field its own module documents as a liar."
+#
+# ⚠️ THE GUARD IS NOT WHY THIS SUITE'S OTHER FIXTURES CHANGED. Four tests went red with
+# it, including the delete-capability control, and the cause was `_write_hold_file`
+# aging only ONE clock — see its docstring. The assertions were not touched.
 
-@pytest.mark.xfail( strict=True, reason=(
-    "P0/Rio: the janitor ages on held_at (:486/:493) while is_fresh ages on the FILE "
-    "MTIME (:539). B1 exists BECAUSE agents stamp a stale held_at from a past receipt. "
-    "So a LIVE session that refreshes its hold reads HONORED to the hook and PRUNABLE "
-    "to the janitor. Executed: is_honored=True while the real janitor deleted the file. "
-    "The janitor's docstring claims it 'only ever deletes a hold it can PROVE is "
-    "ancient' — it proves it with the one field its own module documents as a liar." ) )
 def test_janitor_never_reaps_a_hold_the_hook_considers_honored( tmp_path ):
     """B1's OWN documented scenario, replayed against the janitor.
 
@@ -328,3 +356,100 @@ def test_pruned_empty_is_ambiguous_today_documenting_why_report_mode_must_be_lou
     reached_nothing_at_all         = hh.prune_stale_hold_files( base_dir=tmp_path / "does-not-exist",
                                                                 now=_PRUNE_NOW )
     assert reached_real_dir_found_nothing == reached_nothing_at_all == [ ]
+
+
+# ---------------------------------------------------------------------------
+# CALIBRATING `anchor_disagreement` — store row 8670731d, step 1 of 3
+# ---------------------------------------------------------------------------
+#
+# The corpus reports `anchor_disagreement: 0` across every reachable hold file (31 of
+# them, measured 2026-07-26). That zero has been quoted in three separate rows as
+# "observed instances: 0" — and NOT ONE of them had shown the detector can report
+# anything else. A counter that always returns 0 produces the identical number, and
+# the fleet has already logged four instrument-lies of exactly that shape.
+#
+# So: prove the instrument BEFORE reading its zero as evidence. A canary, not a clock.
+#
+# The fixture is not new — it is the SAME shape the two-anchor xfail above already
+# builds (held_at 8h stale, ttl 900s, mtime = now). That is deliberate: calibrating
+# against a different fixture than the one the defect is filed on would calibrate a
+# different instrument.
+
+
+def test_CALIBRATION_the_anchor_detector_CAN_report_a_disagreement( tmp_path ):
+    """The canary. Until this passes, `anchor_disagreement: 0` means nothing.
+
+    A hold whose `held_at` is 8h stale (janitor: ancient) while its mtime is NOW
+    (hook: just refreshed) is the exact two-anchor state B1 documents. The detector
+    must say so.
+    """
+    path = tmp_path / ".heartbeat-hold-canary.json"
+    path.write_text( json.dumps( {
+        "session_id" : "canary", "persona": "probe",
+        "held_at"    : ( _PRUNE_NOW - datetime.timedelta( hours=8 ) ).isoformat(),
+        "ttl_seconds": 900, "reason": "stale held_at, fresh mtime",
+    } ) )
+    now_epoch = _PRUNE_NOW.timestamp()
+    os.utime( path, ( now_epoch, now_epoch ) )
+
+    row = hh.classify_hold_file( path, now=_PRUNE_NOW )
+
+    assert row[ "anchor_disagreement" ] is True, (
+        "the detector cannot report a disagreement that is provably present — every "
+        "`anchor_disagreement: 0` ever quoted from the corpus is uninterpretable" )
+    assert row[ "held_at_age_seconds" ] > row[ "threshold_seconds" ]     # janitor: ancient
+    assert row[ "mtime_age_seconds" ] < row[ "ttl_seconds" ]             # hook: fresh
+
+
+def test_CALIBRATION_the_detector_stays_SILENT_when_both_anchors_agree( tmp_path ):
+    """The other half of the calibration, and the half that makes the first half mean
+    something. A detector that returns True unconditionally would also pass the canary.
+
+    Same age on BOTH clocks: no disagreement to report.
+    """
+    path = tmp_path / ".heartbeat-hold-agreeing.json"
+    path.write_text( json.dumps( {
+        "session_id" : "agreeing", "persona": "probe",
+        "held_at"    : ( _PRUNE_NOW - datetime.timedelta( hours=8 ) ).isoformat(),
+        "ttl_seconds": 900, "reason": "stale on both clocks",
+    } ) )
+    old_epoch = ( _PRUNE_NOW - datetime.timedelta( hours=8 ) ).timestamp()
+    os.utime( path, ( old_epoch, old_epoch ) )
+
+    row = hh.classify_hold_file( path, now=_PRUNE_NOW )
+
+    assert row[ "anchor_disagreement" ] is False
+    assert row[ "mtime_age_seconds" ] > row[ "ttl_seconds" ]             # both say ancient
+
+
+def test_KNOWN_the_anchor_detector_IS_ONE_SIDED_by_construction( tmp_path ):
+    """DOCUMENTS A LIMIT, and it is not a bug — but it was undocumented, which is.
+
+    `anchor_disagreement` is computed INSIDE the `held_at_age >= threshold` branch
+    (heartbeat_hold.py:850-852), so it can only ever flag ONE polarity: stale by
+    `held_at`, fresh by mtime. The REVERSE state — fresh by `held_at`, ancient by
+    mtime — is invisible to it.
+
+    That asymmetry is defensible: the reverse polarity biases toward KEEP (the janitor
+    declines, the hook says stale), and a keep-biased divergence loses nothing. But a
+    reader who sees `anchor_disagreement: 0` and concludes "the two clocks agree across
+    the corpus" is reading more than the field can say. **It reports one direction, and
+    now something asserts that out loud.**
+    """
+    path = tmp_path / ".heartbeat-hold-reverse.json"
+    path.write_text( json.dumps( {
+        "session_id" : "reverse", "persona": "probe",
+        "held_at"    : _PRUNE_NOW.isoformat(),                # janitor: brand new
+        "ttl_seconds": 900, "reason": "fresh held_at, ancient mtime",
+    } ) )
+    old_epoch = ( _PRUNE_NOW - datetime.timedelta( hours=8 ) ).timestamp()
+    os.utime( path, ( old_epoch, old_epoch ) )                # hook: long stale
+
+    row = hh.classify_hold_file( path, now=_PRUNE_NOW )
+
+    assert row[ "mtime_age_seconds" ] > row[ "ttl_seconds" ]             # the clocks DO disagree
+    assert row[ "held_at_age_seconds" ] < row[ "threshold_seconds" ]     # ...in the other direction
+    assert row[ "anchor_disagreement" ] is False, (
+        "if this ever goes True the detector became two-sided — welcome, but every "
+        "prior corpus zero was then measuring something else" )
+    assert row[ "verdict" ] == hh.VERDICT_KEEP                          # and it fails SAFE

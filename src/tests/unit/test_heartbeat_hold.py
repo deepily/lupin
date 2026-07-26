@@ -544,18 +544,30 @@ def test_classify_authoritative_dead_drops_grace_but_no_sid_stays_conservative( 
 
 def test_classify_flags_anchor_disagreement_between_the_two_readers( tmp_path ):
     """The janitor ages on held_at; the HOOK's is_fresh anchors on the file's mtime
-    (B1 — "agents have no reliable wall-clock"). Where they disagree, a hold the
-    fleet is actively HONORING classifies as prunable. Reported as data, not acted
-    on. Observed 0/45 on the live corpus at build time — which is why it is flagged
-    rather than claimed."""
+    (B1 — "agents have no reliable wall-clock"). Where they disagree, the file is now
+    KEPT: pruning requires BOTH clocks to call it ancient.
+
+    ⚠️ THIS ASSERTION WAS FLIPPED ON PURPOSE — store row `8670731d`, 2026-07-26. It
+    used to read `verdict == VERDICT_PRUNABLE`, pinning the behavior that the
+    disagreement was *reported and then ignored*: "reported as data, not acted on."
+    That was an accurate description of the code and a faithful test OF THE DEFECT.
+    The row's whole content is that a hold the fleet is actively HONORING must not be
+    deletable, so the old expectation could not survive the fix.
+
+    The flip is recorded here rather than only in the commit, because "my change broke
+    a test so I changed the test" is the shape that deserves a reader's suspicion. What
+    changed is the POLICY, deliberately; the disagreement detection itself is unchanged
+    and is still asserted below, along with its presence-control.
+    """
     _hold_file( tmp_path, "disagree", age_seconds=900 + 21600 + 100 )   # ancient held_at
     path = tmp_path / ".heartbeat-hold-disagree.json"
     fresh_epoch = _PRUNE_NOW.timestamp() - 10                            # ...but JUST written
     os.utime( path, ( fresh_epoch, fresh_epoch ) )
 
     row = hh.classify_hold_file( path, now=_PRUNE_NOW )
-    assert row[ "verdict" ] == hh.VERDICT_PRUNABLE       # janitor: delete it
-    assert row[ "anchor_disagreement" ] is True          # hook: it's fresh. Flagged.
+    assert row[ "verdict" ] == hh.VERDICT_KEEP                     # one clock says alive
+    assert row[ "reason" ]  == hh.KEEP_ANCHOR_DISAGREEMENT         # ...and it says why
+    assert row[ "anchor_disagreement" ] is True                    # the detection, unchanged
     # PRESENCE-control: an ancient file with an ancient mtime does NOT get flagged.
     _hold_file( tmp_path, "agree", age_seconds=900 + 21600 + 100 )
     old_epoch = _PRUNE_NOW.timestamp() - ( 900 + 21600 + 100 )

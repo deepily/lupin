@@ -104,6 +104,10 @@ KEEP_LIVE_SESSION         = "live_session"
 KEEP_NO_PROVABLE_AGE      = "no_provable_age"
 KEEP_WITHIN_THRESHOLD     = "within_threshold"
 KEEP_CARGO_BEARING        = "cargo_bearing"
+# Store row 8670731d. The two anchors are no longer merely REPORTED against each
+# other — where they disagree, the file is KEPT. Prune requires BOTH clocks to call
+# it ancient. See classify_hold_file for why the guard sits ahead of the cargo guard.
+KEEP_ANCHOR_DISAGREEMENT  = "anchor_disagreement"
 
 # 6929f4ac field names (single-source so readers/writers never drift)
 PENDING_USER_GATES_FIELD = "pending_user_gates"
@@ -849,7 +853,48 @@ def classify_hold_file( path, now=None, grace_seconds=DEFAULT_PRUNE_GRACE_SECOND
     row[ "threshold_seconds" ] = threshold
     if row[ "held_at_age_seconds" ] >= threshold:
         mtime_age = row[ "mtime_age_seconds" ]
-        row[ "anchor_disagreement" ] = mtime_age is not None and mtime_age < ttl
+        # A NEGATIVE mtime age means the file's mtime is in the FUTURE relative to
+        # `now` — clock skew, a bad `touch`, a restored backup. That is not evidence
+        # of liveness; it is evidence the mtime cannot be read as a clock at all, so
+        # it must not count as "fresh". Requiring `mtime_age >= 0` keeps the guard
+        # anchored on usable evidence and falls through to the `held_at` decision,
+        # which is the only clock left saying anything intelligible.
+        #
+        # Found by measurement, not foresight: the adversarial suite freezes `now` a
+        # month BEFORE its fixtures are written, so every fixture had a future mtime
+        # and the first version of this guard kept ALL of them — including the control
+        # that proves the janitor can delete at all. A guard that keeps everything is
+        # indistinguishable from a janitor pointed at the wrong directory.
+        row[ "anchor_disagreement" ] = ( mtime_age is not None
+                                         and 0 <= mtime_age < ttl )
+        if row[ "anchor_disagreement" ]:
+            # TWO-ANCHOR GUARD (store row 8670731d). Pruning now requires BOTH clocks
+            # to call the file ancient. Where they disagree, KEEP.
+            #
+            # This is not a new policy — it is this module's stated bias-to-keep finally
+            # applied to the one place that had two clocks and trusted the worse of them.
+            # B1 exists BECAUSE `held_at` is agent-written and "agents have no reliable
+            # wall-clock"; the janitor then aged on that very field. A live session that
+            # refreshes its hold with a stale receipt read HONORED to the hook and
+            # PRUNABLE to the janitor, and lost its hold to the janitor.
+            #
+            # ⚠️ THE GUARD SITS AHEAD OF THE CARGO GUARD, DELIBERATELY, AND IT MOVES A
+            # NUMBER. A disagreement is a suspected-LIVENESS signal, and liveness
+            # outranks cargo as a reason not to delete — `KEEP_LIVE_SESSION` is already
+            # checked before everything. The consequence, stated rather than discovered:
+            # a file that is BOTH cargo-bearing and anchor-disagreeing now reports
+            # `anchor_disagreement` instead of `cargo_bearing`, so the triage's
+            # "how many would have been deleted but for the cargo guard" tally counts
+            # only files where cargo was the LAST line of defense. That is the more
+            # honest reading of that number, but it is a different one.
+            #
+            # NOT OPENABLE, unlike the cargo guard, and that asymmetry is on purpose:
+            # cargo has a legitimate reclamation step (triage, then delete the husk),
+            # whereas "one clock says this session is alive" has no state in which
+            # overriding it is correct. If the disagreement is spurious the fix is to
+            # stop the anchors diverging, not to add a flag that ignores them.
+            row[ "reason" ] = KEEP_ANCHOR_DISAGREEMENT
+            return row
         if row[ "cargo_bearing" ] and not allow_cargo_deletion:
             row[ "reason" ] = KEEP_CARGO_BEARING     # verdict stays KEEP — the guard, structurally
             return row
