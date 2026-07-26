@@ -2,6 +2,22 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-06-23 to 07-08](history/2026-06-23-to-07-08-history.md). History health: ✅ **HEALTHY at ~7.9k tokens (31% of 25k)** — archived 2026-07-21 by Mr. Radio 🦉 (session 56a74d7b), ~9.6k tokens moved to archive on Rick's ruling at the 17.5k WARNING threshold.
 
+### 2026.07.26 - Session 9a63d597 (Mr. Radio 🦉) | `c8f60c22`: two interfaces for one phase, and a guard that fired without saying what to fix
+
+**Accomplishments** (solo; `aa59d882` + `480436f2` on `wip-v0.1.9`, HELD; rows `c8f60c22` closed, `b5ca8fd5` opened):
+
+1. **`lupin-vm.sh preflight --phase pre` forwarded `--phase --phase`.** The verb read a bare positional while the script it wraps takes `--phase <val>`. It aborted *loudly* — that part was the design working — but the message named the INNER script's argument handling for a mistake made at the OUTER verb, sending the reader to the wrong file. Now accepts **both** spellings and whitelists against `pre|post|full`. **The whitelist also closed an injection point**: `PF_PHASE` is interpolated into the remote `--command` string handed to `gcloud compute ssh`, so an unvalidated value ran on the VM. One line fixed both.
+
+2. **Tests in two halves, because the first half is not enough.** 8 assert the guard's SHAPE; 6 RUN the verb under `--dry-run` — reject paths proven never to reach gcloud, and both spellings proven to emit the *identical* command. Every shape assertion would have stayed green with `die` spelled `echo`; mutated exactly that in a **scratchpad copy** and the mutant forwards `--phase bogus` straight to gcloud, which is what the behavioral arm asserts against.
+
+3. **Closed the row's own open question rather than inheriting it.** It said *"whether any OTHER verb has the same wrapper-vs-wrapped mismatch — I checked only `preflight`."* Swept all 17 verbs: 9 read positionals, and **`preflight` was the only one whose concept has a competing flag spelling** in the file. `deploy [branch]`, `tunnel [PORT]`, `svc <sub>`, `firewall`, `push-file`, `push-repo`, `run`, `creds-status` all take plain values with no flag form to collide with. ⚠️ **Residual, unfixed and not ruled**: none of them *validate* their positional, so `deploy --hard` would try to check out a branch named `--hard`. Weaker class — unvalidated input, not a competing spelling — and it fails loudly at git checkout.
+
+4. **⭐ A guard's negative control caught a defect in the guard itself** (`480436f2`, the hooks/lib import-discipline detector, built at María's suggestion rather than filed as a row). It went red on first run: the detector fired correctly but reported `"from heartbeat_hold"` instead of the full statement — **enough to fail a build, not enough to tell anyone what to fix.** The guard itself was green; only the control saw it. *"Did it fire?" and "can someone act on what it said?" are different questions, and only the first one is obvious.*
+
+**On counting, twice in one exchange**: María measured 13 suites inserting `hooks/lib` on `sys.path`; I measured 2 — one of which was **my own file, a false positive matching on comment prose**. Three predicates give 2, 175, or 7. Both numbers withdrawn; the test asserts the **import graph**, which is the one thing that is not predicate-dependent. (Live bare sibling imports across all 33 modules: **zero** — mine was the only one and it was already fixed.)
+
+**Files**: `src/scripts/lupin-vm.sh`, `src/tests/unit/deploy/test_lupin_vm_preflight_verb.py` (new), `src/tests/unit/test_hooks_lib_import_discipline.py` (new)
+
 ### 2026.07.26 - Session 9a63d597 (Mr. Radio 🦉) | `8758d0b1`: the janitor the plan asked for would have deleted nothing, and the safety claim under it was backwards
 
 **Accomplishments** (solo; `b0c05e47` + `a9923c0f` on `wip-v0.1.9`, HELD; row `8758d0b1` closed, decision `7ee5b646` opened for Rick). Plan by María 🌸 (`77c55e5f`), handed over on Rick's direct ask about `.dm-inbox-hwm-*.json` piling up in the repo root — 435 files, 1.8 MB, ~18/day since 07-02. **Tidiness, not capacity.**
