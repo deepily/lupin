@@ -731,8 +731,26 @@ bash src/scripts/preflight-vm.sh --phase post || echo 'POST-deploy preflight rep
 
     preflight)
         # Standalone preflight. PHASE defaults to full; pass pre|post|full.
+        #
+        # BOTH SPELLINGS ACCEPTED (row c8f60c22). This verb took a bare POSITIONAL
+        # while the script it wraps takes `--phase <val>`, so the obvious
+        # `lupin-vm.sh preflight --phase pre` forwarded `--phase --phase` and the
+        # inner script aborted. It aborted LOUDLY — the design working — but the
+        # failure named the INNER script's argument handling for a mistake made at
+        # the OUTER verb, which sends the reader to the wrong file. Two interfaces
+        # for one concept, with nothing reconciling them.
+        #
+        # The whitelist below is also what keeps this safe to interpolate: PF_PHASE
+        # is pasted into the remote `--command` string, so an unvalidated value is
+        # an injection point as well as a typo.
         require_project
         PF_PHASE="${1:-full}"
+        [ "$PF_PHASE" = "--phase" ] && PF_PHASE="${2:-}"      # accept the inner script's own spelling
+        case "$PF_PHASE" in
+            pre|post|full) ;;
+            "") die "preflight: --phase given with no value. Usage: lupin-vm.sh preflight [pre|post|full]" ;;
+            *)  die "preflight: unknown phase '$PF_PHASE'. Expected one of: pre, post, full (or --phase <one of those>)." ;;
+        esac
         runit gcloud compute ssh "$VM_NAME" \
             --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
             $SSH_KEEPALIVE \
