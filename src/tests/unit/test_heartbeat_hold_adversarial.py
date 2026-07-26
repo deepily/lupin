@@ -105,14 +105,24 @@ def test_control_null_ttl_hold_survives_beside_a_reaped_one( tmp_path ):
     assert null_ttl.exists(),   "null-TTL hold reaped: 'can't prove age → KEEP' (:488) regressed"
 
 
-# ── P0 #1 — CARGO PRESERVATION (RED on main) ─────────────────────────────────
-
-@pytest.mark.xfail( strict=True, reason=(
-    "P0/Rio: the CURRENT janitor deletes hand-written mementos that carry a numeric "
-    "ttl. Executed against copies of the live corpus, roots-alone destroys 10 real "
-    "cargo-bearing files (the_nights_finding, why_lupin_is_held, board_state, "
-    "harvest_state, ...), 7 of them the design author's own. Deletion does NOT wait "
-    "for A2. XPASS here = the cargo guard landed; delete this marker." ) )
+# ── P0 #1 — CARGO PRESERVATION (GREEN since 2026-07-26 — the guard landed) ───
+#
+# THE MARKER FIRED, AND IT IS DELETED CONSCIOUSLY, WHICH IS WHAT STRICT WAS FOR.
+# `xfail(strict=True)` reported XPASS-as-FAILURE the moment precondition 1 of
+# `11461241` landed — `classify_hold_file( allow_cargo_deletion=False )` as the
+# structural DEFAULT, cargo_bearing ⇒ VERDICT_KEEP at the prunable decision
+# (heartbeat_hold.py). Removing the marker is the acknowledgement the strict flag
+# was designed to extract; the test itself is unchanged and now guards the fix.
+#
+# The marker's own words, preserved because they are the receipt: "the CURRENT
+# janitor deletes hand-written mementos that carry a numeric ttl. Executed against
+# copies of the live corpus, roots-alone destroys 10 real cargo-bearing files
+# (the_nights_finding, why_lupin_is_held, board_state, harvest_state, ...), 7 of
+# them the design author's own. Deletion does NOT wait for A2."
+#
+# ⚠️ THE SECOND MARKER BELOW IS STILL ARMED AND MUST STAY ARMED. Two-anchor
+# (held_at vs mtime) is a DIFFERENT defect and this fix does not touch it. A seat
+# who deletes both because "the milestone landed" removes a live gate.
 def test_janitor_never_deletes_a_file_carrying_non_schema_cargo( tmp_path ):
     """THE INVARIANT THIS MILESTONE IS ABOUT.
 

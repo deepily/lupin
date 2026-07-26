@@ -597,15 +597,74 @@ def test_report_SWEPT_ZERO_ROOTS_is_distinguishable_from_FOUND_ZERO_PRUNABLE( tm
 
 
 def test_report_never_deletes_even_a_provably_ancient_file( tmp_path ):
-    """The absolute invariant of this milestone: hold files carry irreplaceable
-    memento cargo, so the report classifies and keeps its hands off. Deletion is a
-    separate, gated step that runs only after the cargo is triaged out."""
-    _hold_file( tmp_path, "ancient", age_seconds=900 + 21600 + 100,
-                note_to_my_successor="irreplaceable" )
+    """The absolute invariant of this milestone: the report classifies and keeps its
+    hands off. Deletion is a separate, gated step.
+
+    ⚠️ THIS FIXTURE USED TO CARRY `note_to_my_successor="irreplaceable"` AND ASSERT
+    `prunable == 1`. It was written when cargo was REPORTED but not GUARDED, so one
+    file could demonstrate both "ancient enough to prune" and "carries cargo" at
+    once. Precondition 1 of `11461241` separates those two properties on purpose —
+    a cargo file is no longer prunable at all — so the fixture is SPLIT rather than
+    the assertion relaxed. The ancient-and-empty file still proves the report KNOWS
+    it could prune; the cargo case gets its own tests below.
+    """
+    _hold_file( tmp_path, "ancient", age_seconds=900 + 21600 + 100 )
     report = hh.report_hold_files( base_dirs=[ tmp_path ], now=_PRUNE_NOW )
     assert report[ "counts" ][ "prunable" ] == 1                 # it KNOWS it could
     assert report[ "deleted" ] == 0                              # and it did NOT
     assert ( tmp_path / ".heartbeat-hold-ancient.json" ).exists()
+
+
+def test_an_ancient_CARGO_file_is_not_even_prunable( tmp_path ):
+    """Precondition 1 of `11461241` (Rio F-A, BINDING) — the structural cargo guard.
+
+    Same age as the file above, one key different. `allow_cargo_deletion` defaults
+    to False, so an ancient hold carrying non-schema cargo is KEEP/`cargo_bearing` —
+    and the guard lives in `classify_hold_file`, not at a call site, because A0
+    (this milestone's origin bug) WAS a call-site bug.
+    """
+    _hold_file( tmp_path, "ancient", age_seconds=900 + 21600 + 100,
+                note_to_my_successor="irreplaceable" )
+    report = hh.report_hold_files( base_dirs=[ tmp_path ], now=_PRUNE_NOW )
+    assert report[ "counts" ][ "prunable" ] == 0
+    assert report[ "counts" ][ "cargo_bearing" ] == 1
+    assert report[ "files" ][ 0 ][ "reason"  ] == hh.KEEP_CARGO_BEARING
+    assert report[ "files" ][ 0 ][ "verdict" ] == hh.VERDICT_KEEP
+
+
+def test_the_cargo_guard_is_OPENABLE_for_the_gated_reclamation_step( tmp_path ):
+    """The other half of Rio's F-A, and it is not optional.
+
+    Triage is COPY-FORWARD, so rescued originals KEEP their cargo keys. A cargo
+    guard that could never be opened would make those husks unreclaimable forever
+    and defeat Rick's Q4 — "if the janitor can't reclaim them, it isn't fixed".
+    Structural AND openable; the gated step passes True and has to say so.
+    """
+    _hold_file( tmp_path, "ancient", age_seconds=900 + 21600 + 100,
+                note_to_my_successor="already triaged" )
+    report = hh.report_hold_files( base_dirs=[ tmp_path ], now=_PRUNE_NOW,
+                                   allow_cargo_deletion=True )
+    assert report[ "counts" ][ "prunable" ] == 1
+    assert report[ "counts" ][ "cargo_bearing" ] == 1            # still REPORTED as cargo
+    assert report[ "deleted" ] == 0                              # report still deletes nothing
+
+
+def test_the_janitor_itself_will_not_delete_cargo_by_default( tmp_path ):
+    """The guard where it actually matters: the path that unlinks.
+
+    `report_hold_files` cannot delete anything by construction, so a guard proven
+    only against the report is proven against a function with no teeth. This drives
+    `prune_stale_hold_files` — the one holding the `unlink` — and carries a POSITIVE
+    CONTROL in the same run, so a surviving cargo file can never be confused with a
+    janitor that was pointed at the wrong directory.
+    """
+    _hold_file( tmp_path, "cargo", age_seconds=900 + 21600 + 100,
+                note_to_my_successor="irreplaceable" )
+    _hold_file( tmp_path, "plain", age_seconds=900 + 21600 + 100 )
+    pruned = hh.prune_stale_hold_files( base_dirs=[ tmp_path ], now=_PRUNE_NOW )
+    assert ( tmp_path / ".heartbeat-hold-cargo.json" ).exists()      # survived the janitor
+    assert not ( tmp_path / ".heartbeat-hold-plain.json" ).exists()  # CONTROL: it can still kill
+    assert len( pruned ) == 1
 
 
 def test_report_counts_and_kept_reason_tally( tmp_path ):

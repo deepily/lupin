@@ -103,6 +103,7 @@ KEEP_NOT_AN_OBJECT        = "not_an_object"
 KEEP_LIVE_SESSION         = "live_session"
 KEEP_NO_PROVABLE_AGE      = "no_provable_age"
 KEEP_WITHIN_THRESHOLD     = "within_threshold"
+KEEP_CARGO_BEARING        = "cargo_bearing"
 
 # 6929f4ac field names (single-source so readers/writers never drift)
 PENDING_USER_GATES_FIELD = "pending_user_gates"
@@ -738,7 +739,7 @@ def _iter_hold_paths( base_dir=None, base_dirs=None, max_depth=DEFAULT_SWEEP_MAX
 
 
 def classify_hold_file( path, now=None, grace_seconds=DEFAULT_PRUNE_GRACE_SECONDS,
-                        live_session_ids=None ):
+                        live_session_ids=None, allow_cargo_deletion=False ):
     """
     Decide what the janitor WOULD do with one hold file — and never touch it.
 
@@ -751,6 +752,7 @@ def classify_hold_file( path, now=None, grace_seconds=DEFAULT_PRUNE_GRACE_SECOND
         - now is an aware datetime or None; grace_seconds >= 0
         - live_session_ids is an iterable of live session-id strings, or None
           (no authoritative live-set — see prune_stale_hold_files' BIAS-TO-KEEP)
+        - allow_cargo_deletion is False by DEFAULT — see the CARGO GUARD below
 
     Ensures:
         - Returns a row dict: path · verdict (VERDICT_PRUNABLE|VERDICT_KEEP) ·
@@ -758,8 +760,31 @@ def classify_hold_file( path, now=None, grace_seconds=DEFAULT_PRUNE_GRACE_SECOND
           held_at_age_seconds · mtime_age_seconds · threshold_seconds ·
           cargo_bearing · cargo_keys · anchor_disagreement
         - CONSERVATIVE BY CONSTRUCTION: unreadable / non-object / live-session /
-          unprovable-age / within-threshold all yield VERDICT_KEEP with the reason
-          naming the guard that kept it
+          unprovable-age / within-threshold / CARGO-BEARING all yield VERDICT_KEEP
+          with the reason naming the guard that kept it
+        - THE CARGO GUARD (precondition 1 of 11461241; Rio F-A, BINDING): a file
+          carrying non-schema cargo can never be PRUNABLE while
+          allow_cargo_deletion is False, which is the DEFAULT.
+
+          WHY IT LIVES HERE AND NOT AT THE CALL SITE: A0 — this milestone's origin
+          bug — WAS a call-site bug. Cargo was REPORTED by this function and
+          PROTECTED by whoever happened to call it, so protection was one forgotten
+          argument deep. Rio proved by execution that the real unmodified janitor,
+          handed roots alone, deletes 20 files, 10 of them cargo-bearing
+          hand-written mementos. The guard belongs where the bug was.
+
+          WHY IT IS OPENABLE AND MUST STAY OPENABLE: triage is COPY-FORWARD, so
+          rescued originals KEEP their cargo keys. A permanent cargo guard would
+          make those husks unreclaimable forever and defeat Rick's Q4 ("if the
+          janitor can't reclaim them, it isn't fixed"). The gated reclamation step
+          passes allow_cargo_deletion=True — but only AFTER the triage is verified,
+          and it has to say so out loud to do it.
+
+          WHY IT OVERRIDES AT THE PRUNABLE DECISION RATHER THAN ON ENTRY: placing
+          it earlier would relabel every cargo file that some OTHER guard already
+          kept, and the per-guard tally would stop being able to answer the one
+          question the triage needs — how many files WOULD have been deleted but
+          for the cargo guard. A `cargo_bearing` reason now means exactly that.
         - anchor_disagreement flags a file the janitor would prune on its `held_at`
           age while the HOOK would still call it fresh on the file's mtime (B1).
           The two readers anchor on different clocks; where they disagree, a hold
@@ -823,10 +848,13 @@ def classify_hold_file( path, now=None, grace_seconds=DEFAULT_PRUNE_GRACE_SECOND
     threshold                  = ttl if ( authoritative and sid ) else ttl + grace_seconds
     row[ "threshold_seconds" ] = threshold
     if row[ "held_at_age_seconds" ] >= threshold:
-        row[ "verdict" ] = VERDICT_PRUNABLE
-        row[ "reason" ]  = VERDICT_PRUNABLE
         mtime_age = row[ "mtime_age_seconds" ]
         row[ "anchor_disagreement" ] = mtime_age is not None and mtime_age < ttl
+        if row[ "cargo_bearing" ] and not allow_cargo_deletion:
+            row[ "reason" ] = KEEP_CARGO_BEARING     # verdict stays KEEP — the guard, structurally
+            return row
+        row[ "verdict" ] = VERDICT_PRUNABLE
+        row[ "reason" ]  = VERDICT_PRUNABLE
     else:
         row[ "reason" ] = KEEP_WITHIN_THRESHOLD
     return row
@@ -835,7 +863,8 @@ def classify_hold_file( path, now=None, grace_seconds=DEFAULT_PRUNE_GRACE_SECOND
 def report_hold_files( base_dir=None, base_dirs=None, now=None,
                        grace_seconds=DEFAULT_PRUNE_GRACE_SECONDS,
                        live_session_ids=None, max_depth=DEFAULT_SWEEP_MAX_DEPTH,
-                       skip_dir_names=SWEEP_SKIP_DIR_NAMES ):
+                       skip_dir_names=SWEEP_SKIP_DIR_NAMES,
+                       allow_cargo_deletion=False ):
     """
     REACH and CLASSIFY every hold file — and DELETE NOTHING. Ever.
 
@@ -874,7 +903,8 @@ def report_hold_files( base_dir=None, base_dirs=None, now=None,
     )
 
     files  = [ classify_hold_file( p, now=now, grace_seconds=grace_seconds,
-                                   live_session_ids=live_session_ids ) for p in paths ]
+                                   live_session_ids=live_session_ids,
+                                   allow_cargo_deletion=allow_cargo_deletion ) for p in paths ]
     reasons = { }
     for row in files:
         if row[ "verdict" ] == VERDICT_KEEP:
@@ -903,7 +933,8 @@ def prune_stale_hold_files( base_dir=None, now=None,
                             grace_seconds=DEFAULT_PRUNE_GRACE_SECONDS,
                             live_session_ids=None, base_dirs=None,
                             max_depth=DEFAULT_SWEEP_MAX_DEPTH,
-                            skip_dir_names=SWEEP_SKIP_DIR_NAMES ):
+                            skip_dir_names=SWEEP_SKIP_DIR_NAMES,
+                            allow_cargo_deletion=False ):
     """
     Reclaim hold artifacts that have been EXPIRED far longer than any plausible
     live session — the accumulating `.heartbeat-hold-*.json` cruft in the project
@@ -963,7 +994,8 @@ def prune_stale_hold_files( base_dir=None, now=None,
     pruned = [ ]
     for path in candidates:
         row = classify_hold_file( path, now=now, grace_seconds=grace_seconds,
-                                  live_session_ids=live_session_ids )
+                                  live_session_ids=live_session_ids,
+                                  allow_cargo_deletion=allow_cargo_deletion )
         if row[ "verdict" ] != VERDICT_PRUNABLE:
             continue
         try:
