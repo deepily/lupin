@@ -48,26 +48,45 @@ UNIT_TEST_DIR = os.path.join( PROJECT_ROOT, "src/tests/unit" )
 # missing these too, and a parity defect fixed on one side is a parity defect.
 SERVICES_RUNNING_UNIT_TESTS = [ "lupin-rest-dev", "lupin-rest-test" ]
 
-# The DECLARED manifest — repo-root artifacts the unit suite reads. Adding a
-# test that reads a new one means adding it here AND mounting it; the discovered
-# arm below enforces that pairing rather than trusting anyone to remember.
+# The DECLARED manifest — every path outside ./src that the unit suite reads.
 DECLARED_REPO_ROOT_ARTIFACTS = [
     "docker-compose.yml",
     "docker-compose.cloud-gpu.yml",
     "docker-compose.cloud-test.yml",
-    "docker/lupin/Dockerfile",
+    "docker",                      # directory: covers docker/**/Dockerfile, claude-config, scripts
     ".dockerignore",
     ".docview.yml",
+    ".gitleaks.toml",
+    ".stylelintrc.json",
+    "alembic.ini",
+    "cloud-test.env.example",
+    "package.json",
+    "package-lock.json",
+    "pyproject.toml",
+    "tsconfig.json",
+    "tsconfig.diagnostic.json",
+    "tsconfig.nav.json",
 ]
 
-# Filenames that are repo-root deploy artifacts when referenced by a test. Kept
-# narrow on purpose: a broad pattern would sweep up unrelated string literals
-# and turn this comparator into a nuisance, which is how comparators get deleted.
-DISCOVERY_PATTERNS = [
-    re.compile( r"\bdocker-compose[A-Za-z0-9._-]*\.yml\b" ),
-    re.compile( r"\b\.dockerignore\b" ),
-    re.compile( r"\b\.docview\.yml\b" ),
-]
+# ⚠️ THE FIRST VERSION OF THIS FILE GUESSED, AND THE GUESS WAS WRONG.
+#
+# It declared six artifacts and discovered more by matching filename PATTERNS I
+# had thought of (docker-compose*.yml, .dockerignore, .docview.yml). It went
+# green. Then the recreated container ran the real tests and
+# test_no_hardcoded_gcp_identifiers died on `.gitleaks.toml` — a seventh
+# artifact no pattern of mine covered.
+#
+# Measured properly, that test does not read a LIST at all. It walks
+# `git ls-files`, filters to executable surfaces, and READS EVERY ONE:
+#     scanned surfaces 2294   missing in container 16
+# Sixteen, not six. A hand-picked mount list can never satisfy a whole-repo
+# reader, and a comparator built from hand-picked patterns will keep certifying
+# it as complete — which is this file's own subject, committed by this file.
+#
+# So the discovered arm below no longer guesses. It derives the universe from
+# the SAME predicate the real test uses, which makes it wrong only if the test
+# is wrong.
+COVERAGE_PREDICATE_NOTE = "derived from git ls-files + the executable-surface predicate, not from a pattern list"
 
 
 def _compose():
@@ -148,49 +167,64 @@ def test_the_two_services_agree():
 # The discovered arm — the one that survives a growing suite
 # ══════════════════════════════════════════════════════════════════════════
 
-def _discover_referenced_artifacts():
+def _scanned_surfaces_outside_src():
     """
-    Scan the unit-test tree for references to repo-root deploy artifacts.
+    Every path test_no_hardcoded_gcp_identifiers actually READS, minus what the
+    ./src bind already covers.
 
     Ensures:
-        - returns a set of filenames (basenames as written in the source)
-        - skips this file, whose DECLARED list would otherwise match itself and
-          make the comparison circular
+        - returns a sorted list of repo-relative paths
+        - asserts the predicate returned something; an empty universe would make
+          the comparator vacuously green, which is exactly the failure this file
+          committed in its first version
     """
-    found = set()
-    for dirpath, _dirnames, filenames in os.walk( UNIT_TEST_DIR ):
-        if "__pycache__" in dirpath:
-            continue
-        for fn in filenames:
-            if not fn.endswith( ".py" ) or fn == os.path.basename( __file__ ):
-                continue
-            text = open( os.path.join( dirpath, fn ), errors="ignore" ).read()
-            for pat in DISCOVERY_PATTERNS:
-                found.update( pat.findall( text ) )
-    return found
+    import importlib.util
+
+    path = os.path.join( PROJECT_ROOT, "src/tests/unit/test_no_hardcoded_gcp_identifiers.py" )
+    spec = importlib.util.spec_from_file_location( "_gcp_guard", path )
+    mod  = importlib.util.module_from_spec( spec )
+    spec.loader.exec_module( mod )
+
+    surfaces = mod.scanned_files()
+    assert surfaces, "the guard's own predicate returned NO files — instrument broken, not clean"
+    return sorted( f for f in surfaces if not f.startswith( "src/" ) )
 
 
-def test_discovery_actually_finds_something():
-    """
-    Instrument check. If the patterns drift, the comparator below scans nothing
-    and passes — a green meaning the scanner broke, not that the mounts are
-    complete. This is the arm b5b6d252's own history argues for: its count grew
-    the day after it was filed.
-    """
-    found = _discover_referenced_artifacts()
-    assert len( found ) >= 3, f"scan found only {found} — patterns have drifted"
-    assert "docker-compose.yml" in found
+def _is_covered( rel_path, mount_targets ):
+    """True when rel_path sits at, or under, any mounted target."""
+    container_path = f"/var/lupin/{rel_path}"
+    if container_path in mount_targets:
+        return True
+    return any( container_path.startswith( t.rstrip( "/" ) + "/" ) for t in mount_targets )
 
 
-def test_every_discovered_artifact_is_declared_and_mounted():
+def test_the_guard_predicate_yields_a_real_universe():
     """
-    THE COMPARATOR. A new test that reads a new repo-root deploy artifact fails
-    HERE, at commit time, instead of six weeks later inside a scheduled run.
+    Instrument check. If scanned_files() ever returns nothing — a moved file, a
+    broken git call — the comparator below passes over an empty set and
+    certifies mounts it never examined.
     """
-    declared_basenames = { os.path.basename( a ) for a in DECLARED_REPO_ROOT_ARTIFACTS }
-    undeclared = sorted( _discover_referenced_artifacts() - declared_basenames )
-    assert not undeclared, (
-        f"unit tests reference repo-root artifacts that are neither declared "
-        f"nor mounted: {undeclared}. Add them to DECLARED_REPO_ROOT_ARTIFACTS "
-        f"and mount them read-only in both services in docker-compose.yml."
+    outside_src = _scanned_surfaces_outside_src()
+    assert len( outside_src ) >= 10, f"only {len( outside_src )} surfaces outside ./src — predicate broke"
+    assert ".gitleaks.toml" in outside_src, \
+        "the artifact that exposed the first version's blind spot is no longer in the universe"
+
+
+@pytest.mark.parametrize( "service", SERVICES_RUNNING_UNIT_TESTS )
+def test_every_scanned_surface_outside_src_is_mounted( service ):
+    """
+    THE COMPARATOR, rebuilt on the guard's OWN predicate.
+
+    The first version matched filename patterns I had thought of, went green,
+    and missed `.gitleaks.toml` — which the real test then found in a recreated
+    container. Deriving the universe from git ls-files + the executable-surface
+    filter makes this wrong only if the guard itself is wrong, instead of wrong
+    whenever someone adds a file shape I did not anticipate.
+    """
+    targets   = _mounted_targets( service )
+    unmounted = [ f for f in _scanned_surfaces_outside_src() if not _is_covered( f, targets ) ]
+    assert not unmounted, (
+        f"{service} does not mount {len( unmounted )} file(s) that "
+        f"test_no_hardcoded_gcp_identifiers READS: {unmounted}. "
+        f"They raise FileNotFoundError in-container while passing on the host."
     )

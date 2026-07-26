@@ -148,9 +148,19 @@ services:
       - ./docker-compose.yml:/var/lupin/docker-compose.yml:ro
       - ./docker-compose.cloud-gpu.yml:/var/lupin/docker-compose.cloud-gpu.yml:ro
       - ./docker-compose.cloud-test.yml:/var/lupin/docker-compose.cloud-test.yml:ro
-      - ./docker/lupin/Dockerfile:/var/lupin/docker/lupin/Dockerfile:ro
+      - ./docker:/var/lupin/docker:ro
       - ./.dockerignore:/var/lupin/.dockerignore:ro
       - ./.docview.yml:/var/lupin/.docview.yml:ro
+      - ./.gitleaks.toml:/var/lupin/.gitleaks.toml:ro
+      - ./.stylelintrc.json:/var/lupin/.stylelintrc.json:ro
+      - ./alembic.ini:/var/lupin/alembic.ini:ro
+      - ./cloud-test.env.example:/var/lupin/cloud-test.env.example:ro
+      - ./package.json:/var/lupin/package.json:ro
+      - ./package-lock.json:/var/lupin/package-lock.json:ro
+      - ./pyproject.toml:/var/lupin/pyproject.toml:ro
+      - ./tsconfig.json:/var/lupin/tsconfig.json:ro
+      - ./tsconfig.diagnostic.json:/var/lupin/tsconfig.diagnostic.json:ro
+      - ./tsconfig.nav.json:/var/lupin/tsconfig.nav.json:ro
       - ./.git:/var/lupin/.git
       # TFE/BFE worktrees preserved under host project root so operator can
       # inspect agent commits after Phase 5 even across container rm.
@@ -243,9 +253,19 @@ services:
       - ./docker-compose.yml:/var/lupin/docker-compose.yml:ro
       - ./docker-compose.cloud-gpu.yml:/var/lupin/docker-compose.cloud-gpu.yml:ro
       - ./docker-compose.cloud-test.yml:/var/lupin/docker-compose.cloud-test.yml:ro
-      - ./docker/lupin/Dockerfile:/var/lupin/docker/lupin/Dockerfile:ro
+      - ./docker:/var/lupin/docker:ro
       - ./.dockerignore:/var/lupin/.dockerignore:ro
       - ./.docview.yml:/var/lupin/.docview.yml:ro
+      - ./.gitleaks.toml:/var/lupin/.gitleaks.toml:ro
+      - ./.stylelintrc.json:/var/lupin/.stylelintrc.json:ro
+      - ./alembic.ini:/var/lupin/alembic.ini:ro
+      - ./cloud-test.env.example:/var/lupin/cloud-test.env.example:ro
+      - ./package.json:/var/lupin/package.json:ro
+      - ./package-lock.json:/var/lupin/package-lock.json:ro
+      - ./pyproject.toml:/var/lupin/pyproject.toml:ro
+      - ./tsconfig.json:/var/lupin/tsconfig.json:ro
+      - ./tsconfig.diagnostic.json:/var/lupin/tsconfig.diagnostic.json:ro
+      - ./tsconfig.nav.json:/var/lupin/tsconfig.nav.json:ro
       - ./.git:/var/lupin/.git
       # TFE/BFE worktrees preserved under host project root so operator can
       # inspect agent commits after Phase 5 even across container rm.

@@ -86,7 +86,7 @@ KNOWN_DIVERGENT_MOUNTS = {
         "cloud-test": "2026-07-26 — see /var/lupin/docker-compose.yml.",
         "cloud-gpu" : "2026-07-26 — see /var/lupin/docker-compose.yml.",
     },
-    "/var/lupin/docker/lupin/Dockerfile": {
+    "/var/lupin/docker": {
         "cloud-test": "2026-07-26 — see /var/lupin/docker-compose.yml.",
         "cloud-gpu" : "2026-07-26 — see /var/lupin/docker-compose.yml.",
     },
@@ -95,6 +95,49 @@ KNOWN_DIVERGENT_MOUNTS = {
         "cloud-gpu" : "2026-07-26 — see /var/lupin/docker-compose.yml.",
     },
     "/var/lupin/.docview.yml": {
+        "cloud-test": "2026-07-26 — see /var/lupin/docker-compose.yml.",
+        "cloud-gpu" : "2026-07-26 — see /var/lupin/docker-compose.yml.",
+    },
+    # The remaining surfaces test_no_hardcoded_gcp_identifiers READS. It walks
+    # git ls-files rather than a list, so the set is 16 files, not the 6 the
+    # first pass guessed — see test_repo_root_artifact_mount_parity.py.
+    "/var/lupin/.gitleaks.toml": {
+        "cloud-test": "2026-07-26 — see /var/lupin/docker-compose.yml.",
+        "cloud-gpu" : "2026-07-26 — see /var/lupin/docker-compose.yml.",
+    },
+    "/var/lupin/.stylelintrc.json": {
+        "cloud-test": "2026-07-26 — see /var/lupin/docker-compose.yml.",
+        "cloud-gpu" : "2026-07-26 — see /var/lupin/docker-compose.yml.",
+    },
+    "/var/lupin/alembic.ini": {
+        "cloud-test": "2026-07-26 — see /var/lupin/docker-compose.yml.",
+        "cloud-gpu" : "2026-07-26 — see /var/lupin/docker-compose.yml.",
+    },
+    "/var/lupin/cloud-test.env.example": {
+        "cloud-test": "2026-07-26 — see /var/lupin/docker-compose.yml.",
+        "cloud-gpu" : "2026-07-26 — see /var/lupin/docker-compose.yml.",
+    },
+    "/var/lupin/package.json": {
+        "cloud-test": "2026-07-26 — see /var/lupin/docker-compose.yml.",
+        "cloud-gpu" : "2026-07-26 — see /var/lupin/docker-compose.yml.",
+    },
+    "/var/lupin/package-lock.json": {
+        "cloud-test": "2026-07-26 — see /var/lupin/docker-compose.yml.",
+        "cloud-gpu" : "2026-07-26 — see /var/lupin/docker-compose.yml.",
+    },
+    "/var/lupin/pyproject.toml": {
+        "cloud-test": "2026-07-26 — see /var/lupin/docker-compose.yml.",
+        "cloud-gpu" : "2026-07-26 — see /var/lupin/docker-compose.yml.",
+    },
+    "/var/lupin/tsconfig.json": {
+        "cloud-test": "2026-07-26 — see /var/lupin/docker-compose.yml.",
+        "cloud-gpu" : "2026-07-26 — see /var/lupin/docker-compose.yml.",
+    },
+    "/var/lupin/tsconfig.diagnostic.json": {
+        "cloud-test": "2026-07-26 — see /var/lupin/docker-compose.yml.",
+        "cloud-gpu" : "2026-07-26 — see /var/lupin/docker-compose.yml.",
+    },
+    "/var/lupin/tsconfig.nav.json": {
         "cloud-test": "2026-07-26 — see /var/lupin/docker-compose.yml.",
         "cloud-gpu" : "2026-07-26 — see /var/lupin/docker-compose.yml.",
     },
