@@ -48,6 +48,29 @@ sweep look idle and would reward dropping, which is the one outcome nobody wants
 board-hygiene pass. For the same reason `total_at_start` is FROZEN at sweep start: if the
 denominator shrank as rows were dropped, the gate could be closed by dropping instead of by
 reviewing.
+
+🔴 BOTH ENDS OF THE FRACTION NEED A FLOOR, and the first version only had one (María 🌸,
+   `fae1bbc4`, 2026-07-25, found with a PLANTED-JUNK CONTROL rather than by reading):
+
+       record_reviewed( "maria", [ 5 real ids ] )                         -> 5/22
+       record_reviewed( "maria", [ "deadbeef-0000-0000-0000-000000000000" ] ) -> 6/22
+
+   `deadbeef-…` is on nobody's board and it COUNTED. The denominator was frozen so dropping
+   rows could not shrink the gate open — and the NUMERATOR had the identical hole from the
+   other side: it could not be shrunk, but it could be PADDED. Twenty-two arbitrary strings
+   satisfied the gate. A counter that measures "how many ids were recorded" instead of "how
+   many of MY rows were reviewed" is only correct while the caller is honest, which is
+   precisely the property a gate exists not to depend on.
+
+   ⇒ The start-set of row ids is now frozen alongside the count, and an id outside it is
+     REFUSED. The membership set must be the FROZEN start-set and never a live re-query
+     (also hers): a row legitimately DROPPED mid-sweep leaves the live board, so a naive
+     live intersection would reject the id of a row you just reviewed and dropped — the
+     exact work the gate is trying to reward.
+
+   ⇒ A ledger carrying NO frozen start-set is UNVALIDATED, and `sweep_progress_line` says so
+     out loud on every tick rather than reporting a bare fraction. An unverifiable numerator
+     rendered as a clean number is the false green this whole gate exists to prevent.
 """
 
 import json
@@ -148,11 +171,20 @@ def sweep_progress_line( persona ):
     total    = ledger[ "total_at_start" ]
     # De-duped: re-reviewing a row you already reviewed is not progress.
     reviewed = len( { str( r ) for r in ledger[ "reviewed" ] } )
+    # A ledger with no frozen start-set cannot tell a reviewed row from an arbitrary
+    # string. It still counts — refusing to count would strand a live sweep — but it
+    # NEVER reports a bare fraction, because an unverifiable numerator rendered cleanly
+    # is the false green this gate exists to prevent.
+    unvalidated = ( "  ⚠️ THIS LEDGER HAS NO FROZEN START-SET, so the count above is "
+                    "UNVERIFIED — any string would advance it. Re-create it with the "
+                    "board_ids of your owed rows before trusting the number."
+                    if ledger.get( "board_ids" ) is None else "" )
 
     if reviewed >= total:
         return ( f"✅ BOARD SWEEP COMPLETE: {reviewed}/{total} owed rows iterated. Rick's two "
                  f"questions were asked of every one. Work the survivors in priority order — "
-                 f"and report the pass with its counts, not with 'the sweep is done'." )
+                 f"and report the pass with its counts, not with 'the sweep is done'."
+                 + unvalidated )
 
     remaining = total - reviewed
     return ( f"⛔ BOARD SWEEP IN PROGRESS — {reviewed}/{total} rows iterated, {remaining} NOT "
@@ -164,10 +196,11 @@ def sweep_progress_line( persona ):
              f"lapse because our scheduler fired. Before you KEEP a row, run "
              f"`git log -S\"<the mechanism it names>\" -- <the file it names>` — a row is "
              f"often closed by a commit landed under a DIFFERENT row's id, and that is the "
-             f"expensive direction: you keep a dead row and spend real attention on it." )
+             f"expensive direction: you keep a dead row and spend real attention on it."
+             + unvalidated )
 
 
-def record_reviewed( persona, task_ids, total_at_start=None ):
+def record_reviewed( persona, task_ids, total_at_start=None, board_ids=None ):
     """
     Mark one or more rows as iterated, creating the ledger on first call.
 
@@ -177,12 +210,25 @@ def record_reviewed( persona, task_ids, total_at_start=None ):
         - total_at_start is the owed count at sweep start; REQUIRED on the call that
           CREATES the ledger and ignored afterwards, so the denominator cannot drift down
           as rows are dropped
+        - board_ids is the seat's FROZEN start-set of owed row ids. Supplied on the
+          creating call; ignored afterwards. When present, every recorded id must belong
+          to it
 
     Ensures:
         - returns the written ledger dict
         - raises ValueError when creating a ledger without a positive total_at_start — a
           sweep with no denominator can never be completed, and a gate that cannot close is
           an outage
+        - raises ValueError, naming the offending ids, when a recorded id is NOT in the
+          frozen start-set — the numerator cannot be padded past the board (María's
+          planted-junk finding; see the module docstring)
+        - a ledger with NO frozen start-set accepts anything, and `sweep_progress_line`
+          then reports itself UNVALIDATED on every tick. Accepting silently AND reporting
+          cleanly would be the false green; accepting loudly is the honest degrade for the
+          ledgers that predate this check
+        - membership is checked against the FROZEN set, never a live re-query: a row
+          legitimately dropped mid-sweep leaves the live board, and rejecting it would
+          punish exactly the work the gate rewards
         - raises ValueError rather than appending to an unreadable ledger
     """
     ledger, error = read_ledger( persona )
@@ -197,9 +243,22 @@ def record_reviewed( persona, task_ids, total_at_start=None ):
             "total_at_start" : total_at_start,
             "reviewed"       : [ ],
         }
+        if board_ids is not None:
+            ledger[ "board_ids" ] = sorted( { str( b ) for b in board_ids } )
+
+    frozen  = ledger.get( "board_ids" )
+    recorded = [ str( t ) for t in task_ids ]
+    if frozen is not None:
+        strays = sorted( { t for t in recorded if t not in set( frozen ) } )
+        if strays:
+            raise ValueError(
+                f"refusing to record {len( strays )} id(s) that are not on this seat's frozen "
+                f"start-set: {strays}. The numerator must count YOUR rows, not arbitrary "
+                f"strings — otherwise {ledger[ 'total_at_start' ]} junk ids close the gate."
+            )
 
     seen = list( ledger[ "reviewed" ] )
-    seen.extend( str( t ) for t in task_ids )
+    seen.extend( recorded )
     ledger[ "reviewed" ]   = sorted( set( seen ) )
     ledger[ "updated_at" ] = datetime.now( timezone.utc ).isoformat()
 

@@ -201,3 +201,68 @@ def test_decide_heartbeat_threads_the_sweep_line_to_the_reason():
     # test failing if the emission channel ever moves.
     assert result[ "hook_output" ][ "decision" ] == "block"
     assert "SWEEP-MARKER" in result[ "hook_output" ][ "reason" ]
+
+
+# ---------------------------------------------------------------- the numerator's floor
+#
+# María 🌸 (fae1bbc4) broke the first version with a PLANTED-JUNK CONTROL, not by reading:
+# a `deadbeef-…` id that is on nobody's board advanced her counter 5/22 -> 6/22. The
+# denominator was frozen so dropping could not shrink the gate open; the numerator had the
+# identical hole from the other side — it could not be shrunk, but it could be PADDED.
+
+def test_a_junk_id_cannot_pad_the_numerator( sweep_dir ):
+    """THE REGRESSION. Twenty-two arbitrary strings must not close a 22-row gate."""
+    board = [ "row-1", "row-2", "row-3" ]
+    board_sweep.record_reviewed( "maria", [ "row-1" ], total_at_start=3, board_ids=board )
+
+    with pytest.raises( ValueError ) as excinfo:
+        board_sweep.record_reviewed( "maria", [ "deadbeef-0000-0000-0000-000000000000" ] )
+    assert "deadbeef" in str( excinfo.value )
+    assert "1/3" in board_sweep.sweep_progress_line( "maria" )      # unmoved
+
+
+def test_a_stray_is_refused_WITHOUT_dropping_the_valid_ids_in_the_same_call( sweep_dir ):
+    """
+    All-or-nothing, deliberately. A partial write would leave the caller believing the
+    whole batch landed — the failure is loud precisely so the batch can be re-sent clean.
+    """
+    board_sweep.record_reviewed( "maria", [ ], total_at_start=3, board_ids=[ "a", "b", "c" ] )
+    with pytest.raises( ValueError ):
+        board_sweep.record_reviewed( "maria", [ "a", "junk" ] )
+    assert "0/3" in board_sweep.sweep_progress_line( "maria" )
+
+
+def test_membership_is_the_FROZEN_set_not_a_live_board( sweep_dir ):
+    """
+    María's caveat, and it is the subtle half: a row legitimately DROPPED mid-sweep leaves
+    the live board. A naive live intersection would then reject the id of a row you just
+    reviewed and dropped — punishing exactly the work the gate rewards. The frozen set
+    still contains it, so recording it works.
+    """
+    board_sweep.record_reviewed( "mr radio", [ ], total_at_start=2, board_ids=[ "kept", "dropped-by-me" ] )
+    board_sweep.record_reviewed( "mr radio", [ "dropped-by-me" ] )   # no longer on the live board
+    assert "1/2" in board_sweep.sweep_progress_line( "mr radio" )
+
+
+def test_a_ledger_with_no_frozen_set_still_counts_but_says_it_is_UNVERIFIED( sweep_dir ):
+    """
+    The honest degrade for ledgers predating the check. Refusing to count would strand a
+    live sweep; counting SILENTLY would be the false green. So it counts and confesses.
+    """
+    board_sweep.record_reviewed( "mr radio", [ "anything at all" ], total_at_start=2 )
+    line = board_sweep.sweep_progress_line( "mr radio" )
+    assert "1/2" in line
+    assert "NO FROZEN START-SET" in line and "UNVERIFIED" in line
+
+
+def test_the_unvalidated_warning_also_rides_the_COMPLETE_line( sweep_dir ):
+    """A sweep that 'completed' on unverifiable ids must not report a clean ✅."""
+    board_sweep.record_reviewed( "mr radio", [ "x", "y" ], total_at_start=2 )
+    line = board_sweep.sweep_progress_line( "mr radio" )
+    assert "SWEEP COMPLETE" in line and "UNVERIFIED" in line
+
+
+def test_a_validated_ledger_carries_NO_warning( sweep_dir ):
+    """The negative control — the warning must not fire on a correctly-armed ledger."""
+    board_sweep.record_reviewed( "mr radio", [ "a" ], total_at_start=2, board_ids=[ "a", "b" ] )
+    assert "UNVERIFIED" not in board_sweep.sweep_progress_line( "mr radio" )
