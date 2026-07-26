@@ -2,6 +2,23 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-06-23 to 07-08](history/2026-06-23-to-07-08-history.md). History health: ✅ **HEALTHY at ~7.9k tokens (31% of 25k)** — archived 2026-07-21 by Mr. Radio 🦉 (session 56a74d7b), ~9.6k tokens moved to archive on Rick's ruling at the 17.5k WARNING threshold.
 
+### 2026.07.25 - Session b38f09bb (Cheech 🌿) | VM DM `missing_auth_header`: two stacked defects behind one error string
+
+**Accomplishments** (solo; committed on `wip-v0.1.9` as `bba39eed`, HELD — 5 files, +445/−13):
+1. **Two defects, stacked, one error string** — María's DM verbs all failed on `lupin-host-test` while commons read kept working. (a) The outbound key file was mode `600` owned by uid `1001` while the MCP server runs as the OS-Login user; `os.path.exists()` said True, `open()` raised `PermissionError`, and a bare `except Exception: return None` erased it. (b) **Underneath it**, the key VALUE was the **dev box's key** (byte-identical), rsync'd at provisioning and never registered in that server's DB → `401 Invalid or inactive API key`.
+2. **⭐ The chmod alone would have read as a fix and wasn't.** It moved the error from `missing_auth_header` to `401` — same failure to the caller, different string. What caught it was refusing to accept "the key loads now" as the receipt and probing the endpoint the caller actually depends on. Verified through the MCP's own loader on the VM: `/api/dm/list` → **200**, with the pre-fix key as a control → **401**.
+3. **The loader gets a voice** (`src/lupin_mcp/outbound_api_key.py`) — return contract **unchanged** (key or `None`, so all 13 call sites are untouched), with a parallel diagnosis channel. Details now name absent-vs-unreadable-vs-empty, and for the unreadable case the **mode and owner uid**. Success clears the recorded clause so a stale diagnosis can never be reported against a later working load. The four DM details + the `/api/tasks/*` transport detail consume it.
+4. **🔴 My own first preflight was blind to defect 2.** Check 5a tests key READABILITY (not presence — `os.path.exists()` passes on the exact shape that broke). But a *readable* key from another deployment sails straight through it, so check **6a** tests server ACCEPTANCE, control-verified 200-vs-401. *The gap was in the fix, written while the first defect still felt like the whole story.*
+5. **No MCP restart needed** — the key is read fresh at each of the 13 call sites, not cached at module load, so María picked up the fix immediately.
+6. **Dev secrets removed from the VM** on Rick's instruction — 9 unrelated credentials (`openai`, `eleven11`, `anthropic-api-key-firewalled`, `gemini`, `google`, `groq`, `huggingface`, `kagi`, `mistral`) plus the dev-key `.bak`, each hashed byte-identical against dev first so nothing unique was lost. Verified **inside the container** where the app reads: healthy, `/docs` 200, `/api/dm/list` 200, logs clean.
+7. **10 new tests, 100% lines AND branches** on the new module; `src/tests/unit/lupin_mcp/` 189 green; full unit run 10,816 passed / 2 failed (both pre-existing, neither mine).
+
+**Peer safety**: committed by **pathspec** with other seats' files in the tree (`heartbeat_hold.py`, `task_store_rejoin.py`); staged only my five.
+
+**Doc**: [2026.07.25-vm-dm-outbound-key-two-stacked-defects.md](src/rnd/v0.1.9/2026.07.25-vm-dm-outbound-key-two-stacked-defects.md) — includes an open question left deliberately unsettled: the 07-25 entry records `26e3c096` as the re-minted app key for the **Secret Manager / Cloud Run STT** path, while this VM's local `:7999` container rejects it and accepts `ccfc494d`. Different deployments; whether they should be unified is for whoever owns key provisioning.
+
+**Files**: `src/lupin_mcp/outbound_api_key.py` · `src/lupin_mcp/cosa_voice_mcp.py` · `src/lupin_mcp/task_store_tools.py` · `src/scripts/install-cosa-voice.sh` · `src/tests/unit/lupin_mcp/test_outbound_api_key.py`
+
 ### 2026.07.26 - Session 43ff094e (Mr. Radio 🦉) | `00a6bde2` item 3: the done-arm rejoin, with the instrument proven before its zero was believed
 
 **Accomplishments** (solo; committed on `wip-v0.1.9` as `32de43fc`, HELD):
