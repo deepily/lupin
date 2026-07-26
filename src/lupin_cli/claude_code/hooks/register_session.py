@@ -1121,12 +1121,44 @@ def main():
     # ── Phase 1: Read hook input ──────────────────────────────────────────
     payload = read_hook_input()
     if not payload:
+        # 🔎 WITNESS FOR THE FIRST NO-BRIDGE EXIT (row e9822f8d). This return
+        # leaves NO bridge, NO lockfile and NO env file, and the seat that comes
+        # up behind it is healthy, invisible and unaddressable: list_spawned_sessions
+        # says alive, dm_send says recipient_unresolved, and the session itself works
+        # fine and DMs OUT. Exiting quietly on an unreadable payload is CORRECT — a
+        # raising SessionStart is itself how you get a seat with no bridge — but the
+        # SILENCE is what left that row undiagnosed for four days.
+        #
+        # The row's own body names stderr as the first place to look, because hook
+        # stderr lands in the session's OWN transcript as a hook_success attachment
+        # (the 86aa79ac method). This is the line that will be there next time.
+        print( "[register_session] WARNING: hook payload was empty or unreadable — "
+               "NO session bridge written. This seat will have no voice persona, "
+               "cannot set a session topic, and cannot receive DMs (row e9822f8d).",
+               file=sys.stderr )
         emit_json( {} )
         sys.exit( 0 )
 
     session_id      = payload.get( "session_id", "" )
     transcript_path = payload.get( "transcript_path", "" )
     cwd             = payload.get( "cwd", "" )
+
+    # 🔎 WITNESS FOR THE SECOND NO-BRIDGE EXIT (row e9822f8d). EVERYTHING in
+    # Phase 2 — the lockfile, the /clear detection, the bridge write itself — is
+    # guarded by `if session_id:` below. A payload that parses but carries no
+    # session_id therefore falls straight through to Phase 3 having written
+    # nothing, and until now said nothing either.
+    #
+    # ⚠️ THIS IS THE HALF THE EXISTING INSTRUMENTS CANNOT SEE. The persona-alloc
+    # give-up got a witness in 99589967 and the bridge WRITE got one inside
+    # atomic_write_json — but both live DOWNSTREAM of this branch. A witness
+    # bolted onto a later step cannot fire when the hook never reaches that step,
+    # which is exactly why two commits naming e9822f8d did not close it.
+    if not session_id:
+        print( "[register_session] WARNING: hook payload carried no session_id "
+               f"(keys: {sorted( payload )}) — NO session bridge written. Same "
+               "consequence as an empty payload: persona-less, topic-less, "
+               "unaddressable by DM (row e9822f8d).", file=sys.stderr )
 
     # ── Phase 2: Write session bridge file ────────────────────────────────
     session_dir  = os.path.expanduser( "~/.claude/sessions" )
