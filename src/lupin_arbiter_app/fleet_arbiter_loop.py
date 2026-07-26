@@ -47,13 +47,22 @@ from cosa.agents.heartbeat_arbiter.operator_gate_routing import DEFAULT_DIGEST_C
 # real here so the :8001 service actually resurfaces a dark session's aged user-gate
 # to Rick (without this wiring the seam stays None → the backstop is decorative).
 from lupin_cli.claude_code.hooks.lib.heartbeat_hold import read_hold as _default_hold_reader
-# REPORT-ONLY janitor (2026-07-16). NOT prune_stale_hold_files: hold files carry
-# hand-written memento cargo (note_to_my_successor / the_lesson_that_should_outlive_
-# this_session / board), and a measured 10 of them are ALREADY reapable by the
-# existing rule the moment the sweep widens. Deletion stays disabled until the cargo
-# has been triaged OUT — so the supervisor is wired to a function that structurally
-# CANNOT delete, rather than to a destructive one behind a flag.
+# The hold sweep is REPORT + RECLAIM as of 2026-07-26 (row 11461241, Rick's direct
+# ruling — "wire it: the arbiter calls the janitor"). It was report-only from
+# 2026-07-16 while hold files still carried untriaged hand-written memento cargo.
+#
+# WHAT CHANGED IS THE TRIAGE, NOT THE APPETITE FOR RISK. All five preconditions were
+# met and re-verified by measurement before this landed:
+#   · the cargo guard is STRUCTURAL — classify_hold_file( allow_cargo_deletion=False )
+#     is the DEFAULT, and cargo_bearing ⇒ VERDICT_KEEP. No call site reaches deletion
+#     by omission, which is where A0 (this milestone's origin bug) lived.
+#   · all 20 cargo-bearing files carry a content-verified rescued record (55/55 keys
+#     verbatim), so nothing reapable here is the only copy of anything.
+#   · the two-anchor guard is live: prune needs BOTH clocks to agree.
+# The reporter is STILL imported and STILL runs — it is the evidence half, and it is
+# what makes `deleted` auditable rather than merely asserted.
 from lupin_cli.claude_code.hooks.lib.heartbeat_hold import report_hold_files as _default_hold_reporter
+from lupin_cli.claude_code.hooks.lib.heartbeat_hold import prune_stale_hold_files as _default_hold_deleter
 from lupin_cli.claude_code.hooks.lib.session_bridge import find_active_voice_persona_sessions as _find_active_voice_persona_sessions
 from lupin_cli.claude_code.hooks.lib.session_bridge import find_active_sessions as _find_active_sessions
 from lupin_mcp.persona_normalization import canonical_persona_key
@@ -795,8 +804,10 @@ class FleetArbiterLoop:
         *,
         log_fn               : Optional[ Callable ] = None,
         hold_janitor_fn      : Optional[ Callable ] = None,
+        hold_deleter_fn      : Optional[ Callable ] = None,
         hold_roots_fn        : Optional[ Callable ] = None,
         live_session_ids_fn  : Optional[ Callable ] = None,
+        enable_hold_deletion : bool = False,
     ) -> None:
         self._job_factory    = job_factory
         self._log_fn         = log_fn if log_fn is not None else _default_log_fn
@@ -806,8 +817,23 @@ class FleetArbiterLoop:
         # UNRULED questions (which roots? which live-set?) are answered by the
         # caller rather than assumed here.
         self._hold_janitor_fn     = hold_janitor_fn if hold_janitor_fn is not None else _default_hold_reporter
+        self._hold_deleter_fn     = hold_deleter_fn if hold_deleter_fn is not None else _default_hold_deleter
         self._hold_roots_fn       = hold_roots_fn if hold_roots_fn is not None else _default_hold_roots
         self._live_session_ids_fn = live_session_ids_fn if live_session_ids_fn is not None else _default_live_session_ids
+        # Reclamation switch (11461241, Rick's ruling "wire it"). **DEFAULT FALSE, and
+        # that is not timidity — it is this milestone's own rule applied to itself.**
+        #
+        # A0, the origin bug of this whole family, was a CALL SITE that reached
+        # deletion by OMITTING a guard. `classify_hold_file` was therefore given
+        # `allow_cargo_deletion=False` as its default so that omission is the SAFE
+        # state. A constructor whose omitted parameter DELETES is that same bug in a
+        # new place — and it was in the first draft of this diff, three lines under a
+        # docstring citing A0 as the reason not to do it. Caught by Mr Radio 🦉.
+        #
+        # Deletion is therefore opt-IN, stated out loud at the one production call
+        # site Rick authorized. Every other construction — tests, tools, any future
+        # caller — is report-only unless it says otherwise.
+        self._enable_hold_deletion = bool( enable_hold_deletion )
         self._stop           = threading.Event()
         self._current_job    = None
         self._thread         = None
@@ -840,11 +866,30 @@ class FleetArbiterLoop:
 
     def _sweep_hold_files( self ) -> None:
         """
-        REACH and CLASSIFY every `.heartbeat-hold-*` file, and DELETE NOTHING.
+        REACH and CLASSIFY every `.heartbeat-hold-*` file, then RECLAIM the ones the
+        classification proved prunable.
 
-        Renamed from `_reap_stale_holds`: it no longer reaps, and a method whose
-        name promises deletion while its body reports is exactly the kind of false
-        claim that becomes the next reader's ground truth.
+        Reclamation was wired 2026-07-26 (row 11461241, Rick's direct ruling) after
+        all five preconditions were met. From 2026-07-16 to then this method could
+        not delete at all, and the name `_sweep_hold_files` was chosen precisely
+        because a method whose name promises deletion while its body reports is the
+        kind of false claim that becomes the next reader's ground truth. The name
+        still fits: it sweeps, and now the sweep has teeth.
+
+        **THE EVIDENCE AND THE ACT SHARE ONE CLOCK — this is the design.** The
+        report and the janitor are two functions over ONE decision rule
+        (`classify_hold_file`), which is what lets the emitted tally stand as proof
+        of what was deleted. That guarantee is only real if both passes classify
+        against the SAME instant: a file crossing its TTL boundary between the two
+        calls would otherwise be logged KEPT and deleted anyway, and the log would
+        be wrong in the one direction that matters. So `now` is frozen ONCE here and
+        passed to both. Do not let either call default it.
+
+        **THE CARGO GUARD IS NOT PASSED AND MUST NOT BE.** Both callees default
+        `allow_cargo_deletion=False`, so cargo-bearing holds are KEPT structurally.
+        Omission is the safe state by construction — A0, this milestone's origin
+        bug, was a call site that reached deletion by omitting a guard. Passing
+        `True` from here would be the same bug wearing the fix's clothes.
 
         Two defects this method used to embody, both fixed here:
 
@@ -871,13 +916,18 @@ class FleetArbiterLoop:
               "found nothing", and a lone zero cannot tell them apart
             - surfaces skipped-but-hold-bearing dirs + unreachable roots rather
               than silently omitting them
-            - deletes nothing; swallows + logs any exception (the janitor must
-              never kill the supervisor)
+            - deletes ONLY what the same-clock classification marked prunable, and
+              NEVER a cargo-bearing hold; emits `deleted` and `deletion_enabled`
+              every tick so neither is inferred from silence
+            - swallows + logs any exception (the janitor must never kill the
+              supervisor); a deletion failure does not suppress the report, which
+              is emitted BEFORE reclamation is attempted
         """
         try:
             roots  = list( self._hold_roots_fn() or [ ] )
             live   = self._live_session_ids_fn()
-            report = self._hold_janitor_fn( base_dirs=roots, live_session_ids=live )
+            now    = datetime.datetime.now( datetime.timezone.utc )   # ONE clock: evidence AND act
+            report = self._hold_janitor_fn( base_dirs=roots, live_session_ids=live, now=now )
             counts = report[ "counts" ]
             if not report[ "roots_swept" ]:
                 # LOUD: reached no roots at all. Not the same fact as "nothing to reap".
@@ -895,9 +945,28 @@ class FleetArbiterLoop:
                           anchor_disagreement     = counts[ "anchor_disagreement" ],
                           kept_reasons            = counts[ "reachable_but_kept_reasons" ],
                           skipped_dirs_with_holds = report[ "skipped_dirs_with_holds" ],
+                          deletion_enabled        = self._enable_hold_deletion,
                           deleted                 = report[ "deleted" ] )
         except Exception as e:                   # janitor must never kill the supervisor
             self._log_fn( "fleet_arbiter_hold_janitor_error", error=str( e ) )
+            return                               # no classification ⇒ nothing is proven prunable
+
+        if not self._enable_hold_deletion:
+            return
+        try:
+            # SAME roots, SAME live-set, SAME `now` as the report above — and the
+            # cargo guard left at its default False. The report's `prunable` tally is
+            # therefore a PREDICTION of this call's result, which is what makes the
+            # pair auditable: if `deleted` and `prunable` ever disagree, the disagreement
+            # itself is the finding.
+            pruned = self._hold_deleter_fn( base_dirs=roots, live_session_ids=live, now=now )
+            self._log_fn( "fleet_arbiter_hold_reclaimed",
+                          deleted           = len( pruned ),
+                          predicted_prunable = counts[ "prunable" ],
+                          agrees            = ( len( pruned ) == counts[ "prunable" ] ),
+                          paths             = pruned )
+        except Exception as e:               # reclamation must never kill the supervisor
+            self._log_fn( "fleet_arbiter_hold_reclaim_error", error=str( e ) )
 
     def start( self ) -> None:
         """Spawn the daemon supervisor thread."""

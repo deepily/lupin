@@ -355,29 +355,65 @@ def test_sweep_roots_fn_exception_swallowed():
     assert any( e == "fleet_arbiter_hold_janitor_error" for e, _ in rec.logs )
 
 
-def test_supervisor_CANNOT_delete_a_hold_file():
-    """The absolute invariant of this milestone, asserted structurally rather than
-    trusted: hold files carry hand-written memento cargo (note_to_my_successor,
-    the_lesson_that_should_outlive_this_session), and a measured 10 of them are
-    ALREADY reapable the moment the sweep widens. Deletion stays disabled until the
-    cargo is triaged OUT — so the supervisor's sweep path contains no unlink and
-    calls nothing that does."""
-    import ast, inspect
+def test_supervisor_deletes_NOTHING_unless_deletion_is_explicitly_opted_IN( tmp_path ):
+    """SUCCESSOR to `test_supervisor_CANNOT_delete_a_hold_file` (11461241, 2026-07-26).
+
+    THE OLD TEST STAYED GREEN WHILE THE INVARIANT IT NAMED BECAME FALSE, and that is
+    why it was replaced rather than edited. It asserted two things:
+
+      1. no literal `.unlink` attribute in six function sources, via an AST scan
+      2. `_hold_janitor_fn is report_hold_files` on a default-constructed loop
+
+    When reclamation was wired, BOTH still passed. (2) passed because the deleter went
+    on a NEW seam, `_hold_deleter_fn`, which the assertion never looked at — it kept
+    checking that the old seam still pointed at the reporter, which was true and had
+    become beside the point. (1) passed because the sweep now reaches `unlink` through
+    an injected CALLABLE one frame down, and a shallow attribute scan cannot see that.
+    Its failure message said "REACHABLE unlink"; its implementation meant "no literal
+    `.unlink` token in these six sources." The word `reachable` was doing work the
+    code did not do. Found by Mr Radio 🦉 running the suite against a PREDICTION that
+    it would go red — a review would not have caught it, because reading the old test
+    makes it look like it covers this.
+
+    ⇒ So this successor is BEHAVIOURAL. It puts real files on disk and asks what
+    survives, which is the only formulation that cannot be fooled by where the call
+    lives or how many frames down the unlink sits.
+    """
+    import json, time
     from lupin_cli.claude_code.hooks.lib import heartbeat_hold as hh
 
-    def attrs_of( fn ):
-        return { n.attr for n in ast.walk( ast.parse( inspect.getsource( fn ).lstrip() ) )
-                 if isinstance( n, ast.Attribute ) }
+    def _write_hold( name, age_seconds, **extra ):
+        p = tmp_path / f".heartbeat-hold-{name}.json"
+        held = datetime.datetime.now( datetime.timezone.utc ) - datetime.timedelta( seconds=age_seconds )
+        body = { "session_id": name, "held_at": held.isoformat(), "ttl_seconds": 60 }
+        body.update( extra )
+        p.write_text( json.dumps( body ) )
+        old = time.time() - age_seconds
+        os.utime( p, ( old, old ) )              # mtime anchor must agree with held_at
+        return p
 
-    for fn in ( FleetArbiterLoop._sweep_hold_files, hh.report_hold_files,
-                hh.classify_hold_file, hh._iter_hold_paths, hh._walk_hold_files,
-                hh._probe_dir_for_holds ):
-        assert "unlink" not in attrs_of( fn ), f"REACHABLE unlink in {fn.__name__}"
+    ancient = _write_hold( "plainold", 86400 )
+    cargo   = _write_hold( "precious", 86400, note_to_my_successor="the only copy of this" )
 
-    # POSITIVE CONTROL — this check is not vacuous: it DOES detect the real thing.
-    assert "unlink" in attrs_of( hh.prune_stale_hold_files )
-    # ...and the supervisor is wired to the report fn, not the destructive one.
-    assert FleetArbiterLoop( lambda: None )._hold_janitor_fn is hh.report_hold_files
+    # ── DEFAULT CONSTRUCTION: deletion is OPT-IN, so BOTH files must survive ──
+    loop = FleetArbiterLoop( lambda: None, log_fn=lambda *a, **k: None,
+                             hold_roots_fn=lambda: [ str( tmp_path ) ],
+                             live_session_ids_fn=lambda: set() )
+    loop._sweep_hold_files()
+    assert ancient.exists(), "default-constructed supervisor DELETED — omission must be the safe state (A0)"
+    assert cargo.exists()
+
+    # ── OPTED IN: the plain file goes, the CARGO file still does not ──
+    loop = FleetArbiterLoop( lambda: None, log_fn=lambda *a, **k: None,
+                             hold_roots_fn=lambda: [ str( tmp_path ) ],
+                             live_session_ids_fn=lambda: set(),
+                             enable_hold_deletion=True )
+    loop._sweep_hold_files()
+    assert not ancient.exists(), "POSITIVE CONTROL FAILED: opted-in sweep deleted nothing — the test proves nothing"
+    assert cargo.exists(), "CARGO FILE DELETED — the structural guard did not hold"
+
+    # The destructive fn is still the one on the deleter seam (a rename must not silently unwire it).
+    assert FleetArbiterLoop( lambda: None )._hold_deleter_fn is hh.prune_stale_hold_files
 
 
 def test_runner_stop_cancel_error_swallowed():

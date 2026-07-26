@@ -377,7 +377,19 @@ def assemble_app(
         count_dm_as_liveness_fn = lambda: cfg.get( "arbiter count dm as liveness", default=True, return_type="boolean" ),
         follow_through_watcher_factory = follow_through_watcher_factory,        # eng#7 §3b
     )
-    fleet_arbiter_loop = FleetArbiterLoop( fleet_arbiter_factory, log_fn=arbiter_log_fn )
+    # Hold-file RECLAMATION (row 11461241, Rick's direct ruling 2026-07-26: "wire it —
+    # the arbiter calls the janitor"). This is the ONE call site that opens deletion:
+    # `enable_hold_deletion` defaults FALSE in the constructor so that omission stays
+    # the safe state everywhere else, and the opt-in is stated out loud here.
+    #
+    # INI-gated for a no-bounce rollback — a destructive capability should be
+    # revocable by an operator without a code change. Cargo-bearing holds are KEPT
+    # regardless of this flag: that guard is structural in classify_hold_file and is
+    # NOT reachable from here.
+    fleet_arbiter_loop = FleetArbiterLoop(
+        fleet_arbiter_factory, log_fn=arbiter_log_fn,
+        enable_hold_deletion = cfg.get( "arbiter enable hold deletion", default=True, return_type="boolean" ),
+    )
 
     # ── context-headroom writer: gated on `arbiter context watch enabled` ──
     context_pressure_loop = _build_context_pressure_loop( cfg, store, clock=clock, log_fn=cp_log_fn )
