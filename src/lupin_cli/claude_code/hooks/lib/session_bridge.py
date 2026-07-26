@@ -592,12 +592,38 @@ def _resolve_project_from_bridge_cwd() -> Optional[str]:
 
 def resolve_project_name( environ=None ) -> str:
     """
-    Resolve the current session's project name — the ONE project-name
-    resolver shared by every hook consumer (the task-store write gate's
+    Resolve the current session's project name — the project-name resolver
+    for the HOOK consumers named below (the task-store write gate's
     manager-figure predicate, the per-repo persona-chain env-key lookup,
-    and hook credential resolution). One name at every layer; the former
+    and hook credential resolution). The former
     `manager_figure.derive_project_name` and `hook_credentials.
     _derive_project_name` duplicates were converged here (bug 9bf1dc4a).
+
+    🔴 THIS DOCSTRING USED TO SAY "the ONE project-name resolver … one name at
+    every layer" AND THAT IS FALSE (row 7160b671, corrected 2026-07-25).
+    `build_sender_id_for_cc` — the path that stamps identity onto EVERY peer DM —
+    does NOT call this function. It resolves independently:
+    `_resolve_project_from_bridge_cwd()`, and on None falls through to
+    `build_sender_id( project=None )` → `detect_project()` → `os.getcwd()`.
+
+    ⇒ TWO RESOLVERS, DIFFERENT FALLBACKS. This one falls back to the LUPIN_ROOT
+    basename; that one falls back to the live cwd. They disagree exactly when a
+    seat's cwd and LUPIN_ROOT name different repos.
+
+    ⚠️ THE FALSE CLAIM ALREADY COST A DIAGNOSIS. On 2026-07-21 the heartbeat-hold
+    `--base-dir`-defaults-to-LUPIN_ROOT twin was offered as the mechanism for the
+    `@lupin` DM stamp, and it looked like an excellent match BECAUSE this function
+    — the one you would naturally read, since it advertised itself as THE one —
+    really does carry that fallback. A discriminator (LUPIN_ROOT set, cwd in a
+    non-lupin repo, no bridge) returned `@plan`, proving the lever is
+    `os.getcwd()`. The wrong mechanism had to be struck from P1 row 12b5a766.
+
+    ⇒ A CONVERGENCE THAT ADVERTISES ITSELF AS COMPLETE WHILE A CALL SITE BYPASSES
+    IT SENDS THE NEXT READER TO THE WRONG CODE WITH CONFIDENCE. The claim is
+    corrected here rather than the resolvers merged: converging them is a real
+    refactor and is deliberately deferred, because doing it now could MASK
+    12b5a766 by making the `@lupin` stamp look intentional (that row's own
+    warning). Row 7160b671 carries the convergence.
 
     Resolution order:
         1. The bridge file's SessionStart cwd → nearest `.git` ancestor
