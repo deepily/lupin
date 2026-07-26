@@ -119,14 +119,32 @@ say_head "A. Host / OS"
 #      `gcloud ssh --command` opens a NON-LOGIN shell that does not source ~/.bashrc,
 #      so a naive `env` check reports MISSING on a perfectly-configured VM. Read the
 #      env the way a login shell would, and SAY which surface was read.
+#      MEASURED 2026-07-26, first live run: SOURCING IS NOT ENOUGH. Debian's stock
+#      ~/.bashrc opens with `case $- in *i*) ;; *) return;; esac` — a non-interactive
+#      guard that returns before any export. So `source ~/.bashrc` from this script is
+#      a NO-OP, and every var read as UNSET on a correctly-configured VM. The first
+#      run of this preflight reported 12 false UNSETs for exactly that reason.
+#      Fix: source it, then for anything still unset, eval the `export NAME=` lines
+#      out of the file directly — and SAY which surface supplied the value.
 ENV_SURFACE="current shell"
 if [ -r "$HOME/.bashrc" ] && [ -z "${LUPIN_ROOT:-}" ]; then
     dbg "sourcing ~/.bashrc (non-login shell detected: LUPIN_ROOT unset)"
     # shellcheck disable=SC1090
     source "$HOME/.bashrc" >/dev/null 2>&1 || true
-    ENV_SURFACE="~/.bashrc (sourced — this was a NON-LOGIN shell)"
+    ENV_SURFACE="~/.bashrc sourced"
 fi
-printf "        env surface: %s\n" "$ENV_SURFACE"
+
+# pfv_hydrate_from_bashrc <VARNAME> — last-resort read for a var the non-interactive
+# guard hid. Only ever SETS a var that is currently empty; never overrides a live value.
+pfv_hydrate_from_bashrc() {
+    local name="$1" line
+    [ -z "$( eval "printf '%s' \"\${$name:-}\"" )" ] || return 0
+    [ -r "$HOME/.bashrc" ] || return 1
+    line="$( grep -E "^[[:space:]]*export[[:space:]]+$name=" "$HOME/.bashrc" 2>/dev/null | tail -1 )"
+    [ -n "$line" ] || return 1
+    eval "$line" >/dev/null 2>&1 || return 1
+    return 0
+}
 
 # A1 — every REQUIRED var in the contract, validated against its declared shape.
 if [ -r "$CONTRACT" ]; then
@@ -139,10 +157,14 @@ if [ -r "$CONTRACT" ]; then
         # CONTAINER-surface vars are asserted in layer C, not here.
         [ "$surface" = "CONTAINER" ] && continue
         tier="BLOCK"; [ "$req" = "OPTIONAL" ] && tier="WARN"
+        src="$ENV_SURFACE"
+        if pfv_hydrate_from_bashrc "$name"; then
+            [ "$src" = "$ENV_SURFACE" ] && src="~/.bashrc export line (the non-interactive guard hid it)"
+        fi
         value="$( eval "printf '%s' \"\${$name:-}\"" )"
         pfv_shape_matches "$value" "$shape" "$VM_PREFIX"; rc=$?
         case $rc in
-            0) report pass    "$tier" "$name set and matches $shape" ;;
+            0) report pass    "$tier" "$name set and matches $shape   [from: $src]" ;;
             1) report fail    "$tier" "$name = '$value' does NOT match shape $shape" \
                               "fix the value in ~/.bashrc, or re-run: lupin-vm.sh push-env" ;;
             2) report unknown "$tier" "$name is UNSET (surface: $surface)" \
@@ -232,10 +254,15 @@ fi
 #      the identity git ACTUALLY RUNS AS, not for the login user.
 for d in "$REPO_ROOT" "${PLANNING_IS_PROMPTING_ROOT:-}"; do
     [ -n "$d" ] && [ -d "$d" ] || continue
+    # NB tier=WARN, deliberately. The sanctioned tooling (lupin-vm.sh push-bundle)
+    # passes `-c safe.directory=` INLINE on every call, so a missing root-side entry
+    # does NOT break the supported path — it only bites a bare `sudo git` typed by
+    # hand. Reporting it as BLOCK was this check's first-run defect: it failed a VM
+    # whose supported workflow was entirely healthy.
     if sudo -n git config --global --get-all safe.directory 2>/dev/null | grep -qxF "$d"; then
-        report pass BLOCK "safe.directory registered for $d (root's gitconfig)"
+        report pass WARN "safe.directory registered for $d in root's gitconfig"
     else
-        report fail BLOCK "no root-side safe.directory for $d — sudo git will refuse it" \
+        report fail WARN "no root-side safe.directory for $d — a bare 'sudo git -C $d' will refuse (the tooling passes it inline, so this is not blocking)" \
                       "sudo git config --global --add safe.directory $d"
     fi
 done
@@ -290,8 +317,11 @@ if layer_runs B; then
 # than no assertion, because it reads as coverage.
 for pair in "$REPO_ROOT" "${PLANNING_IS_PROMPTING_ROOT:-}"; do
     [ -n "$pair" ] && [ -d "$pair/.git" ] || continue
-    head_sha="$( sudo -n git -C "$pair" rev-parse --short HEAD 2>/dev/null || printf '' )"
-    dirty="$(   sudo -n git -C "$pair" status --porcelain 2>/dev/null | grep -v '^??' | head -5 )"
+    # -c safe.directory inline: root's gitconfig lacks the 1001-owned-repo exception,
+    # exactly as lupin-vm.sh does it. Without this the read returns nothing and the
+    # check reports a FALSE "cannot read HEAD" on a perfectly clean repo.
+    head_sha="$( sudo -n git -c "safe.directory=$pair" -C "$pair" rev-parse --short HEAD 2>/dev/null || printf '' )"
+    dirty="$(   sudo -n git -c "safe.directory=$pair" -C "$pair" status --porcelain 2>/dev/null | grep -v '^??' | head -5 )"
     if [ -z "$head_sha" ]; then
         report unknown BLOCK "cannot read HEAD of $pair" "sudo git -C $pair rev-parse HEAD"
     elif [ -n "$dirty" ]; then
@@ -303,7 +333,7 @@ for pair in "$REPO_ROOT" "${PLANNING_IS_PROMPTING_ROOT:-}"; do
 done
 
 # B4 — a committed .mcp.json with absolute dev paths pollutes every checkout.
-if sudo -n git -C "$REPO_ROOT" ls-files --error-unmatch .mcp.json >/dev/null 2>&1; then
+if sudo -n git -c "safe.directory=$REPO_ROOT" -C "$REPO_ROOT" ls-files --error-unmatch .mcp.json >/dev/null 2>&1; then
     report fail WARN ".mcp.json is TRACKED — it must not be (cosa-voice is a per-machine USER-scope MCP)" \
                   "git rm --cached .mcp.json && echo .mcp.json >> .gitignore"
 else
@@ -401,8 +431,11 @@ PY
     #      the entire outage, while socket-init had DELETED the socket out from under it.
     #      So: probe the ARTIFACT, not the provider's self-report.
     conn="${CLOUD_SQL_CONNECTION_NAME:-}"
-    if [ -z "$conn" ] && [ -r "$REPO_ROOT/cloud-gpu.env" ]; then
-        conn="$( grep -E '^CLOUD_SQL_CONNECTION_NAME=' "$REPO_ROOT/cloud-gpu.env" 2>/dev/null | head -1 | cut -d= -f2- )"
+    if [ -z "$conn" ] && [ -e "$REPO_ROOT/cloud-gpu.env" ]; then
+        # sudo: cloud-gpu.env is mode 600 / uid 1001, so a plain grep by the SSH user
+        # reads NOTHING and the socket check reports a false UNKNOWN — measured on the
+        # first live run. `sudo docker compose` reads it the same way for the same reason.
+        conn="$( sudo -n grep -E '^CLOUD_SQL_CONNECTION_NAME=' "$REPO_ROOT/cloud-gpu.env" 2>/dev/null | head -1 | cut -d= -f2- )"
     fi
     if [ -z "$conn" ]; then
         report unknown BLOCK "CLOUD_SQL_CONNECTION_NAME unknown — cannot locate the socket" \
