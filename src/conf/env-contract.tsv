@@ -1,0 +1,66 @@
+# env-contract.tsv — the ONE in-repo authority for Lupin's environment variables.
+#
+# WHY THIS FILE EXISTS  (R3 of src/rnd/v0.1.9/2026.07.26-configuration-splintering-analysis.md)
+#   LUPIN_ROOT alone has 36 read sites and four writers (each machine's ~/.bashrc,
+#   push-env, every compose `environment:` block, and a default inside
+#   cu.get_project_root()) — and no list of which vars exist, who sets them, or what
+#   shape they should have per machine. Every one of those is one fact asserted in
+#   several places with nothing comparing them.
+#
+#   This is the CONTRACT, not the VALUES. Values are legitimately machine-specific
+#   (/mnt/DATA01/... on dev vs /mnt/lupin-data/... on the VM) and must stay that way.
+#   What is NOT machine-specific is WHICH vars must exist, WHO writes them, and WHAT
+#   SHAPE they take — and that genuinely is one fact, so it lives here, once.
+#
+#   This is the same pattern as src/conf/claude-code-hooks.json: one in-repo authority,
+#   machine-specific instantiation by a script. That is the pattern that has worked.
+#
+# CONSUMERS
+#   - src/scripts/preflight-vm.sh   check A1 — asserts each var per this contract.
+#   - src/scripts/lupin-vm.sh       push-env — SHOULD generate from this file rather
+#                                   than carrying its own hardcoded echo list
+#                                   (follow-on; the list is duplicated today).
+#
+# FORMAT — tab-separated, 6 columns. '#' comments and blank lines ignored.
+#
+#   name          the environment variable.
+#   surface       HOST      — the VM/dev shell (~/.bashrc, push-env)
+#                 CONTAINER — a compose `environment:` block
+#                 BOTH      — must agree on both surfaces
+#   writer        what is responsible for setting it.
+#   shape         PATH_VM      — must live under the VM data root on a VM
+#                 PATH_ANY     — a path, machine-specific, not otherwise constrained
+#                 EMAIL / LITERAL / NUMERIC / SECRET / ENUM:<a|b|c>
+#   requirement   REQUIRED — preflight BLOCKS when unset
+#                 OPTIONAL — preflight WARNs when unset
+#   note          why it exists / what breaks without it. Keep it factual.
+#
+# name	surface	writer	shape	requirement	note
+
+# ── roots ────────────────────────────────────────────────────────────────────
+LUPIN_ROOT	BOTH	push-env + compose	PATH_VM	REQUIRED	36 read sites. Container value is /var/lupin; host value is the checkout. cu.get_project_root() falls back to /var/lupin, which is CORRECT in a container and WRONG on a host — so an unset host value fails silently rather than loudly.
+PLANNING_IS_PROMPTING_ROOT	HOST	push-env	PATH_VM	REQUIRED	The alias library and the hook templates are relative to it. Aliases only REFERENCED it; nothing defined it until 5eb54324.
+DEEPILY_PROJECTS_DIR	HOST	push-env	PATH_VM	REQUIRED	The alias library depends on it (878df337).
+
+# ── Claude Code host integration ─────────────────────────────────────────────
+LUPIN_CC_VENV	HOST	push-env	PATH_ANY	REQUIRED	The interpreter for the MCP server AND the 8 hooks. Defaults to $LUPIN_ROOT/.venv, which on the VM is a SYMLINK to the arbiter's venv (uid 1001, py3.10) — missing deps and unwritable. The dev box masks this completely.
+LUPIN_DEV_EMAIL	HOST	push-env	EMAIL	REQUIRED	notify() target-user resolution. Without it: 401 "no target user". ~/.lupin/config global_notification_recipient is NOT read at runtime — this var is.
+LUPIN_API_KEY	HOST	minted ON the target	SECRET	REQUIRED	The X-API-Key (ck_live_ format), validated against a bcrypt hash in THAT SERVER'S api_keys table. PER-DATABASE — the dev key cannot validate on the VM. Never ship it from dev (reverted footgun 90b56fd4).
+
+# ── VM deployment identity ───────────────────────────────────────────────────
+LUPIN_GCP_PROJECT_ID	HOST	operator ~/.bashrc	LITERAL	REQUIRED	Required by lupin-vm.sh for every gcloud call. NB test_no_hardcoded_gcp_identifiers currently reports lupin-vm.sh hardcodes the sandbox value as well — an open pre-existing failure.
+LUPIN_BRIDGE_GID	CONTAINER	cloud-gpu.env	NUMERIC	REQUIRED	group_add for the app container so uid 1001 can read/write host-written CC session bridges. Absent => persona allocation 404s.
+LUPIN_HOST_SESSIONS_DIR	CONTAINER	cloud-gpu.env	PATH_ANY	REQUIRED	Bind source for the CC session bridges. A short ${HOME}-relative bind silently CREATES an empty dir when HOME is wrong — indistinguishable from "mounted but empty".
+
+# ── runtime profile ──────────────────────────────────────────────────────────
+LUPIN_ENV	CONTAINER	compose	ENUM:development|testing|production	REQUIRED	Chooses the DATABASE. Per cloud-test.yml's own comment it is "never inferred". Must AGREE with the INI block below — nothing compares them today (R4).
+LUPIN_CONFIG_MGR_CLI_ARGS	CONTAINER	compose	LITERAL	REQUIRED	Chooses the INI BLOCK (e.g. Lupin:+Testing-GCS). A different knob from LUPIN_ENV with a similar name; they can disagree silently.
+
+# ── Vertex / direct Opus (host CLI) ──────────────────────────────────────────
+CLAUDE_CODE_USE_VERTEX	HOST	operator ~/.bashrc	ENUM:0|1	OPTIONAL	Only needed for direct Opus via Vertex on the VM.
+ANTHROPIC_VERTEX_PROJECT_ID	HOST	operator ~/.bashrc	LITERAL	OPTIONAL	Ranked BELOW GOOGLE_CLOUD_PROJECT/GCLOUD_PROJECT — a literal elsewhere can silently bill another project.
+CLOUD_ML_REGION	HOST	operator ~/.bashrc	ENUM:global	OPTIONAL	Opus 4.8 on Vertex is GLOBAL-ONLY. A regional value yields model-not-found, which the CC wizard mis-reports as "permission denied".
+
+# ── test venues (dev box only) ───────────────────────────────────────────────
+LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL	HOST	operator ~/.bashrc	EMAIL	OPTIONAL	Test/proxy auth as the SAME user, so both share a WebSocket channel. Absent => "Operation cancelled" failures.
+LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD	HOST	operator ~/.bashrc	SECRET	OPTIONAL	See above.
