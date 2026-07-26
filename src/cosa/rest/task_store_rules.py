@@ -145,6 +145,11 @@ RESPONSE_CHAR_BUDGET = 100_000
 SCOPING_FILTERS = (
     "owner_persona", "status", "item_class", "project",
     "gate_class", "accountable_manager", "correlation_key",
+    # id_prefix is the NARROWEST filter there is — it names at most a handful of
+    # rows by identity. Omitting it here would make `task_query(id_prefix=...)`
+    # count as a bare unscoped pull and get rejected by the guard, which is the
+    # opposite of what the guard is for (row f45b37a9 remedy 2 / 4288dd53).
+    "id_prefix",
 )
 
 
@@ -436,6 +441,34 @@ TASK_REF_INVALID = "invalid"
 # "ambiguous" error would name too many candidates to be actionable — the
 # unscoped-query defect wearing a different hat.
 MIN_TASK_REF_PREFIX_LEN = 4
+
+
+def hyphenate_compact_prefix( compact_prefix ) -> str:
+    """
+    Re-insert canonical UUID hyphens into a compact hex prefix. Pure.
+
+    THE ONE IMPLEMENTATION, on purpose. A compact prefix cannot be LIKE-matched
+    against the stored id directly: ids render hyphenated, so any prefix longer
+    than 8 chars crosses a boundary the compact form does not have. This logic
+    lived only inside `TaskRepository.find_by_id_prefix`; the moment a SECOND
+    caller needed it (the `id_prefix` query filter) a copy would have been the
+    obvious move — and a second copy of a matching rule is how two read paths
+    start disagreeing about which rows an identifier names. That is the
+    parallel-construction hazard row f45b37a9 is itself about.
+
+    Requires:
+        - compact_prefix is lowercase hex with hyphens already stripped, as
+          `classify_task_ref` returns for TASK_REF_PREFIX
+
+    Ensures:
+        - returns the prefix re-hyphenated at 8-4-4-4-12 positions, truncated to
+          the supplied length (no trailing hyphen for an exact-boundary prefix)
+        - a prefix shorter than 8 chars is returned unchanged
+        - never raises
+    """
+    chunks = [ ( 0, 8 ), ( 8, 12 ), ( 12, 16 ), ( 16, 20 ), ( 20, 32 ) ]
+    parts  = [ compact_prefix[ start:end ] for start, end in chunks if compact_prefix[ start:end ] ]
+    return "-".join( parts )
 
 
 def classify_task_ref( ref ) -> tuple:

@@ -424,6 +424,7 @@ def task_query_impl(
     project             = None,
     item_class          = None,
     correlation_key     = None,
+    id_prefix           = None,
     limit               = None,
     offset              = None,
     terse               = False,
@@ -445,6 +446,15 @@ def task_query_impl(
           call is "everything, newest first" — the manager board glance
         - `correlation_key` exact-match filter passes through (spec amendment
           2026-06-12 / Phase-2 contract §1.11(C); pre-Phase-2 server ignores it)
+        - `id_prefix` filters BY IDENTITY and accepts the 8-hex form every brief,
+          DM and cross-reference in this fleet is written in — or a full UUID,
+          which is normalized server-side (row f45b37a9 remedy 2, closing
+          4288dd53). Until this shipped, `task_query` had NO id filter at all and
+          `task_get` demanded a full UUID, so the identifier the fleet
+          communicates in could not fetch the thing it names. Junk 422s rather
+          than reaching SQL: a LIKE built from arbitrary caller text would turn an
+          id lookup into a search surface. It counts as a SCOPING filter, so an
+          id_prefix query is never rejected by the unscoped-size guard.
         - terse=True (§G token win) requests the at-a-glance projection
           (id/title/status/blocked_by/next_chase_ts/priority/park_reason_stale
           — body dropped);
@@ -501,6 +511,7 @@ def task_query_impl(
         "project"             : canonicalize_project_name( project ),
         "item_class"          : item_class,
         "correlation_key"     : correlation_key,
+        "id_prefix"           : id_prefix,
         "limit"               : limit,
         "offset"              : offset,
     }

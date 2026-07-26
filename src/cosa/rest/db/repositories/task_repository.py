@@ -25,6 +25,7 @@ from cosa.rest.task_store_rules import (
     UNSCOPED_QUERY_THRESHOLD,
     UnscopedQueryError,
     is_unscoped,
+    hyphenate_compact_prefix,
     normalize_status_fields,
     compose_drop_marker,
 )
@@ -116,12 +117,11 @@ class TaskRepository( BaseRepository[TaskItem] ):
               before matching, so a prefix longer than 8 chars (which spans a
               hyphen) still matches the stored rendering
         """
-        # Re-insert canonical hyphens at 8-4-4-4-12 boundaries, truncated to the
-        # supplied length — a bare LIKE on the compact form would never match a
-        # prefix long enough to cross a hyphen.
-        chunks   = [ ( 0, 8 ), ( 8, 12 ), ( 12, 16 ), ( 16, 20 ), ( 20, 32 ) ]
-        parts    = [ compact_prefix[ start:end ] for start, end in chunks if compact_prefix[ start:end ] ]
-        hyphened = "-".join( parts )
+        # Re-hyphenation via the SHARED rule — a bare LIKE on the compact form would
+        # never match a prefix long enough to cross a hyphen. Single-sourced with the
+        # `id_prefix` query filter (`_apply_scalar_filters`) so the two read paths
+        # cannot drift about which rows a prefix names.
+        hyphened = hyphenate_compact_prefix( compact_prefix )
 
         return (
             self.session.query( TaskItem )
@@ -688,6 +688,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         project             : Optional[str] = None,
         item_class          : Optional[str] = None,
         correlation_key     : Optional[str] = None,
+        id_prefix           : Optional[str] = None,
         limit               : int = 100,
         offset              : int = 0,
         include_terminal    : bool = False,
@@ -743,6 +744,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
             "project"             : project,
             "item_class"          : item_class,
             "correlation_key"     : correlation_key,
+            "id_prefix"           : id_prefix,
         }
 
         # The guard: a bare unscoped pull over-threshold, with no deliberate-audit
@@ -760,6 +762,47 @@ class TaskRepository( BaseRepository[TaskItem] ):
 
         query = self.session.query( TaskItem )
 
+        query = self._apply_scalar_filters(
+            query, owner_persona, status, gate_class, urgency,
+            accountable_manager, project, item_class, correlation_key, id_prefix
+        )
+        query = self._apply_owed_filter( query, owed_only, hide_parked, status, include_terminal, now )
+
+        return query.order_by( TaskItem.created_ts.desc(), TaskItem.id ).limit( limit ).offset( offset ).all()
+
+    @staticmethod
+    def _apply_scalar_filters( query, owner_persona, status, gate_class, urgency,
+                               accountable_manager, project, item_class, correlation_key,
+                               id_prefix ):
+        """
+        The ONE place the exact-match filters are applied — shared by query_tasks,
+        count_tasks and status_breakdown.
+
+        EXTRACTED FOR THE SAME REASON `_apply_owed_filter` WAS, and the reason had
+        already come true here. That helper's own docstring says the two methods
+        "carried byte-identical filter blocks maintained by copy-paste" — and this
+        block was carried in THREE copies at the time `id_prefix` was added. Adding a
+        fourth by hand would have put the new filter on the page seam, the COUNT(*)
+        seam and the breakdown seam as three independent edits, any one of which
+        could be forgotten: the page would then narrow while the count did not, and
+        `has_more` would be computed against a different population than the rows it
+        describes. One helper means the three CANNOT disagree about which rows a
+        filter admits.
+
+        Requires:
+            - query is a TaskItem query; every filter is None or an exact value
+            - id_prefix, when present, is COMPACT lowercase hex (hyphens stripped)
+              exactly as `classify_task_ref` returns — this method does NOT
+              re-validate caller text, because a LIKE built from arbitrary input
+              turns an id lookup into a search surface
+
+        Ensures:
+            - returns the query with one AND-ed filter per non-None argument
+            - id_prefix matches on the id's canonical HYPHENATED rendering via the
+              shared `hyphenate_compact_prefix` rule, so a prefix spanning a hyphen
+              still matches
+            - never raises
+        """
         if owner_persona is not None:       query = query.filter( TaskItem.owner_persona == owner_persona )
         if status is not None:              query = query.filter( TaskItem.status == status )
         if gate_class is not None:          query = query.filter( TaskItem.gate_class == gate_class )
@@ -768,9 +811,10 @@ class TaskRepository( BaseRepository[TaskItem] ):
         if project is not None:             query = query.filter( TaskItem.project == project )
         if item_class is not None:          query = query.filter( TaskItem.item_class == item_class )
         if correlation_key is not None:     query = query.filter( TaskItem.correlation_key == correlation_key )
-        query = self._apply_owed_filter( query, owed_only, hide_parked, status, include_terminal, now )
-
-        return query.order_by( TaskItem.created_ts.desc(), TaskItem.id ).limit( limit ).offset( offset ).all()
+        if id_prefix is not None:
+            hyphened = hyphenate_compact_prefix( id_prefix )
+            query    = query.filter( cast( TaskItem.id, String ).like( f"{hyphened}%" ) )
+        return query
 
     @staticmethod
     def _apply_owed_filter( query, owed_only, hide_parked, status, include_terminal, now ):
@@ -858,6 +902,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         project             : Optional[str] = None,
         item_class          : Optional[str] = None,
         correlation_key     : Optional[str] = None,
+        id_prefix           : Optional[str] = None,
         include_terminal    : bool = False,
         owed_only           : bool = False,
         hide_parked         : bool = False,
@@ -904,14 +949,10 @@ class TaskRepository( BaseRepository[TaskItem] ):
         """
         query = self.session.query( TaskItem.status, func.count( TaskItem.id ) )
 
-        if owner_persona is not None:       query = query.filter( TaskItem.owner_persona == owner_persona )
-        if status is not None:              query = query.filter( TaskItem.status == status )
-        if gate_class is not None:          query = query.filter( TaskItem.gate_class == gate_class )
-        if urgency is not None:             query = query.filter( TaskItem.urgency == urgency )
-        if accountable_manager is not None: query = query.filter( TaskItem.accountable_manager == accountable_manager )
-        if project is not None:             query = query.filter( TaskItem.project == project )
-        if item_class is not None:          query = query.filter( TaskItem.item_class == item_class )
-        if correlation_key is not None:     query = query.filter( TaskItem.correlation_key == correlation_key )
+        query = self._apply_scalar_filters(
+            query, owner_persona, status, gate_class, urgency,
+            accountable_manager, project, item_class, correlation_key, id_prefix
+        )
         # The SAME helper count_tasks and query_tasks use — the breakdown MUST select
         # the identical admitted set, or the sum-parity gate is comparing two
         # different populations and its green means nothing.
@@ -929,6 +970,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         project             : Optional[str] = None,
         item_class          : Optional[str] = None,
         correlation_key     : Optional[str] = None,
+        id_prefix           : Optional[str] = None,
         include_terminal    : bool = False,
         owed_only           : bool = False,
         hide_parked         : bool = False,
@@ -964,14 +1006,10 @@ class TaskRepository( BaseRepository[TaskItem] ):
         """
         query = self.session.query( func.count( TaskItem.id ) )
 
-        if owner_persona is not None:       query = query.filter( TaskItem.owner_persona == owner_persona )
-        if status is not None:              query = query.filter( TaskItem.status == status )
-        if gate_class is not None:          query = query.filter( TaskItem.gate_class == gate_class )
-        if urgency is not None:             query = query.filter( TaskItem.urgency == urgency )
-        if accountable_manager is not None: query = query.filter( TaskItem.accountable_manager == accountable_manager )
-        if project is not None:             query = query.filter( TaskItem.project == project )
-        if item_class is not None:          query = query.filter( TaskItem.item_class == item_class )
-        if correlation_key is not None:     query = query.filter( TaskItem.correlation_key == correlation_key )
+        query = self._apply_scalar_filters(
+            query, owner_persona, status, gate_class, urgency,
+            accountable_manager, project, item_class, correlation_key, id_prefix
+        )
         # The SAME helper query_tasks uses — this is the COUNT(*)/page parity seam
         # the Stop-hook oracle reads. Rachel's gate asserts
         # count_tasks(owed_only=True) == len(query_tasks(owed_only=True)).

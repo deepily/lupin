@@ -757,9 +757,21 @@ class TestUnscopedGuardRules:
 
     def test_scoping_filters_set_membership( self ):
         # Pin the exact scoping set + urgency's exclusion (the guard boolean María reviews).
+        #
+        # ⚠️ THIS PIN WENT RED ON PURPOSE 2026-07-25 AND ITS ARGUMENT WAS ANSWERED BEFORE
+        # IT WAS WIDENED. The pin exists because every addition here EXEMPTS a query shape
+        # from the over-threshold guard, so it must be a deliberate, reviewed act rather
+        # than a side effect of adding a filter. `id_prefix` (row f45b37a9 remedy 2) was
+        # admitted because it does not widen anything: it selects at most a handful of
+        # rows BY IDENTITY, making it the narrowest filter in the set. Omitting it would
+        # have inverted the guard — `task_query(id_prefix=...)` would count as a bare
+        # unscoped pull and be REJECTED for being too broad, which is the one outcome the
+        # guard should never produce. `urgency` stays excluded on the original reasoning:
+        # it is too coarse to narrow anything.
         assert set( rules.SCOPING_FILTERS ) == {
             "owner_persona", "status", "item_class", "project",
             "gate_class", "accountable_manager", "correlation_key",
+            "id_prefix",
         }
         assert "urgency" not in rules.SCOPING_FILTERS
 

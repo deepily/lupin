@@ -1045,6 +1045,7 @@ def query_tasks(
     project             : Optional[str] = None,
     item_class          : Optional[str] = None,
     correlation_key     : Optional[str] = None,
+    id_prefix           : Optional[str] = None,
     count_only          : bool = False,
     terse               : bool = False,
     include_terminal    : bool = False,
@@ -1130,6 +1131,22 @@ def query_tasks(
         errors.append( f"urgency filter '{urgency}' must be one of {rules.VALID_URGENCIES}" )
     if item_class is not None and item_class not in rules.VALID_ITEM_CLASSES:
         errors.append( f"item_class filter '{item_class}' must be one of {rules.VALID_ITEM_CLASSES}" )
+
+    # id_prefix (row f45b37a9 remedy 2, closing 4288dd53) — the fleet writes 8-hex
+    # everywhere and no read verb accepted it as a FILTER. Classified, never passed
+    # through: a LIKE built from arbitrary caller text turns an id lookup into a
+    # search surface, so junk 422s here and never reaches SQL. A FULL uuid is
+    # accepted and normalized to its compact form, because refusing the exact
+    # spelling of the thing you are filtering on would be a gratuitous trap.
+    if id_prefix is not None:
+        kind, value = rules.classify_task_ref( id_prefix )
+        if kind == rules.TASK_REF_INVALID:
+            errors.append(
+                f"id_prefix '{id_prefix}' is not a task reference — expect a full UUID or "
+                f"at least {rules.MIN_TASK_REF_PREFIX_LEN} hex characters (hyphens optional)"
+            )
+        else:
+            id_prefix = value.hex if kind == rules.TASK_REF_FULL else value
     _reject_if_errors( errors )
 
     # Identity parity (Phase 2): canonicalize the persona-typed filters so the
@@ -1160,6 +1177,7 @@ def query_tasks(
                 project             = project,
                 item_class          = item_class,
                 correlation_key     = correlation_key,
+                id_prefix           = id_prefix,
                 include_terminal    = include_terminal,
                 owed_only           = owed_only,
                 hide_parked         = hide_parked,
@@ -1191,6 +1209,7 @@ def query_tasks(
                 project             = project,
                 item_class          = item_class,
                 correlation_key     = correlation_key,
+                id_prefix           = id_prefix,
                 include_terminal    = include_terminal,
                 owed_only           = owed_only,
                 hide_parked         = hide_parked,
@@ -1210,6 +1229,7 @@ def query_tasks(
                 project             = project,
                 item_class          = item_class,
                 correlation_key     = correlation_key,
+                id_prefix           = id_prefix,
                 limit               = limit,
                 offset              = offset,
                 include_terminal    = include_terminal,
@@ -1224,7 +1244,7 @@ def query_tasks(
                     f"unscoped task_query would return {e.count} non-terminal rows "
                     f"(> {e.threshold}). Narrow it with a filter (owner_persona / "
                     f"status / item_class / project / gate_class / accountable_manager "
-                    f"/ correlation_key), or pass unscoped_audit=true for a deliberate "
+                    f"/ correlation_key / id_prefix), or pass unscoped_audit=true for a deliberate "
                     f"full-store audit."
                 ),
             )
@@ -1261,6 +1281,7 @@ def query_tasks(
             project             = project,
             item_class          = item_class,
             correlation_key     = correlation_key,
+            id_prefix           = id_prefix,
             include_terminal    = include_terminal,
             owed_only           = owed_only,
             hide_parked         = hide_parked,
