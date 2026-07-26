@@ -34,9 +34,15 @@ import time
 
 import pytest
 
-sys.path.insert( 0, os.path.join( os.environ[ "LUPIN_ROOT" ], "src/lupin_cli/claude_code/hooks/lib" ) )
-
-import dm_inbox_hwm_janitor as jan
+# Imported by PACKAGE PATH, exactly as the arbiter imports it in production.
+#
+# ⚠️ The first draft did `sys.path.insert( <hooks/lib> )` + `import
+# dm_inbox_hwm_janitor`, which made the module's own bare `from heartbeat_hold
+# import ...` resolve — and hid that the same import EXPLODES when the arbiter
+# loads it by package path. 27 tests passed against an import graph production
+# never uses. Import the way the caller does, or the suite grades a different
+# module than the one that ships.
+import lupin_cli.claude_code.hooks.lib.dm_inbox_hwm_janitor as jan
 
 
 DAY = 24 * 60 * 60
@@ -197,7 +203,7 @@ def test_a_deleted_hwm_reads_back_as_the_UNSEEDED_empty_state( tmp_path ):
     first draft of this arm called a `read_state` that does not exist, and a test
     that cannot run proves nothing.
     """
-    import dm_inbox_reconcile as rec
+    import lupin_cli.claude_code.hooks.lib.dm_inbox_reconcile as rec
 
     doomed = _write_hwm( tmp_path, "dead0001", age_days=30 )
     jan.sweep_and_reclaim_hwm_files( base_dir=tmp_path, live_session_ids=[ ] )
@@ -224,7 +230,7 @@ def test_deleting_a_LIVE_sessions_hwm_SWALLOWS_its_pending_dms( tmp_path ):
     `59f355e0` re-created. This test exists so nobody re-derives the comfortable
     version of that claim.
     """
-    import dm_inbox_reconcile as rec
+    import lupin_cli.claude_code.hooks.lib.dm_inbox_reconcile as rec
 
     sid   = "dead0001-aaaa-bbbb-cccc-dddddddddddd"
     row   = [ { "job_id": "dead0001", "message_id": "m1",
@@ -382,7 +388,7 @@ def test_the_hold_familys_default_traversal_is_unchanged( tmp_path ):
     its exact behavior. Asserted directly rather than assumed from "the hold tests
     still pass".
     """
-    import heartbeat_hold as hh
+    import lupin_cli.claude_code.hooks.lib.heartbeat_hold as hh
 
     hold = tmp_path / ".heartbeat-hold-abc123.json"
     hold.write_text( "{}" )
@@ -393,3 +399,127 @@ def test_the_hold_familys_default_traversal_is_unchanged( tmp_path ):
 
     _r, _u, paths, _s = hh._iter_hold_paths( base_dir=tmp_path, glob_pat=jan.HWM_GLOB )
     assert paths == [ hwm ]
+
+
+# ── ARBITER WIRING — the seam, the switch, and the frozen clock ────────────
+
+def _loop( **kw ):
+    """Build a FleetArbiterLoop with every external seam injected."""
+    from lupin_arbiter_app.fleet_arbiter_loop import FleetArbiterLoop
+    kw.setdefault( "log_fn", lambda *a, **k: None )
+    return FleetArbiterLoop( lambda: None, **kw )
+
+
+def test_the_hwm_sweep_RUNS_and_would_have_caught_a_missing_import():
+    """
+    Calls `_sweep_hwm_files` for real rather than asserting on its source.
+
+    ⚠️ THIS ARM EARNED ITS KEEP IMMEDIATELY. The first draft of the method used
+    `time.time()` while `time` was not imported in that module — and `py_compile`
+    passed, because a NameError is a RUNTIME failure. Compile-clean is a
+    prerequisite for testing, never a substitute: only executing the method finds
+    it.
+
+    The method swallows exceptions by design (a janitor must never kill the
+    supervisor), so the missing import would have surfaced as
+    `fleet_arbiter_hwm_janitor_error` — which is exactly what this asserts is
+    ABSENT.
+    """
+    events = [ ]
+    loop = _loop( log_fn = lambda name, **kw: events.append( ( name, kw ) ),
+                  hold_roots_fn        = lambda: [ ],
+                  live_session_ids_fn  = lambda: set() )
+    loop._sweep_hwm_files()
+
+    names = [ n for n, _ in events ]
+    assert "fleet_arbiter_hwm_janitor_error" not in names, \
+        f"the sweep raised internally — a NameError/TypeError the compiler cannot see: {events}"
+    assert "fleet_arbiter_hwm_report" in names
+
+
+def test_deletion_is_OFF_by_default_and_the_report_still_emits( tmp_path ):
+    """
+    Omission must be the SAFE state — the A0 lesson, and doubly so here because
+    this family's failure is silent. The report still runs so an operator can
+    watch the tallies before ever enabling deletion.
+    """
+    doomed = _write_hwm( tmp_path, "dead0001", age_days=30 )
+    events = [ ]
+    loop = _loop( log_fn = lambda name, **kw: events.append( ( name, kw ) ),
+                  hold_roots_fn       = lambda: [ str( tmp_path ) ],
+                  live_session_ids_fn = lambda: set() )
+    loop._sweep_hwm_files()
+
+    report = dict( events )[ "fleet_arbiter_hwm_report" ]
+    assert report[ "prunable" ] == 1, "the report did not even see the file"
+    assert report[ "deletion_enabled" ] is False
+    assert doomed.exists(), "deletion happened with the switch OFF"
+    assert "fleet_arbiter_hwm_reclaimed" not in [ n for n, _ in events ]
+
+
+def test_with_the_switch_ON_it_deletes_and_the_prediction_agrees( tmp_path ):
+    """The report's `prunable` is a PREDICTION of the act; a disagreement is the finding."""
+    doomed = _write_hwm( tmp_path, "dead0001", age_days=30 )
+    events = [ ]
+    loop = _loop( log_fn = lambda name, **kw: events.append( ( name, kw ) ),
+                  hold_roots_fn       = lambda: [ str( tmp_path ) ],
+                  live_session_ids_fn = lambda: set(),
+                  enable_hwm_deletion = True )
+    loop._sweep_hwm_files()
+
+    reclaimed = dict( events )[ "fleet_arbiter_hwm_reclaimed" ]
+    assert reclaimed[ "deleted" ] == 1
+    assert reclaimed[ "agrees" ] is True, "the dry-run tally disagreed with the deletion count"
+    assert not doomed.exists()
+
+
+def test_the_hwm_switch_is_INDEPENDENT_of_the_hold_switch( tmp_path ):
+    """
+    Rick ruled two switches. Proven by setting them OPPOSITE ways: hold deletion
+    ON must not enable HWM deletion. If one flag drove both, this file dies.
+    """
+    survivor = _write_hwm( tmp_path, "dead0001", age_days=30 )
+    loop = _loop( hold_roots_fn       = lambda: [ str( tmp_path ) ],
+                  live_session_ids_fn = lambda: set(),
+                  enable_hold_deletion = True,      # the OTHER family's switch, ON
+                  enable_hwm_deletion  = False )
+    loop._sweep_hwm_files()
+    assert survivor.exists(), "the hold switch reached the HWM family — the switches are coupled"
+
+
+def test_a_None_live_set_from_the_seam_deletes_nothing_even_switched_ON( tmp_path ):
+    """
+    The fail-safe, asserted THROUGH the arbiter rather than only at the classifier:
+    an unavailable live-set must not become "nothing is alive" at any layer.
+    """
+    survivor = _write_hwm( tmp_path, "dead0001", age_days=3650 )
+    events   = [ ]
+    loop = _loop( log_fn = lambda name, **kw: events.append( ( name, kw ) ),
+                  hold_roots_fn       = lambda: [ str( tmp_path ) ],
+                  live_session_ids_fn = lambda: None,
+                  enable_hwm_deletion = True )
+    loop._sweep_hwm_files()
+
+    assert survivor.exists(), "a None live-set deleted a file — the fail-safe is not wired through"
+    assert dict( events )[ "fleet_arbiter_hwm_report" ][ "live_set_present" ] is False
+
+
+def test_a_raising_seam_is_swallowed_and_logged_not_propagated():
+    """A janitor must never kill the supervisor."""
+    events = [ ]
+    loop = _loop( log_fn = lambda name, **kw: events.append( ( name, kw ) ),
+                  hold_roots_fn       = lambda: [ ],
+                  live_session_ids_fn = lambda: set(),
+                  hwm_janitor_fn      = lambda **kw: ( _ for _ in () ).throw( RuntimeError( "boom" ) ) )
+    loop._sweep_hwm_files()                                   # must not raise
+    assert "fleet_arbiter_hwm_janitor_error" in [ n for n, _ in events ]
+
+
+def test_zero_roots_is_reported_DISTINCTLY_from_zero_files():
+    """"Swept nothing" and "found nothing" are opposite facts; one zero cannot tell them apart."""
+    events = [ ]
+    loop = _loop( log_fn = lambda name, **kw: events.append( ( name, kw ) ),
+                  hold_roots_fn       = lambda: [ ],
+                  live_session_ids_fn = lambda: set() )
+    loop._sweep_hwm_files()
+    assert "fleet_arbiter_hwm_report_no_roots" in [ n for n, _ in events ]

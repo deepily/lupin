@@ -93,8 +93,16 @@ Venue: pure filesystem + mtime. No network, no DB, no container.
 import time
 from pathlib import Path
 
-from heartbeat_hold import _iter_hold_paths, _file_mtime, _resolve_base_dir
-from heartbeat_hold import DEFAULT_SWEEP_MAX_DEPTH, SWEEP_SKIP_DIR_NAMES
+# FULL package path, matching every sibling in this lib (heartbeat_hold_warn,
+# heartbeat_decision, task_store_spool, dm_inbox_reconcile). A bare
+# `from heartbeat_hold import ...` resolves only when this directory is on
+# sys.path — true under hook execution and in a test that inserts it, FALSE when
+# the arbiter imports this module by its package path, which is what production
+# does. The bare form was the first draft here and it broke arbiter collection.
+from lupin_cli.claude_code.hooks.lib.heartbeat_hold import (
+    _iter_hold_paths, _file_mtime, _resolve_base_dir,
+    DEFAULT_SWEEP_MAX_DEPTH, SWEEP_SKIP_DIR_NAMES,
+)
 
 # The family this janitor owns. Deliberately NOT folded into HOLD_GLOB — see the
 # module docstring for why one glob over two families would be a silent no-op.

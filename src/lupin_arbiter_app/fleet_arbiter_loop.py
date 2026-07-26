@@ -37,6 +37,7 @@ import datetime
 import json
 import os
 import threading
+import time
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Optional
 
@@ -63,6 +64,11 @@ from lupin_cli.claude_code.hooks.lib.heartbeat_hold import read_hold as _default
 # what makes `deleted` auditable rather than merely asserted.
 from lupin_cli.claude_code.hooks.lib.heartbeat_hold import report_hold_files as _default_hold_reporter
 from lupin_cli.claude_code.hooks.lib.heartbeat_hold import prune_stale_hold_files as _default_hold_deleter
+# 8758d0b1 — the SECOND runtime-state family. Same traversal, its own classifier:
+# an HWM file carries no held_at / ttl_seconds / session_id, so the hold classifier
+# would keep every one of them forever and report a clean green.
+from lupin_cli.claude_code.hooks.lib.dm_inbox_hwm_janitor import report_hwm_files as _default_hwm_reporter
+from lupin_cli.claude_code.hooks.lib.dm_inbox_hwm_janitor import sweep_and_reclaim_hwm_files as _default_hwm_deleter
 from lupin_cli.claude_code.hooks.lib.session_bridge import find_active_voice_persona_sessions as _find_active_voice_persona_sessions
 from lupin_cli.claude_code.hooks.lib.session_bridge import find_active_sessions as _find_active_sessions
 from lupin_mcp.persona_normalization import canonical_persona_key
@@ -808,6 +814,9 @@ class FleetArbiterLoop:
         hold_roots_fn        : Optional[ Callable ] = None,
         live_session_ids_fn  : Optional[ Callable ] = None,
         enable_hold_deletion : bool = False,
+        hwm_janitor_fn       : Optional[ Callable ] = None,
+        hwm_deleter_fn       : Optional[ Callable ] = None,
+        enable_hwm_deletion  : bool = False,
     ) -> None:
         self._job_factory    = job_factory
         self._log_fn         = log_fn if log_fn is not None else _default_log_fn
@@ -834,6 +843,20 @@ class FleetArbiterLoop:
         # site Rick authorized. Every other construction — tests, tools, any future
         # caller — is report-only unless it says otherwise.
         self._enable_hold_deletion = bool( enable_hold_deletion )
+        # 8758d0b1 — the DM-inbox HWM family gets its OWN seams and its OWN switch,
+        # per Rick's ruling 2026-07-26. NOT folded into enable_hold_deletion: the two
+        # families have different failure modes, and coupling them means disabling
+        # hold deletion after a cargo scare would silently stop HWM cleanup too,
+        # with the pile resuming growth and nobody noticing.
+        #
+        # ⚠️ Reaping a LIVE session's HWM SILENTLY SWALLOWS its un-surfaced DMs
+        # (measured; surface_dm_inbox:327-328 blanks context when `seeded` is False,
+        # and a missing file reads as unseeded). That is 59f355e0 re-created. So this
+        # switch defaults FALSE for the same reason enable_hold_deletion does — an
+        # omitted parameter must never be the one that deletes.
+        self._hwm_janitor_fn      = hwm_janitor_fn if hwm_janitor_fn is not None else _default_hwm_reporter
+        self._hwm_deleter_fn      = hwm_deleter_fn if hwm_deleter_fn is not None else _default_hwm_deleter
+        self._enable_hwm_deletion = bool( enable_hwm_deletion )
         self._stop           = threading.Event()
         self._current_job    = None
         self._thread         = None
@@ -851,6 +874,7 @@ class FleetArbiterLoop:
         """
         while not self._stop.is_set():
             self._sweep_hold_files()             # b39562e4 pt2: hold janitor — REPORT-ONLY (deletes nothing)
+            self._sweep_hwm_files()              # 8758d0b1: DM-inbox HWM janitor — its own switch
             job = self._job_factory()
             self._current_job = job
             self.cycles += 1
@@ -967,6 +991,75 @@ class FleetArbiterLoop:
                           paths             = pruned )
         except Exception as e:               # reclamation must never kill the supervisor
             self._log_fn( "fleet_arbiter_hold_reclaim_error", error=str( e ) )
+
+    def _sweep_hwm_files( self ) -> None:
+        """
+        REACH and CLASSIFY every `.dm-inbox-hwm-*` file, then RECLAIM what the
+        classification proved orphaned AND aged — row 8758d0b1.
+
+        Deliberately a SIBLING of _sweep_hold_files rather than an extension of it.
+        The two families share a traversal and nothing else: an HWM file carries no
+        `held_at`, no `ttl_seconds` and no `session_id`, so pointing the hold
+        classifier at one yields KEEP for every file, forever, with a clean green
+        report. Measured before this was written.
+
+        SAME CLOCK, SAME LIVE-SET for the report and the act — one frozen `now_ts`
+        passed to both — so the report's `prunable` tally is a PREDICTION of the
+        deletion count. A disagreement between them is itself the finding. (The
+        pairing, and the frozen-clock discipline, are María's from `d779c7ab`; each
+        family freezes its own clock because their sweeps are independent.)
+
+        ⚠️ THE LIVE-SET IS CORRECTNESS-CRITICAL HERE, not politeness. Reaping a
+        LIVE session's HWM makes its next reconcile read as first-ever activation
+        (`seeded` False), which records the inbox as already-seen and surfaces
+        NOTHING — silently and permanently swallowing every un-surfaced DM. That is
+        `59f355e0` re-created. `_default_live_session_ids` returning None keeps
+        everything; that fail-safe is what makes this affordable at all.
+
+        Ensures:
+            - emits `fleet_arbiter_hwm_report` EVERY cycle with roots / files_seen /
+              tallies — empty or not, so "swept nothing" is never inferred from silence
+            - emits `fleet_arbiter_hwm_report_no_roots` distinctly when the sweep
+              reached ZERO roots ("swept nothing" is the opposite fact from "found
+              nothing", and one zero cannot tell them apart)
+            - deletes ONLY when enable_hwm_deletion is set, and only what the
+              same-clock classification marked prunable
+            - swallows + logs any exception; a janitor must never kill the supervisor
+        """
+        try:
+            roots  = list( self._hold_roots_fn() or [ ] )     # same roots — same runtime-state family location
+            live   = self._live_session_ids_fn()
+            now_ts = time.time()                              # ONE clock: evidence AND act
+            report = self._hwm_janitor_fn( base_dirs=roots, live_session_ids=live, now_ts=now_ts )
+            counts = report[ "counts" ]
+            if not report[ "roots_swept" ]:
+                self._log_fn( "fleet_arbiter_hwm_report_no_roots",
+                              roots_requested   = report[ "roots_requested" ],
+                              roots_unreachable = report[ "roots_unreachable" ] )
+            self._log_fn( "fleet_arbiter_hwm_report",
+                          roots_swept       = report[ "roots_swept" ],
+                          roots_unreachable = report[ "roots_unreachable" ],
+                          files_seen        = report[ "files_found" ],
+                          prunable          = counts[ "prunable" ],
+                          kept              = counts[ "keep" ],
+                          kept_reasons      = counts[ "reachable_but_kept_reasons" ],
+                          live_set_present  = ( live is not None ),
+                          deletion_enabled  = self._enable_hwm_deletion )
+        except Exception as e:                   # janitor must never kill the supervisor
+            self._log_fn( "fleet_arbiter_hwm_janitor_error", error=str( e ) )
+            return                               # no classification ⇒ nothing is proven prunable
+
+        if not self._enable_hwm_deletion:
+            return
+        try:
+            pruned = self._hwm_deleter_fn( base_dirs=roots, live_session_ids=live, now_ts=now_ts )
+            self._log_fn( "fleet_arbiter_hwm_reclaimed",
+                          deleted            = len( pruned ),
+                          predicted_prunable = counts[ "prunable" ],
+                          agrees             = ( len( pruned ) == counts[ "prunable" ] ),
+                          paths              = pruned )
+        except Exception as e:               # reclamation must never kill the supervisor
+            self._log_fn( "fleet_arbiter_hwm_reclaim_error", error=str( e ) )
 
     def start( self ) -> None:
         """Spawn the daemon supervisor thread."""

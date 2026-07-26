@@ -386,9 +386,23 @@ def assemble_app(
     # revocable by an operator without a code change. Cargo-bearing holds are KEPT
     # regardless of this flag: that guard is structural in classify_hold_file and is
     # NOT reachable from here.
+    #
+    # DM-inbox HWM reclamation (row 8758d0b1, Rick's ruling 2026-07-26) rides its OWN
+    # switch, deliberately NOT `arbiter enable hold deletion`. The families fail
+    # differently, and one flag would mean disabling hold deletion after a cargo scare
+    # silently stops HWM cleanup too — the pile resumes growing and nobody notices.
+    #
+    # ⚠️ DEFAULT FALSE, unlike the hold switch above. Reaping a LIVE session's HWM
+    # SILENTLY SWALLOWS its un-surfaced DMs (measured — a missing file reads as
+    # `seeded: False`, and surface_dm_inbox then records the inbox as already-seen and
+    # surfaces nothing), which re-creates bug 59f355e0 for that session. A capability
+    # whose failure is invisible does not get to be on out of the box; an operator
+    # turns it on once the live-set fail-safe has been watched in the report logs,
+    # which this emits every cycle whether deletion is enabled or not.
     fleet_arbiter_loop = FleetArbiterLoop(
         fleet_arbiter_factory, log_fn=arbiter_log_fn,
         enable_hold_deletion = cfg.get( "arbiter enable hold deletion", default=True, return_type="boolean" ),
+        enable_hwm_deletion  = cfg.get( "arbiter enable hwm deletion",  default=False, return_type="boolean" ),
     )
 
     # ── context-headroom writer: gated on `arbiter context watch enabled` ──
