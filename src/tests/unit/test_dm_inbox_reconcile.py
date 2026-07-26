@@ -397,3 +397,62 @@ class TestHwmPath:
     def test_none_session_id_suffix( self, tmp_path ):
         p = dr._hwm_path( None, base_dir=tmp_path )
         assert p.name == ".dm-inbox-hwm-.json"
+
+
+# ── 2a6759de — the sid8 key is a LOSSY truncation ─────────────────────────────
+
+class TestPrefixCollisionBetweenTwoSessions:
+    """
+    ARMED GATE for row `2a6759de`. These tests describe a defect that is REAL and
+    currently UNEXERCISED (0 duplicate suffixes measured across 435 live HWM files
+    on 2026-07-26). They are xfail(strict) so they REPORT AS FAILURES the moment
+    the defect is fixed — the same live-gate pattern the heartbeat-hold family
+    used for its cargo and two-anchor guards.
+
+    THE DEFECT: `_hwm_path` keys the durable HWM by `session_id[ :8 ]`, and
+    `dm.py:329` sets a DM's `job_id` to `target_session_id[ :8 ]` by the same rule.
+    So two sessions sharing a first-8 are indistinguishable BOTH in the ledger
+    they write and in the DMs they claim.
+
+    ⚠️ WHY xfail AND NOT A SKIP: a skip records an opinion; an xfail(strict)
+    records a PREDICTION the suite re-tests on every run. If someone widens the
+    key or adds a full-id check, these turn red and demand to be looked at,
+    which is the only way this row's finding survives its author.
+    """
+
+    ALPHA = "46ffe611-aaaa-4000-8000-000000000001"
+    BETA  = "46ffe611-bbbb-4000-8000-000000000002"      # same first-8 as ALPHA
+
+    @pytest.mark.xfail( strict=True, reason="2a6759de arm 1 — _hwm_path keys on session_id[:8], so two "
+                                            "sessions sharing a first-8 share one ledger. XPASS(strict) "
+                                            "means the key was widened: come read the row before deleting me." )
+    def test_two_sessions_sharing_a_prefix_do_not_share_one_hwm_file( self, tmp_path ):
+        """The two sessions are distinct; their durable ledgers must be too."""
+        a = dr._hwm_path( self.ALPHA, base_dir=tmp_path )
+        b = dr._hwm_path( self.BETA,  base_dir=tmp_path )
+        assert a.name != b.name, (
+            f"COLLISION: both sessions key the same ledger {a.name!r} — "
+            "arm 1, mutual suppression of each other's DMs"
+        )
+
+    @pytest.mark.xfail( strict=True, reason="2a6759de arm 2 — job_id IS target_session_id[:8] (dm.py:329), "
+                                            "so a colliding session claims another's DMs. XPASS(strict) means "
+                                            "DM addressing was widened: do NOT delete me, read the row." )
+    def test_a_dm_addressed_to_one_session_is_not_claimed_by_the_other( self ):
+        """
+        Arm 2 — the worse one. `reconcile_context` selects rows whose `job_id`
+        equals this session's hash8, and `job_id` IS the recipient's truncated id.
+        A DM addressed to ALPHA is therefore indistinguishable from one addressed
+        to BETA, so BETA surfaces ALPHA's private DM as its own.
+        """
+        hash8_alpha = self.ALPHA[ :8 ]
+        hash8_beta  = self.BETA[ :8 ]
+        dm_for_alpha = _row( "m-alpha", job_id=hash8_alpha, body="private to alpha" )
+
+        ctx, _state = dr.reconcile_context(
+            hash8_beta, [ dm_for_alpha ], { "cursor_ts": None, "surfaced_ids": [], "seeded": True }
+        )
+        assert "private to alpha" not in ctx, (
+            "MISDELIVERY: session BETA surfaced a DM addressed to ALPHA — "
+            "arm 2, upstream of the HWM entirely (dm.py:329)"
+        )
