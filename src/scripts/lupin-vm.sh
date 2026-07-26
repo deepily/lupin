@@ -92,6 +92,18 @@ Firewall (one-time — the tunnel needs IAP allowed to :$APP_PORT):
   firewall status        list all VPC firewall rules (scan sourceRanges for 35.235.240.0/20)
   firewall open [PORT]   allow IAP range -> tcp:PORT (default $APP_PORT); network auto-derived
 
+Deployment contract (task 47c4801b):
+  preflight [pre|post|full]
+                         assert the VM's deployment contract: env vars vs src/conf/env-contract.tsv,
+                         unversioned payloads vs src/conf/vm-unversioned-manifest.tsv, compose-vs-
+                         running mount sets, the Cloud SQL socket ITSELF (not the proxy's self-
+                         report), and credential ACCEPTANCE with a wrong-key control.
+                         Assert-only — every failure prints an executable remedy.
+                         `deploy` runs the pre arm before, and the post arm after, automatically.
+  push-unversioned       ship the payloads git cannot deliver (gitignored keys, personal-data maps),
+                         driven by src/conf/vm-unversioned-manifest.tsv. Rows with local_path '-'
+                         are VM-local and only ASSERTED, never copied.
+
 One-off file upload (SCP a single local file anywhere on the VM):
   push-file <local-file> <remote-path>
                          e.g. push-file ./notes.md $VM_ROOT/notes.md
@@ -469,6 +481,23 @@ case "$SUBCMD" in
         #   deploy [branch]        branch defaults to this repo's current branch
         require_project
         DEPLOY_BRANCH="${1:-}"
+        # 0. PRE-flight (Rick's ruling 2026-07-26 — run BOTH arms). Answers "is this VM fit
+        #    to deploy onto?" BEFORE anything is touched. Skips B-parity (HEAD is about to
+        #    change) and D (the server is about to restart). A blocking failure here aborts
+        #    the deploy; set LUPIN_SKIP_PREFLIGHT=1 to override deliberately.
+        #    Running both arms is what distinguishes "the deploy broke it" from "it was
+        #    already broken" — the diagnosis that cost five minutes of bisection on 07-26.
+        if [ "${LUPIN_SKIP_PREFLIGHT:-0}" != "1" ]; then
+            log "PRE-deploy preflight (--phase pre)"
+            if ! gcloud compute ssh "$VM_NAME" \
+                    --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
+                    $SSH_KEEPALIVE \
+                    --command "cd $VM_ROOT && bash src/scripts/preflight-vm.sh --phase pre"; then
+                die "PRE-deploy preflight FAILED — the VM is not fit to deploy onto. Fix the blocking items above, or re-run with LUPIN_SKIP_PREFLIGHT=1 to override."
+            fi
+        else
+            log "PRE-deploy preflight SKIPPED (LUPIN_SKIP_PREFLIGHT=1)"
+        fi
         # 1. sync code + FORCE the working tree to the branch (reset --hard; drift-proof, since a
         #    deploy target must mirror the branch and may have drifted). Preserves untracked
         #    data/env/keys — no git clean.
@@ -479,7 +508,15 @@ case "$SUBCMD" in
         RESTART_CMD="set -e
 cd $VM_ROOT
 echo '== [1/3] restart :$APP_PORT $REST_SERVICE (docker compose) =='
-sudo docker compose -f $COMPOSE_FILE --env-file $ENV_FILE up -d --force-recreate $REST_SERVICE
+# --no-deps is NOT optional (bug 70794d58, took :7999 down 2026-07-26). Without it,
+# compose re-runs cloudsql-socket-init, whose \`rm -f /cloudsql/*/.s.PGSQL.5432\` DELETES
+# the live socket the already-running proxy owns. The proxy binds once at start and never
+# re-creates it, so every app connect then fails "No such file or directory" and lupin-rest
+# crash-loops — while \`docker ps\` still reads "healthy", because the proxy healthcheck
+# probes :9090 and never touches the socket. The hand-run recreate on 2026-07-25 passed
+# --no-deps for exactly this reason; this automated path did not, and the runbook had
+# already written "Filing recommended" about it a day before it bit.
+sudo docker compose -f $COMPOSE_FILE --env-file $ENV_FILE up -d --no-deps --force-recreate $REST_SERVICE
 echo '== [2/3] restart :$ARBITER_PORT arbiter ($ARBITER_SERVICE, systemd --user) =='
 export XDG_RUNTIME_DIR=/run/user/\$(id -u)
 systemctl --user restart $ARBITER_SERVICE || echo 'WARN: arbiter systemctl --user restart failed — may need an interactive login or loginctl enable-linger; check the :$ARBITER_PORT probe below'
@@ -495,7 +532,9 @@ for p in $APP_PORT $ARBITER_PORT; do
     sleep 8
   done
   echo \":\$p health -> \$st (after ~\$((i*8))s)\"
-done"
+done
+echo '== [4/4] POST-deploy preflight (--phase post) =='
+bash src/scripts/preflight-vm.sh --phase post || echo 'POST-deploy preflight reported BLOCKING failures (above). NOT rolling back — a rollback on a half-applied deploy is more dangerous than a named failure. Fix forward.'"
         if [ "$DRY_RUN" -eq 1 ]; then
             log "(dry-run) restart+verify on VM:"
             printf '%s\n' "$RESTART_CMD" >&2
@@ -505,6 +544,69 @@ done"
                 --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
                 --command "$RESTART_CMD"
         fi
+        ;;
+
+    push-unversioned)
+        # Ship the payloads GIT CANNOT DELIVER, driven by src/conf/vm-unversioned-manifest.tsv.
+        # This category (gitignored secrets, personal data, VM-local config) used to live in
+        # somebody's head and a fresh VM rediscovered each member BY FAILING — three times in
+        # one day on 2026-07-25, one of which made EVERY transcription 500. The list is data
+        # so that adding a payload is a row, not a code edit.
+        require_project
+        MANIFEST_FILE="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../.." && pwd )/src/conf/vm-unversioned-manifest.tsv"
+        [ -r "$MANIFEST_FILE" ] || die "manifest not readable: $MANIFEST_FILE"
+        DEV_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../.." && pwd )"
+        shipped=0; skipped_rows=0
+        while IFS=$'\t' read -r m_local m_remote m_owner m_mode m_req; do
+            case "$m_local" in ''|'#'*) continue ;; esac
+            # local_path '-' means "VM-local, do NOT copy from dev" (e.g. cloud-gpu.env holds
+            # VM-correct values a copy would clobber). Preflight still ASSERTS its presence.
+            if [ "$m_local" = "-" ]; then
+                log "skip (VM-local, assert-only): $m_remote"
+                skipped_rows=$(( skipped_rows + 1 )); continue
+            fi
+            src_path="$m_local"
+            case "$src_path" in /*) ;; *) src_path="$DEV_ROOT/$m_local" ;; esac
+            if [ ! -e "${src_path%/}" ]; then
+                log "WARN: local payload missing, cannot ship: $src_path"
+                continue
+            fi
+            log "shipping $src_path -> $m_remote"
+            if [ "$DRY_RUN" -eq 1 ]; then
+                log "(dry-run) would push-file $src_path $m_remote (owner=$m_owner mode=$m_mode)"
+            else
+                case "$m_local" in
+                    */) # directory: tar over the wire, then unpack with owner/mode applied
+                        tarball="$( mktemp -t lupin-unversioned-XXXXXX.tgz )"
+                        tar -czf "$tarball" -C "$( dirname "${src_path%/}" )" "$( basename "${src_path%/}" )"
+                        gcloud compute scp "$tarball" "$VM_NAME:/tmp/lupin-unversioned.tgz" \
+                            --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap
+                        rm -f "$tarball"
+                        gcloud compute ssh "$VM_NAME" --zone="$VM_ZONE" \
+                            --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap $SSH_KEEPALIVE \
+                            --command "sudo mkdir -p $( dirname "${m_remote%/}" ) && sudo tar -xzf /tmp/lupin-unversioned.tgz -C $( dirname "${m_remote%/}" ) && rm -f /tmp/lupin-unversioned.tgz && [ '$m_owner' = '-' ] || sudo chown -R $m_owner ${m_remote%/}"
+                        ;;
+                    *)  "$0" push-file "$src_path" "$m_remote"
+                        [ "$m_mode" = "-" ] || gcloud compute ssh "$VM_NAME" --zone="$VM_ZONE" \
+                            --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap $SSH_KEEPALIVE \
+                            --command "sudo chmod $m_mode $m_remote && [ '$m_owner' = '-' ] || sudo chown $m_owner $m_remote"
+                        ;;
+                esac
+            fi
+            shipped=$(( shipped + 1 ))
+        done < <( grep -v '^[[:space:]]*#' "$MANIFEST_FILE" | grep -v '^[[:space:]]*$' )
+        log "push-unversioned done: $shipped shipped, $skipped_rows VM-local (assert-only)"
+        log "verify with: lupin-vm.sh run \"cd $VM_ROOT && bash src/scripts/preflight-vm.sh --phase pre\""
+        ;;
+
+    preflight)
+        # Standalone preflight. PHASE defaults to full; pass pre|post|full.
+        require_project
+        PF_PHASE="${1:-full}"
+        runit gcloud compute ssh "$VM_NAME" \
+            --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
+            $SSH_KEEPALIVE \
+            --command "cd $VM_ROOT && bash src/scripts/preflight-vm.sh --phase $PF_PHASE"
         ;;
 
     install-cli)
