@@ -2,6 +2,23 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-06-23 to 07-08](history/2026-06-23-to-07-08-history.md). History health: ✅ **HEALTHY at ~7.9k tokens (31% of 25k)** — archived 2026-07-21 by Mr. Radio 🦉 (session 56a74d7b), ~9.6k tokens moved to archive on Rick's ruling at the 17.5k WARNING threshold.
 
+### 2026.07.26 - Session 43ff094e (Mr. Radio 🦉) | `00a6bde2` item 3: the done-arm rejoin, with the instrument proven before its zero was believed
+
+**Accomplishments** (solo; committed on `wip-v0.1.9` as `32de43fc`, HELD):
+1. **The done arm rejoins** (`cosa/rest/task_store_rejoin.py`) — a row `blocked_by` items that are ALL `done` had its wait end and kept reading as blocked. `classify_blocked_row` now decides that mechanically; `dormancy_stamp` writes what the row must carry back. The **`dropped` arm is untouched and stays that way** until Rick rules — dropping was a decision, and a silent rejoin would overturn it.
+2. **It is a WRITE, not a read-time flag like park-expiry — deliberately.** The dormancy stamp is the point, and a derived boolean cannot stamp anything. The row's own §3 measured why: two of the first three hand-rejoined rows had premises that had already gone false, and **both read as ready**. The failure was never that the row stayed blocked; it is that a resurrected row reads as freshly-vetted.
+3. **The caller** (`src/scripts/rejoin-done-blocked-rows.py`) — **dry-run by default**, `--apply` requires an explicit `--actor` (no anonymous audited write). Write order is **amend-then-transition**: the reverse order, on a failed amend, leaves the row queued and freshly-vetted-looking — the exact defect, manufactured by its own fix.
+4. **Polarity recorded**: this instrument lies toward NOT rejoining, the opposite of `blocker_terminal`'s lie-direction, for the same reason. A false hold leaves a row where the defect already left it; a false rejoin puts a row genuinely waiting on a human in front of a seat who will work it. Consequence, pinned by a named test: **an unresolvable canonical blocker FLAGS on item 2 but does NOT rejoin here** — flagging says "this edge is dead", rejoining says "the precondition happened", and an absent row never happened.
+5. **55 tests, 100% lines AND branches**; 10,802 green in the full unit run (2 pre-existing failures, neither mine).
+
+**⭐ The live zero is a PROVEN zero.** 0 eligible rows on a 1,228-row board — and that was the *expected* result, since the six known instances had already been rejoined by hand, which is precisely the condition under which a blind instrument ships unnoticed. So both directions were controlled against **real board data**: a positive control (synthetic row → a real `done` blocker) **FIRED**; a negative control (→ a real `dropped` blocker) **HELD**. The four real blocked rows hold honestly: 3 live-blocker, 1 persona.
+
+**🔴 My harness lied again, in a new costume.** Mutation predicted 7 CAUGHT + 1 no-op SURVIVED. M7 came back SURVIVED and read as a test gap — it was not: the `sed` pattern contained a newline and `sed` is line-oriented, so **the mutation never reached the file**. A mutant that did not mutate yields a green suite and reports SURVIVED. The harness now refuses any mutant leaving the file byte-identical. *Last session's harness needed a control proving it could report CAUGHT; this one needed a control proving the mutant was real.*
+
+**Peer safety**: committed by **pathspec** while three other seats had files in the working tree (`heartbeat_hold.py`, `lupin_mcp/*` — Cheech's emergency DM fixes). My three files touch **zero** DM surface; `12b5a766` (which edits `routers/dm.py` on a `--reload` server) was deliberately **held** for exactly that reason.
+
+**Files**: `src/cosa/rest/task_store_rejoin.py` · `src/scripts/rejoin-done-blocked-rows.py` · `src/tests/unit/test_task_store_rejoin.py`
+
 ### 2026.07.25 - Session 43ff094e (Mr. Radio 🦉) | GCP VM: persona-404 APPLIED + proven end-to-end · STT 401 root-caused (8-month-stale secret) · GitHub push/pull wired · harvey-labs corpus delivered
 
 **Accomplishments** (solo VM-ops session for Rick; committed on `wip-v0.1.9`, `b7ea000f`→`cd1f62f7`, all HELD):
