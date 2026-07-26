@@ -195,6 +195,15 @@ omit   = [
 [tool.coverage.report]
 # exclude_also APPENDS to defaults (keeps `# pragma: no cover` working)
 exclude_also = [
-    "def quick_smoke_test",         # house-style inline smoke block; never runs under pytest
+    # ⚠️ EXCLUDED BY POLICY, NOT BECAUSE IT IS UNREACHABLE (row 3c0d3d1c, 2026-07-25).
+    # This comment used to read "never runs under pytest". That was FALSE and it was
+    # load-bearing: the house style WRAPS these blocks in a pytest case, e.g.
+    # test_arbiter_routing.py::test_arbiter_routing_quick_smoke, which is green today.
+    # An auditor of the 100% mandate who believed "unreachable" would not go looking for
+    # the wrapper. On arbiter_routing.py this exclusion removes 47 lines (189-237) from the
+    # denominator while the file reports 100% — and a tracked mini-plan-04 edit landed
+    # INSIDE that excluded block. The exclusion may well be right; the stated reason was not,
+    # and a load-bearing exclusion justified by a false claim is a stale comment on a gate.
+    "def quick_smoke_test",         # manual/CLI entrypoint convention — out of the denominator BY POLICY, even where a pytest wrapper exercises it
     "if __name__ == .__main__.:",   # inline main guards inside regular modules
 ]
