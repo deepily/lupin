@@ -1,6 +1,22 @@
 # TODO
 
-Last updated: 2026-07-25 (session b38f09bb, Cheech 🌿 — VM DM key: two stacked defects fixed; 3 follow-ons opened: key unification, provisioning key-copy, store persona misattribution)
+Last updated: 2026-07-26 (session 9a63d597, Mr. Radio 🦉 — `d6f11dfd` closed; backend-blind test isolation split to `d621b111` + decision `2b20a6d6` raised for Rick)
+
+---
+
+## ⏳ PENDING DECISION 2026-07-26 (Mr. Radio 🦉 `9a63d597`) — `2b20a6d6`: backend-blind test isolation
+
+**Status**: OPEN, awaiting Rick. Store row `2b20a6d6` (decision, `gate_class=operator`) carries the full pros/cons; this is the narrative pointer.
+
+**The situation**: nine `cosa/memory/*` classes route on the ambient `vector store backend` flag and silently discard any `db_path` handed to them. `postgres` has been live since 2026-07-07 with no per-block override, so a test that constructs one believing it is isolated is reading and writing the shared store. One module (`test_answer_is_correct`) is fixed — commit `e4113d64`. Six more in `src/tests/integration/` are not.
+
+**What Rick decides**: which remedy, and what happens to the six.
+
+**My recommendation, revised after measuring**: fix the three production call sites first, THEN raise at the source, then add the guard test. The original recommendation said "raise" outright; checking its stated risk showed **three live sites pass `db_path` under postgres** (`main.py:512`, `responder.py:260`, `prediction_engine.py:165`), so a raise breaks them today. `routers/system.py:272` is the one good citizen — it asks the flag before building a path, and is the shape the others should take.
+
+**Why I did not just do it**: the six live on the gated `:8000` suite; a change there cannot be verified without monopolizing the test server, which is the second half of what this decision decides. Also worth naming — `main.py` gates on `solution snapshots manager type`, a **second authority for the same fact** with nothing comparing the two. Reconciling that belongs to whichever remedy wins.
+
+**Related**: `d621b111` (the bug + full sweep) · `d6f11dfd` (closed) · `cfcbb703` Family B (the allowlist that missed this) · `d8a23fca`
 
 ---
 

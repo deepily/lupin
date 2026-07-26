@@ -2,6 +2,20 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-06-23 to 07-08](history/2026-06-23-to-07-08-history.md). History health: ✅ **HEALTHY at ~7.9k tokens (31% of 25k)** — archived 2026-07-21 by Mr. Radio 🦉 (session 56a74d7b), ~9.6k tokens moved to archive on Rick's ruling at the 17.5k WARNING threshold.
 
+### 2026.07.26 - Session 9a63d597 (Mr. Radio 🦉) | `d6f11dfd`: a test that named a backend nobody runs, writing where it said it wasn't
+
+**Accomplishments** (solo; `e4113d64` on `wip-v0.1.9`, HELD; row `d6f11dfd` closed, `d621b111` + decision `2b20a6d6` opened):
+1. **The row's own title was the last thing wrong with it.** `vector store backend = postgres` has been live in `[Lupin: Baseline]` since 2026-07-07 with **no per-block override** — so LanceDB is not the backend in *any* venue, host included. `TestAnswerIsCorrectLanceDB` handed `SolutionSnapshotManager` a tmpdir `db_path` that three separate classes discard; `initialize()` short-circuited to `_pg_initialize()` and its four tests upserted into the real shared store on every unit sweep.
+2. **⭐ My data-loss hypothesis was refuted by reading, after four probes failed to settle it.** The ORM column is `Text`, not `Boolean`, so `json.dumps` on write and `json.loads` on read are symmetric and the value reaches the constructor. A `Boolean` column *would* have handed `json.loads` a bool, raised into the bare `except:`, and yielded `None` — so the negative control asserts exactly that, and the green tests have teeth instead of passing on anything.
+3. **Fixed at the flag's single definition site**, not per-class: patching `get_vector_store_backend` covers all three, since `is_postgres_backend` resolves it from that module's globals at call time. The fixture then **asserts** `_use_postgres is False` — a pin that silently stops pinning is the failure this file already had once.
+4. **Controls both directions**: unpinned repro on the host (`_use_postgres=True`, `_table=None`, tmpdir discarded); pin neutered → **4 errors carrying the text predicted before the run**; restored → 18 pass, with LanceDB-only warnings proving the branch was actually taken. 88 across all five vector-store-touching unit modules.
+
+**🔴 The remedy was already in the tree and had an allowlist for a mouth.** Bug `cfcbb703` Family B fixed this exact shape in July via `_PG_ISOLATION_MODULES = { two module names }`. This module had the identical shape, was never added, and stayed broken for three weeks next to its own fix. A sweep found six more offenders in `src/tests/integration/` — including `test_lancedb_local_isolation.py`, named for the property the bug destroys, and `test_lancedb_gcs_integration.py:133`, whose `assert manager.db_path == uri` is **vacuous**: the attribute echoes what it was handed and the manager never reads it.
+
+**Held for a ruling, with its stated risk measured first**: decision `2b20a6d6` asks which remedy and what happens to the six. Its own "unchecked" caveat is now checked — **three production sites pass `db_path` under postgres** (`main.py:512`, `responder.py:260`, `prediction_engine.py:165`), so a raise would break them; only `routers/system.py:272` asks the flag first. Recommendation revised to fix-the-call-sites-then-raise. The six are untouched: they run on the gated `:8000` suite and a change there cannot be verified without monopolizing it, which is the very thing the decision decides.
+
+**Files**: `src/tests/unit/test_answer_is_correct.py`
+
 ### 2026.07.25 - Session b38f09bb (Cheech 🌿) | VM DM `missing_auth_header`: two stacked defects behind one error string
 
 **Accomplishments** (solo; `bba39eed` code + `d2fb6a6b` docs on `wip-v0.1.9`; store row `641942c0` closed):
