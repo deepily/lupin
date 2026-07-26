@@ -430,6 +430,27 @@ PY
                           "add group_add: [\"\${LUPIN_BRIDGE_GID}\"] to the compose service, then --force-recreate"
     fi
 
+    # C4b — LUPIN_ENV and the INI block must name the SAME environment (R4).
+    #       Two knobs with similar names, set side by side in every compose file,
+    #       choosing COUPLED facts: LUPIN_ENV picks the DATABASE ("never inferred",
+    #       per cloud-test.yml's own comment), config_block_id picks the INI BLOCK.
+    #       Nothing compared them until now, and a disagreement crashes nothing —
+    #       it just runs testing config against the development database, or the
+    #       reverse. Read from the RUNNING container, not the compose file: a
+    #       --force-recreate with a stale env-file, or a hand-started container,
+    #       diverges from the file that is supposed to describe it.
+    c_env="$( docker exec "$CONTAINER" sh -c 'printf %s "${LUPIN_ENV:-}"' 2>/dev/null || printf '' )"
+    c_args="$( docker exec "$CONTAINER" sh -c 'printf %s "${LUPIN_CONFIG_MGR_CLI_ARGS:-}"' 2>/dev/null || printf '' )"
+    c_block="$( pfv_config_block_id "$c_args" )" || c_block=""
+    pfv_env_block_agree "$c_env" "$c_block"; rc=$?
+    case $rc in
+        0) report pass BLOCK "LUPIN_ENV='$c_env' agrees with config_block_id='$c_block'" ;;
+        1) report fail BLOCK "LUPIN_ENV='$c_env' DISAGREES with config_block_id='$c_block' — the app reads one environment's config while addressing another's database" \
+                      "make them agree in $COMPOSE_FILE, then: up -d --no-deps --force-recreate $CONTAINER   # a RESTART will NOT re-read the environment" ;;
+        2) report unknown BLOCK "cannot compare LUPIN_ENV='$c_env' with config_block_id='$c_block' — one is empty or the block id lacks the 'Lupin:+' prefix" \
+                      "check the environment: block for LUPIN_ENV and LUPIN_CONFIG_MGR_CLI_ARGS in $COMPOSE_FILE" ;;
+    esac
+
     # C5 — THE ALARM MUST NOT BE GATED ON THE HEALTHY VALUE.
     #      The Cloud SQL proxy healthcheck probes :9090 and never touches the socket
     #      it exists to publish. On 2026-07-26 it reported "Up 35 hours (healthy)" for

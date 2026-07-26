@@ -175,6 +175,66 @@ pfv_contract_remedy() {
     esac
 }
 
+# ── pfv_config_block_id ──────────────────────────────────────────────────────
+# Extract the `config_block_id=<value>` token from a LUPIN_CONFIG_MGR_CLI_ARGS
+# string.
+#
+# Requires:  $1 = the full CLI-args string (may contain other space-separated tokens)
+# Ensures:
+#   - prints the block id with NO trailing newline, returns 0
+#   - returns 2 and prints nothing when no config_block_id token is present —
+#     ABSENT and EMPTY must not collapse, because "the knob is missing" and
+#     "the knob is set to nothing" have different remedies
+pfv_config_block_id() {
+    local args="$1" tok
+    tok="$( printf '%s' "$args" | tr ' ' '\n' | grep -m1 '^config_block_id=' || true )"
+    [ -n "$tok" ] || return 2
+    printf '%s' "${tok#config_block_id=}"
+}
+
+# ── pfv_env_block_agree ──────────────────────────────────────────────────────
+# Do LUPIN_ENV and the INI block id name the SAME environment? (R4)
+#
+# WHY THIS EXISTS: two knobs with similar names, set side by side in every
+# compose file, choosing COUPLED facts — and nothing compares them.
+#   LUPIN_ENV                  chooses the DATABASE.  cloud-test.yml's own
+#                              comment says it is "never inferred".
+#   config_block_id            chooses the INI BLOCK.
+# They can disagree silently, and the failure mode is the worst kind: an app
+# reading testing config while writing to the development database, or the
+# reverse. Nothing crashes. All four shipped service blocks agree TODAY, which
+# is exactly why this needs a comparator rather than an inspection — agreement
+# now is not a property, it is a coincidence nobody is holding in place.
+#
+# THE AGREEMENT RULE, stated so it can be argued with:
+#   strip a leading "Lupin:+", take the segment before the first "-", lowercase,
+#   and require equality with a lowercased LUPIN_ENV. The suffix is deliberately
+#   ignored — "Lupin:+Testing-GCS" is a testing block with a storage variant,
+#   and treating the variant as a disagreement would make the check cry wolf on
+#   the shipped configuration.
+#
+# Requires:  $1 = LUPIN_ENV value, $2 = config block id
+# Ensures:
+#   - returns 0 when they agree, 1 when they DISAGREE
+#   - returns 2 (UNDETERMINED) when either input is empty, or when the block id
+#     does not carry the "Lupin:+" prefix this rule knows how to read. An
+#     unreadable block id is NOT reported as agreement: a comparator that
+#     answers "fine" whenever it cannot parse its input is quietest exactly
+#     when something has changed underneath it. Callers must treat 2 as
+#     blocking-and-loud, not as a pass
+pfv_env_block_agree() {
+    local lupin_env="$1" block_id="$2" head
+    [ -n "$lupin_env" ] || return 2
+    [ -n "$block_id" ]  || return 2
+    case "$block_id" in Lupin:+*) ;; *) return 2 ;; esac
+    head="${block_id#Lupin:+}"
+    head="${head%%-*}"
+    [ -n "$head" ] || return 2
+    [ "$( printf '%s' "$head" | tr '[:upper:]' '[:lower:]' )" \
+      = "$( printf '%s' "$lupin_env" | tr '[:upper:]' '[:lower:]' )" ] && return 0
+    return 1
+}
+
 # ── pfv_shape_matches ────────────────────────────────────────────────────────
 # Validate an env var's VALUE against the SHAPE its contract row declares.
 #
