@@ -361,6 +361,15 @@ def _serialize_item_terse( item, blocker_statuses=None ) -> dict:
     (§3.3). It costs one boolean per row. A row that was never parked reports
     False, so the flag is silent on the overwhelming majority of rows.
 
+    `project` rides here for a different reason, and it is a cost argument (row d23147e8,
+    2026-07-25). It was ABSENT from terse, and there is no distinct-project-values endpoint — so
+    answering "what project strings actually exist in this store?" required pulling 1,227 FULL
+    rows. María ran exactly that census once: 9 distinct values, ONE of them an orphan alias
+    (`google-skills-distillation` vs `skills-distillation`) that had hidden a live row from a
+    project-scoped partition BY CONSTRUCTION. A census that expensive is never routine, which is
+    precisely why the NEXT orphan also gets found by accident. `project` is a short string; adding
+    it makes the check habitual instead of heroic.
+
     `blocker_terminal` rides here on the SAME argument, and the argument is stronger:
     blocked rows are EXCLUDED from the workable-now count by design, so a stranded row
     is invisible in exactly the way a finished row is — it costs nothing to look at and
@@ -388,6 +397,7 @@ def _serialize_item_terse( item, blocker_statuses=None ) -> dict:
         "blocked_by"        : item.blocked_by,
         "next_chase_ts"     : item.next_chase_ts.isoformat() if item.next_chase_ts is not None else None,
         "priority"          : item.priority,
+        "project"           : item.project,
         "park_reason_stale" : park_reason_is_stale( item.status, item.park_reason_captured_at, item.updated_ts ),
         "blocker_terminal"  : blocker_is_terminal( item.status, item.blocked_by, blocker_statuses or { } ),
     }

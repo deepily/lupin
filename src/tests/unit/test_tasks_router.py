@@ -526,6 +526,11 @@ def test_query_terse_returns_glance_projection_only( client, repo ):
         # exactly the way a finished row is. A flag absent from the projection a board
         # glance reads is a flag nobody sees.
         "blocker_terminal",
+        # `project` joined 2026-07-25 (row d23147e8) on a COST argument rather than a visibility
+        # one: without it, "which project strings exist?" costs 1,227 FULL rows, so the census
+        # that catches an orphan alias is never routine — and the next orphan gets found by
+        # accident too. A short string that makes a check habitual instead of heroic.
+        "project",
     }
     assert "body" not in row                                  # the token win — body dropped
     # `is False`, not a truthiness check, and a type assertion beside it: the SQL
@@ -1926,6 +1931,32 @@ def test_the_reject_never_fires_on_a_persona_or_user_ref( client, repo, ref ):
 
     assert r.status_code == 200
     repo.statuses_for_ids.assert_not_called()                # no item arm => no query at all
+
+
+def test_terse_carries_project_so_the_census_is_cheap( client, repo ):
+    """
+    Row d23147e8. Without `project` in terse, answering "which project strings exist in this
+    store?" costs 1,227 FULL rows — so the census that catches an orphan alias is heroic rather
+    than routine, and the next orphan gets found by accident too.
+
+    Asserted as a VALUE, not merely a key: a present-but-null field would satisfy an exact-set
+    check and still leave the census impossible.
+    """
+    repo.query_tasks.return_value = [ make_item( project="skills-distillation" ) ]
+    row = client.get( "/api/tasks", params={ "owner_persona": "krishna", "terse": "true" } ).json()[ "tasks" ][ 0 ]
+    assert row[ "project" ] == "skills-distillation"
+
+
+def test_terse_and_full_agree_about_project( client, repo ):
+    """
+    THE PARITY ARM. A terse row is documented as a strict SUBSET of the full shape; if the two
+    ever disagreed about `project`, a cheap census would return different answers from an
+    expensive one and nobody would know which to believe.
+    """
+    repo.query_tasks.return_value = [ make_item( project="plan" ) ]
+    terse = client.get( "/api/tasks", params={ "owner_persona": "k", "terse": "true"  } ).json()[ "tasks" ][ 0 ]
+    full  = client.get( "/api/tasks", params={ "owner_persona": "k", "terse": "false" } ).json()[ "tasks" ][ 0 ]
+    assert terse[ "project" ] == full[ "project" ] == "plan"
 
 
 if __name__ == "__main__":
