@@ -58,8 +58,8 @@ LUPIN_CONFIG_MGR_CLI_ARGS	CONTAINER	compose	LITERAL	REQUIRED	Chooses the INI BLO
 
 # ── Vertex / direct Opus (host CLI) ──────────────────────────────────────────
 CLAUDE_CODE_USE_VERTEX	HOST	operator ~/.bashrc	ENUM:0|1	OPTIONAL	Only needed for direct Opus via Vertex on the VM.
-ANTHROPIC_VERTEX_PROJECT_ID	HOST	operator ~/.bashrc	LITERAL	OPTIONAL	Ranked BELOW GOOGLE_CLOUD_PROJECT/GCLOUD_PROJECT — a literal elsewhere can silently bill another project.
-CLOUD_ML_REGION	HOST	operator ~/.bashrc	ENUM:global	OPTIONAL	Opus 4.8 on Vertex is GLOBAL-ONLY. A regional value yields model-not-found, which the CC wizard mis-reports as "permission denied".
+ANTHROPIC_VERTEX_PROJECT_ID	HOST	operator ~/.bashrc	LITERAL	OPTIONAL_UNLESS:CLAUDE_CODE_USE_VERTEX=1	Ranked BELOW GOOGLE_CLOUD_PROJECT/GCLOUD_PROJECT — a literal elsewhere can silently bill another project.
+CLOUD_ML_REGION	HOST	operator ~/.bashrc	ENUM:global	OPTIONAL_UNLESS:CLAUDE_CODE_USE_VERTEX=1	Opus 4.8 on Vertex is GLOBAL-ONLY. A regional value yields model-not-found, which the CC wizard mis-reports as "permission denied".
 
 # ── test venues (dev box only) ───────────────────────────────────────────────
 LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL	HOST	operator ~/.bashrc	EMAIL	OPTIONAL	Test/proxy auth as the SAME user, so both share a WebSocket channel. Absent => "Operation cancelled" failures.

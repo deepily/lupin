@@ -157,7 +157,11 @@ if [ -r "$CONTRACT" ]; then
         req="$(   pfv_contract_field "$row" 5 )"
         # CONTAINER-surface vars are asserted in layer C, not here.
         [ "$surface" = "CONTAINER" ] && continue
-        tier="BLOCK"; [ "$req" = "OPTIONAL" ] && tier="WARN"
+        # Resolve OPTIONAL / REQUIRED / OPTIONAL_UNLESS:<VAR>=<VAL> against the LIVE
+        # env before choosing a tier — a conditionally-required var is only required
+        # when its condition holds.
+        eff_req="$( pfv_req_effective "$req" )"
+        tier="BLOCK"; [ "$eff_req" = "OPTIONAL" ] && tier="WARN"
         src="$ENV_SURFACE"
         if pfv_hydrate_from_bashrc "$name"; then
             [ "$src" = "$ENV_SURFACE" ] && src="~/.bashrc export line (the non-interactive guard hid it)"
@@ -172,8 +176,17 @@ if [ -r "$CONTRACT" ]; then
             0) report pass    "$tier" "$name set and matches $shape   [from: $src]" ;;
             1) report fail    "$tier" "$name = '$value' does NOT match shape $shape" \
                               "$remedy" ;;
-            2) report unknown "$tier" "$name is UNSET (surface: $surface)" \
-                              "$remedy" ;;
+            2) # UNSET. An OPTIONAL var that is absent is COMPLIANT — reporting it as
+               # UNKNOWN made a reader triage a non-defect every run, and printed a
+               # remedy for three vars that are unset on the dev box too, so the
+               # remedy could never clear its own alarm. Only a REQUIRED (or
+               # conditionally-required, condition HOLDING) var earns the unknown.
+               if [ "$eff_req" = "OPTIONAL" ]; then
+                   report pass "$tier" "$name unset — OPTIONAL, absent is compliant (surface: $surface)"
+               else
+                   report unknown "$tier" "$name is UNSET (surface: $surface)" \
+                                  "$remedy"
+               fi ;;
         esac
     done < <( pfv_parse_manifest "$CONTRACT" )
 else

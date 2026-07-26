@@ -79,6 +79,60 @@ pfv_contract_field() {
     pfv_row_field "$1" "$2" 6
 }
 
+# ── pfv_req_effective ────────────────────────────────────────────────────────
+# Resolve a contract `req` field to REQUIRED or OPTIONAL against the LIVE env.
+#
+# WHY THIS EXISTS (2026-07-26, first real `preflight pre` run — 7 warnings, 5 of
+# them false). The contract already said these vars were OPTIONAL and the runner
+# still reported UNSET-and-optional as UNKNOWN-WARN with a remedy. An OPTIONAL var
+# that is absent is COMPLIANT; warning on it makes a reader triage a non-defect
+# every run, which is how a reader learns to stop reading the tier — and then the
+# one real warning is invisible. Same defect class as b5b6d252.
+#
+# It also adds the form the flat OPTIONAL/REQUIRED split could not express:
+#
+#     OPTIONAL_UNLESS:<VAR>=<VALUE>
+#
+# meaning "REQUIRED exactly when <VAR> currently equals <VALUE>, OPTIONAL otherwise".
+# The Vertex trio is why. All three absent is a SAFE, coherent state — Vertex is off.
+# The dangerous state is a PARTIAL set: CLAUDE_CODE_USE_VERTEX=1 with no
+# CLOUD_ML_REGION yields model-not-found, which the CC wizard mis-reports as
+# "permission denied" (the contract's own note on that row). A flat OPTIONAL cannot
+# distinguish the safe emptiness from the dangerous half-fill, so it warned on the
+# safe one and would have stayed quiet on the dangerous one — the alarm was
+# loudest exactly where nothing was wrong.
+#
+# Requires:
+#   - $1 = the contract's req field, verbatim
+# Ensures:
+#   - prints REQUIRED for "REQUIRED", or for OPTIONAL_UNLESS whose condition HOLDS
+#   - prints OPTIONAL for "OPTIONAL", or for OPTIONAL_UNLESS whose condition does not
+#   - an unparseable OPTIONAL_UNLESS prints REQUIRED — a malformed condition must not
+#     silently downgrade an assertion; not-knowing makes the waiver unsafe
+#   - prints REQUIRED for any unrecognised value, for the same reason
+#   - never raises; reads the env, writes nothing
+pfv_req_effective() {
+    local req="$1"
+    case "$req" in
+        OPTIONAL) printf 'OPTIONAL'; return 0 ;;
+        REQUIRED) printf 'REQUIRED'; return 0 ;;
+        OPTIONAL_UNLESS:*)
+            local cond var val observed
+            cond="${req#OPTIONAL_UNLESS:}"
+            case "$cond" in
+                *=*) ;;
+                *)   printf 'REQUIRED'; return 0 ;;    # malformed ⇒ assert, never waive
+            esac
+            var="${cond%%=*}"
+            val="${cond#*=}"
+            [ -n "$var" ] || { printf 'REQUIRED'; return 0; }
+            observed="$( eval "printf '%s' \"\${$var:-}\"" )"
+            if [ "$observed" = "$val" ]; then printf 'REQUIRED'; else printf 'OPTIONAL'; fi
+            return 0 ;;
+        *) printf 'REQUIRED'; return 0 ;;
+    esac
+}
+
 # ── pfv_contract_push_env_names ──────────────────────────────────────────────
 # The set of env vars `lupin-vm.sh push-env` is contractually responsible for
 # writing to the VM's ~/.bashrc, DERIVED from env-contract.tsv (R3b).

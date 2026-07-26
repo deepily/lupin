@@ -385,6 +385,71 @@ def test_phase_includes_unknown_phase_runs_everything():
 
 
 # ══════════════════════════════════════════════════════════════════════════
+# pfv_req_effective — OPTIONAL / REQUIRED / OPTIONAL_UNLESS
+#
+# Added 2026-07-26 after the first real `preflight pre` run reported 7 warnings,
+# 5 of them false: the contract already said those vars were OPTIONAL and the
+# runner still called UNSET-and-optional an UNKNOWN with a remedy. Three of the
+# five printed a remedy that could not run — they are unset on the dev box too,
+# so there was nothing for push-env to push.
+# ══════════════════════════════════════════════════════════════════════════
+
+def test_req_effective_optional_stays_optional():
+    assert _run( "pfv_req_effective 'OPTIONAL'" ).stdout == "OPTIONAL"
+
+
+def test_req_effective_required_stays_required():
+    assert _run( "pfv_req_effective 'REQUIRED'" ).stdout == "REQUIRED"
+
+
+def test_req_effective_conditional_is_optional_when_the_switch_is_off():
+    """
+    The Vertex trio's SAFE state. All three absent is coherent — Vertex is off —
+    and must not warn. This is the case that produced 3 of the 5 false warnings.
+    """
+    r = _run( "unset CLAUDE_CODE_USE_VERTEX; pfv_req_effective 'OPTIONAL_UNLESS:CLAUDE_CODE_USE_VERTEX=1'" )
+    assert r.stdout == "OPTIONAL"
+
+
+def test_req_effective_conditional_is_REQUIRED_when_the_switch_is_on():
+    """
+    THE CASE THE FLAT OPTIONAL/REQUIRED SPLIT COULD NOT EXPRESS, and the reason
+    this function exists rather than a blanket downgrade.
+
+    A PARTIAL Vertex set is the dangerous state, not the empty one: with
+    CLAUDE_CODE_USE_VERTEX=1 and no CLOUD_ML_REGION, Opus 4.8 is global-only, so a
+    missing region yields model-not-found — which the CC wizard mis-reports as
+    "permission denied". Flat OPTIONAL warned on the safe emptiness and would have
+    stayed SILENT here. The alarm was loudest exactly where nothing was wrong.
+    """
+    r = _run( "export CLAUDE_CODE_USE_VERTEX=1; pfv_req_effective 'OPTIONAL_UNLESS:CLAUDE_CODE_USE_VERTEX=1'" )
+    assert r.stdout == "REQUIRED"
+
+
+def test_req_effective_conditional_is_optional_when_the_switch_holds_another_value():
+    """`=0` is not `=1` — the condition is equality, not truthiness."""
+    r = _run( "export CLAUDE_CODE_USE_VERTEX=0; pfv_req_effective 'OPTIONAL_UNLESS:CLAUDE_CODE_USE_VERTEX=1'" )
+    assert r.stdout == "OPTIONAL"
+
+
+@pytest.mark.parametrize( "req", [
+    "OPTIONAL_UNLESS:",                 # no condition at all
+    "OPTIONAL_UNLESS:NO_EQUALS_SIGN",   # missing the =
+    "OPTIONAL_UNLESS:=1",               # empty var name
+    "MAYBE",                            # unrecognised entirely
+    "",                                 # blank
+] )
+def test_req_effective_fails_CLOSED_on_anything_it_cannot_parse( req ):
+    """
+    A malformed condition must never silently downgrade an assertion to OPTIONAL.
+    Not-knowing makes the WAIVER unsafe, so the unknown resolves to REQUIRED — the
+    same polarity the preflight's blocking arms use, and the opposite of the
+    "ambiguous ⇒ pass" universal this instrument already refused once.
+    """
+    assert _run( f"pfv_req_effective '{req}'" ).stdout == "REQUIRED"
+
+
+# ══════════════════════════════════════════════════════════════════════════
 # Instrument control — the harness must be able to report a failure
 # ══════════════════════════════════════════════════════════════════════════
 
