@@ -93,7 +93,7 @@ def _result( outcome, hook_output, should_increment=False, should_notify_cap=Fal
     }
 
 
-def decide_heartbeat( hold, oracle_verdict, poke_count, cap, now=None, goal_line="" ):
+def decide_heartbeat( hold, oracle_verdict, poke_count, cap, now=None, goal_line="", sweep_line="" ):
     """
     Pure §0 decision over fetched leaf state.
 
@@ -110,6 +110,11 @@ def decide_heartbeat( hold, oracle_verdict, poke_count, cap, now=None, goal_line
           poke reason (BOTH the oracle-owed and the self-declared paths). Empty ⇒
           the reason is byte-identical to the pre-role-goals output. Canonical
           goal text: planning-is-prompting -> workflow/role-goals.md.
+        - sweep_line is the per-persona board-sweep progress gate
+          (board_sweep.sweep_progress_line) or "" — Rick's 2026-07-25 order that a
+          sweeping seat may not stop until every owed row has been iterated.
+          INJECTED like goal_line (the ledger read is IO and stays in the shell) and
+          appended AFTER it, because it is the more specific instruction of the two.
 
     Ensures:
         - Returns the _result(...) structure; NO I/O, NO side effects
@@ -201,7 +206,7 @@ def decide_heartbeat( hold, oracle_verdict, poke_count, cap, now=None, goal_line
     # (the non-override path already returned OUTCOME_HONORED for any honored hold,
     # so hold_overridden is False there).
     hold_overridden = obligation_overrides and is_honored( hold, now=now )
-    reason = build_poke_reason( oracle_verdict, goal_line=goal_line, hold_overridden=hold_overridden )
+    reason = build_poke_reason( oracle_verdict, goal_line=goal_line, hold_overridden=hold_overridden, sweep_line=sweep_line )
     return _result( OUTCOME_POKE, { "decision": "block", "reason": reason }, should_increment=True )
 
 

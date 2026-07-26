@@ -551,7 +551,7 @@ def evaluate_work_owed( todo_items=None, pending_decisions=None,
     }
 
 
-def build_poke_reason( verdict, goal_line="", hold_overridden=False ):
+def build_poke_reason( verdict, goal_line="", hold_overridden=False, sweep_line="" ):
     """
     Compose the self-poke `reason` string from a work-owed verdict.
 
@@ -566,6 +566,10 @@ def build_poke_reason( verdict, goal_line="", hold_overridden=False ):
         - verdict is the dict returned by evaluate_work_owed (has "specifics")
         - goal_line is a string (the role-selected goal echo) or "" — empty ⇒
           nothing appended (output byte-identical to the pre-role-goals reason)
+        - sweep_line is the per-persona board-sweep progress gate (board_sweep.
+          sweep_progress_line) or "" — Rick's 2026-07-25 order that a sweeping seat
+          may not stop until every owed row has been iterated. Injected like
+          goal_line: the ledger read is IO and stays in the shell
         - hold_overridden is a bool (bug d0d7f068) — True when the poke fires via
           the obligation-override while a hold is HONORED (the caller passes
           obligation_overrides AND is_honored). Selects the honest hold clause so
@@ -583,6 +587,12 @@ def build_poke_reason( verdict, goal_line="", hold_overridden=False ):
     reason = POKE_REASON_TEMPLATE.format( specifics=verdict[ "specifics" ], hold_clause=hold_clause )
     if goal_line:
         reason = reason + "\n\n" + goal_line
+    # LAST, deliberately. The sweep gate is the most specific instruction the seat has —
+    # it names a count that must reach a number — so it must not be read as a footnote to
+    # the role goal above it. An empty sweep_line leaves the reason byte-identical to the
+    # pre-sweep output, which is the normal state of every session that is not sweeping.
+    if sweep_line:
+        reason = reason + "\n\n" + sweep_line
     return reason
 
 

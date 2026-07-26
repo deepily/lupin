@@ -76,6 +76,7 @@ from lupin_cli.claude_code.hooks.lib.heartbeat_decision import (
 from lupin_cli.claude_code.hooks.lib.heartbeat_settings import load_heartbeat_settings
 from lupin_cli.claude_code.hooks.lib import heartbeat_events
 # v2 Track-A — live work-owed oracle (Task* replay from the session transcript).
+from lupin_cli.claude_code.hooks.lib.board_sweep import sweep_progress_line
 from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import (
     evaluate_work_owed, partition_inbound_by_age, TODO_IN_PROGRESS, TODO_PENDING,
     manager_needs_verification, manager_needs_spinup_check, manager_needs_question_surface,
@@ -383,6 +384,44 @@ def _heartbeat_goal_line( session_id, bridge_role ):
             value = mgr.get( key, default="", silent=True )
         return str( value or "" ).strip()
     except Exception:
+        return ""
+
+
+def _board_sweep_line( session_id ):
+    """
+    The IO shell for Rick's 2026-07-25 board-sweep gate: resolve THIS seat's persona from
+    the bridge, then read its sweep ledger.
+
+    WHY PERSONA AND NOT ROLE (the design call, recorded so it can be argued with). The
+    obvious home for "do not stop until you have iterated all N items" is the
+    `heartbeat <role> goal line` INI key that `_heartbeat_goal_line` already reads. It
+    cannot carry this: both sweeping seats resolve to `worker`, so one key would say the
+    SAME N to María (22) and to Mr. Radio (71), and whichever seat got the smaller number
+    would stop early believing it had finished. The gate has to be addressed to a seat, so
+    it is keyed on the persona.
+
+    Requires:
+        - session_id is a string
+
+    Ensures:
+        - returns the sweep gate sentence, or "" when this seat has no ledger (the normal
+          state of every session that is not sweeping — output byte-identical to before)
+        - returns a LOUD line, never "", when a ledger exists but cannot be read: a gate
+          that goes quiet because it could not read its own state is the failure it exists
+          to prevent
+        - a persona that cannot be resolved yields "" — no seat, no ledger to address
+        - never raises; never writes to stdout (the hook's JSON protocol channel)
+    """
+    try:
+        persona = get_voice_persona( session_id ) or { }
+        name    = persona.get( "name" )
+        if not name: return ""
+        return sweep_progress_line( name )
+    except Exception:
+        # Degrade-safe like _heartbeat_goal_line: a broken bridge read must never take the
+        # poke down. This arm is the one place silence is accepted on an error, and only
+        # because it means "could not identify the seat", not "could not read the ledger" —
+        # the latter is handled loudly inside sweep_progress_line.
         return ""
 
 
@@ -1953,7 +1992,13 @@ def _resolve_owed_state( session_id, transcript_path=None, cwd=None ):
     except Exception:
         _bridge_role = None
     goal_line  = _heartbeat_goal_line( session_id, _bridge_role )
-    result     = decide_heartbeat( hold, verdict, poke_count, settings[ "poke_cap" ], goal_line=goal_line )
+    # Rick's 2026-07-25 board-sweep gate. PERSONA-scoped, not role-scoped: both sweeping
+    # seats resolve to `worker`, so the role goal line above physically cannot say "22" to
+    # one and "71" to the other. Silent for every seat with no ledger — i.e. everyone not
+    # sweeping — and LOUD (never "") when a ledger exists but cannot be read.
+    sweep_line = _board_sweep_line( session_id )
+    result     = decide_heartbeat( hold, verdict, poke_count, settings[ "poke_cap" ],
+                                   goal_line=goal_line, sweep_line=sweep_line )
 
     return {
         "config_error"       : False,
