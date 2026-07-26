@@ -31,12 +31,12 @@ executable surface in the repo, terraform included.
 Venue: :7999-eligible — pure file reads + an offline `terraform validate`. No network
 writes, no GCP calls, no mutation.
 """
-import inspect
 import os
 import re
 import shutil
 import subprocess
 import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -310,6 +310,35 @@ def test_envs_test_passes_terraform_validate():
         assert "valid" in result.stdout
 
 
+def _source_of( function_name ):
+    """
+    Return the source text of a top-level function in THIS file.
+
+    Reads the file named by `__file__` rather than going through
+    `inspect.getsource`, whose `co_filename` is baked into pytest's cached rewritten
+    bytecode and is therefore wrong in whichever venue did not compile that cache
+    (bug d8a23fca — `__pycache__` is bind-mounted into a container with a different
+    repo root). `__file__` is resolved per-import from the module spec, so it names a
+    path that exists wherever the test is actually running.
+
+    Requires:
+        - function_name is a top-level `def` in this module
+
+    Ensures:
+        - returns the text from that `def` line up to the next top-level statement
+        - raises AssertionError naming the function when it is not found, rather than
+          returning an empty string a caller's `in` check would silently pass on
+    """
+    lines = Path( __file__ ).read_text().splitlines( keepends=True )
+    start = next( ( i for i, line in enumerate( lines )
+                    if line.startswith( f"def {function_name}(" ) ), None )
+    assert start is not None, f"{function_name} not found in {__file__} — the guard cannot read what it asserts about"
+
+    end = next( ( j for j in range( start + 1, len( lines ) )
+                  if lines[ j ].strip() and not lines[ j ][ 0 ].isspace() ), len( lines ) )
+    return "".join( lines[ start : end ] )
+
+
 def test_the_validate_check_never_touches_the_network_or_a_credential():
     """
     ⚠️ THE INVARIANT, PINNED — because the defect above was invisible in the test's own
@@ -320,8 +349,21 @@ def test_the_validate_check_never_touches_the_network_or_a_credential():
     (TF_PLUGIN_CACHE_DIR) — and it will PASS on the developer's machine, where both happen
     to be reachable, while moving at random in CI. So the mechanism is asserted, not
     trusted.
+
+    ⚠️ Bug d8a23fca — this read the source via `inspect.getsource( fn )`, which resolves
+    through the function's `co_filename`. pytest's assertion-rewriting BAKES that absolute
+    path into the cached bytecode, and `src/tests/unit/__pycache__/` is bind-mounted into
+    lupin-rest-test — a container whose repo root is /var/lupin, not the host's
+    /mnt/DATA01/…. So whichever venue did not compile the cache loads a `co_filename`
+    that does not exist for it, and `getsource` dies with "could not get source code".
+
+    Measured both directions: with a host-written cache the CONTAINER failed; after
+    deleting it and letting the container recompile, the HOST failed and the container
+    passed. The venue that breaks is decided by run order, silently. `__file__` is set
+    per-import from the module spec — the real filesystem — rather than from the cached
+    bytecode, so reading the file directly is correct in every venue and under any cache.
     """
-    source = inspect.getsource( test_envs_test_passes_terraform_validate )
+    source = _source_of( "test_envs_test_passes_terraform_validate" )
     for var in ( "TF_DATA_DIR", "TF_PLUGIN_CACHE_DIR" ):
         assert var in source, (
             f"{var} is gone from the terraform validate test. Without it the test reaches the "

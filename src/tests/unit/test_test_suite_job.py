@@ -18,6 +18,32 @@ from cosa.rest.job_state import JobState
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Shared stubs
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Bug d8a23fca. Patching `job.cu.get_project_root` does NOT scope to job.py — `cu`
+# is the shared `cosa.utils.util` module object, so the patch rewrites project-root
+# resolution for every consumer in the process. do_all() then reaches
+# _preflight_assert_exclusive_test_db, which lazily imports lupin_app.main, whose
+# module-level ConfigurationManager resolves lupin-app.ini under the mocked tmpdir
+# and dies with "That file doesn't exist".
+#
+# It only bites where the engine IS lupin_db_test: off the test DB the preflight
+# returns before the import, so on the dev host these tests pass having never
+# executed the branch at all. Their green there was vacuous, not sound — and inside
+# the container four of the six were ALSO green, masked by an earlier test importing
+# lupin_app.main under the real root. Run alone, all six fail.
+#
+# The preflight has its own six tests (TestPreflightExclusivity), so a do_all() test
+# that only needs the io_base pin stubs it — the idiom
+# test_preflight_fires_before_first_suite already uses. `new` is given explicitly, so
+# no extra mock argument is injected and signatures stay put.
+_stub_preflight = patch.object(
+    TestSuiteJob, "_preflight_assert_exclusive_test_db", lambda self: None
+)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Fixtures
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -302,6 +328,7 @@ class TestStateTransitions:
         """New job should be PENDING."""
         assert job.state == JobState.PENDING
 
+    @_stub_preflight
     @patch( "cosa.agents.test_suite.job.cu.get_project_root" )
     @patch( "cosa.agents.test_suite.job.TestSuiteJob._run_suite" )
     @patch( "cosa.agents.test_suite.voice_io" )
@@ -330,6 +357,7 @@ class TestStateTransitions:
         assert job.answer_conversational is not None
         assert job.error is None
 
+    @_stub_preflight
     @patch( "cosa.agents.test_suite.job.cu.get_project_root" )
     @patch( "cosa.agents.test_suite.job.TestSuiteJob._run_suite" )
     @patch( "cosa.agents.test_suite.voice_io" )
@@ -492,6 +520,7 @@ class TestVoiceIOIntegration:
 class TestArtifacts:
     """Tests for artifact population after execution."""
 
+    @_stub_preflight
     @patch( "cosa.agents.test_suite.job.cu.get_project_root" )
     @patch( "cosa.agents.test_suite.job.TestSuiteJob._run_suite" )
     @patch( "cosa.agents.test_suite.voice_io" )
@@ -535,6 +564,7 @@ class TestArtifacts:
         assert cost[ "total_passed" ] == 20  # 10 per suite * 2 suites
         assert cost[ "total_failed" ] == 4   # 2 per suite * 2 suites
 
+    @_stub_preflight
     @patch( "cosa.agents.test_suite.job.cu.get_project_root" )
     @patch( "cosa.agents.test_suite.job.TestSuiteJob._run_suite" )
     @patch( "cosa.agents.test_suite.voice_io" )
@@ -881,6 +911,7 @@ class TestSweepResetsBetweenSuites:
         "duration"  : 0.1,
     }
 
+    @_stub_preflight
     @patch( "cosa.agents.test_suite.job.cu.get_project_root" )
     @patch( "cosa.agents.test_suite.voice_io" )
     def test_reset_fires_between_suites_in_order( self, mock_voice_io, mock_root, job, tmp_path ):
@@ -905,6 +936,7 @@ class TestSweepResetsBetweenSuites:
 
         assert order == [ "run:integration", "reset:integration->e2e", "run:e2e" ]
 
+    @_stub_preflight
     @patch( "cosa.agents.test_suite.job.cu.get_project_root" )
     @patch( "cosa.agents.test_suite.voice_io" )
     def test_single_suite_never_resets( self, mock_voice_io, mock_root, single_suite_job, tmp_path ):
