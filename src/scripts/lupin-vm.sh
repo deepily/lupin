@@ -92,6 +92,14 @@ Firewall (one-time — the tunnel needs IAP allowed to :$APP_PORT):
   firewall status        list all VPC firewall rules (scan sourceRanges for 35.235.240.0/20)
   firewall open [PORT]   allow IAP range -> tcp:PORT (default $APP_PORT); network auto-derived
 
+One-off file upload (SCP a single local file anywhere on the VM):
+  push-file <local-file> <remote-path>
+                         e.g. push-file ./notes.md $VM_ROOT/notes.md
+                              push-file ./x.sh    bin/x.sh          (relative => SSH user's \$HOME)
+                              push-file ./x.md    $VM_ROOT/src/rnd/  (trailing / keeps the basename)
+                         Absolute targets are staged in /tmp and sudo-installed (the SSH user cannot
+                         write root/1001-owned dirs); anything under /mnt/lupin-data is chown 1001:1001.
+
 Sibling repos (the VM has no git creds — archive+SCP a LOCAL checkout):
   push-repo <local-path> [dest-name]
                          copy a local git repo (tracked files @ HEAD) to /mnt/lupin-data/<dest-name>,
@@ -335,6 +343,61 @@ case "$SUBCMD" in
                     --source-ranges=35.235.240.0/20
                 ;;
             *) die "firewall needs: status | open [PORT]" ;;
+        esac
+        ;;
+
+    push-file)
+        # One-line upload of a SINGLE local file to an arbitrary path on the VM, over the same
+        # IAP-only SCP path everything else here uses. Complements push-repo (whole checkout) and
+        # push-bundle (git refs): this is the "just get this one file over there" primitive.
+        #
+        #   push-file <local-file> <remote-path>
+        #
+        # Target routing — the SSH user is NOT root and NOT uid 1001, so it can only write its own
+        # $HOME. Two paths, chosen by the shape of <remote-path>:
+        #   relative / '~/...'  -> scp writes it DIRECTLY (lands under the SSH user's home)
+        #   absolute '/...'     -> staged in /tmp, then `sudo install`ed to the target (a direct scp
+        #                          to e.g. $VM_ROOT would fail "Permission denied")
+        # Files landing under $VM_DEEPILY_PROJECTS_DIR get chown 1001:1001 — the UID that owns the
+        # on-VM checkouts — so the app container (and the checkout's own tooling) can read them.
+        # NOTE: quote a '~/...' target ('~/x.md'), else your LOCAL shell expands it to /home/<you>.
+        LOCAL_FILE="${1:-}"
+        REMOTE_PATH="${2:-}"
+        [ -n "$LOCAL_FILE" ] && [ -n "$REMOTE_PATH" ] \
+            || die "push-file needs a source AND a target:  lupin-vm.sh push-file ./notes.md $VM_ROOT/notes.md"
+        [ -f "$LOCAL_FILE" ] || die "not a readable local file: $LOCAL_FILE  (push-file takes ONE file; use push-repo for a checkout)"
+        require_project
+        # A trailing slash means "into this directory" — keep the local basename.
+        case "$REMOTE_PATH" in
+            */) REMOTE_PATH="$REMOTE_PATH$( basename "$LOCAL_FILE" )" ;;
+        esac
+        case "$REMOTE_PATH" in
+            /*)
+                REMOTE_DIR="$( dirname "$REMOTE_PATH" )"
+                STAGE="/tmp/lupin-pushfile-$$-$( basename "$LOCAL_FILE" )"
+                # chown only under the data disk; elsewhere (/etc, /opt, ...) leave root ownership.
+                CHOWN_CMD="true"
+                case "$REMOTE_PATH" in
+                    "$VM_DEEPILY_PROJECTS_DIR"/*) CHOWN_CMD="sudo chown 1001:1001 $REMOTE_PATH" ;;
+                esac
+                if [ "$DRY_RUN" -eq 1 ]; then
+                    log "(dry-run) gcloud compute scp $LOCAL_FILE $VM_NAME:$STAGE; then on VM: sudo mkdir -p $REMOTE_DIR && sudo install -m 644 $STAGE $REMOTE_PATH && rm -f $STAGE && $CHOWN_CMD"
+                else
+                    log "scp $LOCAL_FILE -> $VM_NAME:$STAGE (staging)"
+                    gcloud compute scp "$LOCAL_FILE" "$VM_NAME:$STAGE" \
+                        --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap
+                    log "installing -> $REMOTE_PATH"
+                    gcloud compute ssh "$VM_NAME" \
+                        --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
+                        --command "sudo mkdir -p $REMOTE_DIR && sudo install -m 644 $STAGE $REMOTE_PATH && rm -f $STAGE && $CHOWN_CMD && echo UPLOADED && ls -l $REMOTE_PATH"
+                fi
+                ;;
+            *)
+                # Home-relative (or a quoted '~/...') — scp can write it directly, no sudo needed.
+                log "scp $LOCAL_FILE -> $VM_NAME:$REMOTE_PATH (SSH user's home)"
+                runit gcloud compute scp "$LOCAL_FILE" "$VM_NAME:$REMOTE_PATH" \
+                    --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap
+                ;;
         esac
         ;;
 
