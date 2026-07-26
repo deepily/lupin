@@ -485,11 +485,17 @@ def task_query_impl(
         - PARK-REASON STALENESS (2026-07-19): every row carries
           `park_reason_stale` (bool), in the TERSE projection as well as the
           full shape — a flag only the full row carried would be a flag nobody
-          reads. True means the row was AMENDED AFTER its `park_reason` quote
+          reads. True means the row's BODY CHANGED AFTER its `park_reason` quote
           was frozen, so the quote is no longer known to describe the row.
           ADVISORY ONLY: it changes no owed-ness, unparks nothing, blocks
           nothing. Re-park to re-freeze the quote. Rows parked before this
           shipped, and rows never parked, report False.
+          ⚠️ FIXED 2026-07-26 (bug 54924128): it used to read `updated_ts`, which
+          EVERY write bumps, so a priority-only edit during a board recut defamed
+          a correct quote — every parked row in the store was falsely flagged when
+          it was found. It now reads `body_changed_ts`. The fix ships no backfill,
+          so the flag stays quiet on each existing row until that row's body next
+          changes; a pre-2026-07-26 `true` should be re-checked, not trusted.
         - STRANDED BLOCKERS (2026-07-25, row 00a6bde2): every row also carries
           `blocker_terminal` (bool), likewise in TERSE as well as the full shape.
           True means this row is `blocked` on an ITEM that is already done or

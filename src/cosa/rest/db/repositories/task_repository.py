@@ -397,6 +397,51 @@ class TaskRepository( BaseRepository[TaskItem] ):
 
         return self._append_event( item.id, actor, transition_label, authority, receipt_refs, reason=reason )
 
+    def _db_clock_now( self ) -> datetime:
+        """
+        Read the DATABASE clock, tz-normalized. **The one clock every timestamp
+        that gets COMPARED to another must come from.**
+
+        Two columns are compared by `task_store_owed.park_reason_is_stale`:
+        `park_reason_captured_at` (stamped at park) and `body_changed_ts` (stamped
+        on a real body change). Both come from here. Take either from
+        `datetime.now()` instead and the comparison becomes cross-clock, where skew
+        surfaces as a **false FRESH** — a parked row silently failing to report an
+        expired quote. That is the feature's own defect arriving in the direction
+        nobody notices, which is why the source is centralized here rather than
+        re-decided at each writer.
+
+        Requires:
+            - an open session/transaction (the caller's; this reads, never writes)
+
+        Ensures:
+            - returns a tz-aware UTC datetime from the DB clock
+            - a naive return is converted to tz-aware UTC, so the value compares
+              correctly against the tz-aware column on every backend
+            - commit NOT called; nothing is written here
+
+        Returns:
+            The database clock's current instant
+        """
+        captured = self.session.execute( select( func.now() ) ).scalar_one()
+
+        # MEASURED, both backends, 2026-07-19 — not assumed:
+        #   PostgreSQL -> datetime(..., tzinfo=UTC)   (tz-aware)
+        #   SQLite     -> datetime(...)               (NAIVE, and a datetime —
+        #                                              NOT the string it is easy
+        #                                              to assume it returns)
+        # So exactly one normalization is needed and it is load-bearing on
+        # SQLite: a naive value compared against the tz-aware column raises
+        # TypeError. An earlier draft also carried an `isinstance( captured, str )`
+        # branch written on the ASSUMPTION that SQLite returns a string. It does
+        # not, so that branch was unreachable — a hedge marking where its author
+        # had declined to find out, and an uncoverable line under the 100% gate.
+        # Verified, then deleted.
+        if captured.tzinfo is None:
+            captured = captured.replace( tzinfo=timezone.utc )
+
+        return captured
+
     def _park_capture_ts( self ) -> datetime:
         """
         Read the DATABASE clock for the park write's single timestamp — the one
@@ -452,24 +497,11 @@ class TaskRepository( BaseRepository[TaskItem] ):
         Returns:
             The single timestamp for this park write
         """
-        captured = self.session.execute( select( func.now() ) ).scalar_one()
-
-        # MEASURED, both backends, 2026-07-19 — not assumed:
-        #   PostgreSQL -> datetime(..., tzinfo=UTC)   (tz-aware)
-        #   SQLite     -> datetime(...)               (NAIVE, and a datetime —
-        #                                              NOT the string it is easy
-        #                                              to assume it returns)
-        # So exactly one normalization is needed and it is load-bearing on
-        # SQLite: a naive value compared against the tz-aware column raises
-        # TypeError. An earlier draft also carried an `isinstance( captured, str )`
-        # branch written on the ASSUMPTION that SQLite returns a string. It does
-        # not, so that branch was unreachable — a hedge marking where its author
-        # had declined to find out, and an uncoverable line under the 100% gate.
-        # Verified, then deleted.
-        if captured.tzinfo is None:
-            captured = captured.replace( tzinfo=timezone.utc )
-
-        return captured
+        # ONE clock for every compared timestamp — see _db_clock_now. This wrapper
+        # exists for its NAME and its §3.4 reasoning above, not for a second
+        # implementation: `body_changed_ts` is compared against what this returns,
+        # so the two must not be able to drift to different clocks.
+        return self._db_clock_now()
 
     def apply_correlation(
         self,
@@ -535,8 +567,21 @@ class TaskRepository( BaseRepository[TaskItem] ):
               "[persona_flag: … off-roster]") appended to the resolved event
               reason; None means no marker (the reason is unchanged)
 
+        ⚠️ STAMPS `body_changed_ts` — ONLY when `body` is in `fields` AND its value
+        actually DIFFERS (bug 54924128, 2026-07-26). That condition IS the fix. The
+        other four free-edit fields (title / priority / gate_class / urgency) cannot
+        make a park quote untrue, so they must leave the marker alone; before this,
+        `park_reason_is_stale` read `updated_ts`, which every write bumps, and a
+        priority-only edit during a routine board recut defamed correct quotes —
+        0 of 2 live parked rows correctly flagged when it was found.
+
+        A no-op body write (same text) stamps NOTHING: the quote cannot have been
+        invalidated by text that did not change, and stamping there would re-import
+        the false-positive class through a narrower door.
+
         Ensures:
             - each provided field whose value differs is written onto the item
+            - body_changed_ts stamped from the DB clock IFF `body` changed value
             - exactly one TaskEvent appended: transition='patched',
               receipt_refs=None, reason = the caller-supplied `reason` when it is
               non-empty, else the field delta ("k: old -> new; ...") or a no-op
@@ -549,12 +594,20 @@ class TaskRepository( BaseRepository[TaskItem] ):
         Returns:
             The appended TaskEvent instance
         """
-        changes = [ ]
+        changes      = [ ]
+        body_changed = False
         for key, new_value in fields.items():
             old_value = getattr( item, key )                 # key is whitelist-validated, never arbitrary — fails loud if absent
             if old_value != new_value:
                 setattr( item, key, new_value )
                 changes.append( f"{key}: {old_value!r} -> {new_value!r}" )
+                if key == "body": body_changed = True
+
+        # THE FIX FOR 54924128, in one condition: the content-change marker moves
+        # for a body edit and for nothing else. Keyed off the SAME equality the
+        # audit delta uses, so the marker and the event can never disagree about
+        # whether the body changed.
+        if body_changed: item.body_changed_ts = self._db_clock_now()
 
         # Caller-supplied reason wins (the manager's "why" for a reassignment);
         # otherwise auto-describe the field delta so the event is never blank.
@@ -602,6 +655,13 @@ class TaskRepository( BaseRepository[TaskItem] ):
               stamped block when the body was non-empty; the stamped block ALONE
               when the body was empty/None (no leading blank lines on a first
               amendment)
+            - item.body_changed_ts stamped from the DB clock UNCONDITIONALLY — an
+              amend only ever APPENDS, so the body always changed. This is the
+              other half of bug 54924128's fix: the marker must still go TRUE on a
+              genuine body change, or the fix is indistinguishable from deleting
+              the feature. ⚠️ The DB clock, never datetime.now(): this value is
+              compared against park_reason_captured_at, and a cross-clock compare
+              would surface skew as a false FRESH (see _db_clock_now)
             - item.status is NEVER touched (an amend is not a transition)
             - exactly one TaskEvent appended: transition='amended',
               receipt_refs=None, reason = the caller-supplied `reason` when it is
@@ -617,6 +677,13 @@ class TaskRepository( BaseRepository[TaskItem] ):
             item.body = f"{item.body}\n\n{block}"
         else:
             item.body = block
+
+        # The body ALWAYS changed here (append-only, and the router rejects a blank
+        # note). Stamped from the DB clock, NOT the injected `now` — `now` is the
+        # ROUTER's application clock, deliberately injected to keep this method
+        # deterministic for the event stamp, and it is the wrong clock for a value
+        # that gets COMPARED to park_reason_captured_at.
+        item.body_changed_ts = self._db_clock_now()
 
         # Caller-supplied reason wins (the "why" for the amendment); otherwise
         # auto-describe the appended length so the event is never blank.

@@ -21,13 +21,21 @@ rule 14 — a control licenses only what its scope covers):
      at all. This file does not re-license reachability. AC6-live
      (test_parked_status_ac6_live.py, run ts-0e8c0fb2) covers it.
 
-  2. THE §3.4 ORDERING — that park captures the POST-write `updated_ts`. That
-     is a property of the WRITE, not of the predicate, and AC3 demands it be
-     asserted as EQUALITY rather than sampled through `stale == False`. A
-     predicate test cannot see it: `stale == False` holds for the correct
-     implementation AND for a `now()`-written-after implementation that leaves
-     an undetectable amendment window. AC3 and live-AC4 therefore belong to a
-     Postgres-backed integration run, NOT here.
+  2. THE §3.4 ORDERING — that park stamps `park_reason_captured_at` and
+     `updated_ts` with ONE instant. That is a property of the WRITE, not of the
+     predicate, and AC3 demands it be asserted as EQUALITY rather than sampled
+     through `stale == False`. A predicate test cannot see it: `stale == False`
+     holds for the correct implementation AND for a `now()`-written-after
+     implementation that leaves an undetectable amendment window. AC3 and
+     live-AC4 therefore belong to a Postgres-backed integration run, NOT here.
+
+  3. ⚠️ NEW WITH 54924128 (2026-07-26) — THAT THE WRITERS STAMP `body_changed_ts`
+     ON A BODY CHANGE AND ON NOTHING ELSE. That is the entire fix, and it lives
+     in `TaskRepository.apply_patch` / `apply_amendment`, not in this predicate.
+     Nothing in this file can distinguish a correct stamping writer from one that
+     never stamps at all: both leave the predicate's arithmetic identical.
+     `src/tests/unit/test_body_changed_ts_stamping.py` carries BOTH control arms.
+     ⇒ A green here is not evidence that the false-positive class is closed.
 
   (AC10 — same-transaction agreement with the `task_events` park row — is NOT
   in this seat's scope. Moved to seat 2 on :8000 by the manager, 2026-07-19:
@@ -61,10 +69,20 @@ dicts decoded from an HTTP body and on in-memory rows, not only on rows that
 survived a CHECK — no constraint travels with those callers. So "parked + NULL
 capture is handled" must never be read as "parked + NULL capture happens."
 
-IS THE PROJECTION NULL REACHABLE IN PRODUCTION? NO — derived here rather than
-assumed, because the answer changes what the projection arm is FOR:
+IS THE PROJECTION NULL REACHABLE IN PRODUCTION?
+⚠️ **IT WAS NOT. AS OF 2026-07-26 IT IS — AND ON EVERY PARKED ROW.** This section
+said NO for a year of reading and the answer INVERTED with bug 54924128's fix.
+Re-derived rather than carried forward, because the answer is what the projection
+arm is FOR:
 
-  · `updated_ts` is `nullable=False` with a server_default (postgres_models.py).
+  · The clause's third column USED to be `updated_ts`, which is `nullable=False`
+    with a server_default (postgres_models.py) — a NULL was structurally
+    impossible, so the null guard could never fire.
+  · It is now `body_changed_ts`: **nullable forever, with no server_default and
+    deliberately no CHECK** (a row whose body has never changed since the column
+    shipped legitimately has no value). Migration `38e025169a73` writes NO
+    backfill, so **every row in the store is NULL the moment it lands** and stays
+    NULL until its body next changes.
   · `park_reason_captured_at` is nullable, BUT the CHECK
     `status != 'parked' OR park_reason_captured_at IS NOT NULL`
     (migration d47487369407) forbids NULL on exactly the rows whose comparison
@@ -73,17 +91,16 @@ assumed, because the answer changes what the projection arm is FOR:
     NON-parked row cannot project NULL even with the guards dropped. Only
     `TRUE AND NULL` — a PARKED row with a NULL operand — yields NULL.
 
-  ⇒ The two conditions that jointly produce a NULL are unreachable on a real
-    `task_items` row. The NULL the projection mutant produces below comes from a
-    matrix row the CHECK forbids.
+  ⇒ A parked row with a NULL `body_changed_ts` is not merely reachable, it is
+    **the default state of every parked row in production today.**
 
-⇒ SO THE NULL GUARDS ARE, IN PRODUCTION, UNREACHABLE DEFENSIVE CODE, and the
-  projection arm proves them TOTAL for the non-DB callers — NOT that it prevents
-  a live `park_reason_stale: None` on the wire. Stated because the arm was added
-  under the belief that a live None was possible; it is not, on any shape the
-  table can hold. The arm still earns its place: a filter-shaped gate cannot see
-  those guards AT ALL, and the day someone relaxes that CHECK they become
-  load-bearing with nothing else watching them.
+⇒ SO THE NULL GUARDS ARE NO LONGER DEFENSIVE CODE — they are load-bearing on
+  every parked row, and the day they are dropped a live `park_reason_stale: None`
+  goes out on the wire immediately rather than never. The projection arm changed
+  from proving totality for non-DB callers to guarding a live production path.
+  ⚠️ Its scope grew without a line of it being edited: the same assertions, over
+  the same matrix, now license strictly more. That is worth noticing — a control's
+  reach is a function of the world around it, not only of what it asserts.
 
 WHY SQLITE
 ----------
@@ -148,7 +165,7 @@ def test_seat_one_predicate_has_landed():
         f"seat 1's staleness predicate is NOT in task_store_owed — every test "
         f"below is vacuous until it lands. Import error: {_IMPORT_ERROR}. "
         f"Expected per design §3.2: park_reason_is_stale( status, "
-        f"park_reason_captured_at, updated_ts ) plus park_reason_is_stale_clause"
+        f"park_reason_captured_at, body_changed_ts ) plus park_reason_is_stale_clause"
         f"( model ) as a GENUINELY independent twin. NOTE: the clause takes NO "
         f"`now` — staleness compares two ROW COLUMNS and reads no clock, unlike "
         f"park_is_active_clause( model, now )."
@@ -176,7 +193,7 @@ class StalenessRow( Base ):
     id                      = Column( Integer, primary_key=True )
     status                  = Column( String )
     park_reason_captured_at = Column( DateTime )
-    updated_ts              = Column( DateTime )
+    body_changed_ts              = Column( DateTime )
 
 
 # ---------------------------------------------------------------------------
@@ -191,7 +208,7 @@ CAPTURE_SHAPES = {
 }
 
 UPDATED_SHAPES = {
-    "null"   : None,                        # a row with no updated_ts at all
+    "null"   : None,                        # a row with no body_changed_ts at all
     "before" : CAP - timedelta( hours=6 ),  # clock skew / backdated write
     "equal"  : CAP,                         # THE BOUNDARY — freshly parked
     "after"  : CAP + timedelta( hours=6 ),  # amended after park -> STALE
@@ -206,7 +223,7 @@ def _build_matrix():
         - returns a list of ( id, status, captured_or_None, updated_or_None )
         - covers all 8 statuses x 2 capture shapes x 4 updated shapes = 64 rows
         - contains the four AC6 boundary cases: equal timestamps, null capture,
-          null updated_ts, and every status
+          null body_changed_ts, and every status
     """
     rows    = []
     next_id = 1
@@ -235,7 +252,7 @@ def session():
             id                      = row_id,
             status                  = status,
             park_reason_captured_at = captured,
-            updated_ts              = updated,
+            body_changed_ts              = updated,
         ) )
     sess.commit()
     yield sess
@@ -267,7 +284,7 @@ def _sql_projection( session, clause_builder=None ):
     The clause's VALUE per row — `{ id: True | False | None }`. Injectable for mutants.
 
     ⚠️ WHY THIS EXISTS, AND WHY A FILTER-ONLY GATE FALSE-GREENS (seat 1, 15474267):
-    in a WHERE clause `updated_ts > captured_at` with a NULL operand evaluates to
+    in a WHERE clause `body_changed_ts > captured_at` with a NULL operand evaluates to
     NULL, and the engine DISCARDS the row — which is the same OBSERVABLE OUTCOME
     as an explicit `isnot(None)` guard excluding it. So the null guards are
     INVISIBLE to any filter-shaped test: drop them and the selected row set does
@@ -322,7 +339,7 @@ def test_the_matrix_covers_every_ac6_boundary_case():
 
     assert statuses == set( VALID_STATUSES ),  "matrix does not cover all 8 statuses"
     assert None in captures,                   "matrix lacks the null-capture case"
-    assert None in updateds,                   "matrix lacks the null-updated_ts case"
+    assert None in updateds,                   "matrix lacks the null-body_changed_ts case"
     assert CAP in captures and CAP in updateds, "matrix lacks the equal-timestamps boundary"
     assert len( MATRIX ) == len( VALID_STATUSES ) * 2 * 4
 
@@ -378,23 +395,28 @@ def test_non_parked_rows_are_never_stale_on_the_sql_side( session ):
 
 def test_a_parked_row_amended_after_park_is_stale():
     """
-    AC4 at the predicate level: captured < updated_ts ⇒ STALE.
+    AC4 at the predicate level: captured < body_changed_ts ⇒ STALE.
 
-    ⚠️ SCOPE: this proves the PREDICATE's arithmetic. The load-bearing form of
-    AC4 — that a real amendment through the real write path bumps `updated_ts`
-    past the capture — is a live-Postgres claim. A predicate cannot attest that
-    the ORM's `onupdate` fires.
+    ⚠️ SCOPE: this proves the PREDICATE's arithmetic and NOTHING about the writer.
+    The load-bearing form of AC4 — that a real amendment through the real write
+    path stamps `body_changed_ts` past the capture — is a claim about
+    `TaskRepository.apply_amendment`, which this file never calls. Since 54924128
+    that stamp is EXPLICIT (`_db_clock_now`), no longer an ORM `onupdate` side
+    effect, so a writer that simply forgot to stamp would leave every assertion in
+    this file green. See `test_body_changed_ts_stamping.py`.
     """
     assert park_reason_is_stale( PARK_STATUS, CAP, CAP + timedelta( hours=6 ) )
 
 
 def test_a_freshly_parked_row_reads_not_stale():
     """
-    The equal-timestamps boundary: captured == updated_ts ⇒ NOT stale.
+    The equal-timestamps boundary: captured == body_changed_ts ⇒ NOT stale.
 
     ⚠️ THIS IS NOT AC3, AND MUST NOT BE READ AS AC3. AC3 requires asserting
     `park_reason_captured_at == updated_ts` as EQUALITY on a row the write path
-    actually parked. What is asserted here is the strictly weaker consequence
+    actually parked — that pair is still the park write's invariant, unchanged by
+    54924128, which moved only what the PREDICATE reads. What is asserted here is
+    the strictly weaker consequence
     (`stale == False`), which the design (§3.4) records as one assertion short:
     it also passes for a `now()`-written-after implementation. Naming it
     correctly is the whole point — AC3 is a live claim, not this one.
@@ -429,8 +451,8 @@ def test_a_parked_row_with_no_capture_reads_not_stale():
     assert not park_reason_is_stale( PARK_STATUS, None, CAP + timedelta( hours=6 ) )
 
 
-def test_a_parked_row_with_no_updated_ts_reads_not_stale():
-    """A null `updated_ts` cannot be greater than anything — not stale, never raises."""
+def test_a_parked_row_with_no_body_changed_ts_reads_not_stale():
+    """A null `body_changed_ts` cannot be greater than anything — not stale, never raises."""
     assert not park_reason_is_stale( PARK_STATUS, CAP, None )
 
 
@@ -535,8 +557,8 @@ def _mutant_clause_boundary_inclusive( model ):
     return and_(
         model.status == PARK_STATUS,
         model.park_reason_captured_at.isnot( None ),
-        model.updated_ts.isnot( None ),
-        model.updated_ts >= model.park_reason_captured_at,
+        model.body_changed_ts.isnot( None ),
+        model.body_changed_ts >= model.park_reason_captured_at,
     )
 
 
@@ -546,8 +568,8 @@ def _mutant_clause_boundary_reversed( model ):
     return and_(
         model.status == PARK_STATUS,
         model.park_reason_captured_at.isnot( None ),
-        model.updated_ts.isnot( None ),
-        model.updated_ts < model.park_reason_captured_at,
+        model.body_changed_ts.isnot( None ),
+        model.body_changed_ts < model.park_reason_captured_at,
     )
 
 
@@ -556,8 +578,8 @@ def _mutant_clause_no_status_guard( model ):
     from sqlalchemy import and_
     return and_(
         model.park_reason_captured_at.isnot( None ),
-        model.updated_ts.isnot( None ),
-        model.updated_ts > model.park_reason_captured_at,
+        model.body_changed_ts.isnot( None ),
+        model.body_changed_ts > model.park_reason_captured_at,
     )
 
 
@@ -568,7 +590,7 @@ def _mutant_clause_null_arm_inverted( model ):
         model.status == PARK_STATUS,
         or_(
             model.park_reason_captured_at.is_( None ),
-            model.updated_ts > model.park_reason_captured_at,
+            model.body_changed_ts > model.park_reason_captured_at,
         ),
     )
 
@@ -577,7 +599,7 @@ def _mutant_clause_drop_null_guards( model ):
     """
     MUTANT (SQL): both `isnot( None )` guards DROPPED.
 
-    ⚠️ THE ONE A FILTER CANNOT SEE. `updated_ts > captured_at` with a NULL operand
+    ⚠️ THE ONE A FILTER CANNOT SEE. `body_changed_ts > captured_at` with a NULL operand
     is NULL; a WHERE clause discards the row, which is indistinguishable from the
     guard excluding it. Identical row set, different VALUE — NULL where the twin
     says False. Killable only in projection.
@@ -585,7 +607,7 @@ def _mutant_clause_drop_null_guards( model ):
     from sqlalchemy import and_
     return and_(
         model.status == PARK_STATUS,
-        model.updated_ts > model.park_reason_captured_at,
+        model.body_changed_ts > model.park_reason_captured_at,
     )
 
 
@@ -641,8 +663,8 @@ def _mutant_clause_negate_status_guard( model ):
     return and_(
         model.status != PARK_STATUS,
         model.park_reason_captured_at.isnot( None ),
-        model.updated_ts.isnot( None ),
-        model.updated_ts > model.park_reason_captured_at,
+        model.body_changed_ts.isnot( None ),
+        model.body_changed_ts > model.park_reason_captured_at,
     )
 
 
@@ -652,7 +674,7 @@ def _mutant_clause_drop_ordering( model ):
     return and_(
         model.status == PARK_STATUS,
         model.park_reason_captured_at.isnot( None ),
-        model.updated_ts.isnot( None ),
+        model.body_changed_ts.isnot( None ),
     )
 
 
@@ -662,14 +684,14 @@ def _mutant_clause_negate_ordering( model ):
     return and_(
         model.status == PARK_STATUS,
         model.park_reason_captured_at.isnot( None ),
-        model.updated_ts.isnot( None ),
-        model.updated_ts <= model.park_reason_captured_at,
+        model.body_changed_ts.isnot( None ),
+        model.body_changed_ts <= model.park_reason_captured_at,
     )
 
 
 def _mutant_clause_negate_updated_notnull( model ):
     """
-    MUTANT: the UPDATED null guard NEGATED — `updated_ts IS NULL`, which then
+    MUTANT: the UPDATED null guard NEGATED — `body_changed_ts IS NULL`, which then
     cannot satisfy the comparison. Selects nothing.
 
     Caught by `test_the_mutant_list_is_STRUCTURALLY_complete` on its FIRST run:
@@ -680,8 +702,8 @@ def _mutant_clause_negate_updated_notnull( model ):
     return and_(
         model.status == PARK_STATUS,
         model.park_reason_captured_at.isnot( None ),
-        model.updated_ts.is_( None ),
-        model.updated_ts > model.park_reason_captured_at,
+        model.body_changed_ts.is_( None ),
+        model.body_changed_ts > model.park_reason_captured_at,
     )
 
 
@@ -691,8 +713,8 @@ def _mutant_clause_boundary_not_equal( model ):
     return and_(
         model.status == PARK_STATUS,
         model.park_reason_captured_at.isnot( None ),
-        model.updated_ts.isnot( None ),
-        model.updated_ts != model.park_reason_captured_at,
+        model.body_changed_ts.isnot( None ),
+        model.body_changed_ts != model.park_reason_captured_at,
     )
 
 
@@ -712,8 +734,8 @@ def _mutant_clause_drop_capture_notnull( model ):
     from sqlalchemy import and_
     return and_(
         model.status == PARK_STATUS,
-        model.updated_ts.isnot( None ),
-        model.updated_ts > model.park_reason_captured_at,
+        model.body_changed_ts.isnot( None ),
+        model.body_changed_ts > model.park_reason_captured_at,
     )
 
 
@@ -723,7 +745,7 @@ def _mutant_clause_drop_updated_notnull( model ):
     return and_(
         model.status == PARK_STATUS,
         model.park_reason_captured_at.isnot( None ),
-        model.updated_ts > model.park_reason_captured_at,
+        model.body_changed_ts > model.park_reason_captured_at,
     )
 
 
@@ -939,7 +961,7 @@ def test_an_unparseable_capture_reads_not_stale():
     assert park_reason_is_stale( PARK_STATUS, "not-a-timestamp", "2026-07-19T18:00:00" ) is False
 
 
-def test_an_unparseable_updated_ts_reads_not_stale():
+def test_an_unparseable_body_changed_ts_reads_not_stale():
     """Same rule, the other column — asserted separately so one arm cannot cover for the other."""
     assert park_reason_is_stale( PARK_STATUS, "2026-07-19T12:00:00", "not-a-timestamp" ) is False
 

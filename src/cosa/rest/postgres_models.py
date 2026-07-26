@@ -1358,9 +1358,31 @@ class TaskItem( Base ):
        # (that makes captured_at < updated_ts the instant park commits, i.e. every
        # row BORN STALE — the trap the design's own §3.4 prescribed in draft).
        # Invariant immediately after park: park_reason_captured_at == updated_ts,
-       # EXACTLY. Any later amendment bumps updated_ts strictly greater, and
-       # task_store_owed.park_reason_is_stale reads that gap as the quote having
+       # EXACTLY. A later BODY CHANGE stamps body_changed_ts strictly greater, and
+       # task_store_owed.park_reason_is_stale reads THAT gap as the quote having
        # expired. Design: src/rnd/v0.1.9/2026.07.19-park-reason-staleness-detection.md
+       #
+       # ⚠️ THE PREDICATE READS `body_changed_ts` (below), NOT `updated_ts`. That
+       # was bug 54924128 (2026-07-26): `updated_ts` moves on EVERY write, so a
+       # priority-only edit defamed a correct quote — 0 of 2 live parked rows
+       # correctly flagged at the moment it was found.
+    body_changed_ts: Mapped[Optional[datetime]] = mapped_column(
+        DateTime( timezone=True ),
+        nullable=True
+    )  # WHEN the row's `body` last actually CHANGED — the content-change marker
+       # `park_reason_is_stale` compares the frozen quote against. Stamped from the
+       # DATABASE clock (the SAME clock park_reason_captured_at is written from; a
+       # cross-clock comparison would surface skew as a false FRESH, i.e. in the
+       # silent direction) by exactly two paths:
+       #   apply_amendment -> ALWAYS (an amend only ever appends to body)
+       #   apply_patch     -> ONLY when `body` is in the payload AND its value differs
+       # That second condition IS the fix: title/priority/gate_class/urgency edits
+       # leave this alone, because none of them can make a park quote untrue.
+       # NULLABLE FOREVER, and deliberately NO CHECK: a row whose body has never
+       # changed since this shipped legitimately has no value, and a NOT NULL would
+       # assert a fact about history nobody recorded. NULL reads as FRESH
+       # (ambiguity -> FRESH), which is also why migration 38e025169a73 does not
+       # backfill — every value it could have written would be a fabrication.
     gate_class: Mapped[str] = mapped_column(
         String( 32 ),
         nullable=False,

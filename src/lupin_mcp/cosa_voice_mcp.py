@@ -4023,20 +4023,30 @@ def task_query(
     STALE PARK REASONS (2026-07-19): every row carries `park_reason_stale`
     (bool) — in the TERSE projection too, not only the full row. A
     `park_reason` is a FROZEN QUOTE of the row's decisive sentence, captured at
-    park time. Amend the row afterward and that quote stays syntactically valid
-    while it stops being true, and nothing goes red. `park_reason_stale=True`
-    IS that red: the row was written to AFTER its quote was frozen, so the
+    park time. Change the row's BODY afterward and that quote stays syntactically
+    valid while it stops being true, and nothing goes red. `park_reason_stale=True`
+    IS that red: the row's body changed AFTER its quote was frozen, so the
     quote is no longer known to describe the row — read the row itself, not its
     park_reason, and re-park to re-freeze the quote.
+
+    ⚠️ FIXED 2026-07-26 (bug 54924128) — IF YOU REMEMBER THIS FLAG BEING NOISE,
+    THAT WAS THE BUG. It used to fire on ANY write that bumped `updated_ts`, so a
+    **priority-only edit during a routine board recut defamed a correct quote**.
+    When it was found, every parked row in the store carried the flag and every
+    one was wrong. It now reads `body_changed_ts`, which moves only when the body
+    actually changes. ⇒ Re-check any `park_reason_stale: true` you saw before that
+    date rather than trusting it.
 
     ADVISORY ONLY. Staleness changes NO owed-ness, unparks nothing, blocks
     nothing. It marks a quote untrustworthy and stops there — deciding what to
     do about it is a human's call, not this flag's.
 
-    It under-reports by design: a row parked before this shipped has no capture
-    time and reports False (we cannot know what its quote described), as does
-    any row never parked. So `True` is strong evidence and `False` is merely the
-    absence of evidence.
+    It under-reports by design, and MORE SO right after the fix: a row parked
+    before capture-time shipped has no capture time and reports False, as does any
+    row never parked — and since the fix ships **no backfill**, every row's
+    `body_changed_ts` starts NULL, which also reports False. So the flag is quiet
+    until each row's body next changes. `True` is strong evidence; `False` is
+    merely the absence of evidence.
 
     Examples:
         # My owed work (terse list) — the everyday scoped query:

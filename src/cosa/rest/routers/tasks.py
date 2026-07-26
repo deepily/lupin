@@ -328,7 +328,10 @@ def _serialize_item( item, blocker_statuses=None ) -> dict:
         "next_chase_ts"       : item.next_chase_ts.isoformat() if item.next_chase_ts is not None else None,
         "park_reason"         : item.park_reason,
         "park_reason_captured_at" : item.park_reason_captured_at.isoformat() if item.park_reason_captured_at is not None else None,
-        "park_reason_stale"   : park_reason_is_stale( item.status, item.park_reason_captured_at, item.updated_ts ),
+        # THIRD ARG IS body_changed_ts, NOT updated_ts (bug 54924128). Both call
+        # sites — here and the terse projection — must pass the same column, or the
+        # flag means different things depending on how the caller queried.
+        "park_reason_stale"   : park_reason_is_stale( item.status, item.park_reason_captured_at, item.body_changed_ts ),
         "blocker_terminal"    : blocker_is_terminal( item.status, item.blocked_by, blocker_statuses or { } ),
         "gate_class"          : item.gate_class,
         "priority"            : item.priority,
@@ -398,7 +401,8 @@ def _serialize_item_terse( item, blocker_statuses=None ) -> dict:
         "next_chase_ts"     : item.next_chase_ts.isoformat() if item.next_chase_ts is not None else None,
         "priority"          : item.priority,
         "project"           : item.project,
-        "park_reason_stale" : park_reason_is_stale( item.status, item.park_reason_captured_at, item.updated_ts ),
+        # body_changed_ts, matching _serialize_item — see the note there (54924128).
+        "park_reason_stale" : park_reason_is_stale( item.status, item.park_reason_captured_at, item.body_changed_ts ),
         "blocker_terminal"  : blocker_is_terminal( item.status, item.blocked_by, blocker_statuses or { } ),
     }
 

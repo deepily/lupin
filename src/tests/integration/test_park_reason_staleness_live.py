@@ -233,7 +233,15 @@ def _amend( api_key, task_id, **fields ):
     touch status or park_reason — so the row STAYS parked, its frozen quote is
     left syntactically intact, and the thing the quote described has changed
     underneath it. That is precisely "the quote stops being true and NOTHING GOES
-    RED" (§1). `updated_ts` bumps; `park_reason_captured_at` does not.
+    RED" (§1). `body_changed_ts` bumps; `park_reason_captured_at` does not.
+
+    ⚠️ SINCE BUG 54924128 (2026-07-26) THE FIELD YOU PASS DECIDES THE OUTCOME.
+    Staleness reads `body_changed_ts`, which only a real BODY change moves. So
+    `_amend( ..., body=... )` makes a parked row stale and `_amend( ..., title=... )`
+    deliberately does NOT. Before the fix ANY field did — and AC4 below passed
+    `title=`, so **this suite went green on the defect.** That is why the AC4 test
+    now carries a sibling asserting the title-only case stays FRESH: one arm alone
+    cannot distinguish the fix from the bug.
 
     ⚠️ `actor` IS REQUIRED and was MISSING here on run ts-6fb8e966 — 4 of 5 tests
     died at this call with a 422, never reaching a line of staleness code.
@@ -370,8 +378,15 @@ def test_a_row_amended_after_park_is_reported_stale( test_api_key, persona ):
     fires on the wire.
 
     The unit suite proves the predicate's arithmetic on constructed values. This
-    proves the thing that actually matters — that a REAL amendment bumps
-    `updated_ts` past the frozen capture, so the divergence becomes VISIBLE.
+    proves the thing that actually matters — that a REAL body change stamps
+    `body_changed_ts` past the frozen capture, so the divergence becomes VISIBLE.
+
+    ⚠️ THIS TEST PASSED `title=` UNTIL 2026-07-26 AND WAS GREEN ON THE BUG.
+    Under the old `updated_ts` comparison a title edit flipped the flag, so the
+    live gate for "a real amendment is detected" was in fact demonstrating the
+    false-positive class it should have caught. It now passes `body=` — the only
+    edit that can actually make a quote untrue — and its sibling below pins the
+    title case to FRESH. Neither arm means anything without the other.
     """
     api_key = test_api_key[ "api_key" ]
     row     = _create_row( api_key, persona )
@@ -380,7 +395,7 @@ def test_a_row_amended_after_park_is_reported_stale( test_api_key, persona ):
     fresh = _get_row( api_key, row[ "id" ] )
     assert fresh[ "park_reason_stale" ] is False, "a freshly parked row must not be stale"
 
-    _amend( api_key, row[ "id" ], title="scope changed — arbiter migration is no longer the blocker" )
+    _amend( api_key, row[ "id" ], body="scope changed — arbiter migration is no longer the blocker" )
     amended = _get_row( api_key, row[ "id" ] )
 
     assert amended[ "status" ]            == "parked", "PATCH must not unpark the row"
@@ -389,8 +404,45 @@ def test_a_row_amended_after_park_is_reported_stale( test_api_key, persona ):
         "while still present is the entire defect this build detects"
     )
     assert amended[ "park_reason_stale" ] is True, (
-        "AC4 VIOLATED — the row was amended after park and the quote is no longer "
+        "AC4 VIOLATED — the row's body changed after park and the quote is no longer "
         "trustworthy, but nothing went red"
+    )
+
+
+def test_a_row_whose_PRIORITY_changed_after_park_is_NOT_stale( test_api_key, persona ):
+    """
+    BUG 54924128, LIVE — the arm this suite did not have, and the reason it shipped.
+
+    A priority-only edit is the single most common maintenance write on the board
+    (a recut re-prioritizes every row). It cannot make a park quote untrue: the
+    quote describes the row's CONTENT, and priority is not content.
+
+    Before the fix this returned True, and it returned True on **every parked row
+    in production** — measured 2026-07-26, 0 of 2 correct. The flag's own contract
+    calls a false STALE unrecoverable: *"it merely defames a correct quote and
+    teaches readers to ignore the flag, which disarms the feature permanently."*
+
+    ⚠️ Runs on its OWN row and asserts the quote survived verbatim, so a green here
+    cannot be bought by the PATCH silently unparking or rewriting anything.
+    """
+    api_key = test_api_key[ "api_key" ]
+    row     = _create_row( api_key, persona )
+
+    _park( api_key, row[ "id" ], "not right now — revisit when something forces it" )
+    assert _get_row( api_key, row[ "id" ] )[ "park_reason_stale" ] is False
+
+    _amend( api_key, row[ "id" ], priority="P3" )
+    after = _get_row( api_key, row[ "id" ] )
+
+    assert after[ "status" ]      == "parked",  "PATCH must not unpark the row"
+    assert after[ "priority" ]    == "P3",      "sanity: the edit must actually have applied"
+    assert after[ "park_reason" ] == "not right now — revisit when something forces it", (
+        "the quote must be untouched — this test is about a quote that is still TRUE"
+    )
+    assert after[ "park_reason_stale" ] is False, (
+        "54924128 IS BACK — a priority-only edit is defaming a correct quote. The "
+        "predicate is reading a column that every write moves, not one that tracks "
+        "content."
     )
 
 

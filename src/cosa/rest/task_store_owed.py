@@ -258,9 +258,9 @@ def is_owed( status, next_chase_ts, now ) -> bool:
     return not park_is_active( status, next_chase_ts, now )
 
 
-def park_reason_is_stale( status, park_reason_captured_at, updated_ts ) -> bool:
+def park_reason_is_stale( status, park_reason_captured_at, body_changed_ts ) -> bool:
     """
-    True iff the row's `park_reason` quote is provably OLDER than the row itself.
+    True iff the row's `park_reason` quote is provably OLDER than the row's BODY.
 
     `park_reason` is a FROZEN QUOTE captured at park time. Amend the row afterward
     and the quote stays syntactically valid while it stops being true, and NOTHING
@@ -268,18 +268,43 @@ def park_reason_is_stale( status, park_reason_captured_at, updated_ts ) -> bool:
     makes the divergence VISIBLE (design
     src/rnd/v0.1.9/2026.07.19-park-reason-staleness-detection.md §3.2).
 
+    ⚠️ THE THIRD ARGUMENT IS `body_changed_ts`, NOT `updated_ts` — bug 54924128
+    -----------------------------------------------------------------------------
+    v1 compared against `updated_ts`, which moves on EVERY write. `task_edit`'s
+    five free-edit fields are title / body / priority / gate_class / urgency, and
+    **only `body` can make a park quote untrue.** The other four bumped
+    `updated_ts` and flipped the flag anyway; so did any transition, patch or
+    amend.
+
+    Two priority-only edits during a routine board recut on 2026-07-26 produced
+    two false STALEs in three minutes — at that moment **every parked row in
+    production carried the flag and every one was wrong, 0 of 2.** The single most
+    common maintenance write on the board was defaming correct quotes.
+
+    ⇒ `updated_ts` was a PROXY for "the row's content changed," and it is not one.
+    The spec always named the right event: this function's own local variable was
+    called `amended_ts` while bound to `updated_ts`. Only the binding was wrong.
+
+    ⇒ The shape is unchanged, and that was the point of choosing this fix over the
+    quote-in-body alternative: still no clock, still two values already on the row,
+    still ambiguity → FRESH. Both twins stay a plain column compare, which is what
+    makes their parity cheap to prove.
+
     READS NO CLOCK — deliberately, and unlike `park_is_active`. Staleness is a
     comparison of two values ALREADY ON THE ROW; `now` has no part in it. A `now`
     parameter here would be an invitation to write `now() > captured_at`, which is
     true of every parked row the instant after it is parked.
 
     THE ORDERING THIS DEPENDS ON (§3.4 — read it before changing the writer):
-    `park_reason_captured_at` is set at park time to the POST-write `updated_ts`,
-    the value the park write itself stamps. So immediately after park
-    `captured_at == updated_ts` EXACTLY, and this returns False. Capture the
-    PRE-write value instead and `captured_at < updated_ts` the instant park
-    commits — every row born STALE, the trap this plan's own §3.4 prescribed in
-    draft. Capture `now()` and it races the `updated_ts` stamp.
+    `park_reason_captured_at` is set at park time to the DB-clock instant the park
+    write stamps into `updated_ts`, in ONE statement. `body_changed_ts` is stamped
+    from the SAME DB clock by the two paths that write `body`. So a body change
+    AFTER the park lands strictly greater and this returns True; a park AFTER a
+    body change lands strictly greater on the capture side and this returns False.
+    ⚠️ Both sides MUST come from the database clock — an application-clock stamp on
+    either would make this a cross-clock comparison, and skew would surface as a
+    false FRESH: a parked row silently failing to report an expired quote, which is
+    this feature's defect arriving in the direction nobody notices.
 
     WHICH WAY THIS INSTRUMENT LIES: every ambiguous arm returns False
     (NOT-stale) — the OPPOSITE direction from `park_is_active`'s
@@ -290,26 +315,34 @@ def park_reason_is_stale( status, park_reason_captured_at, updated_ts ) -> bool:
     status quo this change improves on. Silence is recoverable here; a crying wolf
     is not.
 
+    ⚠️ That bias is a DESIGN-TIME answer about THIS hazard, not a universal — do
+    not lift it into another gate. It holds here because staleness blocks nothing,
+    so a miss costs only the status quo. A gate whose ambiguity implies an UNSAFE
+    action must refuse instead, and be right to.
+
     Requires:
         - status is the row's status string (any value accepted)
         - park_reason_captured_at is an ISO-8601 string, a datetime, or None
-        - updated_ts is an ISO-8601 string, a datetime, or None
+        - body_changed_ts is an ISO-8601 string, a datetime, or None
         - naive datetimes on either side are interpreted as UTC
 
     Ensures:
-        - status != PARK_STATUS                     -> False (checked FIRST; a
+        - status != PARK_STATUS                       -> False (checked FIRST; a
           non-parked row is never stale whatever its timestamps say — AC5)
-        - park_reason_captured_at is None           -> False (a row parked before
-          this shipped has no capture time; we cannot know what its quote
-          described, so we do not accuse it — §7, no backfill)
-        - updated_ts is None                        -> False (no evidence of any
-          write after capture)
-        - either side unparseable                   -> False (same rationale)
-        - updated_ts >  park_reason_captured_at     -> True  (STALE — the row was
-          amended after its quote was frozen, AC4)
-        - updated_ts == park_reason_captured_at     -> False (the freshly-parked
+        - park_reason_captured_at is None             -> False (a row parked before
+          capture-time shipped has none; we cannot know what its quote described,
+          so we do not accuse it)
+        - body_changed_ts is None                     -> False (the body has not
+          changed since this column shipped — every row is NULL at migration
+          38e025169a73, which is why no backfill was written: every value it could
+          have invented would be a fabrication)
+        - either side unparseable                     -> False (same rationale)
+        - body_changed_ts >  park_reason_captured_at  -> True  (STALE — the body
+          changed after the quote was frozen, AC4)
+        - body_changed_ts == park_reason_captured_at  -> False (the freshly-parked
           state, AC3 — the boundary, and the one the ordering trap turns on)
-        - updated_ts <  park_reason_captured_at     -> False
+        - body_changed_ts <  park_reason_captured_at  -> False (the body changed
+          BEFORE the park; the quote was taken from the current text)
         - never raises
     """
     if status != PARK_STATUS:
@@ -325,11 +358,11 @@ def park_reason_is_stale( status, park_reason_captured_at, updated_ts ) -> bool:
     else:
         return False
 
-    if isinstance( updated_ts, datetime ):
-        amended_ts = updated_ts
-    elif isinstance( updated_ts, str ):
+    if isinstance( body_changed_ts, datetime ):
+        amended_ts = body_changed_ts
+    elif isinstance( body_changed_ts, str ):
         try:
-            amended_ts = datetime.fromisoformat( updated_ts.strip().replace( "Z", "+00:00" ) )
+            amended_ts = datetime.fromisoformat( body_changed_ts.strip().replace( "Z", "+00:00" ) )
         except ValueError:
             return False
     else:
@@ -548,16 +581,21 @@ def park_reason_is_stale_clause( model ):
     NO `now` PARAMETER, matching twin (a) — staleness compares two columns of the
     same row, and a clock has no part in it.
 
+    ⚠️ READS `body_changed_ts`, NOT `updated_ts` (bug 54924128, 2026-07-26). This
+    twin MUST move with twin (a) or the two halves silently disagree, and a reader
+    gets a different answer depending on whether the flag was computed in Python or
+    in SQL. See twin (a)'s docstring for why `updated_ts` was the wrong column.
+
     Requires:
         - model is the mapped TaskItem class (or an alias) exposing `status`,
-          `park_reason_captured_at` and `updated_ts`
+          `park_reason_captured_at` and `body_changed_ts`
 
     Ensures:
         - returns a SQLAlchemy boolean expression, never a Python bool
         - TRUE iff status == PARK_STATUS
                   AND park_reason_captured_at IS NOT NULL
-                  AND updated_ts             IS NOT NULL
-                  AND updated_ts > park_reason_captured_at
+                  AND body_changed_ts         IS NOT NULL
+                  AND body_changed_ts > park_reason_captured_at
         - a NULL on EITHER timestamp yields FALSE, not NULL — three-valued logic
           would drop the row from BOTH sides of a filter, and it must land on the
           NOT-STALE side, matching twin (a)'s null arms
@@ -568,8 +606,8 @@ def park_reason_is_stale_clause( model ):
     return and_(
         model.status == PARK_STATUS,
         model.park_reason_captured_at.isnot( None ),
-        model.updated_ts.isnot( None ),
-        model.updated_ts > model.park_reason_captured_at,
+        model.body_changed_ts.isnot( None ),
+        model.body_changed_ts > model.park_reason_captured_at,
     )
 
 
