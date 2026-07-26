@@ -79,6 +79,102 @@ pfv_contract_field() {
     pfv_row_field "$1" "$2" 6
 }
 
+# ── pfv_contract_push_env_names ──────────────────────────────────────────────
+# The set of env vars `lupin-vm.sh push-env` is contractually responsible for
+# writing to the VM's ~/.bashrc, DERIVED from env-contract.tsv (R3b).
+#
+# WHY THIS EXISTS: env-contract.tsv's own header says push-env "SHOULD generate
+# from this file rather than carrying its own hardcoded echo list (follow-on;
+# the list is duplicated today)". Until this function the contract had ONE
+# consumer (preflight check A1) where it needed TWO — so a var could be added
+# to the contract, asserted by preflight, and never written by push-env. The
+# operator's remedy for that preflight failure is "run push-env", which would
+# not have fixed it. An alarm whose prescribed remedy cannot clear it is worse
+# than no alarm.
+#
+# The selection predicate is the contract's own columns, not a second list:
+#   surface  HOST or BOTH  — CONTAINER-only vars are compose's job, not bashrc's
+#   writer   mentions push-env
+# LUPIN_API_KEY is excluded by the DATA, not by a special case here: its writer
+# column reads "minted ON the target" precisely because the key is validated
+# per-database and a dev-box value can never authenticate against the VM.
+#
+# Requires:
+#   - $1 is a readable env-contract.tsv path
+#
+# Ensures:
+#   - prints each qualifying var NAME on its own line, in contract order
+#   - returns 1 and prints nothing when $1 is unreadable — an unreadable
+#     contract is a BROKEN INPUT, and must not read as "no vars to write",
+#     which would let push-env silently write nothing and report success
+#   - returns 0 with NO output when the contract is readable but has no
+#     qualifying row; that is a legitimate (if unlikely) empty answer and is
+#     deliberately distinguished from the unreadable case above
+#   - malformed rows (fewer than 6 fields) are SKIPPED, not guessed at; the
+#     contract's own well-formedness is check A1's assertion, not this one's
+pfv_contract_push_env_names() {
+    local contract="$1" row name surface writer
+    [ -r "$contract" ] || return 1
+    while IFS= read -r row; do
+        [ -n "$row" ] || continue
+        name="$( pfv_contract_field "$row" 1 )" || continue
+        surface="$( pfv_contract_field "$row" 2 )"
+        writer="$(  pfv_contract_field "$row" 3 )"
+        case "$surface" in HOST|BOTH) ;; *) continue ;; esac
+        case "$writer"  in *push-env*) ;; *) continue ;; esac
+        printf '%s\n' "$name"
+    done < <( pfv_parse_manifest "$contract" )
+    return 0
+}
+
+# ── pfv_contract_remedy ──────────────────────────────────────────────────────
+# The remedy line for a failing/unset contract var, DERIVED from the var's own
+# `writer` column rather than assumed.
+#
+# WHY THIS EXISTS — found live 2026-07-26 by running preflight after wiring R3b.
+# A1 hardcoded "lupin-vm.sh push-env" as the remedy for EVERY host var. Four of
+# the contract's vars are not push-env's to write, and the contract says so in
+# the column right next to them:
+#     LUPIN_API_KEY                writer = minted ON the target
+#     CLAUDE_CODE_USE_VERTEX       writer = operator ~/.bashrc
+#     ANTHROPIC_VERTEX_PROJECT_ID  writer = operator ~/.bashrc
+#     CLOUD_ML_REGION              writer = operator ~/.bashrc
+# So the instrument told the operator to run a command that CANNOT clear the
+# alarm — for LUPIN_API_KEY it is worse than useless, because push-env
+# deliberately refuses to ship a per-database key and running it would look like
+# compliance while changing nothing.
+#
+# This is the same defect R3b closes on the WRITE side, surviving on the READ
+# side: one fact (who writes this var) asserted in two places, with nothing
+# comparing them. Now there is one place, and it is the contract.
+#
+# Requires:
+#   - $1 = the row's writer field, $2 = the var name
+#
+# Ensures:
+#   - prints a remedy string with NO trailing newline
+#   - an UNRECOGNIZED writer yields a remedy that names the writer verbatim and
+#     points at the contract, rather than guessing a command. A wrong remedy is
+#     more expensive than an honest "the contract says X writes this" — the
+#     operator can act on the second and is misled by the first
+pfv_contract_remedy() {
+    local writer="$1" name="$2"
+    case "$writer" in
+        *push-env*)
+            printf '%s' "lupin-vm.sh push-env   # writes $name to the VM ~/.bashrc" ;;
+        *minted*)
+            printf '%s' "MINT it on the target (push-env deliberately will NOT ship this): create_service_account_postgres.py with LUPIN_ENV=testing, then export $name by hand. A dev-box value can never validate against the VM's own database." ;;
+        *operator*)
+            printf '%s' "set $name by hand in the operator's ~/.bashrc on that machine (contract writer: $writer) — push-env does NOT write it" ;;
+        *cloud-gpu.env*)
+            printf '%s' "add $name to cloud-gpu.env on the VM (git-ignored, VM-local; ship the file with: lupin-vm.sh push-unversioned)" ;;
+        *compose*)
+            printf '%s' "set $name in the compose environment: block (contract writer: $writer)" ;;
+        *)
+            printf '%s' "no known remedy path — env-contract.tsv names the writer as '$writer' for $name; fix it there or at that writer" ;;
+    esac
+}
+
 # ── pfv_shape_matches ────────────────────────────────────────────────────────
 # Validate an env var's VALUE against the SHAPE its contract row declares.
 #

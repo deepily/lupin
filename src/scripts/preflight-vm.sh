@@ -152,6 +152,7 @@ if [ -r "$CONTRACT" ]; then
         [ -n "$row" ] || continue
         name="$(  pfv_contract_field "$row" 1 )" || { say_fail "malformed env-contract row: $row"; continue; }
         surface="$( pfv_contract_field "$row" 2 )"
+        writer="$( pfv_contract_field "$row" 3 )"
         shape="$( pfv_contract_field "$row" 4 )"
         req="$(   pfv_contract_field "$row" 5 )"
         # CONTAINER-surface vars are asserted in layer C, not here.
@@ -162,13 +163,17 @@ if [ -r "$CONTRACT" ]; then
             [ "$src" = "$ENV_SURFACE" ] && src="~/.bashrc export line (the non-interactive guard hid it)"
         fi
         value="$( eval "printf '%s' \"\${$name:-}\"" )"
+        # The remedy comes from the var's own writer column, NOT from a constant.
+        # Four contract vars are not push-env's to write, and telling the operator
+        # to run push-env for those is a remedy that cannot clear its own alarm.
+        remedy="$( pfv_contract_remedy "$writer" "$name" )"
         pfv_shape_matches "$value" "$shape" "$VM_PREFIX"; rc=$?
         case $rc in
             0) report pass    "$tier" "$name set and matches $shape   [from: $src]" ;;
             1) report fail    "$tier" "$name = '$value' does NOT match shape $shape" \
-                              "fix the value in ~/.bashrc, or re-run: lupin-vm.sh push-env" ;;
+                              "$remedy" ;;
             2) report unknown "$tier" "$name is UNSET (surface: $surface)" \
-                              "lupin-vm.sh push-env   # writes it to the VM ~/.bashrc" ;;
+                              "$remedy" ;;
         esac
     done < <( pfv_parse_manifest "$CONTRACT" )
 else

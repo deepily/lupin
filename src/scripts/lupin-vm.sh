@@ -666,9 +666,79 @@ echo 'NEXT (manual, interactive): open a fresh shell, run  claude  once, complet
         # validated per-DATABASE (hash in the server's api_keys table). The VM runs its own test DB,
         # so the dev-box key can never validate there — a VM key must be MINTED against the VM DB
         # (create_service_account_postgres.py with LUPIN_ENV=testing) and set by hand. Shipping the
-        # dev key here would only clobber that manual VM key via bashrc ordering. See task backlog.
+        # dev key here would only clobber that manual VM key via bashrc ordering. That exclusion is
+        # expressed in the CONTRACT (writer = "minted ON the target"), not as a special case here.
+
+        # ── the export set is DERIVED from src/conf/env-contract.tsv (R3b) ──────────
+        # WHICH vars push-env writes is the contract's fact, asserted once. WHAT VALUE
+        # each takes on the VM is machine-specific and stays here — the contract is
+        # deliberately values-free (a path is legitimately /mnt/DATA01/... on dev and
+        # /mnt/lupin-data/... on the VM).
+        #
+        # The two sets are compared IN BOTH DIRECTIONS below, and either mismatch is
+        # fatal. That comparison — not the generation — is the point of this change:
+        # today the derived set and the map agree exactly, so a check of the form
+        # "generated == what we already emit" would pass while proving nothing. What
+        # earns its keep is the FUTURE divergence:
+        #   contract row with no value   -> preflight would assert the var, tell the
+        #                                   operator to "run push-env", and push-env
+        #                                   would not write it. A remedy that cannot
+        #                                   clear its own alarm.
+        #   value with no contract row   -> push-env writes a var nothing declares, so
+        #                                   preflight never checks it and its absence
+        #                                   on a fresh VM is discovered by failing.
+        DEV_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../.." && pwd )"
+        CONTRACT_FILE="$DEV_ROOT/src/conf/env-contract.tsv"
+        PFV_LIB="$DEV_ROOT/src/scripts/lib/preflight-vm-lib.sh"
+        [ -r "$PFV_LIB" ]       || die "preflight lib not readable: $PFV_LIB"
+        [ -r "$CONTRACT_FILE" ] || die "env contract not readable: $CONTRACT_FILE"
+        # shellcheck source=lib/preflight-vm-lib.sh
+        source "$PFV_LIB"
+
+        # VM-side VALUES, keyed by contract var name. Single-quoted entries stay
+        # LITERAL all the way to the VM (\$HOME must expand THERE, not here).
+        declare -A PUSH_ENV_VALUES=(
+            [LUPIN_ROOT]="$VM_ROOT"
+            [PLANNING_IS_PROMPTING_ROOT]="$VM_PIP_ROOT"
+            [DEEPILY_PROJECTS_DIR]="$VM_DEEPILY_PROJECTS_DIR"
+            [LUPIN_CC_VENV]='$HOME/.venv-lupin-mcp'
+            [LUPIN_DEV_EMAIL]='ricardo.felipe.ruiz@gmail.com'
+        )
+
+        CONTRACT_NAMES="$( pfv_contract_push_env_names "$CONTRACT_FILE" )" \
+            || die "could not read the push-env var set from $CONTRACT_FILE"
+        [ -n "$CONTRACT_NAMES" ] \
+            || die "env contract declares NO push-env vars — refusing to write an empty environment to the VM (check the surface/writer columns in $CONTRACT_FILE)"
+
+        # Direction 1 — every contract-declared var must have a value here.
+        EXPORT_BLOCK=""
+        while IFS= read -r ev_name; do
+            [ -n "$ev_name" ] || continue
+            [ -n "${PUSH_ENV_VALUES[$ev_name]+set}" ] || die \
+                "env-contract.tsv declares $ev_name as push-env-written, but lupin-vm.sh has no VM value for it. Add it to PUSH_ENV_VALUES in the push-env verb, or change that row's writer column in $CONTRACT_FILE."
+            ev_line="export $ev_name=${PUSH_ENV_VALUES[$ev_name]}"
+            # whole-line grep guard: idempotent, and a CHANGED value appends a new
+            # line that wins by bashrc ordering (later export overrides earlier).
+            EXPORT_BLOCK="${EXPORT_BLOCK}grep -qxF '$ev_line' ~/.bashrc || echo '$ev_line' >> ~/.bashrc
+"
+        done <<< "$CONTRACT_NAMES"
+
+        # Direction 2 — no value may exist without a contract row declaring it.
+        for ev_name in "${!PUSH_ENV_VALUES[@]}"; do
+            printf '%s\n' "$CONTRACT_NAMES" | grep -qxF "$ev_name" || die \
+                "lupin-vm.sh would export $ev_name, but no row in $CONTRACT_FILE declares it as push-env-written (surface HOST/BOTH + writer mentioning push-env). Add the contract row, or drop it from PUSH_ENV_VALUES."
+        done
+
+        log "push-env will write $( printf '%s\n' "$CONTRACT_NAMES" | grep -c . ) contract-declared vars: $( printf '%s' "$CONTRACT_NAMES" | tr '\n' ' ' )"
+
         if [ "$DRY_RUN" -eq 1 ]; then
             log "(dry-run) scp $ALIASES + $UC_GEN -> $VM_NAME:~/ ; then on VM: python3 ~/.bash_aliases_to_uc.py; ensure ~/.bashrc sources .bash_aliases + .bash_aliases_uc"
+            # Print the generated block. A dry-run that names the vars but hides the
+            # VALUES cannot catch the failure this verb actually produces on a VM —
+            # a right var carrying a dev-box path. \$HOME must appear UNEXPANDED here;
+            # if it reads as /home/rruiz, it will be baked in on the VM too.
+            log "(dry-run) would append these lines to the VM ~/.bashrc (if absent):"
+            printf '%s' "$EXPORT_BLOCK" | sed 's/^/    /'
         else
             log "scp alias files -> $VM_NAME:~/"
             gcloud compute scp "$ALIASES" "$UC_GEN" "$VM_NAME:~/" \
@@ -679,14 +749,8 @@ python3 ~/.bash_aliases_to_uc.py
 echo '== ensure ~/.bashrc sources both alias files (whole-line, idempotent) =='
 grep -qxF 'source ~/.bash_aliases'    ~/.bashrc || echo 'source ~/.bash_aliases'    >> ~/.bashrc
 grep -qxF 'source ~/.bash_aliases_uc' ~/.bashrc || echo 'source ~/.bash_aliases_uc' >> ~/.bashrc
-echo '== export VM-correct project roots in ~/.bashrc (whole-line, idempotent) =='
-grep -qxF 'export LUPIN_ROOT=$VM_ROOT'                    ~/.bashrc || echo 'export LUPIN_ROOT=$VM_ROOT'                    >> ~/.bashrc
-grep -qxF 'export PLANNING_IS_PROMPTING_ROOT=$VM_PIP_ROOT' ~/.bashrc || echo 'export PLANNING_IS_PROMPTING_ROOT=$VM_PIP_ROOT' >> ~/.bashrc
-grep -qxF 'export DEEPILY_PROJECTS_DIR=$VM_DEEPILY_PROJECTS_DIR' ~/.bashrc || echo 'export DEEPILY_PROJECTS_DIR=$VM_DEEPILY_PROJECTS_DIR' >> ~/.bashrc
-echo '== export LUPIN_CC_VENV (operator-owned CC venv; \$LUPIN_ROOT/.venv is the arbiters symlink on the VM) =='
-grep -qxF 'export LUPIN_CC_VENV=\$HOME/.venv-lupin-mcp' ~/.bashrc || echo 'export LUPIN_CC_VENV=\$HOME/.venv-lupin-mcp' >> ~/.bashrc
-echo '== export LUPIN_DEV_EMAIL (notify() target-user resolution; ~/.lupin/config global_notification_recipient is not read in the hook/MCP env) =='
-grep -qxF 'export LUPIN_DEV_EMAIL=ricardo.felipe.ruiz@gmail.com' ~/.bashrc || echo 'export LUPIN_DEV_EMAIL=ricardo.felipe.ruiz@gmail.com' >> ~/.bashrc
+echo '== export contract-declared vars in ~/.bashrc (whole-line, idempotent; set derived from src/conf/env-contract.tsv) =='
+$EXPORT_BLOCK
 echo '== ensure ~/.lupin/config exists (lupin CLI: api_url + notification recipient) =='
 mkdir -p ~/.lupin
 if [ ! -f ~/.lupin/config ]; then
