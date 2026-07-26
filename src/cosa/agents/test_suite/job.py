@@ -19,7 +19,11 @@ Example:
 import asyncio
 import json
 import os
+import queue
+import re
+import signal
 import subprocess
+import threading
 import time
 import traceback as tb_mod
 import xml.etree.ElementTree as ET
@@ -76,6 +80,21 @@ SUITE_TIMEOUTS_SECONDS = {
     "presentation"   : 1800,   # 30 min (render-only + Sonnet; +Opus/R2P with flags)
 }
 SUITE_TIMEOUT_DEFAULT_SECONDS = 600  # 10 min fallback for unknown types
+
+# How long the poll loop may wait on stdout before re-checking its own timeout
+# and cancellation flags (bug 8b93bcf5 defect 2). This is the UPPER BOUND on how
+# late a kill can be, and it replaces an unbounded one: the loop used to block in
+# readline() for as long as the child stayed quiet, which on the 2026-07-26 smoke
+# tier was ~9 minutes past a 3600s budget. Half a second is far below any budget
+# here and costs nothing — the wait is idle, not a spin.
+STDOUT_POLL_INTERVAL_SECONDS = 0.5
+
+# Upper bound on draining already-queued stdout after a kill. Bounded on purpose:
+# the drain used to be process.stdout.read(), which blocks until every descriptor
+# holding the pipe's write end closes — including a grandchild the kill never
+# reached. Measured: a suite whose script ran `sleep 30` returned 30.0s after a
+# 1s budget. The kill was punctual; the return was not.
+STDOUT_DRAIN_BUDGET_SECONDS = 5.0
 
 # When the caller asks for "all", expand into these component suites and run
 # each as its own entry in self.suite_results. This preserves partial results
@@ -943,6 +962,10 @@ class TestSuiteJob( AgenticJobBase ):
                 stderr=subprocess.STDOUT,
                 cwd=project_root,
                 text=True,
+                # Own process group (bug 8b93bcf5): terminate() reaches only the
+                # direct child, so a grandchild survives the kill and keeps the
+                # inherited stdout pipe open. One group = one signal, whole tree.
+                start_new_session=True,
                 env={
                     **os.environ,
                     "LUPIN_ROOT"          : project_root,
@@ -969,16 +992,48 @@ class TestSuiteJob( AgenticJobBase ):
             timeout_secs = SUITE_TIMEOUTS_SECONDS.get( suite_type, SUITE_TIMEOUT_DEFAULT_SECONDS )
             if self.debug: print( f"[TestSuiteJob] {suite_type} timeout: {timeout_secs}s" )
 
+            # Bug 8b93bcf5 defect 2 — DRAIN STDOUT ON A SEPARATE THREAD.
+            #
+            # This loop used to call process.stdout.readline() inline. readline()
+            # on a pipe BLOCKS until a newline or EOF, so both the timeout check
+            # and the cancellation check below were reachable only BETWEEN lines.
+            # A child that went quiet parked the loop inside readline() and
+            # neither could fire until it spoke again. Measured live on
+            # 2026-07-26: the smoke tier ran ~9 minutes past its 3600s budget,
+            # because --auto-proxy smoke is dominated by real LLM round-trips and
+            # its silences are long BY DESIGN. Cancellation inherited the same
+            # deafness, in exactly the case where someone reaches for cancel.
+            #
+            # A reader thread + a queue with a short get() timeout puts the loop's
+            # OWN clock in charge: both checks now run at least every
+            # STDOUT_POLL_INTERVAL_SECONDS no matter how silent the child is.
+            # subprocess.run(timeout=) is not a drop-in — this loop needs the
+            # stdout incrementally for the log.
+            stdout_queue = queue.Queue()
+
+            def _drain_stdout( pipe, q ):
+                try:
+                    for drained in iter( pipe.readline, "" ):
+                        q.put( drained )
+                finally:
+                    q.put( None )   # EOF sentinel — distinct from "nothing yet"
+
+            reader_thread = threading.Thread(
+                target = _drain_stdout, args=( process.stdout, stdout_queue ), daemon=True
+            )
+            reader_thread.start()
+
             # Poll loop for cancellation support + timeout enforcement
-            stdout_lines = []
+            stdout_lines  = []
+            stdout_at_eof = False
             while True:
                 # Check for cancellation
                 if self._cancel_requested:
-                    process.terminate()
-                    try:
-                        process.wait( timeout=10 )
-                    except subprocess.TimeoutExpired:
-                        process.kill()
+                    # Same group kill as the timeout path (bug 8b93bcf5). A cancel
+                    # that leaves the grandchild running would report "Cancelled"
+                    # while the work carries on holding the monopolize server —
+                    # the worst of both outcomes, and silent.
+                    self._terminate_process_group( process )
                     duration = time.monotonic() - start_time
                     return {
                         "passed"    : 0,
@@ -995,51 +1050,95 @@ class TestSuiteJob( AgenticJobBase ):
                 elapsed = time.monotonic() - start_time
                 if elapsed > timeout_secs:
                     print( f"[TestSuiteJob] TIMEOUT: {suite_type} exceeded {timeout_secs}s, killing process" )
-                    process.terminate()
-                    try:
-                        process.wait( timeout=10 )
-                    except subprocess.TimeoutExpired:
-                        process.kill()
+                    self._terminate_process_group( process )
 
-                    # Drain anything still buffered after terminate so the tail
+                    # Drain what the reader thread has already queued, so the tail
                     # captured in the synthetic failure reflects reality.
-                    try:
-                        remaining = process.stdout.read()
-                        if remaining:
-                            stdout_lines.append( remaining )
-                    except ( OSError, ValueError ):
-                        pass
+                    #
+                    # This used to be `process.stdout.read()` — a BLOCKING read to
+                    # EOF, which returns only once EVERY descriptor holding the
+                    # pipe's write end is closed. terminate() signals the direct
+                    # child only, so any surviving grandchild keeps that pipe open
+                    # and the drain waits for IT. Measured: a suite script running
+                    # `sleep 30` returned 30.0s after a 1s budget — the kill was
+                    # punctual, the RETURN was not. Bounded queue drain instead;
+                    # the reader thread owns the pipe and nothing else reads it.
+                    drain_deadline = time.monotonic() + STDOUT_DRAIN_BUDGET_SECONDS
+                    while time.monotonic() < drain_deadline:
+                        try:
+                            leftover = stdout_queue.get_nowait()
+                        except queue.Empty:
+                            break
+                        if leftover is None:
+                            break
+                        stdout_lines.append( leftover )
 
                     stdout_text = "".join( stdout_lines )
                     log_path    = self._write_stdout_log( suite_type, stdout_text )
                     tail_text   = "".join( stdout_lines[ -40: ] ).strip()
 
+                    # Bug 8b93bcf5: a killed tier used to report 0/0/0/1, which is
+                    # indistinguishable from a tier that never ran — while sitting
+                    # on results it had already produced. Recover what the progress
+                    # output still holds, and say plainly that it is partial.
+                    recovered = self._parse_pytest_progress_stdout( "".join( stdout_lines ) )
+                    if recovered is None:
+                        partial_note = "no pytest progress output was recognized, so NO partial results could be recovered"
+                        p_passed = p_failed = p_skipped = p_errors = 0
+                    else:
+                        p_passed  = recovered[ "passed"  ]
+                        p_failed  = recovered[ "failed"  ]
+                        p_skipped = recovered[ "skipped" ]
+                        p_errors  = recovered[ "errors"  ]
+                        partial_note = (
+                            f"PARTIAL results recovered from progress output: "
+                            f"{p_passed} passed, {p_failed} failed, {p_errors} errors, "
+                            f"{p_skipped} skipped across {len( recovered[ 'partial_files' ] )} files. "
+                            f"FILE-level only — compact pytest output carries no test node-id, "
+                            f"and the run was killed before the summary block, so no per-test "
+                            f"name or traceback exists to recover."
+                        )
+                    print( f"[TestSuiteJob] {suite_type}: {partial_note}" )
+
                     return {
-                        "passed"          : 0,
-                        "failed"          : 0,
-                        "skipped"         : 0,
-                        "errors"          : 1,
+                        "passed"          : p_passed,
+                        "failed"          : p_failed,
+                        "skipped"         : p_skipped,
+                        # +1 for the timeout itself, so a tier that was killed can
+                        # never report a clean bill regardless of what it recovered.
+                        "errors"          : p_errors + 1,
                         "exit_code"       : -2,
                         "log_path"        : log_path,
                         "duration"        : elapsed,
-                        "error"           : f"Timeout: {suite_type} exceeded {timeout_secs}s",
+                        "error"           : f"Timeout: {suite_type} exceeded {timeout_secs}s — {partial_note}",
                         "failure_details" : [ self._synth_failure_detail(
                             suite_type     = suite_type,
                             name           = "timeout",
                             elapsed        = elapsed,
-                            message        = f"Subprocess killed after {timeout_secs}s budget (actual {elapsed:.1f}s)",
+                            message        = f"Subprocess killed after {timeout_secs}s budget (actual {elapsed:.1f}s). {partial_note}",
                             traceback_text = tail_text,
                         ) ],
                     }
 
-                # Read available output
-                line = process.stdout.readline()
-                if line:
-                    stdout_lines.append( line )
-                    if self.verbose: print( line, end="" )
+                # Read whatever the drain thread has produced. The get() timeout is
+                # what bounds how long this loop can be away from its own checks.
+                try:
+                    line = stdout_queue.get( timeout=STDOUT_POLL_INTERVAL_SECONDS )
+                except queue.Empty:
+                    line = ""
+                else:
+                    if line is None:
+                        stdout_at_eof = True
+                        line = ""
+                    else:
+                        stdout_lines.append( line )
+                        if self.verbose: print( line, end="" )
 
-                # Check if process has finished
-                if line == "" and process.poll() is not None:
+                # Finished only when stdout hit EOF AND the process has exited.
+                # Requiring BOTH matters: EOF alone can precede exit, and exit
+                # alone can leave buffered lines undrained — breaking on either
+                # one by itself truncates the log this job exists to preserve.
+                if stdout_at_eof and process.poll() is not None:
                     break
 
             duration  = time.monotonic() - start_time
@@ -1298,6 +1397,122 @@ class TestSuiteJob( AgenticJobBase ):
             "skipped" : int( skipped_matches[ -1 ] ) if skipped_matches else 0,
             "errors"  : 0,
         }
+
+    @staticmethod
+    def _terminate_process_group( process ) -> None:
+        """
+        Kill the subprocess AND everything it spawned.
+
+        WHY (bug 8b93bcf5, third defect): the runner is `bash <script>`, and
+        process.terminate() signals that bash alone. A script that does NOT exec
+        into pytest leaves a grandchild holding the inherited stdout pipe, which
+        outlives the kill — so the tier's own budget stops governing the machine.
+        Popen is started with start_new_session=True, giving the child its own
+        process group, so one signal reaches the whole tree.
+
+        Requires:
+            - process is a Popen started with start_new_session=True
+
+        Ensures:
+            - SIGTERM to the group, escalating to SIGKILL after a grace period
+            - falls back to the plain process-level terminate/kill when the group
+              is already gone (ProcessLookupError) or the platform has no killpg;
+              a cleanup helper must never raise into the caller's error path,
+              because the caller is already handling a failure
+        """
+        def _signal_group( sig ):
+            try:
+                os.killpg( os.getpgid( process.pid ), sig )
+            except ( ProcessLookupError, PermissionError, AttributeError, OSError ):
+                # Group unavailable — fall back to the direct child so the kill
+                # still happens, just without the descendants.
+                try:
+                    process.kill() if sig == signal.SIGKILL else process.terminate()
+                except ProcessLookupError:
+                    pass
+
+        _signal_group( signal.SIGTERM )
+        try:
+            process.wait( timeout=10 )
+        except subprocess.TimeoutExpired:
+            _signal_group( signal.SIGKILL )
+            try:
+                process.wait( timeout=10 )
+            except subprocess.TimeoutExpired:
+                pass
+
+    @staticmethod
+    def _parse_pytest_progress_stdout( stdout: str ) -> Optional[ Dict ]:
+        """
+        Recover per-file result counts from pytest's COMPACT progress output.
+
+        WHY (bug 8b93bcf5): --junit-xml is written only at session end, so a tier
+        killed by the timeout leaves NO junit file, _parse_junit_xml falls back to
+        zeros, and the tier publishes "0 passed, 0 failed, 1 errors" — a string
+        byte-identical to a tier that crashed at import, a tier whose script was
+        missing, and a tier that collected nothing. On 2026-07-26 that erased
+        ~17 failures and 1 error the smoke tier had ALREADY found.
+
+        The progress line survives in captured stdout, so the counts are
+        recoverable even though the junit file is not:
+
+            src/tests/smoke/test_alembic_....py FFF.F                    [  1%]
+
+        ⚠️ THIS IS A MITIGATION, NOT THE FIX. It recovers FILE-level resolution
+        only. Compact mode never emits a test node-id, and a killed run never
+        reaches the "short test summary info" block, so no per-test name and no
+        traceback exist ANYWHERE to recover. A reader learns "4 tests in this
+        file failed" and cannot learn which four or why. Full per-test detail
+        needs incremental capture (pytest-reportlog is NOT installed in the test
+        image), which is a separate change.
+
+        Requires:
+            - stdout is the captured (possibly truncated) subprocess output
+
+        Ensures:
+            - returns a dict with passed/failed/skipped/errors counts plus a
+              `partial_files` list of ( filename, chars ) for the reader
+            - returns None when NO progress line was recognized — an empty parse
+              must not read as "zero of everything", which is the exact
+              indistinguishable-zeros failure this method exists to end
+        """
+        # Progress chars pytest emits in compact mode. 'x'/'X' are xfail/xpass and
+        # count as neither pass nor failure, matching the junit parser's treatment.
+        counts = { "passed": 0, "failed": 0, "skipped": 0, "errors": 0 }
+        partial_files = []
+        current_file  = None
+        recognized    = False
+
+        for raw in stdout.split( "\n" ):
+            line = re.sub( r"\[\s*\d+%\]\s*$", "", raw ).rstrip()
+            if not line.strip():
+                continue
+            m = re.match( r"^(\S+\.py)\s+(.*)$", line )
+            if m:
+                current_file = m.group( 1 )
+                chars        = m.group( 2 )
+            else:
+                # A wrapped continuation carries progress chars with no filename.
+                chars = line.strip()
+                if current_file is None:
+                    continue
+            chars = chars.replace( " ", "" )
+            # Anything outside the progress alphabet means this is not a progress
+            # line (a banner, a traceback, a summary). Skip rather than guess —
+            # miscounting a traceback as results would be worse than no recovery.
+            if not chars or re.search( r"[^.FEsxX]", chars ):
+                continue
+            recognized = True
+            counts[ "passed"  ] += chars.count( "." )
+            counts[ "failed"  ] += chars.count( "F" )
+            counts[ "errors"  ] += chars.count( "E" )
+            counts[ "skipped" ] += chars.count( "s" )
+            partial_files.append( ( current_file, chars ) )
+
+        if not recognized:
+            return None
+        counts[ "partial_files" ] = partial_files
+        return counts
 
     @staticmethod
     def _parse_non_pytest_stdout( suite_type: str, stdout: str ) -> Optional[ Dict ]:
