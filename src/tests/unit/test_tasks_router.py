@@ -1930,3 +1930,66 @@ def test_the_reject_never_fires_on_a_persona_or_user_ref( client, repo, ref ):
 
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )
+
+
+# ---------------------------------------------------------------------------
+# row-cap overflow must NAME itself (row a5f4eb3f)
+# ---------------------------------------------------------------------------
+#
+# /api/tasks has TWO truncation modes and only the char-budget one announced itself.
+# The row cap is the mode that actually bit: the notifications dashboard polled with
+# include_terminal=true, inflating the board to 1,171 rows against the 500 cap — 671
+# dropped, no flag, no warning, and newest-first ordering meant the EVICTED rows were
+# the OPEN ones the panel exists to display.
+
+def test_row_cap_overflow_emits_a_named_warning( client, repo ):
+    """THE REGRESSION. `has_more` alone was ignored by both consumers; a warning names it."""
+    repo.query_tasks.return_value = [ make_item() for _ in range( 3 ) ]
+    repo.count_tasks.return_value = 10                      # 3 of 10 -> 7 unshown
+
+    body = client.get( "/api/tasks", params={ "owner_persona": "krishna", "limit": 3 } ).json()
+
+    assert body[ "has_more" ] is True
+    assert len( body[ "warnings" ] ) == 1
+    notice = body[ "warnings" ][ 0 ]
+    assert "row-cap truncation" in notice
+    assert "3 of 10" in notice and "7 rows" in notice       # the count AND the shortfall
+    assert "OLDEST" in notice                               # which rows were evicted
+
+
+def test_row_cap_overflow_does_NOT_set_truncated( client, repo ):
+    """
+    `truncated` means "stopped at the CHAR BUDGET" to every existing consumer.
+    Overloading it would silently change a live signal's meaning — the same class of
+    defect as `count` being read as a total, which this very endpoint already carries.
+    """
+    repo.query_tasks.return_value = [ make_item() for _ in range( 3 ) ]
+    repo.count_tasks.return_value = 10
+
+    body = client.get( "/api/tasks", params={ "owner_persona": "krishna", "limit": 3 } ).json()
+    assert body[ "truncated" ] is False
+
+
+def test_a_COMPLETE_page_warns_about_nothing( client, repo ):
+    """
+    THE NEGATIVE CONTROL. Without it the warning could fire on every query and the
+    test above would still pass — a notice nobody can trust is worse than none.
+    """
+    repo.query_tasks.return_value = [ make_item() for _ in range( 3 ) ]
+    repo.count_tasks.return_value = 3                       # everything matched is shown
+
+    body = client.get( "/api/tasks", params={ "owner_persona": "krishna" } ).json()
+    assert body[ "has_more" ] is False
+    assert body[ "warnings" ] == [ ]
+
+
+def test_offset_paging_stops_warning_on_the_LAST_page( client, repo ):
+    """The shortfall is computed from offset, not from the page length alone."""
+    repo.query_tasks.return_value = [ make_item() for _ in range( 4 ) ]
+    repo.count_tasks.return_value = 10
+
+    mid  = client.get( "/api/tasks", params={ "owner_persona": "k", "limit": 4, "offset": 0 } ).json()
+    last = client.get( "/api/tasks", params={ "owner_persona": "k", "limit": 4, "offset": 6 } ).json()
+
+    assert any( "row-cap truncation" in w for w in mid[ "warnings" ] )
+    assert last[ "warnings" ] == [ ]                        # 6 + 4 == 10, nothing unshown

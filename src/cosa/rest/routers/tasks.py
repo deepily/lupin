@@ -1278,6 +1278,32 @@ def query_tasks(
             )
             print( f"[task_query WARN] {truncation_notice}" )
             warnings.append( truncation_notice )
+        # ROW-CAP overflow — the OTHER truncation mode, which signalled NOTHING until
+        # now (row a5f4eb3f). `/api/tasks` has two ways to drop rows and only the
+        # char-budget one announced itself: exceed `limit` and the caller gets a full
+        # page, `truncated: false`, and an empty `warnings[]`.
+        #
+        # THE ROW CAP IS THE MODE THAT ACTUALLY BIT. The notifications dashboard polled
+        # with include_terminal=true, inflating the board to 1,171 rows against the 500
+        # cap: 671 rows dropped, no flag, no warning — and newest-first ordering meant
+        # the EVICTED rows were the OPEN ones the panel exists to display. Both call
+        # sites carried a comment promising the human's view was "never silently
+        # truncated." It was truncated by 57%.
+        #
+        # ⚠️ `truncated` IS DELIBERATELY NOT SET HERE. It means "stopped at the char
+        # budget" to every existing consumer, and overloading it would silently change
+        # a live signal's meaning — the same class of defect as `count` being read as a
+        # total. `has_more` already carries the fact; what was missing is that nothing
+        # NAMED it, and both consumers ignored a bare boolean. A warning names it.
+        elif offset + len( tasks ) < total:
+            row_cap_notice = (
+                f"row-cap truncation — {len( tasks )} of {total} matching rows returned "
+                f"(limit={limit}, offset={offset}); {total - offset - len( tasks )} rows "
+                f"not shown. Ordering is newest-first, so the omitted rows are the "
+                f"OLDEST matches. Page with offset, or narrow the filter"
+            )
+            print( f"[task_query WARN] {row_cap_notice}" )
+            warnings.append( row_cap_notice )
         # ⚠️ ADDED KEYS ONLY. `count` KEEPS ITS EXACT PRIOR MEANING (the length of
         # THIS page) — /api/tasks is NOT internal-only and the multiplexer parses
         # this shape on a 60s poll (see the standing comment on the count_only
