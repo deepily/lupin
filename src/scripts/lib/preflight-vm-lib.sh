@@ -235,6 +235,82 @@ pfv_env_block_agree() {
     return 1
 }
 
+# ── pfv_secret_fingerprint ───────────────────────────────────────────────────
+# A comparable fingerprint for a secret VALUE, never the value itself (R2).
+#
+# WHY A FINGERPRINT AND NOT THE VALUE: the whole point of `creds-status` is to
+# print several authorities SIDE BY SIDE so a divergence is visible. Printing the
+# secrets would make the tool itself the leak — and it would be run precisely
+# when someone is already confused, i.e. when they are most likely to paste the
+# output somewhere.
+#
+# Requires:
+#   - $1 = the value (may be empty)
+#
+# Ensures:
+#   - prints "sha256:<first 12 hex>" for a non-empty value, returns 0
+#   - prints "EMPTY" and returns 2 for a present-but-empty value — a key file
+#     that exists and holds nothing is a DIFFERENT failure from one that is
+#     missing, and the two have different remedies. Collapsing them is how a
+#     truncated write reads as "not configured yet"
+#   - returns 3 and prints "NO-SHA-TOOL" when no sha256 utility exists, rather
+#     than printing something that looks like a fingerprint
+pfv_secret_fingerprint() {
+    local value="$1" sum
+    if [ -z "$value" ]; then printf 'EMPTY'; return 2; fi
+    if   command -v sha256sum >/dev/null 2>&1; then sum="$( printf '%s' "$value" | sha256sum | cut -c1-12 )"
+    elif command -v shasum    >/dev/null 2>&1; then sum="$( printf '%s' "$value" | shasum -a 256 | cut -c1-12 )"
+    else printf 'NO-SHA-TOOL'; return 3; fi
+    printf 'sha256:%s' "$sum"
+}
+
+# ── pfv_read_secret_file ─────────────────────────────────────────────────────
+# Read a secret file, distinguishing every way it can fail to yield a value.
+#
+# WHY FOUR STATES AND NOT A STRING-OR-EMPTY: the 2026-07-25 outage was a key file
+# that EXISTED and was UNREADABLE (mode 600, uid 1001) — `os.path.exists()` said
+# yes and a plain `cat` by the SSH user printed nothing, with no error. A reader
+# that returns "" for absent, unreadable, and empty alike cannot tell the
+# operator which of three different things to do.
+#
+# Requires:  $1 = path
+# Ensures:
+#   - prints the trimmed contents and returns 0 when readable and non-empty
+#   - prints ABSENT (1) / UNREADABLE (2) / EMPTY (3), each distinct, otherwise
+pfv_read_secret_file() {
+    local path="$1" content
+    [ -e "$path" ] || { printf 'ABSENT'; return 1; }
+    [ -r "$path" ] || { printf 'UNREADABLE'; return 2; }
+    content="$( tr -d '\n\r' < "$path" 2>/dev/null )"
+    [ -n "$content" ] || { printf 'EMPTY'; return 3; }
+    printf '%s' "$content"
+}
+
+# ── pfv_fingerprints_agree ───────────────────────────────────────────────────
+# Do a set of fingerprints all name the same secret?
+#
+# Requires:  "$@" = zero or more fingerprint strings
+# Ensures:
+#   - returns 0 when every COMPARABLE fingerprint is identical
+#   - returns 1 when two comparable fingerprints differ
+#   - returns 2 when FEWER THAN TWO comparable fingerprints were supplied —
+#     "they all agree" is not a claim one value can support, and reporting
+#     agreement from a single surface is how a lone stale key reads as verified.
+#     Non-fingerprints (ABSENT/UNREADABLE/EMPTY/UNAVAILABLE/NO-SHA-TOOL) are
+#     excluded from the comparison rather than counted as a mismatch: an absent
+#     surface is a fact about coverage, not a disagreement about the value
+pfv_fingerprints_agree() {
+    local first="" fp n=0
+    for fp in "$@"; do
+        case "$fp" in sha256:*) ;; *) continue ;; esac
+        n=$(( n + 1 ))
+        if [ -z "$first" ]; then first="$fp"
+        elif [ "$fp" != "$first" ]; then return 1; fi
+    done
+    [ "$n" -ge 2 ] || return 2
+    return 0
+}
+
 # ── pfv_shape_matches ────────────────────────────────────────────────────────
 # Validate an env var's VALUE against the SHAPE its contract row declares.
 #

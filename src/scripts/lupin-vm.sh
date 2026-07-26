@@ -599,6 +599,136 @@ bash src/scripts/preflight-vm.sh --phase post || echo 'POST-deploy preflight rep
         log "verify with: lupin-vm.sh run \"cd $VM_ROOT && bash src/scripts/preflight-vm.sh --phase pre\""
         ;;
 
+    creds-status)
+        # R2 — print every authority for the notification API key SIDE BY SIDE.
+        #
+        # WHY: "the notification API key" is FIVE surfaces over TWO independent
+        # validators, and BOTH of 2026-07-25's outages were the same defect at a
+        # different validator — STT 401 (Secret Manager version eight months
+        # stale) and DM missing_auth_header (the key file held the DEV BOX's key,
+        # unregistered in the VM's database). Each surface looked fine on its own.
+        # Nothing compared them, so nobody could see that they disagreed.
+        #
+        # THE ASYMMETRY THAT SHAPES THIS VERB: four surfaces hold a VALUE and can
+        # be fingerprinted and compared. The fifth — the bcrypt row in the
+        # server's api_keys table — is a one-way hash and can NEVER be compared,
+        # only EXERCISED. That is why the acceptance probe is the design and not
+        # a shortcut: for that validator, a request is the only question you can
+        # ask. Fingerprints alone would leave the one surface that actually
+        # rejects you unmeasured.
+        require_project
+        DEV_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../.." && pwd )"
+        PFV_LIB="$DEV_ROOT/src/scripts/lib/preflight-vm-lib.sh"
+        [ -r "$PFV_LIB" ] || die "preflight lib not readable: $PFV_LIB"
+        # shellcheck source=lib/preflight-vm-lib.sh
+        source "$PFV_LIB"
+
+        CS_TARGET="${2:-local}"           # which ~/.lupin/config section to read
+        CS_KEYFILE="$DEV_ROOT/src/conf/keys/notification-api-claude-code-dev"
+        CS_SECRET_NAME="${LUPIN_NOTIFICATION_KEY_SECRET:-lupin-notification-api-key}"
+
+        printf '\n%s\n' "== notification API key — every authority, side by side =="
+        printf '%s\n\n' "   (fingerprints are sha256 prefixes; values are NEVER printed)"
+
+        # ── surface 1: the in-repo key file ──────────────────────────────────
+        # `set -e` is ON in this script. A bare `var=$(cmd)` ABORTS when cmd
+        # returns non-zero — which here is ABSENT/UNREADABLE/EMPTY, i.e. every
+        # state this verb exists to report. `|| rc=$?` keeps the branch alive.
+        cs_rc=0; cs_file_val="$( pfv_read_secret_file "$CS_KEYFILE" )" || cs_rc=$?
+        if [ $cs_rc -eq 0 ]; then cs_fp_file="$( pfv_secret_fingerprint "$cs_file_val" )"
+        else cs_fp_file="$cs_file_val"; fi
+        printf '  %-34s %s\n' "key file" "$cs_fp_file"
+        [ $cs_rc -eq 2 ] && printf '  %-34s %s\n' "" "^ mode/uid — this was the 2026-07-25 defect; try: sudo cat"
+
+        # ── surface 2: the LUPIN_API_KEY env var ─────────────────────────────
+        if [ -n "${LUPIN_API_KEY:-}" ]; then cs_fp_env="$( pfv_secret_fingerprint "$LUPIN_API_KEY" )"
+        else cs_fp_env="UNSET"; fi
+        printf '  %-34s %s\n' "LUPIN_API_KEY env" "$cs_fp_env"
+
+        # ── surface 3: whatever ~/.lupin/config's api_key_file points at ─────
+        cs_cfg_path="$( awk -v sect="[$CS_TARGET]" '
+            $0 == sect { inside = 1; next }
+            /^\[/      { inside = 0 }
+            inside && $1 == "api_key_file" { print $3; exit }
+        ' "$HOME/.lupin/config" 2>/dev/null )"
+        if [ -n "$cs_cfg_path" ]; then
+            cs_cfg_path="${cs_cfg_path/#\~/$HOME}"
+            cs_rc=0; cs_cfg_val="$( pfv_read_secret_file "$cs_cfg_path" )" || cs_rc=$?
+            if [ $cs_rc -eq 0 ]; then cs_fp_cfg="$( pfv_secret_fingerprint "$cs_cfg_val" )"
+            else cs_fp_cfg="$cs_cfg_val"; fi
+        else
+            cs_fp_cfg="NO-api_key_file-IN-[$CS_TARGET]"
+        fi
+        printf '  %-34s %s\n' "~/.lupin/config [$CS_TARGET]" "$cs_fp_cfg"
+        [ -n "$cs_cfg_path" ] && printf '  %-34s -> %s\n' "" "$cs_cfg_path"
+
+        # ── surface 4: Secret Manager ────────────────────────────────────────
+        # UNAVAILABLE is reported as its own state. A tool that silently omitted
+        # this row when gcloud is absent would let a stale Secret Manager version
+        # — one of the two 07-25 outages — sit unexamined behind a clean report.
+        if command -v gcloud >/dev/null 2>&1; then
+            cs_sm_val="$( gcloud secrets versions access latest --secret="$CS_SECRET_NAME" \
+                          --project="$LUPIN_GCP_PROJECT_ID" 2>/dev/null | tr -d '\n\r' )"
+            if [ -n "$cs_sm_val" ]; then cs_fp_sm="$( pfv_secret_fingerprint "$cs_sm_val" )"
+            else cs_fp_sm="ABSENT-OR-DENIED"; fi
+        else
+            cs_fp_sm="UNAVAILABLE (no gcloud on this host)"
+        fi
+        printf '  %-34s %s\n' "Secret Manager/$CS_SECRET_NAME" "$cs_fp_sm"
+
+        # ── the comparison ───────────────────────────────────────────────────
+        printf '\n'
+        cs_rc=0
+        pfv_fingerprints_agree "$cs_fp_file" "$cs_fp_env" "$cs_fp_cfg" "$cs_fp_sm" || cs_rc=$?
+        # Count coverage and name the gaps. "AGREES" over two surfaces reads
+        # exactly like "AGREES" over four unless the denominator is printed —
+        # and with the key file ABSENT the agreeing pair may not include the
+        # surface the caller actually uses.
+        cs_ncomp=0; cs_gaps=""
+        for cs_pair in "key-file:$cs_fp_file" "env:$cs_fp_env" "config:$cs_fp_cfg" "secret-manager:$cs_fp_sm"; do
+            case "${cs_pair#*:}" in
+                sha256:*) cs_ncomp=$(( cs_ncomp + 1 )) ;;
+                *)        cs_gaps="$cs_gaps ${cs_pair%%:*}" ;;
+            esac
+        done
+        [ -n "$cs_gaps" ] && printf '  COVERAGE: %s of 4 surfaces yielded a value; NOT compared:%s\n' "$cs_ncomp" "$cs_gaps"
+
+        case $cs_rc in
+            0) printf '  VERDICT: the %s comparable surface(s) AGREE\n' "$cs_ncomp" ;;
+            1) printf '  VERDICT: ⚠️  SURFACES DISAGREE — at least two hold different keys\n'
+               printf '           Both 2026-07-25 outages were exactly this, at different validators.\n' ;;
+            2) printf '  VERDICT: NOT COMPARABLE — fewer than two surfaces yielded a value.\n'
+               printf '           This is NOT agreement. One surface cannot corroborate itself.\n' ;;
+        esac
+
+        # ── surface 5: the DB bcrypt row — EXERCISE, with a control ──────────
+        # A 200 alone does not prove the key was checked. Only a 401 on a
+        # deliberately-wrong key proves the endpoint enforces the header at all;
+        # without that arm, an endpoint that ignores X-API-Key reports success
+        # for any key, including a wrong one.
+        printf '\n%s\n' "== the fifth surface: the api_keys bcrypt row (exercise only) =="
+        CS_URL="${LUPIN_CREDS_STATUS_URL:-http://localhost:$APP_PORT}"
+        if [ "$cs_fp_file" != "${cs_fp_file#sha256:}" ]; then
+            cs_good="$( curl -s -o /dev/null -w '%{http_code}' --max-time 20 -H "X-API-Key: $cs_file_val" "$CS_URL/api/dm/list" 2>/dev/null )"
+            cs_bad="$(  curl -s -o /dev/null -w '%{http_code}' --max-time 20 -H "X-API-Key: creds-status-deliberately-invalid" "$CS_URL/api/dm/list" 2>/dev/null )"
+            printf '  %-34s good=%s  wrong-key control=%s\n' "$CS_URL" "$cs_good" "$cs_bad"
+            if   [ "$cs_good" = "200" ] && [ "$cs_bad" = "401" ]; then
+                printf '  VERDICT: key ACCEPTED, and the control proves the header is enforced\n'
+            elif [ "$cs_good" = "200" ] && [ "$cs_bad" = "200" ]; then
+                printf '  VERDICT: ⚠️  PROBE IS VACUOUS — the wrong key also returned 200.\n'
+                printf '           This endpoint is not checking the header; the 200 above means nothing.\n'
+            elif [ "$cs_good" = "401" ]; then
+                printf '  VERDICT: ⚠️  key REJECTED — readable, but NOT registered in THIS database.\n'
+                printf '           Mint one against this deployment; a key from another is never valid here.\n'
+            else
+                printf '  VERDICT: inconclusive (good=%s bad=%s) — is the app up at %s?\n' "$cs_good" "$cs_bad" "$CS_URL"
+            fi
+        else
+            printf '  SKIPPED: no readable key file to probe with (%s)\n' "$cs_fp_file"
+        fi
+        printf '\n'
+        ;;
+
     preflight)
         # Standalone preflight. PHASE defaults to full; pass pre|post|full.
         require_project
