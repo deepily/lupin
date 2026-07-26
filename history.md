@@ -16,6 +16,20 @@
 
 **Files**: `src/tests/unit/test_answer_is_correct.py`
 
+### 2026.07.26 - Session 9a63d597 (Mr. Radio 🦉) | `7c2e889e` + `d8a23fca`: three tests that were green because of where they ran, and a bytecode cache shared across two repo roots
+
+**Accomplishments** (solo; `bfa2d6d2` + `8b8c929e` on `wip-v0.1.9`, HELD; rows `7c2e889e` + `d8a23fca` closed, `b39c350d` opened):
+1. **`7c2e889e` — a negative control that was only false where nothing was mounted.** It hard-coded `/var/external-projects/…` and asserted `not is_dir()` as "host truth". Those paths genuinely exist in `lupin-rest-test` (the doc-viewer bind), so it was green on the host by accident and RED in the venue closest to the arbiter's real problem. Absence is now a property of the fixture (`tmp_path`, never created); the claims about the real literals are KEPT, restated as claims about `_translate_container_root`, which short-circuits before any filesystem access.
+2. **`d8a23fca` said three failures; it is seven, and neither cause is what it guessed.** Its cwd hypothesis is refuted — `LUPIN_ROOT` wins and unsetting it fails loudly.
+3. **⭐ `test_test_suite_job`: six offenders, four of them GREEN.** Patching `job.cu.get_project_root` rewrites project-root resolution process-wide (`cu` is the shared module object), so `do_all()` → the preflight → a lazy `import lupin_app.main` → config resolved under the mocked tmpdir. It only bites where the engine IS `lupin_db_test`, so **on the host these passed having never executed the branch at all**, and in-container four were masked by an earlier test importing `main` under the real root. Run alone, all six fail — a false green inside the venue we were treating as the honest one.
+4. **⭐ `test_terraform_invariants` was never a venue artifact.** pytest's assertion rewriting bakes `co_filename` into cached bytecode, and `__pycache__` is bind-mounted into a container whose repo root is `/var/lupin`, not `/mnt/DATA01/…`. **Proven by inverting it**: the host-written cache broke the container; deleting it and letting the container recompile broke the HOST and fixed the container. Read straight out of the `.pyc`, `co_filename` is `/var/lupin/…`.
+
+**🔴 My own instrument was wrong twice more, and the prediction caught both.** A `grep -ci "statreload"` read 914→916 after a probe that should have moved nothing — my Bash step descriptions contain the word and echo into the server log via `/api/notify`, so I was counting myself. And a mutation control came back GREEN when I had predicted RED: I had renamed `TF_DATA_DIR`→`TF_DATA_DIR_MUTANT`, and the original is a substring of that, so the guard's `in` check still matched. **Both were found by predicting the result first, not by reading the output.**
+
+**Split out `b39c350d`**: the bytecode cache is not owned by either venue. Sampling 400 `src/cosa/**` `.pyc` files gives **221 container-written, 94 host-written, 85 relative** — mixed module by module. Ten more `inspect.getsource` consumers across six test files pass today purely because the modules they introspect happen to hold host-compatible entries.
+
+**Files**: `src/tests/unit/test_lupin_arbiter_app_fleet_arbiter_loop.py` · `src/tests/unit/test_test_suite_job.py` · `src/tests/unit/test_terraform_invariants.py`
+
 ### 2026.07.25 - Session b38f09bb (Cheech 🌿) | VM DM `missing_auth_header`: two stacked defects behind one error string
 
 **Accomplishments** (solo; `bba39eed` code + `d2fb6a6b` docs on `wip-v0.1.9`; store row `641942c0` closed):
