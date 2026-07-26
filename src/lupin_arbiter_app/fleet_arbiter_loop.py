@@ -367,6 +367,27 @@ def _compute_hold_roots( config_mgr, host_root, scan_fn=None ):
         translated = _translate_container_root( raw, prefix_pair )
         candidates.append( translated if translated is not None else str( raw ) )
     candidates.extend( str( root ) for root in scan_fn() )
+    # THE FLEET DATA ROOT — row 8758d0b1 / f56fc63b. Runtime state now lives OUTSIDE
+    # every repo, and the three sources above all yield REPOS: the parent scan
+    # appends only directories containing `.git`, so a data dir is invisible to it
+    # BY CONSTRUCTION. Measured: seed a parent with `a-repo/.git` + `lupin-data/`
+    # and the scan returns ['a-repo'].
+    #
+    # ⚠️ Omitting this does NOT fail loudly. `roots_swept` stays non-empty because
+    # the repos still exist, so the no-roots alarm never fires and the report reads
+    # `roots N · files 0 · prunable 0` — indistinguishable from a clean fleet, while
+    # BOTH janitors silently stop reclaiming (`enable_hold_deletion` defaults True).
+    # That is the smallest line here with the largest blast radius.
+    #
+    # APPENDED LAST, deliberately: the documented order is "config order first, then
+    # scan order", and the first draft of this inserted at index 1 and broke it. The
+    # ordering test caught it — that contract is load-bearing for readers comparing
+    # a report against a config.
+    try:
+        from lupin_cli.claude_code.hooks.lib.heartbeat_hold import fleet_data_root
+        candidates.append( str( fleet_data_root( host_root ) ) )
+    except Exception:
+        pass                                           # never let root-derivation kill the sweep
 
     roots, seen = [ ], set()
     for candidate in candidates:

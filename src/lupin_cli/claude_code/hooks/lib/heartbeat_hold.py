@@ -64,6 +64,7 @@ the 3-way shared-substrate seam review with Rachel + María.
 import os
 import json
 import datetime
+import subprocess
 from fnmatch import fnmatch
 from pathlib import Path
 
@@ -135,23 +136,118 @@ LAST_SPINUP_CHECK_FIELD      = "last_spinup_check_ts"
 LAST_SURFACED_QUESTIONS_FIELD = "last_surfaced_questions_ts"
 
 
+DATA_DIR_ENV      = "DEEPILY_DATA_DIR"
+DATA_DIR_FALLBACK = "projects-data"          # sibling of the projects tree — Rick, 2026-07-26
+
+
+def _main_repo_path( repo_root ):
+    """
+    The MAIN repo's absolute directory for a tree — a worktree resolves to its
+    parent checkout, a normal checkout to itself.
+
+    Requires:
+        - repo_root is a path-like
+
+    Ensures:
+        - returns an absolute Path; falls back to the resolved repo_root when git
+          is unavailable or the path is not a repo
+        - never raises
+
+    ⚠️ Both the identity AND the fallback base must derive from THIS, not from the
+    passed tree. Deriving the base from a worktree path yields
+    `.claude/projects-data/...` — measured, and the first version of this did it.
+    """
+    try:
+        out = subprocess.run(
+            [ "git", "-C", str( repo_root ), "rev-parse", "--path-format=absolute", "--git-common-dir" ],
+            capture_output=True, text=True, timeout=10
+        )
+        common = out.stdout.strip()
+        if out.returncode == 0 and common:
+            return Path( common ).parent               # <repo>/.git -> <repo>
+    except ( OSError, subprocess.SubprocessError ):
+        pass                                           # git missing / not a repo
+    return Path( repo_root ).resolve()
+
+
+def _repo_identity( repo_root ):
+    """
+    The REPO a tree belongs to — the fleet-global key for its runtime data.
+
+    Fleet-global means one data dir per REPO, shared by every worktree of it, so
+    the key must be repo identity and not tree identity: `--git-common-dir`
+    resolves a worktree to its main repo where a basename resolves it to itself.
+
+    ⚠️ `--git-common-dir` returns a RELATIVE `.git` from the main checkout, which
+    naively compared collides every repo into one identity. `--path-format=absolute`
+    is not optional.
+
+    ⚠️ AND THIS IS NOT THE PREDICATE THE SWEEP USES. `_compute_hold_roots` dedupes
+    on REALPATH, ruled 2026-07-16, because a worktree and its main repo are
+    different directories holding different FILES — deduping sweep roots on repo
+    identity would drop a worktree root. Both rules stand; they answer different
+    questions (Rick confirmed 2026-07-26). Do not "unify" them.
+
+    Requires:
+        - repo_root is a path-like pointing inside a git tree (or not)
+
+    Ensures:
+        - returns the main repo's directory name; falls back to the basename of
+          repo_root when git is unavailable or the path is not a repo
+        - never raises
+    """
+    return _main_repo_path( repo_root ).name
+
+
+def fleet_data_root( repo_root=None ):
+    """
+    The fleet-global runtime-data directory for this repo — row 8758d0b1 / f56fc63b.
+
+    Runtime state (hold files, DM-inbox bookmarks, acked ledgers, task-store maps)
+    moved OUT of the repo root, because a gitignored path inside the tree is on
+    `git clean -xdf`'s kill list, not shielded by it: measured 2026-07-26, a dry
+    run listed 448 runtime files as "would remove", including cargo-bearing holds.
+
+    Ensures:
+        - returns <DEEPILY_DATA_DIR>/<repo-name>
+        - falls back to <projects-parent>/projects-data/<repo-name> when the env
+          var is unset. NOT a silent degradation to the repo root — that would
+          recreate the clutter this exists to remove. It is the SAME location the
+          env var names, derived rather than read, so a long-lived session whose
+          environment predates the variable still writes where everyone else reads.
+        - never raises
+    """
+    import cosa.utils.util as cu
+    root = Path( repo_root ) if repo_root is not None else Path( cu.get_project_root() )
+    main = _main_repo_path( root )                     # a worktree resolves to its parent checkout
+    base = os.environ.get( DATA_DIR_ENV ) or str( main.parent.parent / DATA_DIR_FALLBACK )
+    return Path( base ) / main.name
+
+
 def _resolve_base_dir( base_dir ):
     """
-    Resolve the directory that holds `.heartbeat-hold-*.json` files.
+    Resolve the directory that holds the runtime-state families.
 
     Requires:
         - base_dir is a path-like, a string, or None
 
     Ensures:
         - Returns a Path
-        - base_dir provided  → Path( base_dir )
-        - base_dir is None   → project root via cu.get_project_root()
+        - base_dir provided  → Path( base_dir )  (tests + explicit callers win)
+        - base_dir is None   → the FLEET DATA ROOT, not the project root
           (PATH MANAGEMENT mandate — never __file__ chains)
+        - creates the directory if absent: every caller of this either writes into
+          it or globs it, and a missing dir would surface as "no files" — the
+          silent-empty reading this whole family keeps being bitten by
     """
     if base_dir is not None:
         return Path( base_dir )
-    import cosa.utils.util as cu
-    return Path( cu.get_project_root() )
+    root = fleet_data_root()
+    try:
+        root.mkdir( parents=True, exist_ok=True )
+    except OSError:
+        pass                                           # unwritable → callers fail loudly on use
+    return root
 
 
 def resolve_hold_base_dir( cwd=None ):

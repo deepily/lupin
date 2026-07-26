@@ -41,11 +41,19 @@ def test_hold_path_empty_session_collapses_to_unknown( tmp_path ):
     assert p == tmp_path / ".heartbeat-hold-unknown.json"
 
 
-def test_hold_path_default_base_dir_uses_project_root( monkeypatch, tmp_path ):
+def test_hold_path_default_base_dir_uses_the_FLEET_DATA_ROOT( monkeypatch, tmp_path ):
+    """
+    Row 8758d0b1 / f56fc63b — runtime state moved OUT of the repo.
+
+    `base_dir=None` now resolves `<DEEPILY_DATA_DIR>/<repo-name>`, not the project
+    root. A gitignored path inside the tree is on `git clean -xdf`'s KILL LIST, not
+    shielded by it — measured, a dry run listed 448 runtime files as "would remove".
+    """
     import cosa.utils.util as cu
-    monkeypatch.setattr( cu, "get_project_root", lambda: str( tmp_path ) )
+    monkeypatch.setattr( cu, "get_project_root", lambda: str( tmp_path / "lupin" ) )
+    monkeypatch.setenv( "DEEPILY_DATA_DIR", str( tmp_path / "data" ) )
     p = hh.hold_path( "abc12345" )
-    assert p == tmp_path / ".heartbeat-hold-abc12345.json"
+    assert p == tmp_path / "data" / "lupin" / ".heartbeat-hold-abc12345.json"
 
 
 # ── _now ──────────────────────────────────────────────────────────────────────
@@ -1197,13 +1205,19 @@ def test_read_hold_resilient_finds_hold_in_cwd( tmp_path, monkeypatch ):
 
 
 def test_read_hold_resilient_finds_hold_at_project_root_when_cwd_differs( tmp_path, monkeypatch ):
-    """THE BUG: write_hold default lands at project root; a reader whose cwd is a
-    worktree (≠ project root) must STILL find the honored hold via the fallback."""
+    """THE BUG: write_hold's DEFAULT location and a reader's cwd differ; the reader
+    must STILL find the honored hold via the fallback.
+
+    Post-relocation the default location is the FLEET DATA ROOT rather than the
+    project root, so this writes with base_dir=None — the production path — instead
+    of naming a directory. Writing to an explicit dir here would have tested a
+    location production no longer uses."""
     import cosa.utils.util as cu
     cwd_dir  = tmp_path / "worktree"; cwd_dir.mkdir()
     root_dir = tmp_path / "root";     root_dir.mkdir()
     monkeypatch.setattr( cu, "get_project_root", lambda: str( root_dir ) )
-    hh.write_hold( "sid12345", "Rio", "holding", base_dir=root_dir )   # default-write location
+    monkeypatch.setenv( "DEEPILY_DATA_DIR", str( tmp_path / "data" ) )
+    hh.write_hold( "sid12345", "Rio", "holding" )                      # DEFAULT-write location
     # cwd dir holds NO file — resilient read must fall through to the project root.
     hold = hh.read_hold_resilient( "sid12345", cwd=str( cwd_dir ) )
     assert hold is not None

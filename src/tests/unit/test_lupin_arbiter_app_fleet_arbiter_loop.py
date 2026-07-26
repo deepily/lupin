@@ -647,6 +647,20 @@ def _git_init_with_worktree( main, worktree ):
     _git( "worktree", "add", "-q", "--detach", str( worktree ), cwd=main )
 
 
+
+def _data_root( host_root ):
+    """
+    The fleet data root a given host_root derives — row 8758d0b1 / f56fc63b.
+
+    Computed from the SAME function production uses rather than hardcoded, so these
+    assertions cannot drift from the resolver. A literal here would pass while the
+    real sweep pointed somewhere else — which is the exact defect class this root
+    exists to close.
+    """
+    from lupin_cli.claude_code.hooks.lib.heartbeat_hold import fleet_data_root
+    return str( fleet_data_root( host_root ) )
+
+
 def _make_projects_tree( tmp_path ):
     """
     A miniature of the real host layout: a projects parent holding registered repos,
@@ -718,7 +732,8 @@ def test_NEGATIVE_CONTROL_untranslated_container_paths_reach_nothing( tmp_path )
                                                 paths={ "cosa-voice": unreachable } ),
                                  host_root=str( projects / "lupin" ),
                                  scan_fn=lambda: [ ] )
-    assert roots == [ str( projects / "lupin" ), unreachable ]    # PASSED THROUGH, not dropped
+    assert roots == [ str( projects / "lupin" ), unreachable,
+                      _data_root( projects / "lupin" ) ]         # PASSED THROUGH, not dropped
     #     ^ emitted on purpose so the sweep reports it in roots_unreachable:
     #       the gap stays a NUMBER instead of a silence.
 
@@ -740,7 +755,15 @@ def test_translation_is_what_reaches_the_holds( tmp_path ):
 
     assert str( projects / "google" / "skills-distillation" ) in roots   # container → host
     assert all( not r.startswith( "/var/" ) for r in roots )             # nothing left untranslated
-    assert all( Path( r ).is_dir() for r in roots )                      # every root REACHES
+
+    # "every root REACHES" is scoped to the TRANSLATED roots, which is what this test
+    # is about. The fleet data root is deliberately EXEMPT: it is emitted whether or
+    # not it exists yet, exactly as an unreachable config root is, so that a missing
+    # data dir surfaces in `roots_unreachable` as a NUMBER instead of a silence. A
+    # blanket is_dir() assertion here would force the sweep to drop it silently —
+    # which is the failure this root was added to prevent.
+    translated = [ r for r in roots if r != _data_root( projects / "lupin" ) ]
+    assert all( Path( r ).is_dir() for r in translated )                  # every root REACHES
 
 
 # ---- anchor derivation ------------------------------------------------------
@@ -931,7 +954,7 @@ def test_dedupe_does_NOT_collapse_a_worktree_into_its_main_repo( tmp_path ):
 
 def test_host_root_is_always_present_even_with_an_empty_config( tmp_path ):
     roots = _compute_hold_roots( FakeConfigMgr(), host_root=str( tmp_path ), scan_fn=lambda: [ ] )
-    assert roots == [ str( tmp_path ) ]
+    assert roots == [ str( tmp_path ), _data_root( tmp_path ) ]
 
 
 def test_config_order_first_then_scan_order( tmp_path ):
@@ -943,7 +966,8 @@ def test_config_order_first_then_scan_order( tmp_path ):
                                     scan_fn=lambda: [ str( projects / "google" / "harvey-labs" ) ] )
     assert roots == [ str( projects / "lupin" ),                 # host_root first (config's lupin dedupes)
                       str( projects / "planning-is-prompting" ),  # …then config order
-                      str( projects / "google" / "harvey-labs" ) ]   # …then scan order
+                      str( projects / "google" / "harvey-labs" ),    # …then scan order
+                      _data_root( projects / "lupin" ) ]             # …then the FLEET DATA ROOT, last
 
 
 # ---- the raw config read ----------------------------------------------------
