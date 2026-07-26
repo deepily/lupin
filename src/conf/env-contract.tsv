@@ -61,6 +61,19 @@ CLAUDE_CODE_USE_VERTEX	HOST	operator ~/.bashrc	ENUM:0|1	OPTIONAL	Only needed for
 ANTHROPIC_VERTEX_PROJECT_ID	HOST	operator ~/.bashrc	LITERAL	OPTIONAL_UNLESS:CLAUDE_CODE_USE_VERTEX=1	Ranked BELOW GOOGLE_CLOUD_PROJECT/GCLOUD_PROJECT — a literal elsewhere can silently bill another project.
 CLOUD_ML_REGION	HOST	operator ~/.bashrc	ENUM:global	OPTIONAL_UNLESS:CLAUDE_CODE_USE_VERTEX=1	Opus 4.8 on Vertex is GLOBAL-ONLY. A regional value yields model-not-found, which the CC wizard mis-reports as "permission denied".
 
+# ── Cloud SQL / database (VM container) ──────────────────────────────────────
+# Requirement below is COMPOSE'S OWN declaration, not a judgement call: `${VAR:?msg}`
+# aborts `up` when unset (=> REQUIRED); `${VAR:-default}` cannot (=> OPTIONAL).
+CLOUD_SQL_CONNECTION_NAME	CONTAINER	cloud-gpu.env	LITERAL	REQUIRED	project:region:instance for the cloud-sql-proxy sidecar AND the app. `${...:?}` in cloud-gpu.yml:61,181 and cloud-test.yml:60,107 — unset aborts `up` outright. Preflight C also probes the resulting socket at /cloudsql/<this>/.s.PGSQL.5432.
+DB_PASSWORD	CONTAINER	cloud-gpu.env	SECRET	REQUIRED	`${...:?}` (cloud-gpu.yml:184). Sourced from Secret Manager `lupin-db-password`. cloud-gpu.env is mode 600 / uid 1001 — a plain grep by the SSH user reads NOTHING, with no error.
+DB_USER	CONTAINER	cloud-gpu.env	LITERAL	OPTIONAL	Defaults to `lupin_app` in compose (cloud-gpu.yml:182). Absent is compliant; the default is the deployed value.
+DB_NAME	CONTAINER	cloud-gpu.env	LITERAL	OPTIONAL	Defaults to `lupin_db_test` in compose (cloud-gpu.yml:183). NB the host dev engine is lupin_db_dev — code guarded by `if "lupin_db_test" not in db_url` never executes on the host.
+LUPIN_IMAGE	CONTAINER	cloud-gpu.env	LITERAL	OPTIONAL	The app image tag; defaults to `lupin:1.1.0` (cloud-gpu.yml:80). An unset value silently deploys the DEFAULT tag rather than failing, so a stale image looks like a successful deploy.
+LUPIN_MODEL_SERVER_TAG	CONTAINER	cloud-gpu.env	LITERAL	OPTIONAL	Model-server image tag, defaults to `0.1.0` (cloud-test.yml:143). Same silent-default hazard as LUPIN_IMAGE.
+LUPIN_MODEL_SERVER_URL	CONTAINER	cloud-gpu.env	LITERAL	REQUIRED	The Cloud Run service URL. REQUIRED is the VM's regime (`${...:?}` cloud-gpu.yml:193); the LOCAL docker-compose.yml gives it a `:-http://lupin-model-server:7998` default instead, so its requirement is venue-dependent and this contract states the VM's.
+CLAUDE_CODE_OAUTH_TOKEN	CONTAINER	cloud-gpu.env	SECRET	OPTIONAL	`${...:-}` (cloud-gpu.yml:199, cloud-test.yml:121) so unset resolves to EMPTY and never blocks `up`. ⚠️ MEASURED 2026-07-26: the line is COMMENTED OUT at cloud-gpu.env:31, so it IS empty on the VM today. What that breaks is NOT established — read the consumer before asserting anything.
+GH_TOKEN	CONTAINER	operator ~/.bashrc	SECRET	OPTIONAL	`${GH_TOKEN:-}` in the LOCAL docker-compose.yml only (:204, :312) — not interpolated by either cloud compose file. Unset resolves to empty; gh CLI calls inside the container then run unauthenticated.
+
 # ── test venues (dev box only) ───────────────────────────────────────────────
 LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL	HOST	operator ~/.bashrc	EMAIL	OPTIONAL	Test/proxy auth as the SAME user, so both share a WebSocket channel. Absent => "Operation cancelled" failures.
 LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD	HOST	operator ~/.bashrc	SECRET	OPTIONAL	See above.

@@ -5,9 +5,20 @@ THE DEFECT THIS EXISTS TO CATCH
 -------------------------------
 `src/conf/env-contract.tsv` calls itself, in its own header, "the ONE in-repo
 authority for Lupin's environment variables." Measured 2026-07-26 it held FOUR of
-the FOURTEEN variables the compose files interpolate. Seven of the ten missing ones
-are in the VM's own `docker-compose.cloud-gpu.yml` — `DB_PASSWORD`,
-`CLOUD_SQL_CONNECTION_NAME`, `CLAUDE_CODE_OAUTH_TOKEN`, `LUPIN_IMAGE` among them.
+the FOURTEEN variables the compose files interpolate — a nine-var hole once `HOME`
+is set aside as EXEMPT. All nine were added 2026-07-26 and this comparator now holds
+the line at zero.
+
+Of those nine, `cloud-gpu.env` on the VM supplies SEVEN: `CLOUD_SQL_CONNECTION_NAME`,
+`DB_PASSWORD`, `DB_USER`, `DB_NAME`, `LUPIN_IMAGE`, `LUPIN_MODEL_SERVER_TAG`,
+`LUPIN_MODEL_SERVER_URL`. It does NOT supply the other two: `CLAUDE_CODE_OAUTH_TOKEN`
+is present but COMMENTED OUT at `cloud-gpu.env:31`, so it resolves to empty on the VM
+today, and `GH_TOKEN` is interpolated only by the local `docker-compose.yml`.
+
+REQUIRED vs OPTIONAL was not a judgement call in the end — compose declares it:
+`${VAR:?msg}` aborts `up` when unset (REQUIRED, 3 vars), `${VAR:-default}` cannot
+(OPTIONAL, 6). One var is venue-split: `LUPIN_MODEL_SERVER_URL` is `:?` on the VM but
+`:-` locally, and the contract records the VM's regime with that stated in its note.
 
 The preflight's layer-A1 iterates the CONTRACT, so a variable absent from the
 contract is a variable the preflight structurally cannot assert. Its failure mode is
@@ -102,19 +113,25 @@ def _contract_names():
 
 # ── the coverage assertion ────────────────────────────────────────────────
 
-_KNOWN_GAP = pytest.mark.xfail(
-    strict = True,
-    reason = "row a5255712 — the contract holds 4 of the 14 vars compose interpolates. "
-             "ARMED AS A LIVE GATE, not a waiver: strict=True means these XPASS→FAIL the "
-             "moment the missing vars are added, forcing the marker off rather than letting "
-             "a stale exemption outlive the gap. Deliberately NOT closed in the same commit "
-             "that adds the comparator — the 7 cloud vars want surface=CONTAINER / "
-             "writer=cloud-gpu.env (measured on the VM), and getting REQUIRED vs OPTIONAL "
-             "wrong there flips the VM preflight from blocking=0 to blocking=7.",
-)
+# The xfail(strict) marker that used to sit here is GONE, and it came off the way it
+# was designed to: the 9 missing vars were added to the contract, all four assertions
+# XPASSed, and strict=True turned that into a FAILURE rather than letting a stale
+# waiver outlive the gap it excused. The marker forced its own removal.
+#
+# ⚠️ WHAT A GREEN HERE STILL DOES NOT MEAN — measured 2026-07-26, filed as its own row:
+# `pfv_parse_manifest "$CONTRACT"` appears exactly ONCE in preflight-vm.sh, at :191,
+# inside layer A1 — and A1 `continue`s past every surface=CONTAINER row (:158-159) on
+# the stated grounds that "CONTAINER-surface vars are asserted in layer C". Layer C
+# never iterates the contract. It hand-codes checks for four of them. So the nine rows
+# this test now certifies as COVERED are asserted by nothing at all.
+#
+# That is precisely the scope line this file's module docstring already draws — "this
+# asserts COVERAGE, not correctness ... a green here is a floor" — and it is why the
+# floor is worth having anyway: a var absent from the contract cannot be asserted by
+# ANY layer, on any box, ever. Closing that reach gap is a prerequisite for the
+# follow-on, not a substitute for it.
 
 
-@_KNOWN_GAP
 @pytest.mark.parametrize( "compose_file", COMPOSE_FILES )
 def test_every_compose_interpolated_var_is_in_the_contract( compose_file ):
     """
@@ -145,7 +162,6 @@ def test_every_compose_interpolated_var_is_in_the_contract( compose_file ):
     )
 
 
-@_KNOWN_GAP
 def test_the_contract_covers_every_compose_file_at_once():
     """The union, so a var moving between compose files cannot slip through the
     per-file parametrization."""
