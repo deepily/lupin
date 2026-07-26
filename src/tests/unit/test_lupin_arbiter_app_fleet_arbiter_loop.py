@@ -635,26 +635,54 @@ def test_NEGATIVE_CONTROL_untranslated_container_paths_reach_nothing( tmp_path )
     perfectly reasonable and reaches ZERO holds.
 
     This test asserts the FAILURE is LOUD: every untranslated root must be
-    REPORTED (is_dir() False → roots_unreachable downstream), never silently
+    REPORTED (emitted verbatim → roots_unreachable downstream), never silently
     skipped. It is the control that MUST fail — delete the translation and
     `test_translation_is_what_reaches_the_holds` goes RED while this one stays
     green, which is exactly how you tell "swept 0 roots" from "found 0 prunable".
+
+    ⚠️ Bug 7c2e889e — this control used to hard-code the REAL container literals
+    (/var/external-projects/…) and assert `not is_dir()` on them as "host truth".
+    That is not a truth, it is an accident of what happens to be mounted: those
+    paths genuinely exist inside lupin-rest-test (the multi-repo doc-viewer bind),
+    so the control went RED in the venue CLOSEST to where the arbiter's translation
+    problem actually lives, and was green on the host only because nothing was
+    mounted there. A control whose falsity is venue-dependent is not a control, and
+    every mount added makes it worse — silently, had it not already been red.
+
+    So absence is now a property of THIS fixture rather than of the venue: the
+    container-shaped roots live under `tmp_path`, which pytest makes unique per test
+    and which is never created. The claims about the REAL literals are kept, but
+    stated as claims about `_translate_container_root` — which never touches the
+    filesystem — so they hold identically on the host and in any container.
     """
-    projects  = _make_projects_tree( tmp_path )
-    container = [ "/var/external-projects/lupin", "/var/external-projects/google/skills-distillation" ]
+    projects = _make_projects_tree( tmp_path )
+
+    # Container-SHAPED, absent BY CONSTRUCTION — never created, unique per test.
+    absent_mount = tmp_path / "absent-mount" / "external-projects"
+    container    = [ str( absent_mount / "lupin" ),
+                     str( absent_mount / "google" / "skills-distillation" ) ]
 
     for raw in container:
-        assert not Path( raw ).is_dir()                          # host truth: they do not exist
+        assert not Path( raw ).is_dir()                          # true in EVERY venue
         # …and no anchor can be derived against a host root, so nothing translates:
         assert _translate_container_root( raw, None ) is None
 
+    # The real container literals, asserted where it is safe to assert them: with no
+    # anchor, translation short-circuits before any filesystem access, so this pins
+    # the actual bug shape without depending on what is mounted.
+    for raw in [ "/var/external-projects/lupin", "/var/external-projects/google/skills-distillation" ]:
+        assert _translate_container_root( raw, None ) is None
+
     # The whole point: a config-derived list, untranslated, reaches nothing.
+    # `cosa-voice` cannot anchor against a host root named `lupin`, so it is emitted
+    # VERBATIM. Asserting the exact root list is stronger than the old is_dir() filter
+    # AND owes nothing to the filesystem: scan_fn is empty, so this is fully determined.
+    unreachable = str( absent_mount / "cosa-voice" )
     roots = _compute_hold_roots( FakeConfigMgr( repos=[ "cosa-voice" ],
-                                                paths={ "cosa-voice": "/var/external-projects/cosa-voice" } ),
+                                                paths={ "cosa-voice": unreachable } ),
                                  host_root=str( projects / "lupin" ),
                                  scan_fn=lambda: [ ] )
-    untranslatable = [ r for r in roots if not Path( r ).is_dir() ]
-    assert untranslatable == [ "/var/external-projects/cosa-voice" ]   # PASSED THROUGH, not dropped
+    assert roots == [ str( projects / "lupin" ), unreachable ]    # PASSED THROUGH, not dropped
     #     ^ emitted on purpose so the sweep reports it in roots_unreachable:
     #       the gap stays a NUMBER instead of a silence.
 
