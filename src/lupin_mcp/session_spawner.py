@@ -1074,8 +1074,16 @@ def list_spawned_sessions(
                     identity_warning, unattributable_bridges }
         - model surfaces the persisted manifest model id (None when a pre-fix
           record predates model capture — honest absence, never a guess)
-        - Never raises (a missing manifest yields an empty list; an empty roster
-          is identity_complete=True with no warning — nothing was claimed)
+        - Never raises (a missing manifest yields an empty list)
+        - identity_complete is `warning is None`, and _build_identity_warning returns a
+          warning whenever unattributable_bridges > 0 — REGARDLESS OF ROW COUNT. So an
+          EMPTY roster with a corrupt bridge is identity_complete=FALSE, not True.
+          🔴 This bullet used to promise the opposite ("an empty roster is
+          identity_complete=True with no warning — nothing was claimed"), and it was
+          FALSE from the moment the R-1 fix landed at 6ef13065 — stale inside its own fix
+          commit, which is what row e788fce2 was filed for. Measured there: 0 records +
+          1 corrupt bridge -> identity_complete=False. The code and its test agreed; the
+          contract was the one lying, and a contract is the half a reader trusts.
 
     Args:
         manager_session_id: lineage key
