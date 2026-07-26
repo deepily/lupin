@@ -612,7 +612,7 @@ def _is_skipped_dir( path, skip_dir_names ):
     return path.name == "worktrees" and path.parent.name == ".claude"
 
 
-def _probe_dir_for_holds( root, max_depth ):
+def _probe_dir_for_holds( root, max_depth, glob_pat=None ):
     """
     Count hold files inside a directory the sweep is SKIPPING — depth-bounded.
 
@@ -624,11 +624,13 @@ def _probe_dir_for_holds( root, max_depth ):
 
     Requires:
         - root is a Path; max_depth is a non-negative int
+        - glob_pat is an fnmatch pattern, or None for the default HOLD_GLOB
 
     Ensures:
-        - Returns the list of hold-file Paths found under root within max_depth
+        - Returns the list of matching Paths found under root within max_depth
         - Never descends into a nested skipped dir; never raises (OSError → [])
     """
+    if glob_pat is None: glob_pat = HOLD_GLOB
     found = [ ]
     stack = [ ( root, 0 ) ]
     while stack:
@@ -645,18 +647,19 @@ def _probe_dir_for_holds( root, max_depth ):
             if is_dir:
                 if depth < max_depth and not _is_skipped_dir( Path( entry.path ), SWEEP_SKIP_DIR_NAMES ):
                     stack.append( ( Path( entry.path ), depth + 1 ) )
-            elif fnmatch( entry.name, HOLD_GLOB ):
+            elif fnmatch( entry.name, glob_pat ):
                 found.append( Path( entry.path ) )
     return found
 
 
-def _walk_hold_files( root, max_depth, skip_dir_names ):
+def _walk_hold_files( root, max_depth, skip_dir_names, glob_pat=None ):
     """
     Depth-bounded recursive scan of ONE root for hold files.
 
     Requires:
         - root is a Path; max_depth is a non-negative int; skip_dir_names is a
           container of directory names
+        - glob_pat is an fnmatch pattern, or None for the default HOLD_GLOB
 
     Ensures:
         - Returns ( hold_paths, skipped_dirs ) where skipped_dirs is a list of
@@ -666,6 +669,7 @@ def _walk_hold_files( root, max_depth, skip_dir_names ):
           directory only
         - Never raises
     """
+    if glob_pat is None: glob_pat = HOLD_GLOB
     found, skipped = [ ], [ ]
     stack = [ ( root, 0 ) ]
     while stack:
@@ -682,18 +686,18 @@ def _walk_hold_files( root, max_depth, skip_dir_names ):
             if is_dir:
                 child = Path( entry.path )
                 if _is_skipped_dir( child, skip_dir_names ):
-                    holds = _probe_dir_for_holds( child, max_depth )
+                    holds = _probe_dir_for_holds( child, max_depth, glob_pat=glob_pat )
                     if holds:
                         skipped.append( { "dir": str( child ), "hold_count": len( holds ) } )
                 elif depth < max_depth:
                     stack.append( ( child, depth + 1 ) )
-            elif fnmatch( entry.name, HOLD_GLOB ):
+            elif fnmatch( entry.name, glob_pat ):
                 found.append( Path( entry.path ) )
     return found, skipped
 
 
 def _iter_hold_paths( base_dir=None, base_dirs=None, max_depth=DEFAULT_SWEEP_MAX_DEPTH,
-                      skip_dir_names=SWEEP_SKIP_DIR_NAMES ):
+                      skip_dir_names=SWEEP_SKIP_DIR_NAMES, glob_pat=None ):
     """
     Enumerate hold files across one or many roots — the shared sweep front-end.
 
@@ -701,6 +705,11 @@ def _iter_hold_paths( base_dir=None, base_dirs=None, max_depth=DEFAULT_SWEEP_MAX
         - base_dir is path-like / str / None (LEGACY single-root mode)
         - base_dirs is an iterable of path-like roots, or None
         - max_depth is a non-negative int; skip_dir_names is a container of names
+        - glob_pat selects the FILE FAMILY to enumerate; None means HOLD_GLOB, so
+          every pre-existing caller keeps its exact behavior. The traversal is
+          family-agnostic — what a file MEANS is the classifier's business, not
+          the walker's, which is why a second runtime-state family can reuse this
+          without touching classify_hold_file (row 8758d0b1).
 
     Ensures:
         - base_dirs is None → LEGACY mode: the single resolved base_dir, glob'd
@@ -713,10 +722,11 @@ def _iter_hold_paths( base_dir=None, base_dirs=None, max_depth=DEFAULT_SWEEP_MAX
           sorted deterministically
         - Never raises
     """
+    if glob_pat is None: glob_pat = HOLD_GLOB
     if base_dirs is None:
         base = _resolve_base_dir( base_dir )
         try:
-            return [ str( base ) ], [ ], sorted( base.glob( HOLD_GLOB ) ), [ ]
+            return [ str( base ) ], [ ], sorted( base.glob( glob_pat ) ), [ ]
         except OSError:
             return [ ], [ { "root": str( base ), "error": "glob_failed" } ], [ ], [ ]
 
@@ -735,7 +745,7 @@ def _iter_hold_paths( base_dir=None, base_dirs=None, max_depth=DEFAULT_SWEEP_MAX
         if not reachable:
             roots_unreachable.append( { "root": key, "error": "not_a_directory" } )
             continue
-        found, skipped_here = _walk_hold_files( root, max_depth, skip_dir_names )
+        found, skipped_here = _walk_hold_files( root, max_depth, skip_dir_names, glob_pat=glob_pat )
         roots_swept.append( key )
         paths.extend( found )
         skipped.extend( skipped_here )
