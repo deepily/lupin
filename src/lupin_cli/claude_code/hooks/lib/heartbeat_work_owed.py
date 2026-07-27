@@ -141,10 +141,10 @@ MUTE_PROMPT_SENTINEL = "[heartbeat: pokes muted]"
 # a verification debt outranks the hold's quiescence by design), asserting "no
 # fresh hold" is FALSE — the hold is fresh, just overridden. The override clause
 # states the true state so the pokee isn't told to declare a hold it already has.
-NO_FRESH_HOLD_CLAUSE   = ", no fresh hold"
+NO_FRESH_HOLD_CLAUSE   = "No fresh hold. "
 HOLD_OVERRIDDEN_CLAUSE = (
-    " — your fresh hold is HONORED but OVERRIDDEN by a due obligation (a user-gate "
-    "re-ask or a worker-verification debt), which is owed work a declared hold cannot suppress"
+    "Your fresh hold is HONORED but OVERRIDDEN by a due obligation (a user-gate re-ask "
+    "or a worker-verification debt) — owed work a declared hold cannot suppress. "
 )
 
 # COMPRESSED 2026-07-27 (Rick): 1,099 -> 650 chars rendered, 41% shorter. Every
@@ -162,7 +162,7 @@ HOLD_OVERRIDDEN_CLAUSE = (
 # parsing four question-form sentences to find which one is theirs. A poke nobody
 # finishes reading is a poke that does not fire.
 POKE_REASON_TEMPLATE = (
-    POKE_PROMPT_SENTINEL + " — {specifics}{hold_clause}. Do ONE now:\n"
+    POKE_PROMPT_SENTINEL + " — {specifics}\n{hold_clause}Do ONE now:\n"
     "1. WORK IT — drive it. Manage a crew? Delegate, spawn if tasks > workers. Never build it yourself.\n"
     "2. PEER-BLOCKED — DM for status, then write .heartbeat-hold-<FULL-hyphenated-session-id>.json "
     "(NOT the 8-char form) with reason + awaiting: peer:<name>.\n"
@@ -170,6 +170,8 @@ POKE_REASON_TEMPLATE = (
     "notify, not a hold. Re-ask until answered.\n"
     "4. NOTHING OWED — prove it: hold with work_owed: false."
 )
+
+SPECIFICS_JOINER  = "\n- "
 
 NO_WORK_SPECIFICS = "no owed work detected"
 
@@ -681,7 +683,15 @@ def evaluate_work_owed( todo_items=None, pending_decisions=None,
     return {
         "work_owed" : bool( signals ),
         "signals"   : signals,
-        "specifics" : "; ".join( specifics ) if specifics else NO_WORK_SPECIFICS,
+        # ONE OBLIGATION PER LINE (Rick, 2026-07-27). "; " joined up to four separate
+        # demands — owed rows, workers still out, a verification debt, a staff-up — into
+        # a single wrapping paragraph where the reader had to parse punctuation to find
+        # the boundaries. The FIRST specific stays on the sentinel line because it is
+        # the headline (the owed count); the rest become their own dashed lines.
+        # "- " and not "· ", which the owed summary already uses INSIDE itself to
+        # separate the status split from the priority split — reusing it as the
+        # line bullet would make one glyph mean two different groupings.
+        "specifics" : SPECIFICS_JOINER.join( specifics ) if specifics else NO_WORK_SPECIFICS,
     }
 
 

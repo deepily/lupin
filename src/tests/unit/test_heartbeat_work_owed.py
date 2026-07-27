@@ -354,7 +354,7 @@ def test_all_signals_fire_strongest_first():
         "needs_verification", "outstanding_user_gate",
     ]
     # specifics carries all seven counts (6 separators)
-    assert v[ "specifics" ].count( ";" ) == 6
+    assert v[ "specifics" ].count( o.SPECIFICS_JOINER ) == 6
 
 
 def test_all_nine_signals_fire_strongest_first():
@@ -380,7 +380,7 @@ def test_all_nine_signals_fire_strongest_first():
         "needs_verification", "outstanding_user_gate",
         "surface_operator_gates", "spinup_nudge",
     ]
-    assert v[ "specifics" ].count( ";" ) == 8
+    assert v[ "specifics" ].count( o.SPECIFICS_JOINER ) == 8
 
 
 # ── build_poke_reason ─────────────────────────────────────────────────────────
@@ -683,7 +683,7 @@ def _specifics_verdict():
 def test_build_poke_reason_default_says_no_fresh_hold():
     """Default (hold_overridden=False) keeps the byte-identical 'and no fresh hold'."""
     reason = o.build_poke_reason( _specifics_verdict() )
-    assert "no fresh hold" in reason
+    assert "No fresh hold" in reason
     assert "OVERRIDDEN" not in reason
     assert reason.startswith( o.POKE_PROMPT_SENTINEL )     # still recognized as a poke
 
@@ -817,3 +817,38 @@ def test_without_owed_summary_the_transcript_replay_wording_is_UNCHANGED():
     items = [ { "status": o.TODO_IN_PROGRESS, "owned_by_me": True } ]
     v = o.evaluate_work_owed( todo_items=items )
     assert "1 in-progress TODO item(s) you own" in v[ "specifics" ]
+
+
+def test_each_obligation_gets_its_own_line( ):
+    """
+    Rick, 2026-07-27: the joined line ran four separate demands into one wrapping
+    paragraph. Each obligation is now its own dashed line; only the FIRST (the owed
+    headline) shares the sentinel line.
+    """
+    v = o.evaluate_work_owed(
+        todo_items              = [ { "status": o.TODO_PENDING, "owned_by_me": True } ],
+        outstanding_delegations = [ { "id": 1 } ],
+        needs_verification      = True,
+        needs_spinup_check      = True,
+        owed_summary            = "12 owed: 3 in progress, 9 queued" )
+    lines = o.build_poke_reason( v ).split( "\n" )
+    assert lines[ 0 ].startswith( "Do not stop yet — 12 owed:" )
+    assert lines[ 1 ].startswith( "- " ) and lines[ 2 ].startswith( "- " )
+    assert "; " not in lines[ 0 ]
+
+
+def test_the_bullet_is_not_the_glyph_the_owed_summary_uses_internally():
+    """
+    The owed summary already uses "·" INSIDE itself to split status from priority.
+    Reusing it as the line bullet would make one glyph mean two groupings.
+    """
+    assert o.SPECIFICS_JOINER.strip() == "-"
+    assert "·" in o.format_owed_summary( { "queued": 3 }, { "P2": 3 } )
+
+
+def test_the_hold_clause_starts_its_own_sentence_not_a_trailing_comma():
+    """It used to glue onto the previous specific — "...the 4 P1s, no fresh hold."""
+    v = o.evaluate_work_owed( todo_items=[ { "status": o.TODO_PENDING, "owned_by_me": True } ],
+                              owed_summary="12 owed: 3 in progress, 9 queued" )
+    reason = o.build_poke_reason( v )
+    assert "\nNo fresh hold. Do ONE now:" in reason

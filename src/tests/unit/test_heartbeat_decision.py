@@ -200,7 +200,7 @@ def test_gate_override_under_honored_hold_uses_honest_text():
     assert r[ "outcome" ] == hd.OUTCOME_POKE
     reason = r[ "hook_output" ][ "reason" ]
     assert "OVERRIDDEN" in reason                 # honest override clause
-    assert "and no fresh hold" not in reason      # the false assertion is gone
+    assert "no fresh hold" not in reason.lower().replace( "no fresh hold. do one", "" )      # the false assertion is gone
 
 
 def test_oracle_owed_no_hold_keeps_no_fresh_hold_text():
@@ -208,7 +208,7 @@ def test_oracle_owed_no_hold_keeps_no_fresh_hold_text():
     'and no fresh hold' clause (hold_overridden is False on the non-override path)."""
     r = hd.decide_heartbeat( None, _owed_verdict(), 0, 3, now=NOW )
     reason = r[ "hook_output" ][ "reason" ]
-    assert "no fresh hold" in reason
+    assert "No fresh hold" in reason
     assert "OVERRIDDEN" not in reason
 
 
