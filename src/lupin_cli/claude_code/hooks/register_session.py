@@ -1351,25 +1351,34 @@ def main():
         # the explicit carry-forward list. session_data wins for keys it
         # provides; existing fills in everything else.
         # See: src/rnd/v0.1.7/2026.05.17-owner-user-id-stamper-writer-side/01-design.md §D4 Fix B
-        try:
-            existing = { }
-            if os.path.exists( session_file ):
-                try:
-                    with open( session_file ) as f:
-                        existing = json.load( f )
-                    if not isinstance( existing, dict ):
-                        existing = { }
-                except ( json.JSONDecodeError, OSError ):
+        existing = { }
+        if os.path.exists( session_file ):
+            try:
+                with open( session_file ) as f:
+                    existing = json.load( f )
+                if not isinstance( existing, dict ):
                     existing = { }
-            merged = { **existing, **session_data }
-            # Atomic (row 49b2c80b). The stable-id lockfile twelve lines above
-            # is already O_EXCL against "the documented double-fire on
-            # --continue (two concurrent SessionStart hooks)" — that same
-            # concurrency reaches THIS write, which had no guard at all. The
-            # lock went on the id; the bridge got nothing.
-            atomic_write_json( session_file, merged )
-        except OSError:
-            pass  # Best-effort
+            except ( json.JSONDecodeError, OSError ):
+                existing = { }
+        merged = { **existing, **session_data }
+        # Atomic (row 49b2c80b). The stable-id lockfile twelve lines above
+        # is already O_EXCL against "the documented double-fire on
+        # --continue (two concurrent SessionStart hooks)" — that same
+        # concurrency reaches THIS write, which had no guard at all. The
+        # lock went on the id; the bridge got nothing.
+        #
+        # ⚠️ NO try/except HERE — deliberately, row 0f10ff75. There WAS an
+        # `except OSError: pass` wrapping this block and it was DEAD:
+        # `atomic_write_json` catches ( OSError, TypeError, ValueError )
+        # itself, unlinks its temp file, prints a stderr witness naming the
+        # path, and returns False. Its contract says "Never raises" and the
+        # BODY agrees. The only other statement the wrapper covered was
+        # `os.path.exists`, which swallows OSError and returns False.
+        # ⇒ The guard for a failed bridge write lives INSIDE the callee, at
+        # the mechanism — one witness rather than one per call site, six of
+        # which ignore the return entirely. A dead handler here read as
+        # "handled locally" and cost the next reader the trail.
+        atomic_write_json( session_file, merged )
 
     # ── Phase 3: Write to CLAUDE_ENV_FILE (for Bash commands) ─────────────
     # Use stable_session_id so all hooks produce consistent sender_ids
