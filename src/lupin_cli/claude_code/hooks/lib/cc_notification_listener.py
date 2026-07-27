@@ -1006,9 +1006,22 @@ class CCNotificationListener( BaseWebSocketListener ):
             self._log( f"{self.LOG_PREFIX} Gister failed: {e}" )
             gist = None
 
-        # Fallback: first 5 words
+        # Fallback: first 5 words.
+        #
+        # FAIL-LOUD (2026-07-27): this fallback is INDISTINGUISHABLE from a real gist at
+        # the UI — "Received: <5 words>" reads as a short paraphrase, not as a failure —
+        # so a broken Gister degrades silently and stays broken. It did: 526 consecutive
+        # fallbacks between 2026-07-14 and 2026-07-27 (`LUPIN_CONFIG_MGR_CLI_ARGS` not
+        # forwarded across the tmux pane boundary), during which the gist model was never
+        # contacted and no vLLM-side error ever appeared to signal the outage. Mark the
+        # degraded path explicitly so the next occurrence is greppable on sight.
         if not gist:
             gist = " ".join( text.split()[ :5 ] )
+            self._log(
+                f"{self.LOG_PREFIX} DEGRADED: gist unavailable — emitting 5-word prefix "
+                f"fallback \"{gist}\". This is NOT a model-generated gist; the Gister "
+                f"failure logged above is the cause."
+            )
 
         try:
             from lupin_cli.notifications.notification_models import (

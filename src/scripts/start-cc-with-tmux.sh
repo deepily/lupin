@@ -254,6 +254,28 @@ fi
 if [[ -n "${HOOK_TTS_ENABLED:-}" ]]; then
     INNER+="export HOOK_TTS_ENABLED=$(printf '%q' "$HOOK_TTS_ENABLED"); "
 fi
+# ── Forward LUPIN_CONFIG_MGR_CLI_ARGS — third sibling of the 2026-07-14 boundary bug ──
+# ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ) reads this var for
+# its config_path/splainer_path/config_block_id. It is exported in ~/.bashrc, but the
+# pane shell is non-login (the .bashrc interactive guard returns before reaching it) and
+# the tmux server carries no arbitrary parent env — so without this forward the var never
+# reaches `claude`, never reaches the hooks, and never reaches the CC notification
+# listener spawned by register_session._spawn_listener_locked (which does env.copy() and
+# so faithfully inherits the gap).
+#
+# Symptom when missing: _send_gist_response()'s `Gister()` construction raises
+# "[LUPIN_CONFIG_MGR_CLI_ARGS] is NOT set", the except swallows it, and the gist degrades
+# to `" ".join( text.split()[:5] )` — a 5-word prefix that reads like a truncated gist,
+# not like a failure. Cost: 526 consecutive fallback receipts between 2026-07-14 23:49
+# and 2026-07-27, with the Phi-4 gist model (svllmc, :3001) never once contacted — which
+# is why no 404s ever appeared in the vLLM log to give the game away.
+#
+# Same tmux-server-restart event, same frozen non-login env, same day as the LUPIN_ROOT
+# and LUPIN_DEV_EMAIL forwards above. Those two were noticed because they failed loudly;
+# this one was not. GUARDED for the same clobber reason documented above.
+if [[ -n "${LUPIN_CONFIG_MGR_CLI_ARGS:-}" ]]; then
+    INNER+="export LUPIN_CONFIG_MGR_CLI_ARGS=$(printf '%q' "$LUPIN_CONFIG_MGR_CLI_ARGS"); "
+fi
 if [[ -f "$VENV_ACTIVATE" ]]; then
     INNER+="source $(printf '%q' "$VENV_ACTIVATE"); "
 fi
