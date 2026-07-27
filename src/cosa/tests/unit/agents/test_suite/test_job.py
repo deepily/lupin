@@ -907,3 +907,72 @@ def test_parse_non_pytest_stdout_total_only_no_marker_is_none():
     out = TSJob._parse_non_pytest_stdout(
         "websocket", "Total Tests: 12\n" )
     assert out is None
+
+
+# ---------------------------------------------------------------------------
+# Bug 8b93bcf5 follow-up — a DEAD READER THREAD must not read as a clean run.
+#
+# `69295c25` moved readline() off the main path into a daemon reader thread to
+# stop a silent child from parking the poll loop. The move was right; its error
+# path was not. The thread's `finally` posted the EOF sentinel on ANY exit, so a
+# crashed reader was indistinguishable from clean EOF: the loop fell through to
+# `exit_code = process.returncode` and reported a tier whose output was never
+# read as 0 passed / 0 failed / 0 errors / exit 0 — GREEN. Strictly worse than
+# the 0/0/0/1 that 8b93bcf5 was filed about, because that at least said "error".
+#
+# These are the controls. Each fails if the crash sentinel is removed, and the
+# predicted failure is stated so a red here is diagnosable rather than merely red.
+# ---------------------------------------------------------------------------
+
+def test_reader_thread_crash_is_not_reported_as_success( monkeypatch, no_real_log ):
+    """
+    A reader-thread crash must surface as errors=1 / exit_code=1.
+
+    Remove the crash sentinel and this fails as `assert 0 == 1` on exit_code —
+    the exact shape the regression wore for a day before anyone ran this tree.
+    """
+    _patch_config_mgr( monkeypatch, extra="" )
+    monkeypatch.setattr( job_mod.os.path, "exists", lambda p: True )
+    fake = _FakeProcess( lines=[], returncode=0,
+                         readline_raises=RuntimeError( "reader blew up" ) )
+    monkeypatch.setattr( job_mod.subprocess, "Popen", lambda *a, **k: fake )
+
+    job = _make_job()
+    res = job._run_suite( "unit", "/proj" )
+
+    assert res[ "exit_code" ] == 1,  "a crashed reader must not report the child's exit code"
+    assert res[ "errors"    ] == 1,  "a crashed reader must be counted as an error"
+    assert "reader blew up" in res[ "error" ], "the original exception must survive to the caller"
+
+
+def test_reader_crash_marker_is_distinct_from_the_eof_sentinel():
+    """
+    The marker must not BE the EOF sentinel — that identity was the whole bug.
+
+    Without this, someone 'simplifying' the marker back to None would restore
+    the silence and every other test here would stay green.
+    """
+    crash = job_mod._StdoutReaderCrash( ValueError( "x" ), "tb text" )
+    assert crash is not None
+    assert not isinstance( crash, str ), "a marker that is a str would be appended to the log as output"
+    assert crash.exc.args == ( "x", )
+    assert crash.tb == "tb text"
+
+
+def test_clean_eof_still_reports_the_childs_own_exit_code( monkeypatch, no_real_log ):
+    """
+    CONTROL IN THE OTHER DIRECTION: a healthy run must be unaffected.
+
+    A fix that raised on every EOF would pass the crash tests above while
+    breaking every real run — this is the arm that catches it.
+    """
+    _patch_config_mgr( monkeypatch, extra="" )
+    monkeypatch.setattr( job_mod.os.path, "exists", lambda p: True )
+    fake = _FakeProcess( lines=[ "ok\n" ], returncode=0 )
+    monkeypatch.setattr( job_mod.subprocess, "Popen", lambda *a, **k: fake )
+
+    job = _make_job()
+    res = job._run_suite( "unit", "/proj" )
+
+    assert res[ "exit_code" ] == 0
+    assert res.get( "error" ) in ( None, "" ) or "reader" not in str( res.get( "error" ) )

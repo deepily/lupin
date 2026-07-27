@@ -49,14 +49,62 @@ class TestRevisionChain( unittest.TestCase ):
     def test_down_revision_chains_to_prior_head( self ):
         self.assertEqual( self.mig.down_revision, _HEAD_BEFORE_THIS )
 
-    def test_this_revision_is_a_head( self ):
-        # No other migration may list this revision as its down_revision.
-        for path in glob.glob( os.path.join( _versions_dir(), "*.py" ) ):
+    def test_no_two_migrations_share_a_down_revision( self ):
+        """
+        The chain must not FORK — no two migrations may declare the same parent.
+
+        WHAT THIS REPLACED, AND WHY (2026-07-27, row 5bf28e07)
+        -----------------------------------------------------
+        This assertion used to be `test_this_revision_is_a_head`: it walked every
+        migration and required that NONE list this revision as its down_revision.
+        That is stale by construction — it holds only until the next migration
+        lands on top, which is the normal, correct thing for a migration to do.
+
+        It went red on 2026-07-15 when `f2a3b4c5d6e7` chained off this revision,
+        and stayed red for twelve days without anyone noticing, because
+        `src/cosa/tests/**` is referenced by no gate. Had the tree been gated it
+        would have blocked EVERY migration ever added — the assertion was a
+        tripwire across the path the project has to walk.
+
+        A hash bump would only move the expiry date. The durable invariant is a
+        FORK: two siblings claiming one parent produces two alembic heads, which
+        is a real defect and does not become true merely because the chain grew.
+        """
+        parents = {}
+        for path in sorted( glob.glob( os.path.join( _versions_dir(), "*.py" ) ) ):
             with open( path ) as fh:
                 src = fh.read()
             m = re.search( r"down_revision.*?=\s*['\"]([0-9a-f]+)['\"]", src )
-            if m:
-                self.assertNotEqual( m.group( 1 ), _THIS_REVISION, f"{path} chains off this head" )
+            if not m: continue                      # `down_revision = None` — the base
+            parents.setdefault( m.group( 1 ), [] ).append( os.path.basename( path ) )
+
+        forks = { parent: kids for parent, kids in parents.items() if len( kids ) > 1 }
+        self.assertEqual(
+            forks, {},
+            f"migration chain FORKS — these parents have more than one child, which "
+            f"produces multiple alembic heads: {forks}"
+        )
+
+    def test_the_fork_check_can_actually_see_a_fork( self ):
+        """
+        CONTROL. The check above passes on a healthy tree, and a check that passes
+        because it never looks is indistinguishable from one that passes because
+        the tree is clean. This drives the same grouping over a synthetic fork and
+        requires it to be caught.
+        """
+        sources = {
+            "0001_base.py"  : "revision = 'aaa1'\ndown_revision = None\n",
+            "0002_left.py"  : "revision = 'bbb2'\ndown_revision = 'aaa1'\n",
+            "0003_right.py" : "revision = 'ccc3'\ndown_revision = 'aaa1'\n",   # the fork
+        }
+        parents = {}
+        for name, src in sorted( sources.items() ):
+            m = re.search( r"down_revision.*?=\s*['\"]([0-9a-f]+)['\"]", src )
+            if not m: continue
+            parents.setdefault( m.group( 1 ), [] ).append( name )
+
+        forks = { p: k for p, k in parents.items() if len( k ) > 1 }
+        self.assertEqual( forks, { "aaa1": [ "0002_left.py", "0003_right.py" ] } )
 
 
 class TestUpgradeDowngradeOps( unittest.TestCase ):

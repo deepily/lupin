@@ -135,6 +135,25 @@ def _expand_all( test_types: List[ str ] ) -> List[ str ]:
                 expanded.append( c )
     return expanded
 
+class _StdoutReaderCrash:
+    """
+    Queue marker meaning THE STDOUT READER THREAD DIED — not end of output.
+
+    `None` on the stdout queue means clean EOF. Without a second, distinct
+    marker a reader that crashed posts the same `None` (from its `finally`),
+    and the poll loop reports the run as a clean success: the crashed tier's
+    exit code becomes `process.returncode`, which for a child that already
+    exited 0 is 0. That is a green for a run whose output was never read.
+
+    Carries the traceback text because the exception is re-raised on the main
+    thread, where the original thread's stack is otherwise unrecoverable.
+    """
+
+    def __init__( self, exc, tb ):
+        self.exc = exc
+        self.tb  = tb
+
+
 class TestSuiteJob( AgenticJobBase ):
     """
     Background job for running test suites in CJ Flow.
@@ -1015,6 +1034,20 @@ class TestSuiteJob( AgenticJobBase ):
                 try:
                     for drained in iter( pipe.readline, "" ):
                         q.put( drained )
+                except BaseException as reader_exc:                          # noqa: BLE001 — see below
+                    # A crash in HERE must not look like a clean EOF. Before the
+                    # reader thread existed, readline() ran inline and any failure
+                    # hit _run_suite's `except Exception`, returning errors=1 /
+                    # exit_code=1. Moving it to a thread made the exception die
+                    # unraisable and `finally` post the EOF sentinel, so the poll
+                    # loop fell through to exit_code = process.returncode = 0 and
+                    # reported a crashed tier as A SUCCESS (0 passed, 0 failed,
+                    # 0 errors, exit 0) — strictly worse than the 0/0/0/1 that
+                    # bug 8b93bcf5 was filed about, because it reads as green.
+                    # BaseException, not Exception: a KeyboardInterrupt or
+                    # SystemExit in the reader is still a lost stdout stream, and
+                    # silently reporting success for one is the defect either way.
+                    q.put( _StdoutReaderCrash( reader_exc, tb_mod.format_exc() ) )
                 finally:
                     q.put( None )   # EOF sentinel — distinct from "nothing yet"
 
@@ -1071,6 +1104,18 @@ class TestSuiteJob( AgenticJobBase ):
                             break
                         if leftover is None:
                             break
+                        if isinstance( leftover, _StdoutReaderCrash ):
+                            # This path is already returning a timeout/kill verdict
+                            # (exit_code -2, errors +1), so it must NOT raise and
+                            # convert a measured timeout into an exception. But the
+                            # marker is not a log line either — appending it would
+                            # put a repr into the saved stdout. Record and continue
+                            # draining.
+                            stdout_lines.append(
+                                f"\n[TestSuiteJob] stdout reader thread died: "
+                                f"{type( leftover.exc ).__name__}: {leftover.exc}\n"
+                            )
+                            continue
                         stdout_lines.append( leftover )
 
                     stdout_text = "".join( stdout_lines )
@@ -1130,6 +1175,15 @@ class TestSuiteJob( AgenticJobBase ):
                     if line is None:
                         stdout_at_eof = True
                         line = ""
+                    elif isinstance( line, _StdoutReaderCrash ):
+                        # Raise on the MAIN path so _run_suite's `except Exception`
+                        # sees it — that handler is what turns a crash into
+                        # errors=1 / exit_code=1 / an error string. Swallowing it
+                        # here would restore the exact silence this marker exists
+                        # to break.
+                        raise RuntimeError(
+                            f"stdout reader thread died: {type( line.exc ).__name__}: {line.exc}\n\n{line.tb}"
+                        ) from line.exc
                     else:
                         stdout_lines.append( line )
                         if self.verbose: print( line, end="" )
