@@ -241,6 +241,29 @@ DISPOSABLE_PG_ENV = "LUPIN_TEST_DISPOSABLE_PG_ADMIN_URL"
 _LIVE_STORE_NAMES = ( "lupin_db_" + "dev", "lupin_db_" + "prod" )
 
 
+def throwaway_url( admin_url, dbname ):
+    """
+    Build the per-test throwaway DB URL from the operator's admin URL.
+
+    Requires:
+        - admin_url is a sqlalchemy URL; dbname is the throwaway's name
+
+    Ensures:
+        - returns a connectable URL string with the PASSWORD INTACT
+
+    ⚠️ WHY THIS IS NOT `str( url )`. SQLAlchemy's `URL.__str__` renders the
+    password as `***`, so `str()` produces a URL that LOOKS right and cannot
+    authenticate — every opt-in run died `FATAL: password authentication failed`.
+    Found by Clayton 😎 on the first real opt-in; it was invisible to me because
+    a trust / `.pgpass` URL has no password to mask, and the skip meant nobody
+    had ever executed this path.
+
+    Returns:
+        str
+    """
+    return admin_url.set( database=dbname ).render_as_string( hide_password=False )
+
+
 def _live_store_literals( source ):
     """
     Return every EXECUTABLE string literal in `source` naming a live data store.
@@ -329,12 +352,23 @@ class TestCheckParityLive( unittest.TestCase ):
             port     = admin_url.port or 5432,
         )
         self._admin.autocommit = True
+        # Registered BEFORE the CREATE so a failure anywhere below still closes it.
+        self.addCleanup( self._admin.close )
+
         with self._admin.cursor() as cur:
             cur.execute( sql.SQL( "CREATE DATABASE {}" ).format( sql.Identifier( self.dbname ) ) )
 
+        # ⚠️ REGISTERED IMMEDIATELY AFTER THE CREATE, not in tearDown. unittest does
+        # NOT call tearDown when setUp raises, and `run_migrations_to_head` below CAN
+        # raise — so a tearDown-based DROP leaks the throwaway on exactly the runs that
+        # fail. Measured by Clayton 😎 on the first real opt-in: 2 orphan
+        # `lupin_parity_ut_*` databases, one per failed attempt. addCleanup runs even
+        # when a later line of setUp raises.
+        self.addCleanup( self._drop_throwaway )
+
         # The throwaway inherits the operator's own connection details — nothing
         # about the target instance is hardcoded here any more.
-        self.url = str( admin_url.set( database=self.dbname ) )
+        self.url = throwaway_url( admin_url, self.dbname )
         self._pg = dict(
             user     = admin_url.username,
             password = admin_url.password,
@@ -344,12 +378,13 @@ class TestCheckParityLive( unittest.TestCase ):
         from cosa.rest.db.auto_migrate import run_migrations_to_head
         run_migrations_to_head( database_url=self.url )   # bootstrap to head from models
 
-    def tearDown( self ):
+    def _drop_throwaway( self ):
+        """Drop the per-test database. Safe to call when the CREATE succeeded and
+        anything after it did not."""
         with self._admin.cursor() as cur:
             cur.execute(
                 self._sql.SQL( "DROP DATABASE IF EXISTS {} WITH ( FORCE )" ).format( self._sql.Identifier( self.dbname ) )
             )
-        self._admin.close()
 
     def test_in_parity_then_dropped_column_flagged( self ):
         drift, _ = csp.check_parity( database_url=self.url )
@@ -454,6 +489,78 @@ class TestLiveLayerIsolation( unittest.TestCase ):
                           "importing this module opened a database connection" )
         self.assertIn( "IMPORTED_CLEAN", result.stdout,
                        f"the probe did not complete, so it proves nothing:\n{result.stderr[-800:]}" )
+
+    def test_the_throwaway_url_KEEPS_the_password( self ):
+        """
+        DEFECT 1 regression lock. `str( URL )` masks the password as `***`, so the
+        URL looks correct and cannot authenticate. Every opt-in run died on it.
+
+        The `str()` arm is the CONTROL: without it, an implementation that also
+        masked would pass the first assertion by producing something merely
+        non-empty. The two must DISAGREE.
+        """
+        from sqlalchemy.engine import make_url
+
+        admin = make_url( "postgresql+psycopg2://someuser:s3cr3t@localhost:55433/postgres" )
+        built = throwaway_url( admin, "lupin_parity_ut_deadbeef" )
+
+        self.assertIn( "s3cr3t", built, "the password was masked — this URL cannot authenticate" )
+        self.assertNotIn( "***", built )
+        self.assertIn( "lupin_parity_ut_deadbeef", built )
+        self.assertNotIn( "s3cr3t", str( admin.set( database="lupin_parity_ut_deadbeef" ) ),
+                          "str() no longer masks — this control has stopped controlling" )
+
+    def test_a_setUp_failure_still_DROPS_the_throwaway( self ):
+        """
+        DEFECT 2 regression lock. unittest does NOT call tearDown when setUp
+        raises, so a tearDown-based DROP leaks the database on exactly the runs
+        that fail — measured as 2 orphans on the first real opt-in.
+
+        Drives the real setUp with a fake psycopg2 and a migration that RAISES,
+        then asserts a DROP was still issued. No database anywhere.
+        """
+        import psycopg2
+
+        executed = []
+
+        class _FakeCursor:
+            def __enter__( self ): return self
+            def __exit__( self, *a ): return False
+            def execute( self, statement, *a ): executed.append( str( statement ) )
+
+        class _FakeConn:
+            autocommit = False
+            def cursor( self ): return _FakeCursor()
+            def close( self ): executed.append( "CLOSE" )
+
+        real_connect = psycopg2.connect
+        import cosa.rest.db.auto_migrate as am
+        real_migrate = am.run_migrations_to_head
+
+        def _boom( *a, **k ): raise RuntimeError( "migration blew up after CREATE" )
+
+        psycopg2.connect          = lambda *a, **k: _FakeConn()
+        am.run_migrations_to_head = _boom
+        os.environ[ DISPOSABLE_PG_ENV ] = "postgresql+psycopg2://u:p@localhost:55433/postgres"
+        try:
+            # setUp/doCleanups directly, NOT case.run(): the class-level
+            # `skipUnless` was evaluated at IMPORT with the env unset, so run()
+            # skips and this scenario would silently prove nothing. (That the
+            # decorator cannot be re-armed at runtime is itself confirmation the
+            # gate is import-time — the property the original defect abused.)
+            case = TestCheckParityLive( "test_in_parity_then_dropped_column_flagged" )
+            with self.assertRaises( RuntimeError ):
+                case.setUp()
+            case.doCleanups()
+        finally:
+            psycopg2.connect          = real_connect
+            am.run_migrations_to_head = real_migrate
+            os.environ.pop( DISPOSABLE_PG_ENV, None )
+
+        created = [ s for s in executed if "CREATE DATABASE" in s ]
+        dropped = [ s for s in executed if "DROP DATABASE" in s ]
+        self.assertTrue( created, "the scenario never reached the CREATE — it proves nothing" )
+        self.assertTrue( dropped, "setUp raised after CREATE and the throwaway was NOT dropped" )
 
     def test_the_live_layer_is_OFF_unless_the_operator_opts_in( self, ):
         """
