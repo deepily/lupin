@@ -456,8 +456,19 @@ class TestSuiteJob( AgenticJobBase ):
                     queue_name="run"
                 )
 
+                started_at = cu.get_current_datetime_iso()
                 result = self._run_suite( suite_type, project_root )
                 self.suite_results[ suite_type ] = result
+
+                # Row 691d49db — attest that this tier RAN, durably.
+                #
+                # AT THE CALL SITE ON PURPOSE. `_run_suite` has five terminal
+                # returns (success, no-script, bad-type, timeout/kill, exception);
+                # attesting inside it would mean five edits and a sixth return
+                # added later that nobody remembers to instrument. Here every
+                # outcome funnels through one line — INCLUDING the timeout path,
+                # which is the 8b93bcf5 case and the one most worth a receipt.
+                self._attest_tier_run( suite_type, result, started_at )
 
                 # Report per-suite results
                 suite_found  = result[ "passed" ] + result[ "failed" ] + result[ "skipped" ] + result[ "errors" ]
@@ -868,6 +879,53 @@ class TestSuiteJob( AgenticJobBase ):
             # hiccup must never vaporize the rest of the sweep.
             print( f"[TestSuiteJob] ⚠️ between-suites reset FAILED ({prev_suite}->{next_suite}), "
                    f"non-fatal: {reset_err}" )
+
+    def _attest_tier_run( self, suite_type: str, result: Dict, started_at: str ) -> None:
+        """
+        Append a durable, tamper-evident record that this tier ran (row 691d49db).
+
+        Requires:
+            - result is a `_run_suite` return dict
+            - started_at is an ISO timestamp taken BEFORE the run
+
+        Ensures:
+            - appends one chained record to the ledger under the `io/` bind mount
+            - NEVER raises: a failure to record must not fail the tier it records.
+              The whole point is a receipt for runs that go wrong, so an
+              attestation that can abort the run would delete the evidence in
+              exactly the case it exists for.
+            - prints the failure rather than swallowing it — a silent recorder is
+              indistinguishable from one that was never wired, which is the defect
+              this row was filed about
+        """
+        try:
+            from cosa.agents.test_suite import attestation
+
+            attestation.append_attestation(
+                result       = result,
+                suite        = suite_type,
+                job_id       = self.id_hash,
+                started_at   = started_at,
+                finished_at  = cu.get_current_datetime_iso(),
+                project_root = self._attestation_project_root(),
+            )
+        except Exception as e:
+            print( f"[TestSuiteJob] WARNING: tier-run attestation FAILED for {suite_type}: "
+                   f"{type( e ).__name__}: {e} — the run itself is unaffected, but this "
+                   f"run has NO durable receipt (row 691d49db)" )
+
+    def _attestation_project_root( self ):
+        """
+        The project root the ledger hangs off, honoring a pinned artifact dir.
+
+        Ensures:
+            - returns None in production, so `attestation` resolves the real root
+            - returns the pinned dir's parent chain when a test has redirected
+              `_ARTIFACT_DIR`, so an attestation never lands in the live ledger
+              from a test — the same fail-closed contract `artifact_root()` has
+        """
+        if self._ARTIFACT_DIR is None: return None
+        return self._ARTIFACT_DIR
 
     def _run_suite( self, suite_type: str, project_root: str ) -> Dict:
         """

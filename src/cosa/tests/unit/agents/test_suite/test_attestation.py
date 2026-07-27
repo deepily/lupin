@@ -281,3 +281,83 @@ def test_outside_pytest_the_real_root_resolves( monkeypatch ):
     monkeypatch.delenv( "PYTEST_CURRENT_TEST", raising=False )
     assert att.artifact_root().endswith( att.ARTIFACTS_SUBDIR )
     assert att.attestation_path().endswith( att.ATTESTATION_FILENAME )
+
+
+# ---------------------------------------------------------------------------
+# THE WIRING — row 691d49db's 0→N, at unit scale.
+#
+# ⚠️ This is NOT the calibration the row owes. The row requires the ledger
+# observed going 0→N on a REAL scheduled tier. What these prove is narrower and
+# worth stating: that `_run_suite`'s call site reaches the writer at all, and
+# that a failure to record cannot fail the run it records. An unwired writer and
+# a wired one are indistinguishable without the first of these.
+# ---------------------------------------------------------------------------
+
+def test_a_tier_run_appends_exactly_one_record( tmp_path, monkeypatch ):
+    """0 -> 1. The ledger is empty, one tier runs, one chained record exists."""
+    from cosa.agents.test_suite.job import TestSuiteJob
+
+    monkeypatch.setattr( TestSuiteJob, "_ARTIFACT_DIR", str( tmp_path ) )
+    job = TestSuiteJob.__new__( TestSuiteJob )
+    job.id_hash = "ts-wired01"
+
+    ledger = tmp_path / att.ATTESTATIONS_SUBDIR / att.ATTESTATION_FILENAME
+    assert att.verify_chain( str( ledger ) )[ "status" ] == "no_records"
+
+    job._attest_tier_run( "unit", _result( passed=7 ), "2026-07-27T10:00:00Z" )
+
+    verdict = att.verify_chain( str( ledger ) )
+    assert verdict == { "status" : "valid", "count" : 1 }
+    rec = att.read_records( str( ledger ) )[ 0 ]
+    assert rec[ "suite" ] == "unit" and rec[ "job_id" ] == "ts-wired01" and rec[ "passed" ] == 7
+
+
+def test_successive_tier_runs_chain( tmp_path, monkeypatch ):
+    """0 -> N, and the chain holds across suites the way a real job runs them."""
+    from cosa.agents.test_suite.job import TestSuiteJob
+
+    monkeypatch.setattr( TestSuiteJob, "_ARTIFACT_DIR", str( tmp_path ) )
+    job = TestSuiteJob.__new__( TestSuiteJob )
+    job.id_hash = "ts-wired02"
+
+    for suite in ( "unit", "smoke", "integration" ):
+        job._attest_tier_run( suite, _result(), "2026-07-27T10:00:00Z" )
+
+    ledger = tmp_path / att.ATTESTATIONS_SUBDIR / att.ATTESTATION_FILENAME
+    assert att.verify_chain( str( ledger ) ) == { "status" : "valid", "count" : 3 }
+    assert [ r[ "suite" ] for r in att.read_records( str( ledger ) ) ] == [ "unit", "smoke", "integration" ]
+
+
+def test_a_failing_attestation_never_fails_the_run( tmp_path, monkeypatch, capsys ):
+    """
+    CONTROL. The receipt exists FOR runs that go wrong, so a recorder that can
+    abort the run would delete the evidence in exactly the case it is for.
+    """
+    from cosa.agents.test_suite.job import TestSuiteJob
+
+    monkeypatch.setattr( TestSuiteJob, "_ARTIFACT_DIR", str( tmp_path ) )
+    monkeypatch.setattr( att, "append_attestation",
+                         lambda **kw: ( _ for _ in () ).throw( OSError( "disk full" ) ) )
+    job = TestSuiteJob.__new__( TestSuiteJob )
+    job.id_hash = "ts-wired03"
+
+    job._attest_tier_run( "unit", _result(), "2026-07-27T10:00:00Z" )   # must NOT raise
+
+    err = capsys.readouterr().out
+    assert "attestation FAILED" in err and "disk full" in err
+    assert "run itself is unaffected" in err
+
+
+def test_a_test_pinned_artifact_dir_keeps_the_ledger_out_of_the_live_root( tmp_path, monkeypatch ):
+    """
+    The wiring inherits the fail-closed contract: a test that pinned _ARTIFACT_DIR
+    writes its ledger there, never into the real `io/`.
+    """
+    from cosa.agents.test_suite.job import TestSuiteJob
+
+    monkeypatch.setattr( TestSuiteJob, "_ARTIFACT_DIR", str( tmp_path ) )
+    job = TestSuiteJob.__new__( TestSuiteJob )
+    job.id_hash = "ts-wired04"
+    job._attest_tier_run( "unit", _result(), "2026-07-27T10:00:00Z" )
+
+    assert ( tmp_path / att.ATTESTATIONS_SUBDIR / att.ATTESTATION_FILENAME ).exists()
