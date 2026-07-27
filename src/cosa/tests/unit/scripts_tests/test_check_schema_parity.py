@@ -212,34 +212,135 @@ class TestMain( unittest.TestCase ):
 
 
 # ---------------------------------------------------------------------------
-# Live integration — dropped-column detection against a throwaway DB
+# Live integration — dropped-column detection against a DISPOSABLE Postgres
 # ---------------------------------------------------------------------------
-_PG = dict( host="localhost", port=5432, user="lupin_dev", password="dev_password" )
+# 🔴 THIS LAYER USED TO TOUCH THE LIVE DEV STORE. Corrected 2026-07-27 on Mr
+# Radio's stop-and-fix, under Rick's standing rule (decision `2b20a6d6`,
+# verbatim): "I absolutely do not want any test touching a live dev data store!
+# If it's not isolated then it needs to be removed or fixed."
+#
+# What it did: connected to `lupin_db_dev` on localhost:5432 with hardcoded dev
+# credentials and `CREATE DATABASE`d throwaways there. Teardown was a clean
+# `DROP DATABASE … WITH (FORCE)` and zero orphans were ever measured — but ZERO
+# ORPHANS MEASURES HYGIENE, and the rule's predicate is CONTACT. A well-behaved
+# exception tier was offered to Rick and he rejected the premise: intent does
+# not launder the contact, and there is no known-good list.
+#
+# ⚠️ AND THE CONTACT WAS WORSE THAN THE SETUP LINE SUGGESTED. The old gate was
+# `@unittest.skipUnless( _pg_reachable(), ... )`, and a decorator argument is
+# evaluated at IMPORT time. So merely COLLECTING this file opened a connection
+# to `lupin_db_dev` — the contact happened on every run of the whole unit suite,
+# including the runs where this class then skipped.
+#
+# Now: the operator supplies a DISPOSABLE instance by env var. Unset by default,
+# so the default posture is no database, no connection, and a LOUD named skip.
+DISPOSABLE_PG_ENV = "LUPIN_TEST_DISPOSABLE_PG_ADMIN_URL"
+
+# The live data stores no test may name in executable code. Assembled at runtime
+# so this list is not itself a match for the scanner that reads this file.
+_LIVE_STORE_NAMES = ( "lupin_db_" + "dev", "lupin_db_" + "prod" )
 
 
-def _pg_reachable():
-    try:
-        import psycopg2
-        conn = psycopg2.connect( dbname="lupin_db_dev", connect_timeout=2, **_PG )
-        conn.close()
-        return True
-    except Exception:
-        return False
+def _live_store_literals( source ):
+    """
+    Return every EXECUTABLE string literal in `source` naming a live data store.
+
+    Requires:
+        - source is Python text
+
+    Ensures:
+        - returns a list of the offending literal values, [] when clean
+        - comments cannot match: they do not survive parsing to AST
+        - DOCSTRINGS are excluded deliberately — prose describing this defect is
+          a record of it, not an instance of it
+        - unparseable source raises rather than returning [], because a silent []
+          from a broken parse is a green that means nothing
+
+    Args:
+        source: Python source text
+
+    Returns:
+        list[str]
+    """
+    import ast
+
+    tree = ast.parse( source )
+
+    docstring_nodes = set()
+    for node in ast.walk( tree ):
+        if isinstance( node, ( ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef ) ):
+            body = getattr( node, "body", [] )
+            if body and isinstance( body[ 0 ], ast.Expr ) and isinstance( body[ 0 ].value, ast.Constant ) \
+               and isinstance( body[ 0 ].value.value, str ):
+                docstring_nodes.add( id( body[ 0 ].value ) )
+
+    return [
+        node.value
+        for node in ast.walk( tree )
+        if isinstance( node, ast.Constant ) and isinstance( node.value, str )
+        and id( node ) not in docstring_nodes
+        and any( name in node.value for name in _LIVE_STORE_NAMES )
+    ]
 
 
-@unittest.skipUnless( _pg_reachable(), "local Postgres (localhost:5432 lupin_dev) not reachable" )
+def disposable_admin_url():
+    """
+    The operator-supplied admin URL of a DISPOSABLE Postgres, or None.
+
+    Requires:
+        - nothing; reads the environment only
+
+    Ensures:
+        - returns the URL string when DISPOSABLE_PG_ENV is set and non-blank
+        - returns None otherwise
+        - OPENS NO CONNECTION. The skip decision must never itself be the
+          contact it exists to prevent — that was the original defect
+
+    Returns:
+        str | None
+    """
+    return os.environ.get( DISPOSABLE_PG_ENV ) or None
+
+
+# The skip is decided by the ENVIRONMENT, not by probing a server. It names the
+# variable so the skip is actionable rather than a silent hole in the suite.
+@unittest.skipUnless(
+    disposable_admin_url(),
+    f"SKIPPED (not a pass): set {DISPOSABLE_PG_ENV} to a DISPOSABLE Postgres admin URL "
+    f"to run the live parity layer. It CREATEs and DROPs databases, so it must never "
+    f"point at a live dev/prod store (Rick's rule, decision 2b20a6d6)."
+)
 class TestCheckParityLive( unittest.TestCase ):
 
     def setUp( self ):
         import psycopg2
         from psycopg2 import sql
-        self._sql = sql
+        from sqlalchemy.engine import make_url
+
+        self._sql   = sql
+        admin_url   = make_url( disposable_admin_url() )
         self.dbname = "lupin_parity_ut_" + uuid.uuid4().hex[ :12 ]
-        self._admin = psycopg2.connect( dbname="lupin_db_dev", **_PG )
+
+        self._admin = psycopg2.connect(
+            dbname   = admin_url.database,
+            user     = admin_url.username,
+            password = admin_url.password,
+            host     = admin_url.host,
+            port     = admin_url.port or 5432,
+        )
         self._admin.autocommit = True
         with self._admin.cursor() as cur:
             cur.execute( sql.SQL( "CREATE DATABASE {}" ).format( sql.Identifier( self.dbname ) ) )
-        self.url = f"postgresql+psycopg2://lupin_dev:dev_password@localhost:5432/{self.dbname}"
+
+        # The throwaway inherits the operator's own connection details — nothing
+        # about the target instance is hardcoded here any more.
+        self.url = str( admin_url.set( database=self.dbname ) )
+        self._pg = dict(
+            user     = admin_url.username,
+            password = admin_url.password,
+            host     = admin_url.host,
+            port     = admin_url.port or 5432,
+        )
         from cosa.rest.db.auto_migrate import run_migrations_to_head
         run_migrations_to_head( database_url=self.url )   # bootstrap to head from models
 
@@ -255,7 +356,7 @@ class TestCheckParityLive( unittest.TestCase ):
         self.assertEqual( drift, {}, "freshly-bootstrapped DB should be in parity" )
 
         import psycopg2
-        conn = psycopg2.connect( dbname=self.dbname, **_PG )
+        conn = psycopg2.connect( dbname=self.dbname, **self._pg )
         conn.autocommit = True
         with conn.cursor() as cur:
             cur.execute( "ALTER TABLE users DROP COLUMN is_protected" )
@@ -265,6 +366,105 @@ class TestCheckParityLive( unittest.TestCase ):
         self.assertIn( "users", drift )
         self.assertIn( "is_protected", drift[ "users" ][ "model_only" ] )
         self.assertEqual( csp.main( [ "--database-url", self.url ] ), 1 )
+
+
+# ---------------------------------------------------------------------------
+# THE CONTROL — fails if the isolation is removed
+# ---------------------------------------------------------------------------
+class TestLiveLayerIsolation( unittest.TestCase ):
+    """
+    Always runs. If someone restores a hardcoded live-store target or a
+    connecting skip-gate, these go RED.
+
+    ⚠️ A test file that skips its own live layer is not evidence of isolation —
+    the ORIGINAL defect skipped correctly and connected anyway, at collection.
+    So the assertions below are about CONTACT, not about the skip.
+    """
+
+    def test_no_EXECUTABLE_string_in_this_module_names_a_live_data_store( self ):
+        """
+        The concrete regression: the live store was hardcoded twice — as the
+        reachability probe's target and as the CREATE DATABASE admin connection.
+
+        ⚠️ THE PREDICATE IS ABOUT CODE, NOT PROSE. A plain text scan flags the
+        comments ABOVE that explain the defect, and a checker a description of
+        the bug can trip is not a checker about the bug. So: parse to AST
+        (comments do not survive), collect string CONSTANTS, drop docstrings.
+        What is left is what can actually reach a connection.
+        """
+        offenders = _live_store_literals( open( __file__, encoding="utf-8" ).read() )
+        self.assertEqual(
+            offenders, [],
+            f"a live data store name reached executable code in this file: {offenders}"
+        )
+
+    def test_the_scanner_ITSELF_catches_a_planted_offender( self ):
+        """
+        THE ARM THAT MUST FAIL. Without it, `_live_store_literals` returning []
+        proves nothing — a scanner that always returns empty passes the test
+        above forever. Plant the exact shape that was removed; require a hit.
+        """
+        planted = 'conn = psycopg2.connect( dbname="lupin_db_' + 'dev", host="x" )\n'
+        self.assertTrue(
+            _live_store_literals( planted ),
+            "the scanner did not flag a hardcoded live-store connection — it is inert"
+        )
+
+    def test_the_scanner_does_NOT_flag_prose( self ):
+        """The other direction: prose naming the store is a RECORD of the
+        defect, not the defect. Without this the scanner could be a text grep."""
+        prose = '# once connected to lupin_db_' + 'dev\n"""and lupin_db_' + 'dev in a docstring."""\n'
+        self.assertEqual( _live_store_literals( prose ), [] )
+
+    def test_IMPORTING_this_module_opens_NO_connection( self ):
+        """
+        🔴 THE COLLECTION-SCOPE CONTROL — the half a "the test didn't run" check
+        misses entirely.
+
+        `@unittest.skipUnless( _pg_reachable(), … )` evaluates its argument at
+        IMPORT time, so the old gate dialled the live database during pytest
+        COLLECTION, before any test ran and regardless of whether it then
+        skipped. Deleting the test class would not have fixed that; the gate had
+        to go.
+
+        Runs in a SUBPROCESS because this module is already imported in-process —
+        an in-process check could never observe its own import-time behaviour.
+        `psycopg2.connect` is replaced before the import, so any attempt aborts
+        with a nameable marker.
+        """
+        import subprocess
+
+        probe = (
+            "import sys, importlib, psycopg2\n"
+            "def _trap( *a, **k ): raise SystemExit( 'CONNECTED_AT_IMPORT' )\n"
+            "psycopg2.connect = _trap\n"
+            f"sys.path.insert( 0, {os.path.dirname( os.path.abspath( __file__ ) )!r} )\n"
+            # Importing the TEST module is what reproduces collection: the module
+            # body runs, and any decorator argument is evaluated right there.
+            "importlib.import_module( 'test_check_schema_parity' )\n"
+            "print( 'IMPORTED_CLEAN' )\n"
+        )
+        env = dict( os.environ )
+        env.pop( DISPOSABLE_PG_ENV, None )   # the default posture is what is under test
+        result = subprocess.run(
+            [ sys.executable, "-c", probe ],
+            capture_output=True, text=True, timeout=120, env=env,
+        )
+        self.assertNotIn( "CONNECTED_AT_IMPORT", result.stdout + result.stderr,
+                          "importing this module opened a database connection" )
+        self.assertIn( "IMPORTED_CLEAN", result.stdout,
+                       f"the probe did not complete, so it proves nothing:\n{result.stderr[-800:]}" )
+
+    def test_the_live_layer_is_OFF_unless_the_operator_opts_in( self, ):
+        """
+        Default posture: no env var, no database. Asserted against the real
+        environment — if this box has the var set, the assertion inverts rather
+        than being skipped, so the test still says something true.
+        """
+        if os.environ.get( DISPOSABLE_PG_ENV ):
+            self.assertTrue( disposable_admin_url(), "env var set but not read" )
+        else:
+            self.assertIsNone( disposable_admin_url() )
 
 
 if __name__ == "__main__":
