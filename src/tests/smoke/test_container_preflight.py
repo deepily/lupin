@@ -199,6 +199,74 @@ def test_gh_auth_status_warn_only():
         )
 
 
+def test_single_file_binds_serve_the_CURRENT_host_file():
+    """
+    Probe 8: a single-file bind can be PRESENT in `docker inspect` and still serve
+    STALE BYTES. Every probe above checks that a mount EXISTS. None checks that it
+    carries today's content, and those are different claims.
+
+    THE MECHANISM. Docker binds a single file by INODE, not by path. An editor that
+    saves atomically — write-temp-then-rename, which is most of them — leaves the host
+    path pointing at a NEW inode while the container's mount still resolves the OLD
+    one. `docker inspect` goes on reporting the mount as healthy, because the Source
+    string it echoes is the compose declaration and was never a claim about content.
+    `docker restart` does not re-resolve it either; only a recreate does.
+
+    OBSERVED 2026-07-27 (row ec3a7fb0): `pytest.ini` was edited on the host to add
+    `--strict-markers`; the container served a 1978-byte copy dated Jun 17 for an
+    entire scheduled unit tier. Host inode 24726153, container inode 24808682. The
+    tier reported on a config it was not running.
+
+    ⇒ The file-level twin of what this module exists to catch, and the quieter half:
+    a MISSING mount fails loudly, a STALE one reports success about a file nobody is
+    reading. Directory binds (./src, ./io) are immune — the kernel resolves through
+    the directory on every open, which is why a conftest.py edit lands and a
+    pytest.ini edit does not, in the same commit, in the same container.
+    """
+    lupin_root = os.environ.get( "LUPIN_ROOT", "." )
+    compose    = os.path.join( lupin_root, "docker-compose.yml" )
+    if not os.path.exists( compose ):
+        pytest.skip( f"docker-compose.yml not readable at {compose}" )
+
+    import yaml
+    services = yaml.safe_load( open( compose, encoding="utf-8" ) )[ "services" ]
+    volumes  = next(
+        ( v.get( "volumes", [] ) for v in services.values()
+          if v.get( "container_name" ) == CONTAINER ), []
+    )
+
+    stale, compared = [], 0
+    for entry in volumes:
+        if not isinstance( entry, str ) or not entry.startswith( "./" ): continue
+        host_rel, _, rest = entry.partition( ":" )
+        dest              = rest.split( ":" )[ 0 ]
+        host_path         = os.path.join( lupin_root, host_rel[ 2 : ] )
+        if not os.path.isfile( host_path ): continue          # directory binds are immune
+
+        host_sum = subprocess.run( [ "md5sum", host_path ], capture_output=True, text=True, timeout=10 )
+        ctr_sum  = _docker_exec( "md5sum", dest )
+        if host_sum.returncode or ctr_sum.returncode: continue
+        compared += 1
+        h, c = host_sum.stdout.split()[ 0 ], ctr_sum.stdout.split()[ 0 ]
+        if h != c: stale.append( f"{host_rel} -> {dest}   host={h[ :12 ]}  container={c[ :12 ]}" )
+
+    # A green here means nothing if the loop compared zero files — the same
+    # can't-fail shape this probe exists to catch, one level up.
+    assert compared > 0, (
+        f"probe compared ZERO single-file binds for '{CONTAINER}' — it cannot have "
+        "detected staleness, so a pass would be vacuous. Check the compose service name "
+        "and that ./-prefixed file binds still exist."
+    )
+    assert not stale, (
+        f"single-file bind mounts are serving STALE content ({len( stale )} of {compared} "
+        "compared) — the container is reading a different file than the repo has, and every "
+        "mount-presence probe above still passes:\n  "
+        + "\n  ".join( stale )
+        + f"\n\nRemedy: docker rm -f {CONTAINER} && docker compose up -d {CONTAINER}"
+        + "\n(`docker restart` does NOT re-resolve a single-file bind's inode.)"
+    )
+
+
 if __name__ == "__main__":
     import sys
     sys.exit( pytest.main( [ __file__, "-v" ] ) )
