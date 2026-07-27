@@ -155,7 +155,13 @@ if [ -r "$CONTRACT" ]; then
         writer="$( pfv_contract_field "$row" 3 )"
         shape="$( pfv_contract_field "$row" 4 )"
         req="$(   pfv_contract_field "$row" 5 )"
-        # CONTAINER-surface vars are asserted in layer C, not here.
+        # CONTAINER-surface vars cannot be read from the host shell; check C6 asserts
+        # them inside the container. That delegation is REAL as of 2026-07-27 (row
+        # b5ca8fd5) — it was not when this line was written. The comment then said
+        # "asserted in layer C" while layer C hand-coded four vars and never read the
+        # contract, so a reader auditing coverage stopped here satisfied. It was
+        # true-by-coincidence for 2 of 2 rows and became false for 8 of 11 the day
+        # nine more CONTAINER rows landed. PROSE IS NOT A DELEGATION.
         [ "$surface" = "CONTAINER" ] && continue
         # Resolve OPTIONAL / REQUIRED / OPTIONAL_UNLESS:<VAR>=<VAL> against the LIVE
         # env before choosing a tier — a conditionally-required var is only required
@@ -463,6 +469,106 @@ PY
         2) report unknown BLOCK "cannot compare LUPIN_ENV='$c_env' with config_block_id='$c_block' — one is empty or the block id lacks the 'Lupin:+' prefix" \
                       "check the environment: block for LUPIN_ENV and LUPIN_CONFIG_MGR_CLI_ARGS in $COMPOSE_FILE" ;;
     esac
+
+    # C6 — EVERY surface=CONTAINER contract row, asserted INSIDE the container.
+    #      This is the delegation A1's comment has been promising (row b5ca8fd5).
+    #      Before this, layer C hand-coded four vars — LUPIN_ENV + LUPIN_CONFIG_MGR_CLI_ARGS
+    #      (C4b), LUPIN_BRIDGE_GID (C4), CLOUD_SQL_CONNECTION_NAME (C5) — and the other
+    #      seven CONTAINER rows were declared-and-unasserted while reading as covered.
+    #
+    #      THE TIER IS DERIVED FROM THE COMPOSE FILE, NOT DECLARED IN THE CONTRACT
+    #      (Mr. Radio's ruling, 2026-07-27). The contract has ONE requirement column
+    #      and the venues genuinely disagree — LUPIN_MODEL_SERVER_URL is `:?` on
+    #      cloud-gpu, `:-default` locally, and a hardcoded literal on cloud-test. A
+    #      per-venue column would be a SECOND authority for a fact compose already
+    #      states; the interpolation regime IS the requirement, declared where the
+    #      venue is defined. So we read it, and we COMPARE it against the contract —
+    #      which is the comparator those two authorities never had.
+    #
+    #      NO NEW ABORT SURFACE: a `${VAR:?}` that is unset already aborts
+    #      `docker compose up`. Asserting it BLOCK here moves that existing failure
+    #      earlier and gives it a name, rather than discovering it after
+    #      `docker rm -f` has already taken the container down.
+    if [ -r "$CONTRACT" ]; then
+        c6_checked=0
+        while IFS= read -r row; do
+            [ -n "$row" ] || continue
+            cname="$(    pfv_contract_field "$row" 1 )" || continue
+            csurface="$( pfv_contract_field "$row" 2 )"
+            cshape="$(   pfv_contract_field "$row" 4 )"
+            creq="$(     pfv_contract_field "$row" 5 )"
+            [ "$csurface" = "CONTAINER" ] || continue
+            c6_checked=$(( c6_checked + 1 ))
+
+            regime="$( pfv_compose_var_regime "$COMPOSE_FILE" "$cname" )"
+            derived="$( pfv_regime_requirement "$regime" )"
+
+            case "$regime" in
+                ABSENT)
+                    # The contract says this venue supplies the var; the venue's own
+                    # compose file never mentions it. Reported, not skipped — a
+                    # silent skip is how a contract row drifts out of every venue and
+                    # still reads as covered.
+                    report fail WARN "$cname declared surface=CONTAINER but $( basename "$COMPOSE_FILE" ) never references it" \
+                                  "add it to the compose environment: block, or correct its surface in env-contract.tsv"
+                    continue ;;
+                CONFLICT|UNKNOWN)
+                    report unknown BLOCK "$cname: cannot read a requirement from $( basename "$COMPOSE_FILE" ) (regime=$regime)" \
+                                  "inspect how $cname is interpolated there; CONFLICT means two different operators in one file, UNKNOWN means a form this reader does not enumerate"
+                    continue ;;
+            esac
+
+            # LITERAL: compose pins the value outright, so the container MUST carry
+            # it — its absence means this container was not built from this file.
+            ctier="BLOCK"
+            [ "$derived" = "OPTIONAL" ] && ctier="WARN"
+
+            # `printenv` distinguishes UNSET (non-zero) from set-but-empty (zero,
+            # empty stdout). `sh -c 'printf %s "$VAR"'` collapses the two, and they
+            # have different remedies.
+            if cvalue="$( docker exec "$CONTAINER" printenv "$cname" 2>/dev/null )"; then
+                cset=true
+            else
+                cset=false; cvalue=""
+            fi
+
+            if [ "$cset" != true ]; then
+                report unknown "$ctier" "$cname is UNSET in the container (compose regime: $regime)" \
+                              "set $cname for this venue — $( basename "$COMPOSE_FILE" ) declares it $regime"
+            else
+                pfv_shape_matches "$cvalue" "$cshape" "$VM_PREFIX"; crc=$?
+                case $crc in
+                    0) report pass "$ctier" "$cname set in container, matches $cshape   [compose: $regime]" ;;
+                    1) # NEVER echo the value for a SECRET — a preflight is run
+                       # precisely when someone is confused, i.e. when they are most
+                       # likely to paste its output somewhere.
+                       shown="'$cvalue'"
+                       [ "$cshape" = "SECRET" ] && shown="$( pfv_secret_fingerprint "$cvalue" )"
+                       report fail "$ctier" "$cname = $shown in container does NOT match shape $cshape" \
+                                   "correct $cname for this venue in $( basename "$COMPOSE_FILE" ) or its env-file" ;;
+                    2) report unknown "$ctier" "$cname is set but EMPTY in the container (compose regime: $regime)" \
+                                   "an empty value is a DIFFERENT failure from unset; check the env-file that supplies it" ;;
+                esac
+            fi
+
+            # THE COMPARATOR — the half that pays for deriving. Two authorities now
+            # exist (the contract column and the compose regime) and this is the only
+            # thing looking at both. Silent disagreement is what made a5255712's
+            # coverage green while nothing asserted the rows.
+            pfv_requirement_agrees "$creq" "$derived"; arc=$?
+            case $arc in
+                0) : ;;   # agreement is the expected case; do not add a line per var
+                1) report fail WARN "$cname: env-contract.tsv says '$creq' but $( basename "$COMPOSE_FILE" ) treats it as $derived (regime=$regime)" \
+                              "reconcile them — the compose file is the venue's own declaration; the contract column is venue-independent and may need OPTIONAL_UNLESS or a note" ;;
+                2) : ;;   # LITERAL/ABSENT/UNKNOWN already reported above; not repeated
+            esac
+        done < <( pfv_parse_manifest "$CONTRACT" )
+        [ "$c6_checked" -gt 0 ] \
+            || report unknown BLOCK "no surface=CONTAINER rows found in the contract — C6 asserted nothing" \
+                          "check $CONTRACT is the file you think it is"
+    else
+        report unknown BLOCK "env contract unreadable at $CONTRACT — C6 asserted NOTHING" "deploy the repo to the VM"
+    fi
 
     # C5 — THE ALARM MUST NOT BE GATED ON THE HEALTHY VALUE.
     #      The Cloud SQL proxy healthcheck probes :9090 and never touches the socket

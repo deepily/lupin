@@ -229,6 +229,174 @@ pfv_contract_remedy() {
     esac
 }
 
+# ── pfv_compose_var_regime ───────────────────────────────────────────────────
+# How does THIS compose file treat this variable? (row b5ca8fd5)
+#
+# WHY DERIVE INSTEAD OF DECLARING (Mr. Radio's ruling, 2026-07-27)
+#   env-contract.tsv has ONE `requirement` column, and the venues disagree:
+#       docker-compose.cloud-gpu.yml:193   ${LUPIN_MODEL_SERVER_URL:?…}       required
+#       docker-compose.yml:193,299         ${LUPIN_MODEL_SERVER_URL:-http://…} defaulted
+#       docker-compose.cloud-test.yml:113  http://lupin-model-server:7998      hardcoded
+#   The obvious fix is a per-venue requirement column. That would be a SECOND
+#   authority for a fact compose already states — the shape decision 2b20a6d6 found
+#   with FOUR authorities for "which store backs this data" and no comparator
+#   between them. The compose interpolation regime IS the requirement, declared
+#   where the venue is defined. Adding a column duplicates it; deriving reads it.
+#
+# ⚠️ THE RISK THIS TRADE ACCEPTS: it replaces a STATED fact with a PARSED one, so
+#   this parser becomes the authority. A parser that silently mis-classifies a form
+#   nobody enumerated does it quietly, at a rate that reads like noise. So every
+#   form in the compose grammar is enumerated EXPLICITLY, and anything else is a
+#   loud UNKNOWN — never a default to OPTIONAL, which would waive an assertion by
+#   accident.
+#
+# THE FULL GRAMMAR (docker compose interpolation), all seven forms:
+#     ${VAR}       BARE       unset interpolates to empty; compose only WARNS
+#     ${VAR:-d}    DEFAULTED  default when unset OR empty
+#     ${VAR-d}     DEFAULTED  default when unset only
+#     ${VAR:?e}    REQUIRED   compose ABORTS when unset OR empty
+#     ${VAR?e}     REQUIRED   compose ABORTS when unset only
+#     ${VAR:+r}    ALTERNATE  substitutes only when SET; unset is fine
+#     ${VAR+r}     ALTERNATE  substitutes only when set (even if empty)
+#   Measured 2026-07-27 across every docker-compose*.yml in the repo: 27
+#   interpolations total = 13 `:?` + 13 `:-` + 1 bare, and the three classes sum to
+#   the total (a count that did NOT reconcile is what exposed my first, broken
+#   tally). The other four forms are absent TODAY — which is not a reason to leave
+#   them unhandled, because absence now is not absence later.
+#
+# Requires:
+#   - $1 = path to a compose file, $2 = variable name
+# Ensures:
+#   - prints exactly one of:
+#       REQUIRED | DEFAULTED | ALTERNATE | BARE | LITERAL | ABSENT | CONFLICT | UNKNOWN
+#   - returns 0 for a confidently-classified regime, 2 for CONFLICT/UNKNOWN and for
+#     an unreadable file or empty name — the caller must treat 2 as
+#     cannot-determine, never as a pass
+#   - LITERAL means the name appears as a compose KEY with a hardcoded value and is
+#     interpolated NOWHERE — cloud-test.yml's shape. The env var is not consulted at
+#     all on that venue, so asserting the HOST/container env for it would be asking
+#     about a knob that is not wired
+#   - CONFLICT means ONE file interpolates the same var under two different
+#     operators. That is a real inconsistency in the file, and reporting it as
+#     either requirement would pick a side silently
+#   - matching is anchored on the character AFTER the name, so ${LUPIN_ROOT} and
+#     ${LUPIN_ROOT_EXTRA} can never be confused for one another
+pfv_compose_var_regime() {
+    local path="$1" name="$2" ops="" n=0 op pat
+    [ -r "$path" ] || { printf 'UNKNOWN'; return 2; }
+    [ -n "$name" ] || { printf 'UNKNOWN'; return 2; }
+
+    # ⚠️ STRUCTURED AS "IS IT REFERENCED AT ALL?" THEN "WHICH OPERATOR?", DELIBERATELY.
+    # The first cut of this function matched only the KNOWN operators in one regex.
+    # That made an UNENUMERATED operator — say `${VAR:%odd}` — fail to match at all,
+    # so the var fell through to the not-interpolated branch and was reported
+    # **ABSENT: not present in this file**, about a variable sitting right there on
+    # line N. My own negative control caught it, because the verdict was predicted
+    # before the run.
+    #
+    # That is the parser's reach standing in for the file's content — the same defect
+    # class this instrument exists to remove, in the instrument. The tier happened to
+    # land safe (ABSENT maps to UNDETERMINED, not OPTIONAL), but the FACT reported was
+    # false, and a reader would have concluded the venue does not wire the var.
+    #
+    # ⇒ Detect the reference FIRST, on the name alone. Only then classify. Anything
+    #   referenced-but-unclassifiable is a loud UNKNOWN.
+
+    # Referenced as ${NAME…} or as braceless $NAME. Braceless is legal compose
+    # (equivalent to a bare ${NAME}) and appears ZERO times in this repo today —
+    # which is a reason to handle it, not a reason to skip it.
+    local braced=false bare_ref=false
+    grep -qE '\$\{'"$name"'([^A-Za-z0-9_]|$)'  "$path" 2>/dev/null && braced=true
+    grep -qE '\$'"$name"'([^A-Za-z0-9_{]|$)'   "$path" 2>/dev/null && bare_ref=true
+
+    if [ "$braced" = true ]; then
+        # EVERY form in the grammar, tried longest-operator-first so `:-` is never
+        # read as a bare `-`. This list IS the enumeration; adding a compose operator
+        # means adding a line here, and forgetting to yields UNKNOWN rather than a
+        # confident wrong answer.
+        for pat in ':-:DEFAULTED' ':\?:REQUIRED' ':\+:ALTERNATE' \
+                   '-:DEFAULTED'  '\?:REQUIRED'  '\+:ALTERNATE' '}:BARE'; do
+            op="${pat##*:}"
+            local sym="${pat%:*}"
+            if grep -qE '\$\{'"$name$sym" "$path" 2>/dev/null; then
+                case " $ops " in *" $op "*) ;; *) ops="$ops $op"; n=$(( n + 1 )) ;; esac
+            fi
+        done
+        # Referenced with braces but matching NO known operator ⇒ a form this reader
+        # does not understand. Say so.
+        [ "$n" -eq 0 ] && { printf 'UNKNOWN'; return 2; }
+    fi
+
+    if [ "$bare_ref" = true ]; then
+        case " $ops " in *" BARE "*) ;; *) ops="$ops BARE"; n=$(( n + 1 )) ;; esac
+    fi
+
+    # One file interpolating the same var under two operators is a real
+    # inconsistency in that file. Reporting either requirement would pick a side
+    # silently.
+    if [ "$n" -gt 1 ]; then printf 'CONFLICT'; return 2; fi
+    if [ "$n" -eq 1 ]; then printf '%s' "${ops# }"; return 0; fi
+
+    # Not referenced anywhere. Distinguish "wired to a hardcoded value here" from
+    # "not present at all" — collapsing them would report a var this venue
+    # deliberately pins as though the venue had forgotten it.
+    if grep -qE "^[[:space:]]*$name:" "$path" 2>/dev/null; then
+        printf 'LITERAL'; return 0
+    fi
+    printf 'ABSENT'; return 0
+}
+
+# ── pfv_regime_requirement ───────────────────────────────────────────────────
+# Map a compose regime to the requirement tier preflight should assert at.
+#
+# Requires:  $1 = a regime token from pfv_compose_var_regime
+# Ensures:
+#   - prints REQUIRED for REQUIRED (compose itself aborts the bring-up without it,
+#     so asserting it as blocking adds NO new abort surface — it moves an existing
+#     failure earlier and gives it a name)
+#   - prints OPTIONAL for DEFAULTED / ALTERNATE / BARE — in all three, an unset var
+#     is a state compose tolerates
+#   - prints UNDETERMINED for LITERAL / ABSENT / CONFLICT / UNKNOWN / anything else.
+#     ⚠️ An UNRECOGNIZED token maps to UNDETERMINED, never to OPTIONAL: a typo or a
+#     future regime must surface as "I cannot tell", because silently waiving an
+#     assertion is the failure this whole file exists to prevent, and it is the
+#     quiet one
+pfv_regime_requirement() {
+    case "$1" in
+        REQUIRED)                    printf 'REQUIRED'     ; return 0 ;;
+        DEFAULTED|ALTERNATE|BARE)    printf 'OPTIONAL'     ; return 0 ;;
+        *)                           printf 'UNDETERMINED' ; return 2 ;;
+    esac
+}
+
+# ── pfv_requirement_agrees ───────────────────────────────────────────────────
+# Does the CONTRACT's requirement column agree with what the compose file does?
+#
+# WHY THIS IS THE HALF THAT PAYS FOR THE TRADE: deriving the requirement removes a
+# duplicate authority, but the contract column still exists and is still read by
+# other consumers (pfv_contract_push_env_names, the coverage comparator). Two
+# authorities with nothing comparing them is the defect; two authorities WITH a
+# comparator is a check. This is the comparator.
+#
+# Requires:  $1 = contract requirement field (verbatim), $2 = derived requirement
+# Ensures:
+#   - returns 0 when they agree, 1 when they DISAGREE, 2 when the comparison cannot
+#     be made (derived is UNDETERMINED, or either side is empty)
+#   - the contract side is resolved through pfv_req_effective first, so an
+#     OPTIONAL_UNLESS row is compared on what it means RIGHT NOW rather than on its
+#     literal text
+#   - a 2 is never an agreement. A comparator that answers "fine" whenever it cannot
+#     parse its input is quietest exactly when something has changed underneath it
+pfv_requirement_agrees() {
+    local contract_req="$1" derived="$2" effective
+    [ -n "$contract_req" ] || return 2
+    [ -n "$derived" ]      || return 2
+    [ "$derived" = "UNDETERMINED" ] && return 2
+    effective="$( pfv_req_effective "$contract_req" )"
+    [ "$effective" = "$derived" ] && return 0
+    return 1
+}
+
 # ── pfv_config_block_id ──────────────────────────────────────────────────────
 # Extract the `config_block_id=<value>` token from a LUPIN_CONFIG_MGR_CLI_ARGS
 # string.
