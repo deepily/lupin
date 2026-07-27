@@ -101,15 +101,147 @@ def _read( rel_path ):
         return f.read()
 
 
+def _strip_shell_comment( line ):
+    """
+    Return `line` with any trailing shell comment removed.
+
+    A `#` inside quotes is not a comment, so quote state is tracked rather than
+    splitting on the first `#` — otherwise a legitimate string containing `#`
+    would truncate the line and hide a real assignment after it.
+    """
+    in_single = in_double = False
+    for i, ch in enumerate( line ):
+        if   ch == "'" and not in_double: in_single = not in_single
+        elif ch == '"' and not in_single: in_double = not in_double
+        elif ch == "#" and not in_single and not in_double:
+            if i == 0 or line[ i - 1 ] in " \t": return line[ :i ]
+    return line
+
+
+def _is_inert_error_message( line, idx ):
+    """
+    True when the literal at `idx` sits inside a `${VAR:?...}` expansion.
+
+    `:?` is the ABORT-WITH-MESSAGE form — the text after it is printed and the
+    shell exits; it can never become the parameter's value. `:-` and `:=` are the
+    DEFAULT-VALUE forms and are the opposite: they hand the literal to the running
+    process, which is exactly the defect this guard exists to catch. Distinguishing
+    them is the whole point — collapsing both to "inside ${...}" would create the
+    silent-default hole while looking like a fix.
+    """
+    open_at = line.rfind( "${", 0, idx )
+    if open_at == -1: return False
+    close_at = line.find( "}", idx )
+    if close_at == -1: return False
+    return ":?" in line[ open_at:idx ]
+
+
+def supplying_occurrences( text ):
+    """
+    Lines where the literal appears in a position that can SUPPLY IT TO A PROCESS.
+
+    Requires:
+        - text is the full contents of an executable surface
+
+    Ensures:
+        - returns [ (lineno, line) ] for value-supplying occurrences only
+        - comments never match: prose describing the id is a record, not a use
+        - `${VAR:?...}` error text never matches — it aborts, it does not assign
+        - `${VAR:-...}` / `${VAR:=...}` DO match: they are silent defaults
+        - anything else containing the literal is treated as supplying, so a new
+          syntax nobody anticipated fails CLOSED rather than sailing through
+    """
+    hits = []
+    for lineno, raw in enumerate( text.splitlines(), start=1 ):
+        code = _strip_shell_comment( raw )
+        idx  = code.find( SANDBOX_PROJECT_ID )
+        if idx == -1: continue
+        if _is_inert_error_message( code, idx ): continue
+        hits.append( ( lineno, raw.strip() ) )
+    return hits
+
+
 def test_no_hardcoded_gcp_project_id_on_any_executable_surface():
-    """THE GUARD. Scans what git tracks — not what someone remembered to list."""
-    offenders = [ f for f in scanned_files() if SANDBOX_PROJECT_ID in _read( f ) ]
+    """
+    THE GUARD. Scans what git tracks — not what someone remembered to list.
+
+    NARROWED 2026-07-27 (row 5bf28e07 follow-up). It used to test
+    `SANDBOX_PROJECT_ID in _read( f )` — a raw substring over the whole file. That
+    matched a COMMENT and a `${VAR:?...}` error-message example in
+    `src/scripts/lupin-vm.sh`, neither of which assigns or bills anything, and it
+    blocked the wired gate on prose. A predicate that matches a DESCRIPTION of the
+    project id is not a predicate about the project id.
+
+    The remedy is a narrower predicate, NOT an exemption for that file: an
+    exemption fixes one script and re-arms the guard for the next one, and it
+    would have silently exempted a real assignment added to it later.
+    """
+    offenders = { f: supplying_occurrences( _read( f ) ) for f in scanned_files() }
+    offenders = { f: hits for f, hits in offenders.items() if hits }
     assert not offenders, (
         f"{len( offenders )} tracked executable file(s) hardcode the sandbox project id "
         f"'{SANDBOX_PROJECT_ID}'. GOOGLE_CLOUD_PROJECT/GCLOUD_PROJECT outrank "
         f"ANTHROPIC_VERTEX_PROJECT_ID — a literal here can silently bill the wrong "
-        f"project while every guard reports green. Offenders: " + ", ".join( offenders )
+        f"project while every guard reports green. Offenders (file: line): "
+        + "; ".join( f"{f}: {[ n for n, _ in hits ]}" for f, hits in offenders.items() )
     )
+
+
+# ---------------------------------------------------------------------------
+# CONTROLS for the narrowed predicate. Without these, a predicate that returned
+# [] unconditionally would pass the guard above on any tree — the failure mode
+# the narrowing itself could introduce.
+# ---------------------------------------------------------------------------
+
+def test_a_real_assignment_is_still_caught():
+    """CONTROL THAT MUST FAIL when the narrowing is over-eager."""
+    text = f'export GOOGLE_CLOUD_PROJECT="{SANDBOX_PROJECT_ID}"\n'
+    assert supplying_occurrences( text ) == [ ( 1, text.strip() ) ]
+
+
+def test_a_bare_default_expansion_is_still_caught():
+    """
+    `${VAR:-<id>}` SUPPLIES the literal when VAR is unset — the silent-billing
+    case. It must stay caught even though `${VAR:?...}` does not, and this is the
+    arm that fails if someone "simplifies" the check to ignore all `${...}`.
+    """
+    text = f'PROJECT="${{LUPIN_GCP_PROJECT_ID:-{SANDBOX_PROJECT_ID}}}"\n'
+    assert len( supplying_occurrences( text ) ) == 1
+
+    assign_text = f'PROJECT="${{LUPIN_GCP_PROJECT_ID:={SANDBOX_PROJECT_ID}}}"\n'
+    assert len( supplying_occurrences( assign_text ) ) == 1
+
+
+def test_a_comment_is_not_an_offender():
+    """Prose describing the id is a record of it, not a use of it."""
+    assert supplying_occurrences( f"# e.g. {SANDBOX_PROJECT_ID}\n" ) == []
+    assert supplying_occurrences( f"VAR=x   # e.g. {SANDBOX_PROJECT_ID}\n" ) == []
+
+
+def test_an_abort_message_expansion_is_not_an_offender():
+    """`${VAR:?...}` prints and exits — it can never become the value."""
+    text = f': "${{LUPIN_GCP_PROJECT_ID:?Set it (e.g. export LUPIN_GCP_PROJECT_ID={SANDBOX_PROJECT_ID})}}"\n'
+    assert supplying_occurrences( text ) == []
+
+
+def test_a_hash_inside_quotes_does_not_truncate_the_line():
+    """
+    A naive `split('#')[0]` would drop everything after a quoted `#` and hide a
+    real assignment sitting behind it. This is that hole, asserted shut.
+    """
+    text = f'echo "tag#1" && export GOOGLE_CLOUD_PROJECT={SANDBOX_PROJECT_ID}\n'
+    assert len( supplying_occurrences( text ) ) == 1
+
+
+def test_the_live_offenders_are_exactly_the_two_prose_hits_in_lupin_vm():
+    """
+    Pins WHY the tree is green: `lupin-vm.sh` still CONTAINS the literal twice,
+    and both are inert. If someone adds a real assignment there, the guard above
+    goes red and this test documents that the file was never literal-free.
+    """
+    text = _read( "src/scripts/lupin-vm.sh" )
+    assert SANDBOX_PROJECT_ID in text, "premise gone — the file no longer names the id at all"
+    assert supplying_occurrences( text ) == [], "a supplying occurrence appeared in lupin-vm.sh"
 
 
 def test_guard_covers_the_vertex_toggle_script():

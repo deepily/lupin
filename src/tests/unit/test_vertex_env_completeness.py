@@ -231,17 +231,31 @@ def test_the_scrape_finds_keys_in_a_synthetic_binary( tmp_path ):
 
 def test_the_drift_guard_goes_red_when_the_binary_ships_an_unguarded_override( tmp_path ):
     """
-    THE ONE THAT MATTERS. A future CC that ships VERTEX_REGION_CLAUDE_5_OPUS — the key the
-    tuple conspicuously lacks — must turn this suite RED. Proven here against a synthetic
-    release, because waiting for the real one to arrive is not a test strategy.
+    THE ONE THAT MATTERS. A CC release shipping an override we do not guard must turn this
+    suite RED. Proven against a synthetic release, because waiting for the real one to
+    arrive is not a test strategy.
+
+    ⚠️ ITS SYNTHETIC KEY USED TO BE `VERTEX_REGION_CLAUDE_5_OPUS` — "the key the tuple
+    conspicuously lacks". On 2026-07-27 CC 2.1.220 SHIPPED that key, it was added to the
+    tuple, and this control silently stopped controlling: its "extra" key was no longer
+    extra, so the drift it fabricated did not exist and the assertion never fired.
+
+    A control whose synthetic offender is a PLAUSIBLE FUTURE REAL VALUE expires the moment
+    the future arrives — and expires green, in the same commit that makes it obsolete. The
+    sentinel below is one the vendor cannot ship, so this control cannot be retired by
+    reality.
     """
-    fake = _fake_binary( tmp_path, list( PER_MODEL_REGION_OVERRIDES ) + [ "VERTEX_REGION_CLAUDE_5_OPUS" ] )
+    never_real = "VERTEX_REGION_CLAUDE_SYNTHETIC_NEVER_SHIPPED_0"
+    assert never_real not in PER_MODEL_REGION_OVERRIDES, (
+        "the sentinel became real — pick another; a control must not be satisfiable by the vendor"
+    )
+    fake = _fake_binary( tmp_path, list( PER_MODEL_REGION_OVERRIDES ) + [ never_real ] )
 
     with pytest.raises( AssertionError ) as exc:
         _assert_tuple_matches_binary( fake, set( PER_MODEL_REGION_OVERRIDES ) )
 
-    assert "VERTEX_REGION_CLAUDE_5_OPUS" in str( exc.value )
-    assert "DOES NOT GUARD"              in str( exc.value )
+    assert never_real    in str( exc.value )
+    assert "DOES NOT GUARD" in str( exc.value )
 
 
 def test_the_drift_guard_goes_red_on_a_stale_phantom_key( tmp_path ):

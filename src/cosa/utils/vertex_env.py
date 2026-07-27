@@ -158,10 +158,27 @@ VERTEX_REGION_CERTIFICATIONS = {
 # configuration teaches people to disable guards (C4, one bucket over). Only DRIFT IN THE KEYS
 # is an error; a drift in the version number is merely news.
 PER_MODEL_REGION_OVERRIDES_CALIBRATION = {
-    "cc_version" : "2.1.209",
-    "harvested"  : "2026-07-14",
+    "cc_version" : "2.1.220",
+    "harvested"  : "2026-07-27",
     "instrument" : "strings $(readlink -f $(which claude)) | grep -oE 'VERTEX_REGION_CLAUDE_[A-Z0-9_]+'",
 }
+
+# HOW THIS STAYS CALIBRATED — and why the stamp above is provenance, not the
+# mechanism. `test_per_model_region_override_set_matches_the_shipped_binary`
+# re-harvests from the CURRENTLY INSTALLED binary on EVERY run and fails on any
+# divergence in either direction. So the tuple cannot silently rot: it rots
+# loudly, at the next test run after a CC upgrade.
+#
+# That is deliberate rather than automatic. A new VERTEX_REGION_* key means the
+# shipped binary can route ONE model to another region, where it runs, bills and
+# logs outside every guard we have — auto-adopting it would let the binary widen
+# our exposure without anyone reading the diff. The red is the review request.
+#
+# History of the stamp, which is the point: harvested at 2.1.207, re-derived
+# clean against 2.1.209 on 2026-07-14 (key set held, version moved), and moved
+# again here — 2.1.220 added VERTEX_REGION_CLAUDE_5_OPUS, red for however long
+# the upgrade predated this run. THE VERSION IS NOT THE INSTRUMENT; the binary
+# on disk is. Never "fix" a red here by bumping cc_version alone.
 
 PER_MODEL_REGION_OVERRIDES = (
     "VERTEX_REGION_CLAUDE_3_5_HAIKU",
@@ -176,6 +193,7 @@ PER_MODEL_REGION_OVERRIDES = (
     "VERTEX_REGION_CLAUDE_4_6_SONNET",
     "VERTEX_REGION_CLAUDE_4_7_OPUS",
     "VERTEX_REGION_CLAUDE_4_8_OPUS",
+    "VERTEX_REGION_CLAUDE_5_OPUS",          # added 2.1.220 (2026-07-27)
     "VERTEX_REGION_CLAUDE_5_SONNET",
     "VERTEX_REGION_CLAUDE_FABLE_5",
     "VERTEX_REGION_CLAUDE_HAIKU_4_5",
