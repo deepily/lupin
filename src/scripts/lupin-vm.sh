@@ -511,11 +511,11 @@ echo '== [1/3] restart :$APP_PORT $REST_SERVICE (docker compose) =='
 # --no-deps is NOT optional (bug 70794d58, took :7999 down 2026-07-26). Without it,
 # compose re-runs cloudsql-socket-init, whose \`rm -f /cloudsql/*/.s.PGSQL.5432\` DELETES
 # the live socket the already-running proxy owns. The proxy binds once at start and never
-# re-creates it, so every app connect then fails "No such file or directory" and lupin-rest
-# crash-loops — while \`docker ps\` still reads "healthy", because the proxy healthcheck
+# re-creates it, so every app connect then fails \"No such file or directory\" and lupin-rest
+# crash-loops — while \`docker ps\` still reads \"healthy\", because the proxy healthcheck
 # probes :9090 and never touches the socket. The hand-run recreate on 2026-07-25 passed
 # --no-deps for exactly this reason; this automated path did not, and the runbook had
-# already written "Filing recommended" about it a day before it bit.
+# already written \"Filing recommended\" about it a day before it bit.
 sudo docker compose -f $COMPOSE_FILE --env-file $ENV_FILE up -d --no-deps --force-recreate $REST_SERVICE
 echo '== [2/3] restart :$ARBITER_PORT arbiter ($ARBITER_SERVICE, systemd --user) =='
 export XDG_RUNTIME_DIR=/run/user/\$(id -u)
