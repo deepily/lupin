@@ -119,6 +119,8 @@ docker exec lupin-rest-dev grep '<key>' /var/lupin/src/conf/lupin-app.ini
 
 (`src/` is bind-mounted, so the file's content is visible immediately on host edit; the bounce only re-instantiates `ConfigurationManager`.)
 
+> ⚠️ **That parenthetical is the whole warning — read it before reusing this shape.** The grep proves the FILE has the value. It says nothing about whether the running process has read it. For **INI on `:7999`** that gap is small and named above. For **CODE on `:8000`** it is not: see "Did my fix land in the RUNNING PROCESS?" below, where the same command returns a confident YES while the process holds the old module.
+
 ### Refreshing `:8000` (user-invoked)
 
 ```bash
@@ -153,6 +155,54 @@ Expect three containers: `lupin-rest-dev`, `lupin-rest-test`, `lupin-postgres`.
 
 ---
 
+## Did my fix land in the RUNNING PROCESS? (row `ce89669e`)
+
+**Never answer this by grepping the container.** `:8000` bind-mounts `./src` but runs `reload=False` by design, so the file inside the container is the host's current file while the imported module is whatever loaded at process start.
+
+> **The file is new. The process is old. And the obvious check reads the file.**
+
+Measured 2026-07-26 while verifying commit `69295c25`:
+
+```
+docker exec lupin-rest-test grep -c <symbol> .../job.py    ->  3
+container started 13:44 UTC  ·  fix committed 16:29 UTC
+```
+
+Three hits, zero of them running — and the report reads as a measurement to everyone downstream.
+
+⚠️ **`git` inside the container lies identically.** The repo is bind-mounted too, so `docker exec <c> git rev-parse HEAD` tracks the **host working tree**, not the loaded code. Re-confirmed 2026-07-27: the `:8000` container reported a sha committed on the host minutes earlier against a process nearly an hour old. *"Just check the sha instead of grepping" is the grep with extra steps.*
+
+**The polarity is what makes this a habit problem**: `:7999` runs `--reload`, so the same grep on the DEV container usually IS true. The habit is trained where it works and carried to where it doesn't.
+
+### Use one of these two instead
+
+```bash
+# 1. From a shell — compares process start time against the commit's AUTHOR date.
+src/scripts/verify-running-code.sh lupin-rest-test <commit-ish>
+#    exit 0 HAS IT  ·  1 MISSING (recreate)  ·  2 CANNOT DETERMINE (absent / down / bad ref)
+```
+
+```bash
+# 2. Over HTTP, no docker socket needed — identity captured at MODULE IMPORT.
+curl -sS http://localhost:8000/api/code-identity
+#    compare `imported_at` against: git log -1 --format=%aI <commit-ish>
+#    commit newer than imported_at  =>  the running process does NOT have it
+```
+
+**Three outcomes, deliberately not two.** "Does not have it" and "cannot tell" have different remedies, and collapsing them reproduces this row's own defect inside its fix.
+
+| Verdict | Meaning | Remedy |
+|---|---|---|
+| `0` HAS IT | process started after the commit | none |
+| `1` MISSING | commit is newer than the process | **recreate** (`docker rm -f` + `compose up -d`) — a `restart` does NOT re-import a loaded module |
+| `2` CANNOT DETERMINE | container absent, never started, or **stopped** | start it, or fix the ref — **not** a recreate |
+
+⚠️ **The recreate has its own trap.** `docker rm -f` succeeds *before* `docker compose up -d` is known to work: compose interpolates `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_*` from `~/.bashrc`, which a non-interactive shell never sources. The destructive half lands first. Export them before recreating — `verify-running-code.sh`'s MISSING verdict prints the exact line.
+
+⚠️ **A stopped container is `2`, not `0`.** `docker inspect` returns the LAST start time for a container that has exited — non-empty and perfectly parseable — so a start-clock read *without* `.State.Running` certifies every commit older than that stale timestamp against a process that is not there. That was a real defect in this script (fixed 2026-07-27); the lesson generalizes to any check built on `StartedAt`.
+
+---
+
 ## What This Skill Does NOT Cover
 
 - **Container debugging** (won't start, keeps restarting, OOM): use `docker logs`, `docker inspect`, `docker compose logs -f` — out of scope here.
@@ -170,5 +220,7 @@ This skill is purely about *intentional* lifecycle actions and the decision tree
 - `feedback_dev_server_bounce_via_docker.md` — pointer to this skill
 - `feedback_test_server_monopolize_mode.md` — `:8000` scheduling protocol
 - `reference_port_routing_dual_container.md` — port mapping (host:8000 → container:7999)
+- `src/scripts/verify-running-code.sh` — does the RUNNING process have this commit? (row `ce89669e`)
+- `src/cosa/rest/code_identity.py` + `GET /api/code-identity` — the same answer over HTTP, captured at module import
 - `src/scripts/refresh-test-server.sh` — canonical `:8000` refresh script
 - `.claude/commands/refresh-test.md` — slash-command wrapper for the same
