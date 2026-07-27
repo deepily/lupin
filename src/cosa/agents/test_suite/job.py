@@ -1287,7 +1287,13 @@ class TestSuiteJob( AgenticJobBase ):
     # ⇒ Everything derives from _ARTIFACT_DIR. Redirect it and the log file, the
     # symlink and the junit XML all move together; there is no way to move one and
     # forget another, which is the failure this replaces.
-    _ARTIFACT_DIR = "/tmp"
+    # ⚠️ None means "resolve the durable root at call time", NOT "/tmp". Kept as a
+    # sentinel rather than an eagerly-resolved string because `artifact_root()` FAILS
+    # CLOSED under pytest (attestation.py, commit `c29beb07`): resolving it at class-
+    # definition time would fire that refusal at IMPORT, taking down every test that
+    # merely imports this module. A test redirects it by setting this attribute to a
+    # tmp_path — which is what the autouse `_isolate_artifact_root` fixture does.
+    _ARTIFACT_DIR = None
 
     _LOG_BASENAMES = {
         "unit"         : "unit-latest.log",
@@ -1309,12 +1315,30 @@ class TestSuiteJob( AgenticJobBase ):
             - returns None for an unknown suite (callers treat that as a no-op)
         """
         basename = cls._LOG_BASENAMES.get( suite_type )
-        return os.path.join( cls._ARTIFACT_DIR, basename ) if basename else None
+        return os.path.join( cls._artifact_dir(), basename ) if basename else None
+
+    @classmethod
+    def _artifact_dir( cls ) -> str:
+        """
+        The ONE resolution point for the artifact root.
+
+        Ensures:
+            - returns `cls._ARTIFACT_DIR` when a test (or an operator) has pinned it
+            - otherwise resolves the durable root via attestation.artifact_root(), which
+              RAISES under pytest when no root was pinned — so a test cannot reach the
+              real directory through any call path, computed or literal
+
+        ⚠️ Resolved lazily, per call. An eager module- or class-level resolution would
+        trigger that refusal at import and take down every test that imports this file.
+        """
+        if cls._ARTIFACT_DIR is not None: return cls._ARTIFACT_DIR
+        from cosa.agents.test_suite.attestation import artifact_root
+        return artifact_root()
 
     @classmethod
     def _artifact_path( cls, filename: str ) -> str:
         """Ensures: returns `filename` resolved under the current artifact root."""
-        return os.path.join( cls._ARTIFACT_DIR, filename )
+        return os.path.join( cls._artifact_dir(), filename )
 
     @classmethod
     def _write_stdout_log( cls, suite_type: str, stdout_text: str ) -> Optional[ str ]:

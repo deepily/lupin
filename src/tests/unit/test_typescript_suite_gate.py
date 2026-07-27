@@ -196,13 +196,18 @@ def test_typescript_has_an_explicit_timeout():
     )
 
 
-def test_typescript_has_a_canonical_log_symlink():
+def test_typescript_has_a_canonical_log_symlink( tmp_path, monkeypatch ):
     # Derived from _ARTIFACT_DIR now (row fd0cd863) so the symlink cannot be relocated
-    # independently of the log file and the junit XML. Asserted against the computed
-    # path rather than the literal, so this follows a future artifact-root move instead
-    # of pinning the tree to /tmp.
+    # independently of the log file and the junit XML.
+    #
+    # The root MUST be pinned here. Left unpinned, `_log_symlink_path` resolves through
+    # attestation.artifact_root(), which fails closed under pytest (c29beb07) — and that
+    # refusal is correct: this test has no business resolving the real artifact root just
+    # to check a basename. Asserted against the computed path rather than a literal, so
+    # it follows a future artifact-root move instead of pinning the tree to /tmp.
+    monkeypatch.setattr( TestSuiteJob, "_ARTIFACT_DIR", str( tmp_path ) )
     assert TestSuiteJob._log_symlink_path( "typescript" ) == os.path.join(
-        TestSuiteJob._ARTIFACT_DIR, "typescript-latest.log"
+        str( tmp_path ), "typescript-latest.log"
     )
 
 

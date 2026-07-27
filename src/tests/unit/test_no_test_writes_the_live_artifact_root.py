@@ -45,7 +45,7 @@ import os
 import pytest
 
 import cosa.utils.util as cu
-from cosa.agents.test_suite.attestation import TEST_SUITE_IO_SUBDIR, artifact_root
+from cosa.agents.test_suite.attestation import TEST_SUITE_IO_SUBDIR
 from cosa.agents.test_suite.job import TestSuiteJob
 
 PROJECT_ROOT = cu.get_project_root()
@@ -57,10 +57,15 @@ PROJECT_ROOT = cu.get_project_root()
 # `TEST_SUITE_IO_SUBDIR` is deliberately the widest of Clayton's roots (`691d49db`,
 # commit `c55bf44f`): it covers artifacts AND the attestation ledger, so a future third
 # subdir beneath it is guarded by construction rather than needing an edit here.
+# ⚠️ artifact_root() is NOT called here. It fails closed under pytest by design
+# (c29beb07), so resolving it at module scope would raise at COLLECTION and take this
+# guard — and every module importing it — down. The durable root is spelled from its
+# repo-relative constant plus the project root instead, which is the same value by
+# construction without invoking the refusal.
 FORBIDDEN_ROOTS = (
-    TestSuiteJob._ARTIFACT_DIR.rstrip( "/" ) + "/",           # today's live root
-    artifact_root().rstrip( "/" ) + "/",                      # the durable home
-    TEST_SUITE_IO_SUBDIR + "/",                               # repo-relative spelling
+    "/tmp/",                                                       # the legacy live root
+    os.path.join( PROJECT_ROOT, TEST_SUITE_IO_SUBDIR ) + "/",      # the durable home
+    TEST_SUITE_IO_SUBDIR + "/",                                    # repo-relative spelling
 )
 
 # Basenames the tier itself owns. A test naming one of these under a forbidden root is
@@ -176,7 +181,7 @@ def test_the_predicate_bites_in_both_directions( suffix, should_flag, tmp_path )
     "fixed" it by carving a hole in the very scan, so the data is built instead.
     """
     probe = tmp_path / "test_probe.py"
-    probe.write_text( "X = %r\n" % os.path.join( TestSuiteJob._ARTIFACT_DIR, suffix ) )
+    probe.write_text( "X = %r\n" % os.path.join( "/tmp", suffix ) )
     assert bool( _offending_literals( str( probe ) ) ) is should_flag
 
 
