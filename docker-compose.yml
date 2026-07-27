@@ -204,6 +204,26 @@ services:
       GH_TOKEN: ${GH_TOKEN:-}
       CHROME_PATH: /home/rruiz/.cache/ms-playwright/chromium-1208/chrome-linux64/chrome
       PYTHONUNBUFFERED: 1
+      # bug b39c350d — `./src` is bind-mounted, so `src/**/__pycache__` is SHARED between
+      # two interpreters whose repo roots differ (host /mnt/DATA01/…, container /var/lupin/…).
+      # A .pyc bakes co_filename as an absolute path, and both venues see identical source
+      # mtime+size, so neither recompiles: the venue that did NOT write the cache runs code
+      # naming a path that does not exist for it. Census of the shared tree, 4008 first-party
+      # entries: 2202 host-written, 708 container-written, 565 relative, 129 pointing at the
+      # project's pre-rename path. Measured consequence on the host at repo root — 708/708
+      # container-written and 129/129 pre-rename entries render NO SOURCE in a traceback
+      # (linecache.getlines returns []), and coverage keys on the same co_filename.
+      #
+      # Sending the container's bytecode to a container-LOCAL dir un-shares the directory.
+      # Confirmed rather than assumed (the two things this remedy depends on):
+      #   1. with pycache_prefix set, __cached__ resolves under the prefix and the in-tree
+      #      __pycache__ is IGNORED even when present — so the 4008 pre-existing shared
+      #      entries go inert for the container without having to be purged.
+      #   2. pytest's assertion rewriter honors it: the *-pytest-*.pyc lands under the
+      #      prefix, and the in-tree __pycache__ gains nothing.
+      # /tmp because it is container-local (only ./src and ./io are bind-mounted) and always
+      # writable by uid 1001; a bytecode cache needs no durability across restarts.
+      PYTHONPYCACHEPREFIX: /tmp/pycache
     deploy:
       resources:
         reservations:
@@ -312,6 +332,26 @@ services:
       GH_TOKEN: ${GH_TOKEN:-}
       CHROME_PATH: /home/rruiz/.cache/ms-playwright/chromium-1208/chrome-linux64/chrome
       PYTHONUNBUFFERED: 1
+      # bug b39c350d — `./src` is bind-mounted, so `src/**/__pycache__` is SHARED between
+      # two interpreters whose repo roots differ (host /mnt/DATA01/…, container /var/lupin/…).
+      # A .pyc bakes co_filename as an absolute path, and both venues see identical source
+      # mtime+size, so neither recompiles: the venue that did NOT write the cache runs code
+      # naming a path that does not exist for it. Census of the shared tree, 4008 first-party
+      # entries: 2202 host-written, 708 container-written, 565 relative, 129 pointing at the
+      # project's pre-rename path. Measured consequence on the host at repo root — 708/708
+      # container-written and 129/129 pre-rename entries render NO SOURCE in a traceback
+      # (linecache.getlines returns []), and coverage keys on the same co_filename.
+      #
+      # Sending the container's bytecode to a container-LOCAL dir un-shares the directory.
+      # Confirmed rather than assumed (the two things this remedy depends on):
+      #   1. with pycache_prefix set, __cached__ resolves under the prefix and the in-tree
+      #      __pycache__ is IGNORED even when present — so the 4008 pre-existing shared
+      #      entries go inert for the container without having to be purged.
+      #   2. pytest's assertion rewriter honors it: the *-pytest-*.pyc lands under the
+      #      prefix, and the in-tree __pycache__ gains nothing.
+      # /tmp because it is container-local (only ./src and ./io are bind-mounted) and always
+      # writable by uid 1001; a bytecode cache needs no durability across restarts.
+      PYTHONPYCACHEPREFIX: /tmp/pycache
     deploy:
       resources:
         reservations:

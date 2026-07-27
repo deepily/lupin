@@ -120,6 +120,14 @@ services:
       # jobs simply fail-loud until it's present — they are not on the boot path).
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       PYTHONUNBUFFERED: "1"
+      # bug b39c350d. NOTE this service does NOT bind-mount the source tree (its `src` is
+      # image-baked; only ./io and the read-only conf/keys leaf are bound), so it is not
+      # exposed to the shared-__pycache__ hazard today and does not strictly need this.
+      # Set anyway, for two reasons: it keeps `test_env_key_parity` honest without widening
+      # KNOWN_DIVERGENT_ENV, and if this service ever gains a `./src:/var/lupin/src` mount it
+      # is already covered rather than silently re-exposed. Inert where unneeded, and a
+      # bytecode cache requires no durability.
+      PYTHONPYCACHEPREFIX: /tmp/pycache
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:7999/health', timeout=3)\""]
       interval: 30s

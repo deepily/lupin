@@ -198,6 +198,18 @@ services:
       # compose files still carry the dead var (out of this remediation's scope).
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       PYTHONUNBUFFERED: "1"
+      # bug b39c350d — this service bind-mounts `./src:/var/lupin/src` (line 100), so the VM's
+      # on-disk `src/**/__pycache__` is shared between the container (repo root /var/lupin) and
+      # anything running on the VM host against the same checkout. A .pyc bakes co_filename as
+      # an absolute path and is NOT recompiled when mtime+size match, so the venue that did not
+      # write the cache runs code naming a path it cannot resolve — degrading tracebacks and
+      # coverage line-mapping silently. Same remedy as docker-compose.yml: send this
+      # interpreter's bytecode to a container-local dir so the directory stops being shared.
+      # Verified on 3.13: with pycache_prefix set, an existing in-tree __pycache__ entry is
+      # IGNORED rather than merely not-updated, so pre-existing shared entries go inert.
+      # ⚠️ Env change — takes effect only on `up -d --no-deps --force-recreate lupin-rest`,
+      # NOT on a `docker restart`. (--no-deps per bug 70794d58.)
+      PYTHONPYCACHEPREFIX: /tmp/pycache
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:7999/health', timeout=3)\""]
       interval: 30s
