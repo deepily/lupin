@@ -47,11 +47,13 @@ from cosa.agents.utils.proxy_agents.base_config import (
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import build_sender_id_for_cc
 from lupin_cli.claude_code.hooks.lib.listener_processes import tmux_injection_lock
+from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-SESSION_DIR       = Path.home() / ".claude" / "sessions"
+# Row 8ccc20ab — derived from the one seam (see lib/sessions_dir.py).
+SESSION_DIR       = sessions_dir()
 CENTRALIZED_LOG   = SESSION_DIR / "cc-listeners.log"
 SUBSCRIBED_EVENTS = [ "notification_queue_update" ]
 

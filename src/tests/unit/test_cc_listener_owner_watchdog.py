@@ -54,7 +54,9 @@ SESSION_ID   = "abc12345-6789-abcd-ef01-234567890abc"
 @pytest.fixture
 def lock_dir( tmp_path, monkeypatch ):
     """Isolate the spawn-lock files from the real ~/.claude/sessions."""
-    monkeypatch.setattr( listener_processes, "SESSION_DIR", tmp_path )
+    # Row 8ccc20ab: listener_processes resolves the lock dir through
+    # sessions_dir() at CALL time; the seam is the env var, not a constant.
+    monkeypatch.setenv( "LUPIN_HOOK_SESSIONS_DIR", str( tmp_path ) )
     return tmp_path
 
 

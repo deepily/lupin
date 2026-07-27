@@ -43,9 +43,13 @@ import time
 import uuid
 from pathlib import Path
 from typing import Optional, Tuple
+from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 
 
-SESSION_DIR = Path.home() / ".claude" / "sessions"
+# Row 8ccc20ab: DERIVED from the one seam so LUPIN_SESSIONS_DIR governs any
+# freshly-started process. Still a module-level NAME because ~200 in-process
+# tests patch it directly; the env var is the out-of-process half.
+SESSION_DIR = sessions_dir()
 
 
 def atomic_write_json( path, data ):

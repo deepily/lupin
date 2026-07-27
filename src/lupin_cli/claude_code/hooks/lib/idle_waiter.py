@@ -41,6 +41,7 @@ from lupin_cli.claude_code.hooks.lib.session_bridge import (
     get_speakerphone,
 )
 from lupin_cli.claude_code.hooks.lib.idle_settings import load_idle_settings
+from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 from lupin_cli.claude_code.hooks.lib.anything_else_ask import (
     fire_anything_else_ask, AnythingElseResult,
 )
@@ -50,7 +51,8 @@ from lupin_cli.claude_code.hooks.lib.anything_else_ask import (
 # Logging
 # ---------------------------------------------------------------------------
 
-_LOG_DIR = Path( os.path.expanduser( "~/.claude/sessions" ) )
+# Row 8ccc20ab — derived from the one seam (see lib/sessions_dir.py).
+_LOG_DIR = sessions_dir()
 
 
 def _log( session_id: str, msg: str ) -> None:

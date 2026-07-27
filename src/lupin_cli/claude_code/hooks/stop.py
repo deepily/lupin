@@ -88,6 +88,7 @@ from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import (
 # owed source. DEFAULT-old (transcript replay) until the fleet cutover flips
 # heartbeat.owed_source_from_store. See cascade review §A/§B/§C, lupin ->
 # src/rnd/v0.1.8/2026.06.16-store-canonical-task-mgmt-cascade-review.md
+from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 from lupin_cli.claude_code.hooks.lib.task_store_settings import load_task_store_settings
 from lupin_cli.claude_code.hooks.lib.task_store_client import read_api_key, query_owed, query_owed_breakdowns
 # v4 acked-inbound ledger (Rick 2026-06-10) — explicit "looked-at" qids the
@@ -832,7 +833,7 @@ def _arm_idle_waiter( session_id, last_assistant_message, cwd ):
 
     # Spawn the waiter — mirrors register_session.py:_spawn_listener pattern
     short    = session_id[ :8 ] if session_id else "unknown"
-    log_path = Path( os.path.expanduser( f"~/.claude/sessions/cc-idle-waiter-{short}.log" ) )
+    log_path = sessions_dir() / f"cc-idle-waiter-{short}.log"   # row 8ccc20ab: the one seam
 
     cmd = [
         sys.executable, "-m", "lupin_cli.claude_code.hooks.lib.idle_waiter",

@@ -36,6 +36,7 @@ _src_path = os.path.join( os.environ.get( "LUPIN_ROOT", os.getcwd() ), "src" )
 if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
+from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 from lupin_cli.claude_code.hooks.lib.hook_common import (
     read_hook_input, log_payload, emit_json, get_buffer_path
 )
@@ -98,7 +99,7 @@ def _find_all_listener_pids( session_id, session_dir=None ):
     from lupin_cli.claude_code.hooks.lib.listener_processes import find_live_listener_pids
 
     if session_dir is None:
-        session_dir = os.path.expanduser( "~/.claude/sessions" )
+        session_dir = str( sessions_dir() )   # row 8ccc20ab: the one seam
 
     pids   = set()
     hashes = set()

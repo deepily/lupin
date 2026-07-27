@@ -32,6 +32,8 @@ import shutil
 import sys
 from pathlib import Path
 
+from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
+
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -320,7 +322,7 @@ def main( argv=None ):
                       "--apply MOVEs reversibly to a quarantine dir; never deletes, never replays)."
     )
     parser.add_argument( "--sessions-dir",
-                         default = str( Path.home() / ".claude" / "sessions" ),
+                         default = str( sessions_dir() ),   # row 8ccc20ab: the one seam
                          help    = "Dir holding cc-buffer-*.jsonl (default: ~/.claude/sessions)" )
     parser.add_argument( "--quarantine-dir", default=None,
                          help = "Move target for --apply (default: <sessions-dir>/cc-buffer-quarantine)" )

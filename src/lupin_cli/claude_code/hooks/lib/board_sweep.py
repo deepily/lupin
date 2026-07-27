@@ -79,7 +79,10 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-SWEEP_DIR = Path( os.path.expanduser( "~/.claude/sessions" ) )
+from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
+
+# Row 8ccc20ab — derived from the one seam (see lib/sessions_dir.py).
+SWEEP_DIR = sessions_dir()
 
 
 def persona_slug( persona ):

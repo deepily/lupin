@@ -28,6 +28,8 @@ import os
 from pathlib import Path
 from typing import Optional
 
+from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
+
 
 # The Claude Code subagent tool's hook `tool_name`.
 SUBAGENT_TOOL_NAMES = ( "Task", )
@@ -65,7 +67,7 @@ def _governance_enabled( env=None ) -> bool:
 
 def _session_dir() -> Path:
     """The spawn-manifest directory (matches session_spawner.SESSION_DIR)."""
-    return Path.home() / ".claude" / "sessions"
+    return sessions_dir()   # row 8ccc20ab: the one seam
 
 
 def _is_crew_manager( session_id, session_dir: Optional[ Path ] = None ) -> bool:

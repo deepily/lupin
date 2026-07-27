@@ -30,6 +30,7 @@ from pathlib import Path
 # Canonical path resolution via cu.get_project_root() — keeps runtime output
 # in io/ directory, consistent with existing io/log/ convention.
 import cosa.utils.util as cu
+from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 
 
 def _logs_dir():
@@ -1294,7 +1295,8 @@ def get_turn_elapsed_seconds( session_id ):
 
 # ── Voice Buffer Functions ────────────────────────────────────────────────────
 
-SESSION_DIR = Path.home() / ".claude" / "sessions"
+# Row 8ccc20ab — derived from the one seam (see lib/sessions_dir.py).
+SESSION_DIR = sessions_dir()
 
 
 def get_buffer_path( session_id ):

@@ -24,7 +24,16 @@ import subprocess
 from contextlib import contextmanager
 from pathlib import Path
 
-SESSION_DIR          = Path.home() / ".claude" / "sessions"
+from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
+
+# Row 8ccc20ab — the lock paths below resolve through `sessions_dir()` at CALL
+# time, NOT through an import-time constant. That distinction is the row: a
+# constant frozen at import keeps pointing at the real bridge directory even
+# after a test redirects the seam, so `_spawn_listener` deposited
+# `cc-listener-abc-123.spawn-lock` + `.stderr` into the operator's live directory
+# while the contact detector (which globs `cc-*.json` only) reported no contact.
+# There is deliberately no SESSION_DIR constant here any more — a patchable name
+# nobody remembers to patch is what produced that.
 LISTENER_MODULE_NAME = "cc_notification_listener"
 
 
@@ -135,7 +144,7 @@ def listener_spawn_lock( session_hash ):
 
     Ensures:
         - Returns the exclusive_flock context manager for
-          SESSION_DIR/cc-listener-{session_hash}.spawn-lock
+          sessions_dir()/cc-listener-{session_hash}.spawn-lock
 
     Args:
         session_hash: 8-char CC session hash
@@ -143,7 +152,7 @@ def listener_spawn_lock( session_hash ):
     Returns:
         context manager yielding bool (lock held)
     """
-    return exclusive_flock( SESSION_DIR / f"cc-listener-{session_hash}.spawn-lock" )
+    return exclusive_flock( sessions_dir() / f"cc-listener-{session_hash}.spawn-lock" )
 
 
 def tmux_injection_lock( tmux_session ):
@@ -157,7 +166,7 @@ def tmux_injection_lock( tmux_session ):
 
     Ensures:
         - Returns the exclusive_flock context manager for
-          SESSION_DIR/tmux-inject-{sanitized}.lock
+          sessions_dir()/tmux-inject-{sanitized}.lock
         - Sanitizes the session name to filename-safe characters
 
     Args:
@@ -167,4 +176,4 @@ def tmux_injection_lock( tmux_session ):
         context manager yielding bool (lock held)
     """
     sanitized = re.sub( r"[^A-Za-z0-9._-]", "_", tmux_session )
-    return exclusive_flock( SESSION_DIR / f"tmux-inject-{sanitized}.lock" )
+    return exclusive_flock( sessions_dir() / f"tmux-inject-{sanitized}.lock" )

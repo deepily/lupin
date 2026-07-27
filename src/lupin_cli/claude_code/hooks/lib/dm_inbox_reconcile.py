@@ -35,6 +35,7 @@ import json
 import urllib.parse
 from pathlib import Path
 
+from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 from lupin_cli.claude_code.hooks.lib.hook_common import build_peer_dm_reminder
 
 
@@ -272,7 +273,7 @@ def _log_capped( session_id, count, log_dir=None ):
     documented known-bound). Never raises.
     """
     try:
-        base = Path( log_dir ) if log_dir is not None else ( Path.home() / ".claude" / "sessions" )
+        base = Path( log_dir ) if log_dir is not None else sessions_dir()   # row 8ccc20ab: the one seam
         base.mkdir( parents=True, exist_ok=True )
         with open( base / RECONCILE_LOG_NAME, "a" ) as f:
             f.write( f"{( session_id or '' )[:8]} inbox page CAPPED at {count} (possible truncation)\n" )

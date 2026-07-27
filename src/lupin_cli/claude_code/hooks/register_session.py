@@ -44,6 +44,7 @@ from lupin_cli.claude_code.hooks.lib.hook_common import (
     read_hook_input, log_payload, emit_json, send_tts
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import atomic_write_json, build_sender_id_for_cc
+from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 from lupin_cli.claude_code.hooks.lib.listener_processes import find_live_listener_pids, listener_spawn_lock
 from cosa.agents.utils.sender_id import detect_project
 from cosa.utils.notification_utils import is_known_project
@@ -330,7 +331,7 @@ def _spawn_listener_locked( session_id, session_data, session_file, accepted_ids
         cmd.append( "--memory-trace" )
 
     # Always write per-session log files (backward compat) + centralized log
-    log_dir          = os.path.expanduser( "~/.claude/sessions" )
+    log_dir          = str( sessions_dir() )
     log_path         = os.path.join( log_dir, f"cc-listener-{short_id}.log" )
     centralized_path = os.path.join( log_dir, "cc-listeners.log" )
     cmd.extend( [ "--log-file", log_path ] )
@@ -348,7 +349,7 @@ def _spawn_listener_locked( session_id, session_data, session_file, accepted_ids
 
     try:
         # Always capture stderr for startup crash diagnostics
-        session_dir = os.path.expanduser( "~/.claude/sessions" )
+        session_dir = str( sessions_dir() )
         stderr_path = os.path.join( session_dir, f"cc-listener-{short_id}.stderr" )
         stderr_file = open( stderr_path, "w" )
 
@@ -438,7 +439,7 @@ def _log_session_transition( old_hash, new_hash, stable_hash ):
         stable_hash: 8-char hash of the stable (original) session
     """
     try:
-        log_path  = os.path.expanduser( "~/.claude/sessions/cc-listeners.log" )
+        log_path  = str( sessions_dir() / "cc-listeners.log" )
         now       = datetime.now( timezone.utc )
         timestamp = now.strftime( "%Y.%m.%d @ %H:%M %S" ) + f",{now.microsecond // 1000:03d}ms"
         line      = f"{timestamp} [--------] === SESSION TRANSITION: {old_hash} -> {new_hash} (stable: {stable_hash}) ===\n"
@@ -479,7 +480,7 @@ def _cleanup_old_listener( old_session_data, new_session_id ):
     old_hash         = old_session_id[:8] if old_session_id else ""
     new_hash         = new_session_id[:8] if new_session_id else ""
 
-    session_dir = os.path.expanduser( "~/.claude/sessions" )
+    session_dir = str( sessions_dir() )
 
     # Step 1: Kill old listener
     if old_listener_pid:
@@ -1161,7 +1162,10 @@ def main():
                "unaddressable by DM (row e9822f8d).", file=sys.stderr )
 
     # ── Phase 2: Write session bridge file ────────────────────────────────
-    session_dir  = os.path.expanduser( "~/.claude/sessions" )
+    # Row 8ccc20ab: this line used to be a bare expanduser of the real bridge
+    # directory — the write that merged a fixture into three LIVE seats. It now
+    # resolves through the one seam, so LUPIN_SESSIONS_DIR redirects it.
+    session_dir  = str( sessions_dir() )
     session_file = None
     old_data     = None
     is_context_clear      = False

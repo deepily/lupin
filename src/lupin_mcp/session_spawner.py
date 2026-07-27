@@ -30,6 +30,7 @@ from pathlib import Path
 from typing  import Any, Callable, Dict, List, Optional, Tuple
 
 from lupin_mcp.persona_normalization import persona_slug
+from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 
 
 # Default ceiling on concurrent reviewers a single manager may spawn. Overridden
@@ -37,7 +38,9 @@ from lupin_mcp.persona_normalization import persona_slug
 DEFAULT_SPAWN_CAP = 8
 
 # Directory holding session bridge + manifest files (mirrors session_bridge.py).
-SESSION_DIR = Path.home() / ".claude" / "sessions"
+# Row 8ccc20ab — derived from the one seam (see
+# lupin_cli/claude_code/hooks/lib/sessions_dir.py).
+SESSION_DIR = sessions_dir()
 
 # ── Persona-state vocabulary for the spawn roster (row 6f8fd858) ──────────────
 #
