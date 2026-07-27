@@ -32,6 +32,24 @@
 # (compose interpolates LUPIN_TEST_INTERACTIVE_MOCK_JOBS_* from a shell that a
 # non-interactive invocation never sourced). Export those first.
 #
+# ⚠️ AND THIS SCRIPT SHIPPED WITH THE SAME DEFECT IT EXISTS TO KILL. Measured
+# 2026-07-27 by Rio ⚡ while auditing it: the first cut read `.State.StartedAt` and
+# never read `.State.Running`. `docker inspect` returns the LAST start time for a
+# STOPPED container — non-empty and a perfectly valid ISO timestamp — so the
+# emptiness guard below only ever caught a container that does not EXIST.
+#
+#   EXITED container, StartedAt=2026-07-27T16:27:37Z Running=false
+#     -> "HAS IT"  exit 0        for a container with NO RUNNING PROCESS AT ALL
+#   NEVER-STARTED,   StartedAt=0001-01-01T00:00:00Z Running=false
+#     -> "MISSING" exit 1        wrong verdict class; prescribes a recreate for a
+#                                container that only needed starting
+#
+# The question asked is "does a RUNNING process have this commit". A start-clock
+# alone answers "did a process ever start after this commit" — a different question
+# with the same shape, which is this row's entire thesis wearing the fix's clothes.
+# ⇒ Read BOTH facts. A container that is not running cannot answer, and
+#   "cannot answer" is outcome 2, never outcome 0.
+#
 # USAGE
 #   verify-running-code.sh <container> [commit-ish]     # default commit-ish: HEAD
 #   verify-running-code.sh lupin-rest-test 69295c25
@@ -40,7 +58,7 @@
 # remedies and collapsing them is the same class of defect this script exists for.
 #   0  the running process HAS the commit
 #   1  the running process does NOT have it  (recreate required)
-#   2  cannot determine                      (container down, bad ref, unparseable)
+#   2  cannot determine                      (container absent, DOWN, bad ref, unparseable)
 set -uo pipefail
 
 RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'; NC=$'\033[0m'
@@ -53,19 +71,62 @@ if [ -z "$CONTAINER" ]; then
     exit 2
 fi
 
-# --- clock 1: when did the PROCESS start? -------------------------------------
+# --- fact 1: is there a RUNNING PROCESS AT ALL, and when did it start? --------
+# TWO facts, read in ONE inspect so they cannot describe different moments.
+#
 # INJECTABLE SEAM. The comparison is the whole decision, and it must be testable
 # without a live container — otherwise the only suite that can exercise this script
 # is one that needs :8000 up, which is the venue this script exists to be careful
 # about. Same shape as the arbiter's hold_roots_fn / scan_fn injection.
+#
+# `..._RUNNING` defaults to "true" when only the clock is injected: an injected
+# clock stands in for a live container, and every existing caller of the seam means
+# exactly that. Set it to "false" to exercise the DOWN arm.
 started_at="${VERIFY_RUNNING_CODE_STARTED_AT:-}"
+is_running="${VERIFY_RUNNING_CODE_RUNNING:-}"
 if [ -z "$started_at" ]; then
-    started_at="$( docker inspect -f '{{.State.StartedAt}}' "$CONTAINER" 2>/dev/null )"
+    # ONE call, both fields: asking twice could straddle a start/stop and yield a
+    # pair that never coexisted.
+    inspected="$( docker inspect -f '{{.State.Running}} {{.State.StartedAt}}' "$CONTAINER" 2>/dev/null )"
+    # An empty result leaves BOTH empty, which the next guard reports as absent.
+    is_running="${inspected%% *}"
+    started_at="${inspected#* }"
+else
+    is_running="${is_running:-true}"
 fi
+
 if [ -z "$started_at" ]; then
-    printf '%sCANNOT DETERMINE%s  container %s is not running (or does not exist)\n' \
+    printf '%sCANNOT DETERMINE%s  container %s does not exist (or docker is unreachable)\n' \
            "$YELLOW" "$NC" "$CONTAINER" >&2
-    printf '  a container that is down has no running code to verify; start it, then re-run\n' >&2
+    printf '  nothing to inspect; check the name with: docker ps -a --format "{{.Names}}"\n' >&2
+    exit 2
+fi
+
+# A never-started container reports the ZERO timestamp. Checked BEFORE the running
+# flag because both are false for it and only this branch says the true thing:
+# "never started" is not "has already exited", and a message that describes a
+# process which never existed is the same substitution — a plausible narrative
+# standing in for the measured fact — that this whole script exists to refuse.
+case "$started_at" in
+    0001-01-01T00:00:00*)
+        printf '%sCANNOT DETERMINE%s  container %s has NEVER STARTED (zero start time)\n' \
+               "$YELLOW" "$NC" "$CONTAINER" >&2
+        printf '  it was created but never run, so there is no process to hold any commit\n' >&2
+        printf '  remedy: docker start %s   # then re-run\n' "$CONTAINER" >&2
+        exit 2 ;;
+esac
+
+# ⚠️ THE DEFECT THIS ROW IS ABOUT, GUARDED. A stopped container reports its LAST
+# start time, so the clock alone would happily certify a commit against a process
+# that is not there. There is no running code to have the commit — that is a
+# CANNOT-DETERMINE, and its remedy is "start it", NOT the recreate that outcome 1
+# prescribes. Two different situations, two different remedies, two exit codes.
+if [ "$is_running" != "true" ]; then
+    printf '%sCANNOT DETERMINE%s  container %s exists but is NOT RUNNING\n' \
+           "$YELLOW" "$NC" "$CONTAINER" >&2
+    printf '  a container that is down has no running code to verify — its last start\n' >&2
+    printf '  time (%s) describes a process that has already exited\n' "$started_at" >&2
+    printf '  remedy: docker start %s   # then re-run; if the code is still stale, THEN recreate\n' "$CONTAINER" >&2
     exit 2
 fi
 
