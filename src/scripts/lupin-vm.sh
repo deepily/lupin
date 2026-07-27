@@ -298,9 +298,20 @@ case "$SUBCMD" in
         action="${1:-}"
         case "$action" in
             status)  remote_compose "ps" ;;
+            # Bare `up -d` (no service) is the whole-graph bring-up — running socket-init IS
+            # correct here, and --no-deps is not even meaningful without a named service.
             up)      remote_compose "up -d" ;;
             down)    remote_compose "down" ;;
-            restart) remote_compose "up -d --force-recreate $REST_SERVICE" ;;
+            # --no-deps is NOT optional (bug 70794d58) — SAME hazard as `deploy`, which got the
+            # fix on 2026-07-26 while this sibling did not. Recreating lupin-rest walks
+            # depends_on to cloud-sql-proxy(service_healthy) -> cloudsql-socket-init
+            # (service_completed_successfully), re-running its `rm -f /cloudsql/*/.s.PGSQL.5432`
+            # — which deletes the socket the ALREADY-RUNNING proxy owns and never re-creates.
+            # Measured, isolated compose project: without --no-deps the socket is GONE and the
+            # proxy still reports `running health=healthy` (its probe hits :9090 and never
+            # touches the socket); with --no-deps the socket survives and socket-init does not
+            # re-run. Guarded by src/tests/unit/deploy/test_compose_nodeps_socket_guard.py.
+            restart) remote_compose "up -d --no-deps --force-recreate $REST_SERVICE" ;;
             logs)    remote_compose "logs -f --tail=200 $REST_SERVICE" ;;
             *)       die "svc needs one of: status | up | down | restart | logs" ;;
         esac

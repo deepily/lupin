@@ -29,7 +29,15 @@ set -euo pipefail
 VM_NAME="lupin-host-test"
 VM_ZONE="us-central1-a"
 VM_ROOT="/mnt/lupin-data/lupin"                      # UID-1001-owned on-VM checkout
-REST_CONTAINER="lupin-rest-cloud-test"
+REST_CONTAINER="lupin-rest-cloud-test"               # container_name — for `docker restart|inspect`
+# COMPOSE SERVICE name, which is NOT the container name. `docker compose pull|up` resolves
+# SERVICES; handed a container_name it exits "no such service: lupin-rest-cloud-test" (measured
+# on compose v2.19.1, both verbs). AXIS-B passed $REST_CONTAINER to both and so aborted at the
+# `pull` under `set -e` — it was broken by construction and had never completed. Two names
+# because they are two namespaces: `docker restart` at :104/:156 and `docker inspect` at :141
+# take the CONTAINER, compose takes the SERVICE. Collapsing them back into one variable
+# re-breaks whichever half loses.
+REST_SERVICE="lupin-rest"                            # docker-compose.cloud-test.yml:78
 COMPOSE_FILE="docker-compose.cloud-test.yml"
 ENV_FILE="cloud-test.env"
 DEPLOYED_REF_FILE="$VM_ROOT/.deployed-ref"
@@ -81,7 +89,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
     log "DRY-RUN plan:"
     log "  axis=$AXIS ref=$SHORT prev=${PREV_SHA:0:8}"
     [ "$AXIS" = code ] && log "  would: git archive src/ -> SCP -> sudo cp -> chown 1001:1001 -> docker restart $REST_CONTAINER -> health-gate" \
-                       || log "  would: cloud-run-build.sh <tag> -> push AR -> compose pull -> up --force-recreate $REST_CONTAINER -> health-gate"
+                       || log "  would: cloud-run-build.sh <tag> -> push AR -> compose pull -> up -d --no-deps --force-recreate $REST_SERVICE -> health-gate"
     log "  would stamp $DEPLOYED_REF_FILE = '$SHA $(date -u +%FT%TZ) $AXIS'; keep prior src/ as src.bak-$STAMP"
     exit 0
 fi
@@ -123,8 +131,18 @@ deploy_deps() {
         TOKEN=\$(curl -s -H 'Metadata-Flavor: Google' 'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token' | python3 -c 'import sys,json;print(json.load(sys.stdin)[\"access_token\"])')
         echo \"\$TOKEN\" | sudo docker login -u oauth2accesstoken --password-stdin https://us-central1-docker.pkg.dev >/dev/null
         sudo sed -i \"s#^\\(LUPIN_IMAGE=.*\\):[^:]*\$#\\1:$tag#\" $ENV_FILE
-        sudo docker compose -f $COMPOSE_FILE --env-file $ENV_FILE pull $REST_CONTAINER
-        sudo docker compose -f $COMPOSE_FILE --env-file $ENV_FILE up -d --force-recreate $REST_CONTAINER
+        sudo docker compose -f $COMPOSE_FILE --env-file $ENV_FILE pull $REST_SERVICE
+        # --no-deps is NOT optional (bug 70794d58). docker-compose.cloud-test.yml carries the
+        # SAME graph as cloud-gpu — lupin-rest(:129) -> cloud-sql-proxy service_healthy(:53-55)
+        # -> cloudsql-socket-init service_completed_successfully — so recreating the app walks
+        # the graph and re-runs socket-init, whose \`rm -f /cloudsql/*/.s.PGSQL.5432\` DELETES
+        # the socket the ALREADY-RUNNING proxy owns. The proxy binds once and never re-creates
+        # it, so every app connect then fails "No such file or directory" while \`docker ps\`
+        # still reads "healthy" (the proxy healthcheck probes :9090 and never touches the socket).
+        # ⚠️ This omission was LATENT, not dormant-by-luck: AXIS-B died one line up on the
+        # service-name bug, so it never reached this command. Fixing that bug ALONE would have
+        # ARMED this one on the cloud-test VM. They had to land together.
+        sudo docker compose -f $COMPOSE_FILE --env-file $ENV_FILE up -d --no-deps --force-recreate $REST_SERVICE
     "
 }
 
