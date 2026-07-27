@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-07-27 (session 951a4459, Mr. Radio 🦉 — decision `2b20a6d6` RULED both arms and closed; `7ee5b646` still open for Rick)
+Last updated: 2026-07-27 afternoon (Clayton 😎 `34474b66` — six-worker crew day: five rulings logged below, incl. two requirements corrected by measurement; `7ee5b646` still open for Rick, and `5bf28e07` timed out to default with no ruling)
 
 ---
 
@@ -11,6 +11,30 @@ Last updated: 2026-07-27 (session 951a4459, Mr. Radio 🦉 — decision `2b20a6d
 **The situation**: the DM-inbox bookmark janitor shipped with `arbiter enable hwm deletion = False`, which **diverges from his "let the janitor drain them" ruling**. I flipped it to OFF after measuring that the plan's safety claim was inverted — reaping a live session's bookmark does not duplicate its DMs, it **silently swallows the un-surfaced ones** (a missing file reads as never-seeded, so the reconcile records the inbox as already-seen and surfaces nothing). That re-creates bug `59f355e0`.
 
 **What Rick decides**: whether to turn it on. The 7-day window is already his ruling and needs no change. Nothing drains until the INI key flips.
+
+---
+
+## 📋 DECISIONS LOG 2026-07-27 afternoon (six-worker crew, recorded by Clayton 😎 `34474b66`) — five rulings, and a pattern worth reusing
+
+**2026-07-27 — VM dual-stack ordering → KEEP the one-commit rule, MOVE the load-bearing half to a per-file compose `name:`.** Sam and Mr Radio ruled that de-hardcoding `container_name` must land with the socket-volume split, on the premise that the hardcoded name is the only thing preventing stack 2's init from deleting stack 1's live socket. **The premise held only across distinct compose projects, which this repo never supplies** — no top-level `name:`, no `-p` at any call site, `COMPOSE_PROJECT_NAME` nowhere, both files at one root ⇒ `/var/lupin` resolves to project `lupin` for both. Measured: same project ⇒ compose does not conflict, it **recreates** — socket deleted, `rm` run twice, and stack 1's app container destroyed. ⇒ The deletion is **already armed**; the gating act is the first `compose up` of a second stack, not a commit. Premise withdrawn by Mr Radio; rule kept.
+
+**2026-07-27 — Vertex data-sharing (OSQ C-1) → OPTIONAL, and the paid probe is CANCELLED.** Phase 1.1's own rule was *"config without `dataSharingEnabledProvider`, issue one request, rejection ⇒ required."* That experiment had already run on 07-13 and succeeded. Confirmed live at zero cost: config present, field absent, 509 anthropic invocations in 14 days. ⇒ Gate `31f6d447` gets the OPTIONAL question. **The probe is now more dangerous than when designed** — `setPublisherModelConfig` is a full-object SET and would clobber a live logging config that did not exist on 07-13.
+
+**2026-07-27 — tier-run attestation → TAMPER-EVIDENCE, not tamper-proofing.** The requirement was "write it where the tests cannot write." Measured, that is unachievable: `job.py`'s pytest Popen uses `env={**os.environ, …}`, so the subprocess inherits every credential the orchestrator holds; the `TFE_/BFE_/LUPIN_TEST_` allowlist filters only the **caller-supplied** dict, not inheritance, **though it reads as if it does**. ⇒ Anyone may append, nobody may rewrite: `prev_sha256` chain, verifier names the first broken index. **Building to "cannot write" would have shipped a receipt store whose guarantee is a promise** — the defect the row was filed about, one layer up. Requirement corrected by its author on the measurement.
+
+**2026-07-27 — two dated regressions → one was the FIX, one was the TEST.** `69295c25` (the `8b93bcf5` lying-zero fix) moved `readline()` into a reader thread whose `finally` posted the EOF sentinel on **any** exit, so a crashed reader read as clean EOF and a dead tier reported **`exit_code 0`** — worse than the `0/0/0/1` it was filed to fix, because it reads as green. The fix was wrong. Separately, `test_this_revision_is_a_head` was **stale by construction**: had the CoSA tree been gated it would have blocked **every migration ever added**. The test was wrong. ⇒ Rule applied: *measure which before touching either.*
+
+**2026-07-27 — a stale COUNT is a second authority → assert the property, never re-pin the number.** `test_vertex_env.py` pinned `== 15` after the tuple was re-harvested to 16. **Bumping to 16 only moves the expiry date on a population the vendor controls**, and it was already a second authority on a fact `test_vertex_env_completeness.py` owns by re-harvesting from the binary every run. ⇒ Now asserts *every key in the tuple is in `HOSTILE_ENV_KEYS`*, per key; **what belongs IN the tuple defers to the single authority that measures it.** The test's NAME said "fifteen" too — **a stale name is a claim**, so renaming was part of the fix.
+
+### ⭐ PATTERN TO REUSE — an exemption with an EXPIRY CONDITION, not a reason
+
+`test_attestation.py` is unreachable by any gate **because `src/cosa/tests/**` is referenced by none** — the exact condition decision `5bf28e07` is open to rule on, not a property of the file. Its allowlist entry therefore records an **expiry condition** rather than a justification: *"remove this line when `5bf28e07` is ruled, either way."*
+
+⇒ **An exemption that dissolves when the condition it rests on resolves cannot rot into a permanent one**, and the ruling disposes of it automatically with no separate decision. Prefer this shape wherever an exemption exists because of an open question rather than because of the thing itself.
+
+### ⚠️ COUNTING YOUR OWN VISIBILITY AND REPORTING IT AS THE TREE
+
+The day was briefed to Rick as ~20 commits; the reviewer measured **48**; the branch since midnight holds **55**. **48 and 55 are both correct** — `da1a5ed8..59038897` is a review range, `--since` is a day — but ~20 was one manager's own visibility reported as the repository's state. Same shape as the three blind instruments in `691d49db`: **a clean number answering a narrower question than the one asked.** Always state the predicate with the count.
 
 ---
 

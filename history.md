@@ -2,6 +2,28 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-06-23 to 07-08](history/2026-06-23-to-07-08-history.md). History health: ✅ **HEALTHY at ~7.9k tokens (31% of 25k)** — archived 2026-07-21 by Mr. Radio 🦉 (session 56a74d7b), ~9.6k tokens moved to archive on Rick's ruling at the 17.5k WARNING threshold.
 
+### 2026.07.27 - Six-worker crew day (recorded by Clayton 😎 `34474b66`) | Instruments that answered the wrong question — 55 commits
+
+**Scope note**: 55 commits on the branch since midnight; the aggregate review's 48 covers `da1a5ed8..59038897`. Both correct, different windows. Decisions Log in TODO.md; this is accomplishments only.
+
+1. **VM dual-stack (`f3b5ecf3`)** — plan + ordering guard. The ruling's premise was withdrawn on measurement: the hardcoded `container_name` guards nothing under the invocation this repo uses (no per-file `name:`, no `-p`, both compose files at one root ⇒ one project). Same-project bring-up **recreates** rather than conflicts — socket deleted, `rm` run twice, stack 1's app container destroyed. Guard goes red on a rename-only diff. `db8a4b2d`.
+
+2. **Vertex OSQ C-1 (`e919d895`)** — resolved **OPTIONAL** and the paid probe cancelled. The designed experiment had already run on 07-13; confirmed live at zero cost (config present, `dataSharingEnabledProvider` absent, 509 invocations/14d). `441d2f46`, `4f89a1bb`.
+
+3. **CoSA test survey (`5bf28e07`)** — first execution of 8,799 ungated tests: **8,771 passed, 4 failed, 0 errors, 24 skipped**. Option 1's "days of red" refuted. Two failures were dated invisible regressions (12 days and 1 day); two were an unset `HF_HOME`. Also **11 of 412 files collect zero tests**. `3d7e22cd`.
+
+4. **Both regressions fixed (`df53c132`)** — opposite verdicts. `69295c25`'s reader thread posted the EOF sentinel on any exit, so a crashed tier reported `exit_code 0`; **the fix was wrong**. `test_this_revision_is_a_head` was stale by construction and would have blocked every migration; **the test was wrong**.
+
+5. **Two wired-gate reds (`e9e8087d`, `406cd4af` closed)** — a guard matching a **comment** and a `${VAR:?…}` error message, narrowed rather than exempted (`${VAR:-…}`/`${VAR:=…}` stay caught); and a drift control that had **expired green** because its synthetic offender shipped for real in CC 2.1.220.
+
+6. **Tier-run attestation (`691d49db`, P1)** — three instruments proved unable to say whether a tier ever ran. Ledger built: append-only JSONL under the `io/` bind mount, `prev_sha256` chain, verifier names the first broken index, empty reports `no_records` never `valid`. `artifact_root()` **fails closed under pytest**. `ef947fb3`, `c55bf44f`, `c29beb07`. ⚠️ **0→N calibration still owed** — unit-green is not calibration.
+
+7. **`fd0cd863`'s ungated twin (`150a5602`)** and **a half-landed re-harvest (`d7ace9a8`)** — a green unit tier reported health for a CoSA file it cannot see (17 red), and a `== 15` count survived a re-harvest to 16. Fixed by property, not by a bumped number.
+
+**Own defects, recorded**: one commit (`c29beb07`) swept up four of a peer's files — `add` scopes staging, `commit` takes the whole index, and that commit was not pathspec'd. Four predicates of mine matched a *description* of the thing rather than the thing.
+
+---
+
 ### 2026.07.26 - Session 9a63d597 (Mr. Radio 🦉) | `DEEPILY_DATA_DIR`: runtime state leaves the repo, and the step that would have failed silently
 
 **Accomplishments** (solo, on Rick's direct rulings; `b3eb9b68` + `fc60b364` on `wip-v0.1.9`, HELD; rows `8758d0b1`/`f56fc63b`). Plan by María 🌸 (REV.10, planning-is-prompting).
