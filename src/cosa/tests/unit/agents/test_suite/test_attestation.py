@@ -361,3 +361,53 @@ def test_a_test_pinned_artifact_dir_keeps_the_ledger_out_of_the_live_root( tmp_p
     job._attest_tier_run( "unit", _result(), "2026-07-27T10:00:00Z" )
 
     assert ( tmp_path / att.ATTESTATIONS_SUBDIR / att.ATTESTATION_FILENAME ).exists()
+
+
+def test_an_ESCAPING_exception_still_produces_a_receipt( tmp_path, monkeypatch ):
+    """
+    THE ARM THE FIRST REAL RUN EXPOSED — driven through the REAL `_execute`.
+
+    ts-102267b8 (2026-07-27) died when `_write_stdout_log` raised, the `except`
+    handler re-invoked it, and the exception left `_run_suite` entirely. The
+    attestation was a bare call AFTER `_run_suite`, so the crashed run produced
+    NO receipt: scope-correct over five returns, boundary-wrong over escapes.
+
+    ⚠️ AN EARLIER VERSION OF THIS TEST HAND-ROLLED ITS OWN try/finally AND SO
+    TESTED NOTHING. Reverting the production `finally` to a bare call left it
+    GREEN — the test asserted the behaviour by re-implementing it, which is the
+    self-fulfilling control this repo has been killing all day. Caught by the
+    mutant surviving. It now drives `_execute`, so the `finally` under test is
+    the one that ships.
+    """
+    import asyncio
+    from unittest.mock import AsyncMock, Mock
+    import cosa.agents.test_suite.voice_io as vio
+    import cosa.agents.test_suite.cosa_interface as ci
+    from cosa.agents.test_suite.job import TestSuiteJob
+
+    # Boundary-mock the voice seam: no notification leaves the process.
+    monkeypatch.setattr( vio, "notify",       AsyncMock() )
+    monkeypatch.setattr( vio, "reconfigure",  Mock() )
+    monkeypatch.setattr( vio, "set_job_id",   Mock() )
+    monkeypatch.setattr( vio, "clear_job_id", Mock() )
+    monkeypatch.setattr( ci,  "_get_sender_id", lambda suffix=None: "test@x" )
+
+    monkeypatch.setattr( TestSuiteJob, "_ARTIFACT_DIR", str( tmp_path ) )
+
+    def _boom( self, suite_type, project_root ):
+        raise RuntimeError( "log write blew up, twice" )
+    monkeypatch.setattr( TestSuiteJob, "_run_suite", _boom )
+
+    job = TestSuiteJob( test_types=[ "unit" ], user_id="u", user_email="e@e.com", session_id="s" )
+
+    with pytest.raises( RuntimeError ):
+        asyncio.run( job._execute() )          # the escape must still propagate
+
+    ledger  = tmp_path / att.ATTESTATIONS_SUBDIR / att.ATTESTATION_FILENAME
+    verdict = att.verify_chain( str( ledger ) )
+    assert verdict == { "status" : "valid", "count" : 1 }, "a crashed tier must still leave a receipt"
+
+    rec = att.read_records( str( ledger ) )[ 0 ]
+    assert rec[ "suite" ] == "unit"
+    assert rec[ "exit_code" ] == 1 and rec[ "errors" ] == 1
+    assert "escaped" in rec[ "error" ]

@@ -456,19 +456,35 @@ class TestSuiteJob( AgenticJobBase ):
                     queue_name="run"
                 )
 
-                started_at = cu.get_current_datetime_iso()
-                result = self._run_suite( suite_type, project_root )
-                self.suite_results[ suite_type ] = result
-
                 # Row 691d49db — attest that this tier RAN, durably.
                 #
-                # AT THE CALL SITE ON PURPOSE. `_run_suite` has five terminal
-                # returns (success, no-script, bad-type, timeout/kill, exception);
-                # attesting inside it would mean five edits and a sixth return
-                # added later that nobody remembers to instrument. Here every
-                # outcome funnels through one line — INCLUDING the timeout path,
-                # which is the 8b93bcf5 case and the one most worth a receipt.
-                self._attest_tier_run( suite_type, result, started_at )
+                # AT THE CALL SITE, IN A `finally`. Both halves are load-bearing:
+                #
+                # CALL SITE, because `_run_suite` has five terminal returns
+                # (success, no-script, bad-type, timeout/kill, exception).
+                # Attesting inside it means five edits and a sixth return added
+                # later that nobody instruments.
+                #
+                # `finally`, because A CALL SITE IS NOT A BOUNDARY. The first
+                # version of this was a bare call after `_run_suite` and it was
+                # scope-correct and boundary-wrong: it covered all five RETURNS
+                # and none of the ESCAPES. Proven on the very first real run
+                # (ts-102267b8, 2026-07-27): `_write_stdout_log` raised on the
+                # main path, the `except` handler re-invoked it and it raised
+                # again, so the exception left `_run_suite` entirely — and the
+                # one run most worth a receipt produced none.
+                #
+                # `result` is bound only on a normal return, so the crash arm
+                # attests a synthesized record rather than nothing: an escape is
+                # a tier outcome, and the ledger's whole purpose is runs that
+                # went wrong.
+                started_at = cu.get_current_datetime_iso()
+                result     = None
+                try:
+                    result = self._run_suite( suite_type, project_root )
+                    self.suite_results[ suite_type ] = result
+                finally:
+                    self._attest_tier_run( suite_type, result, started_at )
 
                 # Report per-suite results
                 suite_found  = result[ "passed" ] + result[ "failed" ] + result[ "skipped" ] + result[ "errors" ]
@@ -885,10 +901,15 @@ class TestSuiteJob( AgenticJobBase ):
         Append a durable, tamper-evident record that this tier ran (row 691d49db).
 
         Requires:
-            - result is a `_run_suite` return dict
+            - result is a `_run_suite` return dict, or None when `_run_suite`
+              raised and the exception is escaping
             - started_at is an ISO timestamp taken BEFORE the run
 
         Ensures:
+            - a None result is attested as an ESCAPED run rather than skipped —
+              exit_code 1, errors 1, and an `error` naming the escape. A crashed
+              tier that leaves no receipt is the exact hole this row exists to
+              close, and it is the outcome most worth recording.
             - appends one chained record to the ledger under the `io/` bind mount
             - NEVER raises: a failure to record must not fail the tier it records.
               The whole point is a receipt for runs that go wrong, so an
@@ -900,6 +921,13 @@ class TestSuiteJob( AgenticJobBase ):
         """
         try:
             from cosa.agents.test_suite import attestation
+
+            if result is None:
+                result = {
+                    "passed" : 0, "failed" : 0, "skipped" : 0, "errors" : 1,
+                    "exit_code" : 1,
+                    "error"     : "_run_suite raised and the exception escaped — see the job's own error",
+                }
 
             attestation.append_attestation(
                 result       = result,

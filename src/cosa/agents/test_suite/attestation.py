@@ -213,6 +213,12 @@ def build_record( result, suite, job_id, prev_sha256, seq, started_at, finished_
         "failed"        : result[ "failed"  ],
         "skipped"       : result[ "skipped" ],
         "errors"        : result[ "errors"  ],
+        # WHY a run went wrong, not just that it did. A receipt whose whole
+        # purpose is failed runs must carry the reason: `errors: 1` with no
+        # `error` tells a later reader that something happened and nothing about
+        # what — which is the class of record this row was filed against.
+        # None on a clean run, and None is meaningful here rather than missing.
+        "error"         : result.get( "error" ),
         "log_path"      : result.get( "log_path" ),
         "log_sha256"    : sha256_file( result.get( "log_path" ) ),
         "junit_path"    : result.get( "junit_path" ),
