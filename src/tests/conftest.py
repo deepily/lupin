@@ -49,6 +49,45 @@ os.environ.setdefault(
 # Now cosa is importable - other test files can just: import cosa.utils.util as du
 
 
+# ── Venue routing: host_only deselection (row dba10ba5) ───────────────────────
+#
+# 186 files under src/tests/ declare a `Venue:` line in their own docstring and
+# NOTHING read them. Harmless for most — but a test whose SUBJECT is the host
+# (test_pilot_ac_instruments::test_every_ac_register_entry_matches_the_host, whose
+# header says "IT MEANS 'THE TOOL IS ON THIS HOST'") cannot produce a verdict from
+# inside a container. It went red there for five days for a correct reason, which is
+# how a tier teaches its readers to stop reading it (b5b6d252).
+#
+# Logic lives in venue_routing.py so it is unit-testable in BOTH directions without
+# a container; this hook is the thin wiring. The deselected node-ids are NAMED in the
+# report, never merely counted — see deselection_report()'s docstring for why.
+# `tests.venue_routing`, NOT `venue_routing`: src/tests/__init__.py EXISTS, so pytest's
+# prepend import-mode puts `src/` on sys.path (the first ancestor without __init__.py),
+# never `src/tests/`. A bare `from venue_routing import ...` fails at conftest load and
+# takes EVERY test run with it. Verified against `PYTHONPATH=src`, which is what the
+# bootstrap above actually establishes — an earlier check used `PYTHONPATH=src/tests`
+# and passed by manufacturing a path pytest does not provide.
+from tests.venue_routing import (                # noqa: E402  (needs the sys.path bootstrap above)
+    host_is_reachable, partition_by_venue, deselection_report,
+)
+
+_deselected_by_venue = []
+
+
+def pytest_collection_modifyitems( config, items ):
+    kept, deselected = partition_by_venue( items, host_is_reachable() )
+    if not deselected: return
+    config.hook.pytest_deselected( items=deselected )
+    items[ : ] = kept
+    _deselected_by_venue[ : ] = [ i.nodeid for i in deselected ]
+
+
+def pytest_report_collectionfinish( config, start_path, items ):
+    # start_path (pathlib), NOT startdir (py.path.local) — the latter raises
+    # PytestRemovedIn9Warning and becomes an error in pytest 9.
+    return deselection_report( _deselected_by_venue )
+
+
 # ── FM-21: hermetic-config module boundary ────────────────────────────────────
 #
 # Design + nod trail: src/rnd/v0.1.8/2026.06.11-fm21-test-isolation-hermetic-config-fixture.md

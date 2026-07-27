@@ -262,6 +262,13 @@ def register_drift( ac, spec ):
     return None
 
 
+# host_only (row dba10ba5): this function's name is not decoration — its SUBJECT is the
+# host. In a container `gcloud`/`bq` are absent, so it goes red for a claim that was
+# never about the container; install them there and it goes GREEN while the proposition
+# ("the operator host carries them") stays unverified. Neither outcome is a verdict, so
+# where the host is unreachable it is deselected AND NAMED rather than silenced. On the
+# host — the only venue that can judge it — nothing changes and it still fails loudly.
+@pytest.mark.host_only
 @pytest.mark.parametrize( "ac", sorted( PILOT_ACS ) )
 def test_every_ac_register_entry_matches_the_host( ac ):
     """
