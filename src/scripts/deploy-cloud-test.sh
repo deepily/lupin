@@ -9,6 +9,12 @@
 #
 # TWO AXES (auto-detected):
 #   AXIS A (code): only src/ changed -> bind-mount sync + docker restart.
+#                  ⚠️ REQUIRES the target container to bind /var/lupin/src. It does
+#                  NOT today (the ./src mount was removed 2026-07-07 so it cannot
+#                  shadow the baked image), so this axis ABORTS with a named error
+#                  rather than silently deploying nothing — bug be706f10. Asserted
+#                  against the LIVE container via docker inspect, not this repo's
+#                  compose file, which is not what the VM runs.
 #   AXIS B (deps): pyproject.toml / uv.lock changed -> image rebuild path
 #                  (build->push->pull->force-recreate). NEVER a silent restart.
 #
@@ -88,14 +94,53 @@ STAMP="$( dctl_compute_stamp "$SHA" )"
 if [ "$DRY_RUN" -eq 1 ]; then
     log "DRY-RUN plan:"
     log "  axis=$AXIS ref=$SHORT prev=${PREV_SHA:0:8}"
-    [ "$AXIS" = code ] && log "  would: git archive src/ -> SCP -> sudo cp -> chown 1001:1001 -> docker restart $REST_CONTAINER -> health-gate" \
+    [ "$AXIS" = code ] && log "  would: ASSERT $REST_CONTAINER binds /var/lupin/src (be706f10; ABORTS if not) -> git archive src/ -> SCP -> sudo cp -> chown 1001:1001 -> docker restart $REST_CONTAINER -> health-gate" \
                        || log "  would: cloud-run-build.sh <tag> -> push AR -> compose pull -> up -d --no-deps --force-recreate $REST_SERVICE -> health-gate"
     log "  would stamp $DEPLOYED_REF_FILE = '$SHA $(date -u +%FT%TZ) $AXIS'; keep prior src/ as src.bak-$STAMP"
     exit 0
 fi
 
 # ---- AXIS A: code-only bind-mount sync -----------------------------------
+#
+# PRECONDITION (bug be706f10). This axis is a BIND-MOUNT SYNC: it extracts src/
+# onto the VM's disk and `docker restart`s, which only deploys code if the
+# container actually binds that directory. `docker-compose.cloud-test.yml` stopped
+# mounting `./src` on 2026-07-07 (deliberately — a live bind would SHADOW the
+# self-consistent baked image for the v0.2.0 pgvector leg), and this script was
+# never swept. Without the check below, AXIS-A extracts code the container cannot
+# see, restarts the SAME baked image, and the health-gate goes GREEN — because the
+# container IS healthy; it is merely running the old code.
+#
+# ⚠️ ASSERTED AGAINST THE LIVE CONTAINER, NOT THE REPO'S COMPOSE FILE. The repo
+# file is not what the VM runs; a VM-side copy may legitimately differ, and reading
+# the repo to answer a question about the VM is the exact failure this lane keeps
+# finding. `docker inspect` asks the process that will actually serve the code.
+#
+# This also transitively protects `rollback_code`, which restores src.bak-$STAMP
+# and restarts under the SAME assumption: it runs only after deploy_code, and
+# deploy_code now dies here under `set -euo pipefail` before the health-gate.
+#
+# ⚠️ BEHAVIOUR CHANGE, stated plainly: code-only deploys that previously reported
+# SUCCESS will now FAIL. They were not deploying anything; the green was the bug.
+assert_container_binds_src() {
+    log "precondition: does $REST_CONTAINER actually bind /var/lupin/src?"
+    local bound
+    bound="$( "${SSH[@]}" "sudo docker inspect -f '{{range .Mounts}}{{println .Destination}}{{end}}' $REST_CONTAINER 2>/dev/null | grep -Fx '/var/lupin/src' || true" )"
+    if [ -z "$bound" ]; then
+        die "AXIS-A cannot work against $REST_CONTAINER: it has NO bind mount at /var/lupin/src.
+  This axis syncs src/ to the VM's disk and restarts — with no mount, the container
+  never sees the new code, keeps running the baked image, and the health-gate passes
+  anyway (bug be706f10). The ./src mount was removed from docker-compose.cloud-test.yml
+  on 2026-07-07 on purpose, so that a live bind cannot SHADOW the baked image.
+  REMEDY: deploy via the image axis instead — re-run with --deps, which builds and
+  pushes a new image rather than syncing a directory nothing reads.
+  Do NOT 'fix' this by restoring the ./src mount; that re-arms the shadow trap."
+    fi
+    log "precondition OK — /var/lupin/src is bind-mounted; the sync can land"
+}
+
 deploy_code() {
+    assert_container_binds_src
     local tar="/tmp/lupin-src-$SHORT.tar"
     log "exporting committed src/ @ $SHORT"
     git archive --format=tar "$SHA" src/ > "$tar"
