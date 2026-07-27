@@ -92,12 +92,20 @@ class TestRunMigrationsToHead( unittest.TestCase ):
         engine = MagicMock()
         fake_base = MagicMock()
         with patch( "cosa.rest.db.auto_migrate._inspect_db_state", return_value=( False, False ) ), \
-             patch( "cosa.rest.db.auto_migrate.create_engine", return_value=engine ), \
+             patch( "cosa.rest.db.auto_migrate.create_engine", return_value=engine ) as ce, \
              patch( "cosa.rest.postgres_models.Base", fake_base ), \
              patch( "cosa.rest.db.auto_migrate.command" ) as cmd:
             auto_migrate.run_migrations_to_head( database_url=self.URL, debug=True )
         fake_base.metadata.create_all.assert_called_once_with( engine )
-        engine.dispose.assert_called_once()
+        # EVERY engine opened is disposed. This was `assert_called_once`, which
+        # read as "exactly one engine exists" — true only incidentally. Row
+        # 0aae1a28 added the before/after revision reads that make the migration
+        # announcement possible, and each opens its own engine; `create_engine` is
+        # patched module-wide so all of them are this one mock. Asserting the
+        # PAIRING is the invariant that was meant; asserting the COUNT was an
+        # accident of there having been one.
+        self.assertEqual( engine.dispose.call_count, ce.call_count )
+        self.assertGreaterEqual( ce.call_count, 1 )
         cmd.stamp.assert_called_once()
         cmd.upgrade.assert_not_called()
         # v0.2.0 pgvector: the `vector` extension is created before create_all.

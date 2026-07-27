@@ -86,6 +86,12 @@ NOTIFY_TIMEOUT_SECONDS = 5.0
 # Drift kinds, so callers/tests match on a constant rather than a magic string.
 KIND_MISSING_TABLE  = "missing_table"
 KIND_MISSING_COLUMN = "missing_column"
+# Row 0aae1a28 (c). The DB is stamped BEHIND the tree's head while every mapped
+# column happens to be present. Column-diffing is STRUCTURALLY BLIND to this: a
+# migration that only adds an index, a constraint, or changes a column TYPE moves
+# the revision without changing the column set, so `find_missing_columns` returns
+# empty and the old early-return meant the revisions were never even read.
+KIND_REVISION_BEHIND = "revision_behind_head"
 
 
 def model_names_by_table( base ):
@@ -238,13 +244,37 @@ def format_drift_alarm( drift, db_revision, head_revision ):
     Returns:
         str
     """
+    # The two findings have DIFFERENT diagnoses and DIFFERENT remedies, so the
+    # header must not assert the column one when only a revision gap was found.
+    # A missing column is a live 500; a revision gap alone is not — saying it is
+    # would be an alarm that overstates, and an alarm that overstates gets
+    # discounted the next time it fires correctly.
+    has_columns  = any( row[ "kind" ] != KIND_REVISION_BEHIND for row in drift )
+    has_revision = any( row[ "kind" ] == KIND_REVISION_BEHIND for row in drift )
+
     lines = [
         "=" * 78,
-        "CRITICAL: ORM/DATABASE SCHEMA DRIFT DETECTED AT STARTUP",
+        "CRITICAL: ORM/DATABASE SCHEMA DRIFT DETECTED AT STARTUP" if has_columns
+        else "WARNING: DATABASE IS BEHIND THE TREE'S MIGRATION HEAD",
         "=" * 78,
-        "The ORM maps columns the live database does not have. Reads of the",
-        "affected tables will fail with UndefinedColumn (HTTP 500) until the",
-        "missing migration lands. The server is starting ANYWAY (fail-open).",
+    ]
+
+    if has_columns:
+        lines += [
+            "The ORM maps columns the live database does not have. Reads of the",
+            "affected tables will fail with UndefinedColumn (HTTP 500) until the",
+            "missing migration lands. The server is starting ANYWAY (fail-open).",
+        ]
+    else:
+        lines += [
+            "Every mapped column is present, so this is NOT a live 500 — but the",
+            "database is stamped behind the tree's head. A migration that changes",
+            "only an index, a constraint, or a column TYPE moves the revision",
+            "without changing the column set, which is why the column check above",
+            "reads clean. The server is starting ANYWAY (fail-open).",
+        ]
+
+    lines += [
         "",
         f"  DB stamped revision : {db_revision or 'unknown'}",
         f"  Migration head      : {head_revision or 'unknown'}",
@@ -253,17 +283,27 @@ def format_drift_alarm( drift, db_revision, head_revision ):
     ]
 
     for row in drift:
-        if row[ "kind" ] == KIND_MISSING_TABLE:
+        if row[ "kind" ] == KIND_REVISION_BEHIND:
+            lines.append( f"    - REVISION BEHIND  db={db_revision or 'unknown'} tree={head_revision or 'unknown'}" )
+        elif row[ "kind" ] == KIND_MISSING_TABLE:
             lines.append( f"    - TABLE MISSING  {row[ 'table' ]}  (model {row[ 'model' ]})" )
         else:
             lines.append( f"    - COLUMN MISSING {row[ 'table' ]}.{row[ 'column' ]}  (model {row[ 'model' ]})" )
 
-    lines += [
-        "",
-        "  Remedy: write the missing Alembic migration (never a hand-run ALTER)",
-        "  and restart. Do NOT add the column to an allowlist.",
-        "=" * 78,
-    ]
+    lines.append( "" )
+    if has_columns:
+        lines += [
+            "  Remedy: write the missing Alembic migration (never a hand-run ALTER)",
+            "  and restart. Do NOT add the column to an allowlist.",
+        ]
+    if has_revision:
+        lines += [
+            "  Remedy for the revision gap: the startup migrate did NOT take. This",
+            "  runs AFTER 'alembic upgrade head', so reaching it means the upgrade",
+            "  no-opped against a database it did not move. Check which database",
+            "  the app resolved and re-run the migrate against THAT one.",
+        ]
+    lines.append( "=" * 78 )
     return "\n".join( lines )
 
 
@@ -292,11 +332,29 @@ def check_schema_drift( database_url=None ):
     engine = create_engine( url )
     try:
         drift = find_missing_columns( engine, Base.metadata, model_names_by_table( Base ) )
-        if not drift:
-            return None
+        # ⚠️ READ THE REVISIONS ALWAYS (row 0aae1a28 (c)). This used to sit behind
+        # `if not drift: return None`, which made the revision comparison DEAD
+        # CODE unless a column was already missing — the revisions were only ever
+        # decoration on an alarm raised by something else. A DB one migration
+        # behind on an index/constraint/type-only change has a complete column
+        # set, so the old early-return reported it clean.
         db_revision, head_revision = read_revisions( engine )
     finally:
         engine.dispose()
+
+    # Only when BOTH are readable can they disagree meaningfully. An unreadable
+    # revision degrades to None and must not manufacture an alarm — that would be
+    # a detector that fires on its own blindness.
+    if db_revision is not None and head_revision is not None and db_revision != head_revision:
+        drift = drift + [ {
+            "kind"     : KIND_REVISION_BEHIND,
+            "table"    : None,
+            "column"   : None,
+            "model"    : None,
+        } ]
+
+    if not drift:
+        return None
 
     return {
         "drift"         : drift,

@@ -444,8 +444,33 @@ async def lifespan( app: FastAPI ):
     # get_database_url builder, so it connects exactly like the app in every env.
     from cosa.rest.db.auto_migrate import run_migrations_to_head
     print( "Running database auto-migration (alembic upgrade head)..." )
-    run_migrations_to_head( debug=app_debug )
+    migrate_result = run_migrations_to_head( debug=app_debug )
     print( "✓ Database schema is at migration head." )
+
+    # ANNOUNCE AN APPLIED MIGRATION (row 0aae1a28 (a), Mr Radio's ruling).
+    #
+    # On :7999 uvicorn runs with StatReload over a bind-mounted repo, so SAVING a
+    # watched host file restarts the server, which runs this migrate. Not
+    # committing, not bouncing — saving. That means a schema change can reach the
+    # fleet's task store with no gate and, until now, no announcement: both
+    # `command.upgrade` and this block were silent whether they moved the
+    # database or no-opped. María spent an afternoon asking for a deploy window
+    # for a change that had already shipped hours earlier as she typed.
+    #
+    # ⚠️ The normal objection to a log line — "a log nobody reads is not a guard"
+    # — was weighed and withdrawn by Mr Radio for this case specifically: a DEV
+    # server log is read; that is what it is for. This is an ANNOUNCEMENT, not a
+    # gate, and it is not claimed as one.
+    #
+    # Deliberately silent on a no-op: a line on every boot is a line nobody sees.
+    if migrate_result[ "applied" ]:
+        print(
+            f"⚠️  MIGRATION APPLIED — the database moved {migrate_result[ 'before' ] or '(unstamped)'}"
+            f" -> {migrate_result[ 'after' ]}.\n"
+            f"    On :7999 a file-save restarts the server and runs this migrate, so this may be a\n"
+            f"    schema deploy nobody decided. If you did not intend it, that is the thing to look at.",
+            file=sys.stderr,
+        )
 
     # ORM/database drift alarm — FAIL-OPEN. Detects a mapped_column that reached
     # the tree ahead of its migration: on :7999 uvicorn runs with --reload, so the
