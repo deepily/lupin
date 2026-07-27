@@ -186,15 +186,67 @@ def test_an_unreachable_database_names_the_DATABASE( monkeypatch ):
     assert "database's current revision" in reason
 
 
-def test_a_healthy_read_returns_a_pair_and_no_reason():
+def test_a_healthy_read_returns_a_pair_and_no_reason( monkeypatch ):
     """
     CONTROL for the three failure tests above. Each of them asserts that a reason is
     PRESENT; if read_revisions always returned a reason — for any unrelated
     environmental cause — all three would pass while measuring nothing.
+
+    ⚠️ PINNED TO THE TEST VENUE, NOT THE AMBIENT ONE (row `76acde23`).
+    `read_revisions()` takes no URL and resolves through the app builder, so with
+    `LUPIN_ENV` unset it defaulted to `development` and read **`lupin_db_dev`** —
+    the live dev store (`database.py:74`, `:110`). Measured 2026-07-27: this was
+    the ONLY test in `src/tests/unit/` doing so.
+
+    Rick's standing rule (decision `2b20a6d6`): *"I absolutely do not want any
+    test touching a live dev data store!"*
+
+    The pin follows the pattern `test_metadata_schema_drift.py` already
+    establishes — set the venue explicitly and neutralise the overrides that
+    could retarget it — so the comparison cannot drift with whatever the
+    developer's shell happens to carry. `DATABASE_URL` and `DB_NAME` are cleared
+    for the same reason that file clears them: either one silently wins.
+
+    ⚠️ THE CONTROL IS PRESERVED, NOT TRADED AWAY. This still calls the real
+    `read_revisions()` on its real healthy path; only the venue moves. Making the
+    database unreachable instead would have satisfied a rule that does not apply
+    to `lupin_db_test` while destroying the vacuity guard three siblings depend
+    on — Mr Radio ruled against exactly that (see the module note below).
     """
+    monkeypatch.setenv( "LUPIN_ENV", "testing" )
+    monkeypatch.delenv( "DATABASE_URL", raising=False )
+    monkeypatch.delenv( "DB_NAME",      raising=False )
+
     head, _current, reason = csah.read_revisions()
     assert reason is None, f"the healthy path is broken here, so the failure tests prove nothing: {reason}"
     assert head, "no head revision resolved from this tree"
+
+
+def test_the_healthy_read_does_NOT_target_the_live_dev_store( monkeypatch ):
+    """
+    Regression lock for the pin above. Asserts the resolved venue under the
+    test's own environment is the TEST database, not the dev one.
+
+    CONTROL: the same resolver with `LUPIN_ENV` left at its ambient default must
+    name a DIFFERENT database. Without that arm this passes on any builder that
+    returns a constant, and would keep passing if the pin were deleted.
+    """
+    from cosa.rest.db.database import get_database_url
+
+    monkeypatch.delenv( "DATABASE_URL", raising=False )
+    monkeypatch.delenv( "DB_NAME",      raising=False )
+
+    monkeypatch.setenv( "LUPIN_ENV", "testing" )
+    pinned = get_database_url()
+
+    monkeypatch.setenv( "LUPIN_ENV", "development" )
+    ambient = get_database_url()
+
+    assert "lupin_db_test" in pinned, f"the pin does not reach the test venue: {pinned}"
+    assert "lupin_db_dev" not in pinned, f"the pinned venue is the LIVE DEV store: {pinned}"
+    assert pinned != ambient, (
+        "pinned and ambient resolve to the SAME database — the pin asserts nothing"
+    )
 
 
 # ── the bootstrap + the CLI contract ─────────────────────────────────────
