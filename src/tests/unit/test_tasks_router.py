@@ -88,6 +88,14 @@ def repo( monkeypatch ):
     # An empty map is also the honest default: no blocker was resolved, so no row can be
     # flagged, and any test that wants a finding sets this explicitly.
     fake.statuses_for_ids.return_value = { }
+    # `count_tasks_by_project` must return a REAL dict for exactly the reasons above
+    # (row d23147e8). The aperture disclosure calls `.items()` on it whenever a
+    # `project=` filter is present; a bare MagicMock yields a MagicMock from
+    # `.items()`, which iterates as nothing — so the disclosure would silently emit
+    # no warning and every aperture assertion would pass against unfixed code. An
+    # empty map is also the honest default: no other project exists, so nothing is
+    # excluded, and a test wanting a finding sets this explicitly.
+    fake.count_tasks_by_project.return_value = { }
 
     @contextmanager
     def _fake_get_db():

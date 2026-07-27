@@ -150,11 +150,25 @@ def test_the_router_forwards_id_prefix_to_every_repo_call_site():
     a different indent and was missed, silently. Signature checks alone would NOT have
     caught it — the repo accepted the kwarg, the router just never sent it. Counting the
     forwards at the call sites is the only assertion that distinguishes those two.
+
+    ⚠️ THIS COUNT IS LOAD-BEARING AND MUST BE RAISED DELIBERATELY. It went 4 -> 5 on
+    2026-07-27 when `count_tasks_by_project` was added for the aperture disclosure
+    (row `d23147e8`). The test FAILED on that addition, which is it working: a new
+    repo call site is exactly the event that re-opens this bug, and a hand-threaded
+    filter reaching four of five seams is indistinguishable from reaching all of
+    them until something counts. Raise it only after CONFIRMING the new call site
+    actually forwards `id_prefix` — bumping the constant to silence a red is how
+    this guard stops guarding.
     """
-    import inspect
+    import inspect, re
     from cosa.rest.routers import tasks as tasks_router
     source = inspect.getsource( tasks_router.query_tasks )
-    assert source.count( "id_prefix           = id_prefix," ) == 4
+    # Cross-check against the repo call sites themselves rather than trusting the
+    # literal alone: if someone adds a call site and bumps this number without
+    # forwarding the filter, the two counts disagree and THAT is the finding.
+    repo_call_sites = len( re.findall( r"repo\.\w+\(", source ) )
+    assert repo_call_sites == 5, f"repo call sites changed to {repo_call_sites} — re-audit the forwards"
+    assert source.count( "id_prefix           = id_prefix," ) == 5
 
 
 # ----------------------------------------------------------------------------------

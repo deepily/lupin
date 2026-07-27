@@ -1027,6 +1027,69 @@ class TaskRepository( BaseRepository[TaskItem] ):
 
         return { row_status : row_count for row_status, row_count in query.group_by( TaskItem.status ).all() }
 
+    def count_tasks_by_project(
+        self,
+        owner_persona       : Optional[str] = None,
+        status              : Optional[str] = None,
+        gate_class          : Optional[str] = None,
+        urgency             : Optional[str] = None,
+        accountable_manager : Optional[str] = None,
+        item_class          : Optional[str] = None,
+        correlation_key     : Optional[str] = None,
+        id_prefix           : Optional[str] = None,
+        include_terminal    : bool = False,
+        owed_only           : bool = False,
+        hide_parked         : bool = False,
+        now                 : Optional[datetime] = None,
+    ) -> dict:
+        """
+        The PER-PROJECT breakdown of the admitted set WITH THE PROJECT FILTER
+        DELIBERATELY ABSENT — the aperture a project-scoped query can report
+        (bug `d23147e8`, item 3).
+
+        WHY THIS EXISTS: `project` is free text. `TaskCreateIn.project` validates
+        only `min_length=1, max_length=255`, and `_canon_project` passes any
+        non-aliased name through unchanged, so a typo mints a project silently and
+        permanently. A caller who queries `project="skills-distillation"` while a
+        row sits under `"google-skills-distillation"` gets a clean, plausible,
+        SMALLER number and no indication anything was excluded. That is how
+        `52c1c41e` survived a census Rick's drop order was executed against.
+
+        ⛔ THE PROJECT FILTER IS NOT A PARAMETER HERE, AND ITS ABSENCE IS THE POINT.
+        Accepting one would let a caller scope the aperture to the very value whose
+        blind spot it exists to reveal — the buckets it must report are precisely
+        the ones the caller's `project=` did NOT match. A signature that cannot
+        express the wrong question cannot be asked it.
+
+        Every OTHER filter is applied, through the SAME two helpers `count_tasks`
+        and `query_tasks` use. That is what makes the result comparable: the buckets
+        answer "under my other constraints, what project values exist?" — not
+        "what exists in the store," which would report projects the caller's own
+        owner/status filters had already ruled out and read as a bigger blind spot
+        than there is.
+
+        Requires:
+            - each filter is either None (no constraint) or an exact-match value
+            - the filter set is applied IDENTICALLY to count_tasks, minus project
+
+        Ensures:
+            - returns { project: count } over ONLY the projects actually present in
+              the admitted set — an absent project is absent, never a 0 bucket
+            - the key is the RAW stored string, NOT alias-canonicalized: reporting
+              a canonical form would hide the orphan spelling that IS the finding
+            - sum( result.values() ) == count_tasks( <same filters, project=None> )
+            - a row whose project is NULL lands under the None key rather than being
+              dropped — a row with no project is exactly the case a census must see
+        """
+        query = self.session.query( TaskItem.project, func.count( TaskItem.id ) )
+        query = self._apply_scalar_filters(
+            query, owner_persona, status, gate_class, urgency,
+            accountable_manager, None, item_class, correlation_key, id_prefix
+        )
+        query = self._apply_owed_filter( query, owed_only, hide_parked, status, include_terminal, now )
+
+        return { row_project : row_count for row_project, row_count in query.group_by( TaskItem.project ).all() }
+
     def count_tasks(
         self,
         owner_persona       : Optional[str] = None,

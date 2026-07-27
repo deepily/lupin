@@ -1291,6 +1291,94 @@ def query_tasks(
             hide_parked         = hide_parked,
         )
         warnings = [ ]
+        # APERTURE DISCLOSURE (bug d23147e8, item 3) — a project-scoped query must
+        # declare what it did NOT match.
+        #
+        # `project` is free text: TaskCreateIn validates only min_length=1/
+        # max_length=255 and `_canon_project` passes non-aliased names through
+        # unchanged, so a typo mints a project silently and permanently. The alias
+        # table is NOT the defence and item 2 of this row was struck on that ground —
+        # you cannot enumerate aliases for names nobody has agreed on. What scales is
+        # the query publishing its own blind spot.
+        #
+        # THE FAILURE THIS ANSWERS: a wrong `project=` value returns a clean,
+        # plausible, SMALLER number and nothing says a row was excluded. `52c1c41e`
+        # was invisible to a census by construction — the row lived under
+        # "google-skills-distillation" while the census asked for
+        # "skills-distillation" — and Rick's drop order was executed against that
+        # census. It survived only because its owner happened to see it on her own
+        # owner-scoped board.
+        #
+        # Computed ONLY when a project filter is active: with no filter the caller
+        # already sees every project, so there is no aperture to declare and no
+        # second query worth paying for.
+        if project is not None:
+            by_project = repo.count_tasks_by_project(
+                owner_persona       = owner_persona,
+                status              = status,
+                gate_class          = gate_class,
+                urgency             = urgency,
+                accountable_manager = accountable_manager,
+                item_class          = item_class,
+                correlation_key     = correlation_key,
+                id_prefix           = id_prefix,
+                include_terminal    = include_terminal,
+                owed_only           = owed_only,
+                hide_parked         = hide_parked,
+            )
+            # Compare on the CANONICAL form so an alias that legitimately resolves to
+            # the queried project is NOT reported as unmatched — `_canon_project` is
+            # the same function the filter itself went through, so a bucket is
+            # "unmatched" here iff the filter genuinely could not have matched it.
+            # The reported KEY stays the RAW stored string: canonicalizing the output
+            # would hide the orphan spelling, which IS the finding.
+            unmatched = {
+                stored : n for stored, n in by_project.items()
+                if _canon_project( stored ) != project
+            }
+            if unmatched:
+                excluded = sum( unmatched.values() )
+                # ⚠️ RANK BY SUSPICION, NOT BY SIZE. The first cut of this sorted by
+                # count descending — which buries the finding by construction. An
+                # orphan spelling is RARE (that is what makes it an orphan), so a
+                # count-descending list puts the one value worth seeing dead last,
+                # behind every large unrelated project, and the top-N cut drops it
+                # first. On the live store that ordered the actual defect
+                # ('google-skills-distillation'=1) at position 8 of 8, under
+                # 'lupin'=838. A disclosure whose ordering hides its own signal is
+                # the `park_reason_stale` failure — a flag readers learn to skip,
+                # which disarms it permanently.
+                #
+                # NEAR = one name contains the other (case-folded). That is exactly
+                # the shape an alias takes: a prefix/suffix qualifier on a shared
+                # stem ("google-" + "skills-distillation"). Deliberately NOT edit
+                # distance — it would rank 'lookml' near 'lupin' on 3 shared letters
+                # and rank the real 8-character prefix pair as far.
+                def _is_near( stored ):
+                    a, b = ( stored or "" ).casefold(), ( project or "" ).casefold()
+                    return bool( a ) and bool( b ) and ( a in b or b in a )
+                ranked = sorted(
+                    unmatched.items(),
+                    key = lambda kv: ( not _is_near( kv[ 0 ] ), -kv[ 1 ] )
+                )
+                near     = [ s for s, _ in ranked if _is_near( s ) ]
+                shown    = ", ".join( f"{stored!r}={n}" for stored, n in ranked[ :10 ] )
+                more     = "" if len( unmatched ) <= 10 else f" (+{len( unmatched ) - 10} more)"
+                # The near-miss callout leads, because it is the actionable half. When
+                # nothing is near, say so rather than leaving the reader to scan the
+                # list and conclude it themselves.
+                lead = (
+                    f"⚠️ LIKELY SAME PROJECT, DIFFERENT SPELLING: {', '.join( repr( n ) for n in near )}. "
+                    if near else "No near-miss spelling detected. "
+                )
+                aperture_notice = (
+                    f"project={project!r} matched {total} row(s). {lead}"
+                    f"{excluded} row(s) under {len( unmatched )} OTHER project value(s) were "
+                    f"excluded by this filter and are NOT in `total` (nearest-first): "
+                    f"{shown}{more}"
+                )
+                print( f"[task_query APERTURE] {aperture_notice}" )
+                warnings.append( aperture_notice )
         # Warn-not-fail (María #3): a heavy NON-terse pull earns an OBSERVABLE log
         # line nudging toward terse=True — never a rejection, rows still returned.
         if not terse and len( tasks ) > rules.NONTERSE_WARN_THRESHOLD:
