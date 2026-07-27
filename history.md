@@ -2,6 +2,28 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-06-23 to 07-08](history/2026-06-23-to-07-08-history.md). History health: ✅ **HEALTHY at ~7.9k tokens (31% of 25k)** — archived 2026-07-21 by Mr. Radio 🦉 (session 56a74d7b), ~9.6k tokens moved to archive on Rick's ruling at the 17.5k WARNING threshold.
 
+### 2026.07.26 - Session 9a63d597 (Mr. Radio 🦉) | `DEEPILY_DATA_DIR`: runtime state leaves the repo, and the step that would have failed silently
+
+**Accomplishments** (solo, on Rick's direct rulings; `b3eb9b68` + `fc60b364` on `wip-v0.1.9`, HELD; rows `8758d0b1`/`f56fc63b`). Plan by María 🌸 (REV.10, planning-is-prompting).
+
+1. **Why it left the repo.** Gitignored is the **kill list, not the shield** — `git clean -xdf` deletes ignored files, which is what `-x` means. Measured: a dry run listed **448 runtime files as "would remove"**, including three cargo-bearing holds carrying hand-written successor notes. All four families now live at `<DEEPILY_DATA_DIR>/<repo>/`, outside every repo.
+
+2. **⭐ Two path predicates, deliberately NOT unified.** Sweep roots stay **realpath**-keyed (Rick's 2026-07-16 ruling, untouched — deduping them on repo identity would drop a worktree root, and a hold lives in `cheech-orphan-bridge` today); the **write location** uses repo identity via `git rev-parse --path-format=absolute --git-common-dir`, which is what makes the data fleet-global. Rick confirmed directly that both hold — they answer different questions. Tests exist so a future "unification" goes red.
+
+3. **🔴 The step whose failure is silent — the one Rick asked for.** Every existing source of `_compute_hold_roots` yields a **repo**: the parent scan appends only directories containing `.git`, so a data dir is invisible to it *by construction* (proved: seed a parent with `a-repo/.git` + `lupin-data/`, the scan returns `['a-repo']`). Omit the data root and `roots_swept` stays non-empty, the no-roots alarm never fires, the report reads `roots N · files 0 · prunable 0` — **indistinguishable from a clean fleet while both janitors quietly stop reclaiming**, with `enable_hold_deletion` defaulting True. Live proof after the change: **439 files found**, the exact number that would have read as 0.
+
+4. **Backup discharged by a receipt BEFORE anything moved.** New `sync-data-to-backup.sh` — own source, own destination, **own exclude file**. Deliberately not a second source on `sync-to-backup.sh`, which is a single SOURCE→DEST pair with `--delete` **live**: appending there would have merged the data tree into the lupin backup destination and deleted what didn't match. ⚠️ `--delete` makes it a **mirror, not an archive** — it covers disk failure, **not** wrongful deletion; versioned snapshots recorded as a named gap.
+
+5. **449 files relocated · 448 verified byte-identical**, with a control proving the verify could fail. Seven survivors turned out to be **live sessions' bookmarks rewritten since the copy** — the destination held staler versions, so those were refreshed *from* the originals before removal rather than the reverse.
+
+**🔴 Three of my own instruments were wrong in one sitting, each caught by a number that disagreed with itself**: `cp` reported "0 copied" (`ls -1` hides dotfiles — the directory was 28 KB while claiming to be empty); a verify loop reported "0 mismatches" while checking nothing (unexpanded glob, vacuous skip); and the fallback base was derived from the *passed tree*, so a worktree resolved to `.claude/projects-data/lupin` — inside the repo. All three fixed, the third pinned by a regression test.
+
+**Not fail-loud, deliberately**: `DEEPILY_DATA_DIR` is unset in every long-lived session's environment, so a hard failure would have been a fleet-wide outage. It falls back to the *same* location derived rather than read — never to the repo root, which would recreate the clutter, and only in the sessions nobody is watching.
+
+**Tests**: 11 new (using a real `git worktree add`, not a mocked shape) · **3044 passed + 2 xfailed**, no regressions. Five pre-existing tests pinned the old `base_dir=None → project root` contract and were **rewritten to the new one rather than deleted**.
+
+**Files**: `heartbeat_hold.py`, `fleet_arbiter_loop.py`, `sync-data-to-backup.sh` (new), `conf/rsync-exclude-data.txt` (new), `test_fleet_data_root.py` (new), + 5 updated suites
+
 ### 2026.07.26 - Session 9a63d597 (Mr. Radio 🦉) | `c8f60c22`: two interfaces for one phase, and a guard that fired without saying what to fix
 
 **Accomplishments** (solo; `aa59d882` + `480436f2` on `wip-v0.1.9`, HELD; rows `c8f60c22` closed, `b5ca8fd5` opened):
