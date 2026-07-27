@@ -249,7 +249,16 @@ services:
   # Companion credentials (admin user + API key) auto-seeded from dev DB
   # on every startup via seed_test_companions.py.
   lupin-rest-test:
-    image: lupin:1.1.2-agy-candidate    # 2026-07-11: agy (Antigravity CLI) baked in (Rio, Rick user_direct); test rides same version as dev. Rollback: lupin:1.1.1-pgvector-candidate. Prior: 1.1.1-pgvector-candidate.
+    # 2026-07-27 (Krishna, rows 719962ed/b5b6d252): test DIVERGES from dev by exactly
+    # three binaries — tmux, node v22.15.0, terraform v1.12.2 — so the scheduled tier
+    # stops silencing 6 tmux-gated assertions and can run the typescript tier at all.
+    # Measured a true delta, not an upstream jump: dpkg 523 -> 527 (tmux + libevent-core
+    # + libutempter0 + unzip), ZERO removed, ZERO version changes; chromium-1208, the
+    # pip freeze hash and the bundled CC 2.1.161 all byte-identical to 1.1.2 — so the
+    # e2e visual tier sees no drift. Dev stays on 1.1.2 ONLY because recreating
+    # lupin-rest-dev bounces Rick's live :7999; the image is correct for dev too.
+    # Rollback: lupin:1.1.2-agy-candidate.
+    image: lupin:1.1.3-testtoolchain-candidate
     container_name: lupin-rest-test
     restart: unless-stopped
     user: "1001:1001"
