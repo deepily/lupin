@@ -147,32 +147,29 @@ def sweep_progress_line( persona, live_owed=None ):
     """
     The sentence the Stop-hook appends to its self-poke reason.
 
-    ⚠️ WHY `live_owed` IS CONSULTED ONLY ON THE COMPLETE ARM (Rick, 2026-07-27).
+    THE DENOMINATOR IS THE LIVE OWED COUNT (Rick, 2026-07-27).
 
     He saw `✅ BOARD SWEEP COMPLETE: 71/71 owed rows iterated` in a live poke and
     asked whether 71 was real. It was — on 2026-07-25. Mr Radio's board was 71 rows
-    then and is 14 now, and the ledger on disk has no expiry, so a finished sweep
-    kept asserting a two-day-old fraction in the present tense on every tick. His
-    fix: look the total up dynamically instead of freezing it.
+    then and is 12 now, and the ledger on disk has no expiry, so a finished sweep
+    asserted a two-day-old fraction in the present tense on every tick.
 
-    🔴 HE IS RIGHT ABOUT THE STALENESS AND THE FIX MUST NOT BE APPLIED WHOLESALE.
-    A live denominator on the IN-PROGRESS arm re-opens the exact hole the freeze
-    exists to close, named in this module's docstring: *"if the denominator shrank
-    as rows were dropped, the gate could be closed by dropping instead of by
-    reviewing."* At 60/71, dropping the remaining 11 would make a live count read
-    60/60 COMPLETE. The gate would be satisfiable by deletion.
+    🔴 MY FIRST FIX SPLIT THE ARMS — live count on COMPLETE, frozen on IN-PROGRESS —
+    to protect the module docstring's anti-gaming property (*"if the denominator
+    shrank as rows were dropped, the gate could be closed by dropping instead of by
+    reviewing"*). RICK OVERRULED IT, 2026-07-27: *"your argument about gaming the
+    board … is specious, and irrelevant. I as a human operator will catch gaming of
+    the system in a heartbeat. Let's not assume the worst of Claude Code just yet."*
 
-    ⇒ THE SPLIT, and it is safe because the two arms have different risk:
-      · IN PROGRESS — the gate is OPEN, so a shrinkable denominator is a way out.
-        Stays FROZEN. Byte-identical to before. Also keeps the frozen `board_ids`
-        membership floor, which the docstring forbids re-querying live for its own
-        separate reason (a legitimately dropped row leaves the live board).
-      · COMPLETE — the gate is already SATISFIED. There is nothing left to game
-        open, so the live count cannot be abused here, and it is the only thing
-        that can tell a finished sweep from a stale one.
+    ⇒ HE IS ALSO RIGHT ON THE MERITS, which I missed while defending the freeze. The
+    sweep's purpose is *"review every row you owe."* If the board legitimately shrank
+    — rows closed, dropped with reason, reassigned — then a seat that reviewed what
+    remains IS done, and the frozen denominator was holding a satisfied gate open
+    against a board that no longer had the work in it. The freeze defended against a
+    dishonest seat by lying to an honest one on every tick.
 
-    ⇒ The frozen fraction is not deleted; it is DEMOTED to history and labelled as
-    such. What changes is that it stops being stated as a fact about now.
+    ⇒ `total_at_start` stays in the LEDGER as the historical record of what the sweep
+    began against. It is no longer the denominator anyone is shown.
 
     Requires:
         - persona is the seat's display name (str) or None
@@ -182,13 +179,12 @@ def sweep_progress_line( persona, live_owed=None ):
 
     Ensures:
         - "" ONLY when this seat has no ledger — see the module docstring's failure table
-        - an incomplete sweep yields a DO-NOT-STOP line carrying reviewed/total and the
-          number remaining, so the poke counts DOWN rather than repeating a constant.
-          UNAFFECTED by live_owed — the frozen denominator is the anti-gaming floor
-        - a complete sweep yields a distinct completion line (never silence) that
-          reports the LIVE board, and names the frozen fraction as history
-        - a complete sweep with live_owed None says the live board is UNKNOWN rather
-          than implying the historical fraction still describes it
+        - the denominator is `live_owed` on BOTH arms; `total_at_start` is reported
+          only as dated history
+        - live_owed None ⇒ the count is UNKNOWN and says so; it NEVER falls back to
+          the frozen total, which is the stale number this change exists to remove
+        - an incomplete sweep yields a DO-NOT-STOP line with the number remaining
+        - a complete sweep yields a distinct completion line (never silence)
         - an unreadable ledger yields a LOUD line naming the file and the reason
         - never raises
     """
@@ -214,40 +210,33 @@ def sweep_progress_line( persona, live_owed=None ):
                     "board_ids of your owed rows before trusting the number."
                     if ledger.get( "board_ids" ) is None else "" )
 
-    if reviewed >= total:
-        # The sweep is satisfied. The frozen fraction now describes a board that may
-        # no longer exist, so it is reported as HISTORY with its date, and the live
-        # count is the only present-tense number. See the docstring's arm split.
-        when = str( ledger.get( "started_at" ) or "" )[ :10 ] or "an earlier date"
-        history = f"(swept {reviewed}/{total} on {when} — HISTORY, not your board now)"
+    when     = str( ledger.get( "started_at" ) or "" )[ :10 ] or "an earlier date"
+    began    = f"(sweep began {total} rows, {when})"
 
-        if live_owed is None:
-            return ( f"✅ BOARD SWEEP COMPLETE {history}. ⚠️ Your CURRENT owed count could not "
-                     f"be read this tick, so nothing here describes your board as it stands. "
-                     f"Do NOT treat this line as a clean board — re-check before you stop."
-                     + unvalidated )
+    # live_owed is UNKNOWN, not zero, and must NOT fall back to `total` — the frozen
+    # number is the stale figure this whole change exists to stop showing.
+    if live_owed is None:
+        return ( f"⚠️ BOARD SWEEP: your CURRENT owed count could not be read this tick "
+                 f"{began}, so no number here describes your board as it stands. Do NOT "
+                 f"treat this as a clean board — re-check before you stop." + unvalidated )
 
-        if live_owed == 0:
-            return ( f"✅ BOARD SWEEP COMPLETE and your board is CLEAR — 0 owed now {history}."
-                     + unvalidated )
+    if live_owed == 0:
+        return ( f"✅ BOARD SWEEP COMPLETE — 0 owed now {began}." + unvalidated )
 
-        return ( f"⛔ You owe {live_owed} row(s) RIGHT NOW. A completed sweep {history} does "
-                 f"NOT cover them — rows arrive after a sweep ends. Work them in priority "
-                 f"order and report the pass with its counts, not with 'the sweep is done'."
-                 + unvalidated )
+    if reviewed >= live_owed:
+        return ( f"⛔ {live_owed} owed NOW {began}. You have reviewed {reviewed}, so the "
+                 f"sweep is satisfied — but reviewing is not doing. Work them in priority "
+                 f"order and report the pass with its counts." + unvalidated )
 
-    remaining = total - reviewed
-    return ( f"⛔ BOARD SWEEP IN PROGRESS — {reviewed}/{total} rows iterated, {remaining} NOT "
-             f"YET REVIEWED. Rick's standing order (2026-07-25): do NOT stop reviewing until "
-             f"you have iterated your way through ALL {total} of your items. Per row ask "
-             f"(1) is this ALREADY DONE — if so close it to `done` WITH a receipt, or drop it "
-             f"if there is nothing to cite; (2) has it been OVERTAKEN BY EVENTS — if so drop "
-             f"it with the reason. An expired chase is NEITHER: a hold Rick placed does not "
-             f"lapse because our scheduler fired. Before you KEEP a row, run "
-             f"`git log -S\"<the mechanism it names>\" -- <the file it names>` — a row is "
-             f"often closed by a commit landed under a DIFFERENT row's id, and that is the "
-             f"expensive direction: you keep a dead row and spend real attention on it."
-             + unvalidated )
+    remaining = live_owed - reviewed
+    return ( f"⛔ BOARD SWEEP IN PROGRESS — {reviewed}/{live_owed} reviewed, {remaining} to go "
+             f"{began}. Per row ask (1) is this ALREADY DONE — close it to `done` WITH a "
+             f"receipt, or drop it if there is nothing to cite; (2) has it been OVERTAKEN BY "
+             f"EVENTS — drop it with the reason. An expired chase is NEITHER: a hold Rick "
+             f"placed does not lapse because our scheduler fired. Before you KEEP a row, run "
+             f"`git log -S\"<the mechanism it names>\" -- <the file it names>` — a row is often "
+             f"closed by a commit landed under a DIFFERENT row's id, and keeping a dead row "
+             f"is the expensive direction." + unvalidated )
 
 
 def record_reviewed( persona, task_ids, total_at_start=None, board_ids=None ):

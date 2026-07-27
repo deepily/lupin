@@ -63,8 +63,8 @@ def test_two_seats_get_two_ledgers( sweep_dir ):
     board_sweep.record_reviewed( "mr radio", [ "a" ], total_at_start=71 )
     board_sweep.record_reviewed( "maria",    [ "x" ], total_at_start=22 )
 
-    assert "1/71" in board_sweep.sweep_progress_line( "mr radio" )
-    assert "1/22" in board_sweep.sweep_progress_line( "maria" )
+    assert "1/71" in board_sweep.sweep_progress_line( "mr radio", live_owed=71 )
+    assert "1/22" in board_sweep.sweep_progress_line( "maria", live_owed=22 )
 
 
 # ---------------------------------------------------------------- the failure table
@@ -75,12 +75,12 @@ def test_no_ledger_is_the_only_silent_arm( sweep_dir ):
 
 def test_an_incomplete_sweep_counts_down( sweep_dir ):
     board_sweep.record_reviewed( "mr radio", [ "a", "b", "c" ], total_at_start=10 )
-    line = board_sweep.sweep_progress_line( "mr radio" )
-    assert "3/10" in line and "7 NOT YET REVIEWED" in line
-    assert "do NOT stop" in line
+    line = board_sweep.sweep_progress_line( "mr radio", live_owed=10 )
+    assert "3/10" in line and "7 to go" in line
+    assert "BOARD SWEEP IN PROGRESS" in line
 
     board_sweep.record_reviewed( "mr radio", [ "d" ] )
-    assert "4/10" in board_sweep.sweep_progress_line( "mr radio" )   # it MOVES
+    assert "4/10" in board_sweep.sweep_progress_line( "mr radio", live_owed=10 )   # it MOVES
 
 
 def test_a_complete_sweep_is_loud_not_silent( sweep_dir ):
@@ -89,8 +89,8 @@ def test_a_complete_sweep_is_loud_not_silent( sweep_dir ):
     started — and that difference is the entire receipt.
     """
     board_sweep.record_reviewed( "mr radio", [ "a", "b" ], total_at_start=2 )
-    line = board_sweep.sweep_progress_line( "mr radio" )
-    assert line != "" and "SWEEP COMPLETE" in line and "2/2" in line
+    line = board_sweep.sweep_progress_line( "mr radio", live_owed=2 )
+    assert line != "" and "owed NOW" in line and "reviewed 2" in line
 
 
 @pytest.mark.parametrize( "bad_content", [
@@ -107,7 +107,7 @@ def test_an_unusable_ledger_is_LOUD_never_silent( sweep_dir, bad_content ):
     precisely to survive a seat that would like to stop.
     """
     ( sweep_dir / "board-sweep-mr-radio.json" ).write_text( bad_content, encoding="utf-8" )
-    line = board_sweep.sweep_progress_line( "mr radio" )
+    line = board_sweep.sweep_progress_line( "mr radio", live_owed=5 )
     assert line != "", f"an unusable ledger went SILENT on: {bad_content}"
     assert "UNVERIFIED" in line and "board-sweep-mr-radio.json" in line
 
@@ -121,7 +121,7 @@ def test_an_unaddressable_seat_yields_no_ledger_and_no_line( sweep_dir, persona 
     """
     assert board_sweep.ledger_path( persona ) is None
     assert board_sweep.read_ledger( persona ) == ( None, "" )
-    assert board_sweep.sweep_progress_line( persona ) == ""
+    assert board_sweep.sweep_progress_line( persona, live_owed=5 ) == ""
 
 
 def test_read_ledger_distinguishes_absent_from_unreadable( sweep_dir ):
@@ -137,19 +137,34 @@ def test_read_ledger_distinguishes_absent_from_unreadable( sweep_dir ):
 
 def test_re_reviewing_a_row_is_not_progress( sweep_dir ):
     board_sweep.record_reviewed( "mr radio", [ "a", "a", "a" ], total_at_start=3 )
-    assert "1/3" in board_sweep.sweep_progress_line( "mr radio" )
+    assert "1/3" in board_sweep.sweep_progress_line( "mr radio", live_owed=3 )
 
 
-def test_the_denominator_is_frozen_at_sweep_start( sweep_dir ):
+def test_the_LEDGER_still_freezes_total_at_start_as_history( sweep_dir ):
     """
-    THE GATE MUST NOT BE CLOSEABLE BY DROPPING. If `total_at_start` re-derived from the
-    live board, dropping rows would shrink the denominator and satisfy the gate without
-    reviewing anything — rewarding exactly the behaviour Rick's two questions guard against.
+    `total_at_start` is still frozen ON DISK — it is the record of what the sweep began
+    against, and a later record_reviewed cannot rewrite it. What changed 2026-07-27 is
+    that it is no longer the DENOMINATOR anyone is shown; see the next test.
     """
     board_sweep.record_reviewed( "mr radio", [ "a" ], total_at_start=71 )
     board_sweep.record_reviewed( "mr radio", [ "b" ], total_at_start=2 )   # ignored
     assert json.loads( ( sweep_dir / "board-sweep-mr-radio.json" ).read_text() )[ "total_at_start" ] == 71
-    assert "2/71" in board_sweep.sweep_progress_line( "mr radio" )
+
+
+def test_the_DISPLAYED_denominator_is_the_LIVE_board_not_the_frozen_total( sweep_dir ):
+    """
+    🔴 RICK'S RULING, 2026-07-27, overturning my earlier design: "your argument about
+    gaming the board … is specious, and irrelevant. I as a human operator will catch
+    gaming of the system in a heartbeat."
+
+    He is also right on the merits. The sweep asks "review every row you owe." If the
+    board legitimately shrank, a seat that reviewed what remains IS done — and the frozen
+    denominator was holding a satisfied gate open against work that no longer existed.
+    The freeze defended against a dishonest seat by lying to an honest one every tick.
+    """
+    board_sweep.record_reviewed( "mr radio", [ "a", "b" ], total_at_start=71 )
+    assert "2/12" in board_sweep.sweep_progress_line( "mr radio", live_owed=12 )
+    assert "2/71" not in board_sweep.sweep_progress_line( "mr radio", live_owed=12 )
 
 
 @pytest.mark.parametrize( "bad_total", [ None, 0, -1, "71", True ] )
@@ -218,7 +233,7 @@ def test_a_junk_id_cannot_pad_the_numerator( sweep_dir ):
     with pytest.raises( ValueError ) as excinfo:
         board_sweep.record_reviewed( "maria", [ "deadbeef-0000-0000-0000-000000000000" ] )
     assert "deadbeef" in str( excinfo.value )
-    assert "1/3" in board_sweep.sweep_progress_line( "maria" )      # unmoved
+    assert "1/3" in board_sweep.sweep_progress_line( "maria", live_owed=3 )      # unmoved
 
 
 def test_a_stray_is_refused_WITHOUT_dropping_the_valid_ids_in_the_same_call( sweep_dir ):
@@ -229,7 +244,7 @@ def test_a_stray_is_refused_WITHOUT_dropping_the_valid_ids_in_the_same_call( swe
     board_sweep.record_reviewed( "maria", [ ], total_at_start=3, board_ids=[ "a", "b", "c" ] )
     with pytest.raises( ValueError ):
         board_sweep.record_reviewed( "maria", [ "a", "junk" ] )
-    assert "0/3" in board_sweep.sweep_progress_line( "maria" )
+    assert "0/3" in board_sweep.sweep_progress_line( "maria", live_owed=3 )
 
 
 def test_membership_is_the_FROZEN_set_not_a_live_board( sweep_dir ):
@@ -241,7 +256,7 @@ def test_membership_is_the_FROZEN_set_not_a_live_board( sweep_dir ):
     """
     board_sweep.record_reviewed( "mr radio", [ ], total_at_start=2, board_ids=[ "kept", "dropped-by-me" ] )
     board_sweep.record_reviewed( "mr radio", [ "dropped-by-me" ] )   # no longer on the live board
-    assert "1/2" in board_sweep.sweep_progress_line( "mr radio" )
+    assert "1/2" in board_sweep.sweep_progress_line( "mr radio", live_owed=2 )
 
 
 def test_a_ledger_with_no_frozen_set_still_counts_but_says_it_is_UNVERIFIED( sweep_dir ):
@@ -250,7 +265,7 @@ def test_a_ledger_with_no_frozen_set_still_counts_but_says_it_is_UNVERIFIED( swe
     live sweep; counting SILENTLY would be the false green. So it counts and confesses.
     """
     board_sweep.record_reviewed( "mr radio", [ "anything at all" ], total_at_start=2 )
-    line = board_sweep.sweep_progress_line( "mr radio" )
+    line = board_sweep.sweep_progress_line( "mr radio", live_owed=2 )
     assert "1/2" in line
     assert "NO FROZEN START-SET" in line and "UNVERIFIED" in line
 
@@ -258,14 +273,14 @@ def test_a_ledger_with_no_frozen_set_still_counts_but_says_it_is_UNVERIFIED( swe
 def test_the_unvalidated_warning_also_rides_the_COMPLETE_line( sweep_dir ):
     """A sweep that 'completed' on unverifiable ids must not report a clean ✅."""
     board_sweep.record_reviewed( "mr radio", [ "x", "y" ], total_at_start=2 )
-    line = board_sweep.sweep_progress_line( "mr radio" )
-    assert "SWEEP COMPLETE" in line and "UNVERIFIED" in line
+    line = board_sweep.sweep_progress_line( "mr radio", live_owed=2 )
+    assert "owed NOW" in line and "UNVERIFIED" in line
 
 
 def test_a_validated_ledger_carries_NO_warning( sweep_dir ):
     """The negative control — the warning must not fire on a correctly-armed ledger."""
     board_sweep.record_reviewed( "mr radio", [ "a" ], total_at_start=2, board_ids=[ "a", "b" ] )
-    assert "UNVERIFIED" not in board_sweep.sweep_progress_line( "mr radio" )
+    assert "UNVERIFIED" not in board_sweep.sweep_progress_line( "mr radio", live_owed=3 )
 
 
 # ---------------------------------------------------------------- re-arm must not un-freeze
@@ -287,7 +302,7 @@ def test_rearm_carries_completed_rows_INTO_the_frozen_set( sweep_dir ):
     assert total   == 3, "the denominator SHRANK — re-arming un-froze the freeze"
     assert carried == 2, "completed work was discarded from the numerator"
     assert "closed-by-me" in ledger[ "board_ids" ]
-    assert "2/3" in board_sweep.sweep_progress_line( "maria" )
+    assert "2/3" in board_sweep.sweep_progress_line( "maria", live_owed=3 )
 
 
 def test_rearm_admits_rows_that_are_NEW_on_the_live_board( sweep_dir ):
@@ -301,7 +316,7 @@ def test_rearm_admits_rows_that_are_NEW_on_the_live_board( sweep_dir ):
 def test_rearm_from_no_prior_ledger_is_just_a_start( sweep_dir ):
     ledger, carried, total = board_sweep.rearm( "mr radio", [ "a", "b", "c" ] )
     assert ( carried, total ) == ( 0, 3 )
-    assert "0/3" in board_sweep.sweep_progress_line( "mr radio" )
+    assert "0/3" in board_sweep.sweep_progress_line( "mr radio", live_owed=3 )
 
 
 def test_rearm_still_enforces_membership_afterwards( sweep_dir ):
@@ -309,7 +324,7 @@ def test_rearm_still_enforces_membership_afterwards( sweep_dir ):
     board_sweep.rearm( "mr radio", [ "a" ] )
     with pytest.raises( ValueError ):
         board_sweep.record_reviewed( "mr radio", [ "deadbeef-0000-0000-0000-000000000000" ] )
-    assert "UNVERIFIED" not in board_sweep.sweep_progress_line( "mr radio" )
+    assert "UNVERIFIED" not in board_sweep.sweep_progress_line( "mr radio", live_owed=3 )
 
 
 def test_rearm_refuses_an_unreadable_prior_ledger( sweep_dir ):
@@ -336,54 +351,44 @@ def _complete_ledger( persona="seat", total=71 ):
     board_sweep.record_reviewed( persona, ids, total_at_start=total )
 
 
-def test_complete_arm_reports_the_LIVE_count_not_the_frozen_one( sweep_dir ):
-    _complete_ledger( "seat", total=71 )
-    line = board_sweep.sweep_progress_line( "seat", live_owed=14 )
-    assert "14 row(s) RIGHT NOW" in line
-    assert "HISTORY" in line
+def test_reviewing_everything_currently_owed_satisfies_the_sweep( sweep_dir ):
+    """Reviewed >= live owed ⇒ satisfied. Reviewing is still not DOING, and it says so."""
+    board_sweep.record_reviewed( "seat", [ f"id-{i}" for i in range( 12 ) ], total_at_start=71 )
+    line = board_sweep.sweep_progress_line( "seat", live_owed=12 )
+    assert "12 owed NOW" in line and "reviewed 12" in line
+    assert "reviewing is not doing" in line
 
 
-def test_complete_arm_labels_the_frozen_fraction_as_history( sweep_dir ):
-    """71/71 may still be SHOWN — it must never be shown as a fact about now."""
-    _complete_ledger( "seat", total=71 )
-    line = board_sweep.sweep_progress_line( "seat", live_owed=14 )
-    assert "71/71" in line and "HISTORY, not your board now" in line
-
-
-def test_complete_arm_with_zero_owed_says_the_board_is_clear( sweep_dir ):
-    _complete_ledger( "seat", total=71 )
-    assert "CLEAR" in board_sweep.sweep_progress_line( "seat", live_owed=0 )
-
-
-def test_complete_arm_with_unknown_live_count_does_NOT_read_as_clear( sweep_dir ):
+def test_a_shrinking_board_closes_the_gate_and_that_is_INTENDED( sweep_dir ):
     """
-    ⚠️ None means UNKNOWN, never zero. A store-unreachable tick rendering as "your board is
-    clear" is the alarm-gated-on-the-healthy-value defect — the counter would go quiet
-    exactly when it could not see.
+    The behaviour my earlier design forbade, now pinned as correct. 60 reviewed of a board
+    that has fallen to 60 = satisfied. Rick owns catching a seat that shrank it dishonestly;
+    the gate's job is to be true for the honest one.
     """
-    _complete_ledger( "seat", total=71 )
-    line = board_sweep.sweep_progress_line( "seat", live_owed=None )
-    assert "could not be read" in line
-    assert "CLEAR" not in line
-
-
-@pytest.mark.parametrize( "live_owed", [ None, 0, 3, 60, 999 ] )
-def test_IN_PROGRESS_arm_is_byte_identical_for_every_live_owed( sweep_dir, live_owed ):
-    """
-    🔴 THE ANTI-GAMING GUARD. Thread a live denominator into the in-progress arm and a seat
-    at 60/71 could drop its 11 unreviewed rows to make the live board read 60 — closing the
-    gate by DELETION instead of by review. The frozen denominator is what forbids that, and
-    this arm proves live_owed cannot reach it.
-    """
-    board_sweep.record_reviewed( "seat", [ f"id-{i}" for i in range( 71 ) ][ :60 ], total_at_start=71 )
-    baseline = board_sweep.sweep_progress_line( "seat", live_owed=None )
-    assert board_sweep.sweep_progress_line( "seat", live_owed=live_owed ) == baseline
-    assert "60/71" in baseline
-
-
-def test_dropping_the_unreviewed_rows_does_not_close_the_gate( sweep_dir ):
-    """The gaming scenario spelled out end to end: live board falls to 60, gate still demands 71."""
     board_sweep.record_reviewed( "seat", [ f"id-{i}" for i in range( 60 ) ], total_at_start=71 )
     line = board_sweep.sweep_progress_line( "seat", live_owed=60 )
-    assert "60/71" in line and "11 NOT" in line
-    assert "COMPLETE" not in line
+    assert "IN PROGRESS" not in line
+    assert "60 owed NOW" in line
+
+
+def test_zero_owed_is_the_only_CLEAR_line( sweep_dir ):
+    board_sweep.record_reviewed( "seat", [ "a" ], total_at_start=71 )
+    assert "COMPLETE — 0 owed now" in board_sweep.sweep_progress_line( "seat", live_owed=0 )
+
+
+def test_unknown_live_count_NEVER_falls_back_to_the_frozen_total( sweep_dir ):
+    """
+    ⚠️ None means UNKNOWN. Falling back to `total_at_start` would restore the exact stale
+    number this change removed — 71 reported against a board of 12 — and it would do so
+    on precisely the ticks nobody could check it.
+    """
+    board_sweep.record_reviewed( "seat", [ "a" ], total_at_start=71 )
+    line = board_sweep.sweep_progress_line( "seat", live_owed=None )
+    assert "could not be read" in line
+    assert "1/71" not in line and "CLEAR" not in line and "COMPLETE" not in line
+
+
+def test_the_frozen_total_appears_only_as_dated_history( sweep_dir ):
+    board_sweep.record_reviewed( "seat", [ "a" ], total_at_start=71 )
+    line = board_sweep.sweep_progress_line( "seat", live_owed=12 )
+    assert "sweep began 71 rows" in line
