@@ -331,7 +331,22 @@ def run_standalone_tests():
     """
     Run tests as standalone script (no pytest, no server dependency).
     This bypasses the conftest.py server validation.
+
+    Bypassing conftest also bypasses the class-scoped `_pin_lancedb_backend` fixture,
+    so this path pins the backend itself (decision 2b20a6d6). Without it the ambient
+    flag is `postgres`, the temp_dir is never touched, and this "local isolation" run
+    would report on the shared store — the exact defect the file is named against.
     """
+    from unittest.mock import patch
+    from cosa.rest.db.repositories import vector_store_backend
+
+    with patch.object( vector_store_backend, "get_vector_store_backend",
+                       return_value=vector_store_backend.LANCEDB ):
+        return _run_standalone_tests_pinned()
+
+
+def _run_standalone_tests_pinned():
+    """Body of run_standalone_tests, executed with the LanceDB backend pin held."""
     import cosa.utils.util as cu
     import tempfile
     import shutil

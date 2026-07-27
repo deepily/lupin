@@ -620,9 +620,19 @@ class TestPredictionEngineWarm:
 
         embedding = self._generate_embedding_http( question )
 
-        lancedb_path = cu.get_project_root() + "/src/conf/long-term-memory/lupin.lancedb"
+        # NO db_path (decision 2b20a6d6). These are E2E tests: they seed here and then ask
+        # the SERVER to predict, so the seed MUST land where the server reads. Under the
+        # live `postgres` backend that is the PredictionDecisionRepository, and the
+        # LanceDB path this used to pass was never honored — it only made the call look
+        # isolated. `resolve_lancedb_path` now raises on it.
+        #
+        # Venue note: pytest runs inside the test container (LUPIN_ENV=testing), so both
+        # this process and the server resolve to `lupin_db_test` — the dedicated test
+        # database, NOT the live `lupin_db_dev` store Rick's ruling protects.
+        #
+        # TEST_LANCEDB_TABLE is retained for the LanceDB path only; _pg_add_decision does
+        # not forward table_name to the repository, so it buys no isolation under postgres.
         store = ProxyDecisionEmbeddings(
-            db_path       = lancedb_path,
             table_name    = TEST_LANCEDB_TABLE,
             embedding_dim = 768,
             debug         = False
