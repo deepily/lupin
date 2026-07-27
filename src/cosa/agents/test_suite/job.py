@@ -963,7 +963,9 @@ class TestSuiteJob( AgenticJobBase ):
         # websocket async orchestrator) will error at arg-parse if this flag
         # is appended, killing the subprocess before any tests run.
         if suite_type in SUITES_SUPPORTING_JUNIT_XML:
-            junit_xml_path = f"/tmp/{suite_type}-junit-{datetime.now().strftime( '%Y%m%d-%H%M%S' )}.xml"
+            junit_xml_path = self._artifact_path(
+                f"{suite_type}-junit-{datetime.now().strftime( '%Y%m%d-%H%M%S' )}.xml"
+            )
             sanitized_args += [ f"--junit-xml={junit_xml_path}" ]
         else:
             junit_xml_path = None  # _parse_junit_xml(None) returns zero-counts without raising
@@ -1268,18 +1270,51 @@ class TestSuiteJob( AgenticJobBase ):
                 ) ],
             }
 
-    # Map suite_type to canonical /tmp/<name>-latest.log symlink used across scripts
-    _LOG_SYMLINKS = {
-        "unit"         : "/tmp/unit-latest.log",
-        "typescript"   : "/tmp/typescript-latest.log",
-        "smoke"        : "/tmp/smoke-latest.log",
-        "smoke_direct" : "/tmp/smoke-direct-latest.log",
-        "pytest_direct": "/tmp/pytest-direct-latest.log",
-        "websocket"    : "/tmp/websocket-latest.log",
-        "integration"  : "/tmp/integration-latest.log",
-        "e2e"          : "/tmp/e2e-ui-latest.log",
-        "all"          : "/tmp/all-tests-latest.log",
+    # ── artifact root: ONE knob, so the three paths cannot be moved apart ──────
+    #
+    # Row fd0cd863. Before this, the symlink map held absolute paths while
+    # `actual_log` and `junit_xml_path` hardcoded "/tmp/" independently. A test could
+    # therefore redirect the SYMLINK and still write the real FILE into the live
+    # artifact directory — and that is exactly what happened:
+    #
+    #     /tmp/integration-latest.log  ->  line-1 line-2 line-3 line-4 line-5 line-6
+    #     /tmp/unit-20260727-185252.log -> "first run"
+    #
+    # Fixture strings, in the path a human triaging a scheduled run reads. Not absent
+    # — present and WRONG, with a plausible timestamped name and a correctly-rotated
+    # symlink. A partial isolation seam is worse than none, because it reads as done.
+    #
+    # ⇒ Everything derives from _ARTIFACT_DIR. Redirect it and the log file, the
+    # symlink and the junit XML all move together; there is no way to move one and
+    # forget another, which is the failure this replaces.
+    _ARTIFACT_DIR = "/tmp"
+
+    _LOG_BASENAMES = {
+        "unit"         : "unit-latest.log",
+        "typescript"   : "typescript-latest.log",
+        "smoke"        : "smoke-latest.log",
+        "smoke_direct" : "smoke-direct-latest.log",
+        "pytest_direct": "pytest-direct-latest.log",
+        "websocket"    : "websocket-latest.log",
+        "integration"  : "integration-latest.log",
+        "e2e"          : "e2e-ui-latest.log",
+        "all"          : "all-tests-latest.log",
     }
+
+    @classmethod
+    def _log_symlink_path( cls, suite_type: str ) -> Optional[ str ]:
+        """
+        Ensures:
+            - returns the absolute canonical symlink path for a known suite
+            - returns None for an unknown suite (callers treat that as a no-op)
+        """
+        basename = cls._LOG_BASENAMES.get( suite_type )
+        return os.path.join( cls._ARTIFACT_DIR, basename ) if basename else None
+
+    @classmethod
+    def _artifact_path( cls, filename: str ) -> str:
+        """Ensures: returns `filename` resolved under the current artifact root."""
+        return os.path.join( cls._ARTIFACT_DIR, filename )
 
     @classmethod
     def _write_stdout_log( cls, suite_type: str, stdout_text: str ) -> Optional[ str ]:
@@ -1296,11 +1331,13 @@ class TestSuiteJob( AgenticJobBase ):
               was written (unknown suite or empty text)
             - updates /tmp/<suite>-latest.log symlink atomically (unlink+symlink)
         """
-        symlink_path = cls._LOG_SYMLINKS.get( suite_type )
+        symlink_path = cls._log_symlink_path( suite_type )
         if not ( symlink_path and stdout_text ):
             return None
         import pathlib
-        actual_log = f"/tmp/{suite_type}-{datetime.now().strftime( '%Y%m%d-%H%M%S' )}.log"
+        actual_log = cls._artifact_path(
+            f"{suite_type}-{datetime.now().strftime( '%Y%m%d-%H%M%S' )}.log"
+        )
         pathlib.Path( actual_log ).write_text( stdout_text )
         pathlib.Path( symlink_path ).unlink( missing_ok=True )
         pathlib.Path( symlink_path ).symlink_to( actual_log )

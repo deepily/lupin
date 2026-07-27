@@ -74,19 +74,56 @@ ATTESTATION_FILENAME   = "tier-runs.jsonl"
 GENESIS_PREV = "0" * 64
 
 
+def _refuse_implicit_root_under_pytest( caller ):
+    """
+    Raise when running under pytest with no explicit root.
+
+    WHY THIS IS RUNTIME AND NOT A STATIC GUARD
+    ------------------------------------------
+    `fd0cd863` — a fixture writing the tier's REAL triage log path — would NOT
+    have been caught by an AST scan for path literals, because those tests named
+    no path at all: they called production code that computed it. Krishna found
+    that hole in his own guard. A static scan matches a DESCRIPTION of the hazard;
+    this matches the hazard, because it fires on the call itself no matter how the
+    caller reached it.
+
+    ⚠️ Scope, so the coupling is not a surprise: `PYTEST_CURRENT_TEST` is set for
+    EVERY test in the repo, not just this suite's. Anything that transitively
+    reaches these helpers under pytest must pass `project_root` explicitly.
+    That is the point — accidental reach is exactly what leaked fixture strings
+    into `/tmp/integration-latest.log` — but it means the blast radius is the
+    whole test tree, and it is Krishna's wiring commit that absorbs it.
+    """
+    if os.environ.get( "PYTEST_CURRENT_TEST" ) is None: return
+    raise RuntimeError(
+        f"{caller}() was called under pytest without an explicit `project_root`. "
+        f"Tests must not resolve the REAL artifact root — pass project_root=str( tmp_path ). "
+        f"(Row fd0cd863: a fixture wrote the tier's real triage log path and a reader "
+        f"triaged six lines of fixture text. This refusal is why that cannot recur.)"
+    )
+
+
 def artifact_root( project_root=None ):
     """
     Absolute path of the durable artifact directory.
 
     Requires:
         - project_root is None (resolve from the environment) or an absolute path
+        - under pytest, project_root MUST be supplied — see
+          _refuse_implicit_root_under_pytest
 
     Ensures:
         - returns an absolute path under the `io/` bind mount
         - creates nothing; callers decide when to make directories
+        - RAISES rather than returning the real root to a test
+
+    Raises:
+        - RuntimeError when called under pytest with project_root=None
     """
-    root = project_root if project_root is not None else cu.get_project_root()
-    return os.path.join( root, ARTIFACTS_SUBDIR )
+    if project_root is None:
+        _refuse_implicit_root_under_pytest( "artifact_root" )
+        project_root = cu.get_project_root()
+    return os.path.join( project_root, ARTIFACTS_SUBDIR )
 
 
 def attestation_path( project_root=None ):
@@ -95,13 +132,20 @@ def attestation_path( project_root=None ):
 
     Requires:
         - project_root is None (resolve from the environment) or an absolute path
+        - under pytest, project_root MUST be supplied
 
     Ensures:
         - returns an absolute path under the `io/` bind mount
         - creates nothing
+        - RAISES rather than returning the real ledger path to a test
+
+    Raises:
+        - RuntimeError when called under pytest with project_root=None
     """
-    root = project_root if project_root is not None else cu.get_project_root()
-    return os.path.join( root, ATTESTATIONS_SUBDIR, ATTESTATION_FILENAME )
+    if project_root is None:
+        _refuse_implicit_root_under_pytest( "attestation_path" )
+        project_root = cu.get_project_root()
+    return os.path.join( project_root, ATTESTATIONS_SUBDIR, ATTESTATION_FILENAME )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

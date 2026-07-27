@@ -17,6 +17,7 @@ coverage number is. Those are the suite's job. A wiring test that claimed a
 green it never observed would be the same defect one layer up.
 """
 
+import os
 import re
 import stat
 
@@ -196,7 +197,13 @@ def test_typescript_has_an_explicit_timeout():
 
 
 def test_typescript_has_a_canonical_log_symlink():
-    assert TestSuiteJob._LOG_SYMLINKS[ "typescript" ] == "/tmp/typescript-latest.log"
+    # Derived from _ARTIFACT_DIR now (row fd0cd863) so the symlink cannot be relocated
+    # independently of the log file and the junit XML. Asserted against the computed
+    # path rather than the literal, so this follows a future artifact-root move instead
+    # of pinning the tree to /tmp.
+    assert TestSuiteJob._log_symlink_path( "typescript" ) == os.path.join(
+        TestSuiteJob._ARTIFACT_DIR, "typescript-latest.log"
+    )
 
 
 def test_typescript_is_excluded_from_junit_xml_injection():

@@ -233,3 +233,51 @@ def test_blank_lines_are_skipped_without_breaking_the_chain( tmp_path ):
     path.write_text( lines[ 0 ] + "\n\n" + lines[ 1 ] + "\n   \n" + lines[ 2 ] + "\n\n" )
 
     assert att.verify_chain( str( path ) ) == { "status" : "valid", "count" : 3 }
+
+
+# ---------------------------------------------------------------------------
+# FAIL-CLOSED under pytest — the arm that closes the mode a static AST scan
+# structurally cannot see (fd0cd863: the tests named no path; production code
+# computed it). Krishna took the test_job.py coupling knowingly.
+# ---------------------------------------------------------------------------
+
+def test_artifact_root_refuses_the_real_root_under_pytest():
+    """
+    THE CONTROL THAT MUST FAIL if the refusal is removed.
+
+    Predicted failure when the guard is deleted: no exception is raised, so
+    pytest.raises reports DID NOT RAISE — and the returned path would be the
+    real /var/lupin artifact root.
+    """
+    with pytest.raises( RuntimeError ) as exc:
+        att.artifact_root()
+    assert "without an explicit `project_root`" in str( exc.value )
+    assert "tmp_path" in str( exc.value )
+
+
+def test_attestation_path_refuses_the_real_ledger_under_pytest():
+    """Both entry points, not just the one someone remembered."""
+    with pytest.raises( RuntimeError ) as exc:
+        att.attestation_path()
+    assert "attestation_path" in str( exc.value )
+
+
+def test_an_explicit_root_is_always_honored( tmp_path ):
+    """
+    THE OTHER DIRECTION. A refusal that fired unconditionally would pass both
+    tests above while making the module unusable — this is the arm that catches
+    a guard which blocks the legitimate path too.
+    """
+    assert att.artifact_root( str( tmp_path ) ).startswith( str( tmp_path ) )
+    assert att.attestation_path( str( tmp_path ) ).startswith( str( tmp_path ) )
+
+
+def test_outside_pytest_the_real_root_resolves( monkeypatch ):
+    """
+    PREMISE: production must still work. Simulated by clearing the marker the
+    guard keys on — if this ever fails, the guard has stopped being conditional
+    and is refusing the orchestrator itself.
+    """
+    monkeypatch.delenv( "PYTEST_CURRENT_TEST", raising=False )
+    assert att.artifact_root().endswith( att.ARTIFACTS_SUBDIR )
+    assert att.attestation_path().endswith( att.ATTESTATION_FILENAME )

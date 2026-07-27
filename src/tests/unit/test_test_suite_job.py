@@ -5,6 +5,7 @@ Tests job creation, configuration, pytest output parsing, state transitions,
 dry run mode, and voice_io integration.
 """
 
+import os
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
@@ -46,6 +47,34 @@ _stub_preflight = patch.object(
 # ═══════════════════════════════════════════════════════════════════════════════
 # Fixtures
 # ═══════════════════════════════════════════════════════════════════════════════
+
+@pytest.fixture( autouse=True )
+def _isolate_artifact_root( tmp_path, monkeypatch ):
+    """
+    Every test in this module writes tier artifacts under a tmp root. AUTOUSE, and
+    that is the load-bearing word.
+
+    ROW fd0cd863. This module exercises the real `_run_suite` / `_write_stdout_log`
+    paths, and those wrote into the LIVE artifact directory. Measured in the running
+    test container 2026-07-27:
+
+        /tmp/integration-latest.log  ->  line-1 line-2 line-3 line-4 line-5 line-6
+        /tmp/unit-20260727-185252.log -> "first run"
+
+    Fixture strings, sitting in the path a human triaging a scheduled run opens, with
+    a plausible timestamped filename and a correctly-rotated symlink. Not absent —
+    present and WRONG, which is the worse polarity: absence prompts a question, a
+    convincing wrong answer ends one.
+
+    ⛔ AUTOUSE RATHER THAN PER-TEST, DELIBERATELY. One test here already redirected
+    `_LOG_SYMLINKS` by hand and was still writing the real log file, because the
+    symlink and the file were separately configurable. An opt-in fixture has the same
+    shape as that partial fix and as the `_PG_ISOLATION_MODULES` allowlist deleted on
+    2026-07-27: every test added later is un-isolated by default and nothing says so.
+    Autouse inverts the default, so a new test cannot reach the live path by omission.
+    """
+    monkeypatch.setattr( TestSuiteJob, "_ARTIFACT_DIR", str( tmp_path ) )
+
 
 @pytest.fixture
 def job():
@@ -648,7 +677,12 @@ class TestSyntheticFailureRecords:
         # Captured stdout tail survives the terminate()
         assert "line-" in fd[ 0 ][ "traceback" ]
         # Log file was actually written
-        assert result[ "log_path" ] and result[ "log_path" ].startswith( "/tmp/integration-" )
+        # Asserted against the ISOLATED root, not "/tmp/". The old form pinned the
+        # literal live directory — so it passed only while this test was polluting it,
+        # and it went red the moment the pollution stopped. An assertion that requires
+        # the defect in order to pass is not a guard; it is the defect's alibi.
+        assert result[ "log_path" ]
+        assert result[ "log_path" ].startswith( os.path.join( str( tmp_path ), "integration-" ) )
 
     def test_exception_populates_failure_details( self, single_suite_job, tmp_path, monkeypatch ):
         """Exception branch must return errors=1 (not 0) + one synthetic failure_details entry."""
@@ -680,9 +714,18 @@ class TestSyntheticFailureRecords:
         import pathlib
         from cosa.agents.test_suite.job import TestSuiteJob
 
-        # Redirect _LOG_SYMLINKS to a tmp location so the test doesn't stomp /tmp/unit-latest.log
+        # Redirect the ARTIFACT ROOT, not just the symlink map.
+        #
+        # This test used to monkeypatch _LOG_SYMLINKS alone, which moved the symlink and
+        # left `actual_log` hardcoded at /tmp/ — so every run wrote a real
+        # /tmp/unit-<timestamp>.log containing "first run" into the live artifact
+        # directory the scheduled tier and its human triager both read. Found 2026-07-27
+        # (row fd0cd863) with "first run" sitting in the container's /tmp.
+        #
+        # Patching _ARTIFACT_DIR moves the log file, the symlink and the junit XML
+        # together, because they all derive from it now. There is nothing left to forget.
+        monkeypatch.setattr( TestSuiteJob, "_ARTIFACT_DIR", str( tmp_path ) )
         link = tmp_path / "unit-latest.log"
-        monkeypatch.setattr( TestSuiteJob, "_LOG_SYMLINKS", { "unit": str( link ) } )
 
         path1 = TestSuiteJob._write_stdout_log( "unit", "first run\n" )
         assert path1 is not None
