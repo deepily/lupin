@@ -317,3 +317,73 @@ def test_rearm_refuses_an_unreadable_prior_ledger( sweep_dir ):
     ( sweep_dir / "board-sweep-mr-radio.json" ).write_text( "{ broken", encoding="utf-8" )
     with pytest.raises( ValueError ):
         board_sweep.rearm( "mr radio", [ "a" ] )
+
+
+# ---------------------------------------------------------------- live_owed on the COMPLETE arm
+#
+# Rick saw "✅ BOARD SWEEP COMPLETE: 71/71 owed rows iterated" in a live poke on 2026-07-27
+# and asked whether 71 was real. It was — on 2026-07-25. The ledger has no expiry, so a
+# finished sweep asserted a two-day-old fraction in the present tense forever. His fix: look
+# the total up each iteration, which costs nothing because the Stop hook already fetches it.
+#
+# ⚠️ THE SPLIT THESE PIN. A live denominator on the IN-PROGRESS arm would re-open the hole
+# the freeze exists to close (drop the unreviewed rows and the gate reads complete). So
+# live_owed is consulted ONLY once the gate is already satisfied.
+
+
+def _complete_ledger( persona="seat", total=71 ):
+    ids = [ f"id-{i}" for i in range( total ) ]
+    board_sweep.record_reviewed( persona, ids, total_at_start=total )
+
+
+def test_complete_arm_reports_the_LIVE_count_not_the_frozen_one( sweep_dir ):
+    _complete_ledger( "seat", total=71 )
+    line = board_sweep.sweep_progress_line( "seat", live_owed=14 )
+    assert "14 row(s) RIGHT NOW" in line
+    assert "HISTORY" in line
+
+
+def test_complete_arm_labels_the_frozen_fraction_as_history( sweep_dir ):
+    """71/71 may still be SHOWN — it must never be shown as a fact about now."""
+    _complete_ledger( "seat", total=71 )
+    line = board_sweep.sweep_progress_line( "seat", live_owed=14 )
+    assert "71/71" in line and "HISTORY, not your board now" in line
+
+
+def test_complete_arm_with_zero_owed_says_the_board_is_clear( sweep_dir ):
+    _complete_ledger( "seat", total=71 )
+    assert "CLEAR" in board_sweep.sweep_progress_line( "seat", live_owed=0 )
+
+
+def test_complete_arm_with_unknown_live_count_does_NOT_read_as_clear( sweep_dir ):
+    """
+    ⚠️ None means UNKNOWN, never zero. A store-unreachable tick rendering as "your board is
+    clear" is the alarm-gated-on-the-healthy-value defect — the counter would go quiet
+    exactly when it could not see.
+    """
+    _complete_ledger( "seat", total=71 )
+    line = board_sweep.sweep_progress_line( "seat", live_owed=None )
+    assert "could not be read" in line
+    assert "CLEAR" not in line
+
+
+@pytest.mark.parametrize( "live_owed", [ None, 0, 3, 60, 999 ] )
+def test_IN_PROGRESS_arm_is_byte_identical_for_every_live_owed( sweep_dir, live_owed ):
+    """
+    🔴 THE ANTI-GAMING GUARD. Thread a live denominator into the in-progress arm and a seat
+    at 60/71 could drop its 11 unreviewed rows to make the live board read 60 — closing the
+    gate by DELETION instead of by review. The frozen denominator is what forbids that, and
+    this arm proves live_owed cannot reach it.
+    """
+    board_sweep.record_reviewed( "seat", [ f"id-{i}" for i in range( 71 ) ][ :60 ], total_at_start=71 )
+    baseline = board_sweep.sweep_progress_line( "seat", live_owed=None )
+    assert board_sweep.sweep_progress_line( "seat", live_owed=live_owed ) == baseline
+    assert "60/71" in baseline
+
+
+def test_dropping_the_unreviewed_rows_does_not_close_the_gate( sweep_dir ):
+    """The gaming scenario spelled out end to end: live board falls to 60, gate still demands 71."""
+    board_sweep.record_reviewed( "seat", [ f"id-{i}" for i in range( 60 ) ], total_at_start=71 )
+    line = board_sweep.sweep_progress_line( "seat", live_owed=60 )
+    assert "60/71" in line and "11 NOT" in line
+    assert "COMPLETE" not in line

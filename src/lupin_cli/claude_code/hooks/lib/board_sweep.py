@@ -143,18 +143,52 @@ def read_ledger( persona ):
     return data, ""
 
 
-def sweep_progress_line( persona ):
+def sweep_progress_line( persona, live_owed=None ):
     """
     The sentence the Stop-hook appends to its self-poke reason.
 
+    ⚠️ WHY `live_owed` IS CONSULTED ONLY ON THE COMPLETE ARM (Rick, 2026-07-27).
+
+    He saw `✅ BOARD SWEEP COMPLETE: 71/71 owed rows iterated` in a live poke and
+    asked whether 71 was real. It was — on 2026-07-25. Mr Radio's board was 71 rows
+    then and is 14 now, and the ledger on disk has no expiry, so a finished sweep
+    kept asserting a two-day-old fraction in the present tense on every tick. His
+    fix: look the total up dynamically instead of freezing it.
+
+    🔴 HE IS RIGHT ABOUT THE STALENESS AND THE FIX MUST NOT BE APPLIED WHOLESALE.
+    A live denominator on the IN-PROGRESS arm re-opens the exact hole the freeze
+    exists to close, named in this module's docstring: *"if the denominator shrank
+    as rows were dropped, the gate could be closed by dropping instead of by
+    reviewing."* At 60/71, dropping the remaining 11 would make a live count read
+    60/60 COMPLETE. The gate would be satisfiable by deletion.
+
+    ⇒ THE SPLIT, and it is safe because the two arms have different risk:
+      · IN PROGRESS — the gate is OPEN, so a shrinkable denominator is a way out.
+        Stays FROZEN. Byte-identical to before. Also keeps the frozen `board_ids`
+        membership floor, which the docstring forbids re-querying live for its own
+        separate reason (a legitimately dropped row leaves the live board).
+      · COMPLETE — the gate is already SATISFIED. There is nothing left to game
+        open, so the live count cannot be abused here, and it is the only thing
+        that can tell a finished sweep from a stale one.
+
+    ⇒ The frozen fraction is not deleted; it is DEMOTED to history and labelled as
+    such. What changes is that it stops being stated as a fact about now.
+
     Requires:
         - persona is the seat's display name (str) or None
+        - live_owed is the seat's CURRENT owed-row count, or None when the caller
+          could not resolve it (store unreachable — the caller must pass None
+          rather than 0, since 0 is a real and very different answer)
 
     Ensures:
         - "" ONLY when this seat has no ledger — see the module docstring's failure table
         - an incomplete sweep yields a DO-NOT-STOP line carrying reviewed/total and the
-          number remaining, so the poke counts DOWN rather than repeating a constant
-        - a complete sweep yields a distinct completion line (never silence)
+          number remaining, so the poke counts DOWN rather than repeating a constant.
+          UNAFFECTED by live_owed — the frozen denominator is the anti-gaming floor
+        - a complete sweep yields a distinct completion line (never silence) that
+          reports the LIVE board, and names the frozen fraction as history
+        - a complete sweep with live_owed None says the live board is UNKNOWN rather
+          than implying the historical fraction still describes it
         - an unreadable ledger yields a LOUD line naming the file and the reason
         - never raises
     """
@@ -181,9 +215,25 @@ def sweep_progress_line( persona ):
                     if ledger.get( "board_ids" ) is None else "" )
 
     if reviewed >= total:
-        return ( f"✅ BOARD SWEEP COMPLETE: {reviewed}/{total} owed rows iterated. Rick's two "
-                 f"questions were asked of every one. Work the survivors in priority order — "
-                 f"and report the pass with its counts, not with 'the sweep is done'."
+        # The sweep is satisfied. The frozen fraction now describes a board that may
+        # no longer exist, so it is reported as HISTORY with its date, and the live
+        # count is the only present-tense number. See the docstring's arm split.
+        when = str( ledger.get( "started_at" ) or "" )[ :10 ] or "an earlier date"
+        history = f"(swept {reviewed}/{total} on {when} — HISTORY, not your board now)"
+
+        if live_owed is None:
+            return ( f"✅ BOARD SWEEP COMPLETE {history}. ⚠️ Your CURRENT owed count could not "
+                     f"be read this tick, so nothing here describes your board as it stands. "
+                     f"Do NOT treat this line as a clean board — re-check before you stop."
+                     + unvalidated )
+
+        if live_owed == 0:
+            return ( f"✅ BOARD SWEEP COMPLETE and your board is CLEAR — 0 owed now {history}."
+                     + unvalidated )
+
+        return ( f"⛔ You owe {live_owed} row(s) RIGHT NOW. A completed sweep {history} does "
+                 f"NOT cover them — rows arrive after a sweep ends. Work them in priority "
+                 f"order and report the pass with its counts, not with 'the sweep is done'."
                  + unvalidated )
 
     remaining = total - reviewed

@@ -387,7 +387,7 @@ def _heartbeat_goal_line( session_id, bridge_role ):
         return ""
 
 
-def _board_sweep_line( session_id ):
+def _board_sweep_line( session_id, live_owed=None ):
     """
     The IO shell for Rick's 2026-07-25 board-sweep gate: resolve THIS seat's persona from
     the bridge, then read its sweep ledger.
@@ -400,8 +400,21 @@ def _board_sweep_line( session_id ):
     would stop early believing it had finished. The gate has to be addressed to a seat, so
     it is keyed on the persona.
 
+    THE LIVE COUNT WAS ALREADY IN HAND AND NOBODY PASSED IT (Rick, 2026-07-27). He asked
+    why the total could not simply be looked up each iteration. It can, and it costs
+    NOTHING: `_owed_count_from_store` already runs every tick to feed the owed oracle, and
+    its result sits in a local variable ~100 lines above this call. The sweep line reached
+    for the ledger's frozen `total_at_start` instead and so kept reporting `71/71` two days
+    after Mr Radio's board fell to 14. Threaded through as `live_owed`.
+
+    ⚠️ `live_owed=None` means UNKNOWN, not zero. A store-unreachable tick must not render
+    as "your board is clear" — that is the alarm-gated-on-the-healthy-value defect this
+    module's docstring already refuses elsewhere, and 0 is a real answer that means
+    something else entirely.
+
     Requires:
         - session_id is a string
+        - live_owed is this seat's current owed count, or None when unresolved
 
     Ensures:
         - returns the sweep gate sentence, or "" when this seat has no ledger (the normal
@@ -410,13 +423,15 @@ def _board_sweep_line( session_id ):
           that goes quiet because it could not read its own state is the failure it exists
           to prevent
         - a persona that cannot be resolved yields "" — no seat, no ledger to address
+        - an IN-PROGRESS sweep is unaffected by live_owed (frozen denominator = the
+          anti-gaming floor); only the COMPLETE arm consults it
         - never raises; never writes to stdout (the hook's JSON protocol channel)
     """
     try:
         persona = get_voice_persona( session_id ) or { }
         name    = persona.get( "name" )
         if not name: return ""
-        return sweep_progress_line( name )
+        return sweep_progress_line( name, live_owed=live_owed )
     except Exception:
         # Degrade-safe like _heartbeat_goal_line: a broken bridge read must never take the
         # poke down. This arm is the one place silence is accepted on an error, and only
@@ -1891,6 +1906,12 @@ def _resolve_owed_state( session_id, transcript_path=None, cwd=None ):
     # the idle-announce beacon does NOT claim "nothing owed" during a store
     # outage (the poke is already suppressed by the §C fail-safe below).
     owed_unknown = False
+    # Bound UNCONDITIONALLY so the board-sweep gate below can read them on every path.
+    # `None` (not 0) is the honest "unknown": the transcript-replay path has no store
+    # count at all, and rendering that as 0 would tell a sweeping seat its board is
+    # clear on the strength of a source that was never consulted.
+    store_count = None
+    store_ok    = False
     if settings[ "owed_source_from_store" ]:
         store_count, store_ok, store_breakdown = _owed_count_from_store( session_id )
         if not store_ok:
@@ -1996,7 +2017,11 @@ def _resolve_owed_state( session_id, transcript_path=None, cwd=None ):
     # seats resolve to `worker`, so the role goal line above physically cannot say "22" to
     # one and "71" to the other. Silent for every seat with no ledger — i.e. everyone not
     # sweeping — and LOUD (never "") when a ledger exists but cannot be read.
-    sweep_line = _board_sweep_line( session_id )
+    # store_count is the live owed count fetched ~100 lines above for the oracle;
+    # None (not 0) when the store could not be read, so the COMPLETE arm says
+    # UNKNOWN instead of rendering a store outage as a clear board.
+    _live_owed = store_count if ( settings[ "owed_source_from_store" ] and store_ok ) else None
+    sweep_line = _board_sweep_line( session_id, live_owed=_live_owed )
     result     = decide_heartbeat( hold, verdict, poke_count, settings[ "poke_cap" ],
                                    goal_line=goal_line, sweep_line=sweep_line )
 
