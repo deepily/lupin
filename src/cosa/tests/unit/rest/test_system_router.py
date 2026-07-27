@@ -32,6 +32,36 @@ from unit_test_utilities import UnitTestUtilities
 # Import the module under test
 from cosa.rest.routers.system import router, health_check, health, init, get_session_id, auth_test, get_websocket_sessions
 
+# ⚠️ LOAD-BEARING IMPORT — DO NOT REMOVE AS "UNUSED". Bug e9e31de7, measured 2026-07-27.
+#
+# `init()` imports `cosa.rest.db.database` INSIDE its own try block, and several tests
+# below wrap that call in `patch.dict( 'sys.modules', ... )` to stub `lupin_app.main`.
+# On exit, `patch.dict` restores sys.modules to its PRE-PATCH SNAPSHOT — which EVICTS
+# every module the patched code imported while inside. Measured: that import pulls in
+# **140 sqlalchemy modules**, and all 140 are evicted on exit.
+#
+#   sqlalchemy modules before patch.dict : 0
+#   inside, after init()'s import        : 140
+#   after patch.dict exits               : 0      <- all evicted
+#   re-import in the next test           : RAISES
+#
+# SQLAlchemy cannot be re-imported after a partial eviction; the re-import raises
+# (`AssertionError: Type <class 'object'> is already registered` under pytest, or
+# `ImportError: cannot load module more than once per process` standalone — same
+# partial-eviction family, differing by which module is reached first). `init()`
+# catches it and returns `{"status": "error"}`, so `get_config_manager` is never
+# called and the NEXT test fails with "called 0 times".
+#
+# ⇒ The failure is SYMMETRIC: whichever of these tests runs FIRST does the eviction,
+#   and whichever runs SECOND fails. It is not one test contaminating a specific
+#   other one — both directions reproduce.
+#
+# Importing it HERE puts it in the pre-patch snapshot, so restoration keeps it and
+# nothing is ever re-imported. This is the same mechanism `cosa/rest/db/__init__.py`
+# documents for bug 1b8ec2b9, where coverage's `sys_modules_saved()` was the evictor
+# instead of `patch.dict`.
+import cosa.rest.db.database  # noqa: F401
+
 
 def _patch_fastapi_main( mock_main ):
     """
