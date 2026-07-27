@@ -66,88 +66,25 @@ def _isolate_hook_log_dir( tmp_path, monkeypatch ):
 
 
 # ---------------------------------------------------------------------------
-# Additive per-test isolation for the ProxyDecisionEmbeddings Postgres tests
-# (bug cfcbb703 Family B — 2026-07-11, Rio).
+# RETIRED 2026-07-27 — the `_PG_ISOLATION_MODULES` allowlist and its
+# `_isolate_pg_vector_store` per-test-schema fixture (bug cfcbb703 Family B).
 #
-# Why: `vector store backend = postgres` routes ProxyDecisionEmbeddings to the
-# shared dev `prediction_decisions` table (the `db_path=tmpdir` these tests pass
-# is inert under Postgres). That broke isolation two ways — (1) the tests bled
-# rows into the shared dev DB on every run (duplicate-key floods), and (2) the
-# tests assume an EMPTY / only-my-rows table (test_empty_table asserts
-# find_similar == []; the round-trip asserts results[0] is its own row), which
-# transaction-rollback isolation CANNOT provide because the ~200k committed base
-# rows stay visible inside the txn. So we give each test a genuinely empty,
-# throwaway `prediction_decisions` inside its own per-test schema and point the
-# store's get_db() sessions at it via search_path. Strictly ADDITIVE — never
-# touches / locks / wipes public.prediction_decisions; DROP SCHEMA CASCADE tears
-# the throwaway down. Design + recipe: src/rnd/2026.07.11-cfcbb703-unit-test-triage.md.
+# The fixture worked, but its gate was a hand-kept set of TWO module names. Any
+# module that constructed a postgres-routed class and was not on the list inherited
+# the hazard by default, silently — which is exactly how `test_answer_is_correct`
+# spent three weeks writing into the live dev store with the remedy already in the
+# tree (bug d621b111).
+#
+# Rick's ruling on decision 2b20a6d6 (2026-07-27) forbids the shape outright:
+# "I absolutely do not want any test touching a live dev data store! If it's not
+# isolated then it needs to be removed or fixed." A list of sanctioned offenders is
+# neither.
+#
+# Both covered modules — test_data_origin and test_proxy_decision_embeddings — now
+# carry their own autouse `_pin_lancedb_backend` fixture, which pins the backend flag
+# so their tmpdir LanceDB stores are REAL isolation rather than a shared-store
+# redirect. `resolve_lancedb_path` (vector_store_backend.py) now raises at
+# construction if any future test hands a db_path to a postgres-routed class, so a
+# new offender fails loudly at its own call site instead of needing to be remembered
+# here.
 # ---------------------------------------------------------------------------
-_PG_ISOLATION_MODULES = { "test_data_origin", "test_proxy_decision_embeddings" }
-
-
-@pytest.fixture( autouse=True )
-def _isolate_pg_vector_store( request, monkeypatch ):
-    """
-    Route ProxyDecisionEmbeddings' Postgres get_db() sessions at an empty per-test
-    schema so each test sees ONLY its own rows and nothing lands in public.
-
-    Ensures:
-        - only fires for the two target modules (no-op yield for every other unit test)
-        - creates schema "test_pdv_<uuid>" with an empty prediction_decisions table
-        - the store's `from cosa.rest.db.database import get_db` (imported at call
-          time inside each _pg_* method) resolves to a patched get_db whose sessions
-          are bound to a fixture-owned connection with search_path = <schema>, public
-        - teardown drops the schema (CASCADE) and resets the connection's search_path
-          before returning it to the pool (no leakage); public is never mutated
-    """
-    module = request.module.__name__.rsplit( ".", 1 )[ -1 ]
-    if module not in _PG_ISOLATION_MODULES:
-        yield
-        return
-
-    import uuid
-    from contextlib   import contextmanager
-    from sqlalchemy   import MetaData
-    from sqlalchemy.orm import Session
-    from cosa.rest.db import database as _db
-    from cosa.rest.db.vector_store_models import PredictionDecision
-
-    schema = "test_pdv_" + uuid.uuid4().hex[ :12 ]
-    conn   = _db.engine.connect()
-    try:
-        conn.exec_driver_sql( f'CREATE SCHEMA "{schema}"' )
-        # The `vector` type/opclass live in public (CREATE EXTENSION vector is
-        # DB-global), so public MUST stay on the path for vector(768) to resolve;
-        # the ROWS land in the test schema.
-        conn.exec_driver_sql( f'SET search_path TO "{schema}", public' )
-        # Copy ONLY prediction_decisions into the test schema. Indexes are dropped
-        # from the copy — a handful of test rows seq-scan fine, and this sidesteps
-        # any empty-table HNSW/opclass quirk.
-        test_md  = MetaData()
-        test_tbl = PredictionDecision.__table__.to_metadata( test_md, schema=schema )
-        test_tbl.indexes.clear()
-        test_tbl.create( bind=conn )
-        conn.commit()   # persist the empty schema + table for the store's sessions
-
-        @contextmanager
-        def _isolated_get_db():
-            # Bind to the fixture-owned connection so every _pg_* call shares the
-            # one search_path'd connection + transaction visibility.
-            session = Session( bind=conn )
-            try:
-                yield session
-                session.commit()
-            except Exception:
-                session.rollback()
-                raise
-            finally:
-                session.close()
-
-        monkeypatch.setattr( _db, "get_db", _isolated_get_db )
-        yield
-    finally:
-        conn.rollback()   # defensive: clear any aborted txn so cleanup always runs
-        conn.exec_driver_sql( f'DROP SCHEMA IF EXISTS "{schema}" CASCADE' )
-        conn.exec_driver_sql( "RESET search_path" )   # no leakage back to the pool
-        conn.commit()
-        conn.close()

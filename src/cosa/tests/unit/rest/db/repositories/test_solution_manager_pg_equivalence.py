@@ -58,10 +58,17 @@ def _make_pg_manager( db_session, monkeypatch ):
         yield db_session
     monkeypatch.setattr( "cosa.rest.db.database.get_db", _fake_get_db )
 
-    config = { "table_name": "solution_snapshots", "db_path": "/tmp/pg_equiv", "storage backend": "local" }
-    with patch.object( lsm.SolutionSnapshotManager, "_resolve_db_path", return_value="/tmp/pg_equiv" ), \
-         patch.object( lsm, "QuestionEmbeddingsTable" ):
+    # No db_path (decision 2b20a6d6): this fixture builds the POSTGRES manager, which
+    # honors no LanceDB location — passing one asserted a redirection that never
+    # existed, and resolve_lancedb_path now raises on it. `storage backend` is dropped
+    # with it; under postgres nothing consults it either.
+    config = { "table_name": "solution_snapshots" }
+    with patch.object( lsm, "QuestionEmbeddingsTable" ):
         mgr = lsm.SolutionSnapshotManager( config, debug=False )
+
+    # Control: the postgres flip must actually have taken, and no path may survive.
+    assert mgr._use_postgres is True, "postgres flip failed — this fixture tests the wrong path"
+    assert mgr.db_path is None,       "a db_path survived on the postgres path"
     return mgr
 
 

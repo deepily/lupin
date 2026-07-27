@@ -13,6 +13,34 @@ import pytest
 from cosa.agents.decision_proxy.proxy_decision_embeddings import ProxyDecisionEmbeddings
 
 
+@pytest.fixture( autouse=True )
+def _pin_lancedb_backend():
+    """
+    Pin `vector store backend` to lancedb for every test in this module.
+
+    These tests hand ProxyDecisionEmbeddings a real tmpdir and assert round-trip and
+    similarity behavior. The live INI resolves to `postgres`, under which the store
+    routes to PredictionDecisionRepository and the tmpdir is inert — so they were
+    reading and writing the SHARED store while their docstring claimed isolated
+    LanceDB instances (bug d621b111, ruling on decision 2b20a6d6).
+
+    This REPLACES the `_PG_ISOLATION_MODULES` allowlist entry that used to cover this
+    module. An allowlist of sanctioned offenders is the shape that let the defect
+    spread; a per-module pin gives genuine isolation — each test owns its tmpdir and
+    reaches no shared database at all.
+
+    Patched at the flag's single definition site so every class that resolves
+    is_postgres_backend() from that module's globals is covered at once.
+    """
+    from unittest.mock import patch
+    from cosa.rest.db.repositories import vector_store_backend
+
+    with patch.object( vector_store_backend, "get_vector_store_backend",
+                       return_value=vector_store_backend.LANCEDB ):
+        yield
+
+
+
 def _make_embedding( seed=42, dim=768 ):
     """Generate a deterministic normalized 768-dim embedding."""
     rng = np.random.RandomState( seed )

@@ -75,12 +75,24 @@ class TestGistCacheTable( unittest.TestCase ):
         mock_db.open_table.return_value   = mock_tbl
         mock_db.create_table.return_value = mock_tbl
 
-        with patch( "cosa.memory.gist_cache_table.lancedb" ) as mock_lancedb, \
+        # Pin the backend to lancedb DURING construction (decision 2b20a6d6). The live
+        # INI resolves to `postgres`, under which __init__ skips the whole LanceDB arm
+        # — `_gist_cache_tbl` is never set and every method here falls through to
+        # get_db() against the shared database. That is why this module carried 19
+        # `AttributeError: no attribute '_gist_cache_tbl'` failures before this pin.
+        from cosa.rest.db.repositories import vector_store_backend
+
+        with patch.object( vector_store_backend, "get_vector_store_backend",
+                           return_value=vector_store_backend.LANCEDB ), \
+             patch( "cosa.memory.gist_cache_table.lancedb" ) as mock_lancedb, \
              patch( "cosa.memory.gist_cache_table.Normalizer", return_value=mock_normalizer ):
 
             mock_lancedb.connect.return_value = mock_db
             from cosa.memory.gist_cache_table import GistCacheTable
             cache = GistCacheTable( "/db/uri", table_name=table_name, debug=debug, verbose=verbose )
+
+        # Control: the pin must actually have taken.
+        assert cache._use_postgres is False, "backend pin failed — tests would hit the shared store"
 
         mocks = {
             "db"         : mock_db,
@@ -515,13 +527,21 @@ class TestPostgresGistCacheBackend( unittest.TestCase ):
 
     def _build_pg( self, debug=False ):
         # is_postgres_backend → True; ctor must NOT connect to LanceDB.
+        #
+        # db_uri is None, not "/unused" (decision 2b20a6d6). The old literal named the
+        # defect out loud — a path passed to a store that would never honor it — and
+        # resolve_lancedb_path now raises on exactly that. None is the shape the
+        # production postgres call site uses.
         with patch( "cosa.memory.gist_cache_table.is_postgres_backend", return_value=True ), \
              patch( "cosa.memory.gist_cache_table.Normalizer" ) as norm, \
              patch( "cosa.memory.gist_cache_table.lancedb.connect",
                     side_effect=AssertionError( "postgres ctor must not connect to LanceDB" ) ), \
              patch( "builtins.print" ):
             from cosa.memory.gist_cache_table import GistCacheTable
-            cache = GistCacheTable( "/unused", debug=debug )
+            cache = GistCacheTable( None, debug=debug )
+
+        # Control: the postgres pin must actually have taken.
+        assert cache._use_postgres is True, "postgres pin failed — this tests the wrong path"
         return cache, norm.return_value
 
     @staticmethod

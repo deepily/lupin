@@ -508,22 +508,39 @@ async def lifespan( app: FastAPI ):
     manager_type = config_mgr.get( "solution snapshots manager type", default="file_based" )
     
     if manager_type.lower() == "lancedb":
-        # Use LanceDB backend
-        lancedb_path = config_mgr.get( "solution snapshots lancedb path", default="/src/conf/long-term-memory/lupin.lancedb" )
         lancedb_table = config_mgr.get( "solution snapshots lancedb table", default="solution_snapshots" )
-        
-        # Convert relative path to absolute
-        if lancedb_path.startswith( "/" ):
-            lancedb_path = du.get_project_root() + lancedb_path
-        
-        config = {
-            "db_path": lancedb_path,
-            "table_name": lancedb_table
-        }
-        
-        if app_debug:
-            print( f"Using LanceDB solution snapshot manager: {lancedb_path}" )
-            
+
+        # TWO AUTHORITIES, RECONCILED (decision 2b20a6d6). `solution snapshots manager
+        # type` names the MANAGER class; `vector store backend` names the STORAGE the
+        # manager routes to. Nothing compared them before, so this block built a LanceDB
+        # path unconditionally and the manager silently ignored it under postgres.
+        # `vector store backend` is the storage authority — ask it before building a path.
+        from cosa.rest.db.repositories.vector_store_backend import is_postgres_backend
+
+        if is_postgres_backend( config_mgr ):
+            config = {
+                "table_name" : lancedb_table
+            }
+
+            if app_debug:
+                print( "Using Postgres+pgvector solution snapshot storage (no LanceDB path built)" )
+
+        else:
+            lancedb_path = config_mgr.get( "solution snapshots lancedb path", default="/src/conf/long-term-memory/lupin.lancedb" )
+
+            # Convert relative path to absolute
+            if lancedb_path.startswith( "/" ):
+                lancedb_path = du.get_project_root() + lancedb_path
+
+            config = {
+                "db_path"    : lancedb_path,
+                "table_name" : lancedb_table
+            }
+
+            if app_debug:
+                print( f"Using LanceDB solution snapshot manager: {lancedb_path}" )
+
+
     else:
         # # Use file-based backend (default)
         # path_to_snapshots_dir_wo_root = config_mgr.get( "path to snapshots dir wo root" )

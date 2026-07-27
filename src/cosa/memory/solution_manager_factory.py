@@ -11,6 +11,7 @@ from typing import Union, Dict, Any, List
 import cosa.utils.util as du
 
 from cosa.memory.snapshot_manager_interface import SolutionSnapshotManagerInterface
+from cosa.rest.db.repositories.vector_store_backend import is_postgres_backend
 
 
 class ManagerType( Enum ):
@@ -164,8 +165,13 @@ class SolutionSnapshotManagerFactory:
         # gcs_uri (not db_path) — see create_from_config_manager's gcs branch — so
         # requiring db_path unconditionally would make every valid gcs config
         # unbuildable.
+        #
+        # A FOURTH authority on the same fact (decision 2b20a6d6): under the postgres
+        # backend the manager routes to SolutionSnapshotRepository and touches NO
+        # LanceDB location at all, so demanding one here rejects the only correct
+        # config. Ask the storage authority before requiring a storage location.
         missing_keys = [ key for key in [ "table_name" ] if key not in config ]
-        if "db_path" not in config and "gcs_uri" not in config:
+        if not is_postgres_backend() and "db_path" not in config and "gcs_uri" not in config:
             missing_keys.append( "db_path|gcs_uri" )
         if missing_keys:
             raise KeyError( f"Missing required config keys for lancedb manager: {missing_keys}" )

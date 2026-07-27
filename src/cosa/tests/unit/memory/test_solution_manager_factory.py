@@ -161,11 +161,43 @@ class TestCreateLancedbManager( unittest.TestCase ):
         self.assertIs( result, created )
 
     def test_missing_location_raises( self ):
-        """table_name present but NEITHER db_path nor gcs_uri → KeyError (no storage location)."""
+        """
+        table_name present but NEITHER db_path nor gcs_uri → KeyError (no storage location).
+
+        Pinned to the lancedb backend (decision 2b20a6d6): the factory only demands a
+        storage location when one would actually be used. Under postgres it correctly
+        accepts a location-free config, so without this pin the test asserts a KeyError
+        the live flag makes wrong. See test_missing_location_allowed_under_postgres for
+        the other half of that contract.
+        """
+        from cosa.rest.db.repositories import vector_store_backend
+
         mod, cls, created = _fake_module( _LANCE_MOD, "SolutionSnapshotManager" )
-        with patch.dict( sys.modules, { _LANCE_MOD: mod } ):
+        with patch.dict( sys.modules, { _LANCE_MOD: mod } ), \
+             patch.object( vector_store_backend, "get_vector_store_backend",
+                           return_value=vector_store_backend.LANCEDB ):
             with self.assertRaises( KeyError ):
                 SolutionSnapshotManagerFactory._create_lancedb_manager( { "table_name": "t" }, False, False )
+
+    def test_missing_location_allowed_under_postgres( self ):
+        """
+        Under the postgres backend a location-free config is VALID — the manager routes
+        to SolutionSnapshotRepository and touches no LanceDB location at all.
+
+        This is the branch that broke server startup on 2026-07-27: main.py stopped
+        building a LanceDB path under postgres (correctly), and this factory gate
+        rejected the only correct config. Guards that regression directly.
+        """
+        from cosa.rest.db.repositories import vector_store_backend
+
+        mod, cls, created = _fake_module( _LANCE_MOD, "SolutionSnapshotManager" )
+        with patch.dict( sys.modules, { _LANCE_MOD: mod } ), \
+             patch.object( vector_store_backend, "get_vector_store_backend",
+                           return_value=vector_store_backend.POSTGRES ):
+            result = SolutionSnapshotManagerFactory._create_lancedb_manager( { "table_name": "t" }, False, False )
+
+        cls.assert_called_once_with( { "table_name": "t" }, False, False )
+        self.assertIs( result, created )
 
 
 class TestGetAvailableTypes( unittest.TestCase ):

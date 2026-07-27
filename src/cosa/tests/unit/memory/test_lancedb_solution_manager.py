@@ -35,14 +35,25 @@ def _make_manager( debug=False, verbose=False ):
     (QuestionEmbeddingsTable + db-path resolution), then mark it initialized
     with a mock table so the search/retrieval gates pass.
     """
-    with patch( "cosa.memory.lancedb_solution_manager.QuestionEmbeddingsTable" ), \
+    # Pin lancedb-mode hermetically (v0.2.0 §6 backend flag): post-cutover the INI
+    # default resolves to `postgres`, so without this these lancedb-path tests would
+    # dispatch into the _pg_* helpers and hit a live backend. _pg_manager() re-flips
+    # this to True after construction.
+    #
+    # The pin must be held DURING construction, not applied after (decision 2b20a6d6):
+    # __init__ resolves the backend itself and now REJECTS a db_path it would not
+    # honor, so a post-hoc `mgr._use_postgres = False` arrives too late — the
+    # constructor has already raised. Patched at the flag's single definition site.
+    from cosa.rest.db.repositories import vector_store_backend
+
+    with patch.object( vector_store_backend, "get_vector_store_backend",
+                       return_value=vector_store_backend.LANCEDB ), \
+         patch( "cosa.memory.lancedb_solution_manager.QuestionEmbeddingsTable" ), \
          patch.object( SolutionSnapshotManager, "_resolve_db_path", return_value=_CONFIG[ "db_path" ] ):
         mgr = SolutionSnapshotManager( _CONFIG, debug=debug, verbose=verbose )
-    # Pin lancedb-mode hermetically (v0.2.0 §6 backend flag): post-cutover the INI
-    # default resolved to `postgres`, so without this these lancedb-path tests would
-    # dispatch into the _pg_* helpers and hit a live backend. _pg_manager() re-flips
-    # this to True. Mirrors the convention at test_canonical_synonyms_delete.py:24.
-    mgr._use_postgres  = False
+
+    # Control: the pin must actually have taken.
+    assert mgr._use_postgres is False, "backend pin failed — lancedb-path tests would hit the live store"
     mgr._initialized   = True
     mgr.is_initialized = Mock( return_value=True )
     mgr._table         = MagicMock()

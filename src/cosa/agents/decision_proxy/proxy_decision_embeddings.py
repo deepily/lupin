@@ -19,7 +19,7 @@ import lancedb
 import pyarrow as pa
 
 import cosa.utils.util as cu
-from cosa.rest.db.repositories.vector_store_backend import is_postgres_backend
+from cosa.rest.db.repositories.vector_store_backend import is_postgres_backend, resolve_lancedb_path
 
 
 class ProxyDecisionEmbeddings:
@@ -57,26 +57,40 @@ class ProxyDecisionEmbeddings:
     # write-safe. Writes are infrequent, so there is no perf concern.
     _write_lock = threading.RLock()
 
-    def __init__( self, db_path, table_name="proxy_decisions", embedding_dim=768, nprobes=20, debug=False ):
+    def __init__( self, db_path=None, table_name="proxy_decisions", embedding_dim=768, nprobes=20, debug=False ):
         """
         Initialize the proxy decision embedding store.
 
         Requires:
-            - db_path is a valid filesystem path
+            - db_path is a valid filesystem path under the 'lancedb' backend,
+              and is None under the 'postgres' backend (where no path is honored)
             - table_name is a non-empty string
             - embedding_dim is a positive integer
 
         Ensures:
             - Store is configured but table is lazily created on first use
+            - self.db_path is None under the postgres backend — never a path
+              that looks honored but is not
+
+        Raises:
+            - ValueError if db_path is supplied while the postgres backend is
+              active (decision 2b20a6d6 — a silently-ignored path is the defect)
 
         Args:
-            db_path: Path to the LanceDB database directory
+            db_path: Path to the LanceDB database directory; None under postgres
             table_name: Name of the table within the database
             embedding_dim: Dimensionality of question embeddings
             nprobes: Number of probes for IVF index search
             debug: Enable debug output
         """
-        self.db_path       = db_path
+        # v0.2.0 backend flag (§6): when 'postgres', route to the
+        # PredictionDecisionRepository (the 1:1 pgvector mirror of this store) and
+        # skip LanceDB entirely. 'lancedb' (default) preserves the legacy path.
+        # Resolved FIRST so a path that will not be honored is rejected before it
+        # is stored on the attribute and read back as though it were (2b20a6d6).
+        self._use_postgres = is_postgres_backend()
+
+        self.db_path       = resolve_lancedb_path( db_path, "ProxyDecisionEmbeddings" )
         self.table_name    = table_name
         self.embedding_dim = embedding_dim
         self.nprobes       = nprobes
@@ -84,11 +98,6 @@ class ProxyDecisionEmbeddings:
 
         self._db    = None
         self._table = None
-
-        # v0.2.0 backend flag (§6): when 'postgres', route to the
-        # PredictionDecisionRepository (the 1:1 pgvector mirror of this store) and
-        # skip LanceDB entirely. 'lancedb' (default) preserves the legacy path.
-        self._use_postgres = is_postgres_backend()
 
     def _get_schema( self ):
         """

@@ -27,7 +27,7 @@ from typing import Optional, Dict, Any
 import cosa.utils.util as cu
 from cosa.utils.util_stopwatch import Stopwatch
 from cosa.memory.normalizer import Normalizer
-from cosa.rest.db.repositories.vector_store_backend import is_postgres_backend
+from cosa.rest.db.repositories.vector_store_backend import is_postgres_backend, resolve_lancedb_path
 
 
 class GistCacheTable:
@@ -82,6 +82,9 @@ class GistCacheTable:
         # GistCacheRepository and skip LanceDB entirely. 'lancedb' (default)
         # preserves the legacy path below byte-for-byte.
         self._use_postgres = is_postgres_backend()
+
+        # Reject a caller-supplied path that would never be honored (2b20a6d6).
+        db_uri = resolve_lancedb_path( db_uri, "GistCacheTable" )
 
         if not self._use_postgres:
             # Connect to database

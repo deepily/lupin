@@ -16,9 +16,30 @@ from cosa.agents.decision_proxy import proxy_decision_embeddings as pde
 from cosa.agents.decision_proxy.proxy_decision_embeddings import ProxyDecisionEmbeddings
 
 
+def _lancedb_store( *args, **kwargs ):
+    """
+    Construct a ProxyDecisionEmbeddings on the LanceDB path, hermetically.
+
+    The backend pin is held DURING construction (decision 2b20a6d6): __init__
+    resolves the flag itself and REJECTS a db_path it would not honor, and the live
+    INI resolves to `postgres`. Without the pin every store here would dispatch into
+    the _pg_* helpers and reach the shared database — which is what these
+    LanceDB-boundary tests spent their life doing, silently.
+    """
+    from cosa.rest.db.repositories import vector_store_backend
+
+    with patch.object( vector_store_backend, "get_vector_store_backend",
+                       return_value=vector_store_backend.LANCEDB ):
+        store = ProxyDecisionEmbeddings( *args, **kwargs )
+
+    # Control: the pin must actually have taken.
+    assert store._use_postgres is False, "backend pin failed — tests would hit the shared store"
+    return store
+
+
 def _ready_store( **kwargs ):
     """Store with an injected table mock → _ensure_table returns True (cached)."""
-    store = ProxyDecisionEmbeddings( "/db", **kwargs )
+    store = _lancedb_store( "/db", **kwargs )
     store._table = MagicMock()
     return store
 
@@ -38,7 +59,7 @@ def _chain_search( records ):
 # __init__ / _get_schema
 # ============================================================================
 def test_init_stores_config():
-    store = ProxyDecisionEmbeddings( "/db", table_name="t", embedding_dim=128, nprobes=10, debug=True )
+    store = _lancedb_store( "/db", table_name="t", embedding_dim=128, nprobes=10, debug=True )
     assert store.db_path == "/db"
     assert store.table_name == "t"
     assert store.embedding_dim == 128
@@ -49,7 +70,7 @@ def test_init_stores_config():
 
 
 def test_get_schema_has_expected_fields():
-    store = ProxyDecisionEmbeddings( "/db" )
+    store = _lancedb_store( "/db" )
     names = store._get_schema().names
     for f in ( "id", "question", "category", "decision_value", "ratification_state",
                "data_origin", "response_type", "question_embedding", "created_at" ):
@@ -60,7 +81,7 @@ def test_get_schema_has_expected_fields():
 # _ensure_table
 # ============================================================================
 def test_ensure_table_cached_skips_connect():
-    store = ProxyDecisionEmbeddings( "/db" )
+    store = _lancedb_store( "/db" )
     store._table = MagicMock()
     with patch.object( pde.lancedb, "connect" ) as conn:
         assert store._ensure_table() is True
@@ -68,7 +89,7 @@ def test_ensure_table_cached_skips_connect():
 
 
 def test_ensure_table_creates_new_when_absent( capsys ):
-    store = ProxyDecisionEmbeddings( "/db", debug=True )
+    store = _lancedb_store( "/db", debug=True )
     db = MagicMock()
     db.table_names.return_value = []
     created = MagicMock()
@@ -81,7 +102,7 @@ def test_ensure_table_creates_new_when_absent( capsys ):
 
 
 def test_ensure_table_creates_new_quiet():
-    store = ProxyDecisionEmbeddings( "/db", debug=False )
+    store = _lancedb_store( "/db", debug=False )
     db = MagicMock()
     db.table_names.return_value = []
     with patch.object( pde.lancedb, "connect", return_value=db ):
@@ -89,7 +110,7 @@ def test_ensure_table_creates_new_quiet():
 
 
 def test_ensure_table_opens_existing_matching_schema( capsys ):
-    store = ProxyDecisionEmbeddings( "/db", debug=True )
+    store = _lancedb_store( "/db", debug=True )
     expected = list( store._get_schema().names )
     db = MagicMock()
     db.table_names.return_value = [ store.table_name ]
@@ -103,7 +124,7 @@ def test_ensure_table_opens_existing_matching_schema( capsys ):
 
 
 def test_ensure_table_opens_existing_quiet():
-    store = ProxyDecisionEmbeddings( "/db", debug=False )
+    store = _lancedb_store( "/db", debug=False )
     expected = list( store._get_schema().names )
     db = MagicMock()
     db.table_names.return_value = [ store.table_name ]
@@ -115,7 +136,7 @@ def test_ensure_table_opens_existing_quiet():
 
 
 def test_ensure_table_schema_mismatch_recreates( capsys ):
-    store = ProxyDecisionEmbeddings( "/db" )
+    store = _lancedb_store( "/db" )
     db = MagicMock()
     db.table_names.return_value = [ store.table_name ]
     stale = MagicMock()
@@ -131,14 +152,14 @@ def test_ensure_table_schema_mismatch_recreates( capsys ):
 
 
 def test_ensure_table_failure_returns_false( capsys ):
-    store = ProxyDecisionEmbeddings( "/db", debug=True )
+    store = _lancedb_store( "/db", debug=True )
     with patch.object( pde.lancedb, "connect", side_effect=RuntimeError( "no db" ) ):
         assert store._ensure_table() is False
     assert "Failed to initialize" in capsys.readouterr().out
 
 
 def test_ensure_table_failure_quiet():
-    store = ProxyDecisionEmbeddings( "/db", debug=False )
+    store = _lancedb_store( "/db", debug=False )
     with patch.object( pde.lancedb, "connect", side_effect=RuntimeError( "x" ) ):
         assert store._ensure_table() is False
 
@@ -168,7 +189,7 @@ def test_add_decision_success_quiet():
 
 
 def test_add_decision_returns_when_table_unavailable():
-    store = ProxyDecisionEmbeddings( "/db" )
+    store = _lancedb_store( "/db" )
     store._ensure_table = MagicMock( return_value=False )
     store.add_decision( id="x", question="q", category="c", decision_value="v",
                         ratification_state="p", question_embedding=[], created_at="t" )
@@ -195,7 +216,7 @@ def test_add_decision_exception_swallowed_quiet( capsys ):
 # find_similar
 # ============================================================================
 def test_find_similar_returns_empty_when_table_unavailable():
-    store = ProxyDecisionEmbeddings( "/db" )
+    store = _lancedb_store( "/db" )
     store._ensure_table = MagicMock( return_value=False )
     assert store.find_similar( [ 0.1 ] ) == []
 
@@ -258,7 +279,7 @@ def test_find_similar_exception_returns_empty():
 # update_ratification_state
 # ============================================================================
 def test_update_returns_when_table_unavailable():
-    store = ProxyDecisionEmbeddings( "/db" )
+    store = _lancedb_store( "/db" )
     store._ensure_table = MagicMock( return_value=False )
     store.update_ratification_state( "x", "new" )     # no crash
     store._ensure_table.assert_called_once()
@@ -313,9 +334,26 @@ import contextlib
 
 
 def _pg_store( **kwargs ):
-    """Store constructed in postgres mode (is_postgres_backend patched True)."""
+    """
+    Store constructed in postgres mode — with NO db_path, which is the shape
+    production now uses.
+
+    This helper used to pass "/db" under a postgres pin. That is precisely the
+    construction decision 2b20a6d6 outlawed: the path is never honored on this path,
+    so passing one asserted a redirection that did not exist. `resolve_lancedb_path`
+    now raises on it, and the correct postgres call site supplies no path at all.
+
+    `resolve_lancedb_path` is patched alongside `is_postgres_backend` because the
+    former resolves the flag through its OWN module (vector_store_backend), which
+    patching `pde.is_postgres_backend` does not reach.
+    """
     with patch.object( pde, "is_postgres_backend", return_value=True ):
-        return ProxyDecisionEmbeddings( "/db", **kwargs )
+        store = ProxyDecisionEmbeddings( **kwargs )
+
+    # Control: the postgres pin must actually have taken, and no path may survive.
+    assert store._use_postgres is True, "postgres pin failed — this tests the wrong path"
+    assert store.db_path is None,       "a db_path survived on the postgres path"
+    return store
 
 
 @contextlib.contextmanager

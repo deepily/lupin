@@ -31,6 +31,27 @@ from cosa.memory.lancedb_solution_manager import SolutionSnapshotManager
 
 
 class TestLanceDBManagerPathResolution:
+
+    @pytest.fixture( autouse=True )
+    def _pin_lancedb_backend( self ):
+        """
+        Pin `vector store backend` to lancedb for every test in this class.
+
+        This class asserts how SolutionSnapshotManager RESOLVES a LanceDB path
+        (local prefixing, gs:// validation, error messages). Under the live INI the
+        flag is `postgres`, where no path is resolved at all — so these assertions
+        were describing a code path the manager never took (decision 2b20a6d6).
+
+        Patched at the flag's single definition site; the manager, CanonicalSynonymsTable
+        and QuestionEmbeddingsTable all resolve it from that module at call time.
+        """
+        from unittest.mock import patch as _patch
+        from cosa.rest.db.repositories import vector_store_backend
+
+        with _patch.object( vector_store_backend, "get_vector_store_backend",
+                            return_value=vector_store_backend.LANCEDB ):
+            yield
+
     """Test suite for SolutionSnapshotManager path resolution logic."""
 
     def test_local_backend_with_relative_path_applies_project_root(self):

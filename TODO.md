@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-07-26 (session 9a63d597, Mr. Radio 🦉 — runtime state relocated to `DEEPILY_DATA_DIR`; `a5255712`/`8758d0b1`/`c8f60c22`/`d6f11dfd`/`7c2e889e`/`d8a23fca` closed; decisions `2b20a6d6` + `7ee5b646` open for Rick)
+Last updated: 2026-07-27 (session 951a4459, Mr. Radio 🦉 — decision `2b20a6d6` RULED both arms and closed; `7ee5b646` still open for Rick)
 
 ---
 
@@ -14,9 +14,19 @@ Last updated: 2026-07-26 (session 9a63d597, Mr. Radio 🦉 — runtime state rel
 
 ---
 
-## ⏳ PENDING DECISION 2026-07-26 (Mr. Radio 🦉 `9a63d597`) — `2b20a6d6`: backend-blind test isolation
+## 📋 DECISIONS LOG 2026-07-27 (Mr. Radio 🦉 `951a4459`) — `2b20a6d6` RULED, both arms
 
-**Status**: OPEN, awaiting Rick. Store row `2b20a6d6` (decision, `gate_class=operator`) carries the full pros/cons; this is the narrative pointer.
+**2026-07-27 — which remedy for backend-blind test isolation → (1b) fix the three production call sites FIRST, then RAISE at construction, then land the guard test.** Why: a raise is unaffordable while three live sites still pass an ignored `db_path`; once they are reconciled the raise costs nothing and covers unswept code. Re-verified against the artifact this session — `responder.py:256-260` and `prediction_engine.py:163-165` have **no guard at all** (the row said "not guarded by the backend flag"; they are not guarded by *any* flag), and `prediction_engine.py` **hardcodes** its path rather than reading config. Only `main.py:512-520` gates, and on a second authority (`solution snapshots manager type`) with no comparator against `vector store backend`. Target shape: `routers/system.py:272-289`.
+
+**2026-07-27 — what happens to the six existing test offenders → ALL SIX isolated or removed. No exemptions, no known-bad list.** Rick, verbatim: *"I absolutely do not want any test touching a live dev data store! If it's not isolated then it needs to be removed or fixed."* This **overrode all four options offered** — I had proposed re-scoping the two `test_prediction_*_e2e` tests to *declare* that they use real data, on the reasoning that they point at the real store on purpose and are therefore honest. Rick rejects the premise: intent does not launder the contact. If isolating a test makes it vacuous, it is removed. Standing rule now in auto-memory `feedback_no_test_touches_a_live_dev_data_store.md`.
+
+**Follow-on opened**: three weeks of unisolated runs left unknown junk in `lupin_db_test` — contaminated data in a live dev store, needing its own cleanup call. Whether the six *write* or merely *construct* is now a cleanup-sizing question, not a disposition question.
+
+---
+
+## ⏳ ~~PENDING DECISION~~ ✅ RULED 2026-07-27 — `2b20a6d6`: backend-blind test isolation (kept for the record)
+
+**Status**: ✅ **CLOSED 2026-07-27** — both arms ruled by Rick; see the Decisions Log entry immediately above. Store row `2b20a6d6` carries both rulings as amendments. Original framing retained below.
 
 **The situation**: nine `cosa/memory/*` classes route on the ambient `vector store backend` flag and silently discard any `db_path` handed to them. `postgres` has been live since 2026-07-07 with no per-block override, so a test that constructs one believing it is isolated is reading and writing the shared store. One module (`test_answer_is_correct`) is fixed — commit `e4113d64`. Six more in `src/tests/integration/` are not.
 

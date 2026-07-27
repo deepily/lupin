@@ -25,7 +25,7 @@ from cosa.memory.snapshot_manager_interface import (
 )
 from cosa.memory.solution_snapshot import SolutionSnapshot
 from cosa.memory.question_embeddings_table import QuestionEmbeddingsTable
-from cosa.rest.db.repositories.vector_store_backend import is_postgres_backend
+from cosa.rest.db.repositories.vector_store_backend import is_postgres_backend, resolve_lancedb_path
 
 
 # Column order mirrors _snapshot_to_record EXACTLY (Postgres ORM columns are 1:1
@@ -95,8 +95,20 @@ class SolutionSnapshotManager( SolutionSnapshotManagerInterface ):
         self.storage_backend = config.get( "storage backend", "local" )
         self.table_name = config["table_name"]
 
+        # v0.2.0 migration flag: route through SolutionSnapshotRepository (Postgres+
+        # pgvector) when `vector store backend = postgres`. Defaults lancedb (old path
+        # preserved). Resolved BEFORE _resolve_db_path (decision 2b20a6d6): under
+        # postgres NO LanceDB location is touched, so resolving + validating one and
+        # publishing it on self.db_path advertised a path that was never honored.
+        self._use_postgres = is_postgres_backend()
+
         # Resolve database path based on backend (local filesystem or GCS)
-        self.db_path = self._resolve_db_path( config )
+        if self._use_postgres:
+            resolve_lancedb_path( config.get( "db_path" ), "SolutionSnapshotManager" )
+            resolve_lancedb_path( config.get( "gcs_uri" ), "SolutionSnapshotManager" )
+            self.db_path = None
+        else:
+            self.db_path = self._resolve_db_path( config )
 
         # LanceDB connection and table objects
         self._db = None
@@ -117,13 +129,6 @@ class SolutionSnapshotManager( SolutionSnapshotManagerInterface ):
         # Get standardized embedding dimension from config
         _cfg = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
         self._embedding_dim = int( _cfg.get( "embedding dimensions", default="768" ) )
-
-        # v0.2.0 migration flag: route through SolutionSnapshotRepository (Postgres+
-        # pgvector) when `vector store backend = postgres`. Defaults lancedb (old path
-        # preserved). NOTE: __init__ does NO lancedb work (that is initialize()), and
-        # QuestionEmbeddingsTable + _resolve_db_path are needed in BOTH modes, so they
-        # are NOT guarded out here — the postgres divergence lives in the _pg_* helpers.
-        self._use_postgres = is_postgres_backend()
 
         if self.debug:
             print( f"SolutionSnapshotManager configured:" )

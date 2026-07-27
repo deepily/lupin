@@ -73,3 +73,43 @@ def is_postgres_backend( config_mgr: Optional[ConfigurationManager] = None ) -> 
         - propagates ValueError from get_vector_store_backend on an invalid flag
     """
     return get_vector_store_backend( config_mgr ) == POSTGRES
+
+
+def resolve_lancedb_path( db_path, caller: str, config_mgr: Optional[ConfigurationManager] = None ):
+    """
+    Gate a caller-supplied LanceDB path on the active backend — the ONE seam
+    every path-taking store calls before it stores or connects.
+
+    Before this existed, a store accepted a `db_path`, echoed it back on the
+    attribute, and ignored it whenever the postgres path was active — so a
+    caller (test or production) believing it had redirected the store was in
+    fact reading and writing the shared one, silently. Bug `d621b111`; Rick's
+    2026-07-27 ruling on decision `2b20a6d6` closed it at the source.
+
+    Requires:
+        - caller is a non-empty string naming the construction site, used
+          verbatim in the raised message
+
+    Ensures:
+        - returns db_path unchanged when the LanceDB backend is active
+        - returns None when the postgres backend is active AND db_path is None
+          (nothing was promised, so nothing is broken)
+
+    Raises:
+        - ValueError when the postgres backend is active and db_path is not
+          None — the caller asked for a path that would never be honored, and
+          a silently-ignored path is the defect this seam exists to kill
+    """
+    if not is_postgres_backend( config_mgr ):
+        return db_path
+
+    if db_path is not None:
+        raise ValueError(
+            f"{caller}: a db_path was supplied ({db_path!r}) but '{_CONFIG_KEY}' is "
+            f"'{POSTGRES}', so the path would be silently ignored and the SHARED "
+            f"postgres store used instead. Build the LanceDB path only under the "
+            f"'{LANCEDB}' backend (see routers/system.py for the reference form), or "
+            f"flip '{_CONFIG_KEY}' to '{LANCEDB}' if a real LanceDB store is intended."
+        )
+
+    return None
