@@ -1,6 +1,16 @@
 # TODO
 
-Last updated: 2026-07-26 (session 9a63d597, Mr. Radio 🦉 — `d6f11dfd` closed; backend-blind test isolation split to `d621b111` + decision `2b20a6d6` raised for Rick)
+Last updated: 2026-07-26 (session 9a63d597, Mr. Radio 🦉 — runtime state relocated to `DEEPILY_DATA_DIR`; `a5255712`/`8758d0b1`/`c8f60c22`/`d6f11dfd`/`7c2e889e`/`d8a23fca` closed; decisions `2b20a6d6` + `7ee5b646` open for Rick)
+
+---
+
+## ⏳ PENDING DECISION 2026-07-26 (Mr. Radio 🦉 `9a63d597`) — `7ee5b646`: the HWM janitor switch
+
+**Status**: OPEN, awaiting Rick. Store row `7ee5b646` (decision, `gate_class=operator`).
+
+**The situation**: the DM-inbox bookmark janitor shipped with `arbiter enable hwm deletion = False`, which **diverges from his "let the janitor drain them" ruling**. I flipped it to OFF after measuring that the plan's safety claim was inverted — reaping a live session's bookmark does not duplicate its DMs, it **silently swallows the un-surfaced ones** (a missing file reads as never-seeded, so the reconcile records the inbox as already-seen and surfaces nothing). That re-creates bug `59f355e0`.
+
+**What Rick decides**: whether to turn it on. The 7-day window is already his ruling and needs no change. Nothing drains until the INI key flips.
 
 ---
 
