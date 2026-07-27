@@ -3,14 +3,103 @@ Root pytest config shared by BOTH test trees under `src/`:
   - the Lupin `src/tests/` tree, and
   - the in-tree CoSA `src/cosa/tests/` tree.
 
-This file exists for ONE cross-tree test-isolation guard (see the fixture below).
-Keep it minimal — tree-specific fixtures belong in `src/tests/conftest.py` /
+This file exists for cross-tree test-isolation guards (see below). Keep it minimal —
+tree-specific fixtures belong in `src/tests/conftest.py` /
 `src/cosa/tests/...conftest.py`, not here.
 """
 
+import importlib._bootstrap
 import sys
 
 import pytest
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# GUARD: a re-import-hostile package was UNLOADED and LOADED AGAIN (row e1da2b5f)
+# ══════════════════════════════════════════════════════════════════════════════
+# SQLAlchemy cannot survive a partial eviction: re-importing after one raises
+# `AssertionError: Type <class 'object'> is already registered`. Something evicting
+# it mid-suite therefore breaks a LATER test, in a DIFFERENT file, with an error that
+# names neither the evictor nor the cause.
+#
+# Two evictors are on record:
+#   `patch.dict( 'sys.modules', ... )`  — restores a pre-patch snapshot on exit,
+#       dropping everything the patched code imported while inside   (bug e9e31de7)
+#   coverage's `sys_modules_saved()`    — same shape, different actor (bug 1b8ec2b9)
+#
+# ⚠️ WHY THIS WATCHES THE RE-LOAD AND NOT THE EVICTION. Three detectors were built
+# against the eviction and all three were blind:
+#   1. sys.modules diff, setup vs teardown  — victims are imported DURING the test,
+#      so they were never in the setup snapshot
+#   2. session high-water mark              — load AND unload complete inside ONE
+#      test body; no between-tests hook ever observes the package present
+#   3. a spy on `mock._patch_dict._unpatch_dict` — proven live by a control that
+#      fired, yet silent on the real test
+# All three aimed AT the effect. The observable is one step upstream: the *re-load*.
+#
+# MEASURED, both arms predicted before running (2026-07-27):
+#   defect present : test 1 loads 60 sqlalchemy modules inside the patch,
+#                    test 2 RE-loads 8   -> the failure
+#   defect fixed   : 0 and 0             -> silent
+_PROTECTED_ROOTS  = ( "sqlalchemy", )
+_ever_loaded      = set()
+_reloaded_by_test = []
+
+_real_find_and_load = importlib._bootstrap._find_and_load
+
+
+def _find_and_load_watching_reimports( name, import_ ):
+    """
+    Wrap the import machinery's cache-MISS path to notice a protected re-load.
+
+    Ensures:
+        - behaviour is identical to the wrapped function in every case
+        - a protected module loaded a SECOND time in one session is recorded
+        - never raises on its own; the fixture decides what a recording means, so an
+          import can never fail because of this instrument
+    """
+    root = name.split( "." )[ 0 ]
+    if root in _PROTECTED_ROOTS and name in _ever_loaded:
+        _reloaded_by_test.append( name )
+    if root in _PROTECTED_ROOTS:
+        _ever_loaded.add( name )
+    return _real_find_and_load( name, import_ )
+
+
+importlib._bootstrap._find_and_load = _find_and_load_watching_reimports
+
+
+@pytest.fixture( autouse=True )
+def _fail_on_protected_module_reimport():
+    """
+    Fail the test that RE-LOADED a package which cannot survive re-import.
+
+    ⚠️ The failure it prevents is not this test's — it is the NEXT one's, in another
+    file, with an assertion about a call that never happened. Attributing it here, to
+    the test that actually did the unloading, is the entire value.
+
+    Ensures:
+        - a test that re-loads any `_PROTECTED_ROOTS` module fails, naming the modules
+        - a test that does not is untouched
+        - the recording buffer is cleared per test, so one offender cannot cascade
+          into blaming every test that follows it
+    """
+    _reloaded_by_test.clear()
+    yield
+    if _reloaded_by_test:
+        offenders = sorted( set( _reloaded_by_test ) )[ :6 ]
+        raise AssertionError(
+            f"This test RE-LOADED {len( set( _reloaded_by_test ) )} protected module(s) "
+            f"— e.g. {offenders}. Something unloaded them mid-test (most often "
+            f"`patch.dict( 'sys.modules', ... )`, which restores a PRE-PATCH snapshot on "
+            f"exit and drops whatever the patched code imported while inside). "
+            f"SQLAlchemy cannot survive that: the next re-import raises "
+            f"'Type <class \\'object\\'> is already registered', and the test that FAILS "
+            f"will be a later one in a different file. Fix: import the module at test-"
+            f"MODULE scope so it sits in the pre-patch snapshot (see "
+            f"src/cosa/tests/unit/rest/test_system_router.py), or stop stubbing "
+            f"sys.modules around code that imports it. Row e1da2b5f."
+        )
 
 
 @pytest.fixture( autouse=True )
