@@ -40,6 +40,7 @@ container self-contained and frozen):
 
 import asyncio
 import gc
+import hashlib
 import os
 import re
 import secrets
@@ -95,6 +96,13 @@ class _State:
         # from the plaintext key file (None until lifespan runs OR if the key
         # file is missing → all auth-protected endpoints 503).
         self.api_key_hash      : Optional[ bytes ] = None
+        # bug 6cc52525 — WHICH key this instance is holding, as a truncated
+        # sha256 of the plaintext. Never the key itself. Cloud Run mounts the
+        # secret as `latest`, resolved PER INSTANCE at cold start, so two
+        # instances of the SAME revision can hold different key versions with
+        # nothing in the deploy history to say so. This is the field that makes
+        # that answerable in one request instead of by log archaeology.
+        self.api_key_fingerprint : Optional[ str ] = None
 
     def is_ready( self ) -> bool:
         """All 3 models successfully resident in VRAM."""
@@ -102,6 +110,32 @@ class _State:
 
 
 _state = _State()
+
+
+def _key_fingerprint( plaintext: str ) -> str:
+    """
+    Stable, non-reversible identifier for WHICH key this instance holds.
+
+    Truncated sha256 of the plaintext — 12 hex chars, 48 bits. It answers
+    "do these two instances hold the same key?" and nothing else. The key is
+    64+ chars of high-entropy random (`_CK_LIVE_RE`), so this leaks no usable
+    information about the value; it is a version tag, not a credential.
+
+    ⚠️ Deliberately surfaced on the UNAUTHENTICATED `/health`, not on the
+    auth-gated `/admin/metrics`. The failure this exists to diagnose is
+    "every request 401s because this instance holds a stale key" — during
+    which, by construction, nobody has a working key to authenticate WITH.
+    A fingerprint behind auth would be unreadable in exactly the outage it
+    was added for.
+
+    Requires:
+        - plaintext is a non-empty str
+
+    Ensures:
+        - returns 12 lowercase hex chars
+        - never returns, logs, or embeds any part of the plaintext
+    """
+    return hashlib.sha256( plaintext.encode( "utf-8" ) ).hexdigest()[ :12 ]
 
 
 def _load_api_key_plaintext() -> Optional[ str ]:
@@ -238,6 +272,72 @@ def _update_vram_gauge():
         _VRAM_USED_MB.set( 0 )
 
 
+def _install_api_key() -> None:
+    """
+    Read the mounted API key, VALIDATE it, and install hash + fingerprint.
+
+    Extracted from `lifespan` for bug 6cc52525: the logic is three branches
+    with real consequences and was unreachable by unit tests while it sat
+    inside an asynccontextmanager that also loads three models onto a GPU.
+    An untestable guard is how the untested one got there.
+
+    Ensures:
+        - key missing/unreadable  -> load_error, hash stays None (503)
+        - key present but malformed -> DISTINCT load_error, hash stays None (503),
+          and it is NEVER hashed
+        - key valid -> fingerprint + bcrypt hash installed, plaintext purged
+        - the key value is never logged, in whole or in part, on any branch
+    """
+    # bug 6cc52525 — THE ASYMMETRY THIS BLOCK EXISTS TO CLOSE.
+    # `require_api_key` validates every INCOMING key against `_CK_LIVE_RE` before
+    # bcrypt. This site used to validate NOTHING about the key it HASHED — not the
+    # prefix, not the length, not the charset — and then printed
+    # "API key loaded + hashed" regardless. A truncated, rotated-stale, or
+    # wrong-format secret payload produced that same cheerful line and then 401'd
+    # every caller for the instance's entire life. The instrument checked its
+    # counterparty rigorously and never itself.
+    #
+    # This matters MORE on Cloud Run than locally: the secret is mounted as
+    # `latest`, resolved PER INSTANCE at cold start, so a rotation lands at an
+    # unpredictable future moment with no deploy and no revision change. `574fd1dc`
+    # measured 726 × 200 then 33 × 401 across 10 instances with ZERO mixed — the
+    # status was a property of which secret version each instance happened to boot with.
+    plaintext_key = _load_api_key_plaintext()
+    if plaintext_key is None:
+        _state.load_errors.append(
+            f"api_key: file {API_KEY_NAME!r} missing or unreadable in {KEYS_DIR!r} — "
+            f"all auth-protected endpoints will return 503"
+        )
+        print( f"[lupin-model-server] WARNING: API key file {API_KEY_NAME!r} not loaded" )
+    elif not _CK_LIVE_RE.match( plaintext_key ):
+        # Same predicate the request path applies to callers. Kept as a DISTINCT
+        # branch from "missing" on purpose: "the file isn't there" and "the file is
+        # there and holds the wrong bytes" are different operator actions, and
+        # collapsing them into one None would throw away the diagnosis this row is about.
+        # Length is reported because truncation is the likeliest cause and it is
+        # decisive; the VALUE is never logged, in whole or in part.
+        _state.load_errors.append(
+            f"api_key: {API_KEY_NAME!r} in {KEYS_DIR!r} does not match the ck_live_ format "
+            f"this server requires of every incoming key (got {len( plaintext_key )} chars) — "
+            f"REFUSING to hash it; all auth-protected endpoints will return 503"
+        )
+        print(
+            f"[lupin-model-server] ERROR: API key file {API_KEY_NAME!r} is MALFORMED "
+            f"({len( plaintext_key )} chars, expected ck_live_ + 64+) — not hashed. "
+            f"A rotated or truncated secret looks exactly like this; the server is "
+            f"failing loud instead of 401-ing every caller silently (bug 6cc52525)."
+        )
+        del plaintext_key
+    else:
+        _state.api_key_fingerprint = _key_fingerprint( plaintext_key )
+        _state.api_key_hash        = bcrypt.hashpw( plaintext_key.encode( "utf-8" ), bcrypt.gensalt() )
+        del plaintext_key  # purge plaintext from memory; only hash + fingerprint retained
+        print(
+            f"[lupin-model-server] API key loaded + hashed from {API_KEY_NAME} "
+            f"(fingerprint {_state.api_key_fingerprint})"
+        )
+
+
 # ── Lifespan: load 3 models eagerly ──────────────────────────────────────────
 
 @asynccontextmanager
@@ -251,17 +351,10 @@ async def lifespan( app: FastAPI ):                                # pragma: no 
     # (default `notification-api-claude-code-dev`); the model-server's
     # validator allowlists ONE key (no DB walk needed). Hash-once-at-boot
     # keeps plaintext out of process memory for the lifetime of the worker.
-    plaintext_key = _load_api_key_plaintext()
-    if plaintext_key:
-        _state.api_key_hash = bcrypt.hashpw( plaintext_key.encode( "utf-8" ), bcrypt.gensalt() )
-        del plaintext_key  # purge plaintext from memory; only hash retained
-        print( f"[lupin-model-server] API key loaded + hashed from {API_KEY_NAME}" )
-    else:
-        _state.load_errors.append(
-            f"api_key: file {API_KEY_NAME!r} missing or unreadable in {KEYS_DIR!r} — "
-            f"all auth-protected endpoints will return 503"
-        )
-        print( f"[lupin-model-server] WARNING: API key file {API_KEY_NAME!r} not loaded" )
+    _install_api_key()
+
+
+
 
     try:
         _state.whisper_pipeline = _load_whisper()
@@ -318,7 +411,12 @@ def health():
         "models_loaded"  : list( _state.models_loaded ),
         "vram_used_mb"   : int( _VRAM_USED_MB._value.get() ) if hasattr( _VRAM_USED_MB, "_value" ) else None,
         "uptime_seconds" : int( time.time() - _state.started_at ),
-        "load_errors"    : list( _state.load_errors )
+        "load_errors"    : list( _state.load_errors ),
+        # bug 6cc52525 — WHICH key version this instance holds. Truncated sha256,
+        # never the key. null means no key was loaded (missing or malformed), in
+        # which case load_errors above says which. Unauthenticated on purpose:
+        # the outage it diagnoses is one where nobody has a working key.
+        "api_key_fingerprint" : _state.api_key_fingerprint
     }
     status_code = 200 if _state.is_ready() else 503
     return JSONResponse( content=body, status_code=status_code )
