@@ -388,7 +388,14 @@ def test_build_poke_reason_includes_specifics():
     reason = o.build_poke_reason( v )
     assert reason.startswith( "Do not stop yet" )
     assert "in-progress TODO" in reason
-    assert "declare a fresh hold" in reason
+    # ⚠️ The peer-blocked route must name the hold file AND the FULL-id rule.
+    # A hold written at the short 8-char id is silently ignored (c121037b facet 2),
+    # so ".heartbeat-hold-" alone is NOT enough — it matches a placeholder that
+    # dropped the very warning that prevents the failure. Caught by mutation
+    # 2026-07-27: replacing the filename with .heartbeat-hold-<id>.json left this
+    # test GREEN. Pin the load-bearing words, not the prefix.
+    assert ".heartbeat-hold-" in reason
+    assert "FULL" in reason and "8-char" in reason
 
 
 def test_build_poke_reason_with_no_work_uses_placeholder():
@@ -407,20 +414,27 @@ def test_build_poke_reason_with_no_work_uses_placeholder():
 def test_poke_reason_step1_tells_managers_to_delegate_not_build():
     v      = o.evaluate_work_owed( todo_items=[ { "status": o.TODO_IN_PROGRESS, "owned_by_me": True } ] )
     reason = o.build_poke_reason( v )
-    assert "1. Owe work? Resume and drive it now" in reason
-    assert "assign/delegate it to a worker" in reason
-    assert "do NOT build it yourself" in reason
+    # Pins the INSTRUCTION, not its phrasing: option 1 exists, managers delegate,
+    # and building it yourself is forbidden. Reworded 2026-07-27; the three
+    # obligations are unchanged and are what these assertions are for.
+    assert "\n1. " in reason
+    assert "Delegate" in reason
+    assert "Never build it yourself" in reason
 
 
 def test_poke_reason_has_blocked_on_user_option_three():
     v      = o.evaluate_work_owed( todo_items=[ { "status": o.TODO_IN_PROGRESS, "owned_by_me": True } ] )
     reason = o.build_poke_reason( v )
-    assert "3. Blocked on the USER" in reason
+    assert "\n3. USER-BLOCKED" in reason
     assert "ask_yes_no" in reason and "ask_multiple_choice" in reason and "converse" in reason
-    assert "re-ask until answered" in reason
-    # the old nothing-to-do branch renumbered to 4
-    assert "4. Truly nothing to do? Declare it — write a hold with work_owed: false." in reason
-    assert "3. Truly nothing to do" not in reason
+    assert "Re-ask until answered" in reason
+    # ⚠️ The load-bearing half of option 3: a user-gate must NOT be buried in a
+    # notify and must NOT be parked in a hold. Both prohibitions survive the
+    # 2026-07-27 rewording and are the reason this option exists.
+    assert "Not buried in a notify" in reason and "not a hold" in reason
+    # the nothing-to-do branch is option 4, and carries the flag that declares it
+    assert "\n4. " in reason and "work_owed: false" in reason
+    assert "3. NOTHING OWED" not in reason
 
 
 def test_poke_reason_options_numbered_one_through_four():
@@ -432,8 +446,8 @@ def test_poke_reason_options_numbered_one_through_four():
 
 def test_spinup_nudge_specifics_owes_a_staff_up_this_tick():
     v = o.evaluate_work_owed( needs_spinup_check=True )
-    assert "more open tasks than active workers" in v[ "specifics" ]
-    assert "OWE a staff-up THIS tick" in v[ "specifics" ]
+    assert "tasks > workers" in v[ "specifics" ]
+    assert "STAFF UP THIS TICK" in v[ "specifics" ]
     assert "redline" in v[ "specifics" ]
     assert "last_spinup_check_ts" in v[ "specifics" ]        # stamp instruction preserved
 

@@ -93,7 +93,16 @@ SPINUP_BACKLOG_MIN_N = 3
 # resets on a real user prompt. Both POKE_REASON_TEMPLATE (oracle-owed) and
 # heartbeat_decision.DECLARED_OWED_REASON (self-declared) open with it (one
 # descriptive name everywhere — they derive their prefix from this constant).
-POKE_PROMPT_SENTINEL = "Do not stop yet — you stopped with work owed"
+#
+# SHORTENED 2026-07-27 (Rick, verbosity pass). "you stopped with" was dropped: the
+# poke fires ONLY on a Stop, so it stated the one thing already guaranteed. The
+# "Do not stop yet" PREFIX is deliberately retained — every downstream assertion
+# matches on it, and it keeps the marker readable as an instruction rather than a
+# machine token. Safe to change because emitter and detector both DERIVE from this
+# one constant (POKE_REASON_TEMPLATE :142, DECLARED_OWED_REASON, and
+# is_heartbeat_poke_prompt :188); nothing outside tests hardcodes the full string,
+# and the arbiter keys on its OWN sentinel, not this one.
+POKE_PROMPT_SENTINEL = "Do not stop yet — work owed"
 
 # Arbiter-poke sentinel (b33c8e96, 2026-06-30) — the SHARED opening clause of the
 # arbiter's stuck-poke and manager-staleness poke bodies. Unlike the heartbeat
@@ -138,18 +147,28 @@ HOLD_OVERRIDDEN_CLAUSE = (
     "re-ask or a worker-verification debt), which is owed work a declared hold cannot suppress"
 )
 
+# COMPRESSED 2026-07-27 (Rick): 1,099 -> 650 chars rendered, 41% shorter. Every
+# MECHANICAL detail is retained verbatim, because each one is a thing that silently
+# fails when omitted: the FULL hyphenated session id (a hold written at the short
+# 8-char id is ignored — c121037b facet 2), `awaiting: peer:<name>`, `work_owed:
+# false`, the three ask_* verb names, and `stamp last_spinup_check_ts`.
+#
+# What went was PROSE, not instruction: a worked example of how to phrase a DM, a
+# gloss on what "blocked on the USER" means, and a restatement that a user-gate is
+# owed work (already carried by "Not buried in a notify").
+#
+# Option labels are FRONT-LOADED (WORK IT / PEER-BLOCKED / USER-BLOCKED / NOTHING
+# OWED) so a reader routes to their own case on the first two words instead of
+# parsing four question-form sentences to find which one is theirs. A poke nobody
+# finishes reading is a poke that does not fire.
 POKE_REASON_TEMPLATE = (
-    POKE_PROMPT_SENTINEL + " ({specifics}){hold_clause}. "
-    "Pick one and act before you stop:\n"
-    "1. Owe work? Resume and drive it now — but if you manage a crew: assign/delegate it to a worker "
-    "(spawn one if you have more open tasks than workers); do NOT build it yourself.\n"
-    '2. Blocked on someone? DM them for status ("where are we on X?"), then declare a fresh hold — '
-    "write .heartbeat-hold-<your-FULL-session-id>.json (use the full hyphenated session id, "
-    "NOT the short 8-char form) with a reason and awaiting: peer:<name>.\n"
-    "3. Blocked on the USER (a decision only they can make)? Fire a dedicated ask_* "
-    "(ask_yes_no / ask_multiple_choice / converse) to them THIS turn — do NOT bury it in a status notify "
-    "or sit in a hold. A user-gate is owed work; surface it directly and re-ask until answered.\n"
-    "4. Truly nothing to do? Declare it — write a hold with work_owed: false."
+    POKE_PROMPT_SENTINEL + ": {specifics}{hold_clause}. Do ONE now:\n"
+    "1. WORK IT — drive it. Manage a crew? Delegate, spawn if tasks > workers. Never build it yourself.\n"
+    "2. PEER-BLOCKED — DM for status, then write .heartbeat-hold-<FULL-hyphenated-session-id>.json "
+    "(NOT the 8-char form) with reason + awaiting: peer:<name>.\n"
+    "3. USER-BLOCKED — fire ask_yes_no / ask_multiple_choice / converse THIS turn. Not buried in a "
+    "notify, not a hold. Re-ask until answered.\n"
+    "4. NOTHING OWED — prove it: hold with work_owed: false."
 )
 
 NO_WORK_SPECIFICS = "no owed work detected"
@@ -542,7 +561,11 @@ def evaluate_work_owed( todo_items=None, pending_decisions=None,
         specifics.append( "operator-gate re-surface overdue — the manager MUST fire a dedicated HIGH-PRIORITY 'action-required' notification (a targeted ask_*) to the user the moment it's raised — NOT a line buried in a status notify — AND mint the typed operator gate (re-surface your open operator-gate asks now, stamp last_surfaced_questions_ts)" )
     if needs_spinup_check:
         signals.append( "spinup_nudge" )
-        specifics.append( "more open tasks than active workers (or idle crew capacity) — you OWE a staff-up THIS tick: spawn/assign the next worker now. Waiting to be told to staff is a redline. (stamp last_spinup_check_ts)" )
+        # Compressed 2026-07-27 (Rick): 196 -> 117 chars. The redline and the stamp
+        # are the two load-bearing halves and both survive verbatim; "(or idle crew
+        # capacity)" and "the next worker" were restating the trigger back at the
+        # reader, who is being told about it in the same sentence.
+        specifics.append( "tasks > workers — STAFF UP THIS TICK: spawn/assign now. Waiting to be told is a redline. (stamp last_spinup_check_ts)" )
 
     return {
         "work_owed" : bool( signals ),
