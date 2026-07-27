@@ -570,6 +570,51 @@ PY
         report unknown BLOCK "env contract unreadable at $CONTRACT — C6 asserted NOTHING" "deploy the repo to the VM"
     fi
 
+    # C7 — IS THE DATABASE SCHEMA AT THE CHECKED-OUT TREE'S HEAD? (row 4aa2b9d5)
+    #      main.py migrates to head at startup, which closes the code-newer-than-schema
+    #      window BY CONSTRUCTION — for any path that goes through startup.
+    #      `lupin-vm.sh push-bundle --checkout` does NOT. Moving code without bouncing
+    #      the servers is the entire point of that verb, so it is precisely a path that
+    #      lands new code on a box while skipping the startup migrate. Post-checkout a
+    #      VM can run code that SELECTs a column its database does not have — María's
+    #      instance: commit 9fbb6258 selects body_changed_ts (migration 38e025169a73),
+    #      which on a pre-migration schema is a 500 on EVERY task query.
+    #
+    #      Before this check, preflight had 31 assertions across 5 layers and NOT ONE
+    #      looked at the schema. A box could pass every one green while running two
+    #      migrations behind, and the green would be honest about all it asserted.
+    #
+    #      ⚠️ PHASE-AWARE TIER, deliberately. In `pre` under `deploy`, the deploy that
+    #      follows RESTARTS the app, and the restart migrates — so blocking here would
+    #      abort the very thing that fixes the condition. Reported, not blocking. In
+    #      `post` (and standalone `full`) drift means the migration did NOT take, and
+    #      that is blocking.
+    #      Runs INSIDE the container: that is where the venv, the app package and DB
+    #      reachability live. It therefore inherits layer C's running-container
+    #      precondition — and a container that cannot answer is CANNOT-DETERMINE, which
+    #      is NOT the same as drift and does NOT get drift's remedy.
+    schema_tier="BLOCK"; [ "$PHASE" = "pre" ] && schema_tier="WARN"
+    schema_probe="$REPO_ROOT/src/scripts/check_schema_at_head.py"
+    if [ ! -r "$schema_probe" ]; then
+        report unknown "$schema_tier" "schema probe missing at $schema_probe" \
+                      "deploy the repo to the VM (the probe ships with it)"
+    else
+        # The probe's own three outcomes are preserved end to end; collapsing them
+        # here would undo the reason it has three.
+        schema_out="$( docker exec "$CONTAINER" python /var/lupin/src/scripts/check_schema_at_head.py 2>&1 )"
+        schema_rc=$?
+        schema_head="$(  printf '%s\n' "$schema_out" | grep -m1 '^HEAD_IN_TREE='  | cut -d= -f2- )"
+        schema_cur="$(   printf '%s\n' "$schema_out" | grep -m1 '^CURRENT_IN_DB=' | cut -d= -f2- )"
+        schema_detail="$( printf '%s\n' "$schema_out" | grep -m1 '^DETAIL='       | cut -d= -f2- )"
+        case $schema_rc in
+            0) report pass "$schema_tier" "DB schema is at the tree's head revision ($schema_head)" ;;
+            1) report fail "$schema_tier" "SCHEMA DRIFT — ${schema_detail:-db=$schema_cur tree=$schema_head}" \
+                          "restart the app container so main.py migrates to head: sudo docker compose -f $COMPOSE_FILE --env-file $REPO_ROOT/cloud-gpu.env up -d --no-deps --force-recreate $CONTAINER" ;;
+            *) report unknown "$schema_tier" "cannot determine schema revision — ${schema_detail:-$( printf '%s' "$schema_out" | tr '\n' ' ' | cut -c1-160 )}" \
+                          "this is NOT drift and does not take drift's remedy — the question could not be answered; check the container is up and the DB reachable: docker exec $CONTAINER python /var/lupin/src/scripts/check_schema_at_head.py" ;;
+        esac
+    fi
+
     # C5 — THE ALARM MUST NOT BE GATED ON THE HEALTHY VALUE.
     #      The Cloud SQL proxy healthcheck probes :9090 and never touches the socket
     #      it exists to publish. On 2026-07-26 it reported "Up 35 hours (healthy)" for

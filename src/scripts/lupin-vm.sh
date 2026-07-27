@@ -477,6 +477,35 @@ case "$SUBCMD" in
             esac
         done
         do_push_bundle "$BRANCH" "$DO_CHECKOUT"
+        # POST-checkout preflight (row 4aa2b9d5). ONLY when the working tree actually
+        # MOVED — a fetch-only run changes no code, so there is nothing new to assert
+        # and an arm there would be noise that teaches people to skip the flag's output.
+        #
+        # WHY THIS VERB NEEDED AN ARM AT ALL: `--checkout` lands new code WITHOUT
+        # restarting the servers — that is its entire purpose. main.py migrates to head
+        # at startup, so every path through a restart closes the code-newer-than-schema
+        # window by construction. This path skips it. Post-checkout a VM can serve code
+        # that SELECTs a column its database does not have.
+        #
+        # `--phase post` and not `pre`: HEAD has just changed, so B-parity is meaningful
+        # now (it is skipped in `pre` precisely because the ref is about to move), and
+        # the D-tier app probes are measuring a server that is NOT about to restart —
+        # which is the whole hazard here.
+        #
+        # NOT FATAL, deliberately. The code is already on the box by the time this runs;
+        # aborting would leave the operator with a moved tree and a non-zero exit and no
+        # more information than the report already gave them. `deploy`'s PRE arm aborts
+        # because nothing has been touched yet; this one reports.
+        if [ -n "$DO_CHECKOUT" ] && [ "${LUPIN_SKIP_PREFLIGHT:-0}" != "1" ]; then
+            log "POST-checkout preflight (--phase post) — the tree moved without a restart"
+            gcloud compute ssh "$VM_NAME" \
+                --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
+                $SSH_KEEPALIVE \
+                --command "cd $VM_ROOT && bash src/scripts/preflight-vm.sh --phase post" \
+                || log "POST-checkout preflight reported BLOCKING failures (above). The code IS on the box; nothing was rolled back. If it reported SCHEMA DRIFT, the app has new code against an older schema — restart the container so main.py migrates, or run: lupin-vm.sh deploy"
+        elif [ -n "$DO_CHECKOUT" ]; then
+            log "POST-checkout preflight SKIPPED (LUPIN_SKIP_PREFLIGHT=1)"
+        fi
         ;;
 
     deploy)
