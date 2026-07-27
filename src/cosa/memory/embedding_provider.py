@@ -257,6 +257,91 @@ class EmbeddingProvider:
             return ( model_server_url, cls._http_api_key(), "/embeddings" )
         return ( cls._resolve_server_url(), cls._http_api_key(), "/api/embeddings" )
 
+    # HTTP status codes worth a second attempt. A 5xx is the server failing to
+    # answer a request it accepted; 429 is explicit backpressure. Everything
+    # else in the 4xx family is a CONTRACT error — a 401 from a wrong API key
+    # retries into the identical rejection, so it is raised on the first try.
+    _RETRYABLE_STATUS = ( 429, 500, 502, 503, 504 )
+
+    def _http_retry_config( self ) -> tuple:
+        """
+        Resolve (retries, backoff_seconds) for the embedding HTTP fallbacks.
+
+        Requires:
+            - self._config_mgr is a live ConfigurationManager
+
+        Ensures:
+            - returns ( int retries >= 0, float backoff >= 0.0 )
+            - a negative configured retry count is clamped to 0 rather than
+              silently inverting the loop's meaning
+        """
+        retries = int( self._config_mgr.get( "embedding http retries", default="2" ) )
+        backoff = float( self._config_mgr.get( "embedding http retry backoff seconds", default="2.0" ) )
+        return ( max( 0, retries ), max( 0.0, backoff ) )
+
+    def _post_with_retry( self, url: str, payload: dict, api_key: str, timeout: float, label: str ):
+        """
+        POST to an embedding endpoint, retrying transport failures and 5xx/429.
+
+        The defect this exists for (bug `574fd1dc`): the model server is a
+        scale-to-zero Cloud Run GPU service whose cold start was MEASURED at
+        31.5-66.0s across 12 of 12 starts. A single attempt against any
+        timeout below that loses the caller's data every time the service has
+        gone idle. With a retry, the first attempt absorbs the warm-up and a
+        later one lands on the now-warm instance.
+
+        Requires:
+            - url is the fully-qualified endpoint
+            - payload is the JSON body
+            - api_key is a non-empty X-API-Key value
+            - timeout is the per-ATTEMPT read timeout, not a total budget
+            - label names the caller for the raised message
+
+        Ensures:
+            - returns the requests.Response on the first attempt that is
+              neither a transport failure nor a retryable status
+            - sleeps backoff * 2**n between attempts, never after the last
+            - makes exactly (1 + retries) attempts at most
+
+        Raises:
+            - RuntimeError naming the url, the attempt count, and the final
+              failure, after every attempt has been spent
+        """
+        import time
+
+        import requests
+
+        retries, backoff = self._http_retry_config()
+        attempts         = retries + 1
+        last_failure     = None
+
+        for attempt in range( attempts ):
+            try:
+                response = requests.post(
+                    url,
+                    json    = payload,
+                    headers = { "X-API-Key": api_key },
+                    timeout = timeout
+                )
+                if response.status_code not in self._RETRYABLE_STATUS:
+                    return response
+                last_failure = f"HTTP {response.status_code}: {response.text[ :200 ]}"
+            except requests.RequestException as e:
+                last_failure = f"{type( e ).__name__}: {e}"
+
+            if attempt < attempts - 1:
+                delay = backoff * ( 2 ** attempt )
+                if self.debug: print( f"[{label}] attempt {attempt + 1}/{attempts} failed ({last_failure}); retrying in {delay:.1f}s" )
+                time.sleep( delay )
+
+        raise RuntimeError(
+            f"{label} unreachable at {url} after {attempts} attempt(s): {last_failure}. "
+            f"Per-attempt timeout was {timeout}s — if the model server is scale-to-zero, "
+            f"a cold start has been measured at 31.5-66.0s, so raise "
+            f"'embedding http timeout seconds' / 'embedding http retries' rather than "
+            f"assuming the service is down (bug 574fd1dc)."
+        )
+
     def _generate_embedding_via_http( self, text: str, content_type: str ) -> List[float]:
         """
         Single-text embedding via HTTP fallback to /api/embeddings/generate.
@@ -279,8 +364,6 @@ class EmbeddingProvider:
         Raises:
             RuntimeError: when HTTP routing cannot complete the request
         """
-        import requests
-
         # Phase 3.1 of the model-server carve-out: when LUPIN_MODEL_SERVER_URL
         # is set, this resolves to (model-server URL, ck_internal_* key,
         # "/embeddings"). Otherwise falls through to the existing FastAPI
@@ -296,18 +379,15 @@ class EmbeddingProvider:
                 "EmbeddingProvider.declare_in_process_engine_owner() from the GPU-loading process."
             )
 
-        url = f"{base_url}{prefix}/generate"
-        try:
-            response = requests.post(
-                url,
-                json    = { "text": text, "content_type": content_type },
-                headers = { "X-API-Key": api_key },
-                timeout = 10
-            )
-        except requests.RequestException as e:
-            raise RuntimeError(
-                f"EmbeddingProvider HTTP fallback unreachable at {url}: {type( e ).__name__}: {e}"
-            )
+        url     = f"{base_url}{prefix}/generate"
+        # Was a hardcoded `timeout = 10`, which 12 of 12 measured cold starts
+        # (31.5-66.0s) defeated. Config-driven now; see bug 574fd1dc.
+        timeout = float( self._config_mgr.get( "embedding http timeout seconds", default="90" ) )
+
+        response = self._post_with_retry(
+            url, { "text": text, "content_type": content_type },
+            api_key, timeout, "EmbeddingProvider HTTP fallback"
+        )
 
         if response.status_code != 200:
             raise RuntimeError(
@@ -340,8 +420,6 @@ class EmbeddingProvider:
         Raises:
             RuntimeError: when HTTP routing cannot complete the request
         """
-        import requests
-
         # Phase 3.1 carve-out: same resolver as the single-text path above.
         base_url, api_key, prefix = self._resolve_http_target()
         if not api_key:
@@ -351,18 +429,15 @@ class EmbeddingProvider:
                 "(used by both the FastAPI and lupin-model-server HTTP paths)."
             )
 
-        url = f"{base_url}{prefix}/batch"
-        try:
-            response = requests.post(
-                url,
-                json    = { "texts": texts, "content_type": content_type },
-                headers = { "X-API-Key": api_key },
-                timeout = 30
-            )
-        except requests.RequestException as e:
-            raise RuntimeError(
-                f"EmbeddingProvider HTTP batch fallback unreachable at {url}: {type( e ).__name__}: {e}"
-            )
+        url     = f"{base_url}{prefix}/batch"
+        # Was a hardcoded `timeout = 30` — the right ORDERING versus the single
+        # path (a batch is more work) at a magnitude every cold start defeated.
+        timeout = float( self._config_mgr.get( "embedding http batch timeout seconds", default="120" ) )
+
+        response = self._post_with_retry(
+            url, { "texts": texts, "content_type": content_type },
+            api_key, timeout, "EmbeddingProvider HTTP batch fallback"
+        )
 
         if response.status_code != 200:
             raise RuntimeError(

@@ -9,6 +9,7 @@ from cosa.utils.util_stopwatch import Stopwatch
 from cosa.rest.db.repositories.vector_store_backend import is_postgres_backend
 
 import lancedb
+from threading import Lock
 from typing import Optional, Any
 
 # @singleton
@@ -40,6 +41,14 @@ class InputAndOutputTable():
         self.debug          = debug
         self.verbose        = verbose
         self._config_mgr    = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+
+        # Bug 574fd1dc Defect 2 — async-drop accounting. The async embedding
+        # path drops a row on any failure; before this, the loss was
+        # unquantified BY CONSTRUCTION (no counter existed, so "how many rows
+        # have we lost" had no answer). These make the loss countable.
+        self.async_failure_count = 0
+        self.last_async_failure  = None
+        self._async_failure_lock = Lock()
         self._embedding_mgr      = EmbeddingManager( debug=debug, verbose=verbose )
         self._embedding_provider = get_embedding_provider( debug=debug, verbose=verbose )
 
@@ -246,10 +255,20 @@ class InputAndOutputTable():
                         print( f"  Output embedding dimensions: {len(final_output_embedding)}" )
                         
                 except Exception as e:
+                    # Bug 574fd1dc Defect 2: this handler used to print and return,
+                    # so a failed row vanished with NO counter and NO record. The
+                    # caller already returned "success" the moment the work was
+                    # queued, so nothing upstream ever learns the write was lost —
+                    # the only evidence was a console banner someone had to read by
+                    # eye, which is exactly how this surfaced. The drop is still a
+                    # drop (no dead-letter store yet), but it is now COUNTED, so
+                    # "how many rows have we lost" stops being unanswerable.
+                    self._record_async_failure( input, e )
                     async_timer.print( f"FAILED after", use_millis=True )
                     du.print_banner( f"ASYNC EMBEDDING GENERATION FAILED", expletive=True )
                     print( f"Failed to generate embeddings and insert row for input: '{input[:debug_truncate_len]}...'" )
                     print( f"Error: {e}" )
+                    print( f"Rows dropped by this failure path since process start: {self.async_failure_count}" )
                     du.print_stack_trace( e, explanation="Async embedding generation failed", caller="insert_io_row async thread" )
             
             # Submit to the shared bounded pool (bug 81854972) instead of spawning
@@ -277,6 +296,41 @@ class InputAndOutputTable():
             } ]
             self._store_io_row( new_row[ 0 ] )
             timer.print( f"Done! I/O table now has {self._row_count()} rows", use_millis=True, end="\n" )
+
+    def _record_async_failure( self, input_text: str, error: Exception ) -> None:
+        """
+        Count one dropped row from the async embedding path (bug `574fd1dc`).
+
+        The row itself is still lost — this does NOT retry or dead-letter it.
+        What it changes is that the loss becomes COUNTABLE. Before this, the
+        handler printed a banner and returned, so the only record of a dropped
+        row was a console line in a container log, and "how many have we lost"
+        was unanswerable by construction.
+
+        Called from the embedding-pool worker thread, so the increment is
+        locked: the pool runs several workers concurrently and a bare `+= 1`
+        on a shared int is a read-modify-write that can silently lose counts —
+        which would make the instrument understate exactly the quantity it
+        exists to measure.
+
+        Requires:
+            - input_text is the row's input string (may be empty)
+            - error is the exception that killed the insert
+
+        Ensures:
+            - async_failure_count increments by exactly one per call
+            - last_async_failure holds ( truncated input, exception type, str(error) )
+              for the MOST RECENT failure
+            - never raises — a failure in the failure recorder must not mask
+              the original error
+        """
+        with self._async_failure_lock:
+            self.async_failure_count += 1
+            self.last_async_failure   = (
+                input_text[ :100 ] if input_text else "",
+                type( error ).__name__,
+                str( error )
+            )
 
     def _store_io_row( self, row: dict ) -> None:
         """
