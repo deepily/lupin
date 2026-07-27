@@ -22,6 +22,7 @@ from ..dependencies.config import get_config_manager, get_snapshot_manager, get_
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.memory.solution_snapshot_mgr import SolutionSnapshotManager
 from cosa.agents.two_word_id_generator import TwoWordIdGenerator
+from cosa.rest.code_identity import get_code_identity
 import cosa.utils.util as du
 
 
@@ -71,19 +72,24 @@ async def health_check():
         - Returns healthy status with service identification
         - Includes current timestamp in ISO format
         - Provides version information for monitoring systems
+        - Includes `code_identity`, captured at IMPORT (row ce89669e remedy 1)
         - Response is consistently formatted for health checks
-        
+
     Raises:
         - None (endpoint is designed to always succeed)
-        
+
     Returns:
-        dict: Health status with service name, timestamp, and version
+        dict: Health status with service name, timestamp, version, and code identity
     """
     return {
         "status": "healthy",
         "service": "lupin-fastapi",
         "timestamp": du.get_current_datetime_iso(),
-        "version": "0.1.0"
+        # Hardcoded since 2025 and identifying nothing — kept because consumers assert
+        # on it, superseded by code_identity below. THAT is what tells you which code
+        # is running; this tells you only that someone typed a number once.
+        "version": "0.1.0",
+        "code_identity": get_code_identity()
     }
 
 @router.get(
@@ -103,17 +109,69 @@ async def health():
         - Returns "ok" status for monitoring systems
         - Includes current timestamp in ISO format
         - Provides minimal response for high-frequency health checks
-        
+
     Raises:
         - None (endpoint is designed to always succeed)
-        
+
     Returns:
         dict: Simple status and timestamp for monitoring
     """
+    # ⚠️ DELIBERATELY TWO FIELDS. `code_identity` was added here first and reverted:
+    # this endpoint's stated contract is "minimal response for high-frequency health
+    # checks", it backs a docker healthcheck that fires every 30s, and a test pins
+    # the field count. Growing it to carry an identity payload would have been an
+    # unannounced contract change for a caller that never asked. The identity lives
+    # on `/` and on `/api/code-identity` instead.
     return {
         "status": "ok",
         "timestamp": du.get_current_datetime_iso()
     }
+
+
+@router.get(
+    "/api/code-identity",
+    response_class = JSONResponse,
+    summary        = "Which code is this process actually running?",
+    description    = "The git sha, branch and load time captured at MODULE IMPORT — not re-read per request."
+)
+async def code_identity():
+    """
+    The running process's frozen code identity (row ce89669e remedy 1).
+
+    WHY THIS ENDPOINT EXISTS
+        `:8000` bind-mounts `./src` and runs `reload=False`, so the file inside the
+        container is the host's current file while the imported module is whatever
+        loaded at process start. Every cheap check reads the filesystem and answers
+        the wrong question confidently:
+
+            docker exec <c> grep -c <symbol> <file>       -> hits that are not running
+            docker exec <c> git rev-parse --short HEAD    -> the HOST's working tree
+
+        Measured 2026-07-27: the `:8000` container reported a sha committed on the
+        host minutes earlier, against a process nearly an hour old.
+
+    HOW TO USE IT
+        Compare `imported_at` against a commit's AUTHOR date. If the commit is newer,
+        the running process does not have it, whatever any file or any in-container
+        `git` says. `src/scripts/verify-running-code.sh` makes the same comparison
+        against `docker inspect`; this makes it available without a docker socket.
+
+    Requires:
+        - FastAPI application is running and responsive
+
+    Ensures:
+        - Returns the record captured at import; the value does NOT move between
+          requests, by construction
+        - Never re-reads the repository (a per-request read would reproduce exactly
+          the lie this endpoint exists to remove)
+
+    Raises:
+        - None
+
+    Returns:
+        dict: git_sha, git_branch, git_sha_source, imported_at, pid
+    """
+    return get_code_identity()
 
 @router.get(
     "/api/server-info",
