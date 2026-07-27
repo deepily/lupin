@@ -24,6 +24,7 @@ branches the smoke block never reached. The legacy `quick_smoke_test()` +
 `if __name__ == "__main__":` block is therefore MARKED FOR DELETION (manager
 gates the delete post-commit per campaign runbook §9).
 """
+import os
 import asyncio
 import subprocess
 
@@ -128,6 +129,33 @@ def patched_voice( monkeypatch ):
     monkeypatch.setattr( vio, "clear_job_id", Mock() )
     monkeypatch.setattr( ci,  "_get_sender_id", lambda suffix=None: f"test.suite@x#{suffix}" )
     return notify
+
+
+@pytest.fixture( autouse=True )
+def _isolate_artifact_root( tmp_path, monkeypatch ):
+    """
+    Every test in this module writes tier artifacts under a tmp root. AUTOUSE, and
+    that is the load-bearing word.
+
+    THE TWIN THAT WAS MISSED — row 5bf28e07's thesis, live
+    ------------------------------------------------------
+    Krishna landed exactly this fixture on `src/tests/unit/test_test_suite_job.py`
+    (row fd0cd863) and ran the full unit tier green. THIS module is the same job's
+    other test file, and it went red on the same change — 17 failures — because
+    `src/cosa/tests/**` is referenced by NO GATE, so the tier he ran could not see
+    it. Two test files for one unit, one gated and one not: the gated one reported
+    health for both.
+
+    That is `5bf28e07` demonstrated rather than argued, and it is the second reason
+    this fixture is autouse rather than per-test: an opt-in fixture in an UNGATED
+    module is a default nobody will ever be told they missed.
+
+    `_ARTIFACT_DIR` is the single knob — the log file, the symlink and the junit XML
+    all derive from it, so there is nothing left to redirect separately. Patching it
+    also satisfies `attestation.artifact_root()`'s fail-closed refusal, which is what
+    turned this red loudly instead of letting the tests keep writing the live path.
+    """
+    monkeypatch.setattr( TSJob, "_ARTIFACT_DIR", str( tmp_path ) )
 
 
 def _make_job( **overrides ):
@@ -760,25 +788,33 @@ def test_write_stdout_log_empty_text_returns_none():
 
 
 def test_write_stdout_log_writes_file_and_symlink( monkeypatch, tmp_path ):
-    """Valid call writes a timestamped log and refreshes the canonical symlink.
+    """
+    Valid call writes a timestamped log and refreshes the canonical symlink.
 
-    The canonical symlink target is redirected into tmp_path so the real
-    /tmp/<suite>-latest.log is never touched; the timestamped actual-log still
-    lands in /tmp (hard-coded in the method) and is cleaned up here.
+    ⚠️ THIS TEST USED TO DOCUMENT `fd0cd863` IN ITS OWN DOCSTRING. Verbatim, before
+    2026-07-27: *"the timestamped actual-log still lands in /tmp (hard-coded in the
+    method) and is cleaned up here."* It patched `_LOG_SYMLINKS` alone, which moved
+    the symlink and left the real file writing into the live artifact directory —
+    the two-authorities defect, stated as a known limitation and then shipped.
+    "Cleaned up here" was also conditional: a failure before the `finally` left the
+    file behind, which is how `"first run"` came to be sitting in the container's
+    live `/tmp` when Krishna looked.
+
+    Now `_ARTIFACT_DIR` is the single knob and the autouse fixture redirects it, so
+    the log, the symlink and the junit XML move together. The assertion below is
+    against the ISOLATED root — the old `startswith( "/tmp/unit-" )` form required
+    the pollution in order to pass.
     """
     import pathlib
-    symlink = tmp_path / "unit-latest.log"
-    monkeypatch.setattr( job_mod.TestSuiteJob, "_LOG_SYMLINKS", { "unit": str( symlink ) } )
 
     path = TSJob._write_stdout_log( "unit", "hello log\n" )
-    try:
-        assert path is not None and path.startswith( "/tmp/unit-" )
-        assert pathlib.Path( path ).read_text() == "hello log\n"
-        assert symlink.is_symlink()
-        assert pathlib.Path( symlink ).resolve() == pathlib.Path( path ).resolve()
-    finally:
-        pathlib.Path( path ).unlink( missing_ok=True )
-        symlink.unlink( missing_ok=True )
+    symlink = pathlib.Path( TSJob._ARTIFACT_DIR ) / "unit-latest.log"
+
+    assert path is not None
+    assert path.startswith( os.path.join( str( tmp_path ), "unit-" ) )
+    assert pathlib.Path( path ).read_text() == "hello log\n"
+    assert symlink.is_symlink()
+    assert pathlib.Path( symlink ).resolve() == pathlib.Path( path ).resolve()
 
 
 # =========================================================================== #
