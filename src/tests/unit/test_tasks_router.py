@@ -96,6 +96,10 @@ def repo( monkeypatch ):
     # empty map is also the honest default: no other project exists, so nothing is
     # excluded, and a test wanting a finding sets this explicitly.
     fake.count_tasks_by_project.return_value = { }
+    # Same reason again for the priority breakdown (Rick 2026-07-27): the count_only
+    # branch returns it beside `breakdown`, and a MagicMock there would serialize as
+    # a non-JSON object and 500 the route rather than failing an assertion cleanly.
+    fake.count_tasks_by_priority.return_value = { }
 
     @contextmanager
     def _fake_get_db():
@@ -478,7 +482,7 @@ def test_query_count_only_returns_count_without_rows( client, repo ):
     repo.count_tasks_by_status.return_value  = { "queued": 273 }
     r = client.get( "/api/tasks", params={ "count_only": "true" } )
     assert r.status_code == 200
-    assert r.json() == { "count": 273, "breakdown": { "queued": 273 } }   # >100, no page saturation
+    assert r.json() == { "count": 273, "breakdown": { "queued": 273 }, "priority_breakdown": { } }   # >100, no page saturation
     repo.count_tasks.assert_called_once()
     repo.query_tasks.assert_not_called()
 
@@ -494,7 +498,7 @@ def test_query_count_only_forwards_filters_not_pagination( client, repo ):
         "limit"         : 7,                                  # ignored in count mode
         "offset"        : 3,                                  # ignored in count mode
     } )
-    assert r.status_code == 200 and r.json() == { "count": 0, "breakdown": { } }
+    assert r.status_code == 200 and r.json() == { "count": 0, "breakdown": { }, "priority_breakdown": { } }
     kwargs = repo.count_tasks.call_args.kwargs
     assert kwargs[ "owner_persona" ] == "krishna" and kwargs[ "status" ] == "queued"
     assert kwargs[ "project" ] == "lupin"
@@ -579,7 +583,7 @@ def test_query_count_only_precedes_terse( client, repo ):
     repo.count_tasks.return_value           = 5
     repo.count_tasks_by_status.return_value = { "queued": 5 }
     r = client.get( "/api/tasks", params={ "count_only": "true", "terse": "true" } )
-    assert r.status_code == 200 and r.json() == { "count": 5, "breakdown": { "queued": 5 } }
+    assert r.status_code == 200 and r.json() == { "count": 5, "breakdown": { "queued": 5 }, "priority_breakdown": { } }
     repo.count_tasks.assert_called_once()
     repo.query_tasks.assert_not_called()
 
@@ -596,7 +600,7 @@ def test_count_only_returns_breakdown_beside_count( client, repo ):
     r = client.get( "/api/tasks", params={ "owed_only": "true", "count_only": "true" } )
 
     assert r.status_code == 200
-    assert r.json() == { "count": 16, "breakdown": { "in_progress": 2, "queued": 13, "parked": 1 } }
+    assert r.json() == { "count": 16, "breakdown": { "in_progress": 2, "queued": 13, "parked": 1 }, "priority_breakdown": { } }
     repo.query_tasks.assert_not_called()                      # still no row materialization
 
 

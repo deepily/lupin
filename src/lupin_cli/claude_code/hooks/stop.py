@@ -79,6 +79,7 @@ from lupin_cli.claude_code.hooks.lib import heartbeat_events
 from lupin_cli.claude_code.hooks.lib.board_sweep import sweep_progress_line
 from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import (
     evaluate_work_owed, partition_inbound_by_age, TODO_IN_PROGRESS, TODO_PENDING,
+    format_owed_summary,
     manager_needs_verification, manager_needs_spinup_check, manager_needs_question_surface,
     SPINUP_CHECK_DEBOUNCE_SECONDS, SURFACE_QUESTIONS_DEBOUNCE_SECONDS, SPINUP_BACKLOG_MIN_N,
     MUTE_PROMPT_SENTINEL,
@@ -88,7 +89,7 @@ from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import (
 # heartbeat.owed_source_from_store. See cascade review §A/§B/§C, lupin ->
 # src/rnd/v0.1.8/2026.06.16-store-canonical-task-mgmt-cascade-review.md
 from lupin_cli.claude_code.hooks.lib.task_store_settings import load_task_store_settings
-from lupin_cli.claude_code.hooks.lib.task_store_client import read_api_key, query_owed
+from lupin_cli.claude_code.hooks.lib.task_store_client import read_api_key, query_owed, query_owed_breakdowns
 # v4 acked-inbound ledger (Rick 2026-06-10) — explicit "looked-at" qids the
 # unanswered-inbound gatherer subtracts (spec part (c)).
 from lupin_cli.claude_code.hooks.lib.heartbeat_acked_ledger import read_acked_qids
@@ -1503,10 +1504,11 @@ def _owed_count_from_store( session_id ):
         # Idempotent → safe whether the bridge holds the display or pool form.
         persona_key = canonical_persona_key( persona.get( "name" ) if isinstance( persona, dict ) else None ) or "unknown"
         project  = resolve_project_name()
-        ok, count, breakdown = query_owed( settings, api_key, persona_key, project=project )
-        return count, ok, breakdown
+        ok, count, breakdown, priority_breakdown = query_owed_breakdowns(
+            settings, api_key, persona_key, project=project )
+        return count, ok, breakdown, priority_breakdown
     except Exception:
-        return 0, False, { }
+        return 0, False, { }, { }
 
 
 # The store's owed statuses, mapped onto the oracle's TODO vocabulary (c191be39).
@@ -1910,10 +1912,11 @@ def _resolve_owed_state( session_id, transcript_path=None, cwd=None ):
     # `None` (not 0) is the honest "unknown": the transcript-replay path has no store
     # count at all, and rendering that as 0 would tell a sweeping seat its board is
     # clear on the strength of a source that was never consulted.
-    store_count = None
-    store_ok    = False
+    store_count     = None
+    store_ok        = False
+    store_priorities = { }
     if settings[ "owed_source_from_store" ]:
-        store_count, store_ok, store_breakdown = _owed_count_from_store( session_id )
+        store_count, store_ok, store_breakdown, store_priorities = _owed_count_from_store( session_id )
         if not store_ok:
             log_to_stream( "stop", {}, extra={
                 "phase"      : "heartbeat_store_unreachable",
@@ -1992,6 +1995,10 @@ def _resolve_owed_state( session_id, transcript_path=None, cwd=None ):
             "pokeable_user_gates"  : len( pokeable_gates ),
             "deferred_user_gates"  : _deferred_gate_count,
         } )
+    # One line carrying total + status split + priority split, replacing the two
+    # count sentences. Empty on the transcript-replay path (no store breakdown),
+    # where evaluate_work_owed falls back to its own wording.
+    owed_summary = format_owed_summary( store_breakdown, store_priorities ) if store_ok else ""
     verdict    = evaluate_work_owed(
         todo_items                   = owed_items,
         unanswered_inbound_questions = open_inbound,
@@ -2000,6 +2007,7 @@ def _resolve_owed_state( session_id, transcript_path=None, cwd=None ):
         open_user_gates              = due_gates,   # bug d0d7f068: the obligation-OVERRIDE + poke key on DUE gates (reask-interval elapsed), NOT any-open — an open-but-not-due gate stays tracked in the hold (still "not answered") but must NOT poke through an honored hold every Stop. Its re-ask cadence IS reask_interval_s; the row's existence, not per-Stop poking, is the not-done tracker. (open_gates still logged below for observability.)
         needs_question_surface       = needs_question_surface,
         needs_spinup_check           = needs_spinup_check,
+        owed_summary                 = owed_summary,
     )
     # Role-selected north-star goal echo (role-goals Phase 2-3) — APPENDED to the
     # poke reason so the session re-anchors on its goal every tick. Role comes from

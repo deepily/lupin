@@ -9,6 +9,8 @@ The oracle is a PURE decision function — every test injects parsed state
 (no live commons / TODO / transcript access). Exhaustive decision matrix
 per §0 #3 / §4 of the canonical design.
 """
+import pytest
+
 from lupin_cli.claude_code.hooks.lib import heartbeat_work_owed as o
 
 
@@ -681,7 +683,7 @@ def _specifics_verdict():
 def test_build_poke_reason_default_says_no_fresh_hold():
     """Default (hold_overridden=False) keeps the byte-identical 'and no fresh hold'."""
     reason = o.build_poke_reason( _specifics_verdict() )
-    assert "and no fresh hold" in reason
+    assert "no fresh hold" in reason
     assert "OVERRIDDEN" not in reason
     assert reason.startswith( o.POKE_PROMPT_SENTINEL )     # still recognized as a poke
 
@@ -699,3 +701,119 @@ def test_build_poke_reason_overridden_composes_with_goal_line():
     """The goal-line append still works on the overridden clause path."""
     reason = o.build_poke_reason( _specifics_verdict(), goal_line="GOAL: ship it", hold_overridden=True )
     assert "OVERRIDDEN" in reason and reason.endswith( "GOAL: ship it" )
+
+
+# ── format_owed_summary — the poke's owed line (Rick, 2026-07-27) ─────────────
+#
+# Replaces "2 in-progress TODO item(s) you own; 10 unstarted TODO item(s) you own",
+# which made the reader ADD to learn their board size and never named a priority
+# while the standing instruction is to work in descending priority.
+
+def test_owed_summary_matches_the_specified_format():
+    assert o.format_owed_summary( { "in_progress": 2, "queued": 10 },
+                                  { "P1": 6, "P2": 5, "P3": 1 } ) == (
+        "12 owed: 2 in progress, 10 queued · 6 at P1, 5 at P2, and 1 at P3 "
+        "— start with the 6 P1s" )
+
+
+def test_empty_priority_levels_are_SKIPPED_not_zeroed():
+    """
+    Rick, 2026-07-27: "you can dynamically skip P0, or any priority level, if there
+    are none at that level." A rendered "P0:0" is noise on every poke for a level
+    that is almost always empty — and it invites reading a printed 0 as measured,
+    when an absent bucket and a zero bucket are different claims.
+    """
+    line = o.format_owed_summary( { "queued": 3 }, { "P2": 3 } )
+    assert "P0" not in line and "P1" not in line and "P3" not in line
+    assert "3 at P2" in line
+
+
+def test_a_zero_valued_bucket_is_treated_as_absent():
+    """A server that emits an explicit 0 must render identically to one that omits it."""
+    assert ( o.format_owed_summary( { "queued": 3 }, { "P0": 0, "P2": 3 } )
+             == o.format_owed_summary( { "queued": 3 }, { "P2": 3 } ) )
+
+
+@pytest.mark.parametrize( "pri,expected", [
+    ( { "P2": 3 },                     "3 at P2" ),
+    ( { "P1": 1, "P2": 2 },            "1 at P1 and 2 at P2" ),
+    ( { "P1": 1, "P2": 2, "P3": 4 },   "1 at P1, 2 at P2, and 4 at P3" ),
+] )
+def test_the_series_uses_an_oxford_comma_and_no_stray_and( pri, expected ):
+    assert expected in o.format_owed_summary( { "queued": sum( pri.values() ) }, pri )
+
+
+def test_start_with_names_the_HIGHEST_priority_actually_present():
+    """Points at P0 when a P0 exists, and never invents a level with no rows."""
+    assert "start with the P0" in o.format_owed_summary( { "queued": 4 }, { "P0": 1, "P2": 3 } )
+    assert "start with the 3 P2s" in o.format_owed_summary( { "queued": 3 }, { "P2": 3 } )
+
+
+def test_singular_start_with_drops_the_count_and_the_plural_s():
+    assert "start with the P1" in o.format_owed_summary( { "queued": 2 }, { "P1": 1, "P2": 1 } )
+    assert "the 1 P1s" not in o.format_owed_summary( { "queued": 2 }, { "P1": 1, "P2": 1 } )
+
+
+def test_parked_expired_is_named_distinctly_from_never_started():
+    """
+    `STORE_STATUS_TO_TODO_STATUS` collapses parked -> PENDING for the VERDICT, and the
+    code comment records that as an accepted cost. The breakdown carries it separately,
+    so the DISPLAY need not inherit the collapse.
+    """
+    assert "1 parked-expired" in o.format_owed_summary( { "queued": 3, "parked": 1 }, { } )
+
+
+def test_the_total_is_summed_from_the_parts_so_they_cannot_disagree():
+    line = o.format_owed_summary( { "in_progress": 2, "queued": 10 }, { } )
+    assert line.startswith( "12 owed: " )
+
+
+def test_an_unknown_status_still_counts_toward_the_total():
+    """
+    Dropping a status the word-map does not know would make the parts stop summing to
+    the whole — a sentence disagreeing with itself in one line.
+    """
+    line = o.format_owed_summary( { "queued": 3, "wat": 2 }, { } )
+    assert line.startswith( "5 owed: " ) and "2 wat" in line
+
+
+def test_no_priority_data_omits_the_clause_rather_than_implying_none():
+    line = o.format_owed_summary( { "queued": 3 }, { } )
+    assert line == "3 owed: 3 queued"
+    assert "·" not in line and "start with" not in line
+
+
+@pytest.mark.parametrize( "bad", [ None, [ ], "nope", 7 ] )
+def test_malformed_input_yields_empty_never_raises( bad ):
+    """Foreign hook-payload data. "" makes the caller fall back to its own specifics."""
+    assert o.format_owed_summary( bad, { } ) == ""
+    assert o.format_owed_summary( { "queued": 3 }, bad ).startswith( "3 owed" )
+
+
+def test_zero_owed_yields_empty_rather_than_a_0_owed_line():
+    assert o.format_owed_summary( { }, { } ) == ""
+    assert o.format_owed_summary( { "queued": 0 }, { "P1": 0 } ) == ""
+
+
+def test_owed_summary_REPLACES_the_count_sentences_but_never_the_signals():
+    """
+    ⚠️ THE LOAD-BEARING ARM. `owed_summary` is a WORDING override. If it also gated
+    the signals, a formatting choice would decide whether the poke fires at all —
+    the prose becoming authoritative over the logic.
+    """
+    items = [ { "status": o.TODO_IN_PROGRESS, "owned_by_me": True },
+              { "status": o.TODO_PENDING,     "owned_by_me": True } ]
+    v = o.evaluate_work_owed( todo_items=items, owed_summary="2 owed: 1 in progress, 1 queued" )
+    assert v[ "signals" ] == [ "todo_in_progress", "todo_unstarted" ]
+    assert v[ "specifics" ] == "2 owed: 1 in progress, 1 queued"
+    assert "TODO item(s)" not in v[ "specifics" ]
+
+
+def test_without_owed_summary_the_transcript_replay_wording_is_UNCHANGED():
+    """
+    The fallback path really IS the harness TodoWrite list, so "TODO item(s)" is
+    accurate there. It was only wrong on the store path, which now renders the summary.
+    """
+    items = [ { "status": o.TODO_IN_PROGRESS, "owned_by_me": True } ]
+    v = o.evaluate_work_owed( todo_items=items )
+    assert "1 in-progress TODO item(s) you own" in v[ "specifics" ]

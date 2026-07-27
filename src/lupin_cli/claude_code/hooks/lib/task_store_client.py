@@ -318,6 +318,53 @@ def _count_on_connection( connection, path_with_query, api_key ):
     return True, count, _parse_breakdown( parsed.get( "breakdown" ) )
 
 
+def _count_on_connection_full( connection, path_with_query, api_key ):
+    """
+    `_count_on_connection` plus the PRIORITY breakdown — ONE request, four values.
+
+    WHY A SIBLING AND NOT A FOURTH RETURN SLOT. `_count_on_connection` / `query_owed`
+    are asserted as 3-tuples in ~30 places. Widening the arity would rewrite every one
+    of those assertions to accommodate a field most of them do not care about, and a
+    mass edit of assertions is how a suite quietly loses the property it was pinning.
+
+    ⚠️ THIS DOES NOT DELEGATE TO `_count_on_connection`. Calling it would issue a
+    SECOND GET on the same connection for a body already read — doubling the request
+    the Stop hook fires every turn, and re-reading a consumed response. The parse is
+    duplicated deliberately; the shape it parses is four lines long and the
+    alternative is an extra round trip on the hot path.
+
+    Ensures:
+        - returns ( ok, count, breakdown, priority_breakdown )
+        - identical fail-safe contract to `_count_on_connection`: ANY transport error
+          / non-2xx / unparseable body / missing-or-bool `count` → ( False, 0, {}, {} )
+        - `priority_breakdown` degrades to {} on absent/malformed data for the same
+          reason `breakdown` does — it is a REPORTING refinement of a count that is
+          already trusted, so it must never fail a read that otherwise succeeded
+        - NEVER raises
+    """
+    try:
+        connection.request( "GET", path_with_query, headers={ "X-API-Key": api_key } )
+        response = connection.getresponse()
+        status   = response.status
+        raw      = response.read().decode( "utf-8" )
+    except Exception:
+        return False, 0, { }, { }
+
+    if not ( 200 <= status < 300 ):
+        return False, 0, { }, { }
+    try:
+        parsed = json.loads( raw )
+    except json.JSONDecodeError:
+        return False, 0, { }, { }
+    if not isinstance( parsed, dict ):
+        return False, 0, { }, { }
+    count = parsed.get( "count" )
+    if isinstance( count, bool ) or not isinstance( count, int ):
+        return False, 0, { }, { }
+    return ( True, count,
+             _parse_breakdown( parsed.get( "breakdown" ) ),
+             _parse_breakdown( parsed.get( "priority_breakdown" ) ) )
+
 def query_owed( settings, api_key, owner_persona, project=None, timeout=None,
                 owner_field="owner_persona" ):
     """
@@ -426,3 +473,41 @@ def query_owed( settings, api_key, owner_persona, project=None, timeout=None,
         return True, count, breakdown
     finally:
         connection.close()                   # release the socket (close is idempotent)
+
+
+def query_owed_breakdowns( settings, api_key, owner_persona, project=None, timeout=None,
+                           owner_field="owner_persona" ):
+    """
+    `query_owed` plus the PRIORITY breakdown — same ONE request, four values.
+
+    The Stop-hook poke needs to say WHICH rows matter, not only how many (Rick,
+    2026-07-27). `query_owed` keeps its 3-tuple so its ~30 existing assertions stay
+    exactly as written; this is the entry point for the one caller that wants the
+    fourth field.
+
+    Ensures:
+        - returns ( ok, count, breakdown, priority_breakdown )
+        - identical fail-safe contract to `query_owed`: any not-ok read yields
+          ( False, 0, {}, {} ) and the caller does NOT poke
+        - issues exactly ONE HTTP request, like `query_owed`
+        - the connection is ALWAYS closed
+        - NEVER raises
+    """
+    if timeout is None:
+        timeout = DEFAULT_OWED_TIMEOUT_SECONDS
+
+    connection = _open_owed_connection( settings[ "api_base_url" ], timeout )
+    if connection is None:
+        return False, 0, { }, { }
+
+    try:
+        params = { owner_field: owner_persona, "owed_only": "true", "count_only": "true" }
+        if project:
+            params[ "project" ] = project
+        path = f"/api/tasks?{urllib.parse.urlencode( params )}"
+        ok, count, breakdown, priority_breakdown = _count_on_connection_full( connection, path, api_key )
+        if not ok:
+            return False, 0, { }, { }
+        return True, count, breakdown, priority_breakdown
+    finally:
+        connection.close()

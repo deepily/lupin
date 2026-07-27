@@ -1218,7 +1218,27 @@ def query_tasks(
                 owed_only           = owed_only,
                 hide_parked         = hide_parked,
             )
-            return { "count": count, "breakdown": breakdown }
+            # Priority breakdown rides the SAME count_only branch as `breakdown`
+            # (Rick 2026-07-27): the poke needs to say WHICH rows matter, not only
+            # how many. Scoped to this branch for the identical reason the status
+            # breakdown is — it returns before any row is materialized, so it
+            # provably cannot reach the multiplexer's full-row shape.
+            priority_breakdown = repo.count_tasks_by_priority(
+                owner_persona       = owner_persona,
+                status              = status,
+                gate_class          = gate_class,
+                urgency             = urgency,
+                accountable_manager = accountable_manager,
+                project             = project,
+                item_class          = item_class,
+                correlation_key     = correlation_key,
+                id_prefix           = id_prefix,
+                include_terminal    = include_terminal,
+                owed_only           = owed_only,
+                hide_parked         = hide_parked,
+            )
+            return { "count": count, "breakdown": breakdown,
+                     "priority_breakdown": priority_breakdown }
         # The unscoped-query guard (design 2026.07.07) is a repository-layer raise;
         # map it to an educational HTTP 400 that names the two fixes (mirrors the
         # ?scope= teach-while-enforcing 400). A legitimate full sweep passes

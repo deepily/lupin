@@ -208,7 +208,7 @@ def test_oracle_owed_no_hold_keeps_no_fresh_hold_text():
     'and no fresh hold' clause (hold_overridden is False on the non-override path)."""
     r = hd.decide_heartbeat( None, _owed_verdict(), 0, 3, now=NOW )
     reason = r[ "hook_output" ][ "reason" ]
-    assert "and no fresh hold" in reason
+    assert "no fresh hold" in reason
     assert "OVERRIDDEN" not in reason
 
 

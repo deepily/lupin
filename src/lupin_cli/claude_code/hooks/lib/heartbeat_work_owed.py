@@ -102,7 +102,7 @@ SPINUP_BACKLOG_MIN_N = 3
 # one constant (POKE_REASON_TEMPLATE :142, DECLARED_OWED_REASON, and
 # is_heartbeat_poke_prompt :188); nothing outside tests hardcodes the full string,
 # and the arbiter keys on its OWN sentinel, not this one.
-POKE_PROMPT_SENTINEL = "Do not stop yet — work owed"
+POKE_PROMPT_SENTINEL = "Do not stop yet"
 
 # Arbiter-poke sentinel (b33c8e96, 2026-06-30) — the SHARED opening clause of the
 # arbiter's stuck-poke and manager-staleness poke bodies. Unlike the heartbeat
@@ -141,7 +141,7 @@ MUTE_PROMPT_SENTINEL = "[heartbeat: pokes muted]"
 # a verification debt outranks the hold's quiescence by design), asserting "no
 # fresh hold" is FALSE — the hold is fresh, just overridden. The override clause
 # states the true state so the pokee isn't told to declare a hold it already has.
-NO_FRESH_HOLD_CLAUSE   = " and no fresh hold"
+NO_FRESH_HOLD_CLAUSE   = ", no fresh hold"
 HOLD_OVERRIDDEN_CLAUSE = (
     " — your fresh hold is HONORED but OVERRIDDEN by a due obligation (a user-gate "
     "re-ask or a worker-verification debt), which is owed work a declared hold cannot suppress"
@@ -162,7 +162,7 @@ HOLD_OVERRIDDEN_CLAUSE = (
 # parsing four question-form sentences to find which one is theirs. A poke nobody
 # finishes reading is a poke that does not fire.
 POKE_REASON_TEMPLATE = (
-    POKE_PROMPT_SENTINEL + ": {specifics}{hold_clause}. Do ONE now:\n"
+    POKE_PROMPT_SENTINEL + " — {specifics}{hold_clause}. Do ONE now:\n"
     "1. WORK IT — drive it. Manage a crew? Delegate, spawn if tasks > workers. Never build it yourself.\n"
     "2. PEER-BLOCKED — DM for status, then write .heartbeat-hold-<FULL-hyphenated-session-id>.json "
     "(NOT the 8-char form) with reason + awaiting: peer:<name>.\n"
@@ -172,6 +172,98 @@ POKE_REASON_TEMPLATE = (
 )
 
 NO_WORK_SPECIFICS = "no owed work detected"
+
+
+# Store status -> the words a human reads. The poke used to say "unstarted TODO
+# item(s) you own", which named a surface RETIRED at the 2026-06-17 store-only
+# cutover — the native harness list stopped being the liveness source, so a
+# rehydrating session was pointed at the wrong place by its own poke.
+_STATUS_WORDS = { "in_progress": "in progress", "queued": "queued", "parked": "parked-expired" }
+
+# The order buckets are read in. Explicit rather than dict-order: "2 in progress,
+# 10 queued" and "10 queued, 2 in progress" are the same facts in different
+# priority orders, and the first is the one that matches how the work is picked up.
+_STATUS_ORDER   = ( "in_progress", "queued", "parked" )
+_PRIORITY_ORDER = ( "P0", "P1", "P2", "P3" )
+
+
+def _join_series( parts ):
+    """
+    "a" · "a and b" · "a, b, and c" — Rick's 2026-07-27 format, Oxford comma.
+
+    Requires:
+        - parts is a list of already-rendered strings
+
+    Ensures:
+        - returns "" for an empty list (the caller omits the clause entirely)
+        - 1 part -> itself; 2 parts -> "x and y"; 3+ -> "x, y, and z"
+    """
+    if not parts:      return ""
+    if len( parts ) == 1: return parts[ 0 ]
+    if len( parts ) == 2: return f"{parts[0]} and {parts[1]}"
+    return ", ".join( parts[ :-1 ] ) + f", and {parts[-1]}"
+
+
+def format_owed_summary( status_breakdown, priority_breakdown ):
+    """
+    The poke's owed line: total, status split, priority split, and where to start.
+
+        12 owed: 2 in progress, 10 queued · 6 at P1, 5 at P2, and 1 at P3 — start with the 6 P1s
+
+    Replaces the previous two-line form ("2 in-progress TODO item(s) you own;
+    10 unstarted TODO item(s) you own"), which made the reader ADD to learn their
+    board size and never once named a priority — while the standing instruction is
+    to work in descending priority.
+
+    ⚠️ EMPTY BUCKETS ARE OMITTED, NOT ZEROED (Rick, 2026-07-27: "you can dynamically
+    skip P0, or any priority level, if there are none at that level"). A rendered
+    "P0:0" is noise on every poke for a level that is almost always empty, and it
+    also invites the reader to treat a printed 0 as measured when an absent bucket
+    and a zero bucket are different claims. The GROUP BY already omits them.
+
+    Requires:
+        - status_breakdown is { store_status: count } or falsy
+        - priority_breakdown is { "P0".."P3": count } or falsy
+
+    Ensures:
+        - returns "" when the total is 0 or the status breakdown is empty/unusable —
+          the caller then falls back to its own specifics rather than printing "0 owed"
+        - the total is SUMMED from the status breakdown, not taken on faith from a
+          separate count, so the parts and the whole cannot disagree in one sentence
+        - the priority clause is omitted entirely when no priority data is available,
+          rather than implying every row is unprioritized
+        - "start with the N P1s" names the HIGHEST priority actually present, so it
+          points at P0 when a P0 exists and never invents a level with no rows
+        - never raises on malformed input (foreign hook-payload data)
+    """
+    if not isinstance( status_breakdown, dict ): return ""
+    counts = { k: v for k, v in status_breakdown.items() if isinstance( v, int ) and v > 0 }
+    total  = sum( counts.values() )
+    if total <= 0: return ""
+
+    known  = [ f"{counts[k]} {_STATUS_WORDS[k]}" for k in _STATUS_ORDER if counts.get( k ) ]
+    # A status the map does not know still COUNTS toward the total and is named
+    # verbatim — silently dropping it would make the parts stop summing to the whole.
+    extra  = [ f"{v} {k}" for k, v in sorted( counts.items() )
+               if k not in _STATUS_WORDS ]
+    line   = f"{total} owed: " + ", ".join( known + extra )
+
+    if isinstance( priority_breakdown, dict ):
+        pri = { k: v for k, v in priority_breakdown.items() if isinstance( v, int ) and v > 0 }
+        # MEMBERSHIP, not truthiness. `pri` is already >0-filtered one line up, so a
+        # second truthiness test here would be a REDUNDANT guard for the same rule —
+        # and two guards for one rule make the rule unfalsifiable: mutation 2026-07-27
+        # showed neither could be broken alone because the other covered it. A test
+        # that cannot fail is not verifying anything.
+        present = [ p for p in _PRIORITY_ORDER if p in pri ]
+        unknown = sorted( k for k in pri if k not in _PRIORITY_ORDER )
+        if present or unknown:
+            rendered = [ f"{pri[p]} at {p}" for p in present ] + [ f"{pri[u]} at {u}" for u in unknown ]
+            line += " \u00b7 " + _join_series( rendered )
+            if present:
+                top, n = present[ 0 ], pri[ present[ 0 ] ]
+                line += f" \u2014 start with the {top}" if n == 1 else f" \u2014 start with the {n} {top}s"
+    return line
 
 
 def is_heartbeat_poke_prompt( prompt ):
@@ -464,7 +556,8 @@ def evaluate_work_owed( todo_items=None, pending_decisions=None,
                         needs_verification=False,
                         open_user_gates=None,
                         needs_question_surface=False,
-                        needs_spinup_check=False ):
+                        needs_spinup_check=False,
+                        owed_summary=None ):
     """
     Pure work-owed verdict over injected state (§0 step 3).
 
@@ -535,12 +628,30 @@ def evaluate_work_owed( todo_items=None, pending_decisions=None,
     signals   = [ ]
     specifics = [ ]
 
+    # SIGNALS ARE UNCONDITIONAL; only the WORDING is overridable (Rick, 2026-07-27).
+    # `owed_summary` replaces the two count sentences with one line carrying the
+    # total, the status split and the priority split. It must NOT gate the signals:
+    # `todo_in_progress` / `todo_unstarted` drive the verdict and the oracle log, and
+    # letting a formatting choice decide whether a signal fires would make the poke's
+    # PROSE authoritative over its LOGIC.
     if in_progress:
         signals.append( "todo_in_progress" )
-        specifics.append( f"{len( in_progress )} in-progress TODO item(s) you own" )
     if unstarted:
         signals.append( "todo_unstarted" )
-        specifics.append( f"{len( unstarted )} unstarted TODO item(s) you own" )
+
+    if owed_summary:
+        specifics.append( owed_summary )
+    else:
+        # Fallback wording for the TRANSCRIPT-REPLAY path, which has no store
+        # breakdown to summarize. Deliberately UNCHANGED, "TODO item(s)" included:
+        # on that path the items really ARE the harness TodoWrite list, so the word
+        # is accurate there. It was only wrong on the store path, where it named a
+        # surface retired at the 2026-06-17 cutover — and that path now renders
+        # `owed_summary` instead.
+        if in_progress:
+            specifics.append( f"{len( in_progress )} in-progress TODO item(s) you own" )
+        if unstarted:
+            specifics.append( f"{len( unstarted )} unstarted TODO item(s) you own" )
     if actionable_decisions:
         signals.append( "pending_decision" )
         specifics.append( f"{len( actionable_decisions )} pending decision(s) not blocked on the user" )

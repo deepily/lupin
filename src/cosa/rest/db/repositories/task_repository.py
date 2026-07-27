@@ -1027,6 +1027,54 @@ class TaskRepository( BaseRepository[TaskItem] ):
 
         return { row_status : row_count for row_status, row_count in query.group_by( TaskItem.status ).all() }
 
+    def count_tasks_by_priority(
+        self,
+        owner_persona       : Optional[str] = None,
+        status              : Optional[str] = None,
+        gate_class          : Optional[str] = None,
+        urgency             : Optional[str] = None,
+        accountable_manager : Optional[str] = None,
+        project             : Optional[str] = None,
+        item_class          : Optional[str] = None,
+        correlation_key     : Optional[str] = None,
+        id_prefix           : Optional[str] = None,
+        include_terminal    : bool = False,
+        owed_only           : bool = False,
+        hide_parked         : bool = False,
+        now                 : Optional[datetime] = None,
+    ) -> dict:
+        """
+        The PER-PRIORITY breakdown of the SAME admitted set count_tasks totals —
+        ONE GROUP BY, never N queries (Rick, 2026-07-27).
+
+        WHY: the Stop-hook poke reported HOW MANY rows a seat owed and never WHICH
+        ones mattered. Rick's standing instruction is to work in descending priority,
+        and the poke that fires on every Stop had no priority in it at all — twelve
+        owed rows read as one undifferentiated pile whether six were P1 or none were.
+
+        Mirrors `count_tasks_by_status` exactly, including the sum-parity property:
+        sum( result.values() ) == count_tasks( <same filters> ), two independent
+        computations rather than one derived from the other.
+
+        Requires:
+            - each filter is either None (no constraint) or an exact-match value
+            - the filter set is applied IDENTICALLY to count_tasks (same helpers)
+
+        Ensures:
+            - returns { priority: count } over ONLY the priorities actually present —
+              an absent priority is absent, never a 0 bucket, so a caller cannot
+              mistake "no P0 rows" for "P0 was not measured"
+            - keys are the RAW stored priority strings (P0..P3)
+        """
+        query = self.session.query( TaskItem.priority, func.count( TaskItem.id ) )
+        query = self._apply_scalar_filters(
+            query, owner_persona, status, gate_class, urgency,
+            accountable_manager, project, item_class, correlation_key, id_prefix
+        )
+        query = self._apply_owed_filter( query, owed_only, hide_parked, status, include_terminal, now )
+
+        return { row_priority : row_count for row_priority, row_count in query.group_by( TaskItem.priority ).all() }
+
     def count_tasks_by_project(
         self,
         owner_persona       : Optional[str] = None,

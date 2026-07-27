@@ -1589,14 +1589,14 @@ class TestOwedCountFromStore:
              patch( "lupin_cli.claude_code.hooks.stop.read_api_key", return_value="k" ) as rk, \
              patch( "lupin_cli.claude_code.hooks.stop.resolve_project_name", return_value="lupin" ) as rp, \
              patch( "lupin_cli.claude_code.hooks.stop.get_voice_persona" ) as vp, \
-             patch( "lupin_cli.claude_code.hooks.stop.query_owed" ) as qo:
+             patch( "lupin_cli.claude_code.hooks.stop.query_owed_breakdowns" ) as qo:
             self.ts, self.rk, self.rp, self.vp, self.qo = ts, rk, rp, vp, qo
             yield
 
     def test_persona_dict_scopes_query_and_returns_count( self ):
         self.vp.return_value = { "name": "Krishna" }
-        self.qo.return_value = ( True, 4, { } )
-        assert _owed_count_from_store( "sid" ) == ( 4, True, { } )
+        self.qo.return_value = ( True, 4, { }, { } )
+        assert _owed_count_from_store( "sid" ) == ( 4, True, { }, { } )
         # owner lowercased; project threaded through
         _args, kwargs = self.qo.call_args
         assert _args[ 2 ] == "krishna"
@@ -1607,7 +1607,7 @@ class TestOwedCountFromStore:
         # parked row still reads status="parked") nor avoid double-counting one
         # across the old per-status SUM loop. Asserting its ABSENCE is the guard:
         # re-introduce a 4th positional and this test goes red.
-        assert len( _args ) == 3, f"query_owed must take no status tuple; got {_args!r}"
+        assert len( _args ) == 3, f"query_owed_breakdowns must take no status tuple; got {_args!r}"
 
     def test_accented_persona_queries_canonical_key_FLIP( self ):
         """FACET-1 FLIP (the persona-axis false-idle): a persona whose name carries
@@ -1616,8 +1616,8 @@ class TestOwedCountFromStore:
         canonical_persona_key (revert to .lower()) and the asserted key flips to
         "maría" → this test fails → it genuinely guards the fix."""
         self.vp.return_value = { "name": "María" }
-        self.qo.return_value = ( True, 7, { } )
-        assert _owed_count_from_store( "sid" ) == ( 7, True, { } )
+        self.qo.return_value = ( True, 7, { }, { } )
+        assert _owed_count_from_store( "sid" ) == ( 7, True, { }, { } )
         assert self.qo.call_args[ 0 ][ 2 ] == "maria"
 
     def test_punctuated_persona_keeps_internal_space_FLIP( self ):
@@ -1626,8 +1626,8 @@ class TestOwedCountFromStore:
         substituting _norm_persona, which would strip the space to "mrradio" and
         still miss every row."""
         self.vp.return_value = { "name": "Mr. Radio" }
-        self.qo.return_value = ( True, 2, { } )
-        assert _owed_count_from_store( "sid" ) == ( 2, True, { } )
+        self.qo.return_value = ( True, 2, { }, { } )
+        assert _owed_count_from_store( "sid" ) == ( 2, True, { }, { } )
         assert self.qo.call_args[ 0 ][ 2 ] == "mr radio"
 
     def test_already_normalized_pool_name_is_idempotent( self ):
@@ -1635,31 +1635,31 @@ class TestOwedCountFromStore:
         form ("mr radio"); the canonical key is IDEMPOTENT so it still queries
         "mr radio" (no double-normalization breakage)."""
         self.vp.return_value = { "name": "mr radio" }
-        self.qo.return_value = ( True, 5, { } )
+        self.qo.return_value = ( True, 5, { }, { } )
         _owed_count_from_store( "sid" )
         assert self.qo.call_args[ 0 ][ 2 ] == "mr radio"
 
     def test_persona_name_none_falls_back_to_unknown( self ):
         self.vp.return_value = { "name": None }
-        self.qo.return_value = ( True, 0, { } )
+        self.qo.return_value = ( True, 0, { }, { } )
         _owed_count_from_store( "sid" )
         assert self.qo.call_args[ 0 ][ 2 ] == "unknown"
 
     def test_persona_not_dict_falls_back_to_unknown( self ):
         self.vp.return_value = None
-        self.qo.return_value = ( True, 1, { } )
+        self.qo.return_value = ( True, 1, { }, { } )
         _owed_count_from_store( "sid" )
         assert self.qo.call_args[ 0 ][ 2 ] == "unknown"
 
     def test_query_not_ok_returns_not_ok( self ):
         self.vp.return_value = { "name": "Krishna" }
-        self.qo.return_value = ( False, 0, { } )
-        assert _owed_count_from_store( "sid" ) == ( 0, False, { } )
+        self.qo.return_value = ( False, 0, { }, { } )
+        assert _owed_count_from_store( "sid" ) == ( 0, False, { }, { } )
 
     def test_exception_is_degrade_safe( self ):
         # e.g. load_task_store_settings raises ValueError on malformed config
         self.ts.side_effect = ValueError( "bad task_store config" )
-        assert _owed_count_from_store( "sid" ) == ( 0, False, { } )
+        assert _owed_count_from_store( "sid" ) == ( 0, False, { }, { } )
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1695,7 +1695,7 @@ class TestRunHeartbeatStoreSource:
     _STORE_ON = { "enabled": True, "poke_cap": 3, "count_inbound_questions_as_owed": False,
                   "owed_source_from_store": True, "verification_threshold_seconds": 600 }
 
-    @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 2, True, { } ) )
+    @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 2, True, { }, { } ) )
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
@@ -1712,7 +1712,7 @@ class TestRunHeartbeatStoreSource:
         # §B: task_state still replayed (for the genuine-idle beacon + abstract)
         self.mock_replay.assert_called_once()
 
-    @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, True, { } ) )
+    @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, True, { }, { } ) )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings", return_value=_STORE_ON )
@@ -1727,7 +1727,7 @@ class TestRunHeartbeatStoreSource:
         assert len( idle ) == 1
 
     @patch( "lupin_cli.claude_code.hooks.stop.log_to_stream" )
-    @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, False, { } ) )
+    @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, False, { }, { } ) )
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
@@ -1755,7 +1755,7 @@ class TestRunHeartbeatStoreSource:
         mock_incr.assert_not_called()
 
     @patch( "lupin_cli.claude_code.hooks.stop.log_to_stream" )
-    @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, False, { } ) )
+    @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, False, { }, { } ) )
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
@@ -1778,7 +1778,7 @@ class TestRunHeartbeatStoreSource:
         mock_incr.assert_called_once()
 
     @patch( "lupin_cli.claude_code.hooks.stop.log_to_stream" )
-    @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, False, { } ) )
+    @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, False, { }, { } ) )
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
@@ -1813,7 +1813,7 @@ class TestRunHeartbeatStoreSource:
         assert out[ "decision" ] == "block"
         mock_store.assert_not_called()
 
-    @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, True, { } ) )
+    @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, True, { }, { } ) )
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
@@ -1827,7 +1827,7 @@ class TestRunHeartbeatStoreSource:
         assert out[ "decision" ] == "block"
         assert "1 live worker(s) still out" in out[ "reason" ]
 
-    @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, True, { } ) )
+    @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, True, { }, { } ) )
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )

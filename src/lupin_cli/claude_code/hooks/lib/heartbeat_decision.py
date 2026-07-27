@@ -63,7 +63,7 @@ OUTCOME_SUPPRESSED_STALE_DECLARED_OWED = "suppressed_stale_declared_owed"
 # recognized-poke-prompt fixture (heartbeat_work_owed.is_heartbeat_poke_prompt
 # tests still assert its shape) — decide_heartbeat no longer references it.
 DECLARED_OWED_REASON = (
-    POKE_PROMPT_SENTINEL + " and no fresh hold. "
+    POKE_PROMPT_SENTINEL + " — work owed, no fresh hold. "
     "Pick one and act before you stop:\n"
     "1. Owe work? Resume and finish it now.\n"
     '2. Blocked on someone? DM them for status ("where are we on X?"), then declare a fresh hold — '
