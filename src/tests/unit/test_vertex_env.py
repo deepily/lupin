@@ -178,10 +178,34 @@ def test_an_explicit_region_argument_is_certified_too():
         compose_vertex_env( env=CLEAN_ENV, region="us-central1" )
 
 
-def test_all_fifteen_per_model_overrides_are_guarded():
-    """The binary ships 15. Guarding 14 would leave exactly one silent hole."""
-    assert len( PER_MODEL_REGION_OVERRIDES ) == 15
-    assert "VERTEX_REGION_CLAUDE_4_8_OPUS" in PER_MODEL_REGION_OVERRIDES
+def test_every_per_model_override_is_actually_guarded():
+    """
+    EVERY key in the tuple is treated as hostile — asserted per key, not by count.
+
+    ⚠️ THIS USED TO BE `assert len( PER_MODEL_REGION_OVERRIDES ) == 15`, named
+    `test_all_fifteen_..._are_guarded`. On 2026-07-27 CC 2.1.220 shipped
+    `VERTEX_REGION_CLAUDE_5_OPUS`, the tuple was re-harvested to 16 in `e9e8087d`,
+    and this assertion was left behind — a live red in the shared tree, and the
+    test's own NAME was lying too.
+
+    Bumping 15→16 would only move the expiry date: it is a SECOND HARDCODED COUNT
+    of a population that the vendor controls, and it would drift again on the next
+    release. Worse, it was a second AUTHORITY on a fact
+    `test_vertex_env_completeness.py` already owns — that file re-harvests the set
+    from the installed binary on every run and fails on divergence in either
+    direction. Two authorities on one fact is how they get out of step.
+
+    So this file asserts the PROPERTY it actually cares about — that nothing in the
+    tuple is left unguarded — and defers the question of what belongs IN the tuple
+    to the single authority that measures it. Add a key and this test covers it
+    automatically; it cannot go stale.
+    """
+    assert PER_MODEL_REGION_OVERRIDES, "premise gone: the tuple is empty, so this test asserts nothing"
+    for key in PER_MODEL_REGION_OVERRIDES:
+        assert key in HOSTILE_ENV_KEYS, (
+            f"{key} is listed as a per-model region override but is not in HOSTILE_ENV_KEYS, "
+            f"so it would survive the scrub and silently route one model to another region"
+        )
 
 
 def test_dry_run_renders_sorted_key_value_lines():
