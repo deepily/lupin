@@ -1597,10 +1597,20 @@ class TestOwedCountFromStore:
         self.vp.return_value = { "name": "Krishna" }
         self.qo.return_value = ( True, 4, { }, { } )
         assert _owed_count_from_store( "sid" ) == ( 4, True, { }, { } )
-        # owner lowercased; project threaded through
+        # owner lowercased, and DELIBERATELY NOT project-scoped
         _args, kwargs = self.qo.call_args
         assert _args[ 2 ] == "krishna"
-        assert kwargs[ "project" ] == "lupin"
+        # 🔴 THE GUARD AGAINST REINTRODUCTION (Rick, 2026-07-27). This used to assert
+        # `kwargs["project"] == "lupin"`. The project filter encoded ONE SESSION, ONE
+        # REPO — an assumption this fleet does not hold. A seat in planning-is-prompting
+        # resolves to "plan" while owning rows filed under "lupin", so the oracle
+        # reported owed=0 against three workable P1/P2 rows and no poke fired for half
+        # an hour. Zero is the worst value the filter could return: it is
+        # indistinguishable from a genuinely finished seat, so nothing looked wrong.
+        # A persona's owed work is theirs regardless of which repo the seat sits in.
+        assert "project" not in kwargs, (
+            f"the owed oracle must NOT scope by project — a cross-repo seat then reads "
+            f"as idle. got {kwargs!r}" )
         # PARKED-STATUS (2026-07-19): the caller no longer passes a status tuple.
         # The owed SET moved server-side behind query_owed's owed_only=true —
         # a status tuple HERE could neither see a park-expiry rejoin (an expired

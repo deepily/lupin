@@ -1503,9 +1503,30 @@ def _owed_count_from_store( session_id ):
         # ("maria", "mr radio") instead of false-idling on a bare-.lower() miss.
         # Idempotent → safe whether the bridge holds the display or pool form.
         persona_key = canonical_persona_key( persona.get( "name" ) if isinstance( persona, dict ) else None ) or "unknown"
-        project  = resolve_project_name()
+        # 🔴 NO PROJECT FILTER (Rick, 2026-07-27, found by going dark for half an hour).
+        #
+        # This used to pass `project=resolve_project_name()`. That encodes an assumption
+        # this fleet does not hold: ONE SESSION, ONE REPO. A seat sitting in
+        # planning-is-prompting resolves to "plan" while owning rows filed under "lupin"
+        # — which is not an edge case here, it is the normal shape of cross-repo work.
+        #
+        # MEASURED on the session that surfaced it:
+        #     query_owed( "maria", project="plan"  ) -> owed=0   {}
+        #     query_owed( "maria", project="lupin" ) -> owed=3   {queued: 3}
+        # Three workable P1/P2 rows, and the oracle reported an idle seat. No poke fired
+        # for ~30 minutes and nothing anywhere said a row had been filtered out.
+        #
+        # ⇒ ZERO IS THE WORST VALUE THIS FILTER CAN RETURN. A wrong project does not
+        # produce an error or a suspicious number — it produces "nothing owed", which is
+        # indistinguishable from a genuinely finished seat. Same class as `d23147e8`
+        # (a scoping parameter returning a clean, plausible, SMALLER count), landing on
+        # the one value that reads as healthy.
+        #
+        # A PERSONA'S OWED WORK IS THEIRS REGARDLESS OF WHICH REPO THE SEAT SITS IN.
+        # The owner filter is the correct and sufficient scope; the project filter was
+        # never narrowing a too-broad answer, it was hiding a correct one.
         ok, count, breakdown, priority_breakdown = query_owed_breakdowns(
-            settings, api_key, persona_key, project=project )
+            settings, api_key, persona_key )
         return count, ok, breakdown, priority_breakdown
     except Exception:
         return 0, False, { }, { }
