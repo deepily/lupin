@@ -615,6 +615,52 @@ PY
         esac
     fi
 
+    # C8 — DO THE ORM MODELS AND THE LIVE DATABASE AGREE ABOUT COLUMNS? (row 3eb6dc41)
+    #      `check_schema_parity.py` has been in the tree since 2026-05-29 with tests,
+    #      a green suite, and NO CALLER. Its own docstring said it existed to "gate a
+    #      deploy / CI step"; nothing ever invoked it. A check that exists and never
+    #      runs is the same defect as a check that runs and cannot fail — worse, in
+    #      fact, because the green unit suite is exactly what made it read as live.
+    #
+    #      NOT REDUNDANT WITH C7, and neither subsumes the other:
+    #        C7 at_head : "has every migration in this tree been run?"  — the CAUSE
+    #        C8 parity  : "do the models and the DB agree on columns?"  — the SYMPTOM
+    #      A migration touching only an index, a constraint or a column TYPE moves the
+    #      revision without changing the column set (C7 catches it, C8 reads clean); a
+    #      HAND-EDITED database sits exactly at head with drifted columns (C8 catches
+    #      it, C7 reads clean). The `is_protected` bug — a model column with no
+    #      migration behind it — is C8's class, and it broke user-seeding in the cloud.
+    #
+    #      ⚠️ THE PROBE HAD TO BE FIXED BEFORE IT COULD BE WIRED. It shipped with two
+    #      exit codes; an unreachable database raised out of main and CPython exited 1,
+    #      byte-identical to DRIFT (measured 2026-07-27). Wiring it as-found would have
+    #      printed drift's remedy — "run a migration" — at an operator whose database
+    #      was merely unreachable. It now has C7's three outcomes, and the three are
+    #      preserved end to end here for the same reason C7 preserves its own.
+    #
+    #      Tier matches C7 exactly: WARN in `pre` (the deploy that follows restarts the
+    #      app, and startup migrates — blocking here would abort the thing that fixes
+    #      the condition), BLOCK in `post`/`full` (there, drift means it did NOT take).
+    #      Its own tier variable, deliberately: reusing C7's would couple this check's
+    #      severity to that block's ordering, and a reorder would break it silently.
+    parity_tier="BLOCK"; [ "$PHASE" = "pre" ] && parity_tier="WARN"
+    parity_probe="$REPO_ROOT/src/scripts/check_schema_parity.py"
+    if [ ! -r "$parity_probe" ]; then
+        report unknown "$parity_tier" "parity probe missing at $parity_probe" \
+                      "deploy the repo to the VM (the probe ships with it)"
+    else
+        parity_out="$( docker exec "$CONTAINER" python /var/lupin/src/scripts/check_schema_parity.py 2>&1 )"
+        parity_rc=$?
+        parity_detail="$( printf '%s\n' "$parity_out" | grep -m1 '^DETAIL=' | cut -d= -f2- )"
+        case $parity_rc in
+            0) report pass "$parity_tier" "model/DB schema parity: every model table matches the live database" ;;
+            1) report fail "$parity_tier" "SCHEMA PARITY DRIFT — ${parity_detail:-model and live DB disagree about columns}" \
+                          "read the full report: docker exec $CONTAINER python /var/lupin/src/scripts/check_schema_parity.py   # a model-only column needs a MIGRATION, not a restart" ;;
+            *) report unknown "$parity_tier" "cannot determine schema parity — ${parity_detail:-$( printf '%s' "$parity_out" | tr '\n' ' ' | cut -c1-160 )}" \
+                          "this is NOT drift and does not take drift's remedy — the question could not be answered; check the container is up and the DB reachable: docker exec $CONTAINER python /var/lupin/src/scripts/check_schema_parity.py" ;;
+        esac
+    fi
+
     # C5 — THE ALARM MUST NOT BE GATED ON THE HEALTHY VALUE.
     #      The Cloud SQL proxy healthcheck probes :9090 and never touches the socket
     #      it exists to publish. On 2026-07-26 it reported "Up 35 hours (healthy)" for

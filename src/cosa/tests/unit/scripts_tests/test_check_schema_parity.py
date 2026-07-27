@@ -7,6 +7,7 @@ layer (skipped if Postgres is unreachable) proves the dropped-column detection
 end-to-end against a throwaway DB.
 """
 
+import io
 import os
 import sys
 import unittest
@@ -113,6 +114,50 @@ class TestCheckParity( unittest.TestCase ):
         self.assertIn( "t", drift )
 
 
+class TestClassify( unittest.TestCase ):
+    """
+    THREE OUTCOMES, NOT TWO (row 3eb6dc41). The probe shipped with two: an
+    unreachable database raised out of main and CPython exited 1 — byte-identical
+    to DRIFT. Anything wiring it would have printed drift's remedy ("run a
+    migration") at an operator whose database was merely unreachable.
+    """
+
+    def test_a_reason_ALWAYS_wins_and_is_never_folded_into_a_verdict( self ):
+        code, verdict, detail = csp.classify( None, "connection refused" )
+        self.assertEqual( code, csp.EXIT_CANNOT_DETERMINE )
+        self.assertEqual( verdict, "CANNOT_DETERMINE" )
+        self.assertIn( "connection refused", detail )
+
+    def test_a_reason_wins_even_when_a_drift_dict_is_also_present( self ):
+        # An error must never be reported as drift, whatever else was collected.
+        code, verdict, _ = csp.classify( { "users": {} }, "boom" )
+        self.assertEqual( code, csp.EXIT_CANNOT_DETERMINE )
+        self.assertEqual( verdict, "CANNOT_DETERMINE" )
+
+    def test_a_multiline_reason_is_FLATTENED_to_one_line( self ):
+        # A shell caller reads this with `grep -m1 '^DETAIL='`; an unflattened
+        # DBAPI message would truncate to its first line and drop the host.
+        _, _, detail = csp.classify( None, "line one\n\tIs the server running?\n\nmore" )
+        self.assertNotIn( "\n", detail )
+        self.assertIn( "Is the server running?", detail )
+
+    def test_drift_names_its_tables_sorted( self ):
+        code, verdict, detail = csp.classify( { "zeta": {}, "alpha": {} }, None )
+        self.assertEqual( code, csp.EXIT_DRIFT )
+        self.assertEqual( verdict, "DRIFT" )
+        self.assertEqual( detail, "tables with drift: alpha, zeta" )
+
+    def test_empty_drift_is_parity_with_no_detail( self ):
+        code, verdict, detail = csp.classify( {}, None )
+        self.assertEqual( code, csp.EXIT_PARITY )
+        self.assertEqual( verdict, "PARITY" )
+        self.assertEqual( detail, "" )
+
+    def test_the_three_exit_codes_are_pairwise_DISTINCT( self ):
+        codes = { csp.EXIT_PARITY, csp.EXIT_DRIFT, csp.EXIT_CANNOT_DETERMINE }
+        self.assertEqual( len( codes ), 3 )
+
+
 class TestMain( unittest.TestCase ):
 
     def test_returns_zero_on_parity( self ):
@@ -127,6 +172,43 @@ class TestMain( unittest.TestCase ):
         with patch( "check_schema_parity.check_parity", return_value=( {}, "ok" ) ) as cp:
             csp.main( [ "--database-url", "postgresql://cli" ] )
         cp.assert_called_once_with( database_url="postgresql://cli" )
+
+    def test_prints_a_PARSEABLE_record_on_parity( self ):
+        with patch( "check_schema_parity.check_parity", return_value=( {}, "human report" ) ), \
+             patch( "sys.stdout", new_callable=io.StringIO ) as out:
+            code = csp.main( [] )
+        printed = out.getvalue()
+        self.assertEqual( code, csp.EXIT_PARITY )
+        self.assertIn( "human report", printed )
+        self.assertIn( "VERDICT=PARITY", printed )
+        self.assertNotIn( "DETAIL=", printed )   # no detail line when there is no detail
+
+    def test_prints_VERDICT_and_DETAIL_on_drift( self ):
+        with patch( "check_schema_parity.check_parity", return_value=( { "users": {} }, "human report" ) ), \
+             patch( "sys.stdout", new_callable=io.StringIO ) as out:
+            code = csp.main( [] )
+        printed = out.getvalue()
+        self.assertEqual( code, csp.EXIT_DRIFT )
+        self.assertIn( "VERDICT=DRIFT", printed )
+        self.assertIn( "DETAIL=tables with drift: users", printed )
+
+    def test_an_UNREACHABLE_database_is_CANNOT_DETERMINE_not_drift( self ):
+        """
+        MEASURED before the fix (2026-07-27, `127.0.0.1:59999`): traceback,
+        EXIT=1 — indistinguishable from drift. This is the regression guard.
+        """
+        boom = RuntimeError( "connection refused" )
+        with patch( "check_schema_parity.check_parity", side_effect=boom ), \
+             patch( "sys.stdout", new_callable=io.StringIO ) as out:
+            code = csp.main( [] )
+        printed = out.getvalue()
+        self.assertEqual( code, csp.EXIT_CANNOT_DETERMINE )
+        self.assertNotEqual( code, csp.EXIT_DRIFT )
+        self.assertIn( "VERDICT=CANNOT_DETERMINE", printed )
+        self.assertIn( "RuntimeError: connection refused", printed )
+        # No human report exists when the check could not run — and printing the
+        # literal "None" in its place is the kind of noise a caller would parse.
+        self.assertNotIn( "None", printed )
 
 
 # ---------------------------------------------------------------------------
