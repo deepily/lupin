@@ -207,7 +207,9 @@ def test_blocked_by_rejects_non_list_or_empty( bad_container ):
                                        { "kind": "user", "id": "rick", "extra": True } ] )
 def test_blocked_by_rejects_wrong_ref_shape( bad_ref ):
     errors = rules.validate_blocked_by_refs( [ bad_ref ] )
-    assert len( errors ) == 1 and "must be exactly {kind, id}" in errors[ 0 ]
+    # Message reworded 2026-07-27 when persona refs gained an optional session_id.
+    # The PROPERTY is unchanged: one error, naming the required shape.
+    assert len( errors ) == 1 and "must be {kind, id}" in errors[ 0 ]
 
 
 def test_blocked_by_rejects_bad_kind():
@@ -1171,3 +1173,73 @@ def test_repoint_still_enforces_the_blocked_payload_invariant():
 
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )
+
+
+# ── persona blocked_by refs may carry a session_id (row 00a6bde2 item 6) ──────
+#
+# A {kind:"persona", id:<name>} edge is UNRESOLVABLE BY CONSTRUCTION — this store has
+# no persona lifecycle to check a name against. Worse than a dead ref: overflow names
+# (`extra 1`, `arnold`) are RE-GRANTED after a reap, so a stale edge can silently
+# RE-POINT at a different session and be "satisfied" by someone who never had the
+# context. That is a false GREEN, not a false wait, and it is the more dangerous half.
+
+def test_a_persona_ref_may_carry_a_session_id():
+    assert rules.validate_blocked_by_refs(
+        [ { "kind": "persona", "id": "maria",
+            "session_id": "697e9fef-881d-42ea-9e1f-9b6cebafb6e6" } ] ) == [ ]
+
+
+def test_a_persona_ref_WITHOUT_a_session_id_is_still_legal():
+    """
+    ⚠️ OPTIONAL, NOT REQUIRED. Making it mandatory would 422 every existing caller and
+    every peer not yet updated — converting a latent correctness gap into a live write
+    outage. Requiring it is a separate decision, once the fleet's callers actually send it.
+    """
+    assert rules.validate_blocked_by_refs( [ { "kind": "persona", "id": "maria" } ] ) == [ ]
+
+
+@pytest.mark.parametrize( "kind", [ "item", "user" ] )
+def test_a_session_id_on_a_NON_persona_ref_is_an_error( kind ):
+    """
+    ⚠️ NOT SILENTLY IGNORED. An item id already resolves against this store and a user
+    has no session, so a session_id there is a field that LOOKS authoritative and means
+    nothing — the exact shape row 00a6bde2 exists to kill. Accepting-and-ignoring it
+    would put a second addressee on the row that no reader can act on.
+    """
+    errors = rules.validate_blocked_by_refs( [ { "kind": kind, "id": "x", "session_id": "s" } ] )
+    assert len( errors ) == 1 and "only meaningful on a {kind:persona}" in errors[ 0 ]
+
+
+def test_an_empty_session_id_is_rejected_rather_than_treated_as_absent():
+    """A present-but-blank stamp is worse than none: it reads as "resolved to nothing"."""
+    assert rules.validate_blocked_by_refs(
+        [ { "kind": "persona", "id": "maria", "session_id": "" } ] ) != [ ]
+
+
+def test_unknown_keys_are_STILL_rejected():
+    """
+    THE NEGATIVE CONTROL. `session_id` is the ONE key added to the allowed set. If the
+    shape check had been loosened to "anything goes" instead, this passes and the strict
+    typing the oracle depends on is gone — with every other test here still green.
+    """
+    assert rules.validate_blocked_by_refs(
+        [ { "kind": "persona", "id": "maria", "wat": 1 } ] ) != [ ]
+    assert rules.validate_blocked_by_refs( [ { "kind": "persona" } ] ) != [ ]
+
+
+def test_a_stamped_persona_ref_is_still_NOT_an_item_blocker():
+    """
+    `blocker_terminal` must stay blind to persona edges — stamping one does not give it
+    an oracle, it gives a FUTURE oracle something to resolve. Treating a stamped edge as
+    resolvable today would flag every persona-blocked row as dead.
+    """
+    from cosa.rest.task_store_owed import item_blocker_ids
+    assert item_blocker_ids( [ { "kind": "persona", "id": "maria", "session_id": "s" } ] ) == [ ]
+
+
+def test_the_persona_chase_requirement_is_unaffected_by_the_stamp():
+    """I3 — a peer is chaseable, so a persona blocker still requires next_chase_ts."""
+    assert rules.blocked_by_has_persona(
+        [ { "kind": "persona", "id": "maria", "session_id": "s" } ] ) is True
+    assert rules.validate_blocked_fields(
+        [ { "kind": "persona", "id": "maria", "session_id": "s" } ], None ) != [ ]

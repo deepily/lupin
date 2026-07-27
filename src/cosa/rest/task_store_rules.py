@@ -333,25 +333,67 @@ def validate_blocked_by_refs( blocked_by ) -> list:
         - blocked_by is the candidate value (any type accepted; non-list and
           empty-list are rejected with errors, not exceptions)
 
+    OPTIONAL `session_id` ON A PERSONA REF (row `00a6bde2` item 6, 2026-07-27).
+
+    A `{kind: "persona", id: <name>}` edge is UNRESOLVABLE BY CONSTRUCTION — there is
+    no persona lifecycle in this store to check a name against, so the edge cannot be
+    told "still waiting" from "waiting on someone who left". Worse than a dead ref:
+    overflow persona names (`extra 1`, `arnold`) are RE-GRANTED after a reap, so a
+    stale edge can silently RE-POINT at a different session and be "satisfied" by
+    someone who never had the context — a false GREEN, not a false wait.
+
+    ⇒ `session_id` is the discriminator. Accepting it is the WRITE half of the remedy
+    and it is worth landing alone, before any checker exists, because the cost of
+    delay is ASYMMETRIC: an edge written unstamped today is permanently unresolvable
+    by any later instrument, while a stamped one becomes checkable the moment a
+    persona-liveness surface lands (blocked on `6f8fd858` — `list_spawned_sessions`
+    carries no persona field, and `commons_who` is a posting log where absence means
+    silence, not death).
+
+    ⚠️ OPTIONAL, NOT REQUIRED. Making it mandatory would 422 every existing caller
+    and every peer that has not been updated — turning a latent correctness gap into
+    a live write outage. It is accepted-and-encouraged now; requiring it is a separate
+    decision once the fleet's callers actually send it.
+
+    ⚠️ PERSONA-ONLY, ENFORCED. On an `item` ref the id already resolves against this
+    store, and a `user` ref has no session at all — so a `session_id` there would be a
+    field that looks authoritative and means nothing, which is the shape this row
+    exists to kill.
+
+    Requires:
+        - blocked_by is the candidate value (any type accepted; non-list and
+          empty-list are rejected with errors, not exceptions)
+
     Ensures:
         - returns [] iff blocked_by is a non-empty list where every entry is
-          exactly { "kind": item|persona|user, "id": non-empty string } —
-          TYPED refs, never a mixed string field (design §2.1)
-        - extra or missing keys on a ref are errors (strict shape — R4
-          determinism at exactly the field the oracle queries)
+          { "kind": item|persona|user, "id": non-empty string } plus, on a persona
+          ref ONLY, an optional non-empty "session_id" — TYPED refs, never a mixed
+          string field (design §2.1)
+        - unknown keys remain errors (strict shape — R4 determinism at exactly the
+          field the oracle queries); `session_id` is the ONE key added to the allowed
+          set, and only for persona
+        - a `session_id` on a non-persona ref is an ERROR, not silently ignored
     """
     if not isinstance( blocked_by, list ) or not blocked_by:
         return [ "blocked_by must be a non-empty list of typed refs [{kind, id}]" ]
 
     errors = [ ]
     for i, ref in enumerate( blocked_by ):
-        if not isinstance( ref, dict ) or set( ref.keys() ) != { "kind", "id" }:
-            errors.append( f"blocked_by[{i}] must be exactly {{kind, id}}" )
+        if not isinstance( ref, dict ) or not { "kind", "id" } <= set( ref.keys() ) \
+           or not set( ref.keys() ) <= { "kind", "id", "session_id" }:
+            errors.append( f"blocked_by[{i}] must be {{kind, id}} plus an optional session_id on a persona ref" )
             continue
         if ref[ "kind" ] not in VALID_BLOCKED_BY_KINDS:
             errors.append( f"blocked_by[{i}].kind '{ref['kind']}' must be one of {VALID_BLOCKED_BY_KINDS}" )
         if not isinstance( ref[ "id" ], str ) or not ref[ "id" ]:
             errors.append( f"blocked_by[{i}].id must be a non-empty string" )
+        if "session_id" in ref:
+            if ref[ "kind" ] != "persona":
+                errors.append(
+                    f"blocked_by[{i}].session_id is only meaningful on a {{kind:persona}} ref — "
+                    f"an item id already resolves against this store and a user has no session" )
+            elif not isinstance( ref[ "session_id" ], str ) or not ref[ "session_id" ]:
+                errors.append( f"blocked_by[{i}].session_id must be a non-empty string when present" )
 
     return errors
 
