@@ -341,6 +341,61 @@ RUN curl -fsSL https://d2lang.com/install.sh | sh
 RUN ln -sf "$(python -c 'import claude_agent_sdk as m, pathlib as p; print(p.Path(m.__file__).parent / "_bundled" / "claude")')" /home/rruiz/.local/bin/claude
 
 # ----------------------------------------------------------------------------
+# TEST-TIER TOOLCHAIN — tmux, node, terraform  (rows 719962ed / b5b6d252)
+#
+# WHY THIS EXISTS. The scheduled :8000 unit tier runs INSIDE this image, and a
+# growing set of tests under src/tests/unit/ depend on these three binaries.
+# Without them the tier did not merely go red — it went SILENT:
+#
+#     6 assertions SKIPPED on "tmux is not installed"  (test_killtrace_probe x4,
+#       test_tmux_socket_precedence x2) with NO watchdog naming the loss
+#     1 assertion SKIPPED on terraform  (test_envs_test_passes_terraform_validate —
+#       this one DOES have a watchdog, test_terraform_binary_is_installed)
+#     the entire `typescript` tier reduced to 76 bytes: "exec: npx: not found"
+#
+# A skip is invisible in an 11,000-test run. That is precisely the modules.bats
+# disease test_terraform_invariants.py was written to kill, reproduced inside the
+# gate meant to catch it. Measured 2026-07-27 (Krishna) at HEAD ee3078c0:
+#     without these  1 failed, 18 passed,  6 skipped
+#     with these    25 passed,  0 skipped
+#
+# ⛔ gcloud AND bq ARE DELIBERATELY ABSENT — DO NOT ADD THEM TO "FIX" A RED.
+# test_pilot_ac_instruments::test_every_ac_register_entry_matches_the_host
+# attests that THE OPERATOR HOST carries them (its own header: "IT MEANS 'THE TOOL
+# IS ON THIS HOST'", "Venue: :7999-eligible"). Installing them here turns that test
+# green while the claim it encodes — about a metered-billing pilot's host — goes
+# unverified. Its 5 reds in the container are honest and must stay until the tier
+# enforces the venue each test declares. Ruled by Mr. Radio 🦉 2026-07-27.
+#
+# LATE LAYER ON PURPOSE: the main apt block sits above the HF model downloads, so
+# amending it would re-run multi-GB fetches for three small binaries. Versions are
+# pinned to the dev host (node v22.15.0 / terraform v1.12.2) per the host-vs-
+# container drift lesson at the visual-regression block above.
+#
+# ⚠️ node ALONE IS NOT SUFFICIENT for the typescript tier. node_modules is in
+# .dockerignore and is NOT baked; the tier resolves `npx c8` / `npx tsx` from a
+# bind mount (docker-compose.yml, lupin-rest-test). Binary present != tier runnable.
+# ----------------------------------------------------------------------------
+USER root
+ARG NODE_VERSION=22.15.0
+ARG TERRAFORM_VERSION=1.12.2
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && \
+    apt-get install -y --no-install-recommends tmux unzip && \
+    curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
+        | tar -xJ -C /opt && \
+    ln -sf "/opt/node-v${NODE_VERSION}-linux-x64/bin/node" /usr/local/bin/node && \
+    ln -sf "/opt/node-v${NODE_VERSION}-linux-x64/bin/npm"  /usr/local/bin/npm  && \
+    ln -sf "/opt/node-v${NODE_VERSION}-linux-x64/bin/npx"  /usr/local/bin/npx  && \
+    curl -fsSL -o /tmp/terraform.zip \
+        "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip" && \
+    unzip -qo /tmp/terraform.zip -d /usr/local/bin && \
+    chmod +x /usr/local/bin/terraform && \
+    rm -f /tmp/terraform.zip
+USER rruiz
+
+# ----------------------------------------------------------------------------
 # Runtime configuration
 # ----------------------------------------------------------------------------
 ENV LUPIN_ROOT=/var/lupin

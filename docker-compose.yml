@@ -282,6 +282,13 @@ services:
       - ./cloud-test.env.example:/var/lupin/cloud-test.env.example:ro
       - ./package.json:/var/lupin/package.json:ro
       - ./package-lock.json:/var/lupin/package-lock.json:ro
+      # node_modules — the `typescript` tier's ONLY source of c8/tsx/esbuild.
+      # node is baked into the image (Dockerfile TEST-TIER TOOLCHAIN block) but
+      # node_modules is in .dockerignore and deliberately NOT baked, so `npx c8`
+      # would resolve to nothing without this bind. Binary present != tier runnable
+      # — that is the whole of row 719962ed. Read-only: the tier never installs.
+      # TEST-ONLY divergence, declared in test_compose_service_parity.py.
+      - ./node_modules:/var/lupin/node_modules:ro
       - ./pyproject.toml:/var/lupin/pyproject.toml:ro
       - ./tsconfig.json:/var/lupin/tsconfig.json:ro
       - ./tsconfig.diagnostic.json:/var/lupin/tsconfig.diagnostic.json:ro

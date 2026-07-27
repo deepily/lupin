@@ -125,6 +125,24 @@ KNOWN_DIVERGENT_MOUNTS = {
         "cloud-test": "2026-07-26 — see /var/lupin/docker-compose.yml.",
         "cloud-gpu" : "2026-07-26 — see /var/lupin/docker-compose.yml.",
     },
+    # ── node_modules — TEST-ONLY, and the dev absence is NOT the same reason ──
+    # Added 2026-07-27 (Krishna, row 719962ed) so the `typescript` tier can resolve
+    # c8/tsx/esbuild. node is baked into the image; node_modules is .dockerignore'd
+    # and must be bound. The two absences below are deliberately given SEPARATE
+    # reasons because they expire on different events — collapsing them into one
+    # "not a test venue" line would let the dev entry outlive its cause silently.
+    "/var/lupin/node_modules": {
+        "dev-dev"   : "2026-07-27 — NOT a ruling that dev should lack it. The mount is "
+                      "correct for dev too, but applying it recreates lupin-rest-dev, "
+                      "and :7999 is Rick's live dev server — not a bounce this lane may "
+                      "take. REMOVE THIS ENTRY the next time :7999 is recreated for any "
+                      "other reason; the tier does not run there today, so nothing is lost "
+                      "meanwhile.",
+        "cloud-test": "2026-07-27 — the cloud legs do not run the typescript tier "
+                      "(scoped to WHO RUNS THE SUITE, per the block above — not to "
+                      "'cloud legs are different').",
+        "cloud-gpu" : "2026-07-27 — see cloud-test.",
+    },
     "/var/lupin/pyproject.toml": {
         "cloud-test": "2026-07-26 — see /var/lupin/docker-compose.yml.",
         "cloud-gpu" : "2026-07-26 — see /var/lupin/docker-compose.yml.",
