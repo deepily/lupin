@@ -1157,3 +1157,57 @@ class TestPreflightAssertExclusiveTestDb:
 
         assert order == [ "preflight" ]   # aborted before the first suite
         assert single_suite_job.state == JobState.FAILED
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Artifact-root creation (regression from 11ba6a1b — ts-102267b8 died on it)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestArtifactRootIsCreated:
+    """
+    🔴 THE CASE THE ISOLATION FIXTURE STRUCTURALLY CANNOT PRODUCE.
+
+    `_isolate_artifact_root` pins `_ARTIFACT_DIR` to pytest's `tmp_path` — **which
+    already exists**. So every test in this module wrote into a live directory, and the
+    whole suite stayed green while production died on the first real run:
+
+        FileNotFoundError: /var/lupin/io/test-suite/artifacts/unit-20260727-201637.log
+        job.py:1182  _write_stdout_log        (ts-102267b8, dead at 311s)
+
+    `/tmp` always existed, so no writer ever needed a mkdir. Moving the root to
+    `io/test-suite/artifacts/` replaced a path that is always there with one that must
+    be created — **the change that passes every unit test.**
+
+    ⇒ These tests point the root at a path that does NOT exist. That is the only way
+    the harness stops supplying what production doesn't.
+    """
+
+    def test_write_stdout_log_CREATES_a_missing_artifact_root( self, tmp_path, monkeypatch ):
+        import pathlib
+        missing = tmp_path / "does" / "not" / "exist"
+        assert not missing.exists(), "precondition: the root must be ABSENT, or this proves nothing"
+        monkeypatch.setattr( TestSuiteJob, "_ARTIFACT_DIR", str( missing ) )
+
+        path = TestSuiteJob._write_stdout_log( "unit", "hello\n" )
+
+        assert path is not None
+        assert pathlib.Path( path ).read_text() == "hello\n"
+        assert pathlib.Path( missing / "unit-latest.log" ).resolve() == pathlib.Path( path ).resolve()
+
+    def test_run_suite_RETURNS_its_error_dict_when_the_root_is_missing( self, single_suite_job, tmp_path, monkeypatch ):
+        """
+        The second half: `_write_stdout_log` raised on the main path AND again inside
+        `_run_suite`'s except handler, so the exception ESCAPED rather than returning the
+        error dict. A handler that re-invokes what just failed turns one failure into an
+        escape — and an escaped exception loses the whole result, the `8b93bcf5` family.
+        """
+        script = tmp_path / "src" / "tests" / "run-integration-tests.sh"
+        script.parent.mkdir( parents=True )
+        script.write_text( "#!/usr/bin/env bash\necho hi\n" )
+        script.chmod( 0o755 )
+        monkeypatch.setattr( TestSuiteJob, "_ARTIFACT_DIR", str( tmp_path / "absent" / "root" ) )
+
+        result = single_suite_job._run_suite( "integration", str( tmp_path ) )   # must NOT raise
+
+        assert isinstance( result, dict )
+        assert "log_path" in result

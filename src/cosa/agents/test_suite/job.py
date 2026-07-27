@@ -1389,9 +1389,28 @@ class TestSuiteJob( AgenticJobBase ):
         ⚠️ Resolved lazily, per call. An eager module- or class-level resolution would
         trigger that refusal at import and take down every test that imports this file.
         """
-        if cls._ARTIFACT_DIR is not None: return cls._ARTIFACT_DIR
-        from cosa.agents.test_suite.attestation import artifact_root
-        return artifact_root()
+        root = cls._ARTIFACT_DIR
+        if root is None:
+            from cosa.agents.test_suite.attestation import artifact_root
+            root = artifact_root()
+        # CREATE IT — and note WHERE this line is. Because every artifact path resolves
+        # through here, one mkdir covers the log file, the symlink, the junit XML AND the
+        # except handler's retry. Patching the call sites would have needed three.
+        #
+        # `/tmp` always existed, so no writer ever needed a mkdir. Moving the root to
+        # io/test-suite/artifacts/ replaced a path that is always there with one that must
+        # be created, and the first real tier run died on it (ts-102267b8, 311s):
+        #     FileNotFoundError: /var/lupin/io/test-suite/artifacts/unit-20260727-201637.log
+        # It then failed a SECOND time inside _run_suite's except handler, which calls
+        # _write_stdout_log again — so the exception escaped instead of returning the error
+        # dict. A handler that re-invokes what just failed turns one failure into an escape.
+        #
+        # ⚠️ NO UNIT TEST COULD HAVE CAUGHT THIS. The autouse isolation fixture pins
+        # _ARTIFACT_DIR to pytest's `tmp_path`, WHICH ALWAYS EXISTS — a fixture that hands
+        # you a working precondition cannot detect a missing one. That is a whole class,
+        # not one case. The regression tests pin the root to a path that does NOT exist.
+        os.makedirs( root, exist_ok=True )
+        return root
 
     @classmethod
     def _artifact_path( cls, filename: str ) -> str:
