@@ -128,6 +128,11 @@ dev = [
   "pytest-cov>=7.0.0",
   "pytest-playwright==0.7.2",
   "pytest-playwright-visual-snapshot==0.5.1",
+  # Arms @pytest.mark.timeout (row 61ef0e0d). Without it the marker is silently
+  # ignored: 6 files carried caps that had NEVER been enforced. Four are
+  # subprocess / two-session shapes — precisely the shape that hangs, which is
+  # what a cap defends against.
+  "pytest-timeout==2.4.0",
 ]
 
 # flash-attn ABI-locked declaration so uv resolver doesn't try to fetch
