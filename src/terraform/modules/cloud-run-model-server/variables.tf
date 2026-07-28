@@ -175,21 +175,40 @@ variable "service_account_email" {
 # --- Secret file-mount (the ck_live_ X-API-Key the server reads at boot) -------
 # main.py reads the plaintext key from {KEYS_DIR}/{API_KEY_NAME}. We mount the
 # Secret Manager secret as a FILE at exactly that path → zero app change.
+# ⚠️ THESE THREE DEFAULTS ARE LOAD-BEARING (rows 574fd1dc / 6cc52525, 2026-07-28).
+#
+# They used to name the SHARED notifications key. envs/test passes only
+# api_key_secret_id, so the other two were inherited silently — which is how a
+# single credential came to serve two authorities with incompatible rules:
+#
+#   lupin-notification-api-key -> validated against a PER-DEPLOYMENT `api_keys`
+#                                 table; correct value DIFFERS on every host
+#   this service               -> mounts one secret version and bcrypt-hashes it
+#                                 at BOOT; correct value is IDENTICAL everywhere
+#
+# On the dev box those two coincide by accident (dev's key was seeded into
+# Secret Manager), so the flaw was invisible there. On the VM they cannot, and
+# /embeddings/generate returned 100% 401 for ~38h.
+#
+# ⇒ Do NOT point these back at lupin-notification-api-key "to reduce secret
+#   sprawl". The sprawl is the fix.
+# src/rnd/v0.1.9/2026.07.28-model-server-api-key-decoupling.md
+
 variable "api_key_secret_id" {
   type        = string
-  description = "Secret Manager secret ID holding the model-server X-API-Key (ck_live_*). Matches the secret-manager module inventory."
-  default     = "lupin-notification-api-key"
+  description = "Secret Manager secret ID holding the model-server X-API-Key (ck_live_*). Matches the secret-manager module inventory. MUST NOT be shared with lupin-notification-api-key — different authority, different correct value per host."
+  default     = "lupin-model-server-api"
 }
 
 variable "api_key_name" {
   type        = string
-  description = "Key FILE name within KEYS_DIR (LUPIN_MODEL_SERVER_API_KEY_NAME). The secret is mounted at {keys_dir}/{api_key_name}."
-  default     = "notification-api-claude-code-dev"
+  description = "Key FILE name within KEYS_DIR (LUPIN_MODEL_SERVER_API_KEY_NAME). The secret is mounted at {keys_dir}/{api_key_name}, and callers read the same name from src/conf/keys/."
+  default     = "model-server-api"
 }
 
 variable "api_key_secret_version" {
   type        = string
-  description = "Secret Manager version to mount. 'latest' for the sandbox; pin a numeric version in prod."
+  description = "Secret Manager version to mount. PIN A NUMERIC VERSION: with 'latest' a rotation is resolved PER INSTANCE at cold start, so it lands at an unpredictable future moment with no deploy and no revision change — measured as 726x200 then 33x401 across 10 instances with zero mixed (574fd1dc). Pinning is also what gives a rotation a scheduled moment to re-hash."
   default     = "latest"
 }
 

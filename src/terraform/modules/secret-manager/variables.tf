@@ -26,5 +26,20 @@ variable "secret_ids" {
     "lupin-notification-api-key",
     "lupin-smtp-username",
     "lupin-smtp-password",
+
+    # Consumer B's own credential, split out 2026-07-28 (rows 574fd1dc / 6cc52525).
+    #
+    # DO NOT re-merge this with lupin-notification-api-key. They look
+    # interchangeable and are not: lupin-notification-api-key is validated
+    # against a PER-DEPLOYMENT `api_keys` table, so its correct value differs on
+    # every host; this one is mounted into Cloud Run and bcrypt-hashed at boot,
+    # so its correct value is IDENTICAL everywhere. Sharing one secret between
+    # those two authorities is what produced a 38-hour 100% 401 outage on
+    # /embeddings/generate — the VM's key matched NEITHER secret version because
+    # it had been minted into the VM's own database, which was correct for the
+    # other consumer.
+    #
+    # src/rnd/v0.1.9/2026.07.28-model-server-api-key-decoupling.md
+    "lupin-model-server-api",
   ]
 }

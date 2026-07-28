@@ -86,14 +86,32 @@ services:
       LUPIN_MODEL_SERVER_CODE_EMBED: nomic-ai/CodeRankEmbed
       LUPIN_MODEL_SERVER_PROSE_EMBED: nomic-ai/nomic-embed-text-v1.5
       LUPIN_MODEL_SERVER_WARMUP_MP3: /var/lupin/src/conf/warmup/whisper-warmup-85s.mp3
-      # API key contract (post-2026-05-16 María-brief simplification):
-      # Model-server reuses the existing `notification-api-claude-code-dev`
-      # ck_live_* key via the volume-mounted src/conf/keys/ dir. At boot it
-      # reads the plaintext via du.get_api_key() and computes a bcrypt hash
-      # once; each incoming request is validated via bcrypt.checkpw() against
-      # that in-memory hash. No env-var ceremony, no parallel ck_internal_*
-      # namespace, no DB coupling.
-      LUPIN_MODEL_SERVER_API_KEY_NAME: notification-api-claude-code-dev
+      # API key contract — REVISED 2026-07-28 (rows 574fd1dc / 6cc52525).
+      #
+      # ⚠️ THIS BLOCK USED TO SAY: "Model-server REUSES the existing
+      # `notification-api-claude-code-dev` ck_live_* key ... No env-var ceremony,
+      # no parallel namespace, no DB coupling." That reuse read as thrift and was
+      # the defect. The two keys answer to DIFFERENT AUTHORITIES:
+      #
+      #   notification-api-claude-code-dev -> bcrypt-checked against THAT
+      #        DEPLOYMENT'S `api_keys` table. Correct value DIFFERS per host,
+      #        and it must be minted ON the target (env-contract.tsv:48,
+      #        "never ship it from dev" — reverted footgun 90b56fd4).
+      #   model-server-api                 -> mounted from ONE Secret Manager
+      #        version and bcrypt-hashed at BOOT. Correct value is IDENTICAL
+      #        everywhere, and it IS shipped to every caller host.
+      #
+      # One file cannot satisfy both. On this dev box they coincided by accident
+      # (dev's key had been seeded into Secret Manager), which is why the flaw
+      # was invisible here; on the VM they cannot, and /embeddings/generate
+      # returned 100% 401 for ~38h with the VM's key matching NEITHER secret
+      # version. /transcribe was failing the same way, unreported.
+      #
+      # The CLIENT reads this same var name (embedding_provider._http_api_key,
+      # speech_to_text_provider._model_server_api_key) so the two ends cannot
+      # drift by editing one of them.
+      # src/rnd/v0.1.9/2026.07.28-model-server-api-key-decoupling.md
+      LUPIN_MODEL_SERVER_API_KEY_NAME: model-server-api
       # GPU 0 pin (per memory rule feedback_lupin_models_always_gpu_0) — torch
       # sees only the device at index 0; the underlying device may be physical
       # GPU 0 or 1 depending on docker's enumeration, but we always present
@@ -186,6 +204,13 @@ services:
       DB_HOST: lupin-postgres
       LUPIN_API_URL: http://localhost:7999
       LUPIN_API_KEY_FILE: /var/lupin/src/conf/keys/notification-api-claude-code-dev
+      # The model-server client's own credential — NOT the notifications key
+      # above. That one is per-database and must never be shipped from dev;
+      # this one is a single mounted secret, identical on every host and
+      # shipped to all of them. Sharing them caused a 38h 100% 401 on
+      # /embeddings/generate plus an unreported one on /transcribe.
+      # src/rnd/v0.1.9/2026.07.28-model-server-api-key-decoupling.md
+      LUPIN_MODEL_SERVER_API_KEY_NAME: model-server-api
       # Model-server carve-out env vars (2026-05-16). Until Phase 3.6 lifespan
       # switch lands and `speech to text provider = model-server` in INI, these
       # are dormant — code reads them but doesn't act. See:
@@ -330,6 +355,13 @@ services:
       DB_HOST: lupin-postgres
       LUPIN_API_URL: http://localhost:7999
       LUPIN_API_KEY_FILE: /var/lupin/src/conf/keys/notification-api-claude-code-dev
+      # The model-server client's own credential — NOT the notifications key
+      # above. That one is per-database and must never be shipped from dev;
+      # this one is a single mounted secret, identical on every host and
+      # shipped to all of them. Sharing them caused a 38h 100% 401 on
+      # /embeddings/generate plus an unreported one on /transcribe.
+      # src/rnd/v0.1.9/2026.07.28-model-server-api-key-decoupling.md
+      LUPIN_MODEL_SERVER_API_KEY_NAME: model-server-api
       # Model-server carve-out env vars (2026-05-16). Dormant until Phase 3.6
       # lifespan switch + INI flip to `speech to text provider = model-server`.
       LUPIN_MODEL_SERVER_URL: ${LUPIN_MODEL_SERVER_URL:-http://lupin-model-server:7998}

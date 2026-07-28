@@ -49,6 +49,12 @@ variable "model_server_image_tag" {
   default     = "latest"
 }
 
+variable "model_server_api_key_secret_version" {
+  type        = string
+  description = "Secret Manager version of lupin-model-server-api to mount. PIN A NUMERIC VERSION — with 'latest' the version is resolved PER INSTANCE at cold start, so a rotation lands whenever an instance happens to recycle, with no deploy, no revision change and no signal (measured 2026-07-26: 726x200 then 33x401 across 10 instances, ZERO mixed — the status was a property of which version each instance booted with). Bump this and apply BEFORE distributing the new key file to callers: the model server bcrypt-hashes its key at BOOT, so callers switching first 401 until instances recycle. Rows 574fd1dc / 6cc52525."
+  default     = "1"
+}
+
 variable "model_server_min_instances" {
   type        = number
   description = "Cloud Run model-server min instances — the SEED value Terraform sets at create. DEFAULT-PAUSED (Rick 2026-07-01): 0 = scale-to-zero so a plain `terraform apply` lands the service COLD (no warm baseline, zero GPU cost at rest). Rick toggles warmth MANUALLY when he wants the service running — set this to 1 (or re-enable the scheduler via model_server_enable_scale_schedule). NB: the service ignores drift on min_instance_count (module lifecycle block), so if the scheduler is later enabled it remains the live authority and re-applies never fight it."

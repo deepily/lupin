@@ -192,9 +192,25 @@ services:
       # non-existent local :7998 GPU container.
       LUPIN_MODEL_SERVER_URL: ${LUPIN_MODEL_SERVER_URL:?set LUPIN_MODEL_SERVER_URL to the Cloud Run service URL (https://lupin-model-server-XXXX.run.app)}
       LUPIN_API_KEY_FILE: /var/lupin/src/conf/keys/notification-api-claude-code-dev
+
+      # The model-server client's OWN credential — set EXPLICITLY here, not left
+      # to the code default (rows 574fd1dc / 6cc52525, 2026-07-28).
+      #
+      # ⚠️ THIS HOST IS WHY THE BUG WAS UNFIXABLE BY CONFIG ALONE. cloud-gpu set
+      # no key-name var at all, so its client fell through to a HARDCODED literal
+      # in embedding_provider.py — meaning a compose-only rename would have fixed
+      # the two stacks that already set the var and left THIS one, the broken one,
+      # broken. Stating it here removes that asymmetry.
+      #
+      # ⚠️ Must equal the Terraform `api_key_name` for the Cloud Run service
+      # (terraform/envs/test/main.tf). The client sends what this names; the
+      # server hashes what Terraform mounts. If they disagree, every request 401s
+      # for the instance's whole life while the boot log still reads healthy.
+      # src/rnd/v0.1.9/2026.07.28-model-server-api-key-decoupling.md
+      LUPIN_MODEL_SERVER_API_KEY_NAME: model-server-api
+
       # NOTE: LUPIN_MODEL_SERVER_API_KEY_FILE removed (finding #7) — no code reads
-      # it and it named the wrong key file (lupin-model-server-auth); the client
-      # loads notification-api-claude-code-dev via du.get_api_key(). The 3 other
+      # it and it named the wrong key file (lupin-model-server-auth). The 3 other
       # compose files still carry the dead var (out of this remediation's scope).
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       PYTHONUNBUFFERED: "1"

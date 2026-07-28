@@ -213,11 +213,33 @@ class EmbeddingProvider:
     @staticmethod
     def _http_api_key() -> Optional[str]:
         """
-        Load the X-API-Key value used for the embeddings HTTP endpoints.
+        Load the X-API-Key value used for the MODEL SERVER's embeddings endpoint.
 
-        Mirrors the pattern in `prediction_engine._generate_embedding_via_http`
-        — reads `src/conf/keys/notification-api-claude-code-dev` via the
-        canonical `du.get_api_key()` helper (imported as `du` in this module).
+        ⚠️ THIS IS NOT THE SAME CREDENTIAL AS prediction_engine's, DESPITE THE
+        IDENTICAL READING IDIOM. This docstring used to say it "mirrors the
+        pattern in `prediction_engine._generate_embedding_via_http`", and that
+        sentence is how a shared IDIOM got read as a shared AUTHORITY:
+
+          prediction_engine -> POSTs to localhost/api/embeddings/generate, i.e.
+                               LUPIN'S OWN server, validated against THAT
+                               DEPLOYMENT'S `api_keys` table. Per-host value.
+          this method       -> POSTs to the model server on Cloud Run, which
+                               bcrypt-hashes ONE mounted secret version at boot.
+                               Globally-identical value.
+
+        One file served both until 2026-07-28. On the dev box the two authorities
+        coincide by accident (dev's key was seeded into Secret Manager), so the
+        flaw was invisible there; on the VM they cannot, and /embeddings/generate
+        returned 100% 401 for ~38h with the VM's key matching NEITHER secret
+        version. Rows 574fd1dc / 6cc52525.
+        src/rnd/v0.1.9/2026.07.28-model-server-api-key-decoupling.md
+
+        The name is read from the SAME env var the model server itself reads
+        (`LUPIN_MODEL_SERVER_API_KEY_NAME`, lupin_model_server/main.py:76) so the
+        two ends cannot drift apart by editing one of them.
+
+        Requires:
+            - nothing
 
         Ensures:
             - Returns the API key string if the file is present and readable
@@ -225,7 +247,8 @@ class EmbeddingProvider:
             - Never raises
         """
         try:
-            return du.get_api_key( "notification-api-claude-code-dev" )
+            key_name = os.environ.get( "LUPIN_MODEL_SERVER_API_KEY_NAME", "model-server-api" )
+            return du.get_api_key( key_name )
         except Exception:
             return None
 

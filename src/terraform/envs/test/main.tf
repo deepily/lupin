@@ -104,8 +104,23 @@ module "cloud_run_model_server" {
   ingress               = var.model_server_ingress
   allow_unauthenticated = var.model_server_allow_unauthenticated
 
-  # The api-key secret lives in the secret-manager inventory (lupin-notification-api-key default).
-  api_key_secret_id = "lupin-notification-api-key"
+  # ── The model server's OWN credential (rows 574fd1dc / 6cc52525, 2026-07-28) ──
+  # All three are passed EXPLICITLY. Previously only api_key_secret_id was set and
+  # the other two were inherited from module defaults that named the shared
+  # notifications key — silent inheritance is how one credential came to serve two
+  # authorities with incompatible rules (per-deployment `api_keys` table vs one
+  # globally-mounted secret), producing a 38-hour 100% 401 outage on the VM.
+  # Passing all three makes the coupling impossible to re-create by omission.
+  api_key_secret_id = "lupin-model-server-api"
+  api_key_name      = "model-server-api"
+
+  # ⚠️ PIN, do not use "latest". With `latest` the version is resolved PER
+  # INSTANCE at cold start, so a rotation lands whenever an instance happens to
+  # recycle — no deploy, no revision change, no signal (measured: 726x200 then
+  # 33x401 across 10 instances, zero mixed). Pinning also gives a rotation a
+  # scheduled moment to re-hash, which is the ONLY safe ordering: bump this
+  # version and apply BEFORE distributing the new key file to callers.
+  api_key_secret_version = var.model_server_api_key_secret_version
 
   # Direct VPC egress: network = app VPC, subnetwork supplied separately. Both
   # empty by default → no VPC access block until the terraforming-vms net exists.

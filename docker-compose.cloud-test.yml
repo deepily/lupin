@@ -112,6 +112,13 @@ services:
       LUPIN_API_URL: http://localhost:7999
       LUPIN_MODEL_SERVER_URL: http://lupin-model-server:7998
       LUPIN_API_KEY_FILE: /var/lupin/src/conf/keys/notification-api-claude-code-dev
+      # The model-server client's own credential — NOT the notifications key
+      # above. That one is per-database and must never be shipped from dev;
+      # this one is a single mounted secret, identical on every host and
+      # shipped to all of them. Sharing them caused a 38h 100% 401 on
+      # /embeddings/generate plus an unreported one on /transcribe.
+      # src/rnd/v0.1.9/2026.07.28-model-server-api-key-decoupling.md
+      LUPIN_MODEL_SERVER_API_KEY_NAME: model-server-api
       LUPIN_MODEL_SERVER_API_KEY_FILE: /var/lupin/src/conf/keys/lupin-model-server-auth
       # Claude Code OAuth (M1 Phase F): the Agent SDK inside this container reads
       # CLAUDE_CODE_OAUTH_TOKEN for bounded-CC jobs (Max-subscription, zero per-token
@@ -164,7 +171,14 @@ services:
       LUPIN_MODEL_SERVER_CODE_EMBED: nomic-ai/CodeRankEmbed
       LUPIN_MODEL_SERVER_PROSE_EMBED: nomic-ai/nomic-embed-text-v1.5
       LUPIN_MODEL_SERVER_WARMUP_MP3: /var/lupin/src/conf/warmup/whisper-warmup-85s.mp3
-      LUPIN_MODEL_SERVER_API_KEY_NAME: notification-api-claude-code-dev
+      # Its OWN credential, not the notifications key — rows 574fd1dc / 6cc52525.
+      # The notifications key is validated against a PER-DEPLOYMENT `api_keys`
+      # table (per-host value, minted on target); this one is a single mounted
+      # secret bcrypt-hashed at boot (identical everywhere, shipped to callers).
+      # Sharing them produced a 38h 100% 401 on /embeddings/generate AND a
+      # silent one on /transcribe.
+      # src/rnd/v0.1.9/2026.07.28-model-server-api-key-decoupling.md
+      LUPIN_MODEL_SERVER_API_KEY_NAME: model-server-api
       CUDA_VISIBLE_DEVICES: "0"             # hard rule: Lupin models always cuda:0
       PYTHONUNBUFFERED: "1"
     deploy:
