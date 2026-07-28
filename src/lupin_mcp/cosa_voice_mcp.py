@@ -4037,6 +4037,16 @@ def task_query(
     actually changes. ⇒ Re-check any `park_reason_stale: true` you saw before that
     date rather than trusting it.
 
+    ⚠️ AND `False` DOES NOT MEAN "STILL TRUE" (row aa543525 §2). The flag answers
+    "has the BODY changed since the quote was frozen?" — nothing more. A park
+    reason whose basis lived OUTSIDE the row dies without touching the row, so it
+    reads FRESH forever. MEASURED 2026-07-25: four rows read `false` while each
+    quoted a fleet-wide stand-down that had already evaporated. ⇒ Treat `false` as
+    "no body change," NEVER as an endorsement — and note the flag is silent in
+    exactly the case you most want it to speak. The real property is CONTENT
+    CONTRADICTION, which no clock can answer; **the chase is the backstop, because
+    a park is bounded and self-expiring.**
+
     ADVISORY ONLY. Staleness changes NO owed-ness, unparks nothing, blocks
     nothing. It marks a quote untrustworthy and stops there — deciding what to
     do about it is a human's call, not this flag's.

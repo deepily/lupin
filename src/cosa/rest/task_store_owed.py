@@ -314,6 +314,33 @@ def park_reason_is_stale( status, park_reason_captured_at, body_changed_ts ) -> 
     false FRESH: a parked row silently failing to report an expired quote, which is
     this feature's defect arriving in the direction nobody notices.
 
+    ⚠️ THE QUESTION THIS ANSWERS IS NARROWER THAN ITS NAME — row aa543525 §2
+    -----------------------------------------------------------------------------
+    It answers **"has the row's BODY changed since the quote was frozen?"** It does
+    NOT answer "is the park reason still true," and those come apart whenever the
+    reason's basis lives OUTSIDE the row.
+
+    MEASURED, 2026-07-25: four rows carried `park_reason_stale: false` while their
+    park reason was DEAD BY EVENT — each quoted a fleet-wide stand-down whose basis
+    had since evaporated. Nothing in those rows changed, so nothing could flag them,
+    and every one read FRESH. **That is not an ambiguous arm degrading to False; it
+    is a whole class this predicate cannot see even when both timestamps are perfect
+    and the comparison is exactly right.**
+
+    ⇒ SO A `False` HERE MEANS "no body change since capture," NEVER "verified still
+    true." A reader who treats FRESH as an endorsement is reading a claim this
+    function does not make — and it is the harder error to notice, because the flag
+    is silent in exactly the case a reader most wants it to speak.
+
+    ⇒ THE REAL PROPERTY IS CONTENT CONTRADICTION: a reason is stale when the row's
+    content no longer supports its quoted sentence. NO CLOCK CAN ANSWER THAT, which
+    is why re-stamping `park_reason_captured_at` on a "non-substantive" write was
+    rejected — it requires classifying every write as substantive-or-not, the exact
+    classification this flag exists to avoid needing. **The chase is the backstop:
+    a park is bounded and self-expiring, so an event-invalidated reason is corrected
+    by `next_chase_ts` passing, not by this predicate.** That bound is what makes
+    the gap survivable rather than open-ended.
+
     WHICH WAY THIS INSTRUMENT LIES: every ambiguous arm returns False
     (NOT-stale) — the OPPOSITE direction from `park_is_active`'s
     fail-loud-toward-owed, and deliberately so. Staleness is ADVISORY (§3.3): it

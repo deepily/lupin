@@ -307,6 +307,12 @@ def _serialize_item( item, blocker_statuses=None ) -> dict:
           divergence flag (design §3.3). ADVISORY ONLY — it changes no
           owed-ness, unparks nothing, blocks nothing; it marks the quote
           untrustworthy and stops there.
+          ⚠️ TRUE means "the body changed since capture"; FALSE means "it did
+          not" — NEVER "the reason is still true" (row aa543525 §2). A park
+          reason whose basis lived OUTSIDE the row dies without touching the
+          row and so reads FRESH forever; four such rows were measured
+          2026-07-25, each quoting a stand-down that had already evaporated.
+          The chase is the backstop for that class, not this flag.
         - `blocker_terminal` is DERIVED, never stored (row 00a6bde2): the row is
           `blocked` on an item that can never transition again, so the wait is
           unsatisfiable. ADVISORY, exactly like park_reason_stale — the DISPOSITION

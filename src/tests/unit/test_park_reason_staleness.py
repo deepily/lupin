@@ -1015,3 +1015,65 @@ def test_the_twins_are_genuinely_independent():
     assert "park_reason_is_stale(" not in sql_src, (
         "the SQL twin calls the Python twin — the parity gate is now circular"
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# THE KNOWN LIMIT — row aa543525 §2, pinned so it cannot rot into a surprise
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_an_event_invalidated_reason_reads_FRESH_the_documented_blind_spot():
+    """
+    ⚠️ THIS TEST ASSERTS A LIMITATION, NOT A FEATURE. It exists so the gap is
+    executable rather than only prose, and so anyone who later CLOSES it is
+    forced to come here and delete a test that says why it was open.
+
+    THE MEASURED CASE (2026-07-25, row aa543525 §2): four rows carried
+    `park_reason_stale: false` while each quoted a fleet-wide stand-down whose
+    basis had already evaporated. Their bodies never changed — so nothing could
+    flag them, and every one read FRESH.
+
+    ⇒ `False` here means "the body has not changed since capture." It does NOT
+    mean "the reason is still true", and the two come apart whenever the
+    reason's basis lives OUTSIDE the row. This is NOT one of the ambiguous arms
+    degrading to False: both timestamps are present, well-ordered, and compared
+    exactly right. The predicate is correct and the question is narrower than
+    the name.
+
+    The real property is CONTENT CONTRADICTION, which no clock can answer. The
+    backstop for this class is `next_chase_ts`: a park is bounded and
+    self-expiring, so an event-killed reason is corrected by the chase coming
+    due, never by this flag.
+    """
+    # A row parked six hours ago whose body has not been touched since. Imagine
+    # its park_reason quotes a stand-down that was lifted five hours ago: the
+    # quote is now false, and NOTHING about the row records that.
+    captured = CAP
+    body_changed_before_park = CAP - timedelta( hours=2 )
+
+    assert not park_reason_is_stale( PARK_STATUS, captured, body_changed_before_park ), (
+        "a row whose body predates its park now reports STALE — if this went red "
+        "because staleness became content-aware, that is a FIX: delete this test "
+        "and the aperture warnings in task_store_owed.park_reason_is_stale, "
+        "cosa_voice_mcp task_query, and routers/tasks serializers"
+    )
+
+
+def test_the_blind_spot_is_disclosed_where_readers_meet_the_flag():
+    """
+    The limit above is only survivable if a reader is TOLD. A gap that lives in
+    one docstring and not at the surfaces people actually read is the
+    `67fe3be1` shape — a disclosure nobody consumes.
+
+    Pins the aperture warning at the predicate itself. If someone rewrites this
+    docstring and drops the caveat, the flag silently goes back to reading like
+    an endorsement.
+    """
+    import inspect
+
+    doc = inspect.getdoc( park_reason_is_stale ) or ""
+    assert "aa543525" in doc, "the predicate no longer cites the row recording its blind spot"
+    for phrase in ( "OUTSIDE", "CONTENT CONTRADICTION", "chase" ):
+        assert phrase in doc, (
+            f"the aperture disclosure lost {phrase!r} — a reader can no longer tell "
+            f"that False means 'no body change' rather than 'still true'"
+        )
