@@ -61,10 +61,18 @@ So the admission happens ONCE, server-side:
 
     owed_only=True, status=None  ->  queued ∪ in_progress ∪ (parked AND NOT park-active)
 
-This is NOT a widening. `is_park_legal_from` (below) makes park legal ONLY from
-("queued","in_progress"), so the restored set is a SUBSET of those same two
-statuses BY CONSTRUCTION. Nothing new is admitted; blocked/claimed/review
-membership is unchanged for every reader.
+This is NOT a widening. Park ENTRY is legal ONLY from ("queued","in_progress"),
+so the restored set is a SUBSET of those same two statuses BY CONSTRUCTION.
+Nothing new is admitted; blocked/claimed/review membership is unchanged for
+every reader.
+
+`is_park_legal_from` (below) ALSO admits `parked -> parked` — a quote refresh,
+not an entry (row aa543525). That is provenance-idempotent and changes nothing
+here: a re-parked row was already parked, so it was already inside this set, and
+its pre-park status was already proven to be queued/in_progress by induction.
+The carrier of the proof is PARK_LEGAL_FROM_STATUSES, which stays exactly the
+two entry statuses — see the assert below, and `is_park_legal_from` for the
+induction.
 
 REJECTED ALTERNATIVE — a `parked_from_status` column. Rick overruled that exact
 shape today: a new field where a rule suffices. The write-time rule gives the
@@ -662,9 +670,11 @@ def owed_status_clause( model, now ):
     load-bearing and must be preserved. The double-count warning was always
     correct; only its stated cause was wrong.
 
-    Not a widening: `is_park_legal_from` restricts park to
-    PARK_LEGAL_FROM_STATUSES, so the admitted expired-parked rows provably came
-    from those same two statuses. blocked/claimed/review membership is unchanged.
+    Not a widening: park ENTRY is restricted to PARK_LEGAL_FROM_STATUSES, so the
+    admitted expired-parked rows provably came from those same two statuses.
+    blocked/claimed/review membership is unchanged. (`is_park_legal_from` also
+    permits a `parked -> parked` quote refresh — provenance-idempotent, so it
+    admits nothing new; see that function for the induction.)
 
     Requires:
         - model is the mapped TaskItem class (or an alias)

@@ -357,8 +357,11 @@ def test_admission_is_restoration_not_widening():
     "exact restoration" claim silently becomes a widening (or a narrowing) and
     NO twin-parity assertion would notice — both twins would still agree.
     """
+    # ENTRY vs RE-ENTRY (row aa543525, 2026-07-27). `parked -> parked` is legal —
+    # it is the quote refresh the tooling prescribes — but it is a RE-entry, so it
+    # contributes no new provenance and must not be counted as an entry here.
     for status in VALID_STATUSES:
-        if is_park_legal_from( status ):
+        if is_park_legal_from( status ) and status != PARK_STATUS:
             assert status in PARK_LEGAL_FROM_STATUSES
 
     # SUBSET, not equality (Clayton 😎's correction, 2026-07-19, and he is right):
@@ -372,8 +375,24 @@ def test_admission_is_restoration_not_widening():
         f"the Stop hook and arbiter count, not restore it"
     )
 
-    for status in ( "blocked", "claimed", "review", "done", "dropped", PARK_STATUS ):
+    # `parked` must stay OUT of the entry tuple even though it is park-legal: that
+    # tuple is what carries the restoration proof, and `parked` is not an owed
+    # status. This is the guard that keeps the two questions from collapsing.
+    assert PARK_STATUS not in PARK_LEGAL_FROM_STATUSES, (
+        f"'{PARK_STATUS}' entered PARK_LEGAL_FROM_STATUSES — re-entry was folded into "
+        f"the ENTRY set, which breaks the subset proof above (parked ∉ OWED_BASE_STATUSES). "
+        f"Re-park legality belongs in is_park_legal_from, not in this tuple."
+    )
+
+    for status in ( "blocked", "claimed", "review", "done", "dropped" ):
         assert is_park_legal_from( status ) is False, f"park must be illegal from {status!r}"
+
+    # The re-entry arm, pinned positively — the remedy `task_store_tools` prescribes
+    # ("Re-park to re-freeze the quote") must actually be spellable.
+    assert is_park_legal_from( PARK_STATUS ) is True, (
+        "re-parking a parked row is REFUSED — the stale-quote remedy the tooling "
+        "prescribes is unreachable again (the regression row aa543525 closed)"
+    )
 
 
 def test_blocked_claimed_review_membership_is_unchanged( session ):

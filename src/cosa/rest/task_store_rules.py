@@ -49,11 +49,19 @@ VALID_ITEM_CLASSES     = ( "task", "decision", "review_request", "bug", "gate" )
 # purity contract ("no DB, no HTTP") while the SQLAlchemy twin stays out of it.
 PARK_STATUS              = "parked"
 
-# Park is legal ONLY from these statuses. This is what makes re-admitting expired-
-# parked rows to the owed set an exact RESTORATION rather than a widening: such a
-# row provably came from queued/in_progress, so it can never drag in a
-# blocked/claimed/review row. A `parked_from_status` COLUMN was rejected — Rick's
+# The park ENTRY set. Park is legal from these statuses. This is what makes
+# re-admitting expired-parked rows to the owed set an exact RESTORATION rather than
+# a widening: such a row provably came from queued/in_progress, so it can never drag
+# in a blocked/claimed/review row. A `parked_from_status` COLUMN was rejected — Rick's
 # standing rule, a new field where a rule suffices.
+#
+# ⚠️ ENTRY, not ADMISSION — the two are no longer the same set (store row aa543525,
+# 2026-07-27). `parked -> parked` is ALSO legal (see `is_park_legal_from`), but it is
+# a RE-ENTRY, not an entry, and it must NOT be added here: this tuple is the set whose
+# subset relation to OWED_BASE_STATUSES carries the restoration proof, and `parked` is
+# not an owed status. Widening this tuple to include it would trip the import-time
+# assert in `task_store_owed` — correctly, because the proof it guards is about where
+# parked rows COME FROM, and a re-park introduces no new provenance.
 PARK_LEGAL_FROM_STATUSES = ( "queued", "in_progress" )
 
 # The waiting status (store row 00a6bde2, 2026-07-25). Named here for the same reason
@@ -1102,6 +1110,67 @@ def is_blocker_repoint( from_status, to_status, blocked_by, next_chase_ts,
     return blocked_by != current_blocked_by or next_chase_ts != current_next_chase_ts
 
 
+def is_park_refresh( from_status, to_status, park_reason, next_chase_ts ):
+    """
+    Is this `parked`->`parked` a genuine QUOTE REFRESH (re-freezing a park reason
+    against the row's current content), as opposed to a true no-op?
+
+    ⚠️ THIS REVERSES A DELIBERATE PRIOR RULING, ON EVIDENCE (row aa543525,
+    2026-07-27). `is_blocker_repoint` above scoped its carve-out to `blocked`
+    alone and named this very edge as one it was right to leave shut: *"a general
+    'permit same-status when the payload differs' would silently open
+    queued->queued, in_progress->in_progress, review->review and parked->parked —
+    four edges that each write an audit event and MEAN NOTHING."* That reasoning
+    was sound for three of the four. It is wrong for `parked`, and the difference
+    is mechanical rather than a matter of taste:
+
+        a ->parked write re-stamps `park_reason_captured_at` AND `updated_ts` to
+        ONE instant (task_repository), which is the whole definition of a park
+        whose justification is current.
+
+    So a re-park is not an event that means nothing — it is the ONLY operation
+    that restores the post-park equality invariant. Every other same-status edge
+    really would write a nullity.
+
+    THE DEFECT THIS CLOSES, and it is the same shape `is_blocker_repoint` closed.
+    `task_store_tools` prescribes *"Re-park to re-freeze the quote"* as the remedy
+    for a stale park reason, and that remedy was UNREACHABLE through TWO
+    independent gates: park-legality refused `parked` as a source, and this graph
+    refused the edge as a no-op. A seat that noticed its own park reason had
+    rotted had to go `parked -> queued -> parked`, which CLEARS the quote on the
+    way out and writes a `parked->queued` event asserting the row REJOINED the
+    owed set — on a row nobody un-parked. A false event, recurring by design.
+
+    ⇒ SCOPED TO `parked` ALONE, DELIBERATELY, for exactly the reason quoted above.
+    The graph itself is NOT modified; this is a carve-out at the point of use, so
+    the mirror-edge regression and both graph-shape tests hold unchanged.
+
+    NO "payload differs" TEST, and that asymmetry with `is_blocker_repoint` is
+    deliberate: a re-park with a byte-identical reason and an identical chase is
+    still meaningful, because the capture timestamp moves and that is the point of
+    the operation. Requiring a changed quote would refuse the commonest honest
+    case — *"I reviewed this park and it is still exactly right."*
+
+    Requires:
+        - from_status / to_status are valid statuses
+        - park_reason / next_chase_ts are the CANDIDATE payload values
+
+    Ensures:
+        - returns True iff from_status == to_status == PARK_STATUS AND the park
+          payload is present (non-blank reason AND a chase)
+        - returns False when either payload field is absent — fail CLOSED, so a
+          caller that omits the park fields gets the old rejection rather than a
+          silently-permitted nullity
+        - returns False for every other status pair, including every other
+          same-status pair
+        - NEVER relaxes the ->parked payload rules: this opens an EDGE, and
+          validate_park still runs on the result
+    """
+    if from_status != PARK_STATUS or to_status != PARK_STATUS:            return False
+    if not isinstance( park_reason, str ) or not park_reason.strip():     return False
+    return next_chase_ts is not None
+
+
 def validate_transition(
     from_status   : str,
     to_status     : str,
@@ -1173,7 +1242,8 @@ def validate_transition(
     if from_status in TERMINAL_STATUSES:
         errors.append( f"item is terminal ('{from_status}') — done/dropped are append-only, no transitions out" )
     elif to_status not in LEGAL_TRANSITIONS[ from_status ] and not is_blocker_repoint(
-        from_status, to_status, blocked_by, next_chase_ts, current_blocked_by, current_next_chase_ts ):
+        from_status, to_status, blocked_by, next_chase_ts, current_blocked_by, current_next_chase_ts
+    ) and not is_park_refresh( from_status, to_status, park_reason, next_chase_ts ):
         errors.append( f"no-op transition '{from_status}'->'{to_status}' rejected — not a legal edge" )
 
     if to_status == "done" or receipt_refs is not None:
@@ -1218,22 +1288,54 @@ def validate_transition(
 
 def is_park_legal_from( from_status ) -> bool:
     """
-    True iff a row may be parked FROM `from_status`.
+    True iff a row may be parked FROM `from_status` — by ENTRY (queued /
+    in_progress) or by RE-ENTRY (`parked` -> `parked`, a quote refresh).
 
     The guarantee this buys: expired-parked ⊆ ex-queued/in_progress, BY
     CONSTRUCTION. That is what lets the owed-set admission take the entire
     expired-parked set without widening any reader's owed definition.
 
+    ⭐ WHY `parked` IS LEGAL HERE WHILE STAYING OUT OF PARK_LEGAL_FROM_STATUSES
+    (store row aa543525, 2026-07-27). `task_store_tools` prescribes *"Re-park to
+    re-freeze the quote"* as the remedy for a park reason that has gone stale — and
+    that remedy was UNREACHABLE: the validator refused it, so a seat that noticed
+    its own park reason had rotted had no spellable way to do the right thing. Its
+    only recourse was to transition OUT of parked and back, which CLEARS the quote
+    (see `task_repository`) and fires an event asserting a status change that never
+    conceptually happened. A correct rule and correct advice composed into a hole
+    nobody owned.
+
+    THE PROOF STILL HOLDS, by induction on a row's park history:
+        base case — the FIRST park requires from_status ∈ PARK_LEGAL_FROM_STATUSES,
+                    which is ⊆ OWED_BASE_STATUSES (asserted at import in
+                    `task_store_owed`).
+        step      — a re-park requires from_status == `parked`, which by the
+                    induction hypothesis was itself reached from an owed status.
+        ⇒ every parked row's pre-park provenance is queued/in_progress, no matter
+          how many times its quote is refreshed. A re-park is IDEMPOTENT with
+          respect to provenance, which is exactly why it cannot widen admission.
+
+    So the invariant is about ENTRY, and `PARK_LEGAL_FROM_STATUSES` remains its
+    exact carrier. Adding `parked` to that tuple would break the assert while
+    proving nothing new — the two questions ("what may ENTER a park?" vs "what may
+    be parked FROM?") are kept as separate names for the same reason PARK_STATUS
+    and PARK_LEGAL_FROM_STATUSES already are.
+
+    ⚠️ The re-park is what makes the refresh HONEST, not merely possible: the
+    repository stamps `updated_ts` and `park_reason_captured_at` to one instant on
+    every ->parked write, so a re-park restores the post-park equality invariant —
+    which is precisely what "re-freeze the quote" means.
+
     Requires:
         - from_status is the row's CURRENT status (any value accepted)
 
     Ensures:
-        - True iff from_status is in PARK_LEGAL_FROM_STATUSES
-        - False for every other status, including already-`parked` and the
+        - True iff from_status is in PARK_LEGAL_FROM_STATUSES, or is PARK_STATUS
+        - False for every other status, including blocked/claimed/review and the
           terminal states
         - never raises
     """
-    return from_status in PARK_LEGAL_FROM_STATUSES
+    return from_status in PARK_LEGAL_FROM_STATUSES or from_status == PARK_STATUS
 
 
 def validate_park( from_status, next_chase_ts, park_reason ) -> list:
@@ -1246,7 +1348,8 @@ def validate_park( from_status, next_chase_ts, park_reason ) -> list:
 
     Ensures:
         - returns [] iff ALL hold:
-            from_status is in PARK_LEGAL_FROM_STATUSES (queued / in_progress)
+            from_status is park-legal — queued / in_progress (ENTRY), or
+              already `parked` (RE-ENTRY: a quote refresh; see is_park_legal_from)
             next_chase_ts is present
             park_reason is a non-blank string
         - the source-status rule is what makes the owed-set restoration exact:
@@ -1261,7 +1364,8 @@ def validate_park( from_status, next_chase_ts, park_reason ) -> list:
         errors.append(
             f"cannot park from '{from_status}' — park is legal ONLY from "
             f"{PARK_LEGAL_FROM_STATUSES} (this is what keeps the owed-set "
-            f"restoration exact rather than widening)"
+            f"restoration exact rather than widening), or from "
+            f"'{PARK_STATUS}' itself to re-freeze a stale quote"
         )
     if next_chase_ts is None:
         errors.append(

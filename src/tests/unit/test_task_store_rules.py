@@ -999,7 +999,7 @@ def test_transition_to_parked_is_accepted_from_every_legal_source( from_status )
     assert errors == [ ], errors
 
 
-@pytest.mark.parametrize( "from_status", [ "blocked", "claimed", "review", "parked" ] )
+@pytest.mark.parametrize( "from_status", [ "blocked", "claimed", "review" ] )
 def test_transition_to_parked_is_refused_from_an_illegal_source( from_status ):
     """
     The source-status rule is what keeps the owed-set restoration EXACT: because an
@@ -1007,11 +1007,66 @@ def test_transition_to_parked_is_refused_from_an_illegal_source( from_status ):
     expired-parked set can never drag in a blocked/claimed/review row. Parking a
     `blocked` row would silently widen every reader's owed definition.
 
-    `parked` itself is in this list on purpose — re-parking is not a refresh.
+    ⚠️ `parked` WAS in this list, with the note "re-parking is not a refresh". Row
+    aa543525 (2026-07-27) reversed that ON EVIDENCE — see the re-park tests below.
+    It stays OUT of PARK_LEGAL_FROM_STATUSES, which is what actually carries the
+    restoration proof; the ENTRY set is unchanged and this test still pins it.
     """
     errors = rules.validate_transition( from_status, rules.PARK_STATUS, "standing",
                                         next_chase_ts=_CHASE, park_reason=_REASON )
     assert any( "cannot park from" in e for e in errors ), errors
+
+
+def test_reparking_a_parked_row_is_legal_the_prescribed_remedy_is_reachable():
+    """
+    `task_store_tools` prescribes *"Re-park to re-freeze the quote"* for a park
+    reason that has gone stale. That remedy was refused by TWO INDEPENDENT GATES —
+    park-legality (source not in PARK_LEGAL_FROM_STATUSES) and the LEGAL_TRANSITIONS
+    no-op edge — so the one action the documentation named as the fix could not be
+    spelled at all. Row aa543525.
+
+    ⚠️ WHY THIS IS AN END-TO-END TEST AND NOT A PREDICATE TEST. Fixing park-legality
+    alone still left the edge refused, and the ONLY thing that surfaced the second
+    gate was a red test. A unit test on `is_park_legal_from` would have gone green
+    while the operation stayed impossible — the instrument would have answered a
+    narrower question than the reader believed, which is this row's whole subject.
+    """
+    errors = rules.validate_transition( rules.PARK_STATUS, rules.PARK_STATUS, "standing",
+                                        next_chase_ts=_CHASE, park_reason=_REASON )
+    assert errors == [ ], errors
+
+
+def test_repark_still_requires_its_payload_the_carve_out_fails_closed():
+    """
+    The carve-out opens an EDGE, never the ->parked payload rules. A re-park missing
+    its reason or its chase must still be refused — otherwise the escape hatch
+    becomes a way to write the nullity event the no-op rejection existed to prevent.
+    """
+    no_reason = rules.validate_transition( rules.PARK_STATUS, rules.PARK_STATUS, "standing",
+                                           next_chase_ts=_CHASE, park_reason="   " )
+    assert no_reason != [ ], "a blank-reason re-park was permitted — the carve-out did not fail closed"
+
+    no_chase = rules.validate_transition( rules.PARK_STATUS, rules.PARK_STATUS, "standing",
+                                          next_chase_ts=None, park_reason=_REASON )
+    assert no_chase != [ ], "a chase-less re-park was permitted — the carve-out did not fail closed"
+
+
+@pytest.mark.parametrize( "status", [ "queued", "in_progress", "review" ] )
+def test_the_other_same_status_edges_stay_shut( status ):
+    """
+    The carve-out is scoped to `parked` ALONE. `is_blocker_repoint`'s docstring is
+    right that a general "same status when the payload differs" rule would open four
+    edges writing audit events that mean nothing; `parked` is the lone exception,
+    because a ->parked write re-stamps the capture timestamp and so changes real
+    state. The other three must stay shut.
+
+    THIS IS THE GUARD THAT PROVES THE CARVE-OUT DID NOT GENERALIZE — without it,
+    widening `is_park_refresh` to any same-status pair would pass every other test
+    in this file.
+    """
+    errors = rules.validate_transition( status, status, "standing",
+                                        next_chase_ts=_CHASE, park_reason=_REASON )
+    assert any( "no-op transition" in e for e in errors ), errors
 
 
 def test_transition_to_parked_requires_a_chase_time():
