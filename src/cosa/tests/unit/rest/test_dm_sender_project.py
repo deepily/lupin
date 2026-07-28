@@ -140,21 +140,34 @@ class TestCallerSuppliedProject( unittest.TestCase ):
             "claude.code@plan.deepily.ai#asker-session-aaaa"
         )
 
-    def test_absent_project_stamps_exactly_as_today( self ):
+    def test_absent_project_is_now_rejected_step_2_shipped( self ):
         """
-        TRANSITION CONTRACT (step 1 of 2): absent is ACCEPTED, not rejected.
+        ⚠️ THIS TEST WAS INVERTED 2026-07-27 WHEN STEP 2 SHIPPED. It previously
+        asserted the step-1 TRANSITION contract — absent is ACCEPTED and stamped
+        as before — and that contract is now superseded, so the old assertion is
+        recorded here rather than deleted:
 
-        Eleven live MCP processes were running pre-fix code when this landed;
-        each resolves its project at module load, so editing the client does not
-        reach a running one. A strict 422 here would mute every live session's
-        DM until respawn. The flip to 422 is step 2 and is the manager's call.
+            self.assertIsNone( self.spy.calls[ -1 ][ "project" ] )
+            persist sender_id == "claude.code@lupin.deepily.ai#asker-session-aaaa"
+
+        WHY IT WAS RIGHT THEN: eleven live MCP processes were running pre-fix
+        code, each resolving its project at module load, so editing the client
+        could not reach a running one. A 422 then muted the fleet until respawn.
+
+        WHY IT FLIPPED: both arms are now measured — zero live clients predate
+        831e18dc, and 362 audit observations over 12h carry un_projected=0 with a
+        synthetic offender proven to survive the same filter.
+
+        The step-2 contract is pinned in the GATED tree at
+        `src/tests/unit/test_dm_sender_project_required.py` — this file's tree is
+        invisible to every gate (row 5bf28e07), so the regression guard cannot
+        live here. This case remains only so the inversion is visible to anyone
+        reading the step-1 suite.
         """
-        self._run( _make_send_body() )
-        self.assertIsNone( self.spy.calls[ -1 ][ "project" ] )
-        self.assertEqual(
-            self.persist.call_args.kwargs[ "sender_id" ],
-            "claude.code@lupin.deepily.ai#asker-session-aaaa"
-        )
+        result = self._run( _make_send_body() )
+        self.assertEqual( result[ "http_status" ], 422 )
+        self.assertEqual( self.spy.calls, [] )
+        self.persist.assert_not_called()
 
 
 class TestSenderIdBuilderAdapter( unittest.TestCase ):

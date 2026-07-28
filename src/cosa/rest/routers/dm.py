@@ -325,6 +325,31 @@ def execute_dm_send(
     # asking the server to resolve the caller's project is the defect, not the
     # implementation of it.
     _record_dm_project( body.sender_session_id, body.sender_project )
+    # STEP 2 (row 12b5a766, 2026-07-27): an ABSENT project is now a REJECT, not a
+    # fallback. Counted FIRST — the audit records the offender even though the DM
+    # is refused, so a fleet that starts offending stays visible instead of going
+    # quiet at exactly the moment it matters.
+    #
+    # WHY THIS IS SAFE TO FLIP NOW, and it is a measurement rather than a judgement:
+    #   negative arm — zero live cosa_voice_mcp.py clients predate step 1 (831e18dc)
+    #   positive arm — 362 [dm-project-audit] observations over 12h, un_projected=0
+    #                  on every line, with a synthetic un_projected=7 proven to
+    #                  survive the same filter (so the filter discriminates)
+    # The audit counts AT THE ENDPOINT, so it sees off-box callers too — which is
+    # what retires Extra 1's standing "a grep cannot see a caller on another
+    # machine" caveat. That was the last unmeasured unknown on this row.
+    if body.sender_project is None:
+        return {
+            "http_status" : 422,
+            "detail"      : (
+                f"sender_project is REQUIRED on the DM write path. Session "
+                f"'{body.sender_session_id}' sent none, and the server will not guess: "
+                f"resolving the caller's project server-side is the defect (row 12b5a766), "
+                f"not a fallback for it — it answers 'what project is THIS PROCESS in?', "
+                f"and this process is the server. Respawn this seat onto a client that "
+                f"sends sender_project."
+            ),
+        }
     sender_id         = build_sender_id( body.sender_session_id, body.sender_project )
     job_id            = target_session_id[ :8 ]
 
@@ -854,3 +879,24 @@ async def list_dms(   # pragma: no cover
     if http_status >= 400:
         raise HTTPException( status_code=http_status, detail=result[ "detail" ] )
     return JSONResponse( status_code=http_status, content=result )
+
+
+@router.get(
+    "/project-audit",
+    summary     = "Read the un-projected-DM audit — the step-2 gate evidence",
+    description = (
+        "Returns the live `sender_project` audit counters: `projected`, `un_projected`, the distinct "
+        "offender sessions (capped), and the window start. "
+        "WHY THIS EXISTS: the audit has been generated correctly since 2026-07-21 and was readable ONLY by "
+        "grepping `docker logs lupin-rest-dev`, so the gate it existed to inform sat four days unread — the "
+        "fifth instance of row 67fe3be1 (disclosures nobody consumes). The counters reset on every server "
+        "restart, and `:7999` runs --reload, so `since` is load-bearing: a low count usually means a recent "
+        "reload, not a quiet fleet. "
+        "⚠️ `un_projected=0` alone proves nothing — a window with NO DM traffic reports 0/0 and reads exactly "
+        "like a clean one. Always read `projected` alongside it."
+    ),
+)
+async def get_dm_project_audit_endpoint(   # pragma: no cover
+    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
+) -> JSONResponse:
+    return JSONResponse( status_code=200, content=get_dm_project_audit() )

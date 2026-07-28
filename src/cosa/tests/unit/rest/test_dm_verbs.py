@@ -65,6 +65,12 @@ def _send_body( **overrides ):
         recipient_persona = "María",
         sender_persona    = "Clayton",
         sender_icon       = "😎",
+        # REQUIRED since step 2 of row 12b5a766 (2026-07-27): an absent
+        # sender_project is a 422 on the write path. These cases exercise the DM
+        # verb family (threading, respond, list), not the project seam, so they
+        # need a VALID request to reach the behavior under test. The reject
+        # contract is pinned in src/tests/unit/test_dm_sender_project_required.py.
+        sender_project    = "lupin",
     )
     fields.update( overrides )
     return DmSendRequest( **fields )
