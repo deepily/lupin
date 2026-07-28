@@ -8,6 +8,24 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.07.28 - Session 951a4459 (Mr. Radio 🦉) | One key file, two authorities — a 38-hour outage closed, and dev was the only host where the defect was invisible
+
+**Health**: 10.7k tokens at write time (measured, not quoted).
+
+1. **`574fd1dc` P1 CLOSED — `/embeddings/generate` had been 100% 401 for ~38h.** Not drift, not the rotation. One key file served two consumers whose authorities are incompatible: Lupin's own API bcrypt-checks against a **per-deployment `api_keys` table** (correct value differs per host), while the model server bcrypt-hashes **one mounted secret version at boot** (identical everywhere). A file holds one string. **On dev the two coincide by accident** — dev's key had been seeded into Secret Manager — **which is exactly why no test caught it: the defect is invisible on the machine the tests run on.** The VM's key matched *neither* secret version (`ccfc494d8084` vs `26e3c096d4df`/`09baaa60e463`) because it was minted into the VM's own database, correct for the *other* consumer. ⇒ The 07-26 rotation didn't break the VM; **it removed the coincidence that had been making a broken design look healthy.** Both branches of the row's decision table assumed the VM held one of the two versions — neither could ever fire. Commit `d3d2f22f`, doc `src/rnd/v0.1.9/2026.07.28-model-server-api-key-decoupling.md`.
+
+2. **Full deploy, verified end to end.** Secret `lupin-model-server-api` v1 seeded (parity `dbda9daf8dbf`) · `terraform apply` 1 add/1 change/0 destroy, mount moved to its own secret and **pinned to version 1** (closing `6cc52525`) · key to the VM · dev model-server recreated · `push-bundle --checkout` · VM `lupin-rest` recreated with `--no-deps`. **Close measured from inside the VM's container: new key HTTP 200 (768 dims), OLD key HTTP 401** — the negative control is what makes it a close rather than a hope.
+
+3. **`/transcribe` was failing identically and unreported.** `speech_to_text_provider` took the same key to the same service; only embeddings logged loudly. **Consumer B was two call sites, found by grepping the key name, not by any alarm.**
+
+4. **A near-miss the plan would have caused.** The plan said migrate `prediction_engine` "or neither" — it POSTs to `localhost/api/embeddings/generate`, **Lupin's own server**, per-database key. The instruction came from a docstring calling it "the same pattern": **the reading IDIOM is shared, the AUTHORITY is not.** Migrating it would have 401'd it on every host. Pinned by `test_prediction_engine_still_uses_the_notifications_key`.
+
+5. **Rick's rename ruling, and why it was a diagnosis.** `docker-compose.yml:90` said the model server *"reuses the existing"* key — **that reads as thrift only because the name doesn't say who the key is for.** Eight of nine credentials in `src/conf/keys/` are named by purpose alone; the outlier carried API + caller + environment, and `-dev` was **false** (the VM held a file so named). Phase 2 (renaming consumer A to `notification-api`) is deliberately **deferred** — its name is *generated*, lives on every host and in Secret Manager, and `outbound_api_key.py:30` holds it as a module constant gating fleet MCP auth.
+
+6. **Two errors of mine, both caught by verification, both recorded.** I created the secret with the seeder *before* Terraform declared it — apply would have 409'd (fixed by `terraform import`; the module owns containers, the script owns versions). And I **briefly broke dev embeddings** by moving the client before the server — the exact ordering the document I had just written warns against, committed on the box where the warning was written.
+
+7. **Rows minted**: `b93841ca` **P1** (a `--reload` wipes `ws_manager`, so blocking asks 503 as "user offline" while the user is present; **no idempotency on blocking asks**, which is why Rick was re-asked; notifications stranded at `created`) · `16788079` (preflight D8 asserts key *presence*, not installation — 8 empty arrays pass green) · `8a416a96` (preflight E greps **one literal** Vertex override var) · `7266b98f` (two VM env vars absent from `cloud-gpu.env`; **survived a force-recreate**, which is what proves them pre-existing).
+
 ### 2026.07.27 - Six-worker crew day (recorded by Clayton 😎 `34474b66`) | Instruments that answered the wrong question — 55 commits
 
 **Scope note**: 55 commits on the branch since midnight; the aggregate review's 48 covers `da1a5ed8..59038897`. Both correct, different windows. Decisions Log in TODO.md; this is accomplishments only.
