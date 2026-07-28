@@ -6,12 +6,13 @@
 #   1. instance lifecycle   (vm-status / vm-start / vm-stop)   — the VM is suspended-by-default
 #   2. interactive SSH       (shell / run)                      — over IAP (no public IP)
 #   3. app service control   (svc up|down|restart|status|logs)  — docker compose on the VM
-#   4. local tunnel          (tunnel [PORT])                    — bind localhost:PORT -> VM :7999
+#   4. local tunnel          (tunnel [PORT] [VM_PORT])          — bind localhost:PORT -> VM :VM_PORT
 #
 # Access is IAP-only (no public IP), identical to deploy-cloud-test.sh for SSH. NOTE: the `tunnel`
-# subcommand forwards IAP TCP to port 7999, which needs a VPC firewall rule allowing the IAP range
-# 35.235.240.0/20 -> tcp:7999 (SSH works because tcp:22 already has one; 7999 may not). See runbook
-# §"Tunnel firewall" for the one-time `gcloud compute firewall-rules create`.
+# subcommand forwards IAP TCP to VM_PORT (default 7999), which needs a VPC firewall rule allowing
+# the IAP range 35.235.240.0/20 -> tcp:VM_PORT (SSH works because tcp:22 already has one; 7999 and
+# any other VM-side port may not — one rule PER port). See runbook §"Tunnel firewall" for the
+# one-time `gcloud compute firewall-rules create`, or run `lupin-vm.sh firewall open VM_PORT`.
 #
 # Runbook: src/rnd/2026.07.22-lupin-host-test-ssh-tunnel-automation.md
 #
@@ -85,10 +86,15 @@ App services (docker compose in $VM_ROOT):
   svc logs               logs -f --tail=200 $REST_SERVICE
 
 Tunnel:
-  tunnel [PORT]          bind localhost:PORT -> VM :$APP_PORT (default PORT=$APP_PORT)
+  tunnel [PORT] [VM_PORT]
+                         bind localhost:PORT -> VM :VM_PORT
+                         (defaults: PORT=$APP_PORT, VM_PORT=$APP_PORT — VM_PORT does NOT follow PORT)
+                         e.g. tunnel 8799        -> localhost:8799 -> VM :$APP_PORT
+                              tunnel 8080 8080   -> localhost:8080 -> VM :8080
+                         each VM_PORT needs its own IAP rule: firewall open VM_PORT
                          leave running; browse http://localhost:PORT ; Ctrl-C to end
 
-Firewall (one-time — the tunnel needs IAP allowed to :$APP_PORT):
+Firewall (one-time — the tunnel needs IAP allowed to the VM-side port):
   firewall status        list all VPC firewall rules (scan sourceRanges for 35.235.240.0/20)
   firewall open [PORT]   allow IAP range -> tcp:PORT (default $APP_PORT); network auto-derived
 
@@ -319,6 +325,11 @@ case "$SUBCMD" in
 
     tunnel)
         local_port="${1:-$APP_PORT}"
+        # Second arg is the IN-VM port, default $APP_PORT. It does NOT follow local_port: the
+        # runbook documents `tunnel 8799` / `tunnel 6999` as LOCAL-side overrides that still reach
+        # VM :7999 (used when 7999 is busy locally), so a same-port default would silently
+        # re-point those. Same port both ends is therefore explicit: `tunnel 8080 8080`.
+        remote_port="${2:-$APP_PORT}"
         require_project
         # Bind IPv4 127.0.0.1, NOT localhost. On macOS `localhost` resolves to IPv6 ::1 first, and
         # the IAP tunnel mishandles the ::1 local socket -> "OSError: [Errno 9] Bad file descriptor"
@@ -330,8 +341,8 @@ case "$SUBCMD" in
         # NOTE: a real startup failure still shows as the command exiting WITHOUT a "Listening on port"
         # line (the browser then won't load), so quieting the logger does not hide a dead tunnel.
         local_verbosity="${TUNNEL_VERBOSITY:-critical}"
-        log "tunnel: 127.0.0.1:$local_port -> $VM_NAME:$APP_PORT  (browse http://127.0.0.1:$local_port ; Ctrl-C to end; TUNNEL_VERBOSITY=info for full logs)"
-        runit gcloud compute start-iap-tunnel "$VM_NAME" "$APP_PORT" \
+        log "tunnel: 127.0.0.1:$local_port -> $VM_NAME:$remote_port  (browse http://127.0.0.1:$local_port ; Ctrl-C to end; TUNNEL_VERBOSITY=info for full logs)"
+        runit gcloud compute start-iap-tunnel "$VM_NAME" "$remote_port" \
             --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" \
             --local-host-port="127.0.0.1:$local_port" \
             --verbosity="$local_verbosity"
