@@ -8,6 +8,21 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.07.31 - Session 7846bfcb (Mr. Radio 🦉) | Mistral Small 24B stood up on GPU1, config cutover from Phi-4
+
+**Health**: 11.8k tokens at write time (measured, not quoted).
+
+1. **Disk cleanup freed ~1.05TB on `/mnt/DATA01`** (95%→35% used), gated on a verified DATA02 backup of the live `svllmr` checkpoint before any deletion ran.
+2. **vLLM 0.26.0 (latest) is CUDA-13-only** — its compiled extension needs `libcudart.so.13`, which driver 535 cannot run. Bisected to `vllm==0.16.0`+`torch+cu129` as the newest version that actually works on this hardware.
+3. **`ConfidentialMind/Mistral-Small-3.2-24B-Instruct-2506-GPTQ-AutoRound-TextOnly` is live** on GPU1:3001 — dedicated venv at `$DEEPILY_PROJECTS_DIR/vllm-mistral-small-24b`, verified with a real inference call (0.32s, ~25 tok/s).
+4. **Config cutover**: all 29 references to `kaitchup/phi_4_14b` renamed to a new `confidentialmind/mistral_small_24b` spec key across `lupin-app.ini`/`lupin-app-splainer.ini` — the old spec is preserved as a comment, not deleted. New `svllmm` alias added next to `svllmc`.
+5. **Gister-path testing found two real gaps this cutover closes**: a model-name mismatch (404 against the old hardcoded name) and an inert `stop` token list (`</s>`/`</stop>` never emitted by this checkpoint — confirmed via a forced-length test).
+
+#### Checkpoint | 2026.07.31 15:49 | Mistral Small 24B config cutover
+
+**Files**: src/conf/lupin-app.ini, src/conf/lupin-app-splainer.ini, src/rnd/README.md (+2 new R&D docs)
+**Commit**: [pending]
+
 ### 2026.07.28 - Session 951a4459 (Mr. Radio 🦉) | One key file, two authorities — a 38-hour outage closed, and dev was the only host where the defect was invisible
 
 **Health**: 10.7k tokens at write time (measured, not quoted).
