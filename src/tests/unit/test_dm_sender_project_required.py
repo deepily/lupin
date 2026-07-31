@@ -224,6 +224,36 @@ class TestAuditEndpointIsWired( unittest.TestCase ):
         self.assertEqual( fresh[ "un_projected_senders" ], [] )
 
 
+class TestCountSentences( unittest.TestCase ):
+    """
+    _count_sentences() — deliberately a simple .!? splitter, not an NLP-grade
+    sentence boundary detector. It exists to give the length audit a verbosity
+    SIGNAL (multi-topic DMs tend to run more sentences), not to be linguistically
+    exact.
+    """
+
+    def test_single_sentence_with_period( self ):
+        from cosa.rest.routers.dm import _count_sentences
+        self.assertEqual( _count_sentences( "Commit landed." ), 1 )
+
+    def test_two_sentences( self ):
+        from cosa.rest.routers.dm import _count_sentences
+        self.assertEqual( _count_sentences( "Does this still get through? Yes it does." ), 2 )
+
+    def test_fragment_with_no_terminal_punctuation_counts_as_one( self ):
+        """A bare fragment ("status?") is still 1 sentence, never 0."""
+        from cosa.rest.routers.dm import _count_sentences
+        self.assertEqual( _count_sentences( "no terminal punctuation here" ), 1 )
+
+    def test_blank_string_counts_as_zero( self ):
+        from cosa.rest.routers.dm import _count_sentences
+        self.assertEqual( _count_sentences( "   " ), 0 )
+
+    def test_exclamation_and_question_marks_both_count( self ):
+        from cosa.rest.routers.dm import _count_sentences
+        self.assertEqual( _count_sentences( "Stop! Why? Because." ), 3 )
+
+
 class TestDmLengthAuditIsWired( unittest.TestCase ):
     """
     Phase 1 of the DM Verbosity Reduction plan (Rick, 2026-07-31 —
@@ -242,7 +272,7 @@ class TestDmLengthAuditIsWired( unittest.TestCase ):
         from cosa.rest.routers.dm import get_dm_length_audit, reset_dm_length_audit
         reset_dm_length_audit()
         snapshot = get_dm_length_audit()
-        for key in ( "count", "total_chars", "total_words", "since", "avg_chars", "avg_words" ):
+        for key in ( "count", "total_chars", "total_words", "total_sentences", "since", "avg_chars", "avg_words", "avg_sentences" ):
             self.assertIn( key, snapshot )
 
     def test_the_snapshot_is_a_copy_a_reader_cannot_mutate_the_counters( self ):
@@ -275,6 +305,7 @@ class TestDmLengthAuditIsRecordedOnSend( _CoreHarness ):
         self.assertEqual( audit[ "count" ], 1 )
         self.assertEqual( audit[ "total_words" ], 5 )   # "does this still get through?"
         self.assertEqual( audit[ "total_chars" ], 28 )
+        self.assertEqual( audit[ "total_sentences" ], 1 )   # one question, no other terminal punctuation
 
     def test_a_rejected_dm_is_still_counted_in_the_length_audit( self ):
         from cosa.rest.routers.dm import get_dm_length_audit

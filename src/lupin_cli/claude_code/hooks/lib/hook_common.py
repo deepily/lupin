@@ -664,7 +664,7 @@ def _peer_dm_reply_rider():
         str: the rider text for the reply-affordance line
     """
     if cu.get_dm_style_contract_enabled():
-        return f"{PEER_DM_BREVITY_RIDER} {DM_STYLE_TAG}"
+        return f"{PEER_DM_BREVITY_RIDER}\n↳ {DM_STYLE_TAG}"
     return PEER_DM_BREVITY_RIDER
 
 

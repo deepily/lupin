@@ -21,6 +21,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import Optional, Annotated, Literal
 import asyncio
+import re
 import uuid
 from datetime import datetime
 
@@ -226,11 +227,35 @@ def _make_sender_id_builder( host_builder ):
 # ─────────────────────────────────────────────────────────────────────────────
 
 _dm_length_audit = {
-    "count"       : 0,
-    "total_chars" : 0,
-    "total_words" : 0,
-    "since"       : datetime.now().isoformat( timespec="seconds" ),
+    "count"           : 0,
+    "total_chars"     : 0,
+    "total_words"     : 0,
+    "total_sentences" : 0,
+    "since"           : datetime.now().isoformat( timespec="seconds" ),
 }
+
+# Sentence boundary: one or more .!? followed by whitespace or end-of-string.
+# Deliberately simple (no NLP/abbreviation handling) — this is a verbosity
+# SIGNAL for an A/B comparison, not a linguistically exact sentence splitter.
+# A body with no terminal punctuation ("status?") still counts as 1 sentence
+# (a bare fragment), never 0, so a short DM doesn't read as "no content."
+_SENTENCE_SPLIT_RE = re.compile( r'[.!?]+(?:\s+|$)' )
+
+
+def _count_sentences( body_text ):
+    """
+    Count sentence-like chunks in body_text via a simple .!? split.
+
+    Requires:
+        - body_text is a string
+
+    Ensures:
+        - returns 0 only for a blank/whitespace-only string
+        - returns 1 for a fragment with no terminal punctuation
+        - returns the count of non-empty chunks otherwise
+    """
+    chunks = [ c for c in _SENTENCE_SPLIT_RE.split( body_text ) if c.strip() ]
+    return len( chunks )
 
 
 def reset_dm_length_audit():
@@ -238,12 +263,13 @@ def reset_dm_length_audit():
     Reset the DM length-audit counters and re-stamp the `since` instant.
 
     Ensures:
-        - count, total_chars, total_words are all 0, `since` is now
+        - count, total_chars, total_words, total_sentences are all 0, `since` is now
     """
-    _dm_length_audit[ "count" ]       = 0
-    _dm_length_audit[ "total_chars" ] = 0
-    _dm_length_audit[ "total_words" ] = 0
-    _dm_length_audit[ "since" ]       = datetime.now().isoformat( timespec="seconds" )
+    _dm_length_audit[ "count" ]           = 0
+    _dm_length_audit[ "total_chars" ]     = 0
+    _dm_length_audit[ "total_words" ]     = 0
+    _dm_length_audit[ "total_sentences" ] = 0
+    _dm_length_audit[ "since" ]           = datetime.now().isoformat( timespec="seconds" )
 
 
 def get_dm_length_audit():
@@ -252,13 +278,14 @@ def get_dm_length_audit():
 
     Ensures:
         - returns a COPY (a reader cannot mutate the live counters by holding it)
-        - includes avg_chars / avg_words, both 0.0 (never divide-by-zero) when
-          count is 0
+        - includes avg_chars / avg_words / avg_sentences, all 0.0 (never
+          divide-by-zero) when count is 0
     """
     snapshot = dict( _dm_length_audit )
     count = snapshot[ "count" ]
-    snapshot[ "avg_chars" ] = ( snapshot[ "total_chars" ] / count ) if count else 0.0
-    snapshot[ "avg_words" ] = ( snapshot[ "total_words" ] / count ) if count else 0.0
+    snapshot[ "avg_chars" ]     = ( snapshot[ "total_chars" ]     / count ) if count else 0.0
+    snapshot[ "avg_words" ]     = ( snapshot[ "total_words" ]     / count ) if count else 0.0
+    snapshot[ "avg_sentences" ] = ( snapshot[ "total_sentences" ] / count ) if count else 0.0
     return snapshot
 
 
@@ -267,7 +294,8 @@ def format_dm_length_audit_line():
     One readable line carrying the running count and averages.
 
     Ensures:
-        - contains `count=<n>`, `avg_chars=<f>`, `avg_words=<f>` unconditionally
+        - contains `count=<n>`, `avg_chars=<f>`, `avg_words=<f>`, `avg_sentences=<f>`
+          unconditionally
         - names the window start, same convention as format_dm_project_audit_line
     """
     audit = get_dm_length_audit()
@@ -275,7 +303,8 @@ def format_dm_length_audit_line():
         f"[dm-length-audit] since {_dm_length_audit[ 'since' ]}: "
         f"count={audit[ 'count' ]} "
         f"avg_chars={audit[ 'avg_chars' ]:.1f} "
-        f"avg_words={audit[ 'avg_words' ]:.1f}"
+        f"avg_words={audit[ 'avg_words' ]:.1f} "
+        f"avg_sentences={audit[ 'avg_sentences' ]:.1f}"
     )
 
 
@@ -290,12 +319,13 @@ def _record_dm_length( body_text ):
         - measures body_text AS SUPPLIED, before any timestamp/frame prefix is
           added elsewhere in the send path, so constant per-DM overhead never
           pollutes the arm-to-arm delta
-        - increments count, total_chars, total_words
+        - increments count, total_chars, total_words, total_sentences
         - emits one audit line (same convention as _record_dm_project)
     """
-    _dm_length_audit[ "count" ]       += 1
-    _dm_length_audit[ "total_chars" ] += len( body_text )
-    _dm_length_audit[ "total_words" ] += len( body_text.split() )
+    _dm_length_audit[ "count" ]           += 1
+    _dm_length_audit[ "total_chars" ]     += len( body_text )
+    _dm_length_audit[ "total_words" ]     += len( body_text.split() )
+    _dm_length_audit[ "total_sentences" ] += _count_sentences( body_text )
     print( format_dm_length_audit_line() )
 
 
@@ -995,7 +1025,8 @@ async def get_dm_project_audit_endpoint(   # pragma: no cover
     summary     = "Read the DM length audit — evidence for the Phase 1 verbosity A/B",
     description = (
         "Returns the live DM body length counters: `count`, `total_chars`, `total_words`, "
-        "derived `avg_chars`/`avg_words`, and the window start. Snapshot this endpoint before "
+        "`total_sentences`, derived `avg_chars`/`avg_words`/`avg_sentences`, and the window "
+        "start. Snapshot this endpoint before "
         "and after each control/treatment run of the DM Verbosity Reduction A/B "
         "(src/rnd/v0.1.9/2026.07.31-dm-verbosity-reduction/) to get a quantified delta rather "
         "than a vibes-based one. Counters reset on server restart, same as the project-audit; "
