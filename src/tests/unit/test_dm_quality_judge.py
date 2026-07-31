@@ -29,7 +29,7 @@ from cosa.agents.dm_quality_judge.xml_models import (
 )
 from cosa.agents.dm_quality_judge.judge import (
     DmQualityJudge, length_bucket, round_half_up, combine_overall,
-    _JUDGE_UNAVAILABLE_DETAIL, _repair_llm_xml, QUALITATIVE_WORD_LIMIT,
+    _JUDGE_UNAVAILABLE_DETAIL, _repair_llm_xml, QUALITATIVE_WORD_LIMIT, _RETRY_NUDGE,
 )
 
 _FIXTURE_DIR = os.path.join( _src_path, "tests", "unit", "fixtures", "dm_judge" )
@@ -355,6 +355,52 @@ class TestRepairLlmXml:
         out = _repair_llm_xml( "<directness>good" )
         assert not out.startswith( "<response>" )
 
+    def test_recovers_degenerate_curly_mode( self ):
+        """bug 2201516e: the non-XML `{ directness_meh } { tone _ good }` degenerate
+        mode has the label recoverable — synthesize a <response> from it."""
+        out = _repair_llm_xml( "{ directness_meh } { tone _ good }" )
+        assert out == "<response><directness>meh</directness><tone>good</tone></response>"
+        parsed = DmQualityJudgeResponse.from_xml( out )
+        assert parsed.directness_weight() == 0 and parsed.tone_weight() == 1
+
+    def test_curly_recovery_keeps_underscored_label_intact( self ):
+        parsed = DmQualityJudgeResponse.from_xml(
+            _repair_llm_xml( "{ directness_needs_improvement } { tone_meh }" )
+        )
+        assert parsed.directness == "needs_improvement"
+        assert parsed.directness_weight() == -1
+
+    def test_curly_partial_only_directness_is_not_recovered( self ):
+        """Only one dimension present → cannot form a response → returned unwrapped
+        so from_xml raises and the judge falls back (never a half-grade)."""
+        out = _repair_llm_xml( "{ directness_meh } and nothing else here" )
+        assert "<response>" not in out
+
+
+_CURLY_FIXTURES = [
+    ( "degenerate_curly_verbose_146w.txt", 0, 1 ),   # { directness_meh } { tone _ good }
+    ( "degenerate_curly_clean_150w.txt",   2, 1 ),   # { directness_exemplary } { tone _ good }
+]
+
+
+class TestDegenerateCurlyMode:
+    """bug 2201516e — Clayton's live-captured non-XML curly degenerate mode. The
+    SAME capture must fail raw pre-fix and recover a REAL grade post-fix (not the
+    judge-unavailable failure fallback it currently hits)."""
+
+    @pytest.mark.parametrize( "fname,_dw,_tw", _CURLY_FIXTURES )
+    def test_raw_curly_fails_to_parse_pre_fix( self, fname, _dw, _tw ):
+        with pytest.raises( XMLParsingError ):
+            DmQualityJudgeResponse.from_xml( _load_fixture( fname ) )
+
+    @pytest.mark.parametrize( "fname,dw,tw", _CURLY_FIXTURES )
+    def test_judge_recovers_real_grade_post_fix( self, fname, dw, tw ):
+        judge, _client = _make_judge( run_behaviour=_load_fixture( fname ) )
+        result = judge.judge( "a rambling body under the ceiling" )
+        assert result[ "directness" ][ "detail" ] != _JUDGE_UNAVAILABLE_DETAIL
+        assert result[ "directness" ][ "weight" ] == dw
+        assert result[ "tone" ][ "weight" ]       == tw
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Captured-Mistral fixtures — Krishna's acceptance bar: the SAME real malformed
@@ -429,6 +475,39 @@ class TestCapturedMistralFixtures:
         assert result[ "directness" ][ "detail" ] == _JUDGE_UNAVAILABLE_DETAIL
 
 
+class TestOneOfOneDegenerateRecovery:
+    """bug d02eaaa7: the model deterministically emits ' (1 of 1)' (no XML, no grade)
+    on one specific rambling body. Repair alone can't recover it — there is no grade
+    IN it — so the fix is a retry that PREPENDS a reply-anchor nudge to break the
+    deterministic degeneration."""
+
+    def test_one_of_one_is_not_repairable_by_itself( self ):
+        """' (1 of 1)' has no tags and no grade label → repair yields nothing
+        parseable → from_xml raises (which is why a plain retry can't help; the nudge
+        must change the prompt)."""
+        with pytest.raises( XMLParsingError ):
+            DmQualityJudgeResponse.from_xml( _repair_llm_xml( " (1 of 1)" ) )
+
+    @patch( "cosa.agents.dm_quality_judge.judge.time.sleep", return_value=None )
+    def test_retry_prepends_nudge_and_recovers( self, _sleep ):
+        """Attempt 1 (clean prompt) returns the degenerate ' (1 of 1)'; attempt 2
+        (nudge-prefixed) returns valid XML → judge recovers a NON-fallback grade."""
+        judge, client = _make_judge( run_behaviour=[
+            " (1 of 1)",
+            "<response><directness>good</directness><tone>needs_improvement</tone></response>",
+        ] )
+        result = judge.judge( "a short rambling body" )
+        assert client.run.call_count == 2
+        # attempt 1 prompt has NO nudge; attempt 2 prompt LEADS with it
+        first_prompt  = client.run.call_args_list[ 0 ].args[ 0 ]
+        second_prompt = client.run.call_args_list[ 1 ].args[ 0 ]
+        assert not first_prompt.startswith( _RETRY_NUDGE )
+        assert second_prompt.startswith( _RETRY_NUDGE )
+        assert result[ "directness" ][ "detail" ] != _JUDGE_UNAVAILABLE_DETAIL
+        assert result[ "directness" ][ "weight" ] == 1
+        assert result[ "tone" ][ "weight" ]       == -1
+
+
 class TestQualitativeWordCeiling:
     """bug 2a41e141: past QUALITATIVE_WORD_LIMIT the LLM is skipped — honest 🤷/0 on the
     qualitative dims, while Length still penalizes the verbosity."""
@@ -498,6 +577,35 @@ class TestLiveMistralRegression:
             "chat about the queue thing sometime when you get a moment, just flagging it is on my mind."
         )
         assert good[ "directness" ][ "weight" ] > bad[ "directness" ][ "weight" ]
+
+    def test_live_rambling_140w_under_ceiling_grades_non_fallback( self ):
+        """bug 2201516e: a rambling ~140-word DM (under the 150 ceiling, the target
+        population) must return a REAL grade, not the judge-unavailable fallback —
+        whether the model emits XML or the degenerate `{ directness_x }` curly mode,
+        the repair layer now recovers the signal end-to-end against live Mistral."""
+        rambling = (
+            "Hey, so, I hope this is not a bad time, I know everyone is heads-down and the last thing I "
+            "want is to add noise, but I have been mulling over the queue refactor for a couple of days "
+            "and I keep going back and forth on whether it is even worth bringing up, and honestly I am "
+            "still not sure where I land, there are arguments on both sides and a reasonable person might "
+            "disagree, but I figured I would rather flag it early than sit on it and regret it, so anyway, "
+            "no pressure at all, whenever you get a spare moment maybe we could talk it through, or not, "
+            "totally your call, just wanted to put it on your radar in case it helps, thanks so much."
+        )
+        assert len( rambling.split() ) <= QUALITATIVE_WORD_LIMIT
+        result = DmQualityJudge().judge( rambling )
+        assert result[ "directness" ][ "detail" ] != _JUDGE_UNAVAILABLE_DETAIL
+        assert result[ "tone" ][ "detail" ]       != _JUDGE_UNAVAILABLE_DETAIL
+
+    def test_live_1of1_verbose_recovers_via_nudge( self ):
+        """bug d02eaaa7 end-to-end: Clayton's exact 146w body deterministically makes
+        the live model emit ' (1 of 1)' on attempt 1; the nudge retry recovers a REAL
+        non-fallback grade against live Mistral (was judge-unavailable pre-fix)."""
+        body   = _load_fixture( "live_1of1_verbose_146w.txt" )
+        assert len( body.split() ) <= QUALITATIVE_WORD_LIMIT      # under the ceiling → LLM-graded
+        result = DmQualityJudge().judge( body )
+        assert result[ "directness" ][ "detail" ] != _JUDGE_UNAVAILABLE_DETAIL
+        assert result[ "tone" ][ "detail" ]       != _JUDGE_UNAVAILABLE_DETAIL
 
     def test_live_maria_raw_is_length_gated_not_parroted( self ):
         """bug 2a41e141 end-to-end: the 527-word reference DM is PAST the qualitative

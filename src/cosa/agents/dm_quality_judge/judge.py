@@ -44,6 +44,17 @@ _JUDGE_ROUTING_COMMAND      = "dm quality judge"
 
 _JUDGE_UNAVAILABLE_DETAIL   = "judge unavailable"
 
+# On retry, prepend this reply-anchor to break a deterministic degenerate mode
+# (bug d02eaaa7): the model reads certain rambling bodies + the judge prompt and
+# emits a literal " (1 of 1)" (finish_reason stop, 7 tokens) instead of the XML —
+# deterministic at temp=0, so a plain retry reproduces it identically. Prepending
+# this anchor breaks the attractor DETERMINISTICALLY (confirmed live: 3/3 recover a
+# real grade), which a temperature bump did NOT (~50%/attempt, and it hit OTHER
+# degenerate modes) — so this is preferred over temp jitter and keeps the live
+# regression non-flaky. Attempt 1 is unchanged, so inputs that already parse never
+# see the nudge (no regression to the normal path's determinism).
+_RETRY_NUDGE                = "Begin your reply with <response>.\n\n"
+
 # Above this word count the qualitative LLM pass is SKIPPED and Directness/Tone
 # return the honest 🤷/0 fallback (bug 2a41e141, Rick-ratified 2026-07-31 "option 1").
 #
@@ -132,6 +143,18 @@ def _repair_llm_xml( raw ):
                 last_end = max( last_end, idx + len( close ) )
         if last_end != -1:
             return f"<response>{raw[ first.start() : last_end ]}</response>"
+
+    # Degenerate NON-XML curly mode (bug 2201516e): the model sometimes emits, on
+    # rambling DMs, `{ directness_meh } { tone _ good }` — no tags at all, but the
+    # GRADE LABEL is right there after the dimension name (separated by spaces/
+    # underscores). Recover it rather than discard the signal. The label run is
+    # `[a-z_]+` (covers the underscored `needs_improvement`); normalize_grade_label
+    # downstream strips/aliases it.
+    d = re.search( r"directness[\s_]+([a-z][a-z_]*)", raw, re.I )
+    t = re.search( r"tone[\s_]+([a-z][a-z_]*)", raw, re.I )
+    if d is not None and t is not None:
+        return f"<response><directness>{d.group( 1 )}</directness><tone>{t.group( 1 )}</tone></response>"
+
     return raw.strip()
 
 
@@ -352,7 +375,11 @@ class DmQualityJudge:
         max_attempts = 3
         for attempt in range( 1, max_attempts + 1 ):
             try:
-                response_text = self._client.run( prompt )
+                # Retries prepend the reply-anchor nudge to break the deterministic
+                # " (1 of 1)" degenerate mode (bug d02eaaa7). Attempt 1 is the clean
+                # prompt so the normal path is untouched.
+                effective_prompt = prompt if attempt == 1 else _RETRY_NUDGE + prompt
+                response_text = self._client.run( effective_prompt )
                 if self.debug: print( f"[DmQualityJudge] Raw response (attempt {attempt}): {response_text[ :200 ]}" )
 
                 # Repair the live model's sloppy XML (spaced/multi-word tags,

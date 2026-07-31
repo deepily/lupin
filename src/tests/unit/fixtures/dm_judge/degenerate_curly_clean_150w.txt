@@ -1,0 +1,1 @@
+{ directness_exemplary } { tone _ good }
