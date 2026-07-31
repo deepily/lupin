@@ -212,6 +212,93 @@ def _make_sender_id_builder( host_builder ):
     return _build
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# DM length audit (Phase 1 of the DM Verbosity Reduction plan, Rick 2026-07-31 —
+# src/rnd/v0.1.9/2026.07.31-dm-verbosity-reduction/). Kept as a SEPARATE sibling
+# counter rather than merged into `_dm_project_audit` above — different concern
+# (this measures body length, not the sender_project gate), and merging would
+# confuse that audit's own step-2 story.
+#
+# Deliberately does NOT tag rows by experiment arm (on/off toggle) — fragile if
+# control and treatment sessions ever overlap in time on one server. Instead:
+# snapshot `/api/dm/length-audit` before and after each arm's run; `since`
+# scopes each window exactly like the project-audit already does.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_dm_length_audit = {
+    "count"       : 0,
+    "total_chars" : 0,
+    "total_words" : 0,
+    "since"       : datetime.now().isoformat( timespec="seconds" ),
+}
+
+
+def reset_dm_length_audit():
+    """
+    Reset the DM length-audit counters and re-stamp the `since` instant.
+
+    Ensures:
+        - count, total_chars, total_words are all 0, `since` is now
+    """
+    _dm_length_audit[ "count" ]       = 0
+    _dm_length_audit[ "total_chars" ] = 0
+    _dm_length_audit[ "total_words" ] = 0
+    _dm_length_audit[ "since" ]       = datetime.now().isoformat( timespec="seconds" )
+
+
+def get_dm_length_audit():
+    """
+    Snapshot of the DM length audit, with derived averages.
+
+    Ensures:
+        - returns a COPY (a reader cannot mutate the live counters by holding it)
+        - includes avg_chars / avg_words, both 0.0 (never divide-by-zero) when
+          count is 0
+    """
+    snapshot = dict( _dm_length_audit )
+    count = snapshot[ "count" ]
+    snapshot[ "avg_chars" ] = ( snapshot[ "total_chars" ] / count ) if count else 0.0
+    snapshot[ "avg_words" ] = ( snapshot[ "total_words" ] / count ) if count else 0.0
+    return snapshot
+
+
+def format_dm_length_audit_line():
+    """
+    One readable line carrying the running count and averages.
+
+    Ensures:
+        - contains `count=<n>`, `avg_chars=<f>`, `avg_words=<f>` unconditionally
+        - names the window start, same convention as format_dm_project_audit_line
+    """
+    audit = get_dm_length_audit()
+    return (
+        f"[dm-length-audit] since {_dm_length_audit[ 'since' ]}: "
+        f"count={audit[ 'count' ]} "
+        f"avg_chars={audit[ 'avg_chars' ]:.1f} "
+        f"avg_words={audit[ 'avg_words' ]:.1f}"
+    )
+
+
+def _record_dm_length( body_text ):
+    """
+    Count one dm_send body's length (Phase 1 DM Verbosity Reduction A/B).
+
+    Requires:
+        - body_text is the caller-supplied DM body string
+
+    Ensures:
+        - measures body_text AS SUPPLIED, before any timestamp/frame prefix is
+          added elsewhere in the send path, so constant per-DM overhead never
+          pollutes the arm-to-arm delta
+        - increments count, total_chars, total_words
+        - emits one audit line (same convention as _record_dm_project)
+    """
+    _dm_length_audit[ "count" ]       += 1
+    _dm_length_audit[ "total_chars" ] += len( body_text )
+    _dm_length_audit[ "total_words" ] += len( body_text.split() )
+    print( format_dm_length_audit_line() )
+
+
 def _record_dm_project( sender_session_id, sender_project ):
     """
     Count one DM on whichever side of the caller-supplied-project seam it lands,
@@ -325,6 +412,7 @@ def execute_dm_send(
     # asking the server to resolve the caller's project is the defect, not the
     # implementation of it.
     _record_dm_project( body.sender_session_id, body.sender_project )
+    _record_dm_length( body.body )
     # STEP 2 (row 12b5a766, 2026-07-27): an ABSENT project is now a REJECT, not a
     # fallback. Counted FIRST — the audit records the offender even though the DM
     # is refused, so a fleet that starts offending stays visible instead of going
@@ -900,3 +988,21 @@ async def get_dm_project_audit_endpoint(   # pragma: no cover
     authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
 ) -> JSONResponse:
     return JSONResponse( status_code=200, content=get_dm_project_audit() )
+
+
+@router.get(
+    "/length-audit",
+    summary     = "Read the DM length audit — evidence for the Phase 1 verbosity A/B",
+    description = (
+        "Returns the live DM body length counters: `count`, `total_chars`, `total_words`, "
+        "derived `avg_chars`/`avg_words`, and the window start. Snapshot this endpoint before "
+        "and after each control/treatment run of the DM Verbosity Reduction A/B "
+        "(src/rnd/v0.1.9/2026.07.31-dm-verbosity-reduction/) to get a quantified delta rather "
+        "than a vibes-based one. Counters reset on server restart, same as the project-audit; "
+        "`since` is load-bearing for the same reason."
+    ),
+)
+async def get_dm_length_audit_endpoint(   # pragma: no cover
+    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
+) -> JSONResponse:
+    return JSONResponse( status_code=200, content=get_dm_length_audit() )

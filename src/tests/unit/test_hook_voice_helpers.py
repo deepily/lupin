@@ -38,7 +38,9 @@ from lupin_cli.claude_code.hooks.lib.hook_common import (
     VOICE_LINE_PREFIX,
     VOICE_ACK_RIDER,
     BREVITY_TAG,
+    DM_STYLE_TAG,
     PEER_DM_BREVITY_RIDER,
+    _peer_dm_reply_rider,
     TOOLS_SILENT,
     TOOLS_ANNOUNCE
 )
@@ -648,6 +650,68 @@ class TestBrevityRiders:
         """Both surfaces derive from ONE tag — never re-typed literals (46a17f5a)."""
         assert BREVITY_TAG in VOICE_ACK_RIDER
         assert BREVITY_TAG in PEER_DM_BREVITY_RIDER
+
+
+class TestDmStyleTag:
+    """
+    DM_STYLE_TAG — Phase 1 DM Verbosity Reduction (Rick, 2026-07-31). Same
+    ratchet/wording discipline as BREVITY_TAG, kept as a separate constant
+    because BREVITY_TAG's "Detail → abstract" clause doesn't apply to dm_send
+    (no abstract parameter).
+    """
+
+    def test_stays_under_byte_ceiling( self ):
+        """
+        This tag is spliced into the MCP `instructions` payload AND appended to
+        the reply-affordance rider, so its byte cost is a standing budget, not a
+        one-time choice — same ratchet discipline as VOICE_ACK_RIDER.
+        """
+        assert len( DM_STYLE_TAG ) < 220, (
+            f"DM_STYLE_TAG grew to {len( DM_STYLE_TAG )} chars — trim it rather "
+            f"than raising this ceiling"
+        )
+
+    def test_escape_clause_wording_is_asked_not_content_requires( self ):
+        """Same load-bearing wording rule as BREVITY_TAG — see that test's rationale."""
+        assert "ONLY WHEN ASKED" in DM_STYLE_TAG
+        assert "content requires" not in DM_STYLE_TAG.lower()
+
+    def test_not_merged_into_brevity_tag( self ):
+        """Deliberately a separate constant — never accidentally unified."""
+        assert DM_STYLE_TAG != BREVITY_TAG
+        assert "abstract" not in DM_STYLE_TAG.lower()
+
+
+class TestPeerDmReplyRiderToggle:
+    """
+    _peer_dm_reply_rider() — the reply-side half of the DM Style Contract
+    toggle (lupin-app.ini "dm style contract enabled" /
+    cu.get_dm_style_contract_enabled()). Read at CALL TIME, not import time, so
+    the toggle needs no daemon restart.
+    """
+
+    @patch( "lupin_cli.claude_code.hooks.lib.hook_common.cu.get_dm_style_contract_enabled", return_value=False )
+    def test_toggle_off_returns_brevity_rider_unchanged( self, mock_toggle ):
+        """Control arm — today's shipped behavior, byte-for-byte unchanged."""
+        assert _peer_dm_reply_rider() == PEER_DM_BREVITY_RIDER
+
+    @patch( "lupin_cli.claude_code.hooks.lib.hook_common.cu.get_dm_style_contract_enabled", return_value=True )
+    def test_toggle_on_appends_dm_style_tag( self, mock_toggle ):
+        """Treatment arm — carries both the brevity rider AND the style tag."""
+        result = _peer_dm_reply_rider()
+        assert PEER_DM_BREVITY_RIDER in result
+        assert DM_STYLE_TAG in result
+
+    @patch( "lupin_cli.claude_code.hooks.lib.hook_common.cu.get_dm_style_contract_enabled", return_value=True )
+    def test_one_way_advisory_suppresses_rider_regardless_of_toggle( self, mock_toggle ):
+        """
+        Regression: a one-way arbiter advisory takes no reply (bug 8894e597), so
+        it must carry NEITHER rider — even with the DM Style Contract toggle ON.
+        """
+        block = build_peer_dm_reminder( "poke", persona="arbiter", one_way=True )
+        assert PEER_DM_BREVITY_RIDER not in block
+        assert DM_STYLE_TAG not in block
+        assert "ONE-WAY advisory" in block
 
 
 # ═════════════════════════════════════════════════════════════════════════════

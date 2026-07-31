@@ -224,5 +224,63 @@ class TestAuditEndpointIsWired( unittest.TestCase ):
         self.assertEqual( fresh[ "un_projected_senders" ], [] )
 
 
+class TestDmLengthAuditIsWired( unittest.TestCase ):
+    """
+    Phase 1 of the DM Verbosity Reduction plan (Rick, 2026-07-31 —
+    src/rnd/v0.1.9/2026.07.31-dm-verbosity-reduction/). Mirrors
+    TestAuditEndpointIsWired's three assertions for the sibling length-audit
+    counter: a route exists, the endpoint returns live counters, and the
+    snapshot is a defensive copy.
+    """
+
+    def test_a_route_exists_on_the_dm_router_for_the_length_audit( self ):
+        from cosa.rest.routers.dm import router
+        paths = { getattr( r, "path", None ) for r in router.routes }
+        self.assertIn( "/api/dm/length-audit", paths )
+
+    def test_the_endpoint_returns_the_live_counters( self ):
+        from cosa.rest.routers.dm import get_dm_length_audit, reset_dm_length_audit
+        reset_dm_length_audit()
+        snapshot = get_dm_length_audit()
+        for key in ( "count", "total_chars", "total_words", "since", "avg_chars", "avg_words" ):
+            self.assertIn( key, snapshot )
+
+    def test_the_snapshot_is_a_copy_a_reader_cannot_mutate_the_counters( self ):
+        """Same defensive-copy contract as the project-audit's equivalent test."""
+        from cosa.rest.routers.dm import get_dm_length_audit, reset_dm_length_audit
+        reset_dm_length_audit()
+        got = get_dm_length_audit()
+        got[ "count" ] = 999
+        fresh = get_dm_length_audit()
+        self.assertEqual( fresh[ "count" ], 0 )
+
+
+class TestDmLengthAuditIsRecordedOnSend( _CoreHarness ):
+    """
+    A rejected (un-projected) DM still gets its length counted — same
+    count-then-reject ordering discipline as TestRejectionIsStillObserved,
+    so a fleet that starts offending on the project axis doesn't ALSO go
+    invisible on the length axis.
+    """
+
+    def setUp( self ):
+        super().setUp()
+        from cosa.rest.routers.dm import reset_dm_length_audit
+        reset_dm_length_audit()
+
+    def test_an_accepted_dm_is_counted_in_the_length_audit( self ):
+        from cosa.rest.routers.dm import get_dm_length_audit
+        self._run( _make_send_body( sender_project="plan" ) )
+        audit = get_dm_length_audit()
+        self.assertEqual( audit[ "count" ], 1 )
+        self.assertEqual( audit[ "total_words" ], 5 )   # "does this still get through?"
+        self.assertEqual( audit[ "total_chars" ], 28 )
+
+    def test_a_rejected_dm_is_still_counted_in_the_length_audit( self ):
+        from cosa.rest.routers.dm import get_dm_length_audit
+        self._run( _make_send_body() )   # no sender_project → 422, per TestAbsentProjectIsRejected
+        self.assertEqual( get_dm_length_audit()[ "count" ], 1 )
+
+
 if __name__ == "__main__":
     unittest.main()

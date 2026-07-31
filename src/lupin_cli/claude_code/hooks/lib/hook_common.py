@@ -604,6 +604,22 @@ BREVITY_TAG = (
 )
 
 
+# The DM Style Contract tag (Phase 1 prompting-only DM brevity/tone experiment,
+# Rick 2026-07-31, toggled by lupin-app.ini "dm style contract enabled" /
+# cu.get_dm_style_contract_enabled()). Folds the ratified control-instruction
+# language (src/rnd/v0.1.9/2026.07.31-dm-verbosity-reduction/2026.07.31-anthropic-
+# opus-4-8-checkpoints-and-language-reviews.md) into the same bracketed-tag shape
+# as BREVITY_TAG so it rides cheaply wherever it's quoted. Kept as a SEPARATE
+# constant rather than merged into BREVITY_TAG: BREVITY_TAG's closing "Detail →
+# abstract" clause doesn't apply to dm_send (no abstract parameter) and must not
+# be misquoted onto a DM.
+DM_STYLE_TAG = (
+    "[DM Style Contract — lead with the result; plain, literal sentences; "
+    "decisions/evidence/risks/required actions only; NoAA WaHH; 3 lines / "
+    "~60 words; longer ONLY WHEN ASKED.]"
+)
+
+
 # The human-voice TTS-acknowledge rider (appended by enrich_voice_context when a
 # drained message is human voice). Hoisted to a module constant so its BYTE COST
 # is visible at the top of the file — this string rides EVERY spoken utterance.
@@ -630,6 +646,26 @@ VOICE_ACK_RIDER = (
 # suppressed on one_way=True advisories (no reply is possible — see
 # build_peer_dm_reminder's bug 8894e597 branch).
 PEER_DM_BREVITY_RIDER = f"↳ {BREVITY_TAG}"
+
+
+def _peer_dm_reply_rider():
+    """
+    Resolve the reply-affordance rider at CALL TIME (not import time) — gated on
+    lupin-app.ini "dm style contract enabled" (cu.get_dm_style_contract_enabled()),
+    read fresh on every call so the toggle needs no daemon restart, matching the
+    get_spoken_char_cap() uncached-per-call precedent.
+
+    Ensures:
+        - toggle OFF (control, default): returns PEER_DM_BREVITY_RIDER unchanged
+          — today's shipped behavior, the control arm of the A/B
+        - toggle ON (treatment): returns PEER_DM_BREVITY_RIDER + DM_STYLE_TAG
+
+    Returns:
+        str: the rider text for the reply-affordance line
+    """
+    if cu.get_dm_style_contract_enabled():
+        return f"{PEER_DM_BREVITY_RIDER} {DM_STYLE_TAG}"
+    return PEER_DM_BREVITY_RIDER
 
 
 def build_peer_dm_reminder( body, persona=None, icon=None, msg_id=None, thread_id=None, one_way=False ):
@@ -702,7 +738,7 @@ def build_peer_dm_reminder( body, persona=None, icon=None, msg_id=None, thread_i
         reply_affordance = (
             f'↳ Reply via dm_send( recipient="{persona}", body="<your reply>", '
             f'reply_to="{msg_id}", thread_id="{thread_id}" )\n'
-            f'{PEER_DM_BREVITY_RIDER}'
+            f'{_peer_dm_reply_rider()}'
         )
     reminder_body = (
         f"{PEER_DM_FRAME_PREFIX}{sender_label} (message_id {msg_id}, thread {thread_id}):\n\n"
