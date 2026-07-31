@@ -612,31 +612,23 @@ _TTS_CONTRACT_SECTION = (
 
 
 # ============================================================================
-# DM Style Contract (Phase 1 prompting-only DM brevity/tone experiment,
-# Rick 2026-07-31 — see src/rnd/v0.1.9/2026.07.31-dm-verbosity-reduction/)
+# DM Style Contract (DM brevity/tone contract, Rick 2026-07-31 — always on,
+# no toggle. See src/rnd/v0.1.9/2026.07.31-dm-verbosity-reduction/)
 # ============================================================================
 #
-# Gated on lupin-app.ini "dm style contract enabled" (default False = control
-# arm, unchanged behavior). Read ONCE at module load — this MCP subprocess is
-# spawned fresh per Claude Code session, so a toggle flip takes effect on the
-# NEXT session, not the current one (acceptable for a sequential A/B). Closes
-# the gap the research found: the fleet already reminds a peer how to REPLY
-# (PEER_DM_BREVITY_RIDER in hook_common.py), but nothing shaped how a DM is
-# COMPOSED in the first place. This section states that explicitly.
-import cosa.utils.util as _cu_dm_style
-_DM_STYLE_CONTRACT_ENABLED = _cu_dm_style.get_dm_style_contract_enabled()
-
+# Closes the gap the research found: the fleet already reminds a peer how to
+# REPLY (DM_STYLE_TAG on the reply affordance in hook_common.py), but nothing
+# shaped how a DM is COMPOSED in the first place. This section states that
+# explicitly, spliced unconditionally into the MCP `instructions` payload.
 _DM_STYLE_CONTRACT_SECTION = (
-    (
-        "## DM Style Contract (governs `dm_send` — composing AND replying)\n\n"
-        "Every dm_send body is written under this contract BEFORE you send it, "
-        "not only when replying to one. Lead with the result. Plain, literal "
-        "sentences — write it as a human colleague would read it, no invented "
-        "vocabulary. Report only decisions, evidence, risks, and required "
-        "actions; do not narrate routine reasoning or verification; no "
-        "metaphors, aphorisms, slogans, or redundant summaries. 3 lines / "
-        f"~60 words; longer ONLY WHEN ASKED. {DM_STYLE_TAG}\n\n"
-    ) if _DM_STYLE_CONTRACT_ENABLED else ""
+    "## DM Style Contract (governs `dm_send` — composing AND replying)\n\n"
+    "Every dm_send body is written under this contract BEFORE you send it, "
+    "not only when replying to one. Lead with the result. Plain, literal "
+    "sentences — write it as a human colleague would read it, no invented "
+    "vocabulary. Report only decisions, evidence, risks, and required "
+    "actions; do not narrate routine reasoning or verification; no "
+    "metaphors, aphorisms, slogans, or redundant summaries. 3 lines / "
+    f"~60 words; longer ONLY WHEN ASKED. {DM_STYLE_TAG}\n\n"
 )
 
 
@@ -3409,14 +3401,13 @@ def _dm_send_fn(
 
 # Style addendum appended to the docstring BEFORE mcp.tool() registration (not
 # via decorator syntax) — FastMCP may snapshot the tool description at
-# decoration time, so the mutation must land first. Gated on the same
-# _DM_STYLE_CONTRACT_ENABLED toggle as the `instructions` § DM Style Contract
-# section above; empty string (no-op) when the toggle is off.
+# decoration time, so the mutation must land first. Always appended (the DM
+# Style Contract is unconditional — no toggle).
 _DM_SEND_STYLE_ADDENDUM = (
     "\n\n    STYLE (governs the body you compose): see § DM Style Contract in "
     "this server's `instructions` — lead with the result, 3 lines / ~60 words. "
     f"{DM_STYLE_TAG}\n"
-) if _DM_STYLE_CONTRACT_ENABLED else ""
+)
 _dm_send_fn.__doc__ = _dm_send_fn.__doc__ + _DM_SEND_STYLE_ADDENDUM
 dm_send = mcp.tool( _dm_send_fn )
 

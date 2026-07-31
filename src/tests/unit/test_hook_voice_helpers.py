@@ -39,8 +39,6 @@ from lupin_cli.claude_code.hooks.lib.hook_common import (
     VOICE_ACK_RIDER,
     BREVITY_TAG,
     DM_STYLE_TAG,
-    PEER_DM_BREVITY_RIDER,
-    _peer_dm_reply_rider,
     TOOLS_SILENT,
     TOOLS_ANNOUNCE
 )
@@ -629,27 +627,33 @@ class TestBrevityRiders:
         for acronym in ( "KISS", "3LoL", "NoMC C2C", "NoAA" ):
             assert acronym in BREVITY_TAG, f"{acronym} missing from the tag"
 
-    def test_peer_dm_reply_affordance_carries_brevity_rider( self ):
-        """A bidirectional peer DM carries the rider (task 314671cd)."""
+    def test_peer_dm_reply_affordance_carries_dm_style_tag( self ):
+        """A bidirectional peer DM carries the DM Style Contract tag on its reply
+        affordance (DM Verbosity Reduction, always-on — no toggle)."""
         block = build_peer_dm_reminder( "status?", persona="maría", icon="🌸",
                                         msg_id="m1", thread_id="t1" )
-        assert PEER_DM_BREVITY_RIDER in block
+        assert DM_STYLE_TAG in block
         assert "dm_send(" in block
 
-    def test_one_way_advisory_suppresses_brevity_rider( self ):
+    def test_one_way_advisory_suppresses_reply_rider( self ):
         """
         An arbiter one-way advisory takes NO reply (bug 8894e597), so a rider that
-        shapes replies is pure byte cost — suppressed.
+        shapes replies is pure byte cost — suppressed (the DM Style Contract tag
+        does not appear).
         """
         block = build_peer_dm_reminder( "poke", persona="arbiter", one_way=True )
-        assert PEER_DM_BREVITY_RIDER not in block
         assert BREVITY_TAG not in block
+        assert DM_STYLE_TAG not in block
         assert "ONE-WAY advisory" in block
 
-    def test_riders_share_one_tag_constant_no_drift( self ):
-        """Both surfaces derive from ONE tag — never re-typed literals (46a17f5a)."""
+    def test_reply_affordance_derives_from_one_tag_constant_no_drift( self ):
+        """The reply affordance's rider IS the module's DM_STYLE_TAG constant —
+        never a re-typed literal (46a17f5a). The voice-ack rider likewise derives
+        from BREVITY_TAG."""
         assert BREVITY_TAG in VOICE_ACK_RIDER
-        assert BREVITY_TAG in PEER_DM_BREVITY_RIDER
+        block = build_peer_dm_reminder( "status?", persona="maría", icon="🌸",
+                                        msg_id="m1", thread_id="t1" )
+        assert DM_STYLE_TAG in block
 
 
 class TestDmStyleTag:
@@ -680,38 +684,6 @@ class TestDmStyleTag:
         """Deliberately a separate constant — never accidentally unified."""
         assert DM_STYLE_TAG != BREVITY_TAG
         assert "abstract" not in DM_STYLE_TAG.lower()
-
-
-class TestPeerDmReplyRiderToggle:
-    """
-    _peer_dm_reply_rider() — the reply-side half of the DM Style Contract
-    toggle (lupin-app.ini "dm style contract enabled" /
-    cu.get_dm_style_contract_enabled()). Read at CALL TIME, not import time, so
-    the toggle needs no daemon restart.
-    """
-
-    @patch( "lupin_cli.claude_code.hooks.lib.hook_common.cu.get_dm_style_contract_enabled", return_value=False )
-    def test_toggle_off_returns_brevity_rider_unchanged( self, mock_toggle ):
-        """Control arm — today's shipped behavior, byte-for-byte unchanged."""
-        assert _peer_dm_reply_rider() == PEER_DM_BREVITY_RIDER
-
-    @patch( "lupin_cli.claude_code.hooks.lib.hook_common.cu.get_dm_style_contract_enabled", return_value=True )
-    def test_toggle_on_appends_dm_style_tag( self, mock_toggle ):
-        """Treatment arm — carries both the brevity rider AND the style tag."""
-        result = _peer_dm_reply_rider()
-        assert PEER_DM_BREVITY_RIDER in result
-        assert DM_STYLE_TAG in result
-
-    @patch( "lupin_cli.claude_code.hooks.lib.hook_common.cu.get_dm_style_contract_enabled", return_value=True )
-    def test_one_way_advisory_suppresses_rider_regardless_of_toggle( self, mock_toggle ):
-        """
-        Regression: a one-way arbiter advisory takes no reply (bug 8894e597), so
-        it must carry NEITHER rider — even with the DM Style Contract toggle ON.
-        """
-        block = build_peer_dm_reminder( "poke", persona="arbiter", one_way=True )
-        assert PEER_DM_BREVITY_RIDER not in block
-        assert DM_STYLE_TAG not in block
-        assert "ONE-WAY advisory" in block
 
 
 # ═════════════════════════════════════════════════════════════════════════════

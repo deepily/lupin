@@ -720,42 +720,6 @@ def get_spoken_char_cap() -> int:
         return SPOKEN_CHAR_CAP_DEFAULT
 
 
-# ── DM Style Contract toggle — SINGLE SOURCE OF TRUTH ─────────────────────────
-# Phase 1 prompting-only DM brevity/tone A/B (Rick, 2026-07-31). Gates BOTH the
-# send-side MCP `instructions` § DM Style Contract + dm_send docstring addendum
-# (lupin_mcp.cosa_voice_mcp) and the reply-side rider resolver
-# (lupin_cli...hook_common._peer_dm_reply_rider). Same key, same default-off
-# safety, so both surfaces can never drift out of sync with each other.
-DM_STYLE_CONTRACT_INI_KEY = "dm style contract enabled"
-DM_STYLE_CONTRACT_DEFAULT = False
-
-
-def get_dm_style_contract_enabled() -> bool:
-    """
-    Resolve the DM Style Contract toggle (Phase 1 prompting-only DM brevity/tone
-    A/B) from lupin-app.ini at call time — runtime-tunable, same precedent as
-    get_spoken_char_cap().
-
-    Requires:
-        - ConfigurationManager is importable
-        - LUPIN_CONFIG_MGR_CLI_ARGS env var is set on first singleton init
-
-    Ensures:
-        - returns True only when the ini key is explicitly True
-        - returns DM_STYLE_CONTRACT_DEFAULT (False) if the key is absent or on
-          any config-read error (never raises) — control/off is the safe default
-
-    Raises:
-        - never
-    """
-    from cosa.config.configuration_manager import ConfigurationManager
-    try:
-        config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
-        return config_mgr.get( DM_STYLE_CONTRACT_INI_KEY, default=DM_STYLE_CONTRACT_DEFAULT, return_type="boolean" )
-    except Exception:
-        return DM_STYLE_CONTRACT_DEFAULT
-
-
 def get_api_key(key_name: str, project_root: str = None) -> Optional[str]:
     """
     Get an API key from the configuration directory.

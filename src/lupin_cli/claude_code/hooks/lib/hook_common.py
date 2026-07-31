@@ -604,19 +604,17 @@ BREVITY_TAG = (
 )
 
 
-# The DM Style Contract tag (Phase 1 prompting-only DM brevity/tone experiment,
-# Rick 2026-07-31, toggled by lupin-app.ini "dm style contract enabled" /
-# cu.get_dm_style_contract_enabled()). Folds the ratified control-instruction
-# language (src/rnd/v0.1.9/2026.07.31-dm-verbosity-reduction/2026.07.31-anthropic-
-# opus-4-8-checkpoints-and-language-reviews.md) into the same bracketed-tag shape
-# as BREVITY_TAG so it rides cheaply wherever it's quoted. Kept as a SEPARATE
-# constant rather than merged into BREVITY_TAG: BREVITY_TAG's closing "Detail →
-# abstract" clause doesn't apply to dm_send (no abstract parameter) and must not
-# be misquoted onto a DM.
+# The DM Style Contract tag (DM brevity/tone contract, Rick 2026-07-31 — always
+# on, no toggle). Finalized merged line from Rick's editorial pass: folds the
+# acronym list + the decisions/evidence clause into ONE line and keeps the
+# acronym-dense register deliberately (WaHH added, decisions/evidence slash-
+# joined). Kept as a SEPARATE constant rather than merged into BREVITY_TAG:
+# BREVITY_TAG's closing "Detail → abstract" clause doesn't apply to dm_send
+# (no abstract parameter) and must not be misquoted onto a DM.
+# See src/rnd/v0.1.9/2026.07.31-dm-verbosity-reduction/.
 DM_STYLE_TAG = (
-    "[DM Style Contract — lead with the result; plain, literal sentences; "
-    "decisions/evidence/risks/required actions only; NoAA WaHH; 3 lines / "
-    "~60 words; longer ONLY WHEN ASKED.]"
+    "[KISS · 3LoL · NoMC C2C · NoAA · WaHH — verdict first, 3 lines or less; "
+    "decisions/evidence/risks/required actions only; longer ONLY WHEN ASKED.]"
 )
 
 
@@ -634,38 +632,6 @@ VOICE_ACK_RIDER = (
     "The user is listening, not reading the terminal. "
     f"{BREVITY_TAG}"
 )
-
-
-# The peer-DM brevity rider (task 314671cd). Peer-to-peer DMs are the fleet's
-# worst bloat surface — informality invites courtesy, context-setting, and mutual
-# appreciation the recipient pays for and does not need. Session-boot CLAUDE.md
-# decays into back-of-context; this rider is read fresh at the moment of
-# composing a reply, which is where the leverage is.
-#
-# Scoped to the REPLY affordance on purpose: it governs how you answer, so it is
-# suppressed on one_way=True advisories (no reply is possible — see
-# build_peer_dm_reminder's bug 8894e597 branch).
-PEER_DM_BREVITY_RIDER = f"↳ {BREVITY_TAG}"
-
-
-def _peer_dm_reply_rider():
-    """
-    Resolve the reply-affordance rider at CALL TIME (not import time) — gated on
-    lupin-app.ini "dm style contract enabled" (cu.get_dm_style_contract_enabled()),
-    read fresh on every call so the toggle needs no daemon restart, matching the
-    get_spoken_char_cap() uncached-per-call precedent.
-
-    Ensures:
-        - toggle OFF (control, default): returns PEER_DM_BREVITY_RIDER unchanged
-          — today's shipped behavior, the control arm of the A/B
-        - toggle ON (treatment): returns PEER_DM_BREVITY_RIDER + DM_STYLE_TAG
-
-    Returns:
-        str: the rider text for the reply-affordance line
-    """
-    if cu.get_dm_style_contract_enabled():
-        return f"{PEER_DM_BREVITY_RIDER}\n↳ {DM_STYLE_TAG}"
-    return PEER_DM_BREVITY_RIDER
 
 
 def build_peer_dm_reminder( body, persona=None, icon=None, msg_id=None, thread_id=None, one_way=False ):
@@ -704,8 +670,8 @@ def build_peer_dm_reminder( body, persona=None, icon=None, msg_id=None, thread_i
         - Returns a complete "<system-reminder>...</system-reminder>" block
         - Missing persona falls back to "a peer session"; missing icon/ids → ""
         - one_way=False → the dm_send reply affordance (bidirectional peer DM),
-          followed by PEER_DM_BREVITY_RIDER (task 314671cd — the rider governs
-          how you REPLY, so it rides the reply affordance)
+          followed by DM_STYLE_TAG (the DM Style Contract governs how you REPLY,
+          so it rides the reply affordance — always on, no toggle)
         - one_way=True  → an honest one-way notice (no dm_send line, and NO
           brevity rider — no reply is possible, so a reply-shaping rider would
           be pure byte cost); resuming work is named as the acknowledgment
@@ -738,7 +704,7 @@ def build_peer_dm_reminder( body, persona=None, icon=None, msg_id=None, thread_i
         reply_affordance = (
             f'↳ Reply via dm_send( recipient="{persona}", body="<your reply>", '
             f'reply_to="{msg_id}", thread_id="{thread_id}" )\n'
-            f'{_peer_dm_reply_rider()}'
+            f'↳ {DM_STYLE_TAG}'
         )
     reminder_body = (
         f"{PEER_DM_FRAME_PREFIX}{sender_label} (message_id {msg_id}, thread {thread_id}):\n\n"
