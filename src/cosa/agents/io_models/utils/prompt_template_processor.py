@@ -19,6 +19,7 @@ from cosa.agents.io_models.xml_models import (
 )
 from cosa.agents.runtime_argument_expeditor.xml_models import ExpeditorResponse, ArgConfirmationResponse
 from cosa.agents.notification_proxy.xml_models import ScriptMatcherResponse, BatchScriptMatcherResponse, VerificationResponse
+from cosa.agents.dm_quality_judge.xml_models import DmQualityJudgeResponse
 from cosa.crud_for_dataframes.xml_models import CRUDIntent
 from cosa.agents.calculator.xml_models import CalcIntent
 
@@ -57,6 +58,8 @@ class PromptTemplateProcessor:
         'notification proxy script matcher'        : ScriptMatcherResponse,
         'notification proxy batch script matcher'  : BatchScriptMatcherResponse,
         'notification proxy answer verifier'       : VerificationResponse,
+        # DM Quality Judge (Phase 2 DM Verbosity Reduction)
+        'dm quality judge'                         : DmQualityJudgeResponse,
     }
     
     def __init__( self, debug: bool = False, verbose: bool = False ):

@@ -313,5 +313,119 @@ class TestDmLengthAuditIsRecordedOnSend( _CoreHarness ):
         self.assertEqual( get_dm_length_audit()[ "count" ], 1 )
 
 
+class TestDmQualityAuditIsWired( unittest.TestCase ):
+    """
+    Phase 2 of the DM Verbosity Reduction plan (Rick, 2026-07-31). Mirrors the
+    length-audit's three wiring assertions for the sibling quality-audit counter:
+    a route exists, the endpoint returns live counters (count + all four running
+    weight totals + their derived averages), and the snapshot is a defensive copy.
+    """
+
+    def test_a_route_exists_on_the_dm_router_for_the_quality_audit( self ):
+        from cosa.rest.routers.dm import router
+        paths = { getattr( r, "path", None ) for r in router.routes }
+        self.assertIn( "/api/dm/quality-audit", paths )
+
+    def test_the_endpoint_returns_the_live_counters( self ):
+        from cosa.rest.routers.dm import get_dm_quality_audit, reset_dm_quality_audit
+        reset_dm_quality_audit()
+        snapshot = get_dm_quality_audit()
+        for key in (
+            "count", "since",
+            "total_length_weight", "total_directness_weight",
+            "total_tone_weight", "total_overall_weight",
+            "avg_length", "avg_directness", "avg_tone", "avg_overall",
+        ):
+            self.assertIn( key, snapshot )
+
+    def test_zero_count_averages_are_guarded_against_divide_by_zero( self ):
+        """The same `if count else 0.0` guard as the length-audit — a fresh window
+        reports 0.0 averages, never raises ZeroDivisionError."""
+        from cosa.rest.routers.dm import get_dm_quality_audit, reset_dm_quality_audit
+        reset_dm_quality_audit()
+        snapshot = get_dm_quality_audit()
+        self.assertEqual( snapshot[ "count" ], 0 )
+        for avg in ( "avg_length", "avg_directness", "avg_tone", "avg_overall" ):
+            self.assertEqual( snapshot[ avg ], 0.0 )
+
+    def test_the_snapshot_is_a_copy_a_reader_cannot_mutate_the_counters( self ):
+        """Same defensive-copy contract as the other two audits."""
+        from cosa.rest.routers.dm import get_dm_quality_audit, reset_dm_quality_audit
+        reset_dm_quality_audit()
+        got = get_dm_quality_audit()
+        got[ "count" ] = 999
+        fresh = get_dm_quality_audit()
+        self.assertEqual( fresh[ "count" ], 0 )
+
+    def test_record_tallies_all_four_weights( self ):
+        from cosa.rest.routers.dm import get_dm_quality_audit, reset_dm_quality_audit, _record_dm_quality
+        reset_dm_quality_audit()
+        _record_dm_quality( {
+            "length"     : { "weight":  2 },
+            "directness" : { "weight":  1 },
+            "tone"       : { "weight": -1 },
+            "overall"    : { "weight":  1 },
+        } )
+        audit = get_dm_quality_audit()
+        self.assertEqual( audit[ "count" ], 1 )
+        self.assertEqual( audit[ "total_length_weight" ], 2 )
+        self.assertEqual( audit[ "total_directness_weight" ], 1 )
+        self.assertEqual( audit[ "total_tone_weight" ], -1 )
+        self.assertEqual( audit[ "total_overall_weight" ], 1 )
+        self.assertEqual( audit[ "avg_tone" ], -1.0 )
+
+
+class TestDmQualityJudgeMergedIntoSend( _CoreHarness ):
+    """
+    Phase 2: the injected grade_quality_fn seam decides whether execute_dm_send's
+    201 result carries a `quality` field. Control (grader returns None) → no field,
+    the Phase 1 baseline shape. Treatment (grader returns a grade) → the grade is
+    appended verbatim. The grader is only reached on the ACCEPTED (201) path.
+    """
+
+    def _run_with_grader( self, body, grader ):
+        return self.execute_dm_send(
+            authenticated_user_id = "user-uuid-1",
+            body                  = body,
+            notification_queue    = self.queue,
+            resolve_recipient_fn  = self.resolve,
+            build_sender_id       = self.spy,
+            persist_fn            = self.persist,
+            new_id_fn             = lambda: "fixed-msg-id",
+            grade_quality_fn      = grader,
+        )
+
+    def test_control_grader_none_appends_no_quality_field( self ):
+        result = self._run_with_grader( _make_send_body( sender_project="plan" ), lambda body: None )
+        self.assertEqual( result[ "http_status" ], 201 )
+        self.assertNotIn( "quality", result )
+
+    def test_treatment_grade_is_appended_verbatim( self ):
+        grade = {
+            "length"     : { "emoji": "⭐", "weight":  2, "detail": "12 words, target ~60" },
+            "directness" : { "emoji": "👍", "weight":  1, "detail": "leads with the result" },
+            "tone"       : { "emoji": "⭐", "weight":  2, "detail": "plain colleague voice" },
+            "overall"    : { "emoji": "⭐", "weight":  2, "note": "Tight and direct." },
+        }
+        result = self._run_with_grader( _make_send_body( sender_project="plan" ), lambda body: grade )
+        self.assertEqual( result[ "http_status" ], 201 )
+        self.assertEqual( result[ "quality" ], grade )
+
+    def test_grader_receives_the_raw_body_not_the_stamped_one( self ):
+        seen = {}
+        def grader( body_text ):
+            seen[ "body" ] = body_text
+            return None
+        self._run_with_grader( _make_send_body( sender_project="plan", body="crisp verdict here." ), grader )
+        self.assertEqual( seen[ "body" ], "crisp verdict here." )   # no EDT "[...]" prefix
+
+    def test_a_rejected_dm_never_reaches_the_grader( self ):
+        """The grader runs only on the 201 path — a 422 (no sender_project) must not
+        pay for a judge call."""
+        calls = []
+        self._run_with_grader( _make_send_body(), lambda body: calls.append( body ) )
+        self.assertEqual( calls, [] )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,1 @@
+<?xml version="1.0" encoding "utf-8" ? < response > < directness > good < / directness > < directness note > leads with the result; one minor stray sentence. < / directness note > < tone > good < / tone > < tone note > mostly plain; one small flourish. < / tone note > < / response >

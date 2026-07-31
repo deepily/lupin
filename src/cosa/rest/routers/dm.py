@@ -329,6 +329,143 @@ def _record_dm_length( body_text ):
     print( format_dm_length_audit_line() )
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# DM quality audit + judge (Phase 2 of the DM Verbosity Reduction plan, Rick
+# 2026-07-31). A sibling counter to _dm_length_audit above, on a SECOND axis: it
+# tallies the DM Quality Judge's grade weights (length/directness/tone/overall)
+# fleet-wide, aggregate only (no persona split). It accumulates ONLY during
+# TREATMENT windows — the judge runs only when `dm quality judgment enabled` is
+# True — so its own `since`/`count` naturally scope it; no toggle-awareness is
+# built into the counter itself.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_dm_quality_audit = {
+    "count"                   : 0,
+    "total_length_weight"     : 0,
+    "total_directness_weight" : 0,
+    "total_tone_weight"       : 0,
+    "total_overall_weight"    : 0,
+    "since"                   : datetime.now().isoformat( timespec="seconds" ),
+}
+
+# Lazily-built judge singleton — one client per process, built on the first
+# TREATMENT send only, so a control-only server never pays to construct it.
+_dm_quality_judge = None
+
+
+def get_dm_quality_judgment_enabled():
+    """
+    Resolve the `dm quality judgment enabled` toggle from lupin-app.ini at call
+    time — runtime-tunable, same precedent as the cosa-voice spoken-char-cap read.
+
+    Ensures:
+        - returns True only when the ini key is explicitly True
+        - returns False if the key is absent or on any config-read error (the
+          safe CONTROL default) — never raises
+    """
+    from cosa.config.configuration_manager import ConfigurationManager
+    try:
+        config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+        return config_mgr.get( "dm quality judgment enabled", default=False, return_type="boolean" )
+    except Exception:
+        return False
+
+
+def reset_dm_quality_audit():
+    """Reset the DM quality-audit counters and re-stamp the `since` instant."""
+    _dm_quality_audit[ "count" ]                   = 0
+    _dm_quality_audit[ "total_length_weight" ]     = 0
+    _dm_quality_audit[ "total_directness_weight" ] = 0
+    _dm_quality_audit[ "total_tone_weight" ]       = 0
+    _dm_quality_audit[ "total_overall_weight" ]    = 0
+    _dm_quality_audit[ "since" ]                   = datetime.now().isoformat( timespec="seconds" )
+
+
+def get_dm_quality_audit():
+    """
+    Snapshot of the DM quality audit, with derived average weights.
+
+    Ensures:
+        - returns a COPY (a reader cannot mutate the live counters by holding it)
+        - includes avg_length/avg_directness/avg_tone/avg_overall, all 0.0 (the
+          same `if count else 0.0` divide-by-zero guard as get_dm_length_audit)
+          when count is 0
+    """
+    snapshot = dict( _dm_quality_audit )
+    count = snapshot[ "count" ]
+    snapshot[ "avg_length" ]     = ( snapshot[ "total_length_weight" ]     / count ) if count else 0.0
+    snapshot[ "avg_directness" ] = ( snapshot[ "total_directness_weight" ] / count ) if count else 0.0
+    snapshot[ "avg_tone" ]       = ( snapshot[ "total_tone_weight" ]       / count ) if count else 0.0
+    snapshot[ "avg_overall" ]    = ( snapshot[ "total_overall_weight" ]    / count ) if count else 0.0
+    return snapshot
+
+
+def format_dm_quality_audit_line():
+    """
+    One readable line carrying the running count and average weights.
+
+    Ensures:
+        - contains `count=<n>` and avg_length/avg_directness/avg_tone/avg_overall
+          unconditionally, same convention as format_dm_length_audit_line
+    """
+    audit = get_dm_quality_audit()
+    return (
+        f"[dm-quality-audit] since {_dm_quality_audit[ 'since' ]}: "
+        f"count={audit[ 'count' ]} "
+        f"avg_length={audit[ 'avg_length' ]:.2f} "
+        f"avg_directness={audit[ 'avg_directness' ]:.2f} "
+        f"avg_tone={audit[ 'avg_tone' ]:.2f} "
+        f"avg_overall={audit[ 'avg_overall' ]:.2f}"
+    )
+
+
+def _record_dm_quality( quality ):
+    """
+    Tally one judge grade into the quality audit.
+
+    Requires:
+        - quality is the dict returned by DmQualityJudge.judge()
+          ({"length","directness","tone","overall"}, each with an int "weight")
+
+    Ensures:
+        - increments count + the four running weight totals
+        - emits one audit line (same convention as _record_dm_length)
+    """
+    _dm_quality_audit[ "count" ]                   += 1
+    _dm_quality_audit[ "total_length_weight" ]     += quality[ "length" ][ "weight" ]
+    _dm_quality_audit[ "total_directness_weight" ] += quality[ "directness" ][ "weight" ]
+    _dm_quality_audit[ "total_tone_weight" ]       += quality[ "tone" ][ "weight" ]
+    _dm_quality_audit[ "total_overall_weight" ]    += quality[ "overall" ][ "weight" ]
+    print( format_dm_quality_audit_line() )
+
+
+def _maybe_grade_dm_quality( body_text ):
+    """
+    Grade a DM body IFF the DM Quality Judge toggle is ON (treatment arm).
+
+    Requires:
+        - body_text is the caller-supplied DM body string
+
+    Ensures:
+        - toggle OFF (control, default): returns None — no judge call, no audit
+          tally, and execute_dm_send appends NO `quality` field (the Phase 1
+          baseline result shape, unchanged)
+        - toggle ON (treatment): builds the judge lazily (once per process), grades
+          the body, tallies the quality audit, and returns the quality dict
+        - never raises: DmQualityJudge.judge itself never raises (a judge that
+          cannot even be built still returns a safe all-🤷/0 grade)
+    """
+    global _dm_quality_judge
+    if not get_dm_quality_judgment_enabled():
+        return None
+    if _dm_quality_judge is None:
+        from cosa.agents.dm_quality_judge.judge import DmQualityJudge
+        _dm_quality_judge = DmQualityJudge()
+    quality = _dm_quality_judge.judge( body_text )
+    _record_dm_quality( quality )
+    return quality
+
+
 def _record_dm_project( sender_session_id, sender_project ):
     """
     Count one DM on whichever side of the caller-supplied-project seam it lands,
@@ -373,6 +510,7 @@ def execute_dm_send(
     persist_fn,
     new_id_fn = None,
     now_fn    = None,
+    grade_quality_fn = None,
 ):
     """
     Pure-logic core for POST /api/dm/send — notification-native AI↔AI DM.
@@ -426,6 +564,11 @@ def execute_dm_send(
     """
     if new_id_fn is None:
         new_id_fn = lambda: str( uuid.uuid4() )
+    # Phase 2 DM Quality Judge seam (default = the module-level toggle-gated
+    # grader). Injected for tests; production leaves it None → _maybe_grade_dm_quality,
+    # which returns None (no `quality` field) whenever the judge toggle is OFF.
+    if grade_quality_fn is None:
+        grade_quality_fn = _maybe_grade_dm_quality
 
     resolution = resolve_recipient_fn(
         recipient_session_id  = body.recipient_session_id,
@@ -511,7 +654,7 @@ def execute_dm_send(
         thread_id      = thread_id,
     )
 
-    return {
+    result = {
         "http_status"       : 201,
         "message_id"        : db_id or message_id,
         "thread_id"         : thread_id,
@@ -531,6 +674,16 @@ def execute_dm_send(
         "recipient_persona" : target_persona,
         "dispatched"        : True,
     }
+
+    # Phase 2: append the judge's grade of the composed body IFF the toggle is on.
+    # OFF (control) → grade_quality_fn returns None → the result shape is the Phase 1
+    # baseline, unchanged. The judge grades body.body (the raw composed text), not the
+    # EDT-stamped outbound body — the stamp is per-DM overhead, not the sender's prose.
+    quality = grade_quality_fn( body.body )
+    if quality is not None:
+        result[ "quality" ] = quality
+
+    return result
 
 
 @router.post(
@@ -1037,3 +1190,25 @@ async def get_dm_length_audit_endpoint(   # pragma: no cover
     authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
 ) -> JSONResponse:
     return JSONResponse( status_code=200, content=get_dm_length_audit() )
+
+
+@router.get(
+    "/quality-audit",
+    summary     = "Read the DM quality audit — evidence for the Phase 2 verbosity A/B",
+    description = (
+        "Returns the live DM Quality Judge counters: `count`, the running "
+        "`total_length_weight`/`total_directness_weight`/`total_tone_weight`/"
+        "`total_overall_weight`, the derived `avg_length`/`avg_directness`/`avg_tone`/"
+        "`avg_overall`, and the window start. This is the SECOND A/B axis (the first "
+        "is `/length-audit`): it accumulates ONLY during TREATMENT windows (the judge "
+        "runs only when `dm quality judgment enabled` is True), so a control window "
+        "reports count=0. Snapshot before and after a treatment run and read the "
+        "avg_overall trend against the length-audit's avg_words trend "
+        "(src/rnd/v0.1.9/2026.07.31-dm-verbosity-reduction/). Counters reset on server "
+        "restart; `since` is load-bearing, same as the other audits."
+    ),
+)
+async def get_dm_quality_audit_endpoint(   # pragma: no cover
+    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
+) -> JSONResponse:
+    return JSONResponse( status_code=200, content=get_dm_quality_audit() )

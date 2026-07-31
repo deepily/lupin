@@ -1,0 +1,1 @@
+<?xml version="1.0" encoding="utf-8" ? <response> <directness>meh</directness> <directness note> The result is buried in the second sentence. </directness note> <tone> meah </tone> <tone note> The "count only path" is a new term. </tone note> </response>
