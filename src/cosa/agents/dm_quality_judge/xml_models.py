@@ -16,6 +16,8 @@ The canonical grade label ⇄ weight ⇄ emoji table lives here (GRADE_TABLE) so
 judge, the audit counter, and the tests all read ONE source.
 """
 
+import re
+
 from pydantic import Field, field_validator
 
 from cosa.agents.io_models.utils.util_xml_pydantic import BaseXMLModel
@@ -58,14 +60,33 @@ def normalize_grade_label( label ):
 
     Ensures:
         - returns a key present in GRADE_TABLE
-        - lowercases, strips, and maps spaces/hyphens to underscores
-          ("Needs Improvement" / "needs-improvement" → "needs_improvement")
+        - lowercases, strips, and COLLAPSES any run of whitespace/hyphens/underscores
+          to a single underscore ("Needs Improvement" / "needs-improvement" /
+          "needs _ improvement" / "needs__improvement" → "needs_improvement")
         - applies observed-typo aliases (e.g. "meah" → "meh"), bug a5f7b36d
         - an unknown or blank label degrades to "meh" (never raises)
+
+    🔴 WHY A COLLAPSE AND NOT TWO .replace() CALLS (bug ca7a2cbf, 2026-08-01). The
+       live 24B GPTQ model emits `needs _ improvement` — spaces AROUND the
+       underscore, the same sloppiness that produced spaced TAGS in a5f7b36d.
+       Sequential replaces turned that into `needs___improvement`, which is not in
+       GRADE_TABLE, so the most-frequent multi-word label in the whole scale fell
+       through to the `meh` fallback SILENTLY, on every occurrence.
+
+       That fallback exists for a genuinely unrecognizable label. It was instead
+       swallowing a perfectly recoverable one and reporting 0 — a real grade of
+       -1 rendered as neutral, with nothing anywhere saying a label had been
+       dropped. Measured live: Tone read `meh` for every DM tested while the model
+       was in fact returning `needs_improvement`.
+
+       ⇒ The lesson is about the FALLBACK, not the spacing. A degrade-to-neutral
+         that cannot distinguish "I do not recognize this" from "I failed to parse
+         something I should have recognized" reports both as a considered judgement
+         of `meh`.
     """
     if not label:
         return _FALLBACK_LABEL
-    key = str( label ).strip().lower().replace( " ", "_" ).replace( "-", "_" )
+    key = re.sub( r"[\s_\-]+", "_", str( label ).strip().lower() ).strip( "_" )
     key = _LABEL_ALIASES.get( key, key )
     return key if key in GRADE_TABLE else _FALLBACK_LABEL
 

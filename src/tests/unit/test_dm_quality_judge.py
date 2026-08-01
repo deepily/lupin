@@ -109,6 +109,56 @@ class TestDmQualityJudgeResponse:
     def test_label_normalization( self, raw, canonical ):
         assert normalize_grade_label( raw ) == canonical
 
+    # ── bug ca7a2cbf — a recoverable label was being thrown away silently ──────
+    #
+    # The live 24B GPTQ model emits `needs _ improvement` — spaces AROUND the
+    # underscore, the same sloppiness that produced spaced TAGS in a5f7b36d. The
+    # old two-`.replace()` normalizer turned that into `needs___improvement`,
+    # which is not in GRADE_TABLE, so the most-frequent multi-word label in the
+    # scale fell through to the `meh` fallback on EVERY occurrence: a real -1
+    # published as a neutral 0, with nothing saying a label had been dropped.
+    #
+    # Measured live before the fix: Tone read `meh` for every DM tested while the
+    # model was in fact returning `needs_improvement`.
+
+    @pytest.mark.parametrize( "raw", [
+        "needs _ improvement",          # ← the exact live-model spelling
+        "needs__improvement",
+        "needs - improvement",
+        "  NEEDS  -  IMPROVEMENT  ",
+        "needs\timprovement",
+        "_needs_improvement_",
+    ] )
+    def test_a_spaced_or_doubled_separator_still_resolves_to_the_real_label( self, raw ):
+        """
+        THE REGRESSION. Each of these is a RECOVERABLE label; none may land on the
+        fallback. Asserting the weight (-1) and not just the key, because the whole
+        defect was a wrong NUMBER reaching a reader, not a wrong string internally.
+        """
+        assert normalize_grade_label( raw ) == "needs_improvement"
+        assert grade_weight( raw )          == -1
+
+    def test_a_genuinely_unknown_label_STILL_degrades_to_meh( self ):
+        """
+        THE NEGATIVE CONTROL, and the reason the fix is a collapse rather than a
+        widening. Recovering sloppy separators must not turn the fallback off —
+        an unrecognizable label is still a real case and must still land on meh/0.
+        Without this, "fix the normalizer" could be satisfied by accepting anything.
+        """
+        for junk in ( "banana", "needs_improvementt", "very good", "___", "  -  " ):
+            assert normalize_grade_label( junk ) == "meh"
+            assert grade_weight( junk )          == 0
+
+    def test_every_label_survives_its_own_sloppy_spellings( self ):
+        """All five levels, not just the one that bit us — the model can space any of them."""
+        for label, ( weight, _ ) in GRADE_TABLE.items():
+            for variant in ( label.replace( "_", " _ " ),
+                             label.replace( "_", "-" ),
+                             label.upper(),
+                             f"  {label}  " ):
+                assert normalize_grade_label( variant ) == label, variant
+                assert grade_weight( variant )          == weight, variant
+
     def test_module_helpers_match_table( self ):
         for label, ( weight, emoji ) in GRADE_TABLE.items():
             assert grade_weight( label ) == weight
