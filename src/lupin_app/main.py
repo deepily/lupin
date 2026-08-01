@@ -411,6 +411,22 @@ async def websocket_cleanup_loop():
 # cosa.rest.managed_bounce_broadcast; these thin wrappers bind it to the live
 # commons singletons (module globals set during startup).
 
+def _managed_bounce_server_label():
+    """
+    Which server THIS process is, as it should appear in a fleet broadcast.
+
+    The dev and test containers run this same file and differ only by config
+    block (`Lupin: Development` vs `Lupin: Testing`), so without this the test
+    server announces itself as ":7999" — measured 2026-08-01, nine sessions were
+    told the DEV server had bounced when the TEST container restarted (bug
+    652271f3). Resolved ONCE here and passed to every call site so the warning
+    and the all-clear can never disagree about who is speaking.
+    """
+    from cosa.rest.managed_bounce_broadcast import DEFAULT_SERVER_LABEL
+
+    return config_mgr.get( "managed bounce server label", default=DEFAULT_SERVER_LABEL )
+
+
 def _emit_managed_bounce( kind, message, broadcast_id=None ):
     """
     Fire a managed-bounce fleet broadcast in-process, never raising.
@@ -479,7 +495,8 @@ def _managed_bounce_all_clear_blocking( boot_id, boot_started, startup_began ):
     )
 
     uptime     = time.monotonic() - startup_began
-    message    = build_bounce_message( "all-clear", boot_id=boot_id, boot_started=boot_started, uptime_seconds=uptime )
+    message    = build_bounce_message( "all-clear", boot_id=boot_id, boot_started=boot_started, uptime_seconds=uptime,
+                                       server_label=_managed_bounce_server_label() )
     result     = _emit_managed_bounce( "all-clear", message )
     recipients = ( result or {} ).get( "recipients" )
     curve      = "→".join( str( c ) for c in gate[ "curve" ] )
@@ -1093,8 +1110,11 @@ async def lifespan( app: FastAPI ):
     # wired; any failure degrades to a log, never a failed boot.
     if config_mgr.get( "commons enabled", default=True, return_type="boolean" ) and commons_store is not None:
         try:
-            from cosa.rest.managed_bounce_broadcast import next_boot_id
-            _boot_counter_path = du.get_project_root() + "/io/managed-bounce/boot-counter.txt"
+            from cosa.rest.managed_bounce_broadcast import next_boot_id, boot_counter_path
+            # PER-SERVER counter (bug 652271f3): io/ is bind-mounted into both
+            # containers, so one shared file interleaved dev and test boots and
+            # made the number in a watched all-clear unpredictable.
+            _boot_counter_path = boot_counter_path( du.get_project_root(), _managed_bounce_server_label() )
             _boot_id           = next_boot_id( _boot_counter_path )
             asyncio.create_task(
                 _run_managed_bounce_all_clear(
@@ -1129,7 +1149,7 @@ async def lifespan( app: FastAPI ):
     # already runs on every graceful SIGTERM, which is exactly the edge we want.
     try:
         from cosa.rest.managed_bounce_broadcast import build_bounce_message
-        _emit_managed_bounce( "warning", build_bounce_message( "warning" ) )
+        _emit_managed_bounce( "warning", build_bounce_message( "warning", server_label=_managed_bounce_server_label() ) )
     except Exception as e:  # pragma: no cover - best-effort boundary guard; must never block shutdown (main.py is outside cov source=["cosa"])
         print( f"[managed-bounce] WARN: shutdown warning emit failed: {e}", file=sys.stderr )
 

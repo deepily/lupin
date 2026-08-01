@@ -31,6 +31,10 @@ from typing import Any, Callable, Dict, List, Optional
 
 DEFAULT_SERVER_LABEL = ":7999"
 
+# Characters allowed in the filename derived from a server label. Anything else
+# collapses to "-", so a label can never escape the counter directory.
+_LABEL_SAFE_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
 # The fleet's service-account user. CC sessions are stamped with this
 # owner_user_id (or none — commons scoping passes bridges that lack it), so a
 # broadcast authored as this user reaches every fleet session. Same literal the
@@ -86,6 +90,39 @@ def build_bounce_message(
 
 
 # ─── Boot counter (self-distinguishing all-clear) ───────────────────────────
+
+
+def boot_counter_path( project_root: Any, server_label: str = DEFAULT_SERVER_LABEL ) -> Path:
+    """
+    The boot-counter file for ONE server, derived from that server's label.
+
+    Both containers bind-mount the same `io/` directory, so a single shared
+    counter interleaves their boots: three test-server starts between two dev
+    starts make the dev server look like it flapped five times, and the boot
+    number a watcher is told to expect for a specific bounce is simply wrong.
+    That defeats the counter's entire purpose, which is to make a crash-loop
+    read as N distinct all-clears rather than one line people learn to ignore.
+    Measured 2026-08-01: the shared counter read 3, and boot #3 was the TEST
+    server's — announced to nine sessions as a DEV bounce (bug 652271f3).
+
+    The label is reduced to its alphanumerics, so ":7999" and ":8000" become
+    `boot-counter-7999.txt` and `boot-counter-8000.txt`. A label with no
+    alphanumerics at all falls back to "default" rather than producing a
+    hidden or empty filename.
+
+    Requires:
+        - project_root is a path-like to the repository root
+        - server_label is a string
+
+    Ensures:
+        - returns a Path under <project_root>/io/managed-bounce/
+        - two different labels never resolve to the same file
+        - the filename contains no path separators regardless of the label
+    """
+    slug = "".join( c if c in _LABEL_SAFE_CHARS else "-" for c in server_label ).strip( "-" )
+    if not slug: slug = "default"
+
+    return Path( project_root ) / "io" / "managed-bounce" / f"boot-counter-{slug}.txt"
 
 
 def next_boot_id( counter_path: Any ) -> int:

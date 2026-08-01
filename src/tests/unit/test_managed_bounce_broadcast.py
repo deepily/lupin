@@ -29,6 +29,7 @@ from unittest.mock import MagicMock
 
 from cosa.rest.managed_bounce_broadcast import (
     build_bounce_message,
+    boot_counter_path,
     next_boot_id,
     emit_bounce_broadcast_in_process,
     count_acked_sessions,
@@ -90,8 +91,73 @@ class BuildBounceMessageTests( unittest.TestCase ):
         with self.assertRaises( ValueError ):
             build_bounce_message( "shutdown-ish" )
 
+    def test_a_non_default_label_reaches_BOTH_message_kinds( self ):
+        """
+        Bug 652271f3: the test server announced itself as the dev server.
+
+        Both containers run the same main.py, so the label must come from config
+        and travel to BOTH builders. Asserting only the default proves nothing
+        here — the default IS the bug — so this passes ":8000" and demands the
+        dev port be absent from each message, not merely that the test port appear.
+        """
+        warning   = build_bounce_message( "warning", server_label=":8000" )
+        all_clear = build_bounce_message( "all-clear", boot_id=3, boot_started="t", uptime_seconds=1.0,
+                                          server_label=":8000" )
+
+        for msg in ( warning, all_clear ):
+            self.assertIn(    ":8000", msg )
+            self.assertNotIn( ":7999", msg )
+
 
 # ─── next_boot_id ───────────────────────────────────────────────────────────
+
+
+class BootCounterPathTests( unittest.TestCase ):
+    """
+    Bug 652271f3, second symptom: `io/` is bind-mounted into BOTH containers, so
+    one shared counter file interleaved dev and test boots. The number a watcher
+    is told to expect for a specific bounce was therefore unpredictable.
+    """
+
+    def test_two_servers_get_two_different_files( self ):
+        dev  = boot_counter_path( "/repo", ":7999" )
+        test = boot_counter_path( "/repo", ":8000" )
+
+        self.assertNotEqual( dev, test )
+        self.assertEqual( dev.name,  "boot-counter-7999.txt" )
+        self.assertEqual( test.name, "boot-counter-8000.txt" )
+        self.assertTrue( str( dev ).endswith( "io/managed-bounce/boot-counter-7999.txt" ) )
+
+    def test_default_label_is_the_dev_server( self ):
+        self.assertEqual( boot_counter_path( "/repo" ).name, "boot-counter-7999.txt" )
+
+    def test_a_label_cannot_escape_the_counter_directory( self ):
+        # A label is config, not user input — but a path separator in it would
+        # silently write outside io/managed-bounce/, so it collapses like any
+        # other non-alphanumeric.
+        path = boot_counter_path( "/repo", "../../etc/passwd" )
+
+        self.assertEqual( path.parent.as_posix(), "/repo/io/managed-bounce" )
+        self.assertNotIn( "/", path.name )
+
+    def test_a_label_with_no_alphanumerics_falls_back_rather_than_hiding( self ):
+        # "" or "///" must not yield "boot-counter-.txt" — a name that reads as
+        # a bug and sorts oddly. Fall back to an explicit slug instead.
+        self.assertEqual( boot_counter_path( "/repo", "///" ).name, "boot-counter-default.txt" )
+        self.assertEqual( boot_counter_path( "/repo", ""    ).name, "boot-counter-default.txt" )
+
+    def test_the_two_servers_sequences_do_not_interleave( self ):
+        """End-to-end: advancing one server's counter must not move the other's."""
+        with tempfile.TemporaryDirectory() as root:
+            dev  = boot_counter_path( root, ":7999" )
+            test = boot_counter_path( root, ":8000" )
+            os.makedirs( dev.parent )
+
+            self.assertEqual( next_boot_id( dev ),  1 )
+            self.assertEqual( next_boot_id( test ), 1 )   # NOT 2 — separate sequences
+            self.assertEqual( next_boot_id( dev ),  2 )
+            self.assertEqual( next_boot_id( dev ),  3 )
+            self.assertEqual( next_boot_id( test ), 2 )   # unmoved by the three dev boots
 
 
 class NextBootIdTests( unittest.TestCase ):
