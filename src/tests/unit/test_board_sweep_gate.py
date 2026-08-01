@@ -26,6 +26,8 @@ WHAT THIS FILE PROVES
 
 import json
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from lupin_cli.claude_code.hooks.lib import board_sweep
@@ -392,3 +394,210 @@ def test_the_frozen_total_appears_only_as_dated_history( sweep_dir ):
     board_sweep.record_reviewed( "seat", [ "a" ], total_at_start=71 )
     line = board_sweep.sweep_progress_line( "seat", live_owed=12 )
     assert "sweep began 71 rows" in line
+
+
+# ---------------------------------------------------------------- the ledger must EXPIRE
+#
+# Bug `c2d6bcfa` (María 🌸 filed, Clayton 😎 root-caused, 2026-07-31). `rearm()` refreshes a
+# ledger against a fresh board and is called from NOWHERE — only the read-only
+# `sweep_progress_line` runs, from `stop.py:436`. So `board-sweep-maria.json` and
+# `board-sweep-mr-radio.json` were written once on 2026-07-25/26 at 22/22 and 71/71 and stood
+# untouched for five days, with `reviewed >= live_owed` permanently true. A gate that reports
+# a five-day-old sweep in the present tense is not a gate.
+#
+# ⚠️ EVERY TEST BELOW COMES IN PAIRS. A stale-only assertion passes on a function that hard-
+# codes "EXPIRED", which is indistinguishable in its output from one that measures. The fresh
+# arm is what makes the stale arm mean anything.
+
+DAY = 24 * 3600
+
+
+def _now(): return datetime( 2026, 8, 1, 12, 0, 0, tzinfo=timezone.utc )
+
+
+def _ledger_stamped( sweep_dir, persona, updated_at, reviewed=None, total=5, started_at=None ):
+    """Write a STRUCTURALLY VALID ledger at a chosen age — the one thing record_reviewed
+    cannot do, since it always stamps the current clock."""
+    body = {
+        "persona"        : persona,
+        "started_at"     : started_at if started_at is not None else updated_at,
+        "total_at_start" : total,
+        "reviewed"       : reviewed if reviewed is not None else [ "a", "b", "c", "d", "e" ],
+        "board_ids"      : [ "a", "b", "c", "d", "e" ],
+    }
+    if updated_at is not None: body[ "updated_at" ] = updated_at
+    ( sweep_dir / f"board-sweep-{board_sweep.persona_slug( persona )}.json" ).write_text(
+        json.dumps( body ), encoding="utf-8" )
+
+
+def test_a_STALE_ledger_cannot_report_a_SATISFIED_sweep( sweep_dir ):
+    """THE REGRESSION, in the exact shape Rick saw: 5/5 reviewed, five days untouched."""
+    _ledger_stamped( sweep_dir, "mr radio", ( _now() - timedelta( days=5 ) ).isoformat() )
+
+    line = board_sweep.sweep_progress_line( "mr radio", live_owed=5, now=_now() )
+    assert "EXPIRED" in line
+    # NOT keyed on "owed NOW" — the EXPIRED line quotes the live count too, deliberately.
+    # "reviewing is not doing" is the satisfied arm's own sentence and nothing else's.
+    assert "reviewing is not doing" not in line, "the satisfied arm still rendered under a stale ledger"
+    assert "5 days old" in line
+
+
+def test_a_FRESH_ledger_still_reports_a_SATISFIED_sweep( sweep_dir ):
+    """THE NEGATIVE CONTROL. Without this, the test above passes on a constant."""
+    _ledger_stamped( sweep_dir, "mr radio", ( _now() - timedelta( hours=1 ) ).isoformat() )
+
+    line = board_sweep.sweep_progress_line( "mr radio", live_owed=5, now=_now() )
+    assert "EXPIRED" not in line
+    assert "owed NOW" in line and "reviewing is not doing" in line
+
+
+def test_a_STALE_ledger_cannot_report_an_IN_PROGRESS_fraction( sweep_dir ):
+    """The other arm that compares `reviewed` to `live_owed`. Both age; both are replaced."""
+    _ledger_stamped( sweep_dir, "mr radio", ( _now() - timedelta( days=5 ) ).isoformat(),
+                     reviewed=[ "a", "b" ] )
+
+    line = board_sweep.sweep_progress_line( "mr radio", live_owed=5, now=_now() )
+    assert "EXPIRED" in line
+    assert "2/5" not in line and "IN PROGRESS" not in line
+
+
+def test_a_FRESH_ledger_still_reports_an_IN_PROGRESS_fraction( sweep_dir ):
+    _ledger_stamped( sweep_dir, "mr radio", ( _now() - timedelta( hours=1 ) ).isoformat(),
+                     reviewed=[ "a", "b" ] )
+
+    line = board_sweep.sweep_progress_line( "mr radio", live_owed=5, now=_now() )
+    assert "EXPIRED" not in line
+    assert "2/5" in line and "3 to go" in line
+
+
+@pytest.mark.parametrize( "age_seconds,expired", [
+    ( DAY - 60, False ),          # just inside
+    ( DAY,      False ),          # exactly at the TTL is NOT past it
+    ( DAY + 60, True  ),          # just outside
+] )
+def test_the_boundary_is_where_the_constant_says_it_is( sweep_dir, age_seconds, expired ):
+    """Both sides of the same edge, so the threshold cannot drift without a red test."""
+    assert board_sweep.SWEEP_LEDGER_TTL_SECONDS == DAY
+    _ledger_stamped( sweep_dir, "mr radio",
+                     ( _now() - timedelta( seconds=age_seconds ) ).isoformat() )
+
+    line = board_sweep.sweep_progress_line( "mr radio", live_owed=5, now=_now() )
+    assert ( "EXPIRED" in line ) is expired
+
+
+def test_an_IN_FLIGHT_sweep_never_ages_out_however_long_it_takes( sweep_dir ):
+    """
+    🔴 THE LOAD-BEARING CLAIM UNDER THE 24h CHOICE, and the one that makes the TTL safe to
+    set at all. A seat still sweeping rewrites `updated_at` on EVERY `record_reviewed`, so a
+    sweep begun a week ago and worked on ten minutes ago is FRESH. If age were read from
+    `started_at`, a long honest sweep would be told its own live work had expired.
+    """
+    _ledger_stamped( sweep_dir, "mr radio", None, reviewed=[ "a" ],
+                     started_at=( _now() - timedelta( days=7 ) ).isoformat() )
+    # No updated_at yet -> only the week-old started_at is available -> EXPIRED.
+    assert "EXPIRED" in board_sweep.sweep_progress_line( "mr radio", live_owed=5, now=_now() )
+
+    board_sweep.record_reviewed( "mr radio", [ "b" ] )        # the seat does one more row
+    line = board_sweep.sweep_progress_line( "mr radio", live_owed=5 )
+    assert "EXPIRED" not in line, "a live sweep was told its own fresh work had expired"
+    assert "2/5" in line
+
+
+def test_a_ledger_with_NO_readable_TIMESTAMP_is_EXPIRED_not_fresh( sweep_dir ):
+    """
+    A could-not-tell is loud here exactly as it is on the unreadable arm. Defaulting an
+    un-dateable ledger to fresh would make "delete the timestamp" the way to disarm the gate.
+    """
+    ( sweep_dir / "board-sweep-mr-radio.json" ).write_text(
+        json.dumps( { "total_at_start": 5, "reviewed": [ "a", "b", "c", "d", "e" ] } ),
+        encoding="utf-8" )
+
+    line = board_sweep.sweep_progress_line( "mr radio", live_owed=5, now=_now() )
+    assert "EXPIRED" in line and "no readable timestamp" in line
+
+
+def test_an_UNPARSEABLE_updated_at_falls_back_to_started_at( sweep_dir ):
+    """Garbage in one field must not discard the other — and the fallback is what is read."""
+    _ledger_stamped( sweep_dir, "mr radio", "not-a-timestamp",
+                     started_at=( _now() - timedelta( hours=2 ) ).isoformat() )
+    assert "EXPIRED" not in board_sweep.sweep_progress_line( "mr radio", live_owed=5, now=_now() )
+
+    _ledger_stamped( sweep_dir, "mr radio", "not-a-timestamp",
+                     started_at=( _now() - timedelta( days=5 ) ).isoformat() )
+    assert "EXPIRED" in board_sweep.sweep_progress_line( "mr radio", live_owed=5, now=_now() )
+
+
+def test_a_NAIVE_timestamp_is_read_as_UTC_not_rejected( sweep_dir ):
+    """Every stamp this module writes is UTC; a naive one is ours, missing its suffix."""
+    _ledger_stamped( sweep_dir, "mr radio",
+                     ( _now() - timedelta( hours=1 ) ).replace( tzinfo=None ).isoformat() )
+    assert "EXPIRED" not in board_sweep.sweep_progress_line( "mr radio", live_owed=5, now=_now() )
+
+
+def test_a_FUTURE_dated_ledger_is_EXPIRED_not_freshly_written( sweep_dir ):
+    """
+    ⚠️ AGE IS A DISTANCE, NOT A DIFFERENCE. A clock that moved backwards leaves a ledger
+    stamped ahead of now; a signed comparison reads that as newer than new and the gate goes
+    quiet — failing toward silence, which is the one direction this module never fails.
+    """
+    _ledger_stamped( sweep_dir, "mr radio", ( _now() + timedelta( days=5 ) ).isoformat() )
+    assert "EXPIRED" in board_sweep.sweep_progress_line( "mr radio", live_owed=5, now=_now() )
+
+
+def test_a_CLEAR_board_keeps_its_verdict_and_only_GAINS_a_staleness_note( sweep_dir ):
+    """
+    🔴 WHY THE EXPIRY DOES NOT FIRE ON EVERY ARM. `live_owed` is fetched fresh every tick;
+    only `reviewed` ages. "0 owed now" is a statement about the LIVE board and is true at any
+    ledger age — replacing it with an alarm would be crying wolf on a genuinely clear board,
+    which is the same defect as a false green wearing the other coat.
+    """
+    _ledger_stamped( sweep_dir, "mr radio", ( _now() - timedelta( days=5 ) ).isoformat() )
+    line = board_sweep.sweep_progress_line( "mr radio", live_owed=0, now=_now() )
+    assert "COMPLETE — 0 owed now" in line, "a truthful live verdict was replaced by an alarm"
+    assert "STALE" in line, "the stale ledger went unmentioned"
+
+
+def test_an_UNKNOWN_live_count_keeps_its_verdict_and_only_GAINS_a_staleness_note( sweep_dir ):
+    _ledger_stamped( sweep_dir, "mr radio", ( _now() - timedelta( days=5 ) ).isoformat() )
+    line = board_sweep.sweep_progress_line( "mr radio", live_owed=None, now=_now() )
+    assert "could not be read" in line
+    assert "STALE" in line
+
+
+def test_a_FRESH_ledger_adds_NO_staleness_note_to_either_live_arm( sweep_dir ):
+    """The negative control for the pair above."""
+    _ledger_stamped( sweep_dir, "mr radio", ( _now() - timedelta( hours=1 ) ).isoformat() )
+    assert "STALE" not in board_sweep.sweep_progress_line( "mr radio", live_owed=0, now=_now() )
+    assert "STALE" not in board_sweep.sweep_progress_line( "mr radio", live_owed=None, now=_now() )
+
+
+def test_an_UNREADABLE_ledger_still_wins_over_the_expiry_check( sweep_dir ):
+    """Ordering: you cannot date a ledger you could not parse, and the parse failure is the
+    more actionable message."""
+    ( sweep_dir / "board-sweep-mr-radio.json" ).write_text( "{ not json", encoding="utf-8" )
+    line = board_sweep.sweep_progress_line( "mr radio", live_owed=5, now=_now() )
+    assert "UNVERIFIED" in line and "EXPIRED" not in line
+
+
+def test_the_now_seam_DEFAULTS_to_the_real_clock( sweep_dir ):
+    """
+    The stop.py call site passes no `now` and is unchanged by this work. A seam that only
+    works when a test supplies it is not wired into production.
+    """
+    board_sweep.record_reviewed( "mr radio", [ "a" ], total_at_start=5, board_ids=[ "a", "b" ] )
+    assert "EXPIRED" not in board_sweep.sweep_progress_line( "mr radio", live_owed=5 )
+
+    _ledger_stamped( sweep_dir, "mr radio",
+                     ( datetime.now( timezone.utc ) - timedelta( days=5 ) ).isoformat() )
+    assert "EXPIRED" in board_sweep.sweep_progress_line( "mr radio", live_owed=5 )
+
+
+@pytest.mark.parametrize( "age,expected", [
+    ( None,       "no readable timestamp" ),
+    ( 25 * 3600,  "25 hours old" ),
+    ( 7 * DAY,    "7 days old" ),
+] )
+def test_the_age_phrase_names_a_MISSING_stamp_rather_than_inventing_an_age( age, expected ):
+    """"unknown age" would read as a measurement that came back vague. It is not a
+    measurement at all, and the reader needs to know which."""
+    assert expected in board_sweep._age_phrase( age )

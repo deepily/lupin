@@ -38,9 +38,37 @@ before writing this:
                                   sweep" because it could not read its own state is the
                                   alarm-gated-on-the-healthy-value defect, and this gate
                                   exists precisely to survive a seat that wants to stop.
+   · LEDGER OLDER THAN THE TTL -> a LOUD EXPIRED line INSTEAD of any fraction. See the
+                                  next block; a stale ledger's `reviewed` list is the one
+                                  input here that ages, and both arms that consume it read
+                                  SATISFIED as it ages.
 
    The ordering matters: only the arm meaning "this seat is not sweeping" may be quiet.
    Every arm meaning "I could not tell" is loud.
+
+🔴 A LEDGER WITH NO EXPIRY REPORTS A FINISHED SWEEP FOREVER (bug `c2d6bcfa`, María 🌸
+   2026-07-31, root-caused by Clayton 😎). `rearm()` below exists to refresh a ledger against
+   a fresh board — and is called from NOWHERE in the hooks tree. Only the read-only
+   `sweep_progress_line` is invoked (`stop.py:436` via `_board_sweep_line`). So a ledger
+   written once is never refreshed: `board-sweep-maria.json` and `board-sweep-mr-radio.json`
+   were written on 2026-07-25/26 at 22/22 and 71/71 and stood untouched for five days, with
+   `reviewed >= live_owed` permanently true.
+
+   ⇒ THE FIX IS AN EXPIRY, NOT A CALL SITE. Wiring `rearm()` into the hook lifecycle needs
+     per-persona live board ids at hook time, which the Stop hook does not have. A TTL read
+     at the point of DISPLAY needs nothing the function is not already holding.
+
+   ⇒ WHICH ARMS IT REPLACES, and why not all of them. `live_owed` is fetched fresh every
+     tick; `reviewed` is what ages. Only the two arms that compare them — SATISFIED and
+     IN PROGRESS — can be made to lie by an old ledger, so only those two are replaced by
+     the EXPIRED line. The `live_owed is None` and `live_owed == 0` arms describe the LIVE
+     board and stay true at any ledger age; they carry an appended staleness note instead.
+     Turning a truthful "0 owed now" into an alarm would be crying wolf on a clear board,
+     which is the same defect as a false green wearing the other coat.
+
+   ⇒ AGE IS MEASURED AS A DISTANCE, NOT A DIFFERENCE (`abs`). A ledger stamped in the FUTURE
+     is as untrustworthy as one stamped long past, and a signed comparison would read it as
+     freshly written — failing toward quiet, which is the direction this module never fails.
 
 THE COUNTER COUNTS REVIEWS, NOT DROPS. A row that survives the sweep is REVIEWED — Rick's
 two questions were asked and both answered no. Counting only drops would make a careful
@@ -76,13 +104,66 @@ reviewing.
 import json
 import os
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 
 # Row 8ccc20ab — derived from the one seam (see lib/sessions_dir.py).
 SWEEP_DIR = sessions_dir()
+
+# Bug c2d6bcfa. A seat actively sweeping rewrites `updated_at` on EVERY `record_reviewed`,
+# so an in-flight sweep — however slow — stays inside this window by construction. Only a
+# ledger nobody has touched for a day ages out, which is exactly the population the bug
+# describes: finished-and-frozen, or abandoned.
+SWEEP_LEDGER_TTL_SECONDS = 24 * 3600
+
+
+def _ledger_age_seconds( ledger, now ):
+    """
+    How far this ledger's newest timestamp sits from `now`, in seconds.
+
+    Requires:
+        - ledger is a parsed ledger dict
+        - now is a timezone-aware datetime
+
+    Ensures:
+        - prefers `updated_at`; falls back to `started_at` when it is absent or unparseable
+        - returns a NON-NEGATIVE float — the DISTANCE, not the difference. A future-dated
+          ledger (clock moved backwards) is untrustworthy in the same way an ancient one is,
+          and a signed comparison would read it as freshly written
+        - assumes UTC for a naive timestamp, since every stamp this module writes is UTC
+        - returns None when no timestamp is parseable — the caller treats that as expired,
+          matching the module's "loud whenever I could not tell" rule
+        - never raises
+    """
+    for key in ( "updated_at", "started_at" ):
+        raw = ledger.get( key )
+        if not raw: continue
+        try:
+            stamp = datetime.fromisoformat( str( raw ) )
+        except ( TypeError, ValueError ):
+            continue
+        if stamp.tzinfo is None: stamp = stamp.replace( tzinfo=timezone.utc )
+        return abs( ( now - stamp ).total_seconds() )
+    return None
+
+
+def _age_phrase( age ):
+    """
+    Render a ledger age for a human reading a poke.
+
+    Ensures:
+        - None -> names the MISSING TIMESTAMP rather than inventing an age. "unknown age"
+          would read as a measurement that came back vague; it is not a measurement at all
+        - otherwise a coarse "N hours old" / "N days old" — the reader needs the order of
+          magnitude to decide, not a precise duration
+        - never raises
+    """
+    if age is None: return "it carries no readable timestamp"
+    hours = age / 3600.0
+    if hours < 48: return f"{hours:.0f} hours old"
+    return f"{hours / 24.0:.0f} days old"
 
 
 def persona_slug( persona ):
@@ -146,7 +227,7 @@ def read_ledger( persona ):
     return data, ""
 
 
-def sweep_progress_line( persona, live_owed=None ):
+def sweep_progress_line( persona, live_owed=None, now=None ):
     """
     The sentence the Stop-hook appends to its self-poke reason.
 
@@ -179,6 +260,8 @@ def sweep_progress_line( persona, live_owed=None ):
         - live_owed is the seat's CURRENT owed-row count, or None when the caller
           could not resolve it (store unreachable — the caller must pass None
           rather than 0, since 0 is a real and very different answer)
+        - now is a timezone-aware datetime, or None to read the clock. A test seam;
+          the stop.py call site passes neither and is unchanged
 
     Ensures:
         - "" ONLY when this seat has no ledger — see the module docstring's failure table
@@ -189,6 +272,13 @@ def sweep_progress_line( persona, live_owed=None ):
         - an incomplete sweep yields a DO-NOT-STOP line with the number remaining
         - a complete sweep yields a distinct completion line (never silence)
         - an unreadable ledger yields a LOUD line naming the file and the reason
+        - a ledger older than SWEEP_LEDGER_TTL_SECONDS (or carrying no parseable
+          timestamp) yields a LOUD EXPIRED line INSTEAD of either arm that compares
+          `reviewed` against `live_owed` — a stale ledger satisfies that comparison
+          forever, which is bug `c2d6bcfa`
+        - the two arms that describe the LIVE board rather than the ledger (live_owed
+          None, live_owed 0) keep their verdict and gain an appended staleness note —
+          they are true at any ledger age, and alarming on them would be a false alarm
         - never raises
     """
     ledger, error = read_ledger( persona )
@@ -216,15 +306,32 @@ def sweep_progress_line( persona, live_owed=None ):
     when     = str( ledger.get( "started_at" ) or "" )[ :10 ] or "an earlier date"
     began    = f"(sweep began {total} rows, {when})"
 
+    # Bug c2d6bcfa. `age is None` means no timestamp was parseable, which is a
+    # could-not-tell and therefore loud — never quietly fresh.
+    age     = _ledger_age_seconds( ledger, now or datetime.now( timezone.utc ) )
+    expired = age is None or age > SWEEP_LEDGER_TTL_SECONDS
+    stale   = ( f"  ⚠️ Your sweep ledger is STALE ({_age_phrase( age )}) — it describes an "
+                f"older board. Re-arm it before you read any fraction from it."
+                if expired else "" )
+
     # live_owed is UNKNOWN, not zero, and must NOT fall back to `total` — the frozen
     # number is the stale figure this whole change exists to stop showing.
     if live_owed is None:
         return ( f"⚠️ BOARD SWEEP: your CURRENT owed count could not be read this tick "
                  f"{began}, so no number here describes your board as it stands. Do NOT "
-                 f"treat this as a clean board — re-check before you stop." + unvalidated )
+                 f"treat this as a clean board — re-check before you stop." + stale + unvalidated )
 
     if live_owed == 0:
-        return ( f"✅ BOARD SWEEP COMPLETE — 0 owed now {began}." + unvalidated )
+        return ( f"✅ BOARD SWEEP COMPLETE — 0 owed now {began}." + stale + unvalidated )
+
+    # Both arms below compare `reviewed` — the one input that ages — against a live count.
+    # A ledger past its TTL satisfies that comparison forever, so neither arm may render.
+    if expired:
+        return ( f"⛔ BOARD SWEEP LEDGER EXPIRED — {_age_phrase( age )} {began}. It claims "
+                 f"{reviewed} reviewed against {live_owed} owed NOW, but nothing has "
+                 f"refreshed it, so that fraction describes a board you may no longer have. "
+                 f"Re-arm the ledger against your current owed rows before you trust any "
+                 f"number here, and do NOT read this as a satisfied sweep." + unvalidated )
 
     if reviewed >= live_owed:
         return ( f"⛔ {live_owed} owed NOW {began}. You have reviewed {reviewed}, so the "
@@ -315,6 +422,17 @@ def rearm( persona, live_board_ids ):
     Re-create a seat's ledger against a fresh board WITHOUT losing progress or un-freezing
     the denominator.
 
+    ⚠️ NOTHING CALLS THIS, AND THAT IS DELIBERATE AS OF 2026-08-01 — it is not an oversight
+       to be tidied up by wiring it in. Bug `c2d6bcfa` was filed because the absent call site
+       let ledgers report a finished sweep forever, and the obvious reading of that bug is
+       "so add the call site." It was not the remedy: re-arming needs the seat's CURRENT owed
+       row ids, and the Stop hook has a persona and a count, not a board. Fetching one per
+       tick would put a store round-trip in the hook's path to fix a display defect.
+
+       ⇒ The expiry in `sweep_progress_line` closes the bug using only what that function
+         already holds. This stays as the operator's manual re-arm — the thing the EXPIRED
+         line tells a seat to run — and its correctness below is still load-bearing for that.
+
     🔴 THE DEFECT THIS EXISTS TO NOT HAVE (María 🌸, `fae1bbc4`, 2026-07-25 — the third time
        in one evening she found the frozen-denominator property re-derived incorrectly one
        layer out). The first re-arm helper did:
@@ -367,7 +485,17 @@ def rearm( persona, live_board_ids ):
 
 
 def quick_smoke_test():
-    """Self-contained smoke test — writes only inside a temp dir."""
+    """
+    Self-contained smoke test — writes only inside a temp dir.
+
+    ⚠️ THIS FUNCTION WAS DEAD-WRONG FROM 2026-07-27 TO 2026-08-01 and nothing noticed,
+    because nothing runs it. It asserted `"2/5"` and `"3 NOT YET REVIEWED"` against calls
+    that passed no `live_owed` — which take the UNKNOWN arm and contain neither string, and
+    `"3 NOT YET REVIEWED"` had stopped being emitted anywhere at all. It is fixed here to
+    the current API, but the lesson is the file's, not the function's: an assertion nobody
+    executes decays into a description of a version that no longer exists. The real gate is
+    `src/tests/unit/test_board_sweep_gate.py`.
+    """
     import tempfile
 
     global SWEEP_DIR
@@ -379,22 +507,28 @@ def quick_smoke_test():
             # No ledger -> silent, and this is the ONLY silent arm.
             assert sweep_progress_line( "mr radio" ) == "", "a non-sweeping seat must be unchanged"
 
-            # Start a sweep -> the DO-NOT-STOP line counts down.
+            # Start a sweep -> the DO-NOT-STOP line counts down against the LIVE board.
             record_reviewed( "mr radio", [ "a", "b" ], total_at_start=5 )
-            line = sweep_progress_line( "mr radio" )
-            assert "2/5" in line and "3 NOT YET REVIEWED" in line, line
+            line = sweep_progress_line( "mr radio", live_owed=5 )
+            assert "2/5" in line and "3 to go" in line, line
 
             # Re-reviewing a row is not progress.
             record_reviewed( "mr radio", [ "a" ] )
-            assert "2/5" in sweep_progress_line( "mr radio" )
+            assert "2/5" in sweep_progress_line( "mr radio", live_owed=5 )
 
             # Completion is LOUD, not silence.
             record_reviewed( "mr radio", [ "c", "d", "e" ] )
-            assert "SWEEP COMPLETE" in sweep_progress_line( "mr radio" )
+            assert "owed NOW" in sweep_progress_line( "mr radio", live_owed=5 )
+
+            # Bug c2d6bcfa — the SAME satisfied ledger, read a week later, must NOT
+            # still read as satisfied. Both arms, because only the pair is evidence.
+            later = datetime.now( timezone.utc ) + timedelta( days=7 )
+            assert "EXPIRED" in sweep_progress_line( "mr radio", live_owed=5, now=later )
+            assert "EXPIRED" not in sweep_progress_line( "mr radio", live_owed=5 )
 
             # A corrupt ledger must NOT read as "no sweep".
             ledger_path( "mr radio" ).write_text( "{ not json", encoding="utf-8" )
-            corrupt = sweep_progress_line( "mr radio" )
+            corrupt = sweep_progress_line( "mr radio", live_owed=5 )
             assert corrupt != "" and "unreadable" in corrupt, corrupt
 
             # Starting without a denominator is refused.
