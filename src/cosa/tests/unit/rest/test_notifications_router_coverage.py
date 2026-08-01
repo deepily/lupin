@@ -759,6 +759,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
         notif = Mock(); notif.state = "expired"
         notif.expires_at = datetime.now( timezone.utc ) - timedelta( seconds=5 )
         notif.recipient_id = UID_STR; notif.job_id = "dr-a1b2c3d4"
+        notif.sender_id = None; notif.sender_persona = None
         repo = Mock(); repo.get_by_id.return_value = notif; repo.update_response.return_value = True
         with patch.object( N, "get_db", _ctx_db( Mock() ) ), \
              patch.object( N, "NotificationRepository", return_value=repo ), \
@@ -772,6 +773,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
 
     async def test_update_response_false_500( self ):
         notif = Mock(); notif.state = "delivered"; notif.recipient_id = UID_STR; notif.job_id = None
+        notif.sender_id = None; notif.sender_persona = None
         repo = Mock(); repo.get_by_id.return_value = notif; repo.update_response.return_value = False
         with patch.object( N, "get_db", _ctx_db( Mock() ) ), \
              patch.object( N, "NotificationRepository", return_value=repo ), \
@@ -784,6 +786,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
 
     async def test_success_dict_value_with_prediction_and_sse_signal( self ):
         notif = Mock(); notif.state = "delivered"; notif.recipient_id = UID_STR; notif.job_id = "dr-a1b2c3d4"
+        notif.sender_id = None; notif.sender_persona = None
         repo = Mock(); repo.get_by_id.return_value = notif; repo.update_response.return_value = True
         # Seed an SSE waiter + prediction result for this notification id.
         N.pending_responses[ UID_STR ] = { "event": asyncio.Event(), "response_data": None }
@@ -817,6 +820,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
         def _capture_record( **kwargs ):
             captured[ "thread_id" ] = threading.get_ident()
         notif = Mock(); notif.state = "delivered"; notif.recipient_id = UID_STR; notif.job_id = None
+        notif.sender_id = None; notif.sender_persona = None
         repo = Mock(); repo.get_by_id.return_value = notif; repo.update_response.return_value = True
         N.pending_responses[ UID_STR ] = { "event": asyncio.Event(), "response_data": None,
                                            "prediction_result": Mock( response_type="yes_no" ) }
@@ -841,6 +845,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
 
     async def test_prediction_outcome_recording_error_nonfatal( self ):
         notif = Mock(); notif.state = "delivered"; notif.recipient_id = UID_STR; notif.job_id = None
+        notif.sender_id = None; notif.sender_persona = None
         repo = Mock(); repo.get_by_id.return_value = notif; repo.update_response.return_value = True
         N.pending_responses[ UID_STR ] = { "event": asyncio.Event(), "response_data": None,
                                            "prediction_result": Mock( response_type="yes_no" ) }
@@ -860,6 +865,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
 
     async def test_success_ws_broadcast_failure_nonfatal( self ):
         notif = Mock(); notif.state = "delivered"; notif.recipient_id = UID_STR; notif.job_id = None
+        notif.sender_id = None; notif.sender_persona = None
         repo = Mock(); repo.get_by_id.return_value = notif; repo.update_response.return_value = True
         ws = _ws_manager(); ws.emit_to_user_or_listener_sync.side_effect = Exception( "ws down" )
         with patch.object( N, "get_db", _ctx_db( Mock() ) ), \
@@ -881,6 +887,51 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
                     request_body={ "notification_id": "not-a-uuid", "response_value": "yes" },
                     ws_manager=_ws_manager() )
         self.assertEqual( ctx.exception.status_code, 500 )
+
+
+class TestLateAnswerHandback( unittest.IsolatedAsyncioTestCase ):
+    """
+    Section C (§4.3): the handback route.
+
+    C-V4  — the one-line live fix: when the ask carried no job_id, the
+            notification_responded emit routes on the asking session's #hash8
+            (asker_hash8), so it reaches that session's cc-listener. Red-proof:
+            delete `or asker_hash8` → the emit routes on None → this goes red.
+    setter(a) — answer_delivered_at is RECEIPT-gated: it is stamped ONLY when the
+            live SSE waiter is woken (a genuine in-process receipt), and NEVER
+            when there is no waiter (a bare emit is a send, not a receipt).
+    """
+
+    def _delivered_notif( self, sender_id, job_id=None ):
+        notif = Mock(); notif.state = "delivered"; notif.recipient_id = UID_STR
+        notif.job_id = job_id; notif.sender_id = sender_id; notif.sender_persona = "tiberius"
+        return notif
+
+    async def _submit( self, notif, ws, repo ):
+        with patch.object( N, "get_db", _ctx_db( Mock() ) ), \
+             patch.object( N, "NotificationRepository", return_value=repo ), \
+             patch.object( N, "get_formatted_time_display", return_value="12:00 EST" ), \
+             patch.object( N, "get_formatted_date_display", return_value="2026-06-01" ), \
+             _patch_fastapi_main( Mock( config_mgr=Mock( get=Mock( return_value=300 ) ) ) ), \
+             patch( "builtins.print" ):
+            return await submit_notification_response(
+                request_body={ "notification_id": UID_STR, "response_value": "yes" }, ws_manager=ws )
+
+    # NOTE: test_cv4_emit_routes_on_asker_hash8_when_no_job_id and
+    # test_setter_a_marks_delivered_only_when_sse_waiter_woken were lifted into
+    # src/tests/unit/test_late_answer_setter_a_wiring.py — they guard the
+    # job_id-or-asker_hash8 emit line + the SSE-waiter setter-(a) call, which land
+    # in a later notifications.py commit. They ride WITH that code so a test never
+    # sits red against a tree that has not received its subject yet.
+
+    async def test_setter_a_not_marked_without_sse_waiter( self ):
+        # NO waiter → a bare emit is a SEND, not a receipt → mark_answer_delivered
+        # must NOT fire; the row stays owed for catch-up. (Receipt-gating invariant.)
+        N.pending_responses.pop( UID_STR, None )
+        notif = self._delivered_notif( sender_id="claude.code@x#abcd1234", job_id="dr-1" )
+        repo = Mock(); repo.get_by_id.return_value = notif; repo.update_response.return_value = True
+        await self._submit( notif, _ws_manager(), repo )
+        repo.mark_answer_delivered.assert_not_called()
 
 
 # ===========================================================================

@@ -440,6 +440,92 @@ class NotificationRepository( BaseRepository[Notification] ):
         self.session.flush()
         return notification
 
+    def mark_answer_delivered( self, notification_id: uuid.UUID ) -> Optional[Notification]:
+        """
+        Stamp the late-answer handback mark (answer_delivered_at) — §4.3 contract.
+
+        This is the ONLY writer of answer_delivered_at, called by exactly the three
+        RECEIPT-gated setters: (a) the live SSE waiter being woken, (b) the pull
+        endpoint's ack-on-consume, (c) a §4.5 re-attach land. It is NEVER called on
+        a send signal, a successful send_json, an emit attempt, or on merely
+        SERVING a row — those leave the mark NULL so the row stays owed and catch-up
+        re-delivers. The state row is NOT deleted (ruling 2); only this mark moves.
+
+        Requires:
+            - notification_id: Valid notification UUID
+
+        Ensures:
+            - answer_delivered_at set to now() (idempotent — re-stamping is harmless)
+            - the row is otherwise untouched (never deleted; state unchanged)
+
+        Returns:
+            Updated Notification instance, or None if not found
+        """
+        notification = self.get_by_id( notification_id )
+        if not notification:
+            return None
+
+        # tz-AWARE to match the TIMESTAMPTZ column (Rachel, real-DB D-tier): a naive
+        # utcnow() coerces but stores a naive value inconsistent with responded_at /
+        # created_at. This is the one reader-critical timestamp, so keep it aware.
+        notification.answer_delivered_at = datetime.now( timezone.utc )
+        self.session.flush()
+        return notification
+
+    def get_answers_owed_for_persona(
+        self, sender_persona: str, limit: int = 100,
+        max_age_hours: Optional[int] = None, since: Optional[datetime] = None
+    ) -> List[Notification]:
+        """
+        Get the answers OWED to a persona — answered asks not yet handed back (§4.4).
+
+        The one reader of answer_delivered_at. Its WHERE is the owed predicate,
+        stated in full with the SAME THREE TERMS (in the same words) as §4.1's ORM
+        index and the concurrent migration:
+
+            response_requested AND responded_at IS NOT NULL AND answer_delivered_at IS NULL
+
+        - `responded_at IS NOT NULL` is the §3 design-level invariant, NOT cosmetic:
+          an offline/expired persist carries a machine default with responded_at
+          NULL and must NEVER be served as an owed answer (the forged-answer defect).
+        - Retrieval is persona-keyed (ruling 6): matches on sender_persona ALONE.
+          session_hash8 is NOT a filter here — it is a returned field the endpoint
+          uses to set the earlier-session flag.
+
+        ⚠️ ORDER + CURSOR are on `responded_at`, NOT `created_at`. Copying the
+        undelivered idiom's created_at cursor wholesale would strand a 20-hour-old
+        ask answered two minutes ago behind a cursor that already passed its
+        creation time (D-V4). The `since` cursor advances on responded_at.
+        The 24h age cap still keys on `created_at` (the storm-guard semantics).
+
+        Requires:
+            - sender_persona: a non-empty persona key (never None — a persona-less
+              ask stamps NULL and is unretrievable by persona, the accepted gap)
+            - max_age_hours: None (no cap) or a positive int (hours), on created_at
+            - since: None or a responded_at cursor; only rows answered AFTER it
+
+        Ensures:
+            - Returns rows matching the three-term owed predicate for this persona
+            - Ordered by responded_at ascending (oldest answer first); honors limit
+
+        Returns:
+            List of owed Notification instances
+        """
+        query = self.session.query( Notification ).filter(
+            Notification.sender_persona == sender_persona,
+            Notification.response_requested == True,
+            Notification.responded_at.isnot( None ),
+            Notification.answer_delivered_at.is_( None )
+        )
+        if max_age_hours is not None:
+            cutoff = datetime.now( timezone.utc ) - timedelta( hours=max_age_hours )
+            query  = query.filter( Notification.created_at >= cutoff )
+        if since is not None:
+            query = query.filter( Notification.responded_at > since )
+        return query.order_by(
+            Notification.responded_at.asc()
+        ).limit( limit ).all()
+
     def get_pending_for_recipient( self, recipient_id: uuid.UUID ) -> List[Notification]:
         """
         Get pending (unresponded) notifications requiring response.
