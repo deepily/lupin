@@ -66,9 +66,15 @@ def build_bounce_message(
         - ValueError if kind is not one of the two known signals
     """
     if kind == "warning":
+        # SELF-LIMITING hold (Tiffany's ruling, 2026-08-01): the exit must NOT be
+        # "an all-clear" alone — all-clear delivery is best-effort, and a session
+        # that misses it would otherwise stay suppressed INDEFINITELY, not just
+        # miss news. The "or confirm health yourself" clause closes that trap with
+        # a sentence, no mechanism (no auto-timeout, no polling, no re-fire).
         return (
-            f"⚠️ {server_label} is bouncing NOW — hold notifications and blocking "
-            f"asks until the all-clear. Any in-flight question will drop and need re-asking."
+            f"⚠️ {server_label} is bouncing NOW — hold notifications and blocking asks until the "
+            f"all-clear, OR until you can confirm the server is healthy yourself. Any in-flight "
+            f"question will drop and need re-asking."
         )
     if kind == "all-clear":
         up = "?" if uptime_seconds is None else f"{uptime_seconds:.1f}"
@@ -292,62 +298,82 @@ def poll_acks_until_satisfied(
         sleep_fn( poll_interval_seconds )
 
 
-def all_clear_fire_reason( gate_ready: bool ) -> str:
+def missed_sessions( expected_ids, present_ids ):
     """
-    Label WHY the all-clear fired, for the fire-time log line.
+    Sessions expected back (the roster) that have NO live socket — i.e. who never
+    rejoined and therefore got no all-clear.
 
-    This is load-bearing gate evidence, not decoration: the log is Rachel's AC8
-    instrument and the ONLY check on whether the guessed settle window was right.
-    If it ever labels a deadline expiry as a threshold hit, the instrument reports
-    the opposite of the truth. Lives here (measured) rather than in main.py so the
-    label decision is tested, not merely written.
+    Named on deadline expiry so the delivery LOSS is legible, not a bare count
+    (Rio's requirement). The ROSTER is legitimately the bridge-file session list:
+    bridge files survive a bounce, so they answer "who do we expect back", which
+    is exactly what they cannot answer for "who is back NOW" (that is the live
+    socket set). Roster minus live = missed.
+
+    Requires:
+        - expected_ids, present_ids are iterables of session-id strings
 
     Ensures:
-        - "threshold met"    when the fleet reappeared before the deadline
-        - "deadline expired" when it did not
+        - returns a sorted, de-duplicated list of ids in expected but not present
     """
-    return "threshold met" if gate_ready else "deadline expired"
+    return sorted( set( expected_ids ) - set( present_ids ) )
 
 
-# ─── All-clear settle gate (R5 delivery, option A) ──────────────────────────
+# ─── All-clear settle gate (R5 SOLE delivery path — no durable backstop) ─────
 
 
-def wait_for_recipients(
+def wait_for_reconnection_plateau(
     *,
-    count_sessions_fn     : Callable[ [ ], int ],
+    count_fn              : Callable[ [ ], int ],
     minimum               : int,
+    stable_polls          : int,
     deadline_seconds      : float,
     poll_interval_seconds : float,
     now_fn                : Callable[ [ ], float ],
     sleep_fn              : Callable[ [ float ], None ],
 ) -> Dict[ str, Any ]:
     """
-    Wait for at least `minimum` fleet sessions to (re)appear, or a deadline.
+    Wait for reconnecting sockets to PLATEAU, then fire — else fire at the deadline.
 
-    Fixes the R5 hole Tiffany flagged: the all-clear fires from lifespan startup,
-    but `perform_fanout` targets a LIVE snapshot of sessions at fire-time — and
-    right after a restart the browser + cc-listener sockets have not reconnected,
-    so an immediate fire reaches ≈0 recipients. This gate delays the single fire
-    until listeners rejoin. Chosen over replay-on-connect because that is the
-    durable-notify-path design Rick tagged do-not-implement (2026.07.28).
+    This is the SOLE delivery path for a live all-clear: there is no durable
+    backstop. `perform_fanout` writes each `broadcasts` entry targeted at the
+    fire-time snapshot, so a straggler who rejoins after the fire has NO entry at
+    all — emitted-≠-heard one layer down. Re-fire/replay is barred (Rick's
+    do-not-implement on the durable-notify-path, 2026-07-28). So the fire must
+    wait until the fleet is actually back.
 
-    Fully injectable (`count_sessions_fn`, `now_fn`, `sleep_fn`) → 100% testable
-    with no real clock and no real sessions.
+    `count_fn` MUST be a LIVE-socket count that empties on a bounce
+    (`websocket_manager.get_connection_count`), NOT a bridge-file count that
+    survives one: the bridge proxy read "present" at 0.0s and fired into sockets
+    that were not back — the 2026-08-01 zero-ack bug (all-clears 0 acks vs
+    warnings 7, same sessions).
+
+    Firing conditions:
+      · PLATEAU — count >= `minimum` AND the SAME count has been observed in
+        `stable_polls` consecutive polls (reconnections have stopped arriving). A
+        single observation is NOT a plateau; `stable_polls` equal reads in a row are.
+      · DEADLINE — `deadline_seconds` elapsed first. Accepted delivery LOSS: fire
+        anyway so the fleet that IS back hears it; the caller names who was missed.
+
+    Fully injectable (`count_fn`, `now_fn`, `sleep_fn`) → 100% testable with no
+    real clock and no real sockets.
 
     Ensures:
-        - returns {ready, count, elapsed}; `ready` True iff `count >= minimum`
-          was seen before the deadline
-        - the CALLER fires the all-clear regardless of `ready` (a not-ready fire
-          still writes the durable `broadcasts` commons entry) — this gate only
-          decides how long to wait, never whether to speak
-        - polls at least once so an already-populated fleet returns without sleeping
+        - returns {reason, count, elapsed, curve}; `reason` is "plateau" or "deadline"
+        - `curve` is the per-poll count series (the reconnect curve) for the log
+        - polls at least once; a plateau at a count below `minimum` never fires
+          early (it rides to the deadline), so a still-empty fleet is not mistaken
+          for a settled one
     """
     start = now_fn()
+    curve : List[ int ] = [ ]
+    run   = 0                            # length of the current run of equal counts
     while True:
-        count   = count_sessions_fn()
+        count = count_fn()
+        run   = run + 1 if ( curve and count == curve[ -1 ] ) else 1
+        curve.append( count )
         elapsed = now_fn() - start
-        if count >= minimum:
-            return { "ready": True, "count": count, "elapsed": elapsed }
+        if count >= minimum and run >= stable_polls:
+            return { "reason": "plateau", "count": count, "elapsed": elapsed, "curve": curve }
         if elapsed >= deadline_seconds:
-            return { "ready": False, "count": count, "elapsed": elapsed }
+            return { "reason": "deadline", "count": count, "elapsed": elapsed, "curve": curve }
         sleep_fn( poll_interval_seconds )

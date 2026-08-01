@@ -451,38 +451,63 @@ def _managed_bounce_all_clear_blocking( boot_id, boot_started, startup_began ):
     async wrapper hands it to a thread so it never touches the event loop.
     """
     from lupin_cli.claude_code.hooks.lib.session_bridge import find_active_voice_persona_sessions
-    from cosa.rest.managed_bounce_broadcast import wait_for_recipients, build_bounce_message, all_clear_fire_reason
+    from cosa.rest.managed_bounce_broadcast import wait_for_reconnection_plateau, build_bounce_message, missed_sessions
 
-    deadline  = config_mgr.get( "managed bounce all-clear settle deadline seconds",      default=15,  return_type="float" )
-    interval  = config_mgr.get( "managed bounce all-clear settle poll interval seconds", default=0.5, return_type="float" )
-    minimum   = config_mgr.get( "managed bounce all-clear settle minimum recipients",    default=1,   return_type="int" )
+    deadline     = config_mgr.get( "managed bounce all-clear settle deadline seconds",      default=15,  return_type="float" )
+    interval     = config_mgr.get( "managed bounce all-clear settle poll interval seconds", default=0.5, return_type="float" )
+    minimum      = config_mgr.get( "managed bounce all-clear settle minimum recipients",    default=1,   return_type="int" )
+    stable_polls = config_mgr.get( "managed bounce all-clear settle stable polls",          default=2,   return_type="int" )
 
-    # Raw session count is a cheap "are listeners back yet" proxy; the actual
-    # all-clear fanout below applies the real liveness + user filters. We only
-    # need to know the fleet reconnected, not exactly who is eligible.
-    gate = wait_for_recipients(
-        count_sessions_fn     = lambda: len( find_active_voice_persona_sessions() ),
+    # Count LIVE WebSocket sockets (get_connection_count = len(active_connections)),
+    # NOT bridge files. Fix for the 2026-08-01 zero-ack bug (found by Rachel,
+    # verified by Tiffany): the old proxy counted bridge FILES on an 8h mtime
+    # window, and bridge files SURVIVE a bounce — so every session read "present"
+    # at 0.0s, the gate opened instantly, and the fanout raced ahead of sockets
+    # that had not reconnected (all-clears 0 acks vs warnings 7, same sessions).
+    # active_connections is re-instantiated EMPTY on a bounce and refills only as
+    # real sockets reconnect. This is the SOLE delivery path — there is no durable
+    # backstop (a straggler past the deadline gets NOTHING), so the gate waits for
+    # reconnections to PLATEAU (stable_polls consecutive equal reads) before firing.
+    gate = wait_for_reconnection_plateau(
+        count_fn              = websocket_manager.get_connection_count,
         minimum               = minimum,
+        stable_polls          = stable_polls,
         deadline_seconds      = deadline,
         poll_interval_seconds = interval,
         now_fn                = time.monotonic,
         sleep_fn              = time.sleep,
     )
 
-    uptime  = time.monotonic() - startup_began
-    message = build_bounce_message( "all-clear", boot_id=boot_id, boot_started=boot_started, uptime_seconds=uptime )
-    result  = _emit_managed_bounce( "all-clear", message )
+    uptime     = time.monotonic() - startup_began
+    message    = build_bounce_message( "all-clear", boot_id=boot_id, boot_started=boot_started, uptime_seconds=uptime )
+    result     = _emit_managed_bounce( "all-clear", message )
     recipients = ( result or {} ).get( "recipients" )
+    curve      = "→".join( str( c ) for c in gate[ "curve" ] )
 
-    # Fire-time receipt — the ONLY signal that will later tell us whether the
-    # settle deadline (a guess, not a measurement) was ever the right number:
-    # how many recipients were present, and why we fired when we did.
-    why = all_clear_fire_reason( gate[ "ready" ] )
-    print(
-        f"[managed-bounce] all-clear FIRED (boot #{boot_id}): reached {recipients} recipient(s); "
-        f"settle gate {why} after {gate[ 'elapsed' ]:.1f}s with {gate[ 'count' ]} session(s) present.",
-        file=sys.stderr,
-    )
+    # Fire-time receipt + reconnect curve — the instruments that tell us later
+    # whether the guessed window was right and how the fleet came back.
+    if gate[ "reason" ] == "deadline":
+        # Accepted delivery LOSS (Rick's ruling: no re-fire). NAME who never
+        # rejoined so the loss is legible, not a bare count: roster (bridge files =
+        # who we EXPECT back — they survive the bounce) minus live sockets. A
+        # missed straggler gets NOTHING: no push, and NO durable entry either
+        # (perform_fanout writes entries only for the fire-time snapshot).
+        roster  = [ sid for ( _path, sid, _persona ) in find_active_voice_persona_sessions() ]
+        present = list( websocket_manager.active_connections.keys() )
+        missed  = missed_sessions( roster, present )
+        print(
+            f"[managed-bounce] ⚠️ all-clear FIRED on DEADLINE EXPIRY (boot #{boot_id}): reached "
+            f"{recipients} recipient(s) after {gate[ 'elapsed' ]:.1f}s; reconnect curve {curve}. "
+            f"{len( missed )} session(s) NEVER rejoined and got NO all-clear (accepted loss, no re-fire): "
+            f"{missed}.",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            f"[managed-bounce] all-clear FIRED (boot #{boot_id}): reconnect plateau after "
+            f"{gate[ 'elapsed' ]:.1f}s; reconnect curve {curve}; reached {recipients} recipient(s).",
+            file=sys.stderr,
+        )
 
 
 async def _run_managed_bounce_all_clear( *, boot_id, boot_started, startup_began ):

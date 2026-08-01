@@ -10,8 +10,10 @@ Covers the full pure/injectable surface to 100% (lines + branches):
   · emit_bounce_broadcast_in_process — happy, 429 loud log, >=400 log, no-status, exception
   · count_acked_sessions         — distinct-session dedupe, wrong id/status/type filters
   · poll_acks_until_satisfied    — immediate, zero-expected, after-polls, deadline expiry
-  · wait_for_recipients          — ready immediately, after polls, deadline-with-zero (the
-                                    emitted!=heard guard: fire-to-zero is NOT a satisfied fire)
+  · wait_for_reconnection_plateau — plateau after N equal reads, single-read does NOT fire
+                                    (the emitted!=heard guard), climb→deadline, plateau-at-zero
+  · missed_sessions              — roster minus present, sorted + deduped
+  · resolve_ack_timing           — reads both config keys, forwards defaults
 
 Zero external dependencies: clock, sleep, session/entry readers, and the
 broadcast executor are all injected or boundary-mocked. No real network, DB, or
@@ -31,8 +33,8 @@ from cosa.rest.managed_bounce_broadcast import (
     emit_bounce_broadcast_in_process,
     count_acked_sessions,
     poll_acks_until_satisfied,
-    wait_for_recipients,
-    all_clear_fire_reason,
+    wait_for_reconnection_plateau,
+    missed_sessions,
     resolve_ack_timing,
     FLEET_BROADCAST_USER_ID,
 )
@@ -64,6 +66,13 @@ class BuildBounceMessageTests( unittest.TestCase ):
         self.assertIn( ":7999", msg )
         self.assertIn( "hold notifications", msg )
         self.assertNotIn( "<system-reminder>", msg.lower() )
+
+    def test_warning_hold_is_self_limiting( self ):
+        # The hold's exit must NOT be the all-clear alone — a missed all-clear
+        # would otherwise suppress a session indefinitely (Tiffany's own case).
+        msg = build_bounce_message( "warning" ).lower()
+        self.assertIn( "all-clear", msg )
+        self.assertIn( "confirm the server is healthy yourself", msg )
 
     def test_all_clear_is_self_distinguishing_by_boot_id( self ):
         a = build_bounce_message( "all-clear", boot_id=41, boot_started="2026-08-01T12:00:00", uptime_seconds=3.2 )
@@ -208,13 +217,17 @@ class EmitBounceBroadcastTests( unittest.TestCase ):
             execute.assert_not_called()
 
 
-class AllClearFireReasonTests( unittest.TestCase ):
+class MissedSessionsTests( unittest.TestCase ):
 
-    def test_threshold_met_when_ready( self ):
-        self.assertEqual( all_clear_fire_reason( True ), "threshold met" )
+    def test_returns_roster_minus_present_sorted( self ):
+        # Named on deadline expiry: who was expected back (roster) but has no socket.
+        self.assertEqual( missed_sessions( [ "c", "a", "b" ], [ "b" ] ), [ "a", "c" ] )
 
-    def test_deadline_expired_when_not_ready( self ):
-        self.assertEqual( all_clear_fire_reason( False ), "deadline expired" )
+    def test_empty_when_everyone_present( self ):
+        self.assertEqual( missed_sessions( [ "a", "b" ], [ "a", "b", "x" ] ), [ ] )
+
+    def test_dedupes_repeated_roster_ids( self ):
+        self.assertEqual( missed_sessions( [ "a", "a", "b" ], [ ] ), [ "a", "b" ] )
 
 
 # ─── count_acked_sessions ───────────────────────────────────────────────────
@@ -290,41 +303,59 @@ class PollAcksTests( unittest.TestCase ):
         self.assertEqual( res[ "expected" ], 3 )
 
 
-# ─── wait_for_recipients (the emitted != heard guard) ───────────────────────
+# ─── wait_for_reconnection_plateau (the emitted != heard guard) ─────────────
 
 
-class WaitForRecipientsTests( unittest.TestCase ):
+class PlateauGateTests( unittest.TestCase ):
 
-    def test_ready_immediately_when_fleet_already_present( self ):
-        sleep = MagicMock()
-        res = wait_for_recipients(
-            count_sessions_fn=lambda: 3, minimum=1, deadline_seconds=10,
-            poll_interval_seconds=0.5, now_fn=_FakeClock( [ 0, 0 ] ), sleep_fn=sleep,
-        )
-        self.assertTrue( res[ "ready" ] )
-        self.assertEqual( res[ "count" ], 3 )
-        sleep.assert_not_called()
-
-    def test_ready_after_sessions_rejoin( self ):
-        counts = iter( [ 0, 2 ] )
+    def test_plateau_fires_after_stable_polls_consecutive_equal_reads( self ):
+        # count climbs 3 → 7 → 7; with stable_polls=2 the second equal 7 is the plateau.
+        counts = iter( [ 3, 7, 7 ] )
         sleep  = MagicMock()
-        res = wait_for_recipients(
-            count_sessions_fn=lambda: next( counts ), minimum=1, deadline_seconds=10,
-            poll_interval_seconds=0.5, now_fn=_FakeClock( [ 0, 1, 2 ] ), sleep_fn=sleep,
+        res = wait_for_reconnection_plateau(
+            count_fn=lambda: next( counts ), minimum=1, stable_polls=2, deadline_seconds=10,
+            poll_interval_seconds=0.5, now_fn=_FakeClock( [ 0, 0, 0, 0 ] ), sleep_fn=sleep,
         )
-        self.assertTrue( res[ "ready" ] )
-        self.assertEqual( res[ "count" ], 2 )
-        sleep.assert_called_once_with( 0.5 )
+        self.assertEqual( res[ "reason" ], "plateau" )
+        self.assertEqual( res[ "count" ], 7 )
+        self.assertEqual( res[ "curve" ], [ 3, 7, 7 ] )
+        self.assertEqual( sleep.call_count, 2 )     # did NOT fire on the first 7
 
-    def test_fire_to_zero_is_NOT_ready_at_deadline( self ):
-        # Rio's guard: emitted != heard. If nobody ever reconnects, the gate must
-        # return ready=False with count 0 — NOT a satisfied fire. Mutation-proof:
-        # revert `count >= minimum` and this goes red while the ready tests stay green.
-        res = wait_for_recipients(
-            count_sessions_fn=lambda: 0, minimum=1, deadline_seconds=10,
-            poll_interval_seconds=1, now_fn=_FakeClock( [ 0, 1, 100 ] ), sleep_fn=MagicMock(),
+    def test_single_stable_read_does_NOT_fire_needs_two( self ):
+        # THE fires-on-a-single-plateau guard. count is 7 from the first poll; a naive
+        # gate fires immediately. With stable_polls=2 it must wait for a SECOND equal
+        # read before firing. PREDICTED FAILURE if stable_polls is mis-implemented as
+        # run>=1 (fires on a single read): the gate returns at the first poll, so
+        # `sleep.assert_called_once()` fails with "Expected 'mock' to be called once.
+        # Called 0 times." and res["curve"] would be [7] not [7, 7].
+        counts = iter( [ 7, 7 ] )
+        sleep  = MagicMock()
+        res = wait_for_reconnection_plateau(
+            count_fn=lambda: next( counts ), minimum=1, stable_polls=2, deadline_seconds=10,
+            poll_interval_seconds=0.5, now_fn=_FakeClock( [ 0, 0, 0 ] ), sleep_fn=sleep,
         )
-        self.assertFalse( res[ "ready" ] )
+        self.assertEqual( res[ "reason" ], "plateau" )
+        self.assertEqual( res[ "curve" ], [ 7, 7 ] )
+        sleep.assert_called_once()                  # exactly one wait: the first 7 did NOT fire
+
+    def test_never_stabilizes_rides_to_deadline( self ):
+        # A strictly-climbing count never plateaus → deadline fire, curve preserved.
+        counts = iter( [ 1, 2, 3 ] )
+        res = wait_for_reconnection_plateau(
+            count_fn=lambda: next( counts ), minimum=1, stable_polls=2, deadline_seconds=10,
+            poll_interval_seconds=1, now_fn=_FakeClock( [ 0, 0, 1, 100 ] ), sleep_fn=MagicMock(),
+        )
+        self.assertEqual( res[ "reason" ], "deadline" )
+        self.assertEqual( res[ "curve" ], [ 1, 2, 3 ] )
+
+    def test_plateau_at_zero_below_minimum_rides_to_deadline( self ):
+        # A plateau at 0 is NOT a settled fleet — nobody came back. Mutation-proof:
+        # drop the `count >= minimum` guard and this flips to reason "plateau".
+        res = wait_for_reconnection_plateau(
+            count_fn=lambda: 0, minimum=1, stable_polls=2, deadline_seconds=10,
+            poll_interval_seconds=1, now_fn=_FakeClock( [ 0, 0, 100 ] ), sleep_fn=MagicMock(),
+        )
+        self.assertEqual( res[ "reason" ], "deadline" )
         self.assertEqual( res[ "count" ], 0 )
 
 
