@@ -6,7 +6,8 @@ request. Do NOT run this from a dev seat — it belongs in Rachel's next :8000 p
 runner collides with her in-flight sequence.
 
 WHY THIS EXISTS beyond the unit tests: the unit suite
-(`src/cosa/tests/unit/rest/test_managed_bounce_broadcast.py`) asserts `wait_for_recipients`
+(`src/tests/unit/test_managed_bounce_broadcast.py` — moved there 2026-08-01 so the `unit`
+test-type actually reaches it, row 663433a7) asserts `wait_for_recipients`
 and `all_clear_fire_reason` in ISOLATION — it mocks the lifespan wiring out. But on real
 traffic the all-clear has only ever been observed taking the THRESHOLD-MET branch: two live
 `:7999` bounces on 2026-08-01 both fired at 0.0s with 7 sessions already present. The

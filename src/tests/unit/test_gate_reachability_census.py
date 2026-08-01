@@ -331,3 +331,61 @@ def test_defines_a_test_recognises_pytest_discovery_shapes( tmp_path, source, ex
     path.write_text( source )
 
     assert _defines_a_test( path ) is expected
+
+
+@pytest.mark.parametrize(
+    "source,expected",
+    [
+        # The three real shapes that were misreported as barren on 2026-08-01.
+        ( "class FooTests( unittest.TestCase ):\n    def test_a(self): pass\n",           True  ),
+        ( "class FooTests( TestCase ):\n    def test_a(self): pass\n",                    True  ),
+        ( "class FooTest( unittest.IsolatedAsyncioTestCase ):\n"
+          "    async def test_a(self): pass\n",                                           True  ),
+        # THE CONTROL — inheritance alone must NOT excuse a file. pytest collects
+        # nothing from a TestCase with no test method, so the census must still
+        # name it. If this ever flips to True the widening has gone too far.
+        ( "class FooTests( unittest.TestCase ):\n    def helper(self): pass\n",           False ),
+        # A helper method whose name merely CONTAINS "test" is not a test method.
+        ( "class FooTests( unittest.TestCase ):\n    def assert_test_ran(self): pass\n",  False ),
+        # Inheritance through a project-local base is invisible to the AST — the
+        # documented limit. Such a file reads as barren and needs a ledger entry.
+        ( "class FooTests( OurOwnBase ):\n    def test_a(self): pass\n",                  False ),
+    ],
+)
+def test_defines_a_test_recognises_unittest_testcase_subclasses( tmp_path, source, expected ):
+    """
+    pytest collects `unittest.TestCase` subclasses by INHERITANCE, not by name.
+
+    The detector knew only the `Test*` name prefix, so a file whose classes are
+    named `FooTests(unittest.TestCase)` — the dominant spelling in this repo —
+    was reported as defining no test while holding real, passing, collected
+    tests. Row 663433a7. The rule is inheritance AND at least one `test_*`
+    method; the fourth case above is the arm that keeps the second half honest.
+    """
+    path = tmp_path / "test_probe.py"
+    path.write_text( source )
+
+    assert _defines_a_test( path ) is expected
+
+
+def test_zero_collect_detector_does_not_flag_a_real_testcase_file( tmp_path ):
+    """
+    End-to-end arm: a gated TestCase-style file must not surface as barren.
+
+    The parametrized cases above pin the predicate; this pins the CENSUS that
+    calls it, so a future refactor cannot reintroduce the false positive one
+    layer up while every unit-level assertion still passes.
+    """
+    _build_synthetic_tree( tmp_path )
+    ( tmp_path / "src/tests/unit/test_unittest_style.py" ).write_text(
+        "import unittest\n"
+        "class ReloadEnabledGateTests( unittest.TestCase ):\n"
+        "    def test_gate(self): self.assertTrue( True )\n"
+    )
+    ( tmp_path / "src/tests/unit/test_hollow_case.py" ).write_text(
+        "import unittest\n"
+        "class HollowTests( unittest.TestCase ):\n"
+        "    def helper(self): pass\n"
+    )
+
+    assert find_zero_collect_test_files( tmp_path, {} ) == [ "src/tests/unit/test_hollow_case.py" ]

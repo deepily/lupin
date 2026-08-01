@@ -275,11 +275,23 @@ def _defines_a_test( path: Path ) -> bool:
     """
     Whether a file defines anything pytest would collect as a test.
 
+    pytest collects by TWO independent rules, and this hunts for files that
+    satisfy NEITHER. The `python_classes = Test*` name prefix is only the first;
+    the second is `unittest.TestCase` inheritance, which pytest collects
+    REGARDLESS of the class name. A detector that knew only the prefix reported
+    every `class FooTests( unittest.TestCase )` file as contributing nothing —
+    three such files, each holding real passing tests, were named as barren on
+    2026-08-01 (row 663433a7).
+
     Requires:
         - path names an existing file
 
     Ensures:
         - returns True if a module-level `test_*` function or `Test*` class is defined
+        - returns True for a module-level `unittest.TestCase` subclass that defines
+          at least one `test_*` method
+        - returns False for a TestCase subclass with NO test method — pytest
+          collects nothing from it, which is exactly the silence this hunts
         - returns True when the file cannot be parsed — an unparseable file fails
           collection loudly and is not the silent class this hunts
     """
@@ -290,6 +302,53 @@ def _defines_a_test( path: Path ) -> bool:
 
     for node in tree.body:
         if isinstance( node, ( ast.FunctionDef, ast.AsyncFunctionDef ) ) and node.name.startswith( "test_" ): return True
-        if isinstance( node, ast.ClassDef ) and node.name.startswith( "Test" ): return True
+        if isinstance( node, ast.ClassDef ):
+            if node.name.startswith( "Test" ): return True
+            if _is_test_case_subclass( node ) and _has_a_test_method( node ): return True
 
     return False
+
+
+def _is_test_case_subclass( node: ast.ClassDef ) -> bool:
+    """
+    Whether a class declares a `TestCase`-shaped base.
+
+    Keyed on the base's trailing NAME so both import spellings land — bare
+    `TestCase` and dotted `unittest.TestCase` — plus the async variant
+    `IsolatedAsyncioTestCase`. It CANNOT see inheritance through a project-local
+    intermediate base (`class Mine( OurBase )`); such a file still reads as
+    barren and needs a ledger entry. Deliberately narrow: any base at all would
+    admit files pytest does not collect, which is the opposite failure.
+
+    Requires:
+        - node is an ast.ClassDef
+
+    Ensures:
+        - returns True iff some base's trailing identifier ends with "TestCase"
+    """
+    for base in node.bases:
+        if   isinstance( base, ast.Name      ) and base.id.endswith(   "TestCase" ): return True
+        elif isinstance( base, ast.Attribute ) and base.attr.endswith( "TestCase" ): return True
+
+    return False
+
+
+def _has_a_test_method( node: ast.ClassDef ) -> bool:
+    """
+    Whether a class body defines at least one `test_*` method.
+
+    The narrowing half of the TestCase rule: a TestCase subclass holding only
+    helpers emits nothing, so accepting it on inheritance alone would let a
+    genuinely barren file through the census.
+
+    Requires:
+        - node is an ast.ClassDef
+
+    Ensures:
+        - returns True iff some direct body member is a (sync or async) function
+          whose name starts with "test_"
+    """
+    return any(
+        isinstance( child, ( ast.FunctionDef, ast.AsyncFunctionDef ) ) and child.name.startswith( "test_" )
+        for child in node.body
+    )
