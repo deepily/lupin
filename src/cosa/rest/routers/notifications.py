@@ -1181,6 +1181,14 @@ async def notify_user(
         # Task 3 & 4: SSE event generator with timeout handling
         async def event_generator():
             try:
+                # §4.5 E-a: opening ack frame — hands the asking client this ask's
+                # notification_id BEFORE we block on the answer, so that if the SSE
+                # stream later dies the client can re-attach by polling
+                # GET /notifications/response/{id}. Purely additive: consume_sse_stream
+                # `continue`s on an unrecognized status, so a client that ignores it is
+                # unaffected.
+                yield f"data: {json.dumps({'status': 'ack', 'notification_id': notification_id})}\n\n"
+
                 # Wait for response with timeout
                 await asyncio.wait_for(
                     response_event.wait(),
@@ -1662,6 +1670,61 @@ async def ack_answer_owed(
     except Exception as e:
         print( f"[NOTIFY] Error acking answer {notification_id}: {str( e )}" )
         raise HTTPException( status_code=500, detail=f"Failed to ack answer: {str( e )}" )
+
+
+@router.get(
+    "/notifications/response/{notification_id}",
+    summary     = "Read one notification's response state (re-attach poll target)",
+    description = "PURE READ (§4.5 E-b) of {state, response_value, responded_at} for one notification. The MCP re-attach poll reads this after its SSE stream dies to learn whether the human answered. **No ack** — serving does NOT set answer_delivered_at; the ack is the explicit companion POST /answers-owed/ack. Registered BEFORE /notifications/{user_id} so the static path is not captured as a {user_id}."
+)
+async def get_notification_response(
+    authenticated_user_id: Annotated[str, Depends(require_api_key_or_jwt)],
+    notification_id: str
+):
+    """
+    Read one notification's response state — the re-attach poll target (§4.5 step 2).
+
+    Requires:
+        - a valid API key or Bearer JWT
+        - notification_id is a UUID string
+
+    Ensures:
+        - returns { state, response_value, responded_at } (responded_at ISO or None)
+        - PURE READ — never sets answer_delivered_at (serving is not a receipt); the
+          caller decides landed-ness on `responded_at IS NOT NULL` and acks separately
+        - 404 when the notification does not exist
+
+    Raises:
+        - HTTPException 404 if the notification does not exist
+        - HTTPException 500 on read failure
+    """
+    try:
+        def _fetch_response_sync():
+            with get_db() as session:
+                repo = NotificationRepository( session )
+                n    = repo.get_by_id( uuid.UUID( notification_id ) )
+                if n is None:
+                    return None
+                return {
+                    "state"          : n.state,
+                    "response_value" : n.response_value,
+                    "responded_at"   : n.responded_at.isoformat() if n.responded_at else None,
+                }
+
+        result = await asyncio.to_thread( _fetch_response_sync )
+        if result is None:
+            raise HTTPException( status_code=404, detail=f"Notification {notification_id} not found" )
+        return {
+            "status"          : "success",
+            "notification_id" : notification_id,
+            **result,
+            "timestamp"       : get_local_timestamp()
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print( f"[NOTIFY] Error reading response for {notification_id}: {str( e )}" )
+        raise HTTPException( status_code=500, detail=f"Failed to read notification response: {str( e )}" )
 
 
 @router.post(

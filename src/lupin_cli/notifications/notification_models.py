@@ -542,6 +542,11 @@ class NotificationResponse(BaseModel):
         description="Whether notification timed out"
     )
 
+    reattach_state: Optional[str] = Field(
+        default=None,
+        description="Late-answer re-attach signal (§4.5 E-c): 'reattach_armed' (stream died, poll fired against the remaining budget) | 'reattach_unavailable' (stream died but the ack id was never captured, so no re-attach was possible — the silent-no-op failure, surfaced loud) | None (no stream death). Assertable + queryable."
+    )
+
     @property
     def success( self ) -> bool:
         """
