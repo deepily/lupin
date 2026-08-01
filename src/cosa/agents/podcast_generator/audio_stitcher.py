@@ -330,21 +330,21 @@ def quick_smoke_test():
         mock_results = [
             TTSSegmentResult(
                 segment_index = 0,
-                speaker       = "Nora",
+                speaker       = "Maria",
                 role          = "curious",
                 pcm_audio     = b"\x00" * 24000,  # 0.5s
                 success       = True,
             ),
             TTSSegmentResult(
                 segment_index = 1,
-                speaker       = "Quentin",
+                speaker       = "Mr. Radio",
                 role          = "expert",
                 pcm_audio     = b"\x00" * 24000,  # 0.5s
                 success       = True,
             ),
             TTSSegmentResult(
                 segment_index = 2,
-                speaker       = "Nora",
+                speaker       = "Maria",
                 role          = "curious",
                 pcm_audio     = b"\x00" * 24000,  # 0.5s
                 success       = True,
@@ -383,7 +383,7 @@ def quick_smoke_test():
         failed_results = [
             TTSSegmentResult(
                 segment_index = 0,
-                speaker       = "Nora",
+                speaker       = "Maria",
                 role          = "curious",
                 success       = False,
                 error_message = "API error",

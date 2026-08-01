@@ -1553,7 +1553,7 @@ class PodcastOrchestratorAgent:
 IMPORTANT REQUIREMENTS:
 1. Generate NATURAL {language_name} dialogue - do NOT translate literally
 2. Preserve ALL prosody markers (*[pause]*, *[excited]*, etc.) UNCHANGED in English
-3. Keep host names (Nora, Quentin) UNCHANGED
+3. Keep host names (Maria, Mr. Radio) UNCHANGED
 4. Maintain the same dialogue structure (same number of segments, same speaker order)
 5. Adapt idioms, cultural references, and examples for {language_name} speakers
 6. Match the tone and energy of each segment
@@ -1567,7 +1567,7 @@ Generate the {language_name} script in JSON format with the same structure:
 {{
     "title": "{language_name} title here",
     "segments": [
-        {{"speaker": "Nora", "role": "curious", "text": "{language_name} dialogue with *[prosody]* markers"}},
+        {{"speaker": "Maria", "role": "curious", "text": "{language_name} dialogue with *[prosody]* markers"}},
         ...
     ],
     "key_topics": [...],
@@ -1902,11 +1902,11 @@ def quick_smoke_test():
         test_script = PodcastScript(
             title           = "Test Podcast",
             research_source = "/test.md",
-            host_a_name     = "Nora",
-            host_b_name     = "Quentin",
+            host_a_name     = "Maria",
+            host_b_name     = "Mr. Radio",
             segments        = [
-                ScriptSegment( speaker="Nora", role="curious", text="Hello!" ),
-                ScriptSegment( speaker="Quentin", role="expert", text="Hi there!" ),
+                ScriptSegment( speaker="Maria", role="curious", text="Hello!" ),
+                ScriptSegment( speaker="Mr. Radio", role="expert", text="Hi there!" ),
             ],
             estimated_duration_minutes = 5.0,
             key_topics      = [ "topic1", "topic2" ],
@@ -1915,7 +1915,7 @@ def quick_smoke_test():
         preview = agent._get_script_preview( test_script )
         assert "Test Podcast" in preview
         assert "2" in preview  # 2 segments
-        assert "Nora" in preview
+        assert "Maria" in preview
         print( "✓ _get_script_preview generates proper markdown" )
 
         print( "\n✓ Podcast Orchestrator smoke test completed successfully" )

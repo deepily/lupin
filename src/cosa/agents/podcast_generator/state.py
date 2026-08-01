@@ -551,16 +551,16 @@ def quick_smoke_test():
         # Test 3: ScriptSegment model
         print( "Testing ScriptSegment model..." )
         segment = ScriptSegment(
-            speaker         = "Nora",
+            speaker         = "Maria",
             role            = "curious",
             text            = "So what you're saying is... *[pause]* this changes everything?",
             prosody         = [ "pause" ],
             topic_reference = "quantum computing",
         )
-        assert segment.speaker == "Nora"
+        assert segment.speaker == "Maria"
         assert "pause" in segment.prosody
         markdown = segment.to_markdown()
-        assert "**[Nora - Curious]**" in markdown
+        assert "**[Maria - Curious]**" in markdown
         print( "✓ ScriptSegment model validates and converts to markdown" )
 
         # Test 4: PodcastScript model
@@ -568,15 +568,15 @@ def quick_smoke_test():
         script = PodcastScript(
             title           = "Understanding Quantum Computing",
             research_source = "/path/to/research.md",
-            host_a_name     = "Nora",
-            host_b_name     = "Quentin",
+            host_a_name     = "Maria",
+            host_b_name     = "Mr. Radio",
             segments        = [ segment ],
             estimated_duration_minutes = 12.5,
             key_topics      = [ "quantum", "computing", "future" ],
         )
         assert script.get_segment_count() == 1
         word_counts = script.get_speaker_word_counts()
-        assert "Nora" in word_counts
+        assert "Maria" in word_counts
         markdown_full = script.to_markdown()
         assert "# Podcast: Understanding Quantum Computing" in markdown_full
         print( "✓ PodcastScript model validates" )
@@ -585,27 +585,27 @@ def quick_smoke_test():
         print( "Testing PodcastScript.from_markdown()..." )
         test_markdown = """# Podcast: Voice Computing Revolution
 ## Generated: 2026-01-19T10:30:00
-## Hosts: Nora, Quentin
+## Hosts: Maria, Mr. Radio
 ## Estimated Duration: 15.5 minutes
 
 ---
 
-**[Nora - Curious]**: So what you're saying is... *[pause]* this changes everything?
+**[Maria - Curious]**: So what you're saying is... *[pause]* this changes everything?
 
-**[Quentin - Expert]**: Exactly! *[excited]* The market is growing from $14 billion to $61 billion by 2033.
+**[Mr. Radio - Expert]**: Exactly! *[excited]* The market is growing from $14 billion to $61 billion by 2033.
 
-**[Nora - Curious]**: Wait, that's a huge jump! *[surprised]* How is that even possible?
+**[Maria - Curious]**: Wait, that's a huge jump! *[surprised]* How is that even possible?
 """
         parsed = PodcastScript.from_markdown( test_markdown )
         assert parsed.title == "Voice Computing Revolution"
-        assert parsed.host_a_name == "Nora"
-        assert parsed.host_b_name == "Quentin"
+        assert parsed.host_a_name == "Maria"
+        assert parsed.host_b_name == "Mr. Radio"
         assert parsed.estimated_duration_minutes == 15.5
         assert len( parsed.segments ) == 3
-        assert parsed.segments[ 0 ].speaker == "Nora"
+        assert parsed.segments[ 0 ].speaker == "Maria"
         assert parsed.segments[ 0 ].role == "curious"
         assert "pause" in parsed.segments[ 0 ].prosody
-        assert parsed.segments[ 1 ].speaker == "Quentin"
+        assert parsed.segments[ 1 ].speaker == "Mr. Radio"
         assert "excited" in parsed.segments[ 1 ].prosody
         print( f"✓ from_markdown() works (parsed {len( parsed.segments )} segments)" )
 
@@ -651,22 +651,22 @@ def quick_smoke_test():
         english = PodcastScript(
             title           = "English Test",
             research_source = "/test.md",
-            host_a_name     = "Nora",
-            host_b_name     = "Quentin",
+            host_a_name     = "Maria",
+            host_b_name     = "Mr. Radio",
             segments        = [
-                ScriptSegment( speaker="Nora", role="curious", text="Test *[pause]* one", prosody=[ "pause" ] ),
-                ScriptSegment( speaker="Quentin", role="expert", text="Test *[excited]* two", prosody=[ "excited" ] ),
+                ScriptSegment( speaker="Maria", role="curious", text="Test *[pause]* one", prosody=[ "pause" ] ),
+                ScriptSegment( speaker="Mr. Radio", role="expert", text="Test *[excited]* two", prosody=[ "excited" ] ),
             ],
         )
         # Translation with same markers
         translated_good = PodcastScript(
             title           = "Spanish Test",
             research_source = "/test.md",
-            host_a_name     = "Nora",
-            host_b_name     = "Quentin",
+            host_a_name     = "Maria",
+            host_b_name     = "Mr. Radio",
             segments        = [
-                ScriptSegment( speaker="Nora", role="curious", text="Prueba *[pause]* uno", prosody=[ "pause" ] ),
-                ScriptSegment( speaker="Quentin", role="expert", text="Prueba *[excited]* dos", prosody=[ "excited" ] ),
+                ScriptSegment( speaker="Maria", role="curious", text="Prueba *[pause]* uno", prosody=[ "pause" ] ),
+                ScriptSegment( speaker="Mr. Radio", role="expert", text="Prueba *[excited]* dos", prosody=[ "excited" ] ),
             ],
         )
         is_preserved, details = validate_prosody_preservation( english, translated_good )
@@ -679,11 +679,11 @@ def quick_smoke_test():
         translated_bad = PodcastScript(
             title           = "Spanish Test",
             research_source = "/test.md",
-            host_a_name     = "Nora",
-            host_b_name     = "Quentin",
+            host_a_name     = "Maria",
+            host_b_name     = "Mr. Radio",
             segments        = [
-                ScriptSegment( speaker="Nora", role="curious", text="Prueba uno", prosody=[] ),  # Missing pause
-                ScriptSegment( speaker="Quentin", role="expert", text="Prueba *[excited]* dos", prosody=[ "excited" ] ),
+                ScriptSegment( speaker="Maria", role="curious", text="Prueba uno", prosody=[] ),  # Missing pause
+                ScriptSegment( speaker="Mr. Radio", role="expert", text="Prueba *[excited]* dos", prosody=[ "excited" ] ),
             ],
         )
         is_preserved2, details2 = validate_prosody_preservation( english, translated_bad )

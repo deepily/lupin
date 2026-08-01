@@ -270,7 +270,7 @@ IMPORTANT - LANGUAGE REQUIREMENT:
 Generate this podcast script in {language_name}.
 - Write natural, conversational dialogue as native speakers would speak
 - Preserve all prosody markers (*[pause]*, *[excited]*, etc.) UNCHANGED in English
-- Keep host names (Nora, Quentin) UNCHANGED
+- Keep host names (Maria, Mr. Radio) UNCHANGED
 - Adapt idioms, examples, and cultural references to be appropriate for {language_name} speakers
 - Do NOT translate literally - create authentic, natural-sounding dialogue
 
@@ -586,8 +586,8 @@ def quick_smoke_test():
             host_b_personality = DEFAULT_EXPERT_HOST,
             target_duration_minutes = 10,
         )
-        assert "Nora" in script_prompt  # Default curious host
-        assert "Quentin" in script_prompt  # Default expert host
+        assert "Maria" in script_prompt  # Default curious host
+        assert "Mr. Radio" in script_prompt  # Default expert host
         assert "10 minutes" in script_prompt
         print( "✓ Script generation prompt generated" )
 
@@ -621,7 +621,7 @@ def quick_smoke_test():
         # Test 3: Revision prompt
         print( "Testing revision prompt..." )
         revision_prompt = get_script_revision_prompt(
-            current_script  = "**[Nora]**: Hello!",
+            current_script  = "**[Maria]**: Hello!",
             feedback        = "Make it more energetic",
             revision_number = 1,
         )

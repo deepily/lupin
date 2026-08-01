@@ -148,8 +148,8 @@ class TestPodcastConfigBasics:
         assert cfg.target_duration_minutes == 10
         assert cfg.audience                == "academic"
         assert cfg.target_languages        == [ "en" ]
-        assert cfg.get_host_a_name()       == "Nora"
-        assert cfg.get_host_b_name()       == "Quentin"
+        assert cfg.get_host_a_name()       == "Maria"
+        assert cfg.get_host_b_name()       == "Mr. Radio"
         # default factories produce the module-level singletons' values
         assert cfg.host_a_personality.name == DEFAULT_CURIOUS_HOST.name
         assert cfg.host_b_personality.name == DEFAULT_EXPERT_HOST.name

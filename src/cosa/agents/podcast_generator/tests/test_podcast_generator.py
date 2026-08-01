@@ -53,8 +53,8 @@ class TestPodcastConfig:
     def test_default_host_personalities( self ):
         """Test default host configurations."""
         config = PodcastConfig()
-        assert config.host_a_personality.name == "Alex"
-        assert config.host_b_personality.name == "Jordan"
+        assert config.host_a_personality.name == "Maria"
+        assert config.host_b_personality.name == "Mr. Radio"
         assert config.host_a_personality.role == "Curious Questioner"
         assert config.host_b_personality.role == "Knowledgeable Explainer"
 
@@ -257,8 +257,8 @@ class TestPromptGeneration:
             host_b_personality     = DEFAULT_EXPERT_HOST,
             target_duration_minutes = 10,
         )
-        assert "Alex" in prompt
-        assert "Jordan" in prompt
+        assert "Maria" in prompt
+        assert "Mr. Radio" in prompt
         assert "10 minutes" in prompt
 
 
@@ -327,7 +327,7 @@ class TestPersonalityPrompts:
             host_personality = DEFAULT_CURIOUS_HOST,
             is_curious_role  = True,
         )
-        assert "Alex" in section
+        assert "Maria" in section
         assert "CURIOUS HOST" in section
 
     def test_dynamic_duo_description( self ):
@@ -336,8 +336,8 @@ class TestPersonalityPrompts:
             host_a = DEFAULT_CURIOUS_HOST,
             host_b = DEFAULT_EXPERT_HOST,
         )
-        assert "Alex" in desc
-        assert "Jordan" in desc
+        assert "Maria" in desc
+        assert "Mr. Radio" in desc
         assert "INTERACTION DYNAMICS" in desc
 
     def test_create_personality_from_description( self ):

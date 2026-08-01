@@ -157,17 +157,17 @@ class TestVoiceConfigResolution:
 
     def test_defaults_female_when_no_config_mgr( self ):
         cfg = _client().get_voice_config_for_speaker( "Nora" )
-        assert cfg.name == "Nora"
+        assert cfg.name == "Maria"
         assert cfg.voice_id == "kcQkGnn0HAT2JRDQ4Ljp"
 
     def test_defaults_male_when_no_config_mgr( self ):
         cfg = _client().get_voice_config_for_speaker( "Quentin" )
-        assert cfg.name == "Quentin"
+        assert cfg.name == "Mr. Radio"
         assert cfg.voice_id == "Aa6nEBJJMKJwJkCx8VU2"
 
     def test_unknown_speaker_warns_and_defaults_female( self, caplog ):
         cfg = _client().get_voice_config_for_speaker( "Zaphod" )
-        assert cfg.name == "Nora"                           # female default
+        assert cfg.name == "Maria"                          # female default
 
     def test_config_mgr_english_success( self ):
         cm = MagicMock()

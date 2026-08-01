@@ -244,21 +244,21 @@ def quick_smoke_test():
         from ..config import DEFAULT_CURIOUS_HOST, DEFAULT_EXPERT_HOST
 
         section = get_personality_prompt_section( DEFAULT_CURIOUS_HOST, is_curious_role=True )
-        assert "Nora" in section
+        assert "Maria" in section
         assert "CURIOUS HOST" in section
         assert "Wait, so..." in section or "typical_phrases" in section.lower()
         print( "✓ Curious host prompt section generated" )
 
         section_expert = get_personality_prompt_section( DEFAULT_EXPERT_HOST, is_curious_role=False )
-        assert "Quentin" in section_expert
+        assert "Mr. Radio" in section_expert
         assert "KNOWLEDGEABLE HOST" in section_expert
         print( "✓ Expert host prompt section generated" )
 
         # Test 2: Get dynamic duo description
         print( "Testing get_dynamic_duo_description..." )
         duo_desc = get_dynamic_duo_description( DEFAULT_CURIOUS_HOST, DEFAULT_EXPERT_HOST )
-        assert "Nora" in duo_desc
-        assert "Quentin" in duo_desc
+        assert "Maria" in duo_desc
+        assert "Mr. Radio" in duo_desc
         assert "INTERACTION DYNAMICS" in duo_desc
         assert "COMPLEMENTARY ENERGY" in duo_desc
         print( "✓ Dynamic duo description generated" )

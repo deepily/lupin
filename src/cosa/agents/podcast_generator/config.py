@@ -214,7 +214,7 @@ LANGUAGE_NAMES = {
 # =============================================================================
 
 DEFAULT_CURIOUS_HOST = HostPersonality(
-    name              = "Nora",
+    name              = "Maria",
     role              = "Curious Questioner",
     tone              = "highly animated, fast-paced, and inquisitive",
     expertise_level   = "educated layperson",
@@ -231,7 +231,7 @@ DEFAULT_CURIOUS_HOST = HostPersonality(
 )
 
 DEFAULT_EXPERT_HOST = HostPersonality(
-    name              = "Quentin",
+    name              = "Mr. Radio",
     role              = "Knowledgeable Explainer",
     tone              = "energetic, warm, and authoritative",
     expertise_level   = "expert",
@@ -489,8 +489,8 @@ def quick_smoke_test():
 
         # Test 2: Host personalities
         print( "Testing host personalities..." )
-        assert config.host_a_personality.name == "Nora"
-        assert config.host_b_personality.name == "Quentin"
+        assert config.host_a_personality.name == "Maria"
+        assert config.host_b_personality.name == "Mr. Radio"
         assert config.host_a_personality.role == "Curious Questioner"
         assert config.host_b_personality.role == "Knowledgeable Explainer"
         print( f"✓ Host A: {config.get_host_a_name()} ({config.host_a_personality.role})" )
@@ -508,9 +508,9 @@ def quick_smoke_test():
         # Test 4: HostPersonality.to_prompt_description
         print( "Testing personality prompt generation..." )
         prompt_desc = config.host_a_personality.to_prompt_description()
-        assert "Nora" in prompt_desc
+        assert "Maria" in prompt_desc
         assert "Curious Questioner" in prompt_desc
-        assert "enthusiastic" in prompt_desc
+        assert "animated" in prompt_desc
         print( "✓ Personality prompt description generated" )
 
         # Test 5: Custom personalities
@@ -619,8 +619,8 @@ def quick_smoke_test():
             cfg_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
             config_from_ini = PodcastConfig.from_config( cfg_mgr, debug=True )
             assert config_from_ini.script_model == "claude-opus-4-6"
-            assert config_from_ini.host_a_personality.name == "Nora"
-            assert config_from_ini.host_b_personality.name == "Quentin"
+            assert config_from_ini.host_a_personality.name == "Maria"
+            assert config_from_ini.host_b_personality.name == "Mr. Radio"
             assert len( config_from_ini.host_a_personality.typical_phrases ) > 0
             assert config_from_ini.target_duration_minutes == 10
             assert isinstance( config_from_ini.include_intro, bool )
