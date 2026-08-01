@@ -1306,6 +1306,85 @@ class TestGetUndeliveredNotifications( unittest.IsolatedAsyncioTestCase ):
         self.assertEqual( ctx.exception.status_code, 503 )       # re-raised verbatim, NOT wrapped to 500
 
 
+class TestPersonaStamping( unittest.IsolatedAsyncioTestCase ):
+    """
+    Section B (§4.2): sender_persona/sender_icon are stamped on response-required
+    ask rows so persona-keyed retrieval (ruling 6) can find late answers.
+
+    B-V1  — the persona VALUE survives the persist path (asserted on the stored
+            string, i.e. the same string a DM from that session stores — never a
+            dict key named "name"), for BOTH resolved states (online/offline).
+    B-V3  — the endpoint stamps on the OFFLINE branch too (audit-completeness;
+            red if reverted to online-only or the hoisted lookup is removed).
+    B-V4  — a persona-less ask stamps NULL sender_persona AND emits the audible
+            WARNING naming the sender_id (K-B3 documented fate).
+    """
+
+    EMAIL = "ricardo.felipe.ruiz@gmail.com"
+
+    # ---- B-V1: persona value survives _persist_response_required_sync ----
+    def _run_persist( self, state ):
+        mock_db = Mock(); repo = Mock()
+        repo.create_notification.return_value = Mock( id=uuid.uuid4() )
+        with patch.object( N, "get_db", _ctx_db( mock_db ) ), \
+             patch.object( N, "NotificationRepository", return_value=repo ), \
+             patch( "builtins.print" ):
+            N._persist_response_required_sync(
+                "claude.code@x#abcd1234", UID_STR, "hi", "custom", "medium", "T",
+                None, "yes_no", "no", None, 120, None, None, state,
+                "tiberius", "👑"
+            )
+        return repo
+
+    def test_bv1_online_persist_stamps_persona_value( self ):
+        kwargs = self._run_persist( "delivered" ).create_notification.call_args.kwargs
+        self.assertEqual( kwargs[ "sender_persona" ], "tiberius" )   # the STORED VALUE, not a key
+        self.assertEqual( kwargs[ "sender_icon" ], "👑" )
+
+    def test_bv1_offline_persist_stamps_persona_value( self ):
+        kwargs = self._run_persist( "expired" ).create_notification.call_args.kwargs
+        self.assertEqual( kwargs[ "sender_persona" ], "tiberius" )
+        self.assertEqual( kwargs[ "sender_icon" ], "👑" )
+
+    # ---- endpoint helper: offline response-required ask ----
+    async def _call_offline_ask( self, persona_payload, printer=None ):
+        ws = _ws_manager( is_connected=False, connection_count=0 )
+        mock_db = Mock(); repo = Mock()
+        repo.create_notification.return_value = Mock( id=uuid.uuid4() )
+        printer = printer or Mock()
+        with patch( "cosa.rest.user_service.get_user_by_email", return_value={ "id": UID_STR } ), \
+             patch.object( N, "get_db", _ctx_db( mock_db ) ), \
+             patch.object( N, "NotificationRepository", return_value=repo ), \
+             patch.object( N, "_voice_persona_for_sender_id", return_value=persona_payload ), \
+             _patch_fastapi_main( Mock( app_debug=False, app_verbose=False ) ), \
+             patch( "builtins.print", printer ):
+            await notify_user(
+                authenticated_user_id="svc", message="Hello world", type="progress",
+                direction="ai_to_human", priority="medium", target_user=self.EMAIL,
+                response_requested=True, response_type="yes_no", timeout_seconds=120,
+                response_default="no", title=None, sender_id=None, response_options=None,
+                abstract=None, job_id=None, queue_name=None, suppress_ding=False,
+                progress_group_id=None, prediction_hint_override=None,
+                display_qualifier_widget=False, session_name=None, idempotency_key=None,
+                notification_queue=Mock(), ws_manager=ws,
+            )
+        return repo
+
+    async def test_bv3_endpoint_offline_branch_stamps_persona( self ):
+        kwargs = ( await self._call_offline_ask( { "name": "tiberius", "icon": "👑" } ) ).create_notification.call_args.kwargs
+        self.assertEqual( kwargs[ "sender_persona" ], "tiberius" )
+        self.assertEqual( kwargs[ "sender_icon" ], "👑" )
+
+    async def test_bv4_persona_less_stamps_null_and_warns( self ):
+        printer = Mock()
+        repo = await self._call_offline_ask( None, printer=printer )
+        self.assertIsNone( repo.create_notification.call_args.kwargs[ "sender_persona" ] )
+        warned = [ c for c in printer.call_args_list
+                   if c.args and "NO voice persona" in str( c.args[ 0 ] ) ]
+        self.assertTrue( warned, "expected the persona-less WARNING to be printed" )
+        self.assertIn( "claude.code@unknown.deepily.ai", str( warned[ 0 ].args[ 0 ] ) )
+
+
 def isolated_unit_test():
     """
     Run the supplemental notifications-router coverage suite in isolation.

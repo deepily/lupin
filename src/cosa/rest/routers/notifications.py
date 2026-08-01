@@ -361,7 +361,8 @@ def _update_notification_state_sync( notification_id, state ):
 def _persist_response_required_sync(
     resolved_sender_id, target_system_id, message, type, priority, title,
     abstract, response_type, response_default, parsed_response_options,
-    timeout_seconds, job_id, progress_group_id, state
+    timeout_seconds, job_id, progress_group_id, state,
+    sender_persona=None, sender_icon=None
 ):
     """
     Synchronous DB persist for a response-required notification — run OFF the
@@ -404,7 +405,9 @@ def _persist_response_required_sync(
             timeout_seconds    = timeout_seconds,
             expires_at         = expires_at,
             job_id             = job_id,
-            progress_group_id  = progress_group_id
+            progress_group_id  = progress_group_id,
+            sender_persona     = sender_persona,
+            sender_icon        = sender_icon
         )
         repo.update_state( db_notification.id, state )
         return str( db_notification.id )
@@ -492,8 +495,13 @@ def _submit_response_sync( notification_id, response_value ):
         # Capture recipient_id and job_id before session closes (for WebSocket broadcast).
         # job_id is needed for the cross-user CC-listener fallback in the
         # notification_responded broadcast below (Phase C migration 2026-04-27).
+        # sender_id + sender_persona are captured for the late-answer handback
+        # (§4.3): the asking session's #hash8 is the durable/listener routing key,
+        # and sender_persona keys the catch-up pull.
         recipient_id        = str( notification.recipient_id )
         notification_job_id = notification.job_id
+        sender_id           = notification.sender_id
+        sender_persona      = notification.sender_persona
 
         # Update database with response (pass dict, not JSON string)
         # Wrap in dict if response_value is a simple string like "yes" or "no"
@@ -510,7 +518,36 @@ def _submit_response_sync( notification_id, response_value ):
                 detail      = "Failed to update notification response in database"
             )
 
-        return ( recipient_id, notification_job_id )
+        # A dict, not the old 2-tuple (§4.3 step 1) — carries the asking session's
+        # sender_id + sender_persona for the handback routing/catch-up keys.
+        return {
+            "recipient_id"   : recipient_id,
+            "job_id"         : notification_job_id,
+            "sender_id"      : sender_id,
+            "sender_persona" : sender_persona,
+        }
+
+
+def _mark_answer_delivered_sync( notification_id ):
+    """
+    Stamp answer_delivered_at on a notification — run OFF the event loop via
+    asyncio.to_thread. The router's arm of the three RECEIPT-gated setters (§4.3):
+    setter (a) calls this when the live SSE waiter is woken (the asking coroutine
+    consumed the value). Setters (b)/(c) share the same repo write via the
+    answers-owed ack endpoint.
+
+    Requires:
+        - notification_id is a UUID string
+
+    Ensures:
+        - answer_delivered_at is set (idempotent); the row is never deleted
+
+    Raises:
+        - propagates DB errors to the caller (handled there as non-fatal)
+    """
+    with get_db() as session:
+        repo = NotificationRepository( session )
+        repo.mark_answer_delivered( uuid.UUID( notification_id ) )
 
 
 @router.post(
@@ -986,6 +1023,24 @@ async def notify_user(
         # RESPONSE-REQUIRED MODE (Phase 2.1 - new SSE blocking behavior)
         # =================================================================================
 
+        # Resolve the session's voice persona ONCE, above the offline branch (§4.2),
+        # so BOTH persist paths (offline/expired and online/delivered) can stamp
+        # sender_persona — the audit trail is complete regardless of how the ask
+        # resolved, and persona-keyed retrieval (ruling 6) needs the key present.
+        # The online WS push below REUSES this payload instead of re-reading the
+        # bridge file (one fewer bridge read per ask on the hot path).
+        # Lever B: bridge-file read is blocking I/O — off the event loop.
+        voice_persona_payload = await asyncio.to_thread( _voice_persona_for_sender_id, resolved_sender_id )
+        sender_persona = voice_persona_payload.get( "name" ) if voice_persona_payload else None
+        sender_icon    = voice_persona_payload.get( "icon" ) if voice_persona_payload else None
+        # A persona-less ask (allocation failed) stamps NULL sender_persona, so its
+        # answer is unretrievable by persona and will never receive a late answer
+        # (§4.4 runbook gap — accepted, near-universal allocation). Make it AUDIBLE
+        # rather than silent: a lost late-answer shows in the log, not by Rick
+        # noticing an answer never arrived.
+        if sender_persona is None:
+            print( f"[NOTIFY] ⚠️ response-required ask has NO voice persona (sender_id={resolved_sender_id!r}) — its late answer will be unretrievable by persona (§4.4 accepted gap)" )
+
         # Task 5: Offline Detection - return default immediately if user not connected
         if not is_connected:
             if response_default:
@@ -998,7 +1053,8 @@ async def notify_user(
                     resolved_sender_id, target_system_id, message, type, priority,
                     title, abstract, response_type, response_default,
                     parsed_response_options, timeout_seconds, job_id,
-                    progress_group_id, "expired"
+                    progress_group_id, "expired",
+                    sender_persona, sender_icon
                 )
 
                 return JSONResponse({
@@ -1021,7 +1077,8 @@ async def notify_user(
             resolved_sender_id, target_system_id, message, type, priority,
             title, abstract, response_type, response_default,
             parsed_response_options, timeout_seconds, job_id,
-            progress_group_id, "delivered"
+            progress_group_id, "delivered",
+            sender_persona, sender_icon
         )
 
         print(f"[NOTIFY] Created response-required notification: {notification_id}")
@@ -1087,8 +1144,8 @@ async def notify_user(
         # ---- End Prediction Engine Hook ----
 
         # Push notification to WebSocket for UI rendering (Phase 2.2 with full fields).
-        # Lever B (surgical pass 2): persona lookup reads bridge files — off the loop.
-        voice_persona_payload = await asyncio.to_thread( _voice_persona_for_sender_id, resolved_sender_id )
+        # voice_persona_payload was resolved ONCE above the offline branch (§4.2) —
+        # reuse it here instead of re-reading the bridge file.
         notification_item = notification_queue.push_notification(
             message                  = message.strip(),
             type                     = type,
@@ -1281,9 +1338,16 @@ async def submit_notification_response(
 
         # Get notification from PostgreSQL + persist the response. Lever B
         # (surgical pass 2): blocking DB read/validate/update off the event loop.
-        recipient_id, notification_job_id = await asyncio.to_thread(
+        submit_result       = await asyncio.to_thread(
             _submit_response_sync, notification_id, response_value
         )
+        recipient_id        = submit_result[ "recipient_id" ]
+        notification_job_id = submit_result[ "job_id" ]
+        asker_sender_id     = submit_result[ "sender_id" ]
+        # The asking session's #hash8 — the listener/durable routing key when the
+        # answer must travel by session rather than by job (§4.3 step 2). None when
+        # the sender_id carries no #suffix (a root session).
+        asker_hash8 = asker_sender_id.split( "#", 1 )[ 1 ].strip() if asker_sender_id and "#" in asker_sender_id else None
 
         print(f"[NOTIFY] ✓ Updated database with response for {notification_id}")
 

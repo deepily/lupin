@@ -19,7 +19,8 @@ from sqlalchemy import (
     Text,
     Index,
     CheckConstraint,
-    func
+    func,
+    text
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB, INET
 from sqlalchemy.orm import DeclarativeBase, relationship, Mapped, mapped_column
@@ -604,6 +605,16 @@ class Notification( Base ):
         DateTime( timezone=True ),
         nullable=True
     )
+    # The late-answer handback mark. Simultaneously the "owed" flag and the
+    # don't-deliver-twice guard: a row is owed a handback iff it was an answered
+    # ask that has not yet been confirmed-received. RECEIPT-gated — set only by
+    # the three setters in the §4.3 contract (a woken SSE waiter, the §4.4 pull
+    # ack, or a §4.5 re-attach land), NEVER by a send signal or an emit attempt.
+    # See src/rnd/v0.1.9/2026.08.01-late-answer-handback.md §4.1.
+    answer_delivered_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime( timezone=True ),
+        nullable=True
+    )
     expires_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime( timezone=True ),
         nullable=True
@@ -666,6 +677,18 @@ class Notification( Base ):
         Index( 'idx_notifications_state', 'state' ),
         Index( 'idx_notifications_created_at', 'created_at' ),
         Index( 'idx_notifications_sender_recipient', 'sender_id', 'recipient_id' ),
+        # Partial index over the answer-owed set — the one reader is §4.4's
+        # get_answers_owed_for_persona query. Declared here as the schema of
+        # record so `alembic autogenerate` does not report phantom drift
+        # (schema_drift.py checks columns only, never indexes); built
+        # CONCURRENTLY in the migration so the forever-kept table is never
+        # write-locked. The three predicate terms are character-identical to
+        # the migration and the repo query — see the plan §4.1 / §4.4.
+        Index(
+            'idx_notifications_answer_owed',
+            'sender_persona', 'responded_at',
+            postgresql_where=text( "response_requested AND responded_at IS NOT NULL AND answer_delivered_at IS NULL" ),
+        ),
     )
 
     def __repr__( self ) -> str:

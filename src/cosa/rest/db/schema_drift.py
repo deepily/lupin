@@ -4,9 +4,13 @@ ORM-vs-database schema drift detector — the startup alarm (Half 3b, FAIL-OPEN)
 Why this exists
 ---------------
 A ``mapped_column`` can land in ``postgres_models.py`` before its migration
-exists. On ``:7999`` uvicorn runs with ``--reload``, so **the model edit IS the
-deploy**: the ORM immediately SELECTs a column the database lacks and every read
-of that table 500s fleet-wide.
+exists. R1 turned ``:7999``'s uvicorn ``--reload`` **OFF** on 2026-08-01, so a
+model edit no longer deploys itself — it sits **inert until someone bounces**.
+That is safer, but it changes the shipping rule: the migration must be *applied*
+before the bounce, not merely committed first, or the model and its column land
+together at the next restart and the ORM immediately SELECTs a column the
+database lacks — every read of that table then 500s fleet-wide until the
+migration is applied.
 
 Measured incident (2026-07-19): ``task_items.park_reason_captured_at`` — 12 live
 500s on ``/api/tasks`` over 2m 28s. ``/api/tasks`` is the task store, the
