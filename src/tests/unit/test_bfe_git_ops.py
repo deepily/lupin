@@ -35,7 +35,7 @@ def test_run_git_success():
     git_ops = GitOps( debug=False )
     proc = _mock_proc( returncode=0, stdout=b"main\n" )
     with patch( "asyncio.create_subprocess_exec", return_value=proc ):
-        result = asyncio.get_event_loop().run_until_complete( git_ops._run_git( "rev-parse", "--abbrev-ref", "HEAD" ) )
+        result = asyncio.run( git_ops._run_git( "rev-parse", "--abbrev-ref", "HEAD" ) )
     assert result[ "success" ] is True
     assert result[ "returncode" ] == 0
     assert result[ "stdout" ] == "main"
@@ -46,7 +46,7 @@ def test_run_git_failure():
     git_ops = GitOps( debug=False )
     proc = _mock_proc( returncode=1, stdout=b"", stderr=b"fatal: not a git repository" )
     with patch( "asyncio.create_subprocess_exec", return_value=proc ):
-        result = asyncio.get_event_loop().run_until_complete( git_ops._run_git( "status" ) )
+        result = asyncio.run( git_ops._run_git( "status" ) )
     assert result[ "success" ] is False
     assert result[ "returncode" ] == 1
     assert "not a git repository" in result[ "stderr" ]
@@ -55,7 +55,7 @@ def test_run_git_failure():
 def test_run_git_exception_handled():
     git_ops = GitOps( debug=False )
     with patch( "asyncio.create_subprocess_exec", side_effect=FileNotFoundError( "git not found" ) ):
-        result = asyncio.get_event_loop().run_until_complete( git_ops._run_git( "status" ) )
+        result = asyncio.run( git_ops._run_git( "status" ) )
     assert result[ "success" ] is False
     assert result[ "returncode" ] == -1
     assert "git not found" in result[ "stderr" ]
@@ -74,7 +74,7 @@ def test_commit_on_branch_success():
         _mock_proc( returncode=0, stdout=b"abc123def456" ),  # git rev-parse HEAD
     ]
     with patch( "asyncio.create_subprocess_exec", side_effect=procs ):
-        result = asyncio.get_event_loop().run_until_complete( git_ops.commit_on_branch( [ "file1.py", "file2.py" ], "[BFE] Fix bug" ) )
+        result = asyncio.run( git_ops.commit_on_branch( [ "file1.py", "file2.py" ], "[BFE] Fix bug" ) )
     assert result[ "success" ] is True
     assert result[ "commit_hash" ] == "abc123def456"
     assert result[ "error" ] is None
@@ -82,7 +82,7 @@ def test_commit_on_branch_success():
 
 def test_commit_on_branch_rejects_empty_files():
     git_ops = GitOps( debug=False )
-    result = asyncio.get_event_loop().run_until_complete( git_ops.commit_on_branch( [], "test" ) )
+    result = asyncio.run( git_ops.commit_on_branch( [], "test" ) )
     assert result[ "success" ] is False
     assert result[ "commit_hash" ] is None
     assert "no files" in result[ "error" ]
@@ -92,7 +92,7 @@ def test_commit_on_branch_add_fails():
     git_ops = GitOps( debug=False )
     proc = _mock_proc( returncode=1, stderr=b"pathspec did not match" )
     with patch( "asyncio.create_subprocess_exec", return_value=proc ):
-        result = asyncio.get_event_loop().run_until_complete( git_ops.commit_on_branch( [ "missing.py" ], "test" ) )
+        result = asyncio.run( git_ops.commit_on_branch( [ "missing.py" ], "test" ) )
     assert result[ "success" ] is False
     assert "git add failed" in result[ "error" ]
 
@@ -105,7 +105,7 @@ def test_create_fix_branch_success():
     git_ops = GitOps( debug=False )
     proc = _mock_proc( returncode=0 )
     with patch( "asyncio.create_subprocess_exec", return_value=proc ):
-        result = asyncio.get_event_loop().run_until_complete( git_ops.create_fix_branch( "fix/2026-04-05-null-pointer" ) )
+        result = asyncio.run( git_ops.create_fix_branch( "fix/2026-04-05-null-pointer" ) )
     assert result[ "success" ] is True
     assert result[ "branch_name" ] == "fix/2026-04-05-null-pointer"
     assert result[ "error" ] is None
@@ -113,7 +113,7 @@ def test_create_fix_branch_success():
 
 def test_create_fix_branch_rejects_empty_slug():
     git_ops = GitOps( debug=False )
-    result = asyncio.get_event_loop().run_until_complete( git_ops.create_fix_branch( "" ) )
+    result = asyncio.run( git_ops.create_fix_branch( "" ) )
     assert result[ "success" ] is False
     assert result[ "branch_name" ] is None
     assert "empty slug" in result[ "error" ]
@@ -133,7 +133,7 @@ def test_commit_and_push_sequence():
         _mock_proc( returncode=0 ),                        # git push -u origin
     ]
     with patch( "asyncio.create_subprocess_exec", side_effect=procs ):
-        result = asyncio.get_event_loop().run_until_complete( git_ops.commit_and_push(
+        result = asyncio.run( git_ops.commit_and_push(
             "fix/2026-04-05-bug", [ "a.py" ], "[BFE] Fix"
         ) )
     assert result[ "success" ] is True
@@ -150,7 +150,7 @@ def test_commit_and_push_push_fails():
         _mock_proc( returncode=1, stderr=b"auth failure" ), # git push -u origin
     ]
     with patch( "asyncio.create_subprocess_exec", side_effect=procs ):
-        result = asyncio.get_event_loop().run_until_complete( git_ops.commit_and_push(
+        result = asyncio.run( git_ops.commit_and_push(
             "fix/test", [ "a.py" ], "[BFE] Fix"
         ) )
     assert result[ "success" ] is False
@@ -167,7 +167,7 @@ def test_create_pr_success():
     git_ops._gh_available = True   # pre-cache
     proc = _mock_proc( returncode=0, stdout=b"https://github.com/foo/bar/pull/42" )
     with patch( "asyncio.create_subprocess_exec", return_value=proc ):
-        result = asyncio.get_event_loop().run_until_complete( git_ops.create_pr(
+        result = asyncio.run( git_ops.create_pr(
             "fix/test", "[BFE] Fix bug", "Automated fix body"
         ) )
     assert result[ "success" ] is True
@@ -178,7 +178,7 @@ def test_create_pr_success():
 def test_create_pr_gh_unavailable_degrades():
     git_ops = GitOps( debug=False )
     with patch( "shutil.which", return_value=None ):
-        result = asyncio.get_event_loop().run_until_complete( git_ops.create_pr( "fix/test", "t", "b" ) )
+        result = asyncio.run( git_ops.create_pr( "fix/test", "t", "b" ) )
     assert result[ "success" ] is False
     assert result[ "pr_url" ] is None
     assert "gh CLI not available" in result[ "error" ]
@@ -190,7 +190,7 @@ def test_create_pr_gh_command_fails():
     git_ops._gh_available = True
     proc = _mock_proc( returncode=1, stderr=b"pull request already exists" )
     with patch( "asyncio.create_subprocess_exec", return_value=proc ):
-        result = asyncio.get_event_loop().run_until_complete( git_ops.create_pr( "fix/test", "t", "b" ) )
+        result = asyncio.run( git_ops.create_pr( "fix/test", "t", "b" ) )
     assert result[ "success" ] is False
     assert result[ "pr_url" ] is None
     assert "gh pr create failed" in result[ "error" ]
@@ -204,7 +204,7 @@ def test_get_current_branch_success():
     git_ops = GitOps( debug=False )
     proc = _mock_proc( returncode=0, stdout=b"main\n" )
     with patch( "asyncio.create_subprocess_exec", return_value=proc ):
-        branch = asyncio.get_event_loop().run_until_complete( git_ops.get_current_branch() )
+        branch = asyncio.run( git_ops.get_current_branch() )
     assert branch == "main"
 
 
@@ -212,7 +212,7 @@ def test_get_current_branch_on_failure_returns_empty():
     git_ops = GitOps( debug=False )
     proc = _mock_proc( returncode=128, stderr=b"fatal" )
     with patch( "asyncio.create_subprocess_exec", return_value=proc ):
-        branch = asyncio.get_event_loop().run_until_complete( git_ops.get_current_branch() )
+        branch = asyncio.run( git_ops.get_current_branch() )
     assert branch == ""
 
 
@@ -220,6 +220,6 @@ def test_checkout_branch_success():
     git_ops = GitOps( debug=False )
     proc = _mock_proc( returncode=0 )
     with patch( "asyncio.create_subprocess_exec", return_value=proc ):
-        result = asyncio.get_event_loop().run_until_complete( git_ops.checkout_branch( "main" ) )
+        result = asyncio.run( git_ops.checkout_branch( "main" ) )
     assert result[ "success" ] is True
     assert result[ "error" ] is None

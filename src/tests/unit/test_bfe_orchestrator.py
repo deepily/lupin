@@ -293,7 +293,7 @@ class TestSDKDelegation:
 
             with patch( "cosa.agents.bug_fix_expediter.orchestrator.BFEOrchestrator._voice_gate_diagnosis", new_callable=AsyncMock ) as mock_gate:
                 mock_gate.side_effect = lambda d, *args, **kwargs: d  # pass through
-                result = asyncio.get_event_loop().run_until_complete(
+                result = asyncio.run(
                     orchestrator.run_diagnosis()
                 )
 
@@ -318,7 +318,7 @@ class TestSDKDelegation:
         with patch( "cosa.agents.bug_fix_expediter.orchestrator.sdk_query", side_effect=mock_gen ):
             with patch( "cosa.agents.bug_fix_expediter.orchestrator.BFEOrchestrator._voice_gate_diagnosis", new_callable=AsyncMock ) as mock_gate:
                 mock_gate.side_effect = lambda d, *args, **kwargs: d
-                result = asyncio.get_event_loop().run_until_complete(
+                result = asyncio.run(
                     orchestrator.run_diagnosis()
                 )
 
@@ -343,7 +343,7 @@ class TestSDKDelegation:
         with patch( "cosa.agents.bug_fix_expediter.orchestrator.sdk_query", side_effect=mock_gen ):
             with patch( "cosa.agents.bug_fix_expediter.orchestrator.BFEOrchestrator._voice_gate_diagnosis", new_callable=AsyncMock ) as mock_gate:
                 mock_gate.side_effect = lambda d, *args, **kwargs: d
-                result = asyncio.get_event_loop().run_until_complete(
+                result = asyncio.run(
                     orchestrator.run_diagnosis()
                 )
 
@@ -361,7 +361,7 @@ class TestSDKDelegation:
         )
 
         with patch( "cosa.agents.bug_fix_expediter.orchestrator.SDK_AVAILABLE", False ):
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 orch.run_diagnosis()
             )
 
@@ -378,7 +378,7 @@ class TestSDKDelegation:
         with patch( "cosa.agents.bug_fix_expediter.orchestrator.sdk_query", side_effect=mock_gen ):
             with patch( "cosa.agents.bug_fix_expediter.orchestrator.BFEOrchestrator._voice_gate_diagnosis", new_callable=AsyncMock ) as mock_gate:
                 mock_gate.side_effect = lambda d, *args, **kwargs: d
-                result = asyncio.get_event_loop().run_until_complete(
+                result = asyncio.run(
                     orchestrator.run_diagnosis()
                 )
 
@@ -399,7 +399,7 @@ class TestVoiceGate:
         mock_voice_io = MagicMock()
         mock_cosa     = MagicMock()
 
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             orchestrator._voice_gate_diagnosis( sample_diagnosis, mock_voice_io, mock_cosa )
         )
         assert result == sample_diagnosis
@@ -410,7 +410,7 @@ class TestVoiceGate:
         mock_cosa     = MagicMock()
         mock_cosa.ask_confirmation = AsyncMock( return_value=True )
 
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             orchestrator._voice_gate_diagnosis( sample_diagnosis, mock_voice_io, mock_cosa )
         )
         assert result == sample_diagnosis
@@ -436,7 +436,7 @@ class TestVoiceGate:
             yield AssistantMessage( content=[ TextBlock( text=better_json ) ], model="opus" )
 
         with patch( "cosa.agents.bug_fix_expediter.orchestrator.sdk_query", side_effect=mock_gen ):
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 orchestrator._voice_gate_diagnosis( sample_diagnosis, mock_voice_io, mock_cosa )
             )
 
@@ -450,7 +450,7 @@ class TestVoiceGate:
         mock_cosa.ask_confirmation = AsyncMock( return_value=False )
         mock_cosa.get_feedback     = AsyncMock( return_value=None )
 
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             orchestrator._voice_gate_diagnosis( sample_diagnosis, mock_voice_io, mock_cosa )
         )
         assert result == sample_diagnosis
@@ -467,7 +467,7 @@ class TestNotifications:
         mock_voice_io        = MagicMock()
         mock_voice_io.notify = AsyncMock()
 
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             orchestrator._notify( mock_voice_io, "test message" )
         )
 
@@ -479,7 +479,7 @@ class TestNotifications:
         mock_voice_io        = MagicMock()
         mock_voice_io.notify = AsyncMock()
 
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             orchestrator._notify( mock_voice_io, "test message" )
         )
 
@@ -490,7 +490,7 @@ class TestNotifications:
         mock_voice_io        = MagicMock()
         mock_voice_io.notify = AsyncMock()
 
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             orchestrator._notify( mock_voice_io, "test message" )
         )
 
@@ -541,7 +541,7 @@ class TestCancellation:
         with patch( "cosa.agents.bug_fix_expediter.orchestrator.sdk_query", side_effect=mock_gen ):
             with patch( "cosa.agents.bug_fix_expediter.orchestrator.BFEOrchestrator._voice_gate_diagnosis", new_callable=AsyncMock ) as mock_gate:
                 mock_gate.side_effect = lambda d, *args, **kwargs: d
-                result = asyncio.get_event_loop().run_until_complete(
+                result = asyncio.run(
                     orchestrator.run_diagnosis()
                 )
 

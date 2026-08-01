@@ -205,7 +205,7 @@ class TestVerification:
 
         with patch( "cosa.agents.bug_fix_expediter.orchestrator.sdk_query", side_effect=mock_gen ):
             # No test files created → relies on tester self-report
-            passed, output = asyncio.get_event_loop().run_until_complete(
+            passed, output = asyncio.run(
                 orchestrator._verify_fix( MagicMock(), selected_fix, "Coder output", [ "file.py" ], guard, mock_cosa )
             )
 
@@ -224,7 +224,7 @@ class TestVerification:
         mock_cosa = MagicMock()
 
         with patch( "cosa.agents.bug_fix_expediter.orchestrator.sdk_query", side_effect=mock_gen ):
-            passed, output = asyncio.get_event_loop().run_until_complete(
+            passed, output = asyncio.run(
                 orchestrator._verify_fix( MagicMock(), selected_fix, "Coder output", [ "file.py" ], guard, mock_cosa )
             )
 
@@ -255,7 +255,7 @@ class TestVerification:
         with patch( "cosa.agents.bug_fix_expediter.orchestrator.sdk_query", side_effect=mock_gen ):
             with patch( "cosa.agents.bug_fix_expediter.orchestrator.run_pytest", new_callable=AsyncMock, return_value=mock_pytest_result ):
                 with patch( "cosa.agents.bug_fix_expediter.orchestrator.post_tool_hook", new_callable=AsyncMock ):
-                    passed, output = asyncio.get_event_loop().run_until_complete(
+                    passed, output = asyncio.run(
                         orchestrator._verify_fix( MagicMock(), selected_fix, "Coder output", [ "file.py" ], guard, mock_cosa )
                     )
 
@@ -267,7 +267,7 @@ class TestVerification:
         mock_cosa = MagicMock()
 
         with patch( "cosa.agents.bug_fix_expediter.orchestrator.sdk_query", side_effect=RuntimeError( "SDK error" ) ):
-            passed, output = asyncio.get_event_loop().run_until_complete(
+            passed, output = asyncio.run(
                 orchestrator._verify_fix( MagicMock(), selected_fix, "output", [], guard, mock_cosa )
             )
 
@@ -287,7 +287,7 @@ class TestRetryLoop:
         with patch.object( orchestrator, "_delegate_to_coder", new_callable=AsyncMock, return_value=( "Fixed it", [ "file.py" ] ) ):
             with patch.object( orchestrator, "_verify_fix", new_callable=AsyncMock, return_value=( True, "All tests pass" ) ):
                 with patch.object( PlanWriter, "update_implementation_log" ):
-                    result = asyncio.get_event_loop().run_until_complete(
+                    result = asyncio.run(
                         orchestrator.run_fix( diagnosis, selected_fix, "/tmp/plan.md" )
                     )
 
@@ -310,7 +310,7 @@ class TestRetryLoop:
         with patch.object( orchestrator, "_delegate_to_coder", new_callable=AsyncMock, return_value=( "Fixed it", [ "file.py" ] ) ):
             with patch.object( orchestrator, "_verify_fix", side_effect=mock_verify ):
                 with patch.object( PlanWriter, "update_implementation_log" ):
-                    result = asyncio.get_event_loop().run_until_complete(
+                    result = asyncio.run(
                         orchestrator.run_fix( diagnosis, selected_fix, "/tmp/plan.md" )
                     )
 
@@ -334,7 +334,7 @@ class TestRetryLoop:
                     with patch.object( PlanWriter, "update_implementation_log" ):
                         # Patch cosa_interface in the orchestrator's run_fix context
                         with patch( "cosa.agents.bug_fix_expediter.cosa_interface", mock_cosa ):
-                            result = asyncio.get_event_loop().run_until_complete(
+                            result = asyncio.run(
                                 orchestrator.run_fix( diagnosis, selected_fix, "/tmp/plan.md" )
                             )
 
@@ -349,7 +349,7 @@ class TestRetryLoop:
 
         with patch.object( orchestrator, "_delegate_to_coder", side_effect=mock_coder ):
             with patch.object( PlanWriter, "update_implementation_log" ):
-                result = asyncio.get_event_loop().run_until_complete(
+                result = asyncio.run(
                     orchestrator.run_fix( diagnosis, selected_fix, "/tmp/plan.md" )
                 )
 
@@ -359,7 +359,7 @@ class TestRetryLoop:
     def test_sdk_unavailable( self, orchestrator, diagnosis, selected_fix ):
         """SDK not available → graceful failure."""
         with patch( "cosa.agents.bug_fix_expediter.orchestrator.SDK_AVAILABLE", False ):
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 orchestrator.run_fix( diagnosis, selected_fix, "/tmp/plan.md" )
             )
 
@@ -448,7 +448,7 @@ class TestIntegrationFlow:
         with patch.object( orchestrator, "_delegate_to_coder", new_callable=AsyncMock, return_value=( "Done", [ "f.py" ] ) ):
             with patch.object( orchestrator, "_verify_fix", new_callable=AsyncMock, return_value=( True, "PASS" ) ):
                 with patch.object( PlanWriter, "update_implementation_log" ):
-                    result = asyncio.get_event_loop().run_until_complete(
+                    result = asyncio.run(
                         orchestrator.run_fix( diagnosis, selected_fix, "/tmp/plan.md" )
                     )
 
@@ -458,7 +458,7 @@ class TestIntegrationFlow:
 
     def test_run_fix_sdk_unavailable_graceful( self, orchestrator, diagnosis, selected_fix ):
         with patch( "cosa.agents.bug_fix_expediter.orchestrator.SDK_AVAILABLE", False ):
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 orchestrator.run_fix( diagnosis, selected_fix, "/tmp/plan.md" )
             )
         assert not result.applied

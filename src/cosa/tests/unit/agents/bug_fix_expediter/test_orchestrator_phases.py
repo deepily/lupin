@@ -378,7 +378,21 @@ class TestRunProposal( unittest.TestCase ):
             _run( orch.run_proposal( _diag() ) )
         self.assertEqual( cm.exception.phase, BFEPhase.PROPOSING.value )
         self.assertIn( "unreachable", str( cm.exception ) )
-        self.assertIsNone( getattr( orch, "selected_fix", None ) )
+        # Krishna 🦚 flagged the assertion that used to sit here —
+        #   assertIsNone( getattr( orch, "selected_fix", None ) )
+        # — as vacuous, and it was worse than he thought: __init__ sets
+        # self.selected_fix = None (orchestrator.py:135) and run_proposal only
+        # ever binds a LOCAL, so that line could not fail under any behaviour.
+        # It asserted nothing while reading like the load-bearing check.
+        # What actually matters is that no SELECTION reaches the writer — the
+        # step that would carry an unapproved fix forward. (write_plan IS called
+        # once for the initial plan, so assert_not_called would be wrong here;
+        # the invariant is that no call ever names a selected_fix.)
+        selected_args = [
+            c.kwargs.get( "selected_fix" ) for c in self.writer.write_plan.call_args_list
+        ]
+        self.assertTrue( selected_args, "writer was never called at all — test is not exercising the path" )
+        self.assertTrue( all( s is None for s in selected_args ), f"a fix was carried to the writer: {selected_args}" )
 
     def test_selected_fix_triggers_plan_rewrite( self ):
         orch = _orch()
