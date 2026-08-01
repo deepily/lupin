@@ -299,7 +299,11 @@ async def run_research(
                     clarification = await voice_io.choose(
                         question     = question,
                         options      = options,
-                        allow_custom = True  # Still allow "Other" for free-text
+                        allow_custom = True,  # Still allow "Other" for free-text
+                        # No human to ask ⇒ do not clarify. Previously this
+                        # returned options[0], silently rewriting the user's
+                        # query with a clarification they never chose.
+                        response_default = "skip"
                     )
                 else:
                     # Fall back to open-ended input for truly open questions
@@ -397,7 +401,13 @@ async def run_research(
                     "Sending to your screen for selection.",
                     priority="medium"
                 )
-                selected_theme_indices = await voice_io.select_themes( themes )
+                selected_theme_indices = await voice_io.select_themes(
+                    themes,
+                    # Unattended ⇒ keep every theme, as this path has always
+                    # done. Declared here rather than guessed in the library,
+                    # so it is greppable and _require_default logs each use.
+                    response_default = list( range( len( themes ) ) )
+                )
 
             else:
                 # Normal case (2-6 themes) - proceed with selection
@@ -408,7 +418,10 @@ async def run_research(
                     priority="medium"
                 )
                 try:
-                    selected_theme_indices = await voice_io.select_themes( themes )
+                    selected_theme_indices = await voice_io.select_themes(
+                        themes,
+                        response_default = list( range( len( themes ) ) )
+                    )
                 except RuntimeError as e:
                     # Technical failure - user already notified by select_themes
                     logger.error( f"Theme selection failed: {e}" )
@@ -446,7 +459,8 @@ async def run_research(
 
                 try:
                     selected_indices = await voice_io.select_topics(
-                        [ sq for _, sq in candidate_subqueries ]
+                        [ sq for _, sq in candidate_subqueries ],
+                        response_default = list( range( len( candidate_subqueries ) ) )
                     )
                 except RuntimeError as e:
                     # Technical failure - user already notified by select_topics

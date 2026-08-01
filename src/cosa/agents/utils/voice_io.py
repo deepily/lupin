@@ -450,7 +450,8 @@ async def choose(
     options: Union[ List[ str ], List[ dict ] ],
     timeout: int = 120,
     allow_custom: bool = False,
-    job_id: Optional[ str ] = None
+    job_id: Optional[ str ] = None,
+    response_default: Optional[ str ] = None
 ) -> str:
     """
     Present multiple-choice options (voice-first).
@@ -469,13 +470,27 @@ async def choose(
 
     Ensures:
         - Returns one of the provided option labels (or custom input if allowed)
-        - Returns first option as default on timeout/error
+        - On any path where no human answered, returns response_default if the
+          caller declared one, and raises otherwise
+
+    Before 2026-08-01 every unreachable-human path returned labels[0]. The
+    answer was therefore decided by the ORDER of the options rather than by
+    anything the caller asked for: reorder the same gate and an absent user is
+    deemed to have chosen something else. Row 741011ba.
 
     Args:
         question: The question introducing the choices
         options: List of option strings or dicts with label/description
         timeout: Seconds to wait for response
         allow_custom: If True, user can provide custom input via "Other"
+        response_default: What to answer when no human can be reached. This is
+            the supported way to run unattended — the caller picks the value,
+            rather than the function picking position 0. Omitting it makes an
+            unreachable gate raise.
+
+    Raises:
+        - VoiceGateNoDefaultError if no human answered and response_default
+          was not declared
 
     Returns:
         str: The selected option label (or custom input)
@@ -506,8 +521,7 @@ async def choose(
     if _force_cli_mode or _cosa_interface is None or not await is_voice_available():
         # Non-interactive (queue/Docker): use first option as default without blocking
         if not _is_interactive():
-            logger.info( f"Non-interactive mode, using default '{labels[ 0 ]}' for: {question[ :60 ]}" )
-            return labels[ 0 ]
+            return _require_default( response_default, _DEFAULT_SOURCE_NON_INTERACTIVE, "Choice" )
         # CLI fallback - numbered menu with descriptions
         print( f"\n  {question}" )
         for i, opt in enumerate( normalized_options, 1 ):
@@ -526,12 +540,13 @@ async def choose(
                 return labels[ idx ]
             elif allow_custom and idx == len( labels ):
                 custom = input( "  Enter your choice: " ).strip()
-                return custom if custom else labels[ 0 ]
+                if custom:
+                    return custom
+                return _require_default( response_default, _DEFAULT_SOURCE_CLI_BLANK, "Choice" )
         except ValueError:
             pass
 
-        print( f"  Invalid selection, using default: {labels[ 0 ]}" )
-        return labels[ 0 ]
+        return _require_default( response_default, _DEFAULT_SOURCE_CLI_BAD_INDEX, "Choice" )
 
     try:
         # Build question format for cosa_interface
@@ -552,11 +567,17 @@ async def choose(
         if selection and selection in labels:
             return selection
 
-        return labels[ 0 ]  # Default
+        # The dispatch succeeded but carried no recognisable choice. That is
+        # not the same as a failure, and it is not a selection either.
+        return _require_default( response_default, _DEFAULT_SOURCE_NO_SELECTION, "Choice" )
 
+    except VoiceGateNoDefaultError:
+        # Raised by the branch above — it is the refusal, not a dispatch
+        # failure, and must not be recaught and answered here.
+        raise
     except Exception as e:
         logger.warning( f"Voice choose failed: {e}" )
-        return labels[ 0 ]
+        return _require_default( response_default, _DEFAULT_SOURCE_DISPATCH_FAILED, "Choice" )
 
 
 class VoiceGateNoDefaultError( RuntimeError ):
@@ -592,6 +613,44 @@ _DEFAULT_SOURCE_NON_INTERACTIVE = "non_interactive"   # no tty, queue/Docker
 _DEFAULT_SOURCE_CLI_BLANK       = "cli_blank_entry"   # prompt shown, user hit enter
 _DEFAULT_SOURCE_CLI_BAD_INDEX   = "cli_bad_index"     # number outside the option range
 _DEFAULT_SOURCE_DISPATCH_FAILED = "dispatch_failed"   # voice call raised (503, timeout…)
+_DEFAULT_SOURCE_CLI_UNPARSEABLE = "cli_unparseable"   # entry could not be parsed at all
+_DEFAULT_SOURCE_NO_SELECTION    = "no_selection"      # dispatch returned, carried no choice
+
+
+def _require_default( response_default, source: str, what: str ):
+    """
+    Resolve the caller's declared default for a path where no human answered,
+    or refuse to answer at all.
+
+    The bare-return twin of _resolve_default. present_choices returns a dict,
+    so it could carry provenance in new keys; choose / select_themes /
+    select_topics return a bare string or a bare list, and there is nowhere in
+    those to put a `default_used` flag without changing every call site. So
+    the contract here is the other half of the same rule: an explicitly
+    declared default is honoured and logged loudly, and the absence of one is
+    an error rather than a guess.
+
+    Requires:
+        - source is one of the _DEFAULT_SOURCE_* markers
+        - what names the gate, for the error and the log line
+
+    Ensures:
+        - returns response_default unchanged when the caller declared one
+        - logs at WARNING naming the value and the path that produced it, so
+          a defaulted answer is distinguishable after the fact from a real one
+
+    Raises:
+        - VoiceGateNoDefaultError when response_default is None, because
+          nobody answered and nobody said what to do about that
+    """
+    if response_default is None:
+        raise VoiceGateNoDefaultError( reason=source, headers=[ what ] )
+
+    logger.warning(
+        f"{what}: answered by a DECLARED DEFAULT, not a human "
+        f"(source={source}, value={response_default!r})."
+    )
+    return response_default
 
 
 def _resolve_default( questions: list, response_default: Optional[ dict ], source: str ) -> dict:
@@ -766,7 +825,8 @@ async def present_choices(
 
 async def select_themes(
     themes: list,
-    timeout: int = 180
+    timeout: int = 180,
+    response_default: Optional[ list ] = None
 ) -> list:
     """
     Present themes for multi-select and return selected theme indices.
@@ -778,19 +838,32 @@ async def select_themes(
     Ensures:
         - Returns list of selected theme indices (0-based)
         - Returns empty list if user cancels
+        - On any path where no human answered, returns response_default if the
+          caller declared one, and raises otherwise
+
+    Before 2026-08-01 the unreachable-human path returned every index — so
+    "nobody answered" became "the user wants all of them", which silently
+    maximises scope on a path that spends real search budget. A malformed CLI
+    entry separately became "the user wants none of them". Row 741011ba.
 
     Args:
         themes: List of theme dicts from clustering response
         timeout: Seconds to wait for response
+        response_default: Indices to use when no human can be reached. There
+            is no defensible implicit answer to "which subset did they want",
+            so omitting this makes an unreachable gate raise.
+
+    Raises:
+        - VoiceGateNoDefaultError if no human answered and response_default
+          was not declared
 
     Returns:
         list[int]: Selected theme indices (0-based)
     """
     if _force_cli_mode or _cosa_interface is None or not await is_voice_available():
-        # Non-interactive (queue/Docker): select all themes without blocking
+        # Non-interactive (queue/Docker): no human to ask
         if not _is_interactive():
-            logger.info( f"Non-interactive mode, selecting all {len( themes )} themes" )
-            return list( range( len( themes ) ) )
+            return _require_default( response_default, _DEFAULT_SOURCE_NON_INTERACTIVE, "Themes" )
         # CLI fallback
         print( "\n  Select research themes (comma-separated numbers, or 'all'):" )
         for i, theme in enumerate( themes, 1 ):
@@ -806,7 +879,8 @@ async def select_themes(
             indices = [ int( x.strip() ) - 1 for x in response.split( "," ) ]
             return [ i for i in indices if 0 <= i < len( themes ) ]
         except ValueError:
-            return []
+            # An unparseable entry is not a selection of nothing.
+            return _require_default( response_default, _DEFAULT_SOURCE_CLI_UNPARSEABLE, "Themes" )
 
     # Voice mode - use present_choices with multiSelect
     questions = [ {
@@ -824,7 +898,14 @@ async def select_themes(
 
     try:
         result = await _cosa_interface.present_choices( questions, timeout )
-        selected_names = result.get( "answers", {} ).get( "Themes", [] )
+        answers = result.get( "answers", {} ) if isinstance( result, dict ) else {}
+
+        # An ABSENT header is not an empty selection. Defaulting the lookup to
+        # [] told the caller the user had deselected everything.
+        if "Themes" not in answers:
+            return _require_default( response_default, _DEFAULT_SOURCE_NO_SELECTION, "Themes" )
+
+        selected_names = answers[ "Themes" ]
 
         # Handle single selection (string) vs multi (list)
         if isinstance( selected_names, str ):
@@ -836,6 +917,11 @@ async def select_themes(
             if theme[ "name" ] in selected_names
         ]
 
+    except VoiceGateNoDefaultError:
+        # The refusal above is raised INSIDE this try. Without this guard the
+        # generic handler below recatches it and re-raises a plain RuntimeError,
+        # losing the reason and defeating the fix one line later.
+        raise
     except Exception as e:
         error_msg = str( e )
         logger.warning( f"Voice select_themes failed: {error_msg}" )
@@ -853,7 +939,8 @@ async def select_themes(
 async def select_topics(
     topics: list,
     preselected: bool = True,
-    timeout: int = 180
+    timeout: int = 180,
+    response_default: Optional[ list ] = None
 ) -> list:
     """
     Present specific topics for refinement.
@@ -864,20 +951,32 @@ async def select_topics(
     Ensures:
         - Returns list of selected topic indices
         - Returns empty list if user cancels
+        - On any path where no human answered, returns response_default if the
+          caller declared one, and raises otherwise
+
+    Before 2026-08-01 both the unreachable-human path AND an unparseable CLI
+    entry returned every index, the latter under a comment reading "Default to
+    all on error". A typo therefore expanded the run to every topic, on a path
+    that spends real per-token budget. Row 741011ba.
 
     Args:
         topics: List of topic dicts (subqueries)
         preselected: Whether topics should be pre-selected (for deselection flow)
         timeout: Seconds to wait for response
+        response_default: Indices to use when no human can be reached. Omitting
+            it makes an unreachable gate raise rather than guess a subset.
+
+    Raises:
+        - VoiceGateNoDefaultError if no human answered and response_default
+          was not declared
 
     Returns:
         list[int]: Selected topic indices (0-based)
     """
     if _force_cli_mode or _cosa_interface is None or not await is_voice_available():
-        # Non-interactive (queue/Docker): select all topics without blocking
+        # Non-interactive (queue/Docker): no human to ask
         if not _is_interactive():
-            logger.info( f"Non-interactive mode, selecting all {len( topics )} topics" )
-            return list( range( len( topics ) ) )
+            return _require_default( response_default, _DEFAULT_SOURCE_NON_INTERACTIVE, "Topics" )
         # CLI fallback
         print( "\n  Refine topic selection (comma-separated numbers, 'all', or 'none'):" )
         for i, topic in enumerate( topics, 1 ):
@@ -893,7 +992,8 @@ async def select_topics(
             indices = [ int( x.strip() ) - 1 for x in response.split( "," ) ]
             return [ i for i in indices if 0 <= i < len( topics ) ]
         except ValueError:
-            return list( range( len( topics ) ) )  # Default to all on error
+            # Was "Default to all on error" — a typo must not expand the run.
+            return _require_default( response_default, _DEFAULT_SOURCE_CLI_UNPARSEABLE, "Topics" )
 
     # Voice mode
     questions = [ {
@@ -911,7 +1011,13 @@ async def select_topics(
 
     try:
         result = await _cosa_interface.present_choices( questions, timeout )
-        selected = result.get( "answers", {} ).get( "Topics", [] )
+        answers = result.get( "answers", {} ) if isinstance( result, dict ) else {}
+
+        # See select_themes: an absent header is not "deselected everything".
+        if "Topics" not in answers:
+            return _require_default( response_default, _DEFAULT_SOURCE_NO_SELECTION, "Topics" )
+
+        selected = answers[ "Topics" ]
 
         if isinstance( selected, str ):
             selected = [ selected ]
@@ -920,6 +1026,11 @@ async def select_topics(
         topic_names = [ t.get( "topic", "" )[ :50 ] for t in topics ]
         return [ i for i, name in enumerate( topic_names ) if name in selected ]
 
+    except VoiceGateNoDefaultError:
+        # The refusal above is raised INSIDE this try. Without this guard the
+        # generic handler below recatches it and re-raises a plain RuntimeError,
+        # losing the reason and defeating the fix one line later.
+        raise
     except Exception as e:
         error_msg = str( e )
         logger.warning( f"Voice select_topics failed: {error_msg}" )

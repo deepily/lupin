@@ -169,11 +169,20 @@ class TestGetInputNonInteractive:
 # ============================================================================
 
 class TestChooseNonInteractive:
-    """Verify choose returns first option without blocking in non-interactive mode."""
+    """
+    SUPERSEDED PREMISE, kept deliberately as a record.
+
+    This class used to assert that choose() returning options[0] when nobody
+    is there is "deliberate and already gated" — and that framing is why the
+    non-interactive path went unexamined while its twin was being fixed. Row
+    741011ba ruled the other way: position in a list is not consent on ANY
+    path, gated or not. Unattended operation is supported by DECLARING a
+    default, not by the function picking one.
+    """
 
     @pytest.mark.asyncio
-    async def test_returns_first_option_when_non_interactive( self ):
-        """choose() returns first option label in non-interactive mode."""
+    async def test_refuses_to_answer_when_non_interactive( self ):
+        """choose() must not answer for an absent human, even without blocking."""
         from cosa.agents.utils import voice_io
 
         original_interface = voice_io._cosa_interface
@@ -184,18 +193,24 @@ class TestChooseNonInteractive:
 
             with patch.object( sys, "stdin" ) as mock_stdin:
                 mock_stdin.isatty.return_value = False
-                result = await voice_io.choose(
+                with pytest.raises( voice_io.VoiceGateNoDefaultError ):
+                    await voice_io.choose(
+                        "Which format?",
+                        [ "Option A", "Option B", "Option C" ]
+                    )
+                # ...and the supported unattended path still works.
+                assert await voice_io.choose(
                     "Which format?",
-                    [ "Option A", "Option B", "Option C" ]
-                )
-                assert result == "Option A"
+                    [ "Option A", "Option B", "Option C" ],
+                    response_default="Option C"
+                ) == "Option C"
         finally:
             voice_io._cosa_interface = original_interface
             voice_io._voice_available = original_available
 
     @pytest.mark.asyncio
-    async def test_returns_first_option_dict_format( self ):
-        """choose() handles dict-format options in non-interactive mode."""
+    async def test_refuses_with_dict_format_options_too( self ):
+        """The refusal is not specific to string-shaped options."""
         from cosa.agents.utils import voice_io
 
         original_interface = voice_io._cosa_interface
@@ -206,14 +221,14 @@ class TestChooseNonInteractive:
 
             with patch.object( sys, "stdin" ) as mock_stdin:
                 mock_stdin.isatty.return_value = False
-                result = await voice_io.choose(
-                    "Which format?",
-                    [
-                        { "label": "Approve", "description": "Accept as-is" },
-                        { "label": "Revise", "description": "Request changes" },
-                    ]
-                )
-                assert result == "Approve"
+                with pytest.raises( voice_io.VoiceGateNoDefaultError ):
+                    await voice_io.choose(
+                        "Which format?",
+                        [
+                            { "label": "Approve", "description": "Accept as-is" },
+                            { "label": "Revise", "description": "Request changes" },
+                        ]
+                    )
         finally:
             voice_io._cosa_interface = original_interface
             voice_io._voice_available = original_available
@@ -328,11 +343,11 @@ class TestPresentChoicesNonInteractive:
 # ============================================================================
 
 class TestSelectThemesNonInteractive:
-    """Verify select_themes selects all in non-interactive mode."""
+    """Same superseded premise as TestChooseNonInteractive — see its docstring."""
 
     @pytest.mark.asyncio
-    async def test_selects_all_themes_when_non_interactive( self ):
-        """select_themes() returns all indices in non-interactive mode."""
+    async def test_refuses_rather_than_selecting_all_themes( self ):
+        """"Nobody answered" must not silently become "wants every theme"."""
         from cosa.agents.utils import voice_io
 
         original_interface = voice_io._cosa_interface
@@ -348,19 +363,22 @@ class TestSelectThemesNonInteractive:
 
             with patch.object( sys, "stdin" ) as mock_stdin:
                 mock_stdin.isatty.return_value = False
-                result = await voice_io.select_themes( themes )
-                assert result == [ 0, 1 ]
+                with pytest.raises( voice_io.VoiceGateNoDefaultError ):
+                    await voice_io.select_themes( themes )
+                assert await voice_io.select_themes(
+                    themes, response_default=[ 0, 1 ]
+                ) == [ 0, 1 ]
         finally:
             voice_io._cosa_interface = original_interface
             voice_io._voice_available = original_available
 
 
 class TestSelectTopicsNonInteractive:
-    """Verify select_topics selects all in non-interactive mode."""
+    """Same superseded premise as TestChooseNonInteractive — see its docstring."""
 
     @pytest.mark.asyncio
-    async def test_selects_all_topics_when_non_interactive( self ):
-        """select_topics() returns all indices in non-interactive mode."""
+    async def test_refuses_rather_than_selecting_all_topics( self ):
+        """This one also spends real search budget per selected topic."""
         from cosa.agents.utils import voice_io
 
         original_interface = voice_io._cosa_interface
@@ -377,8 +395,11 @@ class TestSelectTopicsNonInteractive:
 
             with patch.object( sys, "stdin" ) as mock_stdin:
                 mock_stdin.isatty.return_value = False
-                result = await voice_io.select_topics( topics )
-                assert result == [ 0, 1, 2 ]
+                with pytest.raises( voice_io.VoiceGateNoDefaultError ):
+                    await voice_io.select_topics( topics )
+                assert await voice_io.select_topics(
+                    topics, response_default=[ 0, 1, 2 ]
+                ) == [ 0, 1, 2 ]
         finally:
             voice_io._cosa_interface = original_interface
             voice_io._voice_available = original_available
