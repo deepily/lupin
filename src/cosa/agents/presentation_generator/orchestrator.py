@@ -44,6 +44,24 @@ from . import voice_io
 logger = logging.getLogger( __name__ )
 
 
+class VoiceGateNotAnsweredError( RuntimeError ):
+    """
+    Raised when a presentation gate cannot obtain a human answer.
+
+    A gate exists to stop the pipeline until someone approves. Before
+    2026-08-01 all four gates did the opposite when anything went wrong:
+    each `except Exception` returned True with the comment "auto-approve to
+    not block the pipeline", and each call site defaulted a missing answer
+    to "Approve". So the failure of the approval mechanism was itself
+    treated as approval (rows be8830a3, fef0ed85).
+
+    Failing here is the point. If a gate genuinely must run unattended,
+    that is expressed by passing an explicit `response_default` to
+    voice_io.present_choices — a value somebody chose on purpose — not by
+    swallowing the error that says nobody was reached.
+    """
+
+
 class PresentationOrchestratorAgent:
     """
     Top-level orchestrator for presentation generation — single job, multi-phase, async.
@@ -222,7 +240,7 @@ class PresentationOrchestratorAgent:
             if not narrative_sections:
                 raise ValueError( "Phase 2 (narrative analysis) produced no sections — failing the job (D6-STRICT)" )
 
-            # Gate 1: Narrative arc review (stub — auto-approve)
+            # Gate 1: Narrative arc review — raises if it cannot reach a human
             gate1_approved = await self._gate_1_narrative_review( narrative_sections )
             if not gate1_approved: await self._handle_stop(); return None
 
@@ -237,7 +255,7 @@ class PresentationOrchestratorAgent:
             if not slide_outline:
                 raise ValueError( "Phase 3 (slide outline) produced no entries — failing the job (D6-STRICT)" )
 
-            # Gate 2: Slide titles + visual types review (stub — auto-approve)
+            # Gate 2: Slide titles + visual types review — raises if it cannot reach a human
             gate2_approved = await self._gate_2_outline_review( slide_outline )
             if not gate2_approved: await self._handle_stop(); return None
 
@@ -252,7 +270,7 @@ class PresentationOrchestratorAgent:
             if not elaborated_slides:
                 raise ValueError( "Phase 4 (slide elaboration) produced no slides — failing the job (D6-STRICT)" )
 
-            # Gate 3: Full content review (stub — auto-approve)
+            # Gate 3: Full content review — raises if it cannot reach a human
             gate3_approved = await self._gate_3_content_review( elaborated_slides )
             if not gate3_approved: await self._handle_stop(); return None
 
@@ -275,7 +293,7 @@ class PresentationOrchestratorAgent:
             await self._render_visuals_async( presentation_model )
             if self._check_stop(): await self._handle_stop(); return None
 
-            # Gate 4: Final rendered output review (stub — auto-approve)
+            # Gate 4: Final rendered output review — raises if it cannot reach a human
             gate4_approved = await self._gate_4_render_review( presentation_model )
             if not gate4_approved: await self._handle_stop(); return None
 
@@ -345,7 +363,7 @@ class PresentationOrchestratorAgent:
             await self._render_visuals_async( presentation )
             if self._check_stop(): await self._handle_stop(); return None
 
-            # Gate 4: Final rendered output review (stub — auto-approve)
+            # Gate 4: Final rendered output review — raises if it cannot reach a human
             gate4_approved = await self._gate_4_render_review( presentation )
             if not gate4_approved: await self._handle_stop(); return None
 
@@ -1582,6 +1600,51 @@ class PresentationOrchestratorAgent:
     # Gate Stubs (to be implemented in Phases 3-4)
     # =========================================================================
 
+    @staticmethod
+    def _read_gate_answer( result: dict, header: str, gate_name: str ) -> str:
+        """
+        Read a gate answer, refusing to invent one.
+
+        Before 2026-08-01 every gate did `result.get("answers", {}).get(header,
+        "Approve")` — so a payload missing the header entirely became an
+        approval. Combined with a voice layer that manufactured answers from
+        option ordering, a presentation could approve itself at four
+        consecutive gates without a human present (rows be8830a3, fef0ed85).
+
+        An explicitly-declared `response_default` IS honoured — that is the
+        supported way to run unattended, and the caller chose the value. What
+        is refused is a MISSING answer silently becoming "Approve".
+
+        Requires:
+            - result is the dict returned by voice_io.present_choices
+            - header is the question header the gate asked under
+
+        Ensures:
+            - returns the answer the gate actually received
+            - logs loudly when that answer came from a declared default
+              rather than a human, naming which path produced it
+
+        Raises:
+            - VoiceGateNotAnsweredError if the header is absent, because a
+              missing answer is not consent
+        """
+        answers = result.get( "answers", {} ) if isinstance( result, dict ) else {}
+
+        if header not in answers:
+            raise VoiceGateNotAnsweredError(
+                f"{gate_name}: voice gate returned no answer for '{header}' "
+                f"(payload keys: {sorted( result.keys() ) if isinstance( result, dict ) else type( result ).__name__}). "
+                f"A missing answer is not an approval — refusing to proceed."
+            )
+
+        if result.get( "default_used", False ):
+            logger.warning(
+                f"{gate_name}: '{header}' answered by a DECLARED DEFAULT, not a human "
+                f"(source={result.get( 'default_source' )}, value={answers[ header ]!r})."
+            )
+
+        return answers[ header ]
+
     async def _gate_1_narrative_review( self, sections: List[ NarrativeSection ] ) -> bool:
         """
         Gate 1: User reviews narrative arc mapping.
@@ -1649,8 +1712,8 @@ class PresentationOrchestratorAgent:
                 abstract = summary,
             )
 
-            # Parse response
-            answer = result.get( "answers", {} ).get( "Narrative Arc", "Approve" )
+            # Parse response — a missing answer is NOT an approval
+            answer = self._read_gate_answer( result, "Narrative Arc", "Gate 1" )
 
             if answer == "Cancel":
                 await voice_io.notify( "Presentation generation cancelled at Gate 1.", priority="medium" )
@@ -1691,10 +1754,12 @@ class PresentationOrchestratorAgent:
                 return True
 
         except Exception as e:
-            # If voice I/O fails, auto-approve to not block the pipeline
-            logger.warning( f"Gate 1 voice I/O failed, auto-approving: {e}" )
-            if self.debug: print( f"[Orchestrator] Gate 1: Voice I/O error — auto-approve. {e}" )
-            return True
+            # A gate that could not reach a human FAILS. It does not proceed.
+            # This previously returned True "to not block the pipeline", which
+            # turned the failure of the approval mechanism into an approval.
+            logger.error( f"Gate 1 voice I/O failed — refusing to auto-approve: {e}" )
+            if self.debug: print( f"[Orchestrator] Gate 1: Voice I/O error — FAILING, not approving. {e}" )
+            raise VoiceGateNotAnsweredError( f"Gate 1 (narrative arc) could not reach a human: {e}" ) from e
 
     async def _gate_2_outline_review( self, outline: List[ SlideOutline ] ) -> bool:
         """
@@ -1766,7 +1831,8 @@ class PresentationOrchestratorAgent:
                 abstract = summary,
             )
 
-            answer = result.get( "answers", {} ).get( "Slide Outline", "Approve" )
+            # Parse response — a missing answer is NOT an approval
+            answer = self._read_gate_answer( result, "Slide Outline", "Gate 2" )
 
             if answer == "Cancel":
                 await voice_io.notify( "Presentation generation cancelled at Gate 2.", priority="medium" )
@@ -1807,9 +1873,10 @@ class PresentationOrchestratorAgent:
                 return True
 
         except Exception as e:
-            logger.warning( f"Gate 2 voice I/O failed, auto-approving: {e}" )
-            if self.debug: print( f"[Orchestrator] Gate 2: Voice I/O error — auto-approve. {e}" )
-            return True
+            # A gate that could not reach a human FAILS. It does not proceed.
+            logger.error( f"Gate 2 voice I/O failed — refusing to auto-approve: {e}" )
+            if self.debug: print( f"[Orchestrator] Gate 2: Voice I/O error — FAILING, not approving. {e}" )
+            raise VoiceGateNotAnsweredError( f"Gate 2 (slide outline) could not reach a human: {e}" ) from e
 
     async def _gate_3_content_review( self, slides: List[ SlideModel ] ) -> bool:
         """
@@ -1892,7 +1959,8 @@ class PresentationOrchestratorAgent:
                 abstract = summary,
             )
 
-            answer = result.get( "answers", {} ).get( "Content Review", "Approve" )
+            # Parse response — a missing answer is NOT an approval
+            answer = self._read_gate_answer( result, "Content Review", "Gate 3" )
 
             if answer == "Cancel":
                 await voice_io.notify( "Presentation generation cancelled at Gate 3.", priority="medium" )
@@ -1932,9 +2000,10 @@ class PresentationOrchestratorAgent:
                 return True
 
         except Exception as e:
-            logger.warning( f"Gate 3 voice I/O failed, auto-approving: {e}" )
-            if self.debug: print( f"[Orchestrator] Gate 3: Voice I/O error — auto-approve. {e}" )
-            return True
+            # A gate that could not reach a human FAILS. It does not proceed.
+            logger.error( f"Gate 3 voice I/O failed — refusing to auto-approve: {e}" )
+            if self.debug: print( f"[Orchestrator] Gate 3: Voice I/O error — FAILING, not approving. {e}" )
+            raise VoiceGateNotAnsweredError( f"Gate 3 (content review) could not reach a human: {e}" ) from e
 
     async def _gate_4_render_review( self, presentation: Optional[ PresentationModel ] ) -> bool:
         """
@@ -1985,7 +2054,8 @@ class PresentationOrchestratorAgent:
                 abstract = summary,
             )
 
-            answer = result.get( "answers", {} ).get( "Visual Review", "Approve" )
+            # Parse response — a missing answer is NOT an approval
+            answer = self._read_gate_answer( result, "Visual Review", "Gate 4" )
 
             if answer == "Cancel":
                 await voice_io.notify( "Presentation cancelled at Gate 4.", priority="medium" )
@@ -1994,8 +2064,10 @@ class PresentationOrchestratorAgent:
             return True
 
         except Exception as e:
-            logger.warning( f"Gate 4 voice I/O failed: {e} — auto-approving" )
-            return True
+            # A gate that could not reach a human FAILS. It does not proceed.
+            logger.error( f"Gate 4 voice I/O failed — refusing to auto-approve: {e}" )
+            if self.debug: print( f"[Orchestrator] Gate 4: Voice I/O error — FAILING, not approving. {e}" )
+            raise VoiceGateNotAnsweredError( f"Gate 4 (visual review) could not reach a human: {e}" ) from e
 
 
 # =============================================================================
