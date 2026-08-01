@@ -32,21 +32,26 @@ Tone — does it read like a plain-spoken human colleague?
 
 ### Worked examples:
 
-Two DMs that have already been graded, at OPPOSITE ends of both scales. They are
-here to show how a grade follows the text. Neither one is your answer — the DM
-you must grade is in the Input section further down.
+Two DMs that have already been graded. They are here to show how a grade follows
+the text. Neither one is your answer — the DM you must grade is in the Input
+section further down.
+
+Note that the FIRST example scores DIFFERENTLY on the two dimensions. That is
+normal and you should expect it: a message can be perfectly direct and still be
+written badly, or be pleasant to read and never reach its point.
 
 EXAMPLE DM ONE:
-Deploy is blocked. The migration needs a column the test database does not have,
-so I rolled back to the previous tag. I need your call on whether we patch the
-schema today or wait for Thursday's window.
+Deploy is blocked. The migration's column contract is unsatisfiable against the
+test substrate's current shape, so I reverted to the prior tag. I need your ruling
+on whether we patch today or hold for Thursday — that trade is the load-bearing
+half of the whole exercise.
 
 GRADE FOR EXAMPLE DM ONE:
 <response>
 	<directness>exemplary</directness>
 	<directness_note>Opens with "Deploy is blocked"; every later sentence is cause, action taken, or the decision needed.</directness_note>
-	<tone>exemplary</tone>
-	<tone_note>Ordinary work-email English throughout, with no coined terms.</tone_note>
+	<tone>needs_improvement</tone>
+	<tone_note>Coined phrasing such as "column contract is unsatisfiable against the test substrate", and it closes on an aphorism about its own importance.</tone_note>
 </response>
 
 EXAMPLE DM TWO:
