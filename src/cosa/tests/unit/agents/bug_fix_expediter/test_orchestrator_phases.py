@@ -42,7 +42,9 @@ from cosa.agents.bug_fix_expediter.state import (
     BFEPhase, DeadJobContext, DiagnosisResult, ProposedFix, FixResult,
 )
 from cosa.agents.bug_fix_expediter.config import BugFixExpediterConfig
-from cosa.agents.test_fix_expediter.state import VoiceGateTimeoutError, StalledException
+from cosa.agents.test_fix_expediter.state import (
+    VoiceGateTimeoutError, VoiceGateUnreachableError, StalledException,
+)
 
 from claude_agent_sdk import AssistantMessage, TextBlock, ToolUseBlock
 
@@ -189,6 +191,39 @@ class TestRunDiagnosis( unittest.TestCase ):
         self.assertEqual( cm.exception.phase, BFEPhase.DIAGNOSING.value )
         self.assertIsNotNone( orch.diagnosis )          # populated for checkpoint
 
+    def test_voice_gate_unreachable_also_raises_stalled( self ):
+        # The caller wiring, not the gate: an unreachable gate must reach the
+        # SAME clean yield point as a timeout — checkpoint + stall — rather than
+        # escaping as an unhandled error and failing the job (row 421b9498).
+        orch = _orch()
+        orch._delegate_to_lead     = AsyncMock( return_value=_diag_json( 0.9 ) )
+        orch._voice_gate_diagnosis = AsyncMock(
+            side_effect=VoiceGateUnreachableError( "diagnosing", RuntimeError( "ws down" ) )
+        )
+        with self.assertRaises( StalledException ) as cm:
+            _run( orch.run_diagnosis() )
+        self.assertEqual( cm.exception.phase, BFEPhase.DIAGNOSING.value )
+        self.assertIsNotNone( orch.diagnosis )          # populated for checkpoint
+
+    def test_stall_message_says_which_no_answer_it_was( self ):
+        # Timeout and unreachable both stall, so the stall alone cannot tell them
+        # apart — the message is the only place the distinction survives.
+        orch = _orch()
+        orch._delegate_to_lead     = AsyncMock( return_value=_diag_json( 0.9 ) )
+        orch._voice_gate_diagnosis = AsyncMock(
+            side_effect=VoiceGateUnreachableError( "diagnosing", RuntimeError( "ws down" ) )
+        )
+        with self.assertRaises( StalledException ) as cm:
+            _run( orch.run_diagnosis() )
+        self.assertIn( "unreachable", str( cm.exception ) )
+
+        orch2 = _orch()
+        orch2._delegate_to_lead     = AsyncMock( return_value=_diag_json( 0.9 ) )
+        orch2._voice_gate_diagnosis = AsyncMock( side_effect=VoiceGateTimeoutError( "diagnosing" ) )
+        with self.assertRaises( StalledException ) as cm2:
+            _run( orch2.run_diagnosis() )
+        self.assertIn( "timeout", str( cm2.exception ) )
+
     def test_cancel_before_voice_gate_skips_gate( self ):
         cfg = BugFixExpediterConfig(); cfg.max_diagnosis_iterations = 1
         # cancel_check: False during the loop, True at the post-loop gate guard.
@@ -330,6 +365,21 @@ class TestRunProposal( unittest.TestCase ):
             _run( orch.run_proposal( _diag() ) )
         self.assertEqual( cm.exception.phase, BFEPhase.PROPOSING.value )
 
+    def test_voice_gate_unreachable_raises_stalled_and_selects_nothing( self ):
+        # Caller wiring for the fix-application gate. The load-bearing assertion
+        # is the second one: no fix is carried forward for application when the
+        # gate broke (row 421b9498).
+        orch = _orch()
+        orch._delegate_to_lead    = AsyncMock( return_value=None )
+        orch._voice_gate_proposal = AsyncMock(
+            side_effect=VoiceGateUnreachableError( "proposing", RuntimeError( "ws down" ) )
+        )
+        with self.assertRaises( StalledException ) as cm:
+            _run( orch.run_proposal( _diag() ) )
+        self.assertEqual( cm.exception.phase, BFEPhase.PROPOSING.value )
+        self.assertIn( "unreachable", str( cm.exception ) )
+        self.assertIsNone( getattr( orch, "selected_fix", None ) )
+
     def test_selected_fix_triggers_plan_rewrite( self ):
         orch = _orch()
         sel = _fix( title="Chosen" )
@@ -386,17 +436,65 @@ class TestVoiceGateDiagnosis( unittest.TestCase ):
         with self.assertRaises( VoiceGateTimeoutError ):
             _run( orch._voice_gate_diagnosis( _diag(), vio_mod, self.ci ) )
 
-    def test_other_confirmation_exception_auto_approves( self ):
+    def test_other_confirmation_exception_refuses_to_approve( self ):
+        # Was test_other_confirmation_exception_auto_approves — it pinned the defect.
+        # A gate that cannot reach a human must not answer for them (row 421b9498).
         orch = _orch()
         self.ci.ask_confirmation.side_effect = RuntimeError( "ws down" )
-        d = _diag()
-        out = _run( orch._voice_gate_diagnosis( d, vio_mod, self.ci ) )
-        self.assertIs( out, d )
+        with self.assertRaises( VoiceGateUnreachableError ) as ctx:
+            _run( orch._voice_gate_diagnosis( _diag(), vio_mod, self.ci ) )
+        self.assertEqual( ctx.exception.phase, BFEPhase.DIAGNOSING.value )
+        self.assertIsInstance( ctx.exception.cause, RuntimeError )
 
-    def test_rejected_feedback_exception_returns_as_is( self ):
+    def test_unreachable_is_not_reported_as_a_timeout( self ):
+        # The two are distinct events and the record must be able to say which.
+        # Collapsing them is the same "cannot distinguish" defect the gate had.
+        orch = _orch()
+        self.ci.ask_confirmation.side_effect = RuntimeError( "ws down" )
+        with self.assertRaises( VoiceGateUnreachableError ):
+            _run( orch._voice_gate_diagnosis( _diag(), vio_mod, self.ci ) )
+        self.assertFalse( issubclass( VoiceGateUnreachableError, VoiceGateTimeoutError ) )
+        self.assertFalse( issubclass( VoiceGateTimeoutError, VoiceGateUnreachableError ) )
+
+    def test_rejected_then_feedback_exception_does_not_convert_no_into_yes( self ):
+        # Was test_rejected_feedback_exception_returns_as_is. The user ALREADY
+        # said no; returning the diagnosis turned an explicit rejection into an
+        # acceptance because a *second* call failed. The only site in this sweep
+        # that overrode a human who spoke, rather than one who was absent.
         orch = _orch( debug=True )
-        self.ci.ask_confirmation.return_value = False
+        self.ci.ask_confirmation.return_value = False          # explicit NO
         self.ci.get_feedback.side_effect = RuntimeError( "fb down" )
+        with self.assertRaises( VoiceGateUnreachableError ) as ctx:
+            _run( orch._voice_gate_diagnosis( _diag(), vio_mod, self.ci ) )
+        self.assertIsInstance( ctx.exception.cause, RuntimeError )
+
+    def test_feedback_timeout_stays_a_timeout_and_is_not_relabelled( self ):
+        # Krishna 🦚, pre-commit review: the feedback handler wrapped EVERY
+        # exception as unreachable, including a genuine VoiceGateTimeoutError
+        # that get_feedback raises in its own right. Both branches stall, so
+        # nothing leaked — but a handler that cannot tell the two states apart
+        # is the exact defect this change exists to remove, sitting inside the
+        # fix for it.
+        orch = _orch()
+        self.ci.ask_confirmation.return_value = False          # user rejects
+        self.ci.get_feedback.side_effect = VoiceGateTimeoutError( "diagnosing" )
+        with self.assertRaises( VoiceGateTimeoutError ):
+            _run( orch._voice_gate_diagnosis( _diag(), vio_mod, self.ci ) )
+
+    # NOTE: a second "end-to-end" test was written here and DELETED. It mocked
+    # _voice_gate_diagnosis wholesale, so it never entered the feedback handler
+    # at all — with Krishna's fix reverted it still passed. It would have sat in
+    # the suite looking like coverage of exactly the defect it could not see.
+    # The caller-side label is already proven by
+    # test_stall_message_says_which_no_answer_it_was, which does go red.
+
+    def test_control_a_working_gate_still_returns_the_approved_diagnosis( self ):
+        # Control for the two refusal tests above: if they passed because the
+        # gate refuses EVERYTHING, this one goes red. A refusal test whose green
+        # is indistinguishable from a gate that never approves proves nothing.
+        orch = _orch()
+        self.ci.ask_confirmation.return_value = True
+        self.ci.ask_confirmation.side_effect = None
         d = _diag()
         out = _run( orch._voice_gate_diagnosis( d, vio_mod, self.ci ) )
         self.assertIs( out, d )
@@ -478,9 +576,22 @@ class TestVoiceGateProposal( unittest.TestCase ):
         with self.assertRaises( VoiceGateTimeoutError ):
             _run( orch._voice_gate_proposal( [ _fix( confidence=0.9 ) ], vio_mod, self.ci ) )
 
-    def test_auto_select_other_exception_auto_approves( self ):
+    def test_auto_select_other_exception_refuses_to_apply( self ):
+        # Was test_auto_select_other_exception_auto_approves. This gate asks
+        # "Apply this fix?" — a broken gate returning the fix meant BFE applied
+        # a code change nobody approved (row 421b9498).
         orch = _orch()
         self.ci.ask_confirmation.side_effect = RuntimeError( "ws down" )
+        with self.assertRaises( VoiceGateUnreachableError ) as ctx:
+            _run( orch._voice_gate_proposal( [ _fix( confidence=0.9 ) ], vio_mod, self.ci ) )
+        self.assertEqual( ctx.exception.phase, BFEPhase.PROPOSING.value )
+
+    def test_control_a_working_gate_still_returns_the_approved_fix( self ):
+        # Control: if the refusal test above passed because the gate refuses
+        # everything, this goes red.
+        orch = _orch()
+        self.ci.ask_confirmation.side_effect = None
+        self.ci.ask_confirmation.return_value = True
         f = _fix( confidence=0.9 )
         out = _run( orch._voice_gate_proposal( [ f ], vio_mod, self.ci ) )
         self.assertIs( out, f )

@@ -262,6 +262,35 @@ class VoiceGateTimeoutError( Exception ):
         super().__init__( message or f"Voice gate timeout at {phase}" )
 
 
+class VoiceGateUnreachableError( Exception ):
+    """
+    Voice gate could not reach the human at all — the call itself failed.
+
+    Distinct from VoiceGateTimeoutError on purpose. A timeout means the
+    question was asked and no answer came back; this means the asking
+    mechanism broke (transport down, MCP unavailable, serialization error).
+    Both mean "no human answered", and both must checkpoint-and-stall — but
+    collapsing them into one type would make the record unable to say which
+    happened, which is the same defect this exception exists to remove.
+
+    Before this existed, the orchestrator caught the generic exception and
+    AUTO-APPROVED: a gate that could not reach a human answered for them,
+    in a value indistinguishable from a real approval.
+
+    Requires:
+        - phase is a valid BFEPhase/TFEPhase value string
+        - cause is the original exception that broke the gate
+
+    Ensures:
+        - Carries the phase where the gate failed and the underlying cause
+        - Caught by the orchestrator to trigger checkpoint-and-stall
+    """
+    def __init__( self, phase: str, cause: Exception, message: str = "" ):
+        self.phase = phase
+        self.cause = cause
+        super().__init__( message or f"Voice gate unreachable at {phase}: {cause}" )
+
+
 class StalledException( Exception ):
     """
     Orchestrator requests a clean stall with checkpoint.
