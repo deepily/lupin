@@ -43,6 +43,7 @@ DEFAULT_JUDGE_PROMPT_PATH   = "/src/conf/prompts/dm-quality-judge.txt"
 _JUDGE_ROUTING_COMMAND      = "dm quality judge"
 
 _JUDGE_UNAVAILABLE_DETAIL   = "judge unavailable"
+_QUALITATIVE_OFF_DETAIL     = "not graded — qualitative judging is off (Rick 2026-08-01, row ca7a2cbf)"
 
 # On retry, prepend this reply-anchor to break a deterministic degenerate mode
 # (bug d02eaaa7): the model reads certain rambling bodies + the judge prompt and
@@ -310,6 +311,17 @@ def combine_overall( length_weight, directness_weight, tone_weight, length_detai
         - Rick's worked example: length=−2, directness=+2, tone=+2 →
           qualitative=2 → round_half_up(0.5*−2 + 0.5*2)=round_half_up(0)=0 → 🤷
     """
+    # LENGTH-ONLY MODE (Rick, 2026-08-01: "stick with length for now — that's quantitative
+    # and we can calculate a grade very easily"). When the qualitative half is switched off
+    # its two dimensions carry NO judgement, so blending them in would let two withheld
+    # values drag Overall toward 0 and publish that as a considered score — the exact defect
+    # this package spent the day on. Overall IS the Length grade, and its note says so.
+    if directness_weight is None and tone_weight is None:
+        overall_weight = max( -2, min( 2, int( length_weight ) ) )
+        return { "emoji"  : WEIGHT_TO_EMOJI[ overall_weight ],
+                 "weight" : overall_weight,
+                 "note"   : f"Length only ({length_detail}); directness/tone not graded." }
+
     qualitative_weight = ( directness_weight + tone_weight ) / 2.0
     raw                = 0.5 * length_weight + 0.5 * qualitative_weight
     overall_weight     = max( -2, min( 2, round_half_up( raw ) ) )
@@ -329,10 +341,47 @@ def _fallback_dimension():
     return { "emoji": "🤷", "weight": 0, "detail": _JUDGE_UNAVAILABLE_DETAIL }
 
 
+def _withheld_dimension():
+    """
+    The dimension result when the qualitative half is SWITCHED OFF (Rick, 2026-08-01).
+
+    Ensures:
+        - weight is None, NOT 0 — and that is the whole point. 0 is `meh`, a real grade
+          on this scale, and today's investigation was one long demonstration of what
+          happens when a non-answer is published in the same value space as an answer.
+          None cannot be averaged, cannot be compared, and cannot be mistaken for an
+          opinion by any consumer that does not explicitly handle it
+        - the emoji is 🚫 rather than 🤷: 🤷 is what an UNAVAILABLE judge and an
+          OVER-LENGTH body already return, and "we chose not to grade this" is a third
+          thing that must not wear either of their faces
+    """
+    return { "emoji": "🚫", "weight": None, "detail": _QUALITATIVE_OFF_DETAIL }
+
+
 def _too_long_dimension( word_count ):
     """A neutral dimension result (🤷/0) for a body past QUALITATIVE_WORD_LIMIT — the
     honest 'not graded at this length' signal, distinct from the judge-unavailable one."""
     return { "emoji": "🤷", "weight": 0, "detail": f"{_TOO_LONG_DETAIL} ({word_count} words > {QUALITATIVE_WORD_LIMIT})" }
+
+
+def _get_qualitative_enabled():
+    """
+    Read `dm quality qualitative enabled` from lupin-app.ini at construction.
+
+    Ensures:
+        - returns a bool; DEFAULTS TO FALSE, because as of 2026-08-01 the qualitative
+          half does not work (row ca7a2cbf) and a default that turns it on would
+          re-publish grades Rick switched off
+        - a missing key or unreadable config returns False rather than raising — the
+          judge must never take a DM send down, and False is the safe direction here
+    """
+    try:
+        from cosa.config.configuration_manager import ConfigurationManager
+        config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+        return config_mgr.get( "dm quality qualitative enabled", default=False, return_type="boolean" )
+    except Exception as e:
+        print( f"[DmQualityJudge] could not read the qualitative toggle ({type( e ).__name__}) — defaulting OFF" )
+        return False
 
 
 class DmQualityJudge:
@@ -357,6 +406,7 @@ class DmQualityJudge:
         prompt_template_path = DEFAULT_JUDGE_PROMPT_PATH,
         debug                = False,
         verbose              = False,
+        qualitative_enabled  = None,
     ):
         """
         Initialize the judge with its LLM configuration.
@@ -380,6 +430,16 @@ class DmQualityJudge:
         self.prompt_template_path = prompt_template_path
         self._available           = False
         self._client              = None
+        # None => read the INI. An explicit bool is an INJECTION SEAM for tests, which
+        # must not depend on ambient config: a suite whose verdict flips with an operator's
+        # toggle is measuring the machine it runs on, not the code.
+        self.qualitative_enabled  = ( _get_qualitative_enabled()
+                                      if qualitative_enabled is None else bool( qualitative_enabled ) )
+
+        # Length-only is the CONFIGURED state as of 2026-08-01, not a degraded one — say
+        # so at build time so an operator reading logs is not left inferring it from a 🚫.
+        if not self.qualitative_enabled:
+            print( "[DmQualityJudge] qualitative judging OFF — Length only (row ca7a2cbf)" )
 
         try:
             factory         = LlmClientFactory( debug=debug, verbose=verbose )
@@ -419,10 +479,21 @@ class DmQualityJudge:
         word_count = len( body_text.split() )
         length     = length_bucket( word_count )
 
+        # LENGTH-ONLY MODE (Rick, 2026-08-01, row ca7a2cbf). Measured that day, the 24B
+        # recognizes exactly ONE of four message types — a message that is direct AND
+        # plainly written. Hold the prose jargony and it cannot tell a leading verdict
+        # from a buried one; bury the verdict and it cannot tell plain prose from jargon.
+        # Everything not good-on-both collapses to `meh`. His ruling: keep Length, which
+        # is Python-computed and has never been in doubt, and pursue the qualitative half
+        # separately via fine-tuning on purpose-built training data.
+        if not self.qualitative_enabled:
+            directness = _withheld_dimension()
+            tone       = _withheld_dimension()
+
         # Qualitative ceiling (bug 2a41e141): past QUALITATIVE_WORD_LIMIT the model
         # cannot reliably judge — skip the LLM call and return the honest 🤷/0. Length
         # (above) still penalizes the verbosity, which is what actually matters here.
-        if word_count > QUALITATIVE_WORD_LIMIT:
+        elif word_count > QUALITATIVE_WORD_LIMIT:
             directness = _too_long_dimension( word_count )
             tone       = _too_long_dimension( word_count )
         else:
