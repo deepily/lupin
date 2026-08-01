@@ -559,12 +559,81 @@ async def choose(
         return labels[ 0 ]
 
 
+class VoiceGateNoDefaultError( RuntimeError ):
+    """
+    Raised when a choice gate cannot reach a human and the caller named no
+    explicit default.
+
+    Position in an options list is not consent. Before 2026-08-01 every
+    unreachable-human path here answered `options[0]["label"]` and returned
+    it in a payload identical to a real selection, so a podcast script
+    review gate offering [Approve, Revise, Cancel] "approved" itself while
+    the user was offline (row be8830a3). A gate with nothing to fall back
+    on now fails loudly instead of guessing.
+
+    Attributes:
+        reason:  which unreachable path fired (see _DEFAULT_SOURCES)
+        headers: the question headers that had no answer
+    """
+
+    def __init__( self, reason: str, headers: list ):
+        self.reason  = reason
+        self.headers = headers
+        super().__init__(
+            f"voice gate unreachable ({reason}) and no response_default was given "
+            f"for {headers} — refusing to answer on the user's behalf"
+        )
+
+
+# Provenance markers for the `default_source` field. A caller that wants to
+# treat some of these differently (e.g. accept a CLI blank-entry default but
+# not a transport failure) can branch on the exact value.
+_DEFAULT_SOURCE_NON_INTERACTIVE = "non_interactive"   # no tty, queue/Docker
+_DEFAULT_SOURCE_CLI_BLANK       = "cli_blank_entry"   # prompt shown, user hit enter
+_DEFAULT_SOURCE_CLI_BAD_INDEX   = "cli_bad_index"     # number outside the option range
+_DEFAULT_SOURCE_DISPATCH_FAILED = "dispatch_failed"   # voice call raised (503, timeout…)
+
+
+def _resolve_default( questions: list, response_default: Optional[ dict ], source: str ) -> dict:
+    """
+    Build the answer payload for a path where no human answered.
+
+    Requires:
+        - questions is a list of question objects
+        - response_default is None, or a dict keyed by question header
+
+    Ensures:
+        - returns a payload carrying default_used=True and default_source
+        - the payload is NOT shape-identical to a genuine selection
+
+    Raises:
+        - VoiceGateNoDefaultError if response_default does not cover every
+          header, because a partial default is still a guess
+    """
+    missing = [
+        q.get( "header", "Choice" ) for q in questions
+        if not response_default or q.get( "header", "Choice" ) not in response_default
+    ]
+    if missing:
+        raise VoiceGateNoDefaultError( reason=source, headers=missing )
+
+    answers = { q.get( "header", "Choice" ): response_default[ q.get( "header", "Choice" ) ] for q in questions }
+    logger.info( f"present_choices default used (source={source}): {answers}" )
+    return {
+        "answers"        : answers,
+        "default_used"   : True,
+        "answered"       : False,
+        "default_source" : source,
+    }
+
+
 async def present_choices(
     questions: list,
     timeout: int = 120,
     title: Optional[ str ] = None,
     abstract: Optional[ str ] = None,
-    job_id: Optional[ str ] = None
+    job_id: Optional[ str ] = None,
+    response_default: Optional[ dict ] = None
 ) -> dict:
     """
     Present multiple-choice questions (voice-first).
@@ -575,39 +644,49 @@ async def present_choices(
     This function supports the full question format with headers and
     multi-select capability. For simpler use cases, see choose().
 
+    Every path that cannot obtain a human answer either applies the
+    caller's explicit `response_default` — flagged as such in the return —
+    or raises. None of them invent an answer from option ordering.
+
     Requires:
         - questions is a list of question objects
         - Each question has: question, header, multiSelect, options
+        - response_default, if given, has a key per question header
 
     Ensures:
-        - Returns dict with "answers" key containing selections
-        - In CLI mode, returns first option on invalid input
+        - a genuine selection returns {"answers": {...}, "default_used": False,
+          "answered": True}
+        - an unanswered gate returns default_used=True, answered=False and a
+          default_source naming the path — deliberately NOT the same shape as
+          a real answer, so callers can distinguish consent from silence
+        - option order never decides the outcome
 
     Args:
         questions: List of question objects with options
         timeout: Seconds to wait for response
         title: Optional title for the notification
         abstract: Optional supplementary context
+        job_id: Optional job ID for routing to job cards
+        response_default: Explicit per-header fallback, keyed by question
+            header. Required for any gate expected to run unattended.
 
     Returns:
-        dict: {"answers": {...}} with selections keyed by header
+        dict: {"answers": {...}, "default_used": bool, "answered": bool}
+              plus "default_source" when default_used is True
+
+    Raises:
+        - VoiceGateNoDefaultError when no human can answer and no
+          response_default covers the questions
     """
     # Auto-inject module-level job_id if caller didn't provide one
     if job_id is None and _job_id is not None:
         job_id = _job_id
 
     if _force_cli_mode or _cosa_interface is None or not await is_voice_available():
-        # Non-interactive (queue/Docker): use first option as default without blocking
+        # Non-interactive (queue/Docker): nobody can answer. Use the caller's
+        # declared default or fail — never option[0].
         if not _is_interactive():
-            answers = {}
-            for q in questions:
-                header  = q.get( "header", "Choice" )
-                options = q.get( "options", [] )
-                multi   = q.get( "multiSelect", False )
-                default_label = options[ 0 ][ "label" ] if options else ""
-                answers[ header ] = [ default_label ] if multi else default_label
-            logger.info( f"Non-interactive mode, using defaults for present_choices: {answers}" )
-            return { "answers": answers }
+            return _resolve_default( questions, response_default, _DEFAULT_SOURCE_NON_INTERACTIVE )
 
         # CLI fallback - numbered menu
         if abstract:
@@ -629,42 +708,56 @@ async def present_choices(
                 else:
                     print( f"    {i}. {label}" )
 
+            # A blank entry or an out-of-range number is NOT a selection. Both
+            # defer to the caller's declared default (or raise) rather than
+            # silently landing on whichever option happens to be listed first.
             if multi_select:
                 response = input( "  Enter numbers (comma-separated) or text for 'Other': " ).strip()
+                if not response:
+                    return _resolve_default( questions, response_default, _DEFAULT_SOURCE_CLI_BLANK )
                 try:
-                    indices = [ int( x.strip() ) - 1 for x in response.split( "," ) ]
+                    indices  = [ int( x.strip() ) - 1 for x in response.split( "," ) ]
                     selected = [ options[ i ][ "label" ] for i in indices if 0 <= i < len( options ) ]
-                    answers[ header ] = selected if selected else [ options[ 0 ][ "label" ] ] if options else []
+                    if not selected:
+                        return _resolve_default( questions, response_default, _DEFAULT_SOURCE_CLI_BAD_INDEX )
+                    answers[ header ] = selected
                 except ValueError:
-                    # User typed custom text
-                    answers[ header ] = [ response ] if response else ( [ options[ 0 ][ "label" ] ] if options else [] )
+                    # User typed custom text — that IS their answer
+                    answers[ header ] = [ response ]
             else:
                 response = input( "  Enter number (or text for 'Other'): " ).strip()
+                if not response:
+                    return _resolve_default( questions, response_default, _DEFAULT_SOURCE_CLI_BLANK )
                 try:
                     idx = int( response ) - 1
                     if 0 <= idx < len( options ):
                         answers[ header ] = options[ idx ][ "label" ]
                     else:
-                        answers[ header ] = options[ 0 ][ "label" ] if options else ""
+                        return _resolve_default( questions, response_default, _DEFAULT_SOURCE_CLI_BAD_INDEX )
                 except ValueError:
-                    # User typed custom text
-                    answers[ header ] = response if response else ( options[ 0 ][ "label" ] if options else "" )
+                    # User typed custom text — that IS their answer
+                    answers[ header ] = response
 
-        return { "answers": answers }
+        return { "answers": answers, "default_used": False, "answered": True }
 
     try:
-        return await _cosa_interface.present_choices(
+        result = await _cosa_interface.present_choices(
             questions=questions, timeout=timeout, title=title, abstract=abstract, job_id=job_id
         )
     except Exception as e:
+        # The dispatcher raises deliberately here (VoiceGateTimeoutError on a
+        # 503 "user is offline", transport errors, pre-MCP validation failures)
+        # precisely so a caller can stall and checkpoint. Swallowing it into
+        # options[0] defeated that one layer up — row be8830a3.
         logger.warning( f"Voice present_choices failed: {e}" )
-        # Fallback - return first option as default
-        answers = {}
-        for q in questions:
-            header = q.get( "header", "Choice" )
-            options = q.get( "options", [] )
-            answers[ header ] = options[ 0 ][ "label" ] if options else ""
-        return { "answers": answers }
+        return _resolve_default( questions, response_default, _DEFAULT_SOURCE_DISPATCH_FAILED )
+
+    # A real answer came back. Stamp provenance so callers never have to infer
+    # it from the payload's shape.
+    if isinstance( result, dict ):
+        result.setdefault( "default_used", False )
+        result.setdefault( "answered", True )
+    return result
 
 
 # =============================================================================

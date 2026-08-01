@@ -226,9 +226,56 @@ class TestChooseNonInteractive:
 class TestPresentChoicesNonInteractive:
     """Verify present_choices returns defaults without blocking."""
 
+    # Behaviour changed 2026-08-01 (row be8830a3). This class previously
+    # asserted that a non-interactive present_choices() answers with
+    # options[0]. It does not any more: option ORDER is not consent, so a
+    # gate with no explicit response_default now raises instead of guessing.
+    # The two tests below pin both halves of the replacement contract.
+
     @pytest.mark.asyncio
-    async def test_returns_first_option_per_question( self ):
-        """present_choices() returns first option for each question."""
+    async def test_raises_when_no_explicit_default_given( self ):
+        """
+        Non-interactive with no response_default must FAIL LOUDLY rather
+        than answer on the user's behalf.
+        """
+        from cosa.agents.utils import voice_io
+
+        original_interface = voice_io._cosa_interface
+        original_available = voice_io._voice_available
+        try:
+            voice_io._cosa_interface = None
+            voice_io._voice_available = None
+
+            questions = [
+                {
+                    "question"    : "Which style?",
+                    "header"      : "Style",
+                    "multiSelect" : False,
+                    "options"     : [
+                        { "label": "Casual", "description": "Relaxed tone" },
+                        { "label": "Formal", "description": "Professional tone" },
+                    ]
+                }
+            ]
+
+            with patch.object( sys, "stdin" ) as mock_stdin:
+                mock_stdin.isatty.return_value = False
+                with pytest.raises( voice_io.VoiceGateNoDefaultError ) as exc:
+                    await voice_io.present_choices( questions )
+
+                assert exc.value.reason == "non_interactive"
+                assert exc.value.headers == [ "Style" ]
+        finally:
+            voice_io._cosa_interface = original_interface
+            voice_io._voice_available = original_available
+
+    @pytest.mark.asyncio
+    async def test_explicit_default_is_applied_and_flagged( self ):
+        """
+        With an explicit response_default the call succeeds, returns the
+        caller's chosen values, and marks them as a default so the caller
+        can tell this apart from a real selection.
+        """
         from cosa.agents.utils import voice_io
 
         original_interface = voice_io._cosa_interface
@@ -258,13 +305,19 @@ class TestPresentChoicesNonInteractive:
                 }
             ]
 
+            # Deliberately NOT option[0] for either question — proves the
+            # caller's declaration is what lands, not the list ordering.
+            declared = { "Style": "Formal", "Features": [ "Outro" ] }
+
             with patch.object( sys, "stdin" ) as mock_stdin:
                 mock_stdin.isatty.return_value = False
-                result = await voice_io.present_choices( questions )
+                result = await voice_io.present_choices( questions, response_default=declared )
 
-                assert "answers" in result
-                assert result[ "answers" ][ "Style" ] == "Casual"
-                assert result[ "answers" ][ "Features" ] == [ "Intro" ]
+                assert result[ "answers" ][ "Style" ]    == "Formal"
+                assert result[ "answers" ][ "Features" ] == [ "Outro" ]
+                assert result[ "default_used" ]   is True
+                assert result[ "answered" ]       is False
+                assert result[ "default_source" ] == "non_interactive"
         finally:
             voice_io._cosa_interface = original_interface
             voice_io._voice_available = original_available
