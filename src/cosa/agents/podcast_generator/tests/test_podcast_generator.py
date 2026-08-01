@@ -352,6 +352,60 @@ class TestPersonalityPrompts:
         assert "enthusiastic" in custom.tone
 
 
+class TestLoudFailureOnLLMError:
+    """
+    Bug 4c49cde4: when the bounded-CC LLM call fails, the orchestrator must fail
+    LOUDLY (raise PodcastGenerationError) instead of silently returning a fake
+    "Research Topic" / 0-segment placeholder that reaches the review gate looking
+    review-ready.
+    """
+
+    def _make_orchestrator( self ):
+        from cosa.agents.podcast_generator.orchestrator import PodcastOrchestratorAgent
+        return PodcastOrchestratorAgent(
+            research_doc_path = "/tmp/does-not-matter.md",
+            user_id           = "test-user",
+        )
+
+    @pytest.mark.asyncio
+    async def test_analysis_failure_raises_not_placeholder( self ):
+        from cosa.agents.podcast_generator.orchestrator import PodcastGenerationError
+
+        orch = self._make_orchestrator()
+        # Inject a mock API client whose analysis call raises (the revoked-token 401 shape).
+        mock_client = Mock()
+        mock_client.call_for_analysis = AsyncMock(
+            side_effect = Exception( "Claude Code returned an error result: success" )
+        )
+        orch._api_client = mock_client
+
+        with pytest.raises( PodcastGenerationError ) as exc_info:
+            await orch._analyze_content_async( "some research content" )
+
+        # User-facing message, and the original error is chained (not swallowed).
+        assert "Podcast generation failed" in str( exc_info.value )
+        assert isinstance( exc_info.value.__cause__, Exception )
+
+    @pytest.mark.asyncio
+    async def test_script_failure_raises_not_empty_script( self ):
+        from cosa.agents.podcast_generator.orchestrator import PodcastGenerationError
+
+        orch = self._make_orchestrator()
+        mock_client = Mock()
+        mock_client.call_for_script = AsyncMock(
+            side_effect = Exception( "Claude Code returned an error result: success" )
+        )
+        orch._api_client = mock_client
+
+        analysis = ContentAnalysis( main_topic="Test Topic", key_subtopics=[] )
+
+        with pytest.raises( PodcastGenerationError ) as exc_info:
+            await orch._generate_script_async( "some research content", analysis )
+
+        assert "Podcast generation failed" in str( exc_info.value )
+        assert isinstance( exc_info.value.__cause__, Exception )
+
+
 def quick_smoke_test():
     """Quick smoke test for unit tests module."""
     import cosa.utils.util as cu

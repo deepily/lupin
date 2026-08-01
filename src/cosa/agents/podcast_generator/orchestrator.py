@@ -58,6 +58,22 @@ logger = logging.getLogger( __name__ )
 ELEVENLABS_COST_PER_1K_CHARS = 0.30  # $0.30 per 1000 characters
 
 
+class PodcastGenerationError( Exception ):
+    """
+    Raised when a core LLM-backed generation step (content analysis or script
+    generation) fails, so the job fails LOUDLY instead of silently producing a
+    fake placeholder script that reaches the review gate looking review-ready.
+
+    Requires:
+        - message is a non-empty, user-facing string
+
+    Ensures:
+        - carries a clear user-facing message up to the run() handler, which
+          sets state=FAILED, notifies the user, and re-raises
+    """
+    pass
+
+
 class PodcastOrchestratorAgent:
     """
     Top-level orchestrator for podcast generation - single job, multi-phase, async.
@@ -1216,11 +1232,12 @@ class PodcastOrchestratorAgent:
             if self.debug:
                 print( f"[PodcastOrchestratorAgent] Analysis error: {e}" )
 
-            # Return minimal analysis
-            return ContentAnalysis(
-                main_topic    = "Research Topic",
-                key_subtopics = [],
-            )
+            # Fail LOUDLY. A silent placeholder analysis would flow downstream into a
+            # fake 0-segment script that reaches the review gate looking review-ready.
+            raise PodcastGenerationError(
+                "Podcast generation failed: the AI service returned an error while "
+                "analyzing the research document. Please try again in a few minutes."
+            ) from e
 
     async def _generate_script_async(
         self,
@@ -1293,14 +1310,12 @@ class PodcastOrchestratorAgent:
             if self.debug:
                 print( f"[PodcastOrchestratorAgent] Script generation error: {e}" )
 
-            # Return minimal script
-            return PodcastScript(
-                title           = f"Podcast: {analysis.main_topic}",
-                research_source = self.research_doc_path,
-                host_a_name     = self.config.get_host_a_name(),
-                host_b_name     = self.config.get_host_b_name(),
-                segments        = [],
-            )
+            # Fail LOUDLY. A silent 0-segment placeholder script would reach the
+            # review gate looking like a normal (if empty) review-ready result.
+            raise PodcastGenerationError(
+                "Podcast generation failed: the AI service returned an error while "
+                "writing the podcast script. Please try again in a few minutes."
+            ) from e
 
     async def _revise_script_async(
         self,
