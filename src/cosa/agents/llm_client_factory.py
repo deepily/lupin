@@ -178,8 +178,29 @@ class LlmClientFactory:
                         **model_params
                     )
                 else:
+                    # ChatClient hands model_name straight to pydantic_ai's Agent, which
+                    # resolves it against a registry of KNOWN providers — a bare vLLM id
+                    # like "kaitchup/Phi-4-AutoRound-GPTQ-4bit" raises UserError "Unknown
+                    # model". A local vLLM speaks the OpenAI protocol, so the "openai:"
+                    # prefix is what makes it resolvable; base_url (set into
+                    # OPENAI_BASE_URL by ChatClient) points that provider at our own box
+                    # rather than api.openai.com. Spike-verified 2026-08-01: bare name
+                    # raises, prefixed name returns a real completion.
+                    #
+                    # This branch had NO callers before the DM Quality Judge v2 key —
+                    # every vllm:// spec in lupin-app.ini was instruction_completion, so
+                    # nothing reached it and the defect was never visible.
+                    #
+                    # api_key="EMPTY" is required, not cosmetic: a local vLLM wants no
+                    # credential, but the OpenAI SDK underneath refuses to construct
+                    # without one. CompletionClient already defaults it to "EMPTY" for
+                    # every vllm:// client in this file (completion_client.py:82-84);
+                    # ChatClient only sets it when passed (chat_client.py:59-60), so the
+                    # factory has to supply it. Passing it here keeps the two vLLM paths
+                    # behaving identically rather than editing the shared client.
                     return ChatClient(
-                        model_name=model_name,
+                        model_name=f"openai:{model_name}",
+                        api_key="EMPTY",
                         base_url=base_url,
                         model_tokenizer_map=model_tokenizer_map,
                         debug=self.debug,

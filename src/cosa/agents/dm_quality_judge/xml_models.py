@@ -38,6 +38,34 @@ GRADE_TABLE = {
 # weight → emoji, derived from GRADE_TABLE so it can never drift from it.
 WEIGHT_TO_EMOJI = { weight: emoji for weight, emoji in GRADE_TABLE.values() }
 
+
+# ── Non-answer faces ──────────────────────────────────────────────────────────
+# 🔴 A NON-ANSWER MUST NEVER WEAR A GRADE'S FACE (Rick, 2026-08-01: "we cannot
+#    conflate none with `meh` or 🤷").
+#
+# 🤷 is not a neutral shrug in this system — it is the emoji of `meh`, weight 0, a real
+# considered grade on the scale. Every non-answer used to return it, so a dimension the
+# judge had never run on was visually indistinguishable from one it had graded neutrally.
+# The weights were already fixed (all non-answers carry None, so nothing can average
+# them); this closes the same hole on the surface a human actually reads.
+#
+# Four DISTINCT faces, because four different silences must not collapse into one — the
+# reader should be able to tell "we chose not to" from "it was too long" from "the judge
+# was down" from "the model answered and its answer did not check out".
+NONANSWER_EMOJI = {
+    "withheld"    : "🚫",   # qualitative half switched off — a deliberate choice
+    "too_long"    : "♾️",   # past the word ceiling — Rick's pick, 2026-08-01
+    "unavailable" : "⚠️",   # the judge could not be reached or kept failing
+    "unverified"  : "❓",   # the model answered; the answer failed its check
+}
+
+# Nothing here may collide with a grade's emoji. Asserted at import so a future edit
+# that reintroduces 🤷 (or any other grade face) fails loudly at startup rather than
+# quietly making a silence look like an opinion again.
+assert not ( set( NONANSWER_EMOJI.values() ) & set( WEIGHT_TO_EMOJI.values() ) ), (
+    "a non-answer emoji collides with a grade emoji — a silence would read as a grade"
+)
+
 # The safe default for an unknown/blank label — meh / 0 (never raise on a
 # surprise label; the judge is advisory, a bad label degrades to neutral).
 _FALLBACK_LABEL = "meh"

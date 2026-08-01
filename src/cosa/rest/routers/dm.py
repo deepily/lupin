@@ -481,8 +481,11 @@ def _maybe_grade_dm_quality( body_text ):
     if not get_dm_quality_judgment_enabled():
         return None
     if _dm_quality_judge is None:
-        from cosa.agents.dm_quality_judge.judge import DmQualityJudge
-        _dm_quality_judge = DmQualityJudge()
+        # Go through the factory, not a named class: which implementation runs is
+        # `dm quality judge version` (default 1), and keeping that decision in one
+        # place means this call site never has to learn about a v3.
+        from cosa.agents.dm_quality_judge import get_dm_quality_judge
+        _dm_quality_judge = get_dm_quality_judge()
     quality = _dm_quality_judge.judge( body_text )
     _record_dm_quality( quality )
     return quality

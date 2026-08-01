@@ -26,6 +26,24 @@ automated interactive testing system, see [`src/docs/automated-interactive-testi
 | `test_token_proactive_refresh_smoke.py` | JWT token proactive refresh validation | Yes | No |
 | `test_vllm_dynamic_client_smoke.py` | vLLM dynamic client initialization | No | No |
 
+### DM Quality Judge probes — instruments, not gates
+
+Two live measurement scripts. **Neither is `test_`-prefixed and neither is collected by
+pytest**, on purpose: both drive a real model many times over, take minutes, and answer a
+question rather than guarding a behaviour. Run them deliberately. They touch neither
+`:7999` nor `:8000` — they talk to the local vLLM box directly and mutate no state.
+
+| File | Question it answers | Calls | Notes |
+|------|--------------------|:-----:|-------|
+| `dm_judge_discrimination_probe.py` | Does the judge still tell a leading verdict from a buried one, and plain prose from jargon? | ~24 | The 2×2. `--version {1,2}` picks the judge. **Any prompt edit must be re-measured here or it is unverified.** |
+| `dm_judge_length_ceiling_probe.py` | Is the 150-word qualitative ceiling still real on the current model and path? | ~48 | Lifts the ceiling *in-process only*. **Directness only** — its padding confounds tone by design; see the module docstring. |
+
+Both classify each result by its **detail string**, never by weight alone: a refusal and a
+real `meh` are both weight-adjacent, and an un-dropped refusal can satisfy a check while
+measuring nothing. Their pure logic is unit-gated in
+`src/tests/unit/test_dm_judge_discrimination_probe.py` and
+`src/tests/unit/test_dm_judge_length_ceiling_probe.py`.
+
 ### Utility Modules (`utilities/`)
 
 | File | Description |

@@ -59,6 +59,7 @@ import sys
 
 sys.path.insert( 0, os.path.join( os.environ[ "LUPIN_ROOT" ], "src" ) )
 
+from cosa.agents.dm_quality_judge import get_dm_quality_judge
 from cosa.agents.dm_quality_judge.judge import (
     DmQualityJudge,
     QUALITATIVE_WORD_LIMIT,
@@ -66,6 +67,13 @@ from cosa.agents.dm_quality_judge.judge import (
     _QUALITATIVE_OFF_DETAIL,
     _TOO_LONG_DETAIL,
 )
+# v2 adds a FOURTH way to not-answer: the model replied, the XML parsed, and the
+# extraction did not survive checking against the source text. It is neither
+# "unavailable" nor "too long", so it needs its own string AND its own registration
+# here — an unregistered non-answer passes is_measurement(), is scored as a real 0,
+# and can satisfy an ordering while measuring nothing. That is the exact defect this
+# probe was rebuilt to close; adding a version must not reopen it one level out.
+from cosa.agents.dm_quality_judge.judge_v2 import _EXTRACTION_FAILED_DETAIL
 
 # ── the 2x2, and why it is a 2x2 ──────────────────────────────────────────────
 #
@@ -147,7 +155,7 @@ CONTRASTS = {
 # The non-answer kinds, in the order we report them. Keeping this list here (rather than
 # re-deriving it in three places) means a table column, a per-cell counter, and a test
 # fixture all agree on the same vocabulary.
-NONANSWER_KINDS = ( "unavailable", "too_long", "withheld" )
+NONANSWER_KINDS = ( "unavailable", "too_long", "withheld", "unverified" )
 
 
 def nonanswer_kind( dim ):
@@ -170,11 +178,20 @@ def nonanswer_kind( dim ):
           judge cannot silently desynchronize this classifier)
         - returns None when the result is a real, comparable grade
     """
-    if dim[ "weight" ] is None:                 return "withheld"
+    # ⚠️ DETAIL IS CHECKED BEFORE WEIGHT, and the order is load-bearing (2026-08-01).
+    # Every non-answer now carries weight None — that change was made so combine_overall
+    # cannot average a silence into Overall. But it means a leading `weight is None`
+    # test would swallow ALL FOUR kinds into "withheld", and this function exists
+    # precisely to tell them apart. The specific detail wins; the None check is the
+    # backstop for a silence that arrives without a recognized string.
     detail = dim.get( "detail", "" )
-    if detail == _JUDGE_UNAVAILABLE_DETAIL:     return "unavailable"
-    if detail == _QUALITATIVE_OFF_DETAIL:       return "withheld"
-    if detail.startswith( _TOO_LONG_DETAIL ):   return "too_long"
+    if detail == _JUDGE_UNAVAILABLE_DETAIL:           return "unavailable"
+    if detail == _QUALITATIVE_OFF_DETAIL:             return "withheld"
+    if detail.startswith( _TOO_LONG_DETAIL ):         return "too_long"
+    # v2 only: the model answered and the XML parsed, but the extraction could not be
+    # reconciled with the source text — neither "unavailable" nor "too long".
+    if detail.startswith( _EXTRACTION_FAILED_DETAIL ): return "unverified"
+    if dim[ "weight" ] is None:                       return "withheld"
     return None
 
 
@@ -208,10 +225,14 @@ def _cell_counts( runs, index ):
     Count real grades and each kind of non-answer for ONE cell on ONE dimension.
 
     Ensures:
-        - returns {"real": n, "unavailable": n, "too_long": n, "withheld": n}
-        - the four counts sum to len( runs )
+        - returns {"real": n} plus one key per NONANSWER_KINDS entry
+        - the counts sum to len( runs )
+
+    The key set is DERIVED from NONANSWER_KINDS, not written out again: a hand-copied
+    list here meant adding v2's "unverified" kind raised KeyError mid-run, after every
+    model call had been paid for. One vocabulary, one place.
     """
-    counts = { "real": 0, "unavailable": 0, "too_long": 0, "withheld": 0 }
+    counts = dict.fromkeys( ( "real", ) + NONANSWER_KINDS, 0 )
     for r in runs:
         kind = nonanswer_kind( r[ index ] )
         counts[ "real" if kind is None else kind ] += 1
@@ -319,11 +340,31 @@ def _nonanswer_summary( counts ):
     if counts[ "unavailable" ]: parts.append( f"u={counts[ 'unavailable' ]}" )
     if counts[ "too_long"    ]: parts.append( f"t={counts[ 'too_long'    ]}" )
     if counts[ "withheld"    ]: parts.append( f"w={counts[ 'withheld'    ]}" )
+    if counts[ "unverified"  ]: parts.append( f"x={counts[ 'unverified'  ]}" )
     return " ".join( parts )
 
 
 def main():
-    runs = int( sys.argv[ 1 ] ) if len( sys.argv ) > 1 else 3
+    # Usage: dm_judge_discrimination_probe.py [runs] [--version {1,2}]
+    # The 2x2 bodies, the per-cell guard and the non-answer classifier are IDENTICAL
+    # across versions on purpose — the measurement must not move when the thing being
+    # measured does, or the two tables cannot be compared.
+    argv    = [ a for a in sys.argv[ 1: ] ]
+    version = 1
+    if "--version" in argv:
+        i       = argv.index( "--version" )
+        version = int( argv[ i + 1 ] )
+        del argv[ i : i + 2 ]
+    # --model swaps the CHECKPOINT while holding the prompts, the path and the bodies,
+    # so a difference in the table is attributable to the model. The spec key must name
+    # what the server is ACTUALLY serving — the model name rides in the request body and
+    # vLLM validates it.
+    spec_key = None
+    if "--model" in argv:
+        i        = argv.index( "--model" )
+        spec_key = argv[ i + 1 ]
+        del argv[ i : i + 2 ]
+    runs = int( argv[ 0 ] ) if argv else 3
 
     for name, body in BODIES:
         wc = len( body.split() )
@@ -340,7 +381,12 @@ def main():
     print( "  Production ships qualitative OFF (row ca7a2cbf); this measures the" )
     print( "  qualitative half in isolation, NOT live DM-grading behavior." )
 
-    judge = DmQualityJudge( debug=False, verbose=False, qualitative_enabled=True )
+    print( f"  judge version: v{version}" )
+    print( f"  model spec: {spec_key or 'default for this version'}" )
+
+    kwargs = { "llm_spec_key": spec_key } if spec_key else { }
+    judge  = get_dm_quality_judge( version=version, debug=False, verbose=False,
+                                   qualitative_enabled=True, **kwargs )
     if not judge.available:
         print( "✗ judge LLM unavailable — probe cannot run" )
         return 2
@@ -388,7 +434,7 @@ def main():
     )
     if total_nonanswers:
         print( f"\n🔴 NON-ANSWERS PRESENT: {total_nonanswers} dimension-result(s) were NOT real grades." )
-        print( "   (u=judge unavailable/parse-fail, t=too long, w=withheld/feature-off)" )
+        print( "   (u=judge unavailable/parse-fail, t=too long, w=withheld/feature-off, x=extraction unverified [v2])" )
         for name, _ in BODIES:
             for dim_name in ( "Directness", "Tone" ):
                 counts = report[ "cell_stats" ][ name ][ dim_name ]

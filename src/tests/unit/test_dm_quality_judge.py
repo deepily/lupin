@@ -314,8 +314,8 @@ class TestDmQualityJudge:
     def test_unavailable_client_returns_meh_qualitative_never_raises( self ):
         judge, client = _make_judge( available=False )
         result = judge.judge( "short body" )
-        assert result[ "directness" ][ "weight" ] == 0
-        assert result[ "tone" ][ "weight" ] == 0
+        assert result[ "directness" ][ "weight" ] is None
+        assert result[ "tone" ][ "weight" ] is None
         assert result[ "directness" ][ "detail" ] == _JUDGE_UNAVAILABLE_DETAIL
         client.run.assert_not_called()
 
@@ -340,7 +340,7 @@ class TestDmQualityJudge:
         judge, client = _make_judge( run_behaviour=RuntimeError( "always down" ) )
         result = judge.judge( "body" )
         assert client.run.call_count == 3
-        assert result[ "directness" ][ "weight" ] == 0
+        assert result[ "directness" ][ "weight" ] is None
         assert result[ "tone" ][ "detail" ] == _JUDGE_UNAVAILABLE_DETAIL
         # length + overall still computed
         assert "overall" in result
@@ -350,7 +350,7 @@ class TestDmQualityJudge:
         judge, client = _make_judge( run_behaviour="<garbage>no closing" )
         result = judge.judge( "body" )
         assert client.run.call_count == 3      # retried, then fell back
-        assert result[ "directness" ][ "weight" ] == 0
+        assert result[ "directness" ][ "weight" ] is None
 
 
 class TestDmQualityJudgeConstruction:
@@ -554,7 +554,7 @@ class TestCapturedMistralFixtures:
         judge, _client = _make_judge( run_behaviour="totally not xml, no tags at all" )
         with patch( "cosa.agents.dm_quality_judge.judge.time.sleep", return_value=None ):
             result = judge.judge( "short body" )
-        assert result[ "directness" ][ "weight" ] == 0
+        assert result[ "directness" ][ "weight" ] is None
         assert result[ "directness" ][ "detail" ] == _JUDGE_UNAVAILABLE_DETAIL
 
 
@@ -600,8 +600,8 @@ class TestQualitativeWordCeiling:
         long_body = " ".join( [ "word" ] * 300 )                        # 300 words → past the ceiling AND length 😞/−2
         result = judge.judge( long_body )
         client.run.assert_not_called()                                  # LLM never invoked
-        assert result[ "directness" ][ "weight" ] == 0
-        assert result[ "tone" ][ "weight" ]       == 0
+        assert result[ "directness" ][ "weight" ] is None
+        assert result[ "tone" ][ "weight" ]       is None
         assert "too long" in result[ "directness" ][ "detail" ]
         assert result[ "length" ][ "weight" ]     == -2                 # verbosity still penalized
 
@@ -736,7 +736,7 @@ class TestLiveMistralRegression:
             cu.get_project_root() + "/src/rnd/v0.1.9/2026.07.31-dm-verbosity-reduction/dm-maria-raw.txt"
         )
         result = DmQualityJudge( qualitative_enabled=True ).judge( maria )
-        assert result[ "directness" ][ "weight" ] == 0
+        assert result[ "directness" ][ "weight" ] is None
         assert "too long" in result[ "directness" ][ "detail" ]
         assert result[ "length" ][ "weight" ] == -2
 

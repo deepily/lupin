@@ -10,7 +10,13 @@ DM Quality Judge — hybrid grader for a peer-DM body.
 Modeled on cosa/agents/notification_proxy/verification.py (LlmAnswerVerifier):
 same LlmClientFactory client, same PromptTemplateProcessor, same 3-attempt/backoff
 retry, same graceful-degradation contract (a failure NEVER raises to the caller —
-it returns a safe all-🤷/0 result and the DM still sends).
+it returns a NAMED non-answer, weight None with its own emoji, and the DM still sends).
+
+🔴 A NON-ANSWER IS NOT A GRADE, on either axis (Rick, 2026-08-01). Every dimension the
+judge did not actually grade carries weight None — never 0, which is `meh` and averages
+into Overall — and its own emoji from NONANSWER_EMOJI, never 🤷, which is `meh`'s face.
+Overall falls back to Length alone the moment EITHER qualitative dimension is a
+non-answer.
 
 References:
     - src/cosa/agents/dm_quality_judge/xml_models.py (DmQualityJudgeResponse, GRADE_TABLE)
@@ -24,7 +30,7 @@ import time
 
 import cosa.utils.util as cu
 from cosa.agents.llm_client_factory import LlmClientFactory
-from cosa.agents.dm_quality_judge.xml_models import DmQualityJudgeResponse, WEIGHT_TO_EMOJI
+from cosa.agents.dm_quality_judge.xml_models import DmQualityJudgeResponse, WEIGHT_TO_EMOJI, NONANSWER_EMOJI
 from cosa.agents.io_models.utils.prompt_template_processor import PromptTemplateProcessor
 
 
@@ -102,7 +108,21 @@ _KNOWN_FIELDS = ( "directness", "directness-note", "tone", "tone-note" )
 _CANONICAL_BY_KEY = { re.sub( r"[\s_-]+", "_", f ): f for f in _KNOWN_FIELDS }
 
 
-def _extract_unclosed_fields( span ):
+def _canonical_by_key( known_fields ):
+    """
+    Build the separator-agnostic lookup for one field set.
+
+    Requires:
+        - known_fields is a sequence of canonical tag names
+
+    Ensures:
+        - returns { collapsed_key: canonical_name }, where the key lowercases the name
+          and collapses any run of whitespace/underscore/dash to one underscore
+    """
+    return { re.sub( r"[\s_-]+", "_", f ): f for f in known_fields }
+
+
+def _extract_unclosed_fields( span, known_fields=_KNOWN_FIELDS ):
     """
     Recover field values from a <response>...</response> span whose child tags
     were opened but never closed (bug d9c3e1a2's failure-2 shape: <directness>,
@@ -126,6 +146,15 @@ def _extract_unclosed_fields( span ):
           "<directness>good</directness><tone>..." round-trips unchanged, since
           the close tag immediately precedes the next open tag and gets
           stripped the same way
+
+    ⚠️ known_fields IS A PARAMETER, and it has to be (found live 2026-08-01 while
+       wiring v2). This function REBUILDS the span from the known fields it finds,
+       so any tag NOT in that tuple is DELETED. v2's tone response is
+       <tone-evidence> + <tone>: called with v1's tuple it matched <tone> only,
+       silently dropped the evidence, and the judge reported a graded tone with a
+       blank justification. Nothing raised — the XML was well-formed both before
+       and after, so only reading the emitted detail caught it. A repair layer that
+       edits toward a hardcoded schema is a data-loss bug for every other schema.
     """
     inner = span
     if inner.startswith( "<response>" ):
@@ -134,7 +163,7 @@ def _extract_unclosed_fields( span ):
         inner = inner[ : -len( "</response>" ) ]
 
     positions = []
-    for field in _KNOWN_FIELDS:
+    for field in known_fields:
         m = re.search( rf"<{field}>", inner )
         if m is not None:
             positions.append( ( m.start(), m.end(), field ) )
@@ -180,7 +209,7 @@ def _is_garbage_output( text ):
     return False
 
 
-def _repair_llm_xml( raw ):
+def _repair_llm_xml( raw, known_fields=_KNOWN_FIELDS ):
     """
     Repair the malformed XML the live Mistral judge emits into parseable XML.
 
@@ -206,7 +235,15 @@ def _repair_llm_xml( raw ):
         - truly unrecoverable output (no known child tags) is returned as-is so
           from_xml() raises and the judge degrades to 🤷/0
         - returns the repaired string stripped; never raises
+
+    Args:
+        raw: the model's verbatim output
+        known_fields: the canonical child tags of the schema being parsed. Defaults
+            to v1's four, so every existing caller is unchanged. v2 passes its own —
+            see the warning on _extract_unclosed_fields for why a hardcoded set
+            silently deletes another schema's fields.
     """
+    canonical_by_key = _canonical_by_key( known_fields )
     # Drop a (possibly unclosed) XML declaration — up to the next '<' only, so an
     # unclosed `<?xml ... ?` cannot greedily consume the opening <response> tag.
     raw = re.sub( r"<\?xml[^<]*", "", raw )
@@ -217,7 +254,7 @@ def _repair_llm_xml( raw ):
         # lowercase), then map a KNOWN field onto its canonical (dash-cased) tag.
         # An unknown tag (e.g. <response>) keeps its collapsed form unchanged.
         key   = re.sub( r"[\s_-]+", "_", m.group( 2 ).strip().lower() )
-        name  = _CANONICAL_BY_KEY.get( key, key )
+        name  = canonical_by_key.get( key, key )
         return f"<{slash}{name}>"
 
     raw = _TAG_RE.sub( _fix_tag, raw )
@@ -230,18 +267,19 @@ def _repair_llm_xml( raw ):
         # were opened but never closed, recover them field-by-field rather than
         # returning the span as-is for expat to hard-fail on (bug d9c3e1a2).
         span      = raw[ start : end + len( "</response>" ) ].strip()
-        recovered = _extract_unclosed_fields( span )
+        recovered = _extract_unclosed_fields( span, known_fields )
         return recovered if recovered is not None else span
 
     # MISSING/implicit root (bug 46690a76): strip any stray wrapper fragments and
     # rebuild ONE root around the known child-tag span (first known open tag →
     # last known close tag). Excludes any leading prose / orphan </response>.
     raw = raw.replace( "<response>", "" ).replace( "</response>", "" )
-    first = re.search( r"<(?:directness|directness_note|tone|tone_note)>", raw )
+    first = re.search( "|".join( re.escape( f"<{f}>" ) for f in known_fields ), raw )
     if first is not None:
         last_end = -1
-        for close in ( "</tone_note>", "</tone>", "</directness_note>", "</directness>" ):
-            idx = raw.rfind( close )
+        for field in known_fields:
+            close = f"</{field}>"
+            idx   = raw.rfind( close )
             if idx != -1:
                 last_end = max( last_end, idx + len( close ) )
         if last_end != -1:
@@ -328,11 +366,21 @@ def combine_overall( length_weight, directness_weight, tone_weight, length_detai
           qualitative=2 → round_half_up(0.5*−2 + 0.5*2)=round_half_up(0)=0 → 🤷
     """
     # LENGTH-ONLY MODE (Rick, 2026-08-01: "stick with length for now — that's quantitative
-    # and we can calculate a grade very easily"). When the qualitative half is switched off
-    # its two dimensions carry NO judgement, so blending them in would let two withheld
-    # values drag Overall toward 0 and publish that as a considered score — the exact defect
-    # this package spent the day on. Overall IS the Length grade, and its note says so.
-    if directness_weight is None and tone_weight is None:
+    # and we can calculate a grade very easily"). When the qualitative half carries NO
+    # judgement, blending it in would let non-answers drag Overall toward 0 and publish
+    # that as a considered score — the exact defect this package spent the day on.
+    # Overall IS the Length grade, and its note says so.
+    #
+    # 🔴 EITHER, NOT BOTH (found 2026-08-01 by running Maria's 527-word DM through it).
+    # This used to require BOTH weights to be None, which quietly covered only the
+    # feature-off case. Every OTHER silence — over-length, judge unavailable, an
+    # extraction that failed its check — returned weight 0, and 0 is `meh`, a real grade
+    # on this scale. Measured on the worst DM we have: Length said 😞 −2, both
+    # qualitative dimensions said "not judged: too long", and Overall came out 👎 −1,
+    # SOFTER than Length alone, over a note reading "directness/tone were stronger."
+    # They were not stronger. They were never graded. One un-graded dimension is enough
+    # to make the average meaningless, so either one triggers Length-only.
+    if directness_weight is None or tone_weight is None:
         overall_weight = max( -2, min( 2, int( length_weight ) ) )
         return { "emoji"  : WEIGHT_TO_EMOJI[ overall_weight ],
                  "weight" : overall_weight,
@@ -353,8 +401,16 @@ def combine_overall( length_weight, directness_weight, tone_weight, length_detai
 
 
 def _fallback_dimension():
-    """A safe neutral dimension result (meh/0) — used when the judge is unavailable."""
-    return { "emoji": "🤷", "weight": 0, "detail": _JUDGE_UNAVAILABLE_DETAIL }
+    """
+    The dimension result when the judge could not produce one at all.
+
+    Ensures:
+        - weight is None, NOT 0. 0 is `meh` — a real grade on this scale — and a judge
+          that never ran has not said `meh` about anything. The emoji stays 🤷 because
+          that is what "no opinion" has always looked like here, but the WEIGHT has to
+          be un-averageable or combine_overall will blend a silence into a score.
+    """
+    return { "emoji": NONANSWER_EMOJI[ "unavailable" ], "weight": None, "detail": _JUDGE_UNAVAILABLE_DETAIL }
 
 
 def _withheld_dimension():
@@ -371,13 +427,13 @@ def _withheld_dimension():
           OVER-LENGTH body already return, and "we chose not to grade this" is a third
           thing that must not wear either of their faces
     """
-    return { "emoji": "🚫", "weight": None, "detail": _QUALITATIVE_OFF_DETAIL }
+    return { "emoji": NONANSWER_EMOJI[ "withheld" ], "weight": None, "detail": _QUALITATIVE_OFF_DETAIL }
 
 
 def _too_long_dimension( word_count ):
     """A neutral dimension result (🤷/0) for a body past QUALITATIVE_WORD_LIMIT — the
     honest 'not graded at this length' signal, distinct from the judge-unavailable one."""
-    return { "emoji": "🤷", "weight": 0, "detail": f"{_TOO_LONG_DETAIL} ({word_count} words > {QUALITATIVE_WORD_LIMIT})" }
+    return { "emoji": NONANSWER_EMOJI[ "too_long" ], "weight": None, "detail": f"{_TOO_LONG_DETAIL} ({word_count} words > {QUALITATIVE_WORD_LIMIT})" }
 
 
 def _get_qualitative_enabled():
