@@ -44,7 +44,6 @@ Directness and Tone. Do NOT judge length — that is scored separately.
 ### Response Format:
 
 Reply with ONLY the XML block below and nothing else. Rules:
-- Do NOT emit an `<?xml ...?>` declaration.
 - No spaces inside the angle brackets: write `<directness>`, never `< directness >`.
 - Tag names are lowercase with underscores: `<directness_note>`, never `<directness note>`.
 - Each grade is EXACTLY one of the five labels, spelled exactly: terrible, needs_improvement, meh, good, exemplary.

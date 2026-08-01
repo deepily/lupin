@@ -84,6 +84,88 @@ _TOO_LONG_DETAIL            = "not judged: DM too long for reliable qualitative 
 # note >`). Group 1 = optional slash, group 2 = the raw (possibly spaced) tag name.
 _TAG_RE = re.compile( r"<\s*(/?)\s*([A-Za-z][A-Za-z0-9_ ]*?)\s*>" )
 
+# The 4 known child fields, in prompt/schema order — used by both the
+# unclosed-tag fallback below and to detect "well-formed enough" spans.
+_KNOWN_FIELDS = ( "directness", "directness_note", "tone", "tone_note" )
+
+
+def _extract_unclosed_fields( span ):
+    """
+    Recover field values from a <response>...</response> span whose child tags
+    were opened but never closed (bug d9c3e1a2's failure-2 shape: <directness>,
+    <directness_note>, <tone>, <tone_note> all open, none closed — but the
+    <response>/</response> wrapper IS present, so the caller's fast path would
+    otherwise return the span unmodified and expat would hard-fail on the
+    unclosed children).
+
+    Requires:
+        - span is the extracted "<response>...</response>" string, tags already
+          passed through _fix_tag (spacing/underscores normalized)
+
+    Ensures:
+        - returns None if none of the 4 known open tags are found (nothing to
+          recover — caller falls back to returning the span unmodified)
+        - otherwise returns a well-formed "<response>...</response>" string:
+          each found field's text runs from just after its open tag to the next
+          known tag (open or close) or the end of the span, with any matching
+          close tag for that field stripped from the tail
+        - idempotent on ALREADY-well-formed input: a properly closed
+          "<directness>good</directness><tone>..." round-trips unchanged, since
+          the close tag immediately precedes the next open tag and gets
+          stripped the same way
+    """
+    inner = span
+    if inner.startswith( "<response>" ):
+        inner = inner[ len( "<response>" ) : ]
+    if inner.endswith( "</response>" ):
+        inner = inner[ : -len( "</response>" ) ]
+
+    positions = []
+    for field in _KNOWN_FIELDS:
+        m = re.search( rf"<{field}>", inner )
+        if m is not None:
+            positions.append( ( m.start(), m.end(), field ) )
+    if not positions:
+        return None
+
+    positions.sort()
+    parts = []
+    for i, ( _start, end, field ) in enumerate( positions ):
+        next_start = positions[ i + 1 ][ 0 ] if i + 1 < len( positions ) else len( inner )
+        text = inner[ end : next_start ]
+        text = re.sub( rf"</{field}>\s*$", "", text ).strip()
+        parts.append( f"<{field}>{text}</{field}>" )
+
+    return f"<response>{''.join( parts )}</response>"
+
+
+def _is_garbage_output( text ):
+    """
+    Cheap pre-check for LLM output not worth running through the XML repair
+    pipeline at all (bug d9c3e1a2's failure-1: a response of 10^100+ repeated
+    "0" characters — previously burned a full repair+parse+expat-exception
+    cycle before the retry backoff, for output that was never going to parse).
+
+    Deliberately does NOT flag "no '<' present" as garbage — the curly-brace
+    degenerate mode ("{ directness_meh } { tone _ good }", bug 2201516e) has no
+    angle brackets either and IS recoverable; that check would have discarded
+    a real, already-handled signal.
+
+    Requires:
+        - text is a string (the model's verbatim response)
+
+    Ensures:
+        - returns True only if text is >=95% one repeated character (checked
+          only at length >=20, so short real answers can't false-positive)
+        - returns False otherwise — NEVER a false positive on real XML or on
+          the curly-brace degenerate mode
+    """
+    if len( text ) >= 20:
+        most_common_count = max( text.count( ch ) for ch in set( text ) )
+        if most_common_count / len( text ) >= 0.95:
+            return True
+    return False
+
 
 def _repair_llm_xml( raw ):
     """
@@ -127,8 +209,12 @@ def _repair_llm_xml( raw ):
     end   = raw.find( "</response>" )
     if start != -1 and end != -1:
         # Well-formed-enough: keep only the <response>...</response> span (drops a
-        # trailing </stop> sentinel or any post-root chatter).
-        return raw[ start : end + len( "</response>" ) ].strip()
+        # trailing </stop> sentinel or any post-root chatter). If its child tags
+        # were opened but never closed, recover them field-by-field rather than
+        # returning the span as-is for expat to hard-fail on (bug d9c3e1a2).
+        span      = raw[ start : end + len( "</response>" ) ].strip()
+        recovered = _extract_unclosed_fields( span )
+        return recovered if recovered is not None else span
 
     # MISSING/implicit root (bug 46690a76): strip any stray wrapper fragments and
     # rebuild ONE root around the known child-tag span (first known open tag →
@@ -381,6 +467,12 @@ class DmQualityJudge:
                 effective_prompt = prompt if attempt == 1 else _RETRY_NUDGE + prompt
                 response_text = self._client.run( effective_prompt )
                 if self.debug: print( f"[DmQualityJudge] Raw response (attempt {attempt}): {response_text[ :200 ]}" )
+
+                # Cheap garbage guard (bug d9c3e1a2, failure-1): skip straight past
+                # the repair/parse pipeline for output that was never going to
+                # parse (no XML tags at all, or a degenerate repeated-character run).
+                if _is_garbage_output( response_text ):
+                    raise ValueError( "garbage output: no XML tags or degenerate repeated-character response" )
 
                 # Repair the live model's sloppy XML (spaced/multi-word tags,
                 # unclosed prolog) before parsing — bug a5f7b36d.

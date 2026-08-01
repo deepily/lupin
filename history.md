@@ -21,6 +21,15 @@
 #### Checkpoint | 2026.07.31 15:49 | Mistral Small 24B config cutover
 
 **Files**: src/conf/lupin-app.ini, src/conf/lupin-app-splainer.ini, src/rnd/README.md (+2 new R&D docs)
+**Commit**: `5499fdbf`
+
+6. **DM Quality Judge live A/B run + 3-bug fix.** Flipped `dm quality judgment enabled` on for a live treatment window; Maria (peer session) diagnosed 3 real judge bugs from the run (self-contradicting XML-declaration instruction, no fallback for unclosed child tags, no garbage-output pre-check) and handed them off. Fixed all 3, verified against the unit suite (95/96 pass — the 1 fail is the toggle-state test, expected since the toggle is standing ON per Rick's instruction).
+7. **Caught and reverted a regression from Maria's own suggested fix.** Her proposed BUG-1 fix (strip the `<?xml?>` declaration in the shared `prompt_template_processor.py`) demonstrably broke live good-vs-bad discrimination — verified 3/3 reproducible via `git stash` isolation. Root-caused and fixed differently: deleted just the contradicting instruction line from `dm-quality-judge.txt` instead, leaving the injected example's declaration untouched (the parser already strips it regardless). Discrimination test passes 2/2 post-fix.
+8. **BUG 3's guard was also over-broad as suggested** — a "no `<` present" check would have broken the pre-existing curly-brace degenerate-mode recovery (`{ directness_meh } { tone _ good }` has no angle brackets and IS legitimately recoverable). Narrowed to the repeated-single-character signature only.
+
+#### Checkpoint | 2026.08.01 02:15 | DM Quality Judge 3-bug fix (Maria's diagnosis)
+
+**Files**: src/cosa/agents/dm_quality_judge/judge.py, src/conf/prompts/dm-quality-judge.txt, src/conf/lupin-app.ini
 **Commit**: [pending]
 
 ### 2026.07.28 - Session 951a4459 (Mr. Radio 🦉) | One key file, two authorities — a 38-hour outage closed, and dev was the only host where the defect was invisible

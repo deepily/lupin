@@ -1,6 +1,14 @@
 # TODO
 
-Last updated: 2026-07-27 afternoon (Clayton 😎 `34474b66` — six-worker crew day: five rulings logged below, incl. two requirements corrected by measurement; `7ee5b646` still open for Rick, and `5bf28e07` timed out to default with no ruling)
+Last updated: 2026-08-01 (Mr. Radio 🦉 `7846bfcb` — DM Quality Judge live A/B + 3-bug fix)
+
+---
+
+## 📋 DECISIONS LOG 2026-07-31/08-01 (Mr. Radio 🦉 `7846bfcb`) — DM Quality Judge toggle standing ON
+
+**2026-08-01 — Rick: `dm quality judgment enabled` is standing ON, not the usual one-DM-then-revert.** Verbatim: "flip the toggle to true I want the judge to grade DMs. And let's leave it there until I say otherwise." Do NOT assume it's back to the ini-default `False` in a future session — check `src/conf/lupin-app.ini` directly. Live audit (`/api/dm/quality-audit`) was at count=8 when this session ended.
+
+**2026-08-01 — 3 bugs fixed in `DmQualityJudge`, one caught mid-fix.** Maria diagnosed a prompt self-contradiction, a missing unclosed-tag fallback, and a missing garbage-output guard. Her suggested fix for bug 1 regressed live discrimination (verified 3/3); fixed differently (deleted the contradicting prompt line, left the injected example unchanged) and confirmed the regression is gone. See history.md 2026.08.01 checkpoint for the full account.
 
 ---
 
