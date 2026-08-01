@@ -501,28 +501,44 @@ def _managed_bounce_all_clear_blocking( boot_id, boot_started, startup_began ):
     recipients = ( result or {} ).get( "recipients" )
     curve      = "→".join( str( c ) for c in gate[ "curve" ] )
 
+    # Accepted delivery LOSS (Rick's ruling: no re-fire). NAME who had not rejoined
+    # so the loss is legible, not a bare count: roster (bridge files = who we EXPECT
+    # back — they survive the bounce) minus live sockets. A missed session gets
+    # NOTHING: no push, and NO durable entry either (perform_fanout writes entries
+    # only for the fire-time snapshot).
+    #
+    # COMPUTED FOR BOTH FIRE REASONS, not just deadline expiry (bug 784d4a2e). A
+    # PLATEAU fire can miss just as many people: measured 2026-08-01 boot #2, the
+    # gate saw curve 0→1→1, called it settled at 1.0s, and fired to 4 recipients of
+    # whom ZERO acked — and because naming lived in the deadline branch alone, the
+    # log line read "reconnect plateau after 1.0s ... reached 4 recipient(s)" and was
+    # indistinguishable from success. An accepted loss that stops being visible is
+    # just a loss.
+    roster  = [ sid for ( _path, sid, _persona ) in find_active_voice_persona_sessions() ]
+    present = list( websocket_manager.active_connections.keys() )
+    missed  = missed_sessions( roster, present )
+    loss    = (
+        f" {len( missed )} session(s) had NOT rejoined and got NO all-clear "
+        f"(accepted loss, no re-fire): {missed}."
+        if missed else " every session on the roster had a live socket."
+    )
+
     # Fire-time receipt + reconnect curve — the instruments that tell us later
     # whether the guessed window was right and how the fleet came back.
     if gate[ "reason" ] == "deadline":
-        # Accepted delivery LOSS (Rick's ruling: no re-fire). NAME who never
-        # rejoined so the loss is legible, not a bare count: roster (bridge files =
-        # who we EXPECT back — they survive the bounce) minus live sockets. A
-        # missed straggler gets NOTHING: no push, and NO durable entry either
-        # (perform_fanout writes entries only for the fire-time snapshot).
-        roster  = [ sid for ( _path, sid, _persona ) in find_active_voice_persona_sessions() ]
-        present = list( websocket_manager.active_connections.keys() )
-        missed  = missed_sessions( roster, present )
         print(
             f"[managed-bounce] ⚠️ all-clear FIRED on DEADLINE EXPIRY (boot #{boot_id}): reached "
-            f"{recipients} recipient(s) after {gate[ 'elapsed' ]:.1f}s; reconnect curve {curve}. "
-            f"{len( missed )} session(s) NEVER rejoined and got NO all-clear (accepted loss, no re-fire): "
-            f"{missed}.",
+            f"{recipients} recipient(s) after {gate[ 'elapsed' ]:.1f}s; reconnect curve {curve}."
+            f"{loss}",
             file=sys.stderr,
         )
     else:
+        # A plateau fire is NOT self-evidently a success — say so when it missed people.
+        flag = "" if not missed else "⚠️ "
         print(
-            f"[managed-bounce] all-clear FIRED (boot #{boot_id}): reconnect plateau after "
-            f"{gate[ 'elapsed' ]:.1f}s; reconnect curve {curve}; reached {recipients} recipient(s).",
+            f"[managed-bounce] {flag}all-clear FIRED (boot #{boot_id}): reconnect plateau after "
+            f"{gate[ 'elapsed' ]:.1f}s; reconnect curve {curve}; reached {recipients} recipient(s)."
+            f"{loss}",
             file=sys.stderr,
         )
 

@@ -27,6 +27,7 @@ every assertion below.
 
 import unittest
 
+import cosa.utils.util as cu
 from cosa.rest.managed_bounce_broadcast import missed_sessions
 from cosa.rest.routers.commons import perform_fanout
 
@@ -138,6 +139,81 @@ class LateReconnectLossTests( unittest.TestCase ):
         self.assertNotIn( "sess-late", first_store.targets() )
         # A genuinely new fanout is a different broadcast, not a repair of the old one.
         self.assertIn( "sess-late", second_store.targets() )
+
+
+class LossIsNamedOnEveryFireReasonTests( unittest.TestCase ):
+    """
+    Bug 784d4a2e: the naming lived in the DEADLINE branch alone, so a PLATEAU fire
+    that missed people logged a line indistinguishable from success.
+
+    Measured 2026-08-01 boot #2 — the gate saw curve 0→1→1, called it settled at
+    1.0s, fired to 4 recipients of whom ZERO acked, and reported only "reconnect
+    plateau after 1.0s ... reached 4 recipient(s)". Nobody was named because a
+    plateau fire never reached the naming code.
+
+    `main.py` is outside `[tool.coverage.run] source = ["cosa"]`, so a source
+    invariant is how this gets a gate at all — the same shape as the server-label
+    seam test, and for the same reason.
+    """
+
+    def _all_clear_fn( self ):
+        import ast
+
+        from pathlib import Path
+
+        source = ( Path( cu.get_project_root() ) / "src/lupin_app/main.py" ).read_text( encoding="utf-8" )
+        for node in ast.walk( ast.parse( source ) ):
+            if isinstance( node, ast.FunctionDef ) and node.name == "_managed_bounce_all_clear_blocking":
+                return node
+
+        self.fail( "_managed_bounce_all_clear_blocking not found in main.py — move this gate with it" )
+
+    def test_the_missed_computation_is_not_nested_in_the_deadline_branch( self ):
+        import ast
+
+        fn = self._all_clear_fn()
+
+        # Every `if` inside the function whose body reaches missed_sessions would
+        # make the naming conditional. The call must sit at the function's own
+        # statement level so BOTH fire reasons pass through it.
+        conditional = [
+            node.lineno
+            for node in ast.walk( fn )
+            if isinstance( node, ast.If )
+            for inner in ast.walk( node )
+            if isinstance( inner, ast.Call )
+            and getattr( inner.func, "id", None ) == "missed_sessions"
+        ]
+
+        self.assertEqual(
+            conditional, [ ],
+            "missed_sessions() is inside a conditional in _managed_bounce_all_clear_blocking — "
+            "a fire reason that skips it reports a delivery loss as a success (bug 784d4a2e)"
+        )
+
+    def test_the_scanner_would_catch_the_original_nesting( self ):
+        """The control: the code as it was BEFORE the fix must be reported."""
+        import ast
+
+        before = ast.parse(
+            "def _managed_bounce_all_clear_blocking():\n"
+            "    if gate[ 'reason' ] == 'deadline':\n"
+            "        missed = missed_sessions( roster, present )\n"
+            "        print( missed )\n"
+            "    else:\n"
+            "        print( 'fired' )\n"
+        ).body[ 0 ]
+
+        conditional = [
+            node.lineno
+            for node in ast.walk( before )
+            if isinstance( node, ast.If )
+            for inner in ast.walk( node )
+            if isinstance( inner, ast.Call )
+            and getattr( inner.func, "id", None ) == "missed_sessions"
+        ]
+
+        self.assertNotEqual( conditional, [ ], "the scanner must fire on the pre-fix shape" )
 
 
 if __name__ == "__main__":
