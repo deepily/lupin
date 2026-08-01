@@ -29,7 +29,7 @@ from cosa.agents.io_models.utils.util_xml_pydantic import BaseXMLModel
 # their emoji from this same table, keyed by weight (WEIGHT_TO_EMOJI below).
 GRADE_TABLE = {
     "terrible"          : ( -2, "😞" ),
-    "needs_improvement" : ( -1, "👎" ),
+    "bad"               : ( -1, "👎" ),
     "meh"               : (  0, "🤷" ),
     "good"              : (  1, "👍" ),
     "exemplary"         : (  2, "⭐" ),
@@ -128,10 +128,13 @@ class DmQualityJudgeResponse( BaseXMLModel ):
         - directness_weight()/tone_weight() map to ints; unknown labels → 0
     """
 
-    directness      : str = Field( default="meh", description="Directness grade label (terrible/needs_improvement/meh/good/exemplary)" )
-    directness_note : str = Field( default="",    description="One short sentence justifying the directness grade" )
-    tone            : str = Field( default="meh", description="Tone grade label (terrible/needs_improvement/meh/good/exemplary)" )
-    tone_note       : str = Field( default="",    description="One short sentence justifying the tone grade" )
+    # Tag names are DASH-cased via alias, matching this repo's convention
+    # (`line-number`, `one-line-of-code`, `rephrased-answer` in io_models/xml_models.py).
+    # The Python attribute stays snake_case; only the XML tag carries the dash.
+    directness      : str = Field( default="meh", description="Directness grade label (terrible/bad/meh/good/exemplary)" )
+    directness_note : str = Field( default="",    description="One short sentence justifying the directness grade", alias="directness-note" )
+    tone            : str = Field( default="meh", description="Tone grade label (terrible/bad/meh/good/exemplary)" )
+    tone_note       : str = Field( default="",    description="One short sentence justifying the tone grade", alias="tone-note" )
 
     @field_validator( "*", mode="before" )
     @classmethod
@@ -148,6 +151,29 @@ class DmQualityJudgeResponse( BaseXMLModel ):
         if v is None:
             return ""
         return v
+
+    def to_xml( self, root_tag="response", pretty=True ):
+        """
+        Serialize with DASH-cased tags, matching this repo's XML convention.
+
+        Requires:
+            - the model's dash aliases are declared on the note fields
+
+        Ensures:
+            - `<directness-note>` / `<tone-note>` in the output, never underscores
+            - every other field is unchanged
+
+        BaseXMLModel.to_xml() calls model_dump() WITHOUT by_alias, so a declared
+        alias is honoured on the way IN (parsing) and silently ignored on the way
+        OUT. Every other dash-cased model in this repo works around that by
+        hand-building a literal dict in its own to_xml() override; this does the
+        same job by asking Pydantic for the aliases it already knows about, so a
+        renamed field cannot drift from its tag.
+        """
+        import xmltodict
+        return xmltodict.unparse(
+            { root_tag: self.model_dump( by_alias=True, exclude_none=True ) }, pretty=pretty
+        )
 
     def directness_weight( self ):
         """Integer weight for the directness grade (unknown/blank → 0)."""
@@ -196,10 +222,10 @@ class DmQualityJudgeResponse( BaseXMLModel ):
         here.
         """
         return cls(
-            directness      = "Your directness grade",
-            directness_note = "Your one-sentence reason for the directness grade",
-            tone            = "Your tone grade",
-            tone_note       = "Your one-sentence reason for the tone grade",
+            directness        = "[CHOOSE ONE: {terrible|bad|meh|good|exemplary}]",
+            **{ "directness-note" : "YOUR COMMENTS ON DIRECTNESS HERE",
+                "tone"            : "[CHOOSE ONE: {terrible|bad|meh|good|exemplary}]",
+                "tone-note"       : "YOUR COMMENTS ON TONE HERE" }
         )
 
     @classmethod
