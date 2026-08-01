@@ -133,6 +133,41 @@ def create_app(
     return app
 
 
+def _announce_reload_blindness( containers, *, env_inspect_fn, assess_fn, reload_decider, notify_fn, log_fn ):
+    """
+    Startup pass: for each watched container, decide whether the crash-loop
+    detector is BLIND (uvicorn --reload armed) and ANNOUNCE it loudly if so.
+
+    A watcher that silently stops watching is this row's exact defect, so a
+    reload-armed container must produce a startup escalation, not a code comment.
+
+    Requires:
+        - assess_fn( container, env_inspect_fn, reload_decider=… ) →
+          ( "blind"|"ok"|"unknown", message_or_None )
+        - notify_fn( message ) is the health escalation sink (→ Rick)
+
+    Ensures:
+        - a "blind" verdict → notify_fn( message ) + a `reload_blind` log
+        - an "ok" verdict → a `reload_ok` log (no page)
+        - an "unknown" verdict (env inspect failed) → a `reload_state_unknown` log
+          (never a false all-clear, never a false alarm)
+        - a notify raise is swallowed + logged (startup must not die on it)
+        - never raises
+    """
+    for name in containers:
+        verdict, message = assess_fn( name, env_inspect_fn, reload_decider=reload_decider )
+        if verdict == "blind":
+            log_fn( "reload_blind", container=name )
+            try:
+                notify_fn( message )
+            except Exception as e:                           # startup must not die on a notify error
+                log_fn( "reload_blind_notify_error", container=name, error=str( e ) )
+        elif verdict == "unknown":
+            log_fn( "reload_state_unknown", container=name )
+        else:
+            log_fn( "reload_ok", container=name )
+
+
 def _make_health_notify_fn( gateway, live_notify_fn, log_fn ):
     """
     Build the health-watcher (Loop A) escalation notify_fn — Part-6 #1/#2/#3:
@@ -239,7 +274,11 @@ def assemble_app(
           :7999/:8000 HTTP and builds NO job until the runner starts (testable
           with a fake cfg + fake gateway)
     """
-    from lupin_arbiter_app.health_watcher import HealthWatcherLoop, docker_inspect_health
+    from lupin_arbiter_app.health_watcher import (
+        HealthWatcherLoop, docker_inspect_health, docker_inspect_restart_count,
+        docker_inspect_env, assess_reload_blindness,
+    )
+    from lupin_app.bootstrap_helpers import reload_enabled
     from lupin_arbiter_app.fleet_arbiter_loop import (
         FleetArbiterLoop, build_fleet_arbiter_job_factory, make_follow_through_watcher_factory,
         make_escalation_notify_fn,
@@ -436,17 +475,35 @@ def assemble_app(
         raw = cfg.get( key, default=default ) or default
         return [ c.strip() for c in raw.split( "," ) if c.strip() ]
 
+    watch_containers  = _csv( "arbiter health watch containers", "lupin-rest-dev,lupin-rest-test,lupin-model-server,lupin-postgres" )
+    inspect_timeout   = int( cfg.get( "arbiter health inspect timeout seconds", default=5, return_type="int" ) )
+    health_notify_fn  = _make_health_notify_fn( gateway, live_notify_fn, health_log_fn )   # Part-6 #1/2/3 → Rick
     health_loop = HealthWatcherLoop(
-        containers            = _csv( "arbiter health watch containers", "lupin-rest-dev,lupin-rest-test,lupin-model-server,lupin-postgres" ),
-        inspect_fn            = lambda name: docker_inspect_health( name, int( cfg.get( "arbiter health inspect timeout seconds", default=5, return_type="int" ) ) ),
-        notify_fn             = _make_health_notify_fn( gateway, live_notify_fn, health_log_fn ),   # Part-6 #1/2/3 → Rick
-        store                 = store,
-        log_fn                = health_log_fn,
-        interval_seconds      = int( cfg.get( "arbiter health watch interval seconds", default=30, return_type="int" ) ),
-        flap_window_seconds   = int( cfg.get( "arbiter health flap window seconds", default=600, return_type="int" ) ),
-        flap_threshold        = int( cfg.get( "arbiter health flap threshold transitions", default=3, return_type="int" ) ),
-        flap_exclude          = _csv( "arbiter health flap exclude containers", "lupin-rest-dev" ),
-        blind_threshold_polls = int( cfg.get( "arbiter health blind threshold polls", default=3, return_type="int" ) ),
+        containers             = watch_containers,
+        inspect_fn             = lambda name: docker_inspect_health( name, inspect_timeout ),
+        notify_fn              = health_notify_fn,
+        store                  = store,
+        log_fn                 = health_log_fn,
+        interval_seconds       = int( cfg.get( "arbiter health watch interval seconds", default=30, return_type="int" ) ),
+        flap_window_seconds    = int( cfg.get( "arbiter health flap window seconds", default=600, return_type="int" ) ),
+        flap_threshold         = int( cfg.get( "arbiter health flap threshold transitions", default=3, return_type="int" ) ),
+        flap_exclude           = _csv( "arbiter health flap exclude containers", "lupin-rest-dev" ),
+        blind_threshold_polls  = int( cfg.get( "arbiter health blind threshold polls", default=3, return_type="int" ) ),
+        restart_inspect_fn     = lambda name: docker_inspect_restart_count( name, inspect_timeout ),
+        restart_loop_threshold = int( cfg.get( "arbiter health restart loop threshold transitions", default=2, return_type="int" ) ),
+    )
+    # Reload-blindness announcement (LOUD, not a comment): RestartCount only detects
+    # a crash-loop while uvicorn --reload is OFF. If reload is armed on a watched
+    # container, a crashing worker is respawned WITHOUT the container exiting, so the
+    # crash-loop detector goes blind — announce it at startup so a silently-blind
+    # watcher never masquerades as a working one.
+    _announce_reload_blindness(
+        watch_containers,
+        env_inspect_fn = lambda name: docker_inspect_env( name, inspect_timeout ),
+        assess_fn      = assess_reload_blindness,
+        reload_decider = reload_enabled,
+        notify_fn      = health_notify_fn,
+        log_fn         = health_log_fn,
     )
     return create_app( snapshot_store=store, health_loop=health_loop, fleet_arbiter_loop=fleet_arbiter_loop,
                        context_pressure_loop=context_pressure_loop,

@@ -17,9 +17,13 @@ import pytest
 from lupin_arbiter_app.health_watcher import (
     ContainerHealthTracker,
     HealthWatcherLoop,
+    RestartLoopTracker,
     SystemClock,
     _default_log_fn,
     _parse_inspect_result,
+    _parse_restart_count,
+    _parse_env_value,
+    assess_reload_blindness,
 )
 from lupin_arbiter_app.local_snapshot_store import LocalSnapshotStore
 
@@ -338,3 +342,231 @@ def test_default_log_fn_emits_json_line( capsys ):
     assert parsed[ "container" ] == "c1"
     assert parsed[ "loop" ] == "health_watcher"
     assert parsed[ "service" ] == "lupin-arbiter-app"
+
+
+# ══ crash-loop detection (row bba1c988) ══════════════════════════════════════
+
+# ── RestartLoopTracker (pure, L1 logic controls) ────────────────────────────
+
+def test_restart_tracker_warmup_first_observation_is_baseline():
+    tr = RestartLoopTracker( 600, 2 )
+    assert tr.observe( 0, T0 ) == [ ]
+    assert tr.last_count == 0
+    assert tr.rises_in_window() == 0
+
+
+def test_restart_tracker_red_burst_fires_crash_loop():
+    """RED control: a policy restart burst 0→1→2→3 MUST fire crash_loop."""
+    tr    = RestartLoopTracker( 600, 2 )
+    fired = [ ]
+    for i, count in enumerate( [ 0, 1, 2, 3 ] ):
+        fired += tr.observe( count, _at( i * 30 ) )
+    assert "crash_loop" in fired
+    assert tr.rises_in_window() == 3
+
+
+def test_restart_tracker_green_sanctioned_double_bounce_is_silent():
+    """GREEN control: a sanctioned double-bounce keeps RestartCount flat at 0 → silent."""
+    tr    = RestartLoopTracker( 600, 2 )
+    fired = [ ]
+    for i, count in enumerate( [ 0, 0, 0, 0, 0, 0 ] ):
+        fired += tr.observe( count, _at( i * 30 ) )
+    assert fired == [ ]
+
+
+def test_restart_tracker_green_one_off_crash_recovers_is_silent():
+    """GREEN control: a single one-off crash 0→1 (delta 1 < threshold 2) → not a loop."""
+    tr    = RestartLoopTracker( 600, 2 )
+    fired = [ ]
+    for i, count in enumerate( [ 0, 1, 1, 1 ] ):
+        fired += tr.observe( count, _at( i * 30 ) )
+    assert fired == [ ]
+
+
+def test_restart_tracker_decrease_is_clean_reset_not_negative_rise():
+    """A recreate resets the count downward → clean slate; a fresh single crash must NOT re-fire."""
+    tr = RestartLoopTracker( 600, 2 )
+    for i, count in enumerate( [ 0, 1, 2 ] ):                # fires at 2
+        events = tr.observe( count, _at( i * 30 ) )
+    assert "crash_loop" in events
+    assert tr.observe( 0, _at( 120 ) ) == [ ]               # recreate reset → clean slate
+    assert tr.rises_in_window() == 0
+    assert tr._escalated is False
+    assert tr.observe( 1, _at( 150 ) ) == [ ]               # one fresh crash post-recreate → no loop
+    assert tr.rises_in_window() == 1
+
+
+def test_restart_tracker_rearms_after_window_clears():
+    tr = RestartLoopTracker( 100, 2 )
+    tr.observe( 0, _at( 0 ) )
+    tr.observe( 1, _at( 10 ) )
+    events = tr.observe( 2, _at( 20 ) )                     # fires
+    assert "crash_loop" in events
+    tr.observe( 2, _at( 30 ) )                              # unchanged count, prune-only
+    # advance past the window so the two rises prune away → re-arm
+    assert tr.observe( 2, _at( 300 ) ) == [ ]
+    assert tr.rises_in_window() == 0
+    assert tr._escalated is False
+    tr.observe( 3, _at( 330 ) )                             # one rise post-clear
+    assert tr.observe( 4, _at( 360 ) ) == [ "crash_loop" ]  # second rise → fires again
+
+
+# ── _parse_restart_count (all arms) ─────────────────────────────────────────
+
+def test_parse_restart_count_all_arms():
+    f = _parse_restart_count
+    assert f( 1, "3" ) is None                              # non-zero returncode
+    assert f( 0, "" ) is None                               # empty stdout
+    assert f( 0, None ) is None                             # None stdout → (stdout or "")
+    assert f( 0, "  7  " ) == 7                             # parseable int, trimmed
+    assert f( 0, "0" ) == 0                                 # zero is a valid count
+    assert f( 0, "not-a-number" ) is None                   # unparseable
+
+
+# ── _parse_env_value (all arms) ─────────────────────────────────────────────
+
+def test_parse_env_value_all_arms():
+    f = _parse_env_value
+    assert f( None, "LUPIN_RELOAD" ) is None                # None env list
+    assert f( [ ], "LUPIN_RELOAD" ) is None                 # empty env list
+    assert f( [ "PATH=/bin", "LUPIN_ENV=development" ], "LUPIN_RELOAD" ) is None   # absent key
+    assert f( [ "LUPIN_RELOAD=1" ], "LUPIN_RELOAD" ) == "1"
+    assert f( [ "LUPIN_RELOAD=" ], "LUPIN_RELOAD" ) == ""   # present but empty value
+    assert f( [ "LUPIN_RELOAD=0", "LUPIN_RELOAD=1" ], "LUPIN_RELOAD" ) == "1"      # last wins
+    assert f( [ 123, "LUPIN_RELOAD=1" ], "LUPIN_RELOAD" ) == "1"                   # non-str entry skipped
+
+
+# ── assess_reload_blindness (all arms) ──────────────────────────────────────
+
+def _decider( env_value, is_prod_or_test ):
+    """Mirror of bootstrap_helpers.reload_enabled for the tests (kept local + pure)."""
+    return ( env_value or "" ).strip().lower() in ( "1", "true", "yes" ) and not is_prod_or_test
+
+
+def test_assess_reload_blindness_unknown_when_env_none():
+    verdict, msg = assess_reload_blindness( "c", lambda n: None, reload_decider=_decider )
+    assert verdict == "unknown" and msg is None
+
+
+def test_assess_reload_blindness_unknown_when_env_inspect_raises():
+    def boom( n ):
+        raise RuntimeError( "docker gone" )
+    verdict, msg = assess_reload_blindness( "c", boom, reload_decider=_decider )
+    assert verdict == "unknown" and msg is None
+
+
+def test_assess_reload_blindness_blind_when_reload_armed_in_dev():
+    env = [ "LUPIN_ENV=development", "LUPIN_RELOAD=1" ]
+    verdict, msg = assess_reload_blindness( "lupin-rest-dev", lambda n: env, reload_decider=_decider )
+    assert verdict == "blind"
+    assert "BLIND" in msg and "lupin-rest-dev" in msg
+
+
+def test_assess_reload_blindness_ok_when_reload_off():
+    env = [ "LUPIN_ENV=development" ]                        # no LUPIN_RELOAD
+    verdict, msg = assess_reload_blindness( "c", lambda n: env, reload_decider=_decider )
+    assert verdict == "ok" and msg is None
+
+
+def test_assess_reload_blindness_ok_when_prod_or_test_even_if_reload_set():
+    env = [ "LUPIN_ENV=testing", "LUPIN_RELOAD=1" ]          # reload never arms in test
+    verdict, msg = assess_reload_blindness( "c", lambda n: env, reload_decider=_decider )
+    assert verdict == "ok" and msg is None
+
+
+# ── HealthWatcherLoop construction validation for the new threshold ──────────
+
+def test_loop_init_restart_threshold_validation_raises():
+    with pytest.raises( ValueError ):
+        HealthWatcherLoop( containers=[ "c" ], inspect_fn=lambda n: None,
+                           notify_fn=lambda m: None, restart_loop_threshold=0 )
+
+
+# ── poll_once crash-loop WIRING (L2 — proves the poll path calls the detector) ─
+
+def _restart_seq( mapping ):
+    """Build a restart_inspect_fn from {name: iterator}."""
+    return lambda n: next( mapping[ n ] )
+
+
+def test_poll_wires_restart_detector_and_pages():
+    """L2: a rising RestartCount fed through the REAL poll_once reaches notify_fn."""
+    rec  = Recorder()
+    seq  = { "c1": iter( [ 0, 1, 2, 3 ] ) }
+    loop = HealthWatcherLoop(
+        containers=[ "c1" ], inspect_fn=lambda n: { "Status": "healthy" },
+        notify_fn=rec.notify, clock=FakeClock(), log_fn=rec.log,
+        restart_inspect_fn=_restart_seq( seq ), restart_loop_threshold=2,
+    )
+    for _ in range( 4 ):
+        loop.poll_once()
+    assert any( "CRASH-LOOPING" in m for m in rec.notices )
+    assert any( ev == "restart_obs" for ev, _ in rec.logs )
+
+
+def test_poll_crash_loop_pages_even_when_health_says_nothing():
+    """Independence: fast crash never reaches a health status, yet crash_loop still pages."""
+    rec  = Recorder()
+    seq  = { "c1": iter( [ 0, 1, 2 ] ) }
+    loop = HealthWatcherLoop(
+        containers=[ "c1" ], inspect_fn=lambda n: { "Status": None },   # health-unknown → skipped
+        notify_fn=rec.notify, clock=FakeClock(), log_fn=rec.log,
+        restart_inspect_fn=_restart_seq( seq ), restart_loop_threshold=2,
+    )
+    for _ in range( 3 ):
+        loop.poll_once()
+    assert any( "CRASH-LOOPING" in m for m in rec.notices )
+
+
+def test_poll_restart_inspect_failure_is_skipped():
+    rec  = Recorder()
+    loop = HealthWatcherLoop(
+        containers=[ "c1" ], inspect_fn=lambda n: { "Status": "healthy" },
+        notify_fn=rec.notify, clock=FakeClock(), log_fn=rec.log,
+        restart_inspect_fn=lambda n: None,                  # inspect fails
+    )
+    loop.poll_once()
+    assert any( ev == "restart_inspect_failed" for ev, _ in rec.logs )
+    assert not any( "CRASH-LOOPING" in m for m in rec.notices )
+
+
+def test_poll_restart_inspect_raise_is_swallowed():
+    rec  = Recorder()
+    def boom( n ):
+        raise RuntimeError( "docker gone" )
+    loop = HealthWatcherLoop(
+        containers=[ "c1" ], inspect_fn=lambda n: { "Status": "healthy" },
+        notify_fn=rec.notify, clock=FakeClock(), log_fn=rec.log,
+        restart_inspect_fn=boom,
+    )
+    loop.poll_once()
+    assert any( ev == "restart_inspect_error" for ev, _ in rec.logs )
+
+
+def test_poll_no_restart_inspect_fn_is_noop():
+    """restart_inspect_fn omitted → crash-loop detection inactive, no restart logs."""
+    rec  = Recorder()
+    loop = _loop( lambda n: { "Status": "healthy" }, rec )
+    loop.poll_once()
+    assert not any( ev.startswith( "restart_" ) for ev, _ in rec.logs )
+
+
+def test_format_escalation_crash_loop_arm():
+    msg = HealthWatcherLoop._format_escalation( "crash_loop", "lupin-rest-dev", "5" )
+    assert "CRASH-LOOPING" in msg and "lupin-rest-dev" in msg and "count=5" in msg
+
+
+def test_write_state_includes_restart_watch_view():
+    from lupin_arbiter_app.local_snapshot_store import LocalSnapshotStore
+    rec   = Recorder()
+    store = LocalSnapshotStore()
+    seq   = { "c1": iter( [ 0, 1 ] ) }
+    loop  = HealthWatcherLoop(
+        containers=[ "c1" ], inspect_fn=lambda n: { "Status": "healthy" },
+        notify_fn=rec.notify, clock=FakeClock(), log_fn=rec.log, store=store,
+        restart_inspect_fn=_restart_seq( seq ), restart_loop_threshold=2,
+    )
+    loop.poll_once(); loop.poll_once()
+    section = store.get_section( "health_watcher" )
+    assert section[ "restart_watch" ][ "c1" ][ "restart_count" ] == 1
+    assert section[ "restart_watch" ][ "c1" ][ "rises_in_window" ] == 1

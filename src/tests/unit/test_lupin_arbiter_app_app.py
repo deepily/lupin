@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 from lupin_arbiter_app import __version__
 from lupin_arbiter_app.app import create_app, assemble_app, _utcnow, _make_health_notify_fn, \
-                                 _build_context_pressure_loop
+                                 _build_context_pressure_loop, _announce_reload_blindness
 from lupin_arbiter_app.health_watcher import HealthWatcherLoop
 from lupin_arbiter_app.fleet_arbiter_loop import FleetArbiterLoop
 from lupin_arbiter_app.context_pressure_writer import ContextPressureWriterLoop
@@ -39,6 +39,37 @@ class _FakeLoop:
 class _FakeGW:
     def __init__( self ): self.posts = [ ]
     def post( self, topic, body ): self.posts.append( ( topic, body ) )
+
+
+def test_announce_reload_blindness_all_arms():
+    """blind → notify + log; ok → log only; unknown → log only; notify raise swallowed."""
+    logs    = [ ]
+    notices = [ ]
+    def log( event, **f ): logs.append( event )
+    verdicts = { "blind-c": ( "blind", "BLIND msg" ), "ok-c": ( "ok", None ),
+                 "unk-c": ( "unknown", None ) }
+    def assess( name, env_inspect_fn, *, reload_decider ):
+        return verdicts[ name ]
+    _announce_reload_blindness(
+        [ "blind-c", "ok-c", "unk-c" ],
+        env_inspect_fn=lambda n: None, assess_fn=assess,
+        reload_decider=lambda v, p: False, notify_fn=notices.append, log_fn=log,
+    )
+    assert notices == [ "BLIND msg" ]
+    assert "reload_blind" in logs and "reload_ok" in logs and "reload_state_unknown" in logs
+
+
+def test_announce_reload_blindness_notify_raise_is_swallowed():
+    logs = [ ]
+    def log( event, **f ): logs.append( event )
+    def boom( msg ): raise RuntimeError( "notify down" )
+    _announce_reload_blindness(
+        [ "blind-c" ],
+        env_inspect_fn=lambda n: None,
+        assess_fn=lambda n, e, *, reload_decider: ( "blind", "m" ),
+        reload_decider=lambda v, p: True, notify_fn=boom, log_fn=log,
+    )
+    assert "reload_blind_notify_error" in logs
 
 
 def test_make_health_notify_fn_logs_and_escalates_rick_only():
