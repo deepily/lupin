@@ -208,11 +208,18 @@ def test_notify_voice_dispatch_failure_falls_back_to_print( capsys ):
 # =========================================================================== #
 # ask_yes_no
 # =========================================================================== #
-def test_ask_yes_no_cli_non_interactive_uses_default( capsys ):
+def test_ask_yes_no_cli_non_interactive_refuses_without_declaration():
+    """Was: read `default` as the absent human's answer (row 84933a05)."""
     mod.set_cli_mode( True )
     with patch.object( mod, "_is_interactive", return_value=False ):
-        assert _run( mod.ask_yes_no( "Proceed?", default="yes", abstract="ctx" ) ) is True
-    assert "auto-default" in capsys.readouterr().out
+        with pytest.raises( mod.VoiceGateNoDefaultError ):
+            _run( mod.ask_yes_no( "Proceed?", default="yes", abstract="ctx" ) )
+
+
+def test_ask_yes_no_cli_non_interactive_honours_declaration():
+    mod.set_cli_mode( True )
+    with patch.object( mod, "_is_interactive", return_value=False ):
+        assert _run( mod.ask_yes_no( "Proceed?", unattended_default=True ) ) is True
 
 
 def test_ask_yes_no_cli_interactive_yes():
@@ -235,11 +242,19 @@ def test_ask_yes_no_voice_success():
     assert _run( mod.ask_yes_no( "Proceed?" ) ) is True
 
 
-def test_ask_yes_no_voice_failure_non_interactive_default():
+def test_ask_yes_no_voice_failure_non_interactive_refuses():
     iface = _fake_iface( ask_confirmation=AsyncMock( side_effect=RuntimeError( "x" ) ) )
     _enter_voice_mode( iface )
     with patch.object( mod, "_is_interactive", return_value=False ):
-        assert _run( mod.ask_yes_no( "Proceed?", default="yes" ) ) is True
+        with pytest.raises( mod.VoiceGateNoDefaultError ):
+            _run( mod.ask_yes_no( "Proceed?", default="yes" ) )
+
+
+def test_ask_yes_no_voice_failure_non_interactive_honours_declaration():
+    iface = _fake_iface( ask_confirmation=AsyncMock( side_effect=RuntimeError( "x" ) ) )
+    _enter_voice_mode( iface )
+    with patch.object( mod, "_is_interactive", return_value=False ):
+        assert _run( mod.ask_yes_no( "Proceed?", unattended_default=True ) ) is True
 
 
 def test_ask_yes_no_voice_failure_interactive_cli_fallback():
@@ -265,7 +280,7 @@ def test_job_id_autoinject_across_blocking_helpers():
     mod.set_cli_mode( True )
     mod._job_id = "dr-deadbeef"
     with patch.object( mod, "_is_interactive", return_value=False ):
-        assert _run( mod.ask_yes_no( "Q?", default="yes" ) ) is True
+        assert _run( mod.ask_yes_no( "Q?", unattended_default=True ) ) is True
         assert _run( mod.get_input( "Q?" ) ) is None
         assert _run( mod.choose( "Q?", [ "a", "b" ], response_default="a" ) ) == "a"
         assert _run( mod.present_choices( _Q_SINGLE, response_default={ "Pick": "a" } ) )[ "answers" ] == { "Pick": "a" }

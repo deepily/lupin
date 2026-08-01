@@ -325,7 +325,8 @@ async def ask_yes_no(
     default: str = "no",
     timeout: int = 60,
     abstract: Optional[ str ] = None,
-    job_id: Optional[ str ] = None
+    job_id: Optional[ str ] = None,
+    unattended_default: Optional[ bool ] = None
 ) -> bool:
     """
     Ask a yes/no question (voice-first).
@@ -341,13 +342,29 @@ async def ask_yes_no(
     Ensures:
         - Returns True if user said yes
         - Returns False if user said no
-        - Returns default value on timeout or error
+        - On a path where NO human can answer, returns unattended_default if
+          the caller declared one, and raises otherwise
+
+    `default` and `unattended_default` answer two different questions, and
+    before 2026-08-01 one parameter was doing both jobs. `default` is what an
+    interactive [Y/n] prompt OFFERS — pressing Enter to accept it is a human
+    act. `unattended_default` is what the answer means when there is no human
+    at all, which nobody had ever stated: `default: str = "no"` silently
+    supplied one. All four production callers passed default="yes", so an
+    unreachable user was recorded as having said yes to "continue with partial
+    audio" and to "proceed with this research plan". Row 84933a05.
 
     Args:
         question: The yes/no question to ask
-        default: Default answer if timeout ("yes" or "no")
+        default: Answer offered at an interactive prompt ("yes" or "no")
         timeout: Seconds to wait for response
         abstract: Optional supplementary context (plan details, URLs, markdown)
+        unattended_default: What the answer means when no human is reachable.
+            Omitting it makes those paths raise rather than guess.
+
+    Raises:
+        - VoiceGateNoDefaultError if no human could answer and the caller
+          declared no unattended_default
 
     Returns:
         bool: True if user approved, False otherwise
@@ -362,9 +379,8 @@ async def ask_yes_no(
             print( f"\n  Context:\n{abstract}\n" )
         # Non-interactive (queue/Docker): use default without blocking on input()
         if not _is_interactive():
-            logger.info( f"Non-interactive mode, using default='{default}' for: {question}" )
-            print( f"  {question} → auto-default: {default}" )
-            return default == "yes"
+            # No human here. `default` describes an interactive prompt, not consent.
+            return _require_default( unattended_default, _DEFAULT_SOURCE_NON_INTERACTIVE, "Confirm" )
         default_hint = "Y/n" if default == "yes" else "y/N"
         response = input( f"  {question} [{default_hint}]: " ).strip().lower()
         if not response:
@@ -377,8 +393,7 @@ async def ask_yes_no(
         logger.warning( f"Voice ask_yes_no failed: {e}" )
         # Non-interactive fallback: use default
         if not _is_interactive():
-            logger.info( f"Non-interactive mode, using default='{default}' for: {question}" )
-            return default == "yes"
+            return _require_default( unattended_default, _DEFAULT_SOURCE_DISPATCH_FAILED, "Confirm" )
         # Interactive CLI fallback
         if abstract:
             print( f"\n  Context:\n{abstract}\n" )

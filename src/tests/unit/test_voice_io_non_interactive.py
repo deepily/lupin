@@ -75,11 +75,19 @@ class TestIsInteractive:
 # ============================================================================
 
 class TestAskYesNoNonInteractive:
-    """Verify ask_yes_no returns default without blocking in non-interactive mode."""
+    """
+    SUPERSEDED PREMISE — see TestChooseNonInteractive's docstring.
+
+    `default` is what an interactive [Y/n] prompt OFFERS. It was also being
+    read as what an ABSENT human meant, which is a different question nobody
+    had answered. Row 84933a05 separates them: `unattended_default` states the
+    second, and omitting it raises. Not blocking on input() is still required
+    and still pinned below.
+    """
 
     @pytest.mark.asyncio
-    async def test_returns_default_yes_when_non_interactive( self ):
-        """ask_yes_no(default='yes') returns True in non-interactive mode."""
+    async def test_refuses_when_non_interactive_and_nothing_declared( self ):
+        """A prompt default is not consent from someone who was never asked."""
         from cosa.agents.utils import voice_io
 
         # Force CLI fallback (no cosa_interface) + non-interactive stdin
@@ -91,15 +99,19 @@ class TestAskYesNoNonInteractive:
 
             with patch.object( sys, "stdin" ) as mock_stdin:
                 mock_stdin.isatty.return_value = False
-                result = await voice_io.ask_yes_no( "Continue?", default="yes" )
-                assert result is True
+                with pytest.raises( voice_io.VoiceGateNoDefaultError ):
+                    await voice_io.ask_yes_no( "Continue?", default="yes" )
+                # ...and the supported unattended path still works.
+                assert await voice_io.ask_yes_no(
+                    "Continue?", default="yes", unattended_default=True
+                ) is True
         finally:
             voice_io._cosa_interface = original_interface
             voice_io._voice_available = original_available
 
     @pytest.mark.asyncio
-    async def test_returns_default_no_when_non_interactive( self ):
-        """ask_yes_no(default='no') returns False in non-interactive mode."""
+    async def test_declared_unattended_false_is_honoured( self ):
+        """False is declared, not absent — the check must be `is None`."""
         from cosa.agents.utils import voice_io
 
         original_interface = voice_io._cosa_interface
@@ -110,7 +122,7 @@ class TestAskYesNoNonInteractive:
 
             with patch.object( sys, "stdin" ) as mock_stdin:
                 mock_stdin.isatty.return_value = False
-                result = await voice_io.ask_yes_no( "Proceed?", default="no" )
+                result = await voice_io.ask_yes_no( "Proceed?", unattended_default=False )
                 assert result is False
         finally:
             voice_io._cosa_interface = original_interface
@@ -130,8 +142,12 @@ class TestAskYesNoNonInteractive:
             with patch.object( sys, "stdin" ) as mock_stdin:
                 mock_stdin.isatty.return_value = False
                 with patch( "builtins.input", side_effect=AssertionError( "input() should not be called" ) ):
-                    result = await voice_io.ask_yes_no( "Question?", default="yes" )
-                    assert result is True
+                    # Still must not block on input(); it now refuses instead.
+                    with pytest.raises( voice_io.VoiceGateNoDefaultError ):
+                        await voice_io.ask_yes_no( "Question?", default="yes" )
+                    assert await voice_io.ask_yes_no(
+                        "Question?", unattended_default=True
+                    ) is True
         finally:
             voice_io._cosa_interface = original_interface
             voice_io._voice_available = original_available

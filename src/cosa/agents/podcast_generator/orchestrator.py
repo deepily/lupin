@@ -604,6 +604,9 @@ class PodcastOrchestratorAgent:
                     continue_anyway = await voice_io.ask_yes_no(
                         f"{lang_name}: {len( failed_indices )} segments failed. Continue with partial audio?",
                         default  = "yes",
+                        # Unattended: keep the partial audio, as this path has
+                        # always done. Declared here so it is a caller's choice.
+                        unattended_default = True,
                         abstract = f"**Language**: {lang_name}\n**Failed**: {len( failed_indices )}\n**Successful**: {len( tts_results ) - len( failed_indices )}\n**Error**: {first_error}"
                     )
                     if not continue_anyway:
@@ -982,6 +985,7 @@ class PodcastOrchestratorAgent:
                 continue_anyway = await voice_io.ask_yes_no(
                     f"{len( failed_indices )} segments failed. Continue with partial audio?",
                     default  = "yes",
+                    unattended_default = True,
                     timeout  = 120,
                     abstract = f"**Failed**: {len( failed_indices )}\n**Successful**: {len( tts_results ) - len( failed_indices )}\n**Error**: {first_error}"
                 )

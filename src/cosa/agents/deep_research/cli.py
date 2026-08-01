@@ -508,10 +508,13 @@ async def run_research(
             proceed = await voice_io.ask_yes_no(
                 "Would you like to proceed with this research plan?",
                 default="yes",
+                # Unattended runs proceed, as before — but the announcement
+                # below no longer claims a user approved it.
+                unattended_default=True,
                 abstract=plan_abstract
             )
             await voice_io.notify(
-                f"User {'approved' if proceed else 'rejected'} research plan ({len( subqueries )} topics).",
+                f"Research plan {'approved' if proceed else 'rejected'} ({len( subqueries )} topics).",
                 priority="low"
             )
             if not proceed:
@@ -652,10 +655,11 @@ async def run_research(
             if findings:
                 proceed_partial = await voice_io.ask_yes_no(
                     f"Generate partial report from {completed} completed topics?",
-                    default="yes"
+                    default="yes",
+                    unattended_default=True
                 )
                 await voice_io.notify(
-                    f"User {'approved' if proceed_partial else 'declined'} partial report ({completed}/{total} topics).",
+                    f"Partial report {'approved' if proceed_partial else 'declined'} ({completed}/{total} topics).",
                     priority="low"
                 )
 
