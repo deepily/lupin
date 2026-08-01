@@ -43,7 +43,10 @@ from unittest.mock import MagicMock, AsyncMock, patch
 import pytest
 
 from cosa.agents.presentation_generator import orchestrator as orch_mod
-from cosa.agents.presentation_generator.orchestrator import PresentationOrchestratorAgent
+from cosa.agents.presentation_generator.orchestrator import (
+    PresentationOrchestratorAgent,
+    VoiceGateNotAnsweredError,
+)
 from cosa.agents.presentation_generator.state import (
     OrchestratorState,
     ArcPosition,
@@ -1086,10 +1089,13 @@ class TestGate1NarrativeReview:
         _silence_voice_io[ "input" ].return_value = ""
         assert _run( agent._gate_1_narrative_review( [ _section() ] ) ) is True
 
-    def test_voice_io_exception_auto_approves( self, capsys, _silence_voice_io ):
+    def test_voice_io_exception_refuses_to_approve( self, capsys, _silence_voice_io ):
+        """Was: auto-approved so as not to block the pipeline, which turned the
+        failure of the approval mechanism into an approval (row fef0ed85)."""
         agent = _agent( debug=True )
         _silence_voice_io[ "choices" ].side_effect = RuntimeError( "voice down" )
-        assert _run( agent._gate_1_narrative_review( [ _section() ] ) ) is True
+        with pytest.raises( VoiceGateNotAnsweredError ):
+            _run( agent._gate_1_narrative_review( [ _section() ] ) )
 
 
 class TestGate2OutlineReview:
@@ -1134,10 +1140,11 @@ class TestGate2OutlineReview:
         _silence_voice_io[ "input" ].return_value = ""
         assert _run( agent._gate_2_outline_review( [ _outline() ] ) ) is True
 
-    def test_exception_auto_approves( self, _silence_voice_io ):
+    def test_exception_refuses_to_approve( self, _silence_voice_io ):
         agent = _agent( debug=True )
         _silence_voice_io[ "choices" ].side_effect = RuntimeError( "x" )
-        assert _run( agent._gate_2_outline_review( [ _outline() ] ) ) is True
+        with pytest.raises( VoiceGateNotAnsweredError ):
+            _run( agent._gate_2_outline_review( [ _outline() ] ) )
 
 
 class TestGate3ContentReview:
@@ -1186,10 +1193,11 @@ class TestGate3ContentReview:
         _silence_voice_io[ "input" ].return_value = ""
         assert _run( agent._gate_3_content_review( self._slides_with_visual() ) ) is True
 
-    def test_exception_auto_approves( self, _silence_voice_io ):
+    def test_exception_refuses_to_approve( self, _silence_voice_io ):
         agent = _agent( debug=True )
         _silence_voice_io[ "choices" ].side_effect = RuntimeError( "x" )
-        assert _run( agent._gate_3_content_review( self._slides_with_visual() ) ) is True
+        with pytest.raises( VoiceGateNotAnsweredError ):
+            _run( agent._gate_3_content_review( self._slides_with_visual() ) )
 
 
 # ===========================================================================
@@ -1211,11 +1219,13 @@ class TestGate4RenderReview:
         _silence_voice_io[ "choices" ].return_value = _ans( "Visual Review", "Approve" )
         assert _run( agent._gate_4_render_review( _presentation() ) ) is True
 
-    def test_missing_key_defaults_to_approve( self, _silence_voice_io ):
+    def test_missing_key_refuses_rather_than_approving( self, _silence_voice_io ):
+        """A payload with no answer for this gate's header is not consent."""
         agent = _agent()
         agent._presentation_state[ "visuals_rendered" ] = 1
-        _silence_voice_io[ "choices" ].return_value = { "answers": {} }  # no header → default Approve
-        assert _run( agent._gate_4_render_review( _presentation() ) ) is True
+        _silence_voice_io[ "choices" ].return_value = { "answers": {} }
+        with pytest.raises( VoiceGateNotAnsweredError ):
+            _run( agent._gate_4_render_review( _presentation() ) )
 
     def test_cancel( self, _silence_voice_io ):
         agent = _agent()
@@ -1223,11 +1233,12 @@ class TestGate4RenderReview:
         _silence_voice_io[ "choices" ].return_value = _ans( "Visual Review", "Cancel" )
         assert _run( agent._gate_4_render_review( _presentation() ) ) is False
 
-    def test_exception_auto_approves( self, _silence_voice_io ):
+    def test_exception_refuses_to_approve( self, _silence_voice_io ):
         agent = _agent()
         agent._presentation_state[ "visuals_rendered" ] = 1
         _silence_voice_io[ "choices" ].side_effect = RuntimeError( "voice down" )
-        assert _run( agent._gate_4_render_review( _presentation() ) ) is True
+        with pytest.raises( VoiceGateNotAnsweredError ):
+            _run( agent._gate_4_render_review( _presentation() ) )
 
 
 # ===========================================================================
