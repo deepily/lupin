@@ -115,6 +115,18 @@ class BaseWebSocketListener:
         """Whether the WebSocket is currently connected and authenticated."""
         return self._connected
 
+    async def _on_connected( self ):
+        """
+        Connect hook — fired once per successful connect, after auth_success and
+        before the receive loop. Default no-op; subclasses override to run
+        catch-up on connect (e.g. the CC listener pulls answers owed to its
+        persona that landed while it was disconnected — §4.4).
+
+        Ensures:
+            - default implementation does nothing (pure live subscribers)
+        """
+        pass
+
     async def run( self ):
         """
         Start the listener with automatic reconnection.
@@ -286,6 +298,13 @@ class BaseWebSocketListener:
             else:
                 print( f"{self.LOG_PREFIX} Unexpected auth response: {auth_data}" )
                 return
+
+            # Connect hook (default no-op; the CC listener overrides it to catch
+            # up on answers owed to this persona that landed while it was
+            # disconnected — §4.4). Fires on EVERY connect edge: a listener
+            # respawn after a bounce IS a first connect, so unlike the browser
+            # rehydrator (reconnect edge only) we fire here on both.
+            await self._on_connected()
 
             # Receive loop
             async for message in ws:

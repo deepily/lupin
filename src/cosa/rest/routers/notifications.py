@@ -1380,8 +1380,16 @@ async def submit_notification_response(
         if notification_id in pending_responses:
             pending_responses[notification_id]["response_data"] = response_value
             pending_responses[notification_id]["event"].set()  # Wake up SSE stream!
-            print(f"[NOTIFY] ✓ Signaled SSE stream for {notification_id}")
+            # Setter (a) of the §4.3 receipt-gated contract: the SSE waiter lives in
+            # THIS process and its event is now set, so the asking coroutine WILL
+            # consume the value — a genuine receipt. Mark the answer delivered so
+            # catch-up never re-hands it. Lever B: DB write off the event loop.
+            await asyncio.to_thread( _mark_answer_delivered_sync, notification_id )
+            print(f"[NOTIFY] ✓ Signaled SSE stream + marked answer delivered for {notification_id}")
         else:
+            # No live SSE waiter here — the answer stays owed (answer_delivered_at
+            # NULL) unless the listener frame below is confirmed. The row being owed
+            # is what §4.4's catch-up re-delivers; the mark is NEVER set on a send.
             print(f"[NOTIFY] No SSE stream waiting for {notification_id} (may have already completed)")
 
         # Task 7: Broadcast WebSocket event (notification_responded).
@@ -1391,9 +1399,13 @@ async def submit_notification_response(
         # recipient_id, missing the listener registered under a shared
         # service-account user_id).
         try:
+            # §4.3 step 3 — the one-line live fix (fact 1): fall back to the asking
+            # session's #hash8 when the ask carried no job_id (every MCP ask has
+            # job_id None), so the notification_responded event reaches the asking
+            # session's cc-listener socket byte-for-byte and its :481 arm delivers it.
             ws_manager.emit_to_user_or_listener_sync(
                 user_id = recipient_id,
-                job_id  = notification_job_id,
+                job_id  = notification_job_id or asker_hash8,
                 event   = "notification_responded",
                 data    = {
                     "notification_id"  : notification_id,
@@ -1506,6 +1518,150 @@ async def get_undelivered_notifications(
     except Exception as e:
         print( f"[NOTIFY] Error getting undelivered for {authenticated_user_id}: {str( e )}" )
         raise HTTPException( status_code=500, detail=f"Failed to get undelivered notifications: {str( e )}" )
+
+
+def _project_owed_answer( n, requesting_session_hash8=None ):
+    """
+    Project an owed-answer Notification row to the replayed-answer envelope (§4.3,
+    rulings 6/7). Every replayed answer carries its ORIGINAL question text plus its
+    responded_at — a bare answer with no question attached is worse than nothing
+    (the model would bind it to whatever it is doing now).
+
+    Requires:
+        - n is an owed Notification row (responded, not yet handed back)
+
+    Ensures:
+        - `question` is the original ask text; `response_value` is the human's answer
+        - `from_earlier_session` is True iff the asking session differs from the
+          requesting one (ruling 6 — delivered, but FLAGGED as an earlier session's)
+    """
+    asker_hash8 = n.sender_id.split( "#", 1 )[ 1 ].strip() if n.sender_id and "#" in n.sender_id else None
+    from_earlier_session = bool( requesting_session_hash8 and asker_hash8 and asker_hash8 != requesting_session_hash8 )
+    return {
+        "id"                   : str( n.id ),
+        "sender_id"            : n.sender_id,
+        "sender_persona"       : n.sender_persona,
+        "session_hash8"        : asker_hash8,
+        "question"             : n.message,
+        "title"                : n.title,
+        "abstract"             : n.abstract,
+        "response_value"       : n.response_value,
+        "responded_at"         : n.responded_at.isoformat() if n.responded_at else None,
+        "created_at"           : n.created_at.isoformat() if n.created_at else None,
+        "job_id"               : n.job_id,
+        "from_earlier_session" : from_earlier_session,
+    }
+
+
+@router.get(
+    "/notifications/answers-owed",
+    summary     = "Get answers owed to a persona (late-answer handback pull inbox)",
+    description = "Persona-keyed pull inbox (§4.4): answered asks not yet handed back to the session that asked. Retrieval matches sender_persona ALONE (ruling 6); session_hash8 sets the earlier-session flag but NEVER filters. Serving does NOT mark delivered — that is the companion /ack (ack-on-consume)."
+)
+async def get_answers_owed(
+    authenticated_user_id: Annotated[str, Depends(require_api_key_or_jwt)],
+    persona: str = Query(..., description="The persona whose owed answers to pull (retrieval key — ruling 6, matched alone)."),
+    session_hash8: Optional[str] = Query(None, description="Requesting session's 8-char hash. Sets the earlier-session flag on each envelope; NEVER filters (ruling 6)."),
+    since: Optional[str] = Query(None, description="ISO responded_at cursor — only answers responded AFTER it. Cursor advances on responded_at, not created_at."),
+    limit: int = Query(100, description="Maximum owed answers to return.")
+):
+    """
+    Pull the answers owed to `persona` — answered asks not yet handed back (§4.4).
+
+    Requires:
+        - a valid API key or Bearer JWT (X-API-Key lane resolves the human owner —
+          the row's recipient_id; NOT the listener's ambient service-account id.
+          D-V1 is the negative control that proves this on real credentials)
+        - persona is a non-empty retrieval key
+
+    Ensures:
+        - returns owed envelopes (question + answer + responded_at + flag), oldest
+          answer first (ordered/cursored on responded_at)
+        - SERVING does NOT set answer_delivered_at — only /ack does (ack-on-consume)
+
+    Raises:
+        - HTTPException 500 on query failure
+    """
+    try:
+        max_age_hours = _undelivered_max_age_hours()
+        since_dt = None
+        if since:
+            try:
+                since_dt = datetime.fromisoformat( since )
+            except ValueError:
+                raise HTTPException( status_code=400, detail="`since` must be an ISO-8601 timestamp" )
+
+        def _fetch_owed_sync():
+            # Lever B: blocking DB read off the event loop — fires per session-return.
+            with get_db() as session:
+                repo  = NotificationRepository( session )
+                items = repo.get_answers_owed_for_persona(
+                    persona, limit=limit, max_age_hours=max_age_hours, since=since_dt
+                )
+                return [ _project_owed_answer( n, requesting_session_hash8=session_hash8 ) for n in items ]
+
+        answers = await asyncio.to_thread( _fetch_owed_sync )
+        return {
+            "status"      : "success",
+            "owed_count"  : len( answers ),
+            "answers"     : answers,
+            "timestamp"   : get_local_timestamp()
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print( f"[NOTIFY] Error getting answers-owed for persona {persona!r}: {str( e )}" )
+        raise HTTPException( status_code=500, detail=f"Failed to get answers owed: {str( e )}" )
+
+
+@router.post(
+    "/notifications/answers-owed/ack",
+    summary     = "Ack a handed-back answer (mark delivered)",
+    description = "Setter (b)/(c) of the §4.3 receipt-gated contract: stamp answer_delivered_at for a notification the client has CONSUMED. Ack on consume, never on serve — a dropped serve response must leave the answer owed. The row is never deleted (ruling 2)."
+)
+async def ack_answer_owed(
+    authenticated_user_id: Annotated[str, Depends(require_api_key_or_jwt)],
+    request_body: Dict[str, Any] = Body(..., description="Request body with notification_id")
+):
+    """
+    Ack an owed answer as consumed — the pull/re-attach receipt (§4.3 setters b/c).
+
+    Requires:
+        - a valid API key or Bearer JWT
+        - request_body.notification_id is a valid UUID string
+
+    Ensures:
+        - answer_delivered_at is stamped so catch-up will not re-surface the row
+        - the row is NOT deleted (ruling 2)
+
+    Raises:
+        - HTTPException 422 if notification_id is missing
+        - HTTPException 404 if the notification does not exist
+        - HTTPException 500 on update failure
+    """
+    notification_id = request_body.get( "notification_id" )
+    if not notification_id:
+        raise HTTPException( status_code=422, detail="notification_id is required in request body" )
+    try:
+        def _ack_sync():
+            with get_db() as session:
+                repo   = NotificationRepository( session )
+                marked = repo.mark_answer_delivered( uuid.UUID( notification_id ) )
+                return marked is not None
+
+        found = await asyncio.to_thread( _ack_sync )
+        if not found:
+            raise HTTPException( status_code=404, detail=f"Notification {notification_id} not found" )
+        return {
+            "status"          : "success",
+            "notification_id" : notification_id,
+            "timestamp"       : get_local_timestamp()
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print( f"[NOTIFY] Error acking answer {notification_id}: {str( e )}" )
+        raise HTTPException( status_code=500, detail=f"Failed to ack answer: {str( e )}" )
 
 
 @router.post(

@@ -39,6 +39,7 @@ from lupin_cli.claude_code.hooks.lib.session_bridge import (
 from lupin_cli.claude_code.hooks.lib.heartbeat_poke_cap import reset_poke_count
 from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import is_heartbeat_poke_prompt
 from lupin_cli.claude_code.hooks.lib.dm_inbox_reconcile import surface_dm_inbox
+from lupin_cli.claude_code.hooks.lib.answer_catchup import surface_owed_answers
 
 
 def main():
@@ -122,12 +123,20 @@ def main():
                        if m.get( "direction" ) == "ai_to_ai" ]
     dm_ctx = surface_dm_inbox( session_id, extra_surfaced_ids=drained_dm_ids )
 
+    # Late-answer catch-up (§4.4): pull answers to blocking asks that landed while
+    # this session was disconnected and surface them as replayed context (NO
+    # interrupt/deny — matches the DM contract). This covers the case the listener's
+    # on-connect hook structurally cannot: the listener process being DEAD, not just
+    # its socket. The shared HWM + side-log dedupe it against the live listener arm.
+    # Fail-open — never raises.
+    answer_ctx = surface_owed_answers( session_id )
+
     if voice_ctx:
         voice_ctx = enrich_voice_context( voice_ctx, messages )
 
-    # Assemble additionalContext: human voice first, then reconciled peer DMs,
-    # then the conv-mode rider. Any subset may be empty; {} when all are.
-    parts = [ part for part in ( voice_ctx, dm_ctx, reminder ) if part ]
+    # Assemble additionalContext: human voice first, then reconciled peer DMs, then
+    # late-answer catch-up, then the conv-mode rider. Any subset may be empty; {} when all are.
+    parts = [ part for part in ( voice_ctx, dm_ctx, answer_ctx, reminder ) if part ]
     if parts:
         emit_json( build_additional_context( "\n\n".join( parts ), "UserPromptSubmit" ) )
     else:

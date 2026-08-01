@@ -47,6 +47,7 @@ from cosa.agents.utils.proxy_agents.base_config import (
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import build_sender_id_for_cc
 from lupin_cli.claude_code.hooks.lib.listener_processes import tmux_injection_lock
+from lupin_cli.claude_code.hooks.lib.answer_catchup import surface_owed_answers, append_surfaced_id
 from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 
 
@@ -459,6 +460,70 @@ class CCNotificationListener( BaseWebSocketListener ):
         """
         self._write_central( f"{self._timestamp()} [{self.session_id_hash}] {message}" )
 
+    async def _on_connected( self ):
+        """
+        Catch up on answers OWED to this persona that landed while disconnected
+        (§4.4). Overrides the base no-op; fires on EVERY connect edge (a listener
+        respawn after a bounce IS a first connect, so unlike the browser rehydrator
+        we do NOT gate on the reconnect edge). Owed answers surface as buffered,
+        non-interrupt context drained by the next injecting hook.
+
+        ⚠️ The fetch reads the X-API-Key lane (resolves to the HUMAN OWNER), NEVER
+        `self._user_id` — which here holds the shared SERVICE-ACCOUNT identity set at
+        auth_success. Catch-up is persona-keyed (ruling 6): surface_owed_answers
+        resolves THIS session's persona from the bridge and is never handed a
+        user_id. Routing the fetch through self._user_id would return a
+        correct-looking, silently EMPTY list — the plan's one silent-failure surface
+        (D-V1 is the negative control). Never raises.
+        """
+        try:
+            context = surface_owed_answers( self.session_id_hash )
+            if context:
+                self._buffer_message( {
+                    "message"   : context,
+                    "id"        : "",
+                    "job_id"    : self.session_id_hash,
+                    "direction" : "human_to_ai",
+                } )
+        except Exception as e:
+            self._log( f"{self.LOG_PREFIX} ERROR in answer catch-up on connect: {e}" )
+
+    def _handle_answer_responded( self, event_data ):
+        """
+        Live late-answer handback arm (§4.3, the :481 notification_responded arm).
+
+        The response endpoint's job_id→asker_hash8 fallback (fact 1) makes the
+        notification_responded event reach THIS asking session's socket. Record the
+        answered notification_id into the shared cross-process side-log (so the
+        hook-side catch-up dedupes against it — the §4.3 one-ledger) and surface the
+        answer as a buffered, non-interrupt message. Routes on job_id ∈ accepted_ids.
+        Never raises.
+
+        Requires:
+            - event_data is the notification_responded frame (data carries
+              notification_id + response_value; job_id at top level or in data)
+        """
+        try:
+            data   = event_data.get( "data", event_data ) or {}
+            job_id = data.get( "job_id" ) or event_data.get( "job_id" ) or ""
+            nid    = data.get( "notification_id" ) or ""
+            if not nid or job_id not in self.accepted_ids:
+                return
+            # Cross-process ledger write: the hook folds this side-log into its dedup
+            # (K-D1). O_APPEND makes it lock-free across the listener/hook boundary.
+            append_surfaced_id( self.session_id_hash, nid )
+            answer = data.get( "response_value" )
+            if isinstance( answer, dict ):
+                answer = answer.get( "value", answer )
+            self._buffer_message( {
+                "message"   : f"[Answer to a question you asked earlier — context only] {answer}",
+                "id"        : nid,
+                "job_id"    : self.session_id_hash,
+                "direction" : "human_to_ai",
+            } )
+        except Exception as e:
+            self._log( f"{self.LOG_PREFIX} ERROR in answer-responded arm: {e}" )
+
     async def _handle_event( self, event_type, event_data ):
         """
         Handle a WebSocket event by filtering and buffering.
@@ -468,7 +533,8 @@ class CCNotificationListener( BaseWebSocketListener ):
             - event_data is a dict
 
         Ensures:
-            - Only processes notification_queue_update events
+            - Live late-answer handback: notification_responded is recorded + surfaced
+            - Only processes notification_queue_update events (otherwise)
             - Only buffers user_initiated_message notifications
             - Only buffers notifications whose job_id matches session_id_hash
             - Writes JSONL line to buffer file on match
@@ -478,6 +544,12 @@ class CCNotificationListener( BaseWebSocketListener ):
             event_type: WebSocket event type string
             event_data: Full event payload dict
         """
+        # Late-answer live handback arm (§4.3 :481) — handled BEFORE the
+        # notification_queue_update gate, which would otherwise discard it.
+        if event_type == "notification_responded":
+            self._handle_answer_responded( event_data )
+            return
+
         if event_type != "notification_queue_update":
             if self.verbose:
                 self._log( f"{self.LOG_PREFIX} Ignoring event type: {event_type}" )
