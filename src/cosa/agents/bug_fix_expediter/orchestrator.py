@@ -49,6 +49,7 @@ from cosa.agents.shared.fix_executor import FixExecutor
 from cosa.agents.swe_team.safety_limits import SafetyGuard, SafetyLimitError
 from cosa.agents.swe_team.hooks import build_can_use_tool, post_tool_hook, wrap_prompt_for_streaming
 from cosa.agents.swe_team.test_runner import run_pytest
+from cosa.agents.utils.voice_io import read_gate_answer
 
 # SDK imports — graceful fallback
 try:
@@ -1044,7 +1045,10 @@ class BFEOrchestrator:
                     job_id   = self.job_id,
                 )
 
-                selection = result.get( "answers", {} ).get( "Fix Selection", "" )
+                # An ABSENT header is not "the user picked nothing" (row 2b604cdb).
+                selection = read_gate_answer(
+                    result, "Fix Selection", "BFE proposal gate", unattended_default=""
+                )
 
                 # Find selected fix
                 for fix in fixes:

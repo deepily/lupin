@@ -357,9 +357,16 @@ class TestProposalVoiceGate:
         assert selected == []
 
     @pytest.mark.asyncio
-    async def test_aggregate_mode_voice_gate_error_auto_selects( self ):
-        """On voice gate exception, fall back to auto-selecting all proposals."""
-        orch = _make_orchestrator( dry_run=False, voice_gate_mode="aggregate" )
+    async def test_aggregate_mode_voice_gate_error_applies_the_policy( self ):
+        """
+        Was: "fall back to auto-selecting all proposals" — a failed voice gate
+        applied EVERY proposed fix to the codebase. The timeout branch already
+        deferred to a configured policy; the generic-failure branch now does
+        the same instead of bypassing it. Row 2b604cdb.
+        """
+        orch = _make_orchestrator(
+            dry_run=False, voice_gate_mode="aggregate", voice_gate_timeout_policy="none"
+        )
         proposals = self._make_proposals( 2 )
 
         with patch(
@@ -368,7 +375,7 @@ class TestProposalVoiceGate:
         ):
             selected = await orch._proposal_voice_gate( proposals )
 
-        assert len( selected ) == 2
+        assert selected == []      # policy=none -> nothing applied
 
     @pytest.mark.asyncio
     async def test_per_cluster_mode( self ):

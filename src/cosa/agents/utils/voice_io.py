@@ -632,6 +632,54 @@ _DEFAULT_SOURCE_CLI_UNPARSEABLE = "cli_unparseable"   # entry could not be parse
 _DEFAULT_SOURCE_NO_SELECTION    = "no_selection"      # dispatch returned, carried no choice
 
 
+def read_gate_answer( result, header: str, gate_name: str, unattended_default=None ):
+    """
+    Read one answer out of a present_choices payload, refusing to invent one.
+
+    The CONSUMER-side counterpart to the producer fixes in this module, and
+    public because six agents need it. Each had written its own
+
+        result.get( "answers", {} ).get( "<Header>", <fallback> )
+
+    which reads as ordinary defensive code and is not: an absent header — a
+    payload that carries no answer at all — silently becomes the fallback.
+    Presentation's version of this line turned a failed gate into "Approve"
+    (row fef0ed85); swe_team's turned it into "Continue to next task" on a
+    task that had already failed every retry; deep_research's set a flag named
+    plan_approved. Row 2b604cdb.
+
+    An answer the user genuinely gave is returned untouched, including an
+    empty string or empty list — choosing nothing is a choice. What is refused
+    is the header being ABSENT.
+
+    Requires:
+        - result is the dict returned by present_choices (a non-dict is
+          treated as carrying no answers, not as an error to swallow)
+        - header is the question header the gate asked under
+
+    Ensures:
+        - returns the answer the gate actually received
+        - logs at WARNING when that answer came from a declared default rather
+          than a human, naming the gate and the path
+
+    Raises:
+        - VoiceGateNoDefaultError if the header is absent and the caller
+          declared no unattended_default
+    """
+    answers = result.get( "answers", {} ) if isinstance( result, dict ) else {}
+
+    if header not in answers:
+        return _require_default( unattended_default, _DEFAULT_SOURCE_NO_SELECTION, f"{gate_name}/{header}" )
+
+    if isinstance( result, dict ) and result.get( "default_used", False ):
+        logger.warning(
+            f"{gate_name}: '{header}' answered by a DECLARED DEFAULT, not a human "
+            f"(source={result.get( 'default_source' )}, value={answers[ header ]!r})."
+        )
+
+    return answers[ header ]
+
+
 def _require_default( response_default, source: str, what: str ):
     """
     Resolve the caller's declared default for a path where no human answered,

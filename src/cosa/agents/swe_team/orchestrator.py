@@ -44,6 +44,7 @@ from .test_runner import run_pytest, TestRunResult
 from .mock_clients import MockAgentSDKSession
 from .hooks import build_can_use_tool, post_tool_hook, notification_hook, wrap_prompt_for_streaming
 from .state_files import FeatureList, ProgressLog
+from cosa.agents.utils.voice_io import read_gate_answer
 
 # Transport budget for out-of-process HTTP calls to `:7999` (row 204911ca).
 # ~30s = 1.60x the observed maximum reload window of 18.76s — a multiplier with
@@ -1023,7 +1024,14 @@ Keep your response concise (3-5 sentences). Output ONLY the analysis, no preambl
                             )
 
                             # Process escalation response
-                            escalation_choice = escalation.get( "answers", {} ).get( "Escalation", "Continue to next task" )
+                            # Was: an absent answer became "Continue to next task",
+                            # silently skipping a task that had already failed every
+                            # verification retry. Behaviour preserved, but now the
+                            # caller declares it and each use is logged. Row 2b604cdb.
+                            escalation_choice = read_gate_answer(
+                                escalation, "Escalation", "SWE escalation gate",
+                                unattended_default="Continue to next task"
+                            )
 
                             if escalation_choice == "Stop and get help":
                                 self._stop_requested = True

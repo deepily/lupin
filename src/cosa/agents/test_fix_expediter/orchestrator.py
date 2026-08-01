@@ -53,6 +53,7 @@ from cosa.agents.test_fix_expediter.prompts.fix import (
     CODER_SYSTEM_PROMPT as TFE_CODER_SYSTEM_PROMPT,
     TESTER_SYSTEM_PROMPT as TFE_TESTER_SYSTEM_PROMPT,
 )
+from cosa.agents.utils.voice_io import read_gate_answer
 
 # SWE Team safety primitives (shared with BFE)
 try:
@@ -1066,10 +1067,17 @@ class TFEOrchestrator:
             # Default policy "stall" preserves prior behavior (raise → STALLED).
             return self._apply_voice_gate_timeout_policy( proposals )
         except Exception as e:
-            logger.warning( f"[TFE] Voice gate failed: {e} — auto-selecting all" )
-            return list( proposals )
+            # Was: "auto-selecting all" — a failed gate applied EVERY proposed
+            # fix to the codebase. The timeout branch above already routes
+            # through a configured policy (default "stall"); a non-timeout
+            # failure is not a reason to bypass it. Row 2b604cdb.
+            logger.warning( f"[TFE] Voice gate failed: {e} — applying the configured gate policy" )
+            return self._apply_voice_gate_timeout_policy( proposals )
 
-        selected_labels = result.get( "answers", {} ).get( "Fixes", [] )
+        # An ABSENT header is not "the user selected no fixes".
+        selected_labels = read_gate_answer(
+            result, "Fixes", "TFE proposal gate", unattended_default=[]
+        )
         if isinstance( selected_labels, str ):
             selected_labels = [ selected_labels ]
 
@@ -1191,8 +1199,16 @@ class TFEOrchestrator:
                     job_id=self.job_id,
                 )
             except Exception as e:
-                logger.warning( f"[TFE] Per-cluster gate failed for {p.cluster_id}: {e}" )
-                selected.append( p )   # on error, err on the side of applying
+                # Was: `selected.append( p )` under the comment "on error, err
+                # on the side of applying" — a gate that could not reach a
+                # human APPLIED the code change it was asking about. Erring
+                # toward applying an unreviewed fix is not the safe direction.
+                # Row 2b604cdb. The aggregate gate's sibling defect is four
+                # hundred lines up.
+                logger.warning(
+                    f"[TFE] Per-cluster gate failed for {p.cluster_id}: {e} — NOT applying "
+                    f"(nobody approved it)"
+                )
                 continue
 
             if isinstance( answer, str ) and answer.lower().startswith( "yes" ):
