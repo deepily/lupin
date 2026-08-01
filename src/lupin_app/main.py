@@ -48,7 +48,7 @@ if src_path not in sys.path:
 # Promote the weak "LUPIN_ROOT is set" guard above to a strong "LUPIN_ROOT is
 # valid" check — fails loud and immediate on the /app-vs-/var/lupin path drift
 # instead of cryptically later at config load. (No defensive fallback.)
-from lupin_app.bootstrap_helpers import assert_lupin_root_valid
+from lupin_app.bootstrap_helpers import assert_lupin_root_valid, reload_enabled as _reload_enabled
 from cosa.rest.error_envelope import make_unhandled_exception_handler
 assert_lupin_root_valid( lupin_root )
 
@@ -405,6 +405,94 @@ async def websocket_cleanup_loop():
             await asyncio.sleep( interval_seconds )
 
 
+# ─── Managed-bounce broadcasts (R4 warning + R5 all-clear) ──────────────────
+# Design of record: src/rnd/v0.1.9/2026.08.01-managed-bounce-review-tiffany.md +
+# 2026.08.01-managed-bounce-for-7999.md Rev 2. Pure/injectable logic lives in
+# cosa.rest.managed_bounce_broadcast; these thin wrappers bind it to the live
+# commons singletons (module globals set during startup).
+
+def _emit_managed_bounce( kind, message, broadcast_id=None ):
+    """
+    Fire a managed-bounce fleet broadcast in-process, never raising.
+
+    Returns the execute_broadcast result dict, or None when commons is disabled /
+    not yet wired (the not-wired guard + skip-log live in the measured module's
+    emit_bounce_broadcast_in_process, so the branch is tested, not just written).
+    """
+    from cosa.rest.routers.commons import execute_broadcast, BroadcastRequestBody, build_sender_id_for_cc, _load_bridge_fields
+    from lupin_cli.claude_code.hooks.lib.session_bridge import find_active_voice_persona_sessions
+    from cosa.rest.managed_bounce_broadcast import emit_bounce_broadcast_in_process, FLEET_BROADCAST_USER_ID
+
+    threshold = config_mgr.get( "commons broadcast liveness threshold seconds", default=28800, return_type="int" )
+    return emit_bounce_broadcast_in_process(
+        kind                             = kind,
+        message                          = message,
+        user_id                          = FLEET_BROADCAST_USER_ID,
+        store                            = commons_store,
+        rate_limiter                     = commons_rate_limiter,
+        ack_watcher                      = commons_ack_watcher,
+        notification_queue               = jobs_notification_queue,
+        active_session_threshold_seconds = float( threshold ),
+        raw_sessions_fn                  = find_active_voice_persona_sessions,
+        bridge_loader                    = _load_bridge_fields,
+        build_sender_id                  = build_sender_id_for_cc,
+        execute_broadcast_fn             = execute_broadcast,
+        broadcast_request_cls            = BroadcastRequestBody,
+        broadcast_id                     = broadcast_id,
+    )
+
+
+def _managed_bounce_all_clear_blocking( boot_id, boot_started, startup_began ):
+    """
+    R5 all-clear, run in a worker thread post-yield (option A: bounded settle gate).
+
+    Waits for cc-listener/browser sockets to reconnect after the restart, then
+    fires ONE boot-stamped all-clear. Blocking (filesystem + queue writes); the
+    async wrapper hands it to a thread so it never touches the event loop.
+    """
+    from lupin_cli.claude_code.hooks.lib.session_bridge import find_active_voice_persona_sessions
+    from cosa.rest.managed_bounce_broadcast import wait_for_recipients, build_bounce_message, all_clear_fire_reason
+
+    deadline  = config_mgr.get( "managed bounce all-clear settle deadline seconds",      default=15,  return_type="float" )
+    interval  = config_mgr.get( "managed bounce all-clear settle poll interval seconds", default=0.5, return_type="float" )
+    minimum   = config_mgr.get( "managed bounce all-clear settle minimum recipients",    default=1,   return_type="int" )
+
+    # Raw session count is a cheap "are listeners back yet" proxy; the actual
+    # all-clear fanout below applies the real liveness + user filters. We only
+    # need to know the fleet reconnected, not exactly who is eligible.
+    gate = wait_for_recipients(
+        count_sessions_fn     = lambda: len( find_active_voice_persona_sessions() ),
+        minimum               = minimum,
+        deadline_seconds      = deadline,
+        poll_interval_seconds = interval,
+        now_fn                = time.monotonic,
+        sleep_fn              = time.sleep,
+    )
+
+    uptime  = time.monotonic() - startup_began
+    message = build_bounce_message( "all-clear", boot_id=boot_id, boot_started=boot_started, uptime_seconds=uptime )
+    result  = _emit_managed_bounce( "all-clear", message )
+    recipients = ( result or {} ).get( "recipients" )
+
+    # Fire-time receipt — the ONLY signal that will later tell us whether the
+    # settle deadline (a guess, not a measurement) was ever the right number:
+    # how many recipients were present, and why we fired when we did.
+    why = all_clear_fire_reason( gate[ "ready" ] )
+    print(
+        f"[managed-bounce] all-clear FIRED (boot #{boot_id}): reached {recipients} recipient(s); "
+        f"settle gate {why} after {gate[ 'elapsed' ]:.1f}s with {gate[ 'count' ]} session(s) present.",
+        file=sys.stderr,
+    )
+
+
+async def _run_managed_bounce_all_clear( *, boot_id, boot_started, startup_began ):
+    """Post-yield async wrapper: run the blocking all-clear off the event loop."""
+    try:
+        await asyncio.to_thread( _managed_bounce_all_clear_blocking, boot_id, boot_started, startup_began )
+    except Exception as e:  # pragma: no cover - best-effort boundary guard; must never surface (main.py is outside cov source=["cosa"])
+        print( f"[managed-bounce] WARN: all-clear task failed: {e}", file=sys.stderr )
+
+
 @asynccontextmanager
 async def lifespan( app: FastAPI ):
     """
@@ -429,6 +517,9 @@ async def lifespan( app: FastAPI ):
     # Startup
     global config_mgr, snapshot_mgr, jobs_todo_queue, jobs_done_queue, jobs_dead_queue, jobs_run_queue, jobs_notification_queue, io_tbl, id_generator, app_debug, app_verbose, app_silent, clock_task, consumer_thread, websocket_heartbeat_task, websocket_cleanup_task, fcm_wake_service
     
+    # Monotonic mark for the managed-bounce all-clear uptime stamp (R5).
+    _startup_monotonic = time.monotonic()
+
     config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
 
     # Get configuration flags (needed for debug output below)
@@ -967,10 +1058,55 @@ async def lifespan( app: FastAPI ):
 
     print( f"FastAPI startup complete at {datetime.now()}" )
 
+    # ── R5: managed-bounce all-clear ──────────────────────────────────────────
+    # Fires on EVERY start (script, hand-typed docker restart, compose up,
+    # crash-restart, host reboot) — the just-started server is the one process
+    # guaranteed alive when "I am up" must be spoken. Scheduled as a post-yield
+    # task (create_task only QUEUES; it runs once the loop is serving) so it
+    # NEVER blocks boot, and so the settle gate can wait for reconnecting sockets
+    # while the server already accepts connections. Guarded on commons being
+    # wired; any failure degrades to a log, never a failed boot.
+    if config_mgr.get( "commons enabled", default=True, return_type="boolean" ) and commons_store is not None:
+        try:
+            from cosa.rest.managed_bounce_broadcast import next_boot_id
+            _boot_counter_path = du.get_project_root() + "/io/managed-bounce/boot-counter.txt"
+            _boot_id           = next_boot_id( _boot_counter_path )
+            asyncio.create_task(
+                _run_managed_bounce_all_clear(
+                    boot_id       = _boot_id,
+                    boot_started  = datetime.now().isoformat( timespec="seconds" ),
+                    startup_began = _startup_monotonic,
+                )
+            )
+        except Exception as e:  # pragma: no cover - best-effort boundary guard; never let the all-clear break boot (main.py is outside cov source=["cosa"])
+            print( f"[managed-bounce] WARN: could not schedule all-clear: {e}", file=sys.stderr )
+
     yield
-    
+
     # Shutdown
     print( f"FastAPI shutdown at {datetime.now()}" )
+
+    # ── R4 backstop: managed-bounce warning on graceful shutdown ──────────────
+    # PINNED FIRST in the shutdown block — BEFORE the WebSocket/consumer teardown
+    # below — because after those are cancelled this emit is a silent no-op that
+    # still LOOKS implemented (Tiffany, 2026-08-01). This is the backstop for
+    # un-sanctioned bounce paths (hand-typed `docker restart`); the bounce script
+    # sends its OWN ack-confirmed warning on the sanctioned path.
+    #
+    # Best-effort + will sometimes lose the race: `docker stop` grants ~10s before
+    # SIGKILL, and a hard `docker kill`/OOM skips graceful shutdown entirely — so
+    # this can fail to send. Accepted, because the NEXT start's all-clear closes
+    # the loop regardless of how the last one died.
+    #
+    # Deliberately NOT a signal.signal(SIGTERM) handler: that would REPLACE
+    # uvicorn's own SIGTERM handler and break graceful shutdown + the
+    # timeout_graceful_shutdown outage fix (bug 5b654a15). The post-yield block
+    # already runs on every graceful SIGTERM, which is exactly the edge we want.
+    try:
+        from cosa.rest.managed_bounce_broadcast import build_bounce_message
+        _emit_managed_bounce( "warning", build_bounce_message( "warning" ) )
+    except Exception as e:  # pragma: no cover - best-effort boundary guard; must never block shutdown (main.py is outside cov source=["cosa"])
+        print( f"[managed-bounce] WARN: shutdown warning emit failed: {e}", file=sys.stderr )
 
     # Clean-shutdown marker: exact last-available stamp (the 60s heartbeat covers hard kills)
     try:
@@ -1247,8 +1383,22 @@ if __name__ == "__main__":
     #
     # Known, accepted consequence: `cosa/__init__.py` sits at the cosa root and is no
     # longer watched. It is near-static; editing it needs a container restart.
+    #
+    # R1 (2026-08-01, Rick's direct instruction): auto-reload is now OFF by default,
+    # even on local dev. The StatReload watcher took the whole fleet's :7999 server
+    # down 16 times in 30 min (7 of them from ordinary board_sweep.py writes). Everyone
+    # edits freely now; the server is bounced DELIBERATELY when a change needs serving
+    # (see the bounce controls). Opt back in for a focused solo dev loop with
+    # LUPIN_RELOAD=1. Precedent: :8000 already runs reload-off via LUPIN_ENV=testing.
+    #
+    # ⚠️ This gate reads the environment ONLY at container START (inside __main__).
+    # Editing LUPIN_RELOAD — or this line — is INERT until a docker RECREATE, not a
+    # restart (`docker restart` reuses the container + its env). With reload now off
+    # by default, that trap is easy to hit: reload-having-been-live has trained
+    # everyone that source edits are served live; they are not until you bounce.
+    reload_enabled = _reload_enabled( os.environ.get( "LUPIN_RELOAD" ), is_production_or_test )
     reload_kwargs = {}
-    if not is_production_or_test:
+    if reload_enabled:
         reload_kwargs[ "reload" ]      = True
         reload_kwargs[ "reload_dirs" ] = [
             "lupin_app", "lib", "lupin_cli", "lupin_mcp",
