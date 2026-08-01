@@ -170,17 +170,36 @@ class DmQualityJudgeResponse( BaseXMLModel ):
         """
         Get an example instance for prompt-template injection.
 
-        CONCRETE, not placeholder (bug a5f7b36d): the live 24B GPTQ model mirrors
-        the example LITERALLY — a `[one of: ...]` enum hint was echoed verbatim as
-        malformed XML. A well-formed, fully-filled example (real labels + real
-        notes) is copied cleanly. Uses two DIFFERENT labels so the model sees it
-        must actually choose, not parrot one value.
+        PLACEHOLDER CONTENT, matching the shape every other agent in this repo uses
+        (`agents/math.txt` injects `<thoughts>Your thoughts</thoughts>`,
+        `<idea1>Your first idea</idea1>`). The injected example teaches STRUCTURE;
+        it must not read as an ANSWER.
+
+        Two earlier attempts here were both wrong, in opposite directions, and the
+        history matters because each one looks correct on its own:
+
+          - `[one of: terrible, needs_improvement, ...]` (bug a5f7b36d) — an ENUM
+            HINT in brackets. The 24B echoed the brackets verbatim as malformed
+            XML. That failure was read as "placeholders don't work here," and the
+            conclusion drawn was to go fully concrete.
+          - `good` / "Leads with the verdict in the first sentence." — a filled,
+            PLAUSIBLE grade. It is well-formed, and the model copied it byte-for-
+            byte onto messages it did not describe, including the single word
+            "yes". Removing it to stop the copying took the well-formedness
+            lesson with it, and the model began emitting unclosed tags.
+
+        Neither failure was about placeholders-vs-concrete. `[one of: ...]` failed
+        because bracket-enum syntax is not prose; a plausible grade failed because
+        it is a usable answer. Math's form is neither: plain descriptive prose that
+        no model would mistake for a verdict. The grade vocabulary is already
+        stated in the prompt's Task section, so nothing is lost by not repeating it
+        here.
         """
         return cls(
-            directness      = "good",
-            directness_note = "Leads with the verdict in the first sentence.",
-            tone            = "needs_improvement",
-            tone_note       = "Leans on an aphorism instead of plain phrasing.",
+            directness      = "Your directness grade",
+            directness_note = "Your one-sentence reason for the directness grade",
+            tone            = "Your tone grade",
+            tone_note       = "Your one-sentence reason for the tone grade",
         )
 
     @classmethod
