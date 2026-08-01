@@ -374,6 +374,75 @@ class TestDmQualityAuditIsWired( unittest.TestCase ):
         self.assertEqual( audit[ "total_overall_weight" ], 1 )
         self.assertEqual( audit[ "avg_tone" ], -1.0 )
 
+    def test_length_only_mode_does_not_crash_the_audit_on_a_none_weight( self ):
+        """REGRESSION. LENGTH-ONLY mode (Rick, 2026-08-01, row ca7a2cbf) returns
+        weight None for Directness/Tone. The tally did `int += None` and threw
+        TypeError, which surfaced as a 500 on EVERY DM send the moment the ruling
+        reached a running server. A None must be skipped, never summed."""
+        from cosa.rest.routers.dm import get_dm_quality_audit, reset_dm_quality_audit, _record_dm_quality
+        reset_dm_quality_audit()
+        _record_dm_quality( {
+            "length"     : { "weight":  2 },
+            "directness" : { "weight": None },
+            "tone"       : { "weight": None },
+            "overall"    : { "weight":  2 },
+        } )
+        audit = get_dm_quality_audit()
+        self.assertEqual( audit[ "count" ], 1 )
+        self.assertEqual( audit[ "total_length_weight" ], 2 )
+        self.assertEqual( audit[ "total_overall_weight" ], 2 )
+
+    def test_a_withheld_grade_does_not_count_toward_the_qualitative_average( self ):
+        """A withheld dimension is NOT a zero. Averaging it as one would drag
+        avg_directness toward 0 and publish that as a considered score — the exact
+        non-answer-in-the-answer's-value-space defect row ca7a2cbf is about, moved
+        into the audit counter. qualitative_count is what keeps them separable."""
+        from cosa.rest.routers.dm import get_dm_quality_audit, reset_dm_quality_audit, _record_dm_quality
+        reset_dm_quality_audit()
+        _record_dm_quality( {                                    # withheld — must not dilute
+            "length": { "weight": 0 }, "directness": { "weight": None },
+            "tone"  : { "weight": None }, "overall": { "weight": 0 },
+        } )
+        _record_dm_quality( {                                    # a real grade
+            "length": { "weight": 0 }, "directness": { "weight": 2 },
+            "tone"  : { "weight": 2 }, "overall": { "weight": 1 },
+        } )
+        audit = get_dm_quality_audit()
+        self.assertEqual( audit[ "count" ], 2 )
+        self.assertEqual( audit[ "qualitative_count" ], 1 )
+        # 2/1, NOT 2/2 — the withheld row is absent from the denominator
+        self.assertEqual( audit[ "avg_directness" ], 2.0 )
+        self.assertEqual( audit[ "avg_tone" ], 2.0 )
+
+    def test_qualitative_count_is_zero_in_pure_length_only_mode( self ):
+        """The tell a reader needs: avg_directness == 0.0 with qualitative_count == 0
+        means NOTHING was graded, which is a different fact from an average of zero."""
+        from cosa.rest.routers.dm import get_dm_quality_audit, reset_dm_quality_audit, _record_dm_quality
+        reset_dm_quality_audit()
+        for _ in range( 3 ):
+            _record_dm_quality( {
+                "length": { "weight": 1 }, "directness": { "weight": None },
+                "tone"  : { "weight": None }, "overall": { "weight": 1 },
+            } )
+        audit = get_dm_quality_audit()
+        self.assertEqual( audit[ "count" ], 3 )
+        self.assertEqual( audit[ "qualitative_count" ], 0 )
+        self.assertEqual( audit[ "avg_directness" ], 0.0 )
+        self.assertEqual( audit[ "avg_tone" ], 0.0 )
+        self.assertEqual( audit[ "avg_length" ], 1.0 )
+
+    def test_reset_clears_the_qualitative_counter_too( self ):
+        """A counter that survives a reset silently poisons the next window."""
+        from cosa.rest.routers.dm import get_dm_quality_audit, reset_dm_quality_audit, _record_dm_quality
+        reset_dm_quality_audit()
+        _record_dm_quality( {
+            "length": { "weight": 1 }, "directness": { "weight": 1 },
+            "tone"  : { "weight": 1 }, "overall": { "weight": 1 },
+        } )
+        self.assertEqual( get_dm_quality_audit()[ "qualitative_count" ], 1 )
+        reset_dm_quality_audit()
+        self.assertEqual( get_dm_quality_audit()[ "qualitative_count" ], 0 )
+
 
 class TestDmQualityJudgeMergedIntoSend( _CoreHarness ):
     """

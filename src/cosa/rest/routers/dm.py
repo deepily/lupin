@@ -341,6 +341,12 @@ def _record_dm_length( body_text ):
 
 _dm_quality_audit = {
     "count"                   : 0,
+    # Grades whose qualitative half carried a REAL weight. Separate from `count`
+    # because LENGTH-ONLY mode (Rick, 2026-08-01) returns weight None for
+    # Directness/Tone, and a None must not be averaged as if it were a 0 — that
+    # is the same non-answer-in-the-answer's-value-space defect this package
+    # spent the day on, just moved into the audit counter.
+    "qualitative_count"       : 0,
     "total_length_weight"     : 0,
     "total_directness_weight" : 0,
     "total_tone_weight"       : 0,
@@ -374,6 +380,7 @@ def get_dm_quality_judgment_enabled():
 def reset_dm_quality_audit():
     """Reset the DM quality-audit counters and re-stamp the `since` instant."""
     _dm_quality_audit[ "count" ]                   = 0
+    _dm_quality_audit[ "qualitative_count" ]       = 0
     _dm_quality_audit[ "total_length_weight" ]     = 0
     _dm_quality_audit[ "total_directness_weight" ] = 0
     _dm_quality_audit[ "total_tone_weight" ]       = 0
@@ -390,13 +397,18 @@ def get_dm_quality_audit():
         - includes avg_length/avg_directness/avg_tone/avg_overall, all 0.0 (the
           same `if count else 0.0` divide-by-zero guard as get_dm_length_audit)
           when count is 0
+        - avg_directness/avg_tone divide by qualitative_count, NOT count. In
+          LENGTH-ONLY mode qualitative_count stays 0 and both read 0.0 — a
+          "nothing was graded" zero, which is why qualitative_count ships in
+          the snapshot: a reader can tell it from a real average of zero
     """
     snapshot = dict( _dm_quality_audit )
-    count = snapshot[ "count" ]
+    count    = snapshot[ "count" ]
+    qual     = snapshot[ "qualitative_count" ]
     snapshot[ "avg_length" ]     = ( snapshot[ "total_length_weight" ]     / count ) if count else 0.0
-    snapshot[ "avg_directness" ] = ( snapshot[ "total_directness_weight" ] / count ) if count else 0.0
-    snapshot[ "avg_tone" ]       = ( snapshot[ "total_tone_weight" ]       / count ) if count else 0.0
     snapshot[ "avg_overall" ]    = ( snapshot[ "total_overall_weight" ]    / count ) if count else 0.0
+    snapshot[ "avg_directness" ] = ( snapshot[ "total_directness_weight" ] / qual )  if qual  else 0.0
+    snapshot[ "avg_tone" ]       = ( snapshot[ "total_tone_weight" ]       / qual )  if qual  else 0.0
     return snapshot
 
 
@@ -425,17 +437,27 @@ def _record_dm_quality( quality ):
 
     Requires:
         - quality is the dict returned by DmQualityJudge.judge()
-          ({"length","directness","tone","overall"}, each with an int "weight")
+          ({"length","directness","tone","overall"}); Length and Overall always
+          carry an int weight, Directness and Tone carry an int OR None
 
     Ensures:
-        - increments count + the four running weight totals
+        - increments count + the Length/Overall totals on every grade
+        - a None Directness/Tone weight (LENGTH-ONLY mode) is SKIPPED, not
+          coerced to 0, and does not increment qualitative_count — so the
+          qualitative averages stay averages of grades that actually happened
         - emits one audit line (same convention as _record_dm_length)
     """
-    _dm_quality_audit[ "count" ]                   += 1
-    _dm_quality_audit[ "total_length_weight" ]     += quality[ "length" ][ "weight" ]
-    _dm_quality_audit[ "total_directness_weight" ] += quality[ "directness" ][ "weight" ]
-    _dm_quality_audit[ "total_tone_weight" ]       += quality[ "tone" ][ "weight" ]
-    _dm_quality_audit[ "total_overall_weight" ]    += quality[ "overall" ][ "weight" ]
+    _dm_quality_audit[ "count" ]                += 1
+    _dm_quality_audit[ "total_length_weight" ]  += quality[ "length" ][ "weight" ]
+    _dm_quality_audit[ "total_overall_weight" ] += quality[ "overall" ][ "weight" ]
+
+    directness_weight = quality[ "directness" ][ "weight" ]
+    tone_weight       = quality[ "tone" ][ "weight" ]
+    if directness_weight is not None and tone_weight is not None:
+        _dm_quality_audit[ "qualitative_count" ]       += 1
+        _dm_quality_audit[ "total_directness_weight" ] += directness_weight
+        _dm_quality_audit[ "total_tone_weight" ]       += tone_weight
+
     print( format_dm_quality_audit_line() )
 
 
