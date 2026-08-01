@@ -1,6 +1,26 @@
 # TODO
 
-Last updated: 2026-08-01 (Cheech 🌿 `070d88a5` — podcast rename + container auth blocker)
+Last updated: 2026-08-01 (Cheech 🌿 `7edf6e5e` — late-answer-handback cascade post-game)
+
+---
+
+## 📋 DECISIONS LOG 2026-08-01 (Cheech 🌿 `7edf6e5e` + María 🌸 `2b9feb77`) — late-answer-handback cascade post-game
+
+**Retro**: `io/post-games/2026.08.01-late-answer-handback-cascade-post-game.md` (local corpus, gitignored). Cascade telemetry: 15 stage-reviews, 5 sections, 43 min, 51 findings, 0 rejected, 0 escalations, no code under Rick's gate. Cast reaped 16:54; post-game opened 16:58.
+
+**R-1 — the deposits carried the harvest through a reap-before-harvest, and that is a receipt, not a mechanism claim.** 18 rolling deposits from 4 of 4 cascade seats, every one carrying provenance; the reap cost the retro almost nothing. **María, cross-examined, refused the causal version**: *"with one run I cannot separate 'a mechanism made it hold' from 'four diligent seats made it hold.' Diligence is the confound and we did not control for it."* Accepted verbatim — headline the receipt, drop the causation.
+
+**R-1b — two runs now point the same way, on different tiers.** 2026-07-27 measured the *teardown-time* deposit (memento element 9) → 1 of 6. 2026-08-01 measured the *during-run* deposit → 4 of 4. Consistent with `post-game.md` §3.4 ranking tier 2 above tier 3, and the first positive control that ranking has. Still not a controlled comparison — the seats differ.
+
+**R-1c — PENDING RICK.** The 2026-07-27 ruling R1 (*"every stand-down instruction must name element 9"*) is a *"remember to do this"* rule — the anti-pattern `post-game.md` §7 names by name. Proposal: demote it to a backstop under a headline of *rely on the during-run deposit*, the same demotion §3.3 applied to the reap gate. **Not applied.** A doctrine demotion is not a manager call. Store row `20efd445` (decision, owner `rick`, gate_class `operator`).
+
+**R-2 — Candidate 1 (an artifact belonging to no section goes un-updated) stays a CANDIDATE at four instances.** Tiberius 👑 refuted the promotion *from his own deposit, before anyone asked*: "count causes, not symptoms before you let evidence promote a rule." María: "Nothing moves it. Four instances, one cause, one run." A reaped seat winning an argument with a live manager is what the provenance field is for.
+
+**R-3 — Candidate 2 (a close check scoped to its author's own conditions) stays a CANDIDATE, and María's self-contradicting crew brief is NOT folded in to reach two.** Her ruling: same *family*, different *mechanism*; folding it in inflates the evidence. What it adds is a second author and a different engagement. **Promotion bar: cross-DAY recurrence.**
+
+**R-4 — on "0 rejected across 51 findings": the asymmetry is the finding, not the zero — now supported by a sample of two.** Tension was real on the manager axis (reviewers refuted the manager 4×; two reviewers disagreed substantively; one retired her own concern on evidence) and absent on the author axis (51 for 51 conceded, never once defended). María supplied the discriminator — *"was any ACCEPTED finding wrong? Nobody re-derived one"* — and it was run rather than argued: two accepted findings re-derived cold, both hold at the exact cited lines (`emit_to_session` has no `return` statement at all; the ORM partial-index prior art sits at `postgres_models.py:227-231`). **2 of 51 is a spot check.** Hypothesis → supported, not proven.
+
+**The day's through-line, from the design under review straight into the review of it**: *a value that cannot distinguish "I know" from "I don't know" was used as a gate.* A send read as a receipt · a stored default read as a given answer · "returns nothing" read as a proof · "the same ledger" read as one process · a headline count read as its own tables. **The manager reported ~70 findings upward all afternoon against a true 51 — and the moderator of this very post-game announced 20 deposits against a true 18, one hour after reading a memento whose headline finding is that exact defect.** Both corrected in flight and left visible rather than scrubbed.
 
 ---
 
