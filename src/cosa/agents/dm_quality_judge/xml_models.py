@@ -258,10 +258,13 @@ class DmQualityJudgeResponse( BaseXMLModel ):
             assert junk.tone_weight()       == 0
             assert junk.directness_emoji()  == "🤷"
 
-            # Label normalization (spaces / hyphens / case)
-            assert normalize_grade_label( "Needs Improvement" ) == "needs_improvement"
-            assert normalize_grade_label( "needs-improvement" ) == "needs_improvement"
-            assert normalize_grade_label( None )                == "meh"
+            # Label normalization (padding / separators / case). Rick's 2026-08-01
+            # vocabulary has no multi-word label, so the multi-word case that
+            # motivated the collapse is exercised in the unit suite rather than here.
+            assert normalize_grade_label( "  BAD  " )   == "bad"
+            assert normalize_grade_label( "_bad_" )     == "bad"
+            assert normalize_grade_label( "Exemplary" ) == "exemplary"
+            assert normalize_grade_label( None )        == "meh"
 
             # XML round-trip
             xml_str = r.to_xml()

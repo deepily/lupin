@@ -11,6 +11,22 @@ prose, jargon} — graded N times each. Each dimension is scored ONLY against th
 varies it while HOLDING the other property constant, so a failure is attributable to the
 dimension being tested.
 
+🔴 A NON-ANSWER IS NOT A MEASUREMENT (row ca7a2cbf, 2026-08-01). When the judge cannot
+   parse the model's XML it falls back to weight 0 with detail "judge unavailable"; a body
+   over the word limit returns weight 0 with a "too long" detail; the feature-off state
+   returns weight None. A REAL `meh` grade is ALSO weight 0. Earlier versions of this probe
+   compared WEIGHTS ONLY, so every fallback wore the costume of a real neutral grade and
+   could silently satisfy an ordering test. This probe now classifies each dimension result
+   by its `detail` string (imported from judge.py, never re-typed) and DROPS non-answers
+   from the ordering entirely — a non-answer is never treated as a 0.
+
+   The guard is PER CELL, not global: any cell that produced zero real grades on a
+   dimension fails the run outright. A global "some data exists" check would let three
+   good cells and one all-fallback cell satisfy an ordering by quietly comparing fewer
+   cells — the same defect this probe fixes, one level out. And a run that measured
+   nothing anywhere fails hardest of all (exit 2); it can never be mistaken for "I
+   measured, and it was fine."
+
 🔴 THIS SAMPLE HAS BEEN WRONG TWICE, and each time the sample was the defect rather than
    the judge. Both are recorded because the second one was invisible until the first was
    fixed.
@@ -36,14 +52,20 @@ Every body is kept UNDER the qualitative word limit on purpose; past it the judg
 short-circuits to 🤷/0 without calling the model at all, which would make this probe
 pass while measuring nothing.
 
-Usage:  python judge_discrimination_probe.py [runs]
+Usage:  python dm_judge_discrimination_probe.py [runs]
 """
 import os
 import sys
 
 sys.path.insert( 0, os.path.join( os.environ[ "LUPIN_ROOT" ], "src" ) )
 
-from cosa.agents.dm_quality_judge.judge import DmQualityJudge, QUALITATIVE_WORD_LIMIT
+from cosa.agents.dm_quality_judge.judge import (
+    DmQualityJudge,
+    QUALITATIVE_WORD_LIMIT,
+    _JUDGE_UNAVAILABLE_DETAIL,
+    _QUALITATIVE_OFF_DETAIL,
+    _TOO_LONG_DETAIL,
+)
 
 # ── the 2x2, and why it is a 2x2 ──────────────────────────────────────────────
 #
@@ -122,29 +144,182 @@ CONTRASTS = {
                          ( "BURIED_PLAIN",  "BURIED_JARGON" ) ) ),  # verdict held buried
 }
 
+# The non-answer kinds, in the order we report them. Keeping this list here (rather than
+# re-deriving it in three places) means a table column, a per-cell counter, and a test
+# fixture all agree on the same vocabulary.
+NONANSWER_KINDS = ( "unavailable", "too_long", "withheld" )
+
+
+def nonanswer_kind( dim ):
+    """
+    Name why a dimension result is NOT a real grade, or return None if it is one.
+
+    A non-answer describes ITSELF — the judge's own state ("judge unavailable", "too
+    long", "off"). A real grade describes something in the graded TEXT ("Leans on an
+    aphorism instead of plain phrasing"). The two are distinguishable only by weight and
+    detail together, NEVER by weight alone — a fallback and a real `meh` are both weight
+    0. This is the whole defect the probe exists to close (row ca7a2cbf, §6.1).
+
+    Requires:
+        - dim is a dimension result dict carrying "weight" and "detail" keys, exactly as
+          DmQualityJudge.judge() emits them
+
+    Ensures:
+        - returns one of NONANSWER_KINDS when the result is a non-answer, matched against
+          the SAME constants judge.py emits (imported, never re-typed, so a drift in the
+          judge cannot silently desynchronize this classifier)
+        - returns None when the result is a real, comparable grade
+    """
+    if dim[ "weight" ] is None:                 return "withheld"
+    detail = dim.get( "detail", "" )
+    if detail == _JUDGE_UNAVAILABLE_DETAIL:     return "unavailable"
+    if detail == _QUALITATIVE_OFF_DETAIL:       return "withheld"
+    if detail.startswith( _TOO_LONG_DETAIL ):   return "too_long"
+    return None
+
+
+def is_measurement( dim ):
+    """
+    True iff this dimension result is a real grade, not a judge non-answer.
+
+    Ensures:
+        - returns True only when nonanswer_kind( dim ) is None
+    """
+    return nonanswer_kind( dim ) is None
+
+
+def _measured_weights( runs, index ):
+    """
+    The real-grade weights on ONE dimension across a cell's runs — non-answers DROPPED.
+
+    Requires:
+        - runs is a list of ( directness_dict, tone_dict ) tuples
+        - index is 0 (directness) or 1 (tone)
+
+    Ensures:
+        - returns a list of int weights, containing ONLY runs that were real grades; a
+          non-answer is omitted, never coerced to 0
+    """
+    return [ r[ index ][ "weight" ] for r in runs if is_measurement( r[ index ] ) ]
+
+
+def _cell_counts( runs, index ):
+    """
+    Count real grades and each kind of non-answer for ONE cell on ONE dimension.
+
+    Ensures:
+        - returns {"real": n, "unavailable": n, "too_long": n, "withheld": n}
+        - the four counts sum to len( runs )
+    """
+    counts = { "real": 0, "unavailable": 0, "too_long": 0, "withheld": 0 }
+    for r in runs:
+        kind = nonanswer_kind( r[ index ] )
+        counts[ "real" if kind is None else kind ] += 1
+    return counts
+
 
 def _ordered( results, index, pairs, dim_name ):
     """
-    Does each held-constant pair come out in the right order on ONE dimension?
+    Do the held-constant pairs come out in the right order on ONE dimension?
+
+    Scores ONLY pairs where both sides have at least one real grade — a dead cell (zero
+    real grades) is caught separately and globally by evaluate(), so it is skipped here
+    rather than double-reported. This function's job is ordering, not coverage.
 
     Ensures:
-        - compares the WORST run of the better body against the BEST run of the worse
-          one — a margin, so a single overlapping run fails instead of averaging away
-        - returns ( ok, list_of_failure_strings ); a failure names the pair AND the two
-          numbers, because "not monotonic" alone does not say where it broke
-        - makes NO claim across cells that differ on BOTH properties. DIRECT_PLAIN vs
-          BURIED_JARGON is deliberately never compared: a difference there cannot be
-          attributed to either dimension, and comparing it is how the previous version
-          of this probe ended up marking a correct answer wrong
+        - compares only REAL measurements — a non-answer is dropped, NEVER treated as a 0
+        - compares the WORST run of the better body against the BEST run of the worse one
+          — a margin, so a single overlapping run fails instead of averaging away
+        - returns a list of failure strings; a failure names the pair AND the two numbers
+        - makes NO claim across cells that differ on BOTH properties (DIRECT_PLAIN vs
+          BURIED_JARGON is deliberately never compared)
     """
     failures = [ ]
     for better, worse in pairs:
-        worst_better = min( r[ index ] for r in results[ better ] )
-        best_worse   = max( r[ index ] for r in results[ worse  ] )
+        wb = _measured_weights( results[ better ], index )
+        ww = _measured_weights( results[ worse  ], index )
+        if not wb or not ww:
+            continue                                # dead cell — reported by evaluate()
+        worst_better = min( wb )
+        best_worse   = max( ww )
         if worst_better <= best_worse:
             failures.append(
                 f"{dim_name}: {better} ({worst_better}) is NOT above {worse} ({best_worse})" )
-    return ( not failures ), failures
+    return failures
+
+
+def evaluate( results, contrasts ):
+    """
+    Turn per-cell run results into a verdict that CANNOT confuse a non-answer with a grade.
+
+    Requires:
+        - results maps body-name -> list of ( directness_dict, tone_dict ) runs, each dict
+          carrying "weight" and "detail" exactly as DmQualityJudge.judge() emits
+        - contrasts is the CONTRASTS map ( dim_name -> ( index, pairs ) )
+
+    Ensures:
+        - counts real grades and each kind of non-answer PER CELL PER DIMENSION (cell_stats)
+        - dead_cells lists every ( body, dimension ) that produced ZERO real grades — the
+          per-cell guard, so one all-fallback cell fails the run even when the other three
+          cells are fully graded
+        - status is exactly one of:
+            "NO_MEASUREMENTS" — zero real grades ANYWHERE; the probe measured nothing
+            "INSUFFICIENT"    — at least one dead cell; an ordering rests on missing grades
+            "NOT_MONOTONIC"   — every needed cell measured, at least one ordering wrong
+            "MONOTONIC"       — every needed cell measured and every ordering correct
+        - exit_code is 0 ONLY for MONOTONIC; 1 for NOT_MONOTONIC and INSUFFICIENT; 2 for
+          NO_MEASUREMENTS — a probe that measured nothing is a HARD failure, never a pass
+        - returns a report dict:
+            {"status", "exit_code", "cell_stats", "dead_cells", "total_real",
+             "failures", "verdicts"}
+    """
+    cell_stats = { }
+    dead_cells = [ ]
+    total_real = 0
+    for name in results:
+        cell_stats[ name ] = { }
+        for dim_name, ( index, _pairs ) in contrasts.items():
+            counts = _cell_counts( results[ name ], index )
+            cell_stats[ name ][ dim_name ] = counts
+            total_real += counts[ "real" ]
+            if counts[ "real" ] == 0:
+                dead_cells.append( ( name, dim_name ) )
+
+    failures, verdicts = [ ], { }
+    for dim_name, ( index, pairs ) in contrasts.items():
+        fails = _ordered( results, index, pairs, dim_name )
+        # A dimension is "ok" only if it had no ordering failures AND no dead cell.
+        dim_dead = any( d == dim_name for _n, d in dead_cells )
+        verdicts[ dim_name ] = ( not fails ) and ( not dim_dead )
+        failures.extend( fails )
+
+    if total_real == 0:
+        status, exit_code = "NO_MEASUREMENTS", 2
+    elif dead_cells:
+        status, exit_code = "INSUFFICIENT", 1
+    elif failures:
+        status, exit_code = "NOT_MONOTONIC", 1
+    else:
+        status, exit_code = "MONOTONIC", 0
+
+    return {
+        "status"     : status,
+        "exit_code"  : exit_code,
+        "cell_stats" : cell_stats,
+        "dead_cells" : dead_cells,
+        "total_real" : total_real,
+        "failures"   : failures,
+        "verdicts"   : verdicts,
+    }
+
+
+def _nonanswer_summary( counts ):
+    """Compact "u=1 t=0 w=2" tail for the non-answer columns; empty string if all zero."""
+    parts = [ ]
+    if counts[ "unavailable" ]: parts.append( f"u={counts[ 'unavailable' ]}" )
+    if counts[ "too_long"    ]: parts.append( f"t={counts[ 'too_long'    ]}" )
+    if counts[ "withheld"    ]: parts.append( f"w={counts[ 'withheld'    ]}" )
+    return " ".join( parts )
 
 
 def main():
@@ -156,7 +331,16 @@ def main():
             f"{name} body is {wc} words, over the {QUALITATIVE_WORD_LIMIT} limit — the judge "
             f"would skip the model entirely and this probe would measure nothing" )
 
-    judge = DmQualityJudge( debug=False, verbose=False )
+    # Force qualitative grading ON regardless of the ambient INI. The feature ships OFF
+    # (row ca7a2cbf), but this probe exists to measure the qualitative half itself, so it
+    # injects the seam rather than depending on an operator's toggle. Say so LOUDLY — a
+    # reader who assumes this verdict describes live behavior would be wrong.
+    print( "── DM Quality Judge discrimination probe ─────────────────────────────" )
+    print( "⚠ qualitative judging FORCED ON for this probe (injection seam)." )
+    print( "  Production ships qualitative OFF (row ca7a2cbf); this measures the" )
+    print( "  qualitative half in isolation, NOT live DM-grading behavior." )
+
+    judge = DmQualityJudge( debug=False, verbose=False, qualitative_enabled=True )
     if not judge.available:
         print( "✗ judge LLM unavailable — probe cannot run" )
         return 2
@@ -167,39 +351,65 @@ def main():
         for name, body in BODIES:
             g = judge.judge( body )
             d, t = g[ "directness" ], g[ "tone" ]
-            results[ name ].append( ( d[ "weight" ], t[ "weight" ] ) )
+            results[ name ].append( ( d, t ) )
             rows.append( ( i + 1, name, d[ "emoji" ], d[ "weight" ], t[ "emoji" ],
                            t[ "weight" ], g[ "overall" ][ "emoji" ] ) )
 
-    print( f"\n{'run':<5}{'body':<15}{'direct':<10}{'w':<4}{'tone':<10}{'w':<4}{'overall'}" )
-    print( "-" * 52 )
+    print( f"\n{'run':<5}{'body':<15}{'direct':<10}{'w':<6}{'tone':<10}{'w':<6}{'overall'}" )
+    print( "-" * 56 )
     for r in rows:
-        print( f"{r[0]:<5}{r[1]:<15}{r[2]:<10}{r[3]:<4}{r[4]:<10}{r[5]:<4}{r[6]}" )
+        wd = "—" if r[ 3 ] is None else r[ 3 ]
+        wt = "—" if r[ 5 ] is None else r[ 5 ]
+        print( f"{r[0]:<5}{r[1]:<15}{r[2]:<10}{str( wd ):<6}{r[4]:<10}{str( wt ):<6}{r[6]}" )
 
-    verdicts, failures = { }, [ ]
-    for dim_name, ( index, pairs ) in CONTRASTS.items():
-        ok, fails = _ordered( results, index, pairs, dim_name )
-        verdicts[ dim_name ] = ok
-        failures.extend( fails )
-    ok_d, ok_t = verdicts[ "Directness" ], verdicts[ "Tone" ]
+    report = evaluate( results, CONTRASTS )
 
-    print( "" )
+    # The 2x2, with the real-grade weights AND the non-answer count stated PER CELL — a
+    # cell that never produced a real grade is the headline, not a footnote.
+    print( "\n2x2 real-grade weights (non-answers are NOT shown as 0):" )
     for name, _ in BODIES:
-        ds = sorted( { r[ 0 ] for r in results[ name ] } )
-        ts = sorted( { r[ 1 ] for r in results[ name ] } )
-        print( f"{name:<14} directness={ds}  tone={ts}" )
+        line = f"  {name:<14}"
+        for dim_name in ( "Directness", "Tone" ):
+            index  = CONTRASTS[ dim_name ][ 0 ]
+            counts = report[ "cell_stats" ][ name ][ dim_name ]
+            ws     = sorted( { w for w in _measured_weights( results[ name ], index ) } )
+            tail   = _nonanswer_summary( counts )
+            tail   = f"  [non-answers {tail}]" if tail else ""
+            label  = "direct" if dim_name == "Directness" else "tone"
+            shown  = ws if counts[ "real" ] else "NONE MEASURED"
+            line  += f"  {label}={shown}{tail}"
+        print( line )
 
-    for line in failures:
+    # Loud, un-missable non-answer accounting. If ANY cell produced a non-answer, say so
+    # here — a reader must never have to infer it from a suspiciously clean table.
+    total_nonanswers = sum(
+        report[ "cell_stats" ][ name ][ dim ][ k ]
+        for name, _ in BODIES for dim in ( "Directness", "Tone" ) for k in NONANSWER_KINDS
+    )
+    if total_nonanswers:
+        print( f"\n🔴 NON-ANSWERS PRESENT: {total_nonanswers} dimension-result(s) were NOT real grades." )
+        print( "   (u=judge unavailable/parse-fail, t=too long, w=withheld/feature-off)" )
+        for name, _ in BODIES:
+            for dim_name in ( "Directness", "Tone" ):
+                counts = report[ "cell_stats" ][ name ][ dim_name ]
+                tail   = _nonanswer_summary( counts )
+                if tail:
+                    print( f"   {name:<14} {dim_name:<11} real={counts[ 'real' ]}  {tail}" )
+
+    for name, dim_name in report[ "dead_cells" ]:
+        print( f"  ⚠ DEAD CELL: {name} produced 0 real grades on {dim_name} — cannot be ordered" )
+    for line in report[ "failures" ]:
         print( f"  ✗ {line}" )
 
-    # A 🤷/0 everywhere would satisfy no ordering, but a judge that has died mid-run
-    # deserves its own exit code rather than being reported as a grading failure.
-    if all( d == 0 and t == 0 for v in results.values() for d, t in v ):
-        print( "\n✗ every run returned the 0 fallback — the judge is not grading at all" )
-        return 2
-
-    print( f"\n{'✓ MONOTONIC on both dimensions' if ok_d and ok_t else '✗ NOT MONOTONIC'}" )
-    return 0 if ( ok_d and ok_t ) else 1
+    status = report[ "status" ]
+    banner = {
+        "NO_MEASUREMENTS" : "✗ MEASURED NOTHING — every dimension was a non-answer; this is NOT a pass",
+        "INSUFFICIENT"    : "✗ INSUFFICIENT — a dead cell means an ordering rests on grades that do not exist",
+        "NOT_MONOTONIC"   : "✗ NOT MONOTONIC",
+        "MONOTONIC"       : "✓ MONOTONIC on both dimensions",
+    }[ status ]
+    print( f"\n{banner}" )
+    return report[ "exit_code" ]
 
 
 if __name__ == "__main__":

@@ -79,15 +79,27 @@ QUALITATIVE_WORD_LIMIT      = 150
 _TOO_LONG_DETAIL            = "not judged: DM too long for reliable qualitative grading"
 
 
-# Matches ONE angle-bracket tag, tolerating the sloppiness the live 24B GPTQ model
-# emits (bug a5f7b36d): leading/inner whitespace, a spaced slash (`< / tone >`), and
+# Matches ONE angle-bracket tag, tolerating the sloppiness the live models emit
+# (bug a5f7b36d): leading/inner whitespace, a spaced slash (`< / tone >`), and
 # multi-word / spaced-underscore tag names (`< directness note >`, `< directness _
-# note >`). Group 1 = optional slash, group 2 = the raw (possibly spaced) tag name.
-_TAG_RE = re.compile( r"<\s*(/?)\s*([A-Za-z][A-Za-z0-9_ ]*?)\s*>" )
+# note >`). The char class also includes '-' so a DASH-cased tag (`<directness-note>`,
+# the repo convention as of 2026-08-01) is CAPTURED for canonicalization rather than
+# slipping past the repair layer unrewritten — which mangled it (row 25e8ca1c).
+# Group 1 = optional slash, group 2 = the raw (possibly spaced/dashed) tag name.
+_TAG_RE = re.compile( r"<\s*(/?)\s*([A-Za-z][A-Za-z0-9_ -]*?)\s*>" )
 
-# The 4 known child fields, in prompt/schema order — used by both the
-# unclosed-tag fallback below and to detect "well-formed enough" spans.
-_KNOWN_FIELDS = ( "directness", "directness_note", "tone", "tone_note" )
+# The 4 known child fields in the CANONICAL form the parser expects: bare grade tags,
+# DASH-cased note tags — DmQualityJudgeResponse declares alias="directness-note" /
+# "tone-note", so dash is the shape from_xml() parses. Used by the unclosed-tag
+# fallback below and to detect "well-formed enough" spans.
+_KNOWN_FIELDS = ( "directness", "directness-note", "tone", "tone-note" )
+
+# A field looked up by its SEPARATOR-AGNOSTIC key: lowercased, with any run of
+# whitespace / underscore / dash collapsed to a single underscore. Lets _fix_tag map
+# every sloppy variant — `<directness_note>`, `< directness note >`, `<directness-note>`
+# — onto the one canonical `<directness-note>` tag. The tag convention thus lives in
+# exactly ONE place (_KNOWN_FIELDS); a future change to it needs no edit here.
+_CANONICAL_BY_KEY = { re.sub( r"[\s_-]+", "_", f ): f for f in _KNOWN_FIELDS }
 
 
 def _extract_unclosed_fields( span ):
@@ -201,7 +213,11 @@ def _repair_llm_xml( raw ):
 
     def _fix_tag( m ):
         slash = "/" if m.group( 1 ) == "/" else ""
-        name  = re.sub( r"[\s_]+", "_", m.group( 2 ).strip() )
+        # Separator-agnostic key (collapse whitespace/underscore/dash → one '_',
+        # lowercase), then map a KNOWN field onto its canonical (dash-cased) tag.
+        # An unknown tag (e.g. <response>) keeps its collapsed form unchanged.
+        key   = re.sub( r"[\s_-]+", "_", m.group( 2 ).strip().lower() )
+        name  = _CANONICAL_BY_KEY.get( key, key )
         return f"<{slash}{name}>"
 
     raw = _TAG_RE.sub( _fix_tag, raw )
@@ -526,7 +542,17 @@ class DmQualityJudge:
         template_processed = self._processor.process_template(
             template_raw, _JUDGE_ROUTING_COMMAND
         )
-        prompt = template_processed.format( dm_body=body_text )
+        # .replace(), NOT .format() — str.format treats EVERY brace in the string as a
+        # format field, and two independent sources put literal braces in here:
+        #   1. the injected XML example carries `{terrible|bad|meh|good|exemplary}`
+        #      (the CHOOSE-ONE placeholder), which format() reads as a field name and
+        #      dies on with KeyError — outside the retry block, so judge() RAISED and
+        #      broke its own never-raises contract;
+        #   2. any DM body containing a brace — a dict literal, an f-string, a JSON
+        #      snippet — would do the same, and peers paste code into DMs constantly.
+        # The template has exactly one substitution point and no need for format()'s
+        # grammar, so the narrower tool is the correct one.
+        prompt = template_processed.replace( "{dm_body}", body_text )
 
         last_error   = None
         max_attempts = 3

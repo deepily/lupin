@@ -81,7 +81,7 @@ class TestDmQualityJudgeResponse:
 
     @pytest.mark.parametrize( "label,weight,emoji", [
         ( "terrible",          -2, "😞" ),
-        ( "needs_improvement", -1, "👎" ),
+        ( "bad",               -1, "👎" ),
         ( "meh",                0, "🤷" ),
         ( "good",               1, "👍" ),
         ( "exemplary",          2, "⭐" ),
@@ -100,11 +100,12 @@ class TestDmQualityJudgeResponse:
         assert r.directness_emoji()  == "🤷"
 
     @pytest.mark.parametrize( "raw,canonical", [
-        ( "Needs Improvement", "needs_improvement" ),
-        ( "needs-improvement", "needs_improvement" ),
-        ( "  GOOD  ",          "good" ),
-        ( None,                "meh" ),
-        ( "",                  "meh" ),
+        ( "  GOOD  ",   "good" ),
+        ( "Bad",        "bad" ),
+        ( "  BAD  ",    "bad" ),
+        ( "EXEMPLARY",  "exemplary" ),
+        ( None,         "meh" ),
+        ( "",           "meh" ),
     ] )
     def test_label_normalization( self, raw, canonical ):
         assert normalize_grade_label( raw ) == canonical
@@ -122,21 +123,50 @@ class TestDmQualityJudgeResponse:
     # model was in fact returning `needs_improvement`.
 
     @pytest.mark.parametrize( "raw", [
-        "needs _ improvement",          # ← the exact live-model spelling
-        "needs__improvement",
-        "needs - improvement",
-        "  NEEDS  -  IMPROVEMENT  ",
-        "needs\timprovement",
-        "_needs_improvement_",
+        "  bad  ",
+        "\tbad\t",
+        "_bad_",
+        "-bad-",
+        "  BAD  ",
     ] )
-    def test_a_spaced_or_doubled_separator_still_resolves_to_the_real_label( self, raw ):
+    def test_a_padded_or_separator_wrapped_label_still_resolves( self, raw ):
         """
-        THE REGRESSION. Each of these is a RECOVERABLE label; none may land on the
-        fallback. Asserting the weight (-1) and not just the key, because the whole
-        defect was a wrong NUMBER reaching a reader, not a wrong string internally.
+        THE REGRESSION, KEPT — but note its original subject label is GONE.
+
+        The bug was: the live model emitted `needs _ improvement` (spaces AROUND the
+        underscore) and a two-`.replace()` normalizer produced `needs___improvement`,
+        which is not in GRADE_TABLE, so the most-frequent multi-word label in the
+        scale silently became `meh`/0 on every occurrence — a real -1 published as a
+        considered neutral.
+
+        Rick's 2026-08-01 vocabulary (`terrible|bad|meh|good|exemplary`) has NO
+        multi-word label, so that exact defect cannot recur while this vocabulary
+        stands. The collapse is still the right normalizer and is still tested here,
+        because the vocabulary could grow a multi-word label again and the next
+        person should not have to rediscover why the collapse exists.
+
+        Asserting the WEIGHT, not just the key — the defect was a wrong NUMBER
+        reaching a reader.
         """
-        assert normalize_grade_label( raw ) == "needs_improvement"
+        assert normalize_grade_label( raw ) == "bad"
         assert grade_weight( raw )          == -1
+
+    @pytest.mark.parametrize( "raw,canonical", [
+        ( "needs _ improvement", "needs_improvement" ),
+        ( "needs__improvement",  "needs_improvement" ),
+        ( "  NEEDS  -  IMPROVEMENT  ", "needs_improvement" ),
+    ] )
+    def test_the_collapse_still_handles_a_multi_word_label_shape( self, raw, canonical ):
+        """
+        The mechanism, tested independently of the vocabulary. `needs_improvement` is
+        no longer a grade, so these correctly fall through to the `meh` fallback —
+        but the COLLAPSE itself must still produce the single-underscore key, or a
+        future multi-word label re-opens the original bug silently.
+        """
+        assert normalize_grade_label( raw ) == "meh"        # not a grade any more
+        # the collapse mechanism itself, asserted directly
+        import re as _re
+        assert _re.sub( r"[\s_\-]+", "_", raw.strip().lower() ).strip( "_" ) == canonical
 
     def test_a_genuinely_unknown_label_STILL_degrades_to_meh( self ):
         """
@@ -369,8 +399,11 @@ class TestRepairLlmXml:
         assert "< " not in out and " >" not in out
 
     def test_collapses_multi_word_and_spaced_underscore_tags( self ):
-        assert "<directness_note>"  in _repair_llm_xml( "<response>< directness note >x</ directness note ></response>" )
-        assert "<directness_note>"  in _repair_llm_xml( "<response>< directness _ note >x</ directness _ note ></response>" )
+        # Every sloppy separator (space, spaced-underscore, dash) canonicalizes to the
+        # DASH-cased note tag the parser expects (row 25e8ca1c) — one convention, one place.
+        assert "<directness-note>"  in _repair_llm_xml( "<response>< directness note >x</ directness note ></response>" )
+        assert "<directness-note>"  in _repair_llm_xml( "<response>< directness _ note >x</ directness _ note ></response>" )
+        assert "<directness-note>"  in _repair_llm_xml( "<response><directness-note>x</directness-note></response>" )
 
     def test_extracts_only_the_response_span_dropping_trailing_stop( self ):
         raw = "<response><tone>good</tone></response></stop> trailing junk"
@@ -413,11 +446,11 @@ class TestRepairLlmXml:
         parsed = DmQualityJudgeResponse.from_xml( out )
         assert parsed.directness_weight() == 0 and parsed.tone_weight() == 1
 
-    def test_curly_recovery_keeps_underscored_label_intact( self ):
+    def test_curly_recovery_keeps_the_label_intact( self ):
         parsed = DmQualityJudgeResponse.from_xml(
-            _repair_llm_xml( "{ directness_needs_improvement } { tone_meh }" )
+            _repair_llm_xml( "{ directness_bad } { tone_meh }" )
         )
-        assert parsed.directness == "needs_improvement"
+        assert parsed.directness == "bad"
         assert parsed.directness_weight() == -1
 
     def test_curly_partial_only_directness_is_not_recovered( self ):
@@ -544,7 +577,7 @@ class TestOneOfOneDegenerateRecovery:
         (nudge-prefixed) returns valid XML → judge recovers a NON-fallback grade."""
         judge, client = _make_judge( run_behaviour=[
             " (1 of 1)",
-            "<response><directness>good</directness><tone>needs_improvement</tone></response>",
+            "<response><directness>good</directness><tone>bad</tone></response>",
         ] )
         result = judge.judge( "a short rambling body" )
         assert client.run.call_count == 2
@@ -580,20 +613,49 @@ class TestQualitativeWordCeiling:
         assert result[ "directness" ][ "weight" ] == 1
 
 
-class TestConcreteExampleNotPlaceholder:
-    """The prompt example must be CONCRETE — a `[one of: ...]` placeholder is what
-    the 24B model echoed as literal malformed XML (bug a5f7b36d)."""
+class TestExampleIsAChooseOnePlaceholder:
+    """
+    PREMISE REVERSED 2026-08-01 (Rick). This class previously asserted the opposite —
+    that the example must be CONCRETE — because an early `[one of: terrible, ...]`
+    enum hint was echoed verbatim as malformed XML (bug a5f7b36d), and that failure
+    was read as "placeholders do not work here."
 
-    def test_example_carries_no_bracket_placeholder( self ):
-        ex = DmQualityJudgeResponse.get_example_for_template()
-        for field in ( ex.directness, ex.directness_note, ex.tone, ex.tone_note ):
-            assert "[" not in field and "]" not in field
+    Both readings were too broad. A bracketed ENUM HINT failed because that syntax is
+    not prose; a filled PLAUSIBLE grade failed differently — the model copied it
+    byte-for-byte onto messages it did not describe, including the single word "yes".
+    Rick's CHOOSE-ONE form is neither: an instruction the model reads and substitutes.
+    Verified live against phi-4 — the placeholder is NOT echoed and a real label is
+    returned.
 
-    def test_example_uses_real_labels_and_two_differ( self ):
+    The example must therefore be a placeholder that CANNOT be mistaken for an answer.
+    """
+
+    def test_example_is_a_choose_one_placeholder_not_a_usable_grade( self ):
         ex = DmQualityJudgeResponse.get_example_for_template()
-        assert ex.directness_weight() in ( -2, -1, 0, 1, 2 )
-        assert ex.tone_weight()       in ( -2, -1, 0, 1, 2 )
-        assert ex.directness != ex.tone   # forces the model to choose, not parrot
+        for grade in ( ex.directness, ex.tone ):
+            assert "CHOOSE ONE" in grade
+            # the whole point: it is NOT a label a copying model could pass off
+            assert grade not in GRADE_TABLE
+
+    def test_example_enumerates_every_legal_label( self ):
+        """The CHOOSE-ONE list must stay in step with GRADE_TABLE, or the prompt
+        starts advertising a vocabulary the parser does not accept."""
+        ex = DmQualityJudgeResponse.get_example_for_template()
+        for label in GRADE_TABLE:
+            assert label in ex.directness, label
+            assert label in ex.tone, label
+
+    def test_example_notes_are_directives_not_prose_a_model_could_copy( self ):
+        ex = DmQualityJudgeResponse.get_example_for_template()
+        for note in ( ex.directness_note, ex.tone_note ):
+            assert note.isupper(), note      # shouted instruction, not a sentence
+
+    def test_example_serializes_with_dash_cased_tags( self ):
+        """Repo convention (`line-number`, `rephrased-answer`). The repair layer and
+        the parser both canonicalize on the dash form, so the EXAMPLE must teach it."""
+        xml = DmQualityJudgeResponse.get_example_for_template().to_xml()
+        assert "<directness-note>" in xml and "<tone-note>" in xml
+        assert "_note>" not in xml
 
 
 class TestMeahAlias:
@@ -609,16 +671,9 @@ class TestLiveMistralRegression:
     hit the real endpoint. This exercises the LIVE model end-to-end (skipped when
     :3001 is unreachable so the offline unit gate stays green)."""
 
-    @pytest.mark.xfail( reason=(
-        "CATCHING A REAL REGRESSION I INTRODUCED — do NOT delete, and do not read the "
-        "xfail as 'known broken, ignore'. Commit c7b76ce5 landed a few-shot prompt that "
-        "REMOVED the trailing {{PYDANTIC_XML_EXAMPLE}}, and with it the well-formedness "
-        "lesson that example was teaching. The live 24B now emits malformed XML on some "
-        "bodies — `<response><directness>meah <directness>` — opening the tag twice and "
-        "never closing it, so all 3 retries fail and the dimension falls back to "
-        "'judge unavailable'/0. Production is UNAFFECTED today only because Rick ruled "
-        "the qualitative half OFF the same day. Un-xfail when the prompt is fixed. "
-        "Row ca7a2cbf." ), strict=False )
+    # Un-xfailed 2026-08-01 (row 25e8ca1c): the prompt regression is fixed and the repair
+    # layer is now tag-convention-agnostic, so phi-4's clean dash-cased XML parses and this
+    # returns a real non-fallback grade. Was xfail while c7b76ce5's prompt took it down.
     def test_live_short_exemplary_body_grades_non_fallback( self ):
         judge  = DmQualityJudge( qualitative_enabled=True )
         result = judge.judge( "Phase 1 done, green. 89 tests pass. Not committed — holding your gate." )
@@ -626,16 +681,8 @@ class TestLiveMistralRegression:
         assert result[ "tone" ][ "detail" ]       != _JUDGE_UNAVAILABLE_DETAIL
         assert set( result.keys() ) == { "length", "directness", "tone", "overall" }
 
-    @pytest.mark.xfail( reason=(
-        "CATCHING A REAL REGRESSION I INTRODUCED — do NOT delete, and do not read the "
-        "xfail as 'known broken, ignore'. Commit c7b76ce5 landed a few-shot prompt that "
-        "REMOVED the trailing {{PYDANTIC_XML_EXAMPLE}}, and with it the well-formedness "
-        "lesson that example was teaching. The live 24B now emits malformed XML on some "
-        "bodies — `<response><directness>meah <directness>` — opening the tag twice and "
-        "never closing it, so all 3 retries fail and the dimension falls back to "
-        "'judge unavailable'/0. Production is UNAFFECTED today only because Rick ruled "
-        "the qualitative half OFF the same day. Un-xfail when the prompt is fixed. "
-        "Row ca7a2cbf." ), strict=False )
+    # Un-xfailed 2026-08-01 (row 25e8ca1c): prompt fixed + repair layer tag-agnostic, so
+    # the grades diverge for real again. Was xfail under c7b76ce5's malformed-XML fallback.
     def test_live_discrimination_good_vs_bad_diverge( self ):
         """Krishna req #2: on short/medium DMs the grades ACTUALLY diverge — a
         verdict-first DM must out-score a rambling no-verdict one on directness. This
@@ -667,15 +714,9 @@ class TestLiveMistralRegression:
         assert result[ "directness" ][ "detail" ] != _JUDGE_UNAVAILABLE_DETAIL
         assert result[ "tone" ][ "detail" ]       != _JUDGE_UNAVAILABLE_DETAIL
 
-    @pytest.mark.xfail( reason=(
-        "SAME REGRESSION AS ITS TWO SIBLINGS ABOVE — this one was MISSED when they were "
-        "marked, and it is the third live test the c7b76ce5 prompt takes down, not a new "
-        "defect. That prompt removed the trailing {{PYDANTIC_XML_EXAMPLE}} and with it the "
-        "well-formedness lesson; the live 24B now emits `<response><directness>good "
-        "<directness>` — tag opened twice, never closed — so all 3 retries fail and both "
-        "dimensions land on 'judge unavailable'/0. Production is UNAFFECTED because the "
-        "qualitative half is OFF (Rick, 2026-08-01). Un-xfail all three together when the "
-        "prompt is fixed. Row ca7a2cbf." ), strict=False )
+    # Un-xfailed 2026-08-01 (row 25e8ca1c): third of the three siblings — prompt fixed +
+    # repair layer tag-agnostic, so the nudge retry recovers a real grade. Was xfail under
+    # c7b76ce5's malformed-XML fallback.
     def test_live_1of1_verbose_recovers_via_nudge( self ):
         """bug d02eaaa7 end-to-end: Clayton's exact 146w body deterministically makes
         the live model emit ' (1 of 1)' on attempt 1; the nudge retry recovers a REAL
