@@ -30,7 +30,7 @@
 #### Checkpoint | 2026.08.01 02:15 | DM Quality Judge 3-bug fix (Maria's diagnosis)
 
 **Files**: src/cosa/agents/dm_quality_judge/judge.py, src/conf/prompts/dm-quality-judge.txt, src/conf/lupin-app.ini
-**Commit**: [pending]
+**Commit**: `43cb37e7`
 
 ### 2026.07.28 - Session 951a4459 (Mr. Radio 🦉) | One key file, two authorities — a 38-hour outage closed, and dev was the only host where the defect was invisible
 
