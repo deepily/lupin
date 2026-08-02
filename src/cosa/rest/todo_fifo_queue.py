@@ -3,6 +3,8 @@ import threading
 import uuid
 from typing import Any, Optional, Dict, Type, List
 
+import requests
+
 from cosa.agents.confirmation_dialog import ConfirmationDialogue
 from cosa.rest.fifo_queue import FifoQueue  # CJ Flow ingress queue — receives all incoming jobs
 
@@ -697,9 +699,7 @@ class TodoFifoQueue( FifoQueue ):
                 print( msg )
                 # TTS Migration (Session 97): Use notification service instead of _emit_speech
                 self._notify( f"{self.hemming_and_hawing[ random.randint( 0, len( self.hemming_and_hawing ) - 1 ) ]} I'm gonna ask our research librarian about that", target_user=user_email )
-                search = LupinSearch( query=question_gist )
-                search.search_and_summarize_the_web()
-                msg = search.get_results( scope="summary" )
+                msg = self._search_and_summarize_safely( question_gist )
             
             elif command == "agent router go to calendar":
                 if self._crud_agents_enabled():
@@ -772,9 +772,7 @@ class TodoFifoQueue( FifoQueue ):
                 print( msg )
                 # TTS Migration (Session 98): Use notification service instead of emit_speech_callback
                 self._notify( f"{self.hemming_and_hawing[ random.randint( 0, len( self.hemming_and_hawing ) - 1 ) ]} {self.thinking[ random.randint( 0, len( self.thinking ) - 1 ) ]}", target_user=user_email )
-                search = LupinSearch( query=question_gist )
-                search.search_and_summarize_the_web()
-                msg = search.get_results( scope="summary" )
+                msg = self._search_and_summarize_safely( question_gist )
                 
             if ding_for_new_job:
                 self.websocket_mgr.emit( 'notification_sound_update', { 'soundFile': '/static/gentle-gong.mp3' } )
@@ -913,6 +911,34 @@ class TodoFifoQueue( FifoQueue ):
         msg = f'Job added to queue. Queue size [{self.size()}]'
         return { "message": msg, "job_id": job.id_hash }
     
+    def _search_and_summarize_safely( self, question_gist: str ) -> str:
+        """
+        Run a web search, returning a spoken message even when the search backend is down.
+
+        The push path calls this synchronously, so an unhandled transport error here
+        surfaces to the user as an HTTP 500 from /api/push with a stack trace and no
+        explanation. Two unrelated conditions — "we could not route your request" and
+        "a third-party search API is unavailable" — must not both present as a 500.
+
+        Requires:
+            - question_gist is a non-empty string
+
+        Ensures:
+            - returns a non-empty string suitable for speaking to the user
+            - never raises on a search-backend transport or HTTP failure
+
+        Raises:
+            - nothing for search-backend failures; unrelated exceptions propagate
+        """
+        try:
+            search = LupinSearch( query=question_gist )
+            search.search_and_summarize_the_web()
+            return search.get_results( scope="summary" )
+
+        except requests.exceptions.RequestException as e:
+            print( f"[SEARCH] Web search backend unavailable: {e}" )
+            return "I couldn't work out which agent handles that, and the web search I fall back on isn't answering right now. Could you rephrase it?"
+
     def _get_routing_command( self, question: str ) -> tuple[str, str]:
         """
         Determine the routing command for a question.
@@ -935,7 +961,8 @@ class TodoFifoQueue( FifoQueue ):
         router_prompt_template = du.get_file_as_string( du.get_project_root() + router_prompt_template_path )
         
         prompt = router_prompt_template.format( voice_command=question )
-        
+        if self.debug and self.verbose: print( f"\n===== ROUTER PROMPT START =====\n{prompt}\n===== ROUTER PROMPT END =====\n" )
+
         llm_spec_key = self.config_mgr.get( "llm spec key for agent router" )
         llm_client = self.llm_factory.get_client( llm_spec_key, debug=self.debug, verbose=self.verbose )
         response = llm_client.run( prompt )
