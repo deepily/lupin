@@ -69,6 +69,14 @@ export interface ProxyAcknowledgeResult {
   new_batch     : string;     // pr-{8hex}-{N+1}
 }
 
+/** 202 body from POST /api/system/bounce (row 1b4211ac R2). A 409/503 arrives as
+ *  an ApiError whose `.message` is the JSON reason. */
+export interface BounceResult {
+  status     : string;    // "triggered"
+  detail    ?: string;
+  timestamp  : string;
+}
+
 export interface ApiClient {
   get<T>(path: string, opts?: ApiCallOptions): Promise<T>;
   post<T>(path: string, body: unknown, opts?: ApiCallOptions): Promise<T>;
@@ -79,6 +87,8 @@ export interface ApiClient {
   broadcastToCcSessions(req: BroadcastRequest, opts?: ApiCallOptions): Promise<BroadcastResult>;
   /** Retire the current proxy notification batch (proxy-ratify-link acknowledge, B4). */
   acknowledgeProxy(opts?: ApiCallOptions): Promise<ProxyAcknowledgeResult>;
+  /** Trigger a managed bounce of the dev server (:7999) via the host-side watcher. */
+  bounceDevServer(opts?: ApiCallOptions): Promise<BounceResult>;
 }
 
 export class ApiError extends Error {
@@ -142,6 +152,13 @@ class ApiClientImpl implements ApiClient {
     // Body-less POST — legacy parity (notifications.js:7176 sends only auth
     // headers). The server retires the current batch + mints the next.
     return this.post<ProxyAcknowledgeResult>("/api/proxy/acknowledge", undefined, opts);
+  }
+
+  bounceDevServer(opts?: ApiCallOptions): Promise<BounceResult> {
+    // Body-less admin POST. On 202 the host-side watcher was handed the bounce;
+    // a 409 (already bouncing) or 503 (watcher not running) surfaces as an
+    // ApiError whose message is the JSON reason — the caller decodes it.
+    return this.post<BounceResult>("/api/system/bounce", undefined, opts);
   }
 
   private async request<T>(

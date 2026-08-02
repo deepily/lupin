@@ -9,6 +9,7 @@ Generated on: 2025-01-24
 """
 
 import os
+import time
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
@@ -861,3 +862,119 @@ async def set_similarity_confirmation(
         "similarity confirmation enabled", str( body.enabled ).lower()
     )
     return { "enabled": body.enabled, "previous": previous }
+
+
+# ─── Managed dev-server bounce (R2/R3: the web-client button path) ────
+# The web process CANNOT restart its own container, so this endpoint does not run
+# the bounce script. It drops a trigger file into the shared io/ mount that the
+# host-side daemon (src/scripts/bounce-watcher.sh) acts on — that daemon survives
+# the restart, runs the sanctioned bounce-dev-server.sh (warn → restart → poll),
+# and the restarted server self-emits the all-clear from its startup hook.
+#
+# The endpoint's job is to make sure the button never LIES: it refuses with a plain
+# reason when the watcher is not running (503) or a bounce is already underway
+# (409), so a press that can't take effect says so instead of spinning forever and
+# looking exactly like a slow restart.
+_BOUNCE_DIR_REL              = "/io/bounce"
+_BOUNCE_HEARTBEAT_STALE_SECS = 30   # watcher stamps every ~2s; older than this ⇒ not running
+_BOUNCE_INPROGRESS_MAX_SECS  = 90   # bounce-dev-server.sh health deadline is 60s + headroom
+
+
+def _bounce_paths():
+    """Return (base_dir, heartbeat, trigger, inprogress) under the shared io/ mount."""
+    base = du.get_project_root() + _BOUNCE_DIR_REL
+    return base, base + "/watcher-heartbeat", base + "/bounce.trigger", base + "/bounce.inprogress"
+
+
+def _read_epoch( path ):
+    """Read an epoch-second integer from path, or None if missing/unparseable."""
+    try:
+        with open( path ) as f:
+            return int( f.read().strip() )
+    except ( FileNotFoundError, ValueError ):
+        return None
+
+
+class BounceResponse( BaseModel ):
+    status    : str
+    reason    : Optional[ str ] = None
+    detail    : Optional[ str ] = None
+    timestamp : str
+
+
+@router.post(
+    "/api/system/bounce",
+    response_class = JSONResponse,
+    summary        = "Bounce the dev server",
+    description    = "Request a managed restart of :7999 via the host-side watcher. Warns the fleet, restarts the container, and the restarted server self-emits the all-clear."
+)
+async def bounce_dev_server( current_user = Depends( get_current_user ) ):
+    """
+    Trigger the sanctioned managed bounce of the dev server from a web client.
+
+    The web process lives inside the container it would restart, so it cannot run
+    the bounce itself. This endpoint only drops a trigger file the host-side watcher
+    picks up. It first verifies the watcher is alive and that no bounce is already
+    running, so the button reflects reality instead of silently succeeding.
+
+    Requires:
+        - Valid JWT (Authorization: Bearer …) — same as the clients' other POSTs
+        - Host-side src/scripts/bounce-watcher.sh running against the same io/ mount
+
+    Ensures:
+        - 409 if a bounce is already in progress (checked first, so a heartbeat that
+          goes quiet DURING a bounce is not misreported as a dead watcher)
+        - 503 with a plain reason if the watcher heartbeat is missing or stale
+        - 202 otherwise, and the trigger file is written; the watcher runs
+          bounce-dev-server.sh and the server self-emits the all-clear on startup
+
+    Raises:
+        - HTTPException(401) via get_current_user if unauthenticated
+
+    Returns:
+        JSONResponse: { status, reason?/detail?, timestamp } with the code above
+    """
+    base, heartbeat_path, trigger_path, inprogress_path = _bounce_paths()
+    now = int( time.time() )
+
+    # Already bouncing? Checked FIRST: while the script runs, the watcher is busy and
+    # its heartbeat goes stale — the in-progress marker is what tells the two apart.
+    inprogress_ts = _read_epoch( inprogress_path )
+    if inprogress_ts is not None and ( now - inprogress_ts ) < _BOUNCE_INPROGRESS_MAX_SECS:
+        return JSONResponse(
+            status_code = 409,
+            content     = {
+                "status"    : "in_progress",
+                "reason"    : "A dev-server bounce is already running — wait for the all-clear.",
+                "timestamp" : du.get_current_datetime_iso()
+            }
+        )
+
+    # Watcher alive? A missing or stale heartbeat means the host-side daemon is not
+    # running, so a trigger would sit unclaimed and the button would spin forever.
+    heartbeat_ts = _read_epoch( heartbeat_path )
+    if heartbeat_ts is None or ( now - heartbeat_ts ) > _BOUNCE_HEARTBEAT_STALE_SECS:
+        age = "missing" if heartbeat_ts is None else f"{now - heartbeat_ts}s old"
+        return JSONResponse(
+            status_code = 503,
+            content     = {
+                "status"    : "watcher_unavailable",
+                "reason"    : f"Bounce watcher is not running (heartbeat {age}). "
+                              f"Start src/scripts/bounce-watcher.sh on the host, then retry.",
+                "timestamp" : du.get_current_datetime_iso()
+            }
+        )
+
+    # Drop the trigger. The watcher claims it within one poll interval (~2s).
+    os.makedirs( base, exist_ok=True )
+    with open( trigger_path, "w" ) as f:
+        f.write( str( now ) )
+
+    return JSONResponse(
+        status_code = 202,
+        content     = {
+            "status"    : "triggered",
+            "detail"    : "Warning the fleet, then restarting the server (~20s). Watch for the all-clear.",
+            "timestamp" : du.get_current_datetime_iso()
+        }
+    )

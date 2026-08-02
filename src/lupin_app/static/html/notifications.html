@@ -58,6 +58,12 @@
         <button class="toolbar-btn active" data-section="section-status" data-testid="notifications-toolbar-status" title="System Status">📊</button>
         <button class="toolbar-btn active" data-section="section-direct-tts" data-testid="notifications-toolbar-direct-tts" title="Direct TTS Test">🔧</button>
         <button class="toolbar-btn active" data-section="section-debug" data-testid="notifications-toolbar-debug" title="Debug Info">🐛</button>
+        <!-- Managed dev-server bounce (row 1b4211ac R2, 2026-08-01). DISTINCT class
+             (bounce-server-btn, NOT toolbar-btn) + NO data-section so the
+             section-visibility click dispatcher ignores it — this is an action,
+             not a section toggle. Hands off to POST /api/system/bounce, which the
+             host-side watcher turns into the sanctioned warn → restart → all-clear. -->
+        <button class="bounce-server-btn" id="bounce-dev-server-btn" data-testid="notifications-bounce-dev-server" type="button" title="Bounce the dev server (:7999) — warns the fleet, then restarts (~20s)">🔄</button>
     </div>
 
     <div class="container">

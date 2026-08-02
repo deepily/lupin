@@ -1698,7 +1698,13 @@ class NotificationsUI {
         document.getElementById( 'stop-audio' ).addEventListener( 'click', () => {
             this.stopAudio();
         });
-        
+
+        // Managed dev-server bounce (row 1b4211ac R2). Static toolbar button.
+        const bounceBtn = document.getElementById( 'bounce-dev-server-btn' );
+        if ( bounceBtn ) {
+            bounceBtn.addEventListener( 'click', () => this.bounceDevServer() );
+        }
+
         // Enter key in Q&A input
         document.getElementById( 'qa-input' ).addEventListener( 'keydown', ( e ) => {
             if ( e.key === 'Enter' ) {
@@ -7832,6 +7838,97 @@ class NotificationsUI {
                 cancelBtn.innerText = 'Cancel Job';
             }
         }
+    }
+
+    async bounceDevServer() {
+        /**
+         * Managed bounce of the dev server (:7999) from the toolbar — row 1b4211ac R2.
+         *
+         * POSTs to /api/system/bounce, which does NOT restart the server inline (the
+         * process serving this request is the one that dies). It drops a trigger the
+         * host-side watcher turns into the sanctioned bounce-dev-server.sh: warn the
+         * fleet → restart → the server self-emits the all-clear on startup.
+         *
+         * The button must never lie about a ~20s outage, so it disables + shows a
+         * "bouncing" state, then re-enables only once /health confirms the server is
+         * actually back. A 409 (already bouncing) or 503 (watcher down) is surfaced
+         * verbatim instead of a false "in progress".
+         */
+        const READY_LABEL = '🔄';
+        const READY_TITLE = 'Bounce the dev server (:7999) — warns the fleet, then restarts (~20s)';
+
+        if ( !confirm( 'Bounce the dev server (:7999)? The fleet is warned first, then it restarts (~20s). In-flight notifications will drop.' ) ) return;
+
+        const btn = document.getElementById( 'bounce-dev-server-btn' );
+        const restore = ( label, title ) => {
+            if ( !btn ) return;
+            btn.disabled    = false;
+            btn.textContent = label;
+            btn.title       = title;
+        };
+        if ( btn ) {
+            btn.disabled    = true;
+            btn.textContent = '⏳';
+            btn.title       = 'Bouncing… (~20s)';
+        }
+
+        try {
+            const response = await this.authedFetch( '/api/system/bounce', { method : 'POST' } );
+            const data     = await response.json().catch( () => ( {} ) );
+
+            if ( response.status === 202 ) {
+                this.log( '[BOUNCE] Triggered — warning the fleet, then restarting. Waiting for the server to return.' );
+                const back = await this.waitForServerBack();
+                if ( back ) {
+                    restore( '✅', 'Dev server is back up. Bounce it again?' );
+                    setTimeout( () => restore( READY_LABEL, READY_TITLE ), 4000 );
+                } else {
+                    // Never confirmed healthy within the window — do NOT show a green
+                    // check we can't stand behind.
+                    alert( 'Bounce was triggered, but the server has not reported healthy yet. Check the server logs.' );
+                    restore( '⚠️', 'Bounce triggered but not confirmed healthy — retry or check logs' );
+                }
+                return;
+            }
+
+            // 409 already bouncing, 503 watcher not running, or any other non-202.
+            const reason = data.reason || data.detail || `HTTP ${response.status}`;
+            alert( `Bounce not started: ${reason}` );
+            restore( READY_LABEL, READY_TITLE );
+
+        } catch ( error ) {
+            this.error( '[BOUNCE] Request failed:', error );
+            alert( `Bounce request failed: ${error.message}` );
+            restore( READY_LABEL, READY_TITLE );
+        }
+    }
+
+    async waitForServerBack( timeoutMs = 90000, intervalMs = 1500 ) {
+        /**
+         * Resolve true once /health returns ok after the bounce, allowing for the
+         * server to go DOWN and come back in between. Returns false on timeout.
+         *
+         * We re-enable on ok only after we've either observed a down blip (the
+         * restart we asked for) OR a generous grace has elapsed — a fast restart
+         * whose down-edge we miss between polls must not leave the button spinning.
+         */
+        const start = Date.now();
+        const GRACE_MS = 25000;   // exceeds warn (~8s) + restart worst case
+        let sawDown = false;
+        while ( Date.now() - start < timeoutMs ) {
+            await new Promise( r => setTimeout( r, intervalMs ) );
+            try {
+                const r = await fetch( '/health', { cache : 'no-store' } );
+                if ( r.ok ) {
+                    if ( sawDown || ( Date.now() - start ) > GRACE_MS ) return true;
+                } else {
+                    sawDown = true;
+                }
+            } catch ( e ) {
+                sawDown = true;   // connection refused during the restart window
+            }
+        }
+        return false;
     }
 
     isResumableWithOverrides( job ) {

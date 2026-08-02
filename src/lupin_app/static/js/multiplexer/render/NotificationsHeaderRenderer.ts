@@ -38,10 +38,14 @@ export interface NotificationsHeaderStoreLike {
   removeByIdHashes(idHashes: ReadonlyArray<string>): void;
 }
 
-// Narrowed api surface — only the generic delete<T> is needed (reused, not a
-// new typed method); production passes the canonical ApiClient.
+// Narrowed api surface — the generic delete<T> (clear-all) plus the managed
+// bounce (row 1b4211ac R2). Production passes the canonical ApiClient, which
+// satisfies both structurally.
 export interface NotificationDeleteApiLike {
   delete<T>(path: string): Promise<T>;
+  // Managed dev-server bounce. On 202 the host-side watcher was handed the job;
+  // a 409/503 is thrown as an error carrying a numeric `status`.
+  bounceDevServer(): Promise<{ status: string; detail?: string; timestamp: string }>;
 }
 
 // Narrowed sys_time_update payload (server clock loop, main.py:265 →
@@ -58,6 +62,12 @@ export interface NotificationsHeaderRendererOptions {
   // Test injection — production uses globalThis.confirm. Returns the user's
   // yes/no to the "cannot be undone" guard.
   confirmFn?: (message: string) => boolean;
+  // Managed dev-server bounce (row 1b4211ac R2). All test-injectable; production
+  // uses globalThis.fetch to poll /health across the ~20s restart window.
+  fetchFn?      : typeof fetch;
+  bouncePollMs? : number;   // health poll interval (default 1500)
+  bounceWaitMs? : number;   // give-up timeout      (default 90000)
+  bounceGraceMs?: number;   // accept ok after this even if no down-blip was seen (default 25000)
 }
 
 export interface NotificationsHeaderRenderer {
@@ -72,11 +82,16 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
   private readonly store     : NotificationsHeaderStoreLike;
   private readonly api       : NotificationDeleteApiLike;
   private readonly confirmFn : (message: string) => boolean;
+  private readonly fetchFn      : typeof fetch;
+  private readonly bouncePollMs : number;
+  private readonly bounceWaitMs : number;
+  private readonly bounceGraceMs: number;
 
   private mounted      = false;
   private root         : HTMLElement | null        = null;
   private countEl      : HTMLElement | null        = null;
   private clearBtn     : HTMLButtonElement | null   = null;
+  private bounceBtn    : HTMLButtonElement | null   = null;
   private historyBtn   : HTMLButtonElement | null   = null;
   private historyPanel : HTMLElement | null        = null;
   private statusEl     : HTMLElement | null        = null;
@@ -98,6 +113,11 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     this.api       = opts.api;
     /* c8 ignore next */ // production-default fallback: globalThis.confirm is the runtime guard; tests always inject confirmFn.
     this.confirmFn = opts.confirmFn ?? ((m) => globalThis.confirm(m));
+    /* c8 ignore next */ // production-default fallback: globalThis.fetch is the runtime health poll; tests always inject fetchFn.
+    this.fetchFn       = opts.fetchFn ?? globalThis.fetch.bind(globalThis);
+    this.bouncePollMs  = opts.bouncePollMs  ?? 1500;
+    this.bounceWaitMs  = opts.bounceWaitMs  ?? 90000;
+    this.bounceGraceMs = opts.bounceGraceMs ?? 25000;
   }
 
   mount(root: HTMLElement): void {
@@ -138,6 +158,17 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     this.clearBtn.textContent = "Clear all";
     this.clearBtn.addEventListener("click", () => void this.onClearAll());
 
+    // Managed dev-server bounce (row 1b4211ac R2) — the simplest access Rick asked
+    // for, mirrored from the notification client's toolbar button.
+    this.bounceBtn = document.createElement("button");
+    this.bounceBtn.type = "button";
+    this.bounceBtn.className = "notifications-bounce-server";
+    this.bounceBtn.id = "bounce-dev-server";
+    this.bounceBtn.setAttribute("data-testid", "multiplexer-bounce-dev-server");
+    this.bounceBtn.title = "Bounce the dev server (:7999) — warns the fleet, then restarts (~20s)";
+    this.bounceBtn.textContent = "🔄 Bounce server";
+    this.bounceBtn.addEventListener("click", () => void this.onBounce());
+
     this.statusEl = document.createElement("span");
     this.statusEl.className = "notifications-header-status";
     this.statusEl.setAttribute("data-testid", "multiplexer-notifications-header-status");
@@ -152,7 +183,7 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
       icon    : "🔔",
       title   : "Notifications",
       testid  : "multiplexer-notifications-header",
-      actions : [ this.historyBtn, this.clearBtn, this.statusEl ],
+      actions : [ this.historyBtn, this.clearBtn, this.bounceBtn, this.statusEl ],
     });
     this.header  = header;
     this.countEl = header.countEl;
@@ -216,6 +247,7 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     this.header = null;
     if (this.root !== null) this.root.replaceChildren();
     this.root = this.countEl = this.clearBtn = null;
+    this.bounceBtn = null;
     this.historyBtn = null;
     this.historyPanel = this.statusEl = null;
     this.envLabelEl = this.clockEl = null;
@@ -325,6 +357,77 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
         ? `Cleared ${succeeded.length}.`
         : `Cleared ${succeeded.length}, ${failed} failed.`;
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Managed dev-server bounce (row 1b4211ac R2)
+  // -------------------------------------------------------------------------
+
+  private setBounceStatus(text: string): void {
+    if (this.statusEl !== null) this.statusEl.textContent = text;
+  }
+
+  private async onBounce(): Promise<void> {
+    /**
+     * Trigger the managed bounce and reflect the ~20s outage honestly.
+     *
+     * The endpoint does not restart inline — it hands off to the host-side watcher
+     * (warn → restart → the server self-emits the all-clear). A 202 means the bounce
+     * was accepted; a 409 (already bouncing) or 503 (watcher down) is surfaced as a
+     * plain reason instead of a false "in progress". We disable the button until
+     * /health confirms the server is actually back, so it never looks dead while
+     * working or alive while down.
+     */
+    if (this.bounceBtn === null) return;
+    if (!this.confirmFn("Bounce the dev server (:7999)? The fleet is warned first, then it restarts (~20s). In-flight notifications will drop.")) return;
+
+    this.bounceBtn.disabled = true;
+    this.setBounceStatus("Bouncing… (~20s)");
+
+    try {
+      await this.api.bounceDevServer();
+    } catch (err) {
+      const status = (err as { status?: number }).status;
+      const reason =
+        status === 409 ? "A dev-server bounce is already running — wait for the all-clear."
+      : status === 503 ? "Bounce watcher is not running on the host."
+      : (err as Error).message;
+      this.setBounceStatus(`Bounce not started: ${reason}`);
+      this.bounceBtn.disabled = false;
+      return;
+    }
+
+    // 202 — the bounce is running. Wait for the server to come back before we
+    // re-enable, so a re-press can't race the restart.
+    const back = await this.waitForServerBack();
+    this.setBounceStatus(back ? "Server back up ✓" : "Bounce triggered — not yet confirmed healthy; check logs.");
+    if (this.bounceBtn !== null) this.bounceBtn.disabled = false;
+  }
+
+  private async waitForServerBack(): Promise<boolean> {
+    /**
+     * Resolve true once /health returns ok after the bounce, allowing for the
+     * server to go DOWN and return in between. We accept an ok only after either a
+     * down blip was observed (the restart we asked for) or a grace has elapsed —
+     * a fast restart whose down-edge we miss between polls must still re-enable.
+     * Returns false on timeout.
+     */
+    const start = Date.now();
+    let sawDown = false;
+    while (Date.now() - start < this.bounceWaitMs) {
+      await new Promise((r) => setTimeout(r, this.bouncePollMs));
+      try {
+        const r = await this.fetchFn("/health", { cache: "no-store" });
+        if (r.ok) {
+          if (sawDown || (Date.now() - start) > this.bounceGraceMs) return true;
+        } else {
+          sawDown = true;
+        }
+      } catch {
+        sawDown = true;   // connection refused during the restart window
+      }
+    }
+    return false;
   }
 }
 
