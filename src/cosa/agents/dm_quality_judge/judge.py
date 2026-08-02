@@ -87,15 +87,17 @@ _RETRY_NUDGE                = "Begin your reply with <response>.\n\n"
 # withheld where the model cannot produce it. Chunk-and-aggregate and a stronger model
 # were both considered and rejected as not worth the complexity for a bonus signal.
 # Full finding: bug 2a41e141 (Krishna's evidence writeup) + this session's 8-variant probe.
-# ── Config-backed length thresholds (row f4bb1cdb amend-2, Rick 2026-08-02) ──────────
+# ── Config-backed length thresholds (row f4bb1cdb amend-2, Rick 2026-08-02;
+#    made /api/init-reachable row 00600a75, Rick 2026-08-02) ───────────────────────────
 # Each threshold has ONE definition, resolved from lupin-app.ini with today's value as
 # the default, so the length buckets below READ these names instead of repeating the
 # numbers inline — before this, a change to a named constant left the inline bucket
-# literal untouched and the two drifted silently. Resolved at IMPORT time, NOT per call:
-# these stay module-level ints so judge_v2 (which imports QUALITATIVE_WORD_LIMIT) and the
-# tests (which patch it as a module attribute) keep working untouched — call-time
-# resolution would force edits into judge_v2.py + the length tests, which reaches beyond
-# this row's judge.py-only scope. A threshold change therefore takes a server bounce.
+# literal untouched and the two drifted silently. They stay module-level ints (so
+# judge_v2, which imports QUALITATIVE_WORD_LIMIT, and the tests, which patch it as a
+# module attribute, keep working untouched), but the values are (re)read by
+# _reload_length_thresholds() below: once at import AND again on every /api/init
+# hot-reload, via a cache_registry invalidator. So editing a threshold in the ini and
+# hitting GET /api/init takes effect with NO server bounce.
 def _resolve_threshold( config_key, default ):
     """Read an int length threshold from lupin-app.ini, default on absence/any error.
     Never raises — a broken config read must not stop this module from importing."""
@@ -107,23 +109,66 @@ def _resolve_threshold( config_key, default ):
         return default
 
 
-QUALITATIVE_WORD_LIMIT      = _resolve_threshold( "dm qualitative word limit", 150 )
+def _reload_length_thresholds():
+    """
+    (Re)resolve all five DM-length thresholds from lupin-app.ini into this module's
+    globals, and sync judge_v2's own imported copy of QUALITATIVE_WORD_LIMIT.
 
-# The target every Length grade is stated against. Was a bare "~60" written into the
-# detail string; promoted to a constant when `overage` started dividing by it (row
-# 0fc5b8f0), so the number a reader is told and the number the ratio uses cannot drift
-# apart. NOT the same as the ⭐ boundary being 60 — they coincide today and are free to
-# stop coinciding, which is exactly why they are not the same literal reused twice
-# (LENGTH_EXCELLENT_LIMIT below is the ⭐ boundary, its OWN config key).
-LENGTH_TARGET_WORDS         = _resolve_threshold( "dm length target words", 60 )
+    Called once at import, then again on every /api/init hot-reload via the
+    cache_registry invalidator registered below — so an ini edit plus a GET /api/init
+    takes effect with no server bounce.
 
-# The four Length BUCKET boundaries — each its own config key so none is an inline
-# literal a named constant could silently drift apart from. 150 is deliberately NOT
-# repeated here: the 🤷/👎 boundary IS the qualitative cap QUALITATIVE_WORD_LIMIT, which
-# is also the emoji-repetition interval — the single reason Rick chose 150.
-LENGTH_EXCELLENT_LIMIT      = _resolve_threshold( "dm length excellent limit", 60 )    # ⭐ ≤ this
-LENGTH_GOOD_LIMIT           = _resolve_threshold( "dm length good limit", 90 )         # 👍 ≤ this
-LENGTH_VERBOSE_LIMIT        = _resolve_threshold( "dm length verbose limit", 250 )     # 👎 ≤ this
+    Requires:
+        - lupin-app.ini is readable (any error falls back to the per-key default, via
+          _resolve_threshold, which never raises)
+
+    Ensures:
+        - the five module globals are rebound to the current ini values
+        - judge_v2.QUALITATIVE_WORD_LIMIT (its OWN binding, from `from judge import ...`)
+          is rebound to match IF judge_v2 is already imported — a sys.modules reach, not
+          a source edit, so judge_v2's import and the length tests keep working untouched
+        - length_bucket, which reads these globals at call time, reflects the new values
+          on its next call (no restart)
+    """
+    global QUALITATIVE_WORD_LIMIT, LENGTH_TARGET_WORDS, LENGTH_EXCELLENT_LIMIT
+    global LENGTH_GOOD_LIMIT, LENGTH_VERBOSE_LIMIT
+
+    QUALITATIVE_WORD_LIMIT = _resolve_threshold( "dm qualitative word limit", 150 )
+
+    # The target every Length grade is stated against. Was a bare "~60" written into the
+    # detail string; promoted to a constant when `overage` started dividing by it (row
+    # 0fc5b8f0), so the number a reader is told and the number the ratio uses cannot drift
+    # apart. NOT the same as the ⭐ boundary being 60 — they coincide today and are free to
+    # stop coinciding, which is exactly why they are not the same literal reused twice
+    # (LENGTH_EXCELLENT_LIMIT below is the ⭐ boundary, its OWN config key).
+    LENGTH_TARGET_WORDS    = _resolve_threshold( "dm length target words", 60 )
+
+    # The four Length BUCKET boundaries — each its own config key so none is an inline
+    # literal a named constant could silently drift apart from. 150 is deliberately NOT
+    # repeated here: the 🤷/👎 boundary IS the qualitative cap QUALITATIVE_WORD_LIMIT, which
+    # is also the emoji-repetition interval — the single reason Rick chose 150.
+    LENGTH_EXCELLENT_LIMIT = _resolve_threshold( "dm length excellent limit", 60 )    # ⭐ ≤ this
+    LENGTH_GOOD_LIMIT      = _resolve_threshold( "dm length good limit", 90 )         # 👍 ≤ this
+    LENGTH_VERBOSE_LIMIT   = _resolve_threshold( "dm length verbose limit", 250 )     # 👎 ≤ this
+
+    # STALE-COPY SYNC: judge_v2 did `from judge import QUALITATIVE_WORD_LIMIT`, so it holds
+    # its OWN module binding that a rebind here does not reach. Push the new value across
+    # through sys.modules (a runtime reach, not a source edit) so judge_v2's own
+    # `> QUALITATIVE_WORD_LIMIT` ceiling moves with the config. Guarded: judge_v2 may not be
+    # imported yet at the first (import-time) call — fine, it reads the fresh value itself
+    # when it loads.
+    import sys
+    _v2 = sys.modules.get( "cosa.agents.dm_quality_judge.judge_v2" )
+    if _v2 is not None:
+        _v2.QUALITATIVE_WORD_LIMIT = QUALITATIVE_WORD_LIMIT
+
+
+# Resolve once at import so the globals exist for judge_v2's `from judge import ...` and
+# for length_bucket; re-resolved on each /api/init by the invalidator registered next.
+_reload_length_thresholds()
+
+from cosa.config.cache_registry import register_invalidator
+register_invalidator( "dm_length_thresholds", _reload_length_thresholds )
 
 _TOO_LONG_DETAIL            = "not judged: DM too long for reliable qualitative grading"
 
@@ -378,7 +423,9 @@ def length_bucket( word_count ):
         - "emoji" is the band's face REPEATED max(1, word_count // QUALITATIVE_WORD_LIMIT)
           times (display-only intensity, row f4bb1cdb); "weight" is unaffected
         - the boundaries are the resolved config thresholds (defaults 60/90/150/250),
-          inclusive-left as written above (≤60→⭐, 61→👍, ...)
+          inclusive-left as written above (≤60→⭐, 61→👍, ...); these are re-read on
+          every /api/init hot-reload (_reload_length_thresholds), so a call after an ini
+          edit + GET /api/init reflects the new boundaries with no server bounce
         - overage is word_count / LENGTH_TARGET_WORDS, rounded to 1dp, and is
           STRICTLY INCREASING in word_count past the saturation point — which is the
           whole reason it exists
