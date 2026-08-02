@@ -67,7 +67,13 @@ def _ack_timing():
 def main() -> int:
     base_url = os.environ.get( "LUPIN_BOUNCE_BASE_URL", DEFAULT_BASE_URL )
     api_key  = read_api_key()
-    message  = build_bounce_message( "warning" )
+    # BOUNCE_DIRTY_FILES (row 7de5a09f) — the bounce script exports the dirty-tree
+    # `git status --short` blob here so the warning NAMES the uncommitted files it
+    # will deploy. Empty / unset when the tree is clean. This is how the owner of a
+    # dirty file gets told during the ack window even when the bouncer is a non-TTY
+    # agent whose confirmation prompt was skipped.
+    dirty_files = os.environ.get( "BOUNCE_DIRTY_FILES" ) or None
+    message  = build_bounce_message( "warning", dirty_files=dirty_files )
     ack_deadline_s, ack_poll_s = _ack_timing()
 
     # Post the warning. require_ack=True so each recipient's listener writes an

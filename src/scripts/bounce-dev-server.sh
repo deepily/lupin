@@ -19,12 +19,25 @@
 # Usage:
 #   ./src/scripts/bounce-dev-server.sh          # verbose
 #   ./src/scripts/bounce-dev-server.sh --quiet  # one-line summary only
-#   ./src/scripts/bounce-dev-server.sh --force  # skip the unwarned-fleet pause (exit 2)
+#   ./src/scripts/bounce-dev-server.sh --force  # skip the dirty-tree confirm + unwarned pause
 #
 # When the warning helper reports exit 2 (nobody was warned at all), the bounce
 # still proceeds — a broken warn path must not block recovery of a wedged server —
 # but it PAUSES first (UNWARNED_PAUSE_SECS, default 5) so a human gets the beat to
 # abort a bounce that will look like a crash to the fleet. --force skips that pause.
+#
+# DIRTY-TREE AWARENESS (row 7de5a09f): with auto-reload off and the repo bind-mounted,
+# a bounce serves EVERY saved file in the tree — committed or not, from every session —
+# not just the bouncer's work. So before restarting, if the tree is dirty this script
+# NAMES the dirty files (git status --short). It NEVER fails closed and NEVER refuses a
+# non-interactive caller:
+#   • at a TERMINAL ([ -t 0 ]): asks a y/N; answering no aborts (exit 3) before the
+#     restart. --force skips this human prompt.
+#   • non-interactive (every Claude session): PROCEEDS after naming the files — no
+#     --force needed — and the dirty list rides the warning broadcast so the seat that
+#     OWNS a file can object during the ack window.
+# A tree that is not a git repo is treated as clean — the hand-run bounce must always
+# be able to recover a wedged server.
 
 set -euo pipefail
 
@@ -56,6 +69,56 @@ log() { [ "$QUIET" -eq 1 ] || echo "$@"; }
 if [ -z "${LUPIN_ROOT:-}" ]; then
     echo "ERROR: LUPIN_ROOT is not set — export LUPIN_ROOT=/path/to/project" >&2
     exit 1
+fi
+
+# ── Step 0: dirty-tree awareness ──────────────────────────────────────────────
+# A bounce serves EVERY saved file in the bind-mounted tree, committed or not, from
+# EVERY session (row 7de5a09f, observed live boot #12) — reload is off, so a restart
+# deploys disk state, not the bouncer's commit. The fleet-idle precondition checks
+# ATTENTION, nothing checks the TREE. So NAME the dirty files before the restart.
+#
+# ⚠️ NEVER fail-closed, and NEVER refuse a NON-INTERACTIVE caller. Every Claude
+# session invokes this without a TTY, and the tree is essentially always dirty — so
+# an abort-by-default would make the sanctioned path refuse the fleet's most common
+# bouncer (gate ruling, row 7de5a09f). Two channels instead:
+#   • a human AT A TERMINAL (`[ -t 0 ]`) gets a y/N and can abort (exit 3) — the beat
+#     to stop before deploying someone's mid-edit;
+#   • a non-TTY caller PROCEEDS after naming the files, no --force required, and the
+#     dirty list rides the warning broadcast (BOUNCE_DIRTY_FILES → bounce_dev_warn.py)
+#     so the seat that OWNS a file can object during the ack window — the reach a
+#     skipped prompt can never deliver to an agent.
+# --force stays "skip the human pauses" ONLY; it is not the sole way an agent bounces.
+# A non-git LUPIN_ROOT yields empty status (treated clean), never an error. Comes
+# BEFORE the warn broadcast so a human abort fires no false alarm.
+#
+# `git -C` follows LUPIN_ROOT, not the caller's cwd. 2>/dev/null + `|| true` keep a
+# non-repo tree from tripping set -e. Exported so Step 1's warn helper can name it.
+export BOUNCE_DIRTY_FILES="$( git -C "$LUPIN_ROOT" status --short 2>/dev/null || true )"
+if [ -n "$BOUNCE_DIRTY_FILES" ]; then
+    # Unconditional (not log()): may precede a blocking prompt, and it is the record
+    # of what this bounce will deploy — it must show even under --quiet.
+    echo "⚠️  The working tree is DIRTY — this bounce will serve these saved files too, not just committed work:"
+    echo "$BOUNCE_DIRTY_FILES"
+    if [ "$FORCE" -eq 1 ]; then
+        log "    --force given — not pausing for confirmation."
+    elif [ -t 0 ]; then
+        echo "    (commit or stash to deploy only reviewed work, or re-run with --force to skip this prompt.)"
+        printf 'Proceed with the bounce anyway? [y/N] '
+        read -r reply || reply=""
+        case "$reply" in
+            y|Y|yes|YES)
+                log "Proceeding on a dirty tree by confirmation."
+                ;;
+            *)
+                echo "Aborted — tree is dirty and not confirmed. Commit/stash, or re-run with --force." >&2
+                exit 3
+                ;;
+        esac
+    else
+        # Non-interactive: proceed (never refuse an agent), and rely on the broadcast
+        # carrying BOUNCE_DIRTY_FILES so the owning seat can object during the ack window.
+        log "    Non-interactive caller — proceeding; the warning broadcast names these files so their owner can object."
+    fi
 fi
 
 # ── Step 1: ack-confirmed warning ─────────────────────────────────────────────

@@ -30,6 +30,7 @@ from unittest.mock import MagicMock, patch
 
 from cosa.rest.managed_bounce_broadcast import (
     build_bounce_message,
+    format_dirty_clause,
     boot_counter_path,
     next_boot_id,
     emit_bounce_broadcast_in_process,
@@ -92,6 +93,50 @@ class BuildBounceMessageTests( unittest.TestCase ):
     def test_unknown_kind_raises( self ):
         with self.assertRaises( ValueError ):
             build_bounce_message( "shutdown-ish" )
+
+    # ─── dirty-tree naming in the warning (row 7de5a09f item 2) ───────────────
+
+    def test_warning_names_dirty_files_when_supplied( self ):
+        # The owner of an uncommitted file must be able to spot it in the broadcast
+        # (the reach a skipped TTY prompt can never give an agent).
+        msg = build_bounce_message( "warning", dirty_files=" M src/a.py\n?? src/b.py" )
+        self.assertIn( "src/a.py", msg )
+        self.assertIn( "src/b.py", msg )
+        self.assertIn( "object during this ack window", msg )
+        self.assertNotIn( "\n", msg )                        # stays single-line
+
+    def test_warning_without_dirty_files_is_unchanged( self ):
+        # A clean bounce carries no dirty clause — None and the default agree.
+        self.assertEqual(
+            build_bounce_message( "warning", dirty_files=None ),
+            build_bounce_message( "warning" ),
+        )
+
+    def test_warning_ignores_blank_dirty_files( self ):
+        # Whitespace-only is treated as clean, not as a file named "".
+        self.assertEqual(
+            build_bounce_message( "warning", dirty_files="   \n  " ),
+            build_bounce_message( "warning" ),
+        )
+
+    def test_format_dirty_clause_caps_and_summarises_the_remainder( self ):
+        blob = "\n".join( f" M f{i}.py" for i in range( 15 ) )
+        clause = format_dirty_clause( blob, cap=12 )
+        self.assertIn( "f0.py", clause )
+        self.assertIn( "f11.py", clause )
+        self.assertNotIn( "f12.py", clause )                 # beyond the cap
+        self.assertIn( "(+3 more)", clause )                 # 15 - 12
+        self.assertNotIn( "\n", clause )
+
+    def test_format_dirty_clause_empty_for_clean( self ):
+        self.assertEqual( format_dirty_clause( None ), "" )
+        self.assertEqual( format_dirty_clause( "" ), "" )
+        self.assertEqual( format_dirty_clause( "   " ), "" )
+
+    def test_format_dirty_clause_no_summary_when_within_cap( self ):
+        clause = format_dirty_clause( " M only.py", cap=12 )
+        self.assertIn( "only.py", clause )
+        self.assertNotIn( "more)", clause )                  # nothing to summarise
 
     def test_a_non_default_label_reaches_BOTH_message_kinds( self ):
         """

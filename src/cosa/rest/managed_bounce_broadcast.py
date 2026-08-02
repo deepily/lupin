@@ -44,6 +44,45 @@ FLEET_BROADCAST_USER_ID = "claude.code@lupin.deepily.ai"
 
 # ─── Message text (pure) ────────────────────────────────────────────────────
 
+# Cap on how many dirty paths the warning broadcast names inline before it
+# summarises the rest as "(+N more)". A bounce of a long-dirty tree must still
+# fit one readable line — the point is to let an OWNER spot their file, not to
+# reproduce the whole `git status`.
+_DIRTY_BROADCAST_CAP = 12
+
+
+def format_dirty_clause( dirty_files, cap: int = _DIRTY_BROADCAST_CAP ) -> str:
+    """
+    Fold a `git status --short` blob into ONE single-line clause naming the dirty
+    paths, so the warning broadcast can carry it to the seat that OWNS those files
+    (row 7de5a09f item 2 — the half of the remedy a TTY prompt can never reach an
+    agent with). Pure.
+
+    Requires:
+        - dirty_files is the raw `git status --short` output (multi-line str), or
+          None / "" when the tree is clean
+
+    Ensures:
+        - returns "" when dirty_files is None / blank / whitespace-only (the
+          warning is then unchanged — a clean bounce carries no clause)
+        - otherwise returns a leading-space clause with the status lines joined by
+          "; " (never a raw newline — the message stays single-line), at most `cap`
+          named, the remainder summarised as "; …(+N more)"
+        - never raises
+    """
+    if not dirty_files or not dirty_files.strip():
+        return ""
+    lines = [ line.strip() for line in dirty_files.splitlines() if line.strip() ]
+    shown = lines[ :cap ]
+    joined = "; ".join( shown )
+    remainder = len( lines ) - len( shown )
+    if remainder > 0:
+        joined += f"; …(+{remainder} more)"
+    return (
+        f" Heads-up: this bounce also deploys these uncommitted files — {joined}. "
+        f"If any are yours, object during this ack window."
+    )
+
 
 def build_bounce_message(
     kind           : str,
@@ -52,6 +91,7 @@ def build_bounce_message(
     boot_started   : Optional[ str ]   = None,
     uptime_seconds : Optional[ float ] = None,
     server_label   : str               = DEFAULT_SERVER_LABEL,
+    dirty_files    : Optional[ str ]   = None,
 ) -> str:
     """
     Build the fleet broadcast body for a managed bounce.
@@ -62,9 +102,16 @@ def build_bounce_message(
           (they make the message SELF-DISTINGUISHING so a crash-loop reads as N
           distinct all-clears, not one message people learn to ignore — María's
           R5 delta, 2026-08-01)
+        - dirty_files (warning only) is the raw `git status --short` blob when the
+          bouncer's tree is dirty, else None. It names the uncommitted files the
+          bounce will deploy so their OWNER can object during the ack window (row
+          7de5a09f) — the reach a non-interactive caller's skipped prompt cannot.
+          Ignored for "all-clear".
 
     Ensures:
         - returns a non-empty single-line string with no system-reminder framing
+        - for "warning" with a non-blank dirty_files, the string additionally names
+          the dirty paths (via format_dirty_clause); a clean warning is unchanged
 
     Raises:
         - ValueError if kind is not one of the two known signals
@@ -79,6 +126,7 @@ def build_bounce_message(
             f"⚠️ {server_label} is bouncing NOW — hold notifications and blocking asks until the "
             f"all-clear, OR until you can confirm the server is healthy yourself. Any in-flight "
             f"question will drop and need re-asking."
+            f"{format_dirty_clause( dirty_files )}"
         )
     if kind == "all-clear":
         up = "?" if uptime_seconds is None else f"{uptime_seconds:.1f}"
