@@ -118,6 +118,136 @@ _idempotency_lock  = threading.Lock()
 _IDEMPOTENCY_TTL   = 60   # seconds
 _IDEMPOTENCY_MAX   = 1000
 
+# ── Ask-idempotency index (bug f433fbae D2) ──
+# The fire-and-forget cache above stores a whole response dict, which works because
+# that path returns a plain dict. The response-required (blocking) path returns a
+# StreamingResponse, so it cannot cache-and-replay the same way — instead we remember
+# which notification_id a given idempotency_key already minted, and a re-POST with
+# that key RE-ATTACHES to the original ask instead of creating a second card. Same
+# TTL / max-size policy and lock as the fire-and-forget cache.
+# Key: idempotency_key (UUID) → Value: (notification_id, timestamp)
+_ask_idempotency_index = OrderedDict()
+
+
+def _record_ask_idempotency( idempotency_key, notification_id ):
+    """
+    Remember which notification_id a response-required ask minted for this key.
+
+    Requires:
+        - notification_id is the id of a freshly-created response-required notification
+
+    Ensures:
+        - a falsy idempotency_key is a no-op (nothing to de-dup on)
+        - otherwise the key → notification_id mapping is stored, trimmed to
+          _IDEMPOTENCY_MAX (oldest evicted first)
+    """
+    if not idempotency_key:
+        return
+    with _idempotency_lock:
+        _ask_idempotency_index[ idempotency_key ] = ( notification_id, time_mod.time() )
+        while len( _ask_idempotency_index ) > _IDEMPOTENCY_MAX:
+            _ask_idempotency_index.popitem( last=False )
+
+
+def _lookup_ask_idempotency( idempotency_key ):
+    """
+    Return the notification_id previously minted for this key, or None.
+
+    Ensures:
+        - a falsy key returns None
+        - entries older than _IDEMPOTENCY_TTL are evicted before the lookup, so a
+          stale key never re-attaches to a long-gone ask
+        - returns the stored notification_id on a live hit, else None
+    """
+    if not idempotency_key:
+        return None
+    with _idempotency_lock:
+        now = time_mod.time()
+        while _ask_idempotency_index:
+            oldest_key, ( _, ts ) = next( iter( _ask_idempotency_index.items() ) )
+            if now - ts > _IDEMPOTENCY_TTL:
+                _ask_idempotency_index.pop( oldest_key )
+            else:
+                break
+        entry = _ask_idempotency_index.get( idempotency_key )
+        return entry[ 0 ] if entry else None
+
+
+def _read_notification_state_sync( notification_id ):
+    """
+    Read one notification's {state, response_value, responded_at} for the ask
+    re-attach poll (bug f433fbae D2). Mirrors get_notification_response's fetch.
+
+    Ensures:
+        - returns None when the row is gone
+        - otherwise returns the three fields verbatim (responded_at as a datetime|None)
+    """
+    with get_db() as session:
+        repo = NotificationRepository( session )
+        n    = repo.get_by_id( uuid.UUID( str( notification_id ) ) )
+        if n is None:
+            return None
+        return {
+            "state"          : n.state,
+            "response_value" : n.response_value,
+            "responded_at"   : n.responded_at,
+        }
+
+
+def _extract_response_value( response_value ):
+    """Pull the scalar answer out of a stored response_value (dict-wrapped or bare),
+    coerced to a string RespondedEvent/ExpiredEvent can carry. None → None."""
+    if response_value is None:
+        return None
+    val = response_value.get( "value" ) if isinstance( response_value, dict ) else response_value
+    return val if isinstance( val, str ) else json.dumps( val )
+
+
+async def _ask_reattach_generator( notification_id, timeout_seconds ):
+    """
+    Re-attach SSE for a duplicate idempotency_key (bug f433fbae D2): stream the
+    ORIGINAL ask's outcome by polling its DB row, so a re-POST does not mint a second
+    card. Self-contained — never touches the in-memory pending_responses event, so it
+    is safe regardless of whether the original stream is alive.
+
+    Ensures:
+        - first frame is an ack carrying the ORIGINAL notification_id
+        - a landed human answer (responded_at set) yields a `responded` frame
+        - a manufactured default (response_value set, not responded) yields an
+          `expired` frame with default_used=True
+        - budget exhausted with neither yields an `expired` frame with no default
+    """
+    yield f"data: {json.dumps({'status': 'ack', 'notification_id': notification_id})}\n\n"
+    deadline      = datetime.utcnow() + timedelta( seconds=timeout_seconds )
+    poll_interval = 2.0
+    while True:
+        row = await asyncio.to_thread( _read_notification_state_sync, notification_id )
+        if row is not None:
+            if row[ "responded_at" ] is not None:
+                val = _extract_response_value( row[ "response_value" ] )
+                yield f"data: {json.dumps({'status': 'responded', 'response': val, 'default_used': False})}\n\n"
+                return
+            if row[ "response_value" ] is not None:
+                val = _extract_response_value( row[ "response_value" ] )
+                yield f"data: {json.dumps({'status': 'expired', 'response': val, 'default_used': True, 'timeout': True})}\n\n"
+                return
+        if datetime.utcnow() >= deadline:
+            yield f"data: {json.dumps({'status': 'expired', 'response': None, 'default_used': False, 'timeout': True})}\n\n"
+            return
+        await asyncio.sleep( min( poll_interval, max( 0.0, ( deadline - datetime.utcnow() ).total_seconds() ) ) )
+
+
+def _sse_headers():
+    """Standard text/event-stream headers shared by every SSE StreamingResponse here."""
+    return {
+        "Cache-Control"               : "no-cache",
+        "X-Accel-Buffering"           : "no",
+        "Connection"                  : "keep-alive",
+        "Content-Type"                : "text/event-stream",
+        "Access-Control-Allow-Origin" : "*",
+    }
+
+
 def get_notification_queue():
     """
     Dependency to get notification queue from main module.
@@ -1041,6 +1171,22 @@ async def notify_user(
         if sender_persona is None:
             print( f"[NOTIFY] ⚠️ response-required ask has NO voice persona (sender_id={resolved_sender_id!r}) — its late answer will be unretrievable by persona (§4.4 accepted gap)" )
 
+        # ── Idempotency for the response-required path (bug f433fbae D2) ──
+        # Hoisted above the offline/online split so a re-POST with the same
+        # idempotency_key re-attaches to the ORIGINAL ask instead of minting a second
+        # card. The fire-and-forget branch already dedups; this is its blocking-path
+        # counterpart. The blocking verbs now always stamp a key
+        # (cosa_voice_mcp._with_idempotency_key), so notify_user_sync's retry_on_timeout
+        # re-POST — and any durable resend — lands here and re-attaches, not duplicates.
+        existing_nid = _lookup_ask_idempotency( idempotency_key )
+        if existing_nid is not None:
+            print( f"[NOTIFY] Idempotency hit (ask): {idempotency_key} → re-attaching to {existing_nid}" )
+            return StreamingResponse(
+                _ask_reattach_generator( existing_nid, timeout_seconds ),
+                media_type = "text/event-stream",
+                headers    = _sse_headers()
+            )
+
         # Task 5: Offline Detection — deliver the default immediately, but as an SSE
         # frame the streaming client can actually CONSUME (bug f433fbae D1).
         #
@@ -1068,6 +1214,9 @@ async def notify_user(
                     sender_persona, sender_icon
                 )
 
+                # Record the key→id mapping so a retry re-attaches here too.
+                _record_ask_idempotency( idempotency_key, notification_id )
+
                 async def offline_event_generator():
                     # ack first — hands the client this ask's notification_id so a
                     # mid-stream death can re-attach (§4.5 E-a), same as the online path.
@@ -1080,13 +1229,7 @@ async def notify_user(
                 return StreamingResponse(
                     offline_event_generator(),
                     media_type = "text/event-stream",
-                    headers    = {
-                        "Cache-Control"               : "no-cache",
-                        "X-Accel-Buffering"           : "no",
-                        "Connection"                  : "keep-alive",
-                        "Content-Type"                : "text/event-stream",
-                        "Access-Control-Allow-Origin" : "*"
-                    }
+                    headers    = _sse_headers()
                 )
             else:
                 raise HTTPException(
@@ -1105,6 +1248,10 @@ async def notify_user(
             progress_group_id, "delivered",
             sender_persona, sender_icon
         )
+
+        # D2 (bug f433fbae): remember this key→id so a same-key re-POST re-attaches
+        # to this ask instead of minting a second card.
+        _record_ask_idempotency( idempotency_key, notification_id )
 
         print(f"[NOTIFY] Created response-required notification: {notification_id}")
 

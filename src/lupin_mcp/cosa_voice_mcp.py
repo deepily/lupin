@@ -1144,6 +1144,28 @@ def _outbox_has_backlog():
 DEFAULT_USED_MARKER = "[default used] "
 
 
+def _with_idempotency_key( request ):
+    """
+    Assign a fresh idempotency_key to a blocking-ask request if it lacks one, so a
+    re-POST of the SAME request (notify_user_sync's retry_on_timeout loop, a durable
+    resend) de-dups server-side instead of minting a second notification card
+    (bug f433fbae D2). Mirrors the async notify() assignment (notify_user_async:160)
+    and _notify_impl (cosa_voice_mcp.py:1374). The blocking-ask verbs never set one,
+    so every retry used to look like a brand-new ask.
+
+    Requires:
+        - request is a NotificationRequest with an `idempotency_key` attribute
+
+    Ensures:
+        - returns a request whose idempotency_key is a non-None uuid4 string
+        - a request that already carries a key is returned UNCHANGED (caller-supplied
+          keys win; only None is filled)
+    """
+    if request.idempotency_key is None:
+        return request.model_copy( update={ "idempotency_key": str( _uuid.uuid4() ) } )
+    return request
+
+
 @mcp.tool
 def converse(
     message: str,
@@ -1205,6 +1227,9 @@ def converse(
         logger.error( f"Validation error: {e}" )
         return f"[validation error: {e}]"
 
+    # D2 (bug f433fbae): stamp an idempotency_key so a re-POST of this same ask
+    # de-dups server-side instead of minting a duplicate card.
+    request = _with_idempotency_key( request )
     response: NotificationResponse = notify_user_sync( request=request, debug=False )
 
     if response.exit_code == 0:
@@ -1533,6 +1558,9 @@ def ask_yes_no(
     except ( ValidationError, ValueError ):
         return f"{DEFAULT_USED_MARKER}{default}"
 
+    # D2 (bug f433fbae): stamp an idempotency_key so a re-POST of this same ask
+    # de-dups server-side instead of minting a duplicate card.
+    request = _with_idempotency_key( request )
     response: NotificationResponse = notify_user_sync( request=request, debug=False )
 
     if response.exit_code == 0 and response.response_value:
@@ -1732,6 +1760,9 @@ def ask_multiple_choice(
         logger.error( f"Validation error: {e}" )
         return { "error": f"validation error: {e}" }
 
+    # D2 (bug f433fbae): stamp an idempotency_key so a re-POST of this same ask
+    # de-dups server-side instead of minting a duplicate card.
+    request = _with_idempotency_key( request )
     response: NotificationResponse = notify_user_sync( request=request, debug=False )
 
     if response.exit_code == 0:
@@ -1995,6 +2026,9 @@ def ask_open_ended_batch(
         logger.error( f"Validation error: {e}" )
         return { "error": f"validation error: {e}" }
 
+    # D2 (bug f433fbae): stamp an idempotency_key so a re-POST of this same ask
+    # de-dups server-side instead of minting a duplicate card.
+    request = _with_idempotency_key( request )
     response: NotificationResponse = notify_user_sync( request=request, debug=False )
 
     if response.exit_code == 0:

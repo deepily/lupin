@@ -24,6 +24,18 @@ Sam retracted his own pass unprompted and named the miss himself: *"I gated the 
 
 ---
 
+## 📥 SCOPED 2026-08-02 (Clayton 😎 `99913b08`) — bug f433fbae D2 does NOT fix the symptom Rick reported
+
+**No store row** — Rick's no-new-rows order tonight. Two caveats, so D2 is never read as closing a complaint it doesn't touch.
+
+**What D2 landed.** The blocking-ask verbs (`ask_yes_no` / `ask_multiple_choice` / `converse` / `ask_open_ended_batch`) now stamp an `idempotency_key`, and the server's response-required path re-attaches to the original notification on a repeat key instead of minting a second card. This closes the **in-process same-key re-POST** duplicate — `notify_user_sync`'s `retry_on_timeout` loop and any durable resend.
+
+**Caveat 1 — a bounce still duplicates.** `_ask_idempotency_index` is an in-memory `OrderedDict`; a :7999 bounce wipes it, so the same key re-POSTed *after* a bounce misses and mints a new card. The existing fire-and-forget idempotency cache has the identical limitation. **Fix (deferred):** add an `idempotency_key` column to the `notifications` table (a migration on the hot table — none exists today, and the row has no spare metadata field) and look up by key so the dedup survives a process restart.
+
+**Caveat 2 (the bigger finding, stated bluntly) — D2 does NOT fix the symptom Rick reported.** Rick's "re-answer the same question" came from **three separate ask INVOCATIONS**, each minting a *fresh* idempotency_key. No idempotency key — in-memory or DB-backed — dedups distinct invocations; only content-hashing the ask would, and nobody has ratified that. D2 fixes the retry-loop case, not the re-invocation case. The reload-OFF policy change (2026-08-01) plus D1's marked-default are what actually reduce the reported storm; D2 is defense-in-depth on top.
+
+---
+
 ## 📥 FINDING 2026-08-02 (Tiberius 👑 `f63d0e28`) — the handback bounce-e2e can't be a :8000-scheduled job
 
 **Status**: measured, resolved for THIS test, worth a venue-rule note. **No store row** — Rick's no-new-rows order tonight.
@@ -35,6 +47,14 @@ Sam retracted his own pass unprompted and named the miss himself: *"I gated the 
 **Resolution (Cheech green-lit 2026-08-01 20:32)**: the handback e2e stands up its **own uvicorn on a throwaway migrated DB** and bounces *that* via a genuine kill+restart. Real process-lifetime seam (in-memory waiters wiped, durable PG row survives), isolated, reproducible, no fleet disruption, no live-DB write. No manual :7999 bounce tonight.
 
 **Also measured**: `lupin_db_dev` is already migrated — `answer_delivered_at` column + `idx_notifications_answer_owed` index present, `alembic_version = 3da5c0d1eee6`. So Rachel's deferred "live round-trip" precondition (deferred until the shared DB carries `3da5c0d1eee6`) is satisfied for the dev DB.
+
+**LANDED 2026-08-02**: `src/tests/e2e/test_ask_answer_handback.py` (+ `_handback_e2e_server.py`) — both scenarios GREEN, 33s.
+- (a) stream-death, server alive → answer reaches the asker via the re-attach poll → `responded`, no re-ask.
+- (b) stream-death + real server restart → `pending_responses` wiped → answer submitted with no waiter → row OWED → travels via `answer_catchup.surface_owed_answers` (the additionalContext the asker's next turn receives); ack empties the owed set → surfaces once, no duplicate.
+- Falsification EXECUTED: inverted the owed predicate (`answer_delivered_at.isnot(None)`) → scenario (b) went red with the predicted `"the asker did not receive the question in catch-up: ''"`; restored.
+- Venue: own uvicorn (real notifications+websocket routers) on a throwaway migrated DB, bounced by kill+restart. Never touched :7999/:8000/`lupin_db_dev`.
+
+**Finding worth the design owners' eyes (stale-PID bridge → NULL persona)**: `_voice_persona_for_sender_id` resolves the bridge via `find_session_by_id`, which **skips any bridge file whose filename PID is not a live process** (stale-session guard). So a session whose bridge is stale/dead at answer-persist time stamps `sender_persona = NULL` on the ask row — and that late answer becomes **unretrievable by persona**, the same §4.4 accepted gap as a persona-less session, but reached by a *different* door (a dead-PID bridge, not a failed allocation). Bounded + already-audible (the `[NOTIFY] ⚠️ … NO voice persona` warning fires), but the runbook gap is currently framed as "allocation failed" only; a dead bridge at persist time hits it too. Not a blocker; noting so the gap's framing is complete.
 
 ---
 

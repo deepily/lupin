@@ -1458,6 +1458,188 @@ class TestPersonaStamping( unittest.IsolatedAsyncioTestCase ):
         self.assertIn( "claude.code@unknown.deepily.ai", str( warned[ 0 ].args[ 0 ] ) )
 
 
+# ===========================================================================
+# Ask-idempotency + re-attach (bug f433fbae D2)
+# ===========================================================================
+def _parse_frames( chunks ):
+    """Parse a drained SSE body (list of 'data: {...}\\n\\n' strings) to dicts."""
+    import json as _json
+    return [ _json.loads( c.split( "data: ", 1 )[ 1 ].strip() ) for c in chunks if "data: " in c ]
+
+
+class TestAskIdempotencyHelpers( unittest.TestCase ):
+    """_record_ask_idempotency / _lookup_ask_idempotency and the value extractor."""
+
+    def setUp( self ):
+        N._ask_idempotency_index.clear()
+
+    def test_record_then_lookup_hit( self ):
+        N._record_ask_idempotency( "k", "nid-1" )
+        self.assertEqual( N._lookup_ask_idempotency( "k" ), "nid-1" )
+
+    def test_falsy_key_record_is_noop_and_lookup_none( self ):
+        N._record_ask_idempotency( None, "nid" )        # no-op
+        N._record_ask_idempotency( "", "nid" )          # no-op
+        self.assertEqual( len( N._ask_idempotency_index ), 0 )
+        self.assertIsNone( N._lookup_ask_idempotency( None ) )
+        self.assertIsNone( N._lookup_ask_idempotency( "" ) )
+
+    def test_lookup_miss_returns_none( self ):
+        self.assertIsNone( N._lookup_ask_idempotency( "absent" ) )
+
+    def test_ttl_eviction_drops_stale_keeps_fresh( self ):
+        # Oldest-first order: a stale front entry is evicted; the fresh one survives.
+        N._ask_idempotency_index[ "old" ]   = ( "nid-old",   time.time() - ( N._IDEMPOTENCY_TTL + 999 ) )
+        N._ask_idempotency_index[ "fresh" ] = ( "nid-fresh", time.time() )
+        self.assertIsNone( N._lookup_ask_idempotency( "old" ) )        # evicted
+        self.assertEqual( N._lookup_ask_idempotency( "fresh" ), "nid-fresh" )
+
+    def test_max_size_trim( self ):
+        for i in range( N._IDEMPOTENCY_MAX + 5 ):
+            N._record_ask_idempotency( f"k{i}", f"n{i}" )
+        self.assertLessEqual( len( N._ask_idempotency_index ), N._IDEMPOTENCY_MAX )
+
+    def test_extract_response_value_all_shapes( self ):
+        import json as _json
+        self.assertIsNone( N._extract_response_value( None ) )
+        self.assertEqual( N._extract_response_value( { "value": "yes" } ), "yes" )
+        self.assertEqual( N._extract_response_value( "yes" ), "yes" )
+        self.assertEqual( N._extract_response_value( { "value": { "a": 1 } } ), _json.dumps( { "a": 1 } ) )
+        self.assertEqual( N._extract_response_value( 42 ), _json.dumps( 42 ) )
+
+
+class TestReadNotificationStateSync( unittest.TestCase ):
+    """_read_notification_state_sync mirrors get_notification_response's fetch."""
+
+    def test_present_row_projected( self ):
+        row = Mock( state="delivered", response_value={ "value": "yes" }, responded_at=None )
+        repo = Mock(); repo.get_by_id.return_value = row
+        with patch.object( N, "get_db", _ctx_db( Mock() ) ), \
+             patch.object( N, "NotificationRepository", return_value=repo ):
+            out = N._read_notification_state_sync( UID_STR )
+        self.assertEqual( out, { "state": "delivered", "response_value": { "value": "yes" }, "responded_at": None } )
+
+    def test_missing_row_returns_none( self ):
+        repo = Mock(); repo.get_by_id.return_value = None
+        with patch.object( N, "get_db", _ctx_db( Mock() ) ), \
+             patch.object( N, "NotificationRepository", return_value=repo ):
+            self.assertIsNone( N._read_notification_state_sync( UID_STR ) )
+
+
+class TestAskReattachGenerator( unittest.IsolatedAsyncioTestCase ):
+    """_ask_reattach_generator: ack + a terminal frame keyed on the original id."""
+
+    async def _drain( self, agen ):
+        return _parse_frames( [ c async for c in agen ] )
+
+    async def test_responded_answer_streams_responded_frame( self ):
+        row = { "responded_at": datetime( 2026, 1, 1, tzinfo=timezone.utc ),
+                "response_value": { "value": "yes" }, "state": "responded" }
+        with patch.object( N, "_read_notification_state_sync", Mock( return_value=row ) ):
+            frames = await self._drain( N._ask_reattach_generator( "orig-nid", 5 ) )
+        self.assertEqual( frames[ 0 ][ "status" ], "ack" )
+        self.assertEqual( frames[ 0 ][ "notification_id" ], "orig-nid" )   # re-attach to ORIGINAL
+        self.assertEqual( frames[ 1 ], { "status": "responded", "response": "yes", "default_used": False } )
+
+    async def test_manufactured_default_streams_expired_default( self ):
+        row = { "responded_at": None, "response_value": "no", "state": "expired" }
+        with patch.object( N, "_read_notification_state_sync", Mock( return_value=row ) ):
+            frames = await self._drain( N._ask_reattach_generator( "orig-nid", 5 ) )
+        self.assertEqual( frames[ 1 ],
+                          { "status": "expired", "response": "no", "default_used": True, "timeout": True } )
+
+    async def test_no_answer_by_deadline_streams_expired_no_default( self ):
+        row = { "responded_at": None, "response_value": None, "state": "delivered" }
+        with patch.object( N, "_read_notification_state_sync", Mock( return_value=row ) ):
+            frames = await self._drain( N._ask_reattach_generator( "orig-nid", 0 ) )   # deadline now
+        self.assertEqual( frames[ 1 ],
+                          { "status": "expired", "response": None, "default_used": False, "timeout": True } )
+
+    async def test_row_gone_then_deadline( self ):
+        with patch.object( N, "_read_notification_state_sync", Mock( return_value=None ) ):
+            frames = await self._drain( N._ask_reattach_generator( "orig-nid", 0 ) )
+        self.assertEqual( frames[ 1 ][ "status" ], "expired" )   # row missing → no answer
+
+    async def test_polls_again_after_sleep_then_lands( self ):
+        # First poll: no answer, deadline far → the sleep line runs → second poll lands.
+        rows = [ { "responded_at": None, "response_value": None, "state": "delivered" },
+                 { "responded_at": datetime( 2026, 1, 1, tzinfo=timezone.utc ),
+                   "response_value": "yes", "state": "responded" } ]
+        with patch.object( N, "_read_notification_state_sync", Mock( side_effect=rows ) ), \
+             patch.object( N.asyncio, "sleep", AsyncMock() ) as slept:
+            frames = await self._drain( N._ask_reattach_generator( "orig-nid", 100 ) )
+        slept.assert_awaited()                                   # the poll-again path ran
+        self.assertEqual( frames[ 1 ][ "response" ], "yes" )
+
+
+class TestResponseRequiredIdempotencyHoist( unittest.IsolatedAsyncioTestCase ):
+    """The hoisted dedup: a repeat key re-attaches instead of minting a 2nd card."""
+
+    EMAIL = "test@example.com"
+
+    def setUp( self ):
+        N._ask_idempotency_index.clear()
+
+    async def _call_nu( self, nq, ws, **overrides ):
+        kwargs = dict(
+            authenticated_user_id="svc", message="Hello world", type="progress",
+            direction="ai_to_human", priority="medium", target_user=self.EMAIL,
+            response_requested=True, response_type="yes_no", timeout_seconds=5,
+            response_default="no", title=None, sender_id=None, response_options=None,
+            abstract=None, job_id=None, queue_name=None, suppress_ding=False,
+            progress_group_id=None, prediction_hint_override=None,
+            display_qualifier_widget=False, session_name=None, idempotency_key=None,
+            notification_queue=nq, ws_manager=ws,
+        )
+        kwargs.update( overrides )
+        return await notify_user( **kwargs )
+
+    async def test_duplicate_key_reattaches_without_new_card( self ):
+        # Seed the index so the hoisted check fires. A create must NOT happen.
+        N._ask_idempotency_index[ "dup" ] = ( "orig-nid", time.time() )
+        ws   = _ws_manager( is_connected=True, connection_count=1 )
+        nq   = Mock()
+        repo = Mock()
+        row  = { "responded_at": datetime( 2026, 1, 1, tzinfo=timezone.utc ),
+                 "response_value": "yes", "state": "responded" }
+        with patch( "cosa.rest.user_service.get_user_by_email", return_value={ "id": UID_STR } ), \
+             patch.object( N, "NotificationRepository", return_value=repo ), \
+             patch.object( N, "_read_notification_state_sync", Mock( return_value=row ) ), \
+             _patch_fastapi_main( Mock( app_debug=False, app_verbose=False ) ), patch( "builtins.print" ):
+            out = await self._call_nu( nq, ws, idempotency_key="dup" )
+            self.assertIsInstance( out, StreamingResponse )
+            frames = _parse_frames( [ c async for c in out.body_iterator ] )
+
+        self.assertEqual( frames[ 0 ][ "notification_id" ], "orig-nid" )   # re-attached to ORIGINAL
+        repo.create_notification.assert_not_called()                        # NO second card
+        nq.push_notification.assert_not_called()
+
+    async def test_online_ask_records_the_key( self ):
+        # A first (miss) online ask records key→id so a later retry can re-attach.
+        ws   = _ws_manager( is_connected=True, connection_count=1 )
+        item = Mock(); item.response_default = "no"; item.to_dict.return_value = {}
+        nq   = Mock(); nq.push_notification.return_value = item
+        repo = Mock(); repo.create_notification.return_value = Mock( id=uuid.uuid4() )
+        with patch( "cosa.rest.user_service.get_user_by_email", return_value={ "id": UID_STR } ), \
+             patch.object( N, "get_db", _ctx_db( Mock() ) ), \
+             patch.object( N, "NotificationRepository", return_value=repo ), \
+             _patch_fastapi_main( Mock( app_debug=False, app_verbose=False ) ), patch( "builtins.print" ):
+            out = await self._call_nu( nq, ws, idempotency_key="new-online" )
+        self.assertIsInstance( out, StreamingResponse )
+        self.assertIsNotNone( N._lookup_ask_idempotency( "new-online" ) )   # recorded
+
+    async def test_offline_ask_records_the_key( self ):
+        ws   = _ws_manager( is_connected=False, connection_count=0 )
+        repo = Mock(); repo.create_notification.return_value = Mock( id=uuid.uuid4() )
+        with patch( "cosa.rest.user_service.get_user_by_email", return_value={ "id": UID_STR } ), \
+             patch.object( N, "get_db", _ctx_db( Mock() ) ), \
+             patch.object( N, "NotificationRepository", return_value=repo ), \
+             _patch_fastapi_main( Mock( app_debug=False, app_verbose=False ) ), patch( "builtins.print" ):
+            out = await self._call_nu( Mock(), ws, idempotency_key="new-offline" )
+        self.assertIsInstance( out, StreamingResponse )
+        self.assertIsNotNone( N._lookup_ask_idempotency( "new-offline" ) )   # recorded
+
+
 def isolated_unit_test():
     """
     Run the supplemental notifications-router coverage suite in isolation.
@@ -1480,6 +1662,8 @@ def isolated_unit_test():
         TestVoicePersonaHelper, TestTimeDateDisplay, TestResolveSenderId,
         TestNotifyUser, TestSubmitResponse, TestSimpleEndpointErrors,
         TestSenderHistoryEndpoints, TestGenerateGist,
+        TestAskIdempotencyHelpers, TestReadNotificationStateSync,
+        TestAskReattachGenerator, TestResponseRequiredIdempotencyHoist,
     ):
         suite.addTests( loader.loadTestsFromTestCase( cls ) )
 

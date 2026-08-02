@@ -12,6 +12,7 @@ Tests cover:
 """
 
 import json
+import uuid
 
 import pytest
 from unittest.mock import patch, MagicMock
@@ -23,7 +24,77 @@ from lupin_mcp.cosa_voice_mcp import (
     _stamp_answer_provenance,
     _validate_multiple_choice_default,
     ask_multiple_choice,
+    _with_idempotency_key,
 )
+from lupin_cli.notifications.notification_models import NotificationRequest, ResponseType
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TestWithIdempotencyKey — bug f433fbae, D2
+#
+# The blocking-ask verbs never stamped an idempotency_key, so notify_user_sync's
+# retry_on_timeout re-POST (and any durable resend) looked like a brand-new ask
+# and minted a duplicate card. This helper fills the gap the way notify() does.
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestWithIdempotencyKey:
+    """Assign a key iff absent; never clobber a caller-supplied one."""
+
+    def _req( self, key=None ):
+        return NotificationRequest(
+            message       = "hi",
+            response_type = ResponseType.YES_NO,
+            sender_id     = "claude.code@lupin.deepily.ai#abcd1234",
+            idempotency_key = key,
+        )
+
+    def test_assigns_a_uuid_when_absent( self ):
+        out = _with_idempotency_key( self._req( None ) )
+        assert out.idempotency_key is not None
+        uuid.UUID( out.idempotency_key )                 # parses → it is a real uuid
+
+    def test_preserves_a_caller_supplied_key( self ):
+        # NEGATIVE-CONTROL twin: a present key must survive untouched, else the
+        # helper would overwrite a deliberate key on every retry (the opposite bug).
+        out = _with_idempotency_key( self._req( "keep-me" ) )
+        assert out.idempotency_key == "keep-me"
+
+
+class TestAskVerbsStampIdempotencyKey:
+    """End-to-end: each blocking-ask verb stamps a key onto the request it sends."""
+
+    def _resp( self, exit_code=0, response_value="yes", default_used=False ):
+        mock                = MagicMock()
+        mock.exit_code      = exit_code
+        mock.response_value = response_value
+        mock.status         = ""
+        mock.is_timeout     = ( exit_code == 2 )
+        mock.default_used   = default_used
+        return mock
+
+    @patch( "lupin_mcp.cosa_voice_mcp._wait_for_sender_id", return_value="claude.code@lupin.deepily.ai#t" )
+    @patch( "lupin_mcp.cosa_voice_mcp.notify_user_sync" )
+    def test_ask_yes_no_stamps_a_key( self, mock_notify, mock_sender ):
+        # NEGATIVE CONTROL: delete `request = _with_idempotency_key(request)` from
+        # ask_yes_no and this fails with `assert None is not None` — the request
+        # reaches notify_user_sync with no key.
+        mock_notify.return_value = self._resp()
+        ask_yes_no.fn( question="Ship it?" )
+        sent = mock_notify.call_args.kwargs[ "request" ]
+        assert sent.idempotency_key is not None
+        uuid.UUID( sent.idempotency_key )
+
+    @patch( "lupin_mcp.cosa_voice_mcp._wait_for_sender_id", return_value="claude.code@lupin.deepily.ai#t" )
+    @patch( "lupin_mcp.cosa_voice_mcp.notify_user_sync" )
+    def test_ask_multiple_choice_stamps_a_key( self, mock_notify, mock_sender ):
+        mock_notify.return_value = self._resp( response_value='{"answers": {"Database": "MongoDB"}}' )
+        ask_multiple_choice.fn( questions=[ {
+            "question": "Which database?", "header": "Database", "multiSelect": False,
+            "options": [ { "label": "PostgreSQL" }, { "label": "MongoDB" } ]
+        } ] )
+        sent = mock_notify.call_args.kwargs[ "request" ]
+        assert sent.idempotency_key is not None
+        uuid.UUID( sent.idempotency_key )
 
 
 # ═════════════════════════════════════════════════════════════════════════════

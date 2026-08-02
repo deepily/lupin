@@ -249,6 +249,11 @@ class NotificationRequest(BaseModel):
         description="When True, render the yes/no qualifier comment widget expanded by default with softer instructional text."
     )
 
+    idempotency_key: Optional[str] = Field(
+        default=None,
+        description="UUID idempotency key to prevent duplicate notifications on retry (bug f433fbae D2). Same key = same notification: the server re-attaches to the original ask instead of minting a second card. Mirrors AsyncNotificationRequest.idempotency_key."
+    )
+
     @field_validator( 'message' )
     @classmethod
     def message_not_whitespace( cls, v: str ) -> str:
@@ -421,6 +426,10 @@ class NotificationRequest(BaseModel):
         # Add display_qualifier_widget for expanded comment widget
         if self.display_qualifier_widget:
             params["display_qualifier_widget"] = "true"
+
+        # Add idempotency_key for retry de-duplication (bug f433fbae D2)
+        if self.idempotency_key is not None:
+            params["idempotency_key"] = self.idempotency_key
 
         return params
 
