@@ -322,6 +322,14 @@ class TestCombinationMath:
         assert "dragged it down" not in low_qual[ "note" ]
         balanced = combine_overall( 1, 1, 1, "70 words, target ~60" )
         assert "Balanced" in balanced[ "note" ]
+        # The exact defect instance (row 700a6330): a TOP-scoring DM — every sub-score
+        # positive, Overall at +2 — must not be told anything "dragged it down". This is
+        # where the harm wording misfired hardest, because that is when length maxes at
+        # +2 and qualitative cannot exceed it.
+        top = combine_overall( 2, 1, 1, "53 words, target ~60" )
+        assert top[ "weight" ] == 2
+        assert "dragged it down" not in top[ "note" ]
+        assert "Directness/tone scored below length" in top[ "note" ]
 
 
 # ═════════════════════════════════════════════════════════════════════════════
