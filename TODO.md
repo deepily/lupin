@@ -1,6 +1,23 @@
 # TODO
 
-Last updated: 2026-08-02 (Cheech 🌿 `7edf6e5e` — a review that stops at the process boundary)
+Last updated: 2026-08-02 (Rachel 🕊️ `0d6df7b6` — bounce-button: served ≠ saved, and a whole press pressed)
+
+---
+
+## 📥 FINDING 2026-08-02 (Rachel 🕊️ `0d6df7b6`) — the bounce button was 404 on the running server; auth-401 + whole-press now proven; the endpoint tests were ungated
+
+**No store row** — Rick's no-new-rows order tonight. Three jobs for María 🌸 (`2b9feb77`) on commit `5f40de15` (Managed bounce R2). Same shape three times: a saved file that was not a served/gated file.
+
+**Job 2 finding (biggest) — committed ≠ deployed.** `POST /api/system/bounce` returned **404 on the live :7999**: the endpoint committed at 20:52 but the container last started 20:25 and reload is OFF, so the button was DEAD on the running server. María's own rule — "a saved file is not a served file" — broken within the hour of R2 being called done. Fixed by driving the sanctioned sequence: `bounce-dev-server.sh` (load the endpoint; 404→401 confirmed live) → `install-bounce-watcher.sh` (the watcher was NOT running — no `io/bounce` heartbeat → a press would 503; now a systemd --user unit, heartbeat fresh at 1s) → **the real authenticated press**.
+
+**Whole press proven end-to-end (first time):** click → `202 triggered` at t=0 → watcher claimed the trigger + set `bounce.inprogress` at t=2s → :7999 DOWN at t=20s → HEALTHY at t=28s (all-clear). Observe loop only accepts "healthy" AFTER first seeing "down", so a pre-restart 200 cannot false-green it. Corroborated independently by María: container `StartedAt` moved 21:16:45 → 21:20:51.
+
+**Job 1 — the auth-401 branch was untested.** `test_system_bounce.py` proved 409/503/202 but called the endpoint with a **fake `current_user`**, bypassing the auth dependency, so the 401 the commit names never ran. Closed by new `test_system_bounce_auth.py` (2 passed): drives the REAL chain (`HTTPBearerWith401` → `get_current_user`); unauth AND malformed-Bearer both 401 (a custom 401 subclass, not FastAPI's default 403 — the commit's "401" claim verified). Red-proof (documented): removing `Depends(get_current_user)` → unauth reaches the body → 503/202, not 401.
+
+**Job 3 — those tests were invisible to the gate.** Both files lived in `src/cosa/tests/unit/rest/`, but the unit gate runs `pytest src/tests/unit/` only (`src/tests/run-unit-tests.sh`), so **0 were collected** — green locally, never in CI. Relocated both into `src/tests/unit/` (where sibling `test_bounce_watcher*.py` already live); verified by RUNNING the gate: `run-unit-tests.sh -k system_bounce` → **13 passed, 12142 deselected**. Chose relocate over allowlist deliberately.
+- **SYSTEMIC (worth a real look):** no runner I could find collects `src/cosa/tests/` at all — `pyproject.toml` references it only to EXCLUDE it from coverage — yet it holds **~415 test files**. A whole tree of unit tests may be green-locally / ungated. Same failure shape as the 404, at scale.
+
+**Uncommitted for the crew (Sam gates, María/Cheech commit):** `src/tests/unit/test_system_bounce_auth.py` (new), the `git mv` of `test_system_bounce.py` into `src/tests/unit/`, and the D2/D3 test files from the prior legs.
 
 ---
 
@@ -95,12 +112,47 @@ reconnect curve 0→0→1→1→1→1→…→1   [29 polls flat at ONE]
 10 session(s) had NOT rejoined and got NO all-clear (accepted loss, no re-fire): [10 ids]
 ```
 
-**🔴 CORRECTED — my first reading of this was WRONG, and the correction is the useful part.** I originally wrote this entry up as "reconnection is slower than the 15-second window" (1 of 11 sockets back). That is a plausible story that fits the number, and I stopped there. The actual cause, found minutes later and confirmed independently by Arnold 🪨: **the roster and the live-socket set were never the same id space**, so the comparison could not match at all. The roster holds full session ids (`0768c103-eb8d-…`); the socket registry holds `cc-listener-0768c103`. Present reached 1 while `missing` stayed at the full 10 — because that one socket was never in the roster's vocabulary. **The gate was not coarse, it was blind.** Fixed under bug `784d4a2e`; details on that row.
+**🔴 CORRECTED TWICE. Read both corrections — the second one partly restores the first, and that is the lesson.**
 
-**What remains genuinely open** (the part that survives the correction):
-1. **Nobody has measured cc-listener reconnect latency after a bounce.** The 15-second deadline is still a guess with no soak behind it. Now that the gate can actually recognize a returning session, the reconnect curve finally means something — read the next few bounces before tuning anything.
-2. **Use the WARNING phase's ack list as the roster**, carried across the restart in a file. Those are exactly the sessions that were live and heard us minutes ago — tighter than bridge files on an 8-hour window.
-3. **Raise the deadline only once (1) has a number under it.** Raising it blind just moves a guess.
+*First version*: "reconnection is slower than the 15-second window" (1 of 11 sockets back at fire time). *Correction 1*: I called that wrong and replaced it — the roster and the live-socket set were **never the same id space** (roster holds `0768c103-eb8d-…`, the socket registry holds `cc-listener-0768c103`), so the comparison could not match at all and the gate was **blind, not coarse**. Fixed under `784d4a2e`.
+
+*Correction 2, measured on boot #4 with the fix live*: **both defects were real and stacked.** The id-space bug was masking a genuine timing problem, and now that the gate can actually see returning sessions, the timing problem is exposed and finally has a number under it. My first explanation was not wrong — it was **incomplete, and I called it wrong**. Over-correcting is its own error: a second story that fits the evidence does not automatically retire the first.
+
+**🎯 THE NUMBER, measured on boot #4 (2026-08-02 01:17, `d96f59ce` live):**
+```
+01:17:08.404  all-clear FIRED on DEADLINE EXPIRY — 15.5s, curve 0→0→0→1→1→…→1
+              9 session(s) named as missed
+01:17:11.506  cc-listener-0768c103   ┐
+01:17:11.511  cc-listener-7edf6e5e   │  ALL NINE of the "missed"
+01:17:11.511  cc-listener-9056b85b   │  reconnect 3.1s LATER,
+01:17:11.512  cc-listener-0d6df7b6   │  within 8 MILLISECONDS
+01:17:11.513  cc-listener-f63d0e28   │  of each other
+01:17:11.513  cc-listener-8a09f41c   │
+01:17:11.513  cc-listener-5b2b4545   ┘  (+ 2 more)
+```
+
+**What this establishes, and it is the first hard evidence in this whole arc:**
+- The fleet does **not** trickle back — it returns in one synchronized burst at **~18.6s after the gate starts**, roughly 3 seconds past a 15-second deadline. That looks like a fixed reconnect/backoff interval, not load-dependent scatter.
+- **The deadline is the lever now, and it is short by about 3 seconds.** Every one of the 9 sessions named as an accepted loss was actually back moments later — and got nothing, because re-fire is barred.
+- The gate itself is behaving correctly: it named exactly the sessions that genuinely had no socket at fire time. The instrument is sound; the window is wrong.
+
+**✅ SECOND SAMPLE ARRIVED — boot #5, a peer's bounce minutes later. It CONFIRMS the burst and widens the spread:**
+```
+boot #4   fire 01:17:08.404 (15.5s)  →  9 listeners at 01:17:11.506   = +3.1s   (within 8ms)
+boot #5   fire 01:21:14.801 (15.4s)  →  9 listeners at 01:21:19.813   = +5.0s   (within ~70ms)
+```
+Reconnection completes **~18.6s and ~20.4s** after the gate starts. **The 15s deadline misses it both times.** Two independent bounces, both a synchronized burst, both a total delivery loss.
+
+**Worth noting how the second sample was obtained**: I asked Rick whether to fire two controlled bounces for measurement — a deliberate fleet disruption at 1am — and the ask timed out because a peer's bounce dropped it. That bounce *was* the sample. The question answered itself at zero cost to the fleet.
+
+**Next, in order:**
+1. **DELEGATED (Krishna, spawned 01:22)** — raise the deadline 15 → **30**, not 25: two samples at 18.6 and 20.4 are 1.8s apart at n=2, so leave real headroom rather than hugging the larger one. Splainer twin must state the measurements *and* that n=2 — it currently admits "15 is a GUESS", and the replacement must not read as more certain than two samples support. Plus a test that goes red if anyone tidies it back to 15.
+2. **✅ ANSWERED — and it makes 30 the wrong number.** Krishna traced the burst to the listener's exponential backoff in `src/cosa/agents/utils/proxy_agents/base_config.py`: `RECONNECT_INITIAL_DELAY=1.0`, `BACKOFF_FACTOR=2.0`, `MAX_DELAY=30.0`, **no jitter** — which is exactly why all nine wake within 8ms of each other. The fleet lands on the **30-second cap wake**. So a 30s deadline *races the wake it is waiting for* — a coin flip, and the same "don't hug the sample" error I gave him, reappearing one level up. **Corrected to 40**, clear of the boundary. (Arithmetic being reconciled first: his series is 2/6/14/30, mine is 1/3/7/15/31 from `min(1.0·2^attempt, 30)`; we are choosing a config value against those boundaries, so the exact series and the offset between the disconnect clock and the gate clock have to be settled, not assumed.)
+
+3. **🔴 THE REAL FIX IS JITTER, and it is Rick's call — fleet-wide blast radius.** Nine sessions waking within 8 milliseconds is a textbook thundering herd; the lockstep is a property of the backoff having no randomization. Adding jitter would spread the reconnects and make *any* deadline choice robust instead of boundary-sensitive. Also worth pricing: a 30s cap means a listener that misses early attempts waits half a minute, which is what pushes reconnection past any sane all-clear window in the first place. **Not touched** — a launch-wide backoff change is not something a bounce-arc worker should land unilaterally.
+
+4. **Also fixed**: `main.py:472`'s fallback default was still 15. A fallback that disagrees with the key silently reverts to the known-wrong value if the key ever goes missing.
+3. Only then consider the warning-phase ack list as a tighter roster — it may be unnecessary if the window is simply correct.
 
 ⚠️ **The roster over-count is real and still costs us**, independent of the id bug: the 00:25 warning was acked by only 2 distinct sessions while the roster listed 10. Krishna was **reaped at ~15:50** and his bridge file is still on the roster nine hours later — a session that will never reconnect, holding the gate to the deadline on every bounce.
 
