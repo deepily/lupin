@@ -11,6 +11,8 @@ Tests cover:
         * multi-select questions reject string default or bad-label list
 """
 
+import json
+
 import pytest
 from unittest.mock import patch, MagicMock
 
@@ -436,6 +438,88 @@ class TestAskMultipleChoiceDefault:
 
         result = ask_multiple_choice.fn( questions=self.SINGLE_QUESTION )
         assert result == { "answers": { "Database": "MongoDB" }, "default_used": False, "answered": True }
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TestResponseDefaultPlumbedToRequest — bug f433fbae, D1
+#
+# The FALSE-503-while-online defect: ask_multiple_choice never passed
+# response_default to the NotificationRequest, so the server raised
+# HTTPException(503, "User is offline and no default response provided") on the
+# offline branch — including the false-offline window after a bounce wipes the
+# in-memory ws_manager, i.e. a user sitting at the keyboard. ask_yes_no has
+# always plumbed its string default; this class proves the MULTIPLE_CHOICE path
+# now does too, and in the shape _parse_multiple_choice_response round-trips.
+#
+# These assert on what reaches NotificationRequest (the mocked build), which is
+# the exact seam the defect lived at — the request was constructed without the
+# field. The negative control is documented per-test.
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestResponseDefaultPlumbedToRequest:
+    """response_default must reach the request when (and only when) a default is given."""
+
+    SINGLE_QUESTION = TestAskMultipleChoiceDefault.SINGLE_QUESTION
+    MULTI_QUESTION  = TestAskMultipleChoiceDefault.MULTI_QUESTION
+
+    def _resp( self, exit_code=2, response_value=None, status="", is_timeout=None, default_used=False ):
+        if is_timeout is None:
+            is_timeout = ( exit_code == 2 )
+        mock                = MagicMock()
+        mock.exit_code      = exit_code
+        mock.response_value = response_value
+        mock.status         = status
+        mock.is_timeout     = is_timeout
+        mock.default_used   = default_used
+        return mock
+
+    def _patches( fn ):
+        fn = patch( "lupin_mcp.cosa_voice_mcp.notify_user_sync" )( fn )
+        fn = patch( "lupin_mcp.cosa_voice_mcp._wait_for_sender_id", return_value="claude.code@lupin.deepily.ai#t" )( fn )
+        fn = patch( "lupin_mcp.cosa_voice_mcp._normalize_abstract", return_value=None )( fn )
+        fn = patch( "lupin_mcp.cosa_voice_mcp.NotificationRequest" )( fn )
+        return fn
+
+    @_patches
+    def test_single_select_default_serialized_into_response_default( self, mock_notify, mock_sender, mock_abstract, mock_request ):
+        # NEGATIVE CONTROL: delete the `response_default=` line in
+        # ask_multiple_choice and this fails with
+        # `AssertionError: assert None == '{"answers": {"Database": "PostgreSQL"}}'`
+        # — the field is absent from the call, so .get() returns None.
+        mock_notify.return_value = self._resp( exit_code=2 )
+
+        ask_multiple_choice.fn(
+            questions = self.SINGLE_QUESTION,
+            default   = { "Database": "PostgreSQL" }
+        )
+
+        passed = mock_request.call_args.kwargs.get( "response_default" )
+        assert passed == json.dumps( { "answers": { "Database": "PostgreSQL" } } )
+        # And it round-trips through the client's own parser back to the default.
+        assert json.loads( passed ) == { "answers": { "Database": "PostgreSQL" } }
+
+    @_patches
+    def test_multi_select_default_serialized_into_response_default( self, mock_notify, mock_sender, mock_abstract, mock_request ):
+        mock_notify.return_value = self._resp( exit_code=2 )
+
+        ask_multiple_choice.fn(
+            questions = self.MULTI_QUESTION,
+            default   = { "Features": [ "Auth", "Caching" ] }
+        )
+
+        passed = mock_request.call_args.kwargs.get( "response_default" )
+        assert passed == json.dumps( { "answers": { "Features": [ "Auth", "Caching" ] } } )
+
+    @_patches
+    def test_no_default_leaves_response_default_none( self, mock_notify, mock_sender, mock_abstract, mock_request ):
+        # The honest 503 stays for "offline and no safe default to substitute".
+        # NEGATIVE CONTROL: if the code hard-coded a non-None default, this fails
+        # with `assert '<something>' is None`.
+        mock_notify.return_value = self._resp( exit_code=2 )
+
+        ask_multiple_choice.fn( questions=self.SINGLE_QUESTION )
+
+        assert mock_request.call_args.kwargs.get( "response_default" ) is None
 
 
 # ═════════════════════════════════════════════════════════════════════════════

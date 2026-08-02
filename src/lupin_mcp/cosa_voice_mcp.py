@@ -1701,6 +1701,19 @@ def ask_multiple_choice(
         except ValueError as e:
             return { "error": f"default validation error: {e}" }
 
+    # D1 (bug f433fbae) — plumb a server-side response_default so an OFFLINE
+    # user does not 503. ask_yes_no has always passed its string default here
+    # (:1528); the MULTIPLE_CHOICE path omitted it, so notifications.py raised
+    # HTTPException(503, "User is offline and no default response provided")
+    # whenever is_connected read False — including the FALSE-offline window right
+    # after a server bounce wipes the in-memory ws_manager, i.e. a user at the
+    # keyboard. Serialized as the SAME shape _parse_multiple_choice_response
+    # expects ({"answers": <default>}), so if the server substitutes it on the
+    # offline path it round-trips into answers verbatim. None when no caller
+    # default — the honest 503 stays for "offline and no safe default to use".
+    import json
+    response_default = json.dumps( { "answers": default } ) if default is not None else None
+
     try:
         request = NotificationRequest(
             message=tts_message,
@@ -1711,6 +1724,7 @@ def ask_multiple_choice(
             title=title,
             sender_id=_wait_for_sender_id(),
             response_options=response_options,
+            response_default=response_default,
             abstract=_normalize_abstract( abstract ),
             job_id=job_id
         )
