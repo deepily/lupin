@@ -47,6 +47,31 @@ So the **first** bounce after this commit runs a 15s deadline against listeners 
 
 ---
 
+## 📥 FINDING 2026-08-02 (Mr. Radio 🦉 `1bf47c18`) — a listener loads the WORKING TREE at spawn, so it can pick up HALF an edit
+
+**Status**: measured on boot #8, **no store row** (Rick's no-new-rows order stands). Sharper than the transition hazard filed above, and it partly replaces it.
+
+**How it surfaced**: boot #8's reconnect lines were inconsistent with each other. Four listeners printed the old bare format; one printed **timestamped** lines — my instrument, committed at 13:43 — while *also* showing a **16.0s** delay at attempt 4, which the new 10s cap forbids. Timestamp present, cap absent. That combination exists in no commit.
+
+**Cause**: listeners run `python -m lupin_cli...` straight out of `/src` (verified: the module resolves to the working tree, not site-packages). They import **whatever is on disk at the moment they spawn**. My two edits were saved ~15 minutes apart; a session that started between them loaded one and not the other.
+
+```
+3e328792  12:51   no timestamped lines
+1bf47c18  12:53   no
+b07d59ac  13:04   no
+9fec7c53  13:20   FOUR  <- spawned between the _log edit and the cap edit
+55eae7a8  14:06   (not yet reconnected)
+```
+A clean split at exactly the edit boundary — this is the mechanism, not a coincidence.
+
+**🔴 Why it matters beyond this change.** `:7999` has the rule "a saved file is not a served file — you must bounce." **For listeners the inverse holds: a saved file IS served, to the next listener that spawns, with no bounce and no announcement.** An editing session therefore deploys *intermediate* states to the fleet without anyone acting. The fleet can hold several code versions at once, and none of them need correspond to a commit.
+
+**Not proposing a fix here** — the options (spawn from an installed copy, stamp each listener with a git sha at spawn, or accept it and make the version legible in the log) have real trade-offs and this is fleet-shaped. Naming the mechanism so the next confusing log is diagnosed in a minute rather than an hour.
+
+**Refines the transition-hazard entry above**: it is not "old code vs new code" — there is no single old version. Any listener alive across an editing session may hold a mix.
+
+---
+
 ## 📥 FINDING 2026-08-02 (Mr. Radio 🦉 `1bf47c18`) — session gists have been degraded fleet-wide since the Mistral cutover
 
 **Status**: found incidentally while reading listener logs, **not fixed** — a model-server bounce and GPU work are outside what I take unilaterally. No store row (Rick's no-new-rows order stands).
