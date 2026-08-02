@@ -931,3 +931,63 @@ class TestMain:
             self._run_main()
         assert mk.call_args.kwargs[ "accepted_ids" ] is None
         fake_listener.run.assert_awaited_once()
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Late-answer handback: the :481 notification_responded arm + _on_connected (§4.3/§4.4)
+# ═════════════════════════════════════════════════════════════════════════════
+class TestLateAnswerListenerArm:
+    def test_responded_arm_records_id_and_surfaces_answer( self, listener ):
+        # job_id ∈ accepted_ids ({session_id_hash}) → append to the cross-process
+        # side-log AND buffer the answer.
+        with patch.object( listener, "_buffer_message" ) as buf, \
+             patch.object( listener_module, "append_surfaced_id" ) as app:
+            listener._handle_answer_responded( {
+                "data": { "job_id": "abc12345", "notification_id": "n1",
+                          "response_value": { "value": "yes" } } } )
+        app.assert_called_once_with( "abc12345", "n1" )
+        assert "yes" in buf.call_args.args[ 0 ][ "message" ]
+
+    def test_responded_arm_skips_foreign_job_id( self, listener ):
+        with patch.object( listener, "_buffer_message" ) as buf, \
+             patch.object( listener_module, "append_surfaced_id" ) as app:
+            listener._handle_answer_responded( {
+                "data": { "job_id": "other999", "notification_id": "n1",
+                          "response_value": "yes" } } )
+        app.assert_not_called()
+        buf.assert_not_called()
+
+    def test_responded_arm_skips_missing_id( self, listener ):
+        with patch.object( listener, "_buffer_message" ) as buf, \
+             patch.object( listener_module, "append_surfaced_id" ) as app:
+            listener._handle_answer_responded( { "data": { "job_id": "abc12345" } } )
+        app.assert_not_called()
+        buf.assert_not_called()
+
+    def test_responded_arm_never_raises( self, listener ):
+        # append raising must be swallowed (non-fatal).
+        with patch.object( listener_module, "append_surfaced_id", side_effect=RuntimeError( "x" ) ), \
+             patch.object( listener, "_buffer_message" ):
+            listener._handle_answer_responded( {
+                "data": { "job_id": "abc12345", "notification_id": "n1", "response_value": "y" } } )   # no raise
+
+    def test_handle_event_routes_responded_before_queue_gate( self, listener ):
+        with patch.object( listener, "_handle_answer_responded" ) as arm:
+            asyncio.run( listener._handle_event( "notification_responded", { "data": {} } ) )
+        arm.assert_called_once()
+
+    def test_on_connected_surfaces_catchup_context( self, listener ):
+        with patch.object( listener_module, "surface_owed_answers", return_value="OWED CTX" ), \
+             patch.object( listener, "_buffer_message" ) as buf:
+            asyncio.run( listener._on_connected() )
+        assert buf.call_args.args[ 0 ][ "message" ] == "OWED CTX"
+
+    def test_on_connected_no_context_no_buffer( self, listener ):
+        with patch.object( listener_module, "surface_owed_answers", return_value="" ), \
+             patch.object( listener, "_buffer_message" ) as buf:
+            asyncio.run( listener._on_connected() )
+        buf.assert_not_called()
+
+    def test_on_connected_never_raises( self, listener ):
+        with patch.object( listener_module, "surface_owed_answers", side_effect=RuntimeError( "x" ) ):
+            asyncio.run( listener._on_connected() )   # no raise
