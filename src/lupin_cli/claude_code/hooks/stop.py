@@ -77,6 +77,7 @@ from lupin_cli.claude_code.hooks.lib.heartbeat_settings import load_heartbeat_se
 from lupin_cli.claude_code.hooks.lib import heartbeat_events
 # v2 Track-A — live work-owed oracle (Task* replay from the session transcript).
 from lupin_cli.claude_code.hooks.lib.board_sweep import sweep_progress_line
+from lupin_cli.claude_code.hooks.lib.memento_verify_tick import verify_tick_line
 from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import (
     evaluate_work_owed, partition_inbound_by_age, TODO_IN_PROGRESS, TODO_PENDING,
     format_owed_summary,
@@ -2052,6 +2053,17 @@ def _resolve_owed_state( session_id, transcript_path=None, cwd=None ):
     # UNKNOWN instead of rendering a store outage as a clear board.
     _live_owed = store_count if ( settings[ "owed_source_from_store" ] and store_ok ) else None
     sweep_line = _board_sweep_line( session_id, live_owed=_live_owed )
+
+    # Row 505e5c12 — the standing tick for `memento_io.py verify`, which had no caller
+    # and had not run in 6d14h while a bare slot (a live data-loss window) sat waiting.
+    # Self-throttled to once a day by its own ledger, so this call is a cheap no-op on
+    # all but one tick; it REPORTS and never repairs. Appended to the sweep line rather
+    # than given its own channel because both are "before you stop, look at this".
+    # It cannot raise — every path inside returns a string.
+    memento_line = verify_tick_line()
+    if memento_line:
+        sweep_line = f"{sweep_line}\n{memento_line}" if sweep_line else memento_line
+
     result     = decide_heartbeat( hold, verdict, poke_count, settings[ "poke_cap" ],
                                    goal_line=goal_line, sweep_line=sweep_line )
 
