@@ -19,6 +19,12 @@
 # Usage:
 #   ./src/scripts/bounce-dev-server.sh          # verbose
 #   ./src/scripts/bounce-dev-server.sh --quiet  # one-line summary only
+#   ./src/scripts/bounce-dev-server.sh --force  # skip the unwarned-fleet pause (exit 2)
+#
+# When the warning helper reports exit 2 (nobody was warned at all), the bounce
+# still proceeds — a broken warn path must not block recovery of a wedged server —
+# but it PAUSES first (UNWARNED_PAUSE_SECS, default 5) so a human gets the beat to
+# abort a bounce that will look like a crash to the fleet. --force skips that pause.
 
 set -euo pipefail
 
@@ -27,12 +33,15 @@ HEALTH_URL="http://localhost:7999/health"
 TIMEOUT_SECS=60           # sized for the slower (recreate) path, not just restart
 POLL_INTERVAL=0.5
 QUIET=0
+FORCE=0
+UNWARNED_PAUSE_SECS="${UNWARNED_PAUSE_SECS:-5}"   # env-overridable (tests set 0)
 
 for arg in "$@"; do
     case "$arg" in
         --quiet|-q) QUIET=1 ;;
+        --force|-f) FORCE=1 ;;
         -h|--help)
-            sed -n '2,22p' "$0"
+            sed -n '2,27p' "$0"
             exit 0
             ;;
         *)
@@ -50,15 +59,38 @@ if [ -z "${LUPIN_ROOT:-}" ]; then
 fi
 
 # ── Step 1: ack-confirmed warning ─────────────────────────────────────────────
-# Non-zero exit is NOT fatal here: partial reach (1) or a wedged server we could
-# not reach (2) both still want the restart — that IS the recovery. We proceed
-# and let the warning helper's own message say what happened.
+# bounce_dev_warn.py distinguishes THREE outcomes (its own header):
+#   0 — every recipient acked (or zero active sessions)
+#   1 — PARTIAL reach: the broadcast went out, some sessions did not ack in time
+#   2 — FAILED: nobody was warned at all (broadcast errored / server unreachable)
+# None is fatal — a broken warn path must never block recovery of a wedged server,
+# and the hand-run restart IS the recovery path. But 1 and 2 are NOT the same event
+# and must not read the same (row 32e659f1): on 1 the fleet WAS warned; on 2 a bounce
+# nobody was warned about is indistinguishable from a crash — the exact state the
+# warning exists to prevent. So 2 names itself in those words and PAUSES (skippable
+# with --force) to give a human the beat to abort; 1 proceeds directly.
 log "Warning the fleet before the bounce..."
 warn_rc=0
 python3 "${LUPIN_ROOT}/src/scripts/bounce_dev_warn.py" || warn_rc=$?
-if [ "$warn_rc" -ne 0 ]; then
-    log "Warning broadcast exited ${warn_rc} (partial reach or server unreachable) — proceeding with the bounce."
-fi
+case "$warn_rc" in
+    0)
+        log "Warning confirmed reached the fleet."
+        ;;
+    1)
+        log "Warning reached the fleet only PARTIALLY (some sessions did not ack in time) — proceeding with the bounce."
+        ;;
+    *)
+        # exit 2 (nobody warned) AND any unexpected non-zero code: assume the fleet
+        # was NOT warned and make that impossible to miss, then proceed anyway.
+        log "⚠️  Warning FAILED (exit ${warn_rc}) — NOBODY was warned; this bounce will look like a CRASH to the fleet."
+        if [ "$FORCE" -eq 1 ]; then
+            log "    --force given — proceeding immediately."
+        elif [ "$UNWARNED_PAUSE_SECS" -gt 0 ]; then
+            log "    Pausing ${UNWARNED_PAUSE_SECS}s before bouncing anyway — Ctrl-C to abort, or re-run with --force to skip this pause."
+            sleep "$UNWARNED_PAUSE_SECS"
+        fi
+        ;;
+esac
 
 # ── Step 2: restart ───────────────────────────────────────────────────────────
 log "Restarting container: $CONTAINER (docker restart — reuses container)"
