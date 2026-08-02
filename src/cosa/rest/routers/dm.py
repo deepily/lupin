@@ -348,6 +348,13 @@ _dm_quality_audit = {
     # spent the day on, just moved into the audit counter.
     "qualitative_count"       : 0,
     "total_length_weight"     : 0,
+    # Sum of the Length grade's `overage` ratio (words / target). Tracked BESIDE the
+    # weight, never instead of it: `total_length_weight` saturates because the grade
+    # saturates — a 251-word DM and a 1000-word DM both contribute -2, so avg_length
+    # has a floor it silently hits and "are DMs getting worse?" stops being answerable
+    # past that point. The ratio has no ceiling, so avg_overage keeps moving (row
+    # 0fc5b8f0).
+    "total_overage"           : 0.0,
     "total_directness_weight" : 0,
     "total_tone_weight"       : 0,
     "total_overall_weight"    : 0,
@@ -382,6 +389,7 @@ def reset_dm_quality_audit():
     _dm_quality_audit[ "count" ]                   = 0
     _dm_quality_audit[ "qualitative_count" ]       = 0
     _dm_quality_audit[ "total_length_weight" ]     = 0
+    _dm_quality_audit[ "total_overage" ]           = 0.0
     _dm_quality_audit[ "total_directness_weight" ] = 0
     _dm_quality_audit[ "total_tone_weight" ]       = 0
     _dm_quality_audit[ "total_overall_weight" ]    = 0
@@ -401,6 +409,9 @@ def get_dm_quality_audit():
           LENGTH-ONLY mode qualitative_count stays 0 and both read 0.0 — a
           "nothing was graded" zero, which is why qualitative_count ships in
           the snapshot: a reader can tell it from a real average of zero
+        - includes avg_overage, the mean words-to-target ratio. UNLIKE avg_length it
+          has no floor, so it still moves when traffic is dominated by DMs past the
+          -2 saturation point — which is precisely the population this feature aims at
     """
     snapshot = dict( _dm_quality_audit )
     count    = snapshot[ "count" ]
@@ -409,6 +420,7 @@ def get_dm_quality_audit():
     snapshot[ "avg_overall" ]    = ( snapshot[ "total_overall_weight" ]    / count ) if count else 0.0
     snapshot[ "avg_directness" ] = ( snapshot[ "total_directness_weight" ] / qual )  if qual  else 0.0
     snapshot[ "avg_tone" ]       = ( snapshot[ "total_tone_weight" ]       / qual )  if qual  else 0.0
+    snapshot[ "avg_overage" ]    = ( snapshot[ "total_overage" ]           / count ) if count else 0.0
     return snapshot
 
 
@@ -427,7 +439,8 @@ def format_dm_quality_audit_line():
         f"avg_length={audit[ 'avg_length' ]:.2f} "
         f"avg_directness={audit[ 'avg_directness' ]:.2f} "
         f"avg_tone={audit[ 'avg_tone' ]:.2f} "
-        f"avg_overall={audit[ 'avg_overall' ]:.2f}"
+        f"avg_overall={audit[ 'avg_overall' ]:.2f} "
+        f"avg_overage={audit[ 'avg_overage' ]:.1f}x"
     )
 
 
@@ -441,7 +454,8 @@ def _record_dm_quality( quality ):
           carry an int weight, Directness and Tone carry an int OR None
 
     Ensures:
-        - increments count + the Length/Overall totals on every grade
+        - increments count + the Length/Overall totals and the overage sum on
+          every grade
         - a None Directness/Tone weight (LENGTH-ONLY mode) is SKIPPED, not
           coerced to 0, and does not increment qualitative_count — so the
           qualitative averages stay averages of grades that actually happened
@@ -450,6 +464,11 @@ def _record_dm_quality( quality ):
     _dm_quality_audit[ "count" ]                += 1
     _dm_quality_audit[ "total_length_weight" ]  += quality[ "length" ][ "weight" ]
     _dm_quality_audit[ "total_overall_weight" ] += quality[ "overall" ][ "weight" ]
+    # `.get` with a 0.0 default, and this is the ONE place a defensive read is right:
+    # a v2 judge on an older code path can hand back a Length dict predating `overage`,
+    # and a KeyError here would 500 the SEND over a statistic. The weight above is
+    # subscripted directly on purpose — that one is not optional and must fail loud.
+    _dm_quality_audit[ "total_overage" ]        += quality[ "length" ].get( "overage", 0.0 )
 
     directness_weight = quality[ "directness" ][ "weight" ]
     tone_weight       = quality[ "tone" ][ "weight" ]

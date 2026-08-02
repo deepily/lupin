@@ -224,6 +224,44 @@ class TestLengthBucket:
     def test_detail_names_the_word_count_and_target( self ):
         assert length_bucket( 187 )[ "detail" ] == "187 words, target ~60"
 
+    # ── overage: the field that sees past the saturated weight (row 0fc5b8f0) ──
+
+    @pytest.mark.parametrize( "words, overage", [
+        (   60,  1.0 ),
+        (   30,  0.5 ),
+        (  120,  2.0 ),
+        (  251,  4.2 ),
+        ( 1000, 16.7 ),
+    ] )
+    def test_overage_is_the_ratio_to_target( self, words, overage ):
+        assert length_bucket( words )[ "overage" ] == overage
+
+    def test_overage_is_present_on_every_grade_not_only_bad_ones( self ):
+        # A field that appears only in the failing case is one consumers forget to read.
+        for words in ( 1, 60, 91, 200, 5000 ):
+            assert "overage" in length_bucket( words )
+
+    def test_overage_keeps_increasing_where_the_weight_saturates( self ):
+        # 🔴 THE CONTROL, and the whole reason this field exists. Both of these score
+        # an identical -2 😞 — that is the defect. If overage ever stops separating
+        # them, it has inherited the saturation it was added to see past, and every
+        # "which sender is worst" ranking built on it silently collapses.
+        a, b = length_bucket( 251 ), length_bucket( 1000 )
+        assert a[ "weight" ] == b[ "weight" ] == -2, "premise changed: the weights no longer tie"
+        assert a[ "overage" ] < b[ "overage" ]
+
+    def test_overage_is_strictly_increasing_across_the_saturated_range( self ):
+        counts   = [ 251, 400, 700, 1000, 2000 ]
+        overages = [ length_bucket( n )[ "overage" ] for n in counts ]
+        assert overages == sorted( overages ) and len( set( overages ) ) == len( overages )
+
+    def test_weight_stays_inside_the_documented_contract( self ):
+        # The alternative fix was a -3/-4 band. It would have broken this, which is
+        # asserted in length_bucket's own docstring, relied on by combine_overall's
+        # clamp, and assumed by every reader of WEIGHT_TO_EMOJI.
+        for words in ( 0, 60, 61, 150, 251, 10_000 ):
+            assert -2 <= length_bucket( words )[ "weight" ] <= 2
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # round_half_up + combine_overall — the combination math (item 4)
@@ -842,3 +880,65 @@ class TestQualityToggleRead:
 
 if __name__ == "__main__":
     pytest.main( [ __file__, "-v" ] )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# The audit's overage accumulator (row 0fc5b8f0)
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestQualityAuditOverage:
+
+    def setup_method( self ):
+        import cosa.rest.routers.dm as dm
+        dm.reset_dm_quality_audit()
+
+    def teardown_method( self ):
+        import cosa.rest.routers.dm as dm
+        dm.reset_dm_quality_audit()
+
+    def _grade( self, overage, length_weight=-2 ):
+        return {
+            "length"     : { "weight": length_weight, "detail": "x", "overage": overage },
+            "directness" : { "weight": None, "detail": "off" },
+            "tone"       : { "weight": None, "detail": "off" },
+            "overall"    : { "weight": length_weight },
+        }
+
+    def test_avg_overage_moves_where_avg_length_cannot( self ):
+        # 🔴 THE CONTROL FOR THE AUDIT HALF. Both grades are -2, so avg_length is pinned
+        # at its floor and cannot answer "are DMs getting worse?". avg_overage must.
+        import cosa.rest.routers.dm as dm
+        dm._record_dm_quality( self._grade( 4.2 ) )
+        first = dm.get_dm_quality_audit()
+        dm._record_dm_quality( self._grade( 16.7 ) )
+        second = dm.get_dm_quality_audit()
+        assert first[ "avg_length" ] == second[ "avg_length" ] == -2.0
+        assert second[ "avg_overage" ] > first[ "avg_overage" ]
+
+    def test_avg_overage_is_zero_with_no_data_not_a_crash( self ):
+        import cosa.rest.routers.dm as dm
+        assert dm.get_dm_quality_audit()[ "avg_overage" ] == 0.0
+
+    def test_reset_clears_the_overage_sum( self ):
+        import cosa.rest.routers.dm as dm
+        dm._record_dm_quality( self._grade( 9.0 ) )
+        assert dm.get_dm_quality_audit()[ "total_overage" ] == 9.0
+        dm.reset_dm_quality_audit()
+        assert dm.get_dm_quality_audit()[ "total_overage" ] == 0.0
+
+    def test_a_length_dict_without_overage_does_not_500_the_send( self ):
+        # The defensive .get is deliberate and scoped to this one field: a judge on an
+        # older path can hand back a Length dict predating `overage`, and losing a SEND
+        # over a statistic is the wrong trade. The weight beside it is subscripted
+        # directly and still fails loud.
+        import cosa.rest.routers.dm as dm
+        legacy = self._grade( 0.0 )
+        del legacy[ "length" ][ "overage" ]
+        dm._record_dm_quality( legacy )
+        assert dm.get_dm_quality_audit()[ "count" ] == 1
+        assert dm.get_dm_quality_audit()[ "total_overage" ] == 0.0
+
+    def test_audit_line_reports_overage( self ):
+        import cosa.rest.routers.dm as dm
+        dm._record_dm_quality( self._grade( 16.7 ) )
+        assert "avg_overage=16.7x" in dm.format_dm_quality_audit_line()

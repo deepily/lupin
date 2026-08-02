@@ -89,6 +89,13 @@ _RETRY_NUDGE                = "Begin your reply with <response>.\n\n"
 # Full finding: bug 2a41e141 (Krishna's evidence writeup) + this session's 8-variant probe.
 QUALITATIVE_WORD_LIMIT      = 150
 
+# The target every Length grade is stated against. Was a bare "~60" written into the
+# detail string; promoted to a constant when `overage` started dividing by it (row
+# 0fc5b8f0), so the number a reader is told and the number the ratio uses cannot drift
+# apart. NOT the same as the ⭐ boundary being 60 — they coincide today and are free to
+# stop coinciding, which is exactly why they are not the same literal reused twice.
+LENGTH_TARGET_WORDS         = 60
+
 _TOO_LONG_DETAIL            = "not judged: DM too long for reliable qualitative grading"
 
 
@@ -316,19 +323,43 @@ def length_bucket( word_count ):
         ≤ 60   → ⭐ +2     91–150  → 🤷  0     251+ → 😞 −2
         61–90  → 👍 +1     151–250 → 👎 −1
 
+    THE SCALE SATURATES AT 251, AND `overage` IS HOW A CONSUMER SEES PAST IT (row
+    0fc5b8f0, 2026-08-01). Surfaced by Rick's broadcast about a ~1000-word DM: 251
+    words and 1000 words both score 😞 −2, so every consumer reading the WEIGHT — the
+    audit averages, Overall, any future gate — cannot tell a message 4× over target
+    from one 16× over. This judge exists to curb token burn, and a scale that cannot
+    rank the worst offenders against each other is blind exactly where it is aimed.
+
+    THE WEIGHT IS DELIBERATELY UNCHANGED. Adding a −3/−4 would be the other obvious
+    fix and it breaks a documented contract: `weight in [-2, 2]` is asserted in this
+    docstring, relied on by combine_overall's clamp, and assumed by every reader of
+    WEIGHT_TO_EMOJI. So the ranking information is added ALONGSIDE the grade instead
+    of by stretching it — no consumer changes behaviour, and one that wants to rank
+    over-long DMs now has a number to rank on.
+
+    `overage` is the ratio to target, rounded to one decimal: 60 words → 1.0,
+    1000 words → 16.7. It is on EVERY result, not only the saturated ones, because a
+    field that appears only in the bad case is a field consumers forget to read.
+
     Requires:
         - word_count is a non-negative int
 
     Ensures:
-        - returns {"emoji", "weight", "detail"} with a weight in [-2, 2]
+        - returns {"emoji", "weight", "detail", "overage"} with a weight in [-2, 2]
         - the boundaries are inclusive-left as written above (60→⭐, 61→👍, ...)
+        - overage is word_count / LENGTH_TARGET_WORDS, rounded to 1dp, and is
+          STRICTLY INCREASING in word_count past the saturation point — which is the
+          whole reason it exists
     """
     if   word_count <=  60: emoji, weight = "⭐", 2
     elif word_count <=  90: emoji, weight = "👍", 1
     elif word_count <= 150: emoji, weight = "🤷", 0
     elif word_count <= 250: emoji, weight = "👎", -1
     else:                   emoji, weight = "😞", -2
-    return { "emoji": emoji, "weight": weight, "detail": f"{word_count} words, target ~60" }
+    return { "emoji"   : emoji,
+             "weight"  : weight,
+             "detail"  : f"{word_count} words, target ~{LENGTH_TARGET_WORDS}",
+             "overage" : round( word_count / LENGTH_TARGET_WORDS, 1 ) }
 
 
 def round_half_up( x ):
