@@ -1,5 +1,22 @@
 # TODO
 
+## 🔴 FOR TOMORROW (2026-08-02) — Krishna's managed-bounce lane: what is UNFINISHED, and what is NOT
+
+**Rick asked for a note that Krishna has work "still in flight and uncommitted." I checked the tree before writing it, and the second half is not true — so here is the accurate version, because a wrong note tomorrow costs more than no note.**
+
+**NOTHING of Krishna's is uncommitted.** His tree work — deadline 15 → 30, the splainer rewrite, and the pin test — shipped in `416940e4`. `git status` shows no managed-bounce file dirty. He explicitly reverted a half-finished edit rather than leave the tree inconsistent under a deadline, and said so.
+
+**What IS unfinished is work he never built.** Three items, in priority order:
+
+1. **`main.py:472` still falls back to `15`.** The key is now 30, so if that config key ever goes missing the server silently reverts to the value we just measured as wrong. One line. This is the only *code* item.
+2. **The deadline may need to be 40, not 30 — and the arithmetic to decide it is UNRECONCILED.** I ordered 40, then withdrew the order when I noticed my own objection cut both ways. The dispute: Krishna reads the listener backoff wake series as **2/6/14/30** from disconnect; I read `min(1.0·2^attempt, 30)` as **1/3/7/15/31**. Neither of us settled **the offset between the disconnect clock and the gate-start clock**, which is precisely what makes "+20.4s from gate start" and "a 30s wake from disconnect" non-comparable. 30 clears both *observed* samples by ~10s, so what shipped is defensible on measurement — but if the boundary reading is right, 30 races the wake it is waiting for.
+3. **🔴 THE REAL FIX, and it needs Rick, not a worker.** The listener backoff in `src/cosa/agents/utils/proxy_agents/base_config.py` has **no jitter** and a 30s cap. Nine sessions waking within 8 milliseconds of each other is a thundering herd by construction. Jitter would make *any* deadline choice robust instead of boundary-sensitive, and a lower cap would stop pushing reconnection past every sane window. **Fleet-wide blast radius — deliberately not taken by the bounce-arc crew.**
+
+**Where the context lives**: Krishna's memento (`.claude-memento-krishna-50c3680b.md`) carries all three plus the backoff finding; store row `251a42d0` (done) carries the full arc; his session was reaped clean on Rick's word.
+
+---
+
+
 Last updated: 2026-08-02 (Rachel 🕊️ `0d6df7b6` — bounce-button: served ≠ saved, and a whole press pressed)
 
 ---
