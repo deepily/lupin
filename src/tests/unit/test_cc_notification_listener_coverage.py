@@ -30,6 +30,7 @@ network, no real tmux, no state mutation outside tmp_path.
 
 import asyncio
 import json
+import re
 
 import pytest
 from argparse import Namespace
@@ -991,3 +992,81 @@ class TestLateAnswerListenerArm:
     def test_on_connected_never_raises( self, listener ):
         with patch.object( listener_module, "surface_owed_answers", side_effect=RuntimeError( "x" ) ):
             asyncio.run( listener._on_connected() )   # no raise
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# The reconnect wake must be readable OFF A CLOCK, end to end
+# ═════════════════════════════════════════════════════════════════════════════
+class TestReconnectLineIsTimestampedOnDisk:
+    """
+    The base listener emits reconnect lines; the CC subclass timestamps what it logs.
+    Whether those two halves actually meet is a CROSS-LAYER question, and reading the
+    chain is how it stays broken — that is last night's lesson (a review that stops at
+    the process boundary passes an inert fix). So this drives the real `run()` loop
+    against a real file and asserts on what LANDED, not on what should have.
+
+    Why it matters: the settle-deadline arithmetic could not be closed from the record
+    because no timestamped reconnect line existed anywhere — a grep over the whole
+    118 MB centralized listener log returned zero. The downtime behind every measured
+    bounce had to be inferred from arrival times instead of read off a clock.
+    """
+
+    # 2026.08.02 @ 17:35 12,717ms [deadbeef] [CC-Listener] ... Reconnecting in 5.1s (attempt 3/10)...
+    LINE_RE = re.compile(
+        r"^\d{4}\.\d{2}\.\d{2} @ \d{2}:\d{2} \d{2},\d{3}ms "
+        r"\[(?P<sid>\w+)\] .*Reconnecting in (?P<delay>[\d.]+)s \(attempt (?P<n>\d+)/\d+\)"
+    )
+
+    def _drive_reconnects( self, log_path, rounds=3 ):
+        """Run the REAL base run() loop with a real centralized log open."""
+        listener                     = CCNotificationListener.__new__( CCNotificationListener )
+        listener.LOG_PREFIX          = "[CC-Listener]"
+        listener.session_id_hash     = "deadbeef"
+        listener._log_file           = None
+        listener._centralized_log    = open( log_path, "a", buffering=1 )
+        listener._running            = False
+        listener._attempt            = 0
+
+        calls = { "n": 0 }
+
+        async def fake_connect_and_listen():
+            calls[ "n" ] += 1
+            if calls[ "n" ] >= rounds:
+                listener._running = False
+            raise RuntimeError( "simulated bounce" )
+
+        listener._connect_and_listen = fake_connect_and_listen
+
+        async def no_sleep( _ ):
+            pass
+
+        with patch( "cosa.agents.utils.proxy_agents.base_listener.asyncio.sleep", no_sleep ):
+            asyncio.run( base_listener_module.BaseWebSocketListener.run( listener ) )
+
+        listener._centralized_log.close()
+        return log_path.read_text()
+
+    def test_every_reconnect_line_lands_timestamped_and_attributed( self, tmp_path ):
+        body  = self._drive_reconnects( tmp_path / "central.log" )
+        lines = [ l for l in body.splitlines() if "Reconnecting in" in l ]
+
+        assert lines, "no reconnect line reached the centralized log at all"
+        for line in lines:
+            m = self.LINE_RE.match( line )
+            assert m, f"reconnect line is not timestamped/attributed on disk: {line!r}"
+            assert m.group( "sid" ) == "deadbeef"     # which session woke
+            assert float( m.group( "delay" ) ) > 0    # how long it waited
+            assert int( m.group( "n" ) ) >= 1         # which backoff wake this is
+
+    def test_the_line_carries_enough_to_reconstruct_the_wake_series( self, tmp_path ):
+        # A timestamp alone is not the instrument. To measure a bounce you need, per
+        # line: when it fired, which attempt it was, and the delay it then slept. With
+        # all three, the next real bounce MEASURES the downtime instead of leaving it
+        # to be derived from arrival times.
+        body     = self._drive_reconnects( tmp_path / "central.log" )
+        parsed   = [ self.LINE_RE.match( l ) for l in body.splitlines() if "Reconnecting in" in l ]
+        attempts = [ int( m.group( "n" ) ) for m in parsed if m ]
+
+        assert attempts == sorted( attempts ), "attempt numbers are not monotonic"
+        assert attempts[ 0 ] == 1, f"first recorded attempt is {attempts[0]}, expected 1"
+        assert len( set( attempts ) ) == len( attempts ), "an attempt number was recorded twice"

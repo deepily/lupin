@@ -595,37 +595,86 @@ class ResolveAckTimingTests( unittest.TestCase ):
 
 class SettleDeadlinePinTests( unittest.TestCase ):
     """
-    Pins the LIVE INI `managed bounce all-clear settle deadline seconds` at or
-    above the measured reconnect window, so a later "tidy up" back to 15 goes
-    RED naming the two boots that set the floor.
+    Pins the LIVE INI `managed bounce all-clear settle deadline seconds` against the
+    listener backoff cap it is DERIVED FROM — not against an observed sample.
 
-    Evidence (Tiffany, 2026-08-02, roster-coverage gate live @ commit d96f59ce,
-    measured from the lupin-rest-dev container log): two independent live
-    bounces returned all 9 listeners in one synchronized burst —
-      boot #4  gate fires 01:17:08.404  ->  all 9 reconnect 01:17:11.506  = +18.6s from gate start
-      boot #5  gate fires 01:21:14.801  ->  all 9 reconnect 01:21:19.813  = +20.4s from gate start
-    The retired 15s deadline missed BOTH; the deadline must cover the larger
-    sample. This is a small sample (n=2, spread 1.8s) — the pin is the observed
-    max, not a claim of exhaustive measurement.
+    Why derived and not observed. The gate fires on COVERAGE: it holds until every
+    rostered session is back, so it waits for the SLOWEST one, so the worst case it
+    must sit through is exactly RECONNECT_MAX_DELAY (a listener can wake an instant
+    before the server is ready and then sleep one full cap). Jitter is downward-only,
+    so it cannot push past that ceiling. The deadline therefore has a HARD requirement
+    that is computable from the backoff constants, and this test computes it.
+
+    An earlier version of this test pinned the deadline at 20.4s, the larger of two
+    observed reconnects. That number could not survive its own cause: the observation
+    was made under a 30s cap, and the cap is now 10. Pinning the OBSERVATION would have
+    gone red on a change that made the system strictly better, and would have said
+    nothing at all if someone raised the cap back to 30. Pinning the DERIVATION tracks
+    both directions automatically.
+
+    The 15-then-30-then-15 churn happened because the deadline and the cap were chosen
+    independently, in different files, by different people. This test is the coupling.
+
+    Origin of the arithmetic, the two live samples it explains, and why jitter is aimed
+    at the herd rather than at this gate:
+      src/rnd/v0.1.9/2026.08.02-settle-deadline-arithmetic-30-vs-40.md
     """
 
-    OBSERVED_RECONNECT_WINDOW_SECONDS = 20.4  # boot #5, the larger of the two live samples
+    # Margin over the hard requirement: connect + auth round-trip after the wake fires,
+    # plus one settle poll interval. Deliberately not zero — a deadline sitting exactly
+    # ON its bound is a coin flip decided by scheduling noise, which is precisely how
+    # the retired 30s value failed.
+    REQUIRED_MARGIN_SECONDS = 3.0
 
-    def test_settle_deadline_covers_the_measured_reconnect_window( self ):
+    def _required_deadline( self ):
+        """Worst-case wait the coverage gate must outlast, plus margin."""
+        from cosa.agents.utils.proxy_agents.base_config import (
+            RECONNECT_MAX_DELAY, RECONNECT_JITTER_FRACTION
+        )
+        # Downward-only jitter never lengthens a wait, so the ceiling IS the cap.
+        assert 0.0 <= RECONNECT_JITTER_FRACTION < 1.0, "jitter fraction must be a downward fraction"
+        return RECONNECT_MAX_DELAY + self.REQUIRED_MARGIN_SECONDS
+
+    def test_settle_deadline_covers_the_backoff_cap_it_is_derived_from( self ):
         from cosa.config.configuration_manager import ConfigurationManager
+        from cosa.agents.utils.proxy_agents.base_config import RECONNECT_MAX_DELAY
+
         config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
         deadline   = config_mgr.get(
-            "managed bounce all-clear settle deadline seconds", default=15, return_type="float"
+            "managed bounce all-clear settle deadline seconds", default=0.0, return_type="float"
         )
+        required = self._required_deadline()
         self.assertGreaterEqual(
-            deadline, self.OBSERVED_RECONNECT_WINDOW_SECONDS,
-            f"managed-bounce settle deadline {deadline}s < observed "
-            f"{self.OBSERVED_RECONNECT_WINDOW_SECONDS}s reconnect window. Two live bounces on "
-            f"2026-08-02 (boots #4 and #5, roster-coverage gate @ d96f59ce) returned all 9 "
-            f"listeners at +18.6s and +20.4s after gate start; anything under 20.4s misses the "
-            f"burst and names every session an accepted loss (re-fire is barred). Do NOT tidy "
-            f"this back to 15."
+            deadline, required,
+            f"managed-bounce settle deadline is {deadline}s but the listener backoff cap is "
+            f"{RECONNECT_MAX_DELAY}s, so a session can wake one full cap after the server is "
+            f"ready and the coverage gate must outlast that: it needs >= {required}s "
+            f"({RECONNECT_MAX_DELAY} + {self.REQUIRED_MARGIN_SECONDS} margin). These two values "
+            f"are DERIVED, not independent — if you changed RECONNECT_MAX_DELAY in "
+            f"base_config.py, change this key with it. See "
+            f"src/rnd/v0.1.9/2026.08.02-settle-deadline-arithmetic-30-vs-40.md"
         )
+
+    def test_downward_jitter_cannot_exceed_the_cap( self ):
+        # The derivation above is only valid while jitter is downward-only. If someone
+        # switches to a symmetric +/- form, the cap stops being a ceiling and every
+        # deadline computed from it becomes wrong — silently. Assert the property on the
+        # real function rather than trusting the constant's name.
+        from cosa.agents.utils.proxy_agents.base_listener import BaseWebSocketListener
+        from cosa.agents.utils.proxy_agents.base_config import RECONNECT_MAX_DELAY
+
+        listener = BaseWebSocketListener.__new__( BaseWebSocketListener )
+        for attempt in range( 1, 11 ):
+            listener._attempt = attempt
+            for _ in range( 200 ):
+                delay = listener._next_delay()
+                self.assertGreater( delay, 0.0 )
+                self.assertLessEqual(
+                    delay, RECONNECT_MAX_DELAY,
+                    f"_next_delay returned {delay}s at attempt {attempt}, above the "
+                    f"{RECONNECT_MAX_DELAY}s cap. Jitter must be DOWNWARD-ONLY — the settle "
+                    f"deadline is derived from this cap being a real ceiling."
+                )
 
 
 class SettleDeadlineFallbackPinTests( unittest.TestCase ):
@@ -668,14 +717,16 @@ class SettleDeadlineFallbackPinTests( unittest.TestCase ):
                     boot_id=1, boot_started="x", startup_began=0.0
                 )
 
+        required      = SettleDeadlinePinTests()._required_deadline()
         key, fallback = recorded[ 0 ]
         self.assertEqual( key, "managed bounce all-clear settle deadline seconds" )
         self.assertGreaterEqual(
-            fallback, SettleDeadlinePinTests.OBSERVED_RECONNECT_WINDOW_SECONDS,
-            f"main.py's settle-deadline fallback is {fallback}s, under the observed "
-            f"{SettleDeadlinePinTests.OBSERVED_RECONNECT_WINDOW_SECONDS}s reconnect window. "
-            f"A fallback that disagrees with the INI key silently restores the retired "
-            f"15s value if the key ever goes missing. Keep it tracking the key."
+            fallback, required,
+            f"main.py's settle-deadline fallback is {fallback}s, under the {required}s the "
+            f"backoff cap requires. A fallback that disagrees with the key silently reverts "
+            f"the gate to a value the cap does not support if the key ever goes missing — "
+            f"and the log still reads like a normal deadline expiry. Keep it tracking the key, "
+            f"and keep BOTH tracking RECONNECT_MAX_DELAY."
         )
 
 

@@ -19,6 +19,7 @@ References:
 
 import asyncio
 import json
+import random
 import time
 from urllib.parse import quote
 from typing import Callable, List, Optional
@@ -33,6 +34,7 @@ from cosa.agents.utils.proxy_agents.base_config import (
     RECONNECT_MAX_DELAY,
     RECONNECT_MAX_ATTEMPTS,
     RECONNECT_BACKOFF_FACTOR,
+    RECONNECT_JITTER_FRACTION,
 )
 
 
@@ -127,6 +129,57 @@ class BaseWebSocketListener:
         """
         pass
 
+    def _next_delay( self ):
+        """
+        Seconds to wait before the next reconnect attempt.
+
+        Exponential backoff, capped, with DOWNWARD-ONLY jitter so that nine listeners
+        dropped by the same bounce do not all wake within milliseconds of each other
+        (measured 2026-08-02: 9 sessions inside 8ms — a thundering herd against
+        /auth/login by construction, because nothing in the delay was random).
+
+        Jitter never lengthens a wait. RECONNECT_MAX_DELAY stays a real maximum, which
+        is what the server-side settle gate depends on: it fires on coverage, so it
+        waits for the SLOWEST session, so its deadline is derived from this cap. A
+        symmetric jitter that could overshoot the cap would silently invalidate that
+        deadline.
+
+        Requires:
+            - self._attempt has already been incremented for this retry
+
+        Ensures:
+            - returns a float in ( 0, RECONNECT_MAX_DELAY ]
+            - never exceeds RECONNECT_MAX_DELAY, jitter included
+            - grows exponentially until it reaches the cap
+        """
+        base = min(
+            RECONNECT_INITIAL_DELAY * ( RECONNECT_BACKOFF_FACTOR ** self._attempt ),
+            RECONNECT_MAX_DELAY
+        )
+        return base * random.uniform( 1.0 - RECONNECT_JITTER_FRACTION, 1.0 )
+
+    def _log( self, message ):
+        """
+        Emit one listener line. Overridable so a subclass can route it somewhere
+        durable and TIMESTAMPED.
+
+        The reconnect lines below used bare `print`, which reaches stderr and the
+        per-session log but NOT the timestamped centralized log. That is why the
+        settle-deadline arithmetic could not be closed from the record: a grep for a
+        timestamped reconnect line over the whole 118 MB centralized listener log
+        returns zero matches, so the downtime behind every measured bounce had to be
+        inferred from arrival times instead of read off a clock
+        (src/rnd/v0.1.9/2026.08.02-settle-deadline-arithmetic-30-vs-40.md §4).
+
+        Requires:
+            - message is a string
+
+        Ensures:
+            - writes message to stdout; subclasses may additionally persist it
+            - never raises
+        """
+        print( message, flush=True )
+
     async def run( self ):
         """
         Start the listener with automatic reconnection.
@@ -139,6 +192,8 @@ class BaseWebSocketListener:
             - Reconnects with exponential backoff on disconnection
             - Stops after RECONNECT_MAX_ATTEMPTS consecutive failures
             - Returns cleanly when stop() is called
+            - Every reconnect decision is emitted through _log, so a subclass that
+              timestamps its log records WHEN each backoff wake fired
         """
         self._running = True
         self._attempt = 0
@@ -152,11 +207,8 @@ class BaseWebSocketListener:
                 # Connection dropped — reset for reconnect
                 self._connected = False
                 self._attempt += 1
-                delay = min(
-                    RECONNECT_INITIAL_DELAY * ( RECONNECT_BACKOFF_FACTOR ** self._attempt ),
-                    RECONNECT_MAX_DELAY
-                )
-                print( f"{self.LOG_PREFIX} Connection lost. Reconnecting in {delay:.1f}s (attempt {self._attempt}/{RECONNECT_MAX_ATTEMPTS})..." )
+                delay = self._next_delay()
+                self._log( f"{self.LOG_PREFIX} Connection lost. Reconnecting in {delay:.1f}s (attempt {self._attempt}/{RECONNECT_MAX_ATTEMPTS})..." )
                 await asyncio.sleep( delay )
 
             except asyncio.CancelledError:
@@ -164,15 +216,12 @@ class BaseWebSocketListener:
             except Exception as e:
                 self._connected = False
                 self._attempt += 1
-                delay = min(
-                    RECONNECT_INITIAL_DELAY * ( RECONNECT_BACKOFF_FACTOR ** self._attempt ),
-                    RECONNECT_MAX_DELAY
-                )
-                print( f"{self.LOG_PREFIX} Error: {e}. Reconnecting in {delay:.1f}s (attempt {self._attempt}/{RECONNECT_MAX_ATTEMPTS})..." )
+                delay = self._next_delay()
+                self._log( f"{self.LOG_PREFIX} Error: {e}. Reconnecting in {delay:.1f}s (attempt {self._attempt}/{RECONNECT_MAX_ATTEMPTS})..." )
                 await asyncio.sleep( delay )
 
         if self._attempt >= RECONNECT_MAX_ATTEMPTS:
-            print( f"{self.LOG_PREFIX} Max reconnection attempts ({RECONNECT_MAX_ATTEMPTS}) reached. Giving up." )
+            self._log( f"{self.LOG_PREFIX} Max reconnection attempts ({RECONNECT_MAX_ATTEMPTS}) reached. Giving up." )
 
     async def stop( self ):
         """
