@@ -425,6 +425,7 @@
   "src/lupin_cli/notifications/test_notifications.py": "UNGATED 2026-07-21 (d97b024e): CLI-local test module outside every gated root.",
   "src/scripts/test_websocket_notification.py": "UNGATED 2026-07-21 (d97b024e): standalone operator script named test_*; not part of any suite.",
   "src/tests/e2e/deploy/test_deploy_cloud_test_live.py": "UNGATED 2026-07-21 (d97b024e): e2e tree distinct from the gated src/tests/e2e_ui/; no runner names it.",
+  "src/tests/e2e/test_ask_answer_handback.py": "UNGATED 2026-08-02 (rows 6f22531f / df698896): late-answer-handback e2e; boots its own uvicorn subprocess on a throwaway Postgres DB and kill+restarts it, so it needs Postgres + ~57s and cannot run in the fast unit gate. Distinct from the gated src/tests/e2e_ui/; no runner names it. Run directly: pytest src/tests/e2e/test_ask_answer_handback.py.",
   "src/tests/e2e/test_heartbeat_poker_e2e.py": "UNGATED 2026-07-21 (d97b024e): e2e tree distinct from the gated src/tests/e2e_ui/; no runner names it.",
   "src/tests/lupin_smoke/test_audio_tts.py": "UNGATED 2026-07-21 (d97b024e): legacy smoke tree; src/tests/run-lupin-smoke-tests.sh is not in job.py SUITE_SCRIPTS, so no test-type can invoke it.",
   "src/tests/lupin_smoke/test_notifications.py": "UNGATED 2026-07-21 (d97b024e): legacy smoke tree; src/tests/run-lupin-smoke-tests.sh is not in job.py SUITE_SCRIPTS, so no test-type can invoke it.",
