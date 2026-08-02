@@ -1095,7 +1095,7 @@ class TestBatchCollectArgs:
             response_value = json.dumps( { "answers": { "budget": "10", "audience": "expert" } } )
         )
 
-        result = self.expeditor._batch_collect_args(
+        result, _reason = self.expeditor._batch_collect_args(
             [ "budget", "audience" ], self.fallback_questions, "test@test.com"
         )
 
@@ -1117,7 +1117,7 @@ class TestBatchCollectArgs:
             response_value = None
         )
 
-        result = self.expeditor._batch_collect_args(
+        result, _reason = self.expeditor._batch_collect_args(
             [ "budget", "audience" ], self.fallback_questions, "test@test.com"
         )
 
@@ -1132,7 +1132,7 @@ class TestBatchCollectArgs:
             response_value = json.dumps( { "answers": { "budget": "cancel", "audience": "expert" } } )
         )
 
-        result = self.expeditor._batch_collect_args(
+        result, _reason = self.expeditor._batch_collect_args(
             [ "budget", "audience" ], self.fallback_questions, "test@test.com"
         )
 
@@ -1147,7 +1147,7 @@ class TestBatchCollectArgs:
             response_value = json.dumps( { "cancelled": True, "answers": {} } )
         )
 
-        result = self.expeditor._batch_collect_args(
+        result, _reason = self.expeditor._batch_collect_args(
             [ "budget", "audience" ], self.fallback_questions, "test@test.com"
         )
 
@@ -1161,7 +1161,7 @@ class TestBatchCollectArgs:
             response_value = "this is not json at all"
         )
 
-        result = self.expeditor._batch_collect_args(
+        result, _reason = self.expeditor._batch_collect_args(
             [ "budget", "audience" ], self.fallback_questions, "test@test.com"
         )
 
@@ -1176,7 +1176,7 @@ class TestBatchCollectArgs:
             response_value = json.dumps( { "answers": {} } )
         )
 
-        result = self.expeditor._batch_collect_args(
+        result, _reason = self.expeditor._batch_collect_args(
             [ "budget", "audience" ], self.fallback_questions, "test@test.com"
         )
 
@@ -1191,7 +1191,7 @@ class TestBatchCollectArgs:
             response_value = json.dumps( { "answers": { "budget": "10" } } )
         )
 
-        result = self.expeditor._batch_collect_args(
+        result, _reason = self.expeditor._batch_collect_args(
             [ "budget", "audience" ], self.fallback_questions, "test@test.com"
         )
 
@@ -1206,7 +1206,7 @@ class TestBatchCollectArgs:
             response_value = json.dumps( { "answers": { "mystery_arg": "42", "another_arg": "hello" } } )
         )
 
-        result = self.expeditor._batch_collect_args(
+        result, _reason = self.expeditor._batch_collect_args(
             [ "mystery_arg", "another_arg" ], self.fallback_questions, "test@test.com"
         )
 
@@ -1231,7 +1231,7 @@ class TestBatchCollectArgs:
     def test_expedite_uses_batch_for_multiple_missing( self, mock_factory, mock_confirm, mock_batch, mock_uva ):
         """When >1 batchable args missing, batch path is taken."""
         mock_uva.return_value = [ "query", "budget", "audience", "audience_context" ]
-        mock_batch.return_value = { "budget": "10", "audience": "expert" }
+        mock_batch.return_value = ( { "budget": "10", "audience": "expert" }, "answered" )
         mock_confirm.return_value = { "query": "quantum", "budget": "10", "audience": "expert" }
 
         # Set up LLM to return "args missing" response
@@ -1845,7 +1845,7 @@ class TestOptionalArgPrompting:
     def test_happy_path_still_prompts_optional_args( self, mock_confirm, mock_batch, mock_uva ):
         """DR with query present (all_required_met=true) → still asks budget, audience, audience_context via batch."""
         mock_uva.return_value = [ "query", "budget", "audience", "audience_context" ]
-        mock_batch.return_value = { "budget": "10", "audience": "expert", "audience_context": "researchers" }
+        mock_batch.return_value = ( { "budget": "10", "audience": "expert", "audience_context": "researchers" }, "answered" )
         mock_confirm.return_value = { "query": "quantum computing", "budget": "10", "audience": "expert", "audience_context": "researchers" }
         self.mock_llm.run.return_value = self._make_llm_response( "query=quantum computing" )
 
@@ -1865,7 +1865,7 @@ class TestOptionalArgPrompting:
     def test_rtp_prompts_languages_when_query_present( self, mock_confirm, mock_batch, mock_uva ):
         """RTP with query present → asks budget, audience, audience_context, languages."""
         mock_uva.return_value = [ "query", "budget", "audience", "audience_context", "languages" ]
-        mock_batch.return_value = { "budget": "5", "audience": "beginner", "audience_context": "students", "languages": "en" }
+        mock_batch.return_value = ( { "budget": "5", "audience": "beginner", "audience_context": "students", "languages": "en" }, "answered" )
         mock_confirm.return_value = { "query": "AI safety", "budget": "5", "audience": "beginner", "audience_context": "students", "languages": "en" }
         self.mock_llm.run.return_value = self._make_llm_response( "query=AI safety" )
 
@@ -1887,7 +1887,7 @@ class TestOptionalArgPrompting:
         mock_uva.return_value = [ "research", "languages", "audience", "audience_context" ]
         # research is a special_handler (fuzzy_file_match), so it won't be in batchable
         mock_fuzzy.return_value = "/io/deep-research/test@test.com/doc.md"
-        mock_batch.return_value = { "languages": "en,es-MX", "audience": "academic", "audience_context": "none" }
+        mock_batch.return_value = ( { "languages": "en,es-MX", "audience": "academic", "audience_context": "none" }, "answered" )
         mock_confirm.return_value = { "research": "/io/deep-research/test@test.com/doc.md", "languages": "en,es-MX", "audience": "academic", "audience_context": "none" }
         # LLM says required arg (research) is missing — but fuzzy handler provides it
         self.mock_llm.run.return_value = self._make_llm_response( "", "research", "false" )
@@ -1910,7 +1910,7 @@ class TestOptionalArgPrompting:
     def test_already_extracted_optional_not_re_prompted( self, mock_confirm, mock_batch, mock_uva ):
         """DR with query AND audience both present → only asks missing ones (budget, audience_context)."""
         mock_uva.return_value = [ "query", "budget", "audience", "audience_context" ]
-        mock_batch.return_value = { "budget": "no limit", "audience_context": "none" }
+        mock_batch.return_value = ( { "budget": "no limit", "audience_context": "none" }, "answered" )
         mock_confirm.return_value = { "query": "quantum", "audience": "beginner", "budget": "no limit", "audience_context": "none" }
         # LLM detects both query and audience as present
         self.mock_llm.run.return_value = self._make_llm_response( "query=quantum, audience=beginner" )
@@ -1930,7 +1930,7 @@ class TestOptionalArgPrompting:
     def test_optional_defaults_prefilled_in_batch( self, mock_confirm, mock_batch, mock_uva ):
         """Batch questions include default_value from fallback_defaults."""
         mock_uva.return_value = [ "query", "budget", "audience", "audience_context" ]
-        mock_batch.return_value = { "budget": "no limit", "audience": "academic", "audience_context": "none" }
+        mock_batch.return_value = ( { "budget": "no limit", "audience": "academic", "audience_context": "none" }, "answered" )
         mock_confirm.return_value = { "query": "test" }
         self.mock_llm.run.return_value = self._make_llm_response( "query=test" )
 
@@ -1952,7 +1952,7 @@ class TestOptionalArgPrompting:
         """User answers 'no limit' for budget → budget not in final_args."""
         mock_uva.return_value = [ "query", "budget", "audience", "audience_context" ]
         # Batch returns "no limit" for budget — should be skipped
-        mock_batch.return_value = { "budget": "no limit", "audience": "expert", "audience_context": "none" }
+        mock_batch.return_value = ( { "budget": "no limit", "audience": "expert", "audience_context": "none" }, "answered" )
         mock_confirm.return_value = { "query": "quantum", "audience": "expert" }
         self.mock_llm.run.return_value = self._make_llm_response( "query=quantum" )
 
@@ -1970,7 +1970,7 @@ class TestOptionalArgPrompting:
     def test_none_skips_audience_context( self, mock_confirm, mock_batch, mock_uva ):
         """User answers 'none' for audience_context → not filtered (audience_context is a non-skippable arg)."""
         mock_uva.return_value = [ "query", "budget", "audience", "audience_context" ]
-        mock_batch.return_value = { "budget": "10", "audience": "academic", "audience_context": "none" }
+        mock_batch.return_value = ( { "budget": "10", "audience": "academic", "audience_context": "none" }, "answered" )
         mock_confirm.return_value = { "query": "quantum", "budget": "10", "audience": "academic", "audience_context": "none" }
         self.mock_llm.run.return_value = self._make_llm_response( "query=quantum" )
 
@@ -1986,7 +1986,7 @@ class TestOptionalArgPrompting:
     def test_cancel_in_optional_batch_returns_none( self, mock_batch, mock_uva ):
         """Cancel keyword in optional batch → expedite returns None."""
         mock_uva.return_value = [ "query", "budget", "audience", "audience_context" ]
-        mock_batch.return_value = None  # User cancelled
+        mock_batch.return_value = ( None, "declined" )  # User cancelled
         self.mock_llm.run.return_value = self._make_llm_response( "query=quantum" )
 
         result = self._run_expedite( self.DR_COMMAND_KEY, 'query="quantum"', "research quantum" )

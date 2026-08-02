@@ -38,6 +38,24 @@ from cosa.utils.notification_utils import (
 )
 
 
+# --------------------------------------------------------------------------- #
+# Why a batch collection came back without answers (bug 2aaab1bf).
+#
+# `None` alone cannot carry a reason. Collapsing every outcome into it is what
+# let a TRANSPORT failure be reported as a USER decision: a 503 (the prompt could
+# not be delivered, so the user was never asked) printed as "User cancelled
+# batch collection" and killed the job as "cancelled by user or timeout".
+#
+# Only DECLINED represents an actual human choice. The rest are failures of the
+# machinery and must never be reported as something the user did.
+# --------------------------------------------------------------------------- #
+BATCH_ANSWERED    = "answered"      # got every arg asked for
+BATCH_DECLINED    = "declined"      # the USER said no — the ONLY reason that is a user decision
+BATCH_UNREACHABLE = "unreachable"   # could not deliver, or timed out — the user was never asked
+BATCH_MALFORMED   = "malformed"     # delivered, but the response could not be parsed
+BATCH_INCOMPLETE  = "incomplete"    # answered, but a required arg came back missing or blank
+
+
 class RuntimeArgumentExpeditor:
     """
     Determines which required arguments a user's voice command provides and
@@ -81,6 +99,10 @@ class RuntimeArgumentExpeditor:
         self.confirmation_prompt_path  = config_mgr.get( "prompt template for argument confirmation" )
         self.llm_factory               = LlmClientFactory( debug=debug, verbose=verbose )
         self._last_notification_status = None
+        # Why the last batch collection ended without answers — one of the BATCH_*
+        # constants. Readable by callers so an UNREACHABLE job is never recorded as
+        # a user cancellation (bug 2aaab1bf).
+        self._last_batch_reason        = None
 
     def expedite( self, command, raw_args, user_email, session_id, user_id, original_question, job_id=None, bearer_token=None ):
         """
@@ -235,9 +257,18 @@ class RuntimeArgumentExpeditor:
             # Batch-collect batchable args if more than one
             if len( batchable ) > 1:
                 if self.debug: print( f"[Expeditor] Batch-collecting {len( batchable )} args: {batchable}" )
-                batch_answers = self._batch_collect_args( batchable, fallback_questions, user_email, fallback_defaults, command, abstract=request_abstract )
+                batch_answers, batch_reason = self._batch_collect_args( batchable, fallback_questions, user_email, fallback_defaults, command, abstract=request_abstract )
                 if batch_answers is None:
-                    print( "[Expeditor] User cancelled batch collection" )
+                    self._last_batch_reason = batch_reason
+                    if batch_reason == BATCH_DECLINED:
+                        print( "[Expeditor] User declined batch collection" )
+                    else:
+                        # NOT a user decision. Say so, and say what actually happened —
+                        # reporting a transport failure as a cancellation is the defect
+                        # this branch exists to prevent (bug 2aaab1bf).
+                        print( f"[Expeditor] Batch collection did NOT reach a user decision: {batch_reason} "
+                               f"(notification status: {self._last_notification_status}). "
+                               f"The user did not cancel — the prompt never got a usable answer." )
                     return None
                 for arg_name, value in batch_answers.items():
                     # Handle special "no limit" / "none" answers for optional args
@@ -780,9 +811,20 @@ class RuntimeArgumentExpeditor:
             - user_email is the target user's email
 
         Ensures:
-            - Returns dict of { arg_name: value } on success
-            - Returns None on timeout, error, or cancellation
+            - Returns ``( answers, reason )`` — ALWAYS a 2-tuple, never a bare value
+            - answers is a dict of { arg_name: value } with reason BATCH_ANSWERED,
+              or None with one of BATCH_DECLINED / BATCH_UNREACHABLE /
+              BATCH_MALFORMED / BATCH_INCOMPLETE
             - Questions include default_value when resolved default is not None
+
+        ⚠️ THE REASON IS THE POINT (bug 2aaab1bf). This used to return a bare
+        ``None`` for five structurally different outcomes, and its docstring said
+        so out loud: "Returns None on timeout, error, or cancellation" — three
+        meanings, one value. The caller could not tell them apart, so it printed
+        "User cancelled batch collection" for all of them. A 503 (the prompt could
+        not be delivered, so the user was never asked) killed the job as
+        "cancelled by user". Only BATCH_DECLINED is a human decision; treating any
+        other reason as one asserts an intent the user never expressed.
 
         Args:
             batchable_args: List of arg names to collect
@@ -793,7 +835,8 @@ class RuntimeArgumentExpeditor:
             abstract: Optional markdown context shown in UI but not spoken
 
         Returns:
-            dict or None: Collected answers or None on cancel/timeout
+            ( dict, str ) | ( None, str ): the collected answers with
+            BATCH_ANSWERED, or None with the BATCH_* reason it failed.
         """
         if fallback_defaults is None:
             fallback_defaults = {}
@@ -841,35 +884,38 @@ class RuntimeArgumentExpeditor:
                    f"value={response.response_value[ :100 ] if response.response_value else None}" )
 
         if not response.success or not response.response_value:
-            return None
+            # The user was NEVER ASKED — the prompt could not be delivered (503 when
+            # no websocket is registered) or it timed out. Carries no information
+            # about what the user wants. Bug 2aaab1bf.
+            return None, BATCH_UNREACHABLE
 
         # Parse JSON response
         try:
             parsed = json.loads( response.response_value )
         except ( json.JSONDecodeError, TypeError ):
             if self.debug: print( f"[Expeditor] Failed to parse batch response: {response.response_value}" )
-            return None
+            return None, BATCH_MALFORMED
 
-        # Check for cancellation
+        # Check for cancellation — a REAL user decision
         if parsed.get( "cancelled" ):
-            return None
+            return None, BATCH_DECLINED
 
         answers = parsed.get( "answers", {} )
         if not answers:
-            return None
+            return None, BATCH_MALFORMED
 
         # Check for cancellation keywords in any answer
         for arg_name, value in answers.items():
             if isinstance( value, str ) and value.lower().strip() in ( "cancel", "nevermind", "never mind", "stop", "quit" ):
-                return None
+                return None, BATCH_DECLINED
 
         # Check all requested args have non-empty values
         for arg_name in batchable_args:
             if arg_name not in answers or not str( answers.get( arg_name, "" ) ).strip():
                 if self.debug: print( f"[Expeditor] Batch response missing arg: {arg_name}" )
-                return None
+                return None, BATCH_INCOMPLETE
 
-        return answers
+        return answers, BATCH_ANSWERED
 
     def _handle_fuzzy_file_match( self, user_email, agent_display_name=None ):
         """
