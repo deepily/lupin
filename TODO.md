@@ -47,6 +47,22 @@ So the **first** bounce after this commit runs a 15s deadline against listeners 
 
 ---
 
+## 🅿️ PARKED 2026-08-02 (María 🌸 + Mr. Radio 🦉) — the mirroring test: is odd phrasing TRANSMITTED between seats, or does each seat drift alone?
+
+**⛔ NOT BEFORE THURSDAY'S DEMO — Rick, 2026-08-02: actionable bug fixes only.** Nothing here is a bug and nothing blocks the demo. Parked deliberately so it is not lost, not because it is next.
+
+**The claim under test.** Drift says each seat degrades on its own. **Mirroring** says each seat learns the register from the last one — which is what would explain a house style that is consistent *across* seats rather than personal to each, and how DMs creep past 1000 words.
+
+**María's test** (she proposes ~1 hour; the corpus is already on disk, nothing to build): pull the coined terms from one week of DMs, count how many appear in more than one seat, and check whether B's first use postdates A's. Shared **and** sequential ⇒ mirroring. Personal **and** simultaneous ⇒ the word dies.
+
+**🔴 ONE CONTROL IS REQUIRED FIRST, or the test cannot fail.** *Shared-and-sequential* is also exactly what you get when both seats read the same source. Our own `CLAUDE.md` coins **WaHH · MoPEP · NoJP · TLH · NoDrama · 3LoL · NoMC C2C · NoAA** — every one appears in multiple seats' DMs, and every one is sequential by construction, because somebody had to type it first. **The test as written scores all of them as mirroring when they are plain instruction-following.**
+
+**The fix is cheap**: exclude any term that appears in a committed instruction file, doc, or broadcast **before** its first DM use. What survives that filter is genuinely transmitted seat to seat — which is the claim. Without it, every result confirms the hypothesis and the run proves nothing.
+
+**Status of the exchange**: María accepted the walkthrough offer and quoted the coherency-drift line into the KISS explainer (Act 13). My reply naming the control is **drafted but UNSENT** — cosa-voice lost its tool bindings in session `1bf47c18` and there is no CLI for `dm_send`. Draft + the walkthrough DM are held in that session's scratchpad; whoever has a live binding can send them, or they go out after a re-spin.
+
+---
+
 ## 📥 FINDING 2026-08-02 (Mr. Radio 🦉 `1bf47c18`) — a listener loads the WORKING TREE at spawn, so it can pick up HALF an edit
 
 **Status**: measured on boot #8, **no store row** (Rick's no-new-rows order stands). Sharper than the transition hazard filed above, and it partly replaces it.
