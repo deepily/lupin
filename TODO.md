@@ -1,6 +1,40 @@
 # TODO
 
-Last updated: 2026-08-02 (Tiffany 💍 `0768c103` — R5 reconnect-window finding)
+Last updated: 2026-08-02 (Cheech 🌿 `7edf6e5e` — a review that stops at the process boundary)
+
+---
+
+## 📥 STASHED 2026-08-02 (Cheech 🌿 `7edf6e5e`) — a review that stops at the process boundary passes an inert fix
+
+**Not filed as a row, per Rick's board-to-zero directive tonight.** Recorded here because it is the second instance in one day, in different code, by different people.
+
+**What happened.** Bug `f433fbae` D1 committed as `fd11cd30`: `ask_multiple_choice` now passes `response_default`, so an offline read should return the default instead of a 503. Sam reviewed it and PASSED it — he confirmed the 503 had drifted to `notifications.py:1068-1069`, reverted the plumb himself, and got the exact predicted failure text. A careful review by any normal standard.
+
+Then Clayton, chasing an unrelated ruling about marking defaults, found the fix **delivers nothing**:
+
+- the server's offline branch returns a plain `JSONResponse`, not a `data:` SSE frame the client parses;
+- `OfflineEvent` requires a `response` field the server never sends — the default goes into `default_used` instead;
+- so client validation fails and drops to an error dict. Honest, not forged. But the default never lands.
+
+Sam retracted his own pass unprompted and named the miss himself: *"I gated the server emit and the plumb, never traced the client consume — the exact different-process seam."*
+
+**Why it matters.** This is the same shape the late-answer-handback cascade caught four hours earlier: a dedupe ledger whose writer lived in a different process from its reader, whose test would have gone green while production failed. Different file, different people, same seam. A unit-level negative control proves the **plumb**, not the **delivery** — and the control is what makes the review feel finished.
+
+**The rule that came out of it, now binding on this crew:** do not gate a cross-process fix by reading the chain. Reading is how it passed the first time. Execute it — drive a real call against a server forced into the failing state and assert on **what the caller actually receives**, provenance intact.
+
+---
+
+## 📥 FINDING 2026-08-02 (Tiberius 👑 `f63d0e28`) — the handback bounce-e2e can't be a :8000-scheduled job
+
+**Status**: measured, resolved for THIS test, worth a venue-rule note. **No store row** — Rick's no-new-rows order tonight.
+
+**The finding**: the two execution rules in my brief can't both hold for the late-answer handback e2e.
+- **A :8000-scheduled test cannot bounce :8000.** The test-suite runner `Popen`s pytest as a *child of the :8000 server process* (`src/cosa/agents/test_suite/job.py`). A test that restarts :8000 to wipe the in-memory `pending_responses` waiters kills its own runner mid-run → deadlock, no results.
+- **Bouncing the real :7999 is worse**, not a fallback: it's the live fleet server, and seeding+answering notification rows there writes to `lupin_db_dev` — the "no test touches a live dev data store" mandate.
+
+**Resolution (Cheech green-lit 2026-08-01 20:32)**: the handback e2e stands up its **own uvicorn on a throwaway migrated DB** and bounces *that* via a genuine kill+restart. Real process-lifetime seam (in-memory waiters wiped, durable PG row survives), isolated, reproducible, no fleet disruption, no live-DB write. No manual :7999 bounce tonight.
+
+**Also measured**: `lupin_db_dev` is already migrated — `answer_delivered_at` column + `idx_notifications_answer_owed` index present, `alembic_version = 3da5c0d1eee6`. So Rachel's deferred "live round-trip" precondition (deferred until the shared DB carries `3da5c0d1eee6`) is satisfied for the dev DB.
 
 ---
 
@@ -17,14 +51,16 @@ reconnect curve 0→0→1→1→1→1→…→1   [29 polls flat at ONE]
 10 session(s) had NOT rejoined and got NO all-clear (accepted loss, no re-fire): [10 ids]
 ```
 
-**Both halves are true and both matter.** The gate did its job: the retired plateau predicate would have fired at ~1.0s on that `1→1` and reported success. Coverage held the full window and named every session it lost. **But only 1 of 11 sockets came back inside 15 seconds**, so coverage can essentially never complete, and the gate is in practice a fixed 15-second wait followed by a fire that misses almost everyone. **The delivery symptom is not fixed** — it is now merely honest about failing.
+**🔴 CORRECTED — my first reading of this was WRONG, and the correction is the useful part.** I originally wrote this entry up as "reconnection is slower than the 15-second window" (1 of 11 sockets back). That is a plausible story that fits the number, and I stopped there. The actual cause, found minutes later and confirmed independently by Arnold 🪨: **the roster and the live-socket set were never the same id space**, so the comparison could not match at all. The roster holds full session ids (`0768c103-eb8d-…`); the socket registry holds `cc-listener-0768c103`. Present reached 1 while `missing` stayed at the full 10 — because that one socket was never in the roster's vocabulary. **The gate was not coarse, it was blind.** Fixed under bug `784d4a2e`; details on that row.
 
-**So the open question is not "which predicate" — it is "why does reconnection take longer than the window, and what is the right window".** Three directions, none authorized, in the order I'd try them:
-1. **Find out what the listeners actually do after a bounce.** Nobody has measured cc-listener reconnect latency directly. A 15s guess was never validated against it; if the real curve is 60s, no predicate saves us. Measure first, tune second.
-2. **Use the WARNING phase's ack list as the roster**, carried across the restart in a file. Those are exactly the sessions that were live and heard us minutes ago — a far tighter roster than bridge files on an 8-hour window, which is what makes coverage unreachable today.
-3. **Raise the deadline** only once (1) has a number under it. Raising it blind just moves a guess.
+**What remains genuinely open** (the part that survives the correction):
+1. **Nobody has measured cc-listener reconnect latency after a bounce.** The 15-second deadline is still a guess with no soak behind it. Now that the gate can actually recognize a returning session, the reconnect curve finally means something — read the next few bounces before tuning anything.
+2. **Use the WARNING phase's ack list as the roster**, carried across the restart in a file. Those are exactly the sessions that were live and heard us minutes ago — tighter than bridge files on an 8-hour window.
+3. **Raise the deadline only once (1) has a number under it.** Raising it blind just moves a guess.
 
-⚠️ **The roster over-count is real and observable**: the 00:25 warning was acked by only 2 distinct sessions (Tiffany, Krishna) while the roster listed 11. Krishna was **reaped at ~15:50** and his bridge file is still on the roster nine hours later — a session that will never reconnect, holding the gate to the deadline every single bounce.
+⚠️ **The roster over-count is real and still costs us**, independent of the id bug: the 00:25 warning was acked by only 2 distinct sessions while the roster listed 10. Krishna was **reaped at ~15:50** and his bridge file is still on the roster nine hours later — a session that will never reconnect, holding the gate to the deadline on every bounce.
+
+⚠️ **A second, upstream collision** (Arnold, not fixable in the gate): the two id spaces meet at `session_id[:8]`, because the socket key carries only 8 characters. Two sessions sharing 8 leading characters would mark a real straggler as covered. That lives in how listeners are named, not in the gate.
 
 ---
 
