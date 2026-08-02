@@ -335,6 +335,24 @@ class TestNotifyFireAndForget:
         assert "Invalid" in response.json()["detail"] or "API key" in response.json()["detail"]
 
 
+def _parse_sse_frames( body ):
+    """
+    Parse an SSE response body into its decoded `data:` payloads.
+
+    Requires:
+        - body is a string of SSE text; every data line carries valid JSON
+
+    Ensures:
+        - returns a list of dicts, one per `data: ` line, in emission order
+        - non-data lines (comments, blank separators) are ignored
+
+    Raises:
+        - json.JSONDecodeError if a data line is not valid JSON
+    """
+    return [ json.loads( line.split( "data: ", 1 )[ 1 ] )
+             for line in body.splitlines() if line.startswith( "data: " ) ]
+
+
 class TestNotifyResponseRequired:
     """Test suite for POST /api/notify in response-required mode (Phase 2.1)."""
 
@@ -444,11 +462,21 @@ class TestNotifyResponseRequired:
                         headers={"X-API-Key": "claude_code_simple_key"}
                     )
 
-                    # Should pass validation (200 offline-with-default, not 400)
+                    # Should pass validation (200 offline-with-default, not 400).
+                    # Bug f433fbae D1 (server half, 1cd795c7): the offline branch now
+                    # emits a CONSUMABLE SSE stream, not a JSONResponse. `.json()` on
+                    # this path is wrong BY DESIGN — assert the two frames instead.
                     assert response.status_code == 200
-                    data = response.json()
-                    assert data["status"] == "offline"
-                    assert data["default_used"] == "defer"
+                    assert response.headers[ "content-type" ].startswith( "text/event-stream" )
+
+                    frames = _parse_sse_frames( response.text )
+                    assert len( frames ) == 2
+                    ack, offline = frames
+                    assert ack[ "status" ] == "ack"
+                    assert "notification_id" in ack                  # re-attach handle
+                    assert offline[ "status" ] == "offline"
+                    assert offline[ "response" ] == "defer"          # the default is DELIVERED
+                    assert offline[ "default_used" ] is True         # MARKED as a substitution
 
         finally:
             user_service.get_user_by_email = original_get_user
@@ -513,11 +541,23 @@ class TestNotifyResponseRequired:
                         headers={"X-API-Key": "claude_code_simple_key"}
                     )
 
+                    # Bug f433fbae D1 (server half, 1cd795c7): the offline branch emits
+                    # an SSE ack frame (carrying notification_id for re-attach) followed
+                    # by an OfflineEvent whose `response` IS the default and whose
+                    # default_used=True is the provenance marker the caller stamps as
+                    # `answered: False`. Restoring a `.json()` assertion here would be
+                    # the cheap green, and the wrong one.
                     assert response.status_code == 200
-                    data = response.json()
-                    assert data["status"] == "offline"
-                    assert data["default_used"] == "no"
-                    assert "notification_id" in data
+                    assert response.headers[ "content-type" ].startswith( "text/event-stream" )
+
+                    frames = _parse_sse_frames( response.text )
+                    assert len( frames ) == 2
+                    ack, offline = frames
+                    assert ack[ "status" ] == "ack"
+                    assert "notification_id" in ack                  # re-attach handle
+                    assert offline[ "status" ] == "offline"
+                    assert offline[ "response" ] == "no"             # the default is DELIVERED
+                    assert offline[ "default_used" ] is True         # MARKED as a substitution
 
         finally:
             # Restore original function

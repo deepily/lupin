@@ -26,7 +26,7 @@ import os
 import tempfile
 import unittest
 from contextlib import redirect_stderr
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from cosa.rest.managed_bounce_broadcast import (
     build_bounce_message,
@@ -625,6 +625,57 @@ class SettleDeadlinePinTests( unittest.TestCase ):
             f"listeners at +18.6s and +20.4s after gate start; anything under 20.4s misses the "
             f"burst and names every session an accepted loss (re-fire is barred). Do NOT tidy "
             f"this back to 15."
+        )
+
+
+class SettleDeadlineFallbackPinTests( unittest.TestCase ):
+    """
+    Pins the CALL-SITE FALLBACK in `main._managed_bounce_all_clear_blocking` to the
+    same floor as the INI key.
+
+    The test above pins the KEY. It cannot see the fallback, and the two disagreed:
+    the key read 30 while `main.py` still passed `default=15`. Nothing is red in that
+    state — the key is present, so the fallback never fires — but if the key is ever
+    removed or renamed, the gate silently reverts to the value both live samples
+    measured as WRONG, and the log still reads like a normal deadline expiry.
+
+    Read behaviourally, not by grepping the source: patch `config_mgr.get` and assert
+    on the `default` it was actually CALLED with.
+    """
+
+    def test_call_site_fallback_covers_the_measured_reconnect_window( self ):
+        import lupin_app.main as main_module
+
+        recorded = []
+
+        class _Stop( Exception ):
+            pass
+
+        def _record( key, default=None, return_type=None ):
+            recorded.append( ( key, default ) )
+            # Short-circuit before the gate runs — we are reading the ARGUMENTS, not
+            # exercising the settle loop (which the tests above already cover).
+            raise _Stop()
+
+        # `config_mgr` is a module global set during the lifespan startup, so it is
+        # None at import time — patch the module attribute, not an attribute on it.
+        fake_cfg     = MagicMock()
+        fake_cfg.get = _record
+
+        with patch.object( main_module, "config_mgr", fake_cfg ):
+            with self.assertRaises( _Stop ):
+                main_module._managed_bounce_all_clear_blocking(
+                    boot_id=1, boot_started="x", startup_began=0.0
+                )
+
+        key, fallback = recorded[ 0 ]
+        self.assertEqual( key, "managed bounce all-clear settle deadline seconds" )
+        self.assertGreaterEqual(
+            fallback, SettleDeadlinePinTests.OBSERVED_RECONNECT_WINDOW_SECONDS,
+            f"main.py's settle-deadline fallback is {fallback}s, under the observed "
+            f"{SettleDeadlinePinTests.OBSERVED_RECONNECT_WINDOW_SECONDS}s reconnect window. "
+            f"A fallback that disagrees with the INI key silently restores the retired "
+            f"15s value if the key ever goes missing. Keep it tracking the key."
         )
 
 

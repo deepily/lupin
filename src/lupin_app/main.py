@@ -469,7 +469,10 @@ def _managed_bounce_all_clear_blocking( boot_id, boot_started, startup_began ):
     from lupin_cli.claude_code.hooks.lib.session_bridge import find_active_voice_persona_sessions
     from cosa.rest.managed_bounce_broadcast import wait_for_roster_coverage, build_bounce_message
 
-    deadline = config_mgr.get( "managed bounce all-clear settle deadline seconds",      default=15,  return_type="float" )
+    # Fallback tracks the KEY (30, measured on two live bounces — bug 784d4a2e). It read
+    # 15 while the key read 30, so a vanished key silently restored the value both samples
+    # measured as WRONG: reconnection completed at +18.6s and +20.4s, and 15 missed both.
+    deadline = config_mgr.get( "managed bounce all-clear settle deadline seconds",      default=30,  return_type="float" )
     interval = config_mgr.get( "managed bounce all-clear settle poll interval seconds", default=0.5, return_type="float" )
 
     # Hold until live sockets COVER the roster of sessions we expect back. The two
