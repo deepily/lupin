@@ -183,16 +183,22 @@ KNOWN_DIVERGENT_MOUNTS = {
                      "the cloud legs bind it separately because cloud-test has no ./src.",
         "dev-test" : "2026-07-26 — same.",
     },
-    "/home/rruiz/.claude": {
-        "dev-dev"  : "2026-07-26 — dev binds the single .credentials.json FILE; the cloud "
-                     "legs mount a claude-creds VOLUME over the whole dir for OAuth "
-                     "persistence across recreates. Same fact, different shape.",
-        "dev-test" : "2026-07-26 — same.",
-    },
-    "/home/rruiz/.claude/.credentials.json": {
-        "cloud-test": "2026-07-26 — superseded by the claude-creds volume; see /home/rruiz/.claude.",
-        "cloud-gpu" : "2026-07-26 — same.",
-    },
+    # 2026-08-02 — BOTH /home/rruiz/.claude entries DELETED, gap closed, not excused.
+    #
+    # This table used to carry two entries here: one excusing dev for binding the
+    # single .credentials.json FILE while the cloud legs mounted a claude-creds
+    # VOLUME, and one excusing the cloud legs for lacking the file target. Both are
+    # gone because dev now uses the volume shape too (row c7c60896, ruled 2026-08-02).
+    #
+    # The divergence was never cosmetic. A single-file bind is resolved ONCE at
+    # container start, and Claude Code renews its token by REPLACING the file — so
+    # dev and test 401'd roughly three times a day while the cloud legs, on the
+    # volume shape, never did. "Same fact, different shape" was the wrong reading:
+    # only one of the two shapes worked.
+    #
+    # This test is what surfaced the leftovers — it failed with "IS NOW PRESENT in
+    # dev-dev / dev-test" the moment the mounts converged, which is the entire point
+    # of the stale-exemption check.
     "/home/rruiz/.claude/sessions": {
         "cloud-test": "2026-07-26 UNCLASSIFIED — the CC session-bridge bind that fixed "
                       "persona-404 on cloud-gpu (b7ea000f) was never added to cloud-test. "

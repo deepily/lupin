@@ -186,12 +186,38 @@ services:
       - ./.claude/worktrees:/var/lupin/.claude/worktrees
       - ~/.lora_env:/home/rruiz/.lora_env:ro
       - ~/.lupin:/home/rruiz/.lupin:ro
-      - ~/.claude/.credentials.json:/home/rruiz/.claude/.credentials.json:ro
-      # Read-write so the cosa-voice conversation-mode endpoint can flip
-      # conversation_mode_active in the per-session bridge files written by
-      # SessionStart hook. Container runs as rruiz (UID matches host) so file
-      # ownership is preserved on writes.
-      - ~/.claude/sessions:/home/rruiz/.claude/sessions
+      # CC OAuth login store — this container's OWN grant, not a share of the
+      # host's (row c7c60896, ruled 2026-08-02; same shape the cloud files have
+      # always used). Seed once with `docker exec -it lupin-rest-dev claude /login`.
+      #
+      # WHY NOT the host's ~/.claude/.credentials.json as a single-file bind — the
+      # shape this replaces: docker resolves a single-file bind ONCE, at container
+      # start. Claude Code renews its token by REPLACING the file (write temp, then
+      # rename), which mints a new inode. The container keeps holding the old one and
+      # 401s until somebody restarts it. The access token lives exactly 8h, so that
+      # fired ~3x/day. Dropping `:ro` does not help — rename-over-a-bind-mounted-FILE
+      # fails "Resource busy" regardless. A host symlink does not help either: rename
+      # replaces the SYMLINK, not its target (both measured, 2026-08-01/02).
+      - claude-creds-dev:/home/rruiz/.claude
+      # CC session bridges — the HOST hook writes these; the container reads/rewrites
+      # them via set_voice_persona(). Read-write so the cosa-voice conversation-mode
+      # endpoint can flip conversation_mode_active. Container runs as rruiz (uid 1001,
+      # matches host) so ownership is preserved on writes.
+      #
+      # ⚠️ MUST STAY BELOW claude-creds-dev. That volume mounts over the WHOLE
+      # /home/rruiz/.claude and SHADOWS this path; nested-deeper wins only because
+      # compose applies it after. Getting this wrong 404s request_persona() — the
+      # exact defect the VM hit on 2026-07-24. Verify BOTH mounts with `docker inspect`
+      # after any recreate.
+      #
+      # Long form + create_host_path:false on purpose: a short `~/...` bind silently
+      # CREATES an empty dir when the path is absent, which looks identical to
+      # "mounted but empty". Fail loud instead.
+      - type: bind
+        source: ${LUPIN_HOST_SESSIONS_DIR:-/home/rruiz/.claude/sessions}
+        target: /home/rruiz/.claude/sessions
+        bind:
+          create_host_path: false
       # Multi-repo doc viewer (2026-05-12) — exposes Rick's other repos as
       # named `scope`s in /api/docs/file. Read-only by design (viewer never writes).
       # See src/rnd/v0.1.7/2026.05.12-multi-repo-doc-viewer.md §3h.
@@ -333,7 +359,15 @@ services:
       # Added 2026-04-18 Session be57a252 alongside auto_cleanup=false flip.
       - ./.claude/worktrees:/var/lupin/.claude/worktrees
       - ~/.lora_env:/home/rruiz/.lora_env:ro
-      - ~/.claude/.credentials.json:/home/rruiz/.claude/.credentials.json:ro
+      # CC OAuth login store — this container's OWN grant. See the long note on
+      # lupin-rest-dev's claude-creds-dev mount for why the single-file bind this
+      # replaces went 401 ~3x/day (row c7c60896, ruled 2026-08-02).
+      #
+      # DELIBERATELY a SEPARATE volume from dev's, not a shared one: two containers
+      # renewing one credential would re-create the same two-writers race this change
+      # exists to remove, just between dev and test instead of host and container.
+      # The price is one `docker exec -it lupin-rest-test claude /login` of its own.
+      - claude-creds-test:/home/rruiz/.claude
       # 2026-04-28: dev-test parity fix. cosa-voice MCP validates lupin-project
       # credentials at startup by reading ~/.lupin/config; tests that hit the
       # notification dispatch path need this. Same mount as lupin-rest-dev.
@@ -342,7 +376,14 @@ services:
       # follow-ups). Conversation-mode endpoint reads the per-session bridge
       # files written by SessionStart hook; without this mount the endpoint
       # can't see them and tests that exercise conversation_mode_active fail.
-      - ~/.claude/sessions:/home/rruiz/.claude/sessions
+      #
+      # ⚠️ MUST STAY BELOW claude-creds-test — that volume shadows the whole
+      # /home/rruiz/.claude. Same trap as dev; see the note there.
+      - type: bind
+        source: ${LUPIN_HOST_SESSIONS_DIR:-/home/rruiz/.claude/sessions}
+        target: /home/rruiz/.claude/sessions
+        bind:
+          create_host_path: false
       # Multi-repo doc viewer (2026-05-12) — exposes Rick's other repos as
       # named `scope`s in /api/docs/file. Read-only by design (viewer never writes).
       # See src/rnd/v0.1.7/2026.05.12-multi-repo-doc-viewer.md §3h.
@@ -443,6 +484,16 @@ services:
 
 volumes:
   pgadmin_data:
+    driver: local
+  # CC OAuth login stores — one per container, each holding its OWN grant
+  # (row c7c60896, ruled 2026-08-02). Seed each once with `claude /login` inside
+  # the container; the login then renews itself and survives a recreate, which is
+  # the whole point — a single-file bind of the host credential could not follow
+  # the host's ~3x/day token replacement and 401'd until someone restarted it.
+  # Same shape docker-compose.cloud-{gpu,test}.yml have always used.
+  claude-creds-dev:
+    driver: local
+  claude-creds-test:
     driver: local
 
 networks:
