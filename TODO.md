@@ -34,6 +34,8 @@ Sam retracted his own pass unprompted and named the miss himself: *"I gated the 
 
 **Caveat 2 (the bigger finding, stated bluntly) — D2 does NOT fix the symptom Rick reported.** Rick's "re-answer the same question" came from **three separate ask INVOCATIONS**, each minting a *fresh* idempotency_key. No idempotency key — in-memory or DB-backed — dedups distinct invocations; only content-hashing the ask would, and nobody has ratified that. D2 fixes the retry-loop case, not the re-invocation case. The reload-OFF policy change (2026-08-01) plus D1's marked-default are what actually reduce the reported storm; D2 is defense-in-depth on top.
 
+**Follow-up (D1 offline test) — pre-existing failure, must move to the SSE contract when fixed.** `src/tests/unit/test_notifications_api.py::TestNotifyResponseRequired::test_notify_response_required_offline_with_default` **already fails at the pre-tonight base** (`fd11cd30^`) — an empty-body test-harness issue, independent of D1. It is NOT a D1 regression. BUT: D1 changed the response-required offline path from a `JSONResponse` to an SSE `StreamingResponse` (ack + OfflineEvent frame). So whoever fixes that test's harness must **also** update it to assert the SSE contract (`response.status_code == 200`, `text/event-stream`, parse `data:` frames → `status: offline` / `response` / `default_used: true`) — a `response.json()` assertion on that path is now wrong by design. Same applies to `test_notify_response_required_open_ended_batch_accepted` if it exercises the offline path.
+
 ---
 
 ## 📥 FINDING 2026-08-02 (Tiberius 👑 `f63d0e28`) — the handback bounce-e2e can't be a :8000-scheduled job
@@ -48,13 +50,35 @@ Sam retracted his own pass unprompted and named the miss himself: *"I gated the 
 
 **Also measured**: `lupin_db_dev` is already migrated — `answer_delivered_at` column + `idx_notifications_answer_owed` index present, `alembic_version = 3da5c0d1eee6`. So Rachel's deferred "live round-trip" precondition (deferred until the shared DB carries `3da5c0d1eee6`) is satisfied for the dev DB.
 
-**LANDED 2026-08-02**: `src/tests/e2e/test_ask_answer_handback.py` (+ `_handback_e2e_server.py`) — both scenarios GREEN, 33s.
+**LANDED 2026-08-02**: `src/tests/e2e/test_ask_answer_handback.py` (+ `_handback_e2e_server.py`) — THREE scenarios GREEN, 57s.
 - (a) stream-death, server alive → answer reaches the asker via the re-attach poll → `responded`, no re-ask.
-- (b) stream-death + real server restart → `pending_responses` wiped → answer submitted with no waiter → row OWED → travels via `answer_catchup.surface_owed_answers` (the additionalContext the asker's next turn receives); ack empties the owed set → surfaces once, no duplicate.
-- Falsification EXECUTED: inverted the owed predicate (`answer_delivered_at.isnot(None)`) → scenario (b) went red with the predicted `"the asker did not receive the question in catch-up: ''"`; restored.
+- (b) orphaned waiter (stream death) → answer OWED → travels via `answer_catchup.surface_owed_answers`; ack empties owed → surfaces once. Proves the catch-up path only.
+- (c) **LIVE waiter wiped by a real restart** — hold the stream OPEN (waiter live), assert in-flight, restart (process death), then answer → travels via catch-up. Rick's mid-question-bounce case.
+- **Sam's catch (2026-08-02)**: (b) alone oversold — closing the client stream makes uvicorn cancel the generator, whose `finally` DELETES the waiter, so the restart wiped nothing live (deleting it stayed green). Fixed: (b) renamed + descoped to orphaned-answer travel; (c) added for the live-waiter case.
+- Falsifications EXECUTED (predicted text confirmed, restored): (1) inverted the owed predicate → catch-up empties → red; (2) neutralized (c)'s restart → the live waiter is woken (delivered), owed stays 0 → red. (2) proves (c)'s restart is load-bearing.
 - Venue: own uvicorn (real notifications+websocket routers) on a throwaway migrated DB, bounced by kill+restart. Never touched :7999/:8000/`lupin_db_dev`.
 
 **Finding worth the design owners' eyes (stale-PID bridge → NULL persona)**: `_voice_persona_for_sender_id` resolves the bridge via `find_session_by_id`, which **skips any bridge file whose filename PID is not a live process** (stale-session guard). So a session whose bridge is stale/dead at answer-persist time stamps `sender_persona = NULL` on the ask row — and that late answer becomes **unretrievable by persona**, the same §4.4 accepted gap as a persona-less session, but reached by a *different* door (a dead-PID bridge, not a failed allocation). Bounded + already-audible (the `[NOTIFY] ⚠️ … NO voice persona` warning fires), but the runbook gap is currently framed as "allocation failed" only; a dead bridge at persist time hits it too. Not a blocker; noting so the gap's framing is complete.
+
+---
+
+## 📥 FINDING 2026-08-02 (Tiffany 💍 `0768c103`) — two notification tests assert the pre-SSE offline contract; NOT "pre-existing", 40 minutes old
+
+**Status**: reproduced and root-caused by me, **not fixed** — it is the f433fbae campaign's lane, not mine. **No store row** per Rick's no-new-rows order.
+
+```
+FAILED test_notifications_api.py::TestNotifyResponseRequired::test_notify_response_required_offline_with_default
+FAILED test_notifications_api.py::TestNotifyResponseRequired::test_notify_response_required_open_ended_batch_accepted
+        json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+```
+
+**Cause**: `1cd795c7` ("Bug f433fbae D1 (server half)") deliberately changed the offline branch from a plain `JSONResponse` to a `StreamingResponse` emitting two SSE frames. That is the correct fix and the commit is sound — it updated *its own* test. It did not update these two **twins in a different file**, which still call `.json()` on a response that is now an SSE stream.
+
+**🔴 THE LABEL MATTERS.** These were reported to me as "pre-existing failures, not in my diff." The first half is right, the second is misleading: **I ran this exact class at 00:38 tonight and all five passed.** They broke at ~00:55. "Pre-existing" invites everyone to route around them; "someone changed the contract 40 minutes ago and two twins were missed" tells the owner it is theirs and still warm.
+
+**Fix direction — assert the NEW contract, do NOT restore the JSON blob.** Drain the generator and assert both frames, `response=<default>`, `default_used=True`, exactly as `1cd795c7` did for its own test. This is the third instance tonight of the same shape (podcast tests `20c70793`, DM-judge `60bbb6ce`): a campaign moves a contract, a twin in another file keeps asserting the old one, and the cheapest green is the wrong one.
+
+**Verified not caused by the bridge-guard work**: both still fail with `-o addopts=""`, so the `pytest.ini` marker change is exonerated.
 
 ---
 
