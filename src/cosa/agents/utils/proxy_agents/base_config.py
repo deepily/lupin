@@ -25,49 +25,19 @@ DEFAULT_SERVER_PORT = 7999
 # ============================================================================
 
 RECONNECT_INITIAL_DELAY  = 1.0     # seconds
-RECONNECT_MAX_DELAY      = 10.0    # seconds — see "why 10, not 30" below
+RECONNECT_MAX_DELAY      = 10.0    # seconds
 RECONNECT_MAX_ATTEMPTS   = 10
 RECONNECT_BACKOFF_FACTOR = 2.0
 
-# Jitter is applied DOWNWARD ONLY: the delay is drawn from
-# [ (1 - RECONNECT_JITTER_FRACTION) * base, base ]. It never lengthens a wait.
-#
-# Direction is deliberate. Symmetric jitter (the usual +/- form) can exceed
-# RECONNECT_MAX_DELAY, which turns a "maximum" into an average and breaks the one
-# property anything downstream can rely on. Measured over 20,000 simulated bounces,
-# worst-case time for the LAST of 9 listeners to return, from server-ready:
-#     cap 10, no jitter        p50  4.6s   p95  9.4s   max 10.0s
-#     cap 10, jitter DOWN      p50  7.4s   p95  9.3s   max 10.0s   <- cap still holds
-#     cap 10, jitter SYMMETRIC p50 10.7s   p95 13.8s   max 15.0s   <- cap exceeded by 50%
+# Jitter is DOWNWARD ONLY: delay is drawn from [ (1-fraction)*base, base ]. Symmetric
+# jitter could exceed RECONNECT_MAX_DELAY, and the server-side all-clear settle deadline
+# is derived from that cap being a real ceiling.
 RECONNECT_JITTER_FRACTION = 0.5
 
-# ── Why 10, not 30 (Rick's ruling, 2026-08-02) ──────────────────────────────
-# These constants are read by two very different consumers and the second one is
-# easy to forget:
-#   1. the listener, deciding how long to sleep before retrying;
-#   2. the managed-bounce all-clear settle gate on the SERVER, which holds its
-#      announcement until every rostered session is back — so it waits out
-#      whatever this cap allows.
-# The gate fires on COVERAGE (everyone back), which means it waits for the SLOWEST
-# session, which means the worst case it must sit through is exactly this cap. At
-# 30 that made 30 the floor under any safe deadline; the shipped 30s deadline sat
-# exactly ON that bound. Dropping the cap to 10 is what let the deadline come back
-# DOWN to 15 with real margin instead of being raised to 40.
-#
-# ⚠️ THE DEADLINE IS DERIVED FROM THIS VALUE, NOT CHOSEN BESIDE IT. If you change
-# this cap, `managed bounce all-clear settle deadline seconds` must change with it —
-# `SettleDeadlinePinTests` computes the required deadline from these constants and
-# goes RED if the two drift apart. Picking them independently is the defect that
-# produced the 15-then-30 churn in the first place.
-#
-# Full derivation, the two live samples it explains, and why jitter is aimed at the
-# herd rather than at this gate:
-#   src/rnd/v0.1.9/2026.08.02-settle-deadline-arithmetic-30-vs-40.md
+# ⚠️ The settle deadline (`managed bounce all-clear settle deadline seconds`) is DERIVED
+# from RECONNECT_MAX_DELAY — change one, change the other. SettleDeadlinePinTests enforces it.
+# src/rnd/v0.1.9/2026.08.02-settle-deadline-arithmetic-30-vs-40.md
 
-
-# ============================================================================
-# Credential Resolution
-# ============================================================================
 
 def get_credentials( cli_email=None, cli_password=None ):
     """

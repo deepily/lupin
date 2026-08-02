@@ -469,11 +469,7 @@ def _managed_bounce_all_clear_blocking( boot_id, boot_started, startup_began ):
     from lupin_cli.claude_code.hooks.lib.session_bridge import find_active_voice_persona_sessions
     from cosa.rest.managed_bounce_broadcast import wait_for_roster_coverage, build_bounce_message
 
-    # Fallback tracks the KEY, and BOTH are derived from the listener backoff cap — the
-    # gate fires on coverage, so it waits for the slowest session, so the worst case it
-    # must sit through is exactly RECONNECT_MAX_DELAY. Cap 10 (Rick, 2026-08-02) => 15
-    # here, with margin. This value is NOT independently chosen: SettleDeadlinePinTests
-    # computes the requirement from the backoff constants and goes red if they drift.
+    # Fallback tracks the key; both are derived from RECONNECT_MAX_DELAY (pinned by test).
     deadline = config_mgr.get( "managed bounce all-clear settle deadline seconds",      default=15,  return_type="float" )
     interval = config_mgr.get( "managed bounce all-clear settle poll interval seconds", default=0.5, return_type="float" )
 
