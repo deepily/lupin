@@ -338,12 +338,17 @@ def task_amend_impl(
           reject to report, not ours — transport only)
         - note is the amendment text (server validates 1..4000 + non-blank)
 
+    A TERMINAL item is ALLOWED (Rick's ruling 2026-08-02): amend is the ONE write
+    verb accepted on a done/dropped row — a gate verdict written after a worker
+    self-closes needs a durable home. The server marks it a post-terminal addendum
+    and stamps an 'amended_post_terminal' event; status is not moved.
+
     Ensures:
         - returns { item, event } (200 body) verbatim on success
         - 404 surfaces "task {id} not found" verbatim
-        - 422 surfaces the server's detail VERBATIM (spec §2.2) — terminal items
-          (no amending closed history), a blank note, and a bad authority are the
-          server's reject, never pre-checked here
+        - 422 surfaces the server's detail VERBATIM (spec §2.2) — a blank note and
+          a bad authority are the server's reject, never pre-checked here. A
+          terminal item is NO LONGER a 422: it lands as a post-terminal addendum
     """
     payload = {
         "note"      : note,

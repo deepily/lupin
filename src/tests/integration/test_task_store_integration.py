@@ -350,7 +350,7 @@ class TestTaskStorePhase2WritePaths:
         assert any( "immutable" in e for e in locked.json()[ "detail" ][ "errors" ] )
 
     def test_amend_appends_body_with_audit_event( self, test_api_key ):
-        """Append-only body amend live: original body preserved verbatim, 'amended' event, terminal + blank-note refuse."""
+        """Append-only body amend live: original body preserved verbatim, 'amended' event, blank-note refuses, terminal lands as a post-terminal addendum."""
         headers = { "X-API-Key": test_api_key[ "api_key" ] }
         created = requests.post( ENDPOINT, json=_create_body( body="ORIGINAL SPEC verbatim." ),
                                  headers=headers, timeout=10 )
@@ -383,12 +383,28 @@ class TestTaskStorePhase2WritePaths:
         assert blank.status_code == 422
         assert any( "note" in e for e in blank.json()[ "detail" ][ "errors" ] )
 
-        # Terminal lockout: drop it, then amend must 422 (no amending closed history).
+        # Post-terminal addendum (Rick 2026-08-02): drop it, then amend must SUCCEED
+        # — a gate verdict written after a self-close has a durable home. The block
+        # is marked distinctly and the event is 'amended_post_terminal'; a closed
+        # row stays closed (status is NOT moved, so transition/edit/correlate on it
+        # still refuse — proven elsewhere).
         _transition( headers, task_id, to_status="dropped", actor="arnold 8b7225c4", reason="probe cleanup" )
-        locked = requests.post( f"{ENDPOINT}/{task_id}/amend", headers=headers, timeout=10,
-                                json={ "note": "too late", "actor": "arnold 8b7225c4" } )
-        assert locked.status_code == 422
-        assert any( "closed history" in e for e in locked.json()[ "detail" ][ "errors" ] )
+        late = requests.post( f"{ENDPOINT}/{task_id}/amend", headers=headers, timeout=10,
+                              json={ "note": "GATE: verified on re-run.", "actor": "mr radio 4829ab05" } )
+        assert late.status_code == 200
+        late_body = late.json()
+        assert "[post-terminal addendum · mr radio 4829ab05 · " in late_body[ "item" ][ "body" ]
+        assert "row was 'dropped' at write — added after close, not a reopening]" in late_body[ "item" ][ "body" ]
+        assert late_body[ "item" ][ "body" ].startswith( "ORIGINAL SPEC verbatim." )   # earliest text still first
+        assert late_body[ "item" ][ "status" ] == "dropped"              # a closed row stays closed
+        assert late_body[ "event" ][ "transition" ] == "amended_post_terminal"
+
+        # And the state machine did NOT soften on that closed row: a transition out
+        # of dropped is STILL refused (append-only finality holds).
+        blocked_out = _transition( headers, task_id, to_status="in_progress",
+                                   actor="arnold 8b7225c4", reason="should be refused" )
+        assert blocked_out.status_code == 422
+        assert any( "append-only" in e for e in blocked_out.json()[ "detail" ][ "errors" ] )
 
 
 class TestTaskStoreWrapperE2E:

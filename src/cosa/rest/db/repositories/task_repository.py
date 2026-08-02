@@ -640,9 +640,20 @@ class TaskRepository( BaseRepository[TaskItem] ):
         leaked outside the store (scratchpad checklists / code comments /
         transition reasons).
 
+        POST-TERMINAL ADDENDUM (Rick's ruling 2026-08-02, row 3c569786). Amend is
+        the ONE write verb the store allows on a TERMINAL row: a gate verdict
+        written after a worker self-closes their row has nowhere durable to go
+        otherwise. On a done/dropped item the divider reads `[post-terminal
+        addendum · <actor> · <utc> · row was '<status>' at write — added after
+        close, not a reopening]` and the audit event's transition is
+        'amended_post_terminal' (not 'amended'), so the addendum is unmistakable
+        from the original body and queryable in history. Status is NOT changed —
+        transition / edit / correlate remain refused on a terminal row.
+
         Requires:
-            - item is a NON-terminal TaskItem loaded in THIS session (row-locked
-              by the router, N3 parity)
+            - item is a TaskItem loaded in THIS session (row-locked by the router,
+              N3 parity). It MAY be terminal — a post-terminal amend is legal
+              (Rick 2026-08-02); the status read here selects the divider + event
             - note is the caller's amendment text (wire-checked 1..4000 + the
               router rejects a whitespace-only note)
             - now is a timezone-aware datetime (the router owns the clock so this
@@ -662,17 +673,38 @@ class TaskRepository( BaseRepository[TaskItem] ):
               the feature. ⚠️ The DB clock, never datetime.now(): this value is
               compared against park_reason_captured_at, and a cross-clock compare
               would surface skew as a false FRESH (see _db_clock_now)
-            - item.status is NEVER touched (an amend is not a transition)
-            - exactly one TaskEvent appended: transition='amended',
-              receipt_refs=None, reason = the caller-supplied `reason` when it is
-              non-empty, else an auto-marker naming the appended length (R3 — the
-              amendment is auditable either way)
+            - the divider is the ordinary `[amendment · …]` on a non-terminal
+              row, and the distinct `[post-terminal addendum · … · row was
+              '<status>' at write — added after close, not a reopening]` on a
+              done/dropped row
+            - item.status is NEVER touched (an amend is not a transition) — a
+              terminal row stays terminal; nothing here reads as a reopening
+            - exactly one TaskEvent appended: transition='amended' on a live row,
+              'amended_post_terminal' on a terminal row (so late verdicts are
+              queryable), receipt_refs=None, reason = the caller-supplied `reason`
+              when it is non-empty, else an auto-marker naming the appended length
+              (R3 — the amendment is auditable either way)
             - flush() called; commit NOT called (caller's get_db() commits)
 
         Returns:
             The appended TaskEvent instance
         """
-        block = f"[amendment · {actor} · {now.isoformat()}]\n{note}"
+        # POST-TERMINAL ADDENDUM (Rick's ruling 2026-08-02, row 3c569786). A gate
+        # verdict is written AFTER the worker self-closed the row: amend is the ONE
+        # write verb the store now allows on a terminal row (transition / edit /
+        # correlate stay refused — a closed row stays closed). The block is stamped
+        # DISTINCTLY so a reader sees at a glance that this text arrived after the
+        # close and never mistakes it for the original body OR for a reopening, and
+        # the audit event carries a DISTINCT transition ('amended_post_terminal')
+        # so the history can be queried for late verdicts later. Status is NEVER
+        # touched here — that is true for a live amend and stays true post-terminal.
+        post_terminal = item.status in TERMINAL_STATUSES
+        if post_terminal:
+            block            = f"[post-terminal addendum · {actor} · {now.isoformat()} · row was '{item.status}' at write — added after close, not a reopening]\n{note}"
+            transition_label = "amended_post_terminal"
+        else:
+            block            = f"[amendment · {actor} · {now.isoformat()}]\n{note}"
+            transition_label = "amended"
         if item.body:
             item.body = f"{item.body}\n\n{block}"
         else:
@@ -688,7 +720,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         # Caller-supplied reason wins (the "why" for the amendment); otherwise
         # auto-describe the appended length so the event is never blank.
         event_reason = reason if reason else f"body amended (+{len( note )} chars)"
-        return self._append_event( item.id, actor, "amended", authority, receipt_refs=None, reason=event_reason )
+        return self._append_event( item.id, actor, transition_label, authority, receipt_refs=None, reason=event_reason )
 
     def query_chase_due( self, now: datetime, limit: int = 100 ) -> List[TaskItem]:
         """

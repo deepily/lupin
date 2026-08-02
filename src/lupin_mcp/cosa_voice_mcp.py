@@ -4390,9 +4390,16 @@ def task_amend(
     amendment history reads inline. This is NOT a destructive edit — reach for it
     when you would otherwise rewrite a body but must keep the prior spec.
 
-    The server REJECTS terminal items (no amending closed history), a blank note,
-    and a bad authority — this tool does NOT pre-check those; a 422 carries the
-    server's words verbatim.
+    A TERMINAL item is ALLOWED (Rick's ruling 2026-08-02): amend is the ONE write
+    verb the store accepts on a done/dropped row — the durable home for a gate
+    verdict written AFTER a worker self-closes their own row. On a terminal row
+    the block is marked a post-terminal addendum (`[post-terminal addendum · … ·
+    added after close, not a reopening]`) and the audit event is stamped
+    'amended_post_terminal', so a reader tells at a glance it arrived after the
+    close; status is NOT moved (a closed row stays closed — transition / edit /
+    correlate remain refused on it). The server still REJECTS a blank note and a
+    bad authority — this tool does NOT pre-check those; a 422 carries the server's
+    words verbatim.
 
     Example:
         # Record a manager-ruled scope reframe on a live item:
@@ -4405,14 +4412,16 @@ def task_amend(
     Args:
         task_id: The item's UUID
         note: The amendment text to append (server validates 1..4000 + non-blank)
-        reason: Optional justification stamping the 'amended' audit event; when
-            omitted the event records an auto-marker naming the appended length
+        reason: Optional justification stamping the audit event; when omitted the
+            event records an auto-marker naming the appended length. The event
+            transition is 'amended' on a live row, 'amended_post_terminal' on a
+            terminal one
         authority: standing | user_direct | manager_relay (default "standing")
 
     Returns:
         { item, event } (server 200 body) verbatim, or an error dict — a 404
-        carries "task {id} not found" verbatim under "detail"; a 422 (terminal
-        item / blank note / bad authority) carries the server's detail verbatim.
+        carries "task {id} not found" verbatim under "detail"; a 422 (blank note /
+        bad authority) carries the server's detail verbatim.
 
     `actor` is NOT a parameter — bridge-stamped like task_transition's actor
     (anti-impersonation; the amendment is auditable to the real session).

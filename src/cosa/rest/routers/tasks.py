@@ -860,10 +860,12 @@ def correlate_task(
     "/tasks/{task_id}/amend",
     summary     = "Append an amendment to a task-store item's body",
     description = "Phase-2.2 append-only body amendment: appends a persona-stamped "
-                  "+ UTC-timestamped block to a NON-terminal item's body WITHOUT "
-                  "rewriting the existing text (distinct from PATCH body, which "
-                  "overwrites) and appends an 'amended' audit event. status / the "
-                  "oracle fields are never touched. Terminal items, a blank note, "
+                  "+ UTC-timestamped block to an item's body WITHOUT rewriting the "
+                  "existing text (distinct from PATCH body, which overwrites) and "
+                  "appends an 'amended' audit event. status / the oracle fields are "
+                  "never touched. A TERMINAL item is ALLOWED (Rick 2026-08-02): the "
+                  "block is marked a post-terminal addendum and the event is stamped "
+                  "'amended_post_terminal' — a closed row stays closed. A blank note "
                   "and a bad authority are rejected (every violation at once). "
                   "Auth: X-API-Key or Bearer JWT."
 )
@@ -883,14 +885,20 @@ def amend_task(
 
     Ensures:
         - 404 when the item does not exist
-        - 422 when authority is not a valid enum member, the note is blank after
-          strip, or the item is terminal (no amending closed history) — every
-          violation reported at once
-        - row-locked read (N3 parity) so the terminal check cannot be raced by a
-          concurrent ->done/->dropped transition
+        - 422 when authority is not a valid enum member or the note is blank after
+          strip — every violation reported at once
+        - a TERMINAL item is NOT rejected (Rick's ruling 2026-08-02, row
+          3c569786): amend is the ONE write verb allowed on a closed row, so a
+          gate verdict written after a worker self-closes has a durable home. The
+          repository marks it a post-terminal addendum + stamps an
+          'amended_post_terminal' event; status is never moved. transition / edit
+          / correlate stay refused on a terminal row (unchanged)
+        - row-locked read (N3 parity) so the status read that SELECTS the
+          post-terminal marker cannot be raced by a concurrent ->done/->dropped
+          transition
         - the router owns the clock (datetime.now(utc)) so the repo stays
-          deterministic; body append + 'amended' event are atomic (one
-          get_db() transaction)
+          deterministic; body append + 'amended'/'amended_post_terminal' event
+          are atomic (one get_db() transaction)
         - returns { item, event } serialized
     """
     with get_db() as session:
@@ -899,13 +907,19 @@ def amend_task(
         if item is None:
             raise HTTPException( status_code=404, detail=f"task {task_id} not found" )
 
+        # NO terminal rejection here (Rick's ruling 2026-08-02, row 3c569786):
+        # amend is the ONE write verb allowed on a closed row, so a gate verdict
+        # written after a worker self-closes has a durable home. The repository
+        # marks the appended block as a post-terminal addendum and stamps a
+        # distinct 'amended_post_terminal' event; status is never moved. The row
+        # lock below still matters — the status read that SELECTS that marker must
+        # not be raced by a concurrent ->done/->dropped. Transition / edit /
+        # correlate stay refused on a terminal row (unchanged).
         errors = [ ]
         if payload.authority not in rules.VALID_AUTHORITIES:
             errors.append( f"authority '{payload.authority}' must be one of {rules.VALID_AUTHORITIES}" )
         if not payload.note.strip():
             errors.append( "note must be a non-blank string" )
-        if item.status in rules.TERMINAL_STATUSES:
-            errors.append( f"item is terminal ('{item.status}') — no amendments to closed history" )
         _reject_if_errors( errors )
 
         event = repo.apply_amendment(

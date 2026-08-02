@@ -1568,12 +1568,22 @@ def test_amend_422_on_malformed_uuid( client, repo ):
 
 
 @pytest.mark.parametrize( "terminal", [ "done", "dropped" ] )
-def test_amend_rejects_terminal_items( client, repo, terminal ):
-    repo.get_by_id_for_update.return_value = make_item( status=terminal )
-    r = client.post( f"/api/tasks/{uuid.uuid4()}/amend", json=_AMEND_BODY )
-    assert r.status_code == 422
-    assert any( "closed history" in e for e in r.json()[ "detail" ][ "errors" ] )
-    repo.apply_amendment.assert_not_called()
+def test_amend_allowed_on_terminal_items( client, repo, terminal ):
+    # Rick's ruling 2026-08-02 (row 3c569786): amend is the ONE write verb allowed
+    # on a CLOSED row — a gate verdict written after a worker self-closes has a
+    # durable home. No 422; the router calls apply_amendment (repo marks the block
+    # a post-terminal addendum + stamps 'amended_post_terminal'). Status untouched.
+    item = make_item( status=terminal, body="CLOSED BY WORKER." )
+    repo.get_by_id_for_update.return_value = item
+    repo.apply_amendment.return_value = make_event(
+        item.id, transition="amended_post_terminal", reason="gate: I re-ran the suite, verified" )
+    r = client.post( f"/api/tasks/{item.id}/amend",
+                     json={ **_AMEND_BODY, "reason": "gate: I re-ran the suite, verified" } )
+    assert r.status_code == 200
+    assert r.json()[ "event" ][ "transition" ] == "amended_post_terminal"
+    repo.apply_amendment.assert_called_once()
+    # The router never rejects a closed row for BEING closed.
+    assert item.status == terminal
 
 
 def test_amend_rejects_bad_authority( client, repo ):
@@ -1608,8 +1618,11 @@ def test_amend_reports_all_violations_together( client, repo ):
     repo.get_by_id_for_update.return_value = make_item( status="done" )
     r = client.post( f"/api/tasks/{uuid.uuid4()}/amend",
                      json={ **_AMEND_BODY, "authority": "divine_right", "note": "   " } )
-    # bad authority + blank note + terminal item -> all three at once.
-    assert r.status_code == 422 and len( r.json()[ "detail" ][ "errors" ] ) == 3
+    # bad authority + blank note -> both at once. A terminal item is NO LONGER a
+    # violation (Rick 2026-08-02), so it is not among the reported errors.
+    assert r.status_code == 422 and len( r.json()[ "detail" ][ "errors" ] ) == 2
+    assert not any( "closed history" in e for e in r.json()[ "detail" ][ "errors" ] )
+    repo.apply_amendment.assert_not_called()
 
 
 def test_amend_happy_path_returns_item_and_event( client, repo ):

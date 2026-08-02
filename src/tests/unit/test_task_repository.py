@@ -920,6 +920,63 @@ def test_apply_amendment_auto_marker_reason_when_absent( repo, session ):
     assert event.authority == "manager_relay"
 
 
+# Post-terminal addendum (Rick's ruling 2026-08-02, row 3c569786) — amend is the
+# ONE write verb allowed on a closed row; the block + audit event are marked
+# distinctly so a late gate verdict is unmistakable from the original body.
+
+@pytest.mark.parametrize( "terminal", [ "done", "dropped" ] )
+def test_apply_amendment_on_terminal_row_marks_post_terminal_addendum( repo, session, terminal ):
+    item  = _item( status=terminal, body="CLOSED BY WORKER: 3 tests pass." )
+    event = repo.apply_amendment(
+        item      = item,
+        note      = "GATE (Mr. Radio): re-ran the collected suite — 1 failed / 125 passed on the first pass; worker fixed the pinned wording; verified green on the second.",
+        actor     = "mr radio 4829ab05",
+        authority = "manager_relay",
+        now       = _AMEND_NOW,
+        reason    = "gate verdict on cited receipts",
+    )
+    # Original body preserved verbatim; the addendum lands below a DISTINCT divider
+    # that names the pre-close status and says it is not a reopening.
+    assert item.body.startswith( "CLOSED BY WORKER: 3 tests pass.\n\n" )
+    assert f"[post-terminal addendum · mr radio 4829ab05 · 2026-07-02T21:55:00+00:00 · row was '{terminal}' at write — added after close, not a reopening]" in item.body
+    assert "[amendment · " not in item.body                    # NOT the ordinary live-row divider
+    assert item.body.rstrip().endswith( "verified green on the second." )
+    # DISTINCT audit transition so the history is queryable for late verdicts.
+    assert event.transition == "amended_post_terminal"
+    assert event.receipt_refs is None
+    assert event.reason     == "gate verdict on cited receipts"
+    # Status is NEVER moved — a closed row stays closed; nothing reads as reopened.
+    assert item.status == terminal
+    added_events = _added_instances( session, TaskEvent )
+    assert len( added_events ) == 1 and added_events[ 0 ] is event
+
+
+def test_apply_amendment_on_terminal_row_auto_marker_reason_when_absent( repo, session ):
+    # reason falsy on a terminal row -> auto length marker, but the transition is
+    # still the DISTINCT post-terminal one (the two are independent axes).
+    item  = _item( status="done", body="closed." )
+    event = repo.apply_amendment(
+        item      = item, note="late", actor="a b",
+        authority = "standing", now=_AMEND_NOW, reason=None,
+    )
+    assert event.transition == "amended_post_terminal"
+    assert event.reason     == "body amended (+4 chars)"
+
+
+def test_apply_amendment_live_row_keeps_ordinary_marker( repo, session ):
+    # The control for the branch: a NON-terminal row keeps the plain 'amended'
+    # event and the ordinary divider — the post-terminal shape must not leak onto
+    # a live amend.
+    item  = _item( status="in_progress", body="live." )
+    event = repo.apply_amendment(
+        item      = item, note="mid-flight note", actor="a b",
+        authority = "standing", now=_AMEND_NOW, reason=None,
+    )
+    assert event.transition == "amended"
+    assert "[amendment · a b · 2026-07-02T21:55:00+00:00]" in item.body
+    assert "post-terminal addendum" not in item.body
+
+
 # ---------------------------------------------------------------------------
 # Persona-key follow-on policy (2026-07-11, task c03d1870) — flag_suffix folds
 # the off-roster persona marker into the EXISTING creation / patched event reason

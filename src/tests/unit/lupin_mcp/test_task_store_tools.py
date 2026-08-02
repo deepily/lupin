@@ -682,10 +682,11 @@ class TestTaskAmendImpl:
         assert calls[ "json" ][ "reason" ]    is None
         assert calls[ "json" ][ "authority" ] == "manager_relay"
 
-    def test_422_terminal_item_surfaces_detail_verbatim( self, capture_request ):
-        # No amending closed history: the terminal reject is the SERVER's 422
-        # (one rules home) — transport carries its words unedited.
-        detail = "item is terminal ('done') — no amendments to closed history"
+    def test_422_surfaces_detail_verbatim( self, capture_request ):
+        # The wrapper is transport-only: whatever 422 the server returns is carried
+        # verbatim. A TERMINAL item is NO LONGER a 422 (Rick 2026-08-02 — it lands
+        # as a post-terminal addendum); a blank note is the standing 422 example.
+        detail = "note must be a non-blank string"
         capture_request( FakeResponse( 422, json_body={ "detail": detail } ) )
         result = task_amend_impl(
             BASE_URL, API_KEY,
@@ -694,6 +695,20 @@ class TestTaskAmendImpl:
             note    = "n",
         )
         assert result == { "status": "error", "http_status": 422, "detail": detail }
+
+    def test_terminal_item_post_terminal_addendum_surfaces_200_verbatim( self, capture_request ):
+        # Rick 2026-08-02: amend on a closed row succeeds — the server returns 200
+        # with an 'amended_post_terminal' event; the wrapper forwards it verbatim.
+        body = { "item": { "status": "done" },
+                 "event": { "transition": "amended_post_terminal" } }
+        capture_request( FakeResponse( 200, json_body=body ) )
+        result = task_amend_impl(
+            BASE_URL, API_KEY,
+            actor   = "mr radio 4829ab05",
+            task_id = "abc",
+            note    = "GATE: verified on re-run.",
+        )
+        assert result == body
 
 
 class TestTaskGetImpl:
