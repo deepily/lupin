@@ -46,6 +46,7 @@ _PASSWORD = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
 
 _ENDPOINT = f"{BASE_URL}/api/notifications/answers-owed"
 _ACK      = f"{BASE_URL}/api/notifications/answers-owed/ack"
+_RESPOND  = f"{BASE_URL}/api/notify/response"
 
 
 pytestmark = pytest.mark.skipif(
@@ -284,6 +285,109 @@ def test_dv4_cursor_orders_on_responded_at_not_created_at( auth_headers ):
             "filters on responded_at and is not a no-op"
         )
         assert resp2.json()[ "owed_count" ] == 1, resp2.json()
+
+    finally:
+        with get_db() as session:
+            session.execute(
+                text( "DELETE FROM notifications WHERE id::text = ANY(:ids)" ),
+                { "ids": [ str( i ) for i in all_ids ] },
+            )
+            session.commit()
+
+
+def test_d3_answer_with_no_live_waiter_lands_owed_and_is_retrievable( auth_headers ):
+    """
+    D3 positive guard (bug f433fbae) — an answer submitted after the asking SSE stream
+    has died (no live waiter) must land OWED and be retrievable, so the late-answer
+    handback delivers it. This is what makes "card answerable after stream death" the
+    FEATURE, not a bug.
+
+    Why NOT mark the row expired on disconnect (the tempting mirror of the timeout path):
+    _submit_response_sync rejects an expired row past the grace period with HTTP 400
+    (the grace-period gate in notifications.py) — so for any answer given >300s after the
+    disconnect, marking expired would 400-reject it and LOSE the answer. The correct
+    behavior is the one this guard pins: leave the row answerable → answered → owed →
+    handed back.
+
+    Positive: seed a 'delivered' response-required row (responded_at NULL,
+    answer_delivered_at NULL) with NO SSE waiter open, POST /api/notify/response, then
+    assert responded_at is now SET, answer_delivered_at is STILL NULL, and answers-owed
+    RETURNS the row.
+
+    Red-proof (query-level, no notifications.py edit): a sibling row identical except
+    answer_delivered_at is SET — exactly what the no-waiter branch would produce if it
+    marked delivered — is EXCLUDED from answers-owed. So marking delivered on a no-waiter
+    submit makes the answer unretrievable; leaving it NULL keeps it deliverable.
+
+    Venue: :8000 (mutates DB state). Self-cleaning.
+    """
+    from sqlalchemy import text
+    from cosa.rest.db.database import get_db
+    from cosa.rest.postgres_models import Notification
+
+    persona = f"itest-d3-{uuid.uuid4().hex[ :12 ]}"
+    now     = datetime.now( timezone.utc )
+
+    owed_id      = uuid.uuid4()   # answered with no waiter → must land owed + retrievable
+    delivered_id = uuid.uuid4()   # red-proof: answer_delivered_at set → must be excluded
+    all_ids      = [ owed_id, delivered_id ]
+
+    try:
+        with get_db() as session:
+            row = session.execute(
+                text( "SELECT id FROM users WHERE email = :e" ), { "e": _EMAIL }
+            ).first()
+            assert row is not None, f"test user {_EMAIL} not found"
+            rid = row[ 0 ]
+            # The ask the user is about to answer — delivered, not yet responded.
+            session.add( Notification(
+                id=owed_id, sender_id="cc@lupin#d3sess", recipient_id=rid,
+                message="d3 unanswered ask", type="task", priority="high",
+                created_at=now, sender_persona=persona, response_requested=True,
+                responded_at=None, answer_delivered_at=None, state="delivered",
+            ) )
+            # Red-proof sibling — what the else-branch would produce if it marked delivered.
+            session.add( Notification(
+                id=delivered_id, sender_id="cc@lupin#d3sess", recipient_id=rid,
+                message="d3 already-delivered", type="task", priority="high",
+                created_at=now, sender_persona=persona, response_requested=True,
+                responded_at=now, answer_delivered_at=now,
+                response_value={ "value": "yes" }, state="responded",
+            ) )
+            session.commit()
+
+        # ── submit an answer with NO live SSE waiter (the stream already died) ──
+        resp = requests.post( _RESPOND,
+                              json={ "notification_id": str( owed_id ), "response_value": "yes, proceed" },
+                              timeout=15 )
+        assert resp.status_code == 200, f"submit response failed: {resp.status_code} {resp.text}"
+
+        # ── the no-waiter branch persisted the answer but left it OWED (not delivered) ──
+        with get_db() as session:
+            r = session.execute(
+                text( "SELECT responded_at, answer_delivered_at FROM notifications WHERE id = :id" ),
+                { "id": str( owed_id ) },
+            ).first()
+            assert r is not None and r[ 0 ] is not None, "answer must be persisted (responded_at set)"
+            assert r[ 1 ] is None, (
+                "a no-waiter submit must NOT mark answer_delivered_at — leaving it NULL is what "
+                "keeps the answer owed and deliverable by the handback (D3 regression guard)"
+            )
+
+        # ── retrievable via answers-owed; the already-delivered sibling is excluded ──
+        pull = requests.get( _ENDPOINT, headers=auth_headers,
+                             params={ "persona": persona, "limit": 100 }, timeout=15 )
+        assert pull.status_code == 200, pull.text
+        ids = _ids_in( pull.json() )
+        assert str( owed_id ) in ids, (
+            "the answered-with-no-waiter row MUST be retrievable via answers-owed so the "
+            "handback delivers it (an empty result is not the pass signal)"
+        )
+        assert str( delivered_id ) not in ids, (
+            "RED-PROOF: a row with answer_delivered_at set is excluded — so if the no-waiter "
+            "branch marked delivered, the answer would be unretrievable and lost"
+        )
+        assert pull.json()[ "owed_count" ] == 1, pull.json()
 
     finally:
         with get_db() as session:
