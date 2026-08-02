@@ -1041,10 +1041,21 @@ async def notify_user(
         if sender_persona is None:
             print( f"[NOTIFY] ⚠️ response-required ask has NO voice persona (sender_id={resolved_sender_id!r}) — its late answer will be unretrievable by persona (§4.4 accepted gap)" )
 
-        # Task 5: Offline Detection - return default immediately if user not connected
+        # Task 5: Offline Detection — deliver the default immediately, but as an SSE
+        # frame the streaming client can actually CONSUME (bug f433fbae D1).
+        #
+        # The prior return here was a plain JSONResponse: not SSE-framed AND missing
+        # the `response` field OfflineEvent requires. notify_user_sync streams the
+        # POST and only parses `data: `-prefixed lines, so it could not read that
+        # JSON at all — it fell through to a re-attach with no ack id and returned an
+        # error dict. Net: the offline default was NEVER delivered (the client
+        # plumbing in commit fd11cd30 was inert without this half). Emitting a real
+        # SSE OfflineEvent maps the client to exit_code=0 / default_used=True, so the
+        # caller stamps `answered: False`: the default is DELIVERED and MARKED as a
+        # substitution, never forged into something a human answered.
         if not is_connected:
             if response_default:
-                print(f"[NOTIFY] User offline - returning default immediately: {response_default}")
+                print(f"[NOTIFY] User offline - streaming default immediately: {response_default}")
 
                 # Create notification in PostgreSQL with state='expired'.
                 # Lever B (surgical pass 2): blocking DB persist off the event loop.
@@ -1057,12 +1068,26 @@ async def notify_user(
                     sender_persona, sender_icon
                 )
 
-                return JSONResponse({
-                    "status"             : "offline",
-                    "default_used"       : response_default,
-                    "notification_id"    : notification_id,
-                    "message"            : "User is offline, returned default value immediately"
-                })
+                async def offline_event_generator():
+                    # ack first — hands the client this ask's notification_id so a
+                    # mid-stream death can re-attach (§4.5 E-a), same as the online path.
+                    yield f"data: {json.dumps({'status': 'ack', 'notification_id': notification_id})}\n\n"
+                    # OfflineEvent: `response` carries the default; default_used=True is
+                    # the provenance the caller stamps as `answered: False` — the marker
+                    # that keeps a substitution from reading as a human decision.
+                    yield f"data: {json.dumps({'status': 'offline', 'response': response_default, 'default_used': True})}\n\n"
+
+                return StreamingResponse(
+                    offline_event_generator(),
+                    media_type = "text/event-stream",
+                    headers    = {
+                        "Cache-Control"               : "no-cache",
+                        "X-Accel-Buffering"           : "no",
+                        "Connection"                  : "keep-alive",
+                        "Content-Type"                : "text/event-stream",
+                        "Access-Control-Allow-Origin" : "*"
+                    }
+                )
             else:
                 raise HTTPException(
                     status_code = 503,

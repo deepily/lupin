@@ -31,7 +31,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock, MagicMock, AsyncMock, patch
 
 from fastapi import HTTPException
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse
 
 import cosa.rest.routers.notifications as N
 from cosa.rest.routers.notifications import (
@@ -411,6 +411,10 @@ class TestNotifyUser( unittest.IsolatedAsyncioTestCase ):
 
     # ---- response-required offline ----
     async def test_response_required_offline_with_default( self ):
+        # Bug f433fbae D1 (server half): the offline branch must emit a CONSUMABLE
+        # SSE OfflineEvent, not a JSONResponse. Consume the generator and assert the
+        # two frames: an ack (carrying notification_id for re-attach) and an offline
+        # frame carrying `response`=<default> and default_used=True.
         ws = _ws_manager( is_connected=False, connection_count=0 )
         mock_db = Mock(); repo = Mock(); repo.create_notification.return_value = Mock( id=uuid.uuid4() )
         with patch( "cosa.rest.user_service.get_user_by_email", return_value={ "id": UID_STR } ), \
@@ -419,7 +423,25 @@ class TestNotifyUser( unittest.IsolatedAsyncioTestCase ):
              _patch_fastapi_main( self._user_main() ), patch( "builtins.print" ):
             out = await self._call( Mock(), ws, response_requested=True, response_type="yes_no",
                                     response_default="no" )
-        self.assertIsInstance( out, JSONResponse )
+
+        self.assertIsInstance( out, StreamingResponse )
+
+        # Drain the SSE body and parse the frames.
+        import json as _json
+        chunks = [ c async for c in out.body_iterator ]
+        frames = [ _json.loads( c.split( "data: ", 1 )[ 1 ].strip() ) for c in chunks if "data: " in c ]
+
+        self.assertEqual( len( frames ), 2 )
+        ack, offline = frames
+        self.assertEqual( ack[ "status" ], "ack" )
+        self.assertIn( "notification_id", ack )                 # re-attach handle present
+        self.assertEqual( offline[ "status" ], "offline" )
+        # NEGATIVE CONTROL: drop `response` from the emitted frame and OfflineEvent
+        # (response: str, required) can't validate → the client falls back to an
+        # error, exactly the inert-fd11cd30 behaviour. These two assertions fail if
+        # the field is missing or the marker flips.
+        self.assertEqual( offline[ "response" ], "no" )         # the default is DELIVERED
+        self.assertIs( offline[ "default_used" ], True )        # MARKED as a substitution
 
     async def test_response_required_offline_no_default_503( self ):
         ws = _ws_manager( is_connected=False, connection_count=0 )
