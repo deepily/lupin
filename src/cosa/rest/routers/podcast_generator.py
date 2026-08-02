@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 from cosa.rest.auth import get_current_user
 from cosa.rest.queue_extensions import user_job_tracker
 from cosa.rest.queue_util import emit_job_state_transition
+from cosa.rest.job_state import JobState
 from cosa.rest.agentic_job_factory import create_agentic_job
 from cosa.agents.podcast_generator.job import PodcastGeneratorJob
 import cosa.utils.util as cu
@@ -596,7 +597,7 @@ async def submit_podcast_job(
             'status'        : 'pending',
             'expediting'    : True
         }
-        emit_job_state_transition( websocket_mgr, spec_id, 'pending', 'todo', user_id, spec_metadata )
+        emit_job_state_transition( websocket_mgr, spec_id, JobState.PENDING, JobState.QUEUED, user_id, spec_metadata )
 
         # Set voice_io job_id so notifications during selection auto-route to spec card
         cosa_interface.TARGET_USER = user_email
@@ -611,7 +612,7 @@ async def submit_podcast_job(
 
             if not matches:
                 # Tear down speculative card
-                emit_job_state_transition( websocket_mgr, spec_id, 'todo', 'dead', user_id )
+                emit_job_state_transition( websocket_mgr, spec_id, JobState.QUEUED, JobState.FAILED, user_id )
                 user_job_tracker.remove_job( spec_id )
                 raise HTTPException(
                     status_code=404,
@@ -628,7 +629,7 @@ async def submit_podcast_job(
 
             if not selected_doc:
                 # User cancelled — tear down speculative card
-                emit_job_state_transition( websocket_mgr, spec_id, 'todo', 'dead', user_id )
+                emit_job_state_transition( websocket_mgr, spec_id, JobState.QUEUED, JobState.CANCELLED, user_id )
                 user_job_tracker.remove_job( spec_id )
                 return PodcastMatchingResponse(
                     status  = "cancelled",
@@ -640,7 +641,7 @@ async def submit_podcast_job(
 
             # Security: validate path stays within project root
             if not validate_source_path( selected_doc[ "relative_path" ] ):
-                emit_job_state_transition( websocket_mgr, spec_id, 'todo', 'dead', user_id )
+                emit_job_state_transition( websocket_mgr, spec_id, JobState.QUEUED, JobState.FAILED, user_id )
                 user_job_tracker.remove_job( spec_id )
                 raise HTTPException(
                     status_code=403,
@@ -648,7 +649,7 @@ async def submit_podcast_job(
                 )
 
             if not os.path.exists( full_path ):
-                emit_job_state_transition( websocket_mgr, spec_id, 'todo', 'dead', user_id )
+                emit_job_state_transition( websocket_mgr, spec_id, JobState.QUEUED, JobState.FAILED, user_id )
                 user_job_tracker.remove_job( spec_id )
                 raise HTTPException(
                     status_code=404,
@@ -678,7 +679,7 @@ async def submit_podcast_job(
             )
 
             if job is None:
-                emit_job_state_transition( websocket_mgr, spec_id, 'todo', 'dead', user_id )
+                emit_job_state_transition( websocket_mgr, spec_id, JobState.QUEUED, JobState.FAILED, user_id )
                 user_job_tracker.remove_job( spec_id )
                 raise HTTPException( status_code=500, detail="Failed to create podcast job" )
 
