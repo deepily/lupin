@@ -1,6 +1,62 @@
 # TODO
 
-Last updated: 2026-08-01 (Cheech 🌿 `7edf6e5e` — late-answer-handback cascade post-game)
+Last updated: 2026-08-02 (Tiffany 💍 `0768c103` — R5 reconnect-window finding)
+
+---
+
+## 📥 BACKLOG 2026-08-02 (Tiffany 💍 `0768c103`) — the all-clear's real blocker is the reconnect WINDOW, not the predicate
+
+**Status**: measured tonight, NOT built, NOT ruled. **No store row** — Rick's broadcast ordered no new task items tonight, so this is stashed here deliberately.
+
+**Context**: bug `784d4a2e` replaced the all-clear settle gate's plateau predicate with roster-coverage (Rick's direct ruling, 2026-08-02 ~00:20). The predicate change is right and is committed work. This entry is about what the fix EXPOSED rather than solved.
+
+**The measurement** — a real `:7999` bounce at 00:25 ran the new gate:
+```
+all-clear FIRED on DEADLINE EXPIRY (boot #3): reached 10 recipient(s) after 15.3s;
+reconnect curve 0→0→1→1→1→1→…→1   [29 polls flat at ONE]
+10 session(s) had NOT rejoined and got NO all-clear (accepted loss, no re-fire): [10 ids]
+```
+
+**Both halves are true and both matter.** The gate did its job: the retired plateau predicate would have fired at ~1.0s on that `1→1` and reported success. Coverage held the full window and named every session it lost. **But only 1 of 11 sockets came back inside 15 seconds**, so coverage can essentially never complete, and the gate is in practice a fixed 15-second wait followed by a fire that misses almost everyone. **The delivery symptom is not fixed** — it is now merely honest about failing.
+
+**So the open question is not "which predicate" — it is "why does reconnection take longer than the window, and what is the right window".** Three directions, none authorized, in the order I'd try them:
+1. **Find out what the listeners actually do after a bounce.** Nobody has measured cc-listener reconnect latency directly. A 15s guess was never validated against it; if the real curve is 60s, no predicate saves us. Measure first, tune second.
+2. **Use the WARNING phase's ack list as the roster**, carried across the restart in a file. Those are exactly the sessions that were live and heard us minutes ago — a far tighter roster than bridge files on an 8-hour window, which is what makes coverage unreachable today.
+3. **Raise the deadline** only once (1) has a number under it. Raising it blind just moves a guess.
+
+⚠️ **The roster over-count is real and observable**: the 00:25 warning was acked by only 2 distinct sessions (Tiffany, Krishna) while the roster listed 11. Krishna was **reaped at ~15:50** and his bridge file is still on the roster nine hours later — a session that will never reconnect, holding the gate to the deadline every single bounce.
+
+---
+
+## 📥 STASHED 2026-08-01 night (Mr. Radio 🦉 `9056b85b`) — two findings NOT filed as rows, per Rick's board-to-zero directive
+
+Rick's broadcast `0152e7b0`: *"stop posting new task list items. NONE… stash it in the to-do file and we'll come back to it on another day."* Both of these would otherwise be store rows. Neither blocks anything.
+
+**1. Tone's evidence sometimes hands back the whole message instead of the phrase it judged.**
+Measured properly in commit `a09a2327` (probe + 31 tests). On the four probe bodies the behaviour is clean and defensible: the two *plainly-written* bodies (tone +2) get the whole body quoted — when prose is uniformly plain there is no offending phrase to point at, so "all of it" is a fair answer — while the two *jargon* bodies (tone −2/−1) get aimed quotes, 6/6. **The anomaly is on live DMs, not probe bodies**: two of mine scored tone **−1** and still echoed whole. On a negative grade there *is* something specific to point at, so the probe's pattern does not predict it. n=2. Not a grading defect — the weights are right — an evidence-quality one. Next step if picked up: run the tone grader against bodies that are plain-but-flawed, which is the cell the 2×2 does not contain.
+
+**2. `io/mementos/tiberius.md` is a bare slot that nobody can clear.**
+The last surviving `memento_io verify` finding on this repo. Its content is **byte-identical** to `tiberius-legacy-2026.07.14-193034.md`, so the data-loss window is already closed — what remains is a label, not a risk. Clearing a bare slot needs `write --persona <p> --session-id <sid>`, and Tiberius's seat is gone, so the session id would have to be invented. That is exactly what `BARE_SLOT_EXEMPTIONS` in `memento_io.py` exists for, and three slots already sit in it for this reason. **It is a planning-is-prompting change, not a Lupin one**, and adding a fifth entry deliberately reds `test_exemptions_are_exactly_the_ruled_set` so a human has to notice — which is the design, not an obstacle. Deliberately not done from this repo tonight.
+
+---
+
+## 📥 BACKLOG 2026-08-01 evening (Rick's idea, captured by Mr. Radio 🦉 `9056b85b`) — reject over-long DMs at a hidden, randomized word limit
+
+**Status**: idea captured, NOT built, NOT ruled. No store row yet — this is a design Rick floated, not owed work.
+
+**Rick's proposal, in his framing**: tell everyone up front that exceeding the word limit produces an **error and the DM is not sent**. Do **not** tell them what the limit is, and draw it **randomly between 150 and 250** so it cannot be gamed. The published advice is simply to stay within the recommended limits.
+
+**Why the lever is right.** A grade is advisory. The judge published 👎s all evening and nobody was blocked by one, which is exactly how a ~1000-word DM still went out (Rick's broadcast `d8099c6c`). A rejection forces the rewrite — a different instrument, not a louder version of the same one.
+
+**Why the randomization is smarter than it first reads.** A known limit of 200 puts everyone at 199 — compliance, but it parks all traffic at the ceiling. A threshold drawn from 150–250 turns the cliff into a **slope of rejection probability**: ~10% at 160 words, ~90% at 240. The risk-averse response is to go well under 150 rather than hug the edge, and that behaviour falls out of the mechanism instead of out of asking nicely.
+
+**🔴 THE ONE CHANGE I'd insist on — seed the threshold on a HASH OF THE BODY, not a fresh random per call.** As drafted, a rejected DM retried *unchanged* succeeds about half the time, which teaches **"retry beats editing"** — the one gaming vector the randomization itself introduces. Hashing keeps every property wanted (unknowable in advance, unguessable, spread over 150–250) and adds the one needed: the same text always gets the same verdict, so a rejection sticks until the words actually change. It also keeps the send path reproducible for debugging and tests.
+
+**Two things to settle before it ships**
+1. **What counts as a word.** A pasted stack trace, code block, JSON blob or long URL blows any limit — and those are sometimes what a DM legitimately carries. Strip fenced blocks from the count, or the rule punishes the wrong messages.
+2. **What the error says.** That message is the *entire* teaching surface. It should name the ~60-word target, say the limit is variable so nobody burns a cycle reverse-engineering it, and point at the doc-link pattern for anything genuinely long. "Too long" alone produces guessing.
+
+**Interaction with the open bug rows**: this largely retires `0fc5b8f0` (the −2 length grade saturating at 250) for *enforcement* — nothing that long gets sent at all — but the saturation still distorts the audit history, so that row stays open rather than closing on this.
 
 ---
 
