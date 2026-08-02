@@ -1589,6 +1589,25 @@ async def get_answers_owed(
 
     Raises:
         - HTTPException 500 on query failure
+
+    ⚠️ AUTHENTICATED, NOT AUTHORIZED — a RULED design decision, not an oversight
+    (Rick, 2026-08-01: "let's leave it where it is, this is one trusted fleet…
+    let's make sure we document this behavior"). This endpoint checks that the
+    caller holds a valid credential; it does NOT check that the credential
+    belongs to `persona`. Any valid key can pull any persona's owed answers.
+
+    This is one property read two ways. `persona` is matched ALONE (ruling 6)
+    precisely so a returning session can pull what accumulated in its absence —
+    the caller's own identity is never a parameter of the query. That is what
+    makes the service-account lane failure unexpressible rather than merely
+    unused (the D-V1 negative control), and it is the same reason the endpoint
+    cannot tell one caller's request from another's.
+
+    The trust boundary, stated so a later reader need not re-derive it: every
+    credential here belongs to a session in this fleet. If that stops being true
+    — an outside integration, a shared key, a key that outlives its seat — this
+    becomes a real hole, and closing it means binding keys to personas, which
+    they are not today. Filed and closed as `fd245188`.
     """
     try:
         max_age_hours = _undelivered_max_age_hours()
