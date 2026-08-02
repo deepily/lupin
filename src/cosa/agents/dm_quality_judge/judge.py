@@ -87,14 +87,43 @@ _RETRY_NUDGE                = "Begin your reply with <response>.\n\n"
 # withheld where the model cannot produce it. Chunk-and-aggregate and a stronger model
 # were both considered and rejected as not worth the complexity for a bonus signal.
 # Full finding: bug 2a41e141 (Krishna's evidence writeup) + this session's 8-variant probe.
-QUALITATIVE_WORD_LIMIT      = 150
+# ── Config-backed length thresholds (row f4bb1cdb amend-2, Rick 2026-08-02) ──────────
+# Each threshold has ONE definition, resolved from lupin-app.ini with today's value as
+# the default, so the length buckets below READ these names instead of repeating the
+# numbers inline — before this, a change to a named constant left the inline bucket
+# literal untouched and the two drifted silently. Resolved at IMPORT time, NOT per call:
+# these stay module-level ints so judge_v2 (which imports QUALITATIVE_WORD_LIMIT) and the
+# tests (which patch it as a module attribute) keep working untouched — call-time
+# resolution would force edits into judge_v2.py + the length tests, which reaches beyond
+# this row's judge.py-only scope. A threshold change therefore takes a server bounce.
+def _resolve_threshold( config_key, default ):
+    """Read an int length threshold from lupin-app.ini, default on absence/any error.
+    Never raises — a broken config read must not stop this module from importing."""
+    from cosa.config.configuration_manager import ConfigurationManager
+    try:
+        return ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ).get(
+            config_key, default=default, return_type="int" )
+    except Exception:
+        return default
+
+
+QUALITATIVE_WORD_LIMIT      = _resolve_threshold( "dm qualitative word limit", 150 )
 
 # The target every Length grade is stated against. Was a bare "~60" written into the
 # detail string; promoted to a constant when `overage` started dividing by it (row
 # 0fc5b8f0), so the number a reader is told and the number the ratio uses cannot drift
 # apart. NOT the same as the ⭐ boundary being 60 — they coincide today and are free to
-# stop coinciding, which is exactly why they are not the same literal reused twice.
-LENGTH_TARGET_WORDS         = 60
+# stop coinciding, which is exactly why they are not the same literal reused twice
+# (LENGTH_EXCELLENT_LIMIT below is the ⭐ boundary, its OWN config key).
+LENGTH_TARGET_WORDS         = _resolve_threshold( "dm length target words", 60 )
+
+# The four Length BUCKET boundaries — each its own config key so none is an inline
+# literal a named constant could silently drift apart from. 150 is deliberately NOT
+# repeated here: the 🤷/👎 boundary IS the qualitative cap QUALITATIVE_WORD_LIMIT, which
+# is also the emoji-repetition interval — the single reason Rick chose 150.
+LENGTH_EXCELLENT_LIMIT      = _resolve_threshold( "dm length excellent limit", 60 )    # ⭐ ≤ this
+LENGTH_GOOD_LIMIT           = _resolve_threshold( "dm length good limit", 90 )         # 👍 ≤ this
+LENGTH_VERBOSE_LIMIT        = _resolve_threshold( "dm length verbose limit", 250 )     # 👎 ≤ this
 
 _TOO_LONG_DETAIL            = "not judged: DM too long for reliable qualitative grading"
 
@@ -346,17 +375,30 @@ def length_bucket( word_count ):
 
     Ensures:
         - returns {"emoji", "weight", "detail", "overage"} with a weight in [-2, 2]
-        - the boundaries are inclusive-left as written above (60→⭐, 61→👍, ...)
+        - "emoji" is the band's face REPEATED max(1, word_count // QUALITATIVE_WORD_LIMIT)
+          times (display-only intensity, row f4bb1cdb); "weight" is unaffected
+        - the boundaries are the resolved config thresholds (defaults 60/90/150/250),
+          inclusive-left as written above (≤60→⭐, 61→👍, ...)
         - overage is word_count / LENGTH_TARGET_WORDS, rounded to 1dp, and is
           STRICTLY INCREASING in word_count past the saturation point — which is the
           whole reason it exists
     """
-    if   word_count <=  60: emoji, weight = "⭐", 2
-    elif word_count <=  90: emoji, weight = "👍", 1
-    elif word_count <= 150: emoji, weight = "🤷", 0
-    elif word_count <= 250: emoji, weight = "👎", -1
-    else:                   emoji, weight = "😞", -2
-    return { "emoji"   : emoji,
+    if   word_count <= LENGTH_EXCELLENT_LIMIT: emoji, weight = "⭐", 2
+    elif word_count <= LENGTH_GOOD_LIMIT:      emoji, weight = "👍", 1
+    elif word_count <= QUALITATIVE_WORD_LIMIT: emoji, weight = "🤷", 0
+    elif word_count <= LENGTH_VERBOSE_LIMIT:   emoji, weight = "👎", -1
+    else:                                      emoji, weight = "😞", -2
+    # DISPLAY-ONLY intensity (row f4bb1cdb, Rick 2026-08-02): repeat the message's OWN
+    # length-grade face once per QUALITATIVE_WORD_LIMIT words — 150 is where the
+    # qualitative grader stops, which is Rick's stated reason, so the interval IS that
+    # constant, not a fresh literal. count = max(1, word_count // QUALITATIVE_WORD_LIMIT):
+    # the faces never contradict the band (a 160-word 👎 shows 👎, never 😞) and the first
+    # DOUBLING is at 2×the cap. This RENDERS intensity that `overage` already carries as a
+    # number — the `weight` is untouched and stays in [-2, 2], so combine_overall, the
+    # audit, and the stored len_grade are unaffected. A wider weight would be clamped back
+    # by combine_overall anyway AND would break the corpus mid-collection for the demo.
+    faces = emoji * max( 1, word_count // QUALITATIVE_WORD_LIMIT )
+    return { "emoji"   : faces,
              "weight"  : weight,
              "detail"  : f"{word_count} words, target ~{LENGTH_TARGET_WORDS}",
              "overage" : round( word_count / LENGTH_TARGET_WORDS, 1 ) }

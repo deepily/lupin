@@ -555,6 +555,9 @@ class TestDmTrafficJsonlCorpus( _CoreHarness ):
         self.assertEqual( row[ "body" ],         "crisp verdict here." )
         # written from within pytest → stamped as a test row (row f5d6dc5e)
         self.assertEqual( row[ "origin" ],       "test" )
+        # experiment arm stamped from config; the test ini has `dm reject on overage`
+        # False → arm A (row f4bb1cdb)
+        self.assertEqual( row[ "arm" ],          "signal_only" )
         # grades ride along as integer weights
         self.assertEqual( row[ "len_grade" ],  2 )
         self.assertEqual( row[ "directness" ], 1 )
@@ -637,6 +640,53 @@ class TestDmTrafficJsonlCorpus( _CoreHarness ):
         self._run_with_grader( _make_send_body( sender_project="plan", body="short one." ), lambda b: None )
         row = json.loads( open( self.corpus_path, encoding="utf-8" ).read().splitlines()[ 0 ] )
         self.assertEqual( row[ "origin" ], "test" )
+
+
+def _fake_cm( values ):
+    """A ConfigurationManager stand-in whose .get returns the stored value, or the
+    passed default when the key is ABSENT — mirroring the real manager's missing-key
+    behaviour, which is the case row f4bb1cdb turns on."""
+    class _CM:
+        def __init__( self, **kwargs ):   # constructed as ConfigurationManager(env_var_name=...)
+            pass
+        def get( self, key, default=None, return_type=None ):
+            return values.get( key, default )
+    return _CM
+
+
+def _fake_cm_that_cannot_construct():
+    class _CM:
+        def __init__( self, **kwargs ):
+            raise RuntimeError( "config unavailable" )
+    return _CM
+
+
+class TestDmFeedbackArm( unittest.TestCase ):
+    """Row f4bb1cdb — get_dm_feedback_arm() derives the experiment arm from the
+    `dm reject on overage` config key. False/absent → "signal_only" (arm A), True →
+    "reject_on_overage" (arm B). A MISSING key or a read error is arm A, NEVER an error
+    (no fail-closed): the corpus must name its arm before arm B is built."""
+
+    def _arm_under( self, cm_class ):
+        import cosa.rest.routers.dm as dm
+        with patch( "cosa.config.configuration_manager.ConfigurationManager", cm_class ):
+            return dm.get_dm_feedback_arm()
+
+    def test_false_key_is_signal_only( self ):
+        self.assertEqual( self._arm_under( _fake_cm( { "dm reject on overage": False } ) ), "signal_only" )
+
+    def test_true_key_is_reject_on_overage( self ):
+        self.assertEqual( self._arm_under( _fake_cm( { "dm reject on overage": True } ) ), "reject_on_overage" )
+
+    def test_absent_key_is_signal_only_not_an_error( self ):
+        """María's required case: a default nobody has run with the key DELETED is a
+        default nobody has tested. Missing key → arm A, no exception."""
+        self.assertEqual( self._arm_under( _fake_cm( {} ) ), "signal_only" )
+
+    def test_config_read_failure_falls_back_to_signal_only( self ):
+        """A broken config read is arm A, not fail-closed — same posture as the missing
+        key. Stamping nothing, or raising into the send path, would both be worse."""
+        self.assertEqual( self._arm_under( _fake_cm_that_cannot_construct() ), "signal_only" )
 
 
 if __name__ == "__main__":

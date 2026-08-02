@@ -219,7 +219,34 @@ class TestLengthBucket:
     def test_boundaries( self, words, weight, emoji ):
         b = length_bucket( words )
         assert b[ "weight" ] == weight
-        assert b[ "emoji" ]  == emoji
+        # The emoji may now REPEAT for display-only intensity (row f4bb1cdb); this test
+        # pins the BAND — every face is the band's own emoji. Repetition COUNT is pinned
+        # by TestLengthEmojiRepeats below.
+        assert set( b[ "emoji" ] ) == { emoji }
+
+    @pytest.mark.parametrize( "words, expected", [
+        ( 150, "🤷" ),                     # the qualitative cap itself → still single
+        ( 151, "👎" ),                     # one past the cap, 151//150 == 1 → single
+        ( 250, "👎" ),                     # 👎 band, single
+        ( 251, "😞" ),                     # 😞 band, single
+        ( 299, "😞" ),                     # last single before the doubling edge
+        ( 300, "😞😞" ),                   # 2×cap → the first DOUBLING
+        ( 800, "😞😞😞😞😞" ),             # 800 // 150 == 5
+    ] )
+    def test_length_emoji_repeats_per_qualitative_cap( self, words, expected ):
+        """Row f4bb1cdb boundaries (María's gate): the band face repeats
+        max(1, words // QUALITATIVE_WORD_LIMIT) times. 299 vs 300 is the doubling edge —
+        boundaries are where an off-by-one lives. Assumes the default cap of 150."""
+        assert length_bucket( words )[ "emoji" ] == expected
+
+    def test_repetition_is_display_only_and_never_moves_the_weight( self ):
+        """Gate (a): the faces are DISPLAY ONLY. An 800-word body still stores weight -2,
+        and no word count pushes the weight outside the [-2, 2] contract combine_overall
+        and the audit rely on."""
+        assert length_bucket( 800 )[ "weight" ]  == -2
+        assert length_bucket( 5000 )[ "weight" ] == -2
+        for words in ( 0, 60, 90, 150, 250, 300, 800, 5000 ):
+            assert -2 <= length_bucket( words )[ "weight" ] <= 2
 
     def test_detail_names_the_word_count_and_target( self ):
         assert length_bucket( 187 )[ "detail" ] == "187 words, target ~60"

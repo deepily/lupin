@@ -387,7 +387,9 @@ def _persist_dm_row( *, body_text, from_persona, from_session, from_project,
           identified after the fact instead of inferred from a timezone.
         - AUDITABLE: every row carries `origin` — "live" for a real send, "test" for a
           write made from within pytest (to a redirected sink) — so a reader filters on
-          the field instead of guessing from where the process happened to run.
+          the field instead of guessing from where the process happened to run. It also
+          carries `arm` (row f4bb1cdb), the config-derived feedback experiment arm in
+          force ("signal_only" today), so the two-arm study is split by reading the row.
         - FAIL-SOFT: the whole body is wrapped in try/except and NEVER raises into
           the send path. dm_send is the fleet's comms bus; a corpus-write failure
           must not take a DM down (and by call-site placement the DM is already
@@ -406,6 +408,7 @@ def _persist_dm_row( *, body_text, from_persona, from_session, from_project,
         row = {
             "ts"           : datetime.now().isoformat( timespec="seconds" ),
             "origin"       : "test" if under_pytest else "live",
+            "arm"          : get_dm_feedback_arm(),
             "from"         : from_persona,
             "from_session" : from_session,
             "from_project" : from_project,
@@ -480,6 +483,26 @@ def get_dm_quality_judgment_enabled():
         return config_mgr.get( "dm quality judgment enabled", default=False, return_type="boolean" )
     except Exception:
         return False
+
+
+def get_dm_feedback_arm():
+    """The DM feedback EXPERIMENT ARM in force, derived from config (row f4bb1cdb).
+
+    Rick 2026-08-02: `dm reject on overage` False OR ABSENT → "signal_only" (arm A, the
+    current feedback-only world); True → "reject_on_overage" (arm B). A MISSING key is a
+    VALID arm-A state, never an error — so a config-read failure resolves to arm A too,
+    NOT fail-closed. Nothing ACTS on True yet: no reject path exists. The value only
+    LABELS each corpus row so arm A stays separable from a future arm B by READING the
+    row, instead of inferring the condition from when the row was written (the same
+    timestamp-inference mistake the `origin` stamp already retired).
+    """
+    from cosa.config.configuration_manager import ConfigurationManager
+    try:
+        reject = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ).get(
+            "dm reject on overage", default=False, return_type="boolean" )
+    except Exception:
+        reject = False
+    return "reject_on_overage" if reject else "signal_only"
 
 
 def reset_dm_quality_audit():
