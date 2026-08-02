@@ -593,5 +593,40 @@ class ResolveAckTimingTests( unittest.TestCase ):
         )
 
 
+class SettleDeadlinePinTests( unittest.TestCase ):
+    """
+    Pins the LIVE INI `managed bounce all-clear settle deadline seconds` at or
+    above the measured reconnect window, so a later "tidy up" back to 15 goes
+    RED naming the two boots that set the floor.
+
+    Evidence (Tiffany, 2026-08-02, roster-coverage gate live @ commit d96f59ce,
+    measured from the lupin-rest-dev container log): two independent live
+    bounces returned all 9 listeners in one synchronized burst —
+      boot #4  gate fires 01:17:08.404  ->  all 9 reconnect 01:17:11.506  = +18.6s from gate start
+      boot #5  gate fires 01:21:14.801  ->  all 9 reconnect 01:21:19.813  = +20.4s from gate start
+    The retired 15s deadline missed BOTH; the deadline must cover the larger
+    sample. This is a small sample (n=2, spread 1.8s) — the pin is the observed
+    max, not a claim of exhaustive measurement.
+    """
+
+    OBSERVED_RECONNECT_WINDOW_SECONDS = 20.4  # boot #5, the larger of the two live samples
+
+    def test_settle_deadline_covers_the_measured_reconnect_window( self ):
+        from cosa.config.configuration_manager import ConfigurationManager
+        config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+        deadline   = config_mgr.get(
+            "managed bounce all-clear settle deadline seconds", default=15, return_type="float"
+        )
+        self.assertGreaterEqual(
+            deadline, self.OBSERVED_RECONNECT_WINDOW_SECONDS,
+            f"managed-bounce settle deadline {deadline}s < observed "
+            f"{self.OBSERVED_RECONNECT_WINDOW_SECONDS}s reconnect window. Two live bounces on "
+            f"2026-08-02 (boots #4 and #5, roster-coverage gate @ d96f59ce) returned all 9 "
+            f"listeners at +18.6s and +20.4s after gate start; anything under 20.4s misses the "
+            f"burst and names every session an accepted loss (re-fire is barred). Do NOT tidy "
+            f"this back to 15."
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
