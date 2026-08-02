@@ -467,27 +467,26 @@ def _managed_bounce_all_clear_blocking( boot_id, boot_started, startup_began ):
     async wrapper hands it to a thread so it never touches the event loop.
     """
     from lupin_cli.claude_code.hooks.lib.session_bridge import find_active_voice_persona_sessions
-    from cosa.rest.managed_bounce_broadcast import wait_for_reconnection_plateau, build_bounce_message, missed_sessions
+    from cosa.rest.managed_bounce_broadcast import wait_for_roster_coverage, build_bounce_message
 
-    deadline     = config_mgr.get( "managed bounce all-clear settle deadline seconds",      default=15,  return_type="float" )
-    interval     = config_mgr.get( "managed bounce all-clear settle poll interval seconds", default=0.5, return_type="float" )
-    minimum      = config_mgr.get( "managed bounce all-clear settle minimum recipients",    default=1,   return_type="int" )
-    stable_polls = config_mgr.get( "managed bounce all-clear settle stable polls",          default=2,   return_type="int" )
+    deadline = config_mgr.get( "managed bounce all-clear settle deadline seconds",      default=15,  return_type="float" )
+    interval = config_mgr.get( "managed bounce all-clear settle poll interval seconds", default=0.5, return_type="float" )
 
-    # Count LIVE WebSocket sockets (get_connection_count = len(active_connections)),
-    # NOT bridge files. Fix for the 2026-08-01 zero-ack bug (found by Rachel,
-    # verified by Tiffany): the old proxy counted bridge FILES on an 8h mtime
-    # window, and bridge files SURVIVE a bounce — so every session read "present"
-    # at 0.0s, the gate opened instantly, and the fanout raced ahead of sockets
-    # that had not reconnected (all-clears 0 acks vs warnings 7, same sessions).
-    # active_connections is re-instantiated EMPTY on a bounce and refills only as
-    # real sockets reconnect. This is the SOLE delivery path — there is no durable
-    # backstop (a straggler past the deadline gets NOTHING), so the gate waits for
-    # reconnections to PLATEAU (stable_polls consecutive equal reads) before firing.
-    gate = wait_for_reconnection_plateau(
-        count_fn              = websocket_manager.get_connection_count,
-        minimum               = minimum,
-        stable_polls          = stable_polls,
+    # Hold until live sockets COVER the roster of sessions we expect back. The two
+    # inputs are deliberately different sources and neither can do the other's job:
+    #   · roster  = bridge files. They SURVIVE a bounce, which is why they answer
+    #               "who was here before it" and CANNOT answer "who is back now".
+    #   · present = websocket_manager.active_connections, re-instantiated EMPTY on
+    #               a bounce and refilled only by a real reconnect.
+    # Two earlier predicates failed by being FLOORS instead of completion tests —
+    # v1 counted bridge files (always true → fired at 0.0s, 0 acks), v2 waited for
+    # a plateau of live sockets and fired at 1 of 4 on a staggered reconnect
+    # (bug 784d4a2e, boot #2: curve 0→1→1, fired at 1.0s, zero acks). Coverage is
+    # a completion test: a subset never satisfies it, at any fleet size.
+    # This is the SOLE delivery path — a straggler past the deadline gets NOTHING.
+    gate = wait_for_roster_coverage(
+        roster_fn             = lambda: [ sid for ( _path, sid, _persona ) in find_active_voice_persona_sessions() ],
+        present_fn            = lambda: list( websocket_manager.active_connections.keys() ),
         deadline_seconds      = deadline,
         poll_interval_seconds = interval,
         now_fn                = time.monotonic,
@@ -514,13 +513,29 @@ def _managed_bounce_all_clear_blocking( boot_id, boot_started, startup_began ):
     # log line read "reconnect plateau after 1.0s ... reached 4 recipient(s)" and was
     # indistinguishable from success. An accepted loss that stops being visible is
     # just a loss.
-    roster  = [ sid for ( _path, sid, _persona ) in find_active_voice_persona_sessions() ]
-    present = list( websocket_manager.active_connections.keys() )
-    missed  = missed_sessions( roster, present )
-    loss    = (
+    # Taken from the GATE's own firing observation, not re-read here. A second read
+    # after the fanout would see late arrivals and report a SMALLER loss than the
+    # one the gate actually decided on — an under-count in the direction that
+    # flatters us.
+    missed = gate[ "missing" ]
+    loss   = (
         f" {len( missed )} session(s) had NOT rejoined and got NO all-clear "
         f"(accepted loss, no re-fire): {missed}."
-        if missed else " every session on the roster had a live socket."
+        if missed
+        else (
+            f" all {gate[ 'roster_size' ]} session(s) on the roster had a live socket."
+            if gate[ "roster_size" ]
+            # ⚠️ An EMPTY roster is AMBIGUOUS and the gate cannot resolve it:
+            # find_active_sessions returns [] both when nobody is expected back AND
+            # when the bridge directory is missing or unreadable. Coverage is then
+            # satisfied vacuously and this fires into nobody. Say that plainly rather
+            # than reporting the flattering reading as fact (Arnold 🪨, attack #2).
+            else (
+                " ⚠️ the roster was EMPTY — either nobody was expected back, or the bridge "
+                "directory could not be read. This fire reached nobody and the gate cannot "
+                "tell those two apart."
+            )
+        )
     )
 
     # Fire-time receipt + reconnect curve — the instruments that tell us later
@@ -533,10 +548,8 @@ def _managed_bounce_all_clear_blocking( boot_id, boot_started, startup_began ):
             file=sys.stderr,
         )
     else:
-        # A plateau fire is NOT self-evidently a success — say so when it missed people.
-        flag = "" if not missed else "⚠️ "
         print(
-            f"[managed-bounce] {flag}all-clear FIRED (boot #{boot_id}): reconnect plateau after "
+            f"[managed-bounce] all-clear FIRED (boot #{boot_id}): roster COVERED after "
             f"{gate[ 'elapsed' ]:.1f}s; reconnect curve {curve}; reached {recipients} recipient(s)."
             f"{loss}",
             file=sys.stderr,

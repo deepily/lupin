@@ -335,41 +335,95 @@ def poll_acks_until_satisfied(
         sleep_fn( poll_interval_seconds )
 
 
+LISTENER_SID_PREFIX = "cc-listener-"
+
+# The two id spaces meet at the SHORT session id — the first 8 characters of a
+# Claude Code session id (`register_session.py`: `short_id = session_id[:8]`).
+_SHORT_ID_LEN = 8
+
+
+def socket_match_key( session_id : str ) -> str:
+    """
+    Reduce a roster id OR a live-socket key to the SHORT id the two spaces share.
+
+    🔴 THE TWO SIDES ARE NOT THE SAME STRINGS, and comparing them raw is a bug that
+    shipped and went unnoticed (found 2026-08-02):
+        roster entry   "0768c103-eb8d-459f-8e0e-0380fba88792"   (full session id,
+                        from the bridge filename)
+        live-socket key "cc-listener-0768c103"                  (the listener
+                        connects to /ws/queue/cc-listener-{short_id})
+    A raw `set(roster) - set(present)` therefore NEVER matches anything: every
+    roster entry reads as missing, on every bounce, no matter who actually came
+    back. That made the named-loss line a CONSTANT dressed as a measurement — it
+    printed the whole roster every time — and it would have made the roster
+    coverage gate unsatisfiable by construction, i.e. a fixed wait to the deadline.
+
+    Both sides reduce to `session_id[:8]`, which is the id the listener is spawned
+    with and the id the bridge filename starts with.
+
+    ⚠️ Browser sessions ("foolish goat") also pass through here and simply fail to
+    match any roster id, which is correct — they are not sessions we are waiting
+    for. A browser id whose first 8 characters happened to equal a real short id
+    would be a false match; short ids are hex, so this is not reachable in practice.
+
+    ⚠️ TWO SESSIONS SHARING THEIR FIRST 8 CHARACTERS WOULD COLLIDE, and one real
+    straggler would be marked covered (Arnold 🪨, review 2026-08-02). Eight is a
+    CEILING here, not a choice: the socket side literally carries no more than that
+    — the listener is spawned with `session_id[:8]` and connects as
+    `cc-listener-{short_id}`, so the extra characters do not exist to compare. The
+    collision therefore lives in how listeners are NAMED, upstream of this gate;
+    widening the match key cannot fix it and would only mask the mismatch again.
+
+    Requires:
+        - session_id is a string
+
+    Ensures:
+        - returns the leading short id, with the listener prefix removed first
+        - is idempotent: applying it to its own output returns the same value
+    """
+    sid = session_id[ len( LISTENER_SID_PREFIX ): ] if session_id.startswith( LISTENER_SID_PREFIX ) else session_id
+    return sid[ :_SHORT_ID_LEN ]
+
+
 def missed_sessions( expected_ids, present_ids ):
     """
     Sessions expected back (the roster) that have NO live socket — i.e. who never
     rejoined and therefore got no all-clear.
 
-    Named on deadline expiry so the delivery LOSS is legible, not a bare count
-    (Rio's requirement). The ROSTER is legitimately the bridge-file session list:
-    bridge files survive a bounce, so they answer "who do we expect back", which
-    is exactly what they cannot answer for "who is back NOW" (that is the live
-    socket set). Roster minus live = missed.
+    Named so the delivery LOSS is legible, not a bare count (Rio's requirement).
+    The ROSTER is legitimately the bridge-file session list: bridge files survive a
+    bounce, so they answer "who do we expect back", which is exactly what they
+    cannot answer for "who is back NOW" (that is the live socket set).
+
+    Matching is by `socket_match_key`, NOT by raw string equality — see that
+    function for why raw comparison silently names everyone.
 
     Requires:
         - expected_ids, present_ids are iterables of session-id strings
 
     Ensures:
-        - returns a sorted, de-duplicated list of ids in expected but not present
+        - returns a sorted, de-duplicated list of the FULL expected ids that have
+          no matching live socket (full ids, because the point is to NAME them)
     """
-    return sorted( set( expected_ids ) - set( present_ids ) )
+    live = { socket_match_key( p ) for p in present_ids }
+    return sorted( { e for e in expected_ids if socket_match_key( e ) not in live } )
 
 
 # ─── All-clear settle gate (R5 SOLE delivery path — no durable backstop) ─────
 
 
-def wait_for_reconnection_plateau(
+def wait_for_roster_coverage(
     *,
-    count_fn              : Callable[ [ ], int ],
-    minimum               : int,
-    stable_polls          : int,
+    roster_fn             : Callable[ [ ], List[ str ] ],
+    present_fn            : Callable[ [ ], List[ str ] ],
     deadline_seconds      : float,
     poll_interval_seconds : float,
     now_fn                : Callable[ [ ], float ],
     sleep_fn              : Callable[ [ float ], None ],
 ) -> Dict[ str, Any ]:
     """
-    Wait for reconnecting sockets to PLATEAU, then fire — else fire at the deadline.
+    Wait until live sockets COVER the expected roster, then fire — else fire at
+    the deadline.
 
     This is the SOLE delivery path for a live all-clear: there is no durable
     backstop. `perform_fanout` writes each `broadcasts` entry targeted at the
@@ -378,39 +432,80 @@ def wait_for_reconnection_plateau(
     do-not-implement on the durable-notify-path, 2026-07-28). So the fire must
     wait until the fleet is actually back.
 
-    `count_fn` MUST be a LIVE-socket count that empties on a bounce
-    (`websocket_manager.get_connection_count`), NOT a bridge-file count that
-    survives one: the bridge proxy read "present" at 0.0s and fired into sockets
-    that were not back — the 2026-08-01 zero-ack bug (all-clears 0 acks vs
-    warnings 7, same sessions).
+    🔴 WHY COVERAGE AND NOT A PLATEAU (bug 784d4a2e, Rick's ruling 2026-08-02).
+    Two predicates have now failed here, both because they were FLOORS rather
+    than completion tests:
+      · v1 counted bridge FILES, which survive a bounce → always true → fired at
+        0.0s into sockets that were not back (all-clears 0 acks vs warnings 7).
+      · v2 counted live sockets and waited for a PLATEAU (N equal reads at or
+        above a minimum). Measured on two real bounces, same code:
+            boot #1  curve 0(x17)→7→7   plateau @ 9.0s   8 recipients   3 acks
+            boot #2  curve 0→1→1        plateau @ 1.0s   4 recipients   0 acks
+        Boot #2 is the defect: ONE socket back, two equal reads at the floor of
+        1, and the gate called reconnection settled while three of four targets
+        had no socket. Two equal reads at ANY value above the floor are
+        indistinguishable from two at the true final value — `0→1→1` is not a
+        plateau of reconnection, it is the BEGINNING of one sampled between two
+        arrivals. Boot #1 passed on luck: its batch happened to land all at once.
+
+    The roster answers the question a count cannot: WHO do we expect back. Bridge
+    files survive a bounce, which is exactly why they are useless for "who is back
+    NOW" and correct for "who was here before it". Roster minus live sockets = who
+    we would miss if we fired this instant; the gate holds while that set is
+    non-empty.
+
+    ⚠️ THE ROSTER IS NOW THE LIMITING FACTOR, and this is a KNOWN cost that was
+    put to Rick before he ruled, not a surprise: it is the bridge-file list on an
+    8-hour mtime window, so it can name a session that is gone for good and will
+    never come back. That session holds the gate to the full deadline. Accepted
+    deliberately — riding the window and NAMING the loss beats firing at 1.0s and
+    calling it settled. If this proves too coarse in practice, the better roster
+    is the WARNING phase's ack list (exactly the sessions that were live and heard
+    us), which would have to be carried across the restart in a file; that is a
+    named follow-up, not something this function should guess at.
 
     Firing conditions:
-      · PLATEAU — count >= `minimum` AND the SAME count has been observed in
-        `stable_polls` consecutive polls (reconnections have stopped arriving). A
-        single observation is NOT a plateau; `stable_polls` equal reads in a row are.
+      · COVERAGE — every roster id has a live socket. A completion test: it cannot
+        be satisfied by a subset, at any fleet size.
       · DEADLINE — `deadline_seconds` elapsed first. Accepted delivery LOSS: fire
-        anyway so the fleet that IS back hears it; the caller names who was missed.
+        anyway so the fleet that IS back hears it, and return `missing` so the
+        caller names them.
 
-    Fully injectable (`count_fn`, `now_fn`, `sleep_fn`) → 100% testable with no
-    real clock and no real sockets.
+    Fully injectable (`roster_fn`, `present_fn`, `now_fn`, `sleep_fn`) → 100%
+    testable with no real clock and no real sockets.
+
+    Requires:
+        - roster_fn returns an iterable of expected session-id strings
+        - present_fn returns an iterable of live session-id strings in the SAME
+          id space as the roster (both are voice-persona session ids)
 
     Ensures:
-        - returns {reason, count, elapsed, curve}; `reason` is "plateau" or "deadline"
-        - `curve` is the per-poll count series (the reconnect curve) for the log
-        - polls at least once; a plateau at a count below `minimum` never fires
-          early (it rides to the deadline), so a still-empty fleet is not mistaken
-          for a settled one
+        - returns {reason, count, missing, roster_size, elapsed, curve};
+          `reason` is "coverage" or "deadline"
+        - `missing` is the roster-minus-live set AT THE FIRING OBSERVATION, so the
+          loss the caller reports is the one the gate actually decided on — not a
+          second, later read that would under-count it
+        - `curve` is the per-poll live-socket count series for the log
+        - polls at least once; an EMPTY roster is covered vacuously and fires on
+          the first poll (nobody is expected, so nobody can be missed)
     """
     start = now_fn()
     curve : List[ int ] = [ ]
-    run   = 0                            # length of the current run of equal counts
     while True:
-        count = count_fn()
-        run   = run + 1 if ( curve and count == curve[ -1 ] ) else 1
-        curve.append( count )
+        roster  = list( roster_fn() )
+        present = list( present_fn() )
+        missing = missed_sessions( roster, present )
+        curve.append( len( present ) )
         elapsed = now_fn() - start
-        if count >= minimum and run >= stable_polls:
-            return { "reason": "plateau", "count": count, "elapsed": elapsed, "curve": curve }
+        result  = {
+            "count"       : len( present ),
+            "missing"     : missing,
+            "roster_size" : len( set( roster ) ),
+            "elapsed"     : elapsed,
+            "curve"       : curve,
+        }
+        if not missing:
+            return { "reason": "coverage", **result }
         if elapsed >= deadline_seconds:
-            return { "reason": "deadline", "count": count, "elapsed": elapsed, "curve": curve }
+            return { "reason": "deadline", **result }
         sleep_fn( poll_interval_seconds )

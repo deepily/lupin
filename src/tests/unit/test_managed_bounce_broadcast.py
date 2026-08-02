@@ -10,8 +10,9 @@ Covers the full pure/injectable surface to 100% (lines + branches):
   · emit_bounce_broadcast_in_process — happy, 429 loud log, >=400 log, no-status, exception
   · count_acked_sessions         — distinct-session dedupe, wrong id/status/type filters
   · poll_acks_until_satisfied    — immediate, zero-expected, after-polls, deadline expiry
-  · wait_for_reconnection_plateau — plateau after N equal reads, single-read does NOT fire
-                                    (the emitted!=heard guard), climb→deadline, plateau-at-zero
+  · wait_for_roster_coverage     — fires only when live sockets COVER the roster
+                                    (the emitted!=heard guard), partial-coverage rides to the
+                                    deadline, the boot-#2 replay, empty roster, gate-time missing
   · missed_sessions              — roster minus present, sorted + deduped
   · resolve_ack_timing           — reads both config keys, forwards defaults
 
@@ -34,8 +35,9 @@ from cosa.rest.managed_bounce_broadcast import (
     emit_bounce_broadcast_in_process,
     count_acked_sessions,
     poll_acks_until_satisfied,
-    wait_for_reconnection_plateau,
+    wait_for_roster_coverage,
     missed_sessions,
+    socket_match_key,
     resolve_ack_timing,
     FLEET_BROADCAST_USER_ID,
 )
@@ -295,6 +297,54 @@ class MissedSessionsTests( unittest.TestCase ):
     def test_dedupes_repeated_roster_ids( self ):
         self.assertEqual( missed_sessions( [ "a", "a", "b" ], [ ] ), [ "a", "b" ] )
 
+    # ── the id-space regression (found 2026-08-02) ──────────────────────────
+
+    def test_full_roster_id_matches_its_cc_listener_socket_key( self ):
+        # 🔴 THE BUG. These two strings denote the SAME session, and raw set
+        # subtraction says they do not:
+        #   roster        "0768c103-eb8d-459f-8e0e-0380fba88792"   (bridge filename)
+        #   live socket   "cc-listener-0768c103"                   (/ws/queue/...)
+        # With raw comparison every roster entry reads as missing on every bounce,
+        # so the named-loss line printed the whole roster as if it had measured it,
+        # and roster-coverage could never be satisfied.
+        #
+        # PREDICTED FAILURE if the normalization is removed: this returns the full
+        # roster id instead of [], failing with
+        # "Lists differ: ['0768c103-eb8d-459f-8e0e-0380fba88792'] != []".
+        self.assertEqual(
+            missed_sessions(
+                [ "0768c103-eb8d-459f-8e0e-0380fba88792" ],
+                [ "cc-listener-0768c103" ],
+            ),
+            [ ],
+        )
+
+    def test_names_the_FULL_id_of_a_session_that_has_no_socket( self ):
+        # Matching is on the short id; the NAME reported is still the full id,
+        # because the whole point of the line is to identify who was lost.
+        self.assertEqual(
+            missed_sessions(
+                [ "0768c103-eb8d-459f-8e0e-0380fba88792", "a7cf035f-19f1-4531-9087-0ff01d638a4e" ],
+                [ "cc-listener-a7cf035f" ],
+            ),
+            [ "0768c103-eb8d-459f-8e0e-0380fba88792" ],
+        )
+
+    def test_browser_sessions_never_match_a_roster_entry( self ):
+        # active_connections also holds browser sockets ("foolish goat"). They are
+        # not sessions we wait for, and they must not accidentally satisfy anyone.
+        self.assertEqual(
+            missed_sessions( [ "0768c103-eb8d-459f-8e0e-0380fba88792" ], [ "foolish goat" ] ),
+            [ "0768c103-eb8d-459f-8e0e-0380fba88792" ],
+        )
+
+    def test_socket_match_key_strips_the_prefix_and_is_idempotent( self ):
+        self.assertEqual( socket_match_key( "cc-listener-0768c103" ), "0768c103" )
+        self.assertEqual( socket_match_key( "0768c103-eb8d-459f-8e0e-0380fba88792" ), "0768c103" )
+        # Idempotent: feeding a key back through must not shorten it further.
+        once = socket_match_key( "cc-listener-0768c103" )
+        self.assertEqual( socket_match_key( once ), once )
+
 
 # ─── count_acked_sessions ───────────────────────────────────────────────────
 
@@ -369,60 +419,157 @@ class PollAcksTests( unittest.TestCase ):
         self.assertEqual( res[ "expected" ], 3 )
 
 
-# ─── wait_for_reconnection_plateau (the emitted != heard guard) ─────────────
+# ─── wait_for_roster_coverage (the emitted != heard guard) ─────────────────
 
 
-class PlateauGateTests( unittest.TestCase ):
+class RosterCoverageGateTests( unittest.TestCase ):
+    """
+    The gate fires only when every session we EXPECT back has a live socket.
 
-    def test_plateau_fires_after_stable_polls_consecutive_equal_reads( self ):
-        # count climbs 3 → 7 → 7; with stable_polls=2 the second equal 7 is the plateau.
-        counts = iter( [ 3, 7, 7 ] )
-        sleep  = MagicMock()
-        res = wait_for_reconnection_plateau(
-            count_fn=lambda: next( counts ), minimum=1, stable_polls=2, deadline_seconds=10,
-            poll_interval_seconds=0.5, now_fn=_FakeClock( [ 0, 0, 0, 0 ] ), sleep_fn=sleep,
+    Two predecessors shipped here and both were floors rather than completion
+    tests (bug 784d4a2e): v1 counted bridge files (always true after a bounce),
+    v2 waited for the live-socket count to plateau at or above 1. These tests pin
+    the property a floor cannot have — a SUBSET never satisfies the gate.
+
+    ⚠️ EVERY fake clock below MUST be able to reach the deadline, including in the
+    tests that assert an early fire and never get near it. The gate's only two
+    exits are "covered" and "deadline expired"; a clock that repeats 0 forever
+    removes the second one, so a mis-implemented gate SPINS instead of failing.
+    Measured twice while building these: mutating the fire condition to a floor,
+    and then to set-equality, each hung a test until the runner was killed — the
+    mutations registered as timeouts rather than named assertions. An unreachable
+    deadline converts a legible red into a hang, which is a worse instrument even
+    though it is still technically "detected".
+    """
+
+    def test_fires_only_when_every_roster_session_has_a_socket( self ):
+        # Sockets arrive one at a time: none → a → a,b. Coverage completes on the
+        # third poll, not before.
+        presents = iter( [ [ ], [ "a" ], [ "a", "b" ] ] )
+        sleep    = MagicMock()
+        res = wait_for_roster_coverage(
+            roster_fn=lambda: [ "a", "b" ], present_fn=lambda: next( presents ),
+            deadline_seconds=10, poll_interval_seconds=0.5,
+            now_fn=_FakeClock( [ 0, 0, 0, 100 ] ), sleep_fn=sleep,
         )
-        self.assertEqual( res[ "reason" ], "plateau" )
-        self.assertEqual( res[ "count" ], 7 )
-        self.assertEqual( res[ "curve" ], [ 3, 7, 7 ] )
-        self.assertEqual( sleep.call_count, 2 )     # did NOT fire on the first 7
+        self.assertEqual( res[ "reason" ], "coverage" )
+        self.assertEqual( res[ "missing" ], [ ] )
+        self.assertEqual( res[ "curve" ], [ 0, 1, 2 ] )
+        self.assertEqual( res[ "roster_size" ], 2 )
+        self.assertEqual( sleep.call_count, 2 )     # did NOT fire while "b" was still out
 
-    def test_single_stable_read_does_NOT_fire_needs_two( self ):
-        # THE fires-on-a-single-plateau guard. count is 7 from the first poll; a naive
-        # gate fires immediately. With stable_polls=2 it must wait for a SECOND equal
-        # read before firing. PREDICTED FAILURE if stable_polls is mis-implemented as
-        # run>=1 (fires on a single read): the gate returns at the first poll, so
-        # `sleep.assert_called_once()` fails with "Expected 'mock' to be called once.
-        # Called 0 times." and res["curve"] would be [7] not [7, 7].
-        counts = iter( [ 7, 7 ] )
-        sleep  = MagicMock()
-        res = wait_for_reconnection_plateau(
-            count_fn=lambda: next( counts ), minimum=1, stable_polls=2, deadline_seconds=10,
-            poll_interval_seconds=0.5, now_fn=_FakeClock( [ 0, 0, 0 ] ), sleep_fn=sleep,
-        )
-        self.assertEqual( res[ "reason" ], "plateau" )
-        self.assertEqual( res[ "curve" ], [ 7, 7 ] )
-        sleep.assert_called_once()                  # exactly one wait: the first 7 did NOT fire
-
-    def test_never_stabilizes_rides_to_deadline( self ):
-        # A strictly-climbing count never plateaus → deadline fire, curve preserved.
-        counts = iter( [ 1, 2, 3 ] )
-        res = wait_for_reconnection_plateau(
-            count_fn=lambda: next( counts ), minimum=1, stable_polls=2, deadline_seconds=10,
-            poll_interval_seconds=1, now_fn=_FakeClock( [ 0, 0, 1, 100 ] ), sleep_fn=MagicMock(),
+    def test_boot_2_replay_a_plateau_of_one_does_NOT_fire( self ):
+        # 🔴 THE REGRESSION. This is boot #2 of 2026-08-01 replayed: four sessions
+        # expected, ONE socket back, and the live count reads 0 → 1 → 1. The retired
+        # plateau predicate fired here at 1.0s — two equal reads at or above its floor
+        # of 1 — reaching 4 recipients of whom ZERO acked. Coverage must ride to the
+        # deadline instead and NAME the three it would have missed.
+        #
+        # PREDICTED FAILURE if a floor is ever reintroduced (e.g. firing on `count >=
+        # minimum` or on N equal reads): res["reason"] comes back "coverage" and the
+        # first assertion fails with "'coverage' != 'deadline'"; res["missing"] would
+        # be reported empty despite b, c and d having no socket.
+        presents = iter( [ [ ], [ "a" ], [ "a" ] ] )
+        res = wait_for_roster_coverage(
+            roster_fn=lambda: [ "a", "b", "c", "d" ], present_fn=lambda: next( presents ),
+            deadline_seconds=10, poll_interval_seconds=0.5,
+            now_fn=_FakeClock( [ 0, 0, 1, 100 ] ), sleep_fn=MagicMock(),
         )
         self.assertEqual( res[ "reason" ], "deadline" )
-        self.assertEqual( res[ "curve" ], [ 1, 2, 3 ] )
+        self.assertEqual( res[ "missing" ], [ "b", "c", "d" ] )
+        self.assertEqual( res[ "count" ], 1 )
+        self.assertEqual( res[ "curve" ], [ 0, 1, 1 ] )
 
-    def test_plateau_at_zero_below_minimum_rides_to_deadline( self ):
-        # A plateau at 0 is NOT a settled fleet — nobody came back. Mutation-proof:
-        # drop the `count >= minimum` guard and this flips to reason "plateau".
-        res = wait_for_reconnection_plateau(
-            count_fn=lambda: 0, minimum=1, stable_polls=2, deadline_seconds=10,
-            poll_interval_seconds=1, now_fn=_FakeClock( [ 0, 0, 100 ] ), sleep_fn=MagicMock(),
+    def test_nobody_comes_back_rides_to_deadline_and_names_everyone( self ):
+        # The empty-fleet case: no socket ever reconnects. Fire anyway (the accepted
+        # loss — there is no re-fire), with every expected session named.
+        res = wait_for_roster_coverage(
+            roster_fn=lambda: [ "z", "y" ], present_fn=lambda: [ ],
+            deadline_seconds=10, poll_interval_seconds=1,
+            now_fn=_FakeClock( [ 0, 0, 100 ] ), sleep_fn=MagicMock(),
         )
         self.assertEqual( res[ "reason" ], "deadline" )
+        self.assertEqual( res[ "missing" ], [ "y", "z" ] )     # sorted, per missed_sessions
         self.assertEqual( res[ "count" ], 0 )
+
+    def test_empty_roster_is_covered_vacuously_and_fires_on_the_first_poll( self ):
+        # Nobody is expected back, so nobody can be missed. Fires immediately rather
+        # than burning the full deadline on an empty fleet. roster_size 0 is what lets
+        # the caller say "reached nobody BY DESIGN" instead of implying success.
+        #
+        # ⚠️ THE CLOCK MUST BE ABLE TO EXPIRE, even though this test asserts a fire on
+        # the FIRST poll and never reaches it. A clock stuck at 0 makes a mis-implemented
+        # gate spin forever instead of failing — measured: mutating the fire condition to
+        # a floor (`len(present) >= 1`) hung this test until the runner was killed, so
+        # the mutation registered as a 2-minute timeout rather than a named assertion.
+        # An unreachable deadline turns a legible red into a hang.
+        sleep = MagicMock()
+        res = wait_for_roster_coverage(
+            roster_fn=lambda: [ ], present_fn=lambda: [ ],
+            deadline_seconds=10, poll_interval_seconds=1,
+            now_fn=_FakeClock( [ 0, 0, 100 ] ), sleep_fn=sleep,
+        )
+        self.assertEqual( res[ "reason" ], "coverage" )
+        self.assertEqual( res[ "roster_size" ], 0 )
+        self.assertEqual( res[ "curve" ], [ 0 ] )
+        sleep.assert_not_called()
+
+    def test_sockets_beyond_the_roster_do_not_block_coverage( self ):
+        # active_connections also holds browser clients that were never on the
+        # bridge-file roster. Coverage is roster ⊆ live, NOT equality — a superset
+        # must still fire. Mutation-proof: implement the check as `set(present) ==
+        # set(roster)` and this rides to the deadline instead.
+        res = wait_for_roster_coverage(
+            roster_fn=lambda: [ "a" ], present_fn=lambda: [ "a", "some-browser-tab" ],
+            deadline_seconds=10, poll_interval_seconds=1,
+            now_fn=_FakeClock( [ 0, 0, 100 ] ), sleep_fn=MagicMock(),
+        )
+        self.assertEqual( res[ "reason" ], "coverage" )
+        self.assertEqual( res[ "count" ], 2 )
+
+    def test_real_world_id_shapes_can_actually_reach_coverage( self ):
+        # 🔴 THE TEST THAT WOULD HAVE CAUGHT THE ID-SPACE BUG, and the reason the
+        # other tests in this class are weaker than they look: with "a"/"b" on both
+        # sides, raw string comparison passes and the gate appears correct. Only the
+        # REAL shapes — a full session id on the roster, a "cc-listener-{short}" key
+        # on the socket side — expose that the two sides never match. 51 green tests
+        # and 100% module coverage vouched for the pure function while the wiring was
+        # blind (Arnold 🪨, review 2026-08-02, attack #4).
+        #
+        # PREDICTED FAILURE without socket_match_key: coverage is unreachable, so
+        # this rides to the deadline and fails "'deadline' != 'coverage'", with
+        # res["missing"] holding both full ids despite both sockets being live.
+        presents = iter( [
+            [ ],
+            [ "cc-listener-0768c103" ],
+            [ "cc-listener-0768c103", "cc-listener-a7cf035f", "foolish goat" ],
+        ] )
+        res = wait_for_roster_coverage(
+            roster_fn=lambda: [
+                "0768c103-eb8d-459f-8e0e-0380fba88792",
+                "a7cf035f-19f1-4531-9087-0ff01d638a4e",
+            ],
+            present_fn=lambda: next( presents ),
+            deadline_seconds=10, poll_interval_seconds=0.5,
+            now_fn=_FakeClock( [ 0, 0, 0, 100 ] ), sleep_fn=MagicMock(),
+        )
+        self.assertEqual( res[ "reason" ], "coverage" )
+        self.assertEqual( res[ "missing" ], [ ] )
+
+    def test_missing_is_the_firing_observation_not_a_later_read( self ):
+        # The loss the caller logs must be the one the gate DECIDED on. If `missing`
+        # were re-read after the fire, a session arriving in that gap would shrink the
+        # reported loss — an under-count in the direction that flatters us. Here the
+        # roster shrinks on the poll AFTER the deadline fire; the result must still
+        # name what was missing when it fired.
+        rosters = iter( [ [ "a", "b" ], [ "a", "b" ], [ "a" ] ] )
+        res = wait_for_roster_coverage(
+            roster_fn=lambda: next( rosters ), present_fn=lambda: [ "a" ],
+            deadline_seconds=10, poll_interval_seconds=1,
+            now_fn=_FakeClock( [ 0, 0, 100 ] ), sleep_fn=MagicMock(),
+        )
+        self.assertEqual( res[ "reason" ], "deadline" )
+        self.assertEqual( res[ "missing" ], [ "b" ] )
 
 
 class ResolveAckTimingTests( unittest.TestCase ):
