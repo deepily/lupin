@@ -309,12 +309,17 @@ class TestCombinationMath:
         assert combine_overall(  2,  2,  2, "5 words, target ~60" )[ "weight" ] ==  2
         assert combine_overall( -2, -2, -2, "5 words, target ~60" )[ "weight" ] == -2
 
-    def test_note_is_python_templated_naming_the_drag( self ):
+    def test_note_names_the_lower_side_without_asserting_harm( self ):
+        # Row 700a6330: the note states a RELATIVE ordering, so it must NOT be worded as
+        # absolute harm ("dragged it down" fired on top-scoring DMs). It names which side
+        # scored lower; the sub-scores carry any real harm signal.
         low_length = combine_overall( -2, 2, 2, "300 words, target ~60" )
-        assert "Length pulled this down" in low_length[ "note" ]
+        assert "Length scored below directness/tone" in low_length[ "note" ]
         assert "300 words" in low_length[ "note" ]
+        assert "pulled this down" not in low_length[ "note" ]
         low_qual = combine_overall( 2, -2, -2, "10 words, target ~60" )
-        assert "directness/tone dragged it down" in low_qual[ "note" ]
+        assert "Directness/tone scored below length" in low_qual[ "note" ]
+        assert "dragged it down" not in low_qual[ "note" ]
         balanced = combine_overall( 1, 1, 1, "70 words, target ~60" )
         assert "Balanced" in balanced[ "note" ]
 

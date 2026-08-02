@@ -392,7 +392,8 @@ def combine_overall( length_weight, directness_weight, tone_weight, length_detai
         overall_weight     = clamp to [-2, 2], then bucket to its emoji
 
     `note` is PYTHON-TEMPLATED (never an LLM field — the overall grade is computed
-    here, so its note is too): it names which category dragged the score.
+    here, so its note is too): it names which category scored lower as a plain
+    ordering, WITHOUT asserting that anything caused harm.
 
     Requires:
         - the three weights are ints in [-2, 2]
@@ -428,10 +429,17 @@ def combine_overall( length_weight, directness_weight, tone_weight, length_detai
     raw                = 0.5 * length_weight + 0.5 * qualitative_weight
     overall_weight     = max( -2, min( 2, round_half_up( raw ) ) )
 
+    # NEUTRAL ORDERING, NOT HARM (row 700a6330, 2026-08-02). These branches compare
+    # length against qualitative — a RELATIVE ordering — so they must NOT be worded as
+    # absolute harm. "dragged it down" / "pulled this down" fired on top-scoring DMs
+    # (every sub-score positive, Overall +2) because qualitative merely being lower than
+    # length is enough to take the branch. The note is the only prose in the payload —
+    # the whole teaching surface — so it misfired hardest on writers already complying.
+    # State which side scored lower; let the sub-scores carry any actual harm signal.
     if length_weight < qualitative_weight:
-        note = f"Length pulled this down ({length_detail}); directness/tone were stronger."
+        note = f"Length scored below directness/tone ({length_detail})."
     elif qualitative_weight < length_weight:
-        note = f"Length was fine ({length_detail}); directness/tone dragged it down."
+        note = f"Directness/tone scored below length ({length_detail})."
     else:
         note = f"Balanced — length and directness/tone agreed ({length_detail})."
 
