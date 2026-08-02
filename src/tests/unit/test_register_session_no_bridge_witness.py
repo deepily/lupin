@@ -41,6 +41,19 @@ from pathlib import Path
 import pytest
 
 
+# ── SERIAL BRIDGE GUARD (bug 2508b1ce) ──────────────────────────────────────────────
+# EVERY test here runs under the autouse `isolate_home_and_detect_real_dir_contact`
+# fixture below, which fingerprints the operator's REAL ~/.claude/sessions directory
+# before and after the test and asserts it is byte-identical. A LIVE peer session writing
+# its own bridge during the test window moves that fingerprint through no fault of this
+# test — a false accusation, which is exactly what bug 2508b1ce surfaced. So the WHOLE
+# module carries the marker (not a per-test decorator like the siblings, because here the
+# autouse fixture makes every test do the contact check) and is deselected from the
+# default parallel run via pytest.ini addopts `-m "not serial_bridge_guard"`. It runs
+# only under src/scripts/run-serial-bridge-guard, where nothing else touches the dir.
+pytestmark = pytest.mark.serial_bridge_guard
+
+
 HOOK_MODULE = "lupin_cli.claude_code.hooks.register_session"
 
 # Captured AT IMPORT, before any fixture rewrites $HOME — this must name the
