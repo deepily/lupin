@@ -20,5 +20,11 @@ python3 scripts/seed_test_companions.py
 # inside this container and need LUPIN_TEST_INTERACTIVE_MOCK_JOBS_* vars)
 [ -f /home/rruiz/.lupin/test-env.sh ] && source /home/rruiz/.lupin/test-env.sh
 
-# Start FastAPI (LUPIN_ENV=testing set by docker-compose env block)
-python3 -m lupin_app.main
+# Start FastAPI (LUPIN_ENV=testing set by docker-compose env block).
+# `exec` so uvicorn REPLACES this bash wrapper and becomes PID 1 (compose command
+# is `/bin/bash run-fastapi-lupin-test.sh`). Without it, bash is PID 1 and on
+# `docker stop` uvicorn is never signalled — rides the grace, SIGKILLed (137), no
+# shutdown lines, lifespan shutdown never runs (bug AC6's twin, 2026-08-02). The
+# seed step above must finish first, so exec ONLY the server here.
+# ⚠️ UNVERIFIED: the LUPIN_RELOAD=1 reloader-subprocess path (reload is off here).
+exec python3 -m lupin_app.main
