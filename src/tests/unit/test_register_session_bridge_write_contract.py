@@ -29,14 +29,16 @@ propagating `TypeError` or `ValueError` would have escaped it anyway).
 Test 2 is the one that goes red if the contract breaks — verified by making the
 callee raise, which is the future regression this file exists to catch.
 
-⚠️ CONTACT DETECTOR. `main()` is driven for real here. `$HOME` and the bridge
-seam are both redirected, and the operator's real directory is content-hashed
-before and after — the whole directory, not `cc-*.json` (row `877794ed`: that
-glob covered 18 of 4,836 entries and reported "no contact" while
-`_spawn_listener` wrote beside the bridges).
+⚠️ CONTACT GUARD (two-tier, row e2ae4102). `main()` is driven for real here, with
+`$HOME` and the bridge seam both redirected. The old guard content-hashed the
+WHOLE real directory before and after EVERY test and blamed the test for any
+change — which FALSE-ACCUSES on a busy box, where a peer session's own bridge
+write during the run trips it. It is now split into a concurrent-safe SCOPED
+canary (watches only this file's probe ids) and a whole-directory SERIAL GATE
+(`@pytest.mark.serial_bridge_guard`, run only by `src/scripts/run-serial-bridge-
+guard.sh` on a quiescent box). Shared logic: `tests.bridge_dir_guard`.
 """
 
-import hashlib
 import io
 import json
 import os
@@ -46,46 +48,37 @@ from pathlib import Path
 import pytest
 
 from lupin_cli.claude_code.hooks.lib.session_bridge import atomic_write_json
+from tests.bridge_dir_guard import real_dir_fingerprint, dir_delta, contact_detail
 
 
 HOOK_MODULE = "lupin_cli.claude_code.hooks.register_session"
 
 REAL_SESSIONS_DIR = Path( os.path.expanduser( "~/.claude/sessions" ) )
 
-# Fleet-shared append-only logs — every live listener/idle-waiter writes them
-# continuously, so a change is not attributable to the observing test. Named,
-# not silently globbed around. See row 877794ed.
-_UNATTRIBUTABLE = frozenset( { "cc-listeners.log", "cc-idle-waiters.log" } )
-
-
-def _real_dir_fingerprint():
-    if not REAL_SESSIONS_DIR.is_dir():
-        return { }
-    out = { }
-    for p in sorted( REAL_SESSIONS_DIR.glob( "*" ) ):
-        if p.name in _UNATTRIBUTABLE:
-            continue
-        if p.is_dir():
-            out[ p.name ] = "<dir>"
-            continue
-        try:
-            out[ p.name ] = hashlib.sha256( p.read_bytes() ).hexdigest()
-        except OSError:
-            out[ p.name ] = "<unreadable>"
-    return out
+# Every session id this file drives through the real `main()` carries "probe";
+# a peer session never does, which is why the scoped canary cannot false-accuse.
+_TEST_DRIVEN_SESSION_IDS = frozenset( { "probe" } )
 
 
 @pytest.fixture( autouse=True )
-def detect_real_dir_contact():
-    before = _real_dir_fingerprint()
+def detect_scoped_real_dir_contact():
+    """
+    Concurrent-safe tier-1 canary — watches ONLY entries whose name embeds one of
+    this file's probe ids, so a peer's concurrent write cannot trip it (row
+    e2ae4102). A hardcoded-path regression that writes `cc-<probe-id>.json` into
+    the real directory is still caught immediately.
+
+    ⚠️ Cannot see a merge into a LIVE seat (real id, not a probe id) — that is the
+    whole-directory SERIAL GATE's job (`test_the_real_bridge_dir_is_untouched_
+    SERIAL_GATE`), which is why that gate is load-bearing.
+    """
+    before = real_dir_fingerprint( session_ids=_TEST_DRIVEN_SESSION_IDS )
     yield
-    after   = _real_dir_fingerprint()
-    created = sorted( set( after ) - set( before ) )
-    removed = sorted( set( before ) - set( after ) )
-    changed = sorted( n for n in ( set( before ) & set( after ) ) if before[ n ] != after[ n ] )
-    assert not ( created or removed or changed ), (
-        f"🔴 THIS TEST TOUCHED THE OPERATOR'S REAL BRIDGE DIRECTORY ({REAL_SESSIONS_DIR}).\n"
-        f"  created: {created}\n  removed: {removed}\n  CHANGED (merged into a live seat): {changed}"
+    after = real_dir_fingerprint( session_ids=_TEST_DRIVEN_SESSION_IDS )
+    detail = contact_detail( *dir_delta( before, after ) )
+    assert detail is None, (
+        f"🔴 A TEST DEPOSITED A PROBE-ID FILE IN THE OPERATOR'S REAL BRIDGE DIRECTORY "
+        f"({REAL_SESSIONS_DIR}) — the seam was not honored.\n  {detail}"
     )
 
 
@@ -358,3 +351,56 @@ class TestPhase2HasNoLocalHandler:
             "the locator did not report a deliberately planted `except OSError` — it is not "
             "looking where it claims, so its empty result on the real file proves nothing."
         )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 4. The whole-directory hazard guard — SERIAL GATE (row e2ae4102)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@pytest.mark.serial_bridge_guard
+def test_the_real_bridge_dir_is_untouched_SERIAL_GATE( monkeypatch, tmp_path ):
+    """
+    Whole-directory contact guard (row 8ccc20ab).
+
+    🔴 NOT RUN BY THE CONCURRENT UNIT SUITE. `pytest.ini` addopts carries
+    `-m "not serial_bridge_guard"`, so this is deselected everywhere by default.
+    It is invoked ONLY by `src/scripts/run-serial-bridge-guard.sh`, which the
+    operator runs on a QUIESCENT box at merge time per CLAUDE.md § PR MERGE
+    REQUIREMENTS. If that script or its checklist line is ever removed, this
+    whole-directory guard is silently gone — the scoped canary above cannot stand
+    in for it, because it does not see a merge into a live seat.
+
+    On a quiescent box any change to the real directory across this test IS
+    attributable, so the whole-directory fingerprint is valid. It drives the real
+    `main()` with `$HOME` and the seam redirected (a correctly-seamed hook writes
+    into tmp and this passes) and fails if a hardcoded-path regression reaches the
+    real directory instead.
+    """
+    before = real_dir_fingerprint()
+
+    home = tmp_path / "home"
+    seam = tmp_path / "seam"
+    ( home / ".claude" / "sessions" ).mkdir( parents=True )
+    seam.mkdir()
+    monkeypatch.setenv( "HOME", str( home ) )
+    monkeypatch.setenv( "LUPIN_HOOK_SESSIONS_DIR", str( seam ) )
+
+    import importlib
+    module = importlib.import_module( HOOK_MODULE )
+    monkeypatch.setattr( module, "read_hook_input",
+                         lambda: { "session_id": "write-probe-serial", "cwd": "/tmp",
+                                   "transcript_path": "/x" } )
+    monkeypatch.setattr( module, "emit_json", lambda *a, **k: None )
+    with redirect_stderr( io.StringIO() ):
+        try:
+            module.main()
+        except SystemExit:
+            pass
+        except Exception:                                         # noqa: BLE001
+            pass
+
+    after = real_dir_fingerprint()
+    detail = contact_detail( *dir_delta( before, after ) )
+    assert detail is None, (
+        f"🔴 main() TOUCHED THE OPERATOR'S REAL BRIDGE DIRECTORY ({REAL_SESSIONS_DIR}) — row 8ccc20ab.\n  {detail}"
+    )

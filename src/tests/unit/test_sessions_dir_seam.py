@@ -27,15 +27,20 @@ row could have predicted it — it had to be measured against the live environme
 These tests pin BOTH halves: the seam works, AND it does not take precedence over
 `$HOME`.
 
-⚠️ THE CONTACT DETECTOR HERE WATCHES THE WHOLE DIRECTORY, not `cc-*.json`.
-The sibling detector in `test_register_session_no_bridge_witness.py` globs
-`cc-*.json` — 18 of the 4,836 entries in the real directory when this was written.
-It reported "no contact" while `_spawn_listener` was depositing
-`cc-listener-abc-123.spawn-lock` and `.stderr` beside the bridges, because those
-are not `.json`. A receipt narrower than its claim reads true anyway.
+⚠️ THE CONTACT GUARD IS TWO-TIER (row e2ae4102). It used to fingerprint the WHOLE
+real directory before and after EVERY test and blame the test for any change —
+which FALSE-ACCUSES on a busy fleet box, where a peer session writes its own
+bridge mid-run and the guard points at whichever test was holding the suite. The
+guard detected CONTACT and reported it as AUTHORSHIP. It is now split:
+  · a SCOPED canary (concurrent, below) watches only entries bearing this file's
+    own synthetic probe ids — a peer cannot trip it, a hardcoded-path regression
+    still does; and
+  · a whole-directory SERIAL GATE (`@pytest.mark.serial_bridge_guard`, below) run
+    only on a quiescent box by `src/scripts/run-serial-bridge-guard.sh`.
+Shared logic lives in `tests.bridge_dir_guard`, unit-tested in
+`test_bridge_dir_guard.py`.
 """
 
-import hashlib
 import io
 import json
 import os
@@ -47,6 +52,7 @@ from pathlib import Path
 import pytest
 
 from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
+from tests.bridge_dir_guard import real_dir_fingerprint, dir_delta, contact_detail
 
 
 SEAM_VAR = "LUPIN_HOOK_SESSIONS_DIR"
@@ -63,71 +69,89 @@ SEAM_MODULE = REPO_ROOT / "src" / "lupin_cli" / "claude_code" / "hooks" / "lib" 
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Contact detector — whole-directory, content-hashed
+# Contact guard — tier 1: SCOPED canary (concurrent-safe), tier 2: SERIAL gate
 # ══════════════════════════════════════════════════════════════════════════════
 
-# ⚠️ NAMED BLIND SPOT — these two are FLEET-SHARED append-only logs that every
-# live listener and idle-waiter writes to continuously. A change to them during a
-# test is NOT attributable to that test, so watching them makes the detector fire
-# on other people's work: measured 2026-07-27, `cc-listeners.log` changed under a
-# test that only wrote and deleted a .py file.
-#
-# They are excluded so the detector reports contact, not concurrency — and named
-# HERE rather than dropped silently, because a receipt narrower than its claim
-# reads true anyway. Everything else in the directory IS watched, including the
-# per-session `cc-listener-*.spawn-lock` / `.stderr` artefacts the `cc-*.json`
-# glob missed.
-_UNATTRIBUTABLE = frozenset( { "cc-listeners.log", "cc-idle-waiters.log" } )
-
-
-def _real_dir_fingerprint():
-    """
-    Content fingerprint of every attributable entry in the real bridge directory.
-
-    Hashes CONTENT, not names or a count: bug `2508b1ce` turned on exactly that
-    distinction — a merge into a live seat's bridge leaves the file count
-    unchanged, so a count-based check clears while identity is being rewritten.
-    Size alone is likewise insufficient; a merge can swap one id for another of
-    equal length.
-
-    Globs `*`, not `cc-*.json`, because the narrower glob is how
-    `cc-listener-*.spawn-lock` / `.stderr` writes went unseen — minus the
-    fleet-shared logs named in `_UNATTRIBUTABLE` above.
-    """
-    if not REAL_SESSIONS_DIR.is_dir():
-        return { }
-    out = { }
-    for p in sorted( REAL_SESSIONS_DIR.glob( "*" ) ):
-        if p.name in _UNATTRIBUTABLE:
-            continue
-        if p.is_dir():
-            out[ p.name ] = "<dir>"
-            continue
-        try:
-            out[ p.name ] = hashlib.sha256( p.read_bytes() ).hexdigest()
-        except OSError:
-            out[ p.name ] = "<unreadable>"
-    return out
+# Every session id this file drives through the real `main()`. All contain
+# "seam-probe", so the substring below matches each. A peer session never carries
+# a probe id, which is precisely why the scoped canary cannot false-accuse.
+_TEST_DRIVEN_SESSION_IDS = frozenset( { "seam-probe" } )
 
 
 @pytest.fixture( autouse=True )
-def detect_real_dir_contact():
+def detect_scoped_real_dir_contact():
     """
-    Every test in this file must leave the operator's real bridge directory
-    byte-identical. This asserts the claim that matters — the real dir was NOT
-    TOUCHED — rather than the weaker "we used tmp", which a tmp_path-shaped
-    assertion is all that can be made.
-    """
-    before = _real_dir_fingerprint()
-    yield
-    after   = _real_dir_fingerprint()
-    created = sorted( set( after ) - set( before ) )
-    removed = sorted( set( before ) - set( after ) )
-    changed = sorted( n for n in ( set( before ) & set( after ) ) if before[ n ] != after[ n ] )
+    Concurrent-safe tier-1 canary. Watches ONLY entries in the operator's real
+    bridge directory whose name embeds one of this file's synthetic probe ids
+    (`_TEST_DRIVEN_SESSION_IDS`), so a peer's concurrent write cannot trip it —
+    that is the false accusation row e2ae4102 was filed for.
 
-    assert not ( created or removed or changed ), (
-        f"🔴 THIS TEST TOUCHED THE OPERATOR'S REAL BRIDGE DIRECTORY ({REAL_SESSIONS_DIR}) — row 8ccc20ab.\n"
-        f"  created: {created}\n  removed: {removed}\n  CHANGED (merged into a live seat): {changed}\n"
+    It catches the common regression directly: code that hardcodes the real path
+    instead of honoring the seam would deposit `cc-<probe-id>.json` in the real
+    directory, and this fires on it immediately.
+
+    ⚠️ IT CANNOT catch a merge into a LIVE seat — that bears a real session id, not
+    a probe id, so it falls outside this scope BY DESIGN. That case is covered by
+    the whole-directory SERIAL GATE below (`test_the_real_bridge_dir_is_untouched_
+    SERIAL_GATE`), which is exactly why that gate is load-bearing and not a nicety.
+    """
+    before = real_dir_fingerprint( session_ids=_TEST_DRIVEN_SESSION_IDS )
+    yield
+    after = real_dir_fingerprint( session_ids=_TEST_DRIVEN_SESSION_IDS )
+    detail = contact_detail( *dir_delta( before, after ) )
+    assert detail is None, (
+        f"🔴 A TEST DEPOSITED A PROBE-ID FILE IN THE OPERATOR'S REAL BRIDGE DIRECTORY "
+        f"({REAL_SESSIONS_DIR}) — row 8ccc20ab. The seam was not honored.\n  {detail}"
+    )
+
+
+@pytest.mark.serial_bridge_guard
+def test_the_real_bridge_dir_is_untouched_SERIAL_GATE( monkeypatch, tmp_path ):
+    """
+    Tier-2 whole-directory hazard guard (row 8ccc20ab).
+
+    🔴 NOT RUN BY THE CONCURRENT UNIT SUITE. `pytest.ini` addopts carries
+    `-m "not serial_bridge_guard"`, so this is deselected everywhere by default.
+    It is invoked ONLY by `src/scripts/run-serial-bridge-guard.sh`, which the
+    operator runs on a QUIESCENT box at merge time per CLAUDE.md § PR MERGE
+    REQUIREMENTS. If that script or its checklist line is ever removed, this
+    whole-directory guard is silently gone — the scoped canary above cannot stand
+    in for it (it does not see a merge into a live seat).
+
+    On a quiescent box any change to the real directory across this test IS
+    attributable, so the whole-directory fingerprint is valid — the attribution
+    ambiguity that plagues it under a live fleet does not apply here. It drives the
+    real `main()` with `$HOME` and the seam redirected (so a correctly-seamed hook
+    writes into tmp and this passes), and fails if a hardcoded-path regression
+    reaches the real directory instead.
+    """
+    before = real_dir_fingerprint()
+
+    home = tmp_path / "home"
+    seam = tmp_path / "seam"
+    ( home / ".claude" / "sessions" ).mkdir( parents=True )
+    seam.mkdir()
+    monkeypatch.setenv( "HOME", str( home ) )
+    monkeypatch.setenv( SEAM_VAR, str( seam ) )
+
+    import importlib
+    module = importlib.import_module( "lupin_cli.claude_code.hooks.register_session" )
+    monkeypatch.setattr( module, "read_hook_input",
+                         lambda: { "session_id": "seam-probe-serial", "cwd": "/tmp",
+                                   "transcript_path": "/x" } )
+    monkeypatch.setattr( module, "emit_json", lambda *a, **k: None )
+    with redirect_stderr( io.StringIO() ):
+        try:
+            module.main()
+        except SystemExit:
+            pass
+        except Exception:                                         # noqa: BLE001
+            pass
+
+    after = real_dir_fingerprint()
+    detail = contact_detail( *dir_delta( before, after ) )
+    assert detail is None, (
+        f"🔴 main() TOUCHED THE OPERATOR'S REAL BRIDGE DIRECTORY ({REAL_SESSIONS_DIR}) — row 8ccc20ab.\n  {detail}\n"
         "A changed file is the dangerous case: it rewrites a RUNNING session's identity, "
         "leaves the file count unchanged, and can null that seat's voice_persona."
     )

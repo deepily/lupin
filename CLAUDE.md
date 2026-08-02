@@ -370,7 +370,9 @@ Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:
 
 ## PR MERGE REQUIREMENTS
 
-**All must pass before merging to main** (venues + commands per §TESTING above), run in this order: unit (:7999) → WebSocket smoke (:7999) → E2E UI + visual regression (:8000 scheduled) → **integration (:8000 scheduled — FINAL GATE)**. Each requires 100% pass. Wait for E2E to complete before launching the integration gate; PID-file guards block concurrent runs.
+**All must pass before merging to main** (venues + commands per §TESTING above), run in this order: unit (:7999) → **serial bridge guard (`src/scripts/run-serial-bridge-guard.sh`, on a quiescent box)** → WebSocket smoke (:7999) → E2E UI + visual regression (:8000 scheduled) → **integration (:8000 scheduled — FINAL GATE)**. Each requires 100% pass. Wait for E2E to complete before launching the integration gate; PID-file guards block concurrent runs.
+
+The **serial bridge guard** step is the tier-2 whole-directory contact check (row e2ae4102) that the concurrent unit run deselects (`-m "not serial_bridge_guard"`) because a live peer's bridge write would false-accuse it. Run it when you are the only session writing bridges; if it reports contact, a hook is resolving its directory from a hardcoded real path instead of the seam. Dropping this line silently removes the guard — the concurrent scoped canary does not see a merge into a live seat.
 
 Integration is the final gate because it exercises complete user workflows across API + DB + auth on a real server — catching regressions unit tests miss.
 
