@@ -762,9 +762,21 @@ class TestMaybeGradeDmQualityWiring:
         assert dm._maybe_grade_dm_quality( "body" ) is None
         assert dm.get_dm_quality_audit()[ "count" ] == 0
 
-    @patch( "cosa.agents.dm_quality_judge.judge.DmQualityJudge" )
+    # 🔴 PATCHED AT THE FACTORY, NOT AT A VERSION'S CLASS (fixed 2026-08-01, row 55a5baab).
+    # This used to patch `cosa.agents.dm_quality_judge.judge.DmQualityJudge` — the v1 class.
+    # `dm._maybe_grade_dm_quality` does not name a class; it calls `get_dm_quality_judge()`
+    # precisely so the call site never learns about a version. The moment
+    # `dm quality judge version` moved to 2, the patch stopped matching what the factory
+    # returned, and this "unit" test built a REAL judge and made LIVE MODEL CALLS — slow,
+    # network-dependent, and tallying into the audit counters it then asserted on.
+    #
+    # It went red rather than silently-wrong only by luck: the real judge returned real
+    # grades that did not equal the mock's dict. Had the assertion been looser (a key
+    # check, a count check), a live-calling unit test would have kept passing and nobody
+    # would have known. Patch the seam the code actually uses.
+    @patch( "cosa.agents.dm_quality_judge.get_dm_quality_judge" )
     @patch( "cosa.rest.routers.dm.get_dm_quality_judgment_enabled", return_value=True )
-    def test_toggle_on_builds_grades_and_records( self, _enabled, MockJudge ):
+    def test_toggle_on_builds_grades_and_records( self, _enabled, mock_factory ):
         import cosa.rest.routers.dm as dm
         grade = {
             "length"     : { "weight": 2 },
@@ -772,14 +784,28 @@ class TestMaybeGradeDmQualityWiring:
             "tone"       : { "weight": 0 },
             "overall"    : { "weight": 1 },
         }
-        MockJudge.return_value.judge.return_value = grade
+        mock_factory.return_value.judge.return_value = grade
         out = dm._maybe_grade_dm_quality( "short body" )
         assert out == grade
         assert dm.get_dm_quality_audit()[ "count" ] == 1
         # lazy singleton: built exactly once, reused thereafter
-        assert dm._dm_quality_judge is MockJudge.return_value
+        assert dm._dm_quality_judge is mock_factory.return_value
         dm._maybe_grade_dm_quality( "another" )
-        assert MockJudge.call_count == 1
+        assert mock_factory.call_count == 1
+
+    @patch( "cosa.agents.dm_quality_judge.get_dm_quality_judge" )
+    @patch( "cosa.rest.routers.dm.get_dm_quality_judgment_enabled", return_value=True )
+    def test_grading_is_version_agnostic( self, _enabled, mock_factory ):
+        # THE CONTROL for the fix above: the wiring must go through the factory, so no
+        # judge CLASS is ever constructed directly here. If someone re-couples this call
+        # site to a version's class, the factory stops being consulted and this goes red.
+        import cosa.rest.routers.dm as dm
+        mock_factory.return_value.judge.return_value = { "length": { "weight": 0 },
+                                                         "directness": { "weight": 0 },
+                                                         "tone": { "weight": 0 },
+                                                         "overall": { "weight": 0 } }
+        dm._maybe_grade_dm_quality( "body" )
+        assert mock_factory.called, "the call site bypassed get_dm_quality_judge()"
 
 
 class TestQualityToggleRead:

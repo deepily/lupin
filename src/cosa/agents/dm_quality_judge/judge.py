@@ -41,7 +41,14 @@ from cosa.agents.io_models.utils.prompt_template_processor import PromptTemplate
 # `localhost` is the container — so the config value points at the container-
 # reachable `192.168.1.21:3001` (the same box the working mistral key already
 # reaches from in-container). See the ini comment on `dm_quality_judge/...`.
-DEFAULT_JUDGE_LLM_SPEC_KEY  = "dm_quality_judge/mistral_small_24b"
+#
+# RENAMED 2026-08-01 (row 55a5baab), was `dm_quality_judge/mistral_small_24b`. The key
+# said mistral and the endpoint served `kaitchup/Phi-4-AutoRound-GPTQ-4bit` — behaviourally
+# harmless and actively misleading in every diagnosis of this component. It is also part of
+# why the chat-template finding bit: the prompt below is Alpaca-style `### Instruction:`,
+# written for a Mistral-family model, and it was going to a checkpoint instruction-tuned on
+# `<|im_start|>` turns. Reading "the Mistral judge" made that look consistent when it was not.
+DEFAULT_JUDGE_LLM_SPEC_KEY  = "dm_quality_judge/phi_4"
 DEFAULT_JUDGE_PROMPT_PATH   = "/src/conf/prompts/dm-quality-judge.txt"
 
 # The routing_command the prompt template is registered under in
