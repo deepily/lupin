@@ -10,6 +10,7 @@ tree-specific fixtures belong in `src/tests/conftest.py` /
 
 import importlib._bootstrap
 import sys
+from unittest.mock import patch
 
 import pytest
 
@@ -131,3 +132,34 @@ def _evict_real_fastapi_main_after_test():
     pkg = sys.modules.get( "lupin_app" )
     if pkg is not None and hasattr( pkg, "main" ):
         delattr( pkg, "main" )
+
+
+@pytest.fixture( autouse=True )
+def _redirect_dm_traffic_corpus( tmp_path ):
+    """
+    Cross-tree test-isolation guard (row 334569d6).
+
+    `execute_dm_send` appends one JSON row per ACCEPTED send to
+    `cosa.rest.routers.dm._DM_TRAFFIC_JSONL` — a real file under `src/tmp/` resolved
+    via `cu.get_project_root()`. Under test that resolves to the HOST repo, so ANY
+    send-path test (this tree or the CoSA tree) silently appends fixture rows into
+    Rick's live four-day DM corpus. A per-file redirect is the shape that gets
+    forgotten the next time someone adds a send-path test, so the guard lives here.
+
+    Redirects the sink to a unique per-test file WHENEVER the dm router is loaded.
+    Send-path test files import the router at MODULE scope, so it is already in
+    `sys.modules` by the time this fixture runs — no forced heavy import is paid by
+    the thousands of tests that never touch DMs.
+
+    Ensures:
+        - during any test with the dm router loaded, `_DM_TRAFFIC_JSONL` points inside
+          the test's `tmp_path`, never the production corpus
+        - the module attribute is restored after the test
+        - inert (no-op) when the dm router is not loaded
+    """
+    dm = sys.modules.get( "cosa.rest.routers.dm" )
+    if dm is None or not hasattr( dm, "_DM_TRAFFIC_JSONL" ):
+        yield
+        return
+    with patch.object( dm, "_DM_TRAFFIC_JSONL", str( tmp_path / "dm_traffic.jsonl" ) ):
+        yield

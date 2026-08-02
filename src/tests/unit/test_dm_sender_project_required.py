@@ -42,8 +42,13 @@ that the audit still observes a rejected DM. The 12 other server-side
 Row: 12b5a766
 """
 
+import json
+import os
+import tempfile
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+
+import cosa.utils.util as cu
 
 
 class _SenderIdSpy:
@@ -91,6 +96,7 @@ class TestSpyControl( unittest.TestCase ):
 class _CoreHarness( unittest.TestCase ):
 
     def setUp( self ):
+        import cosa.rest.routers.dm as dm
         from cosa.rest.routers.dm import execute_dm_send, reset_dm_project_audit
         self.execute_dm_send = execute_dm_send
         self.reset_audit     = reset_dm_project_audit
@@ -103,6 +109,16 @@ class _CoreHarness( unittest.TestCase ):
             "persona_name" : "mr radio",
         } )
         self.reset_audit()
+        # Row 334569d6: execute_dm_send now appends a JSONL row to _DM_TRAFFIC_JSONL on
+        # every ACCEPTED (201) send. Under test that path resolves via
+        # cu.get_project_root() to the REAL host corpus — so a send-path test would
+        # silently write fixture rows ("does this still get through?" etc.) into Rick's
+        # four-day dataset. Redirect the sink to a throwaway file for EVERY test built on
+        # this harness; a guard below proves the real corpus is never touched.
+        self.corpus_path = os.path.join( tempfile.mkdtemp(), "dm_traffic.jsonl" )
+        _corpus_patch = patch.object( dm, "_DM_TRAFFIC_JSONL", self.corpus_path )
+        _corpus_patch.start()
+        self.addCleanup( _corpus_patch.stop )
 
     def _run( self, body ):
         return self.execute_dm_send(
@@ -494,6 +510,100 @@ class TestDmQualityJudgeMergedIntoSend( _CoreHarness ):
         calls = []
         self._run_with_grader( _make_send_body(), lambda body: calls.append( body ) )
         self.assertEqual( calls, [] )
+
+
+class TestDmTrafficJsonlCorpus( _CoreHarness ):
+    """
+    Row 334569d6 — the per-DM JSONL corpus that stops discarding rows the running
+    counter can only sum. The write lands at execute_dm_send's tail (after the DM is
+    persisted + pushed) so a corpus failure cannot cost a message; grades ride along
+    from the same 726 call. These tests point the module's sink path at a temp file.
+    """
+
+    def _run_with_grader( self, body, grader ):
+        return self.execute_dm_send(
+            authenticated_user_id = "user-uuid-1",
+            body                  = body,
+            notification_queue    = self.queue,
+            resolve_recipient_fn  = self.resolve,
+            build_sender_id       = self.spy,
+            persist_fn            = self.persist,
+            new_id_fn             = lambda: "fixed-msg-id",
+            grade_quality_fn      = grader,
+        )
+
+    _GRADE = {
+        "length"     : { "emoji": "⭐", "weight":  2, "detail": "3 words, target ~60" },
+        "directness" : { "emoji": "👍", "weight":  1, "detail": "leads with the result" },
+        "tone"       : { "emoji": "😞", "weight": -2, "detail": "curt" },
+        "overall"    : { "emoji": "👍", "weight":  1, "note": "ok" },
+    }
+
+    def test_accepted_dm_appends_one_row_with_fields_and_grades( self ):
+        self._run_with_grader(
+            _make_send_body( sender_project="plan", body="crisp verdict here." ),
+            lambda b: self._GRADE,
+        )
+        lines = open( self.corpus_path, encoding="utf-8" ).read().splitlines()
+        self.assertEqual( len( lines ), 1 )
+        row = json.loads( lines[ 0 ] )
+        self.assertEqual( row[ "from" ],         "María" )
+        self.assertEqual( row[ "from_project" ], "plan" )
+        self.assertEqual( row[ "to" ],           "mr radio" )
+        self.assertEqual( row[ "words" ],        3 )
+        self.assertEqual( row[ "sentences" ],    1 )
+        self.assertEqual( row[ "body" ],         "crisp verdict here." )
+        # grades ride along as integer weights
+        self.assertEqual( row[ "len_grade" ],  2 )
+        self.assertEqual( row[ "directness" ], 1 )
+        self.assertEqual( row[ "tone" ],       -2 )
+        self.assertEqual( row[ "overall" ],    1 )
+
+    def test_control_grader_none_still_writes_row_with_null_grades( self ):
+        """Judge OFF → quality is None → the row is STILL written (measurements +
+        body), with grade fields null. A corpus that logged nothing when the judge
+        is off would collect nothing in the control arm."""
+        self._run_with_grader( _make_send_body( sender_project="plan", body="short one." ), lambda b: None )
+        row = json.loads( open( self.corpus_path, encoding="utf-8" ).read().splitlines()[ 0 ] )
+        self.assertEqual( row[ "words" ], 2 )
+        self.assertIsNone( row[ "len_grade" ] )
+        self.assertIsNone( row[ "directness" ] )
+        self.assertIsNone( row[ "tone" ] )
+        self.assertIsNone( row[ "overall" ] )
+
+    def test_a_rejected_dm_writes_no_corpus_row( self ):
+        """A 422 (no sender_project) returns before the tail write, so the corpus is
+        the SENT-traffic population — a rejected DM never sent and must not appear."""
+        result = self._run_with_grader( _make_send_body(), lambda b: None )   # no project → 422
+        self.assertEqual( result[ "http_status" ], 422 )
+        self.assertFalse( os.path.exists( self.corpus_path ) )
+
+    def test_write_failure_is_fail_soft_and_the_dm_still_sends( self ):
+        """GATE (c) — FORCE the except arm. The sink path points into a directory that
+        does not exist, so the append raises FileNotFoundError inside the writer. The
+        DM must still return 201 dispatched=True, and no file may appear (proving the
+        write genuinely threw and was swallowed, not silently succeeded)."""
+        import cosa.rest.routers.dm as dm
+        missing = os.path.join( tempfile.mkdtemp(), "no_such_dir", "dm.jsonl" )
+        with patch.object( dm, "_DM_TRAFFIC_JSONL", missing ):
+            result = self._run_with_grader( _make_send_body( sender_project="plan" ), lambda b: self._GRADE )
+        self.assertEqual( result[ "http_status" ], 201 )
+        self.assertTrue( result[ "dispatched" ] )
+        self.assertFalse( os.path.exists( missing ) )
+
+    def test_a_send_path_test_never_writes_the_real_production_corpus( self ):
+        """GUARD (row 334569d6 CHANGES-REQUESTED). The harness MUST redirect the sink
+        away from the real host corpus, else every send-path test silently pollutes
+        Rick's four-day dataset. Proves (1) the active sink is not the production path
+        and (2) a real send under test leaves the production file byte-for-byte
+        untouched."""
+        import cosa.rest.routers.dm as dm
+        real = cu.get_project_root() + "/src/tmp/dm_traffic.jsonl"
+        self.assertNotEqual( dm._DM_TRAFFIC_JSONL, real )
+        before = os.path.getsize( real ) if os.path.exists( real ) else None
+        self._run_with_grader( _make_send_body( sender_project="plan" ), lambda b: self._GRADE )
+        after = os.path.getsize( real ) if os.path.exists( real ) else None
+        self.assertEqual( before, after )
 
 
 if __name__ == "__main__":

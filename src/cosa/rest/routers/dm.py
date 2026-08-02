@@ -21,9 +21,12 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import Optional, Annotated, Literal
 import asyncio
+import json
 import re
 import uuid
 from datetime import datetime
+
+import cosa.utils.util as cu
 
 # Import dependencies and services
 from ..notification_fifo_queue import NotificationFifoQueue
@@ -327,6 +330,68 @@ def _record_dm_length( body_text ):
     _dm_length_audit[ "total_words" ]     += len( body_text.split() )
     _dm_length_audit[ "total_sentences" ] += _count_sentences( body_text )
     print( format_dm_length_audit_line() )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Per-DM JSONL traffic corpus (row 334569d6, Rick ruled by keypress 2026-08-02).
+# The running counter above holds only four SUMS; totals cannot be un-summed, so
+# "how many DMs ran over 250 words?" is unanswerable from it (established by the
+# row 49a76406 readout). This is a SEPARATE, ADDITIVE sink that stops discarding
+# the rows: one JSON object per DM, append-only, never read-modify-write.
+#
+# WHERE: src/tmp/ — gitignored (the bare `tmp` pattern, .gitignore:5; verified
+# with `git check-ignore -v`) and /var/lupin/src is bind-mounted READ-WRITE, so
+# the file appears in Rick's own repo shell the instant it is written — no compose
+# change, no recreate, no migration.
+#
+# ⚠️ SAFE ONLY BECAUSE AUTO-RELOAD IS OFF (verified: LUPIN_RELOAD empty in the dev
+# container, live process is a plain `python3 -m lupin_app.main`, no --reload). A
+# watched-dir write under src/ with --reload ON would bounce the server per DM.
+_DM_TRAFFIC_JSONL = cu.get_project_root() + "/src/tmp/dm_traffic.jsonl"
+
+
+def _persist_dm_row( *, body_text, from_persona, from_session, from_project,
+                     to_persona, to_session, quality ):
+    """
+    Append ONE JSON line describing this sent DM to the traffic corpus.
+
+    Requires:
+        - identities are passed IN by the caller (dm.py send path), where they are
+          already resolved — this writer resolves nothing itself
+        - quality is DmQualityJudge.judge()'s dict ({"length","directness","tone",
+          "overall"}) or None when the judge toggle is OFF
+
+    Ensures:
+        - FAIL-SOFT: the whole body is wrapped in try/except and NEVER raises into
+          the send path. dm_send is the fleet's comms bus; a corpus-write failure
+          must not take a DM down (and by call-site placement the DM is already
+          sent when this runs). On failure it prints a warning and returns.
+        - ADDITIVE: does not touch the in-memory counter or its audit line
+        - grade fields carry the judge's integer weight per dimension, or null when
+          `quality` is None (judge off) — the row is still written either way
+    """
+    try:
+        row = {
+            "ts"           : datetime.now().isoformat( timespec="seconds" ),
+            "from"         : from_persona,
+            "from_session" : from_session,
+            "from_project" : from_project,
+            "to"           : to_persona,
+            "to_session"   : to_session,
+            "words"        : len( body_text.split() ),
+            "chars"        : len( body_text ),
+            "sentences"    : _count_sentences( body_text ),
+            "body"         : body_text,
+            "len_grade"    : quality[ "length"     ][ "weight" ] if quality else None,
+            "directness"   : quality[ "directness" ][ "weight" ] if quality else None,
+            "tone"         : quality[ "tone"       ][ "weight" ] if quality else None,
+            "overall"      : quality[ "overall"    ][ "weight" ] if quality else None,
+        }
+        with open( _DM_TRAFFIC_JSONL, "a", encoding="utf-8" ) as f:
+            f.write( json.dumps( row, ensure_ascii=False ) + "\n" )
+    except Exception as e:
+        # Swallow — the DM has already been dispatched; the corpus is best-effort.
+        print( f"[dm-traffic] WARNING: failed to append DM row: {e}" )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -726,6 +791,21 @@ def execute_dm_send(
     quality = grade_quality_fn( body.body )
     if quality is not None:
         result[ "quality" ] = quality
+
+    # Row 334569d6: append this SENT DM (measurements + body + grades) to the per-DM
+    # JSONL corpus. Placed here, immediately before `return result`, on purpose: the
+    # DM was persisted (persist_fn) and pushed (push_notification) above and
+    # dispatched is already True, so this write runs AFTER delivery and rides along
+    # with the judge grades computed one line up. Fail-soft lives inside the writer.
+    _persist_dm_row(
+        body_text    = body.body,
+        from_persona = body.sender_persona,
+        from_session = body.sender_session_id,
+        from_project = body.sender_project,
+        to_persona   = target_persona,
+        to_session   = target_session_id,
+        quality      = quality,
+    )
 
     return result
 
