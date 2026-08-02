@@ -553,6 +553,8 @@ class TestDmTrafficJsonlCorpus( _CoreHarness ):
         self.assertEqual( row[ "words" ],        3 )
         self.assertEqual( row[ "sentences" ],    1 )
         self.assertEqual( row[ "body" ],         "crisp verdict here." )
+        # written from within pytest → stamped as a test row (row f5d6dc5e)
+        self.assertEqual( row[ "origin" ],       "test" )
         # grades ride along as integer weights
         self.assertEqual( row[ "len_grade" ],  2 )
         self.assertEqual( row[ "directness" ], 1 )
@@ -604,6 +606,37 @@ class TestDmTrafficJsonlCorpus( _CoreHarness ):
         self._run_with_grader( _make_send_body( sender_project="plan" ), lambda b: self._GRADE )
         after = os.path.getsize( real ) if os.path.exists( real ) else None
         self.assertEqual( before, after )
+
+    def test_writer_refuses_the_production_corpus_from_a_pytest_process( self ):
+        """GATE (a), row f5d6dc5e — the case the conftest fixture does NOT cover. Point
+        the sink back at the LITERAL production constant (simulating the fixture not in
+        play, e.g. a send-path test written outside its reach) and call the writer
+        directly under pytest. The self-guard must refuse: the production corpus stays
+        byte-for-byte unchanged.
+
+        Compares against dm._DM_TRAFFIC_PRODUCTION_PATH — the immutable constant the
+        fixture never patches — NOT the patched _DM_TRAFFIC_JSONL read back, which would
+        be a control comparing a value to itself."""
+        import cosa.rest.routers.dm as dm
+        prod = dm._DM_TRAFFIC_PRODUCTION_PATH
+        before = open( prod, "rb" ).read() if os.path.exists( prod ) else None
+        # Override the conftest redirect: aim the live sink at the real production path.
+        with patch.object( dm, "_DM_TRAFFIC_JSONL", prod ):
+            dm._persist_dm_row(
+                body_text="a test that slipped the fixture would land HERE",
+                from_persona="Fixture-Escapee", from_session="sess-x", from_project="lupin",
+                to_persona="victim", to_session="sess-y", quality=None,
+            )
+        after = open( prod, "rb" ).read() if os.path.exists( prod ) else None
+        self.assertEqual( before, after, "self-guard failed: a pytest write reached the real corpus" )
+
+    def test_row_is_stamped_origin_test_when_written_under_pytest( self ):
+        """The audit stamp (row f5d6dc5e): a row written from within pytest carries
+        origin='test', so a reader filters contaminants on the field instead of
+        inferring them from a timezone."""
+        self._run_with_grader( _make_send_body( sender_project="plan", body="short one." ), lambda b: None )
+        row = json.loads( open( self.corpus_path, encoding="utf-8" ).read().splitlines()[ 0 ] )
+        self.assertEqual( row[ "origin" ], "test" )
 
 
 if __name__ == "__main__":

@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 from typing import Optional, Annotated, Literal
 import asyncio
 import json
+import os
 import re
 import uuid
 from datetime import datetime
@@ -349,6 +350,20 @@ def _record_dm_length( body_text ):
 # watched-dir write under src/ with --reload ON would bounce the server per DM.
 _DM_TRAFFIC_JSONL = cu.get_project_root() + "/src/tmp/dm_traffic.jsonl"
 
+# The ONE TRUE production corpus path, captured as its own constant that the test
+# conftest's `patch.object(dm, "_DM_TRAFFIC_JSONL", tmp)` NEVER touches (row f5d6dc5e).
+# The self-guard below compares the live sink against THIS. Deriving "is this
+# production?" from `_DM_TRAFFIC_JSONL` itself would compare a value to itself and
+# could never fire once the fixture patched it — a control blind to its own failure.
+_DM_TRAFFIC_PRODUCTION_PATH = _DM_TRAFFIC_JSONL
+
+
+def _running_under_pytest():
+    """True iff this process is executing a pytest test (pytest sets
+    PYTEST_CURRENT_TEST per test). The one signal a self-guard can read without the
+    cooperation of whoever writes the next test."""
+    return os.environ.get( "PYTEST_CURRENT_TEST" ) is not None
+
 
 def _persist_dm_row( *, body_text, from_persona, from_session, from_project,
                      to_persona, to_session, quality ):
@@ -362,6 +377,17 @@ def _persist_dm_row( *, body_text, from_persona, from_session, from_project,
           "overall"}) or None when the judge toggle is OFF
 
     Ensures:
+        - SELF-GUARD (row f5d6dc5e): refuses to write the PRODUCTION corpus from any
+          pytest process, even if the conftest redirect fixture is not in play — the
+          check lives in the code being protected, so it cannot be forgotten by
+          whoever adds the next test. LIMIT, stated plainly rather than left implied:
+          this catches PYTEST ONLY. A hand-run script that imports this module and
+          sends a DM is caught by NEITHER this guard NOR the fixture — which is exactly
+          why every row also carries `origin`, so such a contaminant can at least be
+          identified after the fact instead of inferred from a timezone.
+        - AUDITABLE: every row carries `origin` — "live" for a real send, "test" for a
+          write made from within pytest (to a redirected sink) — so a reader filters on
+          the field instead of guessing from where the process happened to run.
         - FAIL-SOFT: the whole body is wrapped in try/except and NEVER raises into
           the send path. dm_send is the fleet's comms bus; a corpus-write failure
           must not take a DM down (and by call-site placement the DM is already
@@ -370,9 +396,16 @@ def _persist_dm_row( *, body_text, from_persona, from_session, from_project,
         - grade fields carry the judge's integer weight per dimension, or null when
           `quality` is None (judge off) — the row is still written either way
     """
+    under_pytest = _running_under_pytest()
+    # SELF-GUARD: a pytest process may never write the real corpus. When the sink IS
+    # the production path here, the redirect fixture is not in play — refuse and write
+    # nothing (a test that reached production wanted no row anyway).
+    if under_pytest and _DM_TRAFFIC_JSONL == _DM_TRAFFIC_PRODUCTION_PATH:
+        return
     try:
         row = {
             "ts"           : datetime.now().isoformat( timespec="seconds" ),
+            "origin"       : "test" if under_pytest else "live",
             "from"         : from_persona,
             "from_session" : from_session,
             "from_project" : from_project,
