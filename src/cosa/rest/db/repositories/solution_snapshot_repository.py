@@ -104,7 +104,7 @@ class SolutionSnapshotRepository( BaseRepository[SolutionSnapshot] ):
                                    threshold: float = 90.0, limit: int = 7,
                                    exclude_id_hash: Optional[str] = None ) -> List[Tuple[float, SolutionSnapshot]]:
         """
-        Dot nearest-k over question_embedding.
+        Cosine nearest-k over question_embedding.
 
         Requires:
             - query_embedding is a dim-768 list; limit is a positive int
@@ -112,19 +112,19 @@ class SolutionSnapshotRepository( BaseRepository[SolutionSnapshot] ):
 
         Ensures:
             - returns up to limit ``( similarity_pct, entity )`` tuples >= threshold,
-              strongest dot first; excludes exclude_id_hash when given
+              strongest cosine first; excludes exclude_id_hash when given
         """
         return dot_topk(
             self.session, SolutionSnapshot, SolutionSnapshot.question_embedding,
             query_embedding, limit=limit, exclude_filter=self._exclude_filter( exclude_id_hash ),
-            threshold_pct=threshold,
+            threshold_pct=threshold, metric="cosine",
         )
 
     def get_snapshots_by_code_similarity( self, query_embedding: List[float],
                                           threshold: float = 85.0, limit: int = 20,
                                           exclude_id_hash: Optional[str] = None ) -> List[Tuple[float, SolutionSnapshot]]:
         """
-        Dot nearest-k over code_embedding.
+        Cosine nearest-k over code_embedding.
 
         Requires:
             - query_embedding is a dim-768 list; limit is a positive int
@@ -132,19 +132,19 @@ class SolutionSnapshotRepository( BaseRepository[SolutionSnapshot] ):
 
         Ensures:
             - returns up to limit ``( similarity_pct, entity )`` tuples >= threshold,
-              strongest dot first; excludes exclude_id_hash when given
+              strongest cosine first; excludes exclude_id_hash when given
         """
         return dot_topk(
             self.session, SolutionSnapshot, SolutionSnapshot.code_embedding,
             query_embedding, limit=limit, exclude_filter=self._exclude_filter( exclude_id_hash ),
-            threshold_pct=threshold,
+            threshold_pct=threshold, metric="cosine",
         )
 
     def get_snapshots_by_solution_similarity( self, query_embedding: List[float],
                                               threshold: float = 85.0, limit: int = 20,
                                               exclude_id_hash: Optional[str] = None ) -> List[Tuple[float, SolutionSnapshot]]:
         """
-        Dot nearest-k over solution_embedding.
+        Cosine nearest-k over solution_embedding.
 
         Requires:
             - query_embedding is a dim-768 list; limit is a positive int
@@ -152,12 +152,12 @@ class SolutionSnapshotRepository( BaseRepository[SolutionSnapshot] ):
 
         Ensures:
             - returns up to limit ``( similarity_pct, entity )`` tuples >= threshold,
-              strongest dot first; excludes exclude_id_hash when given
+              strongest cosine first; excludes exclude_id_hash when given
         """
         return dot_topk(
             self.session, SolutionSnapshot, SolutionSnapshot.solution_embedding,
             query_embedding, limit=limit, exclude_filter=self._exclude_filter( exclude_id_hash ),
-            threshold_pct=threshold,
+            threshold_pct=threshold, metric="cosine",
         )
 
     def get_gists( self ) -> List[str]:

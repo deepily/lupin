@@ -515,7 +515,29 @@ class TodoFifoQueue( FifoQueue ):
             best_score    = similar_snapshots[ 0 ][ 0 ]
             best_snapshot = similar_snapshots[ 0 ][ 1 ]
 
-            if best_score >= 100.0:
+            # A similarity percentage outside [0,100] is not a strong match, it is a
+            # BROKEN MEASUREMENT — and the old code read it as maximum confidence.
+            # Bug 78f21b1b: query embeddings moved to a model that does not return
+            # unit vectors, so `dot * 100` produced 1024.15% for a true cosine of
+            # 0.517, and that landed in the `>= 100.0` perfect-match branch. Every
+            # voice request was answered from cache and agent routing became
+            # unreachable — silently, in 0 ms, which reads like success.
+            #
+            # Refuse the value rather than trusting it. Falling through to LLM
+            # routing is the safe direction: the worst case is doing the work
+            # instead of replaying a cached answer.
+            if best_score < 0.0 or best_score > 100.0:
+                print( f"push_job(): REJECTING out-of-range similarity {best_score:.1f}% "
+                       f"(expected 0-100) — treating as NO cache match and routing normally. "
+                       f"This means the scorer is misconfigured; see bug 78f21b1b." )
+                # Set the flag DIRECTLY. Emptying similar_snapshots here would NOT
+                # reach the outer `else` (the length check has already passed), so
+                # needs_llm_routing would stay False and the request would fall
+                # through doing nothing at all — a worse failure than the one being
+                # fixed. Caught by tracing the control flow rather than assuming it.
+                needs_llm_routing = True
+
+            elif best_score >= 100.0:
                 # Perfect match (L1/L2 exact or L4 at 100%) — auto-accept, no prompt
                 print( f"push_job(): Perfect match (score: {best_score:.1f}%) — auto-accepting" )
                 best_snapshot.last_question_asked = ( salutations + ' ' + question ).strip()
@@ -620,7 +642,7 @@ class TodoFifoQueue( FifoQueue ):
             needs_llm_routing = True
 
         # Route through LLM if no cache match or user declined confirmation
-        if needs_llm_routing:  # pragma: no branch - always True here: every non-returning path sets it True (L590 declined / L617 below-threshold / L620 no-snapshots); all cache-hit paths (L538/587/612) return before this → the False arc is unreachable
+        if needs_llm_routing:  # pragma: no branch - always True here: every non-returning path sets it True (out-of-range rejection / declined confirmation / below-threshold / no-snapshots); all cache-hit paths return before this → the False arc is unreachable
 
             print( "Routing through LLM (no cache match or user declined)..." )
             
