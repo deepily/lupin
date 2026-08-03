@@ -208,6 +208,13 @@ class _ExecGraph:
             "cosa.agents.podcast_generator.config": _make_module(
                 "cosa.agents.podcast_generator.config",
                 PodcastConfig=podcast_config,
+                LANGUAGE_NAMES={
+                    "en"    : "English",
+                    "es"    : "Spanish",
+                    "es-ES" : "Castilian Spanish (Spain)",
+                    "es-MX" : "Mexican Spanish",
+                    "es-AR" : "Argentinian Spanish",
+                },
             ),
             "cosa.config.configuration_manager": _make_module(
                 "cosa.config.configuration_manager",
@@ -288,6 +295,107 @@ class TestExecute:
 
         # on-stage order: overlay first, standalone tab second, download last
         assert abstract.index( play_here ) < abstract.index( listen ) < abstract.index( download )
+
+    def test_completion_abstract_lists_every_language_labelled( self ):
+        """
+        Bug 00e6aba1: a two-language run wrote English + Mexican Spanish mp3s but
+        the card linked only English. The abstract must now carry ONE labelled
+        block per language, each with its own Play Here / Listen / Download, and
+        the artifacts must expose the full per-language maps.
+        """
+        state = {
+            "final_audio_path"  : "/proj/io/pod/ep-en.mp3",
+            "final_script_path" : "/proj/io/pod/ep-en.md",
+            "audio_paths_by_language"  : {
+                "en"    : "/proj/io/pod/ep-en.mp3",
+                "es-MX" : "/proj/io/pod/ep-es-MX.mp3",
+            },
+            "script_paths_by_language" : {
+                "en"    : "/proj/io/pod/ep-en.md",
+                "es-MX" : "/proj/io/pod/ep-es-MX.md",
+            },
+        }
+        job   = _job( target_languages=[ "en", "es-MX" ] )
+        graph = _ExecGraph( state=state )
+        with graph.patcher(), \
+             patch( "os.path.exists", return_value=True ), \
+             patch( "cosa.utils.util.get_project_root", return_value="/proj" ):
+            _run( job._execute() )
+
+        abstract = next(
+            c.kwargs[ "abstract" ] for c in graph.voice_io.notify.await_args_list
+            if c.kwargs.get( "abstract" )
+        )
+
+        # Both languages labelled.
+        assert "**English**:" in abstract
+        assert "**Mexican Spanish**:" in abstract
+
+        # Each language carries its OWN full triplet against its OWN file.
+        for enc in ( "pod/ep-en.mp3", "pod/ep-es-MX.mp3" ):
+            assert f"[▶️ Play Here](/app/audio?path={enc}&embed=1)" in abstract
+            assert f"[🎧 Listen](/app/audio?path={enc})"           in abstract
+            assert f"[⬇️ Download](/api/io/file?path={enc}&download=true)" in abstract
+        # Two languages → two overlay links, two mp3s reachable.
+        assert abstract.count( "&embed=1" ) == 2
+        # Requested order preserved: English block precedes the Spanish block.
+        assert abstract.index( "**English**:" ) < abstract.index( "**Mexican Spanish**:" )
+
+        # Per-language artifact maps exposed (relative paths), primary unchanged.
+        assert job.artifacts[ "audio_path" ] == "pod/ep-en.mp3"
+        assert job.artifacts[ "audio_paths_by_language" ] == {
+            "en" : "pod/ep-en.mp3", "es-MX" : "pod/ep-es-MX.mp3",
+        }
+        assert job.artifacts[ "script_paths_by_language" ] == {
+            "en" : "pod/ep-en.md", "es-MX" : "pod/ep-es-MX.md",
+        }
+
+    def test_completion_abstract_extra_language_not_in_target_still_listed( self ):
+        """A language present in the artifact maps but absent from target_languages
+        (e.g. an appended default) is still surfaced — the ordered-language tail."""
+        state = {
+            "final_audio_path"  : "/proj/io/pod/ep-en.mp3",
+            "final_script_path" : "/proj/io/pod/ep-en.md",
+            "audio_paths_by_language"  : {
+                "en"    : "/proj/io/pod/ep-en.mp3",
+                "es-MX" : "/proj/io/pod/ep-es-MX.mp3",
+            },
+            "script_paths_by_language" : {},
+        }
+        job   = _job( target_languages=[ "en" ] )   # es-MX NOT requested
+        graph = _ExecGraph( state=state )
+        with graph.patcher(), \
+             patch( "os.path.exists", return_value=True ), \
+             patch( "cosa.utils.util.get_project_root", return_value="/proj" ):
+            _run( job._execute() )
+        abstract = next(
+            c.kwargs[ "abstract" ] for c in graph.voice_io.notify.await_args_list
+            if c.kwargs.get( "abstract" )
+        )
+        assert "**Mexican Spanish**:" in abstract          # tail-appended
+        assert "pod/ep-es-MX.mp3" in abstract
+
+    def test_completion_abstract_skips_language_with_blank_paths( self ):
+        """A language key whose audio AND script paths are blank produces no block
+        (no broken empty line) — the `if parts` false arc."""
+        state = {
+            "final_audio_path"  : "/proj/io/pod/ep-en.mp3",
+            "final_script_path" : "/proj/io/pod/ep-en.md",
+            "audio_paths_by_language"  : { "en": "/proj/io/pod/ep-en.mp3", "es-MX": "" },
+            "script_paths_by_language" : { "en": "/proj/io/pod/ep-en.md" },
+        }
+        job   = _job( target_languages=[ "en", "es-MX" ] )
+        graph = _ExecGraph( state=state )
+        with graph.patcher(), \
+             patch( "os.path.exists", return_value=True ), \
+             patch( "cosa.utils.util.get_project_root", return_value="/proj" ):
+            _run( job._execute() )
+        abstract = next(
+            c.kwargs[ "abstract" ] for c in graph.voice_io.notify.await_args_list
+            if c.kwargs.get( "abstract" )
+        )
+        assert "**English**:" in abstract
+        assert "**Mexican Spanish**:" not in abstract       # blank-path language dropped
 
     def test_dry_run_routes_to_dry_run_helper( self ):
         # dry_run=True must short-circuit to _execute_dry_run after reconfigure,
