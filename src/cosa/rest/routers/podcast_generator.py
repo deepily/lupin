@@ -570,68 +570,120 @@ async def submit_podcast_job(
             print( f"[submit_podcast_job] Speculative card emitted: {spec_id}" )
 
         try:
-            # Step 1: Find matching documents via LLM
-            matches = await match_research_docs( user_email, research_source, debug=debug )
-
-            if not matches:
-                # Tear down speculative card
-                emit_job_state_transition( websocket_mgr, spec_id, JobState.QUEUED, JobState.FAILED, user_id )
-                user_job_tracker.remove_job( spec_id )
-                raise HTTPException(
-                    status_code=404,
-                    detail="No matching research documents found. Please check your research library or provide a direct file path."
-                )
-
-            # Step 2: Present options to user and wait for selection (BLOCKING)
-            selected_doc = await get_user_document_selection(
-                user_email = user_email,
-                session_id = session_id,
-                matches    = matches,
-                debug      = debug
+            # ── Resolve + collect args (row 7c46fdde, Rick's instruction: the
+            # agentic card must USE the runtime argument facilitator) ──
+            #
+            # Default path: the Runtime Argument Expeditor owns BOTH document
+            # resolution (fuzzy_file_match) AND missing-argument collection, and its
+            # question flow surfaces on the SAME notification-answer surface this
+            # endpoint already used for document selection — so it is reachable from
+            # WITHIN this card, no new UI. Reach, not rebuild.
+            #
+            # The legacy endpoint-owned path (match_research_docs +
+            # get_user_document_selection) is PRESERVED behind the config flag as a
+            # same-day fallback for the demo — flip the flag off to restore it
+            # without a code change.
+            use_expeditor = todo_queue.config_mgr.get(
+                "podcast card uses runtime argument expeditor",
+                default=True, return_type="boolean"
             )
 
-            if not selected_doc:
-                # User cancelled — tear down speculative card
-                emit_job_state_transition( websocket_mgr, spec_id, JobState.QUEUED, JobState.CANCELLED, user_id )
-                user_job_tracker.remove_job( spec_id )
-                return PodcastMatchingResponse(
-                    status  = "cancelled",
-                    message = "Podcast generation cancelled by user."
+            if use_expeditor:
+                from cosa.agents.runtime_argument_expeditor.expeditor import (
+                    RuntimeArgumentExpeditor,
+                    user_message_for_expedite_reason,
                 )
 
-            # Step 3: Build full path from relative_path and create job
-            full_path = cu.get_project_root() + "/" + selected_doc[ "relative_path" ]
-
-            # Security: validate path stays within project root
-            if not validate_source_path( selected_doc[ "relative_path" ] ):
-                emit_job_state_transition( websocket_mgr, spec_id, JobState.QUEUED, JobState.FAILED, user_id )
-                user_job_tracker.remove_job( spec_id )
-                raise HTTPException(
-                    status_code=403,
-                    detail="Selected path escapes project root. Access denied."
+                expeditor = RuntimeArgumentExpeditor(
+                    config_mgr = todo_queue.config_mgr,
+                    debug      = debug
+                )
+                # The RAE resolves "research" via fuzzy_file_match and batch-collects
+                # any missing metadata (languages/audience/audience_context). The
+                # card's typed description IS the original question.
+                args_dict = expeditor.expedite(
+                    command           = "agent router go to podcast generator",
+                    raw_args          = "",
+                    user_email        = user_email,
+                    session_id        = session_id,
+                    user_id           = user_id,
+                    original_question = research_source,
+                    job_id            = spec_id,
                 )
 
-            if not os.path.exists( full_path ):
-                emit_job_state_transition( websocket_mgr, spec_id, JobState.QUEUED, JobState.FAILED, user_id )
-                user_job_tracker.remove_job( spec_id )
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Selected file not found: {selected_doc[ 'relative_path' ]}"
+                if args_dict is None:
+                    # Say WHY it failed — only a genuine decline blames the user
+                    # (bug 68198c9f); undeliverable / timed-out / unresolved do not.
+                    spoken, _log = user_message_for_expedite_reason( expeditor._last_expedite_reason )
+                    emit_job_state_transition( websocket_mgr, spec_id, JobState.QUEUED, JobState.CANCELLED, user_id )
+                    user_job_tracker.remove_job( spec_id )
+                    return PodcastMatchingResponse( status="cancelled", message=spoken )
+
+                # Runtime/test-hook fields the RAE does not manage (research +
+                # metadata already came from the expeditor).
+                if request.dry_run:
+                    args_dict[ "dry_run" ] = True
+                if request.force_failure_mode:
+                    args_dict[ "force_failure_mode" ] = request.force_failure_mode
+
+            else:
+                # ── Legacy fallback (preserved): endpoint owns resolution ──
+                matches = await match_research_docs( user_email, research_source, debug=debug )
+
+                if not matches:
+                    emit_job_state_transition( websocket_mgr, spec_id, JobState.QUEUED, JobState.FAILED, user_id )
+                    user_job_tracker.remove_job( spec_id )
+                    raise HTTPException(
+                        status_code=404,
+                        detail="No matching research documents found. Please check your research library or provide a direct file path."
+                    )
+
+                selected_doc = await get_user_document_selection(
+                    user_email = user_email,
+                    session_id = session_id,
+                    matches    = matches,
+                    debug      = debug
                 )
 
-            # Create job using shared factory
-            args_dict = { "research": full_path }
-            if request.target_languages:
-                args_dict[ "languages" ] = ",".join( request.target_languages )
-            if request.dry_run:
-                args_dict[ "dry_run" ] = True
-            if request.force_failure_mode:
-                args_dict[ "force_failure_mode" ] = request.force_failure_mode
-            if request.audience:
-                args_dict[ "audience" ] = request.audience
-            if request.audience_context:
-                args_dict[ "audience_context" ] = request.audience_context
+                if not selected_doc:
+                    emit_job_state_transition( websocket_mgr, spec_id, JobState.QUEUED, JobState.CANCELLED, user_id )
+                    user_job_tracker.remove_job( spec_id )
+                    return PodcastMatchingResponse(
+                        status  = "cancelled",
+                        message = "Podcast generation cancelled by user."
+                    )
 
+                full_path = cu.get_project_root() + "/" + selected_doc[ "relative_path" ]
+
+                if not validate_source_path( selected_doc[ "relative_path" ] ):
+                    emit_job_state_transition( websocket_mgr, spec_id, JobState.QUEUED, JobState.FAILED, user_id )
+                    user_job_tracker.remove_job( spec_id )
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Selected path escapes project root. Access denied."
+                    )
+
+                if not os.path.exists( full_path ):
+                    emit_job_state_transition( websocket_mgr, spec_id, JobState.QUEUED, JobState.FAILED, user_id )
+                    user_job_tracker.remove_job( spec_id )
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Selected file not found: {selected_doc[ 'relative_path' ]}"
+                    )
+
+                args_dict = { "research": full_path }
+                if request.target_languages:
+                    args_dict[ "languages" ] = ",".join( request.target_languages )
+                if request.dry_run:
+                    args_dict[ "dry_run" ] = True
+                if request.force_failure_mode:
+                    args_dict[ "force_failure_mode" ] = request.force_failure_mode
+                if request.audience:
+                    args_dict[ "audience" ] = request.audience
+                if request.audience_context:
+                    args_dict[ "audience_context" ] = request.audience_context
+
+            # ── Shared job creation (both paths) ──
             job = create_agentic_job(
                 command    = "agent router go to podcast generator",
                 args_dict  = args_dict,

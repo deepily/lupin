@@ -554,6 +554,11 @@ class TestSubmitFlowB( unittest.TestCase ):
     def setUp( self ):
         self.user  = { "uid": "user_42", "email": "u@test.com", "session_id": "sess-1" }
         self.queue = MagicMock()
+        # Flag OFF → the legacy endpoint-owned resolution path (match_research_docs +
+        # get_user_document_selection). Row 7c46fdde preserved this behind the config
+        # flag; these tests exercise that fallback. The RAE path (flag ON, default) is
+        # covered by TestSubmitFlowBExpeditor.
+        self.queue.config_mgr.get.return_value = False
         self.ws    = MagicMock()
         self.root  = "/proj/root"
         self.voice = MagicMock()
@@ -723,6 +728,151 @@ class TestSubmitFlowB( unittest.TestCase ):
             self.assertTrue( job.monopolize )
             self.queue.push.assert_called_once_with( job )
             self.voice.clear_job_id.assert_called_once()
+        finally:
+            self._exit( ctxs )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# submit_podcast_job — Flow B via the Runtime Argument Expeditor (flag ON, default)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_EXP = "cosa.agents.runtime_argument_expeditor.expeditor"
+
+
+class TestSubmitFlowBExpeditor( unittest.TestCase ):
+    """
+    Row 7c46fdde: with the flag ON (default), Flow B routes the description through
+    the Runtime Argument Expeditor instead of the endpoint's own resolver.
+
+    Requires:
+        - is_research_path False; config flag True; RuntimeArgumentExpeditor patched
+          at its source module (imported inside the endpoint at call time); voice_io /
+          cosa_interface / emit / create_agentic_job / user_job_tracker /
+          match_research_docs mocked
+    Ensures:
+        - expedite()→args → job queued; the RAE resolver runs, match_research_docs is
+          NOT awaited; request dry_run/force_failure_mode merged onto the RAE args
+        - expedite()→None → PodcastMatchingResponse(cancelled) whose message comes from
+          the REAL user_message_for_expedite_reason( _last_expedite_reason ) — an
+          undeliverable prompt says "couldn't reach you", never "cancelled" (bug
+          68198c9f wired into this card); teardown + clear_job_id fire
+    """
+
+    def setUp( self ):
+        self.user  = { "uid": "user_42", "email": "u@test.com", "session_id": "sess-1" }
+        self.queue = MagicMock()
+        self.queue.config_mgr.get.return_value = True   # flag ON → RAE branch
+        self.ws    = MagicMock()
+        self.voice = MagicMock()
+        self.iface = MagicMock()
+
+    def _call( self, body ):
+        return asyncio.run( submit_podcast_job(
+            request=body, current_user=self.user, todo_queue=self.queue, websocket_mgr=self.ws ) )
+
+    def _patches( self, *, expedite_ret, reason=None, job=None, tracker_ret="pg-rae" ):
+        tracker  = MagicMock(); tracker.register_scoped_job.return_value = tracker_ret
+        exp_inst = MagicMock()
+        exp_inst.expedite.return_value = expedite_ret
+        exp_inst._last_expedite_reason = reason
+        self.match_mock = AsyncMock()
+        ctxs = [
+            patch( f"{M}.is_research_path", return_value=False ),
+            patch( f"{M}.cu.get_project_root", return_value="/proj/root" ),
+            patch( f"{M}.emit_job_state_transition" ),
+            patch( f"{M}.user_job_tracker", tracker ),
+            patch( f"{M}.match_research_docs", new=self.match_mock ),
+            patch( "cosa.agents.podcast_generator.voice_io", self.voice ),
+            patch( "cosa.agents.podcast_generator.cosa_interface", self.iface ),
+            patch( f"{_EXP}.RuntimeArgumentExpeditor", return_value=exp_inst ),
+        ]
+        return tracker, exp_inst, ctxs
+
+    def _enter( self, ctxs ):
+        return [ c.__enter__() for c in ctxs ]
+
+    def _exit( self, ctxs ):
+        for c in reversed( ctxs ):
+            c.__exit__( None, None, None )
+
+    def test_flag_on_happy_uses_rae_not_match( self ):
+        """Ensures: flag ON → RAE resolves + collects; job queued; match_research_docs NOT awaited; dry_run/force_failure_mode merged."""
+        self.queue.size.return_value = 5
+        job = MagicMock(); job.id_hash = "init"
+        tracker, exp_inst, ctxs = self._patches(
+            expedite_ret={ "research": "/proj/root/io/x.md", "languages": "en,es-MX" },
+            job=job, tracker_ret="pg-rae" )
+        body = PodcastSubmitRequest(
+            research_source="the KISS explainer I wrote", dry_run=True, force_failure_mode="code_bug" )
+        self._enter( ctxs )
+        try:
+            with patch( f"{M}.create_agentic_job", return_value=job ) as m_create:
+                result = self._call( body )
+            self.assertIsInstance( result, PodcastSubmitResponse )
+            self.assertEqual( result.job_id, "pg-rae" )
+            self.assertEqual( result.queue_position, 5 )
+            exp_inst.expedite.assert_called_once()
+            self.match_mock.assert_not_awaited()          # RAE path, not the legacy resolver
+            _, kwargs = m_create.call_args
+            args_dict = kwargs[ "args_dict" ]
+            self.assertEqual( args_dict[ "research" ], "/proj/root/io/x.md" )
+            self.assertEqual( args_dict[ "languages" ], "en,es-MX" )
+            self.assertTrue( args_dict[ "dry_run" ] )
+            self.assertEqual( args_dict[ "force_failure_mode" ], "code_bug" )
+            self.assertEqual( job.id_hash, "pg-rae" )     # inherited spec id
+            self.queue.push.assert_called_once_with( job )
+            self.voice.clear_job_id.assert_called_once()
+        finally:
+            self._exit( ctxs )
+
+    def test_flag_on_factory_none_500( self ):
+        """Ensures: RAE returns args but create_agentic_job → None → 500 + teardown."""
+        tracker, exp_inst, ctxs = self._patches(
+            expedite_ret={ "research": "/proj/root/io/x.md" }, job=None )
+        self._enter( ctxs )
+        try:
+            with patch( f"{M}.create_agentic_job", return_value=None ):
+                with self.assertRaises( HTTPException ) as ctx:
+                    self._call( PodcastSubmitRequest( research_source="a description" ) )
+            self.assertEqual( ctx.exception.status_code, 500 )
+            tracker.remove_job.assert_called()
+            self.voice.clear_job_id.assert_called_once()
+        finally:
+            self._exit( ctxs )
+
+    def test_flag_on_expedite_none_is_undeliverable_not_cancelled( self ):
+        """
+        Ensures: expedite()→None with an UNREACHABLE reason yields
+        PodcastMatchingResponse(cancelled-status) whose spoken message is the REAL
+        user_message_for_expedite_reason — 'couldn't reach you', NOT 'you cancelled'.
+        Proves the Lane B helper (bug 68198c9f) is wired into this card, not just the
+        voice path.
+        """
+        from cosa.agents.runtime_argument_expeditor.expeditor import BATCH_UNREACHABLE
+        tracker, exp_inst, ctxs = self._patches(
+            expedite_ret=None, reason=BATCH_UNREACHABLE, job=MagicMock() )
+        self._enter( ctxs )
+        try:
+            result = self._call( PodcastSubmitRequest( research_source="the KISS explainer" ) )
+            self.assertIsInstance( result, PodcastMatchingResponse )
+            self.assertEqual( result.status, "cancelled" )
+            self.assertIn( "reach", result.message.lower() )
+            self.assertNotIn( "cancel", result.message.lower() )   # never blame a user we never asked
+            tracker.remove_job.assert_called()
+            self.voice.clear_job_id.assert_called_once()
+        finally:
+            self._exit( ctxs )
+
+    def test_flag_on_expedite_declined_may_say_cancelled( self ):
+        """Ensures: a genuine BATCH_DECLINED IS allowed to tell the user they cancelled."""
+        from cosa.agents.runtime_argument_expeditor.expeditor import BATCH_DECLINED
+        tracker, exp_inst, ctxs = self._patches(
+            expedite_ret=None, reason=BATCH_DECLINED, job=MagicMock() )
+        self._enter( ctxs )
+        try:
+            result = self._call( PodcastSubmitRequest( research_source="the KISS explainer" ) )
+            self.assertEqual( result.status, "cancelled" )
+            self.assertIn( "cancel", result.message.lower() )
         finally:
             self._exit( ctxs )
 
