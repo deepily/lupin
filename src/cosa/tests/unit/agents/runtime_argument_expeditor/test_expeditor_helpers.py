@@ -18,7 +18,15 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 import cosa.agents.runtime_argument_expeditor.expeditor as ex_mod
-from cosa.agents.runtime_argument_expeditor.expeditor import RuntimeArgumentExpeditor
+from cosa.agents.runtime_argument_expeditor.expeditor import (
+    RuntimeArgumentExpeditor,
+    BATCH_ANSWERED,
+    BATCH_DECLINED,
+    BATCH_UNREACHABLE,
+    BATCH_TIMEOUT,
+    BATCH_MALFORMED,
+    BATCH_INCOMPLETE,
+)
 from cosa.agents.runtime_argument_expeditor.xml_models import ArgConfirmationResponse
 
 
@@ -228,55 +236,83 @@ class TestBatchCollectArgs( unittest.TestCase ):
             convert_open_ended_batch_for_api=MagicMock( return_value={ "questions": [ { "question": "q", "header": "h" } ] } ),
         )
 
+    # ⚠️ _batch_collect_args returns ( answers, reason ) — a 2-tuple on EVERY path
+    # (bug 2aaab1bf). None alone cannot carry WHY a collection came back empty, and
+    # collapsing every outcome into it is what let a transport failure be reported
+    # as a user cancellation. These tests pin the reason, not just the None.
+
     def test_success_returns_answers( self ):
         o = _mk_expeditor( debug=True )
         resp = _resp( value=json.dumps( { "answers": { "budget": "10", "audience": "expert" } } ) )
         with self._patch_tts(), patch.object( ex_mod, "notify_user_sync", return_value=resp ):
-            out = o._batch_collect_args( [ "budget", "audience" ], { "budget": "?", "audience": "?" },
-                                         "u@x", { "budget": "no limit" }, "agent router go to deep research" )
-        self.assertEqual( out, { "budget": "10", "audience": "expert" } )
+            answers, reason = o._batch_collect_args( [ "budget", "audience" ], { "budget": "?", "audience": "?" },
+                                                     "u@x", { "budget": "no limit" }, "agent router go to deep research" )
+        self.assertEqual( answers, { "budget": "10", "audience": "expert" } )
+        self.assertEqual( reason, BATCH_ANSWERED )
 
-    def test_failure_returns_none( self ):
+    def test_failure_returns_unreachable( self ):
         o = _mk_expeditor()
         with self._patch_tts(), patch.object( ex_mod, "notify_user_sync", return_value=_resp( success=False, value=None ) ):
-            self.assertIsNone( o._batch_collect_args( [ "a", "b" ], {}, "u@x" ) )
+            answers, reason = o._batch_collect_args( [ "a", "b" ], {}, "u@x" )
+        self.assertIsNone( answers )
+        self.assertEqual( reason, BATCH_UNREACHABLE )
 
-    def test_malformed_json_returns_none( self ):
+    def test_timeout_returns_timeout( self ):
+        o = _mk_expeditor()
+        resp = _resp( success=False, value=None )
+        resp.is_timeout = True
+        with self._patch_tts(), patch.object( ex_mod, "notify_user_sync", return_value=resp ):
+            answers, reason = o._batch_collect_args( [ "a", "b" ], {}, "u@x" )
+        self.assertIsNone( answers )
+        self.assertEqual( reason, BATCH_TIMEOUT )
+
+    def test_malformed_json_returns_malformed( self ):
         o = _mk_expeditor( debug=True )
         with self._patch_tts(), patch.object( ex_mod, "notify_user_sync", return_value=_resp( value="not json" ) ):
-            self.assertIsNone( o._batch_collect_args( [ "a", "b" ], {}, "u@x" ) )
+            answers, reason = o._batch_collect_args( [ "a", "b" ], {}, "u@x" )
+        self.assertIsNone( answers )
+        self.assertEqual( reason, BATCH_MALFORMED )
 
-    def test_cancelled_flag_returns_none( self ):
+    def test_cancelled_flag_returns_declined( self ):
         o = _mk_expeditor()
         with self._patch_tts(), patch.object( ex_mod, "notify_user_sync",
                                               return_value=_resp( value=json.dumps( { "cancelled": True } ) ) ):
-            self.assertIsNone( o._batch_collect_args( [ "a", "b" ], {}, "u@x" ) )
+            answers, reason = o._batch_collect_args( [ "a", "b" ], {}, "u@x" )
+        self.assertIsNone( answers )
+        self.assertEqual( reason, BATCH_DECLINED )
 
-    def test_empty_answers_returns_none( self ):
+    def test_empty_answers_returns_malformed( self ):
         o = _mk_expeditor()
         with self._patch_tts(), patch.object( ex_mod, "notify_user_sync",
                                               return_value=_resp( value=json.dumps( { "answers": {} } ) ) ):
-            self.assertIsNone( o._batch_collect_args( [ "a", "b" ], {}, "u@x" ) )
+            answers, reason = o._batch_collect_args( [ "a", "b" ], {}, "u@x" )
+        self.assertIsNone( answers )
+        self.assertEqual( reason, BATCH_MALFORMED )
 
-    def test_cancellation_keyword_in_answer_returns_none( self ):
+    def test_cancellation_keyword_in_answer_returns_declined( self ):
         o = _mk_expeditor()
         resp = _resp( value=json.dumps( { "answers": { "a": "stop", "b": "x" } } ) )
         with self._patch_tts(), patch.object( ex_mod, "notify_user_sync", return_value=resp ):
-            self.assertIsNone( o._batch_collect_args( [ "a", "b" ], {}, "u@x" ) )
+            answers, reason = o._batch_collect_args( [ "a", "b" ], {}, "u@x" )
+        self.assertIsNone( answers )
+        self.assertEqual( reason, BATCH_DECLINED )
 
-    def test_missing_arg_in_answers_returns_none( self ):
+    def test_missing_arg_in_answers_returns_incomplete( self ):
         o = _mk_expeditor( debug=True )
         resp = _resp( value=json.dumps( { "answers": { "a": "x" } } ) )   # missing "b"
         with self._patch_tts(), patch.object( ex_mod, "notify_user_sync", return_value=resp ):
-            self.assertIsNone( o._batch_collect_args( [ "a", "b" ], {}, "u@x" ) )
+            answers, reason = o._batch_collect_args( [ "a", "b" ], {}, "u@x" )
+        self.assertIsNone( answers )
+        self.assertEqual( reason, BATCH_INCOMPLETE )
 
     def test_default_value_attached_without_command_key( self ):
         # command_key=None → resolved_default = fallback_defaults.get(arg) directly.
         o = _mk_expeditor()
         resp = _resp( value=json.dumps( { "answers": { "a": "1", "b": "2" } } ) )
         with self._patch_tts(), patch.object( ex_mod, "notify_user_sync", return_value=resp ):
-            out = o._batch_collect_args( [ "a", "b" ], { "a": "qa" }, "u@x", { "a": "da" }, command_key=None )
-        self.assertEqual( out, { "a": "1", "b": "2" } )
+            answers, reason = o._batch_collect_args( [ "a", "b" ], { "a": "qa" }, "u@x", { "a": "da" }, command_key=None )
+        self.assertEqual( answers, { "a": "1", "b": "2" } )
+        self.assertEqual( reason, BATCH_ANSWERED )
 
 
 # ============================================================================

@@ -48,6 +48,7 @@ from cosa.agents.runtime_argument_expeditor.expeditor import (
     BATCH_ANSWERED,
     BATCH_DECLINED,
     BATCH_UNREACHABLE,
+    BATCH_TIMEOUT,
     BATCH_MALFORMED,
     BATCH_INCOMPLETE,
 )
@@ -102,12 +103,21 @@ def test_undeliverable_is_unreachable_not_declined():
     assert reason != BATCH_DECLINED, "an undeliverable prompt is not a user decision"
 
 
-def test_timeout_is_also_unreachable_not_declined():
-    """A timeout is a non-answer too — the user may never have seen the prompt."""
+def test_timeout_is_timeout_not_declined():
+    """
+    OVERTURN, on the record. Commit b326d015 deliberately merged timeout INTO
+    BATCH_UNREACHABLE ("a timeout is a non-answer too"). That merge existed only to
+    keep a machine failure from being reported as "you cancelled" — it lumped the
+    two because nothing then needed them apart. Bug 68198c9f now does: the user hears
+    a different sentence for "didn't hear back in time" (asked, no answer) than for
+    "couldn't reach you" (never asked). Grounds to split: the invariant b326d015
+    protected is KEPT — both stay non-declined — and only the granularity widens.
+    """
     answers, reason = _collect( _response( False, None, status="timeout", is_timeout=True ) )
 
     assert answers is None
-    assert reason == BATCH_UNREACHABLE
+    assert reason == BATCH_TIMEOUT
+    assert reason != BATCH_UNREACHABLE, "timed-out and undeliverable must stay distinct"
     assert reason != BATCH_DECLINED
 
 
@@ -176,6 +186,7 @@ def test_complete_answers_come_back_with_answered():
 
 @pytest.mark.parametrize( "response", [
     _response( False, None, status="http_error_503" ),
+    _response( False, None, status="timeout", is_timeout=True ),
     _response( True, "not json" ),
     _response( True, '{"cancelled": true}' ),
     _response( True, '{"answers": {"query": "x", "budget": "y"}}' ),
@@ -191,18 +202,19 @@ def test_every_path_returns_a_two_tuple( response ):
         f"every return must be ( answers, reason ); got {result!r}"
     )
     answers, reason = result
-    assert reason in ( BATCH_ANSWERED, BATCH_DECLINED, BATCH_UNREACHABLE,
+    assert reason in ( BATCH_ANSWERED, BATCH_DECLINED, BATCH_UNREACHABLE, BATCH_TIMEOUT,
                        BATCH_MALFORMED, BATCH_INCOMPLETE ), f"unknown reason {reason!r}"
 
 
-def test_the_five_reasons_are_distinct():
+def test_the_six_reasons_are_distinct():
     """
     Guards against a well-meaning 'simplification' that collapses two reasons back
     into one — which is the original defect, just with nicer names.
     """
-    reasons = [ BATCH_ANSWERED, BATCH_DECLINED, BATCH_UNREACHABLE, BATCH_MALFORMED, BATCH_INCOMPLETE ]
+    reasons = [ BATCH_ANSWERED, BATCH_DECLINED, BATCH_UNREACHABLE, BATCH_TIMEOUT,
+                BATCH_MALFORMED, BATCH_INCOMPLETE ]
 
-    assert len( set( reasons ) ) == 5, "the BATCH_* reasons must not share values"
+    assert len( set( reasons ) ) == 6, "the BATCH_* reasons must not share values"
 
 
 def test_only_declined_is_treated_as_a_user_decision_by_the_caller():

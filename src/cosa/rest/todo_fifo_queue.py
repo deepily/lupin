@@ -49,7 +49,10 @@ from lupin_cli.notifications.notification_models import (
 
 # Runtime Argument Expeditor imports for agentic job routing
 from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
-from cosa.agents.runtime_argument_expeditor.expeditor import RuntimeArgumentExpeditor
+from cosa.agents.runtime_argument_expeditor.expeditor import (
+    RuntimeArgumentExpeditor,
+    user_message_for_expedite_reason,
+)
 
 # Mode-to-Agent mapping for direct routing (bypasses LLM router)
 MODE_TO_AGENT = {
@@ -1162,12 +1165,16 @@ class TodoFifoQueue( FifoQueue ):
             job_id            = spec_id
         )
 
-        # ── Step 4: Handle cancel/timeout ────────────────────────────────
+        # ── Step 4: Handle failure — say WHY, and only blame the user for a real "no" ──
+        # expedite() records the cause on _last_expedite_reason (bug 68198c9f). A
+        # prompt that could not be delivered, or timed out, is a machine failure — it
+        # must never be reported as the user cancelling a job they never saw.
         if args_dict is None:
+            spoken, log_line = user_message_for_expedite_reason( expeditor._last_expedite_reason )
             emit_job_state_transition( self.websocket_mgr, spec_id, JobState.QUEUED, JobState.CANCELLED, user_id )
             self.user_job_tracker.remove_job( spec_id )
-            self._notify( "Job cancelled.", target_user=user_email )
-            return "Agentic job cancelled by user or timeout."
+            self._notify( spoken, target_user=user_email )
+            return log_line
 
         # ── Step 4.5: Extract runtime scheduling args (not agent-specific) ──
         scheduled_at_raw = args_dict.pop( "scheduled_at", None )

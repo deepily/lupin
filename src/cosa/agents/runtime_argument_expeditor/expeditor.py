@@ -51,9 +51,54 @@ from cosa.utils.notification_utils import (
 # --------------------------------------------------------------------------- #
 BATCH_ANSWERED    = "answered"      # got every arg asked for
 BATCH_DECLINED    = "declined"      # the USER said no — the ONLY reason that is a user decision
-BATCH_UNREACHABLE = "unreachable"   # could not deliver, or timed out — the user was never asked
+BATCH_UNREACHABLE = "unreachable"   # could not deliver — the user was never asked (no live socket)
+BATCH_TIMEOUT     = "timeout"       # delivered or not, the budget elapsed with no answer
 BATCH_MALFORMED   = "malformed"     # delivered, but the response could not be parsed
 BATCH_INCOMPLETE  = "incomplete"    # answered, but a required arg came back missing or blank
+BATCH_INTERNAL    = "internal"      # setup failed before the user could be asked (e.g. unknown command)
+
+
+# --------------------------------------------------------------------------- #
+# Turning a failure reason into what the user hears (bug 68198c9f).
+#
+# expedite() used to return a bare None on every failure, so the caller said one
+# thing for all of them: "Agentic job cancelled by user or timeout." A prompt
+# that could not be delivered — the user never saw it — was reported as the user
+# cancelling. ONLY BATCH_DECLINED is a human decision; every other reason is a
+# machine failure and must never be phrased as something the user did.
+# --------------------------------------------------------------------------- #
+def user_message_for_expedite_reason( reason ):
+    """
+    Map an expedite failure reason to the ( spoken, log_line ) the user gets.
+
+    Requires:
+        - reason is one of the BATCH_* strings, None, or any unknown string
+
+    Ensures:
+        - returns a 2-tuple of non-empty strings ( spoken, log_line )
+        - ONLY BATCH_DECLINED produces a message that attributes the outcome
+          to the user; every other reason (including None / unknown) is worded
+          as a machine failure the user did not cause
+    """
+    messages = {
+        BATCH_DECLINED    : ( "Okay, I've cancelled that job.",
+                              "Agentic job cancelled: the user declined." ),
+        BATCH_UNREACHABLE : ( "I couldn't reach you to confirm the details, so I held off on starting the job. Just ask again when you're ready.",
+                              "Agentic job not started: the confirmation prompt could not be delivered (user had no live connection)." ),
+        BATCH_TIMEOUT     : ( "I didn't hear back in time, so I didn't start the job. Just ask again when you're ready.",
+                              "Agentic job not started: the confirmation timed out with no answer." ),
+        BATCH_MALFORMED   : ( "I couldn't make out your answer, so I didn't start the job. Let's try that again.",
+                              "Agentic job not started: the response could not be understood." ),
+        BATCH_INCOMPLETE  : ( "I'm still missing some details, so I haven't started the job yet.",
+                              "Agentic job not started: required details were incomplete." ),
+        BATCH_INTERNAL    : ( "Something went wrong setting up that job, so I didn't start it.",
+                              "Agentic job not started: internal error during argument expediting." ),
+    }
+    return messages.get(
+        reason,
+        ( "Something went wrong setting up that job, so I didn't start it.",
+          "Agentic job not started: unrecognized expedite failure reason." )
+    )
 
 
 class RuntimeArgumentExpeditor:
@@ -99,10 +144,32 @@ class RuntimeArgumentExpeditor:
         self.confirmation_prompt_path  = config_mgr.get( "prompt template for argument confirmation" )
         self.llm_factory               = LlmClientFactory( debug=debug, verbose=verbose )
         self._last_notification_status = None
-        # Why the last batch collection ended without answers — one of the BATCH_*
-        # constants. Readable by callers so an UNREACHABLE job is never recorded as
-        # a user cancellation (bug 2aaab1bf).
-        self._last_batch_reason        = None
+        # Why the last expedite() ended without a complete args dict — one of the
+        # BATCH_* constants, or None on success. Readable by the caller so an
+        # UNREACHABLE / TIMEOUT job is never recorded as a user cancellation
+        # (bugs 2aaab1bf, 68198c9f). Set on EVERY failure path, not just the batch.
+        self._last_expedite_reason     = None
+
+    @staticmethod
+    def _classify_ask_failure( response ):
+        """
+        Classify a failed/empty notification response into a machine-failure reason.
+
+        Requires:
+            - response has .success, .is_timeout attributes
+
+        Ensures:
+            - NEVER returns BATCH_DECLINED — a decline is a parsed user answer,
+              detected by the caller, not a failed delivery
+            - is_timeout            -> BATCH_TIMEOUT
+            - delivered but empty   -> BATCH_MALFORMED (exit 0, no usable value)
+            - otherwise             -> BATCH_UNREACHABLE (never delivered)
+        """
+        if response.is_timeout:
+            return BATCH_TIMEOUT
+        if response.success:
+            return BATCH_MALFORMED
+        return BATCH_UNREACHABLE
 
     def expedite( self, command, raw_args, user_email, session_id, user_id, original_question, job_id=None, bearer_token=None ):
         """
@@ -132,12 +199,14 @@ class RuntimeArgumentExpeditor:
         Returns:
             dict or None: Complete argument dictionary or None on cancel
         """
-        self._job_id       = job_id
-        self._bearer_token = bearer_token
+        self._job_id               = job_id
+        self._bearer_token         = bearer_token
+        self._last_expedite_reason = None
 
         agent_entry = AGENTIC_AGENTS.get( command )
         if not agent_entry:
             print( f"[Expeditor] Unknown command: {command}" )
+            self._last_expedite_reason = BATCH_INTERNAL
             return None
 
         # Step 1: Capture --help output
@@ -259,7 +328,7 @@ class RuntimeArgumentExpeditor:
                 if self.debug: print( f"[Expeditor] Batch-collecting {len( batchable )} args: {batchable}" )
                 batch_answers, batch_reason = self._batch_collect_args( batchable, fallback_questions, user_email, fallback_defaults, command, abstract=request_abstract )
                 if batch_answers is None:
-                    self._last_batch_reason = batch_reason
+                    self._last_expedite_reason = batch_reason
                     if batch_reason == BATCH_DECLINED:
                         print( "[Expeditor] User declined batch collection" )
                     else:
@@ -418,6 +487,7 @@ class RuntimeArgumentExpeditor:
                 return args_dict
 
             if lower == "no":
+                self._last_expedite_reason = BATCH_DECLINED
                 return None
 
             # "yes [comment: ...]" or "no [comment: ...]"
@@ -441,6 +511,7 @@ class RuntimeArgumentExpeditor:
                         # Loop continues — re-present updated summary
                         continue
                 # No comment or parse failed — respect the "no"
+                self._last_expedite_reason = BATCH_DECLINED
                 return None
 
         # Safety valve: too many iterations
@@ -721,11 +792,14 @@ class RuntimeArgumentExpeditor:
 
         if response.success and response.response_value:
             value = response.response_value.strip()
-            # Check for cancellation keywords
+            # Check for cancellation keywords — the ONE outcome that is a user decision
             if value.lower() in ( "cancel", "nevermind", "never mind", "stop", "quit" ):
+                self._last_expedite_reason = BATCH_DECLINED
                 return None
             return value
 
+        # No usable answer — a machine failure, never a user cancellation (bug 68198c9f)
+        self._last_expedite_reason = self._classify_ask_failure( response )
         return None
 
     def _ask_for_confirmation( self, message, user_email, abstract=None ):
@@ -773,6 +847,9 @@ class RuntimeArgumentExpeditor:
         if response.success and response.response_value:
             return response.response_value.strip()
 
+        # Confirmation never got a usable answer — a machine failure, not a decline
+        # (bug 68198c9f). The measured stage-killer: an undeliverable confirm.
+        self._last_expedite_reason = self._classify_ask_failure( response )
         return None
 
     @staticmethod
@@ -884,10 +961,13 @@ class RuntimeArgumentExpeditor:
                    f"value={response.response_value[ :100 ] if response.response_value else None}" )
 
         if not response.success or not response.response_value:
-            # The user was NEVER ASKED — the prompt could not be delivered (503 when
-            # no websocket is registered) or it timed out. Carries no information
-            # about what the user wants. Bug 2aaab1bf.
-            return None, BATCH_UNREACHABLE
+            # The user was NEVER (effectively) ASKED. Two distinct machine failures,
+            # neither a user decision (bugs 2aaab1bf, 68198c9f): a timeout means the
+            # budget elapsed with no answer; anything else means the prompt could not
+            # be delivered (503 when no websocket is registered). Rick reads different
+            # words for each on stage, so they must not collapse into one reason.
+            reason = BATCH_TIMEOUT if response.is_timeout else BATCH_UNREACHABLE
+            return None, reason
 
         # Parse JSON response
         try:
