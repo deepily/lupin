@@ -291,7 +291,7 @@ class PodcastConfig:
     # === Execution Limits ===
     max_script_revisions          : int = 3
     feedback_timeout_seconds      : int = 300
-    script_review_timeout_seconds : int = 240  # Longer timeout for reviewing full scripts
+    script_review_timeout_seconds : int = 600  # Fail-open review window; on timeout the gate continues (10 min)
 
     # === Output Configuration ===
     output_dir_template        : str   = "io/podcasts/{user}"
@@ -451,7 +451,7 @@ class PodcastConfig:
             examples_per_topic        = _get( "podcast examples per topic",        "2",    "int" ),
             max_script_revisions      = _get( "podcast max script revisions",      "3",    "int" ),
             feedback_timeout_seconds  = _get( "podcast feedback timeout seconds",  "300",  "int" ),
-            script_review_timeout_seconds = _get( "podcast script review timeout seconds", "240", "int" ),
+            script_review_timeout_seconds = _get( "podcast script review timeout seconds", "600", "int" ),
             output_dir_template       = _get( "podcast output dir template",       "io/podcasts/{user}" ),
             script_filename_template  = _get( "podcast script filename template",  "{timestamp}-{topic}-script.md" ),
             audio_filename_template   = _get( "podcast audio filename template",   "{timestamp}-{topic}.mp3" ),

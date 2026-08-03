@@ -58,6 +58,66 @@ logger = logging.getLogger( __name__ )
 ELEVENLABS_COST_PER_1K_CHARS = 0.30  # $0.30 per 1000 characters
 
 
+def build_auto_continue_disclosure( timeout_seconds: int ) -> str:
+    """
+    Build the "silence means keep going" sentence appended to a podcast
+    script-review question.
+
+    The podcast approval gate FAILS OPEN: if the user does not answer within
+    the review timeout, generation continues on its own (via response_default
+    at the gate). The user must be able to hear/read that this is what silence
+    does, so this sentence rides in the QUESTION text — format_questions_for_tts
+    speaks the question (not the options), so this is the part the user hears.
+
+    Requires:
+        - timeout_seconds is a positive int
+
+    Ensures:
+        - returns one natural-language sentence naming the wait in whole minutes
+          (floored, minimum 1) and stating that silence continues generation
+        - the stated minutes track the timeout, so the spoken promise cannot
+          drift from the actual wait
+
+    Raises:
+        - ValueError if timeout_seconds is not a positive int
+    """
+    if not isinstance( timeout_seconds, int ) or isinstance( timeout_seconds, bool ) or timeout_seconds <= 0:
+        raise ValueError( f"timeout_seconds must be a positive int, got {timeout_seconds!r}" )
+
+    minutes = max( 1, timeout_seconds // 60 )
+    unit    = "minute" if minutes == 1 else "minutes"
+    return (
+        f"If you don't respond within about {minutes} {unit}, "
+        f"I'll keep going and finish the podcast automatically."
+    )
+
+
+def auto_approval_notice( auto_approved: bool ) -> str:
+    """
+    One-line completion note stating whether the script reached audio WITHOUT a
+    human reading it.
+
+    The approval gate fails open, so "Approve script" in the completion can mean
+    either a real approval or a silent timeout. Clayton's review flagged that the
+    two are otherwise indistinguishable to whoever reads the finished podcast, so
+    when the approval came from the timeout default we say so, plainly.
+
+    Requires:
+        - auto_approved is a bool
+
+    Ensures:
+        - returns a single plain sentence when auto_approved is True
+        - returns "" when auto_approved is False (a human approved — nothing to
+          disclose)
+    """
+    if auto_approved:
+        return (
+            "This script was approved automatically because the review window "
+            "elapsed with no response — nobody read it before it went to audio."
+        )
+    return ""
+
+
 class PodcastGenerationError( Exception ):
     """
     Raised when a core LLM-backed generation step (content analysis or script
@@ -400,18 +460,18 @@ class PodcastOrchestratorAgent:
 
                 revision_label = f" (Revision {self._podcast_state[ 'revision_count' ]})" if self._podcast_state[ "revision_count" ] > 0 else ""
 
-                choice = await voice_io.present_choices(
+                choice = await self._present_script_review(
                     questions = [ {
                         "question"    : "Podcast script is ready. How would you like to proceed?",
                         "header"      : "Script Review",
                         "multiSelect" : False,
                         "options"     : [
-                            { "label": "Approve script", "description": "Keep script and continue" },
+                            { "label": "Approve script", "description": "Keep script and continue (this happens automatically if you don't respond)" },
                             { "label": "Revise script", "description": "Provide feedback for changes" },
                             { "label": "Cancel", "description": "Discard script and stop" }
                         ]
                     } ],
-                    timeout  = self.config.script_review_timeout_seconds,
+                    header   = "Script Review",
                     abstract = script_preview,
                     title    = f"Script Review{revision_label}",
                 )
@@ -424,10 +484,13 @@ class PodcastOrchestratorAgent:
                     return None
 
                 elif review_choice == "Approve script":
-                    # Explicit approval - save and exit loop
+                    # Approval - save and exit loop. The gate fails open, so this
+                    # branch also fires when the review window elapsed with no
+                    # answer; record WHICH so the completion can disclose it.
                     script.revision_count = self._podcast_state[ "revision_count" ]
                     script_path = await self._save_script_async( script )
                     self._podcast_state[ "draft_script_path" ] = script_path
+                    self._podcast_state[ "script_auto_approved" ] = bool( choice.get( "default_used", False ) )
                     script_approved = True
 
                 else:
@@ -532,18 +595,18 @@ class PodcastOrchestratorAgent:
                     translated_preview = self._get_script_preview( translated_script )
                     translated_preview += f"\n\n**Full Script**: {translated_link}"
 
-                    choice = await voice_io.present_choices(
+                    choice = await self._present_script_review(
                         questions = [ {
                             "question"    : f"How would you like to proceed with the {lang_name} script?",
                             "header"      : f"{lang_name} Review",
                             "multiSelect" : False,
                             "options"     : [
-                                { "label": "Approve script", "description": f"Keep {lang_name} script and continue" },
+                                { "label": "Approve script", "description": f"Keep {lang_name} script and continue (this happens automatically if you don't respond)" },
                                 { "label": "Revise script", "description": "Provide feedback for changes" },
                                 { "label": "Skip language", "description": f"Skip {lang_name} version entirely" }
                             ]
                         } ],
-                        timeout  = self.config.script_review_timeout_seconds,
+                        header   = f"{lang_name} Review",
                         abstract = translated_preview,
                         title    = f"{lang_name} Script Review",
                     )
@@ -753,6 +816,9 @@ class PodcastOrchestratorAgent:
             lang_count = len( scripts_by_language )
             lang_summary = f"{lang_count} language(s)" if lang_count > 1 else "1 language"
 
+            auto_notice   = auto_approval_notice( self._podcast_state.get( "script_auto_approved", False ) )
+            approval_line = f"\n\n**Approval**: {auto_notice}" if auto_notice else ""
+
             await voice_io.notify(
                 f"All podcasts complete! {lang_summary}, ~{audio_duration_mins:.1f} min each",
                 priority = "high",
@@ -764,6 +830,7 @@ class PodcastOrchestratorAgent:
                            f"**Total Cost**: ${total_cost:.4f}\n\n"
                            + "\n".join( output_lines ) + "\n\n"
                            f"**Research**: {research_link}"
+                           + approval_line
             )
 
             return script
@@ -839,18 +906,18 @@ class PodcastOrchestratorAgent:
 
                 revision_label = f" (Revision {self._podcast_state[ 'revision_count' ]})" if self._podcast_state[ "revision_count" ] > 0 else ""
 
-                choice = await voice_io.present_choices(
+                choice = await self._present_script_review(
                     questions = [ {
                         "question"    : "How would you like to proceed with this script?",
                         "header"      : "Script Review",
                         "multiSelect" : False,
                         "options"     : [
-                            { "label": "Approve script", "description": "Keep script and finish" },
+                            { "label": "Approve script", "description": "Keep script and finish (this happens automatically if you don't respond)" },
                             { "label": "Revise script", "description": "Provide feedback for changes" },
                             { "label": "Cancel", "description": "Discard changes and stop" }
                         ]
                     } ],
-                    timeout  = self.config.script_review_timeout_seconds,
+                    header   = "Script Review",
                     abstract = script_preview,
                     title    = f"Script Review{revision_label}",
                 )
@@ -863,10 +930,13 @@ class PodcastOrchestratorAgent:
                     return None
 
                 elif review_choice == "Approve script":
-                    # Explicit approval - save and exit loop
+                    # Approval - save and exit loop. The gate fails open, so this
+                    # branch also fires when the review window elapsed with no
+                    # answer; record WHICH so the completion can disclose it.
                     script.revision_count = self._podcast_state[ "revision_count" ]
                     script_path = await self._save_script_async( script )
                     self._podcast_state[ "draft_script_path" ] = script_path
+                    self._podcast_state[ "script_auto_approved" ] = bool( choice.get( "default_used", False ) )
                     script_approved = True
 
                 else:
@@ -1079,6 +1149,10 @@ class PodcastOrchestratorAgent:
             ]
             if research_link:
                 abstract_lines.append( f"**Research**: {research_link}" )
+
+            auto_notice = auto_approval_notice( self._podcast_state.get( "script_auto_approved", False ) )
+            if auto_notice:
+                abstract_lines.append( f"**Approval**: {auto_notice}" )
 
             await voice_io.notify(
                 f"Podcast audio complete! Duration: {audio_duration_mins:.1f} minutes",
@@ -1510,6 +1584,58 @@ class PodcastOrchestratorAgent:
         except Exception as e:
             logger.warning( f"Failed to delete draft script: {e}" )
             # Non-fatal - continue anyway
+
+    async def _present_script_review(
+        self,
+        questions: list,
+        header: str,
+        abstract: Optional[ str ] = None,
+        title: Optional[ str ] = None,
+        continue_label: str = "Approve script",
+    ) -> dict:
+        """
+        Present a podcast script-review choice that FAILS OPEN.
+
+        Rick's requirement: the demo must not stall if he misses a prompt. So
+        this gate CONTINUES generation when the user is silent, instead of
+        dead-lettering. Two things make that happen, both centralized here:
+
+        1. The auto-continue disclosure (synced to the review timeout) is
+           appended to the question text, so the user hears/reads that silence
+           keeps generation going — format_questions_for_tts speaks the
+           question, not the options, so the sentence must ride in the question.
+        2. A response_default is declared for `header`, so voice_io returns
+           `continue_label` when no human answers within the timeout (rather
+           than raising VoiceGateNoDefaultError, which is what dead-letters the
+           job today). This is the DESIGNED unattended-gate seam, not a change
+           to the shared voice dispatcher.
+
+        Requires:
+            - questions is a one-item list whose dict is keyed under `header`,
+              carries a non-empty `question` string, and lists an option whose
+              label is `continue_label`
+            - self.config.script_review_timeout_seconds is a positive int
+
+        Ensures:
+            - the disclosure sentence is appended to questions[0]["question"]
+            - returns voice_io.present_choices(...) with response_default set so
+              a silent gate resolves to {header: continue_label}
+
+        Raises:
+            - ValueError if the review timeout is not a positive int
+        """
+        timeout = self.config.script_review_timeout_seconds
+        questions[ 0 ][ "question" ] = (
+            questions[ 0 ][ "question" ] + " " + build_auto_continue_disclosure( timeout )
+        )
+
+        return await voice_io.present_choices(
+            questions        = questions,
+            timeout          = timeout,
+            abstract         = abstract,
+            title            = title,
+            response_default = { header: continue_label },
+        )
 
     def _get_script_preview( self, script: PodcastScript ) -> str:
         """
