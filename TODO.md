@@ -1,5 +1,23 @@
 # TODO
 
+## 📋 DECISIONS LOG 2026-08-02 (Cheech 🌿 `13459df0`) — embedding regeneration scope + venue
+
+**D1 — Regenerate EVERY row, not the subset that looks wrong.** *Ruled by Rick, 2026-08-02.*
+
+I proposed regenerating only the 79,318 rows whose vectors read norm 1.0, treating the other 209,468 as already correct. Rick's ruling: *"We are replacing all of those values not a segment because they represent the results of embeddings created by two different embedding spaces, two different training sets, two different services."*
+
+**Why my version was wrong, in one line**: a norm measures whether a vector was *normalized*, not which model produced it. It separates OpenAI from local only because those two happen to differ in normalization, and it cannot see any boundary *inside* the local era — a model version, training set, service endpoint, or prose/code engine choice could all change without moving the norm. "Already correct" asserted a provenance nothing had measured.
+
+The invariant is one space, one model, one pass. Partial regeneration leaves a mixed space **and leaves it undetectable**, which is how the original defect survived two and a half months. Scope: 158,666 → **578,364** calls. Selection predicate is now "has source text".
+
+**D2 — The fill runs against `:7999` off-peak.** *Ruled by Rick, 2026-08-02.* Rejected `:8000` (monopolize-mode; a multi-hour fill would block every scheduled test suite, and this is not a test suite) and in-process (conflicts with the standing never-grab-a-GPU rule + GPU-0 pinning). Rick added: measure one batch of 256 first and extrapolate, rather than scheduling against a guess.
+
+### ⏳ Still open on this row — nothing is blocked, but nothing writes until these are settled
+
+- **Runtime is unmeasured.** The `/api/busy` probe 404s (endpoint committed, server not yet bounced), so the measurement script's own gate refused to add load to a server it could not read. That refusal is the design working. The batch measurement is owed next.
+- **Rollback undecided.** Once swapped, the old vectors are gone unless the shadow columns are kept or a `pg_dump` of the two tables is taken first. Real disk. Needs a ruling before step 5.
+- **Full walkthrough not yet held.** Rick's standing constraint: no writes to `input_and_output` "until you and I discuss the entire process from beginning to end." D1 and D2 settled scope and venue; the end-to-end walkthrough has not.
+
 ## 🗳️ RULING 2026-08-02 (Rick, via Mr. Radio 🦉 `4829ab05`) — a closed row may now be amended
 
 **Decision**: allow `task_amend` on a terminal row, flagged as a post-terminal addendum. Chosen over adding a `ready-for-gate` status (too much surgery for a P3) and over writing down the process rule (rules get forgotten — this fleet chose a janitor over a "delete when done" instruction for exactly that reason).
