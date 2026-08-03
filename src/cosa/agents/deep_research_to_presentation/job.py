@@ -263,6 +263,52 @@ class DeepResearchToPresentationJob( AgenticJobBase ):
             }
             self.artifacts[ "cost_summary" ] = self.cost_summary
 
+            # ── Completion report: build a rich abstract with clickable links so the
+            #    promoted running→done card renders View Presentation WITHOUT a page
+            #    reload. Before this, the real path returned a bare "Pipeline complete!"
+            #    string and stored NO abstract, so _transition_to_done emitted
+            #    abstract=None → blank done card (bug 2da4095a). Mirrors
+            #    presentation_generator/job.py:304-335. ──
+            import urllib.parse
+            io_base = cu.get_project_root() + "/io/"
+
+            def _doc_link( path, label ):
+                if path and path.startswith( io_base ):
+                    rel = path.replace( io_base, "" )
+                    return f"[{label}](/app/docs?path={urllib.parse.quote( rel )})"
+                return path
+
+            research_link = _doc_link( result.research_path, "📄 View" )
+            yaml_link     = _doc_link( result.yaml_path,     "View YAML" )
+            marp_link     = _doc_link( result.marp_path,     "View Presentation" )
+
+            completion_abstract = f"""**Research → Presentation Complete!**
+
+**Research Report**: {research_link}
+
+**Slides**: {result.slide_count} slides
+
+**YAML**: {yaml_link}
+
+**Presentation**: {marp_link}
+
+**Cost**: ${result.total_cost:.4f}"""
+
+            # Store the abstract in artifacts so it rides the running→done transition
+            # (running_fifo_queue._transition_to_done reads artifacts.get("abstract")).
+            self.artifacts[ "abstract" ] = completion_abstract
+
+            try:
+                await voice_io.notify(
+                    f"Research to presentation complete. Total cost ${result.total_cost:.4f}.",
+                    priority   = "medium",
+                    abstract   = completion_abstract,
+                    job_id     = self.id_hash,
+                    queue_name = "run",
+                )
+            except Exception as notify_err:
+                print( f"[DeepResearchToPresentationJob] completion notify failed: {notify_err}" )
+
             # Return conversational answer
             return f"Pipeline complete! Research report and presentation generated. Total cost: ${result.total_cost:.4f}. Presentation: {self.marp_path}"
 

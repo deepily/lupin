@@ -28,6 +28,20 @@ from cosa.agents.agentic_job_base import AgenticJobBase
 from cosa.rest.job_state import JobState
 
 
+# Display labels for the completion-abstract per-language lines. Kept local (not
+# imported from cosa.agents.podcast_generator.config) so building a card does not
+# drag in the whole podcast_generator package __init__ at runtime — that chain
+# pulls mcp/pydantic and is heavier than a text abstract needs. Unknown codes fall
+# back to the raw code via .get(lang, lang). Mirror of that module's LANGUAGE_NAMES.
+_LANGUAGE_NAMES = {
+    "en"    : "English",
+    "es"    : "Spanish",
+    "es-ES" : "Castilian Spanish (Spain)",
+    "es-MX" : "Mexican Spanish",
+    "es-AR" : "Argentinian Spanish",
+}
+
+
 class DeepResearchToPodcastJob( AgenticJobBase ):
     """
     Background job for Deep Research → Podcast pipeline execution.
@@ -261,6 +275,86 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
                 "total_cost_usd" : result.total_cost,
             }
             self.artifacts[ "cost_summary" ] = self.cost_summary
+
+            # ── Completion report: build a rich abstract with clickable per-language
+            #    links so the promoted running→done card renders Play Here WITHOUT a
+            #    page reload. Before this, the real path returned a bare "Pipeline
+            #    complete!" string and stored NO abstract, so _transition_to_done
+            #    emitted abstract=None → blank done card (bug 2da4095a; sibling of
+            #    9b481811, but a missing BUILD, not just a missing store). Mirrors
+            #    podcast_generator/job.py:358-406. ──
+            import urllib.parse
+            io_base = cu.get_project_root() + "/io/"
+
+            def _to_rel( p ):
+                if not p: return None
+                if p.startswith( io_base ): return p[ len( io_base ): ]
+                if p.startswith( "io/" ):   return p[ 3: ]
+                return p.lstrip( "/" )
+
+            def _script_link( rel ):
+                return f"[📝 Script](/app/docs?path={urllib.parse.quote( rel )})" if rel else None
+
+            def _audio_triplet( rel ):
+                enc = urllib.parse.quote( rel )
+                return (
+                    f"[▶️ Play Here](/app/audio?path={enc}&embed=1) | "
+                    f"[🎧 Listen](/app/audio?path={enc}) | "
+                    f"[⬇️ Download](/api/io/file?path={enc}&download=true)"
+                )
+
+            # One labelled link set PER language (bug 00e6aba1: a two-language run
+            # writes two mp3s but must link BOTH, not just the primary). The maps ride
+            # pg_artifacts from the orchestrator; fall back to the single primary path
+            # for single-language / older state so the loop below stays uniform.
+            audio_by_lang  = dict( result.pg_artifacts.get( "audio_paths_by_language" )  or {} )
+            script_by_lang = dict( result.pg_artifacts.get( "script_paths_by_language" ) or {} )
+            languages      = self.target_languages or [ "en" ]
+            if not audio_by_lang and result.audio_path:
+                audio_by_lang = { languages[ 0 ]: result.audio_path }
+            if not script_by_lang and result.script_path:
+                script_by_lang = { languages[ 0 ]: result.script_path }
+
+            # Requested order first, then any extra language that produced an artifact.
+            ordered_langs = [ l for l in languages if l in audio_by_lang or l in script_by_lang ]
+            for l in list( audio_by_lang ) + list( script_by_lang ):
+                if l not in ordered_langs:
+                    ordered_langs.append( l )
+
+            per_language_lines = []
+            for lang in ordered_langs:
+                label  = _LANGUAGE_NAMES.get( lang, lang )
+                a_rel  = _to_rel( audio_by_lang.get( lang ) )
+                s_rel  = _to_rel( script_by_lang.get( lang ) )
+                parts  = []
+                s_link = _script_link( s_rel )
+                if s_link: parts.append( s_link )
+                if a_rel:  parts.append( _audio_triplet( a_rel ) )
+                if parts:
+                    per_language_lines.append( f"**{label}**: " + " | ".join( parts ) )
+
+            lines   = [ "**Research → Podcast Complete!**", "" ]
+            r_rel   = _to_rel( result.research_path )
+            if r_rel:
+                lines.append( f"**Research Report**: [📄 View](/app/docs?path={urllib.parse.quote( r_rel )})" )
+            lines.extend( per_language_lines )
+            lines.append( f"**Cost**: ${result.total_cost:.4f}" )
+            completion_abstract = "\n".join( lines )
+
+            # Store the abstract in artifacts so it rides the running→done transition
+            # (running_fifo_queue._transition_to_done reads artifacts.get("abstract")).
+            self.artifacts[ "abstract" ] = completion_abstract
+
+            try:
+                await voice_io.notify(
+                    f"Research to podcast complete. Total cost ${result.total_cost:.4f}.",
+                    priority   = "medium",
+                    abstract   = completion_abstract,
+                    job_id     = self.id_hash,
+                    queue_name = "run",
+                )
+            except Exception as notify_err:
+                print( f"[DeepResearchToPodcastJob] completion notify failed: {notify_err}" )
 
             # Return conversational answer
             return f"Pipeline complete! Research report and podcast generated. Total cost: ${result.total_cost:.4f}. Audio: {self.audio_path}"

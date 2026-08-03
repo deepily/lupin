@@ -441,6 +441,10 @@ class DeepResearchToPodcastAgent:
         script_path = state.get( "script_path" )
         cost = agent.api_client.cost_estimate.estimated_cost_usd if agent._api_client else 0.0
 
+        # Per-language artifact maps from the orchestrator state (bugs 00e6aba1 /
+        # 2da4095a): a multi-language run writes one audio+script pair per language.
+        # Thread ALL of them through so the job's completion abstract can link every
+        # language, not just the primary. Absent (single-language / older state) → None.
         return {
             "audio_path"  : audio_path,
             "script_path" : script_path,
@@ -450,6 +454,8 @@ class DeepResearchToPodcastAgent:
                 "title"        : script.title if script else None,
                 "segment_count": script.get_segment_count() if script else 0,
                 "duration_min" : script.estimated_duration_minutes if script else 0,
+                "audio_paths_by_language"  : state.get( "audio_paths_by_language" ),
+                "script_paths_by_language" : state.get( "script_paths_by_language" ),
             },
             "cancelled"   : False,
         }
