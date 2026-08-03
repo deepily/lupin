@@ -124,6 +124,10 @@ class TestPodcastOverlayPlayHere:
         _render_abstract( page )
         _click_play_here( page )
         page.locator( OVERLAY ).wait_for( state="visible", timeout=5000 )
+        # Prove the player actually LOADED before dismissing — an X-Frame-Options
+        # DENY leaves the iframe element in the DOM with the right src but an
+        # unrendered error document, so an element-only check would false-green.
+        page.frame_locator( FRAME ).locator( "audio" ).wait_for( state="attached", timeout=5000 )
 
         # Dismiss removes the iframe → playback stops (Rio: ✕ removes the iframe).
         page.locator( DISMISS ).click()
@@ -139,6 +143,8 @@ class TestPodcastOverlayPlayHere:
         _click_play_here( page )
         page.locator( OVERLAY ).wait_for( state="visible", timeout=5000 )
         assert page.locator( FRAME ).get_attribute( "src" ).endswith( "&embed=1" )
+        # Not a src-only false-green: require the framed player document to load.
+        page.frame_locator( FRAME ).locator( "audio" ).wait_for( state="attached", timeout=5000 )
 
     def test_listen_link_opens_a_tab_and_never_the_overlay( self, notifications_page ):
         # NEGATIVE: a plain /app/audio link (no &embed=1) is NOT intercepted —
