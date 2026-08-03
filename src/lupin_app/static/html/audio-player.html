@@ -14,6 +14,11 @@
             padding: 0 24px 48px;
         }
 
+        /* embed=1 — strip nav + page chrome so the player fits a narrow container */
+        body.embed #lupin-nav { display: none !important; }
+        body.embed .audio-player-container { margin: 8px auto; padding: 0 12px 12px; }
+        body.embed .audio-player-content h1.audio-player-title { margin-top: 12px; font-size: 20px; }
+
         .audio-player-loading {
             text-align: center;
             padding: 64px 0;
@@ -105,9 +110,14 @@
     <script src="/static/js/lupin-nav.js" defer></script>
     <script>
         ( async function() {
-            const target = document.getElementById( 'audio-player-target' );
-            const params = new URLSearchParams( window.location.search );
-            const path   = params.get( 'path' );
+            const target   = document.getElementById( 'audio-player-target' );
+            const params   = new URLSearchParams( window.location.search );
+            const path     = params.get( 'path' );
+            const embed    = params.get( 'embed' ) === '1';
+            const autoplay = params.get( 'autoplay' ) === '1';
+
+            // embed=1 — hide nav + tighten chrome (set synchronously, before deferred nav renders)
+            if ( embed ) document.body.classList.add( 'embed' );
 
             if ( !path ) {
                 target.className = 'audio-player-error';
@@ -182,6 +192,35 @@
                         <dt>Size</dt><dd>${fileSizeStr}</dd>
                     </dl>
                 </details>`;
+
+            // autoplay=1 — MEASUREMENT PROBE: attempt play() with no fresh gesture on
+            // this frame and report whether the browser permitted it. Reports to a
+            // visible element AND console ("[AUTOPLAY-PROBE] ...") for headless capture.
+            if ( autoplay ) {
+                const audioEl  = target.querySelector( 'audio.audio-player-element' );
+                const resultEl = document.createElement( 'div' );
+                resultEl.id = 'autoplay-result';
+                resultEl.style.cssText = 'margin:16px 0;padding:12px;border-radius:6px;font-size:14px;font-family:monospace;';
+                target.appendChild( resultEl );
+                const mark = ( ok, detail ) => {
+                    const tag = ok ? 'AUTOPLAY_FIRED' : 'AUTOPLAY_BLOCKED';
+                    resultEl.textContent = tag + ': ' + detail;
+                    resultEl.style.background = ok ? '#dcfce7' : '#fee2e2';
+                    resultEl.style.color      = ok ? '#166534' : '#991b1b';
+                    console.log( '[AUTOPLAY-PROBE] ' + tag + ' ' + detail );
+                };
+                try {
+                    const p = audioEl.play();
+                    if ( p !== undefined ) {
+                        p.then( () => mark( true, 'play() resolved; paused=' + audioEl.paused ) )
+                         .catch( ( err ) => mark( false, err.name + ': ' + err.message ) );
+                    } else {
+                        mark( true, 'play() returned undefined (legacy); paused=' + audioEl.paused );
+                    }
+                } catch ( err ) {
+                    mark( false, 'sync throw: ' + err.name + ': ' + err.message );
+                }
+            }
         } )();
     </script>
 </body>
