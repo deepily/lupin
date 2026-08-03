@@ -173,22 +173,61 @@ def is_reask_capped( gate ):
     return count >= cap
 
 
-def pokeable_gates( gates, now_epoch ):
+def is_user_deferred( now_epoch, user_chase_until_epoch ):
+    """
+    Is this gate's USER deferred to a future scheduled chase right now?
+
+    Store row be56bff8 — the per-USER reconciliation. "Rick is unreachable until T"
+    is ONE fact about a person, not a property of each gate. The Stop-hook / arbiter
+    IO shell derives `user_chase_until_epoch` from the STORE (the soonest FUTURE
+    next_chase_ts among this session's blocked_by:[{kind:user}] rows) — the deferral
+    a seat can actually cause via task_transition. While the user is deferred EVERY
+    open gate to that user inherits it, so no hold-file gate ever has to be linked to
+    a store row.
+
+    Requires:
+        - now_epoch is POSIX seconds
+        - user_chase_until_epoch is a POSIX-seconds float, or None (no per-user chase)
+
+    Ensures:
+        - Returns True iff user_chase_until_epoch is not None AND now_epoch is
+          STRICTLY before it (now_epoch < user_chase_until_epoch)
+        - Boundary: now_epoch EXACTLY == user_chase_until_epoch is NOT deferred (the
+          chase has arrived ⇒ eligible), mirroring is_chase_deferred's >= boundary
+        - Read-time expiry: once now passes the chase, the shell derives no future
+          chase and this returns False — the gate re-surfaces (parked-row semantics,
+          no sweeper)
+        - PURE: no clock (now injected), no IO; never raises
+    """
+    return user_chase_until_epoch is not None and now_epoch < user_chase_until_epoch
+
+
+def pokeable_gates( gates, now_epoch, user_chase_until_epoch=None ):
     """
     Open gates eligible to be surfaced/re-asked — the relief-valve-filtered set.
 
-    An open gate is POKEABLE iff it is neither chase-deferred (a future
-    next_chase_ts) nor reask-capped (budget spent with no scheduled chase). This
-    is the set the proactive-manager Face-B re-surface consults; due_gates filters
-    it further by each gate's own re-ask cadence.
+    An open gate is POKEABLE iff its USER is not deferred (store row be56bff8 —
+    per-USER deferral) AND it is neither chase-deferred (a future next_chase_ts) nor
+    reask-capped (budget spent with no scheduled chase). This is the set the
+    proactive-manager Face-B re-surface consults; due_gates filters it further by
+    each gate's own re-ask cadence.
 
     Requires:
         - gates is an iterable of gate-row dicts, or None; now_epoch is POSIX secs
+        - user_chase_until_epoch is a POSIX-seconds float, or None (no per-user chase)
 
     Ensures:
-        - Returns the subset of open_gates(gates) that is neither deferred nor capped
+        - Returns [] when the gate's user is deferred (is_user_deferred) — the whole
+          per-user set goes quiet until the chase arrives, no matter each gate's own
+          fields
+        - Otherwise returns the subset of open_gates(gates) that is neither
+          chase-deferred nor reask-capped
+        - user_chase_until_epoch defaults to None ⇒ byte-for-byte the pre-be56bff8
+          behavior (no per-user suppression); backward compatible
         - Input order preserved; PURE; never raises on well-formed dict input
     """
+    if is_user_deferred( now_epoch, user_chase_until_epoch ):
+        return [ ]
     return [ g for g in open_gates( gates )
              if not is_chase_deferred( g, now_epoch ) and not is_reask_capped( g ) ]
 
@@ -209,35 +248,38 @@ def open_gates( gates ):
              if isinstance( g, dict ) and not g.get( "answered", False ) ]
 
 
-def due_gates( gates, now_epoch ):
+def due_gates( gates, now_epoch, user_chase_until_epoch=None ):
     """
     Gates to RE-FIRE this tick — POKEABLE gates whose re-ask cadence has elapsed.
 
-    A gate is DUE iff it is POKEABLE (open AND neither chase-deferred nor
-    reask-capped — the bug-75f392c0 relief valve) AND ( it has never been asked
-    (last_asked_ts missing/undateable ⇒ bias-to-ask) OR now − last_asked_ts ≥
-    reask_interval_s ).
+    A gate is DUE iff it is POKEABLE (its user is not deferred AND it is open AND
+    neither chase-deferred nor reask-capped — the be56bff8 per-user + 75f392c0
+    relief valves) AND ( it has never been asked (last_asked_ts missing/undateable
+    ⇒ bias-to-ask) OR now − last_asked_ts ≥ reask_interval_s ).
 
-    The relief-valve filter is applied FIRST (via pokeable_gates): a gate deferred
-    to a future scheduled chase, or one that spent its re-ask budget with no chase
-    scheduled, is NOT due however stale its last ask — this is what stops the
-    every-turn re-ask storm on an offline-user gate.
+    The relief-valve filter is applied FIRST (via pokeable_gates): a gate whose user
+    is deferred to a future store chase, or one deferred to its own future chase, or
+    one that spent its re-ask budget with no chase scheduled, is NOT due however
+    stale its last ask — this is what stops the every-turn re-ask storm on an
+    offline-user gate.
 
     Requires:
         - gates is an iterable of gate-row dicts, or None
         - now_epoch is the caller's injected "now" (POSIX seconds)
+        - user_chase_until_epoch is a POSIX-seconds float, or None (no per-user chase)
 
     Ensures:
-        - Returns the subset of pokeable_gates(gates, now_epoch) that are due to
-          re-ask now (relief-valve-filtered, then cadence-filtered)
+        - Returns the subset of pokeable_gates(gates, now_epoch, user_chase_until_epoch)
+          that are due to re-ask now (relief-valve-filtered, then cadence-filtered)
         - Boundary: age EXACTLY == reask_interval_s is DUE (>=) — a 10-min-old
           ask is re-fired, matching "re-ask at least every 10 min"
         - A row with a non-int/bool reask_interval_s falls back to the default
           cadence (never crashes on foreign data)
+        - user_chase_until_epoch defaults to None ⇒ pre-be56bff8 behavior
         - PURE: no clock, no IO; never raises on well-formed dict input
     """
     out = [ ]
-    for g in pokeable_gates( gates, now_epoch ):
+    for g in pokeable_gates( gates, now_epoch, user_chase_until_epoch ):
         interval = g.get( "reask_interval_s", DEFAULT_REASK_INTERVAL_S )
         if isinstance( interval, bool ) or not isinstance( interval, int ):
             interval = DEFAULT_REASK_INTERVAL_S
@@ -247,7 +289,7 @@ def due_gates( gates, now_epoch ):
     return out
 
 
-def aged_open_gates( gates, now_epoch, age_seconds ):
+def aged_open_gates( gates, now_epoch, age_seconds, user_chase_until_epoch=None ):
     """
     Open gates whose last (re-)ask is OLDER than a FIXED `age_seconds` threshold —
     the arbiter's "this session stopped re-asking" signal (6929f4ac §9.2 backstop).
@@ -257,22 +299,93 @@ def aged_open_gates( gates, now_epoch, age_seconds ):
     gate only after the session has clearly failed to re-ask it for a long while
     (e.g. 2x the re-ask cadence), independent of the gate's per-row interval.
 
+    Per-USER deferral (store row be56bff8): the arbiter resurface reads the SAME
+    hold file as the seat's Stop hook, so it must honor the same per-user store
+    chase — else fixing the seat but not the arbiter just MOVES the nag (the
+    sibling-gate lesson). A deferred user ⇒ nothing to resurface.
+
     Requires:
         - gates is an iterable of gate-row dicts, or None
         - now_epoch is the caller's injected "now" (POSIX seconds)
         - age_seconds is the staleness ceiling (positive number)
+        - user_chase_until_epoch is a POSIX-seconds float, or None (no per-user chase)
 
     Ensures:
-        - Returns the subset of open_gates(gates) whose last_asked_ts age is None
-          (never asked / undateable ⇒ aged) OR >= age_seconds
+        - Returns [] when the gate's user is deferred (is_user_deferred)
+        - Otherwise returns the subset of open_gates(gates) whose last_asked_ts age
+          is None (never asked / undateable ⇒ aged) OR >= age_seconds
+        - user_chase_until_epoch defaults to None ⇒ pre-be56bff8 behavior
         - PURE: no clock, no IO; never raises on well-formed dict input
     """
+    if is_user_deferred( now_epoch, user_chase_until_epoch ):
+        return [ ]
     out = [ ]
     for g in open_gates( gates ):
         age = _iso_age_seconds( g.get( "last_asked_ts" ), now_epoch )
         if age is None or age >= age_seconds:
             out.append( g )
     return out
+
+
+def _blocked_by_has_user( blocked_by ):
+    """
+    Does a store row's blocked_by carry any {kind: "user"} ref? (pure; never raises)
+
+    Requires:
+        - blocked_by is the row's blocked_by value (any type tolerated)
+
+    Ensures:
+        - Returns True iff blocked_by is a list containing a dict whose "kind" == "user"
+        - Non-list / no user ref ⇒ False
+    """
+    if not isinstance( blocked_by, list ):
+        return False
+    return any( isinstance( ref, dict ) and ref.get( "kind" ) == "user"
+                for ref in blocked_by )
+
+
+def derive_user_chase_until( rows, now_epoch ):
+    """
+    The soonest FUTURE user-chase instant among a session's blocked store rows —
+    the per-USER deferral source (store row be56bff8).
+
+    Given this owner's `blocked` rows (task_store_client.query_blocked_user_rows),
+    find every row that is blocked on a user ({kind:"user"} in blocked_by) and whose
+    next_chase_ts is STILL IN THE FUTURE, and return the earliest such instant. That
+    is `user_chase_until`, which is_user_deferred consumes to suppress this session's
+    hold-file gates until the chase arrives.
+
+    "Soonest" (min) is the conservative liveness choice: gates re-surface at the
+    EARLIEST moment the user might be reachable again, never later. Read-time expiry
+    falls out for free — a chase that has already passed contributes NOTHING, so once
+    the last future chase elapses this returns None and the gates re-surface, with no
+    sweeper (parked-row semantics).
+
+    Requires:
+        - rows is an iterable of store-row dicts, or None (foreign data tolerated)
+        - now_epoch is the caller's injected "now" (POSIX seconds)
+
+    Ensures:
+        - Returns the minimum FUTURE next_chase_ts (as POSIX seconds) among rows
+          blocked on a user, or None when there is no such future chase
+        - A row with no user block / an absent-unparseable / past / == now chase is
+          ignored (== now has arrived ⇒ not future ⇒ eligible, mirroring the boundary)
+        - PURE: no clock (now injected), no IO; never raises on well-formed dict input
+    """
+    soonest = None
+    for row in ( rows or [ ] ):
+        if not isinstance( row, dict ):
+            continue
+        if not _blocked_by_has_user( row.get( "blocked_by" ) ):
+            continue
+        # age = now - next_chase_ts; age < 0 ⇒ the chase is in the FUTURE.
+        age = _iso_age_seconds( row.get( "next_chase_ts" ), now_epoch )
+        if age is None or age >= 0:
+            continue                                  # no / unparseable / already-arrived chase
+        chase_epoch = now_epoch - age                 # reconstruct the future instant (age < 0)
+        if soonest is None or chase_epoch < soonest:
+            soonest = chase_epoch
+    return soonest
 
 
 def upsert_gate( gates, gate ):

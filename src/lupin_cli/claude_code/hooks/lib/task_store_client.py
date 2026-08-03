@@ -189,6 +189,48 @@ def query_by_correlation_key( settings, api_key, correlation_key ):
     return _request( "GET", f"{settings['api_base_url']}/api/tasks?{query}", api_key, settings[ "timeout_seconds" ] )
 
 
+def query_blocked_user_rows( settings, api_key, owner_persona, timeout=None ):
+    """
+    GET this owner's `blocked` rows (full fidelity) — the per-USER gate-deferral
+    source (store row be56bff8).
+
+    The Stop hook / arbiter derives `user_chase_until` from these: the soonest
+    FUTURE next_chase_ts among the rows whose blocked_by carries any {kind:"user"}
+    ref. `blocked` rows are EXCLUDED from the owed-count query, so they need their
+    own fetch. Full rows (NOT count_only) — the caller needs blocked_by + next_chase_ts.
+
+    Fired ONLY when the session has open hold-file gates (the common zero-gate Stop
+    pays nothing), so the extra round-trip is off the hot path in practice. Still
+    bounded by the aggressive owed-timeout: a slow :7999 must never stall turn-end.
+
+    Requires:
+        - settings is the load_task_store_settings() dict (provides api_base_url)
+        - api_key is a string (may be empty — server 401s it)
+        - owner_persona is the lowercased canonical persona key
+        - timeout overrides DEFAULT_OWED_TIMEOUT_SECONDS (seconds, per request)
+
+    Ensures:
+        - Returns ( ok, rows ):
+            ok   : True iff a 2xx carried a list under `tasks`
+            rows : that list of full row dicts (empty list when ok is False)
+        - ANY transport failure / non-2xx / malformed body / missing-or-non-list
+          `tasks` → ( False, [] )  (§C fail-safe: the caller does NOT suppress on a
+          bad read — never silently bury an open user decision on a store outage)
+        - NEVER raises
+    """
+    if timeout is None:
+        timeout = DEFAULT_OWED_TIMEOUT_SECONDS
+    query = urllib.parse.urlencode( { "owner_persona": owner_persona, "status": "blocked" } )
+    ok, _status, body = _request(
+        "GET", f"{settings['api_base_url']}/api/tasks?{query}", api_key, timeout )
+    if not ok:
+        return False, [ ]
+    rows = body.get( "tasks" )
+    if not isinstance( rows, list ):
+        return False, [ ]
+    return True, rows
+
+
 def _open_owed_connection( api_base_url, timeout ):
     """
     Open ONE keep-alive HTTP(S) connection for the owed count request (O3).

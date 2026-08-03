@@ -163,6 +163,39 @@ class TestWireShape:
         assert ok is True
 
 
+class TestQueryBlockedUserRows:
+    """be56bff8 — the per-USER gate-deferral source: full `blocked` rows for one
+    owner. Fail-safe toward LIVENESS: any bad read ⇒ ( False, [] )."""
+
+    def test_encodes_owner_and_status_and_returns_rows( self, capture ):
+        rows = [ { "id": "r1", "status": "blocked",
+                   "blocked_by": [ { "kind": "user", "id": "rick" } ] } ]
+        capture[ "outcome" ] = FakeResponse( 200, json.dumps( { "tasks": rows, "count": 1 } ) )
+        ok, got = tc.query_blocked_user_rows( SETTINGS, "k", "mr radio" )
+        req = capture[ "request" ]
+        assert req.get_method() == "GET" and req.data is None
+        assert req.full_url == "http://test:7999/api/tasks?owner_persona=mr+radio&status=blocked"
+        assert capture[ "timeout" ] == tc.DEFAULT_OWED_TIMEOUT_SECONDS   # hot-path budget, not settings
+        assert ( ok, got ) == ( True, rows )
+
+    def test_timeout_override_is_passed( self, capture ):
+        capture[ "outcome" ] = FakeResponse( 200, '{"tasks": []}' )
+        tc.query_blocked_user_rows( SETTINGS, "k", "krishna", timeout=0.25 )
+        assert capture[ "timeout" ] == 0.25
+
+    def test_non_list_tasks_is_not_ok( self, capture ):
+        capture[ "outcome" ] = FakeResponse( 200, '{"tasks": "oops"}' )
+        assert tc.query_blocked_user_rows( SETTINGS, "k", "krishna" ) == ( False, [ ] )
+
+    def test_missing_tasks_key_is_not_ok( self, capture ):
+        capture[ "outcome" ] = FakeResponse( 200, '{"count": 0}' )
+        assert tc.query_blocked_user_rows( SETTINGS, "k", "krishna" ) == ( False, [ ] )
+
+    def test_transport_failure_is_not_ok( self, capture ):
+        capture[ "outcome" ] = ConnectionError( "boom" )   # urlopen raises → transport failure
+        assert tc.query_blocked_user_rows( SETTINGS, "k", "krishna" ) == ( False, [ ] )
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # query_owed — Spine Step-2 store-count owed reader, O3 connection-reuse path
 # (_open_owed_connection + _count_on_connection + query_owed) — 100% L/B/F

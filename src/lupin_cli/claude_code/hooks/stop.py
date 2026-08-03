@@ -91,7 +91,7 @@ from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import (
 # src/rnd/v0.1.8/2026.06.16-store-canonical-task-mgmt-cascade-review.md
 from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 from lupin_cli.claude_code.hooks.lib.task_store_settings import load_task_store_settings
-from lupin_cli.claude_code.hooks.lib.task_store_client import read_api_key, query_owed, query_owed_breakdowns
+from lupin_cli.claude_code.hooks.lib.task_store_client import read_api_key, query_owed, query_owed_breakdowns, query_blocked_user_rows
 # v4 acked-inbound ledger (Rick 2026-06-10) — explicit "looked-at" qids the
 # unanswered-inbound gatherer subtracts (spec part (c)).
 from lupin_cli.claude_code.hooks.lib.heartbeat_acked_ledger import read_acked_qids
@@ -1534,6 +1534,42 @@ def _owed_count_from_store( session_id ):
         return 0, False, { }, { }
 
 
+def _user_chase_until_from_store( session_id, now_epoch ):
+    """
+    Resolve THIS session's per-USER gate-deferral instant from the store (be56bff8).
+
+    The soonest FUTURE next_chase_ts among this owner's blocked_by:[{kind:user}]
+    rows — the deferral a seat actually causes via task_transition(blocked). While
+    it is in the future, is_user_deferred suppresses this session's hold-file gates
+    (pokeable/due/aged), so a gate deferred in the STORE stops re-asking a user the
+    seat just proved unreachable — WITHOUT any key linking the two representations.
+
+    Requires:
+        - session_id is the resolved stable session id string
+        - now_epoch is the caller's injected "now" (POSIX seconds)
+
+    Ensures:
+        - Returns the minimum future user-chase epoch (float), or None when the
+          store has no such row
+        - §C FAIL-SAFE toward LIVENESS: a store outage / bad read → None (do NOT
+          suppress). Suppressing on an unknown read could silently bury an open user
+          decision; a store outage is transient and the storm it resumes is bounded.
+        - Routes the persona through the SAME canonical key as the owed-count read
+        - NEVER raises
+    """
+    try:
+        settings    = load_task_store_settings()
+        api_key     = read_api_key()
+        persona     = get_voice_persona( session_id )
+        persona_key = canonical_persona_key( persona.get( "name" ) if isinstance( persona, dict ) else None ) or "unknown"
+        ok, rows = query_blocked_user_rows( settings, api_key, persona_key )
+        if not ok:
+            return None
+        return heartbeat_user_gates.derive_user_chase_until( rows, now_epoch )
+    except Exception:
+        return None
+
+
 # The store's owed statuses, mapped onto the oracle's TODO vocabulary (c191be39).
 #
 # `parked` maps to PENDING (Rick's ruling, plan §4.3a): an admitted parked row has
@@ -1973,14 +2009,22 @@ def _resolve_owed_state( session_id, transcript_path=None, cwd=None ):
         threshold_seconds = settings[ "verification_threshold_seconds" ] )
     user_gates    = get_pending_user_gates( hold )
     open_gates    = heartbeat_user_gates.open_gates( user_gates )      # every not-answered gate (tracked; arbiter aged-backstop set)
+    # be56bff8 per-USER deferral: a gate the seat deferred in the STORE
+    # (task_transition -> blocked + future next_chase_ts — the deferral verb a seat
+    # actually has) must go quiet, but the hold-file row it never touched has no own
+    # chase to strip. So derive the per-user chase from the store and suppress ALL of
+    # this session's gates while the user is deferred. ONLY queried when there ARE
+    # open gates (the common zero-gate Stop pays no round-trip); fail-safe to None
+    # (no suppression) on a bad read so a store outage never buries an open decision.
+    user_chase_until = _user_chase_until_from_store( session_id, now_epoch ) if open_gates else None
     # bug 75f392c0 relief valve: a gate deferred to a FUTURE scheduled chase (an
     # offline user with a next_chase_ts) or one that spent its re-ask budget with
     # no chase scheduled is NOT eligible to poke this Stop — pokeable_gates strips
     # those out. due_gates already filters through it (re-ask cadence on top); Face
     # B's re-surface debounce below is fed pokeable so a deferred gate never
     # re-triggers the surface either. open_gates stays the tracked/observability set.
-    pokeable_gates = heartbeat_user_gates.pokeable_gates( user_gates, now_epoch )  # relief-valve-eligible
-    due_gates     = heartbeat_user_gates.due_gates( user_gates, now_epoch )  # re-ask NOW (poke detail)
+    pokeable_gates = heartbeat_user_gates.pokeable_gates( user_gates, now_epoch, user_chase_until )  # relief-valve-eligible
+    due_gates     = heartbeat_user_gates.due_gates( user_gates, now_epoch, user_chase_until )  # re-ask NOW (poke detail)
     # ── Proactive-manager mechanism (fcb5dbc0, A1) — TWO new debounced signals ──
     # Both ride the SAME pure-debounce shape as the 6929f4ac inward twin, gated on
     # the per-manager stamps in the hold (survive /clear). Config (per-face

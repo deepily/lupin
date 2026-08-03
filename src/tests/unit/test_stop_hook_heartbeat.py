@@ -37,7 +37,7 @@ from lupin_cli.claude_code.hooks.stop import (
     _poke_sentence, _announce_poke, _has_pending_voice,
     _compose_poke_abstract, _build_poke_abstract_safe, _format_inbound, _receipt_lines,
     _owed_count_from_store, _synthesize_owed_items,
-    _resolve_owed_state,
+    _resolve_owed_state, _user_chase_until_from_store,
 )
 from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import (
     TODO_IN_PROGRESS, TODO_PENDING, evaluate_work_owed,
@@ -1670,6 +1670,65 @@ class TestOwedCountFromStore:
         # e.g. load_task_store_settings raises ValueError on malformed config
         self.ts.side_effect = ValueError( "bad task_store config" )
         assert _owed_count_from_store( "sid" ) == ( 0, False, { }, { } )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# be56bff8 per-USER gate deferral — _user_chase_until_from_store (IO shell, L/B/F)
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestUserChaseUntilFromStore:
+    """Resolve the soonest FUTURE user-chase from this owner's blocked store rows.
+    Degrade-safe toward LIVENESS: any bad read ⇒ None ⇒ NO suppression (never bury
+    an open user decision on a store outage)."""
+
+    _NOW = 1_800_000_000.0    # fixed injected "now" (POSIX seconds)
+
+    @pytest.fixture( autouse=True )
+    def _isolate( self ):
+        with patch( "lupin_cli.claude_code.hooks.stop.load_task_store_settings",
+                    return_value={ "api_base_url": "http://t:7999" } ) as ts, \
+             patch( "lupin_cli.claude_code.hooks.stop.read_api_key", return_value="k" ) as rk, \
+             patch( "lupin_cli.claude_code.hooks.stop.get_voice_persona" ) as vp, \
+             patch( "lupin_cli.claude_code.hooks.stop.query_blocked_user_rows" ) as qb:
+            self.ts, self.rk, self.vp, self.qb = ts, rk, vp, qb
+            yield
+
+    def _iso( self, offset_s ):
+        import datetime as _dt
+        return _dt.datetime.fromtimestamp( self._NOW + offset_s, _dt.timezone.utc ).isoformat()
+
+    def test_future_user_chase_returns_soonest_epoch( self ):
+        self.vp.return_value = { "name": "Mr. Radio" }
+        self.qb.return_value = ( True, [
+            { "blocked_by": [ { "kind": "user", "id": "rick" } ], "next_chase_ts": self._iso( 7200 ) },
+            { "blocked_by": [ { "kind": "user", "id": "rick" } ], "next_chase_ts": self._iso( 1800 ) },
+        ] )
+        got = _user_chase_until_from_store( "sid", self._NOW )
+        assert abs( got - ( self._NOW + 1800 ) ) < 1.0
+        # persona routed through the canonical key (period dropped, space kept)
+        assert self.qb.call_args[ 0 ][ 2 ] == "mr radio"
+
+    def test_no_future_user_chase_returns_none( self ):
+        self.vp.return_value = { "name": "Krishna" }
+        self.qb.return_value = ( True, [
+            { "blocked_by": [ { "kind": "user" } ], "next_chase_ts": self._iso( -60 ) },   # past
+        ] )
+        assert _user_chase_until_from_store( "sid", self._NOW ) is None
+
+    def test_persona_none_falls_back_to_unknown( self ):
+        self.vp.return_value = None
+        self.qb.return_value = ( True, [ ] )
+        assert _user_chase_until_from_store( "sid", self._NOW ) is None
+        assert self.qb.call_args[ 0 ][ 2 ] == "unknown"
+
+    def test_not_ok_read_is_none( self ):
+        self.vp.return_value = { "name": "Krishna" }
+        self.qb.return_value = ( False, [ ] )
+        assert _user_chase_until_from_store( "sid", self._NOW ) is None
+
+    def test_exception_is_degrade_safe( self ):
+        self.ts.side_effect = ValueError( "bad task_store config" )
+        assert _user_chase_until_from_store( "sid", self._NOW ) is None
 
 
 # ═════════════════════════════════════════════════════════════════════════════
