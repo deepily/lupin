@@ -76,6 +76,12 @@ def browser_type_launch_args( browser_type_launch_args ):
             "--disable-lcd-text",
             "--force-color-profile=srgb",
             "--force-device-scale-factor=1",
+            # Headless has no audio sink; an unmuted playing <audio> element's media
+            # clock can freeze at ~0. Muting the browser output lets the clock advance
+            # so a playback assertion (currentTime advances) is measurable — WITHOUT
+            # touching the autoplay-gesture policy. Zero visual impact. See
+            # test_podcast_overlay_playback.py (audio player P0, row 4cfabc0f).
+            "--mute-audio",
         ],
     }
 
