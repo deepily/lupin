@@ -180,7 +180,9 @@ class TestPresentationConfig:
         from cosa.config.configuration_manager import ConfigurationManager
         config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
         config = PresentationConfig.from_config( config_mgr )
-        assert config.content_model == "claude-opus-4-6"
+        # Tracks `presentation generator content model` in lupin-app.ini, moved to
+        # Opus 5 by 976498af along with the other five lead-model keys.
+        assert config.content_model == "claude-opus-5"
         assert config.target_duration_minutes == 15
         assert config.slides_per_minute == 1.0
         assert config.title_style == "assertion"
