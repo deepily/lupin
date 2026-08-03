@@ -1,6 +1,10 @@
 # Lupin AF
 
-*Named after Arsene Lupin, the gentleman thief. More about the AF part when the v0.1.6 branch lands in mid-to-late April.*
+*Named after Arsène Lupin, the gentleman thief. The **AF** is **Agent Factory** -- and, yes, the other thing too.*
+
+> **Lupin AF (Agent Factory) is a voice-driven, human-in-the-loop harness that wraps Claude Code so a person who can't type can still drive an agentic coding session as a first-class UX citizen -- not just ride along as a passenger. And that's cool AF.**
+>
+> -- R.P. Ruiz, *[Lupin AF: How I Turned Claude Code Into an Agent Factory That Proves Itself](https://medium.com/@ricardo.felipe.ruiz/lupin-af-how-i-turned-claude-code-into-an-agent-factory-that-proves-itself-fc6f09bafadd)*
 
 **A voice-first AI agent platform that closes the voice loop from browser UI through agent execution into developer tooling and back -- with Bayesian trust learning, fine-tuned intent routing, and solution caching built in.**
 
