@@ -430,7 +430,10 @@ class TestExecuteDryRun:
         assert out == "Dry run complete. Podcast simulation finished."
         assert voice_io.notify.await_count == 6                # 5 breadcrumbs + completion
         assert slp.await_count == 5
-        assert job.audio_path.endswith( "/podcast.mp3" )
+        # Audio now points at the committed, pre-rendered dry-run fixture (io-relative).
+        assert job.audio_path == "fixtures/podcast-dry-run/podcast-dry-run.mp3"
+        assert job.artifacts[ "audio_path" ] == "fixtures/podcast-dry-run/podcast-dry-run.mp3"
+        # Script stays a mock — dry-run generates no script.
         assert job.script_path.endswith( "/script.md" )
         assert job.artifacts[ "podcast_id" ].startswith( "dry-run-" )
         assert job.cost_summary == {
@@ -439,6 +442,33 @@ class TestExecuteDryRun:
             "total_cost_usd"  : 0.0,
         }
         assert "DRY RUN MODE" in capsys.readouterr().out
+
+    def test_dry_run_completion_abstract_emits_overlay_links( self ):
+        """Completion abstract carries Play Here / Listen / Download for the fixture,
+        keeps the 🧪 markers + 'not a real podcast' framing, and leaves the script
+        line as an un-created mock."""
+        job = _job( debug=False )
+        voice_io, cosa_interface = self._voice_iface()
+        with patch( "asyncio.sleep", AsyncMock() ):
+            _run( job._execute_dry_run( voice_io, cosa_interface ) )
+
+        # The completion notify is the one carrying the abstract.
+        completion = next(
+            c for c in voice_io.notify.await_args_list
+            if c.kwargs.get( "abstract" )
+        )
+        abstract = completion.kwargs[ "abstract" ]
+        enc = "fixtures/podcast-dry-run/podcast-dry-run.mp3"
+        assert f"/app/audio?path={enc}&embed=1" in abstract          # Play Here → overlay
+        assert f"/app/audio?path={enc}" in abstract                  # Listen → standalone tab
+        assert f"/api/io/file?path={enc}&download=true" in abstract  # Download
+        assert "Play Here" in abstract and "Listen" in abstract and "Download" in abstract
+        # Never mistakable for a real podcast.
+        assert "🧪" in abstract
+        assert "not a real podcast" in abstract.lower()
+        assert "(mock - not actually created)" in abstract          # script line intact
+        # Spoken message keeps the dry-run flag.
+        assert "🧪" in completion.args[ 0 ]
 
     def test_dry_run_debug_false_no_banner( self, capsys ):
         job = _job( debug=False )
@@ -455,3 +485,21 @@ class TestExecuteDryRun:
         with patch( "asyncio.sleep", AsyncMock() ):
             with pytest.raises( KeyError ):
                 _run( job._execute_dry_run( voice_io, cosa_interface ) )
+
+
+# ----------------------------------------------------------------------------
+# Committed dry-run fixture presence (the link above is a dead end without it)
+# ----------------------------------------------------------------------------
+class TestDryRunFixtureShips:
+    """The audio the dry-run overlay serves is a REAL committed mp3, not a stub."""
+
+    def test_fixture_exists_and_is_mp3( self ):
+        import os
+        import cosa.utils.util as cu
+        path = cu.get_project_root() + "/io/fixtures/podcast-dry-run/podcast-dry-run.mp3"
+        assert os.path.isfile( path ), f"missing dry-run fixture: {path}"
+        assert os.path.getsize( path ) > 10_000            # a real render, not an empty stub
+        with open( path, "rb" ) as f:
+            head = f.read( 4 )
+        # ID3v2 tag ("ID3") or a raw MPEG frame sync (0xFF 0xEx/0xFx).
+        assert head[ :3 ] == b"ID3" or ( head[ 0 ] == 0xFF and ( head[ 1 ] & 0xE0 ) == 0xE0 )

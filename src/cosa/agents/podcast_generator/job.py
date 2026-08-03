@@ -398,6 +398,7 @@ class PodcastGeneratorJob( AgenticJobBase ):
         """
         import asyncio
         import os
+        import urllib.parse
 
         # Set sender_id and target_user for notifications
         cosa_interface.SENDER_ID   = cosa_interface._get_sender_id( suffix=self.base_id )
@@ -428,14 +429,34 @@ class PodcastGeneratorJob( AgenticJobBase ):
         await voice_io.notify( "🧪 Dry run: skipping audio stitching", priority="low", job_id=self.id_hash, queue_name="run" )
         await asyncio.sleep( 1.0 )
 
-        # Set mock results
-        self.audio_path  = f"/io/podcasts/{self.user_email}/dry-run-{self.id_hash}/podcast.mp3"
+        # Audio: point at the committed, pre-rendered dry-run fixture (io-relative).
+        # This is a REAL mp3 that ships with the repo — Maria + Mr. Radio literally
+        # narrating what dry-run mode does (rendered once from mock_clients.
+        # MOCK_SCRIPT_RESPONSE via the production TTS path; see io/fixtures/
+        # podcast-dry-run/README.md). Serving it exercises the entire overlay path
+        # (Play Here link → &embed=1 interception → iframe render → blob-fetch auth →
+        # auto-start) at zero per-run cost.
+        #
+        # Script stays a mock: dry-run does NOT generate a script, so that path is
+        # deliberately fake and framed "(mock - not actually created)".
+        audio_rel        = "fixtures/podcast-dry-run/podcast-dry-run.mp3"
+        self.audio_path  = audio_rel
         self.script_path = f"/io/podcasts/{self.user_email}/dry-run-{self.id_hash}/script.md"
 
-        # Store mock artifacts
+        # Store artifacts
         self.artifacts[ "audio_path" ]  = self.audio_path
         self.artifacts[ "script_path" ] = self.script_path
         self.artifacts[ "podcast_id" ]  = f"dry-run-{self.id_hash}"
+
+        # Clickable audio links — same shape as the real path (job.py:346-348):
+        #   Play Here → &embed=1 floating overlay (auto-starts) · Listen → standalone
+        #   tab · Download → raw mp3 attachment.
+        encoded     = urllib.parse.quote( audio_rel )
+        audio_links = (
+            f"[▶️ Play Here](/app/audio?path={encoded}&embed=1) | "
+            f"[🎧 Listen](/app/audio?path={encoded}) | "
+            f"[⬇️ Download](/api/io/file?path={encoded}&download=true)"
+        )
 
         # Mock cost summary
         self.cost_summary = {
@@ -454,7 +475,9 @@ class PodcastGeneratorJob( AgenticJobBase ):
 
 **Script**: {self.script_path} (mock - not actually created)
 
-**Audio**: {self.audio_path} (mock - not actually created)
+**🧪 Audio**: {audio_links}
+
+_🧪 Pre-rendered dry-run fixture — Maria & Mr. Radio narrating what dry-run mode does. Not a real podcast; no content was generated for this submission._
 
 **Stats**: $0.00 | 10 segments | 5.0s (simulated)"""
 

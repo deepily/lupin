@@ -98,6 +98,15 @@ io/**
 !io/test-suite/visual-baselines/
 !io/test-suite/visual-baselines/**
 
+# EXCEPTION — the pre-rendered dry-run podcast fixture is git-TRACKED so it ships
+# with the repo and never has to be regenerated. It is a REAL mp3 (Maria + Mr.
+# Radio narrating what dry-run mode does) that PodcastGeneratorJob._execute_dry_run
+# serves through the overlay path, making a dry-run submit a zero-cost end-to-end
+# exercise of that path. Same carve pattern as visual-baselines above.
+!io/fixtures/
+!io/fixtures/podcast-dry-run/
+!io/fixtures/podcast-dry-run/**
+
 # Same runtime-artifact class as io/** above, but written UNDER src/ when the
 # codebase-analysis tools (loc-delta / git-delta CSV+PNG) run with cwd=src or
 # cwd=src/cosa. src/io/ is pure output (no source) → ignore wholesale; for
