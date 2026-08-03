@@ -352,6 +352,18 @@ class PodcastOrchestratorAgent:
             if self.debug:
                 print( f"[PodcastOrchestratorAgent] Script generated: {script.get_segment_count()} segments" )
 
+            # Floor (P0 4317efd1): a zero-segment script must NEVER reach the human
+            # approval gate. The parser now RAISES on unrecoverable output; a
+            # genuinely-empty parse ({"segments": []}) still lands here, so reject it
+            # loudly. This raises into the generate() handler → the user sees
+            # "Podcast generation failed" and the job dead-letters, instead of an
+            # empty "Untitled Podcast" being offered for approval.
+            if script.get_segment_count() == 0:
+                raise PodcastGenerationError(
+                    "Podcast script generation produced zero segments — refusing to "
+                    "present an empty script for approval. Please try again."
+                )
+
             if self._check_stop(): return await self._handle_stop()
 
             # =================================================================
@@ -1379,6 +1391,12 @@ class PodcastOrchestratorAgent:
 
         except Exception as e:
             logger.error( f"Script revision failed: {e}" )
+            # P0 4317efd1: tell the user the revision failed instead of silently
+            # handing back the previous script with no explanation.
+            await voice_io.notify(
+                f"Script revision failed — keeping the previous script. ({str( e )[ :100 ]})",
+                priority = "high",
+            )
             # Return original script unchanged
             return current_script
 
@@ -1644,6 +1662,13 @@ Generate the {language_name} script in JSON format with the same structure:
             logger.error( f"Script translation to {target_language} failed: {e}" )
             if self.debug:
                 print( f"[PodcastOrchestratorAgent] Translation error: {e}" )
+
+            # P0 4317efd1: tell the user the translation failed instead of silently
+            # substituting the English script.
+            await voice_io.notify(
+                f"{language_name} translation failed — using the English script. ({str( e )[ :100 ]})",
+                priority = "high",
+            )
 
             # Return a copy of English script with updated title as fallback
             return PodcastScript(

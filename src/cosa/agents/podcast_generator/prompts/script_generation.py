@@ -8,10 +8,17 @@ two hosts having complementary roles.
 """
 
 import json
+import logging
 import re
 from typing import Optional
 
 from ..config import HostPersonality, LANGUAGE_NAMES
+from cosa.agents.io_models.utils.json_object_recovery import (
+    extract_json_object,
+    recover_json_object,
+)
+
+logger = logging.getLogger( __name__ )
 
 
 # =============================================================================
@@ -371,75 +378,13 @@ Return the revised script in the same JSON format."""
 # These helpers recover the JSON object best-effort. They are also imported by
 # api_client.py (single source of truth — see CLAUDE.md one-name rule).
 
-def extract_json_object( text: str ) -> Optional[ str ]:
-    """
-    Extract the last balanced JSON object from text by matching braces.
-
-    Recovers a JSON object embedded in surrounding prose (e.g. "Here's the
-    script: { ... }"). Ports the BFE/TFE forensic-parser approach.
-
-    Requires:
-        - text is a string
-
-    Ensures:
-        - returns the substring of the last balanced {...} object, or None
-    """
-    close_idx = text.rfind( "}" )
-    if close_idx == -1:
-        return None
-
-    depth = 0
-    for i in range( close_idx, -1, -1 ):
-        if text[ i ] == "}":
-            depth += 1
-        elif text[ i ] == "{":
-            depth -= 1
-            if depth == 0:
-                return text[ i : close_idx + 1 ]
-
-    return None
-
-
-def lenient_json_loads( response_content: str ) -> Optional[ dict ]:
-    """
-    Best-effort recovery of a JSON object from a (possibly chatty) completion.
-
-    Strategy (D6-LENIENT):
-        1. Strip leading/trailing markdown code fences.
-        2. Try a direct `json.loads`.
-        3. On failure, extract the last balanced {...} object from the prose
-           and retry.
-
-    Requires:
-        - response_content is a string
-
-    Ensures:
-        - returns the parsed dict, or None if no JSON object can be recovered
-    """
-    content = response_content.strip()
-
-    # Strip markdown code fences
-    if content.startswith( "```json" ):
-        content = content[ 7: ]
-    if content.startswith( "```" ):
-        content = content[ 3: ]
-    if content.endswith( "```" ):
-        content = content[ :-3 ]
-    content = content.strip()
-
-    try:
-        return json.loads( content )
-    except json.JSONDecodeError:
-        pass
-
-    extracted = extract_json_object( content )
-    if extracted is None:
-        return None
-
-    try:
-        return json.loads( extracted )
-    except json.JSONDecodeError:
-        return None
+# `extract_json_object` and `recover_json_object` now live in the shared helper
+# `cosa.agents.io_models.utils.json_object_recovery` (de-dup 52cde456: the podcast
+# and presentation copies were byte-identical). The fence-preference fix and the
+# loud-None logging land there, for both agents at once. The historical local name
+# `lenient_json_loads` is kept as an alias so this module's importers
+# (api_client.py, tests) are unchanged.
+lenient_json_loads = recover_json_object
 
 
 # =============================================================================
@@ -491,21 +436,28 @@ def parse_script_response( response_content: str ) -> dict:
     Ensures:
         - Returns dictionary with title, segments, key_topics
         - Recovers JSON embedded in surrounding prose (bounded-CC tolerant)
-        - Returns default structure if no JSON object can be recovered
+        - RAISES ValueError if no JSON object can be recovered (P0 4317efd1) —
+          the caller (orchestrator initial-generation) dead-letters the job with
+          an honest failure rather than presenting an empty script for approval.
 
-    Floor invariant: a recovered object with zero segments still yields an
-    empty-segment script; the downstream audio phase enforces the
-    "no segments → real failure" floor (orchestrator Phase 5 guards), so a
-    cosmetic formatting drift never silently produces a broken podcast.
+    Fail-loud posture (P0 4317efd1): a previous version returned a silent
+    "Untitled Podcast" / 0-segment fallback here, which flowed all the way to the
+    human approval gate looking like a normal (if empty) result. That is why the
+    zero-segment failure hid since March. Unrecoverable output now raises; the
+    orchestrator additionally floors a genuinely-empty (parsed-but-0-segment)
+    script BEFORE the approval gate.
 
     Args:
         response_content: Raw response from Claude
 
     Returns:
         dict: Parsed script data
+
+    Raises:
+        ValueError: if the response contains no recoverable JSON object.
     """
-    parsed = lenient_json_loads( response_content )
-    if parsed is not None:
+    parsed = recover_json_object( response_content )
+    if isinstance( parsed, dict ):
         # Validate required fields
         if "segments" not in parsed:
             parsed[ "segments" ] = []
@@ -513,13 +465,16 @@ def parse_script_response( response_content: str ) -> dict:
             parsed[ "title" ] = "Untitled Podcast"
         return parsed
 
-    # Return default structure if no JSON object can be recovered
-    return {
-        "title"                      : "Untitled Podcast",
-        "segments"                   : [],
-        "key_topics"                 : [],
-        "estimated_duration_minutes" : 0,
-    }
+    # Unrecoverable (None, or a non-object JSON value) → FAIL LOUD (P0 4317efd1).
+    # recover_json_object has already logged the full raw body at ERROR. Raising
+    # here — instead of returning a silent empty fallback — makes the
+    # initial-generation call site dead-letter the job with an honest
+    # "script generation failed", rather than handing the user a 0-segment
+    # "Untitled Podcast" to approve.
+    raise ValueError(
+        "Podcast script response contained no recoverable JSON object — the model "
+        "output could not be parsed into a script."
+    )
 
 
 def extract_prosody_from_text( text: str ) -> tuple[ str, list[ str ] ]:

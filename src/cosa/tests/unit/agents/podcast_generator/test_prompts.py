@@ -228,10 +228,11 @@ class TestParseScriptResponse( unittest.TestCase ):
         parsed = parse_script_response( '```\n{"title": "Bare", "segments": []}\n```' )
         self.assertEqual( parsed[ "title" ], "Bare" )
 
-    def test_invalid_returns_default( self ):
-        parsed = parse_script_response( "garbage" )
-        self.assertEqual( parsed[ "title" ], "Untitled Podcast" )
-        self.assertEqual( parsed[ "estimated_duration_minutes" ], 0 )
+    def test_unrecoverable_raises( self ):
+        # P0 4317efd1: unrecoverable output now FAILS LOUD (ValueError) instead of
+        # returning a silent "Untitled Podcast" / 0-segment fallback.
+        with self.assertRaises( ValueError ):
+            parse_script_response( "garbage" )
 
 
 class TestExtractProsodyFromText( unittest.TestCase ):
@@ -313,10 +314,10 @@ class TestLenientParsers( unittest.TestCase ):
         self.assertEqual( out[ "title" ], "Untitled Podcast" )
         self.assertEqual( out[ "segments" ], [] )
 
-    def test_script_unrecoverable_returns_default( self ):
-        out = parse_script_response( "totally not json" )
-        self.assertEqual( out[ "title" ], "Untitled Podcast" )
-        self.assertEqual( out[ "segments" ], [] )
+    def test_script_unrecoverable_raises( self ):
+        # P0 4317efd1: fail loud, do not hand the user an empty script.
+        with self.assertRaises( ValueError ):
+            parse_script_response( "totally not json" )
 
     def test_analysis_recovers_from_prose( self ):
         out = parse_analysis_response( 'Analysis: {"main_topic": "AI"}' )

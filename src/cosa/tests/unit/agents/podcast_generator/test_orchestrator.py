@@ -889,6 +889,19 @@ class TestDoAllAsync:
         assert result is None
         assert agent.state == OrchestratorState.STOPPED
 
+    def test_zero_segment_script_floored_before_review_gate( self, _silence_voice_io ):
+        # P0 4317efd1 floor: a parsed-but-empty (0-segment) script must be rejected
+        # BEFORE the human approval gate. Proving the raise alone is not enough —
+        # the whole point is that the approval surface is NEVER invoked, so we also
+        # assert present_choices was never awaited.
+        agent = _agent( target_languages=[ "en" ] )
+        _wire_pipeline( agent, script=_script( title="Untitled Podcast", segments=[] ) )
+        with patch( "cosa.utils.util.get_project_root", return_value="/proj" ):
+            with pytest.raises( PodcastGenerationError, match="zero segments" ):
+                _run( agent.do_all_async() )
+        _silence_voice_io[ "choices" ].assert_not_called()   # never reached the gate
+        assert agent.state == OrchestratorState.FAILED
+
     def test_revise_empty_then_custom_then_approve( self, _silence_voice_io ):
         agent = _agent( target_languages=[ "en" ] )
         _wire_pipeline( agent )
