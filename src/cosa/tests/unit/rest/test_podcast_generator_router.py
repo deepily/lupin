@@ -232,6 +232,8 @@ class TestMatchResearchDocs( unittest.TestCase ):
         processor = MagicMock()
         processor.process_template.side_effect = lambda tmpl, _name: tmpl
 
+        self._last_client = client   # let tests assert whether the LLM was invoked
+
         with patch( "cosa.config.configuration_manager.ConfigurationManager", return_value=cfg ), \
              patch( f"{M}.cu.get_project_root", return_value=self.root ), \
              patch( f"{M}.cu.get_file_as_string", return_value="{description}\n{file_list}" ), \
@@ -300,13 +302,25 @@ class TestMatchResearchDocs( unittest.TestCase ):
         result = self._run( "quantum entanglement", [ rel ], search_paths="/bulk", debug=True )
         self.assertEqual( result, [ { "filename": "quantum-entanglement.md", "relative_path": rel } ] )
 
-    def test_prefilter_no_keyword_overlap_uses_full_map( self ):
-        """Ensures: >MAX_CANDIDATES docs but zero overlap → 'no keyword matches' else arm."""
+    def test_prefilter_no_keyword_overlap_bails_before_llm( self ):
+        """Ensures: >MAX_CANDIDATES docs + zero overlap → prefilter flags arbitrary →
+        [] returned WITHOUT calling the LLM (never picks from an unranked slice)."""
         for i in range( 55 ):
             self._write( f"bulk/report_{i:03d}.md" )
-        # description keywords (len>2, non-stopword) that match no path component
-        result = self._run( "xylophone wombat", [], search_paths="/bulk", debug=True )
-        self.assertEqual( result, [] )   # LLM returns no matches; exercising the else arm is the point
+        # keywords (len>2, non-stopword) matching no path component → arbitrary bail
+        result = self._run( "xylophone wombat", [ "bulk/report_000.md" ], search_paths="/bulk", debug=True )
+        self.assertEqual( result, [] )                      # bail, not a match
+        self._last_client.run.assert_not_called()           # LLM never saw the arbitrary slice
+
+    def test_prefilter_small_map_zero_overlap_does_not_bail( self ):
+        """Ensures: a SMALL doc set with a non-overlapping description is complete,
+        so it does NOT bail — the LLM is consulted and resolves a match."""
+        for i in range( 5 ):
+            self._write( f"bulk/report_{i:03d}.md" )
+        rel = "bulk/report_002.md"
+        result = self._run( "xylophone wombat", [ rel ], search_paths="/bulk", debug=True )
+        self.assertEqual( result, [ { "filename": "report_002.md", "relative_path": rel } ] )
+        self._last_client.run.assert_called_once()          # small map → LLM consulted, no bail
 
     def test_llm_exception_returns_empty( self ):
         """Ensures: an LLM .run() exception is caught → [] (except arm, debug print)."""

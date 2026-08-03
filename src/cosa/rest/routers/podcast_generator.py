@@ -252,7 +252,14 @@ async def match_research_docs( user_email: str, description: str, debug: bool = 
     # Voice transcriptions produce noisy descriptions and a repo can hold
     # thousands of markdown files; sending them all overwhelms the local LLM.
     # Shared with the expeditor path so there is one behaviour instead of two.
-    docs_map = prefilter_docs_map_by_keywords( docs_map, description, debug=debug )
+    docs_map, arbitrary = prefilter_docs_map_by_keywords( docs_map, description, debug=debug )
+    if arbitrary:
+        # Too many candidates to send whole, and the description matched no path.
+        # Returning no matches surfaces a visible "no document matched" to the
+        # user (404) rather than letting the model pick confidently from an
+        # unranked slice that only looks like a shortlist.
+        if debug: print( f"[match_research_docs] No keyword overlap on {len( docs_map )}-file cap — returning no matches so the user is asked for an exact path" )
+        return []
 
     # Load prompt template
     template_path = config_mgr.get( "prompt template for fuzzy file matching" )

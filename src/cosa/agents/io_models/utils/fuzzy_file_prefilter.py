@@ -40,18 +40,22 @@ def prefilter_docs_map_by_keywords( docs_map, description, debug=False ):
         - description is a string
 
     Ensures:
-        - returns a dict whose keys are a subset of docs_map's keys
-        - the returned map NEVER exceeds MAX_CANDIDATES entries — a HARD cap
-          that closes the context overflow regardless of what the description
-          says (this is the whole point: a fix that only lowers the odds of
-          the overflow is not a fix)
-        - returns docs_map UNCHANGED (same object) only when it already holds
-          <= MAX_CANDIDATES entries
-        - on a larger map, when keywords overlap candidate paths, keeps the
-          highest-scoring MAX_CANDIDATES
+        - returns a tuple ( result_map, arbitrary )
+        - result_map's keys are a subset of docs_map's keys and NEVER exceed
+          MAX_CANDIDATES entries — a HARD cap so the candidate list can never
+          overflow the model's context regardless of the description
+        - result_map IS docs_map (same object) exactly when docs_map already
+          holds <= MAX_CANDIDATES entries; such a map is returned UNCHANGED and
+          arbitrary is False (a within-budget list is complete, never a guess)
+        - on a larger map with keyword overlap, keeps the highest-scoring
+          MAX_CANDIDATES; arbitrary is False
         - on a larger map with NO scoring signal (no usable keywords, or zero
-          overlap), keeps a deterministic sorted MAX_CANDIDATES slice as a
-          last-resort cap
+          keyword overlap), caps to a deterministic sorted MAX_CANDIDATES slice
+          AND sets arbitrary True: the slice is unranked and may not contain the
+          target, so the CALLER must NOT hand it to the model as a shortlist —
+          it should ask the user for an exact path instead. Capping here still
+          guarantees the no-overflow invariant for any caller that chooses to
+          proceed with disclosure.
         - never returns None; never mutates the input
 
     Args:
@@ -60,11 +64,13 @@ def prefilter_docs_map_by_keywords( docs_map, description, debug=False ):
         debug: enable debug output
 
     Returns:
-        dict: the filtered (or original) { relative_path -> abs_path } map
+        tuple ( dict, bool ): ( result_map, arbitrary ) — see Ensures.
     """
-    # A map that already fits the LLM context needs no work — return it as-is.
+    # A map that already fits the model context needs no work — return it as-is.
+    # This is complete, not a guess, so it is never 'arbitrary' and never bails,
+    # even when the description shares no keyword with any path.
     if len( docs_map ) <= MAX_CANDIDATES:
-        return docs_map
+        return docs_map, False
 
     # Extract keywords from description (lowered, de-duped, stopwords removed).
     desc_words = set(
@@ -89,17 +95,19 @@ def prefilter_docs_map_by_keywords( docs_map, description, debug=False ):
         keep = [ rel for _score, rel in scored[ :MAX_CANDIDATES ] ]
         if debug:
             print( f"[fuzzy_file_prefilter] Pre-filtered {len( docs_map )} → {len( keep )} candidates (top scores: {[ s for s, _ in scored[ :5 ] ]})" )
-    else:
-        # No scoring signal (no usable keywords, or zero keyword overlap) on a
-        # LARGE map. Returning the full map here is the exact context overflow
-        # that took Lane 2 down — so we STILL cap, to a deterministic sorted
-        # slice. The slice is unranked (there is nothing to rank on) but bounded,
-        # which beats a guaranteed HTTP 400.
-        keep = sorted( docs_map.keys() )[ :MAX_CANDIDATES ]
-        if debug:
-            print( f"[fuzzy_file_prefilter] No scoring signal — hard-capping {len( docs_map )} → {len( keep )} (deterministic slice)" )
+        return { k: docs_map[ k ] for k in keep }, False
 
-    return { k: docs_map[ k ] for k in keep }
+    # No scoring signal (no usable keywords, or zero keyword overlap) on a LARGE
+    # map. We MUST cap — returning the full map is the exact overflow that took
+    # Lane 2 down — but a deterministic slice is UNRANKED and may not hold the
+    # target, so we flag it arbitrary. The caller must ask for an exact path
+    # rather than let the model pick confidently from a list that only looks
+    # like a shortlist. (That confident-wrong pick is how a ham-radio report
+    # once nearly went into the demo under a filename that looked right.)
+    keep = sorted( docs_map.keys() )[ :MAX_CANDIDATES ]
+    if debug:
+        print( f"[fuzzy_file_prefilter] No scoring signal — hard-capping {len( docs_map )} → {len( keep )} (arbitrary slice; caller should ask for exact path)" )
+    return { k: docs_map[ k ] for k in keep }, True
 
 
 def quick_smoke_test():
@@ -111,27 +119,29 @@ def quick_smoke_test():
     big_map[ "io/deep-research/x/2026.07.25-the-kiss-protocol-brevity.md" ] = "/abs/kiss.md"
 
     try:
-        # 1) Narrowing path — a specific description picks the KISS doc.
-        out = prefilter_docs_map_by_keywords( big_map, "the kiss brevity protocol", debug=True )
+        # 1) Narrowing path — a specific description picks the KISS doc (not arbitrary).
+        out, arbitrary = prefilter_docs_map_by_keywords( big_map, "the kiss brevity protocol", debug=True )
         assert len( out ) <= MAX_CANDIDATES, f"expected <= {MAX_CANDIDATES}, got {len( out )}"
+        assert arbitrary is False, "keyword-scored narrowing is not arbitrary"
         assert "io/deep-research/x/2026.07.25-the-kiss-protocol-brevity.md" in out, "KISS doc should survive"
         print( "✓ narrowing keeps the keyword-matching doc" )
 
-        # 2) Small map — returned unchanged (same object).
+        # 2) Small map — returned unchanged, never arbitrary, even with zero overlap.
         small = { "io/a.md": "/abs/a.md", "io/b.md": "/abs/b.md" }
-        assert prefilter_docs_map_by_keywords( small, "anything", debug=False ) is small
-        print( "✓ small map returned unchanged" )
+        out, arbitrary = prefilter_docs_map_by_keywords( small, "quantum zzz nomatch", debug=False )
+        assert out is small and arbitrary is False, "small map must return unchanged, not arbitrary"
+        print( "✓ small map returned unchanged (never bails)" )
 
-        # 3) No usable keywords on a large map — STILL hard-capped.
-        out = prefilter_docs_map_by_keywords( big_map, "the a of it", debug=False )
-        assert len( out ) == MAX_CANDIDATES, f"keyword-less large map must cap to {MAX_CANDIDATES}, got {len( out )}"
-        print( "✓ keyword-less large map hard-capped" )
+        # 3) No usable keywords on a large map — hard-capped AND flagged arbitrary.
+        out, arbitrary = prefilter_docs_map_by_keywords( big_map, "the a of it", debug=False )
+        assert len( out ) == MAX_CANDIDATES and arbitrary is True, "keyword-less large map must cap + flag arbitrary"
+        print( "✓ keyword-less large map hard-capped + arbitrary" )
 
-        # 4) Zero overlap on a large map — STILL hard-capped (deterministic slice).
-        out = prefilter_docs_map_by_keywords( big_map, "quantum entanglement chromodynamics", debug=False )
-        assert len( out ) == MAX_CANDIDATES, f"zero-overlap large map must cap to {MAX_CANDIDATES}, got {len( out )}"
-        assert list( out.keys() ) == sorted( big_map.keys() )[ :MAX_CANDIDATES ], "fallback slice must be deterministic"
-        print( "✓ zero-overlap large map hard-capped (deterministic)" )
+        # 4) Zero overlap on a large map — hard-capped, deterministic, arbitrary.
+        out, arbitrary = prefilter_docs_map_by_keywords( big_map, "quantum entanglement chromodynamics", debug=False )
+        assert len( out ) == MAX_CANDIDATES and arbitrary is True, "zero-overlap large map must cap + flag arbitrary"
+        assert list( out.keys() ) == sorted( big_map.keys() )[ :MAX_CANDIDATES ], "arbitrary slice must be deterministic"
+        print( "✓ zero-overlap large map hard-capped (deterministic, arbitrary)" )
 
         print( "\n✓ ALL fuzzy_file_prefilter smoke tests passed" )
     except AssertionError as e:

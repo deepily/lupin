@@ -1099,7 +1099,18 @@ class RuntimeArgumentExpeditor:
         # is sent to phi-4's 8k context and the request fails HTTP 400 before
         # any description is judged. Shared with the router path so there is one
         # behaviour instead of two.
-        docs_map = prefilter_docs_map_by_keywords( docs_map, description, debug=self.debug )
+        docs_map, arbitrary = prefilter_docs_map_by_keywords( docs_map, description, debug=self.debug )
+        if arbitrary:
+            # The candidate set was too large to send whole, and the description
+            # matched no path — a capped slice here is unranked and may not hold
+            # the target. Ask for an exact path rather than let the model pick
+            # confidently from a list that only looks like a shortlist.
+            if self.debug: print( "[Expeditor] No keyword overlap on a large candidate set — asking for an exact path instead of guessing" )
+            return self._ask_for_arg(
+                "research",
+                "I couldn't match that to a document. Please say the exact filename or path.",
+                user_email
+            )
 
         # Try fuzzy matching via LLM
         try:

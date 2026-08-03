@@ -209,17 +209,44 @@ class TestFuzzyFileMatch( unittest.TestCase ):
             out = o._handle_fuzzy_file_match( "u@x" )
         return out, captured.get( "prompt", "" )
 
-    def test_large_map_hard_capped_through_handler_zero_overlap( self ):
-        # 200 files, a description that overlaps NO path → the fallback hard cap
-        # must fire so the LLM never sees more than MAX_CANDIDATES paths. This is
-        # the exact overflow that took Lane 2 down, proven closed end-to-end.
+    def test_large_map_zero_overlap_bails_to_ask_exact_path( self ):
+        # 200 files, a description that overlaps NO path → prefilter flags the
+        # capped slice 'arbitrary' → the handler must BAIL to _ask_for_arg for an
+        # exact path and NEVER hand the model an unranked list (the confident-
+        # wrong-pick failure). Proven end-to-end: the LLM is never called.
         o = _mk_expeditor()
-        # deterministic slice → first sorted rel path is the match the LLM returns
-        first_rel = sorted( f"src/doc-{i}.md" for i in range( MAX_CANDIDATES * 4 ) )[ 0 ]
-        out, prompt = self._run_with_large_walk( o, "zzznomatch qqqunrelated", [ first_rel ] )
-        self.assertEqual( prompt.count( "- src/" ), MAX_CANDIDATES )   # HARD cap, not 200
-        self.assertIn( f"- {first_rel}", prompt )
-        self.assertTrue( out.endswith( first_rel.split( "/" )[ -1 ] ) )
+        files = [ f"doc-{i}.md" for i in range( MAX_CANDIDATES * 4 ) ]
+        cm = _inner_config_mgr()
+        llm_client = MagicMock( run=MagicMock( return_value="<xml/>" ) )
+        with _patch_config_mgr( cm ), \
+             patch.object( ex_mod.cu, "get_project_root", return_value="/p" ), \
+             patch.object( ex_mod.os.path, "exists", side_effect=lambda p: p.endswith( "/src" ) ), \
+             patch.object( ex_mod.os, "walk", return_value=[ ( "/p/src", [], files ) ] ), \
+             patch.object( o, "_ask_for_arg", side_effect=[ "zzznomatch qqqunrelated", "/exact/path.md" ] ) as ask:
+            o.llm_factory.get_client = MagicMock( return_value=llm_client )
+            out = o._handle_fuzzy_file_match( "u@x" )
+        self.assertEqual( out, "/exact/path.md" )   # the bail's exact-path answer
+        self.assertEqual( ask.call_count, 2 )        # description, then exact-path bail
+        llm_client.run.assert_not_called()           # never sent an arbitrary list to the model
+
+    def test_small_map_zero_overlap_resolves_through_handler( self ):
+        # Mr Radio's edge: a SMALL folder (Rick's ~8 docs) with a non-overlapping
+        # description must NOT bail — it is complete, so the LLM sees all of it
+        # and resolves. Breaking this to fix the large case would be a regression.
+        o = _mk_expeditor()
+        files = [ f"doc-{i}.md" for i in range( 8 ) ]
+        cm = _inner_config_mgr()
+        with _patch_config_mgr( cm ), _patch_fuzzy_model( [ "src/doc-3.md" ] ), \
+             patch.object( ex_mod.cu, "get_project_root", return_value="/p" ), \
+             patch.object( ex_mod.cu, "get_file_as_string", return_value="t {description} {file_list}" ), \
+             patch.object( ex_mod, "PromptTemplateProcessor" ) as PTP, \
+             patch.object( ex_mod.os.path, "exists", side_effect=lambda p: p.endswith( "/src" ) ), \
+             patch.object( ex_mod.os, "walk", return_value=[ ( "/p/src", [], files ) ] ), \
+             patch.object( o, "_ask_for_arg", return_value="zzznomatch qqqunrelated" ):
+            PTP.return_value.process_template.side_effect = lambda t, n: t
+            o.llm_factory.get_client = MagicMock( return_value=MagicMock( run=MagicMock( return_value="<xml/>" ) ) )
+            out = o._handle_fuzzy_file_match( "u@x" )
+        self.assertTrue( out.endswith( "/doc-3.md" ) )   # resolved, did not bail
 
     def test_large_map_narrowed_by_keyword_through_handler( self ):
         # 200 decoys + one keyword-matching target; the description narrows to it
