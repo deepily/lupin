@@ -12,9 +12,11 @@ The invariant is one space, one model, one pass. Partial regeneration leaves a m
 
 **D2 — The fill runs against `:7999` off-peak.** *Ruled by Rick, 2026-08-02.* Rejected `:8000` (monopolize-mode; a multi-hour fill would block every scheduled test suite, and this is not a test suite) and in-process (conflicts with the standing never-grab-a-GPU rule + GPU-0 pinning). Rick added: measure one batch of 256 first and extrapolate, rather than scheduling against a guess.
 
+**D3 — Unload the other GPU models before the run.** *Rick, 2026-08-02.* GPU 0 is a 24,564 MiB card with **23 MiB free**: 7,416 MiB is the embedding model server itself (must stay) and 16,754 MiB is a vLLM instance (pid 9710) that can be unloaded, taking free memory to ~17 GiB. This invalidated the hardcoded batch budget. Resolved by making the budget adaptive (grows on success, halves on refusal) rather than scaling a constant by a chars-per-MiB rate I have no data for. ⚠️ Open question for the walkthrough: unloading that vLLM may interact with row `357c283f` (router-model 404), which is also a vLLM question.
+
 ### ⏳ Still open on this row — nothing is blocked, but nothing writes until these are settled
 
-- **Runtime is unmeasured.** The `/api/busy` probe 404s (endpoint committed, server not yet bounced), so the measurement script's own gate refused to add load to a server it could not read. That refusal is the design working. The batch measurement is owed next.
+- **Runtime is HALF measured.** Embedding: 0.41s per 256-batch, ~16 min for all 578,364 — and that measurement found a CUDA OOM on long-text batches that would have killed the run (fixed, `0310aa05` + `d7e02562`). The **DB write side remains unmeasured** — 288,932 UPDATEs plus reads, very likely the dominant term. Measuring it needs the clone rehearsal or a bounded shadow-column fill, both behind the walkthrough.
 - **Rollback undecided.** Once swapped, the old vectors are gone unless the shadow columns are kept or a `pg_dump` of the two tables is taken first. Real disk. Needs a ruling before step 5.
 - **Full walkthrough not yet held.** Rick's standing constraint: no writes to `input_and_output` "until you and I discuss the entire process from beginning to end." D1 and D2 settled scope and venue; the end-to-end walkthrough has not.
 
