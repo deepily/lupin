@@ -47,6 +47,23 @@ class TestClassifyFailure( unittest.TestCase ):
     def test_code_bug( self ):
         self.assertEqual( classify_failure( "KeyError: x" ), FailureCategory.CODE_BUG )
 
+    def test_user_input_research_doc_not_found( self ):
+        # bug f16c7ce1: this message carries no FileNotFoundError/"No such file"
+        # token, so it used to fall through to UNKNOWN → BFE. It is a user-input
+        # error, not a code bug.
+        self.assertEqual(
+            classify_failure( "Research document not found: my write-up on the lighthouse" ),
+            FailureCategory.USER_INPUT
+        )
+
+    def test_user_input_wins_over_code_bug_token( self ):
+        # Checked before code-bug patterns, so a user-input message that happens
+        # to contain a bug-ish word still classifies as USER_INPUT.
+        self.assertEqual(
+            classify_failure( "no matching document (ValueError-ish phrasing)" ),
+            FailureCategory.USER_INPUT
+        )
+
     def test_unknown_fallback( self ):
         self.assertEqual( classify_failure( "weird non-matching text" ), FailureCategory.UNKNOWN )
 
@@ -104,6 +121,13 @@ class TestIsEligible( unittest.TestCase ):
         ok, reason = is_eligible_for_auto_fix( job, [ "presentation" ] )
         self.assertFalse( ok )
         self.assertIn( "environment", reason.lower() )
+
+    def test_user_input_ineligible( self ):
+        # bug f16c7ce1: a missing-research-doc failure must NOT be sent to BFE.
+        job = _job( JOB_TYPE="presentation", error="Research document not found: the KISS explainer" )
+        ok, reason = is_eligible_for_auto_fix( job, [ "presentation" ] )
+        self.assertFalse( ok )
+        self.assertIn( "user-input", reason.lower() )
 
     def test_eligible_state_none_debug_on( self ):
         job = _job( JOB_TYPE="presentation", state=None, artifacts={ "stack_trace": "KeyError" } )

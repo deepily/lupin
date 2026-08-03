@@ -28,6 +28,7 @@ class FailureCategory:
     INFRA_OOM           = "infra_oom"
     INFRA_RATE_LIMIT    = "infra_rate_limit"
     INFRA_ENVIRONMENT   = "infra_environment"
+    USER_INPUT          = "user_input"
     UNKNOWN             = "unknown"
 
 
@@ -54,6 +55,18 @@ _INFRA_PATTERNS = {
         re.IGNORECASE
     ),
 }
+
+# Regex patterns for USER-INPUT failures — the user supplied something that
+# resolved to nothing (e.g. a podcast doc description matching no file). These
+# are NOT code bugs and NOT infrastructure; sending them to the Bug Fix
+# Expediter burns cycles trying to code-fix a missing input AND saturates the
+# agentic pool (bug f16c7ce1). The remedy is to ask the user to re-specify, so
+# these are classified distinctly and made BFE-ineligible.
+_USER_INPUT_PATTERNS = re.compile(
+    r"Research document not found|no\s+matching\s+document|"
+    r"document\s+not\s+found",
+    re.IGNORECASE
+)
 
 # Regex patterns for code bugs (stronger signal → BFE eligible)
 _CODE_BUG_PATTERNS = re.compile(
@@ -88,6 +101,13 @@ def classify_failure( error: str, stack_trace: str = "" ) -> str:
 
     if not combined.strip():
         return FailureCategory.UNKNOWN
+
+    # Check user-input failures FIRST — the most specific, correct label. A
+    # "Research document not found" message carries neither "FileNotFoundError"
+    # nor "No such file" tokens, so without this it fell through to UNKNOWN and
+    # was sent to the BFE (bug f16c7ce1).
+    if _USER_INPUT_PATTERNS.search( combined ):
+        return FailureCategory.USER_INPUT
 
     # Check infrastructure patterns first (higher priority)
     for category, pattern in _INFRA_PATTERNS.items():
@@ -178,6 +198,9 @@ def is_eligible_for_auto_fix(
 
     if category == FailureCategory.INFRA_ENVIRONMENT:
         return False, "Infrastructure failure (environment/credentials) — requires manual intervention"
+
+    if category == FailureCategory.USER_INPUT:
+        return False, "User-input error (e.g. no matching research document) — ask the user to re-specify, not a code bug (bug f16c7ce1)"
 
     # Rate limit and timeout: could retry the original job without BFE,
     # but for MVP we let BFE diagnose — it will correctly identify as transient
@@ -559,6 +582,10 @@ def quick_smoke_test():
         assert classify_failure( "RateLimitError: 429" ) == FailureCategory.INFRA_RATE_LIMIT
         assert classify_failure( "Connection refused (ECONNREFUSED)" ) == FailureCategory.INFRA_ENVIRONMENT
         print( "✓ classify_failure: infra failures detected correctly" )
+
+        # 3b: classify_failure — user-input (bug f16c7ce1: must NOT reach BFE)
+        assert classify_failure( "Research document not found: my lighthouse write-up" ) == FailureCategory.USER_INPUT
+        print( "✓ classify_failure: user-input (missing research doc) detected correctly" )
 
         # 4: classify_failure — unknown
         assert classify_failure( "Something went wrong" ) == FailureCategory.UNKNOWN
