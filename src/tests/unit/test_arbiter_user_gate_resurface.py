@@ -221,6 +221,52 @@ class TestResurfaceDetector:
         assert job._check_user_gate_resurface( { }, NOW ) == 0
 
 
+# ── be56bff8: per-USER deferral suppresses the arbiter resurface too ───────────
+
+def _ahead( seconds ):
+    return ( NOW + datetime.timedelta( seconds=seconds ) ).isoformat()
+
+
+def _user_blocked_row( next_chase_ts ):
+    return { "status": "blocked", "gate_class": "operator",
+             "blocked_by": [ { "kind": "user", "id": "rick" } ],
+             "next_chase_ts": next_chase_ts }
+
+
+class TestResurfacePerUserDeferral:
+    """The arbiter reads the same hold file as the seat, so a gate the seat
+    deferred in the store (blocked_on_user + future chase) must NOT be
+    re-surfaced by the arbiter either — else the nag only halves."""
+
+    def _aged_gate( self ):
+        return ug.make_gate( "g1", "Deploy to prod?", "ask_yes_no", last_asked_ts=_ago( 9999 ) )
+
+    def _dark_job_and_snap( self ):
+        job  = _job( hold_reader_fn=lambda s: _hold_with_gate( self._aged_gate() ) )
+        snap = _snapshot( _row( "s1", "Sam", verdict="offline" ) )
+        return job, snap
+
+    def test_future_user_chase_suppresses_resurface( self ):
+        job, snap = self._dark_job_and_snap()
+        owed = { "Sam": [ _user_blocked_row( _ahead( 3600 ) ) ] }
+        assert job._check_user_gate_resurface( snap, NOW, owed_items=owed ) == 0
+
+    def test_past_user_chase_still_resurfaces( self ):
+        job, snap = self._dark_job_and_snap()
+        owed = { "Sam": [ _user_blocked_row( _ago( 60 ) ) ] }        # chase already passed
+        assert job._check_user_gate_resurface( snap, NOW, owed_items=owed ) == 1
+
+    def test_deferral_for_other_persona_does_not_suppress( self ):
+        job, snap = self._dark_job_and_snap()
+        owed = { "Krishna": [ _user_blocked_row( _ahead( 3600 ) ) ] }   # not Sam
+        assert job._check_user_gate_resurface( snap, NOW, owed_items=owed ) == 1
+
+    def test_owed_items_none_no_suppression( self ):
+        # store read failed / seam unwired ⇒ fail-safe toward liveness (resurface)
+        job, snap = self._dark_job_and_snap()
+        assert job._check_user_gate_resurface( snap, NOW, owed_items=None ) == 1
+
+
 def test_case_kind_registered():
     from cosa.agents.heartbeat_arbiter.arbiter_job import CASE_KINDS
     assert CASE_KINDS[ CASE_USER_GATE_RESURFACE ] == "user_gate_resurface"

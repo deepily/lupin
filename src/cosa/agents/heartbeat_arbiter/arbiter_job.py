@@ -97,7 +97,7 @@ from lupin_mcp.persona_normalization import canonical_persona_key
 # 6929f4ac outward-twin backstop (§9.2): the pure hold/gate readers reused so the
 # arbiter resurfaces a dark session's aged user-gate to Rick.
 from lupin_cli.claude_code.hooks.lib.heartbeat_hold import get_pending_user_gates, hold_path, declared_work_owed, is_honored
-from lupin_cli.claude_code.hooks.lib.heartbeat_user_gates import open_gates, aged_open_gates
+from lupin_cli.claude_code.hooks.lib.heartbeat_user_gates import open_gates, aged_open_gates, derive_user_chase_until
 # b33c8e96: cross-package SINGLE source of truth for the arbiter-poke sentinel. Both
 # poke bodies below DERIVE their prefix from this constant so the emitter (here) and
 # the Stop-hook matcher (is_heartbeat_poke_prompt) cannot drift — a wrapped arbiter
@@ -286,10 +286,15 @@ def _default_owed_work_fn( personas ):   # pragma: no cover - production store-r
                 now           = now,
             )
             out[ persona ] = [
-                { "id"         : str( it.id ),
-                  "status"     : it.status,
-                  "gate_class" : it.gate_class,
-                  "blocked_by" : it.blocked_by }
+                { "id"            : str( it.id ),
+                  "status"        : it.status,
+                  "gate_class"    : it.gate_class,
+                  "blocked_by"    : it.blocked_by,
+                  # be56bff8: the per-USER gate-deferral source. The resurface leg
+                  # derives user_chase_until from the blocked_by:[{kind:user}] rows'
+                  # future chase, so a gate the seat deferred in the store stops the
+                  # arbiter re-surfacing it too. Additive on a read that already runs.
+                  "next_chase_ts" : it.next_chase_ts.isoformat() if it.next_chase_ts else None }
                 for it in items if it.status not in _TERMINAL
             ]
     return out
@@ -1358,7 +1363,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # gone-dark session's buried gate is still seen. The production factories wire
         # hold_reader_fn (read_hold) so this is LIVE on :8001; unit-fake construction
         # leaves it None → inert.
-        gates_resurfaced    = self._check_user_gate_resurface( self._last_full_snapshot, now )
+        gates_resurfaced    = self._check_user_gate_resurface( self._last_full_snapshot, now, owed_items=owed_items )
         # A2/A3 (fcb5dbc0): the arbiter's single-pusher operator-gate routing — read
         # ALL open operator gates (store, fleet-wide → covers dark + alive), route by
         # D4 urgency (urgent interrupt / normal digest / low pull-only). Inert until
@@ -4607,7 +4612,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
 
     # ── 6929f4ac: outward-twin user-gate resurface (dark session → Rick) ────────
 
-    def _check_user_gate_resurface( self, snapshot, now ):
+    def _check_user_gate_resurface( self, snapshot, now, owed_items=None ):
         """
         6929f4ac OUTWARD-twin backstop (§9.2): a session that went DARK while still
         holding an OPEN, AGED direct user-gate (it stopped re-asking) → surface the
@@ -4658,7 +4663,17 @@ class ArbiterConsumerJob( AgenticJobBase ):
             except Exception:
                 hold = None
             persona = row.get( "persona" ) or sid
-            for gate in aged_open_gates( get_pending_user_gates( hold ), now_epoch, ceiling ):
+            # be56bff8 per-USER deferral: the arbiter reads the SAME hold file as the
+            # seat, so it must honor the same store deferral — else fixing the seat
+            # but not the arbiter just MOVES the nag. Derive this persona's per-user
+            # chase from the per-poll owed read (blocked_by:[{kind:user}] future
+            # chase); a deferred user ⇒ aged_open_gates returns nothing to resurface.
+            # owed_items None (store read failed / seam unwired) ⇒ None ⇒ no
+            # suppression (fail-safe toward liveness — never bury an open decision).
+            user_chase = derive_user_chase_until(
+                ( owed_items or { } ).get( persona ), now_epoch ) if owed_items else None
+            for gate in aged_open_gates( get_pending_user_gates( hold ), now_epoch, ceiling,
+                                         user_chase_until_epoch=user_chase ):
                 eligible[ f"{sid}:{gate.get( 'id' )}" ] = ( sid, persona, gate )
         # re-arm: drop already-resurfaced keys no longer eligible (gate cleared /
         # session freshened) so a future dark episode re-surfaces.
