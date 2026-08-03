@@ -43,6 +43,36 @@ from .test_podcast_overlay_playhere import (
 FIXTURE_ENC = "fixtures/podcast-dry-run/podcast-dry-run.mp3"
 
 
+# Shared consume predicate — the SINGLE source of truth for "did the done card
+# render the abstract with a clickable Play Here?". Both the real promotion test
+# and the negative control call THIS exact function, so the control proves MY
+# predicate detects the bug, not some second hand-rolled check.
+_ABSTRACT_PREDICATE_JS = """
+( card ) => {
+    const ab = card && card.querySelector( '.job-abstract' );
+    const a  = ab && ab.querySelector( "a[href*='embed=1']" );
+    const abstractText = ab ? ( ab.textContent || '' ).trim() : '';
+    const playHref     = a ? a.getAttribute( 'href' ) : null;
+    const playVisible  = !!( a && a.offsetParent !== null );
+    return {
+        abstractText : abstractText,
+        playHref     : playHref,
+        playVisible  : playVisible,
+        ok : abstractText.length > 0 && !!playHref && playHref.indexOf( 'embed=1' ) !== -1 && playVisible
+    };
+}
+"""
+
+
+def _consume_predicate_by_job_id( page, job_id ):
+    """Run the shared consume predicate against the live card for job_id."""
+    return page.evaluate(
+        "( jobId ) => ( " + _ABSTRACT_PREDICATE_JS
+        + " )( document.getElementById( 'job-card-' + jobId ) )",
+        job_id,
+    )
+
+
 def _capture_dry_run_abstract() -> str:
     """Run the REAL _execute_dry_run with voice_io mocked and return the completion
     abstract it emits — the exact markdown a dry-run submit shows the user.
@@ -139,6 +169,15 @@ class TestDryRunDoneCardConsumeSeam:
     abstract, .job-abstract stays empty, and this fails with
     "abstract empty on done card" / "Play Here absent" — NOT a bare timeout.
 
+    DETECTION IS PROVEN TWO WAYS (phase-2 timed-revert is DROPPED, not deferred —
+    :8000 and :7999 bind the same src mount, so reverting the fix to force a real
+    red would revert it out from under a live rehearsal):
+      - The real test below rides the FULL running→done WebSocket promotion and
+        asserts the abstract renders.
+      - `test_negative_control_predicate_detects_omitted_abstract` proves the
+        SAME predicate goes RED when the done event omits the abstract — the exact
+        symptom the server bug produced — with no server on buggy code and no reload.
+
     Venue: :8000 (scheduled) — a real dry-run submit enqueues + mutates queue
     state and needs the consumer running. Dry run = no LLM/ElevenLabs spend.
     """
@@ -178,44 +217,95 @@ class TestDryRunDoneCardConsumeSeam:
             )
             assert job_id, "podcast dry-run submit did not return a job_id"
 
-            # NO RELOAD from here. The card is created (todo), runs ~5s of dry-run
-            # breadcrumbs, then promotes running→done over the SAME WebSocket. The
-            # done promotion is the ONLY thing that fills .job-abstract
-            # (notifications.js updateJobCardWithCompletion). If the done event
-            # carries no abstract, .job-abstract stays empty and this times out.
+            # (req 3) Prove the card passes THROUGH a pre-done state during the test,
+            # so a stale done card can't false-pass. First wait for the card to exist
+            # (todo/running), then assert it is NOT already done.
+            page.wait_for_function(
+                "( jobId ) => !!document.getElementById( 'job-card-' + jobId )",
+                arg=job_id,
+                timeout=20000,
+            )
+            predone = page.evaluate(
+                """( jobId ) => {
+                    const c = document.getElementById( 'job-card-' + jobId );
+                    const r = c && c.querySelector( '.job-response' );
+                    const done = !!r && r.style.display !== 'none' && ( r.textContent || '' ).trim().length > 0;
+                    return done ? 'already-done' : 'pending';
+                }""",
+                job_id,
+            )
+            assert predone == "pending", \
+                f"card was already done at first observation ({predone}) — running→done not exercised"
+
+            # NO RELOAD from here. Wait on the DONE SIGNAL, not the abstract:
+            # insertJobMetadata() shows .job-response (from response_text) on EVERY
+            # completion, independent of the abstract. Keying the wait on
+            # .job-response proves the running→done promotion happened WITHOUT a
+            # reload and decouples "reached done" from "abstract rendered" — so on
+            # pre-fix code the wait still SUCCEEDS and the failure surfaces as the
+            # abstract ASSERTION below, not a bare timeout a broken selector could
+            # also produce.
             page.wait_for_function(
                 """( jobId ) => {
                     const card = document.getElementById( 'job-card-' + jobId );
                     if ( !card ) return false;
-                    const ab = card.querySelector( '.job-abstract' );
-                    if ( !ab ) return false;
-                    const txt = ( ab.textContent || '' ).trim();
-                    const playHere = ab.querySelector( "a[href*='embed=1']" );
-                    return txt.length > 0 && !!playHere;
+                    const resp = card.querySelector( '.job-response' );
+                    return !!resp && resp.style.display !== 'none'
+                           && ( resp.textContent || '' ).trim().length > 0;
                 }""",
                 arg=job_id,
                 timeout=45000,
             )
 
-            # Explicit assertions so a regression reads as the PREDICTED text, not a
-            # bare wait-timeout.
-            state = page.evaluate(
-                """( jobId ) => {
-                    const card = document.getElementById( 'job-card-' + jobId );
-                    const ab   = card && card.querySelector( '.job-abstract' );
-                    const a    = ab && ab.querySelector( "a[href*='embed=1']" );
-                    return {
-                        abstractText : ab ? ( ab.textContent || '' ).trim() : '',
-                        playHref     : a ? a.getAttribute( 'href' ) : null,
-                        playVisible  : !!( a && a.offsetParent !== null ),
-                    };
-                }""",
-                job_id,
-            )
+            # Card promoted to DONE (no reload). Assert the CONSUME seam via the
+            # SHARED predicate. On pre-fix code the done event carries no abstract →
+            # .job-abstract stays empty → PREDICTED text, not a timeout.
+            state = _consume_predicate_by_job_id( page, job_id )
             assert state[ "abstractText" ], "abstract empty on done card (no reload)"
             assert state[ "playHref" ] and "embed=1" in state[ "playHref" ], \
                 "Play Here absent on done card (no reload)"
             assert state[ "playVisible" ], "Play Here present but not clickable/visible"
+            assert state[ "ok" ], "shared consume predicate failed on the real done card"
         finally:
             if os.path.exists( seed ):
                 os.remove( seed )
+
+    def test_negative_control_predicate_detects_omitted_abstract( self, notifications_page ):
+        """
+        NEGATIVE CONTROL — proves the SHARED consume predicate goes RED on the bug's
+        exact symptom: a running→done completion that OMITS the abstract. Drives the
+        app's OWN completion handler (notificationsUI.insertJobMetadata) with a done
+        payload lacking `abstract`, then runs the SAME predicate the real test uses.
+
+        LIMIT (stated plainly): this proves the CLIENT detects an omitted abstract.
+        It does NOT prove the real test's wait-for-promotion logic is sound — it
+        injects metadata directly and bypasses the WebSocket running→done promotion
+        the real test rides. The real test above owns that half; this owns detection.
+        """
+        page = notifications_page
+        result = page.evaluate(
+            "() => {"
+            "  const ui = window.notificationsUI;"
+            "  const card = document.createElement( 'div' );"
+            "  card.className = 'job-card';"
+            "  card.id = 'job-card-NEGCTRL';"
+            "  card.innerHTML = '<div class=\"job-response\" style=\"display:none\"></div>"
+            "<div class=\"job-abstract\" style=\"display:none\"></div>';"
+            "  document.body.appendChild( card );"
+            # Real completion handler, done payload WITHOUT abstract (the buggy shape).
+            "  ui.insertJobMetadata( 'NEGCTRL', card, { response_text: 'Dry run complete.' } );"
+            "  const resp = card.querySelector( '.job-response' );"
+            "  const handlerRan = !!resp && resp.style.display !== 'none'"
+            "                     && ( resp.textContent || '' ).trim().length > 0;"
+            "  const verdict = ( " + _ABSTRACT_PREDICATE_JS + " )( card );"
+            "  return { handlerRan: handlerRan, verdict: verdict };"
+            "}"
+        )
+        # The handler DID run (response rendered) — so an empty abstract is because it
+        # was OMITTED, not because insertJobMetadata no-op'd or the name drifted.
+        assert result[ "handlerRan" ], \
+            "insertJobMetadata did not run — negative control proves nothing (check the handler name)"
+        v = result[ "verdict" ]
+        assert v[ "ok" ] is False, "predicate should be RED when the abstract is omitted"
+        assert not v[ "abstractText" ], "abstract should be empty when omitted"
+        assert not v[ "playHref" ], "Play Here should be absent when abstract omitted"
