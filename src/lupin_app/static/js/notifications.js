@@ -12477,7 +12477,13 @@ class NotificationsUI {
         const frame = document.createElement( "iframe" );
         frame.className = "podcast-overlay-frame";
         frame.setAttribute( "data-testid", "podcast-overlay-frame" );
-        frame.src = audioUrl;              // the <audio controls> lives inside the embed page
+        // Auto-start on open: Rick's "Play Here" click is a user gesture, so the
+        // player's play() is always permitted (Mr Radio ruling 2026-08-03). The
+        // <audio controls> still supply start/stop and the ✕ still dismisses;
+        // auto-start is only the initial state. autoplay=1 is REAL auto-start with
+        // no debug UI as of Krishna's edf0d7c6 (the fired/blocked probe div is
+        // gated behind ?probe=1, never shipped). Guard against a doubled flag.
+        frame.src = /[?&]autoplay=1(?:&|$)/.test( audioUrl ) ? audioUrl : audioUrl + "&autoplay=1";
         frame.setAttribute( "title", title || "Podcast player" );
         frame.setAttribute( "allow", "autoplay" );
 

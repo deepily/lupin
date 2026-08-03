@@ -119,7 +119,9 @@ test( "_showPodcastOverlay builds a single overlay with iframe src, title, and d
   assert.equal( el.id, "podcast-overlay" );
   const frame = el.querySelector( "iframe.podcast-overlay-frame" ) as HTMLIFrameElement;
   assert.ok( frame, "iframe present" );
-  assert.ok( frame.getAttribute( "src" )!.endsWith( "&embed=1" ), "iframe carries the embed URL verbatim" );
+  const frameSrc = frame.getAttribute( "src" )!;
+  assert.ok( frameSrc.includes( "/app/audio?path=" ) && frameSrc.includes( "&embed=1" ), "iframe carries the embed URL" );
+  assert.ok( /[?&]autoplay=1(?:&|$)/.test( frameSrc ), "overlay auto-starts on open (autoplay=1 appended)" );
   assert.equal( el.querySelector( ".podcast-overlay-title" )!.textContent, "My Podcast" );
   assert.ok( el.querySelector( "button.podcast-overlay-dismiss" ), "dismiss button present" );
   // Stable E2E hooks for Rachel.
@@ -134,6 +136,20 @@ test( "_showPodcastOverlay is single-instance — a second call replaces the fir
   const all = document.querySelectorAll( "#podcast-overlay" );
   assert.equal( all.length, 1, "still exactly one overlay" );
   assert.equal( document.querySelector( ".podcast-overlay-title" )!.textContent, "Second" );
+} );
+
+test( "_showPodcastOverlay appends autoplay=1 for auto-start on open", () => {
+  const ui = newUI();
+  const el = ui._showPodcastOverlay( "/app/audio?path=x.mp3&embed=1", "X" );
+  const src = el.querySelector( "iframe.podcast-overlay-frame" )!.getAttribute( "src" )!;
+  assert.equal( src, "/app/audio?path=x.mp3&embed=1&autoplay=1" );
+} );
+
+test( "_showPodcastOverlay does not double autoplay=1 if the URL already carries it", () => {
+  const ui = newUI();
+  const el = ui._showPodcastOverlay( "/app/audio?path=x.mp3&embed=1&autoplay=1", "X" );
+  const src = el.querySelector( "iframe.podcast-overlay-frame" )!.getAttribute( "src" )!;
+  assert.equal( ( src.match( /autoplay=1/g ) || [] ).length, 1, "autoplay=1 appears exactly once" );
 } );
 
 test( "_showPodcastOverlay falls back to a default title when none is given", () => {
