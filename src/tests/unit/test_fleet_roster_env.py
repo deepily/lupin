@@ -189,6 +189,13 @@ class TestStartCcWithTmuxForwarding:
 
     def test_dry_run_exits_before_tmux( self, tmp_path ):
         # --dry-run must remain side-effect-free: no tmux session appears.
+        # Precondition: the tmux binary must be on PATH for the leaked-session probe
+        # below. It is absent in the file-bind test container; this check runs on any
+        # host/CI venue where tmux is installed. The dry-run-exits-0 coverage is not
+        # lost when skipped here — the sibling test_dry_run_forwards_sourced_roster
+        # asserts it without needing tmux.
+        if shutil.which( "tmux" ) is None:
+            pytest.skip( "requires the tmux binary on PATH to probe for a leaked session — not installed in the file-bind test container" )
         self._seed_home_roster( tmp_path )
         result = self._dry_run( _clean_env( tmp_path ) )
         assert result.returncode == 0, result.stderr
