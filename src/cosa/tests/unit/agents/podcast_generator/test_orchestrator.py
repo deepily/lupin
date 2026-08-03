@@ -1447,5 +1447,35 @@ class TestDoAudioOnlyAsync:
             assert _run( agent.do_audio_only_async() ) is not None
 
 
+# ===========================================================================
+# Approval gate speaks at HIGH priority (Rick's direct ask 2026-08-03)
+# ===========================================================================
+class TestPresentScriptReviewPriority:
+    """The blocking script-review gate MUST pass priority='high' so the TTS
+    alert fires for Rick driving by voice from across the room. The default was
+    'medium' (the dispatcher's default_priority), which may not alert at all —
+    and standing doctrine is that every blocking ask is high. This asserts the
+    gate passes it, so nobody silently drops it back to the default."""
+
+    def test_gate_passes_priority_high( self, _silence_voice_io ):
+        agent = _agent()
+        agent.config.script_review_timeout_seconds = 600
+        asyncio.run( agent._present_script_review(
+            questions = [ {
+                "header"  : "Review",
+                "question": "Approve this script?",
+                "options" : [ { "label": "Approve script" }, { "label": "Revise" } ],
+            } ],
+            header = "Review",
+        ) )
+        choices = _silence_voice_io[ "choices" ]
+        choices.assert_awaited_once()
+        _args, kwargs = choices.await_args
+        assert kwargs.get( "priority" ) == "high", (
+            f"the script-review gate must alert at high so the TTS reaches a "
+            f"remote user; got {kwargs.get( 'priority' )!r}"
+        )
+
+
 if __name__ == "__main__":
     pytest.main( [ __file__, "-v" ] )

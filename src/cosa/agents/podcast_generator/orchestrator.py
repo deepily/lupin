@@ -1644,6 +1644,10 @@ class PodcastOrchestratorAgent:
             abstract         = abstract,
             title            = title,
             response_default = { header: continue_label },
+            # Blocking approval gate — MUST alert at HIGH so the TTS reaches Rick
+            # driving by voice from across the room. Default was "medium" (the
+            # dispatcher's default_priority), which may not fire the alert at all.
+            priority         = "high",
         )
 
     def _get_script_preview( self, script: PodcastScript ) -> str:

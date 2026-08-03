@@ -755,7 +755,8 @@ async def present_choices(
     title: Optional[ str ] = None,
     abstract: Optional[ str ] = None,
     job_id: Optional[ str ] = None,
-    response_default: Optional[ dict ] = None
+    response_default: Optional[ dict ] = None,
+    priority: Optional[ str ] = None
 ) -> dict:
     """
     Present multiple-choice questions (voice-first).
@@ -863,8 +864,13 @@ async def present_choices(
         return { "answers": answers, "default_used": False, "answered": True }
 
     try:
+        # Pass priority ONLY when the caller set one, so agent cosa_interfaces
+        # that do not accept a priority kwarg are unaffected (default-None path
+        # calls them exactly as before). A blocking gate passes priority="high".
+        _priority_kwargs = { "priority": priority } if priority is not None else {}
         result = await _cosa_interface.present_choices(
-            questions=questions, timeout=timeout, title=title, abstract=abstract, job_id=job_id
+            questions=questions, timeout=timeout, title=title, abstract=abstract, job_id=job_id,
+            **_priority_kwargs
         )
     except Exception as e:
         # The dispatcher raises deliberately here (VoiceGateTimeoutError on a
