@@ -91,6 +91,40 @@ done
 # Widening the denominator's holes is how a 100% gate becomes decorative, and
 # the diff that does it must be one a reviewer can see and question.
 #
+# ===========================================================================
+# DOCUMENTED EXEMPTION — legacy notifications.js is NOT in this gate, ON PURPOSE
+# ===========================================================================
+# Ruling: Mr. Radio 2026-08-03 (row f8abf4b6, Option 2). This is NOT a fourth
+# --exclude — it changes no number below. It is the written record that a large
+# legacy file sits OUTSIDE this gate deliberately, so the next reader does not
+# mistake its absence for "covered" or its ad-hoc 0/0 for "tested, zero lines".
+#
+# THE FILE: src/lupin_app/static/js/notifications.js (~20,900 lines). Plain
+# browser JS, in NO tsconfig, so it never matches the three --include trees
+# above and is not in this gate's denominator at all.
+#
+# WHY IT CANNOT BE INSTRUMENTED HERE: every test under
+# src/tests/unit/notifications_js/ loads it by slicing the source string and
+# running it through vm.runInThisContext (see e.g.
+# reading_pane_scroll_anchor.test.ts:40). c8 instruments modules it sees through
+# the require/import graph; a vm.runInThisContext'd string is not in that graph,
+# so c8 reports 0/0 for it EVEN IF you force it into --include. That ad-hoc 0/0
+# (measured 2026-08-03) is the "silence" this note exists to replace — the
+# defect Rio filed was the silence, not the uncovered lines.
+#
+# WHAT ITS REAL GATE IS: the behavioural unit tests in
+# src/tests/unit/notifications_js/ (DOM assertions under happy-dom + direct
+# method calls — they PASS, they just emit no coverage number) PLUS Rachel's
+# :8000 Playwright E2E for the real click-through. Not "untested" — measured by
+# instruments c8 cannot read.
+#
+# DO NOT "fix" this by adding a --include for it: that manufactures a 0% red
+# gate with no owner and no path to 100%, which is exactly the option (1) that
+# was weighed and rejected. The forward direction (Option 3, standing) is to
+# extract NEW logic into small importable TS modules — as done for the
+# multiplexer — so the un-instrumentable legacy surface shrinks over time
+# instead of growing.
+#
 # NOTE for src/cosa/repo/gate_reachability.py: the `src/tests/**` glob below is
 # a GLOB ROOT, not a suite target. That detector's path-token regex rejects it
 # on purpose; see the comment on _PATH_TOKEN_RE.
