@@ -44,12 +44,26 @@ def test_doc_viewer_page_allows_same_origin_framing():
     )
 
 
+def test_audio_player_page_allows_same_origin_framing():
+    """The audio-player page must be SAMEORIGIN so the floating podcast overlay
+    can frame it. DENY here is bug 4cfabc0f — the overlay iframe stayed blank
+    (standalone worked because top-level navigation ignores X-Frame-Options)."""
+    status, xfo = _x_frame_options( "/app/audio" )
+    assert status == 200, f"/app/audio should serve the player page (got {status})"
+    assert xfo == "SAMEORIGIN", (
+        f"/app/audio must send X-Frame-Options: SAMEORIGIN so the podcast overlay "
+        f"iframe can embed it; got {xfo!r}. DENY here is bug 4cfabc0f — the "
+        f"overlay renders blank."
+    )
+
+
 def test_notifications_page_still_denies_framing():
-    """Control: non-viewer routes keep the stricter DENY (clickjacking defense)."""
+    """Control: non-frameable routes keep the stricter DENY (clickjacking defense).
+    Only /app/docs and /app/audio are the intentional SAMEORIGIN carve-outs."""
     status, xfo = _x_frame_options( "/app/notifications" )
     assert xfo == "DENY", (
         f"/app/notifications must keep X-Frame-Options: DENY (only the doc-viewer "
-        f"is intentionally frameable); got {xfo!r}"
+        f"and audio-player are intentionally frameable); got {xfo!r}"
     )
 
 

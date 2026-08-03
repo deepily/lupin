@@ -1327,13 +1327,16 @@ async def add_security_headers( request: Request, call_next ):
     response = await call_next( request )
 
     response.headers["X-Content-Type-Options"] = "nosniff"
-    # X-Frame-Options: DENY everywhere EXCEPT the document-viewer page, which is
-    # intentionally embedded SAME-ORIGIN in the notifications Reading Pane iframe
-    # (master-detail layout, 2026-05-21). DENY blocks ALL framing — even
-    # same-origin — which surfaced as Chrome's "localhost refused to connect"
-    # inside the pane when following a doc-link. SAMEORIGIN still blocks
-    # cross-origin clickjacking (only this same app can frame the viewer).
-    if request.url.path == "/app/docs":
+    # X-Frame-Options: DENY everywhere EXCEPT pages we intentionally embed
+    # SAME-ORIGIN in a notifications-client iframe. DENY blocks ALL framing —
+    # even same-origin — which surfaces as Chrome's "localhost refused to
+    # connect" inside the frame. SAMEORIGIN still blocks cross-origin
+    # clickjacking (only this same app can frame these).
+    #   /app/docs  — document viewer in the Reading Pane iframe (2026-05-21)
+    #   /app/audio — podcast player in the floating overlay iframe (2026-08-03,
+    #                bug 4cfabc0f: DENY left the overlay blank, standalone worked
+    #                because top-level navigation ignores X-Frame-Options)
+    if request.url.path in ( "/app/docs", "/app/audio" ):
         response.headers["X-Frame-Options"] = "SAMEORIGIN"
     else:
         response.headers["X-Frame-Options"] = "DENY"
