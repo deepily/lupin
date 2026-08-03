@@ -642,6 +642,68 @@ class TestDoAllAsyncFailsOpenPastGate:
         assert orch._podcast_state[ "script_auto_approved" ] is True
 
 
+    @pytest.mark.asyncio
+    async def test_mixed_human_english_silent_translation_still_discloses( self ):
+        """
+        Clayton's gap: English approved by hand, a translation then auto-approves
+        on silence. The run must STILL disclose (script_auto_approved=True) — the
+        per-language gate ORs the flag in, so a silent translation is not hidden
+        behind a hand-approved English.
+        """
+        from cosa.agents.podcast_generator import orchestrator as orch_mod
+        from cosa.agents.podcast_generator.orchestrator import PodcastOrchestratorAgent
+
+        orch = PodcastOrchestratorAgent(
+            research_doc_path = "/tmp/does-not-matter.md",
+            user_id           = "test-user",
+        )
+        orch.target_languages = [ "en", "es" ]
+
+        def _script():
+            return PodcastScript(
+                title           = "T",
+                research_source = "/tmp/does-not-matter.md",
+                host_a_name     = "A",
+                host_b_name     = "B",
+                segments        = [
+                    ScriptSegment( speaker="A", role="curious", text="hi" ),
+                    ScriptSegment( speaker="B", role="expert",  text="yo" ),
+                ],
+            )
+
+        class _StopAfterGate( Exception ):
+            pass
+
+        orch._load_research_async            = AsyncMock( return_value="research content" )
+        orch._analyze_content_async          = AsyncMock( return_value=ContentAnalysis( main_topic="T" ) )
+        orch._generate_script_async          = AsyncMock( return_value=_script() )
+        orch._generate_translated_script_async = AsyncMock( return_value=_script() )
+        orch._save_script_async              = AsyncMock( return_value="/tmp/s.md" )
+        orch._generate_audio_async           = AsyncMock( side_effect=_StopAfterGate( "stop after gates" ) )
+
+        english_human = {
+            "answers"      : { "Script Review": "Approve script" },
+            "default_used" : False,   # a real human choice
+            "answered"     : True,
+        }
+        spanish_silent = {
+            "answers"      : { "Spanish Review": "Approve script" },
+            "default_used" : True,    # nobody answered — fail-open default
+            "answered"     : False,
+        }
+        mock_pc = AsyncMock( side_effect=[ english_human, spanish_silent ] )
+
+        with patch.object( orch_mod.voice_io, "present_choices", mock_pc ), \
+             patch.object( orch_mod.voice_io, "notify", AsyncMock() ):
+            with pytest.raises( _StopAfterGate ):
+                await orch.do_all_async()
+
+        # English was human (would set the flag False on its own); the silent
+        # Spanish gate ORs it to True. If the per-language gate ignored
+        # default_used, this would be False and the disclosure would lie.
+        assert orch._podcast_state[ "script_auto_approved" ] is True
+
+
 def quick_smoke_test():
     """Quick smoke test for unit tests module."""
     import cosa.utils.util as cu

@@ -620,6 +620,15 @@ class PodcastOrchestratorAgent:
                         translated_approved = True  # Exit loop
 
                     elif review_choice == "Approve script":
+                        # Fail-open also fires here: a silent per-language gate
+                        # resolves to "Approve script". OR the flag in — ANY
+                        # silent gate (English or a translation) must disclose,
+                        # so a hand-approved English + auto-approved translation
+                        # still says the podcast was approved automatically.
+                        self._podcast_state[ "script_auto_approved" ] = (
+                            self._podcast_state.get( "script_auto_approved", False )
+                            or bool( choice.get( "default_used", False ) )
+                        )
                         translated_approved = True
 
                     else:
