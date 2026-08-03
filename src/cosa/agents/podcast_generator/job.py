@@ -397,6 +397,14 @@ class PodcastGeneratorJob( AgenticJobBase ):
             lines.append( f"**Duration**: {elapsed_sec}s" )
             completion_abstract = "\n".join( lines )
 
+            # Store the abstract in artifacts so it rides the running→done
+            # job_state_transition (running_fifo_queue.py:567 reads
+            # artifacts.get("abstract")). Without this the promoted done card
+            # renders with no abstract → "loading…" + no Play Here until a page
+            # reload re-fetches from the persisted notification (bug 9b481811).
+            # The dry-run path stores its own abstract separately (see _execute_dry_run).
+            self.artifacts[ "abstract" ] = completion_abstract
+
             try:
                 await voice_io.notify(
                     tts_msg,
