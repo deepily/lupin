@@ -92,6 +92,14 @@ DEFAULT_BATCH_SIZE = 256
 # that matters, and the GPU is shared with the rest of Lupin.
 DEFAULT_CHAR_BUDGET = 40_000
 
+# The adaptive budget's travel limits. The floor is small enough to survive the
+# crowded-GPU case measured on 2026-08-02 (23 MiB free); the ceiling exists so a
+# freshly-emptied card cannot tempt the run into one enormous batch whose failure
+# would cost a long split-retry to unwind. Neither is a measurement — they are
+# guard rails around the value the run discovers for itself.
+MIN_CHAR_BUDGET = 5_000
+MAX_CHAR_BUDGET = 2_000_000
+
 
 class RegenSpec( NamedTuple ):
     """One (table, text column → vector column) regeneration target."""
@@ -280,6 +288,79 @@ def plan_batches_by_budget( items: Sequence[Any], size_of, *,
     if current:
         batches.append( current )
     return batches
+
+
+class AdaptiveBudget:
+    """
+    A character budget that FINDS its own ceiling instead of being told one.
+
+    Why this exists rather than a constant: DEFAULT_CHAR_BUDGET was calibrated
+    against a GPU with 23 MiB free, because a 16.7 GiB vLLM instance was sharing
+    it. Rick's point — the other models can be unloaded for this run — means that
+    number describes a machine that will not exist when the run happens. Measured
+    2026-08-02: GPU 0 is a 24,564 MiB card holding the model server (7,416 MiB)
+    and one vLLM (16,754 MiB). Unloading the vLLM takes free memory from 23 MiB
+    to roughly 17 GiB.
+
+    But I only have ONE calibrated point — the crowded card. Scaling a budget
+    from it by a made-up chars-per-MiB rate would be inventing the very
+    measurement that is missing. So this grows EMPIRICALLY: start conservative,
+    widen while batches succeed, halve when one is refused. The run discovers the
+    real ceiling on the hardware it actually finds, whether or not anything was
+    unloaded, and no constant has to be re-tuned by hand afterwards.
+
+    Pairs with split_batch(): this sets the target size, that recovers the batch
+    that overshot.
+    """
+
+    def __init__( self, start: int = DEFAULT_CHAR_BUDGET, *,
+                  floor: int = MIN_CHAR_BUDGET, ceiling: int = MAX_CHAR_BUDGET,
+                  growth: float = 1.5 ):
+        """
+        Requires:
+            - floor <= start <= ceiling, all positive; growth > 1.0
+
+        Ensures:
+            - current() starts at start, clamped into [floor, ceiling]
+
+        Raises:
+            - ValueError if the bounds are inconsistent or growth is not > 1.0
+        """
+        if floor <= 0 or ceiling < floor:
+            raise ValueError( f"need 0 < floor <= ceiling, got floor={floor} ceiling={ceiling}" )
+        if growth <= 1.0:
+            raise ValueError( f"growth must exceed 1.0, got {growth}" )
+        self.floor    = floor
+        self.ceiling  = ceiling
+        self.growth   = growth
+        self._current = max( floor, min( ceiling, start ) )
+
+    def current( self ) -> int:
+        """Ensures: returns the budget to use for the next batch."""
+        return self._current
+
+    def record_success( self ) -> int:
+        """
+        Widen the budget after a batch lands.
+
+        Ensures:
+            - the budget grows by the growth factor, never past ceiling
+            - returns the new budget
+        """
+        self._current = min( self.ceiling, int( self._current * self.growth ) )
+        return self._current
+
+    def record_failure( self ) -> int:
+        """
+        Halve the budget after a batch is refused.
+
+        Ensures:
+            - the budget halves, never below floor
+            - returns the new budget
+            - is safe to call repeatedly; it converges on floor rather than 0
+        """
+        self._current = max( self.floor, self._current // 2 )
+        return self._current
 
 
 def split_batch( batch: Sequence[Any] ) -> List[List[Any]]:
@@ -540,7 +621,7 @@ def _plan( session, prefix="" ):   # pragma: no cover - live DB boundary
     return grand_total
 
 
-def _embed_with_split_retry( provider, rows, content_type, depth=0 ):   # pragma: no cover - live embedder boundary
+def _embed_with_split_retry( provider, rows, content_type, depth=0, budget=None ):   # pragma: no cover - live embedder boundary
     """
     Embed (id, text) rows, halving the batch on failure until it fits or is one row.
 
@@ -553,8 +634,10 @@ def _embed_with_split_retry( provider, rows, content_type, depth=0 ):   # pragma
     """
     try:
         vectors = provider.generate_embeddings_batch( [ r[ 1 ] for r in rows ], content_type=content_type )
+        if budget is not None and depth == 0: budget.record_success()
         return list( zip( [ r[ 0 ] for r in rows ], vectors ) )
     except Exception as error:
+        if budget is not None: budget.record_failure()
         halves = split_batch( rows )
         if not halves:
             print( f"    single row {rows[ 0 ][ 0 ]} failed to embed alone: {type( error ).__name__}: {str( error )[ :90 ]}" )
@@ -562,7 +645,7 @@ def _embed_with_split_retry( provider, rows, content_type, depth=0 ):   # pragma
         print( f"    batch of {len( rows )} failed ({type( error ).__name__}) — splitting" )
         out = []
         for half in halves:
-            out.extend( _embed_with_split_retry( provider, half, content_type, depth + 1 ) )
+            out.extend( _embed_with_split_retry( provider, half, content_type, depth + 1, budget ) )
         return out
 
 
@@ -589,6 +672,11 @@ def _fill( session, spec, provider, prefix="", batch_size=DEFAULT_BATCH_SIZE,
 
     done, written, rejected = list( load_checkpoint( path )[ "done_ids" ] ), 0, 0
 
+    # The budget FINDS its ceiling on whatever GPU this actually runs on — the
+    # starting value describes the crowded card measured on 2026-08-02, not the
+    # cleared one Rick intends to run against.
+    budget = AdaptiveBudget( start=char_budget )
+
     # Batch by ID first only to bound the SELECT; the embedder batch is re-planned
     # by CHARACTER BUDGET once the texts are in hand, because that is what the GPU
     # actually costs (see plan_batches_by_budget).
@@ -600,10 +688,10 @@ def _fill( session, spec, provider, prefix="", batch_size=DEFAULT_BATCH_SIZE,
         for batch in plan_batches_by_budget(
             [ ( row[ 0 ], row[ 1 ] ) for row in fetched ],
             size_of     = lambda pair: len( pair[ 1 ] or "" ),
-            char_budget = char_budget,
+            char_budget = budget.current(),
             max_count   = batch_size,
         ):
-            for row_id, vector in _embed_with_split_retry( provider, batch, spec.content_type ):
+            for row_id, vector in _embed_with_split_retry( provider, batch, spec.content_type, budget=budget ):
                 reason = "embedder failed on this row alone" if vector is None else validate_fresh_vector( vector )
                 if reason:
                     print( f"    REJECTED {spec.pk}={row_id}: {reason}" )
@@ -619,7 +707,7 @@ def _fill( session, spec, provider, prefix="", batch_size=DEFAULT_BATCH_SIZE,
         save_checkpoint( path, done )
         print( f"    {written:,} written / {rejected:,} rejected", end="\r" )
 
-    print( f"\n  {spec.label}: {written:,} written, {rejected:,} rejected" )
+    print( f"\n  {spec.label}: {written:,} written, {rejected:,} rejected, final char budget {budget.current():,}" )
     return { "planned": len( ids ), "written": written, "rejected": rejected }
 
 

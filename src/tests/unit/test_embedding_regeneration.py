@@ -14,6 +14,9 @@ import pytest
 
 from cosa.rest.db.embedding_regeneration import (
     DEFAULT_CHAR_BUDGET,
+    MAX_CHAR_BUDGET,
+    MIN_CHAR_BUDGET,
+    AdaptiveBudget,
     EMBEDDING_DIM,
     LOCAL_NORM_CEILING,
     LOCAL_NORM_FLOOR,
@@ -469,3 +472,74 @@ class TestSplitBatch:
             if not halves: singles += 1
             else: work.extend( halves )
         assert singles == 8
+
+
+# --------------------------------------------------------------------------- #
+# AdaptiveBudget — the answer to "we can unload the other models first".
+#
+# DEFAULT_CHAR_BUDGET was calibrated on a GPU with 23 MiB free, because a
+# 16.7 GiB vLLM was sharing the card. That number describes a machine that will
+# not exist at run time. Rather than scale it by an invented chars-per-MiB rate,
+# the budget grows on success and halves on refusal, so the run finds the real
+# ceiling on whatever hardware it meets.
+# --------------------------------------------------------------------------- #
+class TestAdaptiveBudget:
+
+    def test_starts_where_told( self ):
+        assert AdaptiveBudget( start=40_000 ).current() == 40_000
+
+    def test_start_is_clamped_into_range( self ):
+        assert AdaptiveBudget( start=1 ).current() == MIN_CHAR_BUDGET
+        assert AdaptiveBudget( start=10 ** 12 ).current() == MAX_CHAR_BUDGET
+
+    def test_success_widens( self ):
+        b = AdaptiveBudget( start=10_000, growth=1.5 )
+        assert b.record_success() == 15_000
+
+    def test_failure_halves( self ):
+        b = AdaptiveBudget( start=40_000 )
+        assert b.record_failure() == 20_000
+
+    def test_growth_stops_at_the_ceiling( self ):
+        b = AdaptiveBudget( start=MAX_CHAR_BUDGET, growth=2.0 )
+        assert b.record_success() == MAX_CHAR_BUDGET
+
+    def test_shrink_stops_at_the_floor( self ):
+        b = AdaptiveBudget( start=MIN_CHAR_BUDGET )
+        assert b.record_failure() == MIN_CHAR_BUDGET
+
+    def test_repeated_failure_converges_on_the_floor_not_zero( self ):
+        # A budget that halved to 0 would make every batch empty and the run
+        # would spin forever making no progress.
+        b = AdaptiveBudget( start=MAX_CHAR_BUDGET )
+        for _ in range( 200 ):
+            b.record_failure()
+        assert b.current() == MIN_CHAR_BUDGET
+
+    def test_it_climbs_to_the_ceiling_on_a_cleared_gpu( self ):
+        # The behaviour Rick asked for: unload the other models and the run
+        # should USE the headroom without anyone re-tuning a constant.
+        b = AdaptiveBudget( start=DEFAULT_CHAR_BUDGET )
+        for _ in range( 100 ):
+            b.record_success()
+        assert b.current() == MAX_CHAR_BUDGET
+
+    def test_it_settles_back_down_on_a_crowded_gpu( self ):
+        # And the converse: if the card is still busy, growth is undone by the
+        # refusals it causes, so it does not thrash upward forever.
+        b = AdaptiveBudget( start=DEFAULT_CHAR_BUDGET )
+        for _ in range( 40 ):
+            b.record_success(); b.record_failure(); b.record_failure()
+        assert b.current() == MIN_CHAR_BUDGET
+
+    @pytest.mark.parametrize( "floor,ceiling", [ ( 0, 100 ), ( -5, 100 ), ( 500, 100 ) ] )
+    def test_inconsistent_bounds_raise( self, floor, ceiling ):
+        with pytest.raises( ValueError, match="floor" ):
+            AdaptiveBudget( start=50, floor=floor, ceiling=ceiling )
+
+    @pytest.mark.parametrize( "growth", [ 1.0, 0.5, 0.0 ] )
+    def test_non_growing_growth_raises( self, growth ):
+        # growth <= 1.0 would mean success never widens anything, which silently
+        # turns the adaptive budget back into the hardcoded constant it replaced.
+        with pytest.raises( ValueError, match="growth" ):
+            AdaptiveBudget( start=50_000, growth=growth )
