@@ -8,6 +8,36 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.08.02 - Session b07d59ac (Cheech 🌿) | Embedding regeneration built; a norm can't identify a model
+
+**Health**: 13.1k tokens at write time (measured, not quoted).
+
+1. **Regeneration pipeline for every stored embedding** (row `5e848dd8`, commit `13459df0`). The model changed 2026-05-16 with no data migration, leaving vectors from two producers that share a dimension count and nothing else — cosine between them on identical text is ~0.008. Four subcommands, each asked for by name: `plan` (read-only) / `fill` (shadow columns only) / `verify` / `swap` (the one destructive step, refuses unless verify is clean). 83 unit tests, 100% lines + branches. **Zero live rows written** — every write path is still gated.
+2. **My first cut selected by vector norm and Rick overruled it.** I regenerated only the 79,318 rows reading norm 1.0, calling the other 209,468 "already correct." A norm says whether a vector was **normalized**, not which model produced it — it separates OpenAI from local only because those two differ in normalization, and it is blind to any change *inside* the local era. Selection is now by source text: 578,364 calls, whole table. `verify`'s denominator widened to match, so a partial run can no longer report clean.
+3. **Read-only survey answered "how do I test this without touching the table"** — 288,932 rows, zero missing vectors, zero rows with a vector but no text, crisp 05-16 cutover, no row mixing producers. Plus a fixture that must NOT be regenerated: `prediction_decisions.clamp-001` ("non-unit vector", norm exactly 3.0) asserts the out-of-range clamp.
+4. **`--today` on the LoC delta tool reports ZERO for today's commits** (row `d0b3cd84`, filed). Bare `--since=<today>` returns 0 from git; the same date with `00:00` returns 35. It is the default mode and the one session-end calls, so every seat hands the roll-up a silent zero that reads as an empty day. Caught only because 0 contradicted commits I had just made. Warned María before her global roll-up.
+5. **Container OAuth row re-parked, not closed** (`c7c60896`). Its chase was sized to a host refresh that Design E made irrelevant — each container now holds its own grant. Correct criterion is each container's own expiry (02:10:31 / 02:16:31 EDT); chase moved to 02:30.
+
+**Peer catch**: María 🌸 flagged my test file sitting under `src/cosa/tests/`, which no gate-invocable runner collects. Moved to `src/tests/unit/` rather than allowlisted — it is a plain no-DB unit test and belongs where the gate runs it.
+
+**Also fixed**: `test_presentation_generator_job` still asserted `claude-opus-4-6` after `976498af` moved the config to Opus 5; swept the other Opus assertions, they are hardcoded fixtures and fine.
+
+**Files**: src/cosa/rest/db/embedding_regeneration.py, src/tests/unit/test_embedding_regeneration.py, src/scripts/embedding_regen_probe.py, src/rnd/v0.1.9/2026.08.02-embedding-regeneration-from-logged-text.md, src/tests/unit/test_presentation_generator_job.py
+
+### 2026.08.02 - Session 4829ab05 (Mr. Radio 🦉) | Three store/tooling rows, gated not relayed
+
+**Health**: 9.5k tokens at write time (measured, not quoted).
+
+1. **A gate verdict written after a worker self-closes now has a durable home** (row `3c569786`, commit `310aa290`). Rick ruled amend-on-closed-rows; the block is stamped a post-terminal addendum naming the status at write, the event is `amended_post_terminal`, and the close is never reopened.
+2. **A bounce now names whose saved files it will deploy** (row `7de5a09f`, commit `0dc2b281`). Two channels, because one cannot reach both audiences: a human at a terminal gets a y/N; a non-TTY caller is named the files and **proceeds**, with the list riding the warning broadcast so the owning seat can object during the ack window.
+3. **I failed that row's first pass** — the guard aborted with no TTY, which is every Claude session, on a tree that is essentially always dirty. Proved it by running it (`exit 3`, no restart) rather than reasoning about it; the `--force` escape would also have disarmed the pre-existing unwarned-fleet pause.
+4. **A test fixture emptied a process-global registry and never put it back** (row `3b5be159`, commit `5a9c9ebf`). `test_cache_registry.py` cleared `cache_registry._REGISTRY` in teardown, wiping `judge.py`'s import-time registration for the rest of the process; fixed at the polluter, not the victim.
+5. **"A peer is churning that file" was wrong and worth catching.** The file's mtime was stable and it was already committed — the red was an ordering dependency, not noise. Taken at face value it would have been waved through and the fixture would still be wiping registries.
+
+**Crew**: Rachel 💐 built all three; I gated each and re-ran the full suite myself both sides — 12262 passed/2 failed → **12264 passed/0 failed**. Memento `io/mementos/rachel-94da8f37.md`, reaped at session end.
+
+**Files**: src/cosa/rest/db/repositories/task_repository.py, src/cosa/rest/routers/tasks.py, src/lupin_mcp/cosa_voice_mcp.py, src/lupin_mcp/task_store_tools.py, src/scripts/bounce-dev-server.sh, src/scripts/bounce_dev_warn.py, src/cosa/rest/managed_bounce_broadcast.py, src/tests/unit/ (5 files), src/tests/integration/test_task_store_integration.py
+
 ### 2026.07.31 - Session 7846bfcb (Mr. Radio 🦉) | Mistral Small 24B stood up on GPU1, config cutover from Phi-4
 
 **Health**: 11.8k tokens at write time (measured, not quoted).

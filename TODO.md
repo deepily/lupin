@@ -1,5 +1,15 @@
 # TODO
 
+## 🗳️ RULING 2026-08-02 (Rick, via Mr. Radio 🦉 `4829ab05`) — a closed row may now be amended
+
+**Decision**: allow `task_amend` on a terminal row, flagged as a post-terminal addendum. Chosen over adding a `ready-for-gate` status (too much surgery for a P3) and over writing down the process rule (rules get forgotten — this fleet chose a janitor over a "delete when done" instruction for exactly that reason).
+
+**Why it was asked**: a worker self-closes, then the manager runs the gate — and the store refused every write verb on a closed row, so the verdict had nowhere to go. Maria hit it twice in one hour; on row `700a6330` her gate **failed the first pass** and none of that reached the row.
+
+**Landed**: row `3c569786`, commit `310aa290`. The block names the status at write and says it is not a reopening; the event is `amended_post_terminal`. `transition` / `edit` / `correlate` stay refused — a closed row stays closed.
+
+**Not recovered**: the verdicts already lost on `ddcc40c2` / `700a6330` / `49a76406`. The capability now exists to write them late, but they are Maria's to write — reconstructing them from her DMs would put words in her mouth on a durable record.
+
 ## ✅ CLOSED 2026-08-02 (Mr. Radio 🦉 `1bf47c18`) — Krishna's managed-bounce lane: all three items done, and the answer moved the target
 
 *(The "FOR TOMORROW" version of this entry is kept below for the record — it was accurate when written and one of its own claims turned out to be wrong.)*
