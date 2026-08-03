@@ -19,6 +19,7 @@ import pytest
 
 import cosa.agents.runtime_argument_expeditor.expeditor as ex_mod
 from cosa.agents.runtime_argument_expeditor.expeditor import RuntimeArgumentExpeditor
+from cosa.agents.io_models.utils.fuzzy_file_prefilter import MAX_CANDIDATES
 
 
 # Submodules this file fakes via `patch.dict( sys.modules, {...} )`. patch.dict restores
@@ -171,6 +172,66 @@ class TestFuzzyFileMatch( unittest.TestCase ):
             o.llm_factory.get_client = MagicMock( return_value=MagicMock( run=MagicMock( return_value="<xml/>" ) ) )
             out = o._handle_fuzzy_file_match( "u@x" )
         self.assertTrue( out.endswith( "/report.md" ) )
+
+    # ------------------------------------------------------------------
+    # The pre-filter call is exercised END-TO-END (f5a1ca0d). The tests above
+    # only ever build a 1-2 file docs_map, so the pre-filter runs but never
+    # narrows — the cap that keeps phi-4's context from overflowing was
+    # inspection-verified only. These drive a LARGE candidate set through the
+    # real handler and assert the file_list the LLM receives is capped.
+    # ------------------------------------------------------------------
+
+    def _run_with_large_walk( self, o, description, matches, n_files=MAX_CANDIDATES * 4, extra_files=None ):
+        """
+        Build an n_files candidate map via os.walk, run the real handler, and
+        return (result_path, prompt_sent_to_llm). Count candidate paths in the
+        prompt with prompt.count( "- src/" ) — every candidate rel path is under
+        src/, and the template glues the FIRST entry onto the description line,
+        so a line-prefix count would undercount by one.
+        """
+        files = [ f"doc-{i}.md" for i in range( n_files ) ]
+        if extra_files:
+            files = extra_files + files
+        cm = _inner_config_mgr()   # search path "/src", template + llm spec set
+        captured = {}
+        def _run( prompt ):
+            captured[ "prompt" ] = prompt
+            return "<xml/>"
+        with _patch_config_mgr( cm ), _patch_fuzzy_model( matches ), \
+             patch.object( ex_mod.cu, "get_project_root", return_value="/p" ), \
+             patch.object( ex_mod.cu, "get_file_as_string", return_value="t {description} {file_list}" ), \
+             patch.object( ex_mod, "PromptTemplateProcessor" ) as PTP, \
+             patch.object( ex_mod.os.path, "exists", side_effect=lambda p: p.endswith( "/src" ) ), \
+             patch.object( ex_mod.os, "walk", return_value=[ ( "/p/src", [], files ) ] ), \
+             patch.object( o, "_ask_for_arg", return_value=description ):
+            PTP.return_value.process_template.side_effect = lambda t, n: t
+            o.llm_factory.get_client = MagicMock( return_value=MagicMock( run=MagicMock( side_effect=_run ) ) )
+            out = o._handle_fuzzy_file_match( "u@x" )
+        return out, captured.get( "prompt", "" )
+
+    def test_large_map_hard_capped_through_handler_zero_overlap( self ):
+        # 200 files, a description that overlaps NO path → the fallback hard cap
+        # must fire so the LLM never sees more than MAX_CANDIDATES paths. This is
+        # the exact overflow that took Lane 2 down, proven closed end-to-end.
+        o = _mk_expeditor()
+        # deterministic slice → first sorted rel path is the match the LLM returns
+        first_rel = sorted( f"src/doc-{i}.md" for i in range( MAX_CANDIDATES * 4 ) )[ 0 ]
+        out, prompt = self._run_with_large_walk( o, "zzznomatch qqqunrelated", [ first_rel ] )
+        self.assertEqual( prompt.count( "- src/" ), MAX_CANDIDATES )   # HARD cap, not 200
+        self.assertIn( f"- {first_rel}", prompt )
+        self.assertTrue( out.endswith( first_rel.split( "/" )[ -1 ] ) )
+
+    def test_large_map_narrowed_by_keyword_through_handler( self ):
+        # 200 decoys + one keyword-matching target; the description narrows to it
+        # and the LLM receives a capped, target-bearing list.
+        o = _mk_expeditor()
+        target = "kissbrevity-target.md"
+        out, prompt = self._run_with_large_walk(
+            o, "kissbrevity target", [ f"src/{target}" ], extra_files=[ target ]
+        )
+        self.assertLessEqual( prompt.count( "- src/" ), MAX_CANDIDATES )
+        self.assertIn( f"- src/{target}", prompt )
+        self.assertTrue( out.endswith( f"/{target}" ) )
 
     def test_fuzzy_no_matches_asks_fallback( self ):
         o = _mk_expeditor( debug=True )

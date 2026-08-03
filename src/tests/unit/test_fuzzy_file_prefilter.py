@@ -76,7 +76,7 @@ class TestNarrowing:
 
 
 # ============================================================================
-# Pass-through branches (map returned UNCHANGED, same object)
+# Pass-through branches — a map already within budget is returned UNCHANGED
 # ============================================================================
 class TestPassThrough:
 
@@ -88,18 +88,44 @@ class TestPassThrough:
         assert len( exact ) == MAX_CANDIDATES
         assert prefilter_docs_map_by_keywords( exact, "src", debug=False ) is exact
 
-    def test_no_usable_keywords_returns_full_map( self, large_map ):
-        # All tokens are stopwords or <= 2 chars → desc_words empty → unchanged.
-        assert prefilter_docs_map_by_keywords( large_map, "the a of it is on", debug=False ) is large_map
-
-    def test_zero_overlap_large_map_returns_full_map( self, large_map ):
-        # Real keywords, but none appear in any path → scored empty → unchanged.
-        out = prefilter_docs_map_by_keywords( large_map, "quantum chromodynamics entanglement", debug=True )
-        assert out is large_map
-
     def test_empty_map_returned_unchanged( self ):
         empty = {}
         assert prefilter_docs_map_by_keywords( empty, "anything at all", debug=False ) is empty
+
+
+# ============================================================================
+# HARD CAP — a large map NEVER exceeds MAX_CANDIDATES, whatever the description.
+# This is the f5a1ca0d fix: no scoring signal must still cap, not fall back to
+# the full map (the original context-overflow).
+# ============================================================================
+class TestHardCap:
+
+    def test_no_usable_keywords_is_capped_not_full( self, large_map ):
+        # All tokens are stopwords or <= 2 chars → no keywords → must STILL cap.
+        out = prefilter_docs_map_by_keywords( large_map, "the a of it is on", debug=True )
+        assert len( out ) == MAX_CANDIDATES
+        assert out is not large_map
+        assert set( out.keys() ).issubset( set( large_map.keys() ) )
+
+    def test_zero_overlap_large_map_is_capped_not_full( self, large_map ):
+        # Real keywords, none appear in any path → zero overlap → must STILL cap.
+        out = prefilter_docs_map_by_keywords( large_map, "quantum chromodynamics entanglement", debug=True )
+        assert len( out ) == MAX_CANDIDATES
+        assert out is not large_map
+        assert set( out.keys() ).issubset( set( large_map.keys() ) )
+
+    def test_fallback_slice_is_deterministic( self, large_map ):
+        # No-signal fallback must be stable across calls (sorted slice), so the
+        # candidate set is reproducible rather than dict-order-dependent.
+        a = prefilter_docs_map_by_keywords( large_map, "zzz nomatch qqq", debug=False )
+        b = prefilter_docs_map_by_keywords( large_map, "zzz nomatch qqq", debug=False )
+        assert list( a.keys() ) == list( b.keys() )
+        assert list( a.keys() ) == sorted( large_map.keys() )[ :MAX_CANDIDATES ]
+
+    def test_narrowing_also_respects_the_cap( self, large_map ):
+        # The signal path is bounded by the same cap.
+        out = prefilter_docs_map_by_keywords( large_map, "unrelated topic", debug=False )
+        assert len( out ) <= MAX_CANDIDATES
 
 
 # ============================================================================

@@ -41,11 +41,17 @@ def prefilter_docs_map_by_keywords( docs_map, description, debug=False ):
 
     Ensures:
         - returns a dict whose keys are a subset of docs_map's keys
-        - returns docs_map UNCHANGED (same object) when it holds
-          <= MAX_CANDIDATES entries, when the description yields no usable
-          keywords, or when no candidate path scores any keyword overlap
-        - when narrowing, returns a NEW dict of at most MAX_CANDIDATES entries,
-          highest keyword-overlap score first
+        - the returned map NEVER exceeds MAX_CANDIDATES entries — a HARD cap
+          that closes the context overflow regardless of what the description
+          says (this is the whole point: a fix that only lowers the odds of
+          the overflow is not a fix)
+        - returns docs_map UNCHANGED (same object) only when it already holds
+          <= MAX_CANDIDATES entries
+        - on a larger map, when keywords overlap candidate paths, keeps the
+          highest-scoring MAX_CANDIDATES
+        - on a larger map with NO scoring signal (no usable keywords, or zero
+          overlap), keeps a deterministic sorted MAX_CANDIDATES slice as a
+          last-resort cap
         - never returns None; never mutates the input
 
     Args:
@@ -56,6 +62,10 @@ def prefilter_docs_map_by_keywords( docs_map, description, debug=False ):
     Returns:
         dict: the filtered (or original) { relative_path -> abs_path } map
     """
+    # A map that already fits the LLM context needs no work — return it as-is.
+    if len( docs_map ) <= MAX_CANDIDATES:
+        return docs_map
+
     # Extract keywords from description (lowered, de-duped, stopwords removed).
     desc_words = set(
         w for w in description.lower().replace( "-", " " ).replace( "/", " " ).replace( ".", " " ).replace( "&", "" ).split()
@@ -64,33 +74,32 @@ def prefilter_docs_map_by_keywords( docs_map, description, debug=False ):
 
     if debug: print( f"[fuzzy_file_prefilter] Keywords extracted: {desc_words}" )
 
-    # Only narrow when there is something to narrow BY and something worth
-    # narrowing — a small map already fits the LLM context.
-    if not desc_words or len( docs_map ) <= MAX_CANDIDATES:
-        return docs_map
-
     # Score each path by keyword overlap against its path components.
     scored = []
-    for rel_path in docs_map:
-        path_lower = rel_path.lower().replace( "-", " " ).replace( "/", " " ).replace( "_", " " ).replace( ".", " " )
-        path_words = set( path_lower.split() )
-        score = len( desc_words & path_words )
-        if score > 0:
-            scored.append( ( score, rel_path ) )
+    if desc_words:
+        for rel_path in docs_map:
+            path_lower = rel_path.lower().replace( "-", " " ).replace( "/", " " ).replace( "_", " " ).replace( ".", " " )
+            path_words = set( path_lower.split() )
+            score = len( desc_words & path_words )
+            if score > 0:
+                scored.append( ( score, rel_path ) )
+        scored.sort( key=lambda x: x[ 0 ], reverse=True )
 
-    scored.sort( key=lambda x: x[ 0 ], reverse=True )
+    if scored:
+        keep = [ rel for _score, rel in scored[ :MAX_CANDIDATES ] ]
+        if debug:
+            print( f"[fuzzy_file_prefilter] Pre-filtered {len( docs_map )} → {len( keep )} candidates (top scores: {[ s for s, _ in scored[ :5 ] ]})" )
+    else:
+        # No scoring signal (no usable keywords, or zero keyword overlap) on a
+        # LARGE map. Returning the full map here is the exact context overflow
+        # that took Lane 2 down — so we STILL cap, to a deterministic sorted
+        # slice. The slice is unranked (there is nothing to rank on) but bounded,
+        # which beats a guaranteed HTTP 400.
+        keep = sorted( docs_map.keys() )[ :MAX_CANDIDATES ]
+        if debug:
+            print( f"[fuzzy_file_prefilter] No scoring signal — hard-capping {len( docs_map )} → {len( keep )} (deterministic slice)" )
 
-    if not scored:
-        # No path shared any keyword — keep the full map rather than return an
-        # empty candidate list (let the LLM try against everything).
-        if debug: print( f"[fuzzy_file_prefilter] No keyword matches, using full docs_map ({len( docs_map )} files)" )
-        return docs_map
-
-    candidates        = { rel for _score, rel in scored[ :MAX_CANDIDATES ] }
-    filtered_docs_map = { k: v for k, v in docs_map.items() if k in candidates }
-    if debug:
-        print( f"[fuzzy_file_prefilter] Pre-filtered {len( docs_map )} → {len( filtered_docs_map )} candidates (top scores: {[ s for s, _ in scored[ :5 ] ]})" )
-    return filtered_docs_map
+    return { k: docs_map[ k ] for k in keep }
 
 
 def quick_smoke_test():
@@ -113,13 +122,16 @@ def quick_smoke_test():
         assert prefilter_docs_map_by_keywords( small, "anything", debug=False ) is small
         print( "✓ small map returned unchanged" )
 
-        # 3) No usable keywords — returned unchanged even when large.
-        assert prefilter_docs_map_by_keywords( big_map, "the a of it", debug=False ) is big_map
-        print( "✓ keyword-less description returns full map" )
+        # 3) No usable keywords on a large map — STILL hard-capped.
+        out = prefilter_docs_map_by_keywords( big_map, "the a of it", debug=False )
+        assert len( out ) == MAX_CANDIDATES, f"keyword-less large map must cap to {MAX_CANDIDATES}, got {len( out )}"
+        print( "✓ keyword-less large map hard-capped" )
 
-        # 4) No overlap on a large map — returned unchanged.
-        assert prefilter_docs_map_by_keywords( big_map, "quantum entanglement chromodynamics", debug=False ) is big_map
-        print( "✓ zero-overlap large map returns full map" )
+        # 4) Zero overlap on a large map — STILL hard-capped (deterministic slice).
+        out = prefilter_docs_map_by_keywords( big_map, "quantum entanglement chromodynamics", debug=False )
+        assert len( out ) == MAX_CANDIDATES, f"zero-overlap large map must cap to {MAX_CANDIDATES}, got {len( out )}"
+        assert list( out.keys() ) == sorted( big_map.keys() )[ :MAX_CANDIDATES ], "fallback slice must be deterministic"
+        print( "✓ zero-overlap large map hard-capped (deterministic)" )
 
         print( "\n✓ ALL fuzzy_file_prefilter smoke tests passed" )
     except AssertionError as e:
