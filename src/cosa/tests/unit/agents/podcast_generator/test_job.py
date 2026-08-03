@@ -585,6 +585,24 @@ class TestExecuteDryRun:
             _run( job._execute_dry_run( voice_io, cosa_interface ) )
         assert "DRY RUN MODE" not in capsys.readouterr().out
 
+    def test_dry_run_stores_abstract_in_artifacts_for_done_card( self ):
+        """Consume-seam prerequisite (bug 9b481811): the dry-run path must store the
+        completion abstract in artifacts so it rides the running→done promotion and
+        the done card renders WITHOUT a reload. Missing → blank card on stage."""
+        job = _job( debug=False )
+        voice_io, cosa_interface = self._voice_iface()
+        with patch( "asyncio.sleep", AsyncMock() ):
+            _run( job._execute_dry_run( voice_io, cosa_interface ) )
+        stored = job.artifacts.get( "abstract" )
+        assert stored                                    # non-empty
+        assert "▶️ Play Here" in stored
+        assert "&embed=1" in stored
+        # Identical to what the completion notify sent (single source of truth).
+        completion = next(
+            c for c in voice_io.notify.await_args_list if c.kwargs.get( "abstract" )
+        )
+        assert stored == completion.kwargs[ "abstract" ]
+
     def test_force_failure_mode_raises( self ):
         # force_failure_mode hook calls AgenticJobBase._raise_forced_failure
         # which raises KeyError for "code_bug".

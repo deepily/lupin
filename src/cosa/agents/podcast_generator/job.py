@@ -516,6 +516,14 @@ _🧪 Pre-rendered dry-run fixture — Maria & Mr. Radio narrating what dry-run 
 
 **Stats**: $0.00 | 10 segments | 5.0s (simulated)"""
 
+        # Store the abstract so it rides the running→done job_state_transition
+        # (running_fifo_queue.py reads artifacts.get("abstract")). Without this the
+        # promoted done card renders empty ("loading…" + no Play Here) until a page
+        # reload re-fetches from the persisted notification — the SAME consume bug
+        # (9b481811) fixed on the real path. The dry-run path needs it too, or a
+        # dry-run on stage shows a blank card.
+        self.artifacts[ "abstract" ] = completion_abstract
+
         # Notify completion
         await voice_io.notify(
             "🧪 Dry run complete! Podcast simulation finished.",
