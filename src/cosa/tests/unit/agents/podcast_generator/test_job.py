@@ -253,6 +253,42 @@ class TestExecute:
         assert "Research document:" in out_txt
         assert "Max segments: 5"    in out_txt
 
+    def test_completion_abstract_emits_play_here_and_listen_links( self ):
+        """
+        Ensures: the completion abstract carries BOTH audio links, same path,
+        in the on-stage order Play Here | Listen | Download —
+            - Play Here -> /app/audio?path=<enc>&embed=1 (floating overlay; leads)
+            - Listen    -> /app/audio?path=<enc>         (standalone tab; no &embed)
+            - Download  -> /api/io/file?path=<enc>&download=true
+        Only Play Here carries &embed=1, so the two audio forms are distinct.
+        """
+        job   = _job()
+        graph = _ExecGraph()
+        with graph.patcher(), \
+             patch( "os.path.exists", return_value=True ), \
+             patch( "cosa.utils.util.get_project_root", return_value="/proj" ):
+            _run( job._execute() )
+
+        completion = [ c for c in graph.voice_io.notify.await_args_list if c.kwargs.get( "abstract" ) ]
+        assert len( completion ) == 1
+        abstract = completion[ 0 ].kwargs[ "abstract" ]
+
+        enc       = "pod/ep.mp3"                                    # quote( audio_rel ), '/' is safe
+        play_here = f"[▶️ Play Here](/app/audio?path={enc}&embed=1)"
+        listen    = f"[🎧 Listen](/app/audio?path={enc})"
+        download  = f"[⬇️ Download](/api/io/file?path={enc}&download=true)"
+
+        # both audio forms present, plus download
+        assert play_here in abstract
+        assert listen    in abstract
+        assert download  in abstract
+
+        # the two forms differ ONLY by &embed=1 — Listen must not carry it
+        assert abstract.count( "&embed=1" ) == 1
+
+        # on-stage order: overlay first, standalone tab second, download last
+        assert abstract.index( play_here ) < abstract.index( listen ) < abstract.index( download )
+
     def test_dry_run_routes_to_dry_run_helper( self ):
         # dry_run=True must short-circuit to _execute_dry_run after reconfigure,
         # before importing/building the orchestrator.

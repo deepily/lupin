@@ -328,9 +328,13 @@ class PodcastGeneratorJob( AgenticJobBase ):
             else:
                 tts_msg = "Podcast generation complete with no segments produced."
 
-            # Build clickable links. Listen routes to the in-app HTML5 audio player
-            # page (cosa/rest/routers/pages.py "/app/audio" → audio-player.html);
-            # Download streams the raw mp3 with attachment disposition.
+            # Build clickable links. Both audio links target the same in-app HTML5
+            # player page (cosa/rest/routers/pages.py "/app/audio" → audio-player.html);
+            # they differ only by the &embed=1 flag:
+            #   - Play Here → &embed=1: the client renders the player in a floating
+            #     overlay in place (Rick's on-stage default — leads the list).
+            #   - Listen → no flag: opens the player as a standalone tab.
+            #   - Download streams the raw mp3 with attachment disposition.
             script_link = (
                 f"[📝 View Script](/app/docs?path={urllib.parse.quote( script_rel )})"
                 if script_rel else None
@@ -339,6 +343,7 @@ class PodcastGeneratorJob( AgenticJobBase ):
             if audio_rel:
                 encoded     = urllib.parse.quote( audio_rel )
                 audio_links = (
+                    f"[▶️ Play Here](/app/audio?path={encoded}&embed=1) | "
                     f"[🎧 Listen](/app/audio?path={encoded}) | "
                     f"[⬇️ Download](/api/io/file?path={encoded}&download=true)"
                 )
