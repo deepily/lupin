@@ -12378,6 +12378,33 @@ class NotificationsUI {
             const title = anchor.textContent || "Doc";
             this._openContentPane( "doc", normalized, title );
         } );
+
+        // Embedded-podcast link interception — BOTH layout modes (unlike the
+        // horizontal-only doc-pane above). In presentation mode Rick can only
+        // present audio from ONE tab and cannot switch mid-demo, so a podcast
+        // player must live INSIDE the client tab as a floating overlay, not a
+        // new tab. We intercept ONLY the `&embed=1` form; a plain
+        // /app/audio?path= link is deliberately left alone and still opens a
+        // new tab (Rick wants both paths).
+        document.addEventListener( "click", ( ev ) => this._handleEmbeddedAudioClick( ev ) );
+    }
+
+    /**
+     * Document-level click handler for embedded-podcast links. Intercepts ONLY
+     * an `/app/audio?path=...&embed=1` anchor and shows the floating in-tab
+     * player; every other click (no anchor, an iframe-internal click, a plain
+     * audio link, a non-audio link) is left untouched. Works in both layout
+     * modes. Split out from the listener so the branching is unit-testable
+     * without wiring the whole document.
+     */
+    _handleEmbeddedAudioClick( ev ) {
+        const anchor = ev.target.closest( "a[href]" );
+        if ( !anchor ) return;
+        if ( ev.target.closest( "#content-pane-body iframe" ) ) return;
+        const normalized = this._normalizeDocLinkHref( anchor.getAttribute( "href" ) );
+        if ( !this._isEmbeddedAudioHref( normalized ) ) return;
+        ev.preventDefault();
+        this._showPodcastOverlay( normalized, anchor.textContent || "Podcast" );
     }
 
     /**
@@ -12390,6 +12417,85 @@ class NotificationsUI {
     _normalizeDocLinkHref( href ) {
         if ( !href ) return href;
         return href.replace( /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?/, "" );
+    }
+
+    /**
+     * True only for an audio link that carries the `embed=1` flag, i.e.
+     * `/app/audio?path=<rel>&embed=1`. The plain `/app/audio?path=` form
+     * (no embed flag) returns false so it keeps opening in a new tab. The
+     * `embed=1` token is matched query-order-agnostically.
+     */
+    _isEmbeddedAudioHref( href ) {
+        if ( !href ) return false;
+        if ( !href.startsWith( "/app/audio?path=" ) ) return false;
+        return /[?&]embed=1(?:&|$)/.test( href );
+    }
+
+    /**
+     * Show a floating, in-tab podcast player overlay. Modeled on
+     * showTTSErrorModal (works in both layout modes), but WITHOUT any
+     * auto-dismiss: the player is silenced only by the user, via the
+     * `<audio controls>` inside the iframe (start/stop) or the ✕ dismiss
+     * button (which removes the iframe and thereby stops playback). There is
+     * NO automated silencing when a notification lands mid-playback — Rick
+     * ruled that out. Single-instance: a second call replaces the first.
+     *
+     * @param {string} audioUrl - the embed URL (/app/audio?path=<rel>&embed=1)
+     * @param {string} title    - label shown in the overlay header
+     * @returns {HTMLElement} the overlay element (for tests / callers)
+     */
+    _showPodcastOverlay( audioUrl, title ) {
+        // Single instance — replace any existing overlay.
+        const existing = document.getElementById( "podcast-overlay" );
+        if ( existing ) existing.remove();
+
+        const overlay = document.createElement( "div" );
+        overlay.id = "podcast-overlay";
+        overlay.className = "podcast-overlay";
+        overlay.setAttribute( "data-testid", "podcast-overlay" );
+
+        const header = document.createElement( "div" );
+        header.className = "podcast-overlay-header";
+
+        const titleEl = document.createElement( "div" );
+        titleEl.className = "podcast-overlay-title";
+        titleEl.textContent = title || "Podcast";
+
+        const dismiss = document.createElement( "button" );
+        dismiss.type = "button";
+        dismiss.className = "podcast-overlay-dismiss";
+        dismiss.setAttribute( "data-testid", "podcast-overlay-dismiss" );
+        dismiss.setAttribute( "aria-label", "Dismiss podcast player" );
+        dismiss.textContent = "✕";
+        // Manual dismiss ONLY: removing the overlay removes the iframe, which
+        // stops playback. No auto-close timer, no notification-driven silencing.
+        dismiss.addEventListener( "click", () => this._dismissPodcastOverlay() );
+
+        header.appendChild( titleEl );
+        header.appendChild( dismiss );
+
+        const frame = document.createElement( "iframe" );
+        frame.className = "podcast-overlay-frame";
+        frame.setAttribute( "data-testid", "podcast-overlay-frame" );
+        frame.src = audioUrl;              // the <audio controls> lives inside the embed page
+        frame.setAttribute( "title", title || "Podcast player" );
+        frame.setAttribute( "allow", "autoplay" );
+
+        overlay.appendChild( header );
+        overlay.appendChild( frame );
+        document.body.appendChild( overlay );
+
+        this.log( `Showing podcast overlay: ${audioUrl}` );
+        return overlay;
+    }
+
+    /**
+     * Remove the podcast overlay if present. Removing the iframe stops any
+     * audio it was playing. No-op when no overlay is open.
+     */
+    _dismissPodcastOverlay() {
+        const overlay = document.getElementById( "podcast-overlay" );
+        if ( overlay ) overlay.remove();
     }
 
     /**

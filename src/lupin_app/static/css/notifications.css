@@ -2930,6 +2930,77 @@
             display: block;
         }
 
+        /* Floating in-tab podcast player (Rick's presentation-mode overlay).
+           Lives in the client tab so audio presents from the ONE tab that
+           carries the feed; works in both layout modes. Corner-anchored and
+           small on purpose — it must NOT cover the presentation the way a
+           full-screen modal backdrop would. Silenced only by the user:
+           <audio controls> inside the iframe (start/stop) or the ✕ button. */
+        .podcast-overlay {
+            position: fixed;
+            right: 20px;
+            bottom: 20px;
+            width: 360px;
+            max-width: calc( 100vw - 40px );
+            background: linear-gradient( 135deg, #1a1a2e 0%, #16213e 100% );
+            border: 2px solid #4a90d9;
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba( 0, 0, 0, 0.5 );
+            z-index: 10001;
+            overflow: hidden;
+            animation: podcastOverlayFadeIn 0.3s ease-out;
+        }
+
+        @keyframes podcastOverlayFadeIn {
+            from { opacity: 0; transform: translateY( 12px ); }
+            to   { opacity: 1; transform: translateY( 0 ); }
+        }
+
+        .podcast-overlay-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 12px;
+            background: rgba( 0, 0, 0, 0.25 );
+            border-bottom: 1px solid rgba( 74, 144, 217, 0.4 );
+        }
+
+        .podcast-overlay-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #e8f0fe;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-right: 8px;
+        }
+
+        .podcast-overlay-dismiss {
+            background: none;
+            border: none;
+            color: #adb5bd;
+            font-size: 16px;
+            line-height: 1;
+            cursor: pointer;
+            padding: 2px 6px;
+            border-radius: 4px;
+            flex-shrink: 0;
+            transition: color 0.2s ease, background 0.2s ease;
+        }
+
+        .podcast-overlay-dismiss:hover {
+            color: #fff;
+            background: rgba( 255, 255, 255, 0.1 );
+        }
+
+        .podcast-overlay-frame {
+            display: block;
+            width: 100%;
+            height: 96px;
+            border: 0;
+            background: transparent;
+        }
+
         .tts-stop-btn:hover {
             background-color: rgba( 255, 193, 7, 0.3 );
             transform: scale( 1.1 );
