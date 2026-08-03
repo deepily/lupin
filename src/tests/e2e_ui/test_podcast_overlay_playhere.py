@@ -67,15 +67,35 @@ def _render_abstract( page ):
     Render the completion abstract through the app's OWN renderer into the
     notifications DOM, so the anchors are real app-rendered anchors (DOMPurify'd)
     and Rio's document-level click interception fires on a genuine click.
+
+    The host is PINNED (fixed, bottom-left, high z-index) so its anchors are
+    always actionable: the notifications toolbar sits at a high z-index and
+    otherwise intercepts the pointer on the leftmost Play Here link (the rightmost
+    Listen link happened to clear it). Rio's interception is document-level on any
+    a[href*=embed=1] click, so where the anchor lives does not matter — pinning
+    only removes a layout-dependent flake, it does not weaken the trigger.
     """
     page.evaluate(
         """( md ) => {
             const host = document.createElement( 'div' );
             host.dataset.testPodcastAbstract = '1';
+            host.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:2147483647;background:#222;padding:8px;';
             host.innerHTML = window.notificationsUI.renderAbstractSection( md );
-            ( document.querySelector( '.notifications-container' ) || document.body ).appendChild( host );
+            document.body.appendChild( host );
         }""",
         ABSTRACT_MD,
+    )
+
+
+def _click_play_here( page ):
+    """
+    Click the real Play Here (&embed=1) anchor to fire Rio's interception, then
+    REMOVE the pinned trigger host so it cannot overlap the overlay's own
+    controls (e.g. the dismiss button) during the assertions that follow.
+    """
+    page.locator( f"{ABS_HOST} a[href*='embed=1']" ).click()
+    page.evaluate(
+        "() => { const h = document.querySelector( \"[data-test-podcast-abstract='1']\" ); if ( h ) h.remove(); }"
     )
 
 
@@ -86,8 +106,8 @@ class TestPodcastOverlayPlayHere:
         page = notifications_page
         _render_abstract( page )
 
-        # Click the real Play Here anchor (the &embed=1 link).
-        page.locator( f"{ABS_HOST} a[href*='embed=1']" ).click()
+        # Click the real Play Here anchor (the &embed=1 link); fires Rio's interception.
+        _click_play_here( page )
 
         # Overlay opens, iframe src is the &embed=1 URL verbatim.
         page.locator( OVERLAY ).wait_for( state="visible", timeout=5000 )
@@ -102,7 +122,7 @@ class TestPodcastOverlayPlayHere:
     def test_dismiss_removes_the_iframe( self, notifications_page ):
         page = notifications_page
         _render_abstract( page )
-        page.locator( f"{ABS_HOST} a[href*='embed=1']" ).click()
+        _click_play_here( page )
         page.locator( OVERLAY ).wait_for( state="visible", timeout=5000 )
 
         # Dismiss removes the iframe → playback stops (Rio: ✕ removes the iframe).
@@ -116,7 +136,7 @@ class TestPodcastOverlayPlayHere:
         page.locator( "#layout-mode-toggle" ).click()      # → horizontal
         page.wait_for_timeout( 100 )
         _render_abstract( page )
-        page.locator( f"{ABS_HOST} a[href*='embed=1']" ).click()
+        _click_play_here( page )
         page.locator( OVERLAY ).wait_for( state="visible", timeout=5000 )
         assert page.locator( FRAME ).get_attribute( "src" ).endswith( "&embed=1" )
 
