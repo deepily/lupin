@@ -130,6 +130,51 @@ async def health():
 
 
 @router.get(
+    "/api/busy",
+    response_class = JSONResponse,
+    summary        = "Is a job running on this server right now?",
+    description    = "Two integers for the managed-bounce guard (row 08919110): "
+                     "inflight_agentic_jobs and run_queue_size. Unauthenticated by design "
+                     "so a host shell script can read it with no credential. Leaks only how "
+                     "many jobs are running; adds nothing to /health."
+)
+async def busy():
+    """
+    Report whether a job is currently running, for bounce-dev-server.sh's guard.
+
+    A restart of :7999 destroys any in-flight job — Rick lost a podcast job exactly
+    this way (row 08919110). The bounce script is a host shell script with no auth
+    credential, so it needs an UNAUTHENTICATED read to REFUSE a bounce that would kill
+    live work. The existing job-state surfaces (/queue/pool-status, /get-queue/run)
+    both require get_current_user, and /health's two-field contract is frozen — so this
+    small endpoint exists specifically for the guard (Rick's ruling 2026-08-02).
+
+    Requires:
+        - lupin_app.main is importable and jobs_run_queue is initialized (server past
+          startup)
+
+    Ensures:
+        - Returns {"inflight_agentic_jobs": int, "run_queue_size": int}
+        - inflight_agentic_jobs = the CJ-flow shared agentic pool's in-flight count
+          (running_fifo_queue.get_pool_status()); run_queue_size = the run FIFO queue
+          depth. Either > 0 means a restart would destroy running work.
+        - Adds NO field to /health — that endpoint's 2-field contract is pinned by a test.
+
+    Raises:
+        - Propagates only if jobs_run_queue is absent/uninitialized. The HOST guard
+          treats ANY non-200 or unreachable response as FAIL-OPEN, so a transient error
+          here never blocks a recovery bounce.
+    """
+    import lupin_app.main as main_module
+    run_queue = main_module.jobs_run_queue
+    pool      = run_queue.get_pool_status()
+    return {
+        "inflight_agentic_jobs" : int( pool[ "inflight_agentic_jobs" ] ),
+        "run_queue_size"        : int( run_queue.size() )
+    }
+
+
+@router.get(
     "/api/code-identity",
     response_class = JSONResponse,
     summary        = "Which code is this process actually running?",

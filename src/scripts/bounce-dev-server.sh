@@ -19,7 +19,7 @@
 # Usage:
 #   ./src/scripts/bounce-dev-server.sh          # verbose
 #   ./src/scripts/bounce-dev-server.sh --quiet  # one-line summary only
-#   ./src/scripts/bounce-dev-server.sh --force  # skip the dirty-tree confirm + unwarned pause
+#   ./src/scripts/bounce-dev-server.sh --force  # skip dirty-tree confirm + unwarned pause + running-job refusal
 #
 # When the warning helper reports exit 2 (nobody was warned at all), the bounce
 # still proceeds — a broken warn path must not block recovery of a wedged server —
@@ -29,8 +29,10 @@
 # DIRTY-TREE AWARENESS (row 7de5a09f): with auto-reload off and the repo bind-mounted,
 # a bounce serves EVERY saved file in the tree — committed or not, from every session —
 # not just the bouncer's work. So before restarting, if the tree is dirty this script
-# NAMES the dirty files (git status --short). It NEVER fails closed and NEVER refuses a
-# non-interactive caller:
+# NAMES the dirty files (git status --short). For a DIRTY TREE it NEVER fails closed and
+# NEVER refuses a non-interactive caller (the running-job guard at Step 0.5 is the ONE
+# deliberate exception — it refuses a bounce that would destroy a live job, --force over-
+# rides, and it still fails OPEN when its probe is unreachable):
 #   • at a TERMINAL ([ -t 0 ]): asks a y/N; answering no aborts (exit 3) before the
 #     restart. --force skips this human prompt.
 #   • non-interactive (every Claude session): PROCEEDS after naming the files — no
@@ -120,6 +122,49 @@ if [ -n "$BOUNCE_DIRTY_FILES" ]; then
         log "    Non-interactive caller — proceeding; the warning broadcast names these files so their owner can object."
     fi
 fi
+
+# ── Step 0.5: running-job guard (row 08919110, Rick's ruling 2026-08-02) ──────────
+# THE ONE PLACE THIS SCRIPT REFUSES. A restart DESTROYS any job running in the container
+# — Rick lost a podcast generation job to a pending bounce. A running job is NOT a dirty
+# tree: a dirty tree is recoverable (the bounce is often how you deploy it), a running job
+# is work no re-bounce brings back. So this step DELIBERATELY reverses the "never refuses"
+# letter of Step 0 above: on a detected live job it REFUSES (exit 4), it does not merely
+# warn. "Ask first" was rejected because the bouncer cannot enumerate what is running from
+# outside the box — the refusal is a mechanism, not a reminder someone must keep.
+#
+#   • bounce_busy_probe.py GETs the unauthenticated /api/busy (two ints:
+#     inflight_agentic_jobs + run_queue_size) and exits 0=idle, 10=busy (either > 0,
+#     the OR trigger), 20=unreachable/malformed.
+#   • BUSY (10) → REFUSE (exit 4) UNLESS --force, the deliberate override that keeps the
+#     wedged-server recovery path open.
+#   • UNREACHABLE (20) or any unexpected code → FAIL OPEN and proceed. A wedged server has
+#     no job to protect and is exactly the case the probe cannot reach; a probe that could
+#     block recovery would be worse than the job-loss this guards. So the "never fails
+#     CLOSED" spirit of the line-32 rule is kept — only its "never refuses" letter changes,
+#     and only for an affirmatively-detected live job.
+# Runs BEFORE the warn broadcast so a refused bounce never fires a false fleet alarm.
+log "Checking for a running job on :7999 before the bounce..."
+busy_rc=0
+python3 "${LUPIN_ROOT}/src/scripts/bounce_busy_probe.py" || busy_rc=$?
+case "$busy_rc" in
+    0)
+        log "No job running on :7999 — safe to bounce."
+        ;;
+    10)
+        if [ "$FORCE" -eq 1 ]; then
+            log "⚠️  A job is RUNNING on :7999 — --force given, bouncing anyway and DESTROYING it."
+        else
+            echo "REFUSED: a job is running on :7999 and this bounce would destroy it (row 08919110)." >&2
+            echo "        Wait for it to finish, or re-run with --force to bounce anyway." >&2
+            exit 4
+        fi
+        ;;
+    *)
+        # 20 (unreachable / malformed) and any unexpected code: FAIL OPEN — a broken probe
+        # must never block recovery of a wedged server (which is why it is unreachable).
+        log "Busy-probe reported no live job it could confirm (rc ${busy_rc}) — failing OPEN and proceeding."
+        ;;
+esac
 
 # ── Step 1: ack-confirmed warning ─────────────────────────────────────────────
 # bounce_dev_warn.py distinguishes THREE outcomes (its own header):
