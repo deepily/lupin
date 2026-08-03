@@ -31,6 +31,7 @@ Usage:
 import subprocess
 from typing import List, Optional, Set
 
+from .date_bounds import normalize_since, normalize_until
 from .exceptions import GitCommandError
 
 
@@ -66,8 +67,11 @@ def _rev_list_shas(
     cmd = [ "git", "rev-list" ]
     if not include_merges:
         cmd.append( "--no-merges" )
-    if since: cmd.append( f"--since={since}" )
-    if until: cmd.append( f"--until={until}" )
+    # Same normalization as GitLogParser._build_command — see date_bounds.
+    # If these two ever diverge the guard silently audits a different window
+    # than the walk it is auditing (row d0b3cd84).
+    if since: cmd.append( f"--since={normalize_since( since )}" )
+    if until: cmd.append( f"--until={normalize_until( until )}" )
     if all_branches:
         cmd.append( "--branches" )
     if rev_range:

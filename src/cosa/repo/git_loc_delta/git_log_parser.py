@@ -29,6 +29,8 @@ Usage:
 import subprocess
 from typing import Iterator, List, Optional
 
+from .date_bounds import normalize_since, normalize_until
+
 from .exceptions import GitCommandError
 
 
@@ -110,8 +112,11 @@ class GitLogParser:
         ]
         if not self.include_merges:
             cmd.append( "--no-merges" )
-        if self.since: cmd.append( f"--since={self.since}" )
-        if self.until: cmd.append( f"--until={self.until}" )
+        # Bare ISO dates are pinned to day boundaries here, NOT at the caller —
+        # coverage_guard mirrors these flags and must normalize identically or
+        # its cross-check compares two different questions (row d0b3cd84).
+        if self.since: cmd.append( f"--since={normalize_since( self.since )}" )
+        if self.until: cmd.append( f"--until={normalize_until( self.until )}" )
         if self.author: cmd.append( f"--author={self.author}" )
         if self.all_branches:
             cmd.append( "--branches" )
