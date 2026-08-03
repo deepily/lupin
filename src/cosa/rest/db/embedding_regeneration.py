@@ -81,7 +81,16 @@ NORMALIZED_NORM_CEILING = 1.01
 LOCAL_NORM_FLOOR   = 5.0
 LOCAL_NORM_CEILING = 60.0
 
+# Count ceiling. Kept, but it is no longer the only bound — see DEFAULT_CHAR_BUDGET.
 DEFAULT_BATCH_SIZE = 256
+
+# Total characters allowed in one batch. Grounded in the 2026-08-02 measurements:
+# 256 typical texts totalling 17,850 chars embed in 0.42s, while ~100k chars of
+# the longest texts CUDA-OOM the shared GPU. 40,000 sits above the typical batch
+# with headroom and well under the failure point. It is deliberately conservative
+# — embedding is ~16 min of the run either way, so buying margin costs nothing
+# that matters, and the GPU is shared with the rest of Lupin.
+DEFAULT_CHAR_BUDGET = 40_000
 
 
 class RegenSpec( NamedTuple ):
@@ -221,6 +230,81 @@ def plan_batches( row_ids: Sequence[Any], batch_size: int = DEFAULT_BATCH_SIZE )
     if batch_size <= 0:
         raise ValueError( f"batch_size must be positive, got {batch_size}" )
     return [ list( row_ids[ i : i + batch_size ] ) for i in range( 0, len( row_ids ), batch_size ) ]
+
+
+def plan_batches_by_budget( items: Sequence[Any], size_of, *,
+                            char_budget: int = DEFAULT_CHAR_BUDGET,
+                            max_count: int = DEFAULT_BATCH_SIZE ) -> List[List[Any]]:
+    """
+    Group items into batches bounded by BOTH a total size budget and a count.
+
+    A fixed count is not a safe batch bound for embedding. Measured 2026-08-02:
+    256 typical texts (17,850 chars total) embed fine, while EIGHT of the longest
+    texts (~100k chars) return HTTP 500 — `torch.OutOfMemoryError` on a GPU whose
+    23.65 GiB is already ~99% held by two other processes. Cost tracks total text,
+    not row count, so the count alone lets the long tail through.
+
+    Requires:
+        - items is a sequence
+        - size_of maps an item to its non-negative size (e.g. len of its text)
+        - char_budget and max_count are positive ints
+
+    Ensures:
+        - returns batches preserving order and covering every item exactly once
+        - no batch exceeds max_count items
+        - no batch exceeds char_budget UNLESS it holds a single item that alone
+          exceeds it — an oversized row is isolated rather than dropped, so the
+          caller can decide, and it can never be silently merged with others
+        - returns [] for an empty input
+
+    Raises:
+        - ValueError if char_budget or max_count is not positive
+    """
+    if char_budget <= 0:
+        raise ValueError( f"char_budget must be positive, got {char_budget}" )
+    if max_count <= 0:
+        raise ValueError( f"max_count must be positive, got {max_count}" )
+
+    batches: List[List[Any]] = []
+    current: List[Any]       = []
+    running                  = 0
+
+    for item in items:
+        size = size_of( item )
+        if current and ( running + size > char_budget or len( current ) >= max_count ):
+            batches.append( current )
+            current, running = [], 0
+        current.append( item )
+        running += size
+
+    if current:
+        batches.append( current )
+    return batches
+
+
+def split_batch( batch: Sequence[Any] ) -> List[List[Any]]:
+    """
+    Halve a batch that the embedder refused, for retry.
+
+    The recovery half of the OOM story: a batch that fails is not evidence that
+    any row in it is bad, only that the batch was too big for the memory free at
+    that moment. Halving converges on the real culprit — or on success — in
+    log2(n) attempts.
+
+    Requires:
+        - batch is a sequence
+
+    Ensures:
+        - returns [] for an empty batch
+        - returns [] for a single-item batch — one item cannot be split, and the
+          caller must treat that as a genuine per-row failure rather than retry
+          forever
+        - otherwise returns exactly two non-empty halves covering the batch in order
+    """
+    if len( batch ) <= 1:
+        return []
+    middle = len( batch ) // 2
+    return [ list( batch[ :middle ] ), list( batch[ middle: ] ) ]
 
 
 def is_off_peak( hour_edt: int ) -> bool:
@@ -456,8 +540,35 @@ def _plan( session, prefix="" ):   # pragma: no cover - live DB boundary
     return grand_total
 
 
+def _embed_with_split_retry( provider, rows, content_type, depth=0 ):   # pragma: no cover - live embedder boundary
+    """
+    Embed (id, text) rows, halving the batch on failure until it fits or is one row.
+
+    A batch that 500s is not evidence that any row in it is bad — it is evidence
+    the batch was too big for the GPU memory free at that instant. Halving
+    separates those two cases instead of failing all of them together.
+
+    Returns [ ( row_id, vector_or_None ), ... ]; a None means that single row
+    genuinely could not be embedded on its own.
+    """
+    try:
+        vectors = provider.generate_embeddings_batch( [ r[ 1 ] for r in rows ], content_type=content_type )
+        return list( zip( [ r[ 0 ] for r in rows ], vectors ) )
+    except Exception as error:
+        halves = split_batch( rows )
+        if not halves:
+            print( f"    single row {rows[ 0 ][ 0 ]} failed to embed alone: {type( error ).__name__}: {str( error )[ :90 ]}" )
+            return [ ( rows[ 0 ][ 0 ], None ) ]
+        print( f"    batch of {len( rows )} failed ({type( error ).__name__}) — splitting" )
+        out = []
+        for half in halves:
+            out.extend( _embed_with_split_retry( provider, half, content_type, depth + 1 ) )
+        return out
+
+
 def _fill( session, spec, provider, prefix="", batch_size=DEFAULT_BATCH_SIZE,
-           limit=None, scratch_dir="/tmp", apply=False ):   # pragma: no cover - live DB + embedder boundary
+           char_budget=DEFAULT_CHAR_BUDGET, limit=None, scratch_dir="/tmp",
+           apply=False ):   # pragma: no cover - live DB + embedder boundary
     """Regenerate one spec's vectors into its SHADOW column. Never writes the live column."""
     from sqlalchemy import text as sql_text
 
@@ -477,25 +588,32 @@ def _fill( session, spec, provider, prefix="", batch_size=DEFAULT_BATCH_SIZE,
         return { "planned": len( ids ), "written": 0, "rejected": 0 }
 
     done, written, rejected = list( load_checkpoint( path )[ "done_ids" ] ), 0, 0
-    for batch in plan_batches( ids, batch_size ):
+
+    # Batch by ID first only to bound the SELECT; the embedder batch is re-planned
+    # by CHARACTER BUDGET once the texts are in hand, because that is what the GPU
+    # actually costs (see plan_batches_by_budget).
+    for id_chunk in plan_batches( ids, batch_size * 4 ):
         fetched = session.execute( sql_text(
             f"SELECT {spec.pk}, {spec.text_column} FROM {table} WHERE {spec.pk} = ANY(:ids)"
-        ), { "ids": batch } ).all()
+        ), { "ids": id_chunk } ).all()
 
-        texts   = [ row[ 1 ] for row in fetched ]
-        vectors = provider.generate_embeddings_batch( texts, content_type=spec.content_type )
-
-        for ( row_id, _ ), vector in zip( fetched, vectors ):
-            reason = validate_fresh_vector( vector )
-            if reason:
-                print( f"    REJECTED {spec.pk}={row_id}: {reason}" )
-                rejected += 1
-                continue
-            session.execute( sql_text(
-                f"UPDATE {table} SET {spec.shadow_column} = :vec WHERE {spec.pk} = :id"
-            ), { "vec": str( list( vector ) ), "id": row_id } )
-            written += 1
-            done.append( row_id )
+        for batch in plan_batches_by_budget(
+            [ ( row[ 0 ], row[ 1 ] ) for row in fetched ],
+            size_of     = lambda pair: len( pair[ 1 ] or "" ),
+            char_budget = char_budget,
+            max_count   = batch_size,
+        ):
+            for row_id, vector in _embed_with_split_retry( provider, batch, spec.content_type ):
+                reason = "embedder failed on this row alone" if vector is None else validate_fresh_vector( vector )
+                if reason:
+                    print( f"    REJECTED {spec.pk}={row_id}: {reason}" )
+                    rejected += 1
+                    continue
+                session.execute( sql_text(
+                    f"UPDATE {table} SET {spec.shadow_column} = :vec WHERE {spec.pk} = :id"
+                ), { "vec": str( list( vector ) ), "id": row_id } )
+                written += 1
+                done.append( row_id )
 
         session.commit()
         save_checkpoint( path, done )
@@ -554,7 +672,8 @@ def _swap( session, spec, prefix="", apply=False ):   # pragma: no cover - live 
 
 
 def _run( command="plan", prefix="", apply=False, force=False, limit=None,
-          batch_size=DEFAULT_BATCH_SIZE, only=None ):   # pragma: no cover - CLI/DB/HTTP boundary
+          batch_size=DEFAULT_BATCH_SIZE, char_budget=DEFAULT_CHAR_BUDGET,
+          only=None ):   # pragma: no cover - CLI/DB/HTTP boundary
     """Open a session, dispatch the subcommand, print a report. Returns exit code."""
     from datetime import datetime
     from zoneinfo import ZoneInfo
@@ -589,7 +708,7 @@ def _run( command="plan", prefix="", apply=False, force=False, limit=None,
             provider = get_embedding_provider()
             for spec in specs:
                 _fill( session, spec, provider, prefix=prefix, batch_size=batch_size,
-                       limit=limit, apply=apply )
+                       char_budget=char_budget, limit=limit, apply=apply )
             return 0
 
         if command == "swap":
@@ -615,6 +734,7 @@ if __name__ == "__main__":   # pragma: no cover - CLI entry
         apply      = ( "--apply" in argv ),
         force      = ( "--force" in argv ),
         limit      = _opt( "limit", int ),
-        batch_size = _opt( "batch-size", int, DEFAULT_BATCH_SIZE ),
-        only       = _opt( "only" ),
+        batch_size  = _opt( "batch-size", int, DEFAULT_BATCH_SIZE ),
+        char_budget = _opt( "char-budget", int, DEFAULT_CHAR_BUDGET ),
+        only        = _opt( "only" ),
     ) )

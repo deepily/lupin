@@ -13,6 +13,7 @@ import json
 import pytest
 
 from cosa.rest.db.embedding_regeneration import (
+    DEFAULT_CHAR_BUDGET,
     EMBEDDING_DIM,
     LOCAL_NORM_CEILING,
     LOCAL_NORM_FLOOR,
@@ -25,10 +26,12 @@ from cosa.rest.db.embedding_regeneration import (
     l2_norm,
     load_checkpoint,
     plan_batches,
+    plan_batches_by_budget,
     qualify,
     remaining_ids,
     save_checkpoint,
     should_proceed,
+    split_batch,
     summarize_verification,
     validate_fresh_vector,
 )
@@ -356,3 +359,113 @@ class TestRegenSpecs:
     def test_every_spec_names_a_text_source( self ):
         for spec in REGEN_SPECS:
             assert spec.text_column and spec.content_type in ( "prose", "code" )
+
+
+# --------------------------------------------------------------------------- #
+# Budget batching + split-on-failure — the CUDA-OOM fix.
+#
+# Measured 2026-08-02: 256 typical texts (17,850 chars) embed in 0.42s, while
+# EIGHT of the longest texts (~100k chars) return HTTP 500 with
+# torch.OutOfMemoryError on a GPU already ~99% held by two other processes.
+# Cost tracks total text, not row count.
+# --------------------------------------------------------------------------- #
+class TestPlanBatchesByBudget:
+
+    @staticmethod
+    def _size( item ):
+        return item
+
+    def test_empty_input( self ):
+        assert plan_batches_by_budget( [], self._size ) == []
+
+    def test_everything_fits_in_one_batch( self ):
+        assert plan_batches_by_budget( [ 10, 20, 30 ], self._size, char_budget=100 ) == [ [ 10, 20, 30 ] ]
+
+    def test_splits_when_the_budget_is_exceeded( self ):
+        assert plan_batches_by_budget( [ 60, 60, 60 ], self._size, char_budget=100 ) == [ [ 60 ], [ 60 ], [ 60 ] ]
+
+    def test_packs_up_to_the_budget( self ):
+        assert plan_batches_by_budget( [ 40, 40, 40 ], self._size, char_budget=100 ) == [ [ 40, 40 ], [ 40 ] ]
+
+    def test_count_ceiling_still_applies_under_budget( self ):
+        # Tiny texts must not produce a 10,000-row batch just because they fit.
+        batches = plan_batches_by_budget( [ 1 ] * 10, self._size, char_budget=10_000, max_count=4 )
+        assert [ len( b ) for b in batches ] == [ 4, 4, 2 ]
+
+    def test_an_oversized_single_item_is_isolated_not_dropped( self ):
+        # The whole-table scope means a 14,418-char row exists and must still be
+        # attempted — alone, where it succeeded in measurement.
+        batches = plan_batches_by_budget( [ 10, 500, 10 ], self._size, char_budget=100 )
+        assert [ 500 ] in batches
+        assert sum( len( b ) for b in batches ) == 3
+
+    def test_every_item_appears_exactly_once_and_in_order( self ):
+        items   = list( range( 1, 200 ) )
+        batches = plan_batches_by_budget( items, self._size, char_budget=500, max_count=7 )
+        assert [ x for b in batches for x in b ] == items
+
+    def test_no_batch_exceeds_the_budget_unless_it_is_a_lone_oversized_item( self ):
+        items   = [ 3, 900, 4, 5, 6 ]
+        for batch in plan_batches_by_budget( items, self._size, char_budget=10 ):
+            assert sum( batch ) <= 10 or len( batch ) == 1
+
+    def test_size_of_is_applied_to_the_item( self ):
+        pairs   = [ ( "a", "xxxxx" ), ( "b", "yyyyy" ) ]
+        batches = plan_batches_by_budget( pairs, lambda p: len( p[ 1 ] ), char_budget=6 )
+        assert batches == [ [ ( "a", "xxxxx" ) ], [ ( "b", "yyyyy" ) ] ]
+
+    def test_the_real_default_budget_admits_a_measured_typical_batch( self ):
+        # 256 typical texts totalled 17,850 chars live and embedded fine.
+        assert len( plan_batches_by_budget( [ 70 ] * 256, self._size,
+                                            char_budget=DEFAULT_CHAR_BUDGET, max_count=256 ) ) == 1
+
+    def test_the_real_default_budget_rejects_the_measured_failing_batch( self ):
+        # Eight of the longest texts (~100k chars) OOM'd. They must not co-batch.
+        batches = plan_batches_by_budget( [ 12_500 ] * 8, self._size,
+                                          char_budget=DEFAULT_CHAR_BUDGET, max_count=256 )
+        assert len( batches ) > 1
+        for batch in batches:
+            assert sum( batch ) <= DEFAULT_CHAR_BUDGET
+
+    @pytest.mark.parametrize( "bad", [ 0, -1 ] )
+    def test_non_positive_budget_raises( self, bad ):
+        with pytest.raises( ValueError, match="char_budget must be positive" ):
+            plan_batches_by_budget( [ 1 ], self._size, char_budget=bad )
+
+    @pytest.mark.parametrize( "bad", [ 0, -1 ] )
+    def test_non_positive_max_count_raises( self, bad ):
+        with pytest.raises( ValueError, match="max_count must be positive" ):
+            plan_batches_by_budget( [ 1 ], self._size, max_count=bad )
+
+
+class TestSplitBatch:
+
+    def test_empty_cannot_split( self ):
+        assert split_batch( [] ) == []
+
+    def test_single_item_cannot_split( self ):
+        # The recursion's floor: one row that fails alone is a REAL failure, not
+        # a batch-size problem, and must not be retried forever.
+        assert split_batch( [ "only" ] ) == []
+
+    def test_even_split( self ):
+        assert split_batch( [ 1, 2, 3, 4 ] ) == [ [ 1, 2 ], [ 3, 4 ] ]
+
+    def test_odd_split_keeps_every_item( self ):
+        halves = split_batch( [ 1, 2, 3 ] )
+        assert [ x for h in halves for x in h ] == [ 1, 2, 3 ]
+        assert all( halves )
+
+    def test_halves_are_strictly_smaller_so_recursion_terminates( self ):
+        batch = list( range( 9 ) )
+        for half in split_batch( batch ):
+            assert 0 < len( half ) < len( batch )
+
+    def test_repeated_splitting_reaches_single_items( self ):
+        work, singles = [ list( range( 8 ) ) ], 0
+        while work:
+            batch  = work.pop()
+            halves = split_batch( batch )
+            if not halves: singles += 1
+            else: work.extend( halves )
+        assert singles == 8
