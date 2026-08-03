@@ -10,7 +10,9 @@ import { createStorageServiceForTesting, InMemoryStorage } from "../../../lupin_
 import { createNotificationStore } from "../../../lupin_app/static/js/multiplexer/stores/NotificationStore";
 import type {
   LupinEvent,
+  SessionTopicPayload,
   StoreNotificationsChangedPayload,
+  StoreNotificationTtsIntentPayload,
 } from "../../../lupin_app/static/js/multiplexer/shared/types";
 
 // ---------------------------------------------------------------------------
@@ -98,6 +100,8 @@ function emitNotification(bus: ReturnType<typeof createEventBusForTesting>, fiel
   progress_group_id   ?: string;
   was_expired         ?: boolean;
   time_display        ?: string;
+  // WP14 (F8) — prediction-hint payload.
+  prediction_hint     ?: { confidence: number; predicted_value: unknown; category: string };
 }): void {
   bus.emit({
     type    : "notification_queue_update",
@@ -232,6 +236,27 @@ test("normalization: response_requested + timeout_seconds → action_required + 
   assert.equal(n.response_type, "yes_no");
   assert.deepEqual(n.options, ["yes", "no"]);
   assert.equal(n.default_value, "no");
+});
+
+// WP14 (F8): prediction_hint carries through normalize() onto the Notification.
+test("normalization: prediction_hint copied through onto the notification (F8)", () => {
+  const { bus, store } = setupStore();
+  emitNotification(bus, {
+    id_hash         : "pred1",
+    message         : "Schedule the meeting?",
+    response_type   : "yes_no",
+    prediction_hint : { confidence: 0.9, predicted_value: "yes", category: "calendar" },
+  });
+  const n = store.list()[0]!;
+  assert.deepEqual(n.prediction_hint, { confidence: 0.9, predicted_value: "yes", category: "calendar" });
+});
+
+// Absent prediction_hint stays undefined (the `!== undefined` copy-guard's false arm).
+test("normalization: no prediction_hint → field stays undefined", () => {
+  const { bus, store } = setupStore();
+  emitNotification(bus, { id_hash: "plain1", message: "no hint here" });
+  const n = store.list()[0]!;
+  assert.equal(n.prediction_hint, undefined);
 });
 
 // ===========================================================================
@@ -596,4 +621,136 @@ test("notification_expired for unknown id is silently dropped (idempotency guard
     ts      : 0,
   });
   assert.equal(store.list().length, 1, "n1 untouched");
+});
+
+// ===========================================================================
+// R5 — session_topic interception (route to SenderStore, DO NOT card it)
+// ===========================================================================
+
+function emitRaw(bus: ReturnType<typeof createEventBusForTesting>, notification: Record<string, unknown>): void {
+  bus.emit({ type: "notification_queue_update", payload: { notification }, source: "test", ts: 0 });
+}
+
+test("R5: a session_topic notification emits a session_topic event and is NOT carded", () => {
+  const { bus, store } = setupStore();
+  const captured: SessionTopicPayload[] = [];
+  bus.on<SessionTopicPayload>("session_topic", (e) => captured.push(e.payload));
+  emitRaw(bus, { notification_type: "session_topic", sender_id: "cc@x#a1", session_name: "Deploy pipeline", id_hash: "h1", message: "ignored" });
+  assert.equal(store.list().length, 0, "session_topic is control metadata — no history card");
+  assert.deepEqual(captured, [ { sender_id: "cc@x#a1", session_name: "Deploy pipeline" } ]);
+});
+
+test("R5: the `type` field also triggers the intercept (notification_type ?? type)", () => {
+  const { bus, store } = setupStore();
+  const captured: SessionTopicPayload[] = [];
+  bus.on<SessionTopicPayload>("session_topic", (e) => captured.push(e.payload));
+  emitRaw(bus, { type: "session_topic", sender_id: "cc@x#a2", session_name: "Nightly", id_hash: "h2", message: "ignored" });
+  assert.equal(store.list().length, 0);
+  assert.equal(captured.length, 1);
+  assert.equal(captured[0]!.session_name, "Nightly");
+});
+
+test("R5: a session_topic MISSING session_name intercepts (no card) but emits nothing", () => {
+  const { bus, store } = setupStore();
+  const captured: SessionTopicPayload[] = [];
+  bus.on<SessionTopicPayload>("session_topic", (e) => captured.push(e.payload));
+  emitRaw(bus, { notification_type: "session_topic", sender_id: "cc@x#a3", id_hash: "h3", message: "ignored" });
+  assert.equal(store.list().length, 0, "still skips the card");
+  assert.equal(captured.length, 0, "no name → no event");
+});
+
+// ===========================================================================
+// F0-d — store_notification_tts_intent producer seam.
+//
+// SPEC (Tiberius ruling 2026-07-02, reviewed against legacy notifications.js,
+// NOT memento §6): gate = priority ∈ {high, urgent} ONLY (suppress_ding never
+// gates speech — legacy :5917/:5985); ttsText = tts_raw === true ? message :
+// formatTtsMessage(...) (fire-and-forget default-contextualized, legacy
+// :5987-5989 + formatter :4176-4187). Emit only on SPOKEN new-arrivals (dedup
+// via the byId.has re-arrival guard); live-only path = hydration-zero.
+// ===========================================================================
+
+function captureTtsIntents(bus: ReturnType<typeof createEventBusForTesting>): StoreNotificationTtsIntentPayload[] {
+  const out: StoreNotificationTtsIntentPayload[] = [];
+  bus.on<StoreNotificationTtsIntentPayload>("store_notification_tts_intent", (e) => out.push(e.payload));
+  return out;
+}
+
+test("F0-d: a HIGH-priority new-arrival emits a TTS intent (contextualized, non-urgent → message unchanged)", () => {
+  const { bus } = setupStore();
+  const intents = captureTtsIntents(bus);
+  emitRaw(bus, { id_hash: "t-high", sender_id: "cc@x#s1", message: "build finished", priority: "high" });
+  assert.deepEqual(intents, [ { id_hash: "t-high", ttsText: "build finished", priority: "high", action_required: false } ]);
+});
+
+test("F0-d: an URGENT new-arrival emits a TTS intent with the \"Urgent! \" prefix", () => {
+  const { bus } = setupStore();
+  const intents = captureTtsIntents(bus);
+  emitRaw(bus, { id_hash: "t-urg", sender_id: "cc@x#s2", message: "disk full", priority: "urgent" });
+  assert.deepEqual(intents, [ { id_hash: "t-urg", ttsText: "Urgent! disk full", priority: "urgent", action_required: false } ]);
+});
+
+test("F0-d: tts_raw === true bypasses the contextualizer — the raw message is spoken verbatim", () => {
+  const { bus } = setupStore();
+  const intents = captureTtsIntents(bus);
+  // urgent + tts_raw:true → NO "Urgent!" prefix (raw wins).
+  emitRaw(bus, { id_hash: "t-raw", sender_id: "cc@x#s3", message: "raw text only", priority: "urgent", tts_raw: true });
+  assert.deepEqual(intents, [ { id_hash: "t-raw", ttsText: "raw text only", priority: "urgent", action_required: false } ]);
+});
+
+test("F0-d (70cbff3e): an action-required high/urgent arrival carries action_required:true on the intent", () => {
+  const { bus } = setupStore();
+  const intents = captureTtsIntents(bus);
+  // response_requested === true → norm.action_required === true (normalize :757);
+  // the producer seam carries it through so the queue item can enter focus mode.
+  emitRaw(bus, { id_hash: "t-ar", sender_id: "cc@x#s8", message: "approve deploy?", priority: "urgent", response_requested: true } );
+  assert.deepEqual(intents, [ { id_hash: "t-ar", ttsText: "Urgent! approve deploy?", priority: "urgent", action_required: true } ]);
+});
+
+test("F0-d (766bb609): a notification WITH a voice_persona carries its voice_id on the intent; WITHOUT one omits the key", () => {
+  const { bus } = setupStore();
+  const intents = captureTtsIntents(bus);
+  // voice_persona present → norm.voice_persona set (:770) → payload carries voice_id.
+  emitRaw(bus, { id_hash: "t-vp", sender_id: "cc@x#s9", message: "build done", priority: "high",
+    voice_persona: { name: "Rachel", voice_id: "vox-rachel", icon: "🕊️", color: "#CE93D8", borrowed: false } } );
+  // no voice_persona → payload omits voice_id (byte-identical to pre-766bb609).
+  emitRaw(bus, { id_hash: "t-novp", sender_id: "cc@x#s10", message: "fyi high", priority: "high" } );
+  assert.deepEqual(intents[0], { id_hash: "t-vp", ttsText: "build done", priority: "high", action_required: false, voice_id: "vox-rachel" });
+  assert.deepEqual(intents[1], { id_hash: "t-novp", ttsText: "fyi high", priority: "high", action_required: false });
+  assert.equal(Object.prototype.hasOwnProperty.call(intents[1]!, "voice_id"), false, "no-persona intent omits voice_id");
+});
+
+test("F0-d: suppress_ding does NOT gate speech — a suppressed high/urgent still emits (manager closing-turn parity)", () => {
+  const { bus } = setupStore();
+  const intents = captureTtsIntents(bus);
+  emitRaw(bus, { id_hash: "t-sd", sender_id: "cc@x#s4", message: "manager report", priority: "high", suppress_ding: true });
+  assert.equal(intents.length, 1, "suppress_ding=true must NOT silence a high-priority arrival");
+  assert.equal(intents[0]!.ttsText, "manager report");
+});
+
+test("F0-d: a LOW/MEDIUM-priority arrival emits NO TTS intent (gate is high/urgent only)", () => {
+  const { bus, store } = setupStore();
+  const intents = captureTtsIntents(bus);
+  emitRaw(bus, { id_hash: "t-low", sender_id: "cc@x#s5", message: "fyi", priority: "low" });
+  assert.equal(intents.length, 0, "low priority is not spoken");
+  assert.equal(store.list().length, 1, "…but it IS still carded");
+});
+
+test("F0-d: a message-less high-priority frame is rejected by normalize BEFORE the emit — zero intents", () => {
+  // normalize() returns null for a message-less frame, so onQueueUpdate returns
+  // at `if (!norm) return` and never reaches the TTS emit. Proves the emit reads
+  // a guaranteed-non-empty norm.message (no nullish path exists).
+  const { bus, store } = setupStore();
+  const intents = captureTtsIntents(bus);
+  emitRaw(bus, { id_hash: "t-nomsg", sender_id: "cc@x#s6", priority: "high" });
+  assert.equal(intents.length, 0, "no message → normalize rejects → no card, no intent");
+  assert.equal(store.list().length, 0);
+});
+
+test("F0-d: a re-arrival (same id_hash) does NOT re-emit — dedup via the byId.has guard", () => {
+  const { bus } = setupStore();
+  const intents = captureTtsIntents(bus);
+  emitRaw(bus, { id_hash: "t-dup", sender_id: "cc@x#s7", message: "once", priority: "urgent" });
+  emitRaw(bus, { id_hash: "t-dup", sender_id: "cc@x#s7", message: "once", priority: "urgent" });
+  assert.equal(intents.length, 1, "the second arrival returns at byId.has — no double-speak");
 });

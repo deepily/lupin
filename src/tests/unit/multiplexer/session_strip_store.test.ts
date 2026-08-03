@@ -337,3 +337,97 @@ test("hydrate with an empty snapshot emits 'hydrated' and tracks nothing", () =>
   assert.equal(events.length, 1);
   assert.equal(events[0]!.payload.changeKind, "hydrated");
 });
+
+// ===========================================================================
+// reconcile() — reconnect-path prune (bug 0b2783ef, option 1)
+//
+// The additive `hydrate` never removes; a stale reaped card (whose live
+// `session_reaped` was missed while the WS was down) therefore survives every
+// reconnect re-hydrate and clears only on a full page refresh. `reconcile` is
+// hydrate PLUS a prune of the sessions the snapshot AUTHORITATIVELY reports as
+// persona-less (present-with-null/released persona) — leaving sessions ABSENT
+// from the snapshot (a live-assigned-not-yet-persisted session) untouched, so
+// the additive/live-event safety is preserved. Confined to the reconnect path;
+// cold-boot `hydrate` stays additive.
+// ===========================================================================
+
+test("reconcile upserts persona-carrying records exactly like hydrate", () => {
+  const { store, events } = setup();
+  store.reconcile([
+    { sender_id: "s1", voice_persona: PERSONA, manager_persona: MANAGER },
+    { sender_id: "s2", voice_persona: { name: "Rio", color: "#fff", assigned_at: "2026-06-10T10:00:00Z" } },
+  ]);
+  assert.equal(store.list().length, 2);
+  assert.deepEqual(store.get("s1")!.manager_persona, MANAGER);
+  assert.equal(store.get("s2")!.voice_persona.name, "Rio");
+  assert.equal(events[events.length - 1]!.payload.changeKind, "hydrated");
+});
+
+test("reconcile PRUNES a session the snapshot INCLUDES with null persona (missed reap)", () => {
+  const { bus, store, events } = setup();
+  emit(bus, { type: "voice_persona_assigned", sender_id: "s1", voice_persona: PERSONA, payload: { manager_persona: MANAGER } });
+  const before = events.length;
+  store.reconcile([{ sender_id: "s1", voice_persona: null }]);   // server: s1 has no persona now (reaped)
+  assert.equal(store.get("s1"), undefined);                      // stale M-badged card pruned
+  const emitted = events.slice(before).map(e => e.payload.changeKind);
+  assert.ok(emitted.includes("removed"));                        // focus-auto-exit parity with live reap
+  const removed = events.slice(before).find(e => e.payload.changeKind === "removed")!;
+  assert.equal(removed.payload.sender_id, "s1");
+  assert.equal(events[events.length - 1]!.payload.changeKind, "hydrated");
+});
+
+test("reconcile PRUNES a released-but-alive session that is null in the snapshot (matches refresh)", () => {
+  const { bus, store } = setup();
+  emit(bus, { type: "voice_persona_assigned", sender_id: "s1", voice_persona: PERSONA });
+  emit(bus, { type: "voice_persona_released", sender_id: "s1" });   // active=false, icon retained
+  assert.equal(store.get("s1")!.active, false);
+  store.reconcile([{ sender_id: "s1", voice_persona: null }]);
+  assert.equal(store.get("s1"), undefined);                        // pruned — reconnect now matches refresh
+});
+
+test("reconcile does NOT prune a session ABSENT from the snapshot (live-assigned, not yet persisted)", () => {
+  const { bus, store } = setup();
+  emit(bus, { type: "voice_persona_assigned", sender_id: "s1", voice_persona: PERSONA });
+  store.reconcile([]);                                             // snapshot doesn't mention s1 yet
+  assert.ok(store.get("s1"));                                      // additive/live-event safety preserved
+});
+
+test("reconcile keeps a session present WITH a persona (upsert, not prune)", () => {
+  const { bus, store } = setup();
+  emit(bus, { type: "voice_persona_assigned", sender_id: "s1", voice_persona: PERSONA });
+  store.reconcile([{ sender_id: "s1", voice_persona: { name: "Rio", color: "#222", assigned_at: "2027-01-01T00:00:00Z" } }]);
+  assert.ok(store.get("s1"));
+  assert.equal(store.get("s1")!.voice_persona.name, "Rio");       // refreshed, not pruned
+});
+
+test("reconcile emits no 'removed' for a null-persona sender that was never tracked", () => {
+  const { store, events } = setup();
+  store.reconcile([{ sender_id: "ghost", voice_persona: null }]);  // not in store
+  const kinds = events.map(e => e.payload.changeKind);
+  assert.ok(!kinds.includes("removed"));                           // no spurious removed
+  assert.equal(events.length, 1);
+  assert.equal(events[0]!.payload.changeKind, "hydrated");
+});
+
+test("reconcile with a released:true persona prunes a tracked session (released leg of the null branch)", () => {
+  const { bus, store } = setup();
+  emit(bus, { type: "voice_persona_assigned", sender_id: "s1", voice_persona: PERSONA });
+  store.reconcile([{ sender_id: "s1", voice_persona: { name: "X", released: true } }]);
+  assert.equal(store.get("s1"), undefined);
+});
+
+test("reconcile skips a record without a sender_id", () => {
+  const { store, events } = setup();
+  store.reconcile([{ voice_persona: null }]);                      // no sender_id → skipped entirely
+  assert.equal(store.list().length, 0);
+  assert.equal(events.length, 1);
+  assert.equal(events[0]!.payload.changeKind, "hydrated");
+});
+
+test("reconcile with an empty snapshot emits 'hydrated' and prunes nothing", () => {
+  const { store, events } = setup();
+  store.reconcile([]);
+  assert.equal(store.list().length, 0);
+  assert.equal(events.length, 1);
+  assert.equal(events[0]!.payload.changeKind, "hydrated");
+});

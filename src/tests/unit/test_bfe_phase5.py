@@ -100,7 +100,7 @@ def test_proxy_init_exception_falls_back_to_none( dead_job_context ):
 def test_run_git_strategy_skips_when_fix_not_success( orchestrator, failed_fix_result ):
     """Guard: if fix.success is False, skip git entirely and return unchanged."""
     with patch( "cosa.agents.bug_fix_expediter.git_ops.GitOps" ) as MockGitOps:
-        result = asyncio.get_event_loop().run_until_complete( orchestrator.run_git_strategy(
+        result = asyncio.run( orchestrator.run_git_strategy(
             failed_fix_result, [ "file.py" ], "/tmp/plan.md"
         ) )
     assert result is failed_fix_result
@@ -111,7 +111,7 @@ def test_run_git_strategy_skips_when_fix_not_success( orchestrator, failed_fix_r
 def test_run_git_strategy_skips_when_no_files( orchestrator, successful_fix_result ):
     """Guard: if files_changed is empty, skip git entirely."""
     with patch( "cosa.agents.bug_fix_expediter.git_ops.GitOps" ) as MockGitOps:
-        result = asyncio.get_event_loop().run_until_complete( orchestrator.run_git_strategy(
+        result = asyncio.run( orchestrator.run_git_strategy(
             successful_fix_result, [], "/tmp/plan.md"
         ) )
     assert result.git_strategy is None

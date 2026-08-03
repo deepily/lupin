@@ -112,7 +112,7 @@ function buildShell(): HTMLElement {
           <div id="sender-cards-container">
             <div class="sender-card" data-sender-id="alice">
               <span class="message-text">Hello from Alice with a fairly long message body</span>
-              <span class="abstract-indicator" data-abstract="${encodeURIComponent("**details**")}">📋</span>
+              <span class="abstract-indicator" data-abstract="**details**">📋</span>
             </div>
           </div>
         </section>
@@ -508,6 +508,23 @@ test("abstract-indicator second click on same abstract toggles pane closed", () 
   assert.equal(store.isPaneOpen(), false);
 });
 
+test("abstract-indicator with a SPACED raw data-abstract round-trips verbatim (no url-encoding) — bug 2b0411c7 guard", () => {
+  // The production writer stores data-abstract RAW (notificationItem.ts →
+  // html helper setAttribute, no encode) and the reader reads it RAW (raw/raw,
+  // Bug#2 d9d8d651). A spaced abstract must surface VERBATIM in the pane, never
+  // url-encoded (%20). A stale E2E fixture had encodeURIComponent'd the value,
+  // injecting a shape production never emits; this pins the raw contract so the
+  // regression can't recur at the cheap unit tier.
+  const { store } = setup({ seed: HORIZ });
+  const ind = document.createElement("span");
+  ind.className = "abstract-indicator";
+  ind.setAttribute("data-abstract", "**Second abstract**");   // RAW, with a space
+  document.body.appendChild(ind);
+  clickEl(ind);
+  assert.equal(store.currentEntry()?.type, "abstract");
+  assert.equal(store.currentEntry()?.payload, "**Second abstract**");   // verbatim — NOT **Second%20abstract**
+});
+
 test("abstract-indicator click in VERTICAL mode does nothing (handler bails)", () => {
   const { store } = setup();   // vertical
   clickEl($(".abstract-indicator"));
@@ -525,7 +542,7 @@ test("indicator title fallback when indicator has no enclosing card", () => {
   const { store } = setup({ seed: HORIZ });
   const loose = document.createElement("span");
   loose.className = "abstract-indicator";
-  loose.setAttribute("data-abstract", encodeURIComponent("loose"));
+  loose.setAttribute("data-abstract", "loose");
   document.body.appendChild(loose);
   clickEl(loose);
   assert.equal(store.currentEntry()?.title, "Notification details");
@@ -539,6 +556,28 @@ test("abstract-indicator with no data-abstract attribute opens empty abstract", 
   clickEl(ind);
   assert.equal(store.currentEntry()?.type, "abstract");
   assert.equal(store.currentEntry()?.payload, "");
+});
+
+test("abstract-indicator with bare % ('100% done') reads RAW — pane opens, no URIError (Bug#2)", () => {
+  // The real writer (notificationItem.ts abstractIndicator) stores data-abstract
+  // RAW via setAttribute. A bare `%` in prose (e.g. "100% done") is NOT valid
+  // percent-encoding, so the prior decodeURIComponent(...) threw URIError and the
+  // click failed silently (~10% of clicks). The reader now reads raw.
+  const { store } = setup({ seed: HORIZ });
+  const ind = document.createElement("span");
+  ind.className = "abstract-indicator";
+  ind.setAttribute("data-abstract", "100% done");   // RAW, bare % — a decode would throw
+  document.body.appendChild(ind);
+  // Outcome-based proof (mechanism-independent): had decode thrown, open() at
+  // ReadingPaneRenderer.ts:436 would never run → the pane would stay closed and
+  // the payload would be absent. A green pane + the raw payload IS the no-URIError proof.
+  assert.doesNotThrow(() => clickEl(ind));
+  assert.equal(store.isPaneOpen(), true);
+  assert.equal(store.currentEntry()?.type, "abstract");
+  assert.equal(store.currentEntry()?.payload, "100% done");
+  // Second click on the SAME raw abstract toggles the pane closed.
+  clickEl(ind);
+  assert.equal(store.isPaneOpen(), false);
 });
 
 test("doc-link anchor click opens the pane as a doc", () => {

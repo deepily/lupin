@@ -15,8 +15,9 @@ import cosa.utils.util as cu
 
 PROJECT_ROOT = cu.get_project_root()
 
+# src/scripts/cloud-run-deploy.sh retired 2026-07-11 (monolith-on-Cloud-Run path,
+# Rick ruled; triggered by audit finding F1) — dropped from the coverage list.
 CLOUD_RUN_SCRIPTS = [
-    "src/scripts/cloud-run-deploy.sh",
     "src/scripts/cloud-run-build.sh",
     "src/scripts/cloud-run-setup-secrets.sh",
     "src/scripts/cloud-run-validate.sh",
@@ -34,9 +35,12 @@ def _read( rel_path ):
         return f.read()
 
 
-def test_no_hardcoded_sandbox_project():
-    for rel in CLOUD_RUN_SCRIPTS:
-        assert "hello-world-foo-423219" not in _read( rel ), f"sandbox project hardcoded in {rel}"
+# test_no_hardcoded_sandbox_project() RETIRED 2026-07-13 — superseded by
+# src/tests/unit/test_no_hardcoded_gcp_identifiers.py. It grepped the hardcoded
+# CLOUD_RUN_SCRIPTS list above (3 files) while 28 tracked files carried the literal,
+# so it passed vacuously and was cited as proof the rule was "enforced forever."
+# A hardcoded allowlist is a BOUNDED check and cannot support a completeness claim.
+# The replacement inverts it: glob over `git ls-files`, so nothing has to be remembered.
 
 
 def test_scripts_source_shared_resolver():

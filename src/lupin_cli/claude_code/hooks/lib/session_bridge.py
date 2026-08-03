@@ -40,13 +40,128 @@ import re
 import signal as signal_mod
 import sys
 import time
-import unicodedata
 import uuid
 from pathlib import Path
 from typing import Optional, Tuple
+from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 
 
-SESSION_DIR = Path.home() / ".claude" / "sessions"
+# Row 8ccc20ab: DERIVED from the one seam so LUPIN_SESSIONS_DIR governs any
+# freshly-started process. Still a module-level NAME because ~200 in-process
+# tests patch it directly; the env var is the out-of-process half.
+SESSION_DIR = sessions_dir()
+
+
+def atomic_write_json( path, data ):
+    """
+    Write `data` as JSON to `path` so a reader can only ever see the WHOLE old
+    document or the WHOLE new one — never a splice of both.
+
+    🔴 WHY THIS EXISTS — row 49b2c80b, measured from the bytes 2026-07-21.
+    Seat 3's bridge `cc-231749.json` was found on disk as ONE valid 1081-byte
+    document followed by 27 bytes that were the TAIL OF A LONGER, DIFFERENT
+    document. The seat stayed alive and working but became unaddressable by
+    `dm_send` for twenty minutes, because a bridge that will not parse is
+    invisible to every persona resolver (that was row e9822f8d — same bug).
+
+    `open(path,"w")` truncates, so ONE writer can never leave a tail. TWO can,
+    and the byte layout named the interleaving exactly:
+
+        W_long  opens (truncates to 0)
+        W_short opens (truncates to 0)
+        W_long  writes 1108 bytes at its own offset 0
+        W_short writes 1081 bytes at its own offset 0
+        on disk: W_short's 1081 bytes + W_long's bytes[1081:1108]
+
+    Both fds truncate at OPEN, so the second truncate cannot remove the first
+    writer's tail once both are past it, and the two fds keep independent
+    offsets. Every bridge write here is a read-modify-write that CAN shrink the
+    document (dropping `conversation_mode_active`, nulling `voice_persona`), so
+    "the new one is shorter than the old one" is routine, not exotic.
+
+    The bridge path is `cc-{cc_pid}.json` and the pid survives `/clear` while
+    the transient session_id does not — so the two racing writers are usually
+    the SAME SEAT either side of a lifecycle event.
+
+    ⚠️ This is a MECHANISM, not a rule: os.replace() is atomic on POSIX, so
+    concurrent writers degrade to last-writer-wins instead of producing a
+    corrupt hybrid, and no writer has to remember to do anything. A
+    discipline-based fix ("always write carefully") needs every future author
+    to know; this needs none of them to.
+
+    NOTE the temp file is created in the SAME DIRECTORY as the target. A temp
+    elsewhere (/tmp) can land on a different filesystem, where os.replace
+    raises OSError instead of being atomic.
+
+    Requires:
+        - path is a str or Path whose parent directory exists and is writable
+        - data is JSON-serializable
+
+    🔎 A FAILURE IS WITNESSED ON STDERR, and the witness lives HERE rather than
+    at the call sites. Clayton 😎, reviewing this fix, enumerated all ten
+    consumers: the SERVER sites turn False into an HTTPException(500) and are
+    already loud, but SIX HOOK SITES IGNORE THE RETURN ENTIRELY. Without a line
+    here, a failed bridge write leaves no log, no counter and no exit code — the
+    field silently never persists and the seat looks healthy. That is the same
+    "reports healthy while blind" family as the corruption this function exists
+    to prevent, one layer up. Swallowing the exception is right in a hook (a
+    raising SessionStart is how you get a seat with NO bridge at all, row
+    e9822f8d); the SILENCE is the part that needed a witness.
+
+    One witness at the mechanism beats six at the callers, for the same reason
+    os.replace beats "write carefully" — nobody has to remember it. stderr is
+    the correct channel: hooks emit there without polluting Claude's context
+    (precedent: register_session.py's lockfile-read warning).
+
+    Requires:
+        - path is a str or Path whose parent directory exists and is writable
+        - data is JSON-serializable
+
+    Ensures:
+        - Returns True when the new document is fully in place at path
+        - Returns False on any OSError/TypeError/ValueError, leaving whatever
+          was already at path untouched — a failed write never truncates
+        - Names the path and the error on stderr when it returns False, and
+          emits NOTHING on success (a witness that fires on success is noise)
+        - A concurrent reader sees the complete old or the complete new
+          document; it never observes a partial or spliced file
+        - Leaves no temp file behind on the failure path
+        - Never raises
+
+    Args:
+        path: destination file
+        data: JSON-serializable object
+
+    Returns:
+        bool: True on success, False on failure
+    """
+    import tempfile
+
+    path = str( path )
+    tmp  = None
+    try:
+        fd, tmp = tempfile.mkstemp( dir=os.path.dirname( path ) or ".", suffix=".tmp" )
+        with os.fdopen( fd, "w" ) as f:
+            json.dump( data, f, indent=2 )
+            f.flush()
+            # Widen to group-rw BEFORE the atomic replace so perms land with the
+            # swap (fchmod on the fd, not chmod on the path after os.replace — a
+            # post-replace failure would fire the stderr witness AFTER the doc
+            # already landed, and mkstemp's hardcoded 0600 masks any dir ACL to
+            # ---). Group-rw lets a cross-uid reader (container uid 1001 ⇄ host
+            # OS-Login uid, sharing the sessions dir's setgid group) read+rewrite
+            # the bridge. See src/rnd/v0.1.9/2026.07.24-vm-persona-bridge-mount-uid-divergence.md.
+            os.fchmod( f.fileno(), 0o660 )
+        os.replace( tmp, path )
+        return True
+    except ( OSError, TypeError, ValueError ) as e:
+        if tmp is not None:
+            try: os.unlink( tmp )
+            except OSError: pass
+        print( f"[atomic_write_json] WARNING: bridge write FAILED for {path}: {e!r} "
+               f"— the field did NOT persist; this seat may look healthier than it is",
+               file=sys.stderr )
+        return False
 
 # Cache to avoid repeated file reads
 _cached_session_id: Optional[str] = None
@@ -94,12 +209,12 @@ def canonical_persona_key( name ) -> str:
     Returns:
         str: the canonical store key
     """
-    if not name or not isinstance( name, str ):
-        return ""
-    decomposed = unicodedata.normalize( "NFKD", name )
-    ascii_only = "".join( c for c in decomposed if not unicodedata.combining( c ) )
-    stripped   = re.sub( r"[^a-z0-9 ]", "", ascii_only.lower() )
-    return re.sub( r"\s+", " ", stripped ).strip()
+    # Implementation moved to the centralized home lupin_mcp.persona_normalization
+    # (2026-06-19) so there is exactly ONE algorithm across the codebase. Delegated
+    # here to preserve existing `from ...session_bridge import canonical_persona_key`
+    # call sites (stop.py read seam, hook write seam, tests).
+    from lupin_mcp.persona_normalization import canonical_persona_key as _impl
+    return _impl( name )
 
 
 def _is_pid_alive( pid: int ) -> bool:
@@ -481,12 +596,38 @@ def _resolve_project_from_bridge_cwd() -> Optional[str]:
 
 def resolve_project_name( environ=None ) -> str:
     """
-    Resolve the current session's project name — the ONE project-name
-    resolver shared by every hook consumer (the task-store write gate's
+    Resolve the current session's project name — the project-name resolver
+    for the HOOK consumers named below (the task-store write gate's
     manager-figure predicate, the per-repo persona-chain env-key lookup,
-    and hook credential resolution). One name at every layer; the former
+    and hook credential resolution). The former
     `manager_figure.derive_project_name` and `hook_credentials.
     _derive_project_name` duplicates were converged here (bug 9bf1dc4a).
+
+    🔴 THIS DOCSTRING USED TO SAY "the ONE project-name resolver … one name at
+    every layer" AND THAT IS FALSE (row 7160b671, corrected 2026-07-25).
+    `build_sender_id_for_cc` — the path that stamps identity onto EVERY peer DM —
+    does NOT call this function. It resolves independently:
+    `_resolve_project_from_bridge_cwd()`, and on None falls through to
+    `build_sender_id( project=None )` → `detect_project()` → `os.getcwd()`.
+
+    ⇒ TWO RESOLVERS, DIFFERENT FALLBACKS. This one falls back to the LUPIN_ROOT
+    basename; that one falls back to the live cwd. They disagree exactly when a
+    seat's cwd and LUPIN_ROOT name different repos.
+
+    ⚠️ THE FALSE CLAIM ALREADY COST A DIAGNOSIS. On 2026-07-21 the heartbeat-hold
+    `--base-dir`-defaults-to-LUPIN_ROOT twin was offered as the mechanism for the
+    `@lupin` DM stamp, and it looked like an excellent match BECAUSE this function
+    — the one you would naturally read, since it advertised itself as THE one —
+    really does carry that fallback. A discriminator (LUPIN_ROOT set, cwd in a
+    non-lupin repo, no bridge) returned `@plan`, proving the lever is
+    `os.getcwd()`. The wrong mechanism had to be struck from P1 row 12b5a766.
+
+    ⇒ A CONVERGENCE THAT ADVERTISES ITSELF AS COMPLETE WHILE A CALL SITE BYPASSES
+    IT SENDS THE NEXT READER TO THE WRONG CODE WITH CONFIDENCE. The claim is
+    corrected here rather than the resolvers merged: converging them is a real
+    refactor and is deliberately deferred, because doing it now could MASK
+    12b5a766 by making the `@lupin` stamp look intentional (that row's own
+    warning). Row 7160b671 carries the convergence.
 
     Resolution order:
         1. The bridge file's SessionStart cwd → nearest `.git` ancestor
@@ -1165,9 +1306,7 @@ def set_speakerphone( session_id, on ):
         # Drop the v1 field if it lingers from a pre-Phase-2 bridge, to avoid
         # two-source-of-truth ambiguity. The v2 field is now authoritative.
         data.pop( "conversation_mode_active", None )
-        with open( path, "w" ) as f:
-            json.dump( data, f, indent=2 )
-        return True
+        return atomic_write_json( path, data )
     except ( json.JSONDecodeError, OSError ):
         return False
 
@@ -1236,9 +1375,7 @@ def set_last_autonarrated_turn_id( session_id, turn_id ):
         with open( path ) as f:
             data = json.load( f )
         data[ "last_autonarrated_turn_id" ] = str( turn_id )
-        with open( path, "w" ) as f:
-            json.dump( data, f, indent=2 )
-        return True
+        return atomic_write_json( path, data )
     except ( json.JSONDecodeError, OSError ):
         return False
 
@@ -1287,9 +1424,7 @@ def set_owner_user_id( session_id, owner_user_id ):
         with open( path ) as f:
             data = json.load( f )
         data[ "owner_user_id" ] = str( owner_user_id )
-        with open( path, "w" ) as f:
-            json.dump( data, f, indent=2 )
-        return True
+        return atomic_write_json( path, data )
     except ( json.JSONDecodeError, OSError ):
         return False
 
@@ -1339,9 +1474,7 @@ def set_user_id( session_id, user_id ):
         with open( path ) as f:
             data = json.load( f )
         data[ "user_id" ] = str( user_id )
-        with open( path, "w" ) as f:
-            json.dump( data, f, indent=2 )
-        return True
+        return atomic_write_json( path, data )
     except ( json.JSONDecodeError, OSError ):
         return False
 
@@ -1426,9 +1559,7 @@ def set_voice_persona( session_id, persona ):
         with open( path ) as f:
             data = json.load( f )
         data[ "voice_persona" ] = persona
-        with open( path, "w" ) as f:
-            json.dump( data, f, indent=2 )
-        return True
+        return atomic_write_json( path, data )
     except ( json.JSONDecodeError, OSError ):
         return False
 
@@ -1527,9 +1658,7 @@ def set_idle_detection_field( session_id, **fields ):
             block = { }
         block.update( fields )
         data[ "idle_detection" ] = block
-        with open( path, "w" ) as f:
-            json.dump( data, f, indent=2 )
-        return True
+        return atomic_write_json( path, data )
     except ( json.JSONDecodeError, OSError ):
         return False
 
@@ -1574,8 +1703,8 @@ def clear_idle_waiter_pid( session_id ):
             return None
         block[ "waiter_pid" ] = None
         data[ "idle_detection" ] = block
-        with open( path, "w" ) as f:
-            json.dump( data, f, indent=2 )
+        if not atomic_write_json( path, data ):
+            return None
         return int( old_pid ) if isinstance( old_pid, int ) else None
     except ( json.JSONDecodeError, OSError, ValueError ):
         return None
@@ -1683,12 +1812,8 @@ def prune_dead_persona_bridges():
             continue
 
         data[ "voice_persona" ] = None
-        try:
-            with open( path, "w" ) as f:
-                json.dump( data, f, indent=2 )
+        if atomic_write_json( path, data ):
             pruned += 1
-        except OSError:
-            continue
 
     return pruned
 

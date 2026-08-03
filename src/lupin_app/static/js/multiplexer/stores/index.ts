@@ -53,8 +53,16 @@ import type { PredictionVoteStore } from "./PredictionVoteStore";
 import { createPredictionVoteStore } from "./PredictionVoteStore";
 import type { FleetStatusStore, FleetApiClient } from "./FleetStatusStore";
 import { createFleetStatusStore } from "./FleetStatusStore";
-import type { TaskListStore } from "./TaskListStore";
+import type { TaskListStore, TaskListApiClient } from "./TaskListStore";
 import { createTaskListStore } from "./TaskListStore";
+import type { ViewStateStore } from "./ViewStateStore";
+import { createViewStateStore } from "./ViewStateStore";
+// Lane C (v0.1.9) — broadcast-to-all-CC compose store.
+import type { BroadcastStore } from "./BroadcastStore";
+import { createBroadcastStore } from "./BroadcastStore";
+// F0 (00b, v0.1.9) — notification-level TTS queue + active-item identity store.
+import type { TtsQueueStore } from "./TtsQueueStore";
+import { createTtsQueueStore } from "./TtsQueueStore";
 
 export interface StoreSet {
   notifications  : NotificationStore;
@@ -82,17 +90,35 @@ export interface StoreSet {
   predictionVote : PredictionVoteStore;
   fleetStatus    : FleetStatusStore;
   taskList       : TaskListStore;
+  // Section-toolbar + accordion-collapse parity (2026-06-23) — view-preference
+  // state (section visibility + accordion collapse), persisted. Order-neutral
+  // (subscribes to no server frames), so it appends after the pinned five.
+  viewState      : ViewStateStore;
+  // Lane C (v0.1.9) — broadcast-to-all-CC compose store. Order-neutral
+  // (subscribes to no server frames); persists only its card-open flag.
+  broadcast      : BroadcastStore;
+  // F0 (00b, v0.1.9) — notification-level TTS queue + active-item identity.
+  // Order-neutral: subscribes to AUDIO-store emissions (store_audio_ended /
+  // store_audio_state_change), NOT server frames, so it appends after the
+  // pinned five. The active id it owns (current()) is the F0 seam Plan 01 B4 /
+  // 02 / 03 / 05 consume; logic-level, no DOM surface of its own.
+  ttsQueue       : TtsQueueStore;
 }
 
 export interface CreateStoresOptions {
   eventBus            : EventBus;
   storage             : StorageService;
-  // post (ActionRequired / Missed / PredictionVote) + get (FleetStatus). The
-  // production ApiClient satisfies both structurally.
-  api                 : ActionRequiredApiClient & FleetApiClient;
+  // post (ActionRequired / Missed / PredictionVote) + get (FleetStatus) +
+  // get/patch/post (TaskList Phase-2 writes). The production ApiClient satisfies
+  // all three structurally.
+  api                 : ActionRequiredApiClient & FleetApiClient & TaskListApiClient;
   // Forward AudioStore options so boot.ts can pass production-side
   // `audioContextFactory`. Tests usually omit (default factory is browser-only).
   audioContextFactory?: AudioStoreOptions["audioContextFactory"];
+  // Phase 2 — authenticated-user identity provider for TaskList edit audit
+  // `actor` (Q1). Boot wires `() => authManager.getCurrentUserEmail()`; omitted
+  // in read-only test constructions (the store defaults to anonymous).
+  actorProvider?      : () => string | null;
 }
 
 /**
@@ -113,7 +139,7 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
   // ORDER MATTERS — see file header. Do not reorder without also updating
   // the integration test assertion.
   const notifications  = createNotificationStore({ bus: opts.eventBus, storage: opts.storage });
-  const senders        = createSenderStore       ({ bus: opts.eventBus });
+  const senders        = createSenderStore       ({ bus: opts.eventBus, storage: opts.storage });
   const actionRequired = createActionRequiredStore({ bus: opts.eventBus, api: opts.api });
   const audio          = createAudioStore        ({
     bus                 : opts.eventBus,
@@ -136,9 +162,20 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
   const missed         = createMissedStore        ({ bus: opts.eventBus, api: opts.api });
   const predictionVote = createPredictionVoteStore({ bus: opts.eventBus, api: opts.api });
   const fleetStatus    = createFleetStatusStore   ({ bus: opts.eventBus, api: opts.api });
-  const taskList       = createTaskListStore      ({ bus: opts.eventBus, api: opts.api });
+  const taskList       = createTaskListStore      ({ bus: opts.eventBus, api: opts.api, actorProvider: opts.actorProvider });
+  // Section-toolbar + accordion-collapse parity — order-neutral; hydrates
+  // persisted section-visibility + accordion-collapse maps at construction.
+  const viewState      = createViewStateStore     ({ bus: opts.eventBus, storage: opts.storage });
+  // Lane C (v0.1.9) — broadcast compose store; order-neutral (no server-frame
+  // subscription), persists only card-open. Recipient auto-refresh rides the
+  // existing store_session_strip_changed (handled in BroadcastCardRenderer).
+  const broadcast      = createBroadcastStore     ({ storage: opts.storage });
+  // F0 (00b) — TTS item-queue store. Order-neutral (subscribes to AudioStore
+  // emissions, not server frames). Its active id (current()) is set by the
+  // F0-d speak-initiation seam in boot.ts and rolled by its own self-advance.
+  const ttsQueue       = createTtsQueueStore      ({ bus: opts.eventBus });
 
-  return { notifications, senders, actionRequired, audio, jobs, sessionStrip, readingPane, commons, missed, predictionVote, fleetStatus, taskList };
+  return { notifications, senders, actionRequired, audio, jobs, sessionStrip, readingPane, commons, missed, predictionVote, fleetStatus, taskList, viewState, broadcast, ttsQueue };
 }
 
 // Re-exports so consumers can import everything from the barrel.
@@ -159,7 +196,7 @@ export type {
   ActionRequiredApiClient,
 } from "./ActionRequiredStore";
 export { createActionRequiredStore } from "./ActionRequiredStore";
-export type { AudioStore, AudioStoreOptions } from "./AudioStore";
+export type { AudioStore, AudioStoreOptions, SchedulableAudioContext } from "./AudioStore";
 export { createAudioStore } from "./AudioStore";
 // WP2 (parity bridge) — SessionStripStore IS part of the canonical store set
 // built by createStores() (folded at the boot-integration step per Lane A's
@@ -186,4 +223,13 @@ export type { FleetStatusStore, FleetStatusStoreOptions, FleetApiClient } from "
 export { createFleetStatusStore } from "./FleetStatusStore";
 export type { TaskListStore, TaskListStoreOptions, TaskListApiClient } from "./TaskListStore";
 export { createTaskListStore } from "./TaskListStore";
+export type { ViewStateStore, ViewStateStoreOptions } from "./ViewStateStore";
+export { createViewStateStore } from "./ViewStateStore";
+// Lane C (v0.1.9) — broadcast compose store.
+export type { BroadcastStore, BroadcastStoreOptions, BroadcastRecipient,
+              BroadcastSessionsApiClient } from "./BroadcastStore";
+export { createBroadcastStore } from "./BroadcastStore";
+// F0 (00b, v0.1.9) — TTS item-queue + active-id store.
+export type { TtsQueueStore, TtsQueueStoreOptions } from "./TtsQueueStore";
+export { createTtsQueueStore } from "./TtsQueueStore";
 /* c8 ignore stop */

@@ -31,7 +31,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock, MagicMock, AsyncMock, patch
 
 from fastapi import HTTPException
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse
 
 import cosa.rest.routers.notifications as N
 from cosa.rest.routers.notifications import (
@@ -411,6 +411,10 @@ class TestNotifyUser( unittest.IsolatedAsyncioTestCase ):
 
     # ---- response-required offline ----
     async def test_response_required_offline_with_default( self ):
+        # Bug f433fbae D1 (server half): the offline branch must emit a CONSUMABLE
+        # SSE OfflineEvent, not a JSONResponse. Consume the generator and assert the
+        # two frames: an ack (carrying notification_id for re-attach) and an offline
+        # frame carrying `response`=<default> and default_used=True.
         ws = _ws_manager( is_connected=False, connection_count=0 )
         mock_db = Mock(); repo = Mock(); repo.create_notification.return_value = Mock( id=uuid.uuid4() )
         with patch( "cosa.rest.user_service.get_user_by_email", return_value={ "id": UID_STR } ), \
@@ -419,7 +423,25 @@ class TestNotifyUser( unittest.IsolatedAsyncioTestCase ):
              _patch_fastapi_main( self._user_main() ), patch( "builtins.print" ):
             out = await self._call( Mock(), ws, response_requested=True, response_type="yes_no",
                                     response_default="no" )
-        self.assertIsInstance( out, JSONResponse )
+
+        self.assertIsInstance( out, StreamingResponse )
+
+        # Drain the SSE body and parse the frames.
+        import json as _json
+        chunks = [ c async for c in out.body_iterator ]
+        frames = [ _json.loads( c.split( "data: ", 1 )[ 1 ].strip() ) for c in chunks if "data: " in c ]
+
+        self.assertEqual( len( frames ), 2 )
+        ack, offline = frames
+        self.assertEqual( ack[ "status" ], "ack" )
+        self.assertIn( "notification_id", ack )                 # re-attach handle present
+        self.assertEqual( offline[ "status" ], "offline" )
+        # NEGATIVE CONTROL: drop `response` from the emitted frame and OfflineEvent
+        # (response: str, required) can't validate → the client falls back to an
+        # error, exactly the inert-fd11cd30 behaviour. These two assertions fail if
+        # the field is missing or the marker flips.
+        self.assertEqual( offline[ "response" ], "no" )         # the default is DELIVERED
+        self.assertIs( offline[ "default_used" ], True )        # MARKED as a substitution
 
     async def test_response_required_offline_no_default_503( self ):
         ws = _ws_manager( is_connected=False, connection_count=0 )
@@ -759,6 +781,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
         notif = Mock(); notif.state = "expired"
         notif.expires_at = datetime.now( timezone.utc ) - timedelta( seconds=5 )
         notif.recipient_id = UID_STR; notif.job_id = "dr-a1b2c3d4"
+        notif.sender_id = None; notif.sender_persona = None
         repo = Mock(); repo.get_by_id.return_value = notif; repo.update_response.return_value = True
         with patch.object( N, "get_db", _ctx_db( Mock() ) ), \
              patch.object( N, "NotificationRepository", return_value=repo ), \
@@ -772,6 +795,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
 
     async def test_update_response_false_500( self ):
         notif = Mock(); notif.state = "delivered"; notif.recipient_id = UID_STR; notif.job_id = None
+        notif.sender_id = None; notif.sender_persona = None
         repo = Mock(); repo.get_by_id.return_value = notif; repo.update_response.return_value = False
         with patch.object( N, "get_db", _ctx_db( Mock() ) ), \
              patch.object( N, "NotificationRepository", return_value=repo ), \
@@ -784,6 +808,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
 
     async def test_success_dict_value_with_prediction_and_sse_signal( self ):
         notif = Mock(); notif.state = "delivered"; notif.recipient_id = UID_STR; notif.job_id = "dr-a1b2c3d4"
+        notif.sender_id = None; notif.sender_persona = None
         repo = Mock(); repo.get_by_id.return_value = notif; repo.update_response.return_value = True
         # Seed an SSE waiter + prediction result for this notification id.
         N.pending_responses[ UID_STR ] = { "event": asyncio.Event(), "response_data": None }
@@ -817,6 +842,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
         def _capture_record( **kwargs ):
             captured[ "thread_id" ] = threading.get_ident()
         notif = Mock(); notif.state = "delivered"; notif.recipient_id = UID_STR; notif.job_id = None
+        notif.sender_id = None; notif.sender_persona = None
         repo = Mock(); repo.get_by_id.return_value = notif; repo.update_response.return_value = True
         N.pending_responses[ UID_STR ] = { "event": asyncio.Event(), "response_data": None,
                                            "prediction_result": Mock( response_type="yes_no" ) }
@@ -841,6 +867,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
 
     async def test_prediction_outcome_recording_error_nonfatal( self ):
         notif = Mock(); notif.state = "delivered"; notif.recipient_id = UID_STR; notif.job_id = None
+        notif.sender_id = None; notif.sender_persona = None
         repo = Mock(); repo.get_by_id.return_value = notif; repo.update_response.return_value = True
         N.pending_responses[ UID_STR ] = { "event": asyncio.Event(), "response_data": None,
                                            "prediction_result": Mock( response_type="yes_no" ) }
@@ -860,6 +887,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
 
     async def test_success_ws_broadcast_failure_nonfatal( self ):
         notif = Mock(); notif.state = "delivered"; notif.recipient_id = UID_STR; notif.job_id = None
+        notif.sender_id = None; notif.sender_persona = None
         repo = Mock(); repo.get_by_id.return_value = notif; repo.update_response.return_value = True
         ws = _ws_manager(); ws.emit_to_user_or_listener_sync.side_effect = Exception( "ws down" )
         with patch.object( N, "get_db", _ctx_db( Mock() ) ), \
@@ -881,6 +909,51 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
                     request_body={ "notification_id": "not-a-uuid", "response_value": "yes" },
                     ws_manager=_ws_manager() )
         self.assertEqual( ctx.exception.status_code, 500 )
+
+
+class TestLateAnswerHandback( unittest.IsolatedAsyncioTestCase ):
+    """
+    Section C (§4.3): the handback route.
+
+    C-V4  — the one-line live fix: when the ask carried no job_id, the
+            notification_responded emit routes on the asking session's #hash8
+            (asker_hash8), so it reaches that session's cc-listener. Red-proof:
+            delete `or asker_hash8` → the emit routes on None → this goes red.
+    setter(a) — answer_delivered_at is RECEIPT-gated: it is stamped ONLY when the
+            live SSE waiter is woken (a genuine in-process receipt), and NEVER
+            when there is no waiter (a bare emit is a send, not a receipt).
+    """
+
+    def _delivered_notif( self, sender_id, job_id=None ):
+        notif = Mock(); notif.state = "delivered"; notif.recipient_id = UID_STR
+        notif.job_id = job_id; notif.sender_id = sender_id; notif.sender_persona = "tiberius"
+        return notif
+
+    async def _submit( self, notif, ws, repo ):
+        with patch.object( N, "get_db", _ctx_db( Mock() ) ), \
+             patch.object( N, "NotificationRepository", return_value=repo ), \
+             patch.object( N, "get_formatted_time_display", return_value="12:00 EST" ), \
+             patch.object( N, "get_formatted_date_display", return_value="2026-06-01" ), \
+             _patch_fastapi_main( Mock( config_mgr=Mock( get=Mock( return_value=300 ) ) ) ), \
+             patch( "builtins.print" ):
+            return await submit_notification_response(
+                request_body={ "notification_id": UID_STR, "response_value": "yes" }, ws_manager=ws )
+
+    # NOTE: test_cv4_emit_routes_on_asker_hash8_when_no_job_id and
+    # test_setter_a_marks_delivered_only_when_sse_waiter_woken were lifted into
+    # src/tests/unit/test_late_answer_setter_a_wiring.py — they guard the
+    # job_id-or-asker_hash8 emit line + the SSE-waiter setter-(a) call, which land
+    # in a later notifications.py commit. They ride WITH that code so a test never
+    # sits red against a tree that has not received its subject yet.
+
+    async def test_setter_a_not_marked_without_sse_waiter( self ):
+        # NO waiter → a bare emit is a SEND, not a receipt → mark_answer_delivered
+        # must NOT fire; the row stays owed for catch-up. (Receipt-gating invariant.)
+        N.pending_responses.pop( UID_STR, None )
+        notif = self._delivered_notif( sender_id="claude.code@x#abcd1234", job_id="dr-1" )
+        repo = Mock(); repo.get_by_id.return_value = notif; repo.update_response.return_value = True
+        await self._submit( notif, _ws_manager(), repo )
+        repo.mark_answer_delivered.assert_not_called()
 
 
 # ===========================================================================
@@ -1306,6 +1379,267 @@ class TestGetUndeliveredNotifications( unittest.IsolatedAsyncioTestCase ):
         self.assertEqual( ctx.exception.status_code, 503 )       # re-raised verbatim, NOT wrapped to 500
 
 
+class TestPersonaStamping( unittest.IsolatedAsyncioTestCase ):
+    """
+    Section B (§4.2): sender_persona/sender_icon are stamped on response-required
+    ask rows so persona-keyed retrieval (ruling 6) can find late answers.
+
+    B-V1  — the persona VALUE survives the persist path (asserted on the stored
+            string, i.e. the same string a DM from that session stores — never a
+            dict key named "name"), for BOTH resolved states (online/offline).
+    B-V3  — the endpoint stamps on the OFFLINE branch too (audit-completeness;
+            red if reverted to online-only or the hoisted lookup is removed).
+    B-V4  — a persona-less ask stamps NULL sender_persona AND emits the audible
+            WARNING naming the sender_id (K-B3 documented fate).
+    """
+
+    EMAIL = "ricardo.felipe.ruiz@gmail.com"
+
+    # ---- B-V1: persona value survives _persist_response_required_sync ----
+    def _run_persist( self, state ):
+        mock_db = Mock(); repo = Mock()
+        repo.create_notification.return_value = Mock( id=uuid.uuid4() )
+        with patch.object( N, "get_db", _ctx_db( mock_db ) ), \
+             patch.object( N, "NotificationRepository", return_value=repo ), \
+             patch( "builtins.print" ):
+            N._persist_response_required_sync(
+                "claude.code@x#abcd1234", UID_STR, "hi", "custom", "medium", "T",
+                None, "yes_no", "no", None, 120, None, None, state,
+                "tiberius", "👑"
+            )
+        return repo
+
+    def test_bv1_online_persist_stamps_persona_value( self ):
+        kwargs = self._run_persist( "delivered" ).create_notification.call_args.kwargs
+        self.assertEqual( kwargs[ "sender_persona" ], "tiberius" )   # the STORED VALUE, not a key
+        self.assertEqual( kwargs[ "sender_icon" ], "👑" )
+
+    def test_bv1_offline_persist_stamps_persona_value( self ):
+        kwargs = self._run_persist( "expired" ).create_notification.call_args.kwargs
+        self.assertEqual( kwargs[ "sender_persona" ], "tiberius" )
+        self.assertEqual( kwargs[ "sender_icon" ], "👑" )
+
+    # ---- endpoint helper: offline response-required ask ----
+    async def _call_offline_ask( self, persona_payload, printer=None ):
+        ws = _ws_manager( is_connected=False, connection_count=0 )
+        mock_db = Mock(); repo = Mock()
+        repo.create_notification.return_value = Mock( id=uuid.uuid4() )
+        printer = printer or Mock()
+        with patch( "cosa.rest.user_service.get_user_by_email", return_value={ "id": UID_STR } ), \
+             patch.object( N, "get_db", _ctx_db( mock_db ) ), \
+             patch.object( N, "NotificationRepository", return_value=repo ), \
+             patch.object( N, "_voice_persona_for_sender_id", return_value=persona_payload ), \
+             _patch_fastapi_main( Mock( app_debug=False, app_verbose=False ) ), \
+             patch( "builtins.print", printer ):
+            await notify_user(
+                authenticated_user_id="svc", message="Hello world", type="progress",
+                direction="ai_to_human", priority="medium", target_user=self.EMAIL,
+                response_requested=True, response_type="yes_no", timeout_seconds=120,
+                response_default="no", title=None, sender_id=None, response_options=None,
+                abstract=None, job_id=None, queue_name=None, suppress_ding=False,
+                progress_group_id=None, prediction_hint_override=None,
+                display_qualifier_widget=False, session_name=None, idempotency_key=None,
+                notification_queue=Mock(), ws_manager=ws,
+            )
+        return repo
+
+    async def test_bv3_endpoint_offline_branch_stamps_persona( self ):
+        kwargs = ( await self._call_offline_ask( { "name": "tiberius", "icon": "👑" } ) ).create_notification.call_args.kwargs
+        self.assertEqual( kwargs[ "sender_persona" ], "tiberius" )
+        self.assertEqual( kwargs[ "sender_icon" ], "👑" )
+
+    async def test_bv4_persona_less_stamps_null_and_warns( self ):
+        printer = Mock()
+        repo = await self._call_offline_ask( None, printer=printer )
+        self.assertIsNone( repo.create_notification.call_args.kwargs[ "sender_persona" ] )
+        warned = [ c for c in printer.call_args_list
+                   if c.args and "NO voice persona" in str( c.args[ 0 ] ) ]
+        self.assertTrue( warned, "expected the persona-less WARNING to be printed" )
+        self.assertIn( "claude.code@unknown.deepily.ai", str( warned[ 0 ].args[ 0 ] ) )
+
+
+# ===========================================================================
+# Ask-idempotency + re-attach (bug f433fbae D2)
+# ===========================================================================
+def _parse_frames( chunks ):
+    """Parse a drained SSE body (list of 'data: {...}\\n\\n' strings) to dicts."""
+    import json as _json
+    return [ _json.loads( c.split( "data: ", 1 )[ 1 ].strip() ) for c in chunks if "data: " in c ]
+
+
+class TestAskIdempotencyHelpers( unittest.TestCase ):
+    """_record_ask_idempotency / _lookup_ask_idempotency and the value extractor."""
+
+    def setUp( self ):
+        N._ask_idempotency_index.clear()
+
+    def test_record_then_lookup_hit( self ):
+        N._record_ask_idempotency( "k", "nid-1" )
+        self.assertEqual( N._lookup_ask_idempotency( "k" ), "nid-1" )
+
+    def test_falsy_key_record_is_noop_and_lookup_none( self ):
+        N._record_ask_idempotency( None, "nid" )        # no-op
+        N._record_ask_idempotency( "", "nid" )          # no-op
+        self.assertEqual( len( N._ask_idempotency_index ), 0 )
+        self.assertIsNone( N._lookup_ask_idempotency( None ) )
+        self.assertIsNone( N._lookup_ask_idempotency( "" ) )
+
+    def test_lookup_miss_returns_none( self ):
+        self.assertIsNone( N._lookup_ask_idempotency( "absent" ) )
+
+    def test_ttl_eviction_drops_stale_keeps_fresh( self ):
+        # Oldest-first order: a stale front entry is evicted; the fresh one survives.
+        N._ask_idempotency_index[ "old" ]   = ( "nid-old",   time.time() - ( N._IDEMPOTENCY_TTL + 999 ) )
+        N._ask_idempotency_index[ "fresh" ] = ( "nid-fresh", time.time() )
+        self.assertIsNone( N._lookup_ask_idempotency( "old" ) )        # evicted
+        self.assertEqual( N._lookup_ask_idempotency( "fresh" ), "nid-fresh" )
+
+    def test_max_size_trim( self ):
+        for i in range( N._IDEMPOTENCY_MAX + 5 ):
+            N._record_ask_idempotency( f"k{i}", f"n{i}" )
+        self.assertLessEqual( len( N._ask_idempotency_index ), N._IDEMPOTENCY_MAX )
+
+    def test_extract_response_value_all_shapes( self ):
+        import json as _json
+        self.assertIsNone( N._extract_response_value( None ) )
+        self.assertEqual( N._extract_response_value( { "value": "yes" } ), "yes" )
+        self.assertEqual( N._extract_response_value( "yes" ), "yes" )
+        self.assertEqual( N._extract_response_value( { "value": { "a": 1 } } ), _json.dumps( { "a": 1 } ) )
+        self.assertEqual( N._extract_response_value( 42 ), _json.dumps( 42 ) )
+
+
+class TestReadNotificationStateSync( unittest.TestCase ):
+    """_read_notification_state_sync mirrors get_notification_response's fetch."""
+
+    def test_present_row_projected( self ):
+        row = Mock( state="delivered", response_value={ "value": "yes" }, responded_at=None )
+        repo = Mock(); repo.get_by_id.return_value = row
+        with patch.object( N, "get_db", _ctx_db( Mock() ) ), \
+             patch.object( N, "NotificationRepository", return_value=repo ):
+            out = N._read_notification_state_sync( UID_STR )
+        self.assertEqual( out, { "state": "delivered", "response_value": { "value": "yes" }, "responded_at": None } )
+
+    def test_missing_row_returns_none( self ):
+        repo = Mock(); repo.get_by_id.return_value = None
+        with patch.object( N, "get_db", _ctx_db( Mock() ) ), \
+             patch.object( N, "NotificationRepository", return_value=repo ):
+            self.assertIsNone( N._read_notification_state_sync( UID_STR ) )
+
+
+class TestAskReattachGenerator( unittest.IsolatedAsyncioTestCase ):
+    """_ask_reattach_generator: ack + a terminal frame keyed on the original id."""
+
+    async def _drain( self, agen ):
+        return _parse_frames( [ c async for c in agen ] )
+
+    async def test_responded_answer_streams_responded_frame( self ):
+        row = { "responded_at": datetime( 2026, 1, 1, tzinfo=timezone.utc ),
+                "response_value": { "value": "yes" }, "state": "responded" }
+        with patch.object( N, "_read_notification_state_sync", Mock( return_value=row ) ):
+            frames = await self._drain( N._ask_reattach_generator( "orig-nid", 5 ) )
+        self.assertEqual( frames[ 0 ][ "status" ], "ack" )
+        self.assertEqual( frames[ 0 ][ "notification_id" ], "orig-nid" )   # re-attach to ORIGINAL
+        self.assertEqual( frames[ 1 ], { "status": "responded", "response": "yes", "default_used": False } )
+
+    async def test_manufactured_default_streams_expired_default( self ):
+        row = { "responded_at": None, "response_value": "no", "state": "expired" }
+        with patch.object( N, "_read_notification_state_sync", Mock( return_value=row ) ):
+            frames = await self._drain( N._ask_reattach_generator( "orig-nid", 5 ) )
+        self.assertEqual( frames[ 1 ],
+                          { "status": "expired", "response": "no", "default_used": True, "timeout": True } )
+
+    async def test_no_answer_by_deadline_streams_expired_no_default( self ):
+        row = { "responded_at": None, "response_value": None, "state": "delivered" }
+        with patch.object( N, "_read_notification_state_sync", Mock( return_value=row ) ):
+            frames = await self._drain( N._ask_reattach_generator( "orig-nid", 0 ) )   # deadline now
+        self.assertEqual( frames[ 1 ],
+                          { "status": "expired", "response": None, "default_used": False, "timeout": True } )
+
+    async def test_row_gone_then_deadline( self ):
+        with patch.object( N, "_read_notification_state_sync", Mock( return_value=None ) ):
+            frames = await self._drain( N._ask_reattach_generator( "orig-nid", 0 ) )
+        self.assertEqual( frames[ 1 ][ "status" ], "expired" )   # row missing → no answer
+
+    async def test_polls_again_after_sleep_then_lands( self ):
+        # First poll: no answer, deadline far → the sleep line runs → second poll lands.
+        rows = [ { "responded_at": None, "response_value": None, "state": "delivered" },
+                 { "responded_at": datetime( 2026, 1, 1, tzinfo=timezone.utc ),
+                   "response_value": "yes", "state": "responded" } ]
+        with patch.object( N, "_read_notification_state_sync", Mock( side_effect=rows ) ), \
+             patch.object( N.asyncio, "sleep", AsyncMock() ) as slept:
+            frames = await self._drain( N._ask_reattach_generator( "orig-nid", 100 ) )
+        slept.assert_awaited()                                   # the poll-again path ran
+        self.assertEqual( frames[ 1 ][ "response" ], "yes" )
+
+
+class TestResponseRequiredIdempotencyHoist( unittest.IsolatedAsyncioTestCase ):
+    """The hoisted dedup: a repeat key re-attaches instead of minting a 2nd card."""
+
+    EMAIL = "test@example.com"
+
+    def setUp( self ):
+        N._ask_idempotency_index.clear()
+
+    async def _call_nu( self, nq, ws, **overrides ):
+        kwargs = dict(
+            authenticated_user_id="svc", message="Hello world", type="progress",
+            direction="ai_to_human", priority="medium", target_user=self.EMAIL,
+            response_requested=True, response_type="yes_no", timeout_seconds=5,
+            response_default="no", title=None, sender_id=None, response_options=None,
+            abstract=None, job_id=None, queue_name=None, suppress_ding=False,
+            progress_group_id=None, prediction_hint_override=None,
+            display_qualifier_widget=False, session_name=None, idempotency_key=None,
+            notification_queue=nq, ws_manager=ws,
+        )
+        kwargs.update( overrides )
+        return await notify_user( **kwargs )
+
+    async def test_duplicate_key_reattaches_without_new_card( self ):
+        # Seed the index so the hoisted check fires. A create must NOT happen.
+        N._ask_idempotency_index[ "dup" ] = ( "orig-nid", time.time() )
+        ws   = _ws_manager( is_connected=True, connection_count=1 )
+        nq   = Mock()
+        repo = Mock()
+        row  = { "responded_at": datetime( 2026, 1, 1, tzinfo=timezone.utc ),
+                 "response_value": "yes", "state": "responded" }
+        with patch( "cosa.rest.user_service.get_user_by_email", return_value={ "id": UID_STR } ), \
+             patch.object( N, "NotificationRepository", return_value=repo ), \
+             patch.object( N, "_read_notification_state_sync", Mock( return_value=row ) ), \
+             _patch_fastapi_main( Mock( app_debug=False, app_verbose=False ) ), patch( "builtins.print" ):
+            out = await self._call_nu( nq, ws, idempotency_key="dup" )
+            self.assertIsInstance( out, StreamingResponse )
+            frames = _parse_frames( [ c async for c in out.body_iterator ] )
+
+        self.assertEqual( frames[ 0 ][ "notification_id" ], "orig-nid" )   # re-attached to ORIGINAL
+        repo.create_notification.assert_not_called()                        # NO second card
+        nq.push_notification.assert_not_called()
+
+    async def test_online_ask_records_the_key( self ):
+        # A first (miss) online ask records key→id so a later retry can re-attach.
+        ws   = _ws_manager( is_connected=True, connection_count=1 )
+        item = Mock(); item.response_default = "no"; item.to_dict.return_value = {}
+        nq   = Mock(); nq.push_notification.return_value = item
+        repo = Mock(); repo.create_notification.return_value = Mock( id=uuid.uuid4() )
+        with patch( "cosa.rest.user_service.get_user_by_email", return_value={ "id": UID_STR } ), \
+             patch.object( N, "get_db", _ctx_db( Mock() ) ), \
+             patch.object( N, "NotificationRepository", return_value=repo ), \
+             _patch_fastapi_main( Mock( app_debug=False, app_verbose=False ) ), patch( "builtins.print" ):
+            out = await self._call_nu( nq, ws, idempotency_key="new-online" )
+        self.assertIsInstance( out, StreamingResponse )
+        self.assertIsNotNone( N._lookup_ask_idempotency( "new-online" ) )   # recorded
+
+    async def test_offline_ask_records_the_key( self ):
+        ws   = _ws_manager( is_connected=False, connection_count=0 )
+        repo = Mock(); repo.create_notification.return_value = Mock( id=uuid.uuid4() )
+        with patch( "cosa.rest.user_service.get_user_by_email", return_value={ "id": UID_STR } ), \
+             patch.object( N, "get_db", _ctx_db( Mock() ) ), \
+             patch.object( N, "NotificationRepository", return_value=repo ), \
+             _patch_fastapi_main( Mock( app_debug=False, app_verbose=False ) ), patch( "builtins.print" ):
+            out = await self._call_nu( Mock(), ws, idempotency_key="new-offline" )
+        self.assertIsInstance( out, StreamingResponse )
+        self.assertIsNotNone( N._lookup_ask_idempotency( "new-offline" ) )   # recorded
+
+
 def isolated_unit_test():
     """
     Run the supplemental notifications-router coverage suite in isolation.
@@ -1328,6 +1662,8 @@ def isolated_unit_test():
         TestVoicePersonaHelper, TestTimeDateDisplay, TestResolveSenderId,
         TestNotifyUser, TestSubmitResponse, TestSimpleEndpointErrors,
         TestSenderHistoryEndpoints, TestGenerateGist,
+        TestAskIdempotencyHelpers, TestReadNotificationStateSync,
+        TestAskReattachGenerator, TestResponseRequiredIdempotencyHoist,
     ):
         suite.addTests( loader.loadTestsFromTestCase( cls ) )
 

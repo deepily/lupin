@@ -170,14 +170,14 @@ def test_phase6a_functional_smoke():
 # ---------------------------------------------------------------------------
 # AC8a (per Pass 1 F7 + C-5) — Exact data-phase6-pending count assertion.
 #
-# Phase 6a baseline: only #tts-pane keeps data-phase6-pending=true after
-# Phase 6a mount (Phase 5 was 3 → 6a lifts #jobs-pane → leaves #tts-pane).
-# Per F7 design: count is parameterized over N action-required widgets:
-#   N=0 → 1, N=2 → 3, N=3 → 4.
-#
-# Phase 6a smoke does NOT inject action-required widgets (those are Phase 5
-# territory and have their own AC8a coverage). Verifies the N=0 case here:
-# the bare-page count is exactly 1.
+# HISTORY: Phase 5 left ≥3 pending markers; Phase 6a lifted #jobs-pane; Phase 6b
+# lifted #tts-pane's marker on TtsChromeRenderer mount → floor = 0.
+# USER-LIVE FLIP (2026-07-02, WP5 final unit): #tts-pane's stub marker is now also
+# REMOVED from the static HTML (the pane is a first-class live section — fed +
+# audible + card-styled), so the count is 0 both BEFORE and after mount. The
+# assertion below stays == 0 as a cross-phase safety net: any future re-
+# introduction of a placeholder fails loudly. (The phase6b "lifted after mount"
+# assertion in test_multiplexer_phase6b_smoke.py is the load-bearing positive.)
 # ---------------------------------------------------------------------------
 
 def test_phase6a_data_phase6_pending_exact_count():

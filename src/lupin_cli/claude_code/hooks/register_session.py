@@ -43,7 +43,8 @@ import urllib.parse
 from lupin_cli.claude_code.hooks.lib.hook_common import (
     read_hook_input, log_payload, emit_json, send_tts
 )
-from lupin_cli.claude_code.hooks.lib.session_bridge import build_sender_id_for_cc
+from lupin_cli.claude_code.hooks.lib.session_bridge import atomic_write_json, build_sender_id_for_cc
+from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 from lupin_cli.claude_code.hooks.lib.listener_processes import find_live_listener_pids, listener_spawn_lock
 from cosa.agents.utils.sender_id import detect_project
 from cosa.utils.notification_utils import is_known_project
@@ -168,11 +169,47 @@ def _record_listener_pid( session_data, session_file, listener_pid ):
     """
     if session_data is not None and session_file:
         session_data[ "listener_pid" ] = listener_pid
+        # Atomic (row 49b2c80b): this write races the Phase-2 bridge write and
+        # the MCP-side updaters on the same cc-{pid}.json path.
+        atomic_write_json( session_file, session_data )  # best-effort, never raises
+
+
+def _resolve_owner_pid( session_data, session_file ):
+    """
+    Resolve the owning Claude Code PID to hand the listener for self-reaping.
+
+    _spawn_listener is called with `session_data if session_id else None`, so on the
+    session_id-less path the in-memory dict is absent — but the bridge file on disk
+    still carries cc_pid. Reading it back closes that hole; without the fallback that
+    path would spawn a listener with NO watchdog, silently preserving the strand bug
+    on exactly the branch nobody looks at.
+
+    Requires:
+        - session_data is a dict carrying "cc_pid", or None
+        - session_file is a path to the bridge JSON, or None
+
+    Ensures:
+        - Returns the cc_pid as an int when resolvable from either source
+        - Returns None when neither source yields one (watchdog disabled, and the
+          listener logs that loudly at startup)
+
+    Args:
+        session_data: In-memory bridge dict, or None
+        session_file: Path to the on-disk bridge JSON
+
+    Returns:
+        int or None: PID of the owning Claude Code process
+    """
+    cc_pid = ( session_data or {} ).get( "cc_pid" )
+
+    if not cc_pid and session_file:
         try:
-            with open( session_file, "w" ) as f:
-                json.dump( session_data, f, indent=2 )
-        except OSError:
-            pass  # Best-effort
+            with open( session_file ) as fh:
+                cc_pid = json.load( fh ).get( "cc_pid" )
+        except ( OSError, ValueError ):
+            return None
+
+    return int( cc_pid ) if cc_pid else None
 
 
 def _spawn_listener( session_id, session_data, session_file, accepted_ids=None ):
@@ -266,6 +303,15 @@ def _spawn_listener_locked( session_id, session_data, session_file, accepted_ids
         "--session-id", short_id,
     ]
 
+    # Hand the listener its owner's PID so it can self-reap. The listener is spawned
+    # detached (start_new_session=True, below), so tmux's SIGHUP never reaches it and
+    # session_end.py — the only other reaper — cannot run on an abrupt death. Without
+    # this the listener outlives its session forever, still wired to the notifications
+    # UI. See cc_notification_listener._watch_owner().
+    owner_pid = _resolve_owner_pid( session_data, session_file )
+    if owner_pid:
+        cmd.extend( [ "--owner-pid", str( owner_pid ) ] )
+
     # Pass accepted IDs for multi-hash filtering
     # On first start, stable_session_id == session_id, so this deduplicates to one entry.
     # On subsequent lifecycle events (compact, clear), they diverge and both are needed.
@@ -279,8 +325,13 @@ def _spawn_listener_locked( session_id, session_data, session_file, accepted_ids
     if os.environ.get( "LUPIN_CC_HOOK_LISTENER_VERBOSE", "" ).strip().lower() == "true":
         cmd.append( "--verbose" )
 
+    # Opt-in memory sampler — set LUPIN_CC_LISTENER_MEMTRACE=true to arm tracemalloc
+    # on spawned listeners (for catching the 684 MB leak, 2026-07-14). Off by default.
+    if os.environ.get( "LUPIN_CC_LISTENER_MEMTRACE", "" ).strip().lower() == "true":
+        cmd.append( "--memory-trace" )
+
     # Always write per-session log files (backward compat) + centralized log
-    log_dir          = os.path.expanduser( "~/.claude/sessions" )
+    log_dir          = str( sessions_dir() )
     log_path         = os.path.join( log_dir, f"cc-listener-{short_id}.log" )
     centralized_path = os.path.join( log_dir, "cc-listeners.log" )
     cmd.extend( [ "--log-file", log_path ] )
@@ -298,7 +349,7 @@ def _spawn_listener_locked( session_id, session_data, session_file, accepted_ids
 
     try:
         # Always capture stderr for startup crash diagnostics
-        session_dir = os.path.expanduser( "~/.claude/sessions" )
+        session_dir = str( sessions_dir() )
         stderr_path = os.path.join( session_dir, f"cc-listener-{short_id}.stderr" )
         stderr_file = open( stderr_path, "w" )
 
@@ -388,7 +439,7 @@ def _log_session_transition( old_hash, new_hash, stable_hash ):
         stable_hash: 8-char hash of the stable (original) session
     """
     try:
-        log_path  = os.path.expanduser( "~/.claude/sessions/cc-listeners.log" )
+        log_path  = str( sessions_dir() / "cc-listeners.log" )
         now       = datetime.now( timezone.utc )
         timestamp = now.strftime( "%Y.%m.%d @ %H:%M %S" ) + f",{now.microsecond // 1000:03d}ms"
         line      = f"{timestamp} [--------] === SESSION TRANSITION: {old_hash} -> {new_hash} (stable: {stable_hash}) ===\n"
@@ -429,7 +480,7 @@ def _cleanup_old_listener( old_session_data, new_session_id ):
     old_hash         = old_session_id[:8] if old_session_id else ""
     new_hash         = new_session_id[:8] if new_session_id else ""
 
-    session_dir = os.path.expanduser( "~/.claude/sessions" )
+    session_dir = str( sessions_dir() )
 
     # Step 1: Kill old listener
     if old_listener_pid:
@@ -489,6 +540,102 @@ def _cleanup_old_listener( old_session_data, new_session_id ):
                 pass  # Best-effort
 
 
+# Budget for the SessionStart banner's `/docs` reachability probe. Deliberately
+# SHORT — it runs on the boot path and its job is to LABEL the server's state,
+# not to outlast a reload. See _classify_server_probe_error for why the label,
+# not the number, is the fix at this site.
+#
+# 🔴 The two constants in this module are NOT interchangeable, and the split is
+# the point: this one buys a fast, correctly-worded LABEL; the one below buys
+# COMPLETION of a call whose result we cannot afford to lose. Sizing the probe
+# like a transaction would stall every session boot by ~30s whenever the server
+# is genuinely down.
+_BANNER_PROBE_TIMEOUT_SECONDS = 3
+
+# Transport budget for out-of-process calls to `:7999` whose RESULT is
+# load-bearing — here, voice-persona release (row 204911ca). ~30s = 1.60x the
+# observed maximum reload window of 18.76s: a multiplier with explicit headroom,
+# NOT a coverage guarantee. `:7999` runs `uvicorn --reload` and the reloader
+# parent holds the listening socket across a restart, so the kernel ACCEPTS a
+# request nothing is there to answer and the caller hangs rather than getting a
+# fast ConnectionRefused. The prior 2s failed every reload window it landed in
+# (measured n=143: min 6.59s, median 6.91s).
+#
+# Full derivation: src/rnd/v0.1.9/2026.07.19-dev-server-reload-availability.md §9(a).
+#
+# 🔴 DRIFT CONTROL — TWO SEARCHES, AND IT TOOK BOTH.
+# `grep -rn _SERVER_TRANSPORT_TIMEOUT_SECONDS` returns every DIRECT call site.
+# It does NOT return members whose budget is carried in a Pydantic FIELD rather
+# than passed at the call — `AsyncNotificationRequest( timeout=… )`, consumed at
+# `notify_user_async.py:197-201` as a bare `requests.post( timeout=request.timeout )`.
+# Two such members were missed on the first pass for exactly this reason.
+# The second search is: `grep -rn "AsyncNotificationRequest(" -A14 | grep timeout`.
+# Run BOTH, or the set you get back is the set the first grep can see.
+#
+# TRADE: a genuinely hung server now stalls persona release ~30s instead of ~2s.
+# Accepted — a leaked persona name is re-granted to a later worker and misdirects
+# them, which outlasts a slow teardown. Not free.
+_SERVER_TRANSPORT_TIMEOUT_SECONDS = 30
+
+
+def _classify_server_probe_error( exc, server_url, timeout_seconds ):
+    """
+    Map a `/docs` probe exception onto the status string the SessionStart banner
+    shows for the server.
+
+    🔴 THE WORDING IS THE POINT HERE, NOT DECORATION. The flat "unreachable"
+    string this replaces is what misdirected row 204911ca across two sessions: a
+    reader saw it and concluded the server was DOWN, when `:7999` was mid-reload
+    and would have answered a few seconds later.
+
+    The two conditions are genuinely distinguishable at the client, and they
+    demand opposite fixes:
+
+      - A STOPPED server REFUSES. Nothing holds the port, the kernel replies
+        RST, and urlopen raises URLError(ConnectionRefusedError) essentially
+        instantly. The fix is "start the server."
+      - A RESTARTING server ACCEPTS AND STALLS. `uvicorn --reload` keeps the
+        listening socket bound in the reloader PARENT across the restart, so the
+        kernel completes the handshake and queues a request that nothing is
+        there to answer yet. The probe exhausts its budget and raises
+        TimeoutError. The fix is "wait a few seconds."
+
+    Both behaviours were measured as controls on row 204911ca (§3), which is why
+    this split is observable rather than aspirational: C2 (a genuinely closed
+    port) refused in 0.0003s, and C1 (a blackhole socket — bound and listening,
+    never accept()ing) timed out at 15.02s with a bare TimeoutError.
+
+    Requires:
+        - exc is the exception raised by the probe
+        - server_url is a non-empty string
+        - timeout_seconds is the positive budget the probe was given
+
+    Ensures:
+        - returns a status string that NAMES the condition whenever this
+          function can identify it, never a bare "unreachable"
+        - treats an HTTP error status as REACHABLE — the server answered
+        - falls back to "unreachable" only for conditions it cannot identify,
+          and names the exception type even then
+    """
+    # The server ANSWERED, just not with 2xx — a HEAD on /docs may legitimately
+    # return 405. Answering at all is the thing this banner is asking about.
+    if isinstance( exc, urllib.error.HTTPError ):
+        return f"reachable ({server_url})"
+
+    # A timeout arrives in two shapes: urllib wraps connect-phase OSErrors in
+    # URLError, but a timeout while READING the response propagates bare (that
+    # is the C1 shape, and the reload case). Unwrap once, then test.
+    reason = exc.reason if isinstance( exc, urllib.error.URLError ) else exc
+
+    if isinstance( reason, TimeoutError ):
+        return f"no response in {timeout_seconds}s — may be restarting ({server_url})"
+
+    if isinstance( reason, ConnectionRefusedError ):
+        return f"not running — connection refused ({server_url})"
+
+    return f"unreachable — {type( reason ).__name__} ({server_url})"
+
+
 def _check_cosa_voice_status():
     """
     Quick non-blocking checks for cosa-voice prerequisites.
@@ -498,7 +645,9 @@ def _check_cosa_voice_status():
 
     Ensures:
         - Returns a formatted status block string (never raises)
-        - Each check has 1s timeout max to avoid blocking session start
+        - The reachability probe is capped at _BANNER_PROBE_TIMEOUT_SECONDS
+          so it cannot block session start; a reload is LABELLED as a
+          possible reload rather than reported as "unreachable"
     """
     checks = []
     sep    = "=" * 42
@@ -548,13 +697,21 @@ def _check_cosa_voice_status():
     hook_status = f"{hook_count}/8 active"
 
     # ── Check 4: Server reachable ────────────────────────────────────
+    # The budget stays SHORT on purpose. Covering the 18.76s observed reload
+    # maximum here would stall EVERY SessionStart boot by that much whenever the
+    # server is genuinely down — a bad trade for one status line. 3s absorbs
+    # ordinary jitter, and a reload is now NAMED as a possible reload instead of
+    # being mislabelled. The WORDING, not the budget, is the fix at this site;
+    # see _classify_server_probe_error.
     server_url = os.getenv( "LUPIN_APP_SERVER_URL", "http://localhost:7999" )
     try:
-        req  = urllib.request.Request( f"{server_url}/docs", method="HEAD" )
-        resp = urllib.request.urlopen( req, timeout=1 )
+        req = urllib.request.Request( f"{server_url}/docs", method="HEAD" )
+        urllib.request.urlopen( req, timeout=_BANNER_PROBE_TIMEOUT_SECONDS )
         server_status = f"reachable ({server_url})"
-    except Exception:
-        server_status = f"unreachable ({server_url})"
+    except Exception as e:
+        server_status = _classify_server_probe_error(
+            e, server_url, _BANNER_PROBE_TIMEOUT_SECONDS
+        )
 
     # ── Check 5: Config file ─────────────────────────────────────────
     config_path   = os.path.expanduser( "~/.lupin/config" )
@@ -575,6 +732,66 @@ def _check_cosa_voice_status():
     return "\n".join( lines )
 
 
+# Transport-budget retry ladder for voice-persona allocation (candidate A1,
+# 2026-07-19; resized for the reload window 2026-07-20, row 204911ca).
+#
+# SIZING: each RUNG is sized against the observed maximum reload window of
+# 18.76s. `:7999` runs `uvicorn --reload`; the reloader parent holds the
+# listening socket across a restart, so the kernel ACCEPTS a request that
+# nothing is there to answer. The client sees a late answer or a bare
+# TimeoutError, never ConnectionRefused. Measured over 8.4 days of container
+# logs (current-config clean-reload class, n=143): min 6.59s, median 6.91s,
+# max 18.76s — all 143 exceed 5s.
+#
+# 🔴 WALL-CLOCK CEILING IS 60s, NOT 30s. EACH ATTEMPT MAKES **TWO** CALLS —
+# `/auth/login` (:889) then `/allocate` (:920) — and BOTH take the SAME rung's
+# timeout. So the worst case is 2x the tuple sum: (5+5) + (10+10) + (15+15) =
+# **60s**, not the 30s an earlier revision of this comment claimed.
+#
+# There is NO backoff sleep between attempts (the loop re-enters immediately on
+# failure), so 60s is the true ceiling and not merely the sum of the budgets.
+# 60s sits far under the 600s harness allowance below, so nothing breaks.
+#
+# ⚠️ THE CONTRACT IS "COVER AN 18.76s WINDOW", NOT "FINISH INSIDE 30s".
+# The first attempt-pair alone spends 10s, and by the second pair the elapsed
+# time exceeds the observed maximum — so the window is covered well before the
+# ladder is spent. No per-attempt total deadline is enforced; if anyone wants
+# <=30s as a REAL contract, that is new control-flow and belongs on its own row
+# with its own control, not bolted on here.
+#
+# 🔴 CORRECTION TO THE PLAN'S PREMISE, RECORDED BECAUSE IT FLATTERED THIS CHANGE.
+# The plan argued the old (2, 4, 8) ladder "= 14s cumulative, under 18.76s" and
+# therefore could not cover the window. **That arithmetic was wrong the same
+# way**: two calls per attempt makes the old ladder **28s**, which already
+# exceeded 18.76s. The old ladder was not as broken as the premise claimed.
+# What the resize actually buys is per-rung headroom — under (2, 4, 8) no single
+# call could outlast a 6.59s minimum window, so success depended on the window
+# happening to end during a later rung. That is a real improvement, and it is a
+# smaller one than the plan asserted. Do not restate the 14s figure.
+#
+# HARNESS HEADROOM: SessionStart carries no `timeout` field in
+# ~/.claude/settings.json, so it runs at Claude Code's default for a command
+# handler — 600s. ⚠️ That 600s is DOC-DERIVED (code.claude.com/docs/en/hooks.md,
+# "Common fields"), NOT measured here; if it ever becomes load-bearing, measure
+# it. The `SYNC_TIMEOUT_SECONDS = 25  # 5s headroom under CC's 30s hook timeout`
+# comment in permission_request.py describes PermissionRequest's OWN configured
+# 30000ms and does not bind this caller.
+#
+# THE TRADE, stated plainly: a genuinely hung server now takes **~60s** to give
+# up, against ~28s before (both figures doubled for the two calls per attempt).
+# That cost was accepted knowingly — Arnold's ruling, 2026-07-20 — to stop
+# losing personas to a routine ~7s reload. It is not free, and the number is
+# 60s, not the 30s the tuple's sum suggests at a glance.
+#
+# 🔴 SCORE THIS HEDGE HONESTLY. On the incident that motivated the original
+# ladder (86aa79ac) it buys NOTHING: the server was flatly unreachable and no
+# budget saves a down server. It pays against a reload window.
+# ⚠️ THE TRAP: if nulls stop recurring after this lands, that is NOT evidence the
+# ladder fixed anything. The loud give-up below landed in commit 77d64647 and
+# makes the same nulls visible. Do not credit the hedge with the alarm's result.
+_ALLOCATE_TIMEOUT_LADDER_SECONDS = ( 5, 10, 15 )
+
+
 def _allocate_voice_persona_via_http(
     server_url, project, stable_session_id,
     previous_persona_name = None,
@@ -589,10 +806,17 @@ def _allocate_voice_persona_via_http(
     (under asyncio.Lock), writes it to the bridge file, and broadcasts a
     voice_persona_assigned WebSocket event.
 
-    Fail-soft: any failure (server unreachable, auth failure, pool empty)
-    logs a warning to stderr and returns None. The session continues
-    without a persona; the speech router will fall back to Sam (the global
-    default voice) on TTS dispatch.
+    Fail-soft, but NEVER SILENT (candidate A, 2026-07-19): any failure returns
+    ( None, failure_dict ) instead of a bare None, so the caller can route the
+    give-up into the session's own boot context rather than leaving it in a
+    stderr line with no reader. The session still continues without a persona;
+    the speech router falls back to Sam (the global default voice).
+
+    Diagnosis this implements: 86aa79ac. The server at localhost:7999 was
+    unreachable at SessionStart, the 2s urlopen budget expired, the broad
+    except swallowed it to one stderr line, and the session ran unattributed
+    for hours. The trigger was a down server; THE DEFECT WAS THAT THE GIVE-UP
+    HAD NO READER.
 
     Requires:
         - server_url is a non-empty string (e.g. http://localhost:7999)
@@ -600,10 +824,18 @@ def _allocate_voice_persona_via_http(
         - stable_session_id is a non-empty string
 
     Ensures:
-        - Returns the persona dict on success
-        - Returns None on any failure (logged to stderr)
+        - Returns ( persona_dict, None ) on success
+        - Returns ( None, failure_dict ) on any failure, where failure_dict
+          carries stage / exception / message / attempts / server_url
+        - persona is None IFF failure is not None — there is no silent-None
+          return left in this function
         - Never raises exceptions
-        - Uses 2-second timeouts for both /auth/login and /allocate
+        - Retries transport failures on the _ALLOCATE_TIMEOUT_LADDER_SECONDS
+          budget (5s, 10s, 15s per rung). Each attempt makes TWO calls — login
+          then /allocate — and both take the rung's timeout, so the worst-case
+          wall clock is 2x the tuple sum = 60s, not 30s. A server that ANSWERS
+          with a wrong or empty body is NOT retried, because retrying a
+          definite answer is noise
         - When previous_persona_name is non-empty, threads it as a
           query-string param so the server pushes a "Voice re-assigned"
           announcement after the assigned broadcast
@@ -638,57 +870,149 @@ def _allocate_voice_persona_via_http(
     Returns:
         dict or None: The persona dict, or None on failure
     """
+    def _fail( stage, exception_name, message, attempts ):
+        """Build the structured give-up AND log it to stderr (forensic copy)."""
+        print( f"[register_session] WARNING: voice persona allocate failed ({exception_name}: {message})",
+               file=sys.stderr )
+        return None, {
+            "stage"      : stage,
+            "exception"  : exception_name,
+            "message"    : str( message ),
+            "attempts"   : attempts,
+            "server_url" : server_url
+        }
+
+    # ── Credentials: read OUTSIDE the transport try (candidate A3) ────────
+    # A missing/blank credential file and a down server used to produce the
+    # IDENTICAL silent None while demanding opposite fixes. They are now
+    # distinguishable by `stage` before a single byte goes over the wire.
     try:
         from lupin_cli.claude_code.hooks.lib.hook_credentials import get_hook_credentials
         email, password = get_hook_credentials( project )
+    except ( OSError, KeyError, ValueError ) as e:
+        return _fail( "credentials", type( e ).__name__, e, 0 )
 
-        # Step 1: login to get JWT
-        login_body = json.dumps( { "email": email, "password": password } ).encode()
-        login_req  = urllib.request.Request(
-            f"{server_url}/auth/login",
-            data    = login_body,
-            method  = "POST",
-            headers = { "Content-Type": "application/json" }
-        )
-        with urllib.request.urlopen( login_req, timeout=2 ) as resp:
-            login_data = json.loads( resp.read().decode() )
-        access_token = login_data.get( "tokens", {} ).get( "access_token" )
-        if not access_token:
-            print( f"[register_session] WARNING: voice persona allocate — login response missing access_token",
+    # ── Transport: retried on the budget ladder ───────────────────────────
+    # The except stays BROAD on purpose. Its breadth was never the defect —
+    # the missing reader was. Narrowing it risks an UNCAUGHT exception on the
+    # SessionStart boot path, which is a worse bug than the one being fixed.
+    # (Verified py3.13: URLError/HTTPError/TimeoutError/FileNotFoundError all
+    # subclass OSError and JSONDecodeError subclasses ValueError, so the old
+    # seven-name tuple was already effectively these three.)
+    last_error = None
+    for attempt, timeout_seconds in enumerate( _ALLOCATE_TIMEOUT_LADDER_SECONDS, start=1 ):
+        try:
+            # Step 1: login to get JWT
+            login_body = json.dumps( { "email": email, "password": password } ).encode()
+            login_req  = urllib.request.Request(
+                f"{server_url}/auth/login",
+                data    = login_body,
+                method  = "POST",
+                headers = { "Content-Type": "application/json" }
+            )
+            with urllib.request.urlopen( login_req, timeout=timeout_seconds ) as resp:
+                login_data = json.loads( resp.read().decode() )
+            access_token = login_data.get( "tokens", {} ).get( "access_token" )
+            if not access_token:
+                # The server ANSWERED and the answer was wrong — not a
+                # transport problem, so do not spend the remaining ladder.
+                return _fail( "login_no_token", "MissingAccessToken",
+                              "login response carried no tokens.access_token", attempt )
+
+            # Step 2: POST /allocate (optionally with previous_persona_name +
+            # persona_chain as query params)
+            alloc_url    = f"{server_url}/api/cosa-voice/voice-persona/{stable_session_id}/allocate"
+            query_params = []
+            if previous_persona_name:
+                query_params.append( f"previous_persona_name={urllib.parse.quote( previous_persona_name )}" )
+            if persona_chain:
+                query_params.append( f"persona_chain={urllib.parse.quote( persona_chain )}" )
+            if declared_managers:
+                query_params.append( f"declared_managers={urllib.parse.quote( ','.join( declared_managers ) )}" )
+            if query_params:
+                alloc_url = f"{alloc_url}?{'&'.join( query_params )}"
+
+            alloc_req = urllib.request.Request(
+                alloc_url,
+                data    = b"",  # empty body (endpoint takes session_id from path)
+                method  = "POST",
+                headers = {
+                    "Content-Type"  : "application/json",
+                    "Authorization" : f"Bearer {access_token}"
+                }
+            )
+            with urllib.request.urlopen( alloc_req, timeout=timeout_seconds ) as resp:
+                alloc_data = json.loads( resp.read().decode() )
+            persona = alloc_data.get( "voice_persona" )
+            if persona is None:
+                # Mr Radio enumerated every 200-return site on /allocate
+                # (voice_persona.py :268 :296 :344 :527) and each carries a
+                # non-None persona; every None path RAISES instead. So this
+                # branch should be unreachable — and if it ever fires it must
+                # ALARM, not hand back the silent None this whole row exists
+                # to delete.
+                return _fail( "empty_response", "MissingVoicePersona",
+                              "allocate returned 200 with no voice_persona", attempt )
+            return persona, None
+
+        except ( OSError, ValueError, KeyError ) as e:
+            last_error = e
+            print( f"[register_session] WARNING: voice persona allocate attempt "
+                   f"{attempt}/{len( _ALLOCATE_TIMEOUT_LADDER_SECONDS )} failed at "
+                   f"timeout={timeout_seconds}s ({type( e ).__name__}: {e})",
                    file=sys.stderr )
-            return None
 
-        # Step 2: POST /allocate (optionally with previous_persona_name +
-        # persona_chain as query params)
-        alloc_url    = f"{server_url}/api/cosa-voice/voice-persona/{stable_session_id}/allocate"
-        query_params = []
-        if previous_persona_name:
-            query_params.append( f"previous_persona_name={urllib.parse.quote( previous_persona_name )}" )
-        if persona_chain:
-            query_params.append( f"persona_chain={urllib.parse.quote( persona_chain )}" )
-        if declared_managers:
-            query_params.append( f"declared_managers={urllib.parse.quote( ','.join( declared_managers ) )}" )
-        if query_params:
-            alloc_url = f"{alloc_url}?{'&'.join( query_params )}"
+    return _fail( "transport", type( last_error ).__name__, last_error,
+                  len( _ALLOCATE_TIMEOUT_LADDER_SECONDS ) )
 
-        alloc_req = urllib.request.Request(
-            alloc_url,
-            data    = b"",  # empty body (endpoint takes session_id from path)
-            method  = "POST",
-            headers = {
-                "Content-Type"  : "application/json",
-                "Authorization" : f"Bearer {access_token}"
-            }
-        )
-        with urllib.request.urlopen( alloc_req, timeout=2 ) as resp:
-            alloc_data = json.loads( resp.read().decode() )
-        return alloc_data.get( "voice_persona" )
 
-    except ( urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError,
-             KeyError, FileNotFoundError, OSError, ValueError ) as e:
-        print( f"[register_session] WARNING: voice persona allocate failed ({type( e ).__name__}: {e})",
-               file=sys.stderr )
-        return None
+def _build_persona_failure_block( failure, stable_session_id ):
+    """
+    Render the voice-persona give-up as a block for the SessionStart hook's
+    `additionalContext` — the channel the SESSION ITSELF reads at boot.
+
+    This is the whole point of candidate A. The except path already printed to
+    stderr and had been doing so all along; locating that stderr took a
+    dedicated hunt (it lands as a hook_success attachment inside the session's
+    own transcript, not any file under ~/.claude/sessions). A give-up printed
+    where nobody reads it is not an alarm. This function puts it where the
+    model will read it, at boot, at zero interrupt cost to the user.
+
+    Composes with candidate D (7b2db462): D tells a null session to announce
+    itself; this block is what lets that announcement say WHY.
+
+    Requires:
+        - failure is None, or a dict carrying stage/exception/message/
+          attempts/server_url
+        - stable_session_id is a string or None
+
+    Ensures:
+        - Returns "" when failure is None (no alarm when nothing failed)
+        - Otherwise returns a block naming the cause AND the session_id
+        - Never raises
+    """
+    if not failure: return ""
+
+    sid = stable_session_id or "unknown"
+    return (
+        "\n"
+        "════════════════════════════════════════════════════════════════\n"
+        "  ⚠️  VOICE PERSONA ALLOCATION FAILED — THIS SESSION IS UNATTRIBUTED\n"
+        "════════════════════════════════════════════════════════════════\n"
+        f"  stage      : {failure.get( 'stage' )}\n"
+        f"  cause      : {failure.get( 'exception' )}: {failure.get( 'message' )}\n"
+        f"  attempts   : {failure.get( 'attempts' )}\n"
+        f"  server     : {failure.get( 'server_url' )}\n"
+        f"  session id : {sid}\n"
+        "\n"
+        "  You have NO persona name, NO persona badge on your notification\n"
+        "  cards, and NO distinct TTS voice — you speak in the fallback voice\n"
+        "  alongside every other session. Announce this at your first\n"
+        "  opportunity and SPEAK THE SESSION ID ABOVE: it is the only thing\n"
+        "  that identifies you, precisely because the two channels that\n"
+        "  normally carry your identity are the ones that went missing.\n"
+        "════════════════════════════════════════════════════════════════\n"
+    )
 
 
 def _release_voice_persona_via_http( server_url, project, stable_session_id ):
@@ -715,7 +1039,9 @@ def _release_voice_persona_via_http( server_url, project, stable_session_id ):
         - Returns True on successful POST /release (HTTP 2xx)
         - Returns False on any failure (logged to stderr)
         - Never raises exceptions
-        - Uses 2-second timeouts for both /auth/login and /release
+        - Uses _SERVER_TRANSPORT_TIMEOUT_SECONDS on both /auth/login and
+          /release — sized to outlast a `:7999` reload window rather than
+          fail inside one
 
     Args:
         server_url: Lupin server URL
@@ -737,7 +1063,7 @@ def _release_voice_persona_via_http( server_url, project, stable_session_id ):
             method  = "POST",
             headers = { "Content-Type": "application/json" }
         )
-        with urllib.request.urlopen( login_req, timeout=2 ) as resp:
+        with urllib.request.urlopen( login_req, timeout=_SERVER_TRANSPORT_TIMEOUT_SECONDS ) as resp:
             login_data = json.loads( resp.read().decode() )
         access_token = login_data.get( "tokens", {} ).get( "access_token" )
         if not access_token:
@@ -755,7 +1081,7 @@ def _release_voice_persona_via_http( server_url, project, stable_session_id ):
                 "Authorization" : f"Bearer {access_token}"
             }
         )
-        with urllib.request.urlopen( rel_req, timeout=2 ) as resp:
+        with urllib.request.urlopen( rel_req, timeout=_SERVER_TRANSPORT_TIMEOUT_SECONDS ) as resp:
             resp.read()  # drain
         return True
 
@@ -796,6 +1122,21 @@ def main():
     # ── Phase 1: Read hook input ──────────────────────────────────────────
     payload = read_hook_input()
     if not payload:
+        # 🔎 WITNESS FOR THE FIRST NO-BRIDGE EXIT (row e9822f8d). This return
+        # leaves NO bridge, NO lockfile and NO env file, and the seat that comes
+        # up behind it is healthy, invisible and unaddressable: list_spawned_sessions
+        # says alive, dm_send says recipient_unresolved, and the session itself works
+        # fine and DMs OUT. Exiting quietly on an unreadable payload is CORRECT — a
+        # raising SessionStart is itself how you get a seat with no bridge — but the
+        # SILENCE is what left that row undiagnosed for four days.
+        #
+        # The row's own body names stderr as the first place to look, because hook
+        # stderr lands in the session's OWN transcript as a hook_success attachment
+        # (the 86aa79ac method). This is the line that will be there next time.
+        print( "[register_session] WARNING: hook payload was empty or unreadable — "
+               "NO session bridge written. This seat will have no voice persona, "
+               "cannot set a session topic, and cannot receive DMs (row e9822f8d).",
+               file=sys.stderr )
         emit_json( {} )
         sys.exit( 0 )
 
@@ -803,8 +1144,28 @@ def main():
     transcript_path = payload.get( "transcript_path", "" )
     cwd             = payload.get( "cwd", "" )
 
+    # 🔎 WITNESS FOR THE SECOND NO-BRIDGE EXIT (row e9822f8d). EVERYTHING in
+    # Phase 2 — the lockfile, the /clear detection, the bridge write itself — is
+    # guarded by `if session_id:` below. A payload that parses but carries no
+    # session_id therefore falls straight through to Phase 3 having written
+    # nothing, and until now said nothing either.
+    #
+    # ⚠️ THIS IS THE HALF THE EXISTING INSTRUMENTS CANNOT SEE. The persona-alloc
+    # give-up got a witness in 99589967 and the bridge WRITE got one inside
+    # atomic_write_json — but both live DOWNSTREAM of this branch. A witness
+    # bolted onto a later step cannot fire when the hook never reaches that step,
+    # which is exactly why two commits naming e9822f8d did not close it.
+    if not session_id:
+        print( "[register_session] WARNING: hook payload carried no session_id "
+               f"(keys: {sorted( payload )}) — NO session bridge written. Same "
+               "consequence as an empty payload: persona-less, topic-less, "
+               "unaddressable by DM (row e9822f8d).", file=sys.stderr )
+
     # ── Phase 2: Write session bridge file ────────────────────────────────
-    session_dir  = os.path.expanduser( "~/.claude/sessions" )
+    # Row 8ccc20ab: this line used to be a bare expanduser of the real bridge
+    # directory — the write that merged a fixture into three LIVE seats. It now
+    # resolves through the one seam, so LUPIN_SESSIONS_DIR redirects it.
+    session_dir  = str( sessions_dir() )
     session_file = None
     old_data     = None
     is_context_clear      = False
@@ -812,6 +1173,17 @@ def main():
 
     if session_id:
         os.makedirs( session_dir, exist_ok=True )
+        # Enforce setgid + group-rwx EXPLICITLY: makedirs' mode arg is umask-masked
+        # and ignored entirely when the dir already exists, so it cannot guarantee
+        # 2770. The setgid bit makes bridges written here inherit THIS dir's group,
+        # so a cross-uid writer (container uid 1001 ⇄ host) and reader share access
+        # regardless of who wrote last. See
+        # src/rnd/v0.1.9/2026.07.24-vm-persona-bridge-mount-uid-divergence.md.
+        try:
+            os.chmod( session_dir, 0o2770 )
+        except OSError as e:
+            print( f"[register_session] WARNING: could not set 2770 on {session_dir}: {e!r} "
+                   f"— cross-uid bridge sharing may fail", file=sys.stderr )
 
         hook_ppid    = os.getppid()
         cc_pid       = _resolve_cc_pid( hook_ppid )
@@ -903,6 +1275,15 @@ def main():
             session_data[ "headless" ]        = os.environ.get( "COSA_VOICE_HEADLESS", "" ) == "1"
             session_data[ "role" ]            = os.environ.get( "COSA_VOICE_ROLE", "reviewer" )
             session_data[ "speakerphone_on" ] = False
+            # Owner-lineage drift fix (2026-06-22): freeze the manager's persona-at-
+            # spawn onto this worker's bridge so the arbiter resolves the TRUE
+            # spawning manager for a finished/dead worker WITHOUT re-deriving the
+            # manager session's CURRENT (drift-prone) persona. Worker-keyed, durable.
+            # Omitted when the spawner couldn't resolve a manager persona (legacy
+            # behavior: resolver falls back to re-derivation).
+            _spawned_by_persona = os.environ.get( "COSA_VOICE_SPAWNED_BY_PERSONA" )
+            if _spawned_by_persona:
+                session_data[ "spawned_by_persona" ] = _spawned_by_persona
 
         # Carry voice_persona forward across ANY context reset (/clear,
         # /compact, resume, --continue double-fire) so the user keeps the same
@@ -970,21 +1351,34 @@ def main():
         # the explicit carry-forward list. session_data wins for keys it
         # provides; existing fills in everything else.
         # See: src/rnd/v0.1.7/2026.05.17-owner-user-id-stamper-writer-side/01-design.md §D4 Fix B
-        try:
-            existing = { }
-            if os.path.exists( session_file ):
-                try:
-                    with open( session_file ) as f:
-                        existing = json.load( f )
-                    if not isinstance( existing, dict ):
-                        existing = { }
-                except ( json.JSONDecodeError, OSError ):
+        existing = { }
+        if os.path.exists( session_file ):
+            try:
+                with open( session_file ) as f:
+                    existing = json.load( f )
+                if not isinstance( existing, dict ):
                     existing = { }
-            merged = { **existing, **session_data }
-            with open( session_file, "w" ) as f:
-                json.dump( merged, f, indent=2 )
-        except OSError:
-            pass  # Best-effort
+            except ( json.JSONDecodeError, OSError ):
+                existing = { }
+        merged = { **existing, **session_data }
+        # Atomic (row 49b2c80b). The stable-id lockfile twelve lines above
+        # is already O_EXCL against "the documented double-fire on
+        # --continue (two concurrent SessionStart hooks)" — that same
+        # concurrency reaches THIS write, which had no guard at all. The
+        # lock went on the id; the bridge got nothing.
+        #
+        # ⚠️ NO try/except HERE — deliberately, row 0f10ff75. There WAS an
+        # `except OSError: pass` wrapping this block and it was DEAD:
+        # `atomic_write_json` catches ( OSError, TypeError, ValueError )
+        # itself, unlinks its temp file, prints a stderr witness naming the
+        # path, and returns False. Its contract says "Never raises" and the
+        # BODY agrees. The only other statement the wrapper covered was
+        # `os.path.exists`, which swallows OSError and returns False.
+        # ⇒ The guard for a failed bridge write lives INSIDE the callee, at
+        # the mechanism — one witness rather than one per call site, six of
+        # which ignore the return entirely. A dead handler here read as
+        # "handled locally" and cost the next reader the trail.
+        atomic_write_json( session_file, merged )
 
     # ── Phase 3: Write to CLAUDE_ENV_FILE (for Bash commands) ─────────────
     # Use stable_session_id so all hooks produce consistent sender_ids
@@ -1052,6 +1446,9 @@ def main():
     # exactly today's behavior. No SessionStart blocking.
     #
     # Design: src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md
+    # Give-up record for Phase 7. None means "no failure to report" — either
+    # allocation succeeded or it was never attempted (persona carried forward).
+    voice_persona_failure = None
     if session_id and "voice_persona" not in session_data:
         try:
             project = detect_project()
@@ -1082,7 +1479,7 @@ def main():
             voice_persona_server_url = os.getenv( "LUPIN_APP_SERVER_URL", "http://localhost:7999" )
             print( f"[LOOKML-DEBUG] calling _allocate_voice_persona_via_http — server={voice_persona_server_url!r} sid={stable_session_id!r} chain={chain!r}",
                    file=sys.stderr )
-            allocated = _allocate_voice_persona_via_http(
+            allocated, voice_persona_failure = _allocate_voice_persona_via_http(
                 voice_persona_server_url, project, stable_session_id,
                 previous_persona_name = previous_persona_name,
                 persona_chain         = chain,
@@ -1099,6 +1496,13 @@ def main():
                    file=sys.stderr )
             print( f"[LOOKML-DEBUG] exception in phase4.5 — type={type( e ).__name__} msg={e}",
                    file=sys.stderr )
+            voice_persona_failure = {
+                "stage"      : "phase",
+                "exception"  : type( e ).__name__,
+                "message"    : str( e ),
+                "attempts"   : 0,
+                "server_url" : os.getenv( "LUPIN_APP_SERVER_URL", "http://localhost:7999" )
+            }
 
     # ── Phase 5: Send TTS notification (with explicit sender_id) ────────
     short_id = session_id[:8] if session_id else "unknown"
@@ -1123,8 +1527,9 @@ def main():
             status_block = _check_cosa_voice_status()
         except Exception:
             status_block = ""
+        alarm_block = _build_persona_failure_block( voice_persona_failure, stable_session_id )
         emit_json( {
-            "additionalContext": f"Session ID: {session_id}\n\n{status_block}"
+            "additionalContext": f"Session ID: {session_id}\n\n{status_block}{alarm_block}"
         } )
     else:
         emit_json( {} )

@@ -57,9 +57,18 @@ from lupin_cli.claude_code.hooks.lib.anything_else_ask import (
 #    stop_hook_active loop guard; voice always wins. Leaf modules are pure +
 #    100%-covered; this file holds only the thin adapter. See:
 #    src/rnd/v0.1.8/2026.06.04-heartbeat-hook/02-stop-py-seam-factoring-proposal.md
-from lupin_cli.claude_code.hooks.lib.heartbeat_hold import read_hold_resilient
+from lupin_cli.claude_code.hooks.lib.heartbeat_hold import (
+    read_hold_resilient, get_pending_user_gates, get_last_looked_in_ts,
+    get_last_spinup_check_ts, get_last_surfaced_questions_ts,
+)
+# Scoped loud-at-read: this session's OWN hold declares a ttl that cannot make it
+# fresh ⇒ it is never honored ⇒ it is being poked despite holding. One warning,
+# once per hold-version. See heartbeat_hold_warn for the cardinality argument.
+from lupin_cli.claude_code.hooks.lib.heartbeat_hold_warn import should_warn_unusable_ttl
+# 6929f4ac receipts-of-progress — the pure gate-row transforms (outward twin).
+from lupin_cli.claude_code.hooks.lib import heartbeat_user_gates
 from lupin_cli.claude_code.hooks.lib.heartbeat_poke_cap import (
-    get_poke_count, increment_poke_count,
+    get_poke_count, increment_poke_count, DEFAULT_POKE_CAP,
 )
 from lupin_cli.claude_code.hooks.lib.heartbeat_decision import (
     decide_heartbeat, OUTCOME_POKE, OUTCOME_NOT_OWED, OUTCOME_HONORED, OUTCOME_CAP_REACHED,
@@ -67,15 +76,22 @@ from lupin_cli.claude_code.hooks.lib.heartbeat_decision import (
 from lupin_cli.claude_code.hooks.lib.heartbeat_settings import load_heartbeat_settings
 from lupin_cli.claude_code.hooks.lib import heartbeat_events
 # v2 Track-A — live work-owed oracle (Task* replay from the session transcript).
+from lupin_cli.claude_code.hooks.lib.board_sweep import sweep_progress_line
+from lupin_cli.claude_code.hooks.lib.memento_verify_tick import verify_tick_line
 from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import (
-    evaluate_work_owed, partition_inbound_by_age, TODO_IN_PROGRESS,
+    evaluate_work_owed, partition_inbound_by_age, TODO_IN_PROGRESS, TODO_PENDING,
+    format_owed_summary,
+    manager_needs_verification, manager_needs_spinup_check, manager_needs_question_surface,
+    SPINUP_CHECK_DEBOUNCE_SECONDS, SURFACE_QUESTIONS_DEBOUNCE_SECONDS, SPINUP_BACKLOG_MIN_N,
+    MUTE_PROMPT_SENTINEL,
 )
 # Spine Step-2 (store-canonical task management) — the flag-gated store-count
 # owed source. DEFAULT-old (transcript replay) until the fleet cutover flips
 # heartbeat.owed_source_from_store. See cascade review §A/§B/§C, lupin ->
 # src/rnd/v0.1.8/2026.06.16-store-canonical-task-mgmt-cascade-review.md
+from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 from lupin_cli.claude_code.hooks.lib.task_store_settings import load_task_store_settings
-from lupin_cli.claude_code.hooks.lib.task_store_client import read_api_key, query_owed
+from lupin_cli.claude_code.hooks.lib.task_store_client import read_api_key, query_owed, query_owed_breakdowns, query_blocked_user_rows
 # v4 acked-inbound ledger (Rick 2026-06-10) — explicit "looked-at" qids the
 # unanswered-inbound gatherer subtracts (spec part (c)).
 from lupin_cli.claude_code.hooks.lib.heartbeat_acked_ledger import read_acked_qids
@@ -286,23 +302,176 @@ def _stop_hook_idle_behavior() -> str:
         return DEFAULT_IDLE_BEHAVIOR
 
 
-def _idle_sentence( persona_name, owed_unknown=False ) -> str:
+# ── Role-goal poke echo (role-goals Phase 2-3) ───────────────────────────────
+# The compressed, role-selected "north-star goal" line APPENDED to the heartbeat
+# self-poke reason so a session re-anchors on what it is ultimately trying to
+# achieve, fresh every tick. The text lives as runtime config (retune live, no
+# redeploy — D1); CANONICAL human-readable source: planning-is-prompting ->
+# workflow/role-goals.md §"Injection: the poke echo". The config READ is IO and
+# stays in this shell; the pure decision module only appends the injected string.
+_GOAL_LINE_KEYS = {
+    "manager"  : "heartbeat manager goal line",
+    "worker"   : "heartbeat worker goal line",
+    "agnostic" : "heartbeat role-agnostic goal line",
+}
+
+
+def _select_goal_role( session_id, bridge_role ):
+    """
+    3-way role selector for the Stop-hook self-poke goal line (role-goals Phase
+    2-3; María/Rick refinement 2026-06-24).
+
+    Resolution order:
+        1. bridge_role present → a spawned session stamped its role at spawn
+           (COSA_VOICE_ROLE → register_session.py); role=="manager" is a
+           DEFENSIVE branch (the spawner only ever spawns WORKER roles today —
+           author/reviewer/tester/worker — so in practice a present role lands
+           on the worker line; the manager arm is reachable only if a session is
+           ever spawned with COSA_VOICE_ROLE=manager, kept as belt-and-suspenders).
+        2. else _is_manager_persona(session_id) → a declared fleet-roster manager
+           (COSA_VOICE_MANAGERS__<PROJECT>) gets the Manager line at its OWN
+           self-poke, not only via the arbiter (sites #2/#3). Reuses the tested,
+           fail-open governance helper — no hand-rolled roster/canon logic.
+        3. else → "agnostic" (D2 graceful fallback when role can't be determined).
+
+    Requires:
+        - session_id is a string
+        - bridge_role is the bridge meta "role" value (str) or None
+
+    Ensures:
+        - returns one of "manager" | "worker" | "agnostic"; never raises
+    """
+    role = ( bridge_role or "" ).strip().lower()
+    if role == "manager":
+        return "manager"
+    if role:
+        return "worker"
+    try:
+        from lupin_cli.claude_code.hooks.lib.subagent_governance import _is_manager_persona
+        if _is_manager_persona( session_id ):
+            return "manager"
+    except Exception:
+        pass
+    return "agnostic"
+
+
+def _heartbeat_goal_line( session_id, bridge_role ):
+    """
+    Read the role-selected heartbeat goal echo from the configuration_manager
+    (role-goals Phase 2-3, D1 — runtime-tunable). The ConfigurationManager
+    banners would corrupt the hook's stdout JSON protocol channel, so the read is
+    wrapped in redirect_stdout exactly like _stop_hook_idle_behavior().
+
+    Requires:
+        - session_id is a string
+        - bridge_role is the bridge meta "role" value (str) or None
+
+    Ensures:
+        - returns the goal-echo string for the role _select_goal_role resolves, or
+          "" on any error / missing key — an empty goal_line makes the poke reason
+          byte-identical to the pre-role-goals output (degrade-safe; never breaks
+          the poke)
+        - never raises; never writes to stdout
+    """
+    import contextlib
+    import io
+    role_kind = _select_goal_role( session_id, bridge_role )
+    key       = _GOAL_LINE_KEYS[ role_kind ]
+    try:
+        with contextlib.redirect_stdout( io.StringIO() ):
+            mgr   = ConfigurationManager(
+                env_var_name  = "LUPIN_CONFIG_MGR_CLI_ARGS",
+                silent        = True,
+                mute_splainer = True,
+            )
+            value = mgr.get( key, default="", silent=True )
+        return str( value or "" ).strip()
+    except Exception:
+        return ""
+
+
+def _board_sweep_line( session_id, live_owed=None ):
+    """
+    The IO shell for Rick's 2026-07-25 board-sweep gate: resolve THIS seat's persona from
+    the bridge, then read its sweep ledger.
+
+    WHY PERSONA AND NOT ROLE (the design call, recorded so it can be argued with). The
+    obvious home for "do not stop until you have iterated all N items" is the
+    `heartbeat <role> goal line` INI key that `_heartbeat_goal_line` already reads. It
+    cannot carry this: both sweeping seats resolve to `worker`, so one key would say the
+    SAME N to María (22) and to Mr. Radio (71), and whichever seat got the smaller number
+    would stop early believing it had finished. The gate has to be addressed to a seat, so
+    it is keyed on the persona.
+
+    THE LIVE COUNT WAS ALREADY IN HAND AND NOBODY PASSED IT (Rick, 2026-07-27). He asked
+    why the total could not simply be looked up each iteration. It can, and it costs
+    NOTHING: `_owed_count_from_store` already runs every tick to feed the owed oracle, and
+    its result sits in a local variable ~100 lines above this call. The sweep line reached
+    for the ledger's frozen `total_at_start` instead and so kept reporting `71/71` two days
+    after Mr Radio's board fell to 14. Threaded through as `live_owed`.
+
+    ⚠️ `live_owed=None` means UNKNOWN, not zero. A store-unreachable tick must not render
+    as "your board is clear" — that is the alarm-gated-on-the-healthy-value defect this
+    module's docstring already refuses elsewhere, and 0 is a real answer that means
+    something else entirely.
+
+    Requires:
+        - session_id is a string
+        - live_owed is this seat's current owed count, or None when unresolved
+
+    Ensures:
+        - returns the sweep gate sentence, or "" when this seat has no ledger (the normal
+          state of every session that is not sweeping — output byte-identical to before)
+        - returns a LOUD line, never "", when a ledger exists but cannot be read: a gate
+          that goes quiet because it could not read its own state is the failure it exists
+          to prevent
+        - a persona that cannot be resolved yields "" — no seat, no ledger to address
+        - an IN-PROGRESS sweep is unaffected by live_owed (frozen denominator = the
+          anti-gaming floor); only the COMPLETE arm consults it
+        - never raises; never writes to stdout (the hook's JSON protocol channel)
+    """
+    try:
+        persona = get_voice_persona( session_id ) or { }
+        name    = persona.get( "name" )
+        if not name: return ""
+        return sweep_progress_line( name, live_owed=live_owed )
+    except Exception:
+        # Degrade-safe like _heartbeat_goal_line: a broken bridge read must never take the
+        # poke down. This arm is the one place silence is accepted on an error, and only
+        # because it means "could not identify the seat", not "could not read the ledger" —
+        # the latter is handled loudly inside sweep_progress_line.
+        return ""
+
+
+def _idle_sentence( persona_name, owed_unknown=False, owed=False, total_owed=0 ) -> str:
     """
     The first-person idle status sentence for the `idle_announce` behavior
     (seeded from the dropped poke-scaffold's NOT_OWED case). Pure.
 
+    Owed-aware (bug aa403e03): the Stop idle-announce now consults the SAME
+    hold-aware verdict (_resolve_owed_state) the Notification idle-beacon uses, so
+    the two never disagree. Precedence — UNKNOWN first (cannot assert a count),
+    then OWED (work owed but no poke THIS Stop, e.g. the poke-cap halted poking),
+    then plain idle.
+
     Ensures:
-        - owed_unknown False → "Momentarily idle." (persona-agnostic; the
-          sender_id already renders the card AS the persona)
-        - owed_unknown True  → "Owed status unknown." — the store was
-          unreachable, so genuine-idle CANNOT be asserted (UNKNOWN ≠ IDLE)
+        - owed_unknown True → "Owed status unknown." (UNKNOWN ≠ IDLE)
+        - owed True         → "Idle, but N item(s) owed." (or "Idle, but work
+          owed." when total_owed is 0 — owed via a referent-less signal); the
+          phrasing matches the Notification beacon for cross-hook consistency
+        - otherwise         → "Momentarily idle." (genuinely not owed)
     """
     if owed_unknown:
         return "Owed status unknown."
+    if owed:
+        if total_owed > 0:
+            plural = "" if total_owed == 1 else "s"
+            return f"Idle, but {total_owed} item{plural} owed."
+        return "Idle, but work owed."
     return "Momentarily idle."
 
 
-def _announce_idle( session_id, persona_name, owed_unknown=False ):
+def _announce_idle( session_id, persona_name, owed_unknown=False, owed=False, total_owed=0, muted=False ):
     """
     Fire ONE low-priority, non-blocking idle status notify for the
     `idle_announce` behavior. The persona "speaks" its own idle state.
@@ -326,16 +495,28 @@ def _announce_idle( session_id, persona_name, owed_unknown=False ):
         - owed_unknown False → abstract "Heartbeat: idle — nothing owed."
         - owed_unknown True  → abstract "Heartbeat: owed status unknown (task
           store unreachable) — NOT idle; verify manually." (no "nothing owed")
+        - owed_unknown True AND muted True → the same NOT-idle verdict, but
+          named to its ACTUAL cause (pokes muted, lookup skipped) rather than
+          blaming the store. Both are "we did not measure"; only one is an
+          outage, and an operator who muted the fleet himself should not be sent
+          hunting a store that is fine.
         - NEVER raises / never blocks the Stop (try/except; mirrors the
           emit-outcome invariant)
     """
-    if owed_unknown:
+    if owed_unknown and muted:
+        abstract = ( "Heartbeat: pokes MUTED (heartbeat.poke_output_enabled = false) — the "
+                     "obligations lookup did not run, so owed status is UNKNOWN, not clear. "
+                     "Muting buys silence, not an all-clear." )
+    elif owed_unknown:
         abstract = "Heartbeat: owed status unknown (task store unreachable) — NOT idle; verify manually."
+    elif owed:
+        detail   = f"{total_owed} owed referent(s)" if total_owed > 0 else "work owed (referent-less signal)"
+        abstract = f"Heartbeat: idle but NOT done — {detail} (hold-aware verdict, e.g. poke-cap reached). Stop + beacon agree."
     else:
         abstract = "Heartbeat: idle — nothing owed."
     try:
         request = AsyncNotificationRequest(
-            message   = _idle_sentence( persona_name, owed_unknown=owed_unknown ),
+            message   = _idle_sentence( persona_name, owed_unknown=owed_unknown, owed=owed, total_owed=total_owed ),
             priority  = NotificationPriority.LOW,
             sender_id = build_sender_id_for_cc( session_id ),
             abstract  = abstract,
@@ -344,6 +525,47 @@ def _announce_idle( session_id, persona_name, owed_unknown=False ):
     except Exception as e:
         log_to_stream( "stop", {}, extra={
             "phase"      : "idle_announce_error",
+            "session_id" : session_id,
+            "error"      : str( e ),
+        } )
+
+
+def _announce_muted( session_id, persona_name, mute_message ):
+    """
+    Fire ONE low-priority beacon reporting the MUTED stop (heartbeat.
+    poke_output_enabled = false), carrying the substitute text VERBATIM.
+
+    Rick 2026-07-22: while pokes are muted the operator must see exactly what the
+    workers see. A bare "Momentarily idle." card hides the substitute entirely —
+    the operator then has no way to tell a muted fleet from a genuinely quiet one,
+    or to read the text every worker is actually being handed. So the beacon
+    speaks the mute state and puts the configured message, unedited, in the
+    abstract.
+
+    Requires:
+        - mute_message is the non-empty configured substitute (the empty/None
+          spelling never reaches here — it is the full-silence path)
+
+    Ensures:
+        - posts a LOW-priority AsyncNotificationRequest stamped with this
+          session's CC sender_id, so it renders as the persona
+        - the abstract carries the substitute VERBATIM (what workers receive)
+        - NEVER raises / never blocks the Stop (mirrors _announce_idle)
+    """
+    who = persona_name or "A worker"
+    try:
+        request = AsyncNotificationRequest(
+            message   = f"{who} stopped — pokes muted, default message injected.",
+            priority  = NotificationPriority.LOW,
+            sender_id = build_sender_id_for_cc( session_id ),
+            abstract  = ( "Heartbeat: pokes MUTED (heartbeat.poke_output_enabled = false) — no "
+                          "live-obligations lookup ran. Injected verbatim to this worker:\n\n"
+                          f"{mute_message}" ),
+        )
+        notify_user_async( request )
+    except Exception as e:
+        log_to_stream( "stop", {}, extra={
+            "phase"      : "muted_announce_error",
             "session_id" : session_id,
             "error"      : str( e ),
         } )
@@ -612,7 +834,7 @@ def _arm_idle_waiter( session_id, last_assistant_message, cwd ):
 
     # Spawn the waiter — mirrors register_session.py:_spawn_listener pattern
     short    = session_id[ :8 ] if session_id else "unknown"
-    log_path = Path( os.path.expanduser( f"~/.claude/sessions/cc-idle-waiter-{short}.log" ) )
+    log_path = sessions_dir() / f"cc-idle-waiter-{short}.log"   # row 8ccc20ab: the one seam
 
     cmd = [
         sys.executable, "-m", "lupin_cli.claude_code.hooks.lib.idle_waiter",
@@ -1056,20 +1278,21 @@ def _dm_topic_for( persona_name ):
     """
     Derive the commons DM-topic name for a persona.
 
-    Mirrors `cosa_voice_mcp._dm_topic` / `arbiter_gateway.dm_topic_for` (the
-    canonical sluggers): lowercase, then collapse non-word chars to "_" with
-    re.UNICODE so non-ASCII personas survive ("mr radio" → "dm-mr_radio",
-    "María" → "dm-maría").
+    Routes through the shared `persona_slug` root (Phase 3 of the persona-name
+    normalization plan) so the slug is accent-proof and agrees with the store's
+    canonical persona key: "Mr. Radio" → "dm-mr_radio", "María" → "dm-maria"
+    (NOT the prior accent-leaky "dm-maría"). `sep='_'` keeps the established
+    `dm-<persona>` topic-file convention (spaces → underscore).
 
     Requires:
-        - persona_name is a non-empty string
+        - persona_name is a string or None
 
     Ensures:
         - Returns "dm-<slug>" matching the server-side topic pattern
+        - Accent/punctuation in the persona collapses to the canonical form
     """
-    import re
-    slug = re.sub( r"[^\w-]+", "_", persona_name.strip().lower(), flags=re.UNICODE )
-    return f"dm-{slug}"
+    from lupin_mcp.persona_normalization import persona_slug
+    return f"dm-{persona_slug( persona_name, sep='_' )}"
 
 
 def _gather_outstanding_delegations( session_id ):
@@ -1237,10 +1460,16 @@ def _gather_unanswered_inbound_questions( session_id ):
 
 
 # ── Spine Step-2 (store-canonical task management) store-count seam ───────────
-# The owed store-statuses queried for the work-owed verdict. The store's
-# {queued, in_progress} == the owed set (cascade review §B); a module constant
-# is the single source of truth (one-name rule).
-STORE_OWED_STATUSES = ( "queued", "in_progress" )
+# STORE_OWED_STATUSES was DELETED here on 2026-07-19 (PARKED-STATUS). It named
+# the owed set locally, and had already forked into 4 copies (here,
+# task_store_drain.py, the arbiter, rules.py). The owed set now lives SERVER-side
+# behind query_owed's `owed_only=true`: queued U in_progress U (parked AND NOT
+# park-active). Deleted rather than re-pointed — a constant that no longer exists
+# cannot drift, and a status tuple held HERE could neither see a park-expiry
+# rejoin (an expired parked row still reads status="parked") nor avoid
+# double-counting one across a per-status loop.
+# Membership is otherwise UNCHANGED: blocked / claimed / review are still not
+# owed to this reader. Design: src/rnd/v0.1.9/2026.07.19-parked-status-board-hygiene.md
 
 
 def _owed_count_from_store( session_id ):
@@ -1257,11 +1486,14 @@ def _owed_count_from_store( session_id ):
         - session_id is the resolved stable session id string
 
     Ensures:
-        - Returns ( count, ok ): ok True iff the store answered every owed-status
-          query cleanly; count is the summed owed-row count (0 when not ok)
-        - store unreachable / timeout / malformed config or body → ( 0, False )
+        - Returns ( count, ok, breakdown ): ok True iff the store answered
+          cleanly; count is the server-computed owed-row count (0 when not ok);
+          breakdown is { status: count } over that same set (c191be39), or {}
+          when the server omitted it — see _synthesize_owed_items for how an
+          empty breakdown degrades
+        - store unreachable / timeout / malformed config or body → ( 0, False, {} )
           (§C fail-safe: the caller does NOT poke — never guess on a bad read)
-        - NEVER raises (degrade-safe IO shell — any error ⇒ ( 0, False ))
+        - NEVER raises (degrade-safe IO shell — any error ⇒ ( 0, False, {} ))
     """
     try:
         settings = load_task_store_settings()
@@ -1273,83 +1505,365 @@ def _owed_count_from_store( session_id ):
         # ("maria", "mr radio") instead of false-idling on a bare-.lower() miss.
         # Idempotent → safe whether the bridge holds the display or pool form.
         persona_key = canonical_persona_key( persona.get( "name" ) if isinstance( persona, dict ) else None ) or "unknown"
-        project  = resolve_project_name()
-        ok, count = query_owed( settings, api_key, persona_key, STORE_OWED_STATUSES, project=project )
+        # 🔴 NO PROJECT FILTER (Rick, 2026-07-27, found by going dark for half an hour).
+        #
+        # This used to pass `project=resolve_project_name()`. That encodes an assumption
+        # this fleet does not hold: ONE SESSION, ONE REPO. A seat sitting in
+        # planning-is-prompting resolves to "plan" while owning rows filed under "lupin"
+        # — which is not an edge case here, it is the normal shape of cross-repo work.
+        #
+        # MEASURED on the session that surfaced it:
+        #     query_owed( "maria", project="plan"  ) -> owed=0   {}
+        #     query_owed( "maria", project="lupin" ) -> owed=3   {queued: 3}
+        # Three workable P1/P2 rows, and the oracle reported an idle seat. No poke fired
+        # for ~30 minutes and nothing anywhere said a row had been filtered out.
+        #
+        # ⇒ ZERO IS THE WORST VALUE THIS FILTER CAN RETURN. A wrong project does not
+        # produce an error or a suspicious number — it produces "nothing owed", which is
+        # indistinguishable from a genuinely finished seat. Same class as `d23147e8`
+        # (a scoping parameter returning a clean, plausible, SMALLER count), landing on
+        # the one value that reads as healthy.
+        #
+        # A PERSONA'S OWED WORK IS THEIRS REGARDLESS OF WHICH REPO THE SEAT SITS IN.
+        # The owner filter is the correct and sufficient scope; the project filter was
+        # never narrowing a too-broad answer, it was hiding a correct one.
+        ok, count, breakdown, priority_breakdown = query_owed_breakdowns(
+            settings, api_key, persona_key )
+        return count, ok, breakdown, priority_breakdown
+    except Exception:
+        return 0, False, { }, { }
+
+
+def _user_chase_until_from_store( session_id, now_epoch ):
+    """
+    Resolve THIS session's per-USER gate-deferral instant from the store (be56bff8).
+
+    The soonest FUTURE next_chase_ts among this owner's blocked_by:[{kind:user}]
+    rows — the deferral a seat actually causes via task_transition(blocked). While
+    it is in the future, is_user_deferred suppresses this session's hold-file gates
+    (pokeable/due/aged), so a gate deferred in the STORE stops re-asking a user the
+    seat just proved unreachable — WITHOUT any key linking the two representations.
+
+    Requires:
+        - session_id is the resolved stable session id string
+        - now_epoch is the caller's injected "now" (POSIX seconds)
+
+    Ensures:
+        - Returns the minimum future user-chase epoch (float), or None when the
+          store has no such row
+        - §C FAIL-SAFE toward LIVENESS: a store outage / bad read → None (do NOT
+          suppress). Suppressing on an unknown read could silently bury an open user
+          decision; a store outage is transient and the storm it resumes is bounded.
+        - Routes the persona through the SAME canonical key as the owed-count read
+        - NEVER raises
+    """
+    try:
+        settings    = load_task_store_settings()
+        api_key     = read_api_key()
+        persona     = get_voice_persona( session_id )
+        persona_key = canonical_persona_key( persona.get( "name" ) if isinstance( persona, dict ) else None ) or "unknown"
+        ok, rows = query_blocked_user_rows( settings, api_key, persona_key )
+        if not ok:
+            return None
+        return heartbeat_user_gates.derive_user_chase_until( rows, now_epoch )
+    except Exception:
+        return None
+
+
+# The store's owed statuses, mapped onto the oracle's TODO vocabulary (c191be39).
+#
+# `parked` maps to PENDING (Rick's ruling, plan §4.3a): an admitted parked row has
+# provably EXPIRED — park-active rows never survive owed admission — so it is owed
+# and workable, but it is neither in_progress nor pending in the oracle's native
+# vocabulary. It rides `pending` because that bucket already means "owned, not
+# begun", which is the closest true statement available.
+#
+# ACCEPTED COST, named so nobody rediscovers it as a defect: a reader cannot
+# distinguish a never-started row from a rejoined one without opening it. Option
+# (b), restoring the pre-park status, is NOT AVAILABLE — verified 2026-07-20,
+# there is no pre-park status column (only park_reason + park_reason_captured_at);
+# recovering it would mean walking task_events per row, i.e. a per-row join on an
+# endpoint built as one cheap COUNT(*) that fires every turn.
+STORE_STATUS_TO_TODO_STATUS = {
+    "in_progress" : TODO_IN_PROGRESS,
+    "queued"      : TODO_PENDING,
+    "parked"      : TODO_PENDING,
+}
+
+
+def _synthesize_owed_items( count, breakdown=None ):
+    """
+    Build a `todo_items` list of synthetic owed entries CARRYING THEIR REAL STATUS.
+
+    The store-count seam yields a COUNT, but evaluate_work_owed consumes a LIST of
+    owned dicts. Synthesize them in the SAME shape owed_items_from_state emits
+    ({ status, owned_by_me }) so the verdict, the oracle log's owed_items length,
+    the §4 poke abstract, and total_owed all read the store transparently.
+
+    🔴 THIS FUNCTION WAS THE DEFECT (c191be39, fixed 2026-07-20). It took only a
+    count and stamped EVERY synthesized item TODO_IN_PROGRESS, so a session owning
+    16 `queued` rows was told it owned "16 in-progress TODO item(s)". Two
+    consequences, the second invisible: every queued row misreported, AND the
+    oracle's `todo_unstarted` signal became unreachable dead code, because nothing
+    could ever arrive carrying TODO_PENDING.
+
+    The status is NOT re-derived here. It is carried from the server's GROUP BY
+    over the same admitted set — the pure oracle (heartbeat_work_owed.py:203-206)
+    already partitions on real status and already emits two distinct signals. It
+    needed correct input, not new vocabulary; it is UNMODIFIED by this fix.
+
+    Requires:
+        - count is a non-negative int
+        - breakdown is { store_status: count } or None/{} (server omitted it)
+
+    Ensures:
+        - With a breakdown: returns one item per counted row, each stamped its
+          MAPPED todo status (queued/parked → pending, in_progress → in_progress).
+          Total length is sum( breakdown.values() ) — the server's own partition.
+        - An UNKNOWN store status (one this map does not name) falls back to
+          TODO_IN_PROGRESS and is still COUNTED. Deliberate: a new status must
+          never silently vanish from the owed list. Over-reporting its urgency is
+          recoverable; dropping it is a session that goes quiet while owing work.
+        - Without a breakdown ({} / None — server omitted or malformed): degrades
+          EXACTLY to the pre-fix shape, `count` items stamped in_progress. The
+          count still governs the poke; only its status detail is coarse.
+        - count 0 with an empty breakdown → [] (genuinely no owed work)
+    """
+    if not breakdown:
+        return [ { "status": TODO_IN_PROGRESS, "owned_by_me": True } for _ in range( count ) ]
+
+    items = [ ]
+    for store_status, status_count in breakdown.items():
+        todo_status = STORE_STATUS_TO_TODO_STATUS.get( store_status, TODO_IN_PROGRESS )
+        items.extend( { "status": todo_status, "owned_by_me": True } for _ in range( status_count ) )
+    return items
+
+
+# Proactive-manager mechanism (fcb5dbc0, Lane A1) — the spawn-cap default that
+# bounds Face A's idle-crew-capacity test (INI `cc session spawn max reviewers`).
+DEFAULT_SPAWN_CAP = 8
+
+
+def _backlog_count_from_store( session_id ):
+    """
+    Resolve THIS manager's BACKLOG count from the store (Face A, A1) — the owed
+    items it is ACCOUNTABLE for (queued + in_progress), via accountable_manager.
+
+    The Face A backlog source (design: task_query(accountable_manager=me, status
+    in queued/in_progress)). Distinct from _owed_count_from_store (which counts the
+    session's OWN owner_persona rows): a manager's spin-up decision keys on the
+    chase-list it is accountable for, not its own hands-on work. Querying by
+    accountable_manager=me ALSO inherently gates manager-scope — a non-manager has
+    ~zero rows accountable to itself, so Face A never nudges a plain worker.
+
+    Requires:
+        - session_id is the resolved stable session id string
+
+    Ensures:
+        - Returns ( count, ok ): ok True iff the store answered cleanly; count is
+          the summed queued+in_progress count accountable to this persona (0 when
+          not ok)
+        - store unreachable / timeout / malformed → ( 0, False ) (§C fail-safe:
+          Face A does NOT nudge on a bad read — never guess)
+        - NEVER raises (degrade-safe IO shell)
+    """
+    try:
+        settings    = load_task_store_settings()
+        api_key     = read_api_key()
+        persona     = get_voice_persona( session_id )
+        persona_key = canonical_persona_key( persona.get( "name" ) if isinstance( persona, dict ) else None ) or "unknown"
+        project     = resolve_project_name()
+        # The breakdown is DISCARDED here on purpose: Face A keys on the SIZE of
+        # the chase-list, not its status mix. Unpacked rather than sliced so a
+        # future arity change fails loudly at this line instead of silently
+        # rebinding `count` to a dict.
+        ok, count, _breakdown = query_owed( settings, api_key, persona_key,
+                                            project=project, owner_field="accountable_manager" )
         return count, ok
     except Exception:
         return 0, False
 
 
-def _synthesize_owed_items( count ):
+def _has_idle_crew_capacity( delegations, cap ):
     """
-    Build a `todo_items` list of `count` synthetic owed entries for the oracle.
+    Does this manager have room to spawn another worker under the fleet cap?
 
-    The store-count seam yields a COUNT, but evaluate_work_owed consumes a LIST
-    of owned/in_progress dicts. Synthesize `count` owed items in the SAME shape
-    owed_items_from_state emits ({ status, owned_by_me }) so the verdict, the
-    oracle log's owed_items length, the §4 poke abstract, and total_owed all read
-    the store count transparently — no other call site changes.
+    Face A's "idle crew capacity" predicate (pure): the count of this manager's
+    LIVE delegated workers is below the spawn cap. A manager already at the cap
+    has no idle capacity ⇒ never nudged to spin up more (the nudge would be a
+    no-op it cannot act on).
 
     Requires:
-        - count is a non-negative int
+        - delegations is the gathered live-worker list (truthy ⇒ alive), or None
+        - cap is the spawn-concurrency cap (positive int)
 
     Ensures:
-        - Returns a list of length `count`, each
-          { "status": in_progress, "owned_by_me": True }
-        - count 0 → [] (genuinely no owed work)
+        - Returns True iff len( live workers ) < cap; never raises
     """
-    return [ { "status": TODO_IN_PROGRESS, "owned_by_me": True } for _ in range( count ) ]
+    live = len( [ d for d in ( delegations or [ ] ) if d ] )
+    return live < cap
 
 
-def _run_heartbeat( session_id, transcript_path, cwd=None ):
+def _resolve_proactive_manager_config():
     """
-    Branch-C heartbeat self-poke adapter (thin; composes the pure leaf modules).
+    Read the proactive-manager Face A / Face B knobs from lupin-app.ini (A1).
 
-    The §0 5-step decision logic lives entirely in the pure, 100%-covered leaf
-    modules (heartbeat_hold / heartbeat_work_owed / heartbeat_poke_cap /
-    heartbeat_decision). This adapter is ONLY the side-effecting shell: read the
-    hold + poke count + live work-owed verdict, call decide_heartbeat, apply the
-    increment / cap-FYI / emit side effects it signals, and return the block
-    dict to emit when (and only when) the heartbeat owns this stop.
+    Mirrors _resolve_idle_behavior: ConfigurationManager under redirect_stdout
+    (its banners would corrupt the hook's stdout JSON protocol channel), fail-safe
+    to the module defaults on ANY error / missing key / non-positive-int value.
 
-    **v2 scope (Task* live oracle — §0.3, corrected TodoWrite→Task*):** the
-    work-owed verdict comes from the session's OWN Task* state, replayed from
-    its transcript (`transcript_path`). So v2 ALSO catches the FM-19
-    undeclared-lazy-stop case: a session with NO hold that stops with owed Task*
-    work (in_progress / pending) is poked. v1 behavior is preserved — a fresh
-    reasoned hold is still honored; the hold's self-declared work_owed still
-    wins over the oracle (decide_heartbeat order). `owned_by_me` is TRUE by
-    construction (the Task* calls live in THIS session's transcript). The
-    transcript read is `:7999`-free and never a dependency of the poke (the
-    reader never raises; a missing/empty transcript ⇒ no owed work ⇒
-    conservative).
+    Ensures:
+        - Returns a dict { spinup_threshold_s, surface_threshold_s,
+          spinup_backlog_min, spawn_cap } of positive ints
+        - any unreadable / non-positive key falls back to its default
+          (SPINUP_CHECK_DEBOUNCE_SECONDS / SURFACE_QUESTIONS_DEBOUNCE_SECONDS /
+          SPINUP_BACKLOG_MIN_N / DEFAULT_SPAWN_CAP)
+        - never raises; never writes to stdout
+    """
+    import contextlib
+    import io
 
-    Gated by ~/.claude/settings.json ["heartbeat"]["enabled"] (DEFAULT False).
-    A malformed config (ValueError from the loader) fails SAFE → disabled.
+    defaults = {
+        "spinup_threshold_s"  : SPINUP_CHECK_DEBOUNCE_SECONDS,
+        "surface_threshold_s" : SURFACE_QUESTIONS_DEBOUNCE_SECONDS,
+        "spinup_backlog_min"  : SPINUP_BACKLOG_MIN_N,
+        "spawn_cap"           : DEFAULT_SPAWN_CAP,
+    }
+    keys = {
+        "spinup_threshold_s"  : "stop hook spinup check threshold seconds",
+        "surface_threshold_s" : "stop hook surface questions threshold seconds",
+        "spinup_backlog_min"  : "stop hook spinup backlog min",
+        "spawn_cap"           : "cc session spawn max reviewers",
+    }
+    try:
+        with contextlib.redirect_stdout( io.StringIO() ):
+            mgr = ConfigurationManager(
+                env_var_name  = "LUPIN_CONFIG_MGR_CLI_ARGS",
+                silent        = True,
+                mute_splainer = True,
+            )
+            out = { }
+            for field, ini_key in keys.items():
+                out[ field ] = _positive_int_or_default(
+                    mgr.get( ini_key, default=defaults[ field ], silent=True ), defaults[ field ] )
+        return out
+    except Exception:
+        return dict( defaults )
+
+
+def _positive_int_or_default( value, default ):
+    """
+    Coerce a config value to a positive int, else return `default` (pure).
+
+    Bool is an int subclass — rejected so a stray True/False never slips through
+    as 1/0. A string of digits is accepted (INI values arrive as strings).
+
+    Ensures:
+        - Returns int( value ) when it is (or parses to) a positive int
+        - Returns default on None / bool / non-positive / unparseable; never raises
+    """
+    if isinstance( value, bool ):
+        return default
+    try:
+        ivalue = int( value )
+    except ( TypeError, ValueError ):
+        return default
+    return ivalue if ivalue > 0 else default
+
+
+def _empty_owed_state( config_error, enabled, poke_muted=False, mute_message="", mute_poke_cap=None ):
+    """
+    The fail-safe owed-state bundle for the short-circuit paths (malformed config
+    or heartbeat-disabled) where _resolve_owed_state returns BEFORE doing any hold
+    read / transcript replay / store query — preserving the "no reads when
+    disabled" contract the Stop-hook tests pin. owed=False / owed_unknown=False /
+    total_owed=0 ⇒ the idle consumers render a plain "Momentarily idle." (the
+    legacy behavior on a disabled or misconfigured heartbeat).
+
+    poke_muted / mute_message carry the runtime mute switch (heartbeat.
+    poke_output_enabled = false): the obligations lookup is skipped exactly like
+    the disabled path, but _run_heartbeat still emits mute_message in the poke's
+    place when that text is non-empty.
+    """
+    return {
+        "config_error"       : config_error,
+        "enabled"            : enabled,
+        "poke_muted"         : poke_muted,
+        "mute_message"       : mute_message,
+        "mute_poke_cap"      : mute_poke_cap,
+        "outcome"            : None,
+        "owed"               : False,
+        # ⚠️ MUTED ⇒ owed_unknown TRUE, and this is the whole point of the line.
+        # Two of the three mute outcomes (full silence, and cap-reached) return
+        # None from _run_heartbeat, so main() falls through to the idle-announce.
+        # The mute short-circuits BEFORE the hold read, the transcript replay and
+        # the store query — by design — so owed=False here is not a measurement,
+        # it is a default standing in for a lookup that never ran. Reported as
+        # owed_unknown=False it becomes "Heartbeat: idle — nothing owed." on the
+        # operator's card: the exact UNKNOWN-as-NOT-OWED conflation _announce_idle
+        # was written to kill after the :7999 outage whole-fleet false-idle.
+        # Muting must buy SILENCE, never a false all-clear.
+        # (config_error / heartbeat-disabled keep the legacy False — those are
+        # long-standing contracts the Stop-hook tests pin, and neither is a
+        # switch an operator flips across a live fleet expecting quiet.)
+        "owed_unknown"       : bool( poke_muted ),
+        "total_owed"         : 0,
+        "result"             : None,
+        "verdict"            : None,
+        "settings"           : None,
+        "hold"               : None,
+        "poke_count"         : 0,
+        "task_state"         : { },
+        "owed_items"         : [ ],
+        "delegations"        : [ ],
+        "open_inbound"       : [ ],
+        "stale_inbound"      : [ ],
+        "needs_verification" : False,
+        "open_gates"         : [ ],
+        "due_gates"          : [ ],
+    }
+
+
+def _resolve_owed_state( session_id, transcript_path=None, cwd=None ):
+    """
+    The single canonical, HOLD-AWARE owed-work verdict — shared by the Stop-hook
+    self-poke (_run_heartbeat) AND the two idle consumers (the Stop idle-announce
+    gating + the Notification idle-beacon) so they never disagree on whether a
+    session is idle (bug aa403e03).
+
+    Before this extraction the consumers computed "owed" DIFFERENTLY: the Stop hook
+    ran the full oracle through decide_heartbeat (honoring the .heartbeat-hold,
+    poke-count and the 6929f4ac obligation overrides), while the idle-beacon read
+    _owed_count_from_store ALONE (raw store count, hold-blind). A held / blocked /
+    hold-suppressed store row therefore read 0-owed on the Stop path but N-owed on
+    the beacon ("Momentarily idle." vs "Idle, but N owed" within ~60s). Routing
+    BOTH through this one verdict kills the class of bug.
 
     Requires:
-        - session_id is a string
-        - transcript_path is the Stop-hook payload's transcript_path (str/None)
-        - called DOWNSTREAM of the stop_hook_active loop guard, and ONLY when
-          no voice input is pending — Branch C's no-voice_ctx path, or the §3
-          speakerphone branch behind its _has_pending_voice peek. Voice always
-          wins; never poke on a re-fire
+        - session_id is the resolved stable session id
+        - transcript_path is the Stop-payload transcript_path, or None (the beacon
+          may not carry it — the store owed-source needs neither it nor the replay)
+        - cwd is the Stop-payload cwd, or None (forwarded to read_hold_resilient so
+          a hold written under the session's worktree cwd is found — bug 1789f197)
 
     Ensures:
-        - Returns a ( hook_output, owed_unknown ) tuple.
-        - hook_output is {"decision":"block","reason": …} ONLY when the heartbeat
-          pokes (OUTCOME_POKE) — the caller emits it and skips the idle path;
-          else None on disabled / malformed config / honored hold / nothing
-          owed / cap reached — the caller falls through to the existing
-          idle-waiter / "Anything else?" path UNCHANGED.
-        - owed_unknown is True iff the store-owed source was ON and the store
-          read FAILED (count is unknowable) — the caller's idle beacon then
-          renders "owed status unknown" instead of "nothing owed". False on the
-          transcript-replay path and on every determinate store answer.
-        - Applies the counter increment (on poke) + cap FYI (at cap) +
-          fire-and-forget event emission side effects
-        - On a poke, ALSO fires the §4 low-pri breadcrumb to the user's card
-          (_announce_poke — failsafe, never blocks the poke)
+        - Returns a bundle dict carrying both the idle-consumer view AND every local
+          the _run_heartbeat side-effect tail needs: { config_error, enabled,
+          outcome, owed, owed_unknown, total_owed, result, verdict, settings, hold,
+          poke_count, task_state, owed_items, delegations, open_inbound,
+          stale_inbound, needs_verification, open_gates, due_gates }
+        - owed := outcome in { OUTCOME_POKE, OUTCOME_CAP_REACHED } — work IS owed
+          whether or not the poke-cap has halted the poking; HONORED / NOT_OWED ⇒
+          owed False. The hold-aware gate: a held in_progress row resolves to
+          HONORED ⇒ owed False on BOTH consumers.
+        - total_owed = owed_items + delegations + open_inbound (the SAME referent
+          count the §4 poke breadcrumb reports), so the beacon's "N owed" matches.
+        - owed_unknown True iff the store-owed source was ON and the store read
+          FAILED (UNKNOWN ≠ idle); the consumers then render a neutral message.
+        - SHORT-CIRCUITS to _empty_owed_state BEFORE any hold read / transcript
+          replay / store query on a malformed config (config_error) or a disabled
+          heartbeat (enabled False) — preserving the "no reads when disabled" Stop
+          contract. NEVER raises on well-formed input.
     """
     try:
         settings = load_heartbeat_settings()
@@ -1360,10 +1874,26 @@ def _run_heartbeat( session_id, transcript_path, cwd=None ):
             "session_id" : session_id,
             "error"      : str( e ),
         } )
-        return None, False
+        return _empty_owed_state( config_error=True, enabled=False )
 
     if not settings[ "enabled" ]:
-        return None, False
+        return _empty_owed_state( config_error=False, enabled=False )
+
+    # ── Runtime poke MUTE (Rick 2026-07-22) ────────────────────────────────────
+    # A settings.json switch that silences the poke WITHOUT disabling the
+    # heartbeat block, re-read on every Stop (fresh hook process ⇒ toggling
+    # mid-session takes effect on the very next Stop). Short-circuits BEFORE the
+    # hold read / transcript replay / store query — muted means the live-
+    # obligations lookup does not run at all, so a noisy or wrong board cannot
+    # distract the worker. The substitute text (possibly "") rides out for
+    # _run_heartbeat to emit in the poke's place.
+    # .get() keeps a settings dict minted before this key existed working as
+    # before (the loader always supplies it; only stubs can omit it).
+    if not settings.get( "poke_output_enabled", True ):
+        return _empty_owed_state( config_error=False, enabled=False,
+                                  poke_muted=True,
+                                  mute_message=settings.get( "poke_disabled_message", "" ),
+                                  mute_poke_cap=settings.get( "poke_cap", DEFAULT_POKE_CAP ) )
 
     # Resolve the hold resiliently across BOTH the session's OWN cwd (facet 3,
     # threaded from the Stop payload) AND the project root where write_hold
@@ -1371,6 +1901,18 @@ def _run_heartbeat( session_id, transcript_path, cwd=None ):
     # cwd is a git worktree wrote its hold under LUPIN_ROOT but the cwd-only read
     # missed it → relentless false re-pokes despite a fresh honored hold.
     hold       = read_hold_resilient( session_id, cwd=cwd )
+    # A hold whose ttl_seconds is absent/unusable can NEVER be fresh ⇒ never
+    # honored ⇒ this session gets poked anyway, silently, forever. Say so — ONCE
+    # per hold-version, to this session only, about its OWN file (the hook reads
+    # exactly one hold; the 40+ others are the JANITOR's glob and stay silent).
+    if should_warn_unusable_ttl( session_id, hold ):
+        log_to_stream( "stop", {}, extra={
+            "phase"      : "heartbeat_hold_ttl_unusable",
+            "session_id" : session_id,
+            "ttl_seconds": hold.get( "ttl_seconds" ),
+            "warning"    : ( "This hold declares no usable ttl_seconds — it is NOT honored and this "
+                             "session is being poked despite holding. Re-declare via write_hold." ),
+        } )
     poke_count = get_poke_count( session_id )
     # v2: REAL work-owed verdict from the session's own Task* state, replayed
     # from its transcript (§0.3). owned_by_me TRUE by construction; :7999-free;
@@ -1425,8 +1967,15 @@ def _run_heartbeat( session_id, transcript_path, cwd=None ):
     # the idle-announce beacon does NOT claim "nothing owed" during a store
     # outage (the poke is already suppressed by the §C fail-safe below).
     owed_unknown = False
+    # Bound UNCONDITIONALLY so the board-sweep gate below can read them on every path.
+    # `None` (not 0) is the honest "unknown": the transcript-replay path has no store
+    # count at all, and rendering that as 0 would tell a sweeping seat its board is
+    # clear on the strength of a source that was never consulted.
+    store_count     = None
+    store_ok        = False
+    store_priorities = { }
     if settings[ "owed_source_from_store" ]:
-        store_count, store_ok = _owed_count_from_store( session_id )
+        store_count, store_ok, store_breakdown, store_priorities = _owed_count_from_store( session_id )
         if not store_ok:
             log_to_stream( "stop", {}, extra={
                 "phase"      : "heartbeat_store_unreachable",
@@ -1435,15 +1984,242 @@ def _run_heartbeat( session_id, transcript_path, cwd=None ):
             owed_items   = [ ]
             owed_unknown = True
         else:
-            owed_items = _synthesize_owed_items( store_count )
+            owed_items = _synthesize_owed_items( store_count, store_breakdown )
     else:
         owed_items = owed_items_from_state( task_state )
+    # ── 6929f4ac receipts-of-progress — TWO new owed signals off the hold ──────
+    # Both are PURE predicates over the (already-read) hold + the delegations
+    # gathered above; no extra IO, no :7999 dependency, never raise.
+    #   (a) INWARD twin (§3-§5): a MANAGER owes a fresh worker-verification
+    #       receipt — workers OUT *and* its last look-in is stale (debounce, Rick
+    #       10 min). The worker-set itself gates manager-scope: a non-manager has
+    #       an empty manifest ⇒ no delegations ⇒ never a verification debt. The
+    #       agent CLEARS it by stamping last_looked_in_on_workers_ts when it
+    #       verifies (explicit v1; the poke reason instructs the stamp).
+    #   (b) OUTWARD twin (§9): any OPEN (unanswered) user-gate is owed work that
+    #       must be RE-SURFACED — keeps the session alive to re-ask Rick. The
+    #       Stop hook CANNOT call ask_* (SSE-blocking, 1s budget) — it only keeps
+    #       the session awake + NAMES the due gates in the poke; the AGENT
+    #       re-fires the ask_* + stamps last_asked_ts (per the §9.1 doctrine).
+    #       Parallel to outstanding_delegation: ANY open gate ⇒ owed (design §9.2).
+    now_epoch          = time.time()
+    last_look_in_ts    = get_last_looked_in_ts( hold )
+    needs_verification = manager_needs_verification(
+        delegations, last_look_in_ts, now_epoch,
+        threshold_seconds = settings[ "verification_threshold_seconds" ] )
+    user_gates    = get_pending_user_gates( hold )
+    open_gates    = heartbeat_user_gates.open_gates( user_gates )      # every not-answered gate (tracked; arbiter aged-backstop set)
+    # be56bff8 per-USER deferral: a gate the seat deferred in the STORE
+    # (task_transition -> blocked + future next_chase_ts — the deferral verb a seat
+    # actually has) must go quiet, but the hold-file row it never touched has no own
+    # chase to strip. So derive the per-user chase from the store and suppress ALL of
+    # this session's gates while the user is deferred. ONLY queried when there ARE
+    # open gates (the common zero-gate Stop pays no round-trip); fail-safe to None
+    # (no suppression) on a bad read so a store outage never buries an open decision.
+    user_chase_until = _user_chase_until_from_store( session_id, now_epoch ) if open_gates else None
+    # bug 75f392c0 relief valve: a gate deferred to a FUTURE scheduled chase (an
+    # offline user with a next_chase_ts) or one that spent its re-ask budget with
+    # no chase scheduled is NOT eligible to poke this Stop — pokeable_gates strips
+    # those out. due_gates already filters through it (re-ask cadence on top); Face
+    # B's re-surface debounce below is fed pokeable so a deferred gate never
+    # re-triggers the surface either. open_gates stays the tracked/observability set.
+    pokeable_gates = heartbeat_user_gates.pokeable_gates( user_gates, now_epoch, user_chase_until )  # relief-valve-eligible
+    due_gates     = heartbeat_user_gates.due_gates( user_gates, now_epoch, user_chase_until )  # re-ask NOW (poke detail)
+    # ── Proactive-manager mechanism (fcb5dbc0, A1) — TWO new debounced signals ──
+    # Both ride the SAME pure-debounce shape as the 6929f4ac inward twin, gated on
+    # the per-manager stamps in the hold (survive /clear). Config (per-face
+    # thresholds + backlog floor + spawn cap) is INI-resolved once per Stop;
+    # fail-safe to defaults. Both gatherers are degrade-safe — a store outage / a
+    # parked non-manager simply never fires the signal (never a false poke).
+    #   Face A (item 11): backlog this manager is ACCOUNTABLE for >= floor AND idle
+    #     crew capacity AND the spin-up-check debounce elapsed → NUDGE "spin up a
+    #     crew" (the manager decides + acts of its own accord). The store read is
+    #     fail-safe: on a not-ok read Face A stays silent (never guess).
+    #   Face B (item 1): >=1 open operator gate AND the per-manager re-surface
+    #     debounce elapsed → re-fire the operator-gate asks (one debounce, D3).
+    pm_config          = _resolve_proactive_manager_config()
+    last_spinup_ts     = get_last_spinup_check_ts( hold )
+    last_surfaced_ts   = get_last_surfaced_questions_ts( hold )
+    backlog_count, backlog_ok = _backlog_count_from_store( session_id )
+    needs_spinup_check = backlog_ok and manager_needs_spinup_check(
+        backlog_count,
+        _has_idle_crew_capacity( delegations, pm_config[ "spawn_cap" ] ),
+        last_spinup_ts, now_epoch,
+        threshold_seconds = pm_config[ "spinup_threshold_s" ],
+        backlog_min_n     = pm_config[ "spinup_backlog_min" ] )
+    needs_question_surface = manager_needs_question_surface(
+        pokeable_gates, last_surfaced_ts, now_epoch,   # 75f392c0: deferred/capped gates don't re-surface
+        threshold_seconds = pm_config[ "surface_threshold_s" ] )
+    # Relief-valve observability (75f392c0): greppable count of gates suppressed
+    # this Stop (open but not pokeable — deferred to a future chase or budget-spent)
+    # so the "why isn't it re-asking?" question is answerable from the log stream.
+    _deferred_gate_count = len( open_gates ) - len( pokeable_gates )
+    if _deferred_gate_count:
+        log_to_stream( "stop", {}, extra={
+            "phase"                : "heartbeat_gate_relief_valve",
+            "session_id"           : session_id,
+            "open_user_gates"      : len( open_gates ),
+            "pokeable_user_gates"  : len( pokeable_gates ),
+            "deferred_user_gates"  : _deferred_gate_count,
+        } )
+    # One line carrying total + status split + priority split, replacing the two
+    # count sentences. Empty on the transcript-replay path (no store breakdown),
+    # where evaluate_work_owed falls back to its own wording.
+    owed_summary = format_owed_summary( store_breakdown, store_priorities ) if store_ok else ""
     verdict    = evaluate_work_owed(
         todo_items                   = owed_items,
         unanswered_inbound_questions = open_inbound,
         outstanding_delegations      = delegations,
+        needs_verification           = needs_verification,
+        open_user_gates              = due_gates,   # bug d0d7f068: the obligation-OVERRIDE + poke key on DUE gates (reask-interval elapsed), NOT any-open — an open-but-not-due gate stays tracked in the hold (still "not answered") but must NOT poke through an honored hold every Stop. Its re-ask cadence IS reask_interval_s; the row's existence, not per-Stop poking, is the not-done tracker. (open_gates still logged below for observability.)
+        needs_question_surface       = needs_question_surface,
+        needs_spinup_check           = needs_spinup_check,
+        owed_summary                 = owed_summary,
     )
-    result     = decide_heartbeat( hold, verdict, poke_count, settings[ "poke_cap" ] )
+    # Role-selected north-star goal echo (role-goals Phase 2-3) — APPENDED to the
+    # poke reason so the session re-anchors on its goal every tick. Role comes from
+    # the bridge (spawned workers stamp it at spawn); a declared fleet-roster
+    # manager is detected via _is_manager_persona so it gets the Manager line at
+    # its OWN self-poke too; otherwise the role-agnostic fallback (D2). The config
+    # read (runtime-tunable) lives here in the IO shell; decide_heartbeat only
+    # appends the injected string. Degrade-safe: "" ⇒ pre-role-goals reason.
+    try:
+        _bridge_role = get_session_metadata().get( "role" )
+    except Exception:
+        _bridge_role = None
+    goal_line  = _heartbeat_goal_line( session_id, _bridge_role )
+    # Rick's 2026-07-25 board-sweep gate. PERSONA-scoped, not role-scoped: both sweeping
+    # seats resolve to `worker`, so the role goal line above physically cannot say "22" to
+    # one and "71" to the other. Silent for every seat with no ledger — i.e. everyone not
+    # sweeping — and LOUD (never "") when a ledger exists but cannot be read.
+    # store_count is the live owed count fetched ~100 lines above for the oracle;
+    # None (not 0) when the store could not be read, so the COMPLETE arm says
+    # UNKNOWN instead of rendering a store outage as a clear board.
+    _live_owed = store_count if ( settings[ "owed_source_from_store" ] and store_ok ) else None
+    sweep_line = _board_sweep_line( session_id, live_owed=_live_owed )
+
+    # Row 505e5c12 — the standing tick for `memento_io.py verify`, which had no caller
+    # and had not run in 6d14h while a bare slot (a live data-loss window) sat waiting.
+    # Self-throttled to once a day by its own ledger, so this call is a cheap no-op on
+    # all but one tick; it REPORTS and never repairs. Appended to the sweep line rather
+    # than given its own channel because both are "before you stop, look at this".
+    # It cannot raise — every path inside returns a string.
+    memento_line = verify_tick_line()
+    if memento_line:
+        sweep_line = f"{sweep_line}\n{memento_line}" if sweep_line else memento_line
+
+    result     = decide_heartbeat( hold, verdict, poke_count, settings[ "poke_cap" ],
+                                   goal_line=goal_line, sweep_line=sweep_line )
+
+    return {
+        "config_error"       : False,
+        "enabled"            : True,
+        "poke_muted"         : False,
+        "mute_message"       : "",
+        "mute_poke_cap"      : None,
+        "outcome"            : result[ "outcome" ],
+        "owed"               : result[ "outcome" ] in ( OUTCOME_POKE, OUTCOME_CAP_REACHED ),
+        "owed_unknown"       : owed_unknown,
+        "total_owed"         : len( owed_items ) + len( delegations ) + len( open_inbound ),
+        "result"             : result,
+        "verdict"            : verdict,
+        "settings"           : settings,
+        "hold"               : hold,
+        "poke_count"         : poke_count,
+        "task_state"         : task_state,
+        "owed_items"         : owed_items,
+        "delegations"        : delegations,
+        "open_inbound"       : open_inbound,
+        "stale_inbound"      : stale_inbound,
+        "needs_verification" : needs_verification,
+        "open_gates"         : open_gates,
+        "due_gates"          : due_gates,
+    }
+
+
+def _run_heartbeat( session_id, transcript_path, cwd=None, state=None ):
+    """
+    Branch-C heartbeat self-poke adapter — the side-effecting shell around
+    _resolve_owed_state (bug aa403e03 extraction). Resolves the shared HOLD-AWARE
+    owed verdict, then applies ONLY the poke side-effects (increment / cap-FYI /
+    emit_outcome / genuine-idle beacon / §4 breadcrumb + tmux poke-inject) and
+    returns the ( hook_output, owed_unknown ) tuple.
+
+    `state` is an OPTIONAL pre-resolved _resolve_owed_state bundle: when main()
+    has already resolved the verdict for the idle-announce (so the Stop poke and
+    the idle-beacon share ONE computation), it threads that bundle in; when None
+    (the default, and how the tests call it) the verdict is resolved internally —
+    behavior is identical either way.
+
+    Behavior is byte-identical to the pre-extraction adapter: hook_output is the
+    {"decision":"block","reason": …} dict ONLY on OUTCOME_POKE (the caller emits it
+    and skips the idle path); else None on disabled / malformed / honored / not-owed
+    / cap-reached. owed_unknown rides the store-unreachable §C fail-safe so the
+    caller's idle beacon renders "owed status unknown" rather than "nothing owed".
+
+    Requires:
+        - transcript_path is the Stop-hook payload's transcript_path (str/None)
+        - called DOWNSTREAM of the stop_hook_active loop guard, ONLY when no voice
+          input is pending (voice always wins; never poke on a re-fire)
+
+    Ensures:
+        - Returns ( hook_output, owed_unknown ); applies the increment (on poke) +
+          cap FYI (at cap) + fire-and-forget emit + §4 breadcrumb side effects
+        - Disabled / malformed config ⇒ ( None, False ) with NO reads (the bundle
+          short-circuits before any hold/transcript/store IO)
+    """
+    state = state if state is not None else _resolve_owed_state( session_id, transcript_path, cwd )
+    # Runtime mute (heartbeat.poke_output_enabled = false): the obligations
+    # lookup was skipped upstream. A NON-EMPTY substitute is delivered exactly
+    # like a real poke — block + tmux inject (Rick 2026-07-22: the block alone is
+    # silent re-prompt context on a stopped session; the keystroke is what makes
+    # the worker actually receive it) — plus the operator beacon carrying the
+    # same text verbatim, so Rick sees what the workers see. An empty/None
+    # substitute is the full-silence path: no output, no inject, no beacon.
+    if state.get( "poke_muted" ):
+        mute_message = state.get( "mute_message" ) or ""
+        # The substitute is a POKE and is budgeted like one. Without the cap the
+        # inject re-fired every Stop forever: it creates a new turn, that turn
+        # ends in a Stop, which injects again — nobody typing, no bound (observed
+        # live 2026-07-22, two self-turns before it was caught). The cap file is
+        # shared with the real poke and is reopened only by genuine user typing,
+        # which is why the injected text carries MUTE_PROMPT_SENTINEL: without
+        # that marker UserPromptSubmit reads the substitute as user
+        # re-engagement and resets the very budget meant to bound it (c121037b).
+        poke_count = get_poke_count( session_id )
+        cap        = state.get( "mute_poke_cap" ) or DEFAULT_POKE_CAP
+        capped     = poke_count >= cap
+        log_to_stream( "stop", {}, extra={
+            "phase"       : "heartbeat_poke_muted",
+            "session_id"  : session_id,
+            "has_message" : bool( mute_message ),
+            "poke_count"  : poke_count,
+            "cap"         : cap,
+            "capped"      : capped,
+        } )
+        if mute_message and not capped:
+            increment_poke_count( session_id )
+            persona = get_voice_persona( session_id )
+            _announce_muted( session_id, persona.get( "name" ) if persona else None, mute_message )
+            inject_qualifier_via_tmux( session_id,
+                                       f"{MUTE_PROMPT_SENTINEL} {mute_message}", wrap=False )
+            return build_stop_block( mute_message ), False
+        return None, False
+    if state[ "config_error" ] or not state[ "enabled" ]:
+        return None, False
+    settings           = state[ "settings" ]
+    hold               = state[ "hold" ]
+    task_state         = state[ "task_state" ]
+    owed_items         = state[ "owed_items" ]
+    delegations        = state[ "delegations" ]
+    open_inbound       = state[ "open_inbound" ]
+    stale_inbound      = state[ "stale_inbound" ]
+    owed_unknown       = state[ "owed_unknown" ]
+    needs_verification = state[ "needs_verification" ]
+    open_gates         = state[ "open_gates" ]
+    due_gates          = state[ "due_gates" ]
+    verdict            = state[ "verdict" ]
+    result             = state[ "result" ]
 
     if result[ "should_increment" ]:
         increment_poke_count( session_id )
@@ -1474,7 +2250,16 @@ def _run_heartbeat( session_id, transcript_path, cwd=None ):
         "owed_items"   : len( owed_items ),
         "delegations"  : len( delegations ),
         "open_inbound"  : len( open_inbound ),
-        "stale_inbound" : len( stale_inbound ),   # surfaced-for-review, not owed
+        # stale_inbound REMOVED from the oracle log (item 6fc8d78d, Tiberius
+        # 2026-07-07): María's watch measured it 0/12891 — never populated on
+        # production data, so it was pure noise in the greppable oracle stream. The
+        # underlying mechanism (partition_inbound_by_age + the "review, not owed"
+        # poke-abstract display) is a working, fully-tested feature and STAYS — it
+        # simply never triggers in prod because real inbound is handled/acked before
+        # it ages out. Only the dead LOG field is pruned, per her "prune or wire".
+        "needs_verification" : needs_verification,            # 6929f4ac inward twin
+        "open_user_gates"    : len( open_gates ),             # 6929f4ac outward twin (owed)
+        "due_user_gates"     : len( due_gates ),              # 6929f4ac outward twin (re-ask now)
         "poke_count"   : get_poke_count( session_id ),
         "cap"          : settings[ "poke_cap" ],
         "awaiting"     : ( hold.get( "awaiting" ) if hold else None ),
@@ -1608,9 +2393,13 @@ def main():
         #
         # Branch-C invariant (voice always wins): peek at the voice buffer
         # WITHOUT draining — pending voice ⇒ no poke, buffer left untouched.
-        owed_unknown = False
+        # bug aa403e03: resolve the shared hold-aware verdict ONCE and thread it
+        # into BOTH the poke decision and the idle-announce, so the Stop hook and
+        # the Notification idle-beacon never disagree on owed-vs-idle.
+        idle_state = None
         if not _has_pending_voice( session_id ):
-            heartbeat_output, owed_unknown = _run_heartbeat( session_id, payload.get( "transcript_path" ), payload.get( "cwd" ) )
+            idle_state = _resolve_owed_state( session_id, payload.get( "transcript_path" ), payload.get( "cwd" ) )
+            heartbeat_output, _ = _run_heartbeat( session_id, payload.get( "transcript_path" ), payload.get( "cwd" ), state=idle_state )
             if heartbeat_output is not None:
                 log_to_stream( "stop", {}, extra={
                     "phase"      : "speakerphone_poke",
@@ -1645,7 +2434,11 @@ def main():
         if _stop_hook_idle_behavior() == "idle_announce":
             persona      = get_voice_persona( session_id )
             persona_name = persona.get( "name" ) if persona else None
-            _announce_idle( session_id, persona_name, owed_unknown=owed_unknown )
+            _announce_idle( session_id, persona_name,
+                            owed_unknown = idle_state[ "owed_unknown" ],
+                            owed         = idle_state[ "owed" ],
+                            total_owed   = idle_state[ "total_owed" ],
+                            muted        = idle_state.get( "poke_muted", False ) )
 
         # Speakerphone/chorus sessions skip ONLY the blocking "Anything else?"
         # prompt path below (it would interrupt the user's live voice
@@ -1691,7 +2484,10 @@ def main():
         # fall through to the existing idle-waiter / "Anything else?" path.
         # transcript_path (Stop payload) feeds the v2 Task*-replay work-owed oracle.
         # cwd (Stop payload) resolves the per-session hold base (c121037b facet 3).
-        heartbeat_output, owed_unknown = _run_heartbeat( session_id, payload.get( "transcript_path" ), payload.get( "cwd" ) )
+        # bug aa403e03: resolve the shared hold-aware verdict ONCE and thread it into
+        # BOTH the poke decision and the idle-announce (consistency with the beacon).
+        idle_state = _resolve_owed_state( session_id, payload.get( "transcript_path" ), payload.get( "cwd" ) )
+        heartbeat_output, _ = _run_heartbeat( session_id, payload.get( "transcript_path" ), payload.get( "cwd" ), state=idle_state )
         if heartbeat_output is not None:
             emit_json( heartbeat_output )
             return
@@ -1730,7 +2526,11 @@ def main():
         elif idle_behavior == "idle_announce":
             persona      = get_voice_persona( session_id )
             persona_name = persona.get( "name" ) if persona else None
-            _announce_idle( session_id, persona_name, owed_unknown=owed_unknown )
+            _announce_idle( session_id, persona_name,
+                            owed_unknown = idle_state[ "owed_unknown" ],
+                            owed         = idle_state[ "owed" ],
+                            total_owed   = idle_state[ "total_owed" ],
+                            muted        = idle_state.get( "poke_muted", False ) )
             emit_json( {} )  # allow stop — v2.1 owns liveness; this is a courtesy ping
         else:   # "none": silent allow-stop
             emit_json( {} )

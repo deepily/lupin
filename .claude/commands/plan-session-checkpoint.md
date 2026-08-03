@@ -1,8 +1,12 @@
 # Session Checkpoint - Mid-Session Commit
 
-**Project**: LUPIN
+**Project**: Lupin
 **Prefix**: [LUPIN]
 **Version**: 1.0
+
+---
+
+> **⚠️ Note**: This command's canonical workflow uses cosa-voice notifications. In conversation mode (`get_session_info().conversation_mode_active=true`), the commit-approval gate is voice-driven; the **TTS Brevity Mandate** applies — speak the 1-line commit subject only, full body and file list stay in `abstract` and the terminal reply. See `workflow/cosa-voice-integration.md` §Conversation Mode for full rules.
 
 ---
 
@@ -37,7 +41,7 @@
    - Do NOT proceed without these parameters
 
 2. **MUST read the canonical workflow document**:
-   - Location: planning-is-prompting -> workflow/session-checkpoint.md
+   - Location: planning-is-prompting → workflow/session-checkpoint.md
    - This is the ONLY authoritative source for ALL checkpoint steps
    - Do NOT proceed without reading this document in full
 

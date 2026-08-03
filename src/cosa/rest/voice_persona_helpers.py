@@ -34,7 +34,7 @@ from typing    import List, Optional, Set, Dict, Any
 # manager_resolver 2026-06-11); import-time-safe — commons_persona_matcher
 # pulls only re+typing, and cosa→lupin_mcp imports are precedented
 # (e.g. cosa/rest/routers/commons.py).
-from lupin_mcp.commons_persona_matcher import _normalize_for_match
+from lupin_mcp.persona_normalization import canonical_persona_key
 
 
 PoolPersona = Dict[ str, Any ]
@@ -611,14 +611,19 @@ def _find_persona_in_pool( pool: List[ PoolPersona ], requested_name: str ) -> O
     if not requested_name:
         return None
 
-    needle = requested_name.strip().lower()
+    # Identity parity (Phase 2): match a persona reference to pool entries by the
+    # one canonical key, so an accented/punctuated request ("María", "Mr. Radio")
+    # resolves to the same pool entry as its pool-key form ("maria", "mr radio").
+    # All compare sides moved in lockstep; the pool-key and display-name branches
+    # both collapse onto the canonical key.
+    needle = canonical_persona_key( requested_name )
     if not needle:
         return None
 
     for entry in pool:
-        if entry[ "name" ].lower() == needle:
+        if canonical_persona_key( entry[ "name" ] ) == needle:
             return entry
-        if display_name_for( entry[ "name" ] ).lower() == needle:
+        if canonical_persona_key( display_name_for( entry[ "name" ] ) ) == needle:
             return entry
     return None
 
@@ -816,9 +821,12 @@ def parse_declared_managers( raw ) -> List[ str ]:
         stripped = item.strip()
         if not stripped or stripped == "*":
             continue
-        # F-B: dedup key is normalize-keyed ("Tiberius, Mr. Radio, mr radio"
-        # declares TWO managers, not three); the emitted name stays verbatim.
-        key = _normalize_for_match( stripped )
+        # F-B: dedup key is the canonical identity key ("Tiberius, Mr. Radio,
+        # mr radio" declares TWO managers, not three); the emitted name stays
+        # verbatim. canonical_persona_key keeps internal spaces but is symmetric
+        # on both sides, so "Mr. Radio"/"mr radio" still collapse to one entry
+        # ("mr radio") — dedup behavior preserved + store-key parity gained.
+        key = canonical_persona_key( stripped )
         if key in seen:
             continue
         seen.add( key )

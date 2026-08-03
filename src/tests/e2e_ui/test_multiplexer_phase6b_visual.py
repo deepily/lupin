@@ -133,12 +133,33 @@ _STABILIZE_COUNTDOWN_JS = """
 """
 
 
+# Pin the pending TTS card's `.message-time` cell to the frozen golden HH:MM so the
+# focus-mode snapshot is deterministic (task 02f99882). The held "Build finished"
+# card renders its time via ttsCardTime() → new Date( item.addedAt ), and addedAt is
+# stamped nowFn() (wall-clock) at enqueue in wireTtsIntent — IGNORING the injected
+# fixed ts. So the rendered HH:MM drifts every run (golden 01:45 vs a live capture
+# time) → a ~24px CONTIGUOUS timestamp diff that is NOT a font-race (fonts.ready
+# already fixed the glyph race) and NOT AA (a contiguous block, correctly rejected by
+# the content-shift comparator). Mirrors _STABILIZE_COUNTDOWN_JS above + the 6a
+# _STABILIZE_DOM_JS TIMING_PINS approach. Value = the frozen golden baseline; the pin
+# fires before EVERY capture (compare AND --update) so golden and actual always agree.
+_STABILIZE_TTS_CARD_TIME_JS = """
+() => {
+    const PIN = '01:45';
+    document.querySelectorAll( '#tts-pane .message-time' ).forEach( el => {
+        el.textContent = PIN;
+    } );
+    return true;
+}
+"""
+
+
 # ---------------------------------------------------------------------------
 # Visual regression — action-required interactive widgets
 # ---------------------------------------------------------------------------
 
 def test_multiplexer_phase6b_action_required_visual(
-    request, clean_test_db, assert_snapshot, logged_in_page,
+    request, clean_test_db, assert_snapshot_height_tolerant, logged_in_page,
 ):
     """
     Capture the Phase 6b action-required-section in its rendered baseline state.
@@ -151,7 +172,8 @@ def test_multiplexer_phase6b_action_required_visual(
     Requires:
         - Server running on `:8000` with Testing config
         - `logged_in_page` fixture (authenticated session)
-        - `assert_snapshot` fixture (pytest-playwright-visual-snapshot)
+        - `assert_snapshot_height_tolerant` fixture (bug 660d02b4 — ≤1px
+          height-tolerant; forgives the benign --update-vs-compare row-height flap)
         - `--update-snapshots` flag on first run to establish the baseline
 
     Ensures:
@@ -185,8 +207,19 @@ def test_multiplexer_phase6b_action_required_visual(
     # Brief settle window for layout repaint after stabilization.
     time.sleep( 0.2 )
 
+    # Height-tolerant compare (bug 660d02b4): forgives a benign ≤1px sub-pixel
+    # row-height rounding flap between --update-snapshots and a plain COMPARE,
+    # while staying strict on width + overlapping pixels. (A larger genuine
+    # height change — e.g. the 0a/0c section-header +57px — still fails until the
+    # baseline is legitimately re-captured.)
+    # Font-load barrier (task 006cb393 — emoji glyph-render race): await
+    # document.fonts.ready + 2 RAFs so any NotoColorEmoji glyphs are loaded before
+    # capture. networkidle does NOT gate fonts. See
+    # test_multiplexer_task_editing.py:316-318. Pure load barrier — comparator untouched.
+    page.evaluate( "() => document.fonts.ready" )
+    page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
     section = page.locator( '#action-required-section' )
-    assert_snapshot( section, name="multiplexer_phase6b_action_required.png" )
+    assert_snapshot_height_tolerant( section, name="multiplexer_phase6b_action_required.png" )
 
     print( "✓ multiplexer_phase6b_action_required: visual snapshot compared" )
 
@@ -196,7 +229,7 @@ def test_multiplexer_phase6b_action_required_visual(
 # ---------------------------------------------------------------------------
 
 def test_multiplexer_phase6b_tts_chrome_visual(
-    request, clean_test_db, assert_snapshot, logged_in_page,
+    request, clean_test_db, assert_snapshot_content_shift_tolerant, logged_in_page,
 ):
     """
     Capture the Phase 6b TTS chrome in its idle baseline state.
@@ -221,13 +254,151 @@ def test_multiplexer_phase6b_tts_chrome_visual(
         timeout=15000,
     )
 
-    # Wait for the tts-chrome controls to render (sanity check before snapshot).
-    page.wait_for_selector( '#tts-pane .tts-controls', timeout=2000 )
+    # Wait for the tts-chrome to render its IDLE panel (sanity check before
+    # snapshot). Straggler bug a90cc63e: the prior gate waited for
+    # `#tts-pane .tts-controls`, but `.tts-controls` is emitted ONLY by the
+    # PLAYING/paused branch of renderTtsChrome (templates/ttsChrome.ts:135). This
+    # test captures the IDLE state (no audio flowing), where the STATE-driven
+    # empty panel renders `.tts-chrome-empty` + `.tts-queue-empty-state` and NO
+    # `.tts-controls` (renderTtsEmpty, ttsChrome.ts:86-92; locked by unit test
+    # templates_tts_chrome.test.ts:48). The old selector could therefore NEVER
+    # resolve idle → a guaranteed 2000ms timeout, not a contention flake. Wait
+    # instead for the idle observability handle the template DOES emit for every
+    # state (data-testid + data-state, ttsChrome.test.ts:223), with a generous
+    # timeout matching the test-hook wait above.
+    page.wait_for_selector(
+        '#tts-pane [data-testid="multiplexer-tts-chrome"][data-state="idle"]',
+        timeout=15000,
+    )
 
     # Brief settle window for any post-mount layout repaint.
     time.sleep( 0.2 )
 
+    # Height-tolerant compare (bug 660d02b4): forgives the benign ≤1px sub-pixel
+    # row-height rounding flap (e.g. 129 vs 130) between --update-snapshots and a
+    # plain COMPARE, while staying strict on width + overlapping pixels.
+    # Font-load barrier (task 006cb393 — emoji glyph-render race): await
+    # document.fonts.ready + 2 RAFs so the 🔇/persona NotoColorEmoji glyphs are
+    # loaded before capture. networkidle does NOT gate fonts. See
+    # test_multiplexer_task_editing.py:316-318. Pure load barrier — comparator untouched.
+    page.evaluate( "() => document.fonts.ready" )
+    page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
     pane = page.locator( '#tts-pane' )
-    assert_snapshot( pane, name="multiplexer_phase6b_tts_chrome.png" )
+    assert_snapshot_content_shift_tolerant( pane, name="multiplexer_phase6b_tts_chrome.png" )
 
     print( "✓ multiplexer_phase6b_tts_chrome: visual snapshot compared" )
+
+
+# ---------------------------------------------------------------------------
+# Test-hook injection — drive the TTS chrome into FOCUS mode (70cbff3e).
+#
+# focus-mode ENTER path (TtsQueueStore.onAudioEnded → enterFocus): an
+# action-required TTS item becomes the active head, then store_audio_ended
+# fires while it is UNRESOLVED → the roll pauses, the head is discarded, and a
+# pending item is held behind it. All three events go straight onto the boot
+# eventBus (the wireTtsIntent producer seam + the F0-f store_audio_ended
+# subscriber both listen there) — no NotificationStore / DB dependency.
+# ---------------------------------------------------------------------------
+
+_INJECT_TTS_FOCUS_JS = """
+() => {
+    const hook = window.__multiplexerTestHook;
+    if ( !hook || !hook.eventBus ) {
+        throw new Error( "test hook not present — boot.ts test surface missing" );
+    }
+    const bus = hook.eventBus;
+
+    // 1) An ACTION-REQUIRED item enters the TTS queue as the active head
+    //    (store_notification_tts_intent → wireTtsIntent → enqueue auto-promote).
+    bus.emit({
+        type    : 'store_notification_tts_intent',
+        payload : { id_hash: 'phase6b_focus_ar', ttsText: 'Approve the deploy?', priority: 'urgent', action_required: true },
+        source  : 'phase6b-focus-visual',
+        ts      : 1778702400000,
+    });
+    // 2) A fire-and-forget item waits behind it in the pending tail.
+    bus.emit({
+        type    : 'store_notification_tts_intent',
+        payload : { id_hash: 'phase6b_focus_pending', ttsText: 'Build finished', priority: 'high', action_required: false },
+        source  : 'phase6b-focus-visual',
+        ts      : 1778702460000,
+    });
+    // 3) The active AR item's audio completes while UNRESOLVED → focus ENTER:
+    //    roll paused, active discarded, header → "Paused: 1 waiting" + Resume.
+    bus.emit({
+        type    : 'store_audio_ended',
+        payload : {},
+        source  : 'phase6b-focus-visual',
+        ts      : 1778702520000,
+    });
+
+    return true;
+}
+"""
+
+
+# ---------------------------------------------------------------------------
+# Visual regression — TTS chrome (FOCUS mode, 70cbff3e)
+# ---------------------------------------------------------------------------
+
+def test_multiplexer_phase6b_tts_chrome_focus_visual(
+    request, clean_test_db, assert_snapshot_height_tolerant, logged_in_page,
+):
+    """
+    Capture the Phase 6b TTS chrome in FOCUS mode (70cbff3e — first golden of
+    the focus-mode render; the idle `multiplexer_phase6b_tts_chrome` golden does
+    NOT drive focus, so this is purely additive).
+
+    Drives the focus-mode ENTER path via the test-hook eventBus: an
+    action-required TTS item becomes the active head, then `store_audio_ended`
+    fires while it is unresolved → `TtsQueueStore.onAudioEnded` enters focus
+    (holds the roll, discards the head), leaving one pending item behind it.
+
+    Ensures:
+        - `.tts-playing-header.focus-mode` renders "Paused: 1 waiting" (gray #6c757d)
+        - `.tts-btn-resume` renders (green #28a745)
+        - Snapshot of `#tts-pane` matches the focus-mode baseline
+    """
+    page = logged_in_page
+
+    page.goto( f"{BASE_URL}/app/multiplexer" )
+    page.wait_for_load_state( "networkidle" )
+
+    page.wait_for_function(
+        "() => window.__multiplexerTestHook !== undefined && window.__multiplexerTestHook.eventBus !== undefined",
+        timeout=15000,
+    )
+
+    # Drive focus mode (AR active → audio ends unresolved → ENTER, 1 held pending).
+    page.evaluate( _INJECT_TTS_FOCUS_JS )
+
+    # Wait for the focus header + Resume button (proves ENTER rendered).
+    page.wait_for_selector( '#tts-pane .tts-playing-header.focus-mode', timeout=15000 )
+    page.wait_for_selector( '#tts-pane .tts-btn-resume', timeout=5000 )
+
+    # Content assertion before the pixel snapshot — the header must read the
+    # held-queue count ("Paused: N waiting", N = 1 pending item).
+    header_text = page.locator( '#tts-pane .tts-playing-header.focus-mode' ).inner_text()
+    assert "Paused: 1 waiting" in header_text, f"unexpected focus header: {header_text!r}"
+
+    # Freeze the pending card's live wall-clock timestamp before capture (task
+    # 02f99882 — see _STABILIZE_TTS_CARD_TIME_JS). The residual left after the
+    # fonts.ready barrier was an unfrozen `.message-time` HH:MM (arrival wall-clock),
+    # NOT AA — this pin makes the focus snapshot deterministic run-to-run.
+    page.evaluate( _STABILIZE_TTS_CARD_TIME_JS )
+
+    # Brief settle window for the RAF-coalesced repaint.
+    time.sleep( 0.2 )
+
+    # Height-tolerant compare (bug 660d02b4): forgives ≤1px sub-pixel row-height
+    # rounding, strict on width + overlapping pixels.
+    # Font-load barrier (task 006cb393 — emoji glyph-render race): await
+    # document.fonts.ready + 2 RAFs so the 🔇/persona NotoColorEmoji glyphs are
+    # loaded before capture. networkidle does NOT gate fonts. See
+    # test_multiplexer_task_editing.py:316-318. Pure load barrier — comparator untouched.
+    page.evaluate( "() => document.fonts.ready" )
+    page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
+    pane = page.locator( '#tts-pane' )
+    assert_snapshot_height_tolerant( pane, name="multiplexer_phase6b_tts_chrome_focus.png" )
+
+    print( "✓ multiplexer_phase6b_tts_chrome_focus: focus-mode visual snapshot compared" )

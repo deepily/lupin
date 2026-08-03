@@ -92,7 +92,8 @@ class TestSubmitTestSuiteEndpoint( unittest.TestCase ):
         if user is None:
             user = _valid_user()
         return asyncio.run(
-            submit_test_suite( request_body=request_body, current_user=user, todo_queue=self.todo_queue )
+            submit_test_suite( request_body=request_body, current_user=user,
+                               todo_queue=self.todo_queue )
         )
 
     def _patched( self, job="default", scoped_id="ts-scoped" ):
@@ -118,6 +119,23 @@ class TestSubmitTestSuiteEndpoint( unittest.TestCase ):
     def test_router_is_apirouter_with_tag( self ):
         """The module exposes a configured APIRouter (cheap import/structure guard)."""
         self.assertIn( "test-suite", router.tags )
+
+    def test_malformed_submission_maps_valueerror_to_400( self ):
+        """A ValueError raised inside the try (e.g. unbalanced quotes in
+        pytest_args surfacing from create_agentic_job) maps to HTTP 400 — a loud
+        client error, never a silent 500. Covers the except-ValueError arm."""
+        factory_cm = patch.object( M, "create_agentic_job",
+                                   side_effect=ValueError( "unbalanced quote in pytest_args" ) )
+        tracker_cm = patch.object( M, "user_job_tracker" )
+        factory_cm.start()
+        tracker_cm.start()
+        self.addCleanup( factory_cm.stop )
+        self.addCleanup( tracker_cm.stop )
+        with self.assertRaises( HTTPException ) as ctx:
+            self._run( TestSuiteSubmitRequest( pytest_args='-k "auth or' ) )
+        self.assertEqual( ctx.exception.status_code, 400 )
+        self.assertIn( "Invalid test suite submission", ctx.exception.detail )
+        self.todo_queue.push.assert_not_called()
 
     def test_happy_path_minimal_request( self ):
         mock_factory, _ = self._patched( scoped_id="ts-scoped-01" )

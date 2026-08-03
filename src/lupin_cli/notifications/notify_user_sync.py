@@ -21,11 +21,12 @@ Environment Variables:
 
 import os
 import sys
+import time
 import requests
 import argparse
 import json
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from pydantic import ValidationError
 
 # Import Pydantic models
@@ -55,7 +56,8 @@ from lupin_cli.notifications.notification_types import (
 def consume_sse_stream(
     response: requests.Response,
     timeout_seconds: int,
-    debug: bool = False
+    debug: bool = False,
+    ack_capture: Optional[dict] = None
 ) -> Optional[SSEEvent]:
     """
     Consume SSE stream from response-required notification endpoint.
@@ -115,6 +117,17 @@ def consume_sse_stream(
                         # Determine event type and validate with Pydantic
                         status = raw_data.get( 'status' )
 
+                        if status == 'ack':
+                            # §4.5 E-a: the opening ack frame — capture this ask's
+                            # notification_id for re-attach-after-stream-death, then
+                            # keep reading (NOT a terminal event). Additive: a client
+                            # that ignores it just continues, exactly as before.
+                            if ack_capture is not None and raw_data.get( 'notification_id' ):
+                                ack_capture[ 'notification_id' ] = raw_data[ 'notification_id' ]
+                            if debug:
+                                print( f"[DEBUG] Captured ack notification_id: {raw_data.get( 'notification_id' )}", file=sys.stderr )
+                            continue
+
                         if status == 'responded':
                             event = RespondedEvent( **raw_data )
                         elif status == 'expired':
@@ -157,6 +170,110 @@ def consume_sse_stream(
             import traceback
             traceback.print_exc( file=sys.stderr )
         return None
+
+
+def _poll_notification_response( notification_id, base_url, headers, timeout=5 ):
+    """
+    GET /api/notifications/response/{notification_id} — the re-attach poll read
+    (§4.5 E-b). Returns the parsed { state, response_value, responded_at } dict, or
+    None on any non-200 / transport failure. Never raises.
+    """
+    try:
+        resp = requests.get(
+            f"{base_url}/api/notifications/response/{notification_id}",
+            headers = headers,
+            timeout = ( 3, timeout )
+        )
+        if resp.status_code != 200:
+            return None
+        return resp.json()
+    except ( requests.exceptions.RequestException, ValueError ):
+        return None
+
+
+def _reattach_after_stream_death(
+    notification_id, remaining_seconds, base_url, headers,
+    poll_fn=None, poll_interval=2.0, debug=False
+):
+    """
+    Re-attach after the SSE stream died (§4.5 E-c). Poll the response-by-id endpoint
+    against the remaining wall-clock budget; decide the outcome on the §3 invariant
+    **`responded_at IS NOT NULL`** — never on `state` moving or `response_value`
+    being non-null.
+
+    ⚠️ POST-CASCADE CONTRACT AMENDMENT (María, ruling b): a LANDED answer is RETURNED
+    to the caller and the row is LEFT OWED — **no ack fires here**. Acking on poll-land
+    would mark the row delivered before the value reached the caller ("ack on consume,
+    never on serve" one level in), so a death in that window would lose the answer. The
+    receipt is the next-turn catch-up's ack (setter b). Fails toward re-delivery (a
+    bounded double-SEE), never toward silence.
+
+    Requires:
+        - notification_id: the ack id captured from the opening frame (None ⇒ no
+          re-attach is possible)
+        - remaining_seconds: the wall-clock budget left for the whole ask
+        - poll_fn(notification_id) -> row dict|None (dependency-injected in tests;
+          defaults to _poll_notification_response)
+
+    Ensures:
+        - returns a NotificationResponse with `reattach_state` set:
+            * `reattach_unavailable` when notification_id is None (surfaced LOUD)
+            * `reattach_armed` once at least one poll has fired
+        - responded_at NOT NULL ⇒ RespondedEvent-shaped (status="responded",
+          default_used=False), NO ack
+        - responded_at NULL WITH a response_value ⇒ manufactured default ⇒
+          status="expired", default_used=True, is_timeout=True, NO ack, never responded
+        - budget exhausted with no landed answer ⇒ status="expired", is_timeout=True
+        - ALWAYS fires at least one poll before returning (E-V3), even at budget≤0
+        - never raises
+    """
+    if not notification_id:
+        # The ack id was never captured — no re-attach is possible. Surface it LOUD
+        # (an assertable/queryable terminal signal, not a silent no-op).
+        if debug:
+            print( "[DEBUG] Re-attach unavailable: no ack notification_id captured", file=sys.stderr )
+        return NotificationResponse(
+            response_value = None, exit_code = 1, status = "stream_error",
+            reattach_state = "reattach_unavailable"
+        )
+
+    if poll_fn is None:
+        poll_fn = lambda nid: _poll_notification_response( nid, base_url, headers )
+
+    deadline = datetime.now() + timedelta( seconds=max( 0, remaining_seconds ) )
+    while True:
+        # One poll ALWAYS fires before any budget check (E-V3: a dying stream at the
+        # deadline still gets its terminal check).
+        row = poll_fn( notification_id )
+        if row is not None:
+            responded_at   = row.get( "responded_at" )
+            response_value = row.get( "response_value" )
+            if responded_at is not None:
+                # LANDED — a human answered. Return it; DO NOT ack (ruling b). Row stays
+                # owed so the next-turn catch-up hands it back once and acks then.
+                val = response_value.get( "value" ) if isinstance( response_value, dict ) else response_value
+                if debug:
+                    print( f"[DEBUG] Re-attach LANDED (responded_at set) — returning, leaving owed (no ack)", file=sys.stderr )
+                return NotificationResponse(
+                    response_value = val, exit_code = 0, status = "responded",
+                    default_used = False, reattach_state = "reattach_armed"
+                )
+            if response_value is not None:
+                # responded_at NULL but a value present = a machine default the server
+                # manufactured (offline/expired persist), NOT a human answer. Terminal:
+                # expired, default_used, no ack. NEVER responded (the §3 invariant).
+                val = response_value.get( "value" ) if isinstance( response_value, dict ) else response_value
+                return NotificationResponse(
+                    response_value = val, exit_code = 2, status = "expired",
+                    default_used = True, is_timeout = True, reattach_state = "reattach_armed"
+                )
+            # responded_at NULL and no value → not answered yet; keep polling until budget.
+        if datetime.now() >= deadline:
+            return NotificationResponse(
+                response_value = None, exit_code = 2, status = "expired",
+                is_timeout = True, reattach_state = "reattach_armed"
+            )
+        time.sleep( min( poll_interval, max( 0.0, ( deadline - datetime.now() ).total_seconds() ) ) )
 
 
 def _send_sync_notification(
@@ -227,6 +344,9 @@ def _send_sync_notification(
         # remains tied to the user's notification window (e.g. 180s for a
         # confirmation prompt), which is the latency we actually need to
         # survive — the user clicking "yes" within their attention budget.
+        # Mark the wall-clock start so the §4.5 E-c re-attach knows how much of the
+        # ask's budget is left if the SSE stream dies mid-flight.
+        _send_start = datetime.now()
         response = requests.post(
             url,
             params  = params,
@@ -248,15 +368,24 @@ def _send_sync_notification(
         if debug:
             print( f"[DEBUG] ✓ SSE stream connected, waiting for response...", file=sys.stderr )
 
-        # Consume SSE stream (returns typed Pydantic event)
-        event = consume_sse_stream( response, request.timeout_seconds, debug )
+        # Consume SSE stream (returns typed Pydantic event); capture the opening ack
+        # frame's notification_id so we can re-attach if the stream dies (§4.5 E-a/E-c).
+        ack_capture = {}
+        event = consume_sse_stream( response, request.timeout_seconds, debug, ack_capture=ack_capture )
 
         if not event:
-            print( "✗ Failed to get response from SSE stream", file=sys.stderr )
-            return NotificationResponse(
-                response_value = None,
-                exit_code      = 1,
-                status         = "stream_error"
+            # §4.5 E-c (ruling b): the stream died before a terminal event. Rather than
+            # returning a bare stream_error (which the caller reads as a false default),
+            # re-attach — poll GET /notifications/response/{id} against the remaining
+            # budget. A LANDED answer is returned and the row LEFT OWED (no ack here; the
+            # next-turn catch-up acks on genuine consume). Fails toward re-delivery,
+            # never toward silence. If the ack id was never captured, the re-attach is
+            # unavailable and that is surfaced LOUD (reattach_unavailable).
+            elapsed   = ( datetime.now() - _send_start ).total_seconds()
+            remaining = request.timeout_seconds - elapsed
+            print( "✗ SSE stream died — re-attaching via response-by-id poll", file=sys.stderr )
+            return _reattach_after_stream_death(
+                ack_capture.get( "notification_id" ), remaining, base_url, headers, debug=debug
             )
 
         if debug:

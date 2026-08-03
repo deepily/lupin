@@ -282,26 +282,24 @@ class CommonsStore:
             "metadata"          : metadata,
         }
 
-    def read(
-        self,
-        topic : str,
-        since : Optional[ str ] = None,
-        limit : int = 50,
-    ) -> List[ Dict[ str, Any ] ]:
+    def _parse_topic_file( self, path: Path ) -> List[ Dict[ str, Any ] ]:
         """
-        Return parsed entries from `topic` (newest first when no `since`,
-        ascending when `since` supplied). Honors `limit` strictly.
+        Parse one topic file (active or archived) into entries.
 
-        Missing free-form topic → empty list. Missing reserved topic → raises
-        FileNotFoundError (per AC4: should never happen post-AC2).
+        Extracted from `read` so the ACTIVE file and the ARCHIVED dailies go through
+        exactly one parser. Two parsers would be two records of one format, and the
+        legacy-separator fallback below is precisely the kind of subtlety that
+        diverges when it is written twice.
+
+        Ensures:
+            - returns the parsed entries, unsorted and unfiltered
+            - an unparseable block is counted and warned, never raised
+            - a missing file yields [] (the caller decides whether that is a finding)
         """
-        path = self._topic_path( topic )
         if not path.exists():
-            if topic in RESERVED_TOPICS:
-                raise FileNotFoundError( f"Reserved topic file missing: {path}" )
             return [ ]
-        content    = path.read_text( encoding="utf-8" )
-        _, body    = _split_frontmatter( content )
+        content = path.read_text( encoding="utf-8" )
+        _, body = _split_frontmatter( content )
         # Try the canonical separator first. Fall back to the legacy "\n---\n"
         # separator for files that have not yet been migrated. The legacy
         # split is INTENTIONALLY a fallback (not a parallel always-attempt)
@@ -323,6 +321,126 @@ class CommonsStore:
                 orphan_count += 1
         if orphan_count > 0:
             _warn_orphan_blocks( path, orphan_count )
+        return entries
+
+    def _archive_topic_paths( self, topic: str, since: Optional[ str ] ) -> List[ Path ]:
+        """
+        The archived daily files for `topic` that could still contribute, NEWEST FIRST.
+
+        `commons_archival` writes to `archive/yyyy-mm-dd/<topic>.md`, so the directory
+        name is a usable date key and the irrelevant dailies can be skipped WITHOUT
+        opening them. That bound is the point: the post-game topic alone holds 1.1 MB
+        across 10 dailies, and a reader that opens all of them to answer a one-day
+        question has replaced a wrong answer with a slow one.
+
+        Requires:
+            - since is None or an ISO-8601 timestamp string
+        Ensures:
+            - returns existing `<topic>.md` paths under `archive/*/`, sorted by
+              directory name DESCENDING (newest day first)
+            - when `since` is given, drops days that ended before it — compared on the
+              10-char date prefix, so a `since` mid-day keeps that whole day. Coarse
+              ON PURPOSE: the per-entry `ts > since` filter runs afterwards, so a day
+              kept unnecessarily costs one file read, while a day dropped wrongly
+              loses entries silently. Only one of those two errors is recoverable.
+            - a malformed directory name is KEPT, not skipped — an unparseable name is
+              not evidence the day is irrelevant
+        """
+        if not self.archive_dir.is_dir():
+            return [ ]
+        since_day = since[ :10 ] if since else None
+        paths     = [ ]
+        for day_dir in sorted( self.archive_dir.iterdir(), key=lambda p: p.name, reverse=True ):
+            if not day_dir.is_dir():
+                continue
+            if since_day is not None and len( day_dir.name ) == 10 and day_dir.name < since_day:
+                continue
+            candidate = day_dir / f"{topic}.md"
+            if candidate.exists():
+                paths.append( candidate )
+        return paths
+
+    def read(
+        self,
+        topic : str,
+        since : Optional[ str ] = None,
+        limit : int = 50,
+    ) -> List[ Dict[ str, Any ] ]:
+        """
+        Return parsed entries from `topic` (newest first when no `since`,
+        ascending when `since` supplied). Honors `limit` strictly.
+
+        Missing free-form topic → empty list. Missing reserved topic → raises
+        FileNotFoundError (per AC4: should never happen post-AC2).
+
+        READS THE ARCHIVE TOO, and that is a BUG FIX, not a feature (store row
+        `ff1924b5`, María 2026-07-26). `commons_archival` rotates entries older than
+        24h out of the active file into `archive/yyyy-mm-dd/<topic>.md` — working
+        exactly as specified (AC9). **This reader was never extended to follow, so
+        commons was write-only beyond one day through its documented interface.**
+
+        Measured at the time of the fix: the active `post-game.md` held 101 bytes — a
+        YAML header, zero entries — while its archive held 1,140,882. `read()` returned
+        `[]`, and `since="2026-07-18"` returned `[]` too. **An empty list is
+        indistinguishable from "this topic has no such content,"** so a handoff of the
+        form "the details are on commons" self-expired after a day, silently, and the
+        seat honoring it would reasonably conclude the material was lost. That happened.
+
+        THE ARCHIVE IS READ ONLY WHEN THE ACTIVE FILE CANNOT ALREADY ANSWER:
+            · with `since` — only when `since` predates the oldest active entry (or the
+              active file is empty). A tail of the last hour still touches one file.
+            · without `since` — only when the active file yielded fewer than `limit`.
+              This is the arm that bit hardest: the caller passes no `since`, the active
+              file is empty, and the honest answer is entirely in the archive.
+
+        DE-DUPLICATION IS MANDATORY, NOT DEFENSIVE. `commons_archival`'s own docstring
+        records that its archive-append-then-active-rewrite ordering can, on a failed
+        rewrite, leave the same entries in BOTH the archive and the active file for a
+        cycle. Merging two surfaces without a key would therefore DOUBLE-REPORT exactly
+        those entries — a new defect introduced by the fix for an old one.
+
+        Requires:
+            - topic is a topic name; since is None or ISO-8601; limit >= 0
+        Ensures:
+            - returns at most `limit` entries, newest-first without `since`,
+              ascending with `since`
+            - every returned entry appears exactly once, keyed on
+              (ts, sender_session_id, body)
+            - the active file is always read; archive dailies are read only under the
+              conditions above, newest day first
+        """
+        path = self._topic_path( topic )
+        if not path.exists() and topic in RESERVED_TOPICS:
+            raise FileNotFoundError( f"Reserved topic file missing: {path}" )
+
+        # A missing free-form active file is NO LONGER a short-circuit to []. The topic
+        # may have been rotated wholesale, or the file removed while its history stands
+        # in the archive; returning [] here was half of the reported defect.
+        entries = self._parse_topic_file( path )
+
+        if since is not None:
+            oldest_active = min( ( e[ "ts" ] for e in entries ), default=None )
+            need_archive  = oldest_active is None or since < oldest_active
+        else:
+            need_archive  = len( entries ) < limit
+
+        if need_archive:
+            seen = { ( e[ "ts" ], e[ "sender_session_id" ], e[ "body" ] ) for e in entries }
+            for archived in self._archive_topic_paths( topic, since ):
+                for entry in self._parse_topic_file( archived ):
+                    key = ( entry[ "ts" ], entry[ "sender_session_id" ], entry[ "body" ] )
+                    if key in seen:
+                        continue                  # rotation left it in both surfaces
+                    seen.add( key )
+                    entries.append( entry )
+                # EARLY STOP ONLY IN THE NO-`since` CASE. There, days are walked newest
+                # first and the query wants the newest `limit` entries, so once we hold
+                # `limit` of them no older day can displace any. With `since` the query
+                # is "everything after T" — there is no sufficient count, so every day
+                # the date filter kept must be read.
+                if since is None and len( entries ) >= limit:
+                    break
+
         if since is not None:
             entries = [ e for e in entries if e[ "ts" ] > since ]
             entries.sort( key=lambda e: e[ "ts" ] )

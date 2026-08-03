@@ -40,7 +40,7 @@ import os
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, text
 
 import cosa.utils.util as cu
 
@@ -126,6 +126,38 @@ def _inspect_db_state( url ):
     return ( "alembic_version" in tables, _SENTINEL_APP_TABLE in tables )
 
 
+def _read_current_revision( url ):
+    """
+    Best-effort read of the DB's currently-stamped alembic revision.
+
+    Requires:
+        - url is a concrete SQLAlchemy URL
+
+    Ensures:
+        - returns the stamped revision string, or None when there is none
+          (fresh DB) or it could not be read
+        - NEVER raises. This is observability, not a gate: a migration must not
+          fail because the thing that reports on it could not read a revision
+
+    Args:
+        url: concrete SQLAlchemy URL
+
+    Returns:
+        str | None
+    """
+    try:
+        from alembic.runtime.migration import MigrationContext
+        engine = create_engine( url )
+        try:
+            with engine.connect() as conn:
+                heads = MigrationContext.configure( conn ).get_current_heads()
+        finally:
+            engine.dispose()
+        return ",".join( heads ) if heads else None
+    except Exception:
+        return None
+
+
 def run_migrations_to_head( database_url=None, debug=False ):
     """
     Bring the target database up to the latest migration head (auto-bootstrapping
@@ -149,7 +181,12 @@ def run_migrations_to_head( database_url=None, debug=False ):
         debug: when True, print before/after one-liners
 
     Returns:
-        None
+        dict — { "before": str|None, "after": str|None, "applied": bool,
+                 "bootstrapped": bool }. `applied` is True ONLY when the
+        revision actually MOVED, which is what lets a caller distinguish a
+        deploy from a no-op. Every existing caller ignores this and is
+        unaffected; it is added because "did this run change the database?"
+        was previously unanswerable from the outside (row 0aae1a28).
 
     Raises:
         RuntimeError: app tables exist but the DB was never alembic-stamped
@@ -159,6 +196,7 @@ def run_migrations_to_head( database_url=None, debug=False ):
     config = build_alembic_config( database_url=url )
 
     has_version_table, has_app_tables = _inspect_db_state( url )
+    before = _read_current_revision( url )
 
     if not has_version_table and not has_app_tables:
         # Truly fresh, empty database → build the baseline from the models and
@@ -167,12 +205,23 @@ def run_migrations_to_head( database_url=None, debug=False ):
         from cosa.rest.postgres_models import Base
         engine = create_engine( url )
         try:
+            # pgvector (v0.2.0 vector store): the `vector` type must exist BEFORE
+            # create_all builds any Vector column / HNSW index. Idempotent — a no-op
+            # when the extension is already present. Requires the base image to
+            # bundle pgvector (docker-compose: pgvector/pgvector:pg16; Cloud-SQL native).
+            with engine.begin() as conn:
+                conn.execute( text( "CREATE EXTENSION IF NOT EXISTS vector" ) )
             Base.metadata.create_all( engine )
         finally:
             engine.dispose()
         command.stamp( config, "head" )
         if debug: print( "[auto-migrate] Fresh DB bootstrapped and stamped at head." )
-        return
+        # A bootstrap is NOT an "applied migration" — nothing was upgraded, the
+        # schema was built from the models and stamped. Reporting it as applied
+        # would make a first boot indistinguishable from a live schema change,
+        # which is the exact distinction this return value exists to draw.
+        return { "before": before, "after": _read_current_revision( url ),
+                 "applied": False, "bootstrapped": True }
 
     if not has_version_table and has_app_tables:
         # Legacy schema.sql DB that was never alembic-stamped. Replaying the
@@ -191,3 +240,10 @@ def run_migrations_to_head( database_url=None, debug=False ):
     if debug: print( "[auto-migrate] Running 'alembic upgrade head'..." )
     command.upgrade( config, "head" )
     if debug: print( "[auto-migrate] Database is at migration head." )
+
+    # Read AFTER, and compare. The revision moving is the only honest evidence
+    # that this call was a deploy rather than a no-op — `command.upgrade` returns
+    # nothing and is silent either way, which is why nobody could see it happen.
+    after = _read_current_revision( url )
+    return { "before": before, "after": after,
+             "applied": ( after is not None and after != before ), "bootstrapped": False }

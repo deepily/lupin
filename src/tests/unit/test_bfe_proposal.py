@@ -225,7 +225,7 @@ class TestProposalVoiceGate:
 
     def test_auto_approve_when_disabled( self, orchestrator, sample_fixes ):
         orchestrator.config.require_user_confirm = False
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             orchestrator._voice_gate_proposal( sample_fixes, MagicMock(), MagicMock() )
         )
         # Should pick highest confidence
@@ -239,7 +239,7 @@ class TestProposalVoiceGate:
         mock_cosa = MagicMock()
         mock_cosa.ask_confirmation = AsyncMock( return_value=True )
 
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             orchestrator._voice_gate_proposal( [ fix ], MagicMock(), mock_cosa )
         )
         assert result == fix
@@ -250,7 +250,7 @@ class TestProposalVoiceGate:
             "answers": { "Fix Selection": "Add missing key to INI" }
         } )
 
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             orchestrator._voice_gate_proposal( sample_fixes, MagicMock(), mock_cosa )
         )
         assert result.title == "Add missing key to INI"
@@ -262,13 +262,13 @@ class TestProposalVoiceGate:
         } )
         mock_cosa.get_feedback = AsyncMock( return_value=None )
 
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             orchestrator._voice_gate_proposal( sample_fixes, MagicMock(), mock_cosa )
         )
         assert result is None
 
     def test_empty_fixes_returns_none( self, orchestrator ):
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             orchestrator._voice_gate_proposal( [], MagicMock(), MagicMock() )
         )
         assert result is None
@@ -294,7 +294,7 @@ class TestProposalSDKDelegation:
                     fix_type="config_change", confidence=0.9,
                 )
                 with patch.object( PlanWriter, "write_plan", return_value="/tmp/test-plan.md" ):
-                    fixes, selected, plan_path = asyncio.get_event_loop().run_until_complete(
+                    fixes, selected, plan_path = asyncio.run(
                         orchestrator.run_proposal( diagnosis )
                     )
 
@@ -304,7 +304,7 @@ class TestProposalSDKDelegation:
 
     def test_run_proposal_sdk_unavailable( self, orchestrator, diagnosis ):
         with patch( "cosa.agents.bug_fix_expediter.orchestrator.SDK_AVAILABLE", False ):
-            fixes, selected, plan_path = asyncio.get_event_loop().run_until_complete(
+            fixes, selected, plan_path = asyncio.run(
                 orchestrator.run_proposal( diagnosis )
             )
 
@@ -316,7 +316,7 @@ class TestProposalSDKDelegation:
     def test_run_proposal_cancellation( self, orchestrator, diagnosis ):
         orchestrator._stop_requested = True
 
-        fixes, selected, plan_path = asyncio.get_event_loop().run_until_complete(
+        fixes, selected, plan_path = asyncio.run(
             orchestrator.run_proposal( diagnosis )
         )
 

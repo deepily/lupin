@@ -70,6 +70,54 @@ export function applyManagerBadge(button: HTMLElement, managerPersona: ManagerPe
 }
 
 /**
+ * Derive the allocation-status flag for a strip session (V9).
+ *
+ * Ported from the legacy strip-icon sub-badge system (notifications.js
+ * :5087-5106 / :10930-10973), driven by the two server-verified inputs
+ * `voice_persona.borrowed` + `StripSession.active`: a session whose persona is
+ * BORROWED, or whose session is INACTIVE (released), carries a 🔉
+ * allocation-status indicator; a normal active own-persona session carries
+ * none. `borrowed` takes precedence over `inactive` (both render the same 🔉
+ * glyph, so precedence only fixes the reported status string).
+ *
+ * Requires:
+ *   - `session` is a StripSession with a populated `voice_persona`.
+ * Ensures:
+ *   - Returns "borrowed" when the persona is borrowed;
+ *   - else "inactive" when the session is not active;
+ *   - else null (no indicator).
+ */
+export function stripAllocStatus(session: StripSession): "borrowed" | "inactive" | null {
+  if (session.voice_persona.borrowed) return "borrowed";
+  if (!session.active) return "inactive";
+  return null;
+}
+
+/**
+ * Apply (or clear) the allocation-status attribute on a strip-icon button (V9).
+ *
+ * `data-alloc-status` drives the CSS `::before` 🔉 indicator
+ * (session-strip.css) — the same data-attribute-driven pattern legacy used for
+ * its `.cc-strip-icon[data-...]::before` sub-badges. Idempotent: removes the
+ * attribute when the session carries no allocation flag.
+ *
+ * Requires:
+ *   - `button` is a `.cc-strip-icon` element.
+ *   - `session` is the session it represents.
+ * Ensures:
+ *   - `data-alloc-status` reflects `stripAllocStatus(session)` — set to the
+ *     status string, or removed when null.
+ */
+export function applyAllocStatus(button: HTMLElement, session: StripSession): void {
+  const status = stripAllocStatus(session);
+  if (status === null) {
+    button.removeAttribute("data-alloc-status");
+    return;
+  }
+  button.setAttribute("data-alloc-status", status);
+}
+
+/**
  * Render one CC-session strip icon button for a strip session.
  *
  * Requires:
@@ -102,6 +150,7 @@ export function renderSessionStripIcon(session: StripSession): HTMLElement {
     button.style.setProperty("--persona-color", persona.color);
   }
   applyManagerBadge(button, session.manager_persona ?? null);
+  applyAllocStatus(button, session);
 
   return button;
 }
@@ -134,4 +183,5 @@ export function updateSessionStripIcon(button: HTMLElement, session: StripSessio
   if (initialEl !== null) initialEl.textContent = personaInitial(persona.name);
 
   applyManagerBadge(button, session.manager_persona ?? null);
+  applyAllocStatus(button, session);
 }

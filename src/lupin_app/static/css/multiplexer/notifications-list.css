@@ -1,29 +1,35 @@
 /* ============================================================================
-   Multiplexer Phase 5 — notifications-list pane stylesheet.
+   Multiplexer notifications-list — MUX-ONLY + MUX-MECHANISM overrides.
 
-   Sourced from `static/css/notifications.css` per Q-D + Q-C ratifications:
-   - Q-C: legacy class names verbatim (.sender-card / .sender-message / etc.)
-   - Q-D: separate <link rel="stylesheet"> tag (esbuild stays JS-only)
+   ⚠️ NARROWED ROLE (v0.1.9 WS1, 2026-06-22, Clayton).
+   The layout-CONTRACT surfaces this file USED to carry (page-frame, sender
+   cards, date accordions, sender messages, expired/abstract/progress) were a
+   COPY of `static/css/notifications.css` that had drifted. They have been
+   single-sourced — byte-faithful to the monolith — into
+   `static/css/shared/notifications-surface.css`, which BOTH /app/notifications
+   and /app/multiplexer now link (Pillar 1 / D1 Rider A). See
+   src/rnd/v0.1.9/2026.06.19-multiplexer-layout-parity-methodology/.
 
-   Stripped (vs legacy 5,040-line file):
-   - Job queue chrome (jobs-pane is a hidden Phase 6 mount point)
-   - TTS chrome (tts-pane is a hidden Phase 6 mount point)
-   - Audio recorder, focus tray, voice-persona modal, conversation-mode pin
-   - .cc-voice-input, .notification-corner-pause-btn, .notification-corner-stop-btn,
-     .tts-playing, .is-paused-current (Phase 6 interactive surface)
+   What REMAINS here is ONLY the rules the shared contract sheet cannot carry:
+     1. mux-specific STRUCTURE (the #notifications-pane two-child pane layout,
+        the empty state) — legacy uses different containers;
+     2. mux-MECHANISM seams that must keep the mux FUNCTIONING until WS2
+        reconciles them against the contract (the `[data-collapsed]` accordion
+        collapse, the `.sender-persona-badge` button, the `.sender-display-name`
+        / `.date-text` renamed labels, the active-indicator color);
+     3. mux-only markdown / hover / responsive niceties absent from the monolith.
 
-   Action-required widget classes use the .action-required-* prefix per
-   D-A ratification 2026-05-05 (NOT .ar-*); legacy CSS is reused where
-   semantically equivalent.
+   Each seam below is tagged with the divergence id (C2-a/-b, rename, WS2/WS4)
+   so the WS2 builder and Rachel's oracle can find them. DO NOT re-add the
+   contract rules here — they belong to the shared sheet now.
    ============================================================================ */
 
-* {
-    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
-    box-sizing: border-box;
-}
-
 /* ============================================================================
-   #notifications-pane container layout (D-L two-child structure)
+   #notifications-pane container layout (D-L two-child structure) — MUX-ONLY.
+   Legacy groups cards under `.collapsible-section`; the mux uses these panes.
+   D2: the drift-invented `gap: 8px` is DROPPED — inter-card spacing now comes
+   from the contract `.sender-card { margin-bottom: 12px }` (shared sheet),
+   matching the legacy margin model.
    ============================================================================ */
 
 #notifications-pane {
@@ -36,17 +42,13 @@
 #sender-cards-container {
     display: flex;
     flex-direction: column;
-    gap: 8px;
 }
 
 #action-required-section {
     margin-bottom: 16px;
 }
 
-/* ============================================================================
-   Empty state (Q-K)
-   ============================================================================ */
-
+/* Empty state (Q-K) — MUX-ONLY. */
 .notifications-empty-state {
     padding: 48px 24px;
     text-align: center;
@@ -58,266 +60,166 @@
 }
 
 /* ============================================================================
-   Sender card
+   Sender-card MUX-ONLY overrides on top of the shared contract.
    ============================================================================ */
 
-.sender-card {
-    margin-bottom: 12px;
-    border: 1px solid var( --persona-color, #dee2e6 );
-    border-radius: 8px;
-    overflow: hidden;
-    background-color: #fff;
-    /* CSS-parity 2026-06-17: restore legacy double box-shadow (ring + drop) —
-       notifications.css .sender-card. The persona-tinted ring resolves once
-       --persona-color-rgb is set by senderCard.ts (this milestone's JS fix);
-       falls back to neutral black before then. */
-    box-shadow:
-        0 0 0 1px rgba( var( --persona-color-rgb, 0, 0, 0 ), 0.06 ),
-        0 2px 6px  rgba( var( --persona-color-rgb, 0, 0, 0 ), 0.12 );
-    transition: border-color 0.25s ease, box-shadow 0.25s ease;
-}
-
+/* MUX-ONLY hover affordance (the monolith has no `.sender-card:hover`). */
 .sender-card:hover {
     box-shadow: 0 2px 8px rgb( 0, 0, 0, 0.08 );
 }
 
-.sender-card-header {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 15px;
-    background: linear-gradient(
-        to right,
-        rgb( var( --persona-color-rgb, 233, 236, 239 ), 0.10 ),
-        rgb( var( --persona-color-rgb, 248, 249, 250 ), 0.02 )
-    );
-    border-bottom: 1px solid #e9ecef;
-    cursor: pointer;
-    transition: background 0.2s;
-}
-
-.sender-card-header:hover {
-    background: linear-gradient(
-        to right,
-        rgb( var( --persona-color-rgb, 222, 226, 230 ), 0.20 ),
-        rgb( var( --persona-color-rgb, 233, 236, 239 ), 0.10 )
-    );
-}
-
+/* ACTIVE-STATE SEAM (→ WS2/WS4): the contract sheet supplies the indicator
+   geometry but NOT its color — the monolith colors it via the
+   `.sender-card-active` state class, which the mux renderer does not emit yet.
+   Keep the mux's green so the dot is not un-themed; reconcile when the mux
+   models active/inactive session state. */
 .sender-active-indicator {
     color: #28a745;
-    font-size: 12px;
     flex-shrink: 0;
 }
 
-.sender-display-name {
-    font-weight: 600;
+/* RENAME SEAM CLOSED (WS4/G4, Clayton 2026-06-22): the project-label slot is
+   now emitted as the legacy-verbatim `.sender-project-name` (was the mux-only
+   `.sender-display-name`); content is still `display_name` (Category-4). The
+   overflow/max-width niceties are retained to keep the header a single row.
+   FLAG (WS1-contract question, raised to Rachel/Tiberius): like the other
+   sender-card header chrome rules below, this ideally migrates into the shared
+   contract sheet (notifications-surface.css) — kept mux-side here so the shared
+   sheet stays WS1's to extend, and so this slice does not silently rewrite the
+   contract. */
+.sender-project-name {
+    font-weight: bold;
     font-size: 14px;
-    color: #212529;
+    color: #495057;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     max-width: 280px;
 }
 
-.sender-stats-group {
-    margin-left: auto;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-shrink: 0;
-}
-
-.sender-new-count {
-    background-color: #28a745;
-    color: #fff;
-    font-size: 11px;
-    font-weight: 700;
-    border-radius: 10px;
-    padding: 2px 8px;
-    min-width: 22px;
-    text-align: center;
-    line-height: 1.2;
-}
-
-.sender-message-count {
-    color: #6c757d;
+/* ============================================================================
+   WS4/G4 (Clayton 2026-06-22) — CC-session sender-card HEADER CHROME styling.
+   Byte-faithful port from the legacy monolith (notifications.css:1703-1808) so
+   the mux header renders at the legacy single-row height (~43px) once
+   senderCard.ts emits the chrome — WITHOUT these the unstyled chrome makes the
+   header ~45px and REGRESSES the (previously green) `card>header` geometry.
+   FLAG (WS1-contract): these are contract surfaces that ideally live in the
+   SHARED sheet; kept mux-side pending the WS1 placement call (Rachel/Tiberius).
+   ============================================================================ */
+.sender-status {
     font-size: 12px;
-    white-space: nowrap;
 }
 
-.sender-last-activity {
-    color: #6c757d;
+.sender-session-id {
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
     font-size: 11px;
+    color: #868e96;
+    margin-left: 4px;
+}
+
+.sender-session-copy {
+    font-size: 11px;
+    margin-left: 0;
+    margin-right: 2px;
+    cursor: pointer;
+}
+
+.sender-session-name {
     font-style: italic;
+    font-size: 12px;
+    color: #6c757d;
+    margin-left: 6px;
+    max-width: 225px;
+    overflow: hidden;
+    text-overflow: ellipsis;
     white-space: nowrap;
-}
-
-/* ============================================================================
-   Persona badge (sender-card chrome)
-
-   Phase 6c Node A Step A1 (2026-05-19): renamed from `.persona-badge` to
-   `.sender-persona-badge` per F-Arnold-3 (rule-rename-in-place). The
-   element was also promoted from <span> to <button> with `popovertarget`
-   pointing at the persona-popover modal — clicking opens a popover with
-   full persona details (name, voice id, borrowed status). The badge is
-   now glyph-only (icon shown; name surfaced via popover on demand).
-   Button-default styling (border, background) is overridden below; the
-   pill shape + persona-color flow is preserved verbatim from the legacy
-   span styling.
-   ============================================================================ */
-
-.sender-persona-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-    padding: 1px 8px;
-    border-radius: 10px;
-    background-color: var( --persona-color, #6c757d );
-    color: #fff;
-    font-size: 11px;
-    font-weight: 600;
-    text-shadow: 0 1px 1px rgb( 0, 0, 0, 0.15 );
-    white-space: nowrap;
-    /* Reset native <button> defaults so the visual matches the legacy span. */
-    border: none;
     cursor: pointer;
-    font-family: inherit;
+    border-bottom: 1px dotted rgba( 108, 117, 125, 0.4 );
+    padding: 0 4px;
+    transition: background-color 0.2s, border-bottom-color 0.2s;
 }
 
-.sender-persona-badge.borrowed {
-    border: 1px dashed #fff;
+.sender-gist-btn {
+    background: rgba( 108, 117, 125, 0.15 );
+    border: 1px solid rgba( 108, 117, 125, 0.3 );
+    border-radius: 4px;
+    cursor: pointer;
+    padding: 2px 8px;
+    margin-left: 6px;
+    font-size: 0.85em;
     opacity: 0.8;
+    transition: all 0.2s ease;
 }
 
-/* ============================================================================
-   Date accordion (sender card → date → messages)
-   ============================================================================ */
-
-.sender-card-dates {
-    padding: 4px 0;
-    background-color: #fff;
-}
-
-.date-accordion {
-    margin: 0;
-    border-top: 1px solid #f1f3f5;
-}
-
-.date-accordion:first-child {
-    border-top: none;
-}
-
-.date-accordion-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 14px;
-    background-color: #f8f9fa;
-    border-bottom: 1px solid #e9ecef;
+.sender-delete-btn {
+    background: none;
+    border: none;
+    font-size: 16px;
+    color: #adb5bd;
     cursor: pointer;
-    user-select: none;
-    transition: background 0.2s;
+    padding: 2px 6px;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+    line-height: 1;
+    margin-left: 4px;
 }
 
-.date-accordion-header:hover {
-    background-color: #e9ecef;
-}
-
-.date-text {
-    font-size: 11px;
-    font-weight: 600;
-    color: #495057;
-    letter-spacing: 0.3px;
-}
-
-.date-count {
+.sender-toggle {
+    font-size: 12px;
     color: #6c757d;
-    font-size: 11px;
+    margin-left: 8px;
 }
 
-.date-toggle {
-    margin-left: auto;
-    color: #6c757d;
-    font-size: 10px;
-}
-
-.date-accordion-messages {
-    display: flex;
-    flex-direction: column;
-    padding: 6px 8px;
-    max-height: 60vh;
-    overflow-y: auto;
-    /* CSS-parity 2026-06-17: restore legacy message-well inset background +
-       top separator (notifications.css .date-accordion-messages). max-height
-       intentionally kept at the Phase-5 60vh value (legacy was 250px). */
-    border-top: 1px solid #e9ecef;
-    background-color: #fafafa;
-}
-
-.date-accordion[ data-collapsed="true" ] .date-accordion-messages {
+/* Sender-card collapse (2026-06-23, section-toolbar/accordion parity, Rachel
+   🕊️). NotificationsListRenderer flips `data-collapsed="true"` on the
+   `.sender-card` on a header click (carbon-copy of legacy toggleSenderCard,
+   which hid `.sender-card-dates` via inline `style.display`). The mux uses a
+   data-attr (parallel to the date-accordion `[data-collapsed]` idiom) instead
+   of inline style; only the dates region collapses (header + any CC voice-input
+   row stay visible), matching legacy. This is a MUX MECHANISM — legacy carries
+   NO equivalent CSS-class selector (it collapsed via inline style), so there is
+   nothing to UNION into the shared C2-b collapse rule: this stays mux-only, by
+   design. (C2-b single-sources only the date-accordion collapse, which DOES have
+   a legacy `.collapsed` counterpart — see test_c2b_collapse_union_in_shared.) */
+.sender-card[ data-collapsed="true" ] .sender-card-dates {
     display: none;
 }
 
+/* C2-a RESOLVED (WS2): the `.sender-persona-badge` (mux button) BASE styling
+   lives in the shared sheet as a `.persona-badge, .sender-persona-badge` UNION
+   that makes the button compute identically to the legacy span (inline-flex +
+   gap layout supplied there).
+
+   Lane-2 skin revert (2026-07-02, plan 06 §5): the badge reverted from R4
+   glyph-only back to the legacy inline icon + NAME, so senderCard.ts now emits
+   `.persona-badge-icon` + `.persona-badge-name` children inside the button.
+   These two child rules are byte-faithful from legacy notifications.css:1765-1771
+   and are declared mux-side here (this sheet is mux-only-linked; legacy declares
+   its own copies in the monolith). */
+.persona-badge-icon {
+    font-size: 1.0em;
+}
+
+.persona-badge-name {
+    letter-spacing: 0.02em;
+}
+
 /* ============================================================================
-   Sender message — chat-bubble shape
+   Date-accordion MUX-ONLY / MECHANISM seams.
    ============================================================================ */
 
-.sender-message {
-    position: relative;
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    padding: 6px 10px;
-    margin-bottom: 6px;
-    border-radius: 8px;
-    font-size: 13px;
-    line-height: 1.4;
-    background-color: #f8f9fa;
-}
+/* RENAME COMPLETED (WS2): the `.date-label`→`.date-text` rename is done — the
+   shared sheet now styles `.date-text` at the designed 13px/500 (byte-faithful
+   from notifications.css:2776), so this mux 11px placeholder is removed. */
 
-.sender-message.incoming {
-    margin-right: 40px;
-    border-bottom-left-radius: 2px;
-    background: linear-gradient(
-        to right,
-        rgb( var( --persona-color-rgb, 233, 236, 239 ), 0.10 ),
-        rgb( var( --persona-color-rgb, 248, 249, 250 ), 0.02 )
-    );
-}
+/* C2-b RESOLVED (WS2): the `[data-collapsed]` collapse rule moved to the shared
+   sheet as a `.collapsed ∪ [data-collapsed]` UNION, so the single contract now
+   drives both clients' collapse. No mux-only collapse rule remains here. */
 
-.sender-card:not( [ style*="--persona-color" ] ) .sender-message.incoming {
-    background: linear-gradient( to right, #e9ecef, #f8f9fa );
-}
-
-.sender-message.outgoing {
-    background-color: #007bff;
-    color: #fff;
-    margin-left: 40px;
-    flex-direction: row-reverse;
-    border-bottom-right-radius: 2px;
-}
-
-.sender-message.expired-response {
-    opacity: 0.6;
-}
-
-.message-time {
-    font-size: 10px;
-    color: #868e96;
-    white-space: nowrap;
-    flex-shrink: 0;
-    margin-top: 2px;
-}
-
-.sender-message.outgoing .message-time {
-    color: rgb( 255, 255, 255, 0.85 );
-}
-
-.message-text {
-    flex: 1;
-    overflow-wrap: anywhere;
-}
+/* ============================================================================
+   Message-text markdown niceties — MUX-ONLY (absent from the monolith's
+   notifications.css contract; styles renderMarkdownInline output).
+   ============================================================================ */
 
 .message-text p {
     margin: 0 0 6px 0;
@@ -325,22 +227,6 @@
 
 .message-text p:last-child {
     margin-bottom: 0;
-}
-
-.message-text code {
-    background: rgb( 0, 0, 0, 0.06 );
-    padding: 1px 4px;
-    border-radius: 3px;
-    font-size: 12px;
-}
-
-.message-text pre {
-    background: rgb( 0, 0, 0, 0.06 );
-    padding: 8px 10px;
-    border-radius: 4px;
-    overflow-x: auto;
-    font-size: 12px;
-    margin: 4px 0;
 }
 
 .message-text a {
@@ -353,241 +239,8 @@
 }
 
 /* ============================================================================
-   Expired badge + abstract indicator
-   ============================================================================ */
-
-.expired-badge {
-    display: inline-block;
-    padding: 1px 6px;
-    background-color: #dc3545;
-    color: #fff;
-    font-size: 9px;
-    font-weight: 700;
-    letter-spacing: 0.5px;
-    border-radius: 3px;
-    flex-shrink: 0;
-    margin-top: 2px;
-}
-
-.abstract-indicator {
-    display: inline-block;
-    cursor: pointer;
-    user-select: none;
-    flex-shrink: 0;
-    font-size: 13px;
-    margin-top: 1px;
-    transition: transform 0.15s;
-}
-
-.abstract-indicator:hover {
-    transform: scale( 1.15 );
-}
-
-/* ============================================================================
-   Progress group — head + history + toggle (Q-G lazy-render)
-   ============================================================================ */
-
-.progress-group-head {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    flex: 1;
-    width: 100%;
-}
-
-.progress-group-toggle {
-    margin-left: auto;
-    cursor: pointer;
-    user-select: none;
-    color: #6c757d;
-    font-size: 11px;
-    padding: 0 4px;
-    flex-shrink: 0;
-    transition: color 0.15s;
-}
-
-.progress-group-toggle:hover {
-    color: #495057;
-}
-
-.progress-group-history {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    margin-top: 6px;
-    padding-top: 6px;
-    border-top: 1px dashed rgb( 0, 0, 0, 0.08 );
-    width: 100%;
-}
-
-.progress-history-entry {
-    display: flex;
-    gap: 8px;
-    padding: 4px 8px;
-    background-color: rgb( 0, 0, 0, 0.03 );
-    border-radius: 4px;
-    font-size: 11px;
-    color: #6c757d;
-}
-
-.activity-timestamp {
-    font-size: 10px;
-    color: #adb5bd;
-    white-space: nowrap;
-    flex-shrink: 0;
-}
-
-.activity-message {
-    flex: 1;
-    overflow-wrap: anywhere;
-}
-
-@keyframes progress-pulse {
-    0% {
-        transform: scale( 1 );
-    }
-
-    50% {
-        transform: scale( 1.02 );
-        background-color: rgb( 0, 123, 255, 0.05 );
-    }
-
-    100% {
-        transform: scale( 1 );
-    }
-}
-
-/* ============================================================================
-   Action-required widget (read-only, Phase 5 — D-A naming)
-   ============================================================================ */
-
-.action-required-widget {
-    border: 1px solid #ffc107;
-    border-radius: 8px;
-    padding: 10px 14px;
-    background-color: #fff8e1;
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-    font-size: 13px;
-    line-height: 1.4;
-    cursor: not-allowed;
-    box-shadow: 0 1px 3px rgb( 255, 193, 7, 0.2 );
-    transition: opacity 0.2s;
-}
-
-.action-required-widget[ aria-disabled="true" ] {
-    opacity: 0.85;
-}
-
-.action-required-prompt {
-    flex: 1 1 100%;
-    font-weight: 600;
-    color: #212529;
-    margin-bottom: 4px;
-}
-
-.action-required-response-type-badge {
-    display: inline-block;
-    padding: 2px 8px;
-    background-color: #ffc107;
-    color: #212529;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.3px;
-    text-transform: uppercase;
-    border-radius: 4px;
-    flex-shrink: 0;
-}
-
-.action-required-countdown {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 2px 8px;
-    background-color: rgb( 255, 255, 255, 0.7 );
-    border: 1px solid #ffe082;
-    border-radius: 4px;
-    font-family: "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", monospace;
-    font-size: 12px;
-    color: #6c757d;
-    flex-shrink: 0;
-}
-
-.action-required-options-preview {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-    flex: 1 1 100%;
-    margin-top: 4px;
-}
-
-.action-required-option-readonly {
-    display: inline-block;
-    padding: 4px 12px;
-    background-color: rgb( 255, 255, 255, 0.85 );
-    border: 1px solid #ffe082;
-    border-radius: 4px;
-    color: #6c757d;
-    font-size: 12px;
-    cursor: not-allowed;
-    user-select: none;
-}
-
-.action-required-input-placeholder {
-    flex: 1 1 100%;
-    padding: 8px 12px;
-    background-color: rgb( 0, 0, 0, 0.04 );
-    border: 1px dashed #ced4da;
-    border-radius: 4px;
-    color: #adb5bd;
-    font-style: italic;
-    font-size: 12px;
-    margin-top: 4px;
-}
-
-.action-required-default {
-    flex: 1 1 100%;
-    color: #6c757d;
-    font-size: 11px;
-    margin-top: 4px;
-}
-
-.action-required-pending-notice {
-    flex: 1 1 100%;
-    padding: 4px 8px;
-    background-color: rgb( 0, 0, 0, 0.04 );
-    border-left: 3px solid #ffc107;
-    color: #6c757d;
-    font-size: 11px;
-    font-style: italic;
-    margin-top: 6px;
-}
-
-/* ============================================================================
-   Scrollbar styling (webkit)
-   ============================================================================ */
-
-.date-accordion-messages::-webkit-scrollbar {
-    width: 6px;
-}
-
-.date-accordion-messages::-webkit-scrollbar-track {
-    background: transparent;
-}
-
-.date-accordion-messages::-webkit-scrollbar-thumb {
-    background: #c1c1c1;
-    border-radius: 3px;
-}
-
-.date-accordion-messages::-webkit-scrollbar-thumb:hover {
-    background: #a1a1a1;
-}
-
-/* ============================================================================
-   Responsive — narrow viewports
+   Responsive — narrow viewports. MUX-ONLY (the monolith has no contract
+   @media). The oracle runs at a fixed viewport, so this does not affect parity.
    ============================================================================ */
 
 @media ( max-width: 600px ) {
@@ -598,7 +251,20 @@
     .sender-message.incoming  { margin-right: 16px; }
     .sender-message.outgoing  { margin-left:  16px; }
 
-    .sender-display-name { max-width: 160px; }
+    .sender-project-name { max-width: 160px; }
 
     .sender-stats-group  { gap: 4px; }
+}
+
+/* ============================================================================
+   Lane 0a (2026-07-02, Rachel 🕊️) — CC Notifications section collapse. The
+   notifications section-header bar is emitted by NotificationsHeaderRenderer
+   into #notifications-header-mount (a SEPARATE mount ABOVE the list pane), so
+   the chevron toggles `data-collapsed` on the sibling #notifications-pane. This
+   MUX-ONLY rule hides the list pane when collapsed (the header bar stays). Kept
+   in the mux sheet — #notifications-pane is a mux-only id and is barred from the
+   shared contract sheet by design. Session-only (07 §3.A U-A3).
+   ============================================================================ */
+#notifications-pane[ data-collapsed="true" ] {
+    display: none;
 }

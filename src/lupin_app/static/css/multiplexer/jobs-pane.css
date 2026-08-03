@@ -135,6 +135,83 @@
     transition: transform 0.15s ease;
 }
 
+/* W2 (plan 04 §W2) — per-bucket delete-all 🗑 button. Sits in the bucket header
+   just before the chevron. Muted by default; danger-tinted on hover to signal
+   the destructive bulk action. Legacy class name `.queue-delete-all-btn`
+   preserved verbatim (Q-C). */
+.jobs-bucket-header .queue-delete-all-btn {
+    background    : transparent;
+    border        : none;
+    color         : #adb5bd;
+    cursor        : pointer;
+    font-size     : 14px;
+    line-height   : 1;
+    padding       : 2px 6px;
+    border-radius : 3px;
+    user-select   : none;
+}
+
+.jobs-bucket-header .queue-delete-all-btn:hover {
+    background : #f8d7da;
+    color      : #dc3545;
+}
+
+/* W3 (plan 04 §W3) — history time-window <select>. Sits in the history bucket
+   header between the count and the 🗑. Compact to match the header density.
+   Legacy class `.history-time-select` preserved verbatim (Q-C). */
+.jobs-bucket-header .history-time-select {
+    font-size     : 11px;
+    padding       : 1px 4px;
+    border        : 1px solid #ced4da;
+    border-radius : 3px;
+    background    : #fff;
+    color         : #495057;
+    cursor        : pointer;
+}
+
+/* W4 (plan 04 §W4) — history Load-More affordance. Full-width row under the
+   history cards. Hidden when the bucket is collapsed (its header sibling carries
+   aria-expanded="false"), matching the collapsed cards. Legacy class
+   `.history-load-more` preserved verbatim (Q-C). */
+.history-load-more {
+    display       : block;
+    width         : 100%;
+    margin        : 4px 0 2px;
+    padding       : 6px;
+    font-size     : 12px;
+    font-weight   : 600;
+    color         : #007bff;
+    background    : #f8f9fa;
+    border        : 1px solid #e9ecef;
+    border-radius : 3px;
+    cursor        : pointer;
+}
+
+.history-load-more:hover {
+    background : #e9ecef;
+}
+
+.jobs-bucket-header[ aria-expanded="false" ] ~ .history-load-more {
+    display : none;
+}
+
+/* W6 (plan 04 §W6) — queues filter badge (👤 Mine / 🌐 Others / 🔵 All). Static
+   hidden seam under D1; plan-08 lights it up. Legacy class `.queues-filter-badge`
+   preserved verbatim (Q-C). `[hidden]` keeps it out of the flow until wired. */
+.queues-filter-badge {
+    font-size     : 11px;
+    font-weight   : 500;
+    padding       : 1px 6px;
+    margin-left   : 6px;
+    border-radius : 10px;
+    background    : #e9ecef;
+    color         : #495057;
+}
+
+.queues-filter-badge[ hidden ] {
+    display : none;
+}
+
 .jobs-bucket-cards {
     display        : flex;
     flex-direction : column;
@@ -254,6 +331,26 @@
     user-select   : none;
 }
 
+/* W5 (plan 04 §W5) — per-job retry ↻ on terminal cards (dead + history). Sits
+   just before the delete button in the card header. Legacy class name
+   `.job-retry-button` preserved verbatim (Q-C). */
+.jobs-bucket .job-retry-button {
+    background    : transparent;
+    border        : none;
+    color         : #6c757d;
+    cursor        : pointer;
+    font-size     : 15px;
+    line-height   : 1;
+    padding       : 2px 6px;
+    border-radius : 3px;
+    user-select   : none;
+}
+
+.jobs-bucket .job-retry-button:hover {
+    background : #e2f0ff;
+    color      : #007bff;
+}
+
 .jobs-bucket .job-delete-button[ aria-disabled="true" ] {
     opacity : 0.55;
 }
@@ -310,7 +407,7 @@
 }
 
 /* ============================================================================
-   Paused job-card (ported from notifications.css:4841-4846 — visual-only in
+   Paused job-card (ported from notifications.css:5126-5133 — visual-only in
    6a per Q-A4; pause/resume controls land in 6b)
    ============================================================================ */
 
@@ -321,4 +418,46 @@
 
 .jobs-bucket .job-card.job-paused .job-card-header {
     background : #fffbeb;
+}
+
+/* ============================================================================
+   hydration-failure banner (the hydration_failed CONSUMER affordance — WS3
+   cross-cutting, 2026-06-22). Painted at the top of #jobs-pane when
+   JobsPaneRenderer's eager hydrateHistory rejects, so the failure is VISIBLE
+   instead of console-only. Carries a Retry button that re-runs hydration.
+   ============================================================================ */
+
+.jobs-hydration-error {
+    display         : flex;
+    align-items     : center;
+    justify-content : space-between;
+    gap             : 12px;
+    margin          : 8px;
+    padding         : 10px 12px;
+    background      : #f8d7da;
+    border          : 1px solid #f5c2c7;
+    border-left     : 3px solid #dc3545;
+    border-radius   : 4px;
+    color           : #721c24;
+    font-size       : 13px;
+}
+
+.jobs-hydration-error-message {
+    flex : 1;
+}
+
+.jobs-hydration-retry {
+    flex-shrink   : 0;
+    padding       : 4px 12px;
+    background    : #dc3545;
+    color         : #fff;
+    border        : none;
+    border-radius : 3px;
+    font-size     : 12px;
+    font-weight   : 600;
+    cursor        : pointer;
+}
+
+.jobs-hydration-retry:hover {
+    background : #bb2d3b;
 }

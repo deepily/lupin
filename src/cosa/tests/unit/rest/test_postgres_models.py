@@ -14,6 +14,8 @@ the slice is exercised. ZERO DB.
 import unittest
 import uuid
 
+from sqlalchemy import DateTime
+
 from cosa.rest import postgres_models as pm
 
 
@@ -77,6 +79,37 @@ class TestModelReprs( unittest.TestCase ):
     def test_server_lifecycle_repr( self ):
         r = repr( pm.ServerLifecycle( key="singleton", last_available_at="2026-01-01T00:00:00Z" ) )
         self.assertIn( "ServerLifecycle(", r )
+
+
+class TestAnswerDeliveredAtColumn( unittest.TestCase ):
+    """
+    A-V2 (late-answer handback §4.1): the answer_delivered_at column and the
+    partial owed index are present, correctly typed, and carry the exact
+    three-term owed predicate — asserted against the ORM metadata (no DB).
+
+    Red-proofs (A-V4 / A-V5): deleting the mapped_column reddens the column
+    asserts; removing the ORM Index reddens the index asserts.
+    """
+
+    _OWED_PREDICATE = "response_requested AND responded_at IS NOT NULL AND answer_delivered_at IS NULL"
+
+    def test_answer_delivered_at_column_exists_nullable_tstz( self ):
+        cols = pm.Notification.__table__.c
+        self.assertIn( "answer_delivered_at", cols, "A-V4 red-proof anchor: column must exist" )
+        col = cols[ "answer_delivered_at" ]
+        self.assertTrue( col.nullable, "answer_delivered_at must be NULLable" )
+        self.assertIsInstance( col.type, DateTime, "answer_delivered_at must be a DateTime" )
+        self.assertTrue( col.type.timezone, "answer_delivered_at must be TIMESTAMPTZ (timezone=True)" )
+
+    def test_answer_owed_index_present_with_predicate( self ):
+        idxs = { index.name: index for index in pm.Notification.__table__.indexes }
+        self.assertIn( "idx_notifications_answer_owed", idxs, "A-V5 red-proof anchor: ORM Index must be declared" )
+        idx = idxs[ "idx_notifications_answer_owed" ]
+        # Columns, in order: sender_persona then responded_at.
+        self.assertEqual( [ c.name for c in idx.columns ], [ "sender_persona", "responded_at" ] )
+        # The partial predicate is character-identical to the migration and the repo query.
+        where_clause = idx.dialect_options[ "postgresql" ][ "where" ]
+        self.assertEqual( str( where_clause ), self._OWED_PREDICATE )
 
 
 def isolated_unit_test():

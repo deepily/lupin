@@ -1,25 +1,34 @@
-# Backup Command for Lupin
+# Backup Command - Dry Run (Safe Default)
 
 **Project**: Lupin
 **Prefix**: [LUPIN]
+**Version**: 1.0
+
+---
+
+## Related Commands
+
+This is the **safe default** - preview changes without modifying files.
+
+For other operations, use:
+- `/plan-backup-write` - Execute actual backup (files will be modified)
+- `/plan-backup-check` - Check for script version updates only
 
 ---
 
 ## Usage
 
-- `/plan-backup` - Dry-run (preview changes, no files modified)
-- `/plan-backup --write` - Execute backup to destination
-- `/plan-backup --check-for-update` - Check for script updates only
+`/plan-backup` - Dry-run preview (no files modified)
 
 ---
 
 ## Instructions to Claude
 
-Execute the project's backup script located at `src/scripts/backup.sh` with the provided flags.
+Execute the project's backup script located at `src/scripts/backup.sh` in **dry-run mode** (safe default).
 
 **Command**:
 ```bash
-./src/scripts/backup.sh "$@"
+./src/scripts/backup.sh
 ```
 
 **What this does**:
@@ -45,11 +54,11 @@ Execute the project's backup script located at `src/scripts/backup.sh` with the 
 
 ```
 ========================================
-  Lupin Backup Sync
+  Planning is Prompting Backup Sync
 ========================================
 Mode: DRY RUN
-Source: /mnt/DATA01/include/www.deepily.ai/projects/[project]/
-Destination: /mnt/DATA02/include/www.deepily.ai/projects/[project]/
+Source: /mnt/DATA01/include/www.deepily.ai/projects/lupin/
+Destination: /mnt/DATA02/include/www.deepily.ai/projects/planning-is-prompting/
 Exclusions: src/scripts/conf/rsync-exclude.txt
 ========================================
 
@@ -67,7 +76,7 @@ Running rsync...
   DRY RUN COMPLETE
 ========================================
 No files were modified. To execute sync, run:
-  /plan-backup --write
+  /plan-backup-write
 ```
 
 **Configuration**:
@@ -88,7 +97,7 @@ src/scripts/conf/rsync-exclude.txt
 **Version Management**:
 
 This script is versioned and can be updated from the canonical reference:
-- Check for updates: `/plan-backup --check-for-update`
+- Check for updates: `/plan-backup-check`
 - See planning-is-prompting → workflow/backup-version-check.md for update process
 
 ---

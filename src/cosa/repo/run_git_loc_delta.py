@@ -108,6 +108,16 @@ def create_parser() -> argparse.ArgumentParser:
         default = "main",
         help    = "Base ref for --branch mode (default: main)",
     )
+    parser.add_argument(
+        "--all-branches",
+        action  = "store_true",
+        help    = (
+            "Walk ALL local branch refs, not just HEAD. Answers 'what work happened "
+            "in this window' rather than 'what is on my current branch'. Git de-dupes "
+            "the DAG walk, so a commit reachable from several branches is counted once. "
+            "Not valid with --branch (a branch delta already names its endpoints)."
+        ),
+    )
 
     # Filters
     parser.add_argument(
@@ -379,6 +389,16 @@ def main( argv: Optional[list] = None ) -> int:
     target_root = _resolve_target_root( args.repo_path )
     repo_name   = _resolve_repo_name( args.repo_name, target_root )
 
+    if args.all_branches and mode == "branch":
+        print(
+            "Error: --all-branches is not valid with --branch. A branch delta "
+            "(base..branch) already names its endpoints; widening the walk to every "
+            "local ref would answer a different question. Use --since/--until "
+            "--all-branches to ask 'what work happened in this window'.",
+            file = sys.stderr,
+        )
+        return 1
+
     try:
         analyzer = GitLogLocDeltaAnalyzer(
             repo_path      = args.repo_path,
@@ -387,13 +407,17 @@ def main( argv: Optional[list] = None ) -> int:
             base           = args.base,
             since          = args.since,
             until          = args.until,
+            all_branches   = args.all_branches,
             include_merges = args.include_merges,
             author         = args.author,
             repo_name      = repo_name,
             debug          = args.debug,
             verbose        = args.verbose,
         )
-        result = analyzer.analyze()
+        result = analyzer.analyze( reconcile=True )
+        coverage = result.get( "coverage" )
+        if coverage and not coverage[ "reconciled" ]:
+            print( coverage[ "warning" ], file=sys.stderr )
     except DateRangeError as e:
         # Graceful empty output for empty ranges (AC17): print the banner and exit 0
         # only for the "no commits / merge-base == HEAD" subcase. Other invalid

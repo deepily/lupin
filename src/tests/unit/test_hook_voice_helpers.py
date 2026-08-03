@@ -28,12 +28,17 @@ from lupin_cli.claude_code.hooks.lib.hook_common import (
     increment_stop_block_count,
     reset_stop_block_count,
     build_peer_dm_reminder,
+    is_injected_peer_dm,
+    PEER_DM_FRAME_PREFIX,
     enrich_voice_context,
     deliver_pending_peer_dms,
     inject_qualifier_via_tmux,
     MAX_STOP_BLOCKS,
     MCP_VOICE_PREFIX,
     VOICE_LINE_PREFIX,
+    VOICE_ACK_RIDER,
+    BREVITY_TAG,
+    DM_STYLE_TAG,
     TOOLS_SILENT,
     TOOLS_ANNOUNCE
 )
@@ -418,6 +423,32 @@ class TestBuildPeerDmReminder:
         assert "notify("      not in r
         assert "tts"          not in lowered
 
+    def test_one_way_omits_reply_affordance( self ):
+        """bug 8894e597: one_way=True (arbiter-authored advisory) → NO dm_send reply
+        affordance (the arbiter has no inbox — bug 9694fb11), replaced by the honest
+        one-way notice naming resumed work as the acknowledgment. Header + body intact."""
+        r = build_peer_dm_reminder(
+            "you appear STUCK — status?", persona="heartbeat-arbiter", icon="🛰️",
+            msg_id="m-1", thread_id="t-1", one_way=True,
+        )
+        # still a framed peer-DM block with the header + body
+        assert r.startswith( "<system-reminder>" ) and r.endswith( "</system-reminder>" )
+        assert "PEER DM from heartbeat-arbiter 🛰️" in r
+        assert "you appear STUCK — status?" in r
+        # the FALSE reply affordance is gone
+        assert "dm_send" not in r
+        assert "Reply via" not in r
+        # the honest one-way signal path is present
+        assert "ONE-WAY" in r and "no inbox" in r
+        assert "resuming work" in r and "acknowledgment" in r
+
+    def test_default_stays_bidirectional_when_one_way_false( self ):
+        """Regression guard: the DEFAULT (one_way=False) still emits the dm_send
+        affordance — genuine peer DMs are untouched by the 8894e597 arbiter variant."""
+        r = build_peer_dm_reminder( "body", persona="maría", icon="🌸", msg_id="m1", thread_id="t1" )
+        assert 'dm_send( recipient="maría"' in r
+        assert "ONE-WAY" not in r
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # TestFormatVoiceContextPeerDm — §6a ai_to_ai branch of format_voice_context
@@ -499,7 +530,7 @@ class TestEnrichVoiceContext:
         dm_block = format_voice_context( msgs )
         result   = enrich_voice_context( dm_block, msgs )
         assert result == dm_block
-        assert "MUST acknowledge" not in result
+        assert VOICE_ACK_RIDER not in result
 
     def test_voice_only_keeps_rider( self ):
         """A voice-only context (a human_to_ai message) keeps the notify()-acknowledge rider."""
@@ -507,7 +538,7 @@ class TestEnrichVoiceContext:
         ctx    = format_voice_context( msgs )
         result = enrich_voice_context( ctx, msgs )
         assert result.startswith( f"{VOICE_LINE_PREFIX}hello" )
-        assert "MUST acknowledge" in result
+        assert VOICE_ACK_RIDER in result
 
     def test_mixed_voice_and_dm_keeps_rider( self ):
         """A mixed context (voice + DM) keeps the rider — the voice line still needs it."""
@@ -516,13 +547,13 @@ class TestEnrichVoiceContext:
             { "message": "dm body", "direction": "ai_to_ai", "sender_persona": "maría" },
         ]
         result = enrich_voice_context( format_voice_context( msgs ), msgs )
-        assert "MUST acknowledge" in result
+        assert VOICE_ACK_RIDER in result
 
     def test_messages_none_defaults_to_no_rider( self ):
         """messages=None is the §6a-safe default — never attach the human rider blindly."""
         result = enrich_voice_context( f"{VOICE_LINE_PREFIX}hello" )
         assert result == f"{VOICE_LINE_PREFIX}hello"
-        assert "MUST acknowledge" not in result
+        assert VOICE_ACK_RIDER not in result
 
     def test_blank_human_voice_does_not_count_as_voice( self ):
         """A BLANK human_to_ai message contributes no [Voice]: line → structurally
@@ -533,7 +564,7 @@ class TestEnrichVoiceContext:
         ]
         ctx    = format_voice_context( msgs )   # only the DM block renders
         result = enrich_voice_context( ctx, msgs )
-        assert "MUST acknowledge" not in result
+        assert VOICE_ACK_RIDER not in result
 
     def test_f2_voice_marker_inside_dm_body_no_rider( self ):
         """
@@ -549,8 +580,110 @@ class TestEnrichVoiceContext:
         ctx    = format_voice_context( msgs )
         assert VOICE_LINE_PREFIX in ctx          # the substring IS present in the body…
         result = enrich_voice_context( ctx, msgs )
-        assert "MUST acknowledge" not in result  # …but structurally it's a pure peer DM → NO rider
+        assert VOICE_ACK_RIDER not in result  # …but structurally it's a pure peer DM → NO rider
         assert result == ctx
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TestBrevityRiders — Rick's brevity mandate, 2026-07-19 (tasks 6a3941b8 + 314671cd)
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestBrevityRiders:
+    """The brevity tag rides both injection surfaces — voice-ack and peer-DM."""
+
+    def test_voice_ack_rider_carries_brevity_tag( self ):
+        """The STT/voice rider carries the tag (task 6a3941b8)."""
+        assert BREVITY_TAG in VOICE_ACK_RIDER
+
+    def test_voice_ack_rider_stays_under_byte_ceiling( self ):
+        """
+        The ratchet (Maria's net-smaller constraint): this rider is appended to EVERY
+        spoken utterance, so its byte cost is a standing budget, not a one-time choice.
+        The pre-brevity-mandate rider was 325 chars; folding the tag in had to make the
+        payload SMALLER, not bigger. 260 leaves trim headroom without licensing regrowth.
+        """
+        assert len( VOICE_ACK_RIDER ) < 260, (
+            f"voice rider grew to {len( VOICE_ACK_RIDER )} chars — it rides every "
+            f"utterance; trim it rather than raising this ceiling"
+        )
+
+    def test_escape_clause_wording_is_asked_not_content_requires( self ):
+        """
+        LOAD-BEARING (Rick's amendment): the exception must read "ONLY WHEN ASKED".
+        "when the content requires it" was drafted and rejected the same hour — a
+        self-assessed exception hands length-discretion back to the verbose author,
+        which makes the rule a receipt instead of a control.
+        """
+        assert "ONLY WHEN ASKED" in BREVITY_TAG
+        assert "content requires" not in BREVITY_TAG.lower()
+
+    def test_tag_carries_all_four_acronyms( self ):
+        """
+        The mandate is four acronyms, not three — NoAA (No Aphorisms or Apologies)
+        was ratified ~20 min after the first three (canonical c64aed1). Pinned by
+        name so a future trim cannot silently drop one to buy bytes: the ceiling is
+        bought by cutting PROSE, never by dropping an acronym.
+        """
+        for acronym in ( "KISS", "3LoL", "NoMC C2C", "NoAA" ):
+            assert acronym in BREVITY_TAG, f"{acronym} missing from the tag"
+
+    def test_peer_dm_reply_affordance_carries_dm_style_tag( self ):
+        """A bidirectional peer DM carries the DM Style Contract tag on its reply
+        affordance (DM Verbosity Reduction, always-on — no toggle)."""
+        block = build_peer_dm_reminder( "status?", persona="maría", icon="🌸",
+                                        msg_id="m1", thread_id="t1" )
+        assert DM_STYLE_TAG in block
+        assert "dm_send(" in block
+
+    def test_one_way_advisory_suppresses_reply_rider( self ):
+        """
+        An arbiter one-way advisory takes NO reply (bug 8894e597), so a rider that
+        shapes replies is pure byte cost — suppressed (the DM Style Contract tag
+        does not appear).
+        """
+        block = build_peer_dm_reminder( "poke", persona="arbiter", one_way=True )
+        assert BREVITY_TAG not in block
+        assert DM_STYLE_TAG not in block
+        assert "ONE-WAY advisory" in block
+
+    def test_reply_affordance_derives_from_one_tag_constant_no_drift( self ):
+        """The reply affordance's rider IS the module's DM_STYLE_TAG constant —
+        never a re-typed literal (46a17f5a). The voice-ack rider likewise derives
+        from BREVITY_TAG."""
+        assert BREVITY_TAG in VOICE_ACK_RIDER
+        block = build_peer_dm_reminder( "status?", persona="maría", icon="🌸",
+                                        msg_id="m1", thread_id="t1" )
+        assert DM_STYLE_TAG in block
+
+
+class TestDmStyleTag:
+    """
+    DM_STYLE_TAG — Phase 1 DM Verbosity Reduction (Rick, 2026-07-31). Same
+    ratchet/wording discipline as BREVITY_TAG, kept as a separate constant
+    because BREVITY_TAG's "Detail → abstract" clause doesn't apply to dm_send
+    (no abstract parameter).
+    """
+
+    def test_stays_under_byte_ceiling( self ):
+        """
+        This tag is spliced into the MCP `instructions` payload AND appended to
+        the reply-affordance rider, so its byte cost is a standing budget, not a
+        one-time choice — same ratchet discipline as VOICE_ACK_RIDER.
+        """
+        assert len( DM_STYLE_TAG ) < 220, (
+            f"DM_STYLE_TAG grew to {len( DM_STYLE_TAG )} chars — trim it rather "
+            f"than raising this ceiling"
+        )
+
+    def test_escape_clause_wording_is_asked_not_content_requires( self ):
+        """Same load-bearing wording rule as BREVITY_TAG — see that test's rationale."""
+        assert "ONLY WHEN ASKED" in DM_STYLE_TAG
+        assert "content requires" not in DM_STYLE_TAG.lower()
+
+    def test_not_merged_into_brevity_tag( self ):
+        """Deliberately a separate constant — never accidentally unified."""
+        assert DM_STYLE_TAG != BREVITY_TAG
+        assert "abstract" not in DM_STYLE_TAG.lower()
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -660,3 +793,28 @@ class TestInjectQualifierWrapParam:
     def test_outer_exception_swallowed( self, mock_find ):
         """An error resolving the session is swallowed (hook must never crash CC)."""
         inject_qualifier_via_tmux( "abc12345", "text" )   # must not raise
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TestIsInjectedPeerDm — bug d0d7f068 Part 2 (option C): the peer-DM inject
+# predicate the Stop-hook poke-cap reset guard uses to NOT treat a DM/tap as
+# genuine user re-engagement. Matched via the SHARED PEER_DM_FRAME_PREFIX.
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestIsInjectedPeerDm:
+    def test_true_on_build_peer_dm_reminder_envelope( self ):
+        """A real build_peer_dm_reminder envelope (the SINGLE source of framing) is
+        recognized — derived from the shared constant, no re-typed literal."""
+        dm = build_peer_dm_reminder( "where are we on X?", persona="mr radio", icon="🦉",
+                                     msg_id="m1", thread_id="t1" )
+        assert PEER_DM_FRAME_PREFIX in dm                 # frame really is present
+        assert is_injected_peer_dm( dm ) is True
+
+    def test_false_on_genuine_user_prompt( self ):
+        """Real user typing carries no peer-DM frame → resets the cap (re-engagement)."""
+        assert is_injected_peer_dm( "please fix the failing test" ) is False
+
+    def test_false_on_non_string( self ):
+        """Foreign hook-payload data (None / non-str) → False, never raises."""
+        assert is_injected_peer_dm( None ) is False
+        assert is_injected_peer_dm( { "prompt": "x" } ) is False

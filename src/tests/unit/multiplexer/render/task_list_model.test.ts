@@ -5,15 +5,23 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  activeReassignTargets,
+  deriveTaskActor,
+  EDITABLE_PRIORITIES,
   formatChaseTime,
   formatTaskBlockedBy,
   groupTasksByOwner,
   isOpenStatus,
+  priorityRank,
   taskCellOrDash,
   taskOwnerLabel,
   taskPriorityClass,
   taskStatusClass,
   taskTitleLabel,
+  taskBodyIsEmpty,
+  taskIdLabel,
+  truncateTaskTitle,
+  TASK_TITLE_TRUNCATE_LEN,
   type TaskBlockedRef,
   type TaskItem,
 } from "../../../../lupin_app/static/js/multiplexer/render/taskListModel";
@@ -224,4 +232,124 @@ test("formatChaseTime: invalid IANA zone → degrades to browser-local (no throw
   const out = formatChaseTime("2026-06-16T14:30:00Z", "Not/AZone");
   assert.notEqual(out, "—");
   assert.match(out, /\d/);
+});
+
+// ---------------------------------------------------------------------------
+// Phase 2 — priorityRank (now exported), EDITABLE_PRIORITIES
+// ---------------------------------------------------------------------------
+
+test("priorityRank: P0 highest; unknown/absent sort last", () => {
+  assert.equal(priorityRank("P0"), 0);
+  assert.equal(priorityRank("P3"), 3);
+  assert.equal(priorityRank(null), 99);
+  assert.equal(priorityRank(undefined), 99);
+  assert.equal(priorityRank("nonsense"), 99);
+});
+
+test("EDITABLE_PRIORITIES: P0–P3 in urgency order", () => {
+  assert.deepEqual([...EDITABLE_PRIORITIES], ["P0", "P1", "P2", "P3"]);
+});
+
+// ---------------------------------------------------------------------------
+// Phase 2 — deriveTaskActor (Q1: derive from authed user, not a fixed literal)
+// ---------------------------------------------------------------------------
+
+test("deriveTaskActor: email → '<email> (multiplexer)'", () => {
+  assert.equal(deriveTaskActor("rick@example.com"), "rick@example.com (multiplexer)");
+});
+
+test("deriveTaskActor: trims surrounding whitespace", () => {
+  assert.equal(deriveTaskActor("  rick@example.com  "), "rick@example.com (multiplexer)");
+});
+
+test("deriveTaskActor: null/undefined/blank → anonymous fallback", () => {
+  assert.equal(deriveTaskActor(null), "anonymous (multiplexer)");
+  assert.equal(deriveTaskActor(undefined), "anonymous (multiplexer)");
+  assert.equal(deriveTaskActor(""), "anonymous (multiplexer)");
+  assert.equal(deriveTaskActor("   "), "anonymous (multiplexer)");
+});
+
+// ---------------------------------------------------------------------------
+// Phase 2 — activeReassignTargets (active personas, Sam INCLUDED; Q5)
+// ---------------------------------------------------------------------------
+
+test("activeReassignTargets: null / missing fleet_arbiter / non-array sessions → []", () => {
+  assert.deepEqual(activeReassignTargets(null), []);
+  assert.deepEqual(activeReassignTargets(undefined), []);
+  assert.deepEqual(activeReassignTargets({}), []);                                  // no fleet_arbiter
+  assert.deepEqual(activeReassignTargets({ fleet_arbiter: {} }), []);              // no sessions
+  assert.deepEqual(activeReassignTargets({ fleet_arbiter: { sessions: "x" as unknown as [] } }), []);
+});
+
+test("activeReassignTargets: distinct live personas, alpha-sorted", () => {
+  const fleet = { fleet_arbiter: { sessions: [
+    { persona: "zoe" },
+    { persona: "amy" },
+    { persona: "amy" },   // duplicate collapses
+    { persona: "bob" },
+  ] } };
+  assert.deepEqual(activeReassignTargets(fleet), ["amy", "bob", "zoe"]);
+});
+
+test("activeReassignTargets: INCLUDES the Sam overflow persona (Q5)", () => {
+  // Q5 ruling 2026-06-23: the roster is the SAME one the fleet-status card shows,
+  // which carries Sam as a live persona — no reassign-only exclusion. Sam is a
+  // valid reassignment target alongside the other live personas.
+  const fleet = { fleet_arbiter: { sessions: [
+    { persona: "Sam" },
+    { persona: "amy" },
+  ] } };
+  assert.deepEqual(activeReassignTargets(fleet), ["amy", "Sam"]);
+});
+
+test("activeReassignTargets: offline personas are excluded (only live contribute)", () => {
+  const fleet = { fleet_arbiter: { sessions: [
+    { persona: "amy", liveness: { verdict: "live" } },
+    { persona: "bob", liveness: { verdict: "offline" } },   // dropped
+    { persona: "carol" },                                    // no verdict → live
+  ] } };
+  assert.deepEqual(activeReassignTargets(fleet), ["amy", "carol"]);
+});
+
+test("activeReassignTargets: blank/absent personas dropped", () => {
+  const fleet = { fleet_arbiter: { sessions: [
+    { persona: "" },
+    { session_id: "abc" },   // no persona
+    { persona: "amy" },
+  ] } };
+  assert.deepEqual(activeReassignTargets(fleet), ["amy"]);
+});
+
+// ---------------------------------------------------------------------------
+// Row redesign 2026.06.29 — taskIdLabel / truncateTaskTitle / taskBodyIsEmpty
+// (mirror the in-service notifications.js helpers; 100% L/B/F).
+// ---------------------------------------------------------------------------
+
+test("taskIdLabel: first 8 chars of id; short id verbatim; absent/null → em-dash", () => {
+  assert.equal(taskIdLabel({ id: "3b85863e-ccb9-4948-948c-627e3922850e" }), "3b85863e");
+  assert.equal(taskIdLabel({ id: "abc" }), "abc");      // shorter than 8
+  assert.equal(taskIdLabel({ id: "" }), "—");
+  assert.equal(taskIdLabel({}), "—");                   // id absent
+  assert.equal(taskIdLabel({ id: null } as TaskItem), "—");
+  assert.equal(taskIdLabel(null), "—");                 // no task object
+  assert.equal(taskIdLabel(undefined), "—");
+});
+
+test("truncateTaskTitle: under/at cap verbatim; over cap → slice(60)+ellipsis", () => {
+  assert.equal(TASK_TITLE_TRUNCATE_LEN, 60);
+  assert.equal(truncateTaskTitle("short title"), "short title");
+  const at = "x".repeat(60);
+  assert.equal(truncateTaskTitle(at), at);              // exactly at cap → no ellipsis
+  const over = "y".repeat(90);
+  assert.equal(truncateTaskTitle(over), "y".repeat(60) + "…");
+});
+
+test("taskBodyIsEmpty: null/undefined/blank → true; non-blank → false", () => {
+  assert.equal(taskBodyIsEmpty({ body: null }), true);
+  assert.equal(taskBodyIsEmpty({}), true);              // body absent
+  assert.equal(taskBodyIsEmpty({ body: "" }), true);
+  assert.equal(taskBodyIsEmpty({ body: "  \n\t " }), true);
+  assert.equal(taskBodyIsEmpty(null), true);            // no task object
+  assert.equal(taskBodyIsEmpty(undefined), true);
+  assert.equal(taskBodyIsEmpty({ body: "detail here" }), false);
 });

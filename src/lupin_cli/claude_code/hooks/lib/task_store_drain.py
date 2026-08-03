@@ -14,7 +14,9 @@ This module replays each ACTIVE session's transcript and IDEMPOTENTLY creates
 a store item for every owed native item it finds, stamping the SAME identity
 the mirror would have stamped:
 
-    owner_persona        = the session's lowercased voice-persona name
+    owner_persona        = the session's canonical voice-persona key
+                           (canonical_persona_key: accent/punct-stripped,
+                           lowercased, internal spaces kept — store-key parity)
     accountable_manager  = same (mirror's create branch sets both)
     project              = the session's bridge-cwd-anchored project name
     correlation_key      = cc-task:<stable_sid>:g<generation>:<harness_id>
@@ -43,6 +45,7 @@ Design authority: lupin ->
     src/rnd/v0.1.8/2026.06.16-store-canonical-task-mgmt-cascade-review.md §Q(d).
 """
 
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -56,13 +59,26 @@ from lupin_cli.claude_code.hooks.lib.task_store_settings import load_task_store_
 from lupin_cli.claude_code.hooks.lib import task_store_client as client
 from lupin_cli.claude_code.hooks.lib import task_store_map as task_map
 from lupin_cli.claude_code.hooks.lib.session_bridge import find_active_voice_persona_sessions
+from lupin_mcp.persona_normalization import canonical_persona_key
 
 
-# STORE-side owed statuses (parity to stop.py STORE_OWED_STATUSES). The mirror
-# maps a pending harness task -> store "queued" and an in_progress task ->
-# "in_progress"; a drain-created item lands at "queued" (the create endpoint
-# forces it). Both are owed.
-STORE_OWED_STATUSES = ( "queued", "in_progress" )
+# STORE_OWED_STATUSES was DELETED here on 2026-07-19 (PARKED-STATUS). It was the
+# 4th copy of the owed-status tuple (stop.py, here, the arbiter, rules.py) and
+# existed only to mirror stop.py's — a duplicate maintained by discipline, which
+# is to say by luck. Parity now runs through the ONE canonical row-level
+# predicate, `owed_row`, whose SQL twin `owed_clause` backs the server's
+# `owed_only` flag. This module is a PARITY checker: if it re-derived "owed"
+# locally it could certify parity against its own opinion rather than against
+# what the oracle actually counts, which is worse than no check at all.
+# Design: src/rnd/v0.1.9/2026.07.19-parked-status-board-hygiene.md
+# Parity runs through the ONE canonical row-level predicate. `owed_status_row` is
+# the row twin of `owed_status_clause` (the SQL behind the server's `owed_only`),
+# so this checker measures owed EXACTLY as the oracle counts it. Deliberately NOT
+# `is_owed`: that is the general non-terminal predicate and would count
+# blocked/claimed/review, letting a PARITY checker certify parity against its own
+# opinion rather than against what the Stop hook actually reads.
+# Design: src/rnd/v0.1.9/2026.07.19-parked-status-board-hygiene.md
+from cosa.rest.task_store_owed import owed_status_row
 
 # Title used only when a TaskCreate carried no subject (replay_task_subjects
 # skips blank subjects but still consumes the ordinal, so the id can still be
@@ -163,7 +179,8 @@ def discover_active_sessions(
         transcript_path = data.get( "transcript_path" )
         if not transcript_path:
             continue
-        persona_lower = ( persona.get( "name" ) or "unknown" ).lower() if isinstance( persona, dict ) else "unknown"
+        raw_name      = ( persona.get( "name" ) or "unknown" ) if isinstance( persona, dict ) else "unknown"
+        persona_lower = canonical_persona_key( raw_name ) or "unknown"
         try:
             project = _project_from_cwd( data.get( "cwd" ), environ=environ )
         except ( OSError, ValueError, RuntimeError ):
@@ -289,6 +306,7 @@ def check_session_parity(
     _replay             = replay_task_state,
     _current_generation = task_map.current_generation,
     _query              = client.query_by_correlation_key,
+    now                 = None,
 ):
     """
     Per-session count-parity: store owed-count == transcript owed-count.
@@ -310,10 +328,16 @@ def check_session_parity(
           transcript_owed )
         - A failed probe sets query_ok False (parity cannot be asserted on an
           unreachable store) — never a false-green
+        - `now` is an INJECTABLE tz-aware clock (None resolves it once, here, at
+          the IO boundary). Explicit so a park-expiry boundary row is reachable
+          in a test without patching module state, and so ONE instant classifies
+          the whole sweep.
         - NEVER raises
     """
     session_id = session[ "session_id" ]
     transcript = session[ "transcript_path" ]
+    if now is None:
+        now = datetime.now( timezone.utc )
 
     generation = _current_generation( session_id, base_dir )
     owed_ids   = _owed_harness_ids( transcript, _replay )
@@ -327,7 +351,10 @@ def check_session_parity(
             query_ok = False
             continue
         tasks = body.get( "tasks" ) or [ ]
-        if any( t.get( "status" ) in STORE_OWED_STATUSES for t in tasks ):
+        # ONE clock for the whole sweep (`now` resolved by the caller): a
+        # per-row clock read could classify two rows against different instants
+        # and straddle a park-expiry boundary mid-scan.
+        if any( owed_status_row( t.get( "status" ), t.get( "next_chase_ts" ), now ) for t in tasks ):
             store_owed += 1
 
     return {

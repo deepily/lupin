@@ -35,6 +35,7 @@ def _call( post_fn, api_key="k-123", recipient="tiberius", recipient_session_id=
         session_id           = "asker-sess-1",
         sender_persona       = "Mr. Radio",
         sender_icon          = "🦉",
+        sender_project       = "lupin",
         api_base_url         = "http://localhost:7999",
         api_key              = api_key,
         post_fn              = post_fn,

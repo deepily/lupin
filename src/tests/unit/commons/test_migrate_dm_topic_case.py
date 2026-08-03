@@ -79,8 +79,15 @@ class TestDeriveCanonicalStem:
         # If such a file existed (pre-fix workaround), the migration would route it
         assert migrate_dm_topic_case._derive_canonical_stem( "dm-Mr Radio.md" ) == "mr_radio"
 
-    def test_unicode_persona_preserved( self ):
-        assert migrate_dm_topic_case._derive_canonical_stem( "dm-María.md" ) == "maría"
+    def test_unicode_persona_accent_stripped( self ):
+        """Phase 3 ripple (intended, plan-aligned): `_derive_canonical_stem` rides
+        `_derive_dm_topic`, now routed through the shared `persona_slug` root, so
+        accents strip to the canonical store form ("dm-María.md" → "maria", was
+        "maría"). BENEFICIAL: accent variants (dm-María vs dm-maria) now group to
+        the SAME canonical stem and dedupe-merge, instead of living as split
+        topics. Keeping migrate on the shared root (vs a private slugger) is the
+        whole point of the normalization plan."""
+        assert migrate_dm_topic_case._derive_canonical_stem( "dm-María.md" ) == "maria"
 
     def test_alias_map_radio_to_mr_radio( self ):
         """`dm-radio` is Tiberius's manual workaround; ALIAS_MAP routes it to canonical."""

@@ -1,346 +1,757 @@
 # TODO
 
-## ▶ NEXT SESSION (Mr. Radio 🦉 session f33b0f62 end — 2026-06-16) — cosa-voice CUTOVER landed + reap-tombstone fix shipped
+## 📋 DECISIONS LOG 2026-08-02 (Cheech 🌿 `13459df0`) — embedding regeneration scope + venue
 
-**Pending (cosa-voice token-reduction engagement):**
-- [x] **[LUPIN] 12 integration failures** from the Phase-4 commons-DM comment-out (`5ce5dba5`): `test_commons_ask_async_push_integration.py` ×7 + `test_dm_integration_live.py` ×5. Classify each: (i) retired-path assertion → skip/update citing 5ce5dba5, vs (ii) real break → fix. Selective-stage only those files. Brief in `io/mementos/krishna-task-store-operationalize-resume-2026.06.15.md`.
-- [x] **[LUPIN] `/api/notify-peer` → `dm_send`-aligned rename** (one-name doctrine; e.g. `/api/dm-send`). Discuss + execute.
-- [ ] **[LUPIN] commons polling-tool audit**: now directed DMs use `dm_send`, are `commons_ask_async`/`ask_sync` polling-mode (+ `commons_read` token cost) still used? Retire if dead — further token win.
-- [ ] **[LUPIN] Full-removal pass** of the commented-out legacy commons-DM machinery (after cutover soak + zero-hit telemetry). Includes `heartbeat_poker`/`cascade_heartbeat_scheduler` still referencing the now-404 `register-question`.
-- [ ] **[LUPIN] Task-store adoption gaps** (Krishna `5b5e5c08` inventory): gap A discoverability (recommend close-now); gaps E chase-flag + F write-scope = Rick decisions.
+**D1 — Regenerate EVERY row, not the subset that looks wrong.** *Ruled by Rick, 2026-08-02.*
 
-**Landed + pushed this session:** cosa-voice notification-native cutover (bounce :7999 + MCP reload), reap-tombstone roster-eviction `08ca99a4`, task-store wrapper suite `ab40b62b` + adoption-gaps `5b5e5c08`; branch `wip-v0.1.8` pushed + backed up; crew reaped with mementos.
+I proposed regenerating only the 79,318 rows whose vectors read norm 1.0, treating the other 209,468 as already correct. Rick's ruling: *"We are replacing all of those values not a segment because they represent the results of embeddings created by two different embedding spaces, two different training sets, two different services."*
 
----
+**Why my version was wrong, in one line**: a norm measures whether a vector was *normalized*, not which model produced it. It separates OpenAI from local only because those two happen to differ in normalization, and it cannot see any boundary *inside* the local era — a model version, training set, service endpoint, or prose/code engine choice could all change without moving the norm. "Already correct" asserted a provenance nothing had measured.
 
-## ▶ NEXT SESSION (cleared restart — Rick's end-of-session directive, broadcast 59f2d129, 2026-06-12 18:00 EDT)
+The invariant is one space, one model, one pass. Partial regeneration leaves a mixed space **and leaves it undetectable**, which is how the original defect survived two and a half months. Scope: 158,666 → **578,364** calls. Selection predicate is now "has source text".
 
-**Seed memento**: `io/mementos/tiberius-session-resume-2026.06.12-endofsession.md` (read END TO END on boot).
-**Two priorities Rick named**: (1) **the task list** — task-store Phase-1+2+wrapper ALL LANDED today (held, flag `task_store.enabled` DEFAULT OFF); discuss enablement/UX. (2) **cosa-voice MCP token efficiency** — burning ~75% of inference budget; bring reduction ideas (the prior session's own notify/abstract/per-DM-ack pattern is a big contributor).
-**Hard constraint**: Max-plan WEEKLY cap hit → delegation OFFLINE until ~Sun Jun 15 11am EDT; only credit-funded sessions work. **GCP back-burnered.** Rick's open gates: flag-flip + watched run · push held chain · fleet-panel rebaseline · Sat cutover (06-14, feasible under cap).
+**D2 — The fill runs against `:7999` off-peak.** *Ruled by Rick, 2026-08-02.* Rejected `:8000` (monopolize-mode; a multi-hour fill would block every scheduled test suite, and this is not a test suite) and in-process (conflicts with the standing never-grab-a-GPU rule + GPU-0 pinning). Rick added: measure one batch of 256 first and extrapolate, rather than scheduling against a guess.
 
----
+**D3 — Unload the other GPU models before the run.** *Rick, 2026-08-02.* GPU 0 is a 24,564 MiB card with **23 MiB free**: 7,416 MiB is the embedding model server itself (must stay) and 16,754 MiB is a vLLM instance (pid 9710) that can be unloaded, taking free memory to ~17 GiB. This invalidated the hardcoded batch budget. Resolved by making the budget adaptive (grows on success, halves on refusal) rather than scaling a constant by a chars-per-MiB rate I have no data for. ⚠️ Open question for the walkthrough: unloading that vLLM may interact with row `357c283f` (router-model 404), which is also a vLLM question.
 
-## 🎙️ POST-GAME AGENDA (Rick-requested at 2026-06-12 morning ritual — items to go over across all sessions)
+### ⏳ Still open on this row — nothing is blocked, but nothing writes until these are settled
 
-1. **Quota policy ruling needed**: TWO fleet-wide Max-plan freezes in 12h (22:08 peak-hours ×10 sessions; 01:10–03:45 post-midnight ×7 sessions, 2.5h). Off-peak no longer guarantees headroom — fleet-size × window budget needs an explicit policy (cap concurrent sessions? stagger heavy lanes?).
-2. **Arbiter tuning** (telemetry from the night): 1 TRUE positive (caught the 01:10 freeze) vs **7 false positives** (blind to manager shell-work, holding workers, human-gated waits). Proposals on file: Mr Radio's `fleet_state=human_gated` presence marker + Phase-3 store-oracle integration (`blocked_by kind=user` ⇒ not-owed — the task store we just built IS the fix). Also: rate-limit-frozen sessions can't be poke-recovered (dialogs swallow injected DMs — only bare Enter works, and Mr Radio's classifier blocks even that cross-pane; classifier-vs-standing-grant gap, his sweep candidate #6).
-3. **Rick's pending rulings**: ① push the 5-merge held chain ② C2 staffed→LANDED pin (exercised, unvetoed) ③ cosa-voice MCP-wrapper repo touch (Phase-1 leg parked) ④ `test_fleet_status_panel` visual baseline (sole e2e fail — eyeball + rebaseline?) ⑤ GCP morning: gcloud login (step 0) + keys SCP + OAuth (successor dismissed at ritual, seed memento ready for respawn).
-4. **All-suite runner nits** (from baseline `ts-b51e63c9`): unit-leg timeout 180s < actual ~185s (bump in test_suite/job.py) · smoke leg inherits the destructive proxy test (folder≠venue caveat) · integration `clean_test_db` TRUNCATE list missing task_items/task_events.
-5. **Task-store Phase 2+ kickoff timing**: Phase-1 live on dev; backlog anchored in PIP TODO.md (Clayton's C-numbering of record); widen-to-all-sessions rider (F4) double-anchored — when do write-path hooks (Phase 2) start?
-6. **Alembic zero-bootstrap durable fix**: stamp-then-upgrade recipe proven but is a workaround — baseline migration vs documented bootstrap procedure decision.
-7. **Process wins worth ratifying**: investigate-first tripwire doctrine paid twice (T1/T2 both ghosts) · non-launderable-auth held under live fire (Krishna refused, manager in-band) · fresh-critical reviews caught 2 HIGH defects builders' 100%-coverage suites couldn't see (newline smuggle, shared-sid clobber) · worktree-conftest path-poisoning + pytest-cov double-registration + pytest INTERNALERROR-on-control = 3 harness gotchas for the fleet playbook.
+- **Runtime is HALF measured.** Embedding: 0.41s per 256-batch, ~16 min for all 578,364 — and that measurement found a CUDA OOM on long-text batches that would have killed the run (fixed, `0310aa05` + `d7e02562`). The **DB write side remains unmeasured** — 288,932 UPDATEs plus reads, very likely the dominant term. Measuring it needs the clone rehearsal or a bounded shadow-column fill, both behind the walkthrough.
+- **Rollback undecided.** Once swapped, the old vectors are gone unless the shadow columns are kept or a `pg_dump` of the two tables is taken first. Real disk. Needs a ruling before step 5.
+- **Full walkthrough not yet held.** Rick's standing constraint: no writes to `input_and_output` "until you and I discuss the entire process from beginning to end." D1 and D2 settled scope and venue; the end-to-end walkthrough has not.
 
-## 📌 FILED WORK ITEMS (from post-game rulings 2026-06-12)
-- [ ] **[LUPIN] Alembic TRUE baseline migration** (D7 hybrid ruling, post-cutover slot): make `upgrade head` work from an empty DB — encode schema.sql's origin as migration zero; until then stamp-then-upgrade recipe (schema.sql if empty → `alembic stamp e9f0a1b2c3d4` → `upgrade head`) is the OFFICIAL documented bootstrap (3 clean runs incl. fresh Cloud-SQL 06-12).
-- [ ] **[LUPIN] Arbiter whitelist tuning work-order** (D2 ratified, staff on next freed slot): suppression classes (a) human_gated marker w/ TTL (b) post-ritual standby (c) zero-workers+:8000-run (d) acking-manager; + Mr Radio addendum #14 (quota-freeze correlation, covers-metadata retry bug); + root-cause what "last signal" actually measures. Evidence file: memento §4 (1 TP vs 15 FP).
-- [ ] **[LUPIN] E2E smoke-budget proof point** (Tiffany F3): next scheduled smoke run confirms the proxy-test exclusion brings the leg under its 3600s budget — read the breakdown, not just completion.
-- [ ] **[LUPIN] T4: DM-review-request auto-create in commons.py** (server-side task_create on review-request DMs; C10 scope call) — explicitly OUT of the Phase-2 hook lane per 2026-06-12 ruling (Tiffany call 5); assign separately after the Task*-hook lane lands.
-- [ ] **[LUPIN] Task-store WATCH-2** (Clayton reviewer memento): live :8000 integration leg (3 wire tests in test_task_store_integration.py) rides the next deploy sequence — new endpoints not on deployed servers until bounce.
-- [x] **[LUPIN] Task-store WATCH-3**: `task_store.enabled` is DEFAULT OFF (merge was a no-op); first enablement = Rick's flip + a WATCHED run (mirror writes live for the first time). Sequencing note: pre-flip MCP subprocesses lack the amended wrapper until respawn (→dropped 422s, self-healing).
+## 🗳️ RULING 2026-08-02 (Rick, via Mr. Radio 🦉 `4829ab05`) — a closed row may now be amended
 
-## 🔄 2026-06-12 LIVE BOARD (Tiberius 👑, session f557aab9 post-/clear) — updated 06:05 EDT (late-night shift close)
+**Decision**: allow `task_amend` on a terminal row, flagged as a post-terminal addendum. Chosen over adding a `ready-for-gate` status (too much surgery for a P3) and over writing down the process rule (rules get forgotten — this fleet chose a janitor over a "delete when done" instruction for exactly that reason).
 
-**THE NIGHT'S HEADLINE — Rick's task-store directive executed REVIEW→LAND end-to-end**: cold 3-pass review (Clayton fresh, C1-C15) → v0.4/v0.4.1 fold FOLD-VERIFIED → Phase-1 BUILT (Krishna) → Rachel ×2 zero-discrepancy reviews → merged `3be8008e` → both DBs migrated → **integration 11/11 GREEN (`ts-e232f0d4`)** + :7999 probe 200. **`/api/tasks/*` IS LIVE ON DEV.** Plus: **starvation fix LANDED** (`5e5c2b67`+`f99a4af5` — F2 gate satisfied, mark_played smoking gun killed, both-directions regression pinned) · **S6 FCM landed** (`83990552`, AC-S6.1 6/6, Mr. Radio's AC-D4 triggered) · tripwires T1/T2 closed as stale-with-receipts + mux-test refresh `4ff0346f` (rest/ 2437/0) · 2nd quota freeze (01:10-03:45, all 7 sessions) recovered cleanly — arbiter true-positive catch + 1 false-positive (tuning telemetry filed) · alembic zero-bootstrap gap proven + stamp-then-upgrade recipe (GCP-relevant, see Pending entry).
+**Why it was asked**: a worker self-closes, then the manager runs the gate — and the store refused every write verb on a closed row, so the verdict had nowhere to go. Maria hit it twice in one hour; on row `700a6330` her gate **failed the first pass** and none of that reached the row.
 
-**HELD CHAIN awaiting Rick's push**: `5e5c2b67` → `3be8008e` → `f99a4af5` → `83990552` → `4ff0346f`. **Rick's open items**: C2 LANDED pin (exercised, unvetoed) · cosa-voice MCP-wrapper repo touch (parked for his word) · GCP morning SCP + OAuth (successor spawns from `krishna-gcp-m2-resume-2026.06.11.md` ~07:45 or on his presence) · Saturday cutover flip (GO-READY). **Baseline `ts-b51e63c9` COLLECTED 06:40 EDT** (report `io/test-suite/2026.06.12-at-06:40-EDT-all-results.md`): **NO regressions from the night's 5 merges** — WS 50/50 · integration 320/0 (38 env-gated skips) · e2e **589 passed / 1 failed** (sole fail = `test_fleet_status_panel` VISUAL baseline, known snapshot-drift class, Rick's eyes; the 06-10 "12 visual fails" class otherwise CLEANED UP) · unit+smoke legs show "1 error/0 tests" = **all-suite RUNNER BUDGET artifacts, not code** (unit needs ~185s vs 180s budget — bump `unit` timeout in test_suite/job.py; smoke leg inherits the destructive proxy test per the folder≠venue caveat — both filed as runner nits; same code passed 6744-green standalone at 04:35). Fleet at zero (10 workers reaped w/ mementos). **Top-5 remaining** (item 2 ✅ done): #1 messaging-plane hardening (morning, María co-design) · #3 FM-21 hermetic fixture · #4 CoSA coverage ramp · #5 arbiter :8000 standing job.
+**Landed**: row `3c569786`, commit `310aa290`. The block names the status at write and says it is not a reopening; the event is `amended_post_terminal`. `transition` / `edit` / `correlate` stay refused — a closed row stays closed.
 
----
+**Not recovered**: the verdicts already lost on `ddcc40c2` / `700a6330` / `49a76406`. The capability now exists to write them late, but they are Maria's to write — reconstructing them from her DMs would put words in her mouth on a durable record.
 
-## 🔄 2026-06-11 LIVE BOARD (Tiberius 👑, session f557aab9) — updated 23:30 EDT (night close; session-end ritual run under Rick's broadcast: push + backup authorized). NIGHT ADDS: double-wedge recovery (both workers, Enter-immune dead-call mechanism — filed) · card-gap lane CLOSED end-to-end (RC `980e465a` → fix merged `47aa72f3`, live FAIL `ts-82ae2446`→PASS `ts-69419933` receipts — Saturday offline-history asterisk CLEARED) · GCP VM UP + Cloud-SQL proxy PROVEN (only Rick's AM SCP + OAuth remain; successor seeds from `krishna-gcp-m2-resume-2026.06.11.md`) · fleet-wide Max-plan quota freeze 22:08 recovered no-spend · WP6 e2e receipt confirmed (588/0) · task-store F1–F4 rulings recorded (cold review + Phase-1 entries in Pending-HIGH). Fleet fully reaped to zero; single clean tree.
+## ✅ CLOSED 2026-08-02 (Mr. Radio 🦉 `1bf47c18`) — Krishna's managed-bounce lane: all three items done, and the answer moved the target
 
-> Day shape: 10-worker fleet ran Rick's morning directives; manager wedged in a hung MCP call 10:55–17:26 EDT (the new arbiter caught it — 45m advisory + 3 pokes + noon fleet-dark, journal receipts: `src/rnd/v0.1.8/2026.06.11-arbiter-loop-closure-journal-receipts.md`). 4 workers harvested complete (Sam 🎙️, Arnold 🪨, Rio ⚡, Extra 1 🪨); 6 live.
+*(The "FOR TOMORROW" version of this entry is kept below for the record — it was accurate when written and one of its own claims turned out to be wrong.)*
 
-**🔝 TOP 7 (descending importance — reviewed with Rick 18:30 EDT; #1 CLOSED 18:37):**
-1. ~~**Cheech 🌿: corpse-ceiling fix → :8001 restart**~~ ✅ **CLOSED 18:37 EDT**: reviewed APPROVE, MERGED `ddeb91a4`, systemd drop-in (`COSA_VOICE_MANAGERS__LUPIN="Tiberius, Mr. Radio"`), :8001 restarted (bare-command allow-rule; compound form classifier-denied — Krishna's prefix-match lesson). Fresh-boot proof: roster resolved, corpse `7b76ad86` gates `beyond_max_age` w/ ZERO pokes/advisories, live manager `not_stale`. Cheech → memento + reap.
-2. ~~**Krishna 🦚: GCP M2 Step 3 — VM up**~~ ✅ **CLOSED 22:36 EDT**: VM-RUNNING retry #5 (21:43; ~4h10m stockout), data disk formatted/mounted, repo via ratified git bundle, **Cloud-SQL proxy chain PROVEN**, both images staged (model-server built on-VM `cc91c3e7`), durable compose socket-init fix `e927b75f`. Remaining = Rick's AM SCP (his direct voice ruling) + Step-6 OAuth; successor boots from `io/mementos/krishna-gcp-m2-resume-2026.06.11.md`.
-3. ~~**Clayton 😎: :8000 consolidated mux run triage**~~ ✅ **CLOSED 19:05**: `ts-2c5e5deb` GREEN 64/0/0/1 across all 15 mux suites (1 skip = pre-existing Lane-E prediction-vote, Arnold's in-flight surface); receipt `7fa2298d`.
-4. ~~**WP6 caret-splice port + E2E = 7/7**~~ ✅ **CLOSED 19:10**: Rick RATIFIED (walkthrough D1); port reviewed APPROVE + MERGED `0319da38`; gates reproduced (c8 100×4 both files, tsc clean, TS suite 1244/1244); bundle rebuilt (`boot.c72307f5e4fb`, dist=gitignored artifact); adversarial E2E rides next :8000 batch. **7/7 counterparts COMPLETE — Clayton's tonight-commitment fully delivered.**
-5. **Rio ⚡: FM-21 test-isolation Fix 1+2** — clears the fleet-wide "3 known fails" from every full-suite gate.
-6. **Saturday cutover execution** (Sat 06-14 AM: INI `legacy notifications redirect enabled`=true + :8000 bounce) — Rick's flip; prep GO-READY.
-7. **Tiffany-merge activation tail** — Rick: ~/.bashrc chain lines + re-source (unblocked); MCP-spawner code rides new sessions automatically; ~58 held commits await Rick-initiated push.
+**All three landed** in `70a27d02` (item 1) and `066f04f8` (items 2–3), on Rick's ruling. Doc: `src/rnd/v0.1.9/2026.08.02-settle-deadline-arithmetic-30-vs-40.md`.
 
-**✅ COMPLETED OFF THE PREVIOUS TOP 7:** Tiffany multi-manager+persona-chain (reviewed, MERGED `c2156762`) · arbiter poke-loop closure (deployed + organically validated) · broadcast-miss F1–F4 (MERGED `fdcc17b4`) · Saturday cutover prep (GO ratified) · mux e2e counterparts 6/7 built (22 tests green).
+1. **`main.py` fallback** — was still 15 while the key read 30; now tracks the key, with a **call-site pin test** that reads the `default=` the code was actually called with rather than grepping the source. (Note: TODO line 171 in the entry below claimed this was "also fixed". It was not — it was still 15 this morning. A claim about a fix is a claim like any other.)
+2. **The arithmetic is settled, and Krishna was right.** `self._attempt += 1` runs **before** the `min()`, so the first delay is `2^1` not `2^0` — wakes at **2/6/14/30/60**, his series, not my 1/3/7/15/31. Confirmed against ~63k printed reconnect delays, not just derived. Both live samples fall out **exactly** at a ~40s restart catching the t=60 wake (+18.6s, +20.4s).
+3. **Jitter is ON — pointing DOWN**, and the cap came to 10, deadline to 15.
 
-**✅ DONE TODAY (held on wip-v0.1.8 unless noted):**
-- [x] **Arbiter missed-poke post-game** (Cheech 🌿): F1 outreach logging + F2 manager-staleness tier (INI 2700s) + F3 fleet-dark — Rick-ratified, reviewed, MERGED (`c89c13d6`), **DEPLOYED :8001 10:52 EDT**, organically validated same day. Design: `2026.06.11-arbiter-missed-poke-postgame-and-outreach-logging.md`.
-- [x] **Sam's debt sweep** MERGED: roster-aware broadcast matcher + review fixes (`99d6577b`+`c7821ca4`), dangling-gitlink fail-safe (`73fd67df`), bare-scope listing (`930981d5`), shlex pytest_args (`9a17fda4`).
-- [x] **Thumbs-vote Stage 3** (Arnold): multi-select + open-ended steering + threshold-in-payload, landed `5914586d`, :8000 E2E 3/3 green (`ts-34d2a9d8`).
-- [x] **Rachel's visual-fix harvest** (Rio): `ca1f3d5f` merged (`bf424d54`) + BONUS product fix `562e8cb8` (borrowed-badge CSS `[hidden]` override), 4/4 :8000 verify green.
-- [x] **Broadcast-miss F1–F4** (Mr. Radio 🦉): reviewed APPROVE (`18f1164e`), MERGED `fdcc17b4`; Mr. Radio harvested.
-- [x] **Tiffany: multi-manager + persona-chain transport** — reviewed APPROVE, **MERGED `c2156762` 18:24 EDT** (gates reproduced by reviewer: 392+338 tests, 100% L+B ×8 modules; 440 green post-merge; register_session.py overlap with F1 singleton guard auto-merged + verified). Activation: hook/spawner landed-is-deployed for NEW sessions; :7999 auto-reloaded; :8001 activation rides Cheech's restart (needs `COSA_VOICE_MANAGERS__LUPIN` in service env); **Rick's ~/.bashrc chain lines now UNBLOCKED** (Tiffany hands over).
-- [x] **Clayton mux e2e batches A+B+C**: held `3aaf740b`+`0e11cfbe`+`74ad168b` — 22 tests, 6 of 7 counterparts built, all :7999 pre-flight green; consolidated :8000 run `ts-2c5e5deb` queued (all 15 mux suites).
-- [x] **Saturday cutover prep** (Clayton 😎): GO-READY — redirect built flag-OFF (`baa7e7e7`+doc `86b83203`), 153 e2e sites pre-patched, :8000 11/11 ×2.
-- [x] **Fleet-panel colors + lineage**: verified already-landed (`f2733cf8`); baseline rebaselined+verified (Extra 1).
-- [x] **svllmr/svllmc**: resolved — user-error double-launch; both healthy; Rachel's port-guard line queued for Rick's dotfiles.
-- [x] **:7999 wedge** 10:48 EDT: bounced (queues verified empty), healthy in 25s; recurrence-watch: HTTP starvation while background work continues.
-- [x] **GCP Steps 0–2** (Krishna 🦚): auth verified, gitleaks green (held `483abf9f`+`3c0142e6`), `lupin:1.1.0` IN Artifact Registry, compose already arbiter-complete.
+**🔴 The finding that outlives the three items — arrival is a SAWTOOTH in restart downtime.** A restart 11 seconds *faster* arrives 11 seconds *later* relative to gate start (D=30.1 → +29.9; D=41.4 → +18.6). Rachel's ~8s-downtime bounce would have arrived at +6s and 15 would have been fine — **the two nights' numbers never conflicted, they were different points on a sawtooth.** So the deadline can never be tuned by averaging observations, and 30 was not "measurement-backed" in any sense that survives: two samples cannot bound a sawtooth.
 
-**🔄 IN FLIGHT:**
-- [x] **Cheech 🌿: corpse-ceiling fix** ✅ CLOSED + REAPED 18:48 (merged `ddeb91a4`, deployed, organically verified; memento `io/mementos/cheech-corpse-ceiling-closeout-2026.06.11.md`; postgame worktrees pruned).
-- [x] **Krishna 🦚: GCP Step 3+** ✅ NIGHT COMPLETE (see Top-7 #2) — L4 research delivered too (zonal squeeze; retry-overnight evidence-backed; reservation only-if-chronic). Reaped 23:08 w/ rotation memento.
-- [x] **Clayton 😎: tonight-commitment** ✅ 7/7 COMPLETE (see Top-7 #3/#4) — harvest-ready, his call on running the :8000 WP6-e2e receipt first.
-- [x] **Rio ⚡ (1st fb-engagement): FM-21** ✅ merged `06cb528a` — "3 known fails" cleared fleet-wide; reaped w/ memento.
-- [x] **Rio ⚡ (fb19e662): arbiter observability** ✅ merged `1cb192ab`, DEPLOYED 19:53 — ts_local EDT timestamps + outreach_id receipts chain live; ROOT CAUSE: Rick-push NEVER worked (literal `${LUPIN_DEV_EMAIL}`, 0× sent/7× swallowed 404s); R1 env fix Rick-RATIFIED + live. First-ever delivered arbiter advisory = the Sam-voice stall warning Rick heard.
-- [x] **Rio ⚡: fleet-status lineage bug** ✅ MERGED `46234ebc` + DEPLOYED 20:22 (file-backed lineage carry + punct-tolerant roster matching; fresh-boot proof: "mr radio" badges MANAGER, carry file writing; pre-fix orphans age out by design). Rio ROTATED on Rick's order (>50% ctx) — checkpoint was COMPLETE, no successor needed; memento `io/mementos/rio-lineage-carry-rotation-2026.06.11.md`; reaped with honors (2 merged engagements + 1 complete build in one context).
-- [x] **:7999 wedge #2 (20:23 EDT)** ✅ bounced — /health 3× 10s-timeouts (HTTP starvation recurrence, same morning pattern; ALSO the cause of 2× `register_network_error` push failures to Rachel); queues verified empty via consumer log; healthy immediately post-restart. ⚠️ TWICE in one day now — recurrence pattern firming up; the filed HTTP-starvation debt is gaining urgency.
-- [x] **Clayton 😎: external-notification card gap** ✅ LANE CLOSED END-TO-END tonight — Clayton's RC (`980e465a`: mux has NO history hydration, 5-leg innocence proof) → Rachel 🕊️ built fix + `:727` id-threading one-liner → Rio ⚡ fresh-critical APPROVE (caught the 'today'→48h ruling error) → MERGED `47aa72f3` + live FAIL/PASS receipts (`ts-82ae2446`/`ts-69419933`). Queued enhancements: window selector + non-CC chip (post-cutover). Focus-mode card *visibility* = separate small UX item if Rick wants it. All four crew reaped w/ mementos.
-- [x] **Rachel 🕊️: env-file + reserve-from-random bundle** ✅ MERGED `a52c8bda` + LANDED 20:44 (single-source `src/conf/fleet-roster.env` live: drop-in now `EnvironmentFile=-`, fresh-boot roster resolves from the file; declared managers reserved out of random/`*` allocation on EVERY allocate call incl. no-chain — receipt-proven). Gates reproduced 100% ×4, suite 6500/0. Rachel → memento + reap. (Predecessor Tiffany reaped unresponsive 19:54; zero work lost.)
+**What replaced measurement**: the deadline is now **derived**, not chosen. `SettleDeadlinePinTests` computes the requirement as `RECONNECT_MAX_DELAY + margin` and reds if the cap and the deadline drift apart **in either direction**. The 15→30→15 churn happened because the two values lived in different files and were picked independently by different people; that coupling is now a test.
 
-**🎯 RICK'S DECISIONS — RESOLVED via /plan-decide walkthrough 18:00-18:05 EDT (see Decisions Log). Still standing (not decisions):** OAuth `claude setup-token` when the GCP VM comes up (Step 6) · PUSH of held commits (Rick-initiated only, never prompted) · Rick pastes the port-guard into both aliases (his dotfiles).
+**On jitter, and Rick was right to push back.** He asked *"jitter always helps smooth out the thundering herd, does it not?"* — yes, and that was never disputed. The narrower claim was that it helps the *herd* (load) and not the *gate* (last-arrival), since a coverage gate waits for the slowest session. Simulated over 20k bounces: symmetric ±50% jitter at the old cap takes the typical wait from 8.1s to 27.7s. **His pushback produced the better fix**: jitter has a *direction*, and applying it **downward only** spreads the fleet just as well while leaving the cap a real ceiling — which the deadline's derivation depends on.
 
-**🆕 NEW PROJECT (Rick, D2 ruling):** [LUPIN] **JS-vs-TS client code-quality comparison study** — preserve the JS notifications client + its ENTIRE test suite long-term as a research corpus. Compare client 1 (JS, organic "hot collection of changes" accretion) vs client 2 (TS, serialized review → cascade review midway). Methodology TBD; planned: submit both implementations to Claude + GPT-5 for qualitative code analysis. Implication: cutover ≠ deletion; `?classic=1` + JS suites retained indefinitely (Clayton updating the readiness-report deprecation language).
+**The instrument that was missing**, and the honest reason two competent readings stood unreconciled for a day: the reconnect line had **no timestamp** and sat outside the timestamped log path — zero timestamped reconnect lines in the entire 118 MB centralized log. The downtime had to be *inferred* from arrival times. Now routed through an overridable `_log`; gated by driving the real `run()` loop against a real file and asserting on **what landed on disk**, not by reading the chain.
 
-## Decisions Log
-- 2026-06-12 (post-game D1) — Quota policy after 2 fleet-wide freezes in 12h → **CAP fleet-wide at 8 concurrent sessions + stagger heavy lanes** (Rick raised the recommended 6 → 8). Riders: cross-repo manager coordination on worker allocation (María = coordination point, DM sent e7fc1d22); all managers vigilant about reaping unused workers promptly. Why: both freezes had 7-10 sessions burning the same rolling window.
-- 2026-06-12 (post-game D2) — Arbiter FP tuning (1 TP vs 15 FP overnight) → **RATIFY suppression whitelist now as a tuning work-order**: classes (a) human_gated marker (b) post-ritual standby (c) zero-workers+:8000-run (d) acking-manager; + Mr Radio addendum #14 carve-outs (quota-freeze correlation, covers-metadata retry bug) + root-cause the "last signal" channel; markers get TTLs. Phase-3 store-oracle follows when task-store Phase 2 lands. Staffing rides the next freed slot under the cap-of-8. Why: freeze/human-gated classes aren't store-visible, so the whitelist is needed regardless; 15:1 noise erodes the arbiter's proven value.
-- 2026-06-12 (post-game D3) — Task-store Phase-2 write-path hooks → **KICK OFF TONIGHT, off-peak** (builder staffed from freed slots post review-merge; 1 builder + 1 reviewer sequenced under the cap-of-8). Why: Phase-1 context hot; unblocks the D2-ratified arbiter Phase-3 oracle; cutover prep already GO-READY.
-- 2026-06-12 (post-game D4) — cosa-voice MCP-wrapper repo touch (parked since 06-11) → **AUTHORIZED, rides tonight's Phase-2 lane** (spec frozen at 02-mcp-wrapper-spec.md; cross-repo review + MCP restart to land). Why: Phase-2 write semantics + session-side tools are one contract; HTTP-only writes leave the arbiter-oracle data thin.
-- 2026-06-12 (post-game D5) — C2 (task-store review C-ledger) → **PIN LANDED** (exercised by ts-e232f0d4, unvetoed; relayed to María for the PIP TODO.md ledger edit). Why: ledger matches shipped reality; reversible one-liner.
-- 2026-06-12 (post-game D6) — test_fleet_status_panel visual (sole baseline red) → **EYEBALL THEN REBASELINE**: Rick inspects the live panel, then Tiberius submits the :8000 rebaseline (--update-snapshots -k fleet_status_panel + flagless verify). Why: panel changed legitimately twice this week; human sign-off before new truth is baked.
-- 2026-06-12 (post-game D7) — Alembic zero-bootstrap → **HYBRID**: stamp-then-upgrade recipe = documented official bootstrap for now (3 clean runs incl. Krishna's Cloud-SQL today); TRUE baseline migration filed as post-cutover work item. Why: zero risk to in-flight GCP lane; chain surgery 2 days pre-cutover is worst timing.
-- 2026-06-12 (post-game D8) — Process wins → **ALL FOUR RATIFIED into standing doctrine**: investigate-first tripwires · fresh-critical review before every merge · non-launderable auth · harness gotchas → fleet playbook + worker-brief template. Lands in PIP workflow/manager-autonomy.md (María drafts w/ allocation convention, Tiberius reviews, Mr Radio acks).
-- 2026-06-12 (post-game D1 rider) — Cap scope → **ALL sessions count inside the 8** (managers/stewards + workers; ~5 worker slots with 3 standing seats). Rick's emphasis: the tight budget is the POINT — it forces cross-repo manager collaboration and vigilant spin-down of unused/unoccupied workers. Why: the freezes hit total rolling-window burn, so the cap must bound the real cause.
-- 2026-06-11 — Saturday cutover → **GO as planned (Sat 06-14 AM: INI flip + :8000 bounce)**. Why: gate green, redirect reviewed, 153 sites pre-patched, receipts 11/11 ×2.
-- 2026-06-11 — `?classic=1` hatch + JS client retention → **KEEP LONG-TERM as research corpus** (beyond soak; see new project above). Why: planned JS-vs-TS quality study needs both implementations + suites intact.
-- 2026-06-11 — 7 `test_multiplexer_*` e2e counterparts → **BUILD PRE-SATURDAY, starting tonight** (Rick override of fast-follow rec: "plenty of bandwidth"). Clayton re-activated, 3 batches.
-- 2026-06-11 — R1 frozen-fixture visual snapshots → **RATIFIED**. Why: live-data drift produced 4 false reds in one day; functional siblings keep real scopes covered.
-- 2026-06-11 — svllm port-guard aliases → **ADOPT** (Rick pastes into svllmr+svllmc; line on Rachel's 10:00 card + walkthrough abstract). Why: this morning's OOM was exactly the unguarded double-launch.
-- 2026-06-11 18:26 — WP6 mux recorder insert-at-caret = FEATURE GAP (Clayton's finding: re-record overwrites edits — the bug legacy F5 fixed) → **PORT caret-splice pre-Saturday** (manager default call; Rick offline, ask 503'd; decision card queued w/ objection window — Rick may override on return). Why: cutover must not resurrect a fixed edit-loss bug; conservative = preserve existing UX contract.
-- 2026-06-11 18:45 (walkthrough, 3 decisions) — WP6 caret-splice → **RATIFIED: port pre-Saturday** (Clayton: triage → port in worktree → true-contract E2E = 7/7). Why: cutover must not resurrect F5's edit-loss bug.
-- 2026-06-11 18:45 — Krishna GCP L4 stockout → **RETRY us-central1-a OVERNIGHT** (pre-decided the 19:15 time-box away; zone-B recreate stays the documented fallback if morning arrives without capacity). Why: stockouts typically clear in hours; retry loop is free + unattended; zone move = real terraform recreate + disk snapshot/restore.
-- 2026-06-11 18:46 — `COSA_VOICE_MANAGERS__LUPIN` roster → **SINGLE-SOURCE env file** (Rick's refinement): shared `KEY="value"` conf file in repo, sourced by `start-cc-with-tmux.sh` AND read by the arbiter unit via `EnvironmentFile=`; drop-in literal retired. **Tiffany implements** (held, reviewed, then one arbiter restart). Why: one definition, two readers — script and service can never disagree.
-- 2026-06-11 18:56 (voice) — roster ORDER → **"Mr. Radio, Tiberius"** (Mr. Radio first = declared fallback head); flipped live + verified. ALSO commissioned: declared personas EXCLUDED from random/wildcard allocation (today they are NOT — role-only); strict/named-chain claims still work (Tiffany's bundle).
-- 2026-06-11 19:14 — R1 deploy fix (arbiter live-push 404 root cause: unit env lacked `LUPIN_DEV_EMAIL` → literal `${LUPIN_DEV_EMAIL}` target → 404 swallowed → journal claimed delivery; 0× ever sent) → **RATIFIED by Rick** (ask_yes_no): email var added to the drop-in + :8001 restarted + verified (roster intact, no 404s). Why: the currently-deployed arbiter must be able to reach Rick tonight, ahead of the full receipts engagement.
+### ⚠️ TRANSITION HAZARD — the next bounce is the lossy one, and it is unavoidable
 
-**📋 FILED DEBT (non-blocking):** wedged-turn detection tier (arbiter can't wake a hung-tool-call session — today's gap) · report-filename minute-collision in test-suite results · smoke `hasAttribute('hidden')` false-pass hardening · `.git/worktrees/` deletion incident UNATTRIBUTED (bounded 09:55–10:03 EDT; Extra 1 ruled out by verbatim log; leads: rm-rf signature + 09:54:45 merge timing) · commons register_network_error flakiness during server stress · sender_id.py 4 pre-fold smoke-helper lines (96% whole-file, grandfathered ramp).
+The two halves of this fix land on **different processes at different times**:
+
+- the **deadline (15s)** is server-side — live the moment `:7999` is bounced;
+- the **cap (10s) + jitter** is in the **listener**, a long-lived host-side process that keeps its old code until it respawns.
+
+So the **first** bounce after this commit runs a 15s deadline against listeners still on the 30s cap — the one combination that is worse than either state. Sessions alive right now will not have the new backoff until their listeners restart.
+
+**Not a reason to revert, and not a reason to rush a bounce.** Options, for whoever takes it: accept one lossy all-clear (the warning still lands, and the warning text is self-limiting), or let the fleet turn over naturally first. **Flagged rather than decided — Mr. Radio did not bounce `:7999` on this.**
 
 ---
 
-## 🌙 2026-06-10 SESSION-END (Tiberius 👑, session 4f7a7ab8) — pushed + backed up; SAT cutover next
+## 🗄️ FOR THE RECORD — the "FOR TOMORROW" entry as written 2026-08-02 00:12 (superseded by the entry above)
 
-> **RESUME HERE TOMORROW** — memento: `io/mementos/tiberius-session-resume-2026.06.10-evening.md`. Headline: merge-train r2 complete (~50 commits PUSHED at session-end), **both servers on validated 1.1.0**, final flagless e2e **560/3/1/3 = cutover gate functionally GREEN**, oracle acked-ledger live (self-poke 46→~0). NOTE: the visible TaskCreate list does NOT persist — rebuild from this block + memento (this morning's pattern).
->
-> **▶ TOMORROW, descending priority:**
-> 1. **[LUPIN] 🥇 GCP deploy resumes on Rick's word** — respin Rio's successor seeded from `io/mementos/rio-gcp-rotation-2026.06.10.md` (+ postscript): AR push lupin:1.1.0 → 12 secrets → VM bring-up → arbiter unit → CC OAuth setup-token (Rick-gated) → /health + bounded-CC E2E. Side-thread: Rick's settings.local.json `docker compose up` allow-rule.
-> 2. **[LUPIN] Harvest Rachel 🕊️ (680a2c22)** — held `ca1f3d5f` on `wip-rachel-e2e-visual-baseline-fix` (base 922c6f4b; 9 files +90/−14: popover snapshots retargeted to #persona-popover element + frozen fixture dirs + 2 tests renamed per one-name rule). Steps: fresh CRITICAL review → merge → **:8000 rebaseline+verify REQUIRED** (e2e --update-snapshots -k "popover_open or popover_borrowed or external_scope_listing or directory_listing_frozen", then same -k flagless → expect 4 pass; snapshot pass UNPROVEN until live run — collect-only-blindness). Ratify tradeoff: listings no longer snapshot live claude-plans/io scopes (sibling functional tests intact). Exact commands: `io/mementos/rachel-e2e-visuals-2026.06.10.md`.
-> 3. **[LUPIN] SATURDAY CUTOVER prep (06-14)** — /app/multiplexer default + redirect; checklist `src/rnd/v0.1.8/2026.06.10-notifications-ui-multiplexer-gap-bridge/02-bridging-work-plan.md` §02; gate already functionally green.
-> 4. **[LUPIN] Verify oracle ledger live**: next manager stop-event should show ~0-3 owed (was 46/1001) — the acceptance proof on real traffic.
-> 5. Debt ledger (non-blocking): broadcast-miss F1–F4 fixes (post-cutover) · acked-ledger flock hardening (optional) · test-isolation pollution · fleet stopPolling decoupling · stop.py whole-file 89% · host-venue rule for file-assertion tests.
+**Rick asked for a note that Krishna has work "still in flight and uncommitted." I checked the tree before writing it, and the second half is not true — so here is the accurate version, because a wrong note tomorrow costs more than no note.**
 
-## ⏸️▶ 2026-06-10 MIDDAY ROTATION (Tiberius 👑, session 4f7a7ab8 → harvested at Rick's direction)
+**NOTHING of Krishna's is uncommitted.** His tree work — deadline 15 → 30, the splainer rewrite, and the pin test — shipped in `416940e4`. `git status` shows no managed-bounce file dirty. He explicitly reverted a half-finished edit rather than leave the tree inconsistent under a deadline, and said so.
 
-> **RESUME HERE**: full rehydration memento → `io/mementos/tiberius-session-resume-2026.06.10-midday.md` (fleet roster, 10-item priority queue, Rick's gates, merge-train record). Headline: **MERGE TRAIN COMPLETE** on `wip-v0.1.8` (8 merges, all held/unpushed, 8/8 reviews APPROVE, all gates green: mux 1108/1108 · arbiter 428 · heartbeat 473). Next: Lane E color delta → Mr. Radio's E2E triage → SenderCardRecorder branch gap (Cheech) → :8000 batch → SATURDAY CUTOVER. Rick's open gates: GCP gitleaks in-band clearance (key rotation + dotfile audit) · :8001 restart offer · push.
+**What IS unfinished is work he never built.** Three items, in priority order:
 
-## 🔝🔝 2026-06-10 RICK'S MORNING DIRECTIVE (Tiberius 👑, session 4f7a7ab8) — two top priorities; sprint close ~Sunday 2026-06-14
+1. **`main.py:472` still falls back to `15`.** The key is now 30, so if that config key ever goes missing the server silently reverts to the value we just measured as wrong. One line. This is the only *code* item.
+2. **The deadline may need to be 40, not 30 — and the arithmetic to decide it is UNRECONCILED.** I ordered 40, then withdrew the order when I noticed my own objection cut both ways. The dispute: Krishna reads the listener backoff wake series as **2/6/14/30** from disconnect; I read `min(1.0·2^attempt, 30)` as **1/3/7/15/31**. Neither of us settled **the offset between the disconnect clock and the gate-start clock**, which is precisely what makes "+20.4s from gate start" and "a 30s wake from disconnect" non-comparable. 30 clears both *observed* samples by ~10s, so what shipped is defensible on measurement — but if the boundary reading is right, 30 races the wake it is waiting for.
+3. **🔴 THE REAL FIX, and it needs Rick, not a worker.** The listener backoff in `src/cosa/agents/utils/proxy_agents/base_config.py` has **no jitter** and a 30s cap. Nine sessions waking within 8 milliseconds of each other is a thundering herd by construction. Jitter would make *any* deadline choice robust instead of boundary-sensitive, and a lower cap would stop pushing reconnection past every sane window. **Fleet-wide blast radius — deliberately not taken by the bounce-arc crew.**
 
-> Rick (voice, 2026-06-10 AM): shortening sprints 4wk → 2wk. Close out + merge `wip-v0.1.8` perhaps as soon as **Sunday 2026-06-14**. Two workers spawned for the two items below; ALL other TODO items rank beneath them. Remaining-backlog re-prioritization happens with Rick after these are in flight.
-
-1. **[LUPIN] 🥇 Notifications-UI → Multiplexer gap-bridge — deprecate the JS notifications UI by THIS WEEKEND.** Worker assigned 2026-06-10. Analyze every functional change to the current JS notifications client (`src/lupin_app/static/js/notifications.js` + html/css) since multiplexer implementation work paused (~2026-05-29, v0.1.7 merge `26898e1`; ~20 functional commits since: Reading Pane + iframe embed/bust-out, scroll-position preservation, reap→focus-bar badge drop, manager-lineage badges + live-patch, abstract-icon pane toggle, action-required-in-reader, Fleet-Status table + context columns + offline toggle, prediction-hint thumbs-vote, missed-badge Reset, TTS preview slider, STT insert-at-caret, messaging-plane inbox surfacing). Deliverables: (a) functional-change summary, (b) gap analysis vs multiplexer current state, (c) bridging WORK PLAN in `src/rnd/` sized for completion by the weekend.
-2. **[LUPIN] 🥈 GCP deployment — working demonstrable Lupin + ALL accompanying services (incl. `lupin-arbiter-app`).** Worker assigned 2026-06-10. Resume M1 from Mr. Radio's RETURN-TO + Sam's resume list (both below): bind data-plane IAM to `vm_sa`, seed the 12 provider-key secrets, push `lupin:1.1.0` to `lupin-images`, VM bring-up (`docker-compose.cloud-test.yml`), CC OAuth setup-token (Rick-gated), `/health` + bounded-CC E2E. **NEW scope:** the deployed composition must include the arbiter (`lupin-arbiter-app`) and all accompanying services — extend the cloud-test compose accordingly.
-3. Everything else below is subordinate to these two until the branch close-out/merge.
-
-**📋 FLEET TRACKING — Tiberius 👑 follows through on every delegation (Rick's mandate 2026-06-10):**
-- [~] **[LUPIN]** **MULTIPLEXER FULL-PARITY SPRINT** (recalibrated: Rick 2026-06-10 — Claude lanes = human-days ÷ 10-20; full parity + hard redirect by SAT if green). Rachel's r2 plan: critical path 2.2-4.4 lane-hrs. **5 lanes BUILDING** (`cc-author-tiberius-5..9`): A Foundation (auth `lupin_*` migrate + sender-send + boot.ts mount-slot, merges first) · B CC-strip keystone (→WP10/7/8/9) · C Reading Pane (critical path; X-Frame-Options first-action) · D Commons panel (WP7 contract via manager) · E Quartet (keep-at-all-costs). Tiberius = integration owner (mount-slot relay, D↔B arbitration, reviewer-per-lane, :8000 E2E batching, merge order, cutover redirect). Friday-night fallback: MVD-no-redirect, cut C then D. Rachel 🕊️ (`36b35962`) = consulting author on standby. Idiom rule to relay at each lane's first contact: NO inline-onclick — store-action + addEventListener delegation.
-- [~] **[LUPIN]** Track **Rio ⚡** (`227134b4`) — GCP M2: ALL automatable work DONE (Option-B arbiter artifacts + provision script · IAM repoint coded, fmt+validate clean · (f)+(g) closed: model-server = sole L4 consumer · OAuth wired into cloud-test). **GATED BATCH awaits Rick**: ADC re-auth (`gcloud auth application-default login` — stale, blocks even Rick) → terraform apply → seed 12 secrets → push lupin:1.1.0 → VM bring-up → arbiter unit → CC OAuth setup-token. Rio writing the copy-paste Rick runbook, then idling.
-- [x] **[LUPIN]** Worker 3 — MCP worktree mis-detection fix ✅ DONE (Clayton 😎 built; real bug in shared `sender_id.py`, gitlink-aware detect_project; Sam 🎙️ fresh-critical APPROVE, 7/7 adversarial probes) — **COMMITTED HELD `6879937`** on wip-v0.1.8, not pushed. New spawns load the fix at boot; live sessions on next MCP restart. Crew reaped.
-- [x] **[LUPIN]** Track **worker 4** — `history.md` archival ✅ DONE (Mr. Radio 🦉 `0102cf69`, 2026-06-10): 23,684 → 12,208 tokens (48.8%, HEALTHY); 11,476 tokens → `history/2026-05-19-to-22-history.md`; conservation EXACT, index updated. HELD uncommitted — rides Tiberius's selective commit gate.
-- [~] **[LUPIN]** **Tiberius-owned:** batched :8000 E2E run — ✅ SUBMITTED 2026-06-10 ~10:25 EDT as job `ts-ea182db9` (scope `e2e`, `--update-snapshots`; verified-idle protocol: todo+run queues empty → bounced `lupin-rest-test` → healthy → queued pos 1). REMAINING: collect results (~17-40 min) + triage the 6 expected visual rebaselines (doc_viewer ×2, claude_plans listing, dm_badge, multiplexer_phase5, notifications) vs real regressions.
-- [~] **[LUPIN]** **Fleet-status worker** (spawned 2026-06-10 PM, Rick-directed, `wt-fleet-colors`): (1) legacy fleet-table liveness COLOR-CODING + % window heat-tint (was never tasked — Tiberius's miss, owned); (2) "unmanaged" lineage bug — reaped sessions drop to unmanaged because reap deletes bridge+manifest lineage while focus-bar badge is event-cached; fix = offline rows retain last-known manager. Color scheme → relay to Lane E for multiplexer WP12 parity.
-- [ ] **[LUPIN]** **Repo-hygiene follow-ups from the 2026-06-10 uncommitted-work audit** (Rick-directed): (a) triage 2 ORPHANS from prior sessions — untracked `src/scripts/purge-offline-heartbeat-events.py` + deleted-but-uncommitted `src/ephemera/dead-letters/__init__.py` (both pre-date this session; identify owner/intent, commit or discard); (b) commit the 06-09 stop-hook brief doc `src/rnd/v0.1.8/2026.06.04-heartbeat-hook/2026.06.09-stop-hook-speakerphone-poke-fix-and-poked-rename.md` (canon of the deployed poke-fix, still untracked); (c) Rick's stash decision — `git stash drop` the superseded poke→poked drift stash@{0}; (d) `.claude-session.md` is tracked but CLAUDE.md mandates it be gitignored — add to .gitignore + `git rm --cached` at a quiet moment.
-- [x] **[LUPIN]** **Tiberius-owned:** broadcast-miss **listener-layer root cause** — ✅ DONE 2026-06-10 PM: plain-English report delivered → `src/rnd/v0.1.8/2026.06.10-broadcast-miss-duplicate-listener-root-cause.md` (SessionStart double-fire spawns 2 listeners, no singleton guard, PID shadowing orphans one, tmux injection race; F1–F4 fix plan, crew-able post-cutover).
-- [~] **[LUPIN]** **Work-owed oracle: acked-inbound ledger** (Rick-directed 2026-06-10 ~14:50: self-poke backlog "way too goddamn big" — 46 of the owed items are serviced acks/verdicts; need a way to "mark them as looked at"). Fix spec: expect_reply=False never owed · `commons_send_to(in_reply_to=qid)` clears qid · explicit per-session `.heartbeat-acked-<sid>.json` looked-at ledger the gatherer subtracts · delegations clear on `dismiss_sessions` · age-out to a "stale, review" bucket. Acceptance: a manager stop-event counts only genuinely-awaiting items (~0-3, not 46). Worktree-only (live hook family). **Assigned: Clayton 😎 (618979e7), 2026-06-10 PM.**
+**Where the context lives**: Krishna's memento (`.claude-memento-krishna-50c3680b.md`) carries all three plus the backoff finding; store row `251a42d0` (done) carries the full arc; his session was reaped clean on Rick's word.
 
 ---
 
-## 🌙 2026-06-09 LATE (Tiberius 👑, session 7b76ad86) — heartbeat-oracle + fleet fixes deployed; MCP follow-ups
+## 🅿️ PARKED 2026-08-02 (María 🌸 + Mr. Radio 🦉) — the mirroring test: is odd phrasing TRANSMITTED between seats, or does each seat drift alone?
 
-> Tonight, all on `wip-v0.1.8` (reviewed + deployed, **NOT pushed**): stop-hook poke-fix, Fleet-Status §5.1/§5.2 + nit, manager-resolution `spawned_by` fix, worker-roster phantom guard, heartbeat-v3 dual-signal oracle (manager outstanding-delegations + worker inbound-DM), idle string → "Momentarily idle." (`366c43e`). Plus the brevity kill-switch (uncommitted).
+**⛔ NOT BEFORE THURSDAY'S DEMO — Rick, 2026-08-02: actionable bug fixes only.** Nothing here is a bug and nothing blocks the demo. Parked deliberately so it is not lost, not because it is next.
 
-**▶ NEXT SESSION — FIRST ACTIONS (descending priority):**
-1. **[LUPIN] Fix cosa-voice MCP project mis-detection in git worktrees** — a session whose cwd is a git worktree (e.g. `/tmp/wt-delegation-signal`) makes `src/lupin_mcp/cosa_voice_mcp.py` detect `project=<worktree-basename>` → strict account-validation fails → recurring **URGENT "No credentials for project '<name>'" TTS**. **Fix:** make project detection worktree-aware — resolve a worktree cwd to its MAIN repo's registered project via `git rev-parse --git-common-dir` (or the main worktree's `--show-toplevel`), not the dir basename. Files: `src/lupin_mcp/cosa_voice_mcp.py` + `test_mcp_account_validation.py`. Worktree crews are the norm now → fires on every build until fixed. (Diagnosed tonight; emitter session reaped to stop the noise.)
-2. **[LUPIN] Brevity kill-switch — verify on MCP boot.** `cosa voice enforce spoken char cap = False` set + code landed (UNCOMMITTED on disk in `cosa_voice_mcp.py` + tests). The running MCP keeps the OLD code until restarted; tomorrow's fresh start loads it → spoken-length guard OFF for all callers. Confirm on boot; decide whether to commit it (vs the idle-string already committed at `366c43e`).
-3. ✅ **DONE 2026-06-09 — [LUPIN] Push `wip-v0.1.8`** — PUSHED (Rick confirmed 2026-06-10; git-verified: branch 0 ahead of origin). Stale-entry lesson: verify `git rev-list --count origin/<branch>..HEAD` before citing this list. (Still parked: the reversible `git stash` of the superseded poke→poked drift — `git stash drop` to purge.)
+**The claim under test.** Drift says each seat degrades on its own. **Mirroring** says each seat learns the register from the last one — which is what would explain a house style that is consistent *across* seats rather than personal to each, and how DMs creep past 1000 words.
 
----
+**María's test** (she proposes ~1 hour; the corpus is already on disk, nothing to build): pull the coined terms from one week of DMs, count how many appear in more than one seat, and check whether B's first use postdates A's. Shared **and** sequential ⇒ mirroring. Personal **and** simultaneous ⇒ the word dies.
 
-## 🌙 2026-06-09 SESSION-END (Tiberius 👑, session d9e65cd8) — arbiter OPERATOR LOOP done + DEPLOYED
+**🔴 ONE CONTROL IS REQUIRED FIRST, or the test cannot fail.** *Shared-and-sequential* is also exactly what you get when both seats read the same source. Our own `CLAUDE.md` coins **WaHH · MoPEP · NoJP · TLH · NoDrama · 3LoL · NoMC C2C · NoAA** — every one appears in multiple seats' DMs, and every one is sequential by construction, because somebody had to type it first. **The test as written scores all of them as mirroring when they are plain instruction-following.**
 
-> Heartbeat-arbiter Phase-1 liveness fix + Round 2a rename + Round 2b operator loop (live-push + Part-6 routing + bounded auto-poke) all BUILT, committed, **deployed live on :8001**, María-verified 3-for-3, and PUSHED at session-end. Commits: `852ab83` (Phase 1) · `21189d4` (2a) · `06fb0b3`+`b4441d7`+`ba57416` (2b). Resume memento: `io/mementos/tiberius-session-resume-2026.06.08-night.md`.
+**The fix is cheap**: exclude any term that appears in a committed instruction file, doc, or broadcast **before** its first DM use. What survives that filter is genuinely transmitted seat to seat — which is the claim. Without it, every result confirms the hypothesis and the run proves nothing.
 
-**▶ FOLLOW-UPS (descending priority):**
-1. **🚨 [LUPIN] history.md archival — CRITICAL (~93% of 25k).** Archive older entries FIRST next session, before adding new content (well past the 19k line).
-2. ~~**[LUPIN] Live-push API key**~~ ✅ STALE ENTRY, RESOLVED 2026-06-09/10 — superseded by the `~/.lupin/config` config-loader design (`2026.06.09-arbiter-notify-key-from-lupin-config`); key resolver verified True 2026-06-10, INI `arbiter live notify enabled = true`. No env var needed. (Rick caught the staleness during the 06-10 walkthrough.)
-3. **[LUPIN] Manual-poker make-before-break stand-down** — the manual cascade-poker stopgap stays LIVE until the deployed auto-poke (2b-3) is proven in prod; then stand the manual one down.
-4. **[LUPIN] Deploy allow-rule** — add a `settings.json` allow-rule for `systemctl --user restart lupin-arbiter-app` so the manager can deploy :8001 without the auto-mode classifier gate (per the session-end deploy-permission explanation).
-
-**Done this session (were pending below):** R0 cutover ✅ · operator loop ✅ · loop rename (Decision 6) ✅. The older "interim heartbeat poker" + "deploy v2.2 arbiter" items are now SUPERSEDED by the deployed operator loop.
+**Status of the exchange**: María accepted the walkthrough offer and quoted the coherency-drift line into the KISS explainer (Act 13). My reply naming the control is **drafted but UNSENT** — cosa-voice lost its tool bindings in session `1bf47c18` and there is no CLI for `dm_send`. Draft + the walkthrough DM are held in that session's scratchpad; whoever has a live binding can send them, or they go out after a re-spin.
 
 ---
 
-## 🌙 2026-06-07 NIGHT WRAP (Tiberius 👑, session 1f9f3c4c) — arbiter B1 DONE, NOT in production
+## 📥 FINDING 2026-08-02 (Mr. Radio 🦉 `1bf47c18`) — a listener loads the WORKING TREE at spawn, so it can pick up HALF an edit
 
-> Session-end state: arbiter-vigilance B1 (L1–L4 + R0) + test-debt sweep + broadcast source fix all reviewer-passed, committed + PUSHED (2 selective commits), backup to DATA02. **NOT in production** — :8000 verify not run, R0 cutover not done, :8001 staged-not-enabled. Resume memento: `io/mementos/tiberius-session-resume-2026.06.07-night.md`.
+**Status**: measured on boot #8, **no store row** (Rick's no-new-rows order stands). Sharper than the transition hazard filed above, and it partly replaces it.
 
-**▶ NEXT SESSION — FIRST ACTIONS (descending priority):**
-1. **🔝 [LUPIN] Batched :8000 e2e verify — NOW UNBLOCKED.** Rick added the `docker restart lupin-rest-test` allow-rule (`.claude/settings.local.json`) clearing the harness gate that denied a peer-authorized bounce. **Krishna 🦚 is staged + holding** (idle-confirmed, preflight green, payload ready: `test_types="e2e"`, `pytest_args="--update-snapshots"`, `--bg`). Fire him: bounce → submit → triage the 6 visual rebaselines (doc_viewer_directory_listing_docs/_io, test_visual_claude_plans_listing, dm_badge_visual_baseline, test_multiplexer_phase5_visual, visual_regression notifications) against his sweep knowledge → directed-DM verdict. Authoritative green for the whole sweep + broadcast fix + L4.
-2. **[LUPIN] R0 break-before-make cutover** (Rick's call) — flip `arbiter in-process bootstrap enabled`=false → bounce :7999/:8000 (verify DISABLED log) → `systemctl --user enable --now arbiter-vigilance` + `loginctl enable-linger` → confirm :8001/health. Tiffany 💍 offered to clean-env-verify preconditions first. Supersedes the older "Deploy v2.2 arbiter on :8000" item below.
-3. **[LUPIN] history.md archival** — at ~19.8k tokens (≥19k archival line); archive older entries next session before it nears the 25k limit.
+**How it surfaced**: boot #8's reconnect lines were inconsistent with each other. Four listeners printed the old bare format; one printed **timestamped** lines — my instrument, committed at 13:43 — while *also* showing a **16.0s** delay at attempt 4, which the new 10s cap forbids. Timestamp present, cap absent. That combination exists in no commit.
 
-**Resolved 2026-06-07 (Rick's call):** the 4 `clayton-*.patch` files were **DELETED** (redundant — their code already committed: `0d7adad`/`40c5491`/`7973376`/`5aadab1`). The context-pressure **proposal + source R&D were COMMITTED** (proposal moved into `2026.06.07-managing-context-memory/`). The proposal still awaits Rick's go for **implementation** (tracked in the PROPOSAL section below).
+**Cause**: listeners run `python -m lupin_cli...` straight out of `/src` (verified: the module resolves to the working tree, not site-packages). They import **whatever is on disk at the moment they spawn**. My two edits were saved ~15 minutes apart; a session that started between them loaded one and not the other.
 
----
+```
+3e328792  12:51   no timestamped lines
+1bf47c18  12:53   no
+b07d59ac  13:04   no
+9fec7c53  13:20   FOUR  <- spawned between the _log edit and the cap edit
+55eae7a8  14:06   (not yet reconnected)
+```
+A clean split at exactly the edit boundary — this is the mechanism, not a coincidence.
 
-## 💡 2026-06-07 (Clayton 😎) — Fleet Context-Pressure Assessment Utility (PROPOSAL, Rick interested)
+**🔴 Why it matters beyond this change.** `:7999` has the rule "a saved file is not a served file — you must bounce." **For listeners the inverse holds: a saved file IS served, to the next listener that spawns, with no bounce and no announcement.** An editing session therefore deploys *intermediate* states to the fleet without anyone acting. The fleet can hold several code versions at once, and none of them need correspond to a commit.
 
-- [ ] **[LUPIN]** **Fleet context-pressure assessment utility** — proposal serialized + parked at Rick's request (he found it "really interesting"). On-the-fly health-check utility to surface workers running low on context + recommend reset (compact) or harvest+respawn-with-memento. **Key insight (verified):** the SDK's `get_context_usage()` is client-only and does NOT reach our tmux-CLI workers; instead read each worker's transcript JSONL (`transcript_path` in its bridge) — last assistant message's `input + cache_read + cache_creation` = true occupancy (probed María's live session: ~46% of 1M). Sensor+recommender, never auto-act (P1/P2). **Proposal doc:** `src/rnd/v0.1.8/2026.06.07-managing-context-memory/2026.06.07-fleet-context-pressure-assessment.md` (committed; lives beside the source R&D). **Source R&D:** `src/rnd/v0.1.8/2026.06.07-managing-context-memory/2026.06.07-managing-context-memory.md`. **Status: PROPOSAL — awaiting Rick's go-ahead** (3 open Qs: ship P1-only first? WARN 70 / CRIT 85%? sensor-only? — Clayton recs yes/yes/yes). Ephemeral plan: `~/.claude/plans/rustling-knitting-mccarthy.md`.
+**Not proposing a fix here** — the options (spawn from an installed copy, stamp each listener with a git sha at spawn, or accept it and make the version legible in the log) have real trade-offs and this is fleet-shaped. Naming the mechanism so the next confusing log is diagnosed in a minute rather than an hour.
 
-## 🔥 2026-06-06 PM (Tiberius 👑, session 060c8d6b) — heartbeat hardening follow-ups
-
-- [ ] **[LUPIN]** **Broadcast-miss root-cause (NOT yet solved — listener layer)** — a USER BROADCAST didn't reach Tiberius while DMs still landed (2026-06-06). Initial "stale bridge > 600s / Thread A `idle_announce` removed the heartbeat" hypothesis was **REFUTED** — the live fanout threshold is `commons broadcast liveness threshold seconds = 28800` (8h), and idle was only ~77 min, so the bridge-mtime filter did NOT drop the session; `owner_user_id` also passes (un-stamped → graceful). **Real direction:** broadcasts arrive via the `cc_notification_listener` (separate from the harness direct-prompt path) → fault is in the listener/injection layer. **Anomaly found:** DUPLICATE listeners for one session (a 09:34 one + a 16:22 one, both alive, same log) on a ~14h-old `claude` process. Needs a dedicated root-cause: the broadcast dispatch path + why a 2nd listener spawns without reaping the 1st. Memory: `reference_broadcast_miss_is_listener_layer`.
-- [ ] **[LUPIN]** **Interim heartbeat poker** (Rick greenlit 2026-06-06) — lightweight recurring watcher that (a) stamps idle managers' bridges to keep them broadcast-reachable + (b) detects whole-fleet-stall → escalates to Rick + DMs the manager. Mechanism lane = Tiberius; charter-doctrine lane = María (standing-pair-must-not-both-go-dark). Retire once the v2.2 arbiter is deployed live on :8000. Was about to fetch CronCreate vs standalone-script mechanism when redirected.
-- [ ] **[LUPIN]** **Deploy v2.2 arbiter** (`0d7adad`, committed held) — stand up `submit_arbiter_if_absent` as a standing job on :8000 post-push + run the live :8000 standing-arbiter integration test (the scheduled post-commit handoff). + the :8000 auth-matrix run (Mr. Radio's lane, needs Rick in-band).
-
----
-
-## 🔴 2026-06-06 E2E TEST-DEBT — Rachel's run unearthed 31 reds (Clayton 😎 picking up, session 19581015)
-
-> **Source run**: Rachel 🕊️ ran the full Playwright `e2e` suite on :8000 late afternoon 2026-06-06 (job `ts-838268c5`, ~32 min). Result **484 passed / 31 failed / 1 error / 3 skipped**. Triage verdict: NONE attributable to her scroll-preservation work (touched only `notifications.js`; the two tests covering that surface passed) → classified as **pre-existing fleet test-debt / branch drift**, handed to Tiberius's crew. Full results: `io/test-suite/2026.06.06-at-16:52-EDT-e2e-results.md`; triage table: `src/rnd/v0.1.8/2026.06.06-reading-pane-scroll-position-preservation.md` §"E2E validation run + triage". **Clayton owning triage + fixes; coordinating with Tiberius 👑 + María 🌸.**
-
-> **RESOLUTION (Clayton 😎, 2026-06-07): ALL 7 clusters fixed + Krishna L3-PASS. 6 test-side, 1 SOURCE (the broadcast bug). Zero source touched in clusters 1-5,7; cluster-6/7 = visual rebaselines. Everything HELD for the single batched :8000 `--update-snapshots` verify + Rick's commit/push.**
-
-- [x] **[LUPIN]** `test_commons_activity_toggle` (9) — STALE TEST: helper resolved controller via dead globals `window.__notifications_controller__`/`notificationsController` (git -S: never existed) → `window.notificationsUI`. Cleared vs `0d7adad`. Krishna L3-PASS.
-- [x] **[LUPIN]** `test_cc_session_strip_and_focus` (7) — ALL test-side: A conv-mode 481/522 `'true'`→`'speakerphone'` +540 `None`→`'quiet'`; B `lands_leftmost`→`_rightmost` (chronological-lock); C `+ensureDateAccordionExists` fixture; D focus-reload reclassified real-bug→fixture artifact (deliberate no-card revert @notifications.js:9933), neg-control + re-inject. Krishna L3-PASS.
-- [x] **[LUPIN]** `test_doc_viewer_directory` + `test_doc_viewer_multi_repo` (10) — STALE retired `?scope=` URLs → unified `?path=lupin/<rel>` / `?path=io` / `?path=claude-plans/` (trailing slash; claude-plans IS browsable — overturned an initial not-browsable ruling). Krishna L3-PASS.
-- [x] **[LUPIN]** `test_commons_recent_activity` (`.trim()` whitespace) / `test_filter_toggle` (flaky fixed-wait → `wait_for_function` poll) / `test_dm_recent_activity` (visual rebaseline). Krishna L3-PASS.
-- [x] **[LUPIN]** `test_layout_mode_toolbar_centering:172` (1) — BRITTLE TEST: iframe fills body **content** width (`clientWidth` 396 ≈ frame 395.6); test compared border-box width (410.6, incl 14.6px scrollbar). Fix = compare vs `clientWidth`. Test-only. (Krishna L3 pending.)
-- [x] **[LUPIN]** `test_multiplexer_phase5_visual` (1) + `test_visual_regression[notifications]` (1, the "error" = `notifications.png` snapshot mismatch surfaced at teardown) — legitimate post-unification/post-UI-change VISUAL REBASELINES → `--update-snapshots` in the batched :8000 run. No code fix.
-- [x] **[LUPIN]** **BROADCAST SUPPRESSION SOURCE BUG** (Rick-greenlit TOP priority) — `broadcast_handler._parse_body` misread prose-`@`-line-with-later-colon as a directive → Rick's AFK broadcast silently skipped fleet-wide. New `_directive_mentions()` (pure @-mention run + colon, match ANY, else default = fail toward delivery). 100% line+branch, Krishna L3-PASS with fails-before/passes-after. SWEEP: single-site.
-
-**FOLLOW-UPS (filed, non-blocking):**
-- [ ] **[LUPIN]** Broadcast matcher **roster-aware hardening** (Krishna nit, Tiberius-approved follow-up): the directive discriminator is heuristic — a short prose line like `@here goes: x` parses as a directive to a nonexistent persona → skips if it's the sole line. Bias is correctly toward-delivery for realistic prose (commas/length catch it). Future fix: give `_parse_body` the persona roster so a token is only a mention if it resembles a registered persona. Today `_parse_body` only sees `local_persona_name`.
-- [ ] **[LUPIN]** Bare-external-scope-root **no-slash 400** (Tiberius-queued robustness): `?path=claude-plans` (no trailing slash) → HTTP 400 while `?path=claude-plans/` lists and `?path=io` (built-in) lists at bare name. External-scope bare root should list or 301→slash. Separate from the test migration.
-- [ ] **[LUPIN]** Pane-body **14.6px vertical scrollbar** in the reading pane (cluster-5 observation) — possibly intended, possibly a tiny iframe overflow; confirm whether `.content-pane-body` should scroll at all.
-- [ ] **[LUPIN]** **Clean full-suite baseline**: no clean green full-suite baseline existed (06-05 reports were filtered 10–20-test runs) → this sweep is attribution-by-blast-radius. Establish a clean baseline so future attribution is before/after.
+**Refines the transition-hazard entry above**: it is not "old code vs new code" — there is no single old version. Any listener alive across an editing session may hold a mix.
 
 ---
 
-## ⏸️▶ 2026-06-04 RESUME-HERE (Tiberius 👑, session 1333e106) — picked up after Rick's end-of-session shutdown
+## 📥 FINDING 2026-08-02 (Mr. Radio 🦉 `1bf47c18`) — session gists have been degraded fleet-wide since the Mistral cutover
 
-> Written 2026-06-03 PM at Rick's "note where you are so we can pick up tomorrow" broadcast. Full rehydration memento: `src/rnd/v0.1.8/2026.05.30-cosa-coverage-campaign/27-tiberius-rehydration-memento-2026.06.03-pm.md`. Session-end state: my docs committed + branch PUSHED + backup done (Tiberius exempted from the no-push/no-backup rule); signalled María to run the global roll-ups after me.
+**Status**: found incidentally while reading listener logs, **not fixed** — a model-server bounce and GPU work are outside what I take unilaterally. No store row (Rick's no-new-rows order stands).
 
-**▶ START HERE TOMORROW (descending priority):**
-1. **🔝 Rick's NEW WORKFLOW IDEA** — still un-described. ASK Rick to describe it, then capture + divide hub-spoke with María 🌸. (The reason I was standing by when shutdown was called.)
-2. ~~Rachel's B3 — `notifications.py:1291` re-raise~~ → **DONE by Rachel** (`bbde599`); tree back to **100%**. Harvest now unblocked. (See Rachel's block immediately below.)
-3. **Harvest (parked, proven SAFE — now UNBLOCKED)** — delete the 4 redundant legacy agent test files (weather / math / date_and_time / token_counter; `test_agents_root_tail.py` is the real coverage-bearer). Tree is green → commit after a Krishna APPROVE.
-4. **E2E `:8000` (`ts-e1d42153`, scope `e2e`, auto_fix=False)** — CHECK result on resume.
-5. **Optional T6 test** (Krishna non-blocking nit) — concurrent `register_question` double-insert guard (`commons_question_watcher.py:202`). Belt+suspenders.
-6. **Standing gate**: Krishna 🦚 reviews ALL code before commit — no self-exemption. Never prompt Rick about pushing.
+**What the server serves** (`GET :3001/v1/models`): `kaitchup/Phi-4-AutoRound-GPTQ-4bit`.
+**What the config asks for** (since the 07-31 cutover `5499fdbf`, 29 references renamed): `ConfidentialMind/Mistral-Small-3.2-24B-Instruct-2506-GPTQ-AutoRound-TextOnly`.
 
----
+Every Gister call 404s. **102 degraded gists today**, most recent 17:14. The listener is honest in the log — *"DEGRADED: gist unavailable — emitting 5-word prefix fallback … This is NOT a model-generated gist"* — but a 5-word prefix still *looks* like a gist in the UI, which is why nobody filed it.
 
-## 🕊️ 2026-06-03 RACHEL (session 7bca7a96) — RESUME HERE TOMORROW
+**Same shape as "a saved file is not a served file."** The 07-31 session verified Mistral with a real inference call on its own dedicated venv/port. What was never verified is that **`:3001` — the port the Gister actually calls — was moved to it.**
 
-**Shipped, reviewer-cleared, COMMITTED locally (`bbde599` on wip-v0.1.8, NOT pushed — held for María's push wave + Rick's word):**
-- Missed-badge **Reset button** + logout dead-onclick-global fix (earlier commit `c0db33d`).
-- **Confidence-overflow "22123%" fix** — clamp `similarity_pct` to [0,100] at the dot-metric boundary.
-- **Send-bar code-fence rendering** — `renderMarkdownInline` delegates ```-fenced text to the block renderer.
-- **Prediction-hint thumbs 👍🏼/👎🏼 → training signal** (Rick's feature): ratification-aware CBR weighting (approve boosts; downvote = negative vote / steer-away) + `POST /api/notify/prediction-vote/{id}` + `record_hint_vote` + UI controls + 4 INI keys.
-- **Fixed `notifications.py:1291`** (dismiss endpoint dead `except HTTPException: raise`, Tiberius's catch) → tree back to 100%. *(→ Tiberius's "[ ] Cover notifications.py:1291" item below is DONE.)*
-- Krishna 🦚 APPROVED (B1/B2/N1/B3 closed); vote-flow E2E green (`ts-852bb878`, 2/2); `prediction_engine.py` 100% line+branch.
-
-**PICK UP TOMORROW:**
-- [x] **[LUPIN]** PUSH `bbde599` — DONE (branch 0-ahead of origin, verified 2026-06-10).
-- [ ] **[LUPIN]** Thumbs-vote **Stage 3**: extend ratification weighting to multi-select + open-ended paths (Stage 1 covered yes_no + MC single-select only); add a :8000 integration test (DB-backed 👍 → approved case steers a later prediction; 👎 → steer-away).
-- [ ] **[LUPIN]** Tidy (Krishna non-blocking nit): `MIN_PCT=50` hardcoded in `notifications.js` mirrors the INI `prediction hint vote min confidence threshold` — fold the threshold into the hint payload / expose to client so they can't drift.
-- [ ] **[LUPIN]** Still mine (PG-D4): Global hermetic-config autouse fixture (FM-21) — design + isolation-verify; land only on a clean full-suite gate.
-
-Design docs: `src/rnd/v0.1.8/2026.06.03-prediction-hint-thumbs-vote-training-signal.md`, `src/rnd/v0.1.8/2026.06.03-notification-markdown-and-confidence-overflow-fixes.md`.
+**Two ways out**: bring `:3001` up on Mistral (what the cutover intended; venv + `svllmm` alias already exist), or revert the 29 config references to Phi-4. Rick's call.
 
 ---
 
-## ✅🏁 2026-06-03 CoSA COVERAGE MARATHON — COMPLETE (Tiberius 👑, session 1333e106)
 
-**DONE:** `cosa` 100% line+branch+function tree-wide (412 files, 0 miss / 0 partial); 11 test-only commits HELD on `wip-v0.1.8` (`d75bb69`→`e70e02e`), Krishna 8/8 reviewer-clean, certified + steward-ratified. Full record: `src/rnd/v0.1.8/2026.05.30-cosa-coverage-campaign/23-overnight-grind-certified-complete.md`.
-
-**🔁 RICK'S MORNING GATE — session 1333e106 progress (2026-06-03):**
-- [x] **[LUPIN]** PUSH the marathon CoSA commits — DONE (on origin; branch 0 ahead / 0 behind, git-verified).
-- [x] **[LUPIN]** PROD BUG (a): `dispatcher.py` uninitialized `self.debug` — FIXED + de-armed (commit `71d0645`); 2 tests cover both debug arms.
-- [x] **[LUPIN]** PROD BUG (b) #12: `cosa_interface.ask_yes_no` → missing `_dispatcher.ask_yes_no` — FIXED (delegates to real `ask_confirmation`) + strict-xfail de-armed (commit `71d0645`).
-- [x] **[LUPIN]** Stale CLAUDE.md §PROJECT STRUCTURE — FIXED (11 real `cosa` source dirs; deleted `app` removed; commit `7526700`); María mirroring the block into PIP.
-- [ ] **[LUPIN]** Global hermetic-config autouse fixture (FM-21) — **Rachel's lane** per PG-D4 (design + isolation-verify; land only on a clean full-suite gate).
-- [ ] **[LUPIN]** io_files watch-note (doc 90) — candidate FM-22; promote only on recurrence WITH captured `--tb=long`. (Monitor.)
-- [~] **[LUPIN]** `:8000` integration/E2E tier — **E2E SCHEDULED** this session (job `ts-e1d42153`, scope `e2e`, `auto_fix=False`); result pending.
-- [ ] **[LUPIN]** HYGIENE: `.claude-session.md` (412KB) + `TODO.md` (273KB) bloat — dedicated size-management (deferred per PG-D4 ruling).
-
-**🔧 RELOCATE PASS — MISDIAGNOSED; corrected (1333e106):**
-> CORRECTION: the 1-statement gap was NOT stray agent coverage. `--cov-report=term-missing` + `git blame` proved the missing line is `notifications.py:1291` (the `except HTTPException: raise` in the new dismiss endpoint), added by **Rachel's `c0db33d`** — unrelated to the harvest. The 4-file agent harvest is coverage-SAFE (agent modules stay 100%). My earlier "stray cross-tree incidental coverage" theory was a confabulation (theorized before reading the line). Corrected lesson: doc 26 §6.
-- [x] **[LUPIN]** Found the lost statement: `notifications.py:1291`, owner = Rachel's `c0db33d` (NOT agent tests).
-- [ ] **[LUPIN]** Cover `notifications.py:1291` (dismiss endpoint re-raise) — **Rachel's lane**, under Krishna review; flagged to her with the exact fix. Tree is 99% until done.
-- [ ] **[LUPIN]** Harvest (now proven safe) — delete the 4 redundant legacy agent test files; commit ONLY once tree is green (Rachel's line covered) + Krishna review. Lower priority.
-
-**🤝 NEW (1333e106) — coordinate with María on Rick's new workflow idea:**
-- [ ] **[LUPIN]** Coordinate with María 🌸 on Rick's **new workflow idea** (idea TBD — Rick to specify; then capture + divide with María per the hub-spoke pattern). Placeholder added 2026-06-03 at Rick's request.
-
-**🧵 FM-7 :7999 fix follow-up (1333e106):**
-- [x] **[LUPIN]** Offload 3 blocking commons handlers to `asyncio.to_thread` (get_active_sessions / get_broadcast_history / post_register_question) — Krishna-APPROVED, committed `21af084`. Removes residual sync bridge I/O from the shared event loop (FM-7 / §13B saturation).
-- [ ] **[LUPIN]** OPTIONAL belt+suspenders (Krishna's non-blocking nit): unit test asserting two concurrent `register_question` calls under a stubbed cap don't double-insert — pins the T6 lock invariant (`commons_question_watcher.py:202`) now that `to_thread` permits true concurrent registration. Not a blocker; the path is lock-safe by construction.
+Last updated: 2026-08-02 (Rachel 🕊️ `0d6df7b6` — bounce-button: served ≠ saved, and a whole press pressed)
 
 ---
 
-## 🟣 2026-06-03 RETURN-TO (Mr. Radio 🦉, session c0aede3d) — GCP Milestone-1 infra is UP; finish the connecting steps + app deploy
+## 📥 FINDING 2026-08-02 (Rachel 🕊️ `0d6df7b6`) — the bounce button was 404 on the running server; auth-401 + whole-press now proven; the endpoint tests were ungated
 
-**✅ DONE this session (committed LOCAL, UNPUSHED):** Milestone-1 GCP TEST infrastructure **stood up & verified** — VM `lupin-host-test` with an **operational L4 GPU** (driver 535/CUDA 12.2; docker `--gpus all` smoke ✓) + full **data plane** (Cloud SQL private-IP PG16 `lupin_db_test`/`lupin_app`; 14 secrets; Artifact Registry `lupin-images`; IAM build-sa/runtime-sa; `dev-vpc` Service-Networking peering). Adopted the standalone `terraforming-vms` app for the VM (retired my `gce-gpu-vm`/`vpc-vpn` modules). Full record + commit list + connection name: `src/rnd/v0.1.8/2026.05.30-gcp-deployment/2026.06.02-terraforming-vms-reuse-and-integration.md` §9.
+**No store row** — Rick's no-new-rows order tonight. Three jobs for María 🌸 (`2b9feb77`) on commit `5f40de15` (Managed bounce R2). Same shape three times: a saved file that was not a served/gated file.
 
-**🔁 RETURN HERE NEXT (none blocking — these are the app-deploy connecting steps):**
-- [ ] **[LUPIN]** Bind data-plane IAM to the VM `vm_sa` (`lupin-host-test-sa@hello-world-foo-423219.iam.gserviceaccount.com`): per-bucket objectUser, per-secret accessor, cloudsql.client, AR reader (currently granted to `runtime-sa`).
-- [ ] **[LUPIN]** Seed the 12 empty provider-key secret versions from `src/conf/keys/` (anthropic/openai/groq/google/gemini/mistral/elevenlabs/kagi/hf/jwt/smtp×2). `lupin-db-password` + `lupin-notification-api-key` are already populated.
-- [ ] **[LUPIN]** Deploy Lupin to the VM: build/push image → `lupin-images`, IAP-SSH, `docker compose up` with `LUPIN_CLOUD_BACKED=true` + `CLOUD_SQL_CONNECTION_NAME=hello-world-foo-423219:us-central1:lupin-pg16-test`.
-- [ ] **[LUPIN]** ⚠️ **Re-enforce Secure Boot** + adopt a proper signed-driver GPU path — current Secure-Boot-OFF is a TEMPORARY exception (Rick 2026-06-02; integration doc §8). Re-enable: `gcloud resource-manager org-policies enable-enforce compute.requireShieldedVm --project=hello-world-foo-423219`.
-- [x] **[LUPIN]** PUSH the held GCP commits — Lupin side DONE (branch 0-ahead, verified 2026-06-10). NOTE: `terraforming-vms` repo commits (`9310741`, `7304dab`) are a SEPARATE repo — verify there independently.
+**Job 2 finding (biggest) — committed ≠ deployed.** `POST /api/system/bounce` returned **404 on the live :7999**: the endpoint committed at 20:52 but the container last started 20:25 and reload is OFF, so the button was DEAD on the running server. María's own rule — "a saved file is not a served file" — broken within the hour of R2 being called done. Fixed by driving the sanctioned sequence: `bounce-dev-server.sh` (load the endpoint; 404→401 confirmed live) → `install-bounce-watcher.sh` (the watcher was NOT running — no `io/bounce` heartbeat → a press would 503; now a systemd --user unit, heartbeat fresh at 1s) → **the real authenticated press**.
 
-Filed 2026-06-03 by Mr. Radio 🦉 at Rick's request.
+**Whole press proven end-to-end (first time):** click → `202 triggered` at t=0 → watcher claimed the trigger + set `bounce.inprogress` at t=2s → :7999 DOWN at t=20s → HEALTHY at t=28s (all-clear). Observe loop only accepts "healthy" AFTER first seeing "down", so a pre-restart 200 cannot false-green it. Corroborated independently by María: container `StartedAt` moved 21:16:45 → 21:20:51.
 
-## 🎙️ 2026-06-03 SESSION-END (Sam 🎙️, session 68ecdfb8) — GCP M1: SDK 0.2.88 + bundled-CLI + cloud-test compose; lupin:1.1.0 built & verified
+**Job 1 — the auth-401 branch was untested.** `test_system_bounce.py` proved 409/503/202 but called the endpoint with a **fake `current_user`**, bypassing the auth dependency, so the 401 the commit names never ran. Closed by new `test_system_bounce_auth.py` (2 passed): drives the REAL chain (`HTTPBearerWith401` → `get_current_user`); unauth AND malformed-Bearer both 401 (a custom 401 subclass, not FastAPI's default 403 — the commit's "401" claim verified). Red-proof (documented): removing `Depends(get_current_user)` → unauth reaches the body → 503/202, not 401.
 
-**✅ DONE (committed `2637e01`, 6 files, UNPUSHED — per Rick's no-push session-end):**
-- Guided 5-decision walkthrough → plan + decisions log: `src/rnd/v0.1.8/2026.05.30-gcp-deployment/2026.06.03-m1-vm-bringup-plan.md`. Decisions: full cutover · ratify standalone-VM architecture · **mount model** (bind-mount `./src` on the VM, NOT bake) · keys = manual scp interim · CC OAuth = manual setup-token + re-auth · Secure Boot stays OFF this milestone (COS signed-driver image = untried/viable).
-- `claude-agent-sdk` 0.1.56→**0.2.88**; `uv.lock` regenerated (only SDK changed); Dockerfile CC CLI `curl|bash` → **symlink to SDK-bundled `_bundled/claude`** (CLI 2.1.161).
-- `docker-compose.cloud-test.yml` — Cloud SQL **Auth Proxy sidecar** (unix socket) + mount-model app (`LUPIN_CLOUD_BACKED` + Testing-GCS) + GPU model-server (cuda:0); +8 unit tests (`src/tests/unit/deploy/test_cloud_test_compose.py`), all green.
-- **`lupin:1.1.0` built + verified** (candidate tag; working `1.0.0` untouched): `claude --version`→2.1.161 via symlink; SDK + all 7 CC call-site symbols import; full app import OK (168 routes); compose lints.
+**Job 3 — those tests were invisible to the gate.** Both files lived in `src/cosa/tests/unit/rest/`, but the unit gate runs `pytest src/tests/unit/` only (`src/tests/run-unit-tests.sh`), so **0 were collected** — green locally, never in CI. Relocated both into `src/tests/unit/` (where sibling `test_bounce_watcher*.py` already live); verified by RUNNING the gate: `run-unit-tests.sh -k system_bounce` → **13 passed, 12142 deselected**. Chose relocate over allowlist deliberately.
+- **SYSTEMIC (worth a real look):** no runner I could find collects `src/cosa/tests/` at all — `pyproject.toml` references it only to EXCLUDE it from coverage — yet it holds **~415 test files**. A whole tree of unit tests may be green-locally / ungated. Same failure shape as the 404, at scale.
 
-**🔁 RESUME HERE (continues Mr. Radio's GCP RETURN-TO above):**
-- [x] **[LUPIN]** PUSH commit `2637e01` (+ Mr. Radio's held GCP commits) — DONE (branch 0-ahead of origin, verified 2026-06-10).
-- [ ] **[LUPIN]** Rick: generate CC OAuth token (`claude setup-token` on home box) → seed into the VM like the keys.
-- [ ] **[LUPIN]** Phase B — repoint data-plane IAM to `vm_sa` (TF `coalesce(external_vm_sa_email, runtime_sa)`; plan §Phase B).
-- [ ] **[LUPIN]** Phase D2 — push `lupin:1.1.0` to `lupin-images` (secret-scan gate).
-- [ ] **[LUPIN]** Phase E — VM bring-up: clone repo to data disk, `chown -R 1001:1001`, scp keys, fetch `DB_PASSWORD`, `docker compose -f docker-compose.cloud-test.yml up`.
-- [ ] **[LUPIN]** Decide model double-load on the single L4 (flip `speech to text provider = model-server` in Testing-GCS so the app defers to the model-server) — plan open item.
-- [ ] **[LUPIN]** Phase G — full uvicorn boot + `/health` + bounded-CC-job E2E (needs GPU + token; user-run or at deploy).
+**Uncommitted for the crew (Sam gates, María/Cheech commit):** `src/tests/unit/test_system_bounce_auth.py` (new), the `git mv` of `test_system_bounce.py` into `src/tests/unit/`, and the D2/D3 test files from the prior legs.
 
-Filed 2026-06-03 by Sam 🎙️ at Rick's session-end request.
+---
 
-## 🔵 2026-06-03 FOLLOW-UP (Rachel 🕊️, session 624abe39) — tmux heartbeat / self-continuation for grind workers
+## 📥 STASHED 2026-08-02 (Cheech 🌿 `7edf6e5e`) — a review that stops at the process boundary passes an inert fix
 
-- [ ] **[LUPIN]** **Follow up on the tmux-heartbeat self-continuation design** → `src/rnd/v0.1.8/2026.05.30-cosa-coverage-campaign/20-tmux-heartbeat-self-continuation-design.md`. **Verdict**: the same `tmux send-keys` path that delivers Rick's voice messages can inject "keep going" as first-class input — no new poker needed; `_arm_idle_waiter` already IS the poker (just notifies Rick instead of nudging the worker). **Gate the poke on the Notification `idle_prompt` event** (safe-to-poke signal — fires when CC is parked at the prompt; its own output is discarded so it can't inject, only time). Pairs with `build_stop_block` (in-turn reflex, self-guarded) as the backstop. **6 open questions in the doc** — chiefly: (Q1) consecutive-poke ceiling/backoff, (Q2) work-pending signal source, (Q3) speakerphone posture for grind workers. Reconcile with the messaging-coordination plane (`2026.06.02-messaging-coordination-plane-design.md`) — may share infra. For Tiberius 👑 + María 🌸.
+**Not filed as a row, per Rick's board-to-zero directive tonight.** Recorded here because it is the second instance in one day, in different code, by different people.
 
-## 🟢 2026-06-02 (Tiberius 👑, session 1333e106) — Post-game consolidated + TTS cap shipped; next infra item pending Rick's pick
+**What happened.** Bug `f433fbae` D1 committed as `fd11cd30`: `ask_multiple_choice` now passes `response_default`, so an offline read should return the default instead of a 503. Sam reviewed it and PASSED it — he confirmed the 503 had drifted to `notifications.py:1068-1069`, reverted the plumb himself, and got the exact predicted failure text. A careful review by any normal standard.
 
-**DONE today (checkpoint, NOT pushed):**
-- [x] **[LUPIN]** CoSA-campaign **post-game consolidated** with María 🌸 → `src/rnd/v0.1.8/2026.05.30-cosa-coverage-campaign/18-postgame-coordinated-for-rick.md` (3-list, descending: **P0** messaging-plane · **P1** completion-discipline · **P2** harvest + reap-fix · **P3** TTS-guard). María's planning-is-prompting framework companion cross-linked both ways. Corrected the "MCP saturation" → "shared :7999 + synchronous handlers" root cause before it shipped.
-- [x] **[LUPIN]** **TTS spoken-brevity cap** (implements post-game P3): caller-side cap in the cosa-voice MCP layer + `override_size_limitation: bool = False` on all 5 spoken tools; `cosa voice spoken char cap = 500` in lupin-app.ini, read via ConfigurationManager **mtime-gated → runtime-tunable** (verified live 500→333→500); 11/11 unit tests. R&D: `src/rnd/v0.1.8/2026.06.02-tts-spoken-brevity-cap.md`. **Activation needs one MCP restart.**
+Then Clayton, chasing an unrelated ruling about marking defaults, found the fix **delivers nothing**:
 
-**Progress (2026-06-02):**
-- [x] **[LUPIN]** ✅ **P2 reap-path** — verified live post-MCP-restart (`dismiss_sessions` list-arg reap works via `3488b43`; spawn→dismiss→empty roster). No re-implementation needed.
-- [~] **[LUPIN]** **P0 messaging-coordination plane** — DESIGN DOC done + in Rick's review: `src/rnd/v0.1.8/2026.06.02-messaging-coordination-plane-design.md` (5 levers A–E; rec order A→D→B→C→E; no external broker this milestone). **Holding for Rick's lever/order decisions before any code.**
+- the server's offline branch returns a plain `JSONResponse`, not a `data:` SSE frame the client parses;
+- `OfflineEvent` requires a `response` field the server never sends — the default goes into `default_used` instead;
+- so client validation fails and drops to an error dict. Honest, not forged. But the default never lands.
 
-**Finish-unfinished triage — Rick's 4 decisions (relayed via María 2026-06-02; recorded post-game §3.7 + framework §11):**
-- [x] **[LUPIN]** **T1 — 403-queues (U4):** ✅ **CLOSED 2026-06-12 04:34 EDT — STALE-MOCKS, NO PROD BUG** (Krishna 🦚 8573bf8f, investigate-first honored, zero code): 403 contract = intentional RBAC since `98ab9652` (2025-10-07); test-side already repaired in `e2d6942c` (2026-06-01 WAVE-2 Phase-A); independent re-run at `83990552`: 2435 passed, ZERO 403-family failures. Entry was stale.
-- [x] **[LUPIN]** **T2 — prod-bug #11:** ✅ **CLOSED 2026-06-12 04:34 EDT — ALREADY FIXED + DE-ARMED** in `d722396a` (2026-05-31, LlmClientFactory import path, Mr. Radio-approved); independently re-verified at head: 179 pkg + 326 full-selection tests green, prediction_engine.py **100% L/B** under full selection. Entry was stale. Side-find fixed same lane: 2 stale mux-config mocks (tts_preview_fraction WP13/F6 drift) refreshed, merged `4ff0346f` (held, test-only) — `cosa/tests/unit/rest/` now **2437/0**.
-- [x] **[LUPIN]** **T3 — `ResearchOrchestratorAgent` (U7): KEEP + coverage-exclude** (Rick-decided; NOT deleted — closes the last Rick-only U-decision).
-- [ ] **[LUPIN]** **T4 — sequencing:** io_models (79→100) + `test_suite_completion_watchdog` SOLO now (fleet-free); **Agents Tier-2 long pole GATED on the messaging fix / WAVE-3** — NO pre-fix fleet spawn (would re-create FM-7).
+Sam retracted his own pass unprompted and named the miss himself: *"I gated the server emit and the plumb, never traced the client consume — the exact different-process seam."*
 
-**Near-term solo lane (fleet-free, parallelizable with the messaging work):** prod-bug #11 · io_models · watchdog · 403-queues investigation.
+**Why it matters.** This is the same shape the late-answer-handback cascade caught four hours earlier: a dedupe ledger whose writer lived in a different process from its reader, whose test would have gone green while production failed. Different file, different people, same seam. A unit-level negative control proves the **plumb**, not the **delivery** — and the control is what makes the review feel finished.
+
+**The rule that came out of it, now binding on this crew:** do not gate a cross-process fix by reading the chain. Reading is how it passed the first time. Execute it — drive a real call against a server forced into the failing state and assert on **what the caller actually receives**, provenance intact.
+
+---
+
+## 📥 SCOPED 2026-08-02 (Clayton 😎 `99913b08`) — bug f433fbae D2 does NOT fix the symptom Rick reported
+
+**No store row** — Rick's no-new-rows order tonight. Two caveats, so D2 is never read as closing a complaint it doesn't touch.
+
+**What D2 landed.** The blocking-ask verbs (`ask_yes_no` / `ask_multiple_choice` / `converse` / `ask_open_ended_batch`) now stamp an `idempotency_key`, and the server's response-required path re-attaches to the original notification on a repeat key instead of minting a second card. This closes the **in-process same-key re-POST** duplicate — `notify_user_sync`'s `retry_on_timeout` loop and any durable resend.
+
+**Caveat 1 — a bounce still duplicates.** `_ask_idempotency_index` is an in-memory `OrderedDict`; a :7999 bounce wipes it, so the same key re-POSTed *after* a bounce misses and mints a new card. The existing fire-and-forget idempotency cache has the identical limitation. **Fix (deferred):** add an `idempotency_key` column to the `notifications` table (a migration on the hot table — none exists today, and the row has no spare metadata field) and look up by key so the dedup survives a process restart.
+
+**Caveat 2 (the bigger finding, stated bluntly) — D2 does NOT fix the symptom Rick reported.** Rick's "re-answer the same question" came from **three separate ask INVOCATIONS**, each minting a *fresh* idempotency_key. No idempotency key — in-memory or DB-backed — dedups distinct invocations; only content-hashing the ask would, and nobody has ratified that. D2 fixes the retry-loop case, not the re-invocation case. The reload-OFF policy change (2026-08-01) plus D1's marked-default are what actually reduce the reported storm; D2 is defense-in-depth on top.
+
+**Follow-up (D1 offline test) — pre-existing failure, must move to the SSE contract when fixed.** `src/tests/unit/test_notifications_api.py::TestNotifyResponseRequired::test_notify_response_required_offline_with_default` **already fails at the pre-tonight base** (`fd11cd30^`) — an empty-body test-harness issue, independent of D1. It is NOT a D1 regression. BUT: D1 changed the response-required offline path from a `JSONResponse` to an SSE `StreamingResponse` (ack + OfflineEvent frame). So whoever fixes that test's harness must **also** update it to assert the SSE contract (`response.status_code == 200`, `text/event-stream`, parse `data:` frames → `status: offline` / `response` / `default_used: true`) — a `response.json()` assertion on that path is now wrong by design. Same applies to `test_notify_response_required_open_ended_batch_accepted` if it exercises the offline path.
+
+---
+
+## 📥 FINDING 2026-08-02 (Tiberius 👑 `f63d0e28`) — the handback bounce-e2e can't be a :8000-scheduled job
+
+**Status**: measured, resolved for THIS test, worth a venue-rule note. **No store row** — Rick's no-new-rows order tonight.
+
+**The finding**: the two execution rules in my brief can't both hold for the late-answer handback e2e.
+- **A :8000-scheduled test cannot bounce :8000.** The test-suite runner `Popen`s pytest as a *child of the :8000 server process* (`src/cosa/agents/test_suite/job.py`). A test that restarts :8000 to wipe the in-memory `pending_responses` waiters kills its own runner mid-run → deadlock, no results.
+- **Bouncing the real :7999 is worse**, not a fallback: it's the live fleet server, and seeding+answering notification rows there writes to `lupin_db_dev` — the "no test touches a live dev data store" mandate.
+
+**Resolution (Cheech green-lit 2026-08-01 20:32)**: the handback e2e stands up its **own uvicorn on a throwaway migrated DB** and bounces *that* via a genuine kill+restart. Real process-lifetime seam (in-memory waiters wiped, durable PG row survives), isolated, reproducible, no fleet disruption, no live-DB write. No manual :7999 bounce tonight.
+
+**Also measured**: `lupin_db_dev` is already migrated — `answer_delivered_at` column + `idx_notifications_answer_owed` index present, `alembic_version = 3da5c0d1eee6`. So Rachel's deferred "live round-trip" precondition (deferred until the shared DB carries `3da5c0d1eee6`) is satisfied for the dev DB.
+
+**LANDED 2026-08-02**: `src/tests/e2e/test_ask_answer_handback.py` (+ `_handback_e2e_server.py`) — THREE scenarios GREEN, 57s.
+- (a) stream-death, server alive → answer reaches the asker via the re-attach poll → `responded`, no re-ask.
+- (b) orphaned waiter (stream death) → answer OWED → travels via `answer_catchup.surface_owed_answers`; ack empties owed → surfaces once. Proves the catch-up path only.
+- (c) **LIVE waiter wiped by a real restart** — hold the stream OPEN (waiter live), assert in-flight, restart (process death), then answer → travels via catch-up. Rick's mid-question-bounce case.
+- **Sam's catch (2026-08-02)**: (b) alone oversold — closing the client stream makes uvicorn cancel the generator, whose `finally` DELETES the waiter, so the restart wiped nothing live (deleting it stayed green). Fixed: (b) renamed + descoped to orphaned-answer travel; (c) added for the live-waiter case.
+- Falsifications EXECUTED (predicted text confirmed, restored): (1) inverted the owed predicate → catch-up empties → red; (2) neutralized (c)'s restart → the live waiter is woken (delivered), owed stays 0 → red. (2) proves (c)'s restart is load-bearing.
+- Venue: own uvicorn (real notifications+websocket routers) on a throwaway migrated DB, bounced by kill+restart. Never touched :7999/:8000/`lupin_db_dev`.
+
+**Finding worth the design owners' eyes (stale-PID bridge → NULL persona)**: `_voice_persona_for_sender_id` resolves the bridge via `find_session_by_id`, which **skips any bridge file whose filename PID is not a live process** (stale-session guard). So a session whose bridge is stale/dead at answer-persist time stamps `sender_persona = NULL` on the ask row — and that late answer becomes **unretrievable by persona**, the same §4.4 accepted gap as a persona-less session, but reached by a *different* door (a dead-PID bridge, not a failed allocation). Bounded + already-audible (the `[NOTIFY] ⚠️ … NO voice persona` warning fires), but the runbook gap is currently framed as "allocation failed" only; a dead bridge at persist time hits it too. Not a blocker; noting so the gap's framing is complete.
+
+---
+
+## 📥 FINDING 2026-08-02 (Tiffany 💍 `0768c103`) — two notification tests assert the pre-SSE offline contract; NOT "pre-existing", 40 minutes old
+
+**Status**: reproduced and root-caused by me, **not fixed** — it is the f433fbae campaign's lane, not mine. **No store row** per Rick's no-new-rows order.
+
+```
+FAILED test_notifications_api.py::TestNotifyResponseRequired::test_notify_response_required_offline_with_default
+FAILED test_notifications_api.py::TestNotifyResponseRequired::test_notify_response_required_open_ended_batch_accepted
+        json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+```
+
+**Cause**: `1cd795c7` ("Bug f433fbae D1 (server half)") deliberately changed the offline branch from a plain `JSONResponse` to a `StreamingResponse` emitting two SSE frames. That is the correct fix and the commit is sound — it updated *its own* test. It did not update these two **twins in a different file**, which still call `.json()` on a response that is now an SSE stream.
+
+**🔴 THE LABEL MATTERS.** These were reported to me as "pre-existing failures, not in my diff." The first half is right, the second is misleading: **I ran this exact class at 00:38 tonight and all five passed.** They broke at ~00:55. "Pre-existing" invites everyone to route around them; "someone changed the contract 40 minutes ago and two twins were missed" tells the owner it is theirs and still warm.
+
+**Fix direction — assert the NEW contract, do NOT restore the JSON blob.** Drain the generator and assert both frames, `response=<default>`, `default_used=True`, exactly as `1cd795c7` did for its own test. This is the third instance tonight of the same shape (podcast tests `20c70793`, DM-judge `60bbb6ce`): a campaign moves a contract, a twin in another file keeps asserting the old one, and the cheapest green is the wrong one.
+
+**Verified not caused by the bridge-guard work**: both still fail with `-o addopts=""`, so the `pytest.ini` marker change is exonerated.
+
+---
+
+## 📥 BACKLOG 2026-08-02 (Tiffany 💍 `0768c103`) — the all-clear's real blocker is the reconnect WINDOW, not the predicate
+
+**Status**: measured tonight, NOT built, NOT ruled. **No store row** — Rick's broadcast ordered no new task items tonight, so this is stashed here deliberately.
+
+**Context**: bug `784d4a2e` replaced the all-clear settle gate's plateau predicate with roster-coverage (Rick's direct ruling, 2026-08-02 ~00:20). The predicate change is right and is committed work. This entry is about what the fix EXPOSED rather than solved.
+
+**The measurement** — a real `:7999` bounce at 00:25 ran the new gate:
+```
+all-clear FIRED on DEADLINE EXPIRY (boot #3): reached 10 recipient(s) after 15.3s;
+reconnect curve 0→0→1→1→1→1→…→1   [29 polls flat at ONE]
+10 session(s) had NOT rejoined and got NO all-clear (accepted loss, no re-fire): [10 ids]
+```
+
+**🔴 CORRECTED TWICE. Read both corrections — the second one partly restores the first, and that is the lesson.**
+
+*First version*: "reconnection is slower than the 15-second window" (1 of 11 sockets back at fire time). *Correction 1*: I called that wrong and replaced it — the roster and the live-socket set were **never the same id space** (roster holds `0768c103-eb8d-…`, the socket registry holds `cc-listener-0768c103`), so the comparison could not match at all and the gate was **blind, not coarse**. Fixed under `784d4a2e`.
+
+*Correction 2, measured on boot #4 with the fix live*: **both defects were real and stacked.** The id-space bug was masking a genuine timing problem, and now that the gate can actually see returning sessions, the timing problem is exposed and finally has a number under it. My first explanation was not wrong — it was **incomplete, and I called it wrong**. Over-correcting is its own error: a second story that fits the evidence does not automatically retire the first.
+
+**🎯 THE NUMBER, measured on boot #4 (2026-08-02 01:17, `d96f59ce` live):**
+```
+01:17:08.404  all-clear FIRED on DEADLINE EXPIRY — 15.5s, curve 0→0→0→1→1→…→1
+              9 session(s) named as missed
+01:17:11.506  cc-listener-0768c103   ┐
+01:17:11.511  cc-listener-7edf6e5e   │  ALL NINE of the "missed"
+01:17:11.511  cc-listener-9056b85b   │  reconnect 3.1s LATER,
+01:17:11.512  cc-listener-0d6df7b6   │  within 8 MILLISECONDS
+01:17:11.513  cc-listener-f63d0e28   │  of each other
+01:17:11.513  cc-listener-8a09f41c   │
+01:17:11.513  cc-listener-5b2b4545   ┘  (+ 2 more)
+```
+
+**What this establishes, and it is the first hard evidence in this whole arc:**
+- The fleet does **not** trickle back — it returns in one synchronized burst at **~18.6s after the gate starts**, roughly 3 seconds past a 15-second deadline. That looks like a fixed reconnect/backoff interval, not load-dependent scatter.
+- **The deadline is the lever now, and it is short by about 3 seconds.** Every one of the 9 sessions named as an accepted loss was actually back moments later — and got nothing, because re-fire is barred.
+- The gate itself is behaving correctly: it named exactly the sessions that genuinely had no socket at fire time. The instrument is sound; the window is wrong.
+
+**✅ SECOND SAMPLE ARRIVED — boot #5, a peer's bounce minutes later. It CONFIRMS the burst and widens the spread:**
+```
+boot #4   fire 01:17:08.404 (15.5s)  →  9 listeners at 01:17:11.506   = +3.1s   (within 8ms)
+boot #5   fire 01:21:14.801 (15.4s)  →  9 listeners at 01:21:19.813   = +5.0s   (within ~70ms)
+```
+Reconnection completes **~18.6s and ~20.4s** after the gate starts. **The 15s deadline misses it both times.** Two independent bounces, both a synchronized burst, both a total delivery loss.
+
+**Worth noting how the second sample was obtained**: I asked Rick whether to fire two controlled bounces for measurement — a deliberate fleet disruption at 1am — and the ask timed out because a peer's bounce dropped it. That bounce *was* the sample. The question answered itself at zero cost to the fleet.
+
+**Next, in order:**
+1. **DELEGATED (Krishna, spawned 01:22)** — raise the deadline 15 → **30**, not 25: two samples at 18.6 and 20.4 are 1.8s apart at n=2, so leave real headroom rather than hugging the larger one. Splainer twin must state the measurements *and* that n=2 — it currently admits "15 is a GUESS", and the replacement must not read as more certain than two samples support. Plus a test that goes red if anyone tidies it back to 15.
+2. **✅ ANSWERED — and it makes 30 the wrong number.** Krishna traced the burst to the listener's exponential backoff in `src/cosa/agents/utils/proxy_agents/base_config.py`: `RECONNECT_INITIAL_DELAY=1.0`, `BACKOFF_FACTOR=2.0`, `MAX_DELAY=30.0`, **no jitter** — which is exactly why all nine wake within 8ms of each other. The fleet lands on the **30-second cap wake**. So a 30s deadline *races the wake it is waiting for* — a coin flip, and the same "don't hug the sample" error I gave him, reappearing one level up. **Corrected to 40**, clear of the boundary. (Arithmetic being reconciled first: his series is 2/6/14/30, mine is 1/3/7/15/31 from `min(1.0·2^attempt, 30)`; we are choosing a config value against those boundaries, so the exact series and the offset between the disconnect clock and the gate clock have to be settled, not assumed.)
+
+3. **🔴 THE REAL FIX IS JITTER, and it is Rick's call — fleet-wide blast radius.** Nine sessions waking within 8 milliseconds is a textbook thundering herd; the lockstep is a property of the backoff having no randomization. Adding jitter would spread the reconnects and make *any* deadline choice robust instead of boundary-sensitive. Also worth pricing: a 30s cap means a listener that misses early attempts waits half a minute, which is what pushes reconnection past any sane all-clear window in the first place. **Not touched** — a launch-wide backoff change is not something a bounce-arc worker should land unilaterally.
+
+4. **Also fixed**: `main.py:472`'s fallback default was still 15. A fallback that disagrees with the key silently reverts to the known-wrong value if the key ever goes missing.
+3. Only then consider the warning-phase ack list as a tighter roster — it may be unnecessary if the window is simply correct.
+
+⚠️ **The roster over-count is real and still costs us**, independent of the id bug: the 00:25 warning was acked by only 2 distinct sessions while the roster listed 10. Krishna was **reaped at ~15:50** and his bridge file is still on the roster nine hours later — a session that will never reconnect, holding the gate to the deadline on every bounce.
+
+⚠️ **A second, upstream collision** (Arnold, not fixable in the gate): the two id spaces meet at `session_id[:8]`, because the socket key carries only 8 characters. Two sessions sharing 8 leading characters would mark a real straggler as covered. That lives in how listeners are named, not in the gate.
+
+---
+
+## 📥 STASHED 2026-08-01 night (Mr. Radio 🦉 `9056b85b`) — two findings NOT filed as rows, per Rick's board-to-zero directive
+
+Rick's broadcast `0152e7b0`: *"stop posting new task list items. NONE… stash it in the to-do file and we'll come back to it on another day."* Both of these would otherwise be store rows. Neither blocks anything.
+
+**1. Tone's evidence sometimes hands back the whole message instead of the phrase it judged.**
+Measured properly in commit `a09a2327` (probe + 31 tests). On the four probe bodies the behaviour is clean and defensible: the two *plainly-written* bodies (tone +2) get the whole body quoted — when prose is uniformly plain there is no offending phrase to point at, so "all of it" is a fair answer — while the two *jargon* bodies (tone −2/−1) get aimed quotes, 6/6. **The anomaly is on live DMs, not probe bodies**: two of mine scored tone **−1** and still echoed whole. On a negative grade there *is* something specific to point at, so the probe's pattern does not predict it. n=2. Not a grading defect — the weights are right — an evidence-quality one. Next step if picked up: run the tone grader against bodies that are plain-but-flawed, which is the cell the 2×2 does not contain.
+
+**2. `io/mementos/tiberius.md` is a bare slot that nobody can clear.**
+The last surviving `memento_io verify` finding on this repo. Its content is **byte-identical** to `tiberius-legacy-2026.07.14-193034.md`, so the data-loss window is already closed — what remains is a label, not a risk. Clearing a bare slot needs `write --persona <p> --session-id <sid>`, and Tiberius's seat is gone, so the session id would have to be invented. That is exactly what `BARE_SLOT_EXEMPTIONS` in `memento_io.py` exists for, and three slots already sit in it for this reason. **It is a planning-is-prompting change, not a Lupin one**, and adding a fifth entry deliberately reds `test_exemptions_are_exactly_the_ruled_set` so a human has to notice — which is the design, not an obstacle. Deliberately not done from this repo tonight.
+
+---
+
+## 📥 BACKLOG 2026-08-01 evening (Rick's idea, captured by Mr. Radio 🦉 `9056b85b`) — reject over-long DMs at a hidden, randomized word limit
+
+**Status**: idea captured, NOT built, NOT ruled. No store row yet — this is a design Rick floated, not owed work.
+
+**Rick's proposal, in his framing**: tell everyone up front that exceeding the word limit produces an **error and the DM is not sent**. Do **not** tell them what the limit is, and draw it **randomly between 150 and 250** so it cannot be gamed. The published advice is simply to stay within the recommended limits.
+
+**Why the lever is right.** A grade is advisory. The judge published 👎s all evening and nobody was blocked by one, which is exactly how a ~1000-word DM still went out (Rick's broadcast `d8099c6c`). A rejection forces the rewrite — a different instrument, not a louder version of the same one.
+
+**Why the randomization is smarter than it first reads.** A known limit of 200 puts everyone at 199 — compliance, but it parks all traffic at the ceiling. A threshold drawn from 150–250 turns the cliff into a **slope of rejection probability**: ~10% at 160 words, ~90% at 240. The risk-averse response is to go well under 150 rather than hug the edge, and that behaviour falls out of the mechanism instead of out of asking nicely.
+
+**🔴 THE ONE CHANGE I'd insist on — seed the threshold on a HASH OF THE BODY, not a fresh random per call.** As drafted, a rejected DM retried *unchanged* succeeds about half the time, which teaches **"retry beats editing"** — the one gaming vector the randomization itself introduces. Hashing keeps every property wanted (unknowable in advance, unguessable, spread over 150–250) and adds the one needed: the same text always gets the same verdict, so a rejection sticks until the words actually change. It also keeps the send path reproducible for debugging and tests.
+
+**Two things to settle before it ships**
+1. **What counts as a word.** A pasted stack trace, code block, JSON blob or long URL blows any limit — and those are sometimes what a DM legitimately carries. Strip fenced blocks from the count, or the rule punishes the wrong messages.
+2. **What the error says.** That message is the *entire* teaching surface. It should name the ~60-word target, say the limit is variable so nobody burns a cycle reverse-engineering it, and point at the doc-link pattern for anything genuinely long. "Too long" alone produces guessing.
+
+**Interaction with the open bug rows**: this largely retires `0fc5b8f0` (the −2 length grade saturating at 250) for *enforcement* — nothing that long gets sent at all — but the saturation still distorts the audit history, so that row stays open rather than closing on this.
+
+---
+
+## 📋 DECISIONS LOG 2026-08-01 (Cheech 🌿 `7edf6e5e` + María 🌸 `2b9feb77`) — late-answer-handback cascade post-game
+
+**Retro**: `io/post-games/2026.08.01-late-answer-handback-cascade-post-game.md` (local corpus, gitignored). Cascade telemetry: 15 stage-reviews, 5 sections, 43 min, 51 findings, 0 rejected, 0 escalations, no code under Rick's gate. Cast reaped 16:54; post-game opened 16:58.
+
+**R-1 — the deposits carried the harvest through a reap-before-harvest, and that is a receipt, not a mechanism claim.** 18 rolling deposits from 4 of 4 cascade seats, every one carrying provenance; the reap cost the retro almost nothing. **María, cross-examined, refused the causal version**: *"with one run I cannot separate 'a mechanism made it hold' from 'four diligent seats made it hold.' Diligence is the confound and we did not control for it."* Accepted verbatim — headline the receipt, drop the causation.
+
+**R-1b — two runs now point the same way, on different tiers.** 2026-07-27 measured the *teardown-time* deposit (memento element 9) → 1 of 6. 2026-08-01 measured the *during-run* deposit → 4 of 4. Consistent with `post-game.md` §3.4 ranking tier 2 above tier 3, and the first positive control that ranking has. Still not a controlled comparison — the seats differ.
+
+**R-1c — PENDING RICK.** The 2026-07-27 ruling R1 (*"every stand-down instruction must name element 9"*) is a *"remember to do this"* rule — the anti-pattern `post-game.md` §7 names by name. Proposal: demote it to a backstop under a headline of *rely on the during-run deposit*, the same demotion §3.3 applied to the reap gate. **Not applied — and the decision row was RETIRED the same evening** (`20efd445`, dropped). Rick: *"explain or retire."* The honest explanation is that it should not have been minted. The post-game workflow says open threads become store items rather than sitting in prose; I applied that to an *observation*, which already lived in two better places (the retro and the corpus README standing note). The result was a row that **read** as owed work while nothing was blocked on it and nobody was doing the wrong thing.
+
+It also failed the bar I had just set for everything else in the same retro: both pattern candidates stay candidates until **cross-day** recurrence, yet I routed this one — two runs, different tiers, diligence uncontrolled by María's own refutation — to the operator queue anyway. Applying my own bar retires it. The July rule stands as a belt beside today's suspenders; keeping both costs nothing, and a third run re-surfaces it with evidence attached.
+
+**R-2 — Candidate 1 (an artifact belonging to no section goes un-updated) stays a CANDIDATE at four instances.** Tiberius 👑 refuted the promotion *from his own deposit, before anyone asked*: "count causes, not symptoms before you let evidence promote a rule." María: "Nothing moves it. Four instances, one cause, one run." A reaped seat winning an argument with a live manager is what the provenance field is for.
+
+**R-3 — Candidate 2 (a close check scoped to its author's own conditions) stays a CANDIDATE, and María's self-contradicting crew brief is NOT folded in to reach two.** Her ruling: same *family*, different *mechanism*; folding it in inflates the evidence. What it adds is a second author and a different engagement. **Promotion bar: cross-DAY recurrence.**
+
+**R-4 — on "0 rejected across 51 findings": the asymmetry is the finding, not the zero — now supported by a sample of two.** Tension was real on the manager axis (reviewers refuted the manager 4×; two reviewers disagreed substantively; one retired her own concern on evidence) and absent on the author axis (51 for 51 conceded, never once defended). María supplied the discriminator — *"was any ACCEPTED finding wrong? Nobody re-derived one"* — and it was run rather than argued: two accepted findings re-derived cold, both hold at the exact cited lines (`emit_to_session` has no `return` statement at all; the ORM partial-index prior art sits at `postgres_models.py:227-231`). **2 of 51 is a spot check.** Hypothesis → supported, not proven.
+
+**The day's through-line, from the design under review straight into the review of it**: *a value that cannot distinguish "I know" from "I don't know" was used as a gate.* A send read as a receipt · a stored default read as a given answer · "returns nothing" read as a proof · "the same ledger" read as one process · a headline count read as its own tables. **The manager reported ~70 findings upward all afternoon against a true 51 — and the moderator of this very post-game announced 20 deposits against a true 18, one hour after reading a memento whose headline finding is that exact defect.** Both corrected in flight and left visible rather than scrubbed.
+
+---
+
+## ⏳ PENDING — 2026-08-01 (Cheech 🌿 `070d88a5`) — podcast E2E blocked on container Claude Code re-auth
+
+**Status**: OPEN, needs Rick first thing in the morning. Store row `bff6bc6c` (bug, owner `rick`, next_chase 2026-08-01 06:45 UTC).
+
+**What shipped tonight (done, no action needed)**: podcast generator hosts renamed Nora→Maria, Quentin→"Mr. Radio" across config/code (commit `1935089d`, reviewed, 337/337 green), plus a fix so a failed AI call now fails loudly instead of faking an empty script (commit `419174ed`, reviewed, 30/30 green).
+
+**What's still blocked**: the `lupin-rest-dev` container's Claude Code login is revoked (401 "OAuth access token has been revoked"). Rick ran `claude auth login` once tonight — `claude auth status` reported success, but a real call still 401'd immediately after, so the login didn't actually take. **`claude auth status` is unreliable in this container — verify with a live call** (`docker exec lupin-rest-dev claude -p "reply PONG"` and confirm it actually returns PONG), not just the status field. Until this is genuinely fixed, no bounded-CC job (podcast, BFE, TFE, deep research, presentation) can run in that container.
+
+**Next step**: Rick re-authenticates, verifies with the live-probe method above, then re-run the real podcast job against `src/rnd/v0.1.9/2026.07.19-brevity-mandate-injection-riders.md` to get the actual rendered episode with Maria/Mr. Radio dialogue.
+
+---
+
+## 📋 DECISIONS LOG 2026-07-31/08-01 (Mr. Radio 🦉 `7846bfcb`) — DM Quality Judge toggle standing ON
+
+**2026-08-01 — Rick: `dm quality judgment enabled` is standing ON, not the usual one-DM-then-revert.** Verbatim: "flip the toggle to true I want the judge to grade DMs. And let's leave it there until I say otherwise." Do NOT assume it's back to the ini-default `False` in a future session — check `src/conf/lupin-app.ini` directly. Live audit (`/api/dm/quality-audit`) was at count=8 when this session ended.
+
+**2026-08-01 — 3 bugs fixed in `DmQualityJudge`, one caught mid-fix.** Maria diagnosed a prompt self-contradiction, a missing unclosed-tag fallback, and a missing garbage-output guard. Her suggested fix for bug 1 regressed live discrimination (verified 3/3); fixed differently (deleted the contradicting prompt line, left the injected example unchanged) and confirmed the regression is gone. See history.md 2026.08.01 checkpoint for the full account.
+
+---
+
+## ⏳ PENDING DECISION 2026-07-26 (Mr. Radio 🦉 `9a63d597`) — `7ee5b646`: the HWM janitor switch
+
+**Status**: OPEN, awaiting Rick. Store row `7ee5b646` (decision, `gate_class=operator`).
+
+**The situation**: the DM-inbox bookmark janitor shipped with `arbiter enable hwm deletion = False`, which **diverges from his "let the janitor drain them" ruling**. I flipped it to OFF after measuring that the plan's safety claim was inverted — reaping a live session's bookmark does not duplicate its DMs, it **silently swallows the un-surfaced ones** (a missing file reads as never-seeded, so the reconcile records the inbox as already-seen and surfaces nothing). That re-creates bug `59f355e0`.
+
+**What Rick decides**: whether to turn it on. The 7-day window is already his ruling and needs no change. Nothing drains until the INI key flips.
+
+---
+
+## 📋 DECISIONS LOG 2026-07-28 (Mr. Radio 🦉 `951a4459`) — the key split, and three rulings
+
+**2026-07-28 — Rick: the two keys get PURPOSE names, and the name was part of the cause.** Verbatim: *"the original was called `notification-api-claude-code-dev`, literally because that was how it was designed to be used — calling the notifications API, by Claude Code, by a developer. That scope has broadened… The key we use to call the model server should be called by its purpose in life: `model-server-api`."* ⇒ **This is a diagnosis, not cosmetics.** `docker-compose.yml:90` read *"Model-server **reuses the existing** … key"* — and that reads as sensible thrift **only because the name doesn't say who the key is for.** Evidence it's right rather than merely tidier: eight of nine credentials in `src/conf/keys/` are named by purpose alone; the outlier carried three claims (API · caller · environment), and `-dev` was **actively false** — the VM, not a dev host, held a file so named. **PHASE 2 (renaming consumer A → `notification-api`) is DEFERRED as its own change**: that name is *generated* by `create_service_account.py`, exists on every host and in Secret Manager, and `outbound_api_key.py:30` holds it as a module constant gating MCP auth fleet-wide. Renaming it beside an outage fix would trade a one-service outage for an all-hosts one.
+
+**2026-07-28 — the mount pin lands in TERRAFORM, never `gcloud`.** I had offered Rick `gcloud run services update` for `6cc52525`. Wrong: `cloud-run-model-server-deploy.sh:10-24` records finding #4 — a second deploy authority produced state drift and a secret mount path diverging from what the app reads. ⇒ **Module DEFAULTS moved too**, not just `envs/test`: that env passed one of three variables and silently inherited the shared key for the other two. **Leaving the defaults would let any future env re-create this bug by omission.**
+
+**2026-07-28 — rotation ORDER is the safety property, and it is what the pin buys.** `_install_api_key()` hashes at BOOT ⇒ new secret version → `terraform apply` → **only then** distribute to callers. Reverse it and every caller 401s until instances recycle. **With `latest` unpinned there is no controlled moment for step 2** — instances pick it up whenever they cold-start. ⇒ The real argument for pinning is not "prevents silent drift", it is **"makes the re-hash an event you can schedule."** *(Recorded because I moved the client before the server on dev and broke embeddings for a few minutes — the exact ordering, violated by the author of the warning.)*
+
+**⏳ STILL OPEN — Rick's, deliberately not assumed**: the model server holds **one** hash, so every rotation is a hard cutover with a disagreement window. Accepting **two** hashes during a rotation window removes it, at the cost of a second live key to revoke. Written so it stays an additive change to `_install_api_key`.
+
+**⏳ STILL UNRULED — crew posture.** Asked twice on 2026-07-27, answered oppositely (`860c57ee` "cap the crew at us two", `bf033a65` "let it run"), then settled by Rick as **"Neither — ask me again when I am not being asked four things at once."** ⇒ **No spawning until he rules.** An automated heartbeat "staff up this tick" does not launder that into authorization.
+
+---
+
+## 📋 DECISIONS LOG 2026-07-27 afternoon (six-worker crew, recorded by Clayton 😎 `34474b66`) — five rulings, and a pattern worth reusing
+
+**2026-07-27 — VM dual-stack ordering → KEEP the one-commit rule, MOVE the load-bearing half to a per-file compose `name:`.** Sam and Mr Radio ruled that de-hardcoding `container_name` must land with the socket-volume split, on the premise that the hardcoded name is the only thing preventing stack 2's init from deleting stack 1's live socket. **The premise held only across distinct compose projects, which this repo never supplies** — no top-level `name:`, no `-p` at any call site, `COMPOSE_PROJECT_NAME` nowhere, both files at one root ⇒ `/var/lupin` resolves to project `lupin` for both. Measured: same project ⇒ compose does not conflict, it **recreates** — socket deleted, `rm` run twice, and stack 1's app container destroyed. ⇒ The deletion is **already armed**; the gating act is the first `compose up` of a second stack, not a commit. Premise withdrawn by Mr Radio; rule kept.
+
+**2026-07-27 — Vertex data-sharing (OSQ C-1) → OPTIONAL, and the paid probe is CANCELLED.** Phase 1.1's own rule was *"config without `dataSharingEnabledProvider`, issue one request, rejection ⇒ required."* That experiment had already run on 07-13 and succeeded. Confirmed live at zero cost: config present, field absent, 509 anthropic invocations in 14 days. ⇒ Gate `31f6d447` gets the OPTIONAL question. **The probe is now more dangerous than when designed** — `setPublisherModelConfig` is a full-object SET and would clobber a live logging config that did not exist on 07-13.
+
+**2026-07-27 — tier-run attestation → TAMPER-EVIDENCE, not tamper-proofing.** The requirement was "write it where the tests cannot write." Measured, that is unachievable: `job.py`'s pytest Popen uses `env={**os.environ, …}`, so the subprocess inherits every credential the orchestrator holds; the `TFE_/BFE_/LUPIN_TEST_` allowlist filters only the **caller-supplied** dict, not inheritance, **though it reads as if it does**. ⇒ Anyone may append, nobody may rewrite: `prev_sha256` chain, verifier names the first broken index. **Building to "cannot write" would have shipped a receipt store whose guarantee is a promise** — the defect the row was filed about, one layer up. Requirement corrected by its author on the measurement.
+
+**2026-07-27 — two dated regressions → one was the FIX, one was the TEST.** `69295c25` (the `8b93bcf5` lying-zero fix) moved `readline()` into a reader thread whose `finally` posted the EOF sentinel on **any** exit, so a crashed reader read as clean EOF and a dead tier reported **`exit_code 0`** — worse than the `0/0/0/1` it was filed to fix, because it reads as green. The fix was wrong. Separately, `test_this_revision_is_a_head` was **stale by construction**: had the CoSA tree been gated it would have blocked **every migration ever added**. The test was wrong. ⇒ Rule applied: *measure which before touching either.*
+
+**2026-07-27 — a stale COUNT is a second authority → assert the property, never re-pin the number.** `test_vertex_env.py` pinned `== 15` after the tuple was re-harvested to 16. **Bumping to 16 only moves the expiry date on a population the vendor controls**, and it was already a second authority on a fact `test_vertex_env_completeness.py` owns by re-harvesting from the binary every run. ⇒ Now asserts *every key in the tuple is in `HOSTILE_ENV_KEYS`*, per key; **what belongs IN the tuple defers to the single authority that measures it.** The test's NAME said "fifteen" too — **a stale name is a claim**, so renaming was part of the fix.
+
+### ⭐ PATTERN TO REUSE — an exemption with an EXPIRY CONDITION, not a reason
+
+`test_attestation.py` is unreachable by any gate **because `src/cosa/tests/**` is referenced by none** — the exact condition decision `5bf28e07` is open to rule on, not a property of the file. Its allowlist entry therefore records an **expiry condition** rather than a justification: *"remove this line when `5bf28e07` is ruled, either way."*
+
+⇒ **An exemption that dissolves when the condition it rests on resolves cannot rot into a permanent one**, and the ruling disposes of it automatically with no separate decision. Prefer this shape wherever an exemption exists because of an open question rather than because of the thing itself.
+
+### ⚠️ COUNTING YOUR OWN VISIBILITY AND REPORTING IT AS THE TREE
+
+The day was briefed to Rick as ~20 commits; the reviewer measured **48**; the branch since midnight holds **55**. **48 and 55 are both correct** — `da1a5ed8..59038897` is a review range, `--since` is a day — but ~20 was one manager's own visibility reported as the repository's state. Same shape as the three blind instruments in `691d49db`: **a clean number answering a narrower question than the one asked.** Always state the predicate with the count.
+
+---
+
+## 📋 DECISIONS LOG 2026-07-27 (Mr. Radio 🦉 `951a4459`) — `2b20a6d6` RULED, both arms
+
+**2026-07-27 — which remedy for backend-blind test isolation → (1b) fix the three production call sites FIRST, then RAISE at construction, then land the guard test.** Why: a raise is unaffordable while three live sites still pass an ignored `db_path`; once they are reconciled the raise costs nothing and covers unswept code. Re-verified against the artifact this session — `responder.py:256-260` and `prediction_engine.py:163-165` have **no guard at all** (the row said "not guarded by the backend flag"; they are not guarded by *any* flag), and `prediction_engine.py` **hardcodes** its path rather than reading config. Only `main.py:512-520` gates, and on a second authority (`solution snapshots manager type`) with no comparator against `vector store backend`. Target shape: `routers/system.py:272-289`.
+
+**2026-07-27 — what happens to the six existing test offenders → ALL SIX isolated or removed. No exemptions, no known-bad list.** Rick, verbatim: *"I absolutely do not want any test touching a live dev data store! If it's not isolated then it needs to be removed or fixed."* This **overrode all four options offered** — I had proposed re-scoping the two `test_prediction_*_e2e` tests to *declare* that they use real data, on the reasoning that they point at the real store on purpose and are therefore honest. Rick rejects the premise: intent does not launder the contact. If isolating a test makes it vacuous, it is removed. Standing rule now in auto-memory `feedback_no_test_touches_a_live_dev_data_store.md`.
+
+**Follow-on opened**: three weeks of unisolated runs left unknown junk in `lupin_db_test` — contaminated data in a live dev store, needing its own cleanup call. Whether the six *write* or merely *construct* is now a cleanup-sizing question, not a disposition question.
+
+---
+
+## ⏳ ~~PENDING DECISION~~ ✅ RULED 2026-07-27 — `2b20a6d6`: backend-blind test isolation (kept for the record)
+
+**Status**: ✅ **CLOSED 2026-07-27** — both arms ruled by Rick; see the Decisions Log entry immediately above. Store row `2b20a6d6` carries both rulings as amendments. Original framing retained below.
+
+**The situation**: nine `cosa/memory/*` classes route on the ambient `vector store backend` flag and silently discard any `db_path` handed to them. `postgres` has been live since 2026-07-07 with no per-block override, so a test that constructs one believing it is isolated is reading and writing the shared store. One module (`test_answer_is_correct`) is fixed — commit `e4113d64`. Six more in `src/tests/integration/` are not.
+
+**What Rick decides**: which remedy, and what happens to the six.
+
+**My recommendation, revised after measuring**: fix the three production call sites first, THEN raise at the source, then add the guard test. The original recommendation said "raise" outright; checking its stated risk showed **three live sites pass `db_path` under postgres** (`main.py:512`, `responder.py:260`, `prediction_engine.py:165`), so a raise breaks them today. `routers/system.py:272` is the one good citizen — it asks the flag before building a path, and is the shape the others should take.
+
+**Why I did not just do it**: the six live on the gated `:8000` suite; a change there cannot be verified without monopolizing the test server, which is the second half of what this decision decides. Also worth naming — `main.py` gates on `solution snapshots manager type`, a **second authority for the same fact** with nothing comparing the two. Reconciling that belongs to whichever remedy wins.
+
+**Related**: `d621b111` (the bug + full sweep) · `d6f11dfd` (closed) · `cfcbb703` Family B (the allowlist that missed this) · `d8a23fca`
+
+---
+
+## 📥 BACKLOG 2026-07-25 (Rick's idea, captured by Mr. Radio 🦉 `43ff094e`) — ASR warm-up endpoint to pre-heat Cloud Run
+
+**Status**: possible FUTURE performance improvement. Not owed work, no store row, not scheduled. Rick's framing: *"I want to be able to warm up cloud run before I actually use the app. And a voice to text warm up endpoint would be great."*
+
+**The problem**: `lupin-model-server` is a scale-to-zero L4 Cloud Run service (`minScale=0`, deliberate — Rick 2026-07-25: *"cloud run should not be warm during the day… I don't want to pay for it sitting there doing nothing"*). So the FIRST voice interaction of a session eats the cold start. Measured today: **32.0s** wall clock for the first authenticated call, versus **4.1s** for a transcribe against an already-warm instance. That ~28s is paid by whoever speaks first.
+
+**Design note that makes this cheap — measured, not assumed.** The warm-up does NOT need to send audio. The model server eager-loads its pipelines at startup (`_load_whisper()`, "Eager-load distil-whisper pipeline to GPU 0"), so ANY request that causes an instance to start also loads the models. Receipt from today's cold start:
+```
+GET /health  →  HTTP 200 in 32.0s
+{"status":"ready","models_loaded":["whisper","code_rank_embed","nomic_embed_text_v1_5"],
+ "vram_used_mb":2496,"uptime_seconds":25,"load_errors":[]}
+```
+`uptime_seconds: 25` on a 32s call ⇒ that call STARTED the instance, and by the time it answered the models were already resident. **An authenticated `GET /health` is a complete warm-up.** No audio round-trip, no `/transcribe`, no upload — which also means the warm-up costs nothing beyond the instance-start it is deliberately buying.
+
+**Sketch** (whoever picks this up should re-derive, not trust this):
+- A Lupin endpoint (e.g. `POST /api/asr/warm`) that fires the authenticated `GET {LUPIN_MODEL_SERVER_URL}/health` and returns promptly — the caller wants "I started it", not "I waited for it".
+- Fire-and-forget / non-blocking, so the UI can trigger it on page load or on mic-button focus without stalling.
+- Idempotent + cheap to call repeatedly; a warm instance answers in ms.
+- Honest reporting: return whether the instance was already warm (`uptime_seconds`) vs just started, so the UI can say "ready" vs "warming, ~30s".
+- ⚠️ **Cost coupling** — this is the one thing to think hard about. A warm-up trigger wired to something automatic (page load, a poll, a heartbeat) re-creates by the back door exactly the always-warm billing Rick just rejected. It should be USER-INTENT-driven (mic focus, an explicit button) or explicitly rate-limited, and that constraint belongs in the design, not in a comment.
+
+**Related**: today's STT 401 (row `30198303`, closed) and `src/cosa/utils/secret_drift.py`. The warm-up path would exercise the same auth chain, so it doubles as an early-warning probe for key drift — but see the `unknown`-is-not-a-pass rule in that module before treating a warm-up failure as a health signal.
+
+---
+
+## 🔴 P0 FOR TOMORROW (2026-07-25) — VM persona-404: APPLY the code-route fix on the VM
+
+**Repo side is DONE + green** (session b46c77e3, `wip-v0.1.9`): `atomic_write_json` fchmod-0660-before-replace, `register_session.py` explicit `chmod 2770` (setgid) sessions dir, 3 new mode tests, 252 unit tests pass. Design in `src/rnd/v0.1.9/2026.07.24-vm-persona-bridge-mount-uid-divergence.md` **FINAL PLAN v3** (approved by two independent reviewers — Sam 🎙️ + local LLM expert — GO-WITH-CHANGES, all folded).
+
+**Morning steps (VM only, NOT yet applied):**
+1. `cloud-gpu.env`: add `LUPIN_HOST_SESSIONS_DIR=/home/admin_rickruiz_altostrat_com/.claude/sessions` + `LUPIN_BRIDGE_GID=1721846087`.
+2. `docker-compose.cloud-gpu.yml` `rest` service: long-form bind (`create_host_path: false`) of sessions dir + `group_add: ["${LUPIN_BRIDGE_GID:?...}"]` — verify via `compose … config | grep sessions` (never `sudo`).
+3. VM: `chmod 2770 ~/.claude/sessions`; backfill `chgrp 1721846087 + chmod 660 ~/.claude/sessions/cc-*.json`.
+4. Push repo change to VM (`./src` bind covers container + host hook); recreate `--env-file cloud-gpu.env --no-deps --force-recreate lupin-rest`.
+5. **Bidirectional runtime test** (the crux): host writes bridge → container `set_voice_persona()` → assert numeric owner 1001 / group 1721846087 / mode 0660 → host rewrites → container reads again. Then fresh session `request_persona()` → allocated (not 404); confirm `notify()`/OAuth/health survive; `docker inspect` both mounts.
+6. VM `lupin-host-test` is currently STARTED (running); `acl` pkg was installed during diagnosis (now moot — code route chosen).
+
+---
+
+## 📋 DECISIONS LOG 2026-07-22 (Mr. Radio 🦉 `2c24d27b` + María 🌸 `f5ed59fd`, two-seat SWE crew) — four assertions that could not fail
+
+**Retro**: [post-game — assertions that cannot fail](src/rnd/v0.1.9/2026.07.22-swe-crew-post-game-assertions-that-cannot-fail.md). Commits `4bec617b` + `b65191ec`, both HELD (push is Rick's).
+
+- **🔴 THE PRACTICE — an assertion is not a guard until you have DELETED the thing it guards and watched it go red.** Twelve assertions shipped across two commits, all twelve verified that way. FOUR other checks written the same day — by both engineers, reviewed by both, agreed by both — **could not fail**, and not one was caught by reading. A check that agrees with the code on the sampled input is *indistinguishable in its output* from a passing test; there is no signal in green that separates them.
+  - **The strongest evidence available**: the fourth instance was written **immediately after both engineers had named the pattern to each other in writing, in the same thread.** ⇒ **naming it does not defend against it. Only reverting does.**
+  - The four: fixture margin (±6h) wider than the masking quantity (a 4h offset) · two banner triggers sharing one dependency on `total` · a test asserting against a state dict it built itself · a pin whose input made both branches of the target function coincide.
+- **🔴 A GUARD KEYED ON COMMITTED STATE IS STRUCTURALLY BLIND TO A PRE-COMMIT RUN.** `test_notifications_task_list_token_not_stale_vs_css` resolves the CSS date from `git log`. `4bec617b` shipped a stale `?v=` token — returning browsers would have served the cached sheet and **none** of the new styles would have rendered. Green pre-commit, red on the very next sweep, because the guard's input did not exist yet. ⇒ *"I ran the suite before committing"* is **not a claim about that guard at all**. Generalizes to migration heads, changelog freshness, tag/version alignment, any file-date coupling.
+- **RULED (Rick, verbatim) — muting the poke is SILENCE AT THE WORKER, HONESTY ON THE CARD.** *"I also want the momentarily idle output pushed to me via notification API to reflect the contents of the default poke disabled message. I want to see what the workers see."* A muted stop skips the obligations lookup by design, so `owed=False` was a default standing in for a lookup that never ran — every muted worker's card published *"idle — nothing owed."* Fixed to report UNKNOWN, naming the mute rather than blaming a healthy store. **Not** widened to `config_error`/disabled: pinned legacy contracts, neither a live-fleet switch, with a discriminator test making that narrowness a decision.
+- **RULED — where a canonical shared predicate exists, MIRROR IT TERM FOR TERM; do not rule fresh.** Both engineers reasoned independently about parked-ness and both got a term wrong; `park_is_active()` (`task_store_owed.py:184`, three existing readers) settled it against both. It keys on **`status == "parked"`, not `park_reason`**, and a null/unparseable/past chase is **NOT** park-active — *"fail-loud-toward-owed"*. The panel was about to become that module's fourth reader, which is exactly where the divergence it exists to prevent would have entered. Corollary (María, self-reported): *do not recommend a field you have not read* — `park_reason_stale` answers quote-drift, not chase expiry.
+- **RULED — the defect was the SILENCE, not the number.** The task panel pulled 1,171 rows against a `limit` hard-capped at 500: 671 dropped, newest-first, so the evicted rows were the OPEN ones the panel exists to show — while both call sites carried a comment promising the view was *"never silently truncated."* Rick ruled **drop terminal rows**, not pagination and not a raised cap. But 139-under-500 is **headroom, not a guard**, so the fix also reads the `has_more`/`total` the server was already publishing and both consumers were discarding.
+- **FILED `a5f4eb3f`** (P2, owner Mr. Radio) — `/api/tasks` row-cap overflow sets neither `truncated` nor a `warnings[]` entry while the char budget sets both. A caller checking **the field named for exactly this** is told "no" with 57% missing: an alarm gated on the healthy value.
+- **⏳ PATTERN-WATCH, NOT DOCTRINE — `revert-to-verify`.** Four instances in one day is a strong *within-session* pattern, not a cross-session one. Per Rick's standing rule it is captured with receipts and logged here; **nothing written to `workflow/`**. The next session to hit it should confirm or kill it, citing the retro. **Rick graduates it, not us.**
+
+---
+
+## 📋 DECISIONS LOG 2026-07-21 (Mr. Radio 🦉, session 56a74d7b) — fleet burn cut to zero + the arbiter stopped CC-ing peer managers
+
+- **Rick: cut the fleet.** 9 seats → 0 across two waves. Wave 1 reaped 5 idle/blocked seats immediately; wave 2 let 4 finish the task in front of them, then stood down. Every seat mementoed, session-qualified where the persona name is re-grantable. **The default is finish-then-stop, not park.**
+- **RULED — case 9 STAYS `TIER_RICK_AND_MANAGERS`; only case 14 flips to Rick-only.** The two rationales are near-verbatim ("leaderless crew" / "leaderless-in-waiting"), so the basis is the **detector, not the wording**: case 9 fires on MEASURED ABSENCE (manager down + holding), case 14 on INFERRED SILENCE (45 min, still rostered, four false-positive suppressors in its own path). **Falsifier recorded**: if that distinction fails, case 9 flips too — case 14 does not stay.
+- **Mini-plan 04 REVERSES a considered carve-out, it does not complete a sweep.** My draft claimed the latter; `f48f089d`'s own author had named case 14 and deliberately distinguished it. Reversal still correct — Rick outranks the comment — but the doc argues it on merits so the next reader doesn't revert us with that sentence.
+- **🔴 DOCTRINE — a coverage gate CANNOT SEE a change to a data literal.** 100% on `arbiter_routing.py` with **zero** of the changed lines executable: the table entry is a dict-literal continuation counted as one statement, green for any value including garbage. Every table-driven routing/config/dispatch change in this repo is invisible to the 100% mandate. **Mutation is the only instrument that answers "would a wrong value be caught."**
+- **DOCTRINE — a peer-silence assertion keys on the RECIPIENT (`s[0]`), never the MESSAGE (`s[1]`).** A message-keyed absence check goes silent the moment the message is renamed, while the thing it forbids keeps happening. Found by an adversarial rename probe against our own new control.
+- **The arbiter bounce is MANAGER authority.** I asked Rick's permission and was corrected directly. Restart at discretion, announce after.
+- **Persona names are not project-scoped.** `b9f2f8e9` (project `parallel-search`) sat on a lupin board firing an open user-gate at Rick every tick because its `owner_persona` string matched mine. Dropped, not parked — a park would have kept it here with a timer.
+
+---
+
+## 📋 DECISIONS LOG 2026-07-20 evening (Mr. Radio 🦉, session 26409c0c) — `task_edit` shipped; two defects killed at the gate
+
+- **Rick ratified the verb shape: Option A — `task_edit(task_id, updates={field: value, …})`**, a dict of fields (atomic multi-field, one `patched` event). Option B (one field per call) is a strict subset; Option C (overload `task_amend`) was REJECTED — `task_amend` is append-only, and overloading it would collide an immutable audit-append with a mutable overwrite.
+- **Rick DESCOPED the audit-identity dict-smuggle guard on deadline grounds** — *"I don't care about that, we gotta ship."* The basic actor stamp-last is retained (free, already built); the `authority`/`reason` smuggle-reject arms were NOT built. Any future hardening needs its own row.
+- **Owner-refusal KEPT despite the descope** (María required, Krishna concurred): `task_edit` refuses `owner_persona`/`accountable_manager` → `task_reassign`. Rationale accepted — it makes the verb do *less*, both reviewers had approved it, and the tester already covered it, so keeping it was the FASTER path. ⚠️ It is an **MCP-layer** guard, NOT inherited: a raw PATCH still accepts owner fields.
+- **`062659f2` will NOT be closed on measurement alone.** A `~/.claude/…/MEMORY.md` edit has **no whitelisted receipt** (no commit; `doc_path`/`log_line` reject on scope), so "done, verified by measurement, no repo artifact" is unexpressible. Ruled: leave queued for a deliberate trim; the wall was logged as a live dated instance on `86ce4c43` rather than papered over with a caveat-close.
+- **`3b0f3923` DROPPED as stale** — the mandate to seed every Krishna spawn with `krishna-ff761722.md` is superseded; he was spawned unseeded tonight, ran a full adversarial review, and wrote a fresh memento.
+
+---
+
+## 📋 DECISIONS LOG 2026-07-20 (Mr. Radio 🦉, session 65a43c6c) — three-plan arc + a provenance defect in our own decision channel
+
+- **Rick ordered three fixes, in order, each with its own plan → review gate → full SWE team**: `c191be39` (Stop-hook owed-status seam) → `4288dd53` (fetch-by-ID) → `eab1d7da` (I3 kind-differentiated chase). **Three separate plans ruled**, not one unified.
+- **Rulings banked (8)**: three separate plans · fix the seam AND revive `todo_unstarted` · expired-parked reports as `pending` · `breakdown` always-returned (scoped to the `count_only` branch, grounded in a caller census on Rick's instruction) · `c191be39` raised P2→P1 · I3 remedy = **chase required only for PEER blockers**, not user/item · `eab1d7da` kept third **on honesty grounds, explicitly NOT poke reduction** · fetch-by-ID = **single-row `task_get` only**, no batch filter.
+- **Plan 1 APPROVED for build** (María, source-verified independently). Plans 2 + 3 drafted/drafting.
+- **🔴 `eab1d7da`'s headline benefit was RETRACTED before it could mislead the build** (amendment, event `3829`): arbiter suppression is `all`, not `any` — `arbiter_job.py:3088` suppresses a persona only when **every** non-terminal row they own is user-gated. Typing 4-5 rows correctly on a board of 16 changes the poke cadence **not at all**. The schema fix makes the board honest; it does not make the pokes stop.
+- **⚠️ ROUTED FROM RIO ⚡ — `ask_multiple_choice` discards the answered-vs-defaulted signal.** `src/lupin_mcp/cosa_voice_mcp.py:1653` returns a bare `{"answers": default}` on timeout — **byte-identical in shape to a real selection**. `converse` sets the correct precedent at `:1174` (`"[default used] "` prefix). The response object carries **both** `default_used` and `is_timeout`; the multiple-choice path throws them away. Proposed one-line additive fix: `return { "answers": default, "default_used": True }`. Leads (unverified by Rio): `ask_yes_no` `:1419` and `ask_open_ended_batch` may share the pattern.
+  - **Cost already paid**: Rio's 5-decision walkthrough for Rick this morning — every ask backgrounded at 120s and returned the recommended label, which was also his default. `parallel-search/TODO.md` now carries a **provenance caveat on five ratified rulings**, unrecoverable after the fact.
+  - **This session's 8 rulings are NOT affected, and the reason is mechanical, not hopeful**: no `default` was passed on any ask, so a timeout returns `{"error": "timeout", "timeout": true}` — structurally distinguishable. **The control fired live**: ask `kcmn92g1r` timed out and surfaced exactly that error dict. Every other ruling returned `{"answers": …}`, which under this call shape can only come from a keypress.
+  - **Standing practice until fixed**: do NOT pass `default` to `ask_multiple_choice` when the answer will be treated as a ruling. A default converts an unanswered question into an unfalsifiable answer.
+- **🔴 STALE-RECORD PATTERN, 2nd instance, banked**: María's 07-19 loop deletion left three artifacts describing the deleted mechanism in the present tense — one of them (`task_store_client.py:196`) sat **77 lines above** the docstring that documents the deletion, so a top-down reader met the retired shape first. Candidate rule: **when deleting a mechanism, grep for its BEHAVIOUR DESCRIPTION, not just its call sites.** All three fixed + green (198 passed) before implementation. Related generalization (mine): **a plan section citing a docstring as authority inherits every other docstring in that file as a competing authority.**
+
+---
+
+## 🔴 P0 FOR TOMORROW (2026-07-17) — Task-board state classification: finish the analysis
+
+**Priority: 0 (HIGHEST). Assignee: Mr. Radio 🦉. Filed: 2026-07-16 (session 1a52ceb2, Rick's session-end directive).**
+
+- **[LUPIN] Task-board state classification for workflow analysis — the doc + its amendment.**
+  - **Document**: `src/rnd/v0.1.9/2026.07.16-task-board-state-classification-for-workflow-analysis.md` (commits `78854959` report + `5e8373c1` amendment)
+  - **⛔ READ THE AMENDMENT FIRST — the report's central causal claim is REFUTED by my own measurement.** The amendment outranks the report. Do not re-ship the retracted claims:
+    - ⛔ *"the board grows BY CONSTRUCTION (receipts gate on exit, none on entrance)"* — mechanism real, **effect ABSENT**.
+    - ⛔ *"the board only grows"* — **FALSE as a steady state** (07-13 closed 46/46).
+  - **Measured truth** (store Postgres direct, read-only — `task_items` + `task_events`): **all-time closure 861/925 = 93.1%** · **oldest OPEN item = 4 days, ZERO older than a week** · **40 of 64 open rows are <1 day old** · 3-day burst **158 arrived / 101 (64%) closed** · **52% of the open board belongs to the crew reaped at 22:11** ⇒ **the board didn't rot, it was DECAPITATED MID-SPRINT** · **I am the single largest minter of the burst I catalogued** (35 rows / 3 sessions).
+  - **Findings that SURVIVE the refutation** (these are the real work): **C1** zombie items N≥4 (owner already reaped at mint time) · **C3** chase-expired ≥7 · **C4/C5** · **C7: 41 P1 / 65% — priority carries no information** · **the Stop-hook owed-work oracle LIES** (told me "2 in-progress" when the store said 0; told María "10" when the store said 2 — N=2, two seats, one hour) · **THE FILTER DEFECT: §6 mandates scoped queries, and a scoped query CANNOT show you that half the board is someone else's. I declared "board clean" 3× — each TRUE OF MY FILTER.** (María owns the §6 fix; finding is mine.)
+  - **The meta-lesson, banked**: *a finding that CONFIRMS the boss's suspicion passes a checkpoint that a contradicting one never would.* Rick was angry; my catalog agreed; I never ran the one number my own report called "the number that actually proves it." María sent it back. **Agreement is not a checkpoint — it is the absence of one.**
+  - **Next actions**: (1) drive the surviving findings (C1/C3/C7 + the Stop-hook oracle + the filter defect) to filed, owned store items; (2) reconcile with María's workflow analysis — this doc was written *for* her lane; (3) decide whether the retracted framing needs a correction anywhere it was already relayed.
+
+---
+
+## 📋 DECISIONS LOG 2026-07-17 (Mr. Radio 🦉, session b526cb36) — M1 demo shipped + board cleanup via Rick's guided walkthrough
+
+- **GCP work DEMOTED from P0 (Rick, 2026-07-17 ~10:20 EDT).** *"Until the 2 Monday-07-20 demos are ready, skills-distillation + a new demo TBD are the ONLY focus. Only Rick lifts the mandate."* GCP readiness (`97c12d68`) + dependents (`53bac23a`, `f3b5ecf3`, `1b6331b8`) PARKED. Body-amended; the priority FIELD still reads P0 — Rick demotes via admin UI. (Finding: no MCP verb demotes priority, but `PATCH /api/tasks` does — the mechanical root of C7's P1-inflation.)
+- **M1 skills-distillation demo = the sole P0, SHIPPED.** `df3f80c9` done, commit `0d01cbe` (verified firsthand). Converged recommendation: `src/rnd/v0.1.9/2026.07.17-converged-p0-demo-recommendation.md`. **POC-2 undefined — Rick's input pending; both POCs must be demo-ready before Rick lifts the mandate.**
+- **Backlog cleanup — Rick's GUIDED WALKTHROUGH (D1–D5 + 9318af31); María ran it, Mr. Radio implemented.** Decisions doc: `plan/src/rnd/2026.07.17-backlog-clear-decisions-for-signoff.md`.
+  - **D1** drop C6 records after re-home → **collapsed to ZERO drops** on body-read (all live doctrine / real bugs / others'-owned).
+  - **D2** drop clean dups/superseded; `c9dd0cc3` = Rick closes his own gate.
+  - **9318af31 = SCOPE-SPLIT (Rick, informed re-ask on Mr Radio's firsthand dig)**: PRESERVE the *"route GCP via Mr Radio"* spend-coordination rule (do NOT retire — fleet's only soft coordination point on real GCP spend, more relevant with 2 POCs going live); DROP only the dead CoT half (witnessed safe on the wire, `d84d60e`). Its title still mis-describes it (5a8aa45b) — a clean re-title/re-file is the follow-up.
+  - **D3** reconcile 3 zombies → dropped w/ reap-reason receipts (`4e20520d`, `2695f5ad`, Sam's `06a3f031`).
+  - **D4** NO demotes (hide-work risk; drops do the real reduction).
+  - **D5** Sam's records → his own harvest.
+  - **Net board reduction = 3 zombie reconciles.** Finding: the catalog's *"~60 noisy rows"* was over-counted from TITLES — bodies show live work, not a graveyard. **Both drafts title-listed live doctrine as droppable; the body-read rule (`73f397d2`) caught it on both sides.**
+- **Board catalog's §4#3 UN-RETRACTED** — Rick's no-chasing experiment is the control arm the report lacked; María's receipt: **closure 0.98→0.725 when Rick withdrew 07-14.** The backpressure hole is at *filing*; Rick was plugging it by hand.
+- **Kept-as-bug** (real defects, no seat can fix, `c191be39` shape): `6f8adc13` (auto-mode classifier wedge) + `74a3ff4d` (offline-user rule prescribes unbuilt `defer_to_chase`/`make_gate`).
+- **Held live doctrine (NOT dropped)**: `73f397d2` (graduation-eligible, held for Rick's wording review) · `2ce26609` (pattern-watch) · `5a8aa45b`+`74c16374` (Sam's s-d, held per POC-2 margin).
+
+---
+
+## 📋 DECISIONS LOG 2026-07-15 EVENING (Mr. Radio 🦉, session da517b03) — GCP deployment arc + bug-fix sprint
+
+- **⏳ GCP Cloud-VM config-block naming — DECIDED, IMPLEMENTATION DEFERRED TO MORNING (Rick, voice, 2026-07-15 ~22:30 EDT).** Two named blocks: **`[Lupin: Cloud VM Development]`** for daily dev on **:7999** (the current cloud-gpu stack) · **`[Lupin: Cloud VM Testing]`** for **:8000** (future, when the test stack is stood up). **Impl plan (NOT YET DONE — first thing AM):** add `[Lupin: Cloud VM Development]` to `src/conf/lupin-app.ini` inheriting `Lupin: Testing-GCS` + overriding ONE key `model server url = https://lupin-model-server-um6r4fv7nq-uc.a.run.app` (Cloud Run; https ⇒ port 443 implicit, no separate port key); repoint `docker-compose.cloud-gpu.yml` `config_block_id` → **`Lupin:+Cloud+VM+Development`** (⚠️ ConfigurationManager decodes `+`→space at `src/cosa/config/configuration_manager.py:151`, so spaces in the block name become `+` in the CLI arg) AND **drop** its `LUPIN_MODEL_SERVER_URL: ${...:?...}` env line (env wins over INI — the override must go for the block to be authoritative). `cloud-test` stays on `Testing-GCS` until the :8000 work reconceptualizes it as Cloud VM Testing (tracked `f3b5ecf3`). Full runbook + ground truth: `src/rnd/v0.1.9/2026.07.15-gcp-vm-getting-started-runbook.md` §0.5/§3.
+- **GCP architecture confirmed (verified live):** two deployment targets — Cloud Run `lupin-model-server` (1 GPU, `minScale:0`/`maxScale:1` scale-to-zero → $0 GPU when idle; cold-starts on call) + VM `lupin-host-test` FastAPI on :7999 (**no GPU** — e2-standard-8; offloads inference to Cloud Run via `LUPIN_MODEL_SERVER_URL`). Rick's work CC routes through an **InTraffic adapter → Model-Garden Opus 4.8** (a Vertex path) — so the bare-slug Opus clamps ARE on the critical path; ⚠️ the $50/day clamp (500 out-TPM) will throttle that same traffic once granted → size to real work throughput. Readiness review: `src/rnd/v0.1.9/2026.07.15-gcp-pilot-readiness-review.md`.
+- **Bug-fix sprint — 4 merges landed (local → pushed at session-end):** `ef10c5b6` focus-bar invisibility durable fix (Cheech) · `ee59d5ed` orphan-bridge reap-survival (Cheech; Change 2 arbiter sweep **DEFAULT-OFF** — Rick flips `arbiter orphan bridge sweep enabled` + restarts `lupin-arbiter-app.service` to activate fleet-wide) · `260dba16` vertex GCP-id guard greened, 3 offenders (Clayton) · `9fe8b80f` bare-unit/smoke config-collection floor in the parent conftest (Clayton). `ee59d5ed` CLOSED end-to-end (:8000 gate true-green, ts-1956de25).
+- **Banked (optional):** Cheech's by-id AC-3 strengthening (`bcd34ba6`) — gate already honest+green; fold in next time the integration test is touched.
+- **GCP deploy gaps tracked:** `f3b5ecf3` (bring up :8000 test server on VM — remap cloud-test to `8000:7999`) · `53bac23a` (provision + actuate :8001 arbiter on the VM, `provision-arbiter-on-vm.sh`).
+- **Pending (Rick's action / gates):** flip the arbiter orphan-sweep flag (activates ee59d5ed Change 2) · part-2 bare-slug clamp paste · enforcement+cost canary · VM re-suspend · coexist-vs-single-stack on the VM · clamp sizing vs Model-Garden throughput · the config-block impl above.
+
+---
+
+## 📋 DECISIONS LOG 2026-07-15 (Mr. Radio 🦉, session bf549da1) — tmux fleet-killer cascade close-out
+
+- **Cascade `cascade-tmux-fleet-killer` COMPLETE** (the P0 below, EXECUTED): 3 sections × 3 stages, 34 findings (0 foundational, 0 votes, 0 user escalations), ~55 min. Plan final-current on disk; Step-9 revision-handoff doc: `src/rnd/v0.1.9/2026.07.15-cascade-tmux-fleet-killer-revision-handoff.md`.
+- **OSQ-1 CONFIRMED (Rick, /plan-decide one-touch, 03:26Z)**: execve kill-tracer ships, ordered LAST in §10 — install-only-on-request preserves the sudo gate.
+- **Implementation = FULL SWE-team workflow (Rick, voice, via María relay 03:27Z)**: `/spin-up-swe-team` crew (Implementer + Reviewer + Tester), implementer seat cold-context-briefed on the handoff doc + plan ONLY.
+- **OSQ-4 ruled by concurrence**: env-strip sufficient, `-S`/`-L` NOT adopted; AC5 = standing precedence canary. **OSQ-5**: vertex WIP lane orphaned (creator c8a18353 died 9 s after launching its own killer pytest) — cleared for edit+restore; vertex-lane continuity store task `bd0b728b` minted.
+- [ ] **v1.N candidate: cascade-tmux-fleet-killer workflow-guidance batch (19 items)** (cascade cascade-tmux-fleet-killer, Manager Mr. Radio 🦉, filed 2026-07-15). Five manager moves ran ahead of the codified playbook (forward cross-section folds under a ratified ownership map · ownership-map-at-ratification · conditional ratify-by-concurrence · carried-items handoff field · probe-before-declare with delivery-clock); full 19-item all-seats index in handoff doc §6. Proposed fold targets: plan-review-cascaded.md §Step 5/§decomposition, common.md §Step 5/§Heartbeat Handling, defaults.md §Severity-tag metadata schema. Source: kind: manager_self_audit_sweep post on cascade-tmux-fleet-killer at 2026-07-15T03:33:43Z.
+
+## ✅ P0 EXECUTED 2026-07-15 — cascaded review of the tmux fleet-killer fix plan (kept for the record)
+
+**Priority: 0 (HIGHEST). Assignee: Mr. Radio. Filed: 2026-07-14 (session 2474504f, Rick voice directive).**
+
+- **[LUPIN] Stand up a cascaded plan-review team — with María on it — to review the tmux fleet-killer fix plan.**
+  - **Plan under review**: `src/rnd/v0.1.9/2026.07.14-tmux-fleet-killer-vertex-taint-test-isolation-leak-fix-plan.md`
+  - **Why P0**: the shared user tmux server died **5× on 2026-07-14** (14:12, 14:55, 19:21, 20:04, 21:13 EDT), each death **atomically killing every Claude Code session across all three projects** (lupin, planning-is-prompting, google-skills-distillation). This is an active, recurring fleet-wide outage.
+  - **Root cause (proven, in the plan)**: `src/tests/smoke/test_vertex_launcher_server_taint.py`'s fixture teardown runs `tmux kill-server`; its `_tmux()`/`_launch()` inherit `$TMUX` from the pane, and on **tmux 3.2a `$TMUX` beats `TMUX_TMPDIR`** for socket selection (verified live via a read-only precedence probe — the file-history "TMUX_TMPDIR beats $TMUX" note was a non-pane false-green). So the "isolated" kill-server actually nukes the fleet's DEFAULT socket every time the test runs from inside a pane.
+  - **Interim mitigation already in place**: the test is **quarantined** out of the collectable tree → `src/tmp/test_vertex_launcher_server_taint.py.QUARANTINED-2026.07.14` (gitignored, non-`.py`, pytest-uncollectable). It stops the bleeding but is NOT the fix. The latent class hazard (any bare `tmux` verb from a pane hits the default socket) persists until the conftest guard lands.
+  - **Review shape**: sequential cascaded plan-review (REUSE → Pass 1 correctness → **Pass 2 ownership audit = María's lane**). The plan's §8 Q1–Q5 are the review agenda (attribution residual, other-tree guards, conftest shape, `-S`/`-L` defense-in-depth, and the ownership/collision check on the untracked peer-WIP test file).
+  - **Rick's plan**: he will **kill this session and restart a fresh one under tmux + the cosa-voice MCP**, then **kick off the review himself** so he can manage it remotely via the notifications client. Mr. Radio's job is to have the review **team stood up (with María)** and ready to run.
+  - **Hard gate**: **NO fix code until the cascaded review clears.** Diagnosis + plan + quarantine only, so far.
+
+---
+
+## 📋 DECISIONS LOG 2026-07-12 EVENING (Mr. Radio 🦉, session 446ce8a0) — GCP code-delivery doctrine + arbiter trilogy
+
+- **Code-delivery DOCTRINE (Rick, voice, ratified + DEPLOYED same evening)**: testing containers ship with **NO app code baked in** — image = deps + runtime env only; code = bind-mounted static snapshot of a committed ref, materialized at deploy/re-spin, refreshed by re-materialize + restart (never image rebuild; deps stay the one rebuild axis). Fail-loud boot-without-mount is the *intended contract*. Canonical: `src/rnd/2026.07.12-gcp-bind-mount-revert-plan.md` §4b. LIVE on `lupin-host-test`: `lupin:1.3.0-codeless` @ `dbb4b307…`, four-proof verified, VM re-suspended.
+- **Manual pull RATIFIED / VM-side GitHub remote DECLINED** (§5): archive+SCP sync from the dev box; zero new credential surface. **Prod code-shipping model POSTPONED** (§6) — deliberately undecided until prod is in view.
+- **`BAKE_CODE` build-arg gate (default off)**: cloud-run-build.sh now produces CODELESS images by default; prod must pass `--build-arg BAKE_CODE=on`. Legacy baked path preserved behind the flag, not git history.
+- **Sibling-gate lesson (arbiter trilogy, Krishna)**: every FP class fixed tonight = a correctness gate wired into ONE consumer of a signal but not its siblings; detection = read the journal until the arbiter contradicts itself on a single poll. Banked in `src/docs/fleet-liveness-and-task-store-architecture.md` §4. Companion rules: recovery-outcome membership = *beacons the session itself emits*; e5e33795's manager-only pin ruled blast-radius scoping (inverted with archaeology, not fought).
+- **Optional (flagged, NOT scheduled)**: local `:8000` true snapshot isolation — materialize a snapshot dir (git archive) at re-spin and point the compose src mount there (§7); promote on Rick's word.
+- **Deferred**: live calculator pipeline on the GCP VM (scope was code-delivery verification; feature regression stays on local :8000 suites).
+
+## 📋 DECISIONS LOG 2026-07-11/12 EVENING (Mr. Radio 🦉, session 372f9dc9 re-spin) — arbiter-accuracy arc rulings
+
+- **Arbiter-accuracy 3-layer stack**: L1 dedup (`ce13b134`→`ad0f6199`) + L2 designed-hold suppression (`cec10ef9`→`73378b09`) both LIVE via :8001 bounces; L3 stale holding_on-edge FPs (`1ff7be20`) PARKED overnight — the quiet advisory stream IS its verify-first evidence; staff morning 2026-07-12 w/ the overnight journal as first artifact.
+- **Classifier wall ≠ authority ruling (Rick, direct)**: arbiter bounce is standing manager authority; a permission-layer denial whose rationale contradicts the manifest is a finding to surface, NEVER grounds to mint a Rick-gate. Memory `feedback_classifier_wall_is_not_an_authority_ruling` banked.
+- **Wake-path is NOT a guarantee in either direction**: Krishna's review DM + 3 arbiter nudges buffered ~55 min without re-invoking me (manager side); Clayton's APPROVE staged Enter-immune (worker side, recovery: Escape→C-u→retype fresh→Enter). Sweep `dm_list` on every wake; memory corrected.
+- **Suppression design invariant (ruled)**: fail-safe-to-ROSTER — every uncertain path (store hiccup / dead operator / mixed owed / deadlock cycle) keeps rostering; never hide a real stall. Uniform rule on both announce legs.
+- **Stale-pending disposition review remains open**: 359 open bullets rode the TODO horizon sweep by AGE into `todo-history/2026-04-15-to-2026-06-16-todo.md` — item-level disposition pending Rick's convenience.
+
+## 📋 DECISIONS LOG 2026-07-11 (Mr. Radio 🦉, session 372f9dc9) — lunch-window arc rulings banked at session-end
+
+- **Monopolize family CLOSED end-to-end**: 3a14292b (Shape-A) + fe375cf6 (Shape-B) + 6d644465 (belt removal) all done w/ receipts; the caf58f71 "no-op placeholder" claim formally retired in code prose. The in-process pool_max=1 test is the DURABLE regression guard replacing the belt (guard-RED receipted). 67473d91's deferred E2E confirm satisfied by ts-dfc230a9.
+- **Persona-key family CLOSED**: root fix at `canonical_persona_key` (separator runs → single space); board healed 13/13 via manager-run backfill on NEW code (ordering guardrail: apply-on-old-code would FUSE healable rows — banked in 951a22be record); derive_dm_topic new contract RATIFIED (Option A, zero-orphan inventory); soft-flag + class-scoped owner default live. Residual policy idea (hard-gate roster) reconsiderable only if a cross-project roster accessor ever exists.
+- **Polluted-row cleanup DEFERRED (open)**: test-fingerprint rows in dev `prediction_decisions` (inventory in `src/rnd/2026.07.11-cfcbb703-unit-test-triage.md`) — fixture stopped the bleeding; the one-time targeted delete is a manager-run confirmed destructive op, batch with next hygiene window.
+- **Persona-pool allocation WALKS (3× today)**: never trust `persona_preference` — verify the actual persona from the worker's check-in DM. Also: receipts schema is strict (commit = single hex, test_run = ts-<8hex> only).
+- **TODO.md horizon archive still owed** (~2,250 lines; flagged 2026-07-06, deferred again this wrap per Rick's tight sequence) — run `/plan-todo archive` early next session. → ✅ **EXECUTED 2026-07-11 same-day re-spin** (this sweep: 2,292→178 lines, archive `todo-history/2026-04-15-to-2026-06-16-todo.md`, task 2a190fa2; stale-pending disposition review remains open).
+
+---
+
+## 📋 DECISIONS LOG 2026-07-07 PM (Mr. Radio 🦉, session 17e81460) — day rulings banked at session-end
+
+- **No GPU-less GCP instance, EVER** (Rick, voice): the e2 downgrade path is dead; item `b8fa9b7d` dropped `user_direct`. Standing companion: **15-min stockout-retry reflex** on `ZONE_RESOURCE_POOL_EXHAUSTED` (g2 VM starts) — persistent duty, currently seeded in Clayton's memento.
+- **Classifier reference case (5 walls today, 0 bypasses)**: the auto-mode classifier accepts user intent ONLY from Rick's own artifacts (settings rules, his shell) — never relayed words, ask-answers, or broadcasts. Walls hit: AR push ×2, VM start, Clayton ssh-read, TFE cancel-API. Delegation-to-manager requires ONE-TIME harness enactment via settings; Rick's 4-rule VM set (settings.local.json:500-503) is action-scoped only.
+- **Phase-2 LanceDB FULL teardown (`4955d0b9`)**: Rick ruled TOMORROW after the 24h soak — the 2026-07-08 13:00Z chase is a **FIRE TIME, not a re-ask** (verify soak green → staff a FRESH author → go). Spec = `src/rnd/v0.2.0/2026.07.07-lancedb-teardown-prep-scoping.md` §4/§7/§5a; Phase-1 symbol rename already landed (`d1a681af`) — do NOT re-rename. Part-2 HNSW stays additionally gated on the flood-purge card.
+- **Tiffany reaped no-respin** (Rick confirmed ask 22:30; unsubmitted-pane-text doctrine applied — surfaced before acting).
+- **TFE `tfe-130826c7` completed naturally** — Rick's unexecuted kill MOOT; :8000 pool freed ~22:04.
+- **67473d91 disposition**: DONE on unit-tier receipts (`d4aa722c`, 12/12); the :8000 E2E confirm is DEFERRED post-`30398595` — live-fire evidence tonight proved the monopoly-hold deadlock (ts-ad4670ec: the run's 7 spawned swe- jobs deferred by `[CONSUMER] Monopoly hold active`, all timed out → RED regardless of budget). NOTE: contradicts caf58f71's "monopolize=True is a no-op" finding — the hold IS active in the consumer (`[CONSUMER] Monopoly hold active` ×1916 in the run window; started_at flipped ONLY after monopoly release 22:43:23 → smoking gun). 30398595 turned out terminal(done) so the amend correctly 422'd — evidence filed as durable **bug `3a14292b`** (P2, accountable mr radio) w/ all receipts + cross-links (Clayton firsthand re-derive: RED 0/7).
+
+---
+
+## 📥 BACKLOG 2026-07-07 PM (Tiberius 👑, session 4e12c586) — post-switchover live-voice E2E pulled off the board (Rick voice order)
+
+**Rick (voice, 2026-07-07 ~22:35 EDT): "push this task item into the to-do queue — it does not belong on the board: ee23fca8."** Store item `ee23fca8` DROPPED with this backlog entry as its durable landing pad. Context: the item was the post-switchover live-voice E2E for `766bb609` (persona voice_id honored per session), blocked on the lane-1 flip; Rick killed the flip the same evening with a global multiplexer-parity verdict ("still ugly, still incomplete for the MVP" — logged HIGH in intake `603d9275`), so the E2E has no near-term trigger.
+
+**Resume-when**: the multiplexer reaches Rick's MVP layout/functionality-parity bar AND the lane-1 flip (multiplexer = live TTS client) actually lands.
+
+**Scope at resume (verbatim from the store item)**: E2E driving ≥2 sessions with distinct voice personas; assert each `/api/get-speech-elevenlabs` POST carries that session's `voice_id` (present→honored) and a persona-less notification omits the key → server default voice, consuming server seam `speech.py:558`. Cite reviewed commit `76946d9a` + merge `a9dd6f41`. Prereq receipt: playback consumer `4f14d38f` is DONE. Also-owed cosmetic sweep bundled in the old item body: `wireTtsPlayback` comment names default voice "(Sam)" but the real default is config key `elevenlabs tts default voice id` — comment-only.
+
+---
+
+## ✅ EXECUTED 2026-07-07 AM (Mr. Radio 🦉, session 17e81460) — v0.2.0 pgvector migration swap-chain + CUTOVER LIVE
+
+**Rick's morning GO ("finish the migration… coast is clear" + manager carte blanche) executed end-to-end, commit `0901984d`**: dev+test recreated onto `lupin:1.1.1-pgvector-candidate` → LIVE backfill 202,081 + 35 + 57 (truncate-then-load, twice: main + straggler re-run) → equivalence PASS (exact-scan PG == LanceDB byte-faithful) → **exact-scan ruling** (Rick ask: keystone is 97.2% duplicate vectors → HNSW recall pathologically broken; migration `e1f2a3b4c5d6` drops the index; exact `<#>` scan = guaranteed parity AND 2.7× faster than legacy ~1,293ms) → **INI `vector store backend = postgres` LIVE on BOTH servers** (Rick ask: flip now) → live-pipeline + WS smokes green; integration gate `ts-c94c514d` = final proof. Full record: `src/rnd/v0.2.0/2026.07.07-pgvector-swap-chain-execution.md`. **Open tails**: soak watch → LanceDB teardown (post-soak, P5); post-hoc adversarial review of `0901984d` (crew spin-up was Rick-held); GCP leg task `c845346a` (Rick-HELD until his GO); boot-log LanceDB banner cleanup (cosmetic).
+
+---
+
+## 🗓️ STATUS 2026-07-06 (Tiberius 👑, session a6553139) — evening: notification-flood P1 shipped + full board sweep (8 items)
+
+Rick's 3000+ digest-flood question root-caused (arbiter re-announce × persist-on-fail × no idempotency; bug `e1bbe011`) and FIXED same evening (`87a1de61`, persist=false flood-guard, LIVE via arbiter bounce). Crew of 4 (Tiffany/Krishna/Rachel/Clayton) closed **8 store items** with git-verified receipts incl. the corrected E2E-gate classification (10 mux-introduced now fixed · **5** truly pre-existing · 0 functional regressions) and the between-suites DB-isolation hardening (`ea0e4428`). All crew reaped w/ mementos. **Rick's open card: 4.7k flood-row purge** (asks expired unanswered — no purge executed; re-offer on engagement). Deferred: `caf58f71` (P3 concurrent-writer class), `ee23fca8`/`603d9275` (by design). **Hygiene: TODO.md at ~2,250 lines — run `/plan-todo archive` (horizon sweep) next session.**
+
+---
+
+## 🗓️ STATUS 2026-07-06 (Mr. Radio 🦉, session 2352acab) — evening: 2 bug lanes shipped, 2 gates executed, arbiter payloads live
+
+Both worker lanes DONE same-evening: **75f392c0** Stop-hook poke-storm relief valve (Cheech, merged `ecae99a0` + doctrine §8 `de355d84`) and **f1a21917** wedge remediation (Rio, merged `7b7f2977` — `MCP_TOOL_TIMEOUT=660000` for all new spawns + turn-age watchdog). Rick-gates executed: `7d50a03a`+`c90f24f4` (pgvector → `src/cosa/.venv`, 93/93 green) + wedge ratification. Arbiter double-bounced w/ Tiberius (Rick broadcast bcea4232 re-affirmed manager bounce authority): **Tiffany's flood fix + turn-age watchdog both LIVE**, first sweeps clean. `63c5d913` closed-verified (`--model` flag injects; stale-process root cause). History archived (22.5k→6.9k). Rick's still-open card: arbiter flood-row purge (on Tiberius's ask). María's `6fc8d78d` (P1 spurious-poke root-cause) remains hers.
+
+---
+
+## ✅ RESOLVED (was: FIRST THING 2026-06-30) — `d1bdb7ca` mux TTS architecture gate
+**Rick RULED (2026-07-01): server-push stands — "server pushes audio, END OF STORY."** Decision `d1bdb7ca` DROPPED in the store; the client-initiate flip is dead scope. Do not resurface.
+
+---
+
+## 🗓️ STATUS 2026-07-03 (Mr. Radio 🦉, session 8a92b253) — end-of-session: pushed `24301068` + backup; v0.2.0 migration swap Rick-gated
+
+**Session-end (Rick broadcast ~10:24):** pushed `wip-v0.1.9` → origin HEAD `24301068` (102 commits, incl. merged 73d2b589 wedge-guard suite + 25c7441c notify-turn-hold fix-design) + backup DATA01→DATA02 (16.67G); 3 workers (Arnold/Cheech/Tiffany) documented + reaped.
+
+**RULING (auto-mode classifier, 2026-07-03):** the v0.2.0 pgvector migration RUN is **Rick-triggered, NOT autonomous-at-quiesce.** The 08:37 swap-chain reached the container-recreate step with all read-only gates green (quiesce verified, image `lupin:1.1.1-pgvector-candidate` present, rollback `lupin:1.1.0`, forensics snapshot) but the recreate `docker compose up -d --no-deps lupin-rest-dev` AND an autonomous resume-cron were BOTH classifier-denied. **Parked on operator gate `d93a1edb` (P1)** — Rick adds a docker permission rule + GO (then I run the chain: recreate → verify → alembic → Tiffany in-container backfill dry-run → LIVE 196k RUN → equivalence + flag-flip readiness), or runs the swap himself. **Flag-flip stays Rick-gated.** Sibling env gate `7d50a03a` (P2 — pgvector into `src/cosa/.venv`, latent hooks/MCP landmine, bug `c90f24f4`). Daylight bugs: `75f392c0` (Stop-hook re-ask loop) + María's `6fc8d78d` (Mr-Radio-path spurious pokes, same family). Zero breakage — :7999 untouched.
+
+---
+
+## 🔝 #1 PRIORITY for the `wip-v0.1.9` bug-fix branch (Rick, 2026-06-26) — Multiplexer → notifications-client LAYOUT-LEVEL parity
+
+**Directive**: get the multiplexer's CC-notifications surface to *real layout-level parity* with the legacy notifications client. This is the **#1 priority for the current bug-fix development branch** (Rick, voice, 2026-06-26).
+
+**Holder (all discrepancies live here)**: `src/rnd/v0.1.9/2026.06.25-notifications-to-multiplexer-migration-discrepancies/` — index `00-index.md`; the section-layout gap analysis is `01-mux-vs-legacy-notifications-section-gap-analysis.md`. New discrepancy docs (CSS/visual, behavior, event-wiring) land in this folder as found.
+
+**Substrate — verified gap analysis** (doc 01 in the holder). Confirmed section-level reorder:
+- **Intended (legacy)**: broadcast card *(with nested Recent-Activity history)* → focus bar *(TTS preview above it)* → sessions container.
+- **Mux actual**: focus bar hoisted to top → TTS preview orphaned as a sibling below it → sessions → jobs → **broadcast exiled to the bottom** → Recent-Activity **de-nested** as a separate pane.
+- Plus per-message regressions: pause/stop/proxy-ratify dropped.
+
+**Remediation buckets (gap doc §6)**: B1 restore section order (broadcast **+ re-nested Recent-Activity** → focus-bar → sessions); B2 relocate TTS preview into/above the focus bar; B3 restore section-header controls (count/filter/history/clear-all); B4 restore per-message pause/stop; B5 CSS pass LAST.
+
+**Design calls — ✅ ALL RESOLVED** (Rick `/plan-decide`, 2026-06-26; §Decisions Log): a/b/c (broadcast-at-top + re-nest Recent-Activity inside broadcast + restore per-message pause/stop) **plus** the audit-surfaced d/e/f/g — Action-Required **full-funnel restore** (+ rich responder), TTS-Queue **full 1:1 restore** (chrome + per-item queue), Task-List **kept as a documented superset**, and **port ALL 7 absent accordions → total 13/13 parity**.
+
+**Build-plan corpus — ✅ DRAFTED & COMMITTED** (`995dc952`, NOT pushed): 11 plans in `…/05-build-plans/` (00-index + shared template; 01 CC-session B1–B5 keystone; 02–04 the 3 partials; 05–11 the 7 absent), plus the **F0 shared-`AudioStore` foundation** finding (gates plans 01/02/03/05) and the consolidated cascaded-review agenda (questions e′–m).
+
+### 🟥 #1 ACTION — Saturday 2026-06-27: run the 11 build-plan drafts through CASCADED REVIEW
+**#1 priority for Sat 2026-06-27 (Rick).** Run ALL 11 drafts in `src/rnd/v0.1.9/2026.06.25-notifications-to-multiplexer-migration-discrepancies/05-build-plans/` through the **cascaded plan-review** process (`/plan-review-cascaded`) on the **dev server** (not the laptop). Start with **F0 (AudioStore shared foundation)** + **plan 01 (CC-session keystone)**; settle the **e′–m** review agenda (esp. e′ TTS reorder = FIFO vs drag · j/k dev-pane gating · i WS-scope filtering · m the jobs-pane delete-routing bug). Implementation begins ONLY after review ratifies each plan (manage-don't-build · 100% L/B/F · visual rebaseline).
+
+### ✅ STATUS 2026-06-29 (Mr. Radio 🦉, session 2f4feb0a) — Plan-01 keystone chain BUILT + PUSHED
+The ratified **Plan 01 (CC-session B1–B5)** keystone chain is largely landed + **pushed** (`wip-v0.1.9` → origin, HEAD `f333b6c2`, green-gated tsc 0 + TS suite 1993/1993):
+- **B1** section reorder + commons re-nest — `5906508f` ✅ · **B2** slider → header region — `f86efef3` ✅ · **B3** own-only filter + section-header controls — `0f6d9ba0` ✅ · **B4** keystone per-message ⏸/⏹ + proxy-ratify — `24298595` (merged `d89e3e20`) ✅ · **F0** AudioStore/TtsQueueStore foundation (00b a/b/c/e/f, gates 01/02/03/05) — `f2204db1` (merged `c2cfa731`) ✅ · **2 reds** (governance hermeticity, C2-b premise) — `e0b3be32`/`d3b668d3` ✅
+
+**Remaining on the mux-parity arc**:
+- [ ] **B5** — CSS single-source into the shared sheet + Layout-Parity Oracle T2/T3 + golden snapshot rebaseline (gated LAST; pins against B3's finalized selectors).
+- [ ] **F0-d call-site** — DEFERRED on **decision `d1bdb7ca`** (mux TTS architecture: server-push vs client-initiate). The mux has NO client-initiate TTS path today; building one is Rick's architecture call, to pair with the 00c / Plan-01 speak-gesture lane. F0 foundation ships complete without it; B4's identity half is mock-verified until F0-d wires the real boot.
+- [ ] **Plans 02–04** (Action-Required, TTS-Queue, Task-List partials) + **05–11** (the 7 absent accordions) — still pending build/review.
+
+### ✅ STATUS 2026-06-30 (Mr. Radio 🦉, session ef70b5f4) — Mux MVP-FINISH remediation BUILT + INTEGRATED (push authorized; flip gated on Rick's visual sign-off)
+
+The ratified **mux MVP-finish remediation** (6 items; plan `src/rnd/v0.1.9/2026.06.30-mux-mvp-finish-remediation-plan.md`) is **BUILT, reviewed, committed-held, and integrated** on `wip-v0.1.9` (HEAD `1351976f`). Execution log: `src/rnd/v0.1.9/2026.06.30-mux-mvp-finish-build-execution-log.md`.
+- **L1** bugs `d9d8d651` · **L2** AR+PLY `f48b0bf0` · **L3** VIS `ce164056` · **L4** NAV `6c20b7c3` · **AudioRecorder c8** `8a2c421a` — all reviewed-green, merged clean (3 shared-file carve-outs composed).
+- **Gates GREEN**: V-P6 3/3 · gate E4 · directory-wide c8 100% · merged suite 2051/2051 · WS smoke 50/50. Dist builds.
+- **:8000**: E2E (`ts-55f92b50`) + integration (`ts-13e9fc86`) submitted — **results for AM review** (Rick: rerun in the morning is fine).
+
+**☀️ 2026-07-01 AM — Rick action items:**
+- [ ] **GCP: `terraform apply` the model-server → Cloud Run split** (Tiberius 👑 session eb4b105f). Committed-held `c89c31ea`, pushed in `df0c1edf`; reviewed GREEN (Tiberius adversarial + María #1-#4 SOURCE + Arnold dry-side; **F-T1 caught+fixed** — scale-schedule jobs `oidc_token`→`oauth_token` for the Cloud Run Admin API, else the min-toggle 403s and the warm window silently never activates). **Rick's go + `gcloud` login — real money.** ⚠️ Apply DURING 09:00-23:00 EDT (finding #8 first-apply overnight warm-leak) → then ping **Arnold 🪨** for the WITH-CREDS green-bar (embedding+STT 200 vs the live `…run.app`; #6 the true-green gate). Cross-repo: VM-side PGA + `*.run.app` DNS + suspend/resume IAM grant live in the `terraforming-vms` handoff (02-vm-downgrade-handoff.md). **Runbook: store task `c3fafac5`.** **DECISION (ratified 2026-06-30, Rick): BUY the split — ≈$527/mo, ~$96/mo (~15%) cheaper than always-on; weekday-only Mon-Fri 09:00-23:00 + VM SUSPEND-not-stop + monthly-only (CUD dropped).** Design: `src/rnd/2026.06.30-gpu-model-server-cloud-run-split/` (01-design + 03-cost-reprice).
+- [ ] **`a5559b49` — visual-regression rebaseline**: env-drift (host↔container libfreetype AA), NOT code. `ce216d11` held (fonts-dejavu-core + fingerprint guard). Landing to true 37/37 via Cheech's treadmill-immune run (`auto_fix_on_failure=false`); 30+ rebaseline PNGs commit local-held. **If it didn't land tonight**: resume runbook in `src/rnd/v0.1.9/2026.06.30-visual-regression-env-drift-root-cause.md` §Phase-2 (pause completion-watchdog OR per-run `auto_fix_on_failure=false` → clear 4 persisted RED jobs → cold `--update`+compare all 36). Blocks nothing downstream. Follow-on: arbiter dual-false-positive bug `262c59f6` (RED-first).
+- [ ] **Visual sign-off** on the :8000 E2E **visual-regression diffs** — they WILL diff on the INTENDED UI (new AR/PLY panels, nav bar, header polish, V9 strip-icon). The one EXECUTOR:HUMAN tier → then **golden rebaseline**.
+- [ ] **The FLIP** (`lupin-app.ini:883` `legacy notifications redirect enabled=True`) — Rick's word, AFTER visual sign-off. Push landed the mux code DORMANT behind the un-flipped flag.
+- [ ] **Oracle-held rows** — if the E2E Oracle geometry surfaces a target: V13 (stale-check), V6/V7 inline, V10a spacing, L2 Playing-N-vs-Queued-N redundancy + AR widget tint. Crew (Krishna 🦚 / Sam 🎙️ / Clayton 😎) held ALIVE on standby to fix fast.
+- [ ] **6 admin NAV items** DEFERRED (L4 `TODO(post-MVP)` in `NavBarRenderer.ts`) — roles-claim shape unverified vs `jwt_service`; verify before porting admin-gating.
+
+### Possible future enhancement (NOT a priority — Rick de-prioritized 2026-06-26; store task `69edd619` dropped)
+- [ ] **[LUPIN] `reason` discriminator on `voice_persona_released`** — add `reason={exit|reassigned|borrowed_return|clear}` to the WS payload (emit `voice_persona.py:~570`; catalog passthrough `notifications.py:~609`; consumers: web notifications.js + mux + mobile). Retires the client-side debounce-guess for true-exit vs benign-release. Mobile ships fine on its 3-5s debounce without it. Revisit only when convenient.
+- [ ] **[LUPIN] Fleet-status board: give the heartbeat-arbiter its own "infra" lane** — the board truncates session `lupin-arbiter-app-8001` → `lupin-ar` and files it under `(Unmanaged) … worker / unknown`, so the standing heartbeat/owed-work arbiter reads like a mystery idle worker. Give it a dedicated infra row (or show its full name + an "infra" tag) so it's not confused with crew workers. Cosmetic only — arbiter is healthy/alive, this is a renderer change. DEFERRED under the mux↔legacy-notifications UI parity freeze (Rick, 2026-06-26 — no changes to either UI until parity lands). Filed by María 🌸 (session `ae92e658`, 2026-06-26).
+
+---
+
+## ▶ 2026-06-25 — LanceDB Phase A REBUILD EXECUTED (session d6b35eb3, MCP off)
+
+**DONE**: `input_and_output_tbl` **90.46GB → 1.07GB** (~89GB reclaimed; 176,877 rows preserved; clean chain @ v1; DATA01 100%/16G → 94%/107G free). In-container staged rebuild (transient `docker compose run` one-offs, lance 0.36.0 V2 core); both servers healthy post-bounce. Execution log: `src/rnd/v0.1.9/2026.06.24-lancedb-88gb-optimize-incident-remediation.md` §8. `rebuild_lancedb_table.py` modified (`--keep-rebuilt` + `drop-rebuilt`) — **committed-held, push stays Rick's word**. Supersedes the gated `5daf94a0`/`db1acda7` REBUILD-impl items.
+
+**~~OWED next (Bucket 3)~~ — CANCELLED 2026-06-26 (Rick strategic decision, see below)**:
+- [x] ~~Phase B standing compaction~~ — **CANCELLED**: Rick 2026-06-26 — "No need for any nightly compaction." LanceDB being abandoned; the entire compaction class is moot.
+- [x] ~~Decision #6 amendments to the recovery script~~ — **CANCELLED**: LanceDB recovery tooling no longer maintained; superseded by the Postgres migration.
+
+---
+
+## ▶ DECISION (2026-06-26, Rick voice ruling) — ABANDON LanceDB → PostgreSQL + pgvector (v0.2.0)
+
+**Ruling**: Move off LanceDB entirely. Adopt **PostgreSQL + an embeddings / similarity-search extension (pgvector)** as the vector store. **No nightly/standing compaction** — the whole incident class that drove Bucket 3 disappears with LanceDB. Rick: "I don't want to put any more effort into it." The 88GB-incident remediation items (`5daf94a0` + Phase B compaction) are **CLOSED as superseded** — Phase A rebuild already reclaimed ~89GB (commit `63bfb1b4`, 90.46GB→1.07GB), more than enough runway to coast until the migration lands.
+
+### v0.2.0 backlog (new dev branch)
+- [ ] **[LUPIN] v0.2.0: LanceDB → PostgreSQL + pgvector migration** — stand up a Postgres-backed vector store (pgvector embeddings + similarity search) replacing LanceDB for `input_and_output_tbl` (and any other LanceDB-backed tables). Encompasses: schema design, embedding column + index strategy (HNSW vs IVFFlat), data backfill from the current LanceDB store, repo/DAO swap, config keys + splainer, 100% line/branch/function tests, and a cutover + rollback plan. Targets the **v0.2.0 dev branch**. Supersedes ALL LanceDB compaction/rebuild work (Bucket 3, TODO 461/462/1668/1745).
+
+### 🗄️ LONG-TERM (deferred, NOT scheduled) — LanceDB source-code teardown (Phase 2)
+**Context (2026-07-08, Mr. Radio 🦉, session 98a1c238 — Rick voice ruling):** the LanceDB **on-disk store** was removed today — DATA01 working-tree copy deleted (30G reclaimed); DATA02 backup-drive mirror FROZEN as a rollback snapshot via a `rsync-exclude.txt` entry. The daily Postgres backup was verified to capture all tables (whole-DB `pg_dump`, 25/25 tables incl. every pgvector table). Store task `4955d0b9` CLOSED. **Rick's instruction: leave the LanceDB source code intact for now — defer removal to a future endeavor, not today.**
+- [ ] **[LUPIN] LanceDB source-code teardown (rollback-killing full teardown)** — the Phase-2 deliverable set from `src/rnd/v0.2.0/2026.07.07-lancedb-teardown-prep-scoping.md §4`: (1) remove the `lancedb` dependency (`pyproject.toml:43` + `src/cosa/requirements.txt:105`) + all 8 top-level `import lancedb`; (2) strip both dispatch layers — Layer A `vector_store_backend.py` + `vector store backend` INI flag (the live rollback switch), Layer B `solution_manager_factory.py` `ManagerType.LANCEDB` + lancedb factory keys; (3) remove all `if not self._use_postgres` branches across the 8 memory modules + update ~12 test files; (4) rename module file `lancedb_solution_manager.py` → `solution_snapshot_manager.py` (class symbol already renamed in Phase 1); (5) retire the `engine.lancedb_table` PredictionEngine family (`DEFAULT_LANCEDB_TABLE`, decision_proxy `proxy_lancedb_table`, INI `prediction engine lancedb table` + `swe team trust proxy lancedb table`, `main.py:480`); (6) disposition the backfill utility + 6 lancedb scripts (§7 table). Large blast radius on the CBR core — 100% L/B/F gate, full test layers, DO NOT rush. **NOTE:** with the on-disk store now gone, flipping `vector store backend` back to `lancedb` would find no local data — code-level rollback is already effectively spent (DATA02 mirror + GCS + off-tree backfill tooling are the only nets), which lowers the risk of this teardown.
+
+---
 
 ## Pending Decisions
 
@@ -349,1754 +760,20 @@ Filed 2026-06-03 by Sam 🎙️ at Rick's session-end request.
 **Messaging-coordination plane (P0)** — ✅ **ALL 7 RESOLVED 2026-06-02 via `/plan-decide`** (Rick ratified every recommendation). Source `src/rnd/v0.1.8/2026.06.02-messaging-coordination-plane-design.md` (§ Ratified Decisions). Rulings in the Decisions Log below.
 - **Implementation queue — ✅ ALL 5 LEVERS COMPLETE:** A durable outbox · D pull-able inbox · B loop de-block · C express lane · E backpressure. In-process, no broker. **A ✅ · D ✅ (committed `722e624`, :8000 integration 2/2) · B ✅ · C ✅ · E ✅** — 990 unit tests green, no regressions. B/C/E committed in the wrap-up checkpoint.
 
+**GCP test-VM operability — follow-on (opened 2026-07-22, session 2c24d27b):** source `src/rnd/2026.07.22-vm-git-sync-strategy-decision.md` §6.
+- [ ] **[LUPIN] Add SSH agent-forwarding to `lupin-vm.sh shell`** (`--ssh-flag="-A"`) — interactive git-as-you on the VM, all repos, zero creds at rest. Recommended next step; trivial.
+- [ ] **[LUPIN] Unattended VM self-update?** — if near-term, start GitHub App setup (short-lived per-repo tokens); machine-user is the lighter interim. Skip deploy key (single-repo ceiling).
+- [ ] **[LUPIN] `push-bundle` default** — keep fetch-only (current, safer) or default `--checkout` (deploy semantic)?
+- [ ] **[LUPIN] Optional: fold `--actuate` into `provision-arbiter-on-vm.sh`** — one-shot arbiter bring-up (linger + enable) behind an explicit opt-in flag.
+- [ ] **[LUPIN] Unify the notification API key across deployments — or ratify that they diverge** (opened 2026-07-25, session b38f09bb). The VM's `:7999` container accepts `ccfc494d` and rejects `26e3c096`, which the 07-25 entry records as the re-minted app key for the **Secret Manager / Cloud Run STT** path. Provisioning had rsync'd the dev box's key onto the VM, where it read fine and authenticated nowhere. Decide whether the VM container's registry should be re-minted to match, or whether per-deployment keys are the intended design and the provisioning copy is the only thing to fix. Detail: `src/rnd/v0.1.9/2026.07.25-vm-dm-outbound-key-two-stacked-defects.md`.
+- [ ] **[LUPIN] Provisioning should not copy `src/conf/keys/` wholesale to a remote host** (opened 2026-07-25, session b38f09bb). The VM held 10 dev credentials it never needed; removed on Rick's instruction. Whatever placed them there will do it again on the next provision — fix at the source.
+
+**Task-store identity (opened 2026-07-25, session b38f09bb):**
+- [ ] **[LUPIN] Store attributes items to the wrong persona** — a row created from session `b38f09bb` (Cheech 🌿) was stamped `owner_persona: "rachel"` / `created_by: "Rachel f3d7df6c"`, where `f3d7df6c` is the **background-job id**, not the MCP session id. The store resolves identity from a different source than the session bridge, so owed work can land under the wrong owner. Row `641942c0` is the live example.
+
 **Messaging plane — follow-on (deferred design decision):**
 - [ ] **[LUPIN] Lever B comprehensive sweep** — revisit moving ALL remaining sync DB/file I/O off the event loop (beyond the surgical hot-handler fix), after measuring whether colder paths still stall under load. Deferred per Rick 2026-06-02; surgical fix lands first.
 - [ ] **[LUPIN] Full-REMOVAL of the legacy commons-DM path (revisit-later)** — note-to-revisit per Rick's 2026-06-15 ruling (comment-out now, full-delete deferred). After the dm_send cutover has soaked and telemetry shows zero legacy-path hits, DELETE the commented-out machinery: `commons_send_to`, `ask_async`/`ask_sync` DM-mode, `register-question` + `CommonsQuestionWatcher` + main.py lifespan, the 2 legacy listener handlers. KEEP polling-mode + broadcasts + presence + `_handle_broadcast_received`. Prereq already handled at comment-out time: arbiter `make_dm_push_fn` migrated to `/api/notify-peer`. Design: `src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/03-phase4-legacy-commons-dm-retirement-proposal.md`.
-
-## Decisions Log
-
-> ADR-lite: `YYYY-MM-DD — decision → ruling. Why: …`. Appended by `/plan-decide` and ad-hoc.
-
-- 2026-06-15 — `/plan-decide` walkthrough (4 rulings, Rick; cosa-voice notification-native engagement). Pre-walkthrough: commit-scope → **A (cosa-voice cluster, exclude task-store)**; landed held `ba0ce800` (32 files, 512 unit green), Krishna's `task_correlate` stacked `67401eb9` (held). Phase-4 reversed from full-delete to **comment-out + note-to-revisit** (Rick, direct voice). The 4: (1) **Phase-4 comment-out → EXECUTE NOW, keep Rachel** (overruled my defer rec). (2) **Bug #9 trailing-truncation → VALIDATE-FIRST** then apply the trailing-`\n` only if empirically proven (root cause is outside our repo; affects both paths). (3) **Cutover (retire legacy commons path, crew→dm_send) → THIS SESSION after comment-out lands** — Rick's word authorizes the gated :7999 bounce + MCP reload (overruled my off-peak-defer rec). (4) **Phase-3 Step-3 voice-in `direction=human_to_ai` tag → DO NOW** (finish the direction model). Push remains Rick's gate; nothing pushed.
-- 2026-06-10 — `/plan-decide` walkthrough (5 rulings, Rick): (1) GCP gated batch → **GO now** (ADC re-auth Rick's hands; Rio executes runbook §9). (2) Arbiter Option B host-systemd → **CONFIRMED** (veto window closed). (3) Arbiter live-push key → **MOOT** — already reads `~/.lupin/config` via config_loader (06-09 design); resolver verified True on this box; the `LUPIN_ARBITER_NOTIFY_API_KEY` env-var TODO entry was STALE. Rick caught it. (4) `systemctl --user restart lupin-arbiter-app` allow-rule → **YES**; Rick adding via /permissions (paste: `Bash(systemctl --user restart lupin-arbiter-app:*)`, project-local scope). (5) Manager-TODO oracle practice → **RATIFIED** (per-session artifact + María's PostToolUse(TodoWrite) hook mirror; blocked_on + next-chase; fail-open + flag-once).
-- 2026-06-10 — Multiplexer sprint integration rulings (Tiberius): transport flat-frame fix + auth_success frame-shape ownership → Lane A (Cheech); Lane E's websocket.py:509 mirror dropped. All new stores join createStores() at boot-wiring. FocusTrayRenderer → RETIRED (strip focus supersedes; clean removal diff). WP9 cold-reload hydration → Lane B follow-on post-A-merge. Lane D recipient-refresh ← subscribes `store_session_strip_changed` (no new event).
-- 2026-06-10 — GCP-M2 arbiter ride-along → Option B: host `systemd --user` on the VM (NOT a compose service). Why: lupin image ships no docker CLI (arbiter shells out to `docker inspect`), zero heavy deps in the import chain, truest out-of-band, mirrors local prod :8001. Ratified by Tiberius (manager-level, Rick veto window open); condition: host-side prereqs scripted, not tribal. Rio's plan doc: `src/rnd/v0.1.8/2026.05.30-gcp-deployment/2026.06.10-m2-arbiter-ride-along-and-vm-cutover.md`.
-- 2026-06-10 — GCP-M2 (f) `LUPIN_ENV` testing-vs-production tension → RESOLVED, no residual gate. Why: `is_cloud_backed()` (`database.py:32-51`) gates SOLELY on `LUPIN_CLOUD_BACKED`, never on the env name; with `LUPIN_ENV=testing`+cloud-backed, `get_database_url()` builds the correct Cloud-SQL socket URL + `lupin_db_test`. Full grep of `LUPIN_ENV`/`=="production"` sites shows no production hard-gate that bites cloud-backed-testing. `LUPIN_ENV=testing` is correct.
-- 2026-06-10 — GCP-M2 image version → DO NOT push lupin:1.1.0 to GCP until validated in daily LOCAL use first (Rick). local dev+test run 1.0.0; 1.1.0 = 1.0.0 + claude-agent-sdk 0.1.56→0.2.88 + bundled-CLI. ACTION: schedule local migration (docker-compose.yml dev+test → 1.1.0, coordinated bounce, revalidate CC/bounded-job paths), coordinate window w/ Tiberius. GCP push (Steps 2-4-6) paused behind it; Step 1 IAM applied, gate green, held commit 64e1037, nothing pushed.
-- 2026-06-10 — GCP-M2 (g) single-L4 model double-load → RESOLVED: model-server is sole L4 consumer. Why: cloud-test `lupin-rest` has NO GPU reservation; Baseline already sets `speech to text provider = model-server`; added `embedding provider = model-server` to `[Lupin: Testing-GCS]` so the rest app loads NO models in-process (STT + embeddings both deferred to `lupin-model-server:7998`). Zero double-load/contention.
-- 2026-06-02 — TTS spoken-cap location → enforce caller-side in the cosa-voice MCP layer, NOT the notifications REST API. Why: limit agent verbosity at the tool boundary; keep the shared delivery API free for jobs/system.
-- 2026-06-02 — TTS cap default + tunability → 500 chars in lupin-app.ini, ConfigurationManager mtime-gated (runtime-tunable). Why: Rick's call; adjustable without code edit or restart.
-- 2026-06-02 — Over-cap behavior → REJECT (raise), not truncate; `override_size_limitation=True` bypasses. Why: no silent content loss; long-is-opt-in-and-intentional.
-- 2026-06-02 — Reap path (`dismiss_sessions`) → already fixed at source (`3488b43`); verified live post-restart, not re-implemented. Why: typed-wrapper coercion fix was the whole bug.
-- 2026-06-02 — T1 403-queues → investigate as a tripwire first (no test-fix until root-caused). Why: possible real prod regression (G0.2).
-- 2026-06-02 — T2 prod-bug #11 → fix now + de-arm + re-verify. Why: armed tripwire ⇒ correct behavior known ⇒ mandated, not gated.
-- 2026-06-02 — T3 `ResearchOrchestratorAgent` → KEEP + coverage-exclude. Why: Rick knows its status; not dead.
-- 2026-06-02 — T4 Agents Tier-2 → gate on the messaging fix (no pre-fix fleet). Why: avoid re-creating FM-7.
-- 2026-06-02 — MP-Scope (messaging plane) → in-process, NO external broker this milestone. Why: pain is a ~5-session fleet, not internet-scale; avoid an ops dependency before GCP.
-- 2026-06-02 — MP-A client delivery → A1 durable outbox + retry/ack (idempotency_key). Why: converts transient slowness → delayed delivery instead of permanent loss.
-- 2026-06-02 — MP-D AFK recovery → D1 undelivered-inbox + on-return surfacing. Why: fixes FM-18 (the 4h-invisible miss); user can pull what was missed.
-- 2026-06-02 — MP-B server loop → B1 move blocking I/O off the event loop (hot handlers first). Why: stop inline file/DB I/O from starving the loop under fleet load.
-- 2026-06-02 — MP-C load isolation → C1 in-process express/priority lane for interactive notify/ask. Why: keep Rick's voice alive during a fleet storm.
-- 2026-06-02 — MP-E backpressure → E1 per-source cap + 429/retry-after. Why: shed excess fleet load gracefully; outbox honors retry-after.
-- 2026-06-02 — MP-Order rollout → A→D→B→C→E. Why: A+D first retire the silent-loss class at lowest risk; each phase independently shippable.
-- 2026-06-02 — Lever B (loop de-block) scope → **SURGICAL** (hottest handlers first: notify DB-persist + commons file writes via `run_in_executor`), NOT a comprehensive sweep. Why: lowest blast radius; targets the FM-7 hot paths; measure then expand. (Revisit item filed in Pending Decisions.)
-- 2026-06-02 — Lever C (express lane) signal → **PRIORITY field** (high/urgent = express, low/medium = normal). Why: the speakerphone rider already sets interactive notifies to high; zero new concept.
-- 2026-06-02 — Lever E (backpressure) source → **PER-SESSION by `sender_id`**; values in `lupin-app.ini` (per-session cap + window + retry-after), runtime-tunable (mtime-gated) + splainer. Why: isolates a runaway worker without throttling the user's interactive session.
-
-## 🚀 ACTIVE (2026-05-30) — GCP deployment: local-dev → GCP-TEST migration (Milestone 1)
-
-**Sam 🎙️ (session 657452e9).** Arc complete through planning + decisions: survey → straw-man plan → Cloud Run vs GCE comparison → all strategic decisions resolved with Rick → "production" wording scrubbed. Docs in `src/rnd/v0.1.8/2026.05.30-gcp-deployment/`. **Mid-session checkpoint committed (NOT pushed).**
-
-**Milestone-1 scope (Rick-confirmed):** prove the **local-dev → GCP-_test_ migration** process. NOT production (that's a later, easy GCP→GCP horizontal clone).
-
-**Decisions locked:** D2 single GCE g2-standard-8 + L4 VM · D1 CC OAuth = setup-token in Secret Manager (+ a token-**refresh** mechanism for CC's occasional forced re-auth) · CC **consolidated** onto the GPU VM · D8 exclude keys from image + rotate + verify history · D3 **reuse sandbox project** for now · IaC = Terraform + bash · **no staging tier** · on-demand cost (credit-covered, **tracked as real $**). Auto-settled by the VM choice: D6 single-instance · D7 image-slim deferred · D9 self-hosted Whisper · D5 vLLM via Cloud VPN.
-
-**Resume here (next session):**
-- [ ] **[LUPIN]** Pick the start point: **Phase 0** (credential-gated validation — needs Rick's sandbox `gcloud` access) OR **Phase 1** (pre-deploy hygiene — no GCP needed: `LUPIN_ROOT` fix, exclude+rotate keys, parameterize the four `cloud-run-*.sh` scripts).
-- [ ] **[LUPIN]** **OPEN ITEM — `LUPIN_ENV` tension** (surfaced by the test re-scope): the cloud path is gated on literal `LUPIN_ENV == "production"`, but M1 is a *test* env selecting `[Lupin: Testing-GCS]` → either reuse the `production` value as the cloud-profile trigger, or extend the code so `testing` is cloud-backed. Resolve before cutover (plan §7.1.3 note).
-- [ ] **[LUPIN]** Phase-0 validation in the sandbox project: region + L4 quota, existing `-test` buckets / Cloud SQL PG16, existing secrets, IAM/Workload-Identity.
-- [ ] **[LUPIN]** Implement the D1 **token-refresh mechanism** (re-mint setup-token → update Secret Manager version → VM reloads; SSH `claude login` manual fallback).
-- [ ] **[LUPIN]** Review agent-flagged plan lines §9 WS1 (~1759/1768) — `model server local mode` config-block wording in the future-GKE phase (left as future-prod per the scrub rules; revisit if M1-VM execution should read as the cloud-backed block).
-- [ ] **[LUPIN]** Commit `src/rnd/README.md` GCP index links later — **deferred from this checkpoint** (multi-session conflict file; my links persist in the working tree).
-
-Full plan + §1 Decision Ledger + resolved-decisions callout: `src/rnd/v0.1.8/2026.05.30-gcp-deployment/2026.05.30-gcp-deployment-provisioning-plan.md`. Survey + Cloud-Run-vs-GCE comparison in the same dir.
-
-## 🔴 TOP PRIORITY (2026-05-30) — CoSA 100%-coverage grandfathering ramp gate (one-week deadline)
-
-**Filed by Tiberius 👑 (session `ac012bd2`) per Rick's 2026-05-30 voice instruction** ("include the one-week ramp-up gate for all migrated CoSA source code to 100% coverage as a top priority"). This formalizes the `coverage inherits + grandfathering-ramp` decision that was ratified during the 2026-05-29 mono-repo fold (commit `0a01da3`) but never written as an actionable, time-boxed item — it was buried in the DONE block below.
-
-**The gate**: the 621 CoSA files folded in as first-class Lupin source (`src/cosa/`) now inherit the **Lupin-wide 100% coverage mandate** (line + branch + function — see `feedback_100pct_coverage_multiplexer.md`, scope-expanded 2026-05-16). A grandfathering ramp was granted so the fold wasn't blocked on instant 100%. **Deadline framing: 2026-06-05** (one week from the 2026-05-29 fold).
-
-**Formal plan (2026-05-30, ratified by Rick via interactive walk-through):** campaign doc home → `src/rnd/v0.1.8/2026.05.30-cosa-coverage-campaign/` (`README.md` index + `00-campaign-plan.md`); baseline currently `src/rnd/v0.1.8/2026.05.30-cosa-100pct-coverage-baseline.md` (relocates into the campaign dir once Tiffany's combined run completes). Key rulings: deadline = **milestone ramp** (config + library tier by 06-05; agents/REST ramped on a published schedule — hard-100%-by-06-05 is ~15-40 grind-days, not reachable by hand); methodology = combined (evidence-confirmed); execution = flat 3-author bounded-CC fleet (Tiffany lead) + adversarial reviewer gating commits, run overnight via the new heartbeat-poker; standing test-only commit authority granted. Baseline measured 45.3% line / 34.8% branch (corrected denominator, zero tests). Combined unit+:8000 evidence COMPLETE: **52.0% line / 41.7% branch** (REST +1,776 server-covered → hybrid); D4 tiering resolved.
-
-**▶ RESUME / NEXT ACTION (cold-start): the off-peak launch (tonight, post-midnight EDT) via the runbook's §15 cold-start checklist** — live-verify the poker (still PENDING) → land Tier-0 `[tool.coverage]` config → spawn 3 FRESH authors + 1 reviewer (cold-brief each from `02-cold-start-runbook.md`, disjoint Tier-1 module-groups) → grind (per-batch reviewer-gate + green-gate, test-only commits). Tiffany was reaped (fact-gathering done); fleet spawns fresh. Also schedule a clean un-instrumented :8000 E2E to validate 31 parallel-session E2E failures. **Execution doc: `src/rnd/v0.1.8/2026.05.30-cosa-coverage-campaign/02-cold-start-runbook.md`.**
-
-**✅ 2026-06-01 UPDATE (Tiberius 👑, session b8a9f332) — `cosa.rest` now at GENUINE 100%.** Completed `src/cosa/rest/` to tree-wide 100% (`11053/0` lines · `2958/0` branch · 2363 passed) — 35 test-only commits, **HELD (not pushed)**. Caught FM-17 (agent-vs-router conflation) via the tree-wide gate + closed the remainder. Session record: `src/rnd/v0.1.8/2026.05.30-cosa-coverage-campaign/17-session-end-100pct-wrap-and-reap-explanation.md`. Carried-forward items:
-- [ ] **[LUPIN]** **PUSH** the held CoSA-coverage commits to remote — awaiting Rick's explicit word (~130 commits local).
-- [ ] **[LUPIN]** **Ratify** (Rick): the AC12 thin-route-handler pragma grandfather precedent (per-endpoint integration-coverage verified) + the `speech.py` `app_debug` 1-line prod bug-fix (debug-only path).
-- [ ] **[LUPIN]** **websocket_manager** independent reviewer post-audit (committed manager-self-audited under FM-7; tree-wide gate is the 100% proof; post-audit owed).
-- [x] **[LUPIN]** ✅ **DONE 2026-06-01 (reap, process-verified):** the parked fleet's tmux sessions + 13 orphaned listeners reaped. **Root cause:** `tmux kill-session` orphaned the listener daemons (reparented to ppid=1, kept running); they **ignore SIGTERM** and **reconnected** to :7999 after a FastAPI restart — which is why they looked like un-reaped "zombies" (state-Z count was always 0; they were live orphans). Fixed via **SIGKILL by exact PID**, protecting the 3 live listeners (Tiberius/María/Krishna). The `dismiss_sessions` fix `3488b43` is committed but still needs an MCP restart to make the *proper* tool-based reap live next time.
-- [ ] **[LUPIN]** **Messaging-black-hole ROOT-CAUSE** (Rick-assigned, BEFORE the next coverage batch): FM-7/11/15/18 = one unreliable coordination plane (no delivery-guarantee / load-isolation / pull-able fallback). **Layer-A confirmed 2026-06-01:** cosa-voice MCP is **stdio, per-session subprocess** (`claude mcp get cosa-voice` → Type: stdio) — so there is NO shared MCP-server bottleneck; the real bottleneck is the **shared :7999 app server + synchronous notify/commons handlers** (each handler POSTs to :7999 on a ~5s budget → under fleet load :7999 slows → every session's handler times out → black-hole). This **corrects** the earlier "MCP-server saturation" framing. Tiberius owns cosa-voice/commons infra debug; María codifies the synthesis + fix-space. **Do NOT spawn the next batch until hardened.**
-- [ ] **[LUPIN]** **RETURN TO FULL POST-GAME ANALYSIS (next session — Rick-requested 2026-06-01):** resume the collaborative messaging-root-cause + framework synthesis with María (FM-7/11/15/18 as one coordination plane → fix-space). Layer-A done (above); remaining = fix-space design (delivery-guarantee / load-isolation / pull-able fallback) + roll the harvest/SIGKILL lessons into the runbook + the broader synthesis doc.
-- [ ] **[LUPIN]** Broader cosa ramp continues — `rest/` done; remaining cosa subtrees (agents not-yet-100%, memory/app/tools/utils) per the 2026-06-05 ramp.
-
-- [ ] **[LUPIN]** Baseline-measure current coverage across all migrated `src/cosa/` modules (pytest `--cov=cosa --cov-report` line+branch+function) — produce the gap list (files < 100%).
-- [ ] **[LUPIN]** Triage the gap list into (a) reachable lines needing tests, (b) genuinely-unreachable defensive branches needing same-line `# pragma: no cover` + reason.
-- [ ] **[LUPIN]** Write/extend tests to close every reachable gap; land same-line-reasoned pragmas on the rest. Report tabular per-module pass/coverage.
-- [ ] **[LUPIN]** Wire a CI/pre-merge `--cov-fail-under=100` (or equivalent) gate over `src/cosa/` so the ramp can't silently regress after the deadline.
-- [ ] **[LUPIN]** On completion: flip the grandfathering note in `feedback_100pct_coverage_multiplexer.md` from "cosa inherits with ramp" to "cosa fully gated", and update the CLAUDE.md coverage section.
-
-**Excludes** (per the standing mandate): sub-repos `lupin-mobile`, `lupin-plugin-firefox`, and external-project bind-mounts. CoSA is in-scope as of the fold.
-
-## 🌅 MORNING (2026-05-29) — LIVE cascade demo: Manager-Spawned Reviewers (Rick wants to see it in action)
-
-Feature **v1 is feature-complete + live-validated** (spawn-1-reap-1 passed; collision-hardened). Rick asked to run the full cast live in the morning (off-peak 12am–9am EDT ✓).
-
-- [ ] **[LUPIN]** Restart the cosa-voice MCP subprocess FIRST — the running one cached the pre-fix `session_spawner` during dry-runs, so the role-in-name / lowest-free-index collision fix isn't live in it yet.
-- [ ] **[LUPIN]** Run a LIVE manager-spawned cascade: `spawn_sessions(3, role="reviewer", ...)` then `spawn_sessions(1, role="author", ...)` → confirm 4 distinct sessions boot (`cc-reviewer-tiberius-1/2/3`, `cc-author-tiberius-1`), each headless + speakerphone-off + own persona, posting to `dm-tiberius`; exercise `list_spawned_sessions`; then `dismiss_sessions` and confirm clean reap.
-- [ ] **[LUPIN]** Optional next: wire `expected_ack_deadline` into the spawn result (María's §3.3 swap); derive reviewer tmux `name_prefix`/role surfaces if cosmetics matter.
-- Design doc: `src/rnd/v0.1.7/2026.05.28-manager-spawned-reviewers.md` · Runbook (María): `planning-is-prompting/workflow/plan-review-cascaded-on-demand-spawn.md`
-
-## 🗓️ NEW (2026-05-29) — Durable scheduled-job persistence across server bounces
-
-**Problem (Rick, 2026-05-29):** Scheduled jobs (e.g. `/api/test-suite/submit` with `scheduled_at`, plus recurring maintenance like the LanceDB compaction routine) live in **server memory**. Bouncing a server — common when you schedule a night job mid-day then redeploy — silently **loses** all queued/scheduled jobs. Rick wants object permanence: scheduled + recurring jobs must survive restarts.
-
-- [x] **[LUPIN]** ✅ **DONE 2026-05-29 (Tiberius 👑):** one-shot (`scheduled_at`) scheduled jobs now survive server bounces. The base persist→preserve→restore→fire chain already existed; closed the **missed-window gap** (a job whose `scheduled_at` passes WHILE the server is down was dropped as INTERRUPTED) via a **measured-downtime catch-up**: 60s heartbeat + clean-shutdown marker → `ServerLifecycle` table → `mark_interrupted_jobs()` preserves past-due-in-downtime jobs. Migration `e9f0a1b2c3d4`. 40/40 unit tests, 100% coverage on changed lines, live-bounce verified. Doc: `src/rnd/v0.1.8/2026.05.29-scheduled-job-bounce-survival.md`. (cosa code committed via fold `0a01da3`; parent wiring committed separately.)
-- [ ] **[LUPIN]** Recurring / cron-like scheduled jobs — the OTHER half of bounce-durable scheduling (only one-shot `scheduled_at` is implemented). Design when needed.
-- [ ] **[LUPIN]** First durable client of the new mechanism: the recurring LanceDB compaction routine (nightly off-peak 12am–9am EDT). **Decision 2026-05-30 (Rick):** declined an OS-crontab stopgap — will schedule the compaction *manually, day-by-day* for now. Build the in-app recurring durable-job mechanism as the proper fix when prioritized; do NOT re-propose crontab.
-- [ ] **[LUPIN]** **Swap-step robustness — learned 2026-05-29 during the live `input_and_output_tbl` rebuild (82GB→679MB, ~81GB reclaimed):** a corrupt-version-chain table needs a REBUILD, not `optimize()`. On LanceDB OSS, `rename_table` is `NotImplementedError` (the method exists but fails — fails *closed*, so it's safe). The `drop_table` + `create_table`-into-the-same-dir fallback works BUT can strand a stray V1 `_versions/<n>.manifest` from the dropped table → **mixed V1/V2 manifest schemes → table unreadable → both servers crash-loop on open** (happened; recovered by quarantining the stray manifest + restart). The durable swap MUST: (a) quarantine/clean stray manifests in the target dir before serving, (b) bounce BOTH servers (they hold the table open + voice rides :7999), (c) keep a staged copy + verified backup covering the drop→create window. Reusable tool exists: `src/scripts/rebuild_lancedb_table.py` (staged build/swap/status). This belongs in the pgvector revisit note too (it's concrete evidence the append-log, not the engine, is the problem).
-
-Filed 2026-05-29 by Tiberius 👑 (session `c9c582b7`).
-
-## ✅ DONE (2026-05-29) — CoSA→Lupin mono-repo merge + local-venv relocation (Krishna 🦚, session `5496cbb6`)
-
-**Phase A (local dev-venv relocation) is DONE** — commits `bf97e1a`, `eda7caf`, `6cdcb7b` on `wip-v0.1.8` (LOCAL + UNPUSHED). New root `.venv` (py3.13) mirrors the container's locked set minus pyaudio/flash-attn/autoawq (native, host-unbuildable, zero host-side imports); unit 5034/0 + WS smoke 50/50 on it; old `src/cosa/.venv` kept as fallback; production Dockerfile untouched. Full plan + weighted pros/cons: `src/rnd/v0.1.8/2026.05.29-cosa-lupin-monorepo-merge-analysis-and-plan.md`.
-
-- [x] **[LUPIN]** ✅ **DONE 2026-05-29** — Pushed `wip-v0.1.8` (all 8 commits: venv + fold + scrub + Tiberius's durable-job/LanceDB). Verified 2026-05-30: origin synced at `2240bf6`, 0 ahead / 0 behind.
-- [ ] **[LUPIN]** Container parity (no action — just expect it): the next `lupin:1.0.0` rebuild picks up `openapi-to-md` (now in root `pyproject.toml`/`uv.lock`).
-- [x] **[LUPIN]** **Phase B — CoSA→Lupin git fold — DONE** (commit `0a01da3`, flatten, directly on `wip-v0.1.8`): 621 cosa files folded as first-class Lupin source; `src/cosa/.git` **MOVED** (not deleted) → `/mnt/DATA02/cosa-git-archive-2026.05.29/` (full history + 42 branches preserved, reversible); unit 5058/0 + WS smoke 50/50 on the folded tree. Decisions ratified by Rick: flatten · move-aside-not-delete · directly-on-branch (not deferred — it's a GCP prerequisite) · coverage inherits+grandfathering-ramp · namespace PRESERVE · GCS container-only · venv lean subset.
-- [x] **[LUPIN]** **Doctrine scrub — DONE** (commit `6bac0bc`): `CLAUDE.md` de-submodule'd (cosa dropped from nested-repos list; firefox/mobile kept); `src/cosa/CLAUDE.md` SUPERSEDED banner; deleted 2 obsolete CoSA-separation memories + their MEMORY.md index lines; flipped the coverage memory to cosa-inherits-the-100%-gate; removed the newline-named junk file; María shipped the PIP-side doctrine (`bbcd865`).
-- [ ] **[LUPIN]** **Doctrine-scrub RESIDUAL** (flagged to Rick): retire/edit the `nested-repo-management` skill — no locatable SKILL.md (likely plugin-managed); needs CoSA dropped, Firefox/Mobile kept. Plus minor staleness in 2 memory bodies (`feedback_cross_project_handoff`, `feedback_sweep_for_pattern_offenders`) + a `src/cosa/CLAUDE.local.md` banner.
-- [x] **[LUPIN]** Pinged María 🌸 — she shipped the PIP refresh (`bbcd865`); axis-1 PRESERVE held with zero invocation rewrites, coverage inherited. Doctrine now consistent across all three surfaces (Lupin code, Lupin doctrine, PIP doctrine).
-
-Filed 2026-05-29 by Krishna 🦚 (session `5496cbb6`).
-
-## 🔬 POST-PR (2026-05-29) — Revisit: LanceDB → PostgreSQL/pgvector migration analysis
-
-Tiberius 👑 ran a multi-agent research workflow (`wkiwwi4u4`) on moving semantic-similarity storage off LanceDB. **Verdict: the 81GB "bloat" is stale, uncompacted version history in ONE append-only log table** (`input_and_output_tbl`: 81G `_versions/`, only ~898MB live `data/`) — a missing-compaction-cron problem, NOT a vector-engine problem. The "migrate to fix the disk" premise was **refuted** adversarially. At Lupin's scale (tens of thousands of 768-dim vectors, single node) pgvector vs LanceDB query perf is a wash (both sub-10ms).
-
-- [ ] **[LUPIN]** After this PR merges, serialize the parked draft → `src/rnd/v0.1.7/2026.05.29-lancedb-to-postgresql-pgvector-migration-analysis.md` (currently held at `~/lancedb-pgvector-analysis-DRAFT.md`, outside the repo during the PR per Rick's instruction).
-- [x] **[LUPIN]** ✅ **DONE 2026-05-29** — Phase 0 disk reclaim complete: the `input_and_output_tbl` rebuild reclaimed ~81GB (82GB→679MB) via `src/scripts/rebuild_lancedb_table.py`. (The recurring-compaction *scheduling* half — wiring it into a cron so the append-log never regrows — remains tracked above under the durable scheduled-job entry, "First durable client: the recurring LanceDB compaction routine.")
-- [ ] **[LUPIN]** Only THEN decide the pgvector migration on consolidation/ACID merits alone (Postgres already deployed as `lupin-postgres`, but ships only `uuid-ossp` — pgvector extension not yet installed). If migrating: move only the ~165MB of genuine vector tables, leave the append-log behind, use the `snapshot_manager` abstraction as the cutover seam.
-
-Filed 2026-05-29 by Tiberius 👑 (session `c9c582b7`). Full draft + 6 adversarial verdicts in the parked file.
-
-## 🟢 PHASE 7A CASCADE-COMPLETE — Run 4 closed 2026-05-20 03:30 UTC (Manager: Tiberius 🌑, session `387b9201`)
-
-**Status**: Phase 7a Telemetry is implementer-handoff-ready. All 4 cap surfaces closed (Stage 1 + 2 + 3 + Step 9 light-review). 57% net cap utilization; 50%+ headroom preserved across every cap surface. Zero T3/T4 escalations.
-
-**Implementer entry points**:
-- Canonical design doc: [`15-phase7a-telemetry-design.md`](src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/15-phase7a-telemetry-design.md) (cascade-ratified, ~470 LOC)
-- Synthesis + handoff doc: [`16-phase7a-cascade-synthesis.md`](src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/16-phase7a-cascade-synthesis.md) (NEW, ~360 LOC, this run's deliverable)
-- Pre-cascade recon (background): [`14-phase7a-telemetry-pre-cascade-recon.md`](src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/14-phase7a-telemetry-pre-cascade-recon.md)
-- Slicing manifest (Step 0 inputs): [`13-phase7-slicing-manifest.md`](src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/13-phase7-slicing-manifest.md)
-
-**Cast** (Run 4): Mr Radio 🦉 (Stage 0), Rachel 🕊️ (Stage 1), Krishna 🦚 (Stage 2 + Step 9 light-reviewer), Rio ⚡ (Stage 3), María 🌸 (Observer + doctrine consultant), Tiberius 🌑 (Manager).
-
-**Next steps**:
-- [ ] **[LUPIN]** Phase 7a code-execution plan → `17-phase7a-execution-plan.md` (post-cascade execution plan, DAG-first per Roscoe pattern) — Manager + implementer to draft
-- [ ] **[LUPIN]** Phase 7a implementation (gated on Phase 6c close per slicing manifest §Where this manifest lives in the cadence) — Roscoe 🤠's Node C must ship first
-- [ ] **[LUPIN]** Cross-project handoff: `/api/multiplexer/config` Pydantic extension (add `otel_collector_endpoint: str` + `otel_sampling_rate: float` fields). Filed at code-write time per [[cross-project-handoff-doc]] — handoff doc + seed TODO in CoSA TODO.md per [[lupin-only-never-cosa]]
-- [ ] **[LUPIN]** Phase 7b CSP cascade (Run 5) — gated on Phase 7a implementer-handoff acceptance
-- [ ] **[LUPIN]** Phase 7c Trusted Types cascade (Run 6) — gated on Phase 7b
-- [ ] **[LUPIN]** Phase 7d Accessibility cascade (Run 7) — gated on Phase 7c
-- [x] **[LUPIN-PIP]** v1.1 doctrine codification — ✅ **SHIPPED 2026-05-20** at PIP commit `adcd96d` (committed, NOT pushed per Rick's standing EOD directive). 7 candidates promoted + 1 placeholder (final shape after María ↔ Tiberius post-Run-4 convergence DM thread, 4 cycles, ratified 2026-05-20):
-  1. Heartbeat-daemon kickoff codification → `plan-review-cascaded-common.md` §Heartbeat Handling — Daemon kickoff procedure (dual-independent default)
-  2. Manager close-out self-audit sweep → `plan-review-cascaded-common.md` §Step 9 cold-context rubric Q#6 + §Manager close-out self-audit sweep sub-section (added during convergence DM as 6th candidate)
-  3. Author-side grep-sweep checklist (Krishna Q-1..Q-4 anchor #2 + Tiffany-rename anchor #3) → `plan-review-cascaded-common.md` §Author-side Discipline — Grep-sweep Checklist
-  4. 4-tier clarification doctrine (T1/T2/T3/T4) → `plan-review-cascaded-common.md` §Clarification Tier Vocabulary
-  5. Manager proactive `commons_read` (failure-mode #6 single-loop mitigation) → `plan-review-cascaded-common.md` §Manager System Prompt self-audit item 7
-  6. Observer-probe-as-mitigation channel (failure-mode #6 double-loop mitigation) → `plan-review-cascaded-common.md` §Observer-mode Probe Protocol + `plan-review-cascaded-personas.md` Persona 6 (added during convergence DM as 7th candidate)
-  7. Multi-surface footer-ratification close protocol with non-adjacent + Step-9-synthesis-doc 7th-surface refinement → `plan-review-cascaded-common.md` §Multi-surface Footer-ratification Close Protocol
-  8. PLACEHOLDER — explicit `[CLOSURE: …]` markers — queued for Run 5+6 evidence per Krishna's FILE-not-FOLD recommendation
-
-  **Pre-committed re-evaluation gates** also locked at design-doc §10.18.12 (4 gates: Run 5/6 wisdom-curve slot-vs-persona controlled experiment + Run 7 forward-asymmetry re-evaluation + Run 7 `light_review_required` HARD-promotion + Run 5/6 failure-mode-#6 mitigation validation; anti-pattern of silent gate slippage forbidden).
-
-  **Bilateral review**: 8/8 ratification checkpoints verified by Tiberius 🌑 (Lupin session `173c0b35`); two non-blocking observations filed as v1.2 polish candidates (Persona-6 Step-9 cadence M=4 borderline-usefulness; Manager-System-Prompt item-7 → Q#6 → sweep-procedure 3-hop cross-reference chain consolidation).
-
-- [ ] **[LUPIN]** `start-cascade-heartbeat.sh --observer` convenience flag — explicit dual-launch ergonomics. Current invocation works via persona-name arg (`bash src/scripts/start-cascade-heartbeat.sh <persona>`); the v1.1 doctrine now formalizes the dual-independent kickoff (Manager daemon + Observer daemon both required when a doctrine consultant participates), so a `--observer` flag would smoothen the doctrine application. Doctrine motivation lives at `planning-is-prompting/workflow/plan-review-cascaded-common.md` §Heartbeat Handling — Daemon kickoff procedure (PIP commit `adcd96d`). Filed 2026-05-20 by Tiberius 🌑 session `173c0b35` per agreed Lupin TODO split-out from the v1.1 codification close.
-
-- [ ] **[LUPIN]** `commons_send_to` recipient pool-key vs display-name routing gap — existing TODO. The v1.1 Observer-mode Probe Protocol now structurally exercises this gap as a regular routine (Observer DMs Manager with unread-signal pointer on every probe-mitigation event), not a fringe case. Bump priority if codification-pass DM threads surface friction. Filed forward by Tiberius 🌑 session `173c0b35` per agreed Lupin-side cross-link from the v1.1 codification close.
-
-**Standing playbook**: commit-only no-push per [[never-auto-commit-push]]. All work uncommitted in working tree awaiting Rick's morning go-ahead.
-
----
-
-## 🎨 NEW — Retire-no-green-color-rule sweep: deferred references (filed 2026-05-28 by Rio ⚡, session `a507b1a5`)
-
-**Context**: Rick retired the no-green persona-color rule on 2026-05-28 ("no longer in effect, remove all references"). Active config + auto-memory were cleaned this session. The following references remain and were deferred for parallel-session-safety / historical-record reasons:
-
-- [ ] **[LUPIN]** `src/tests/unit/test_voice_persona_helpers.py` — `TestExtraColorsGreenRule` class (lines ~702-717) enforces the retired rule. **NOT touched this session: file was being modified by a parallel session.** A Lupin-context session that owns this file should remove the class (extra-colors palette currently still passes it by legacy coincidence, so it isn't red — just dead).
-- [ ] **[LUPIN]** `src/cosa/rest/voice_persona_helpers.py` (lines ~301, ~423, ~513) — docstrings/comments say "Green-rule-compliant palette". Trim the green-rule wording in a CoSA-context session (per [[lupin-only-never-cosa]] — edit only from CoSA context).
-- [ ] **[LUPIN]** ~18 dated R&D docs under `src/rnd/v0.1.7/` reference the rule. Mostly point-in-time historical records — recommend leaving as-is, but the current/active `2026.05.28-extra-n-overflow-personas.md` may warrant a note that the rule is retired. Rick to confirm whether historical docs should be swept.
-
----
-
-## 🟢 RATIFIED — Phase 7 slicing manifest authored + 4 decisions locked (filed 2026-05-20 by Mr. Radio 🦉, session `32a6e563`)
-
-**Filing context**: Manifest at [`src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/13-phase7-slicing-manifest.md`](src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/13-phase7-slicing-manifest.md). Tiberius 🌑 (session `387b9201`) greenlit the draft; Rick ratified all 4 decisions via cosa-voice blocking tools 2026-05-20.
-
-**Ratified decisions**:
-1. **Sequencing**: Option A — 7a Telemetry → 7b CSP → 7c Trusted Types → 7d Accessibility
-2. **Pre-cascade recon**: ON (1-2h author-side per slice, 4-8h total before any design-doc cascade fires)
-3. **7b iterative-tightening**: DECOUPLED as operational close-out (not second cascade)
-4. **7d audit-driven cycle**: DECOUPLED as operational close-out (not second cascade)
-
-**Phase 7 implementation gated on Phase 6c close** — Roscoe 🤠 has Node C in flight per `12-phase6c-execution-plan.md`. Phase 7 start = Phase 6c ship.
-
-**Phase 7a workflow progress** (Rick clarified parallel-track 2026-05-20 — planning unblocks before 6c ships):
-- [x] **[LUPIN]** Author 7a Telemetry pre-cascade recon doc — RESOLVED 6 items (OTel packages, Long Tasks support, telemetry sink endpoint config, ReportingObserver, User Timing Level 3, directory stubs). Path: `14-phase7a-telemetry-pre-cascade-recon.md`. Tiberius 🌑 greenlit DM `9e011230`. ✅ DONE 2026-05-20 (Checkpoint 2)
-- [x] **[LUPIN]** Stage 0 author draft — `15-phase7a-telemetry-design.md` (single cluster T, Q-T1..Q-T7, 14 ACs, 4 OSQs, ~480 LOC). Author rotation ratified via Rick's cast spin-up. ✅ DONE 2026-05-20 (Checkpoint 2)
-- [ ] **[LUPIN]** Step 0 doctrine light-review by María 🌸 — IN PROGRESS, ~15-20 min wall-clock. Run 4 is first live test of Step 0 doctrine
-- [ ] **[LUPIN]** Stage 1 Usability/Reuse dispatch to Rachel 🕊️ — gated on María's light-review pass
-- [ ] **[LUPIN]** Author revision loop (CAP 2/2) if Stage 1 surfaces foundational findings
-- [ ] **[LUPIN]** Stage 2 Ownership-Language Audit by Krishna 🦚 (NOT security per `feedback_pass2_is_ownership_audit_not_security`)
-- [ ] **[LUPIN]** Stage 3 Synthesis by Rio ⚡ → `16-phase7a-cascade-synthesis.md`
-- [ ] **[LUPIN]** Step 9 synthesis-and-handoff doctrine validation — Tiberius + María doctrine consultant cycle. Run 4 is first live test of Step 9 doctrine
-- [ ] **[LUPIN]** Phase 7a code-execution plan → `17-phase7a-execution-plan.md` (post-cascade)
-- [ ] **[LUPIN]** Phase 7a implementation (gated on Phase 6c close per slicing manifest §Where this manifest lives in the cadence)
-
-**Cross-refs**:
-- Slicing manifest: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/13-phase7-slicing-manifest.md`
-- Phase 7 row in roadmap: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/00-synthesis-and-roadmap.md` §3
-- Phase 6 slicing template: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/07-phase6-slicing-manifest.md`
-
-**Empirical anchor for Step 0 doctrine** — Tiberius's brief said my manifest's §Pre-cascade recon section is validating the Step 0 cascade-prep doctrine he and María 🌸 are codifying on the PIP side. One-line back-ref pending when Step 0 codification commits.
-
----
-
-## 🟡 NEW — Phase 6c follow-on: mic-monopoly indicator on pinned sender card (filed 2026-05-19 by Tiberius 🌑, session `4e724860`)
-
-**Filing context**: Path δ ratified by Rick 2026-05-19 via `ask_multiple_choice` (~10-min decision window) during Roscoe 🤠's Node D pre-flight recon. The cascade Section D Q-D3 designed a mic-monopoly visual cue (`data-mic-monopoly="true"` on pinned card → CSS pulsing overlay), assuming the data would arrive via `conversation_mode_changed` payload field `mic_monopoly`. Recon-D2 confirmed at code-write that no such field exists server-side AND no legacy `notifications.js` precedent exists for a separate mic-monopoly indicator. Genuine cascade-design gap. Deferred to preserve Phase 6c "multiplexer client-side port only" scope (which Q-C2 escalation already reinforced).
-
-**System-wide-semantic question to resolve BEFORE designing the indicator**:
-- What does "this session monopolizes the mic" mean as a system concept?
-- Possible answers:
-  - (a) TTS engine has the mic dedicated to this session (engine-state derived)
-  - (b) Conversation-mode active + currently-speaking (cross-signal derivation)
-  - (c) User has explicitly pinned the mic to this sender (different concept entirely)
-
-**Once semantic ratified, decide wire path**:
-- (α) Server-add `mic_monopoly: bool` to existing `conversation_mode_changed` payload (CoSA submodule edit, additive)
-- (β) Separate `mic_monopoly_changed` notification.type (server-side scope expansion + new emission cadence)
-- (γ) Client-derive in multiplexer from `conversation_mode_active + TTS-playing-signal` (strict client-side, semantic-drift risk)
-
-**Files to amend when indicator lands** (per Phase 6c synthesis + execution plan):
-- [ ] **[LUPIN]** `src/lupin_app/static/js/multiplexer/shared/types.ts` — add `mic_monopoly: boolean` to `SenderRecord` (path α or β only; γ uses a derived value)
-- [ ] **[LUPIN]** `src/lupin_app/static/js/multiplexer/render/ConversationModePinRenderer.ts` — add `data-mic-monopoly="true"` attribute writing on pinned card; integrate into lastPinned-tracking across dual-emission window
-- [ ] **[LUPIN]** `src/lupin_app/static/css/multiplexer/conversation-mode-pin.css` — add `.sender-card[data-mic-monopoly="true"]` (pulsing mic icon overlay) + combination `[data-pinned-conv-mode="true"][data-mic-monopoly="true"]` (glow + pulse) selectors
-- [ ] **[LUPIN]** `src/tests/unit/multiplexer/stores/sender_store_conversation_mode.test.ts` — restore AC-D3 #5 + #6 (mic_monopoly payload extraction) tests
-- [ ] **[LUPIN]** `src/tests/unit/multiplexer/render/conversation_mode_pin_renderer.test.ts` — add mic-monopoly attribute lifecycle tests
-- [ ] **[LUPIN]** `src/tests/smoke/test_multiplexer_phase6c_smoke.py` — add `mic_monopoly` smoke case back to AC-D10
-- [ ] **[LUPIN]** (if path α/β chosen) `src/cosa/rest/routers/notifications.py` (or wherever `conversation_mode_changed` originates) — add the wire field or emit the new notification.type. Handle in CoSA-context session per `feedback_lupin_only_never_cosa`.
-
-**Cross-refs**:
-- Synthesis: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/11-phase6c-cascade-synthesis.md` §3.D
-- Execution plan: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/12-phase6c-execution-plan.md` §3.D (shows deferred bits)
-- Parent design: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/10-phase6c-persona-focus-recorder-design.md` Cluster D Q-D3
-
-**Not blocking Phase 6c** — Section D ships with pin-glow + focus-flash mechanics; mic-monopoly indicator is purely additive.
-
----
-
-## 🚀 NEW — Model-server carve-out follow-ups (filed 2026-05-16 by Rio ⚡, session `0025f917`)
-
-**Primary doc**: [`src/rnd/v0.1.7/2026.05.16-model-server-carveout/01-design.md`](src/rnd/v0.1.7/2026.05.16-model-server-carveout/01-design.md). Phases 0-3 + 3.6 + Part 2 bounce + Phase 5.1 smoke test all shipped this session. Verified end-to-end (9/9 smoke green; native browser ASR working). Doom-loop layers 1 + 3 structurally killed.
-
-### Phase 4 — Compute-side cleanup (next session)
-
-- [ ] **[LUPIN]** Strip `deploy.resources.reservations.devices` blocks from `lupin-rest-dev` + `lupin-rest-test` in `docker-compose.yml` — compute no longer needs GPU now that all 3 models live on `:7998`.
-- [ ] **[LUPIN]** Add `depends_on: lupin-model-server: condition: service_healthy` to both compute services so compose-up enforces the dependency order.
-- [ ] **[LUPIN]** Drop the 3 model pre-download `RUN python -c "snapshot_download..."` lines at `docker/lupin/Dockerfile:208-210` — they're no longer used (compute doesn't load models).
-- [ ] **[LUPIN]** Rebuild compute image as candidate `lupin:1.0.0-noasr` (per `feedback_no_auto_promote_tags` — never auto-promote). Expected size drop ~4 GB (31.7 GB → ~27.7 GB).
-- [ ] **[LUPIN]** Smoke-test the candidate; only Rick promotes `1.0.0-noasr` → `1.0.0` after verification.
-
-### Phase 5 — Test coverage + unit tests — ✅ DONE 2026-05-17 (Tiberius 🌑, session `225e5b2d`)
-
-**Closure doc**: [`src/rnd/v0.1.7/2026.05.16-model-server-carveout/92-phase5-closure.md`](src/rnd/v0.1.7/2026.05.16-model-server-carveout/92-phase5-closure.md)
-**Plan doc**: [`src/rnd/v0.1.7/2026.05.16-model-server-carveout/02-phase5-unit-tests-and-coverage-design.md`](src/rnd/v0.1.7/2026.05.16-model-server-carveout/02-phase5-unit-tests-and-coverage-design.md)
-**Audit doc**: [`src/rnd/v0.1.7/2026.05.16-model-server-carveout/91-phase5-smoke-audit.md`](src/rnd/v0.1.7/2026.05.16-model-server-carveout/91-phase5-smoke-audit.md)
-
-- [x] **[LUPIN]** `src/tests/unit/test_speech_to_text_provider.py` — 47 tests, 100% line+branch on `speech_to_text_provider.py`
-- [x] **[LUPIN]** `fake_model_server_client` fixture in `src/tests/conftest.py` (named Fake* per parent design; opt-in not autouse so existing tests unaffected) + paired singleton-reset fixtures
-- [x] **[LUPIN]** 100% on 2 new files (`speech_to_text_provider.py`, `lupin_model_server/main.py`); carveout-scoped on 3 modified files (`embedding_provider.py`, `routers/speech.py`, `lupin_app/main.py`) per Q9 hybrid ratification
-- [x] **[LUPIN]** Smoke-test audit — both existing tests (`test_embedding_api_smoke.py`, `test_model_server_smoke.py`) carveout-compatible already, no retrofit needed
-
-### Phase 6 — Container preflight extension (next session)
-
-- [ ] **[LUPIN]** Extend `src/tests/smoke/test_container_preflight.py` to assert `lupin-model-server` is in `docker ps` + healthy + bind-mounts present.
-- [ ] **[LUPIN]** Extend `src/scripts/preflight-test-container.sh` to curl-probe `:7998/health` via the docker network.
-
-### Phase 7 — Documentation touchpoints (next session)
-
-- [ ] **[LUPIN]** Add a row to `CLAUDE.md` DOCUMENTATION TOUCHPOINTS for `src/lupin_model_server/` → links to `01-design.md` + `90-baseline-metrics.md`.
-- [ ] **[LUPIN]** Add `docker restart lupin-model-server` recovery command to `CLAUDE.md` COMMANDS section (rare; full reload triggers ~10 s model re-load).
-- [ ] **[LUPIN]** Update `~/.claude/skills/server-lifecycle/SKILL.md` — new subsection on bouncing `lupin-model-server` (shared between dev + test, transcribe/embeddings 503 during ~10-second reload window, NOT auto-bounced by AI).
-
-### Phase 8 — Push (next session)
-
-- [ ] **[LUPIN]** Push the checkpoint commit from this session to remote when Rick says go. Currently committed but NOT pushed per Rick's instruction.
-
-### Cross-refs
-
-- Auth design refinement section in `01-design.md` overrides the original R2 ratification (`ck_internal_*` retired in favor of reusing `notification-api-claude-code-dev`'s `ck_live_*` per María's brief + Rick's call).
-- Two memory updates this session: new `feedback_lupin_models_always_gpu_0`; expanded scope on `feedback_100pct_coverage_multiplexer` from multiplexer-only to Lupin-wide.
-
----
-
-## 🐛 NEW — Commons DM thread fragmentation via topic-case mismatch (filed 2026-05-16 by María 🌸, session `3c9fce51`)
-
-**Filed by**: María 🌸 (Lupin session `3c9fce51`), surfaced during cross-session DM coordination with Tiberius 🌑 on 2026-05-16. Rick voice-confirmed worth filing.
-
-**Severity**: Not lethal — DMs still deliver via push-mode persona resolution (server-side, case-insensitive). But the topic-FILE name is case-sensitive, so the asker and recipient end up reading two different topic files for what's logically one thread. Looks "quieter" than it is in the broadcast UI.
-
-**Reproducer**: From session A, call `commons_send_to(recipient="Tiberius", body="...")`. The wrapper at `src/lupin_mcp/cosa_voice_mcp.py:2194` constructs `target_topic = f"dm-{recipient}"` literally — yielding `dm-Tiberius` (capital T). Tiberius's outbound DMs to María land on `dm-maria` (lowercase, his choice). Result: outbound traffic from María lives on `dm-Tiberius`, inbound from Tiberius lives on `dm-maria`. Two case-variant topics, not one canonical thread.
-
-**Proposed fix** (5 LOC at `src/lupin_mcp/cosa_voice_mcp.py:2194`):
-
-```python
-# BEFORE
-target_topic = topic or f"dm-{recipient}"
-
-# AFTER (normalize to lowercase for topic-file consistency)
-target_topic = topic or f"dm-{recipient.lower()}"
-```
-
-Doesn't change the recipient-resolution path — server-side persona match is already case-insensitive. Only normalizes the topic-file name.
-
-- [ ] **[LUPIN]** Apply the lowercase normalization fix in `commons_send_to` wrapper
-- [ ] **[LUPIN]** Add a unit test asserting `commons_send_to(recipient="Tiberius", ...)` and `commons_send_to(recipient="tiberius", ...)` write to the same topic
-- [ ] **[LUPIN]** Consider migration: rename any existing `dm-{Capitalized}` topic files to lowercase, OR add a backward-compat read that union-merges case variants on `commons_read`
-- [ ] **[Sub-bug CONFIRMED 2026-05-17T00:22Z]** Write-level message truncation observed on `commons_post` to `dm-maria` at 2026-05-17T00:18:31Z. Tiberius authored a ~4000-char reply with 5 Q&A sections; the entry on disk (`io/commons/dm-maria.md`, 34,542 bytes total) genuinely ends at "Substantive answers to your 5 questions, ranked by impact:" with NO body below — confirmed via direct `cat` inspection, not just via `commons_read`. Three hypotheses ranked: (a) bounce mid-write killed the MCP subprocess between header flush and body write — most likely given timing coincides with architecture switchover broadcast; (b) fastmcp transport-layer truncation at write time; (c) silent `CommonsStore.post()` body-length cap. Distinct from the system-reminder push-injection truncation Tiberius hypothesized (which is a SEPARATE failure mode worth documenting in MCP instructions as a "#7" — see his suggestion in his 00:20:55Z follow-up). **Investigation needed**: instrument `CommonsStore.post()` for body-length warnings; add a write-side size-limit test; possibly add a retry-on-partial-write to the wrapper. File as standalone TODO entry once Tiberius re-sends his feedback and we recover the lost content.
-
-**Cross-refs**: 2026-05-16 fix-arc commit `f4e0370` (F1-F5) didn't touch the topic-name construction. R&D doc at `src/rnd/v0.1.7/2026.05.16-commons-dm-and-git-loc-delta-fix-arc.md` covers adjacent commons_* infrastructure.
-
----
-
-## 📦 NEW — CoSA-side commit pending: Daily LoC Delta tool (filed 2026-05-16 by María 🌸, session `3c9fce51`)
-
-**Primary doc**: [`src/cosa/rnd/2026.05.16-daily-loc-delta-tool.md`](src/cosa/rnd/2026.05.16-daily-loc-delta-tool.md) — status 🟢 **SHIPPED** — Reduced PIP review + post-ship docs iteration both ratified.
-
-**User-facing README**: [`src/cosa/repo/git_loc_delta/README.md`](src/cosa/repo/git_loc_delta/README.md) — comprehensive scenarios (Use Case A: daily end-of-session ritual; Use Case B: pre-PR summary) + CLI reference + architecture + reuse map + edge cases + future enhancements.
-
-**What's done**:
-- 8 new source files under `src/cosa/repo/git_loc_delta/` (analyzer, parser, aggregator, csv_writer, formatter, exceptions, init, README)
-- `src/cosa/repo/run_git_loc_delta.py` CLI entry
-- 4 unit tests in `src/tests/unit/test_git_loc_delta.py` (parent Lupin)
-- Post-ship: filename default flipped to mode-aware — `--branch` mode → `{repo}-{branch-slug}-loc-delta.csv` (stable per-branch, daily-overwrite-friendly); `--today` / explicit → date-stamped (archival)
-
-All test tiers green:
-
-| Tier | Result |
-|---|---|
-| T1 py_compile (9 files) | ✅ 9/9 OK |
-| T2 import chain | ✅ resolved |
-| T3 unit tests | ✅ 4/4 passed |
-| T4 quick_smoke_test | ✅ 7/7 ✓ |
-| T5 live CLI (today / --branch / --output csv) | ✅ all 3 modes verified on both Lupin + CoSA repos |
-
-**Pending CoSA-context commit** — per `feedback_lupin_only_never_cosa`, the CoSA submodule pieces wait for a CoSA-context session:
-
-- [x] **[LUPIN-COSA]** Commit in a CoSA-context session: `src/cosa/rnd/2026.05.16-daily-loc-delta-tool.md` + `src/cosa/repo/git_loc_delta/` (8 files including README.md) + `src/cosa/repo/run_git_loc_delta.py`. Suggested commit message: `[COSA] Add git_loc_delta sibling — per-day LoC analysis via git log --numstat`
-- [ ] **[LUPIN]** Commit `src/tests/unit/test_git_loc_delta.py` (4 tests) + `TODO.md` (this entry) from a Lupin-context session — these live in the parent repo.
-
-**Live verification artifacts** (current branch outputs):
-- `io/git-loc-delta/lupin-wip-v0.1.7-2026.04.22-spit-and-polish-for-cjflow-tfe-and-bfe-loc-delta.csv` — 118 rows, 21 days, 216 commits, +147,999 / −13,171 net +134,828
-- `io/git-loc-delta/cosa-wip-v0.1.7-2026.04.23-tracking-lupin-work-loc-delta.csv` — 34 rows, 17 days, 69 commits, +12,561 / −3,272 net +9,289
-- `io/git-loc-delta/2026-05-16-loc-delta.csv` — earlier date-stamped run (pre-filename-flip); can be deleted
-
----
-
-## ✅ 🟢 FIX SHIPPED 2026-05-16 — Duplicate notification fan-out (filed by Rio ⚡ session `0025f917`; fixed by María 🌸 session `3c9fce51`)
-
-**Fix R&D**: [`src/rnd/v0.1.7/2026.05.16-broadcast-fanout-watcher-dedupe.md`](src/rnd/v0.1.7/2026.05.16-broadcast-fanout-watcher-dedupe.md) — full diagnosis, fix shape, test coverage, and remaining write-side investigation flagged.
-
-**Original filing context**: [`src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md`](src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md) — "Log-only — Bug #2" section.
-
-**Root cause**: `CommonsActivityWatcher._tick()` was dispatching one `commons_activity` WS event per row read from the `broadcasts` / `broadcast-acks` topics. `perform_fanout` writes N per-recipient rows by design (for `target_session_id`-scoped routing). The HTTP read path `/api/commons/broadcast-history` already dedupes via `_dedupe_broadcasts_by_id` + `_dedupe_broadcast_acks_by_recipient`. The WS push path bypassed both — producer/consumer asymmetry.
-
-**Fix**: Mirror the HTTP-path dedupes inside `CommonsActivityWatcher._tick()` between sort and dispatch. New `_dedupe_for_dispatch` helper. Cursor advancement fixed to use pre-dedupe max ts so dropped duplicates don't re-surface next tick.
-
-**Verification (Tier T1–T4 green; T5 pending Rick's live confirmation)**:
-
-| Tier | Result |
-|---|---|
-| py_compile (2 files) | ✅ OK |
-| import chain | ✅ resolved |
-| Targeted unit (22 watcher tests: 15 pre-existing + 7 new) | ✅ **22/22 PASS** in 0.07s |
-| Full commons regression (438 tests) | ✅ **438/438 PASS** in 14.80s, **0 regressions** |
-| Live :7999 broadcast smoke test | ⏳ Pending Rick's hands-on confirmation when back from snack |
-
-**Pending Rick's EOD batch commit** (per `feedback_lupin_only_never_cosa`, the CoSA-side edit can't commit from this Lupin-context session):
-
-- [x] **[LUPIN-COSA]** Commit `src/cosa/rest/commons_activity_watcher.py` (added `_dedupe_for_dispatch` method ~80 LOC + tick() integration ~15 LOC). **Rick claimed EOD ownership 2026-05-16 for CoSA commits.** Suggested commit message in the R&D doc.
-- [x] **[LUPIN]** `src/tests/unit/commons/test_commons_activity_watcher.py` (+170 LOC for 7 new tests) — parent Lupin, commits from a Lupin-context session.
-- [x] **[LUPIN]** `src/rnd/v0.1.7/2026.05.16-broadcast-fanout-watcher-dedupe.md` (new R&D doc) — parent Lupin.
-
-**Not-fixed-yet follow-ups** (logged in R&D §"Not-fixed-yet"):
-
-- [ ] **[LUPIN]** Investigate the underlying write-side broadcast-acks multiplicity (Arnold's note at `_dedupe_broadcast_acks_by_recipient` docstring) — N `_post_ack` calls per single user-action. Consumer-side dedupe masks the symptom; producer-side root cause remains.
-- [ ] **[LUPIN]** Investigate the completion-cards persona stamping asymmetry (4×Mr-Radio + 1×Rio for a single completion). Suggests something about recipient-side persona resolution in multi-session-same-user scenarios.
-
----
-
-## ✅ DONE 2026-05-15 PM — Inter-Session DM Phase 0 implementation (María 🌸, session `3b6be6f9`)
-
-**Primary doc**: [`src/rnd/v0.1.7/2026.05.15-inter-session-direct-messaging-design.md`](src/rnd/v0.1.7/2026.05.15-inter-session-direct-messaging-design.md) — 18 sections covering Phase 0 design, gap analysis (corrected post-Rick-feedback), REUSE pass with file:line citations, Pass 1 Fitness with 20 ACs, threats considered, Phase 0 ratification log, Testing Ownership Mandate compliance.
-
-**Delivered**: All 8 implementation steps + 28 net-new tests + 3 retries on `:8000`. After Rick's "ultrathink" challenge corrected the parallel-mechanism scope to a Phase 3 extension, scope shrunk from ~480 LOC + 4-6 sessions to ~210 LOC + 1 session.
-
-- [x] **[LUPIN] Phase 0 design + 4 Q-decisions ratified** — sequential walk via `ask_multiple_choice`: Q1-rev (extend `commons_ask_async` + thin `commons_send_to` wrapper), Q2-rev (fire-and-forget dispatch), Q3-rev (both addressing modes + rich `RecipientResolutionError` 422 contract per Rick's amendment), Q4-rev (same broadcasts topic + DM badge).
-- [x] **[LUPIN] REUSE + Pass 1 Fitness folded** — 12 F-findings verified with file:line; 20 ACs derived (AC9 expanded to AC9a-g + AC10-AC14 after Rick flagged testing under-spec); 10 threats walked, 8 inherit Phase 3 mitigations, 2 new have explicit paths.
-- [x] **[LUPIN] Steps 1+2+5** — `RegisterQuestionRequest` + new `RecipientResolutionError` Pydantic; `_resolve_dm_recipient` + `_dispatch_commons_question_received` helpers; `execute_register_question` extension + route handler wiring; `valid_types` += `"commons_question_received"`. (CoSA submodule — separate commit pending in CoSA-context session.)
-- [x] **[LUPIN] Step 3** — `_register_push_mode` rich-dict return; `ask_async` recipient kwargs + metadata stamping; MCP `commons_ask_async` extended; new `commons_send_to` `@mcp.tool` wrapper. (`src/lupin_mcp/commons_ask.py` + `src/lupin_mcp/cosa_voice_mcp.py`.)
-- [x] **[LUPIN] Step 4** — `commons_question_received` action branch + `_handle_commons_question_received` helper with `COMMONS PEER MESSAGE` framing + T7 isolation try/except.
-- [x] **[LUPIN] Step 6** — DM badge in `_renderCommonsEntry`; `.commons-activity-dm-badge` CSS pill.
-- [x] **[LUPIN] Step 7** — Test pyramid: 16 unit + 7 endpoint smoke + 5 listener smoke + 5 `:8000` integration + 3 Playwright E2E + 1 visual regression baseline (`io/test-suite/visual-baselines/test_dm_recent_activity/`). Final tally: **488/488 PASS across :7999 and :8000**.
-- [x] **[LUPIN] Step 8** — INI keys — no-op for v1 (existing Phase 3 keys `commons api base url` + `commons ask async push mode enabled` cover what's needed).
-- [x] **[LUPIN] Commits** — `9bbf298` (Phase 0 main implementation, 12 files, +1840/-53), `98ab544` (:8000 integration test, AC9d), `8e9e144` (Playwright E2E + visual baseline, AC9e + AC9f).
-- [x] **[LUPIN-COSA] CoSA-side commit** — `src/cosa/rest/routers/commons.py` + `src/cosa/rest/routers/notifications.py` (~250 LOC) including the T7-isolation `match_persona` try/except bug fix discovered during `:8000` integration retry-3. **Rick voice-claimed ownership 2026-05-16: "I'll do that at the end of the day today."** Removed from María's priority queue per Rick's request 2026-05-16 (María session `3c9fce51`).
-- [ ] **[LUPIN] PHI-4 LLM disambiguator wiring** (v1.1 follow-on) — currently the T7 try/except routes any LLM failure to 422 RecipientResolutionError. v1.1 enhancement: actually USE PHI-4 when reachable so fuzzy persona match works (e.g. "the bug-fix one" → "tiberius"). Phase 3 Q5 precedent (Haiku stubbed) suggests acceptable scope deferral.
-
-**Reproducibility recipe** (post-CoSA-commit): María calls `commons_send_to(recipient="radio", body="...")` → Radio's tmux receives `COMMONS PEER MESSAGE` system-reminder → Radio replies via `commons_post('dm-radio', body=<reply>, metadata={'in_reply_to': <question_id>})` → María's Phase-3 watcher pushes back via `commons_answer_received`. Rick watches both in Recent Activity with `→ @radio` and `→ @maria` DM badges.
-
----
-
-## ✅ DONE 2026-05-15 PM — `doc_scope` registry exposure for cosa-voice consumption (Rio ⚡, session `c1cbcd11`)
-
-**Lupin-side work delivered via doc-viewer scope unification** (`src/rnd/v0.1.7/2026.05.15-doc-viewer-scope-unification.md`). The original ask was a 4-field `doc_scope` dict on `get_session_info()`; Q-R2 ratification collapsed it to a single `project_name: str` field. Lupin's deliverable shrank accordingly:
-
-- [x] **[LUPIN] Decide registry exposure mechanism** — chose Option 1 (HTTP endpoint) per Q-R1-A. Ratified during interactive Pass 1 review on 2026-05-15.
-- [x] **[LUPIN] Implement `GET /api/docs/scopes`** — admin endpoint shipped in Phase 3 of doc-viewer scope unification. JWT-auth via `get_current_user`. Payload shape: `{scopes: List[{name, root, allowed_prefixes, allowed_root_files, extra_blocklist, source}]}` where `source` is `"manifest"` (when `.docview.yml` present) or `"ini-only"`. Live-verified on `:7999`.
-- [x] **[LUPIN] Update `_scope_registry.py`** — registered scopes now uniform; built-in `docs`/`io` retired by Phase 4a (per Q1-D). Every scope is a regular registry entry.
-- [ ] **[external — Rachel's cosa-voice session]** Wire `project_name: str` into cosa-voice's `get_session_info()` response. Out of scope for this plan; Rachel owns. Coordination handoff: cross-link `planning-is-prompting/src/rnd/2026.05.14-doc-link-scope-cross-repo.md` with the unification design.
-- [x] **[LUPIN] Add smoke test** — `GET /api/docs/scopes` live-tested during Phase 3; returns all currently-registered repos including `lupin` (now manifest-sourced).
-
-**URL shape post-migration**: `/app/docs?path=<project>/<rel>` — `scope=` query param retired (Q-R2). Rachel's MCP exposes `project_name`, not a 4-field dict.
-
----
-
-## 📡 NEW — Writer-side follow-up: `owner_user_id` stamper (filed 2026-05-14 by María, session f6f865fb)
-
-**Primary doc**: `src/rnd/v0.1.7/2026.05.14-broadcast-listener-stamps-wrong-user-id.md` (Option C ratified by Rick; CoSA-side filter migration landed; writer-side pending separate Lupin session).
-
-**Context**: Broadcast UI showed only 1 of 4 personas because the listener was stamping the SERVICE-ACCOUNT user_id (`claude.code@lupin.deepily.ai`) instead of the human owner's. CoSA filter now reads a new `owner_user_id` field with graceful-degradation fallback (all 4 personas visible immediately; isolation tightens once writer lands).
-
-- [ ] **[LUPIN] Decide owner-resolution mechanism** — recommended: env vars `LUPIN_OWNER_EMAIL` + `LUPIN_OWNER_PASSWORD` (mirrors existing listener-creds pattern). Alternatives: `~/.claude/lupin-owner.json` config file, or a `/auth/whoami-for-bridge` endpoint.
-- [ ] **[LUPIN] Add `set_owner_user_id`** in `src/lupin_cli/claude_code/hooks/lib/session_bridge.py` — mirrors existing `set_user_id` with read-modify-write field preservation.
-- [ ] **[LUPIN] Add `_stamp_owner_user_id_on_bridge`** in `src/lupin_cli/claude_code/hooks/lib/cc_notification_listener.py` — same pattern as the existing `_stamp_user_id_on_bridge` but uses HUMAN owner's credentials, called once at listener startup immediately after the existing stamp.
-- [ ] **[LUPIN] Investigate §6 secondary mystery** — Rachel's listener log says her `user_id` WAS stamped but the on-disk bridge has no key. Probably a post-stamp SessionStart/`/clear` hook overwriting without field-preservation. Could clobber `owner_user_id` too if not fixed.
-- [ ] **[LUPIN] Schedule `:8000` integration run** before merging both legs — verify `test_broadcast_two_session_e2e.py` passes and the live broadcast UI shows all 4 personas once writer lands.
-
-**Independence note**: The CoSA-side change is safe to merge independently because the graceful-degradation branch handles bridges without `owner_user_id`. No coordination required between the two repos' merges.
-
----
-
-## 💰 NEW — Bounded ClaudeCodeJob migration audit & plan (filed 2026-05-13 by Tiberius, session 66d534ab)
-
-**Primary doc**: `src/rnd/v0.1.7/2026.05.13-bounded-cc-migration-audit-and-plan.md` (status: awaiting Rick's ratification on D1-D9 decision matrix)
-
-- [ ] **[LUPIN] Ratify D1-D9 decision matrix** — 9 decisions with full pros/cons/flip-conditions/recommendations. Each migration phase (Podcast → Presentation → Deep Research per my recommendation) opens as a separate R&D doc once ratification lands.
-- [ ] **[LUPIN] Phase 1 — Podcast Generator migration to bounded CC** — gated on D1 ratification. ~1 session estimated. Open as `src/rnd/v0.1.7/2026.05.13-podcast-bounded-cc/` once authorized.
-- [ ] **[LUPIN] Phase 2 — Presentation Generator migration to bounded CC** — gated on Phase 1 closure + D6 (strict parser strategy).
-- [ ] **[LUPIN] Phase 3 — Deep Research migration to bounded CC** — gated on Phase 2 closure + D3 (preserve progress events) + max_turns cap tuning.
-- [ ] **[LUPIN] Optional 30-day Anthropic console pull** (10-min user task) — could flip D1 to Deep-Research-first if `spend_deep_research >> spend_podcast + spend_presentation`. Doc captures the model.
-
-**Decision matrix at a glance** (full body in the doc):
-- D1: Phase order (Podcast first vs Deep Research first) — recommend Podcast first
-- D2: `scheduled_at` default (post-midnight) — recommend YES
-- D3: Deep Research progress events (preserve via tool-use vs simplify) — recommend preserve
-- D4: OpenAI sites (defer or eliminate) — recommend defer (out of scope)
-- D5: Runtime Argument Expeditor (defer with trigger vs permanent stay) — recommend defer with revisit trigger
-- D6: Output parser (strict/lenient/hybrid) — recommend per-migration (lenient Podcast, strict Presentation+DR)
-- D7: Pool concurrency limit — recommend keep current values
-- D8: `cost_usd` telemetry — recommend keep with "telemetry only" UI disclaimer
-- D9: Migration marker convention — recommend `__init__.py` banner pattern
-
-**Awaiting**: Rick reads the doc, ratifies D1-D9 en masse OR flips specific decisions. No code touches until then.
-
----
-
-## 🐛 Inter-Session Commons follow-on (filed 2026-05-13 PM by Maria 🌸)
-
-- [ ] **[LUPIN] Host-side stale-bridge sweeper daemon** (Option 2 from `src/rnd/v0.1.7/2026.05.13-broadcast-stale-bridge-phantom.md`) — once-per-hour scan of `~/.claude/sessions/cc-*.json` that deletes bridges whose host PID is dead. Tightens the activity-threshold-vs-phantom trade-off so the `commons broadcast active session threshold seconds` INI key could safely return to a shorter value. ~30-50 LOC + systemd timer or shell hook + tests.
-
----
-
-## 🟡 Multiplexer Phase 6c Q-decisions queue — built, awaiting Rick's pull trigger (filed 2026-05-13 PM by Rio ⚡, session `9fae8c74`)
-
-**Status**: 15 questions queued across Clusters B, C, D. Cluster A already ratified 5/5 on 2026-05-12. Rick is working interstitially and wants to pull questions on his cadence — he'll say "next" / "ready" / "fire" and I deliver one at a time. No forced pace.
-
-**Primary doc**: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/10-phase6c-persona-focus-recorder-design.md`
-
-### Queue contents
-
-**Cluster B — Focus tray + focus-mode toggle (5 Qs)**:
-- [ ] Q-B1 — Mount surface (`#focus-tray` placement in `multiplexer.html`)
-- [ ] Q-B2 — Focus-mode toggle UI (single button vs per-card vs keyboard shortcut)
-- [ ] Q-B3 — Focus-target selection (couple to conv-mode pin vs click-to-focus)
-- [ ] Q-B4 — Tray contents + click-to-refocus behavior
-- [ ] Q-B5 — Flash-on-focus-change animation
-
-**Cluster C — Sender-card audio recorder (6 Qs)**:
-- [ ] Q-C1 — Mount placement (`.cc-voice-input` in card footer)
-- [ ] Q-C2 — `MediaRecorder` MIME type (opus default vs feature-detect chain)
-- [ ] Q-C3 — Recording state machine (idle → recording → processing → ready → sent)
-- [ ] Q-C4 — STT pipeline target endpoint
-- [ ] Q-C5 — Send-button POST payload shape
-- [ ] Q-C6 — Per-sender concurrency (single active recorder guard)
-
-**Cluster D — Conversation-mode UI pin (4 Qs)**:
-- [ ] Q-D1 — Where pin state lives (`SenderRecord` field vs DOM-only)
-- [ ] Q-D2 — Top-of-list pinning mechanism (reducer sort vs `insertBefore`)
-- [ ] Q-D3 — Mic-monopoly indicator wiring
-- [ ] Q-D4 — Multi-sender conversation-mode race (single-pin invariant)
-
-### Resume protocol
-
-Trigger phrases (any of these advance the queue): "next", "next question", "ready", "fire", "give me the next". Other controls: "skip" (defer current, advance), "back up" (revisit last), "pause" (bookmark), "TOC" / "where are we" (position check).
-
-Each delivered question must include: proposed answer + alternatives walked + per-option pros/cons + recommendation with flip-condition (per `feedback_always_include_pros_cons_recommendation`). TTS body = headline + takeaway only; pros/cons + flip-condition go in `abstract` (per `feedback_tts_body_headline_and_takeaway_only`).
-
-### Phase 6c predecessor closure
-
-Phase 6b CLOSED 2026-05-12 (Rachel 🕊️, session `56ee76d6`). All 22 ACs green; c8 100% on 9 TS files; boot gz = 34,647 B (5,029 B headroom under AC7 ceiling). See `97-phase6b-closure.md`.
-
----
-
-## 🚧 UNDERWAY — Inter-Session Commons Phase 3 Steps 3-9 implementation barrel-through (paused 2026-05-12 PM, session 6a054460 → resumed)
-
-**Primary doc**: `src/rnd/v0.1.7/2026.05.09-inter-session-commons/04-phase3-push-mode-and-llm-fallback-design.md` (status: 🟢 APPROVED FOR CODE-WRITE)
-
-### Where we are (Step 3 CLOSED, Step 4 next)
-
-**Completed in 2026-05-12 PM session**:
-- ✅ All 4 plan-review passes (Pass 0 + REUSE + Pass 1 Fitness + Pass 2 Adversarial) — 20 ACs (AC1-AC15 Pass 1 + AC16-AC20 Pass 2 tests), 10 new INI keys, NEW §6 Testing Ownership Mandate, NEW §8 PHI-4 prompt envelope, Pydantic-native validation retrofit
-- ✅ Status flipped to **APPROVED FOR CODE-WRITE** by Rick
-- ✅ Step 1 — Q1 refactor pre-flight: `commons_topic_watcher.py` (base) + refactored `commons_ack_watcher.py` (subclass keeps Phase 2 public API). py_compile + import-chain clean. **26/26 ack-watcher tests GREEN** (AC8 gate satisfied).
-- ✅ Step 2 — 10 INI keys + 10 paired splainer entries land in `lupin-app.ini` + `lupin-app-splainer.ini`. ConfigurationManager.get() resolves 10/10 with correct types.
-
-**Completed in 2026-05-13 AM session (Maria 🌸)**:
-- ✅ Step 3 — `src/cosa/rest/commons_question_watcher.py` (NEW, 354 LOC incl. docstrings; ~155 LOC pure code) subclassing `CommonsTopicWatcher`. `_InFlightQuestion` plain-data record (`topic`, `user_id`, `inject_fn`, `last_seen_ts` ISO string, `expires_at_monotonic`); `register_question` with T3 per-user + global caps + T9 collision + T4 cursor stamping; `unregister_question` with T5 uniform `QuestionNotFound`; `tick()` + `_tick_one_question` with T1 validate + T1 `_dispatched_by_question` idempotency + T6 lock-guarded lookup + T8 inject_fn isolation; override `_prune_expired_locked` to clear dispatched_by_question (memory hygiene); per-question `last_seen_ts` cursor (F3-fit). **Test file at `src/tests/unit/commons/test_commons_question_watcher.py` (43 tests).** Coverage: **100% lines + branches + functions** on the new module (124 stmts / 38 branches / 0 missing). Full commons suite regression: **254 tests, 0 failures (14.16s)**.
-- ✅ Step 4 — `src/lupin_mcp/commons_xml_models.py` (NEW) + `src/tests/unit/commons/test_commons_xml_models.py` (NEW, 35 tests). PersonaInfo (BaseModel, server-side persona registry — no T2 needed); PersonaDisambiguationRequest (BaseXMLModel with `List[PersonaInfo]` + Pydantic Field constraints on `ambiguous_reference` / `context` + `@field_validator(mode="before")` for T2 sanitize-at-boundary — rejects control chars, XML-escapes `<` `>` `&`; **overrides `to_xml()`** to produce PHI-4-friendly nested-persona shape because xmltodict.unparse mishandles `List[PersonaInfo]`); PersonaDisambiguationResponse (Optional matched_persona with empty-tag → None coercion + Field-constrained confidence in [0.0, 1.0]). Coverage: **100% lines + branches** (45 stmts / 10 branches / 0 missing). 35/35 tests PASSED (0.22s).
-- ✅ Step 5 — `src/lupin_mcp/commons_llm_disambiguator.py` (NEW) + `src/tests/unit/commons/test_commons_llm_disambiguator.py` (NEW, 23 tests). `CommonsLlmDisambiguator(config_mgr)` class using `LlmClientFactory.get_client(spec_key)` + BaseXMLModel round-trip + T2 active_personas whitelist + F5-fit confidence floor + T7 audit log (`commons llm disambiguator log decisions` INI-toggleable). PHI-4 errors (TimeoutError / XMLParsingError / ValidationError / ValueError) route to `_fallback_via_haiku()` which raises NotImplementedError per AC7 wired-but-stubbed → outer catches → returns None. Lazy LLM-client construction for testability. Coverage: **100% lines + branches** (63 stmts / 10 branches / 0 missing). **Also wired `src/lupin_mcp/commons_persona_matcher.py`**: added `configure_llm_disambiguator(d)` setter for main.py lifespan injection + extended `disambiguate_via_llm()` to convert string candidates → PersonaInfo and dispatch through the singleton when set; Phase 1 stub behavior preserved when singleton is None. Matcher test file +4 wiring tests; matcher module coverage stays at **100%** (24 stmts / 12 branches / 0 missing). Full commons regression after Step 5: **316 tests, 0 failures (14.51s)**.
-- ✅ Step 6 — `src/cosa/rest/routers/commons.py` (MOD, CoSA-side): extended `init_commons_state()` to accept `question_watcher: Optional[CommonsQuestionWatcher]` (Phase 2 callers unaffected); NEW `RegisterQuestionRequest(BaseModel)` per AC1 with Pydantic Field constraints (topic + question_id regex `^[A-Za-z0-9_-]+$` + length 1-64, asker_session_id length 1-128, ttl_seconds 1-604800 default 3600); NEW pure-logic helpers `make_question_inject_fn` (builds the closure pushing `user_initiated_message` with `title="action:commons_answer_received"` per Q3 framing), `execute_register_question` (T3 cap → 429, T9 collision → 409, success → 201), `execute_unregister_question` (T5 uniform 404 for unknown OR wrong-owner); NEW route handlers `POST /api/commons/register-question` (201/422/409/429) and `DELETE /api/commons/register-question/{question_id}` (204/422/404) with `require_api_key_or_jwt` auth dep + `Path(..., pattern=...)` validation on the path param. NEW `_require_question_watcher()` gate (503 until Step 9 lifespan wires the singleton). Tests at `src/tests/unit/commons/test_commons_router.py` (+21 tests for Pydantic shape, inject_fn payload, execute_register/unregister happy/collision/cap/T5) + `test_commons_ac14_registration.py` (+4 AC14 route-registration smokes for POST + DELETE + method assertions). Coverage on routers/commons.py: **100% lines + branches** (157 stmts / 40 branches / 0 missing). Full commons regression after Step 6: **337 tests, 0 failures (14.54s)**.
-- ✅ Step 7 — `src/lupin_mcp/commons_ask.py` (MOD): ask_async() now accepts optional push-mode kwargs (push_mode_enabled, api_base_url, auth_header, ttl_seconds, register_timeout_s, debug) per F1-fit / F2-fit / AC5. NEW `_register_push_mode()` helper fires `POST {base_url}/api/commons/register-question` with `json={topic, question_id, asker_session_id, ttl_seconds}` + auth headers + timeout; returns True on 2xx, False on non-2xx OR network error OR ImportError (silent fallback to polling-mode). Return shape now includes `push_mode_active: bool`. `ask_sync()` untouched per F10-fit. Phase 1 polling contract preserved when push-mode is disabled or fails. Tests at `src/tests/unit/commons/test_commons_ask.py` (+8 push-mode tests: default disabled, missing-url skip, missing-auth skip, success 2xx, non-2xx 409 fallback, network error fallback, trailing-slash url normalization, ImportError fallback). Coverage: **100% lines + branches** (52 stmts / 12 branches / 0 missing). Full commons regression after Step 7: **345 tests, 0 failures (14.51s)**.
-- ✅ Step 8 — `src/lupin_cli/claude_code/hooks/lib/cc_notification_listener.py` (MOD): 4th `elif action == "commons_answer_received"` branch in `_handle_action()` + NEW `_handle_commons_answer_received(notification)` method reads stamped `payload.persona_name` per F9-fit immutability (NOT a live lookup); builds Q3-framed body `"COMMONS PEER REPLY (question_id X, from @PersonaName):\n\n[body]"` wrapped in `<system-reminder>...</system-reminder>`; injects via `_inject_via_tmux(wrapped, wrap=False)`. Missing-question_id guard logs + returns without injecting (defense against malformed notifications). Missing-persona defaults to `@unknown` per F9-fit (no live lookup fallback). MODIFY `src/cosa/rest/routers/notifications.py` valid_types L359-362: added `"commons_answer_received"` alongside `commons_broadcast_ack` per AC10. Tests at `src/tests/smoke/test_cc_notification_listener.py` (+4 commons_answer_received tests: full payload + Q3 framing + wrap=False; missing question_id; missing persona defaults; no payload). Also FIXED a stale test from the 2026-05-12 speakerphone refactor (`exit_conversation_mode` action was renamed to `disable_speakerphone`). Full regression after Step 8: **387 tests, 0 failures (14.74s)** across commons unit + listener smoke.
-- ✅ Step 9 — Final pyramid + lifespan: NEW `src/tests/smoke/test_ask_async_push_e2e.py` (AC13 TestClient in-process, 11 tests covering 201/409/422/422-missing/204/404/422-malformed-path + full register-tick-dispatch happy path + unregister-prevents-dispatch + AC17-style 429 cap-hit). NEW `src/tests/integration/test_commons_ask_async_push_integration.py` (AC15 scheduled-only :8000 file, 7 tests covering live-server round-trip of POST 201/409/422 + DELETE 204/404/422 + auth-required; skipif on credential env vars; submit via `POST /api/test-suite/submit` with `test_types=integration`, `pytest_args=-k test_commons_ask_async_push`, `auto_fix_on_failure=False`). MODIFY `src/lupin_app/main.py` lifespan at L527+: extends Phase 2 commons singletons block with `CommonsQuestionWatcher` construction (reads `commons question tracker ttl/per-user-max/global-max` INI keys) + `.start()` + `init_commons_state(..., question_watcher=...)` + Phase 3 `configure_llm_disambiguator(CommonsLlmDisambiguator(config_mgr))` + matching shutdown stop. Full :7999 pyramid I can execute: py_compile + import chain + unit + smoke + listener smoke = **398 tests, 0 failures (14.83s)**. AC15 :8000 integration execution remains scheduled-only per `feedback_test_server_monopolize_mode` — awaiting user slot confirmation.
-
-### Required next-session sequence (resume here, in order)
-
-**Step 3** — `src/cosa/rest/commons_question_watcher.py` (NEW, ~150 LOC) — the load-bearing module:
-- `_InFlightQuestion` dataclass: `user_id`, `last_seen_ts`, `inject_fn`, `expires_at_monotonic`
-- `register_question(qid, uid, ttl, inject_fn, last_seen_ts=time.time())` — calls base `_register()` after T3 cap checks (per-user + global)
-- `_dispatched_set: Set[Tuple[str, str]]` for T1 idempotency (cleared on `_unregister`)
-- `_initialize_last_seen_ts()` — subclass impl (reads the registered topic's last entry)
-- `tick()` — for each registered question, polls topic since `question.last_seen_ts`; for each new entry validates `in_reply_to` per T1 (`isinstance` + `TOPIC_RE.match` + `len ≤ 64`); checks `(qid, entry_id) not in _dispatched_set` for T1 idempotency; T6 lookup-under-lock; **dispatch inject_fn OUTSIDE lock** with T8 try-except wrap
-- Custom `CapExceededError` exception for T3 429 translation
-- Plus unit tests in `src/tests/unit/commons/test_commons_question_watcher.py` covering AC16 (T1 idempotency), AC17 (T3 caps), AC18 (T4 cursor), AC19 (T6 concurrency), AC20 (T8 inject_fn failure)
-
-**Step 4** — `src/lupin_mcp/commons_xml_models.py` (NEW, ~80 LOC) — PersonaInfo + PersonaDisambiguationRequest (with `Field` + `@field_validator` for T2 sanitization) + PersonaDisambiguationResponse (with `Field(ge=0, le=1)` on confidence). Per §8 envelope. Plus unit tests.
-
-**Step 5** — `src/lupin_mcp/commons_llm_disambiguator.py` (NEW, ~120 LOC) — `disambiguate()` using `LlmClientFactory.get_client(spec_key)` + BaseXMLModel round-trip + confidence-floor thresholding + T2 whitelist + T7 decision audit log. Stubbed Haiku fallback raises `NotImplementedError`. Plus unit tests with mocked LlmClientFactory.
-
-**Step 6** — `src/cosa/rest/routers/commons.py` (+80 LOC) — `RegisterQuestionRequest(BaseModel)` with Pydantic Field constraints; `POST /api/commons/register-question` and `DELETE /api/commons/register-question/{question_id}` endpoints with auth dep, T3 cap checks (429), T5 uniform 404 body, lock-guard via watcher methods. AC14 router-registration smoke.
-
-**Step 7** — `src/lupin_mcp/commons_ask.py` (+30 LOC) — `ask_async()` reads `commons api base url` from INI; fires `POST /api/commons/register-question` when push-mode enabled; try-except + warning log + polling fallback on failure (F1-fit). `ask_sync()` untouched per F10-fit.
-
-**Step 8** — `src/lupin_cli/claude_code/hooks/lib/cc_notification_listener.py` (+40 LOC) — 4th `elif action == "commons_answer_received"` branch + `_handle_commons_answer_received()` reading stamped `persona_name` from answer entry (F9-fit), building `COMMONS PEER REPLY` body, injecting via `_inject_via_tmux(wrap=False)`. Extend `valid_types` in `routers/notifications.py:359-362`.
-
-**Step 9** — Final pyramid + lifespan: AC13 TestClient smoke in `src/tests/smoke/test_ask_async_push_e2e.py`; extend `main.py:527+` lifespan to instantiate + start `CommonsQuestionWatcher`; AC15 integration E2E file `src/tests/integration/test_commons_ask_async_push_integration.py` (schedulable via `/api/test-suite/submit`). **Run full pyramid + report tabular pass/fail per tier** per §6 Testing Ownership Mandate.
-
-### Testing Ownership Mandate (mandatory at every step)
-
-Per CLAUDE.local.md §"USER IS NEVER A TESTER" + design doc §6:
-
-The AI runs every tier at each step appropriate to that step. Tabular pass/fail reporting before declaring any step "done". User is never asked to verify or run tests. Tier-1 (`py_compile` + import-chain + unit) and Tier-2 (`:7999` smoke + router-registration) are AI-discretionary. Tier-3 (`:8000` integration E2E, AC15) requires user slot-confirmation per `feedback_test_server_monopolize_mode` — the user-ask is slot availability, NOT budget approval, NOT tester-duty deferral.
-
-### Standing memories that apply (mandatory)
-
-- `feedback_approved_sequences_execute_end_to_end` — once Steps 3-9 barrel-through begins, do not re-ask between sub-steps
-- `feedback_pydantic_native_validation` — all body validation declared via Pydantic Field + field_validator, never hand-rolled if/raise
-- `feedback_recraft_speech_dont_pipe_terminal` — TTS message = headlines + verdict only; details in abstract
-- `feedback_lupin_only_never_cosa` — code edits in `src/cosa/` are fine; git ops there are forbidden from parent context
-- `feedback_never_auto_commit_push` — wait for explicit "commit" / "push" per change
-
-### File-location cheatsheet
-
-| Purpose | Path |
-|---|---|
-| Phase 3 design doc | `src/rnd/v0.1.7/2026.05.09-inter-session-commons/04-phase3-push-mode-and-llm-fallback-design.md` |
-| Phase 3 doc-set index | `src/rnd/v0.1.7/2026.05.09-inter-session-commons/00-index.md` |
-| Base watcher (Step 1 ✅) | `src/cosa/rest/commons_topic_watcher.py` |
-| Ack subclass (Step 1 ✅) | `src/cosa/rest/commons_ack_watcher.py` |
-| INI keys (Step 2 ✅) | `src/conf/lupin-app.ini` + `lupin-app-splainer.ini` (search for "Phase 3 (push-mode") |
-| Question watcher (Step 3) | `src/cosa/rest/commons_question_watcher.py` (NEW) |
-| XML models (Step 4) | `src/lupin_mcp/commons_xml_models.py` (NEW) |
-| Disambiguator (Step 5) | `src/lupin_mcp/commons_llm_disambiguator.py` (NEW) |
-| Router endpoints (Step 6) | `src/cosa/rest/routers/commons.py` (MODIFY) |
-| MCP ask_async (Step 7) | `src/lupin_mcp/commons_ask.py` (MODIFY) |
-| Listener wiring (Step 8) | `src/lupin_cli/claude_code/hooks/lib/cc_notification_listener.py` (MODIFY) + `src/cosa/rest/routers/notifications.py:359-362` |
-| Lifespan (Step 9) | `src/lupin_app/main.py:527+` (MODIFY) |
-| Smoke test (Step 9 / AC13) | `src/tests/smoke/test_ask_async_push_e2e.py` (NEW) |
-| Integration test (Step 9 / AC15) | `src/tests/integration/test_commons_ask_async_push_integration.py` (NEW) |
-
----
-
-## 🚧 UNDERWAY — Multiplexer Phase 6c (persona modal + focus tray + audio recorder + conversation-mode UI pin)
-
-**Resume pointer**: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/10-phase6c-persona-focus-recorder-design.md`
-
-### Where we are
-
-Phase 6b is **CLOSED** (commits `118ed10` Phases 5A+5B; `e324e6c` Phases 6+7+8+closure + `97-phase6b-closure.md`). Phase 6c (persona modal + focus tray + audio recorder + conversation-mode UI pin) **design phase opened today** and Cluster A is fully ratified.
-
-### Cluster A — CLOSED 2026-05-12 (5/5 ratified)
-
-| Q | Decision |
-|---|---|
-| Q-A1 | Trigger = `.sender-persona-badge` chip embedded in sender card |
-| Q-A2 | Modal = HTML Popover API; `popover="auto"` mode; chip carries `popovertarget` (declarative wiring) |
-| Q-A3 | Close affordances = ESC + outside-click (built-in) + explicit × button |
-| Q-A4 | Persona color = subtle thin top accent + tinted name text; body neutral |
-| Q-A5 | Borrowed display = `(borrowed)` label only; attribution deferred (server has no `original_owner` field) |
-
-### Remaining Q-decisions for Phase 6c design phase
-
-- [ ] **Cluster B — Focus tray** (Q-B1..Q-B5) — mount surface, toggle UI, focus-target selection (couples to Cluster D), tray contents, flash animation
-- [ ] **Cluster C — Audio recorder** (Q-C1..Q-C6) — mount placement, MediaRecorder MIME, state machine, STT endpoint, Send payload, concurrency
-- [ ] **Cluster D — Conversation-mode UI pin** (Q-D1..Q-D4) — pin state location (store vs DOM), top-of-list mechanism, mic-monopoly indicator, multi-sender race
-
-### After Q-decisions close
-
-1. REUSE pre-pass (catalog reusable patterns from Phases 5/6a/6b)
-2. Pass 1 Fitness review
-3. Pass 2 Adversarial review
-4. Code-execution plan
-5. Implementation
-
-Per `feedback_pip_plan_review_is_sequential` — no auto-progression between gates.
-
-### Follow-on filed during Cluster A walk
-
-- [ ] **[LUPIN]** Server-side extension: add `original_owner` field to `ServerVoicePersona` payload (`cosa/rest/voice_persona_helpers.py:borrowed_persona_for_sid`). When that lands, Phase 6c popover swaps `(borrowed)` → `(borrowed from {name})`. Not blocking Phase 6c.
-
-### TTS format rule learned this session
-
-Spoken `notify(message=…)` / `ask_multiple_choice(question=…)` body is **headline + one-sentence recommendation only**. Detail (pros/cons, flip-conditions, file paths, inventory) goes in `abstract`. Filed as `feedback_tts_body_headline_and_takeaway_only.md`. Rick told me twice during the Q-A walk; sticks now.
-
----
-
-## ✅ Speakerphone (solo/chorus) — MINIMUM-VIABLE CLOSED 2026-05-13 (Arnold 🪨, session 6d663b6c)
-
-**Resume pointer**: `src/rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/00-index.md`
-
-**Decision (2026-05-13)**: Per `97-phase7-execution-log.md` §7 recommendation, Phase 7 minimum-viable scope IS the close. Speakerphone solo/chorus framework is live and tested. Phase 7b (toggle widget migration) and Phase 8 (chorus UX polish) are filed as separate follow-on tickets below.
-
-### Final phase ledger
-
-| Phase | Status | Commit | Notes |
-|---|---|---|---|
-| 1 — INI key + helper | ✅ Committed | `c82ee04` | — |
-| 2 + 3 — Bridge rename + server router | ✅ Committed | `8a8c31c` | CoSA-side edits in same logical change, committed separately by Rick |
-| 4 — MCP tool rename + `_notify_impl` mode-conditional | ✅ Committed | `9ba4db5` | — |
-| 5 — Hook layer renames (function names only) | ✅ Committed | `e17d7d7` | — |
-| 5b — 4-variant rider matrix + brevity migration | ✅ Committed | `b6f1ac2` | 4-variant `_speakerphone_reminder_body(source, mode, speakerphone_on)`. Brevity + routing rules migrated from `~/.claude/CLAUDE.md` into rider. |
-| 6 — CLAUDE.md migration + skill retire | ✅ Committed | `b6f1ac2` | `~/.claude/CLAUDE.md` slimmed 928→889 lines. `conversation-mode-guardrails` skill retired. Slash commands renamed. |
-| 7 — Multiplexer rename + legacy notifications.js wire-fix | ✅ Committed | `b6f1ac2` | 3 multiplexer source files + 2 tests renamed; 100% c8 maintained. Legacy `notifications.js` Phase 3 wire-field regression fixed. |
-
-**Test posture (at commit time)**: Python unit regression 4267 passed, 1 xfailed, 0 failures. Multiplexer 329/329 + c8 100/100/100/100 on touched files.
-
-**Execution logs**: `95-phase5b-execution-log.md`, `96-phase6-execution-log.md`, `97-phase7-execution-log.md`.
-
-### Follow-on tickets (not blocking close)
-
-- [ ] **[LUPIN] Phase 7b — Multiplexer toggle widget migration** (separate ticket) — Migrate the 📞/🔔 toggle widget + monopoly-pin logic from legacy `notifications.js:9590-9736` into the multiplexer with mode-aware rendering, 100% c8 coverage. ~3 hours engineering + tests. Three components per `97-phase7-execution-log.md` §7: `SpeakerphoneToggle`, mode-aware affordances, localStorage + session-store getters. Toggle continues to function in legacy `notifications.js` in the meantime.
-
-- [ ] **[LUPIN] Phase 8 — Chorus-mode UX color/glyph polish** ⏸️ **DEFERRED PER DESIGN** — `17-phase8-color-glyph-uxs-design.md` §2 explicitly requires 1-2 weeks of chorus-mode live use before scoping the (a)/(b)/(c) decision. Capture pain points in `03-open-questions.md` Q1 with timestamps during that window.
-
-- [x] **[LUPIN-COSA] Commit CoSA-side comment fixes from Phase 5b** — 3 files in `src/cosa/` (CoSA-context session only; not touched from parent Lupin context per `feedback_lupin_only_never_cosa`).
-
----
-
-## 💰 LUPIN Cost Migration — three agents flagged for bounded-CC migration (2026-05-12)
-
-**Empirical foundation**: `src/rnd/v0.1.7/2026.05.12-bounded-cc-billing-empirical-confirmation.md` confirms bounded ClaudeCodeJobs are zero per-token cost (covered by Max 200 plan). Console balance moved $0.00 across 10 probe jobs reporting $2.05 in `cost_usd` telemetry.
-
-**Canonical policy**: `CLAUDE.md` § "COST MODEL — BOUNDED CC vs FIREWALLED SDK"
-**Human-facing playbook**: `src/docs/cost-model-bounded-cc-vs-firewalled-sdk.md`
-**Auto-memory rule**: `feedback_prefer_bounded_cc_over_anthropic_sdk.md`
-
-**Three candidates** — each currently calls `AsyncAnthropic` via `ANTHROPIC_API_KEY_FIREWALLED` and is a structural fit for bounded CC (Anthropic-only, prompt-shaped, fits CC tool surface, async-batch-friendly):
-
-- [ ] **[LUPIN] Migrate Deep Research agent (`src/cosa/agents/deep_research/`) to bounded CC** — largest current firewalled-account line-item; uses WebSearch + WebFetch natively (already in CC tool surface). Migration must default `scheduled_at` to post-midnight window per off-peak rule.
-
-- [ ] **[LUPIN] Migrate podcast script-generation phase (`src/cosa/agents/podcast_generator/`) to bounded CC** — script phase only; audio TTS phase stays as-is. Multi-paragraph structured-text synthesis fits cleanly. Default `scheduled_at` post-midnight for non-interactive runs.
-
-- [ ] **[LUPIN] Migrate presentation content-generation phase (`src/cosa/agents/presentation_generator/`) to bounded CC** — content/YAML phase only; pptx-assembly stays as-is. Default `scheduled_at` post-midnight.
-
-**Migration playbook**: see `src/docs/cost-model-bounded-cc-vs-firewalled-sdk.md` § "Migration playbook" (8-step sequence: Q1–Q5 fit check → identify boundary → refactor invocation → drop firewalled-key dep → default scheduled_at → update user-facing doc → update agent banner → verify with console-balance check).
-
-**Precedent**: BFE (`src/cosa/agents/bug_fix_expediter/`) and TFE (`src/cosa/agents/test_fix_expediter/`) — both already on bounded CC, use as code-shape reference.
-
-**NOT migrating** (guardrails): `notification_proxy/strategies/llm_fallback.py` (high-QPS classifier) and `decision_proxy/` (latency-sensitive). Subprocess spawn overhead would break those budgets.
-
-**Not blocking anything** — sequence pick-up after the speakerphone + commons items above settle.
-
----
-
-## Historical resume pointer (kept for reference)
-
-**Original pointer**: `src/rnd/v0.1.7/2026.05.09-inter-session-commons/90-phase2-execution-log.md` — steps 1-8 ✅ CLOSED, steps 9-13 ⏳ pending.
-
-### Where we are
-
-The Inter-Session Commons + User-Broadcast initiative landed Phase 1 (file-based commons MVP) yesterday and the Phase 2 plan-review pipeline (REUSE + Pass 1 Fitness + Pass 2 Adversarial) all closed earlier today. **Phase 2 backend implementation steps 1-8 ALL CLOSED** — the full user-broadcast surface is wired backend-side:
-
-| Step | Artifact | Tests |
-|---|---|---|
-| 1 | `broadcasts` added to `RESERVED_TOPICS` in `commons_store.py` | parametric — existing test adapts |
-| 2 | `src/cosa/rest/commons_rate_limiter.py` | 12 tests, 100% |
-| 3 | `src/lupin_mcp/broadcast_handler.py` | 28 tests, 100% |
-| 4 | `src/cosa/rest/commons_ack_watcher.py` | 26 tests, 100% |
-| 5 | `src/cosa/rest/routers/commons.py` (2 endpoints) | 55 tests, 100% on pure-logic helpers |
-| 6 | `cc_notification_listener._handle_action()` 3rd `elif` + `_handle_broadcast_received()` method | py_compile + import-chain clean (cross-process smoke deferred to step 9) |
-| 7 | 2 new INI keys + paired splainer + `commons_broadcast_ack` registered in `notifications.py:359-362` `valid_types` | n/a |
-| 8 | `main.py` lifespan wiring (startup + shutdown) + `app.include_router(commons.router)` + AC14 registration smoke | 5 tests pass |
-
-**Aggregate: 211 tests, 100% lines + branches across 8 commons modules (622 stmts, 170 branches, 0 missing).**
-
-### Steps remaining
-
-- [x] **Step 9** — 2-session E2E smoke on `:7999` (`test_broadcast_two_session_e2e.py`). Closed 2026-05-12 — 1 test, 7 design-doc gates, 0.76s.
-- [x] **Step 10** — UI panel: `broadcast-panel.js` + `broadcast-panel.css` + `notifications.html` insertion. Closed 2026-05-12.
-- [x] **Step 11** — Playwright E2E on `:8000` (scheduled monopolize-mode). Closed 2026-05-12 — job_id `ts-436237f6`, 10 passed / 0 failed in 40.97s.
-- [x] **Step 12** — Docs: NEW `src/docs/notification-types.md` + UPDATED `src/docs/rest-api-reference.md` §17c + UPDATED `src/docs/README.md`. Closed 2026-05-12.
-- [x] **Step 13** — Phase 2 closure `92-phase2-closure.md` post-mortem. Closed 2026-05-12.
-
-### What's ready to pick up tomorrow
-
-1. **The backend is feature-complete.** All wiring is in place; the next session can immediately start step 9 (2-session E2E smoke) without re-deriving context.
-2. **The design doc is APPROVED FOR CODE-WRITE** with all 14 ACs + 12 mitigations + sanitization ratified.
-3. **No commit done this session** — Phase 2 steps 1-8 are uncommitted on disk per `feedback_never_auto_commit_push.md`. The work is preserved in `.claude-session.md`'s session `9a4a601d` touched-files manifest.
-
-### Verification commands for next session
-
-```bash
-# Confirm steps 1-8 still pass
-PYTHONPATH=src:$PYTHONPATH /mnt/DATA01/include/www.deepily.ai/projects/lupin/src/cosa/.venv/bin/python \
-  -m pytest src/tests/unit/commons/ \
-  --cov=lupin_mcp.commons_persona_matcher --cov=lupin_mcp.commons_store \
-  --cov=lupin_mcp.commons_archival --cov=lupin_mcp.commons_ask \
-  --cov=lupin_mcp.broadcast_handler --cov=cosa.rest.commons_rate_limiter \
-  --cov=cosa.rest.commons_ack_watcher --cov=cosa.rest.routers.commons \
-  --cov-branch --cov-fail-under=100
-
-# Should report: 211 passed; 100% lines + branches across 8 commons modules
-
-# Also confirm Phase 1 smoke still passes (sanity)
-PYTHONPATH=src:$PYTHONPATH /mnt/DATA01/include/www.deepily.ai/projects/lupin/src/cosa/.venv/bin/python \
-  -m pytest src/tests/smoke/test_commons_two_session_roundtrip.py -v
-```
-
-If both green, step 9 implementation can begin.
-
----
-
-## 🚧 Phase 5b PARTIAL — CC Card Normalization (session 77e1bb27 Mr. Radio, 2026-05-11 PM)
-
-User-authorized test-server bounce at 17:13 EDT → 3 batch-1 submissions fired sequentially → some skips suspected to be 401-cred-system fallout → 3 batch-2 submissions resubmitted at 17:59 EDT. Phase 6.8 parent commit remains gated on Phase 5b verdict.
-
-### Batch 1 results (job_ids `ts-b37e982b`, `ts-5fea5f3c`, `ts-f5535947`)
-
-- [x] [LUPIN] **5.8 — E2E functional** (`ts-b37e982b`, 17:16:48 → 17:18:35 EDT, 106.6s): ✅ **30 passed, 0 failed, 0 errors, 0 skipped** — AC11 GREEN. New `test_cc_card_renders_in_sibling_shape` runs clean; 2 obsolete tests deleted as planned.
-
-- [⚠️] [LUPIN] **5.9 — E2E visual baseline regen** (`ts-5fea5f3c`, 17:31:48 → 17:32:40 EDT, 51.5s): 16 passed, 0 failed, **15 errors**, 0 skipped. The 15 "errors" are `pytest_playwright_visual_snapshot` teardown signals on `--update-snapshots` ("Snapshots updated. Please review images.") — **NOT real failures**. 15 baselines regenerated at `io/test-suite/visual-baselines/`:
-  - CC-normalization-adjacent (3): `notifications.png`, `multiplexer_phase5_notifications_pane.png`, `multiplexer_phase6a_jobs_pane.png`
-  - Auth/account (5): login, register, change-password, profile, landing
-  - Admin (5): admin-dashboard, admin-snapshots, admin-users, admin-ratify, admin-trust
-  - Dev/infra (2): dev-tools, ws_circuit_banner_open
-
-- [x] ~~[LUPIN] **5.10 — Subscription smoke**~~ **RETIRED 2026-05-11 EVE.** Deep investigation surfaced: the `cost_usd == 0.0` premise is invalid. CC CLI always reports counterfactual API pricing as metadata regardless of which auth path actually paid for the call. With no `ANTHROPIC_API_KEY` present, Max OAuth is paying flat rate, but `total_cost_usd > 0` is still populated. Verified empirically on both host (~$0.32/call) and container (~$0.05/call). Test cannot pass on any valid CC CLI invocation. Module-level `pytest.mark.skip` added with full forensic trail in module docstring. The 4 architecture fixes applied during investigation (in-container detection, env-var URL routing, schema-drift cost extraction) are preserved as patterns for future CC-related smoke tests.
-
-### Batch 2 in flight (resubmitted 17:59:16 EDT after user credential-system restoration)
-
-- [x] [LUPIN] **5.8 retry** (`ts-476c971a`, scheduled 18:01:16 EDT): identical to batch-1 5.8; sanity-check for credential-system regression. Expected: ✅ pass.
-
-- [x] [LUPIN] **5.9 regression** (`ts-99f2fa02`, scheduled 18:13:16 EDT): `-k visual` **WITHOUT** `--update-snapshots`. Verifies the 15 batch-1 regenerated baselines are self-consistent. Pass = 15 visual tests green against their freshly-written baselines. This closes AC11 by replacing the "manual git-diff inspection of `io/`" step with an automated self-regression check.
-
-- [x] ~~[LUPIN] **5.10 retry**~~ — superseded by retirement above. AC10 closed-as-retired (premise invalid, no test we can make pass without changing the assertion).
-
-### Phase 5b NET STATUS (post-retirement, 2026-05-11 EVE)
-
-- 5.8 ✅ functional regression GREEN both batches
-- 5.9 ✅ visual baselines regenerated + self-consistency confirmed (batch 2 `ts-99f2fa02` 16P/0F/0E/0S in 53.0s)
-- 5.10 ✅ **RETIRED** (premise invalid — see retirement note above)
-
-**Phase 6.8 parent commit is functionally unblocked on the CC card normalization scope.** 5.10's premise issue is pre-existing — exposed by, not caused by, this session's work.
-
-### Follow-up filed
-
-- [x] [LUPIN] **TFE-to-CC design doc amendment** — `src/rnd/v0.1.6/2026.04.10-test-fix-expediter/19-tfe-to-cc-design.md` should be amended to drop the "cost reduction via Max subscription" thesis OR pivot to a more verifiable invariant (e.g., "no `ANTHROPIC_API_KEY` in container env" — provable from `env | grep ANTHROPIC_API_KEY` returning empty). Defer to a follow-up session.
-
-**Reference**: `src/rnd/v0.1.7/2026.05.09-cc-card-normalization/90-execution-log.md` Phase 5b table; report markdowns at `io/test-suite/2026.05.11-at-{17:18,17:32,17:46,18:01,18:13,18:25,19:47,19:57,20:06}-EDT-*-results.md`.
-
----
-
-## ✅ Q2 OPTION C RATIFIED — P1 server-replay deferred (2026-05-04 PM)
-
-During Phase 4 implementation kick-off, the design doc's pre-implementation prerequisite verifications surfaced that **server-side event replay on `auth_success` is NOT implemented** (`src/cosa/rest/routers/websocket.py:467-472` sends `auth_success` and falls straight into the receive loop; `websocket_manager.py` has no buffer/replay mechanism). Per design doc Q2 ratification this was a hard blocker requiring escalation.
-
-User decision via `ask_multiple_choice` (verbatim voice response): **"Yeah option C sounds good just as long as it's properly documented and added as a post phase for follow-up."**
-
-**What ships in Phase 4**: NotificationStore implements Q2 Option A as ratified (unread-count-only persistence with `schemaVersion: 1` envelope + 250ms tail debounce). Active list starts empty on construct; populated by live `notification_received` events from `auth_success` onward. Reload loses in-flight active notifications until a new event arrives.
-
-**Audit trail**:
-- Execution log: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/90-execution-log.md` § "Pre-implementation prerequisite verifications" P1 row + § "P1 escalation + resolution"
-- Design doc Q2 ratification text remains valid; the "server replay" assertion is amended in the execution log resolution section
-
-### Post-Phase-4 follow-up — promote to Option A or B if dogfooding signals jarring reload UX
-
-**Defer until**: after Phase 4 implementation lands AND dogfooding produces reload-UX feedback. If reload's "no notifications until next event" gap feels jarring, evaluate:
-
-**Option A — Build server-side replay** (CoSA edit):
-- [ ] [LUPIN] Add bounded recent-event buffer in `src/cosa/rest/websocket_manager.py` (per-user deque, e.g., 50 most recent events with TTL)
-- [ ] [LUPIN] Flush buffered events to socket immediately after `auth_success` in `src/cosa/rest/routers/websocket.py` queue endpoint (lines 467-472 area)
-- [ ] [LUPIN] Verify replay does not duplicate live events for clients that were never disconnected (idempotency by `id_hash` on the consumer side already handles this)
-- [ ] [LUPIN] NotificationStore unit test: verify replay frames are reduced as normal (`changeKind: "added"` per `id_hash`); no special-casing required client-side
-- [ ] [LUPIN] Phase 4 smoke test extended: assert active list rebuilds within 1s of `auth_success` after reload
-
-**Option B — Pivot Q2 to full-list persistence** (no CoSA edit):
-- [ ] [LUPIN] Extend NotificationStore persistence envelope schema (bump to `schemaVersion: 2`) to carry `{count, lastSeenTs, activeList: Notification[]}`
-- [ ] [LUPIN] Add migration path from v1 → v2 (v1 envelopes get `activeList: []`; storage_corrupt fires on unknown future versions)
-- [ ] [LUPIN] Tail-debounce active list writes too (active list churn could be larger than count churn)
-- [ ] [LUPIN] Storage-volume audit: estimate worst-case envelope size against typical browser quota
-- [ ] [LUPIN] NotificationStore unit tests: verify hydration from persisted active list; verify schema-migration path
-
-**Triggering signal** (decision point): if user reports "I lost notifications on reload" during Phase 4-9 dogfooding, evaluate both options. Otherwise, accept the gap permanently — Option C stands.
-
-### Phase 2 broadcast.ts cleanup — separate commit follow-up
-
-**Where it lives**: `src/lupin_app/static/js/multiplexer/shared/broadcast.ts` (53 LOC) + `src/tests/unit/multiplexer/broadcast.test.ts` (8 unit tests). Header comment of broadcast.ts already updated 2026-05-04 PM with the "INERT IN PRODUCTION per Q12" note.
-
-**What's needed**: Phase 2 spine bundle is closed; ripping out broadcast.ts retroactively touches an approved phase boundary, so it ships as its own focused cleanup commit (not folded into the Phase 4 ratification commit).
-
-**Suggested cleanup**:
-- [ ] [LUPIN] Delete `src/lupin_app/static/js/multiplexer/shared/broadcast.ts` + `src/tests/unit/multiplexer/broadcast.test.ts`
-- [ ] [LUPIN] Delete `BROADCAST_WHITELIST` constant + any `LupinEventType` union entries that exist solely for cross-tab whitelist references (per Phase 2 design doc DC4 — those entries currently exist in `shared/types.ts` for whitelist type-checking only)
-- [ ] [LUPIN] Update `02-phase1-scaffolding-design.md` + `03-phase2-foundation-design.md` with post-implementation amendment banners noting Q12 invalidates the broadcast.ts file row + AC8 cross-tab two-instance roundtrip test (mirror the D1 amendment banner pattern from Phase 3)
-- [ ] [LUPIN] Re-run Phase 1+2+3+4 verification suites; expected unit-test count drops by 8 (broadcast tests gone)
-- [ ] [LUPIN] Update execution log with cleanup section
-
-**Defer until**: after Phase 4 implementation lands (avoids interleaving Phase 4 review/implementation with Phase 2 retroactive surgery).
-
-### D2 [NON-BLOCKING] Inspect the QueueTransport auth-failure bug fix
-
-**Where it lives**: `src/lupin_app/static/js/multiplexer/transport/QueueTransport.ts` `onSocketOpen` catch block (look for the long-form comment starting "Auth failed (token fetch, refresh failure, etc.)"); rationale captured in 90-execution-log.md Phase 3 § "Implementation deviations" #4.
-
-**What was caught**: Initial implementation called `wsChannel.stop()` in the catch path, but did NOT notify the CSM. Because `wsChannel.stop()` nulls handlers BEFORE closing, the wsChannel's onClose callback never fired, so the CSM stayed stuck in `connected` while the channel was dead — a real reconnect-orchestration bug.
-
-**Fix**: catch block now ALSO sends `{type: "socket_close"}` to the CSM. Surfaced via the unit test `auth getToken() failure → socket stops; CSM enters backoff`.
-
-**Action**: glance at the diff if you want to confirm the fix is the right shape; not blocking Phase 4.
-
----
-
-Last updated: 2026-05-11 PM (Session 6d544991 Arnold — `ask_yes_no()` Neither affordance landed end-to-end; CoSA commit pending in separate context per cross-sub-project handoff. Prior session-end @ 6e8a6a03 Rachel — CC card normalization Phase 0 + plan-review closure all 3 passes; Phase 1 implementation parked READY TO BEGIN.)
-
----
-
-## 🪦 CC DISPATCH RETIREMENT — Follow-ups (Session 1a8900ee, 2026-05-05)
-
-The 6-endpoint legacy `/api/claude-code/dispatch` cluster was retired today. Two parity gaps and one mobile dependency surfaced as deliberate-disable visible artifacts.
-
-- [ ] [LUPIN] **Restore Claude Code INTERACTIVE controls on the cj-flow path.** When `ClaudeCodeJob` (`src/cosa/agents/claude_code/job.py`) gains `inject(message)` / `interrupt()` / `end_session()` methods (with corresponding REST endpoints on `claude_code_queue.py`), un-disable the four UI stubs in `notifications.html` (the `#cc-inject-btn`/`#cc-interrupt-btn`/`#cc-end-btn`/`#cc-inject-input` elements inside `.cc-retired-banner`), restore JS handlers that POST to the new endpoints, restore the `INTERACTIVE` option in `#cc-task-type`, and update the two `test_job_dispatch.py` test docstrings (currently noted as existence-only checks). See plan: `src/rnd/v0.1.7/2026.05.05-claude-code-dispatch-retirement/01-plan.md`.
-
-- [ ] [LUPIN] **Per-turn streaming on the cj-flow path** (optional follow-up). The legacy WS streamed `text` / `tool_use` / `tool_result` per turn. The cj-flow path currently emits only coarse start/complete/fail notifications. If user-facing demand surfaces, add per-turn `notify_progress` calls inside `ClaudeCodeJob._execute()` keyed by job_id, and update the dispatcher card's `#cc-response` panel (currently a retirement banner) to consume them. Not blocking; the queue path is functional without per-turn streaming.
-
-- [x] [LUPIN-MOBILE] **Migrate `claude_code_repository.dart` off the retired endpoints.** — ✅ **VERIFIED COMPLETE 2026-05-11** (user-requested verification). Mobile production code at `src/lupin-mobile/lib/features/claude_code/data/claude_code_repository.dart:19` already POSTs to canonical `/api/claude-code/submit`; header comments L5 + L11 confirm "Canonical successor: POST /api/claude-code/submit (this file)". Q8 verdict = PRIMARY (alias `/queue/submit` live through v0.1.8 release cycle). Cross-ref handoff doc: `src/rnd/v0.1.7/2026.05.09-cc-card-normalization/02-handoff-summary.md`. (UX decision for disabled INTERACTIVE controls + BLoC/repository test updates happen in the mobile session if/when needed — not blocking the canonical endpoint cutover.)
-
-- [x] [LUPIN] **Live UI probe (manual gate).** ~~Open `/app/notifications`...~~ **RESOLVED 2026-05-11** (session 658ea35d, Mr. Radio) via CC Card Normalization Phase 5a — superseded by the normalization work which (a) deleted the `.cc-retired-banner` block + disabled inject/interrupt/end inputs entirely from the HTML, (b) renamed submit URL to canonical `/api/claude-code/submit` with `/queue/submit` alias preserved for one release cycle, and (c) verified end-to-end via 5.4/5.5 live JWT POSTs (both return `cc-{uuid8}` jobs) + 5.6 6/6 dry-run smoke + 5.11 TFE/BFE regression GREEN. The "manual" label was legacy metadata — Phase 5.7 was an AI-headless probe per test-ownership mandate. See `src/rnd/v0.1.7/2026.05.09-cc-card-normalization/90-execution-log.md` Phase 5a.
-
----
-
-## 🧩 MULTIPLEXER FOLLOW-UPS (Session 658ea35d, 2026-05-11)
-
-- [ ] [LUPIN] **Multiplexer R&D consumer notice: CC card normalization landed 2026-05-11**. The notifications-page CC card was reshaped to sibling shape (form + submit + status div; no response panel, no inject controls, no session-info row). `JobsPaneRenderer.ts` is unchanged — it's agent-agnostic via `metadata.agent_type` (`stores/JobStore.ts:215`) and CC jobs continue to render uniformly. **Phase 6b visual baseline impact**: if Phase 6b touches CC card screenshots, expect to regenerate baselines (parent already scheduled Phase 5.9 to regen Lupin-side baselines). Full context: handoff doc at `src/rnd/v0.1.7/2026.05.09-cc-card-normalization/02-handoff-summary.md`. Q8 verdict = PRIMARY (alias live for one release cycle).
-
----
-
-## ☀️ FIRST THING NEXT SESSION — `ask_yes_no` Neither: CoSA-context commit + fresh-session E2E verify
-
-**Cycle state on resume**:
-- Parent Lupin scope: ✅ landed in commit `<hash>` (session 6d544991 Arnold, 2026-05-11 PM)
-- CoSA scope: ⏳ **`src/cosa/utils/notification_utils.py`** modified in working tree, not committed (per `feedback_lupin_only_never_cosa` — parent context never commits CoSA)
-- MCP server: ⏳ stdio subprocess holds the OLD docstring; fresh CC session required to pick up the new return-value contract documentation
-
-**Resume actions**:
-- [x] [LUPIN-COSA] In a CoSA-context session (`cd src/cosa && claude` or equivalent): `git status` → expect `utils/notification_utils.py` modified; `git diff utils/notification_utils.py` → confirm regex extension + `format_qualified_response` "neither" branch + smoke-test additions; commit with message like "Extend ask_yes_no qualifier regex + format helper to accept 'neither' answer"
-- [x] [LUPIN] (Optional) Bump CoSA submodule pointer in parent Lupin after the CoSA commit lands
-- [ ] [LUPIN] Fresh CC session E2E verify: call `ask_yes_no("test question?")` from a new session, click the new **Neither** button, confirm Claude receives `"neither"` (or `"neither [comment: ...]"` with comment). Without restart, the current session's MCP stdio subprocess still holds the old docstring.
-
-**Read on resume**:
-1. `src/rnd/v0.1.7/2026.05.11-ask-yes-no-neither-button/00-index.md` — master nav, Q-decisions, REUSE table
-2. `src/rnd/v0.1.7/2026.05.11-ask-yes-no-neither-button/02-handoff-summary.md` — CoSA-context-session pointer with exact commit steps
-3. `src/rnd/v0.1.7/2026.05.11-ask-yes-no-neither-button/90-execution-log.md` — phase status + post-implementation verification evidence
-
----
-
-## ✅ CC Card Normalization — Phases 1–5a SHIPPED (2026-05-11, session 658ea35d Mr. Radio, commit `eab6fac`)
-
-**Cycle state**:
-- Phase 0 Documentation ✅ CLOSED 2026-05-10
-- `/plan-review` REUSE / Pass 1 / Pass 2 ✅ ALL CLOSED 2026-05-11
-- Idempotency marker stamped: `last-reviewed-at: 2026-05-11 (commit c1cec74)` in `00-index.md`
-- Phase 1–5a ✅ **DONE 2026-05-11** (Mr. Radio, commit `eab6fac`)
-- Phase 5b `:8000` E2E ⏳ **IN FLIGHT** via Mr. Radio (user voice update 2026-05-11)
-- Phase 6 wrap ⏳ PARTIAL — 6.1–6.7 docs DONE; 6.8 parent commit + 6.9 CoSA commit HELD for user authorization per `feedback_never_auto_commit_push`
-
-**Action items**:
-- [x] [LUPIN] Phase 1 (HTML normalization in `notifications.html`) — 8 sub-steps applied; AC1, AC1.5, AC2, AC3, AC4 GREEN per 90-execution-log.md
-- [x] [LUPIN] Phase 2 (JS handler normalize) — `submitClaudeCode` + `submitClaudeCodeToQueue` rewritten; fetch URL → `/api/claude-code/submit`; statusDiv 3-color verified
-- [x] [LUPIN] Phase 3 (E2E test cleanup) — 2 obsolete tests deleted; `test_cc_card_renders_in_sibling_shape` added; py_compile clean
-- [x] [LUPIN-COSA] Phase 4 (URL rename + alias) — Q8 verdict = **PRIMARY**; stacked decorators register canonical `/api/claude-code/submit` + deprecated alias `/api/claude-code/queue/submit`
-- [x] [LUPIN] Phase 4.5 (handoff doc finalize) — Q8 verdict populated as PRIMARY in `02-handoff-summary.md`
-- [x] [LUPIN] Phase 5a verification on `:7999` — 5.1–5.6 + 5.11 all GREEN; 5.7 headless UI probe folded into 5.8
-- [ ] [LUPIN] Phase 5b verification on `:8000` — **IN FLIGHT via Mr. Radio's session** (3 submissions: `-k test_job_dispatch`, `-k visual --update-snapshots`, `-k test_claude_code_max_subscription`). Tracking row at top of TODO.md "⏰ NEXT SESSION — Schedule Phase 5b" remains Mr. Radio's working record.
-- [x] [LUPIN] Phase 6.8 parent commit + 6.9 CoSA commit (CoSA-context session) — held for user authorization
-
-**Read on resume**:
-1. `~/.claude/CLAUDE.md` + `/mnt/DATA01/include/www.deepily.ai/projects/lupin/CLAUDE.md` + `CLAUDE.local.md`
-2. `history.md` (this session's entry: 2026.05.11 Session 6e8a6a03 Rachel)
-3. `TODO.md` (this section)
-4. `src/rnd/v0.1.7/2026.05.09-cc-card-normalization/00-index.md` — master nav, Q-decisions table, REUSE table with verification spot-checks
-5. `src/rnd/v0.1.7/2026.05.09-cc-card-normalization/01-design.md` — full design with 9 Q-N FROZEN, 8 phases, 19 ACs (all post-plan-review-applied)
-6. `src/rnd/v0.1.7/2026.05.09-cc-card-normalization/02-handoff-summary.md` — cross-sub-project handoff for mobile + multiplexer teams
-7. `src/rnd/v0.1.7/2026.05.09-cc-card-normalization/90-execution-log.md` — phase status table + REUSE/Pass1/Pass2 closure evidence
-
-**Key ratified decisions worth knowing on resume**:
-- Q1: URL renames `/queue/submit` → `/submit` with backward-compat alias (one release cycle)
-- Q2: INTERACTIVE option stays as disabled `<option>` with tooltip (visual breadcrumb for future return)
-- Q8 fallback: if FastAPI rejects stacked decorators, COMMENT OUT (not delete) the deviant decorator with breadcrumb; mobile + smoke tests migrate immediately
-- Q9: cross-sub-project handoff via `02-handoff-summary.md` + TODO seeds in mobile + multiplexer R&D folder
-
-**Origin plan file** (pre-merge reference): `~/.claude/plans/ok-so-far-so-swirling-pearl.md` (approved 2026-05-10 via ExitPlanMode).
-
----
-
-## ☀️ FIRST THING TOMORROW — Multiplexer Phase 6b Phase 5A → 5B (JobStore.delete + delete-button click handler)
-
-**Cycle state on resume (2026-05-12 AM)**:
-- Q-decisions ✅ CLOSED 12/12 (2026-05-07)
-- REUSE pre-pass ✅ CLOSED 28 RE + 5 L3 (2026-05-07)
-- Pass 1 Fitness ✅ CLOSED 14/14 (2026-05-11)
-- Pass 2 Adversarial ✅ CLOSED 11/11 (2026-05-11)
-- Code-execution plan ✅ AUTHORED 2026-05-11
-- **Phase 1 ✅ COMMITTED** as `057dbd8` (df880556 María, 2026-05-11 PM) — store API prereqs landed
-- **Phase 2 ✅ COMMITTED** as `ed4fc94` (df880556 María, 2026-05-11 PM) — interactive widget templates landed
-- **Phase 3 ✅ IMPLEMENTED + uncommitted** (df880556 María, 2026-05-11 late PM) — `ActionRequiredRenderer.ts` 100% c8; 34 tests; **session-end commit will land it**
-- **Phase 4 ✅ IMPLEMENTED + uncommitted** (df880556 María, 2026-05-11 late PM) — `TtsChromeRenderer.ts` 100% c8; 20 tests; batched with Phase 3 in session-end commit
-- Phase 5A → 5B → 6 → 7 → 8 ⏳ **READY TO BEGIN** at Phase 5A tomorrow morning
-
-**Resume action**:
-- [x] [LUPIN] Re-audit at execute time per `feedback_audit_plans_at_execute_time` — re-grep recent feedback memories for constraints landed since 2026-05-11; surface conflicts before code edits — Done df880556 María (only `feedback_skip_arnold_yes_no_neither_ux` newer; not relevant to Phase 6b)
-- [x] [LUPIN] Capture Phase 6a baseline `B6a` — Done df880556 María: `B6a = 31484` bytes (boot.65c779ac946b.js); AC7 ceiling = 39676 bytes; recorded in code-execution plan + 90-execution-log.md
-- [x] [LUPIN] Verify pre-existing store API signatures — Done df880556 María: all signatures match Pass 2 file:line citations (ActionRequiredStore.respond at L182, tick at L291, expires_at at L266; AudioStore state/queueLength/pause/resume/skip at L201-218; AudioStore.stop() public method confirmed MISSING)
-- [x] [LUPIN] Verify Phase 5 `NotificationsListRenderer.renderActionRequiredSection` still at lines 228-243 — Done df880556 María: confirmed at L228
-- [x] [LUPIN] Verify `actionRequiredReadOnly.ts:49` still sets `data-id-hash` — Done df880556 María: confirmed exact line + correct attribute (no contract drift)
-- [x] [LUPIN] **Begin Phase 1 (Step 1 of code-execution plan)**: 4 store/renderer prereq edits — Done df880556 María (checkpoint pending):
-  - [x] 1.1 `ActionRequiredStore.respondAndAwait()` (Pass 2 A1, Phase 0 prereq #8) — implemented + 6 tests
-  - [x] 1.2 Widen `respond()` + `respondAndAwait()` signature to `string | ReadonlyArray<string> | Record<string, string>` (Pass 2 A2, Phase 0 prereq #9) — implemented + 5 tests + ActionRequiredItem.response widened + new ActionRequiredResponse union in shared/types.ts
-  - [x] 1.3 `AudioStore.stop()` (Pass 2 A6, Phase 0 prereq #10) — implemented + STOP_REQUESTED machine event + 6 tests
-  - [x] 1.4 Phase 5 `NotificationsListRenderer` ownership-flag early-return guard (Pass 2 A3 Path A) — implemented at L228 + 2 tests
-  - [x] 1.5 `c8 --100` on all 3 edited files: GREEN (100% lines/branches/functions/statements); 22 new unit tests; tsc + eslint clean; 489/489 multiplexer unit sweep PASS
-- [x] [LUPIN] **Begin Phase 2 (templates: actionRequiredInteractive.ts + ttsChrome.ts)** — Done df880556 María (checkpoint pending):
-  - [x] 2.1 `actionRequiredInteractive.ts` (NEW, 228 LOC) — switch over 5 response_types (yes_no/radio/checkbox/open_ended/open_ended_batch); addEventListener-based handler attachment; AC2e safe-write header
-  - [x] 2.2 `ttsChrome.ts` (NEW, 147 LOC) — 3 controls (toggle/stop/skip) + state-driven enable matrix per AudioPlaybackState + `.is-playing-current` / `.is-paused-current` + currentTrackName + queueLength
-  - [x] 2.3a 22 tests on `actionRequiredInteractive.test.ts` (≥15 floor) — all 5 happy-path renders + 5 click-dispatch + 1 unknown-response_type throws + 1 AC2e grep ban + edge cases
-  - [x] 2.3b 18 tests on `ttsChrome.test.ts` (≥15 floor) — 6 state-driven renders + 4 click-dispatch + currentTrackName present/absent/empty + queueLength + .is-playing/paused-current + 1 AC2e grep ban
-  - [x] 2.4 `c8 --100` GREEN on both new files (used Phase 6a `jobCard.ts:251` precedent for tagged-template phantom-branch ignores); tsc + eslint clean; 528/528 multiplexer unit sweep PASS
-  - [x] Type extension: added `multiSelect?: boolean` to `ActionRequiredItem` (defaults undefined → radio path; wire-side population still Phase 0 prereq #2 pending)
-- [x] [LUPIN] **Begin Phase 3 (`ActionRequiredRenderer.ts`)** — Done df880556 María 2026-05-11 late PM (session-end commit pending; uncommitted on disk):
-  - [x] 3.1 `ActionRequiredRenderer.ts` (NEW, ~360 LOC) — factory + mount/unmount + `dataset.phase6bOwner="true"` ownership claim BEFORE any DOM write (Pass 2 A3) + 5 widget builders (interactive/submitting/responded/expired/cancelled) + countdown + click→`respondAndAwait` (Pass 2 A1) + onChange dispatcher + tick handler (NO RAF per Pass 2 a2)
-  - [x] 3.2 34 tests on `action_required_renderer.test.ts` (≥21 AC5 floor) — 6 submit happy-path + 5 error-rollback + 6 state-machine transitions + countdown/NO-RAF spy + mount idempotency + AC2c atomic strip (1-2 MutationRecords; happy-dom microbatches replaceWith) + inline error stripe + ownership-flag + cssEscape fallback + multi-item + offline-frozen/resumed
-  - [x] 3.3 `c8 --100` GREEN; tsc + eslint clean; 562/562 multiplexer unit sweep PASS
-- [x] [LUPIN] **Begin Phase 4 (`TtsChromeRenderer.ts`)** — Done df880556 María 2026-05-11 late PM (session-end commit pending; uncommitted on disk, batched with Phase 3):
-  - [x] 4.1 `TtsChromeRenderer.ts` (NEW, ~155 LOC) — factory + mount/unmount + dual subscription (`store_audio_state_change` AND `store_audio_chunk_decoded`) with single shared `pendingRender` flag + RAF coalescing (per Q-B9 + Pass 1 F-13); test-injectable RAF; click handlers wire to `AudioStore.pause/resume/stop/skip`; uses `replaceChildren` for atomic single-childList swap; currentTrackName intentionally omitted (Phase 0 prereq #3 pending)
-  - [x] 4.2 20 tests on `tts_chrome_renderer.test.ts` (≥13 AC5b floor) — 7 state transitions + 4 control wiring + 2 storm safety (chunk_decoded × 100 → 1 RAF; state_change × 5 → 1 RAF) + mount idempotency + stop semantics (queue=0, state=idle per Phase 1.3) + mixed-event coalescing
-  - [x] 4.3 `c8 --100` GREEN ON FIRST TRY (no phantom-branch issues with `replaceChildren`); tsc + eslint clean; 582/582 multiplexer unit sweep PASS
-- [ ] [LUPIN] **Begin Phase 5A → 5B** per `2026.05.11-phase6b-code-execution-plan.md` Step 5 — `JobStore.delete()` then delete-button click handler on `JobsPaneRenderer`. **5A → 5B is a natural compile-time gate** (5B imports `JobStore.delete` from 5A). Q-A6 + Q-B10 follow-through; strips 4 inertness markers from `.job-delete-button`; rollback closure pattern for 5xx/network errors; 404 treated as success per Q-B10. **DOD tables**: 5A has 8 rows (5A-1..5A-8), 5B has 11 rows (5B-1..5B-11) — both must pass before commit
-- [ ] [LUPIN] Phases 6-8 follow per `2026.05.11-phase6b-code-execution-plan.md` execution sequence (per-phase commits each gated on user authorization)
-
-**Phase 5 quick-start checklist (so you can dive straight in tomorrow)**:
-
-| What | Where | Notes |
-|---|---|---|
-| Read the Phase 5 plan | `2026.05.11-phase6b-code-execution-plan.md` Step 5 (lines ~256-320) | full DOD tables for 5A + 5B |
-| Verify `JobStore` lacks `delete()` | `src/lupin_app/static/js/multiplexer/stores/JobStore.ts` | already verified MISSING 2026-05-07 per execution log |
-| Verify `JobsPaneRenderer` delete button is inert | `src/lupin_app/static/js/multiplexer/render/JobsPaneRenderer.ts` + `templates/jobCard.ts:258` | inert markers: `data-phase6-pending`, `aria-disabled`, `cursor: not-allowed`, `title="Delete coming in Phase 6b"` |
-| 5A signature | `JobStore.delete(idHash: string): { restoreState: () => void }` | per design § Phase 4 sub-step DOD signature |
-| 5A test file | NEW `src/tests/unit/multiplexer/stores/jobstore_delete_api.test.ts` | actually goes in `src/tests/unit/multiplexer/` per existing test layout (NOT in stores/ subdir) |
-| 5B test file | EDIT `src/tests/unit/multiplexer/render/jobs_pane_renderer.test.ts` (existing) | extend with ≥6 new AC5c cases |
-| API endpoint | `DELETE /api/queue/<bucket>/<idHash>` | already verified exists at `queues.py:1193` (Phase 0 prereq #1 ✅) |
-
-**Read on resume (in this order)**:
-1. `~/.claude/CLAUDE.md` + `/mnt/DATA01/include/www.deepily.ai/projects/lupin/CLAUDE.md` + `CLAUDE.local.md`
-2. `TODO.md` (this section)
-3. **`src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/2026.05.11-phase6b-code-execution-plan.md`** — THE authoritative resume target; contains full 9-phase sequence + AC scorecard + pre-exit self-audit + resume pointer
-4. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/09-phase6b-interactive-widgets-design.md` (frozen design — Pass 2 closed)
-5. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/95-phase6b-review-findings.md` § "Pass 2 Adversarial — closed 2026-05-11" (ratification record for audit trail)
-6. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/90-execution-log.md` Phase 6b section (per-phase progress table — Phase 1 row to populate first)
-7. `history.md` (today's session entry if seeded)
-8. Phase 6a precedent (only if Phase 6a patterns ambiguous): `2026.05.06-phase6a-code-execution-plan.md` + `94-phase6a-review-findings.md` § "Pass 2 Adversarial — closed"
-
-**Phase 0 prerequisites — net status post-Pass-2** (informational; verified at execute time):
-1. `DELETE /api/queue/<bucket>/<id>` exists in CoSA — ✅ verified (`queues.py:1193`)
-2. `action_required` payload carries `multiSelect: bool` — ⏳ pending verification
-3. `AudioStore.currentNotificationIdHash` linkage — ⏳ pending verification (preferred sync getter per Pass 1 F-11; alternative event payload field)
-4. Action-required render mount surface — ⏳ pending verification (`#action-required-pane` vs inline)
-5. Phase 6a CoSA `multiplexer_config.py` commit — ⏳ pending (carries from Phase 6a)
-6. `JobStore.delete(idHash)` — ❌ verified MISSING 2026-05-07; lands as Phase 5A of code-execution plan
-7. ~~`countdown_expires_at` payload field~~ — **STRUCK 2026-05-11 per Pass 2 A5** (redundant; use existing `expires_at: number`)
-8. **NEW** — `ActionRequiredStore.respondAndAwait()` method — Phase 1.1 of code-execution plan (per Pass 2 A1)
-9. **NEW** — Widen `respond()` signature to `string | ReadonlyArray<string> | Record<string, string>` — Phase 1.2 (per Pass 2 A2)
-10. **NEW** — `AudioStore.stop()` method — Phase 1.3 (per Pass 2 A6)
-
----
-
-## ☀️ HISTORICAL — was "FIRST THING IN THE MORNING — 2026.05.08"
-
-(Superseded by 2026-05-11 ratification above. Kept as audit trail.)
-
-**Resume pointer (historical)**: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/93-resume-here-phase6b-pass1-ratification.md` — now historical; can be removed in a future cleanup.
-- **F-13** — R2 throttle covers `chunk_decoded` only; rapid state-toggle could thrash DOM.
-
-**After Pass 1 closes**:
-- [ ] [LUPIN] Pass 2 Adversarial dispatch (clean-context Explore agent; sees Pass-1-resolved doc state). Phase 6a precedent: 15 findings + 1 Layer 3 → walked individually with `ask_multiple_choice` for the Layer 3.
-- [ ] [LUPIN] After Pass 2 closes: convergence re-grep + author code-execution plan at `<date>-phase6b-code-execution-plan.md` per slicing-manifest naming convention.
-
-### Discussion topic — Broadcast messages from notifications UI
-
-- [ ] [LUPIN] **Brief design discussion: broadcast messages from notifications UI**. Initial scope: notifications UI sends a message that fans out to **all running Claude Code sessions** (not just one targeted session). Later expansion: extend the broadcast surface to **all running agents** (Claude Agent SDK background jobs — Deep Research, Podcast Generator, Presentation, BFE, TFE, etc.). Open questions to surface before implementation: addressing model (target = "all CC sessions" vs explicit session list vs role-based?), delivery semantics (best-effort fire-and-forget vs ack-required vs idempotent retry?), payload shape (free-form text vs structured `notify_user`-shaped envelope?), UI affordance for composition (one-shot text input vs persistent broadcast pane?), permissions / rate-limiting / abuse vectors. Bring to whiteboard / cosa-voice ratification cycle if it grows past a single discussion turn. **Cross-reference**: existing per-session targeted notifications already flow via `notify_user` MCP tool; the broadcast surface is the inverse direction. **Status**: discussion only — no code, no design doc yet. Decide whether to capture as an R&D note under `src/rnd/v0.1.7/` after the discussion if scope warrants.
-
-### Carried forward (from 2026.05.07; partly closed today)
-
-- [x] [LUPIN-COSA] **Commit the CoSA-side Phase 1 endpoint** — `src/cosa/rest/routers/multiplexer_config.py` (NEW) still uncommitted on CoSA side. Parent Lupin commit `362fa5d` is the documenting reference. Handle from a CoSA-context session.
-- [ ] [LUPIN] **history.md archival** — was at 19,719 tokens (CRITICAL); María's parallel session added a 60-line entry today, so it's higher now. Was deferred today because María had uncommitted edits. Re-check at start of session — if María's session has committed (check `git log --oneline -5`), proceed with `/plan-history-management mode=archive`.
-
-### What closed today (2026.05.07)
-
-- ✅ Phase 6a AC11a baseline captured (`ts-b786315c`, baseline PNG at `io/test-suite/visual-baselines/test_multiplexer_phase6a_visual/`, 13:59 EDT)
-- ✅ Phase 6a AC11b regression GREEN (`ts-bd34af9b`, 1 passed in 5.6s, 14:48 EDT)
-- ✅ Phase 6a fully CLOSED on both `:7999` and `:8000`
-- ✅ Two test-suite-submit silent-drop traps documented (memories: `feedback_test_types_e2e_not_e2e_ui` + `feedback_test_suite_submit_field_pytest_args`)
-- ✅ Phase 6b design doc + findings doc + resume-here doc all landed at canonical paths (`d70be64`)
-- ✅ Q-decisions (12/12) + REUSE pre-pass (28 RE + 5 L3) ratified
-- ⏸️ Pass 1 Fitness paused at 14 findings produced
-
----
-
-## ☀️ FIRST THING IN THE MORNING — 2026.05.07
-
-### Pending — Multiplexer Phase 6a follow-ups
-
-- [x] [LUPIN-COSA] **Commit the CoSA-side Phase 1 endpoint** in a CoSA-context session: `src/cosa/rest/routers/multiplexer_config.py` (NEW) — single GET endpoint `/api/multiplexer/config` returning `{multiplexer_max_meta_display_bytes:256000}` from `ConfigurationManager`. Endpoint verified live via `urllib.request` on `:7999` (parent Lupin commit `362fa5d` is the documenting reference + has the matching `main.py` register + INI key + splainer + `rest-api-reference.md` row). Per `feedback_lupin_only_never_cosa` the parent Lupin session never commits CoSA — handle this from `cd src/cosa && git commit ...` in a CoSA-context session, then bump the parent submodule pointer if applicable.
-
-- [ ] [LUPIN] **Schedule Phase 6a AC11a Run #1 (visual baseline capture)** via `/schedule-tests` once a non-overlapping `:8000` `scheduled_at` slot opens up. Submission body: `{"test_types": "e2e", "scheduled_at": "<slot>", "pytest_args": "--update-snapshots -k multiplexer_phase6a", "auto_fix_on_failure": false}` — note two field-name traps both verified empirically: (1) `test_types` value is `"e2e"`, NOT `"e2e_ui"`; (2) the pytest-pass-through field is `pytest_args`, NOT `args` (see `feedback_test_types_e2e_not_e2e_ui.md` + `feedback_test_suite_submit_field_pytest_args.md` — both unknown values are silently dropped to a 0/0/0/0 result OR a full-sweep ignore-the-filter run, with no HTTP error). Test file: `src/tests/e2e_ui/test_multiplexer_phase6a_visual.py` (committed in `5cd8b20`, collects cleanly). Single test only — `-k multiplexer_phase6a` filter ensures the full ~285 functional + 12 visual sweep does NOT run. After the run, baseline PNG lands at `io/test-suite/visual-baselines/test_multiplexer_phase6a_visual/` on the host filesystem (NOT committed — `io/` is gitignored at `.gitignore:68`; baseline is bind-mounted into the test container, which is how AC11b sees it).
-
-- [ ] [LUPIN] **Schedule Phase 6a AC11b Run #2 (regression check)** at a separate `:8000` slot AFTER Run #1's baseline lands. Same submission body (`test_types: "e2e"`, `pytest_args: "-k multiplexer_phase6a"`) minus the `--update-snapshots` flag. Pass criterion: container log contains `Test suite complete` + `e2e: 1 passed, 0 errors` for Run #2.
-
-- [ ] [LUPIN] **Open Phase 6b** when AC11a/AC11b close. Phase 6b scope per `07-phase6-slicing-manifest.md`: TTS chrome + action-required interactive widgets + delete-button handler (Q-A6 wires the disabled `×` from 6a). Phase 6c (voice-persona modal + audio recorder + focus tray + conversation-mode UI pin) follows.
-
-- [ ] [LUPIN] **Optional**: history.md is at 19,719 tokens (CRITICAL threshold per session-end workflow). User deferred archival from this session-end. Consider invoking `/plan-history-management mode=archive` early in next session before adding new content.
-
----
-
-## ☀️ FIRST THING IN THE MORNING — 2026.05.05 (or next session)
-
-### Pending — Commit Phase 3 + begin Multiplexer Phase 4
-
-- [x] [LUPIN-COSA] **Commit the CoSA-side Phase 1 change** in a CoSA-context session: `src/cosa/rest/routers/pages.py` adds `/app/multiplexer` to `_ROUTE_TABLE` (mirror line 26 pattern) + `page_multiplexer()` handler (mirror lines 69-71 pattern). Parent Lupin commit (Phase 1) is the documenting reference. Verified via py_compile + GET 200 against the live :7999 server.
-
-- [ ] [LUPIN] **Commit Phase 3 implementation in parent Lupin repo** — files to be staged: 6 new TS transport modules under `src/lupin_app/static/js/multiplexer/transport/`, edited `boot.ts` + `shared/types.ts` under `src/lupin_app/static/js/multiplexer/`, 5 new unit-test files under `src/tests/unit/multiplexer/`, 1 new WS smoke test under `src/tests/websocket_smoke/`, 1 new Playwright page-load smoke under `src/tests/smoke/`, `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/90-execution-log.md` (Phase 3 section closed), `.claude-session.md` (Phase 3 entries), `history.md`, `TODO.md`. Suggested message: `Multiplexer Phase 3 (ec746144): transport layer (ws-channel + CSM + Queue/Audio/CC-stub + boot.ts wiring) + 70 new tests; AC#7 + AC#8 green`.
-
-- [ ] [LUPIN] **Begin Phase 4 implementation of the multiplexer rebuild** — domain stores phase. Per Q10 amendment + spine-bundle's "natural go/no-go gate at end of Phase 3 implementation": project re-scopes (or proceeds with per-phase-from-now-on cadence) before committing to 6 more design docs. Phases 1-3 spine bundle has shipped clean (Phase 3 amended 2026-05-04 PM per D1 A-extended ratification — CC out of scope) — proceed with per-phase from Phase 4. Entry artifacts a fresh-context Claude must read in order:
-  1. `~/.claude/CLAUDE.md` (Layer 1)
-  2. Lupin `CLAUDE.md` + `CLAUDE.local.md`
-  3. `src/rnd/v0.1.7/2026.05.03-testing-and-fitness-prompts/01-working-contract.md` (Layer 2)
-  4. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/01-phase0-decisions.md` (Q1-Q11 + amendments)
-  5. Phase 4 design doc — **TBD**: a draft must be authored before Phase 4 implementation starts. Per Q11 amendment: REUSE → Pass 1 (Fitness) → Pass 2 (Adversarial) → user approval gate, then 90-execution-log Phase 4 section opens.
-  6. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/90-execution-log.md` — review Phase 1/2/3 outcomes; specifically Phase 3's "Spec drifts" + "Implementation deviations" + "Discovered design gap" + "D1 Ratification Amendment" subsections — these inform Phase 4's stores design, especially that **CC is OUT OF SCOPE for Phase 4 + all subsequent phases** (per A-extended ratification 2026-05-04 PM) and the **server-event-type pass-through** (Phase 3 transport wrappers cast to `LupinEventType` at the boundary; Phase 4 stores need to consume specific event types like `notification_received`, `voice_persona_assigned`, `conversation_mode_change`).
-
-  **Phase 4 scope** (per spine-bundle Phase 0 docs §"Phase plan", reduced per D1 A-extended ratification): NotificationStore, JobStore, AudioStore, ActionRequiredStore, SenderStore. XState for high-churn (TTS, action-required, connection — connection already done in Phase 3); plain reducers elsewhere (notifications list, sender map). AudioStore replaces Phase 3's debug-logger binary handler with the real PCM-decoding handler. **No ClaudeCode store and no CC transport body work** — that scope was removed by the D1 A-extended ratification.
-
----
-
-## ☀️ EARLIER PENDING — carried over from 2026-05-03
-
-### Pending
-
----
-
-## ☀️ FIRST THING IN THE MORNING — 2026.05.03
-
-### Pending
-
-- [x] [LUPIN] **Commit the CoSA-submodule changes for the WS reconnect circuit-breaker milestone (Session 0022baba)** — committed by user on 2026-05-03 (CoSA-context session). Two files: `src/cosa/rest/routers/websocket.py` (4001/4002/4003 close-code constants + 10 queue auth-fail call sites) and `src/cosa/rest/websocket_manager.py:147` (displaced-socket close → `code=4002, reason="session_conflict_displaced"`). Parent Lupin commit `1a9e3e0` is the documenting reference.
-- [x] [LUPIN] **WSChannel binary-frame regression fix** — completed Session 656c8ba2 (2026-05-03 PM). Two-line root cause: post-circuit-breaker WSChannel facade had no Blob branch in `socket.onmessage`, dropping audio chunks via JSON.parse-throws. Fixed with `onBinaryMessage` opt + Blob/ArrayBuffer branch in `ws-channel.js`, wired into audio channel in `notifications.js`. Cache-busters bumped to `v=20260503a`. 22/22 WSChannel unit tests pass (20 pre-existing + 2 new regression). 50/50 WS smoke pass. Manual end-to-end confirmed: 5 chunks reaching handleAudioChunk, TTFA 277ms.
-- [ ] [LUPIN] **Archive `history.md`** — after today's 5-phase milestone, the file sits at 17,138 tokens (just over the 17k WARNING threshold). Run `/history-management mode=check` first to see velocity + recommended cut date, then `/history-management mode=archive` to slice older sessions to a dated archive in `history/`. Should reduce live file to ~8-12k tokens per project policy.
-- [x] [LUPIN] **Land voice-persona /clear preservation fix** — Session d5e3cf21 (2026-05-06 AM). Root cause overturned in Phase 1.2: bug was NOT in `register_session.py` gate-3 but in `session_end.py:224-226` (unconditional `_release_voice_persona` on every SessionEnd, including `/clear`). Fixed with 3-line `reason`-guard in `session_end.py` + 8 new unit tests in `test_session_end.py`. Phase 1F removed the diagnostic prints + their pinning tests once live-verified. Live verification: bridge `assigned_at` preserved unchanged across 2 /clear cycles. Commits: `82c098b` (§0.4) + `f21b163` (Phase 1F + wrap). R&D: `src/rnd/v0.1.7/2026.05.02-voice-persona-clear-preservation/`.
-
----
-
-## ☀️ MORNING FINISHED — 2026.05.02
-
-### Completed today
-
-- ✅ [LUPIN] Built dev-tools voice-persona-reference page at `src/lupin_app/static/html/test/voice-persona-reference.html` — admin-gated, fetches `/api/cosa-voice/voice-persona/pool`, renders six persona tiles with badge styling matching notification cards, ▶ Play sample button per tile, "Play all in sequence" toolbar, "currently allocated personas" footer.
-- ✅ [LUPIN] Added new endpoint `POST /api/cosa-voice/voice-persona/sample` in `src/cosa/rest/routers/voice_persona.py` — JWT-protected, pool-validated voice_id (rejects out-of-pool with 400), calls ElevenLabs HTTP TTS API, returns `audio/mpeg` bytes inline.
-- ✅ [LUPIN] Added card under "Audio & TTS" on `src/lupin_app/static/html/dev-tools.html`.
-- ✅ [LUPIN] Voice-leak diagnosis confirmed via reference page — leaked voice was Tiberius (H1 from plan); root cause is `/clear` preservation failure in `register_session.py`.
-- ✅ [LUPIN] Serialized fix design + execution-log scaffold to `src/rnd/v0.1.7/2026.05.02-voice-persona-clear-preservation/`.
-
-### Pending → carried over to 2026-05-02 AM section above (test-suite post-mortem)
-
-The 19:00 EDT all-test-suite post-mortem work from the now-stale "FIRST THING IN THE MORNING — 2026.05.02" section was deferred to make room for the bug investigation that consumed today's session. Re-prioritize before the voice-persona fix tomorrow if the post-mortem failures are blocking other work.
-
-- [ ] [LUPIN] **Work through the 19:00 EDT 2026.05.01 all-test-suite post-mortem** — `src/rnd/v0.1.7/2026.05.01-postmortem-test-suite-19h00.md`. Categorized 10 failures (8 collapse to 3 root causes: A=auto-proxy not threaded, B=notification proxy 503, C=voice-persona pool rename echo) plus addendum on 39 skips (28 integration skips + 22 stale xfailed-now-passing markers). Cheapest-first sequence at end of doc; steps 1-3 alone should drop failure count from 10 → ~3. Note: prior session 31172845's fix for "notification 503 cascade" did not close the hole — re-investigate before assuming it's a regression.
-
----
-
-## 🧰 TODO SIZE MGMT SKILL — Follow-ups (Session 92ece47c, 2026-05-01)
-
-### Pending
-
-- [ ] [LUPIN→PIP] **Promote `todo-size-management` skill to `planning-is-prompting/workflow/todo-size-management.md`** — Lupin-local skill landed at `.claude/commands/todo-size-management.md` and validated against current TODO.md (38% reduction, 0 pending lost). PIP currently says "TODO.md is NEVER archived" (canonical workflow doc line 268) — the promotion is a **canonical-policy change**, not a pure code addition. Author from a PIP-rooted Claude session: lift algorithm + status × age semantics from `src/rnd/v0.1.7/2026.05.01-todo-size-management/01-design.md`, update `todo-management.md` "never archive" stance to point at the new size-mgmt doc, and ensure other PIP-using projects can adopt it. Note: each project will need its own `.claude/commands/todo-size-management.md` shim (mirror `history-management` pattern).
-- [x] [LUPIN] **Manual triage pass for stale pending items** — Aggressive archival reached 19.4k tokens, still above the 8-12k retention target. Mechanical algorithm does not auto-prune `[ ]` items by design. Reviewable candidates: large OPEN/MIXED sections like `## v0.1.6 — FUTURE DEVELOPMENT` (23 pending), `## Pending — HIGH PRIORITY` (13 pending), `## Pending — Older items carrying over` (14 pending), `## Completed earlier (Sessions 85b05d1d…)` (16 pending sub-bullets) — likely many done outside the formal mark-complete flow. Pass discretion: drop / mark `[x]` / re-stamp into a current section.
-- [ ] [LUPIN] **Add `/todo-size-management` to `/plan-session-end` Step 0.5** — Mirror existing history-management integration. When session-end fires, run `mode=check` first; if WARNING/CRITICAL, prompt user same way as for history.md.
-- [ ] [LUPIN] **MIXED-section excision smoke test** — Add a unit test in `src/tests/unit/` that ingests a synthetic MIXED section with `[x]` parent + `[ ]` sub-bullets and confirms the sub-bullets travel with the parent (current behavior, validated live but not regression-locked).
-
----
-
-## 🎙 PERSONA + CONV-MODE EXIT-REMINDER FOLLOW-UPS (Session 911b1cdc, 2026-05-01)
-
-### Pending
-
-- [ ] [LUPIN] **End-to-end test the cross-session conv-mode exit-reminder injection** — requires fresh listener subprocesses (existing listeners still run pre-edit code). Start two new CC sessions, enter conv mode in one, then in the other. The displaced session should receive the `<system-reminder>` block typed into its tmux pane and on its next turn stop calling `notify()` and stop wrapping replies in `<voice-message>` format.
-- [ ] [LUPIN] **Frontend localStorage reconciliation for `conversation_mode_active`** — separate from this session's server-side exit-reminder fix. The browser caches per-session conv-mode state in `localStorage[notifications_conversation_modes]` and only updates from WS events; missed displace events leave stale entries. Pick fix path (A: hydrate-on-load via new `GET /api/cosa-voice/conversation-mode/active-sessions`; B: server-pushed `conversation_mode_snapshot` WS event on auth) and implement.
-
-### What landed (this session)
-
-- ✅ Persona `Mr. NPR` → `mr radio` rename in INI + splainer + 2 test files
-- ✅ `display_name_for()` helper + `_HONORIFIC_TOKENS` set; stamped on all 3 persona-dict construction sites + defensive stamp on legacy bridges
-- ✅ `_renderPersonaBadgeHTML` updated to use `display_name` with `name` fallback
-- ✅ `conv_mode_exit_reminder()` helper + listener `exit_conversation_mode` action handler + `wrap=True/False` on `_inject_via_tmux`
-- ✅ Conversation-mode router pushes parallel `action:exit_conversation_mode` notification at displacement time (best-effort)
-- ✅ Tests: +7 `TestDisplayNameFor`, +1 pool-stamping, +7 `TestConvModeExitReminder`, +2 listener action tests; updated 3 displacement assertions for new push count
-
----
-
-## 🩺 POSTMORTEM REMEDIATION FOR USER (Session 31172845, 2026-05-01)
-
-**Plan**: `src/rnd/v0.1.7/2026.05.01-postmortem-fixes-plan.md`
-**Execution log**: `src/rnd/v0.1.7/2026.05.01-postmortem-fixes-90-execution-log.md`
-
-### User actions required
-
-- [ ] [LUPIN] **Commit parent-Lupin changes** in this session's manifest (`.claude-session.md` Session 31172845 row). Files: `bug-fix-queue.md`, `history.md`, `TODO.md`, `src/conf/lupin-app.ini`, `src/conf/lupin-app-splainer.ini`, `src/lupin_cli/notifications/notify_user_sync.py`, `src/tests/integration/test_deep_research_orchestrator.py`, `src/tests/smoke/test_container_preflight.py`, `src/tests/smoke/conftest.py` (NEW), `src/tests/unit/test_*.py` (4 NEW files), `src/rnd/v0.1.7/2026.05.01-postmortem-*.md` (3 NEW files). **CAUTION**: parallel session f742b1bc has its own files in the manifest — use `git diff --cached --stat` to verify only my files staged before commit.
-- [x] [LUPIN-COSA] **Commit CoSA submodule changes** in a separate CoSA session: `src/cosa/rest/todo_fifo_queue.py` (Cluster D defensive reorder), `src/cosa/rest/routers/mock_job.py` (Cluster G presentation routing), `src/cosa/agents/test_suite/job.py` (Cluster B per-suite extra args), `src/cosa/rest/routers/test_suite.py` (Cluster C docstring).
-- [ ] [LUPIN] **Schedule next `:8000` all-suite run** to validate fixes (after all commits land + container recreation if needed). Use `POST /api/test-suite/submit` with confirmed scheduled_at. Run `src/scripts/preflight-test-container.sh` from host first (Cluster C workaround).
-- [x] [LUPIN] **Pick fix option for Cluster A (notification 503)** — Session 45e6bf84 (2026-05-05 PM). Investigation overturned the May-1 §Phase 5 diagnosis: the proxy DOES support WS-as-test-user (empirical proof — UUID 50c73ba7-... appears in `user_sessions` when proxy runs with the test user's env-var creds). Real root cause was silent proxy-startup failure in `EmbeddedProxyMixin._start_proxy` (5-second blind sleep + `subprocess.poll()`-only liveness check + WARNING-only abort path). Fix shipped as a 4-phase plan: WS-auth verification poll, hard abort across 7 caller sites, label re-classification (`http_error_*` → `infra_error`), full design + execution log at `src/rnd/v0.1.7/2026.05.05-503-cascade-real-root-cause/`. Phase 4a `:7999` probes both green; Phase 4b `:8000` smoke verification scheduled.
-- [ ] [LUPIN] **Pick architectural option for Cluster C** — see bug-fix-queue.md "Server-side preflight surrogate". 3 options.
-- [ ] [LUPIN] **Investigate `claude-agent-sdk` install state** in test container — see bug-fix-queue.md. Reduces 12 integration skips if the SDK is now installed.
-
-### What landed (this session)
-
-- ✅ Phase 0: docs serialized (plan + execution log + skip-count corrections in post-mortem)
-- ✅ Phase 1A: smoke skip refactor (preflight: 7 skips → 1 module-level skip)
-- ⚠️ Phase 2 (Cluster D): defensive branch reorder + 15 unit tests; **real NoneType.split source still unknown** (filed)
-- ✅ Phase 3 (Cluster G): presentation keyword fallback + 12 unit tests
-- ✅ Phase 4 (Cluster F): notify_user_sync connect-timeout split + 2 unit tests; **smoke regression GREEN** (idle_waiter test)
-- ✅ Phase 5 (Cluster A): root cause identified (filed for design conversation)
-- ✅ Phase 1B: 6 obsolete pytest.mark.skip eliminated via test_phase_* → phase_* renames
-- ✅ Phase 6 (Cluster B): INI-driven per-suite extra pytest_args + smoke conftest.py (5 flag registrations) + 4 unit tests
-- ⚠️ Phase 7 (Cluster C): docstring + filed for architectural decision
-
-**Net impact (when committed + scheduled run lands)**: 9 → ~3-5 smoke failures expected. 51 → ~45 skip count.
-
----
-
-## 🐛 WS RESTART AUTH CASCADE — User-visible symptom resolved (Session f742b1bc, 2026-05-01)
-
-**Bug doc**: `src/rnd/v0.1.7/2026.04.30-ws-restart-auth-cascade-bug.md` (see §Resolution)
-
-- [ ] [LUPIN] **Land Fix 1 (cosmetic)** — `src/cosa/rest/routers/websocket.py:458-466`. Bug A (mislabeled "Token verification failed" — actually a post-verify send_json failure) + Bug B (cascading send_json on already-closed socket). Log-hygiene only, both <10 line fixes; user-visible symptom is gone but the cascade trace can still appear during a real container restart. Fits v0.1.7 spit-and-polish branch intent.
-- [ ] [LUPIN] **What's bumping test file mtimes?** — even with reload now ignoring `tests/`, the underlying question is unanswered: `test_voice_persona_helpers.py` and `test_voice_persona_allocation.py` had mtimes touched at 02:08, 02:14, 09:12 today without anyone running tests. Plausible suspects: backup script, IDE indexer, hook, periodic git op. Not urgent; trace if it surfaces another way.
-- [ ] [LUPIN] **Add WS-smoke regression test** (deferred) — simulate 1012 close + reconnect within 5s and assert `auth_success` received. Belongs in `src/tests/websocket_smoke/`. Lower priority now that the user-visible symptom is gone, but still worth the regression coverage.
-
----
-
-## 🎯 CC SESSION FOCUS MODE — Phase 2 + design follow-ups (Session 488ca8bd, 2026-04-30)
-
-**Plan**: `~/.claude/plans/i-want-to-start-parsed-blossom.md`
-**Design**: `src/rnd/v0.1.7/2026.04.30-cc-session-focus-mode/01-design.md`
-
-### 🚦 Phase 2 — gated for tonight's :8000 batch (user-coordinated)
-
-- [ ] [LUPIN] **Schedule `src/tests/e2e_ui/test_cc_session_strip_and_focus.py` on :8000** (12 Playwright tests across 7 classes). Submit via `/api/test-suite/submit` with the user-confirmed slot — bundling with the other test work the user is batching this evening. First run will also generate the 4 visual-regression baselines via `--update-snapshots`.
-- [ ] [LUPIN] **Capture visual-regression baselines** (`__snapshots__/cc-session-strip-default-stacked.png`, `cc-session-strip-focus-mode-active.png`, `cc-strip-icon-with-conv-mode-overlay.png`, `cc-strip-icon-with-unread-badge.png`) on first scheduled run. Commit baselines after review.
-- [ ] [LUPIN] **Add Phase 2 results to `90-execution-log.md`** after the scheduled run completes — pass/fail per test, timing, any flakiness, baseline-capture confirmation.
-
-### 🛠️ Deferred design items (per design `01-design.md` §16)
-
-- [ ] [LUPIN] **Cross-device focus sync** — current design is `localStorage` per-browser. If user wants focus state to follow them between phone + laptop, add `cc_focus_state` field to bridge file (parallel to `conversation_mode_active`) + new `focus_state_changed` WS event. Gate: wait until use case actually emerges.
-- [ ] [LUPIN] **Strip overflow strategy** — currently `overflow-x: auto` with thin scrollbar. Revisit only if 8+ active CC sessions becomes routine and the horizontal scroll feels ugly. Alternatives: collapse-to-overflow-menu (hide-overflow + chevron) or two-row wrap.
-- [ ] [LUPIN] **Per-card "anchor" pinning** (Q5 option-c from elicitation) — separate small feature. If reorder churn in default-stacked-view (focus mode OFF) still bothers user even with focus-mode escape route, add a per-card pin button so individual cards can be frozen at a stable stack position while others reorder around them.
-- [ ] [LUPIN] **Tier 3 / Tier 4 persona theming follow-up** — already on TODO from Session 9977a1ba (held for Round 1 settling). Independent of focus mode but the strip + focus-mode work surfaces the question of how heavily to lean on persona color. Worth a single review pass after living with focus mode for a session or two.
-
-### 🔍 Watch-fors when batch run lands
-
-- The Playwright tests assume `window.notificationsUI._addStripIcon(...)` etc. are accessible from `page.evaluate()`. If these helper-name renames during a future refactor, the tests will need updating in lockstep — note in design doc revision log if so.
-- The strip's `overflow-x: auto` will produce different visual rendering across Chromium versions; visual-regression baselines may need re-capture if the test container's Chromium minor version drifts.
-
----
-
-## 🎤 CONV-MODE 3-LAYER ENFORCEMENT — Phase 6 follow-ups (Session 406cadbf, 2026-04-30)
-
-**R&D**: `src/rnd/v0.1.7/2026.04.30-conv-mode-three-layer-enforcement/{01-design.md,90-execution.md}`
-**Phases 1-5 status**: ✅ committed (`02af97b` → `d7a6c9f`); 176/176 tests pass; viewer URLs in history.md entry.
-
-### 🚦 Phase 6 — User-gated multi-session live verification
-
-- [ ] [LUPIN] **WebSocket smoke suite full run** — `./src/scripts/run-websocket-smoke-tests.sh` timed out at 120s in the AI-discretionary :7999 venue this session. No conv-mode-relevant assertions in the WS suite, regression risk low (we haven't touched the WS layer or notification routing), but should run as a final regression check before Phase 6 declares closed. User-confirmed slot for the longer run window.
-- [ ] [LUPIN] **Multi-session live verification matrix** (10 rows, design doc §4 Phase 6). User confirms before execution: no parallel CC sessions outside the test, conv mode currently OFF on all sessions, :7999 acceptable for dev verification (or :8000 slot if needed). Matrix:
-  1. Toggle A on → speak voice msg → A's Claude wraps input + narrates with priority=high
-  2. Toggle B on (displaces A) → speak to B → A's bridge=false; A's UI unpinned; A's next turn does NOT auto-narrate
-  3. **Cross-talk cue (the original symptom fix)**: A's Claude has cached belief, calls notify(priority=high, suppress_ding=True) after displacement → user hears audible ding (suppress_ding inverted)
-  4. Console-only response from A while A is the holder → Layer 3 Stop-hook synthesizes narration
-  5. Claude calls notify(priority=medium) while A is the holder → Layer 2 forces priority=high, suppress_ding=True
-  6. Legitimate notify(notification_type=alert, priority=high) from a non-conv-mode session → pass-through with ding
-  7. set_session_topic("...") while A is the holder → internal-call bypass (topic with original params)
-  8. Conv mode OFF → speak voice msg → no wrapper applied (legacy behavior)
-  9. Idempotency: conv_mode_wrap called twice on same string → second call no-ops
-  10. Voice content containing literal `</voice-message>` or `<system-reminder>` → sanitize_for_wrap truncates from first marker
-
-### 📋 Deferred follow-ups (NOT in scope for Phase 6, logged for future)
-
-- [ ] [LUPIN] **MCP HTTP-fallback mutex bypass** (`src/lupin_mcp/cosa_voice_mcp.py:1295`) — Risk #7 in design doc. When the canonical conversation-mode endpoint is briefly unreachable, the MCP `enter_conversation_mode()` tool falls back to direct `set_conversation_mode()` write with NO scan-and-displace. Both sessions could end up `active=true` simultaneously. Documented limitation; long-term fix requires duplicating router scan-and-displace logic into the MCP server. Escalate if observed in practice.
-- [ ] [LUPIN] **Pre/post-tool-use Layer 1 threading** — deferred from Phase 2 because adding the conv-mode reminder per tool call would inject it dozens of times per turn (noisy). Reminder fires at user-prompt-submit (natural turn boundary) only. Revisit if discipline drift is observed at tool-use boundaries.
-- [ ] [LUPIN] **Phase 4 test runtime optimization** — `test_stop_hook_auto_narrate.py` ~30s due to lazy-import of `cosa_voice_mcp.strip_fenced_code_blocks` triggering MCP module init (account-validation HTTP). Optimize by extracting the helper to a lighter module without the cosa_voice_mcp import-time side effects.
-
----
-
-## 🩺 POSTMORTEM FOLLOW-UPS — Session b195a160 (2026-04-30, while user at doctor)
-
-**Postmortem doc**: `src/rnd/v0.1.7/2026.04.30-postmortem-2026.04.29-all-test-run.md`
-
-### ✅ Closed in this session (uncommitted; please review + commit)
-
-### ✅ Postgres bind-mount permanent relocation — DONE (uncommitted)
-
-### ✅ uv.lock regenerated (uncommitted)
-
-### ✅ Image rebuild — DONE (parked at candidate tag, NOT promoted)
-
-### 🚦 Recommended next steps when you're back
-
-1. **Smoke-verify the new image** before promoting: `docker run --rm lupin:1.0.0-bcrypt-4.3.0 /opt/venv/bin/python -c "import lupin"` (or whatever quick health probe you prefer). Bonus: confirm the `(trapped) error reading bcrypt version` log is gone on container start.
-2. **Promote the tag**: `docker tag lupin:1.0.0-bcrypt-4.3.0 lupin:1.0.0`
-3. **Recompose dev :7999**: `docker compose down lupin-rest-dev && docker compose up -d lupin-rest-dev`
-4. **Recompose test :8000**: `docker compose down lupin-rest-test && docker compose up -d lupin-rest-test`
-5. Verify each came up healthy + `LUPIN_INTERACTIVE_TESTS=true` is now in the test container env: `docker exec lupin-rest-test env | grep LUPIN_INTERACTIVE_TESTS`
-6. After step 5, the Tier 3 follow-ups below should become CLOSED automatically.
-
-### ✅ Tier 1 closures — DONE this afternoon (uncommitted)
-
-### ✅ Tier 2 closures — DONE this afternoon (uncommitted)
-
-### 🐳 Tier 3 — STATUS UPDATE (some closed, one pending verification)
-
-- [ ] [LUPIN] **Cluster I config audit — `presentation_generator` agentic-router registration** — **STILL OPEN, awaiting tonight's all-test-run verification**. After today's recompose, re-run will tell us whether `EXP_PRES_MISSING` still returns "Could not match voice command". If yes → agentic-commands.json reload issue. If no → recompose closed it cleanly.
-
-### 🐢 NEW: slow-test rewrite (DONE this afternoon, uncommitted)
-
-### 🆕 New follow-ups — for the user (NOT applied this session)
-
-- [ ] [LUPIN] **(Cluster J adjacent) Investigate why `:7999` cannot reach `192.168.1.21:3001`** for the runtime-argument expediter's LLM. The :8000 test container CAN reach it (yesterday's run got past the LLM call). Worth checking if a service is supposed to be running at `192.168.1.21:3001` for dev workflows.
-- [ ] [LUPIN] **(Architectural) Per-test-file `pytest_args` declarations** — surfaced from Cluster D investigation. The all-suite scheduler doesn't know that `test_presentation_live*` always need `--auto-proxy --cost-cap-usd N`. Idea: declare via a pytest marker that the scheduler reads + merges. Bigger change; deferred.
-- [ ] [LUPIN] **(Hygiene) `TODO.md` triage — CRITICAL** — at **31,518 tokens (126% of 25k limit)** with **199 pending items** as of Session 6562a2c9 session-start (2026-05-01). Many items likely already complete from yesterday's bug-fix-mode + post-mortem cycles. Triage pass: scan top sections, mark resolved items as `[x]` with attribution, prune Completed-section entries older than 7 days. Target: bring file under 12k tokens (8-12k retention range per history-management workflow). Surfaced but deferred at user direction during Session 6562a2c9.
-- [x] [LUPIN] **(Verification) Review the 21:30 EDT all-test-run outcome** — `ts-0fb8e488` scheduled for 2026-04-30T21:30:00-04:00. Expected delta vs yesterday's 15-failure baseline: 5–6 failures. Closes Tier 3 follow-ups if predictions hold.
-
----
-
-## 🎨 PERSONA POOL — Arnold color tweak
-
-- [ ] [LUPIN] **Repaint Arnold from dark red → orangey-peach** — current dark-red Arnold is indistinguishable from both Nora's pink-300 (`#F06292`) and Domi's pink-900 (`#880E4F`) backgrounds at low alphas in Tier 1 chrome. Goal hue family: peach / coral / orange-pink (e.g. Material orange 300 `#FFB74D`, deep-orange 200 `#FFAB91`, or a custom warm-peach `#FFAB6E`). Audit against `feedback_no_green_in_persona_pool` (peach is fine — green RGB component stays well below 30%). Update `src/conf/lupin-app.ini` persona pool entry + splainer note + any hard-coded references.
-
----
-
-## 🌅 FOLLOW-UPS — for the user (Session 9977a1ba — Persona Theming Round 1 + WS cleanup)
-
-- [ ] [LUPIN] **Persona theming Round 2 — Tier 3 widgets**: tint `.sender-conversation-mode-btn` border (when not in active conv-mode green), `.sender-gist-btn` border, `.cc-voice-input-row` chrome with `var(--persona-color, ...)`. Held until you've lived with Round 1 (Foundation + Tier 1 + Tier 2) for a session.
-- [ ] [LUPIN] **Persona theming Round 3 — Tier 4 outgoing message bubbles**: replace bootstrap-blue `#007bff` outgoing-bubble background with `var(--persona-color)`. Boldest change, held for explicit go-ahead.
-- [ ] [LUPIN] **frontend-design plugin polish pass** against live `:7999` after Round 1 settles. The plugin is installed but I haven't invoked it yet — a clean fit for distributing one persona color across many surfaces without it feeling overdone.
-- [ ] [LUPIN] **UserPromptSubmit hook to backstop conv-mode acknowledge-receipt rule**: ~15-line hook script alongside `src/lupin_cli/claude_code/hooks/`; reads bridge file, if `conversation_mode_active` is true, emit a `<system-reminder>` block reminding Claude to ack receipt before tool work. Architecture sketched in this session, not implemented. Real-time enforcement complement to the existing static-doc layers.
-- [x] [LUPIN/CoSA] **Commit the CoSA-side companion edits** for this session's Lupin work, from inside CoSA context: (a) `src/cosa/rest/routers/voice_persona.py` + `conversation_mode.py` migrations to `push_notification`, (b) `src/cosa/rest/notification_fifo_queue.py` `payload` field addition, (c) `src/cosa/rest/routers/notifications.py` `valid_types` extension + senders-visible voice_persona stamping, (d) `src/cosa/rest/routers/speech.py` Rachel-voice-id sentinel fix.
-- [ ] [LUPIN] **Existing Rachel session bridges retain old color** until released and re-allocated (color is copied into bridge at allocation time). To force the new `#7B1FA2` purple immediately on an active Rachel session, `/release` then `/allocate`.
-
----
-
-## 🌅 FOLLOW-UPS — for the user (Session 78abd1aa — passlib/bcrypt mismatch)
-
-- [ ] [LUPIN] **Rebuild `lupin:1.0.0` docker image to land `bcrypt==4.3.0`** — `pyproject.toml:69` tightened from `bcrypt>=4.0,<5` to `bcrypt==4.3.0`; `uv.lock` already pins 4.3.0; running container is on 5.0.0 only because it was built from an older lock state. Per `feedback_no_auto_promote_tags`, park the rebuild at a candidate tag (e.g. `lupin:1.0.0-bcrypt-4.3.0`) and don't overwrite the working `lupin:1.0.0` until verified. After rebuild: (a) confirm `(trapped) error reading bcrypt version` no longer fires on container startup logs, (b) re-run unit + smoke on `:7999`, (c) schedule integration suite on `:8000` to re-run the now-unxfailed `test_list_users_search_filter` and `test_update_user_roles_remove_admin` from `src/tests/integration/test_admin_users.py`. Plan: `io/plans/2026.04.29-bcrypt-passlib-version-mismatch-plan.md`.
-
----
-
-## 🌅 FOLLOW-UPS — for the user (Session c7333045)
-
-- [ ] [LUPIN] **Per-session TTS queue isolation** (so B's new audio plays while A's queued audio stays paused on displacement) — current model is global `pauseTTS` on displacement, user manually resumes. Separate UX cycle.
-- [ ] [LUPIN] **Toast UI for displaced sessions** — `conversation_mode_changed` event payload already carries `displaced=true, displaced_by=<sid>`; UI just doesn't render it yet.
-- [ ] [LUPIN] **Hard programmatic enforcement of user-only-initiation rule** for `enter/exit_conversation_mode()` MCP tools — v1.1 documents the rule in three layers; future enhancement could add a "user-utterance attestation" field on the MCP call if drift is observed.
-- [ ] [LUPIN] **E2E Playwright extension for new mutex + pinning + auto-pause scenarios** — gated behind a user-confirmed `:8000` slot per the E2E two-phase gate.
-- [ ] [LUPIN] **Multi-worker uvicorn lock coordination** — module-level `asyncio.Lock` in conversation_mode router only serializes within one process. If Lupin ever moves to `--workers N`, lock must move to Redis or DB advisory lock. Not relevant today.
-- [ ] [LUPIN] **Make LanceDB cleanup a schedulable evening job on the test server** — wrap `src/scripts/cleanup_lupin_lancedb.py` (the existing `Table.optimize(cleanup_older_than=...)` script that recovered 42 GB on 2026-04-27) as a `test_suite/job.py`-shaped schedulable agentic job, runnable nightly via `POST /api/test-suite/submit` with a `scheduled_at` slot. Constraint: must run on `:8000` test server (monopolize-mode) so it doesn't fight with active writers — script already accepts `--require-stopped` flag, but a scheduled wrapper should also call the canonical `_transition_to_done`/`_transition_to_dead` paths and emit completion notifications. Default cutoff `--older-than-days 7` (conservative); operators can override per-submission. Acceptance: nightly schedule runs, logs version counts before/after, surfaces total disk reclaimed in completion notification, fails fast if the test container has active LanceDB writers.
-
----
-
-## 🌅 FOLLOW-UPS — for the user (Session 30072c25 — per-session voice personas)
-
-- [ ] [LUPIN] **Experience the new persona-driven UX end-to-end** — spawn 3 concurrent `claude code` sessions in different terminals, trigger a notification from each, and confirm: (a) three distinct voices speak via TTS, (b) three distinct colored badges render in the notifications-UI sender-card headers (icon + persona name + tinted background), (c) badges persist across `/clear` (no re-roll). This is the perceptual end-to-end check the test pyramid cannot automate. Design + verification matrix at `src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md` and `90-execution.md`.
-
----
-
-## 🌅 FOLLOW-UPS — for the user (Session 30072c25 — docker build diagnostics)
-
-- [ ] [LUPIN] **(Optional) Route uv.lock R&D doc to external `uv` expert** — open questions (in the doc itself): did `pydantic-ai==0.6.2` ever expose a `slim` extra? did `uv` tighten extras-validation between lock-time and sync-time? should we file a `uv` bug for the lock-writer-accepts-impossible-extras inconsistency? **Lower priority now** that the build is unblocked, but the questions remain interesting for `uv` toolchain governance.
-
----
-
-## 🌅 FOLLOW-UPS — for the user (Session ba7138c4 follow-on)
-
-- [ ] [LUPIN] **READ `src/rnd/v0.1.7/2026.04.28-test-suite-anomaly-remediation/06-resume-from-here.md` FIRST** if returning after `/clear`.
-- [ ] [LUPIN] **Schedule e2e baseline regen run** — `POST /api/test-suite/submit { test_types: "e2e", pytest_args: "--update-snapshots -k visual", scheduled_at: <slot> }`. Container chromium renders subtly different from host; baselines need to lock to container rendering.
-- [ ] [LUPIN] **Investigate 13 surviving smoke FAILs** — real agent failures (not infra). Includes `test_calculator_live_pipeline` which should now PASS via codeless-replay fix; needs re-run to confirm.
-- [ ] [LUPIN] **Ratify OOS-3** — both WG-6 survivors confirmed STILL FAIL.
-- [ ] [LUPIN] **Ratify OOS-1/2/4** — prewarm findings folded into the plan docs. OOS-1's Finding A is a one-line typo at `test_fix_expediter/job.py:549`; standalone hotfix candidate.
-- [x] [LUPIN] **CoSA submodule commit** — running_fifo_queue.py + solution_snapshot.py (this session) + 6 prior CoSA edits from c4e5d4f. Separate cosa-context session per `feedback_lupin_only_never_cosa`.
-- [ ] [LUPIN] **Push parent commits** — `bb9298c` + this checkpoint pending.
-- [ ] [LUPIN] **(Optional) flip TFE voice-gate timeout policy to `top_1`** for after-hours autonomous runs.
-- [ ] [LUPIN] **Memory update**: expand `feedback_never_grab_gpu.md` with SolutionSnapshot constructor warning (loads ~1 GB of embedding models on cuda:0).
-- [ ] [LUPIN] **T46 — delete deprecated `enter_running_loop()`** in `src/cosa/rest/running_fifo_queue.py:122` (~30 LOC; user authorized for after current job).
-
-## 🌅 FOLLOW-UPS — for the user (Session d34f2f74 — Idle-aware Stop hook)
-
-- [ ] [LUPIN] **Activate idle-aware Stop hook** — start a fresh CC session; the new hooks load at session boot, so this current session keeps the legacy immediate-ask behavior in memory until exit. Defaults `enabled=true, backoff_minutes=[5,10,20,40,60]` apply automatically. To override, add an `idle_detection` block to `~/.claude/settings.json` (schema in `src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/01-design.md`).
-- [ ] [LUPIN] **Manual end-to-end checklist for idle-aware Stop hook** (post-merge verification) — see `src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/90-execution.md` Phase 5 checklist (8 steps): set test schedule `[1, 2, 4]` in settings, verify "Anything else?" fires after 1 min idle, "no" advances backoff_index, prompt fires again at 2 min, user prompt resets to 0, conversation-mode skips ask. Restore default schedule afterward.
-- [ ] [LUPIN] **Optional: add `~/.claude/CLAUDE.md` notification-system note for idle detection** — Phase 5 deferred this as out-of-scope (global file, cross-project risk). User can add a brief note themselves if desired.
-
-## 🌅 FOLLOW-UPS — for the user (Session d34f2f74 — Phase 4 backlog completion)
-
-- [ ] [LUPIN] **Migrate other 7 agent types to ContextVar dispatch** — DR done in Phase 4 backlog #1; Podcast / ClaudeCode / BFE / R2P / Presentation / R2Presentation / TestSuite still use legacy `cosa_interface.SENDER_ID = ...` module-global pattern. Dispatcher ContextVar resolvers already prefer ContextVar over self.* — each agent just needs to add a `set_dispatch_context()` helper to its `cosa_interface.py` and call it from `job.py` at execution start. Per-agent diff is ~15 LOC.
-- [ ] [LUPIN] **Cleanup: 124+ stale `*-integration-e2e-remediation.json` files in `io/test-suite/`** — these are unit-test side-effect leakage from `test_artifacts_populated` writing to real filesystem before the 2026-04-29 fix. Safe to bulk-delete since the fixed test now uses `tmp_path`. Suggested: `find io/test-suite -name "*-integration-e2e-remediation.json" -mtime +1 -size -5k -delete` (the bogus files are <2KB; real production runs from test_suite agent are much larger). User discretion — historical inspection value is low.
-- [ ] [LUPIN] **Container recreation needed** — cluster 2.7 fix (`LUPIN_INTERACTIVE_TESTS=true` in docker-compose.yml) requires `docker compose down && up -d` to take effect. `docker restart` doesn't pick up env-var changes. Same recreation will activate Phase 4 backlog item 2 fix (consumer-stalls heartbeat refresh).
-- [ ] [LUPIN] **Recreate test+dev containers to pick up new `LUPIN_INTERACTIVE_TESTS` env var** — added to `docker-compose.yml` in cluster 2.7 fix. `docker restart` does NOT pick up env-var changes; need `docker compose down && docker compose up -d` (or `docker rm -f <name>` + `docker compose up -d`). Without recreation, `test_swe_team_proxy` will continue to self-abort even though the docker-compose.yml is correct.
-
----
-
-## 📦 Cross-project — `planning-is-prompting` follow-up
-
-- [ ] [LUPIN→PIP] **Phase 1: Lift adversarial+fitness review prompts into PIP** — author `planning-is-prompting/workflow/plan-review.md` from the spec in `src/rnd/v0.1.7/2026.04.27-promote-plan-review-pattern-to-pip.md` (§ "Phase 1 deliverable shape"). Pick up in a `planning-is-prompting`-rooted Claude session. Phase 2 (convention establishment in `p-is-p-02-documenting-the-implementation.md`) is the linchpin and must follow Phase 1 immediately.
-
----
-
-## 🌅 FOLLOW-UPS — for the user (no urgency, conversation mode work)
-
-- [ ] [LUPIN] **Phase 6 E2E execution** — `src/tests/e2e_ui/test_conversation_mode.py` is written but not submitted. Schedule via `POST /api/test-suite/submit` with non-overlapping `scheduled_at` slot once `:8000` is free.
-- [ ] [LUPIN] **Bind mount `~/.claude/sessions` on `:8000` test container** — only added to `:7999` dev today. The Phase 6 E2E run on `:8000` will need the same mount or the endpoint will 404. Add to `docker-compose.yml` line ~108 (lupin-rest-test volumes block) before scheduling Phase 6.
-- [x] [LUPIN] **CoSA submodule commit** — new file `src/cosa/rest/routers/conversation_mode.py` waits for separate CoSA-side commit per nested-repo rules.
-- [ ] [LUPIN] **Watch for discipline drift in Option B** — design accepted MCP-tool + behavioral-instruction approach (Option B) over a deterministic Claude Code stop hook (Option C). If Claude consistently forgets to auto-`notify()` after every turn when conversation mode is on, escalate to Option C as belt-and-suspenders (PostAssistantTurn hook reads bridge flag and POSTs to TTS endpoint).
-- [ ] [LUPIN] **Live UX validation** — actually USE conversation mode for a prolonged voice dialogue from the notification UI session pane to validate the ergonomic and the TTS hygiene defaults (strip code blocks, skip tool-call narration, no length cap). Tune defaults if needed.
-- [ ] [LUPIN] **Manifest-tracking discipline** — this session never updated `.claude-session.md` while editing files; surfaced at session-end as a missing section. Worth a future session to either bake manifest-update into the auto-mode flow or relax the manifest mandate when auto-mode is the only writer.
-
----
-
-## 🌅 FOLLOW-UPS — for the user (notification dispatch work)
-
-- [ ] [LUPIN] **Bounce :7999 (and later :8000) onto the new bytecode** when v1.0.0 image rebuild is settled — the helper + 5 migrations are backwards-compatible but currently unloaded. Once bytecode is live, run the live :8000 probe from the plan's "Verification" section to confirm `delivered_via_listener` end-to-end.
-- [x] [LUPIN] **CoSA submodule commit** — 4 files (`websocket_manager.py`, `routers/notifications.py`, `routers/queues.py`, `notification_fifo_queue.py`) wait for separate CoSA-side commit per nested-repo rules. Plan + diagnosis lives in `~/.claude/plans/dazzling-napping-frost.md`.
-- [ ] [LUPIN] **TFE/BFE post-resume proposal-review UX** — filed in bug-fix-queue.md. End-user can't make a proper accept/reject determination on proposed fixes after clicking Resume from Checkpoint; needs WHY-context per proposal, clustering, per-proposal skip vs full cancel, confidence levels.
-- [ ] [LUPIN] **`:7999` uvicorn StatReload watcher recovery** — watcher hasn't fired in 24+ hours despite source touches that should trigger reload. Bouncing recovers it but the underlying mute is unresolved. Worth investigating before next `--reload`-dependent work.
-- [ ] [LUPIN] **CC listener answer-response wiring** (out-of-scope feature) — CC listeners receive response-required notifications (yes/no, multiple_choice, open_ended) via the now-unified dispatch but cannot ANSWER them — no callback wiring exists between the listener and `/api/notify/response`. Filing for visibility; would unlock cross-user yes/no flows.
-- [ ] [LUPIN] **Service-account → operator routing helper** — the `agent_notification_dispatcher._resolve_routing` pattern (orthogonal to today's user-or-listener helper) handles service-account → operator email swaps. Refactoring it into a shared utility alongside the new dispatch helper would eliminate another thread of dispatch ad-hoc-ery.
-
----
-
-## 🌅 FOLLOW-UPS — for the user (no urgency)
-
-- [ ] [LUPIN] **Tonight's full test suite run on lupin:1.0.0** — user plans to run all tests this evening to validate the new image under realistic load. Surface any new regressions (especially additional Python 3.13 incompats lurking in import chains we didn't exercise during sanity boots).
-- [ ] [LUPIN] **Provide dedicated backup drive's mount path** — when convenient. Future maintenance scripts that do need to back up will default there. `feedback_backups_only_to_dedicated_drive.md` captures the policy.
-- [ ] [LUPIN] **Tier 2 / Tier 3 docker hygiene (rainy day)** — multi-stage builder/runtime split (drops cuda-toolkit-12-4 from runtime, ~6 GB saved); HF models via runtime mount / GCS-FUSE (~13 GB saved); pinned base-image digest + Renovate; checksum-pinned d2/MARP/Claude Code installers; BuildKit secret mounts for `src/conf/keys`. Captured as out-of-scope in `src/rnd/v0.1.7/2026.04.27-drop-recursive-chown-image-bloat-audit.md`.
-- [ ] [LUPIN] **Periodic / scheduled lance cleanup** — wire `tbl.optimize(cleanup_older_than=timedelta(days=1))` into FastAPI lifespan as a daily background task. Integration point: `src/lupin_app/main.py:388` alongside existing `clock_loop`, `websocket_heartbeat_loop`, `websocket_cleanup_loop`. Adds INI key like `solution snapshots cleanup older than days = 1`.
-
----
-
-## 🔥 IN FLIGHT — Session 616112aa 2026-04-24
-
-- [x] [LUPIN] **`:8000` E2E UI gate** — re-submission `ts-249d0d40` running since 11:18:38 EDT (after bounce of stale `:8000` that was still running pre-Phase-1 code). ~40min runtime.
-- [ ] [LUPIN] **`:8000` integration gate (FINAL)** — runs after E2E. ~20min.
-- [x] [LUPIN] **:8000 Phase 2 gate in flight** — ts-ff11fb27 fired 15:59 EDT against Phase 1+2+fix. Results pending. Will interpret for Phase 2 validation.
-- [ ] [LUPIN] **:8000 Phase 3 re-run** (conditional) — only if Phase 2 gate is green AND conservative-re-run is desired. Phase 3 adds non-test-visible behaviour (ghost sweeper runs silent, DR path not hit by E2E, pool-status endpoint not hit by E2E). Low value; probably skip.
-- [ ] [LUPIN] **v0.1.7 prod N=1 → N=3 bump** — separate deliberate action after :8000 gates validate. Not part of this session.
-- [ ] [LUPIN] **Receptionist agent multiple issues** — filed 2026-04-24 in bug-fix-queue.md (active queue). Context-length overrun + BFE filter + classifier miss. Not a Phase 1/2/3 regression.
-- [ ] [LUPIN] **DR cli.py estimate_total_time migration** — deferred from Phase 3. Dev utility, not production critical. Follow-up when convenient.
-
----
-
-## ⚠️ SURFACED THIS SESSION — investigate in Phase 2 or follow-up
-
-- [ ] [LUPIN] **`:7999` CPU hot loop (pre-existing)** — PID 2453 at 100% CPU for 108min of CPU time over 2h wall; consistent with 2026-04-22 TODO "push_job takes 60-200s in test env". Not a Phase 1 regression (`test_phase2_shaped_stress` proves RLock is deadlock-free). Phase 2's dispatcher refactor will touch this surface — may root-cause as a side-effect.
-- [ ] [LUPIN] **Calculator live pipeline failing 0/6 on `:7999`** — all "Timeout after 120s"; 13 stale dead-queue entries with `status: pending` + empty error field (odd). Related to the `:7999` CPU issue above. Surface as a Phase 2 diagnostic target.
-- [ ] [LUPIN] **`:7999` `uvicorn.run(reload=True)` may not actually reload** — process tree shows no watcher+worker split; PID 2453 elapsed time monotonically increases with no reset visible through 11 code edits this session. Either uvicorn reload isn't firing despite `LUPIN_ENV=development` setting `reload=True` in `main.py:828`, or it's reloading in-place. Needs a controlled experiment next session to confirm. If reload isn't working on `:7999`, the operational assumption baked into `feedback_fastapi_auto_reload` memory needs revisiting.
-
----
-
-## 🎯 NEXT MILESTONE — Phase 2 (after Phase 1 merge)
-
-- [ ] [LUPIN] **Read `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/03-phase-2-dispatcher-pool-and-pool-status.md`** (design) + `91-phase-2-execution-log.md` (paired log skeleton)
-- [ ] [LUPIN] **Phase 2 scope**: dispatcher refactor, `ThreadPoolExecutor` for agentic pool, `Future.add_done_callback` for completion handling, `/api/queue/pool-status` endpoint, defensive callback ghost-job protection
-- [ ] [LUPIN] **Phase 2 blocks Phase 3 (ghost-job watchdog + full E2E + FIFO-audit)**
-
----
-
-## 🌅 SESSION-CLOSE BRIEFING — 2026-04-22 Session 6a30b98c
-
-### Landed this session
-
-- ✅ [LUPIN] **E2E pause-button test fixed** — Playwright `data=<dict>` → `data=json.dumps()` + `Content-Type: application/json` header (FastAPI was silently dropping `scheduled_at` to defaults); all 14 `datetime.now().isoformat()` sites replaced with `datetime.now(timezone.utc)` to eliminate host-EDT/container-UTC mismatch.
-- ✅ [LUPIN] **E2E admin cross-user retry test fixed** — seeded question "Other user failed job for admin retry test" routed to Claude Code → triggered UPE 180s blocking dialog. Reseeded with "What day is it today" (routes to DateAndTimeAgent, no UPE); test calls `/retry` directly via `admin_page.request.post()`; disabled `similarity confirmation enabled` in `[Lupin: Testing]` block to belt-and-suspenders against the 30→60→120s snapshot-confirmation path.
-- ✅ [LUPIN] **E2E admin-users visual regression drift fixed** — extended `NORMALIZE_DYNAMIC_CONTENT_JS` to normalize `formatDate()` relative-time cells (CREATED, LAST LOGIN) in the admin-users table so snapshots are stable across runs.
-- ✅ [LUPIN] **Integration UUID fixture cast** — dropped `::text` from `gen_random_uuid()::text` against a UUID column in `test_conftest_clean_test_db.py:71`.
-- ✅ [LUPIN] **Integration harness `DB_HOST=localhost` export** — unblocks host-side `seed_test_companions.py` that defaulted to docker-internal `lupin-postgres`.
-- ✅ [LUPIN] **3 dispatcher/notify fixtures** broadened `except` to `(ConnectionError, Timeout)` — 11 ERRORing tests now cleanly skip when `:7999` is unhealthy.
-- ✅ [LUPIN] **`TestDispatcherMocked` xfail → skip** — dodges a CPython 3.11 + pytest-9 AST-traceback-formatter bug (`SystemError: AST constructor recursion depth mismatch`) that was aborting the integration suite at ~31% every run.
-
-### Final green baseline across all 4 layers
-
-| Layer | Result |
-|-------|--------|
-| Unit | 3549 pass / 1 xfail / 0 fail |
-| WebSocket smoke | 50 / 50 |
-| Integration | 228 pass / 31 skip / 0 fail / 0 error |
-| E2E UI | 357 pass / 0 fail / 0 error |
-
-### New follow-ups from Session 6a30b98c
-
-- [ ] [LUPIN] **Move `similarity confirmation enabled = false` behind an env var** — currently in `[Lupin: Testing]` block, which means the test server auto-accepts any 90%+ snapshot match without asking. For prod-like test runs we may want this configurable per-invocation. Not urgent.
-- [ ] [LUPIN] **Investigate why `push_job` takes 60-200s in test env** — even with UPE + similarity-confirm disabled, the LLM router (`deepily/ministral_8b_2410_ft_lora` via vLLM) takes noticeably long on first call per container. Cold-start vs. steady-state unclear. Not blocking.
-- [ ] [LUPIN] **Consider test-fixture helper for timezone-aware ISO** — `datetime.now(timezone.utc).isoformat()` was needed in 14 sites in one file. A `_future_iso(hours=1)` helper in conftest would be DRYer. Low priority.
-
----
-
-## 🌅 SESSION-CLOSE BRIEFING — 2026-04-22 Session b486e9dc
-
-### Landed this session
-
-- ✅ [LUPIN] **Bug A: Flip TFE DEFAULT_MODEL back to Sonnet 4.6** — `src/scripts/tfe_to_cc_phase3_live.py:41` + `notifications.js:7279` localStorage fallback + `notifications.html:925` cache-bust bumped to `v=20260422b`. Dropdown option at `:7288` preserved so Opus is still explicitly selectable. Keep `DEFAULT_EFFORT=high` per matrix 23-*.
-- ✅ [LUPIN] **Bug B: LanceDB-GCS tests stop touching GPU** — class-scoped autouse monkeypatch of `EmbeddingProvider.generate_embedding` + `EmbeddingManager.generate_embedding` routes every embed call through `POST /api/embeddings/batch`. **Zero CoSA edits**, zero engine modification. Validated by xfail test running the full embedding path without OOM. 6 unrelated GCS-creds skips filed as follow-up.
-- ✅ [LUPIN] **Top-10 TODO briefing serialized** — `src/rnd/v0.1.6/2026.04.22-session-start-top-10-briefing.md` captures the 2026-04-21 triage state in a stable location for future sessions.
-- ✅ [LUPIN] **Memory saved** — `feedback_tests_call_server_api_not_instantiate` prevents future plans from proposing in-process engine instantiation for tests.
-
-### New follow-ups from Session b486e9dc
-
-- [ ] [LUPIN] **Mount host `~/.config/gcloud/` into `lupin-rest-test` container** — 6 tests in `test_lancedb_gcs_integration.py` skip because `gcs_credentials_available` fixture finds no Application Default Credentials inside the container. Fix: add bind-mount to `docker-compose.yml` `lupin-rest-test` service (mirrors the pending `gh` CLI creds mount for Phase 5 `git push`). Once landed, all 7 non-xfail tests should run and pass.
-- [ ] [LUPIN] **Browser-verify Bug A on fresh localStorage** — clear `RESUME_MODEL_PREF_KEY` in dev tools, reload notifications page, open a stalled TFE card, confirm Resume dropdown defaults to "Sonnet 4.6" (not Opus).
-- [ ] [LUPIN] **Validate `server_embedder` fixture pattern adopted by future integration tests** — this session sets the precedent. Any future test that needs embeddings should use the fixture rather than instantiating `ProseEmbeddingEngine` or `EmbeddingProvider` in-process. `feedback_tests_call_server_api_not_instantiate` captures the rule.
-
-### Bug B Block 1a status update
-
-The Block 1a item from Session 9934d315 ("5 × `test_lancedb_gcs_integration.py` — CUDA OOM") is **RESOLVED by design** — tests no longer touch GPU regardless of GCS credential availability. The 6 current skips are a separate environmental issue (ADC mount), not a fix regression.
-
----
-
-## 🌅 NEXT-MORNING BRIEFING — 2026-04-18
-
-### TL;DR
-
-Session 44581b8c spent the day walking the TFE Resume path end-to-end. Every blocker that surfaced was root-caused and fixed in order — **Bugs X1/X2 (UI jobId/toggle), 14 (watchdog routing_command), 9a (container .git), 500-char cap, showToast, 15 (SDK streaming wrap)**. Unit tests **42/42 green**. Container recreation required AFTER the .git mount (requires `docker rm -f` + `compose up -d` — a `docker restart` does NOT pick up new volume mounts). Last step — Phase 3 `FixExecutor` actually **applying** fixes — deferred to tomorrow because it needs the Bug 15 CoSA code to be live in the container.
-
-### Boot-up sequence (strict order, tomorrow morning)
-
-1. **Commit CoSA submodule changes** — from inside `src/cosa/`, user commits the 7 files the Bug 14 + 15 + 500-char-cap fixes touched:
-   - `agents/swe_team/hooks.py` (wrap_prompt_for_streaming helper)
-   - `agents/swe_team/__init__.py` (export)
-   - `agents/swe_team/orchestrator.py` (3 call sites)
-   - `agents/bug_fix_expediter/orchestrator.py` (2 call sites + import)
-   - `agents/test_fix_expediter/orchestrator.py` (2 call sites + import)
-   - `rest/test_suite_completion_watchdog.py` (Bug 14 forward fix via create_agentic_job)
-   - `rest/routers/notifications.py` (500-char response_value cap removed)
-2. **Bounce `lupin-rest-test`** — `docker restart lupin-rest-test` (now sufficient, not recreate — only code changed, no volume mount changes). Wait for `/health` → 200.
-3. **Click Resume** on `tfe-72adc928` (the more-recent stalled row — both rows now show their `tfe-*` ID chip in the header thanks to the UI-chip work).
-4. **Re-select the 11 proposals** at the voice gate (previous responses lost with `tfe-445f9e4b` and `tfe-60431542` crashes).
-5. **Observe Phase 3** — each "Applying fix N/11" notification should NOW be followed by successful Edit/Write tool blocks in the worktree at `/var/lupin/.claude/worktrees/tfe-<new>/`. `Phase 3 complete: K/11 cluster(s) fixed` with K > 0.
-6. **Observe Phase 5** — first time reaching `GitStrategist.commit_and_pr_multi()` from inside the container's worktree. May surface `gh` CLI / GitHub credentials follow-up (mount `~/.config/gh` into the container?).
-7. **Observe Phase 6** — auto-queues a validation `TestSuiteJob` to verify the applied fixes retired their failures.
-
-### Today's landings (reference)
-
-- ✅ **UI Bug X1** (Resume button empty jobId) + **Bug X2** (history-card toggle ID collision, = briefing's Bug 2).
-- ✅ **Bug 14** (watchdog bypassed `create_agentic_job`) — factory-routed forward fix + DB patch on `tfe-3436c5b8`. 36/36 watchdog unit tests green.
-- ✅ **showToast undefined method** — swapped to `this.log` at 2 sites.
-- ✅ **500-char response_value cap** (pre-existing) removed at `src/cosa/rest/routers/notifications.py:849` (XSS sanitization + empty check preserved).
-- ✅ **Bug 9a** (container missing `.git` for worktree) — bind-mount added to both dev + test services in `docker-compose.yml`.
-- ✅ **UI job-id chip** — clickable copy-to-clipboard on every card header + ID line in details.
-- ✅ **Bug 15** (`can_use_tool` AsyncIterable requirement, upstream [#18735](https://github.com/anthropics/claude-code/issues/18735) unresolved) — `wrap_prompt_for_streaming()` helper + 7 call sites swapped with inline WORKAROUND comment + URL. 6 new unit tests (42/42 overall green).
-- ✅ **Session manifest `.claude-session.md`** — created 44581b8c section mid-session after user flagged missing status.
-
-### Postmortems filed today
-
-- `src/rnd/v0.1.6/2026.04.17-bug-14-auto-dispatched-tfe-lacks-routing-command.md`
-- `src/rnd/v0.1.6/2026.04.17-bug-9a-container-missing-git-for-worktree.md`
-- `src/rnd/v0.1.6/2026.04.17-bug-15-claude-agent-sdk-streaming-mode-workaround.md`
-
-### New follow-ups from Session d8831785 (2026-04-20)
-
-- [ ] [LUPIN] **Flip harness `DEFAULT_MODEL` back to Sonnet** — matrix 23-*.md proved Sonnet beats Opus ~5× on this workload. `src/scripts/tfe_to_cc_phase3_live.py:40` currently says `claude-opus-4-7`; change to `claude-sonnet-4-6`. Keep `DEFAULT_EFFORT=high`.
-- [ ] [LUPIN] **Flip UI localStorage fallback to Sonnet** — `src/lupin_app/static/js/notifications.js` `renderResumeOverrideControls()` defaults to `'claude-opus-4-7'` when localStorage is empty. Change to `'claude-sonnet-4-6'`. (First-time UI users would otherwise get the worse arm by default.)
-- [ ] [LUPIN] **Why does Opus default to `unclear`?** — three Opus arms (B/C/D) returned 10–11 unclear verdicts regardless of effort. Inspect a failing Opus cluster's stream-json tool-use trace to see whether the Coder subagent even attempted the edit, or returned `unclear` without trying. Most interesting unanswered question from tonight's matrix.
-- [ ] [LUPIN] **Sonnet + medium arm** — find out whether effort saturates below `high`. If Sonnet+medium ≈ Sonnet+high, we've been over-spending thinking budget.
-- [ ] [LUPIN] **Cross-workload matrix validation** — run the 5-arm matrix against a fresh TFE cluster set (different failure profile) to confirm the Sonnet-wins pattern isn't specific to `tfe-72adc928`.
-- [ ] [LUPIN] **Tighten `confidence` prompt semantics** — `src/cosa/agents/test_fix_expediter/prompts/proposal.py` tells the LLM to "rank by confidence" but never defines WHAT the number measures. Observed values conflate "confidence in root cause" with "quality of approach". Consider splitting into two fields or pinning the semantic explicitly to one dimension (and using `risk_level` for the other).
-- [ ] [LUPIN] **Revisit validator "Validation OK: ISSUES"** — harness's `validate_result_payload` still flags `verdict=fixed + commit_sha=null` as an error even though Phase B's `already_clean` verdict correctly handles that case. Update the validator to accept `already_clean` as a terminal state.
-- [ ] [LUPIN] **Cache-bust discipline** — bumped `notifications.html` v=20260417c → v=20260420a tonight after forgetting to bump it with the Phase E UI change. Consider a pre-commit hook that verifies any `notifications.js` diff also touches the v= token in `notifications.html`.
-
-### Deferred / backlog (carried from prior sessions)
-
-- [ ] [LUPIN] **Phase 3/5/6 observation** on fresh `tfe-<resumed>` (tomorrow, step 5-7 above).
-- [ ] [LUPIN] **Investigate cosa-voice `set_session_status` MCP tool** — user's earlier directive ("set session status using cosa-voice MCP at beginning of every session"). My ToolSearch found only `set_session_topic`, `get_session_info`, `notify` (has `session_name` arg). Need to find the tool they mean or confirm the startup-ritual protocol in `~/.claude/CLAUDE.md` should be updated.
-- [ ] [LUPIN] **Revert 500-char cap decision** if on deep review we want it back with higher ceiling (e.g., 10k) instead of fully removed. Current state: removed, relying on XSS sanitization + empty check only.
-- [ ] [LUPIN] **`gh` CLI / credentials mount** for Phase 5 in container (anticipated; worth reading tomorrow if Phase 5 trips).
-- [ ] [LUPIN] **Upstream watch** — https://github.com/anthropics/claude-code/issues/18735 — when closed/fixed, delete `wrap_prompt_for_streaming()` helper and revert the 7 call sites (grep for `wrap_prompt_for_streaming` finds them all).
-
----
-
-## Active TODO below
-
-## ~~🚨 First-thing next session — archive history (still pending from 2026-04-15)~~ ✅ DONE 2026-04-16
-
-- [x] [LUPIN] **Previously**: Review `ts-e4089cf2` outcome (scheduled 2026-04-16 17:24:00 EDT on :8000 test server; full `all` suite ~60 min; TFE voice gate expected ~18:25-18:40 EDT). **Acceptance criteria** for Bug 12 validation:
-  - [ ] Test suite completes with ~38 failures (same reproducible baseline)
-  - [ ] `TestSuiteCompletionWatchdog` auto-dispatches a TFE job
-  - [ ] TFE reaches Phase 2 voice gate (generates ~21 proposals across 8 clusters)
-  - [ ] Voice gate fires while operator offline → MCP 503 "User is offline"
-  - [ ] **POST-FIX EXPECTED**: dispatcher raises `VoiceGateTimeoutError` → orchestrator saves checkpoint → raises `StalledException` → job persisted with `state=STALLED` (NOT `completed`)
-  - [ ] UI History panel shows ⏸ Resume button for the TFE row
-  - [ ] DB `metadata_json["checkpoint"]` contains rehydrated proposals for Resume-to-review
-  - [ ] Worktree isolation status: with `[cosa_worktree] enabled=false` (default), confirm no worktree was created (Phase 3 not reached due to stall). If stall path fails, we'd see an unintended worktree attempt — that's also useful signal.
-  - **If any criterion fails**: forensic capture + patch, do NOT escalate to Doc 18 D2 (attended Resume-apply) until Phase 5 stall-validation passes clean.
-
-- [x] [LUPIN] **Act on overnight TFE's 21 proposals** — report at `io/swe-team/reports/interactive.job.tester@lupin.deepily.ai/2026.04.15-at-21:41-EST-ts-79829a75-completed-test_fix_expediter-report.md`. Four 1-liner wins would retire 27 of 38 failures: (1) `len(AGENTIC_AGENTS) == 9` → `== 10` in 3 sites, (2) re-capture 12 visual baselines via `--update-snapshots`, (3) add `PRODUCT_NAMES` entry for TFE Resume agent, (4) add `resume_from` key to `all_agents` profile. Option: land these directly OR re-run TFE (post-Bug-12) to get a proper stalled row.
-
-- [x] [LUPIN] **Review `ts-79829a75` outcome** — ✅ Ran 2026-04-15 21:05 EDT. 3647/3671 pass. Same 38 failures as morning baseline (reproducible). TFE auto-dispatched → 21 proposals → 0 selected due to Bug 12. Full forensics: `src/rnd/v0.1.6/2026.04.16-overnight-forensics-ts-79829a75.md`.
-- [ ] [LUPIN] **Revert overnight INI override** — `[Lupin: Testing]` block in `src/conf/lupin-app.ini` has `test fix expediter lead model = claude-sonnet-4-6` (added for cheap overnight run). Decide whether to keep or revert to Baseline default (Opus lead).
-- [ ] [LUPIN] **CoSA commit** — 9 submodule files need committing from inside `src/cosa/` repo: `agents/utils/agent_notification_dispatcher.py`, `agents/bug_fix_expediter/cosa_interface.py`, `agents/test_fix_expediter/orchestrator.py`, `agents/test_fix_expediter/state.py`, `rest/agentic_job_factory.py`, `rest/job_persistence.py`, `rest/queue_util.py`, `rest/running_fifo_queue.py`, `rest/routers/io_files.py`.
-
-## 🆕 New follow-ups from Session f01fdc2f
-
-- [ ] [LUPIN] **Design knob — `test fix expediter feedback timeout action`** — options: `stall` (default, current behavior), `skip` (complete with 0 selected), `auto_select_high_confidence` (select proposals ≥ 0.85 confidence). INI + splainer + config.py + orchestrator._aggregate_voice_gate timeout branch. Low priority — stall is fine today.
-
-- [ ] [LUPIN] **`gh auth setup-git` in Dockerfile for Phase 5 `git push`** — validated 2026-04-18 Session be57a252: gh CLI + GH_TOKEN work inside container (preflight 6/6 OK), `gh pr create` will succeed on `deepily/{lupin,cosa}` (scopes `repo,workflow` sufficient). But `git push` uses its own credential path — not gh's — so the first real Phase 5 `git push -u origin <branch>` will prompt for credentials. Fix: add `RUN gh auth setup-git` after the `apt install gh` line in Dockerfile (writes `~/.gitconfig` credential helper to delegate to gh). Deferred until Phase 5 is actually reached (Phase 3 turn-budget tiers need to land successful fixes first).
-
-- [ ] [LUPIN] **lupin.lancedb bloat — `input_and_output_tbl.lance` is 37 GB** — discovered 2026-04-18 Session be57a252 during docker build context audit. Single table accounts for ~95% of the lancedb footprint and gets `COPY`'d into every container image rebuild (Dockerfile:217). Likely uncompacted old versions / stale snapshots. Actions: (1) compact via `LANCE.compact_files()`, (2) audit what's actually persisted (may be runtime logs accumulated without rotation), (3) consider runtime bind-mount instead of COPY (mirrors the postgres-data pattern) so image stays lean. Secondary: Dockerfile COPY step for a 37 GB table probably fails silently on memory-constrained CI. Low priority if dev only, HIGH if production images hit this.
-
-- [ ] [LUPIN] **Client-side notification dedup by idempotency_key** — tfe-8b2eaeda run showed the same `Coder: Bash` notification rendered 4× in the UI because the server fans a single notification out to multiple WebSocket subscribers (queue card + history card + conversation card + session-specific). Each gets the same `idempotency_key`; the server is behaving correctly, but the UI renders each subscriber's copy as a separate card line. Frontend (`notifications.js`) should dedup by `idempotency_key` within a sliding window (~2s) before appending. Filed 2026-04-18 Session be57a252.
-
-- [ ] [LUPIN] **Option B: mid-flight Coder turn-budget check-in** (follow-up to Option A tiered budget) — at soft limit (e.g., 75% of max_turns), orchestrator intercepts tool-use stream, sends `ask_multiple_choice` via cosa-voice with progress summary ("Fix K/N used X/Y turns: read A files, ran B tests, made C edits"), operator picks [abort / X more turns / X*2 more turns / yes-to-all-remaining]. Requires: (1) claude-agent-sdk session restart with context injection since `max_turns` isn't live-extensible, (2) turn counter + tool-use summary extraction in orchestrator, (3) new voice-gate surface + `cosa_interface` wiring. **PRIORITY BUMPED 2026-04-19**: tfe-a1c6e15a confirmed Option A alone insufficient — Coder produced a valid 3-line fix for C6 (renamed `test_registry_has_five_agents` → `ten_agents`, updated `== 5` → `== 10`) but ran out of turns before Tester could verify → uncommitted. Operator-in-the-loop grant of 10 more turns would have saved that fix. With preserved worktrees + enriched abstract, the infrastructure to show operator the progress is now in place.
-
-- [ ] [LUPIN] **Coder prompt audit — reduce turn spend on exploration** — tfe-a1c6e15a showed the Coder burning through 31-51 turns even on simple 3-line test-value edits. Each Coder run does many Read/Grep/Bash calls before committing to the Edit. The Coder system prompt (in `src/cosa/agents/test_fix_expediter/prompts/` — `CODER_SYSTEM_PROMPT`) should be audited for: (1) pushing the Coder to commit to an edit earlier once the diagnosis is clear, (2) capping exploration (e.g., "≤3 Read calls before first Edit"), (3) reducing verification retries. Tiered budgets alone don't address the root cause — the Coder is inherently wasteful with its turn budget. Filed 2026-04-19 Session be57a252.
-
-- [ ] [LUPIN] **Validate Resume** (Doc 18 D2 first half, safe without Bug 9 activation) — `tfe-3436c5b8` is stalled on :8000 with full checkpoint + 17 proposals + plan_path. Click Resume in UI (or `POST http://localhost:8000/api/jobs/tfe-3436c5b8/resume`) while you're online → should rehydrate checkpoint, re-fire voice gate with the full abstract visible (this is the critical Bug 13 regression guard — the abstract length cap removal makes the resumed gate display-able for the first time). Phase 3 apply is SAFE today because `[cosa_worktree] enabled=false` — the FixExecutor path is guarded behind that flag; if resumed, voice gate answer goes through selection but Phase 3 is opt-out until you flip the flag. Fresh-stall row ready for the Resume smoke.
-
-- [ ] [LUPIN] **TFE report rendering bug** — markdown report shows `Duration: 0.0s` and `C1 — 0 failure(s)` through `C8 — 0 failure(s)` even though `state_snapshot` has full cluster data (12 failure_indices on C1, etc.). The printer in `test_fix_expediter/job.py` or `report_writer.py` reads from a different data path than what gets persisted. Mentioned in 2026-04-16 overnight forensics + postmortem but never filed as an action item until now. Affected files: `src/cosa/agents/shared/report_writer.py` (render function) and `src/cosa/agents/test_fix_expediter/job.py` (report builder). Not blocking — cluster data is correct in the DB.
-
-- [ ] [LUPIN] **Worktree maintenance CLI + monitoring** (Bug 9 follow-up) — (1) `src/scripts/worktree-cleanup.sh` to prune orphaned worktrees and report disk usage under `.claude/worktrees/`, (2) periodic cleanup of worktrees older than 7 days even if `auto_cleanup=false` was set, (3) telemetry for worktree disk usage in the admin dashboard. Out of scope for the initial Bug 9 landing.
-
-- [ ] [LUPIN] **BFE dead-job race — eager snapshot + packager fallback (D1)** — `dead_queue_watchdog._submit_bfe` captures only `dead_job_id` string; BFE's later DB lookup fails if row evicted (done/dead rotation, TTL, or E2E `clean_test_db` drop). Fix: snapshot dead-job context at dispatch, have `package_dead_job()` accept snapshot-first. Files: `src/cosa/rest/dead_queue_watchdog.py:393-470`, `src/cosa/agents/bug_fix_expediter/dead_job_packager.py:38-42`, `src/cosa/agents/bug_fix_expediter/job.py:~227`.
-
-- [ ] [LUPIN] **Full attended TFE live run (D2)** — schedule a live TFE where operator answers voice gate, selects real proposals, walks Phase 3/5/6 with real commits + PR. Prereq: overnight `ts-79829a75` outcome reviewed + Bug 9 worktree isolation ideally landed first (so operator's working tree can't contaminate PR).
-
-- [ ] [LUPIN] **Pre-merge E2E gate (D3)** — parallel session's proposed `POST /api/test-suite/submit` with `test_types="e2e"` + `monopolize=true`. Fine to run post-archive; exercises all today's UI fixes (Bug 1 io/file, Bug 2 dedup, Bug 8 labels) but NOT the Claude Agent SDK path.
-
-## 🔖 Resume tomorrow — active triage plan
-
-**Triage doc**: `src/rnd/v0.1.6/2026.04.13-session-triage-and-option-c-docker-non-root.md` — 12 HIGH PRIORITY items (red), 3 TFE follow-ups (yellow), 14 older carry-overs (green). Items #1 #2 #3 closed Session 23f409c8. **Resume at item #9** (quick win: grep today's startup log for `[Watchdogs] BFE=ENABLED, TFE=ENABLED` to confirm already satisfied by rebuild), then #5 (schedule TFE Resume Live E2E) or #6 / #7 (Phase D/E follow-ups).
-
-## Pending — HIGH PRIORITY
-
-- [ ] [LUPIN] **cosa-voice DM token reduction — Phase 1 IMPLEMENT (Monday 2026-06-15)** — design serialized + APPROVED 2026-06-13 (Mr. Radio 🦉): `src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/01-dm-body-in-push-phase1-design.md`. Monday plan: review the doc with Rick, then make the 5 edits — (1) `commons.py:1034` send `message=dm_body` + `kind`/persona/reply payload (kill the empty-body claim-check), (2) `cc_notification_listener.py:716` pass `kind`/`sender_persona`/`sender_icon`/`reply_to` onto the buffered entry, (3) `hook_common.py:397` branch `format_voice_context` on `kind={human_to_ai|ai_to_ai}`, (4) `cosa_voice_mcp.py` `commons_read` docstring "always re-fetch"→"process pushed body; only `since=` catch-up", (5) unit tests @ 100% L/B/F on all three. Target ~18× cut (~3,712 → ~204 tokens/received DM). **Phase 2 (offline-recipient DB-inbox replay) deferred — separate effort after Phase 1 lands.** Start work once Rick is off per-token billing.
-
-- [x] [LUPIN] **Task-store v0.3 cold /plan-review (pre-Phase-1 gate)** — ✅ **COMPLETED 2026-06-12 ~00:00 EDT** (Rick-ordered by voice 23:30): cold reviewer Clayton 😎 (fresh 46ba9b15) ran the 3 serial passes with receipts → **APPROVE-WITH-FINDINGS C1-C15** → María folded C1-C5 into v0.4 (PIP `e4f3d92`) + residuals (`c9f8f78`, v0.4.1 `638a6fc`) → Clayton **FOLD-VERIFIED** → reviewer reaped w/ memento. María observed per Rick's directive. C2 gate pinned staffed→LANDED (3 names, Rick-veto flagged, unexercised). Review chain receipts on commons topic `task-store-cold-review`.
-
-- [x] [LUPIN] **Task-store Phase-1 build** — ✅ **COMPLETED 2026-06-12 04:26 EDT** (Rick accelerated past the post-cutover sequencing by voice 23:30 06-11: "staff and complete the implementation incl. all tests"). LANDED gate honored: async-handlers surgical fix FIRST (Rio ⚡, merged `5e5c2b67` + lock follow-up `f99a4af5`, live :7999, both-directions starvation regression test). Store: Krishna 🦚 built TaskItem/TaskEvent + correlation_key + alembic `f0a1b2c3d4e5` + debt-clean `/api/tasks/*` + receipt key-whitelist validation; Rachel 🕊️ fresh-critical APPROVE + DELTA-VERIFIED (her N1 newline-smuggle + N3 row-lock catches fixed pre-merge); merged **`3be8008e`** (held); BOTH DBs migrated (test DB needed stamp-then-upgrade — the zero-bootstrap gap, see new entry below); **integration 11/11 GREEN on :8000 (`ts-e232f0d4`)**; live probe 200 on :7999. MCP wrapper SPEC committed (`02-mcp-wrapper-spec.md`) — cosa-voice repo touch awaits Rick. Phase-2+ backlog anchored in PIP TODO.md (Clayton's C-numbering = numbering of record). Build docs: `src/rnd/v0.1.8/2026.06.11-task-store-phase1/`.
-
-- [ ] [LUPIN] **Alembic chain not zero-bootstrappable (Krishna escalation 2026-06-12, GCP-relevant)** — `alembic upgrade head` from an EMPTY DB fails at `275fb8d9c75c` (initial schema came out-of-band via schema.sql). Proven live on lupin_db_test 04:00 EDT; recovery recipe PROVEN: `alembic stamp e9f0a1b2c3d4` (pre-task-store head) then `upgrade head`. Fresh Cloud-SQL provisioning hits exactly this — routed to the GCP successor. Durable fix: baseline migration OR documented schema.sql+stamp bootstrap procedure. Also filed: add task_items/task_events to the integration `clean_test_db` TRUNCATE list (rows accumulate across suite runs).
-
-- [x] [LUPIN] **Voice persona rename: Domi → Rio** — ✅ **COMPLETED 2026-05-11** (user-marked complete via voice). Plan doc at `src/rnd/v0.1.7/2026.05.11-rename-persona-domi-to-rio.md`. 4 files touched (`lupin-app.ini`, `lupin-app-splainer.ini`, `test_voice_persona_helpers.py`, `test_voice_persona_allocation.py`). No TTS change — `voice_id` stays at `AZnzlk1XvdvUeBnXmlld`.
-
-- [x] [LUPIN] **Review three scheduled TFE jobs' outcomes (23:15 / 23:20 / 23:25 EDT)** — `ts-1139f28d` dry, `ts-996dafbc` live (with env_vars fixture), `ts-d2d890ed` all. Logs inside test container: `docker exec lupin-rest-test tail -80 /tmp/{pytest-direct,all}-latest.log`. Live run's outcome informs whether `/api/agentic-jobs/submit` exists (live test skips cleanly if missing).
-
-- [ ] [LUPIN] **Follow-up if live test skipped on missing `/api/agentic-jobs/submit`** — add a generic agentic-job submit REST endpoint (factory wrapper like test-suite's) so the live test can actually submit TFE jobs. Currently the test body is complete but depends on this endpoint. Alternative: have the test go through `TestSuiteJob → watchdog` dispatch path.
-
-- [x] [LUPIN] **Bug 2 — history-card scroll toggle** (deferred, awaits user devtools). DOM-id collision hypothesis: live Done card and History card render the same `id="job-details-${jobId}"`; `getElementById` returns the first match. Step 0 (devtools query: `total vs unique` count of `[id^="job-details-"]`) is the gate. Step 3 plan: namespace IDs by queueName at render time. Plan in `src/rnd/v0.1.6/2026.04.14-all-suite-aggregation-and-history-card-toggle.md`.
-
-- [ ] [LUPIN] **Visual-regression snapshot drift** (12 `test_visual_page[chromium-*]` failures). Needs human UI review per page (login, register, change-password, profile, notifications, landing, admin-{dashboard,snapshots,users,ratify,trust}, dev-tools), then `./src/scripts/run-e2e-ui-tests.sh --bg --update-snapshots -k visual` if intentional.
-
-- [ ] [LUPIN] **Auth 401 — test_tfe_resume_e2e + test_cross_container_auth** (8 failures). Migrate from mock-token patterns to JWT from `/auth/login` per `mock_tokens_are_legacy` memory. Not a TFE candidate — needs design decision on test-side credential helper.
-
-- [ ] [LUPIN] **Run Option B chown to unblock backups** (USER-ONLY — needs sudo TTY) — `sudo chown -R rruiz:rruiz /mnt/DATA01/include/www.deepily.ai/projects/lupin/src/conf/long-term-memory/lupin.lancedb/` then re-run `/plan-backup --write` and confirm exit code 0. Originally 63,345 of 67,931 LanceDB files (93%) were owned by root from Docker container writes. This is a one-shot fix; new container writes will regenerate root-owned files until Option C lands.
-
-- [x] [LUPIN] **CoSA submodule commits for Session 9056c113 continuation** — Phases 1+2 of doc 16 added CoSA edits that need committing: `agents/utils/agent_notification_dispatcher.py` (VoiceGateTimeoutError raise on exit_code==2), `agents/bug_fix_expediter/orchestrator.py` (stall handling in run_diagnosis + run_proposal + gate pass-through), `agents/runtime_argument_expeditor/agent_registry.py` (TFE resume entry), `agents/runtime_argument_expeditor/expeditor.py` (_handle_tfe_checkpoint_match handler). Plus whatever's still outstanding from earlier 9056c113 work not yet committed. User commits from CoSA repo context per nested-repo rule. Server is already running the old code — voice gate timeouts will not actually stall until CoSA committed + server restarted again.
-
-- [ ] [LUPIN] **Phase D follow-ups: file-path resume + CLI flag** — Deferred from Session 9056c113 Phase D core. Need (a) `POST /api/test-fix-expediter/resume-from-file` endpoint with auto-detection for `.md` plan doc (resume from Phase 3) vs `.json` checkpoint (resume from checkpoint's ordinal) vs `tfe-*` job ID (shortcut to stalled resume) — mirrors Presentation Generator `render_only` + `yaml_path` pattern (`routers/presentation_generator.py:40,172-186`). (b) "Resume from" text input on TFE submission card in `notifications.js`. (c) `--resume <job_id>` and `--resume-from <path>` flags in `src/tests/e2e/run-tfe-live-e2e.sh`. Plan doc: `src/rnd/v0.1.6/2026.04.10-test-fix-expediter/14-checkpoint-resume-and-completion-report.md` Steps D4b-D4d + D5.
-
-- [ ] [LUPIN] **Phase E follow-ups: BFE completion report + BFE checkpoint-resume** — Deferred from Session 9056c113 Phase E core (skill update done, cross-agent rollout deferred). Follow the patterns now documented in `src/workflow/agentic-voice-workflow.md` v3.0 Phase 11 (completion report) + Phase 12 (checkpoint-resume). BFE already has a text summary (`bug_fix_expediter/job.py:283-290`) — wrap it with `voice_io.notify()` + rich abstract. BFE has voice gates at Phase 2 (fix selection) + Phase 5 (trust confirmation) — add `save_checkpoint()`/`load_checkpoint()` + `StalledException` catch. Reuse exception types from TFE (or extract to shared module). Podcast completion report similarly needs a voice notification if missing.
-
-- [x] [LUPIN] **FastAPI restart + CoSA submodule rebuild needed to activate checkpoint-resume** — Session 9056c113 edits are inside `src/cosa/` submodule. After user commits CoSA + running server picks up the new code, test the end-to-end flow: (1) submit TFE job that will stall (e.g., low `feedback_timeout_seconds` in INI), (2) verify stalled voice notification + stalled badge in UI, (3) click "▶ Resume from Checkpoint" button, (4) verify new TFE job runs from Phase 3 (skipping already-completed phases 0-2).
-
-- [ ] [LUPIN] **TFE live E2E monopolize run (real SDK + real git)** — All infrastructure ready: `src/tests/e2e/run-tfe-live-e2e.sh --live` will exercise the full pipeline against real Claude Agent SDK + real GitOps with a bug-injector-seeded failure. Schedule via `/schedule-tests` skill after hours. Cost gate: ~$15 per run (`test fix expediter cost cap usd`). Validates everything: clustering heuristic, Phase 1 diagnosis prompts, Phase 2 proposal gates, FixExecutor retry loop, multi-cluster git strategy, Phase 6 rerun recursion guard. Until this runs, the 3119-unit-test green bar is the only validation.
-- [ ] [LUPIN] **PEFT trainer run on GPU — TFE voice routing** — Training data ready: 75 templates in `src/ephemera/prompts/data/synthetic-data-agent-routing-test-fix-expediter.txt`, command registered in `src/conf/training/agent-router-agentic-commands.json`, unit tests (12) pass. USER-RUN ONLY per `feedback_never_grab_gpu` memory. When GPU free: `./src/scripts/run-agentic-intent-training.sh test` (sanity) then `full` (~3-4 hrs). Also note Session 389 left prior PEFT data regenerated — confirm whether TFE additions require a full regen or a merge.
-- [ ] [LUPIN] **BFE Phase 6 LIVE E2E (parallel console state unknown)** — User was running BFE Phase 6 live E2E in a separate console during Session 1cfcdf73. Outcome unknown. Verify whether the baseline was established + results captured. Dry-run + persistence fixes already landed in Session 1b8c1cc0 (76/76 unit tests passing); remaining: real Claude Agent SDK, real git commits, known-bad mutation. Enable `bug fix expediter enabled = true` in INI + schedule as monopolized test-suite job after hours.
-## Pending — TFE follow-ups (non-blocking)
-
-- [ ] [LUPIN] **TFE Phase 0 `llm_refine` real SDK wiring** — Infrastructure in place: `llm_refine(ctx, seeds, max_clusters, refine_fn=None)` accepts async callback. MVP uses pure-Python `_cap_enforce()` fallback. Plugging in real Opus SDK call would refine clusters beyond the heuristic. Lives in `src/cosa/agents/test_fix_expediter/cluster.py`.
-- [ ] [LUPIN] **TFE `agent_registry.py` entry** — Deferred during scaffolding. Factory routing works via direct elif in `agentic_job_factory.py`. Adding the `agent_registry.py` entry would enable uniform agent discovery and match the pattern used by deep_research/podcast_generator.
-- [ ] [LUPIN] **`FixContext` Pydantic model (optional refactor)** — TFE currently uses `SimpleNamespace` duck-typed pass-through to `shared.FixExecutor`. Formalizing as a Pydantic model would add validation + serialization. Not blocking any work.
-
-## Pending — v0.1.7 future work (deferred until v0.1.6 ships)
-
-- [x] [LUPIN] **CJ Flow: serial → async + hybrid multi-lane (Approach C)** — Resume the design conversation from Session 237. Design review for v0.1.7 wip lives at `src/rnd/v0.1.7/2026.04.21-cj-flow-async-multi-lane-design-review.md`; original Approach C design at `src/rnd/v0.1.5/2026.02.19-approach-c-hybrid-queue-architecture.md` with 11-step Phase 1/2/3 breakdown. **User decision (2026-04-21)**: pursue ONLY in v0.1.7 wip branch after v0.1.6 lands; default `cj flow max concurrent agentic jobs = 3` for first deploy. Open design questions still need decisions before any code (interactive lane Y/N, cost-guardrail at dispatcher, ghost-job watchdog, pool-status endpoint phase, per-job-type pools, Approach D coupling). Reconcile against `src/workflow/agentic-voice-workflow.md` before exiting plan mode on the implementation plan.
-
-## Pending — Older items carrying over
-
-- [ ] [LUPIN] **Phase 11: Presentation Generator Theme Integration** — Cross-cutting theme wiring for all renderers. Plan doc: `src/rnd/v0.1.6/2026.03.14-presentation-generator/renderers/05-theme-integration-plan.md`.
-- [ ] [LUPIN] **#1-Phase 4 (DEFERRED): migrate remaining 13 compliant fetch sites to authedFetch for uniformity** — Session 85b05d1d implemented Phase 2+3 (helper + 12 non-compliant migrations, commit e68d827). Pure cleanup with no user benefit; can be picked up opportunistically. Plan doc: `src/rnd/v0.1.6/2026.04.10-notifications-js-auth-token-refresh-audit.md`
-- [ ] [LUPIN] **#3-Followup: sdla restart lupin-rest to propagate new pytest.ini paths into container** — Session 85b05d1d commit 824f314 relocated visual regression artifacts. Host-side test (`-k visual`) passes 12/12. The container's bind-mounted `pytest.ini` still points to the OLD inode. Next `sdla restart` picks up the new inode automatically.
-- [x] [LUPIN] **#5 Research 5-6 dead/paused jobs stuck in todo queue** — User reports 5-6 dead or paused jobs visible in todo queue. Investigation inconclusive (transient test-suite traffic hypothesis). Findings doc: `src/rnd/v0.1.6/2026.04.10-stuck-todo-jobs-investigation.md`. Needs user clarification on account + current state.
-- [ ] [LUPIN] **Clean up debug code in `test_suite/job.py`** — Remove temporary debug `print()` statements (6+ lines), `loop_count`/`children_count` variables, and re-enable `os.unlink(junit_xml_path)` after confirming remediation snapshot works end-to-end.
-- [ ] [LUPIN] **Remove [DIAG-JR] diagnostic logging** — In `notifications.js` (3 console.log blocks) and `notifications.py` (1 print). Remove after verifying activity log auto-expand works in production.
-- [ ] [LUPIN] **TestSuiteJob: Surface stderr when subprocess crashes at startup** — When exit_code!=0 AND 0 tests found, response_text says "FAILURES DETECTED" with 0/0/0. Should include captured stdout/stderr tail so operator sees the actual error immediately. Discovered Session 8042b0d1.
-- [ ] [LUPIN] **Test-Suite Job — INI-driven timeouts** — Phase 2 uses hardcoded `SUITE_TIMEOUTS_SECONDS` dict. Promote to INI config keys so operators can tune without code changes.
-- [ ] [LUPIN] **Test-Suite Job — Phase 3 (conftest.py addoption)** — Consolidate `smoke_direct` into unified `smoke` runner via pytest's `pytest_addoption` hooks. ~30 min work. Not blocking. Plan: `src/rnd/2026.04.05-test-suite-agentic-job-comprehensive-expansion.md` Phase 3.
-- [ ] [LUPIN] **Interrupted job re-enqueue mechanism** — `mark_interrupted_jobs()` in `job_persistence.py` marks pending/running jobs as interrupted at startup but does NOT re-enqueue them. Long-running jobs (presentation ~8min, deep research ~15min) are lost on server restart. Proposed: persist constructor args in `metadata_json` at creation time, add `requeue_interrupted_jobs()` at startup with max retry guard.
-- [ ] [LUPIN] **Run Opus through test-suite endpoint** — Sonnet validated (`pr-512e5ca4`, 15 slides, $0.46). Opus has never run through `POST /api/test-suite/submit`. ~$2.43 cost.
-- [ ] [LUPIN] **TestSuiteJob Manual + Automated Testing remaining items** — Pattern A implemented (Session 386). Remaining: (1) Fix voice_io dispatcher bug (`AgentNotificationDispatcher` missing `notify` attribute), (2) Manual UI verification of submit card + scheduling, (3) Verify scheduling timezone fix with live scheduled job, (4) Run live pipeline smoke test with server, (5) Integration test for `POST /api/test-suite/submit`.
-- [ ] [LUPIN] **Automated E2E testing workflow** — Design standard pattern for scheduling E2E/integration test runs as monopolized jobs at user-specified times. Becomes the modus operandi for all post-coding verification.
-- [ ] [LUPIN] **Full E2E re-run needed to verify 2 visual regression errors are pre-existing** (test_visual_regression.py profile + notifications)
-
-## Completed earlier (Sessions 85b05d1d, 1b8c1cc0, etc.)
-
-- [ ] [LUPIN] **TFE implementation** — Execute the 19-step sequence from `src/rnd/2026.04.10-test-fix-expediter-plan.md`. Precondition: BFE Phase 6 live E2E (dry-run first) baseline established in the parallel console. Steps: (1-3) extract PlanWriter/GitStrategist/FixExecutor to `src/cosa/agents/shared/`, (6) TFE scaffolding with all agentic-voice-workflow-mandated modules, (7-12) TFE phases 0-6, (13) TestSuiteCompletionWatchdog + queue hook + main init, (14) 12 INI keys + splainer, (15) proxy Q&A script, (16) live pipeline test, (17) PEFT training data generation (USER runs trainer), (18) E2E dry-run, (19) live monopolize run via `/schedule-tests`. Track progress in execution logs 90-95 in the planning dir.
-- [ ] [LUPIN] **Clean up debug code in `test_suite/job.py`** — Remove temporary debug `print()` statements (6+ lines), `loop_count`/`children_count` variables, and re-enable `os.unlink(junit_xml_path)` after confirming remediation snapshot works end-to-end.
-- [ ] [LUPIN] **Remove [DIAG-JR] diagnostic logging** — In `notifications.js` (3 console.log blocks) and `notifications.py` (1 print). Remove after verifying activity log auto-expand works in production.
-- [ ] [LUPIN] **BFE Phase 6: LIVE E2E test of automated repair loop (non-dry-run)**. Dry-run smoke test complete (Session 1b8c1cc0, doc 09) and persistence gaps fixed (Session 1b8c1cc0, doc 10) — 76/76 unit tests passing, full loop verified end-to-end via DB inspection at $0 cost. Remaining: LIVE run with real Claude Agent SDK, real git commits, known-bad mutation. Enable `auto fix enabled = true` in INI, submit presentation gen job with intentional source-path bug, verify watchdog → BFE (real agents) → resubmit cycle completes. Schedule as monopolized test-suite job after hours.
-- [ ] [LUPIN] **TFE Phase 6: LIVE E2E test of test-fix repair loop (non-dry-run)**. **Precondition**: TFE forensics fix plan (`src/rnd/v0.1.6/2026.04.11-tfe-forensics-capture-plan.md`) must land first so any failure produces real error + traceback data in `job_history` instead of "Unknown error" — without that fix this E2E is un-debuggable. **Scope**: LIVE run with real Claude Agent SDK (Opus lead + Sonnet worker), real git commits, real failing tests. Enable `test fix expediter auto fix enabled = true` in INI, submit a `test_suite` job with a known-failing test pattern (stale visual regression baselines or a deliberately broken unit test), verify the `TestSuiteCompletionWatchdog` → TFE (real agents) → cluster → diagnose → propose → voice gate → fix → git → rerun cycle completes end-to-end. Success criterion: the rerun test suite reports PASS. Schedule as monopolized test-suite job after hours via `/schedule-tests` or the test-suite REST endpoint. Expected cost: ~$2-8 per run depending on cluster count and phase depth (Opus diagnosis + Sonnet fix cycles). **Mirrors the BFE Phase 6 live E2E TODO above** — BFE targets `DeadQueueWatchdog → BFE → fix presentation` loop; TFE targets `TestSuiteCompletionWatchdog → TFE → fix tests` loop. The two loops share infrastructure (persistence, voice gates, PlanWriter, GitStrategist) but have different watchdogs, entry points, and target outcomes, tracked as separate TODO items for independent scheduling and cleaner failure isolation.
-- [ ] [LUPIN] **Automated E2E testing workflow**: Design standard pattern for scheduling E2E/integration test runs as monopolized jobs at user-specified times. Becomes the modus operandi for all post-coding verification.
-
-- [x] [LUPIN] **Session 389 VERIFICATION — return to review today's work (NEXT SESSION)**. Two bodies of work landed in Session 389 that need end-to-end verification: (1) Voice routing training data complete coverage (5 content-gen agents, multi-placeholder expansion bug fix in xml_coordinator.py), (2) BFE Phase 5 Trust Proxy + Git Strategy (git_ops.py, run_git_strategy, 33 new tests, 2,831 unit tests passing). User shut down mid-session; resume with: summarize what was completed, verify commits landed (Lupin parent-repo + COSA nested-repo commits pending), confirm no regressions, identify any loose ends. Plan docs: `src/rnd/v0.1.6/2026.03.27-bug-fix-expediter/07-phase5-execution-log.md`, `src/cosa/agents/presentation_generator/rnd/2026.04.05-voice-routing-training-data-complete-coverage.md`.
-
-- [ ] [LUPIN] **Test-Suite Job — Phase 3 (conftest.py addoption) — DEFERRED to 2026-04-07**. Consolidate `smoke_direct` into unified `smoke` runner via pytest's `pytest_addoption` hooks (--auto-proxy, --cost-cap-usd, --group, etc.). ~30 min work. Not blocking anything. Plan: `src/rnd/2026.04.05-test-suite-agentic-job-comprehensive-expansion.md` Phase 3.
-- [ ] [LUPIN] **TestSuiteJob — Surface stderr when subprocess crashes at startup**. When exit_code!=0 AND 0 tests found, response_text says "FAILURES DETECTED" with 0/0/0 — misleading. Should include captured stdout/stderr tail so operator sees the actual error immediately. Discovered Session 8042b0d1 when 142ms crash showed no diagnostic info.
-- [ ] [LUPIN] **Test-Suite Job — INI-driven timeouts** (follow-up). Phase 2 uses hardcoded `SUITE_TIMEOUTS_SECONDS` dict in job.py. Promote to INI config keys so operators can tune without code changes. Original plan called for this; deferred for v1 pragmatism.
-- [ ] [LUPIN] **Run PEFT trainer — training data REGENERATED & ready (USER-RUN GPU)**. Session 389 expanded training data for complete argument coverage across 5 content-gen agents: presentation_generator (5 placeholders + renderer/duration/audience/audience_context), research_to_presentation, podcast_generator, research_to_podcast, deep_research. Also added monopolize conditional_args for test_suite, target_languages multi-value conditional (es-MX/es-ES/es-AR + en/fr/de) for podcast agents. Fixed multi-placeholder expansion bug in xml_coordinator.py. 35,564 train + 4,446 test + 4,446 validate examples generated; all JSONL files validated. **When GPU free, USER runs**: `./src/scripts/run-agentic-intent-training.sh test` (1% sanity, 5-10 min) then `full` (~3-4 hrs). Plan: `src/cosa/agents/presentation_generator/rnd/2026.04.05-voice-routing-training-data-complete-coverage.md`.
-
-- [x] [LUPIN] **Presentation Generator Visual Rendering Expansion — Phase 11: Theme Integration**. Cross-cutting theme wiring for all renderers. Plan doc: `src/rnd/v0.1.6/2026.03.14-presentation-generator/renderers/05-theme-integration-plan.md`.
-- [ ] [LUPIN] **Interrupted job re-enqueue mechanism**. `mark_interrupted_jobs()` in `job_persistence.py` marks pending/running jobs as interrupted at startup but does NOT re-enqueue them. Long-running jobs (presentation ~8min, deep research ~15min) are lost on server restart. Proposed: persist constructor args in `metadata_json` at creation time, add `requeue_interrupted_jobs()` at startup with max retry guard. See postmortem plan: `~/.claude/plans/misty-noodling-babbage.md` Step 5.
-- [ ] [LUPIN] **Run Opus through test-suite endpoint**. Sonnet validated (`pr-512e5ca4`, 15 slides, $0.46). Opus has never run through `POST /api/test-suite/submit` — the Apr 5 success was via rogue background bash. ~$2.43 cost.
-- [x] [LUPIN] **TestSuiteJob: Manual + Automated Testing** — Pattern A implemented (Session 386). Remaining: (1) Fix voice_io dispatcher bug (`AgentNotificationDispatcher` missing `notify` attribute — notifications fall back to CLI), (2) Manual UI verification of submit card + scheduling, (3) Verify scheduling timezone fix with live scheduled job, (4) Run live pipeline smoke test with server, (5) Integration test for `POST /api/test-suite/submit`. Plan: `src/rnd/v0.1.6/2026.03.31-test-suite-agentic-job-plan.md`
-- [ ] [LUPIN] Full E2E re-run needed to verify 2 visual regression errors are pre-existing (test_visual_regression.py profile + notifications)
-## v0.1.6 — FUTURE DEVELOPMENT
-
-### INI Config Key Naming Convention — Standardize on Spaces (Sessions 256, 349)
-
-### Prediction System: Validation + Documentation
-
-- [ ] **[LUPIN] Prediction System Validation Campaign** — Unified 6-phase validation of UPE (7 slices, 87 unit + 21 E2E) and SWE proxy Layer 2 (shadow-mode capture). Phases: baseline, threshold tuning, SWE shadow-mode, gap tests (+6 E2E), visual QA, full lifecycle. 136 existing + 6 new = 142 total tests.
-  - **Umbrella plan**: [`src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.25-prediction-system-validation-campaign.md`](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.25-prediction-system-validation-campaign.md)
-  - **UPE validation plan**: [`src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.11-upe-live-e2e-validation-plan.md`](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.11-upe-live-e2e-validation-plan.md)
-  - **SWE workload doc**: [`src/rnd/2026.02.25-swe-proxy-data-origin-and-workload-generator.md`](src/rnd/2026.02.25-swe-proxy-data-origin-and-workload-generator.md)
-  - **Progress**: Phase 1 DONE. Phase 2 LanceDB isolation VERIFIED (Session 380) — 195/195 full suite pass, 21/21 prediction engine focused pass. Phases 3-6 can now proceed.
-  - **LanceDB isolation plan**: [`src/rnd/2026.03.25-upe-lancedb-test-isolation.md`](src/rnd/2026.03.25-upe-lancedb-test-isolation.md) — implemented Session 378
-  - **Implementation plan**: [`src/rnd/2026.03.26-upe-lancedb-test-isolation-and-warm-fix.md`](src/rnd/2026.03.26-upe-lancedb-test-isolation-and-warm-fix.md)
-- [ ] **[LUPIN] Trust & Prediction Documentation Update** — Revise `src/docs/proxy-admin-guide.md` for Phase 3 conformal/ICRL + Phase 4 UPE prediction engine. Create `prediction-engine-reference.md`. Blocked by Prediction System Validation Campaign completion.
-  - **Scope**: proxy-admin-guide.md (Sections 7, 9, 10), new prediction-engine-reference.md, docs/README.md links
-  - **Umbrella plan**: [`src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.25-prediction-system-validation-campaign.md`](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.25-prediction-system-validation-campaign.md)
-
-### Config Migration — Claude Agent SDK
-
-- [ ] **[LUPIN] Phase 5: Update agentic voice workflow skill** — Ensure `/lupin-new-claude-agent-sdk-voice-workflow` scaffolds new agents with `from_config()` pattern by default. Update templates in `src/workflow/agentic-voice-workflow.md`.
-
-### CJ Flow: Timed Execution + Monopolize + Pause/Resume (Session 381 — IN PROGRESS)
-
-- [ ] **[LUPIN] Phase 5: Notifications UI + WebSocket integration** — JS event subscriptions (`job_paused`, `job_resumed`), event handlers, paused/scheduled visual states on job cards, pause/resume toggle button, CSS. Continue next session.
-- [ ] **[LUPIN] Phase 6: Documentation + E2E validation** — `websocket-events.md` updates, manual E2E test with live server.
-- **Tracking doc**: [`src/rnd/v0.1.6/2026.03.30-cj-flow/2026.03.27-cj-flow-timed-execution-monopolize-pause.md`](src/rnd/v0.1.6/2026.03.30-cj-flow/2026.03.27-cj-flow-timed-execution-monopolize-pause.md)
-
-### CJ Flow: Unified Job State Machine (Pre-Hybrid Fast Lane)
-
-- [ ] **[LUPIN] Refactor fragmented state tracking** — Replace `status` field + queue position + `paused` boolean with unified `job_state` column (`pending → queued → scheduled → running → paused → completed/failed/cancelled`). Touches 15+ files: protocol, 7 job types, consumer, persistence, routers, UI. Dedicated preparatory effort before Hybrid Fast Lane.
-- **Assessment doc**: [`src/rnd/v0.1.6/2026.03.30-cj-flow/2026.03.30-unified-job-state-machine-assessment.md`](src/rnd/v0.1.6/2026.03.30-cj-flow/2026.03.30-unified-job-state-machine-assessment.md)
-- **CJ Flow hub**: [`src/rnd/v0.1.6/2026.03.30-cj-flow/00-index.md`](src/rnd/v0.1.6/2026.03.30-cj-flow/00-index.md)
-
-### CJ Flow: Hybrid Fast Lane + Bounded Agentic Pool (Session 237)
-
-- [x] **[LUPIN] Phase 1.1: Add RLock to FifoQueue** — `fifo_queue.py`: wrap all mutating + reading methods with `threading.RLock()`
-- [x] **[LUPIN] Phase 1.2: Add config key** — `lupin-app.ini` + `lupin-app-splainer.ini`: `cj flow max concurrent agentic jobs = 3`
-- [x] **[LUPIN] Phase 1.3: Write thread safety tests** — `test_fifo_queue_thread_safety.py`: 4 concurrency tests
-- [x] **[LUPIN] Phase 1.4: Verify Phase 1** — New + existing unit tests pass
-- [x] **[LUPIN] Phase 2.1: Agentic pool + dispatcher refactor** — `running_fifo_queue.py`: ThreadPoolExecutor, route by isinstance, new methods
-- [x] **[LUPIN] Phase 2.2: Update shutdown sequence** — `main.py`: add pool shutdown before consumer thread
-- [x] **[LUPIN] Phase 2.3: Write agentic pool tests** — `test_agentic_pool.py`: 10 pool behavior tests
-- [x] **[LUPIN] Phase 2.4: Verify Phase 2** — New + existing unit tests pass
-- [x] **[LUPIN] Phase 3.1: API endpoint** — `/api/queue/pool-status` (optional)
-- [x] **[LUPIN] Phase 3.2: Integration verification** — Manual E2E test with concurrent agentic + sync jobs
-- **Prerequisite**: Unified Job State Machine refactor must complete first (freshness review of this plan against new consumer loop)
-- **Tracking doc**: `src/rnd/2026.02.19-approach-c-hybrid-queue-architecture.md`
-
-### Playwright E2E Browser Testing (Session 252)
-
-### DataFrame CRUD with Voice I/O — UI Testing + Voice Polish
-
-- [ ] **[LUPIN] Interactive E2E Testing of CRUD Agents** — Execute the 29-scenario testing protocol at `src/rnd/2026.02.04-headless-cc-for-dataframe-crud/testing-protocol.md`.
-  - [x] Part 1: Mock pipeline tests (17/17 passed — routing, pipeline, cache, confirmation, prompt construction)
-  - [x] Bug fix: CRUD agent completion — emit_job_state_transition, answer guard, done queue push (3 new tests, 532/532 pass)
-  - [x] Bug fix: TTS focus mode stuck — staleness check in restoreTTSQueueState + exit in moveToRegularNotifications (Session 164)
-  - [x] **Bug fix: delete_item deletes all records** — Session 189: dedup guard, multi-delete guard, infra column rejection. 6 new tests (816 total). Commit fd21f0c.
-  - [x] Part 3: Curl smoke tests → **SUPERSEDED** by `test_crud_live_pipeline.py` (8-scenario automated test, Session 189)
-  - [x] **Run CRUD live pipeline test** — `test_crud_live_pipeline.py --mode direct --auto-proxy`. Session 267 fixed credential mismatch (CREDENTIAL_ENV_PREFIX unified).
-  - [ ] Part 2: Notifications UI tests (8 scenarios, live server) — **Leverage Playwright E2E infrastructure**
-- [ ] **[LUPIN] Phase 4: End-to-End Voice Workflows + Polish** - PENDING (blocked by Phase 3 ✅)
-- **Note**: Moved to v0.1.6 to leverage Playwright E2E testing infrastructure for UI test automation
-
-### Presentation Generator Agent (Session 362 — IN PROGRESS)
-
-- [ ] **[LUPIN] Presentation Generator Agent: Transform research docs into slide decks** — 🔄 IN PROGRESS. Phases 1-5 complete, Phase 6 beginning. Next: Phase 6 (Text Rendering: Marp Markdown).
-  - **Goal**: Agentic process (Claude SDK) that transforms ~1200-word research documents or technical blog posts into 10-20 minute slide decks with presenter notes. Single orchestrator pattern (like Podcast Generator).
-  - **Architecture**: 8-phase pipeline (ingest, analyze, outline, elaborate, serialize YAML, render Marp, render Mermaid visuals, deliver). 4 human-in-the-loop gates. Pluggable visual renderer registry. Theme cascade (INI -> YAML template -> per-presentation overrides).
-  - **R&D directory**: [`src/rnd/2026.03.14-presentation-generator/`](src/rnd/2026.03.14-presentation-generator/00-index.md)
-  - **Phase 0**: DONE — Strategy & design serialized, implementation plan & tracking created (4 docs)
-  - **Phase 1**: DONE — Foundation (Job, Config, Voice I/O, CJ Flow packaging) — Session 367b
-  - **Phase 2**: DONE — State models & orchestrator skeleton — Session 367b
-  - **Phase 3**: DONE — Content generation: ingest & analyze
-  - **Phase 4**: DONE — Content generation: outline & elaborate
-  - **Phase 5**: DONE — Content generation: serialize YAML
-  - **Phase 6**: Pending — Text rendering: Marp Markdown
-  - **Phase 7**: Pending — Visual rendering: Mermaid + registry
-  - **Phase 8**: Pending — Delivery & DR-to-Presentation chaining (Phase 8)
-
-### CJ Flow Persistence (Sessions 357, 360, 367 — BACKEND COMPLETE)
-
-- [ ] **[LUPIN] CJ Flow Persistence: Job History UI page** — Future scope. Backend + API complete, no browser page yet. Pick up in next session to scope a job history viewer page.
-
-### Universal Prediction Engine: Live E2E Validation (Session 340)
-
-- [ ] **[LUPIN] Live E2E validation of all 7 UPE slices** — **CONSOLIDATED** into [Prediction System Validation Campaign](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.25-prediction-system-validation-campaign.md). See "Prediction System: Validation + Documentation" section above.
-
-### Render Markdown Documents as HTML + Audio Player Viewer
-
-### Trust Proxy Documentation Update
-
-- [ ] **[LUPIN] Update trust proxy documentation** — **CONSOLIDATED** into [Trust & Prediction Documentation Update](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.25-prediction-system-validation-campaign.md). See "Prediction System: Validation + Documentation" section above.
-
----
 
 ## Pending
 
@@ -2125,3 +802,4 @@ Session 44581b8c spent the day walking the TFE Resume path end-to-end. Every blo
 
 - [`todo-history/2026-04-10-to-2026-05-01-todo.md`](todo-history/2026-04-10-to-2026-05-01-todo.md) — 21 CLOSED + 10 MIXED-excerpt sections, 198 closed bullets, archived 2026-05-01 (Session 92ece47c)
 - [`todo-history/2026-04-14-to-2026-05-28-todo.md`](todo-history/2026-04-14-to-2026-05-28-todo.md) — 27 CLOSED sections (2026-04-14 → 2026-05-28), archived 2026-06-18 (Session 3364493b, Tiffany 💍; task 02f1e0d5)
+- [`todo-history/2026-04-15-to-2026-06-16-todo.md`](todo-history/2026-04-15-to-2026-06-16-todo.md) — 98 sections (2026-04-15 → 2026-06-16 arcs + undated legacy queues), HORIZON sweep at the 2026-06-25 boundary, archived 2026-07-11 (Session 372f9dc9, Mr. Radio 🦉; task 2a190fa2). ⚠️ Contains 359 still-open [ ] bullets swept by age, NOT by disposition — stale-pending review open.

@@ -252,4 +252,5 @@ export class AudioRecorder {
     if (this.state !== "error") this.state = "idle";
   }
   /* c8 ignore stop */
+  /* c8 ignore next */ // tsx phantom-branch artifact on class closing-brace line (synthetic default-constructor branch) — falls just AFTER the browser-API ignore region's stop; not reachable code (StorageService.ts:217 precedent).
 }

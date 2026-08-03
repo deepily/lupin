@@ -10,6 +10,8 @@ deliberately NOT re-tested here.
 Venue: :7999-eligible (pure unit, requests fully mocked, no server, no state).
 """
 
+import inspect
+
 import pytest
 import requests
 
@@ -19,7 +21,11 @@ from lupin_mcp.task_store_tools import (
     task_create_impl,
     task_transition_impl,
     task_correlate_impl,
+    task_reassign_impl,
+    task_amend_impl,
+    task_edit_impl,
     task_query_impl,
+    task_get_impl,
 )
 
 BASE_URL = "http://localhost:7999"
@@ -156,9 +162,32 @@ class TestTaskCreateImpl:
             "accountable_manager" : None,
             "gate_class"          : "none",
             "priority"            : "P2",
+            "urgency"             : "normal",
+            "status"              : "queued",       # DEFAULT mint status (build 1b5483f4)
+            "blocked_by"          : None,
+            "next_chase_ts"       : None,
             "source_qid"          : None,
             "correlation_key"     : None,
         }
+
+    def test_blocked_mint_fields_pass_through( self, capture_request ):
+        # One-call blocked mint (Rick 2026-07-20): status/blocked_by/next_chase_ts
+        # ride the payload verbatim — transport only, no client-side pre-validation.
+        calls = capture_request( FakeResponse( 201, json_body={ } ) )
+        task_create_impl(
+            BASE_URL, API_KEY,
+            created_by    = "mr radio 372f9dc9",
+            item_class    = "task",
+            title         = "held on tiberius",
+            project       = "lupin",
+            status        = "blocked",
+            blocked_by    = [ { "kind": "persona", "id": "tiberius" } ],
+            next_chase_ts = "2026-06-12T09:00:00+00:00",
+        )
+        sent = calls[ "json" ]
+        assert sent[ "status" ]        == "blocked"
+        assert sent[ "blocked_by" ]    == [ { "kind": "persona", "id": "tiberius" } ]
+        assert sent[ "next_chase_ts" ] == "2026-06-12T09:00:00+00:00"
 
     def test_all_optionals_pass_through( self, capture_request ):
         calls = capture_request( FakeResponse( 201, json_body={ } ) )
@@ -171,7 +200,7 @@ class TestTaskCreateImpl:
             body                = "Options: A, B",
             owner_persona       = "tiberius",
             accountable_manager = "tiberius",
-            gate_class          = "ricks_court",
+            gate_class          = "operator",
             priority            = "P1",
             source_qid          = "qid-123",
             correlation_key     = "corr-456",
@@ -181,7 +210,7 @@ class TestTaskCreateImpl:
         assert sent[ "body" ]                == "Options: A, B"
         assert sent[ "owner_persona" ]       == "tiberius"
         assert sent[ "accountable_manager" ] == "tiberius"
-        assert sent[ "gate_class" ]          == "ricks_court"
+        assert sent[ "gate_class" ]          == "operator"
         assert sent[ "priority" ]            == "P1"
         assert sent[ "source_qid" ]          == "qid-123"
         assert sent[ "correlation_key" ]     == "corr-456"
@@ -235,6 +264,7 @@ class TestTaskTransitionImpl:
             "next_chase_ts" : None,
             "blocked_by"    : None,
             "reason"        : None,
+            "park_reason"   : None,          # park wiring (f68bc520) — always in the payload
         }
 
     def test_blocked_fields_pass_through( self, capture_request ):
@@ -314,6 +344,188 @@ class TestTaskCorrelateImpl:
         assert result == { "status": "error", "http_status": 422, "detail": detail }
 
 
+class TestTaskReassignImpl:
+
+    def test_payload_and_route_omits_manager_when_absent( self, capture_request ):
+        # No new_manager -> accountable_manager NOT in the body, so the server's
+        # exclude_unset model_dump leaves the chasing manager UNCHANGED (Q6).
+        # Default authority is the manager-relay handoff lane.
+        body  = { "item": { "id": "abc" }, "event": { "transition": "patched" } }
+        calls = capture_request( FakeResponse( 200, json_body=body ) )
+        result = task_reassign_impl(
+            BASE_URL, API_KEY,
+            actor             = "tiberius d9e65cd8",
+            task_id           = "abc-def",
+            new_owner_persona = "marcus",
+            reason            = "Tiffany pulled onto the P0 arbiter fix",
+        )
+        assert result == body
+        assert calls[ "method" ] == "PATCH"
+        assert calls[ "url" ]    == f"{BASE_URL}/api/tasks/abc-def"
+        assert calls[ "json" ]   == {
+            "owner_persona" : "marcus",
+            "reason"        : "Tiffany pulled onto the P0 arbiter fix",
+            "actor"         : "tiberius d9e65cd8",
+            "authority"     : "manager_relay",
+        }
+        assert "accountable_manager" not in calls[ "json" ]
+
+    def test_new_manager_included_when_supplied( self, capture_request ):
+        # An explicit new_manager re-homes the chasing manager too.
+        calls = capture_request( FakeResponse( 200, json_body={ } ) )
+        task_reassign_impl(
+            BASE_URL, API_KEY,
+            actor             = "tiberius d9e65cd8",
+            task_id           = "abc",
+            new_owner_persona = "marcus",
+            reason            = "lane handoff",
+            new_manager       = "tiberius",
+        )
+        assert calls[ "json" ][ "accountable_manager" ] == "tiberius"
+
+    def test_authority_override_passes_through( self, capture_request ):
+        calls = capture_request( FakeResponse( 200, json_body={ } ) )
+        task_reassign_impl(
+            BASE_URL, API_KEY,
+            actor             = "rick (multiplexer)",
+            task_id           = "abc",
+            new_owner_persona = "marcus",
+            reason            = "human edit",
+            authority         = "user_direct",
+        )
+        assert calls[ "json" ][ "authority" ] == "user_direct"
+
+    def test_404_surfaces_detail_verbatim( self, capture_request ):
+        # A bad task id is the server's 404 to report — transport carries it raw.
+        capture_request( FakeResponse( 404, json_body={ "detail": "task abc not found" } ) )
+        result = task_reassign_impl(
+            BASE_URL, API_KEY,
+            actor             = "tiberius d9e65cd8",
+            task_id           = "abc",
+            new_owner_persona = "marcus",
+            reason            = "whatever",
+        )
+        assert result == { "status": "error", "http_status": 404, "detail": "task abc not found" }
+
+
+class TestTaskEditImpl:
+    """Transport for task_edit — PATCH /api/tasks/{id} with a partial-field
+    `updates` dict. Carries ONE new bit of logic: OWNER-field refusal at the MCP
+    boundary (task_edit's 5-field set is a subset of the server's 7; a raw PATCH
+    would accept owner fields). Invariant fields stay refused by the server's
+    extra=forbid; actor/authority/reason are stamped LAST (basic anti-spoof)."""
+
+    def test_payload_and_route_single_field( self, capture_request ):
+        # The C7 P1-inflation fix: demote priority via one PATCH. The updates
+        # dict is spread into the body + bridge actor/authority/reason appended.
+        body  = { "item": { "id": "abc" }, "event": { "transition": "patched" } }
+        calls = capture_request( FakeResponse( 200, json_body=body ) )
+        result = task_edit_impl(
+            BASE_URL, API_KEY,
+            actor   = "clayton 10b141ea",
+            task_id = "abc-def",
+            updates = { "priority": "P3" },
+            reason  = "over-inflated at mint",
+        )
+        assert result == body
+        assert calls[ "method" ] == "PATCH"
+        assert calls[ "url" ]    == f"{BASE_URL}/api/tasks/abc-def"
+        assert calls[ "json" ]   == {
+            "priority"  : "P3",
+            "actor"     : "clayton 10b141ea",
+            "authority" : "standing",
+            "reason"    : "over-inflated at mint",
+        }
+
+    def test_all_five_free_edit_fields_pass_through( self, capture_request ):
+        # AC2: every one of the 5 free-edit fields is settable, atomically.
+        calls   = capture_request( FakeResponse( 200, json_body={ } ) )
+        updates = { "title": "Retitled", "body": "b", "priority": "P1", "gate_class": "operator", "urgency": "low" }
+        task_edit_impl(
+            BASE_URL, API_KEY,
+            actor   = "clayton 10b141ea",
+            task_id = "abc",
+            updates = updates,
+        )
+        for k, v in updates.items():
+            assert calls[ "json" ][ k ] == v
+
+    def test_actor_authority_reason_stamped_last_override_caller_keys( self, capture_request ):
+        # Basic anti-spoof: a caller "actor"/"authority"/"reason" key in `updates`
+        # is OVERWRITTEN by the bridge/param values (stamped after the spread).
+        calls = capture_request( FakeResponse( 200, json_body={ } ) )
+        task_edit_impl(
+            BASE_URL, API_KEY,
+            actor     = "clayton 10b141ea",
+            task_id   = "abc",
+            updates   = { "priority": "P3", "actor": "rick (spoofed)", "authority": "spoofed", "reason": "spoofed" },
+            reason    = "the real reason",
+            authority = "user_direct",
+        )
+        assert calls[ "json" ][ "actor" ]     == "clayton 10b141ea"
+        assert calls[ "json" ][ "authority" ] == "user_direct"
+        assert calls[ "json" ][ "reason" ]    == "the real reason"
+
+    def test_reason_defaults_none( self, capture_request ):
+        calls = capture_request( FakeResponse( 200, json_body={ } ) )
+        task_edit_impl(
+            BASE_URL, API_KEY,
+            actor   = "clayton 10b141ea",
+            task_id = "abc",
+            updates = { "body": "new body" },
+        )
+        assert calls[ "json" ][ "reason" ] is None
+
+    @pytest.mark.parametrize( "owner_field", [ "owner_persona", "accountable_manager" ] )
+    def test_owner_field_refused_at_mcp_boundary( self, capture_request, owner_field ):
+        # AC8: owner fields are refused HERE (not a server 422 — a raw PATCH would
+        # accept them) with a pointer to task_reassign. NO round-trip.
+        calls  = capture_request( FakeResponse( 200, json_body={ } ) )
+        result = task_edit_impl(
+            BASE_URL, API_KEY,
+            actor   = "clayton 10b141ea",
+            task_id = "abc",
+            updates = { owner_field: "marcus" },
+        )
+        assert result[ "reason" ] == "owner_field_refused"
+        assert "task_reassign" in result[ "detail" ]
+        assert calls == { }    # never reached the wire
+
+    def test_mixed_valid_and_owner_key_aborts_whole_call( self, capture_request ):
+        # Reject-loud: one owner key aborts the entire edit — no partial PATCH.
+        calls  = capture_request( FakeResponse( 200, json_body={ } ) )
+        result = task_edit_impl(
+            BASE_URL, API_KEY,
+            actor   = "clayton 10b141ea",
+            task_id = "abc",
+            updates = { "priority": "P3", "owner_persona": "marcus" },
+        )
+        assert result[ "reason" ] == "owner_field_refused"
+        assert calls == { }
+
+    def test_invariant_field_forwarded_to_server_422( self, capture_request ):
+        # Invariant fields are NOT client-refused — they forward and the server's
+        # extra=forbid 422s them (inherited wall, not re-implemented in the MCP layer).
+        capture_request( FakeResponse( 422, json_body={ "detail": [ { "loc": [ "body", "status" ], "msg": "extra fields not permitted" } ] } ) )
+        result = task_edit_impl(
+            BASE_URL, API_KEY,
+            actor   = "clayton 10b141ea",
+            task_id = "abc",
+            updates = { "status": "done" },
+        )
+        assert result[ "http_status" ] == 422
+
+    def test_404_surfaces_detail_verbatim( self, capture_request ):
+        capture_request( FakeResponse( 404, json_body={ "detail": "task abc not found" } ) )
+        result = task_edit_impl(
+            BASE_URL, API_KEY,
+            actor   = "clayton 10b141ea",
+            task_id = "abc",
+            updates = { "priority": "P3" },
+        )
+        assert result == { "status": "error", "http_status": 404, "detail": "task abc not found" }
+
+
 class TestTaskQueryImpl:
 
     def test_no_args_sends_no_params( self, capture_request ):
@@ -343,7 +555,7 @@ class TestTaskQueryImpl:
             BASE_URL, API_KEY,
             owner_persona       = "sam",
             status              = "queued",
-            gate_class          = "ricks_court",
+            gate_class          = "operator",
             accountable_manager = "tiberius",
             project             = "lupin",
             item_class          = "decision",
@@ -354,7 +566,7 @@ class TestTaskQueryImpl:
         assert calls[ "params" ] == {
             "owner_persona"       : "sam",
             "status"              : "queued",
-            "gate_class"          : "ricks_court",
+            "gate_class"          : "operator",
             "accountable_manager" : "tiberius",
             "project"             : "lupin",
             "item_class"          : "decision",
@@ -390,6 +602,21 @@ class TestTaskQueryImpl:
         task_query_impl( BASE_URL, API_KEY, project="planning-is-prompting" )
         assert calls[ "params" ] == { "project": "plan" }
 
+    def test_guard_params_default_omitted( self, capture_request ):
+        # include_terminal / unscoped_audit default False → NOT sent (the guarded,
+        # terminal-excluding common path; contract unchanged for existing callers).
+        calls = capture_request( FakeResponse( 200, json_body={ "tasks": [ ], "count": 0 } ) )
+        task_query_impl( BASE_URL, API_KEY, owner_persona="sam" )
+        assert "include_terminal" not in calls[ "params" ]
+        assert "unscoped_audit" not in calls[ "params" ]
+
+    def test_guard_params_true_send_canonical_lowercase_true( self, capture_request ):
+        # The deliberate-audit escape (the arbiter + UI board cards): both ride the
+        # wire as the canonical lowercase "true" (mirror of terse).
+        calls = capture_request( FakeResponse( 200, json_body={ "tasks": [ ], "count": 0 } ) )
+        task_query_impl( BASE_URL, API_KEY, unscoped_audit=True, include_terminal=True )
+        assert calls[ "params" ] == { "unscoped_audit": "true", "include_terminal": "true" }
+
 
 class TestProjectAliasRoundTrip:
     """
@@ -419,3 +646,167 @@ class TestProjectAliasRoundTrip:
 
         # The crux: the key written is the key queried -> no false-idle.
         assert stored_project == queried_project == "plan"
+
+
+class TestTaskAmendImpl:
+
+    def test_payload_and_route( self, capture_request ):
+        body  = { "item": { "id": "abc" }, "event": { "transition": "amended" } }
+        calls = capture_request( FakeResponse( 200, json_body=body ) )
+        result = task_amend_impl(
+            BASE_URL, API_KEY,
+            actor   = "arnold 8b7225c4",
+            task_id = "abc-def",
+            note    = "SCOPE REFRAME: subscriber path.",
+            reason  = "manager ruling",
+        )
+        assert result == body
+        assert calls[ "method" ] == "POST"
+        assert calls[ "url" ]    == f"{BASE_URL}/api/tasks/abc-def/amend"
+        assert calls[ "json" ]   == {
+            "note"      : "SCOPE REFRAME: subscriber path.",
+            "reason"    : "manager ruling",
+            "actor"     : "arnold 8b7225c4",
+            "authority" : "standing",
+        }
+
+    def test_reason_defaults_none_and_authority_passes_through( self, capture_request ):
+        calls = capture_request( FakeResponse( 200, json_body={ } ) )
+        task_amend_impl(
+            BASE_URL, API_KEY,
+            actor     = "arnold 8b7225c4",
+            task_id   = "abc",
+            note      = "n",
+            authority = "manager_relay",
+        )
+        assert calls[ "json" ][ "reason" ]    is None
+        assert calls[ "json" ][ "authority" ] == "manager_relay"
+
+    def test_422_surfaces_detail_verbatim( self, capture_request ):
+        # The wrapper is transport-only: whatever 422 the server returns is carried
+        # verbatim. A TERMINAL item is NO LONGER a 422 (Rick 2026-08-02 — it lands
+        # as a post-terminal addendum); a blank note is the standing 422 example.
+        detail = "note must be a non-blank string"
+        capture_request( FakeResponse( 422, json_body={ "detail": detail } ) )
+        result = task_amend_impl(
+            BASE_URL, API_KEY,
+            actor   = "arnold 8b7225c4",
+            task_id = "abc",
+            note    = "n",
+        )
+        assert result == { "status": "error", "http_status": 422, "detail": detail }
+
+    def test_terminal_item_post_terminal_addendum_surfaces_200_verbatim( self, capture_request ):
+        # Rick 2026-08-02: amend on a closed row succeeds — the server returns 200
+        # with an 'amended_post_terminal' event; the wrapper forwards it verbatim.
+        body = { "item": { "status": "done" },
+                 "event": { "transition": "amended_post_terminal" } }
+        capture_request( FakeResponse( 200, json_body=body ) )
+        result = task_amend_impl(
+            BASE_URL, API_KEY,
+            actor   = "mr radio 4829ab05",
+            task_id = "abc",
+            note    = "GATE: verified on re-run.",
+        )
+        assert result == body
+
+
+class TestTaskGetImpl:
+    """
+    task_get (4288dd53) — the single-row fetch-by-id transport. Thin proxy over
+    GET /api/tasks/{task_id}; no server change (AC7). Transport only, so the
+    error contract is inherited from task_store_request and re-pinned here at
+    the by-id route.
+    """
+
+    def test_route_is_the_single_row_get( self, capture_request ):
+        # AC1: a valid id → the FULL serialized item verbatim, via a GET to the
+        # by-id route (no body, no params — nothing to shape).
+        item  = { "id": "4288dd53-6779-460a-88bd-a7365fb734b2", "body": "x" * 8395 }
+        calls = capture_request( FakeResponse( 200, json_body=item ) )
+        result = task_get_impl( BASE_URL, API_KEY, "4288dd53-6779-460a-88bd-a7365fb734b2" )
+        assert result == item                                          # full row, body included
+        assert calls[ "method" ] == "GET"
+        assert calls[ "url" ]     == f"{BASE_URL}/api/tasks/4288dd53-6779-460a-88bd-a7365fb734b2"
+        assert calls[ "json" ]    is None                              # no request body
+        assert calls[ "params" ]  is None                              # no query params
+        assert calls[ "headers" ] == { "X-API-Key": API_KEY }
+
+    def test_404_absent_row_is_error_dict_not_empty_success( self, capture_request ):
+        # AC2: an absent row → error dict carrying the server's detail verbatim.
+        # NEVER an empty success, NEVER None — a silent nothing is the confusion
+        # this verb exists to kill.
+        detail = "task 00000000-0000-0000-0000-000000000000 not found"
+        capture_request( FakeResponse( 404, json_body={ "detail": detail } ) )
+        result = task_get_impl( BASE_URL, API_KEY, "00000000-0000-0000-0000-000000000000" )
+        assert result == { "status": "error", "http_status": 404, "detail": detail }
+        assert result is not None and result != { }                   # not a silent nothing
+
+    def test_malformed_uuid_surfaces_server_422_not_client_raise( self, capture_request ):
+        # AC3: a malformed id is the SERVER's 422 to report — never pre-checked
+        # or raised client-side (transport only, no rule duplication).
+        fastapi_detail = [ { "loc": [ "path", "task_id" ], "msg": "value is not a valid uuid" } ]
+        capture_request( FakeResponse( 422, json_body={ "detail": fastapi_detail } ) )
+        result = task_get_impl( BASE_URL, API_KEY, "not-a-uuid" )
+        assert result == { "status": "error", "http_status": 422, "detail": fastapi_detail }
+
+    def test_missing_auth_is_error_dict_not_exception( self, capture_request ):
+        # AC4: auth failure surfaces as an error dict; no HTTP attempt is made.
+        calls  = capture_request( RuntimeError( "must not be called" ) )
+        result = task_get_impl( BASE_URL, api_key=None, task_id="abc" )
+        assert result == {
+            "status" : "error",
+            "reason" : "missing_auth_header",
+            "detail" : result[ "detail" ],                            # exact text pinned in TestTaskStoreRequest
+        }
+        assert calls == { }                                           # never reached the wire
+
+    def test_server_unreachable_is_error_dict_never_raises( self, capture_request ):
+        # AC4 (transport arm): a hung/refused store surfaces as an error dict.
+        capture_request( requests.exceptions.ConnectionError( "refused" ) )
+        result = task_get_impl( BASE_URL, API_KEY, "abc" )
+        assert result[ "status" ] == "error" and result[ "reason" ] == "server_unreachable"
+
+
+class TestFetchByIdNegativeControl:
+    """
+    🔴 AC5 — THE NEGATIVE CONTROL. Prove the PRE-CHANGE MCP surface CANNOT fetch
+    a row by id, so `task_get` is shown to close a real gap rather than merely
+    pass a test that would pass anyway.
+
+    The pre-change read surface was `task_query_impl` ALONE. The gap is
+    structural and asserted on the SPECIFIC mechanism, not on mere absence
+    (Plan-1 AC8a lesson: a control must name the exact wrong shape): the query
+    verb has no id parameter, and its route is the LIST endpoint, so "give me
+    row X" is not expressible — you can only ask a filter and scan a page, and a
+    page's silence is not an answer.
+    """
+
+    def test_pre_change_query_verb_has_no_id_parameter( self ):
+        # The concrete gap: task_query_impl accepts filters, NONE of which is an
+        # id. A caller literally cannot pass the row's id to the pre-change verb.
+        params = inspect.signature( task_query_impl ).parameters
+        assert "task_id" not in params and "id" not in params and "ids" not in params, (
+            "the pre-change query verb grew an id parameter — fetch-by-id belongs "
+            "in task_get, not folded into the list query (plan §5 option (a))" )
+
+    def test_pre_change_query_verb_hits_the_LIST_route_never_a_by_id_route( self, capture_request ):
+        # Even fully specified, task_query_impl issues a GET to the LIST endpoint
+        # (/api/tasks) and returns a {tasks, count} envelope — never /api/tasks/{id}.
+        # So the only pre-change way to "find row X" is to scan a page, which is
+        # exactly the failure (an absence in a page read as a fact about the world).
+        calls  = capture_request( FakeResponse( 200, json_body={ "tasks": [ ], "count": 0 } ) )
+        result = task_query_impl( BASE_URL, API_KEY, owner_persona="sam" )
+        assert calls[ "url" ] == f"{BASE_URL}/api/tasks"                       # the LIST route, exactly
+        assert not calls[ "url" ].startswith( f"{BASE_URL}/api/tasks/" )       # NOT a by-id route
+        assert set( result.keys() ) == { "tasks", "count" }                   # a LIST envelope, never one row
+
+    def test_task_get_closes_the_gap_it_names( self, capture_request ):
+        # The positive contrast, on the SAME axis the control measures: task_get
+        # DOES take an id and DOES hit the by-id route. The gap is real and this
+        # is what closes it.
+        get_params = inspect.signature( task_get_impl ).parameters
+        assert "task_id" in get_params
+        calls = capture_request( FakeResponse( 200, json_body={ "id": "abc" } ) )
+        task_get_impl( BASE_URL, API_KEY, "abc" )
+        assert calls[ "url" ] == f"{BASE_URL}/api/tasks/abc"                   # the by-id route

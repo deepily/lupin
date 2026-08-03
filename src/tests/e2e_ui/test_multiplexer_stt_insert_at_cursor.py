@@ -1,23 +1,30 @@
 #!/usr/bin/env python3
 """
-E2E — Multiplexer WP6: STT insert-at-caret on Re-record (F5).
+E2E — Multiplexer F5 lane: inline voice-input row (MATCH-LEGACY rebuild).
 
-Exercises the full recorder pipeline in a real browser — SenderCardRecorder-
-Renderer → recordingManager → AudioRecorder — with fakes ONLY at the two
-boundaries a headless browser cannot cross: `navigator.mediaDevices.
-getUserMedia` + `MediaRecorder` (injected via add_init_script) and the STT
-upload endpoint `/api/upload-and-transcribe-mp3` (route stub). Everything in
-between, including the WP6 stash→splice→caret-restore path, is production code.
+Exercises the rebuilt inline `.cc-voice-input-row` (conv-mode + mic + text input
++ send) that senderCard.ts now renders STATICALLY between the card header and
+`.sender-card-dates`, with SenderCardRecorderRenderer as the behavior layer. The
+full recorder pipeline runs in a real browser — SenderCardRecorderRenderer →
+recordingManager → AudioRecorder — with fakes ONLY at the two boundaries a
+headless browser cannot cross: `navigator.mediaDevices.getUserMedia` +
+`MediaRecorder` (injected via add_init_script) and the STT upload endpoint
+`/api/upload-and-transcribe-mp3` (route stub). Everything in between, including
+the F5 stash→splice→caret-restore path on the persistent `.cc-session-msg-input`,
+is production code.
 
-Contract under test (legacy `_insertTranscriptionText`, 2026-06-01 Rick):
-a Re-record's transcription is INSERTED at the caret of the user's edited
-text — replacing only a highlighted range — never clobbering the rest. The
-first record stays plain-fill.
+Covers (both acceptance-gate functional items + Tiberius's round-trip ask):
+  - the inline row renders with all four legacy controls;
+  - mic record → first-fill, re-record caret-splice (legacy `_insertTranscription
+    Text` contract, 2026-06-01 Rick), highlighted-range replace;
+  - send POSTs a user_initiated_message to /api/notify with the legacy wire shape;
+  - the conv-mode toggle POSTs the legacy-verbatim /api/cosa-voice/speakerphone
+    body {on: next} AND the conversation_mode_changed round-trip flips is-active.
 
 Pre-deploy override: set LUPIN_WP6_BUNDLE_PATH to a locally-built
-`dist/multiplexer/boot.js` to run this suite BEFORE the served bundle carries
-the WP6 code (the route swaps the bundle for this page only). Unset, the
-suite tests the bundle the server actually serves — the normal mode.
+`dist/multiplexer/boot.js` to run this suite BEFORE the served bundle carries the
+rebuild (the route swaps the bundle for this page only). Unset, the suite tests
+the bundle the server actually serves.
 
 Venue: :8000 (monopolize, scheduled) — `test_multiplexer_*` E2E batch. Per
 CLAUDE.local.md "USER IS NEVER A TESTER": every assertion is AI.
@@ -38,8 +45,11 @@ import requests
 BASE_URL        = os.environ.get( "LUPIN_API_URL", "http://localhost:7999" )
 MULTIPLEXER_URL = f"{BASE_URL}/app/multiplexer"
 
-STT_ROUTE    = "**/api/upload-and-transcribe-mp3"
-BUNDLE_ROUTE = "**/static/dist/multiplexer/boot.js"
+STT_ROUTE          = "**/api/upload-and-transcribe-mp3"
+BUNDLE_ROUTE       = "**/static/dist/multiplexer/boot.js"
+MANIFEST_ROUTE     = "**/static/dist/multiplexer/manifest.json"
+NOTIFY_ROUTE       = "**/api/notify**"
+SPEAKERPHONE_ROUTE = "**/api/cosa-voice/speakerphone/**"
 
 SENDER_ID    = "wp6.stt@e2e.ai#wp6hash01"
 SESSION_HASH = "wp6hash01"
@@ -88,7 +98,30 @@ _EMIT_MESSAGE_JS = """
             timestamp : args.ts,
             type      : 'task',
         } },
-        source : 'e2e-wp6-stt',
+        source : 'e2e-f5-row',
+        ts     : Date.now(),
+    });
+    return true;
+}
+"""
+
+# Drive the SAME conversation_mode_changed envelope the server broadcasts after
+# the speakerphone POST — the store consumes payload.active (SenderStore
+# handleConversationModeUpdate) → store_senders_changed → card re-render →
+# senderCard.ts renders is-active.
+_EMIT_CONV_MODE_JS = """
+( args ) => {
+    const hook = window.__multiplexerTestHook;
+    if ( !hook || !hook.eventBus ) throw new Error( "multiplexer test hook missing" );
+    hook.eventBus.emit({
+        type    : 'notification_queue_update',
+        payload : { notification: {
+            sender_id : args.sender_id,
+            timestamp : args.ts,
+            type      : 'conversation_mode_changed',
+            payload   : { active: args.active },
+        } },
+        source : 'e2e-f5-convmode',
         ts     : Date.now(),
     });
     return true;
@@ -118,7 +151,7 @@ def _login_tokens() -> tuple[ str, str ]:
 
 def _open( page ):
     """Seed auth + media fakes + STT stub (mutable transcription), navigate,
-    emit one sender card so a .cc-voice-input footer exists.
+    emit one sender card so a CC `.cc-voice-input` row exists.
 
     Returns a state dict; tests mutate state["transcription"] between takes.
     """
@@ -138,6 +171,13 @@ def _open( page ):
 
     bundle_override = os.environ.get( "LUPIN_WP6_BUNDLE_PATH" )
     if bundle_override:
+        # multiplexer.html resolves the bundle through a manifest-driven
+        # cache-bust (imports the content-hashed boot.<hash>.js). Pin the
+        # manifest to the STABLE name so the import resolves to
+        # /static/dist/multiplexer/boot.js, which the next route swaps for the
+        # locally-built bundle under test.
+        page.route( MANIFEST_ROUTE, lambda route: route.fulfill(
+            status=200, content_type="application/json", body=json.dumps( { "boot.js": "boot.js" } ) ) )
         page.route( BUNDLE_ROUTE, lambda route: route.fulfill(
             status=200, content_type="text/javascript", path=bundle_override ) )
 
@@ -147,53 +187,69 @@ def _open( page ):
         timeout=10_000,
     )
     page.evaluate( _EMIT_MESSAGE_JS, { "sender_id": SENDER_ID, "message": "hello", "ts": "2026-06-11T18:00:00.000Z" } )
-    page.wait_for_selector( f'.cc-voice-input[data-session-hash="{SESSION_HASH}"] .record-button', timeout=5_000 )
+    page.wait_for_selector( f'.cc-voice-input[data-session-hash="{SESSION_HASH}"] .cc-session-stt', timeout=5_000 )
     return state
 
 
-def _footer( page ):
+def _row( page ):
     return page.locator( f'.cc-voice-input[data-session-hash="{SESSION_HASH}"]' )
 
 
 def _record_take( page, state, transcription: str ):
     """Drive one record→stop cycle through the REAL pipeline; the stubbed STT
-    endpoint returns `transcription`."""
+    endpoint returns `transcription`. Mic is the record/stop toggle; the row
+    returns to data-recorder-state="idle" once the transcription lands."""
     state[ "transcription" ] = transcription
-    _footer( page ).locator( ".record-button" ).click()   # Record / Re-record
+    _row( page ).locator( ".cc-session-stt" ).click()   # record
     page.wait_for_selector(
         f'.cc-voice-input[data-session-hash="{SESSION_HASH}"][data-recorder-state="recording"]',
         timeout=3_000,
     )
-    _footer( page ).locator( ".record-button" ).click()   # Stop
+    _row( page ).locator( ".cc-session-stt" ).click()   # stop → onComplete → idle
     page.wait_for_selector(
-        f'.cc-voice-input[data-session-hash="{SESSION_HASH}"][data-recorder-state="ready_to_send"]',
+        f'.cc-voice-input[data-session-hash="{SESSION_HASH}"][data-recorder-state="idle"]',
         timeout=5_000,
     )
 
 
-def _textarea_state( page ) -> dict:
+def _input_state( page ) -> dict:
     return page.evaluate(
         """( hash ) => {
-            const ta = document.querySelector( `.cc-voice-input[data-session-hash="${hash}"] .cc-voice-input-textarea` );
-            if ( !ta ) return null;
-            return { value: ta.value, selStart: ta.selectionStart, selEnd: ta.selectionEnd };
+            const el = document.querySelector( `.cc-voice-input[data-session-hash="${hash}"] .cc-session-msg-input` );
+            if ( !el ) return null;
+            return { value: el.value, selStart: el.selectionStart, selEnd: el.selectionEnd };
         }""",
         SESSION_HASH,
     )
 
 
-def test_first_record_plain_fills_textarea( page ):
+def test_voice_input_row_renders_with_all_controls( page ):
     """
     Ensures:
-        - The first record fills the fresh textarea with exactly the
-          transcription (plain-fill path unchanged by WP6)
+        - The CC card renders the inline `.cc-voice-input-row` with the four
+          legacy controls (conv-mode toggle + mic + text input + send)
+    """
+    _open( page )
+    row = _row( page )
+    assert row.locator( ".cc-voice-input-row" ).count() == 1
+    assert row.locator( ".sender-conversation-mode-btn" ).count() == 1
+    assert row.locator( ".stt-button.cc-session-stt" ).count() == 1
+    assert row.locator( "input.cc-session-msg-input" ).count() == 1
+    assert row.locator( ".response-submit-button.cc-session-send" ).count() == 1
+
+
+def test_first_record_fills_the_input( page ):
+    """
+    Ensures:
+        - The first record fills the persistent input with exactly the
+          transcription (caret-splice into an empty field == plain fill)
     """
     state = _open( page )
     _record_take( page, state, "first take" )
 
-    ta = _textarea_state( page )
-    assert ta is not None
-    assert ta[ "value" ] == "first take"
+    st = _input_state( page )
+    assert st is not None
+    assert st[ "value" ] == "first take"
 
 
 def test_rerecord_splices_at_caret_preserving_edits( page ):
@@ -206,23 +262,22 @@ def test_rerecord_splices_at_caret_preserving_edits( page ):
     state = _open( page )
     _record_take( page, state, "first take" )
 
-    # User edits, caret after "edited " (index 7).
     page.evaluate(
         """( hash ) => {
-            const ta = document.querySelector( `.cc-voice-input[data-session-hash="${hash}"] .cc-voice-input-textarea` );
-            ta.value = 'edited first take';
-            ta.focus();
-            ta.setSelectionRange( 7, 7 );
+            const el = document.querySelector( `.cc-voice-input[data-session-hash="${hash}"] .cc-session-msg-input` );
+            el.value = 'edited first take';
+            el.focus();
+            el.setSelectionRange( 7, 7 );
         }""",
         SESSION_HASH,
     )
 
     _record_take( page, state, "NEW " )
 
-    ta = _textarea_state( page )
-    assert ta[ "value" ] == "edited NEW first take", \
+    st = _input_state( page )
+    assert st[ "value" ] == "edited NEW first take", \
         "Re-record must caret-splice, never clobber the user's edits"
-    assert ta[ "selStart" ] == 7 + len( "NEW " ), "caret lands after the inserted text"
+    assert st[ "selStart" ] == 7 + len( "NEW " ), "caret lands after the inserted text"
 
 
 def test_rerecord_replaces_only_highlighted_range( page ):
@@ -236,15 +291,85 @@ def test_rerecord_replaces_only_highlighted_range( page ):
 
     page.evaluate(
         """( hash ) => {
-            const ta = document.querySelector( `.cc-voice-input[data-session-hash="${hash}"] .cc-voice-input-textarea` );
-            ta.focus();
-            ta.setSelectionRange( 6, 11 );   // select "cruel"
+            const el = document.querySelector( `.cc-voice-input[data-session-hash="${hash}"] .cc-session-msg-input` );
+            el.focus();
+            el.setSelectionRange( 6, 11 );   // select "cruel"
         }""",
         SESSION_HASH,
     )
 
     _record_take( page, state, "brave" )
 
-    ta = _textarea_state( page )
-    assert ta[ "value" ] == "Hello brave world"
-    assert ta[ "selStart" ] == 6 + len( "brave" )
+    st = _input_state( page )
+    assert st[ "value" ] == "Hello brave world"
+    assert st[ "selStart" ] == 6 + len( "brave" )
+
+
+def test_send_posts_user_initiated_message( page ):
+    """
+    Ensures:
+        - Clicking send POSTs the input text to /api/notify with the legacy
+          wire shape (type=user_initiated_message, message, target_user, job_id)
+    """
+    state = _open( page )
+
+    captured: dict = {}
+
+    def _notify_handler( route ):
+        req = route.request
+        captured[ "url" ]    = req.url
+        captured[ "method" ] = req.method
+        route.fulfill( status=200, content_type="application/json", body="{}" )
+    page.route( NOTIFY_ROUTE, _notify_handler )
+
+    _record_take( page, state, "ship it" )
+    _row( page ).locator( ".cc-session-send" ).click()
+    page.wait_for_function( "() => true", timeout=2_000 )  # let the click's async POST flush
+
+    assert captured.get( "method" ) == "POST", f"expected a POST to /api/notify; got { captured }"
+    url = captured[ "url" ]
+    assert "type=user_initiated_message" in url
+    assert "ship+it" in url or "ship%20it" in url, f"message not in query: { url }"
+    assert f"job_id={ SESSION_HASH }" in url
+    assert "target_user=wp6.stt%40e2e.ai" in url or "target_user=wp6.stt@e2e.ai" in url
+
+
+def test_conv_mode_toggle_posts_speakerphone_and_roundtrips_is_active( page ):
+    """
+    Ensures:
+        - The conv-mode toggle POSTs the legacy-verbatim
+          /api/cosa-voice/speakerphone/<hash> body {on: true} (initial state
+          off → next on), AND the conversation_mode_changed round-trip flips
+          the button to is-active (byte-identical to legacy toggleConversationMode)
+    """
+    _open( page )
+
+    captured: dict = {}
+
+    def _sp_handler( route ):
+        req = route.request
+        captured[ "url" ]      = req.url
+        captured[ "method" ]   = req.method
+        captured[ "postData" ] = req.post_data
+        route.fulfill( status=200, content_type="application/json", body="{}" )
+    page.route( SPEAKERPHONE_ROUTE, _sp_handler )
+
+    btn = _row( page ).locator( ".sender-conversation-mode-btn" )
+    # Initially off (conversation_mode_active defaults false).
+    assert "is-active" not in ( btn.get_attribute( "class" ) or "" )
+
+    btn.click()
+    page.wait_for_function( "() => true", timeout=2_000 )
+
+    assert captured.get( "method" ) == "POST", f"expected a POST to /speakerphone; got { captured }"
+    assert f"/api/cosa-voice/speakerphone/{ SESSION_HASH }" in captured[ "url" ]
+    assert json.loads( captured[ "postData" ] ) == { "on": True }, \
+        "legacy-verbatim body {on: next}; initial off → next on"
+
+    # Server round-trip: broadcast conversation_mode_changed(active=true) → store
+    # → card re-render → is-active.
+    page.evaluate( _EMIT_CONV_MODE_JS, { "sender_id": SENDER_ID, "active": True, "ts": "2026-06-11T18:01:00.000Z" } )
+    page.wait_for_selector(
+        f'.cc-voice-input[data-session-hash="{SESSION_HASH}"] .sender-conversation-mode-btn.is-active',
+        timeout=5_000,
+    )

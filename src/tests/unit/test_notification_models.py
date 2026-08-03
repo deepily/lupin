@@ -191,6 +191,19 @@ class TestNotificationRequestValidation:
         assert "response_default" not in params
         assert "title" not in params
         assert "api_key" not in params  # Now in HTTP headers
+        assert "idempotency_key" not in params  # bug f433fbae D2: None → omitted
+
+    def test_to_api_params_includes_idempotency_key_when_set( self ):
+        """bug f433fbae D2: a set idempotency_key is forwarded so the server can
+        de-dup a re-POST of the same ask."""
+        request = NotificationRequest(
+            message="Test",
+            response_type=ResponseType.YES_NO,
+            target_user="test@example.com",
+            idempotency_key="11111111-2222-3333-4444-555555555555",
+        )
+        params = request.to_api_params()
+        assert params["idempotency_key"] == "11111111-2222-3333-4444-555555555555"
 
     def test_to_api_params_raises_when_target_user_none( self ):
         """Test that to_api_params() raises ValueError when target_user is None."""

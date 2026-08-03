@@ -13,9 +13,15 @@ Design:
     src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/02-notification-native-aixai-design.md
 """
 
+import datetime
 import unittest
 import uuid
 from unittest.mock import MagicMock, patch
+
+
+# A fixed instant for deterministic EDT-stamp assertions: 21:28:46 UTC → 17:28:46 EDT.
+_JUNE_UTC          = datetime.datetime( 2026, 6, 11, 21, 28, 46, tzinfo=datetime.timezone.utc )
+_EXPECTED_EDT_STAMP = "[2026.06.11 at 17:28:46]"
 
 
 def _make_body( **overrides ):
@@ -26,6 +32,12 @@ def _make_body( **overrides ):
         recipient_persona = "María",
         sender_persona    = "Rio",
         sender_icon       = "🌊",
+        # REQUIRED since step 2 of row 12b5a766 (2026-07-27): an absent
+        # sender_project is a 422 on the write path. These cases exercise
+        # threading / endpoint wiring, not the project seam, so they need a VALID
+        # request to reach the behavior under test. The reject contract itself is
+        # pinned in src/tests/unit/test_dm_sender_project_required.py.
+        sender_project    = "lupin",
     )
     fields.update( overrides )
     return DmSendRequest( **fields )
@@ -38,9 +50,10 @@ class TestExecuteDmSend( unittest.TestCase ):
         self.execute_dm_send = execute_dm_send
         self.queue       = MagicMock()
         self.persist     = MagicMock( return_value="db-123" )
-        self.build_sender = lambda s: f"sender::{s}"
+        # 2-arg seam (row 12b5a766): the core now hands the CALLER's project through.
+        self.build_sender = lambda s, project=None: f"sender::{s}"
 
-    def _run( self, resolve_result, body=None, new_id="fixed-msg-id" ):
+    def _run( self, resolve_result, body=None, new_id="fixed-msg-id", now_fn=None ):
         return self.execute_dm_send(
             authenticated_user_id = "user-uuid-1",
             body                  = body or _make_body(),
@@ -49,6 +62,7 @@ class TestExecuteDmSend( unittest.TestCase ):
             build_sender_id       = self.build_sender,
             persist_fn            = self.persist,
             new_id_fn             = lambda: new_id,
+            now_fn                = now_fn,
         )
 
     def test_unresolved_recipient_returns_422_no_side_effects( self ):
@@ -65,7 +79,7 @@ class TestExecuteDmSend( unittest.TestCase ):
             "http_status" : 200,
             "session_id"  : "abcdef1234567890",
             "persona_name": "María",
-        } )
+        }, now_fn=lambda: _JUNE_UTC )
 
         self.assertEqual( out[ "http_status" ], 201 )
         self.assertEqual( out[ "message_id" ], "db-123" )      # db id wins over generated
@@ -74,24 +88,103 @@ class TestExecuteDmSend( unittest.TestCase ):
         self.assertEqual( out[ "recipient_persona" ], "María" )
         self.assertTrue( out[ "dispatched" ] )
 
+        # The body is EDT-prefixed; the original text rides intact after the stamp.
+        expected_body = f"{_EXPECTED_EDT_STAMP} ready for review"
+
         # persist call
         pk = self.persist.call_args.kwargs
         self.assertEqual( pk[ "direction" ], "ai_to_ai" )
-        self.assertEqual( pk[ "message" ], "ready for review" )
+        self.assertEqual( pk[ "message" ], expected_body )
         self.assertEqual( pk[ "sender_persona" ], "Rio" )
         self.assertEqual( pk[ "sender_icon" ], "🌊" )
         self.assertEqual( pk[ "thread_id" ], "fixed-msg-id" )
         self.assertEqual( pk[ "job_id" ], "abcdef12" )          # recipient session [:8]
         self.assertEqual( pk[ "sender_id" ], "sender::asker-session-aaaa" )
 
-        # push call
+        # push call — SAME stamped body the recipient sees (persist + push identical).
         nk = self.queue.push_notification.call_args.kwargs
         self.assertEqual( nk[ "direction" ], "ai_to_ai" )
-        self.assertEqual( nk[ "message" ], "ready for review" )
+        self.assertEqual( nk[ "message" ], expected_body )
+        self.assertEqual( nk[ "message" ], pk[ "message" ] )
         self.assertEqual( nk[ "job_id" ], "abcdef12" )
         self.assertEqual( nk[ "id" ], "db-123" )
         self.assertEqual( nk[ "sender_persona" ], "Rio" )
         self.assertEqual( nk[ "thread_id" ], "fixed-msg-id" )
+
+    def test_edt_prefix_matches_arbiter_wrap_and_no_double_stamp( self ):
+        """
+        The DM stamp is VISUALLY IDENTICAL to the arbiter ping's wrap of the same
+        instant (drift-lock), lands exactly once (no double-stamp), and leaves the
+        original body intact — threading/persona untouched.
+        """
+        from cosa.utils.edt_timestamp import format_outreach_ts, resolve_tz
+
+        self._run(
+            { "http_status": 200, "session_id": "abcdef1234567890", "persona_name": "María" },
+            now_fn = lambda: _JUNE_UTC,
+        )
+        sent = self.queue.push_notification.call_args.kwargs[ "message" ]
+
+        # Drift-lock: DM body == arbiter caller's f"[{inner}] {body}" for the same instant.
+        tz, _ = resolve_tz( "America/New_York" )
+        arbiter_style = f"[{format_outreach_ts( _JUNE_UTC, tz )}] ready for review"
+        self.assertEqual( sent, arbiter_style )
+        self.assertEqual( sent, f"{_EXPECTED_EDT_STAMP} ready for review" )
+
+        # No double-stamp: exactly one bracketed prefix.
+        self.assertEqual( sent.count( "] " ), 1 )
+        self.assertTrue( sent.startswith( "[" ) )
+
+    def test_already_stamped_body_is_not_re_stamped( self ):
+        """Idempotency (bug f49a8b34 / bc8d9d82): an arbiter ping arrives at
+        /api/dm/send ALREADY carrying its own "[YYYY.MM.DD at HH:MM:SS]" stamp (the
+        arbiter pre-stamps via _route, then pushes through this chokepoint). The DM
+        stamp must NOT re-wrap it — no "[push-ts] [compose-ts]" double. The body
+        passes through verbatim; persist + push stay identical."""
+        already = "[2026.06.11 at 17:28:46] maria is blocking worker bob"
+        self._run(
+            { "http_status": 200, "session_id": "abcdef1234567890", "persona_name": "María" },
+            body   = _make_body( body=already ),
+            now_fn = lambda: _JUNE_UTC,
+        )
+        sent = self.queue.push_notification.call_args.kwargs[ "message" ]
+        persisted = self.persist.call_args.kwargs[ "message" ]
+        self.assertEqual( sent, already )                  # verbatim — no second stamp prepended
+        self.assertEqual( persisted, already )             # persist + push identical
+        self.assertNotIn( "] [", sent )                    # no double-bracket
+        self.assertEqual( sent.count( " at " ), 1 )        # exactly ONE stamp
+
+    def test_already_stamped_body_with_one_leading_space_is_not_re_stamped( self ):
+        """Tolerate one optional leading space before the bracket (anchored at start)
+        — still recognized as already-stamped → passed through, not re-wrapped."""
+        already = " [2026.06.11 at 17:28:46] MANAGER-DOWN: bob"
+        self._run(
+            { "http_status": 200, "session_id": "abcdef1234567890", "persona_name": "María" },
+            body   = _make_body( body=already ),
+            now_fn = lambda: _JUNE_UTC,
+        )
+        sent = self.queue.push_notification.call_args.kwargs[ "message" ]
+        self.assertEqual( sent, already )
+        self.assertNotIn( "] [", sent )
+
+    def test_unstamped_body_still_gets_stamped( self ):
+        """No over-correction: a body with NO leading stamp is stamped exactly once
+        (preserves f35d37a1's central-stamp intent for human dm_send)."""
+        self._run(
+            { "http_status": 200, "session_id": "abcdef1234567890", "persona_name": "María" },
+            body   = _make_body( body="plain text, no stamp" ),
+            now_fn = lambda: _JUNE_UTC,
+        )
+        sent = self.queue.push_notification.call_args.kwargs[ "message" ]
+        self.assertEqual( sent, f"{_EXPECTED_EDT_STAMP} plain text, no stamp" )
+        self.assertEqual( sent.count( " at " ), 1 )
+
+    def test_real_now_default_when_now_fn_omitted( self ):
+        """Production path: now_fn omitted → a real bracketed EDT stamp is produced."""
+        import re
+        self._run( { "http_status": 200, "session_id": "abcdef1234567890", "persona_name": "María" } )
+        sent = self.queue.push_notification.call_args.kwargs[ "message" ]
+        self.assertTrue( re.match( r"^\[\d{4}\.\d{2}\.\d{2} at \d{2}:\d{2}:\d{2}\] ready for review$", sent ) )
 
     def test_supplied_thread_id_is_preserved( self ):
         """A reply carries an existing thread_id → it is NOT overwritten."""

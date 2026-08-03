@@ -35,6 +35,7 @@ import signal
 import subprocess
 import sys
 import time
+import tracemalloc
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -46,13 +47,237 @@ from cosa.agents.utils.proxy_agents.base_config import (
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import build_sender_id_for_cc
 from lupin_cli.claude_code.hooks.lib.listener_processes import tmux_injection_lock
+from lupin_cli.claude_code.hooks.lib.answer_catchup import surface_owed_answers, append_surfaced_id
+from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-SESSION_DIR       = Path.home() / ".claude" / "sessions"
+# Row 8ccc20ab — derived from the one seam (see lib/sessions_dir.py).
+SESSION_DIR       = sessions_dir()
 CENTRALIZED_LOG   = SESSION_DIR / "cc-listeners.log"
 SUBSCRIBED_EVENTS = [ "notification_queue_update" ]
+
+# Transport budget for this listener's out-of-process HTTP calls to `:7999`
+# (row 204911ca). ~30s = 1.60x the observed maximum reload window of 18.76s — a
+# multiplier with explicit headroom, NOT a coverage guarantee. `:7999` runs
+# `uvicorn --reload`; the reloader parent keeps the listening socket bound
+# across a restart, so the kernel ACCEPTS a request nothing is there to answer
+# and the caller hangs rather than getting a fast ConnectionRefused. The prior
+# 10.0s was the closest of the cohort but still under the 18.76s max.
+#
+# Full derivation: src/rnd/v0.1.9/2026.07.19-dev-server-reload-availability.md §9(a).
+#
+# 🔴 DRIFT CONTROL — TWO SEARCHES, AND IT TOOK BOTH.
+# `grep -rn _SERVER_TRANSPORT_TIMEOUT_SECONDS` returns every DIRECT call site.
+# It does NOT return members whose budget is carried in a Pydantic FIELD rather
+# than passed at the call — `AsyncNotificationRequest( timeout=… )`, consumed at
+# `notify_user_async.py:197-201` as a bare `requests.post( timeout=request.timeout )`.
+# Two such members were missed on the first pass for exactly this reason.
+# The second search is: `grep -rn "AsyncNotificationRequest(" -A14 | grep timeout`.
+# Run BOTH, or the set you get back is the set the first grep can see.
+#
+# ⚠️ SCOPE — this covers the HTTP user_id stamp calls ONLY. It does NOT apply to
+# the WebSocket read in base_listener.py, where a reload does not HANG the
+# connection, it KILLS it. That is a reconnect problem, not a budget problem;
+# bumping a timeout there fixes nothing.
+#
+# TRADE: a genuinely hung server stalls a stamp ~30s instead of ~10s. This is a
+# long-lived daemon with no latency pressure on these calls, so the cost is low.
+_SERVER_TRANSPORT_TIMEOUT_SECONDS = 30
+
+# 🔴 F5 — THE FIELD-CARRIED BUDGET IS A SEPARATE NUMBER, NOT THE COHORT'S.
+# The gist notification at `_send_gist_response` does NOT pass its budget at the
+# call; it sets `AsyncNotificationRequest( timeout=… )`, which
+# `notify_user_async.py` consumes as a bare `requests.post( timeout=… )`. Two
+# things make the cohort constant the wrong value there:
+#
+#   1. THAT PATH RETRIES, and `calculate_retry_intervals( request.timeout )`
+#      derives the retry schedule FROM the number — so the cohort's 30 would
+#      cost **267s** of wall clock, not 30s, on a listener callback. 6 rides out
+#      the same 18.76s window in 28s. Full table in `hook_common.py`.
+#   2. THE FIELD IS BOUNDED. `AsyncNotificationRequest.timeout` is
+#      `Field( ge=1, le=30 )` (`notification_models.py:620-625`). Wiring the
+#      cohort constant in here armed a tripwire: a future re-measure raising it
+#      to, say, 45 would make the two `urlopen` sites take it correctly while
+#      THIS site threw ValidationError inside `except Exception: self._log(…)` —
+#      gist responses would stop SILENTLY, and the traceback would say
+#      "validation error", not "budget too high".
+#
+# The assert below is the guard, and it fails at import rather than at runtime.
+NOTIFY_TRANSPORT_TIMEOUT_SECONDS = 6
+
+# Fails loudly at import if THIS MODULE'S budget is pushed past the Pydantic bound
+# it has to fit through. A comment warning about this hazard is not a control;
+# this is.
+#
+# 🔴 SCOPE, stated because the earlier wording here said "either budget" and that was
+# FALSE: this assert guards `cc_notification_listener.NOTIFY_TRANSPORT_TIMEOUT_SECONDS`
+# and NOTHING ELSE. `hook_common.py` declares a same-named constant feeding the same
+# `Field( le=30 )` through the same swallowed-except consumer, and it carries its OWN
+# duplicate assert — because a guard in this module cannot run for that one. Raising
+# only one of the two is caught only by the guard beside it.
+assert NOTIFY_TRANSPORT_TIMEOUT_SECONDS <= 30, (
+    "NOTIFY_TRANSPORT_TIMEOUT_SECONDS exceeds AsyncNotificationRequest.timeout's "
+    "Field( le=30 ) — raise the field bound in notification_models.py first, or "
+    "this fails as an opaque ValidationError inside a swallowed except"
+)
+
+# ── Pane-idle probe sentinels (bug d1bb1456) ────────────────────────────────────
+# The pane-idle probe (`_pane_is_idle_at_prompt`) reads the RECIPIENT tmux pane's
+# real state to decide whether it is safe to inject/wake a peer DM. These sentinel
+# sets are the ONLY CLI-UI-coupled surface: they are strings the Claude Code TUI
+# paints, and a CLI upgrade can change them. That coupling is DELIBERATELY isolated
+# here (+ pinned by test_pane_probe_sentinels_documented) so a UI change is a
+# one-line edit, and — critically — an UNRECOGNISED status line fails the positive
+# idle check and degrades to BUFFER (fail-open direction: never a false inject).
+#
+# Empirically confirmed on live panes 2026-07-02 (see the triage doc).
+
+# A RUNNING turn paints the interrupt affordance in its live status line; a pane
+# parked at an idle prompt does not. Presence ⇒ BUSY ⇒ never inject.
+BUSY_STATUS_SENTINELS = ( "esc to interrupt", )
+
+# Permission / trust / AskUserQuestion dialogs show NO "esc to interrupt", so naive
+# absence-logic would type INTO the dialog and could select an option. Presence of
+# any of these ⇒ a modal is up ⇒ never inject (Mr. Radio hardening #2, 2026-07-02).
+DIALOG_SENTINELS = (
+    "Do you want to proceed",
+    "Would you like to",
+    "No, and tell Claude",
+    "Yes, and don't ask again",
+    "esc to reject",
+    "❯ 1.",
+    "1. Yes",
+)
+
+# POSITIVE idle signal (Mr. Radio hardening #1): the normal input prompt paints a
+# full-width horizontal-rule divider around the entry box. Requiring it means mere
+# busy-sentinel ABSENCE never classifies idle — an unknown/blank state has no
+# divider ⇒ not-injectable ⇒ buffer. 40 rules is well below the real width (~128+)
+# yet long enough to never match incidental box-drawing.
+IDLE_PROMPT_DIVIDER   = "─" * 40          # "────…" (40×)
+
+# Transition-race guard (Mr. Radio hardening #1): a turn that is STARTING may not
+# have painted "esc to interrupt" yet. Require TWO captures this far apart to BOTH
+# classify idle before injecting.
+PANE_PROBE_RECHECK_SECONDS = 0.3
+
+# How often the owner watchdog asks "is the Claude Code process that owns me still
+# alive?". The listener is spawned with start_new_session=True (setsid), so it is
+# reparented to init and NEVER receives the SIGHUP tmux sends its panes when the
+# tmux server dies. Its only other reaper is the SessionEnd hook, which by
+# definition cannot run when the session is killed abruptly. Without this poll a
+# hard death (tmux kill-server, crash, SIGKILL) strands the listener forever,
+# still authenticated and still holding its WebSocket to the notifications UI.
+OWNER_WATCHDOG_INTERVAL_SECONDS = 30
+
+# Memory sampler (opt-in, --memory-trace). On 2026-07-14 two orphaned listeners held
+# 684 MB each against a ~35 MB baseline while logging only ~13 notifications — a
+# one-time large allocation, not message accumulation. The orphans were reaped before
+# they could be profiled, so the leak has no root cause yet. This sampler exists to
+# catch the NEXT one with a real allocation traceback instead of archaeology. It is
+# OFF by default (zero tracemalloc overhead) and only arms under the flag.
+MEMORY_SAMPLE_INTERVAL_SECONDS = 60
+# Log a tracemalloc top-N dump when RSS grows by at least this much since the last dump.
+MEMORY_GROWTH_DUMP_THRESHOLD_MB = 100
+MEMORY_TOP_ALLOCATIONS          = 10
+
+
+def read_self_rss_mb():
+    """
+    This process's resident set size in MB, from /proc/self/status.
+
+    Ensures:
+        - Returns RSS in MB as a float, or None if /proc is unreadable
+    """
+    try:
+        with open( "/proc/self/status" ) as fh:
+            for line in fh:
+                if line.startswith( "VmRSS:" ):
+                    return int( line.split()[ 1 ] ) / 1024.0
+    except ( OSError, ValueError, IndexError ):
+        return None
+    return None
+
+
+# ── Owner liveness (PID-reuse safe) ───────────────────────────────────────────
+
+def read_proc_starttime( pid ):
+    """
+    Read a process's start-time (field 22 of /proc/<pid>/stat) as a string.
+
+    This is the PID-reuse guard. A bare os.kill( pid, 0 ) is not sufficient: if the
+    owner dies and the kernel recycles its PID onto an unrelated process, the naive
+    check reports "alive" forever and the listener never reaps itself — the exact bug
+    this watchdog exists to close. Start-time pins the identity: a recycled PID always
+    carries a different start-time.
+
+    Requires:
+        - pid is a positive integer
+
+    Ensures:
+        - Returns the start-time field as a string, or None if the process is gone
+          or /proc is unreadable
+
+    Args:
+        pid: Process ID to inspect
+
+    Returns:
+        str or None: start-time (clock ticks since boot), or None if unreadable
+    """
+    try:
+        with open( f"/proc/{pid}/stat" ) as fh:
+            data = fh.read()
+    except ( FileNotFoundError, ProcessLookupError, PermissionError, OSError ):
+        return None
+
+    # Format: pid (comm) state ppid ... — comm can itself contain spaces and parens,
+    # so split AFTER the final ')'. fields_after_comm[0] is state (field 3), hence
+    # start-time (field 22) sits at index 19.
+    close_paren = data.rfind( ")" )
+    if close_paren == -1:
+        return None
+
+    fields_after_comm = data[ close_paren + 2 : ].split()
+    if len( fields_after_comm ) < 20:
+        return None
+
+    return fields_after_comm[ 19 ]
+
+
+def owner_is_alive( owner_pid, owner_starttime ):
+    """
+    Is the Claude Code process that owns this listener still running?
+
+    Requires:
+        - owner_pid is a positive integer
+        - owner_starttime is the start-time captured when the listener booted, or
+          None if it could not be captured
+
+    Ensures:
+        - Returns False when the PID is gone
+        - Returns False when the PID exists but carries a DIFFERENT start-time
+          (the PID was recycled onto a new process — the owner is still dead)
+        - Returns True only when the PID exists AND its start-time matches
+
+    Args:
+        owner_pid: PID of the owning Claude Code process
+        owner_starttime: start-time pinned at listener startup
+
+    Returns:
+        bool: True if the original owner process is still alive
+    """
+    current = read_proc_starttime( owner_pid )
+    if current is None:
+        return False
+
+    # No pinned start-time (couldn't read /proc at boot) — fall back to bare
+    # existence. Weaker, but strictly better than never checking at all.
+    if owner_starttime is None:
+        return True
+
+    return current == owner_starttime
 
 
 # ── Listener ──────────────────────────────────────────────────────────────────
@@ -91,6 +316,8 @@ class CCNotificationListener( BaseWebSocketListener ):
         verbose              = False,
         log_file_path        = None,
         centralized_log_path = None,
+        owner_pid            = None,
+        memory_trace         = False,
     ):
         """
         Initialize the CC Notification Listener.
@@ -119,6 +346,11 @@ class CCNotificationListener( BaseWebSocketListener ):
             verbose: Enable verbose output (implies debug)
             log_file_path: Optional path to tee all output to a log file
             centralized_log_path: Path to centralized log (default: CENTRALIZED_LOG)
+            owner_pid: PID of the owning Claude Code process. When given, the listener
+                reaps ITSELF once that process dies — the only cleanup path that
+                survives an abrupt death (tmux kill-server, crash, SIGKILL), because
+                the SessionEnd hook cannot run in those cases. None disables the
+                watchdog and is logged loudly at startup.
         """
         ws_session_name = f"cc-listener-{session_id_hash}"
 
@@ -144,6 +376,13 @@ class CCNotificationListener( BaseWebSocketListener ):
         self._centralized_log_path = Path( centralized_log_path ) if centralized_log_path else CENTRALIZED_LOG
         self._centralized_log      = None
         self._message_count        = 0
+
+        # Pin the owner's identity NOW, while it is certainly alive. Comparing this
+        # start-time on every poll is what makes the watchdog safe against PID reuse.
+        self.owner_pid             = owner_pid
+        self._owner_starttime      = read_proc_starttime( owner_pid ) if owner_pid else None
+
+        self.memory_trace          = memory_trace
 
     def _default_buffer_path( self ) -> Path:
         """
@@ -221,6 +460,70 @@ class CCNotificationListener( BaseWebSocketListener ):
         """
         self._write_central( f"{self._timestamp()} [{self.session_id_hash}] {message}" )
 
+    async def _on_connected( self ):
+        """
+        Catch up on answers OWED to this persona that landed while disconnected
+        (§4.4). Overrides the base no-op; fires on EVERY connect edge (a listener
+        respawn after a bounce IS a first connect, so unlike the browser rehydrator
+        we do NOT gate on the reconnect edge). Owed answers surface as buffered,
+        non-interrupt context drained by the next injecting hook.
+
+        ⚠️ The fetch reads the X-API-Key lane (resolves to the HUMAN OWNER), NEVER
+        `self._user_id` — which here holds the shared SERVICE-ACCOUNT identity set at
+        auth_success. Catch-up is persona-keyed (ruling 6): surface_owed_answers
+        resolves THIS session's persona from the bridge and is never handed a
+        user_id. Routing the fetch through self._user_id would return a
+        correct-looking, silently EMPTY list — the plan's one silent-failure surface
+        (D-V1 is the negative control). Never raises.
+        """
+        try:
+            context = surface_owed_answers( self.session_id_hash )
+            if context:
+                self._buffer_message( {
+                    "message"   : context,
+                    "id"        : "",
+                    "job_id"    : self.session_id_hash,
+                    "direction" : "human_to_ai",
+                } )
+        except Exception as e:
+            self._log( f"{self.LOG_PREFIX} ERROR in answer catch-up on connect: {e}" )
+
+    def _handle_answer_responded( self, event_data ):
+        """
+        Live late-answer handback arm (§4.3, the :481 notification_responded arm).
+
+        The response endpoint's job_id→asker_hash8 fallback (fact 1) makes the
+        notification_responded event reach THIS asking session's socket. Record the
+        answered notification_id into the shared cross-process side-log (so the
+        hook-side catch-up dedupes against it — the §4.3 one-ledger) and surface the
+        answer as a buffered, non-interrupt message. Routes on job_id ∈ accepted_ids.
+        Never raises.
+
+        Requires:
+            - event_data is the notification_responded frame (data carries
+              notification_id + response_value; job_id at top level or in data)
+        """
+        try:
+            data   = event_data.get( "data", event_data ) or {}
+            job_id = data.get( "job_id" ) or event_data.get( "job_id" ) or ""
+            nid    = data.get( "notification_id" ) or ""
+            if not nid or job_id not in self.accepted_ids:
+                return
+            # Cross-process ledger write: the hook folds this side-log into its dedup
+            # (K-D1). O_APPEND makes it lock-free across the listener/hook boundary.
+            append_surfaced_id( self.session_id_hash, nid )
+            answer = data.get( "response_value" )
+            if isinstance( answer, dict ):
+                answer = answer.get( "value", answer )
+            self._buffer_message( {
+                "message"   : f"[Answer to a question you asked earlier — context only] {answer}",
+                "id"        : nid,
+                "job_id"    : self.session_id_hash,
+                "direction" : "human_to_ai",
+            } )
+        except Exception as e:
+            self._log( f"{self.LOG_PREFIX} ERROR in answer-responded arm: {e}" )
+
     async def _handle_event( self, event_type, event_data ):
         """
         Handle a WebSocket event by filtering and buffering.
@@ -230,7 +533,8 @@ class CCNotificationListener( BaseWebSocketListener ):
             - event_data is a dict
 
         Ensures:
-            - Only processes notification_queue_update events
+            - Live late-answer handback: notification_responded is recorded + surfaced
+            - Only processes notification_queue_update events (otherwise)
             - Only buffers user_initiated_message notifications
             - Only buffers notifications whose job_id matches session_id_hash
             - Writes JSONL line to buffer file on match
@@ -240,6 +544,12 @@ class CCNotificationListener( BaseWebSocketListener ):
             event_type: WebSocket event type string
             event_data: Full event payload dict
         """
+        # Late-answer live handback arm (§4.3 :481) — handled BEFORE the
+        # notification_queue_update gate, which would otherwise discard it.
+        if event_type == "notification_responded":
+            self._handle_answer_responded( event_data )
+            return
+
         if event_type != "notification_queue_update":
             if self.verbose:
                 self._log( f"{self.LOG_PREFIX} Ignoring event type: {event_type}" )
@@ -311,49 +621,117 @@ class CCNotificationListener( BaseWebSocketListener ):
             - Active recipient → buffered; idle (or unknown-state) recipient → tmux
             - Never raises (both downstream paths are self-isolating)
         """
-        if self._recipient_is_idle():
+        if self._recipient_is_injectable():
             self._handle_peer_dm( notification )
         else:
             self._buffer_message( notification )
 
-    def _recipient_is_idle( self ):
+    def _recipient_is_injectable( self ):
         """
-        Is this CC session sitting at an idle prompt right now?
+        Is this CC session safe to tmux-inject / wake an arriving peer DM into
+        right now — i.e. is it PARKED AT AN IDLE PROMPT (not busy mid-turn, not
+        sitting at a permission/AskUserQuestion dialog)?
 
-        Reads the most recent heartbeat outcome for this session: a last outcome
-        of EVENT_IDLE ("idle") means the session went idle and is waiting at a
-        prompt. Any other outcome (poked/honored/cap_reached/…) or None (no
-        heartbeat history yet — e.g. a freshly-started session) is treated as
-        ACTIVE, so a peer DM buffers cleanly rather than interrupting.
+        SOURCE OF TRUTH (bug d1bb1456, Mr. Radio ratified 2026-07-02): a bounded,
+        fail-open tmux PANE-IDLE PROBE (`_pane_is_idle_at_prompt`) that OBSERVES
+        the recipient pane's real state. This REPLACES the prior heartbeat-outcome
+        heuristic, which read `last_emitted_outcome()` and returned False (→ buffer)
+        for a parked pane whose last outcome was None (only `idle_prompt` beacons
+        emitted, or a fresh session) or "poked". A parked pane so misclassified had
+        its DM buffered for drain-at-next-tool-boundary — but a parked pane has NO
+        next tool boundary and no UserPromptSubmit, so the DM never drained (the
+        residual of baf5ea6d; see src/rnd/v0.1.9/2026.07.02-parked-worker-dm-wake-
+        gap-triage.md). The probe reads the pane's ACTUAL state instead of inferring
+        from a possibly-stale outcome log.
 
         Ensures:
-            - Returns True iff last_emitted_outcome(<full stable uuid>) == EVENT_IDLE
-            - Returns True when the full id can't be resolved, or on any
-              read/import error (fail toward tmux-wake so a DM is never silently
-              lost to a buffer that nothing drains)
+            - Returns True iff the pane is OBSERVABLY parked at a normal idle prompt
+              (delegates to `_pane_is_idle_at_prompt`).
+            - Returns False when the pane is busy mid-turn, sitting at a dialog, or
+              the probe cannot positively confirm idle (fail-open → buffer; the
+              buffered DM still surfaces via the store reconcile on the next
+              UserPromptSubmit, whereas a mis-injected running turn is unrecoverable).
+            - Never raises.
+        """
+        return self._pane_is_idle_at_prompt()
+
+    def _pane_is_idle_at_prompt( self ):
+        """
+        The pane-idle probe (bug d1bb1456). Captures the recipient tmux pane TWICE,
+        ~PANE_PROBE_RECHECK_SECONDS apart, and returns True iff BOTH captures
+        classify as a normal idle prompt (`_classify_capture_idle`).
+
+        The double capture is the transition-race guard (Mr. Radio hardening #1): a
+        turn that is STARTING may not have painted "esc to interrupt" yet, so a
+        single capture could momentarily read idle; requiring two consistent reads
+        closes that window.
+
+        Ensures:
+            - Returns False when the tmux session can't be resolved (can't probe →
+              fail-open to buffer).
+            - Returns True iff the first AND the (short-)later capture both classify
+              idle; False otherwise. Never raises (capture is total).
+        """
+        tmux_session = self._resolve_tmux_session()
+        if not tmux_session:
+            # No pane to probe → can't confirm idle → fail-open to the buffer path.
+            return False
+        if not self._classify_capture_idle( self._capture_pane( tmux_session ) ):
+            return False
+        time.sleep( PANE_PROBE_RECHECK_SECONDS )
+        return self._classify_capture_idle( self._capture_pane( tmux_session ) )
+
+    def _capture_pane( self, tmux_session ):
+        """
+        Bounded, total `tmux capture-pane` of the recipient pane.
+
+        Ensures:
+            - Returns the captured pane text on a clean (rc==0), non-empty capture.
+            - Returns None on any tmux error (timeout / missing binary / OSError),
+              a non-zero return code, or an empty capture — the caller treats None
+              as NOT-idle (fail-open → buffer). Never raises.
         """
         try:
-            from lupin_cli.claude_code.hooks.lib.session_bridge import find_session_by_id
-            from lupin_cli.claude_code.hooks.lib.heartbeat_events import (
-                last_emitted_outcome, EVENT_IDLE
+            result = subprocess.run(
+                [ "tmux", "capture-pane", "-p", "-t", tmux_session ],
+                capture_output=True, text=True, timeout=2
             )
-            # heartbeat events are keyed by the FULL stable UUID — the file is
-            # <full_uuid>.jsonl, read by EXACT match (no prefix glob), and stop.py
-            # writes via resolve_stable_session_id (full UUID). self.session_id_hash
-            # is the 8-char form, so we MUST resolve the full id via the bridge
-            # first; passing the 8-char hash straight through always misses the
-            # file → None → "active" → the idle→tmux-wake branch was DEAD in prod
-            # (F1, Cheech 2026-06-15). Fix at the source (the listener holds the
-            # wrong-form id), not by loosening the store's exact-match contract.
-            data    = find_session_by_id( self.session_id_hash )
-            full_id = ( data.get( "stable_session_id" ) or data.get( "session_id" ) ) if data else None
-            if not full_id:
-                # No live bridge → can't resolve the full id → fail toward tmux-wake.
-                return True
-            return last_emitted_outcome( full_id ) == EVENT_IDLE
-        except Exception as e:
-            self._log( f"{self.LOG_PREFIX} idle-state read failed (assuming idle/tmux-wake): {e}" )
-            return True
+        except ( subprocess.TimeoutExpired, FileNotFoundError, OSError ) as e:
+            self._log( f"{self.LOG_PREFIX} pane-idle probe capture failed (fail-open→buffer): {e}" )
+            return None
+        if result.returncode != 0:
+            self._log( f"{self.LOG_PREFIX} pane-idle probe rc={result.returncode} (fail-open→buffer)" )
+            return None
+        captured = result.stdout or ""
+        return captured if captured.strip() else None
+
+    @staticmethod
+    def _classify_capture_idle( captured ):
+        """
+        PURE classifier: does a captured pane show a NORMAL IDLE PROMPT — safe to
+        tmux-inject a peer DM into?
+
+        Fail-closed-toward-buffer (Mr. Radio hardening #1 & #2): idle requires a
+        POSITIVE signal, never mere busy-sentinel absence. All must hold:
+          - `captured` is a non-empty string (None ⇒ probe failed ⇒ NOT idle);
+          - no BUSY_STATUS_SENTINELS  (a running turn ⇒ never inject);
+          - no DIALOG_SENTINELS       (permission/AskUserQuestion modal ⇒ typing
+                                        into it could select an option ⇒ never inject);
+          - the IDLE_PROMPT_DIVIDER is present (the normal input-box chrome — the
+                                        positive idle signal; an unknown/blank state
+                                        lacks it ⇒ NOT idle ⇒ buffer).
+
+        Ensures:
+            - Returns True iff captured is non-empty AND busy-free AND dialog-free
+              AND carries the idle-prompt divider; False otherwise. Never raises.
+        """
+        if not captured:
+            return False
+        if any( sentinel in captured for sentinel in BUSY_STATUS_SENTINELS ):
+            return False
+        if any( sentinel in captured for sentinel in DIALOG_SENTINELS ):
+            return False
+        return IDLE_PROMPT_DIVIDER in captured
 
     def _handle_peer_dm( self, notification ):
         """
@@ -702,9 +1080,22 @@ class CCNotificationListener( BaseWebSocketListener ):
             self._log( f"{self.LOG_PREFIX} Gister failed: {e}" )
             gist = None
 
-        # Fallback: first 5 words
+        # Fallback: first 5 words.
+        #
+        # FAIL-LOUD (2026-07-27): this fallback is INDISTINGUISHABLE from a real gist at
+        # the UI — "Received: <5 words>" reads as a short paraphrase, not as a failure —
+        # so a broken Gister degrades silently and stays broken. It did: 526 consecutive
+        # fallbacks between 2026-07-14 and 2026-07-27 (`LUPIN_CONFIG_MGR_CLI_ARGS` not
+        # forwarded across the tmux pane boundary), during which the gist model was never
+        # contacted and no vLLM-side error ever appeared to signal the outage. Mark the
+        # degraded path explicitly so the next occurrence is greppable on sight.
         if not gist:
             gist = " ".join( text.split()[ :5 ] )
+            self._log(
+                f"{self.LOG_PREFIX} DEGRADED: gist unavailable — emitting 5-word prefix "
+                f"fallback \"{gist}\". This is NOT a model-generated gist; the Gister "
+                f"failure logged above is the cause."
+            )
 
         try:
             from lupin_cli.notifications.notification_models import (
@@ -720,7 +1111,7 @@ class CCNotificationListener( BaseWebSocketListener ):
                 priority          = NotificationPriority.LOW,
                 target_user       = target_email,
                 sender_id         = sender_id,
-                timeout           = 3
+                timeout           = NOTIFY_TRANSPORT_TIMEOUT_SECONDS
             )
             notify_user_async( request=request )
             self._log( f"{self.LOG_PREFIX} Gist response sent: \"{gist}\"" )
@@ -814,7 +1205,7 @@ class CCNotificationListener( BaseWebSocketListener ):
                 headers = { "Content-Type": "application/json" },
                 method  = "POST",
             )
-            with urllib.request.urlopen( req, timeout=10.0 ) as resp:
+            with urllib.request.urlopen( req, timeout=_SERVER_TRANSPORT_TIMEOUT_SECONDS ) as resp:
                 payload = json.loads( resp.read().decode( "utf-8" ) )
             user_id = payload.get( "user", { } ).get( "id" )
             if not user_id:
@@ -876,7 +1267,7 @@ class CCNotificationListener( BaseWebSocketListener ):
                 headers = { "Content-Type": "application/json" },
                 method  = "POST",
             )
-            with urllib.request.urlopen( req, timeout=10.0 ) as resp:
+            with urllib.request.urlopen( req, timeout=_SERVER_TRANSPORT_TIMEOUT_SECONDS ) as resp:
                 payload = json.loads( resp.read().decode( "utf-8" ) )
             owner_user_id = payload.get( "user", { } ).get( "id" )
             if not owner_user_id:
@@ -909,6 +1300,111 @@ class CCNotificationListener( BaseWebSocketListener ):
             self._log( f"  Buffer lines  : 0 (file does not exist)" )
         self._log( f"  {'─' * 40}" )
         self._log( "" )
+
+    async def _watch_owner( self ):
+        """
+        Reap this listener once its owning Claude Code process dies.
+
+        This is the ONLY cleanup path that survives an abrupt session death. The
+        listener is setsid'd (start_new_session=True in register_session.py), so the
+        SIGHUP tmux sends its panes never reaches it, and session_end.py — the only
+        other reaper — runs only on a GRACEFUL exit. A tmux kill-server, a crash, or a
+        SIGKILL therefore left the listener alive forever, reconnecting on a loop and
+        still holding its WebSocket to the notifications UI.
+
+        Requires:
+            - self.owner_pid is a positive integer (no-op when None)
+
+        Ensures:
+            - Polls owner liveness every OWNER_WATCHDOG_INTERVAL_SECONDS
+            - Calls self.stop() exactly once when the owner is gone, which unwinds the
+              restart loop in run() the same way SIGTERM does
+            - Returns immediately (watchdog disabled) when no owner_pid was supplied
+        """
+        if not self.owner_pid:
+            self._log(
+                f"{self.LOG_PREFIX} WARNING: no --owner-pid given; owner watchdog is "
+                f"DISABLED. This listener will NOT self-reap if its session dies abruptly."
+            )
+            return
+
+        self._log(
+            f"{self.LOG_PREFIX} Owner watchdog armed: pid={self.owner_pid} "
+            f"starttime={self._owner_starttime} interval={OWNER_WATCHDOG_INTERVAL_SECONDS}s"
+        )
+
+        while self._running:
+            await asyncio.sleep( OWNER_WATCHDOG_INTERVAL_SECONDS )
+
+            if not self._running:
+                break
+
+            if not owner_is_alive( self.owner_pid, self._owner_starttime ):
+                self._log(
+                    f"{self.LOG_PREFIX} Owner (pid {self.owner_pid}) is GONE — "
+                    f"self-reaping to avoid stranding a listener on the notifications UI."
+                )
+                self._log_central(
+                    f"=== LISTENER SELF-REAPED (owner pid {self.owner_pid} died) ==="
+                )
+                await self.stop()
+                return
+
+    async def _sample_memory( self ):
+        """
+        Opt-in RSS + tracemalloc sampler to catch the next listener memory leak.
+
+        Off unless self.memory_trace is set (--memory-trace / LUPIN_CC_LISTENER_MEMTRACE).
+        When on: starts tracemalloc, logs RSS every MEMORY_SAMPLE_INTERVAL_SECONDS, and
+        when RSS has grown by MEMORY_GROWTH_DUMP_THRESHOLD_MB since the last dump, logs a
+        tracemalloc top-N by allocation size — the allocation traceback the 2026-07-14
+        post-mortem lacked because the leaking processes were reaped before profiling.
+
+        Requires:
+            - safe to call always; returns immediately when memory_trace is False
+
+        Ensures:
+            - Never raises into the run loop; tracemalloc is stopped on exit
+            - Emits a growth dump at most once per threshold crossing
+        """
+        if not self.memory_trace:
+            return
+
+        tracemalloc.start( 25 )
+        baseline = read_self_rss_mb()
+        last_dump_rss = baseline or 0.0
+        self._log(
+            f"{self.LOG_PREFIX} Memory sampler armed: baseline RSS={baseline:.1f}MB "
+            f"interval={MEMORY_SAMPLE_INTERVAL_SECONDS}s dump_threshold={MEMORY_GROWTH_DUMP_THRESHOLD_MB}MB"
+        )
+
+        try:
+            while self._running:
+                await asyncio.sleep( MEMORY_SAMPLE_INTERVAL_SECONDS )
+                if not self._running:
+                    break
+
+                rss = read_self_rss_mb()
+                if rss is None:
+                    continue
+                self._log( f"{self.LOG_PREFIX} [mem] RSS={rss:.1f}MB (baseline {baseline:.1f}MB)" )
+
+                if rss - last_dump_rss >= MEMORY_GROWTH_DUMP_THRESHOLD_MB:
+                    last_dump_rss = rss
+                    self._dump_top_allocations( rss )
+        finally:
+            tracemalloc.stop()
+
+    def _dump_top_allocations( self, rss ):
+        """Log the tracemalloc top-N allocations — the traceback that names the leak."""
+        snapshot = tracemalloc.take_snapshot()
+        stats    = snapshot.statistics( "lineno" )
+        self._log(
+            f"{self.LOG_PREFIX} [mem] GROWTH DUMP at RSS={rss:.1f}MB — top "
+            f"{MEMORY_TOP_ALLOCATIONS} allocations:"
+        )
+        for stat in stats[ :MEMORY_TOP_ALLOCATIONS ]:
+            self._log( f"{self.LOG_PREFIX} [mem]   {stat}" )
 
     async def run( self ):
         """
@@ -952,6 +1448,13 @@ class CCNotificationListener( BaseWebSocketListener ):
         restart_cooldown = 60  # seconds
         self._running    = True
 
+        # Arm the owner watchdog alongside the restart loop. It runs for the whole
+        # life of the listener and is the thing that ends it when the session dies
+        # without a graceful SessionEnd.
+        watchdog = asyncio.ensure_future( self._watch_owner() )
+        # Opt-in memory sampler (no-op unless --memory-trace). Same lifetime as the loop.
+        mem_sampler = asyncio.ensure_future( self._sample_memory() )
+
         try:
             while self._running:
                 restart_cycle += 1
@@ -977,6 +1480,8 @@ class CCNotificationListener( BaseWebSocketListener ):
                     await asyncio.sleep( restart_cooldown )
 
         finally:
+            watchdog.cancel()
+            mem_sampler.cancel()
             self._log_central( "=== LISTENER STOPPED ===" )
             self._print_stats()
             if self._centralized_log:
@@ -1021,6 +1526,19 @@ def parse_args():
         "--tmux-session",
         default = None,
         help    = "Explicit tmux session name for Enter trigger (default: auto-resolve from session bridge)"
+    )
+    parser.add_argument(
+        "--owner-pid",
+        type    = int,
+        default = None,
+        help    = "PID of the owning Claude Code process. The listener self-reaps when it dies "
+                  "(survives tmux kill-server / crash / SIGKILL, where SessionEnd cannot run)."
+    )
+    parser.add_argument(
+        "--memory-trace",
+        action  = "store_true",
+        help    = "Arm the opt-in RSS + tracemalloc sampler (catches the listener memory leak "
+                  "with an allocation traceback). Off by default; adds tracemalloc overhead."
     )
     parser.add_argument(
         "--host",
@@ -1129,6 +1647,8 @@ async def main():
         verbose              = args.verbose,
         log_file_path        = args.log_file,
         centralized_log_path = args.centralized_log,
+        owner_pid            = args.owner_pid,
+        memory_trace         = args.memory_trace,
     )
 
     # Graceful shutdown on SIGTERM

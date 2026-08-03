@@ -27,6 +27,7 @@ from typing import Optional, Dict, Any
 import cosa.utils.util as cu
 from cosa.utils.util_stopwatch import Stopwatch
 from cosa.memory.normalizer import Normalizer
+from cosa.rest.db.repositories.vector_store_backend import is_postgres_backend, resolve_lancedb_path
 
 
 class GistCacheTable:
@@ -77,24 +78,33 @@ class GistCacheTable:
         # Initialize normalizer for two-tier lookups (verbatim + normalized)
         self._normalizer = Normalizer()
 
-        # Connect to database
-        db = lancedb.connect( db_uri )
+        # v0.2.0 backend flag (§6): when 'postgres', route storage through the
+        # GistCacheRepository and skip LanceDB entirely. 'lancedb' (default)
+        # preserves the legacy path below byte-for-byte.
+        self._use_postgres = is_postgres_backend()
 
-        if table_name not in db.table_names():
-            self._create_table( db, table_name )
-        else:
-            self._gist_cache_tbl = db.open_table( table_name )
+        # Reject a caller-supplied path that would never be honored (2b20a6d6).
+        db_uri = resolve_lancedb_path( db_uri, "GistCacheTable" )
 
-            # Check for corruption and recover if needed
-            if self._is_table_corrupted():
-                print( "⚠️ WARNING: gist_cache table is corrupted, recreating..." )
-                db.drop_table( table_name )
+        if not self._use_postgres:
+            # Connect to database
+            db = lancedb.connect( db_uri )
+
+            if table_name not in db.table_names():
                 self._create_table( db, table_name )
-                print( "✓ Table recreated successfully (cache was cleared)" )
+            else:
+                self._gist_cache_tbl = db.open_table( table_name )
 
-        if self.debug:
-            count = self._gist_cache_tbl.count_rows()
-            print( f"✓ GistCacheTable initialized: {count} entries in '{table_name}'" )
+                # Check for corruption and recover if needed
+                if self._is_table_corrupted():
+                    print( "⚠️ WARNING: gist_cache table is corrupted, recreating..." )
+                    db.drop_table( table_name )
+                    self._create_table( db, table_name )
+                    print( "✓ Table recreated successfully (cache was cleared)" )
+
+            if self.debug:
+                count = self._gist_cache_tbl.count_rows()
+                print( f"✓ GistCacheTable initialized: {count} entries in '{table_name}'" )
 
     def _create_table( self, db, table_name: str ):
         """
@@ -191,6 +201,8 @@ class GistCacheTable:
         Performance:
             - ~5ms for typical cache check
         """
+        if self._use_postgres: return self._pg_has_cached_gist( question )
+
         try:
             escaped = question.replace( "'", "''" )
             # Use to_lance().scanner() to avoid nprobes warning (filter-only query, no vector search)
@@ -236,6 +248,8 @@ class GistCacheTable:
             Verbatim: "What's 2+2?" → "What's 2+2?" (exact)
             Normalized: "What's 2+2?" → "What is 2+2?" (variation caught)
         """
+        if self._use_postgres: return self._pg_get_cached_gist( question )
+
         if self.debug and self.verbose:
             timer = Stopwatch( msg=f"get_cached_gist( '{cu.truncate_string( question )}' )" )
 
@@ -374,6 +388,8 @@ class GistCacheTable:
         Performance:
             - ~20-25ms for insert operation
         """
+        if self._use_postgres: return self._pg_cache_gist( question, gist, normalized )
+
         try:
             # Check if already exists (avoid duplicates)
             if self.has_cached_gist( question ):
@@ -421,6 +437,8 @@ class GistCacheTable:
         Raises:
             - Returns {"error": msg} on exceptions
         """
+        if self._use_postgres: return self._pg_get_statistics()
+
         try:
             total_rows = self._gist_cache_tbl.count_rows()
 
@@ -456,6 +474,8 @@ class GistCacheTable:
         Side Effects:
             - Deletes all rows from cache table
         """
+        if self._use_postgres: return self._pg_clear_cache()
+
         try:
             # LanceDB doesn't have TRUNCATE, so we'd need to drop and recreate
             # For now, just log a warning
@@ -464,6 +484,67 @@ class GistCacheTable:
         except Exception as e:
             if self.debug:  # pragma: no branch - except is only reachable via the debug-gated count_rows() above, so self.debug is always True here
                 print( f"⚠ Error clearing cache: {e}" )
+
+    # ----------------------------------------------------------------------- #
+    # Postgres+pgvector backend (v0.2.0 §6). Relational storage (no vector col)
+    # via GistCacheRepository; two-tier lookup + normalization preserved here.
+    # ----------------------------------------------------------------------- #
+    def _pg_has_cached_gist( self, question: str ) -> bool:
+        """Postgres mirror of has_cached_gist (verbatim-only existence, as LanceDB)."""
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories.gist_cache_repository import GistCacheRepository
+        with get_db() as session:
+            return GistCacheRepository( session ).get_by_verbatim( question ) is not None
+
+    def _pg_get_cached_gist( self, question: str ) -> Optional[str]:
+        """Postgres mirror of get_cached_gist (verbatim tier, then normalized tier)."""
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories.gist_cache_repository import GistCacheRepository
+        with get_db() as session:
+            repo = GistCacheRepository( session )
+            gist = repo.get_cached_gist( question_verbatim=question )
+            if gist is not None:
+                return gist
+            question_normalized = self._normalizer.normalize( question )
+            return repo.get_cached_gist( question_normalized=question_normalized )
+
+    def _pg_cache_gist( self, question: str, gist: str, normalized: str = "" ) -> None:
+        """Postgres mirror of cache_gist (dedupe on verbatim, then insert with metadata)."""
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories.gist_cache_repository import GistCacheRepository
+        with get_db() as session:
+            repo = GistCacheRepository( session )
+            if repo.get_by_verbatim( question ) is not None:
+                return
+            now = time.strftime( "%Y-%m-%d @ %H:%M:%S" )
+            repo.cache_gist(
+                question_verbatim   = question,
+                question_gist       = gist,
+                question_normalized = normalized,
+                created_date        = now,
+                access_count        = 0,
+                last_accessed       = now,
+            )
+
+    def _pg_get_statistics( self ) -> Dict[str, Any]:
+        """Postgres mirror of get_statistics (exact counts — no sampling needed)."""
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories.gist_cache_repository import GistCacheRepository
+        with get_db() as session:
+            stats            = GistCacheRepository( session ).get_statistics()
+            total_entries    = stats[ "total_entries" ]
+            avg_access_count = ( stats[ "total_access_count" ] / total_entries ) if total_entries else 0
+            return {
+                "total_entries"    : total_entries,
+                "avg_access_count" : avg_access_count,
+                "sample_size"      : total_entries,
+                "table_name"       : self.table_name,
+            }
+
+    def _pg_clear_cache( self ) -> None:
+        """Postgres mirror of clear_cache (not implemented — parity with the LanceDB stub)."""
+        if self.debug:  # pragma: no branch - debug-gated log only, mirrors the LanceDB stub
+            print( "⚠ clear_cache() not implemented (postgres backend)" )
 
 
 def quick_smoke_test():

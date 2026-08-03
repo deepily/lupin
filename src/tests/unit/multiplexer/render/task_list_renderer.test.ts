@@ -9,8 +9,12 @@ import { createEventBusForTesting } from "../../../../lupin_app/static/js/multip
 import {
   createTaskListRenderer,
   type TaskListStoreLike,
+  type TaskListFleetLike,
 } from "../../../../lupin_app/static/js/multiplexer/render/TaskListRenderer";
 import type { TaskListComposite } from "../../../../lupin_app/static/js/multiplexer/render/taskListModel";
+import type { TaskMutation, TaskPatchFields } from "../../../../lupin_app/static/js/multiplexer/stores/TaskListStore";
+import { ApiError } from "../../../../lupin_app/static/js/multiplexer/api/ApiClient";
+import type { FleetComposite } from "../../../../lupin_app/static/js/multiplexer/render/fleetModel";
 import type { StoreTaskListChangedPayload } from "../../../../lupin_app/static/js/multiplexer/shared/types";
 import { TASK_LIST_COLLAPSED_KEY } from "../../../../lupin_app/static/js/multiplexer/render/taskListCollapse";
 
@@ -23,25 +27,59 @@ before(() => {
 // Accordion state lives in localStorage — isolate every test.
 beforeEach(() => { localStorage.clear(); });
 
+// Drain microtasks so a mutation's .then/.catch/.finally chain settles.
+const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
 interface FakeStore extends TaskListStoreLike {
   setComposite(c: TaskListComposite | null): void;
   refreshCalls: number;
+  patchArgs: Array<{ id: string; fields: TaskPatchFields }>;
+  dropArgs: Array<{ id: string; reason: string }>;
+  /** Whether the most recent mutation's restoreState() was invoked. */
+  lastRestoreCalled(): boolean;
+  /** Settle the most recent mutation's `done` promise. */
+  settleLast(ok: boolean, err?: unknown): void;
 }
 
 function makeStore(): FakeStore {
   let composite: TaskListComposite | null = null;
+  const patchArgs: Array<{ id: string; fields: TaskPatchFields }> = [];
+  const dropArgs: Array<{ id: string; reason: string }> = [];
+  let lastRestore = { called: false };
+  let lastDeferred: { resolve: () => void; reject: (e: unknown) => void } | null = null;
+
+  const makeMutation = (): TaskMutation => {
+    const restore = { called: false };
+    lastRestore = restore;
+    const done = new Promise<void>((res, rej) => {
+      lastDeferred = { resolve: () => res(), reject: rej };
+    });
+    return { restoreState: () => { restore.called = true; }, done };
+  };
+
   const store: FakeStore = {
     refreshCalls: 0,
+    patchArgs,
+    dropArgs,
     composite: () => composite,
     refresh: async (): Promise<void> => { store.refreshCalls += 1; },
     setComposite: (c) => { composite = c; },
+    patchTask: (id: string, fields: TaskPatchFields): TaskMutation => { patchArgs.push({ id, fields }); return makeMutation(); },
+    dropTask: (id: string, reason: string): TaskMutation => { dropArgs.push({ id, reason }); return makeMutation(); },
+    lastRestoreCalled: () => lastRestore.called,
+    settleLast: (ok, err) => { if (ok) lastDeferred!.resolve(); else lastDeferred!.reject(err); },
   };
   return store;
 }
 
+// A fake fleet store whose composite() drives the owner-reassignment roster.
+function makeFleet(composite: FleetComposite | null): TaskListFleetLike {
+  return { composite: () => composite };
+}
+
 const FIXED_DATE = (): Date => new Date("2026-06-16T18:30:07Z");
 
-function setup(): {
+function setup( fleet?: TaskListFleetLike ): {
   bus: ReturnType<typeof createEventBusForTesting>;
   store: FakeStore;
   root: HTMLElement;
@@ -49,7 +87,7 @@ function setup(): {
 } {
   const bus = createEventBusForTesting();
   const store = makeStore();
-  const r = createTaskListRenderer({ eventBus: bus, stores: { taskList: store }, nowDateFn: FIXED_DATE });
+  const r = createTaskListRenderer({ eventBus: bus, stores: { taskList: store, fleet }, nowDateFn: FIXED_DATE });
   const root = document.createElement("div");
   r.mount(root);
   const emit = (stampUpdated: boolean): void => {
@@ -66,10 +104,14 @@ const okComposite = (tasks: TaskListComposite["tasks"]): TaskListComposite => ({
 // Chrome + initial paint
 // ---------------------------------------------------------------------------
 
-test("mount builds chrome (title, count, refresh, updated, container)", () => {
+test("mount builds chrome (Lane 0a section-header: title, count, refresh, updated, container)", () => {
   const { root } = setup();
-  assert.ok(root.querySelector(".task-list-title"));
-  assert.ok(root.querySelector(".task-list-count"));
+  // Lane 0a — bespoke .task-list-header → uniform .section-header (📋 Task List
+  // in the <h3>); count in the shared .section-header-count chip.
+  const hdr = root.querySelector(".section-header") as HTMLElement;
+  assert.ok(hdr, "section-header bar present");
+  assert.ok(hdr.querySelector("h3")!.textContent!.includes("📋 Task List"), "title in h3");
+  assert.ok(root.querySelector(".section-header-count"));
   assert.ok(root.querySelector(".task-list-refresh"));
   assert.ok(root.querySelector(".task-list-updated"));
   assert.ok(root.querySelector(".task-list-container"));
@@ -87,7 +129,7 @@ test("initial paint with null composite → unreachable indicator + 'no tasks lo
   const { root } = setup();
   assert.ok(root.querySelector(".task-list-unreachable"));
   assert.ok(root.querySelector(".task-list-empty"));
-  assert.equal(root.querySelector(".task-list-count")?.textContent, "0");
+  assert.equal(root.querySelector(".section-header-count")?.textContent, "0");
   assert.equal(root.querySelector(".task-list-updated")?.textContent, ""); // no stamp on initial (stampUpdated=false path)
 });
 
@@ -100,7 +142,7 @@ test("auth_required → sign-in banner, count 0", () => {
   store.setComposite({ status: "auth_required" });
   emit(true);
   assert.ok(root.querySelector(".task-list-signin"));
-  assert.equal(root.querySelector(".task-list-count")?.textContent, "0");
+  assert.equal(root.querySelector(".section-header-count")?.textContent, "0");
 });
 
 // ---------------------------------------------------------------------------
@@ -116,7 +158,7 @@ test("ok with open tasks → table renders, count = open count, stamp set", () =
   ]));
   emit(true);
   assert.ok(root.querySelector(".task-list-table"));
-  assert.equal(root.querySelector(".task-list-count")?.textContent, "2"); // done excluded
+  assert.equal(root.querySelector(".section-header-count")?.textContent, "2"); // done excluded
   // The blocked row surfaces blocked_by + next_chase.
   const blockedRow = root.querySelector(".task-status-blocked");
   assert.ok(blockedRow);
@@ -130,7 +172,7 @@ test("ok but all terminal → filtered to empty → 'No open tasks.', count 0", 
   emit(true);
   assert.ok(root.querySelector(".task-list-empty"));
   assert.equal(root.querySelector(".task-list-empty")?.textContent, "✅ No open tasks.");
-  assert.equal(root.querySelector(".task-list-count")?.textContent, "0");
+  assert.equal(root.querySelector(".section-header-count")?.textContent, "0");
 });
 
 // ---------------------------------------------------------------------------
@@ -143,7 +185,7 @@ test("explicit unreachable (no prior good) → indicator + 'no tasks loaded yet'
   emit(true);
   assert.ok(root.querySelector(".task-list-unreachable"));
   assert.ok(root.querySelector(".task-list-empty"));
-  assert.equal(root.querySelector(".task-list-count")?.textContent, "0");
+  assert.equal(root.querySelector(".section-header-count")?.textContent, "0");
 });
 
 test("composite with non-array tasks → unreachable branch (3rd OR leg)", () => {
@@ -159,14 +201,14 @@ test("graceful degradation: good fetch then unreachable → last-known rows repl
   store.setComposite(okComposite([{ id: "1", title: "live", status: "in_progress", owner_persona: "amy" }]));
   emit(true);
   assert.ok(root.querySelector(".task-list-table"));
-  assert.equal(root.querySelector(".task-list-count")?.textContent, "1");
+  assert.equal(root.querySelector(".section-header-count")?.textContent, "1");
 
   // 2) store goes unreachable — indicator + LAST-KNOWN table (never blank).
   store.setComposite({ status: "unreachable", tasks: null });
   emit(true);
   assert.ok(root.querySelector(".task-list-unreachable"), "indicator shown");
   assert.ok(root.querySelector(".task-list-table"), "last-known rows still rendered");
-  assert.equal(root.querySelector(".task-list-count")?.textContent, "1", "count holds at last-known");
+  assert.equal(root.querySelector(".section-header-count")?.textContent, "1", "count holds at last-known");
 });
 
 // ---------------------------------------------------------------------------
@@ -198,7 +240,7 @@ test("unmount clears the root subtree", () => {
   const r = createTaskListRenderer({ eventBus: bus, stores: { taskList: store }, nowDateFn: FIXED_DATE });
   const root = document.createElement("div");
   r.mount(root);
-  assert.ok(root.querySelector(".task-list-header"));
+  assert.ok(root.querySelector(".section-header"));
   r.unmount();
   assert.equal(root.childNodes.length, 0);
   // After unmount the subscription is detached — a later emit is a no-op (no throw).
@@ -314,4 +356,357 @@ test("accordion: expand-all clears the set + repaints all expanded", () => {
   assert.deepEqual(JSON.parse(localStorage.getItem(TASK_LIST_COLLAPSED_KEY) ?? "[]"), []);
   const anyCollapsed = [...root.querySelectorAll("tbody.task-group")].some((e) => e.classList.contains("collapsed"));
   assert.ok(!anyCollapsed, "no group collapsed after expand-all");
+});
+
+// ---------------------------------------------------------------------------
+// Phase 2 — per-row editing: delegated change/click → store mutation
+// ---------------------------------------------------------------------------
+
+const FLEET = (): FleetComposite => ({
+  fleet_arbiter: { sessions: [
+    { persona: "amy" },
+    { persona: "bob" },
+    { persona: "Sam" },   // overflow persona — INCLUDED in the roster (Q5)
+  ] },
+});
+
+// Render a single open task (owner "amy", priority "P2") with an optional fleet.
+function renderOne( fleet?: TaskListFleetLike ): ReturnType<typeof setup> {
+  const ctx = setup(fleet);
+  ctx.store.setComposite(okComposite([
+    { id: "t1", title: "one", status: "in_progress", owner_persona: "amy", priority: "P2" },
+  ]));
+  ctx.emit(true);
+  return ctx;
+}
+
+function changeSelect( root: HTMLElement, selector: string, value: string ): void {
+  const sel = root.querySelector<HTMLSelectElement>(selector);
+  sel!.value = value;
+  sel!.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function clickDrop( root: HTMLElement, reason: string | null ): void {
+  if (reason !== null) {
+    const input = root.querySelector<HTMLInputElement>(".task-drop-reason");
+    input!.value = reason;
+  }
+  const btn = root.querySelector<HTMLButtonElement>(".task-drop-button");
+  btn!.dispatchEvent(new Event("click", { bubbles: true }));
+}
+
+test("priority select change → patchTask({priority})", () => {
+  const { store, root } = renderOne(makeFleet(FLEET()));
+  changeSelect(root, ".task-priority-select", "P0");
+  assert.deepEqual(store.patchArgs, [{ id: "t1", fields: { priority: "P0" } }]);
+});
+
+test("owner select change → patchTask({owner_persona})", () => {
+  const { store, root } = renderOne(makeFleet(FLEET()));
+  changeSelect(root, ".task-owner-select", "bob");
+  assert.deepEqual(store.patchArgs, [{ id: "t1", fields: { owner_persona: "bob" } }]);
+});
+
+test("owner roster comes from the fleet store, INCLUDES Sam, includes current owner", () => {
+  const { root } = renderOne(makeFleet(FLEET()));
+  const sel = root.querySelector<HTMLSelectElement>(".task-owner-select");
+  // Current owner "amy" prepended; live roster amy/bob/Sam alpha-sorted, deduped (Q5: Sam included).
+  assert.deepEqual(Array.from(sel!.options).map(o => o.value), ["amy", "bob", "Sam"]);
+});
+
+test("no fleet store → owner select shows only the current owner", () => {
+  const { root } = renderOne(undefined);
+  const sel = root.querySelector<HTMLSelectElement>(".task-owner-select");
+  assert.deepEqual(Array.from(sel!.options).map(o => o.value), ["amy"]);
+});
+
+test("fleet store present but null composite → empty roster (only current owner)", () => {
+  const { root } = renderOne(makeFleet(null));
+  const sel = root.querySelector<HTMLSelectElement>(".task-owner-select");
+  assert.deepEqual(Array.from(sel!.options).map(o => o.value), ["amy"]);
+});
+
+test("drop button with a non-blank reason → dropTask(id, reason)", () => {
+  const { store, root } = renderOne(makeFleet(FLEET()));
+  clickDrop(root, "superseded");
+  assert.deepEqual(store.dropArgs, [{ id: "t1", reason: "superseded" }]);
+  assert.equal(root.querySelector(".task-row-error-stripe"), null, "no error on a valid drop");
+});
+
+test("drop button with a blank reason → NO dropTask + inline error stripe", () => {
+  const { store, root } = renderOne(makeFleet(FLEET()));
+  clickDrop(root, "   ");   // whitespace-only → blank after trim
+  assert.equal(store.dropArgs.length, 0);
+  const stripe = root.querySelector(".task-row-error-stripe");
+  assert.ok(stripe, "error stripe rendered");
+  assert.match(stripe?.textContent ?? "", /reason is required/i);
+});
+
+test("blank-drop error stripe does not stack on repeat", () => {
+  const { root } = renderOne(makeFleet(FLEET()));
+  clickDrop(root, "");
+  clickDrop(root, "");
+  assert.equal(root.querySelectorAll(".task-row-error-stripe").length, 1);
+});
+
+test("change on a non-control element is ignored", () => {
+  const { store, root } = renderOne(makeFleet(FLEET()));
+  root.querySelector(".task-col-title")!.dispatchEvent(new Event("change", { bubbles: true }));
+  assert.equal(store.patchArgs.length, 0);
+});
+
+test("idless row → priority change and drop are no-ops", () => {
+  const ctx = setup(makeFleet(FLEET()));
+  ctx.store.setComposite(okComposite([{ title: "noid", status: "queued", owner_persona: "amy" }]));
+  ctx.emit(true);
+  changeSelect(ctx.root, ".task-priority-select", "P0");
+  clickDrop(ctx.root, "reason");
+  assert.equal(ctx.store.patchArgs.length, 0);
+  assert.equal(ctx.store.dropArgs.length, 0);
+});
+
+test("in-flight dedupe: a second same-control edit is a no-op until the first settles", async () => {
+  const { store, root } = renderOne(makeFleet(FLEET()));
+  changeSelect(root, ".task-priority-select", "P0");
+  changeSelect(root, ".task-priority-select", "P1");   // same key → deduped while in flight
+  assert.equal(store.patchArgs.length, 1);
+  store.settleLast(true);
+  await tick();
+  changeSelect(root, ".task-priority-select", "P3");   // key cleared → allowed again
+  assert.equal(store.patchArgs.length, 2);
+});
+
+test("mutation success (2xx) → no rollback, no error stripe", async () => {
+  const { store, root } = renderOne(makeFleet(FLEET()));
+  changeSelect(root, ".task-priority-select", "P0");
+  store.settleLast(true);
+  await tick();
+  assert.equal(store.lastRestoreCalled(), false);
+  assert.equal(root.querySelector(".task-row-error-stripe"), null);
+});
+
+test("mutation ApiError 404 → treated as success (no rollback, no stripe)", async () => {
+  const { store, root } = renderOne(makeFleet(FLEET()));
+  changeSelect(root, ".task-priority-select", "P0");
+  store.settleLast(false, new ApiError(404, "/api/tasks/t1", "gone"));
+  await tick();
+  assert.equal(store.lastRestoreCalled(), false);
+  assert.equal(root.querySelector(".task-row-error-stripe"), null);
+});
+
+test("mutation ApiError (non-404) → rollback + error stripe with HTTP code", async () => {
+  const { store, root } = renderOne(makeFleet(FLEET()));
+  changeSelect(root, ".task-priority-select", "P0");
+  store.settleLast(false, new ApiError(500, "/api/tasks/t1", "boom"));
+  await tick();
+  assert.equal(store.lastRestoreCalled(), true);
+  const stripe = root.querySelector(".task-row-error-stripe");
+  assert.match(stripe?.textContent ?? "", /Edit failed \(HTTP 500\)/);
+});
+
+test("mutation non-Api Error → rollback + generic error stripe", async () => {
+  const { store, root } = renderOne(makeFleet(FLEET()));
+  changeSelect(root, ".task-owner-select", "bob");
+  store.settleLast(false, new Error("network down"));
+  await tick();
+  assert.equal(store.lastRestoreCalled(), true);
+  const stripe = root.querySelector(".task-row-error-stripe");
+  assert.match(stripe?.textContent ?? "", /Edit failed: network down/);
+});
+
+// ---------------------------------------------------------------------------
+// Row redesign 2026.06.29 — detail 📄 body overlay (D2: renders the task body)
+// ---------------------------------------------------------------------------
+
+const withBody = (): TaskListComposite =>
+  okComposite([{ id: "abcd1234-ef", title: "has detail", status: "queued", owner_persona: "amy", body: "the full body" }]);
+
+const liveEmoji = (root: HTMLElement): HTMLElement =>
+  root.querySelector<HTMLElement>(".task-detail-emoji:not(.task-detail-empty)")!;
+
+test("detail 📄: clicking a live emoji opens the body overlay (D2 body); Escape dismisses + detaches", () => {
+  const { store, emit, root } = setup();
+  store.setComposite(withBody());
+  emit(true);
+  liveEmoji(root).dispatchEvent(new Event("click", { bubbles: true }));
+  const overlay = document.getElementById("task-body-overlay");
+  assert.ok(overlay, "overlay opened");
+  assert.equal(overlay!.querySelector(".task-body-overlay-body")?.textContent, "the full body");
+  assert.match(overlay!.querySelector(".task-body-overlay-header")?.textContent ?? "", /abcd1234/);
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+  assert.equal(document.getElementById("task-body-overlay"), null, "Escape dismissed");
+});
+
+test("detail 📄: a non-Escape key does NOT dismiss the overlay", () => {
+  const { store, emit, root } = setup();
+  store.setComposite(withBody());
+  emit(true);
+  liveEmoji(root).dispatchEvent(new Event("click", { bubbles: true }));
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "x" }));
+  assert.ok(document.getElementById("task-body-overlay"), "non-Esc keeps it open");
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));   // cleanup
+});
+
+test("detail 📄: backdrop click dismisses; inner panel click does NOT", () => {
+  const { store, emit, root } = setup();
+  store.setComposite(withBody());
+  emit(true);
+  liveEmoji(root).dispatchEvent(new Event("click", { bubbles: true }));
+  const overlay = document.getElementById("task-body-overlay")!;
+  overlay.querySelector<HTMLElement>(".task-body-overlay-content")!
+    .dispatchEvent(new Event("click", { bubbles: true }));   // inner — stopPropagation
+  assert.ok(document.getElementById("task-body-overlay"), "inner-panel click keeps it open");
+  overlay.dispatchEvent(new Event("click", { bubbles: true }));   // backdrop
+  assert.equal(document.getElementById("task-body-overlay"), null, "backdrop click dismissed");
+});
+
+test("detail 📄: Enter on a focused live emoji opens the overlay (keyboard a11y)", () => {
+  const { store, emit, root } = setup();
+  store.setComposite(withBody());
+  emit(true);
+  liveEmoji(root).dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  assert.ok(document.getElementById("task-body-overlay"), "Enter on emoji opened the overlay");
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));   // cleanup
+});
+
+test("detail 📄: a DIMMED (empty-body) emoji click is inert — no overlay", () => {
+  const { store, emit, root } = setup();
+  store.setComposite(okComposite([{ id: "x", title: "no body", status: "queued", owner_persona: "amy" }]));
+  emit(true);
+  const dimmed = root.querySelector<HTMLElement>(".task-detail-emoji.task-detail-empty");
+  assert.ok(dimmed, "dimmed emoji rendered for the body-less row");
+  dimmed!.dispatchEvent(new Event("click", { bubbles: true }));
+  assert.equal(document.getElementById("task-body-overlay"), null, "dimmed emoji opens nothing");
+});
+
+test("detail 📄: a live emoji with NO dataset opens overlay with empty body/id (?? '' fallback)", () => {
+  const { root } = setup();
+  const container = root.querySelector<HTMLElement>(".task-list-container")!;
+  const emoji = document.createElement("span");
+  emoji.className = "task-detail-emoji";   // live (not dimmed), carries no data-task-* attrs
+  container.appendChild(emoji);
+  emoji.dispatchEvent(new Event("click", { bubbles: true }));
+  const overlay = document.getElementById("task-body-overlay")!;
+  assert.equal(overlay.querySelector(".task-body-overlay-body")?.textContent, "");
+  assert.match(overlay.querySelector(".task-body-overlay-header")?.textContent ?? "", /Task detail/);
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));   // cleanup
+});
+
+test("detail 📄: unmount dismisses an open overlay + detaches its Esc listener", () => {
+  const bus = createEventBusForTesting();
+  const store = makeStore();
+  const r = createTaskListRenderer({ eventBus: bus, stores: { taskList: store }, nowDateFn: FIXED_DATE });
+  const root = document.createElement("div");
+  r.mount(root);
+  store.setComposite(withBody());
+  bus.emit<StoreTaskListChangedPayload>({ type: "store_task_list_changed", payload: { stampUpdated: true }, source: "test", ts: 0 });
+  liveEmoji(root).dispatchEvent(new Event("click", { bubbles: true }));
+  assert.ok(document.getElementById("task-body-overlay"), "overlay open before unmount");
+  r.unmount();
+  assert.equal(document.getElementById("task-body-overlay"), null, "unmount tore the overlay down");
+});
+
+// ---------------------------------------------------------------------------
+// F1 (2026.07.01) — ID cell click-to-copy the FULL uuid
+// ---------------------------------------------------------------------------
+
+// A full uuid whose 8-char DISPLAY prefix ("3b85863e") differs from the copy
+// payload — proving the handler copies the FULL id, not the visible slice.
+const FULL_ID = "3b85863e-ccb9-49af-9f3c-0011deadbeef";
+
+// Swap navigator.clipboard for the duration of a test; returns a restore fn.
+function stubClipboard( impl: { writeText: ( t: string ) => Promise<void> } | undefined ): () => void {
+  const original = Object.getOwnPropertyDescriptor( navigator, "clipboard" );
+  Object.defineProperty( navigator, "clipboard", { value: impl, configurable: true } );
+  return () => {
+    if ( original ) { Object.defineProperty( navigator, "clipboard", original ); }
+    else { delete ( navigator as { clipboard?: unknown } ).clipboard; }
+  };
+}
+
+// Mount a renderer with a captured flash-timer, render the given tasks, return
+// the root + the list of scheduled timers (so a test can fire the flash timeout).
+function renderCopyableWith( tasks: TaskListComposite["tasks"] ): {
+  root: HTMLElement;
+  timers: Array<{ cb: () => void; ms: number }>;
+} {
+  const bus = createEventBusForTesting();
+  const store = makeStore();
+  const timers: Array<{ cb: () => void; ms: number }> = [];
+  const r = createTaskListRenderer({
+    eventBus: bus,
+    stores: { taskList: store },
+    nowDateFn: FIXED_DATE,
+    setTimeoutFn: ( cb, ms ) => { timers.push( { cb, ms } ); return 0; },
+  });
+  const root = document.createElement("div");
+  r.mount(root);
+  store.setComposite( okComposite( tasks ) );
+  bus.emit<StoreTaskListChangedPayload>({ type: "store_task_list_changed", payload: { stampUpdated: true }, source: "test", ts: 0 });
+  return { root, timers };
+}
+
+const renderCopyable = (): ReturnType<typeof renderCopyableWith> =>
+  renderCopyableWith([{ id: FULL_ID, title: "one", status: "in_progress", owner_persona: "amy", priority: "P2" }]);
+
+test("F1: clicking the ID cell copies the FULL uuid + flashes a no-reflow copied state that reverts on timeout", async () => {
+  const writes: string[] = [];
+  const restore = stubClipboard({ writeText: ( t ) => { writes.push( t ); return Promise.resolve(); } });
+  const { root, timers } = renderCopyable();
+  const cell = root.querySelector<HTMLElement>("td.task-col-id")!;
+  assert.equal(cell.textContent, "3b85863e");                 // display is the 8-char PREFIX
+  cell.dispatchEvent(new Event("click", { bubbles: true }));
+  await tick();
+  assert.deepEqual(writes, [FULL_ID]);                        // …but the FULL uuid was copied
+  assert.ok(cell.classList.contains("task-id-copied"));       // transient flash ON
+  assert.equal(timers.length, 1);
+  assert.equal(timers[0].ms, 1200);
+  timers[0].cb();                                             // fire the flash timeout
+  assert.ok(!cell.classList.contains("task-id-copied"));      // …flash reverted (no reflow, class only)
+  restore();
+});
+
+test("F1: Enter and Space on the focused ID cell copy the full uuid (keyboard a11y)", async () => {
+  const writes: string[] = [];
+  const restore = stubClipboard({ writeText: ( t ) => { writes.push( t ); return Promise.resolve(); } });
+  const { root } = renderCopyable();
+  const cell = root.querySelector<HTMLElement>("td.task-col-id")!;
+  cell.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  await tick();
+  cell.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
+  await tick();
+  assert.deepEqual(writes, [FULL_ID, FULL_ID]);
+  restore();
+});
+
+test("F1: clicking an idless (em-dash) ID cell is a no-op — nothing copied", async () => {
+  const writes: string[] = [];
+  const restore = stubClipboard({ writeText: ( t ) => { writes.push( t ); return Promise.resolve(); } });
+  const { root } = renderCopyableWith([{ title: "no-id", status: "queued" }]);
+  const cell = root.querySelector<HTMLElement>("td.task-col-id")!;
+  assert.equal(cell.textContent, "—");
+  cell.dispatchEvent(new Event("click", { bubbles: true }));
+  await tick();
+  assert.deepEqual(writes, []);
+  restore();
+});
+
+test("F1: clipboard unavailable → graceful no-op (no throw, no flash)", () => {
+  const restore = stubClipboard(undefined);
+  const { root } = renderCopyable();
+  const cell = root.querySelector<HTMLElement>("td.task-col-id")!;
+  assert.doesNotThrow(() => cell.dispatchEvent(new Event("click", { bubbles: true })));
+  assert.ok(!cell.classList.contains("task-id-copied"));
+  restore();
+});
+
+test("F1: writeText rejection (permission denied) is swallowed — no flash, no throw", async () => {
+  const restore = stubClipboard({ writeText: () => Promise.reject(new Error("denied")) });
+  const { root, timers } = renderCopyable();
+  const cell = root.querySelector<HTMLElement>("td.task-col-id")!;
+  cell.dispatchEvent(new Event("click", { bubbles: true }));
+  await tick();
+  assert.ok(!cell.classList.contains("task-id-copied"));
+  assert.equal(timers.length, 0);
+  restore();
 });

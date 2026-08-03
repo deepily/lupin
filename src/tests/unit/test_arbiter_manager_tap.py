@@ -16,9 +16,15 @@ if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
 from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob
+from lupin_mcp.persona_normalization import canonical_persona_key
 
 
 NOW = datetime.datetime( 2026, 6, 6, 22, 0, 0, tzinfo=datetime.timezone.utc )
+
+
+def _bridge_key( persona ):
+    """The canonical key the per-poll bridge_mtimes map is keyed by (bug bf8c5cbb)."""
+    return canonical_persona_key( persona ) or persona
 
 
 class _Gateway:
@@ -101,6 +107,128 @@ class TestAttentionWorkers:
         out   = job._attention_workers( fleet, graph )
         assert { v[ "persona" ] for v in out } == { "Holder" }
 
+    # ── bug bbce7e2f: live-peer waits are a legit dependency, not a stall ────────
+
+    def test_holder_awaiting_live_peer_excluded( self ):
+        # REPRODUCTION (bug bbce7e2f): a non-stuck holder awaiting a peer that is
+        # ITSELF alive (Rio actively building) is a legit in-flight dependency —
+        # EXCLUDED from the attention roster (no spurious "blocked" → no -r2 echo).
+        job   = _job( _Gateway(), { } )
+        fleet = {
+            "h":   _working( "h", "MrRadio" ),       # awaiting peer:Rio
+            "rio": _working( "rio", "Rio" ),         # the awaited peer — ALIVE, building
+        }
+        graph = { "edges": { "MrRadio": "Rio" }, "cycles": [ ] }
+        out   = job._attention_workers( fleet, graph )
+        assert out == [ ]                            # live-peer wait → nobody needs attention
+
+    def test_holder_awaiting_dead_peer_kept( self ):
+        # the awaited peer is in the fleet but NON-alive (reaped) → genuine block
+        # on a dead blocker → the holder is KEPT (fail-safe: never hide a block).
+        job   = _job( _Gateway(), { } )
+        fleet = {
+            "h":     _working( "h", "Waiter" ),                  # awaiting peer:Ghost
+            "ghost": _working( "ghost", "Ghost", alive=False ), # awaited peer — DEAD
+        }
+        graph = { "edges": { "Waiter": "Ghost" }, "cycles": [ ] }
+        out   = job._attention_workers( fleet, graph )
+        assert { v[ "persona" ] for v in out } == { "Waiter" }
+
+    def test_holder_awaiting_absent_peer_kept( self ):
+        # the awaited peer is not in the fleet at all (unknown) → treated as NOT
+        # alive → the holder is KEPT (fail-safe).
+        job   = _job( _Gateway(), { } )
+        fleet = { "h": _working( "h", "Waiter" ) }              # awaiting an absent peer
+        graph = { "edges": { "Waiter": "Nobody" }, "cycles": [ ] }
+        out   = job._attention_workers( fleet, graph )
+        assert { v[ "persona" ] for v in out } == { "Waiter" }
+
+    def test_deadlock_cycle_member_kept_even_with_live_peer( self ):
+        # a mutual deadlock (A↔B, both alive) is a REAL stall — both members are
+        # KEPT even though each awaits a LIVE peer (the cycle guard wins). The
+        # store-backed :1018 escalation owns the cycle byte-identically; this
+        # only ensures the manager-tap roster still surfaces it.
+        job   = _job( _Gateway(), { } )
+        fleet = {
+            "a": _working( "a", "Ann" ),
+            "b": _working( "b", "Bob" ),
+        }
+        graph = { "edges": { "Ann": "Bob", "Bob": "Ann" }, "cycles": [ [ "Ann", "Bob" ] ] }
+        out   = job._attention_workers( fleet, graph )
+        assert { v[ "persona" ] for v in out } == { "Ann", "Bob" }
+
+    def test_stuck_holder_awaiting_live_peer_still_kept( self ):
+        # a STUCK session that also happens to await a live peer is KEPT — stuck
+        # always needs attention regardless of the peer's liveness.
+        job   = _job( _Gateway(), { } )
+        fleet = {
+            "s":   _stuck( "s", "Stuckie" ),         # stuck AND awaiting peer:Rio
+            "rio": _working( "rio", "Rio" ),
+        }
+        graph = { "edges": { "Stuckie": "Rio" }, "cycles": [ ] }
+        out   = job._attention_workers( fleet, graph )
+        assert { v[ "persona" ] for v in out } == { "Stuckie" }
+
+    # ── bug bf8c5cbb: bridge-mtime veto extended to the blocked-roster ──────────
+    # The awaited peer reads view alive=False (comms-silent / heads-down) but its
+    # session-bridge mtime is FRESH → it IS alive → the wait is a legit in-flight
+    # dependency → EXCLUDE (the 26dd3afb bridge-veto applied to _attention_workers).
+    # Threads the per-poll bridge_mtimes map (fail-safe: None ⇒ current behavior).
+
+    def test_holder_awaiting_bridge_fresh_but_comms_silent_peer_excluded( self ):
+        """THE REPRO (Rachel case): holder awaits a peer whose view.alive is False
+        (comms-silent) but whose bridge mtime is fresh → excluded, not rostered."""
+        job   = _job( _Gateway(), { } )
+        fleet = {
+            "h":    _working( "h", "Rachel" ),                    # awaiting peer:Busy (Rachel NOT in bridge map)
+            "busy": _working( "busy", "Busy", alive=False ),      # comms-silent view…
+            "bad":  "not-a-dict",                                 # augmentation loop skips non-dicts
+        }
+        graph = { "edges": { "Rachel": "Busy" }, "cycles": [ ] }
+        bridge_mtimes = { _bridge_key( "Busy" ): NOW.timestamp() - 60 }   # …but bridge fresh (60s)
+        out   = job._attention_workers( fleet, graph, now=NOW, bridge_mtimes=bridge_mtimes )
+        assert out == [ ]                                         # bridge-fresh peer → excluded
+
+    def test_holder_awaiting_stale_bridge_peer_kept( self ):
+        """A stale-bridge peer (mtime older than the threshold) does NOT count alive
+        → the holder is KEPT (genuine block; the veto is freshness-gated)."""
+        job   = _job( _Gateway(), { } )
+        fleet = {
+            "h":    _working( "h", "Rachel" ),
+            "busy": _working( "busy", "Busy", alive=False ),
+        }
+        graph = { "edges": { "Rachel": "Busy" }, "cycles": [ ] }
+        bridge_mtimes = { _bridge_key( "Busy" ): NOW.timestamp() - 99999 }   # stale bridge
+        out   = job._attention_workers( fleet, graph, now=NOW, bridge_mtimes=bridge_mtimes )
+        assert { v[ "persona" ] for v in out } == { "Rachel" }
+
+    def test_bridge_mtimes_none_inert_dead_peer_kept( self ):
+        """Fail-safe: bridge_mtimes None (seam unwired / read failed) ⇒ no augmentation
+        ⇒ today's behavior — a comms-silent (non-alive) awaited peer keeps the holder."""
+        job   = _job( _Gateway(), { } )
+        fleet = {
+            "h":    _working( "h", "Rachel" ),
+            "busy": _working( "busy", "Busy", alive=False ),
+        }
+        graph = { "edges": { "Rachel": "Busy" }, "cycles": [ ] }
+        out   = job._attention_workers( fleet, graph, now=NOW, bridge_mtimes=None )
+        assert { v[ "persona" ] for v in out } == { "Rachel" }
+
+    def test_holder_awaiting_future_bridge_peer_kept( self ):
+        """097778b8: a FUTURE bridge mtime (clock skew/corruption ⇒ negative age)
+        must NOT count the peer alive — without the 0<=age lower bound a negative
+        age slips under the threshold and falsely excludes the holder. Fail toward
+        rostering: the holder is KEPT."""
+        job   = _job( _Gateway(), { } )
+        fleet = {
+            "h":    _working( "h", "Rachel" ),
+            "busy": _working( "busy", "Busy", alive=False ),
+        }
+        graph = { "edges": { "Rachel": "Busy" }, "cycles": [ ] }
+        bridge_mtimes = { _bridge_key( "Busy" ): NOW.timestamp() + 60 }   # future mtime → age -60
+        out   = job._attention_workers( fleet, graph, now=NOW, bridge_mtimes=bridge_mtimes )
+        assert { v[ "persona" ] for v in out } == { "Rachel" }            # negative age ⇒ not alive ⇒ kept
+
 
 # ── tap firing / throttle ──────────────────────────────────────────────────────
 
@@ -150,6 +278,21 @@ class TestTapThrottle:
         assert fired == 1
         assert "Blocked: Holder" in gw.sent[ 0 ][ 1 ]
 
+    def test_live_peer_waiters_produce_no_tap( self ):
+        # END-TO-END repro (bug bbce7e2f): MrRadio and Cheech both awaiting a LIVE
+        # Rio (actively building) must NOT generate a "N blocked / cajole" tap —
+        # the spurious advisory that was re-sent as a stale-ts -r2 never fires.
+        gw  = _Gateway()
+        job = _job( gw, { "s1": "MgrA", "s2": "MgrA" } )
+        fleet = {
+            "s1":  _working( "s1", "MrRadio" ),     # awaiting peer:Rio
+            "s2":  _working( "s2", "Cheech" ),      # awaiting peer:Rio
+            "rio": _working( "rio", "Rio" ),        # ALIVE, building
+        }
+        graph = { "edges": { "MrRadio": "Rio", "Cheech": "Rio" }, "cycles": [ ] }
+        fired = job._tap_managers( fleet, graph, [ "rio" ], NOW )
+        assert fired == 0 and gw.sent == [ ]
+
     def test_no_attention_no_tap( self ):
         gw  = _Gateway()
         job = _job( gw, { "s1": "Tiberius" } )
@@ -174,8 +317,12 @@ class TestAdvisoryFraming:
                            { "edges": { }, "cycles": [ [ "A", "B" ] ] }, [ "free1" ], NOW )
         body = gw.sent[ 0 ][ 1 ].lower()
         assert "advisory" in body and "recommend" in body and "do not assign" in body
-        # zero actuation verbs in the recommendation body
-        for verb in ( "assigned", "spawned", "reassigned", "dismissed", "i assigned", "i spawned" ):
+        # zero CLAIMED-actuation verbs in the recommendation body. The MANAGE-not-BUILD
+        # revision (2026-06-29) RECOMMENDS the manager "spawn/assign" and names
+        # "unassigned work" — both advisory, allowed — so the redline is pinned on the
+        # first-person completed-action claim (what the arbiter must NEVER say it did),
+        # not the bare verb stem (which legitimately appears inside "unassigned").
+        for verb in ( "i assigned", "i spawned", "i reassigned", "i dismissed", "i reaped" ):
             assert verb not in body
         assert "free" in body and "deadlock" in body   # carries the actionable counts
 
@@ -292,34 +439,96 @@ class TestManagerAckTracking:
         down = job._check_manager_acks( late, [ ], fleet_view )
         assert down == 1 and "MANAGER-DOWN" in escal[ 0 ]
 
-    def test_manager_bridge_activity_picks_freshest_and_handles_edges( self ):
-        """Direct unit of the helper: freshest mtime across the manager's
-        sessions wins; non-dict views, persona mismatches, missing session_id,
-        unresolved bridges (None), and un-convertible mtimes are all skipped."""
+    def test_manager_liveness_activity_picks_freshest_and_handles_edges( self ):
+        """Direct unit of the 5-signal helper (bug e8f40042): the freshest of the
+        full union (bridge + event + commons + idle_prompt + dm) across the
+        manager's session rows wins, converted back to an absolute datetime;
+        canonical_persona_key matching (mixed-case spelling), count_dm gating,
+        non-dict views, persona mismatches, missing session_id, and rows with NO
+        signal at all are all handled. The OLD _manager_bridge_activity saw only
+        bridge — this helper is the single-source-of-truth replacement."""
         job  = _job( _Gateway(), { } )
-        base = NOW.timestamp()
-        mtimes = {
-            "s-new"    : base + 99,
-            "s-old"    : base + 10,     # older than s-new → does NOT update best
-            "s-newest" : base + 150,    # newest → updates best
-            "s-none"   : None,          # no bridge resolves → skipped
-            "s-bad"    : "garbage",     # fromtimestamp raises (TypeError) → skipped
-        }
+        now  = NOW + datetime.timedelta( seconds=700 )
+        # bridge mtime on one row (oldest signal); a FRESHER event/dm on others.
+        mtimes = { "s-bridge": ( now - datetime.timedelta( seconds=400 ) ).timestamp(),
+                   "s-event" : None, "s-dm": None, "s-bare": None, "s-other": None }
         job._bridge_mtime_fn = lambda sid: mtimes.get( sid )
         fleet_view = {
-            "s-new"    : { "session_id": "s-new",    "persona": "Tiberius" },
-            "s-old"    : { "session_id": "s-old",    "persona": "Tiberius" },
-            "s-newest" : { "session_id": "s-newest", "persona": "Tiberius" },
-            "s-none"   : { "session_id": "s-none",   "persona": "Tiberius" },
-            "s-bad"    : { "session_id": "s-bad",    "persona": "Tiberius" },
-            "s-other"  : { "session_id": "s-other",  "persona": "SomeoneElse" },  # persona mismatch
-            "s-nosid"  : { "persona": "Tiberius" },                               # no session_id → None
-            "not-dict" : "x",                                                     # non-dict view → skipped
+            "s-bridge" : { "session_id": "s-bridge", "persona": "Tiberius" },                         # bridge_age 400
+            "s-event"  : { "session_id": "s-event",  "persona": "tiberius",                           # canon-match (mixed case)
+                           "last_event_ts": now - datetime.timedelta( seconds=200 ) },                # event_age 200
+            "s-dm"     : { "session_id": "s-dm",     "persona": "Tiberius",
+                           "dm_ts": now - datetime.timedelta( seconds=30 ) },                         # dm_age 30 (freshest)
+            "s-stale"  : { "session_id": "s-stale",  "persona": "Tiberius",                           # OLDER than running best
+                           "last_event_ts": now - datetime.timedelta( seconds=500 ) },                # → does NOT update best
+            "s-bare"   : { "session_id": "s-bare",   "persona": "Tiberius" },                         # NO signal → skipped
+            "s-other"  : { "session_id": "s-other",  "persona": "SomeoneElse",                        # persona mismatch → skipped
+                           "dm_ts": now - datetime.timedelta( seconds=1 ) },
+            "not-dict" : "x",                                                                          # non-dict → skipped
         }
-        best = job._manager_bridge_activity( "Tiberius", fleet_view )
-        assert best == datetime.datetime.fromtimestamp( base + 150, tz=datetime.timezone.utc )
-        assert job._manager_bridge_activity( "Nobody",   fleet_view ) is None    # no persona match
-        assert job._manager_bridge_activity( "Tiberius", None )       is None    # None fleet_view
+        # count_dm=True → dm (age 30) is freshest across the matched rows.
+        best = job._manager_liveness_activity( "Tiberius", fleet_view, now, count_dm=True )
+        assert best == now - datetime.timedelta( seconds=30 )
+        # count_dm=False → dm excluded; freshest of the remaining union is event (age 200).
+        best_no_dm = job._manager_liveness_activity( "Tiberius", fleet_view, now, count_dm=False )
+        assert best_no_dm == now - datetime.timedelta( seconds=200 )
+        # no persona match / None fleet_view → None.
+        assert job._manager_liveness_activity( "Nobody",   fleet_view, now, count_dm=True ) is None
+        assert job._manager_liveness_activity( "Tiberius", None,       now, count_dm=True ) is None
+
+    # ── bug e8f40042: tap-ACK must consume the FULL 5-signal union, not {commons,bridge} ──
+
+    def test_dm_only_manager_not_false_downed( self ):
+        """
+        REPRODUCTION (bug e8f40042): a coordination-only manager whose ONLY sign
+        of life is a sent DM (dm_age fresh) — silent on commons AND with a stale
+        bridge (no Read/Edit/Bash to bump it) — was false-DOWNed every window by
+        the OLD {commons, bridge}-only ACK. With the 5-signal union it ACKs.
+        This is exactly María's divergence check.
+        """
+        gw, escal = _Gateway(), [ ]
+        job = _job( gw, { }, notify=lambda m, *a, **k: escal.append( m ) )
+        job._last_tap_at[ "Tiberius" ] = NOW
+        late  = NOW + datetime.timedelta( seconds=700 )                  # past the 600s window
+        stale = ( NOW - datetime.timedelta( seconds=50 ) ).timestamp()   # bridge OLDER than the tap
+        job._bridge_mtime_fn = lambda sid: stale
+        # dm_ts fresh AT/AFTER the tap; commons (who) empty; no event/idle signal.
+        fleet_view = { "s1": { "session_id": "s1", "persona": "Tiberius",
+                               "dm_ts": NOW + datetime.timedelta( seconds=650 ) } }
+        down = job._check_manager_acks( late, [ ], fleet_view, count_dm=True )
+        assert down == 0 and escal == [ ]
+        assert "Tiberius" not in job._manager_down_escalated
+
+    def test_dm_only_manager_downs_when_dm_toggle_off( self ):
+        """NEGATIVE CONTROL: the SAME DM-only manager — fresh dm, stale bridge,
+        no commons/event — DOES down when count_dm=False (the runtime toggle
+        `arbiter count dm as liveness` off), proving the DM signal is what saved
+        it above and that count_dm is honored end-to-end."""
+        gw, escal = _Gateway(), [ ]
+        job = _job( gw, { }, notify=lambda m, *a, **k: escal.append( m ) )
+        job._last_tap_at[ "Tiberius" ] = NOW
+        late  = NOW + datetime.timedelta( seconds=700 )
+        stale = ( NOW - datetime.timedelta( seconds=50 ) ).timestamp()
+        job._bridge_mtime_fn = lambda sid: stale
+        fleet_view = { "s1": { "session_id": "s1", "persona": "Tiberius",
+                               "dm_ts": NOW + datetime.timedelta( seconds=650 ) } }
+        down = job._check_manager_acks( late, [ ], fleet_view, count_dm=False )
+        assert down == 1 and len( escal ) == 1 and "MANAGER-DOWN" in escal[ 0 ]
+
+    def test_fresh_stop_event_acks_commons_and_bridge_silent_manager( self ):
+        """The event_age fold (bug e8f40042): a manager whose only fresh signal is
+        a STOP event (last_event_ts) — stale bridge, empty commons, no dm — ACKs.
+        The OLD {commons, bridge}-only path false-DOWNed it."""
+        gw, escal = _Gateway(), [ ]
+        job = _job( gw, { }, notify=lambda m, *a, **k: escal.append( m ) )
+        job._last_tap_at[ "Tiberius" ] = NOW
+        late  = NOW + datetime.timedelta( seconds=700 )
+        stale = ( NOW - datetime.timedelta( seconds=50 ) ).timestamp()
+        job._bridge_mtime_fn = lambda sid: stale
+        fleet_view = { "s1": { "session_id": "s1", "persona": "Tiberius",
+                               "last_event_ts": NOW + datetime.timedelta( seconds=640 ) } }
+        down = job._check_manager_acks( late, [ ], fleet_view, count_dm=True )
+        assert down == 0 and escal == [ ]
 
 
 if __name__ == "__main__":

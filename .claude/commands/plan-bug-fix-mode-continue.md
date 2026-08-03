@@ -6,10 +6,15 @@
 
 ---
 
+> **⚠️ Note**: This command's canonical workflow uses cosa-voice notifications. In conversation mode (`get_session_info().conversation_mode_active=true`), all gates are voice-driven AND spoken responses follow the **TTS Brevity Mandate** — re-crafted conversational prose, NOT verbatim copies of markdown terminal replies. See `workflow/cosa-voice-integration.md` §Conversation Mode for full rules.
+
+---
+
 ## Related Commands
 
 - `/plan-bug-fix-mode-start` - Initialize new bug fix session
-- `/plan-bug-fix-mode-continue` - Resume after context clear ← **You are here**
+- `/plan-bug-fix-mode-continue` - Resume after context clear <- **You are here**
+- `/plan-bug-fix-mode-wrap` - Wrap up completed fix (document + commit)
 - `/plan-bug-fix-mode-close` - End bug fix session for the day
 
 ---

@@ -44,14 +44,26 @@ OUTCOME_HONORED     = "honored"       # fresh declared hold → don't poke
 OUTCOME_NOT_OWED    = "not_owed"      # nothing owed → genuinely done
 OUTCOME_POKE        = "poked"         # owed + under cap → self-poke
 OUTCOME_CAP_REACHED = "cap_reached"   # owed + at/over cap → stop nudging
+# Lever A (item 6fc8d78d, Tiberius 2026-07-07) — the stale-declared-owed FALSE
+# POKE we now SUPPRESS: a hold self-declares work_owed=True but is NOT honored
+# (is_honored False — stale or reasonless) AND the oracle sees nothing owed AND no
+# obligation override fired. Its own DISTINCT outcome (never OUTCOME_NOT_OWED) so
+# the oracle log line lets María's FP watch audit the gate. {"continue": True},
+# no increment, no cap-notify; emit_outcome self-filters it OUT of the fleet rail.
+OUTCOME_SUPPRESSED_STALE_DECLARED_OWED = "suppressed_stale_declared_owed"
 
-# Reason used when work is owed via the hold's self-declared work_owed=True
-# but the oracle verdict has no specifics to quote. Opens with the shared
-# POKE_PROMPT_SENTINEL (c121037b — one descriptive name everywhere) so
+# Reason that WAS emitted when work was owed via the hold's self-declared
+# work_owed=True but the oracle verdict had no specifics to quote. Opens with the
+# shared POKE_PROMPT_SENTINEL (c121037b — one descriptive name everywhere) so
 # is_heartbeat_poke_prompt recognizes this poke too; names the FULL session id
 # in the hold-write instruction (facet 2 — short-id holds are silently ignored).
+# RETIRED FROM EMISSION by Lever A (item 6fc8d78d, 2026-07-07): that exact
+# shape (declared-owed + oracle-empty) is the production false-poke and now
+# routes to OUTCOME_SUPPRESSED_STALE_DECLARED_OWED. The constant is retained as a
+# recognized-poke-prompt fixture (heartbeat_work_owed.is_heartbeat_poke_prompt
+# tests still assert its shape) — decide_heartbeat no longer references it.
 DECLARED_OWED_REASON = (
-    POKE_PROMPT_SENTINEL + " and no fresh hold. "
+    POKE_PROMPT_SENTINEL + " — work owed, no fresh hold. "
     "Pick one and act before you stop:\n"
     "1. Owe work? Resume and finish it now.\n"
     '2. Blocked on someone? DM them for status ("where are we on X?"), then declare a fresh hold — '
@@ -81,7 +93,7 @@ def _result( outcome, hook_output, should_increment=False, should_notify_cap=Fal
     }
 
 
-def decide_heartbeat( hold, oracle_verdict, poke_count, cap, now=None ):
+def decide_heartbeat( hold, oracle_verdict, poke_count, cap, now=None, goal_line="", sweep_line="" ):
     """
     Pure §0 decision over fetched leaf state.
 
@@ -92,39 +104,109 @@ def decide_heartbeat( hold, oracle_verdict, poke_count, cap, now=None ):
         - poke_count is the current heartbeat poke count (int >= 0)
         - cap is the per-session poke cap (int > 0)
         - now is an aware datetime or None (forwarded to freshness check)
+        - goal_line is the role-selected north-star goal echo (role-goals Phase
+          2-3) or "" — an INJECTED string the IO shell reads from config; when
+          non-empty it is appended as a trailing blank-line-separated block to the
+          poke reason (BOTH the oracle-owed and the self-declared paths). Empty ⇒
+          the reason is byte-identical to the pre-role-goals output. Canonical
+          goal text: planning-is-prompting -> workflow/role-goals.md.
+        - sweep_line is the per-persona board-sweep progress gate
+          (board_sweep.sweep_progress_line) or "" — Rick's 2026-07-25 order that a
+          sweeping seat may not stop until every owed row has been iterated.
+          INJECTED like goal_line (the ledger read is IO and stays in the shell) and
+          appended AFTER it, because it is the more specific instruction of the two.
 
     Ensures:
         - Returns the _result(...) structure; NO I/O, NO side effects
         - Honored fresh hold        → OUTCOME_HONORED,    {"continue": True}
         - Hold self-declares done   → OUTCOME_NOT_OWED,   {"continue": True}
         - Nothing owed (no hold + oracle empty) → OUTCOME_NOT_OWED
-        - Owed + poke_count >= cap  → OUTCOME_CAP_REACHED, {"continue": True},
+        - Owed via a STALE self-declared hold ONLY (declared work_owed=True,
+          is_honored False, oracle empty, no obligation override) →
+          OUTCOME_SUPPRESSED_STALE_DECLARED_OWED, {"continue": True}, NO increment,
+          NO cap-notify. This is Lever A (item 6fc8d78d): the production false-poke
+          — a blocked-waiting session nagged after its hold aged out — is suppressed
+          OBSERVABLY (its own outcome, never OUTCOME_NOT_OWED) so the FP watch can
+          audit the gate. Runs BEFORE the cap gate (a suppressed FP never fires the
+          "max nudges" notify).
+        - Oracle-owed + poke_count >= cap  → OUTCOME_CAP_REACHED, {"continue": True},
                                       should_notify_cap=True
-        - Owed + poke_count <  cap  → OUTCOME_POKE,
+        - Oracle-owed + poke_count <  cap  → OUTCOME_POKE,
                                       {"decision":"block","reason": …},
                                       should_increment=True
-        - The poke reason quotes the oracle specifics when work is oracle-owed,
-          else uses DECLARED_OWED_REASON (self-declared via the hold)
+        - The poke reason quotes the oracle specifics (build_poke_reason). Lever A
+          retired the self-declared DECLARED_OWED_REASON poke path, so oracle-owed
+          is the ONLY surviving poke
+        - 6929f4ac obligation override (the §9 inversion of hold semantics): when
+          the verdict carries `needs_verification` (the manager owes a worker
+          look-in) or `outstanding_user_gate` (the session owes a re-ask to Rick),
+          BOTH the honored-hold short-circuit (step 2) AND the self-declared-done
+          short-circuit (step 3) are SKIPPED — the obligation is owed work that a
+          declared hold must NOT suppress (a user-gated / verification-owing hold
+          is a standing obligation to act, never a license to go quiet). Every
+          OTHER signal leaves a fresh reasoned hold honored exactly as before.
+          The cap still bounds the poke (an obligation stops nagging at poke_cap;
+          the durable re-ask cadence is the /loop tick + the arbiter backstop).
     """
-    # Step 2 — honored declared hold defends its quiescence → never poke
-    if is_honored( hold, now=now ):
-        return _result( OUTCOME_HONORED, { "continue": True } )
+    # 6929f4ac obligation override — does a receipts-of-progress obligation
+    # outrank the hold's quiescence this tick?
+    signals              = ( oracle_verdict or { } ).get( "signals" ) or [ ]
+    obligation_overrides = ( "needs_verification" in signals
+                             or "outstanding_user_gate" in signals )
 
-    # Step 3 — work-owed: the hold's self-declared work_owed wins; else oracle
-    declared = declared_work_owed( hold )
-    if declared is False:
-        return _result( OUTCOME_NOT_OWED, { "continue": True } )
+    if obligation_overrides:
+        # The obligation IS owed work by construction (the signal ⇒ the verdict's
+        # work_owed is True), so skip steps 2-3 and head straight to the cap gate.
+        oracle_owed = True
+        owed        = True
+    else:
+        # Step 2 — honored declared hold defends its quiescence → never poke
+        if is_honored( hold, now=now ):
+            return _result( OUTCOME_HONORED, { "continue": True } )
 
-    oracle_owed = bool( oracle_verdict and oracle_verdict.get( "work_owed" ) )
-    owed        = True if declared is True else oracle_owed
-    if not owed:
-        return _result( OUTCOME_NOT_OWED, { "continue": True } )
+        # Step 3 — work-owed: the hold's self-declared work_owed wins; else oracle
+        declared = declared_work_owed( hold )
+        if declared is False:
+            return _result( OUTCOME_NOT_OWED, { "continue": True } )
+
+        oracle_owed = bool( oracle_verdict and oracle_verdict.get( "work_owed" ) )
+        owed        = True if declared is True else oracle_owed
+        if not owed:
+            return _result( OUTCOME_NOT_OWED, { "continue": True } )
+
+    # ── Lever A (item 6fc8d78d, Tiberius 2026-07-07 sign-off) — suppress the
+    # stale self-declared-owed FALSE POKE ─────────────────────────────────────
+    # We reach here with owed=True. When `oracle_owed` is False the ONLY basis for
+    # the poke is the hold's self-declared work_owed=True (owed became True via
+    # `declared is True`; obligation_overrides forces oracle_owed True, so it is
+    # excluded here). oracle_owed False ⇒ evaluate_work_owed fired ZERO signals ⇒
+    # every secondary trigger (delegation / inbound / verification / user-gate /
+    # spinup) is zero. And the hold is is_honored=False by construction — a fresh
+    # reasoned hold already returned OUTCOME_HONORED at step 2. That exact shape is
+    # the 9-row, six-persona production FP (a blocked-waiting session nagged after
+    # its hold aged out). Trust the oracle's "nothing owed" over the stale
+    # self-declaration and go quiet — but OBSERVABLY, via a DISTINCT outcome (never
+    # NOT_OWED) so María's standing FP watch can audit the gate. This runs BEFORE
+    # the cap gate so a suppressed FP never fires the spurious "max nudges" notify.
+    if not oracle_owed:
+        return _result( OUTCOME_SUPPRESSED_STALE_DECLARED_OWED, { "continue": True } )
 
     # Steps 4 / 5 — owed: poke under cap, else stop nudging
     if poke_count >= cap:
         return _result( OUTCOME_CAP_REACHED, { "continue": True }, should_notify_cap=True )
 
-    reason = build_poke_reason( oracle_verdict ) if oracle_owed else DECLARED_OWED_REASON
+    # Oracle-owed poke — the ONLY surviving poke path. Lever A eliminated the
+    # self-declared-owed poke (DECLARED_OWED_REASON): it fired ONLY when oracle_owed
+    # was False, which the gate above now routes to OUTCOME_SUPPRESSED_STALE_DECLARED_OWED.
+    # So `oracle_owed` is True by construction here (obligation_overrides forces it
+    # True; the declared-only path returned above). build_poke_reason quotes the
+    # oracle specifics and threads the role-selected goal echo (empty ⇒ unchanged).
+    # bug d0d7f068 (honest text): an obligation-override poke past a genuinely
+    # honored hold must read "honored-but-overridden", not the false "no fresh hold"
+    # (the non-override path already returned OUTCOME_HONORED for any honored hold,
+    # so hold_overridden is False there).
+    hold_overridden = obligation_overrides and is_honored( hold, now=now )
+    reason = build_poke_reason( oracle_verdict, goal_line=goal_line, hold_overridden=hold_overridden, sweep_line=sweep_line )
     return _result( OUTCOME_POKE, { "decision": "block", "reason": reason }, should_increment=True )
 
 
@@ -165,6 +247,16 @@ def quick_smoke_test():
     empty = owed_mod.evaluate_work_owed()
     r = decide_heartbeat( None, empty, 0, 3, now=now )
     assert r[ "outcome" ] == OUTCOME_NOT_OWED
+
+    # 6929f4ac override — an open user-gate POKES even under a fresh reasoned hold
+    gate_verdict = owed_mod.evaluate_work_owed( open_user_gates=[ { "id": "g1" } ] )
+    r = decide_heartbeat( honored_hold, gate_verdict, 0, 3, now=now )
+    assert r[ "outcome" ] == OUTCOME_POKE, "open user-gate must override an honored hold"
+    # …and a verification debt likewise overrides a self-declared-done hold
+    done_hold = { "held_at": fresh_at, "ttl_seconds": 900, "reason": "done", "work_owed": False }
+    verify_verdict = owed_mod.evaluate_work_owed( needs_verification=True )
+    r = decide_heartbeat( done_hold, verify_verdict, 0, 3, now=now )
+    assert r[ "outcome" ] == OUTCOME_POKE, "verification debt must override declared-done"
 
     return True
 

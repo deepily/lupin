@@ -1,7 +1,7 @@
 # Backup Script - Version Check
 
-**Project**: Planning is Prompting
-**Prefix**: [PLAN]
+**Project**: Lupin
+**Prefix**: [LUPIN]
 **Version**: 1.0
 
 ---

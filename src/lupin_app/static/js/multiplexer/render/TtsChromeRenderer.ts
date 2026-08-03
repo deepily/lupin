@@ -31,8 +31,17 @@ import type {
   AudioPlaybackState,
   StoreAudioChunkDecodedPayload,
   StoreAudioStateChangePayload,
+  StoreTtsQueueChangedPayload,
+  TtsQueueItem,
 } from "../shared/types";
 import { renderTtsChrome } from "./templates/ttsChrome";
+import { renderTtsActiveCard } from "./templates/ttsActiveCard";
+import { renderTtsMinimizedCard } from "./templates/ttsMinimizedCard";
+import {
+  renderSectionHeader,
+  wireSectionCollapse,
+  type SectionHeaderHandle,
+} from "./templates/sectionHeader";
 
 // ---------------------------------------------------------------------------
 // Public interfaces
@@ -40,15 +49,34 @@ import { renderTtsChrome } from "./templates/ttsChrome";
 
 export interface AudioStoreLike {
   state(): AudioPlaybackState;
-  queueLength(): number;
+  burstLength(): number;   // OQ-F0.4: AudioStore PCM burst counter (renamed from queueLength)
   pause(): void;
   resume(): void;
   stop(): void;
   skip(): void;
 }
 
+// WP4 — the TtsQueueStore surface the renderer consumes: read-only queries +
+// mutators dispatched via card/chrome handlers. NO advance(): the store
+// self-advances on store_audio_ended (TtsQueueStore.ts:168); the renderer never
+// calls advance() and never subscribes store_audio_ended (COND-2).
+export interface TtsQueueStoreLike {
+  current(): string | null;
+  activeItem(): TtsQueueItem | null;
+  pending(): ReadonlyArray<TtsQueueItem>;
+  itemQueueLength(): number;
+  removeById(idHash: string): void;
+  clear(): void;
+  // 70cbff3e — focus-mode read + manual Resume. focusMode() drives the "Paused: N
+  // waiting" header + Resume button; resumeFocus() is the Resume click handler
+  // (exit focus + roll the queue). Kept off the audio path — this is queue state.
+  focusMode(): boolean;
+  resumeFocus(): void;
+}
+
 export interface TtsChromeRendererStores {
-  audio: AudioStoreLike;
+  audio    : AudioStoreLike;
+  ttsQueue : TtsQueueStoreLike;   // WP4 — notification-item queue (active + pending)
 }
 
 export interface TtsChromeRenderer {
@@ -90,6 +118,10 @@ class TtsChromeRendererImpl implements TtsChromeRenderer {
   private readonly unsubscribers: Array<() => void> = [];
 
   private root: HTMLElement | null = null;
+  // Lane 0a — persistent `.section-header` bar + `.section-content` body wrapper.
+  private content : HTMLElement | null = null;
+  private header  : SectionHeaderHandle | null = null;
+  private collapseOff: ( () => void ) | null = null;
   private mounted = false;
   private pendingRender = false;
   private rafHandle: number | null = null;
@@ -110,7 +142,23 @@ class TtsChromeRendererImpl implements TtsChromeRenderer {
     this.mounted = true;
     this.root = root;
 
-    // Initial paint — atomic.
+    // Lane 0a — the uniform `.section-header` bar (🔊 Playing) + a
+    // `.section-content` body wrapper. The header is a persistent sibling; the
+    // transport chrome repaints into `this.content`.
+    const header = renderSectionHeader( {
+      icon   : "🔊",
+      title  : "Playing",
+      testid : "multiplexer-tts-header",
+    } );
+    this.header = header;
+    const content = document.createElement( "div" );
+    content.className = "section-content";
+    content.setAttribute( "data-testid", "multiplexer-tts-content" );
+    this.content = content;
+    root.replaceChildren( header.header, content );
+    this.collapseOff = wireSectionCollapse( root, header );
+
+    // Initial paint — atomic (into the content wrapper).
     this.renderNow();
 
     // Q-B9 + Pass 1 F-13: BOTH state_change AND chunk_decoded are RAF-coalesced
@@ -127,6 +175,16 @@ class TtsChromeRendererImpl implements TtsChromeRenderer {
         () => this.scheduleRender(),
       ),
     );
+    // WP4 — the notification-item queue changed (active/pending mutation). Same
+    // RAF-coalesced render path. Deliberately NOT store_audio_ended: the store
+    // self-advances on that event, so a second subscription here would
+    // double-advance the queue (Clayton COND-2 auto-reject).
+    this.unsubscribers.push(
+      this.bus.on<StoreTtsQueueChangedPayload>(
+        "store_tts_queue_changed",
+        () => this.scheduleRender(),
+      ),
+    );
   }
 
   unmount(): void {
@@ -137,10 +195,16 @@ class TtsChromeRendererImpl implements TtsChromeRenderer {
       this.rafHandle = null;
     }
     this.pendingRender = false;
+    if (this.collapseOff !== null) {
+      this.collapseOff();
+      this.collapseOff = null;
+    }
     if (this.root !== null) {
       this.root.replaceChildren();
       this.root = null;
     }
+    this.content = null;
+    this.header  = null;
     this.mounted = false;
   }
 
@@ -163,23 +227,75 @@ class TtsChromeRendererImpl implements TtsChromeRenderer {
   }
 
   private renderNow(): void {
-    /* c8 ignore next */ // defensive: subscriptions are detached in unmount BEFORE root is nulled.
-    if (this.root === null) return;
+    /* c8 ignore next */ // defensive: subscriptions are detached in unmount BEFORE content is nulled.
+    if (this.content === null) return;
+
+    const tts          = this.stores.ttsQueue;
+    const activeItem   = tts.activeItem();
+    const pending      = tts.pending();
+    const pendingCount = tts.itemQueueLength();
+    // Section-header chip = TOTAL notification items (active head + pending tail).
+    const total        = (activeItem !== null ? 1 : 0) + pending.length;
+    // desync-fix (Tiberius ruling 2026-07-02): the empty panel is QUEUE-driven,
+    // not audio-idle-driven. The chrome shows the empty state iff the item queue
+    // is truly empty (no active head AND no pending tail); otherwise it renders
+    // the transport chrome + cards even while audio is idle (item queued, not yet
+    // speaking). This prevents "🔇 Nothing in the queue" rendering alongside cards.
+    // 70cbff3e — focus mode is now LIVE (the §8.3 follow-on). When focused the
+    // roll is paused (active discarded at enter → activeItem null) but the chrome
+    // must still render its "Paused: N waiting" header + Resume, so queueEmpty is
+    // focus-aware: a focused queue is NEVER "empty" even at zero pending.
+    const focusMode    = this.stores.ttsQueue.focusMode();
+    const queueEmpty   = activeItem === null && pending.length === 0 && !focusMode;
+
+    // Transport chrome (WP3). count = pending (waiting) item count.
     const chrome = renderTtsChrome(
       {
         state       : this.stores.audio.state(),
-        queueLength : this.stores.audio.queueLength(),
-        // currentTrackName intentionally omitted — Phase 0 prereq #3 pending.
+        queueLength : pendingCount,
+        queueEmpty,
+        focusMode,
+        // currentTrackName omitted — Phase 0 prereq #3 pending.
       },
       {
-        onPause  : () => this.stores.audio.pause(),
-        onResume : () => this.stores.audio.resume(),
-        onStop   : () => this.stores.audio.stop(),
-        onSkip   : () => this.stores.audio.skip(),
+        onPause       : () => this.stores.audio.pause(),
+        onResume      : () => this.stores.audio.resume(),
+        onStop        : () => this.stores.audio.stop(),
+        onSkip        : () => this.stores.audio.skip(),
+        onClearAll    : () => this.stores.ttsQueue.clear(),
+        // 70cbff3e — the focus Resume button is DISTINCT from the transport
+        // toggle's onResume (audio.resume()): it exits focus + rolls the queue.
+        onFocusResume : () => this.stores.ttsQueue.resumeFocus(),
       },
     );
-    // replaceChildren — single childList mutation, atomic for the whole pane.
-    this.root.replaceChildren(chrome);
+
+    const children: Node[] = [ chrome ];
+
+    // Active-slot card — the item currently being spoken (WP2 ttsActiveCard).
+    if (activeItem !== null) {
+      children.push( renderTtsActiveCard( activeItem, {
+        onStop  : () => this.stores.audio.stop(),
+        onDelete: ( id ) => this.stores.ttsQueue.removeById( id ),
+      } ) );
+    }
+
+    // Pending minimized cards — 1-indexed queue positions (WP2 ttsMinimizedCard).
+    pending.forEach( ( it, i ) => {
+      children.push( renderTtsMinimizedCard( it, i + 1, {
+        onDelete: ( id ) => this.stores.ttsQueue.removeById( id ),
+      } ) );
+    } );
+    // Empty state (active null + pending empty) falls through to just the chrome,
+    // whose idle panel shows "🔇 Nothing in the queue" when audio is idle.
+
+    // replaceChildren — one atomic childList mutation. THIS is the
+    // CLEAR-PRIOR-THEN-SET invariant: the whole body is rebuilt from current
+    // store state every render, so a current() transition A→B leaves exactly the
+    // B active card — A is cleared before B is set, never two lit bubbles.
+    this.content.replaceChildren( ...children );
+
+    /* c8 ignore next */ // defensive: header is set/nulled in lockstep with content, so non-null whenever renderNow runs.
+    if (this.header !== null) this.header.setCount(total);
   }
 }
 

@@ -359,19 +359,31 @@ def read_events( session_id, base_dir=None ):
 
 def last_emitted_outcome( session_id, base_dir=None ):
     """
-    The session's most recent emitted outcome value, or None if no events.
+    The session's most recent EMITTED OUTCOME value, or None if none exists.
+
+    Filters on the `kind` discriminator: the kind-tagged recency/membership
+    records (idle_prompt / task_transition / reaped) DELIBERATELY OMIT the
+    `outcome` key, and their emit_* docstrings mandate that consumers ignore
+    them on the outcome axis. A naive records[-1].get("outcome") let a trailing
+    idle_prompt record mask a genuine `idle` outcome (returning None), which
+    flipped cc_notification_listener._recipient_is_injectable() to False for a parked
+    worker → the manager's peer DM buffered instead of tmux-waking the pane →
+    the worker went dark (bug baf5ea6d). So scan from the tail and return the
+    first record that actually CARRIES an `outcome`.
 
     Requires:
         - session_id is a string
 
     Ensures:
-        - Returns the "outcome" of the last record, or None (no events, or a
-          last record missing the field) — never raises (read_events is total).
+        - Returns the `outcome` of the most recent record that HAS one, skipping
+          any trailing kind-tagged records that omit it; None when no emitted
+          outcome exists — never raises (read_events is total).
     """
     records = read_events( session_id, base_dir=base_dir )
-    if not records:
-        return None
-    return records[ -1 ].get( "outcome" )
+    for record in reversed( records ):
+        if "outcome" in record:
+            return record[ "outcome" ]
+    return None
 
 
 def should_emit_idle( last_outcome ):

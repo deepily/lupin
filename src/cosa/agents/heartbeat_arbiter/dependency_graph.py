@@ -12,35 +12,309 @@ the fleet_view (from fleet_data_model.build_fleet_view) and acts on the graph.
 
 Design authority: lupin →
     src/rnd/v0.1.8/2026.06.04-heartbeat-hook/03-arbiter-design.md §4 / §6.4.
+
+STORE-CORROBORATION (bug 436a366b, 2026-06-23): the `holding_on: peer:X` edges
+above are SELF-REPORTED / view-derived — a fresh, legitimately-PROGRESSING
+sequencing wait (e.g. Krishna awaiting Mr Radio's merge+build) self-reports a
+ring that is NOT a deadlock and false-escalated every poll. The escalation is
+now GATED on an AUTHORITATIVE store dependency ring (build_store_wait_edges +
+cycle_is_store_backed): a derived persona-ring fires ONLY when it is corroborated
+by real store `blocked_by` edges (owner→owner). Scope limit (v1, ratified by Mr
+Radio): a PURE-coordination ring — two managers mutually awaiting with ZERO store
+rows — is out of scope; it is rare, a human breaks it anyway, and the correct fix
+is managers expressing real waits as store `blocked_by` (this gate is a hygiene
+forcing-function, a feature not a gap).
+
+STALENESS-FILTER (bug bc1bc373, 2026-06-23): the `holding_on: peer:X` edge is
+SELF-REPORTED from the most-recent heartbeat `awaiting` field. When the declaring
+session's HOLD goes DEAD (expired / work_owed=false / past next_chase), the
+lingering `awaiting` still produced a phantom peer edge that fed the
+manager-blocking advisory ("mr radio blocking Tiffany") and any other edge
+consumer with NO store `blocked_by` backing. `hold_is_stale` is the PURE predicate
+(three staleness axes); `build_wait_edges`/`build_graph` accept an OPTIONAL
+`stale_holders` set whose members contribute ZERO edges. This is ADDITIVE and
+UPSTREAM of all edge inference — the deployed deadlock LOGIC (build_store_wait_edges
++ cycle_is_store_backed + the escalation) is byte-identical; a dead holder removed
+from `edges` is simply also absent from `cycles` (it was never store-backed
+anyway). The hold READ lives in the arbiter orchestrator seam
+(ArbiterConsumerJob._stale_hold_holders); this leaf stays pure.
 """
+import datetime
+import re
+
+from lupin_mcp.persona_normalization import canonical_persona_key
+# Staleness primitives REUSED (no reinvention) — the single source of truth for
+# the hold freshness window (held_at + ttl_seconds) and the declared work_owed flag.
+from lupin_cli.claude_code.hooks.lib.heartbeat_hold import is_fresh, declared_work_owed
 
 PEER_PREFIX = "peer:"
 
+# A peer reference is "peer:<persona>". The <persona> token may legitimately carry
+# single internal spaces ("mr radio") and hyphens-without-spaces ("cc-author-mr-radio-1"),
+# but a heartbeat `awaiting` field is FREE-FORM and routinely carries either a
+# MULTI-peer list ("peer:Krishna,peer:maria") or a PROSE tail
+# ("peer:krishna — Krishna's FOLLOW-ON SHA ..."). Only the FIRST canonical persona
+# token may mint a wait-edge; the list tail and prose MUST be dropped. Splitting on
+# a comma / semicolon / open-paren / space-delimited dash isolates the first token
+# while preserving a persona's own internal spaces and bare hyphens.
+_PEER_PROSE_DELIMITERS = re.compile( r"[,;(]|\s[—–-]\s" )
 
-def build_wait_edges( fleet_view ):
+# task 70be69f2 (b39562e4 follow-on): a MIS-PREFIXED awaiting like "peer:user:rick"
+# leaves a NON-peer scheme prefix on the first parsed token — its TRUE awaited
+# target is a user / gate / commons-topic, NOT a peer persona, so it must mint ZERO
+# blocking edge (else the arbiter pings a non-existent "user:rick" peer → a phantom
+# "X blocking Y" advisory + a 422 push_unavailable). NARROW by design (Tiberius's
+# fork-2 ruling): only a token that is ITSELF a non-peer scheme is dropped — a
+# legitimate MULTI-target peer wait ("peer:Tiberius,user:rick") still parses to its
+# genuine first peer (Tiberius) and keeps its edge. Schema schemes per
+# heartbeat_hold.awaiting: "user:" / "gate:" / "commons:".
+_NON_PEER_SCHEME_PREFIXES = ( "user:", "gate:", "commons:" )
+
+
+def _parse_peer_target( holding_on ):
+    """
+    Extract the single canonical awaited-persona from a `peer:` holding string
+    (bug b39562e4 — a prose/list tail was being swallowed whole into a garbage
+    "awaited persona", minting a phantom blocking edge + a 422 push_unavailable).
+
+    Requires:
+        - holding_on is a string beginning with PEER_PREFIX
+
+    Ensures:
+        - returns the FIRST canonical persona token — internal single spaces and
+          bare hyphens preserved ("mr radio", "cc-author-mr-radio-1") — with any
+          multi-peer list tail (after a comma/semicolon) and any prose tail (after
+          an open-paren or a space-delimited em/en/hyphen dash) STRIPPED
+        - returns None when no non-empty persona remains (pure prose / empty body)
+        - returns None when the first token is itself a NON-peer scheme reference
+          (task 70be69f2: a mis-prefixed "peer:user:rick" / "peer:gate:x" /
+          "peer:commons:t" — case-insensitive — names a user/gate/commons target,
+          not a peer persona, so it mints no blocking edge). A legitimate
+          multi-target peer wait ("peer:Tiberius,user:rick") is UNAFFECTED — its
+          first token "Tiberius" is a genuine peer and its edge survives.
+        - never raises (pure string op)
+
+    NOTE (documented v1 limitation): a holder awaiting MULTIPLE peers
+    ("peer:A,peer:B") mints an edge only for the FIRST peer. This is a strict
+    improvement over the prior garbage-edge behavior and is sufficient because the
+    deadlock escalation is independently store-`blocked_by`-gated; modelling every
+    peer of a multi-await holder is a possible follow-on, not this bug.
+    """
+    body  = holding_on[ len( PEER_PREFIX ): ]
+    first = _PEER_PROSE_DELIMITERS.split( body, maxsplit=1 )[ 0 ].strip()
+    if not first:
+        return None
+    if first.lower().startswith( _NON_PEER_SCHEME_PREFIXES ):   # task 70be69f2: user/gate/commons target → no peer edge
+        return None
+    return first
+
+
+def _parse_iso( value ):
+    """Parse an ISO-8601 timestamp → aware datetime, or None. Never raises."""
+    if not value or not isinstance( value, str ):
+        return None
+    text = value.strip()
+    if text.endswith( "Z" ):
+        text = text[ :-1 ] + "+00:00"
+    try:
+        parsed = datetime.datetime.fromisoformat( text )
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace( tzinfo=datetime.timezone.utc )
+    return parsed
+
+
+def hold_is_stale( hold, now ):
+    """
+    Is this declared hold DEAD for edge-inference purposes (bug bc1bc373)?
+
+    A DEAD hold must contribute ZERO inferred edges — its `holding_on: peer:X`
+    wait-edge is a phantom (the session has expired/finished/handed-off its wait).
+    A hold is STALE on ANY of three axes:
+      - EXPIRED         : not is_fresh( hold, now ) — now − held_at ≥ ttl_seconds
+                          (also fires on an uncredible held_at / non-numeric ttl,
+                          a hold that cannot prove freshness → bias-to-suppress,
+                          matching the deadlock detector's documented fail-SUPPRESS)
+      - NOT-WORK-OWED   : declared_work_owed( hold ) is False (explicit False ⇒ the
+                          session is done ⇒ never a real wait; None/absent ≠ stale)
+      - PAST-NEXT-CHASE : an optional `next_chase` ISO ts is present, parseable, and
+                          ≤ now (forward-compatible — holds don't emit it today)
+
+    Requires:
+        - hold is a dict or None; now is an aware datetime
+
+    Ensures:
+        - returns False for a missing / non-dict hold (absence of a hold is NOT
+          evidence of a dead hold — never over-filter a session that simply has no
+          hold; the filter only SUBTRACTS edges for a readable DEAD hold)
+        - returns True iff the hold is EXPIRED, explicitly NOT-WORK-OWED, or
+          PAST-NEXT-CHASE; otherwise False
+        - never raises
+    """
+    if not hold or not isinstance( hold, dict ):
+        return False
+    if not is_fresh( hold, now=now ):
+        return True
+    if declared_work_owed( hold ) is False:
+        return True
+    next_chase = _parse_iso( hold.get( "next_chase" ) )
+    if next_chase is not None and next_chase <= now:
+        return True
+    return False
+
+
+def hold_contradicts_peer_edge( hold, holding_on, now ):
+    """
+    Does a FRESH hold's declared `awaiting` CONTRADICT the derived `holding_on:
+    peer:X` edge (bug 7f9a8ee2)?
+
+    The PRIMARY phantom this kills: a holder whose CURRENT hold is fresh + honored
+    with `awaiting="none"` (or naming a DIFFERENT peer) while its `holding_on` edge
+    was minted from a STALE `last_activity.awaiting="peer:X"` (a heartbeat activity
+    record that out-lived the wait it described). `hold_is_stale` does NOT fire (the
+    hold is fresh), so the dead-hold filter leaves the edge in place → the arbiter
+    loop-fires a phantom "X is blocking worker Y". The hold's declared `awaiting` is
+    AUTHORITATIVE over the stale activity record, so a fresh hold that contradicts
+    the edge must contribute ZERO edges.
+
+    Complement to `hold_is_stale` (the two are OR'd in the arbiter's subtraction
+    set): `hold_is_stale` drops a DEAD-hold holder; THIS drops a FRESH-but-
+    contradicting holder. ADDITIVE and fail-SAFE.
+
+    Requires:
+        - hold is a dict or None; holding_on is the view's holding_on (any type);
+          now is an aware datetime
+
+    Ensures:
+        - returns True iff ALL hold:
+            * hold is a readable dict, AND
+            * holding_on is a `peer:` string naming a parseable peer (the only edge
+              kind that mints a wait-edge), AND
+            * the hold is FRESH (is_fresh — only a fresh hold's `awaiting` is
+              authoritative; a DEAD hold is hold_is_stale's axis, never double-
+              classified here), AND
+            * the hold carries an explicit string `awaiting` field, AND
+            * that `awaiting` does NOT (canonically) name the SAME peer as
+              holding_on — i.e. it is "none", a non-peer scheme, or a different peer
+        - returns False otherwise — in particular fail-SAFE (keep the edge) for a
+          missing/non-dict hold, a non-peer/unparseable holding_on, a non-fresh
+          hold, an absent/non-string `awaiting` (no authoritative declaration), or
+          an `awaiting` that canonically MATCHES the edge peer (a genuine wait)
+        - never raises (pure)
+    """
+    if not hold or not isinstance( hold, dict ):
+        return False
+    if not isinstance( holding_on, str ) or not holding_on.startswith( PEER_PREFIX ):
+        return False
+    edge_peer = _parse_peer_target( holding_on )
+    if edge_peer is None:
+        return False                                         # unparseable peer → no edge minted anyway
+    if not is_fresh( hold, now=now ):
+        return False                                         # only a FRESH hold's awaiting is authoritative
+    awaiting = hold.get( "awaiting" )
+    if not isinstance( awaiting, str ):
+        return False                                         # no authoritative declaration → fail-SAFE keep
+    declared = _parse_peer_target( awaiting ) if awaiting.startswith( PEER_PREFIX ) else None
+    if declared is not None and ( canonical_persona_key( declared ) or declared ) == ( canonical_persona_key( edge_peer ) or edge_peer ):
+        return False                                         # hold corroborates the edge → genuine wait
+    return True                                              # hold declares it is NOT awaiting edge_peer → phantom
+
+
+def session_is_stale( view, now, alive_threshold_seconds ):
+    """
+    Is this holder SESSION itself beyond the alive-threshold (bug 8a450183)?
+
+    The PERSONA-COLLAPSE phantom this kills: a DEAD session's lingering
+    `holding_on: peer:X` edge survives the consumer's per-PERSONA `alive` filter
+    because a LIVE session SHARING the persona keeps that persona "alive" — so a
+    dead session's stale wait is mis-attributed to the live persona ("maria is
+    blocking worker mr radio" from a 12h-dead `mr radio` session). The fix gates
+    peer-edge inference on the HOLDER SESSION's OWN freshness, decided per
+    session-id (this `view`), NEVER collapsed to persona-liveness.
+
+    Complement to `hold_is_stale` (DEAD-hold holder) and `hold_contradicts_peer_edge`
+    (FRESH-but-contradicting holder): those read the per-session HOLD artifact; THIS
+    reads the per-session LAST-ACTIVITY timestamp the view already carries. All three
+    only SUBTRACT edges and are ADDITIVE + fail-SAFE.
+
+    Requires:
+        - view is a fleet-view row dict (any type tolerated); now is an aware
+          datetime; alive_threshold_seconds is a positive number
+        - `view['last_activity_ts']` (when present) is the session's most-recent
+          LIVENESS ts (a datetime, or an ISO string — tolerated/parsed)
+
+    Ensures:
+        - returns True iff the view's `last_activity_ts` is PRESENT, parseable, and
+          its age (now − ts) is STRICTLY GREATER than alive_threshold_seconds
+        - returns False — fail-SAFE, KEEP the edge — for a non-dict view, a missing
+          now / alive_threshold (the additive default: no gate when un-threaded), a
+          missing / None / unparseable `last_activity_ts` (absence of a usable ts is
+          NOT evidence of deadness — never over-filter), or a future/within-window ts
+        - decided EXPLICITLY from the ts (NOT `view['alive']`, which reads False for
+          an unparseable ts and would over-filter — Krishna A3)
+        - never raises (pure)
+    """
+    if not isinstance( view, dict ) or now is None or alive_threshold_seconds is None:
+        return False
+    ts = view.get( "last_activity_ts" )
+    if isinstance( ts, str ):
+        ts = _parse_iso( ts )
+    if not isinstance( ts, datetime.datetime ):
+        return False                                         # no usable ts → fail-SAFE keep
+    try:
+        age = ( now - ts ).total_seconds()
+    except ( TypeError, AttributeError ):
+        return False                                         # unusable now/ts → fail-SAFE keep
+    return age > alive_threshold_seconds
+
+
+def build_wait_edges( fleet_view, stale_holders=None, now=None, alive_threshold_seconds=None ):
     """
     Extract holder→awaited-peer edges from the fleet view.
 
     Requires:
         - fleet_view is a dict { session_id: VIEW } (build_fleet_view output);
-          each VIEW carries "persona" and "holding_on" (e.g. "peer:Sam",
-          "user:Rick", "commons:foo", "none")
+          each VIEW carries "persona", "holding_on" (e.g. "peer:Sam", "user:Rick",
+          "commons:foo", "none") and "last_activity_ts"
+        - stale_holders is a set/collection of holder PERSONAS whose hold is DEAD
+          (bug bc1bc373) — their peer edge is dropped at ingestion — or None
+          (⇒ no persona filtering, byte-identical to the prior behavior)
+        - now / alive_threshold_seconds gate the per-SESSION freshness filter (bug
+          8a450183): both None (the default) ⇒ NO session-freshness gate,
+          byte-identical to the prior behavior — this is what keeps the UNFILTERED
+          :1018 escalation feed `find_deadlock_cycles( build_wait_edges( fleet_view ) )`
+          untouched (it passes neither, so no session is dropped)
 
     Ensures:
         - Returns dict { holder_persona: awaited_persona } for ONLY peer:* edges
           with a non-empty holder AND a non-empty awaited persona
+        - the awaited persona is the FIRST canonical token from the peer string
+          (`_parse_peer_target` — bug b39562e4): a multi-peer list tail or free
+          prose after the first persona is DROPPED, so a free-form `awaiting`
+          field can no longer mint a garbage/phantom edge
+        - a beyond-threshold SESSION (`session_is_stale`) contributes ZERO edges —
+          dropped PER SESSION-ID at ingestion, BEFORE the holder→persona collapse,
+          so a dead session NEVER poisons a live same-persona session (bug 8a450183)
+        - a holder in `stale_holders` contributes ZERO edges (its dead hold's
+          phantom wait-edge is filtered out UPSTREAM of all edge inference)
         - LAST edge wins if a holder appears twice (functional graph)
         - Non-dict views are skipped; never raises
     """
+    stale = stale_holders or set()
     edges = { }
     for view in fleet_view.values():
         if not isinstance( view, dict ):
+            continue
+        if session_is_stale( view, now, alive_threshold_seconds ):   # 8a450183: dead SESSION → zero edges (per session-id, pre-collapse)
             continue
         holder     = view.get( "persona" )
         holding_on = view.get( "holding_on" )
         if not holder or not isinstance( holding_on, str ) or not holding_on.startswith( PEER_PREFIX ):
             continue
-        awaited = holding_on[ len( PEER_PREFIX ): ].strip()
+        if holder in stale:                                  # bc1bc373: dead hold → zero edges
+            continue
+        awaited = _parse_peer_target( holding_on )           # b39562e4: first canonical peer only (drop list/prose tail)
         if awaited:
             edges[ holder ] = awaited
     return edges
@@ -90,19 +364,228 @@ def find_deadlock_cycles( wait_edges ):
     return cycles
 
 
-def build_graph( fleet_view ):
+def build_graph( fleet_view, stale_holders=None, now=None, alive_threshold_seconds=None ):
     """
     Build the dependency graph + deadlock cycles from the fleet view.
 
     Requires:
         - fleet_view is a dict { session_id: VIEW }
+        - stale_holders is a set of dead-hold holder personas (bug bc1bc373) whose
+          peer edge is dropped, or None (⇒ no persona filtering)
+        - now / alive_threshold_seconds gate the per-SESSION freshness filter (bug
+          8a450183) — passed straight through to build_wait_edges; both None
+          (the default) ⇒ no session-freshness gate (byte-identical prior behavior)
 
     Ensures:
         - Returns { "edges": {holder: awaited}, "cycles": [canonical cycles] }
+        - a holder in `stale_holders`, AND a beyond-threshold SESSION when
+          now/threshold are supplied, are absent from BOTH edges and cycles (each
+          contributes ZERO inferred edges to every consumer of THIS filtered graph);
+          the deadlock LOGIC downstream is unchanged — it simply sees fewer rings
         - Never raises
     """
-    edges = build_wait_edges( fleet_view )
+    edges = build_wait_edges( fleet_view, stale_holders=stale_holders,
+                              now=now, alive_threshold_seconds=alive_threshold_seconds )
     return { "edges": edges, "cycles": find_deadlock_cycles( edges ) }
+
+
+def build_store_wait_edges( owed_by_persona ):
+    """
+    Build AUTHORITATIVE owner→owner wait edges from store `blocked_by` refs.
+
+    The store source of truth for "who is really blocked on whom" — the
+    counterpart to the self-reported build_wait_edges. Consumed by
+    cycle_is_store_backed to corroborate a derived deadlock ring before the
+    arbiter escalates it (bug 436a366b).
+
+    Requires:
+        - owed_by_persona is the arbiter's per-poll non-terminal owed read,
+          { persona: [ { id, status, gate_class, blocked_by }, ... ] } (the
+          _default_owed_work_fn / _classify_owed shape), or None
+
+    `blocked_by` is a list of typed refs { "kind": "item"|"persona"|"user",
+    "id": ... }:
+        - persona-kind → a DIRECT owner edge holder→canonical(id).
+        - item-kind    → resolved to the OWNER of that task-id via an id→owner
+          map built from the SAME owed read. A blocking task that is terminal or
+          owned by a persona outside this poll's read is UNRESOLVABLE → that edge
+          is omitted, biasing toward NOT firing (the documented v1 scope limit).
+        - user-kind / malformed / non-dict ref → ignored (a user gate is a
+          human-wait, never a peer deadlock).
+
+    Ensures:
+        - returns { canonical_holder: set(canonical_awaited) }; personas are
+          canonical_persona_key-normalized so the edges match the (same-spelling)
+          derived cycle nodes
+        - self-edges (a holder blocked on its own item) are dropped — a session
+          cannot peer-deadlock on itself
+        - None / malformed input → {}; never raises
+    """
+    owed = owed_by_persona or { }
+    if not isinstance( owed, dict ):
+        return { }
+    # id → canonical owner, across the whole poll read (resolves item-kind refs).
+    id_to_owner = { }
+    for persona, items in owed.items():
+        if not isinstance( items, list ):
+            continue
+        owner = canonical_persona_key( persona ) or persona
+        for it in items:
+            if isinstance( it, dict ) and it.get( "id" ) is not None:
+                id_to_owner[ str( it.get( "id" ) ) ] = owner
+    edges = { }
+    for persona, items in owed.items():
+        if not isinstance( items, list ):
+            continue
+        holder = canonical_persona_key( persona ) or persona
+        for it in items:
+            if not isinstance( it, dict ):
+                continue
+            for ref in ( it.get( "blocked_by" ) or [ ] ):
+                if not isinstance( ref, dict ):
+                    continue
+                kind    = ref.get( "kind" )
+                rid     = ref.get( "id" )
+                awaited = None
+                if kind == "persona" and isinstance( rid, str ):
+                    awaited = canonical_persona_key( rid ) or rid
+                elif kind == "item" and rid is not None:
+                    awaited = id_to_owner.get( str( rid ) )      # None if unresolvable → edge omitted
+                if awaited and awaited != holder:
+                    edges.setdefault( holder, set() ).add( awaited )
+    return edges
+
+
+def build_store_blocked_item_index( owed_by_persona ):
+    """
+    The item-preserving companion to build_store_wait_edges: for each owner→owner
+    wait edge, the SET of the holder's blocked task-ids that produced it.
+
+    build_store_wait_edges collapses every (holder, awaited) edge to a bare
+    persona pair, DROPPING which task item is blocked. The blocker-cc idempotency
+    key (bug ce13b134) needs that item identity: two SEQUENTIAL blocks with the
+    SAME (blocker, blocked_worker, recipient) but DIFFERENT blocked items are
+    genuinely-distinct announcements — each must go out exactly once, not be
+    suppressed as a dup of the other. This index supplies the blocked_item leg of
+    that (blocker, blocked_item, recipient) key.
+
+    Requires:
+        - owed_by_persona is the arbiter's per-poll non-terminal owed read,
+          { persona: [ { id, status, gate_class, blocked_by }, ... ] }, or None
+          (same shape build_store_wait_edges consumes)
+
+    Ensures:
+        - returns { ( canonical_holder, canonical_awaited ): frozenset( item_ids ) }
+          where item_ids are STR ids of the HOLDER's items whose blocked_by
+          resolves to `awaited` (item-kind refs resolved to owner via the same
+          id→owner map; unresolvable/terminal-owner refs omitted, mirroring
+          build_store_wait_edges' v1 scope limit)
+        - self-edges dropped (a holder blocked on its own item is not a peer edge)
+        - personas are canonical_persona_key-normalized so lookups match the
+          (canonicalized) ping-edge keys
+        - None / malformed input → {}; never raises (pure)
+    """
+    owed = owed_by_persona or { }
+    if not isinstance( owed, dict ):
+        return { }
+    id_to_owner = { }
+    for persona, items in owed.items():
+        if not isinstance( items, list ):
+            continue
+        owner = canonical_persona_key( persona ) or persona
+        for it in items:
+            if isinstance( it, dict ) and it.get( "id" ) is not None:
+                id_to_owner[ str( it.get( "id" ) ) ] = owner
+    index = { }
+    for persona, items in owed.items():
+        if not isinstance( items, list ):
+            continue
+        holder = canonical_persona_key( persona ) or persona
+        for it in items:
+            if not isinstance( it, dict ) or it.get( "id" ) is None:
+                continue
+            item_id = str( it.get( "id" ) )
+            for ref in ( it.get( "blocked_by" ) or [ ] ):
+                if not isinstance( ref, dict ):
+                    continue
+                kind    = ref.get( "kind" )
+                rid     = ref.get( "id" )
+                awaited = None
+                if kind == "persona" and isinstance( rid, str ):
+                    awaited = canonical_persona_key( rid ) or rid
+                elif kind == "item" and rid is not None:
+                    awaited = id_to_owner.get( str( rid ) )      # None if unresolvable → edge omitted
+                if awaited and awaited != holder:
+                    index.setdefault( ( holder, awaited ), set() ).add( item_id )
+    return { edge: frozenset( ids ) for edge, ids in index.items() }
+
+
+def cycle_is_store_backed( cycle, store_edges ):
+    """
+    True iff EVERY consecutive holder→awaited edge of a derived persona ring is
+    corroborated by an authoritative store owner-edge (build_store_wait_edges).
+
+    Requires:
+        - cycle is a list of personas in ring order (find_deadlock_cycles output);
+          ring edge i = cycle[i] → cycle[(i+1) % len(cycle)]
+        - store_edges is build_store_wait_edges output { holder: set(awaited) }
+
+    Ensures:
+        - returns True only when all ring edges exist in store_edges (personas
+          compared canonically — both sides share the view-persona spelling, so
+          this is consistent)
+        - a self-cycle [X] needs X→X, which build_store_wait_edges never emits
+          (self-edges dropped) → a self-deadlock is never store-backed (correct:
+          no real cross-owner dependency)
+        - empty / malformed cycle → False; never raises
+    """
+    if not cycle or not isinstance( cycle, list ):
+        return False
+    n = len( cycle )
+    for i in range( n ):
+        holder  = canonical_persona_key( cycle[ i ] )             or cycle[ i ]
+        awaited = canonical_persona_key( cycle[ ( i + 1 ) % n ] ) or cycle[ ( i + 1 ) % n ]
+        if awaited not in store_edges.get( holder, set() ):
+            return False
+    return True
+
+
+def edge_is_store_backed( holder, awaited, store_edges ):
+    """
+    Is a SINGLE derived holder→awaited blocking edge corroborated by an
+    authoritative store owner-edge (build_store_wait_edges)? The single-edge
+    analog of `cycle_is_store_backed` — the B3 backing-obligation gate (bug
+    d44b7068).
+
+    WHY (B3): the "You're blocking worker Y" advisory ping is minted from the
+    WAITER's self-reported `holding_on: peer:X` — it asserts "X is blocking Y"
+    purely because Y says it awaits X, with NO check that X actually OWES Y
+    anything. A holder whose wait is already discharged (the awaited peer
+    delivered / owes nothing) keeps pinging the innocent peer every poll
+    (Maria/Tiberius 2026-06-27; Krishna/Mr-Radio in the post-mortem). The store
+    `blocked_by` graph is the authoritative "who really owes whom"; gating the
+    advisory on it makes the edge truthful — fire ONLY when Y's store item is
+    really blocked_by X.
+
+    Requires:
+        - holder / awaited are view-persona strings (any type tolerated)
+        - store_edges is build_store_wait_edges output { holder: set(awaited) }
+
+    Ensures:
+        - returns True iff canonical(awaited) is in store_edges[ canonical(holder) ]
+          (personas compared canonically, mirroring cycle_is_store_backed — both
+          sides share the view-persona spelling, so this is consistent)
+        - returns False for a falsy holder/awaited or a non-dict store_edges
+          (fail-SUPPRESS: no authoritative backing ⇒ not a real blocker). The
+          CALLER decides the store-UNKNOWN (read-failed) fail-SAFE separately — it
+          only consults this gate when it HAS an authoritative store read
+        - never raises (pure)
+    """
+    if not holder or not awaited or not isinstance( store_edges, dict ):
+        return False
+    h = canonical_persona_key( holder )  or holder
+    a = canonical_persona_key( awaited ) or awaited
+    return a in store_edges.get( h, set() )
 
 
 def quick_smoke_test():
@@ -119,6 +602,47 @@ def quick_smoke_test():
     assert graph[ "cycles" ] == [ [ "Ann", "Bob" ] ], graph[ "cycles" ]
     assert find_deadlock_cycles( { } ) == [ ]
     assert find_deadlock_cycles( { "X": "X" } ) == [ [ "X" ] ]   # self-deadlock
+
+    # store-corroboration (bug 436a366b): item-kind blocked_by resolved to owners.
+    owed = {
+        "Ann": [ { "id": "t1", "status": "blocked", "blocked_by": [ { "kind": "item", "id": "t2" } ] } ],
+        "Bob": [ { "id": "t2", "status": "blocked", "blocked_by": [ { "kind": "item", "id": "t1" } ] } ],
+        "Cal": [ { "id": "t3", "status": "running", "blocked_by": [ ] } ],   # no edge
+    }
+    store = build_store_wait_edges( owed )
+    assert store == { "ann": { "bob" }, "bob": { "ann" } }, store
+    assert cycle_is_store_backed( [ "Ann", "Bob" ], store ) is True       # corroborated ring fires
+    assert cycle_is_store_backed( [ "Dan", "Eve" ], store ) is False      # NOT in store → suppressed
+    assert cycle_is_store_backed( [ "X" ], store )          is False      # self-cycle never store-backed
+    # B3 backing-obligation gate (d44b7068): single-edge store corroboration.
+    assert edge_is_store_backed( "Ann", "Bob", store ) is True            # canonical match → real blocker
+    assert edge_is_store_backed( "Ann", "Eve", store ) is False           # not backed → phantom
+    assert edge_is_store_backed( "",    "Bob", store ) is False           # falsy holder
+    assert edge_is_store_backed( "Ann", "Bob", None )  is False           # non-dict store_edges
+    # persona-kind ref → direct edge; unresolvable item ref → omitted.
+    owed2 = {
+        "Sam": [ { "id": "s1", "blocked_by": [ { "kind": "persona", "id": "Dot" },
+                                               { "kind": "item",    "id": "missing" },
+                                               { "kind": "user",    "id": "Rick" } ] } ],
+    }
+    assert build_store_wait_edges( owed2 ) == { "sam": { "dot" } }
+    assert build_store_wait_edges( None ) == { } and build_store_wait_edges( "x" ) == { }
+
+    # staleness-filter (bug bc1bc373): a dead holder contributes ZERO edges.
+    now_dt = datetime.datetime( 2026, 6, 23, 12, 0, 0, tzinfo=datetime.timezone.utc )
+    fresh_held = ( now_dt - datetime.timedelta( seconds=10 ) ).isoformat()
+    expired_held = ( now_dt - datetime.timedelta( seconds=10_000 ) ).isoformat()
+    live_hold = { "held_at": fresh_held, "ttl_seconds": 900, "work_owed": True, "reason": "waiting" }
+    assert hold_is_stale( None, now_dt ) is False and hold_is_stale( "x", now_dt ) is False
+    assert hold_is_stale( live_hold, now_dt ) is False
+    assert hold_is_stale( { **live_hold, "held_at": expired_held }, now_dt ) is True       # EXPIRED
+    assert hold_is_stale( { **live_hold, "work_owed": False }, now_dt ) is True             # NOT-WORK-OWED
+    assert hold_is_stale( { **live_hold, "next_chase": fresh_held }, now_dt ) is True       # PAST-NEXT-CHASE
+    # edge filter: Ann's dead hold drops her edge; Bob's live edge stays.
+    fv2 = { "a": { "persona": "Ann", "holding_on": "peer:Bob" },
+            "b": { "persona": "Bob", "holding_on": "peer:Ann" } }
+    assert build_wait_edges( fv2, stale_holders={ "Ann" } ) == { "Bob": "Ann" }
+    assert build_graph( fv2, stale_holders={ "Ann", "Bob" } )[ "cycles" ] == [ ]
     return True
 
 

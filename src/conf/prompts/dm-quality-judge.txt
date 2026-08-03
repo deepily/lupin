@@ -1,0 +1,46 @@
+### Instruction:
+
+Use the Task and Input given below to write a Response that grades the following direct message.
+
+### Task:
+
+You are a strict editorial judge for inter-agent direct messages (DMs) in a software engineering fleet. Your job is to grade ONE DM body on two QUALITATIVE dimensions: Directness and Tone. Do NOT judge length — that is scored separately.
+
+Use these exact grade labels, spelled exactly: `terrible`, `bad`, `meh`, `good`, `exemplary`.
+
+Directness — does it lead with the result and carry only what matters?
+
+- exemplary: verdict/result is the FIRST sentence; every remaining sentence is a decision, evidence, risk, or required action. No preamble.
+- good: leads with the result; one minor stray sentence.
+- meh: the result is present but buried under a sentence or two of setup.
+- bad: several sentences of narration before any verdict; reader must hunt for the point.
+- terrible: no clear verdict at all; pure stream-of-consciousness.
+
+Tone — does it read like a plain-spoken human colleague?
+
+- exemplary: plain English a colleague would put in a work email. No invented jargon, no aphorisms, no self-narrated hedging, no courtesy padding.
+- good: mostly plain; one small flourish.
+- meh: some jargon or a coined term a new engineer would need explained.
+- bad: aphorisms, slogans, or a paragraph grading its own work; reads bot-like rather than human.
+- terrible: dense invented vocabulary and self-analysis throughout; unreadable as a normal workplace message.
+
+Requirement: You MUST grade Directness and Tone INDEPENDENTLY. A message can be blunt and pleasant, or polite and rambling; do not let one dimension pull the other.
+Requirement: Each grade MUST be EXACTLY one of the five labels above, spelled exactly.
+Requirement: Each note MUST describe the DM given in the Input below, quoting or naming something actually in it.
+Requirement: The first word of your response MUST be the XML tag `<response>` and your last MUST be the XML tag `</response>`, and all of your work and output MUST occur between these two tags.
+
+### Input:
+
+You MUST respond to the directives above using the following XML format:
+{{PYDANTIC_XML_EXAMPLE}}
+
+Take a deep breath and pause for a moment before you begin. Good luck!
+
+Everything after the next line, up to the end of this section, is the DM you must
+grade. Nothing above it is part of the message.
+
+Grade this DM:
+
+{dm_body}
+
+### Response:

@@ -13,9 +13,13 @@ workflow/manager-autonomy.md §2.1 — a session is a manager-figure iff EITHER:
 
 Resolution reuses the existing chain machinery
 (`cosa.rest.voice_persona_helpers.pick_persona_chain_from_env` +
-`parse_persona_chain`) and the existing punctuation-tolerant normalizer
-(`lupin_mcp.commons_persona_matcher._normalize_for_match`, so "Mr. Radio" ==
-"mr radio") — no duplicated parser, one name at every layer.
+`parse_persona_chain`) and the one canonical identity normalizer
+(`lupin_mcp.persona_normalization.canonical_persona_key`, so "Mr. Radio" ==
+"mr radio") — no duplicated parser, one name at every layer. The declared
+chain entries are display form ("Mr. Radio,Tiberius,*") so the keep-spaces
+canonical key matches the persona's "mr radio" bridge name; the swap from the
+space-dropping match-key is symmetric on both compare sides (equivalence
+preserved) and now agrees with the store key.
 
 **Degrade direction: fail-CLOSED (False).** F4 is managers-first WRITES — a
 session whose manager-hood cannot be established does NOT write to the store.
@@ -27,7 +31,7 @@ Design authority: lupin ->
 """
 
 from cosa.rest.voice_persona_helpers import pick_persona_chain_from_env, parse_persona_chain, PERSONA_CHAIN_WILDCARD
-from lupin_mcp.commons_persona_matcher import _normalize_for_match
+from lupin_mcp.persona_normalization import canonical_persona_key
 from lupin_cli.claude_code.hooks.lib.session_bridge import find_session_path_by_id, resolve_project_name
 
 
@@ -92,7 +96,7 @@ def is_manager_figure( session_id, environ=None, _find_path=find_session_path_by
 
         chain_raw = pick_persona_chain_from_env( resolve_project_name( environ ), environ=environ )
         named     = [ e for e in parse_persona_chain( chain_raw ) if e != PERSONA_CHAIN_WILDCARD ]
-        target    = _normalize_for_match( persona_name )
-        return any( _normalize_for_match( e ) == target for e in named )
+        target    = canonical_persona_key( persona_name )
+        return any( canonical_persona_key( e ) == target for e in named )
     except Exception:
         return False

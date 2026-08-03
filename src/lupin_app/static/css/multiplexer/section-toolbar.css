@@ -1,0 +1,41 @@
+/* ============================================================================
+   Multiplexer section-toolbar — container + section-hidden (2026-06-23, Rachel
+   🕊️ / Mr. Radio lane).
+
+   The shared BUTTON appearance (.toolbar-btn / .toolbar-btn.active / hovers /
+   .task-accordion-btn) is carbon-copied into the shared sheet
+   (css/shared/notifications-surface.css) so legacy + mux render identically.
+   This sheet styles only the mux-shell-specific bits:
+
+     - the #section-toolbar CONTAINER. Legacy's vertical position:fixed is bound
+       to its 1000px centred container and does NOT port to the mux two-pane
+       flex shell, so the mux toolbar is a horizontal top-bar — mirroring the
+       legacy HORIZONTAL-mode .section-toolbar (notifications.css:5779-5789),
+       a legacy-supported appearance.
+     - .section-hidden: the whole-section hide class the per-section toggles
+       add/remove (legacy used `.collapsible-section.section-hidden`; the mux
+       sections are <section> panes, so the class is unscoped here).
+   ============================================================================ */
+
+#section-toolbar {
+    display        : flex;
+    flex-direction : row;
+    flex-wrap      : wrap;
+    align-items    : center;
+    gap            : 4px;
+    width          : max-content;
+    max-width      : 100%;
+    margin         : 0 0 12px 0;
+    padding        : 6px 8px;
+    background     : #ffffff;
+    border         : 1px solid #dee2e6;
+    border-radius  : 8px;
+    box-shadow     : 0 2px 8px rgba( 0, 0, 0, 0.12 );
+}
+
+/* Whole-section hide (per-section visibility toggle off). `!important` mirrors
+   the legacy rule (notifications.css:98-100) so it wins over a section's own
+   display rule. */
+.section-hidden {
+    display: none !important;
+}

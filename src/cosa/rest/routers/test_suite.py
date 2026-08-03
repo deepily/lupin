@@ -133,6 +133,11 @@ async def submit_test_suite(
     if not user_email:
         raise HTTPException( status_code=400, detail="User email not found in authentication token" )
 
+    # (Shape-B, bug fe375cf6: the pool_max==1 monopolize belt that used to fire here
+    # was removed — the monopolizer now runs on a dedicated executor OUTSIDE the shared
+    # pool, so a width-1 pool no longer hard-deadlocks. The in-process pool_max=1
+    # deadlock-safety test is the replacing regression guard.)
+
     # Use provided websocket_id or fall back to a default
     session_id = request_body.websocket_id or f"api-{user_id[ :8 ]}"
 

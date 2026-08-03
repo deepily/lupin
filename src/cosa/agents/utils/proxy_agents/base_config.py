@@ -25,14 +25,19 @@ DEFAULT_SERVER_PORT = 7999
 # ============================================================================
 
 RECONNECT_INITIAL_DELAY  = 1.0     # seconds
-RECONNECT_MAX_DELAY      = 30.0    # seconds
+RECONNECT_MAX_DELAY      = 10.0    # seconds
 RECONNECT_MAX_ATTEMPTS   = 10
 RECONNECT_BACKOFF_FACTOR = 2.0
 
+# Jitter is DOWNWARD ONLY: delay is drawn from [ (1-fraction)*base, base ]. Symmetric
+# jitter could exceed RECONNECT_MAX_DELAY, and the server-side all-clear settle deadline
+# is derived from that cap being a real ceiling.
+RECONNECT_JITTER_FRACTION = 0.5
 
-# ============================================================================
-# Credential Resolution
-# ============================================================================
+# ⚠️ The settle deadline (`managed bounce all-clear settle deadline seconds`) is DERIVED
+# from RECONNECT_MAX_DELAY — change one, change the other. SettleDeadlinePinTests enforces it.
+# src/rnd/v0.1.9/2026.08.02-settle-deadline-arithmetic-30-vs-40.md
+
 
 def get_credentials( cli_email=None, cli_password=None ):
     """

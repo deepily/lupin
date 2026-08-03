@@ -9,7 +9,7 @@ from typing import Optional, List, Dict
 from datetime import datetime, timedelta, timezone
 import uuid
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 from sqlalchemy import func, desc, case
 
 from cosa.rest.postgres_models import Notification
@@ -143,7 +143,8 @@ class NotificationRepository( BaseRepository[Notification] ):
         thread_id: str,
         recipient_id: uuid.UUID,
         since: Optional[datetime] = None,
-        limit: int = 200
+        limit: int = 200,
+        recipient_session: Optional[str] = None
     ) -> List[Notification]:
         """
         Load one peer-DM conversation thread (the `/api/dm/list?thread_id=` read).
@@ -153,15 +154,25 @@ class NotificationRepository( BaseRepository[Notification] ):
         thread in chronological (ascending) order — the natural read order for a
         conversation — optionally tailing only messages newer than `since` (poll).
 
+        ⚠️ `recipient_id` IS NOT A RECIPIENT ON THIS PATH. Peer DMs are persisted
+        with `recipient_user_id = <the SENDER's own authenticated account>` (see
+        routers/dm.py), so this column scopes to a USER — every session sharing
+        one service account shares one pool. `recipient_session` is the addressee
+        filter; see get_dm_inbox for the full note on the job_id overload.
+
         Requires:
             - thread_id: the conversation id (Notification.thread_id)
             - recipient_id: Valid user UUID (same-user scoping — peer DMs land on the
               sender's own user, so this is always the authenticated user's uuid)
             - since: None (whole thread) or a datetime (only created_at > since)
             - limit: positive int cap on rows returned
+            - recipient_session: None (whole thread as before) or an 8-char session
+              hash restricting rows to those ADDRESSED to that session
 
         Ensures:
             - returns ai_to_ai, non-hidden rows for this thread + recipient
+            - when recipient_session is given, only rows whose job_id equals it
+            - when recipient_session is None, behavior is UNCHANGED (account-wide)
             - when since is set, only rows strictly newer than `since`
             - ordered by created_at ascending (oldest first — conversation order)
             - honors limit
@@ -175,6 +186,8 @@ class NotificationRepository( BaseRepository[Notification] ):
             Notification.direction    == "ai_to_ai",
             Notification.is_hidden    == False
         )
+        if recipient_session is not None:
+            query = query.filter( Notification.job_id == recipient_session )
         if since is not None:
             query = query.filter( Notification.created_at > since )
         return query.order_by(
@@ -185,22 +198,63 @@ class NotificationRepository( BaseRepository[Notification] ):
         self,
         recipient_id: uuid.UUID,
         since: Optional[datetime] = None,
-        limit: int = 50
+        limit: int = 50,
+        recipient_session: Optional[str] = None
     ) -> List[Notification]:
         """
         Load the peer-DM inbox (the `/api/dm/list` no-thread read / poll).
 
-        All of a user's received peer DMs (direction='ai_to_ai'), newest first — the
-        cross-thread inbox view. Optionally tails only messages newer than `since`
-        for a lightweight poll.
+        Peer DMs (direction='ai_to_ai') newest first — optionally tailing only
+        messages newer than `since` for a lightweight poll.
+
+        ⚠️ WHAT "INBOX" MEANS HERE — read this before trusting the word.
+        `recipient_id` DOES NOT HOLD A RECIPIENT on this path. routers/dm.py
+        persists every peer DM with `recipient_user_id = <the SENDER's own
+        authenticated account>`, so this column scopes to a SERVICE ACCOUNT —
+        not to a session and not to an addressee. Without `recipient_session`
+        this returns EVERY DM sent by ANY session on that account, including
+        conversations the caller is not party to. Measured 2026-07-21: one
+        session's unfiltered read returned 50 messages across 7 sender sessions
+        and 7 threads, ZERO of them addressed to it; a second session's returned
+        200+ across 12 personas.
+
+        DO NOT assume accounts partition the fleet by project. They do not, in
+        practice: the DM write path stamps `@lupin` for EVERY session regardless
+        of its actual project (a `plan` session's DMs are written as `@lupin`),
+        so today one pool holds the whole fleet and `recipient_id` partitions
+        NOTHING. That is a separate upstream defect; it is recorded here only so
+        no future reader rebuilds a scoping assumption on a per-project split
+        that the data does not contain. `recipient_session` is the ONLY predicate
+        here that actually narrows to an addressee.
+
+        THE ADDRESSEE lives in `job_id` — written at routers/dm.py as
+        `job_id = target_session_id[ :8 ]` and used to route delivery to the
+        recipient's cc-listener. `recipient_session` filters on it.
+
+        🔴 TWO PROPERTIES OF THAT PREDICATE, STATED SO THE NEXT READER HAS THEM:
+          1. `job_id` is OVERLOADED. For other notification types it carries a
+             real agentic job id (e.g. "dr-a1b2c3d4"); only for direction
+             'ai_to_ai' does it carry a recipient session. This filter is sound
+             ONLY in combination with the direction=='ai_to_ai' clause above.
+             Do not lift it to a query that lacks that clause.
+          2. It is TRUNCATED to 8 characters, so this is a PREFIX MATCH, NOT AN
+             ID MATCH. Two sessions whose ids share their first 8 hex chars
+             would be indistinguishable here. Collisions are unlikely, NOT
+             impossible — this is a known, accepted limitation of scoping on a
+             borrowed column rather than a dedicated recipient_session_id.
 
         Requires:
-            - recipient_id: Valid user UUID (same-user scoping)
+            - recipient_id: Valid user UUID (same-ACCOUNT scoping — see above)
             - since: None (whole inbox) or a datetime (only created_at > since)
             - limit: positive int cap on rows returned
+            - recipient_session: None (account-wide, the legacy behavior) or an
+              8-char session hash restricting rows to those addressed to it
 
         Ensures:
-            - returns ai_to_ai, non-hidden rows for this recipient
+            - returns ai_to_ai, non-hidden rows for this account
+            - when recipient_session is given, only rows whose job_id equals it
+            - when recipient_session is None, behavior is UNCHANGED (account-wide),
+              which is what keeps the existing client-side-filtering hook working
             - when since is set, only rows strictly newer than `since`
             - ordered by created_at descending (newest first — inbox order)
             - honors limit
@@ -213,6 +267,8 @@ class NotificationRepository( BaseRepository[Notification] ):
             Notification.direction    == "ai_to_ai",
             Notification.is_hidden    == False
         )
+        if recipient_session is not None:
+            query = query.filter( Notification.job_id == recipient_session )
         if since is not None:
             query = query.filter( Notification.created_at > since )
         return query.order_by(
@@ -383,6 +439,92 @@ class NotificationRepository( BaseRepository[Notification] ):
 
         self.session.flush()
         return notification
+
+    def mark_answer_delivered( self, notification_id: uuid.UUID ) -> Optional[Notification]:
+        """
+        Stamp the late-answer handback mark (answer_delivered_at) — §4.3 contract.
+
+        This is the ONLY writer of answer_delivered_at, called by exactly the three
+        RECEIPT-gated setters: (a) the live SSE waiter being woken, (b) the pull
+        endpoint's ack-on-consume, (c) a §4.5 re-attach land. It is NEVER called on
+        a send signal, a successful send_json, an emit attempt, or on merely
+        SERVING a row — those leave the mark NULL so the row stays owed and catch-up
+        re-delivers. The state row is NOT deleted (ruling 2); only this mark moves.
+
+        Requires:
+            - notification_id: Valid notification UUID
+
+        Ensures:
+            - answer_delivered_at set to now() (idempotent — re-stamping is harmless)
+            - the row is otherwise untouched (never deleted; state unchanged)
+
+        Returns:
+            Updated Notification instance, or None if not found
+        """
+        notification = self.get_by_id( notification_id )
+        if not notification:
+            return None
+
+        # tz-AWARE to match the TIMESTAMPTZ column (Rachel, real-DB D-tier): a naive
+        # utcnow() coerces but stores a naive value inconsistent with responded_at /
+        # created_at. This is the one reader-critical timestamp, so keep it aware.
+        notification.answer_delivered_at = datetime.now( timezone.utc )
+        self.session.flush()
+        return notification
+
+    def get_answers_owed_for_persona(
+        self, sender_persona: str, limit: int = 100,
+        max_age_hours: Optional[int] = None, since: Optional[datetime] = None
+    ) -> List[Notification]:
+        """
+        Get the answers OWED to a persona — answered asks not yet handed back (§4.4).
+
+        The one reader of answer_delivered_at. Its WHERE is the owed predicate,
+        stated in full with the SAME THREE TERMS (in the same words) as §4.1's ORM
+        index and the concurrent migration:
+
+            response_requested AND responded_at IS NOT NULL AND answer_delivered_at IS NULL
+
+        - `responded_at IS NOT NULL` is the §3 design-level invariant, NOT cosmetic:
+          an offline/expired persist carries a machine default with responded_at
+          NULL and must NEVER be served as an owed answer (the forged-answer defect).
+        - Retrieval is persona-keyed (ruling 6): matches on sender_persona ALONE.
+          session_hash8 is NOT a filter here — it is a returned field the endpoint
+          uses to set the earlier-session flag.
+
+        ⚠️ ORDER + CURSOR are on `responded_at`, NOT `created_at`. Copying the
+        undelivered idiom's created_at cursor wholesale would strand a 20-hour-old
+        ask answered two minutes ago behind a cursor that already passed its
+        creation time (D-V4). The `since` cursor advances on responded_at.
+        The 24h age cap still keys on `created_at` (the storm-guard semantics).
+
+        Requires:
+            - sender_persona: a non-empty persona key (never None — a persona-less
+              ask stamps NULL and is unretrievable by persona, the accepted gap)
+            - max_age_hours: None (no cap) or a positive int (hours), on created_at
+            - since: None or a responded_at cursor; only rows answered AFTER it
+
+        Ensures:
+            - Returns rows matching the three-term owed predicate for this persona
+            - Ordered by responded_at ascending (oldest answer first); honors limit
+
+        Returns:
+            List of owed Notification instances
+        """
+        query = self.session.query( Notification ).filter(
+            Notification.sender_persona == sender_persona,
+            Notification.response_requested == True,
+            Notification.responded_at.isnot( None ),
+            Notification.answer_delivered_at.is_( None )
+        )
+        if max_age_hours is not None:
+            cutoff = datetime.now( timezone.utc ) - timedelta( hours=max_age_hours )
+            query  = query.filter( Notification.created_at >= cutoff )
+        if since is not None:
+            query = query.filter( Notification.responded_at > since )
+        return query.order_by(
+            Notification.responded_at.asc()
+        ).limit( limit ).all()
 
     def get_pending_for_recipient( self, recipient_id: uuid.UUID ) -> List[Notification]:
         """
@@ -927,6 +1069,36 @@ class NotificationRepository( BaseRepository[Notification] ):
                 Notification.job_id.isnot( None ),
                 ~Notification.job_id.in_( exclude_job_ids ) if exclude_job_ids else True
             )
+
+        # Reaped-sender exclusion (bug ee59d5ed — durable, HISTORY-SAFE roster eviction).
+        # A `session_reaped` state-update is persisted as a Notification row
+        # (session_spawner._default_emit_reap POSTs it; /api/notify persist defaults
+        # True). The operator focus bar (this roster query) must DURABLY drop a
+        # reaped sender across a page refresh — but WITHOUT destroying its history.
+        # is_hidden=True would over-hide: every history/conversation getter filters
+        # is_hidden==False, so it is the user's clear-conversation soft-delete. So we
+        # evict at the ROSTER query ONLY: exclude any sender_id that has >=1 persisted
+        # `session_reaped` row for THIS recipient. Every history/conversation query is
+        # untouched → full audit trail preserved. Shared by construction across both
+        # reap paths (normal dismiss_sessions AND the orphan-bridge arbiter sweep both
+        # emit the same persisted marker). Re-spawn-safe: sender_id carries the 8-hex
+        # session suffix (…deepily.ai#<session8>), so a re-spawn is a NEW sender_id,
+        # unaffected by a prior session's marker; a once-reaped sender_id stays excluded
+        # (that session is dead). Collision window: a NEW live session reusing an
+        # already-reaped 8-hex suffix is ~1/2**32 — negligible, accepted explicitly.
+        # The type + sender_id + recipient_id single-column indexes back the subquery.
+        # Correlated NOT EXISTS (null-safe): NOT-IN would empty the whole roster if the
+        # subquery ever yielded a NULL sender_id (SQL `x NOT IN (…, NULL)` → NULL → no
+        # rows). sender_id is the NOT-NULL routing key so it is theoretical, but
+        # NOT EXISTS is the robust idiom and degrades gracefully.
+        reaped_marker = aliased( Notification )
+        query = query.filter(
+            ~self.session.query( reaped_marker ).filter(
+                reaped_marker.sender_id   == Notification.sender_id,   # correlate to the outer row
+                reaped_marker.recipient_id == recipient_id,
+                reaped_marker.type         == "session_reaped",
+            ).exists()
+        )
 
         results = query.group_by(
             Notification.sender_id

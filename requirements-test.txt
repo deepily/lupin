@@ -19,6 +19,7 @@ pytest-playwright>=0.7.0             # Playwright integration for pytest
 # The plugin only uses pillow + pixelmatch at runtime; structlog-config is never imported
 # by plugin.py. After --no-deps install, patch __init__.py to make structlog import optional.
 pytest-playwright-visual-snapshot==0.5.1  # Visual regression snapshots (--no-deps required)
+pytest-timeout==2.4.0                # Arms @pytest.mark.timeout (row 61ef0e0d); without it the marker is silently ignored
 
 # Note: Main dependencies are in src/cosa/requirements.txt
 # Install both files for complete development environment:

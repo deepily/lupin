@@ -19,6 +19,7 @@ import type { ServerSenderHydrationRecord } from "../../../lupin_app/static/js/m
 import type {
   LupinEvent,
   StoreNotificationsChangedPayload,
+  StoreNotificationTtsIntentPayload,
 } from "../../../lupin_app/static/js/multiplexer/shared/types";
 
 // ---------------------------------------------------------------------------
@@ -314,4 +315,104 @@ test("isHistoryHydrated is false before the first hydrateHistory", () => {
 
 test("DEFAULT_HISTORY_WINDOW_HOURS is classic's virgin 48h rolling default (notifications.js:360, ruling amended post-review)", () => {
   assert.equal(DEFAULT_HISTORY_WINDOW_HOURS, 48);
+});
+
+// ===========================================================================
+// WS2 / C2-d (D3) — load-time responded-split: a responded history row expands
+// into an incoming prompt + a synthetic `{id}-response` OUTGOING bubble off
+// response_value.value (mirrors legacy notifications.js:14317-14330).
+// ===========================================================================
+
+test("responded-split: response_value.value yields a {id}-response outgoing bubble after the prompt", async () => {
+  const { store } = setupStore();
+  const api = makeApiStub({
+    "ext-sender": { "2026-06-11": [makeRow({
+      id: "p1", message: "Approve deploy?", timestamp: "2026-06-11T21:00:00Z",
+      response_value: { value: "Approved" }, responded_at: "2026-06-11T21:05:00Z",
+    })] },
+  });
+  await store.hydrateHistory(api, { ...OPTS_BASE, senders: [makeSenderRec()] });
+
+  const list = store.list();
+  assert.equal(list.length, 2, "prompt + synthetic response");
+  const incoming = list.find(n => n.id_hash === "p1")!;
+  const outgoing = list.find(n => n.id_hash === "p1-response")!;
+  assert.notEqual(incoming, undefined);
+  assert.notEqual(outgoing, undefined);
+  assert.equal(incoming.direction, undefined);             // default → renders .incoming
+  assert.equal(outgoing.direction, "outgoing");
+  assert.equal(outgoing.message, "Approved");
+  assert.equal(outgoing.sender_id, "ext-sender");
+  assert.equal(outgoing.action_required, false);
+  assert.equal(outgoing.ts, Date.parse("2026-06-11T21:05:00Z"));  // responded_at
+});
+
+test("responded-split: missing responded_at falls the outgoing ts back to the prompt ts", async () => {
+  const { store } = setupStore();
+  const api = makeApiStub({
+    "ext-sender": { "2026-06-11": [makeRow({
+      id: "p2", timestamp: "2026-06-11T21:00:00Z", response_value: { value: "Yes" },
+    })] },   // no responded_at
+  });
+  await store.hydrateHistory(api, { ...OPTS_BASE, senders: [makeSenderRec()] });
+
+  const outgoing = store.list().find(n => n.id_hash === "p2-response")!;
+  assert.notEqual(outgoing, undefined);
+  assert.equal(outgoing.ts, Date.parse("2026-06-11T21:00:00Z"));  // == prompt ts
+});
+
+test("responded-split: response_value null produces NO outgoing (prompt-only)", async () => {
+  const { store } = setupStore();
+  const api = makeApiStub({
+    "ext-sender": { "2026-06-11": [makeRow({ id: "p3", response_value: null })] },
+  });
+  await store.hydrateHistory(api, { ...OPTS_BASE, senders: [makeSenderRec()] });
+  assert.equal(store.list().length, 1);
+  assert.equal(store.list()[0]!.id_hash, "p3");
+});
+
+test("responded-split: empty response_value.value produces NO outgoing", async () => {
+  const { store } = setupStore();
+  const api = makeApiStub({
+    "ext-sender": { "2026-06-11": [makeRow({ id: "p4", response_value: { value: "" } })] },
+  });
+  await store.hydrateHistory(api, { ...OPTS_BASE, senders: [makeSenderRec()] });
+  assert.equal(store.list().length, 1);
+});
+
+test("responded-split: absent response_value (plain prompt) produces NO outgoing", async () => {
+  const { store } = setupStore();
+  const api = makeApiStub({
+    "ext-sender": { "2026-06-11": [makeRow({ id: "p5" })] },   // makeRow default: no response_value
+  });
+  await store.hydrateHistory(api, { ...OPTS_BASE, senders: [makeSenderRec()] });
+  assert.equal(store.list().length, 1);
+});
+
+test("responded-split: non-string response_value.value is ignored (defensive) — NO outgoing", async () => {
+  const { store } = setupStore();
+  const api = makeApiStub({
+    "ext-sender": { "2026-06-11": [makeRow({ id: "p6", response_value: { value: 123 } })] },
+  });
+  await store.hydrateHistory(api, { ...OPTS_BASE, senders: [makeSenderRec()] });
+  assert.equal(store.list().length, 1);
+});
+
+// ===========================================================================
+// F0-d — hydration-zero guard (watch-out #1, by construction)
+// ===========================================================================
+
+test("F0-d: cold-load hydration emits ZERO store_notification_tts_intent, even for a would-be-spoken high-priority row", async () => {
+  const { bus, store } = setupStore();
+  const intents: StoreNotificationTtsIntentPayload[] = [];
+  bus.on<StoreNotificationTtsIntentPayload>("store_notification_tts_intent", (e) => intents.push(e.payload));
+  const api = makeApiStub({
+    // priority:"high" would be SPOKEN on the live path — but the TTS emit lives
+    // only in onQueueUpdate, which hydrateHistory never calls. Zero intents proves
+    // the live-only property by construction (no re-speak of history on reload).
+    "ext-sender" : { "2026-06-11" : [makeRow({ priority: "high" })] },
+  });
+  await store.hydrateHistory(api, { ...OPTS_BASE, senders: [makeSenderRec()] });
+  assert.equal(store.list().length, 1, "row seeded into history");
+  assert.equal(intents.length, 0, "hydration must never emit a TTS intent");
 });

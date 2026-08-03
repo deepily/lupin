@@ -48,7 +48,8 @@ if src_path not in sys.path:
 # Promote the weak "LUPIN_ROOT is set" guard above to a strong "LUPIN_ROOT is
 # valid" check — fails loud and immediate on the /app-vs-/var/lupin path drift
 # instead of cryptically later at config load. (No defensive fallback.)
-from lupin_app.bootstrap_helpers import assert_lupin_root_valid
+from lupin_app.bootstrap_helpers import assert_lupin_root_valid, reload_enabled as _reload_enabled
+from cosa.rest.error_envelope import make_unhandled_exception_handler
 assert_lupin_root_valid( lupin_root )
 
 # Reduce CUDA memory fragmentation (prevents periodic OOM on Whisper inference)
@@ -404,6 +405,166 @@ async def websocket_cleanup_loop():
             await asyncio.sleep( interval_seconds )
 
 
+# ─── Managed-bounce broadcasts (R4 warning + R5 all-clear) ──────────────────
+# Design of record: src/rnd/v0.1.9/2026.08.01-managed-bounce-review-tiffany.md +
+# 2026.08.01-managed-bounce-for-7999.md Rev 2. Pure/injectable logic lives in
+# cosa.rest.managed_bounce_broadcast; these thin wrappers bind it to the live
+# commons singletons (module globals set during startup).
+
+def _managed_bounce_server_label():
+    """
+    Which server THIS process is, as it should appear in a fleet broadcast.
+
+    The dev and test containers run this same file and differ only by config
+    block (`Lupin: Development` vs `Lupin: Testing`), so without this the test
+    server announces itself as ":7999" — measured 2026-08-01, nine sessions were
+    told the DEV server had bounced when the TEST container restarted (bug
+    652271f3). Resolved ONCE here and passed to every call site so the warning
+    and the all-clear can never disagree about who is speaking.
+    """
+    from cosa.rest.managed_bounce_broadcast import DEFAULT_SERVER_LABEL
+
+    return config_mgr.get( "managed bounce server label", default=DEFAULT_SERVER_LABEL )
+
+
+def _emit_managed_bounce( kind, message, broadcast_id=None ):
+    """
+    Fire a managed-bounce fleet broadcast in-process, never raising.
+
+    Returns the execute_broadcast result dict, or None when commons is disabled /
+    not yet wired (the not-wired guard + skip-log live in the measured module's
+    emit_bounce_broadcast_in_process, so the branch is tested, not just written).
+    """
+    from cosa.rest.routers.commons import execute_broadcast, BroadcastRequestBody, build_sender_id_for_cc, _load_bridge_fields
+    from lupin_cli.claude_code.hooks.lib.session_bridge import find_active_voice_persona_sessions
+    from cosa.rest.managed_bounce_broadcast import emit_bounce_broadcast_in_process, FLEET_BROADCAST_USER_ID
+
+    threshold = config_mgr.get( "commons broadcast liveness threshold seconds", default=28800, return_type="int" )
+    return emit_bounce_broadcast_in_process(
+        kind                             = kind,
+        message                          = message,
+        user_id                          = FLEET_BROADCAST_USER_ID,
+        store                            = commons_store,
+        rate_limiter                     = commons_rate_limiter,
+        ack_watcher                      = commons_ack_watcher,
+        notification_queue               = jobs_notification_queue,
+        active_session_threshold_seconds = float( threshold ),
+        raw_sessions_fn                  = find_active_voice_persona_sessions,
+        bridge_loader                    = _load_bridge_fields,
+        build_sender_id                  = build_sender_id_for_cc,
+        execute_broadcast_fn             = execute_broadcast,
+        broadcast_request_cls            = BroadcastRequestBody,
+        broadcast_id                     = broadcast_id,
+    )
+
+
+def _managed_bounce_all_clear_blocking( boot_id, boot_started, startup_began ):
+    """
+    R5 all-clear, run in a worker thread post-yield (option A: bounded settle gate).
+
+    Waits for cc-listener/browser sockets to reconnect after the restart, then
+    fires ONE boot-stamped all-clear. Blocking (filesystem + queue writes); the
+    async wrapper hands it to a thread so it never touches the event loop.
+    """
+    from lupin_cli.claude_code.hooks.lib.session_bridge import find_active_voice_persona_sessions
+    from cosa.rest.managed_bounce_broadcast import wait_for_roster_coverage, build_bounce_message
+
+    # Fallback tracks the key; both are derived from RECONNECT_MAX_DELAY (pinned by test).
+    deadline = config_mgr.get( "managed bounce all-clear settle deadline seconds",      default=15,  return_type="float" )
+    interval = config_mgr.get( "managed bounce all-clear settle poll interval seconds", default=0.5, return_type="float" )
+
+    # Hold until live sockets COVER the roster of sessions we expect back. The two
+    # inputs are deliberately different sources and neither can do the other's job:
+    #   · roster  = bridge files. They SURVIVE a bounce, which is why they answer
+    #               "who was here before it" and CANNOT answer "who is back now".
+    #   · present = websocket_manager.active_connections, re-instantiated EMPTY on
+    #               a bounce and refilled only by a real reconnect.
+    # Two earlier predicates failed by being FLOORS instead of completion tests —
+    # v1 counted bridge files (always true → fired at 0.0s, 0 acks), v2 waited for
+    # a plateau of live sockets and fired at 1 of 4 on a staggered reconnect
+    # (bug 784d4a2e, boot #2: curve 0→1→1, fired at 1.0s, zero acks). Coverage is
+    # a completion test: a subset never satisfies it, at any fleet size.
+    # This is the SOLE delivery path — a straggler past the deadline gets NOTHING.
+    gate = wait_for_roster_coverage(
+        roster_fn             = lambda: [ sid for ( _path, sid, _persona ) in find_active_voice_persona_sessions() ],
+        present_fn            = lambda: list( websocket_manager.active_connections.keys() ),
+        deadline_seconds      = deadline,
+        poll_interval_seconds = interval,
+        now_fn                = time.monotonic,
+        sleep_fn              = time.sleep,
+    )
+
+    uptime     = time.monotonic() - startup_began
+    message    = build_bounce_message( "all-clear", boot_id=boot_id, boot_started=boot_started, uptime_seconds=uptime,
+                                       server_label=_managed_bounce_server_label() )
+    result     = _emit_managed_bounce( "all-clear", message )
+    recipients = ( result or {} ).get( "recipients" )
+    curve      = "→".join( str( c ) for c in gate[ "curve" ] )
+
+    # Accepted delivery LOSS (Rick's ruling: no re-fire). NAME who had not rejoined
+    # so the loss is legible, not a bare count: roster (bridge files = who we EXPECT
+    # back — they survive the bounce) minus live sockets. A missed session gets
+    # NOTHING: no push, and NO durable entry either (perform_fanout writes entries
+    # only for the fire-time snapshot).
+    #
+    # COMPUTED FOR BOTH FIRE REASONS, not just deadline expiry (bug 784d4a2e). A
+    # PLATEAU fire can miss just as many people: measured 2026-08-01 boot #2, the
+    # gate saw curve 0→1→1, called it settled at 1.0s, and fired to 4 recipients of
+    # whom ZERO acked — and because naming lived in the deadline branch alone, the
+    # log line read "reconnect plateau after 1.0s ... reached 4 recipient(s)" and was
+    # indistinguishable from success. An accepted loss that stops being visible is
+    # just a loss.
+    # Taken from the GATE's own firing observation, not re-read here. A second read
+    # after the fanout would see late arrivals and report a SMALLER loss than the
+    # one the gate actually decided on — an under-count in the direction that
+    # flatters us.
+    missed = gate[ "missing" ]
+    loss   = (
+        f" {len( missed )} session(s) had NOT rejoined and got NO all-clear "
+        f"(accepted loss, no re-fire): {missed}."
+        if missed
+        else (
+            f" all {gate[ 'roster_size' ]} session(s) on the roster had a live socket."
+            if gate[ "roster_size" ]
+            # ⚠️ An EMPTY roster is AMBIGUOUS and the gate cannot resolve it:
+            # find_active_sessions returns [] both when nobody is expected back AND
+            # when the bridge directory is missing or unreadable. Coverage is then
+            # satisfied vacuously and this fires into nobody. Say that plainly rather
+            # than reporting the flattering reading as fact (Arnold 🪨, attack #2).
+            else (
+                " ⚠️ the roster was EMPTY — either nobody was expected back, or the bridge "
+                "directory could not be read. This fire reached nobody and the gate cannot "
+                "tell those two apart."
+            )
+        )
+    )
+
+    # Fire-time receipt + reconnect curve — the instruments that tell us later
+    # whether the guessed window was right and how the fleet came back.
+    if gate[ "reason" ] == "deadline":
+        print(
+            f"[managed-bounce] ⚠️ all-clear FIRED on DEADLINE EXPIRY (boot #{boot_id}): reached "
+            f"{recipients} recipient(s) after {gate[ 'elapsed' ]:.1f}s; reconnect curve {curve}."
+            f"{loss}",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            f"[managed-bounce] all-clear FIRED (boot #{boot_id}): roster COVERED after "
+            f"{gate[ 'elapsed' ]:.1f}s; reconnect curve {curve}; reached {recipients} recipient(s)."
+            f"{loss}",
+            file=sys.stderr,
+        )
+
+
+async def _run_managed_bounce_all_clear( *, boot_id, boot_started, startup_began ):
+    """Post-yield async wrapper: run the blocking all-clear off the event loop."""
+    try:
+        await asyncio.to_thread( _managed_bounce_all_clear_blocking, boot_id, boot_started, startup_began )
+    except Exception as e:  # pragma: no cover - best-effort boundary guard; must never surface (main.py is outside cov source=["cosa"])
+        print( f"[managed-bounce] WARN: all-clear task failed: {e}", file=sys.stderr )
+
+
 @asynccontextmanager
 async def lifespan( app: FastAPI ):
     """
@@ -428,6 +589,9 @@ async def lifespan( app: FastAPI ):
     # Startup
     global config_mgr, snapshot_mgr, jobs_todo_queue, jobs_done_queue, jobs_dead_queue, jobs_run_queue, jobs_notification_queue, io_tbl, id_generator, app_debug, app_verbose, app_silent, clock_task, consumer_thread, websocket_heartbeat_task, websocket_cleanup_task, fcm_wake_service
     
+    # Monotonic mark for the managed-bounce all-clear uptime stamp (R5).
+    _startup_monotonic = time.monotonic()
+
     config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
 
     # Get configuration flags (needed for debug output below)
@@ -443,8 +607,65 @@ async def lifespan( app: FastAPI ):
     # get_database_url builder, so it connects exactly like the app in every env.
     from cosa.rest.db.auto_migrate import run_migrations_to_head
     print( "Running database auto-migration (alembic upgrade head)..." )
-    run_migrations_to_head( debug=app_debug )
+    migrate_result = run_migrations_to_head( debug=app_debug )
     print( "✓ Database schema is at migration head." )
+
+    # ANNOUNCE AN APPLIED MIGRATION (row 0aae1a28 (a), Mr Radio's ruling).
+    #
+    # On :7999 uvicorn runs with StatReload over a bind-mounted repo, so SAVING a
+    # watched host file restarts the server, which runs this migrate. Not
+    # committing, not bouncing — saving. That means a schema change can reach the
+    # fleet's task store with no gate and, until now, no announcement: both
+    # `command.upgrade` and this block were silent whether they moved the
+    # database or no-opped. María spent an afternoon asking for a deploy window
+    # for a change that had already shipped hours earlier as she typed.
+    #
+    # ⚠️ The normal objection to a log line — "a log nobody reads is not a guard"
+    # — was weighed and withdrawn by Mr Radio for this case specifically: a DEV
+    # server log is read; that is what it is for. This is an ANNOUNCEMENT, not a
+    # gate, and it is not claimed as one.
+    #
+    # Deliberately silent on a no-op: a line on every boot is a line nobody sees.
+    if migrate_result[ "applied" ]:
+        print(
+            f"⚠️  MIGRATION APPLIED — the database moved {migrate_result[ 'before' ] or '(unstamped)'}"
+            f" -> {migrate_result[ 'after' ]}.\n"
+            f"    On :7999 a file-save restarts the server and runs this migrate, so this may be a\n"
+            f"    schema deploy nobody decided. If you did not intend it, that is the thing to look at.",
+            file=sys.stderr,
+        )
+
+    # ORM/database drift alarm — FAIL-OPEN. Detects a mapped_column that reached
+    # the tree ahead of its migration: on :7999 uvicorn runs with --reload, so the
+    # model edit IS the deploy, and the ORM immediately SELECTs a column the DB
+    # lacks. Measured incident 2026-07-19: task_items.park_reason_captured_at, 12
+    # live 500s on /api/tasks — the owed-work oracle the Stop-hook and arbiter
+    # both read, so the outage was fleet-wide, not local.
+    #
+    # Placed AFTER auto-migrate deliberately: `upgrade head` cannot fabricate a
+    # migration for a column that has none, so the target defect survives it
+    # untouched and is fully visible here. Running BEFORE would instead alarm on
+    # every legitimately-pending migration — a false alarm on every boot after any
+    # new migration lands, which is how a detector gets ignored into uselessness.
+    #
+    # This call is structurally incapable of raising or blocking: no network, no
+    # await, every exception swallowed internally. On drift it writes a CRITICAL
+    # alarm to stderr naming model, table, column, and both revisions — stderr is
+    # the alarm of record because it has no dependencies — and the server SERVES
+    # ANYWAY. Fail-open is load-bearing: refusing boot would take down the box
+    # carrying the MCP transport, the task store, and the owed-work oracle,
+    # turning a partial outage into a total one. Worst case is a false alarm,
+    # which is the correct price.
+    #
+    # No notify() here, by design: /api/notify requires auth plus a target_user,
+    # and pre-yield this very server accepts no connections — the alarm's
+    # transport would be the thing that is still booting. Richer routing is a
+    # separate seam, deliberately absent rather than half-built.
+    # The report is captured so the SECOND channel (a UI notification) can be
+    # scheduled later, once the notification queue exists. The alarm of record
+    # has already fired synchronously by the time this returns.
+    from cosa.rest.db.schema_drift import emit_startup_drift_alarm
+    schema_drift_report = emit_startup_drift_alarm( debug=app_debug )
 
     # Suppress LanceDB cosmetic warnings if configured
     # These warnings are non-functional - queries execute correctly regardless
@@ -475,22 +696,39 @@ async def lifespan( app: FastAPI ):
     manager_type = config_mgr.get( "solution snapshots manager type", default="file_based" )
     
     if manager_type.lower() == "lancedb":
-        # Use LanceDB backend
-        lancedb_path = config_mgr.get( "solution snapshots lancedb path", default="/src/conf/long-term-memory/lupin.lancedb" )
         lancedb_table = config_mgr.get( "solution snapshots lancedb table", default="solution_snapshots" )
-        
-        # Convert relative path to absolute
-        if lancedb_path.startswith( "/" ):
-            lancedb_path = du.get_project_root() + lancedb_path
-        
-        config = {
-            "db_path": lancedb_path,
-            "table_name": lancedb_table
-        }
-        
-        if app_debug:
-            print( f"Using LanceDB solution snapshot manager: {lancedb_path}" )
-            
+
+        # TWO AUTHORITIES, RECONCILED (decision 2b20a6d6). `solution snapshots manager
+        # type` names the MANAGER class; `vector store backend` names the STORAGE the
+        # manager routes to. Nothing compared them before, so this block built a LanceDB
+        # path unconditionally and the manager silently ignored it under postgres.
+        # `vector store backend` is the storage authority — ask it before building a path.
+        from cosa.rest.db.repositories.vector_store_backend import is_postgres_backend
+
+        if is_postgres_backend( config_mgr ):
+            config = {
+                "table_name" : lancedb_table
+            }
+
+            if app_debug:
+                print( "Using Postgres+pgvector solution snapshot storage (no LanceDB path built)" )
+
+        else:
+            lancedb_path = config_mgr.get( "solution snapshots lancedb path", default="/src/conf/long-term-memory/lupin.lancedb" )
+
+            # Convert relative path to absolute
+            if lancedb_path.startswith( "/" ):
+                lancedb_path = du.get_project_root() + lancedb_path
+
+            config = {
+                "db_path"    : lancedb_path,
+                "table_name" : lancedb_table
+            }
+
+            if app_debug:
+                print( f"Using LanceDB solution snapshot manager: {lancedb_path}" )
+
+
     else:
         # # Use file-based backend (default)
         # path_to_snapshots_dir_wo_root = config_mgr.get( "path to snapshots dir wo root" )
@@ -870,12 +1108,80 @@ async def lifespan( app: FastAPI ):
     from cosa.rest.arbiter_bootstrap import submit_arbiter_if_enabled
     submit_arbiter_if_enabled( jobs_todo_queue, jobs_run_queue, config_mgr )
 
+    # Schema-drift SECOND channel. Scheduled here — not at detection time —
+    # because the notification queue does not exist yet when the check runs, and
+    # not after `yield` because everything after `yield` is SHUTDOWN.
+    #
+    # create_task() only QUEUES the coroutine; it cannot begin executing until
+    # the loop resumes, which happens after this generator yields. So the network
+    # work provably lands post-startup while the call itself blocks nothing —
+    # awaiting delivery here would dial a server not yet accepting connections.
+    #
+    # No-ops entirely when there is no drift or no recipient is configured. The
+    # recipient key is EMPTY by default (ratified by Rick 2026-07-19): an
+    # unconfigured server degrades to log-only rather than misdelivering to a
+    # guessed identity. The CRITICAL stderr log remains the alarm of record.
+    from cosa.rest.db.schema_drift import schedule_drift_notification
+    schedule_drift_notification(
+        schema_drift_report,
+        config_mgr.get( "schema drift alarm recipient email", default="" ),
+        jobs_notification_queue
+    )
+
     print( f"FastAPI startup complete at {datetime.now()}" )
-    
+
+    # ── R5: managed-bounce all-clear ──────────────────────────────────────────
+    # Fires on EVERY start (script, hand-typed docker restart, compose up,
+    # crash-restart, host reboot) — the just-started server is the one process
+    # guaranteed alive when "I am up" must be spoken. Scheduled as a post-yield
+    # task (create_task only QUEUES; it runs once the loop is serving) so it
+    # NEVER blocks boot, and so the settle gate can wait for reconnecting sockets
+    # while the server already accepts connections. Guarded on commons being
+    # wired; any failure degrades to a log, never a failed boot.
+    if config_mgr.get( "commons enabled", default=True, return_type="boolean" ) and commons_store is not None:
+        try:
+            from cosa.rest.managed_bounce_broadcast import next_boot_id, boot_counter_path
+            # PER-SERVER counter (bug 652271f3): io/ is bind-mounted into both
+            # containers, so one shared file interleaved dev and test boots and
+            # made the number in a watched all-clear unpredictable.
+            _boot_counter_path = boot_counter_path( du.get_project_root(), _managed_bounce_server_label() )
+            _boot_id           = next_boot_id( _boot_counter_path )
+            asyncio.create_task(
+                _run_managed_bounce_all_clear(
+                    boot_id       = _boot_id,
+                    boot_started  = datetime.now().isoformat( timespec="seconds" ),
+                    startup_began = _startup_monotonic,
+                )
+            )
+        except Exception as e:  # pragma: no cover - best-effort boundary guard; never let the all-clear break boot (main.py is outside cov source=["cosa"])
+            print( f"[managed-bounce] WARN: could not schedule all-clear: {e}", file=sys.stderr )
+
     yield
-    
+
     # Shutdown
     print( f"FastAPI shutdown at {datetime.now()}" )
+
+    # ── R4 backstop: managed-bounce warning on graceful shutdown ──────────────
+    # PINNED FIRST in the shutdown block — BEFORE the WebSocket/consumer teardown
+    # below — because after those are cancelled this emit is a silent no-op that
+    # still LOOKS implemented (Tiffany, 2026-08-01). This is the backstop for
+    # un-sanctioned bounce paths (hand-typed `docker restart`); the bounce script
+    # sends its OWN ack-confirmed warning on the sanctioned path.
+    #
+    # Best-effort + will sometimes lose the race: `docker stop` grants ~10s before
+    # SIGKILL, and a hard `docker kill`/OOM skips graceful shutdown entirely — so
+    # this can fail to send. Accepted, because the NEXT start's all-clear closes
+    # the loop regardless of how the last one died.
+    #
+    # Deliberately NOT a signal.signal(SIGTERM) handler: that would REPLACE
+    # uvicorn's own SIGTERM handler and break graceful shutdown + the
+    # timeout_graceful_shutdown outage fix (bug 5b654a15). The post-yield block
+    # already runs on every graceful SIGTERM, which is exactly the edge we want.
+    try:
+        from cosa.rest.managed_bounce_broadcast import build_bounce_message
+        _emit_managed_bounce( "warning", build_bounce_message( "warning", server_label=_managed_bounce_server_label() ) )
+    except Exception as e:  # pragma: no cover - best-effort boundary guard; must never block shutdown (main.py is outside cov source=["cosa"])
+        print( f"[managed-bounce] WARN: shutdown warning emit failed: {e}", file=sys.stderr )
 
     # Clean-shutdown marker: exact last-available stamp (the 60s heartbeat covers hard kills)
     try:
@@ -975,6 +1281,18 @@ app = FastAPI(
     version="0.6.0",
     lifespan=lifespan
 )
+
+# Unhandled-exception envelope (row b101a60b). SERVER_STARTED_AT is stamped HERE,
+# at module import, which is exactly what makes it useful: uvicorn's --reload
+# re-imports this module, so a caller seeing a start instant a few seconds old
+# knows it hit a reload window rather than a bug in its own request. Paired with
+# `exception_class`, a 500 now explains itself AT THE CALLER — previously the
+# body was the 21-byte string "Internal Server Error" and the class lived only in
+# the container log, where nobody diagnosing a failed call was looking.
+# Deliberately carries no `str(e)`: unaudited for what it exposes (see the module
+# docstring). Raised HTTPExceptions keep FastAPI's own handling, untouched.
+SERVER_STARTED_AT = datetime.now().isoformat( timespec="seconds" )
+app.add_exception_handler( Exception, make_unhandled_exception_handler( SERVER_STARTED_AT ) )
 
 # Add CORS middleware to allow Flutter web app to access API endpoints
 app.add_middleware(
@@ -1114,15 +1432,74 @@ if __name__ == "__main__":
     # long-term-memory store), causing repeated 12-18s server restarts whenever
     # any of those files was touched — surfacing in the browser as
     # ERR_CONNECTION_REFUSED for 30s-2min at a time.
+    #
+    # Bug 5b654a15 (2026-07-13): the whitelist above was NOT sufficient. `cosa` was
+    # watched wholesale, and `src/cosa/tests/` lives INSIDE it — 476 test files, half
+    # the watched tree. So every test-file write tripped StatReload: writing a pure
+    # test file, touching nothing the server imports at runtime, took the server down
+    # for the entire fleet.
+    #
+    # Why not `reload_excludes`? Because it is INERT here. Verbatim from
+    # uvicorn/supervisors/statreload.py:
+    #
+    #     if config.reload_excludes or config.reload_includes:
+    #         logger.warning("--reload-include and --reload-exclude have no effect
+    #                         unless watchfiles is installed.")
+    #
+    # watchfiles is NOT in this image, so uvicorn falls back to StatReload, which
+    # rglobs every reload_dir and ignores the exclude list entirely. Passing excludes
+    # here would look like a fix, log a warning nobody reads, and change nothing.
+    #
+    # The mechanism that DOES work under StatReload is narrowing the watch set: name
+    # cosa's runtime subpackages explicitly and leave tests/ + rnd/ + docs/ + history/
+    # out of it. (Installing watchfiles and using reload_excludes is the tidier
+    # long-term option — noted in the R&D doc as a follow-on, deliberately not bundled
+    # into a P0 hotfix that would require an image rebuild.)
+    #
+    # Known, accepted consequence: `cosa/__init__.py` sits at the cosa root and is no
+    # longer watched. It is near-static; editing it needs a container restart.
+    #
+    # R1 (2026-08-01, Rick's direct instruction): auto-reload is now OFF by default,
+    # even on local dev. The StatReload watcher took the whole fleet's :7999 server
+    # down 16 times in 30 min (7 of them from ordinary board_sweep.py writes). Everyone
+    # edits freely now; the server is bounced DELIBERATELY when a change needs serving
+    # (see the bounce controls). Opt back in for a focused solo dev loop with
+    # LUPIN_RELOAD=1. Precedent: :8000 already runs reload-off via LUPIN_ENV=testing.
+    #
+    # ⚠️ This gate reads the environment ONLY at container START (inside __main__).
+    # Editing LUPIN_RELOAD — or this line — is INERT until a docker RECREATE, not a
+    # restart (`docker restart` reuses the container + its env). With reload now off
+    # by default, that trap is easy to hit: reload-having-been-live has trained
+    # everyone that source edits are served live; they are not until you bounce.
+    reload_enabled = _reload_enabled( os.environ.get( "LUPIN_RELOAD" ), is_production_or_test )
     reload_kwargs = {}
-    if not is_production_or_test:
-        reload_kwargs[ "reload" ] = True
-        reload_kwargs[ "reload_dirs" ] = [ "lupin_app", "cosa", "lib", "lupin_cli", "lupin_mcp" ]
+    if reload_enabled:
+        reload_kwargs[ "reload" ]      = True
+        reload_kwargs[ "reload_dirs" ] = [
+            "lupin_app", "lib", "lupin_cli", "lupin_mcp",
+            # cosa RUNTIME subpackages only — NOT cosa/tests, cosa/rnd, cosa/docs, cosa/history
+            "cosa/agents", "cosa/config", "cosa/crud_for_dataframes", "cosa/io",
+            "cosa/memory", "cosa/orchestration", "cosa/repo", "cosa/rest",
+            "cosa/tools", "cosa/training", "cosa/utils",
+        ]
+
     uvicorn.run(
         "lupin_app.main:app",
         host="0.0.0.0",
         port=port,
         workers=1,  # Single worker required for in-memory notification state (pending_responses dict)
         log_level="info",
+        # Bug 5b654a15 — THE fleet-outage fix. On reload (or any shutdown) uvicorn waits
+        # for open connections to drain. Lupin holds long-lived WebSockets (the browser UI
+        # plus every `cc-listener-*` session), which NEVER drain on their own — so uvicorn
+        # blocked forever at "Waiting for connections to close", the new worker never
+        # booted, and the server stayed down for the WHOLE FLEET until a human ran
+        # `docker restart`. On 2026-07-13 that was 4 manual restarts in ~25 minutes.
+        #
+        # This bounds the drain wait: after 5s uvicorn force-closes the stragglers and
+        # completes the restart. It converts an unbounded hang into a blip. Clients
+        # reconnect on their own. Applies to reload AND to ordinary shutdown, so it is
+        # correct even once the excludes above make reloads rare.
+        timeout_graceful_shutdown=5,
         **reload_kwargs
     )

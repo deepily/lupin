@@ -3,6 +3,8 @@ import threading
 import uuid
 from typing import Any, Optional, Dict, Type, List
 
+import requests
+
 from cosa.agents.confirmation_dialog import ConfirmationDialogue
 from cosa.rest.fifo_queue import FifoQueue  # CJ Flow ingress queue — receives all incoming jobs
 
@@ -47,7 +49,10 @@ from lupin_cli.notifications.notification_models import (
 
 # Runtime Argument Expeditor imports for agentic job routing
 from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
-from cosa.agents.runtime_argument_expeditor.expeditor import RuntimeArgumentExpeditor
+from cosa.agents.runtime_argument_expeditor.expeditor import (
+    RuntimeArgumentExpeditor,
+    user_message_for_expedite_reason,
+)
 
 # Mode-to-Agent mapping for direct routing (bypasses LLM router)
 MODE_TO_AGENT = {
@@ -515,7 +520,29 @@ class TodoFifoQueue( FifoQueue ):
             best_score    = similar_snapshots[ 0 ][ 0 ]
             best_snapshot = similar_snapshots[ 0 ][ 1 ]
 
-            if best_score >= 100.0:
+            # A similarity percentage outside [0,100] is not a strong match, it is a
+            # BROKEN MEASUREMENT — and the old code read it as maximum confidence.
+            # Bug 78f21b1b: query embeddings moved to a model that does not return
+            # unit vectors, so `dot * 100` produced 1024.15% for a true cosine of
+            # 0.517, and that landed in the `>= 100.0` perfect-match branch. Every
+            # voice request was answered from cache and agent routing became
+            # unreachable — silently, in 0 ms, which reads like success.
+            #
+            # Refuse the value rather than trusting it. Falling through to LLM
+            # routing is the safe direction: the worst case is doing the work
+            # instead of replaying a cached answer.
+            if best_score < 0.0 or best_score > 100.0:
+                print( f"push_job(): REJECTING out-of-range similarity {best_score:.1f}% "
+                       f"(expected 0-100) — treating as NO cache match and routing normally. "
+                       f"This means the scorer is misconfigured; see bug 78f21b1b." )
+                # Set the flag DIRECTLY. Emptying similar_snapshots here would NOT
+                # reach the outer `else` (the length check has already passed), so
+                # needs_llm_routing would stay False and the request would fall
+                # through doing nothing at all — a worse failure than the one being
+                # fixed. Caught by tracing the control flow rather than assuming it.
+                needs_llm_routing = True
+
+            elif best_score >= 100.0:
                 # Perfect match (L1/L2 exact or L4 at 100%) — auto-accept, no prompt
                 print( f"push_job(): Perfect match (score: {best_score:.1f}%) — auto-accepting" )
                 best_snapshot.last_question_asked = ( salutations + ' ' + question ).strip()
@@ -620,7 +647,7 @@ class TodoFifoQueue( FifoQueue ):
             needs_llm_routing = True
 
         # Route through LLM if no cache match or user declined confirmation
-        if needs_llm_routing:  # pragma: no branch - always True here: every non-returning path sets it True (L590 declined / L617 below-threshold / L620 no-snapshots); all cache-hit paths (L538/587/612) return before this → the False arc is unreachable
+        if needs_llm_routing:  # pragma: no branch - always True here: every non-returning path sets it True (out-of-range rejection / declined confirmation / below-threshold / no-snapshots); all cache-hit paths return before this → the False arc is unreachable
 
             print( "Routing through LLM (no cache match or user declined)..." )
             
@@ -675,9 +702,7 @@ class TodoFifoQueue( FifoQueue ):
                 print( msg )
                 # TTS Migration (Session 97): Use notification service instead of _emit_speech
                 self._notify( f"{self.hemming_and_hawing[ random.randint( 0, len( self.hemming_and_hawing ) - 1 ) ]} I'm gonna ask our research librarian about that", target_user=user_email )
-                search = LupinSearch( query=question_gist )
-                search.search_and_summarize_the_web()
-                msg = search.get_results( scope="summary" )
+                msg = self._search_and_summarize_safely( question_gist )
             
             elif command == "agent router go to calendar":
                 if self._crud_agents_enabled():
@@ -750,9 +775,7 @@ class TodoFifoQueue( FifoQueue ):
                 print( msg )
                 # TTS Migration (Session 98): Use notification service instead of emit_speech_callback
                 self._notify( f"{self.hemming_and_hawing[ random.randint( 0, len( self.hemming_and_hawing ) - 1 ) ]} {self.thinking[ random.randint( 0, len( self.thinking ) - 1 ) ]}", target_user=user_email )
-                search = LupinSearch( query=question_gist )
-                search.search_and_summarize_the_web()
-                msg = search.get_results( scope="summary" )
+                msg = self._search_and_summarize_safely( question_gist )
                 
             if ding_for_new_job:
                 self.websocket_mgr.emit( 'notification_sound_update', { 'soundFile': '/static/gentle-gong.mp3' } )
@@ -891,6 +914,34 @@ class TodoFifoQueue( FifoQueue ):
         msg = f'Job added to queue. Queue size [{self.size()}]'
         return { "message": msg, "job_id": job.id_hash }
     
+    def _search_and_summarize_safely( self, question_gist: str ) -> str:
+        """
+        Run a web search, returning a spoken message even when the search backend is down.
+
+        The push path calls this synchronously, so an unhandled transport error here
+        surfaces to the user as an HTTP 500 from /api/push with a stack trace and no
+        explanation. Two unrelated conditions — "we could not route your request" and
+        "a third-party search API is unavailable" — must not both present as a 500.
+
+        Requires:
+            - question_gist is a non-empty string
+
+        Ensures:
+            - returns a non-empty string suitable for speaking to the user
+            - never raises on a search-backend transport or HTTP failure
+
+        Raises:
+            - nothing for search-backend failures; unrelated exceptions propagate
+        """
+        try:
+            search = LupinSearch( query=question_gist )
+            search.search_and_summarize_the_web()
+            return search.get_results( scope="summary" )
+
+        except requests.exceptions.RequestException as e:
+            print( f"[SEARCH] Web search backend unavailable: {e}" )
+            return "I couldn't work out which agent handles that, and the web search I fall back on isn't answering right now. Could you rephrase it?"
+
     def _get_routing_command( self, question: str ) -> tuple[str, str]:
         """
         Determine the routing command for a question.
@@ -913,7 +964,8 @@ class TodoFifoQueue( FifoQueue ):
         router_prompt_template = du.get_file_as_string( du.get_project_root() + router_prompt_template_path )
         
         prompt = router_prompt_template.format( voice_command=question )
-        
+        if self.debug and self.verbose: print( f"\n===== ROUTER PROMPT START =====\n{prompt}\n===== ROUTER PROMPT END =====\n" )
+
         llm_spec_key = self.config_mgr.get( "llm spec key for agent router" )
         llm_client = self.llm_factory.get_client( llm_spec_key, debug=self.debug, verbose=self.verbose )
         response = llm_client.run( prompt )
@@ -1113,12 +1165,16 @@ class TodoFifoQueue( FifoQueue ):
             job_id            = spec_id
         )
 
-        # ── Step 4: Handle cancel/timeout ────────────────────────────────
+        # ── Step 4: Handle failure — say WHY, and only blame the user for a real "no" ──
+        # expedite() records the cause on _last_expedite_reason (bug 68198c9f). A
+        # prompt that could not be delivered, or timed out, is a machine failure — it
+        # must never be reported as the user cancelling a job they never saw.
         if args_dict is None:
+            spoken, log_line = user_message_for_expedite_reason( expeditor._last_expedite_reason )
             emit_job_state_transition( self.websocket_mgr, spec_id, JobState.QUEUED, JobState.CANCELLED, user_id )
             self.user_job_tracker.remove_job( spec_id )
-            self._notify( "Job cancelled.", target_user=user_email )
-            return "Agentic job cancelled by user or timeout."
+            self._notify( spoken, target_user=user_email )
+            return log_line
 
         # ── Step 4.5: Extract runtime scheduling args (not agent-specific) ──
         scheduled_at_raw = args_dict.pop( "scheduled_at", None )

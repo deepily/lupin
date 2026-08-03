@@ -29,7 +29,7 @@ class TestIsKnownProject( unittest.TestCase ):
     """Registry membership test against KNOWN_PROJECTS values."""
 
     def test_known_projects_true( self ):
-        for name in ( "lupin", "cosa", "plan", "lupin-mobile", "lupin-plugin-firefox" ):
+        for name in ( "lupin", "cosa", "plan", "lupin-mobile", "lupin-plugin-firefox", "scratchpad" ):
             self.assertTrue( is_known_project( name ), name )
 
     def test_unknown_projects_false( self ):
@@ -39,6 +39,7 @@ class TestIsKnownProject( unittest.TestCase ):
     def test_known_projects_mapping( self ):
         self.assertEqual( KNOWN_PROJECTS[ "/lupin" ], "lupin" )
         self.assertEqual( KNOWN_PROJECTS[ "/planning-is-prompting" ], "plan" )
+        self.assertEqual( KNOWN_PROJECTS[ "/scratchpad" ], "scratchpad" )
 
 
 class TestNormalizeAbstract( unittest.TestCase ):

@@ -68,6 +68,29 @@ export function renderActionRequiredReadOnly(
   return root;
 }
 
+/**
+ * L2 (mux MVP-finish): the shared `✓ No pending actions` empty-state element.
+ *
+ * ONE helper, called from BOTH action-required owner-branches (anti-drift):
+ *   - Phase-6b `ActionRequiredRenderer` (mount-at-0 + unmount-at-0)
+ *   - Phase-5 `NotificationsListRenderer.renderActionRequiredSection` (post
+ *     phase6bOwner early-return)
+ * so the empty-state markup can never diverge between the two paths.
+ *
+ * Ensures:
+ *   - Returned element carries id `#action-required-empty` (single per section)
+ *     + class `.action-required-empty-state` (legacy parity, notifications.css:523)
+ *   - `data-testid="multiplexer-action-required-empty"` for E2E observability
+ */
+export function renderActionRequiredEmpty(): HTMLElement {
+  const root = document.createElement("div");
+  root.id = "action-required-empty";
+  root.className = "action-required-empty-state";
+  root.setAttribute("data-testid", "multiplexer-action-required-empty");
+  root.appendChild(html`✓ No pending actions` as DocumentFragment);
+  return root;
+}
+
 function responseTypeBadge(responseType: ActionRequiredItem["response_type"]): DocumentFragment {
   // Human-readable label per response type.
   const labelMap: Record<ActionRequiredItem["response_type"], string> = {

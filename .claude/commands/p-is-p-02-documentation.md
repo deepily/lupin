@@ -1,7 +1,7 @@
 # Planning is Prompting - Step 2: Document the Implementation
 
-**Project**: Planning is Prompting
-**Prefix**: [PLAN]
+**Project**: Lupin
+**Prefix**: [LUPIN]
 **Version**: 1.0
 
 ---
@@ -11,7 +11,7 @@
 **On every invocation of this command:**
 
 1. **MUST use the following project-specific configuration**:
-   - **[SHORT_PROJECT_PREFIX]**: [PLAN]
+   - **[SHORT_PROJECT_PREFIX]**: [LUPIN]
    - **Optional arguments**:
      - `--pattern=A|B|C` (if provided, skip pattern determination)
      - `--project-name=NAME` (for directory naming)
@@ -40,7 +40,7 @@
 /p-is-p-02-documentation
 
 # With arguments
-/p-is-p-02-documentation --pattern=A --project-name=2025.09.29-jwt-oauth
+/p-is-p-02-documentation --pattern=A --project-name=jwt-oauth
 ```
 
 Invoke this command when:
@@ -51,6 +51,8 @@ Invoke this command when:
 **Skip this command** when:
 - Pattern from Step 1 is Pattern 3 or 4 (small/simple work)
 - Use history.md for tracking instead
+
+> **Skipping the documentation step does *not* exempt any plan document you do write** — if a plan document exists, it enters `/plan-review` (see `workflow/plan-review.md` §4a). The gate is keyed to the **document**, not to the pattern.
 
 ---
 

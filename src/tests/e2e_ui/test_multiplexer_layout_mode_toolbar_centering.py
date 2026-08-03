@@ -137,3 +137,66 @@ class TestMultiplexerLayoutModeToolbarCentering:
         assert page.evaluate( "() => document.body.getAttribute( 'data-layout-mode' )" ) == "vertical"
         assert _toolbar_center_var( page ) == "", \
             "Returning to vertical mode must remove --toolbar-center-x"
+
+
+def _container_padding_top( page ):
+    """Computed padding-top of .container (px string, e.g. '52px')."""
+    return page.evaluate(
+        "() => getComputedStyle( document.querySelector( '.container' ) ).paddingTop"
+    )
+
+
+class TestMultiplexerLayoutModeContainerReflow:
+    """Lane 0b (F-Clay-A1) — horizontal mode reflows the container immediately on
+    toggle, WITHOUT waiting for a pane to open.
+
+    The `.reading-pane-toolbar` floats `position:fixed` in horizontal mode
+    regardless of pane state, so `.container` must gain the 52px top padding that
+    clears it whenever horizontal — un-gated on `.content-shell.pane-open`. This
+    is byte-faithful to the legacy un-gated rule (notifications.css :5632) and was
+    confirmed at runtime against the legacy client at /app/notifications (vertical
+    20px → horizontal 52px, pane closed). Before the fix the mux gated the padding
+    on pane-open, so toggling to horizontal with no pane open produced no visible
+    reflow — the Lane 0b defect. Per-mode computed-style assertions are the CSS
+    branch-coverage vehicle (c8 covers TS only — see F-Sam-A1).
+    """
+
+    def test_vertical_mode_baseline_padding( self, logged_in_page ):
+        page = logged_in_page
+        _open_multiplexer( page )
+        assert page.evaluate( "() => document.body.getAttribute( 'data-layout-mode' )" ) == "vertical"
+        assert _container_padding_top( page ) == "20px", \
+            "Vertical mode keeps the base container padding (no toolbar to clear)"
+
+    def test_horizontal_pane_closed_reflows_container( self, logged_in_page ):
+        page = logged_in_page
+        _open_multiplexer( page )
+        _click_layout_toggle( page )   # → horizontal, pane CLOSED (default)
+        assert page.evaluate( "() => document.body.getAttribute( 'data-layout-mode' )" ) == "horizontal"
+        assert page.evaluate(
+            "() => document.querySelector( '.content-shell' ).classList.contains( 'pane-open' )"
+        ) is False, "Precondition: the pane must be closed for the un-gated reflow assertion"
+        assert _container_padding_top( page ) == "52px", (
+            "Horizontal mode (pane closed) must reflow the container to 52px top "
+            "padding to clear the floating toolbar — the un-gated Lane 0b fix"
+        )
+
+    def test_horizontal_pane_open_keeps_padding( self, logged_in_page ):
+        page = logged_in_page
+        _open_multiplexer( page )
+        _click_layout_toggle( page )   # → horizontal
+        _open_abstract( page )         # open the Reading Pane → pane-open split
+        assert page.evaluate(
+            "() => document.querySelector( '.content-shell' ).classList.contains( 'pane-open' )"
+        ) is True
+        assert _container_padding_top( page ) == "52px", \
+            "The 52px toolbar-clearing padding persists once the pane opens (still horizontal)"
+
+    def test_toggle_back_to_vertical_clears_padding( self, logged_in_page ):
+        page = logged_in_page
+        _open_multiplexer( page )
+        _click_layout_toggle( page )   # → horizontal
+        _click_layout_toggle( page )   # → vertical
+        assert page.evaluate( "() => document.body.getAttribute( 'data-layout-mode' )" ) == "vertical"
+        assert _container_padding_top( page ) == "20px", \
+            "Returning to vertical mode must drop the toolbar-clearing padding"

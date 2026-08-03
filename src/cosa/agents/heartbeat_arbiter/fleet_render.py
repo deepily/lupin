@@ -28,8 +28,12 @@ Pure + never-raises. Design authority: lupin
 import datetime
 
 from cosa.agents.heartbeat_arbiter.manager_resolver import SOURCE_LINEAGE
+# bug 65d1247f: REUSE the edge gate's freshness predicate + peer prefix so the
+# rendered holding_on agrees with peer-EDGE inference (single source of truth —
+# do NOT re-implement a second staleness predicate).
+from cosa.agents.heartbeat_arbiter.dependency_graph import PEER_PREFIX, session_is_stale
 # F-B: THE one persona-equivalence normalizer (allocation/DM path's own).
-from lupin_mcp.commons_persona_matcher import _normalize_for_match
+from lupin_mcp.persona_normalization import canonical_persona_key
 
 
 # Liveness verdict thresholds (seconds). Defaults are render-layer constants
@@ -111,15 +115,18 @@ def compute_liveness( view, bridge_mtime, now,
                       live_seconds  = DEFAULT_LIVE_SECONDS,
                       quiet_seconds = DEFAULT_QUIET_SECONDS,
                       stale_seconds = DEFAULT_STALE_SECONDS,
-                      count_dm      = True ):
+                      count_dm      = True,
+                      hold_mtime    = None,
+                      transcript_mtime = None ):
     """
-    Build the per-session LIVENESS block — FIVE distinct ages + verdict.
+    Build the per-session LIVENESS block — SIX distinct ages + verdict.
 
-    The verdict rides the FRESHEST of up-to-FIVE direct-signal ages (arbiter
-    liveness fix, Part 7 / Step 1.5 + DM-as-liveness toggle, 2026-06-17) — the
-    OLD code saw only {bridge, event}, so a worker live-by-commons or
-    live-by-idle_prompt (but with a stale stop-event) read `offline`: the false
-    WHOLE-FLEET-STALL bug. The ages stay DISTINCT columns (never collapsed):
+    The verdict rides the FRESHEST of up-to-SIX direct-signal ages (arbiter
+    liveness fix, Part 7 / Step 1.5 + DM-as-liveness toggle, 2026-06-17 +
+    hold-mtime, task 70be69f2) — the OLD code saw only {bridge, event}, so a
+    worker live-by-commons or live-by-idle_prompt (but with a stale stop-event)
+    read `offline`: the false WHOLE-FLEET-STALL bug. The ages stay DISTINCT
+    columns (never collapsed):
         - bridge_age_s      — bridge-file mtime (wedge-resilient PRIMARY, §10.1)
         - event_age_s       — last STOP/non-idle_prompt event ts (stop-event age)
         - commons_age_s     — last commons_who activity ts
@@ -136,6 +143,37 @@ def compute_liveness( view, bridge_mtime, now,
           reversibility guarantee). DM is a LIFE signal, never a PROGRESS or
           STATE signal (C4): dm_ts feeds liveness ONLY, never the progress
           signature.
+        - hold_age_s        — `.heartbeat-hold-<sid>.json` file mtime (task
+          70be69f2): an interactive, no-`/loop` MANAGER that refreshes its hold
+          every Stop (held_at re-stamped → file mtime bumps) is provably ALIVE
+          even when it never posts to commons / bumps the bridge — the canonical
+          MANAGER-STALE false-positive (Tiberius's sess 6ec69a8c: hold rewritten
+          every turn yet reported "silent 75m+" because the detector read only
+          commons last_post_ts). hold_age is UNCONDITIONAL (no toggle): a fresh
+          hold mtime is the Stop hook having run = the process is alive, an
+          unambiguous fail-safe sign of LIFE. ADDITIVE — it can only make a
+          session read MORE alive, NEVER suppress a genuinely-dark one (a dark
+          session's hold mtime ages out with everything else). LIFE signal only,
+          never STATE / the progress signature (C4). hold_mtime=None ⇒ hold_age_s
+          is None and the verdict is byte-identical to the prior 5-signal block.
+        - transcript_age_s  — the session's transcript `.jsonl` file mtime (bug
+          fb332fcd): the harness appends to the transcript on EVERY assistant /
+          tool event, so its mtime bumps DURING a long single-turn tool sequence
+          (plan-mode drafting, a big multi-Read/Edit run) — exactly when NO Stop
+          fires and the other six signals all age past STALE. The canonical
+          MANAGER-STALE false-positive this closes: a manager deep in an APPROVED
+          PLAN emits no Stop for the whole plan turn, so bridge/event/commons/
+          idle_prompt/dm/hold all age out and the detector poked an actively-
+          working manager. transcript_age is UNCONDITIONAL (no toggle, like
+          hold_age): a fresh transcript mtime is the process actively doing work
+          = an unambiguous fail-safe sign of LIFE. ADDITIVE — it can only make a
+          session read MORE alive, NEVER suppress a genuinely-dark one (a
+          dark/exited session's transcript stops appending → its mtime ages out
+          with everything else, and a MISSING/unreadable transcript_path
+          contributes NO signal at all — None, never a spurious-fresh value).
+          LIFE signal only, never STATE / the progress signature (C4).
+          transcript_mtime=None ⇒ transcript_age_s is None and the verdict is
+          byte-identical to the prior 6-signal block.
     A session is LIVE if ANY counted signal is fresh (bias-to-alive); offline
     only when NONE is recent.
 
@@ -146,15 +184,27 @@ def compute_liveness( view, bridge_mtime, now,
         - bridge_mtime is an epoch-seconds float or None (get_bridge_mtime)
         - now is an aware datetime; thresholds are positive seconds
         - count_dm is a bool — whether dm_age joins the freshest-of union
+        - hold_mtime is an epoch-seconds float or None (the hold-file mtime;
+          the arbiter reads it out-of-band per session, mirroring bridge_mtime)
 
     Ensures:
         - returns { bridge_age_s, event_age_s, commons_age_s, idle_prompt_age_s,
-          dm_age_s, freshest_age_s, verdict } — ages are int seconds (or None),
-          verdict is the §10.2 label off `freshest_age_s = min(present counted
-          ages)`
+          dm_age_s, hold_age_s, freshest_age_s, verdict } — ages are int seconds
+          (or None), verdict is the §10.2 label off `freshest_age_s = min(present
+          counted ages)`
         - dm_age_s is ALWAYS present (auditable) regardless of count_dm; it joins
           the freshest-of union ONLY when count_dm is True. count_dm=False ⇒ the
           freshest_age_s + verdict are byte-identical to the prior 4-signal block
+        - hold_age_s is present iff hold_mtime is not None; when present it ALWAYS
+          joins the freshest-of union (unconditional fail-safe LIFE signal).
+          hold_mtime=None ⇒ hold_age_s is None and the verdict matches the prior
+          5-signal block (additive, reversible)
+        - transcript_age_s is present iff transcript_mtime is not None; when
+          present it ALWAYS joins the freshest-of union (unconditional fail-safe
+          LIFE signal, like hold_age_s). transcript_mtime=None ⇒ transcript_age_s
+          is None and the verdict matches the prior 6-signal block (additive,
+          reversible) — a missing/unreadable transcript is NO signal, so a
+          genuinely-dark session is never masked (bug fb332fcd non-negotiable #1)
         - state is NOT consulted here (orthogonal columns, C4)
         - never raises
     """
@@ -167,10 +217,25 @@ def compute_liveness( view, bridge_mtime, now,
     # union ONLY when the toggle is on — so count_dm=False is byte-identical to
     # the prior 4-signal verdict (the reversibility guarantee).
     dm_age          = _event_age( view.get( "dm_ts" )          if is_view else None, now )
+    # hold_age (task 70be69f2): the hold-file mtime is an epoch float (same shape
+    # as bridge_mtime), so _bridge_age reads it. UNCONDITIONAL in the union — a
+    # fresh hold mtime is an unambiguous sign of life. None hold_mtime ⇒ None age.
+    hold_age        = _bridge_age( hold_mtime, now )
+    # transcript_age (bug fb332fcd): the transcript .jsonl mtime is an epoch float
+    # (same shape as bridge_mtime), so _bridge_age reads it. UNCONDITIONAL in the
+    # union — a fresh transcript mtime means the process is actively appending
+    # turns (incl. mid-plan, when NO Stop fires and the other 6 signals age out).
+    # None transcript_mtime ⇒ None age (fail-safe: a missing/unreadable transcript
+    # adds NO life, so a genuinely-dark session still ages to STALE).
+    transcript_age  = _bridge_age( transcript_mtime, now )
 
     candidates = [ a for a in ( bridge_age, event_age, commons_age, idle_prompt_age ) if a is not None ]
     if count_dm and dm_age is not None:
         candidates.append( dm_age )
+    if hold_age is not None:
+        candidates.append( hold_age )
+    if transcript_age is not None:
+        candidates.append( transcript_age )
     freshest   = min( candidates ) if candidates else None
 
     def _int( a ):
@@ -182,6 +247,8 @@ def compute_liveness( view, bridge_mtime, now,
         "commons_age_s"     : _int( commons_age ),
         "idle_prompt_age_s" : _int( idle_prompt_age ),
         "dm_age_s"          : _int( dm_age ),
+        "hold_age_s"        : _int( hold_age ),
+        "transcript_age_s"  : _int( transcript_age ),
         "freshest_age_s"    : _int( freshest ),
         "verdict"           : _verdict( freshest, live_seconds, quiet_seconds, stale_seconds ),
     }
@@ -229,7 +296,10 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
                     process_dead         = None,
                     include_offline      = False,
                     declared_managers    = None,
-                    count_dm_as_liveness = True ):
+                    count_dm_as_liveness = True,
+                    hold_mtimes          = None,
+                    transcript_mtimes    = None,
+                    alive_threshold_seconds = None ):
     """
     Build the JSON-able full-fleet snapshot for the GET endpoint (§10.4), enriched
     with per-session hierarchy (Fleet-Status P1, design §4) and live-only-by-default
@@ -265,6 +335,33 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
           block is byte-identical to the prior 4-signal verdict (dm_age_s still
           present for audit, just excluded from the union). DM feeds LIVENESS
           only, never STATE / the progress signature (C4)
+        - hold_mtimes (default None, the task-70be69f2 hold-file-mtime liveness
+          source) is { session_id: epoch-float|None }; each row's hold mtime is
+          threaded to compute_liveness(hold_mtime=...) → its hold_age_s joins the
+          freshest-of union UNCONDITIONALLY (an interactive manager that only
+          Stop-refreshes its hold reads LIVE, not MANAGER-STALE). None / a missing
+          sid ⇒ hold_age_s None for that row, byte-identical to the prior block.
+          Hold-mtime feeds LIVENESS only, never STATE / the progress signature (C4)
+        - transcript_mtimes (default None, the bug-fb332fcd transcript-file-mtime
+          liveness source) is { session_id: epoch-float|None }; each row's
+          transcript mtime is threaded to compute_liveness(transcript_mtime=...) →
+          its transcript_age_s joins the freshest-of union UNCONDITIONALLY (a
+          manager mid-plan, appending its transcript every tool call but emitting
+          no Stop, reads LIVE not MANAGER-STALE). None / a missing sid ⇒
+          transcript_age_s None for that row, byte-identical to the prior block —
+          a missing/unreadable transcript is NO signal, so a genuinely-dark
+          session is never masked. Transcript-mtime feeds LIVENESS only, never
+          STATE / the progress signature (C4)
+        - alive_threshold_seconds (default None) gates the bug-65d1247f DISPLAY
+          sanitization: a row whose HOLDER SESSION is beyond the alive threshold
+          (dependency_graph.session_is_stale — the SAME predicate the peer-EDGE gate
+          uses, threaded from the arbiter's self.alive_threshold_seconds) renders its
+          `peer:X` holding_on as the neutral "none", so the displayed hold AGREES with
+          edge inference (37511bfb). None (the default) ⇒ NO gate, byte-identical to
+          the prior render; peer-prefix-gated (user:/commons: holds untouched);
+          fail-SAFE (missing/unparseable last_activity_ts ⇒ NOT stale ⇒ raw value
+          kept — never hide a LIVE hold). DISPLAY ONLY — edge inference + the :1070
+          deadlock escalation are untouched
         - each row keeps STATE and LIVENESS as separate keys (C4) PLUS the two
           hierarchy keys (role, manager):
           { session_id, persona, state, holding_on, stuck, liveness{...},
@@ -294,15 +391,18 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
         except Exception:
             manager_ids = set()
     # F-B (2026.06.11 lineage-persistence design): persona equivalence uses THE
-    # one shared normalizer (commons_persona_matcher._normalize_for_match —
-    # "Mr. Radio"/"mr radio"/"MR.RADIO" → "mrradio"). Persona strings drift
-    # structurally across signal sources (bridge keeps display casing; the
-    # event-sourced fallback is lowercase punct-stripped), so the journal-
-    # confirmed miss — persona "mr radio" reading role=worker, with the F2
-    # manager-staleness tier config-dead for him — is inherent to any exact
-    # compare. Normalization is for COMPARISON only; display casing untouched.
-    declared_norm = { _normalize_for_match( str( name ) ) for name in ( declared_managers or [ ] )
-                      if _normalize_for_match( str( name ) ) }
+    # one shared identity root (persona_normalization.canonical_persona_key —
+    # "Mr. Radio"/"mr radio"/"MR.RADIO" → "mr radio"; "María" → "maria").
+    # Persona strings drift structurally across signal sources (bridge keeps
+    # display casing; the event-sourced fallback is lowercase punct-stripped),
+    # so the journal-confirmed miss — persona "mr radio" reading role=worker,
+    # with the F2 manager-staleness tier config-dead for him — is inherent to any
+    # exact compare. The swap from the space-dropping match-key to the keep-spaces
+    # canonical key is symmetric on both compare sides (equivalence preserved) and
+    # the value now EQUALS the store key. Normalization is for COMPARISON only;
+    # display casing untouched.
+    declared_norm = { canonical_persona_key( str( name ) ) for name in ( declared_managers or [ ] )
+                      if canonical_persona_key( str( name ) ) }
 
     rows = [ ]
     for sid in sorted( ( fleet_view or { } ).keys() ):
@@ -312,7 +412,9 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
         liveness = compute_liveness(
             view, ( bridge_mtimes or { } ).get( sid ), now,
             live_seconds, quiet_seconds, stale_seconds,
-            count_dm = count_dm_as_liveness,
+            count_dm   = count_dm_as_liveness,
+            hold_mtime = ( hold_mtimes or { } ).get( sid ),
+            transcript_mtime = ( transcript_mtimes or { } ).get( sid ),
         )
         # PID fast-death override (kill-0): a CONFIRMED-dead process forces
         # "offline" now, regardless of how recent its last signal was — so a
@@ -337,7 +439,7 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
         if not include_offline and liveness.get( "verdict" ) == "offline":
             continue
         persona_value = view.get( "persona" )
-        is_declared   = bool( persona_value ) and _normalize_for_match( str( persona_value ) ) in declared_norm
+        is_declared   = bool( persona_value ) and canonical_persona_key( str( persona_value ) ) in declared_norm
         role          = "manager" if ( is_declared or any( _sid_matches( sid, mid ) for mid in manager_ids ) ) else "worker"
         manager       = None
         if resolve_manager_fn is not None:
@@ -347,11 +449,24 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
                     manager = res.get( "manager_persona" )
             except Exception:
                 manager = None
+        # bug 65d1247f (DISPLAY-only): make the rendered holding_on AGREE with the
+        # peer-EDGE gate. 37511bfb drops a STALE holder session's peer EDGE from
+        # inference; here we drop its peer DISPLAY too — a beyond-alive-threshold
+        # session shows a neutral "none" instead of a phantom-active "peer:X".
+        # Peer-prefix-gated (mirrors build_wait_edges: only peer holds were ever
+        # edges, so user:/commons: holds stay honest) and fail-SAFE (session_is_stale
+        # returns False for a missing/unparseable last_activity_ts, AND for the
+        # additive alive_threshold_seconds=None default ⇒ no gate, byte-identical to
+        # the prior render) — never hides a LIVE hold.
+        holding_on = view.get( "holding_on" )
+        if ( isinstance( holding_on, str ) and holding_on.startswith( PEER_PREFIX )
+             and session_is_stale( view, now, alive_threshold_seconds ) ):
+            holding_on = "none"
         rows.append( {
             "session_id" : sid,
             "persona"    : view.get( "persona" ),
             "state"      : view.get( "state" ),
-            "holding_on" : view.get( "holding_on" ),
+            "holding_on" : holding_on,
             "stuck"      : bool( view.get( "stuck" ) ),
             "liveness"   : liveness,
             "role"       : role,

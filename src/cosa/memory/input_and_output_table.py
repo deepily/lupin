@@ -6,9 +6,10 @@ from cosa.memory.question_embeddings_table import QuestionEmbeddingsTable
 from cosa.memory.solution_snapshot import SolutionSnapshot as ss
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.utils.util_stopwatch import Stopwatch
+from cosa.rest.db.repositories.vector_store_backend import is_postgres_backend
 
 import lancedb
-import threading
+from threading import Lock
 from typing import Optional, Any
 
 # @singleton
@@ -40,6 +41,14 @@ class InputAndOutputTable():
         self.debug          = debug
         self.verbose        = verbose
         self._config_mgr    = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+
+        # Bug 574fd1dc Defect 2 — async-drop accounting. The async embedding
+        # path drops a row on any failure; before this, the loss was
+        # unquantified BY CONSTRUCTION (no counter existed, so "how many rows
+        # have we lost" had no answer). These make the loss countable.
+        self.async_failure_count = 0
+        self.last_async_failure  = None
+        self._async_failure_lock = Lock()
         self._embedding_mgr      = EmbeddingManager( debug=debug, verbose=verbose )
         self._embedding_provider = get_embedding_provider( debug=debug, verbose=verbose )
 
@@ -49,18 +58,27 @@ class InputAndOutputTable():
         # Read nprobes configuration for vector search performance tuning
         self._nprobes = self._config_mgr.get( "solution snapshots lancedb nprobes", default=20, return_type="int" )
 
-        self.db = lancedb.connect( du.get_project_root() + self._config_mgr.get( "path to database wo root" ) )
+        # v0.2.0 backend flag (§6): when 'postgres', route storage/search through
+        # InputAndOutputRepository and skip the LanceDB I/O table. The question-
+        # embedding cache table is needed in BOTH backends (it generates query/input
+        # embeddings), so it is created unconditionally. 'lancedb' (default)
+        # preserves the legacy path below byte-for-byte.
+        self._use_postgres = is_postgres_backend( self._config_mgr )
 
-        # Validate existing table dimensions match config before creating/opening
-        self._validate_embedding_dimensions( self.db, "input_and_output_tbl", "input_embedding" )
-
-        # Create table if it doesn't exist
-        self._create_table_if_needed( self.db )
-
-        self._input_and_output_tbl    = self.db.open_table( "input_and_output_tbl" )
         self._question_embeddings_tbl = QuestionEmbeddingsTable( debug=self.debug, verbose=self.verbose )
 
-        print( f"Opened input_and_output_tbl w/ [{self._input_and_output_tbl.count_rows()}] rows" )
+        if not self._use_postgres:
+            self.db = lancedb.connect( du.get_project_root() + self._config_mgr.get( "path to database wo root" ) )
+
+            # Validate existing table dimensions match config before creating/opening
+            self._validate_embedding_dimensions( self.db, "input_and_output_tbl", "input_embedding" )
+
+            # Create table if it doesn't exist
+            self._create_table_if_needed( self.db )
+
+            self._input_and_output_tbl = self.db.open_table( "input_and_output_tbl" )
+
+            print( f"Opened input_and_output_tbl w/ [{self._input_and_output_tbl.count_rows()}] rows" )
 
         # if self.debug and self.verbose:
         #     du.print_banner( "Tables:" )
@@ -227,25 +245,39 @@ class InputAndOutputTable():
                         "solution_path_wo_root"            : solution_path_wo_root
                     } ]
                     
-                    # Insert complete row
-                    self._input_and_output_tbl.add( new_row )
-                    
-                    async_timer.print( f"Async completion! I/O table now has {self._input_and_output_tbl.count_rows()} rows", use_millis=True )
+                    # Insert complete row (backend-dispatched storage leaf)
+                    self._store_io_row( new_row[ 0 ] )
+
+                    async_timer.print( f"Async completion! I/O table now has {self._row_count()} rows", use_millis=True )
                     
                     if self.debug:
                         print( f"  Input embedding dimensions: {len(final_input_embedding)}" )
                         print( f"  Output embedding dimensions: {len(final_output_embedding)}" )
                         
                 except Exception as e:
+                    # Bug 574fd1dc Defect 2: this handler used to print and return,
+                    # so a failed row vanished with NO counter and NO record. The
+                    # caller already returned "success" the moment the work was
+                    # queued, so nothing upstream ever learns the write was lost —
+                    # the only evidence was a console banner someone had to read by
+                    # eye, which is exactly how this surfaced. The drop is still a
+                    # drop (no dead-letter store yet), but it is now COUNTED, so
+                    # "how many rows have we lost" stops being unanswerable.
+                    self._record_async_failure( input, e )
                     async_timer.print( f"FAILED after", use_millis=True )
                     du.print_banner( f"ASYNC EMBEDDING GENERATION FAILED", expletive=True )
                     print( f"Failed to generate embeddings and insert row for input: '{input[:debug_truncate_len]}...'" )
                     print( f"Error: {e}" )
+                    print( f"Rows dropped by this failure path since process start: {self.async_failure_count}" )
                     du.print_stack_trace( e, explanation="Async embedding generation failed", caller="insert_io_row async thread" )
             
-            # Start background thread
-            embedding_thread = threading.Thread( target=generate_embeddings_and_insert, daemon=True )
-            embedding_thread.start()
+            # Submit to the shared bounded pool (bug 81854972) instead of spawning
+            # an unbounded daemon thread per call. The pool caps GLOBAL embedding
+            # concurrency so the asyncio event loop is never starved, and bounds the
+            # backlog so a sustained burst can't grow memory without limit. A full
+            # backlog drops the work (backpressure) — the caller never blocks.
+            from cosa.memory.embedding_pool import get_embedding_pool
+            get_embedding_pool( self._config_mgr, debug=self.debug ).submit( generate_embeddings_and_insert )
             
         else:
             # Sync mode: generate embeddings before inserting (original behavior)
@@ -262,9 +294,143 @@ class InputAndOutputTable():
                 "output_final_embedding"           : output_final_embedding if output_final_embedding else self._embedding_provider.generate_embedding( output_final, content_type="prose" ),
                 "solution_path_wo_root"            : solution_path_wo_root
             } ]
-            self._input_and_output_tbl.add( new_row )
-            timer.print( f"Done! I/O table now has {self._input_and_output_tbl.count_rows()} rows", use_millis=True, end="\n" )
-        
+            self._store_io_row( new_row[ 0 ] )
+            timer.print( f"Done! I/O table now has {self._row_count()} rows", use_millis=True, end="\n" )
+
+    def _record_async_failure( self, input_text: str, error: Exception ) -> None:
+        """
+        Count one dropped row from the async embedding path (bug `574fd1dc`).
+
+        The row itself is still lost — this does NOT retry or dead-letter it.
+        What it changes is that the loss becomes COUNTABLE. Before this, the
+        handler printed a banner and returned, so the only record of a dropped
+        row was a console line in a container log, and "how many have we lost"
+        was unanswerable by construction.
+
+        Called from the embedding-pool worker thread, so the increment is
+        locked: the pool runs several workers concurrently and a bare `+= 1`
+        on a shared int is a read-modify-write that can silently lose counts —
+        which would make the instrument understate exactly the quantity it
+        exists to measure.
+
+        Requires:
+            - input_text is the row's input string (may be empty)
+            - error is the exception that killed the insert
+
+        Ensures:
+            - async_failure_count increments by exactly one per call
+            - last_async_failure holds ( truncated input, exception type, str(error) )
+              for the MOST RECENT failure
+            - never raises — a failure in the failure recorder must not mask
+              the original error
+        """
+        with self._async_failure_lock:
+            self.async_failure_count += 1
+            self.last_async_failure   = (
+                input_text[ :100 ] if input_text else "",
+                type( error ).__name__,
+                str( error )
+            )
+
+    def _store_io_row( self, row: dict ) -> None:
+        """
+        Backend-dispatched storage leaf for one I/O row.
+
+        Requires:
+            - row is a dict of input_and_output column → value
+
+        Ensures:
+            - lancedb backend: appends [row] to the LanceDB table (identical shape)
+            - postgres backend: inserts the row via InputAndOutputRepository
+        """
+        if self._use_postgres:
+            from cosa.rest.db.database import get_db
+            from cosa.rest.db.repositories.input_and_output_repository import InputAndOutputRepository
+            with get_db() as session:
+                InputAndOutputRepository( session ).insert_io_row( **row )
+            return
+        self._input_and_output_tbl.add( [ row ] )
+
+    def _row_count( self ) -> int:
+        """
+        Backend-dispatched row count for the input_and_output store.
+
+        Ensures:
+            - lancedb backend: returns the LanceDB table row count
+            - postgres backend: returns InputAndOutputRepository.count()
+        """
+        if self._use_postgres:
+            from cosa.rest.db.database import get_db
+            from cosa.rest.db.repositories.input_and_output_repository import InputAndOutputRepository
+            with get_db() as session:
+                return InputAndOutputRepository( session ).count()
+        return self._input_and_output_tbl.count_rows()
+
+    # ----------------------------------------------------------------------- #
+    # Postgres+pgvector read mirrors (v0.2.0 §6). Query-embedding generation stays
+    # in the memory layer (via the question-embedding cache); the repo does the dot
+    # search + scans. Return the SAME list[dict] shapes the LanceDB methods produce.
+    # ----------------------------------------------------------------------- #
+    def _pg_get_knn_by_input( self, search_terms: str, k: int ) -> list[dict]:
+        """Postgres mirror of get_knn_by_input (dot `<#>` top-k; same dict keys + _distance)."""
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories.input_and_output_repository import InputAndOutputRepository
+
+        search_terms_embedding = self._question_embeddings_tbl.get_embedding( search_terms )
+        if not search_terms_embedding:
+            du.print_banner( "SKIPPING KNN SEARCH - NO EMBEDDINGS" )
+            print( "Cannot perform similarity search without embeddings" )
+            print( "Returning empty results" )
+            return []
+
+        with get_db() as session:
+            hits = InputAndOutputRepository( session ).get_knn_by_input( search_terms_embedding, k=k )
+            # Mirror the LanceDB record shape: input, output_final, input_embedding, _distance
+            # (_distance = 1 - dot; similarity_pct = dot * 100 → _distance = 1 - pct/100).
+            return [
+                {
+                    "input":           entity.input,
+                    "output_final":    entity.output_final,
+                    "input_embedding": list( entity.input_embedding ) if entity.input_embedding is not None else [],
+                    "_distance":       1.0 - ( similarity_pct / 100.0 ),
+                }
+                for similarity_pct, entity in hits
+            ]
+
+    def _pg_get_all_io( self, max_rows: int ) -> list[dict]:
+        """Postgres mirror of get_all_io (bounded scan; same 5-key dicts)."""
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories.input_and_output_repository import InputAndOutputRepository
+        with get_db() as session:
+            rows = InputAndOutputRepository( session ).get_all_io( max_rows=max_rows )
+            return [ self._io_row_to_dict( r ) for r in rows ]
+
+    def _pg_get_io_stats_by_input_type( self, max_rows: int ) -> dict[str, int]:
+        """Postgres mirror of get_io_stats_by_input_type (count grouped by input_type)."""
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories.input_and_output_repository import InputAndOutputRepository
+        with get_db() as session:
+            return InputAndOutputRepository( session ).get_io_stats_by_input_type( max_rows=max_rows )
+
+    def _pg_get_all_qnr( self, max_rows: int ) -> list[dict]:
+        """Postgres mirror of get_all_qnr (agent-router rows; same 5-key dicts)."""
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories.input_and_output_repository import InputAndOutputRepository
+        with get_db() as session:
+            rows = InputAndOutputRepository( session ).get_all_qnr( max_rows=max_rows )
+            return [ self._io_row_to_dict( r ) for r in rows ]
+
+    @staticmethod
+    def _io_row_to_dict( entity ) -> dict:
+        """Project an InputAndOutput entity to the 5-key record shape callers expect."""
+        return {
+            "date":         entity.date,
+            "time":         entity.time,
+            "input_type":   entity.input_type,
+            "input":        entity.input,
+            "output_final": entity.output_final,
+        }
+
     def get_knn_by_input( self, search_terms: str, k: int=10 ) -> list[dict]:
         """
         Get k-nearest neighbors by input embedding.
@@ -283,8 +449,10 @@ class InputAndOutputTable():
         Raises:
             - None
         """
+        if self._use_postgres: return self._pg_get_knn_by_input( search_terms, k )
+
         timer = Stopwatch( msg="get_knn_by_input() called..." )
-        
+
         # First, convert the search_terms string into an embedding. The embedding table caches all question embeddings
         search_terms_embedding = self._question_embeddings_tbl.get_embedding( search_terms )
         
@@ -348,6 +516,8 @@ class InputAndOutputTable():
         Raises:
             - None
         """
+        if self._use_postgres: return self._pg_get_all_io( max_rows )
+
         timer = Stopwatch( msg=f"get_all_io( max_rows={max_rows} ) called..." )
 
         results = self._input_and_output_tbl.search().select( [ "date", "time", "input_type", "input", "output_final" ] ).limit( max_rows ).to_list()
@@ -376,6 +546,8 @@ class InputAndOutputTable():
         Raises:
             - None
         """
+        if self._use_postgres: return self._pg_get_io_stats_by_input_type( max_rows )
+
         timer = Stopwatch( msg=f"get_io_stats_by_input_type( max_rows={max_rows} ) called..." )
 
         stats_df = self._input_and_output_tbl.search().select( [ "input_type" ] ).limit( max_rows ).to_pandas()
@@ -408,8 +580,10 @@ class InputAndOutputTable():
         Raises:
             - None
         """
+        if self._use_postgres: return self._pg_get_all_qnr( max_rows )
+
         timer = Stopwatch( msg=f"get_all_qnr( max_rows={max_rows} ) called..." )
-        
+
         where_clause = "input_type LIKE 'agent router go to %'"
         results = self._input_and_output_tbl.search().where( where_clause ).limit( max_rows ).select(
             [ "date", "time", "input_type", "input", "output_final" ]
@@ -438,6 +612,9 @@ class InputAndOutputTable():
         Raises:
             - lancedb errors propagated
         """
+        # Postgres backend: schema is alembic-managed; the LanceDB bootstrap is a no-op.
+        if self._use_postgres: return
+
         du.print_banner( "Tables:" )
         print( self.db.table_names() )
         
@@ -469,7 +646,7 @@ class InputAndOutputTable():
         
         # du.print_banner( "Tables:" )
         # print( self.db.table_names() )
-        
+        #
         # schema = self._query_and_response_tbl.schema
         #
         # du.print_banner( "Schema:" )

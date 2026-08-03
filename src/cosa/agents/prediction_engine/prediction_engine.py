@@ -134,6 +134,10 @@ class PredictionEngine:
             self.hint_voting_enabled                = DEFAULT_HINT_VOTING_ENABLED
             self.hint_vote_min_confidence_threshold = DEFAULT_HINT_VOTE_MIN_CONFIDENCE_THRESHOLD
 
+        # Retained for backend-flag resolution in _get_embedding_store (decision
+        # 2b20a6d6). None is legitimate — is_postgres_backend() then builds its own.
+        self._config_mgr = config_mgr
+
         # Initialize classifier
         self.classifier = NotificationCategoryClassifier( debug=self.debug )
 
@@ -155,12 +159,23 @@ class PredictionEngine:
         return self._embedding_provider
 
     def _get_embedding_store( self ):
-        """Lazy-load the LanceDB embedding store."""
+        """Lazy-load the decision embedding store (postgres or LanceDB per the backend flag)."""
         if self._embedding_store is None:
             try:
                 from cosa.agents.decision_proxy.proxy_decision_embeddings import ProxyDecisionEmbeddings
+                from cosa.rest.db.repositories.vector_store_backend import is_postgres_backend
 
-                lancedb_path = cu.get_project_root() + "/src/conf/long-term-memory/lupin.lancedb"
+                # Ask the backend BEFORE building a path (decision 2b20a6d6). The path
+                # was previously hardcoded here — a THIRD authority for the same fact,
+                # unreachable by config. It now comes from the same key the rest of the
+                # LanceDB path-builders read, and only when LanceDB is actually active.
+                if is_postgres_backend( self._config_mgr ):
+                    lancedb_path = None
+                elif self._config_mgr is not None:
+                    lancedb_path = cu.get_project_root() + self._config_mgr.get( "solution snapshots lancedb path" )
+                else:
+                    lancedb_path = cu.get_project_root() + "/src/conf/long-term-memory/lupin.lancedb"
+
                 self._embedding_store = ProxyDecisionEmbeddings(
                     db_path       = lancedb_path,
                     table_name    = self.lancedb_table,

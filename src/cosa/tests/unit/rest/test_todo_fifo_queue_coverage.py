@@ -28,6 +28,7 @@ from unittest.mock import Mock, MagicMock, patch
 
 import cosa.rest.todo_fifo_queue as tfq
 from cosa.rest.todo_fifo_queue import TodoFifoQueue, MODE_TO_AGENT, AGENTIC_MODE_MAP
+from cosa.agents.runtime_argument_expeditor.expeditor import BATCH_DECLINED, BATCH_UNREACHABLE
 from cosa.rest.queue_protocol import QueueableJob
 
 
@@ -522,13 +523,23 @@ class TestHandleAgenticCommand( _TFQBase ):
         msg = self.queue._handle_agentic_command( self._cmd(), "", "u1", "u@x.com", "ws1", "q" )
         self.assertIn( "disabled", msg.lower() )
 
-    def test_expeditor_cancel( self ):
-        exp = Mock(); exp.expedite.return_value = None
+    def _run_expeditor_failure( self, reason ):
+        exp = Mock(); exp.expedite.return_value = None; exp._last_expedite_reason = reason
         with patch.object( tfq, "RuntimeArgumentExpeditor", return_value=exp ), \
              patch.object( tfq, "emit_job_state_transition" ), \
              patch.object( self.queue, "_notify" ), patch( "builtins.print" ):
-            msg = self.queue._handle_agentic_command( self._cmd(), "", "u1", "u@x.com", "ws1", "q" )
+            return self.queue._handle_agentic_command( self._cmd(), "", "u1", "u@x.com", "ws1", "q" )
+
+    def test_expeditor_declined_says_cancelled( self ):
+        # A real user "no" is the ONE outcome that may be reported as a cancellation.
+        msg = self._run_expeditor_failure( BATCH_DECLINED )
         self.assertIn( "cancelled", msg.lower() )
+
+    def test_expeditor_undeliverable_never_says_cancelled( self ):
+        # Bug 68198c9f: a prompt that never reached the user must NOT blame them.
+        msg = self._run_expeditor_failure( BATCH_UNREACHABLE )
+        self.assertNotIn( "cancel", msg.lower() )
+        self.assertNotIn( "declined", msg.lower() )
 
     def test_job_none( self ):
         exp = Mock(); exp.expedite.return_value = { "some": "args" }

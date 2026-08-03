@@ -30,10 +30,28 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    """Add nullable task_events.reason."""
-    op.add_column( 'task_events', sa.Column( 'reason', sa.Text(), nullable=True ) )
+    """Add nullable task_events.reason.
+
+    IDEMPOTENT (hardened 2026-06-22, same bug-class as the b633d12a hotfix for
+    e5f6a7b8c9d0). A create_all-bootstrapped DB stamped BELOW this revision already
+    has task_events.reason, so an unguarded ``add_column`` raises DuplicateColumn on
+    ``upgrade head``. Add it only when the column is absent — a safe no-op on a
+    create_all DB, real add on the empty-DB path (where f0a1b2c3d4e5 just built
+    task_events without it).
+    """
+    insp   = sa.inspect( op.get_bind() )
+    tables = set( insp.get_table_names() )
+    cols   = { c[ "name" ] for c in insp.get_columns( "task_events" ) } if "task_events" in tables else set()
+
+    if "task_events" in tables and "reason" not in cols:
+        op.add_column( 'task_events', sa.Column( 'reason', sa.Text(), nullable=True ) )
 
 
 def downgrade() -> None:
-    """Symmetric removal of task_events.reason."""
-    op.drop_column( 'task_events', 'reason' )
+    """Symmetric removal of task_events.reason (idempotent — only when present)."""
+    insp   = sa.inspect( op.get_bind() )
+    tables = set( insp.get_table_names() )
+    cols   = { c[ "name" ] for c in insp.get_columns( "task_events" ) } if "task_events" in tables else set()
+
+    if "reason" in cols:
+        op.drop_column( 'task_events', 'reason' )

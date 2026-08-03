@@ -178,8 +178,8 @@ class PodcastTTSClient:
         Get voice configuration for a speaker name in specified language.
 
         Maps speaker names to voice configurations from config:
-        - "Nora" → podcast voice female config
-        - "Quentin" → podcast voice male config
+        - "Maria" → podcast voice female config
+        - "Mr. Radio" → podcast voice male config
 
         For non-English languages, uses language-specific voices if configured,
         otherwise falls back to English voices with multilingual model.
@@ -235,10 +235,10 @@ class PodcastTTSClient:
         speaker_lower = speaker.lower()
 
         # Map common curious host names to female voice
-        if speaker_lower in [ "nora", "alex", "curious" ]:
+        if speaker_lower in [ "maria", "nora", "alex", "curious" ]:
             voice_type = "female"
         # Map common expert host names to male voice
-        elif speaker_lower in [ "quentin", "jordan", "expert" ]:
+        elif speaker_lower in [ "mr radio", "mr. radio", "quentin", "jordan", "expert" ]:
             voice_type = "male"
         else:
             # Default to female for unknown speakers
@@ -311,7 +311,7 @@ class PodcastTTSClient:
         if voice_type == "female":
             return VoiceConfig(
                 voice_id         = "kcQkGnn0HAT2JRDQ4Ljp",
-                name             = "Nora",
+                name             = "Maria",
                 language_code    = language,
                 stability        = 0.60,
                 similarity_boost = 0.75,
@@ -320,7 +320,7 @@ class PodcastTTSClient:
         else:
             return VoiceConfig(
                 voice_id         = "Aa6nEBJJMKJwJkCx8VU2",
-                name             = "Quentin",
+                name             = "Mr. Radio",
                 language_code    = language,
                 stability        = 0.55,  # Lower = more varied delivery
                 similarity_boost = 0.80,
@@ -671,13 +671,13 @@ def quick_smoke_test():
         print( "Testing TTSSegmentResult dataclass..." )
         result = TTSSegmentResult(
             segment_index = 0,
-            speaker       = "Nora",
+            speaker       = "Maria",
             role          = "curious",
             pcm_audio     = b"\x00" * 48000,  # 1 second of silence at 24kHz
             success       = True,
         )
         assert result.segment_index == 0
-        assert result.speaker == "Nora"
+        assert result.speaker == "Maria"
         assert result.success is True
         assert result.duration_seconds == 1.0  # 48000 bytes / 2 bytes/sample / 24000 Hz
         print( f"  Segment result: {result.speaker}, duration={result.duration_seconds:.2f}s" )
@@ -685,7 +685,7 @@ def quick_smoke_test():
         # Test with failure
         failed_result = TTSSegmentResult(
             segment_index = 1,
-            speaker       = "Quentin",
+            speaker       = "Mr. Radio",
             role          = "expert",
             success       = False,
             error_message = "API error",
@@ -723,23 +723,23 @@ def quick_smoke_test():
 
         # Test 4: Voice config lookup (without config_mgr)
         print( "Testing voice config lookup..." )
-        nora_config = client.get_voice_config_for_speaker( "Nora" )
-        assert nora_config.name == "Nora"
-        assert nora_config.voice_id == "kcQkGnn0HAT2JRDQ4Ljp"
+        maria_config = client.get_voice_config_for_speaker( "Maria" )
+        assert maria_config.name == "Maria"
+        assert maria_config.voice_id == "kcQkGnn0HAT2JRDQ4Ljp"
 
-        quentin_config = client.get_voice_config_for_speaker( "Quentin" )
-        assert quentin_config.name == "Quentin"
-        assert quentin_config.voice_id == "Aa6nEBJJMKJwJkCx8VU2"
+        mr_radio_config = client.get_voice_config_for_speaker( "Mr. Radio" )
+        assert mr_radio_config.name == "Mr. Radio"
+        assert mr_radio_config.voice_id == "Aa6nEBJJMKJwJkCx8VU2"
 
         # Test fallback for Alex (curious) and Jordan (expert)
         alex_config = client.get_voice_config_for_speaker( "Alex" )
-        assert alex_config.name == "Nora"  # Fallback to female
+        assert alex_config.name == "Maria"  # Fallback to female
         jordan_config = client.get_voice_config_for_speaker( "Jordan" )
-        assert jordan_config.name == "Quentin"  # Fallback to male
-        print( "  Voice config lookup works (Nora/Quentin + Alex/Jordan fallback)" )
+        assert jordan_config.name == "Mr. Radio"  # Fallback to male
+        print( "  Voice config lookup works (Maria/Mr. Radio + Alex/Jordan fallback)" )
 
         # Test language-aware voice lookup
-        spanish_config = client.get_voice_config_for_speaker( "Nora", language="es-MX" )
+        spanish_config = client.get_voice_config_for_speaker( "Maria", language="es-MX" )
         assert spanish_config.language_code == "es-MX"
         # Should use same voice ID (fallback) but with Spanish language code
         print( f"  Spanish voice lookup: {spanish_config.name} (lang={spanish_config.language_code})" )

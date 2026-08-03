@@ -21,7 +21,7 @@ the default /tmp.
 from pathlib import Path
 
 
-DEFAULT_POKE_CAP = 3
+DEFAULT_POKE_CAP = 1
 COUNTER_DIR      = Path( "/tmp" )
 COUNTER_TEMPLATE = "claude-hook-heartbeat-poke-count-{suffix}"
 

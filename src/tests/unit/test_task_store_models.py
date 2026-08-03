@@ -74,6 +74,7 @@ def test_item_indexes_match_migration( items_table ):
         "ix_task_items_owner_persona",
         "ix_task_items_project",
         "ix_task_items_status",
+        "ix_task_items_urgency",
     }
     assert { i.name for i in items_table.indexes } == expected
 
@@ -160,7 +161,7 @@ def test_item_constructs_with_full_field_set():
         status              = "blocked",
         blocked_by          = [ { "kind": "user", "id": "rick" } ],
         next_chase_ts       = now,
-        gate_class          = "ricks_court",
+        gate_class          = "operator",
         priority            = "P0",
         source_qid          = "c8c73fde-6ce4-4e8d-83d7-c55b5cce65a3",
         correlation_key     = "harness-task-42",
@@ -168,7 +169,7 @@ def test_item_constructs_with_full_field_set():
         updated_ts          = now,
     )
     assert item.status == "blocked" and item.blocked_by[ 0 ][ "kind" ] == "user"
-    assert item.gate_class == "ricks_court" and item.next_chase_ts == now
+    assert item.gate_class == "operator" and item.next_chase_ts == now
 
 
 if __name__ == "__main__":

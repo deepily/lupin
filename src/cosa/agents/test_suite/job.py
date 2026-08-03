@@ -19,7 +19,11 @@ Example:
 import asyncio
 import json
 import os
+import queue
+import re
+import signal
 import subprocess
+import threading
 import time
 import traceback as tb_mod
 import xml.etree.ElementTree as ET
@@ -35,6 +39,7 @@ import cosa.utils.util as cu
 # Valid suite types and their script paths (relative to project root)
 SUITE_SCRIPTS = {
     "unit"         : "src/tests/run-unit-tests.sh",
+    "typescript"   : "src/tests/run-typescript-tests.sh",   # TS suite under c8 at an enforced 100% threshold (row 36e479ed)
     "smoke"        : "src/tests/run-smoke-tests.sh",
     "smoke_direct" : "src/tests/run-smoke-direct.sh",
     "pytest_direct": "src/tests/run-pytest-direct.sh",    # Arbitrary pytest file (doc 16 follow-up)
@@ -63,6 +68,7 @@ SUITES_SUPPORTING_JUNIT_XML = frozenset( {
 # Per-suite max execution timeout (seconds). Process is killed if exceeded.
 # Values based on observed worst-case runtimes + 2x buffer. Tunable.
 SUITE_TIMEOUTS_SECONDS = {
+    "typescript"   : 1500,   # 25 min (observed 8m19s for 2,245 tests on 2026-07-21 WITHOUT c8; c8 instrumentation adds overhead, so ~2.5x margin over the uninstrumented run)
     "unit"         : 300,    #  5 min (bumped from 180s on 2026-06-12: observed ~185s on ts-b51e63c9 — suite grew to ~6745 tests and the 180s budget killed it mid-run; ~1.6x margin over observed)
     "smoke"        : 3600,   # 60 min (bumped from 1800s on 2026-04-21: observed 2456s on ts-f55d172d — 160 tests + container_preflight adds overhead; ~1.46x margin over observed)
     "smoke_direct" : 1200,   # 20 min (longest: Phase D live ~10 min)
@@ -75,12 +81,35 @@ SUITE_TIMEOUTS_SECONDS = {
 }
 SUITE_TIMEOUT_DEFAULT_SECONDS = 600  # 10 min fallback for unknown types
 
+# How long the poll loop may wait on stdout before re-checking its own timeout
+# and cancellation flags (bug 8b93bcf5 defect 2). This is the UPPER BOUND on how
+# late a kill can be, and it replaces an unbounded one: the loop used to block in
+# readline() for as long as the child stayed quiet, which on the 2026-07-26 smoke
+# tier was ~9 minutes past a 3600s budget. Half a second is far below any budget
+# here and costs nothing — the wait is idle, not a spin.
+STDOUT_POLL_INTERVAL_SECONDS = 0.5
+
+# Upper bound on draining already-queued stdout after a kill. Bounded on purpose:
+# the drain used to be process.stdout.read(), which blocks until every descriptor
+# holding the pipe's write end closes — including a grandchild the kill never
+# reached. Measured: a suite whose script ran `sleep 30` returned 30.0s after a
+# 1s budget. The kill was punctual; the return was not.
+STDOUT_DRAIN_BUDGET_SECONDS = 5.0
+
 # When the caller asks for "all", expand into these component suites and run
 # each as its own entry in self.suite_results. This preserves partial results
 # when one suite times out or crashes (pre-fix behavior was a single
 # monolithic "all" subprocess whose timeout vaporized every other suite's output).
 # Order matches src/tests/run-all-tests.sh's sequential pyramid.
-ALL_SUITE_COMPONENTS = [ "unit", "smoke", "websocket", "integration", "e2e" ]
+# "typescript" joined the pyramid 2026-07-21 (row 36e479ed) once Rick ratified
+# the denominator exclusions on gate 07a5460d. Before that the TS suite was
+# reachable by NOTHING — no runner, no test-type, no hook, no CI — so the
+# 100%-lines/branches/functions TypeScript mandate in CLAUDE.md was enforced
+# only by a human remembering to type a command. The exclusions (boot.ts /
+# types.ts / index.ts, each with a dated reason) live in
+# src/tests/run-typescript-tests.sh; that file is where the denominator is
+# defined and audited, not here.
+ALL_SUITE_COMPONENTS = [ "unit", "typescript", "smoke", "websocket", "integration", "e2e" ]
 
 
 def _expand_all( test_types: List[ str ] ) -> List[ str ]:
@@ -105,6 +134,25 @@ def _expand_all( test_types: List[ str ] ) -> List[ str ]:
                 seen.add( c )
                 expanded.append( c )
     return expanded
+
+class _StdoutReaderCrash:
+    """
+    Queue marker meaning THE STDOUT READER THREAD DIED — not end of output.
+
+    `None` on the stdout queue means clean EOF. Without a second, distinct
+    marker a reader that crashed posts the same `None` (from its `finally`),
+    and the poll loop reports the run as a clean success: the crashed tier's
+    exit code becomes `process.returncode`, which for a child that already
+    exited 0 is 0. That is a green for a run whose output was never read.
+
+    Carries the traceback text because the exception is re-raised on the main
+    thread, where the original thread's stack is otherwise unrecoverable.
+    """
+
+    def __init__( self, exc, tb ):
+        self.exc = exc
+        self.tb  = tb
+
 
 class TestSuiteJob( AgenticJobBase ):
     """
@@ -353,6 +401,12 @@ class TestSuiteJob( AgenticJobBase ):
             print( f"[TestSuiteJob] Project root: {project_root}" )
 
         try:
+            # Exclusivity preflight (bug caf58f71): fail loud BEFORE the first
+            # suite if a non-test agentic job is inflight on the shared
+            # lupin_db_test — a concurrent writer would contaminate this sweep.
+            # NO-OP off the test DB / when the running queue is unreachable.
+            self._preflight_assert_exclusive_test_db()
+
             await voice_io.notify(
                 f"Starting test suite run: {', '.join( self.test_types )}",
                 priority="medium",
@@ -367,6 +421,18 @@ class TestSuiteJob( AgenticJobBase ):
             if self.debug and suites_to_run != list( self.test_types ):
                 print( f"[TestSuiteJob] Expanded {self.test_types} -> {suites_to_run}" )
 
+            # Between-suites reset seams (bug 8bd20375): _between_suite_pairs is
+            # the SINGLE source of truth for WHERE the shared-DB reset fires —
+            # one (prev, next) per gap. Map each non-first suite to its
+            # predecessor so the loop CONSUMES that spec rather than re-deriving
+            # it (suites_to_run is deduped by _expand_all, so each suite name is
+            # a unique key). A suite present as a key opens a seam; the first
+            # suite never is → no reset before it, none after the last, none at
+            # all for a single-suite run.
+            reset_predecessor = {
+                nxt: prev for prev, nxt in self._between_suite_pairs( suites_to_run )
+            }
+
             for suite_type in suites_to_run:
                 if self._cancel_requested:
                     await voice_io.notify(
@@ -376,14 +442,49 @@ class TestSuiteJob( AgenticJobBase ):
                     )
                     break
 
+                # Reset shared test-DB state BETWEEN suites so the earlier
+                # suite's residue (refresh_tokens → 'Token already exists'
+                # flood) can't cross the e2e→integration seam on the shared
+                # :8000 DB. Fires iff this suite opens a seam.
+                seam_prev = reset_predecessor.get( suite_type )
+                if seam_prev is not None:
+                    self._reset_state_between_suites( seam_prev, suite_type )
+
                 await voice_io.notify(
                     f"Starting {suite_type} tests...",
                     priority="low",
                     queue_name="run"
                 )
 
-                result = self._run_suite( suite_type, project_root )
-                self.suite_results[ suite_type ] = result
+                # Row 691d49db — attest that this tier RAN, durably.
+                #
+                # AT THE CALL SITE, IN A `finally`. Both halves are load-bearing:
+                #
+                # CALL SITE, because `_run_suite` has five terminal returns
+                # (success, no-script, bad-type, timeout/kill, exception).
+                # Attesting inside it means five edits and a sixth return added
+                # later that nobody instruments.
+                #
+                # `finally`, because A CALL SITE IS NOT A BOUNDARY. The first
+                # version of this was a bare call after `_run_suite` and it was
+                # scope-correct and boundary-wrong: it covered all five RETURNS
+                # and none of the ESCAPES. Proven on the very first real run
+                # (ts-102267b8, 2026-07-27): `_write_stdout_log` raised on the
+                # main path, the `except` handler re-invoked it and it raised
+                # again, so the exception left `_run_suite` entirely — and the
+                # one run most worth a receipt produced none.
+                #
+                # `result` is bound only on a normal return, so the crash arm
+                # attests a synthesized record rather than nothing: an escape is
+                # a tier outcome, and the ledger's whole purpose is runs that
+                # went wrong.
+                started_at = cu.get_current_datetime_iso()
+                result     = None
+                try:
+                    result = self._run_suite( suite_type, project_root )
+                    self.suite_results[ suite_type ] = result
+                finally:
+                    self._attest_tier_run( suite_type, result, started_at )
 
                 # Report per-suite results
                 suite_found  = result[ "passed" ] + result[ "failed" ] + result[ "skipped" ] + result[ "errors" ]
@@ -650,6 +751,210 @@ class TestSuiteJob( AgenticJobBase ):
         finally:
             voice_io.clear_job_id()
 
+    # Residue tables cleared at the between-suites seam (bug 8bd20375). Superset
+    # of the per-test clean_test_db TRUNCATE list PLUS refresh_tokens — the
+    # residue whose duplicate-jti survival across the e2e→integration seam
+    # produced the "Token already exists" flood.
+    _BETWEEN_SUITE_TRUNCATE_TABLES = (
+        "auth_audit_log", "failed_login_attempts", "job_history",
+        "proxy_decisions", "trust_states", "task_items", "task_events",
+        "fcm_tokens", "refresh_tokens",
+    )
+
+    @staticmethod
+    def _between_suite_pairs( suites: List[ str ] ) -> List[ tuple ]:
+        """
+        Ordered (prev, next) adjacency pairs marking the BETWEEN-suite reset
+        seams (bug 8bd20375).
+
+        Requires:
+            - suites is an ordered list of suite-type strings (possibly empty)
+
+        Ensures:
+            - returns one (suites[i-1], suites[i]) pair per gap → len(suites)-1 pairs
+            - empty for 0 or 1 suite (single-suite-skip)
+            - NEVER a trailing pair after the last suite (no reset-after-last)
+        """
+        return [ ( suites[ i - 1 ], suites[ i ] ) for i in range( 1, len( suites ) ) ]
+
+    def _preflight_assert_exclusive_test_db( self ) -> None:
+        """
+        Fail loud if a non-test agentic job is inflight on the shared test DB at
+        the moment this merge-gate sweep starts (bug caf58f71 — concurrent-writer
+        contamination).
+
+        The sweep is monopolize-mode. `monopolize` IS enforced now (bug 30398595:
+        the consumer's Gate A drains foreign writers before dispatch and Gate B
+        holds foreign intake for the run; bug 3a14292b exempts the sweep's own
+        lineage children from both). This preflight is the belt to that
+        suspenders — a same-instant DETECTION guard that converts any foreign
+        writer already inflight AT sweep start into an explicit, diagnosable
+        startup failure. It catches writers inflight at start (the shape the
+        evidence shows) but, being a one-shot preflight, cannot see jobs
+        dispatched later in the window — that is Gate B's job.
+
+        SAFETY (mirrors _reset_state_between_suites): gated to lupin_db_test. On
+        any other engine (a sweep aimed at :7999 dev, where coexisting fleet jobs
+        are legitimate) this is a logged NO-OP. If the running-queue singleton is
+        unreachable or not yet initialised (unit context, alternate host) it is
+        also a logged NO-OP — the ONLY raise is the loud-fail.
+
+        Requires:
+            - self.id_hash is this sweep's pool key (excluded from the count)
+
+        Ensures:
+            - on lupin_db_test with >=1 non-test inflight agentic job: raises
+              RuntimeError naming the offenders — aborts the sweep before any suite
+            - on lupin_db_test with none: logs the PASS and returns
+            - off the test DB, or with no reachable running queue: logged NO-OP
+
+        Raises:
+            - RuntimeError when a foreign inflight writer shares lupin_db_test
+        """
+        from cosa.rest.db import database as db_module
+
+        db_url = str( db_module.engine.url )
+        if "lupin_db_test" not in db_url:
+            print( "[TestSuiteJob] preflight exclusivity SKIPPED: engine is not lupin_db_test — "
+                   "coexisting jobs are legitimate off the test DB" )
+            return
+
+        try:
+            import lupin_app.main as main_module
+            running_queue = main_module.jobs_run_queue
+        except ( ImportError, AttributeError ) as e:
+            print( f"[TestSuiteJob] preflight exclusivity SKIPPED: running queue unavailable "
+                   f"({type( e ).__name__}: {e})" )
+            return
+
+        if running_queue is None:
+            print( "[TestSuiteJob] preflight exclusivity SKIPPED: running queue not yet initialised" )
+            return
+
+        offenders = running_queue.get_non_test_inflight_agentic_jobs( exclude_id_hash=self.id_hash )
+        if offenders:
+            detail = ", ".join( f"{o[ 'id_hash' ]}({o[ 'job_type' ]})" for o in offenders )
+            raise RuntimeError(
+                f"Merge-gate sweep preflight FAILED (bug caf58f71): {len( offenders )} non-test "
+                f"agentic job(s) inflight on shared lupin_db_test — concurrent writers will "
+                f"contaminate this sweep. Offenders: {detail}. Quiesce the agentic pool so "
+                f":8000 is idle before scheduling the sweep."
+            )
+
+        print( "[TestSuiteJob] ✓ preflight exclusivity PASSED: no non-test inflight agentic "
+               "jobs on lupin_db_test" )
+
+    def _reset_state_between_suites( self, prev_suite: str, next_suite: str ) -> None:
+        """
+        Hard-reset the shared test DB at the seam between two suites (bug 8bd20375).
+
+        The merge-gate sweep runs suites back-to-back on ONE shared :8000 DB
+        (lupin_db_test). Without a reset here, the earlier suite's residue —
+        notably refresh_tokens, whose duplicate jti collides with the login
+        "Token already exists" 500 — survives into the next suite's auth
+        fixtures (the e2e→integration flood, RED ts-2230937c). A literal
+        container bounce is impossible from inside this job (self-kill), so the
+        equivalent isolation is an in-process residue truncate against the
+        hot-swapped test engine.
+
+        SAFETY: mirrors clean_test_db — refuses to touch anything but
+        lupin_db_test. When the live engine is NOT the test DB (e.g. a
+        multi-suite run submitted against the :7999 dev server), this is a
+        logged NO-OP, never a destructive op on dev data.
+
+        Requires:
+            - prev_suite / next_suite name the adjacent suites (logging only)
+
+        Ensures:
+            - on lupin_db_test: non-protected users deleted + residue TRUNCATEd
+              (incl. refresh_tokens); protected companion rows survive
+            - on any other DB: no destructive op; logs the skip
+            - never raises — a reset failure logs loudly but does NOT abort the
+              sweep (per-test clean_test_db is the finer-grained backstop)
+        """
+        from cosa.rest.db import database as db_module
+        from sqlalchemy import text
+
+        try:
+            engine = db_module.engine
+            db_url = str( engine.url )
+            if "lupin_db_test" not in db_url:
+                print( f"[TestSuiteJob] between-suites reset SKIPPED ({prev_suite}->{next_suite}): "
+                       f"engine is not lupin_db_test — no destructive op off the test DB" )
+                return
+
+            table_list = ", ".join( self._BETWEEN_SUITE_TRUNCATE_TABLES )
+            with engine.begin() as conn:
+                conn.execute( text( "DELETE FROM users WHERE NOT is_protected" ) )
+                conn.execute( text( f"TRUNCATE TABLE {table_list}" ) )
+            print( f"[TestSuiteJob] ✓ between-suites DB reset ({prev_suite}->{next_suite}): "
+                   f"non-protected users + residue cleared on lupin_db_test ({table_list})" )
+
+        except Exception as reset_err:
+            # Non-fatal: the per-test clean_test_db remains the backstop. A reset
+            # hiccup must never vaporize the rest of the sweep.
+            print( f"[TestSuiteJob] ⚠️ between-suites reset FAILED ({prev_suite}->{next_suite}), "
+                   f"non-fatal: {reset_err}" )
+
+    def _attest_tier_run( self, suite_type: str, result: Dict, started_at: str ) -> None:
+        """
+        Append a durable, tamper-evident record that this tier ran (row 691d49db).
+
+        Requires:
+            - result is a `_run_suite` return dict, or None when `_run_suite`
+              raised and the exception is escaping
+            - started_at is an ISO timestamp taken BEFORE the run
+
+        Ensures:
+            - a None result is attested as an ESCAPED run rather than skipped —
+              exit_code 1, errors 1, and an `error` naming the escape. A crashed
+              tier that leaves no receipt is the exact hole this row exists to
+              close, and it is the outcome most worth recording.
+            - appends one chained record to the ledger under the `io/` bind mount
+            - NEVER raises: a failure to record must not fail the tier it records.
+              The whole point is a receipt for runs that go wrong, so an
+              attestation that can abort the run would delete the evidence in
+              exactly the case it exists for.
+            - prints the failure rather than swallowing it — a silent recorder is
+              indistinguishable from one that was never wired, which is the defect
+              this row was filed about
+        """
+        try:
+            from cosa.agents.test_suite import attestation
+
+            if result is None:
+                result = {
+                    "passed" : 0, "failed" : 0, "skipped" : 0, "errors" : 1,
+                    "exit_code" : 1,
+                    "error"     : "_run_suite raised and the exception escaped — see the job's own error",
+                }
+
+            attestation.append_attestation(
+                result       = result,
+                suite        = suite_type,
+                job_id       = self.id_hash,
+                started_at   = started_at,
+                finished_at  = cu.get_current_datetime_iso(),
+                project_root = self._attestation_project_root(),
+            )
+        except Exception as e:
+            print( f"[TestSuiteJob] WARNING: tier-run attestation FAILED for {suite_type}: "
+                   f"{type( e ).__name__}: {e} — the run itself is unaffected, but this "
+                   f"run has NO durable receipt (row 691d49db)" )
+
+    def _attestation_project_root( self ):
+        """
+        The project root the ledger hangs off, honoring a pinned artifact dir.
+
+        Ensures:
+            - returns None in production, so `attestation` resolves the real root
+            - returns the pinned dir's parent chain when a test has redirected
+              `_ARTIFACT_DIR`, so an attestation never lands in the live ledger
+              from a test — the same fail-closed contract `artifact_root()` has
+        """
+        if self._ARTIFACT_DIR is None: return None
+        return self._ARTIFACT_DIR
+
     def _run_suite( self, suite_type: str, project_root: str ) -> Dict:
         """
         Run a single test suite via subprocess.
@@ -744,7 +1049,9 @@ class TestSuiteJob( AgenticJobBase ):
         # websocket async orchestrator) will error at arg-parse if this flag
         # is appended, killing the subprocess before any tests run.
         if suite_type in SUITES_SUPPORTING_JUNIT_XML:
-            junit_xml_path = f"/tmp/{suite_type}-junit-{datetime.now().strftime( '%Y%m%d-%H%M%S' )}.xml"
+            junit_xml_path = self._artifact_path(
+                f"{suite_type}-junit-{datetime.now().strftime( '%Y%m%d-%H%M%S' )}.xml"
+            )
             sanitized_args += [ f"--junit-xml={junit_xml_path}" ]
         else:
             junit_xml_path = None  # _parse_junit_xml(None) returns zero-counts without raising
@@ -762,6 +1069,10 @@ class TestSuiteJob( AgenticJobBase ):
                 stderr=subprocess.STDOUT,
                 cwd=project_root,
                 text=True,
+                # Own process group (bug 8b93bcf5): terminate() reaches only the
+                # direct child, so a grandchild survives the kill and keeps the
+                # inherited stdout pipe open. One group = one signal, whole tree.
+                start_new_session=True,
                 env={
                     **os.environ,
                     "LUPIN_ROOT"          : project_root,
@@ -770,6 +1081,15 @@ class TestSuiteJob( AgenticJobBase ):
                     # lives on internal port 7999 (host :8000 mapping is inaccessible
                     # from within the container). Honor any caller-set value first.
                     "LUPIN_TEST_BASE_URL" : os.environ.get( "LUPIN_TEST_BASE_URL", f"http://localhost:{os.environ.get( 'PORT', '7999' )}" ),
+                    # Lineage token (bug 3a14292b): this sweep's own id_hash, exposed to
+                    # the pytest subprocess so any child job it spawns (e.g. a swe_team
+                    # dry-run via POST /api/swe-team/submit) can echo it back as
+                    # parent_id_hash. The consumer's Gate B then admits those children
+                    # THROUGH the monopoly intake hold instead of starving them. Always
+                    # injected — harmless when this sweep is not monopolize (Gate B never
+                    # fires, so nothing consults it). LUPIN_TEST_ prefix matches the
+                    # subprocess env-allowlist convention.
+                    "LUPIN_TEST_MONOPOLIZE_PARENT_ID" : self.id_hash,
                     # Caller-supplied env (allowlist-filtered in __init__) overrides defaults.
                     **self.env_vars,
                 }
@@ -779,16 +1099,62 @@ class TestSuiteJob( AgenticJobBase ):
             timeout_secs = SUITE_TIMEOUTS_SECONDS.get( suite_type, SUITE_TIMEOUT_DEFAULT_SECONDS )
             if self.debug: print( f"[TestSuiteJob] {suite_type} timeout: {timeout_secs}s" )
 
+            # Bug 8b93bcf5 defect 2 — DRAIN STDOUT ON A SEPARATE THREAD.
+            #
+            # This loop used to call process.stdout.readline() inline. readline()
+            # on a pipe BLOCKS until a newline or EOF, so both the timeout check
+            # and the cancellation check below were reachable only BETWEEN lines.
+            # A child that went quiet parked the loop inside readline() and
+            # neither could fire until it spoke again. Measured live on
+            # 2026-07-26: the smoke tier ran ~9 minutes past its 3600s budget,
+            # because --auto-proxy smoke is dominated by real LLM round-trips and
+            # its silences are long BY DESIGN. Cancellation inherited the same
+            # deafness, in exactly the case where someone reaches for cancel.
+            #
+            # A reader thread + a queue with a short get() timeout puts the loop's
+            # OWN clock in charge: both checks now run at least every
+            # STDOUT_POLL_INTERVAL_SECONDS no matter how silent the child is.
+            # subprocess.run(timeout=) is not a drop-in — this loop needs the
+            # stdout incrementally for the log.
+            stdout_queue = queue.Queue()
+
+            def _drain_stdout( pipe, q ):
+                try:
+                    for drained in iter( pipe.readline, "" ):
+                        q.put( drained )
+                except BaseException as reader_exc:                          # noqa: BLE001 — see below
+                    # A crash in HERE must not look like a clean EOF. Before the
+                    # reader thread existed, readline() ran inline and any failure
+                    # hit _run_suite's `except Exception`, returning errors=1 /
+                    # exit_code=1. Moving it to a thread made the exception die
+                    # unraisable and `finally` post the EOF sentinel, so the poll
+                    # loop fell through to exit_code = process.returncode = 0 and
+                    # reported a crashed tier as A SUCCESS (0 passed, 0 failed,
+                    # 0 errors, exit 0) — strictly worse than the 0/0/0/1 that
+                    # bug 8b93bcf5 was filed about, because it reads as green.
+                    # BaseException, not Exception: a KeyboardInterrupt or
+                    # SystemExit in the reader is still a lost stdout stream, and
+                    # silently reporting success for one is the defect either way.
+                    q.put( _StdoutReaderCrash( reader_exc, tb_mod.format_exc() ) )
+                finally:
+                    q.put( None )   # EOF sentinel — distinct from "nothing yet"
+
+            reader_thread = threading.Thread(
+                target = _drain_stdout, args=( process.stdout, stdout_queue ), daemon=True
+            )
+            reader_thread.start()
+
             # Poll loop for cancellation support + timeout enforcement
-            stdout_lines = []
+            stdout_lines  = []
+            stdout_at_eof = False
             while True:
                 # Check for cancellation
                 if self._cancel_requested:
-                    process.terminate()
-                    try:
-                        process.wait( timeout=10 )
-                    except subprocess.TimeoutExpired:
-                        process.kill()
+                    # Same group kill as the timeout path (bug 8b93bcf5). A cancel
+                    # that leaves the grandchild running would report "Cancelled"
+                    # while the work carries on holding the monopolize server —
+                    # the worst of both outcomes, and silent.
+                    self._terminate_process_group( process )
                     duration = time.monotonic() - start_time
                     return {
                         "passed"    : 0,
@@ -805,51 +1171,116 @@ class TestSuiteJob( AgenticJobBase ):
                 elapsed = time.monotonic() - start_time
                 if elapsed > timeout_secs:
                     print( f"[TestSuiteJob] TIMEOUT: {suite_type} exceeded {timeout_secs}s, killing process" )
-                    process.terminate()
-                    try:
-                        process.wait( timeout=10 )
-                    except subprocess.TimeoutExpired:
-                        process.kill()
+                    self._terminate_process_group( process )
 
-                    # Drain anything still buffered after terminate so the tail
+                    # Drain what the reader thread has already queued, so the tail
                     # captured in the synthetic failure reflects reality.
-                    try:
-                        remaining = process.stdout.read()
-                        if remaining:
-                            stdout_lines.append( remaining )
-                    except ( OSError, ValueError ):
-                        pass
+                    #
+                    # This used to be `process.stdout.read()` — a BLOCKING read to
+                    # EOF, which returns only once EVERY descriptor holding the
+                    # pipe's write end is closed. terminate() signals the direct
+                    # child only, so any surviving grandchild keeps that pipe open
+                    # and the drain waits for IT. Measured: a suite script running
+                    # `sleep 30` returned 30.0s after a 1s budget — the kill was
+                    # punctual, the RETURN was not. Bounded queue drain instead;
+                    # the reader thread owns the pipe and nothing else reads it.
+                    drain_deadline = time.monotonic() + STDOUT_DRAIN_BUDGET_SECONDS
+                    while time.monotonic() < drain_deadline:
+                        try:
+                            leftover = stdout_queue.get_nowait()
+                        except queue.Empty:
+                            break
+                        if leftover is None:
+                            break
+                        if isinstance( leftover, _StdoutReaderCrash ):
+                            # This path is already returning a timeout/kill verdict
+                            # (exit_code -2, errors +1), so it must NOT raise and
+                            # convert a measured timeout into an exception. But the
+                            # marker is not a log line either — appending it would
+                            # put a repr into the saved stdout. Record and continue
+                            # draining.
+                            stdout_lines.append(
+                                f"\n[TestSuiteJob] stdout reader thread died: "
+                                f"{type( leftover.exc ).__name__}: {leftover.exc}\n"
+                            )
+                            continue
+                        stdout_lines.append( leftover )
 
                     stdout_text = "".join( stdout_lines )
                     log_path    = self._write_stdout_log( suite_type, stdout_text )
                     tail_text   = "".join( stdout_lines[ -40: ] ).strip()
 
+                    # Bug 8b93bcf5: a killed tier used to report 0/0/0/1, which is
+                    # indistinguishable from a tier that never ran — while sitting
+                    # on results it had already produced. Recover what the progress
+                    # output still holds, and say plainly that it is partial.
+                    recovered = self._parse_pytest_progress_stdout( "".join( stdout_lines ) )
+                    if recovered is None:
+                        partial_note = "no pytest progress output was recognized, so NO partial results could be recovered"
+                        p_passed = p_failed = p_skipped = p_errors = 0
+                    else:
+                        p_passed  = recovered[ "passed"  ]
+                        p_failed  = recovered[ "failed"  ]
+                        p_skipped = recovered[ "skipped" ]
+                        p_errors  = recovered[ "errors"  ]
+                        partial_note = (
+                            f"PARTIAL results recovered from progress output: "
+                            f"{p_passed} passed, {p_failed} failed, {p_errors} errors, "
+                            f"{p_skipped} skipped across {len( recovered[ 'partial_files' ] )} files. "
+                            f"FILE-level only — compact pytest output carries no test node-id, "
+                            f"and the run was killed before the summary block, so no per-test "
+                            f"name or traceback exists to recover."
+                        )
+                    print( f"[TestSuiteJob] {suite_type}: {partial_note}" )
+
                     return {
-                        "passed"          : 0,
-                        "failed"          : 0,
-                        "skipped"         : 0,
-                        "errors"          : 1,
+                        "passed"          : p_passed,
+                        "failed"          : p_failed,
+                        "skipped"         : p_skipped,
+                        # +1 for the timeout itself, so a tier that was killed can
+                        # never report a clean bill regardless of what it recovered.
+                        "errors"          : p_errors + 1,
                         "exit_code"       : -2,
                         "log_path"        : log_path,
                         "duration"        : elapsed,
-                        "error"           : f"Timeout: {suite_type} exceeded {timeout_secs}s",
+                        "error"           : f"Timeout: {suite_type} exceeded {timeout_secs}s — {partial_note}",
                         "failure_details" : [ self._synth_failure_detail(
                             suite_type     = suite_type,
                             name           = "timeout",
                             elapsed        = elapsed,
-                            message        = f"Subprocess killed after {timeout_secs}s budget (actual {elapsed:.1f}s)",
+                            message        = f"Subprocess killed after {timeout_secs}s budget (actual {elapsed:.1f}s). {partial_note}",
                             traceback_text = tail_text,
                         ) ],
                     }
 
-                # Read available output
-                line = process.stdout.readline()
-                if line:
-                    stdout_lines.append( line )
-                    if self.verbose: print( line, end="" )
+                # Read whatever the drain thread has produced. The get() timeout is
+                # what bounds how long this loop can be away from its own checks.
+                try:
+                    line = stdout_queue.get( timeout=STDOUT_POLL_INTERVAL_SECONDS )
+                except queue.Empty:
+                    line = ""
+                else:
+                    if line is None:
+                        stdout_at_eof = True
+                        line = ""
+                    elif isinstance( line, _StdoutReaderCrash ):
+                        # Raise on the MAIN path so _run_suite's `except Exception`
+                        # sees it — that handler is what turns a crash into
+                        # errors=1 / exit_code=1 / an error string. Swallowing it
+                        # here would restore the exact silence this marker exists
+                        # to break.
+                        raise RuntimeError(
+                            f"stdout reader thread died: {type( line.exc ).__name__}: {line.exc}\n\n{line.tb}"
+                        ) from line.exc
+                    else:
+                        stdout_lines.append( line )
+                        if self.verbose: print( line, end="" )
 
-                # Check if process has finished
-                if line == "" and process.poll() is not None:
+                # Finished only when stdout hit EOF AND the process has exited.
+                # Requiring BOTH matters: EOF alone can precede exit, and exit
+                # alone can leave buffered lines undrained — breaking on either
+                # one by itself truncates the log this job exists to preserve.
+                if stdout_at_eof and process.poll() is not None:
                     break
 
             duration  = time.monotonic() - start_time
@@ -925,17 +1356,94 @@ class TestSuiteJob( AgenticJobBase ):
                 ) ],
             }
 
-    # Map suite_type to canonical /tmp/<name>-latest.log symlink used across scripts
-    _LOG_SYMLINKS = {
-        "unit"         : "/tmp/unit-latest.log",
-        "smoke"        : "/tmp/smoke-latest.log",
-        "smoke_direct" : "/tmp/smoke-direct-latest.log",
-        "pytest_direct": "/tmp/pytest-direct-latest.log",
-        "websocket"    : "/tmp/websocket-latest.log",
-        "integration"  : "/tmp/integration-latest.log",
-        "e2e"          : "/tmp/e2e-ui-latest.log",
-        "all"          : "/tmp/all-tests-latest.log",
+    # ── artifact root: ONE knob, so the three paths cannot be moved apart ──────
+    #
+    # Row fd0cd863. Before this, the symlink map held absolute paths while
+    # `actual_log` and `junit_xml_path` hardcoded "/tmp/" independently. A test could
+    # therefore redirect the SYMLINK and still write the real FILE into the live
+    # artifact directory — and that is exactly what happened:
+    #
+    #     /tmp/integration-latest.log  ->  line-1 line-2 line-3 line-4 line-5 line-6
+    #     /tmp/unit-20260727-185252.log -> "first run"
+    #
+    # Fixture strings, in the path a human triaging a scheduled run reads. Not absent
+    # — present and WRONG, with a plausible timestamped name and a correctly-rotated
+    # symlink. A partial isolation seam is worse than none, because it reads as done.
+    #
+    # ⇒ Everything derives from _ARTIFACT_DIR. Redirect it and the log file, the
+    # symlink and the junit XML all move together; there is no way to move one and
+    # forget another, which is the failure this replaces.
+    # ⚠️ None means "resolve the durable root at call time", NOT "/tmp". Kept as a
+    # sentinel rather than an eagerly-resolved string because `artifact_root()` FAILS
+    # CLOSED under pytest (attestation.py, commit `c29beb07`): resolving it at class-
+    # definition time would fire that refusal at IMPORT, taking down every test that
+    # merely imports this module. A test redirects it by setting this attribute to a
+    # tmp_path — which is what the autouse `_isolate_artifact_root` fixture does.
+    _ARTIFACT_DIR = None
+
+    _LOG_BASENAMES = {
+        "unit"         : "unit-latest.log",
+        "typescript"   : "typescript-latest.log",
+        "smoke"        : "smoke-latest.log",
+        "smoke_direct" : "smoke-direct-latest.log",
+        "pytest_direct": "pytest-direct-latest.log",
+        "websocket"    : "websocket-latest.log",
+        "integration"  : "integration-latest.log",
+        "e2e"          : "e2e-ui-latest.log",
+        "all"          : "all-tests-latest.log",
     }
+
+    @classmethod
+    def _log_symlink_path( cls, suite_type: str ) -> Optional[ str ]:
+        """
+        Ensures:
+            - returns the absolute canonical symlink path for a known suite
+            - returns None for an unknown suite (callers treat that as a no-op)
+        """
+        basename = cls._LOG_BASENAMES.get( suite_type )
+        return os.path.join( cls._artifact_dir(), basename ) if basename else None
+
+    @classmethod
+    def _artifact_dir( cls ) -> str:
+        """
+        The ONE resolution point for the artifact root.
+
+        Ensures:
+            - returns `cls._ARTIFACT_DIR` when a test (or an operator) has pinned it
+            - otherwise resolves the durable root via attestation.artifact_root(), which
+              RAISES under pytest when no root was pinned — so a test cannot reach the
+              real directory through any call path, computed or literal
+
+        ⚠️ Resolved lazily, per call. An eager module- or class-level resolution would
+        trigger that refusal at import and take down every test that imports this file.
+        """
+        root = cls._ARTIFACT_DIR
+        if root is None:
+            from cosa.agents.test_suite.attestation import artifact_root
+            root = artifact_root()
+        # CREATE IT — and note WHERE this line is. Because every artifact path resolves
+        # through here, one mkdir covers the log file, the symlink, the junit XML AND the
+        # except handler's retry. Patching the call sites would have needed three.
+        #
+        # `/tmp` always existed, so no writer ever needed a mkdir. Moving the root to
+        # io/test-suite/artifacts/ replaced a path that is always there with one that must
+        # be created, and the first real tier run died on it (ts-102267b8, 311s):
+        #     FileNotFoundError: /var/lupin/io/test-suite/artifacts/unit-20260727-201637.log
+        # It then failed a SECOND time inside _run_suite's except handler, which calls
+        # _write_stdout_log again — so the exception escaped instead of returning the error
+        # dict. A handler that re-invokes what just failed turns one failure into an escape.
+        #
+        # ⚠️ NO UNIT TEST COULD HAVE CAUGHT THIS. The autouse isolation fixture pins
+        # _ARTIFACT_DIR to pytest's `tmp_path`, WHICH ALWAYS EXISTS — a fixture that hands
+        # you a working precondition cannot detect a missing one. That is a whole class,
+        # not one case. The regression tests pin the root to a path that does NOT exist.
+        os.makedirs( root, exist_ok=True )
+        return root
+
+    @classmethod
+    def _artifact_path( cls, filename: str ) -> str:
+        """Ensures: returns `filename` resolved under the current artifact root."""
+        return os.path.join( cls._artifact_dir(), filename )
 
     @classmethod
     def _write_stdout_log( cls, suite_type: str, stdout_text: str ) -> Optional[ str ]:
@@ -952,11 +1460,13 @@ class TestSuiteJob( AgenticJobBase ):
               was written (unknown suite or empty text)
             - updates /tmp/<suite>-latest.log symlink atomically (unlink+symlink)
         """
-        symlink_path = cls._LOG_SYMLINKS.get( suite_type )
+        symlink_path = cls._log_symlink_path( suite_type )
         if not ( symlink_path and stdout_text ):
             return None
         import pathlib
-        actual_log = f"/tmp/{suite_type}-{datetime.now().strftime( '%Y%m%d-%H%M%S' )}.log"
+        actual_log = cls._artifact_path(
+            f"{suite_type}-{datetime.now().strftime( '%Y%m%d-%H%M%S' )}.log"
+        )
         pathlib.Path( actual_log ).write_text( stdout_text )
         pathlib.Path( symlink_path ).unlink( missing_ok=True )
         pathlib.Path( symlink_path ).symlink_to( actual_log )
@@ -1068,6 +1578,163 @@ class TestSuiteJob( AgenticJobBase ):
         return result
 
     @staticmethod
+    def _parse_node_tap_summary( stdout: str ) -> Optional[ Dict ]:
+        """
+        Parse `node --test` TAP trailer counts emitted by the typescript suite.
+
+        Row 36e479ed. Without this the typescript suite would land in exactly
+        the state WG-7 found the websocket suite in: a green run classified as
+        a failure with metrics 0/0/0/0, because no junit-xml exists to parse.
+
+        The trailer looks like:
+            # tests 2245
+            # pass 2245
+            # fail 0
+            # skipped 0
+
+        Requires:
+            - stdout is the captured runner stdout (may be empty)
+
+        Ensures:
+            - returns passed/failed/skipped/errors when a `# pass` line is present
+            - returns None when the trailer is absent, so the caller keeps its
+              zero-count default and downstream classification is unchanged
+            - counts the LAST trailer, so a nested `# pass` inside test output
+              cannot shadow the run's real total
+        """
+        import re
+
+        passed_matches = re.findall( r"^# pass (\d+)$",    stdout, re.MULTILINE )
+        if not passed_matches:
+            return None
+
+        failed_matches  = re.findall( r"^# fail (\d+)$",    stdout, re.MULTILINE )
+        skipped_matches = re.findall( r"^# skipped (\d+)$", stdout, re.MULTILINE )
+
+        return {
+            "passed"  : int( passed_matches[ -1 ] ),
+            "failed"  : int( failed_matches[ -1 ] )  if failed_matches  else 0,
+            "skipped" : int( skipped_matches[ -1 ] ) if skipped_matches else 0,
+            "errors"  : 0,
+        }
+
+    @staticmethod
+    def _terminate_process_group( process ) -> None:
+        """
+        Kill the subprocess AND everything it spawned.
+
+        WHY (bug 8b93bcf5, third defect): the runner is `bash <script>`, and
+        process.terminate() signals that bash alone. A script that does NOT exec
+        into pytest leaves a grandchild holding the inherited stdout pipe, which
+        outlives the kill — so the tier's own budget stops governing the machine.
+        Popen is started with start_new_session=True, giving the child its own
+        process group, so one signal reaches the whole tree.
+
+        Requires:
+            - process is a Popen started with start_new_session=True
+
+        Ensures:
+            - SIGTERM to the group, escalating to SIGKILL after a grace period
+            - falls back to the plain process-level terminate/kill when the group
+              is already gone (ProcessLookupError) or the platform has no killpg;
+              a cleanup helper must never raise into the caller's error path,
+              because the caller is already handling a failure
+        """
+        def _signal_group( sig ):
+            try:
+                os.killpg( os.getpgid( process.pid ), sig )
+            except ( ProcessLookupError, PermissionError, AttributeError, OSError ):
+                # Group unavailable — fall back to the direct child so the kill
+                # still happens, just without the descendants.
+                try:
+                    process.kill() if sig == signal.SIGKILL else process.terminate()
+                except ProcessLookupError:
+                    pass
+
+        _signal_group( signal.SIGTERM )
+        try:
+            process.wait( timeout=10 )
+        except subprocess.TimeoutExpired:
+            _signal_group( signal.SIGKILL )
+            try:
+                process.wait( timeout=10 )
+            except subprocess.TimeoutExpired:
+                pass
+
+    @staticmethod
+    def _parse_pytest_progress_stdout( stdout: str ) -> Optional[ Dict ]:
+        """
+        Recover per-file result counts from pytest's COMPACT progress output.
+
+        WHY (bug 8b93bcf5): --junit-xml is written only at session end, so a tier
+        killed by the timeout leaves NO junit file, _parse_junit_xml falls back to
+        zeros, and the tier publishes "0 passed, 0 failed, 1 errors" — a string
+        byte-identical to a tier that crashed at import, a tier whose script was
+        missing, and a tier that collected nothing. On 2026-07-26 that erased
+        ~17 failures and 1 error the smoke tier had ALREADY found.
+
+        The progress line survives in captured stdout, so the counts are
+        recoverable even though the junit file is not:
+
+            src/tests/smoke/test_alembic_....py FFF.F                    [  1%]
+
+        ⚠️ THIS IS A MITIGATION, NOT THE FIX. It recovers FILE-level resolution
+        only. Compact mode never emits a test node-id, and a killed run never
+        reaches the "short test summary info" block, so no per-test name and no
+        traceback exist ANYWHERE to recover. A reader learns "4 tests in this
+        file failed" and cannot learn which four or why. Full per-test detail
+        needs incremental capture (pytest-reportlog is NOT installed in the test
+        image), which is a separate change.
+
+        Requires:
+            - stdout is the captured (possibly truncated) subprocess output
+
+        Ensures:
+            - returns a dict with passed/failed/skipped/errors counts plus a
+              `partial_files` list of ( filename, chars ) for the reader
+            - returns None when NO progress line was recognized — an empty parse
+              must not read as "zero of everything", which is the exact
+              indistinguishable-zeros failure this method exists to end
+        """
+        # Progress chars pytest emits in compact mode. 'x'/'X' are xfail/xpass and
+        # count as neither pass nor failure, matching the junit parser's treatment.
+        counts = { "passed": 0, "failed": 0, "skipped": 0, "errors": 0 }
+        partial_files = []
+        current_file  = None
+        recognized    = False
+
+        for raw in stdout.split( "\n" ):
+            line = re.sub( r"\[\s*\d+%\]\s*$", "", raw ).rstrip()
+            if not line.strip():
+                continue
+            m = re.match( r"^(\S+\.py)\s+(.*)$", line )
+            if m:
+                current_file = m.group( 1 )
+                chars        = m.group( 2 )
+            else:
+                # A wrapped continuation carries progress chars with no filename.
+                chars = line.strip()
+                if current_file is None:
+                    continue
+            chars = chars.replace( " ", "" )
+            # Anything outside the progress alphabet means this is not a progress
+            # line (a banner, a traceback, a summary). Skip rather than guess —
+            # miscounting a traceback as results would be worse than no recovery.
+            if not chars or re.search( r"[^.FEsxX]", chars ):
+                continue
+            recognized = True
+            counts[ "passed"  ] += chars.count( "." )
+            counts[ "failed"  ] += chars.count( "F" )
+            counts[ "errors"  ] += chars.count( "E" )
+            counts[ "skipped" ] += chars.count( "s" )
+            partial_files.append( ( current_file, chars ) )
+
+        if not recognized:
+            return None
+        counts[ "partial_files" ] = partial_files
+        return counts
+
+    @staticmethod
     def _parse_non_pytest_stdout( suite_type: str, stdout: str ) -> Optional[ Dict ]:
         """
         Parse the stdout of a non-pytest suite runner (e.g. the websocket smoke
@@ -1100,12 +1767,15 @@ class TestSuiteJob( AgenticJobBase ):
         Returns:
             dict | None: Parsed counts or None if format unrecognized.
         """
-        if suite_type != "websocket":
+        if suite_type not in ( "websocket", "typescript" ):
             return None
         if not stdout:
             return None
 
         import re
+
+        if suite_type == "typescript":
+            return TestSuiteJob._parse_node_tap_summary( stdout )
 
         total_match  = re.search( r"Total Tests:\s*(\d+)", stdout )
         passed_match = re.search( r"\bPassed:\s*(\d+)",   stdout )

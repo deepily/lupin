@@ -38,7 +38,8 @@ def _make_listener( session_id_hash="abc12345", tmux_session="test tmux" ):
 @pytest.fixture
 def lock_dir( tmp_path, monkeypatch ):
     """Isolate the injection lock files from the real ~/.claude/sessions."""
-    monkeypatch.setattr( listener_processes, "SESSION_DIR", tmp_path )
+    # Row 8ccc20ab: the lock dir resolves through sessions_dir() at CALL time.
+    monkeypatch.setenv( "LUPIN_HOOK_SESSIONS_DIR", str( tmp_path ) )
     return tmp_path
 
 
@@ -105,11 +106,11 @@ class TestInjectionMutexFailOpen:
         monkeypatch.setattr( listener_module.subprocess, "run", run_mock )
         monkeypatch.setattr( listener_module.time, "sleep", MagicMock() )
 
-        # Force acquisition failure: SESSION_DIR points at a FILE, so the
+        # Force acquisition failure: the seam points at a FILE, so the
         # lock-file open fails (NotADirectoryError ⊂ OSError) → held=False.
         blocker = lock_dir / "blocker"
         blocker.write_text( "x" )
-        monkeypatch.setattr( listener_processes, "SESSION_DIR", blocker )
+        monkeypatch.setenv( "LUPIN_HOOK_SESSIONS_DIR", str( blocker ) )
 
         logged = [ ]
         l = _make_listener()

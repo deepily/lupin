@@ -19,7 +19,8 @@ src/terraform/
 │   ├── secret-manager/     ⬜ secret inventory + per-secret accessor bindings
 │   ├── cloud-sql-pg16/     ⬜ private-IP PG16 + PITR
 │   ├── vpc-vpn/            ⬜ VPC + Cloud VPN tunnel to on-prem vLLM
-│   └── gce-gpu-vm/         ⬜ L4 VM + startup-script (driver + compose up)
+│   ├── gce-gpu-vm/         ⬜ L4 VM + startup-script (driver + compose up)
+│   └── cloud-run-model-server/ ✅ L4 GPU model server on Cloud Run, scale-to-zero (Set B)
 └── envs/
     └── test/               Milestone-1 GCP TEST environment
 ```

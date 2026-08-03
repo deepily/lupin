@@ -120,9 +120,13 @@ def test_git_worktree_add_functional():
             f"then recreate container."
         )
     finally:
+        # `remove --force` already deletes the smoke worktree's admin entry — do
+        # NOT append `git worktree prune`. An in-container prune wipes the ENTIRE
+        # host .git/worktrees registry (bug 47ac0e50: ./.git is mounted but
+        # lupin-worktrees/ is not, so every host lane's gitdir reads as missing).
         _docker_exec( "sh", "-c",
                       f"cd /var/lupin && git worktree remove --force {smoke_path} "
-                      f">/dev/null 2>&1 ; git worktree prune >/dev/null 2>&1" )
+                      f">/dev/null 2>&1" )
 
 
 def test_claude_credentials_mount_present():
@@ -165,10 +169,13 @@ def test_worktree_bind_mount_end_to_end():
             f"docker compose up -d {CONTAINER}"
         )
     finally:
+        # `remove --force` already deletes the smoke worktree's admin entry — do
+        # NOT append `git worktree prune` (bug 47ac0e50: an in-container prune
+        # wipes the entire host .git/worktrees registry).
         _docker_exec(
             "sh", "-c",
             f"cd /var/lupin && git worktree remove --force {container_path} "
-            f">/dev/null 2>&1 ; git worktree prune >/dev/null 2>&1"
+            f">/dev/null 2>&1"
         )
 
 
@@ -190,6 +197,97 @@ def test_gh_auth_status_warn_only():
             "will fail when it runs. Remedy (when Phase 5 needs it): add "
             "~/.config/gh bind-mount to docker-compose.yml for dev + test services."
         )
+
+
+def _file_binds( container ):
+    """Every FILE bind (./, ~, absolute) compose declares for `container`, as (src, dest)."""
+    import yaml
+    lupin_root = os.environ.get( "LUPIN_ROOT", "." )
+    compose    = os.path.join( lupin_root, "docker-compose.yml" )
+    if not os.path.exists( compose ): return None
+
+    services = yaml.safe_load( open( compose, encoding="utf-8" ) )[ "services" ]
+    volumes  = next(
+        ( v.get( "volumes", [] ) for v in services.values()
+          if v.get( "container_name" ) == container ), []
+    )
+    out = []
+    for entry in volumes:
+        if not isinstance( entry, str ) or entry.count( ":" ) < 1: continue
+        src, dest = entry.split( ":" )[ 0 ], entry.split( ":" )[ 1 ]
+        host_path = ( os.path.expanduser( src ) if src.startswith( "~" )
+                      else os.path.join( lupin_root, src[ 2 : ] ) if src.startswith( "./" )
+                      else src )
+        if os.path.isfile( host_path ):                   # directory binds are immune
+            out.append( ( src, dest, host_path ) )
+    return out
+
+
+def test_single_file_binds_serve_the_CURRENT_host_file():
+    """
+    Probe 8: TWO failure modes that probes 1-7 cannot see, because those check that a
+    mount is DECLARED and this checks what the container actually reads.
+
+    (a) STALE — the mount is present and serving OLD BYTES. Docker binds a single file
+        by INODE, not by path. An atomic save (write-temp-then-rename, which is most
+        editors) leaves the host path on a NEW inode while the container still resolves
+        the old one. ⚠️ `docker inspect` keeps calling this mount healthy, because the
+        Source string it echoes is the compose declaration and was never a claim about
+        content. `docker restart` does not re-resolve it; only a recreate does.
+
+    (b) MISSING — the mount is declared in compose and absent from the container,
+        because the container predates the declaration. Here `docker inspect` does NOT
+        lie: it correctly reports no such mount. This mode is honest and still invisible,
+        for a different reason — nobody was looking at that container.
+
+    ⇒ The two want different remedies and different urgency, so they are reported apart.
+    Conflating them would send a reader hunting an inode problem that isn't there.
+
+    MEASURED 2026-07-27 (row ec3a7fb0), both modes live on the same box:
+        lupin-rest-test   ./pytest.ini STALE — a whole unit tier ran against a Jun-17
+                          copy while inspect reported the mount healthy
+        lupin-rest-dev    15 of 18 binds MISSING (container 2026-07-11, mounts landed
+                          2026-07-26) + ~/.claude/.credentials.json STALE by ~16h
+
+    ⚠️ Directory binds (./src, ./io) are immune to (a) — the kernel resolves through the
+    directory on every open. That is exactly why a conftest.py edit lands and a
+    pytest.ini edit does not, in the same commit, in the same container.
+    """
+    binds = _file_binds( CONTAINER )
+    if binds is None:
+        pytest.skip( "docker-compose.yml not readable" )
+
+    stale, missing, compared = [], [], 0
+    for src, dest, host_path in binds:
+        ctr = _docker_exec( "md5sum", dest )
+        if ctr.returncode != 0:
+            missing.append( f"{src} -> {dest}" ); continue
+        host = subprocess.run( [ "md5sum", host_path ], capture_output=True, text=True, timeout=10 )
+        if host.returncode != 0: continue
+        compared += 1
+        h, c = host.stdout.split()[ 0 ], ctr.stdout.split()[ 0 ]
+        if h != c: stale.append( f"{src} -> {dest}   host={h[ :12 ]}  container={c[ :12 ]}" )
+
+    recreate = f"docker rm -f {CONTAINER} && docker compose up -d {CONTAINER}"
+
+    # A pass proves nothing if the loop examined nothing — the same can't-fail shape
+    # this probe exists to catch, one level up.
+    assert binds, (
+        f"compose declares ZERO file binds for '{CONTAINER}' — this probe cannot have "
+        "detected anything, so a pass would be vacuous. Check the service's container_name."
+    )
+    assert not missing, (
+        f"{len( missing )} of {len( binds )} declared file binds are ABSENT from "
+        f"'{CONTAINER}' — the container predates the compose declaration and has been "
+        "running without them:\n  " + "\n  ".join( missing )
+        + f"\n\nRemedy: {recreate}\n(`docker restart` does NOT pick up new mounts.)"
+    )
+    assert not stale, (
+        f"{len( stale )} of {compared} file binds are serving STALE content in "
+        f"'{CONTAINER}' — the container reads a different file than the repo has, and "
+        "every mount-presence probe above still passes:\n  " + "\n  ".join( stale )
+        + f"\n\nRemedy: {recreate}\n(`docker restart` does NOT re-resolve a bind's inode.)"
+    )
 
 
 if __name__ == "__main__":

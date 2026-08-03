@@ -78,10 +78,11 @@ class TestIsKnownProject:
         assert KNOWN_PROJECTS[ "/planning-is-prompting" ] == "plan"
         assert KNOWN_PROJECTS[ "/lupin-mobile" ]         == "lupin-mobile"
         assert KNOWN_PROJECTS[ "/lupin-plugin-firefox" ] == "lupin-plugin-firefox"
+        assert KNOWN_PROJECTS[ "/scratchpad" ]           == "scratchpad"
 
     def test_known_projects_dict_length( self ):
         """Ensure no accidental additions without test coverage."""
-        assert len( KNOWN_PROJECTS ) == 5
+        assert len( KNOWN_PROJECTS ) == 6
 
 
 class TestDetectProject:

@@ -57,7 +57,13 @@ def _inject_indicator( page, abstract_text ):
             host.className = 'sender-card';
             const ind = document.createElement( 'span' );
             ind.className = 'abstract-indicator';
-            ind.dataset.abstract     = encodeURIComponent( txt );
+            // Store data-abstract RAW — faithful to the production mux writer
+            // (notificationItem.ts abstractIndicator → html helper setAttribute,
+            // no encode) + the raw/raw reader (ReadingPaneRenderer, Bug#2 d9d8d651).
+            // A prior encodeURIComponent here injected %20 for spaces (bug 2b0411c7):
+            // a shape production never emits, so the raw reader surfaced the literal
+            // %20 in the pane. Raw matches reality.
+            ind.dataset.abstract     = txt;
             ind.dataset.testAbstract = txt;
             ind.textContent = '📋';
             host.appendChild( ind );

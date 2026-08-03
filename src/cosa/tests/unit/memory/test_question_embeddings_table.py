@@ -211,5 +211,83 @@ class TestValidateDimensions( unittest.TestCase ):
         mock_db.drop_table.assert_called_once_with( "question_embeddings_tbl" )
 
 
+class TestPostgresBackend( unittest.TestCase ):
+    """v0.2.0 §6 postgres backend: __init__ skips LanceDB; storage via repo; gen-on-miss stays here."""
+
+    @staticmethod
+    def _pg_cfg_get( key, default=None, **kwargs ):
+        return {
+            "embedding dimensions":     "768",
+            "path to database wo root": "/test/db",
+            "vector store backend":     "postgres",
+        }.get( key, default )
+
+    def _make_pg( self ):
+        cfg = Mock()
+        cfg.get.side_effect = self._pg_cfg_get
+        provider = Mock()
+        provider.generate_embedding.return_value = _EMBEDDING
+        with patch( "cosa.memory.question_embeddings_table.ConfigurationManager", return_value=cfg ), \
+             patch( "cosa.memory.question_embeddings_table.EmbeddingManager" ), \
+             patch( "cosa.memory.question_embeddings_table.get_embedding_provider", return_value=provider ), \
+             patch( "cosa.memory.question_embeddings_table.lancedb.connect",
+                    side_effect=AssertionError( "postgres ctor must not connect to LanceDB" ) ), \
+             patch( "builtins.print" ):
+            table = QuestionEmbeddingsTable()
+        return table, provider
+
+    @staticmethod
+    def _patch_repo():
+        import contextlib
+        session   = MagicMock()
+        repo_inst = MagicMock()
+
+        @contextlib.contextmanager
+        def fake_get_db():
+            yield session
+
+        ctx      = patch( "cosa.rest.db.database.get_db", fake_get_db )
+        repo_ctx = patch( "cosa.rest.db.repositories.question_embedding_repository.QuestionEmbeddingRepository",
+                          return_value=repo_inst )
+        return repo_inst, ctx, repo_ctx
+
+    def test_init_uses_postgres( self ):
+        table, _ = self._make_pg()
+        self.assertTrue( table._use_postgres )
+
+    def test_has_delegates( self ):
+        table, _ = self._make_pg()
+        repo, ctx, repo_ctx = self._patch_repo()
+        repo.has.return_value = True
+        with ctx, repo_ctx:
+            self.assertTrue( table.has( "q" ) )
+        repo.has.assert_called_once_with( "q" )
+
+    def test_get_embedding_cache_hit_returns_stored( self ):
+        table, provider = self._make_pg()
+        repo, ctx, repo_ctx = self._patch_repo()
+        repo.get_embedding.return_value = _EMBEDDING
+        with ctx, repo_ctx:
+            self.assertEqual( table.get_embedding( "q" ), _EMBEDDING )
+        provider.generate_embedding.assert_not_called()      # no generation on hit
+
+    def test_get_embedding_miss_generates_but_does_not_store( self ):
+        table, provider = self._make_pg()
+        repo, ctx, repo_ctx = self._patch_repo()
+        repo.get_embedding.return_value = None               # cache miss
+        with ctx, repo_ctx:
+            result = table.get_embedding( "q" )
+        self.assertEqual( result, _EMBEDDING )
+        provider.generate_embedding.assert_called_once_with( "q", content_type="prose" )
+        repo.add_embedding.assert_not_called()               # generate-on-miss does NOT persist
+
+    def test_add_embedding_delegates( self ):
+        table, _ = self._make_pg()
+        repo, ctx, repo_ctx = self._patch_repo()
+        with ctx, repo_ctx:
+            self.assertIsNone( table.add_embedding( "q", _EMBEDDING ) )
+        repo.add_embedding.assert_called_once_with( "q", _EMBEDDING )
+
+
 if __name__ == "__main__":
     unittest.main()

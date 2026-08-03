@@ -1,0 +1,3 @@
+<|system|>{instructions}<|end|>
+<|user|>{input}<|end|>
+<|assistant|>{output}<|end|>

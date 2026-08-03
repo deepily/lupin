@@ -202,12 +202,16 @@ class TestPeftTrainer( unittest.TestCase ):
             - Sets model attributes correctly
             - Handles device mapping properly
         """
-        with patch( 'cosa.training.peft_trainer.du.print_banner' ), \
+        # HF_HOME is a documented precondition of _load_model_and_tokenizer ( guard at
+        # peft_trainer.py:953 ); set it to an existing dir so the method reaches the
+        # from_pretrained calls this test actually exercises ( the real os.chdir needs it ).
+        with patch.dict( os.environ, { "HF_HOME": os.path.dirname( __file__ ) } ), \
+             patch( 'cosa.training.peft_trainer.du.print_banner' ), \
              patch( 'builtins.print' ), \
              patch( 'cosa.training.peft_trainer.AutoModelForCausalLM.from_pretrained' ) as mock_model_load, \
              patch( 'cosa.training.peft_trainer.AutoTokenizer.from_pretrained' ) as mock_tokenizer_load, \
              patch( 'cosa.training.peft_trainer.torch' ):
-            
+
             mock_model_load.return_value = self.mock_model
             mock_tokenizer_load.return_value = self.mock_tokenizer
             
@@ -242,11 +246,15 @@ class TestPeftTrainer( unittest.TestCase ):
             - Propagates model loading exceptions
             - Propagates tokenizer loading exceptions
         """
-        with patch( 'cosa.training.peft_trainer.du.print_banner' ), \
+        # HF_HOME is a documented precondition of _load_model_and_tokenizer ( guard at
+        # peft_trainer.py:953 ); set it so the method reaches the from_pretrained call
+        # whose RuntimeError this test asserts propagates.
+        with patch.dict( os.environ, { "HF_HOME": os.path.dirname( __file__ ) } ), \
+             patch( 'cosa.training.peft_trainer.du.print_banner' ), \
              patch( 'builtins.print' ), \
              patch( 'cosa.training.peft_trainer.AutoModelForCausalLM.from_pretrained' ) as mock_model_load, \
              patch( 'cosa.training.peft_trainer.torch' ):
-            
+
             model_error = RuntimeError( "Model loading failed" )
             mock_model_load.side_effect = model_error
             

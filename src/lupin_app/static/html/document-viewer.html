@@ -229,14 +229,33 @@
     <script src="/static/js/vendor/marked.min.js"></script>
     <script src="/static/js/vendor/purify.min.js"></script>
     <!--
-        Path-prefix dispatch table — keep KNOWN_PROJECTS in sync with the
-        `external repos` key in src/conf/lupin-app.ini and the unified
-        scope registry built by cosa/rest/routers/_scope_registry.py.
-        Per the 2026-05-15 unification (Q-R2), the `?scope=` query param
-        is RETIRED on the server side; the first segment of `path` is now
-        the routing key. Legacy bare io-relative URLs emitted by
-        notifications.js renderReportLinkSection and persisted in old job
-        metadata still resolve via the legacy-fallback branch below.
+        Path-prefix dispatch.
+
+        ⚠️  DO NOT HAND-MAINTAIN A LIST OF PROJECTS HERE. There is no
+        KNOWN_PROJECTS constant, and reintroducing one is a REGRESSION, not a
+        fix. The registered-scope set is DERIVED AT RUNTIME from
+        GET /api/docs/scopes (see below).
+
+        This comment used to say "keep KNOWN_PROJECTS in sync with the
+        `external repos` key in src/conf/lupin-app.ini and the unified scope
+        registry" — i.e. it instructed the maintainer to hand-mirror a runtime
+        registry in a frontend literal. That practice IS bug 3d41fcba: the
+        mirror drifted in BOTH directions (it listed `cosa-voice`, which was not
+        registered, and omitted `skills-distillation`, which was), so a
+        newly-registered repo silently fell through to the legacy IO branch and
+        404'd while the backend served it correctly. Rick could not read a doc
+        for ~40 minutes because of a stale JavaScript Set.
+
+        Enforcement: src/tests/e2e_ui/test_doc_viewer_scope_discovery.py drives a
+        real browser and asserts the page calls /api/docs/scopes and routes to
+        /api/docs/file. If you add a literal back, that suite goes RED. The test
+        is not stale — the literal is wrong.
+
+        Per the 2026-05-15 unification (Q-R2), the `?scope=` query param is
+        RETIRED on the server side; the first segment of `path` is the routing
+        key. Legacy bare io-relative URLs emitted by notifications.js
+        renderReportLinkSection and persisted in old job metadata still resolve
+        via the legacy-fallback branch below.
     -->
     <script>
         ( async function() {
@@ -252,12 +271,36 @@
                 return;
             }
 
+            // JWT auth — every /api/docs/* + /api/io/file request requires an
+            // Authorization: Bearer header per multi-repo-doc-viewer §3f.
+            // Canonical localStorage key is `lupin_access_token` (auth.js, lupin-nav.js).
+            const token   = localStorage.getItem( 'lupin_access_token' );
+            const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
+
             // First-segment routing per 2026-05-15 unification. See _scope_registry.py.
-            const KNOWN_PROJECTS = new Set( [
-                'lupin', 'cosa-voice', 'planning-is-prompting',
-                'lookml', 'par-pacific', 'claude-plans',
-                'lupin-mobile', 'retail-ai-location-strategy'
-            ] );
+            //
+            // Bug 3d41fcba (2026-07-13): this was a HARDCODED literal set. Every repo
+            // registered after the literal was last hand-edited fell through to the
+            // legacy IO branch and 404'd — the backend resolved the file correctly and
+            // the browser never even asked it. `skills-distillation` was invisible for
+            // exactly that reason, and the trap re-arms for repo #11, #12, #13...
+            //
+            // GET /api/docs/scopes exists for this — its own docstring calls it "runtime
+            // scope discovery". Derive the set from the LIVE registry so registering a
+            // repo is sufficient to make it viewable. No literal to forget.
+            let knownProjects = new Set();
+            try {
+                const scopesResp = await fetch( '/api/docs/scopes', { headers } );
+                if ( scopesResp.ok ) {
+                    const scopesData = await scopesResp.json();
+                    knownProjects = new Set( ( scopesData.scopes ?? [] ).map( s => s.name ) );
+                }
+            } catch ( e ) {
+                // Registry unreachable → proceed with an empty set, which routes unknown
+                // first-segments to the legacy IO endpoint exactly as before. Degraded to
+                // the old behavior, never worse than it.
+            }
+
             const firstSeg = rawPath.split( '/' )[ 0 ];
 
             let apiPath, fetchPath;
@@ -265,7 +308,7 @@
                 // New form: ?path=io/<rel> → /api/io/file?path=<rel>
                 apiPath   = '/api/io/file';
                 fetchPath = rawPath.slice( 3 );
-            } else if ( KNOWN_PROJECTS.has( firstSeg ) ) {
+            } else if ( knownProjects.has( firstSeg ) ) {
                 // New form: ?path=<project>/<rel> → /api/docs/file?path=<full>
                 apiPath   = '/api/docs/file';
                 fetchPath = rawPath;
@@ -281,12 +324,6 @@
             if ( filename ) document.title = filename + ' — Lupin';
 
             const fetchUrl = apiPath + '?path=' + encodeURIComponent( fetchPath );
-
-            // JWT auth — every /api/docs/file + /api/io/file request now requires
-            // an Authorization: Bearer header per multi-repo-doc-viewer §3f.
-            // Canonical localStorage key is `lupin_access_token` (auth.js, lupin-nav.js).
-            const token   = localStorage.getItem( 'lupin_access_token' );
-            const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
 
             try {
                 const response = await fetch( fetchUrl, { headers } );

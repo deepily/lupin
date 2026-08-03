@@ -11,10 +11,13 @@
 import { html } from "../html";
 import { keyedListMerge } from "../dom";
 import { renderNotificationItem } from "./notificationItem";
+import type { PredictionVoteIntegration } from "./predictionVoteControls";
 import type { Notification } from "../../shared/types";
 
 interface RenderOptions {
   appTimezone?: string;
+  // WP14 (F8) — forwarded verbatim to renderNotificationItem (vote orchestrator bridge).
+  predictionVote?: PredictionVoteIntegration;
 }
 
 /**

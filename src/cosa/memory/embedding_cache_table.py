@@ -10,6 +10,7 @@ from typing import Optional
 import cosa.utils.util as du
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.utils.util_stopwatch import Stopwatch
+from cosa.rest.db.repositories.vector_store_backend import is_postgres_backend
 
 
 class EmbeddingCacheTable:
@@ -44,33 +45,39 @@ class EmbeddingCacheTable:
         # Get standardized embedding dimension from config
         self._embedding_dim = int( self._config_mgr.get( "embedding dimensions", default="768" ) )
 
-        uri = du.get_project_root() + self._config_mgr.get( "path to database wo root" )
+        # v0.2.0 backend flag (§6): when 'postgres', route storage through the
+        # EmbeddingCacheRepository and skip LanceDB entirely. 'lancedb' (default)
+        # preserves the legacy path below byte-for-byte.
+        self._use_postgres = is_postgres_backend( self._config_mgr )
 
-        db = lancedb.connect( uri )
+        if not self._use_postgres:
+            uri = du.get_project_root() + self._config_mgr.get( "path to database wo root" )
 
-        # Validate existing table dimensions match config before creating/opening
-        self._validate_embedding_dimensions( db, "embedding_cache_tbl", "embedding" )
+            db = lancedb.connect( uri )
 
-        # Check if table exists, create if it doesn't
-        if "embedding_cache_tbl" not in db.table_names():
-            if self.debug:
-                print( "Table 'embedding_cache_tbl' doesn't exist, creating it..." )
-            self._create_table_if_needed( db )
-        else:
-            self._embedding_cache_tbl = db.open_table( "embedding_cache_tbl" )
+            # Validate existing table dimensions match config before creating/opening
+            self._validate_embedding_dimensions( db, "embedding_cache_tbl", "embedding" )
 
-            # Check for corruption and recover if needed
-            if self._is_table_corrupted():
-                print( "⚠️ WARNING: embedding_cache_tbl is corrupted, recreating..." )
-                db.drop_table( "embedding_cache_tbl" )
+            # Check if table exists, create if it doesn't
+            if "embedding_cache_tbl" not in db.table_names():
+                if self.debug:
+                    print( "Table 'embedding_cache_tbl' doesn't exist, creating it..." )
                 self._create_table_if_needed( db )
-                print( "✓ Table recreated successfully (cache was cleared)" )
+            else:
+                self._embedding_cache_tbl = db.open_table( "embedding_cache_tbl" )
 
-        try:
-            row_count = self._embedding_cache_tbl.count_rows()
-            print( f"Opened embedding_cache_tbl w/ [{row_count}] rows" )
-        except Exception as e:
-            print( f"⚠️ WARNING: Could not count rows in embedding_cache_tbl: {e}" )
+                # Check for corruption and recover if needed
+                if self._is_table_corrupted():
+                    print( "⚠️ WARNING: embedding_cache_tbl is corrupted, recreating..." )
+                    db.drop_table( "embedding_cache_tbl" )
+                    self._create_table_if_needed( db )
+                    print( "✓ Table recreated successfully (cache was cleared)" )
+
+            try:
+                row_count = self._embedding_cache_tbl.count_rows()
+                print( f"Opened embedding_cache_tbl w/ [{row_count}] rows" )
+            except Exception as e:
+                print( f"⚠️ WARNING: Could not count rows in embedding_cache_tbl: {e}" )
 
     def _is_table_corrupted( self ) -> bool:
         """
@@ -184,6 +191,8 @@ class EmbeddingCacheTable:
         Raises:
             - None (handles errors gracefully)
         """
+        if self._use_postgres: return self._pg_has_cached_embedding( normalized_text )
+
         if self.debug and self.verbose: timer = Stopwatch( msg=f"has_cached_embedding( '{normalized_text}' )" )
 
         try:
@@ -218,6 +227,8 @@ class EmbeddingCacheTable:
         Raises:
             - None (handles exceptions internally)
         """
+        if self._use_postgres: return self._pg_get_cached_embedding( normalized_text )
+
         if self.debug and self.verbose: timer = Stopwatch( msg=f"get_cached_embedding( '{normalized_text}' )", silent=True )
 
         try:
@@ -257,13 +268,41 @@ class EmbeddingCacheTable:
         Raises:
             - None (catches and logs errors)
         """
+        if self._use_postgres: return self._pg_cache_embedding( normalized_text, embedding )
+
         new_row = [ { "normalized_text": normalized_text, "embedding": embedding } ]
-        
+
         try:
             self._embedding_cache_tbl.add( new_row )
             if self.debug and self.verbose: print( f"Cached embedding for normalized text: '{du.truncate_string( normalized_text )}'" )
         except Exception as e:
             du.print_stack_trace( e, explanation="cache_embedding() failed", caller="EmbeddingCacheTable.cache_embedding()" )
+
+    # ----------------------------------------------------------------------- #
+    # Postgres+pgvector backend (v0.2.0 §6). Storage via EmbeddingCacheRepository;
+    # each call is a short-lived get_db() session (commit on success / rollback on
+    # error), mirroring the LanceDB methods' return shapes exactly.
+    # ----------------------------------------------------------------------- #
+    def _pg_has_cached_embedding( self, normalized_text: str ) -> bool:
+        """Postgres mirror of has_cached_embedding (exact-match existence)."""
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories.embedding_cache_repository import EmbeddingCacheRepository
+        with get_db() as session:
+            return EmbeddingCacheRepository( session ).has_cached_embedding( normalized_text )
+
+    def _pg_get_cached_embedding( self, normalized_text: str ) -> Optional[ list[ float ] ]:
+        """Postgres mirror of get_cached_embedding (returns the vector or None)."""
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories.embedding_cache_repository import EmbeddingCacheRepository
+        with get_db() as session:
+            return EmbeddingCacheRepository( session ).get_cached_embedding( normalized_text )
+
+    def _pg_cache_embedding( self, normalized_text: str, embedding: list[ float ] ) -> None:
+        """Postgres mirror of cache_embedding (append a normalized_text→embedding row)."""
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories.embedding_cache_repository import EmbeddingCacheRepository
+        with get_db() as session:
+            EmbeddingCacheRepository( session ).cache_embedding( normalized_text, embedding )
     
     def init_tbl( self ) -> None:
         """

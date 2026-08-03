@@ -249,6 +249,11 @@ class NotificationRequest(BaseModel):
         description="When True, render the yes/no qualifier comment widget expanded by default with softer instructional text."
     )
 
+    idempotency_key: Optional[str] = Field(
+        default=None,
+        description="UUID idempotency key to prevent duplicate notifications on retry (bug f433fbae D2). Same key = same notification: the server re-attaches to the original ask instead of minting a second card. Mirrors AsyncNotificationRequest.idempotency_key."
+    )
+
     @field_validator( 'message' )
     @classmethod
     def message_not_whitespace( cls, v: str ) -> str:
@@ -422,6 +427,10 @@ class NotificationRequest(BaseModel):
         if self.display_qualifier_widget:
             params["display_qualifier_widget"] = "true"
 
+        # Add idempotency_key for retry de-duplication (bug f433fbae D2)
+        if self.idempotency_key is not None:
+            params["idempotency_key"] = self.idempotency_key
+
         return params
 
 
@@ -540,6 +549,11 @@ class NotificationResponse(BaseModel):
     is_timeout: bool = Field(
         default=False,
         description="Whether notification timed out"
+    )
+
+    reattach_state: Optional[str] = Field(
+        default=None,
+        description="Late-answer re-attach signal (§4.5 E-c): 'reattach_armed' (stream died, poll fired against the remaining budget) | 'reattach_unavailable' (stream died but the ack id was never captured, so no re-attach was possible — the silent-no-op failure, surfaced loud) | None (no stream death). Assertable + queryable."
     )
 
     @property

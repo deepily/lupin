@@ -197,6 +197,29 @@ class DailyAggregator:
             "net":           total_added - total_deleted,
         }
 
+    def all_shas( self ) -> Set[str]:
+        """
+        Return the set of UNIQUE commit SHAs recorded across every bucket.
+
+        This is the counted-commit set the coverage guard reconciles against an
+        independent `git rev-list --count` oracle (bug 37a8beeb, 2026-07-13).
+
+        NEVER derive a commit count by summing the per-(date, file_type) `commits`
+        column: those buckets OVERLAP by construction — one commit touching a .py
+        and a .md file appears in both buckets. Summing them double-counts, which is
+        precisely defect C. Commit counts are only ever a `len()` over a SHA set, or
+        a sum along an axis a SHA cannot straddle (a SHA has exactly one date and
+        belongs to exactly one repo; it does NOT have exactly one file_type).
+
+        Ensures:
+            - Returns a fresh set (caller may mutate without affecting state)
+            - Empty set iff record() has never been called successfully
+        """
+        out: Set[str] = set()
+        for shas in self._by_type_commits.values():
+            out.update( shas )
+        return out
+
     def is_empty( self ) -> bool:
         """
         Return True if no rows have been recorded (used for empty-range banner).

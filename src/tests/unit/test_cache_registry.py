@@ -13,10 +13,26 @@ from cosa.config import cache_registry
 
 @pytest.fixture( autouse=True )
 def _clean_registry():
-    """Drop every registered invalidator before AND after each test."""
+    """Give each test an EMPTY registry, then RESTORE whatever was there before.
+
+    ⚠️ `cache_registry._REGISTRY` is a PROCESS GLOBAL. Real modules self-register
+    invalidators into it at IMPORT time (e.g. judge.py registers
+    "dm_length_thresholds"), and an import happens once per process — so anything
+    this fixture drops and does not put back stays gone for the REST of the suite.
+
+    The old version cleared in teardown and left the registry empty, which wiped
+    those real invalidators; any later suite test asserting one is registered then
+    failed purely on ORDERING (row 3b5be159: test_dm_length_thresholds_reload
+    passed alone, failed after this file ran). Snapshot before, restore after: this
+    file's tests still run against a clean, isolated registry, but the global is
+    left exactly as it was found — the fixture no longer pollutes downstream tests.
+    """
+    saved = dict( cache_registry._REGISTRY )         # the real invalidators, by name→fn
     cache_registry._clear_for_tests()
     yield
-    cache_registry._clear_for_tests()
+    cache_registry._clear_for_tests()                # drop anything this test registered
+    for name, fn in saved.items():                   # then put the real ones back
+        cache_registry.register_invalidator( name, fn )
 
 
 # ---------------------------------------------------------------------------

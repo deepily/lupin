@@ -74,6 +74,10 @@ function makeStubApi(jobs: ReadonlyArray<Job> = []): SimpleApiStub {
       calls.push(`DELETE ${path}`);
       return null as T;
     },
+    post: async <T>(path: string, body: unknown): Promise<T> => {
+      calls.push(`POST ${path} ${JSON.stringify(body)}`);
+      return null as T;
+    },
   };
 }
 
@@ -139,10 +143,11 @@ test("Test 2: mount() throws when #jobs-buckets-container is missing", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Test 3-4: Lifecycle — mount lifts hidden + data-phase6-pending; unmount idempotent
+// Test 3-4: Lifecycle — mount lifts data-phase6-pending but RETAINS `hidden`
+// (Lane 0c cold-hidden default); unmount idempotent
 // ---------------------------------------------------------------------------
 
-test("Test 3: mount() lifts hidden + data-phase6-pending from #jobs-pane", () => {
+test("Test 3: mount() lifts data-phase6-pending but RETAINS `hidden` on #jobs-pane (Lane 0c cold-hidden default)", () => {
   const bus  = createEventBusForTesting();
   const api  = makeStubApi();
   const jobs = createJobStore({ bus });
@@ -151,7 +156,11 @@ test("Test 3: mount() lifts hidden + data-phase6-pending from #jobs-pane", () =>
   assert.equal(root.hasAttribute("hidden"), true);
   assert.equal(root.getAttribute("data-phase6-pending"), "true");
   renderer.mount(root);
-  assert.equal(root.hasAttribute("hidden"), false);
+  // Lane 0c (Rachel 🕊️): the `hidden` cold-hidden default is NO LONGER stripped
+  // on mount — Job Queues starts hidden (legacy parity, Q3 RULED); the
+  // section-toolbar owns visibility, and a persisted user choice overrides the
+  // cold `hidden` default (F-Clay-A3). Only data-phase6-pending is lifted.
+  assert.equal(root.hasAttribute("hidden"), true);
   assert.equal(root.hasAttribute("data-phase6-pending"), false);
   renderer.unmount();
   jobs.disposeForTesting();
@@ -598,10 +607,12 @@ test("Test 17: double-mount throws Error('JobsPaneRenderer already mounted'); po
 });
 
 // ---------------------------------------------------------------------------
-// Test 18: disabled-delete-button click no-op (Pass 2 F23 — programmatic enforcement)
+// Test 18: ENABLED delete-button click triggers delete, intercepted BEFORE the
+//   card-header toggle path (W1 — the button is live now; Pass 2 F23 invariant
+//   still holds: a delete click never toggles the card open).
 // ---------------------------------------------------------------------------
 
-test("Test 18: click on disabled .job-delete-button does NOT toggle the card (Pass 2 F23)", () => {
+test("Test 18: clicking the ENABLED .job-delete-button triggers delete + never toggles the card (W1 / F23)", async () => {
   const bus  = createEventBusForTesting();
   const api  = makeStubApi();
   const jobs = createJobStore({ bus });
@@ -613,21 +624,22 @@ test("Test 18: click on disabled .job-delete-button does NOT toggle the card (Pa
   const card    = root.querySelector(".job-card") as HTMLElement;
   const button  = card.querySelector(".job-delete-button") as HTMLButtonElement;
   const details = card.querySelector(".job-card-details") as HTMLElement;
-  const pre     = card.querySelector(".job-meta-json") as HTMLPreElement;
 
-  // Initial state: collapsed, hidden pre.
+  // The delete button is live (no inert markers).
+  assert.equal(button.getAttribute("aria-disabled"), null, "button must be enabled");
   assert.ok(details.classList.contains("collapsed"));
-  assert.equal(pre.hasAttribute("hidden"), true);
 
-  // Click the disabled × button 3 times.
   button.click();
-  button.click();
-  button.click();
+  await flushMicrotasks();
 
-  // No state change.
-  assert.ok(details.classList.contains("collapsed"), "details should remain collapsed");
-  assert.equal(pre.hasAttribute("hidden"), true,    "pre should remain hidden");
-  assert.equal(pre.textContent, "",                 "pre should remain empty");
+  // The delete flow fired (routed to the live queue) + the card is gone. The
+  // click was intercepted BEFORE the card-header toggle path (F23), so details
+  // (now detached) never expanded. (makeStubApi records the mount-time hydrate
+  // GET too, so filter to the DELETE calls.)
+  const deleteCalls = api.calls.filter(c => c.startsWith("DELETE "));
+  assert.deepEqual(deleteCalls, ["DELETE /api/queue/run/del-1"]);
+  assert.equal(jobs.getById("del-1"), undefined, "job removed on success");
+  assert.ok(details.classList.contains("collapsed"), "delete never toggled the card open");
 
   renderer.unmount();
   jobs.disposeForTesting();
@@ -745,6 +757,10 @@ function makeControllableApi(
       return { jobs: hydrateJobs } as unknown as T;
     },
     delete: <T>(path: string): Promise<T> => {
+      calls.push(path);
+      return api.responder(path) as Promise<T>;
+    },
+    post: <T>(path: string, _body: unknown): Promise<T> => {
       calls.push(path);
       return api.responder(path) as Promise<T>;
     },
@@ -1011,10 +1027,12 @@ test("Test 27: non-delete-button clicks within row do NOT trigger delete (5B-8)"
 });
 
 // ---------------------------------------------------------------------------
-// Test 28 (5B-9): Q-A6 inertness markers stripped from `.job-delete-button`.
+// Test 28 (W1): `.job-delete-button` renders ENABLED post-render — no Q-A6 inert
+//   markers present (the former post-render strip is gone; the template renders
+//   the button live). Same post-render invariant, now guaranteed at the source.
 // ---------------------------------------------------------------------------
 
-test("Test 28: inertness markers stripped from .job-delete-button post-render (5B-9)", () => {
+test("Test 28: .job-delete-button renders with NO inert markers post-render (W1)", () => {
   const bus  = createEventBusForTesting();
   const api  = makeControllableApi();
   const jobs = createJobStore({ bus });
@@ -1080,4 +1098,635 @@ test("Test 29: non-ApiError Error still produces stripe; verifies todo → todo 
 
   renderer.unmount();
   jobs.disposeForTesting();
+});
+
+// ---------------------------------------------------------------------------
+// Test 30 (W1 regression): deleting a HISTORY-bucket card routes to
+//   /api/job-history/{id}, NOT the live-queue endpoint. A history row's status
+//   is done/dead but it is no longer in a live queue, so the legacy
+//   /api/queue/{queue}/{id} 404s → the 404-as-success branch silently swallows
+//   it → the persisted history row survives a reload (the latent bug W1 fixes).
+// ---------------------------------------------------------------------------
+
+test("Test 30 (W1 regression): history-bucket delete routes to /api/job-history/{id}, not /api/queue/...", async () => {
+  const bus  = createEventBusForTesting();
+  const api  = makeControllableApi();   // records the raw path in api.calls
+  const jobs = createJobStore({ bus });
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api });
+  const root = makeRoot();
+  renderer.mount(root);
+
+  // Land a job in the HISTORY bucket: a done job removed → archived to history.
+  emitJobAdded(bus, makeJob({ id_hash: "hist-del", status: "done" }));
+  emitJobRemoved(bus, "hist-del");
+  const historyBucket = root.querySelector('[data-bucket="history"]') as HTMLElement;
+  const button = historyBucket.querySelector(".job-delete-button") as HTMLButtonElement;
+  assert.ok(button, "history card carries a live delete button");
+
+  button.click();
+  await flushMicrotasks();
+
+  assert.deepEqual(api.calls, ["/api/job-history/hist-del"]);
+  assert.ok(!api.calls[0]!.startsWith("/api/queue/"), "history row must NOT hit the live-queue endpoint");
+  assert.equal(jobs.getById("hist-del"), undefined, "history row removed from store on success");
+
+  renderer.unmount();
+  jobs.disposeForTesting();
+});
+
+// =============================================================================
+// WS3 cross-cutting — hydration_failed CONSUMER (visible fail-loud affordance
+// + Retry). Before this consumer the event had ZERO subscribers, so a hydrate
+// failure was invisible. Fault-injection: api.get rejects (== /api/job-history
+// 500) → assert the affordance is VISIBLE in the DOM.
+// =============================================================================
+
+/** An api whose first `get` (hydrate) call rejects, subsequent ones resolve. */
+function makeFlakyHydrateApi(
+  failTimes: number,
+  rejectWith: unknown = new ApiError("HTTP 500", 500),
+): SimpleApiStub {
+  const calls: string[] = [];
+  let getCount = 0;
+  return {
+    calls,
+    get: async <T>(path: string): Promise<T> => {
+      calls.push(path);
+      getCount += 1;
+      if (getCount <= failTimes) {
+        return Promise.reject(rejectWith) as Promise<T>;
+      }
+      return { jobs: [] } as unknown as T;
+    },
+    delete: async <T>(path: string): Promise<T> => {
+      calls.push(`DELETE ${path}`);
+      return null as T;
+    },
+  };
+}
+
+test("Test 31: fault-injection — hydrate 500 paints a VISIBLE hydration-error banner with Retry (consumer)", async () => {
+  const bus  = createEventBusForTesting();
+  const api  = makeFlakyHydrateApi(1);
+  const jobs = createJobStore({ bus });
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api });
+  const root = makeRoot();
+  renderer.mount(root);
+
+  // Let the floated hydrateHistory().catch → emit → consumer microtasks settle.
+  await flushMicrotasks();
+
+  const banner = root.querySelector(".jobs-hydration-error") as HTMLElement | null;
+  assert.ok(banner, "hydration-error banner should be VISIBLE in the DOM after a 500");
+  assert.equal(banner!.getAttribute("role"), "alert", "banner is an assertive alert");
+  assert.match(banner!.textContent ?? "", /Could not load job history/);
+  assert.match(banner!.textContent ?? "", /HTTP 500/, "the underlying error surfaces to the user");
+  const retry = banner!.querySelector(".jobs-hydration-retry") as HTMLButtonElement | null;
+  assert.ok(retry, "Retry affordance should be present");
+
+  renderer.unmount();
+  jobs.disposeForTesting();
+});
+
+test("Test 32: hydration_failed from a NON-jobs source is ignored (no banner)", async () => {
+  const bus  = createEventBusForTesting();
+  const api  = makeStubApi();
+  const jobs = createJobStore({ bus });
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api });
+  const root = makeRoot();
+  renderer.mount(root);
+  await flushMicrotasks();
+
+  // A different renderer's hydrate failure must not paint the jobs banner.
+  bus.emit<HydrationFailedPayload>({
+    type    : "hydration_failed",
+    payload : { source: "commons", error: new Error("not ours") },
+    source  : "CommonsPanelRenderer",
+    ts      : Date.now(),
+  });
+
+  assert.equal(root.querySelector(".jobs-hydration-error"), null, "non-jobs source must be ignored");
+
+  renderer.unmount();
+  jobs.disposeForTesting();
+});
+
+test("Test 33: Retry success removes the banner + hydrates the buckets (consumer)", async () => {
+  const bus  = createEventBusForTesting();
+  const api  = makeFlakyHydrateApi(1);   // first get fails, second succeeds
+  const jobs = createJobStore({ bus });
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api });
+  const root = makeRoot();
+  renderer.mount(root);
+  await flushMicrotasks();
+
+  const banner = root.querySelector(".jobs-hydration-error") as HTMLElement | null;
+  assert.ok(banner, "banner present after initial failure");
+
+  (banner!.querySelector(".jobs-hydration-retry") as HTMLButtonElement).click();
+  await flushMicrotasks();
+
+  assert.equal(root.querySelector(".jobs-hydration-error"), null, "Retry success removes the banner");
+  // Two get calls: the failed hydrate + the successful retry.
+  assert.equal(api.calls.filter(p => p.startsWith("/api/job-history")).length, 2);
+
+  renderer.unmount();
+  jobs.disposeForTesting();
+});
+
+test("Test 34: Retry that fails again repaints the banner (replace, not stack)", async () => {
+  const bus  = createEventBusForTesting();
+  const api  = makeFlakyHydrateApi(2);   // both hydrate + retry fail
+  const jobs = createJobStore({ bus });
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api });
+  const root = makeRoot();
+  renderer.mount(root);
+  await flushMicrotasks();
+
+  assert.ok(root.querySelector(".jobs-hydration-error"), "banner after first failure");
+
+  (root.querySelector(".jobs-hydration-retry") as HTMLButtonElement).click();
+  await flushMicrotasks();
+
+  // Exactly ONE banner — the second failure replaced the first, did not stack.
+  const banners = root.querySelectorAll(".jobs-hydration-error");
+  assert.equal(banners.length, 1, "repeated failure replaces the banner, never stacks");
+
+  renderer.unmount();
+  jobs.disposeForTesting();
+});
+
+// ---------------------------------------------------------------------------
+// Lane 0a — uniform section-header bar (📝 Jobs + 4-live-bucket count + collapse)
+// ---------------------------------------------------------------------------
+
+test("Lane 0a: Jobs renders the 📝 section-header; count = 4 live buckets (history excluded); collapse toggles", () => {
+  const bus  = createEventBusForTesting();
+  const api  = makeStubApi();
+  const jobs = createJobStore({ bus });
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api });
+  const root = makeRoot();
+  renderer.mount(root);
+
+  const header = root.querySelector(".section-header") as HTMLElement;
+  assert.ok(header, "section-header bar present");
+  assert.ok(header.querySelector("h3")!.textContent!.includes("📝 Jobs"), "📝 Jobs title in h3");
+  assert.equal(root.querySelector(".jobs-pane-header"), null, "inert static header is gone");
+
+  const count = root.querySelector(".section-header-count") as HTMLElement;
+  assert.equal(count.textContent, "0", "count 0 initially");
+
+  emitJobAdded(bus, makeJob({ id_hash: "j1", status: "running" }));
+  assert.equal(count.textContent, "1", "1 live job");
+  emitJobAdded(bus, makeJob({ id_hash: "j2", status: "todo" }));
+  assert.equal(count.textContent, "2", "2 live jobs across buckets");
+
+  // Move j1 to the HISTORY bucket (transition done → remove). It leaves the live
+  // buckets, so the count drops — history is excluded from the header count.
+  bus.emit<JobStateTransitionPayload>({
+    type: "job_state_transition",
+    payload: { job_id: "j1", id_hash: "j1", from_state: "running", to_state: "completed" },
+    source: "test", ts: Date.now(),
+  });
+  emitJobRemoved(bus, "j1");
+  assert.equal(count.textContent, "1", "history bucket excluded from the live count");
+
+  // The buckets container is the collapsible body.
+  assert.ok((root.querySelector("#jobs-buckets-container") as HTMLElement).classList.contains("section-content"));
+
+  // Session-only collapse on the pane root.
+  const chevron = header.querySelector(".toggle-button") as HTMLElement;
+  (header.querySelector("h3") as HTMLElement).dispatchEvent(new Event("click", { bubbles: true }));
+  assert.equal(root.getAttribute("data-collapsed"), "true");
+  assert.equal(chevron.textContent, "▶");
+
+  renderer.unmount();
+  jobs.disposeForTesting();
+});
+
+// =============================================================================
+// W2 — per-bucket delete-all 🗑 (confirm-gated bulk delete, refetch-after-2xx)
+// =============================================================================
+
+function stubConfirm(result: boolean): () => void {
+  const orig = globalThis.confirm;
+  globalThis.confirm = () => result;
+  return () => { globalThis.confirm = orig; };
+}
+
+test("Test 31: delete-all confirm-CANCEL aborts with NO fetch + bucket intact (W2)", async () => {
+  const bus  = createEventBusForTesting();
+  const api  = makeStubApi();
+  const jobs = createJobStore({ bus });
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api });
+  const root = makeRoot();
+  renderer.mount(root);
+  emitJobAdded(bus, makeJob({ id_hash: "d1", status: "todo" }));
+
+  const restore = stubConfirm(false);
+  (root.querySelector(".jobs-bucket-todo .queue-delete-all-btn") as HTMLButtonElement).click();
+  await flushMicrotasks();
+  restore();
+
+  assert.deepEqual(api.calls.filter(c => c.startsWith("DELETE ")), [], "no DELETE on cancel");
+  assert.equal(jobs.bucket("todo").length, 1, "job still present after cancel");
+  renderer.unmount(); jobs.disposeForTesting();
+});
+
+test("Test 32: delete-all on RUNNING bucket → DELETE /api/queue/run/all + cleared; confirm carries interrupt warning (W2)", async () => {
+  const bus  = createEventBusForTesting();
+  const api  = makeStubApi();
+  const jobs = createJobStore({ bus });
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api });
+  const root = makeRoot();
+  renderer.mount(root);
+  emitJobAdded(bus, makeJob({ id_hash: "r1", status: "running" }));
+  emitJobAdded(bus, makeJob({ id_hash: "r2", status: "running" }));
+
+  let seen = "";
+  const orig = globalThis.confirm;
+  globalThis.confirm = (m?: string) => { seen = m ?? ""; return true; };
+  (root.querySelector(".jobs-bucket-running .queue-delete-all-btn") as HTMLButtonElement).click();
+  await flushMicrotasks();
+  globalThis.confirm = orig;
+
+  assert.match(seen, /running jobs \(2\)/, "count in confirm message");
+  assert.match(seen, /interrupt active jobs/, "running carries the interrupt warning");
+  assert.deepEqual(api.calls.filter(c => c.startsWith("DELETE ")), ["DELETE /api/queue/run/all"]);
+  assert.equal(jobs.bucket("running").length, 0, "bucket cleared after 2xx");
+  const bucketEl = root.querySelector('[data-bucket="running"]') as HTMLElement;
+  assert.notEqual(bucketEl.querySelector(".jobs-bucket-empty"), null, "re-rendered empty");
+  renderer.unmount(); jobs.disposeForTesting();
+});
+
+test("Test 33: delete-all on TODO bucket → DELETE /api/queue/todo/all; NO interrupt warning for non-running (W2)", async () => {
+  const bus  = createEventBusForTesting();
+  const api  = makeStubApi();
+  const jobs = createJobStore({ bus });
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api });
+  const root = makeRoot();
+  renderer.mount(root);
+  emitJobAdded(bus, makeJob({ id_hash: "t1", status: "todo" }));
+
+  let seen = "";
+  const orig = globalThis.confirm;
+  globalThis.confirm = (m?: string) => { seen = m ?? ""; return true; };
+  (root.querySelector(".jobs-bucket-todo .queue-delete-all-btn") as HTMLButtonElement).click();
+  await flushMicrotasks();
+  globalThis.confirm = orig;
+
+  assert.doesNotMatch(seen, /interrupt/, "no interrupt warning for a non-running bucket");
+  assert.deepEqual(api.calls.filter(c => c.startsWith("DELETE ")), ["DELETE /api/queue/todo/all"]);
+  assert.equal(jobs.bucket("todo").length, 0, "bucket cleared after 2xx");
+  renderer.unmount(); jobs.disposeForTesting();
+});
+
+test("Test 34: delete-all on HISTORY bucket → DELETE /api/job-history/all?days=30 + refetch empties it (W2)", async () => {
+  const bus   = createEventBusForTesting();
+  const calls: string[] = [];
+  let historyRows: Job[] = [
+    { id_hash: "h1", job_type: "X", status: "completed", created_at: 1, completed_at: 2, meta: {} } as unknown as Job,
+  ];
+  const api: JobsPaneApiClient = {
+    get: async <T>(path: string): Promise<T> => {
+      calls.push(path);
+      return { jobs: historyRows, total: historyRows.length } as unknown as T;
+    },
+    delete: async <T>(path: string): Promise<T> => {
+      calls.push(`DELETE ${path}`);
+      historyRows = [];          // server cleared → the refetch returns empty
+      return null as T;
+    },
+  };
+  const jobs = createJobStore({ bus });
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api });
+  const root = makeRoot();
+  renderer.mount(root);
+  await new Promise(r => setTimeout(r, 20));   // initial hydrate
+  assert.equal(jobs.bucket("history").length, 1, "history hydrated with 1");
+
+  const restore = stubConfirm(true);
+  (root.querySelector(".jobs-bucket-history .queue-delete-all-btn") as HTMLButtonElement).click();
+  await new Promise(r => setTimeout(r, 30));   // delete + refetch
+  restore();
+
+  assert.ok(calls.includes("DELETE /api/job-history/all?days=30"), "windowed history delete-all endpoint");
+  assert.ok(calls.some(c => c.startsWith("/api/job-history?days=30")), "refetched the same window");
+  assert.equal(jobs.bucket("history").length, 0, "history empty after delete-all + refetch");
+  renderer.unmount(); jobs.disposeForTesting();
+});
+
+test("Test 35: delete-all 404 is treated as success — bucket cleared (W2)", async () => {
+  const bus  = createEventBusForTesting();
+  const api  = makeControllableApi([], async (path) => { throw new ApiError(404, path, "not found"); });
+  const jobs = createJobStore({ bus });
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api });
+  const root = makeRoot();
+  renderer.mount(root);
+  emitJobAdded(bus, makeJob({ id_hash: "x1", status: "done" }));
+  assert.equal(jobs.bucket("done").length, 1);
+
+  const restore = stubConfirm(true);
+  (root.querySelector(".jobs-bucket-done .queue-delete-all-btn") as HTMLButtonElement).click();
+  await flushMicrotasks();
+  restore();
+
+  assert.deepEqual(api.calls, ["/api/queue/done/all"]);
+  assert.equal(jobs.bucket("done").length, 0, "404 cleared the bucket (treated as success)");
+  renderer.unmount(); jobs.disposeForTesting();
+});
+
+test("Test 36: delete-all 5xx leaves the bucket INTACT + logs (W2)", async () => {
+  const bus  = createEventBusForTesting();
+  const api  = makeControllableApi([], async (path) => { throw new ApiError(500, path, "boom"); });
+  const jobs = createJobStore({ bus });
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api });
+  const root = makeRoot();
+  renderer.mount(root);
+  emitJobAdded(bus, makeJob({ id_hash: "x1", status: "done" }));
+
+  const origWarn = console.warn; let warned = false; console.warn = () => { warned = true; };
+  const restore = stubConfirm(true);
+  (root.querySelector(".jobs-bucket-done .queue-delete-all-btn") as HTMLButtonElement).click();
+  await flushMicrotasks();
+  restore(); console.warn = origWarn;
+
+  assert.equal(warned, true, "5xx logged a warning");
+  assert.equal(jobs.bucket("done").length, 1, "bucket intact on a non-404 error");
+  renderer.unmount(); jobs.disposeForTesting();
+});
+
+test("Test 37: delete-all non-ApiError (network) rejection leaves the bucket INTACT + logs (W2)", async () => {
+  const bus  = createEventBusForTesting();
+  const api  = makeControllableApi([], async () => { throw new Error("network down"); });
+  const jobs = createJobStore({ bus });
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api });
+  const root = makeRoot();
+  renderer.mount(root);
+  emitJobAdded(bus, makeJob({ id_hash: "x1", status: "dead" }));
+
+  const origWarn = console.warn; let warned = false; console.warn = () => { warned = true; };
+  const restore = stubConfirm(true);
+  (root.querySelector(".jobs-bucket-dead .queue-delete-all-btn") as HTMLButtonElement).click();
+  await flushMicrotasks();
+  restore(); console.warn = origWarn;
+
+  assert.equal(warned, true, "network error logged a warning");
+  assert.equal(jobs.bucket("dead").length, 1, "bucket intact on a non-ApiError rejection");
+  renderer.unmount(); jobs.disposeForTesting();
+});
+
+test("Test 38: delete-all on HISTORY with an ALL-TIME window → DELETE /api/job-history/all?days=all (W2)", async () => {
+  const bus   = createEventBusForTesting();
+  const calls: string[] = [];
+  let historyRows: Job[] = [
+    { id_hash: "h1", job_type: "X", status: "completed", created_at: 1, completed_at: 2, meta: {} } as unknown as Job,
+  ];
+  const api: JobsPaneApiClient = {
+    get: async <T>(path: string): Promise<T> => {
+      calls.push(path);
+      return { jobs: historyRows, total: historyRows.length } as unknown as T;
+    },
+    delete: async <T>(path: string): Promise<T> => {
+      calls.push(`DELETE ${path}`);
+      historyRows = [];
+      return null as T;
+    },
+  };
+  const jobs = createJobStore({ bus });
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api });
+  const root = makeRoot();
+  renderer.mount(root);
+  await new Promise(r => setTimeout(r, 20));            // mount hydrate → window = 30
+
+  // Simulate the W3 time-window select switching to all-time (days omitted →
+  // historyWindowDays() === undefined) so delete-all takes the all-time branch.
+  await jobs.hydrateHistory(api, { days: undefined, append: false });
+  assert.equal(jobs.historyWindowDays(), undefined, "window is now all-time");
+
+  const restore = stubConfirm(true);
+  (root.querySelector(".jobs-bucket-history .queue-delete-all-btn") as HTMLButtonElement).click();
+  await new Promise(r => setTimeout(r, 30));            // delete + refetch
+  restore();
+
+  assert.ok(calls.includes("DELETE /api/job-history/all?days=all"), "all-time delete-all endpoint uses days=all");
+  assert.equal(jobs.bucket("history").length, 0, "history empty after all-time delete-all");
+  renderer.unmount(); jobs.disposeForTesting();
+});
+
+// =============================================================================
+// W3 — history time-window <select> change → REPLACE-fetch the new window
+// =============================================================================
+
+test("Test 39: changing the history time-window select refetches that window (W3)", async () => {
+  const bus  = createEventBusForTesting();
+  const api  = makeStubApi();
+  const jobs = createJobStore({ bus });
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api });
+  const root = makeRoot();
+  renderer.mount(root);
+  await new Promise(r => setTimeout(r, 20));   // mount hydrate (window 30)
+
+  const select = root.querySelector(".jobs-bucket-history .history-time-select") as HTMLSelectElement;
+  select.value = "7";
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  await new Promise(r => setTimeout(r, 20));
+
+  assert.ok(api.calls.some(c => c === "/api/job-history?days=7&limit=20&offset=0"), "refetched the days=7 window");
+  assert.equal(jobs.historyWindowDays(), 7, "store window updated to 7");
+  renderer.unmount(); jobs.disposeForTesting();
+});
+
+test("Test 40: selecting 'all time' refetches with NO days param (all-time) (W3)", async () => {
+  const bus  = createEventBusForTesting();
+  const api  = makeStubApi();
+  const jobs = createJobStore({ bus });
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api });
+  const root = makeRoot();
+  renderer.mount(root);
+  await new Promise(r => setTimeout(r, 20));
+
+  const select = root.querySelector(".jobs-bucket-history .history-time-select") as HTMLSelectElement;
+  select.value = "all";
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  await new Promise(r => setTimeout(r, 20));
+
+  assert.ok(api.calls.some(c => c === "/api/job-history?limit=20&offset=0"), "all-time omits the days param");
+  assert.equal(jobs.historyWindowDays(), undefined);
+  renderer.unmount(); jobs.disposeForTesting();
+});
+
+test("Test 41: a change event on a non-select element is a no-op (W3 guard)", async () => {
+  const bus  = createEventBusForTesting();
+  const api  = makeStubApi();
+  const jobs = createJobStore({ bus });
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api });
+  const root = makeRoot();
+  renderer.mount(root);
+  await new Promise(r => setTimeout(r, 20));
+  const before = api.calls.length;
+
+  (root.querySelector("#jobs-buckets-container") as HTMLElement).dispatchEvent(new Event("change", { bubbles: true }));
+  await flushMicrotasks();
+
+  assert.equal(api.calls.length, before, "a change outside the time-window select triggers no fetch");
+  renderer.unmount(); jobs.disposeForTesting();
+});
+
+// =============================================================================
+// W4 — history Load-More pagination (append at the tracked cursor)
+// =============================================================================
+
+test("Test 42: Load-More appends the next page at the tracked cursor (W4)", async () => {
+  const bus   = createEventBusForTesting();
+  const calls: string[] = [];
+  let page = 0;
+  const api: JobsPaneApiClient = {
+    get: async <T>(path: string): Promise<T> => {
+      calls.push(path);
+      const id = `h-${page++}`;                     // distinct row per page
+      return { jobs: [ { id_hash: id, job_type: "X", status: "completed", created_at: 1, completed_at: 2, meta: {} } ], total: 5 } as unknown as T;
+    },
+    delete: async <T>(): Promise<T> => null as T,
+  };
+  const jobs = createJobStore({ bus });
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api });
+  const root = makeRoot();
+  renderer.mount(root);
+  await new Promise(r => setTimeout(r, 20));   // mount hydrate → loaded 1 < total 5
+
+  const loadMore = root.querySelector(".jobs-bucket-history .history-load-more") as HTMLButtonElement;
+  assert.notEqual(loadMore, null, "Load-More present when loaded < total");
+  loadMore.click();
+  await new Promise(r => setTimeout(r, 20));
+
+  assert.ok(calls.some(c => c === "/api/job-history?days=30&limit=20&offset=1"), "appended at offset=1");
+  assert.equal(jobs.bucket("history").length, 2, "second page appended (dedup by id)");
+  renderer.unmount(); jobs.disposeForTesting();
+});
+
+// =============================================================================
+// W5 — per-job retry ↻ (confirm-gated POST; WS repopulates live buckets)
+// =============================================================================
+
+test("Test 43: retry ↻ renders on dead + history cards, NOT on live todo/running/done cards (W5)", async () => {
+  const bus  = createEventBusForTesting();
+  const api  = makeStubApi([
+    { id_hash: "hist-1", job_type: "X", status: "completed", created_at: 1, completed_at: 2, meta: {} } as unknown as Job,
+  ]);
+  const jobs = createJobStore({ bus });
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api });
+  const root = makeRoot();
+  renderer.mount(root);
+  await new Promise(r => setTimeout(r, 20));   // history hydrate → hist-1 in history
+  emitJobAdded(bus, makeJob({ id_hash: "dead-1", status: "dead" }));
+  emitJobAdded(bus, makeJob({ id_hash: "run-1",  status: "running" }));
+
+  const deadCard = root.querySelector('[data-bucket="dead"] .job-card') as HTMLElement;
+  const runCard  = root.querySelector('[data-bucket="running"] .job-card') as HTMLElement;
+  const histCard = root.querySelector('[data-bucket="history"] .job-card') as HTMLElement;
+  assert.notEqual(deadCard.querySelector(".job-retry-button"), null, "dead card has retry");
+  assert.notEqual(histCard.querySelector(".job-retry-button"), null, "history card has retry");
+  assert.equal(runCard.querySelector(".job-retry-button"), null, "running (live) card has no retry");
+  renderer.unmount(); jobs.disposeForTesting();
+});
+
+test("Test 44: retry click confirm → POST /api/job-history/{id}/retry with the wired websocket_id (W5)", async () => {
+  const bus  = createEventBusForTesting();
+  const api  = makeStubApi();
+  const jobs = createJobStore({ bus });
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api, websocketId: "wise-penguin" });
+  const root = makeRoot();
+  renderer.mount(root);
+  emitJobAdded(bus, makeJob({ id_hash: "dead-1", status: "dead" }));
+
+  const restore = stubConfirm(true);
+  (root.querySelector('[data-bucket="dead"] .job-retry-button') as HTMLButtonElement).click();
+  await flushMicrotasks();
+  restore();
+
+  assert.ok(
+    api.calls.some(c => c === 'POST /api/job-history/dead-1/retry {"websocket_id":"wise-penguin"}'),
+    "retry POST carries the wired websocket_id",
+  );
+  renderer.unmount(); jobs.disposeForTesting();
+});
+
+test("Test 45: retry without a wired websocketId sends websocket_id:'' (W5 fallback)", async () => {
+  const bus  = createEventBusForTesting();
+  const api  = makeStubApi();
+  const jobs = createJobStore({ bus });
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api });   // no websocketId
+  const root = makeRoot();
+  renderer.mount(root);
+  emitJobAdded(bus, makeJob({ id_hash: "dead-1", status: "dead" }));
+
+  const restore = stubConfirm(true);
+  (root.querySelector('[data-bucket="dead"] .job-retry-button') as HTMLButtonElement).click();
+  await flushMicrotasks();
+  restore();
+
+  assert.ok(
+    api.calls.some(c => c === 'POST /api/job-history/dead-1/retry {"websocket_id":""}'),
+    "retry POST falls back to an empty websocket_id",
+  );
+  renderer.unmount(); jobs.disposeForTesting();
+});
+
+test("Test 46: retry confirm-CANCEL aborts with no POST (W5)", async () => {
+  const bus  = createEventBusForTesting();
+  const api  = makeStubApi();
+  const jobs = createJobStore({ bus });
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api, websocketId: "wise-penguin" });
+  const root = makeRoot();
+  renderer.mount(root);
+  emitJobAdded(bus, makeJob({ id_hash: "dead-1", status: "dead" }));
+
+  const restore = stubConfirm(false);
+  (root.querySelector('[data-bucket="dead"] .job-retry-button') as HTMLButtonElement).click();
+  await flushMicrotasks();
+  restore();
+
+  assert.deepEqual(api.calls.filter(c => c.startsWith("POST ")), [], "no POST on cancel");
+  renderer.unmount(); jobs.disposeForTesting();
+});
+
+test("Test 47: retry POST failure logs + changes nothing (W5)", async () => {
+  const bus  = createEventBusForTesting();
+  const api  = makeControllableApi([], async (path) => { throw new ApiError(500, path, "boom"); });
+  const jobs = createJobStore({ bus });
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api, websocketId: "wise-penguin" });
+  const root = makeRoot();
+  renderer.mount(root);
+  emitJobAdded(bus, makeJob({ id_hash: "dead-1", status: "dead" }));
+
+  const origWarn = console.warn; let warned = false; console.warn = () => { warned = true; };
+  const restore = stubConfirm(true);
+  (root.querySelector('[data-bucket="dead"] .job-retry-button') as HTMLButtonElement).click();
+  await flushMicrotasks();
+  restore(); console.warn = origWarn;
+
+  assert.equal(warned, true, "retry failure logged");
+  assert.equal(jobs.bucket("dead").length, 1, "dead card still present after a failed retry");
+  renderer.unmount(); jobs.disposeForTesting();
+});
+
+// =============================================================================
+// W6 — queues filter-badge (static hidden plan-08 seam)
+// =============================================================================
+
+test("Test 48: jobs-pane header renders a hidden static queues-filter-badge (W6 plan-08 seam)", () => {
+  const bus  = createEventBusForTesting();
+  const api  = makeStubApi();
+  const jobs = createJobStore({ bus });
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api });
+  const root = makeRoot();
+  renderer.mount(root);
+
+  const badge = root.querySelector('[data-testid="queues-filter-badge"]') as HTMLElement;
+  assert.notEqual(badge, null, "filter badge present in the jobs-pane header");
+  assert.ok(badge.classList.contains("queues-filter-badge"));
+  assert.equal(badge.hidden, true, "badge ships hidden (static seam, inert under D1)");
+  assert.equal(badge.textContent, "👤 Mine", "default-Mine label");
+  renderer.unmount(); jobs.disposeForTesting();
 });

@@ -208,20 +208,30 @@ class TestParseElaborationResponse:
         slides = parse_elaboration_response( wrapped )
         assert len( slides ) == 3
 
-    def test_malformed_returns_empty( self ):
-        assert parse_elaboration_response( "not json" ) == []
+    def test_malformed_raises( self ):
+        """D6-STRICT: unrecoverable input raises ValueError (was: returned [])."""
+        with pytest.raises( ValueError ):
+            parse_elaboration_response( "not json" )
 
-    def test_empty_string_returns_empty( self ):
-        assert parse_elaboration_response( "" ) == []
+    def test_empty_string_raises( self ):
+        """D6-STRICT: empty input raises ValueError (was: returned [])."""
+        with pytest.raises( ValueError ):
+            parse_elaboration_response( "" )
 
-    def test_missing_slides_key_returns_empty( self ):
-        assert parse_elaboration_response( json.dumps( { "outline": [] } ) ) == []
+    def test_missing_slides_key_raises( self ):
+        """D6-STRICT: missing 'slides' key raises ValueError (was: returned [])."""
+        with pytest.raises( ValueError ):
+            parse_elaboration_response( json.dumps( { "outline": [] } ) )
 
-    def test_non_list_slides_returns_empty( self ):
-        assert parse_elaboration_response( json.dumps( { "slides": "not a list" } ) ) == []
+    def test_non_list_slides_raises( self ):
+        """D6-STRICT: non-list 'slides' raises ValueError (was: returned [])."""
+        with pytest.raises( ValueError ):
+            parse_elaboration_response( json.dumps( { "slides": "not a list" } ) )
 
-    def test_empty_slides_array( self ):
-        assert parse_elaboration_response( json.dumps( { "slides": [] } ) ) == []
+    def test_empty_slides_array_raises( self ):
+        """D6-STRICT: empty 'slides' array raises ValueError (was: returned [])."""
+        with pytest.raises( ValueError ):
+            parse_elaboration_response( json.dumps( { "slides": [] } ) )
 
     def test_missing_presenter_notes_gets_defaults( self ):
         data = json.dumps( { "slides": [ { "title": "Test", "number": 1 } ] } )

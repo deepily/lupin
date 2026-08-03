@@ -72,6 +72,49 @@ def _login_tokens() -> tuple[ str, str, str ]:
     return tokens[ "access_token" ], tokens[ "refresh_token" ], email
 
 
+def _uid_from_access_token( access: str ) -> str:
+    """Decode the JWT `sub` (uid) from a RAW access token — no page needed.
+
+    Mirrors conftest.get_user_id_from_page but works off the token string
+    directly, so job_history can be seeded BEFORE navigation (the boot
+    hydration fetch must see the row).
+    """
+    import base64
+
+    payload  = access.split( "." )[ 1 ]
+    payload += "=" * ( -len( payload ) % 4 )   # restore base64 padding
+    return json.loads( base64.b64decode( payload ) )[ "sub" ]
+
+
+def _seed_one_job_history( access: str, email: str ) -> None:
+    """Seed ONE terminal job_history row for the logged-in user so the boot
+    hydration path has a real row to surface (`history_n >= 1`).
+
+    Closes the SEED-GAP leg of the E2E-gate classification (item 6aa7a7ef):
+    `test_boot_has_zero_4xx_and_jobs_pane_hydrates` asserted a hydrated Jobs
+    pane but nothing seeded /api/job-history for the FIXED test user, so
+    `history_n` was 0 on a bounce-fresh single-suite run.
+
+    A UNIQUE `id_suffix` per run avoids the `id_hash` PRIMARY-KEY collision
+    that a fixed suffix would hit on repeat runs against the shared fixed test
+    user (the `seeded_*_page` fixtures dodge this by registering a fresh user
+    per test; this test reuses the standing e2e credentials, so we make the
+    row unique ourselves). COMPLETED status → the row lands in the terminal
+    "history" bucket the assertion reads.
+
+    Writes via the test-process engine (lupin_db_test under the :8000 runner —
+    the SAME DB the server reads), the identical path the conftest
+    `seeded_history_page` fixture already uses.
+    """
+    from tests.helpers.job_history_seed import seed_job_history_records
+
+    user_id = _uid_from_access_token( access )
+    seed_job_history_records(
+        user_id, email,
+        [ { "id_suffix": f"coldload-{ uuid.uuid4().hex[ :8 ] }" } ],
+    )
+
+
 def _open( page, access: str, refresh: str, stub_routes: bool = False,
            hydration_records: list[ dict ] | None = None,
            conversations: dict[ str, dict ] | None = None ):
@@ -263,9 +306,15 @@ def test_cold_load_hydrates_from_stubbed_snapshot_with_zero_live_events( page ):
 # (`/api/queue/job-history` → 404) slipped EVERY tier because:
 #   GAP 1  JobsPaneRenderer.ts:169 `hydrateHistory(api).catch()` SWALLOWS the
 #          rejection — the page boots, "page-loads" e2e stays green.
+#   GAP 2  the boot e2e registered ONLY page.on("response") for 4xx — a JS
+#          error that emits NO 4xx (a TypeError in a renderer, an uncaught
+#          throw in boot.ts, a console.error from a failed dynamic import)
+#          left the page "loaded" and the suite green. (WS3 cross-cutting,
+#          2026-06-22: closed by the console/pageerror capture below.)
 #   GAP 3  the boot e2e had no no-4xx / no-console-error assertion and no
 #          positive "Jobs pane actually hydrated" assertion.
-# This test adds BOTH guards, so a swallowed boot-time 4xx can no longer hide.
+# This test adds ALL THREE guards, so a swallowed boot-time 4xx OR a no-4xx
+# JS error can no longer hide.
 #
 # >>> VENUE / RUN STATUS: NOT YET RUN. Requires the :8000 test server in
 # >>> monopolize mode (live backend + real `/api/job-history` data), scheduled
@@ -280,6 +329,10 @@ def test_boot_has_zero_4xx_and_jobs_pane_hydrates( page ):
           during the `/app/multiplexer` cold load. A swallowed JobStore 404
           (or any sibling client-URL typo) shows up HERE even though the
           renderer's `.catch()` keeps the page booting.
+        - ZERO console errors and ZERO uncaught page errors during the boot.
+          A JS error that emits no 4xx (a renderer TypeError, an uncaught
+          throw in boot.ts, a failed dynamic import) is invisible to the 4xx
+          guard but fails HERE (GAP 2).
         - the Jobs pane genuinely HYDRATES: `JobStore.isHistoryHydrated()` is
           true AND the history bucket holds real rows — proving the
           `/api/job-history` round-trip resolved and populated the store, not
@@ -299,7 +352,14 @@ def test_boot_has_zero_4xx_and_jobs_pane_hydrates( page ):
         - fail-loud assertions on both the negative (no 4xx) and positive
           (store hydrated with rows) sides of the contract.
     """
-    access, refresh, _email = _login_tokens()
+    access, refresh, email = _login_tokens()
+
+    # SEED-GAP fix (item 6aa7a7ef): the boot Jobs-pane hydration asserts
+    # `history_n >= 1`, but nothing seeded /api/job-history for the fixed test
+    # user → the bounce-fresh single-suite run reported history_n=0. Seed one
+    # terminal row (unique id_hash per run) BEFORE navigation so the boot fetch
+    # surfaces it.
+    _seed_one_job_history( access, email )
 
     # Capture every response status seen during the load. page.on("response")
     # fires for the document, every XHR/fetch, and every static asset — exactly
@@ -312,6 +372,23 @@ def test_boot_has_zero_4xx_and_jobs_pane_hydrates( page ):
             bad_responses.append( { "url": response.url, "status": status } )
 
     page.on( "response", _record_response )
+
+    # GAP 2 — capture JS errors that emit NO 4xx. `console` fires for every
+    # console.* call (we keep only type=="error"); `pageerror` fires for every
+    # uncaught exception that reaches the window. Registered BEFORE navigation
+    # (inside _open) so nothing on the boot path is missed.
+    console_errors: list[ str ] = []
+    page_errors:    list[ str ] = []
+
+    def _record_console( msg ):
+        if msg.type == "error":
+            console_errors.append( msg.text )
+
+    def _record_pageerror( error ):
+        page_errors.append( str( error ) )
+
+    page.on( "console",   _record_console )
+    page.on( "pageerror", _record_pageerror )
 
     # Cold load against the REAL hydration path (no route stubs).
     _open( page, access, refresh, stub_routes=False )
@@ -329,6 +406,18 @@ def test_boot_has_zero_4xx_and_jobs_pane_hydrates( page ):
         "boot issued request(s) that returned 4xx — a swallowed client-URL "
         "error (the JobStore 404 class):\n"
         + "\n".join( f"  {r['status']}  {r['url']}" for r in bad_responses )
+    )
+
+    # --- Negative side: zero JS errors during the boot (GAP 2) --------------
+    assert not page_errors, (
+        "boot raised uncaught page error(s) — a JS exception that emits no "
+        "4xx and would otherwise pass the 4xx-only guard:\n"
+        + "\n".join( f"  {e}" for e in page_errors )
+    )
+    assert not console_errors, (
+        "boot logged console error(s) — a no-4xx failure surface (failed "
+        "dynamic import, renderer TypeError, etc.):\n"
+        + "\n".join( f"  {e}" for e in console_errors )
     )
 
     # --- Positive side: the Jobs pane really hydrated -----------------------
@@ -351,7 +440,16 @@ def test_boot_has_zero_4xx_and_jobs_pane_hydrates( page ):
     )
 
     # --- DOM corroboration: hydrated rows actually paint --------------------
-    page.wait_for_selector( '[data-testid="multiplexer-jobs-pane"]', timeout=10_000 )
+    # Lane 0c (RATIFIED item 2aad5b7b): the Job Queues pane is COLD-HIDDEN at boot;
+    # visibility is owned by the section-toolbar. The store-level hydration
+    # assertions above are visibility-INDEPENDENT (they read the live store via the
+    # boot hook), so they already fired against the cold-hidden pane. To corroborate
+    # the RENDERED .job-card DOM we first reveal the pane through its real toolbar
+    # control (the user flow) — NOT a default-visible assumption (that predated the
+    # 0c ruling) — then assert the hydrated rows painted.
+    page.wait_for_selector( '#section-toolbar .toolbar-btn[data-section="jobs-pane"]', timeout=5_000 )
+    page.locator( '#section-toolbar .toolbar-btn[data-section="jobs-pane"]' ).click()
+    page.wait_for_selector( '[data-testid="multiplexer-jobs-pane"]', state="visible", timeout=10_000 )
     card_count = page.locator( "#jobs-buckets-container .job-card" ).count()
     assert card_count >= 1, (
         "the jobs-pane must render .job-card elements for hydrated history "

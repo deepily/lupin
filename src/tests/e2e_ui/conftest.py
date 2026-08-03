@@ -27,6 +27,19 @@ import requests
 # Override via LUPIN_TEST_BASE_URL env var for custom setups or Docker-internal routing.
 BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
 
+# Height-tolerant snapshot comparison core (bug 660d02b4). Imported via a
+# path-guard so the pure helper resolves regardless of pytest import mode.
+import sys as _sys_vt
+_THIS_DIR = os.path.dirname( os.path.abspath( __file__ ) )
+if _THIS_DIR not in _sys_vt.path:
+    _sys_vt.path.insert( 0, _THIS_DIR )
+from visual_height_tolerance import (
+    compare_pngs_height_tolerant,
+    compare_pngs_structure_only,
+    compare_pngs_content_shift_tolerant,
+    compare_pngs_aa_scatter_tolerant,
+)
+
 
 # ---------------------------------------------------------------------------
 # Deterministic Font Rendering for Visual Regression
@@ -65,6 +78,314 @@ def browser_type_launch_args( browser_type_launch_args ):
             "--force-device-scale-factor=1",
         ],
     }
+
+
+# ---------------------------------------------------------------------------
+# Deterministic Viewport for Visual Regression  (bug 99326963)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture( scope="session" )
+def browser_context_args( browser_context_args ):
+    """
+    Pin the Playwright viewport to a FIXED size for every e2e_ui context.
+
+    Root cause of bug 99326963 (mux visual-e2e render non-determinism):
+    pytest-playwright leaves `viewport` UNSET on `browser.new_context()`, so
+    Playwright falls back to Chromium's built-in default. That fallback is an
+    ENVIRONMENT-dependent value — it can differ between pytest-playwright
+    versions, host vs container, and headless vs headed — so a visual baseline
+    captured in one environment can render at a DIFFERENT width than a COMPARE
+    run in another. Element screenshots inherit the context width, so the whole
+    image dimension flips (observed: 1280-wide baselines vs 960-wide recaptures)
+    and pixelmatch fails on a size mismatch that NO rebaseline can reconcile.
+
+    Pinning the viewport here makes EVERY capture and EVERY compare use
+    byte-identical context dimensions, so `--update-snapshots` and a plain
+    COMPARE run can never diverge on size. The width (1280) matches the
+    multiplexer's intended layout target (the horizontal-mode toggle hint reads
+    "Best at viewports >= 1200px wide"); height (720) is the standard 16:9 pair.
+    Element screenshots taller than 720 still capture in full (Playwright scrolls
+    the element), so the height pin does not clip tall panes — only the WIDTH is
+    load-bearing for the size-mismatch class this fixes.
+
+    Requires:
+        - browser_context_args is the default pytest-playwright fixture
+
+    Ensures:
+        - Every browser context is created with viewport 1280x720
+        - Capture and compare runs share identical context dimensions
+
+    See bug 99326963 + src/rnd/v0.1.6/2026.04.10-visual-regression-cold-warm-drift.md
+    (sibling determinism fixture `browser_type_launch_args` above).
+    """
+    return {
+        **browser_context_args,
+        "viewport": { "width": 1280, "height": 720 },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Height-tolerant snapshot assertion  (bug 660d02b4)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def assert_snapshot_height_tolerant( pytestconfig, request ):
+    """
+    A snapshot assertion that tolerates a bounded HEIGHT-only delta.
+
+    Straggler bug 660d02b4: `test_task_editing_controls_visual` renders the
+    task-list card at 960x169 on `--update-snapshots` but 960x170 on a plain
+    COMPARE — a benign sub-pixel row-height rounding that flips run-to-run in the
+    SAME container. The stock `assert_snapshot` is zero-tolerance on dimensions
+    (it raises `ValueError` the instant the sizes differ), so no rebaseline can
+    reconcile the flap. This fixture forgives ONLY a benign bottom-edge ±N px
+    (default 1) via `compare_pngs_height_tolerant`, while staying strict on
+    width, on pixels within the overlapping region, and on the size of the delta
+    — it can never green a genuine regression (a content SHIFT still fails).
+
+    Requires:
+        - the pytest-playwright-visual-snapshot ini keys are set
+          (`playwright_visual_snapshots_path`, `..._threshold`,
+          `..._failures_path`) — the same config the stock fixture reads
+        - the passed object is a Playwright Locator/Page (screenshotted here) or
+          raw PNG bytes
+
+    Ensures:
+        - `--update-snapshots` writes the capture as the baseline (then fails the
+          test with a "review" note, mirroring the stock fixture)
+        - a missing baseline is created (then flagged for review)
+        - otherwise the capture is compared height-tolerantly; a mismatch calls
+          `pytest.fail` and saves actual/expected artifacts under the failures dir
+    """
+    from pathlib import Path as _Path
+    from playwright.sync_api import Locator as _Locator, Page as _Page
+
+    root_dir       = _Path( pytestconfig.rootdir )
+    snapshots_path = root_dir / pytestconfig.getini( "playwright_visual_snapshots_path" )
+    failures_path  = root_dir / pytestconfig.getini( "playwright_visual_snapshot_failures_path" )
+    threshold      = float( pytestconfig.getini( "playwright_visual_snapshot_threshold" ) )
+    update         = bool( request.config.getoption( "--update-snapshots" ) )
+
+    test_file_stem = _Path( request.node.fspath ).stem
+    test_name      = request.node.name.split( "[", 1 )[ 0 ]
+
+    def _assert( locator_or_bytes, *, name, max_height_delta=1 ):
+        if isinstance( locator_or_bytes, ( _Locator, _Page ) ):
+            img = locator_or_bytes.screenshot( animations="disabled", type="png" )
+        else:
+            img = locator_or_bytes
+
+        snapshot_dir  = snapshots_path / test_file_stem / test_name
+        snapshot_dir.mkdir( parents=True, exist_ok=True )
+        baseline_file = snapshot_dir / name
+
+        if update or not baseline_file.exists():
+            baseline_file.write_bytes( img )
+            verb = "updated" if update else "created (new)"
+            pytest.fail( f"[height-tolerant-snapshot] Snapshot {verb}; please review. {baseline_file}" )
+
+        result = compare_pngs_height_tolerant(
+            img, baseline_file.read_bytes(),
+            threshold=threshold, max_height_delta=max_height_delta,
+        )
+        if result.matched:
+            return
+
+        # Save artifacts for triage (parity with the stock fixture's layout).
+        fail_dir = failures_path / test_file_stem / test_name
+        fail_dir.mkdir( parents=True, exist_ok=True )
+        ( fail_dir / f"actual_{name}" ).write_bytes( img )
+        ( fail_dir / f"expected_{name}" ).write_bytes( baseline_file.read_bytes() )
+        pytest.fail( f"[height-tolerant-snapshot] Snapshots DO NOT match! {name} — {result.reason}" )
+
+    return _assert
+
+
+# ---------------------------------------------------------------------------
+# Render-nondeterminism-tolerant snapshot assertion  (bug c0bbd2af)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def assert_snapshot_content_shift_tolerant( pytestconfig, request ):
+    """
+    A snapshot assertion that forgives SUB-PERCEPTUAL render nondeterminism of two
+    proven-benign classes surfaced by re-proof ts-5012699a — while never greening a
+    genuine regression:
+
+      (1) a UNIFORM <=1px content shift inside a same-size frame
+          (`multiplexer_phase6b_tts_chrome`: a ~64px green section-header band that
+          rounds to y11 or y12 run-to-run). Handled by
+          `compare_pngs_content_shift_tolerant`: forgives ONLY when some offset
+          within +/-1px drives the overlap to ZERO mismatch. A >=2px shift can't
+          re-align within +/-1px and ANY hue change never zeroes at any offset, so
+          both hard-fail — the anti-masking line is STRUCTURAL, not a threshold.
+
+      (2) small-region isolated glyph/AA scatter
+          (`multiplexer_phase6c_section_a_popover_borrowed`: an 8x8-corner speckle
+          with the persona modal + CSS untouched). Handled as a FALLBACK by
+          `compare_pngs_aa_scatter_tolerant`: forgives ONLY spatially-isolated
+          sub-floor clusters that leave NO erosion survivor, and fails the instant a
+          diff forms a contiguous block.
+
+    Composition safety: the two comparators are tried in order and the snapshot
+    passes iff EITHER forgives. This preserves never-false-green because EACH
+    comparator independently can only forgive its own proven-benign class — a real
+    regression (a >=2px/contiguous content move, a recolor, a width/height break)
+    fails BOTH, so it fails the OR. Distinct from
+    `assert_snapshot_height_tolerant`, which forgives a TOTAL-HEIGHT delta (the
+    frame grew) but NOT internal band position; this fixture is its intra-image
+    sibling.
+
+    Requires:
+        - the pytest-playwright-visual-snapshot ini keys are set
+          (`playwright_visual_snapshots_path`, `..._threshold`, `..._failures_path`)
+        - the passed object is a Playwright Locator/Page (screenshotted here) or
+          raw PNG bytes
+
+    Ensures:
+        - `--update-snapshots` writes the capture as the baseline (then fails the
+          test with a "review" note, mirroring the stock fixture)
+        - a missing baseline is created (then flagged for review)
+        - otherwise the capture is compared content-shift-tolerantly, then (only if
+          that refuses) aa-scatter-tolerantly; a match under EITHER passes, else
+          `pytest.fail` fires and actual/expected artifacts are saved under the
+          failures dir with BOTH refusal reasons
+    """
+    from pathlib import Path as _Path
+    from playwright.sync_api import Locator as _Locator, Page as _Page
+
+    root_dir       = _Path( pytestconfig.rootdir )
+    snapshots_path = root_dir / pytestconfig.getini( "playwright_visual_snapshots_path" )
+    failures_path  = root_dir / pytestconfig.getini( "playwright_visual_snapshot_failures_path" )
+    threshold      = float( pytestconfig.getini( "playwright_visual_snapshot_threshold" ) )
+    update         = bool( request.config.getoption( "--update-snapshots" ) )
+
+    test_file_stem = _Path( request.node.fspath ).stem
+    test_name      = request.node.name.split( "[", 1 )[ 0 ]
+
+    def _assert( locator_or_bytes, *, name, max_shift=1, max_height_delta=1,
+                 max_isolated_cluster=2 ):
+        if isinstance( locator_or_bytes, ( _Locator, _Page ) ):
+            img = locator_or_bytes.screenshot( animations="disabled", type="png" )
+        else:
+            img = locator_or_bytes
+
+        snapshot_dir  = snapshots_path / test_file_stem / test_name
+        snapshot_dir.mkdir( parents=True, exist_ok=True )
+        baseline_file = snapshot_dir / name
+
+        if update or not baseline_file.exists():
+            baseline_file.write_bytes( img )
+            verb = "updated" if update else "created (new)"
+            pytest.fail( f"[content-shift-snapshot] Snapshot {verb}; please review. {baseline_file}" )
+
+        baseline = baseline_file.read_bytes()
+
+        shift = compare_pngs_content_shift_tolerant(
+            img, baseline,
+            threshold=threshold, max_shift=max_shift, max_height_delta=max_height_delta,
+        )
+        if shift.matched:
+            return
+
+        scatter = compare_pngs_aa_scatter_tolerant(
+            img, baseline,
+            threshold=threshold, max_height_delta=max_height_delta,
+            max_isolated_cluster=max_isolated_cluster,
+        )
+        if scatter.matched:
+            return
+
+        # Save artifacts for triage (parity with the stock fixture's layout).
+        fail_dir = failures_path / test_file_stem / test_name
+        fail_dir.mkdir( parents=True, exist_ok=True )
+        ( fail_dir / f"actual_{name}" ).write_bytes( img )
+        ( fail_dir / f"expected_{name}" ).write_bytes( baseline )
+        pytest.fail(
+            f"[content-shift-snapshot] Snapshots DO NOT match! {name} — "
+            f"content-shift: {shift.reason}; aa-scatter: {scatter.reason}"
+        )
+
+    return _assert
+
+
+# ---------------------------------------------------------------------------
+# Structure-only snapshot assertion  (bug 660d02b4, resolution D)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def assert_snapshot_structure_only( pytestconfig, request ):
+    """
+    A snapshot assertion that verifies WIDTH + HEIGHT-tolerance ONLY — it is
+    PIXEL-BLIND BY DESIGN (bug 660d02b4, resolution D, ratified 2026-07-01).
+
+    LOUD NOTE FOR FUTURE MAINTAINERS: dropping the per-pixel compare here is
+    INTENTIONAL, not an oversight. `test_task_editing_controls_visual` is the
+    most glyph-dense of the 37 mux visual snapshots; even with the suite-wide
+    deterministic-font launch args already applied (see
+    `browser_type_launch_args`) its per-pixel glyph anti-aliasing is
+    non-deterministic run-to-run, HIGH-VARIANCE up to ~3800 scattered px — a
+    magnitude no safe pixel/count budget can forgive without risking a
+    false-green on a real <2000px regression. Its FUNCTIONAL behaviour is covered
+    by the sibling E2E tests in the same file. This retained gate is
+    DETERMINISTIC (the control-height pin + settle-fix stabilise the card size)
+    and still fails a genuine STRUCTURAL regression (wrong width, or height
+    outside the ±delta tolerance). Do NOT re-arm a pixel assertion here — restore
+    pixel coverage via the P3 (C) deterministic-font/sub-pixel harness instead.
+
+    Requires:
+        - the pytest-playwright-visual-snapshot ini keys are set (same config the
+          height-tolerant + stock fixtures read)
+        - the passed object is a Playwright Locator/Page (screenshotted here) or
+          raw PNG bytes
+
+    Ensures:
+        - `--update-snapshots` writes the capture as the baseline (then fails the
+          test with a "review" note, mirroring the stock fixture)
+        - a missing baseline is created (then flagged for review)
+        - otherwise the capture is compared STRUCTURE-ONLY (width exact + height
+          within max_height_delta, NO pixel compare); a structural mismatch calls
+          `pytest.fail` and saves actual/expected artifacts under the failures dir
+    """
+    from pathlib import Path as _Path
+    from playwright.sync_api import Locator as _Locator, Page as _Page
+
+    root_dir       = _Path( pytestconfig.rootdir )
+    snapshots_path = root_dir / pytestconfig.getini( "playwright_visual_snapshots_path" )
+    failures_path  = root_dir / pytestconfig.getini( "playwright_visual_snapshot_failures_path" )
+    update         = bool( request.config.getoption( "--update-snapshots" ) )
+
+    test_file_stem = _Path( request.node.fspath ).stem
+    test_name      = request.node.name.split( "[", 1 )[ 0 ]
+
+    def _assert( locator_or_bytes, *, name, max_height_delta=1 ):
+        if isinstance( locator_or_bytes, ( _Locator, _Page ) ):
+            img = locator_or_bytes.screenshot( animations="disabled", type="png" )
+        else:
+            img = locator_or_bytes
+
+        snapshot_dir  = snapshots_path / test_file_stem / test_name
+        snapshot_dir.mkdir( parents=True, exist_ok=True )
+        baseline_file = snapshot_dir / name
+
+        if update or not baseline_file.exists():
+            baseline_file.write_bytes( img )
+            verb = "updated" if update else "created (new)"
+            pytest.fail( f"[structure-only-snapshot] Snapshot {verb}; please review. {baseline_file}" )
+
+        result = compare_pngs_structure_only(
+            img, baseline_file.read_bytes(), max_height_delta=max_height_delta,
+        )
+        if result.matched:
+            return
+
+        fail_dir = failures_path / test_file_stem / test_name
+        fail_dir.mkdir( parents=True, exist_ok=True )
+        ( fail_dir / f"actual_{name}" ).write_bytes( img )
+        ( fail_dir / f"expected_{name}" ).write_bytes( baseline_file.read_bytes() )
+        pytest.fail( f"[structure-only-snapshot] Structural mismatch! {name} — {result.reason}" )
+
+    return _assert
 
 
 # ---------------------------------------------------------------------------
@@ -203,7 +524,7 @@ def clean_test_db():
         conn.execute( text( "DELETE FROM users WHERE NOT is_protected" ) )
         conn.execute( text(
             "TRUNCATE TABLE auth_audit_log, failed_login_attempts, "
-            "job_history, proxy_decisions, trust_states"
+            "job_history, proxy_decisions, trust_states, refresh_tokens"
         ) )
 
     with engine.connect() as conn:

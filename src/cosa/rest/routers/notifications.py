@@ -118,6 +118,136 @@ _idempotency_lock  = threading.Lock()
 _IDEMPOTENCY_TTL   = 60   # seconds
 _IDEMPOTENCY_MAX   = 1000
 
+# ── Ask-idempotency index (bug f433fbae D2) ──
+# The fire-and-forget cache above stores a whole response dict, which works because
+# that path returns a plain dict. The response-required (blocking) path returns a
+# StreamingResponse, so it cannot cache-and-replay the same way — instead we remember
+# which notification_id a given idempotency_key already minted, and a re-POST with
+# that key RE-ATTACHES to the original ask instead of creating a second card. Same
+# TTL / max-size policy and lock as the fire-and-forget cache.
+# Key: idempotency_key (UUID) → Value: (notification_id, timestamp)
+_ask_idempotency_index = OrderedDict()
+
+
+def _record_ask_idempotency( idempotency_key, notification_id ):
+    """
+    Remember which notification_id a response-required ask minted for this key.
+
+    Requires:
+        - notification_id is the id of a freshly-created response-required notification
+
+    Ensures:
+        - a falsy idempotency_key is a no-op (nothing to de-dup on)
+        - otherwise the key → notification_id mapping is stored, trimmed to
+          _IDEMPOTENCY_MAX (oldest evicted first)
+    """
+    if not idempotency_key:
+        return
+    with _idempotency_lock:
+        _ask_idempotency_index[ idempotency_key ] = ( notification_id, time_mod.time() )
+        while len( _ask_idempotency_index ) > _IDEMPOTENCY_MAX:
+            _ask_idempotency_index.popitem( last=False )
+
+
+def _lookup_ask_idempotency( idempotency_key ):
+    """
+    Return the notification_id previously minted for this key, or None.
+
+    Ensures:
+        - a falsy key returns None
+        - entries older than _IDEMPOTENCY_TTL are evicted before the lookup, so a
+          stale key never re-attaches to a long-gone ask
+        - returns the stored notification_id on a live hit, else None
+    """
+    if not idempotency_key:
+        return None
+    with _idempotency_lock:
+        now = time_mod.time()
+        while _ask_idempotency_index:
+            oldest_key, ( _, ts ) = next( iter( _ask_idempotency_index.items() ) )
+            if now - ts > _IDEMPOTENCY_TTL:
+                _ask_idempotency_index.pop( oldest_key )
+            else:
+                break
+        entry = _ask_idempotency_index.get( idempotency_key )
+        return entry[ 0 ] if entry else None
+
+
+def _read_notification_state_sync( notification_id ):
+    """
+    Read one notification's {state, response_value, responded_at} for the ask
+    re-attach poll (bug f433fbae D2). Mirrors get_notification_response's fetch.
+
+    Ensures:
+        - returns None when the row is gone
+        - otherwise returns the three fields verbatim (responded_at as a datetime|None)
+    """
+    with get_db() as session:
+        repo = NotificationRepository( session )
+        n    = repo.get_by_id( uuid.UUID( str( notification_id ) ) )
+        if n is None:
+            return None
+        return {
+            "state"          : n.state,
+            "response_value" : n.response_value,
+            "responded_at"   : n.responded_at,
+        }
+
+
+def _extract_response_value( response_value ):
+    """Pull the scalar answer out of a stored response_value (dict-wrapped or bare),
+    coerced to a string RespondedEvent/ExpiredEvent can carry. None → None."""
+    if response_value is None:
+        return None
+    val = response_value.get( "value" ) if isinstance( response_value, dict ) else response_value
+    return val if isinstance( val, str ) else json.dumps( val )
+
+
+async def _ask_reattach_generator( notification_id, timeout_seconds ):
+    """
+    Re-attach SSE for a duplicate idempotency_key (bug f433fbae D2): stream the
+    ORIGINAL ask's outcome by polling its DB row, so a re-POST does not mint a second
+    card. Self-contained — never touches the in-memory pending_responses event, so it
+    is safe regardless of whether the original stream is alive.
+
+    Ensures:
+        - first frame is an ack carrying the ORIGINAL notification_id
+        - a landed human answer (responded_at set) yields a `responded` frame
+        - a manufactured default (response_value set, not responded) yields an
+          `expired` frame with default_used=True
+        - budget exhausted with neither yields an `expired` frame with no default
+    """
+    yield f"data: {json.dumps({'status': 'ack', 'notification_id': notification_id})}\n\n"
+    deadline      = datetime.utcnow() + timedelta( seconds=timeout_seconds )
+    poll_interval = 2.0
+    while True:
+        row = await asyncio.to_thread( _read_notification_state_sync, notification_id )
+        if row is not None:
+            if row[ "responded_at" ] is not None:
+                val = _extract_response_value( row[ "response_value" ] )
+                yield f"data: {json.dumps({'status': 'responded', 'response': val, 'default_used': False})}\n\n"
+                return
+            if row[ "response_value" ] is not None:
+                val = _extract_response_value( row[ "response_value" ] )
+                yield f"data: {json.dumps({'status': 'expired', 'response': val, 'default_used': True, 'timeout': True})}\n\n"
+                return
+        if datetime.utcnow() >= deadline:
+            yield f"data: {json.dumps({'status': 'expired', 'response': None, 'default_used': False, 'timeout': True})}\n\n"
+            return
+        await asyncio.sleep( min( poll_interval, max( 0.0, ( deadline - datetime.utcnow() ).total_seconds() ) ) )
+
+
+def _sse_headers():
+    """Standard text/event-stream headers shared by every SSE StreamingResponse here."""
+    return {
+        "Cache-Control"               : "no-cache",
+        "X-Accel-Buffering"           : "no",
+        "Connection"                  : "keep-alive",
+        "Content-Type"                : "text/event-stream",
+        "Access-Control-Allow-Origin" : "*",
+    }
+
+
 def get_notification_queue():
     """
     Dependency to get notification queue from main module.
@@ -361,7 +491,8 @@ def _update_notification_state_sync( notification_id, state ):
 def _persist_response_required_sync(
     resolved_sender_id, target_system_id, message, type, priority, title,
     abstract, response_type, response_default, parsed_response_options,
-    timeout_seconds, job_id, progress_group_id, state
+    timeout_seconds, job_id, progress_group_id, state,
+    sender_persona=None, sender_icon=None
 ):
     """
     Synchronous DB persist for a response-required notification — run OFF the
@@ -404,7 +535,9 @@ def _persist_response_required_sync(
             timeout_seconds    = timeout_seconds,
             expires_at         = expires_at,
             job_id             = job_id,
-            progress_group_id  = progress_group_id
+            progress_group_id  = progress_group_id,
+            sender_persona     = sender_persona,
+            sender_icon        = sender_icon
         )
         repo.update_state( db_notification.id, state )
         return str( db_notification.id )
@@ -492,8 +625,13 @@ def _submit_response_sync( notification_id, response_value ):
         # Capture recipient_id and job_id before session closes (for WebSocket broadcast).
         # job_id is needed for the cross-user CC-listener fallback in the
         # notification_responded broadcast below (Phase C migration 2026-04-27).
+        # sender_id + sender_persona are captured for the late-answer handback
+        # (§4.3): the asking session's #hash8 is the durable/listener routing key,
+        # and sender_persona keys the catch-up pull.
         recipient_id        = str( notification.recipient_id )
         notification_job_id = notification.job_id
+        sender_id           = notification.sender_id
+        sender_persona      = notification.sender_persona
 
         # Update database with response (pass dict, not JSON string)
         # Wrap in dict if response_value is a simple string like "yes" or "no"
@@ -510,7 +648,36 @@ def _submit_response_sync( notification_id, response_value ):
                 detail      = "Failed to update notification response in database"
             )
 
-        return ( recipient_id, notification_job_id )
+        # A dict, not the old 2-tuple (§4.3 step 1) — carries the asking session's
+        # sender_id + sender_persona for the handback routing/catch-up keys.
+        return {
+            "recipient_id"   : recipient_id,
+            "job_id"         : notification_job_id,
+            "sender_id"      : sender_id,
+            "sender_persona" : sender_persona,
+        }
+
+
+def _mark_answer_delivered_sync( notification_id ):
+    """
+    Stamp answer_delivered_at on a notification — run OFF the event loop via
+    asyncio.to_thread. The router's arm of the three RECEIPT-gated setters (§4.3):
+    setter (a) calls this when the live SSE waiter is woken (the asking coroutine
+    consumed the value). Setters (b)/(c) share the same repo write via the
+    answers-owed ack endpoint.
+
+    Requires:
+        - notification_id is a UUID string
+
+    Ensures:
+        - answer_delivered_at is set (idempotent); the row is never deleted
+
+    Raises:
+        - propagates DB errors to the caller (handled there as non-fatal)
+    """
+    with get_db() as session:
+        repo = NotificationRepository( session )
+        repo.mark_answer_delivered( uuid.UUID( notification_id ) )
 
 
 @router.post(
@@ -541,6 +708,7 @@ async def notify_user(
     display_qualifier_widget: bool = Query(False, description="Render yes/no qualifier comment widget expanded by default with softer instructional text."),
     session_name: Optional[str] = Query(None, description="Human-readable session name for UI header display. Updates sender-session-name span in notification history card."),
     idempotency_key: Optional[str] = Query(None, description="UUID idempotency key to prevent duplicate notifications on retry. Same key = same notification, skip push/persist."),
+    persist: bool = Query(True, description="Whether to persist a forensic DB row (default True — byte-identical prior behavior). Set False for delivery-only re-attempts (e.g. arbiter re-announce-on-return) so repeated retries of an already-persisted advisory never mint duplicate rows (bug e1bbe011). Live WebSocket delivery + the offline/online outcome are unaffected; only the DB insert is skipped."),
     notification_queue: NotificationFifoQueue = Depends(get_notification_queue),
     ws_manager: WebSocketManager = Depends(get_websocket_manager)
 ):
@@ -802,23 +970,31 @@ async def notify_user(
                         print( f"[NOTIFY] Idempotency hit: {idempotency_key} — returning cached response" )
                         return cached_response
 
-            # 1. Persist to PostgreSQL (unconditionally — preserves notification history).
+            # 1. Persist to PostgreSQL (preserves notification history).
             #    Lever B (messaging plane): run the blocking DB I/O OFF the event loop
             #    via asyncio.to_thread so a slow DB under fleet load can't stall the
             #    notify path (and every other request sharing the loop) — the FM-7 fix.
+            #    persist=False (bug e1bbe011) skips ONLY the DB insert — a delivery-only
+            #    re-attempt (arbiter re-announce-on-return) must NOT mint a duplicate
+            #    forensic row on every 300s retry. db_notification_id stays None; all
+            #    downstream logic already tolerates None (push_notification falls back
+            #    to a generated uuid4; the offline/online responses are id-agnostic).
             db_notification_id = None
-            try:
-                db_notification_id = await asyncio.to_thread(
-                    _persist_notification_sync,
-                    resolved_sender_id, target_system_id, message, type, priority,
-                    title, abstract, parsed_response_options, job_id, progress_group_id, is_connected,
-                    direction
-                )
-                print( f"[NOTIFY] ✓ Persisted notification {db_notification_id} to PostgreSQL" )
+            if persist:
+                try:
+                    db_notification_id = await asyncio.to_thread(
+                        _persist_notification_sync,
+                        resolved_sender_id, target_system_id, message, type, priority,
+                        title, abstract, parsed_response_options, job_id, progress_group_id, is_connected,
+                        direction
+                    )
+                    print( f"[NOTIFY] ✓ Persisted notification {db_notification_id} to PostgreSQL" )
 
-            except Exception as db_error:
-                # Log but don't fail - FIFO queue is the primary delivery mechanism
-                print( f"[NOTIFY] ⚠️ Failed to persist to PostgreSQL (non-fatal): {db_error}" )
+                except Exception as db_error:
+                    # Log but don't fail - FIFO queue is the primary delivery mechanism
+                    print( f"[NOTIFY] ⚠️ Failed to persist to PostgreSQL (non-fatal): {db_error}" )
+            else:
+                print( f"[NOTIFY] persist=false — skipping DB row (delivery-only re-attempt, flood-guard)" )
 
             # 2. If user is offline, attempt cross-user CC-listener fallback
             #    BEFORE giving up. Delegates to the canonical helper
@@ -977,10 +1153,55 @@ async def notify_user(
         # RESPONSE-REQUIRED MODE (Phase 2.1 - new SSE blocking behavior)
         # =================================================================================
 
-        # Task 5: Offline Detection - return default immediately if user not connected
+        # Resolve the session's voice persona ONCE, above the offline branch (§4.2),
+        # so BOTH persist paths (offline/expired and online/delivered) can stamp
+        # sender_persona — the audit trail is complete regardless of how the ask
+        # resolved, and persona-keyed retrieval (ruling 6) needs the key present.
+        # The online WS push below REUSES this payload instead of re-reading the
+        # bridge file (one fewer bridge read per ask on the hot path).
+        # Lever B: bridge-file read is blocking I/O — off the event loop.
+        voice_persona_payload = await asyncio.to_thread( _voice_persona_for_sender_id, resolved_sender_id )
+        sender_persona = voice_persona_payload.get( "name" ) if voice_persona_payload else None
+        sender_icon    = voice_persona_payload.get( "icon" ) if voice_persona_payload else None
+        # A persona-less ask (allocation failed) stamps NULL sender_persona, so its
+        # answer is unretrievable by persona and will never receive a late answer
+        # (§4.4 runbook gap — accepted, near-universal allocation). Make it AUDIBLE
+        # rather than silent: a lost late-answer shows in the log, not by Rick
+        # noticing an answer never arrived.
+        if sender_persona is None:
+            print( f"[NOTIFY] ⚠️ response-required ask has NO voice persona (sender_id={resolved_sender_id!r}) — its late answer will be unretrievable by persona (§4.4 accepted gap)" )
+
+        # ── Idempotency for the response-required path (bug f433fbae D2) ──
+        # Hoisted above the offline/online split so a re-POST with the same
+        # idempotency_key re-attaches to the ORIGINAL ask instead of minting a second
+        # card. The fire-and-forget branch already dedups; this is its blocking-path
+        # counterpart. The blocking verbs now always stamp a key
+        # (cosa_voice_mcp._with_idempotency_key), so notify_user_sync's retry_on_timeout
+        # re-POST — and any durable resend — lands here and re-attaches, not duplicates.
+        existing_nid = _lookup_ask_idempotency( idempotency_key )
+        if existing_nid is not None:
+            print( f"[NOTIFY] Idempotency hit (ask): {idempotency_key} → re-attaching to {existing_nid}" )
+            return StreamingResponse(
+                _ask_reattach_generator( existing_nid, timeout_seconds ),
+                media_type = "text/event-stream",
+                headers    = _sse_headers()
+            )
+
+        # Task 5: Offline Detection — deliver the default immediately, but as an SSE
+        # frame the streaming client can actually CONSUME (bug f433fbae D1).
+        #
+        # The prior return here was a plain JSONResponse: not SSE-framed AND missing
+        # the `response` field OfflineEvent requires. notify_user_sync streams the
+        # POST and only parses `data: `-prefixed lines, so it could not read that
+        # JSON at all — it fell through to a re-attach with no ack id and returned an
+        # error dict. Net: the offline default was NEVER delivered (the client
+        # plumbing in commit fd11cd30 was inert without this half). Emitting a real
+        # SSE OfflineEvent maps the client to exit_code=0 / default_used=True, so the
+        # caller stamps `answered: False`: the default is DELIVERED and MARKED as a
+        # substitution, never forged into something a human answered.
         if not is_connected:
             if response_default:
-                print(f"[NOTIFY] User offline - returning default immediately: {response_default}")
+                print(f"[NOTIFY] User offline - streaming default immediately: {response_default}")
 
                 # Create notification in PostgreSQL with state='expired'.
                 # Lever B (surgical pass 2): blocking DB persist off the event loop.
@@ -989,15 +1210,27 @@ async def notify_user(
                     resolved_sender_id, target_system_id, message, type, priority,
                     title, abstract, response_type, response_default,
                     parsed_response_options, timeout_seconds, job_id,
-                    progress_group_id, "expired"
+                    progress_group_id, "expired",
+                    sender_persona, sender_icon
                 )
 
-                return JSONResponse({
-                    "status"             : "offline",
-                    "default_used"       : response_default,
-                    "notification_id"    : notification_id,
-                    "message"            : "User is offline, returned default value immediately"
-                })
+                # Record the key→id mapping so a retry re-attaches here too.
+                _record_ask_idempotency( idempotency_key, notification_id )
+
+                async def offline_event_generator():
+                    # ack first — hands the client this ask's notification_id so a
+                    # mid-stream death can re-attach (§4.5 E-a), same as the online path.
+                    yield f"data: {json.dumps({'status': 'ack', 'notification_id': notification_id})}\n\n"
+                    # OfflineEvent: `response` carries the default; default_used=True is
+                    # the provenance the caller stamps as `answered: False` — the marker
+                    # that keeps a substitution from reading as a human decision.
+                    yield f"data: {json.dumps({'status': 'offline', 'response': response_default, 'default_used': True})}\n\n"
+
+                return StreamingResponse(
+                    offline_event_generator(),
+                    media_type = "text/event-stream",
+                    headers    = _sse_headers()
+                )
             else:
                 raise HTTPException(
                     status_code = 503,
@@ -1012,8 +1245,13 @@ async def notify_user(
             resolved_sender_id, target_system_id, message, type, priority,
             title, abstract, response_type, response_default,
             parsed_response_options, timeout_seconds, job_id,
-            progress_group_id, "delivered"
+            progress_group_id, "delivered",
+            sender_persona, sender_icon
         )
+
+        # D2 (bug f433fbae): remember this key→id so a same-key re-POST re-attaches
+        # to this ask instead of minting a second card.
+        _record_ask_idempotency( idempotency_key, notification_id )
 
         print(f"[NOTIFY] Created response-required notification: {notification_id}")
 
@@ -1078,8 +1316,8 @@ async def notify_user(
         # ---- End Prediction Engine Hook ----
 
         # Push notification to WebSocket for UI rendering (Phase 2.2 with full fields).
-        # Lever B (surgical pass 2): persona lookup reads bridge files — off the loop.
-        voice_persona_payload = await asyncio.to_thread( _voice_persona_for_sender_id, resolved_sender_id )
+        # voice_persona_payload was resolved ONCE above the offline branch (§4.2) —
+        # reuse it here instead of re-reading the bridge file.
         notification_item = notification_queue.push_notification(
             message                  = message.strip(),
             type                     = type,
@@ -1115,6 +1353,14 @@ async def notify_user(
         # Task 3 & 4: SSE event generator with timeout handling
         async def event_generator():
             try:
+                # §4.5 E-a: opening ack frame — hands the asking client this ask's
+                # notification_id BEFORE we block on the answer, so that if the SSE
+                # stream later dies the client can re-attach by polling
+                # GET /notifications/response/{id}. Purely additive: consume_sse_stream
+                # `continue`s on an unrecognized status, so a client that ignores it is
+                # unaffected.
+                yield f"data: {json.dumps({'status': 'ack', 'notification_id': notification_id})}\n\n"
+
                 # Wait for response with timeout
                 await asyncio.wait_for(
                     response_event.wait(),
@@ -1272,9 +1518,16 @@ async def submit_notification_response(
 
         # Get notification from PostgreSQL + persist the response. Lever B
         # (surgical pass 2): blocking DB read/validate/update off the event loop.
-        recipient_id, notification_job_id = await asyncio.to_thread(
+        submit_result       = await asyncio.to_thread(
             _submit_response_sync, notification_id, response_value
         )
+        recipient_id        = submit_result[ "recipient_id" ]
+        notification_job_id = submit_result[ "job_id" ]
+        asker_sender_id     = submit_result[ "sender_id" ]
+        # The asking session's #hash8 — the listener/durable routing key when the
+        # answer must travel by session rather than by job (§4.3 step 2). None when
+        # the sender_id carries no #suffix (a root session).
+        asker_hash8 = asker_sender_id.split( "#", 1 )[ 1 ].strip() if asker_sender_id and "#" in asker_sender_id else None
 
         print(f"[NOTIFY] ✓ Updated database with response for {notification_id}")
 
@@ -1307,8 +1560,16 @@ async def submit_notification_response(
         if notification_id in pending_responses:
             pending_responses[notification_id]["response_data"] = response_value
             pending_responses[notification_id]["event"].set()  # Wake up SSE stream!
-            print(f"[NOTIFY] ✓ Signaled SSE stream for {notification_id}")
+            # Setter (a) of the §4.3 receipt-gated contract: the SSE waiter lives in
+            # THIS process and its event is now set, so the asking coroutine WILL
+            # consume the value — a genuine receipt. Mark the answer delivered so
+            # catch-up never re-hands it. Lever B: DB write off the event loop.
+            await asyncio.to_thread( _mark_answer_delivered_sync, notification_id )
+            print(f"[NOTIFY] ✓ Signaled SSE stream + marked answer delivered for {notification_id}")
         else:
+            # No live SSE waiter here — the answer stays owed (answer_delivered_at
+            # NULL) unless the listener frame below is confirmed. The row being owed
+            # is what §4.4's catch-up re-delivers; the mark is NEVER set on a send.
             print(f"[NOTIFY] No SSE stream waiting for {notification_id} (may have already completed)")
 
         # Task 7: Broadcast WebSocket event (notification_responded).
@@ -1318,9 +1579,13 @@ async def submit_notification_response(
         # recipient_id, missing the listener registered under a shared
         # service-account user_id).
         try:
+            # §4.3 step 3 — the one-line live fix (fact 1): fall back to the asking
+            # session's #hash8 when the ask carried no job_id (every MCP ask has
+            # job_id None), so the notification_responded event reaches the asking
+            # session's cc-listener socket byte-for-byte and its :481 arm delivers it.
             ws_manager.emit_to_user_or_listener_sync(
                 user_id = recipient_id,
-                job_id  = notification_job_id,
+                job_id  = notification_job_id or asker_hash8,
                 event   = "notification_responded",
                 data    = {
                     "notification_id"  : notification_id,
@@ -1433,6 +1698,224 @@ async def get_undelivered_notifications(
     except Exception as e:
         print( f"[NOTIFY] Error getting undelivered for {authenticated_user_id}: {str( e )}" )
         raise HTTPException( status_code=500, detail=f"Failed to get undelivered notifications: {str( e )}" )
+
+
+def _project_owed_answer( n, requesting_session_hash8=None ):
+    """
+    Project an owed-answer Notification row to the replayed-answer envelope (§4.3,
+    rulings 6/7). Every replayed answer carries its ORIGINAL question text plus its
+    responded_at — a bare answer with no question attached is worse than nothing
+    (the model would bind it to whatever it is doing now).
+
+    Requires:
+        - n is an owed Notification row (responded, not yet handed back)
+
+    Ensures:
+        - `question` is the original ask text; `response_value` is the human's answer
+        - `from_earlier_session` is True iff the asking session differs from the
+          requesting one (ruling 6 — delivered, but FLAGGED as an earlier session's)
+    """
+    asker_hash8 = n.sender_id.split( "#", 1 )[ 1 ].strip() if n.sender_id and "#" in n.sender_id else None
+    from_earlier_session = bool( requesting_session_hash8 and asker_hash8 and asker_hash8 != requesting_session_hash8 )
+    return {
+        "id"                   : str( n.id ),
+        "sender_id"            : n.sender_id,
+        "sender_persona"       : n.sender_persona,
+        "session_hash8"        : asker_hash8,
+        "question"             : n.message,
+        "title"                : n.title,
+        "abstract"             : n.abstract,
+        "response_value"       : n.response_value,
+        "responded_at"         : n.responded_at.isoformat() if n.responded_at else None,
+        "created_at"           : n.created_at.isoformat() if n.created_at else None,
+        "job_id"               : n.job_id,
+        "from_earlier_session" : from_earlier_session,
+    }
+
+
+@router.get(
+    "/notifications/answers-owed",
+    summary     = "Get answers owed to a persona (late-answer handback pull inbox)",
+    description = "Persona-keyed pull inbox (§4.4): answered asks not yet handed back to the session that asked. Retrieval matches sender_persona ALONE (ruling 6); session_hash8 sets the earlier-session flag but NEVER filters. Serving does NOT mark delivered — that is the companion /ack (ack-on-consume)."
+)
+async def get_answers_owed(
+    authenticated_user_id: Annotated[str, Depends(require_api_key_or_jwt)],
+    persona: str = Query(..., description="The persona whose owed answers to pull (retrieval key — ruling 6, matched alone)."),
+    session_hash8: Optional[str] = Query(None, description="Requesting session's 8-char hash. Sets the earlier-session flag on each envelope; NEVER filters (ruling 6)."),
+    since: Optional[str] = Query(None, description="ISO responded_at cursor — only answers responded AFTER it. Cursor advances on responded_at, not created_at."),
+    limit: int = Query(100, description="Maximum owed answers to return.")
+):
+    """
+    Pull the answers owed to `persona` — answered asks not yet handed back (§4.4).
+
+    Requires:
+        - a valid API key or Bearer JWT (X-API-Key lane resolves the human owner —
+          the row's recipient_id; NOT the listener's ambient service-account id.
+          D-V1 is the negative control that proves this on real credentials)
+        - persona is a non-empty retrieval key
+
+    Ensures:
+        - returns owed envelopes (question + answer + responded_at + flag), oldest
+          answer first (ordered/cursored on responded_at)
+        - SERVING does NOT set answer_delivered_at — only /ack does (ack-on-consume)
+
+    Raises:
+        - HTTPException 500 on query failure
+
+    ⚠️ AUTHENTICATED, NOT AUTHORIZED — a RULED design decision, not an oversight
+    (Rick, 2026-08-01: "let's leave it where it is, this is one trusted fleet…
+    let's make sure we document this behavior"). This endpoint checks that the
+    caller holds a valid credential; it does NOT check that the credential
+    belongs to `persona`. Any valid key can pull any persona's owed answers.
+
+    This is one property read two ways. `persona` is matched ALONE (ruling 6)
+    precisely so a returning session can pull what accumulated in its absence —
+    the caller's own identity is never a parameter of the query. That is what
+    makes the service-account lane failure unexpressible rather than merely
+    unused (the D-V1 negative control), and it is the same reason the endpoint
+    cannot tell one caller's request from another's.
+
+    The trust boundary, stated so a later reader need not re-derive it: every
+    credential here belongs to a session in this fleet. If that stops being true
+    — an outside integration, a shared key, a key that outlives its seat — this
+    becomes a real hole, and closing it means binding keys to personas, which
+    they are not today. Filed and closed as `fd245188`.
+    """
+    try:
+        max_age_hours = _undelivered_max_age_hours()
+        since_dt = None
+        if since:
+            try:
+                since_dt = datetime.fromisoformat( since )
+            except ValueError:
+                raise HTTPException( status_code=400, detail="`since` must be an ISO-8601 timestamp" )
+
+        def _fetch_owed_sync():
+            # Lever B: blocking DB read off the event loop — fires per session-return.
+            with get_db() as session:
+                repo  = NotificationRepository( session )
+                items = repo.get_answers_owed_for_persona(
+                    persona, limit=limit, max_age_hours=max_age_hours, since=since_dt
+                )
+                return [ _project_owed_answer( n, requesting_session_hash8=session_hash8 ) for n in items ]
+
+        answers = await asyncio.to_thread( _fetch_owed_sync )
+        return {
+            "status"      : "success",
+            "owed_count"  : len( answers ),
+            "answers"     : answers,
+            "timestamp"   : get_local_timestamp()
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print( f"[NOTIFY] Error getting answers-owed for persona {persona!r}: {str( e )}" )
+        raise HTTPException( status_code=500, detail=f"Failed to get answers owed: {str( e )}" )
+
+
+@router.post(
+    "/notifications/answers-owed/ack",
+    summary     = "Ack a handed-back answer (mark delivered)",
+    description = "Setter (b)/(c) of the §4.3 receipt-gated contract: stamp answer_delivered_at for a notification the client has CONSUMED. Ack on consume, never on serve — a dropped serve response must leave the answer owed. The row is never deleted (ruling 2)."
+)
+async def ack_answer_owed(
+    authenticated_user_id: Annotated[str, Depends(require_api_key_or_jwt)],
+    request_body: Dict[str, Any] = Body(..., description="Request body with notification_id")
+):
+    """
+    Ack an owed answer as consumed — the pull/re-attach receipt (§4.3 setters b/c).
+
+    Requires:
+        - a valid API key or Bearer JWT
+        - request_body.notification_id is a valid UUID string
+
+    Ensures:
+        - answer_delivered_at is stamped so catch-up will not re-surface the row
+        - the row is NOT deleted (ruling 2)
+
+    Raises:
+        - HTTPException 422 if notification_id is missing
+        - HTTPException 404 if the notification does not exist
+        - HTTPException 500 on update failure
+    """
+    notification_id = request_body.get( "notification_id" )
+    if not notification_id:
+        raise HTTPException( status_code=422, detail="notification_id is required in request body" )
+    try:
+        def _ack_sync():
+            with get_db() as session:
+                repo   = NotificationRepository( session )
+                marked = repo.mark_answer_delivered( uuid.UUID( notification_id ) )
+                return marked is not None
+
+        found = await asyncio.to_thread( _ack_sync )
+        if not found:
+            raise HTTPException( status_code=404, detail=f"Notification {notification_id} not found" )
+        return {
+            "status"          : "success",
+            "notification_id" : notification_id,
+            "timestamp"       : get_local_timestamp()
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print( f"[NOTIFY] Error acking answer {notification_id}: {str( e )}" )
+        raise HTTPException( status_code=500, detail=f"Failed to ack answer: {str( e )}" )
+
+
+@router.get(
+    "/notifications/response/{notification_id}",
+    summary     = "Read one notification's response state (re-attach poll target)",
+    description = "PURE READ (§4.5 E-b) of {state, response_value, responded_at} for one notification. The MCP re-attach poll reads this after its SSE stream dies to learn whether the human answered. **No ack** — serving does NOT set answer_delivered_at; the ack is the explicit companion POST /answers-owed/ack. Registered BEFORE /notifications/{user_id} so the static path is not captured as a {user_id}."
+)
+async def get_notification_response(
+    authenticated_user_id: Annotated[str, Depends(require_api_key_or_jwt)],
+    notification_id: str
+):
+    """
+    Read one notification's response state — the re-attach poll target (§4.5 step 2).
+
+    Requires:
+        - a valid API key or Bearer JWT
+        - notification_id is a UUID string
+
+    Ensures:
+        - returns { state, response_value, responded_at } (responded_at ISO or None)
+        - PURE READ — never sets answer_delivered_at (serving is not a receipt); the
+          caller decides landed-ness on `responded_at IS NOT NULL` and acks separately
+        - 404 when the notification does not exist
+
+    Raises:
+        - HTTPException 404 if the notification does not exist
+        - HTTPException 500 on read failure
+    """
+    try:
+        def _fetch_response_sync():
+            with get_db() as session:
+                repo = NotificationRepository( session )
+                n    = repo.get_by_id( uuid.UUID( notification_id ) )
+                if n is None:
+                    return None
+                return {
+                    "state"          : n.state,
+                    "response_value" : n.response_value,
+                    "responded_at"   : n.responded_at.isoformat() if n.responded_at else None,
+                }
+
+        result = await asyncio.to_thread( _fetch_response_sync )
+        if result is None:
+            raise HTTPException( status_code=404, detail=f"Notification {notification_id} not found" )
+        return {
+            "status"          : "success",
+            "notification_id" : notification_id,
+            **result,
+            "timestamp"       : get_local_timestamp()
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print( f"[NOTIFY] Error reading response for {notification_id}: {str( e )}" )
+        raise HTTPException( status_code=500, detail=f"Failed to read notification response: {str( e )}" )
 
 
 @router.post(

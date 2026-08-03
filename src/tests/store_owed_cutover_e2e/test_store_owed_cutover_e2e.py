@@ -67,6 +67,7 @@ def drive_oracle( monkeypatch, e2e_server, tmp_path ):
             "poke_cap"                       : 1000,
             "count_inbound_questions_as_owed": False,
             "owed_source_from_store"         : flag,
+            "verification_threshold_seconds" : 600,
         } )
         monkeypatch.setattr( stop, "load_task_store_settings", lambda: {
             "enabled"           : True,
@@ -78,7 +79,11 @@ def drive_oracle( monkeypatch, e2e_server, tmp_path ):
         monkeypatch.setattr( stop, "resolve_project_name", lambda: project )
 
         # ── neutralize non-seam side-effects ───────────────────────────────────
-        monkeypatch.setattr( stop, "read_hold", lambda *a, **k: None )
+        # The hold seam MOVED: stop imports `read_hold_resilient` (bug 1789f197 —
+        # resolve across both the session cwd AND the project root), not the old
+        # `read_hold`. Patch follows the seam. `None` is the REAL return shape for
+        # "no hold on file", so this neutralizes without inventing a shape.
+        monkeypatch.setattr( stop, "read_hold_resilient", lambda *a, **k: None )
         monkeypatch.setattr( stop, "get_poke_count", lambda _sid: 0 )
         monkeypatch.setattr( stop, "increment_poke_count", _noop )
         monkeypatch.setattr( stop, "_notify_cap_reached", _noop )
@@ -155,13 +160,39 @@ def test_s1_store_is_the_source( clean_tasks, drive_oracle, tmp_path ):
 
     assert result[ "owed_items" ] == store_owed == 7
     assert result[ "work_owed" ] is True
-    # receipt assertions: count_only flowed over real HTTP for BOTH owed statuses
-    counts_only = [ r for r in result[ "http_new" ] if r[ "query" ].get( "count_only" ) == "true" ]
-    assert len( counts_only ) == 2, result[ "http_new" ]
-    assert { r[ "query" ][ "status" ] for r in counts_only } == { "queued", "in_progress" }
-    assert all( r[ "query" ][ "owner_persona" ] == persona for r in counts_only )
-    assert all( r[ "query" ][ "project" ] == project for r in counts_only )
+    # ── receipt assertions — scoped by OWNER FIELD, not by request count ───────
+    # SHAPE CHANGE (2026-07-19 PARKED build): the old "one count_only GET per
+    # owed status, summed client-side" loop is DELETED — query_owed now issues
+    # ONE request behind `owed_only=true` and the SERVER owns the status set
+    # (task_store_client.query_owed docstring). The second count_only request on
+    # the wire is NOT ours: it is Face A's manager-backlog read
+    # (_backlog_count_from_store, `accountable_manager=`), a different consumer.
+    #
+    # ⚠️ The assertion this replaces (`len( counts_only ) == 2`) went on PASSING
+    # across that change while measuring something else entirely — two CONSUMERS
+    # instead of two STATUSES. It is restated by owner field so it can no longer
+    # be satisfied by an unrelated caller appearing on the wire.
+    owner_counts = [ r for r in result[ "http_new" ]
+                     if r[ "query" ].get( "count_only" ) == "true"
+                     and "owner_persona" in r[ "query" ] ]
+    assert len( owner_counts ) == 1, result[ "http_new" ]
+    owner_q = owner_counts[ 0 ][ "query" ]
+    assert owner_q[ "owed_only" ]      == "true"
+    assert owner_q[ "owner_persona" ]  == persona
+    assert owner_q[ "project" ]        == project
+    # TRIPWIRE — NO DEMONSTRATED RED, and that is stated rather than implied.
+    # It guards a silent RESTORATION of the retired per-status client loop. Every
+    # mutant that re-adds a client-side `status=` was caught EARLIER by the count
+    # assertions above, because the server still HONORS status (measured: adding
+    # status=queued to an owed_only request dropped the count 7 -> 4). So this
+    # line can only fire in a future where the server stops honoring `status`
+    # while a client re-adds it — a scenario that cannot be simulated from the
+    # client today. Kept as a cheap tripwire, NOT counted as armed coverage.
+    assert "status" not in owner_q, \
+        "owed status set is SERVER-owned behind owed_only; a client-side status= is the deleted shape"
     assert len( result[ "sql_new" ] ) >= 2, "expected real COUNT(*) SQL on lupin_db_test"
+    assert any( "owner_persona" in s[ "statement" ] for s in result[ "sql_new" ] ), \
+        "the owed COUNT(*) must be owner-scoped SQL, not inferred from the backlog read"
 
 
 # ── S2 — transcript replay is DEAD under the flag (inverse) ─────────────────────
@@ -218,9 +249,17 @@ def test_s5_flag_off_negative_control( clean_tasks, drive_oracle, tmp_path ):
 
     assert result[ "owed_items" ] == transcript_owed == 5   # transcript replay IS the source under OFF
     assert result[ "work_owed" ] is True
-    # the store must NOT have been touched under the flag-OFF path
-    assert result[ "http_new" ] == [ ], "flag OFF must not hit the store over HTTP"
-    assert result[ "sql_new" ] == [ ], "flag OFF must not run a store COUNT"
+    # The store must not have been read FOR THE OWED COUNT under flag OFF.
+    # NOT "no HTTP at all": Face A's manager-backlog read
+    # (_backlog_count_from_store, `accountable_manager=`) is a DIFFERENT consumer
+    # and is deliberately NOT gated by owed_source_from_store — the flag governs
+    # the owed-count SOURCE, not every store read in the hook. The control is
+    # therefore stated by owner field: an owner_persona-scoped count IS the
+    # cutover read, and under OFF there must be none of them.
+    owner_http = [ r for r in result[ "http_new" ] if "owner_persona" in r[ "query" ] ]
+    assert owner_http == [ ], "flag OFF must not read the OWED COUNT from the store over HTTP"
+    owner_sql  = [ s for s in result[ "sql_new" ] if "owner_persona" in s[ "statement" ] ]
+    assert owner_sql == [ ], "flag OFF must not run an owner-scoped store COUNT"
 
 
 # ── S6 — lupin AND non-lupin/plan dimension (project-scoped read) ───────────────
@@ -238,6 +277,101 @@ def test_s6a_lupin_session_reads_only_lupin_rows( clean_tasks, drive_oracle, tmp
 
     assert result[ "owed_items" ] == 6, "lupin session must NOT see the 9 plan rows"
     assert all( r[ "query" ][ "project" ] == "lupin" for r in result[ "http_new" ] if "project" in r[ "query" ] )
+
+
+def test_s7_queued_row_with_future_chase_still_counts_as_owed( clean_tasks, drive_oracle, tmp_path ):
+    """A SCHEDULED queued row is still OWED — the fence, ruled 2026-07-21.
+
+    THE GAP THIS CLOSES (found on row 9bb4debe, reported before it could bite):
+    every other scenario here seeds rows with a NULL chase, so this suite — the
+    instrument sitting closest to the owed oracle — was GREEN-BLIND to any change
+    on the chase axis. The `next_chase_ts` decoupling (Arnold, rows 86ce4c43 /
+    9bb4debe) makes a chase legal without a blocker, and the tempting way to
+    implement it is to copy the `parked` suppression clause onto `queued`.
+
+    THAT COPY IS THE DEFECT THIS TEST EXISTS TO CATCH. `parked` earns its
+    suppression because A HUMAN RULED THE ROW NOT-NOW and must quote a
+    park_reason; the chase is the bounded expiry on that ruling. A chase on a
+    queued row is a SCHEDULE WITH NOBODY'S RULING BEHIND IT — suppressing on it
+    would let any caller silence a row from the owed oracle with a timestamp, no
+    human in the loop and no reason to refute.
+
+    Ruled by Mr. Radio 2026-07-21: owed semantics are FENCED — a scheduled row
+    does NOT stop counting as owed.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    persona, project = "arnold", "lupin"
+    future = datetime.now( timezone.utc ) + timedelta( hours=6 )
+    store_owed = seed_store_rows( persona, project, n_queued=3, next_chase_ts=future )
+    tp = tmp_path / "s7.jsonl"
+    write_transcript( tp, n_owed=0 )
+
+    result = drive_oracle( flag=True, persona=persona, project=project, transcript_path=tp )
+    _report( "S7 scheduled-is-still-owed", flag=True, persona=persona, project=project,
+             store_owed=f"{store_owed} queued, chase {future.isoformat()}",
+             transcript_owed=0, expected=store_owed, result=result )
+
+    assert store_owed == 3
+    assert result[ "owed_items" ] == 3, \
+        "a queued row with a FUTURE chase must still count as owed — suppressing on the " \
+        "chase alone would let a bare timestamp silence a row no human ruled not-now"
+    assert result[ "work_owed" ] is True
+
+
+def test_s8_front_door_create_keeps_the_chase_and_the_row_is_owed( clean_tasks, e2e_server, drive_oracle, tmp_path ):
+    """FRONT DOOR: POST a queued row WITH a chase — it must survive the write.
+
+    Row 9bb4debe item 4. S7 pins what the ORACLE does with a scheduled row, but
+    seeds it by direct ORM INSERT because the write path could not produce one:
+    create_with_event nulled next_chase_ts for every non-blocked mint and said so
+    ("IGNORING any stray values"). This test comes through the REAL router →
+    repository → SQL, so it is the one that goes RED if that discard returns.
+
+    Measured before the fix (2026-07-21): two operator gates awaiting Rick were
+    minted with a chase and stored with null; across the complete operator-gate
+    population, 47 of 51 carried no chase and ZERO queued rows carried one.
+    """
+    import json
+    import urllib.request
+    from datetime import datetime, timedelta, timezone
+
+    persona, project = "arnold", "lupin"
+    future  = ( datetime.now( timezone.utc ) + timedelta( hours=6 ) ).replace( microsecond=0 )
+    payload = {
+        "item_class"    : "task",
+        "title"         : "s8 front-door chase",
+        "project"       : project,
+        "created_by"    : f"{persona}@e2e-session",
+        "owner_persona" : persona,
+        "status"        : "queued",
+        "next_chase_ts" : future.isoformat(),
+    }
+    req = urllib.request.Request(
+        f"{e2e_server[ 'base_url' ]}/api/tasks",
+        data    = json.dumps( payload ).encode(),
+        headers = { "Content-Type": "application/json", "X-API-Key": "e2e" },
+        method  = "POST",
+    )
+    with urllib.request.urlopen( req, timeout=5 ) as response:
+        created = json.loads( response.read() )
+
+    print( f"\n┌─ S8 front-door create " + "─" * 39 )
+    print( f"│ sent next_chase_ts={future.isoformat()}" )
+    print( f"│ got  next_chase_ts={created[ 'next_chase_ts' ]!r} status={created[ 'status' ]!r}" )
+    print( "└" + "─" * 61 )
+
+    assert created[ "status" ] == "queued"
+    assert created[ "next_chase_ts" ] is not None, \
+        "a queued create must PERSIST the chase it was given — a silent null here is 9bb4debe"
+    assert datetime.fromisoformat( created[ "next_chase_ts" ] ) == future
+
+    # ...and the scheduled row it just made still counts as owed (the S7 fence,
+    # reached through the front door instead of an ORM insert).
+    tp = tmp_path / "s8.jsonl"
+    write_transcript( tp, n_owed=0 )
+    result = drive_oracle( flag=True, persona=persona, project=project, transcript_path=tp )
+    assert result[ "owed_items" ] == 1, "a front-door scheduled row must still count as owed"
 
 
 def test_s6b_plan_session_reads_only_plan_rows( clean_tasks, drive_oracle, tmp_path ):

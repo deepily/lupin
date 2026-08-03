@@ -41,3 +41,50 @@ def _isolate_heartbeat_events_dir( tmp_path, monkeypatch ):
     monkeypatch.setattr(
         heartbeat_events, "FLEET_EVENTS_DIR", tmp_path / "heartbeat-events"
     )
+
+
+@pytest.fixture( autouse=True )
+def _isolate_hook_log_dir( tmp_path, monkeypatch ):
+    """
+    Redirect the hook-event log dir (hook_common._logs_dir) to a per-test tmp dir
+    via LUPIN_HOOK_LOG_DIR — the Lever-P SET site (item 6fc8d78d, 2026-07-07).
+
+    Why (the sibling of the FLEET-dir isolation above): once the Stop hook is LIVE,
+    ANY unit test driving log_to_stream / log_payload (the Branch-C _run_heartbeat
+    path, the oracle `heartbeat_oracle` line, etc.) appended to the REAL production
+    io/claude_code_hooks/logs/hook-events.jsonl. test_heartbeat_integration —
+    which monkeypatches the persona to "Mr. Radio 🦉" and drives synthetic session
+    ids sidC2/sidC3/sidC6b — thereby wrote 1,259+ synthetic `sidC*` rows into the
+    prod log, manufacturing a false "Mr-Radio-only" arbiter false-poke signature
+    that María's overnight watch counted as 336 spurious pokes.
+
+    hook_common._logs_dir resolves the dir at CALL time and honors this env var, so
+    the redirect holds regardless of import order. Tests that need the production
+    default (env UNSET) monkeypatch.delenv it locally.
+    """
+    monkeypatch.setenv( "LUPIN_HOOK_LOG_DIR", str( tmp_path / "hook-logs" ) )
+
+
+# ---------------------------------------------------------------------------
+# RETIRED 2026-07-27 — the `_PG_ISOLATION_MODULES` allowlist and its
+# `_isolate_pg_vector_store` per-test-schema fixture (bug cfcbb703 Family B).
+#
+# The fixture worked, but its gate was a hand-kept set of TWO module names. Any
+# module that constructed a postgres-routed class and was not on the list inherited
+# the hazard by default, silently — which is exactly how `test_answer_is_correct`
+# spent three weeks writing into the live dev store with the remedy already in the
+# tree (bug d621b111).
+#
+# Rick's ruling on decision 2b20a6d6 (2026-07-27) forbids the shape outright:
+# "I absolutely do not want any test touching a live dev data store! If it's not
+# isolated then it needs to be removed or fixed." A list of sanctioned offenders is
+# neither.
+#
+# Both covered modules — test_data_origin and test_proxy_decision_embeddings — now
+# carry their own autouse `_pin_lancedb_backend` fixture, which pins the backend flag
+# so their tmpdir LanceDB stores are REAL isolation rather than a shared-store
+# redirect. `resolve_lancedb_path` (vector_store_backend.py) now raises at
+# construction if any future test hands a db_path to a postgres-routed class, so a
+# new offender fails loudly at its own call site instead of needing to be remembered
+# here.
+# ---------------------------------------------------------------------------

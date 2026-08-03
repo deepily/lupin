@@ -53,8 +53,8 @@ class TestPodcastConfig:
     def test_default_host_personalities( self ):
         """Test default host configurations."""
         config = PodcastConfig()
-        assert config.host_a_personality.name == "Alex"
-        assert config.host_b_personality.name == "Jordan"
+        assert config.host_a_personality.name == "Maria"
+        assert config.host_b_personality.name == "Mr. Radio"
         assert config.host_a_personality.role == "Curious Questioner"
         assert config.host_b_personality.role == "Knowledgeable Explainer"
 
@@ -257,8 +257,8 @@ class TestPromptGeneration:
             host_b_personality     = DEFAULT_EXPERT_HOST,
             target_duration_minutes = 10,
         )
-        assert "Alex" in prompt
-        assert "Jordan" in prompt
+        assert "Maria" in prompt
+        assert "Mr. Radio" in prompt
         assert "10 minutes" in prompt
 
 
@@ -327,7 +327,7 @@ class TestPersonalityPrompts:
             host_personality = DEFAULT_CURIOUS_HOST,
             is_curious_role  = True,
         )
-        assert "Alex" in section
+        assert "Maria" in section
         assert "CURIOUS HOST" in section
 
     def test_dynamic_duo_description( self ):
@@ -336,8 +336,8 @@ class TestPersonalityPrompts:
             host_a = DEFAULT_CURIOUS_HOST,
             host_b = DEFAULT_EXPERT_HOST,
         )
-        assert "Alex" in desc
-        assert "Jordan" in desc
+        assert "Maria" in desc
+        assert "Mr. Radio" in desc
         assert "INTERACTION DYNAMICS" in desc
 
     def test_create_personality_from_description( self ):
@@ -350,6 +350,60 @@ class TestPersonalityPrompts:
         assert custom.name == "Dr. Chen"
         assert custom.expertise_level == "expert"
         assert "enthusiastic" in custom.tone
+
+
+class TestLoudFailureOnLLMError:
+    """
+    Bug 4c49cde4: when the bounded-CC LLM call fails, the orchestrator must fail
+    LOUDLY (raise PodcastGenerationError) instead of silently returning a fake
+    "Research Topic" / 0-segment placeholder that reaches the review gate looking
+    review-ready.
+    """
+
+    def _make_orchestrator( self ):
+        from cosa.agents.podcast_generator.orchestrator import PodcastOrchestratorAgent
+        return PodcastOrchestratorAgent(
+            research_doc_path = "/tmp/does-not-matter.md",
+            user_id           = "test-user",
+        )
+
+    @pytest.mark.asyncio
+    async def test_analysis_failure_raises_not_placeholder( self ):
+        from cosa.agents.podcast_generator.orchestrator import PodcastGenerationError
+
+        orch = self._make_orchestrator()
+        # Inject a mock API client whose analysis call raises (the revoked-token 401 shape).
+        mock_client = Mock()
+        mock_client.call_for_analysis = AsyncMock(
+            side_effect = Exception( "Claude Code returned an error result: success" )
+        )
+        orch._api_client = mock_client
+
+        with pytest.raises( PodcastGenerationError ) as exc_info:
+            await orch._analyze_content_async( "some research content" )
+
+        # User-facing message, and the original error is chained (not swallowed).
+        assert "Podcast generation failed" in str( exc_info.value )
+        assert isinstance( exc_info.value.__cause__, Exception )
+
+    @pytest.mark.asyncio
+    async def test_script_failure_raises_not_empty_script( self ):
+        from cosa.agents.podcast_generator.orchestrator import PodcastGenerationError
+
+        orch = self._make_orchestrator()
+        mock_client = Mock()
+        mock_client.call_for_script = AsyncMock(
+            side_effect = Exception( "Claude Code returned an error result: success" )
+        )
+        orch._api_client = mock_client
+
+        analysis = ContentAnalysis( main_topic="Test Topic", key_subtopics=[] )
+
+        with pytest.raises( PodcastGenerationError ) as exc_info:
+            await orch._generate_script_async( "some research content", analysis )
+
+        assert "Podcast generation failed" in str( exc_info.value )
+        assert isinstance( exc_info.value.__cause__, Exception )
 
 
 def quick_smoke_test():

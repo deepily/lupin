@@ -81,7 +81,15 @@ def patched_main( monkeypatch ):
         "_resolve_cc_pid"                  : MagicMock( return_value=TEST_CC_PID ),
         "_find_tmux_session"               : MagicMock( return_value=None ),
         "_cleanup_old_listener"            : MagicMock(),
-        "_allocate_voice_persona_via_http" : MagicMock( return_value=None ),
+        # ( persona, failure ) since candidate A (2026-07-19): the give-up is
+        # structured so Phase 7 can route it into the session's boot context.
+        # Modelled as a REAL failure shape, not ( None, None ) — that tuple
+        # cannot occur in production and a fixture should not teach otherwise.
+        "_allocate_voice_persona_via_http" : MagicMock( return_value=(
+            None,
+            { "stage": "transport", "exception": "TimeoutError", "message": "timed out",
+              "attempts": 3, "server_url": "http://srv" }
+        ) ),
         "_release_voice_persona_via_http"  : MagicMock( return_value=False ),
         "send_tts"                         : MagicMock(),
         "_spawn_listener"                  : MagicMock( return_value=None ),
@@ -252,6 +260,9 @@ class TestReleaseAndReAssignWiring:
 # EVERY Phase 4.5 call — chain or plain random — or the reserve only protects
 # chained boots (Tiberius's build-time check).
 # Design: src/rnd/v0.1.8/2026.06.11-fleet-roster-env-file-and-reserve-from-random.md
+#         src/rnd/2026.06.22-fleet-roster-to-user-level-migration-spec.md (PIP, María):
+#         the roster moved to the user-level ~/.claude/fleet-roster.env; the
+#         COSA_VOICE_MANAGERS__* VAR contract asserted here is UNCHANGED by that move.
 
 class TestDeclaredManagersTransport:
     """Call-site threading of declared_managers into _allocate_voice_persona_via_http."""
@@ -320,11 +331,12 @@ class TestAllocateHttpDeclaredManagersParam:
         import urllib.parse
         captured = [ ]
         self._patch_transport( monkeypatch, captured )
-        persona = register_session._allocate_voice_persona_via_http(
+        persona, failure = register_session._allocate_voice_persona_via_http(
             "http://srv", "lupin", "sid-1",
             declared_managers=[ "Mr. Radio", "Tiberius" ]
         )
         assert persona == { "name": "nora" }
+        assert failure is None
         query = urllib.parse.parse_qs( urllib.parse.urlsplit( self._alloc_url( captured ) ).query )
         assert query[ "declared_managers" ] == [ "Mr. Radio,Tiberius" ]
         assert "persona_chain" not in query
@@ -505,3 +517,52 @@ class TestResolveWindowTokens:
     def test_nonpositive_env_falls_back( self, monkeypatch ):
         monkeypatch.setenv( "LUPIN_CC_WINDOW_TOKENS", "-5" )
         assert register_session._resolve_window_tokens() == 1_000_000
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TestSpawnLineageStamp — owner-lineage drift fix (2026-06-22)
+# A manager-spawned worker stamps spawned_by + the persona-at-spawn SNAPSHOT
+# (spawned_by_persona) onto its bridge so the arbiter resolves the TRUE spawning
+# manager for a finished/dead worker WITHOUT re-deriving the manager session's
+# drift-prone CURRENT persona.
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestSpawnLineageStamp:
+    def test_persona_snapshot_stamped_on_bridge( self, isolated_session_dir, patched_main, monkeypatch ):
+        """COSA_VOICE_SPAWNED_BY_PERSONA present → frozen onto the bridge."""
+        monkeypatch.setenv( "COSA_VOICE_SPAWNED_BY",         "mgr-session-uuid" )
+        monkeypatch.setenv( "COSA_VOICE_SPAWNED_BY_PERSONA", "Mr. Radio" )
+        monkeypatch.setenv( "COSA_VOICE_ROLE",               "author" )
+
+        register_session.main()
+
+        bridge = _read_bridge( isolated_session_dir )
+        assert bridge[ "spawned_by" ]         == "mgr-session-uuid"
+        assert bridge[ "spawned_by_persona" ] == "Mr. Radio"      # the frozen snapshot
+        assert bridge[ "role" ]               == "author"
+        assert bridge[ "speakerphone_on" ]    is False
+
+    def test_no_persona_env_omits_snapshot( self, isolated_session_dir, patched_main, monkeypatch ):
+        """spawned_by present but NO persona env → snapshot omitted (legacy path:
+        resolver falls back to re-derivation). The False branch of the stamp gate."""
+        monkeypatch.setenv(  "COSA_VOICE_SPAWNED_BY", "mgr-session-uuid" )
+        monkeypatch.delenv( "COSA_VOICE_SPAWNED_BY_PERSONA", raising=False )
+
+        register_session.main()
+
+        bridge = _read_bridge( isolated_session_dir )
+        assert bridge[ "spawned_by" ] == "mgr-session-uuid"
+        assert "spawned_by_persona" not in bridge
+
+    def test_no_spawned_by_env_no_lineage_stamp( self, isolated_session_dir, patched_main, monkeypatch ):
+        """No COSA_VOICE_SPAWNED_BY (an ordinary interactive session) → the whole
+        lineage block is skipped; no spawned_by / spawned_by_persona on the bridge.
+        (Explicit delenv because a SPAWNED test-runner inherits the var.)"""
+        monkeypatch.delenv( "COSA_VOICE_SPAWNED_BY",         raising=False )
+        monkeypatch.delenv( "COSA_VOICE_SPAWNED_BY_PERSONA", raising=False )
+
+        register_session.main()
+
+        bridge = _read_bridge( isolated_session_dir )
+        assert "spawned_by" not in bridge
+        assert "spawned_by_persona" not in bridge

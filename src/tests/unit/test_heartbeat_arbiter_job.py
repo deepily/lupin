@@ -14,6 +14,7 @@ per-poll-exception-swallowed) + do_all.
 
 Venue: :7999-eligible / local — fully mocked I/O, no server, sub-second.
 """
+import datetime
 import json
 import os
 import sys
@@ -145,6 +146,42 @@ def test_last_question_asked_display( tmp_path ):
     job = _make_job( tmp_path, manager_recipient="Tiberius", poll_seconds=30 )
     s = job.last_question_asked()
     assert "Heartbeat arbiter" in s and "Tiberius" in s and "30s" in s
+
+
+# ── 5a1f17f8 (b): durable event offsets across restarts ───────────────────────
+
+def test_offsets_state_path_none_is_in_memory_only( tmp_path ):
+    """Default (no offsets_state_path) → offsets start empty + are NOT persisted:
+    today's in-memory behavior is preserved exactly (the inert branch)."""
+    job = _make_job( tmp_path )                                  # no offsets_state_path
+    assert job._offsets == { } and job._offsets_state_path is None
+    _write_events( str( tmp_path ), "s1", _event( "s1", "honored", persona="Alice" ) )
+    job._poll_once()
+    # nothing written anywhere; offsets advanced only in memory
+    assert job._offsets.get( "s1", 0 ) > 0
+
+
+def test_offsets_loaded_on_init_from_state_path( tmp_path ):
+    """A restart RESUMES from the persisted offsets (bug 5a1f17f8 (b)): the durable
+    store seeds self._offsets so tail_fleet_events does NOT re-read from byte 0."""
+    import json as _json
+    state = tmp_path / "offsets.json"
+    state.write_text( _json.dumps( { "s1": 999999 } ) )         # a prior run's saved offset
+    job = _make_job( tmp_path, offsets_state_path=str( state ) )
+    assert job._offsets == { "s1": 999999 }                     # resumed, not fresh {}
+
+
+def test_offsets_saved_after_poll( tmp_path ):
+    """After each poll the advanced offsets are persisted so the NEXT process start
+    resumes here — no replay of historical cap_reached."""
+    import json as _json
+    state = tmp_path / "offsets.json"
+    _write_events( str( tmp_path ), "s1", _event( "s1", "honored", persona="Alice" ) )
+    job = _make_job( tmp_path, offsets_state_path=str( state ) )
+    assert job._offsets == { }                                  # first-ever start (file absent → {})
+    job._poll_once()
+    persisted = _json.loads( state.read_text() )
+    assert persisted.get( "s1", 0 ) > 0 and persisted == job._offsets   # saved == in-memory
 
 
 # ── _poll_once composition ────────────────────────────────────────────────────
@@ -314,20 +351,413 @@ def test_clear_on_resume_drops_edge_state( tmp_path ):
     assert job._ping_attempts == { }
 
 
+# ── bc1bc373 staleness-filter (dead hold → zero phantom edges) ──────────────────
+
+def _live_hold( now_iso=NOW_ISO ):
+    """A fresh, honored, work-owed hold (held 10s before now)."""
+    held = ( datetime.datetime.fromisoformat( now_iso ) - datetime.timedelta( seconds=10 ) ).isoformat()
+    return { "held_at": held, "ttl_seconds": 900, "work_owed": True, "reason": "waiting on Bob" }
+
+
+def _dead_hold( now_iso=NOW_ISO ):
+    """An EXPIRED hold (held 10_000s before now, ttl 900) → stale."""
+    held = ( datetime.datetime.fromisoformat( now_iso ) - datetime.timedelta( seconds=10_000 ) ).isoformat()
+    return { "held_at": held, "ttl_seconds": 900, "work_owed": True, "reason": "stale" }
+
+
+def test_poll_once_dead_hold_drops_phantom_ping( tmp_path ):
+    """AC B.1: s1's hold is DEAD (expired) → its peer:Bob edge contributes ZERO
+    edges → NO 'Bob is blocking' phantom ping fires."""
+    _write_events( str( tmp_path ), "s1",
+                   _event( "s1", "honored", awaiting="peer:Bob", persona="Alice" ) )
+    gw  = FakeGateway( who_rows=[ { "session_id": "s1", "persona_name": "Alice", "last_post_ts": NOW_ISO } ] )
+    job = _make_job( tmp_path, gateway=gw, hold_reader_fn=lambda sid: _dead_hold() )
+    summary = job._poll_once()
+    assert summary[ "edges" ] == 0
+    assert summary[ "pings_fired" ] == 0
+    assert gw.sent == [ ]
+
+
+def test_poll_once_live_hold_keeps_ping( tmp_path ):
+    """AC B.2: s1's hold is LIVE+honored+work-owed → its peer edge survives → the
+    blocker is still pinged (no over-filtering regression)."""
+    _write_events( str( tmp_path ), "s1",
+                   _event( "s1", "honored", awaiting="peer:Bob", persona="Alice" ) )
+    gw  = FakeGateway( who_rows=[ { "session_id": "s1", "persona_name": "Alice", "last_post_ts": NOW_ISO } ] )
+    job = _make_job( tmp_path, gateway=gw, hold_reader_fn=lambda sid: _live_hold() )
+    summary = job._poll_once()
+    assert summary[ "edges" ] == 1
+    assert summary[ "pings_fired" ] == 1
+    assert gw.sent[ 0 ][ 0 ] == "Bob"
+
+
+def test_poll_once_no_hold_reader_is_inert( tmp_path ):
+    """Reader unwired (default None) → filter inert → today's behavior (pings)."""
+    _write_events( str( tmp_path ), "s1",
+                   _event( "s1", "honored", awaiting="peer:Bob", persona="Alice" ) )
+    gw  = FakeGateway( who_rows=[ { "session_id": "s1", "persona_name": "Alice", "last_post_ts": NOW_ISO } ] )
+    job = _make_job( tmp_path, gateway=gw )                          # no hold_reader_fn
+    summary = job._poll_once()
+    assert summary[ "edges" ] == 1 and summary[ "pings_fired" ] == 1
+
+
+def test_poll_once_stale_participant_store_backed_cycle_still_escalates( tmp_path ):
+    """María review of bc1bc373/c88a7431 (CHANGES-REQUESTED regression): a REAL
+    store-backed deadlock must STILL escalate even when a participant's hold is
+    stale. alice (alive but with an EXPIRED hold) ↔ bob mutually hold (peer cycle);
+    alice's dead hold filters her edge out of the ADVISORY graph so graph["cycles"]
+    is EMPTY — the OLD feed (graph["cycles"]) would MISS the deadlock — but the store
+    carries a real alice↔bob blocked_by ring, so the UNFILTERED escalation feed
+    (find_deadlock_cycles(build_wait_edges(fleet_view))) STILL sees it and escalates."""
+    _write_events( str( tmp_path ), "s1", _event( "s1", "honored", awaiting="peer:bob",   persona="alice" ) )
+    _write_events( str( tmp_path ), "s2", _event( "s2", "honored", awaiting="peer:alice", persona="bob"   ) )
+    gw = FakeGateway( who_rows=[
+        { "session_id": "s1", "persona_name": "alice", "last_post_ts": NOW_ISO },
+        { "session_id": "s2", "persona_name": "bob",   "last_post_ts": NOW_ISO },
+    ] )
+    store_cycle = {
+        "alice": [ { "id": "a1", "status": "in_progress", "gate_class": "none",
+                     "blocked_by": [ { "kind": "persona", "id": "bob" } ] } ],
+        "bob":   [ { "id": "b1", "status": "in_progress", "gate_class": "none",
+                     "blocked_by": [ { "kind": "persona", "id": "alice" } ] } ],
+    }
+    escal = [ ]
+    job = _make_job( tmp_path, gateway=gw,
+                     hold_reader_fn         = lambda sid: _dead_hold() if sid == "s1" else None,
+                     owed_work_fn           = lambda names: store_cycle,
+                     deadlock_dwell_seconds = 0,                     # fire on first corroborated sight
+                     notify_fn              = lambda msg, *a, **k: escal.append( msg ) )
+    summary = job._poll_once()
+    # the ADVISORY graph is FILTERED empty (alice's dead-hold edge dropped) → the OLD
+    # graph["cycles"] feed would have MISSED this real deadlock...
+    assert summary[ "cycles" ] == 0
+    # ...but the UNFILTERED escalation feed (find_deadlock_cycles(build_wait_edges(...)))
+    # sees the store-backed alice↔bob ring → the deadlock STILL escalates. Asserting the
+    # store-corroborated DEADLOCK message NAMES BOTH participants proves it fired via the
+    # unfiltered store-backed path specifically (María's ask: a future re-filter of the
+    # escalation feed → empty cycles → no DEADLOCK escalation → this fails, never silent).
+    deadlock_msgs = [ m for m in escal if "DEADLOCK" in m and "store-corroborated" in m ]
+    assert deadlock_msgs, escal
+    assert "alice" in deadlock_msgs[ 0 ] and "bob" in deadlock_msgs[ 0 ]
+
+
+def test_poll_once_dead_session_participant_store_backed_cycle_still_escalates( tmp_path ):
+    """8a450183 :1018 invariant — the SESSION-freshness AXIS twin of the hold-axis
+    test above (Krishna's veto domain). A REAL store-backed deadlock must STILL
+    escalate even when a ring participant is a beyond-alive-threshold (DEAD) SESSION.
+
+    alice is a ~12h-stale session (bridge-absent → offline) holding peer:bob; bob is
+    fresh holding peer:alice. The NEW per-session freshness gate drops alice's edge
+    from the FILTERED advisory graph (summary['cycles'] == 0 — the OLD graph['cycles']
+    feed would MISS the deadlock), but the store carries a real alice↔bob blocked_by
+    ring, so the UNFILTERED escalation feed at :1018
+    (find_deadlock_cycles(build_wait_edges(fleet_view)) — passes NO now/threshold)
+    STILL sees the ring and escalates. This LOCKS the invariant against the session
+    axis explicitly: if a future change ever threaded now/threshold into the :1018
+    feed, alice would drop there too → empty cycles → no escalation → this fails LOUD
+    (never silent), mirroring the hold-axis guard."""
+    old_ts = ( datetime.datetime.fromisoformat( NOW_ISO ) - datetime.timedelta( hours=12 ) ).isoformat()
+    _write_events( str( tmp_path ), "s1", _event( "s1", "honored", awaiting="peer:bob",   persona="alice", ts=old_ts ) )
+    _write_events( str( tmp_path ), "s2", _event( "s2", "honored", awaiting="peer:alice", persona="bob"   ) )
+    # alice bridge-absent → her commons echo (if any) is phantom-nulled → last_activity
+    # rests on the 12h-old event → session_is_stale fires for her in the FILTERED graph.
+    gw = FakeGateway( who_rows=[
+        { "session_id": "s2", "persona_name": "bob", "last_post_ts": NOW_ISO },
+    ] )
+    store_cycle = {
+        "alice": [ { "id": "a1", "status": "in_progress", "gate_class": "none",
+                     "blocked_by": [ { "kind": "persona", "id": "bob" } ] } ],
+        "bob":   [ { "id": "b1", "status": "in_progress", "gate_class": "none",
+                     "blocked_by": [ { "kind": "persona", "id": "alice" } ] } ],
+    }
+    escal = [ ]
+    job = _make_job( tmp_path, gateway=gw,
+                     bridge_discovery_fn    = lambda: { "s2": "bob" },     # alice ABSENT → dead session
+                     owed_work_fn           = lambda names: store_cycle,
+                     deadlock_dwell_seconds = 0,                            # fire on first corroborated sight
+                     notify_fn              = lambda msg, *a, **k: escal.append( msg ) )
+    summary = job._poll_once()
+    # FILTERED advisory graph: alice's dead-SESSION edge dropped → ring dissolved → 0
+    assert summary[ "cycles" ] == 0
+    # UNFILTERED :1018 feed: store-backed alice↔bob ring STILL escalates
+    deadlock_msgs = [ m for m in escal if "DEADLOCK" in m and "store-corroborated" in m ]
+    assert deadlock_msgs, escal
+    assert "alice" in deadlock_msgs[ 0 ] and "bob" in deadlock_msgs[ 0 ]
+
+
+def test_stale_hold_holders_missing_hold_keeps_edge( tmp_path ):
+    """A session with NO readable hold is NOT added to the stale set (absence ≠
+    deadness) — the edge survives. Directly exercises _stale_hold_holders."""
+    job  = _make_job( tmp_path, hold_reader_fn=lambda sid: None )
+    now  = datetime.datetime.fromisoformat( NOW_ISO )
+    view = { "s1": { "persona": "Alice", "session_id": "s1", "holding_on": "peer:Bob" } }
+    assert job._stale_hold_holders( view, now ) == set()
+
+
+def test_stale_hold_holders_swallows_reader_error_and_skips_non_peer( tmp_path ):
+    """A raising reader degrades that session to 'not stale' (edge survives); a
+    non-peer / persona-less / non-dict view is skipped without a read."""
+    reads = [ ]
+    def boom( sid ):
+        reads.append( sid )
+        raise RuntimeError( "reader down" )
+    job  = _make_job( tmp_path, hold_reader_fn=boom )
+    now  = datetime.datetime.fromisoformat( NOW_ISO )
+    view = {
+        "s1": { "persona": "Alice", "session_id": "s1", "holding_on": "peer:Bob" },  # read → raises → not stale
+        "s2": { "persona": "Cal",   "session_id": "s2", "holding_on": "user:Rick" }, # non-peer → skipped (no read)
+        "s3": { "persona": "Dan",   "session_id": "",   "holding_on": "peer:Eve" },  # no sid → skipped
+        "s4": { "session_id": "s4", "holding_on": "peer:Eve" },                      # no persona → skipped
+        "s5": "not-a-dict",                                                          # non-dict → skipped
+    }
+    assert job._stale_hold_holders( view, now ) == set()
+    assert reads == [ "s1" ]                                         # ONLY the peer-edge holder was read
+
+
+def test_stale_hold_holders_inert_when_reader_none( tmp_path ):
+    job  = _make_job( tmp_path )                                     # hold_reader_fn defaults to None
+    now  = datetime.datetime.fromisoformat( NOW_ISO )
+    view = { "s1": { "persona": "Alice", "session_id": "s1", "holding_on": "peer:Bob" } }
+    assert job._stale_hold_holders( view, now ) == set()
+
+
+# ── 7f9a8ee2 reconciliation (fresh hold awaiting contradicts stale holding_on) ─────
+
+def _fresh_hold( awaiting, now_iso=NOW_ISO ):
+    """A fresh+honored+work-owed hold with an explicit awaiting field."""
+    held = ( datetime.datetime.fromisoformat( now_iso ) - datetime.timedelta( seconds=10 ) ).isoformat()
+    return { "held_at": held, "ttl_seconds": 1800, "work_owed": True, "reason": "parked", "awaiting": awaiting }
+
+
+def test_stale_hold_holders_includes_dead_hold( tmp_path ):
+    """Directly exercises the hold_is_stale operand of the subtraction OR (dead hold
+    → added), at the unit level (not only via _poll_once)."""
+    job  = _make_job( tmp_path, hold_reader_fn=lambda sid: _dead_hold() )
+    now  = datetime.datetime.fromisoformat( NOW_ISO )
+    view = { "s1": { "persona": "Alice", "session_id": "s1", "holding_on": "peer:Bob" } }
+    assert job._stale_hold_holders( view, now ) == { "Alice" }
+
+
+def test_stale_hold_holders_includes_fresh_contradicting_hold( tmp_path ):
+    """7f9a8ee2: a FRESH hold whose awaiting='none' contradicts holding_on=peer:maria
+    → the holder joins the subtraction set (the reconciliation operand of the OR)."""
+    job  = _make_job( tmp_path, hold_reader_fn=lambda sid: _fresh_hold( "none" ) )
+    now  = datetime.datetime.fromisoformat( NOW_ISO )
+    view = { "s1": { "persona": "mr radio", "session_id": "s1", "holding_on": "peer:maria" } }
+    assert job._stale_hold_holders( view, now ) == { "mr radio" }
+
+
+def test_stale_hold_holders_keeps_fresh_corroborating_hold( tmp_path ):
+    """A fresh hold whose awaiting MATCHES holding_on is a genuine wait → NOT added
+    (the both-False arm: not stale AND not contradicting)."""
+    job  = _make_job( tmp_path, hold_reader_fn=lambda sid: _fresh_hold( "peer:maria" ) )
+    now  = datetime.datetime.fromisoformat( NOW_ISO )
+    view = { "s1": { "persona": "mr radio", "session_id": "s1", "holding_on": "peer:maria" } }
+    assert job._stale_hold_holders( view, now ) == set()
+
+
+# ── ping-storm durable Fix 2 (2026-06-24): session_is_stale as a 3rd ADDITIVE,
+# fail-safe subtraction axis in _stale_hold_holders. A holder whose hold is FRESH
+# and CORROBORATING (so hold_is_stale + hold_contradicts both say "keep") but whose
+# SESSION is beyond the alive threshold contributes ZERO edges. Defense-in-depth
+# behind build_graph's existing per-session gate (8a450183) — observable here at
+# the method level. Stays INSIDE the `hold is not None` guard so the method's
+# contract ("no readable hold → never added") is preserved. _STALE_TS = 1h before
+# NOW (> 600s threshold); _FRESH_TS = 60s before NOW (< 600s).
+
+_STALE_TS = "2026-06-05T11:00:00+00:00"          # 3600s before NOW → session_is_stale True
+_FRESH_TS = "2026-06-05T11:59:00+00:00"          #   60s before NOW → session_is_stale False
+
+
+def test_stale_hold_holders_includes_stale_session_fresh_corroborating_hold( tmp_path ):
+    """Fix 2 RED-first: a STALE session (last_activity_ts beyond alive_threshold)
+    with a FRESH+CORROBORATING hold (both other axes say keep) is now SUBTRACTED via
+    the session_is_stale axis. Pre-fix: returns set() (hold neither stale nor
+    contradicting); post-fix: { holder }."""
+    job  = _make_job( tmp_path, hold_reader_fn=lambda sid: _fresh_hold( "peer:maria" ) )
+    now  = datetime.datetime.fromisoformat( NOW_ISO )
+    view = { "s1": { "persona": "mr radio", "session_id": "s1",
+                     "holding_on": "peer:maria", "last_activity_ts": _STALE_TS } }
+    assert job._stale_hold_holders( view, now ) == { "mr radio" }
+
+
+def test_stale_hold_holders_fresh_session_keeps_corroborating_hold( tmp_path ):
+    """Fix 2 no-over-subtract: a FRESH session with a fresh corroborating hold is
+    NOT added (session_is_stale False, both other axes False)."""
+    job  = _make_job( tmp_path, hold_reader_fn=lambda sid: _fresh_hold( "peer:maria" ) )
+    now  = datetime.datetime.fromisoformat( NOW_ISO )
+    view = { "s1": { "persona": "mr radio", "session_id": "s1",
+                     "holding_on": "peer:maria", "last_activity_ts": _FRESH_TS } }
+    assert job._stale_hold_holders( view, now ) == set()
+
+
+def test_stale_hold_holders_missing_ts_keeps_corroborating_hold( tmp_path ):
+    """Fix 2 fail-safe: a missing/unparseable last_activity_ts → session_is_stale
+    False → the corroborating-hold holder's edge is KEPT (never hide a live block)."""
+    job  = _make_job( tmp_path, hold_reader_fn=lambda sid: _fresh_hold( "peer:maria" ) )
+    now  = datetime.datetime.fromisoformat( NOW_ISO )
+    missing = { "s1": { "persona": "mr radio", "session_id": "s1", "holding_on": "peer:maria" } }
+    garbage = { "s2": { "persona": "cal", "session_id": "s2",
+                        "holding_on": "peer:maria", "last_activity_ts": "not-a-ts" } }
+    assert job._stale_hold_holders( missing, now ) == set()
+    assert job._stale_hold_holders( garbage, now ) == set()
+
+
+def test_stale_hold_holders_no_readable_hold_stale_session_still_not_added( tmp_path ):
+    """Fix 2 contract preservation: session_is_stale stays INSIDE the `hold is not
+    None` guard — a STALE session with NO readable hold is STILL not added here
+    (absence ≠ deadness; build_graph's own per-session gate handles the no-hold dead
+    session). Guards against the axis leaking outside the hold-subtraction contract."""
+    job  = _make_job( tmp_path, hold_reader_fn=lambda sid: None )
+    now  = datetime.datetime.fromisoformat( NOW_ISO )
+    view = { "s1": { "persona": "ghost", "session_id": "s1",
+                     "holding_on": "peer:maria", "last_activity_ts": _STALE_TS } }
+    assert job._stale_hold_holders( view, now ) == set()
+
+
+def test_poll_once_fresh_hold_awaiting_none_drops_phantom_edge( tmp_path ):
+    """7f9a8ee2 DETERMINISTIC REPRO: mr radio's last_activity.awaiting is a STALE
+    'peer:maria', but its CURRENT hold is fresh with awaiting='none'. The phantom
+    'maria is blocking worker mr radio' edge must contribute ZERO edges → no cc DM,
+    no advisory. (Pre-fix: hold_is_stale is False for a fresh hold → edge survived.)"""
+    _write_events( str( tmp_path ), "s1",
+                   _event( "s1", "honored", awaiting="peer:maria", persona="mr radio" ) )
+    gw  = FakeGateway( who_rows=[ { "session_id": "s1", "persona_name": "mr radio", "last_post_ts": NOW_ISO } ] )
+    job = _make_job( tmp_path, gateway=gw, hold_reader_fn=lambda sid: _fresh_hold( "none" ) )
+    summary = job._poll_once()
+    assert summary[ "edges" ]       == 0
+    assert summary[ "pings_fired" ] == 0
+    assert gw.sent == [ ]
+
+
+def test_poll_once_fresh_hold_awaiting_matches_keeps_ping( tmp_path ):
+    """7f9a8ee2 complement (no over-filter): a fresh hold whose awaiting MATCHES
+    holding_on is a GENUINE wait → its edge survives → the blocker is still pinged."""
+    _write_events( str( tmp_path ), "s1",
+                   _event( "s1", "honored", awaiting="peer:maria", persona="mr radio" ) )
+    gw  = FakeGateway( who_rows=[ { "session_id": "s1", "persona_name": "mr radio", "last_post_ts": NOW_ISO } ] )
+    job = _make_job( tmp_path, gateway=gw, hold_reader_fn=lambda sid: _fresh_hold( "peer:maria" ) )
+    summary = job._poll_once()
+    assert summary[ "edges" ]       == 1
+    assert summary[ "pings_fired" ] == 1
+    assert gw.sent[ 0 ][ 0 ] == "maria"
+
+
+def test_poll_once_fresh_contradicting_hold_does_not_break_store_backed_deadlock( tmp_path ):
+    """7f9a8ee2 test #7: the new reconciliation feeds ONLY the FILTERED advisory graph
+    (build_graph); the deadlock ESCALATION reads the UNFILTERED build_wait_edges feed.
+    A real store-backed alice↔bob ring STILL escalates even when alice's fresh hold
+    contradicts (awaiting='none') and its advisory edge is dropped."""
+    _write_events( str( tmp_path ), "s1", _event( "s1", "honored", awaiting="peer:bob",   persona="alice" ) )
+    _write_events( str( tmp_path ), "s2", _event( "s2", "honored", awaiting="peer:alice", persona="bob"   ) )
+    gw = FakeGateway( who_rows=[
+        { "session_id": "s1", "persona_name": "alice", "last_post_ts": NOW_ISO },
+        { "session_id": "s2", "persona_name": "bob",   "last_post_ts": NOW_ISO },
+    ] )
+    store_cycle = {
+        "alice": [ { "id": "a1", "status": "in_progress", "gate_class": "none",
+                     "blocked_by": [ { "kind": "persona", "id": "bob" } ] } ],
+        "bob":   [ { "id": "b1", "status": "in_progress", "gate_class": "none",
+                     "blocked_by": [ { "kind": "persona", "id": "alice" } ] } ],
+    }
+    escal = [ ]
+    job = _make_job( tmp_path, gateway=gw,
+                     # alice's hold is FRESH but awaiting='none' (contradicts peer:bob) → her
+                     # advisory edge is dropped; bob has no hold (edge kept either feed).
+                     hold_reader_fn         = lambda sid: _fresh_hold( "none" ) if sid == "s1" else None,
+                     owed_work_fn           = lambda names: store_cycle,
+                     deadlock_dwell_seconds = 0,
+                     notify_fn              = lambda msg, *a, **k: escal.append( msg ) )
+    summary = job._poll_once()
+    deadlock_msgs = [ m for m in escal if "DEADLOCK" in m and "store-corroborated" in m ]
+    assert deadlock_msgs, escal
+    assert "alice" in deadlock_msgs[ 0 ] and "bob" in deadlock_msgs[ 0 ]
+
+
+def test_poll_once_dead_session_no_hold_excluded_from_ping_feed_confirming( tmp_path ):
+    """7f9a8ee2 test #5, UPDATED for 8a450183: a DEAD/reaped session with a lingering
+    stale holding_on=peer:X but NO hold file. Originally this proved the pre-existing
+    alive-prune (live_edges @~1038, alive holders only) suppressed the PING without
+    new code, while the dead edge still showed in summary["edges"]. The 8a450183
+    per-SESSION freshness gate now ALSO drops that dead session's edge from the
+    FILTERED advisory graph at ingestion (a strictly stronger fix that subsumes the
+    secondary gap), so summary["edges"] (the FILTERED graph count) is now 0 — while
+    the UNFILTERED :1018 escalation feed, which passes no now/threshold, is unchanged.
+    pings_fired stays 0 (the operator-observable invariant)."""
+    old_ts = "2026-06-05T11:00:00+00:00"          # 1h before NOW → beyond alive_threshold(600s) → alive=False
+    _write_events( str( tmp_path ), "s1",
+                   _event( "s1", "honored", awaiting="peer:maria", persona="ghost", ts=old_ts ) )
+    gw  = FakeGateway( who_rows=[ { "session_id": "s1", "persona_name": "ghost", "last_post_ts": old_ts } ] )
+    job = _make_job( tmp_path, gateway=gw )        # NO hold_reader_fn → hold-reconciliation inert (isolates the session-freshness gate)
+    summary = job._poll_once()
+    assert summary[ "edges" ]       == 0           # 8a450183: dead SESSION dropped from the FILTERED graph at ingestion
+    assert summary[ "pings_fired" ] == 0           # and (as before) no phantom ping fires
+    assert gw.sent == [ ]                           # no cc DM emitted on its behalf
+
+
 # ── _escalate_deadlocks ───────────────────────────────────────────────────────
 
 def test_escalate_deadlocks_notifies( tmp_path ):
+    """A STORE-CORROBORATED ring (dwell=0 → fires on first sight) escalates."""
     fired = [ ]
-    job = _make_job( tmp_path, notify_fn=lambda m: fired.append( m ) )
-    job._escalate_deadlocks( [ [ "Alice", "Bob" ] ] )
-    assert fired and "DEADLOCK" in fired[ 0 ]
+    job = _make_job( tmp_path, notify_fn=lambda m: fired.append( m ), deadlock_dwell_seconds=0 )
+    now = datetime.datetime.fromisoformat( NOW_ISO )
+    store_edges = { "alice": { "bob" }, "bob": { "alice" } }       # corroborates Alice↔Bob
+    job._escalate_deadlocks( [ [ "Alice", "Bob" ] ], store_edges, now )
+    assert fired and "DEADLOCK" in fired[ 0 ] and "store-corroborated" in fired[ 0 ]
 
 
 def test_escalate_deadlocks_noop_when_empty( tmp_path ):
     fired = [ ]
     job = _make_job( tmp_path, notify_fn=lambda m: fired.append( m ) )
-    job._escalate_deadlocks( [ ] )
+    now = datetime.datetime.fromisoformat( NOW_ISO )
+    job._escalate_deadlocks( [ ], { }, now )
     assert fired == [ ]
+
+
+def test_escalate_deadlocks_suppressed_without_store_backing( tmp_path ):
+    """Bug 436a366b: a derived ring with NO corroborating store edges does NOT
+    escalate (the false-fire we are killing) — even past the dwell."""
+    fired = [ ]
+    job = _make_job( tmp_path, notify_fn=lambda m: fired.append( m ), deadlock_dwell_seconds=0 )
+    now = datetime.datetime.fromisoformat( NOW_ISO )
+    job._escalate_deadlocks( [ [ "Alice", "Bob" ] ], { }, now )    # empty store_edges → not corroborated
+    assert fired == [ ]
+
+
+def test_escalate_deadlocks_dwell_belt_suppresses_fresh_ring( tmp_path ):
+    """Progressing-wait belt: a store-backed ring younger than deadlock_dwell_seconds
+    is suppressed on first sight, then escalates ONCE after the dwell, and a SECOND
+    poll past the dwell does NOT re-escalate (de-dup)."""
+    fired = [ ]
+    job = _make_job( tmp_path, notify_fn=lambda m: fired.append( m ), deadlock_dwell_seconds=300 )
+    now  = datetime.datetime.fromisoformat( NOW_ISO )
+    store_edges = { "alice": { "bob" }, "bob": { "alice" } }
+    cycles      = [ [ "Alice", "Bob" ] ]
+    job._escalate_deadlocks( cycles, store_edges, now )                                  # fresh → recorded, suppressed
+    assert fired == [ ]
+    job._escalate_deadlocks( cycles, store_edges, now + datetime.timedelta( seconds=200 ) )   # still within dwell
+    assert fired == [ ]
+    job._escalate_deadlocks( cycles, store_edges, now + datetime.timedelta( seconds=400 ) )   # past dwell → fire ONCE
+    assert len( fired ) == 1
+    job._escalate_deadlocks( cycles, store_edges, now + datetime.timedelta( seconds=500 ) )   # de-dup: no re-fire
+    assert len( fired ) == 1
+
+
+def test_escalate_deadlocks_rearms_after_ring_resolves( tmp_path ):
+    """A resolved ring (gone from this poll) prunes its first-seen + escalated
+    state, so a genuine RECURRENCE re-arms and can escalate again."""
+    fired = [ ]
+    job = _make_job( tmp_path, notify_fn=lambda m: fired.append( m ), deadlock_dwell_seconds=0 )
+    now  = datetime.datetime.fromisoformat( NOW_ISO )
+    store_edges = { "alice": { "bob" }, "bob": { "alice" } }
+    cycles      = [ [ "Alice", "Bob" ] ]
+    job._escalate_deadlocks( cycles, store_edges, now )                                  # fires once
+    assert len( fired ) == 1
+    job._escalate_deadlocks( [ ], { }, now + datetime.timedelta( seconds=10 ) )          # ring gone → prune/re-arm
+    assert ( "Alice", "Bob" ) not in job._deadlock_escalated
+    job._escalate_deadlocks( cycles, store_edges, now + datetime.timedelta( seconds=20 ) )   # recurrence fires again
+    assert len( fired ) == 2
 
 
 # ── _prune_recent_pings ───────────────────────────────────────────────────────
@@ -586,3 +1016,91 @@ def test_follow_through_sweep_non_dict_result_returns_zero( tmp_path ):
     job     = _make_job( tmp_path, follow_through_watcher_factory=lambda j: watcher )
     assert job._sweep_follow_through() == 0
     assert watcher.calls == 1
+
+
+# ── §4b worktree janitor seam (Worktree Lifecycle Contract) ─────────────────────
+
+def test_worktree_janitor_inert_by_default( tmp_path ):
+    # None seam → no reconcile, byte-identical to today; summary reports 0.
+    summary = _make_job( tmp_path )._poll_once()
+    assert summary[ "worktrees_swept" ] == 0
+
+
+def test_worktree_janitor_fires_when_wired( tmp_path ):
+    calls = []
+    def janitor():
+        calls.append( 1 )
+        return { "swept": [ { "path": "/wt/a" }, { "path": "/wt/b" } ], "skipped": [], "errors": [] }
+    summary = _make_job( tmp_path, worktree_janitor_fn=janitor )._poll_once()
+    assert calls == [ 1 ]                        # invoked exactly once per poll
+    assert summary[ "worktrees_swept" ] == 2     # swept-count surfaced to the journal
+
+
+def test_worktree_janitor_hiccup_is_swallowed( tmp_path ):
+    # Observer invariant: a reconcile exception must NOT kill the poll.
+    def janitor(): raise RuntimeError( "reconcile boom" )
+    summary = _make_job( tmp_path, worktree_janitor_fn=janitor )._poll_once()
+    assert summary[ "worktrees_swept" ] == 0     # demoted to 0, poll completes
+
+
+# ── ee59d5ed ORPHAN-BRIDGE JANITOR: per-poll lineage-independent reap seam ───────
+
+def test_bridge_sweep_inert_by_default( tmp_path ):
+    # None seam → no sweep, byte-identical to today; summary reports 0.
+    summary = _make_job( tmp_path )._poll_once()
+    assert summary[ "bridges_reaped" ] == 0
+
+
+def test_bridge_sweep_fires_when_wired( tmp_path ):
+    calls = []
+    def sweep():
+        calls.append( 1 )
+        return { "reaped": [ { "session_id": "s-1" }, { "session_id": "s-2" } ],
+                 "skipped": [], "errors": [] }
+    summary = _make_job( tmp_path, bridge_sweep_fn=sweep )._poll_once()
+    assert calls == [ 1 ]                         # invoked exactly once per poll
+    assert summary[ "bridges_reaped" ] == 2       # reaped-count surfaced to the journal
+
+
+def test_bridge_sweep_hiccup_is_swallowed( tmp_path ):
+    # Observer invariant: a sweep exception must NOT kill the poll.
+    def sweep(): raise RuntimeError( "sweep boom" )
+    summary = _make_job( tmp_path, bridge_sweep_fn=sweep )._poll_once()
+    assert summary[ "bridges_reaped" ] == 0       # demoted to 0, poll completes
+
+
+def test_bridge_sweep_non_dict_return_counts_zero( tmp_path ):
+    # A seam returning a non-dict (contract violation) is demoted to 0, not crashed.
+    summary = _make_job( tmp_path, bridge_sweep_fn=lambda: None )._poll_once()
+    assert summary[ "bridges_reaped" ] == 0
+
+
+# ── 8a450183 PERSONA-COLLAPSE: dead session's stale edge on a live persona ───────
+
+def test_poll_once_dead_session_same_persona_no_phantom_ping( tmp_path ):
+    """Bug 8a450183 (the committed gap-closer): a DEAD session and a LIVE session
+    SHARE persona 'mr radio'. The dead session's last activity is ~12h stale and its
+    `awaiting=peer:maria` lingers; the live session is fresh and awaiting nothing.
+
+    Pre-fix: the dead session's `mr radio→maria` edge survives the per-PERSONA
+    `alive_personas` filter (the persona is alive via the LIVE session — the
+    persona-collapse) → a phantom 'maria is blocking worker mr radio' ping fires
+    every poll. This dual-session-same-persona case had ZERO test coverage.
+
+    Post-fix: the per-SESSION freshness gate drops the dead session's edge at
+    INGESTION (keyed by session-id, before the holder→persona collapse), with NO
+    hold_reader wired — so this proves A1 (session-keyed) + A3 (explicit ts, not
+    view['alive']) INDEPENDENTLY of the bc1bc373/7f9a8ee2 hold filters."""
+    old_ts = ( datetime.datetime.fromisoformat( NOW_ISO ) - datetime.timedelta( hours=12 ) ).isoformat()
+    _write_events( str( tmp_path ), "s_dead",
+                   _event( "s_dead", "honored", awaiting="peer:maria", persona="mr radio", ts=old_ts ) )
+    _write_events( str( tmp_path ), "s_live",
+                   _event( "s_live", "honored", awaiting="none", persona="mr radio", ts=NOW_ISO ) )
+    # s_live is bridge-present + commons-fresh → alive; s_dead is bridge-ABSENT
+    # (its commons echo, if any, is phantom-nulled) → offline, ~12h stale.
+    gw  = FakeGateway( who_rows=[ { "session_id": "s_live", "persona_name": "mr radio", "last_post_ts": NOW_ISO } ] )
+    job = _make_job( tmp_path, gateway=gw, bridge_discovery_fn=lambda: { "s_live": "mr radio" } )
+    summary = job._poll_once()
+    assert summary[ "pings_fired" ] == 0          # no phantom 'maria blocking mr radio'
+    assert gw.sent == [ ]                         # nothing sent to maria
+    assert summary[ "edges" ] == 0               # live same-persona session not over-filtered into an edge

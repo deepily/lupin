@@ -26,6 +26,16 @@ import type { Job, JobBucket } from "../../shared/types";
 
 interface RenderOptions {
   appTimezone?: string;
+  // W3/W4 — history-bucket controls (consumed ONLY when bucketName === "history";
+  // the renderer computes them from JobStore + passes them on every render). Other
+  // buckets ignore them.
+  //   - historyWindowDays : the selected time-window; `undefined` = all-time ("all"
+  //     option). The renderer always passes it for the history bucket.
+  //   - historyLoadedCount / historyTotalCount : Load-More gate (button shown iff
+  //     loaded < total) + the history count badge (reflects the server total).
+  historyWindowDays?  : number;
+  historyLoadedCount? : number;
+  historyTotalCount?  : number;
 }
 
 // Default-expansion table per Pass 1 F1 (derived from Q-A2):
@@ -36,6 +46,17 @@ const DEFAULT_EXPANDED: Record<JobBucket, boolean> = {
   dead    : false,
   history : false,
 };
+
+// W3 — history time-window select options (legacy #history-time-window: 1/7/14/
+// 30 days + all). `value` is the query `days` param; "all" maps to all-time
+// (days omitted). Verbatim legacy set per plan 04 §W3.
+const HISTORY_WINDOW_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: "1",   label: "Last 24h" },
+  { value: "7",   label: "Last 7 days" },
+  { value: "14",  label: "Last 14 days" },
+  { value: "30",  label: "Last 30 days" },
+  { value: "all", label: "All time" },
+];
 
 // ---------------------------------------------------------------------------
 // renderJobBucket — main template export
@@ -99,6 +120,51 @@ export function renderJobBucket(
   ` as DocumentFragment;
   root.appendChild(headerFrag);
 
+  const header = root.querySelector(".jobs-bucket-header") as HTMLElement;
+
+  // W2 (plan 04 §W2) — per-bucket delete-all 🗑. Present on EVERY bucket header
+  // (live buckets + history). Built via direct DOM ops (not html``) so the
+  // `data-bucket` value threads cleanly. The renderer's root-delegated
+  // `.queue-delete-all-btn` handler owns the confirm + DELETE; this template
+  // only PLACES the control. Inserted before the chevron so the chevron stays
+  // the rightmost affordance.
+  const toggleSpan   = header.querySelector(".jobs-bucket-toggle") as HTMLElement;
+  const deleteAllBtn = document.createElement("button");
+  deleteAllBtn.type        = "button";
+  deleteAllBtn.className    = "queue-delete-all-btn";
+  deleteAllBtn.textContent  = "🗑";
+  deleteAllBtn.setAttribute("data-bucket", bucketName);
+  deleteAllBtn.title = `Delete all ${bucketName} jobs`;
+  deleteAllBtn.setAttribute("aria-label", `Delete all ${bucketName} jobs`);
+  header.insertBefore(deleteAllBtn, toggleSpan);
+
+  // W3 (plan 04 §W3) — history time-window <select> + count-badge-reflects-total.
+  // History only: the renderer's root-delegated `change` handler owns the refetch;
+  // this template just PLACES the control with the current window selected. The
+  // header target-guard (below) keeps a click on it from toggling the bucket.
+  if (bucketName === "history") {
+    const select = document.createElement("select");
+    select.className = "history-time-select";
+    select.setAttribute("aria-label", "History time window");
+    const selectedValue = opts.historyWindowDays === undefined ? "all" : String(opts.historyWindowDays);
+    for (const o of HISTORY_WINDOW_OPTIONS) {
+      const optionEl = document.createElement("option");
+      optionEl.value       = o.value;
+      optionEl.textContent = o.label;
+      select.appendChild(optionEl);
+    }
+    // Set the current window by value AFTER the options are attached (reliable
+    // across DOM impls; per-option `.selected` before append is quirky in some).
+    select.value = selectedValue;
+    header.insertBefore(select, deleteAllBtn);
+    // Count badge reflects the server total for the window (plan §W3), when known
+    // (falls back to the loaded length the base header already rendered).
+    if (opts.historyTotalCount !== undefined) {
+      const countEl = header.querySelector(".jobs-bucket-count") as HTMLElement;
+      countEl.textContent = `(${opts.historyTotalCount})`;
+    }
+  }
+
   if (jobs.length === 0) {
     /* c8 ignore next 4 */ // tagged-template literal: same phantom-branch caveat as the header above.
     const emptyFrag = html`
@@ -114,18 +180,55 @@ export function renderJobBucket(
     cardsContainer.className = initiallyExpanded ? "jobs-bucket-cards" : "jobs-bucket-cards collapsed";
     root.appendChild(cardsContainer);
 
+    // W5 — terminal cards (dead bucket + history) get the retry ↻ affordance.
+    const retryable = bucketName === "dead" || bucketName === "history";
     keyedListMerge({
       parent  : cardsContainer,
       entries : jobs.map(j => ({ idHash: j.id_hash, job: j })),
-      create  : (e) => renderJobCard(e.job, opts),
+      create  : (e) => renderJobCard(e.job, { appTimezone: opts.appTimezone, retryable }),
     });
   }
 
+  // W4 (plan 04 §W4) — history Load-More affordance. History only, shown iff
+  // fewer rows are loaded than the server total for the window. Sits AFTER the
+  // cards (outside the keyed cards container so keyedListMerge never sees it).
+  // The renderer's root-delegated `.history-load-more` click owns the append.
+  if (bucketName === "history") {
+    const loaded = opts.historyLoadedCount ?? 0;
+    const total  = opts.historyTotalCount ?? 0;
+    if (loaded < total) {
+      const loadMore = document.createElement("button");
+      loadMore.type        = "button";
+      loadMore.className    = "history-load-more";
+      loadMore.textContent  = "Load more";
+      loadMore.setAttribute("aria-label", "Load more history");
+      root.appendChild(loadMore);
+    }
+  }
+
   // Self-contained header handlers — F30 keyboard contract.
-  const header = root.querySelector(".jobs-bucket-header") as HTMLElement;
-  header.addEventListener("click", () => toggleBucket(root));
+  //
+  // W2 — a click/keydown on an interactive header control (the delete-all 🗑,
+  // and, once W3/W4 land, the time-window <select> + Load-More) must NOT toggle
+  // the bucket collapse. The header listener is attached DIRECTLY to the header,
+  // so it fires during bubbling BEFORE the event reaches root — a root-level
+  // stopPropagation cannot un-fire it. Guarding on the event target is the
+  // correct mechanism (mirrors the sender-card-header button-guard); the
+  // control's own delegated handler on root still runs the action, and native
+  // <button>/<select> keyboard activation is left to the control itself.
+  header.addEventListener("click", (e: Event) => {
+    const target = e.target as Element | null;
+    /* c8 ignore next */ // defensive: browser-dispatched clicks always carry a target.
+    if (target === null) return;
+    if (target.closest("button, select") !== null) return;
+    toggleBucket(root);
+  });
   header.addEventListener("keydown", (e: Event) => {
-    const ke = e as KeyboardEvent;
+    const ke     = e as KeyboardEvent;
+    const target = ke.target as Element | null;
+    /* c8 ignore next */ // defensive: keydown events always carry a target.
+    if (target === null) return;
+    if (target.closest("button, select") !== null) return;
     if (ke.key === "Enter" || ke.key === " ") {
       ke.preventDefault();   // Space else scrolls the page
       toggleBucket(root);

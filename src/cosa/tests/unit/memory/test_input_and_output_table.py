@@ -27,9 +27,27 @@ production contract:
 
 import unittest
 from unittest.mock import Mock, MagicMock, patch, call, ANY
+import contextlib
 import time
 import threading
 from typing import List, Dict, Any, Optional
+
+
+@contextlib.contextmanager
+def _capture_pool_submit():
+    """
+    Capture the fn insert_io_row submits to the embedding pool.
+
+    The async insert path was refactored (bug 81854972) from a per-call
+    threading.Thread to a bounded embedding pool: it now calls
+    get_embedding_pool( ... ).submit( fn ). Tests capture that fn and run it
+    synchronously to exercise the async worker body.
+    """
+    captured = [ ]
+    pool = MagicMock()
+    pool.submit.side_effect = lambda fn: captured.append( fn )
+    with patch( "cosa.memory.embedding_pool.get_embedding_pool", return_value=pool ):
+        yield captured
 
 # Import test infrastructure
 import sys
@@ -324,20 +342,8 @@ class TestInputAndOutputTable( unittest.TestCase ):
 
         mocks["question_embeddings_tbl"].has.return_value = False
 
-        # Track thread creation by mocking Thread class directly
-        created_threads = []
-
-        class MockThread:
-            def __init__( self, target=None, daemon=None ):
-                created_threads.append( ( target, daemon ) )
-                self.target = target
-                self.daemon = daemon
-
-            def start( self ):
-                pass  # Mock start method
-
         with patch( "cosa.memory.input_and_output_table.Stopwatch" ), \
-             patch( "cosa.memory.input_and_output_table.threading.Thread", MockThread ):
+             _capture_pool_submit() as submitted:
 
             # Test asynchronous insertion
             table.insert_io_row(
@@ -348,19 +354,17 @@ class TestInputAndOutputTable( unittest.TestCase ):
                 async_embedding=True
             )
 
-            # Verify thread was created as a daemon thread with a target
-            self.assertEqual( len( created_threads ), 1 )
-            target_func, daemon_flag = created_threads[0]
-            self.assertTrue( daemon_flag )
-            self.assertIsNotNone( target_func )
+            # Verify the async worker was submitted to the embedding pool (not run yet)
+            self.assertEqual( len( submitted ), 1 )
+            self.assertIsNotNone( submitted[0] )
 
-            # Verify main thread didn't call add (async thread should)
+            # Verify main thread didn't call add (the async worker should)
             mocks["table"].add.assert_not_called()
 
-            # Execute the async function directly
-            target_func()
+            # Execute the async worker directly
+            submitted[0]()
 
-            # Now verify the async function called add
+            # Now verify the async worker called add
             mocks["table"].add.assert_called_once()
             call_args = mocks["table"].add.call_args[0][0]
             row       = call_args[0]
@@ -385,20 +389,8 @@ class TestInputAndOutputTable( unittest.TestCase ):
         # Make embedding generation fail
         mocks["question_embeddings_tbl"].get_embedding.side_effect = Exception( "Embedding generation failed" )
 
-        # Track thread creation to get the target function
-        created_threads = []
-
-        class MockThread:
-            def __init__( self, target=None, daemon=None ):
-                created_threads.append( ( target, daemon ) )
-                self.target = target
-                self.daemon = daemon
-
-            def start( self ):
-                pass  # Mock start method
-
         with patch( "cosa.memory.input_and_output_table.Stopwatch" ), \
-             patch( "cosa.memory.input_and_output_table.threading.Thread", MockThread ), \
+             _capture_pool_submit() as submitted, \
              patch( "cosa.memory.input_and_output_table.du.print_banner" ), \
              patch( "cosa.memory.input_and_output_table.du.print_stack_trace" ) as mock_stack_trace, \
              patch( "builtins.print" ):
@@ -411,9 +403,8 @@ class TestInputAndOutputTable( unittest.TestCase ):
                 async_embedding=True
             )
 
-            # Get and execute the async function — this should NOT raise
-            target_func = created_threads[0][0]
-            target_func()
+            # Get and execute the async worker — this should NOT raise
+            submitted[0]()
 
             # Verify error handling was invoked with documented context
             mock_stack_trace.assert_called_once()
@@ -697,20 +688,8 @@ class TestInputAndOutputTable( unittest.TestCase ):
             "async embedding generation"   : True,
         }.get( key, default )
 
-        # Track thread creation
-        created_threads = []
-
-        class MockThread:
-            def __init__( self, target=None, daemon=None ):
-                created_threads.append( ( target, daemon ) )
-                self.target = target
-                self.daemon = daemon
-
-            def start( self ):
-                pass  # Mock start method
-
         with patch( "cosa.memory.input_and_output_table.Stopwatch" ), \
-             patch( "cosa.memory.input_and_output_table.threading.Thread", MockThread ), \
+             _capture_pool_submit() as submitted, \
              patch( "builtins.print" ):
 
             table.insert_io_row(
@@ -726,8 +705,8 @@ class TestInputAndOutputTable( unittest.TestCase ):
                              if "async embedding generation" in str( c ) ]
             self.assertGreater( len( config_calls ), 0 )
 
-            # Verify async behavior (thread created)
-            self.assertEqual( len( created_threads ), 1 )
+            # Verify async behavior (worker submitted to the pool)
+            self.assertEqual( len( submitted ), 1 )
 
     # ------------------------------------------------------------------ #
     # Completion coverage (Tiberius 👑, 2026-05-31): create path, validate
@@ -795,20 +774,11 @@ class TestInputAndOutputTable( unittest.TestCase ):
         mocks[ "db" ].drop_table.assert_called_once_with( "input_and_output_tbl" )
 
     def _run_async_target( self, table, mocks, **insert_kwargs ):
-        """Insert in async mode and execute the captured daemon-thread target."""
-        captured = [ ]
-
-        class MockThread:
-            def __init__( self, target=None, daemon=None ):
-                captured.append( target )
-                self.daemon = daemon
-            def start( self ):
-                pass
-
+        """Insert in async mode and execute the captured embedding-pool worker."""
         with patch( "cosa.memory.input_and_output_table.Stopwatch" ), \
-             patch( "cosa.memory.input_and_output_table.threading.Thread", MockThread ):
+             _capture_pool_submit() as submitted:
             table.insert_io_row( async_embedding=True, **insert_kwargs )
-            captured[ 0 ]()      # run the thread body synchronously
+            submitted[ 0 ]()     # run the worker body synchronously
         return mocks[ "table" ].add
 
     def test_async_input_embedding_provided_output_generated( self ):
@@ -900,6 +870,133 @@ class TestInputAndOutputTable( unittest.TestCase ):
             table.init_tbl()
         mocks[ "db" ].create_table.assert_called_with( "input_and_output_tbl", schema=ANY, mode="overwrite" )
         self.assertEqual( mocks[ "table" ].create_fts_index.call_count, 5 )
+
+
+class TestPostgresBackend( unittest.TestCase ):
+    """v0.2.0 §6 postgres backend: __init__ skips LanceDB; storage/search via repo."""
+
+    _EMB = [ 0.1 ] * 768
+
+    def _make_pg( self, debug=False, verbose=False ):
+        """Build an InputAndOutputTable in postgres mode; return (table, question_tbl, provider)."""
+        cfg = Mock()
+        cfg.get.side_effect = lambda key, default=None, return_type=None: {
+            "embedding dimensions":               "768",
+            "solution snapshots lancedb nprobes": 20,
+            "debug text truncation length":       48,
+            "async embedding generation":         False,
+        }.get( key, default )
+        question_tbl = Mock()
+        question_tbl.get_embedding.return_value = self._EMB
+        question_tbl.has.return_value = False
+        provider = Mock()
+        provider.generate_embedding.return_value = self._EMB
+        with patch( "cosa.memory.input_and_output_table.is_postgres_backend", return_value=True ), \
+             patch( "cosa.memory.input_and_output_table.ConfigurationManager", return_value=cfg ), \
+             patch( "cosa.memory.input_and_output_table.EmbeddingManager" ), \
+             patch( "cosa.memory.input_and_output_table.get_embedding_provider", return_value=provider ), \
+             patch( "cosa.memory.input_and_output_table.QuestionEmbeddingsTable", return_value=question_tbl ), \
+             patch( "cosa.memory.input_and_output_table.lancedb.connect",
+                    side_effect=AssertionError( "postgres ctor must not connect to LanceDB" ) ), \
+             patch( "builtins.print" ):
+            table = InputAndOutputTable( debug=debug, verbose=verbose )
+        return table, question_tbl, provider
+
+    @staticmethod
+    def _patch_repo():
+        session   = MagicMock()
+        repo_inst = MagicMock()
+
+        @contextlib.contextmanager
+        def fake_get_db():
+            yield session
+
+        ctx      = patch( "cosa.rest.db.database.get_db", fake_get_db )
+        repo_ctx = patch( "cosa.rest.db.repositories.input_and_output_repository.InputAndOutputRepository",
+                          return_value=repo_inst )
+        return repo_inst, ctx, repo_ctx
+
+    def test_init_uses_postgres( self ):
+        table, _, _ = self._make_pg()
+        self.assertTrue( table._use_postgres )
+
+    def test_insert_sync_stores_via_repo( self ):
+        table, question_tbl, provider = self._make_pg()
+        repo, ctx, repo_ctx = self._patch_repo()
+        with ctx, repo_ctx, patch( "cosa.memory.input_and_output_table.Stopwatch" ), patch( "builtins.print" ):
+            table.insert_io_row(
+                input_type="t", input="q", output_raw="r", output_final="out", async_embedding=False,
+            )
+        repo.insert_io_row.assert_called_once()
+        kw = repo.insert_io_row.call_args.kwargs
+        self.assertEqual( kw[ "input_type" ], "t" )
+        self.assertEqual( kw[ "input_embedding" ], self._EMB )     # generated via question cache
+        self.assertEqual( kw[ "output_final_embedding" ], self._EMB )
+
+    def test_insert_async_stores_via_repo( self ):
+        table, question_tbl, provider = self._make_pg()
+        repo, ctx, repo_ctx = self._patch_repo()
+        with ctx, repo_ctx, patch( "cosa.memory.input_and_output_table.Stopwatch" ), \
+             _capture_pool_submit() as submitted, patch( "builtins.print" ):
+            table.insert_io_row(
+                input_type="t", input="q", output_raw="r", output_final="out", async_embedding=True,
+            )
+            repo.insert_io_row.assert_not_called()     # deferred to the pool worker
+            submitted[ 0 ]()
+        repo.insert_io_row.assert_called_once()
+
+    def test_get_knn_by_input_maps_shape( self ):
+        table, question_tbl, _ = self._make_pg()
+        repo, ctx, repo_ctx = self._patch_repo()
+        entity = Mock( input="q", output_final="a", input_embedding=self._EMB )
+        repo.get_knn_by_input.return_value = [ ( 90.0, entity ) ]
+        with ctx, repo_ctx:
+            result = table.get_knn_by_input( "q", k=3 )
+        self.assertEqual( result[ 0 ][ "input" ], "q" )
+        self.assertEqual( result[ 0 ][ "output_final" ], "a" )
+        self.assertAlmostEqual( result[ 0 ][ "_distance" ], 1.0 - 0.9 )   # 1 - pct/100
+
+    def test_get_knn_by_input_empty_embedding_short_circuits( self ):
+        table, question_tbl, _ = self._make_pg()
+        question_tbl.get_embedding.return_value = []       # no embedding → skip search
+        with patch( "cosa.memory.input_and_output_table.du.print_banner" ), patch( "builtins.print" ):
+            self.assertEqual( table.get_knn_by_input( "q" ), [] )
+
+    def test_get_knn_null_embedding_entity_returns_empty_list_field( self ):
+        table, question_tbl, _ = self._make_pg()
+        repo, ctx, repo_ctx = self._patch_repo()
+        entity = Mock( input="q", output_final="a", input_embedding=None )
+        repo.get_knn_by_input.return_value = [ ( 100.0, entity ) ]
+        with ctx, repo_ctx:
+            result = table.get_knn_by_input( "q" )
+        self.assertEqual( result[ 0 ][ "input_embedding" ], [] )
+
+    def test_get_all_io_maps_dicts( self ):
+        table, _, _ = self._make_pg()
+        repo, ctx, repo_ctx = self._patch_repo()
+        repo.get_all_io.return_value = [ Mock( date="d", time="t", input_type="it", input="i", output_final="o" ) ]
+        with ctx, repo_ctx:
+            rows = table.get_all_io( max_rows=10 )
+        self.assertEqual( rows, [ { "date": "d", "time": "t", "input_type": "it", "input": "i", "output_final": "o" } ] )
+
+    def test_get_io_stats_delegates( self ):
+        table, _, _ = self._make_pg()
+        repo, ctx, repo_ctx = self._patch_repo()
+        repo.get_io_stats_by_input_type.return_value = { "math": 2 }
+        with ctx, repo_ctx:
+            self.assertEqual( table.get_io_stats_by_input_type(), { "math": 2 } )
+
+    def test_get_all_qnr_maps_dicts( self ):
+        table, _, _ = self._make_pg()
+        repo, ctx, repo_ctx = self._patch_repo()
+        repo.get_all_qnr.return_value = [ Mock( date="d", time="t", input_type="agent router go to x", input="i", output_final="o" ) ]
+        with ctx, repo_ctx:
+            rows = table.get_all_qnr()
+        self.assertEqual( rows[ 0 ][ "input_type" ], "agent router go to x" )
+
+    def test_init_tbl_is_noop( self ):
+        table, _, _ = self._make_pg()
+        table.init_tbl()      # must not touch self.db (unset in postgres mode)
 
 
 def isolated_unit_test():

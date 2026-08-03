@@ -1,0 +1,30 @@
+# systemd USER unit TEMPLATE for the dev-server bounce watcher (row 1b4211ac R2).
+#
+# This is NOT installed as-is. install-bounce-watcher.sh renders __LUPIN_ROOT__ to
+# the real path and writes the result to ~/.config/systemd/user/. Kept host-agnostic
+# (a placeholder, not a hardcoded path) so the committed artifact works on any host.
+#
+# WHY A USER UNIT: the watcher runs `docker restart` as the same user who already
+# bounces by hand (rruiz, in the docker group), so it needs that user's Docker
+# access — a user service inherits it; a system service would run as root and change
+# who is allowed to bounce.
+#
+# REBOOT SAFETY: a user service only runs while that user has a login session UNLESS
+# lingering is enabled. install-bounce-watcher.sh runs `loginctl enable-linger` so
+# the watcher comes up at boot, before anyone logs in.
+
+[Unit]
+Description=Lupin dev-server bounce watcher (:7999 button path, row 1b4211ac R2)
+Documentation=file://__LUPIN_ROOT__/src/scripts/bounce-watcher.sh
+
+[Service]
+Type=simple
+Environment=LUPIN_ROOT=__LUPIN_ROOT__
+ExecStart=/usr/bin/env bash __LUPIN_ROOT__/src/scripts/bounce-watcher.sh
+# Respawn on crash — the whole point is that the button never depends on someone
+# remembering to restart a script by hand.
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

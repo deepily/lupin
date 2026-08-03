@@ -17,6 +17,11 @@ export {
   type NotificationsListRendererStores,
 } from "./NotificationsListRenderer";
 export {
+  createNotificationsHeaderRenderer,
+  type NotificationsHeaderRenderer,
+  type NotificationsHeaderRendererOptions,
+} from "./NotificationsHeaderRenderer";
+export {
   createJobsPaneRenderer,
   type JobsPaneRenderer,
   type JobsPaneRendererOptions,
@@ -91,6 +96,13 @@ export {
   type MissedBadgeRendererOptions,
   type MissedStoreLike,
 } from "./MissedBadgeRenderer";
+// Lane L4 (v0.1.9) — top nav / logout bar (PORT of lupin-nav.js).
+export {
+  createNavBarRenderer,
+  type NavBarRenderer,
+  type NavBarRendererOptions,
+  type NavAuthPort,
+} from "./NavBarRenderer";
 export {
   createFleetStatusRenderer,
   type FleetStatusRenderer,
@@ -103,6 +115,22 @@ export {
   type TaskListRendererOptions,
   type TaskListStoreLike,
 } from "./TaskListRenderer";
+// Section-toolbar + accordion-collapse parity (2026-06-23).
+export {
+  createSectionToolbarRenderer,
+  type SectionToolbarRenderer,
+  type SectionToolbarRendererOptions,
+  type SectionToolbarRendererStores,
+  type ViewStateStoreLike,
+} from "./SectionToolbarRenderer";
+// Lane C (v0.1.9) — broadcast-to-all-CC compose card renderer.
+export {
+  createBroadcastCardRenderer,
+  type BroadcastCardRenderer,
+  type BroadcastCardRendererOptions,
+  type BroadcastCardApiClient,
+  type BroadcastRecorderLike,
+} from "./BroadcastCardRenderer";
 export { html, raw, type Value } from "./html";
 export { renderMarkdown, renderMarkdownInline, DOMPURIFY_CONFIG } from "./markdown";
 export { formatHM, formatDateKey, formatCountdown, formatDuration } from "./time";

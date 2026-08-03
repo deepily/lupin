@@ -7,24 +7,34 @@
 // fragment is parsed outside a <table> ancestor, AND createElement is inherently
 // safe-write (no markup-injection surface for store-sourced strings).
 //
-// Eight columns: Title · Class · Status · Blocked by · Next chase · Accountable
-// · Priority · Project. The owner_persona is the GROUP HEADER (not a per-row
-// column), so a row never repeats its owner.
+// Columns (row redesign 2026.06.29 + Detail reposition F2 2026.07.01): ID ·
+// Title · Detail · Class · Status · Blocked by · Next chase · Accountable ·
+// Priority · Project · Actions. The leading ID column + the Detail 📄 column
+// (body-overlay affordance, now directly after Title) augment the original
+// eight; Actions stays the trailing edit column. The owner_persona is the GROUP
+// HEADER (not a per-row column), so a row never repeats its owner.
 
 import {
+  EDITABLE_PRIORITIES,
   formatChaseTime,
   formatTaskBlockedBy,
+  taskBodyIsEmpty,
   taskCellOrDash,
+  taskIdLabel,
   taskPriorityClass,
   taskStatusClass,
   taskTitleLabel,
+  truncateTaskTitle,
   type TaskGroup,
   type TaskItem,
   type TaskListModel,
 } from "../taskListModel";
 import { ownerKeyForGroup, taskGroupIdSlug } from "../taskListCollapse";
 
-const TASK_COLSPAN = 8;
+// Eleven columns post-row-redesign: ID + the eight read-only data columns +
+// Detail (📄 body overlay) + the Actions column (priority select · owner-reassign
+// select · drop button + inline reason input).
+const TASK_COLSPAN = 11;
 
 function td( className: string, text: string ): HTMLTableCellElement {
   const cell = document.createElement( "td" );
@@ -34,11 +44,151 @@ function td( className: string, text: string ): HTMLTableCellElement {
 }
 
 /**
- * Render a single task row (<tr>) with the eight columns.
+ * Build the leftmost ID cell (row redesign 2026.06.29 + F1 2026.07.01). Displays
+ * the compact 8-char id label; the FULL id rides the row's `data-task-id`. When
+ * the row carries a real id the cell is a click-to-copy affordance: role=button
+ * + tabindex + title, and `.task-col-id` gets cursor:pointer via CSS (gated on
+ * [role="button"]). A row with no id (label "—") gets NO affordance — there is
+ * nothing to copy — so an em-dash cell is inert.
+ *
+ * Ensures:
+ *   - text = taskIdLabel(task) (8-char prefix, or "—" when the id is absent)
+ *   - task has a non-empty id → role="button", tabindex="0", title set
+ *   - task has no id → a plain cell (no interactive attributes)
+ */
+function renderIdCell( task: TaskItem ): HTMLTableCellElement {
+  const cell = td( "task-col-id", taskIdLabel( task ) );
+  if ( task.id != null && String( task.id ) !== "" ) {
+    cell.setAttribute( "role", "button" );
+    cell.setAttribute( "tabindex", "0" );
+    cell.setAttribute( "title", "Click to copy ID" );
+  }
+  return cell;
+}
+
+/**
+ * Build the Detail cell (row redesign 2026.06.29): a 📄 affordance opening the
+ * body overlay. createElement + dataset (NO innerHTML — safe-write for the
+ * store-sourced body). When the body is empty the emoji is DIMMED in place
+ * (disabled / non-clickable, ruling #3) and carries no body payload.
+ *
+ * Ensures:
+ *   - body present → `.task-detail-emoji` (role=button, tabindex=0) carrying
+ *     data-task-body (the full body) + data-task-id (the 8-char id)
+ *   - body empty → `.task-detail-emoji.task-detail-empty` (aria-disabled), no dataset
+ */
+function renderDetailCell( task: TaskItem ): HTMLTableCellElement {
+  const cell = document.createElement( "td" );
+  cell.className = "task-col-detail";
+  const emoji = document.createElement( "span" );
+  emoji.textContent = "📄";
+  if ( taskBodyIsEmpty( task ) ) {
+    emoji.className = "task-detail-emoji task-detail-empty";
+    emoji.setAttribute( "aria-disabled", "true" );
+    emoji.setAttribute( "title", "No detail" );
+  } else {
+    emoji.className = "task-detail-emoji";
+    emoji.setAttribute( "role", "button" );
+    emoji.setAttribute( "tabindex", "0" );
+    emoji.setAttribute( "title", "View detail" );
+    // In this branch taskBodyIsEmpty(task) is false → body is a non-empty string.
+    emoji.dataset.taskBody = task.body as string;
+    emoji.dataset.taskId   = taskIdLabel( task );
+  }
+  cell.appendChild( emoji );
+  return cell;
+}
+
+/**
+ * Build the per-row Actions cell (Phase 2 — D2/D3 editing controls). All DOM via
+ * createElement + textContent/setAttribute — NO innerHTML (table-section parse
+ * safety + safe-write for store-sourced persona/priority strings). The controls
+ * carry NO inline listeners: TaskListRenderer delegates `change` (selects) and
+ * `click` (drop button) at the persistent container, surviving every re-render.
+ *
+ * Ensures:
+ *   - `.task-priority-select` — P0–P3 options (EDITABLE_PRIORITIES), current
+ *     priority pre-selected; reuses taskPriorityClass for the heat tint
+ *   - `.task-owner-select` — reassignment roster (active personas, INCLUDING the
+ *     'Sam' overflow persona — Q5); the current owner is pre-selected (prepended
+ *     if not already a target so the select reflects reality); an unassigned task
+ *     leads with a disabled "(unassigned)" placeholder
+ *   - `.task-drop-reason` text input + `.task-drop-button` — the inline
+ *     drop-with-reason affordance (Q4: inline row input, not a modal)
+ */
+function renderActionsCell( task: TaskItem, reassignTargets: ReadonlyArray<string> ): HTMLTableCellElement {
+  const cell = document.createElement( "td" );
+  cell.className = "task-col-actions";
+
+  // Priority select (P0–P3). The heat class makes the current urgency legible
+  // even before the user opens the dropdown (color is redundant with the text).
+  const prioSelect = document.createElement( "select" );
+  const prioClass  = taskPriorityClass( task.priority );
+  prioSelect.className = "task-priority-select" + ( prioClass ? ` ${prioClass}` : "" );
+  prioSelect.setAttribute( "aria-label", "Set priority" );
+  for ( const p of EDITABLE_PRIORITIES ) {
+    const opt = document.createElement( "option" );
+    opt.value = p;
+    opt.textContent = p;
+    if ( ( task.priority ?? "" ) === p ) opt.selected = true;
+    prioSelect.appendChild( opt );
+  }
+  cell.appendChild( prioSelect );
+
+  // Owner-reassignment select. The current owner is pre-selected; an unassigned
+  // task gets a disabled placeholder so the control isn't blank.
+  const ownerSelect = document.createElement( "select" );
+  ownerSelect.className = "task-owner-select";
+  ownerSelect.setAttribute( "aria-label", "Reassign owner" );
+  const currentOwner = task.owner_persona ?? "";
+  if ( !currentOwner ) {
+    const placeholder = document.createElement( "option" );
+    placeholder.value = "";
+    placeholder.textContent = "(unassigned)";
+    placeholder.disabled = true;
+    placeholder.selected = true;
+    ownerSelect.appendChild( placeholder );
+  }
+  const seen = new Set<string>();
+  const ordered = currentOwner ? [ currentOwner, ...reassignTargets ] : reassignTargets;
+  for ( const persona of ordered ) {
+    if ( !persona || seen.has( persona ) ) continue;
+    seen.add( persona );
+    const opt = document.createElement( "option" );
+    opt.value = persona;
+    opt.textContent = persona;
+    if ( persona === currentOwner ) opt.selected = true;
+    ownerSelect.appendChild( opt );
+  }
+  cell.appendChild( ownerSelect );
+
+  // Drop-with-reason: inline reason input + Drop button (Q4 — inline row input,
+  // not a modal). The renderer reads the sibling input's value on click and
+  // enforces the non-blank reason the `→dropped` transition requires.
+  const reasonInput = document.createElement( "input" );
+  reasonInput.type = "text";
+  reasonInput.className = "task-drop-reason";
+  reasonInput.setAttribute( "placeholder", "drop reason…" );
+  reasonInput.setAttribute( "aria-label", "Drop reason" );
+  cell.appendChild( reasonInput );
+
+  const dropBtn = document.createElement( "button" );
+  dropBtn.type = "button";
+  dropBtn.className = "task-drop-button";
+  dropBtn.textContent = "Drop";
+  cell.appendChild( dropBtn );
+
+  return cell;
+}
+
+/**
+ * Render a single task row (<tr>) with the eight data columns + the Actions cell.
  *
  * Requires:
  *   - task is a TaskItem (fields rendered defensively — falsy → "—")
  *   - ianaZone is the IANA zone for the next-chase cell, or null/undefined
+ *   - reassignTargets is the active-persona roster (Sam INCLUDED — Q5) for the
+ *     owner select; defaults to [] (e.g. read-only callers / fleet unavailable)
  * Ensures:
  *   - Status cell carries a `.task-status-dot` color-keyed span + the status word
  *   - Blocked-by / Accountable / Project: falsy/"none" → "—"
@@ -46,10 +196,14 @@ function td( className: string, text: string ): HTMLTableCellElement {
  *   - the row carries a `task-status-*` class (status→accent); the Priority cell
  *     carries a `task-prio-*` heat class when recognized. Color is redundant
  *     with the status WORD / priority text (WCAG 1.4.1).
+ *   - the row carries `data-task-id` (the row's id, or "" when absent) so the
+ *     renderer's delegated handlers can resolve the target task from any control
+ *   - the trailing Actions cell carries the priority/owner selects + drop affordance
  */
 export function renderTaskRow(
-  task     : TaskItem,
-  ianaZone : string | null | undefined,
+  task            : TaskItem,
+  ianaZone        : string | null | undefined,
+  reassignTargets : ReadonlyArray<string> = [],
 ): HTMLTableRowElement {
   const status      = task.status || "unknown";
   const statusClass = taskStatusClass( task.status );
@@ -57,8 +211,24 @@ export function renderTaskRow(
 
   const tr = document.createElement( "tr" );
   tr.className = `task-row ${statusClass}`;
+  tr.setAttribute( "data-task-id", task.id ?? "" );
 
-  tr.appendChild( td( "task-col-title", taskTitleLabel( task ) ) );
+  // NEW leftmost ID column — first 8 chars of the id, monospace (via CSS).
+  // Click-to-copy affordance (F1 2026.07.01): a real-id cell copies the FULL
+  // uuid (read from data-task-id) via the renderer's delegated click/keydown.
+  tr.appendChild( renderIdCell( task ) );
+
+  // Title cell: truncated text + the FULL title on a hover-tooltip (title attr).
+  const titleCell = document.createElement( "td" );
+  titleCell.className = "task-col-title";
+  const fullTitle = taskTitleLabel( task );
+  titleCell.textContent = truncateTaskTitle( fullTitle );
+  titleCell.setAttribute( "title", fullTitle );
+  tr.appendChild( titleCell );
+
+  // Detail column (F2 2026.07.01: repositioned 10→3, directly after Title and
+  // before Class): 📄 body-overlay affordance. renderDetailCell is unchanged.
+  tr.appendChild( renderDetailCell( task ) );
 
   const classCell = document.createElement( "td" );
   classCell.className = "task-col-class";
@@ -87,6 +257,8 @@ export function renderTaskRow(
     taskCellOrDash( task.priority ),
   ) );
   tr.appendChild( td( "task-col-project", taskCellOrDash( task.project ) ) );
+
+  tr.appendChild( renderActionsCell( task, reassignTargets ) );
 
   return tr;
 }
@@ -133,13 +305,15 @@ function renderGroupHeader( group: TaskGroup, isCollapsed: boolean, idSlug: stri
  *     accordion seam): a group whose owner key ∈ collapsedOwners gets the
  *     `collapsed` class (CSS hides its rows; the header bar stays), chevron ▸,
  *     aria-expanded="false"; otherwise chevron ▾, aria-expanded="true"
- *   - Read-only: no action column, no mutating controls
+ *   - each row carries the trailing Actions cell (priority/owner edit + drop);
+ *     reassignTargets (active personas, Sam included — Q5) populates the owner selects
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on the multi-line exported function-declaration line; all internal branches are exercised by tests.
 export function renderTaskListTable(
   model           : TaskListModel,
   ianaZone        : string | null | undefined,
   collapsedOwners : ReadonlySet<string> = new Set(),
+  reassignTargets : ReadonlyArray<string> = [],
 ): HTMLTableElement {
   const table = document.createElement( "table" );
   table.className = "task-list-table";
@@ -147,7 +321,9 @@ export function renderTaskListTable(
   const thead = document.createElement( "thead" );
   const headRow = document.createElement( "tr" );
   const headers: ReadonlyArray<[string, string]> = [
+    [ "task-col-id", "ID" ],
     [ "task-col-title", "Title" ],
+    [ "task-col-detail", "Detail" ],
     [ "task-col-class", "Class" ],
     [ "task-col-status", "Status" ],
     [ "task-col-blocked", "Blocked by" ],
@@ -155,6 +331,7 @@ export function renderTaskListTable(
     [ "task-col-accountable", "Accountable" ],
     [ "task-col-priority", "Priority" ],
     [ "task-col-project", "Project" ],
+    [ "task-col-actions", "Actions" ],
   ];
   for ( const [ cls, label ] of headers ) {
     const th = document.createElement( "th" );
@@ -179,7 +356,7 @@ export function renderTaskListTable(
 
     tbody.appendChild( renderGroupHeader( group, isCollapsed, idSlug ) );
     for ( const task of group.tasks ) {
-      tbody.appendChild( renderTaskRow( task, ianaZone ) );
+      tbody.appendChild( renderTaskRow( task, ianaZone, reassignTargets ) );
     }
     table.appendChild( tbody );
   }

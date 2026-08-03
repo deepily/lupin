@@ -122,9 +122,30 @@ class SpeechToTextProvider:
         Load the `ck_live_*` plaintext key used to authenticate against
         lupin-model-server's X-API-Key middleware.
 
-        Per María's 2026-05-16 brief, the model-server reuses the existing
+        ⚠️ SUPERSEDED 2026-07-28 (rows 574fd1dc / 6cc52525). This docstring used
+        to read: *"the model-server reuses the existing
         `notification-api-claude-code-dev` key — no parallel `ck_internal_*`
-        namespace. Same key the FastAPI HTTP paths use.
+        namespace. Same key the FastAPI HTTP paths use."* That reuse was the
+        defect, not the economy it reads as.
+
+        `notification-api-claude-code-dev` is validated against a PER-DEPLOYMENT
+        `api_keys` table, so its correct value differs on every host. The model
+        server bcrypt-hashes ONE mounted secret version at boot, so its correct
+        value is identical everywhere. One file cannot be both.
+
+        ⚠️ AND THIS PATH WAS COLLATERAL DAMAGE NOBODY REPORTED. The 07-26 outage
+        was filed against `/embeddings/generate` because that path logs loudly.
+        `/transcribe` takes the same key to the same service and had been failing
+        for the same ~38h, silently — found only by grepping for the key name
+        while fixing the other one.
+
+        The name is read from the SAME env var the model server reads
+        (`LUPIN_MODEL_SERVER_API_KEY_NAME`, lupin_model_server/main.py:76) so the
+        two ends cannot drift by editing one of them.
+        src/rnd/v0.1.9/2026.07.28-model-server-api-key-decoupling.md
+
+        Requires:
+            - nothing
 
         Ensures:
             - Returns the plaintext key string when the file is present
@@ -132,7 +153,8 @@ class SpeechToTextProvider:
             - Never raises
         """
         try:
-            return du.get_api_key( "notification-api-claude-code-dev" )
+            key_name = os.environ.get( "LUPIN_MODEL_SERVER_API_KEY_NAME", "model-server-api" )
+            return du.get_api_key( key_name )
         except Exception:
             return None
 

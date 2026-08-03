@@ -38,6 +38,7 @@ from typing import Optional
 
 import cosa.utils.util as du
 
+from .coverage_guard   import reconcile_coverage
 from .daily_aggregator import DailyAggregator
 from .exceptions       import DateRangeError, GitCommandError
 from .git_log_parser   import GitLogParser
@@ -56,6 +57,7 @@ class GitLogLocDeltaAnalyzer:
         base:           str           = "main",
         since:          Optional[str] = None,
         until:          Optional[str] = None,
+        all_branches:   bool          = False,
         include_merges: bool          = False,
         author:         Optional[str] = None,
         repo_name:      Optional[str] = None,
@@ -71,6 +73,9 @@ class GitLogLocDeltaAnalyzer:
             - When mode="explicit", at least one of `since` / `until` is set
             - When mode="branch", `base` is a valid ref (default "main"); `branch`
               defaults to the current HEAD if None
+            - all_branches is NOT valid in "branch" mode — a branch delta names its
+              own endpoints, so widening the walk to every local ref would answer a
+              different question than the one asked. Raises ValueError.
             - repo_path is a valid directory
             - repo_name is the explicit repo identity (added 2026-05-21 schema v2);
               None is allowed for backward compatibility but callers writing CSVs
@@ -80,9 +85,31 @@ class GitLogLocDeltaAnalyzer:
         Ensures:
             - All flags captured for analyze() to consume
             - analyze() result dict carries `repo_name` (may be None if not set)
+
+        The two questions this tool answers (2026-07-13, bugs bbff93a3 / 37a8beeb):
+
+            "What work happened in window W?"      → date-windowed + all_branches=True
+            "How far ahead is this branch?"        → mode="branch" (main..<branch>)
+
+            These coincide ONLY when all work sits on the WIP branch, and they diverge
+            silently otherwise — a commit that landed on `main` sits on the BASELINE
+            side of `main..<branch>` and is uncountable by it, forever. The roll-up
+            asks the FIRST question; for weeks it was being answered with the second.
+            Do not let these two drift back together.
+
+        Raises:
+            - ValueError on an invalid mode, or all_branches in branch mode
         """
         if mode not in ( "today", "branch", "explicit" ):
             raise ValueError( f"Invalid mode: {mode!r} (must be 'today', 'branch', or 'explicit')" )
+
+        if all_branches and mode == "branch":
+            raise ValueError(
+                "all_branches is not valid in 'branch' mode: a branch delta (base..branch) "
+                "already names its endpoints, and --branches would widen the walk past them. "
+                "Use mode='explicit' (or 'today') with all_branches=True to ask "
+                "'what work happened in this window'."
+            )
 
         self.repo_path      = repo_path
         self.mode           = mode
@@ -90,6 +117,7 @@ class GitLogLocDeltaAnalyzer:
         self.base           = base
         self.since          = since
         self.until          = until
+        self.all_branches   = all_branches
         self.include_merges = include_merges
         self.author         = author
         self.repo_name      = repo_name
@@ -166,13 +194,21 @@ class GitLogLocDeltaAnalyzer:
         rev_range = f"{self.base}..{resolved_branch}"
         return ( None, None, rev_range, resolved_branch )
 
-    def analyze( self ) -> dict:
+    def analyze( self, reconcile: bool = False ) -> dict:
         """
         Run the full parse → aggregate pipeline and return the analysis dict.
 
+        Requires:
+            - reconcile=True additionally runs the coverage guard, which costs one
+              extra `git rev-list` invocation per call
+
         Ensures:
-            - Returns a dict with keys: since, until, branch, rev_range, repo_path,
-              summary, daily, by_type
+            - Returns a dict with keys: since, until, branch, rev_range, all_branches,
+              repo_path, repo_name, summary, daily, by_type, shas
+            - `shas` is the set of UNIQUE commit SHAs counted — the only honest basis
+              for a commit count (see DailyAggregator.all_shas)
+            - `coverage` is present iff reconcile=True; it carries the guard's report
+              and its `warning` is the caller's to surface (this method does not print)
 
         Raises:
             - GitCommandError if any underlying git invocation fails
@@ -183,7 +219,7 @@ class GitLogLocDeltaAnalyzer:
         if self.debug:
             print(
                 f"[GitLogLocDeltaAnalyzer] mode={self.mode} since={since} until={until} "
-                f"rev_range={rev_range} branch={resolved_branch}"
+                f"rev_range={rev_range} branch={resolved_branch} all_branches={self.all_branches}"
             )
 
         parser = GitLogParser(
@@ -191,6 +227,7 @@ class GitLogLocDeltaAnalyzer:
             since          = since,
             until          = until,
             rev_range      = rev_range,
+            all_branches   = self.all_branches,
             include_merges = self.include_merges,
             author         = self.author,
             timeout        = self.timeout,
@@ -202,17 +239,35 @@ class GitLogLocDeltaAnalyzer:
         for change in parser.iter_changes():
             agg.record( change )
 
-        return {
-            "since":     since,
-            "until":     until,
-            "branch":    resolved_branch,
-            "rev_range": rev_range,
-            "repo_path": self.repo_path,
-            "repo_name": self.repo_name,
-            "summary":   agg.summary(),
-            "daily":     agg.daily(),
-            "by_type":   agg.by_type(),
+        result = {
+            "since":        since,
+            "until":        until,
+            "branch":       resolved_branch,
+            "rev_range":    rev_range,
+            "all_branches": self.all_branches,
+            "repo_path":    self.repo_path,
+            "repo_name":    self.repo_name,
+            "summary":      agg.summary(),
+            "daily":        agg.daily(),
+            "by_type":      agg.by_type(),
+            "shas":         agg.all_shas(),
         }
+
+        if reconcile:
+            result[ "coverage" ] = reconcile_coverage(
+                repo_path      = self.repo_path,
+                counted_shas   = result[ "shas" ],
+                since          = since,
+                until          = until,
+                rev_range      = rev_range,
+                all_branches   = self.all_branches,
+                include_merges = self.include_merges,
+                repo_name      = self.repo_name,
+                timeout        = self.timeout,
+                debug          = self.debug,
+            )
+
+        return result
 
 
 def quick_smoke_test():

@@ -208,11 +208,18 @@ def test_notify_voice_dispatch_failure_falls_back_to_print( capsys ):
 # =========================================================================== #
 # ask_yes_no
 # =========================================================================== #
-def test_ask_yes_no_cli_non_interactive_uses_default( capsys ):
+def test_ask_yes_no_cli_non_interactive_refuses_without_declaration():
+    """Was: read `default` as the absent human's answer (row 84933a05)."""
     mod.set_cli_mode( True )
     with patch.object( mod, "_is_interactive", return_value=False ):
-        assert _run( mod.ask_yes_no( "Proceed?", default="yes", abstract="ctx" ) ) is True
-    assert "auto-default" in capsys.readouterr().out
+        with pytest.raises( mod.VoiceGateNoDefaultError ):
+            _run( mod.ask_yes_no( "Proceed?", default="yes", abstract="ctx" ) )
+
+
+def test_ask_yes_no_cli_non_interactive_honours_declaration():
+    mod.set_cli_mode( True )
+    with patch.object( mod, "_is_interactive", return_value=False ):
+        assert _run( mod.ask_yes_no( "Proceed?", unattended_default=True ) ) is True
 
 
 def test_ask_yes_no_cli_interactive_yes():
@@ -235,11 +242,19 @@ def test_ask_yes_no_voice_success():
     assert _run( mod.ask_yes_no( "Proceed?" ) ) is True
 
 
-def test_ask_yes_no_voice_failure_non_interactive_default():
+def test_ask_yes_no_voice_failure_non_interactive_refuses():
     iface = _fake_iface( ask_confirmation=AsyncMock( side_effect=RuntimeError( "x" ) ) )
     _enter_voice_mode( iface )
     with patch.object( mod, "_is_interactive", return_value=False ):
-        assert _run( mod.ask_yes_no( "Proceed?", default="yes" ) ) is True
+        with pytest.raises( mod.VoiceGateNoDefaultError ):
+            _run( mod.ask_yes_no( "Proceed?", default="yes" ) )
+
+
+def test_ask_yes_no_voice_failure_non_interactive_honours_declaration():
+    iface = _fake_iface( ask_confirmation=AsyncMock( side_effect=RuntimeError( "x" ) ) )
+    _enter_voice_mode( iface )
+    with patch.object( mod, "_is_interactive", return_value=False ):
+        assert _run( mod.ask_yes_no( "Proceed?", unattended_default=True ) ) is True
 
 
 def test_ask_yes_no_voice_failure_interactive_cli_fallback():
@@ -265,10 +280,10 @@ def test_job_id_autoinject_across_blocking_helpers():
     mod.set_cli_mode( True )
     mod._job_id = "dr-deadbeef"
     with patch.object( mod, "_is_interactive", return_value=False ):
-        assert _run( mod.ask_yes_no( "Q?", default="yes" ) ) is True
+        assert _run( mod.ask_yes_no( "Q?", unattended_default=True ) ) is True
         assert _run( mod.get_input( "Q?" ) ) is None
-        assert _run( mod.choose( "Q?", [ "a", "b" ] ) ) == "a"
-        assert _run( mod.present_choices( _Q_SINGLE ) ) == { "answers": { "Pick": "a" } }
+        assert _run( mod.choose( "Q?", [ "a", "b" ], response_default="a" ) ) == "a"
+        assert _run( mod.present_choices( _Q_SINGLE, response_default={ "Pick": "a" } ) )[ "answers" ] == { "Pick": "a" }
 
 
 # =========================================================================== #
@@ -329,10 +344,18 @@ def test_choose_empty_options_raises():
         _run( mod.choose( "Pick", [] ) )
 
 
-def test_choose_cli_non_interactive_first_label():
+def test_choose_cli_non_interactive_refuses_without_a_default():
+    """Was: returned labels[0]. Position in a list is not consent (row 741011ba)."""
     mod.set_cli_mode( True )
     with patch.object( mod, "_is_interactive", return_value=False ):
-        assert _run( mod.choose( "Pick", [ "a", "b" ] ) ) == "a"
+        with pytest.raises( mod.VoiceGateNoDefaultError ):
+            _run( mod.choose( "Pick", [ "a", "b" ] ) )
+
+
+def test_choose_cli_non_interactive_honours_a_declared_default():
+    mod.set_cli_mode( True )
+    with patch.object( mod, "_is_interactive", return_value=False ):
+        assert _run( mod.choose( "Pick", [ "a", "b" ], response_default="b" ) ) == "b"
 
 
 def test_choose_cli_interactive_valid_number():
@@ -350,26 +373,30 @@ def test_choose_cli_interactive_custom_other():
         assert _run( mod.choose( "Pick", [ "a", "b" ], allow_custom=True ) ) == "my custom"
 
 
-def test_choose_cli_interactive_custom_other_empty_uses_default():
+def test_choose_cli_interactive_custom_other_empty_refuses():
+    """Picking "Other" then typing nothing is not a vote for option 1."""
     mod.set_cli_mode( True )
     with patch.object( mod, "_is_interactive", return_value=True ), \
          patch( "builtins.input", side_effect=[ "3", "" ] ):
-        assert _run( mod.choose( "Pick", [ "a", "b" ], allow_custom=True ) ) == "a"
+        with pytest.raises( mod.VoiceGateNoDefaultError ):
+            _run( mod.choose( "Pick", [ "a", "b" ], allow_custom=True ) )
 
 
-def test_choose_cli_interactive_non_numeric_uses_default( capsys ):
+def test_choose_cli_interactive_non_numeric_refuses():
+    """An unusable entry is not an answer. Was: printed a notice and picked labels[0]."""
     mod.set_cli_mode( True )
     with patch.object( mod, "_is_interactive", return_value=True ), \
          patch( "builtins.input", return_value="abc" ):
-        assert _run( mod.choose( "Pick", [ "a", "b" ] ) ) == "a"
-    assert "Invalid selection" in capsys.readouterr().out
+        with pytest.raises( mod.VoiceGateNoDefaultError ):
+            _run( mod.choose( "Pick", [ "a", "b" ] ) )
 
 
-def test_choose_cli_interactive_out_of_range_uses_default():
+def test_choose_cli_interactive_out_of_range_refuses():
     mod.set_cli_mode( True )
     with patch.object( mod, "_is_interactive", return_value=True ), \
          patch( "builtins.input", return_value="99" ):
-        assert _run( mod.choose( "Pick", [ "a", "b" ] ) ) == "a"
+        with pytest.raises( mod.VoiceGateNoDefaultError ):
+            _run( mod.choose( "Pick", [ "a", "b" ] ) )
 
 
 def test_choose_voice_selection_in_labels():
@@ -384,16 +411,25 @@ def test_choose_voice_custom_other_not_in_labels():
     assert _run( mod.choose( "Pick", [ "a", "b" ] ) ) == "custom!"
 
 
-def test_choose_voice_no_selection_returns_default():
+def test_choose_voice_no_selection_refuses():
+    """The dispatch returned but carried no choice. Not a failure, not consent."""
     iface = _fake_iface( present_choices=AsyncMock( return_value={ "answers": {} } ) )
     _enter_voice_mode( iface )
-    assert _run( mod.choose( "Pick", [ "a", "b" ] ) ) == "a"
+    with pytest.raises( mod.VoiceGateNoDefaultError ):
+        _run( mod.choose( "Pick", [ "a", "b" ] ) )
 
 
-def test_choose_voice_failure_returns_default():
+def test_choose_voice_failure_refuses_without_a_default():
     iface = _fake_iface( present_choices=AsyncMock( side_effect=RuntimeError( "x" ) ) )
     _enter_voice_mode( iface )
-    assert _run( mod.choose( "Pick", [ "a", "b" ] ) ) == "a"
+    with pytest.raises( mod.VoiceGateNoDefaultError ):
+        _run( mod.choose( "Pick", [ "a", "b" ] ) )
+
+
+def test_choose_voice_failure_honours_a_declared_default():
+    iface = _fake_iface( present_choices=AsyncMock( side_effect=RuntimeError( "x" ) ) )
+    _enter_voice_mode( iface )
+    assert _run( mod.choose( "Pick", [ "a", "b" ], response_default="b" ) ) == "b"
 
 
 # =========================================================================== #
@@ -405,20 +441,33 @@ _Q_MULTI  = [ { "question": "Which?", "header": "Pick", "multiSelect": True,
                 "options": [ { "label": "a" }, { "label": "b" } ] } ]
 
 
-def test_present_choices_cli_non_interactive_single_and_multi():
+def test_present_choices_cli_non_interactive_refuses_without_a_default():
+    """Was: answered options[0] for both shapes. Row be8830a3 / 247ddaca."""
     mod.set_cli_mode( True )
     with patch.object( mod, "_is_interactive", return_value=False ):
-        out_single = _run( mod.present_choices( _Q_SINGLE ) )
-        out_multi  = _run( mod.present_choices( _Q_MULTI ) )
-    assert out_single == { "answers": { "Pick": "a" } }
-    assert out_multi  == { "answers": { "Pick": [ "a" ] } }
+        with pytest.raises( mod.VoiceGateNoDefaultError ):
+            _run( mod.present_choices( _Q_SINGLE ) )
+        with pytest.raises( mod.VoiceGateNoDefaultError ):
+            _run( mod.present_choices( _Q_MULTI ) )
 
 
-def test_present_choices_cli_non_interactive_empty_options():
+def test_present_choices_cli_non_interactive_honours_a_declared_default():
+    mod.set_cli_mode( True )
+    with patch.object( mod, "_is_interactive", return_value=False ):
+        out = _run( mod.present_choices( _Q_SINGLE, response_default={ "Pick": "b" } ) )
+    assert out[ "answers" ]        == { "Pick": "b" }
+    assert out[ "default_used" ]   is True
+    assert out[ "answered" ]       is False
+    assert out[ "default_source" ] == mod._DEFAULT_SOURCE_NON_INTERACTIVE
+
+
+def test_present_choices_cli_non_interactive_empty_options_refuses():
+    """An options list with nothing in it cannot yield a choice either."""
     mod.set_cli_mode( True )
     q = [ { "header": "Pick", "multiSelect": False, "options": [] } ]
     with patch.object( mod, "_is_interactive", return_value=False ):
-        assert _run( mod.present_choices( q ) ) == { "answers": { "Pick": "" } }
+        with pytest.raises( mod.VoiceGateNoDefaultError ):
+            _run( mod.present_choices( q ) )
 
 
 def test_present_choices_cli_interactive_single_valid( capsys ):
@@ -426,48 +475,72 @@ def test_present_choices_cli_interactive_single_valid( capsys ):
     with patch.object( mod, "_is_interactive", return_value=True ), \
          patch( "builtins.input", return_value="2" ):
         out = _run( mod.present_choices( _Q_SINGLE, abstract="ctx" ) )
-    assert out == { "answers": { "Pick": "b" } }
+    assert out[ "answers" ]      == { "Pick": "b" }
+    assert out[ "answered" ]     is True
+    assert out[ "default_used" ] is False
     assert "ctx" in capsys.readouterr().out
 
 
-def test_present_choices_cli_interactive_single_out_of_range_default():
+def test_present_choices_cli_interactive_single_out_of_range_refuses():
     mod.set_cli_mode( True )
     with patch.object( mod, "_is_interactive", return_value=True ), \
          patch( "builtins.input", return_value="99" ):
-        assert _run( mod.present_choices( _Q_SINGLE ) ) == { "answers": { "Pick": "a" } }
+        with pytest.raises( mod.VoiceGateNoDefaultError ):
+            _run( mod.present_choices( _Q_SINGLE ) )
 
 
 def test_present_choices_cli_interactive_single_custom_text():
     mod.set_cli_mode( True )
     with patch.object( mod, "_is_interactive", return_value=True ), \
          patch( "builtins.input", return_value="my own" ):
-        assert _run( mod.present_choices( _Q_SINGLE ) ) == { "answers": { "Pick": "my own" } }
+        assert _run( mod.present_choices( _Q_SINGLE ) )[ "answers" ] == { "Pick": "my own" }
 
 
 def test_present_choices_cli_interactive_multi_numbers():
     mod.set_cli_mode( True )
     with patch.object( mod, "_is_interactive", return_value=True ), \
          patch( "builtins.input", return_value="1,2" ):
-        assert _run( mod.present_choices( _Q_MULTI ) ) == { "answers": { "Pick": [ "a", "b" ] } }
+        assert _run( mod.present_choices( _Q_MULTI ) )[ "answers" ] == { "Pick": [ "a", "b" ] }
 
 
 def test_present_choices_cli_interactive_multi_custom_text():
     mod.set_cli_mode( True )
     with patch.object( mod, "_is_interactive", return_value=True ), \
          patch( "builtins.input", return_value="freeform" ):
-        assert _run( mod.present_choices( _Q_MULTI ) ) == { "answers": { "Pick": [ "freeform" ] } }
+        assert _run( mod.present_choices( _Q_MULTI ) )[ "answers" ] == { "Pick": [ "freeform" ] }
 
 
 def test_present_choices_voice_success():
     iface = _fake_iface( present_choices=AsyncMock( return_value={ "answers": { "Pick": "a" } } ) )
     _enter_voice_mode( iface )
-    assert _run( mod.present_choices( _Q_SINGLE ) ) == { "answers": { "Pick": "a" } }
+    out = _run( mod.present_choices( _Q_SINGLE ) )
+    assert out[ "answers" ]      == { "Pick": "a" }
+    assert out[ "answered" ]     is True
+    assert out[ "default_used" ] is False
 
 
-def test_present_choices_voice_failure_returns_defaults():
+def test_present_choices_voice_success_is_not_marked_as_defaulted():
+    """A real selection must never carry default_used — that flag is what
+    every consumer-side gate branches on."""
+    iface = _fake_iface( present_choices=AsyncMock(
+        return_value={ "answers": { "Pick": "a" }, "answered": True, "default_used": False } ) )
+    _enter_voice_mode( iface )
+    out = _run( mod.present_choices( _Q_SINGLE ) )
+    assert out.get( "default_used", False ) is False
+
+
+def test_present_choices_voice_failure_refuses_without_a_default():
     iface = _fake_iface( present_choices=AsyncMock( side_effect=RuntimeError( "x" ) ) )
     _enter_voice_mode( iface )
-    assert _run( mod.present_choices( _Q_SINGLE ) ) == { "answers": { "Pick": "a" } }
+    with pytest.raises( mod.VoiceGateNoDefaultError ):
+        _run( mod.present_choices( _Q_SINGLE ) )
+
+
+def test_present_choices_voice_failure_names_the_path_in_its_provenance():
+    iface = _fake_iface( present_choices=AsyncMock( side_effect=RuntimeError( "x" ) ) )
+    _enter_voice_mode( iface )
+    out = _run( mod.present_choices( _Q_SINGLE, response_default={ "Pick": "b" } ) )
+    assert out[ "default_source" ] == mod._DEFAULT_SOURCE_DISPATCH_FAILED
 
 
 # =========================================================================== #
@@ -479,10 +552,18 @@ _THEMES = [
 ]
 
 
-def test_select_themes_cli_non_interactive_all():
+def test_select_themes_cli_non_interactive_refuses_without_a_default():
+    """Was: selected every theme. "Nobody answered" must not mean "wants all" (row 741011ba)."""
     mod.set_cli_mode( True )
     with patch.object( mod, "_is_interactive", return_value=False ):
-        assert _run( mod.select_themes( _THEMES ) ) == [ 0, 1 ]
+        with pytest.raises( mod.VoiceGateNoDefaultError ):
+            _run( mod.select_themes( _THEMES ) )
+
+
+def test_select_themes_cli_non_interactive_honours_a_declared_default():
+    mod.set_cli_mode( True )
+    with patch.object( mod, "_is_interactive", return_value=False ):
+        assert _run( mod.select_themes( _THEMES, response_default=[ 0, 1 ] ) ) == [ 0, 1 ]
 
 
 def test_select_themes_cli_interactive_all_keyword():
@@ -499,11 +580,14 @@ def test_select_themes_cli_interactive_numbers():
         assert _run( mod.select_themes( _THEMES ) ) == [ 1 ]
 
 
-def test_select_themes_cli_interactive_invalid_returns_empty():
+def test_select_themes_cli_interactive_invalid_refuses():
+    """Was: an unparseable entry became an EMPTY selection — invented in the
+    opposite direction from select_topics, equally invented."""
     mod.set_cli_mode( True )
     with patch.object( mod, "_is_interactive", return_value=True ), \
          patch( "builtins.input", return_value="xyz" ):
-        assert _run( mod.select_themes( _THEMES ) ) == []
+        with pytest.raises( mod.VoiceGateNoDefaultError ):
+            _run( mod.select_themes( _THEMES ) )
 
 
 def test_select_themes_voice_maps_names_to_indices():
@@ -532,10 +616,17 @@ def test_select_themes_voice_failure_notifies_and_raises():
 _TOPICS = [ { "topic": "Topic A", "objective": "obj a" }, { "topic": "Topic B", "objective": "obj b" } ]
 
 
-def test_select_topics_cli_non_interactive_all():
+def test_select_topics_cli_non_interactive_refuses_without_a_default():
     mod.set_cli_mode( True )
     with patch.object( mod, "_is_interactive", return_value=False ):
-        assert _run( mod.select_topics( _TOPICS ) ) == [ 0, 1 ]
+        with pytest.raises( mod.VoiceGateNoDefaultError ):
+            _run( mod.select_topics( _TOPICS ) )
+
+
+def test_select_topics_cli_non_interactive_honours_a_declared_default():
+    mod.set_cli_mode( True )
+    with patch.object( mod, "_is_interactive", return_value=False ):
+        assert _run( mod.select_topics( _TOPICS, response_default=[ 1 ] ) ) == [ 1 ]
 
 
 def test_select_topics_cli_interactive_all_keyword():
@@ -559,11 +650,14 @@ def test_select_topics_cli_interactive_numbers():
         assert _run( mod.select_topics( _TOPICS ) ) == [ 0 ]
 
 
-def test_select_topics_cli_interactive_invalid_defaults_all():
+def test_select_topics_cli_interactive_invalid_refuses():
+    """Was "Default to all on error" — a typo silently expanded a run that
+    spends real per-token search budget."""
     mod.set_cli_mode( True )
     with patch.object( mod, "_is_interactive", return_value=True ), \
          patch( "builtins.input", return_value="bogus" ):
-        assert _run( mod.select_topics( _TOPICS ) ) == [ 0, 1 ]
+        with pytest.raises( mod.VoiceGateNoDefaultError ):
+            _run( mod.select_topics( _TOPICS ) )
 
 
 def test_select_topics_voice_maps_names_to_indices():

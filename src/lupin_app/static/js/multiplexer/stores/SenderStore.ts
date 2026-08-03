@@ -37,10 +37,12 @@
 // re-scope.
 
 import type { EventBus } from "../shared/EventBus";
+import type { StorageService } from "../shared/StorageService";
 import type {
   LupinEvent,
   SenderChangeKind,
   SenderRecord,
+  SessionTopicPayload,
   StoreSendersChangedPayload,
   VoicePersona,
 } from "../shared/types";
@@ -132,26 +134,44 @@ export interface SenderStore {
 }
 
 export interface SenderStoreOptions {
-  bus    : EventBus;
-  nowFn? : () => number;
+  bus      : EventBus;
+  nowFn?   : () => number;
+  // R5 — optional StorageService for the session-name localStorage mirror
+  // (cold-load hydration does NOT carry session_name — notifications.py:2495 —
+  // so names are client-persisted, mirroring legacy saveSessionName). Omitted in
+  // unit tests that don't exercise persistence; the in-memory map still buffers.
+  storage? : StorageService;
 }
+
+// R5 — localStorage mirror key + schema for the sender_id→session_name map.
+const SESSION_NAMES_KEY           = "session_names";
+const SESSION_NAMES_SCHEMA_VERSION = 1;
 
 // ---------------------------------------------------------------------------
 // Implementation
 // ---------------------------------------------------------------------------
 
 class SenderStoreImpl implements SenderStore {
-  private readonly bus   : EventBus;
-  private readonly nowFn : () => number;
+  private readonly bus     : EventBus;
+  private readonly nowFn   : () => number;
+  private readonly storage : StorageService | undefined;
 
   private readonly senders = new Map<string, SenderRecord>();
+
+  // R5 — sender_id → session_name. Doubles as (a) the pre-card BUFFER (a
+  // session_topic that arrives before the sender's first card is applied when
+  // the record is created) and (b) the in-memory view of the localStorage
+  // mirror (seeded on construct, written on every session_topic).
+  private readonly sessionNames = new Map<string, string>();
 
   private readonly unsubscribers: Array<() => void> = [];
 
   constructor(opts: SenderStoreOptions) {
-    this.bus   = opts.bus;
+    this.bus     = opts.bus;
     /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests always inject a deterministic nowFn().
-    this.nowFn = opts.nowFn ?? (() => Date.now());
+    this.nowFn   = opts.nowFn ?? (() => Date.now());
+    this.storage = opts.storage;
+    this.loadSessionNames();
     this.subscribe();
   }
 
@@ -181,6 +201,7 @@ class SenderStoreImpl implements SenderStore {
           unread_count             : newCount,
           conversation_mode_active : false,
         };
+        this.applyBufferedSessionName(record);
         this.senders.set(senderId, record);
       } else {
         // Never-regress merge — see interface docstring.
@@ -191,6 +212,15 @@ class SenderStoreImpl implements SenderStore {
       const persona = rec.voice_persona;
       if (record.voice_persona === undefined && persona && persona.released !== true) {
         record.voice_persona = this.normalizeVoicePersona(persona);
+      }
+
+      // Worker-badge silencing (Rick 2026-06-24): cold-load rows carry the
+      // manager lineage at `rec.manager_persona` (same field SessionStripStore
+      // hydrates from). Fill-forward only — set is_worker when the snapshot says
+      // "managed", never clobber a live-set true back to false (a live assigned
+      // event may have arrived before this snapshot resolved).
+      if (rec.manager_persona != null) {
+        record.is_worker = true;
       }
     }
     // Single emission for the whole snapshot — consumers reconcile from list().
@@ -210,7 +240,46 @@ class SenderStoreImpl implements SenderStore {
   private subscribe(): void {
     this.unsubscribers.push(
       this.bus.on<QueueUpdatePayload>("notification_queue_update", (e) => this.onQueueUpdate(e)),
+      // R5 — session-name/topic control event (NotificationStore intercepts the
+      // raw session_topic notification + re-emits it here).
+      this.bus.on<SessionTopicPayload>("session_topic", (e) => this.onSessionTopic(e.payload)),
     );
+  }
+
+  // -------------------------------------------------------------------------
+  // R5 — session name/topic (localStorage-mirrored, buffered pre-card)
+  // -------------------------------------------------------------------------
+
+  // Seed the in-memory map from the localStorage mirror (if a StorageService is
+  // wired). Cold-load hydration lacks session_name, so this restores names
+  // across reloads — legacy parity via saveSessionName's localStorage.
+  private loadSessionNames(): void {
+    if (this.storage === undefined) return;
+    const stored = this.storage.getJSON<Record<string, string>>(SESSION_NAMES_KEY, SESSION_NAMES_SCHEMA_VERSION);
+    if (stored === null) return;
+    for (const [senderId, name] of Object.entries(stored)) this.sessionNames.set(senderId, name);
+  }
+
+  private persistSessionNames(): void {
+    if (this.storage === undefined) return;
+    this.storage.setJSON(SESSION_NAMES_KEY, Object.fromEntries(this.sessionNames), SESSION_NAMES_SCHEMA_VERSION);
+  }
+
+  // Stamp a freshly-created record with any buffered/persisted session name.
+  private applyBufferedSessionName(record: SenderRecord): void {
+    const name = this.sessionNames.get(record.sender_id);
+    if (name !== undefined) record.session_name = name;
+  }
+
+  private onSessionTopic(payload: SessionTopicPayload): void {
+    this.sessionNames.set(payload.sender_id, payload.session_name);
+    this.persistSessionNames();
+    const existing = this.senders.get(payload.sender_id);
+    if (existing !== undefined) {
+      existing.session_name = payload.session_name;
+      this.emit("updated", payload.sender_id);
+    }
+    // else: buffered — applied when the sender's record is created.
   }
 
   // -------------------------------------------------------------------------
@@ -238,12 +307,19 @@ class SenderStoreImpl implements SenderStore {
       } else if (n.type === "conversation_mode_changed" || n.type === "speakerphone_changed") {
         this.handleConversationModeUpdate(senderId, n);
       } else {
-        this.handlePersonaUpdate(senderId, n.type, n.voice_persona ?? null);
+        this.handlePersonaUpdate(senderId, n.type, n.voice_persona ?? null, this.managerPresent(n.payload));
       }
       return;
     }
 
     // Regular-notification path — lookup-or-create + bump last_active + bump unread.
+    // Worker-badge silencing (Rachel hardening 2026-06-24): the server stamps
+    // manager_persona on EVERY notification's payload (legacy reads it from every
+    // notification — notifications.js:5685). Fill-forward is_worker here too
+    // (set-true-ONLY, never clear) so a worker whose FIRST event is a plain
+    // notification — e.g. a silent WS reconnect with no fresh assigned/hydrate —
+    // is silenced immediately, with no count flash before the persona event.
+    const isWorker = this.managerPresent(n.payload);
     const existing = this.senders.get(senderId);
     if (!existing) {
       const record: SenderRecord = {
@@ -253,6 +329,8 @@ class SenderStoreImpl implements SenderStore {
         unread_count             : 1,
         conversation_mode_active : false,           // Phase 6c Node D — default off; flipped by handleConversationModeUpdate
       };
+      if (isWorker) record.is_worker = true;
+      this.applyBufferedSessionName(record);
       this.senders.set(senderId, record);
       this.emit("added", senderId);
       return;
@@ -260,13 +338,15 @@ class SenderStoreImpl implements SenderStore {
 
     existing.last_active_ts = ts;
     existing.unread_count++;
+    if (isWorker) existing.is_worker = true;
     this.emit("updated", senderId);
   }
 
   private handlePersonaUpdate(
-    senderId : string,
-    type     : string,
-    persona  : ServerVoicePersona | null,
+    senderId  : string,
+    type      : string,
+    persona   : ServerVoicePersona | null,
+    isWorker  : boolean,
   ): void {
     let record = this.senders.get(senderId);
     if (!record) {
@@ -280,6 +360,7 @@ class SenderStoreImpl implements SenderStore {
         unread_count             : 0,
         conversation_mode_active : false,
       };
+      this.applyBufferedSessionName(record);
       this.senders.set(senderId, record);
     }
 
@@ -293,7 +374,21 @@ class SenderStoreImpl implements SenderStore {
     if (!persona || persona.released === true) return;
 
     record.voice_persona = this.normalizeVoicePersona(persona);
+    // Worker-badge silencing (Rick 2026-06-24): the assigned event carries the
+    // manager lineage at `payload.manager_persona` (same field SessionStripStore
+    // reads). A managed worker (manager present) gets is_worker=true so the
+    // renderer suppresses its numeric .sender-new-count; a root/manager session
+    // (no manager) gets is_worker=false. Authoritative on every (re-)assignment.
+    record.is_worker = isWorker;
     this.emit("updated", senderId);
+  }
+
+  // True when the notification payload carries a non-null `manager_persona` —
+  // i.e. this sender is a MANAGED worker. Mirrors SessionStripStore's
+  // `managerPersonaField` read so the card and strip agree on worker status.
+  private managerPresent(payload: Record<string, unknown> | null | undefined): boolean {
+    if (!payload) return false;
+    return payload["manager_persona"] != null;
   }
 
   // Server persona → client VoicePersona (5 canonical fields per D-E
@@ -332,6 +427,7 @@ class SenderStoreImpl implements SenderStore {
         unread_count             : 0,
         conversation_mode_active : false,
       };
+      this.applyBufferedSessionName(record);
       this.senders.set(senderId, record);
     }
 

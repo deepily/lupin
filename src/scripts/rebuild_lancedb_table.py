@@ -32,6 +32,16 @@ Staged + idempotent. Phases (run in order):
 
     reclaim   Drop <table>__corrupt_bak -> frees the ~80GB of stale-version disk.
 
+    drop-rebuilt  Drop <table>__rebuilt. Use AFTER `swap --keep-rebuilt` once the
+                  dev+test servers have reopened the new <table> green — removes the
+                  retained instant-rollback net (its job is done).
+
+Swap rollback-net option:
+    swap --keep-rebuilt   Retain <table>__rebuilt after the new table verifies (instead
+                          of dropping it), so it stays as a ~live-data-sized instant
+                          rollback net through the post-swap server bounce. Drop it with
+                          --phase drop-rebuilt once both servers verify green.
+
 Safety: a full verified backup of the lancedb must exist on the dedicated drive
 BEFORE running `swap`. This script never takes its own backup. The `__corrupt_bak`
 table is retained until `reclaim`, giving instant rollback.
@@ -116,7 +126,7 @@ def phase_build( db, table ):
     return 0
 
 
-def phase_swap( db, table ):
+def phase_swap( db, table, keep_rebuilt=False ):
     # LanceDB OSS does NOT support rename_table (the method exists but raises
     # NotImplementedError at runtime). So we re-snapshot the live table, DROP it
     # (which frees the ~stale-version disk in place), and CREATE it fresh from the
@@ -143,7 +153,10 @@ def phase_swap( db, table ):
     if nn != n0:
         print( "  FAIL: post-create count mismatch", file=sys.stderr ); return 8
     if rebuilt_name in _names( db ):
-        print( f"  dropping staging {rebuilt_name} (new table verified)..." ); db.drop_table( rebuilt_name )
+        if keep_rebuilt:
+            print( f"  RETAINING {rebuilt_name} as instant-rollback net (size ~live data); drop it via --phase drop-rebuilt after both servers verify green." )
+        else:
+            print( f"  dropping staging {rebuilt_name} (new table verified)..." ); db.drop_table( rebuilt_name )
     print( f"  SWAP COMPLETE (drop+create). Disk reclaimed in place. >>> Bounce dev+test servers now. <<<" )
     return 0
 
@@ -193,11 +206,23 @@ def phase_reclaim( db, table, db_path ):
     return 0
 
 
+def phase_drop_rebuilt( db, table ):
+    rebuilt_name = table + REBUILT_SUFFIX
+    if rebuilt_name not in _names( db ):
+        print( f"  {rebuilt_name} absent — nothing to drop." ); return 0
+    print( f"  dropping retained rollback-net {rebuilt_name}..." )
+    db.drop_table( rebuilt_name )
+    print( f"  dropped {rebuilt_name}. Rollback net removed (post-verify cleanup)." )
+    return 0
+
+
 def main():
     p = argparse.ArgumentParser( description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter )
-    p.add_argument( "--phase", required=True, choices=[ "status", "build", "swap", "backfill", "reclaim" ] )
+    p.add_argument( "--phase", required=True, choices=[ "status", "build", "swap", "backfill", "reclaim", "drop-rebuilt" ] )
     p.add_argument( "--table", default="input_and_output_tbl" )
     p.add_argument( "--db-path", default=DEFAULT_DB_PATH )
+    p.add_argument( "--keep-rebuilt", action="store_true",
+                    help="swap: retain <table>__rebuilt as an instant-rollback net instead of dropping it after verify" )
     args = p.parse_args()
 
     try:
@@ -212,9 +237,10 @@ def main():
 
     if   args.phase == "status":   return phase_status(  db, args.table, args.db_path )
     elif args.phase == "build":    return phase_build(   db, args.table )
-    elif args.phase == "swap":     return phase_swap(    db, args.table )
+    elif args.phase == "swap":     return phase_swap(    db, args.table, keep_rebuilt=args.keep_rebuilt )
     elif args.phase == "backfill": return phase_backfill( db, args.table )
     elif args.phase == "reclaim":  return phase_reclaim( db, args.table, args.db_path )
+    elif args.phase == "drop-rebuilt": return phase_drop_rebuilt( db, args.table )
 
 
 if __name__ == "__main__":

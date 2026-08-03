@@ -261,6 +261,11 @@ class TestFleetStatusVisual:
 
         container = page.get_by_test_id( "fleet-status-container" )
         container.locator( "table.fleet-status-table" ).wait_for( state="visible", timeout=5000 )
+        # fonts.ready + 2 RAFs so the NotoColorEmoji manager-crown glyph (👑) the
+        # populated table renders is committed before the pixel snapshot — the
+        # emoji font-race the Gate D fix closed (3c7e0aab / task_editing.py).
+        page.evaluate( "() => document.fonts.ready" )
+        page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
         # Pass the LOCATOR (not raw bytes) so the visual plugin applies its
         # animations="disabled" + mask handling; explicit .png so the baseline is
         # named correctly (plugin only auto-appends .png when name is None). Repo

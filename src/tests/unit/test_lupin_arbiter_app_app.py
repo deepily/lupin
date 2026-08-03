@@ -14,11 +14,12 @@ from fastapi.testclient import TestClient
 
 from lupin_arbiter_app import __version__
 from lupin_arbiter_app.app import create_app, assemble_app, _utcnow, _make_health_notify_fn, \
-                                 _build_context_pressure_loop
+                                 _build_context_pressure_loop, _announce_reload_blindness
 from lupin_arbiter_app.health_watcher import HealthWatcherLoop
 from lupin_arbiter_app.fleet_arbiter_loop import FleetArbiterLoop
 from lupin_arbiter_app.context_pressure_writer import ContextPressureWriterLoop
 from lupin_arbiter_app.local_snapshot_store import LocalSnapshotStore
+from cosa.agents.heartbeat_arbiter.turn_age_watchdog import TurnAgeWatchdog
 
 
 UTC = datetime.timezone.utc
@@ -38,6 +39,37 @@ class _FakeLoop:
 class _FakeGW:
     def __init__( self ): self.posts = [ ]
     def post( self, topic, body ): self.posts.append( ( topic, body ) )
+
+
+def test_announce_reload_blindness_all_arms():
+    """blind → notify + log; ok → log only; unknown → log only; notify raise swallowed."""
+    logs    = [ ]
+    notices = [ ]
+    def log( event, **f ): logs.append( event )
+    verdicts = { "blind-c": ( "blind", "BLIND msg" ), "ok-c": ( "ok", None ),
+                 "unk-c": ( "unknown", None ) }
+    def assess( name, env_inspect_fn, *, reload_decider ):
+        return verdicts[ name ]
+    _announce_reload_blindness(
+        [ "blind-c", "ok-c", "unk-c" ],
+        env_inspect_fn=lambda n: None, assess_fn=assess,
+        reload_decider=lambda v, p: False, notify_fn=notices.append, log_fn=log,
+    )
+    assert notices == [ "BLIND msg" ]
+    assert "reload_blind" in logs and "reload_ok" in logs and "reload_state_unknown" in logs
+
+
+def test_announce_reload_blindness_notify_raise_is_swallowed():
+    logs = [ ]
+    def log( event, **f ): logs.append( event )
+    def boom( msg ): raise RuntimeError( "notify down" )
+    _announce_reload_blindness(
+        [ "blind-c" ],
+        env_inspect_fn=lambda n: None,
+        assess_fn=lambda n, e, *, reload_decider: ( "blind", "m" ),
+        reload_decider=lambda v, p: True, notify_fn=boom, log_fn=log,
+    )
+    assert "reload_blind_notify_error" in logs
 
 
 def test_make_health_notify_fn_logs_and_escalates_rick_only():
@@ -107,6 +139,16 @@ def test_lifespan_starts_and_stops_all_three_loops():
     assert a.stopped is True and b.stopped is True and c.stopped is True
 
 
+def test_lifespan_starts_and_stops_turn_age_watchdog_loop():
+    """The turn-age watchdog (wedge fix f1a21917 lever ii) is the fourth lifespan-managed loop."""
+    a, b, c, d = _FakeLoop(), _FakeLoop(), _FakeLoop(), _FakeLoop()
+    with TestClient( create_app( health_loop=a, fleet_arbiter_loop=b,
+                                 context_pressure_loop=c, turn_age_watchdog_loop=d ) ) as client:
+        assert a.started and b.started and c.started and d.started
+        assert client.app.state.turn_age_watchdog_loop is d
+    assert a.stopped and b.stopped and c.stopped and d.stopped
+
+
 class _FakeCfg:
     """Fake ConfigurationManager for assemble_app's enable-gate branches."""
     def __init__( self, enabled, context_enabled=True ):
@@ -157,6 +199,15 @@ def test_assemble_app_context_watch_disabled_wires_no_writer( capsys ):
     assert isinstance( app.state.health_loop, HealthWatcherLoop )
     assert isinstance( app.state.fleet_arbiter_loop, FleetArbiterLoop )
     assert "context_pressure_writer_disabled" in capsys.readouterr().out
+
+
+def test_assemble_app_wires_turn_age_watchdog_in_both_paths():
+    """The turn-age watchdog is ALWAYS wired (both the health-enabled final path and
+    the health-disabled early-return path) — self-gating on its own INI flag."""
+    app_enabled  = assemble_app( _FakeCfg( enabled=True ),  _FakeGateway() )
+    app_disabled = assemble_app( _FakeCfg( enabled=False ), _FakeGateway() )
+    assert isinstance( app_enabled.state.turn_age_watchdog_loop, TurnAgeWatchdog )
+    assert isinstance( app_disabled.state.turn_age_watchdog_loop, TurnAgeWatchdog )
 
 
 def test_build_context_pressure_loop_reads_budget_policy_and_cadence():

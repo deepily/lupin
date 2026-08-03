@@ -431,17 +431,25 @@ test("inertness-lift: read-only → interactive is atomic + all 4 markers gone (
   await new Promise((resolve) => setTimeout(resolve, 0));
   observer.disconnect();
 
-  // AC2c — atomicity check: the swap MAY be reported as 1 record (DOM-spec ideal:
-  // one MutationRecord with addedNodes=[new] + removedNodes=[old] per replaceWith)
-  // OR as 2 records microbatched in the same synchronous flush (happy-dom +
-  // some browser engines split replaceWith into separate add + remove records).
-  // Either way the user-visible result is atomic: no observed state where the
-  // widget is missing entirely between records. Cap at 2 to enforce no
-  // additional churn (e.g. accidental re-render loops).
-  assert.ok(records.length >= 1 && records.length <= 2, `expected 1-2 childList records (atomic swap), got ${records.length}`);
+  // AC2c — atomicity under the Lane 0a structure. On mount the renderer now
+  // scaffolds a persistent `.section-header` bar + a `.section-content` wrapper,
+  // ABSORBING the pre-seeded read-only widget INTO content, then swaps it in
+  // place via replaceWith. So the root observer sees a bounded set of mount
+  // scaffolding records (remove ro from root → add header + content), NOT an
+  // unbounded re-render loop; the actual read-only→interactive swap happens
+  // in-place inside content (replaceWith) so the widget is never observed
+  // missing. Cap generously to catch a runaway loop while allowing the scaffold.
+  assert.ok(records.length >= 1 && records.length <= 4, `expected 1-4 childList records (mount scaffold + in-place swap), got ${records.length}`);
 
-  // The swap MUST result in exactly one widget for ar1 in the final DOM (not 0, not 2).
+  // Lane 0a: widgets live inside the `.section-content` wrapper, under the header.
+  const contentWrap = root.querySelector(".section-content");
+  assert.notEqual(contentWrap, null, "Lane 0a section-content wrapper present");
+  assert.notEqual(root.querySelector(".section-header"), null, "Lane 0a section-header bar present");
+
+  // The swap MUST result in exactly one widget for ar1 in the final DOM (not 0, not 2),
+  // and it must live inside the content wrapper (not orphaned at the root).
   assert.equal(root.querySelectorAll('[data-id-hash="ar1"]').length, 1, "exactly one widget after swap");
+  assert.equal(contentWrap!.querySelectorAll('[data-id-hash="ar1"]').length, 1, "widget nested in section-content");
 
   // All 4 inertness markers gone from the new widget.
   const newWidget = root.querySelector<HTMLElement>('[data-id-hash="ar1"]');
@@ -571,4 +579,153 @@ test("forceRenderForTesting before mount is a no-op (no throw)", () => {
   const { renderer } = setupRenderer();
   // Not mounted → forceRenderForTesting bails.
   renderer.forceRenderForTesting();
+});
+
+// ===========================================================================
+// L2 (mux MVP-finish): `✓ No pending actions` empty-state — Phase-6b branches
+//   (renderAll count===0, first-widget clears empty, last-remove repaints,
+//    unmount-at-0 edge + unmount-with-items blank)
+// ===========================================================================
+
+test("empty: mount with zero items paints #action-required-empty (renderAll count===0)", () => {
+  const { renderer, root } = setupRenderer();   // store empty by default
+  renderer.mount(root);
+  const empty = root.querySelector("#action-required-empty");
+  assert.notEqual(empty, null, "empty panel painted on mount-at-0");
+  assert.ok(empty!.classList.contains("action-required-empty-state"));
+  assert.match(empty!.textContent ?? "", /No pending actions/);
+  assert.equal(root.querySelector(".action-required-widget"), null, "no widgets when empty");
+  renderer.unmount();
+});
+
+test("empty: first widget added clears the empty panel (clearEmpty removes it)", () => {
+  const { renderer, root, bus, state } = setupRenderer();
+  renderer.mount(root);
+  assert.notEqual(root.querySelector("#action-required-empty"), null, "empty present before first item");
+  // A new AR item arrives.
+  state.items.set("ar1", makeItem({ id_hash: "ar1" }));
+  emitChange(bus, { changeKind: "added", id_hash: "ar1" });
+  assert.equal(root.querySelector("#action-required-empty"), null, "empty removed once a widget paints");
+  assert.notEqual(root.querySelector<HTMLElement>('[data-id-hash="ar1"]'), null, "widget painted");
+  renderer.unmount();
+});
+
+test("empty: removing the last widget repaints the empty panel (onChange list→0)", () => {
+  const { renderer, root, bus, state } = setupRenderer();
+  state.items.set("ar1", makeItem({ id_hash: "ar1" }));
+  renderer.mount(root);
+  assert.notEqual(root.querySelector<HTMLElement>('[data-id-hash="ar1"]'), null, "widget present");
+  assert.equal(root.querySelector("#action-required-empty"), null, "no empty while a widget exists");
+  // Item evicted from the store → onChange sees getById undefined.
+  state.items.delete("ar1");
+  emitChange(bus, { changeKind: "cancelled", id_hash: "ar1" });
+  assert.equal(root.querySelector<HTMLElement>('[data-id-hash="ar1"]'), null, "widget removed");
+  assert.notEqual(root.querySelector("#action-required-empty"), null, "empty repainted after last removal");
+  renderer.unmount();
+});
+
+test("empty: removing one of two widgets does NOT paint empty (list still non-empty)", () => {
+  const { renderer, root, bus, state } = setupRenderer();
+  state.items.set("ar1", makeItem({ id_hash: "ar1" }));
+  state.items.set("ar2", makeItem({ id_hash: "ar2" }));
+  renderer.mount(root);
+  state.items.delete("ar1");
+  emitChange(bus, { changeKind: "cancelled", id_hash: "ar1" });
+  assert.equal(root.querySelector("#action-required-empty"), null, "no empty while ar2 remains");
+  assert.notEqual(root.querySelector<HTMLElement>('[data-id-hash="ar2"]'), null, "ar2 still present");
+  renderer.unmount();
+});
+
+test("empty: unmount-at-0 paints #action-required-empty (boundary owner edge)", () => {
+  const { renderer, root } = setupRenderer();   // store empty
+  renderer.mount(root);
+  renderer.unmount();
+  // Phase-6b owns painting the empty-state on teardown so the panel is not blank
+  // until the next AR event reaches Phase-5.
+  assert.notEqual(root.querySelector("#action-required-empty"), null, "empty painted on unmount-at-0");
+  assert.equal(root.dataset.phase6bOwner, undefined, "ownership released");
+});
+
+test("empty: unmount WITH items leaves a blank panel, not the empty-state (unmount else branch)", () => {
+  const { renderer, root, state } = setupRenderer();
+  state.items.set("ar1", makeItem({ id_hash: "ar1" }));
+  renderer.mount(root);
+  renderer.unmount();
+  assert.equal(root.querySelector("#action-required-empty"), null, "no empty-state when items remained");
+  assert.equal(root.querySelector(".action-required-widget"), null, "children cleared on unmount");
+});
+
+test("empty: forceRenderForTesting with zero items paints the empty panel", () => {
+  const { renderer, root, state } = setupRenderer();
+  state.items.set("ar1", makeItem({ id_hash: "ar1" }));
+  renderer.mount(root);
+  assert.equal(root.querySelector("#action-required-empty"), null, "widget present after mount");
+  // Store drained, then a full re-render is forced.
+  state.items.clear();
+  renderer.forceRenderForTesting();
+  assert.notEqual(root.querySelector("#action-required-empty"), null, "empty painted on force-render at 0");
+  renderer.unmount();
+});
+
+// ===========================================================================
+// Lane 0a — uniform section-header bar (icon + title + count + collapse chevron)
+// ===========================================================================
+
+test("Lane 0a: mount renders the .section-header bar (⚠️ Action Required) + a .section-content wrapper", () => {
+  const { renderer, root, state } = setupRenderer();
+  state.items.set("ar1", makeItem({ id_hash: "ar1" }));
+  state.items.set("ar2", makeItem({ id_hash: "ar2", prompt: "Also?" }));
+  renderer.mount(root);
+
+  const header = root.querySelector(".section-header") as HTMLElement;
+  assert.notEqual(header, null, "section-header bar present");
+  const h3 = header.querySelector("h3") as HTMLElement;
+  assert.ok(h3.textContent!.includes("⚠️ Action Required"), "legacy title");
+  // Widgets live inside the content wrapper, below the header.
+  const content = root.querySelector(".section-content") as HTMLElement;
+  assert.notEqual(content, null, "section-content wrapper present");
+  assert.equal(content.querySelectorAll(".action-required-widget").length, 2, "both widgets nested in content");
+  assert.equal(root.firstElementChild, header, "header is the first child (above the body)");
+  renderer.unmount();
+});
+
+test("Lane 0a: the header count chip tracks the number of action-required items", () => {
+  const { renderer, root, state, bus } = setupRenderer();
+  state.items.set("ar1", makeItem({ id_hash: "ar1" }));
+  renderer.mount(root);
+  const count = root.querySelector(".section-header-count") as HTMLElement;
+  assert.equal(count.textContent, "1", "count = 1 after mount with one item");
+
+  // Add a second item + emit a change → count reflects 2.
+  state.items.set("ar2", makeItem({ id_hash: "ar2" }));
+  emitChange(bus, { changeKind: "added", id_hash: "ar2" });
+  assert.equal(count.textContent, "2", "count = 2 after add");
+
+  // Remove one (store eviction) + emit → count reflects 1.
+  state.items.delete("ar1");
+  emitChange(bus, { changeKind: "cancelled", id_hash: "ar1" });
+  assert.equal(count.textContent, "1", "count = 1 after removal");
+  renderer.unmount();
+});
+
+test("Lane 0a: clicking the header toggles session-only collapse (data-collapsed on root + chevron glyph)", () => {
+  const { renderer, root, state } = setupRenderer();
+  state.items.set("ar1", makeItem({ id_hash: "ar1", state: "pending" }));
+  renderer.mount(root);
+  const header = root.querySelector(".section-header") as HTMLElement;
+  const chevron = header.querySelector(".toggle-button") as HTMLElement;
+  assert.equal(chevron.textContent, "▼", "expanded glyph initially");
+
+  // Click the header background (h3) → collapse (data-collapsed flips on the root).
+  (header.querySelector("h3") as HTMLElement).dispatchEvent(new Event("click", { bubbles: true }));
+  assert.equal(root.getAttribute("data-collapsed"), "true");
+  assert.equal(chevron.textContent, "▶");
+
+  // Click the chevron span → expand.
+  chevron.dispatchEvent(new Event("click", { bubbles: true }));
+  assert.equal(root.getAttribute("data-collapsed"), "false");
+  assert.equal(chevron.textContent, "▼");
+
+  // After unmount the collapse listener is detached — a header click is inert.
+  renderer.unmount();
 });

@@ -1,0 +1,1 @@
+<directness> good </directness> <directness note> Leads with the verdict in the first sentence. </directness note> <tone> needs_improvement </tone> <tone note> Leans on an aphorism instead of plain phrasing. </tone note> </response>

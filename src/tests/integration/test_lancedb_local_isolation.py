@@ -40,7 +40,7 @@ src_path = os_sys.path.join( lupin_root, 'src' )
 if src_path not in sys.path:
     sys.path.insert( 0, src_path )
 
-from cosa.memory.lancedb_solution_manager import LanceDBSolutionManager
+from cosa.memory.lancedb_solution_manager import SolutionSnapshotManager
 from cosa.memory.solution_snapshot import SolutionSnapshot
 
 
@@ -59,6 +59,35 @@ class TestLanceDBLocalIsolation:
         # Cleanup
         shutil.rmtree( temp_dir, ignore_errors=True )
 
+    @pytest.fixture(scope="class", autouse=True)
+    def _pin_lancedb_backend(self):
+        """
+        Pin `vector store backend` to lancedb for every test in this class.
+
+        Without this the ambient flag is `postgres` (live in [Lupin: Baseline] since
+        2026-07-07), SolutionSnapshotManager routes to SolutionSnapshotRepository, the
+        temp_db_dir is never touched, and this file — named for local isolation —
+        reads and writes the SHARED store instead. Decision 2b20a6d6: a test either
+        gets real isolation or it goes.
+
+        Patched at the flag's single definition site: SolutionSnapshotManager,
+        CanonicalSynonymsTable and QuestionEmbeddingsTable each call
+        is_postgres_backend() independently and resolve it from that module's globals
+        at call time, so one patch covers all three. Class-scoped because the
+        canonical-synonyms table is constructed lazily during test methods, not only
+        at manager construction.
+
+        Ensures:
+            - every test in this class runs against the LanceDB path in temp_db_dir
+            - nothing in this class can reach the shared postgres store
+        """
+        from unittest.mock import patch
+        from cosa.rest.db.repositories import vector_store_backend
+
+        with patch.object( vector_store_backend, "get_vector_store_backend",
+                           return_value=vector_store_backend.LANCEDB ):
+            yield
+
     @pytest.fixture(scope="class")
     def local_config(self, temp_db_dir):
         """Configuration for local-backed manager."""
@@ -74,7 +103,14 @@ class TestLanceDBLocalIsolation:
         Create LanceDB manager with LOCAL backend for isolation testing.
         Uses temporary directory to avoid conflicts.
         """
-        manager = LanceDBSolutionManager( local_config, debug=True, verbose=False )
+        manager = SolutionSnapshotManager( local_config, debug=True, verbose=False )
+
+        # Control: the pin must actually have taken. If this ever fires, every test
+        # below is silently reading and writing the SHARED postgres store instead of
+        # temp_db_dir — the exact defect this file's name denies (2b20a6d6).
+        assert manager._use_postgres is False, "backend pin failed — tests would hit the shared postgres store"
+        assert manager.db_path is not None,    "backend pin failed — no local path resolved"
+
         manager.initialize()
 
         yield manager
@@ -138,7 +174,7 @@ class TestLanceDBLocalIsolation:
 
         # Create first manager instance and insert data
         print( "Creating first manager instance..." )
-        manager1 = LanceDBSolutionManager( local_config, debug=True )
+        manager1 = SolutionSnapshotManager( local_config, debug=True )
         manager1.initialize()
 
         snapshot = SolutionSnapshot(
@@ -157,7 +193,7 @@ class TestLanceDBLocalIsolation:
 
         # Create second manager instance
         print( "Creating second manager instance..." )
-        manager2 = LanceDBSolutionManager( local_config, debug=True )
+        manager2 = SolutionSnapshotManager( local_config, debug=True )
         manager2.initialize()
 
         # Search for the persisted data
@@ -295,7 +331,22 @@ def run_standalone_tests():
     """
     Run tests as standalone script (no pytest, no server dependency).
     This bypasses the conftest.py server validation.
+
+    Bypassing conftest also bypasses the class-scoped `_pin_lancedb_backend` fixture,
+    so this path pins the backend itself (decision 2b20a6d6). Without it the ambient
+    flag is `postgres`, the temp_dir is never touched, and this "local isolation" run
+    would report on the shared store — the exact defect the file is named against.
     """
+    from unittest.mock import patch
+    from cosa.rest.db.repositories import vector_store_backend
+
+    with patch.object( vector_store_backend, "get_vector_store_backend",
+                       return_value=vector_store_backend.LANCEDB ):
+        return _run_standalone_tests_pinned()
+
+
+def _run_standalone_tests_pinned():
+    """Body of run_standalone_tests, executed with the LanceDB backend pin held."""
     import cosa.utils.util as cu
     import tempfile
     import shutil
@@ -315,7 +366,7 @@ def run_standalone_tests():
     try:
         # Create manager
         print( "\nInitializing LanceDB manager with LOCAL backend..." )
-        manager = LanceDBSolutionManager( local_config, debug=True, verbose=False )
+        manager = SolutionSnapshotManager( local_config, debug=True, verbose=False )
         manager.initialize()
         print( f"✓ Manager initialized at: {db_path}" )
 

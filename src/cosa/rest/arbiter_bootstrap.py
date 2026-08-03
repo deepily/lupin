@@ -64,8 +64,9 @@ def build_arbiter_job( config_mgr ):   # pragma: no cover - production IO bounda
         - manager_recipient here is the v2.1-era single fallback; v2.2 per-group
           routing (B6 resolve_manager) overrides it per stuck worker at tap time
     """
-    from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob
+    from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob, _default_operator_gates_fn
     from cosa.agents.heartbeat_arbiter.arbiter_gateway import LupinArbiterGateway
+    from lupin_cli.claude_code.hooks.lib.heartbeat_hold import read_hold
 
     poll_seconds      = int( config_mgr.get( "arbiter poll seconds", default=60, return_type="int" ) )
     manager_on_duty   = config_mgr.get( "arbiter manager on duty", default="manager-on-duty" ) or "manager-on-duty"
@@ -74,7 +75,58 @@ def build_arbiter_job( config_mgr ):   # pragma: no cover - production IO bounda
     tap_min_interval  = int( config_mgr.get( "arbiter tap min interval seconds", default=300, return_type="int" ) )
     ack_window        = int( config_mgr.get( "arbiter manager ack window seconds", default=600, return_type="int" ) )
     stall_window      = int( config_mgr.get( "arbiter fleet stall window seconds", default=1800, return_type="int" ) )
+    # 6929f4ac outward-twin backstop: the aged-gate resurface ceiling (hold_reader_fn
+    # is wired to the real read_hold below so the in-process arbiter, when enabled,
+    # also resurfaces a dark session's open gate to Rick).
+    gate_resurface    = int( config_mgr.get( "arbiter user gate resurface seconds", default=1800, return_type="int" ) )
+    # A2/A3 (fcb5dbc0): the NORMAL-urgency operator-gate digest cadence (operator_gates_fn
+    # is wired to the real fleet-wide store reader below so the in-process arbiter, when
+    # enabled, also routes operator gates by urgency — urgent interrupt / normal digest).
+    operator_digest_cadence = int( config_mgr.get( "arbiter operator gate digest cadence seconds", default=1800, return_type="int" ) )
+    # Item B (2026.06.24): outreach-timestamp tz — REUSE the existing arbiter-journal
+    # tz key (one tz owner; default America/New_York, DST-aware EDT/EST).
+    local_timezone = config_mgr.get( "arbiter journal local timezone", default="America/New_York" ) or "America/New_York"
+    # Item C (2026.06.24): trailing-window outreach throttle (N msgs / Y min,
+    # PER-RECIPIENT, routine shoulder-taps only). Both runtime-tunable; <=0 disables.
+    throttle_max    = int( config_mgr.get( "arbiter outreach throttle max messages", default=5, return_type="int" ) )
+    throttle_window = int( config_mgr.get( "arbiter outreach throttle window minutes", default=15, return_type="int" ) )
+    # Role-goal poke echoes (role-goals Phase 2-3): the role-selected north-star goal
+    # lines appended to the stuck-poke + manager-staleness poke bodies. Runtime-tunable
+    # (no redeploy — D1); "" leaves the poke body unchanged. Canonical human-readable
+    # source: planning-is-prompting -> workflow/role-goals.md §"Injection: the poke echo".
+    manager_goal_line = config_mgr.get( "heartbeat manager goal line", default="" ) or ""
+    worker_goal_line  = config_mgr.get( "heartbeat worker goal line",  default="" ) or ""
 
+    # §4b worktree janitor (Worktree Lifecycle Contract). DEFAULT-OFF: the flag is
+    # False unless explicitly enabled in lupin-app.ini, so wiring it here is INERT
+    # (worktree_janitor_fn stays None → the arbiter seam is byte-identical) until
+    # an operator flips the flag AND restarts :8001. Activation is therefore a
+    # one-line config change + a restart, never a silent default-on. The janitor
+    # uses the SAME sandbox root the worktrees are created under (worktree_context).
+    janitor_enabled = config_mgr.get( "arbiter worktree janitor enabled", default=False, return_type="boolean" )
+    janitor_age_hrs = int( config_mgr.get( "arbiter worktree janitor age threshold hours", default=6, return_type="int" ) )
+    sandbox_root    = config_mgr.get( "cosa worktree sandbox root", default=".claude/worktrees" ) or ".claude/worktrees"
+    worktree_janitor_fn = None
+    if janitor_enabled:
+        from cosa.agents.shared.worktree_reaper import reconcile_worktrees
+        worktree_janitor_fn = lambda: reconcile_worktrees(
+            sandbox_root        = sandbox_root,
+            age_threshold_hours = janitor_age_hrs,
+        )
+
+    # ROLLBACK-INCOMPLETENESS (task 2a885154, Option A — Tiberius 2026-07-01). This
+    # in-process path is DEAD in steady state (gated OFF by `arbiter in-process
+    # bootstrap enabled = false`, R0 cutover complete); it is retained ONLY as the
+    # spec-§4 rollback (2026.06.07-arbiter-r0-inprocess-decommission-spec.md §4:
+    # "re-flip to True + bounce restores the in-process arbiter"). It is NOT
+    # physically removed because deletion would destroy that documented fallback.
+    # CAVEAT if that rollback is ever exercised: unlike the live :8001
+    # fleet_arbiter_loop, this constructor wires hold_reader_fn + operator_gates_fn
+    # but NEITHER owed_work_fn NOR known_owners_fn — so on rollback the L1
+    # store-aware MANAGER-DOWN/STALE suppression AND the known-persona fail-safe
+    # would both be INERT. Wiring the two missing fns (Option B) is a Rick-gated
+    # follow-up, deferred as out-of-scope for this P3; complete it BEFORE relying on
+    # this path as a true feature-parity rollback.
     gateway = LupinArbiterGateway.from_environment( sender_session_id="heartbeat-arbiter" )
     return ArbiterConsumerJob(
         commons                    = gateway,
@@ -85,6 +137,16 @@ def build_arbiter_job( config_mgr ):   # pragma: no cover - production IO bounda
         tap_min_interval_seconds   = tap_min_interval,
         manager_ack_window_seconds = ack_window,
         fleet_stall_window_seconds = stall_window,
+        hold_reader_fn             = read_hold,               # 6929f4ac: real per-session hold reader (outward-twin backstop)
+        user_gate_resurface_seconds = gate_resurface,         # 6929f4ac: aged-gate resurface ceiling
+        operator_gates_fn          = _default_operator_gates_fn,   # A2/A3: real fleet-wide operator-gate store reader
+        operator_digest_cadence_seconds = operator_digest_cadence, # A2/A3: normal-urgency digest cadence
+        worktree_janitor_fn        = worktree_janitor_fn,    # §4b: None unless `arbiter worktree janitor enabled` (default-off → inert)
+        local_timezone_name        = local_timezone,         # Item B: outreach-stamp tz (reuses the journal tz key)
+        outreach_throttle_max_messages   = throttle_max,     # Item C: N (trailing-window cap, routine taps)
+        outreach_throttle_window_minutes = throttle_window,  # Item C: Y minutes
+        manager_goal_line          = manager_goal_line,      # role-goals Phase 2-3: stuck/manager-stale poke echo
+        worker_goal_line           = worker_goal_line,       # role-goals Phase 2-3: stuck-poke worker echo
         user_id                  = "system",
         user_email               = "system@lupin.deepily.ai",
         session_id               = "heartbeat-arbiter",

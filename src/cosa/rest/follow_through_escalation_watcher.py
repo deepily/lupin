@@ -49,16 +49,15 @@ Canonical design: planning-is-prompting -> src/rnd/2026.06.16-follow-through-acc
 Lupin build plan: src/rnd/v0.1.8/2026.06.16-follow-through-accountability-lupin-build.md
 """
 
-import re
 import json
 import threading
-import unicodedata
 from pathlib import Path
 from datetime import datetime, timezone
 
 import cosa.utils.util as du
 from cosa.rest.db.database import get_db
 from cosa.rest.db.repositories.task_repository import TaskRepository
+from lupin_mcp.persona_normalization import canonical_persona_key
 
 
 ESCALATION_ACTOR = "follow-through-escalation-watcher"   # the system actor naming the escalation source
@@ -92,30 +91,6 @@ def is_awaiting_manager( item ) -> bool:
         if isinstance( ref, dict ) and ref.get( "kind" ) == "persona" and ref.get( "id" ) == manager:
             return True
     return False
-
-
-def _norm_persona( name ) -> str:
-    """
-    Normalize a persona name for cross-surface matching (store owner_persona vs
-    hold-file `persona`), mirroring the dm_send "accent-stripped + lowercase"
-    convention so "Mr. Radio 🦉" (hold) matches "mr radio" (store).
-
-    Requires:
-        - name is a string or None
-
-    Ensures:
-        - None / non-string / empty -> "" (an unmatchable sentinel)
-        - otherwise: NFKD-decomposed, combining marks dropped, lowercased, and
-          reduced to [a-z0-9] (spaces / punctuation / emoji removed)
-
-    Returns:
-        str
-    """
-    if not name or not isinstance( name, str ):
-        return ""
-    decomposed = unicodedata.normalize( "NFKD", name )
-    ascii_only = "".join( c for c in decomposed if not unicodedata.combining( c ) )
-    return re.sub( r"[^a-z0-9]", "", ascii_only.lower() )
 
 
 class FollowThroughEscalationWatcher:
@@ -303,7 +278,11 @@ class FollowThroughEscalationWatcher:
         Returns:
             bool
         """
-        target = _norm_persona( persona )
+        # Identity parity (Phase 2): retired the private _norm_persona (which
+        # DROPPED spaces -> "mrradio") for the one canonical_persona_key root
+        # (keep-spaces -> "mr radio"), so the hold-file persona matches the store
+        # owner_persona by the SAME key. Both compare sides moved in lockstep.
+        target = canonical_persona_key( persona )
         if not target:
             return False
 
@@ -323,7 +302,7 @@ class FollowThroughEscalationWatcher:
                 continue
             if not isinstance( hold, dict ):
                 continue
-            if _norm_persona( hold.get( "persona" ) ) != target:
+            if canonical_persona_key( hold.get( "persona" ) ) != target:
                 continue
             if hh.is_honored( hold, now=now ):
                 return True

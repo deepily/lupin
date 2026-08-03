@@ -87,4 +87,13 @@ temp/
 # LanceDB FTS indices (regeneratable, often created by root/docker)
 */_indices/fts/
 
+# LanceDB legacy vector store — RETIRED after the v0.2.0 Postgres+pgvector
+# cutover (backend = postgres, commit 0901984d, soaked clean). The DATA01
+# working-tree copy was deleted 2026-07-08 (task 4955d0b9, Rick's word). This
+# exclude FREEZES the 30G DATA02 mirror as a durable rollback snapshot: with
+# plain --delete (not --delete-excluded), an excluded path is protected on the
+# destination, so the mirror survives even though the source is gone. Do NOT
+# add --delete-excluded to backup.sh without revisiting this.
+/src/conf/long-term-memory/lupin.lancedb/
+
 # Project-specific exclusions (add your patterns below)

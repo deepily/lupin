@@ -36,9 +36,34 @@ _src_path = os.path.join( os.environ.get( "LUPIN_ROOT", os.getcwd() ), "src" )
 if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
+from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 from lupin_cli.claude_code.hooks.lib.hook_common import (
     read_hook_input, log_payload, emit_json, get_buffer_path
 )
+
+# Transport budget for out-of-process HTTP calls to `:7999` (row 204911ca).
+# ~30s = 1.60x the observed maximum reload window of 18.76s — a multiplier with
+# explicit headroom, NOT a coverage guarantee. `:7999` runs `uvicorn --reload`
+# and the reloader parent holds the listening socket across a restart, so the
+# kernel ACCEPTS a request nothing is there to answer and the caller hangs
+# instead of getting a fast ConnectionRefused. The prior 2s failed every reload
+# it landed in (measured min 6.59s, n=143).
+#
+# Full derivation: src/rnd/v0.1.9/2026.07.19-dev-server-reload-availability.md §9(a).
+#
+# 🔴 DRIFT CONTROL — TWO SEARCHES, AND IT TOOK BOTH.
+# `grep -rn _SERVER_TRANSPORT_TIMEOUT_SECONDS` returns every DIRECT call site.
+# It does NOT return members whose budget is carried in a Pydantic FIELD rather
+# than passed at the call — `AsyncNotificationRequest( timeout=… )`, consumed at
+# `notify_user_async.py:197-201` as a bare `requests.post( timeout=request.timeout )`.
+# Two such members were missed on the first pass for exactly this reason.
+# The second search is: `grep -rn "AsyncNotificationRequest(" -A14 | grep timeout`.
+# Run BOTH, or the set you get back is the set the first grep can see.
+#
+# TRADE: a genuinely hung server now stalls persona release ~30s instead of ~2s.
+# Accepted — a leaked persona name gets re-granted to a later worker and
+# misdirects them, which outlasts a slow teardown. Not free.
+_SERVER_TRANSPORT_TIMEOUT_SECONDS = 30
 
 
 def _find_all_listener_pids( session_id, session_dir=None ):
@@ -74,7 +99,7 @@ def _find_all_listener_pids( session_id, session_dir=None ):
     from lupin_cli.claude_code.hooks.lib.listener_processes import find_live_listener_pids
 
     if session_dir is None:
-        session_dir = os.path.expanduser( "~/.claude/sessions" )
+        session_dir = str( sessions_dir() )   # row 8ccc20ab: the one seam
 
     pids   = set()
     hashes = set()
@@ -129,7 +154,8 @@ def _release_voice_persona( session_id ):
         - Returns True on a successful release HTTP 200
         - Returns False on any failure (logged to stderr)
         - Never raises exceptions
-        - 2-second timeouts on each HTTP call
+        - _SERVER_TRANSPORT_TIMEOUT_SECONDS on each HTTP call — sized to
+          outlast a `:7999` reload window rather than fail inside one
     """
     try:
         from lupin_cli.claude_code.hooks.lib.session_bridge import (
@@ -168,7 +194,7 @@ def _release_voice_persona( session_id ):
             method  = "POST",
             headers = { "Content-Type": "application/json" }
         )
-        with urllib.request.urlopen( login_req, timeout=2 ) as resp:
+        with urllib.request.urlopen( login_req, timeout=_SERVER_TRANSPORT_TIMEOUT_SECONDS ) as resp:
             login_data = json.loads( resp.read().decode() )
         access_token = login_data.get( "tokens", {} ).get( "access_token" )
         if not access_token:
@@ -184,7 +210,7 @@ def _release_voice_persona( session_id ):
                 "Authorization" : f"Bearer {access_token}"
             }
         )
-        with urllib.request.urlopen( release_req, timeout=2 ):
+        with urllib.request.urlopen( release_req, timeout=_SERVER_TRANSPORT_TIMEOUT_SECONDS ):
             pass
         return True
 

@@ -41,6 +41,7 @@ def create_app(
     health_loop           : Optional[ Any ]                = None,
     fleet_arbiter_loop    : Optional[ Any ]                = None,
     context_pressure_loop : Optional[ Any ]                = None,
+    turn_age_watchdog_loop : Optional[ Any ]               = None,
 ) -> FastAPI:
     """
     Build the lupin-arbiter-app FastAPI app.
@@ -48,8 +49,8 @@ def create_app(
     Requires:
         - now_fn (if provided) is a 0-arg callable returning an aware datetime
         - started_at (if provided) is an aware datetime
-        - health_loop / fleet_arbiter_loop / context_pressure_loop (if provided)
-          expose start() / stop()
+        - health_loop / fleet_arbiter_loop / context_pressure_loop /
+          turn_age_watchdog_loop (if provided) expose start() / stop()
 
     Ensures:
         - returns a FastAPI app exposing GET /health
@@ -66,20 +67,21 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan( _app: FastAPI ):
-        for lp in ( health_loop, fleet_arbiter_loop, context_pressure_loop ):
+        for lp in ( health_loop, fleet_arbiter_loop, context_pressure_loop, turn_age_watchdog_loop ):
             if lp is not None:
                 lp.start()
         yield
-        for lp in ( context_pressure_loop, fleet_arbiter_loop, health_loop ):   # stop in reverse start order
+        for lp in ( turn_age_watchdog_loop, context_pressure_loop, fleet_arbiter_loop, health_loop ):   # stop in reverse start order
             if lp is not None:
                 lp.stop()
 
     app = FastAPI( title="lupin-arbiter-app", version=__version__, lifespan=lifespan )
-    app.state.snapshot_store        = store
-    app.state.started_at            = started_at
-    app.state.health_loop           = health_loop
-    app.state.fleet_arbiter_loop    = fleet_arbiter_loop
-    app.state.context_pressure_loop = context_pressure_loop
+    app.state.snapshot_store         = store
+    app.state.started_at             = started_at
+    app.state.health_loop            = health_loop
+    app.state.fleet_arbiter_loop     = fleet_arbiter_loop
+    app.state.context_pressure_loop  = context_pressure_loop
+    app.state.turn_age_watchdog_loop = turn_age_watchdog_loop
 
     @app.get( "/health" )
     def health() -> dict:
@@ -129,6 +131,41 @@ def create_app(
         }
 
     return app
+
+
+def _announce_reload_blindness( containers, *, env_inspect_fn, assess_fn, reload_decider, notify_fn, log_fn ):
+    """
+    Startup pass: for each watched container, decide whether the crash-loop
+    detector is BLIND (uvicorn --reload armed) and ANNOUNCE it loudly if so.
+
+    A watcher that silently stops watching is this row's exact defect, so a
+    reload-armed container must produce a startup escalation, not a code comment.
+
+    Requires:
+        - assess_fn( container, env_inspect_fn, reload_decider=… ) →
+          ( "blind"|"ok"|"unknown", message_or_None )
+        - notify_fn( message ) is the health escalation sink (→ Rick)
+
+    Ensures:
+        - a "blind" verdict → notify_fn( message ) + a `reload_blind` log
+        - an "ok" verdict → a `reload_ok` log (no page)
+        - an "unknown" verdict (env inspect failed) → a `reload_state_unknown` log
+          (never a false all-clear, never a false alarm)
+        - a notify raise is swallowed + logged (startup must not die on it)
+        - never raises
+    """
+    for name in containers:
+        verdict, message = assess_fn( name, env_inspect_fn, reload_decider=reload_decider )
+        if verdict == "blind":
+            log_fn( "reload_blind", container=name )
+            try:
+                notify_fn( message )
+            except Exception as e:                           # startup must not die on a notify error
+                log_fn( "reload_blind_notify_error", container=name, error=str( e ) )
+        elif verdict == "unknown":
+            log_fn( "reload_state_unknown", container=name )
+        else:
+            log_fn( "reload_ok", container=name )
 
 
 def _make_health_notify_fn( gateway, live_notify_fn, log_fn ):
@@ -237,10 +274,16 @@ def assemble_app(
           :7999/:8000 HTTP and builds NO job until the runner starts (testable
           with a fake cfg + fake gateway)
     """
-    from lupin_arbiter_app.health_watcher import HealthWatcherLoop, docker_inspect_health
+    from lupin_arbiter_app.health_watcher import (
+        HealthWatcherLoop, docker_inspect_health, docker_inspect_restart_count,
+        docker_inspect_env, assess_reload_blindness,
+    )
+    from lupin_app.bootstrap_helpers import reload_enabled
     from lupin_arbiter_app.fleet_arbiter_loop import (
         FleetArbiterLoop, build_fleet_arbiter_job_factory, make_follow_through_watcher_factory,
+        make_escalation_notify_fn,
     )
+    from cosa.agents.heartbeat_arbiter.turn_age_watchdog import TurnAgeWatchdog
     from cosa.agents.heartbeat_arbiter.arbiter_journal import make_log_fn
     # Relocated 2026-06-11 (fleet-roster reserve-from-random): the roster
     # reader lives with its env-var siblings in voice_persona_helpers now
@@ -278,6 +321,24 @@ def assemble_app(
     declared_managers = pick_declared_managers_from_env( _arbiter_project )
     log_fn( "declared_managers_resolved", project=_arbiter_project, managers=declared_managers )
 
+    # ── audience scalpel: the EFFECTIVE poke-audience configuration, logged once at
+    # startup. The per-session `arbiter_poke_gate` event covers the two
+    # session-directed tiers (worker/manager) via its why_not vectors, but the
+    # OPERATOR audience is subsystem-level — it has no per-session row, so a
+    # Rick-side silence was NOT diagnosable from production telemetry at all
+    # (found 2026-07-19 when María asked for live proof of the operator path and
+    # there was none to give). This line makes all three observable at the same
+    # place the arbiter logs its other boot-time resolutions, so "why did I stop
+    # hearing from the arbiter" is answerable from the journal alone.
+    _poke_master = cfg.get( "arbiter auto poke enabled", default=True, return_type="boolean" )
+    log_fn( "arbiter_poke_audience_config",
+            master   = _poke_master,
+            workers  = cfg.get( "arbiter auto poke workers enabled",  default=True, return_type="boolean" ),
+            managers = cfg.get( "arbiter auto poke managers enabled", default=True, return_type="boolean" ),
+            operator = cfg.get( "arbiter auto poke operator enabled", default=True, return_type="boolean" ),
+            note     = ( "master OFF — every audience silent regardless of the three below"
+                         if not _poke_master else "master ON — each audience answers for itself" ) )
+
     # ── eng#7 (2026-06-17): the follow-through aged-escalation watcher factory.
     # Built here (cfg + gateway in hand) and threaded into every recycled job so
     # the watcher rides the arbiter poll loop (build-plan §3b). REUSES the job's
@@ -303,10 +364,32 @@ def assemble_app(
         stall_window         = int( cfg.get( "arbiter fleet stall window seconds", default=1800, return_type="int" ) ),
         poll_error_escalate_threshold = int( cfg.get( "arbiter poll error escalate threshold", default=3, return_type="int" ) ),
         auto_poke_enabled    = cfg.get( "arbiter auto poke enabled", default=True, return_type="boolean" ),
+        # AUDIENCE SCALPEL (2026-07-19, Rick via María): three audience-scoped gates
+        # UNDER the master above. Master off ⇒ all silent (panic button); master on ⇒
+        # silence the crew while Rick keeps his own stream (scalpel). Default True ⇒
+        # unconfigured behaves exactly as before.
+        poke_workers_enabled  = cfg.get( "arbiter auto poke workers enabled",  default=True, return_type="boolean" ),
+        poke_managers_enabled = cfg.get( "arbiter auto poke managers enabled", default=True, return_type="boolean" ),
+        poke_operator_enabled = cfg.get( "arbiter auto poke operator enabled", default=True, return_type="boolean" ),
+        # ee59d5ed orphan-bridge janitor — DEFAULT-OFF (fleet-wide reap-semantics change; flip on for Rick's awareness)
+        orphan_bridge_sweep_enabled = cfg.get( "arbiter orphan bridge sweep enabled", default=False, return_type="boolean" ),
+        orphan_bridge_sweep_debounce_polls = int( cfg.get( "arbiter orphan bridge sweep debounce polls", default=2, return_type="int" ) ),
         poke_stall_threshold = int( cfg.get( "arbiter poke stall threshold seconds", default=720, return_type="int" ) ),
         poke_max_per_episode = int( cfg.get( "arbiter poke max per episode", default=3, return_type="int" ) ),
+        stuck_poke_min_interval_seconds = int( cfg.get( "arbiter stuck poke min interval seconds", default=0, return_type="int" ) ),   # bug 5a1f17f8 (c)
         manager_stale_poke_threshold = int( cfg.get( "arbiter manager stale poke threshold seconds", default=2700, return_type="int" ) ),
         manager_stale_poke_max_age   = int( cfg.get( "arbiter manager stale poke max age seconds", default=7200, return_type="int" ) ),
+        # role-goals Phase 2-3 (D1): role-selected north-star goal echoes appended to
+        # the stuck-poke + manager-staleness poke bodies. Runtime-tunable; "" leaves
+        # the poke body unchanged. Canonical: planning-is-prompting -> workflow/role-goals.md.
+        manager_goal_line    = cfg.get( "heartbeat manager goal line", default="" ) or "",
+        worker_goal_line     = cfg.get( "heartbeat worker goal line",  default="" ) or "",
+        # 6929f4ac outward-twin backstop: the aged-gate resurface ceiling (hold_reader_fn
+        # itself defaults to the real read_hold inside the factory, mirroring owed_work_fn).
+        user_gate_resurface_seconds = int( cfg.get( "arbiter user gate resurface seconds", default=1800, return_type="int" ) ),
+        # A2/A3 (fcb5dbc0): the operator-gate NORMAL-urgency digest cadence (operator_gates_fn
+        # itself defaults to the real fleet-wide store reader inside the factory).
+        operator_digest_cadence_seconds = int( cfg.get( "arbiter operator gate digest cadence seconds", default=1800, return_type="int" ) ),
         start_period_seconds = int( cfg.get( "arbiter start period seconds", default=120, return_type="int" ) ),
         # Item B (2026.06.11 receipts design): delivery-receipt seams + knobs.
         # Ledger path: relative INI value combined with the project root at
@@ -324,6 +407,7 @@ def assemble_app(
         reannounce_ttl       = int( cfg.get( "arbiter outreach reannounce ttl seconds", default=86400, return_type="int" ) ),
         pending_ledger_path  = _pending_ledger_path( cfg ),
         lineage_carry_path   = _lineage_carry_path( cfg ),
+        offsets_state_path   = _offsets_state_path( cfg ),                      # bug 5a1f17f8 (b) durable event offsets
         # DM-as-liveness toggle (2026-06-17): a cfg-closed lambda re-read EACH poll
         # (ConfigurationManager.get is mtime-gated) so `arbiter count dm as liveness`
         # is runtime-tunable with NO :8001 bounce — flip the INI, takes effect on
@@ -332,35 +416,98 @@ def assemble_app(
         count_dm_as_liveness_fn = lambda: cfg.get( "arbiter count dm as liveness", default=True, return_type="boolean" ),
         follow_through_watcher_factory = follow_through_watcher_factory,        # eng#7 §3b
     )
-    fleet_arbiter_loop = FleetArbiterLoop( fleet_arbiter_factory, log_fn=arbiter_log_fn )
+    # Hold-file RECLAMATION (row 11461241, Rick's direct ruling 2026-07-26: "wire it —
+    # the arbiter calls the janitor"). This is the ONE call site that opens deletion:
+    # `enable_hold_deletion` defaults FALSE in the constructor so that omission stays
+    # the safe state everywhere else, and the opt-in is stated out loud here.
+    #
+    # INI-gated for a no-bounce rollback — a destructive capability should be
+    # revocable by an operator without a code change. Cargo-bearing holds are KEPT
+    # regardless of this flag: that guard is structural in classify_hold_file and is
+    # NOT reachable from here.
+    #
+    # DM-inbox HWM reclamation (row 8758d0b1, Rick's ruling 2026-07-26) rides its OWN
+    # switch, deliberately NOT `arbiter enable hold deletion`. The families fail
+    # differently, and one flag would mean disabling hold deletion after a cargo scare
+    # silently stops HWM cleanup too — the pile resumes growing and nobody notices.
+    #
+    # ⚠️ DEFAULT FALSE, unlike the hold switch above. Reaping a LIVE session's HWM
+    # SILENTLY SWALLOWS its un-surfaced DMs (measured — a missing file reads as
+    # `seeded: False`, and surface_dm_inbox then records the inbox as already-seen and
+    # surfaces nothing), which re-creates bug 59f355e0 for that session. A capability
+    # whose failure is invisible does not get to be on out of the box; an operator
+    # turns it on once the live-set fail-safe has been watched in the report logs,
+    # which this emits every cycle whether deletion is enabled or not.
+    fleet_arbiter_loop = FleetArbiterLoop(
+        fleet_arbiter_factory, log_fn=arbiter_log_fn,
+        enable_hold_deletion = cfg.get( "arbiter enable hold deletion", default=True, return_type="boolean" ),
+        enable_hwm_deletion  = cfg.get( "arbiter enable hwm deletion",  default=False, return_type="boolean" ),
+    )
 
     # ── context-headroom writer: gated on `arbiter context watch enabled` ──
     context_pressure_loop = _build_context_pressure_loop( cfg, store, clock=clock, log_fn=cp_log_fn )
+
+    # ── turn-age watchdog (wedge fix f1a21917 lever (ii)): the held-turn DETECTOR ──
+    # A standalone daemon (NO ArbiterConsumerJob coupling — it reads transcripts +
+    # panes directly) that flags a CC session whose last tool_use has gone
+    # un-resulted past `arbiter turn age watchdog threshold seconds` while its pane
+    # is idle → ONE operator advisory on the SAME rail as manager-stale (the durable
+    # fleet-escalations post + best-effort live push), one-shot per (session,
+    # tool_use). Self-gates on `arbiter turn age watchdog enabled` (default false):
+    # start() is a no-op and sweep_once does zero IO until the flag flips, so wiring
+    # it in is behavior-neutral. Its session-lister / transcript-reader / pane-oracle
+    # default to the real IO boundaries inside the watchdog; only the advisory sink
+    # is injected here to route onto the arbiter's outreach rail. Design:
+    # src/rnd/v0.1.9/2026.07.03-notify-turn-hold-fix-design.md §3 (lever ii).
+    turn_age_watchdog_loop = TurnAgeWatchdog(
+        cfg,
+        advisory_fn = make_escalation_notify_fn( gateway, live_notify_fn=live_notify_fn, log_fn=arbiter_log_fn ),
+    )
 
     # ── health watcher (L2): gated on the master enable ──
     if not cfg.get( "arbiter health watch enabled", default=True, return_type="boolean" ):
         log_fn( "health_watcher_disabled", reason="arbiter health watch enabled = false" )
         return create_app( snapshot_store=store, health_loop=None, fleet_arbiter_loop=fleet_arbiter_loop,
-                           context_pressure_loop=context_pressure_loop )
+                           context_pressure_loop=context_pressure_loop,
+                           turn_age_watchdog_loop=turn_age_watchdog_loop )
 
     def _csv( key, default ):
         raw = cfg.get( key, default=default ) or default
         return [ c.strip() for c in raw.split( "," ) if c.strip() ]
 
+    watch_containers  = _csv( "arbiter health watch containers", "lupin-rest-dev,lupin-rest-test,lupin-model-server,lupin-postgres" )
+    inspect_timeout   = int( cfg.get( "arbiter health inspect timeout seconds", default=5, return_type="int" ) )
+    health_notify_fn  = _make_health_notify_fn( gateway, live_notify_fn, health_log_fn )   # Part-6 #1/2/3 → Rick
     health_loop = HealthWatcherLoop(
-        containers            = _csv( "arbiter health watch containers", "lupin-rest-dev,lupin-rest-test,lupin-model-server,lupin-postgres" ),
-        inspect_fn            = lambda name: docker_inspect_health( name, int( cfg.get( "arbiter health inspect timeout seconds", default=5, return_type="int" ) ) ),
-        notify_fn             = _make_health_notify_fn( gateway, live_notify_fn, health_log_fn ),   # Part-6 #1/2/3 → Rick
-        store                 = store,
-        log_fn                = health_log_fn,
-        interval_seconds      = int( cfg.get( "arbiter health watch interval seconds", default=30, return_type="int" ) ),
-        flap_window_seconds   = int( cfg.get( "arbiter health flap window seconds", default=600, return_type="int" ) ),
-        flap_threshold        = int( cfg.get( "arbiter health flap threshold transitions", default=3, return_type="int" ) ),
-        flap_exclude          = _csv( "arbiter health flap exclude containers", "lupin-rest-dev" ),
-        blind_threshold_polls = int( cfg.get( "arbiter health blind threshold polls", default=3, return_type="int" ) ),
+        containers             = watch_containers,
+        inspect_fn             = lambda name: docker_inspect_health( name, inspect_timeout ),
+        notify_fn              = health_notify_fn,
+        store                  = store,
+        log_fn                 = health_log_fn,
+        interval_seconds       = int( cfg.get( "arbiter health watch interval seconds", default=30, return_type="int" ) ),
+        flap_window_seconds    = int( cfg.get( "arbiter health flap window seconds", default=600, return_type="int" ) ),
+        flap_threshold         = int( cfg.get( "arbiter health flap threshold transitions", default=3, return_type="int" ) ),
+        flap_exclude           = _csv( "arbiter health flap exclude containers", "lupin-rest-dev" ),
+        blind_threshold_polls  = int( cfg.get( "arbiter health blind threshold polls", default=3, return_type="int" ) ),
+        restart_inspect_fn     = lambda name: docker_inspect_restart_count( name, inspect_timeout ),
+        restart_loop_threshold = int( cfg.get( "arbiter health restart loop threshold transitions", default=2, return_type="int" ) ),
+    )
+    # Reload-blindness announcement (LOUD, not a comment): RestartCount only detects
+    # a crash-loop while uvicorn --reload is OFF. If reload is armed on a watched
+    # container, a crashing worker is respawned WITHOUT the container exiting, so the
+    # crash-loop detector goes blind — announce it at startup so a silently-blind
+    # watcher never masquerades as a working one.
+    _announce_reload_blindness(
+        watch_containers,
+        env_inspect_fn = lambda name: docker_inspect_env( name, inspect_timeout ),
+        assess_fn      = assess_reload_blindness,
+        reload_decider = reload_enabled,
+        notify_fn      = health_notify_fn,
+        log_fn         = health_log_fn,
     )
     return create_app( snapshot_store=store, health_loop=health_loop, fleet_arbiter_loop=fleet_arbiter_loop,
-                       context_pressure_loop=context_pressure_loop )
+                       context_pressure_loop=context_pressure_loop,
+                       turn_age_watchdog_loop=turn_age_watchdog_loop )
 
 
 def _pending_ledger_path( cfg ):
@@ -393,6 +540,23 @@ def _lineage_carry_path( cfg ):
     return cu.get_project_root() + rel
 
 
+def _offsets_state_path( cfg ):
+    """
+    Resolve the durable event-offset store path (bug 5a1f17f8 (b)): relative INI
+    value + the canonical project root (PATH MANAGEMENT). Persisting the per-session
+    byte offsets here lets a :8001 restart RESUME tailing instead of re-reading every
+    events file from byte 0 — the STUCK-poke replay root cause.
+
+    Ensures:
+        - returns <project_root> + <`arbiter event offsets state path`>
+    """
+    import cosa.utils.util as cu
+    rel = ( cfg.get( "arbiter event offsets state path",
+                     default="/io/arbiter/event-offsets.json" )
+            or "/io/arbiter/event-offsets.json" )
+    return cu.get_project_root() + rel
+
+
 def _build_arbiter_outreach_hops( cfg, gateway ):   # pragma: no cover - literal external IO boundary (config, env credential, urllib)
     """
     Build the best-effort outreach hops (2026.06.11 receipts design + Thread C+D):
@@ -415,10 +579,12 @@ def _build_arbiter_outreach_hops( cfg, gateway ):   # pragma: no cover - literal
           LOUDLY, best-effort posts the misconfiguration to fleet-escalations,
           and disables the live hops — no doomed-404 spam, and every subsequent
           Rick-bound outreach journals outcome "disabled" (visible, not silent)
-        - happy path → live_notify_fn = dedup-guarded transport (first sends);
-          live_retry_fn = the RAW transport (re-announce bypasses content-dedup
-          by design — it re-sends the same text); dm_push_fn = the §3.3
-          register-question hop (or None when its gate is off)
+        - happy path → live_notify_fn = dedup-guarded transport (first sends,
+          persist=True → one forensic row); live_retry_fn = the RAW persist=False
+          transport (re-announce bypasses content-dedup by design — it re-sends the
+          same text — AND skips the DB insert so retries never mint duplicate rows,
+          bug e1bbe011); dm_push_fn = the §3.3 register-question hop (or None when
+          its gate is off)
     """
     from cosa.utils.config_loader import get_api_config, load_api_key
     from lupin_arbiter_app.arbiter_live_notify import (
@@ -447,7 +613,7 @@ def _build_arbiter_outreach_hops( cfg, gateway ):   # pragma: no cover - literal
     sender_id    = cfg.get( "arbiter live notify sender id",
                             default="heartbeat-arbiter@lupin.deepily.ai" ) or "heartbeat-arbiter@lupin.deepily.ai"
     dedup_window = int( cfg.get( "arbiter live notify dedup window seconds", default=900, return_type="int" ) )
-    timeout      = int( cfg.get( "arbiter live notify timeout seconds", default=5, return_type="int" ) )
+    timeout      = int( cfg.get( "arbiter live notify timeout seconds", default=30, return_type="int" ) )
 
     dm_push_fn = None
     if cfg.get( "arbiter outreach dm push enabled", default=True, return_type="boolean" ):
@@ -468,12 +634,22 @@ def _build_arbiter_outreach_hops( cfg, gateway ):   # pragma: no cover - literal
             _default_log_fn( "escalation_post_error", error=str( e ) )
         return None, None, dm_push_fn, tmux_push_fn
 
+    # Two transports (bug e1bbe011): the first-send transport persists a forensic
+    # row (persist=True); the re-announce transport does NOT (persist=False) — so a
+    # pending advisory re-pushed every reannounce_interval to an offline Rick
+    # re-attempts LIVE delivery WITHOUT minting a duplicate DB row each retry (the
+    # 3000+-row flood). Live delivery + the user_not_available/queued outcome are
+    # unaffected, so re-announce still lands + terminates when Rick returns.
     transport = make_notify_transport(
         base_url=base_url, target_user=target_user, sender_id=sender_id,
         api_key=api_key, timeout_seconds=timeout,
     )
+    retry_transport = make_notify_transport(
+        base_url=base_url, target_user=target_user, sender_id=sender_id,
+        api_key=api_key, timeout_seconds=timeout, persist=False,
+    )
     return ( make_live_notify_fn( transport, dedup_window_seconds=dedup_window ),
-             transport, dm_push_fn, tmux_push_fn )
+             retry_transport, dm_push_fn, tmux_push_fn )
 
 
 def create_production_app() -> FastAPI:   # pragma: no cover - literal external construction (config, gateway)

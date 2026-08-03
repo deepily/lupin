@@ -20,9 +20,16 @@ import os
 # This ensures config_mgr singleton initializes with Testing block
 os.environ["LUPIN_CONFIG_MGR_CLI_ARGS"] = "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing"
 
-# Set GCS environment variables for LanceDB GCS integration tests
-os.environ["GOOGLE_CLOUD_PROJECT"] = "hello-world-foo-423219"
-os.environ["GOOGLE_CLOUD_LOCATION"] = "us-central1"
+# GCS (LanceDB) integration tests resolve the project through google.auth.default(),
+# which reads ADC — see gcs_utils.py. They do NOT need GOOGLE_CLOUD_PROJECT, and
+# hardcoding it here is actively dangerous: GOOGLE_CLOUD_PROJECT OUTRANKS
+# ANTHROPIC_VERTEX_PROJECT_ID for Vertex clients, so a literal here can silently
+# redirect metered Vertex traffic to the wrong project and defeat the project guard.
+# Honor an operator-set project; otherwise leave unset and let ADC decide.
+_gcp_project = os.environ.get( "LUPIN_GCP_PROJECT_ID" )
+if _gcp_project:
+    os.environ[ "GOOGLE_CLOUD_PROJECT" ]  = _gcp_project
+    os.environ[ "GOOGLE_CLOUD_LOCATION" ] = os.environ.get( "LUPIN_GCP_REGION", "us-central1" )
 
 import pytest
 import requests
@@ -159,7 +166,7 @@ def clean_test_db():
         conn.execute( text(
             "TRUNCATE TABLE auth_audit_log, failed_login_attempts, "
             "job_history, proxy_decisions, trust_states, "
-            "task_items, task_events, fcm_tokens"
+            "task_items, task_events, fcm_tokens, refresh_tokens"
         ) )
 
     with engine.connect() as conn:
@@ -488,12 +495,23 @@ def gcs_credentials_available():
         - Skip message includes clear remediation steps
 
     Usage:
-        Inject into GCS-dependent fixtures:
+        Inject into GCS-dependent fixtures. NOTE the backend pin — without it the
+        ambient `vector store backend` is postgres and the manager ignores gcs_config
+        entirely, exercising the SHARED store instead of GCS (decision 2b20a6d6):
+
+        @pytest.fixture( scope="class", autouse=True )
+        def _pin_lancedb_backend():
+            from unittest.mock import patch
+            from cosa.rest.db.repositories import vector_store_backend
+            with patch.object( vector_store_backend, "get_vector_store_backend",
+                               return_value=vector_store_backend.LANCEDB ):
+                yield
 
         @pytest.fixture
         def gcs_manager(gcs_credentials_available):
             # gcs_credentials_available validates before this runs
-            manager = LanceDBSolutionManager( gcs_config )
+            manager = SolutionSnapshotManager( gcs_config )
+            assert manager._use_postgres is False, "backend pin failed"
             manager.initialize()  # Won't fail due to auth
             return manager
 

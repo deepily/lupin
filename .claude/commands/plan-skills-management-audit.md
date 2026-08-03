@@ -1,6 +1,6 @@
 # Skills Management - Audit Mode
 
-**Project**: LUPIN
+**Project**: Lupin
 **Prefix**: [LUPIN]
 **Version**: 1.0
 
@@ -11,7 +11,7 @@
 - `/plan-skills-management-discover` - Find skill candidates
 - `/plan-skills-management-create` - Build new skill from documentation
 - `/plan-skills-management-edit` - Update existing skill
-- `/plan-skills-management-audit` - Check skills health against documentation <- **You are here**
+- `/plan-skills-management-audit` - Check skills health against documentation ← **You are here**
 - `/plan-skills-management-delete` - Remove obsolete skill
 
 ---
@@ -33,7 +33,7 @@
    - Do NOT proceed without these parameters
 
 2. **MUST read the canonical workflow document**:
-   - Location: planning-is-prompting -> workflow/skills-management.md
+   - Location: planning-is-prompting → workflow/skills-management.md
    - This is the ONLY authoritative source for ALL skills management steps
    - Do NOT proceed without reading this document in full
 
@@ -65,10 +65,10 @@
 
 | Status | Meaning | Action |
 |--------|---------|--------|
-| Up to date | Skill matches source | None needed |
-| Needs update | Source modified since skill update | Run edit mode |
-| Stale | >30 days behind source | Consider recreating |
-| Missing | Candidate not yet converted | Run create mode |
+| ✅ Up to date | Skill matches source | None needed |
+| ⚠️ Needs update | Source modified since skill update | Run edit mode |
+| ❌ Stale | >30 days behind source | Consider recreating |
+| 📋 Missing | Candidate not yet converted | Run create mode |
 
 ---
 

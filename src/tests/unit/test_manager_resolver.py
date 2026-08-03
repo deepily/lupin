@@ -134,6 +134,64 @@ class TestResolveManager:
         )
         assert out == { "manager_session_id": "tib-uuid", "manager_persona": "Tiberius", "source": SOURCE_LINEAGE }
 
+    # ── persona-at-spawn SNAPSHOT (owner-lineage drift fix, 2026-06-22) ───────
+    # A finished/dead worker was mis-attributed to the WRONG manager because the
+    # PRIMARY path re-derived the manager session's CURRENT persona via
+    # persona_lookup(spawned_by). When that manager session's persona DRIFTS
+    # (recycling across /clear/compaction — "Mr. Radio -> Krishna after a
+    # compaction"), the re-derivation returns the manager's LATER persona, and
+    # carry_forward_lineage caches the wrong value into the worker's death. The
+    # fix freezes a worker-keyed persona-at-spawn SNAPSHOT on the bridge
+    # (spawned_by_persona) and resolves from it, never re-deriving.
+
+    def test_spawned_by_persona_snapshot_preferred_over_drifted_lookup( self ):
+        """REPRO + FLIP: the manager session's persona has DRIFTED to 'Tiberius'
+        since spawn, but the worker froze 'Mr. Radio' at spawn. The snapshot wins;
+        the drifted re-derivation is NOT consulted."""
+        lookup_calls = [ ]
+        def _persona( mid ):
+            lookup_calls.append( mid )
+            return { "name": "Tiberius" }                          # the DRIFTED current persona
+        out = resolve_manager(
+            "dead-krishna",
+            bridge_lookup  = lambda sid: { "spawned_by"        : "mgr-session-uuid",
+                                           "spawned_by_persona": "Mr. Radio",   # frozen at spawn
+                                           "tmux_session"      : "cc-author-mr-radio-4" },
+            persona_lookup = _persona,
+        )
+        assert out == { "manager_session_id": "mgr-session-uuid",
+                        "manager_persona": "Mr. Radio", "source": SOURCE_LINEAGE }, out
+        assert lookup_calls == [ ]   # snapshot short-circuits the drift-prone re-derivation
+
+    def test_blank_snapshot_falls_through_to_persona_lookup( self ):
+        """A blank/whitespace snapshot is treated as ABSENT → re-derive (legacy)."""
+        out = resolve_manager(
+            "w",
+            bridge_lookup  = lambda sid: { "spawned_by": "mgr", "spawned_by_persona": "   " },
+            persona_lookup = lambda mid: { "name": "Tiberius" },
+        )
+        assert out == { "manager_session_id": "mgr", "manager_persona": "Tiberius", "source": SOURCE_LINEAGE }
+
+    def test_non_string_snapshot_ignored( self ):
+        """A non-string snapshot (corrupt shape) is ignored → re-derive, never raises."""
+        out = resolve_manager(
+            "w",
+            bridge_lookup  = lambda sid: { "spawned_by": "mgr", "spawned_by_persona": 123 },
+            persona_lookup = lambda mid: { "name": "Tiberius" },
+        )
+        assert out[ "manager_persona" ] == "Tiberius" and out[ "source" ] == SOURCE_LINEAGE
+
+    def test_snapshot_without_spawned_by_does_not_short_circuit( self ):
+        """The snapshot only freezes the PRIMARY (spawned_by) attribution. With no
+        spawned_by, a stray snapshot is NOT trusted — fall through to the scan."""
+        out = resolve_manager(
+            "w",
+            bridge_lookup  = lambda sid: { "spawned_by_persona": "Ghost", "tmux_session": "cc-rev-0" },
+            manifest_scan  = lambda tmux, sd: "tib-uuid" if tmux == "cc-rev-0" else None,
+            persona_lookup = lambda mid: { "name": "Tiberius" },
+        )
+        assert out == { "manager_session_id": "tib-uuid", "manager_persona": "Tiberius", "source": SOURCE_LINEAGE }
+
     # ── manifest-scan FALLBACK path (legacy bridges, unchanged behavior) ─────
 
     def test_lineage_hit( self ):
@@ -212,12 +270,25 @@ class TestResolveActiveManagersDeclared:
     def test_declared_match_is_punct_tolerant_JOURNAL_REGRESSION( self ):
         """F-B regression pin (2026-06-11): the EVENT-shape persona "mr radio"
         (no period) must satisfy declared "Mr. Radio" on the fanout site too —
-        pre-fix this site shared fleet_render's exact-compare miss."""
+        pre-fix this site shared fleet_render's exact-compare miss. Phase 2
+        swaps _normalize_for_match -> canonical_persona_key (keep-spaces);
+        "mr radio" still matches "Mr. Radio"."""
         managers = MR.resolve_active_managers(
             who_rows=[ ], bridge_sessions={ "mgr-new": "mr radio" },
             list_managers=lambda sd: set(),
             declared_managers=[ "Mr. Radio" ] )
         assert managers == [ "mr radio" ]                         # bridge casing emitted, role granted
+
+    def test_declared_match_is_accent_tolerant_FLIP( self ):
+        # FLIP (accent seam): bridge persona "maria" vs declared "María". The
+        # pre-Phase-1 accent-keeping normalizer KEPT accents ("María"->"maría")
+        # and MISSED this; canonical_persona_key strips both to "maria" -> role granted.
+        # Reverting to the pre-Phase-1 accent-keeping normalizer makes this return [] (no match).
+        managers = MR.resolve_active_managers(
+            who_rows=[ ], bridge_sessions={ "mgr-m": "maria" },
+            list_managers=lambda sd: set(),
+            declared_managers=[ "María" ] )
+        assert managers == [ "maria" ]
 
     def test_declared_union_with_lineage_manager( self ):
         managers = MR.resolve_active_managers(

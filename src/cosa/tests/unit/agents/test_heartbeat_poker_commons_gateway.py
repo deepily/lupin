@@ -91,8 +91,13 @@ def test_dm_topic_for_trims_and_lowercases():
     assert LupinCommonsGateway.dm_topic_for( "  Tiberius  " ) == "dm-tiberius"
 
 
-def test_dm_topic_for_unicode_preserved():
-    assert LupinCommonsGateway.dm_topic_for( "maría" ) == "dm-maría"
+def test_dm_topic_for_accent_stripped():
+    # `dm_topic_for` routes through the shared `persona_slug` root (Phase 4),
+    # which STRIPS accents — so "maría" → the canonical "dm-maria", byte-identical
+    # to the sibling gateways + the MCP DM layer. (Previously this asserted the
+    # accent-preserving "dm-maría", a stale expectation left over from the old
+    # accent-leaky re.sub(re.UNICODE) seam — the live split-topic bug.)
+    assert LupinCommonsGateway.dm_topic_for( "maría" ) == "dm-maria"
 
 
 # --------------------------------------------------------------------------
@@ -111,15 +116,23 @@ def test_send_to_posts_to_store():
     assert call[ "metadata" ][ "recipient_persona" ] == "tiberius"
 
 
-def test_send_to_fires_register_question_push():
+def test_send_to_fires_dm_send_push():
+    # Migrated off the deleted /api/commons/register-question route onto the
+    # notification-native /api/dm/send (body INLINE, no commons claim-check).
     http = RecordingHttpPost()
     _make_gateway( http_post=http ).send_to( _WATCHER, "poke-body" )
     assert len( http.calls ) == 1
     call = http.calls[ 0 ]
-    assert call[ "url" ].endswith( "/api/commons/register-question" )
-    assert call[ "json" ][ "topic" ] == "dm-tiberius"
+    assert call[ "url" ].endswith( "/api/dm/send" )
+    assert call[ "json" ][ "sender_session_id" ] == "hp-sender"
     assert call[ "json" ][ "recipient_persona" ] == "tiberius"
-    assert call[ "json" ][ "expect_reply" ] is False
+    assert call[ "json" ][ "body" ] == "poke-body"
+    # thread_id carries the qid so board-polling receipts still correlate
+    assert "thread_id" in call[ "json" ]
+    # the retired register-question fields are GONE
+    assert "topic"        not in call[ "json" ]
+    assert "expect_reply" not in call[ "json" ]
+    assert "ttl_seconds"  not in call[ "json" ]
     assert call[ "headers" ][ "X-API-Key" ] == "test-key"
 
 
@@ -131,10 +144,12 @@ def test_send_to_swallows_push_failure():
 
 
 def test_send_to_post_and_push_share_question_id():
+    # The disk post's metadata.question_id and the dm/send push's thread_id are
+    # the SAME qid — board-polling receipts correlate on it.
     store = FakeStore()
     http  = RecordingHttpPost()
     _make_gateway( store=store, http_post=http ).send_to( _WATCHER, "poke-body" )
-    assert store.post_calls[ 0 ][ "metadata" ][ "question_id" ] == http.calls[ 0 ][ "json" ][ "question_id" ]
+    assert store.post_calls[ 0 ][ "metadata" ][ "question_id" ] == http.calls[ 0 ][ "json" ][ "thread_id" ]
 
 
 # --------------------------------------------------------------------------

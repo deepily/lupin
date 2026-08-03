@@ -1,5 +1,5 @@
 """
-Unit tests for cosa.memory.lancedb_solution_manager.LanceDBSolutionManager.
+Unit tests for cosa.memory.lancedb_solution_manager.SolutionSnapshotManager.
 
 REWRITTEN 2026-05-31 by Sam 🎙️ (memory takeover, CoSA coverage campaign) — the
 prior tests targeted a stale API: they constructed the manager with no `config`
@@ -23,7 +23,7 @@ from unittest.mock import Mock, MagicMock, patch
 
 import pandas as pd
 
-from cosa.memory.lancedb_solution_manager import LanceDBSolutionManager
+from cosa.memory.lancedb_solution_manager import SolutionSnapshotManager
 
 
 _CONFIG = { "table_name": "test_solutions", "db_path": "/tmp/__sam_lancedb_test__", "storage backend": "local" }
@@ -31,16 +31,32 @@ _CONFIG = { "table_name": "test_solutions", "db_path": "/tmp/__sam_lancedb_test_
 
 def _make_manager( debug=False, verbose=False ):
     """
-    Construct a LanceDBSolutionManager with its construction-time deps mocked
+    Construct a SolutionSnapshotManager with its construction-time deps mocked
     (QuestionEmbeddingsTable + db-path resolution), then mark it initialized
     with a mock table so the search/retrieval gates pass.
     """
-    with patch( "cosa.memory.lancedb_solution_manager.QuestionEmbeddingsTable" ), \
-         patch.object( LanceDBSolutionManager, "_resolve_db_path", return_value=_CONFIG[ "db_path" ] ):
-        mgr = LanceDBSolutionManager( _CONFIG, debug=debug, verbose=verbose )
-    mgr._initialized = True
+    # Pin lancedb-mode hermetically (v0.2.0 §6 backend flag): post-cutover the INI
+    # default resolves to `postgres`, so without this these lancedb-path tests would
+    # dispatch into the _pg_* helpers and hit a live backend. _pg_manager() re-flips
+    # this to True after construction.
+    #
+    # The pin must be held DURING construction, not applied after (decision 2b20a6d6):
+    # __init__ resolves the backend itself and now REJECTS a db_path it would not
+    # honor, so a post-hoc `mgr._use_postgres = False` arrives too late — the
+    # constructor has already raised. Patched at the flag's single definition site.
+    from cosa.rest.db.repositories import vector_store_backend
+
+    with patch.object( vector_store_backend, "get_vector_store_backend",
+                       return_value=vector_store_backend.LANCEDB ), \
+         patch( "cosa.memory.lancedb_solution_manager.QuestionEmbeddingsTable" ), \
+         patch.object( SolutionSnapshotManager, "_resolve_db_path", return_value=_CONFIG[ "db_path" ] ):
+        mgr = SolutionSnapshotManager( _CONFIG, debug=debug, verbose=verbose )
+
+    # Control: the pin must actually have taken.
+    assert mgr._use_postgres is False, "backend pin failed — lancedb-path tests would hit the live store"
+    mgr._initialized   = True
     mgr.is_initialized = Mock( return_value=True )
-    mgr._table = MagicMock()
+    mgr._table         = MagicMock()
     return mgr
 
 
@@ -281,7 +297,7 @@ class TestInitAndConfig( unittest.TestCase ):
     def test_missing_table_name_raises_keyerror( self ):
         """A config without 'table_name' fails fast with KeyError (before any I/O)."""
         with self.assertRaises( KeyError ):
-            LanceDBSolutionManager( { "db_path": "/tmp/x", "storage backend": "local" } )
+            SolutionSnapshotManager( { "db_path": "/tmp/x", "storage backend": "local" } )
 
     def test_debug_construction_sets_attributes( self ):
         """debug=True construction prints config AND wires backend/table/embedding_dim."""
@@ -1778,6 +1794,731 @@ class TestDebugOnlyLines( unittest.TestCase ):
         mgr._table.search.return_value.where.return_value.limit.return_value.to_list.return_value = []   # both reads empty
         self.assertTrue( mgr._full_replace_snapshot( snap ) )
         self.assertEqual( mgr._id_lookup[ "h8" ], record )
+
+
+# ======================================================================================
+# Postgres+pgvector backend (v0.2.0 Lane C batch 3b) — _use_postgres dispatch + _pg_* helpers.
+#
+# Isolation: get_db is patched to yield a MagicMock session; SolutionSnapshotRepository is
+# patched where the _pg_* methods import it. Entities stand in as SimpleNamespace(**_full_record())
+# so _pg_record_from_entity + _record_to_snapshot run for REAL against realistic row shapes.
+# ======================================================================================
+
+from contextlib import contextmanager as _contextmanager
+
+
+def _pg_manager( debug=False, verbose=False ):
+    """A _make_manager() flipped into postgres mode."""
+    mgr = _make_manager( debug=debug, verbose=verbose )
+    mgr._use_postgres = True
+    return mgr
+
+
+def _get_db_patch( session ):
+    """Patch cosa.rest.db.database.get_db to yield the given mock session."""
+    @_contextmanager
+    def _cm():
+        yield session
+    return patch( "cosa.rest.db.database.get_db", side_effect=_cm )
+
+
+def _get_db_raises( exc=None ):
+    """Patch get_db to raise on call (drives the _pg_* except arcs)."""
+    return patch( "cosa.rest.db.database.get_db", side_effect=( exc or Exception( "db boom" ) ) )
+
+
+def _repo_patch( **returns ):
+    """
+    Patch SolutionSnapshotRepository (where _pg_* import it) with a MagicMock class.
+    Each kwarg sets the instance method's return_value. Returns (patcher, repo_cls_mock).
+    """
+    repo_cls = MagicMock()
+    for name, value in returns.items():
+        getattr( repo_cls.return_value, name ).return_value = value
+    return patch( "cosa.rest.db.repositories.solution_snapshot_repository.SolutionSnapshotRepository", repo_cls ), repo_cls
+
+
+def _entity( **overrides ):
+    """A SolutionSnapshot ORM stand-in carrying all _SNAPSHOT_RECORD_COLUMNS attrs."""
+    return SimpleNamespace( **_full_record( **overrides ) )
+
+
+def _mock_session( first=None ):
+    """A MagicMock session whose .query(...).filter(...).first() yields `first`."""
+    session = MagicMock()
+    session.query.return_value.filter.return_value.first.return_value = first
+    return session
+
+
+class TestPgDispatch( unittest.TestCase ):
+    """Each public method's `if self._use_postgres: return self._pg_*(...)` True arc."""
+
+    def test_initialize_dispatches( self ):
+        mgr = _pg_manager()
+        mgr._pg_initialize = Mock( return_value=None )
+        self.assertIsNone( mgr.initialize() )
+        mgr._pg_initialize.assert_called_once_with()
+
+    def test_reload_dispatches( self ):
+        mgr = _pg_manager()
+        mgr._pg_reload = Mock( return_value=None )
+        mgr.reload()
+        mgr._pg_reload.assert_called_once_with()
+
+    def test_save_snapshot_dispatches( self ):
+        mgr = _pg_manager()
+        mgr._pg_save_snapshot = Mock( return_value=True )
+        snap = _fake_snapshot()
+        self.assertTrue( mgr.save_snapshot( snap ) )
+        mgr._pg_save_snapshot.assert_called_once_with( snap )
+
+    def test_get_snapshot_by_id_dispatches( self ):
+        mgr = _pg_manager()
+        mgr._pg_get_snapshot_by_id = Mock( return_value="SENTINEL" )
+        self.assertEqual( mgr.get_snapshot_by_id( "h1" ), "SENTINEL" )
+        mgr._pg_get_snapshot_by_id.assert_called_once_with( "h1" )
+
+    def test_delete_snapshot_dispatches( self ):
+        mgr = _pg_manager()
+        mgr._pg_delete_snapshot = Mock( return_value=True )
+        self.assertTrue( mgr.delete_snapshot( "q", True ) )
+        mgr._pg_delete_snapshot.assert_called_once_with( "q", True )
+
+    def test_get_snapshots_by_question_dispatches( self ):
+        mgr = _pg_manager()
+        mgr._pg_get_snapshots_by_question = Mock( return_value=[] )
+        self.assertEqual( mgr.get_snapshots_by_question( "q", "g", 80.0, 70.0, 5, True ), [] )
+        mgr._pg_get_snapshots_by_question.assert_called_once_with( "q", "g", 80.0, 70.0, 5, True )
+
+    def test_get_snapshots_by_code_similarity_dispatches( self ):
+        mgr = _pg_manager()
+        mgr._pg_get_snapshots_by_code_similarity = Mock( return_value=[] )
+        ex = _fake_snapshot()
+        self.assertEqual( mgr.get_snapshots_by_code_similarity( ex, 60.0, 10, False, False, True ), [] )
+        mgr._pg_get_snapshots_by_code_similarity.assert_called_once_with( ex, 60.0, 10, False, False, True )
+
+    def test_get_snapshots_by_solution_similarity_dispatches( self ):
+        mgr = _pg_manager()
+        mgr._pg_get_snapshots_by_solution_similarity = Mock( return_value=[] )
+        ex = _fake_snapshot()
+        self.assertEqual( mgr.get_snapshots_by_solution_similarity( ex, 60.0, 10, False, False, True ), [] )
+        mgr._pg_get_snapshots_by_solution_similarity.assert_called_once_with( ex, 60.0, 10, False, False, True )
+
+    def test_get_gists_dispatches( self ):
+        mgr = _pg_manager()
+        mgr._pg_get_gists = Mock( return_value=[ "g" ] )
+        self.assertEqual( mgr.get_gists(), [ "g" ] )
+        mgr._pg_get_gists.assert_called_once_with()
+
+    def test_get_stats_dispatches( self ):
+        mgr = _pg_manager()
+        mgr._pg_get_stats = Mock( return_value={ "backend_type": "postgres" } )
+        self.assertEqual( mgr.get_stats()[ "backend_type" ], "postgres" )
+        mgr._pg_get_stats.assert_called_once_with()
+
+    def test_health_check_dispatches( self ):
+        mgr = _pg_manager()
+        mgr._pg_health_check = Mock( return_value={ "status": "healthy" } )
+        self.assertEqual( mgr.health_check()[ "status" ], "healthy" )
+        mgr._pg_health_check.assert_called_once_with()
+
+
+class TestPgRecordFromEntity( unittest.TestCase ):
+    """_pg_record_from_entity marshals an ORM entity to the 38-column record dict."""
+
+    def test_all_columns_marshalled( self ):
+        from cosa.memory.lancedb_solution_manager import _SNAPSHOT_RECORD_COLUMNS
+        mgr = _pg_manager()
+        entity = _entity( id_hash="xyz", question="hello?" )
+        record = mgr._pg_record_from_entity( entity )
+        self.assertEqual( set( record.keys() ), set( _SNAPSHOT_RECORD_COLUMNS ) )
+        self.assertEqual( len( record ), 38 )
+        self.assertEqual( record[ "id_hash" ], "xyz" )
+        self.assertEqual( record[ "question" ], "hello?" )
+
+
+class TestPgInitialize( unittest.TestCase ):
+    """_pg_initialize — cache bypass, no in-memory lookups built."""
+
+    def test_sets_initialized_debug_true( self ):
+        mgr = _pg_manager( debug=True )
+        mgr._initialized = False
+        self.assertIsNone( mgr._pg_initialize() )
+        self.assertTrue( mgr._initialized )
+
+    def test_sets_initialized_debug_false( self ):
+        mgr = _pg_manager( debug=False )
+        mgr._initialized = False
+        mgr._pg_initialize()
+        self.assertTrue( mgr._initialized )
+
+
+class TestPgReload( unittest.TestCase ):
+    """_pg_reload — no-op, but gated on initialization."""
+
+    def test_not_initialized_raises( self ):
+        mgr = _pg_manager()
+        mgr._initialized = False
+        with self.assertRaises( RuntimeError ):
+            mgr._pg_reload()
+
+    def test_noop_debug_true( self ):
+        mgr = _pg_manager( debug=True )
+        mgr._initialized = True
+        self.assertIsNone( mgr._pg_reload() )
+
+    def test_noop_debug_false( self ):
+        mgr = _pg_manager( debug=False )
+        mgr._initialized = True
+        self.assertIsNone( mgr._pg_reload() )
+
+
+class TestPgSaveSnapshot( unittest.TestCase ):
+    """_pg_save_snapshot — resolve-by-question + upsert, cache-free."""
+
+    def test_not_initialized_raises( self ):
+        mgr = _pg_manager()
+        mgr.is_initialized = Mock( return_value=False )
+        with self.assertRaises( RuntimeError ):
+            mgr._pg_save_snapshot( _fake_snapshot() )
+
+    def test_none_snapshot_raises( self ):
+        mgr = _pg_manager()
+        with self.assertRaises( ValueError ):
+            mgr._pg_save_snapshot( None )
+
+    def test_empty_question_raises( self ):
+        mgr = _pg_manager()
+        with self.assertRaises( ValueError ):
+            mgr._pg_save_snapshot( _fake_snapshot( question="" ) )
+
+    def test_insert_new_when_no_existing( self ):
+        mgr = _pg_manager()
+        snap = _fake_snapshot( question="brand new?", id_hash="new_hash" )
+        session = _mock_session( first=None )
+        p, repo = _repo_patch()
+        with _get_db_patch( session ), p:
+            self.assertTrue( mgr._pg_save_snapshot( snap ) )
+        args, kwargs = repo.return_value.upsert_snapshot.call_args
+        self.assertEqual( args[ 0 ], "new_hash" )      # id_hash popped + passed positionally
+        self.assertNotIn( "id_hash", kwargs )
+        self.assertEqual( kwargs[ "question" ], "brand new?" )
+
+    def test_update_overrides_id_hash_when_existing( self ):
+        mgr = _pg_manager()
+        snap = _fake_snapshot( question="dupe?", id_hash="compound_hash" )
+        existing = SimpleNamespace( id_hash="base_hash" )
+        session = _mock_session( first=existing )
+        p, repo = _repo_patch()
+        with _get_db_patch( session ), p:
+            self.assertTrue( mgr._pg_save_snapshot( snap ) )
+        args, _ = repo.return_value.upsert_snapshot.call_args
+        self.assertEqual( args[ 0 ], "base_hash" )     # Session-108 base-hash override
+
+    def test_exception_returns_false_debug_true( self ):
+        mgr = _pg_manager( debug=True )
+        with _get_db_raises():
+            self.assertFalse( mgr._pg_save_snapshot( _fake_snapshot() ) )
+
+    def test_exception_returns_false_debug_false( self ):
+        mgr = _pg_manager( debug=False )
+        with _get_db_raises():
+            self.assertFalse( mgr._pg_save_snapshot( _fake_snapshot() ) )
+
+
+class TestPgGetSnapshotById( unittest.TestCase ):
+    """_pg_get_snapshot_by_id — fetch + in-session marshalling."""
+
+    def test_not_initialized_debug_true( self ):
+        mgr = _pg_manager( debug=True )
+        mgr._initialized = False
+        self.assertIsNone( mgr._pg_get_snapshot_by_id( "h1" ) )
+
+    def test_not_initialized_debug_false( self ):
+        mgr = _pg_manager( debug=False )
+        mgr._initialized = False
+        self.assertIsNone( mgr._pg_get_snapshot_by_id( "h1" ) )
+
+    def test_entity_none_debug_true( self ):
+        mgr = _pg_manager( debug=True )
+        p, repo = _repo_patch( get_snapshot_by_id=None )
+        with _get_db_patch( _mock_session() ), p:
+            self.assertIsNone( mgr._pg_get_snapshot_by_id( "missing" ) )
+
+    def test_entity_none_debug_false( self ):
+        mgr = _pg_manager( debug=False )
+        p, repo = _repo_patch( get_snapshot_by_id=None )
+        with _get_db_patch( _mock_session() ), p:
+            self.assertIsNone( mgr._pg_get_snapshot_by_id( "missing" ) )
+
+    def test_found_debug_true( self ):
+        mgr = _pg_manager( debug=True )
+        p, repo = _repo_patch( get_snapshot_by_id=_entity( id_hash="h1", question="what time?" ) )
+        with _get_db_patch( _mock_session() ), p:
+            snap = mgr._pg_get_snapshot_by_id( "h1" )
+        self.assertEqual( snap.id_hash, "h1" )
+        self.assertEqual( snap.question, "what time?" )
+
+    def test_found_debug_false( self ):
+        mgr = _pg_manager( debug=False )
+        p, repo = _repo_patch( get_snapshot_by_id=_entity( id_hash="h2" ) )
+        with _get_db_patch( _mock_session() ), p:
+            snap = mgr._pg_get_snapshot_by_id( "h2" )
+        self.assertEqual( snap.id_hash, "h2" )
+
+    def test_exception_debug_true( self ):
+        mgr = _pg_manager( debug=True )
+        with _get_db_raises():
+            self.assertIsNone( mgr._pg_get_snapshot_by_id( "h1" ) )
+
+    def test_exception_debug_false( self ):
+        mgr = _pg_manager( debug=False )
+        with _get_db_raises():
+            self.assertIsNone( mgr._pg_get_snapshot_by_id( "h1" ) )
+
+
+class TestPgDeleteSnapshot( unittest.TestCase ):
+    """_pg_delete_snapshot — resolve-by-question + delete + canonical cascade."""
+
+    def test_not_initialized_raises( self ):
+        mgr = _pg_manager()
+        mgr.is_initialized = Mock( return_value=False )
+        with self.assertRaises( RuntimeError ):
+            mgr._pg_delete_snapshot( "q" )
+
+    def test_empty_question_raises( self ):
+        mgr = _pg_manager()
+        with self.assertRaises( ValueError ):
+            mgr._pg_delete_snapshot( "" )
+
+    def test_not_found_returns_false_debug( self ):
+        mgr = _pg_manager( debug=True )
+        p, repo = _repo_patch()
+        with _get_db_patch( _mock_session( first=None ) ), p:
+            self.assertFalse( mgr._pg_delete_snapshot( "missing?" ) )
+
+    def test_success_no_canonical( self ):
+        mgr = _pg_manager()
+        mgr._canonical_synonyms = None   # cascade guard skipped
+        existing = SimpleNamespace( id_hash="h_del" )
+        p, repo = _repo_patch()
+        with _get_db_patch( _mock_session( first=existing ) ), p:
+            self.assertTrue( mgr._pg_delete_snapshot( "gone?" ) )
+        repo.return_value.delete_snapshot.assert_called_once_with( "h_del" )
+
+    def test_success_with_canonical_cascade_debug( self ):
+        mgr = _pg_manager( debug=True )
+        mgr._canonical_synonyms = Mock()
+        mgr._canonical_synonyms.delete_by_snapshot_id = Mock( return_value=3 )
+        existing = SimpleNamespace( id_hash="h_del2" )
+        p, repo = _repo_patch()
+        with _get_db_patch( _mock_session( first=existing ) ), p:
+            self.assertTrue( mgr._pg_delete_snapshot( "gone?" ) )
+        mgr._canonical_synonyms.delete_by_snapshot_id.assert_called_once_with( "h_del2" )
+
+    def test_exception_returns_false_debug_true( self ):
+        mgr = _pg_manager( debug=True )
+        with _get_db_raises():
+            self.assertFalse( mgr._pg_delete_snapshot( "q" ) )
+
+    def test_exception_returns_false_debug_false( self ):
+        mgr = _pg_manager( debug=False )
+        with _get_db_raises():
+            self.assertFalse( mgr._pg_delete_snapshot( "q" ) )
+
+
+class TestPgGetSnapshotsByQuestion( unittest.TestCase ):
+    """_pg_get_snapshots_by_question — hierarchical L1/L2 + L4 pgvector, cache bypass."""
+
+    def test_not_initialized_raises( self ):
+        mgr = _pg_manager()
+        mgr.is_initialized = Mock( return_value=False )
+        with self.assertRaises( RuntimeError ):
+            mgr._pg_get_snapshots_by_question( "q" )
+
+    def test_empty_question_raises( self ):
+        mgr = _pg_manager()
+        with self.assertRaises( ValueError ):
+            mgr._pg_get_snapshots_by_question( "" )
+
+    def test_bad_threshold_question_raises( self ):
+        mgr = _pg_manager()
+        with self.assertRaises( ValueError ):
+            mgr._pg_get_snapshots_by_question( "q", threshold_question=150.0 )
+
+    def test_bad_threshold_gist_raises( self ):
+        mgr = _pg_manager()
+        with self.assertRaises( ValueError ):
+            mgr._pg_get_snapshots_by_question( "q", threshold_gist=-1.0 )
+
+    def test_lazy_init_components_fail_debug_true( self ):
+        # canonical + normalizer imports raise → both set False (+debug prints), skip to L4
+        mgr = _pg_manager( debug=True )
+        mgr._canonical_synonyms = None
+        mgr._normalizer = None
+        mgr._question_embeddings_tbl.get_embedding = Mock( return_value=None )   # L4 → []
+        with patch( "cosa.memory.canonical_synonyms_table.CanonicalSynonymsTable", side_effect=Exception( "no cst" ) ), \
+             patch( "cosa.memory.normalizer.Normalizer", side_effect=Exception( "no norm" ) ):
+            self.assertEqual( mgr._pg_get_snapshots_by_question( "q" ), [] )
+        self.assertIs( mgr._canonical_synonyms, False )
+        self.assertIs( mgr._normalizer, False )
+
+    def test_lazy_init_components_fail_debug_false( self ):
+        mgr = _pg_manager( debug=False )
+        mgr._canonical_synonyms = None
+        mgr._normalizer = None
+        mgr._question_embeddings_tbl.get_embedding = Mock( return_value=None )
+        with patch( "cosa.memory.canonical_synonyms_table.CanonicalSynonymsTable", side_effect=Exception( "no cst" ) ), \
+             patch( "cosa.memory.normalizer.Normalizer", side_effect=Exception( "no norm" ) ):
+            self.assertEqual( mgr._pg_get_snapshots_by_question( "q" ), [] )
+        self.assertIs( mgr._canonical_synonyms, False )
+
+    def test_lazy_init_components_succeed_debug( self ):
+        # canonical + normalizer import OK (+debug prints); no exact match → L4 empty
+        mgr = _pg_manager( debug=True )
+        mgr._canonical_synonyms = None
+        mgr._normalizer = None
+        cst = Mock()
+        cst.find_exact_verbatim   = Mock( return_value=None )
+        cst.find_exact_normalized = Mock( return_value=None )
+        norm = Mock()
+        norm.normalize = Mock( return_value="normed" )
+        mgr._question_embeddings_tbl.get_embedding = Mock( return_value=None )
+        with patch( "cosa.memory.canonical_synonyms_table.CanonicalSynonymsTable", return_value=cst ), \
+             patch( "cosa.memory.normalizer.Normalizer", return_value=norm ):
+            self.assertEqual( mgr._pg_get_snapshots_by_question( "q" ), [] )
+
+    def test_components_already_set_skip_lazy_init( self ):
+        # both already truthy (not None) → skip both is-None blocks
+        mgr = _pg_manager()
+        mgr._canonical_synonyms = Mock( find_exact_verbatim=Mock( return_value=None ),
+                                        find_exact_normalized=Mock( return_value=None ) )
+        mgr._normalizer = Mock( normalize=Mock( return_value="n" ) )
+        mgr._question_embeddings_tbl.get_embedding = Mock( return_value=None )
+        self.assertEqual( mgr._pg_get_snapshots_by_question( "q" ), [] )
+
+    def test_level1_verbatim_hit( self ):
+        mgr = _pg_manager( debug=True )
+        mgr._canonical_synonyms = Mock( find_exact_verbatim=Mock( return_value="sid1" ) )
+        mgr._normalizer = Mock()
+        snap = _fake_snapshot()
+        mgr.get_snapshot_by_id = Mock( return_value=snap )
+        result = mgr._pg_get_snapshots_by_question( "q" )
+        self.assertEqual( result, [ ( 100.0, snap ) ] )
+        mgr.get_snapshot_by_id.assert_called_once_with( "sid1" )
+
+    def test_level1_ghost_then_l4_empty( self ):
+        mgr = _pg_manager()
+        mgr._canonical_synonyms = Mock( find_exact_verbatim=Mock( return_value="ghost1" ),
+                                        find_exact_normalized=Mock( return_value=None ) )
+        mgr._canonical_synonyms.delete_by_snapshot_id = Mock()
+        mgr._normalizer = Mock( normalize=Mock( return_value="n" ) )
+        mgr.get_snapshot_by_id = Mock( return_value=None )   # ghost
+        mgr._question_embeddings_tbl.get_embedding = Mock( return_value=None )
+        self.assertEqual( mgr._pg_get_snapshots_by_question( "q" ), [] )
+        mgr._canonical_synonyms.delete_by_snapshot_id.assert_called_once_with( "ghost1" )
+
+    def test_canonical_truthy_normalizer_false_skips_level2( self ):
+        # canonical present (no verbatim match) but normalizer False → L2 block skipped → L4
+        mgr = _pg_manager()
+        mgr._canonical_synonyms = Mock( find_exact_verbatim=Mock( return_value=None ) )
+        mgr._normalizer = False
+        mgr._question_embeddings_tbl.get_embedding = Mock( return_value=None )
+        self.assertEqual( mgr._pg_get_snapshots_by_question( "q" ), [] )
+
+    def test_level2_normalized_hit( self ):
+        mgr = _pg_manager( debug=True )
+        mgr._canonical_synonyms = Mock( find_exact_verbatim=Mock( return_value=None ),
+                                        find_exact_normalized=Mock( return_value="sid2" ) )
+        mgr._normalizer = Mock( normalize=Mock( return_value="normed" ) )
+        snap = _fake_snapshot()
+        mgr.get_snapshot_by_id = Mock( return_value=snap )
+        result = mgr._pg_get_snapshots_by_question( "q" )
+        self.assertEqual( result, [ ( 100.0, snap ) ] )
+
+    def test_level2_ghost_then_l4_empty( self ):
+        mgr = _pg_manager()
+        mgr._canonical_synonyms = Mock( find_exact_verbatim=Mock( return_value=None ),
+                                        find_exact_normalized=Mock( return_value="ghost2" ) )
+        mgr._canonical_synonyms.delete_by_snapshot_id = Mock()
+        mgr._normalizer = Mock( normalize=Mock( return_value="normed" ) )
+        mgr.get_snapshot_by_id = Mock( return_value=None )
+        mgr._question_embeddings_tbl.get_embedding = Mock( return_value=None )
+        self.assertEqual( mgr._pg_get_snapshots_by_question( "q" ), [] )
+        mgr._canonical_synonyms.delete_by_snapshot_id.assert_called_once_with( "ghost2" )
+
+    def test_level4_qe_empty_debug_true( self ):
+        mgr = _pg_manager( debug=True )
+        mgr._canonical_synonyms = False   # skip L1/L2 entirely
+        mgr._normalizer = False
+        mgr._question_embeddings_tbl.get_embedding = Mock( return_value=None )
+        self.assertEqual( mgr._pg_get_snapshots_by_question( "q" ), [] )
+
+    def test_level4_qe_empty_debug_false( self ):
+        mgr = _pg_manager( debug=False )
+        mgr._canonical_synonyms = False
+        mgr._normalizer = False
+        mgr._question_embeddings_tbl.get_embedding = Mock( return_value=None )
+        self.assertEqual( mgr._pg_get_snapshots_by_question( "q" ), [] )
+
+    def test_level4_hits_marshalled_and_sorted( self ):
+        mgr = _pg_manager()
+        mgr._canonical_synonyms = False
+        mgr._normalizer = False
+        mgr._question_embeddings_tbl.get_embedding = Mock( return_value=[ 0.1, 0.2, 0.3, 0.4 ] )
+        hits = [ ( 80.0, _entity( id_hash="a" ) ), ( 95.0, _entity( id_hash="b" ) ) ]
+        p, repo = _repo_patch( get_snapshots_by_question=hits )
+        with _get_db_patch( _mock_session() ), p:
+            result = mgr._pg_get_snapshots_by_question( "q", limit=5 )
+        self.assertEqual( len( result ), 2 )
+        self.assertEqual( result[ 0 ][ 0 ], 95.0 )    # sorted descending
+        self.assertEqual( result[ 1 ][ 0 ], 80.0 )
+        repo.return_value.get_snapshots_by_question.assert_called_once_with(
+            [ 0.1, 0.2, 0.3, 0.4 ], threshold=None, limit=5 )
+
+    def test_level4_limit_nonpositive_uses_100( self ):
+        mgr = _pg_manager()
+        mgr._canonical_synonyms = False
+        mgr._normalizer = False
+        mgr._question_embeddings_tbl.get_embedding = Mock( return_value=[ 0.1, 0.2, 0.3, 0.4 ] )
+        p, repo = _repo_patch( get_snapshots_by_question=[] )
+        with _get_db_patch( _mock_session() ), p:
+            self.assertEqual( mgr._pg_get_snapshots_by_question( "q", limit=0 ), [] )
+        _, kwargs = repo.return_value.get_snapshots_by_question.call_args
+        self.assertEqual( kwargs[ "limit" ], 100 )
+
+    def test_exception_reraises_debug_true( self ):
+        mgr = _pg_manager( debug=True )
+        mgr._canonical_synonyms = False
+        mgr._normalizer = False
+        mgr._question_embeddings_tbl.get_embedding = Mock( side_effect=Exception( "embed boom" ) )
+        with self.assertRaises( Exception ):
+            mgr._pg_get_snapshots_by_question( "q" )
+
+    def test_exception_reraises_debug_false( self ):
+        mgr = _pg_manager( debug=False )
+        mgr._canonical_synonyms = False
+        mgr._normalizer = False
+        mgr._question_embeddings_tbl.get_embedding = Mock( side_effect=Exception( "embed boom" ) )
+        with self.assertRaises( Exception ):
+            mgr._pg_get_snapshots_by_question( "q" )
+
+
+class TestPgSimilaritySearch( unittest.TestCase ):
+    """_pg_similarity_search (via the code wrapper) + the solution wrapper delegation."""
+
+    def test_not_initialized_raises( self ):
+        mgr = _pg_manager()
+        mgr.is_initialized = Mock( return_value=False )
+        with self.assertRaises( RuntimeError ):
+            mgr._pg_get_snapshots_by_code_similarity( _fake_snapshot() )
+
+    def test_none_exemplar_raises( self ):
+        mgr = _pg_manager()
+        with self.assertRaises( ValueError ):
+            mgr._pg_get_snapshots_by_code_similarity( None )
+
+    def test_bad_threshold_raises( self ):
+        mgr = _pg_manager()
+        with self.assertRaises( ValueError ):
+            mgr._pg_get_snapshots_by_code_similarity( _fake_snapshot(), threshold=101.0 )
+
+    def test_empty_embedding_returns_empty( self ):
+        mgr = _pg_manager()
+        self.assertEqual( mgr._pg_get_snapshots_by_code_similarity( _fake_snapshot( code_embedding=[] ) ), [] )
+
+    def test_zero_embedding_returns_empty( self ):
+        mgr = _pg_manager()
+        self.assertEqual(
+            mgr._pg_get_snapshots_by_code_similarity( _fake_snapshot( code_embedding=[ 0.0 ] * 10 ) ), [] )
+
+    def test_exclude_self_skips_matching_id( self ):
+        mgr = _pg_manager()
+        ex = _fake_snapshot( id_hash="me", code_embedding=[ 0.1, 0.2, 0.3, 0.4 ] )
+        hits = [ ( 90.0, _entity( id_hash="me" ) ), ( 80.0, _entity( id_hash="other" ) ) ]
+        p, repo = _repo_patch( get_snapshots_by_code_similarity=hits )
+        with _get_db_patch( _mock_session() ), p:
+            result = mgr._pg_get_snapshots_by_code_similarity( ex, threshold=50.0, exclude_self=True )
+        self.assertEqual( len( result ), 1 )
+        self.assertAlmostEqual( result[ 0 ][ 0 ], 80.0 )
+
+    def test_below_threshold_best_below_appended( self ):
+        mgr = _pg_manager()
+        ex = _fake_snapshot( id_hash="me", code_embedding=[ 0.1, 0.2, 0.3, 0.4 ] )
+        hits = [ ( 40.0, _entity( id_hash="a" ) ) ]
+        p, repo = _repo_patch( get_snapshots_by_code_similarity=hits )
+        with _get_db_patch( _mock_session() ), p:
+            result = mgr._pg_get_snapshots_by_code_similarity(
+                ex, threshold=50.0, exclude_self=False, ensure_top_result=True )
+        self.assertEqual( len( result ), 1 )
+        self.assertAlmostEqual( result[ 0 ][ 0 ], 40.0 )
+
+    def test_below_threshold_best_below_only_first_kept( self ):
+        # two below-threshold hits → elif fires only for the first (best_below already set)
+        mgr = _pg_manager()
+        ex = _fake_snapshot( id_hash="me", code_embedding=[ 0.1, 0.2, 0.3, 0.4 ] )
+        hits = [ ( 40.0, _entity( id_hash="a" ) ), ( 30.0, _entity( id_hash="b" ) ) ]
+        p, repo = _repo_patch( get_snapshots_by_code_similarity=hits )
+        with _get_db_patch( _mock_session() ), p:
+            result = mgr._pg_get_snapshots_by_code_similarity(
+                ex, threshold=50.0, exclude_self=False, ensure_top_result=True )
+        self.assertEqual( len( result ), 1 )
+        self.assertAlmostEqual( result[ 0 ][ 0 ], 40.0 )   # the best (first) below-threshold
+
+    def test_limit_truncation( self ):
+        mgr = _pg_manager()
+        ex = _fake_snapshot( id_hash="me", code_embedding=[ 0.1, 0.2, 0.3, 0.4 ] )
+        hits = [ ( 90.0, _entity( id_hash="a" ) ), ( 85.0, _entity( id_hash="b" ) ),
+                 ( 80.0, _entity( id_hash="c" ) ) ]
+        p, repo = _repo_patch( get_snapshots_by_code_similarity=hits )
+        with _get_db_patch( _mock_session() ), p:
+            result = mgr._pg_get_snapshots_by_code_similarity(
+                ex, threshold=50.0, limit=2, exclude_self=False )
+        self.assertEqual( len( result ), 2 )
+
+    def test_limit_nonpositive_no_truncation_exclude_self_false( self ):
+        mgr = _pg_manager()
+        ex = _fake_snapshot( id_hash="me", code_embedding=[ 0.1, 0.2, 0.3, 0.4 ] )
+        hits = [ ( 90.0, _entity( id_hash="a" ) ), ( 85.0, _entity( id_hash="b" ) ) ]
+        p, repo = _repo_patch( get_snapshots_by_code_similarity=hits )
+        with _get_db_patch( _mock_session() ), p:
+            result = mgr._pg_get_snapshots_by_code_similarity(
+                ex, threshold=50.0, limit=0, exclude_self=False )
+        self.assertEqual( len( result ), 2 )
+        _, kwargs = repo.return_value.get_snapshots_by_code_similarity.call_args
+        self.assertEqual( kwargs[ "limit" ], 100 )   # limit<=0 + no exclude_self → 100
+
+    def test_no_results_no_ensure_top( self ):
+        mgr = _pg_manager()
+        ex = _fake_snapshot( id_hash="me", code_embedding=[ 0.1, 0.2, 0.3, 0.4 ] )
+        hits = [ ( 40.0, _entity( id_hash="a" ) ) ]
+        p, repo = _repo_patch( get_snapshots_by_code_similarity=hits )
+        with _get_db_patch( _mock_session() ), p:
+            result = mgr._pg_get_snapshots_by_code_similarity(
+                ex, threshold=50.0, exclude_self=False, ensure_top_result=False )
+        self.assertEqual( result, [] )   # below threshold + no ensure_top → empty
+
+    def test_solution_wrapper_delegates( self ):
+        mgr = _pg_manager()
+        mgr._pg_similarity_search = Mock( return_value=[ ( 99.0, "snap" ) ] )
+        ex = _fake_snapshot()
+        result = mgr._pg_get_snapshots_by_solution_similarity( ex, threshold=70.0, limit=3 )
+        self.assertEqual( result, [ ( 99.0, "snap" ) ] )
+        mgr._pg_similarity_search.assert_called_once_with(
+            ex, "solution_embedding", "get_snapshots_by_solution_similarity", 70.0, 3, True, True )
+
+    def test_solution_similarity_end_to_end( self ):
+        # exercise the solution wrapper's real body once (function-coverage of _pg_similarity_search
+        # via the solution repo method name)
+        mgr = _pg_manager()
+        ex = _fake_snapshot( id_hash="me", solution_embedding=[ 0.1, 0.2, 0.3, 0.4 ] )
+        hits = [ ( 88.0, _entity( id_hash="s1" ) ) ]
+        p, repo = _repo_patch( get_snapshots_by_solution_similarity=hits )
+        with _get_db_patch( _mock_session() ), p:
+            result = mgr._pg_get_snapshots_by_solution_similarity( ex, threshold=50.0, exclude_self=False )
+        self.assertEqual( len( result ), 1 )
+        self.assertAlmostEqual( result[ 0 ][ 0 ], 88.0 )
+
+
+class TestPgGetGists( unittest.TestCase ):
+    """_pg_get_gists — distinct non-empty, order-preserving dedup."""
+
+    def test_not_initialized_raises( self ):
+        mgr = _pg_manager()
+        mgr.is_initialized = Mock( return_value=False )
+        with self.assertRaises( RuntimeError ):
+            mgr._pg_get_gists()
+
+    def test_dedup_and_skip_empty_debug_true( self ):
+        mgr = _pg_manager( debug=True )
+        p, repo = _repo_patch( get_gists=[ "g1", "g1", "g2", "" ] )
+        with _get_db_patch( _mock_session() ), p:
+            self.assertEqual( mgr._pg_get_gists(), [ "g1", "g2" ] )
+
+    def test_dedup_debug_false( self ):
+        mgr = _pg_manager( debug=False )
+        p, repo = _repo_patch( get_gists=[ "g3" ] )
+        with _get_db_patch( _mock_session() ), p:
+            self.assertEqual( mgr._pg_get_gists(), [ "g3" ] )
+
+    def test_exception_returns_empty_debug_true( self ):
+        mgr = _pg_manager( debug=True )
+        with _get_db_raises():
+            self.assertEqual( mgr._pg_get_gists(), [] )
+
+    def test_exception_returns_empty_debug_false( self ):
+        mgr = _pg_manager( debug=False )
+        with _get_db_raises():
+            self.assertEqual( mgr._pg_get_gists(), [] )
+
+
+class TestPgGetStats( unittest.TestCase ):
+    """_pg_get_stats — postgres backend_type + zero storage size."""
+
+    def test_not_initialized_raises( self ):
+        mgr = _pg_manager()
+        mgr.is_initialized = Mock( return_value=False )
+        with self.assertRaises( RuntimeError ):
+            mgr._pg_get_stats()
+
+    def test_success_debug_true( self ):
+        mgr = _pg_manager( debug=True )
+        p, repo = _repo_patch( get_stats={ "total_snapshots": 5 } )
+        with _get_db_patch( _mock_session() ), p:
+            stats = mgr._pg_get_stats()
+        self.assertEqual( stats[ "total_snapshots" ], 5 )
+        self.assertEqual( stats[ "backend_type" ], "postgres" )
+        self.assertEqual( stats[ "storage_size_mb" ], 0.0 )
+
+    def test_success_debug_false( self ):
+        mgr = _pg_manager( debug=False )
+        p, repo = _repo_patch( get_stats={ "total_snapshots": 2 } )
+        with _get_db_patch( _mock_session() ), p:
+            stats = mgr._pg_get_stats()
+        self.assertEqual( stats[ "total_snapshots" ], 2 )
+
+    def test_exception_error_dict_debug_true( self ):
+        mgr = _pg_manager( debug=True )
+        with _get_db_raises():
+            stats = mgr._pg_get_stats()
+        self.assertEqual( stats[ "status" ], "error" )
+        self.assertEqual( stats[ "backend_type" ], "postgres" )
+
+    def test_exception_error_dict_debug_false( self ):
+        mgr = _pg_manager( debug=False )
+        with _get_db_raises():
+            stats = mgr._pg_get_stats()
+        self.assertEqual( stats[ "status" ], "error" )
+
+
+class TestPgHealthCheck( unittest.TestCase ):
+    """_pg_health_check — healthy / degraded / unhealthy."""
+
+    def test_healthy_when_initialized( self ):
+        mgr = _pg_manager()
+        p, repo = _repo_patch( get_stats={ "total_snapshots": 3 } )
+        with _get_db_patch( _mock_session() ), p:
+            health = mgr._pg_health_check()
+        self.assertEqual( health[ "status" ], "healthy" )
+        self.assertEqual( health[ "connection_status" ], "connected" )
+        self.assertEqual( health[ "snapshot_count" ], 3 )
+        self.assertEqual( health[ "backend_type" ], "postgres" )
+
+    def test_degraded_when_not_initialized( self ):
+        mgr = _pg_manager()
+        mgr.is_initialized = Mock( return_value=False )
+        p, repo = _repo_patch( get_stats={ "total_snapshots": 0 } )
+        with _get_db_patch( _mock_session() ), p:
+            health = mgr._pg_health_check()
+        self.assertEqual( health[ "status" ], "degraded" )
+
+    def test_unhealthy_on_exception( self ):
+        mgr = _pg_manager()
+        with _get_db_raises():
+            health = mgr._pg_health_check()
+        self.assertEqual( health[ "status" ], "unhealthy" )
+        self.assertEqual( health[ "connection_status" ], "disconnected" )
+        self.assertTrue( health[ "errors" ] )
 
 
 if __name__ == "__main__":

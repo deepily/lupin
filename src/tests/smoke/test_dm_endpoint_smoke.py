@@ -51,9 +51,18 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+import re
+
 from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
 from cosa.rest.routers.dm import router as dm_router
 from cosa.rest.routers.notifications import get_notification_queue
+
+
+# Every outbound DM body is prefixed with Rick's central EDT stamp
+# "[YYYY.MM.DD at HH:MM:SS] " (2026-06-24, cosa.utils.edt_timestamp) — the SAME
+# bracketed shape the arbiter pings carry. The stamp is real-now at the HTTP layer,
+# so assert the prefix SHAPE + that the original body rides intact after it.
+_EDT_PREFIX_RE = re.compile( r"^\[\d{4}\.\d{2}\.\d{2} at \d{2}:\d{2}:\d{2}\] " )
 
 
 # A real UUID — the authenticated caller. Fixture bridges are stamped with this
@@ -187,7 +196,7 @@ def test_dm_send_persona_addressed_returns_201( client, captured_pushes, persist
     resp = client.post(
         "/api/dm/send",
         json = {
-            "asker_session_id" : "sid_asker",
+            "sender_session_id" : "sid_asker",
             "body"             : "ready for review",
             "recipient_persona": "radio",
             "sender_persona"   : "tiffany",
@@ -211,7 +220,13 @@ def test_dm_send_persona_addressed_returns_201( client, captured_pushes, persist
     assert len( captured_pushes ) == 1
     push = captured_pushes[ 0 ]
     assert push[ "direction" ]      == "ai_to_ai"
-    assert push[ "message" ]        == "ready for review"
+    # Central EDT prefix lands on the outbound body; original text rides intact after it.
+    assert _EDT_PREFIX_RE.match( push[ "message" ] )
+    assert push[ "message" ].endswith( " ready for review" )
+    # No double-stamp: exactly one bracketed prefix on the body.
+    assert push[ "message" ].count( "] " ) == 1
+    # The persisted row carries the SAME stamped body the recipient sees.
+    assert persisted_rows[ 0 ][ "message" ] == push[ "message" ]
     assert push[ "sender_persona" ] == "tiffany"
     assert push[ "job_id" ]         == _SID_RADIO[ :8 ]
 
@@ -226,7 +241,7 @@ def test_dm_send_null_persona_worker_by_short_sid_returns_201( client, captured_
     resp = client.post(
         "/api/dm/send",
         json = {
-            "asker_session_id"     : "sid_manager",
+            "sender_session_id"     : "sid_manager",
             "body"                 : "you are reachable",
             "recipient_session_id" : _SID_NULL[ :8 ],   # "null0001" — short form
         },
@@ -245,7 +260,7 @@ def test_dm_send_ambiguous_short_prefix_returns_422( client, captured_pushes ):
     resp = client.post(
         "/api/dm/send",
         json = {
-            "asker_session_id"     : "sid_manager",
+            "sender_session_id"     : "sid_manager",
             "body"                 : "who are you",
             "recipient_session_id" : "ambig777",        # prefix of BOTH ambig A and B
         },
@@ -272,7 +287,7 @@ def test_dm_respond_threaded_reply_returns_201( client, captured_pushes, persist
     resp = client.post(
         "/api/dm/respond",
         json = {
-            "asker_session_id" : "sid_asker",
+            "sender_session_id" : "sid_asker",
             "body"             : "ack — verdict GREEN",
             "recipient_persona": "rachel",
             "reply_to"         : "msg-original-1",
@@ -299,7 +314,7 @@ def test_dm_respond_ambiguous_short_prefix_returns_422( client, captured_pushes 
     resp = client.post(
         "/api/dm/respond",
         json = {
-            "asker_session_id"     : "sid_asker",
+            "sender_session_id"     : "sid_asker",
             "body"                 : "reply into the void",
             "recipient_session_id" : "ambig777",
             "reply_to"             : "msg-original-2",

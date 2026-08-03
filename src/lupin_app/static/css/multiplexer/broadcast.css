@@ -1,0 +1,270 @@
+/*
+ * Multiplexer Lane C (v0.1.9 focus-bar parity, 2026-06-24) — broadcast compose card.
+ *
+ * Ports the legacy `broadcast-panel.css` (compose row + recipient chips +
+ * confirm modal) into the multiplexer. Differences from legacy:
+ *   - Collapse is CSS-driven off the card's `data-card-open` attribute (the
+ *     CommonsActivityRenderer idiom) rather than a `.collapsed` class.
+ *   - `#broadcast-submit-status` is VISIBLE (legacy hid it after the aggregate
+ *     panel was retired) — the mux surfaces the post-send recipients/filtered_out
+ *     receipt line here (AC2).
+ *   - Mic uses the `.broadcast-stt` class (not the sender-card `.cc-session-stt`)
+ *     so it is wired only by BroadcastCardRenderer, never the recorder renderer.
+ *   - The live ack-aggregate panel is NOT ported (current legacy routes acks to
+ *     the standard notification stream).
+ */
+
+/* ── Card shell + CSS-driven collapse ─────────────────────────────────────── */
+
+/* V7 — header row: h4 title left, ▼/▶ collapse toggle inline-RIGHT. The shared
+   .job-submit-card-header carries no layout in the mux, so the block-level h4 +
+   button stacked and the glyph orphaned onto its own line. Scoped to the
+   broadcast card → the jobs-pane header is untouched. */
+.broadcast-submit-card .job-submit-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    cursor: pointer;
+}
+
+.broadcast-submit-card .job-submit-card-header h4 {
+    margin: 0;
+    flex: 1 1 auto;
+}
+
+.broadcast-submit-card .job-submit-card-header .toggle-button {
+    flex: 0 0 auto;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: inherit;
+    font-size: 0.9rem;
+    line-height: 1;
+    padding: 2px 6px;
+}
+
+#broadcast-submit-card[data-card-open="false"] #broadcast-submit-section {
+    display: none;
+}
+
+/* ── Compose row ──────────────────────────────────────────────────────────── */
+
+#broadcast-panel-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+#broadcast-compose-row {
+    display: flex;
+    flex-direction: row;
+    gap: 6px;
+    align-items: center;
+}
+
+#broadcast-stt-button {
+    flex: 0 0 auto;
+    align-self: center;
+    height: 34px;
+    min-width: 40px;
+    padding: 4px 8px;
+    font-size: 14px;
+    flex-shrink: 0;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    background: #fff;
+    cursor: pointer;
+}
+
+#broadcast-stt-button.recording {
+    background: #dc3545;
+    color: #fff;
+    border-color: #b02a37;
+}
+
+#broadcast-textarea {
+    flex: 1 1 auto;
+    width: auto;
+    min-height: 45px;
+    max-height: 120px;
+    padding: 8px 10px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 13px;
+    resize: vertical;
+    box-sizing: border-box;
+}
+
+#broadcast-send-button {
+    flex: 0 0 auto;
+    padding: 6px 14px;
+    font-size: 13px;
+    height: 34px;
+    flex-shrink: 0;
+}
+
+/* ── Recipient chip-row ───────────────────────────────────────────────────── */
+
+#broadcast-recipients-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 4px;
+    min-height: 24px;
+    align-items: center;
+}
+
+#broadcast-recipients-label {
+    font-size: 12px;
+    color: #666;
+    margin-right: 4px;
+}
+
+.broadcast-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border-radius: 12px;
+    background: #f1f3f5;
+    border: 1px solid #dee2e6;
+    font-size: 12px;
+    line-height: 1.2;
+    color: inherit;
+    font-family: inherit;
+}
+
+button.broadcast-chip {
+    cursor: pointer;
+    transition: background 0.12s ease, transform 0.06s ease;
+}
+
+button.broadcast-chip:hover {
+    background: #e9ecef;
+}
+
+button.broadcast-chip:active {
+    transform: translateY( 1px );
+}
+
+button.broadcast-chip:focus-visible {
+    outline: 2px solid #4dabf7;
+    outline-offset: 1px;
+}
+
+/* The @all injector chip leads the row (legacy broadcast-chip-all). */
+button.broadcast-chip[data-token="all"] {
+    background: #fff3bf;
+    border-color: #f59f00;
+    font-weight: 600;
+}
+
+button.broadcast-chip[data-token="all"]:hover {
+    background: #ffe066;
+}
+
+.broadcast-chip-icon {
+    font-size: 13px;
+}
+
+.broadcast-chip.no-recipients {
+    color: #c92a2a;
+    background: #fff5f5;
+    border-color: #ffc9c9;
+    font-style: italic;
+}
+
+#broadcast-recipients-refresh {
+    margin-left: auto;
+    padding: 2px 8px;
+    font-size: 11px;
+    background: #fff;
+    border: 1px solid #ced4da;
+    border-radius: 3px;
+    cursor: pointer;
+}
+
+/* ── Post-send status line (recipients / filtered_out receipt) ────────────── */
+
+#broadcast-submit-status {
+    font-size: 12px;
+    color: #666;
+    min-height: 16px;
+}
+
+#broadcast-submit-status.is-error {
+    color: #c92a2a;
+}
+
+/* ── Confirm modal (matches the legacy showErrorModal pattern) ────────────── */
+
+#broadcast-confirm-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgb( 0 0 0 / 0.45 );
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+}
+
+#broadcast-confirm-modal {
+    background: white;
+    padding: 24px;
+    border-radius: 8px;
+    max-width: 520px;
+    width: calc( 100% - 40px );
+    box-shadow: 0 10px 40px rgb( 0 0 0 / 0.2 );
+}
+
+#broadcast-confirm-modal h4 {
+    margin: 0 0 12px 0;
+    font-size: 16px;
+}
+
+#broadcast-confirm-modal .modal-recipients {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 12px 0;
+}
+
+#broadcast-confirm-modal .modal-preview {
+    padding: 8px 10px;
+    background: #f8f9fa;
+    border-left: 3px solid #fd7e14;
+    border-radius: 3px;
+    margin: 12px 0;
+    font-size: 12px;
+    max-height: 160px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+#broadcast-confirm-modal .modal-buttons {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 16px;
+}
+
+#broadcast-confirm-modal button {
+    padding: 8px 16px;
+    border-radius: 4px;
+    border: none;
+    cursor: pointer;
+    font-weight: 500;
+}
+
+#broadcast-confirm-modal .btn-confirm {
+    background: #fd7e14;
+    color: white;
+}
+
+#broadcast-confirm-modal .btn-cancel {
+    background: #e9ecef;
+    color: #495057;
+}

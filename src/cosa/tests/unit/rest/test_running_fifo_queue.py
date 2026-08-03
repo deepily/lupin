@@ -73,6 +73,7 @@ class _AgentBaseFake( _Job ): pass
 class _AgenticFake( _Job ):
     def __init__( self, **kw ):
         kw.setdefault( "JOB_TYPE", "AgenticType" )
+        kw.setdefault( "spawned_by_id_hash", None )   # mirror AgenticJobBase (bug 3a14292b)
         super().__init__( **kw )
 class _SnapFake( _Job ):
     @classmethod
@@ -129,6 +130,11 @@ class _RFQBase( unittest.TestCase ):
         self.emit      = _p( "emit_job_state_transition" )
         self.notify_fn = _p( "notify_user_sync" )
         self.pool_cls  = _p( "ThreadPoolExecutor" )
+        # Shape-B (bug fe375cf6): RunningFifoQueue now builds TWO executors — the
+        # shared _agentic_pool and the dedicated _monopolize_pool. Return a DISTINCT
+        # mock per construction so the two are separable (e.g. shutdown asserts each
+        # once; routing asserts submit lands on the right one).
+        self.pool_cls.side_effect = lambda *a, **k: MagicMock( name="ThreadPoolExecutor()" )
 
         self._thread_patch = patch.object( rfq.threading, "Thread", _FakeThread )
         self._thread_patch.start(); self._patchers.append( self._thread_patch )
@@ -199,6 +205,34 @@ class TestSubmitAgentic( _RFQBase ):
         self.assertIs( rq._agentic_futures[ "aj1" ], fut )
         rq._agentic_pool.submit.assert_called_once()
         fut.add_done_callback.assert_called_once()
+
+    def test_monopolize_routes_to_dedicated_executor_plain_to_shared( self ):
+        """Shape-B (bug fe375cf6): a monopolize job submits to the DEDICATED
+        _monopolize_pool (and sets the hold); a plain job submits to the shared
+        _agentic_pool (no hold). Both are tracked in the SAME _agentic_futures dict."""
+        rq = self.build()
+        plain = _AgenticFake( id_hash="plain", monopolize=False )
+        rq._submit_agentic_job( plain )
+        rq._agentic_pool.submit.assert_called_once()
+        rq._monopolize_pool.submit.assert_not_called()
+        self.assertIn( "plain", rq._agentic_futures )
+        self.assertIsNone( rq._monopolize_active )
+        mono = _AgenticFake( id_hash="mono", monopolize=True )
+        rq._submit_agentic_job( mono )
+        rq._monopolize_pool.submit.assert_called_once()          # dedicated executor
+        rq._agentic_pool.submit.assert_called_once()             # shared pool NOT re-used
+        self.assertIn( "mono", rq._agentic_futures )             # SAME dict → ghost-sweep/callback cover it
+        self.assertEqual( rq._monopolize_active, "mono" )        # hold set
+
+    def test_monopolize_disabled_kill_switch_routes_to_shared_no_hold( self ):
+        """When the master kill-switch is OFF, a monopolize job routes to the SHARED
+        pool and sets no hold (is_mono is False) — the old no-op behavior."""
+        rq = self.build( **{ "cj flow monopolize enabled": False } )
+        mono = _AgenticFake( id_hash="mono2", monopolize=True )
+        rq._submit_agentic_job( mono )
+        rq._agentic_pool.submit.assert_called_once()
+        rq._monopolize_pool.submit.assert_not_called()
+        self.assertIsNone( rq._monopolize_active )
 
     def test_execute_in_pool_calls_do_all( self ):
         rq = self.build()
@@ -429,6 +463,38 @@ class TestGetPoolStatus( _RFQBase ):
         self.assertFalse( out[ "consumer_stalled" ] )
         self.assertEqual( out[ "api_resource_manager" ], { "x": 1 } )
 
+    def test_status_excludes_monopolizer_and_reports_fields( self ):
+        """Shape-B (bug fe375cf6): the active monopolizer's Future is in
+        _agentic_futures but EXCLUDED from the shared-pool inflight/pending counts
+        (it runs on the dedicated executor, not a shared-pool worker); surfaced via
+        the additive monopolize_inflight/monopolize_id fields."""
+        rq = self.build()
+        f_mono  = MagicMock(); f_mono.done.return_value=False;  f_mono.running.return_value=True
+        f_child = MagicMock(); f_child.done.return_value=False; f_child.running.return_value=False
+        rq._agentic_futures = { "mono": f_mono, "child": f_child }
+        rq._monopolize_active = "mono"
+        with patch( "cosa.utils.api_resource_manager.get_arm" ) as ga:
+            ga.return_value.get_status.return_value = {}
+            out = rq.get_pool_status()
+        self.assertEqual( out[ "inflight_agentic_jobs" ], 1 )   # child only; monopolizer excluded
+        self.assertEqual( out[ "pending_in_pool" ], 1 )         # child pending (not running); mono excluded
+        self.assertTrue( out[ "monopolize_inflight" ] )
+        self.assertEqual( out[ "monopolize_id" ], "mono" )
+
+    def test_status_no_monopolizer_reports_false_none( self ):
+        """No monopolizer → monopolize_inflight False, monopolize_id None, and the
+        shared-pool counts include everything (nothing excluded)."""
+        rq = self.build()
+        f = MagicMock(); f.done.return_value=False; f.running.return_value=True
+        rq._agentic_futures = { "a": f }
+        rq._monopolize_active = None
+        with patch( "cosa.utils.api_resource_manager.get_arm" ) as ga:
+            ga.return_value.get_status.return_value = {}
+            out = rq.get_pool_status()
+        self.assertEqual( out[ "inflight_agentic_jobs" ], 1 )
+        self.assertFalse( out[ "monopolize_inflight" ] )
+        self.assertIsNone( out[ "monopolize_id" ] )
+
     def test_status_heartbeat_present_and_stalled( self ):
         from datetime import datetime, timedelta
         rq = self.build()
@@ -450,6 +516,110 @@ class TestGetPoolStatus( _RFQBase ):
         with patch( "cosa.utils.api_resource_manager.get_arm", side_effect=ValueError( "weird" ) ):
             out = rq.get_pool_status()
         self.assertEqual( out[ "api_resource_manager" ][ "state" ], "error" )
+
+
+# ── get_non_test_inflight_agentic_jobs (bug caf58f71 — concurrent-writer classifier)
+class TestNonTestInflightClassifier( _RFQBase ):
+    """The merge-gate sweep exclusivity classifier: which inflight agentic jobs
+    are NON-test writers on the shared lupin_db_test, so the sweep can fail loud."""
+
+    @staticmethod
+    def _future( done ):
+        f = MagicMock( name="future" ); f.done.return_value = done; return f
+
+    def test_done_futures_are_not_offenders( self ):
+        """A completed (done) future is not inflight — never an offender, even
+        for a non-test job."""
+        rq  = self.build()
+        job = _AgenticFake( id_hash="d1", job_type="deep_research" )
+        self._enqueue( rq, job )
+        rq._agentic_futures = { "d1": self._future( done=True ) }
+        self.assertEqual( rq.get_non_test_inflight_agentic_jobs(), [ ] )
+
+    def test_self_is_excluded_by_id_hash( self ):
+        """The sweep's OWN inflight future must be skipped via exclude_id_hash."""
+        rq  = self.build()
+        job = _AgenticFake( id_hash="sweep", job_type="test_suite" )
+        self._enqueue( rq, job )
+        rq._agentic_futures = { "sweep": self._future( done=False ) }
+        self.assertEqual(
+            rq.get_non_test_inflight_agentic_jobs( exclude_id_hash="sweep" ), [ ]
+        )
+
+    def test_other_test_suite_job_is_not_an_offender( self ):
+        """Another test_suite job (job_type == 'test_suite') is not a foreign
+        writer — skipped even without exclude_id_hash."""
+        rq  = self.build()
+        job = _AgenticFake( id_hash="ts2", job_type="test_suite" )
+        self._enqueue( rq, job )
+        rq._agentic_futures = { "ts2": self._future( done=False ) }
+        self.assertEqual( rq.get_non_test_inflight_agentic_jobs(), [ ] )
+
+    def test_inflight_non_test_job_is_an_offender( self ):
+        """An inflight non-test agentic job IS a concurrent writer → offender,
+        reported with its id_hash and job_type."""
+        rq  = self.build()
+        job = _AgenticFake( id_hash="dr1", job_type="deep_research" )
+        self._enqueue( rq, job )
+        rq._agentic_futures = { "dr1": self._future( done=False ) }
+        out = rq.get_non_test_inflight_agentic_jobs( exclude_id_hash="sweep" )
+        self.assertEqual( out, [ { "id_hash": "dr1", "job_type": "deep_research" } ] )
+
+    def test_inflight_future_without_backing_job_is_unknown_offender( self ):
+        """A future present + inflight but whose job is gone from queue_dict is
+        fail-loud 'unknown' — an unclassifiable writer we cannot vouch for."""
+        rq = self.build()
+        rq._agentic_futures = { "ghost": self._future( done=False ) }  # not enqueued
+        out = rq.get_non_test_inflight_agentic_jobs()
+        self.assertEqual( out, [ { "id_hash": "ghost", "job_type": "unknown" } ] )
+
+    def test_mixed_pool_reports_only_foreign_inflight_writers( self ):
+        """Full mix: self (excluded), a done non-test (not inflight), another
+        test_suite (skipped), and one live foreign writer → only the last."""
+        rq = self.build()
+        for h, jt in [ ( "sweep", "test_suite" ), ( "ts2", "test_suite" ),
+                       ( "dr_done", "deep_research" ), ( "pod_live", "podcast" ) ]:
+            self._enqueue( rq, _AgenticFake( id_hash=h, job_type=jt ) )
+        rq._agentic_futures = {
+            "sweep"   : self._future( done=False ),
+            "ts2"     : self._future( done=False ),
+            "dr_done" : self._future( done=True ),
+            "pod_live": self._future( done=False ),
+        }
+        out = rq.get_non_test_inflight_agentic_jobs( exclude_id_hash="sweep" )
+        self.assertEqual( out, [ { "id_hash": "pod_live", "job_type": "podcast" } ] )
+
+    def test_lineage_child_of_sweep_is_exempted( self ):
+        """bug 3a14292b: an inflight job SPAWNED BY the sweep (spawned_by_id_hash ==
+        exclude_id_hash) is not foreign TO the sweep — exempted even though its
+        job_type is not test_suite."""
+        rq    = self.build()
+        child = _AgenticFake( id_hash="swe1", job_type="swe_team", spawned_by_id_hash="sweep" )
+        self._enqueue( rq, child )
+        rq._agentic_futures = { "swe1": self._future( done=False ) }
+        self.assertEqual(
+            rq.get_non_test_inflight_agentic_jobs( exclude_id_hash="sweep" ), [ ]
+        )
+
+    def test_lineage_of_other_parent_is_still_foreign( self ):
+        """A child of a DIFFERENT parent (spawned_by_id_hash != exclude_id_hash) is
+        still a foreign writer — the exemption is lineage-scoped, not blanket."""
+        rq    = self.build()
+        other = _AgenticFake( id_hash="swe2", job_type="swe_team", spawned_by_id_hash="other-sweep" )
+        self._enqueue( rq, other )
+        rq._agentic_futures = { "swe2": self._future( done=False ) }
+        out = rq.get_non_test_inflight_agentic_jobs( exclude_id_hash="sweep" )
+        self.assertEqual( out, [ { "id_hash": "swe2", "job_type": "swe_team" } ] )
+
+    def test_no_exclude_id_hash_does_not_exempt_lineage( self ):
+        """With exclude_id_hash None, a job's default-None lineage must NOT match
+        (None == None) and wrongly exempt it — the guard keys on a real sweep id."""
+        rq  = self.build()
+        job = _AgenticFake( id_hash="dr9", job_type="deep_research" )   # spawned_by_id_hash defaults None
+        self._enqueue( rq, job )
+        rq._agentic_futures = { "dr9": self._future( done=False ) }
+        out = rq.get_non_test_inflight_agentic_jobs()                    # exclude_id_hash=None
+        self.assertEqual( out, [ { "id_hash": "dr9", "job_type": "deep_research" } ] )
 
 
 # ── _ghost_job_sweep + loop ─────────────────────────────────────────────────
@@ -520,6 +690,7 @@ class TestShutdownPool( _RFQBase ):
         rq = self.build()
         rq.shutdown_pool( wait=False )
         rq._agentic_pool.shutdown.assert_called_once()
+        rq._monopolize_pool.shutdown.assert_called_once()   # Shape-B: dedicated executor shuts down too
 
     def test_shutdown_sweeper_still_alive_warns( self ):
         rq = self.build()
@@ -981,6 +1152,169 @@ class TestHandleAgenticJob( _RFQBase ):
         rq._handle_agentic_job( job, "q", rfq.sw.Stopwatch( "t" ) )
         rq._transition_to_dead.assert_called_once()
         self.assertEqual( job.state, JobState.FAILED )
+
+
+# ── Option (a) true-monopoly (bug 30398595): kill-switch + hold lifecycle ────
+class TestMonopolyKillSwitch( _RFQBase ):
+    """The master kill-switch is read FRESH at gate-time (hot-reload, no bounce),
+    gating all three surfaces atomically."""
+
+    def test_enabled_reads_config_true_by_default( self ):
+        self.assertTrue( self.build()._is_monopolize_enabled() )
+
+    def test_enabled_reads_config_false_when_flipped( self ):
+        rq = self.build( **{ "cj flow monopolize enabled": False } )
+        self.assertFalse( rq._is_monopolize_enabled() )
+
+    def test_enabled_none_config_defaults_true( self ):
+        self.assertTrue( self.build( config_mgr=None )._is_monopolize_enabled() )
+
+    def test_reads_fresh_each_call_no_init_cache( self ):
+        """A mid-run INI flip is honored on the NEXT gate read (no __init__ cache)."""
+        cfg   = self._cfg()
+        state = { "on": True }
+        cfg.get.side_effect = lambda key, default=None, return_type=None: (
+            state[ "on" ] if key == "cj flow monopolize enabled" else default
+        )
+        rq = self.build( config_mgr=cfg )
+        self.assertTrue( rq._is_monopolize_enabled() )
+        state[ "on" ] = False                              # operator flips the INI
+        self.assertFalse( rq._is_monopolize_enabled() )    # picked up live
+
+
+class TestMonopolyHoldLifecycle( _RFQBase ):
+    """The monopoly-hold flag: init default, SET on dispatch (kill-switch gated),
+    and RELEASE from every terminal path incl. the ghost sweeper."""
+
+    def test_init_defaults( self ):
+        rq = self.build()
+        self.assertIsNone( rq._monopolize_active )
+        self.assertEqual( rq._monopolize_drain_timeout_seconds, 300 )
+
+    def test_init_none_config_drain_default( self ):
+        self.assertEqual( self.build( config_mgr=None )._monopolize_drain_timeout_seconds, 300 )
+
+    def test_init_drain_timeout_override( self ):
+        rq = self.build( **{ "cj flow monopolize drain timeout seconds": 45 } )
+        self.assertEqual( rq._monopolize_drain_timeout_seconds, 45 )
+
+    def test_submit_sets_hold_for_monopolize_job( self ):
+        rq  = self.build()
+        rq._agentic_pool.submit.return_value = MagicMock( name="future" )
+        job = _AgenticFake( id_hash="m1", monopolize=True )
+        rq._submit_agentic_job( job )
+        self.assertEqual( rq._monopolize_active, "m1" )
+
+    def test_submit_does_not_set_hold_for_nonmonopolize_job( self ):
+        rq  = self.build()
+        rq._agentic_pool.submit.return_value = MagicMock( name="future" )
+        job = _AgenticFake( id_hash="n1", monopolize=False )
+        rq._submit_agentic_job( job )
+        self.assertIsNone( rq._monopolize_active )
+
+    def test_submit_leaves_hold_untouched_when_kill_switch_disabled( self ):
+        """ATOMICITY (Tiberius rider): flag=false → _monopolize_active stays None
+        end-to-end through a full submit — no half-state possible."""
+        rq  = self.build( **{ "cj flow monopolize enabled": False } )
+        rq._agentic_pool.submit.return_value = MagicMock( name="future" )
+        job = _AgenticFake( id_hash="m2", monopolize=True )
+        rq._submit_agentic_job( job )
+        self.assertIsNone( rq._monopolize_active )   # disabled → no-op set
+
+    def test_release_clears_only_matching_owner( self ):
+        rq = self.build()
+        rq._monopolize_active = "owner"
+        rq._release_monopolize_hold( "someone-else" )   # different id → no-op
+        self.assertEqual( rq._monopolize_active, "owner" )
+        rq._release_monopolize_hold( "owner" )          # owner → clears
+        self.assertIsNone( rq._monopolize_active )
+
+    def test_on_agentic_complete_releases_hold( self ):
+        rq = self.build(); rq._transition_to_done = MagicMock()
+        job = _AgenticFake( id_hash="m3", monopolize=True )
+        rq._monopolize_active = "m3"
+        fut = MagicMock(); fut.exception.return_value = None; fut.result.return_value = "out"
+        rq._on_agentic_complete( job, fut )
+        self.assertIsNone( rq._monopolize_active )      # released on completion
+
+    def test_ghost_sweep_dead_letter_releases_hold( self ):
+        """ADDED HAZARD: a ghost-swept monopolize job MUST release the hold, else
+        a wedged sweep freezes ALL intake permanently."""
+        rq = self.build(); rq._transition_to_dead = MagicMock()
+        job = _AgenticFake( id_hash="g1", monopolize=True ); self._enqueue( rq, job )
+        fut = MagicMock(); fut.done.return_value = True; fut.exception.return_value = None
+        rq._agentic_futures = { "g1": fut }
+        rq._monopolize_active = "g1"
+        rq._ghost_job_sweep()
+        rq._transition_to_dead.assert_called_once()
+        self.assertIsNone( rq._monopolize_active )      # intake can resume
+
+    def test_ghost_sweep_already_transitioned_releases_hold( self ):
+        """The already-transitioned cleanup arc (job gone from queue_dict) also
+        releases the hold — idempotent belt."""
+        rq = self.build()
+        fut = MagicMock(); fut.done.return_value = True
+        rq._agentic_futures = { "g2": fut }              # NOT enqueued → get_by_id_hash None
+        rq._monopolize_active = "g2"
+        rq._ghost_job_sweep()
+        self.assertIsNone( rq._monopolize_active )
+
+
+# ── Option (a) Gate-A drain oracle: await_monopolize_pool_drain ──────────────
+class TestAwaitMonopolizePoolDrain( _RFQBase ):
+
+    def test_returns_empty_when_pool_already_clean( self ):
+        rq  = self.build()
+        rq._agentic_futures = { }                        # no foreign inflight
+        job = _AgenticFake( id_hash="sweep" )
+        self.assertEqual(
+            rq.await_monopolize_pool_drain( job, timeout_seconds=5 ), [ ]
+        )
+
+    def test_waits_then_returns_empty_once_drained( self ):
+        """Foreign writer present on the first probe, gone on the second →
+        returns [] after one poll; heartbeat ticked during the wait."""
+        rq  = self.build()
+        job = _AgenticFake( id_hash="sweep" )
+        rq.get_non_test_inflight_agentic_jobs = MagicMock(
+            side_effect=[ [ { "id_hash": "dr1", "job_type": "deep_research" } ], [ ] ]
+        )
+        hb = MagicMock()
+        with patch.object( rfq.time, "sleep" ) as slp:
+            out = rq.await_monopolize_pool_drain(
+                job, timeout_seconds=100, poll_seconds=0.01, heartbeat_fn=hb
+            )
+        self.assertEqual( out, [ ] )
+        hb.assert_called_once()                          # ticked once during the wait
+        slp.assert_called_once_with( 0.01 )
+
+    def test_returns_offenders_on_timeout( self ):
+        """Deadline already passed → the loop body never runs; the initial
+        offender probe is returned so the caller fails loud."""
+        rq  = self.build()
+        job = _AgenticFake( id_hash="sweep" )
+        offenders = [ { "id_hash": "dr1", "job_type": "deep_research" } ]
+        rq.get_non_test_inflight_agentic_jobs = MagicMock( return_value=offenders )
+        hb = MagicMock()
+        with patch.object( rfq.time, "monotonic", side_effect=[ 1000.0, 2000.0 ] ), \
+             patch.object( rfq.time, "sleep" ) as slp:
+            out = rq.await_monopolize_pool_drain(
+                job, timeout_seconds=0, poll_seconds=1.0, heartbeat_fn=hb
+            )
+        self.assertEqual( out, offenders )
+        hb.assert_not_called()                           # loop body never entered
+        slp.assert_not_called()
+
+    def test_no_heartbeat_fn_is_tolerated( self ):
+        """heartbeat_fn is optional — the None arc must not raise."""
+        rq  = self.build()
+        job = _AgenticFake( id_hash="sweep" )
+        rq.get_non_test_inflight_agentic_jobs = MagicMock(
+            side_effect=[ [ { "id_hash": "x", "job_type": "podcast" } ], [ ] ]
+        )
+        with patch.object( rfq.time, "sleep" ):
+            out = rq.await_monopolize_pool_drain( job, timeout_seconds=100, poll_seconds=0.01 )
+        self.assertEqual( out, [ ] )
 
 
 def isolated_unit_test():

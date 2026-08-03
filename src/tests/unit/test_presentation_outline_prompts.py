@@ -175,20 +175,30 @@ class TestParseOutlineResponse:
         outline = parse_outline_response( wrapped )
         assert len( outline ) == 7
 
-    def test_malformed_returns_empty( self ):
-        assert parse_outline_response( "not json at all" ) == []
+    def test_malformed_raises( self ):
+        """D6-STRICT: unrecoverable input raises ValueError (was: returned [])."""
+        with pytest.raises( ValueError ):
+            parse_outline_response( "not json at all" )
 
-    def test_empty_string_returns_empty( self ):
-        assert parse_outline_response( "" ) == []
+    def test_empty_string_raises( self ):
+        """D6-STRICT: empty input raises ValueError (was: returned [])."""
+        with pytest.raises( ValueError ):
+            parse_outline_response( "" )
 
-    def test_missing_outline_key_returns_empty( self ):
-        assert parse_outline_response( json.dumps( { "slides": [] } ) ) == []
+    def test_missing_outline_key_raises( self ):
+        """D6-STRICT: missing 'outline' key raises ValueError (was: returned [])."""
+        with pytest.raises( ValueError ):
+            parse_outline_response( json.dumps( { "slides": [] } ) )
 
-    def test_non_list_outline_returns_empty( self ):
-        assert parse_outline_response( json.dumps( { "outline": "not a list" } ) ) == []
+    def test_non_list_outline_raises( self ):
+        """D6-STRICT: non-list 'outline' raises ValueError (was: returned [])."""
+        with pytest.raises( ValueError ):
+            parse_outline_response( json.dumps( { "outline": "not a list" } ) )
 
-    def test_empty_outline_array( self ):
-        assert parse_outline_response( json.dumps( { "outline": [] } ) ) == []
+    def test_empty_outline_array_raises( self ):
+        """D6-STRICT: empty 'outline' array raises ValueError (was: returned [])."""
+        with pytest.raises( ValueError ):
+            parse_outline_response( json.dumps( { "outline": [] } ) )
 
     def test_invalid_arc_position_defaults_to_body( self ):
         data = json.dumps( { "outline": [ { "arc_position": "bogus", "title": "Test" } ] } )

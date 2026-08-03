@@ -201,19 +201,19 @@ class TestExclusiveFlock:
 class TestNamedLockWrappers:
 
     def test_listener_spawn_lock_path_convention( self, tmp_path, monkeypatch ):
-        monkeypatch.setattr( listener_processes, "SESSION_DIR", tmp_path )
+        monkeypatch.setenv( "LUPIN_HOOK_SESSIONS_DIR", str( tmp_path ) )   # row 8ccc20ab
         with listener_spawn_lock( "abc12345" ) as held:
             assert held is True
         assert ( tmp_path / "cc-listener-abc12345.spawn-lock" ).exists()
 
     def test_tmux_injection_lock_path_convention( self, tmp_path, monkeypatch ):
-        monkeypatch.setattr( listener_processes, "SESSION_DIR", tmp_path )
+        monkeypatch.setenv( "LUPIN_HOOK_SESSIONS_DIR", str( tmp_path ) )   # row 8ccc20ab
         with tmux_injection_lock( "wise penguin" ) as held:
             assert held is True
         assert ( tmp_path / "tmux-inject-wise_penguin.lock" ).exists()
 
     def test_tmux_injection_lock_sanitizes_hostile_names( self, tmp_path, monkeypatch ):
-        monkeypatch.setattr( listener_processes, "SESSION_DIR", tmp_path )
+        monkeypatch.setenv( "LUPIN_HOOK_SESSIONS_DIR", str( tmp_path ) )   # row 8ccc20ab
         with tmux_injection_lock( "../../etc/passwd" ) as held:
             assert held is True
         # No traversal: everything non-filename-safe flattened (dots/dashes kept, slashes not)

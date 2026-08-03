@@ -121,7 +121,7 @@ def quick_smoke_test():
 
         # Test 2: Function with None websocket_mgr (should return early)
         print( "Testing with None websocket_mgr..." )
-        emit_job_state_transition( None, "test-job-123", "todo", "run" )
+        emit_job_state_transition( None, "test-job-123", "queued", "running" )
         print( "✓ Gracefully handled None websocket_mgr" )
 
         # Test 3: Mock WebSocket manager

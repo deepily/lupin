@@ -53,23 +53,57 @@
    Idle / playing / paused state shading
    ============================================================================ */
 
+/* L2 (mux MVP-finish): the green `🔊 Playing` colored accordion — legacy
+   parity for the active TTS panel (notifications.html:589+). Playing shades
+   green; paused shades amber. */
 .tts-chrome.is-playing-current {
-    background-color : transparent;
-    color            : #065f46;
+    padding          : 8px 10px;
+    border           : 1px solid #198754;
+    border-radius   : 6px;
+    background-color : #d1e7dd;
+    color            : #0f5132;
 }
 
 .tts-chrome.is-playing-current .tts-current-track {
-    color : #065f46;
+    color : #0f5132;
 }
 
 .tts-chrome.is-paused-current {
-    background-color : transparent;
-    color            : #92400e;
+    padding          : 8px 10px;
+    border           : 1px solid #ffc107;
+    border-radius   : 6px;
+    background-color : #fff3cd;
+    color            : #664d03;
 }
 
 .tts-chrome.is-paused-current .tts-current-track {
-    color : #92400e;
+    color : #664d03;
 }
+
+/* L2: `🔊 Playing: N` accordion header — green title line on the active panel. */
+.tts-chrome .tts-playing-header {
+    font-weight : 600;
+    font-size   : 13px;
+    color       : #0f5132;
+}
+
+.tts-chrome.is-paused-current .tts-playing-header {
+    color : #664d03;
+}
+
+/* 70cbff3e — TTS focus mode: the queue-roll is paused awaiting a response to an
+   action-required item ("Paused: N waiting"). Header text GRAY (legacy #6c757d
+   "gray for paused", notifications.css:2969) — the mux header is text-color per
+   state (green playing / amber manual-pause), so focus = gray text. */
+.tts-chrome .tts-playing-header.focus-mode {
+    color : #6c757d;
+}
+
+/* Idle empty-state text — DE-FORKED (WP7 single-source, 2026-07-02): the empty
+   panel's `tts-queue-empty-state` element is now styled by the single shared
+   declaration in shared/notifications-surface.css (linked by multiplexer.html),
+   identical to legacy. No mux-side re-declaration here (was a fork of the legacy
+   rule). `.tts-chrome-empty` remains the mux-only root class the template sets. */
 
 /* ============================================================================
    Controls row
@@ -114,23 +148,38 @@
 }
 
 .tts-chrome.is-playing-current .tts-btn-toggle {
-    background   : #10b981;
+    background   : #28a745;
     color        : #fff;
-    border-color : #059669;
+    border-color : #28a745;
 }
 
 .tts-chrome.is-playing-current .tts-btn-toggle:hover {
-    background : #059669;
+    background : #218838;
 }
 
 .tts-chrome.is-paused-current .tts-btn-toggle {
-    background   : #f59e0b;
-    color        : #fff;
-    border-color : #d97706;
+    background   : #ffc107;
+    color        : #664d03;
+    border-color : #ffc107;
 }
 
 .tts-chrome.is-paused-current .tts-btn-toggle:hover {
-    background : #d97706;
+    background : #e0a800;
+}
+
+/* 70cbff3e — focus Resume button (present only in focus mode): green-filled,
+   ported from legacy `.tts-resume-button` (#28a745 / white, hover #218838,
+   notifications.css:2973-2988), matched to Rachel's Bootstrap-green scheme.
+   Inherits `.tts-btn` base (border/radius/padding); overrides fill only. */
+.tts-chrome .tts-btn-resume {
+    background   : #28a745;
+    color        : #fff;
+    border-color : #28a745;
+}
+
+.tts-chrome .tts-btn-resume:hover {
+    background   : #218838;
+    border-color : #218838;
 }
 
 .tts-chrome .tts-btn-stop {
@@ -177,11 +226,11 @@
 }
 
 .tts-chrome.is-playing-current .tts-queue-length {
-    background : #d1fae5;
-    color      : #065f46;
+    background : #d1e7dd;
+    color      : #0f5132;
 }
 
 .tts-chrome.is-paused-current .tts-queue-length {
-    background : #fef3c7;
-    color      : #92400e;
+    background : #fff3cd;
+    color      : #664d03;
 }

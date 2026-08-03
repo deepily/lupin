@@ -402,6 +402,10 @@ class NotificationsUI {
         this.TASK_LIST_COLLAPSED_KEY    = 'lupin.taskList.collapsedOwners'; // localStorage key: JSON array of collapsed owner keys
         this.TASK_LIST_UNASSIGNED_KEY   = '__unassigned__';                 // sentinel owner key for the ownerless bucket
         this._taskListAccordionWired    = false;                            // event-delegation guard (wire the container listener once)
+        // Task-list row redesign (design 2026.06.29): the client title-truncation
+        // backstop length — IDENTICAL to the server-side store-guard cap (60 chars,
+        // handoff #5 / D4). Catches LEGACY rows written before the store guard.
+        this.TASK_TITLE_TRUNCATE_LEN    = 60;                               // truncate-with-ellipsis length; full title on hover-tooltip
 
         // STT for Q&A input
         this.qaAudioRecorder = null;
@@ -1694,7 +1698,13 @@ class NotificationsUI {
         document.getElementById( 'stop-audio' ).addEventListener( 'click', () => {
             this.stopAudio();
         });
-        
+
+        // Managed dev-server bounce (row 1b4211ac R2). Static toolbar button.
+        const bounceBtn = document.getElementById( 'bounce-dev-server-btn' );
+        if ( bounceBtn ) {
+            bounceBtn.addEventListener( 'click', () => this.bounceDevServer() );
+        }
+
         // Enter key in Q&A input
         document.getElementById( 'qa-input' ).addEventListener( 'keydown', ( e ) => {
             if ( e.key === 'Enter' ) {
@@ -7830,6 +7840,97 @@ class NotificationsUI {
         }
     }
 
+    async bounceDevServer() {
+        /**
+         * Managed bounce of the dev server (:7999) from the toolbar — row 1b4211ac R2.
+         *
+         * POSTs to /api/system/bounce, which does NOT restart the server inline (the
+         * process serving this request is the one that dies). It drops a trigger the
+         * host-side watcher turns into the sanctioned bounce-dev-server.sh: warn the
+         * fleet → restart → the server self-emits the all-clear on startup.
+         *
+         * The button must never lie about a ~20s outage, so it disables + shows a
+         * "bouncing" state, then re-enables only once /health confirms the server is
+         * actually back. A 409 (already bouncing) or 503 (watcher down) is surfaced
+         * verbatim instead of a false "in progress".
+         */
+        const READY_LABEL = '🔄';
+        const READY_TITLE = 'Bounce the dev server (:7999) — warns the fleet, then restarts (~20s)';
+
+        if ( !confirm( 'Bounce the dev server (:7999)? The fleet is warned first, then it restarts (~20s). In-flight notifications will drop.' ) ) return;
+
+        const btn = document.getElementById( 'bounce-dev-server-btn' );
+        const restore = ( label, title ) => {
+            if ( !btn ) return;
+            btn.disabled    = false;
+            btn.textContent = label;
+            btn.title       = title;
+        };
+        if ( btn ) {
+            btn.disabled    = true;
+            btn.textContent = '⏳';
+            btn.title       = 'Bouncing… (~20s)';
+        }
+
+        try {
+            const response = await this.authedFetch( '/api/system/bounce', { method : 'POST' } );
+            const data     = await response.json().catch( () => ( {} ) );
+
+            if ( response.status === 202 ) {
+                this.log( '[BOUNCE] Triggered — warning the fleet, then restarting. Waiting for the server to return.' );
+                const back = await this.waitForServerBack();
+                if ( back ) {
+                    restore( '✅', 'Dev server is back up. Bounce it again?' );
+                    setTimeout( () => restore( READY_LABEL, READY_TITLE ), 4000 );
+                } else {
+                    // Never confirmed healthy within the window — do NOT show a green
+                    // check we can't stand behind.
+                    alert( 'Bounce was triggered, but the server has not reported healthy yet. Check the server logs.' );
+                    restore( '⚠️', 'Bounce triggered but not confirmed healthy — retry or check logs' );
+                }
+                return;
+            }
+
+            // 409 already bouncing, 503 watcher not running, or any other non-202.
+            const reason = data.reason || data.detail || `HTTP ${response.status}`;
+            alert( `Bounce not started: ${reason}` );
+            restore( READY_LABEL, READY_TITLE );
+
+        } catch ( error ) {
+            this.error( '[BOUNCE] Request failed:', error );
+            alert( `Bounce request failed: ${error.message}` );
+            restore( READY_LABEL, READY_TITLE );
+        }
+    }
+
+    async waitForServerBack( timeoutMs = 90000, intervalMs = 1500 ) {
+        /**
+         * Resolve true once /health returns ok after the bounce, allowing for the
+         * server to go DOWN and come back in between. Returns false on timeout.
+         *
+         * We re-enable on ok only after we've either observed a down blip (the
+         * restart we asked for) OR a generous grace has elapsed — a fast restart
+         * whose down-edge we miss between polls must not leave the button spinning.
+         */
+        const start = Date.now();
+        const GRACE_MS = 25000;   // exceeds warn (~8s) + restart worst case
+        let sawDown = false;
+        while ( Date.now() - start < timeoutMs ) {
+            await new Promise( r => setTimeout( r, intervalMs ) );
+            try {
+                const r = await fetch( '/health', { cache : 'no-store' } );
+                if ( r.ok ) {
+                    if ( sawDown || ( Date.now() - start ) > GRACE_MS ) return true;
+                } else {
+                    sawDown = true;
+                }
+            } catch ( e ) {
+                sawDown = true;   // connection refused during the restart window
+            }
+        }
+        return false;
+    }
+
     isResumableWithOverrides( job ) {
         /**
          * Return true iff this job type supports per-resume model + effort overrides
@@ -9068,13 +9169,34 @@ class NotificationsUI {
          *     - this.authedFetch is available (handles JWT refresh)
          *
          * Ensures:
-         *     - Returns the parsed { tasks, count } body on 2xx
+         *     - Returns the parsed { tasks, count, total, has_more } body on 2xx
          *     - Returns { status: "auth_required" } on a hard 401
+         *     - Returns { status: "query_unavailable", tasks: null } when the shared
+         *       query module did not load (a DEPLOY defect, not a transport one)
          *     - Returns { status: "unreachable", tasks: null } on any network throw
          *       or non-2xx, non-401 status (never throws)
          */
         try {
-            const response = await this.authedFetch( "/api/tasks?limit=500" );
+            // The query lives in ONE place — /static/js/shared/task-list-query.js,
+            // loaded as a module by this page and imported by the TS multiplexer's
+            // TaskListStore. Two hand-maintained copies had already drifted, and
+            // this one carried `include_terminal=true`, which pushed the result
+            // past the server's 500-row cap and silently dropped 671 rows.
+            // Read at CALL time (never at load time) so module execution order
+            // cannot matter; fail LOUD rather than fall back to a second literal —
+            // a fallback string is exactly the duplication this removes.
+            //
+            // A MISSING QUERY IS ITS OWN STATE, not "unreachable". The store being
+            // down and a static asset 404ing are different failures with different
+            // remedies, and this poll repeats every 60s — collapsing them would have
+            // an operator triaging a deploy defect as an outage, indefinitely, with
+            // the real cause visible only in a console line nobody is tailing.
+            const query = window.LUPIN_TASK_LIST_QUERY;
+            if ( !query ) {
+                this.log( "Task list query missing — /static/js/shared/task-list-query.js did not load" );
+                return { status: "query_unavailable", tasks: null };
+            }
+            const response = await this.authedFetch( query );
             if ( response.status === 401 ) {
                 return { status: "auth_required" };
             }
@@ -9304,12 +9426,65 @@ class NotificationsUI {
         return { totalCount: rows.length, groups };
     }
 
+    _taskIdLabel( task ) {
+        /**
+         * The compact row identifier: the first 8 chars of the item's id (the
+         * store serializes its UUID as `id`; first-8 is the "id_hash" the design
+         * 2026.06.29 row redesign places in the new leftmost column).
+         *
+         * Ensures:
+         *     - non-empty id → its first 8 chars; absent/empty → "—"
+         *     - Pure: no DOM, no side effects
+         */
+        const id = ( task && task.id != null ) ? String( task.id ) : "";
+        return id ? id.slice( 0, 8 ) : "—";
+    }
+
+    _truncateTaskTitle( label ) {
+        /**
+         * Client-side title-truncation backstop (design 2026.06.29 §4.4 / D1):
+         * trim a wall-of-text title to TASK_TITLE_TRUNCATE_LEN chars + an ellipsis.
+         * Backstops LEGACY rows written before the server store-guard; the full
+         * title rides the cell's hover-tooltip (title attr) so nothing is hidden.
+         *
+         * Requires:
+         *     - label is the (already fallback-resolved) title string
+         *
+         * Ensures:
+         *     - label.length > cap → label.slice( 0, cap ) + "…"; else label verbatim
+         *     - Pure: no DOM, no side effects
+         */
+        const cap = this.TASK_TITLE_TRUNCATE_LEN;
+        const s   = String( label );
+        return s.length > cap ? s.slice( 0, cap ) + "…" : s;
+    }
+
+    _taskBodyIsEmpty( task ) {
+        /**
+         * Whether the task has no detail `body` to show in the overlay — drives
+         * the dim-in-place 📄 (handoff ruling #3): an empty body keeps the emoji
+         * in its column for layout uniformity but disabled / non-clickable.
+         *
+         * Ensures:
+         *     - body null / undefined / whitespace-only → true; else false
+         *     - Pure: no DOM, no side effects
+         */
+        const body = task ? task.body : null;
+        return body == null || String( body ).trim() === "";
+    }
+
     _renderTaskRow( task, ianaZone ) {
         /**
-         * Render a single task row (one <tr>) with the eight columns: Title · Class ·
-         * Status · Blocked by · Next chase · Accountable · Priority · Project. The
-         * owner_persona is the GROUP HEADER (not a per-row column), so a row never
-         * repeats its owner.
+         * Render a single task row (one <tr>) with TEN columns: ID · Title · Class ·
+         * Status · Blocked by · Next chase · Accountable · Priority · Project ·
+         * Detail. The owner_persona is the GROUP HEADER (not a per-row column), so a
+         * row never repeats its owner.
+         *
+         * Row redesign (design 2026.06.29, AUGMENT ruling): the NEW leftmost ID
+         * column carries the 8-char id; the Title cell is truncated to ~60 chars +
+         * ellipsis with the FULL title on a hover-tooltip; the NEW rightmost Detail
+         * column carries a 📄 affordance opening the body overlay (dimmed in place
+         * when the body is empty).
          *
          * EVERY store-sourced value is escapeHtml'd (the in-service card writes via
          * innerHTML, so unlike the TS createElement card it must escape explicitly).
@@ -9321,16 +9496,23 @@ class NotificationsUI {
          * Ensures:
          *     - the <tr> carries a `task-status-*` class (status→accent); the Priority
          *       cell carries a `task-prio-*` heat class when recognized
+         *     - ID cell: monospace, first 8 chars of id (absent → "—")
+         *     - Title cell: truncated text + `title=` tooltip carrying the FULL title
          *     - Status cell leads with a `.task-status-dot` span + the status word
          *     - Blocked-by / Accountable / Project: falsy/"none" → "—"
          *     - Next-chase: ISO → "MM-DD HH:MM" in zone; absent → "—"
+         *     - Detail cell: 📄 — clickable (carries data-task-body/-id) when body
+         *       present; `.task-detail-empty` (disabled, non-clickable) when empty
          *     - Pure: no DOM access, no side effects (string in → string out)
          */
         const statusWord  = this.escapeHtml( task.status || "unknown" );
         const statusClass = this._taskStatusClass( task.status );
         const prioClass   = this._taskPriorityClass( task.priority );
 
-        const title       = this.escapeHtml( this._taskTitleLabel( task ) );
+        const idLabel     = this.escapeHtml( this._taskIdLabel( task ) );
+        const fullTitle   = this._taskTitleLabel( task );
+        const titleText   = this.escapeHtml( this._truncateTaskTitle( fullTitle ) );
+        const titleAttr   = this._escapeTaskAttr( fullTitle );
         const itemClass   = task.item_class || "task";
         const classBadge  = this.escapeHtml( itemClass );
         const classSlug   = this.escapeHtml( String( itemClass ).replace( /[^a-zA-Z0-9_-]/g, "" ) );
@@ -9343,17 +9525,92 @@ class NotificationsUI {
         const priority    = this.escapeHtml( this._taskCellOrDash( task.priority ) );
         const project     = this.escapeHtml( this._taskCellOrDash( task.project ) );
 
+        const detailCell  = this._taskBodyIsEmpty( task )
+            ? `<span class="task-detail-emoji task-detail-empty" aria-disabled="true" title="No detail">📄</span>`
+            : `<span class="task-detail-emoji" role="button" tabindex="0" title="View detail" data-task-id="${this._escapeTaskAttr( this._taskIdLabel( task ) )}" data-task-body="${this._escapeTaskAttr( task.body )}">📄</span>`;
+
+        // Parked rows are SHOWN, dimmed and badged — never dropped (Rick
+        // 2026-07-22). The server hides them by default; the dashboard asks for
+        // them explicitly so it reports the same board agents see via task_query.
+        const isParked    = this._taskIsParked( task );
+        const parkedBadge = isParked
+            ? `<span class="task-parked-badge" title="${this._escapeTaskAttr( task.park_reason )}">parked</span>`
+            : "";
+
         return `
-            <tr class="task-row ${statusClass}">
-                <td class="task-col-title">${title}</td>
+            <tr class="task-row ${statusClass}${isParked ? " task-row-parked" : ""}">
+                <td class="task-col-id">${idLabel}</td>
+                <td class="task-col-title" title="${titleAttr}">${titleText}</td>
                 <td class="task-col-class"><span class="task-class-badge task-class-${classSlug}">${classBadge}</span></td>
-                <td class="task-col-status"><span class="task-status-dot"></span>${statusWord}</td>
+                <td class="task-col-status"><span class="task-status-dot"></span>${statusWord}${parkedBadge}</td>
                 <td class="task-col-blocked">${blocked}</td>
                 <td class="task-col-chase">${chase}</td>
                 <td class="task-col-accountable">${accountable}</td>
                 <td class="task-col-priority${prioClass ? " " + prioClass : ""}">${priority}</td>
                 <td class="task-col-project">${project}</td>
+                <td class="task-col-detail">${detailCell}</td>
             </tr>`;
+    }
+
+    _taskIsParked( task, now ) {
+        /**
+         * PARK-ACTIVE — the browser twin of the store's canonical predicate
+         * `park_is_active()` (cosa/rest/task_store_owed.py:184).
+         *
+         *     park_is_active  ==  status == "parked" AND next_chase_ts > now
+         *
+         * THIS IS A FOURTH READER OF A CONTRACT THAT ALREADY HAS THREE, and that
+         * module exists precisely because divergence across them "has bitten this
+         * fleet repeatedly". So this mirrors it term for term rather than inventing
+         * a UI-local rule. Two consequences worth stating, because both are
+         * counter-intuitive and both were gotten wrong in the first draft:
+         *
+         *   1. KEYED ON `status`, NOT on `park_reason`. A present park_reason is
+         *      not the marker — `parked` is a real status in VALID_STATUSES, and
+         *      park_reason merely accompanies it. Keying on the reason would dim
+         *      rows the store does not consider parked at all.
+         *
+         *   2. A NULL / UNPARSEABLE / PAST CHASE IS *NOT* PARKED — deliberately,
+         *      and this is the term that inverts naive intuition. The store calls
+         *      it "fail-loud-toward-owed": a malformed park is VISIBLE work, and
+         *      `is_owed( "parked", None, now )` is True. Dimming such a row would
+         *      make the dashboard whisper "deferred, ignore it" about a row the
+         *      store is actively counting as owed — the exact masquerade this
+         *      marking exists to prevent, only pointed the other way.
+         *
+         * NAIVE TIMESTAMPS ARE UTC — a genuine cross-language trap. The Python
+         * twin does `chase_ts.replace( tzinfo=timezone.utc )` for a naive value,
+         * while `Date.parse( "2026-07-22T14:00:00" )` (no zone) resolves as LOCAL
+         * time. Left alone, the two twins would disagree by the operator's UTC
+         * offset — silently, and only for zone-less rows. Normalized below.
+         *
+         * Requires:
+         *     - task is a row object (foreign wire data; any shape tolerated)
+         *     - now is epoch-millis, or omitted to read the clock at call time
+         *
+         * Ensures:
+         *     - status !== "parked"            → false (checked FIRST, so chase
+         *       logic never touches a non-parked row)
+         *     - parked AND chase >  now        → true
+         *     - parked AND chase === now       → false (come due — rejoined owed)
+         *     - parked AND chase <  now        → false (expired — rejoined owed)
+         *     - parked AND chase null/unparsed → false (fail-loud-toward-owed)
+         *     - a zone-less chase is read as UTC, matching the Python twin
+         *     - Pure: no DOM, no side effects; never throws
+         */
+        if ( !task || task.status !== "parked" ) return false;
+        const raw = task.next_chase_ts;
+        if ( typeof raw !== "string" || raw.trim() === "" ) return false;
+
+        // Zone-less ⇒ UTC (Python-twin parity). Bare "YYYY-MM-DDTHH:MM(:SS(.fff))"
+        // with no trailing Z / ±HH:MM gets one appended before parsing.
+        const trimmed  = raw.trim();
+        const hasZone  = /(?:Z|[+-]\d{2}:?\d{2})$/.test( trimmed );
+        const chaseMs  = Date.parse( hasZone ? trimmed : `${trimmed}Z` );
+        if ( !Number.isFinite( chaseMs ) ) return false;
+
+        const nowMs = ( typeof now === "number" && Number.isFinite( now ) ) ? now : Date.now();
+        return chaseMs > nowMs;
     }
 
     _taskGroupOwnerKey( group ) {
@@ -9407,8 +9664,9 @@ class NotificationsUI {
          * "owner · N" label) followed by that owner's task rows; the Unassigned group
          * renders last.
          *
-         * Eight columns: Title · Class · Status · Blocked by · Next chase ·
-         * Accountable · Priority · Project.
+         * Ten columns: ID · Title · Class · Status · Blocked by · Next chase ·
+         * Accountable · Priority · Project · Detail (design 2026.06.29 row redesign:
+         * the leading ID column + trailing Detail 📄 column augment the original 8).
          *
          * Requires:
          *     - model is the { totalCount, groups } shape from groupTasksByOwner
@@ -9430,6 +9688,7 @@ class NotificationsUI {
         const headerRow = `
             <thead>
                 <tr>
+                    <th class="task-col-id">ID</th>
                     <th class="task-col-title">Title</th>
                     <th class="task-col-class">Class</th>
                     <th class="task-col-status">Status</th>
@@ -9438,6 +9697,7 @@ class NotificationsUI {
                     <th class="task-col-accountable">Accountable</th>
                     <th class="task-col-priority">Priority</th>
                     <th class="task-col-project">Project</th>
+                    <th class="task-col-detail">Detail</th>
                 </tr>
             </thead>`;
 
@@ -9455,7 +9715,7 @@ class NotificationsUI {
 
             const groupHeaderHtml = `
                 <tr class="task-group-header${group.isUnassigned ? " task-group-unassigned" : ""}" role="button" tabindex="0" aria-expanded="${isCollapsed ? "false" : "true"}" aria-controls="${idSlug}">
-                    <td colspan="8">${chevron}${headerLabel}</td>
+                    <td colspan="10">${chevron}${headerLabel}</td>
                 </tr>`;
 
             const rows = group.tasks.map( t => this._renderTaskRow( t, ianaZone ) ).join( "" );
@@ -9501,6 +9761,18 @@ class NotificationsUI {
             return;
         }
 
+        // A missing query module is a DEPLOY defect and says so, naming the file.
+        // Distinct from "unreachable" on purpose: same blank board, different
+        // remedy, and this branch never resolves on its own the way an outage does.
+        if ( composite && composite.status === "query_unavailable" ) {
+            container.innerHTML =
+                `<p class="task-list-message task-list-query-unavailable">🧩 Task-list query did not load` +
+                ` — /static/js/shared/task-list-query.js is missing or failed to parse.` +
+                ` This is a deploy problem, not a store outage.</p>`;
+            if ( countEl ) countEl.textContent = "0";
+            return;
+        }
+
         if ( !composite || composite.status === "unreachable" || !Array.isArray( composite.tasks ) ) {
             this._renderTaskListUnreachable( container, countEl );
             return;
@@ -9510,14 +9782,130 @@ class NotificationsUI {
         this._taskListLastGoodTasks = openTasks;
         if ( countEl ) countEl.textContent = String( openTasks.length );
 
+        const truncation = this._renderTaskListTruncationBanner( composite );
+
         if ( openTasks.length === 0 ) {
-            container.innerHTML = `<p class="task-list-message task-list-empty">✅ No open tasks.</p>`;
+            container.innerHTML = truncation + `<p class="task-list-message task-list-empty">✅ No open tasks.</p>`;
         } else {
             const model = this.groupTasksByOwner( openTasks );
-            container.innerHTML = this.renderTaskListTable( model, undefined, this.loadCollapsedTaskOwners() );
+            container.innerHTML = truncation + this.renderTaskListTable( model, undefined, this.loadCollapsedTaskOwners() );
         }
 
         if ( stampUpdated ) this._stampTaskListUpdated();
+    }
+
+    _renderTaskListTruncationBanner( composite ) {
+        /**
+         * The LOUD half of the truncation fix. Returns banner HTML when the server
+         * says it held rows back, or "" when it did not.
+         *
+         * WHY THIS EXISTS AND WHY IT IS NOT REDUNDANT WITH THE QUERY FIX. Dropping
+         * `include_terminal` took the board from 1,171 rows to 139 against a
+         * server `limit` hard-capped at 500 — but the DEFECT was never the number,
+         * it was the SILENCE. 139-under-500 is headroom, and headroom expires
+         * without telling anyone. At row 501 the same failure recurs, unannounced,
+         * and the next reader re-derives this whole investigation from scratch.
+         *
+         * The server already publishes the signal and both call sites were
+         * discarding it (tasks.py:1160-1167): `total` is a TRUE COUNT(*) over the
+         * same filters — deliberately NOT `len(tasks)`, so it CAN disagree with
+         * the page — and `has_more` is `offset + len(tasks) < total`.
+         *
+         * ⚠️ ROW-CAP OVERFLOW RAISES NEITHER `truncated` NOR A `warnings` ENTRY.
+         * Those fire only for the response CHAR budget (tasks.py:1145). So the
+         * row cap — the mode that actually bit us — is the one overflow path with
+         * no server-side indicator, which is why this reads has_more/total rather
+         * than trusting `truncated`. Follow-up filed against tasks.py to make the
+         * endpoint signal both modes alike; until then this banner is the only
+         * thing between the fleet and a silent truncation.
+         *
+         * THREE TRIGGERS, AND THE THIRD DEPENDS ON NEITHER OF THE FIRST TWO.
+         * `has_more` and `count < total` both key on `total`, so they share a
+         * single point of failure: any response that omits it (a `count_only`
+         * shape, an older deploy, a future branch) makes `has_more` undefined
+         * AND the comparison NaN-false, restoring exactly the silence this
+         * function exists to remove. The third trigger — a page that came back
+         * EXACTLY full with no total to check it against — needs neither field
+         * and says so honestly: completeness UNKNOWN, which is loud, rather than
+         * assumed-complete, which is quiet and wrong.
+         *
+         * Requires:
+         *     - composite is a 2xx body; any/all of has_more/total/count may be
+         *       absent (older server, or a shape change) — treated as "no claim"
+         *
+         * Ensures:
+         *     - Returns "" only when the server made no claim AND the page was
+         *       not exactly full
+         *     - Names shown / total / remainder when the numbers are known
+         *     - Says UNKNOWN, never "complete", when the page is full and no
+         *       total accompanies it
+         *     - Any server `warnings[]` entries render VERBATIM on their own
+         *       line and NEVER feed the arithmetic above
+         *     - Never throws on a missing/garbage field; pure (no DOM writes)
+         */
+        if ( !composite ) return "";
+
+        const total = Number( composite.total );
+        const shown = Number.isFinite( Number( composite.count ) )
+            ? Number( composite.count )
+            : ( Array.isArray( composite.tasks ) ? composite.tasks.length : NaN );
+
+        // has_more is the server's own claim and wins outright. The count<total
+        // comparison is the independent cross-check for a body that omits it.
+        const claimsMore  = composite.has_more === true;
+        const countsShort = Number.isFinite( total ) && Number.isFinite( shown ) && total > shown;
+
+        // Trigger 3: the page is exactly `limit` rows and carries no total. A
+        // full page is the signature of a cap being hit — it is possible to have
+        // exactly `limit` rows legitimately, which is why this says UNKNOWN and
+        // not "truncated". The limit is read off the shared query rather than
+        // hardcoded, so raising it there cannot leave a stale 500 here.
+        const limit      = this._taskListQueryLimit();
+        const pageIsFull = Number.isFinite( limit ) && Number.isFinite( shown ) && shown === limit;
+        const totalUnknown = !Number.isFinite( total );
+
+        // Server warnings ride out VERBATIM on their own line. char_budget=0 is
+        // why we expect this array empty, which is exactly what makes a warning
+        // here informative: something fired that our params were meant to take
+        // off the table. Deliberately NOT folded into the count sentence — an
+        // unrecognized warning has no numbers, and inventing them would be worse
+        // than saying nothing.
+        const warnings = Array.isArray( composite.warnings ) ? composite.warnings : [];
+        const warningLine = warnings.length > 0
+            ? `<p class="task-list-message task-list-truncated">⚠️ Server: ${warnings.map( w => this._escapeTaskAttr( String( w ) ) ).join( " · " )}</p>`
+            : "";
+
+        if ( !claimsMore && !countsShort && !( pageIsFull && totalUnknown ) ) return warningLine;
+
+        let detail;
+        if ( Number.isFinite( total ) && Number.isFinite( shown ) && total > shown ) {
+            detail = `showing ${shown} of ${total} — ${total - shown} not displayed`;
+        } else if ( pageIsFull && totalUnknown ) {
+            detail = `the page came back exactly full (${shown}) and the server reported no total — completeness UNKNOWN`;
+        } else {
+            detail = "the server held rows back — some work is not displayed";
+        }
+
+        return `<p class="task-list-message task-list-truncated">✂️ Board truncated: ${detail}.</p>` + warningLine;
+    }
+
+    _taskListQueryLimit() {
+        /**
+         * The `limit` this panel actually asked for, read off the shared query
+         * constant at call time.
+         *
+         * Parsed rather than hardcoded on purpose: a hardcoded 500 here would
+         * silently stop matching the day someone edits the query, and the
+         * full-page trigger it feeds would quietly never fire again — a guard
+         * that cannot fire, which is the failure mode this whole change is about.
+         *
+         * Ensures:
+         *     - Returns the numeric limit, or NaN when absent/unparseable
+         *     - Pure; never throws on a missing global
+         */
+        const query = ( typeof window !== "undefined" && window.LUPIN_TASK_LIST_QUERY ) || "";
+        const match = /[?&]limit=(\d+)/.exec( query );
+        return match ? Number( match[ 1 ] ) : NaN;
     }
 
     _renderTaskListUnreachable( container, countEl ) {
@@ -9728,6 +10116,103 @@ class NotificationsUI {
         this._applyTaskGroupCollapseState( tbody, isCollapsed );
     }
 
+    _handleTaskListClick( target ) {
+        /**
+         * Single delegated dispatcher for the task-list container (design 2026.06.29
+         * row redesign): a click/activation on a LIVE detail 📄 opens the body
+         * overlay; anything else falls through to the accordion toggle.
+         *
+         * Requires:
+         *     - target is the activated DOM node (or a descendant)
+         *
+         * Ensures:
+         *     - target within a `.task-detail-emoji` that is NOT `.task-detail-empty`
+         *       → open the body overlay with that row's body (and return — no toggle)
+         *     - a DIMMED (empty-body) emoji is inert: neither opens an overlay nor
+         *       toggles the group (the dim-in-place ruling #3)
+         *     - otherwise → delegate to the accordion toggle (unchanged behavior)
+         */
+        const emoji = target.closest ? target.closest( ".task-detail-emoji" ) : null;
+        if ( emoji ) {
+            if ( !emoji.classList.contains( "task-detail-empty" ) ) {
+                this.openTaskBodyOverlay( emoji.dataset.taskBody || "", emoji.dataset.taskId || "" );
+            }
+            return;   // a detail-emoji click is never also an accordion toggle
+        }
+        this._handleTaskAccordionToggle( target );
+    }
+
+    openTaskBodyOverlay( bodyText, idLabel ) {
+        /**
+         * Show a small dismissible overlay rendering the task-store `body` (design
+         * 2026.06.29 / D2 — the BODY field, NOT the notification abstract). Dismiss
+         * on click-away (backdrop click) or Esc.
+         *
+         * Requires:
+         *     - bodyText is the task's body string (already attribute-decoded by the
+         *       browser when read from data-task-body)
+         *     - idLabel is the 8-char id shown in the overlay header (may be "")
+         *
+         * Ensures:
+         *     - any prior overlay is removed first (single instance)
+         *     - the overlay carries the id header + the body in a <pre> (whitespace
+         *       preserved); the body is textContent-set, never innerHTML (no XSS)
+         *     - a backdrop click OR Escape removes the overlay AND its keydown listener
+         *     - no-op-safe if document.body is absent (degrade-safe)
+         */
+        this._dismissTaskBodyOverlay();
+        if ( !document.body ) return;
+
+        const overlay = document.createElement( "div" );
+        overlay.id        = "task-body-overlay";
+        overlay.className = "task-body-overlay";
+
+        const panel = document.createElement( "div" );
+        panel.className = "task-body-overlay-content";
+
+        const header = document.createElement( "div" );
+        header.className = "task-body-overlay-header";
+        header.textContent = idLabel ? `Task ${idLabel}` : "Task detail";
+
+        const pre = document.createElement( "pre" );
+        pre.className = "task-body-overlay-body";
+        pre.textContent = bodyText;   // textContent → no HTML injection from body
+
+        panel.appendChild( header );
+        panel.appendChild( pre );
+        overlay.appendChild( panel );
+
+        // Backdrop click dismisses; a click INSIDE the panel does not (stopPropagation).
+        overlay.addEventListener( "click", () => this._dismissTaskBodyOverlay() );
+        panel.addEventListener( "click", ( e ) => e.stopPropagation() );
+
+        // Esc dismisses — listener stored so _dismissTaskBodyOverlay can remove it.
+        this._taskBodyOverlayKeyListener = ( e ) => {
+            if ( e.key === "Escape" ) this._dismissTaskBodyOverlay();
+        };
+        document.addEventListener( "keydown", this._taskBodyOverlayKeyListener );
+
+        document.body.appendChild( overlay );
+    }
+
+    _dismissTaskBodyOverlay() {
+        /**
+         * Tear down the body overlay if present: remove the element and the
+         * document-level Esc keydown listener. Idempotent (safe to call when no
+         * overlay is open — the open path calls it first to enforce single-instance).
+         *
+         * Ensures:
+         *     - #task-body-overlay removed if present
+         *     - the stored keydown listener is detached + cleared if present
+         */
+        if ( this._taskBodyOverlayKeyListener ) {
+            document.removeEventListener( "keydown", this._taskBodyOverlayKeyListener );
+            this._taskBodyOverlayKeyListener = null;
+        }
+        const existing = document.getElementById( "task-body-overlay" );
+        if ( existing ) existing.remove();
+    }
+
     _wireTaskListAccordion() {
         /**
          * Install the single delegated click+keyboard listener for the accordion.
@@ -9744,15 +10229,16 @@ class NotificationsUI {
         const container = document.getElementById( "task-list-container" );
         if ( !container ) return;
 
-        container.addEventListener( "click", ( e ) => this._handleTaskAccordionToggle( e.target ) );
+        container.addEventListener( "click", ( e ) => this._handleTaskListClick( e.target ) );
         container.addEventListener( "keydown", ( e ) => {
-            // Enter / Space activate the focused header (a11y). " " is the modern
-            // key value; "Spacebar" is the legacy IE/Edge spelling.
+            // Enter / Space activate the focused header OR the focused detail 📄
+            // (a11y). " " is the modern key value; "Spacebar" the legacy spelling.
             if ( e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar" ) return;
+            const emoji  = e.target.closest( ".task-detail-emoji" );
             const header = e.target.closest( ".task-group-header" );
-            if ( !header ) return;
-            e.preventDefault();   // Space must toggle the group, not scroll the page
-            this._handleTaskAccordionToggle( e.target );
+            if ( !emoji && !header ) return;
+            e.preventDefault();   // Space must act, not scroll the page
+            this._handleTaskListClick( e.target );
         } );
 
         this._taskListAccordionWired = true;
@@ -10767,8 +11253,17 @@ class NotificationsUI {
         if ( existing ) existing.remove();
         if ( !managerPersona ) {
             icon.removeAttribute( "data-has-manager" );
+            // Worker-badge silencing (Rick 2026-06-24): managed-worker status is
+            // exactly "has a manager". Clear data-worker when lineage is removed so
+            // the count ::after re-enables (this is the single source that sets
+            // data-worker — covers both icon-creation and the live-patch path).
+            icon.removeAttribute( "data-worker" );
             return;
         }
+        // A sender WITH a manager is a managed worker → suppress its numeric
+        // unread-count badge (CSS hides the ::after for [data-worker][data-unread]);
+        // the faint pulse stays. See gap list §6 Decision A/B.
+        icon.setAttribute( "data-worker", "true" );
         const mgrBadge = document.createElement( "span" );
         mgrBadge.className   = "cc-strip-manager-badge";
         mgrBadge.textContent = managerPersona.initial || "";
@@ -10998,7 +11493,43 @@ class NotificationsUI {
             icon.removeAttribute( "data-unread" );
             void icon.offsetWidth;  // force reflow
             icon.setAttribute( "data-unread", "true" );
-            icon.setAttribute( "data-unread-count", String( next ) );
+            // Worker-badge silencing (Rick 2026-06-24): managed workers keep the
+            // pulse (data-unread above) for peripheral sign-of-life but NEVER get
+            // the numeric count — workers reach Rick through their manager, not via
+            // a count on the focus bar. Predicate: managerPersonaMap.get(id) truthy.
+            if ( this._isWorkerSender( senderId ) ) {
+                icon.removeAttribute( "data-unread-count" );
+            } else {
+                icon.setAttribute( "data-unread-count", String( next ) );
+            }
+        }
+    }
+
+    /**
+     * True when `senderId` is a MANAGED worker — i.e. its manager-lineage is
+     * known (managerPersonaMap holds a non-null persona). Managed workers have
+     * their numeric unread/new-count badges suppressed everywhere (strip icon
+     * ::after + per-card .sender-new-count); the faint activity pulse is kept.
+     * Single predicate so the strip path and the card path stay in lockstep.
+     * See gap list §1 keystone + §6 Decision A (Rick 2026-06-24).
+     */
+    _isWorkerSender( senderId ) {
+        return !!( this.managerPersonaMap && this.managerPersonaMap.get( senderId ) );
+    }
+
+    /**
+     * Set/clear `data-worker="true"` on a `.sender-card` element to reflect the
+     * sender's managed-worker status. The shared stylesheet keys its
+     * count-suppression + faint-pulse rule on `.sender-card[data-worker="true"]`
+     * (notifications-surface.css, shared by BOTH clients). Idempotent; clears the
+     * flag when lineage is absent so a re-parented session re-shows its count.
+     */
+    _applyCardWorkerFlag( card, senderId ) {
+        if ( !card ) return;
+        if ( this._isWorkerSender( senderId ) ) {
+            card.setAttribute( "data-worker", "true" );
+        } else {
+            card.removeAttribute( "data-worker" );
         }
     }
 
@@ -13488,6 +14019,11 @@ class NotificationsUI {
         card.setAttribute( 'data-project', parsed.project );
         card.setAttribute( 'data-session-id', sessionId || '' );
         card.setAttribute( 'data-sender-id', senderId );  // for focus-mode walker lookup
+        // Worker-badge silencing (Rick 2026-06-24): mark managed-worker cards so the
+        // shared sheet (notifications-surface.css) hides the .sender-new-count number
+        // and renders a faint activity dot via .sender-stats-group::after. Kept fresh
+        // by updateSenderCardHeader as manager lineage arrives post-creation.
+        this._applyCardWorkerFlag( card, senderId );
 
         // Foundation: set --persona-color + --persona-color-rgb on the card
         // root so Tier 1 (border + shadow) and Tier 2 (header gradient) CSS
@@ -13582,7 +14118,13 @@ class NotificationsUI {
                 if ( icon ) {
                     this.ccStripUnreadCounts[ senderId ] = 1;
                     icon.setAttribute( "data-unread", "true" );
-                    icon.setAttribute( "data-unread-count", "1" );
+                    // Worker-badge silencing (Rick 2026-06-24): keep the pulse but
+                    // never write the numeric count for managed workers (parity with
+                    // _markStripIconActivity). The CSS ::after carve is the belt;
+                    // this is the suspenders so the attribute is never even present.
+                    if ( !this._isWorkerSender( senderId ) ) {
+                        icon.setAttribute( "data-unread-count", "1" );
+                    }
                 }
             }
         }
@@ -14143,16 +14685,24 @@ class NotificationsUI {
         const card = document.getElementById( cardId );
         if ( !card ) return;
 
+        // Keep the worker flag current — manager lineage can arrive AFTER the card
+        // was first rendered (the icon-before-persona ordering), so re-evaluate on
+        // every header update (Rick 2026-06-24).
+        this._applyCardWorkerFlag( card, senderId );
+
         // Update total count
         const countEl = card.querySelector( '.sender-message-count' );
         if ( countEl ) {
             countEl.textContent = `(${group.totalCount})`;
         }
 
-        // Update new count badge
+        // Update new count badge. Worker-badge silencing (Rick 2026-06-24):
+        // managed workers never surface a "N new" count on their card — they
+        // reach Rick through their manager. The card otherwise renders intact
+        // (status, activity, persona); only the number is suppressed.
         const newCountEl = card.querySelector( '.sender-new-count' );
         if ( newCountEl ) {
-            if ( group.newCount > 0 ) {
+            if ( group.newCount > 0 && !this._isWorkerSender( senderId ) ) {
                 newCountEl.textContent = `${group.newCount} new`;
                 newCountEl.style.display = 'inline-block';
             } else {

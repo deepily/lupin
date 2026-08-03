@@ -112,7 +112,7 @@ test("renderTaskRow: empty blocked_by array → em-dash cell", () => {
 // renderTaskListTable
 // ---------------------------------------------------------------------------
 
-test("renderTaskListTable: 8 headers; owner + Unassigned group headers; rows render", () => {
+test("renderTaskListTable: 11 headers (ID + Detail augment Actions); owner + Unassigned group headers; rows render", () => {
   const tasks: TaskItem[] = [
     { owner_persona: "amy", title: "a1", status: "queued" },
     { title: "orphan", status: "blocked" },   // → Unassigned
@@ -120,7 +120,16 @@ test("renderTaskListTable: 8 headers; owner + Unassigned group headers; rows ren
   const table = renderTaskListTable(groupTasksByOwner(tasks), "America/New_York");
 
   assert.ok(table.classList.contains("task-list-table"));
-  assert.equal(table.querySelectorAll("thead th").length, 8);
+  assert.equal(table.querySelectorAll("thead th").length, 11);   // ID + 8 data + Detail + Actions
+  assert.equal(table.querySelector("thead th.task-col-id")?.textContent, "ID");
+  assert.equal(table.querySelector("thead th.task-col-detail")?.textContent, "Detail");
+  assert.equal(table.querySelector("thead th.task-col-actions")?.textContent, "Actions");
+  // F2 (2026.07.01): exact header ORDER — Detail repositioned 10→3 (after Title,
+  // before Class). This assertion locks the full L→R order against regression.
+  assert.deepEqual(
+    Array.from(table.querySelectorAll("thead th")).map((th) => th.textContent),
+    ["ID", "Title", "Detail", "Class", "Status", "Blocked by", "Next chase", "Accountable", "Priority", "Project", "Actions"],
+  );
 
   const groupHeaders = table.querySelectorAll(".task-group-header");
   assert.equal(groupHeaders.length, 2);
@@ -215,4 +224,188 @@ test("renderTaskListTable: omitting collapsedOwners defaults to all-expanded (fi
   );   // no 3rd arg → default new Set()
   assert.equal(table.querySelectorAll("tbody.task-group.collapsed").length, 0);
   assert.equal(table.querySelector(".task-group-header")?.getAttribute("aria-expanded"), "true");
+});
+
+// ---------------------------------------------------------------------------
+// Phase 2 — per-row Actions cell (priority/owner edit + drop)
+// ---------------------------------------------------------------------------
+
+test("renderTaskRow: carries data-task-id from the row id", () => {
+  const tr = renderTaskRow({ id: "task-42", title: "t", status: "queued" }, undefined);
+  assert.equal(tr.getAttribute("data-task-id"), "task-42");
+});
+
+test("renderTaskRow: missing id → data-task-id is empty string (defensive)", () => {
+  const tr = renderTaskRow({ title: "t", status: "queued" }, undefined);
+  assert.equal(tr.getAttribute("data-task-id"), "");
+});
+
+test("renderTaskRow: Actions cell — priority select has P0–P3, current selected, heat tint", () => {
+  const tr = renderTaskRow({ id: "x", title: "t", status: "queued", priority: "P1" }, undefined);
+  const sel = tr.querySelector<HTMLSelectElement>(".task-priority-select");
+  assert.ok(sel, "priority select present");
+  assert.ok(sel?.classList.contains("task-prio-high"), "P1 heat tint reused");
+  assert.deepEqual(Array.from(sel!.options).map(o => o.value), ["P0", "P1", "P2", "P3"]);
+  assert.equal(sel?.value, "P1", "current priority pre-selected");
+});
+
+test("renderTaskRow: priority select with no current priority → no heat tint, nothing pre-selected to a P1", () => {
+  const tr = renderTaskRow({ id: "x", title: "t", status: "queued" }, undefined);
+  const sel = tr.querySelector<HTMLSelectElement>(".task-priority-select");
+  assert.equal(sel?.className, "task-priority-select", "no heat class when priority absent");
+  // No option matches "", so the browser defaults selection to the first option (P0).
+  assert.equal(sel?.value, "P0");
+});
+
+test("renderTaskRow: owner select — current owner pre-selected + reassign targets, deduped", () => {
+  const tr = renderTaskRow(
+    { id: "x", title: "t", status: "queued", owner_persona: "amy" },
+    undefined,
+    ["bob", "amy", "carol"],   // amy duplicates the current owner → collapsed
+  );
+  const sel = tr.querySelector<HTMLSelectElement>(".task-owner-select");
+  assert.ok(sel, "owner select present");
+  // current owner "amy" leads; "bob"/"carol" follow; the duplicate "amy" is dropped.
+  assert.deepEqual(Array.from(sel!.options).map(o => o.value), ["amy", "bob", "carol"]);
+  assert.equal(sel?.value, "amy", "current owner pre-selected");
+});
+
+test("renderTaskRow: owner select — current owner NOT in targets is prepended", () => {
+  const tr = renderTaskRow(
+    { id: "x", title: "t", status: "queued", owner_persona: "zoe" },
+    undefined,
+    ["bob"],
+  );
+  const sel = tr.querySelector<HTMLSelectElement>(".task-owner-select");
+  assert.deepEqual(Array.from(sel!.options).map(o => o.value), ["zoe", "bob"]);
+  assert.equal(sel?.value, "zoe");
+});
+
+test("renderTaskRow: unassigned task → disabled (unassigned) placeholder + targets", () => {
+  const tr = renderTaskRow(
+    { id: "x", title: "t", status: "queued" },   // no owner_persona
+    undefined,
+    ["bob", "carol"],
+  );
+  const sel = tr.querySelector<HTMLSelectElement>(".task-owner-select");
+  const opts = Array.from(sel!.options);
+  assert.equal(opts[0]?.value, "");
+  assert.equal(opts[0]?.textContent, "(unassigned)");
+  assert.equal(opts[0]?.disabled, true);
+  assert.deepEqual(opts.slice(1).map(o => o.value), ["bob", "carol"]);
+});
+
+test("renderTaskRow: owner select drops blank/empty target entries", () => {
+  const tr = renderTaskRow(
+    { id: "x", title: "t", status: "queued", owner_persona: "amy" },
+    undefined,
+    ["", "bob"],   // blank entry must be skipped
+  );
+  const sel = tr.querySelector<HTMLSelectElement>(".task-owner-select");
+  assert.deepEqual(Array.from(sel!.options).map(o => o.value), ["amy", "bob"]);
+});
+
+test("renderTaskRow: default reassignTargets ([]) → unassigned shows placeholder only", () => {
+  const tr = renderTaskRow({ id: "x", title: "t", status: "queued" }, undefined);
+  const sel = tr.querySelector<HTMLSelectElement>(".task-owner-select");
+  assert.equal(sel?.options.length, 1);
+  assert.equal(sel?.options[0]?.value, "");
+});
+
+test("renderTaskRow: Actions cell — inline drop reason input + Drop button", () => {
+  const tr = renderTaskRow({ id: "x", title: "t", status: "queued" }, undefined);
+  const input = tr.querySelector<HTMLInputElement>(".task-drop-reason");
+  const btn   = tr.querySelector<HTMLButtonElement>(".task-drop-button");
+  assert.equal(input?.type, "text");
+  assert.equal(input?.getAttribute("placeholder"), "drop reason…");
+  assert.equal(btn?.type, "button");
+  assert.equal(btn?.textContent, "Drop");
+});
+
+// ---------------------------------------------------------------------------
+// Row redesign 2026.06.29 — ID cell + title truncation/tooltip + Detail 📄
+// ---------------------------------------------------------------------------
+
+test("renderTaskRow: leading ID cell shows first 8 chars of id; absent → em-dash", () => {
+  const tr = renderTaskRow({ id: "3b85863e-ccb9-49", title: "t", status: "queued" }, undefined);
+  assert.equal(tr.querySelector(".task-col-id")?.textContent, "3b85863e");
+  const tr2 = renderTaskRow({ title: "t", status: "queued" }, undefined);
+  assert.equal(tr2.querySelector(".task-col-id")?.textContent, "—");
+});
+
+test("renderTaskRow: real-id ID cell carries the click-to-copy affordance (role/tabindex/title)", () => {
+  const cell = renderTaskRow({ id: "3b85863e-ccb9-49", title: "t", status: "queued" }, undefined)
+    .querySelector<HTMLElement>(".task-col-id")!;
+  assert.equal(cell.getAttribute("role"), "button");
+  assert.equal(cell.getAttribute("tabindex"), "0");
+  assert.equal(cell.getAttribute("title"), "Click to copy ID");
+});
+
+test("renderTaskRow: empty-string id → em-dash ID cell is INERT (no copy affordance)", () => {
+  const cell = renderTaskRow({ id: "", title: "t", status: "queued" }, undefined)
+    .querySelector<HTMLElement>(".task-col-id")!;
+  assert.equal(cell.textContent, "—");
+  assert.equal(cell.getAttribute("role"), null);
+  assert.equal(cell.getAttribute("tabindex"), null);
+  assert.equal(cell.getAttribute("title"), null);
+});
+
+test("renderTaskRow: absent id → em-dash ID cell is INERT (no copy affordance)", () => {
+  const cell = renderTaskRow({ title: "t", status: "queued" }, undefined)
+    .querySelector<HTMLElement>(".task-col-id")!;
+  assert.equal(cell.getAttribute("role"), null);
+});
+
+test("renderTaskRow: long title truncated in cell, FULL title in title= tooltip", () => {
+  const long = "Z".repeat(90);
+  const tr = renderTaskRow({ id: "x", title: long, status: "queued" }, undefined);
+  const cell = tr.querySelector(".task-col-title")!;
+  assert.equal(cell.textContent, "Z".repeat(60) + "…");
+  assert.equal(cell.getAttribute("title"), long);
+});
+
+test("renderTaskRow: short title not truncated; tooltip carries the full title", () => {
+  const tr = renderTaskRow({ id: "x", title: "short", status: "queued" }, undefined);
+  const cell = tr.querySelector(".task-col-title")!;
+  assert.equal(cell.textContent, "short");
+  assert.equal(cell.getAttribute("title"), "short");
+});
+
+test("renderTaskRow: body present → LIVE 📄 carrying data-task-body/-id", () => {
+  const tr = renderTaskRow({ id: "feedface-1", title: "t", status: "queued", body: "detail" }, undefined);
+  const emoji = tr.querySelector<HTMLElement>(".task-col-detail .task-detail-emoji")!;
+  assert.ok(!emoji.classList.contains("task-detail-empty"));
+  assert.equal(emoji.getAttribute("role"), "button");
+  assert.equal(emoji.dataset.taskBody, "detail");
+  assert.equal(emoji.dataset.taskId, "feedface");   // first 8 of "feedface-1"
+});
+
+test("renderTaskRow: empty-string body → DIMMED 📄 in place (disabled, no dataset)", () => {
+  const tr = renderTaskRow({ id: "x", title: "t", status: "queued", body: "" }, undefined);
+  const emoji = tr.querySelector<HTMLElement>(".task-col-detail .task-detail-emoji")!;
+  assert.ok(emoji.classList.contains("task-detail-empty"));
+  assert.equal(emoji.getAttribute("aria-disabled"), "true");
+  assert.equal(emoji.dataset.taskBody, undefined);
+});
+
+test("renderTaskRow: null body → DIMMED 📄 (taskBodyIsEmpty true)", () => {
+  const tr = renderTaskRow({ id: "x", title: "t", status: "queued", body: null }, undefined);
+  assert.ok(tr.querySelector(".task-detail-emoji")!.classList.contains("task-detail-empty"));
+});
+
+test("renderTaskRow: Detail cell sits BEFORE the Actions cell (read affordance, then edit)", () => {
+  const tr = renderTaskRow({ id: "x", title: "t", status: "queued", body: "d" }, undefined, ["amy"]);
+  const cells = Array.from(tr.children).map((c) => (c as HTMLElement).className.split(" ")[0]);
+  assert.ok(cells.indexOf("task-col-detail") < cells.indexOf("task-col-actions"));
+  assert.equal(cells[0], "task-col-id");   // ID is leftmost
+});
+
+test("renderTaskRow: F2 cell order — Detail sits between Title and Class (repositioned 10→3)", () => {
+  const tr = renderTaskRow({ id: "x", title: "t", status: "queued", body: "d" }, undefined, ["amy"]);
+  const cells = Array.from(tr.children).map((c) => (c as HTMLElement).className.split(" ")[0]);
+  assert.deepEqual(cells, [
+    "task-col-id", "task-col-title", "task-col-detail", "task-col-class", "task-col-status",
+    "task-col-blocked", "task-col-chase", "task-col-accountable", "task-col-priority",
+    "task-col-project", "task-col-actions",
+  ]);
 });

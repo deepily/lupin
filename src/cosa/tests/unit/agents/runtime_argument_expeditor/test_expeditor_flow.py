@@ -123,7 +123,8 @@ class TestExpediteFlow( unittest.TestCase ):
                            parsed=_expeditor_resp( present="query=AI" ) ), \
              patch.object( o, "_build_request_context", return_value="ctx" ), \
              patch.object( o, "_batch_collect_args",
-                           return_value={ "budget": "no limit", "audience": "expert", "audience_context": "none" } ), \
+                           return_value=( { "budget": "no limit", "audience": "expert", "audience_context": "none" },
+                                          ex_mod.BATCH_ANSWERED ) ), \
              patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r: a ):
             out = o.expedite( DR, 'query="AI"', "u@x", "s", "uid", "research AI" )
         self.assertEqual( out[ "audience" ], "expert" )
@@ -134,8 +135,21 @@ class TestExpediteFlow( unittest.TestCase ):
         with _FlowFixture( o, user_visible=[ "query", "budget", "audience" ],
                            parsed=_expeditor_resp( present="query=AI" ) ), \
              patch.object( o, "_build_request_context", return_value="ctx" ), \
-             patch.object( o, "_batch_collect_args", return_value=None ):
+             patch.object( o, "_batch_collect_args", return_value=( None, ex_mod.BATCH_DECLINED ) ):
             self.assertIsNone( o.expedite( DR, 'query="AI"', "u@x", "s", "uid", "research AI" ) )
+        # a real "no" is recorded as the user's decision
+        self.assertEqual( o._last_expedite_reason, ex_mod.BATCH_DECLINED )
+
+    def test_batch_collect_undeliverable_records_machine_reason( self ):
+        # The non-declined batch branch: the reason must survive to the caller, NOT
+        # be reported as a user cancellation (bugs 2aaab1bf, 68198c9f).
+        o = _mk_expeditor()
+        with _FlowFixture( o, user_visible=[ "query", "budget", "audience" ],
+                           parsed=_expeditor_resp( present="query=AI" ) ), \
+             patch.object( o, "_build_request_context", return_value="ctx" ), \
+             patch.object( o, "_batch_collect_args", return_value=( None, ex_mod.BATCH_UNREACHABLE ) ):
+            self.assertIsNone( o.expedite( DR, 'query="AI"', "u@x", "s", "uid", "research AI" ) )
+        self.assertEqual( o._last_expedite_reason, ex_mod.BATCH_UNREACHABLE )
 
     def test_single_missing_arg_from_fallback_question( self ):
         o = _mk_expeditor( debug=True )

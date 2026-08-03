@@ -90,6 +90,31 @@ test("down button click fires onVote('down')", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Optimistic local highlight on click (markSelected) — instant feedback before
+// the POST round-trips; the orchestrator reconciles afterward.
+// ---------------------------------------------------------------------------
+
+test("up click optimistically marks root .voted + up .selected (before any reconcile)", () => {
+  const { handlers } = makeHandlers();
+  const el = renderPredictionVoteControls({ notificationId: "n1", confidencePct: 80 }, handlers)!;
+  el.querySelector<HTMLButtonElement>(".prediction-vote-up")!.click();
+  assert.ok(el.classList.contains("voted"));
+  assert.ok(el.querySelector(".prediction-vote-up")!.classList.contains("selected"));
+  assert.equal(el.querySelector(".prediction-vote-down")!.classList.contains("selected"), false);
+});
+
+test("clicking down then up toggles the optimistic selection (only the latest is .selected)", () => {
+  const { handlers } = makeHandlers();
+  const el = renderPredictionVoteControls({ notificationId: "n1", confidencePct: 80 }, handlers)!;
+  el.querySelector<HTMLButtonElement>(".prediction-vote-down")!.click();
+  assert.ok(el.querySelector(".prediction-vote-down")!.classList.contains("selected"));
+  el.querySelector<HTMLButtonElement>(".prediction-vote-up")!.click();
+  assert.ok(el.querySelector(".prediction-vote-up")!.classList.contains("selected"));
+  assert.equal(el.querySelector(".prediction-vote-down")!.classList.contains("selected"), false);
+  assert.ok(el.classList.contains("voted"));
+});
+
+// ---------------------------------------------------------------------------
 // castVote reflection
 // ---------------------------------------------------------------------------
 

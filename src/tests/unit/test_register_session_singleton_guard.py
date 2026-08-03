@@ -29,7 +29,8 @@ SHORT_ID   = SESSION_ID[ :8 ]
 @pytest.fixture
 def lock_dir( tmp_path, monkeypatch ):
     """Isolate the spawn-lock files from the real ~/.claude/sessions."""
-    monkeypatch.setattr( listener_processes, "SESSION_DIR", tmp_path )
+    # Row 8ccc20ab: the lock dir resolves through sessions_dir() at CALL time.
+    monkeypatch.setenv( "LUPIN_HOOK_SESSIONS_DIR", str( tmp_path ) )
     return tmp_path
 
 

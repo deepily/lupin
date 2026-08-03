@@ -33,6 +33,7 @@ import os
 from typing import Optional
 
 import cosa.utils.util as cu
+from cosa.agents.shared.worktree_reaper import drain_then_remove
 
 
 logger = logging.getLogger( __name__ )
@@ -159,11 +160,21 @@ class WorktreeContext:
 
     async def __aexit__( self, exc_type, exc, tb ) -> bool:
         """
-        Clean up the worktree when auto_cleanup is true.
+        Clean up the worktree when auto_cleanup is true — via the shared
+        drain-then-remove reaper (Worktree Lifecycle Contract §4a).
 
         Ensures:
             - Returns False so any primary exception propagates unmasked
             - Cleanup errors are logged as warnings but never raised
+            - Delegates to worktree_reaper.drain_then_remove, which DIRTY-GATES:
+              it auto-commits WIP to the branch ONLY when `git status --porcelain`
+              is non-empty, then removes the dir + KEEPS the branch (never pushes).
+              A NORMAL exit is expected-clean (FixExecutor/GitStrategist commit
+              their own work by design — verified 2026-06-22), so the auto-commit
+              fires ONLY on the abnormal-exit path (an exception / early-return
+              that left WIP) — the rescue we want, with zero interference on the
+              happy path. No in-flight check is needed: the `async with` body
+              (and thus any GitStrategist op) has completed before __aexit__ runs.
         """
         if not self.enabled:
             return False
@@ -174,26 +185,18 @@ class WorktreeContext:
 
         project_root = cu.get_project_root()
         try:
-            result = await self._run_git_in(
-                project_root,
-                "worktree", "remove", self.path,
-                timeout=self._cleanup_timeout_secs,
+            # Sync reaper (subprocess git inside) → run off the event loop.
+            result = await asyncio.to_thread(
+                drain_then_remove, self.path, project_root=project_root, debug=self.debug,
             )
-            if result[ "success" ]:
-                if self.debug: print( f"[WorktreeContext] Removed: {self.path}" )
-            else:
+            if self.debug:
+                print( f"[WorktreeContext] drain_then_remove: removed={result[ 'removed' ]} "
+                       f"wip_committed={result[ 'wip_committed' ]} branch={result[ 'branch' ]}" )
+            if not result[ "removed" ] and result.get( "errors" ):
                 logger.warning(
-                    f"[WorktreeContext] `git worktree remove {self.path}` failed: "
-                    f"{result.get( 'stderr', '' )}. Trying prune."
+                    f"[WorktreeContext] drain_then_remove did not remove {self.path}: "
+                    f"{result[ 'errors' ]}"
                 )
-                # Fallback: prune — doesn't touch the target path but cleans
-                # up the git-internal admin files if the path is gone
-                prune = await self._run_git_in( project_root, "worktree", "prune" )
-                if not prune[ "success" ]:
-                    logger.warning(
-                        f"[WorktreeContext] `git worktree prune` also failed: "
-                        f"{prune.get( 'stderr', '' )}"
-                    )
         except Exception as e:
             logger.warning( f"[WorktreeContext] Cleanup raised unexpectedly: {e}" )
 

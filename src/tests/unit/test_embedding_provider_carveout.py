@@ -107,6 +107,31 @@ def test_resolve_model_server_url_returns_none_on_config_manager_error( monkeypa
     assert EmbeddingProvider._resolve_model_server_url() is None
 
 
+def test_resolve_model_server_url_resolves_cloud_run_https_and_env_wins( monkeypatch ):
+    """
+    Local → Cloud Run 'transmogrification': a Cloud Run https URL via the
+    LUPIN_MODEL_SERVER_URL env override resolves verbatim AND wins over a
+    local `model server url` INI value — the env-switch from a local GPU
+    container to the scale-to-zero Cloud Run service is this single value.
+
+    See: src/rnd/2026.06.30-gpu-model-server-cloud-run-split/01-design.md
+    """
+    from cosa.memory.embedding_provider import EmbeddingProvider
+
+    cloud_url = "https://lupin-model-server-abcd1234-uc.a.run.app"
+    monkeypatch.setenv( "LUPIN_MODEL_SERVER_URL", cloud_url )
+
+    cfg = MagicMock()
+    cfg.get.side_effect = lambda key, default=None, silent=False, **kw: (
+        "http://lupin-model-server:7998" if key == "model server url" else default
+    )
+    monkeypatch.setattr(
+        "cosa.config.configuration_manager.ConfigurationManager",
+        lambda **kwargs: cfg,
+    )
+    assert EmbeddingProvider._resolve_model_server_url() == cloud_url
+
+
 # ── _http_api_key ───────────────────────────────────────────────────────────
 
 

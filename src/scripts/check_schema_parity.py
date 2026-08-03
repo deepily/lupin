@@ -17,13 +17,37 @@ READ-ONLY: opens a single connection, issues SELECTs against
 can gate a deploy / CI step — the reproducible check that would have caught
 ``is_protected`` before it broke user-seeding in the cloud.
 
+THREE OUTCOMES, DELIBERATELY NOT TWO (row 3eb6dc41)
+---------------------------------------------------
+  0  PARITY            every model table matches the live database
+  1  DRIFT             they disagree — this is the defect
+  2  CANNOT_DETERMINE  the question could not be answered
+
+⚠️ This script shipped with only TWO. An unreachable database raised out of
+``main`` and CPython exited **1** — byte-identical to DRIFT. MEASURED
+2026-07-27 against ``127.0.0.1:59999``: traceback, ``EXIT=1``. Any caller
+wiring it would have printed drift's remedy ("run a migration") at an operator
+whose database was merely unreachable. "The schema is wrong" and "I could not
+read the schema" have DIFFERENT remedies, so they get different codes — the
+same rule ``check_schema_at_head.py`` already follows one file over.
+
+The parseable record (``VERDICT=`` / ``DETAIL=``) exists so a shell caller can
+report the outcome without re-deriving it from prose; preflight-vm.sh check C8
+greps exactly those two keys.
+
 Usage:
     python src/scripts/check_schema_parity.py
     python src/scripts/check_schema_parity.py --database-url postgresql+psycopg2://u:p@host:5432/db
+    docker exec <container> python /var/lupin/src/scripts/check_schema_parity.py
 
 The URL defaults to the app's own builder (cosa.rest.db.database.get_database_url
 via cosa.rest.db.auto_migrate.resolve_database_url), so the check runs against
 exactly the DB the app would use, in every environment.
+
+NOT A DUPLICATE OF ``check_schema_at_head.py`` — see that file's header. In
+short: parity asks "do the models and the DB agree about columns?" (the
+SYMPTOM); at_head asks "has every migration in this tree been run?" (the
+CAUSE). Neither subsumes the other; preflight runs both (C7 and C8).
 """
 
 import argparse
@@ -44,6 +68,10 @@ from sqlalchemy import create_engine, text   # noqa: E402
 
 from cosa.rest.postgres_models import Base                 # noqa: E402
 from cosa.rest.db.auto_migrate import resolve_database_url # noqa: E402
+
+EXIT_PARITY           = 0
+EXIT_DRIFT            = 1
+EXIT_CANNOT_DETERMINE = 2
 
 
 def get_model_columns():
@@ -177,15 +205,55 @@ def check_parity( database_url=None ):
     return drift, format_report( drift )
 
 
+def classify( drift, reason ):
+    """
+    Turn a drift dict (or a failure reason) into one of the three outcomes.
+
+    Requires:
+        - drift is the dict returned by compute_drift, or None when the check
+          could not run
+        - reason is a human string naming what failed, or None on success
+
+    Ensures:
+        - returns ( exit_code, verdict, detail )
+        - a reason present ⇒ CANNOT_DETERMINE, ALWAYS. An error is never folded
+          into a pass, and never into DRIFT either — drift's remedy is "run a
+          migration", which is wrong and misdirecting for an unreachable DB
+        - a non-empty drift dict ⇒ DRIFT, detail names the drifted tables
+        - an empty drift dict ⇒ PARITY
+        - never raises
+    """
+    if reason is not None:
+        # ONE LINE PER KEY. A DBAPI error message is multi-line ("Is the server
+        # running on that host…"), and a shell caller reads this with
+        # `grep -m1 '^DETAIL='` — an unflattened reason would silently truncate
+        # to its first line and drop the half naming the host.
+        return ( EXIT_CANNOT_DETERMINE, "CANNOT_DETERMINE", " ".join( reason.split() ) )
+    if drift:
+        return ( EXIT_DRIFT, "DRIFT",
+                 "tables with drift: " + ", ".join( sorted( drift ) ) )
+    return ( EXIT_PARITY, "PARITY", "" )
+
+
 def main( argv=None ):
     """
-    CLI entry point. Returns a process exit code (0 = parity, 1 = drift).
+    CLI entry point. Returns a process exit code.
+
+    Requires:
+        - argv is None or a list of CLI arguments
+
+    Ensures:
+        - prints the human report (when one could be built) and a parseable
+          VERDICT= / DETAIL= record
+        - returns 0 on parity, 1 on drift, 2 when the question could not be
+          answered — never raises out of the check itself, because an uncaught
+          exception exits 1 and would be indistinguishable from DRIFT
 
     Args:
         argv: optional argument list (defaults to sys.argv[1:])
 
     Returns:
-        int — 0 when in parity, 1 when any drift is found
+        int — EXIT_PARITY | EXIT_DRIFT | EXIT_CANNOT_DETERMINE
     """
     parser = argparse.ArgumentParser( description="Check ORM-model vs live-DB schema parity (read-only)." )
     parser.add_argument(
@@ -195,9 +263,23 @@ def main( argv=None ):
     )
     args = parser.parse_args( argv )
 
-    drift, report = check_parity( database_url=args.database_url )
-    print( report )
-    return 1 if drift else 0
+    # Broad except is deliberate and is the POINT of this block: every failure
+    # mode here (unreachable DB, bad URL, unimportable models) must become
+    # CANNOT_DETERMINE rather than escaping as a bare exit-1 that reads as DRIFT.
+    try:
+        drift, report = check_parity( database_url=args.database_url )
+        reason = None
+    except Exception as e:
+        drift, report = None, None
+        reason = f"cannot read the live schema: {e.__class__.__name__}: {e}"
+
+    code, verdict, detail = classify( drift, reason )
+    if report is not None:
+        print( report )
+    print( f"VERDICT={verdict}" )
+    if detail:
+        print( f"DETAIL={detail}" )
+    return code
 
 
 if __name__ == "__main__":

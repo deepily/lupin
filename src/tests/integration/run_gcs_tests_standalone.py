@@ -23,11 +23,30 @@ if src_path not in sys.path:
     sys.path.insert( 0, src_path )
 
 import cosa.utils.util as cu
-from cosa.memory.lancedb_solution_manager import LanceDBSolutionManager
+from cosa.memory.lancedb_solution_manager import SolutionSnapshotManager
 from cosa.memory.solution_snapshot import SolutionSnapshot
 
 def run_gcs_tests():
-    """Run GCS integration tests standalone."""
+    """
+    Run GCS integration tests standalone.
+
+    The backend pin is NOT optional (decision 2b20a6d6): the ambient
+    `vector store backend` is postgres, under which SolutionSnapshotManager routes
+    to SolutionSnapshotRepository and never touches gcs_config — so this script
+    would report on the SHARED store while claiming to exercise GCS. The pin spans
+    the WHOLE run, not just construction: CanonicalSynonymsTable is built lazily
+    inside save_snapshot / get_snapshots_by_question and reads the flag at call time.
+    """
+    from unittest.mock import patch
+    from cosa.rest.db.repositories import vector_store_backend
+
+    with patch.object( vector_store_backend, "get_vector_store_backend",
+                       return_value=vector_store_backend.LANCEDB ):
+        return _run_gcs_tests_pinned()
+
+
+def _run_gcs_tests_pinned():
+    """Body of run_gcs_tests, executed with the LanceDB backend pin held."""
 
     cu.print_banner( "LanceDB GCS Integration Tests (Standalone)", prepend_nl=True )
 
@@ -46,7 +65,12 @@ def run_gcs_tests():
 
     # Initialize manager
     print( "Initializing GCS manager..." )
-    manager = LanceDBSolutionManager( gcs_config, debug=True, verbose=False )
+    manager = SolutionSnapshotManager( gcs_config, debug=True, verbose=False )
+
+    # Control: the pin held by run_gcs_tests must actually have taken. If this fires,
+    # every result below describes the SHARED postgres store, not GCS (2b20a6d6).
+    assert manager._use_postgres is False, "backend pin failed — this run would hit the shared postgres store"
+
     manager.initialize()
     print( f"✓ Manager initialized\n" )
 

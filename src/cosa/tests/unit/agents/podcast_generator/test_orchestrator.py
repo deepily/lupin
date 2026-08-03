@@ -28,7 +28,7 @@ from unittest.mock import MagicMock, AsyncMock, patch
 import pytest
 
 from cosa.agents.podcast_generator import orchestrator as orch_mod
-from cosa.agents.podcast_generator.orchestrator import PodcastOrchestratorAgent
+from cosa.agents.podcast_generator.orchestrator import PodcastOrchestratorAgent, PodcastGenerationError
 from cosa.agents.podcast_generator.state import (
     OrchestratorState,
     PodcastScript,
@@ -463,14 +463,28 @@ class TestAnalyzeContent:
         assert analysis.complexity_level == "advanced"
         assert agent.metrics[ "api_calls" ] == 1
 
-    def test_analyze_exception_returns_minimal( self, capsys ):
+    def test_analyze_refuses_rather_than_forging_an_analysis( self, capsys ):
+        """
+        A failed analysis must RAISE, not return a plausible-looking stand-in.
+
+        Replaces test_analyze_exception_returns_minimal, which asserted the old
+        behaviour: an exception yielded a minimal ContentAnalysis whose shape was
+        indistinguishable from a real one, so a caller could not tell an invented
+        result from a genuine one. That forgery was deliberately removed — see
+        src/rnd/v0.1.9/2026.08.01-a-fallback-that-forges-an-answer.md. Restoring it
+        to make this file green would silently undo the campaign (row a0ceb502).
+        """
         agent = _agent( debug=True )
         agent._api_client = _mock_api_client()
         agent._api_client.call_for_analysis = AsyncMock( side_effect=RuntimeError( "api down" ) )
+
         with patch.object( orch_mod, "get_content_analysis_prompt", return_value="P" ):
-            analysis = _run( agent._analyze_content_async( "research text" ) )
-        assert analysis.main_topic == "Research Topic"
-        assert analysis.key_subtopics == []
+            with pytest.raises( PodcastGenerationError ) as excinfo:
+                _run( agent._analyze_content_async( "research text" ) )
+
+        # The original cause is chained, so the real error is not swallowed.
+        assert isinstance( excinfo.value.__cause__, RuntimeError )
+        assert "analyzing the research document" in str( excinfo.value )
         assert "Analysis error" in capsys.readouterr().out
 
 
@@ -499,16 +513,27 @@ class TestGenerateScript:
         assert script.get_segment_count() == 2
         assert agent.metrics[ "api_calls" ] == 1
 
-    def test_generate_exception_returns_minimal( self, capsys ):
+    def test_generate_refuses_rather_than_forging_a_script( self, capsys ):
+        """
+        A failed script generation must RAISE, not return an empty stand-in.
+
+        Replaces test_generate_exception_returns_minimal. The old behaviour handed
+        back a 0-segment PodcastScript that reached the review gate looking like a
+        normal — if empty — review-ready result. Raising is the fix; see the
+        orchestrator's own comment at the raise site.
+        """
         agent = _agent( debug=True )
         agent._api_client = _mock_api_client()
         agent._api_client.call_for_script = AsyncMock( side_effect=RuntimeError( "boom" ) )
         analysis = ContentAnalysis( main_topic="Quantum" )
+
         with patch.object( orch_mod, "get_dynamic_duo_description", return_value="DUO" ), \
              patch.object( orch_mod, "get_script_generation_prompt", return_value="P" ):
-            script = _run( agent._generate_script_async( "research", analysis ) )
-        assert script.title == "Podcast: Quantum"
-        assert script.segments == []
+            with pytest.raises( PodcastGenerationError ) as excinfo:
+                _run( agent._generate_script_async( "research", analysis ) )
+
+        assert isinstance( excinfo.value.__cause__, RuntimeError )
+        assert "writing the podcast script" in str( excinfo.value )
         assert "Script generation error" in capsys.readouterr().out
 
 
@@ -1172,22 +1197,36 @@ class TestDoAllAsync:
 # Helper debug=False branch fillers
 # ===========================================================================
 class TestHelperDebugFalseBranches:
-    def test_analyze_exception_no_debug( self ):
+    def test_analyze_refuses_with_debug_off( self, capsys ):
+        """
+        Debug-off covers the false arm of `if self.debug:` — and the raise still fires.
+
+        The old test asserted a forged minimal analysis came back. Silence on stdout
+        is the only thing debug=False should change; whether the failure is REPORTED
+        must not depend on a debug flag.
+        """
         agent = _agent( debug=False )
         agent._api_client = _mock_api_client()
         agent._api_client.call_for_analysis = AsyncMock( side_effect=RuntimeError( "x" ) )
-        with patch.object( orch_mod, "get_content_analysis_prompt", return_value="P" ):
-            analysis = _run( agent._analyze_content_async( "r" ) )
-        assert analysis.main_topic == "Research Topic"
 
-    def test_generate_exception_no_debug( self ):
+        with patch.object( orch_mod, "get_content_analysis_prompt", return_value="P" ):
+            with pytest.raises( PodcastGenerationError ):
+                _run( agent._analyze_content_async( "r" ) )
+
+        assert "Analysis error" not in capsys.readouterr().out
+
+    def test_generate_refuses_with_debug_off( self, capsys ):
+        """Same false-arm coverage for script generation; the raise is unconditional."""
         agent = _agent( debug=False )
         agent._api_client = _mock_api_client()
         agent._api_client.call_for_script = AsyncMock( side_effect=RuntimeError( "x" ) )
+
         with patch.object( orch_mod, "get_dynamic_duo_description", return_value="D" ), \
              patch.object( orch_mod, "get_script_generation_prompt", return_value="P" ):
-            script = _run( agent._generate_script_async( "r", ContentAnalysis( main_topic="Q" ) ) )
-        assert script.segments == []
+            with pytest.raises( PodcastGenerationError ):
+                _run( agent._generate_script_async( "r", ContentAnalysis( main_topic="Q" ) ) )
+
+        assert "Script generation error" not in capsys.readouterr().out
 
     def test_translated_exception_no_debug( self ):
         agent = _agent( debug=False )

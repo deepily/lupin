@@ -35,7 +35,11 @@ import type {
   LupinEvent,
   Notification,
   NotificationChangeKind,
+  NotificationFilterMode,
+  PredictionHint,
+  SessionTopicPayload,
   StoreNotificationsChangedPayload,
+  StoreNotificationTtsIntentPayload,
   VoicePersona,
 } from "../shared/types";
 // Cold-load hydration (2026-06-11): type-only import of the ONE canonical
@@ -54,6 +58,31 @@ interface UnreadCountEnvelope {
 const STORAGE_KEY            = "notifications:unread-count";
 const STORAGE_SCHEMA_VERSION = 1;
 const PERSIST_DEBOUNCE_MS    = 250;
+
+// B3 (01-C) — own-only notification filter persistence (mirrors CommonsStore's
+// activity-filter envelope). The mode persists across reload via StorageService.
+const FILTER_STORAGE_KEY     = "notifications:filter-mode";
+const FILTER_SCHEMA_VERSION  = 1;
+const DEFAULT_FILTER_MODE: NotificationFilterMode = "own";
+
+interface FilterModeEnvelope {
+  mode : NotificationFilterMode;
+}
+
+// B3 (01-C) — the filter predicate, keyed on the ONE client-available axis
+// (`direction`), per the Mr. Radio 2026-06-29 axis ruling. PURE + exported so
+// every mode branch is directly unit-coverable (only "own" is UI-wired today).
+//   - own    : inbound persona messages — direction absent/"incoming"
+//   - others : the user's own sent replies — direction === "outgoing"
+//   - all    : pass everything
+// (Single-user mux ⇒ recipient-based own/others is vacuous; `direction` is the
+// non-vacuous axis. A future real axis swaps in here with zero plumbing rework.)
+export function matchesNotificationFilter( n: Notification, mode: NotificationFilterMode ): boolean {
+  if ( mode === "all" )    return true;
+  if ( mode === "others" ) return n.direction === "outgoing";
+  // mode === "own"
+  return n.direction !== "outgoing";
+}
 
 // ---------------------------------------------------------------------------
 // Cold-load history hydration (2026-06-11) — supporting types + window helper.
@@ -119,6 +148,32 @@ export interface NotificationStore {
   /** Mark every active notification as read in one shot (e.g. inbox open). */
   markAllRead(): void;
   /**
+   * B3 (01-C) — active notifications passing the current filter mode (the
+   * render source for the sender section). `list()` stays the raw total.
+   */
+  visibleEntries(): ReadonlyArray<Notification>;
+  /** B3 (01-C) — the active filter mode. */
+  filterMode(): NotificationFilterMode;
+  /**
+   * B3 (01-C) — set the filter mode, persist it (StorageService), and emit
+   * `store_notifications_changed { changeKind: "filtered" }` so the renderer
+   * re-renders from `visibleEntries()`. (UI to call this is DEFERRED per Rick's
+   * scope — the mechanism is wired, only "own" is reachable today.)
+   */
+  setFilterMode( mode: NotificationFilterMode ): void;
+  /** B3 (01-C) — true when the mode is off its "own" default (drives empty-state copy). */
+  isFilterActive(): boolean;
+  /**
+   * B3 (01-C) — remove the given notifications from the active list (the
+   * clear-all primitive). The header renderer deletes each id server-side
+   * (DELETE /api/notifications/{id_hash}) over `visibleEntries()` THEN calls
+   * this with the SUCCESSFULLY-deleted ids only (partial-failure safe — failed
+   * ids stay in the store). Emits one `store_notifications_changed { "removed" }`.
+   * Unknown ids are skipped. (Realizes F-Krishna-BC3's clearAll() as the
+   * filter-scoped, partial-failure-correct removal Rick's ruling requires.)
+   */
+  removeByIdHashes( idHashes: ReadonlyArray<string> ): void;
+  /**
    * Cold-load history hydration (2026-06-11) — fetch each in-window sender's
    * conversation-by-date history and bulk-seed the active list, then emit a
    * single `store_notifications_changed { changeKind: "hydrated" }`.
@@ -174,6 +229,13 @@ interface ServerNotificationFields {
   message             ?: string;
   title               ?: string;
   sender_id           ?: string;
+  // R5 (2026-07-01) — control-notification discriminator + payload. The server
+  // sends `notification_type` (legacy reads `type || notification_type`,
+  // notifications.js:5855); neither survives normalize(), so the session_topic
+  // intercept reads them off the RAW field here, before normalization.
+  notification_type   ?: string;
+  type                ?: string;
+  session_name        ?: string;
   timestamp           ?: string;       // ISO string — normalized to ms epoch
   response_requested  ?: boolean;       // → action_required
   response_type       ?: Notification["response_type"];
@@ -186,6 +248,16 @@ interface ServerNotificationFields {
   progress_group_id   ?: string;
   was_expired         ?: boolean;
   time_display        ?: string;
+  prediction_hint     ?: PredictionHint;   // WP14 (F8) — thumbs-vote training-signal source
+  // F0-d (2026-07-02) — TTS-intent gate fields. RAW-ONLY: normalize() drops all
+  // three, so the store_notification_tts_intent emit reads them off the RAW
+  // notification here (same pattern as the session_topic discriminator above).
+  // `priority` gates the emit (high/urgent); `tts_raw` selects the ttsText
+  // derivation (contextualized unless true); `suppress_ding` is carried for
+  // completeness but does NOT gate speech (Tiberius ruling — see the emit site).
+  priority            ?: string;
+  suppress_ding       ?: boolean;
+  tts_raw             ?: boolean;
 }
 
 interface ResponsePayload {
@@ -197,6 +269,16 @@ interface ResponsePayload {
 interface ExpiredPayload {
   id_hash         ?: string;
   notification_id ?: string;
+}
+
+// F0-d — TTS message contextualizer. Ported VERBATIM from legacy
+// `notifications.js:4176-4187` (formatNotificationTTSMessage), the single source
+// of notification→TTS text formatting: prefix "Urgent! " for urgent priority,
+// otherwise the message unchanged. Kept module-private (the sole caller is the
+// store_notification_tts_intent emit below); `message` is pre-nullish-coalesced
+// by the caller so this fn has exactly one branch (urgent vs not).
+function formatTtsMessage( priority: string | undefined, message: string ): string {
+  return priority === "urgent" ? `Urgent! ${message}` : message;
 }
 
 class NotificationStoreImpl implements NotificationStore {
@@ -212,6 +294,8 @@ class NotificationStoreImpl implements NotificationStore {
   // Tracks read state per id_hash so unread_count is recomputed deterministically.
   private readSet  : Set<string>                   = new Set();
   private unread   : number                        = 0;
+  // B3 (01-C) — active notification-filter mode (StorageService-persisted).
+  private filterModeState : NotificationFilterMode = DEFAULT_FILTER_MODE;
 
   // Debounced persistence state.
   private persistTimer : unknown = null;
@@ -233,6 +317,7 @@ class NotificationStoreImpl implements NotificationStore {
     /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests always inject a deterministic nowFn().
     this.nowFn          = opts.nowFn          ?? (() => Date.now());
 
+    this.filterModeState = this.hydrateFilterMode();
     this.hydrate();
     this.subscribe();
   }
@@ -274,6 +359,57 @@ class NotificationStoreImpl implements NotificationStore {
     });
   }
 
+  // -------------------------------------------------------------------------
+  // B3 (01-C) — own-only notification filter + clear-all primitive
+  // -------------------------------------------------------------------------
+
+  visibleEntries(): ReadonlyArray<Notification> {
+    return this.active.filter(n => matchesNotificationFilter(n, this.filterModeState));
+  }
+
+  filterMode(): NotificationFilterMode {
+    return this.filterModeState;
+  }
+
+  setFilterMode(mode: NotificationFilterMode): void {
+    this.filterModeState = mode;
+    this.persistFilterMode();
+    // Full re-render signal — the renderer's store_notifications_changed
+    // subscription re-reads visibleEntries() (F-Sam-BC2: no stale cards).
+    this.bus.emit<StoreNotificationsChangedPayload>({
+      type    : "store_notifications_changed",
+      payload : { changeKind: "filtered" },
+      source  : "NotificationStore",
+      ts      : this.nowFn(),
+    });
+  }
+
+  isFilterActive(): boolean {
+    return this.filterModeState !== DEFAULT_FILTER_MODE;
+  }
+
+  removeByIdHashes(idHashes: ReadonlyArray<string>): void {
+    let removedAny = false;
+    for (const idHash of idHashes) {
+      const idx = this.active.findIndex(n => n.id_hash === idHash);
+      if (idx < 0) continue;   // unknown / already-gone id — skip (partial-failure safe)
+      this.active.splice(idx, 1);
+      this.byId.delete(idHash);
+      // Unread bookkeeping: a removed item that was never read stops counting.
+      if (!this.readSet.has(idHash) && this.unread > 0) this.unread--;
+      this.readSet.delete(idHash);
+      removedAny = true;
+    }
+    if (!removedAny) return;   // nothing matched — no persist, no emit
+    this.schedulePersist();
+    this.bus.emit<StoreNotificationsChangedPayload>({
+      type    : "store_notifications_changed",
+      payload : { changeKind: "removed" },
+      source  : "NotificationStore",
+      ts      : this.nowFn(),
+    });
+  }
+
   async hydrateHistory(api: NotificationHistoryApiClient, opts: HydrateHistoryOptions): Promise<void> {
     if (this.historyHydrated) return;
 
@@ -309,6 +445,14 @@ class NotificationStoreImpl implements NotificationStore {
           if (!norm) continue;
           if (this.byId.has(norm.id_hash)) continue;   // live-first wins
           rows.push(norm);
+          // WS2 / C2-d (D3): load-time responded-split. A responded history row
+          // carries the user's answer in `response_value.value`; expand it into
+          // a synthetic `{id}-response` OUTGOING bubble immediately after the
+          // incoming prompt (mirrors legacy notifications.js:14317-14330). This
+          // is the F5-independent half — it consumes the answer the server
+          // already persisted; the live echo of a freshly-sent reply is F5.
+          const outgoing = this.buildOutgoingResponse(raw, norm);
+          if (outgoing && !this.byId.has(outgoing.id_hash)) rows.push(outgoing);
         }
       }
     }
@@ -407,6 +551,23 @@ class NotificationStoreImpl implements NotificationStore {
       // "played" vs client-side "user acknowledged"). No-op.
       return;
     }
+    // R5 — `session_topic` is control metadata, not a message: route the name
+    // to SenderStore via the bus and DO NOT card it (legacy notifications.js:5862
+    // "skip history card"). The discriminator + session_name are raw-only fields
+    // (dropped by normalize()), so intercept here, BEFORE normalization.
+    const raw  = env.notification;
+    const kind = raw.notification_type ?? raw.type;
+    if (kind === "session_topic") {
+      if (raw.sender_id !== undefined && raw.session_name !== undefined) {
+        this.bus.emit<SessionTopicPayload>({
+          type   : "session_topic",
+          payload: { sender_id: raw.sender_id, session_name: raw.session_name },
+          source : "notification-store",
+          ts     : this.nowFn(),
+        });
+      }
+      return;
+    }
     const norm = this.normalize(env.notification);
     if (!norm) return;
 
@@ -428,6 +589,51 @@ class NotificationStoreImpl implements NotificationStore {
     this.unread++;
     this.schedulePersist();
     this.emit("added", norm.id_hash);
+
+    // ── F0-d — TTS producer seam ──────────────────────────────────────────
+    // Emit store_notification_tts_intent for SPOKEN new-arrivals so the boot
+    // wire can enqueue them onto TtsQueueStore. Emitting HERE (only reached via
+    // the byId.has ELSE, i.e. a genuinely-new id) gives dedup for free — a
+    // re-arrival returns above and never re-speaks. onQueueUpdate is the
+    // LIVE-only path (hydrate()/hydrateHistory() never call it), so a cold-load
+    // history rehydrate emits ZERO intents by construction.
+    //
+    // SPEC (Tiberius ruling 2026-07-02, sustained on primary-artifact grounds —
+    // Clayton reviews this against legacy line numbers, NOT memento §6):
+    //   • GATE = priority ∈ {high, urgent} ONLY. Legacy enqueues TTS for ALL
+    //     high/urgent (job-card notifications.js:5917-5942; fire-and-forget
+    //     :5985-6017); suppress_ding affects the ding + enqueue-delay only,
+    //     never speech (confirmed firsthand: manager closing-turn notifies send
+    //     suppress_ding=True + priority=high and ARE heard). Deliberately NO
+    //     suppress_ding condition.
+    //   • ttsText = tts_raw === true ? message : formatTtsMessage(...) — the
+    //     fire-and-forget default-contextualized derivation (legacy :5987-5989).
+    if ( raw.priority === "high" || raw.priority === "urgent" ) {
+      // normalize() above guarantees norm.message is a NON-EMPTY string — a
+      // message-less frame returns null at `if (!norm) return` before reaching
+      // here — so reading norm.message needs no nullish guard and stays typed
+      // `string` (priority/tts_raw are raw-only, dropped by normalize, read off raw).
+      const ttsText = raw.tts_raw === true ? norm.message : formatTtsMessage( raw.priority, norm.message );
+      // 70cbff3e (A1 producer-seam): carry the NORMALIZED action_required flag
+      // (norm.action_required === raw.response_requested===true, set at :757) so
+      // the downstream TtsQueueItem knows whether this item can enter focus mode.
+      this.bus.emit<StoreNotificationTtsIntentPayload>({
+        type    : "store_notification_tts_intent",
+        // 766bb609: carry the session's persona voice_id (from the normalized
+        // voice_persona, set at :770) so the downstream TTS request can speak in
+        // the sender's own voice. OMITTED when the notification has no persona
+        // (byte-identical to the pre-766bb609 payload → server default voice).
+        payload : {
+          id_hash         : norm.id_hash,
+          ttsText,
+          priority        : raw.priority,
+          action_required : norm.action_required,
+          ...( norm.voice_persona !== undefined ? { voice_id: norm.voice_persona.voice_id } : {} ),
+        },
+        source  : "notification-store",
+        ts      : this.nowFn(),
+      });
+    }
   }
 
   private onResponded(e: LupinEvent<ResponsePayload>): void {
@@ -524,6 +730,30 @@ class NotificationStoreImpl implements NotificationStore {
     return norm;
   }
 
+  // WS2 / C2-d (D3): build the synthetic OUTGOING reply for a responded history
+  // row, mirroring legacy notifications.js:14317-14330 — the user's answer in
+  // `response_value.value` becomes a `{id}-response` outgoing bubble timestamped
+  // at `responded_at` (falls back to the prompt's ts). Returns null for the
+  // common prompt-only case (no/empty response value), so non-responded rows are
+  // untouched. `incoming` is the already-normalized prompt (supplies sender_id +
+  // the id_hash stem + the ts fallback).
+  private buildOutgoingResponse(raw: ServerHistoryRow, incoming: Notification): Notification | null {
+    const rv = raw.response_value;
+    const value = rv !== null && typeof rv === "object" && typeof (rv as { value?: unknown }).value === "string"
+      ? (rv as { value: string }).value
+      : "";
+    if (value === "") return null;
+    const respondedAt = typeof raw.responded_at === "string" ? Date.parse(raw.responded_at) : Number.NaN;
+    return {
+      id_hash         : `${incoming.id_hash}-response`,
+      ts              : Number.isNaN(respondedAt) ? incoming.ts : respondedAt,
+      sender_id       : incoming.sender_id,
+      message         : value,
+      action_required : false,
+      direction       : "outgoing",
+    };
+  }
+
   private normalize(raw: ServerNotificationFields): Notification | null {
     const id_hash = raw.id_hash ?? raw.id;
     if (!id_hash || typeof id_hash !== "string") return null;
@@ -552,6 +782,7 @@ class NotificationStoreImpl implements NotificationStore {
     if (raw.progress_group_id !== undefined) norm.progress_group_id = raw.progress_group_id;
     if (raw.was_expired !== undefined)       norm.was_expired       = raw.was_expired;
     if (raw.time_display !== undefined)      norm.time_display      = raw.time_display;
+    if (raw.prediction_hint !== undefined)   norm.prediction_hint   = raw.prediction_hint;
     return norm;
   }
 
@@ -575,6 +806,23 @@ class NotificationStoreImpl implements NotificationStore {
       lastSeenTs : this.nowFn(),
     };
     this.storage.setJSON<UnreadCountEnvelope>(STORAGE_KEY, env, STORAGE_SCHEMA_VERSION);
+  }
+
+  // B3 (01-C) — filter-mode persistence (mirrors CommonsStore.hydrateFilter /
+  // persistFilter). A missing/corrupt/invalid envelope degrades to the "own"
+  // default rather than throwing.
+  private hydrateFilterMode(): NotificationFilterMode {
+    const env = this.storage.getJSON<FilterModeEnvelope>(FILTER_STORAGE_KEY, FILTER_SCHEMA_VERSION);
+    if (env !== null && (env.mode === "own" || env.mode === "others" || env.mode === "all")) {
+      return env.mode;
+    }
+    return DEFAULT_FILTER_MODE;
+  }
+
+  private persistFilterMode(): void {
+    this.storage.setJSON<FilterModeEnvelope>(
+      FILTER_STORAGE_KEY, { mode: this.filterModeState }, FILTER_SCHEMA_VERSION,
+    );
   }
 
   // -------------------------------------------------------------------------

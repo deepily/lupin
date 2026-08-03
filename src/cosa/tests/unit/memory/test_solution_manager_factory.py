@@ -14,7 +14,7 @@ Covers the ManagerType enum and the SolutionSnapshotManagerFactory:
   lancedb gcs (success + missing-uri KeyError), missing-table KeyError,
   debug/verbose logging
 
-The heavy concrete managers (FileBasedSolutionManager / LanceDBSolutionManager)
+The heavy concrete managers (FileBasedSolutionManager / SolutionSnapshotManager)
 are NEVER imported for real — their modules are injected into sys.modules as
 lightweight fakes (or set to None to force ImportError). No filesystem, DB, or
 GPU dependency.
@@ -79,7 +79,7 @@ class TestCreateManager( unittest.TestCase ):
 
     def test_lancedb_dispatch( self ):
         """lancedb dispatch via enum input."""
-        mod, cls, created = _fake_module( _LANCE_MOD, "LanceDBSolutionManager" )
+        mod, cls, created = _fake_module( _LANCE_MOD, "SolutionSnapshotManager" )
         with patch.dict( sys.modules, { _LANCE_MOD: mod } ):
             result = SolutionSnapshotManagerFactory.create_manager(
                 ManagerType.LANCEDB, { "db_path": "/db", "table_name": "t" }
@@ -130,7 +130,7 @@ class TestCreateLancedbManager( unittest.TestCase ):
     """_create_lancedb_manager import + validation arms."""
 
     def test_success( self ):
-        mod, cls, created = _fake_module( _LANCE_MOD, "LanceDBSolutionManager" )
+        mod, cls, created = _fake_module( _LANCE_MOD, "SolutionSnapshotManager" )
         with patch.dict( sys.modules, { _LANCE_MOD: mod } ):
             result = SolutionSnapshotManagerFactory._create_lancedb_manager(
                 { "db_path": "/db", "table_name": "t" }, False, False
@@ -146,14 +146,14 @@ class TestCreateLancedbManager( unittest.TestCase ):
 
     def test_missing_table_name_raises( self ):
         """db_path present but table_name absent → KeyError (table_name always required)."""
-        mod, cls, created = _fake_module( _LANCE_MOD, "LanceDBSolutionManager" )
+        mod, cls, created = _fake_module( _LANCE_MOD, "SolutionSnapshotManager" )
         with patch.dict( sys.modules, { _LANCE_MOD: mod } ):
             with self.assertRaises( KeyError ):
                 SolutionSnapshotManagerFactory._create_lancedb_manager( { "db_path": "/db" }, False, False )
 
     def test_gcs_uri_as_location_success( self ):
         """A gcs config (gcs_uri instead of db_path) builds the manager — the bug-#2 fix."""
-        mod, cls, created = _fake_module( _LANCE_MOD, "LanceDBSolutionManager" )
+        mod, cls, created = _fake_module( _LANCE_MOD, "SolutionSnapshotManager" )
         with patch.dict( sys.modules, { _LANCE_MOD: mod } ):
             result = SolutionSnapshotManagerFactory._create_lancedb_manager(
                 { "gcs_uri": "gs://bucket/db", "table_name": "t" }, False, False
@@ -161,11 +161,43 @@ class TestCreateLancedbManager( unittest.TestCase ):
         self.assertIs( result, created )
 
     def test_missing_location_raises( self ):
-        """table_name present but NEITHER db_path nor gcs_uri → KeyError (no storage location)."""
-        mod, cls, created = _fake_module( _LANCE_MOD, "LanceDBSolutionManager" )
-        with patch.dict( sys.modules, { _LANCE_MOD: mod } ):
+        """
+        table_name present but NEITHER db_path nor gcs_uri → KeyError (no storage location).
+
+        Pinned to the lancedb backend (decision 2b20a6d6): the factory only demands a
+        storage location when one would actually be used. Under postgres it correctly
+        accepts a location-free config, so without this pin the test asserts a KeyError
+        the live flag makes wrong. See test_missing_location_allowed_under_postgres for
+        the other half of that contract.
+        """
+        from cosa.rest.db.repositories import vector_store_backend
+
+        mod, cls, created = _fake_module( _LANCE_MOD, "SolutionSnapshotManager" )
+        with patch.dict( sys.modules, { _LANCE_MOD: mod } ), \
+             patch.object( vector_store_backend, "get_vector_store_backend",
+                           return_value=vector_store_backend.LANCEDB ):
             with self.assertRaises( KeyError ):
                 SolutionSnapshotManagerFactory._create_lancedb_manager( { "table_name": "t" }, False, False )
+
+    def test_missing_location_allowed_under_postgres( self ):
+        """
+        Under the postgres backend a location-free config is VALID — the manager routes
+        to SolutionSnapshotRepository and touches no LanceDB location at all.
+
+        This is the branch that broke server startup on 2026-07-27: main.py stopped
+        building a LanceDB path under postgres (correctly), and this factory gate
+        rejected the only correct config. Guards that regression directly.
+        """
+        from cosa.rest.db.repositories import vector_store_backend
+
+        mod, cls, created = _fake_module( _LANCE_MOD, "SolutionSnapshotManager" )
+        with patch.dict( sys.modules, { _LANCE_MOD: mod } ), \
+             patch.object( vector_store_backend, "get_vector_store_backend",
+                           return_value=vector_store_backend.POSTGRES ):
+            result = SolutionSnapshotManagerFactory._create_lancedb_manager( { "table_name": "t" }, False, False )
+
+        cls.assert_called_once_with( { "table_name": "t" }, False, False )
+        self.assertIs( result, created )
 
 
 class TestGetAvailableTypes( unittest.TestCase ):
@@ -226,7 +258,7 @@ class TestCreateFromConfigManager( unittest.TestCase ):
             "solution snapshots lancedb table"  : "snaps",
             "solution snapshots lancedb path"   : "/db.lance",
         } )
-        mod, cls, created = _fake_module( _LANCE_MOD, "LanceDBSolutionManager" )
+        mod, cls, created = _fake_module( _LANCE_MOD, "SolutionSnapshotManager" )
         with patch.dict( sys.modules, { _LANCE_MOD: mod } ):
             result = SolutionSnapshotManagerFactory.create_from_config_manager( cfg )
         self.assertIs( result, created )
@@ -259,7 +291,7 @@ class TestCreateFromConfigManager( unittest.TestCase ):
             "solution snapshots lancedb table"     : "snaps",
             "solution snapshots lancedb gcs uri"   : "gs://bucket/db",
         } )
-        mod, cls, created = _fake_module( _LANCE_MOD, "LanceDBSolutionManager" )
+        mod, cls, created = _fake_module( _LANCE_MOD, "SolutionSnapshotManager" )
         with patch.dict( sys.modules, { _LANCE_MOD: mod } ):
             result = SolutionSnapshotManagerFactory.create_from_config_manager( cfg )
         self.assertIs( result, created )

@@ -24,9 +24,11 @@
 //     StoreSet); throws at construction if `stores.jobs` is falsy
 //   - Per Pass 2 F25: optional `appTimezone` threads into bucket templates
 //     for TZ-aware bucket-header date display when surfaced
-//   - Phase 6b: after each renderAll(), strips Q-A6 inertness markers
-//     (`aria-disabled`, `tabindex`, `title`) from all `.job-delete-button`
-//     elements so AC2a/AC2b grep guards return zero hits post-mount.
+//   - W1 (Jobs/04): the `.job-delete-button` now renders ENABLED at the template
+//     (jobCard.ts), so the former post-renderAll inertness-marker strip is GONE.
+//     handleDeleteClick routes the DELETE by BUCKET (history → /api/job-history/
+//     {id}; live → /api/queue/{queue}/{id}) — fixing the latent 404-masked
+//     history-delete bug where a history row survived a reload.
 
 import type { EventBus } from "../shared/EventBus";
 import type {
@@ -36,10 +38,15 @@ import type {
   HydrationFailedPayload,
   LupinEvent,
 } from "../shared/types";
-import type { JobStore, JobHistoryApiClient } from "../stores/JobStore";
+import type { JobStore, JobHistoryApiClient, HydrateHistoryOptions } from "../stores/JobStore";
 import { ApiError } from "../api/ApiClient";
 import { renderJobBucket } from "./templates/jobBucket";
 import { populateJobMetaIfNeeded } from "./templates/jobCard";
+import {
+  renderSectionHeader,
+  wireSectionCollapse,
+  type SectionHeaderHandle,
+} from "./templates/sectionHeader";
 
 // ---------------------------------------------------------------------------
 // Public interfaces
@@ -70,6 +77,8 @@ export interface JobsPaneRendererStores {
  */
 export interface JobsPaneApiClient extends JobHistoryApiClient {
   delete<T>(path: string): Promise<T>;
+  // W5 — per-job retry POST. Production ApiClient satisfies it structurally.
+  post<T>(path: string, body: unknown): Promise<T>;
 }
 
 export interface JobsPaneRendererOptions {
@@ -82,6 +91,14 @@ export interface JobsPaneRendererOptions {
    * browser-local TZ when undefined (matches the existing time.ts contract).
    */
   appTimezone? : string;
+  /**
+   * W5 — the mux WebSocket/session id (boot's `storage.getSessionId()`, the id
+   * `transports.queue.start(sessionId)` registers). Sent as `websocket_id` in the
+   * retry POST body so the server routes the re-queued job's events back to this
+   * client (mux equivalent of legacy `this.queueSessionId`). Optional: harnesses
+   * that never exercise retry omit it (the body then carries an empty id).
+   */
+  websocketId? : string;
 }
 
 // ---------------------------------------------------------------------------
@@ -89,6 +106,10 @@ export interface JobsPaneRendererOptions {
 // ---------------------------------------------------------------------------
 
 const ALL_BUCKETS: ReadonlyArray<JobBucket> = ["todo", "running", "done", "dead", "history"];
+
+// Lane 0a — the section-header count = total across the 4 LIVE buckets (net-new
+// source per F-Clay-A4), history EXCLUDED (it is a scrollback, not a live queue).
+const LIVE_BUCKETS: ReadonlyArray<JobBucket> = ["todo", "running", "done", "dead"];
 
 // Phase 6b — UI status → server queue-name mapping for the DELETE endpoint
 // at `cosa/rest/routers/queues.py:1188`. Note the `running` → `run` collapse:
@@ -109,12 +130,24 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
   private readonly stores        : JobsPaneRendererStores;
   private readonly api           : JobsPaneApiClient;
   private readonly appTimezone   : string | undefined;
+  private readonly websocketId   : string | undefined;
   private readonly unsubscribers : Array<() => void> = [];
 
   private mounted        : boolean = false;
   private root           : HTMLElement | null = null;
   private bucketsMount   : HTMLElement | null = null;
   private clickHandler   : ((e: Event) => void) | null = null;
+  // W3 — history time-window <select> change delegation (root-level, alongside
+  // clickHandler). Registered in attachClickDelegation, torn down in unmount.
+  private changeHandler  : ((e: Event) => void) | null = null;
+  // Lane 0a — section-header handle (count chip) + collapse-listener teardown.
+  private header         : SectionHeaderHandle | null = null;
+  private collapseOff    : (() => void) | null = null;
+
+  // The visible hydration-failure banner (null when no failure is showing).
+  // Tracked so repeated failures replace rather than stack, and so unmount
+  // tears it down with the rest of the pane.
+  private hydrationErrorEl : HTMLElement | null = null;
 
   // Phase 6b — idHashes of jobs whose DELETE is in flight. Rapid double-click
   // on the same `.job-delete-button` is gated by this set (5B-7); the entry
@@ -130,6 +163,7 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
     this.stores      = opts.stores;
     this.api         = opts.api;
     this.appTimezone = opts.appTimezone;
+    this.websocketId = opts.websocketId;
   }
 
   // -------------------------------------------------------------------------
@@ -152,21 +186,66 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
     this.bucketsMount = bucketsMount;
     this.mounted      = true;
 
-    // Lift the data-phase6-pending sentinel + hidden attribute from #jobs-pane
-    // (the design contract for Phase 6a — `data-phase6-pending` stays on
-    // #tts-pane until 6b lands).
-    root.removeAttribute("hidden");
+    // Lift the data-phase6-pending sentinel from #jobs-pane (Phase 6a design
+    // contract — `data-phase6-pending` stays on #tts-pane until 6b lands).
+    //
+    // Lane 0c (2026-07-02, Rachel 🕊️): the `hidden` attribute is NO LONGER
+    // stripped here. Job Queues is cold-HIDDEN by default (legacy parity, Q3
+    // RULED) via the HTML `hidden` attribute; stripping it on mount would defeat
+    // that default. Visibility is now owned by the section-toolbar (a persisted
+    // user choice overrides the cold `hidden` default — F-Clay-A3), NOT by this
+    // renderer. The renderer still populates the pane's buckets regardless of
+    // whether the section is shown.
     root.removeAttribute("data-phase6-pending");
+
+    // Lane 0a — emit the uniform `.section-header` bar (📝 Jobs) as the FIRST
+    // child of the pane, replacing the inert static `.jobs-pane-header` that
+    // used to live in multiplexer.html (that markup + its unwired "Load history"
+    // button are removed). The count chip = total across the 4 LIVE buckets. The
+    // pre-existing `#jobs-buckets-container` becomes the collapsible body
+    // (`.section-content`), so the shared `[data-collapsed] > .section-content`
+    // rule hides it on collapse.
+    const header = renderSectionHeader({
+      icon   : "📝",
+      title  : "Jobs",
+      testid : "multiplexer-jobs-header",
+    });
+    this.header = header;
+
+    // W6 (plan 04 §W6) — queues filter badge. A STATIC, HIDDEN, default-"Mine"
+    // badge + a seam for plan-08 (Filter Settings) to later wire the live filter
+    // store. Per F-Clay-B4 the plan-08 store-driven 👤 Mine / 🌐 Others / 🔵 All
+    // states are OUT of D1 scope — NO plan-08 subscription/branch is authored here
+    // (no unreachable-branch / coverage collision). It ships inert-hidden.
+    // TODO(plan-08): subscribe to the shared filter store + reflect the active
+    // 👤 Mine / 🌐 Others / 🔵 All mode when Filter Settings (plan 08) lands.
+    const filterBadge = document.createElement("span");
+    filterBadge.className   = "queues-filter-badge";
+    filterBadge.hidden      = true;
+    filterBadge.textContent = "👤 Mine";
+    filterBadge.setAttribute("data-testid", "queues-filter-badge");
+    header.header.appendChild(filterBadge);
+
+    bucketsMount.classList.add("section-content");
+    root.insertBefore(header.header, bucketsMount);
+    this.collapseOff = wireSectionCollapse(root, header);
 
     this.attachClickDelegation();
     this.subscribe();
     this.renderAll();
 
     // Q-A7 — eager hydration. Float the promise; mount returns immediately.
-    // Pass 1 F3 — wrap the rejection in a `.catch(...)` so unhandled-rejection
-    // events never fire, and emit `hydration_failed` so a future 6b retry
-    // affordance can subscribe.
-    this.stores.jobs.hydrateHistory(this.api).catch((err: unknown) => {
+    this.hydrateWithFailureSignal();
+  }
+
+  // Eager hydration with a fail-loud UI signal. Floats the hydrate promise so
+  // mount() (and the Retry affordance) return immediately; a rejection is
+  // (a) caught so no unhandled-rejection event ever fires (Pass 1 F3) and
+  // (b) re-published as `hydration_failed { source: "jobs" }` so
+  // onHydrationFailed paints the visible Retry banner. Extracted so mount()
+  // and the Retry button share ONE hydrate path.
+  private hydrateWithFailureSignal(opts?: HydrateHistoryOptions): void {
+    this.stores.jobs.hydrateHistory(this.api, opts).catch((err: unknown) => {
       const error = err instanceof Error ? err : new Error(String(err));
       console.warn("JobsPaneRenderer: hydrateHistory rejected:", error);
       this.bus.emit<HydrationFailedPayload>({
@@ -184,13 +263,25 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
     for (const off of this.unsubscribers) off();
     this.unsubscribers.length = 0;
 
+    this.clearHydrationError();
+
+    if (this.collapseOff !== null) {
+      this.collapseOff();
+      this.collapseOff = null;
+    }
+
     if (this.clickHandler !== null && this.root !== null) {
       this.root.removeEventListener("click", this.clickHandler);
     }
-    this.clickHandler = null;
+    if (this.changeHandler !== null && this.root !== null) {
+      this.root.removeEventListener("change", this.changeHandler);
+    }
+    this.clickHandler  = null;
+    this.changeHandler = null;
 
     if (this.bucketsMount !== null) this.bucketsMount.replaceChildren();
     this.bucketsMount = null;
+    this.header       = null;
     this.root         = null;
     this.mounted      = false;
   }
@@ -210,6 +301,70 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
         (e) => this.onJobsChanged(e),
       ),
     );
+    // hydration_failed CONSUMER. Before this, the event had ZERO subscribers,
+    // so a hydrate failure was invisible to the user (only a console.warn).
+    // JobsPaneRenderer is both the emitter (its floated hydrateHistory
+    // rejection) AND the natural consumer: it owns the jobs-pane DOM, so it is
+    // where a "Could not load job history" + Retry affordance belongs (the
+    // 6b retry affordance the emit site always anticipated).
+    this.unsubscribers.push(
+      this.bus.on<HydrationFailedPayload>(
+        "hydration_failed",
+        (e) => this.onHydrationFailed(e),
+      ),
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // hydration_failed consumer — visible fail-loud affordance + Retry
+  // -------------------------------------------------------------------------
+
+  private onHydrationFailed(e: LupinEvent<HydrationFailedPayload>): void {
+    // Only OUR source. Other renderers' hydrate failures (future) carry a
+    // different `source` and are surfaced by their own consumers.
+    if (e.payload.source !== "jobs") return;
+    this.renderHydrationError(e.payload.error);
+  }
+
+  private renderHydrationError(error: Error): void {
+    /* c8 ignore next */ // defensive: the hydration_failed listener is detached in unmount() BEFORE root is nulled, so onHydrationFailed cannot fire with a null root via the bus; this guards only a synthetic direct call.
+    if (this.root === null || this.bucketsMount === null) return;
+    // Replace any prior banner so repeated failures don't stack.
+    this.clearHydrationError();
+
+    const banner = document.createElement("div");
+    banner.className = "jobs-hydration-error";
+    banner.setAttribute("role", "alert");
+    banner.setAttribute("aria-live", "polite");
+
+    const message = document.createElement("span");
+    message.className = "jobs-hydration-error-message";
+    message.textContent = `Could not load job history: ${error.message}`;
+    banner.appendChild(message);
+
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.className = "jobs-hydration-retry";
+    retry.textContent = "Retry";
+    banner.appendChild(retry);
+
+    // Banner sits at the top of the pane, above the buckets.
+    this.root.insertBefore(banner, this.bucketsMount);
+    this.hydrationErrorEl = banner;
+  }
+
+  private clearHydrationError(): void {
+    if (this.hydrationErrorEl !== null) {
+      this.hydrationErrorEl.remove();
+      this.hydrationErrorEl = null;
+    }
+  }
+
+  private handleRetryClick(): void {
+    // Clear the banner immediately; a fresh failure re-emits hydration_failed
+    // (→ onHydrationFailed repaints it), a success leaves it cleared.
+    this.clearHydrationError();
+    this.hydrateWithFailureSignal();
   }
 
   private onJobsChanged(_e: LupinEvent<StoreJobsChangedPayload>): void {
@@ -239,25 +394,33 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
 
     // Replace the buckets container's children atomically. Single
     // replaceChildren call → single layout flush.
-    const fragments = buckets.map(b =>
-      renderJobBucket(b.name, b.jobs, { appTimezone: this.appTimezone })
-    );
+    const fragments = buckets.map(b => {
+      // W3/W4 — the history bucket additionally receives its window + pagination
+      // state (drives the time-window <select> selected value + count badge + the
+      // Load-More gate). Live buckets take only appTimezone.
+      const opts = b.name === "history"
+        ? {
+            appTimezone        : this.appTimezone,
+            historyWindowDays  : this.stores.jobs.historyWindowDays(),
+            historyLoadedCount : this.stores.jobs.historyLoadedCount(),
+            historyTotalCount  : this.stores.jobs.historyTotalCount(),
+          }
+        : { appTimezone: this.appTimezone };
+      return renderJobBucket(b.name, b.jobs, opts);
+    });
     this.bucketsMount.replaceChildren(...fragments);
 
-    // Phase 6b — strip Q-A6 inertness markers from every `.job-delete-button`
-    // so AC2a/AC2b grep guards return zero hits post-mount (5B-9).
-    this.stripInertnessMarkers();
+    // Lane 0a — the header count reflects the total across the 4 live buckets.
+    this.updateCount();
   }
 
-  private stripInertnessMarkers(): void {
-    /* c8 ignore next */ // defensive: bucketsMount is null only between unmount and re-mount; renderAll's null-guard above prevents this branch.
-    if (this.bucketsMount === null) return;
-    const buttons = this.bucketsMount.querySelectorAll(".job-delete-button");
-    for (const btn of Array.from(buttons)) {
-      btn.removeAttribute("aria-disabled");
-      btn.removeAttribute("tabindex");
-      btn.removeAttribute("title");
-    }
+  // Lane 0a — section-header count = todo + running + done + dead (history
+  // excluded; F-Clay-A4 net-new source).
+  private updateCount(): void {
+    /* c8 ignore next */ // defensive: header is set/nulled in lockstep with bucketsMount, so non-null whenever renderAll runs.
+    if (this.header === null) return;
+    const total = LIVE_BUCKETS.reduce((sum, b) => sum + this.stores.jobs.bucket(b).length, 0);
+    this.header.setCount(total);
   }
 
   // -------------------------------------------------------------------------
@@ -271,12 +434,43 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
       const target = e.target as Element | null;
       /* c8 ignore next */ // defensive: browser-dispatched click events always carry a target; null-target is unreachable from real user input but guards against synthetic events constructed without a target.
       if (target === null) return;
+      // hydration_failure Retry dispatch BEFORE the job paths — the banner
+      // lives above the buckets and carries no .job-card, but ordering it
+      // first keeps the intent explicit.
+      const retryButton = target.closest(".jobs-hydration-retry") as HTMLElement | null;
+      if (retryButton !== null) {
+        this.handleRetryClick();
+        return;
+      }
+      // W2 — per-bucket delete-all 🗑 dispatch. A header control that owns its
+      // own confirm + bulk DELETE and returns, so neither the per-card delete
+      // path nor the card-header toggle below runs for this click. Dispatched
+      // before them, mirroring the retry/delete-button ordering.
+      const deleteAllButton = target.closest(".queue-delete-all-btn") as HTMLElement | null;
+      if (deleteAllButton !== null) {
+        this.handleDeleteAllClick(deleteAllButton);
+        return;
+      }
+      // W4 — history Load-More: append the next page at the tracked cursor via
+      // the shared fail-loud hydrate path (append=true).
+      const loadMoreButton = target.closest(".history-load-more") as HTMLElement | null;
+      if (loadMoreButton !== null) {
+        this.hydrateWithFailureSignal({ append: true });
+        return;
+      }
       // Phase 6b — delete-button dispatch BEFORE the card-header toggle path
       // so the Q-B10 optimistic-delete flow fires and the toggle never does
       // (preserves the Pass 2 F23 invariant under active-button semantics).
       const deleteButton = target.closest(".job-delete-button") as HTMLElement | null;
       if (deleteButton !== null) {
         this.handleDeleteClick(deleteButton);
+        return;
+      }
+      // W5 — per-job retry ↻ (terminal cards). Dispatched before the card-header
+      // toggle so a retry click never expands the card.
+      const retryJobButton = target.closest(".job-retry-button") as HTMLElement | null;
+      if (retryJobButton !== null) {
+        this.handleRetryJobClick(retryJobButton);
         return;
       }
       // Pass 2 F23 — query by class, NOT by attribute, so the
@@ -300,7 +494,104 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
 
       details.classList.toggle("collapsed");
     };
+    // W3 — history time-window <select> change → REPLACE-fetch the new window
+    // (clears + refetches; pagination cursors reset). Delegated on root (change
+    // bubbles). "all" → all-time (days omitted); a number → that rolling window.
+    this.changeHandler = (e: Event) => {
+      const target = e.target as Element | null;
+      /* c8 ignore next */ // defensive: change events always carry a target.
+      if (target === null) return;
+      const select = target.closest(".history-time-select") as HTMLSelectElement | null;
+      if (select === null) return;
+      const raw  = select.value;
+      const days = raw === "all" ? undefined : Number(raw);
+      this.hydrateWithFailureSignal({ days, append: false });
+    };
+    this.root.addEventListener("change", this.changeHandler);
     this.root.addEventListener("click", this.clickHandler);
+  }
+
+  // -------------------------------------------------------------------------
+  // Delete-all click flow (W2 — bulk, confirm-gated, refetch-after-2xx)
+  // -------------------------------------------------------------------------
+
+  private handleDeleteAllClick(deleteAllButton: HTMLElement): void {
+    const bucket = deleteAllButton.getAttribute("data-bucket") as JobBucket | null;
+    /* c8 ignore next */ // defensive: the delete-all button always carries data-bucket per the jobBucket template.
+    if (bucket === null) return;
+
+    // Confirm dialog: count + the running-bucket "interrupt active jobs" warning.
+    // Empty bucket still confirms (count 0). Cancel aborts with NO fetch (W2 AC).
+    const count = this.stores.jobs.bucket(bucket).length;
+    let message = `Delete all ${bucket} jobs (${count})?`;
+    if (bucket === "running") message += " This will interrupt active jobs.";
+    if (!globalThis.confirm(message)) return;
+
+    // Endpoint per bucket: history → the persistence delete-all, windowed by the
+    // current time-window's days (all-time → days=all); live → the queue
+    // delete-all (running → server queue `run` via UI_STATUS_TO_SERVER_QUEUE).
+    const isHistory = bucket === "history";
+    let path: string;
+    if (isHistory) {
+      const days = this.stores.jobs.historyWindowDays();
+      path = `/api/job-history/all?days=${days === undefined ? "all" : String(days)}`;
+    } else {
+      path = `/api/queue/${UI_STATUS_TO_SERVER_QUEUE[bucket as JobStatus]}/all`;
+    }
+
+    // Bulk delete is refetch-after-2xx — NO per-card optimistic removal/rollback
+    // (plan 04 §W1-inherit note): the bucket is cleared/refetched only AFTER the
+    // server confirms. 404 (queue absent / already empty) is treated as success,
+    // mirroring the per-card contract; a 5xx/network error leaves the bucket
+    // intact (nothing was optimistically removed) + logs.
+    this.api.delete<unknown>(path)
+      .then(() => this.applyDeleteAllSuccess(bucket, isHistory))
+      .catch((err: unknown) => {
+        if (err instanceof ApiError && err.status === 404) {
+          this.applyDeleteAllSuccess(bucket, isHistory);
+          return;
+        }
+        console.warn("JobsPaneRenderer: delete-all failed:", err);
+      });
+  }
+
+  // Post-2xx bucket reconcile for delete-all. Live buckets are WS-fed with no
+  // GET-refetch → clear locally (authoritative post-2xx). History refetches the
+  // current window (via the shared fail-loud hydrate path) so the server stays
+  // the source of truth + the pagination cursors reset.
+  private applyDeleteAllSuccess(bucket: JobBucket, isHistory: boolean): void {
+    if (isHistory) {
+      this.hydrateWithFailureSignal({ days: this.stores.jobs.historyWindowDays(), append: false });
+      return;
+    }
+    this.stores.jobs.clearBucket(bucket);
+  }
+
+  // -------------------------------------------------------------------------
+  // Retry click flow (W5 — confirm-gated POST; WS repopulates live buckets)
+  // -------------------------------------------------------------------------
+
+  private handleRetryJobClick(retryButton: HTMLElement): void {
+    const card = retryButton.closest(".job-card") as HTMLElement | null;
+    /* c8 ignore next */ // defensive: the retry button only lives inside a .job-card per the template.
+    if (card === null) return;
+    const idHash = card.getAttribute("data-id-hash");
+    /* c8 ignore next */ // defensive: every .job-card carries data-id-hash per Pass 1 F12.
+    if (idHash === null) return;
+    if (!globalThis.confirm("Retry this job?")) return;
+
+    // POST the retry with this client's WS id so the server routes the re-queued
+    // job's events back here. On 2xx the WS `job_state_transition` repopulates the
+    // live buckets automatically; we additionally refresh the current history
+    // window so the terminal row reflects the retry. A failure logs (nothing was
+    // optimistically changed).
+    this.api.post<unknown>(`/api/job-history/${idHash}/retry`, { websocket_id: this.websocketId ?? "" })
+      .then(() => {
+        this.hydrateWithFailureSignal({ days: this.stores.jobs.historyWindowDays(), append: false });
+      })
+      .catch((err: unknown) => {
+        console.warn("JobsPaneRenderer: retry failed:", err);
+      });
   }
 
   // -------------------------------------------------------------------------
@@ -320,12 +611,24 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
     const job = this.stores.jobs.getById(idHash);
     /* c8 ignore next */ // defensive: store-DOM consistency invariant — every rendered .job-card has a corresponding JobStore entry; reaching this branch would indicate a renderAll race that the synchronous bus contract precludes.
     if (job === undefined) return;
-    const queueName = UI_STATUS_TO_SERVER_QUEUE[job.status];
+
+    // W1 — route the DELETE by BUCKET, NOT by job.status. A history-bucket card
+    // carries status done/dead but is NO LONGER in a live server queue, so the
+    // legacy `/api/queue/{queue}/{id}` call 404s — and the 404-as-success branch
+    // below silently swallows it, leaving the persisted history row alive (it
+    // reappears on the next reload). Route history rows to the persistence-delete
+    // endpoint (`/api/job-history/{id}`); live-queue rows keep the queue endpoint.
+    const bucketEl = card.closest("[data-bucket]") as HTMLElement | null;
+    /* c8 ignore next */ // defensive: every rendered .job-card lives inside a [data-bucket] section per the jobBucket template invariant.
+    if (bucketEl === null) return;
+    const path = bucketEl.getAttribute("data-bucket") === "history"
+      ? `/api/job-history/${idHash}`
+      : `/api/queue/${UI_STATUS_TO_SERVER_QUEUE[job.status]}/${idHash}`;
 
     this.deleteInFlight.add(idHash);
     const { restoreState } = this.stores.jobs.delete(idHash);
 
-    this.api.delete<unknown>(`/api/queue/${queueName}/${idHash}`)
+    this.api.delete<unknown>(path)
       .then(() => {
         // 2xx → success path; restoreState discarded (5B-3).
       })

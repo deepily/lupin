@@ -1,5 +1,5 @@
 """
-Unit tests for LanceDBSolutionManager multi-backend path resolution.
+Unit tests for SolutionSnapshotManager multi-backend path resolution.
 
 Tests the _resolve_db_path() method with various configurations to ensure
 correct path resolution for both local filesystem and GCS backends.
@@ -27,11 +27,32 @@ if src_path not in sys.path:
     sys.path.insert( 0, src_path )
 
 from cosa.config.configuration_manager import ConfigurationManager
-from cosa.memory.lancedb_solution_manager import LanceDBSolutionManager
+from cosa.memory.lancedb_solution_manager import SolutionSnapshotManager
 
 
 class TestLanceDBManagerPathResolution:
-    """Test suite for LanceDBSolutionManager path resolution logic."""
+
+    @pytest.fixture( autouse=True )
+    def _pin_lancedb_backend( self ):
+        """
+        Pin `vector store backend` to lancedb for every test in this class.
+
+        This class asserts how SolutionSnapshotManager RESOLVES a LanceDB path
+        (local prefixing, gs:// validation, error messages). Under the live INI the
+        flag is `postgres`, where no path is resolved at all — so these assertions
+        were describing a code path the manager never took (decision 2b20a6d6).
+
+        Patched at the flag's single definition site; the manager, CanonicalSynonymsTable
+        and QuestionEmbeddingsTable all resolve it from that module at call time.
+        """
+        from unittest.mock import patch as _patch
+        from cosa.rest.db.repositories import vector_store_backend
+
+        with _patch.object( vector_store_backend, "get_vector_store_backend",
+                            return_value=vector_store_backend.LANCEDB ):
+            yield
+
+    """Test suite for SolutionSnapshotManager path resolution logic."""
 
     def test_local_backend_with_relative_path_applies_project_root(self):
         """
@@ -53,7 +74,7 @@ class TestLanceDBManagerPathResolution:
         with patch( 'cosa.memory.lancedb_solution_manager.du.get_project_root', return_value='/project/root' ):
             with patch( 'os.path.exists', return_value=True ):
                 with patch( 'cosa.memory.lancedb_solution_manager.lancedb.connect' ):
-                    manager = LanceDBSolutionManager( config, debug=False )
+                    manager = SolutionSnapshotManager( config, debug=False )
 
                     expected = '/project/root/src/conf/long-term-memory/test.lancedb'
                     assert manager.db_path == expected
@@ -70,7 +91,7 @@ class TestLanceDBManagerPathResolution:
 
         with patch( 'os.path.exists', return_value=True ):
             with patch( 'cosa.memory.lancedb_solution_manager.lancedb.connect' ):
-                manager = LanceDBSolutionManager( config, debug=False )
+                manager = SolutionSnapshotManager( config, debug=False )
 
                 assert manager.db_path == "/absolute/path/to/test.lancedb"
 
@@ -85,7 +106,7 @@ class TestLanceDBManagerPathResolution:
         }
 
         with pytest.raises( ValueError ) as exc_info:
-            manager = LanceDBSolutionManager( config, debug=False )
+            manager = SolutionSnapshotManager( config, debug=False )
 
         assert "storage_backend=local requires 'db_path' config key" in str( exc_info.value )
 
@@ -101,7 +122,7 @@ class TestLanceDBManagerPathResolution:
 
         with patch( 'os.path.exists', return_value=False ):
             with pytest.raises( ValueError ) as exc_info:
-                manager = LanceDBSolutionManager( config, debug=False )
+                manager = SolutionSnapshotManager( config, debug=False )
 
             assert "parent directory does not exist" in str( exc_info.value )
 
@@ -116,7 +137,7 @@ class TestLanceDBManagerPathResolution:
         }
 
         with patch( 'cosa.memory.lancedb_solution_manager.lancedb.connect' ):
-            manager = LanceDBSolutionManager( config, debug=False )
+            manager = SolutionSnapshotManager( config, debug=False )
 
             assert manager.db_path == "gs://test-bucket/path/to/db.lancedb"
 
@@ -131,7 +152,7 @@ class TestLanceDBManagerPathResolution:
         }
 
         with pytest.raises( ValueError ) as exc_info:
-            manager = LanceDBSolutionManager( config, debug=False )
+            manager = SolutionSnapshotManager( config, debug=False )
 
         assert "storage_backend=gcs requires 'gcs_uri' config key" in str( exc_info.value )
         assert "Example:" in str( exc_info.value )
@@ -147,7 +168,7 @@ class TestLanceDBManagerPathResolution:
         }
 
         with pytest.raises( ValueError ) as exc_info:
-            manager = LanceDBSolutionManager( config, debug=False )
+            manager = SolutionSnapshotManager( config, debug=False )
 
         assert "GCS URI must start with 'gs://'" in str( exc_info.value )
         assert "s3://wrong-bucket" in str( exc_info.value )
@@ -162,7 +183,7 @@ class TestLanceDBManagerPathResolution:
         }
 
         with pytest.raises( ValueError ) as exc_info:
-            manager = LanceDBSolutionManager( config, debug=False )
+            manager = SolutionSnapshotManager( config, debug=False )
 
         assert "Unknown storage_backend: 's3'" in str( exc_info.value )
         assert "Must be 'local' or 'gcs'" in str( exc_info.value )
@@ -179,7 +200,7 @@ class TestLanceDBManagerPathResolution:
 
         with patch( 'os.path.exists', return_value=True ):
             with patch( 'cosa.memory.lancedb_solution_manager.lancedb.connect' ):
-                manager = LanceDBSolutionManager( config, debug=False )
+                manager = SolutionSnapshotManager( config, debug=False )
 
                 assert manager.storage_backend == "local"
                 assert manager.db_path == "/tmp/test.lancedb"
@@ -195,7 +216,7 @@ class TestLanceDBManagerPathResolution:
         }
 
         with pytest.raises( ValueError ) as exc_info:
-            manager = LanceDBSolutionManager( config_gcs, debug=False )
+            manager = SolutionSnapshotManager( config_gcs, debug=False )
 
         error_msg = str( exc_info.value )
         assert "Example:" in error_msg
@@ -208,7 +229,7 @@ class TestLanceDBManagerPathResolution:
         }
 
         with pytest.raises( ValueError ) as exc_info:
-            manager = LanceDBSolutionManager( config_local, debug=False )
+            manager = SolutionSnapshotManager( config_local, debug=False )
 
         error_msg = str( exc_info.value )
         assert "Example:" in error_msg
@@ -225,7 +246,7 @@ class TestLanceDBManagerPathResolution:
         }
 
         with pytest.raises( ValueError ) as exc_info:
-            manager = LanceDBSolutionManager( config, debug=False )
+            manager = SolutionSnapshotManager( config, debug=False )
 
         assert "GCS URI must start with 'gs://'" in str( exc_info.value )
 

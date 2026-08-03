@@ -51,8 +51,9 @@
 
 | Method | Path | Auth | Summary |
 |--------|------|------|---------|
-| GET | `/` | Public | Health check with version |
-| GET | `/health` | Public | Simplified health check |
+| GET | `/` | Public | Health check with version + `code_identity` |
+| GET | `/health` | Public | Simplified health check (deliberately 2 fields — backs a 30s docker healthcheck) |
+| GET | `/api/code-identity` | Public | Which code the RUNNING PROCESS holds — captured at module import, never re-read (row `ce89669e`) |
 | GET | `/api/init` | Public | Init configuration status |
 | GET | `/api/get-session-id` | Public | Generate new session ID |
 | GET | `/api/auth-test` | JWT | Verify token validity |

@@ -9,6 +9,7 @@ Generated on: 2025-01-24
 """
 
 import os
+import time
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
@@ -22,6 +23,7 @@ from ..dependencies.config import get_config_manager, get_snapshot_manager, get_
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.memory.solution_snapshot_mgr import SolutionSnapshotManager
 from cosa.agents.two_word_id_generator import TwoWordIdGenerator
+from cosa.rest.code_identity import get_code_identity
 import cosa.utils.util as du
 
 
@@ -71,19 +73,24 @@ async def health_check():
         - Returns healthy status with service identification
         - Includes current timestamp in ISO format
         - Provides version information for monitoring systems
+        - Includes `code_identity`, captured at IMPORT (row ce89669e remedy 1)
         - Response is consistently formatted for health checks
-        
+
     Raises:
         - None (endpoint is designed to always succeed)
-        
+
     Returns:
-        dict: Health status with service name, timestamp, and version
+        dict: Health status with service name, timestamp, version, and code identity
     """
     return {
         "status": "healthy",
         "service": "lupin-fastapi",
         "timestamp": du.get_current_datetime_iso(),
-        "version": "0.1.0"
+        # Hardcoded since 2025 and identifying nothing — kept because consumers assert
+        # on it, superseded by code_identity below. THAT is what tells you which code
+        # is running; this tells you only that someone typed a number once.
+        "version": "0.1.0",
+        "code_identity": get_code_identity()
     }
 
 @router.get(
@@ -103,17 +110,114 @@ async def health():
         - Returns "ok" status for monitoring systems
         - Includes current timestamp in ISO format
         - Provides minimal response for high-frequency health checks
-        
+
     Raises:
         - None (endpoint is designed to always succeed)
-        
+
     Returns:
         dict: Simple status and timestamp for monitoring
     """
+    # ⚠️ DELIBERATELY TWO FIELDS. `code_identity` was added here first and reverted:
+    # this endpoint's stated contract is "minimal response for high-frequency health
+    # checks", it backs a docker healthcheck that fires every 30s, and a test pins
+    # the field count. Growing it to carry an identity payload would have been an
+    # unannounced contract change for a caller that never asked. The identity lives
+    # on `/` and on `/api/code-identity` instead.
     return {
         "status": "ok",
         "timestamp": du.get_current_datetime_iso()
     }
+
+
+@router.get(
+    "/api/busy",
+    response_class = JSONResponse,
+    summary        = "Is a job running on this server right now?",
+    description    = "Two integers for the managed-bounce guard (row 08919110): "
+                     "inflight_agentic_jobs and run_queue_size. Unauthenticated by design "
+                     "so a host shell script can read it with no credential. Leaks only how "
+                     "many jobs are running; adds nothing to /health."
+)
+async def busy():
+    """
+    Report whether a job is currently running, for bounce-dev-server.sh's guard.
+
+    A restart of :7999 destroys any in-flight job — Rick lost a podcast job exactly
+    this way (row 08919110). The bounce script is a host shell script with no auth
+    credential, so it needs an UNAUTHENTICATED read to REFUSE a bounce that would kill
+    live work. The existing job-state surfaces (/queue/pool-status, /get-queue/run)
+    both require get_current_user, and /health's two-field contract is frozen — so this
+    small endpoint exists specifically for the guard (Rick's ruling 2026-08-02).
+
+    Requires:
+        - lupin_app.main is importable and jobs_run_queue is initialized (server past
+          startup)
+
+    Ensures:
+        - Returns {"inflight_agentic_jobs": int, "run_queue_size": int}
+        - inflight_agentic_jobs = the CJ-flow shared agentic pool's in-flight count
+          (running_fifo_queue.get_pool_status()); run_queue_size = the run FIFO queue
+          depth. Either > 0 means a restart would destroy running work.
+        - Adds NO field to /health — that endpoint's 2-field contract is pinned by a test.
+
+    Raises:
+        - Propagates only if jobs_run_queue is absent/uninitialized. The HOST guard
+          treats ANY non-200 or unreachable response as FAIL-OPEN, so a transient error
+          here never blocks a recovery bounce.
+    """
+    import lupin_app.main as main_module
+    run_queue = main_module.jobs_run_queue
+    pool      = run_queue.get_pool_status()
+    return {
+        "inflight_agentic_jobs" : int( pool[ "inflight_agentic_jobs" ] ),
+        "run_queue_size"        : int( run_queue.size() )
+    }
+
+
+@router.get(
+    "/api/code-identity",
+    response_class = JSONResponse,
+    summary        = "Which code is this process actually running?",
+    description    = "The git sha, branch and load time captured at MODULE IMPORT — not re-read per request."
+)
+async def code_identity():
+    """
+    The running process's frozen code identity (row ce89669e remedy 1).
+
+    WHY THIS ENDPOINT EXISTS
+        `:8000` bind-mounts `./src` and runs `reload=False`, so the file inside the
+        container is the host's current file while the imported module is whatever
+        loaded at process start. Every cheap check reads the filesystem and answers
+        the wrong question confidently:
+
+            docker exec <c> grep -c <symbol> <file>       -> hits that are not running
+            docker exec <c> git rev-parse --short HEAD    -> the HOST's working tree
+
+        Measured 2026-07-27: the `:8000` container reported a sha committed on the
+        host minutes earlier, against a process nearly an hour old.
+
+    HOW TO USE IT
+        Compare `imported_at` against a commit's AUTHOR date. If the commit is newer,
+        the running process does not have it, whatever any file or any in-container
+        `git` says. `src/scripts/verify-running-code.sh` makes the same comparison
+        against `docker inspect`; this makes it available without a docker socket.
+
+    Requires:
+        - FastAPI application is running and responsive
+
+    Ensures:
+        - Returns the record captured at import; the value does NOT move between
+          requests, by construction
+        - Never re-reads the repository (a per-request read would reproduce exactly
+          the lie this endpoint exists to remove)
+
+    Raises:
+        - None
+
+    Returns:
+        dict: git_sha, git_branch, git_sha_source, imported_at, pid
+    """
+    return get_code_identity()
 
 @router.get(
     "/api/server-info",
@@ -264,26 +368,39 @@ async def reset_prediction_engine( drop_table: bool = True ):
         table_name  = config_mgr.get( "prediction engine lancedb table", default="prediction_decisions" )
         table_dropped = False
 
-        # Drop LanceDB table (server process has write permission, test process may not)
+        # Clear the decision store (server process has write permission, test process may not).
+        # v0.2.0 §6: under the postgres backend clear the pgvector prediction_decisions
+        # rows (the alembic-managed table is kept); under lancedb drop the table.
+        from cosa.rest.db.repositories.vector_store_backend import is_postgres_backend
         if drop_table:
-            try:
-                import lancedb
-                lancedb_path = cu.get_project_root() + "/src/conf/long-term-memory/lupin.lancedb"
-                db = lancedb.connect( lancedb_path )
-                if table_name in db.table_names():
-                    db.drop_table( table_name )
+            if is_postgres_backend( config_mgr ):
+                try:
+                    from cosa.rest.db.database import get_db
+                    from cosa.rest.db.repositories.prediction_decision_repository import PredictionDecisionRepository
+                    with get_db() as session:
+                        PredictionDecisionRepository( session ).delete_all()
                     table_dropped = True
-            except Exception as drop_err:
-                print( f"[PE-RESET] Table drop note: {drop_err}" )
+                except Exception as drop_err:
+                    print( f"[PE-RESET] Postgres clear note: {drop_err}" )
+            else:
+                try:
+                    import lancedb
+                    lancedb_path = cu.get_project_root() + "/src/conf/long-term-memory/lupin.lancedb"
+                    db = lancedb.connect( lancedb_path )
+                    if table_name in db.table_names():
+                        db.drop_table( table_name )
+                        table_dropped = True
+                except Exception as drop_err:
+                    print( f"[PE-RESET] Table drop note: {drop_err}" )
 
         PredictionEngine.reset()
         engine = get_prediction_engine( config_mgr=config_mgr )
 
         return {
-            "status"        : "success",
-            "lancedb_table" : engine.lancedb_table,
-            "table_dropped" : table_dropped,
-            "timestamp"     : du.get_current_datetime_iso()
+            "status"           : "success",
+            "prediction_table" : engine.lancedb_table,
+            "table_dropped"    : table_dropped,
+            "timestamp"        : du.get_current_datetime_iso()
         }
     except Exception as e:
         return {
@@ -790,3 +907,119 @@ async def set_similarity_confirmation(
         "similarity confirmation enabled", str( body.enabled ).lower()
     )
     return { "enabled": body.enabled, "previous": previous }
+
+
+# ─── Managed dev-server bounce (R2/R3: the web-client button path) ────
+# The web process CANNOT restart its own container, so this endpoint does not run
+# the bounce script. It drops a trigger file into the shared io/ mount that the
+# host-side daemon (src/scripts/bounce-watcher.sh) acts on — that daemon survives
+# the restart, runs the sanctioned bounce-dev-server.sh (warn → restart → poll),
+# and the restarted server self-emits the all-clear from its startup hook.
+#
+# The endpoint's job is to make sure the button never LIES: it refuses with a plain
+# reason when the watcher is not running (503) or a bounce is already underway
+# (409), so a press that can't take effect says so instead of spinning forever and
+# looking exactly like a slow restart.
+_BOUNCE_DIR_REL              = "/io/bounce"
+_BOUNCE_HEARTBEAT_STALE_SECS = 30   # watcher stamps every ~2s; older than this ⇒ not running
+_BOUNCE_INPROGRESS_MAX_SECS  = 90   # bounce-dev-server.sh health deadline is 60s + headroom
+
+
+def _bounce_paths():
+    """Return (base_dir, heartbeat, trigger, inprogress) under the shared io/ mount."""
+    base = du.get_project_root() + _BOUNCE_DIR_REL
+    return base, base + "/watcher-heartbeat", base + "/bounce.trigger", base + "/bounce.inprogress"
+
+
+def _read_epoch( path ):
+    """Read an epoch-second integer from path, or None if missing/unparseable."""
+    try:
+        with open( path ) as f:
+            return int( f.read().strip() )
+    except ( FileNotFoundError, ValueError ):
+        return None
+
+
+class BounceResponse( BaseModel ):
+    status    : str
+    reason    : Optional[ str ] = None
+    detail    : Optional[ str ] = None
+    timestamp : str
+
+
+@router.post(
+    "/api/system/bounce",
+    response_class = JSONResponse,
+    summary        = "Bounce the dev server",
+    description    = "Request a managed restart of :7999 via the host-side watcher. Warns the fleet, restarts the container, and the restarted server self-emits the all-clear."
+)
+async def bounce_dev_server( current_user = Depends( get_current_user ) ):
+    """
+    Trigger the sanctioned managed bounce of the dev server from a web client.
+
+    The web process lives inside the container it would restart, so it cannot run
+    the bounce itself. This endpoint only drops a trigger file the host-side watcher
+    picks up. It first verifies the watcher is alive and that no bounce is already
+    running, so the button reflects reality instead of silently succeeding.
+
+    Requires:
+        - Valid JWT (Authorization: Bearer …) — same as the clients' other POSTs
+        - Host-side src/scripts/bounce-watcher.sh running against the same io/ mount
+
+    Ensures:
+        - 409 if a bounce is already in progress (checked first, so a heartbeat that
+          goes quiet DURING a bounce is not misreported as a dead watcher)
+        - 503 with a plain reason if the watcher heartbeat is missing or stale
+        - 202 otherwise, and the trigger file is written; the watcher runs
+          bounce-dev-server.sh and the server self-emits the all-clear on startup
+
+    Raises:
+        - HTTPException(401) via get_current_user if unauthenticated
+
+    Returns:
+        JSONResponse: { status, reason?/detail?, timestamp } with the code above
+    """
+    base, heartbeat_path, trigger_path, inprogress_path = _bounce_paths()
+    now = int( time.time() )
+
+    # Already bouncing? Checked FIRST: while the script runs, the watcher is busy and
+    # its heartbeat goes stale — the in-progress marker is what tells the two apart.
+    inprogress_ts = _read_epoch( inprogress_path )
+    if inprogress_ts is not None and ( now - inprogress_ts ) < _BOUNCE_INPROGRESS_MAX_SECS:
+        return JSONResponse(
+            status_code = 409,
+            content     = {
+                "status"    : "in_progress",
+                "reason"    : "A dev-server bounce is already running — wait for the all-clear.",
+                "timestamp" : du.get_current_datetime_iso()
+            }
+        )
+
+    # Watcher alive? A missing or stale heartbeat means the host-side daemon is not
+    # running, so a trigger would sit unclaimed and the button would spin forever.
+    heartbeat_ts = _read_epoch( heartbeat_path )
+    if heartbeat_ts is None or ( now - heartbeat_ts ) > _BOUNCE_HEARTBEAT_STALE_SECS:
+        age = "missing" if heartbeat_ts is None else f"{now - heartbeat_ts}s old"
+        return JSONResponse(
+            status_code = 503,
+            content     = {
+                "status"    : "watcher_unavailable",
+                "reason"    : f"Bounce watcher is not running (heartbeat {age}). "
+                              f"Start src/scripts/bounce-watcher.sh on the host, then retry.",
+                "timestamp" : du.get_current_datetime_iso()
+            }
+        )
+
+    # Drop the trigger. The watcher claims it within one poll interval (~2s).
+    os.makedirs( base, exist_ok=True )
+    with open( trigger_path, "w" ) as f:
+        f.write( str( now ) )
+
+    return JSONResponse(
+        status_code = 202,
+        content     = {
+            "status"    : "triggered",
+            "detail"    : "Warning the fleet, then restarting the server (~20s). Watch for the all-clear.",
+            "timestamp" : du.get_current_datetime_iso()
+        }
+    )

@@ -88,10 +88,23 @@ class TestIsManagerFigure:
         assert mf.is_manager_figure( "s1", environ=ENV_LUPIN, _find_path=find ) is True
 
     def test_punctuation_tolerant_match( self, tmp_path ):
-        # Bridge says "mr radio"; env chain says "Mr. Radio" — must match.
+        # Bridge says "mr radio"; env chain says "Mr. Radio" — must match. Uses
+        # the EXACT live chain form "Mr. Radio,Tiberius,*" (ENV_LUPIN). The
+        # keep-spaces canonical key preserves this match (verified-clear per the
+        # plan's site-6 regression note).
         write, find = bridge_factory( tmp_path )
         write( "s1", { "voice_persona": { "name": "mr radio" } } )
         assert mf.is_manager_figure( "s1", environ=ENV_LUPIN, _find_path=find ) is True
+
+    def test_accent_tolerant_match_FLIP( self, tmp_path ):
+        # FLIP (accent seam): bridge persona "maria" vs declared chain "María".
+        # The pre-Phase-1 accent-keeping normalizer KEPT accents ("María" -> "maría")
+        # and so MISSED this — canonical_persona_key accent-strips both to "maria".
+        # Revert to the pre-Phase-1 accent-keeping normalizer and this assertion fails (False).
+        env = { "LUPIN_ROOT": "/mnt/x/lupin", "COSA_VOICE_PREFERRED_PERSONA__LUPIN": "María,Tiberius,*" }
+        write, find = bridge_factory( tmp_path )
+        write( "s1", { "voice_persona": { "name": "maria" } } )
+        assert mf.is_manager_figure( "s1", environ=env, _find_path=find ) is True
 
     def test_worker_persona_is_not_manager( self, tmp_path ):
         write, find = bridge_factory( tmp_path )

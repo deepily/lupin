@@ -13,7 +13,8 @@
    - Table:           .task-list-table · .task-group-header
                       (+ .task-group-unassigned) · .task-row · .task-col-* ·
                       .task-class-badge · .task-status-dot
-   - Banners:         .task-list-message (+ -unreachable / -empty / -signin)
+   - Banners:         .task-list-message (+ -unreachable / -empty / -signin /
+                      -truncated / -query-unavailable)
    - Color:           .task-status-{blocked,active,review,queued,done,
                       dropped,unknown} · .task-prio-{high,mid,low}
    ============================================================================ */
@@ -151,8 +152,101 @@ tbody.task-group.collapsed .task-row {
     vertical-align: middle;
 }
 
+/* ---- ID column (design 2026.06.29 row redesign — leftmost) ----
+   The compact 8-char row identifier: monospace + tabular nums, no wrap. */
+.task-list-table .task-col-id,
+.task-list-table th.task-col-id {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    color: #868e96;
+    white-space: nowrap;
+}
+
 .task-row .task-col-title {
     font-weight: 600;
+    /* Truncated to ~60 chars in JS (full title rides the hover-tooltip); keep
+       the cell on one line so an over-long legacy title can't wrap the row. */
+    white-space: nowrap;
+    max-width: 30ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* ---- Detail column (design 2026.06.29 row redesign — rightmost 📄) ---- */
+.task-list-table .task-col-detail,
+.task-list-table th.task-col-detail {
+    text-align: center;
+    white-space: nowrap;
+    width: 1%;
+}
+
+.task-detail-emoji {
+    cursor: pointer;
+    user-select: none;
+    border-radius: 4px;
+    padding: 1px 3px;
+    transition: background 0.15s, transform 0.15s;
+}
+
+.task-detail-emoji:hover,
+.task-detail-emoji:focus-visible {
+    background: #e9ecef;
+    transform: scale( 1.12 );
+    outline: none;
+}
+
+/* Empty-body 📄: dimmed IN PLACE — stays in the column for layout uniformity but
+   is disabled / non-clickable (handoff ruling #3). */
+.task-detail-emoji.task-detail-empty {
+    opacity: 0.28;
+    cursor: default;
+    filter: grayscale( 1 );
+}
+
+.task-detail-emoji.task-detail-empty:hover {
+    background: none;
+    transform: none;
+}
+
+/* ---- Body overlay (design 2026.06.29 / D2 — shows the task-store `body`) ---- */
+.task-body-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgb( 0, 0, 0, 0.45 );
+}
+
+.task-body-overlay-content {
+    max-width: min( 680px, 92vw );
+    max-height: 80vh;
+    overflow: auto;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 8px 30px rgb( 0, 0, 0, 0.3 );
+    padding: 16px 18px;
+}
+
+.task-body-overlay-header {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    font-weight: 700;
+    color: #495057;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #e9ecef;
+}
+
+.task-body-overlay-body {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: inherit;
+    font-size: 13px;
+    line-height: 1.5;
+    color: #343a40;
 }
 
 /* Class badge */
@@ -200,6 +294,37 @@ tbody.task-group.collapsed .task-row {
 .task-status-done    .task-status-dot { background: var( --task-done ); }
 .task-status-dropped .task-status-dot { background: var( --task-dropped ); }
 .task-status-unknown .task-status-dot { background: var( --task-unknown ); }
+
+/* ---- Parked rows (2026-07-22) ------------------------------------------------
+   A PARK-ACTIVE row (status "parked" with a chase still in the future) was
+   deliberately ruled not-now by a human. It is SHOWN, not hidden: the server
+   hides parked by default, which is why the dashboard used to report 30 fewer
+   rows than agents saw via task_query. Dimmed so it reads as deferred at a
+   glance, with the operator's own park_reason on the badge tooltip.
+
+   ⚠️ DIMMING IS FOR PARK-*ACTIVE* ONLY. A parked row whose chase has passed, or
+   that carries no chase at all, is NOT dimmed — the store counts it as OWED
+   ("fail-loud-toward-owed", task_store_owed.py), and dimming it would whisper
+   "ignore me" over live work. Predicate: _taskIsParked, the browser twin of
+   park_is_active(). */
+.task-row-parked td {
+    opacity: 0.55;
+    font-style: italic;
+}
+
+.task-parked-badge {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 0 5px;
+    border: 1px solid currentColor;
+    border-radius: 3px;
+    font-size: 0.75em;
+    font-style: normal;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    vertical-align: middle;
+    cursor: help;
+}
 
 /* Row left-edge accent (3px) on the first cell, keyed to the status class */
 .task-row.task-status-blocked td:first-child { box-shadow: inset 3px 0 0 var( --task-blocked ); }
@@ -252,4 +377,31 @@ tbody.task-group.collapsed .task-row {
     background: #f8d7da;
     color: #721c24;
     border: 1px solid #f5c6cb;
+}
+
+/* Board truncated (2026-07-22) — the server held rows back. Deliberately the
+   LOUDEST banner here: silent truncation is the defect this whole change exists
+   to kill, and a quiet notice about quietness would be self-defeating. Sits
+   ABOVE the table rather than replacing it, because the rows that DID arrive are
+   still worth reading. */
+.task-list-truncated {
+    background: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f1a7b0;
+    border-left: 4px solid #c82333;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+/* Query module failed to load — a DEPLOY defect, NOT a store outage. Visually
+   distinct from .task-list-unreachable (violet, not amber) so an operator does
+   not spend 60-second poll cycles triaging a missing static asset as downtime.
+   The two failures share a blank board and share nothing else. */
+.task-list-query-unavailable {
+    background: #ede7f6;
+    color: #4527a0;
+    border: 1px solid #d1c4e9;
+    border-left: 4px solid #5e35b1;
+    text-align: left;
+    line-height: 1.5;
 }

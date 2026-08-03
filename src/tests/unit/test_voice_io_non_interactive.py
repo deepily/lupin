@@ -75,11 +75,19 @@ class TestIsInteractive:
 # ============================================================================
 
 class TestAskYesNoNonInteractive:
-    """Verify ask_yes_no returns default without blocking in non-interactive mode."""
+    """
+    SUPERSEDED PREMISE — see TestChooseNonInteractive's docstring.
+
+    `default` is what an interactive [Y/n] prompt OFFERS. It was also being
+    read as what an ABSENT human meant, which is a different question nobody
+    had answered. Row 84933a05 separates them: `unattended_default` states the
+    second, and omitting it raises. Not blocking on input() is still required
+    and still pinned below.
+    """
 
     @pytest.mark.asyncio
-    async def test_returns_default_yes_when_non_interactive( self ):
-        """ask_yes_no(default='yes') returns True in non-interactive mode."""
+    async def test_refuses_when_non_interactive_and_nothing_declared( self ):
+        """A prompt default is not consent from someone who was never asked."""
         from cosa.agents.utils import voice_io
 
         # Force CLI fallback (no cosa_interface) + non-interactive stdin
@@ -91,15 +99,19 @@ class TestAskYesNoNonInteractive:
 
             with patch.object( sys, "stdin" ) as mock_stdin:
                 mock_stdin.isatty.return_value = False
-                result = await voice_io.ask_yes_no( "Continue?", default="yes" )
-                assert result is True
+                with pytest.raises( voice_io.VoiceGateNoDefaultError ):
+                    await voice_io.ask_yes_no( "Continue?", default="yes" )
+                # ...and the supported unattended path still works.
+                assert await voice_io.ask_yes_no(
+                    "Continue?", default="yes", unattended_default=True
+                ) is True
         finally:
             voice_io._cosa_interface = original_interface
             voice_io._voice_available = original_available
 
     @pytest.mark.asyncio
-    async def test_returns_default_no_when_non_interactive( self ):
-        """ask_yes_no(default='no') returns False in non-interactive mode."""
+    async def test_declared_unattended_false_is_honoured( self ):
+        """False is declared, not absent — the check must be `is None`."""
         from cosa.agents.utils import voice_io
 
         original_interface = voice_io._cosa_interface
@@ -110,7 +122,7 @@ class TestAskYesNoNonInteractive:
 
             with patch.object( sys, "stdin" ) as mock_stdin:
                 mock_stdin.isatty.return_value = False
-                result = await voice_io.ask_yes_no( "Proceed?", default="no" )
+                result = await voice_io.ask_yes_no( "Proceed?", unattended_default=False )
                 assert result is False
         finally:
             voice_io._cosa_interface = original_interface
@@ -130,8 +142,12 @@ class TestAskYesNoNonInteractive:
             with patch.object( sys, "stdin" ) as mock_stdin:
                 mock_stdin.isatty.return_value = False
                 with patch( "builtins.input", side_effect=AssertionError( "input() should not be called" ) ):
-                    result = await voice_io.ask_yes_no( "Question?", default="yes" )
-                    assert result is True
+                    # Still must not block on input(); it now refuses instead.
+                    with pytest.raises( voice_io.VoiceGateNoDefaultError ):
+                        await voice_io.ask_yes_no( "Question?", default="yes" )
+                    assert await voice_io.ask_yes_no(
+                        "Question?", unattended_default=True
+                    ) is True
         finally:
             voice_io._cosa_interface = original_interface
             voice_io._voice_available = original_available
@@ -169,11 +185,20 @@ class TestGetInputNonInteractive:
 # ============================================================================
 
 class TestChooseNonInteractive:
-    """Verify choose returns first option without blocking in non-interactive mode."""
+    """
+    SUPERSEDED PREMISE, kept deliberately as a record.
+
+    This class used to assert that choose() returning options[0] when nobody
+    is there is "deliberate and already gated" — and that framing is why the
+    non-interactive path went unexamined while its twin was being fixed. Row
+    741011ba ruled the other way: position in a list is not consent on ANY
+    path, gated or not. Unattended operation is supported by DECLARING a
+    default, not by the function picking one.
+    """
 
     @pytest.mark.asyncio
-    async def test_returns_first_option_when_non_interactive( self ):
-        """choose() returns first option label in non-interactive mode."""
+    async def test_refuses_to_answer_when_non_interactive( self ):
+        """choose() must not answer for an absent human, even without blocking."""
         from cosa.agents.utils import voice_io
 
         original_interface = voice_io._cosa_interface
@@ -184,18 +209,24 @@ class TestChooseNonInteractive:
 
             with patch.object( sys, "stdin" ) as mock_stdin:
                 mock_stdin.isatty.return_value = False
-                result = await voice_io.choose(
+                with pytest.raises( voice_io.VoiceGateNoDefaultError ):
+                    await voice_io.choose(
+                        "Which format?",
+                        [ "Option A", "Option B", "Option C" ]
+                    )
+                # ...and the supported unattended path still works.
+                assert await voice_io.choose(
                     "Which format?",
-                    [ "Option A", "Option B", "Option C" ]
-                )
-                assert result == "Option A"
+                    [ "Option A", "Option B", "Option C" ],
+                    response_default="Option C"
+                ) == "Option C"
         finally:
             voice_io._cosa_interface = original_interface
             voice_io._voice_available = original_available
 
     @pytest.mark.asyncio
-    async def test_returns_first_option_dict_format( self ):
-        """choose() handles dict-format options in non-interactive mode."""
+    async def test_refuses_with_dict_format_options_too( self ):
+        """The refusal is not specific to string-shaped options."""
         from cosa.agents.utils import voice_io
 
         original_interface = voice_io._cosa_interface
@@ -206,14 +237,14 @@ class TestChooseNonInteractive:
 
             with patch.object( sys, "stdin" ) as mock_stdin:
                 mock_stdin.isatty.return_value = False
-                result = await voice_io.choose(
-                    "Which format?",
-                    [
-                        { "label": "Approve", "description": "Accept as-is" },
-                        { "label": "Revise", "description": "Request changes" },
-                    ]
-                )
-                assert result == "Approve"
+                with pytest.raises( voice_io.VoiceGateNoDefaultError ):
+                    await voice_io.choose(
+                        "Which format?",
+                        [
+                            { "label": "Approve", "description": "Accept as-is" },
+                            { "label": "Revise", "description": "Request changes" },
+                        ]
+                    )
         finally:
             voice_io._cosa_interface = original_interface
             voice_io._voice_available = original_available
@@ -226,9 +257,56 @@ class TestChooseNonInteractive:
 class TestPresentChoicesNonInteractive:
     """Verify present_choices returns defaults without blocking."""
 
+    # Behaviour changed 2026-08-01 (row be8830a3). This class previously
+    # asserted that a non-interactive present_choices() answers with
+    # options[0]. It does not any more: option ORDER is not consent, so a
+    # gate with no explicit response_default now raises instead of guessing.
+    # The two tests below pin both halves of the replacement contract.
+
     @pytest.mark.asyncio
-    async def test_returns_first_option_per_question( self ):
-        """present_choices() returns first option for each question."""
+    async def test_raises_when_no_explicit_default_given( self ):
+        """
+        Non-interactive with no response_default must FAIL LOUDLY rather
+        than answer on the user's behalf.
+        """
+        from cosa.agents.utils import voice_io
+
+        original_interface = voice_io._cosa_interface
+        original_available = voice_io._voice_available
+        try:
+            voice_io._cosa_interface = None
+            voice_io._voice_available = None
+
+            questions = [
+                {
+                    "question"    : "Which style?",
+                    "header"      : "Style",
+                    "multiSelect" : False,
+                    "options"     : [
+                        { "label": "Casual", "description": "Relaxed tone" },
+                        { "label": "Formal", "description": "Professional tone" },
+                    ]
+                }
+            ]
+
+            with patch.object( sys, "stdin" ) as mock_stdin:
+                mock_stdin.isatty.return_value = False
+                with pytest.raises( voice_io.VoiceGateNoDefaultError ) as exc:
+                    await voice_io.present_choices( questions )
+
+                assert exc.value.reason == "non_interactive"
+                assert exc.value.headers == [ "Style" ]
+        finally:
+            voice_io._cosa_interface = original_interface
+            voice_io._voice_available = original_available
+
+    @pytest.mark.asyncio
+    async def test_explicit_default_is_applied_and_flagged( self ):
+        """
+        With an explicit response_default the call succeeds, returns the
+        caller's chosen values, and marks them as a default so the caller
+        can tell this apart from a real selection.
+        """
         from cosa.agents.utils import voice_io
 
         original_interface = voice_io._cosa_interface
@@ -258,13 +336,19 @@ class TestPresentChoicesNonInteractive:
                 }
             ]
 
+            # Deliberately NOT option[0] for either question — proves the
+            # caller's declaration is what lands, not the list ordering.
+            declared = { "Style": "Formal", "Features": [ "Outro" ] }
+
             with patch.object( sys, "stdin" ) as mock_stdin:
                 mock_stdin.isatty.return_value = False
-                result = await voice_io.present_choices( questions )
+                result = await voice_io.present_choices( questions, response_default=declared )
 
-                assert "answers" in result
-                assert result[ "answers" ][ "Style" ] == "Casual"
-                assert result[ "answers" ][ "Features" ] == [ "Intro" ]
+                assert result[ "answers" ][ "Style" ]    == "Formal"
+                assert result[ "answers" ][ "Features" ] == [ "Outro" ]
+                assert result[ "default_used" ]   is True
+                assert result[ "answered" ]       is False
+                assert result[ "default_source" ] == "non_interactive"
         finally:
             voice_io._cosa_interface = original_interface
             voice_io._voice_available = original_available
@@ -275,11 +359,11 @@ class TestPresentChoicesNonInteractive:
 # ============================================================================
 
 class TestSelectThemesNonInteractive:
-    """Verify select_themes selects all in non-interactive mode."""
+    """Same superseded premise as TestChooseNonInteractive — see its docstring."""
 
     @pytest.mark.asyncio
-    async def test_selects_all_themes_when_non_interactive( self ):
-        """select_themes() returns all indices in non-interactive mode."""
+    async def test_refuses_rather_than_selecting_all_themes( self ):
+        """"Nobody answered" must not silently become "wants every theme"."""
         from cosa.agents.utils import voice_io
 
         original_interface = voice_io._cosa_interface
@@ -295,19 +379,22 @@ class TestSelectThemesNonInteractive:
 
             with patch.object( sys, "stdin" ) as mock_stdin:
                 mock_stdin.isatty.return_value = False
-                result = await voice_io.select_themes( themes )
-                assert result == [ 0, 1 ]
+                with pytest.raises( voice_io.VoiceGateNoDefaultError ):
+                    await voice_io.select_themes( themes )
+                assert await voice_io.select_themes(
+                    themes, response_default=[ 0, 1 ]
+                ) == [ 0, 1 ]
         finally:
             voice_io._cosa_interface = original_interface
             voice_io._voice_available = original_available
 
 
 class TestSelectTopicsNonInteractive:
-    """Verify select_topics selects all in non-interactive mode."""
+    """Same superseded premise as TestChooseNonInteractive — see its docstring."""
 
     @pytest.mark.asyncio
-    async def test_selects_all_topics_when_non_interactive( self ):
-        """select_topics() returns all indices in non-interactive mode."""
+    async def test_refuses_rather_than_selecting_all_topics( self ):
+        """This one also spends real search budget per selected topic."""
         from cosa.agents.utils import voice_io
 
         original_interface = voice_io._cosa_interface
@@ -324,8 +411,11 @@ class TestSelectTopicsNonInteractive:
 
             with patch.object( sys, "stdin" ) as mock_stdin:
                 mock_stdin.isatty.return_value = False
-                result = await voice_io.select_topics( topics )
-                assert result == [ 0, 1, 2 ]
+                with pytest.raises( voice_io.VoiceGateNoDefaultError ):
+                    await voice_io.select_topics( topics )
+                assert await voice_io.select_topics(
+                    topics, response_default=[ 0, 1, 2 ]
+                ) == [ 0, 1, 2 ]
         finally:
             voice_io._cosa_interface = original_interface
             voice_io._voice_available = original_available

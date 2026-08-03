@@ -24,6 +24,7 @@ branches the smoke block never reached. The legacy `quick_smoke_test()` +
 `if __name__ == "__main__":` block is therefore MARKED FOR DELETION (manager
 gates the delete post-commit per campaign runbook §9).
 """
+import os
 import asyncio
 import subprocess
 
@@ -128,6 +129,33 @@ def patched_voice( monkeypatch ):
     monkeypatch.setattr( vio, "clear_job_id", Mock() )
     monkeypatch.setattr( ci,  "_get_sender_id", lambda suffix=None: f"test.suite@x#{suffix}" )
     return notify
+
+
+@pytest.fixture( autouse=True )
+def _isolate_artifact_root( tmp_path, monkeypatch ):
+    """
+    Every test in this module writes tier artifacts under a tmp root. AUTOUSE, and
+    that is the load-bearing word.
+
+    THE TWIN THAT WAS MISSED — row 5bf28e07's thesis, live
+    ------------------------------------------------------
+    Krishna landed exactly this fixture on `src/tests/unit/test_test_suite_job.py`
+    (row fd0cd863) and ran the full unit tier green. THIS module is the same job's
+    other test file, and it went red on the same change — 17 failures — because
+    `src/cosa/tests/**` is referenced by NO GATE, so the tier he ran could not see
+    it. Two test files for one unit, one gated and one not: the gated one reported
+    health for both.
+
+    That is `5bf28e07` demonstrated rather than argued, and it is the second reason
+    this fixture is autouse rather than per-test: an opt-in fixture in an UNGATED
+    module is a default nobody will ever be told they missed.
+
+    `_ARTIFACT_DIR` is the single knob — the log file, the symlink and the junit XML
+    all derive from it, so there is nothing left to redirect separately. Patching it
+    also satisfies `attestation.artifact_root()`'s fail-closed refusal, which is what
+    turned this red loudly instead of letting the tests keep writing the live path.
+    """
+    monkeypatch.setattr( TSJob, "_ARTIFACT_DIR", str( tmp_path ) )
 
 
 def _make_job( **overrides ):
@@ -760,25 +788,33 @@ def test_write_stdout_log_empty_text_returns_none():
 
 
 def test_write_stdout_log_writes_file_and_symlink( monkeypatch, tmp_path ):
-    """Valid call writes a timestamped log and refreshes the canonical symlink.
+    """
+    Valid call writes a timestamped log and refreshes the canonical symlink.
 
-    The canonical symlink target is redirected into tmp_path so the real
-    /tmp/<suite>-latest.log is never touched; the timestamped actual-log still
-    lands in /tmp (hard-coded in the method) and is cleaned up here.
+    ⚠️ THIS TEST USED TO DOCUMENT `fd0cd863` IN ITS OWN DOCSTRING. Verbatim, before
+    2026-07-27: *"the timestamped actual-log still lands in /tmp (hard-coded in the
+    method) and is cleaned up here."* It patched `_LOG_SYMLINKS` alone, which moved
+    the symlink and left the real file writing into the live artifact directory —
+    the two-authorities defect, stated as a known limitation and then shipped.
+    "Cleaned up here" was also conditional: a failure before the `finally` left the
+    file behind, which is how `"first run"` came to be sitting in the container's
+    live `/tmp` when Krishna looked.
+
+    Now `_ARTIFACT_DIR` is the single knob and the autouse fixture redirects it, so
+    the log, the symlink and the junit XML move together. The assertion below is
+    against the ISOLATED root — the old `startswith( "/tmp/unit-" )` form required
+    the pollution in order to pass.
     """
     import pathlib
-    symlink = tmp_path / "unit-latest.log"
-    monkeypatch.setattr( job_mod.TestSuiteJob, "_LOG_SYMLINKS", { "unit": str( symlink ) } )
 
     path = TSJob._write_stdout_log( "unit", "hello log\n" )
-    try:
-        assert path is not None and path.startswith( "/tmp/unit-" )
-        assert pathlib.Path( path ).read_text() == "hello log\n"
-        assert symlink.is_symlink()
-        assert pathlib.Path( symlink ).resolve() == pathlib.Path( path ).resolve()
-    finally:
-        pathlib.Path( path ).unlink( missing_ok=True )
-        symlink.unlink( missing_ok=True )
+    symlink = pathlib.Path( TSJob._ARTIFACT_DIR ) / "unit-latest.log"
+
+    assert path is not None
+    assert path.startswith( os.path.join( str( tmp_path ), "unit-" ) )
+    assert pathlib.Path( path ).read_text() == "hello log\n"
+    assert symlink.is_symlink()
+    assert pathlib.Path( symlink ).resolve() == pathlib.Path( path ).resolve()
 
 
 # =========================================================================== #
@@ -907,3 +943,72 @@ def test_parse_non_pytest_stdout_total_only_no_marker_is_none():
     out = TSJob._parse_non_pytest_stdout(
         "websocket", "Total Tests: 12\n" )
     assert out is None
+
+
+# ---------------------------------------------------------------------------
+# Bug 8b93bcf5 follow-up — a DEAD READER THREAD must not read as a clean run.
+#
+# `69295c25` moved readline() off the main path into a daemon reader thread to
+# stop a silent child from parking the poll loop. The move was right; its error
+# path was not. The thread's `finally` posted the EOF sentinel on ANY exit, so a
+# crashed reader was indistinguishable from clean EOF: the loop fell through to
+# `exit_code = process.returncode` and reported a tier whose output was never
+# read as 0 passed / 0 failed / 0 errors / exit 0 — GREEN. Strictly worse than
+# the 0/0/0/1 that 8b93bcf5 was filed about, because that at least said "error".
+#
+# These are the controls. Each fails if the crash sentinel is removed, and the
+# predicted failure is stated so a red here is diagnosable rather than merely red.
+# ---------------------------------------------------------------------------
+
+def test_reader_thread_crash_is_not_reported_as_success( monkeypatch, no_real_log ):
+    """
+    A reader-thread crash must surface as errors=1 / exit_code=1.
+
+    Remove the crash sentinel and this fails as `assert 0 == 1` on exit_code —
+    the exact shape the regression wore for a day before anyone ran this tree.
+    """
+    _patch_config_mgr( monkeypatch, extra="" )
+    monkeypatch.setattr( job_mod.os.path, "exists", lambda p: True )
+    fake = _FakeProcess( lines=[], returncode=0,
+                         readline_raises=RuntimeError( "reader blew up" ) )
+    monkeypatch.setattr( job_mod.subprocess, "Popen", lambda *a, **k: fake )
+
+    job = _make_job()
+    res = job._run_suite( "unit", "/proj" )
+
+    assert res[ "exit_code" ] == 1,  "a crashed reader must not report the child's exit code"
+    assert res[ "errors"    ] == 1,  "a crashed reader must be counted as an error"
+    assert "reader blew up" in res[ "error" ], "the original exception must survive to the caller"
+
+
+def test_reader_crash_marker_is_distinct_from_the_eof_sentinel():
+    """
+    The marker must not BE the EOF sentinel — that identity was the whole bug.
+
+    Without this, someone 'simplifying' the marker back to None would restore
+    the silence and every other test here would stay green.
+    """
+    crash = job_mod._StdoutReaderCrash( ValueError( "x" ), "tb text" )
+    assert crash is not None
+    assert not isinstance( crash, str ), "a marker that is a str would be appended to the log as output"
+    assert crash.exc.args == ( "x", )
+    assert crash.tb == "tb text"
+
+
+def test_clean_eof_still_reports_the_childs_own_exit_code( monkeypatch, no_real_log ):
+    """
+    CONTROL IN THE OTHER DIRECTION: a healthy run must be unaffected.
+
+    A fix that raised on every EOF would pass the crash tests above while
+    breaking every real run — this is the arm that catches it.
+    """
+    _patch_config_mgr( monkeypatch, extra="" )
+    monkeypatch.setattr( job_mod.os.path, "exists", lambda p: True )
+    fake = _FakeProcess( lines=[ "ok\n" ], returncode=0 )
+    monkeypatch.setattr( job_mod.subprocess, "Popen", lambda *a, **k: fake )
+
+    job = _make_job()
+    res = job._run_suite( "unit", "/proj" )
+
+    assert res[ "exit_code" ] == 0
+    assert res.get( "error" ) in ( None, "" ) or "reader" not in str( res.get( "error" ) )

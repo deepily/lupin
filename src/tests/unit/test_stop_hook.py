@@ -19,7 +19,7 @@ Tests cover:
 
 import sys
 import pytest
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import patch, MagicMock, call, sentinel
 
 from lupin_cli.claude_code.hooks.stop import main, _summarize_task, _should_ask_anything_else
 from lupin_cli.notifications.notification_models import NotificationPriority
@@ -477,8 +477,16 @@ class TestConversationModeGate:
             "session_id"       : "abc12345"
         }
 
-        with pytest.raises( SystemExit ):
-            main()
+        # bug aa403e03 (commit 2c5d68220): main() resolves the shared hold-aware
+        # owed verdict ONCE via _resolve_owed_state and threads the SAME bundle
+        # into _run_heartbeat as state=. Patch it with a sentinel and assert the
+        # identical object reaches the poke (contents are opaque on this path — the
+        # state-bundle mapping has its own tests in test_stop_hook_heartbeat.py).
+        # Patching also keeps this unit test hermetic (no live owed-state store read).
+        with patch( "lupin_cli.claude_code.hooks.stop._resolve_owed_state",
+                    return_value=sentinel.idle_state ):
+            with pytest.raises( SystemExit ):
+                main()
 
         # The gate fired with the resolved session_id
         mock_conv.assert_called_once_with( "abc12345" )
@@ -488,8 +496,9 @@ class TestConversationModeGate:
         mock_try_auto_narrate.assert_called_once_with( "abc12345", mock_read.return_value )
         # §3 regression flip: the heartbeat DOES run for speakerphone sessions
         # (this exact assertion was impossible pre-split — the :990 early-exit
-        # bailed before the poke; see the 2026.06.09 brief §2)
-        mock_hb.assert_called_once_with( "abc12345", None, None )
+        # bailed before the poke; see the 2026.06.09 brief §2). aa403e03: the
+        # shared verdict bundle is threaded through as state= (single-compute).
+        mock_hb.assert_called_once_with( "abc12345", None, None, state=sentinel.idle_state )
         # The interactive side effects MUST NOT fire
         mock_drain.assert_not_called()
         mock_notify.assert_not_called()

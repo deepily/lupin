@@ -28,20 +28,20 @@ MOCK_SCRIPT_RESPONSE = {
     "title"                        : "Mock Podcast: Dry Run Test",
     "estimated_duration_minutes"   : 5.0,
     "speakers"                     : {
-        "curious" : { "name": "Alex", "personality": "Friendly and curious" },
-        "expert"  : { "name": "Jordan", "personality": "Knowledgeable and engaging" }
+        "curious" : { "name": "Maria", "personality": "Friendly and curious" },
+        "expert"  : { "name": "Mr. Radio", "personality": "Knowledgeable and engaging" }
     },
     "segments": [
-        { "speaker": "Alex", "role": "curious", "dialogue": "Welcome to today's mock podcast!" },
-        { "speaker": "Jordan", "role": "expert", "dialogue": "Thanks for having me. We're testing the dry run mode." },
-        { "speaker": "Alex", "role": "curious", "dialogue": "How does dry run mode work?" },
-        { "speaker": "Jordan", "role": "expert", "dialogue": "It simulates the entire workflow without making real API calls." },
-        { "speaker": "Alex", "role": "curious", "dialogue": "That's great for testing the UI!" },
-        { "speaker": "Jordan", "role": "expert", "dialogue": "Exactly. No cost, no delays, just quick validation." },
-        { "speaker": "Alex", "role": "curious", "dialogue": "What about the audio generation?" },
-        { "speaker": "Jordan", "role": "expert", "dialogue": "We return silence bytes that look like real PCM audio." },
-        { "speaker": "Alex", "role": "curious", "dialogue": "Perfect for end-to-end testing." },
-        { "speaker": "Jordan", "role": "expert", "dialogue": "That wraps up our dry run demonstration!" }
+        { "speaker": "Maria", "role": "curious", "dialogue": "Welcome to today's mock podcast!" },
+        { "speaker": "Mr. Radio", "role": "expert", "dialogue": "Thanks for having me. We're testing the dry run mode." },
+        { "speaker": "Maria", "role": "curious", "dialogue": "How does dry run mode work?" },
+        { "speaker": "Mr. Radio", "role": "expert", "dialogue": "It simulates the entire workflow without making real API calls." },
+        { "speaker": "Maria", "role": "curious", "dialogue": "That's great for testing the UI!" },
+        { "speaker": "Mr. Radio", "role": "expert", "dialogue": "Exactly. No cost, no delays, just quick validation." },
+        { "speaker": "Maria", "role": "curious", "dialogue": "What about the audio generation?" },
+        { "speaker": "Mr. Radio", "role": "expert", "dialogue": "We return silence bytes that look like real PCM audio." },
+        { "speaker": "Maria", "role": "curious", "dialogue": "Perfect for end-to-end testing." },
+        { "speaker": "Mr. Radio", "role": "expert", "dialogue": "That wraps up our dry run demonstration!" }
     ]
 }
 
@@ -428,7 +428,7 @@ def quick_smoke_test():
         print( "Testing MockTTSSegmentResult..." )
         segment_result = MockTTSSegmentResult(
             segment_index    = 0,
-            speaker          = "Alex",
+            speaker          = "Maria",
             role             = "curious",
             pcm_audio        = silence,
             duration_seconds = 1.0,

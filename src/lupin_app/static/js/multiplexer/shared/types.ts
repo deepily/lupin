@@ -68,6 +68,18 @@ export type LupinEventType =
   | "job_state_transition"
   | "job_removed"
   | "sys_time_update"
+  // R5 (2026-07-01) — session-name/topic control event. NotificationStore
+  // intercepts a `session_topic` notification (raw notification_type), skips
+  // carding it (legacy notifications.js:5862 "skip history card"), and re-emits
+  // it on this bus event; SenderStore consumes it to set SenderRecord.session_name.
+  | "session_topic"
+  // 00c (Phase-6 TTS playback) — server end-of-utterance marker on /ws/audio
+  // (`speech.py:818-822` OpenAI / `:1115-1119` ElevenLabs). AudioTransport
+  // already subscribes (`AudioTransport.ts:24`) and re-emits it on the bus via
+  // the inherited `BaseTransportImpl.onMessage`; AudioStore subscribes in P6-c
+  // to set its stream-complete flag. Registered here (F-Krishna-B1) so the
+  // subscribe is type-checked rather than an `as LupinEventType` cast.
+  | "audio_streaming_complete"
   // Phase 4 store emissions — each store emits exactly one type per state
   // mutation; renderers subscribe by store. Payloads carry a `changeKind`
   // discriminator so renderers can fast-path-decide what to repaint.
@@ -125,7 +137,46 @@ export type LupinEventType =
   | "store_fleet_status_changed"
   // Step 4 (task-list card): TaskListStore emits when a `/api/tasks` poll
   //   resolves (success, unreachable, or 401).
-  | "store_task_list_changed";
+  | "store_task_list_changed"
+  // Section-toolbar + accordion-collapse parity (2026-06-23, Rachel): the
+  // ViewStateStore emits this ONLY for the cross-renderer bulk intent
+  // (collapse-all / expand-all). Per-section + per-accordion mutations persist
+  // silently (the owning renderer applies the DOM directly), so they do NOT
+  // emit — only the toolbar → NotificationsListRenderer bulk signal rides the
+  // bus. NotificationsListRenderer subscribes and flips every accordion.
+  | "store_view_state_changed"
+  // ── F0 (00b) — TtsQueueStore cross-plan seams ──────────────────────────────
+  // store_tts_queue_changed — F0's OWN event. TtsQueueStore emits it on every
+  // notification-item-queue mutation (enqueue / advance / removeById / clear /
+  // completion-driven self-advance / stop-clear). Declared canonically HERE by
+  // F0, its architectural owner. CROSS-PLAN SEAM: Rio's B4 lane (01-D) landed an
+  // early duplicate of this member so its NotificationsListRenderer could consume
+  // the F0 seam (`TtsQueueStoreLike.current()`) before F0 existed; the serial-
+  // merge deduped the two identical-semantic lines to this single canonical
+  // declaration (manager-owned reconcile — Mr. Radio, 2026-06-29). See 00b §2 F0-c.
+  | "store_tts_queue_changed"
+  // store_notification_tts_intent — F0-d producer seam. NotificationStore emits
+  // this ONCE per SPOKEN new-arrival (a high/urgent notification, dedup'd by the
+  // byId.has re-arrival guard; live-only path so hydration never emits). It is a
+  // DECOUPLING signal: NotificationStore does NOT reach into TtsQueueStore (two
+  // stores must not couple — codebase idiom is stores-emit / boot-wires); instead
+  // boot subscribes and calls `TtsQueueStore.enqueue()`. SPEC (Tiberius ruling
+  // 2026-07-02, sustained on primary-artifact grounds — reviewed against legacy,
+  // NOT memento): gate = priority ∈ {high, urgent} ONLY (legacy notifications.js
+  // :5917 job-card + :5985 fire-and-forget both enqueue TTS for ALL high/urgent;
+  // suppress_ding affects the ding + enqueue-delay only, NEVER speech). ttsText =
+  // tts_raw === true ? message : formatTtsMessage(priority, message) — the
+  // fire-and-forget default-contextualized derivation (legacy :5987-5989 +
+  // formatter :4176-4187). Payload: StoreNotificationTtsIntentPayload.
+  | "store_notification_tts_intent"
+  // store_audio_ended — 00c (Phase-6 playback engine) emits this signal-OUT-only
+  // on NATURAL utterance completion. F0's TtsQueueStore SUBSCRIBES and self-
+  // advances (COND-2 ownership boundary: P6 never calls advance() / touches the
+  // active id). CROSS-PLAN SEAM: 00c introduces the event, but F0 lands FIRST in
+  // the cascade (F0 → P6 → 01), so F0 declares the union member + its minimal
+  // payload here and 00c CONSUMES it rather than re-declaring (manager-reconciled
+  // at merge). See 00b §5 F0-f + 00c §3.
+  | "store_audio_ended";
 
 // ---------------------------------------------------------------------------
 // LupinEvent envelope — the canonical pub/sub shape.
@@ -308,6 +359,21 @@ export interface VoicePersona {
 // `normalize()` copies each through when present.
 // ---------------------------------------------------------------------------
 
+// WP14 (F8) — prediction-hint payload riding on a notification. The server
+// stamps a hint (CBR/LLM prediction of how the user will answer) onto the
+// notification frame; NotificationStore.normalize() copies it through, and the
+// notification-item render path mounts the thumbs-vote controls when the hint's
+// confidence clears PREDICTION_VOTE_MIN_PCT. `response_type` (the kind of
+// answer predicted) already rides on Notification above. `predicted_value` is
+// echoed back verbatim at vote-POST time (the server does not persist the hint,
+// so the client supplies what was voted on — parity with legacy notifications.js
+// `_predictionVoteContext`).
+export interface PredictionHint {
+  confidence      : number;     // 0.0–1.0; ×100 → percent for the gate + display
+  predicted_value : unknown;    // echoed back on vote (opaque to the renderer)
+  category        : string;     // training-signal bucket (echoed back on vote)
+}
+
 export interface Notification {
   id_hash         : string;
   ts              : number;          // ms epoch (normalized from server `timestamp` ISO string)
@@ -321,12 +387,20 @@ export interface Notification {
   response_type?  : "yes_no" | "multiple_choice" | "open_ended" | "open_ended_batch";
   options?        : ReadonlyArray<string>;   // valid choices for multiple_choice; ["yes","no"] for yes_no
   default_value?  : string;          // returned on local expiry without POST
+  prediction_hint?: PredictionHint;  // WP14 (F8) — thumbs-vote training-signal source
   // Phase 5 D-B (2026-05-05) — renderer-surfaced fields.
   voice_persona?    : VoicePersona;   // per-sender persona for --persona-color CSS var
   abstract?         : string;         // detailed description; surfaced via 📋 indicator
   progress_group_id?: string;         // groups messages with history accordion (Q-G)
   was_expired?      : boolean;        // true → renders EXPIRED badge on sender-message
   time_display?     : string;         // backend-provided "HH:MM TZ" override
+  // WS2 / C2-d (D3 — Rick 2026-06-20): chat-bubble direction. Absent/"incoming"
+  // → inbound persona message (.sender-message.incoming); "outgoing" → the
+  // user's response, rendered .sender-message.outgoing. Set by the responded-
+  // split (load-time: NotificationStore.hydrateHistory; harness: toMuxModel),
+  // which expands one responded notification into an incoming prompt + a
+  // synthetic `{id}-response` outgoing reply (mirrors legacy notifications.js).
+  direction?        : "incoming" | "outgoing";
 }
 
 export type NotificationChangeKind =
@@ -334,7 +408,18 @@ export type NotificationChangeKind =
   | "updated"
   | "expired"
   | "removed"
-  | "hydrated";
+  | "hydrated"
+  | "filtered";   // B3 (01-C): setFilterMode changed the active filter — renderer re-renders from visibleEntries()
+
+// B3 (01-C, Rick OWN-ONLY ruling 67fc18f0/a767e1ae; axis ruling Mr. Radio 2026-06-29):
+// the notification-list filter axis. The mux Notification payload carries NO
+// owner/recipient discriminator (NotificationStore.ts:436-437), so the legacy
+// multi-user "own vs others" is vacuous; the one client-available axis is
+// `direction` (incoming/outgoing). own = inbound (direction !== "outgoing"),
+// others = the user's own sent replies (direction === "outgoing"), all = pass.
+// Default + only-wired mode is "own"; the toggle/badge/admin-gating UI is
+// DEFERRED per Rick's scope, so a future real axis swaps in with zero rework.
+export type NotificationFilterMode = "own" | "others" | "all";
 
 export interface StoreNotificationsChangedPayload {
   changeKind : NotificationChangeKind;
@@ -390,6 +475,26 @@ export interface SenderRecord {
   unread_count             : number;
   conversation_mode_active : boolean;
   voice_persona?           : VoicePersona;
+  // Lane A (2026-06-24): true when this sender is a MANAGED worker — i.e. its
+  // voice_persona_assigned payload (or cold-load row) carries a manager_persona,
+  // the same signal SessionStripStore reads. The render gate suppresses the
+  // numeric .sender-new-count for workers (faint sign-of-life pulse kept via the
+  // shared parity sheet's .sender-card[data-worker="true"] rule). Undefined ⇒ not a worker.
+  is_worker?               : boolean;
+  // R5 (2026-07-01): human-readable session name/topic, populated from
+  // `session_topic` control notifications (legacy notifications.js:5856
+  // saveSessionName + refreshSessionNameDisplay). Rendered into the card
+  // header's `.sender-session-name` span. Client-persisted (localStorage
+  // mirror in SenderStore) since the cold-load hydration does NOT carry it.
+  session_name?            : string;
+}
+
+// R5 (2026-07-01) — payload of the `session_topic` bus event (NotificationStore
+// → SenderStore). Both fields required at the emit site (NotificationStore only
+// emits when raw sender_id + session_name are present).
+export interface SessionTopicPayload {
+  sender_id    : string;
+  session_name : string;
 }
 
 export type SenderChangeKind = "added" | "updated" | "removed" | "hydrated";
@@ -537,6 +642,87 @@ export interface StoreAudioChunkDecodedPayload {
 }
 
 // ---------------------------------------------------------------------------
+// F0 (00b) — Notification-level TTS queue (TtsQueueStore).
+//
+// The notification-item TTS queue is distinct from AudioStore's PCM-chunk
+// burst counter (`burstLength()`): this models the NOTIFICATIONS waiting to be
+// spoken (one item per notification), not the raw audio frames of a single
+// utterance. Ported from the legacy client-side `ttsQueue` item shape
+// (`notifications.js:308` — `{id, type, notification, ttsText, addedAt}`) +
+// the active-item field `this.activeTTSItem` (`:309`), which maps 1:1 to
+// `TtsQueueStore.current()`.
+// ---------------------------------------------------------------------------
+
+// One queued TTS notification item. `id_hash` is the canonical key — it equals
+// `Notification.id_hash` (the field Plan 01 B4 gates the active bubble on, and
+// the value `current()` returns). The remaining fields are optional carry-
+// through context for the renderer + the Phase-6 playback engine; F0's queue
+// logic keys ONLY on `id_hash`.
+export interface TtsQueueItem {
+  id_hash       : string;
+  notification ?: Notification;   // the source notification (renderer context)
+  ttsText      ?: string;         // the text submitted to /ws/audio (legacy `ttsText`)
+  addedAt      ?: number;         // ms epoch the item was enqueued (legacy `addedAt`)
+  // 70cbff3e (A1 producer-seam, Tiberius 2026-07-02): whether the source
+  // notification is action-required. TtsQueueStore reads it on store_audio_ended
+  // to decide focus-mode ENTER (active AR item finished speaking → hold the roll).
+  // Legacy keys on the item's OWN type (`justCompletedItem.type==='action-required'`,
+  // notifications.js:17178), so the flag rides the item, not a store cross-ref.
+  // Optional + absent → false (a fire-and-forget item never enters focus).
+  action_required ?: boolean;
+  // 766bb609 (producer-seam, Tiberius GO 2026-07-03): the source notification's
+  // per-session persona voice_id (from voice_persona). wireTtsPlayback adds it to
+  // the /api/get-speech-elevenlabs POST body so each CC session speaks in its own
+  // voice. Optional + absent → omitted from the body = server default voice (Sam),
+  // legacy's null-voice_id case (notifications.js:4262-4293) — unchanged.
+  voice_id ?: string;
+}
+
+// store_tts_queue_changed payload (F0-c). Emitted by TtsQueueStore on every
+// queue mutation. `activeNotificationId` is the id_hash of the notification
+// whose TTS is currently being spoken (the F0-a active id) — null when nothing
+// plays, never a stale id. `pending` is the FIFO tail of items waiting to be
+// spoken (does NOT include the active head). Plan 01 B4 gates exactly one
+// bubble on `activeNotificationId`; Plan 03 renders `pending`.
+export interface StoreTtsQueueChangedPayload {
+  activeNotificationId : string | null;
+  pending              : ReadonlyArray<TtsQueueItem>;
+}
+
+// store_notification_tts_intent payload (F0-d producer seam). Emitted by
+// NotificationStore on every SPOKEN new-arrival (high/urgent). `id_hash` is the
+// canonical notification key (equals Notification.id_hash / TtsQueueItem.id_hash
+// — what the boot wire enqueues and TtsQueueStore.current() returns). `ttsText`
+// is the already-derived text to speak (contextualized unless tts_raw). `priority`
+// is carried through for the renderer/consumer (never re-gated downstream — the
+// gate lives ONLY at the emit site). See the LupinEventType member comment for the
+// full ratified SPEC + legacy line citations.
+export interface StoreNotificationTtsIntentPayload {
+  id_hash  : string;
+  ttsText  : string;
+  priority : string;
+  // 70cbff3e (A1 producer-seam): the normalized action-required flag, carried
+  // through so wireTtsIntent can stamp it onto the enqueued TtsQueueItem. Gated
+  // the same as the emit (high/urgent only), but action_required is orthogonal to
+  // priority — an action-required prompt may be high/urgent OR not.
+  action_required : boolean;
+  // 766bb609 (producer-seam): the source notification's persona voice_id (from
+  // voice_persona.voice_id), carried through so wireTtsIntent can stamp it onto
+  // the enqueued TtsQueueItem. Optional — a notification without a voice_persona
+  // omits it (→ server default voice downstream).
+  voice_id ?: string;
+}
+
+// store_audio_ended payload (F0-f / 00c seam). 00c's Phase-6 playback engine
+// emits this signal-OUT-only on natural utterance completion; F0's TtsQueueStore
+// subscribes and self-advances. It is a SIGNAL — F0 reads NO fields from it
+// (it just calls advance()), so the payload is a minimal marker. `reason` is an
+// optional free-text emit-side annotation 00c may set; F0 ignores it.
+export interface StoreAudioEndedPayload {
+  reason ?: string;
+}
+
+// ---------------------------------------------------------------------------
 // Phase 4 — boot.ts boot_complete payload (D-C ratification 2026-05-04 PM).
 //
 // Emitted once at end of bootMultiplexer() with the resolved binary handler
@@ -614,6 +800,14 @@ export interface BootCompletePayload {
     // after the task-list card mounts. Optional per the same forward/backward-
     // compat pattern + runtime-unconditional in boot.ts.
     taskListRenderer?            : string;
+    // Section-toolbar + accordion-collapse parity (2026-06-23): literal
+    // "mounted" emitted after the section-toolbar mounts at the NEW-LANE MOUNT
+    // SLOT. Optional per the forward/backward-compat pattern.
+    sectionToolbarRenderer?     : string;
+    // Lane L4 (v0.1.9): literal "mounted" emitted after the top nav / logout
+    // bar mounts at the NEW-LANE MOUNT SLOT. Optional per the same
+    // forward/backward-compat pattern.
+    navBarRenderer?             : string;
   };
 }
 
@@ -666,6 +860,24 @@ export type ReadingPaneChangeKind =
 
 export interface StoreReadingPaneChangedPayload {
   changeKind : ReadingPaneChangeKind;
+}
+
+// ---------------------------------------------------------------------------
+// Section-toolbar + accordion-collapse parity (2026-06-23, Rachel 🕊️ / Mr.
+// Radio lane). ViewStateStore owns two persisted maps (section visibility +
+// accordion collapse). It emits `store_view_state_changed` ONLY for the
+// cross-renderer bulk intent — collapse-all / expand-all driven from the
+// section-toolbar, applied by NotificationsListRenderer to every accordion.
+// Per-section + per-accordion toggles persist silently (owning renderer
+// applies DOM directly), so the only `changeKind`s are the two bulk ones.
+// ---------------------------------------------------------------------------
+
+export type ViewStateChangeKind =
+  | "collapse-all"   // requestBulkAccordionCollapse(true): collapse every accordion
+  | "expand-all";    // requestBulkAccordionCollapse(false): expand every accordion
+
+export interface StoreViewStateChangedPayload {
+  changeKind : ViewStateChangeKind;
 }
 
 // ---------------------------------------------------------------------------

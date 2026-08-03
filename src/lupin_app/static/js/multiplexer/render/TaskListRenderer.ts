@@ -20,23 +20,44 @@
 
 import type { EventBus } from "../shared/EventBus";
 import type { StoreTaskListChangedPayload } from "../shared/types";
-import { formatFleetTimestamp } from "./fleetModel";
+import { ApiError } from "../api/ApiClient";
+import { formatFleetTimestamp, type FleetComposite } from "./fleetModel";
 import {
+  activeReassignTargets,
   groupTasksByOwner,
   isOpenStatus,
   type TaskItem,
   type TaskListComposite,
 } from "./taskListModel";
+import type { TaskMutation, TaskPatchFields } from "../stores/TaskListStore";
 import { renderTaskListTable } from "./templates/taskListTable";
 import { loadCollapsedOwners, saveCollapsedOwners, toggleCollapsedOwner } from "./taskListCollapse";
+import {
+  renderSectionHeader,
+  wireSectionCollapse,
+  type SectionHeaderHandle,
+} from "./templates/sectionHeader";
 
 export interface TaskListStoreLike {
   composite(): TaskListComposite | null;
   refresh(): Promise<void>;
+  // Phase 2 — optimistic write surface (priority/owner edit + drop). Both return
+  // a `{ restoreState, done }` handle the renderer drives (JobsPaneRenderer flow).
+  patchTask( id: string, fields: TaskPatchFields ): TaskMutation;
+  dropTask( id: string, reason: string ): TaskMutation;
+}
+
+// The fleet store the owner-reassignment roster is sourced from (Phase 2 — the
+// SAME source the fleet-status card consumes). Only `composite()` is needed.
+export interface TaskListFleetLike {
+  composite(): FleetComposite | null;
 }
 
 export interface TaskListRendererStores {
   taskList : TaskListStoreLike;
+  // Optional so read-only / legacy constructions still mount; when absent the
+  // owner-reassignment roster is empty (the select shows only the current owner).
+  fleet?   : TaskListFleetLike;
 }
 
 export interface TaskListRenderer {
@@ -50,7 +71,13 @@ export interface TaskListRendererOptions {
   stores     : TaskListRendererStores;
   /** Test injection — the clock for the "updated" stamp. Defaults to `new Date()`. */
   nowDateFn? : () => Date;
+  /** Test injection — the timer for the ID click-to-copy flash. Defaults to `setTimeout`. */
+  setTimeoutFn? : ( cb: () => void, ms: number ) => unknown;
 }
+
+// How long the transient "copied" flash stays on the ID cell (F1 2026.07.01).
+// Mirrors the notifications.js checkmark dwell (~1.2s).
+const COPIED_FLASH_MS = 1200;
 
 function messageEl( className: string, text: string ): HTMLParagraphElement {
   const p = document.createElement( "p" );
@@ -63,23 +90,39 @@ class TaskListRendererImpl implements TaskListRenderer {
   private readonly bus       : EventBus;
   private readonly stores    : TaskListRendererStores;
   private readonly nowDateFn : () => Date;
+  private readonly setTimeoutFn : ( cb: () => void, ms: number ) => unknown;
   private readonly unsubscribers: Array<() => void> = [];
 
   private root      : HTMLElement | null = null;
   private container : HTMLElement | null = null;
   private countEl   : HTMLElement | null = null;
   private updatedEl : HTMLElement | null = null;
+  // Lane 0a — section-header handle + collapse-listener teardown.
+  private header    : SectionHeaderHandle | null = null;
+  private collapseOff: ( () => void ) | null = null;
   private mounted   = false;
 
   // Last successfully-fetched OPEN rows — replayed under the "store unreachable"
   // indicator so a transient outage degrades to stale-not-blank.
   private lastGoodTasks : TaskItem[] | null = null;
 
+  // Phase 2 — keys of in-flight edits ("<id>:priority" / "<id>:owner" / "<id>:drop")
+  // so a rapid second activation on the same control+row is a no-op until the
+  // first settles (clears in the .finally of the mutation chain). Mirrors
+  // JobsPaneRenderer.deleteInFlight.
+  private readonly editInFlight: Set<string> = new Set();
+
+  // Row redesign 2026.06.29 — the document-level Esc listener for the body
+  // overlay, stored so dismissTaskBodyOverlay can detach it (null when closed).
+  private taskBodyOverlayKeyListener: ( ( e: KeyboardEvent ) => void ) | null = null;
+
   constructor( opts: TaskListRendererOptions ) {
     this.bus    = opts.eventBus;
     this.stores = opts.stores;
     /* c8 ignore next */ // production-default fallback: `new Date()` is the runtime clock; tests inject a fixed-date fn.
     this.nowDateFn = opts.nowDateFn ?? ( () => new Date() );
+    /* c8 ignore next */ // production-default fallback: `setTimeout` is the runtime timer; tests inject a controllable fn.
+    this.setTimeoutFn = opts.setTimeoutFn ?? ( ( cb, ms ) => globalThis.setTimeout( cb, ms ) );
   }
 
   mount( root: HTMLElement ): void {
@@ -89,27 +132,12 @@ class TaskListRendererImpl implements TaskListRenderer {
     this.mounted = true;
     this.root = root;
 
-    const header = document.createElement( "header" );
-    header.className = "task-list-header";
-
-    const title = document.createElement( "h2" );
-    title.className = "task-list-title";
-    title.textContent = "📋 Task List";
-    header.appendChild( title );
-
-    this.countEl = document.createElement( "span" );
-    this.countEl.className = "task-list-count";
-    this.countEl.setAttribute( "data-testid", "multiplexer-task-list-count" );
-    this.countEl.textContent = "0";
-    header.appendChild( this.countEl );
-
     const refreshBtn = document.createElement( "button" );
     refreshBtn.type = "button";
     refreshBtn.className = "task-list-refresh";
     refreshBtn.setAttribute( "data-testid", "multiplexer-task-list-refresh" );
     refreshBtn.textContent = "⟳";
     refreshBtn.addEventListener( "click", () => void this.stores.taskList.refresh() );
-    header.appendChild( refreshBtn );
 
     // Per-persona accordion: collapse-all / expand-all. The JS card puts these in
     // its #section-toolbar; the multiplexer has no such toolbar, so they live in
@@ -122,7 +150,6 @@ class TaskListRendererImpl implements TaskListRenderer {
     collapseAllBtn.setAttribute( "title", "Collapse all task owners" );
     collapseAllBtn.textContent = "⊟";
     collapseAllBtn.addEventListener( "click", () => this.collapseAll() );
-    header.appendChild( collapseAllBtn );
 
     const expandAllBtn = document.createElement( "button" );
     expandAllBtn.type = "button";
@@ -131,31 +158,59 @@ class TaskListRendererImpl implements TaskListRenderer {
     expandAllBtn.setAttribute( "title", "Expand all task owners" );
     expandAllBtn.textContent = "⊞";
     expandAllBtn.addEventListener( "click", () => this.expandAll() );
-    header.appendChild( expandAllBtn );
 
     this.updatedEl = document.createElement( "span" );
     this.updatedEl.className = "task-list-updated";
     this.updatedEl.setAttribute( "data-testid", "multiplexer-task-list-updated" );
-    header.appendChild( this.updatedEl );
+
+    // Lane 0a — convert the bespoke .task-list-header into the uniform
+    // .section-header bar (📋 Task List). Refresh + collapse-all/expand-all +
+    // updated stamp move into the .section-header-actions slot; the count uses
+    // the shared .section-header-count chip (legacy testid preserved). NOTE: the
+    // per-owner ROW collapse (collapseAll/expandAll → taskListCollapse.ts,
+    // localStorage) is SEPARATE from the section-header's session-only collapse.
+    const header = renderSectionHeader( {
+      icon    : "📋",
+      title   : "Task List",
+      testid  : "multiplexer-task-list-header",
+      actions : [ refreshBtn, collapseAllBtn, expandAllBtn, this.updatedEl ],
+    } );
+    this.header  = header;
+    this.countEl = header.countEl;
+    this.countEl.setAttribute( "data-testid", "multiplexer-task-list-count" );
+    this.countEl.textContent = "0";
 
     this.container = document.createElement( "div" );
-    this.container.className = "task-list-container";
+    // The container IS the collapsible body — carries `.section-content` so the
+    // shared `[data-collapsed="true"] > .section-content` rule hides it.
+    this.container.className = "section-content task-list-container";
     this.container.setAttribute( "data-testid", "multiplexer-task-list-container" );
 
-    // Accordion delegation: ONE click+keyboard listener on the persistent
-    // container (its children are replaced each render, the element is not), so a
-    // header toggle survives every re-render with no per-row re-binding.
-    this.container.addEventListener( "click", ( e ) => this.handleAccordionToggle( e.target ) );
+    // Delegation: ONE set of listeners on the persistent container (its children
+    // are replaced each render, the element is not), so every handler survives
+    // re-render with no per-row re-binding. Click dispatches the drop-button
+    // BEFORE the accordion toggle (the drop button lives inside a .task-row, not
+    // a header, so it never matches the toggle anyway — but dispatching it first
+    // keeps the intent explicit, mirroring JobsPaneRenderer F23). The `change`
+    // listener handles the priority + owner selects.
+    this.container.addEventListener( "click", ( e ) => this.handleContainerClick( e.target ) );
+    this.container.addEventListener( "change", ( e ) => this.handleControlChange( e.target ) );
     this.container.addEventListener( "keydown", ( e ) => {
       const ke = e as KeyboardEvent;
       if ( ke.key !== "Enter" && ke.key !== " " && ke.key !== "Spacebar" ) return;
+      // Enter/Space activates a focused detail 📄, an accordion header, OR an
+      // interactive ID cell (F1 2026.07.01 — copy-to-clipboard). The ID cell is
+      // only keyboard-operable when it carries [role="button"] (a real id).
+      const emoji  = ( e.target as Element ).closest( ".task-detail-emoji" );
       const header = ( e.target as Element ).closest( ".task-group-header" );
-      if ( !header ) return;
-      e.preventDefault();   // Space must toggle the group, not scroll the page
-      this.handleAccordionToggle( e.target );
+      const idCell = ( e.target as Element ).closest( '.task-col-id[role="button"]' );
+      if ( !emoji && !header && !idCell ) return;
+      e.preventDefault();   // Space must act, not scroll the page
+      this.handleContainerClick( e.target );
     } );
 
-    root.replaceChildren( header, this.container );
+    root.replaceChildren( header.header, this.container );
+    this.collapseOff = wireSectionCollapse( root, header );
 
     // Initial paint (composite may be null until the first poll resolves).
     this.renderFromStore( false );
@@ -169,8 +224,13 @@ class TaskListRendererImpl implements TaskListRenderer {
   }
 
   unmount(): void {
+    this.dismissTaskBodyOverlay();   // tear down any open body overlay + its Esc listener
     for ( const off of this.unsubscribers ) off();
     this.unsubscribers.length = 0;
+    if ( this.collapseOff !== null ) {
+      this.collapseOff();
+      this.collapseOff = null;
+    }
     if ( this.root !== null ) {
       this.root.replaceChildren();
       this.root = null;
@@ -178,6 +238,7 @@ class TaskListRendererImpl implements TaskListRenderer {
     this.container = null;
     this.countEl = null;
     this.updatedEl = null;
+    this.header = null;
     this.mounted = false;
   }
 
@@ -213,10 +274,17 @@ class TaskListRendererImpl implements TaskListRenderer {
       this.container.replaceChildren( messageEl( "task-list-empty", "✅ No open tasks." ) );
     } else {
       const model = groupTasksByOwner( openTasks );
-      this.container.replaceChildren( renderTaskListTable( model, undefined, loadCollapsedOwners() ) );
+      this.container.replaceChildren( renderTaskListTable( model, undefined, loadCollapsedOwners(), this.reassignTargets() ) );
     }
 
     if ( stampUpdated ) this.stampUpdated();
+  }
+
+  // The owner-reassignment roster: active personas (Sam INCLUDED — Q5) from the
+  // SAME fleet source the fleet-status card consumes. Empty when no fleet store is
+  // wired (optional construction) or no fleet data is cached yet (null composite).
+  private reassignTargets(): string[] {
+    return activeReassignTargets( this.stores.fleet?.composite() ?? null );
   }
 
   /**
@@ -232,7 +300,7 @@ class TaskListRendererImpl implements TaskListRenderer {
 
     if ( this.lastGoodTasks !== null && this.lastGoodTasks.length > 0 ) {
       const model = groupTasksByOwner( this.lastGoodTasks );
-      this.container.replaceChildren( indicator, renderTaskListTable( model, undefined, loadCollapsedOwners() ) );
+      this.container.replaceChildren( indicator, renderTaskListTable( model, undefined, loadCollapsedOwners(), this.reassignTargets() ) );
       this.setCount( this.lastGoodTasks.length );
     } else {
       this.container.replaceChildren( indicator, messageEl( "task-list-empty", "No tasks loaded yet." ) );
@@ -248,6 +316,179 @@ class TaskListRendererImpl implements TaskListRenderer {
     /* c8 ignore next */ // defensive: stampUpdated only runs from renderFromStore past its container-null guard; updatedEl is set/nulled in lockstep with container. Belt-and-suspenders.
     if ( this.updatedEl === null ) return;
     this.updatedEl.textContent = `updated ${formatFleetTimestamp( this.nowDateFn(), undefined )}`;
+  }
+
+  // -------------------------------------------------------------------------
+  // Per-row editing (Phase 2) — delegated change/click → optimistic store call
+  // -------------------------------------------------------------------------
+
+  /**
+   * Container click dispatch. The drop-button path fires BEFORE the accordion
+   * toggle (mirrors JobsPaneRenderer F23 — query by class, dispatch the active
+   * control first). A non-drop click falls through to the accordion toggle.
+   */
+  private handleContainerClick( target: EventTarget | null ): void {
+    // Detail 📄 (row redesign 2026.06.29) dispatches FIRST: a LIVE emoji opens the
+    // body overlay; a DIMMED (empty-body) emoji is inert (no overlay, no toggle).
+    const emoji = ( target as Element ).closest( ".task-detail-emoji" );
+    if ( emoji !== null ) {
+      if ( !emoji.classList.contains( "task-detail-empty" ) ) {
+        const el = emoji as HTMLElement;
+        this.openTaskBodyOverlay( el.dataset.taskBody ?? "", el.dataset.taskId ?? "" );
+      }
+      return;   // a detail-emoji click is never also a drop/accordion action
+    }
+    const dropButton = ( target as Element ).closest( ".task-drop-button" );
+    if ( dropButton !== null ) {
+      this.handleDropClick( dropButton );
+      return;
+    }
+    // ID cell click-to-copy (F1 2026.07.01): a real-id cell copies its FULL uuid.
+    // An em-dash (idless) cell has no [role="button"] but still matches .task-col-id;
+    // handleIdCopy no-ops on the empty id, so the click is a harmless dead-end.
+    const idCell = ( target as Element ).closest( ".task-col-id" );
+    if ( idCell !== null ) {
+      this.handleIdCopy( idCell as HTMLElement );
+      return;
+    }
+    this.handleAccordionToggle( target );
+  }
+
+  /**
+   * `change` on a priority or owner select → optimistic patch. Resolves the
+   * target task id from the row's `data-task-id`; an empty id (a row whose
+   * server row carried no id) is a defensive no-op.
+   */
+  private handleControlChange( target: EventTarget | null ): void {
+    const select = ( target as Element ).closest<HTMLSelectElement>(
+      "select.task-priority-select, select.task-owner-select",
+    );
+    if ( select === null ) return;
+    const id = this.taskIdOf( select );
+    if ( id === "" ) return;   // defensive: a row without an id cannot be mutated
+    const value = select.value;
+    if ( select.classList.contains( "task-priority-select" ) ) {
+      this.commitMutation( `${id}:priority`, id, () => this.stores.taskList.patchTask( id, { priority: value } ) );
+    } else {
+      this.commitMutation( `${id}:owner`, id, () => this.stores.taskList.patchTask( id, { owner_persona: value } ) );
+    }
+  }
+
+  /**
+   * Drop-button click → read the sibling inline reason input, enforce the
+   * non-blank reason the `→dropped` transition requires (inline error stripe
+   * when blank — no api call), then optimistic drop.
+   */
+  private handleDropClick( dropButton: Element ): void {
+    const row = dropButton.closest<HTMLElement>( ".task-row" );
+    /* c8 ignore next */ // defensive: the drop button only ever lives inside a .task-row per the template invariant.
+    if ( row === null ) return;
+    const id = this.rowId( row );
+    if ( id === "" ) return;   // defensive: idless row cannot be dropped
+    const input  = row.querySelector<HTMLInputElement>( ".task-drop-reason" );
+    /* c8 ignore next */ // defensive: renderActionsCell always renders a `.task-drop-reason` input in every row, so `input` is never null and `.value` is always a string — the `?? ""` guards a template-invariant violation that cannot occur.
+    const reason = ( input?.value ?? "" ).trim();
+    if ( reason === "" ) {
+      this.renderRowError( id, "A drop reason is required." );
+      return;
+    }
+    this.commitMutation( `${id}:drop`, id, () => this.stores.taskList.dropTask( id, reason ) );
+  }
+
+  /**
+   * ID-cell click / Enter / Space (F1 2026.07.01): copy the row's FULL id (the
+   * uuid on `data-task-id`, not the visible 8-char prefix) to the clipboard, then
+   * flash a transient no-reflow "copied" state on the cell.
+   *
+   * Guards (never throws):
+   *   - idless row (data-task-id === "") → no-op (nothing to copy)
+   *   - runtime without `navigator.clipboard` → graceful no-op (no feedback)
+   *   - writeText rejection (permission denied) → swallowed, no flash
+   */
+  private handleIdCopy( idCell: HTMLElement ): void {
+    const row = idCell.closest<HTMLElement>( ".task-row" );
+    /* c8 ignore next */ // defensive: an ID cell only ever lives inside a .task-row per the template invariant.
+    if ( row === null ) return;
+    const fullId = this.rowId( row );
+    if ( fullId === "" ) return;   // idless row → nothing to copy
+    const clipboard = navigator.clipboard;
+    if ( clipboard == null ) return;   // unsupported runtime → graceful no-op
+    void clipboard.writeText( fullId )
+      .then( () => this.flashCopied( idCell ) )
+      .catch( () => { /* clipboard denied/failed → no feedback, no throw */ } );
+  }
+
+  /**
+   * Flash the transient "copied" affordance on the ID cell: add `.task-id-copied`
+   * (a same-width color/overlay change via CSS — NO text swap, so the row never
+   * reflows and the visual snapshot is unaffected), then remove it after
+   * COPIED_FLASH_MS. Mirrors the notifications.js checkmark dwell.
+   */
+  private flashCopied( idCell: HTMLElement ): void {
+    idCell.classList.add( "task-id-copied" );
+    this.setTimeoutFn( () => idCell.classList.remove( "task-id-copied" ), COPIED_FLASH_MS );
+  }
+
+  // Resolve a control's owning task id from its `.task-row[data-task-id]`.
+  private taskIdOf( el: Element ): string {
+    const row = el.closest<HTMLElement>( ".task-row" );
+    /* c8 ignore next */ // defensive: every editable control is rendered inside a .task-row per the template invariant.
+    if ( row === null ) return "";
+    return this.rowId( row );
+  }
+
+  // Read a row's task id. renderTaskRow ALWAYS sets `data-task-id` (to "" when
+  // the server row carried no id), so getAttribute never returns null here.
+  private rowId( row: HTMLElement ): string {
+    /* c8 ignore next */ // defensive: data-task-id is always set by renderTaskRow (template invariant), so getAttribute never returns null and the `?? ""` RHS is unreachable.
+    return row.getAttribute( "data-task-id" ) ?? "";
+  }
+
+  /**
+   * Shared optimistic-mutation driver (clones JobsPaneRenderer.handleDeleteClick):
+   * in-flight dedupe on `key`, invoke the store mutation (optimistic local edit +
+   * `done` promise), and on settle —
+   *   - 2xx → keep the optimistic edit;
+   *   - ApiError 404 → treat as success (the row is already gone server-side);
+   *   - any other error → `restoreState()` + an inline row error stripe.
+   */
+  private commitMutation( key: string, id: string, run: () => TaskMutation ): void {
+    if ( this.editInFlight.has( key ) ) return;   // rapid re-activation is a no-op until settle
+    this.editInFlight.add( key );
+    const { restoreState, done } = run();
+    done
+      .then( () => { /* success — optimistic state stands */ } )
+      .catch( ( err: unknown ) => {
+        if ( err instanceof ApiError && err.status === 404 ) return;   // gone → success
+        restoreState();
+        this.renderRowError( id, deriveEditErrorMessage( err ) );
+      } )
+      .finally( () => { this.editInFlight.delete( key ); } );
+  }
+
+  /**
+   * Append an inline error stripe to the row for `id`. After a `restoreState()`
+   * the store's synchronous re-emit has already repainted the table, so this
+   * targets the freshly-rendered row (the dataset lookup sidesteps id-escape
+   * concerns). A no-matching-row lookup is a benign no-op.
+   */
+  private renderRowError( id: string, message: string ): void {
+    /* c8 ignore next */ // defensive: renderRowError only runs while mounted (container set); the listeners detach in unmount before container is nulled.
+    if ( this.container === null ) return;
+    let target: HTMLElement | null = null;
+    for ( const row of Array.from( this.container.querySelectorAll<HTMLElement>( ".task-row" ) ) ) {
+      if ( row.dataset.taskId === id ) { target = row; break; }
+    }
+    /* c8 ignore next */ // defensive: the row is always in the DOM here (drop-blank path: unchanged DOM; failure path: restoreState repainted it).
+    if ( target === null ) return;
+    const existing = target.querySelector( ".task-row-error-stripe" );
+    if ( existing !== null ) existing.remove();   // replace any prior stripe (no stacking)
+    const stripe = document.createElement( "td" );
+    stripe.className = "task-row-error-stripe";
+    stripe.setAttribute( "role", "alert" );
+    stripe.setAttribute( "aria-live", "polite" );
+    stripe.textContent = message;
+    target.appendChild( stripe );
   }
 
   // -------------------------------------------------------------------------
@@ -285,6 +526,80 @@ class TaskListRendererImpl implements TaskListRenderer {
     saveCollapsedOwners( new Set() );
     this.renderFromStore( false );
   }
+
+  // -------------------------------------------------------------------------
+  // Body overlay (row redesign 2026.06.29 / D2 — renders the task `body`)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Show a small dismissible overlay rendering the task-store `body` (D2 — the
+   * BODY field, NOT the notification abstract). All DOM via createElement +
+   * textContent (no innerHTML — safe-write for the store-sourced body). Dismiss
+   * on backdrop click or Escape.
+   *
+   * Ensures:
+   *   - any prior overlay is removed first (single instance)
+   *   - the overlay carries an id header + the body in a <pre> (whitespace kept)
+   *   - a backdrop click OR Escape removes the overlay AND detaches its keydown listener
+   */
+  private openTaskBodyOverlay( bodyText: string, idLabel: string ): void {
+    this.dismissTaskBodyOverlay();
+
+    const overlay = document.createElement( "div" );
+    overlay.id        = "task-body-overlay";
+    overlay.className = "task-body-overlay";
+
+    const panel = document.createElement( "div" );
+    panel.className = "task-body-overlay-content";
+
+    const header = document.createElement( "div" );
+    header.className = "task-body-overlay-header";
+    header.textContent = idLabel ? `Task ${idLabel}` : "Task detail";
+
+    const pre = document.createElement( "pre" );
+    pre.className = "task-body-overlay-body";
+    pre.textContent = bodyText;   // textContent → no HTML injection from body
+
+    panel.appendChild( header );
+    panel.appendChild( pre );
+    overlay.appendChild( panel );
+
+    // Backdrop click dismisses; a click INSIDE the panel does not (stopPropagation).
+    overlay.addEventListener( "click", () => this.dismissTaskBodyOverlay() );
+    panel.addEventListener( "click", ( e ) => e.stopPropagation() );
+
+    this.taskBodyOverlayKeyListener = ( e: KeyboardEvent ): void => {
+      if ( e.key === "Escape" ) this.dismissTaskBodyOverlay();
+    };
+    document.addEventListener( "keydown", this.taskBodyOverlayKeyListener );
+
+    document.body.appendChild( overlay );
+  }
+
+  /**
+   * Tear down the body overlay if present: remove the element + the document
+   * Esc listener. Idempotent (the open path calls it first to enforce a single
+   * instance; unmount calls it to clean up).
+   */
+  private dismissTaskBodyOverlay(): void {
+    if ( this.taskBodyOverlayKeyListener !== null ) {
+      document.removeEventListener( "keydown", this.taskBodyOverlayKeyListener );
+      this.taskBodyOverlayKeyListener = null;
+    }
+    const existing = document.getElementById( "task-body-overlay" );
+    if ( existing !== null ) existing.remove();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers (module-private)
+// ---------------------------------------------------------------------------
+
+function deriveEditErrorMessage( err: unknown ): string {
+  if ( err instanceof ApiError ) return `Edit failed (HTTP ${err.status})`;
+  if ( err instanceof Error )    return `Edit failed: ${err.message}`;
+  /* c8 ignore next */ // defensive: ApiClient always rejects with Error subclasses; this is a safety net for non-Error throws.
+  return "Edit failed";
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.

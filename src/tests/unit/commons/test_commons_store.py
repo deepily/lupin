@@ -459,3 +459,201 @@ def test_ac10b_real_fcntl_concurrent_append():
         for e in entries:
             assert e[ "body" ].startswith( "sess" )
             assert "-" in e[ "body" ]
+
+
+# ---------- Archive-aware read (store row ff1924b5) ----------
+#
+# `commons_archival` rotates entries older than 24h into archive/yyyy-mm-dd/<topic>.md
+# (AC9 — the writer working as designed). `read()` was never extended to follow, so
+# commons was WRITE-ONLY beyond one day through its documented interface: the active
+# post-game.md held 101 bytes while its archive held 1,140,882, and read() returned [].
+#
+# THE TWO ARMS BELOW MUST BOTH BE ASSERTED IN THE SAME SUITE. A fix proven only on the
+# "archive is read" arm is indistinguishable from one that reads 1.1 MB on every call,
+# and a fix proven only on the "live window is fast" arm is indistinguishable from the
+# defect. Neither arm alone can tell the fix from a plausible wrong version.
+
+
+def _seed_archive( root, topic, day, entries ):
+    """
+    Ensures: archive/<day>/<topic>.md exists holding `entries` as (ts, body) pairs,
+             in the same on-disk format `post` writes — so these tests exercise the
+             real parser, not a fixture-shaped imitation of it.
+    """
+    day_dir = Path( root ) / "io" / "commons" / "archive" / day
+    day_dir.mkdir( parents=True, exist_ok=True )
+    blocks = [ _frontmatter_block( topic, False, "2026-07-01T00:00:00+00:00" ) ]
+    for ts, body in entries:
+        blocks.append( _format_entry( ts, "sess1234", "Clayton", "😎", "#000", body, {} ) )
+    ( day_dir / f"{topic}.md" ).write_text(
+        blocks[ 0 ] + ENTRY_SEPARATOR.join( blocks[ 1: ] ), encoding="utf-8" )
+    return day_dir / f"{topic}.md"
+
+
+def test_ARM_1_a_since_inside_the_live_window_does_NOT_touch_the_archive():
+    """
+    The control that stops the fix from becoming a different defect. A tail of recent
+    activity must be answerable from the active file alone — otherwise every routine
+    poll reads the whole archive, and "correct but unusable" replaces "wrong".
+
+    Asserted by making the archive reader EXPLODE if it is consulted. A count-based
+    spy would pass a version that called it and discarded the result.
+
+    ⚠️ "IN THE LIVE WINDOW" MEANS `since >= the oldest ACTIVE entry`, and my first
+    version of this test got that wrong: it passed `since="2026-01-01"` and asserted the
+    archive stayed shut. That expectation was FALSE — the archive really does hold
+    entries after 2026-01-01, so declining to look would have been a wrong answer. The
+    explode-probe went red and it was the TEST that was defective, not the fix. Kept as
+    a note because a control that fails for the wrong reason is worth nothing, and a
+    name asserting one thing while the value asserts another is how that happens. The
+    `since` is now DERIVED from a real entry instead of written by hand.
+    """
+    with tempfile.TemporaryDirectory() as root:
+        store = CommonsStore( root )
+        store.post( "post-game", "first live entry",  "sess1234", "Clayton", "😎", "#000" )
+        time.sleep( 0.01 )                       # distinct timestamps, no clock assumptions
+        store.post( "post-game", "second live entry", "sess1234", "Clayton", "😎", "#000" )
+        _seed_archive( root, "post-game", "2026-07-18",
+                       [ ( "2026-07-18T15:00:00+00:00", "archived entry" ) ] )
+
+        # The boundary the predicate turns on: everything after the OLDEST ACTIVE entry
+        # is fully contained in the active file, so nothing older can be relevant.
+        #
+        # ⚠️ READ THE ACTIVE FILE DIRECTLY. My second attempt took this min over
+        # `store.read(limit=50)` — which, with no `since` and only 2 live entries, ALSO
+        # consults the archive and therefore returned an ARCHIVED timestamp as the
+        # "oldest active" one. The probe went red again, and again the test was the
+        # defective party. Deriving a boundary from the very function under test is how
+        # a fixture ends up asserting the code's bug back at it.
+        active_entries   = store._parse_topic_file( store._topic_path( "post-game" ) )
+        oldest_active_ts = min( e[ "ts" ] for e in active_entries )
+
+        def explode( *a, **kw ):
+            raise AssertionError( "the archive was consulted for an in-window since" )
+        store._archive_topic_paths = explode
+
+        got = store.read( "post-game", since=oldest_active_ts, limit=50 )
+        assert [ e[ "body" ] for e in got ] == [ "second live entry" ]
+
+
+def test_ARM_2_a_since_behind_the_rotation_DOES_return_archived_entries():
+    """
+    The defect itself, reproduced and then fixed. Before the change this returned [].
+    """
+    with tempfile.TemporaryDirectory() as root:
+        store = CommonsStore( root )
+        _seed_archive( root, "post-game", "2026-07-18",
+                       [ ( "2026-07-18T15:06:06+00:00", "clayton deposit one" ),
+                         ( "2026-07-18T15:08:09+00:00", "clayton deposit two" ) ] )
+
+        got = store.read( "post-game", since="2026-07-17T00:00:00+00:00", limit=50 )
+        assert [ e[ "body" ] for e in got ] == [ "clayton deposit one", "clayton deposit two" ]
+
+
+def test_no_since_with_an_EMPTY_active_file_falls_back_to_the_archive():
+    """
+    The arm that bit hardest in the field: no `since` at all, an active file holding
+    only its YAML header, and the entire honest answer in the archive. This is the
+    literal call that returned [] and nearly got a real handoff declared dead.
+    """
+    with tempfile.TemporaryDirectory() as root:
+        store = CommonsStore( root )
+        ( Path( root ) / "io" / "commons" / "post-game.md" ).write_text(
+            _frontmatter_block( "post-game", False, "2026-06-30T00:00:00+00:00" ),
+            encoding="utf-8" )
+        _seed_archive( root, "post-game", "2026-07-19",
+                       [ ( "2026-07-18T15:06:06+00:00", "the deposit" ) ] )
+
+        got = store.read( "post-game", limit=20 )
+        assert [ e[ "body" ] for e in got ] == [ "the deposit" ]
+
+
+def test_no_since_with_a_FULL_active_file_does_NOT_touch_the_archive():
+    """
+    ARM 1's twin for the no-`since` path. If the active file already yields `limit`
+    entries, no older day can displace any of them, so the archive must stay shut.
+    """
+    with tempfile.TemporaryDirectory() as root:
+        store = CommonsStore( root )
+        for i in range( 3 ):
+            store.post( "post-game", f"live {i}", "sess1234", "Clayton", "😎", "#000" )
+        _seed_archive( root, "post-game", "2026-07-18",
+                       [ ( "2026-07-18T15:00:00+00:00", "archived" ) ] )
+
+        def explode( *a, **kw ):
+            raise AssertionError( "the archive was consulted for a satisfied no-since read" )
+        store._archive_topic_paths = explode
+
+        got = store.read( "post-game", limit=3 )
+        assert len( got ) == 3
+        assert all( e[ "body" ].startswith( "live" ) for e in got )
+
+
+def test_an_entry_in_BOTH_surfaces_is_returned_ONCE():
+    """
+    Mandatory, not defensive. `commons_archival`'s own docstring records that its
+    archive-append-before-active-rewrite ordering can, on a failed rewrite, leave the
+    same entries in BOTH files for a cycle. A merge without a key would double-report
+    exactly those entries — introducing a defect while fixing one.
+    """
+    with tempfile.TemporaryDirectory() as root:
+        store = CommonsStore( root )
+        dup_ts, dup_body = "2026-07-18T15:06:06+00:00", "the duplicated entry"
+        active = Path( root ) / "io" / "commons" / "post-game.md"
+        active.write_text(
+            _frontmatter_block( "post-game", False, "2026-06-30T00:00:00+00:00" )
+            + _format_entry( dup_ts, "sess1234", "Clayton", "😎", "#000", dup_body, {} ),
+            encoding="utf-8" )
+        _seed_archive( root, "post-game", "2026-07-18", [ ( dup_ts, dup_body ) ] )
+
+        got = store.read( "post-game", since="2026-07-01T00:00:00+00:00", limit=50 )
+        assert [ e[ "body" ] for e in got ] == [ dup_body ], "the duplicate was double-reported"
+
+
+def test_a_day_older_than_since_is_skipped_WITHOUT_being_opened():
+    """
+    The bound that keeps the fix usable: irrelevant dailies are skipped by DIRECTORY
+    NAME, never by reading them. Proven by pointing the skipped day's file at content
+    that would be unmistakable if it were parsed.
+    """
+    with tempfile.TemporaryDirectory() as root:
+        store = CommonsStore( root )
+        _seed_archive( root, "post-game", "2026-05-01",
+                       [ ( "2026-05-01T10:00:00+00:00", "ancient and must not appear" ) ] )
+        _seed_archive( root, "post-game", "2026-07-18",
+                       [ ( "2026-07-18T15:00:00+00:00", "in range" ) ] )
+
+        got = store.read( "post-game", since="2026-07-01T00:00:00+00:00", limit=50 )
+        bodies = [ e[ "body" ] for e in got ]
+        assert bodies == [ "in range" ]
+        assert store._archive_topic_paths( "post-game", "2026-07-01T00:00:00+00:00" ) == [
+            Path( root ) / "io" / "commons" / "archive" / "2026-07-18" / "post-game.md" ]
+
+
+def test_a_missing_active_file_no_longer_short_circuits_to_empty():
+    """
+    Half of the reported defect was a literal `return []` when the active topic file
+    was absent. A topic can be rotated wholesale, or its active file removed, while
+    its history stands in the archive.
+    """
+    with tempfile.TemporaryDirectory() as root:
+        store = CommonsStore( root )
+        assert not ( Path( root ) / "io" / "commons" / "free-form-topic.md" ).exists()
+        _seed_archive( root, "free-form-topic", "2026-07-18",
+                       [ ( "2026-07-18T15:00:00+00:00", "survives in the archive" ) ] )
+
+        got = store.read( "free-form-topic", since="2026-07-01T00:00:00+00:00", limit=50 )
+        assert [ e[ "body" ] for e in got ] == [ "survives in the archive" ]
+
+
+def test_a_missing_RESERVED_topic_still_raises():
+    """
+    The pre-existing AC4 contract must survive the change: a reserved topic file that
+    does not exist is a real fault, not an archive lookup.
+    """
+    with tempfile.TemporaryDirectory() as root:
+        store = CommonsStore( root )
+        reserved = next( iter( RESERVED_TOPICS ) )
+        ( Path( root ) / "io" / "commons" / f"{reserved}.md" ).unlink()
+        with pytest.raises( FileNotFoundError ):
+            store.read( reserved )

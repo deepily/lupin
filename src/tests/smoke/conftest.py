@@ -33,6 +33,53 @@ import os
 
 import pytest
 
+from tests.smoke.tmux_isolation import restore_tmux_context, strip_tmux_context
+
+
+@pytest.fixture( scope="session", autouse=True )
+def tmux_fleet_socket_isolation( tmp_path_factory ):
+    """
+    Fixtures arm at first-test SETUP; import/collection-time tmux in smoke
+    modules stays prohibited.
+
+    Fleet-killer CLASS guard (P0, 2026-07-14): strip the ambient tmux pane
+    context ($TMUX/$TMUX_PANE) and pin a per-session private TMUX_TMPDIR so
+    ANY bare `tmux` from ANY smoke test auto-isolates from the shared fleet
+    socket (/tmp/tmux-<uid>/default). On tmux 3.2a an inherited $TMUX BEATS
+    TMUX_TMPDIR for socket selection — stripping is what makes the pin win.
+    Pure logic lives in tests.smoke.tmux_isolation (unit-tested to 100%);
+    this wrapper is measured under smoke-suite coverage.
+
+    The strip arms at first-test setup and stays live through the end of the
+    WHOLE pytest session — in a mixed repo-root run, non-smoke tests running
+    after arm-time also see the stripped env (by design: no legitimate test
+    may address the fleet socket). The prior environment is restored
+    byte-for-byte at session teardown.
+
+    Requires:
+        - tmp_path_factory (pytest built-in session fixture)
+
+    Ensures:
+        - TMUX/TMUX_PANE absent and TMUX_TMPDIR pinned to a private dir for
+          the whole pytest session from first-test setup onward
+        - yields the pinned dir (the AC2 regression test requests this
+          fixture BY NAME and asserts the pin)
+        - snapshot restored byte-for-byte at session teardown (absent keys
+          end absent; present keys end at their snapshot value)
+
+    Raises:
+        - None
+
+    Design: fix plan §5.2 + revision-handoff §4 (shared-mutable-state matrix).
+    """
+    snapshot = strip_tmux_context( os.environ )
+    pinned   = tmp_path_factory.mktemp( "tmux-isolated" )
+    os.environ[ "TMUX_TMPDIR" ] = str( pinned )
+
+    yield pinned
+
+    restore_tmux_context( os.environ, snapshot )
+
 
 def pytest_addoption( parser ):
     """

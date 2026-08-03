@@ -24,7 +24,7 @@ from lupin_arbiter_app.arbiter_live_notify import (
     build_notify_request, build_dm_send_payload, make_dm_push_fn,
     make_live_notify_fn, make_notify_transport, parse_notify_outcome,
     resolve_arbiter_api_key, validate_live_notify_target,
-    _default_log_fn, quick_smoke_test, NOTIFY_PATH, DM_SEND_PATH,
+    _default_log_fn, _default_peer_dm_reminder, quick_smoke_test, NOTIFY_PATH, DM_SEND_PATH,
 )
 from lupin_arbiter_app.fleet_arbiter_loop import make_escalation_notify_fn, ESCALATION_TOPIC
 from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob
@@ -84,6 +84,23 @@ class TestBuildNotifyRequest:
         )
         assert "suppress_ding=true" in url
         assert "priority=urgent" in url and "type=custom" in url and "title=Custom" in url
+
+    def test_persist_defaults_true_byte_identical( self ):
+        """Bug e1bbe011: the default persists a forensic row (byte-identical prior
+        behavior for every existing caller)."""
+        url, _ = build_notify_request(
+            "x", base_url="http://h:7999", target_user="r@x.com", sender_id="s", api_key="k",
+        )
+        assert "persist=true" in url
+
+    def test_persist_false_rides_as_flood_guard( self ):
+        """The re-announce transport (persist=False) carries `persist=false` so a
+        delivery-only retry never mints a duplicate DB row."""
+        url, _ = build_notify_request(
+            "re-announce retry", base_url="http://h:7999", target_user="r@x.com",
+            sender_id="s", api_key="k", persist=False,
+        )
+        assert "persist=false" in url and "persist=true" not in url
 
 
 # ── make_live_notify_fn — the DEDUP guard (receipt b) ──────────────────────────
@@ -212,6 +229,27 @@ class TestMakeNotifyTransport:
         t( "alert" )
         out = capsys.readouterr().out
         assert "live_notify_sent" in out and '"outcome": "queued"' in out
+
+    def test_persist_defaults_true_in_request_url( self ):
+        """The first-send transport (default) threads persist=true into the POST URL."""
+        seen = [ ]
+        t = make_notify_transport(
+            http_post_fn=lambda u, h, s: ( seen.append( u ), ( 200, { "status": "queued" } ) )[ 1 ],
+            log_fn=lambda e, **f: None, **self._ARGS )
+        t( "first send" )
+        assert "persist=true" in seen[ 0 ]
+
+    def test_persist_false_threads_into_request_url( self ):
+        """Bug e1bbe011: the re-announce transport (persist=False) threads
+        persist=false all the way into the POST URL — the flood-guard end to end."""
+        seen = [ ]
+        t = make_notify_transport(
+            persist=False,
+            http_post_fn=lambda u, h, s: ( seen.append( u ), ( 200, { "status": "user_not_available" } ) )[ 1 ],
+            log_fn=lambda e, **f: None, **self._ARGS )
+        out = t( "re-announce retry" )
+        assert "persist=false" in seen[ 0 ] and "persist=true" not in seen[ 0 ]
+        assert out[ "outcome" ] == "user_not_available"     # delivery outcome unaffected by persist
 
 
 # ── validate_live_notify_target — the §3.6 misconfig guard (tonight's R1) ──────
@@ -357,6 +395,21 @@ class TestResolveArbiterApiKey:
         assert key is None
         out = capsys.readouterr().out
         assert "live_notify_disabled" in out and "development" in out
+
+
+def test_default_peer_dm_reminder_frames_one_way():
+    """bug 8894e597: the arbiter's default reminder builder frames pokes ONE-WAY —
+    the arbiter is a pure observer with no inbox (bug 9694fb11), so its wake-nudge
+    must NOT carry a dm_send reply affordance the poked session cannot deliver. This
+    pins the WIRING (arbiter → one_way=True), not just the shared builder's flag."""
+    framed = _default_peer_dm_reminder(
+        "you appear STUCK — status?", "heartbeat-arbiter", "🛰️", "m-1", "t-1",
+    )
+    assert "PEER DM from heartbeat-arbiter 🛰️" in framed
+    assert "you appear STUCK — status?" in framed
+    assert "dm_send" not in framed and "Reply via" not in framed   # no false affordance
+    assert "ONE-WAY" in framed and "no inbox" in framed            # honest one-way notice
+    assert "resuming work" in framed and "acknowledgment" in framed
 
 
 def test_default_log_fn_emits_structured_json( capsys ):

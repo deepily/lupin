@@ -126,6 +126,13 @@ class TestVisualRegression:
         # overlays which produce subpixel rendering differences between runs.
         browser_page.evaluate( NORMALIZE_DYNAMIC_CONTENT_JS )
 
+        # fonts.ready + 2 RAFs so any NotoColorEmoji glyphs (persona/status icons
+        # on the notifications/multiplexer/etc. full-page captures) are loaded
+        # before the pixel snapshot — the emoji font-race the Gate D fix closed
+        # (3c7e0aab / task_editing.py). No-op on the non-emoji pages.
+        browser_page.evaluate( "() => document.fonts.ready" )
+        browser_page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
+
         # Take screenshot and compare against baseline.
         # The name parameter creates human-readable snapshot filenames.
         assert_snapshot(

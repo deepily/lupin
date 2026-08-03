@@ -110,11 +110,14 @@ class FcmWakeService:
         Ensures:
             - self.enabled is True only when the master INI switch is on AND a
               working transport exists (injected, or real firebase_admin init
-              succeeded against the service-account JSON at the INI-named env var)
+              succeeded — via the "fcm wake auth mode" fork: "key_file" against
+              the service-account JSON at the INI-named env var, or "adc" via
+              Application Default Credentials)
             - when disabled, self.disabled_reason names the single cause and one
               clear log line was printed — construction NEVER raises (OSQ-7)
             - per-user debounce window loaded from "fcm wake debounce seconds"
               (default 60)
+            - auth mode loaded from "fcm wake auth mode" (default "key_file")
 
         Raises:
             - None (all init failure modes degrade to disabled)
@@ -129,6 +132,7 @@ class FcmWakeService:
         self.debounce_seconds  = config_mgr.get( "fcm wake debounce seconds", default=60, return_type="int", silent=True )
         master_switch          = config_mgr.get( "fcm wake push enabled", default=True, return_type="boolean", silent=True )
         self._credentials_env  = config_mgr.get( "fcm service account credentials env var", default="FCM_SERVICE_ACCOUNT_JSON", silent=True )
+        self._auth_mode        = config_mgr.get( "fcm wake auth mode", default="key_file", silent=True )
 
         # Per-user debounce state: user_id → monotonic time of last wake attempt.
         # In-memory by design — a debounce window is transient state; a restart
@@ -166,10 +170,48 @@ class FcmWakeService:
 
     def _init_real_transport( self ) -> bool:
         """
-        Lazily import firebase_admin and initialize the NAMED FCM app.
+        Initialize the NAMED FCM app via the configured auth mode (F-S6-2).
 
-        Kept separate from the mock Firebase AUTH layer in auth.py (F-S6-2):
-        own env var, own credential object, own named app — no shared state.
+        Two first-class, permanently-supported auth modes (feature-flag fork on
+        the "fcm wake auth mode" INI key — both paths are permanent, neither is
+        a deprecation ramp):
+
+            - "key_file" (DEFAULT) — resolve a downloaded Firebase service-account
+              JSON via the INI-named env var, then `credentials.Certificate(path)`.
+              The original, back-compatible behavior.
+            - "adc" — resolve Application Default Credentials (the runtime
+              service account, e.g. the GCE VM's attached SA) via
+              `credentials.ApplicationDefault()`. No key FILE, no env var — the
+              keyless path required when org policy
+              `iam.disableServiceAccountKeyCreation` blocks key downloads.
+
+        Both arms feed the SAME get_app/initialize_app + messaging transport flow.
+        Kept separate from the mock Firebase AUTH layer in auth.py (F-S6-2): own
+        credential object, own named app — no shared state.
+
+        Requires:
+            - self._auth_mode is "key_file" or "adc"
+            - in "key_file" mode, self._credentials_env names the env var holding
+              the JSON path
+
+        Ensures:
+            - returns True with self._transport set on success
+            - returns False after _disable() naming the exact failure arm:
+              key_file → env var unset, file missing, module missing, init error;
+              adc → module missing, ADC resolution / init error
+            - NEVER raises (OSQ-7 tolerance)
+        """
+        if self._auth_mode == "adc":
+            return self._init_real_transport_adc()
+        return self._init_real_transport_key_file()
+
+    def _init_real_transport_key_file( self ) -> bool:
+        """
+        Initialize the NAMED FCM app from a downloaded service-account JSON key.
+
+        The original (DEFAULT) key-file auth path — unchanged behavior. Resolves
+        the JSON path from the INI-named env var, requires the file to exist, then
+        builds a `credentials.Certificate` and feeds the shared init flow.
 
         Requires:
             - self._credentials_env names the env var holding the JSON path
@@ -198,6 +240,67 @@ class FcmWakeService:
 
         try:
             cred = credentials.Certificate( credentials_path )
+        except Exception as e:
+            self._disable( f"Firebase init failed for {self._credentials_env}={credentials_path}: {type( e ).__name__}: {e}" )
+            return False
+
+        return self._finalize_real_transport( firebase_admin, messaging, cred, f"key_file from {self._credentials_env}" )
+
+    def _init_real_transport_adc( self ) -> bool:
+        """
+        Initialize the NAMED FCM app from Application Default Credentials (keyless).
+
+        The keyless ADC auth path — no downloaded key file, no env var. Resolves
+        the runtime service account (e.g. the GCE VM's attached SA) via
+        `credentials.ApplicationDefault()`, then feeds the shared init flow. This
+        is the path mandated when org policy `iam.disableServiceAccountKeyCreation`
+        blocks downloading service-account JSON keys.
+
+        Requires:
+            - the runtime environment exposes Application Default Credentials
+              (an attached service account, or GOOGLE_APPLICATION_CREDENTIALS)
+
+        Ensures:
+            - returns True with self._transport set on success
+            - returns False after _disable() naming the exact failure arm:
+              module missing, or ADC resolution / init error
+            - NEVER raises (OSQ-7 tolerance)
+        """
+        try:
+            import firebase_admin
+            from firebase_admin import credentials, messaging
+        except ImportError as e:
+            self._disable( f"firebase_admin not importable ({e}) — install the 'firebase-admin' dependency" )
+            return False
+
+        try:
+            cred = credentials.ApplicationDefault()
+        except Exception as e:
+            self._disable( f"Application Default Credentials could not be resolved (ADC auth mode): {type( e ).__name__}: {e}" )
+            return False
+
+        return self._finalize_real_transport( firebase_admin, messaging, cred, "ADC" )
+
+    def _finalize_real_transport( self, firebase_admin, messaging, cred, source_label: str ) -> bool:
+        """
+        Build the NAMED FCM app + messaging transport from a resolved credential.
+
+        Shared tail of both auth arms: get-or-create the named app, wire the
+        data-only high-priority transport, and emit the single Enabled log line.
+        The firebase_admin + messaging modules are passed in (already imported by
+        the calling auth arm) so this shared tail has no redundant import guard.
+
+        Requires:
+            - firebase_admin and messaging are the imported firebase_admin modules
+            - cred is a resolved firebase_admin credential object
+            - source_label names the credential source for the log line
+
+        Ensures:
+            - returns True with self._transport set on success
+            - returns False after _disable() on any get_app/init/transport error
+            - NEVER raises (OSQ-7 tolerance)
+        """
+        try:
             try:
                 app = firebase_admin.get_app( FIREBASE_APP_NAME )
             except ValueError:
@@ -212,10 +315,10 @@ class FcmWakeService:
                 messaging.send( message, app=app )
 
             self._transport = _real_transport
-            print( f"[FCM-WAKE] Enabled — Firebase app '{FIREBASE_APP_NAME}' initialized from {self._credentials_env}" )
+            print( f"[FCM-WAKE] Enabled — Firebase app '{FIREBASE_APP_NAME}' initialized ({source_label})" )
             return True
         except Exception as e:
-            self._disable( f"Firebase init failed for {self._credentials_env}={credentials_path}: {type( e ).__name__}: {e}" )
+            self._disable( f"Firebase init failed ({source_label}): {type( e ).__name__}: {e}" )
             return False
 
     def maybe_send_wake( self, user_id: str, reason: str = WAKE_REASON_UNDELIVERED ) -> str:

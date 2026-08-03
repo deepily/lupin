@@ -9,7 +9,10 @@
 //
 // Read-contract (LOCKED, cascade §F): read-only consumer of the EXISTING
 // `GET /api/tasks` endpoint (routers/tasks.py:419-477) which returns FULL rows.
-// This card does NOT touch tasks.py.
+// Phase 2 (per-worker task editing) adds the PATCH/transition WRITE consumers in
+// TaskListStore — the card stays a pure consumer; it still does NOT touch tasks.py.
+
+import { splitFleetByLiveness, type FleetComposite } from "./fleetModel";
 
 // ---------------------------------------------------------------------------
 // Wire shapes (all fields optional — rendered defensively)
@@ -103,11 +106,22 @@ function statusRank( status: string | null | undefined ): number {
 }
 
 // Priority rank for the secondary sort: P0 highest. Unknown sorts last.
-function priorityRank( priority: string | null | undefined ): number {
+// Exported (Phase 2) — the editable priority control reuses the same ranking
+// vocabulary the model sorts by, so the dropdown order matches row order.
+export function priorityRank( priority: string | null | undefined ): number {
   if ( !priority ) return 99;
   const m = /^P(\d+)$/.exec( priority );
   return m ? Number( m[ 1 ] ) : 99;
 }
+
+// ---------------------------------------------------------------------------
+// Phase 2 — per-worker task editing helpers (pure; no DOM)
+// ---------------------------------------------------------------------------
+
+// The editable priority buckets (D2 — P0–P3 now; intra-bucket drag-reorder is
+// the deferred Phase 2b). Ordered most-urgent first so the dropdown reads
+// top-to-bottom in the same urgency order the rows sort by (priorityRank).
+export const EDITABLE_PRIORITIES: ReadonlyArray<string> = [ "P0", "P1", "P2", "P3" ];
 
 // ---------------------------------------------------------------------------
 // Labels
@@ -126,6 +140,59 @@ export function taskOwnerLabel( task: TaskItem | null | undefined ): string {
 export function taskTitleLabel( task: TaskItem | null | undefined ): string {
   if ( task && task.title ) return task.title;
   return "(untitled)";
+}
+
+// ---------------------------------------------------------------------------
+// Row redesign 2026.06.29 — id column + title truncation + body-overlay helpers
+// (pure; MIRRORS the in-service JS card's notifications.js helpers VERBATIM so
+// the two cards render the row identically. Drift accepted per D5/throwaway.)
+// ---------------------------------------------------------------------------
+
+// Client title-truncation cap — IDENTICAL to the server-side store-guard cap
+// (task_store_rules.TITLE_SOFT_CAP = 60, handoff #5 / D4). Backstops LEGACY rows
+// written before the store guard.
+export const TASK_TITLE_TRUNCATE_LEN = 60;
+
+/**
+ * The compact row identifier: the first 8 chars of the item's id (the store
+ * serializes its UUID as `id`; first-8 is the "id_hash" the design 2026.06.29
+ * row redesign places in the new leftmost column). Pure.
+ *
+ * Ensures:
+ *   - non-empty id → its first 8 chars; absent/empty → "—"
+ *   - never throws
+ */
+export function taskIdLabel( task: TaskItem | null | undefined ): string {
+  const id = ( task && task.id != null ) ? String( task.id ) : "";
+  return id ? id.slice( 0, 8 ) : "—";
+}
+
+/**
+ * Client title-truncation backstop (design 2026.06.29 §4.4 / D1): trim a
+ * wall-of-text title to TASK_TITLE_TRUNCATE_LEN chars + an ellipsis. The full
+ * title rides the cell's hover-tooltip so nothing is hidden. Pure.
+ *
+ * Ensures:
+ *   - label.length > cap → label.slice( 0, cap ) + "…"; else label verbatim
+ *   - never throws
+ */
+export function truncateTaskTitle( label: string ): string {
+  const s = String( label );
+  return s.length > TASK_TITLE_TRUNCATE_LEN ? s.slice( 0, TASK_TITLE_TRUNCATE_LEN ) + "…" : s;
+}
+
+/**
+ * Whether the task has no detail `body` to show in the overlay — drives the
+ * dim-in-place 📄 (handoff ruling #3): an empty body keeps the emoji in its
+ * column but disabled / non-clickable. Pure.
+ *
+ * Ensures:
+ *   - body null / undefined / whitespace-only → true; else false
+ *   - never throws
+ */
+export function taskBodyIsEmpty( task: TaskItem | null | undefined ): boolean {
+  const body = task ? task.body : null;
+  return body == null || String( body ).trim() === "";
 }
 
 // ---------------------------------------------------------------------------
@@ -291,4 +358,63 @@ export function formatChaseTime( iso: string | null | undefined, ianaZone: strin
     }
   }
   return new Intl.DateTimeFormat( undefined, opts ).format( date );
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 — actor derivation + reassign roster (pure)
+// ---------------------------------------------------------------------------
+
+/**
+ * Derive the audit `actor` string for a UI-originated edit from the
+ * authenticated user's identity (Rick's Q1 ruling 2026-06-23: DERIVE from the
+ * AUTHENTICATED user — email/display identity — NOT a fixed literal). The
+ * "(multiplexer)" surface tag records WHICH client made the edit (the audit
+ * trail already distinguishes provenance via `authority='user_direct'`, but the
+ * surface tag disambiguates two edits by the same human from different clients).
+ * Pure.
+ *
+ * Ensures:
+ *   - a non-blank email → "<trimmed-email> (multiplexer)"
+ *   - null / undefined / blank email → "anonymous (multiplexer)" (defensive —
+ *     an authenticated card always carries an email claim; this is the
+ *     pre-hydration / malformed-token safety net, never a fixed business literal)
+ *   - never throws
+ */
+export function deriveTaskActor( email: string | null | undefined ): string {
+  const id = typeof email === "string" ? email.trim() : "";
+  return id ? `${id} (multiplexer)` : "anonymous (multiplexer)";
+}
+
+/**
+ * Build the reassignment-target roster from the SAME source the fleet-status
+ * card consumes (`FleetStatusStore` → `fleet_arbiter.sessions`), filtered to
+ * ACTIVE (non-offline) personas — INCLUDING the 'Sam' overflow persona (Rick's
+ * Q5 ruling 2026-06-23: the roster is the same one the fleet-status card shows,
+ * which carries Sam as a live persona; no reassign-only exclusion). Distinct,
+ * alpha-sorted. Pure + degrade-safe.
+ *
+ * Requires:
+ *   - fleet is the FleetComposite the fleet card caches, or null (pre-first-poll
+ *     / auth / unreachable sentinels all collapse to an empty roster)
+ * Ensures:
+ *   - null / missing fleet_arbiter / missing sessions → []
+ *   - only LIVE sessions contribute (splitFleetByLiveness — same "live" rule the
+ *     fleet card shows by default); offline personas never become targets
+ *   - blank personas dropped; duplicates collapsed; Sam (when live) is a target
+ *   - returned alpha-sorted
+ *   - never throws
+ */
+/* c8 ignore next */ // tsx phantom-branch artifact on the function-declaration line (union-typed param + array return-type interplay); all internal branches are exercised by tests.
+export function activeReassignTargets( fleet: FleetComposite | null | undefined ): string[] {
+  if ( !fleet || !fleet.fleet_arbiter ) return [];
+  const sessions = fleet.fleet_arbiter.sessions;
+  if ( !Array.isArray( sessions ) ) return [];
+  const { live } = splitFleetByLiveness( sessions );
+  const seen = new Set<string>();
+  for ( const s of live ) {
+    const persona = s.persona;
+    if ( !persona ) continue;
+    seen.add( persona );
+  }
+  return Array.from( seen ).sort( ( a, b ) => a.localeCompare( b ) );
 }

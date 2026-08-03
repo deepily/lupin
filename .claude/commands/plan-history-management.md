@@ -1,7 +1,7 @@
-# History Management for Planning-is-Prompting Project
+# History Management for Lupin Project
 
-**Project**: Planning is Prompting
-**Prefix**: [PLAN]
+**Project**: Lupin
+**Prefix**: [LUPIN]
 **Mode Parameter**: Accepts mode=check (default), mode=archive, mode=analyze, mode=dry-run
 **Version**: 1.0
 
@@ -12,9 +12,9 @@
 **On every invocation of this command:**
 
 1. **MUST use the following project-specific configuration**:
-   - **[SHORT_PROJECT_PREFIX]**: [PLAN]
-   - **History file**: /mnt/DATA01/include/www.deepily.ai/projects/planning-is-prompting/history.md
-   - **Archive directory**: /mnt/DATA01/include/www.deepily.ai/projects/planning-is-prompting/history/
+   - **[SHORT_PROJECT_PREFIX]**: [LUPIN]
+   - **History file**: /mnt/DATA01/include/www.deepily.ai/projects/lupin/history.md
+   - **Archive directory**: /mnt/DATA01/include/www.deepily.ai/projects/lupin/history/
    - **Token thresholds**: 20k warning, 22k critical, 25k limit (defaults)
    - **Retention targets**: 8-12k tokens, 7-14 days (defaults)
    - **Mode parameter**: mode=check (default), mode=archive, mode=analyze, mode=dry-run

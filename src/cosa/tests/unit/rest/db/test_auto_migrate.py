@@ -92,14 +92,26 @@ class TestRunMigrationsToHead( unittest.TestCase ):
         engine = MagicMock()
         fake_base = MagicMock()
         with patch( "cosa.rest.db.auto_migrate._inspect_db_state", return_value=( False, False ) ), \
-             patch( "cosa.rest.db.auto_migrate.create_engine", return_value=engine ), \
+             patch( "cosa.rest.db.auto_migrate.create_engine", return_value=engine ) as ce, \
              patch( "cosa.rest.postgres_models.Base", fake_base ), \
              patch( "cosa.rest.db.auto_migrate.command" ) as cmd:
             auto_migrate.run_migrations_to_head( database_url=self.URL, debug=True )
         fake_base.metadata.create_all.assert_called_once_with( engine )
-        engine.dispose.assert_called_once()
+        # EVERY engine opened is disposed. This was `assert_called_once`, which
+        # read as "exactly one engine exists" — true only incidentally. Row
+        # 0aae1a28 added the before/after revision reads that make the migration
+        # announcement possible, and each opens its own engine; `create_engine` is
+        # patched module-wide so all of them are this one mock. Asserting the
+        # PAIRING is the invariant that was meant; asserting the COUNT was an
+        # accident of there having been one.
+        self.assertEqual( engine.dispose.call_count, ce.call_count )
+        self.assertGreaterEqual( ce.call_count, 1 )
         cmd.stamp.assert_called_once()
         cmd.upgrade.assert_not_called()
+        # v0.2.0 pgvector: the `vector` extension is created before create_all.
+        conn = engine.begin.return_value.__enter__.return_value
+        conn.execute.assert_called_once()
+        self.assertIn( "CREATE EXTENSION", str( conn.execute.call_args[ 0 ][ 0 ] ) )
 
     def test_empty_db_bootstraps_debug_false( self ):
         engine = MagicMock()
@@ -149,11 +161,59 @@ def _pg_reachable():
         return False
 
 
-@unittest.skipUnless( _pg_reachable(), "local Postgres (localhost:5432 lupin_dev) not reachable" )
+def _pgvector_available():
+    """
+    True iff the reachable Postgres advertises the `vector` extension.
+
+    Since v0.2.0 the app schema (Base.metadata) includes the pgvector vector-store
+    tables, so the empty-DB bootstrap these live tests exercise now creates a
+    `vector` column and therefore requires pgvector. On the stock
+    postgres:16.3-alpine image the extension is absent; these tests skip until the
+    docker-compose image swap → pgvector/pgvector:pg16 lands (shared-infra,
+    operator-applied). NOT a mask — the precondition genuinely expanded.
+    """
+    try:
+        import psycopg2
+        conn = psycopg2.connect( dbname="lupin_db_dev", connect_timeout=2, **_PG )
+        try:
+            with conn.cursor() as cur:
+                cur.execute( "SELECT 1 FROM pg_available_extensions WHERE name = 'vector'" )
+                return cur.fetchone() is not None
+        finally:
+            conn.close()
+    except Exception:
+        return False
+
+
+def _resolve_alembic_head():
+    """Return the CURRENT single alembic head from the on-disk migration scripts.
+
+    Ensures:
+        - resolved from the ScriptDirectory (no DB connection), so the head
+          assertions below track the live chain instead of a pinned constant
+          that goes stale the moment a new migration lands. This file was
+          pinned to "d4e5f6a7b8c9" (then-head); six later migrations advanced
+          the chain, silently breaking these live tests the whole time they
+          were skip-gated. Dynamic resolution is the durable fix (cf. the same
+          stale-hardcoded-head drift addressed in task ad2e40bc).
+    """
+    from alembic.script import ScriptDirectory
+    return ScriptDirectory.from_config( auto_migrate.build_alembic_config() ).get_current_head()
+
+
+@unittest.skipUnless(
+    _pg_reachable() and _pgvector_available(),
+    "local Postgres not reachable OR lacks pgvector (GATED on image swap → "
+    "pgvector/pgvector:pg16; v0.2.0 app schema now includes vector tables)",
+)
 class TestAutoMigrateLive( unittest.TestCase ):
     """Real alembic chain against throwaway DBs — created and dropped per test."""
 
-    HEAD = "d4e5f6a7b8c9"
+    # HEAD tracks the live chain (see _resolve_alembic_head) — never pinned.
+    HEAD = _resolve_alembic_head()
+    # PREV is a FIXED historical anchor: the parent of the is_protected migration
+    # (d4e5f6a7b8c9). The cloud/dev scenarios exercise THAT migration
+    # specifically, so PREV is tied to it, not to the moving head.
     PREV = "c3d4e5f6a7b8"
 
     def setUp( self ):
@@ -212,24 +272,30 @@ class TestAutoMigrateLive( unittest.TestCase ):
         self.assertEqual( self._head(), [ ( self.HEAD, ) ] )
 
     def test_cloud_scenario_missing_column_gets_added( self ):
-        # Tables exist, is_protected ABSENT, stamped one-behind-head.
-        self._exec( "CREATE TABLE users ( id uuid PRIMARY KEY DEFAULT gen_random_uuid(), email varchar(255) )" )
+        # Cloud-shaped DB: the full app schema exists UP TO the is_protected
+        # migration's parent — built via the REAL chain so every prior table
+        # physically exists (a bare hand-created `users` + stamp would fake
+        # "prior applied" and crash later migrations on missing FK targets like
+        # `notifications`). is_protected is still ABSENT here; the auto-migrator
+        # must run the remaining chain to head and ADD it end-to-end.
         from alembic import command
-        command.stamp( auto_migrate.build_alembic_config( database_url=self.url ), self.PREV )
+        command.upgrade( auto_migrate.build_alembic_config( database_url=self.url ), self.PREV )
+        self.assertFalse( self._has_is_protected() )                   # not added yet
         auto_migrate.run_migrations_to_head( database_url=self.url )
         self.assertTrue( self._has_is_protected() )
         self.assertEqual( self._head(), [ ( self.HEAD, ) ] )
 
     def test_dev_scenario_existing_column_no_crash( self ):
-        # Tables exist, is_protected PRESENT, stamped one-behind-head — the
-        # idempotent migration must NOT raise DuplicateColumn.
-        self._exec(
-            "CREATE TABLE users ( id uuid PRIMARY KEY DEFAULT gen_random_uuid(), "
-            "email varchar(255), is_protected boolean NOT NULL DEFAULT false )"
-        )
+        # Dev-shaped DB: full app schema up to the is_protected parent (real
+        # chain), then is_protected added OUT-OF-BAND while still stamped one
+        # revision behind its migration. Upgrading to head must run the
+        # inspector-guarded is_protected migration IDEMPOTENTLY — no
+        # DuplicateColumn.
         from alembic import command
-        command.stamp( auto_migrate.build_alembic_config( database_url=self.url ), self.PREV )
+        command.upgrade( auto_migrate.build_alembic_config( database_url=self.url ), self.PREV )
+        self._exec( "ALTER TABLE users ADD COLUMN is_protected boolean NOT NULL DEFAULT false" )
         auto_migrate.run_migrations_to_head( database_url=self.url )   # must not raise
+        self.assertTrue( self._has_is_protected() )
         self.assertEqual( self._head(), [ ( self.HEAD, ) ] )
 
     def test_legacy_unstamped_schema_refused( self ):

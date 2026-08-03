@@ -1,0 +1,238 @@
+#!/usr/bin/env python3
+"""
+Unit tests — role-goal poke echoes (role-goals Phase 2-3).
+
+Covers the role-selected north-star goal line APPENDED to each of the three
+surviving heartbeat poke sites, plus the injected-string plumbing through the
+pure modules:
+
+    1. Pure core  — heartbeat_work_owed.build_poke_reason / heartbeat_decision
+                    .decide_heartbeat append an INJECTED goal_line (empty ⇒
+                    byte-identical to the pre-role-goals output).
+    2. Stop hook  — stop._select_goal_role 3-way (bridge role → worker/manager;
+                    fleet-roster persona → manager; else agnostic) +
+                    _GOAL_LINE_KEYS → the configuration_manager keys.
+    3. Arbiter    — _format_poke (role-selected via view["role"]) +
+                    _format_manager_stale_poke (always Manager) + inert-when-"".
+
+(The legacy cascade-scheduler poke site was RETIRED 2026-06-29 — its daemon
+`src/scripts/cascade_heartbeat_scheduler.py` was deleted under the ddaa2882
+waiver + design-doc milestone I8; liveness is now the Arbiter + Stop-hook alone.)
+
+Canonical goal text: planning-is-prompting -> workflow/role-goals.md.
+"""
+import datetime
+import os
+
+import pytest
+
+from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import (
+    evaluate_work_owed, build_poke_reason, TODO_IN_PROGRESS,
+)
+from lupin_cli.claude_code.hooks.lib.heartbeat_decision import (
+    decide_heartbeat, OUTCOME_POKE,
+    OUTCOME_SUPPRESSED_STALE_DECLARED_OWED,
+)
+
+
+_GOAL = "Your goal: TESTLINE."
+
+
+class _FakeConfigMgr:
+    """
+    A stand-in ConfigurationManager: get(key) → a key-derived SENTINEL string.
+
+    Lets a test prove the goal-line WIRING (which INI key each role reads, that the
+    key's value flows through) WITHOUT coupling to the live goal-line wording — so
+    Rick retuning a goal-line string in lupin-app.ini (the frictionless no-code
+    case D1+D4 were ratified to protect) never breaks these tests.
+    """
+    def __init__( self, *args, **kwargs ):
+        pass
+
+    def get( self, key, default=None, silent=False, **kwargs ):
+        return "SENTINEL::" + key
+
+
+# ── 1. Pure core — injected goal_line append ─────────────────────────────────
+
+class TestPureCoreGoalLine:
+
+    def _owed_verdict( self ):
+        return evaluate_work_owed( todo_items=[ { "status": TODO_IN_PROGRESS, "owned_by_me": True } ] )
+
+    def test_build_poke_reason_empty_is_identical( self ):
+        v = self._owed_verdict()
+        assert build_poke_reason( v ) == build_poke_reason( v, goal_line="" )
+
+    def test_build_poke_reason_appends_trailing_block( self ):
+        v = self._owed_verdict()
+        assert build_poke_reason( v, goal_line=_GOAL ).endswith( "\n\n" + _GOAL )
+
+    def test_decide_oracle_owed_appends_goal( self ):
+        v = self._owed_verdict()
+        r = decide_heartbeat( None, v, 0, 3, goal_line=_GOAL )
+        assert r[ "outcome" ] == OUTCOME_POKE
+        assert r[ "hook_output" ][ "reason" ].endswith( "\n\n" + _GOAL )
+
+    def test_decide_self_declared_empty_oracle_suppressed( self ):
+        # Lever A (item 6fc8d78d): a self-declared-owed hold with an EMPTY oracle
+        # is the production FALSE POKE — now SUPPRESSED, so there is NO poke reason
+        # and thus no goal echo. The goal-append behavior lives on the surviving
+        # oracle-owed poke path (test_decide_oracle_owed_appends_goal above).
+        now      = datetime.datetime( 2026, 6, 4, 12, 0, 0, tzinfo=datetime.timezone.utc )
+        empty_v  = evaluate_work_owed()
+        hold     = { "held_at": now.isoformat(), "ttl_seconds": 0, "reason": "x", "work_owed": True }
+        r        = decide_heartbeat( hold, empty_v, 0, 3, now=now, goal_line=_GOAL )
+        assert r[ "outcome" ]     == OUTCOME_SUPPRESSED_STALE_DECLARED_OWED
+        assert r[ "hook_output" ] == { "continue": True }
+
+    def test_decide_empty_goal_unchanged( self ):
+        v = self._owed_verdict()
+        r = decide_heartbeat( None, v, 0, 3, goal_line="" )
+        assert "\n\nYour goal" not in r[ "hook_output" ][ "reason" ]
+
+
+# ── 2. Stop hook — 3-way role selector + config keys ─────────────────────────
+
+class TestStopSelectGoalRole:
+
+    def _clear_roster( self ):
+        for k in list( os.environ ):
+            if k.startswith( "COSA_VOICE_MANAGERS__" ):
+                del os.environ[ k ]
+
+    def test_keys_map_to_config_names( self ):
+        from lupin_cli.claude_code.hooks import stop
+        assert stop._GOAL_LINE_KEYS == {
+            "manager"  : "heartbeat manager goal line",
+            "worker"   : "heartbeat worker goal line",
+            "agnostic" : "heartbeat role-agnostic goal line",
+        }
+
+    @pytest.mark.parametrize( "role", [ "author", "reviewer", "tester", "worker", "implementer" ] )
+    def test_bridge_worker_roles_select_worker( self, role ):
+        from lupin_cli.claude_code.hooks import stop
+        assert stop._select_goal_role( "sid", role ) == "worker"
+
+    def test_defensive_manager_role_selects_manager( self ):
+        from lupin_cli.claude_code.hooks import stop
+        assert stop._select_goal_role( "sid", "manager" )  == "manager"
+        assert stop._select_goal_role( "sid", "MANAGER" )  == "manager"
+
+    def test_absent_role_no_roster_is_agnostic( self ):
+        self._clear_roster()
+        from lupin_cli.claude_code.hooks import stop
+        assert stop._select_goal_role( "sid", None )  == "agnostic"
+        assert stop._select_goal_role( "sid", "" )    == "agnostic"
+        assert stop._select_goal_role( "sid", "  " )  == "agnostic"
+
+    def test_roster_persona_selects_manager( self, monkeypatch ):
+        # a declared fleet-roster manager gets the Manager line at its OWN self-poke
+        monkeypatch.setenv( "COSA_VOICE_MANAGERS__LUPIN", "Mr. Radio, Tiberius" )
+        import lupin_cli.claude_code.hooks.lib.session_bridge as sb
+        monkeypatch.setattr( sb, "get_voice_persona", lambda sid: { "name": "mr radio" } )  # accent/case variant
+        from lupin_cli.claude_code.hooks import stop
+        assert stop._select_goal_role( "sid", None ) == "manager"
+        # a non-roster persona falls through to agnostic
+        monkeypatch.setattr( sb, "get_voice_persona", lambda sid: { "name": "Rio" } )
+        assert stop._select_goal_role( "sid", None ) == "agnostic"
+
+    def test_heartbeat_goal_line_reads_selected_key( self, monkeypatch ):
+        # D4 protection: prove the kind → _GOAL_LINE_KEYS[kind] → config-read WIRING
+        # WITHOUT pinning the live wording (so Rick retuning a goal-line string never
+        # breaks this test). The fake config echoes "SENTINEL::"+key, so the assert is
+        # non-vacuous: the EXACT key for each role must have been read and flowed back.
+        from lupin_cli.claude_code.hooks import stop
+        monkeypatch.setattr( stop, "ConfigurationManager", _FakeConfigMgr )
+        for kind in [ "worker", "manager", "agnostic" ]:
+            monkeypatch.setattr( stop, "_select_goal_role", lambda sid, br, _k=kind: _k )
+            got = stop._heartbeat_goal_line( "sid", None )
+            assert got == "SENTINEL::" + stop._GOAL_LINE_KEYS[ kind ], ( kind, got )
+
+
+# ── 3. Arbiter — role-selected poke formatters ───────────────────────────────
+
+class TestArbiterPokeGoalLine:
+
+    def _job( self, manager_line="GOAL-MANAGER.", worker_line="GOAL-WORKER." ):
+        from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob
+        j = ArbiterConsumerJob.__new__( ArbiterConsumerJob )   # skip heavy __init__
+        j.manager_goal_line = manager_line
+        j.worker_goal_line  = worker_line
+        j.manager_stale_poke_threshold_seconds = 2700
+        return j
+
+    def test_stuck_poke_worker_role( self ):
+        b = self._job()._format_poke( { "persona": "Rio", "role": "worker", "session_id": "s1" } )
+        assert b.endswith( "\n\nGOAL-WORKER." )
+
+    def test_stuck_poke_manager_role( self ):
+        b = self._job()._format_poke( { "persona": "Mr. Radio", "role": "manager", "session_id": "s2" } )
+        assert b.endswith( "\n\nGOAL-MANAGER." )
+
+    def test_manager_stale_poke_always_manager( self ):
+        b = self._job()._format_manager_stale_poke( { "persona": "Tiberius", "session_id": "s3" }, 3000 )
+        assert b.endswith( "\n\nGOAL-MANAGER." )
+
+    def test_inert_when_unconfigured( self ):
+        j = self._job( manager_line="", worker_line="" )
+        b = j._format_poke( { "persona": "Rio", "role": "worker", "session_id": "s1" } )
+        assert "GOAL" not in b and b.rstrip().endswith( "nudge.)" )
+
+
+# ── 3b. Arbiter — MANAGE-not-BUILD poke-body wording (revision 2026-06-29) ────
+#
+# The §3 apply-spec forks the poke BODY by role: a stuck WORKER is still told to
+# "resume" the work; a stuck MANAGER is told to tap/assign its crew and NOT resume
+# the work itself. These pin the hardcoded body text (NOT a config goal line, so
+# the D4 "don't pin live-retunable wording" rule does not apply here).
+
+class TestManageNotBuildPokeWording:
+
+    def _job( self ):
+        from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob
+        j = ArbiterConsumerJob.__new__( ArbiterConsumerJob )
+        j.manager_goal_line = ""        # isolate the body fork from the goal echo
+        j.worker_goal_line  = ""
+        j.manager_stale_poke_threshold_seconds = 2700
+        return j
+
+    def test_stuck_worker_body_still_says_resume( self ):
+        b = self._job()._format_poke( { "persona": "Rio", "role": "worker", "session_id": "s1" } )
+        assert "ask for help, or resume. (Non-destructive nudge.)" in b
+        assert "don't resume the work yourself" not in b
+        assert "tap/assign your crew" not in b
+
+    def test_stuck_worker_body_when_role_absent( self ):
+        # role absent ⇒ non-manager branch (worker phrasing), never the manager fork.
+        b = self._job()._format_poke( { "persona": "Rio", "session_id": "s1" } )
+        assert "or resume. (Non-destructive nudge.)" in b
+        assert "don't resume the work yourself" not in b
+
+    def test_stuck_manager_body_says_tap_crew_not_resume( self ):
+        b = self._job()._format_poke( { "persona": "Mr. Radio", "role": "manager", "session_id": "s2" } )
+        assert "tap/assign your crew" in b
+        assert "staff up if you have more tasks than workers" in b
+        assert "don't resume the work yourself" in b
+        assert "ask for help, or resume. (Non-destructive nudge.)" not in b
+
+    def test_manager_stale_poke_taps_crew_and_preserves_rick_advised( self ):
+        b = self._job()._format_manager_stale_poke( { "persona": "Tiberius", "session_id": "s3" }, 3000 )
+        assert "tap/assign your crew" in b
+        assert "don't resume the work yourself" in b
+        assert "Rick has been advised." in b                 # §3.4 PRESERVE clause
+
+    def test_manager_tap_recommends_staff_and_never_absorb( self ):
+        # e8eee4c4 (sibling of d34efe7a): the deadlock/fleet advisory opening clause is
+        # derived from the shared ARBITER_POKE_SENTINEL (b33c8e96 one-source-of-truth),
+        # not a drift-prone literal.
+        from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import ARBITER_POKE_SENTINEL
+        members = [ { "persona": "W1", "stuck": True }, { "persona": "W2", "stuck": False } ]
+        graph   = { "cycles": [ ] }
+        b = self._job()._format_manager_tap( "M1", members, graph, free_n=2 )
+        assert b.startswith( ARBITER_POKE_SENTINEL )             # F1 one-source-of-truth pin
+        assert "spawn/assign" in b
+        assert "NEVER absorb the work yourself" in b
+        assert "reap+replace a dark worker" in b
+        assert "(Recommendation only — I do not assign.)" in b   # advisory framing preserved

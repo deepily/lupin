@@ -78,6 +78,9 @@ SEEDED_TASKS = [
     {
         "id"                  : "t-blocked",
         "title"               : "Wire DM namespace cutover",
+        # A non-empty body drives the LIVE (clickable) 📄 detail affordance
+        # (design 2026.06.29 row redesign — the overlay renders THIS field).
+        "body"                : "Full detail for the DM namespace cutover lives here.",
         "owner_persona"       : "tiberius",
         "status"              : "blocked",
         "blocked_by"          : BLOCKED_REFS,
@@ -90,6 +93,7 @@ SEEDED_TASKS = [
     {
         "id"                  : "t-active",
         "title"               : "Author task-list E2E",
+        # No body → the 📄 is DIMMED in place (disabled / non-clickable, ruling #3).
         "owner_persona"       : "tiberius",
         "status"              : "in_progress",
         "blocked_by"          : [ ],
@@ -177,6 +181,27 @@ def _goto_notifications( page ):
     """Navigate to the classic notifications page and settle the network."""
     page.goto( f"{BASE_URL}/app/notifications?classic=1" )
     page.wait_for_load_state( "networkidle" )
+
+
+# Measures the open #task-body-overlay's computed position + geometry vs the
+# viewport (used by the f7486a9d fixed-centered-modal regression guard).
+_OVERLAY_METRICS_JS = """() => {
+    const o = document.getElementById( "task-body-overlay" );
+    const p = o.querySelector( ".task-body-overlay-content" );
+    const cs = getComputedStyle( o );
+    const orect = o.getBoundingClientRect();
+    const prect = p.getBoundingClientRect();
+    return {
+        position : cs.position,
+        vw       : window.innerWidth,
+        vh       : window.innerHeight,
+        o_left   : orect.left,
+        o_top    : orect.top,
+        o_width  : orect.width,
+        o_height : orect.height,
+        panel_cx : prect.left + prect.width / 2,
+    };
+}"""
 
 
 # ---------------------------------------------------------------------------
@@ -588,6 +613,158 @@ class TestTaskListCardRows:
             f"blocked row should precede in_progress within the group; "
             f"order was {titles}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Row redesign 2026.06.29 — leading ID column + title truncation/tooltip +
+# 📄 body-overlay (AUGMENT ruling: added alongside the existing columns).
+# ---------------------------------------------------------------------------
+
+class TestTaskListRowRedesign:
+    """The 8-char ID column, title truncation + tooltip, and 📄 body overlay."""
+
+    def test_id_column_shows_first_8_chars( self, logged_in_page ):
+        """
+        The NEW leftmost ID column renders the first 8 chars of the row id.
+
+        Requires:
+            - Authenticated session, seeded rows
+        Ensures:
+            - the t-active row (id 't-active', exactly 8 chars) shows 't-active'
+              in its .task-col-id cell
+        """
+        _route_tasks( logged_in_page, { "mode": "ok" } )
+        _goto_notifications( logged_in_page )
+        logged_in_page.wait_for_selector( "#task-list-container .task-row", state="attached" )
+
+        ids = logged_in_page.locator( "#task-list-container .task-row .task-col-id" ).all_text_contents()
+        assert "t-active" in [ i.strip() for i in ids ], f"id column missing first-8 id; got {ids}"
+
+    def test_title_cell_carries_full_title_tooltip( self, logged_in_page ):
+        """
+        The Title cell carries the FULL title in a `title=` hover-tooltip attr.
+
+        Requires:
+            - Authenticated session, seeded rows
+        Ensures:
+            - a .task-col-title cell's title attribute equals the full seeded title
+        """
+        _route_tasks( logged_in_page, { "mode": "ok" } )
+        _goto_notifications( logged_in_page )
+        logged_in_page.wait_for_selector( "#task-list-container .task-row", state="attached" )
+
+        cell = logged_in_page.locator(
+            "#task-list-container .task-row .task-col-title", has_text="Wire DM namespace cutover"
+        ).first
+        assert cell.get_attribute( "title" ) == "Wire DM namespace cutover"
+
+    def test_live_detail_emoji_opens_body_overlay( self, logged_in_page ):
+        """
+        Clicking a LIVE 📄 opens an overlay rendering the task `body`.
+
+        Requires:
+            - Authenticated session; the t-blocked row carries a non-empty body
+        Ensures:
+            - the overlay appears with the body text; Escape dismisses it
+        """
+        _route_tasks( logged_in_page, { "mode": "ok" } )
+        _goto_notifications( logged_in_page )
+        logged_in_page.wait_for_selector( "#task-list-container .task-row", state="attached" )
+
+        # The t-blocked row is the only one with a live (non-dimmed) 📄.
+        emoji = logged_in_page.locator(
+            "#task-list-container .task-detail-emoji:not(.task-detail-empty)"
+        ).first
+        emoji.click()
+
+        logged_in_page.wait_for_selector( "#task-body-overlay", state="attached" )
+        body = logged_in_page.locator( "#task-body-overlay .task-body-overlay-body" ).text_content()
+        assert "DM namespace cutover" in body
+
+        logged_in_page.keyboard.press( "Escape" )
+        logged_in_page.wait_for_selector( "#task-body-overlay", state="detached" )
+
+    def test_body_overlay_dismisses_on_backdrop_click( self, logged_in_page ):
+        """
+        A click on the overlay backdrop (outside the panel) dismisses it.
+
+        Requires:
+            - Authenticated session; a live 📄 row
+        Ensures:
+            - opening then clicking the backdrop removes the overlay
+        """
+        _route_tasks( logged_in_page, { "mode": "ok" } )
+        _goto_notifications( logged_in_page )
+        logged_in_page.wait_for_selector( "#task-list-container .task-row", state="attached" )
+
+        logged_in_page.locator(
+            "#task-list-container .task-detail-emoji:not(.task-detail-empty)"
+        ).first.click()
+        logged_in_page.wait_for_selector( "#task-body-overlay", state="attached" )
+
+        # Click the backdrop at a corner, away from the centered content panel.
+        logged_in_page.locator( "#task-body-overlay" ).click( position={ "x": 5, "y": 5 } )
+        logged_in_page.wait_for_selector( "#task-body-overlay", state="detached" )
+
+    def test_empty_body_emoji_is_dimmed_in_place( self, logged_in_page ):
+        """
+        A row with no body keeps its 📄 in the column but DIMMED (disabled).
+
+        Requires:
+            - Authenticated session; the t-active row has no body
+        Ensures:
+            - at least one .task-detail-emoji.task-detail-empty is rendered, and
+              it carries no data-task-body payload (inert)
+        """
+        _route_tasks( logged_in_page, { "mode": "ok" } )
+        _goto_notifications( logged_in_page )
+        logged_in_page.wait_for_selector( "#task-list-container .task-row", state="attached" )
+
+        dimmed = logged_in_page.locator( "#task-list-container .task-detail-emoji.task-detail-empty" )
+        assert dimmed.count() >= 1
+        assert dimmed.first.get_attribute( "data-task-body" ) is None
+
+    def test_live_body_overlay_computes_fixed_centered_modal( self, logged_in_page ):
+        """
+        REGRESSION GUARD (bug f7486a9d): the opened 📄 overlay must COMPUTE
+        position:fixed and cover the full viewport, centering its content — NOT
+        flow to the page foot as a position:static block (the symptom a stale
+        task-list.css cache-bust token produced: the overlay div attached fine
+        but rendered static because the cached CSS lacked the .task-body-overlay
+        rule). This is the computed-style assertion the open/dismiss tests above
+        do not make — they would pass even with the overlay dumped at page-foot.
+
+        Requires:
+            - Authenticated session; the t-blocked row carries a live 📄
+        Ensures:
+            - getComputedStyle(#task-body-overlay).position == "fixed"
+            - the overlay rect anchors at the viewport origin and spans it (inset:0)
+            - the content panel is horizontally centered in the viewport
+        """
+        _route_tasks( logged_in_page, { "mode": "ok" } )
+        _goto_notifications( logged_in_page )
+        logged_in_page.wait_for_selector( "#task-list-container .task-row", state="attached" )
+
+        logged_in_page.locator(
+            "#task-list-container .task-detail-emoji:not(.task-detail-empty)"
+        ).first.click()
+        logged_in_page.wait_for_selector( "#task-body-overlay", state="attached" )
+
+        metrics = logged_in_page.evaluate( _OVERLAY_METRICS_JS )
+
+        assert metrics[ "position" ] == "fixed", \
+            f"overlay must be position:fixed (regression: stale CSS → static); got {metrics[ 'position' ]!r}"
+        # inset:0 → the fixed overlay anchors at the origin (NOT below page content)
+        assert abs( metrics[ "o_left" ] ) <= 1 and abs( metrics[ "o_top" ] ) <= 1, \
+            f"fixed overlay must anchor at viewport origin, not page-foot; got left={metrics[ 'o_left' ]} top={metrics[ 'o_top' ]}"
+        assert abs( metrics[ "o_width" ] - metrics[ "vw" ] ) <= 2 and abs( metrics[ "o_height" ] - metrics[ "vh" ] ) <= 2, \
+            "fixed overlay must span the full viewport (inset:0)"
+        # flex centering → the content panel sits at the horizontal center
+        assert abs( metrics[ "panel_cx" ] - metrics[ "vw" ] / 2 ) <= 2, \
+            "overlay content panel must be horizontally centered"
+
+        logged_in_page.keyboard.press( "Escape" )
+        logged_in_page.wait_for_selector( "#task-body-overlay", state="detached" )
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,18 @@
+# Exclusions for the FLEET DATA tree (<DEEPILY_DATA_DIR>) — rows 8758d0b1 / f56fc63b.
+#
+# DELIBERATELY SHORT, and NOT inherited from rsync-exclude.txt. That file is 99
+# patterns reasoned about against a SOURCE tree; every one of them would apply here
+# by accident rather than by intent.
+#
+# The default for a data tree is BACK IT UP. A pattern here must justify why a
+# runtime file is worth losing on a disk failure.
+
+# OS / filesystem noise — never content.
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Python bytecode, if any tool ever writes it here. Regenerable by definition.
+__pycache__/
+*.pyc

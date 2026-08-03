@@ -99,6 +99,42 @@ class TestComputeLiveness:
         out = fr.compute_liveness( "not-a-dict", None, NOW )
         assert out[ "event_age_s" ] is None and out[ "verdict" ] == "offline"
 
+    # ── hold-mtime as liveness (task 70be69f2) ──────────────────────────────────
+    def test_hold_age_absent_by_default( self ):
+        # hold_mtime defaults to None → hold_age_s is None and the verdict is the
+        # prior 5-signal block (additive + reversible: byte-identical to today).
+        out = fr.compute_liveness( { "last_event_ts": None }, None, NOW )
+        assert out[ "hold_age_s" ] is None and out[ "verdict" ] == "offline"
+
+    def test_hold_mtime_makes_session_live_with_no_other_signal( self ):
+        # THE canonical repro (Tiberius sess 6ec69a8c): no bridge / event / commons /
+        # idle_prompt / dm — ONLY a fresh hold mtime → LIVE (not MANAGER-STALE).
+        out = fr.compute_liveness( { "last_event_ts": None }, None, NOW,
+                                   hold_mtime=NOW.timestamp() - 7 )
+        assert out[ "hold_age_s" ] == 7
+        assert out[ "freshest_age_s" ] == 7 and out[ "verdict" ] == "LIVE"
+
+    def test_hold_age_joins_freshest_union_unconditionally( self ):
+        # A 50m-old event with a fresh (5s) hold → hold wins the freshest-of union.
+        # hold is UNCONDITIONAL (no count_dm-style toggle): even count_dm=False keeps it.
+        view = { "last_event_ts": NOW - datetime.timedelta( minutes=50 ) }
+        out  = fr.compute_liveness( view, None, NOW, count_dm=False,
+                                    hold_mtime=NOW.timestamp() - 5 )
+        assert out[ "event_age_s" ] == 50 * 60 and out[ "hold_age_s" ] == 5
+        assert out[ "freshest_age_s" ] == 5 and out[ "verdict" ] == "LIVE"
+
+    def test_stale_hold_does_not_rescue_a_dark_session( self ):
+        # FAIL-SAFE: a hold mtime as old as everything else ages out too — hold can
+        # only ADD liveness, never falsely keep a genuinely-dark session alive.
+        out = fr.compute_liveness( { "last_event_ts": None }, None, NOW,
+                                   hold_mtime=NOW.timestamp() - 99999 )
+        assert out[ "hold_age_s" ] == 99999 and out[ "verdict" ] == "offline"
+
+    def test_hold_age_bad_value_swallowed( self ):
+        # a non-numeric hold mtime degrades to None (reuses _bridge_age's guard).
+        out = fr.compute_liveness( { "last_event_ts": None }, None, NOW, hold_mtime="nope" )
+        assert out[ "hold_age_s" ] is None and out[ "verdict" ] == "offline"
+
 
 # ── build_snapshot ────────────────────────────────────────────────────────────
 
@@ -130,6 +166,33 @@ class TestBuildSnapshot:
     def test_empty_fleet( self ):
         snap = fr.build_snapshot( { }, { }, NOW )
         assert snap[ "session_count" ] == 0 and snap[ "sessions" ] == [ ]
+
+    def test_hold_mtimes_threaded_into_liveness_union( self ):
+        # task 70be69f2: build_snapshot threads each sid's hold mtime to
+        # compute_liveness. s1 has ONLY a fresh hold mtime (no bridge/event) → LIVE;
+        # s2 has neither bridge nor hold → offline. hold_age_s is per-row.
+        view = {
+            "s1": { "session_id": "s1", "persona": "Ann", "state": "working",
+                    "holding_on": "none", "stuck": False, "last_event_ts": None },
+            "s2": { "session_id": "s2", "persona": "Bo", "state": "unknown",
+                    "holding_on": "none", "stuck": False, "last_event_ts": None },
+        }
+        snap = fr.build_snapshot( view, { }, NOW, include_offline=True,
+                                  hold_mtimes={ "s1": NOW.timestamp() - 6 } )
+        rows = { r[ "session_id" ]: r for r in snap[ "sessions" ] }
+        assert rows[ "s1" ][ "liveness" ][ "hold_age_s" ] == 6
+        assert rows[ "s1" ][ "liveness" ][ "verdict" ] == "LIVE"
+        assert rows[ "s2" ][ "liveness" ][ "hold_age_s" ] is None
+        assert rows[ "s2" ][ "liveness" ][ "verdict" ] == "offline"
+
+    def test_hold_mtimes_default_none_is_byte_identical( self ):
+        # default hold_mtimes=None → hold_age_s None for every row (additive,
+        # reversible: a session with no other signal stays offline).
+        view = { "s1": { "session_id": "s1", "persona": "Ann", "state": "unknown",
+                         "holding_on": "none", "stuck": False, "last_event_ts": None } }
+        row  = fr.build_snapshot( view, { }, NOW, include_offline=True )[ "sessions" ][ 0 ]
+        assert row[ "liveness" ][ "hold_age_s" ] is None
+        assert row[ "liveness" ][ "verdict" ] == "offline"
 
     def test_none_inputs( self ):
         snap = fr.build_snapshot( None, None, NOW )
@@ -165,14 +228,28 @@ class TestBuildSnapshot:
         — the EVENT-sourced lowercase punct-stripped form a bridge-less session
         surfaces — read role=worker against declared "Mr. Radio", which ALSO
         config-deaded the F2 manager-staleness tier for him (stale_why_not:
-        [not_manager]). Equivalence now rides the ONE shared normalizer."""
-        view = { "s1": self._live_row( "s1", "mr radio" ) }              # no period — the journal shape
+        [not_manager]). Equivalence now rides the ONE canonical identity root
+        (Phase 2 swap _normalize_for_match -> canonical_persona_key).
+
+        FLIP (accent seam): the second case ("María"/"maria") is the bug-class
+        this plan kills — the pre-Phase-1 accent-keeping normalizer KEPT accents
+        ("María" -> "maría") and so MISSED a declared "María" against an
+        event-sourced "maria"; canonical_persona_key accent-strips both to "maria" -> match.
+        Reverting to the pre-Phase-1 accent-keeping normalizer makes the accent case fail.
+
+        NOTE (intended keep-spaces tradeoff): the canonical key KEEPS internal
+        spaces, so the realistic spaced journal form "mr radio" matches declared
+        "Mr. Radio", but a contrived SPACELESS "MR.RADIO" -> "mrradio" would NOT
+        (it no longer collapses onto "mr radio"). The space-dropping leniency was
+        deliberately given up for store-key parity; the spaceless variant is not
+        a real persona surface."""
+        view = { "s1": self._live_row( "s1", "mr radio" ) }              # the journal shape (spaced)
         row  = fr.build_snapshot( view, { }, NOW, declared_managers=[ "Mr. Radio" ] )[ "sessions" ][ 0 ]
         assert row[ "role" ] == "manager"
-        # and the squashed variant too — display casing untouched either way
-        view = { "s1": self._live_row( "s1", "MR.RADIO" ) }
-        row  = fr.build_snapshot( view, { }, NOW, declared_managers=[ "Mr. Radio" ] )[ "sessions" ][ 0 ]
-        assert row[ "role" ] == "manager" and row[ "persona" ] == "MR.RADIO"
+        # accent bug-class flip: declared "María" matches event-sourced "maria"
+        view = { "s1": self._live_row( "s1", "maria" ) }
+        row  = fr.build_snapshot( view, { }, NOW, declared_managers=[ "María" ] )[ "sessions" ][ 0 ]
+        assert row[ "role" ] == "manager" and row[ "persona" ] == "maria"
 
     def test_undeclared_persona_stays_worker( self ):
         view = { "s1": self._live_row( "s1", "Rio" ) }
@@ -591,6 +668,64 @@ class TestPruneOfflineRows:
         dark = _snap( self._live_row( "a", "offline" ) )
         out  = fr.prune_offline_rows( dark )
         assert out[ "sessions" ] == [ ] and out[ "session_count" ] == 0
+
+
+# ── stale holding_on display sanitization (bug 65d1247f) ───────────────────────
+# DISPLAY-only: a STALE holder session's raw `peer:X` hold must render as the
+# neutral "none" so the displayed holding_on AGREES with the edge logic
+# (37511bfb drops a stale session's peer EDGE; this drops its peer DISPLAY).
+# Fail-safe (consistent with 37511bfb): missing/unparseable last_activity → NOT
+# stale → show the raw value (never hide a LIVE hold). Single source of truth:
+# reuses dependency_graph.session_is_stale (the same predicate the edge gate uses).
+
+class TestStaleHoldingOnDisplaySanitization:
+    STALE_TS = NOW - datetime.timedelta( seconds=2000 )   # age 2000s > 600 threshold
+    FRESH_TS = NOW - datetime.timedelta( seconds=120 )    # age 120s  < 600 threshold
+
+    def _row( self, holding_on, last_activity_ts, **extra ):
+        view = { "s1": { "session_id": "s1", "persona": "mr radio", "state": "working",
+                         "holding_on": holding_on, "stuck": False } }
+        if last_activity_ts is not None:
+            view[ "s1" ][ "last_activity_ts" ] = last_activity_ts
+        view[ "s1" ].update( extra )
+        # include_offline=True keeps the stale row visible (focus is the hold value,
+        # not the offline prune); alive_threshold_seconds threaded as the edge path does.
+        return fr.build_snapshot( view, { }, NOW, include_offline=True,
+                                  alive_threshold_seconds=600 )[ "sessions" ][ 0 ]
+
+    def test_stale_session_peer_hold_sanitized_to_none( self ):
+        # Test 1 (RED-first): stale session + peer:maria → rendered "none" (NOT peer:maria).
+        assert self._row( "peer:maria", self.STALE_TS )[ "holding_on" ] == "none"
+
+    def test_fresh_session_peer_hold_preserved( self ):
+        # Test 2: fresh session keeps peer:maria — no over-sanitization.
+        assert self._row( "peer:maria", self.FRESH_TS )[ "holding_on" ] == "peer:maria"
+
+    def test_missing_last_activity_fail_safe_keeps_raw( self ):
+        # Test 3a: absent last_activity_ts → NOT stale → keep raw (never hide a live hold).
+        assert self._row( "peer:maria", None )[ "holding_on" ] == "peer:maria"
+
+    def test_unparseable_last_activity_fail_safe_keeps_raw( self ):
+        # Test 3b: unparseable ts → NOT stale → keep raw.
+        assert self._row( "peer:maria", "not-a-timestamp" )[ "holding_on" ] == "peer:maria"
+
+    def test_stale_session_non_peer_hold_unchanged( self ):
+        # peer-prefix gate: a stale user:/commons: hold was NEVER an edge → leave it
+        # honest (mirrors build_wait_edges, which only ever minted peer edges).
+        assert self._row( "user:Rick", self.STALE_TS )[ "holding_on" ] == "user:Rick"
+
+    def test_stale_session_none_hold_unchanged( self ):
+        # holding_on missing/None on a stale session → isinstance(str) gate → unchanged.
+        assert self._row( None, self.STALE_TS )[ "holding_on" ] is None
+
+    def test_default_threshold_none_disables_gate( self ):
+        # alive_threshold_seconds default None ⇒ NO gate (byte-identical to prior
+        # behavior): even a stale session keeps its raw peer hold.
+        view = { "s1": { "session_id": "s1", "persona": "mr radio", "state": "working",
+                         "holding_on": "peer:maria", "stuck": False,
+                         "last_activity_ts": self.STALE_TS } }
+        row = fr.build_snapshot( view, { }, NOW, include_offline=True )[ "sessions" ][ 0 ]
+        assert row[ "holding_on" ] == "peer:maria"
 
 
 def test_quick_smoke_test():

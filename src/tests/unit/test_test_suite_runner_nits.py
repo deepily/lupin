@@ -116,5 +116,27 @@ class TestCleanTestDbTruncatesNewTables:
                 f"clean_test_db TRUNCATE list missing {table}"
 
 
+class TestCleanTestDbTruncatesRefreshTokens:
+    """Bug 8bd20375 (row-level layer): refresh_tokens must be in the
+    clean_test_db TRUNCATE list in BOTH conftests. It is absent today, so
+    companion refresh tokens accumulate unbounded across tests + suites; a
+    residual duplicate-jti row collides with 'Token already exists' (500) when
+    it survives the e2e→integration seam on the shared :8000 DB. Truncating it
+    per-test closes the residue path at the finest grain — intra- AND
+    cross-suite — independent of the runner-level between-suites reset."""
+
+    @pytest.mark.parametrize( "conftest_rel", [
+        "src/tests/integration/conftest.py",
+        "src/tests/e2e_ui/conftest.py",
+    ] )
+    def test_truncate_list_includes_refresh_tokens( self, conftest_rel ):
+        conftest = _read( conftest_rel )
+        truncate = re.search( r"TRUNCATE TABLE[\s\S]*?\)", conftest )
+        assert truncate is not None, \
+            f"{conftest_rel}: clean_test_db TRUNCATE statement not found"
+        assert "refresh_tokens" in truncate.group( 0 ), \
+            f"{conftest_rel}: TRUNCATE list missing refresh_tokens (bug 8bd20375)"
+
+
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )

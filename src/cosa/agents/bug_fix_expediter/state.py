@@ -209,13 +209,14 @@ BFE_PHASE_ORDINALS = {
 # import ...` here would create a cycle at module-init time. Deferring the
 # import until first attribute access breaks the cycle.
 def __getattr__( name ):
-    if name in ( "VoiceGateTimeoutError", "StalledException", "CheckpointData" ):
+    if name in ( "VoiceGateTimeoutError", "VoiceGateUnreachableError", "StalledException", "CheckpointData" ):
         from cosa.agents.test_fix_expediter.state import (
-            VoiceGateTimeoutError, StalledException, CheckpointData,
+            VoiceGateTimeoutError, VoiceGateUnreachableError, StalledException, CheckpointData,
         )
-        return { "VoiceGateTimeoutError": VoiceGateTimeoutError,
-                 "StalledException"    : StalledException,
-                 "CheckpointData"      : CheckpointData }[ name ]
+        return { "VoiceGateTimeoutError"     : VoiceGateTimeoutError,
+                 "VoiceGateUnreachableError" : VoiceGateUnreachableError,
+                 "StalledException"          : StalledException,
+                 "CheckpointData"            : CheckpointData }[ name ]
     raise AttributeError( f"module {__name__} has no attribute {name}" )
 
 

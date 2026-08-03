@@ -1,80 +1,120 @@
 /* ============================================================================
-   Multiplexer Phase 6c Node C — sender-card recorder stylesheet.
+   Multiplexer F5 lane — sender-card voice-input-row stylesheet (MATCH-LEGACY
+   rebuild, 2026-06-22).
 
-   Styles the per-sender-card `.cc-voice-input` footer rendered by
-   senderCard.ts (Step C1) + `SenderCardRecorderRenderer` state machine:
-   - `.cc-voice-input[data-recorder-state="idle"]` — Record button only
-   - `.cc-voice-input[data-recorder-state="recording"]` — Stop button (red)
-   - `.cc-voice-input[data-recorder-state="ready_to_send"]` — textarea + Re-record + Send
+   Styles the legacy inline `.cc-voice-input` > `.cc-voice-input-row` that
+   senderCard.ts now renders STATICALLY between the card header and
+   `.sender-card-dates` (conv-mode toggle + mic + text input + send). Ported
+   byte-faithful from the legacy rules (notifications.css:5297-5354) so the
+   row's computed geometry — the ~51px the layout-parity oracle's Tier-3 cares
+   about — matches the legacy golden and the temporary voice-region carve can
+   lift. SenderCardRecorderRenderer toggles `.recording` on the mic.
 
-   Scope-leak protection (matching Phase 6a/6b/6c-D/B/A pattern):
+   `.cc-voice-input` is a BLOCK (the inner `.cc-voice-input-row` is the flex
+   container — legacy structure). Rules are self-contained (explicit border/bg
+   on every control) so the row renders identically in the component-isolation
+   parity harness, which does NOT load any global `.stt-button` / button base.
+
+   Scope-leak protection (matching the Phase 6a/6b/6c pattern):
    - NO global selectors — fail-build rule in .stylelintrc.json override
-   - All rules scoped under .cc-voice-input + descendants
+   - All rules scoped under .cc-voice-input + its legacy descendants
    ============================================================================ */
 
 .cc-voice-input {
-    display    : flex;
-    flex-wrap  : wrap;
-    gap        : 6px;
-    align-items: center;
-    padding    : 8px 12px;
-    border-top : 1px solid #e9ecef;
-    margin-top : 4px;
+    padding       : 8px 12px;
+    border-bottom : 1px dashed #dee2e6;
+    background    : #f0f7ff;
 }
 
-.cc-voice-input .record-button,
-.cc-voice-input .send-button {
-    padding       : 4px 12px;
+/* Flex row: conv-mode + mic fixed, text input flex:1, send fixed (legacy). */
+.cc-voice-input-row {
+    display     : flex;
+    gap         : 6px;
+    align-items : center;
+}
+
+/* Mic button (record/stop toggle). `.recording` is set by the renderer. */
+.cc-voice-input .cc-session-stt {
+    align-self    : center;
+    height        : 34px;
+    min-width     : 40px;
+    padding       : 4px 8px;
+    font-size     : 14px;
+    flex-shrink   : 0;
     border        : 1px solid #ced4da;
     border-radius : 4px;
     background    : #fff;
-    font-size     : 12px;
     cursor        : pointer;
-    color         : #212529;
 }
 
-.cc-voice-input .record-button:hover,
-.cc-voice-input .send-button:hover {
-    background : #f8f9fa;
-}
-
-.cc-voice-input .record-button.recording {
+.cc-voice-input .cc-session-stt.recording {
     background   : #dc3545;
     color        : #fff;
     border-color : #b02a37;
 }
 
-.cc-voice-input .send-button {
-    background   : #198754;
-    color        : #fff;
-    border-color : #146c43;
+/* Conversation-mode toggle — immediately left of the mic, matched in size +
+   alignment so the two read as a horizontal pair (legacy notifications.css). */
+.cc-voice-input .sender-conversation-mode-btn {
+    align-self      : center;
+    height          : 34px;
+    min-width       : 40px;
+    padding         : 4px 8px;
+    margin-left     : 0;
+    font-size       : 14px;
+    line-height     : 1;
+    flex-shrink     : 0;
+    display         : inline-flex;
+    align-items     : center;
+    justify-content : center;
+    border          : 1px solid rgba( 108, 117, 125, 0.3 );
+    border-radius   : 4px;
+    background      : rgba( 108, 117, 125, 0.15 );
+    cursor          : pointer;
 }
 
-.cc-voice-input .send-button:hover {
+.cc-voice-input .sender-conversation-mode-btn.is-active {
+    background   : #d1e7dd;
+    border-color : rgba( 25, 135, 84, 0.6 );
+}
+
+/* Text input — the persistent compose field (F5 caret-splice target). */
+.cc-voice-input .cc-session-msg-input {
+    flex          : 1;
+    padding       : 6px 10px;
+    border        : 1px solid #ced4da;
+    border-radius : 4px;
+    font-size     : 13px;
+    outline       : none;
+}
+
+.cc-voice-input .cc-session-msg-input:focus {
+    border-color : #007bff;
+}
+
+/* Send button. */
+.cc-voice-input .response-submit-button {
+    height        : 34px;
+    padding       : 6px 14px;
+    font-size     : 13px;
+    flex-shrink   : 0;
+    border        : 1px solid #146c43;
+    border-radius : 4px;
+    background    : #198754;
+    color         : #fff;
+    cursor        : pointer;
+}
+
+.cc-voice-input .response-submit-button:hover {
     background : #146c43;
 }
 
-.cc-voice-input-textarea {
-    flex          : 1 1 200px;
-    min-height    : 28px;
-    padding       : 4px 8px;
-    border        : 1px solid #ced4da;
-    border-radius : 4px;
-    font-family   : inherit;
-    font-size     : 12px;
-    resize        : vertical;
-}
-
+/* Error surface — a block child BELOW the row (not a flex sibling). */
 .cc-voice-input-error {
-    flex            : 1 1 100%;
-    margin-top      : 4px;
-    padding         : 4px 8px;
-    border-left     : 3px solid #dc3545;
-    background-color: #f8d7da;
-    color           : #842029;
-    font-size       : 11px;
-}
-
-.cc-voice-input[data-recorder-state="idle"] .record-button {
-    /* Default state — no additional styling needed; uses base rules above. */
+    margin-top       : 4px;
+    padding          : 4px 8px;
+    border-left      : 3px solid #dc3545;
+    background-color : #f8d7da;
+    color            : #842029;
+    font-size        : 11px;
 }

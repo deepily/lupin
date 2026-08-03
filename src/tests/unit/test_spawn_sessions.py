@@ -37,8 +37,15 @@ from lupin_mcp.session_spawner import (
     _read_manifest,
     _write_manifest,
     _capture_reap_identity,
+    _recover_tmux_session,
+    _scan_persona_by_tmux_session,
+    _build_identity_warning,
     _slug,
     DEFAULT_SPAWN_CAP,
+    PERSONA_STATE_ALLOCATED,
+    PERSONA_STATE_NONE,
+    PERSONA_STATE_UNKNOWN,
+    PERSONA_STATE_UNREADABLE,
 )
 
 
@@ -244,15 +251,64 @@ class TestSpawnSessions:
         assert env[ "COSA_VOICE_SPAWNED_BY" ] == "sid-0da4"
         assert env[ "COSA_VOICE_HEADLESS" ]   == "1"
         assert env[ "COSA_VOICE_ROLE" ]       == "reviewer"
+        # owner-lineage drift fix: the manager's persona-at-spawn is frozen into the
+        # child env so the child can stamp it onto its bridge (resolver snapshot).
+        assert env[ "COSA_VOICE_SPAWNED_BY_PERSONA" ] == "Tiberius"
         # manifest persisted with 3 entries
         manifest = _read_manifest( _manifest_path( "sid-0da4", tmp_path ) )
         assert len( manifest ) == 3
 
     def test_persona_fallback_to_session_id( self, tmp_path ):
-        # manager_persona omitted → topic keys on the session_id slug
+        # manager_persona omitted → topic keys on the session_id slug (stays on
+        # `_slug`, so the hyphen survives: "Mgr-XYZ" → "dm-mgr-xyz"). This is the
+        # surgical proof the session-id path is UNCHANGED by Phase 3.
+        runner = FakeRunner()
         res = spawn_sessions( 1, "t", "Mgr-XYZ", script_path="x",
-                              runner=FakeRunner(), session_dir=tmp_path )
+                              runner=runner, session_dir=tmp_path )
         assert res[ "collection_topic" ] == "dm-mgr-xyz"
+        # no manager_persona resolved → NO snapshot env (resolver falls back to
+        # re-derivation, the legacy behavior — the omitted-snapshot branch).
+        _argv, env = runner.calls[ 0 ]
+        assert "COSA_VOICE_SPAWNED_BY_PERSONA" not in env
+
+    def test_persona_path_canonicalizes_accent_FLIP( self, tmp_path ):
+        """Phase 3 FLIP: a PERSONA-derived topic/session name now routes through
+        `persona_slug`, so "María" canonicalizes to "maria" (was the accent-leaky
+        "maría" the old `_slug` produced, since "í".isalnum() is True). Revert the
+        persona branch at session_spawner.py:315 to `_slug(manager_persona)` and
+        both assertions fail. The session-id fallback stays on `_slug` — surgical."""
+        res = spawn_sessions( 1, "t", "sid-maria", script_path="x",
+                              manager_persona="María", role="author",
+                              runner=FakeRunner(), session_dir=tmp_path )
+        assert res[ "collection_topic" ] == "dm-maria"
+        assert res[ "spawned" ][ 0 ][ "session_name" ] == "cc-author-maria-1"
+
+    def test_multiword_persona_topic_underscore_session_hyphen_FLIP( self, tmp_path ):
+        """One-name mandate (2026-06-22): for a MULTI-WORD persona the DM/collection
+        topic and the tmux SESSION name use DIFFERENT separators and each MUST be the
+        canonical form of its own convention:
+          • collection_topic → "dm-mr_radio"  (persona_slug sep="_" — byte-identical
+            to _derive_dm_topic / _dm_topic_for / every *_gateway.dm_topic_for).
+          • session_name     → "cc-author-mr-radio-1"  (persona_slug sep="-" — the
+            tmux cc-<role>-<persona>-<n> convention the sweep's scan_tmux_mismatches
+            validates with sep="-").
+        FLIP: revert dm_persona_key to sep="-" → the topic assertion fails (the old
+        DIVERGENT "dm-mr-radio" regenerates). Revert name_persona_key to sep="_" →
+        the session-name assertion fails. Single-word personas (Tiberius/María) can
+        NEVER catch this — they have no internal space to separate."""
+        res = spawn_sessions( 1, "t", "sid-radio", script_path="x",
+                              manager_persona="Mr. Radio", role="author",
+                              runner=FakeRunner(), session_dir=tmp_path )
+        assert res[ "collection_topic" ] == "dm-mr_radio"
+        assert res[ "spawned" ][ 0 ][ "session_name" ] == "cc-author-mr-radio-1"
+
+    def test_punctuation_only_persona_falls_back_to_anon( self, tmp_path ):
+        """The `or "anon"` guard preserves `_slug`'s never-empty contract when a
+        truthy persona canonicalizes to "" (e.g. emoji/punct-only)."""
+        res = spawn_sessions( 1, "t", "sid-anon", script_path="x",
+                              manager_persona="🦉", role="reviewer",
+                              runner=FakeRunner(), session_dir=tmp_path )
+        assert res[ "collection_topic" ] == "dm-anon"
 
     def test_failed_spawn_not_persisted( self, tmp_path ):
         runner = FakeRunner( returncode=1 )  # every spawn "fails"
@@ -351,6 +407,98 @@ class TestSpawnSessions:
         # the 5th call argv (index 4 of sid-i) carries "msg #4"
         last_argv = runner.calls[ -1 ][ 0 ]
         assert "msg #4" in last_argv
+
+
+# ── spawn_sessions model-directive (argv threading + roster echo) ─────────────
+
+class TestSpawnSessionsModel:
+    """Model-directive (2026-07-02): the resolved model threads to `--model` via
+    the claude_args seam and is echoed on every roster entry + at the top level."""
+
+    def _argv_of( self, runner, i=0 ):
+        return runner.calls[ i ][ 0 ]
+
+    def test_model_threads_into_argv_before_prompt( self, tmp_path ):
+        runner = FakeRunner( returncode=0 )
+        res = spawn_sessions( 1, "t", "sid-m", script_path="/s.sh", manager_persona="Rio",
+                              model="claude-opus-4-8", runner=runner, session_dir=tmp_path )
+        argv = self._argv_of( runner )
+        # --model <id> present, and inserted BEFORE --prompt (the claude_args seam)
+        assert "--model" in argv
+        assert argv[ argv.index( "--model" ) + 1 ] == "claude-opus-4-8"
+        assert argv.index( "--model" ) < argv.index( "--prompt" )
+        # echoed on the roster entry AND the top-level result
+        assert res[ "spawned" ][ 0 ][ "model" ] == "claude-opus-4-8"
+        assert res[ "model" ] == "claude-opus-4-8"
+
+    def test_model_none_omits_flag_and_echoes_none( self, tmp_path ):
+        runner = FakeRunner( returncode=0 )
+        res = spawn_sessions( 1, "t", "sid-mn", script_path="/s.sh", manager_persona="Rio",
+                              runner=runner, session_dir=tmp_path )
+        argv = self._argv_of( runner )
+        assert "--model" not in argv          # fail-open: no flag → inherit user default
+        assert res[ "spawned" ][ 0 ][ "model" ] is None
+        assert res[ "model" ] is None
+
+    def test_empty_model_string_omits_flag( self, tmp_path ):
+        # An empty string is falsy → treated as "no model" (no --model flag).
+        runner = FakeRunner( returncode=0 )
+        res = spawn_sessions( 1, "t", "sid-me", script_path="/s.sh", manager_persona="Rio",
+                              model="", runner=runner, session_dir=tmp_path )
+        assert "--model" not in self._argv_of( runner )
+        assert res[ "model" ] == ""
+
+    def test_model_on_every_child_in_a_batch( self, tmp_path ):
+        runner = FakeRunner( returncode=0 )
+        res = spawn_sessions( 3, "t", "sid-mb", script_path="/s.sh", manager_persona="Rio",
+                              model="claude-opus-4-8", runner=runner, session_dir=tmp_path )
+        assert all( s[ "model" ] == "claude-opus-4-8" for s in res[ "spawned" ] )
+        for i in range( 3 ):
+            assert "--model" in self._argv_of( runner, i )
+
+    def test_model_coexists_with_dry_run( self, tmp_path ):
+        runner = FakeRunner( returncode=0 )
+        spawn_sessions( 1, "t", "sid-md", script_path="/s.sh", dry_run=True,
+                        model="claude-opus-4-8", runner=runner, session_dir=tmp_path )
+        argv = self._argv_of( runner )
+        # both flags present; --dry-run precedes the session name, --model follows it
+        assert "--dry-run" in argv and "--model" in argv
+        assert argv.index( "--dry-run" ) < argv.index( "--model" )
+
+
+# ── list_spawned_sessions model surfacing (bug 35bdd68f) ──────────────────────
+
+class TestListSpawnedSessionsModel:
+    """Bug 35bdd68f (2026-07-07): the roster row must SURFACE the persisted model
+    id so the fleet can answer 'what LLM is this worker running' without asking the
+    worker. Model is captured + persisted at spawn (see TestSpawnSessionsModel);
+    the bug was the read-side row builder dropping it. A pre-fix record (no 'model'
+    key) surfaces None — honest absence, never a guessed default."""
+
+    def _seed( self, tmp_path, records ):
+        _write_manifest( _manifest_path( "mgr", tmp_path ), records )
+
+    def test_model_surfaces_per_row_echoing_persisted_value( self, tmp_path ):
+        # two DIFFERENT model ids prove the row echoes the PERSISTED value,
+        # not a hardcoded opus default.
+        self._seed( tmp_path, [
+            { "session_name": "cc-author-rio",  "requested_role": "author", "model": "claude-opus-4-8" },
+            { "session_name": "cc-tester-clay", "requested_role": "tester", "model": "claude-sonnet-5"  },
+        ] )
+        res  = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ), session_dir=tmp_path )
+        rows = { r[ "session_name" ]: r for r in res[ "sessions" ] }
+        assert rows[ "cc-author-rio"  ][ "model" ] == "claude-opus-4-8"
+        assert rows[ "cc-tester-clay" ][ "model" ] == "claude-sonnet-5"
+        # contract: EVERY row carries the key, not just the asserted ones
+        assert all( "model" in r for r in res[ "sessions" ] )
+
+    def test_prefix_record_without_model_surfaces_none( self, tmp_path ):
+        # a record persisted BEFORE model capture has no 'model' key
+        self._seed( tmp_path, [ { "session_name": "cc-legacy", "requested_role": "reviewer" } ] )
+        res = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ), session_dir=tmp_path )
+        row = res[ "sessions" ][ 0 ]
+        assert "model" in row            # key present — honest absence, not omission
+        assert row[ "model" ] is None    # None, never a guessed default
 
 
 # ── dismiss_sessions ──────────────────────────────────────────────────────────
@@ -481,7 +629,9 @@ class TestListSpawnedSessions:
         res = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ), session_dir=tmp_path )
         assert res[ "count" ] == 2
         assert res[ "sessions" ][ 0 ] == { "session_name": "a", "requested_role": "author",
-                                           "status": "live", "alive": True }
+                                           "status": "live", "alive": True, "model": None,
+                                           "persona": None, "persona_state": "unknown_no_bridge",
+                                           "identity_verified": False, "age_seconds": None }
         # default requested_role when missing
         assert res[ "sessions" ][ 1 ][ "requested_role" ] == "reviewer"
 
@@ -489,6 +639,462 @@ class TestListSpawnedSessions:
         _write_manifest( _manifest_path( "mgr", tmp_path ), [ { "session_name": "a" } ] )
         res = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=1 ), session_dir=tmp_path )
         assert res[ "sessions" ][ 0 ][ "status" ] == "dead" and res[ "sessions" ][ 0 ][ "alive" ] is False
+
+
+# ── list_spawned_sessions IDENTITY axis (row 6f8fd858) ────────────────────────
+#
+# The defect: the roster answered LIVENESS while presenting as a health check,
+# so a manager asking "who is in this seat?" got a green row and learned
+# nothing — then briefed the wrong session by name. These tests pin the four
+# identity states apart, and pin the roster's refusal to let a green liveness
+# row stand in for identity verification.
+#
+# Bridge files here are REAL files written to a real (tmp) session_dir and read
+# by the real scanner. Nothing about the persona lookup is mocked — a mocked
+# green is precisely the failure mode this row is about.
+
+def _write_bridge( session_dir, filename, *, tmux_session=None, voice_persona="__omit__", raw=None ):
+    """Write a real bridge file into session_dir; return its Path."""
+    path = session_dir / filename
+    if raw is not None:
+        path.write_text( raw )
+        return path
+    data = { }
+    if tmux_session is not None: data[ "tmux_session" ]  = tmux_session
+    if voice_persona != "__omit__": data[ "voice_persona" ] = voice_persona
+    path.write_text( json.dumps( data ) )
+    return path
+
+
+class TestScanPersonaByTmuxSession:
+    def test_missing_dir_yields_empty_scan( self, tmp_path ):
+        index, unattributable, corrupt = _scan_persona_by_tmux_session( tmp_path / "does-not-exist" )
+        assert index == { } and unattributable == 0
+
+    def test_allocated_reads_the_name( self, tmp_path ):
+        _write_bridge( tmp_path, "cc-1.json", tmux_session="seat-a",
+                       voice_persona={ "name": "Krishna", "voice_id": "v1" } )
+        index, _, _c = _scan_persona_by_tmux_session( tmp_path )
+        assert index[ "seat-a" ] == { "persona": "Krishna", "persona_state": PERSONA_STATE_ALLOCATED }
+
+    def test_allocated_name_is_stripped( self, tmp_path ):
+        _write_bridge( tmp_path, "cc-1.json", tmux_session="seat-a", voice_persona={ "name": "  Rio  " } )
+        index, _, _c = _scan_persona_by_tmux_session( tmp_path )
+        assert index[ "seat-a" ][ "persona" ] == "Rio"
+
+    def test_explicit_null_persona_is_none_not_unknown( self, tmp_path ):
+        # THE distinction the row turns on: this child BOOTED and got nothing.
+        # It must not read the same as a child with no bridge on disk at all.
+        _write_bridge( tmp_path, "cc-1.json", tmux_session="seat-a", voice_persona=None )
+        index, _, _c = _scan_persona_by_tmux_session( tmp_path )
+        assert index[ "seat-a" ] == { "persona": None, "persona_state": PERSONA_STATE_NONE }
+
+    def test_absent_persona_key_is_none( self, tmp_path ):
+        _write_bridge( tmp_path, "cc-1.json", tmux_session="seat-a" )
+        index, _, _c = _scan_persona_by_tmux_session( tmp_path )
+        assert index[ "seat-a" ][ "persona_state" ] == PERSONA_STATE_NONE
+
+    @pytest.mark.parametrize( "bad", [ "Krishna", 42, [ "Krishna" ], { }, { "name": "" },
+                                       { "name": "   " }, { "name": 7 } ] )
+    def test_malformed_persona_is_unreadable_not_none( self, tmp_path, bad ):
+        # A record we FOUND but cannot read is an instrument failure, not an
+        # absent persona — collapsing it into "none" would invent a fact.
+        _write_bridge( tmp_path, "cc-1.json", tmux_session="seat-a", voice_persona=bad )
+        index, _, _c = _scan_persona_by_tmux_session( tmp_path )
+        assert index[ "seat-a" ] == { "persona": None, "persona_state": PERSONA_STATE_UNREADABLE }
+
+    def test_corrupt_json_is_counted_not_silently_skipped( self, tmp_path ):
+        # Bridge filenames key on pid, not tmux session, so a corrupt bridge is
+        # unattributable — but the scan must confess it was partially blind.
+        _write_bridge( tmp_path, "cc-bad.json", raw="{ not json" )
+        _write_bridge( tmp_path, "cc-1.json", tmux_session="seat-a", voice_persona={ "name": "Rio" } )
+        index, unattributable, _c = _scan_persona_by_tmux_session( tmp_path )
+        assert unattributable == 1 and index[ "seat-a" ][ "persona" ] == "Rio"
+
+    def test_non_dict_json_is_counted( self, tmp_path ):
+        _write_bridge( tmp_path, "cc-list.json", raw="[1, 2, 3]" )
+        _, unattributable, _c = _scan_persona_by_tmux_session( tmp_path )
+        assert unattributable == 1
+
+    def test_unreadable_file_is_counted( self, tmp_path, monkeypatch ):
+        path = _write_bridge( tmp_path, "cc-1.json", tmux_session="seat-a" )
+        def _boom( self, *a, **k ):
+            if self == path: raise OSError( "permission denied" )
+            return "{}"
+        monkeypatch.setattr( Path, "read_text", _boom )
+        _, unattributable, _c = _scan_persona_by_tmux_session( tmp_path )
+        assert unattributable == 1
+
+    def test_glob_oserror_yields_empty_scan( self, tmp_path, monkeypatch ):
+        monkeypatch.setattr( Path, "glob", lambda self, pat: ( _ for _ in () ).throw( OSError( "nope" ) ) )
+        assert _scan_persona_by_tmux_session( tmp_path ) == ( { }, 0, [ ] )
+
+    def test_buffer_and_listener_sidecars_are_skipped( self, tmp_path ):
+        _write_bridge( tmp_path, "cc-buffer-x.json", raw="{ not json" )
+        _write_bridge( tmp_path, "cc-listener-x.json", raw="{ not json" )
+        assert _scan_persona_by_tmux_session( tmp_path ) == ( { }, 0, [ ] )
+
+    @pytest.mark.parametrize( "tmux", [ None, "", 42 ] )
+    def test_bridge_without_usable_tmux_session_is_ignored( self, tmp_path, tmux ):
+        _write_bridge( tmp_path, "cc-1.json", tmux_session=tmux, voice_persona={ "name": "Rio" } )
+        index, unattributable, _c = _scan_persona_by_tmux_session( tmp_path )
+        assert index == { } and unattributable == 0
+
+
+class TestCorruptBridgeAttribution:
+    """
+    Remedy (a) for row 31051d63 (Rio ⚡, correcting his own ratified claim and
+    mine by inheritance): the scan reported corrupt bridges as an ANONYMOUS
+    COUNT on the reasoning that attribution requires reading the file. False for
+    the failure mode this fleet produces — a SPLICE is a valid document with
+    garbage after it, so `raw_decode` hands the first object back whole.
+
+    A live seat sat unaddressable for 20+ minutes while the fleet counted it as
+    one faceless bad file, and its tmux_session was in readable bytes the whole
+    time. Cross-checked against Rio's INDEPENDENT oracle in
+    test_corrupt_bridge_attribution.py, written before he saw this diff.
+    """
+    def test_splice_names_the_seat( self, tmp_path ):
+        long_doc  = json.dumps( { "tmux_session": "seat-a", "session_id": "931e9dae", "pad": "x" * 80 }, indent=2 )
+        short_doc = json.dumps( { "tmux_session": "seat-a", "session_id": "d43421a6" }, indent=2 )
+        _write_bridge( tmp_path, "cc-splice.json", raw=short_doc + long_doc[ len( short_doc ): ] )
+        _, unattributable, corrupt = _scan_persona_by_tmux_session( tmp_path )
+        assert unattributable == 1                       # count keeps its EXACT prior meaning
+        assert corrupt == [ { "tmux_session": "seat-a", "path": str( tmp_path / "cc-splice.json" ) } ]
+
+    def test_recovers_the_SURVIVING_write_not_the_residue( self ):
+        # With two documents in one file it is possible to recover the WRONG
+        # one. raw_decode stops at the first complete object, which is the
+        # surviving write — this is the assertion that would catch a regression.
+        long_doc  = json.dumps( { "tmux_session": "loser",  "pad": "x" * 80 }, indent=2 )
+        short_doc = json.dumps( { "tmux_session": "winner" }, indent=2 )
+        assert _recover_tmux_session( short_doc + long_doc[ len( short_doc ): ] ) == "winner"
+
+    def test_truncated_first_document_is_genuinely_unnameable( self, tmp_path ):
+        # THE BOUNDARY. A crashed write / full disk leaves nothing to name, and
+        # the fix must not pretend otherwise.
+        _write_bridge( tmp_path, "cc-trunc.json", raw='{"tmux_session":"seat-a","voice_persona":{"na' )
+        _, unattributable, corrupt = _scan_persona_by_tmux_session( tmp_path )
+        assert unattributable == 1 and corrupt == [ ]
+
+    @pytest.mark.parametrize( "raw", [ "[]", "[] trailing", "", "   ", '"a string"', "42" ] )
+    def test_documents_that_name_nobody_are_never_attributed( self, tmp_path, raw ):
+        # `[]` is the one most likely to slip through, because json.load SUCCEEDS
+        # on it — R-1's free finding. Parsed-but-nameless is not attributable.
+        _write_bridge( tmp_path, "cc-x.json", raw=raw )
+        _, unattributable, corrupt = _scan_persona_by_tmux_session( tmp_path )
+        assert corrupt == [ ]
+        assert unattributable == 1
+
+    def test_healthy_bridge_never_lands_in_corrupt_bridges( self, tmp_path ):
+        # The recover path must not be reachable for a file that parses — a
+        # healthy seat appearing in a corruption report would be a false alarm.
+        _write_bridge( tmp_path, "cc-ok.json", tmux_session="seat-ok", voice_persona={ "name": "Rio" } )
+        index, unattributable, corrupt = _scan_persona_by_tmux_session( tmp_path )
+        assert index[ "seat-ok" ][ "persona" ] == "Rio"
+        assert unattributable == 0 and corrupt == [ ]
+
+    def test_recovered_persona_is_NOT_trusted_into_the_index( self, tmp_path ):
+        # A corrupt bridge may be STALE — that is R-1's whole basis. Naming the
+        # seat is the fix; importing its persona would trade an anonymous blind
+        # spot for a confidently wrong one.
+        doc   = json.dumps( { "tmux_session": "seat-a", "voice_persona": { "name": "Stale" }, "pad": "x" * 80 }, indent=2 )
+        short = json.dumps( { "tmux_session": "seat-a", "voice_persona": { "name": "Stale" } }, indent=2 )
+        _write_bridge( tmp_path, "cc-splice.json", raw=short + doc[ len( short ): ] )
+        index, _, corrupt = _scan_persona_by_tmux_session( tmp_path )
+        assert corrupt and corrupt[ 0 ][ "tmux_session" ] == "seat-a"
+        assert "seat-a" not in index, "a corrupt bridge's persona must never enter the index"
+
+    def test_warning_names_the_corrupt_seat_instead_of_a_bare_count( self ):
+        rows = [ { "session_name": "seat-a", "persona_state": PERSONA_STATE_UNKNOWN, "age_seconds": 1200 } ]
+        w = _build_identity_warning( rows, 1, [ { "tmux_session": "seat-a", "path": "/s/cc-1.json" } ] )
+        assert "could still be attributed" in w
+        assert "seat-a (/s/cc-1.json)" in w
+        assert "may be stale" in w                       # the persona is withheld, and says why
+
+    def test_warning_unchanged_when_nothing_was_recoverable( self ):
+        rows = [ { "session_name": "seat-a", "persona_state": PERSONA_STATE_UNKNOWN, "age_seconds": 1 } ]
+        w = _build_identity_warning( rows, 1, [ ] )
+        assert "skipped 1 unreadable bridge file" in w
+        assert "could still be attributed" not in w
+
+    def test_roster_surfaces_corrupt_bridges( self, tmp_path ):
+        _write_manifest( _manifest_path( "mgr", tmp_path ), [ { "session_name": "seat-a" } ] )
+        long_doc  = json.dumps( { "tmux_session": "seat-a", "pad": "x" * 80 }, indent=2 )
+        short_doc = json.dumps( { "tmux_session": "seat-a" }, indent=2 )
+        _write_bridge( tmp_path, "cc-splice.json", raw=short_doc + long_doc[ len( short_doc ): ] )
+        res = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ), session_dir=tmp_path )
+        assert res[ "corrupt_bridges" ] == [ { "tmux_session": "seat-a",
+                                               "path": str( tmp_path / "cc-splice.json" ) } ]
+        assert res[ "identity_complete" ] is False       # naming it does not repair it
+        assert "seat-a" in res[ "identity_warning" ]
+
+
+class TestBuildIdentityWarning:
+    def test_all_allocated_yields_no_warning( self ):
+        rows = [ { "session_name": "a", "persona_state": PERSONA_STATE_ALLOCATED, "age_seconds": 5 } ]
+        assert _build_identity_warning( rows, 0 ) is None
+
+    def test_empty_roster_yields_no_warning( self ):
+        assert _build_identity_warning( [ ], 0 ) is None
+
+    def test_names_every_unverified_seat_with_state_and_age( self ):
+        rows = [ { "session_name": "a", "persona_state": PERSONA_STATE_ALLOCATED, "age_seconds": 5 },
+                 { "session_name": "b", "persona_state": PERSONA_STATE_UNKNOWN,   "age_seconds": 3.7 },
+                 { "session_name": "c", "persona_state": PERSONA_STATE_NONE,      "age_seconds": None } ]
+        w = _build_identity_warning( rows, 0 )
+        assert "2 of 3" in w
+        assert "b (unknown_no_bridge, 3s old)" in w
+        assert "c (none, age unknown)" in w
+        assert "a (" not in w                     # verified seats are not nagged about
+        assert "LIVENESS" in w                    # the refusal is stated, not implied
+
+    def test_blindness_note_only_when_scan_was_blind( self ):
+        rows = [ { "session_name": "b", "persona_state": PERSONA_STATE_UNKNOWN, "age_seconds": 1 } ]
+        assert "unreadable bridge file" not in _build_identity_warning( rows, 0 )
+        assert "skipped 2 unreadable bridge file" in _build_identity_warning( rows, 2 )
+
+    # ── R-1 (Rio, 2026-07-21) ────────────────────────────────────────────────
+    # The first version returned early on "no unverified rows" and dropped the
+    # blindness count, reporting identity_complete=True with unreadable bridges
+    # on disk — this commit's own thesis inverted.
+    def test_all_allocated_but_blind_scan_still_warns( self ):
+        rows = [ { "session_name": "a", "persona_state": PERSONA_STATE_ALLOCATED, "age_seconds": 5 } ]
+        w = _build_identity_warning( rows, 1 )
+        assert w is not None, "a blind scan must not report a clean bill of health"
+        assert "identity is NOT complete" in w
+        assert "skipped 1 unreadable bridge file" in w
+
+    def test_blind_all_allocated_names_the_STALE_risk_not_the_missing_one( self ):
+        # The two situations need different explanations: with an unverified row
+        # the blindness may explain THAT row; with none, the risk is that an
+        # allocated seat is named from a bridge the unreadable one supersedes.
+        allocated = [ { "session_name": "a", "persona_state": PERSONA_STATE_ALLOCATED, "age_seconds": 5 } ]
+        unknown   = [ { "session_name": "b", "persona_state": PERSONA_STATE_UNKNOWN,   "age_seconds": 5 } ]
+        assert "stale bridge"       in _build_identity_warning( allocated, 1 )
+        assert "unknown_no_bridge"  in _build_identity_warning( unknown, 1 )
+
+    def test_empty_roster_with_blind_scan_still_warns( self ):
+        assert _build_identity_warning( [ ], 2 ) is not None
+
+
+class TestListSpawnedSessionsIdentity:
+    def _seed_manifest( self, tmp_path, records ):
+        _write_manifest( _manifest_path( "mgr", tmp_path ), records )
+
+    def test_three_states_are_distinguishable_in_one_roster( self, tmp_path ):
+        # The core acceptance: allocated / none / unknown_no_bridge, side by side,
+        # all three tmux-ALIVE. The old roster rendered these as identical greens.
+        self._seed_manifest( tmp_path, [ { "session_name": "seat-alloc" },
+                                         { "session_name": "seat-null" },
+                                         { "session_name": "seat-nobridge" } ] )
+        _write_bridge( tmp_path, "cc-1.json", tmux_session="seat-alloc", voice_persona={ "name": "Krishna" } )
+        _write_bridge( tmp_path, "cc-2.json", tmux_session="seat-null",  voice_persona=None )
+
+        res  = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ), session_dir=tmp_path )
+        rows = { s[ "session_name" ]: s for s in res[ "sessions" ] }
+
+        assert all( r[ "alive" ] is True for r in rows.values() )   # liveness identical…
+        assert rows[ "seat-alloc"    ][ "persona_state" ] == PERSONA_STATE_ALLOCATED
+        assert rows[ "seat-alloc"    ][ "persona" ]       == "Krishna"
+        assert rows[ "seat-null"     ][ "persona_state" ] == PERSONA_STATE_NONE
+        assert rows[ "seat-nobridge" ][ "persona_state" ] == PERSONA_STATE_UNKNOWN
+        # …identity is NOT. A null persona never arrives without a state saying why.
+        assert rows[ "seat-null" ][ "persona" ] is None and rows[ "seat-nobridge" ][ "persona" ] is None
+        assert rows[ "seat-null" ][ "persona_state" ] != rows[ "seat-nobridge" ][ "persona_state" ]
+
+    def test_identity_verified_tracks_allocated_only( self, tmp_path ):
+        self._seed_manifest( tmp_path, [ { "session_name": "a" }, { "session_name": "b" } ] )
+        _write_bridge( tmp_path, "cc-1.json", tmux_session="a", voice_persona={ "name": "Rio" } )
+        res  = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ), session_dir=tmp_path )
+        rows = { s[ "session_name" ]: s for s in res[ "sessions" ] }
+        assert rows[ "a" ][ "identity_verified" ] is True
+        assert rows[ "b" ][ "identity_verified" ] is False
+
+    def test_fully_identified_roster_declares_itself_complete( self, tmp_path ):
+        self._seed_manifest( tmp_path, [ { "session_name": "a" } ] )
+        _write_bridge( tmp_path, "cc-1.json", tmux_session="a", voice_persona={ "name": "Rio" } )
+        res = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ), session_dir=tmp_path )
+        assert res[ "identity_complete" ] is True and res[ "identity_warning" ] is None
+
+    def test_green_liveness_cannot_be_read_as_identity_verified( self, tmp_path ):
+        # (b) half of the done-condition: every row is alive/live — the caller
+        # must STILL be unable to read this dict as identity-verified.
+        self._seed_manifest( tmp_path, [ { "session_name": "seat-x" } ] )
+        res = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ), session_dir=tmp_path )
+        assert res[ "sessions" ][ 0 ][ "status" ] == "live"
+        assert res[ "sessions" ][ 0 ][ "alive" ] is True
+        assert res[ "identity_complete" ] is False
+        assert "seat-x" in res[ "identity_warning" ]
+
+    def test_empty_roster_claims_nothing_and_warns_about_nothing( self, tmp_path ):
+        res = list_spawned_sessions( "mgr", runner=FakeRunner(), session_dir=tmp_path )
+        assert res[ "count" ] == 0
+        assert res[ "identity_complete" ] is True and res[ "identity_warning" ] is None
+
+    def test_R1_rio_repro_all_allocated_plus_one_corrupt_bridge( self, tmp_path ):
+        """
+        Rio's exact reproduction (2026-07-21), pinned end-to-end through the
+        roster rather than the helper: one healthy allocated seat beside one
+        corrupt bridge — a bridge half-written during SessionStart or truncated
+        by a crash. Before the fix this returned identity_complete=True with an
+        unreadable bridge sitting on disk, and warning=None.
+        """
+        _write_manifest( _manifest_path( "mgr", tmp_path ), [ { "session_name": "seat-a" } ] )
+        _write_bridge( tmp_path, "cc-seat-a.json", tmux_session="seat-a",
+                       voice_persona={ "name": "Rio" } )
+        _write_bridge( tmp_path, "cc-corrupt.json", raw="{ this is not json" )
+
+        res = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ), session_dir=tmp_path )
+
+        assert res[ "sessions" ][ 0 ][ "persona" ]       == "Rio"
+        assert res[ "sessions" ][ 0 ][ "persona_state" ] == PERSONA_STATE_ALLOCATED
+        assert res[ "unattributable_bridges" ] == 1
+        assert res[ "identity_complete" ] is False          # ← the fix
+        assert res[ "identity_warning" ] is not None
+        assert "skipped 1 unreadable bridge file" in res[ "identity_warning" ]
+
+    def test_non_dict_json_also_blocks_completeness_not_just_bad_syntax( self ):
+        # Rio's free finding: `unattributable` also increments when the JSON
+        # PARSES but is not a dict. Validating parseability alone would fix the
+        # narrow case and leave the class — so the flag folds in the count,
+        # which covers both.
+        rows = [ { "session_name": "a", "persona_state": PERSONA_STATE_ALLOCATED, "age_seconds": 1 } ]
+        assert _build_identity_warning( rows, 1 ) is not None
+
+    def test_unattributable_bridges_surfaced_on_the_roster( self, tmp_path ):
+        self._seed_manifest( tmp_path, [ { "session_name": "a" } ] )
+        _write_bridge( tmp_path, "cc-bad.json", raw="{{{" )
+        res = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ), session_dir=tmp_path )
+        assert res[ "unattributable_bridges" ] == 1
+        assert "scan blindness" in res[ "identity_warning" ]
+
+    def test_age_seconds_computed_from_spawned_ts( self, tmp_path ):
+        self._seed_manifest( tmp_path, [ { "session_name": "a", "spawned_ts": 1000.0 } ] )
+        res = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ),
+                                     session_dir=tmp_path, now_fn=lambda: 1042.5 )
+        assert res[ "sessions" ][ 0 ][ "age_seconds" ] == pytest.approx( 42.5 )
+
+    @pytest.mark.parametrize( "bad_ts", [ None, "yesterday" ] )
+    def test_age_is_none_for_legacy_or_malformed_stamp( self, tmp_path, bad_ts ):
+        # Legacy records predate spawn-time capture: honest absence, never a guess.
+        rec = { "session_name": "a" }
+        if bad_ts is not None: rec[ "spawned_ts" ] = bad_ts
+        self._seed_manifest( tmp_path, [ rec ] )
+        res = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ),
+                                     session_dir=tmp_path, now_fn=lambda: 1042.5 )
+        assert res[ "sessions" ][ 0 ][ "age_seconds" ] is None
+
+    def test_age_separates_a_fresh_race_from_a_dead_sessionstart( self, tmp_path ):
+        # Both seats are "no bridge". Nothing on disk resolves the ambiguity, so
+        # the STATE stays ambiguous for both — age is the caller's evidence.
+        self._seed_manifest( tmp_path, [ { "session_name": "fresh", "spawned_ts": 1000.0 },
+                                         { "session_name": "stale", "spawned_ts": 0.0 } ] )
+        res  = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ),
+                                      session_dir=tmp_path, now_fn=lambda: 1003.0 )
+        rows = { s[ "session_name" ]: s for s in res[ "sessions" ] }
+        assert rows[ "fresh" ][ "persona_state" ] == PERSONA_STATE_UNKNOWN
+        assert rows[ "stale" ][ "persona_state" ] == PERSONA_STATE_UNKNOWN
+        assert rows[ "fresh" ][ "age_seconds" ] == pytest.approx( 3.0 )
+        assert rows[ "stale" ][ "age_seconds" ] == pytest.approx( 1003.0 )
+
+    def test_dead_seat_still_reports_identity_axis( self, tmp_path ):
+        # Liveness and identity are independent axes — a dead seat whose bridge
+        # survives still answers "who was in it?".
+        self._seed_manifest( tmp_path, [ { "session_name": "a" } ] )
+        _write_bridge( tmp_path, "cc-1.json", tmux_session="a", voice_persona={ "name": "Rachel" } )
+        res = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=1 ), session_dir=tmp_path )
+        assert res[ "sessions" ][ 0 ][ "alive" ] is False
+        assert res[ "sessions" ][ 0 ][ "persona" ] == "Rachel"
+        assert res[ "identity_complete" ] is True
+
+    def test_unreadable_state_reaches_the_roster( self, tmp_path ):
+        self._seed_manifest( tmp_path, [ { "session_name": "a" } ] )
+        _write_bridge( tmp_path, "cc-1.json", tmux_session="a", voice_persona="Krishna" )
+        res = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ), session_dir=tmp_path )
+        assert res[ "sessions" ][ 0 ][ "persona_state" ] == PERSONA_STATE_UNREADABLE
+        assert res[ "sessions" ][ 0 ][ "identity_verified" ] is False
+
+    def test_bridge_scan_runs_once_regardless_of_roster_size( self, tmp_path, monkeypatch ):
+        self._seed_manifest( tmp_path, [ { "session_name": f"s{i}" } for i in range( 6 ) ] )
+        calls = [ ]
+        real  = Path.glob
+        def _counting_glob( self, pat ):
+            calls.append( pat )
+            return real( self, pat )
+        monkeypatch.setattr( Path, "glob", _counting_glob )
+        list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ), session_dir=tmp_path )
+        assert calls.count( "cc-*.json" ) == 1
+
+
+class TestMeasuredBootSequence:
+    """
+    Replays the boot sequence MEASURED on a live spawn (2026-07-21, row 6f8fd858
+    verification): a healthy child walks unknown_no_bridge → none → allocated in
+    about one second, by writing its bridge first and its persona a beat later.
+
+    This is pinned because it is the empirical reason the roster does NOT treat
+    "none" or "unknown_no_bridge" as failure verdicts. If a future change makes
+    either state assert a failure, this test says why that is wrong.
+    """
+    def test_healthy_child_walks_all_three_states( self, tmp_path ):
+        _write_manifest( _manifest_path( "mgr", tmp_path ),
+                         [ { "session_name": "seat", "spawned_ts": 0.0 } ] )
+        runner   = FakeRunner( returncode=0 )
+        observed = [ ]
+
+        def _roster( t ):
+            res = list_spawned_sessions( "mgr", runner=runner, session_dir=tmp_path, now_fn=lambda: t )
+            observed.append( res[ "sessions" ][ 0 ][ "persona_state" ] )
+            return res
+
+        # t+0.00s — parent recorded the seat; the child has written nothing yet.
+        assert _roster( 0.00 )[ "identity_complete" ] is False
+        # t+0.77s — bridge lands, persona still null.
+        _write_bridge( tmp_path, "cc-1.json", tmux_session="seat", voice_persona=None )
+        assert _roster( 0.77 )[ "identity_complete" ] is False
+        # t+1.02s — SessionStart names the persona.
+        _write_bridge( tmp_path, "cc-1.json", tmux_session="seat", voice_persona={ "name": "Tiberius" } )
+        final = _roster( 1.02 )
+
+        assert observed == [ PERSONA_STATE_UNKNOWN, PERSONA_STATE_NONE, PERSONA_STATE_ALLOCATED ]
+        assert final[ "identity_complete" ] is True
+        assert final[ "sessions" ][ 0 ][ "persona" ] == "Tiberius"
+
+    def test_same_two_states_are_reported_identically_when_aged( self, tmp_path ):
+        # A 40-minute-old "none" is a dead child; a 1-second-old "none" is a
+        # healthy one. The STATE is deliberately the same for both — only the
+        # age differs — because nothing on disk distinguishes them.
+        _write_manifest( _manifest_path( "mgr", tmp_path ),
+                         [ { "session_name": "seat", "spawned_ts": 0.0 } ] )
+        _write_bridge( tmp_path, "cc-1.json", tmux_session="seat", voice_persona=None )
+        young = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ),
+                                       session_dir=tmp_path, now_fn=lambda: 1.0 )
+        old   = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ),
+                                       session_dir=tmp_path, now_fn=lambda: 2400.0 )
+        assert young[ "sessions" ][ 0 ][ "persona_state" ] == old[ "sessions" ][ 0 ][ "persona_state" ]
+        assert young[ "sessions" ][ 0 ][ "age_seconds" ] == pytest.approx( 1.0 )
+        assert old[ "sessions" ][ 0 ][ "age_seconds" ]   == pytest.approx( 2400.0 )
+        assert "1s old"    in young[ "identity_warning" ]
+        assert "2400s old" in old[ "identity_warning" ]
+
+
+class TestSpawnRecordsSpawnedTs:
+    def test_spawn_stamps_spawned_ts_into_the_manifest( self, tmp_path ):
+        spawn_sessions( 2, "brief", "mgr", script_path="/s.sh",
+                        runner=FakeRunner( returncode=0 ), session_dir=tmp_path,
+                        now_fn=lambda: 1234.5 )
+        records = _read_manifest( _manifest_path( "mgr", tmp_path ) )
+        assert [ r[ "spawned_ts" ] for r in records ] == [ 1234.5, 1234.5 ]
+
+    def test_spawned_ts_round_trips_into_age_seconds( self, tmp_path ):
+        # End-to-end on the stamp: spawn writes it, roster reads it back.
+        spawn_sessions( 1, "brief", "mgr", script_path="/s.sh",
+                        runner=FakeRunner( returncode=0 ), session_dir=tmp_path,
+                        now_fn=lambda: 100.0 )
+        res = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ),
+                                     session_dir=tmp_path, now_fn=lambda: 160.0 )
+        assert res[ "sessions" ][ 0 ][ "age_seconds" ] == pytest.approx( 60.0 )
 
 
 # ── module smoke body ─────────────────────────────────────────────────────────
@@ -555,22 +1161,41 @@ class TestResolveManagerIdentity:
 # ── resolve_spawn_config ──────────────────────────────────────────────────────
 
 class TestResolveSpawnConfig:
+    _NO_MODELS = { "reviewer": None, "author": None, "observer": None, "default": None }
+
     def test_defaults_when_none( self ):
         cfg = resolve_spawn_config( None )
-        assert cfg == { "spawn_cap": 8, "ack_timeout_seconds": 120, "write_memento_default": True }
+        assert cfg == { "spawn_cap": 8, "ack_timeout_seconds": 120, "write_memento_default": True,
+                        "spawn_models": self._NO_MODELS }
 
     def test_reads_from_config_mgr( self ):
         mgr = _FakeConfigMgr( {
             "cc session spawn max reviewers"                 : 5,
             "cc session spawn reviewer ack timeout seconds"  : 90,
             "cc session spawn write memento default"         : False,
+            "cc session spawn model reviewer"                : "claude-opus-4-8",
+            "cc session spawn model author"                  : "claude-opus-4-8",
+            "cc session spawn model observer"                : "claude-opus-4-8",
+            "cc session spawn model default"                 : "claude-opus-4-8",
         } )
         cfg = resolve_spawn_config( mgr )
-        assert cfg == { "spawn_cap": 5, "ack_timeout_seconds": 90, "write_memento_default": False }
+        assert cfg == { "spawn_cap": 5, "ack_timeout_seconds": 90, "write_memento_default": False,
+                        "spawn_models": { "reviewer": "claude-opus-4-8", "author": "claude-opus-4-8",
+                                          "observer": "claude-opus-4-8", "default": "claude-opus-4-8" } }
 
     def test_missing_keys_fall_back_to_defaults( self ):
         cfg = resolve_spawn_config( _FakeConfigMgr( {} ) )
         assert cfg[ "spawn_cap" ] == 8 and cfg[ "ack_timeout_seconds" ] == 120
+        # absent model keys → all-None map (fail-open: no --model flag)
+        assert cfg[ "spawn_models" ] == self._NO_MODELS
+
+    def test_partial_model_keys_only_configured_roles_set( self ):
+        # A role key present but others absent → only the present one resolves;
+        # the rest stay None (fail-open per un-keyed role).
+        mgr = _FakeConfigMgr( { "cc session spawn model author": "claude-fable-5" } )
+        cfg = resolve_spawn_config( mgr )
+        assert cfg[ "spawn_models" ] == { "reviewer": None, "author": "claude-fable-5",
+                                          "observer": None, "default": None }
 
 
 # ── MCP-WRAPPER LAYER: dismiss_sessions param-typing regression (2026-06-01) ──
@@ -709,3 +1334,155 @@ class TestDismissSessionsWrapperCoercion:
         asyncio.run( cv_mcp.dismiss_sessions.run( {} ) )
         assert captured[ "session_names" ] is None
         assert captured[ "write_memento" ] is True                  # came from cfg default, not "false"
+
+    def test_wrapper_threads_default_reconciler( self, cv_mcp, monkeypatch ):
+        """d647b531: the LIVE reap entrypoint MUST wire the real reap-RECONCILE
+        producer, so a reaped worker's non-terminal store items get reconciled
+        instead of orphaning. session_spawner defaults reconcile_items_fn=None
+        (hermetic); the wrapper is the production opt-in to the mutation."""
+        import lupin_mcp.session_spawner as ss
+        captured = {}
+        def _spy_dismiss( manager_session_id, *, reconcile_items_fn=None, **_kw ):
+            captured[ "reconcile_items_fn" ] = reconcile_items_fn
+            return { "dismissed": [], "remaining": [], "manager_session_id": manager_session_id }
+        monkeypatch.setattr( cv_mcp, "_wait_for_sender_id", lambda: "sender" )
+        monkeypatch.setattr( cv_mcp, "_get_cc_metadata",   lambda: { "session_id": "abc12345" } )
+        monkeypatch.setattr( cv_mcp, "_spawn_config_mgr",  lambda: None )
+        monkeypatch.setattr( ss, "resolve_manager_identity",
+                             lambda meta, fallback_session_id=None: ( "mgr-sid", "Krishna" ) )
+        monkeypatch.setattr( ss, "resolve_spawn_config",
+                             lambda mgr: { "spawn_cap": 8, "ack_timeout_seconds": 120,
+                                           "write_memento_default": True } )
+        monkeypatch.setattr( ss, "dismiss_sessions", _spy_dismiss )
+        asyncio.run( cv_mcp.dismiss_sessions.run( {} ) )
+        assert captured[ "reconcile_items_fn" ] is ss._default_reconcile_store_items
+
+    def test_respin_personas_schema_is_array_of_strings( self, cv_mcp ):
+        """4dfb2f3b: the param that lets a caller distinguish a RE-SPIN from a REAP
+        must be typed — an untyped param arrives uncoerced (the same class of bug
+        the session_names lock above caught), and an uncoerced name matches no
+        persona slug, so retention would silently do nothing."""
+        rp = cv_mcp.dismiss_sessions.parameters[ "properties" ][ "respin_personas" ]
+        assert "array" in _type_options( rp ), f"respin_personas must allow array, got {rp}"
+        array_branch = rp if rp.get( "type" ) == "array" else next(
+            b for b in rp.get( "anyOf", [] ) if b.get( "type" ) == "array"
+        )
+        assert array_branch[ "items" ][ "type" ] == "string"
+
+    def test_wrapper_threads_respin_personas( self, cv_mcp, monkeypatch ):
+        """4dfb2f3b: the LIVE reap entrypoint must forward the caller's re-spin
+        declaration — a manager who names a returning seat and has it dropped on
+        the floor gets the un-assignment this fix exists to prevent."""
+        captured = {}
+        self._patch_wrapper_deps( cv_mcp, monkeypatch, captured )
+        import lupin_mcp.session_spawner as ss
+        def _spy_dismiss( manager_session_id, *, respin_personas=None, **_kw ):
+            captured[ "respin_personas" ] = respin_personas
+            return { "dismissed": [], "remaining": [], "manager_session_id": manager_session_id }
+        monkeypatch.setattr( ss, "dismiss_sessions", _spy_dismiss )
+        asyncio.run( cv_mcp.dismiss_sessions.run( { "respin_personas": [ "cheech", "rio" ] } ) )
+        assert captured[ "respin_personas" ] == [ "cheech", "rio" ]   # a real list, not char-iterated
+
+
+# ── MCP-WRAPPER LAYER: spawn_sessions model-directive (2026-07-02) ────────────
+#
+# Two concerns, mirroring the dismiss-wrapper regression lock above:
+#   (schema) the new `model` param MUST be typed Optional[str] so FastMCP emits a
+#     string/null JSON schema — an UNTYPED param emits no `type` and a client's
+#     string arrives uncoerced (the exact class of bug the dismiss lock caught).
+#   (resolution) the wrapper resolves a child's model explicit-param → INI role
+#     key → INI `default` key → None, then threads the RESOLVED value into the
+#     inner session_spawner.spawn_sessions. Driven via `.fn()` (the underlying
+#     function) with a spy inner fn — the wrapper body (the resolution) runs; only
+#     FastMCP's own schema coercion is bypassed (that is the schema test's job).
+
+class TestSpawnSessionsWrapperSchema:
+    def test_model_schema_allows_string( self, cv_mcp ):
+        m = cv_mcp.spawn_sessions.parameters[ "properties" ][ "model" ]
+        assert "string" in _type_options( m ), f"model must allow string, got {m}"
+
+    def test_model_schema_allows_null_optional( self, cv_mcp ):
+        # Optional[str] → the null branch is what lets the param be omitted.
+        m = cv_mcp.spawn_sessions.parameters[ "properties" ][ "model" ]
+        assert "null" in _type_options( m ), f"model must allow null (Optional), got {m}"
+
+
+class TestSpawnSessionsWrapperResolution:
+    """explicit-param → role key → `default` key → None, threaded to the inner fn."""
+
+    def _patch( self, cv_mcp, monkeypatch, captured, spawn_models ):
+        import lupin_mcp.session_spawner as ss
+
+        def _spy_spawn( count, task_prompt, sid, *, model=None, role="reviewer", **_kw ):
+            captured[ "model" ] = model
+            captured[ "role" ]  = role
+            return { "spawned": [], "model": model }
+
+        monkeypatch.setattr( cv_mcp, "_wait_for_sender_id", lambda: "sender" )
+        monkeypatch.setattr( cv_mcp, "_get_cc_metadata",   lambda: { "session_id": "abc12345" } )
+        monkeypatch.setattr( cv_mcp, "_spawn_config_mgr",  lambda: None )
+        monkeypatch.setattr( cv_mcp, "_spawn_script_path", lambda: "/s.sh" )
+        monkeypatch.setattr( ss, "resolve_manager_identity",
+                             lambda meta, fallback_session_id=None: ( "mgr-sid", "Rio" ) )
+        monkeypatch.setattr( ss, "resolve_spawn_config",
+                             lambda mgr: { "spawn_cap": 8, "ack_timeout_seconds": 120,
+                                           "write_memento_default": True, "spawn_models": spawn_models } )
+        monkeypatch.setattr( ss, "spawn_sessions", _spy_spawn )
+        return ss
+
+    _ALL_OPUS = { "reviewer": "claude-opus-4-8", "author": "claude-opus-4-8",
+                  "observer": "claude-opus-4-8", "default": "claude-opus-4-8" }
+
+    def test_explicit_param_wins_over_ini( self, cv_mcp, monkeypatch ):
+        captured = {}
+        self._patch( cv_mcp, monkeypatch, captured, self._ALL_OPUS )
+        cv_mcp.spawn_sessions.fn( 1, "t", model="claude-fable-5" )
+        assert captured[ "model" ] == "claude-fable-5"   # explicit beats the opus INI
+
+    def test_role_key_used_when_no_explicit( self, cv_mcp, monkeypatch ):
+        captured = {}
+        self._patch( cv_mcp, monkeypatch, captured,
+                     { "reviewer": "claude-opus-4-8", "author": None, "observer": None, "default": None } )
+        cv_mcp.spawn_sessions.fn( 1, "t", role="reviewer" )
+        assert captured[ "model" ] == "claude-opus-4-8"  # from the reviewer role key
+
+    def test_role_specific_beats_default( self, cv_mcp, monkeypatch ):
+        captured = {}
+        self._patch( cv_mcp, monkeypatch, captured,
+                     { "reviewer": "claude-opus-4-8", "author": None, "observer": None,
+                       "default": "claude-fable-5" } )
+        cv_mcp.spawn_sessions.fn( 1, "t", role="reviewer" )
+        assert captured[ "model" ] == "claude-opus-4-8"  # role key beats the default key
+
+    def test_falls_to_default_key_for_unkeyed_role( self, cv_mcp, monkeypatch ):
+        captured = {}
+        self._patch( cv_mcp, monkeypatch, captured,
+                     { "reviewer": None, "author": None, "observer": None, "default": "claude-opus-4-8" } )
+        # an unknown/new role has no map entry → .get(role) is None → the default key
+        cv_mcp.spawn_sessions.fn( 1, "t", role="manager" )
+        assert captured[ "model" ] == "claude-opus-4-8"
+
+    def test_all_none_resolves_to_none_no_flag( self, cv_mcp, monkeypatch ):
+        captured = {}
+        self._patch( cv_mcp, monkeypatch, captured,
+                     { "reviewer": None, "author": None, "observer": None, "default": None } )
+        cv_mcp.spawn_sessions.fn( 1, "t", role="reviewer" )
+        assert captured[ "model" ] is None               # fail-open: inner fn omits --model
+
+    def test_valueerror_becomes_error_dict( self, cv_mcp, monkeypatch ):
+        # The cap ValueError from the inner fn must surface as {status:"error"} —
+        # the model= threading must not disturb that pre-existing contract.
+        import lupin_mcp.session_spawner as ss
+        monkeypatch.setattr( cv_mcp, "_wait_for_sender_id", lambda: "sender" )
+        monkeypatch.setattr( cv_mcp, "_get_cc_metadata",   lambda: { "session_id": "abc12345" } )
+        monkeypatch.setattr( cv_mcp, "_spawn_config_mgr",  lambda: None )
+        monkeypatch.setattr( cv_mcp, "_spawn_script_path", lambda: "/s.sh" )
+        monkeypatch.setattr( ss, "resolve_manager_identity",
+                             lambda meta, fallback_session_id=None: ( "mgr-sid", "Rio" ) )
+        monkeypatch.setattr( ss, "resolve_spawn_config",
+                             lambda mgr: { "spawn_cap": 8, "ack_timeout_seconds": 120,
+                                           "write_memento_default": True, "spawn_models": self._ALL_OPUS } )
+        def _raise( *a, **k ): raise ValueError( "count 99 exceeds spawn cap 8" )
+        monkeypatch.setattr( ss, "spawn_sessions", _raise )
+        res = cv_mcp.spawn_sessions.fn( 99, "t" )
+        assert res[ "status" ] == "error" and "cap" in res[ "reason" ]

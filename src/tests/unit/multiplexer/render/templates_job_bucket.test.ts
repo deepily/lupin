@@ -214,3 +214,112 @@ test("renderJobBucket: empty bucket header click flips aria-expanded but no card
   header.click();
   assert.equal(header.getAttribute("aria-expanded"), "true");
 });
+
+// ---------------------------------------------------------------------------
+// W2 — per-bucket delete-all 🗑 button (plan 04 §W2)
+// ---------------------------------------------------------------------------
+
+test("renderJobBucket: every bucket header carries exactly one .queue-delete-all-btn[data-bucket]=🗑, just before the chevron (W2)", () => {
+  for (const bucket of ["todo", "running", "done", "dead", "history"] as JobBucket[]) {
+    const el   = renderJobBucket(bucket, [ makeJob({ id_hash: `j-${bucket}` }) ]);
+    const btns = el.querySelectorAll(".jobs-bucket-header .queue-delete-all-btn");
+    assert.equal(btns.length, 1, `${bucket} should have exactly one delete-all button`);
+    const btn = btns[0] as HTMLButtonElement;
+    assert.equal(btn.getAttribute("data-bucket"), bucket);
+    assert.equal(btn.type, "button");
+    assert.equal(btn.textContent, "🗑");
+    const toggle = el.querySelector(".jobs-bucket-toggle") as HTMLElement;
+    assert.equal(btn.nextElementSibling, toggle, `${bucket}: 🗑 sits immediately before the chevron`);
+  }
+});
+
+test("renderJobBucket: empty bucket STILL renders the delete-all 🗑 (W2 — it confirms '0 jobs')", () => {
+  const el  = renderJobBucket("done", []);
+  const btn = el.querySelector(".queue-delete-all-btn");
+  assert.notEqual(btn, null, "delete-all present even on an empty bucket");
+});
+
+test("renderJobBucket: clicking the delete-all 🗑 does NOT toggle the bucket (W2 click target-guard)", () => {
+  const el     = renderJobBucket("todo", [ makeJob({ id_hash: "j1" }) ]);
+  const header = el.querySelector(".jobs-bucket-header") as HTMLElement;
+  const btn    = el.querySelector(".queue-delete-all-btn") as HTMLButtonElement;
+  const cards  = el.querySelector(".jobs-bucket-cards") as HTMLElement;
+
+  assert.equal(header.getAttribute("aria-expanded"), "true");
+  btn.click();   // bubbles to the header listener, which target-guards on the button
+  assert.equal(header.getAttribute("aria-expanded"), "true", "delete-all click must not collapse the bucket");
+  assert.equal(cards.classList.contains("collapsed"), false, "cards stay expanded");
+});
+
+test("renderJobBucket: Enter/Space keydown ON the delete-all 🗑 does NOT toggle the bucket (W2 keyboard target-guard)", () => {
+  const el     = renderJobBucket("todo", [ makeJob({ id_hash: "j1" }) ]);
+  const header = el.querySelector(".jobs-bucket-header") as HTMLElement;
+  const btn    = el.querySelector(".queue-delete-all-btn") as HTMLButtonElement;
+
+  assert.equal(header.getAttribute("aria-expanded"), "true");
+  // A keydown originating on the button bubbles to the header keydown listener;
+  // the target-guard leaves the native <button> to own the key (no bucket toggle).
+  btn.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  btn.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
+  assert.equal(header.getAttribute("aria-expanded"), "true", "a key on 🗑 must not toggle the bucket");
+});
+
+// ---------------------------------------------------------------------------
+// W3 — history time-window <select> (plan 04 §W3)
+// ---------------------------------------------------------------------------
+
+test("renderJobBucket: history header renders a .history-time-select with the 5 legacy option values (W3)", () => {
+  const el     = renderJobBucket("history", [], { historyWindowDays: 30, historyLoadedCount: 0, historyTotalCount: 0 });
+  const select = el.querySelector(".jobs-bucket-header .history-time-select") as HTMLSelectElement;
+  assert.notEqual(select, null, "history header has a time-window select");
+  const values = Array.from(select.querySelectorAll("option")).map(o => (o as HTMLOptionElement).value);
+  assert.deepEqual(values, ["1", "7", "14", "30", "all"]);
+});
+
+test("renderJobBucket: history select reflects the current window (30 → '30'; undefined → 'all') (W3)", () => {
+  const el30 = renderJobBucket("history", [], { historyWindowDays: 30, historyLoadedCount: 0, historyTotalCount: 0 });
+  assert.equal((el30.querySelector(".history-time-select") as HTMLSelectElement).value, "30");
+  const elAll = renderJobBucket("history", [], { historyWindowDays: undefined, historyLoadedCount: 0, historyTotalCount: 0 });
+  assert.equal((elAll.querySelector(".history-time-select") as HTMLSelectElement).value, "all");
+});
+
+test("renderJobBucket: non-history buckets render NO time-window select (W3)", () => {
+  for (const bucket of ["todo", "running", "done", "dead"] as JobBucket[]) {
+    const el = renderJobBucket(bucket, [ makeJob({ id_hash: `j-${bucket}` }) ]);
+    assert.equal(el.querySelector(".history-time-select"), null, `${bucket} must not render a time-window select`);
+  }
+});
+
+test("renderJobBucket: history count badge reflects total when provided; falls back to loaded length otherwise (W3)", () => {
+  const withTotal = renderJobBucket("history", [ makeJob({ id_hash: "h1" }) ], { historyTotalCount: 42, historyLoadedCount: 1, historyWindowDays: 30 });
+  assert.equal(withTotal.querySelector(".jobs-bucket-count")?.textContent, "(42)");
+  const noOpts = renderJobBucket("history", [ makeJob({ id_hash: "h1" }) ]);   // no historyTotalCount → base count
+  assert.equal(noOpts.querySelector(".jobs-bucket-count")?.textContent, "(1)");
+});
+
+test("renderJobBucket: clicking the history time-window select does NOT toggle the bucket (W3 target-guard)", () => {
+  const el     = renderJobBucket("history", [], { historyWindowDays: 30, historyLoadedCount: 0, historyTotalCount: 0 });
+  const header = el.querySelector(".jobs-bucket-header") as HTMLElement;
+  const select = el.querySelector(".history-time-select") as HTMLSelectElement;
+  assert.equal(header.getAttribute("aria-expanded"), "false");   // history starts collapsed
+  select.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  assert.equal(header.getAttribute("aria-expanded"), "false", "a click on the select must not toggle the bucket");
+});
+
+// ---------------------------------------------------------------------------
+// W4 — history Load-More affordance (plan 04 §W4)
+// ---------------------------------------------------------------------------
+
+test("renderJobBucket: history renders Load-More iff loaded < total; absent when caught up / unset; never on live buckets (W4)", () => {
+  const gated = renderJobBucket("history", [ makeJob({ id_hash: "h1" }) ], { historyLoadedCount: 1, historyTotalCount: 5, historyWindowDays: 30 });
+  assert.notEqual(gated.querySelector(".history-load-more"), null, "present when loaded < total");
+
+  const caught = renderJobBucket("history", [ makeJob({ id_hash: "h1" }) ], { historyLoadedCount: 5, historyTotalCount: 5, historyWindowDays: 30 });
+  assert.equal(caught.querySelector(".history-load-more"), null, "absent when caught up (loaded === total)");
+
+  const bare = renderJobBucket("history", []);   // no counts → 0 < 0 → absent
+  assert.equal(bare.querySelector(".history-load-more"), null, "absent when counts unset");
+
+  const live = renderJobBucket("done", [ makeJob({ id_hash: "d1" }) ], { historyLoadedCount: 1, historyTotalCount: 5 });
+  assert.equal(live.querySelector(".history-load-more"), null, "never on a live bucket");
+});

@@ -11,6 +11,7 @@ from typing import Union, Dict, Any, List
 import cosa.utils.util as du
 
 from cosa.memory.snapshot_manager_interface import SolutionSnapshotManagerInterface
+from cosa.rest.db.repositories.vector_store_backend import is_postgres_backend
 
 
 class ManagerType( Enum ):
@@ -147,30 +148,35 @@ class SolutionSnapshotManagerFactory:
               OR config["gcs_uri"] (gcs backend)
 
         Ensures:
-            - Returns LanceDBSolutionManager instance
+            - Returns SolutionSnapshotManager instance
             - Manager configured with provided database settings
             
         Raises:
-            - ImportError if LanceDBSolutionManager not available
+            - ImportError if SolutionSnapshotManager not available
             - KeyError if required config keys missing
         """
         try:
-            from cosa.memory.lancedb_solution_manager import LanceDBSolutionManager
+            from cosa.memory.lancedb_solution_manager import SolutionSnapshotManager
         except ImportError as e:
-            raise ImportError( f"LanceDBSolutionManager not available: {e}" )
+            raise ImportError( f"SolutionSnapshotManager not available: {e}" )
         
         # Validate required configuration. table_name is always required; the
         # storage location may be a local db_path OR a gcs_uri. gcs configs carry
         # gcs_uri (not db_path) — see create_from_config_manager's gcs branch — so
         # requiring db_path unconditionally would make every valid gcs config
         # unbuildable.
+        #
+        # A FOURTH authority on the same fact (decision 2b20a6d6): under the postgres
+        # backend the manager routes to SolutionSnapshotRepository and touches NO
+        # LanceDB location at all, so demanding one here rejects the only correct
+        # config. Ask the storage authority before requiring a storage location.
         missing_keys = [ key for key in [ "table_name" ] if key not in config ]
-        if "db_path" not in config and "gcs_uri" not in config:
+        if not is_postgres_backend() and "db_path" not in config and "gcs_uri" not in config:
             missing_keys.append( "db_path|gcs_uri" )
         if missing_keys:
             raise KeyError( f"Missing required config keys for lancedb manager: {missing_keys}" )
 
-        return LanceDBSolutionManager( config, debug, verbose )
+        return SolutionSnapshotManager( config, debug, verbose )
     
     @staticmethod
     def get_available_types() -> List[str]:

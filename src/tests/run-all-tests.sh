@@ -53,9 +53,15 @@ for arg in "$@"; do
 done
 
 # Suite sequence + runner scripts (pyramid order)
-SUITES=( "unit" "smoke" "websocket" "integration" "e2e" )
+# "typescript" joined the pyramid 2026-07-21 (row 36e479ed, Rick's ruling on
+# gate 07a5460d). Keep this list identical to ALL_SUITE_COMPONENTS in
+# cosa/agents/test_suite/job.py — test_typescript_suite_gate.py asserts they
+# match, because a suite present in one list and absent from the other runs or
+# skips depending on which door you came through.
+SUITES=( "unit" "typescript" "smoke" "websocket" "integration" "e2e" )
 declare -A SCRIPTS=(
     [unit]="src/tests/run-unit-tests.sh"
+    [typescript]="src/tests/run-typescript-tests.sh"
     [smoke]="src/tests/run-smoke-tests.sh"
     [websocket]="src/scripts/run-websocket-smoke-tests.sh"
     [integration]="src/tests/run-integration-tests.sh"

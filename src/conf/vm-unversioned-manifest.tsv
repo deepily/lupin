@@ -1,0 +1,51 @@
+# vm-unversioned-manifest.tsv — the payloads GIT CANNOT DELIVER to a Lupin VM.
+#
+# WHY THIS FILE EXISTS
+#   `push-bundle` / GitHub sync carry COMMITTED, NON-IGNORED content only. Everything
+#   below is gitignored (secrets, personal data, VM-local config, or too large), so a
+#   fresh VM rediscovers each member BY FAILING. On 2026-07-25 that happened three
+#   times in one day: a missing `contact-information.map` made EVERY transcription 500.
+#   This category used to live in somebody's head. Now it is data.
+#
+# CONSUMERS
+#   - src/scripts/preflight-vm.sh    check B3 — asserts each REQUIRED path is present
+#                                    with the expected owner/mode on the VM.
+#   - src/scripts/lupin-vm.sh        push-unversioned — ships each path from the dev
+#                                    box to the VM.
+#
+# FORMAT — tab-separated, 5 columns. '#' comments and blank lines ignored.
+#
+#   local_path      path relative to the dev-box repo root, or an absolute path.
+#                   A trailing '/' means "directory, recurse".
+#   remote_path     absolute path on the VM.
+#   owner           expected numeric uid:gid on the VM ('-' = do not assert).
+#   mode            expected octal mode ('-' = do not assert). For a directory entry
+#                   this is asserted on the FILES inside, not the dir itself.
+#   requirement     REQUIRED — preflight BLOCKS when absent.
+#                   OPTIONAL — preflight WARNs when absent (large/situational payloads).
+#
+# ADDING AN ENTRY
+#   Add the row here — do NOT hardcode a path in the script. If a payload is required
+#   for the app to start, mark it REQUIRED so a fresh VM fails loudly at preflight
+#   instead of quietly at 3am.
+#
+# local_path	remote_path	owner	mode	requirement
+
+# --- provider / notification keys (gitignored: secrets) ------------------------
+src/conf/keys/	/mnt/lupin-data/lupin/src/conf/keys/	1001:1001	644	REQUIRED
+
+# --- personalization map (gitignored: personal data; .gitignore:65) ------------
+# Absent => MultiModalMunger loads 4 of 5 .map files and every transcription 500s.
+# Code fix e1b48afa makes it OPTIONAL at load and REFUSES LOUDLY at use, so its
+# absence is now a named failure rather than a silent "N/A" answer — but the file
+# still has to get there, and only this manifest says so.
+src/conf/contact-information.map	/mnt/lupin-data/lupin/src/conf/contact-information.map	1001:1001	644	REQUIRED
+
+# --- VM-local compose env (gitignored: VM-specific, hand-edited in place) ------
+# NOT shipped from dev — the values are VM-correct and would be clobbered by a copy.
+# Listed so preflight ASSERTS ITS PRESENCE; push-unversioned SKIPS it (local_path '-').
+-	/mnt/lupin-data/lupin/cloud-gpu.env	-	-	REQUIRED
+
+# --- large out-of-band corpora (gitignored: size) ------------------------------
+# Shipped by tar.gz + scp, not by this verb; listed so preflight can report on them.
+-	/mnt/lupin-data/google/harvey-labs/io/markdown-exports/	-	-	OPTIONAL

@@ -26,13 +26,17 @@
 import { eventBus } from "./shared/EventBus";
 import { storage } from "./shared/StorageService";
 import { createAuthManager } from "./auth/AuthManager";
-import { redirectToLoginIfUnauthenticated } from "./auth/authGuard";
+import { redirectToLoginIfUnauthenticated, logout } from "./auth/authGuard";
 import { createApiClient } from "./api/ApiClient";
 import { createTransports } from "./transport";
 import { createStores, DEFAULT_HISTORY_WINDOW_HOURS } from "./stores";
-import type { ServerSenderHydrationRecord } from "./stores";
+import type { ServerSenderHydrationRecord, SchedulableAudioContext } from "./stores";
+import { createStripReconnectRehydrator } from "./stores/StripReconnectRehydrator";
+import { wireNotificationTtsIntent } from "./wireTtsIntent";
+import { wireTtsPlayback } from "./wireTtsPlayback";
 import {
   createNotificationsListRenderer,
+  createNotificationsHeaderRenderer,
   createJobsPaneRenderer,
   createActionRequiredRenderer,
   createTtsChromeRenderer,
@@ -42,12 +46,15 @@ import {
   createSessionStripRenderer,
   createReadingPaneRenderer,
   createCommonsActivityRenderer,
+  createBroadcastCardRenderer,
   configureMetaDisplayCap,
   // Lane E full-parity quartet renderers.
   createTtsPreviewSliderRenderer,
   createMissedBadgeRenderer,
   createFleetStatusRenderer,
   createTaskListRenderer,
+  createSectionToolbarRenderer,
+  createNavBarRenderer,
   type TtsPreviewSliderRenderer,
 } from "./render";
 import { DEFAULT_TTS_FRACTION } from "./render/TtsPreviewSliderRenderer";
@@ -204,20 +211,40 @@ function bootMultiplexer(): void {
     eventBus,
     storage,
     api                 : apiClient,
-    audioContextFactory : () => {
+    // Phase 2 — the TaskList edit audit `actor` derives from the authenticated
+    // user's identity (Q1). AuthManager is constructed above; its email claim is
+    // stable across refresh, so reading it lazily per-edit is correct.
+    actorProvider       : () => authManager.getCurrentUserEmail(),
+    audioContextFactory : (): SchedulableAudioContext => {
       // Production AudioContext factory. Browser autoplay policy may throw
       // if no user gesture preceded — AudioStore catches and emits
       // store_audio_state_change { state: "error", reason: "audiocontext-blocked" }.
+      // Chrome-only mux (Rick 2026-06-27) — no `webkitAudioContext` vendor
+      // prefix (Krishna-C2: the vestigial fallback was dead under Chrome-only).
       const Ctor = (window as unknown as {
-        AudioContext       ?: { new (opts?: { sampleRate?: number }): AudioContext };
-        webkitAudioContext ?: { new (opts?: { sampleRate?: number }): AudioContext };
-      }).AudioContext ?? (window as unknown as {
-        webkitAudioContext ?: { new (opts?: { sampleRate?: number }): AudioContext };
-      }).webkitAudioContext;
+        AudioContext ?: { new (opts?: { sampleRate?: number }): SchedulableAudioContext };
+      }).AudioContext;
       if (!Ctor) throw new Error("AudioContext is not available");
       return new Ctor({ sampleRate: 24000 });
     },
   });
+
+  // F0-d — wire the TTS producer seam. NotificationStore emits
+  // store_notification_tts_intent for every SPOKEN new-arrival (high/urgent);
+  // this glue enqueues each onto TtsQueueStore (stores-emit / boot-wires idiom —
+  // the two stores never couple directly). Registered here, BEFORE transports
+  // start, so a high/urgent frame arriving immediately after transport.start()
+  // is captured (F13 ordering invariant). Page-lifetime subscription (like the
+  // stores themselves); the returned unsubscriber is unused in boot.
+  wireNotificationTtsIntent(eventBus, stores.ttsQueue, () => Date.now());
+
+  // 4f14d38f — TTS playback request-initiation. When TtsQueueStore's active item
+  // rolls to a NEW notification, POST its text to /api/get-speech-elevenlabs with
+  // the mux's OWN audio sessionId (the PCM routing key); the server streams PCM
+  // back over this session's /ws/audio → AudioStore plays → store_audio_ended →
+  // TtsQueueStore.advance(). Registered before transports start so an item queued
+  // immediately after connect still triggers a request. Page-lifetime subscription.
+  wireTtsPlayback(eventBus, stores.ttsQueue, apiClient, sessionId);
 
   // =====================================================================
   // boot.ts MOUNT-SLOT CONVENTION (Lane A deliverable — multiplexer parity)
@@ -259,7 +286,14 @@ function bootMultiplexer(): void {
     stores : {
       notifications  : stores.notifications,
       senders        : stores.senders,
-      actionRequired : stores.actionRequired,
+      // WP14 (F8) — wire the prediction-vote store so prediction-hint
+      // notifications mount interactive thumbs-vote controls in the
+      // notification-item render path (createStores already builds the store).
+      predictionVote : stores.predictionVote,
+      // Section-toolbar / accordion-collapse parity (2026-06-23) — the renderer
+      // reads persisted accordion collapse on render + persists header-click
+      // toggles, and applies toolbar-driven collapse-all/expand-all.
+      viewState      : stores.viewState,
     },
     // Phase 6c Node D Step D5 — inject the conversation-mode-aware sort
     // BEFORE first render so the initial paint already respects pin priority.
@@ -268,6 +302,19 @@ function bootMultiplexer(): void {
   const mountEl = document.getElementById("notifications-pane");
   if (mountEl === null) throw new Error("multiplexer: #notifications-pane not found");
   renderer.mount(mountEl);
+
+  // B3 (01-C) — notifications section-header (count · history-dropdown · clear-all).
+  // Mounts ABOVE the notifications-list pane. Owns the clear-all orchestration
+  // (confirm → per-id DELETE /api/notifications/{id_hash} over visibleEntries()
+  // → store.removeByIdHashes(successes)); reuses the generic ApiClient.delete<T>.
+  const notificationsHeaderRenderer = createNotificationsHeaderRenderer({
+    eventBus,
+    store : stores.notifications,
+    api   : apiClient,
+  });
+  const notificationsHeaderMountEl = document.getElementById("notifications-header-mount");
+  if (notificationsHeaderMountEl === null) throw new Error("multiplexer: #notifications-header-mount not found");
+  notificationsHeaderRenderer.mount(notificationsHeaderMountEl);
 
   // Phase 6a — jobs-pane renderer mounts AFTER the Phase 5 renderer mount,
   // BEFORE transports.queue.start (per F13 ordering invariant). Same factory
@@ -281,8 +328,11 @@ function bootMultiplexer(): void {
   // (transports.audio.start(...) MUST land after every renderer mount).
   const jobsRenderer = createJobsPaneRenderer({
     eventBus,
-    stores : { jobs: stores.jobs },
-    api    : apiClient,
+    stores      : { jobs: stores.jobs },
+    api         : apiClient,
+    // W5 — the WS/session id sent as `websocket_id` in the per-job retry POST so
+    // the server routes the re-queued job's events back to this client.
+    websocketId : sessionId,
   });
   const jobsMountEl = document.getElementById("jobs-pane");
   if (jobsMountEl === null) throw new Error("multiplexer: #jobs-pane not found");
@@ -304,7 +354,7 @@ function bootMultiplexer(): void {
   // (canonical AC9 order: notifications → jobs → actionRequired → ttsChrome).
   const ttsChromeRenderer = createTtsChromeRenderer({
     eventBus,
-    stores : { audio: stores.audio },
+    stores : { audio: stores.audio, ttsQueue: stores.ttsQueue },   // WP4 — item queue
   });
   const ttsMountEl = document.getElementById("tts-pane");
   if (ttsMountEl === null) throw new Error("multiplexer: #tts-pane not found");
@@ -378,6 +428,26 @@ function bootMultiplexer(): void {
   // each lane also updates bootCompletePayload.handlers + the AC9 console line.
   // ===============================================================
 
+  // Lane L4 (v0.1.9) — top nav / logout bar (PORT of lupin-nav.js → mux-TS).
+  // Mounts into #lupin-nav-mount (first child of <body>). auth adapter:
+  //   isAuthenticated ← persisted access token (legacy presence-semantics);
+  //   email           ← AuthManager.getCurrentUserEmail() (null-guarded, F-K-D2);
+  //   logout          ← authGuard.logout(storage, window.location) — clears the
+  //                     PERSISTED tokens (F-K-D1) then redirects to LOGIN_PATH.
+  // Re-renders on auth_state_change (SPA has no full reload — F-K-D4).
+  const navBarRenderer = createNavBarRenderer({
+    eventBus,
+    auth : {
+      isAuthenticated     : (): boolean       => storage.getAccessToken() !== null,
+      getCurrentUserEmail : (): string | null => authManager.getCurrentUserEmail(),
+      logout              : (): void          => logout( storage, window.location ),
+    },
+    getActivePath : (): string => window.location.pathname,
+  });
+  const navBarMountEl = document.getElementById("lupin-nav-mount");
+  if (navBarMountEl === null) throw new Error("multiplexer: #lupin-nav-mount not found");
+  navBarRenderer.mount(navBarMountEl);
+
   // Lane B WP2 — CC-session strip renderer. Mounts on <main.container> (like
   // FocusTrayRenderer) because the renderer queries #cc-session-strip AND its
   // child controls as descendants of root — it cannot mount on
@@ -423,6 +493,20 @@ function bootMultiplexer(): void {
       })
       .catch(() => { /* best-effort cold-reload hydration; live events still populate */ });
   }
+  // v0.1.9 focus-bar eager re-hydrate (option 2) — the cold hydrate above runs
+  // ONCE at boot; after a long silent window the host prune reaps stale sessions
+  // and the strip only lazily refills (~15-20min) as sessions re-announce a
+  // persona. This subscriber re-runs the SAME idempotent hydrate on the queue
+  // socket's genuine reconnect edge (reconnecting->connected), refilling the
+  // strip immediately. Self-contained (no store/renderer surgery); mirrors
+  // ActionRequiredStore's connected-edge pattern.
+  // Design: src/rnd/v0.1.9/2026.07.07-focus-bar-repopulation-ux-design.md
+  createStripReconnectRehydrator({
+    bus      : eventBus,
+    api      : apiClient,
+    stores   : { sessionStrip: stores.sessionStrip, senders: stores.senders },
+    getEmail : () => authManager.getCurrentUserEmail(),
+  });
   // Lane C WP4+WP5 — master-detail Reading Pane renderer. Mounts on the
   // `.content-shell` root (contains .left-column + #content-pane* + splitter +
   // #layout-mode-toggle). Reads the readingPane store (gesture/AR-driven) and
@@ -434,18 +518,36 @@ function bootMultiplexer(): void {
   const readingPaneMountEl = document.querySelector<HTMLElement>(".content-shell");
   if (readingPaneMountEl === null) throw new Error("multiplexer: .content-shell not found");
   readingPaneRenderer.mount(readingPaneMountEl);
+  // Lane C (v0.1.9) — broadcast-to-all-CC compose card. Recipient auto-refresh
+  // rides the existing store_session_strip_changed event (no new EventBus event).
+  // B1 (01-A): mounted FIRST so its rendered subtree hosts the re-nested commons
+  // "Recent Activity" chrome (broadcastCard.ts) BEFORE CommonsActivityRenderer
+  // mounts onto it.
+  const broadcastCardRenderer = createBroadcastCardRenderer({
+    eventBus,
+    store        : stores.broadcast,
+    api          : apiClient,
+    getAuthToken : () => cachedAccessToken,
+  });
+  const broadcastCardMountEl = document.getElementById("broadcast-card-mount");
+  if (broadcastCardMountEl === null) throw new Error("multiplexer: #broadcast-card-mount not found");
+  broadcastCardRenderer.mount(broadcastCardMountEl);
   // Lane D WP3 — commons "Recent Activity" panel. Carries `api` (third field,
   // Tiberius-approved — JobsPaneRenderer precedent) for REST hydrate
   // (/api/commons/broadcast-history) + the persona-pool filter dropdown. The
   // renderer also subscribes to store_session_strip_changed (WP7) to refresh
   // its persona filter when Lane B's strip changes.
+  // B1 (01-A): the commons chrome is now renderer-PRODUCED inside the broadcast
+  // card, so its mount root is acquired by a DYNAMIC post-mount querySelector on
+  // the LIVE rendered broadcast subtree (a page-load getElementById would resolve
+  // null → throw). broadcastCardRenderer.mount() above has already rendered it.
   const commonsActivityRenderer = createCommonsActivityRenderer({
     eventBus,
     stores : { commons: stores.commons },
     api    : apiClient,
   });
-  const commonsActivityMountEl = document.getElementById("commons-activity-pane");
-  if (commonsActivityMountEl === null) throw new Error("multiplexer: #commons-activity-pane not found");
+  const commonsActivityMountEl = broadcastCardMountEl.querySelector<HTMLElement>("#commons-activity-pane");
+  if (commonsActivityMountEl === null) throw new Error("multiplexer: #commons-activity-pane not found inside rendered broadcast card");
   commonsActivityRenderer.mount(commonsActivityMountEl);
   // Lane E WP13 — TTS preview-fraction slider. Storage-backed (no store): the
   // StorageService override is layered on the INI default seeded late via the
@@ -484,17 +586,34 @@ function bootMultiplexer(): void {
   // the WS transports; it polls /api/tasks on its own 60s timer.
   const taskListRenderer = createTaskListRenderer({
     eventBus,
-    stores : { taskList: stores.taskList },
+    // Phase 2 — the fleet store supplies the owner-reassignment roster (active
+    // personas, Sam included — Q5) from the SAME source the fleet-status card uses.
+    stores : { taskList: stores.taskList, fleet: stores.fleetStatus },
   });
   const taskListMountEl = document.getElementById("task-list-pane");
   if (taskListMountEl === null) throw new Error("multiplexer: #task-list-pane not found");
   taskListRenderer.mount(taskListMountEl);
   stores.taskList.startPolling();
 
-  // Lane E WP14 — prediction-hint vote: the PredictionVoteStore is wired into
-  // createStores(); the vote CONTROLS template (predictionVoteControls) is
-  // invoked by the notification-item render path (NotificationsListRenderer),
-  // which is the integration owner's surface — no standalone mount here.
+  // Section-toolbar + accordion-collapse parity (2026-06-23, Rachel 🕊️) —
+  // carbon-copy of the legacy floating #section-toolbar: per-section visibility
+  // toggles + collapse-all/expand-all. Drives the ViewStateStore (persisted);
+  // collapse-all/expand-all fan out to NotificationsListRenderer's accordions
+  // via store_view_state_changed. Per-accordion header-click toggle is wired in
+  // NotificationsListRenderer (above). The layout-mode ⇆ stays in
+  // #reading-pane-toolbar (mux-N/A here — see design doc 06).
+  const sectionToolbarRenderer = createSectionToolbarRenderer({
+    stores : { viewState: stores.viewState },
+  });
+  const sectionToolbarMountEl = document.getElementById("section-toolbar-mount");
+  if (sectionToolbarMountEl === null) throw new Error("multiplexer: #section-toolbar-mount not found");
+  sectionToolbarRenderer.mount(sectionToolbarMountEl);
+
+  // Lane E WP14 / F8 — prediction-hint vote: the PredictionVoteStore is wired
+  // into createStores() AND injected into the NotificationsListRenderer above
+  // (stores.predictionVote). The vote CONTROLS template (predictionVoteControls)
+  // is now mounted by the notification-item render path for any prediction-hint
+  // notification clearing the confidence gate — no standalone mount here.
 
   attachLifecycleListeners();
 
@@ -532,6 +651,10 @@ function bootMultiplexer(): void {
       missedBadgeRenderer         : "mounted",
       fleetStatusRenderer         : "mounted",
       taskListRenderer            : "mounted",
+      // Section-toolbar + accordion-collapse parity (2026-06-23).
+      sectionToolbarRenderer      : "mounted",
+      // Lane L4 (v0.1.9) — top nav / logout bar.
+      navBarRenderer              : "mounted",
     },
   };
   eventBus.emit<BootCompletePayload>({
@@ -558,6 +681,8 @@ function bootMultiplexer(): void {
   console.log("[multiplexer] missedBadgeRenderer:mounted");
   console.log("[multiplexer] fleetStatusRenderer:mounted");
   console.log("[multiplexer] taskListRenderer:mounted");
+  console.log("[multiplexer] sectionToolbarRenderer:mounted");
+  console.log("[multiplexer] navBarRenderer:mounted");
   console.log("[multiplexer] boot_complete", JSON.stringify(bootCompletePayload));
 
   // Phase 5 D-E test hook (per `92-phase5-review-findings.md` D-E): expose

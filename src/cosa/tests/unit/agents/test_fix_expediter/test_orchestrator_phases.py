@@ -470,23 +470,31 @@ class TestVoiceGates:
             out = run( o._aggregate_voice_gate( [ _prop() ] ) )
         assert out == []         # policy=none -> empty
 
-    def test_aggregate_generic_exception_selects_all( self ):
-        o = _orch()
+    def test_aggregate_generic_exception_applies_the_policy_not_everything( self ):
+        """
+        Was: fail-open, auto-select all — a failed voice gate applied EVERY
+        proposed fix. The timeout branch already deferred to a configured
+        policy; a non-timeout failure now does the same instead of bypassing
+        it. Row 2b604cdb.
+        """
+        o = _orch( config=TestFixExpediterConfig( voice_gate_timeout_policy="none" ) )
         ci = SimpleNamespace( present_choices=AsyncMock( side_effect=RuntimeError( "ws" ) ) )
         with patch( "cosa.agents.test_fix_expediter.cosa_interface", ci, create=True ):
-            props = [ _prop( "C1" ) ]
-            out = run( o._aggregate_voice_gate( props ) )
-        assert out == props      # fail-open: auto-select all
+            out = run( o._aggregate_voice_gate( [ _prop( "C1" ) ] ) )
+        assert out == []         # policy=none -> nothing applied
 
     def test_per_cluster_yes_no_and_error( self ):
         o = _orch()
-        # first yes -> selected; second no -> skipped; third raises -> selected (err on apply)
+        # first yes -> selected; second no -> skipped; third raises -> NOT
+        # selected. It used to be selected, under a comment reading "on error,
+        # err on the side of applying" — a gate that could not reach a human
+        # applied the code change it was asking about. Row 2b604cdb.
         ci = SimpleNamespace( ask_confirmation=AsyncMock(
             side_effect=[ "yes", "no", RuntimeError( "boom" ) ] ) )
         props = [ _prop( "C1" ), _prop( "C2" ), _prop( "C3" ) ]
         with patch( "cosa.agents.test_fix_expediter.cosa_interface", ci, create=True ):
             out = run( o._per_cluster_voice_gate( props ) )
-        assert [ p.cluster_id for p in out ] == [ "C1", "C3" ]
+        assert [ p.cluster_id for p in out ] == [ "C1" ]
 
 
 # ============================================================================

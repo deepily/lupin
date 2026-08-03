@@ -1,0 +1,1 @@
+<?xml version="1.0" encoding="utf-8" ? < response > < directness > meh < / directness > < directness note > the result is present but buried under a sentence or two of setup. < / directness note > < tone > meh < / tone > < tone note > some jargon or a coined term a new engineer would need explained. < / tone note > < / response >

@@ -281,7 +281,10 @@ class NarrowingHarness:
                     )
 
                 try:
-                    selected_theme_indices = await voice_io.select_themes( themes )
+                    selected_theme_indices = await voice_io.select_themes(
+                        themes,
+                        response_default = list( range( len( themes ) ) )
+                    )
                 except RuntimeError as e:
                     # Technical failure - user already notified by select_themes
                     result.cancelled = True
@@ -326,7 +329,8 @@ class NarrowingHarness:
 
                     try:
                         selected_indices = await voice_io.select_topics(
-                            [ sq for _, sq in candidate_subqueries ]
+                            [ sq for _, sq in candidate_subqueries ],
+                            response_default = list( range( len( candidate_subqueries ) ) )
                         )
                     except RuntimeError as e:
                         # Technical failure - user already notified by select_topics

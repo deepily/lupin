@@ -42,6 +42,7 @@ from . import cosa_interface
 from .api_client import ResearchAPIClient
 from .cost_tracker import CostTracker
 from .prompts import clarification, planning, subagent, synthesis
+from cosa.agents.utils.voice_io import read_gate_answer
 
 logger = logging.getLogger( __name__ )
 
@@ -196,7 +197,11 @@ class ResearchOrchestratorAgent:
                 ]
             } ] )
 
-            plan_choice = choice.get( "answers", {} ).get( "Plan", "" )
+            # Was: an absent answer fell past both branches and set
+            # plan_approved = True a few lines below. Row 2b604cdb.
+            plan_choice = read_gate_answer(
+                choice, "Plan", "Research plan gate", unattended_default="Execute plan"
+            )
 
             if plan_choice == "Cancel":
                 self.state = OrchestratorState.STOPPED

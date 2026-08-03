@@ -77,6 +77,36 @@ _SKIP_REASON = (
 pytestmark = pytest.mark.skipif( not _stamp_is_wired(), reason=_SKIP_REASON )
 
 
+# ── Deterministic bridge PID (flake 6487d5c0) ─────────────────────────────────
+@pytest.fixture( autouse=True )
+def _stable_bridge_pid():
+    """
+    Pin the process's reported PPID to its OWN pid for the duration of each test.
+
+    The live-fire bridge is named `cc-{ppid}.json`, and BOTH sides key on that
+    filename PID: `touch_bridge_mtime`'s `_find_session_file` resolves it by the
+    PPID-direct path, and the arbiter reader `find_session_path_by_id`
+    additionally SKIPS any bridge whose filename PID is not signalable-alive
+    (`_is_pid_alive` → `os.kill(pid, 0)`). Under a DETACHED / orphaned pytest —
+    e.g. the full suite launched with a trailing `&` so the launching shell exits
+    mid-run — the process is re-parented to init, so `os.getppid()` becomes `1`;
+    `os.kill(1, 0)` raises `PermissionError` → `_is_pid_alive(1)` is False → the
+    reader treats the test's OWN freshly-written bridge as dead and skips it, so
+    `get_bridge_mtime` returns None and the stamp assertion fails. Foreground runs
+    (a live parent shell) pass, which is why this read as an intermittent
+    "full-suite ordering" flake — it actually tracks HOW pytest was launched, not
+    test order.
+
+    Fix at source (deterministic, NOT an assertion loosen): patch `os.getppid` to
+    return `os.getpid()` — always alive and self-signalable — so the filename PID,
+    the touch-side resolver, and the reader's liveness filter all agree regardless
+    of the real parent. `session_bridge` shares this singleton `os`, so the one
+    patch covers both the test's `_write_live_bridge` filename and the hook path.
+    """
+    with patch.object( os, "getppid", return_value=os.getpid() ):
+        yield
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _write_live_bridge( sessions_dir, session_id ):

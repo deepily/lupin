@@ -1,5 +1,5 @@
 """
-Integration tests for LanceDBSolutionManager with real GCS bucket.
+Integration tests for SolutionSnapshotManager with real GCS bucket.
 
 Tests end-to-end GCS operations including manager initialization,
 CRUD operations, question-based search, and data persistence.
@@ -44,7 +44,7 @@ src_path = os.path.join( lupin_root, 'src' )
 if src_path not in sys.path:
     sys.path.insert( 0, src_path )
 
-from cosa.memory.lancedb_solution_manager import LanceDBSolutionManager
+from cosa.memory.lancedb_solution_manager import SolutionSnapshotManager
 from cosa.memory.solution_snapshot import SolutionSnapshot
 from cosa.config.configuration_manager import ConfigurationManager
 
@@ -94,6 +94,36 @@ class TestLanceDBGCSIntegration:
         EmbeddingProvider.generate_embedding = original_provider
         EmbeddingManager.generate_embedding  = original_manager
 
+    @pytest.fixture( scope="class", autouse=True )
+    def _pin_lancedb_backend( self ):
+        """
+        Pin `vector store backend` to lancedb for every test in this class.
+
+        Without this the ambient flag is `postgres` (live in [Lupin: Baseline] since
+        2026-07-07), SolutionSnapshotManager routes to SolutionSnapshotRepository and
+        the gs:// URI is never touched — so a GCS test suite exercises the SHARED
+        postgres store and nothing in GCS. It also made
+        `assert gcs_manager.db_path == gcs_test_bucket_uri` vacuous: db_path faithfully
+        reported the value it was handed while the manager never used it. Decision
+        2b20a6d6: a test either gets real isolation or it goes.
+
+        Patched at the flag's single definition site — SolutionSnapshotManager,
+        CanonicalSynonymsTable and QuestionEmbeddingsTable each resolve
+        is_postgres_backend() from that module's globals at call time, so one patch
+        covers all three. Class-scoped: the canonical-synonyms table is built lazily
+        inside test methods, not only at manager construction.
+
+        Ensures:
+            - every test in this class runs against the GCS-backed LanceDB path
+            - nothing in this class can reach the shared postgres store
+        """
+        from unittest.mock import patch
+        from cosa.rest.db.repositories import vector_store_backend
+
+        with patch.object( vector_store_backend, "get_vector_store_backend",
+                           return_value=vector_store_backend.LANCEDB ):
+            yield
+
     @pytest.fixture( scope="class" )
     def gcs_test_bucket_uri( self ):
         """Provide GCS test bucket URI with timestamp to avoid conflicts."""
@@ -117,7 +147,14 @@ class TestLanceDBGCSIntegration:
         Requires:
             gcs_credentials_available: Ensures GCS auth validated before initialization
         """
-        manager = LanceDBSolutionManager( gcs_config, debug=True, verbose=False )
+        manager = SolutionSnapshotManager( gcs_config, debug=True, verbose=False )
+
+        # Control: the pin must actually have taken. If this ever fires, every test
+        # below is exercising the SHARED postgres store rather than GCS, and the
+        # db_path assertion in test_manager_initialization_with_gcs is vacuous (2b20a6d6).
+        assert manager._use_postgres is False, "backend pin failed — tests would hit the shared postgres store"
+        assert manager.db_path is not None,    "backend pin failed — no GCS URI resolved"
+
         manager.initialize()
 
         yield manager
@@ -181,7 +218,7 @@ class TestLanceDBGCSIntegration:
         Test that data persists in GCS across manager instances.
         """
         # Create first manager instance and insert data
-        manager1 = LanceDBSolutionManager( gcs_config, debug=False )
+        manager1 = SolutionSnapshotManager( gcs_config, debug=False )
         manager1.initialize()
 
         snapshot = SolutionSnapshot(
@@ -197,7 +234,7 @@ class TestLanceDBGCSIntegration:
         time.sleep( 2 )  # GCS consistency delay
 
         # Create second manager instance
-        manager2 = LanceDBSolutionManager( gcs_config, debug=False )
+        manager2 = SolutionSnapshotManager( gcs_config, debug=False )
         manager2.initialize()
 
         # Search for the persisted data

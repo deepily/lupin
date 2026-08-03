@@ -27,6 +27,11 @@ import {
   renderFleetStatusTable,
   renderFleetOfflineToggle,
 } from "./templates/fleetStatusTable";
+import {
+  renderSectionHeader,
+  wireSectionCollapse,
+  type SectionHeaderHandle,
+} from "./templates/sectionHeader";
 
 export interface FleetStoreLike {
   composite(): FleetComposite | null;
@@ -69,6 +74,9 @@ class FleetStatusRendererImpl implements FleetStatusRenderer {
   private container : HTMLElement | null = null;
   private countEl   : HTMLElement | null = null;
   private updatedEl : HTMLElement | null = null;
+  // Lane 0a — section-header handle + collapse-listener teardown.
+  private header    : SectionHeaderHandle | null = null;
+  private collapseOff: ( () => void ) | null = null;
   private mounted   = false;
 
   constructor( opts: FleetStatusRendererOptions ) {
@@ -86,38 +94,41 @@ class FleetStatusRendererImpl implements FleetStatusRenderer {
     this.root = root;
 
     // Build the panel chrome once. The container is repainted per render.
-    const header = document.createElement( "header" );
-    header.className = "fleet-status-header";
-
-    const title = document.createElement( "h2" );
-    title.className = "fleet-status-title";
-    title.textContent = "🛰️ Fleet Status";
-    header.appendChild( title );
-
-    this.countEl = document.createElement( "span" );
-    this.countEl.className = "fleet-status-count";
-    this.countEl.setAttribute( "data-testid", "multiplexer-fleet-status-count" );
-    this.countEl.textContent = "0";
-    header.appendChild( this.countEl );
-
+    // Lane 0a — convert the bespoke `.fleet-status-header` into the uniform
+    // `.section-header` bar (🛰️ Fleet Status). The refresh control + updated
+    // stamp move into the header's `.section-header-actions` slot; the live
+    // count uses the shared `.section-header-count` chip (its legacy testid is
+    // preserved so E2E selectors keep resolving).
     const refreshBtn = document.createElement( "button" );
     refreshBtn.type = "button";
     refreshBtn.className = "fleet-status-refresh";
     refreshBtn.setAttribute( "data-testid", "multiplexer-fleet-status-refresh" );
     refreshBtn.textContent = "⟳";
     refreshBtn.addEventListener( "click", () => void this.stores.fleet.refresh() );
-    header.appendChild( refreshBtn );
 
     this.updatedEl = document.createElement( "span" );
     this.updatedEl.className = "fleet-status-updated";
     this.updatedEl.setAttribute( "data-testid", "multiplexer-fleet-status-updated" );
-    header.appendChild( this.updatedEl );
+
+    const header = renderSectionHeader( {
+      icon    : "🛰️",
+      title   : "Fleet Status",
+      testid  : "multiplexer-fleet-status-header",
+      actions : [ refreshBtn, this.updatedEl ],
+    } );
+    this.header  = header;
+    this.countEl = header.countEl;
+    this.countEl.setAttribute( "data-testid", "multiplexer-fleet-status-count" );
+    this.countEl.textContent = "0";
 
     this.container = document.createElement( "div" );
-    this.container.className = "fleet-status-container";
+    // The container IS the collapsible body — carries `.section-content` so the
+    // shared `[data-collapsed="true"] > .section-content` rule hides it.
+    this.container.className = "section-content fleet-status-container";
     this.container.setAttribute( "data-testid", "multiplexer-fleet-status-container" );
 
-    root.replaceChildren( header, this.container );
+    root.replaceChildren( header.header, this.container );
+    this.collapseOff = wireSectionCollapse( root, header );
 
     // Initial paint (composite may be null until the first poll resolves).
     this.renderFromStore( false );
@@ -133,6 +144,10 @@ class FleetStatusRendererImpl implements FleetStatusRenderer {
   unmount(): void {
     for ( const off of this.unsubscribers ) off();
     this.unsubscribers.length = 0;
+    if ( this.collapseOff !== null ) {
+      this.collapseOff();
+      this.collapseOff = null;
+    }
     if ( this.root !== null ) {
       this.root.replaceChildren();
       this.root = null;
@@ -140,6 +155,7 @@ class FleetStatusRendererImpl implements FleetStatusRenderer {
     this.container = null;
     this.countEl = null;
     this.updatedEl = null;
+    this.header = null;
     this.mounted = false;
   }
 

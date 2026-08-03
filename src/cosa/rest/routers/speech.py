@@ -262,6 +262,10 @@ async def upload_and_transcribe_mp3_file(
     Returns:
         JSONResponse: Processed transcription with munger JSON format
     """
+    # Names the phase the request is in, so the except-handler below can report
+    # WHAT failed instead of blaming transcription for everything downstream of
+    # it. Initialised before the try so the handler can never reference it unbound.
+    stage = "setup (config / decode / save upload)"
     try:
         # Get global debug settings
         import lupin_app.main as main_module
@@ -294,6 +298,7 @@ async def upload_and_transcribe_mp3_file(
         # in-process Whisper (local mode, CUDA OOM retry intact) and HTTP
         # proxy to lupin-model-server. In local mode the call path is
         # identical to the pre-carve-out _run_whisper_with_retry behavior.
+        stage = "transcription (SpeechToTextProvider)"
         processed_text = provider.transcribe(
             path,
             whisper_pipeline = whisper_pipeline,
@@ -303,7 +308,15 @@ async def upload_and_transcribe_mp3_file(
 
         if app_debug:
             print(f"Processed text: [{processed_text}]")
-        
+
+        # Transcription is DONE. Everything past this point is post-processing,
+        # and the handler below must stop crediting its failures to the ASR step:
+        # on 2026-07-25 a missing contact-information.map printed "[ERROR] MP3
+        # transcription failed" on the line AFTER "Processed text: [...]" had
+        # already proven transcription succeeded, which sent debugging at the
+        # model server instead of at the config file.
+        stage = "post-processing (munger / IO table / response)"
+
         # Create multimodal munger instance for processing
         munger = mmm.MultiModalMunger(
             processed_text,
@@ -356,8 +369,16 @@ async def upload_and_transcribe_mp3_file(
         raise HTTPException( status_code=503, detail="Server GPU memory temporarily unavailable. Please retry in a few seconds.", headers={ "Retry-After": "5" } )
 
     except Exception as e:
-        print( f"[ERROR] MP3 transcription failed: {e}" )
-        raise HTTPException( status_code=500, detail="Audio transcription failed. Please try uploading the file again or check that it's a valid audio format." )
+        # Name the STAGE. This handler spans setup, transcription and
+        # post-processing; reporting every one of them as "transcription failed"
+        # sent a 2026-07-25 config-file fault to the model server for debugging,
+        # on the line right after the log had printed the successful transcript.
+        print( f"[ERROR] MP3 upload failed during {stage}: {e}" )
+        if stage.startswith( "transcription" ):
+            detail = "Audio transcription failed. Please try uploading the file again or check that it's a valid audio format."
+        else:
+            detail = f"Audio was transcribed, but the request failed during {stage}."
+        raise HTTPException( status_code=500, detail=detail )
 
 @router.post(
     "/get-speech",

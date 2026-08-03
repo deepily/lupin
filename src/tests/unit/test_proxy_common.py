@@ -43,8 +43,21 @@ class TestBaseConfig:
         assert RECONNECT_INITIAL_DELAY == 1.0
 
     def test_reconnect_max_delay( self ):
+        # 30 -> 10 (Rick, 2026-08-02). This cap is not a private listener tuning knob:
+        # the server-side all-clear settle gate fires on COVERAGE, so it waits for the
+        # slowest session, so its deadline is derived from this number. Changing it here
+        # without changing `managed bounce all-clear settle deadline seconds` reds
+        # SettleDeadlinePinTests, which is the intended coupling.
         from cosa.agents.utils.proxy_agents.base_config import RECONNECT_MAX_DELAY
-        assert RECONNECT_MAX_DELAY == 30.0
+        assert RECONNECT_MAX_DELAY == 10.0
+
+    def test_reconnect_jitter_is_a_downward_fraction( self ):
+        # Downward-only is what keeps RECONNECT_MAX_DELAY a real ceiling; the settle
+        # deadline's derivation depends on that. A value >= 1.0 would let a delay reach
+        # zero, and a symmetric reading would let one exceed the cap — either silently
+        # invalidates the deadline.
+        from cosa.agents.utils.proxy_agents.base_config import RECONNECT_JITTER_FRACTION
+        assert 0.0 < RECONNECT_JITTER_FRACTION < 1.0
 
     def test_reconnect_max_attempts( self ):
         from cosa.agents.utils.proxy_agents.base_config import RECONNECT_MAX_ATTEMPTS
@@ -229,6 +242,105 @@ class TestBaseWebSocketListener:
     def test_log_prefix_default( self ):
         from cosa.agents.utils.proxy_agents.base_listener import BaseWebSocketListener
         assert BaseWebSocketListener.LOG_PREFIX == "[Listener]"
+
+    # ── reconnect lines must be RECORDABLE, not just printable ──────────────
+    # These went out through bare `print`, so they reached stderr but never the
+    # subclass's TIMESTAMPED centralized log. The cost was concrete: the downtime
+    # behind every measured bounce had to be inferred from arrival times because
+    # no timestamped reconnect line exists anywhere in the record
+    # (src/rnd/v0.1.9/2026.08.02-settle-deadline-arithmetic-30-vs-40.md §4).
+    # Routing them through _log lets a subclass persist them; these tests pin
+    # that the routing exists, so a later "simplify" back to print goes red.
+
+    def test_reconnect_lines_go_through_log_not_print( self ):
+        import asyncio
+
+        listener  = self._make_listener()
+        captured  = []
+        listener._log = captured.append
+
+        calls = { "n": 0 }
+
+        async def fake_connect_and_listen():
+            calls[ "n" ] += 1
+            if calls[ "n" ] >= 3:
+                listener._running = False      # let run() exit
+            raise RuntimeError( "boom" )       # drive the error arm
+
+        listener._connect_and_listen = fake_connect_and_listen
+
+        async def no_sleep( _ ):
+            pass
+
+        with patch( "cosa.agents.utils.proxy_agents.base_listener.asyncio.sleep", no_sleep ):
+            asyncio.run( listener.run() )
+
+        # Every reconnect decision reached _log — a subclass override therefore sees them.
+        assert captured, "no reconnect line reached _log — they are unrecordable again"
+        assert all( "Reconnecting in" in line for line in captured )
+
+    def test_reconnect_line_carries_the_delay_and_attempt( self ):
+        # The two fields that make the line an INSTRUMENT rather than a notice: which
+        # backoff wake this is, and how long it waits. Without both, a timestamped line
+        # still cannot reconstruct the wake series.
+        import asyncio
+
+        listener = self._make_listener()
+        captured = []
+        listener._log = captured.append
+
+        calls = { "n": 0 }
+
+        async def fake_connect_and_listen():
+            calls[ "n" ] += 1
+            if calls[ "n" ] >= 3:
+                listener._running = False
+            raise RuntimeError( "boom" )
+
+        listener._connect_and_listen = fake_connect_and_listen
+
+        async def no_sleep( _ ):
+            pass
+
+        # Neutralize jitter so the BASE series is readable. Jitter is exercised
+        # separately below; here the question is which base value attempt 1 produces.
+        with patch( "cosa.agents.utils.proxy_agents.base_listener.asyncio.sleep", no_sleep ), \
+             patch( "cosa.agents.utils.proxy_agents.base_listener.random.uniform",
+                    lambda lo, hi: hi ):
+            asyncio.run( listener.run() )
+
+        # Backoff is 1.0 * 2**attempt capped at RECONNECT_MAX_DELAY — attempt increments
+        # BEFORE the min(), so the FIRST delay is 2.0s, not 1.0s. That off-by-one is what
+        # made two readings of this series disagree for a day; pin it so the code answers
+        # the question instead of two people arguing about it.
+        assert "in 2.0s (attempt 1/" in captured[ 0 ]
+        assert "in 4.0s (attempt 2/" in captured[ 1 ]
+
+    def test_jitter_spreads_the_wake_and_never_exceeds_the_cap( self ):
+        # The herd this exists to break: 9 listeners dropped by one bounce previously woke
+        # within 8 MILLISECONDS of each other, because nothing in the delay was random.
+        from cosa.agents.utils.proxy_agents.base_config import RECONNECT_MAX_DELAY
+
+        listener = self._make_listener()
+        listener._attempt = 8                       # deep enough to be pinned at the cap
+        delays = { round( listener._next_delay(), 6 ) for _ in range( 500 ) }
+
+        assert len( delays ) > 400, (
+            f"only {len(delays)} distinct delays in 500 draws — the wake is not being "
+            f"spread, so a bounce still wakes the whole fleet in lockstep"
+        )
+        assert max( delays ) <= RECONNECT_MAX_DELAY, (
+            f"max delay {max(delays)}s exceeds the {RECONNECT_MAX_DELAY}s cap — jitter "
+            f"must be downward-only or the settle deadline derived from this cap is wrong"
+        )
+        assert min( delays ) > 0.0
+
+    def test_default_log_prints( self, capsys ):
+        # The base's own _log must still reach stdout — subclasses opt INTO persistence,
+        # they do not opt out of visibility.
+        listener = self._make_listener()
+        listener._log( "hello from the base" )
+        assert "hello from the base" in capsys.readouterr().out
 
 
 # ============================================================================

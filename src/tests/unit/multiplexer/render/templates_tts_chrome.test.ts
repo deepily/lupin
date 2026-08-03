@@ -20,41 +20,69 @@ before(() => {
 });
 
 interface CallLog {
-  pause  : number;
-  resume : number;
-  stop   : number;
-  skip   : number;
+  pause       : number;
+  resume      : number;
+  stop        : number;
+  skip        : number;
+  clearAll    : number;
+  focusResume : number;   // 70cbff3e — the focus Resume button (distinct from resume)
 }
 
 function makeHandlers(): { handlers: TtsChromeHandlers; calls: CallLog } {
-  const calls: CallLog = { pause: 0, resume: 0, stop: 0, skip: 0 };
+  const calls: CallLog = { pause: 0, resume: 0, stop: 0, skip: 0, clearAll: 0, focusResume: 0 };
   const handlers: TtsChromeHandlers = {
-    onPause()  : void { calls.pause  += 1; },
-    onResume() : void { calls.resume += 1; },
-    onStop()   : void { calls.stop   += 1; },
-    onSkip()   : void { calls.skip   += 1; },
+    onPause()       : void { calls.pause       += 1; },
+    onResume()      : void { calls.resume      += 1; },
+    onStop()        : void { calls.stop        += 1; },
+    onSkip()        : void { calls.skip        += 1; },
+    onClearAll()    : void { calls.clearAll    += 1; },
+    onFocusResume() : void { calls.focusResume += 1; },
   };
   return { handlers, calls };
 }
 
 function makeOpts(over: Partial<TtsChromeOpts> = {}): TtsChromeOpts {
-  return { state: "idle", queueLength: 0, ...over };
+  // desync-fix: queueEmpty defaults false so bare opts render the chrome; the
+  // empty-panel tests pass queueEmpty:true explicitly.
+  return { state: "idle", queueLength: 0, queueEmpty: false, ...over };
 }
 
 // ---------------------------------------------------------------------------
 // State-driven render (6 cases, one per AudioPlaybackState)
 // ---------------------------------------------------------------------------
 
-test("idle: all 3 controls disabled; no state-class on root", () => {
-  const el = renderTtsChrome(makeOpts({ state: "idle" }), makeHandlers().handlers);
-  const toggle = el.querySelector<HTMLButtonElement>(".tts-btn-toggle")!;
-  const stop   = el.querySelector<HTMLButtonElement>(".tts-btn-stop")!;
-  const skip   = el.querySelector<HTMLButtonElement>(".tts-btn-skip")!;
-  assert.equal(toggle.disabled, true);
-  assert.equal(stop.disabled,   true);
-  assert.equal(skip.disabled,   true);
+test("queueEmpty: renders the 🔇 empty panel (no controls, no state-class); data-state=idle", () => {
+  // desync-fix: the empty panel is QUEUE-driven — queueEmpty:true renders the
+  // `🔇 Nothing in the queue` panel (regardless of audio state), NOT a control row.
+  const el = renderTtsChrome(makeOpts({ state: "idle", queueEmpty: true }), makeHandlers().handlers);
+  const empty = el.querySelector(".tts-queue-empty-state");
+  assert.notEqual(empty, null, "queueEmpty renders .tts-queue-empty-state");
+  assert.match(empty!.textContent ?? "", /Nothing in the queue/);
+  // No controls in the empty panel.
+  assert.equal(el.querySelector(".tts-btn-toggle"), null);
+  assert.equal(el.querySelector(".tts-btn-stop"),   null);
+  assert.equal(el.querySelector(".tts-btn-skip"),   null);
+  assert.equal(el.querySelector(".tts-playing-header"), null, "no playing-header when empty");
+  assert.ok(el.classList.contains("tts-chrome-empty"), "empty root carries .tts-chrome-empty");
   assert.equal(el.classList.contains("is-playing-current"), false);
   assert.equal(el.classList.contains("is-paused-current"),  false);
+  assert.equal(el.dataset.state, "idle");
+  assert.equal(el.getAttribute("data-testid"), "multiplexer-tts-chrome");
+});
+
+test("idle + non-empty queue: renders the control row (all disabled) — NOT the empty panel", () => {
+  // desync-fix unlocks this state: queueEmpty:false at audio-state idle (item
+  // queued, nothing speaking yet) → the chrome renders with all three transport
+  // controls disabled (matrix row idle = ✗✗✗) and Clear-all enabled.
+  const el = renderTtsChrome(makeOpts({ state: "idle", queueLength: 2, queueEmpty: false }), makeHandlers().handlers);
+  assert.equal(el.querySelector(".tts-queue-empty-state"), null, "non-empty queue → NOT the empty panel");
+  assert.equal(el.classList.contains("tts-chrome-empty"), false, "chrome, not the empty panel");
+  assert.equal(el.querySelector<HTMLButtonElement>(".tts-btn-toggle")!.disabled, true, "idle toggle disabled");
+  assert.equal(el.querySelector<HTMLButtonElement>(".tts-btn-stop")!.disabled,   true, "idle stop disabled");
+  assert.equal(el.querySelector<HTMLButtonElement>(".tts-btn-skip")!.disabled,   true, "idle skip disabled");
+  const clear = el.querySelector<HTMLButtonElement>(".tts-btn-clear-all")!;
+  assert.equal(clear.disabled, false, "Clear-all enabled (queue non-empty)");
+  assert.equal(clear.hidden,   false);
   assert.equal(el.dataset.state, "idle");
 });
 
@@ -187,9 +215,12 @@ test("multi-instance independence: two chrome instances dispatch to their own ha
   assert.equal(b.calls.pause,  0);
 });
 
-test("disabled controls are non-interactive (clicks on disabled stop in idle state are no-ops)", () => {
+test("disabled controls are non-interactive (clicks on disabled stop in decoding state are no-ops)", () => {
+  // L2: idle now renders the empty panel (no controls), so the disabled-control
+  // no-op invariant is exercised on `decoding` — a transient state that still
+  // renders the control row with all three disabled.
   const { handlers, calls } = makeHandlers();
-  const el = renderTtsChrome(makeOpts({ state: "idle" }), handlers);
+  const el = renderTtsChrome(makeOpts({ state: "decoding" }), handlers);
   // Force the click anyway; disabled buttons in browsers don't fire listeners,
   // and our renderer attaches listeners conditionally on enabled-state, so calls stay 0.
   el.querySelector<HTMLButtonElement>(".tts-btn-stop")!.click();
@@ -201,12 +232,100 @@ test("disabled controls are non-interactive (clicks on disabled stop in idle sta
   assert.equal(calls.resume, 0);
 });
 
+test("header state machine (WP3): playing → 🔊 Playing: N; paused → Paused: N (paused class)", () => {
+  const playing = renderTtsChrome(makeOpts({ state: "playing", queueLength: 3 }), makeHandlers().handlers);
+  const header = playing.querySelector(".tts-playing-header");
+  assert.notEqual(header, null, "playing renders .tts-playing-header");
+  assert.match(header!.textContent ?? "", /🔊 Playing: 3/);
+  assert.equal(header!.className, "tts-playing-header", "playing has no modifier class");
+  const paused = renderTtsChrome(makeOpts({ state: "paused", queueLength: 2 }), makeHandlers().handlers);
+  const ph = paused.querySelector(".tts-playing-header")!;
+  assert.match(ph.textContent ?? "", /Paused: 2/);
+  assert.doesNotMatch(ph.textContent ?? "", /Playing/, "manual pause header drops the Playing label");
+  assert.equal(ph.className, "tts-playing-header paused");
+});
+
 test("data-testid + data-state always set for E2E observability", () => {
   for (const s of ["idle", "decoding", "playing", "paused", "ended", "error"] as AudioPlaybackState[]) {
     const el = renderTtsChrome(makeOpts({ state: s }), makeHandlers().handlers);
     assert.equal(el.getAttribute("data-testid"), "multiplexer-tts-chrome", `testid for ${s}`);
     assert.equal(el.dataset.state, s, `dataset.state for ${s}`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// WP3 — header transport: focus mode, Resume, Clear-all
+// ---------------------------------------------------------------------------
+
+test("focus mode: header 'Paused: N waiting' + .focus-mode class + Resume present", () => {
+  const el = renderTtsChrome(makeOpts({ state: "playing", queueLength: 4, focusMode: true }), makeHandlers().handlers);
+  const header = el.querySelector(".tts-playing-header")!;
+  assert.match(header.textContent ?? "", /Paused: 4 waiting/);
+  assert.equal(header.className, "tts-playing-header focus-mode");
+  assert.notEqual(el.querySelector(".tts-btn-resume"), null, "Resume present in focus mode");
+});
+
+test("non-focus mode: no Resume button (querySelector null)", () => {
+  const el = renderTtsChrome(makeOpts({ state: "playing", queueLength: 1 }), makeHandlers().handlers);
+  assert.equal(el.querySelector(".tts-btn-resume"), null);
+});
+
+test("70cbff3e — focus Resume click dispatches onFocusResume, NOT onResume (distinct from the transport toggle)", () => {
+  const { handlers, calls } = makeHandlers();
+  const el = renderTtsChrome(makeOpts({ state: "playing", queueLength: 1, focusMode: true }), handlers);
+  (el.querySelector(".tts-btn-resume") as HTMLButtonElement).click();
+  assert.equal(calls.focusResume, 1, "focus Resume → onFocusResume");
+  assert.equal(calls.resume, 0, "focus Resume must NOT fire the audio-resume path");
+});
+
+test("70cbff3e — focus Resume with no onFocusResume handler is inert (present but no throw on click)", () => {
+  // Mirrors the onClearAll inert-when-absent contract: a caller omitting
+  // onFocusResume renders the button but wires no listener.
+  const inert: TtsChromeHandlers = { onPause() {}, onResume() {}, onStop() {}, onSkip() {} };
+  const el = renderTtsChrome(makeOpts({ state: "playing", queueLength: 1, focusMode: true }), inert);
+  const btn = el.querySelector(".tts-btn-resume") as HTMLButtonElement;
+  assert.notEqual(btn, null, "button present in focus mode");
+  btn.click();   // no listener → no throw
+});
+
+test("Clear-all: enabled + shown whenever the chrome renders (queue non-empty)", () => {
+  const el = renderTtsChrome(makeOpts({ state: "playing", queueLength: 2 }), makeHandlers().handlers);
+  const clear = el.querySelector(".tts-btn-clear-all") as HTMLButtonElement;
+  assert.notEqual(clear, null);
+  assert.equal(clear.disabled, false);
+  assert.equal(clear.hidden, false);
+});
+
+// desync-fix: the old "Clear-all disabled/hidden when empty (count 0)" case is
+// GONE — an empty queue renders the empty panel (no Clear-all button at all), so
+// within the chrome Clear-all is ALWAYS enabled. This also fixes the old
+// queueLength===0 gate that wrongly disabled Clear-all for an active-item-only
+// queue (1 active head, 0 pending → chrome renders, Clear-all must still fire).
+test("Clear-all: enabled at queueLength 0 in the chrome (active-item-only queue)", () => {
+  const el = renderTtsChrome(makeOpts({ state: "playing", queueLength: 0, queueEmpty: false }), makeHandlers().handlers);
+  const clear = el.querySelector(".tts-btn-clear-all") as HTMLButtonElement;
+  assert.equal(clear.disabled, false, "active-only queue (0 pending) still lets Clear-all fire");
+  assert.equal(clear.hidden, false);
+});
+
+test("Clear-all click dispatches onClearAll (chrome path)", () => {
+  const { handlers, calls } = makeHandlers();
+  const nonEmpty = renderTtsChrome(makeOpts({ state: "playing", queueLength: 3 }), handlers);
+  (nonEmpty.querySelector(".tts-btn-clear-all") as HTMLButtonElement).click();
+  assert.equal(calls.clearAll, 1);
+});
+
+test("Clear-all: no onClearAll handler → button present + enabled but no listener (inert)", () => {
+  // WP3-before-WP4: a caller that omits the optional onClearAll still renders the
+  // count-gated button; clicking is a safe no-op (no listener, no throw).
+  const noClear: TtsChromeHandlers = {
+    onPause() {}, onResume() {}, onStop() {}, onSkip() {},
+  };
+  const el = renderTtsChrome(makeOpts({ state: "playing", queueLength: 2 }), noClear);
+  const clear = el.querySelector(".tts-btn-clear-all") as HTMLButtonElement;
+  assert.notEqual(clear, null);
+  assert.equal(clear.disabled, false);
+  clear.click();   // no listener wired → no throw
 });
 
 // ---------------------------------------------------------------------------

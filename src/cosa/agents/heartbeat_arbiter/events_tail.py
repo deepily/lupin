@@ -157,6 +157,62 @@ def tail_fleet_events( events_dir=None, offsets=None ):
     return events_by_session, new_offsets
 
 
+def save_offsets( path, offsets ):
+    """
+    Persist the per-session byte-offset map atomically (bug 5a1f17f8 (b): durable
+    offsets across restarts). The arbiter holds `self._offsets` in memory, so a
+    :8001 restart re-reads every events file from byte 0 and re-consumes historical
+    cap_reached as fresh (the STUCK-poke replay). Saving after each poll lets a bounce
+    RESUME where it left off — no replay.
+
+    Atomic (temp file + os.replace) so a mid-write crash never leaves a torn file the
+    next startup would misread. Swallow-safe: any IO error → return False, never raise
+    (an offset-store hiccup must not crash the poll loop — it degrades to the in-memory
+    behavior on the next start, exactly the pre-fix path).
+
+    Requires:
+        - path is a path-like target; offsets is a { session_id: int } map
+
+    Ensures:
+        - writes offsets as JSON to `path` atomically; returns True on success
+        - any OSError / serialization error → returns False (never raises)
+    """
+    path = Path( path )
+    tmp  = path.parent / ( path.name + ".tmp" )
+    try:
+        tmp.write_text( json.dumps( offsets ) )
+        os.replace( tmp, path )
+        return True
+    except ( OSError, TypeError, ValueError ):
+        return False
+
+
+def load_offsets( path ):
+    """
+    Load the persisted per-session byte-offset map (bug 5a1f17f8 (b)). Read at arbiter
+    startup so a restart resumes tailing from the last consumed byte instead of byte 0.
+
+    Swallow-safe + shape-guarded: a missing file (first-ever start), unreadable path,
+    corrupt JSON, or a non-dict payload all yield {} — the fail-SAFE default that
+    reproduces today's fresh-start behavior (read from the top) rather than crashing or
+    trusting garbage. A shrunk/rotated file is still handled downstream by
+    tail_session_file (offset > size → reset to 0), so a stale-but-parseable offset is
+    self-correcting.
+
+    Requires:
+        - path is a path-like source
+
+    Ensures:
+        - returns the persisted { session_id: int } map on a clean read
+        - missing / unreadable / corrupt / non-dict → returns {} (never raises)
+    """
+    try:
+        data = json.loads( Path( path ).read_text() )
+    except ( OSError, ValueError ):
+        return { }
+    return data if isinstance( data, dict ) else { }
+
+
 def quick_smoke_test():
     """
     Self-contained smoke test of glob + byte-offset tail + partial-line + rotation.

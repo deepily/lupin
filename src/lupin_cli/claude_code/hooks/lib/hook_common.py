@@ -14,6 +14,7 @@ Usage from hook scripts:
         is_tts_enabled, build_progress_group_id
     )
 """
+import configparser
 import json
 import os
 import subprocess
@@ -29,9 +30,39 @@ from pathlib import Path
 # Canonical path resolution via cu.get_project_root() — keeps runtime output
 # in io/ directory, consistent with existing io/log/ convention.
 import cosa.utils.util as cu
+from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 
-LOGS_DIR    = Path( cu.get_project_root() ) / "io" / "claude_code_hooks" / "logs"
-STREAM_LOG  = LOGS_DIR / "hook-events.jsonl"
+
+def _logs_dir():
+    """
+    Runtime-resolved hook-log directory (Lever P, item 6fc8d78d, 2026-07-07).
+
+    Resolved at CALL time — NOT bound to an import-time module constant — so a
+    test fixture setting LUPIN_HOOK_LOG_DIR is honored regardless of import order.
+
+    Why this exists: `LOGS_DIR`/`STREAM_LOG` were import-time constants off the
+    real project root. A unit test driving log_to_stream/log_payload (e.g.
+    test_heartbeat_integration, which monkeypatches the persona to "Mr. Radio 🦉"
+    and drives _run_heartbeat with synthetic session ids) could NOT redirect them
+    by monkeypatching cu.get_project_root — the constant was already bound. So test
+    emissions appended to the REAL production io/claude_code_hooks/logs/
+    hook-events.jsonl (1,259+ synthetic `sidC*` rows), manufacturing a false
+    "Mr-Radio-only" arbiter false-poke signature. Resolving lazily + honoring an
+    env override lets the conftest redirect writes to a per-test tmp dir.
+
+    Requires:
+        - (none)
+
+    Ensures:
+        - LUPIN_HOOK_LOG_DIR set (non-empty) → Path( that )  (test-hermetic override)
+        - else → <project root>/io/claude_code_hooks/logs  (production default,
+          byte-identical to the pre-Lever-P constant; production leaves it UNSET)
+        - Never raises
+    """
+    override = os.environ.get( "LUPIN_HOOK_LOG_DIR" )
+    if override:
+        return Path( override )
+    return Path( cu.get_project_root() ) / "io" / "claude_code_hooks" / "logs"
 
 # Tool classification for smart TTS filtering (PostToolUse)
 TOOLS_SILENT   = frozenset( { "Read", "Grep", "Glob", "TaskCreate", "TaskUpdate", "TaskGet", "TaskList" } )
@@ -45,6 +76,70 @@ MAX_STOP_BLOCKS = 3
 
 # Delay before tmux injection after stop block (seconds)
 TMUX_INJECTION_DELAY = 0.25
+
+# Transport budget for the FIELD-CARRIED notification path (row 204911ca, F1
+# 2026-07-20). Set to 6 — **deliberately NOT the cohort's 30.**
+#
+# 🔴 THIS MEMBER IS CARRIED IN A PYDANTIC FIELD, NOT PASSED AT THE CALL.
+# `AsyncNotificationRequest( timeout=… )` is consumed at
+# `notify_user_async.py:197-201` as a bare `requests.post( timeout=request.timeout )`
+# — bare governs BOTH the connect and the read leg, so the read leg is exposed
+# to a `:7999` reload just like a direct call site. The first pass raised the
+# direct `urlopen` sites in this package and left this one at 3s, because
+# `grep -rn _SERVER_TRANSPORT_TIMEOUT_SECONDS` cannot see a field assignment.
+# At 3s a reload silently dropped the notification — the caller swallows the
+# failure, so nothing observed the loss.
+#
+# 🔴 WHY 6 AND NOT 30 — THIS PATH RETRIES, AND THE SCHEDULE IS DERIVED FROM
+# THIS VERY NUMBER. `calculate_retry_intervals( request.timeout )`
+# (`notify_user_async.py:47`) builds the retry ladder FROM the timeout, so
+# raising it inflates BOTH the per-attempt budget AND the attempt count. The
+# cohort's 30 does not cost 30s here; it costs **267s**:
+#
+#   timeout │ attempt starts (s)        │ rides out an 18.76s reload? │ wall clock
+#   ────────┼───────────────────────────┼─────────────────────────────┼───────────
+#      3    │ 0, 4, 8                   │ NO — all inside the window  │   11s
+#      5    │ 0, 6, 12, 19              │ yes, by 0.24s               │   24s
+#    * 6 *  │ 0, 7, 14, 22              │ yes, TWO covering attempts  │   28s
+#     10    │ 0, 11, 22, 34, 46, 59     │ yes                         │   69s
+#     30    │ 0, 31, 63, …              │ yes                         │  267s
+#
+# These are fire-and-forget notifications on a HOOK path, wrapped in
+# `except: pass` precisely so a notification failure never blocks Claude Code.
+# A hook that stalls 267s is a far worse defect than a dropped best-effort
+# notification — so the cohort value is not merely oversized here, it is wrong.
+#
+# At 6 the RETRY LOOP rides out the window rather than any single fat timeout:
+# attempt 3 (14s→20s) is still open when a max-length window ends at 18.76s, and
+# attempt 4 starts at 22s after it. Two independent covering attempts, for 28s
+# worst case against the 11s this path already cost. That is the trade, and it
+# is 2.5x — not the 24x that copying the cohort would have bought.
+#
+# ⚠️ DO NOT "fix" this by aligning it to _SERVER_TRANSPORT_TIMEOUT_SECONDS. The
+# two numbers answer different questions: the cohort's covers ONE call with no
+# retry; this one covers a RETRY SCHEDULE it also generates. They are not the
+# same quantity and should not be made to match.
+#
+# Ceiling note: `AsyncNotificationRequest.timeout` is `Field( ge=1, le=30 )`
+# (`notification_models.py:620-625`), so 6 sits well inside the bound.
+#
+# Full derivation: src/rnd/v0.1.9/2026.07.19-dev-server-reload-availability.md §9(a).
+NOTIFY_TRANSPORT_TIMEOUT_SECONDS = 6
+
+# Fails loudly at import if THIS module's budget is pushed past the Pydantic bound
+# it has to fit through. A comment warning about the hazard is not a control; this is.
+#
+# This guard is deliberately DUPLICATED rather than shared with
+# cc_notification_listener.py's identical assert. The two constants are separate by
+# design (each module owns its own), so a guard in one module CANNOT protect the
+# other — importing the sibling to share it would reintroduce the cross-package
+# import edge on the hook boot path that this whole cohort exists to avoid.
+# Each exposure needs its own guard, at its own definition.
+assert NOTIFY_TRANSPORT_TIMEOUT_SECONDS <= 30, (
+    "NOTIFY_TRANSPORT_TIMEOUT_SECONDS exceeds AsyncNotificationRequest.timeout's "
+    "Field( le=30 ) — raise the field bound in notification_models.py first, or "
+    "this fails as an opaque ValidationError inside a swallowed except"
+)
 
 
 # ── Core Functions ────────────────────────────────────────────────────────────
@@ -90,7 +185,8 @@ def log_to_stream( hook_name, payload, extra=None ):
         extra: Optional dict of hook-specific fields to merge into entry
     """
     try:
-        LOGS_DIR.mkdir( parents=True, exist_ok=True )
+        logs_dir = _logs_dir()
+        logs_dir.mkdir( parents=True, exist_ok=True )
         entry = {
             "ts"   : get_timestamp(),
             "hook" : hook_name,
@@ -105,7 +201,7 @@ def log_to_stream( hook_name, payload, extra=None ):
             entry[ "tool" ]       = payload.get( "tool_name", "" )
         if extra:
             entry.update( extra )
-        with open( STREAM_LOG, "a" ) as f:
+        with open( logs_dir / "hook-events.jsonl", "a" ) as f:
             f.write( json.dumps( entry, default=str ) + "\n" )
     except Exception:
         pass  # Logging failure is non-fatal
@@ -130,9 +226,10 @@ def log_payload( hook_name, payload ):
         payload: Full hook input dict to log
     """
     try:
-        LOGS_DIR.mkdir( parents=True, exist_ok=True )
+        logs_dir  = _logs_dir()
+        logs_dir.mkdir( parents=True, exist_ok=True )
         timestamp = datetime.now( timezone.utc ).strftime( "%Y%m%dT%H%M%S_%f" )
-        log_file  = LOGS_DIR / f"{hook_name}-{timestamp}.json"
+        log_file  = logs_dir / f"{hook_name}-{timestamp}.json"
 
         log_entry = {
             "hook_name"  : hook_name,
@@ -187,21 +284,104 @@ def get_timestamp():
     return now.strftime( "%Y.%m.%d @ %H:%M %S" ) + f",{now.microsecond // 1000:03d}ms"
 
 
-def get_target_email():
+def _config_file_path():
     """
-    Resolve notification target email from LUPIN_DEV_EMAIL environment variable.
+    Resolve the path to the ~/.lupin/config fallback file (bug ef10c5b6).
+
+    Resolved at CALL time — not an import-time constant — so a test fixture
+    setting LUPIN_CONFIG_FILE is honored regardless of import order (same
+    hermetic-override pattern as _logs_dir / LUPIN_HOOK_LOG_DIR above).
 
     Requires:
-        - LUPIN_DEV_EMAIL environment variable is set
+        - (none)
 
     Ensures:
-        - Returns email string if env var is set
-        - Returns None if env var is not set
+        - LUPIN_CONFIG_FILE set (non-empty) → Path( that )  (test-hermetic override)
+        - else → ~/.lupin/config  (production default)
+        - Never raises
+
+    Returns:
+        Path: The config file location (may not exist on disk)
+    """
+    override = os.environ.get( "LUPIN_CONFIG_FILE" )
+    if override:
+        return Path( override )
+    return Path.home() / ".lupin" / "config"
+
+
+def _read_email_from_config_file():
+    """
+    Resolve the notification target email from the ~/.lupin/config fallback file.
+
+    ~/.lupin/config is the host's INI-format Lupin config (the same file the
+    cosa-voice tooling reads). The operator's notification recipient lives at
+    `[<active-env>] global_notification_recipient`, where the active environment
+    name is the value of `[environments] default`. This is the defense-in-depth
+    backstop for get_target_email() (bug ef10c5b6): env keeps precedence, so this
+    runs ONLY when LUPIN_DEV_EMAIL is absent/empty.
+
+    Requires:
+        - (none)
+
+    Ensures:
+        - Returns the active environment's global_notification_recipient
+          (stripped) when the file parses and that env pointer + section + key
+          all resolve to a non-empty value
+        - Returns None when the file is missing/unreadable, the [environments]
+          default pointer is absent/empty, or the target recipient is
+          absent/empty
+        - Never raises (a missing, binary, or malformed file degrades to None)
+
+    Returns:
+        str or None: Configured notification recipient email
+    """
+    parser = configparser.ConfigParser()
+    try:
+        if not parser.read( _config_file_path(), encoding="utf-8" ):
+            return None  # file missing/unreadable → read() returns [] (no raise)
+        env_name = parser.get( "environments", "default", fallback="" ).strip()
+        if not env_name:
+            return None
+        recipient = parser.get( env_name, "global_notification_recipient", fallback="" ).strip()
+        return recipient or None
+    except ( configparser.Error, UnicodeDecodeError ):
+        return None  # malformed / binary config → no fallback available
+
+
+def get_target_email():
+    """
+    Resolve the notification target email, env-first with a file fallback.
+
+    Resolution order (first non-empty hit wins; the environment keeps
+    precedence):
+        1. LUPIN_DEV_EMAIL environment variable
+        2. ~/.lupin/config INI — `[<active-env>] global_notification_recipient`,
+           where the active env is `[environments] default`  (file fallback)
+
+    Why the file fallback exists (bug ef10c5b6, 2026-07-15): the SessionStart
+    hello-world notification is a fresh session's ONLY birth certificate on the
+    operator's focus bar, and send_tts() no-ops SILENTLY when this returns None.
+    A tmux-server restart froze a non-login global env with no LUPIN_DEV_EMAIL,
+    so every new session went invisible until it happened to push an MCP-side
+    notification. The file fallback means a lost env can never again silence
+    registration; the env var still wins whenever it is present.
+
+    Requires:
+        - (none)
+
+    Ensures:
+        - Returns the env value (stripped) when LUPIN_DEV_EMAIL is set non-empty
+        - Else returns the file-configured email when ~/.lupin/config supplies one
+        - Returns None when neither source yields a non-empty email
+        - Never raises
 
     Returns:
         str or None: Target email address
     """
-    return os.environ.get( "LUPIN_DEV_EMAIL" )
+    env_email = os.environ.get( "LUPIN_DEV_EMAIL" )
+    if env_email and env_email.strip():
+        return env_email.strip()
+    return _read_email_from_config_file()
 
 
 def is_tts_enabled():
@@ -306,7 +486,7 @@ def send_tts( message, priority="low", sender_id=None, progress_group_id=None, s
             sender_id          = sender_id,
             progress_group_id  = progress_group_id,
             suppress_ding      = suppress_ding,
-            timeout            = 3
+            timeout            = NOTIFY_TRANSPORT_TIMEOUT_SECONDS
         )
 
         notify_user_async( request=request )
@@ -402,7 +582,59 @@ def drain_and_acknowledge( session_id ):
 VOICE_LINE_PREFIX = "[Voice]: "
 
 
-def build_peer_dm_reminder( body, persona=None, icon=None, msg_id=None, thread_id=None ):
+# bug d0d7f068 (Part 2 / option C): the peer-DM envelope's frame prefix as a SHARED
+# constant. build_peer_dm_reminder emits it; is_injected_peer_dm + the Stop-hook
+# poke-cap reset guard MATCH on it. Deriving both the emit and the match from ONE
+# constant (never a re-typed literal) is the 46a17f5a literal-drift lesson — the
+# "Heartbeat arbiter (" family is exactly how a match silently drifts from its source.
+PEER_DM_FRAME_PREFIX = "PEER DM from "
+
+
+# Rick's brevity mandate, 2026-07-19 (canonical: planning-is-prompting →
+# workflow/brevity-mandate.md). The compact carrier form of KISS · Say 3LoL ·
+# NoMC C2C, shared by BOTH injection riders below.
+#
+# The escape clause reads "ONLY WHEN ASKED" — never "when the content requires
+# it". That earlier wording was drafted and rejected the same hour: a self-
+# assessed exception hands length-discretion back to the verbose author, which
+# makes the rule a receipt rather than a control. Do NOT soften this string.
+BREVITY_TAG = (
+    "[KISS · 3LoL · NoMC C2C · NoAA — verdict first, 3 lines or less; "
+    "longer ONLY WHEN ASKED. Detail → abstract.]"
+)
+
+
+# The DM Style Contract tag (DM brevity/tone contract, Rick 2026-07-31 — always
+# on, no toggle). Finalized merged line from Rick's editorial pass: folds the
+# acronym list + the decisions/evidence clause into ONE line and keeps the
+# acronym-dense register deliberately (WaHH added, decisions/evidence slash-
+# joined). Kept as a SEPARATE constant rather than merged into BREVITY_TAG:
+# BREVITY_TAG's closing "Detail → abstract" clause doesn't apply to dm_send
+# (no abstract parameter) and must not be misquoted onto a DM.
+# See src/rnd/v0.1.9/2026.07.31-dm-verbosity-reduction/.
+DM_STYLE_TAG = (
+    "[KISS · 3LoL · NoMC C2C · NoAA · WaHH — verdict first, 3 lines or less; "
+    "decisions/evidence/risks/required actions only; longer ONLY WHEN ASKED.]"
+)
+
+
+# The human-voice TTS-acknowledge rider (appended by enrich_voice_context when a
+# drained message is human voice). Hoisted to a module constant so its BYTE COST
+# is visible at the top of the file — this string rides EVERY spoken utterance.
+#
+# Sized deliberately (task 6a3941b8 × the pre-existing micro-prompt-reduction
+# ask): the brevity tag was folded in while the rider was CUT from 325 chars /
+# 47 words to 215 / 37 — a net-SMALLER payload that happens to carry the tag,
+# never a straight addition. Any future edit must keep that ratchet: measure
+# before and after, and do not let this grow back.
+VOICE_ACK_RIDER = (
+    "IMPORTANT: ack by voice — notify() or converse(), priority=high. "
+    "The user is listening, not reading the terminal. "
+    f"{BREVITY_TAG}"
+)
+
+
+def build_peer_dm_reminder( body, persona=None, icon=None, msg_id=None, thread_id=None, one_way=False ):
     """
     Build the peer-DM <system-reminder> block — the SINGLE source of peer-DM
     framing for BOTH delivery paths: the listener's idle tmux-wake
@@ -417,14 +649,32 @@ def build_peer_dm_reminder( body, persona=None, icon=None, msg_id=None, thread_i
     speakerphone voice rider / "user spoke" / notify-to-speak instruction. Peers
     reply via dm_send, never TTS.
 
+    ONE-WAY variant (bug 8894e597, 2026-07-02): a genuine peer DM is bidirectional,
+    but an ARBITER-authored poke/advisory is NOT — the arbiter is a pure observer
+    with NO deliverable inbox by ratified design (bug 9694fb11: "there is NO
+    deliverable tap-ACK path — a manager literally cannot DM the arbiter back").
+    The default dm_send affordance is therefore a FALSE promise on arbiter pokes:
+    every poked session burns a turn attempting the impossible reply, then falls
+    back to hold-mtime as the de-facto ACK. When `one_way=True`, the affordance is
+    replaced with an honest statement of the REAL signal path — resuming work
+    (bridge / hold / store freshness IS the acknowledgment the arbiter reads),
+    which composes with the 92c7ab1d bridge-mtime sign-of-life veto. Genuine peer
+    DMs keep the default (one_way=False) affordance untouched.
+
     Requires:
         - body is the message text (any string; caller strips/validates emptiness)
         - persona, icon, msg_id, thread_id are strings or None
+        - one_way is a bool (True only for arbiter-authored one-way advisories)
 
     Ensures:
         - Returns a complete "<system-reminder>...</system-reminder>" block
         - Missing persona falls back to "a peer session"; missing icon/ids → ""
-        - Output is identical regardless of which delivery path calls it
+        - one_way=False → the dm_send reply affordance (bidirectional peer DM),
+          followed by DM_STYLE_TAG (the DM Style Contract governs how you REPLY,
+          so it rides the reply affordance — always on, no toggle)
+        - one_way=True  → an honest one-way notice (no dm_send line, and NO
+          brevity rider — no reply is possible, so a reply-shaping rider would
+          be pure byte cost); resuming work is named as the acknowledgment
 
     Args:
         body: The inline DM body
@@ -432,6 +682,7 @@ def build_peer_dm_reminder( body, persona=None, icon=None, msg_id=None, thread_i
         icon: Sender's persona icon
         msg_id: Originating notification id (for reply_to threading)
         thread_id: Conversation thread id (for thread_id threading)
+        one_way: True → arbiter-authored one-way advisory (no reply affordance)
 
     Returns:
         str: The peer-DM system-reminder block
@@ -441,16 +692,51 @@ def build_peer_dm_reminder( body, persona=None, icon=None, msg_id=None, thread_i
     msg_id       = msg_id or ""
     thread_id    = thread_id or ""
     sender_label = f"{persona} {icon}".strip()
-    reply_affordance = (
-        f'↳ Reply via dm_send( recipient="{persona}", body="<your reply>", '
-        f'reply_to="{msg_id}", thread_id="{thread_id}" )'
-    )
+    if one_way:
+        # bug 8894e597: the arbiter has no inbox — state the honest signal path
+        # instead of a dm_send affordance that cannot be delivered.
+        reply_affordance = (
+            "↳ This is a ONE-WAY advisory — the arbiter is an observer with no inbox "
+            "and cannot receive a reply. Do NOT reply; signal by resuming work "
+            "(your bridge / hold / store-transition freshness IS the acknowledgment)."
+        )
+    else:
+        reply_affordance = (
+            f'↳ Reply via dm_send( recipient="{persona}", body="<your reply>", '
+            f'reply_to="{msg_id}", thread_id="{thread_id}" )\n'
+            f'↳ {DM_STYLE_TAG}'
+        )
     reminder_body = (
-        f"PEER DM from {sender_label} (message_id {msg_id}, thread {thread_id}):\n\n"
+        f"{PEER_DM_FRAME_PREFIX}{sender_label} (message_id {msg_id}, thread {thread_id}):\n\n"
         f"{body}\n\n"
         f"{reply_affordance}"
     )
     return f"<system-reminder>\n{reminder_body}\n</system-reminder>"
+
+
+def is_injected_peer_dm( prompt ):
+    """
+    Is `prompt` an injected peer-DM (a build_peer_dm_reminder envelope delivered as
+    the turn's prompt via the listener's idle tmux-wake), rather than genuine USER
+    typing? (bug d0d7f068 Part 2 / option C.)
+
+    A peer-DM inject / arbiter tap was never USER re-engagement — so the Stop-hook
+    poke-cap reset (user_prompt_submit) must NOT treat it as such (that reset kept
+    reopening the poke budget on every inbound DM/tap, so the cap relief valve never
+    engaged). This predicate keys on the SHARED PEER_DM_FRAME_PREFIX (never a re-typed
+    literal — 46a17f5a). The frame sits inside the <system-reminder> wrapper, so it is
+    matched by SUBSTRING (mirrors the arbiter-poke ARBITER_POKE_SENTINEL match).
+
+    Requires:
+        - prompt is a string or None (foreign hook-payload data)
+
+    Ensures:
+        - Returns True iff prompt is a str containing PEER_DM_FRAME_PREFIX
+        - Returns False for None / non-string / genuine user prompts; never raises
+    """
+    if not isinstance( prompt, str ):
+        return False
+    return PEER_DM_FRAME_PREFIX in prompt
 
 
 def format_voice_context( messages ):
@@ -603,14 +889,7 @@ def enrich_voice_context( voice_ctx, messages=None ):
     if not _context_has_human_voice( messages ):
         # Pure peer-DM context (or no human voice) — no TTS-ack rider (§6a).
         return voice_ctx
-    return (
-        f"{voice_ctx}\n\n"
-        "IMPORTANT: You MUST acknowledge the user's voice message by sending "
-        "a high-priority notification via mcp__cosa-voice__notify() or "
-        "mcp__cosa-voice__converse() so the user receives immediate audio "
-        "feedback that their query is being attended to. Do NOT rely on "
-        "terminal text output alone — the user is not watching the terminal."
-    )
+    return f"{voice_ctx}\n\n{VOICE_ACK_RIDER}"
 
 
 def build_voice_deny_response( voice_ctx, messages=None ):
@@ -1018,7 +1297,8 @@ def get_turn_elapsed_seconds( session_id ):
 
 # ── Voice Buffer Functions ────────────────────────────────────────────────────
 
-SESSION_DIR = Path.home() / ".claude" / "sessions"
+# Row 8ccc20ab — derived from the one seam (see lib/sessions_dir.py).
+SESSION_DIR = sessions_dir()
 
 
 def get_buffer_path( session_id ):
@@ -1154,12 +1434,21 @@ def build_permission_decision( behavior, message=None, interrupt=False ):
 
 # ── Speakerphone Wrap (per-turn rider) ────────────────────────────────────────
 #
-# Per src/rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/14-phase5-hook-rider-design.md
-# (predecessor: src/rnd/v0.1.7/2026.04.30-conv-mode-three-layer-enforcement/01-design.md)
-# Phase 5b: wrap inbound text with a <system-reminder> rider on every turn.
-# Body varies by (tts_interaction_mode, speakerphone_on) per a 4-variant
-# matrix (solo+speaker / solo+phone / chorus+speaker / chorus+phone).
-# Sanitization at the boundary closes the prompt-injection escape vector
+# Per src/rnd/v0.1.9/2026.06.27-cosa-voice-rider-slim.md (Rick-approved
+# 2026-06-27; predecessors: .../2026.05.11-tts-interaction-mode-solo-chorus/
+# 14-phase5-hook-rider-design.md + .../2026.04.30-conv-mode-three-layer-
+# enforcement/01-design.md).
+#
+# The per-turn rider is now SLIM and UNCONDITIONAL: it carries only what is
+# true-now-and-changed (the live input modality + the one catastrophic rule,
+# the spoken-char reject cap) and points at the standing TTS contract that
+# lives once in the cosa-voice MCP server's `instructions` payload. The
+# predecessor 4-variant matrix — solo/chorus framing and speakerphone-state
+# branching — is dropped: speakerphone is assumed ON unconditionally (the
+# get_session_info speakerphone flag is unreliable; decision §0.3). No flag
+# reads, no branching.
+#
+# Sanitization at the boundary still closes the prompt-injection escape vector
 # (§2.4a of the predecessor design doc).
 
 # Markers stripped by sanitize_for_wrap to prevent user content from escaping
@@ -1168,9 +1457,47 @@ def build_permission_decision( behavior, message=None, interrupt=False ):
 _SANITIZE_MARKERS = ( "</voice-message", "<system-reminder" )
 
 # Sentinel substring used to detect already-wrapped strings for idempotency.
-# Appears in BOTH on-variant and off-variant rider bodies so the check is
-# universal across the 4-variant matrix.
-_SPEAKERPHONE_WRAP_SENTINEL = "This session has speakerphone mode"
+# The slim rider always contains this phrase, so the check is universal.
+_SPEAKERPHONE_WRAP_SENTINEL = "TTS contract ACTIVE"
+
+# Chars-per-word used to convert the server's CHARACTER reject cap into the WORD
+# budget the rider actually states (Rick, 2026-07-19: "LLMs suck at counting
+# characters, but they know what words are").
+#
+# 8.3 is DELIBERATELY PESSIMISTIC. Spoken English averages ~6 chars/word incl.
+# the space; budgeting at 8.3 means a compliant reply lands ~360 chars against a
+# 500-char cap — roughly 28% headroom. The asymmetry is intentional: overshooting
+# the char cap fails SILENTLY (the whole notify/ask is rejected and reads as the
+# assistant going mute), while undershooting merely costs a few words. Round the
+# error toward the recoverable side.
+#
+# Calibrated so the default cap (500) yields Rick's stated budget of 60 words.
+_SPOKEN_CHARS_PER_WORD = 8.3
+
+
+def spoken_word_budget( char_cap ):
+    """
+    Convert the server's spoken CHARACTER reject cap into a WORD budget.
+
+    The enforcement threshold is and remains CHARACTERS — this is the guidance
+    denomination only. It exists because the consumer of the rider (an LLM)
+    cannot reliably count characters but counts words well, so a char figure is
+    an unactionable instruction dressed as a precise one.
+
+    Deriving rather than hardcoding keeps the single-source invariant intact: if
+    cu.get_spoken_char_cap() ever moves, the stated word budget moves with it and
+    cannot silently drift into permitting a payload the server will reject.
+
+    Requires:
+        - char_cap is a positive number
+
+    Ensures:
+        - returns a positive int, floored at 1 (never a zero/negative budget)
+        - the budget is CONSERVATIVE: budget * average-real-chars-per-word stays
+          comfortably under char_cap (see _SPOKEN_CHARS_PER_WORD)
+        - never raises on a positive numeric input
+    """
+    return max( 1, int( char_cap / _SPOKEN_CHARS_PER_WORD ) )
 
 
 def sanitize_for_wrap( text ):
@@ -1205,40 +1532,14 @@ def sanitize_for_wrap( text ):
     return text[ :min( indices ) ]
 
 
-def _source_preamble( source ):
-    """
-    Build the source-attribution preamble for the rider — one sentence that
-    names where the input came from. Helpful for Claude's framing and for
-    transcript readability.
-
-    Requires:
-        - source is a string
-
-    Ensures:
-        - Returns a single-sentence string for known sources
-        - Returns empty string for unknown sources (defensive)
-
-    Args:
-        source: Which injection point the text came from
-
-    Returns:
-        str: Preamble sentence or empty string
-    """
-    if source == "voice":
-        return "The user spoke the above as a voice message from a distance."
-    if source == "terminal-typed":
-        return "The user typed the above at the terminal."
-    if source == "hook-idle-prompt":
-        return "The Stop hook fired the above as an idle-aware re-prompt."
-    if source == "hook-permission-prompt":
-        return "A permission-request hook synthesized the above prompt."
-    return ""
-
-
 def _brevity_rules():
     """
     The TTS brevity-rules block migrated from CLAUDE.md per Phase 5 of the
-    speakerphone refactor. Fires only when speakerphone_on=True (live TTS).
+    speakerphone refactor. Post rider-slim (2026-06-27) this is single-sourced
+    into the cosa-voice MCP server's `instructions` payload (the once-stated
+    § Speakerphone TTS Contract); it is no longer composed into the per-turn
+    rider, which now only points at that contract. Kept here so the rider, the
+    contract, and the caller-side enforcement guard all read ONE definition.
 
     Per ratified PIP S110 (Rick-approved, 2026-06-15): the spoken target is
     SENTENCE-based (max 3), NOT word/char COUNTING — LLMs count sentences
@@ -1277,8 +1578,10 @@ def _brevity_rules():
 def _routing_reminder():
     """
     The cosa-voice routing-reminder block migrated from CLAUDE.md per Phase 5
-    of the speakerphone refactor. Fires when speakerphone_on=True so the model
-    uses voice tools rather than the terminal-only AskUserQuestion fallback.
+    of the speakerphone refactor. Post rider-slim (2026-06-27) this is
+    single-sourced into the cosa-voice MCP server's `instructions` payload (the
+    once-stated § Speakerphone TTS Contract); it is no longer composed into the
+    per-turn rider. Kept here so the contract reads ONE definition.
 
     Ensures:
         - Returns a non-empty paragraph mapping interaction types to cosa-voice
@@ -1296,111 +1599,77 @@ def _routing_reminder():
     )
 
 
-def _speakerphone_reminder_body( source, mode, speakerphone_on ):
+def _speakerphone_reminder_body( source ):
     """
-    Build the per-turn rider body for the given (source, mode, speakerphone_on)
-    triple. The body is plain text — no wrapping <system-reminder> tags
-    (those are added by the caller).
+    Build the slim per-turn rider body for the given input source. The body is
+    plain text — no wrapping <system-reminder> tags (those are added by the
+    caller).
 
-    Per the Phase 5 design, the rider fires on every turn; content varies by
-    state, not whether it fires. Composition by variant:
+    Per src/rnd/v0.1.9/2026.06.27-cosa-voice-rider-slim.md (Rick-approved
+    2026-06-27): the rider carries ONLY what is true-now-and-changed — the live
+    input modality plus the one catastrophic rule (the spoken-char reject cap).
 
-    - Source preamble (1 sentence) — always
-    - Speakerphone state notice — always (ON: notify-after; OFF: no notify)
-    - Brevity rules — speakerphone_on=True only
-    - Routing reminder — speakerphone_on=True only
-    - Mode-specific monopoly notice — mode="solo" only
-    - Multi-voice notice — mode="chorus" and speakerphone_on=True only
+    BREVITY ACRONYMS PROMOTED TO BULLET 1 (Rick, 2026-07-19, direct order): the
+    rider previously stated the cap MECHANICALLY ("spoken ≤3 sentences AND ≤N
+    chars … cut to a headline") and never named the mandate the fleet is
+    actually drilled on. Rick: "What's missing? The entire notion of KISS 3LoL,
+    NoAA, etc." The acronyms now LEAD the list and carry the cap with them —
+    substitution, not addition, so the rider does not grow. The reject-cap fact
+    is KEPT on that same bullet deliberately: it is the one rule whose breach
+    fails SILENTLY (the whole notify is rejected, read as the assistant going
+    mute), so dropping it to seat the acronyms would trade a catastrophic
+    warning for a mnemonic. Acronym text mirrors the peer-DM/STT riders
+    (ac661631, bc2b5fe9) so all three surfaces read identically.
+    The full standing TTS contract lives once in the cosa-voice MCP server's
+    `instructions` payload, not repeated turn-to-turn. The predecessor
+    4-variant matrix (solo/chorus framing + speakerphone-state branching) is
+    dropped: speakerphone is assumed ON unconditionally (decision §0.2/§0.3 —
+    the get_session_info speakerphone flag is currently unreliable). No flag
+    reads, no branching — only the input-modality token is dynamic.
+
+    The named char cap is single-sourced from cu.get_spoken_char_cap() — the
+    SAME source the caller-side enforcement guard and the `instructions`
+    contract read — so the rider's number can never drift between surfaces.
 
     Requires:
         - source is one of: "voice", "terminal-typed",
           "hook-idle-prompt", "hook-permission-prompt"
-        - mode is "solo" or "chorus"
-        - speakerphone_on is a bool
 
     Ensures:
         - Returns a non-empty string body
         - Always contains the _SPEAKERPHONE_WRAP_SENTINEL substring
           (idempotency check rides on this invariant)
+        - The input-modality token is "voice(distance)" for source=="voice",
+          "typed" for every other source
 
     Args:
-        source:          Which injection point the text came from
-        mode:            Global TTS interaction mode
-        speakerphone_on: Per-session speakerphone state
+        source: Which injection point the text came from
 
     Returns:
-        str: System-reminder body text
+        str: System-reminder body text (the slim per-turn rider)
     """
-    parts = []
-
-    preamble = _source_preamble( source )
-    if preamble: parts.append( preamble )
-
-    if speakerphone_on:
-        parts.append(
-            "This session has speakerphone mode ON. After your response, call "
-            "`notify(message=<full text of your reply>, suppress_ding=True, "
-            "priority='high')` so the response is spoken aloud."
-        )
-        parts.append( _brevity_rules() )
-        parts.append( _routing_reminder() )
-    else:
-        # 2026-05-14 evening — reframed from "no notify required" (silent) to
-        # quiet-mode (demoted priority). User wants the historical record
-        # preserved with a small ding on arrival; TTS playback is suppressed.
-        # See src/rnd/v0.1.7/2026.05.14-per-session-dnd-toggle-and-slider-move.md
-        #
-        # 2026-05-15 PM — restored the `_SPEAKERPHONE_WRAP_SENTINEL` invariant.
-        # The OFF-variant body now leads with "This session has speakerphone
-        # mode OFF" so the sentinel ("This session has speakerphone mode")
-        # appears in both ON and OFF variants. Without this, the idempotency
-        # check in `speakerphone_wrap` mis-fired on OFF-wrapped strings and
-        # could double-wrap. Per session c1cbcd11 (Rio ⚡) post-doc-viewer
-        # regression-fix sweep.
-        parts.append(
-            "This session has speakerphone mode OFF — operating in QUIET mode "
-            "(per-session DND). The historical record matters — keep calling "
-            "`notify()` for milestones, errors, action-required prompts, and "
-            "the closing-turn summary — BUT use `priority='medium'` and "
-            "`suppress_ding=False` (NOT the standard `priority='high', "
-            "suppress_ding=True`). The user wants the small arrival ding "
-            "without full TTS playback. Detail still goes in the `abstract` "
-            "parameter (UI card rendering is unaffected by the priority "
-            "demotion). Blocking `ask_*` tools remain available — use them "
-            "with `priority='medium'` as well."
-        )
-
-    if mode == "solo":
-        if speakerphone_on:
-            parts.append(
-                "Solo mode: speakerphone is currently held by THIS session. If "
-                "another session activates speakerphone, you will be displaced "
-                "(the bridge flips and the next assistant turn should NOT "
-                "auto-narrate)."
-            )
-        else:
-            parts.append(
-                "Solo mode: speakerphone is held by another session, or by "
-                "none. Activating speakerphone here will displace any current "
-                "holder. Do NOT call `enable_speakerphone` on your own "
-                "initiative — USER-ONLY initiation rule."
-            )
-    elif mode == "chorus" and speakerphone_on:
-        parts.append(
-            "Chorus mode: other sessions may also be in speakerphone mode "
-            "simultaneously. Persona voices disambiguate at the listener's "
-            "ear; the TTS queue serializes playback."
-        )
-
-    return "\n\n".join( parts )
+    cap      = cu.get_spoken_char_cap()
+    words    = spoken_word_budget( cap )
+    modality = "voice(distance)" if source == "voice" else "typed"
+    return (
+        f"[turn-state] input={modality}\n"
+        "TTS contract ACTIVE — full rules in session instructions. This turn:\n"
+        f"• KISS · 3LoL · NoMC C2C · NoAA — verdict first, ≤3 sentences AND ≤{words} words; OVER = whole call REJECTED (silent fail). Longer ONLY WHEN ASKED\n"
+        "• after replying, call notify(message=<reply>, suppress_ding=True, priority='high')\n"
+        "• recraft for speech — no markdown/paths/JSON/URLs\n"
+        "• rich detail → abstract (not length-capped)\n"
+        "• questions → cosa-voice ask_yes_no / ask_multiple_choice / converse / ask_open_ended_batch — never AskUserQuestion\n"
+        "• ack receipt in 1 line before tool calls"
+    )
 
 
 def speakerphone_wrap( text, *, source, session_id=None ):
     """
-    Wrap inbound text with the per-turn speakerphone rider. The rider fires
-    on every turn — content varies by (tts_interaction_mode, speakerphone_on)
-    per the Phase 5 4-variant matrix (solo+speaker / solo+phone /
-    chorus+speaker / chorus+phone).
+    Wrap inbound text with the slim per-turn speakerphone rider. The rider
+    fires on every turn and is now UNCONDITIONAL — it no longer reads the
+    speakerphone flag or the interaction mode (decision §0.3 of the rider-slim
+    doc: the flag is unreliable, so speakerphone is assumed ON; only the input
+    modality is dynamic). See _speakerphone_reminder_body for the body.
 
     For source="voice", the output also includes a <voice-message> envelope
     describing voice INPUT properties (from-distance, priority, suppress-ding).
@@ -1413,7 +1682,7 @@ def speakerphone_wrap( text, *, source, session_id=None ):
     Idempotency: if the input already contains the wrapper sentinel, it is
     returned unchanged (safe to call multiple times on the same string).
 
-    Per src/rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/14-phase5-hook-rider-design.md.
+    Per src/rnd/v0.1.9/2026.06.27-cosa-voice-rider-slim.md.
 
     Requires:
         - text is a string
@@ -1426,14 +1695,13 @@ def speakerphone_wrap( text, *, source, session_id=None ):
 
     Ensures:
         - Returns text unchanged if text is empty, OR session_id is None or
-          empty (can't resolve session state → fail-closed pass-through)
+          empty (fail-closed pass-through)
         - Returns text unchanged if input already contains the wrapper
           sentinel (idempotency)
-        - Returns text unchanged if any error occurs reading the bridge or
-          the mode config (fail-closed — safer than wrapping on stale state)
+        - Returns text unchanged if any error occurs building the rider body
+          (fail-closed — safer than injecting a half-built rider)
         - Otherwise returns wrapped output: <voice-message> envelope (voice
-          source only) + sanitized content + <system-reminder> rider body
-          appropriate to the current (mode, speakerphone_on) tuple
+          source only) + sanitized content + <system-reminder> slim rider body
 
     Args:
         text:       Raw text being injected into Claude's input stream
@@ -1449,16 +1717,13 @@ def speakerphone_wrap( text, *, source, session_id=None ):
     if _SPEAKERPHONE_WRAP_SENTINEL in text: return text
 
     try:
-        from lupin_cli.claude_code.hooks.lib.session_bridge import get_speakerphone
-        speakerphone_on = get_speakerphone( session_id )
-        mode            = cu.get_tts_interaction_mode()
+        reminder_body = _speakerphone_reminder_body( source )
     except Exception:
-        # Fail-closed — any error reading bridge or mode config means pass
-        # through unwrapped (safer than wrapping based on possibly-stale state).
+        # Fail-closed — any error building the rider body means pass through
+        # unwrapped (safer than injecting a half-built rider).
         return text
 
-    clean         = sanitize_for_wrap( text )
-    reminder_body = _speakerphone_reminder_body( source, mode, speakerphone_on )
+    clean = sanitize_for_wrap( text )
 
     if source == "voice":
         return (
@@ -1563,11 +1828,10 @@ def speakerphone_reminder_block( source, session_id ):
     for callers that can only emit additionalContext rather than transform
     the user's input — e.g., the user_prompt_submit hook.
 
-    Per the Phase 5 design, the rider fires on every turn (when session_id
-    is resolvable); content varies by (mode, speakerphone_on) per the
-    4-variant matrix. This is NOT a gate on speakerphone_on=True any more
-    — that gating belonged to the predecessor three-layer-enforcement
-    design and has been superseded.
+    The rider fires on every turn (when session_id is resolvable) and is now
+    UNCONDITIONAL — it no longer reads the speakerphone flag or the interaction
+    mode (decision §0.3 of the rider-slim doc: speakerphone is assumed ON; only
+    the input modality is dynamic). See _speakerphone_reminder_body.
 
     Requires:
         - source is one of: "voice", "terminal-typed",
@@ -1575,10 +1839,10 @@ def speakerphone_reminder_block( source, session_id ):
         - session_id is a non-empty string OR None
 
     Ensures:
-        - Returns empty string if session_id missing or any error reading
-          bridge/mode config (fail-closed)
+        - Returns empty string if session_id missing or any error building the
+          rider body (fail-closed)
         - Returns formatted <system-reminder>…</system-reminder> block
-          otherwise — body chosen per the (mode, speakerphone_on) tuple
+          otherwise — the slim rider body for the given source
 
     Args:
         source:     Which injection point's reminder body to use
@@ -1590,13 +1854,10 @@ def speakerphone_reminder_block( source, session_id ):
     if not session_id: return ""
 
     try:
-        from lupin_cli.claude_code.hooks.lib.session_bridge import get_speakerphone
-        speakerphone_on = get_speakerphone( session_id )
-        mode            = cu.get_tts_interaction_mode()
+        body = _speakerphone_reminder_body( source )
     except Exception:
         return ""
 
-    body = _speakerphone_reminder_body( source, mode, speakerphone_on )
     return f'<system-reminder>\n{body}\n</system-reminder>'
 
 
@@ -1604,7 +1865,7 @@ def speakerphone_reminder_block( source, session_id ):
 
 if __name__ == "__main__":
 
-    print( f"LOGS_DIR:  {LOGS_DIR}" )
+    print( f"LOGS_DIR:  {_logs_dir()}" )
     print( f"TTS enabled: {is_tts_enabled()}" )
     print( f"Target email: {get_target_email()}" )
     print( f"Timestamp: {get_timestamp()}" )
@@ -1612,7 +1873,7 @@ if __name__ == "__main__":
     # Test logging
     test_payload = { "test": True, "session_id": "smoke-test" }
     log_payload( "smoke_test", test_payload )
-    print( f"Log written to: {LOGS_DIR}/smoke_test-*.json" )
+    print( f"Log written to: {_logs_dir()}/smoke_test-*.json" )
 
     # Test emit
     print( "\nEmit test:" )

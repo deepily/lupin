@@ -1,8 +1,12 @@
-# Branch PR and Merge Workflow
+# Branch PR and Merge Workflow for Lupin Project
 
 **Project**: Lupin
 **Prefix**: [LUPIN]
 **Version**: 1.0
+
+---
+
+> **⚠️ Note**: This command's canonical workflow uses cosa-voice notifications and has destructive-or-shared-state gates (push, merge, force-push). In conversation mode (`get_session_info().conversation_mode_active=true`), each gate is a voice gate; the **TTS Brevity Mandate** applies — speak the PR title only, full body and diff stats stay in `abstract` and the terminal reply. Destructive operations require explicit voice confirmation, never silent default. See `workflow/cosa-voice-integration.md` §Conversation Mode for full rules.
 
 ---
 
@@ -14,6 +18,7 @@
    - **[SHORT_PROJECT_PREFIX]**: [LUPIN]
    - **History file**: /mnt/DATA01/include/www.deepily.ai/projects/lupin/history.md
    - **TODO file**: /mnt/DATA01/include/www.deepily.ai/projects/lupin/TODO.md
+   - **README file**: /mnt/DATA01/include/www.deepily.ai/projects/lupin/README.md
    - **Base branch**: main
    - **Branch naming pattern**: `wip-v{version}-{date}-{description}`
    - Do NOT proceed without these parameters
@@ -43,32 +48,10 @@ Invoked when ready to complete a feature branch, create a PR, and transition to 
 
 ---
 
-## What This Command Does
-
-1. **Pre-PR Verification**:
-   - Session documentation check (uncommitted work warning)
-   - Documentation surface check (README, CLAUDE.md)
-   - Branch state audit (commits since base)
-   - Test suite verification (unit, smoke, integration)
-   - Outstanding work review (TODO.md, bug-fix-queue)
-
-2. **PR Creation**:
-   - Generate PR description from branch history
-   - Create PR via `gh pr create`
-   - Push branch if needed
-
-3. **Post-Merge Transition**:
-   - Wait for merge (blocking notification)
-   - Sync local main
-   - Cleanup merged branch
-   - Tag release (optional)
-   - Create next development branch
-
----
-
 ## Notes
 
 This slash command is a **reference wrapper** that reads the canonical workflow document on every invocation. This ensures:
 - Always up-to-date implementation when canonical doc is improved
 - Single source of truth for the branch completion workflow
-- Demonstrates the deterministic wrapper pattern
+- Demonstrates the workflow pattern for other projects
+- This file serves as a working example for other repos

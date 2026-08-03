@@ -36,6 +36,7 @@ if _src_path not in sys.path:
 
 from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob
 from cosa.agents.heartbeat_arbiter.arbiter_gateway import LupinArbiterGateway
+from lupin_cli.claude_code.hooks.lib.heartbeat_hold import read_hold   # 6929f4ac outward-twin backstop
 import cosa.utils.util as cu   # EST timestamps (project canonical US/Eastern)
 
 
@@ -87,6 +88,7 @@ def main():
         manager_recipient       = args.manager,
         alive_threshold_seconds = args.alive,
         quiet_threshold_seconds = args.quiet,
+        hold_reader_fn          = read_hold,            # 6929f4ac: outward-twin backstop (dark-session gate → Rick)
         notify_fn               = _log,
     )
 

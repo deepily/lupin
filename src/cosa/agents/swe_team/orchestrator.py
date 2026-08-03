@@ -44,6 +44,43 @@ from .test_runner import run_pytest, TestRunResult
 from .mock_clients import MockAgentSDKSession
 from .hooks import build_can_use_tool, post_tool_hook, notification_hook, wrap_prompt_for_streaming
 from .state_files import FeatureList, ProgressLog
+from cosa.agents.utils.voice_io import read_gate_answer
+
+# Transport budget for out-of-process HTTP calls to `:7999` (row 204911ca).
+# ~30s = 1.60x the observed maximum reload window of 18.76s — a multiplier with
+# explicit headroom, NOT a coverage guarantee. `:7999` runs `uvicorn --reload`
+# and the reloader parent holds the listening socket across a restart, so the
+# kernel ACCEPTS a request nothing is there to answer and the caller hangs
+# instead of getting a fast ConnectionRefused. The prior 5s failed every reload
+# it landed in (measured n=143: min 6.59s, median 6.91s, max 18.76s).
+#
+# 🔴 WHY THIS MODULE IS EXPOSED — an earlier pass excluded it, twice. Reached
+# via `agentic_job_factory.py:135` -> `SweTeamJob` it runs in the CJ Flow
+# agentic pool INSIDE `:7999`, where a reload tears the caller down alongside
+# the callee and a bigger budget buys nothing. That exclusion was verified by
+# asking which OTHER package imports this module — the one question that cannot
+# see this package's own entry point. `swe_team/__main__.py` imports
+# SweTeamOrchestrator directly and runs it under `python -m cosa.agents.swe_team`,
+# in a SEPARATE OS process. Exposure is a property of the INVOCATION, not of the
+# call site; any package with a `__main__.py` is dual-mode by construction and
+# must be classified per entry point.
+#
+# Full derivation: src/rnd/v0.1.9/2026.07.19-dev-server-reload-availability.md §9(a).
+#
+# 🔴 DRIFT CONTROL — TWO SEARCHES, AND IT TOOK BOTH.
+# `grep -rn _SERVER_TRANSPORT_TIMEOUT_SECONDS` returns every DIRECT call site.
+# It does NOT return members whose budget is carried in a Pydantic FIELD rather
+# than passed at the call — `AsyncNotificationRequest( timeout=… )`, consumed at
+# `notify_user_async.py:197-201` as a bare `requests.post( timeout=request.timeout )`.
+# Two such members were missed on the first pass for exactly this reason.
+# The second search is: `grep -rn "AsyncNotificationRequest(" -A14 | grep timeout`.
+# Run BOTH, or the set you get back is the set the first grep can see.
+#
+# TRADE: a hung server now stalls these best-effort notifications ~30s instead
+# of ~5s. All three sites are already wrapped in broad excepts and are non-fatal,
+# so the cost lands as latency, never as a failed run. Not free.
+_SERVER_TRANSPORT_TIMEOUT_SECONDS = 30
+
 
 # SDK imports — graceful fallback
 try:
@@ -384,7 +421,7 @@ class SweTeamOrchestrator:
                 "abstract"          : abstract,
                 "sender_id"         : f"claude.code@swe-team#{self.job_id}" if self.job_id else "claude.code@swe-team",
                 "target_user"       : self._user_email,
-            }, timeout=5 )
+            }, timeout=_SERVER_TRANSPORT_TIMEOUT_SECONDS )
 
         except Exception as e:
             logger.warning( f"Circuit breaker alert notification failed (non-fatal): {e}" )
@@ -411,7 +448,7 @@ class SweTeamOrchestrator:
 
             # Fetch current batch ID from the proxy batch-id endpoint
             base_url = f"http://localhost:{os.environ.get( 'LUPIN_PORT', '7999' )}"
-            batch_resp = http_requests.get( f"{base_url}/api/proxy/batch-id", timeout=5 )
+            batch_resp = http_requests.get( f"{base_url}/api/proxy/batch-id", timeout=_SERVER_TRANSPORT_TIMEOUT_SECONDS )
             batch_data = batch_resp.json()
             batch_id   = batch_data.get( "batch_id", None )
 
@@ -450,7 +487,7 @@ class SweTeamOrchestrator:
                         "question"      : question[ :100 ],
                         "pending_count" : count,
                     }
-                }, timeout=5 )
+                }, timeout=_SERVER_TRANSPORT_TIMEOUT_SECONDS )
             except Exception:
                 pass  # WebSocket broadcast is best-effort
 
@@ -987,7 +1024,14 @@ Keep your response concise (3-5 sentences). Output ONLY the analysis, no preambl
                             )
 
                             # Process escalation response
-                            escalation_choice = escalation.get( "answers", {} ).get( "Escalation", "Continue to next task" )
+                            # Was: an absent answer became "Continue to next task",
+                            # silently skipping a task that had already failed every
+                            # verification retry. Behaviour preserved, but now the
+                            # caller declares it and each use is logged. Row 2b604cdb.
+                            escalation_choice = read_gate_answer(
+                                escalation, "Escalation", "SWE escalation gate",
+                                unattended_default="Continue to next task"
+                            )
 
                             if escalation_choice == "Stop and get help":
                                 self._stop_requested = True

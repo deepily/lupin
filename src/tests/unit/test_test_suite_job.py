@@ -5,6 +5,7 @@ Tests job creation, configuration, pytest output parsing, state transitions,
 dry run mode, and voice_io integration.
 """
 
+import os
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
@@ -18,8 +19,62 @@ from cosa.rest.job_state import JobState
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Shared stubs
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Bug d8a23fca. Patching `job.cu.get_project_root` does NOT scope to job.py — `cu`
+# is the shared `cosa.utils.util` module object, so the patch rewrites project-root
+# resolution for every consumer in the process. do_all() then reaches
+# _preflight_assert_exclusive_test_db, which lazily imports lupin_app.main, whose
+# module-level ConfigurationManager resolves lupin-app.ini under the mocked tmpdir
+# and dies with "That file doesn't exist".
+#
+# It only bites where the engine IS lupin_db_test: off the test DB the preflight
+# returns before the import, so on the dev host these tests pass having never
+# executed the branch at all. Their green there was vacuous, not sound — and inside
+# the container four of the six were ALSO green, masked by an earlier test importing
+# lupin_app.main under the real root. Run alone, all six fail.
+#
+# The preflight has its own six tests (TestPreflightExclusivity), so a do_all() test
+# that only needs the io_base pin stubs it — the idiom
+# test_preflight_fires_before_first_suite already uses. `new` is given explicitly, so
+# no extra mock argument is injected and signatures stay put.
+_stub_preflight = patch.object(
+    TestSuiteJob, "_preflight_assert_exclusive_test_db", lambda self: None
+)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Fixtures
 # ═══════════════════════════════════════════════════════════════════════════════
+
+@pytest.fixture( autouse=True )
+def _isolate_artifact_root( tmp_path, monkeypatch ):
+    """
+    Every test in this module writes tier artifacts under a tmp root. AUTOUSE, and
+    that is the load-bearing word.
+
+    ROW fd0cd863. This module exercises the real `_run_suite` / `_write_stdout_log`
+    paths, and those wrote into the LIVE artifact directory. Measured in the running
+    test container 2026-07-27:
+
+        /tmp/integration-latest.log  ->  line-1 line-2 line-3 line-4 line-5 line-6
+        /tmp/unit-20260727-185252.log -> "first run"
+
+    Fixture strings, sitting in the path a human triaging a scheduled run opens, with
+    a plausible timestamped filename and a correctly-rotated symlink. Not absent —
+    present and WRONG, which is the worse polarity: absence prompts a question, a
+    convincing wrong answer ends one.
+
+    ⛔ AUTOUSE RATHER THAN PER-TEST, DELIBERATELY. One test here already redirected
+    `_LOG_SYMLINKS` by hand and was still writing the real log file, because the
+    symlink and the file were separately configurable. An opt-in fixture has the same
+    shape as that partial fix and as the `_PG_ISOLATION_MODULES` allowlist deleted on
+    2026-07-27: every test added later is un-isolated by default and nothing says so.
+    Autouse inverts the default, so a new test cannot reach the live path by omission.
+    """
+    monkeypatch.setattr( TestSuiteJob, "_ARTIFACT_DIR", str( tmp_path ) )
+
 
 @pytest.fixture
 def job():
@@ -302,6 +357,7 @@ class TestStateTransitions:
         """New job should be PENDING."""
         assert job.state == JobState.PENDING
 
+    @_stub_preflight
     @patch( "cosa.agents.test_suite.job.cu.get_project_root" )
     @patch( "cosa.agents.test_suite.job.TestSuiteJob._run_suite" )
     @patch( "cosa.agents.test_suite.voice_io" )
@@ -330,6 +386,7 @@ class TestStateTransitions:
         assert job.answer_conversational is not None
         assert job.error is None
 
+    @_stub_preflight
     @patch( "cosa.agents.test_suite.job.cu.get_project_root" )
     @patch( "cosa.agents.test_suite.job.TestSuiteJob._run_suite" )
     @patch( "cosa.agents.test_suite.voice_io" )
@@ -492,6 +549,7 @@ class TestVoiceIOIntegration:
 class TestArtifacts:
     """Tests for artifact population after execution."""
 
+    @_stub_preflight
     @patch( "cosa.agents.test_suite.job.cu.get_project_root" )
     @patch( "cosa.agents.test_suite.job.TestSuiteJob._run_suite" )
     @patch( "cosa.agents.test_suite.voice_io" )
@@ -535,6 +593,7 @@ class TestArtifacts:
         assert cost[ "total_passed" ] == 20  # 10 per suite * 2 suites
         assert cost[ "total_failed" ] == 4   # 2 per suite * 2 suites
 
+    @_stub_preflight
     @patch( "cosa.agents.test_suite.job.cu.get_project_root" )
     @patch( "cosa.agents.test_suite.job.TestSuiteJob._run_suite" )
     @patch( "cosa.agents.test_suite.voice_io" )
@@ -618,7 +677,12 @@ class TestSyntheticFailureRecords:
         # Captured stdout tail survives the terminate()
         assert "line-" in fd[ 0 ][ "traceback" ]
         # Log file was actually written
-        assert result[ "log_path" ] and result[ "log_path" ].startswith( "/tmp/integration-" )
+        # Asserted against the ISOLATED root, not "/tmp/". The old form pinned the
+        # literal live directory — so it passed only while this test was polluting it,
+        # and it went red the moment the pollution stopped. An assertion that requires
+        # the defect in order to pass is not a guard; it is the defect's alibi.
+        assert result[ "log_path" ]
+        assert result[ "log_path" ].startswith( os.path.join( str( tmp_path ), "integration-" ) )
 
     def test_exception_populates_failure_details( self, single_suite_job, tmp_path, monkeypatch ):
         """Exception branch must return errors=1 (not 0) + one synthetic failure_details entry."""
@@ -650,9 +714,18 @@ class TestSyntheticFailureRecords:
         import pathlib
         from cosa.agents.test_suite.job import TestSuiteJob
 
-        # Redirect _LOG_SYMLINKS to a tmp location so the test doesn't stomp /tmp/unit-latest.log
+        # Redirect the ARTIFACT ROOT, not just the symlink map.
+        #
+        # This test used to monkeypatch _LOG_SYMLINKS alone, which moved the symlink and
+        # left `actual_log` hardcoded at /tmp/ — so every run wrote a real
+        # /tmp/unit-<timestamp>.log containing "first run" into the live artifact
+        # directory the scheduled tier and its human triager both read. Found 2026-07-27
+        # (row fd0cd863) with "first run" sitting in the container's /tmp.
+        #
+        # Patching _ARTIFACT_DIR moves the log file, the symlink and the junit XML
+        # together, because they all derive from it now. There is nothing left to forget.
+        monkeypatch.setattr( TestSuiteJob, "_ARTIFACT_DIR", str( tmp_path ) )
         link = tmp_path / "unit-latest.log"
-        monkeypatch.setattr( TestSuiteJob, "_LOG_SYMLINKS", { "unit": str( link ) } )
 
         path1 = TestSuiteJob._write_stdout_log( "unit", "first run\n" )
         assert path1 is not None
@@ -678,7 +751,10 @@ class TestAllExpansion:
 
     def test_all_components_order( self ):
         """Canonical pyramid order: unit → smoke → websocket → integration → e2e."""
-        assert ALL_SUITE_COMPONENTS == [ "unit", "smoke", "websocket", "integration", "e2e" ]
+        # "typescript" joined the pyramid 2026-07-21 (row 36e479ed, Rick's ruling on
+        # gate 07a5460d). Before that, `all` ran every Python tier and silently
+        # skipped the entire TypeScript suite.
+        assert ALL_SUITE_COMPONENTS == [ "unit", "typescript", "smoke", "websocket", "integration", "e2e" ]
 
     def test_expand_all_fans_out( self ):
         assert _expand_all( [ "all" ] ) == ALL_SUITE_COMPONENTS
@@ -824,3 +900,314 @@ class TestJunitFlagGating:
         """Empty-string path treated same as None (non-pytest suites)."""
         result = TestSuiteJob._parse_junit_xml( "" )
         assert result == { "passed": 0, "failed": 0, "skipped": 0, "errors": 0 }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Between-suites DB-reset orchestration (bug 8bd20375)
+#
+# The merge-gate sweep runs suites back-to-back on ONE shared :8000 DB. Without
+# a reset at the seam, the earlier suite's residue (refresh_tokens; e2e→integration
+# "Token already exists" flood) poisons the later suite's auth fixtures. A literal
+# container bounce is impossible from INSIDE the sweep job (self-kill), so the
+# equivalent isolation is an in-job DB hard-reset invoked BETWEEN suites only.
+# These tests pin condition 2 of Tiberius's ruling: the reset fires in every gap,
+# NEVER before the first suite, NEVER after the last, NEVER for a single-suite run.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestBetweenSuiteResetBoundaries:
+    """Pure semantics of the between-suites reset seam — proves not-after-last
+    + single-suite-skip without a DB or container."""
+
+    def test_empty_suite_list_has_no_reset( self ):
+        assert TestSuiteJob._between_suite_pairs( [ ] ) == [ ]
+
+    def test_single_suite_skips_reset( self ):
+        # one suite = zero gaps = zero resets (single-suite-skip)
+        assert TestSuiteJob._between_suite_pairs( [ "integration" ] ) == [ ]
+
+    def test_pair_resets_once_between_the_two( self ):
+        pairs = TestSuiteJob._between_suite_pairs( [ "e2e", "integration" ] )
+        assert pairs == [ ( "e2e", "integration" ) ]
+
+    def test_full_pyramid_resets_in_every_gap_never_after_last( self ):
+        suites = list( ALL_SUITE_COMPONENTS )   # unit, smoke, websocket, integration, e2e
+        pairs  = TestSuiteJob._between_suite_pairs( suites )
+        # exactly one reset per gap → N-1 resets
+        assert len( pairs ) == len( suites ) - 1
+        # each pair is an adjacent (prev, next) in original order
+        assert pairs == [ ( suites[ i - 1 ], suites[ i ] ) for i in range( 1, len( suites ) ) ]
+        # NEVER a reset AFTER the last suite: the last suite never opens a gap
+        assert all( prev != suites[ -1 ] for prev, _ in pairs )
+
+
+class TestSweepResetsBetweenSuites:
+    """The sweep loop invokes _reset_state_between_suites in each between-suite
+    gap — proven by call ORDER (interleaved), not merely count."""
+
+    _CANNED = {
+        "passed"    : 1,
+        "failed"    : 0,
+        "skipped"   : 0,
+        "errors"    : 0,
+        "exit_code" : 0,
+        "log_path"  : None,
+        "duration"  : 0.1,
+    }
+
+    @_stub_preflight
+    @patch( "cosa.agents.test_suite.job.cu.get_project_root" )
+    @patch( "cosa.agents.test_suite.voice_io" )
+    def test_reset_fires_between_suites_in_order( self, mock_voice_io, mock_root, job, tmp_path ):
+        """job fixture = ["integration","e2e"] → exactly ONE reset, and it lands
+        AFTER integration's run and BEFORE e2e's run (interleaved at the gap)."""
+        mock_root.return_value    = str( tmp_path )
+        mock_voice_io.reconfigure = MagicMock()
+        mock_voice_io.set_job_id  = MagicMock()
+        mock_voice_io.clear_job_id = MagicMock()
+        mock_voice_io.notify      = AsyncMock()
+
+        order = [ ]
+        def _run( suite_type, project_root ):
+            order.append( f"run:{suite_type}" )
+            return dict( self._CANNED )
+        def _reset( prev, nxt ):
+            order.append( f"reset:{prev}->{nxt}" )
+
+        with patch.object( TestSuiteJob, "_run_suite", side_effect=_run ), \
+             patch.object( TestSuiteJob, "_reset_state_between_suites", side_effect=_reset, create=True ):
+            job.do_all()
+
+        assert order == [ "run:integration", "reset:integration->e2e", "run:e2e" ]
+
+    @_stub_preflight
+    @patch( "cosa.agents.test_suite.job.cu.get_project_root" )
+    @patch( "cosa.agents.test_suite.voice_io" )
+    def test_single_suite_never_resets( self, mock_voice_io, mock_root, single_suite_job, tmp_path ):
+        """A single-suite run has no gap → the reset must never fire."""
+        mock_root.return_value    = str( tmp_path )
+        mock_voice_io.reconfigure = MagicMock()
+        mock_voice_io.set_job_id  = MagicMock()
+        mock_voice_io.clear_job_id = MagicMock()
+        mock_voice_io.notify      = AsyncMock()
+
+        with patch.object( TestSuiteJob, "_run_suite", return_value=dict( self._CANNED ) ), \
+             patch.object( TestSuiteJob, "_reset_state_between_suites", create=True ) as spy_reset:
+            single_suite_job.do_all()
+
+        spy_reset.assert_not_called()
+
+
+class TestResetStateBetweenSuitesBody:
+    """The reset body (bug 8bd20375): truncates residue ONLY on lupin_db_test,
+    NO-OPs off the test DB (dev-data safety), and never raises."""
+
+    @staticmethod
+    def _mock_engine( url ):
+        conn = MagicMock()
+        executed = [ ]
+        conn.execute.side_effect = lambda stmt: executed.append( str( stmt ) )
+        cm = MagicMock()
+        cm.__enter__.return_value = conn
+        cm.__exit__.return_value  = False
+        engine = MagicMock()
+        engine.url            = url
+        engine.begin.return_value = cm
+        return engine, executed
+
+    def test_truncates_and_deletes_on_test_db( self, job ):
+        """On lupin_db_test: non-protected users DELETEd + residue TRUNCATEd,
+        and refresh_tokens is in the truncate — the flood-killing residue."""
+        engine, executed = self._mock_engine( "postgresql://u@h/lupin_db_test" )
+        with patch( "cosa.rest.db.database.engine", engine ):
+            job._reset_state_between_suites( "e2e", "integration" )
+        joined = " ".join( executed )
+        assert "DELETE FROM users WHERE NOT is_protected" in joined
+        assert "TRUNCATE TABLE" in joined
+        assert "refresh_tokens" in joined
+        engine.begin.assert_called_once()
+
+    def test_skips_off_test_db_no_destructive_op( self, job ):
+        """Against a NON-test DB (e.g. dev), the reset must NOT open a
+        transaction or execute anything — dev-data safety."""
+        engine, executed = self._mock_engine( "postgresql://u@h/lupin_db_dev" )
+        with patch( "cosa.rest.db.database.engine", engine ):
+            job._reset_state_between_suites( "e2e", "integration" )
+        engine.begin.assert_not_called()
+        assert executed == [ ]
+
+    def test_reset_failure_is_non_fatal( self, job ):
+        """A DB error during the reset is swallowed (logged) — it must never
+        abort the surrounding sweep; the per-test clean_test_db is the backstop."""
+        engine = MagicMock()
+        engine.url = "postgresql://u@h/lupin_db_test"
+        engine.begin.side_effect = RuntimeError( "connection refused" )
+        with patch( "cosa.rest.db.database.engine", engine ):
+            # Must not raise
+            job._reset_state_between_suites( "e2e", "integration" )
+
+
+class TestPreflightAssertExclusiveTestDb:
+    """The sweep-start exclusivity preflight (bug caf58f71 — concurrent-writer
+    contamination). Fails LOUD if a non-test agentic job is inflight on the shared
+    lupin_db_test; NO-OPs off the test DB or when the running queue is unreachable."""
+
+    @staticmethod
+    def _test_engine():
+        engine     = MagicMock()
+        engine.url = "postgresql://u@h/lupin_db_test"
+        return engine
+
+    @staticmethod
+    def _install_main( jobs_run_queue="__unset__" ):
+        """Return a patch.dict context injecting fake lupin_app / lupin_app.main
+        into sys.modules. jobs_run_queue: '__unset__' → attr absent (AttributeError
+        path); None → attribute present but None; None-module → ImportError path;
+        any object → that queue."""
+        import sys, types
+        fake_pkg  = types.ModuleType( "lupin_app" )
+        if jobs_run_queue == "__import_error__":
+            fake_pkg.main = None
+            return patch.dict( sys.modules, { "lupin_app": fake_pkg, "lupin_app.main": None } )
+        fake_main = types.ModuleType( "lupin_app.main" )
+        if jobs_run_queue != "__unset__":
+            fake_main.jobs_run_queue = jobs_run_queue
+        fake_pkg.main = fake_main
+        return patch.dict( sys.modules, { "lupin_app": fake_pkg, "lupin_app.main": fake_main } )
+
+    def test_off_test_db_is_noop( self, job ):
+        """Off lupin_db_test (e.g. a sweep aimed at :7999 dev) the preflight must
+        NOT raise and must never consult the running queue."""
+        engine     = MagicMock()
+        engine.url = "postgresql://u@h/lupin_db_dev"
+        with patch( "cosa.rest.db.database.engine", engine ):
+            job._preflight_assert_exclusive_test_db()   # must not raise
+
+    def test_import_error_is_noop( self, job ):
+        """On the test DB but the running-queue module import fails → logged
+        NO-OP, never a raise."""
+        with patch( "cosa.rest.db.database.engine", self._test_engine() ), \
+             self._install_main( jobs_run_queue="__import_error__" ):
+            job._preflight_assert_exclusive_test_db()   # must not raise
+
+    def test_missing_attribute_is_noop( self, job ):
+        """Module present but jobs_run_queue attribute absent → AttributeError
+        path → logged NO-OP."""
+        with patch( "cosa.rest.db.database.engine", self._test_engine() ), \
+             self._install_main():   # attr unset
+            job._preflight_assert_exclusive_test_db()   # must not raise
+
+    def test_none_queue_is_noop( self, job ):
+        """jobs_run_queue present but None (server not yet initialised) → NO-OP."""
+        with patch( "cosa.rest.db.database.engine", self._test_engine() ), \
+             self._install_main( jobs_run_queue=None ):
+            job._preflight_assert_exclusive_test_db()   # must not raise
+
+    def test_no_offenders_passes( self, job ):
+        """A clean pool (no non-test inflight jobs) → preflight passes, no raise,
+        and the sweep's own id_hash is excluded from the query."""
+        fake_queue = MagicMock()
+        fake_queue.get_non_test_inflight_agentic_jobs.return_value = [ ]
+        with patch( "cosa.rest.db.database.engine", self._test_engine() ), \
+             self._install_main( jobs_run_queue=fake_queue ):
+            job._preflight_assert_exclusive_test_db()   # must not raise
+        fake_queue.get_non_test_inflight_agentic_jobs.assert_called_once_with(
+            exclude_id_hash=job.id_hash
+        )
+
+    def test_offenders_raise_loud( self, job ):
+        """A non-test inflight writer → RuntimeError naming the offender(s) and
+        the bug id, aborting the sweep before any suite runs."""
+        fake_queue = MagicMock()
+        fake_queue.get_non_test_inflight_agentic_jobs.return_value = [
+            { "id_hash": "dr-abc123", "job_type": "deep_research" }
+        ]
+        with patch( "cosa.rest.db.database.engine", self._test_engine() ), \
+             self._install_main( jobs_run_queue=fake_queue ):
+            with pytest.raises( RuntimeError ) as exc:
+                job._preflight_assert_exclusive_test_db()
+        msg = str( exc.value )
+        assert "caf58f71" in msg
+        assert "dr-abc123" in msg
+        assert "deep_research" in msg
+
+    @patch( "cosa.agents.test_suite.job.cu.get_project_root" )
+    @patch( "cosa.agents.test_suite.voice_io" )
+    def test_preflight_fires_before_first_suite( self, mock_voice_io, mock_root, single_suite_job, tmp_path ):
+        """The preflight is called at sweep start — BEFORE any suite runs. A
+        loud-fail must abort the run (job FAILED) with no _run_suite call."""
+        mock_root.return_value     = str( tmp_path )
+        mock_voice_io.reconfigure  = MagicMock()
+        mock_voice_io.set_job_id   = MagicMock()
+        mock_voice_io.clear_job_id = MagicMock()
+        mock_voice_io.notify       = AsyncMock()
+
+        order = [ ]
+        def _preflight( self ):
+            order.append( "preflight" )
+            raise RuntimeError( "Merge-gate sweep preflight FAILED (bug caf58f71): offenders" )
+        def _run( self, suite_type, project_root ):
+            order.append( f"run:{suite_type}" )
+            return { "passed": 1, "failed": 0, "skipped": 0, "errors": 0,
+                     "exit_code": 0, "log_path": None, "duration": 0.1 }
+
+        with patch.object( TestSuiteJob, "_preflight_assert_exclusive_test_db", _preflight, create=True ), \
+             patch.object( TestSuiteJob, "_run_suite", _run ):
+            with pytest.raises( RuntimeError ):
+                single_suite_job.do_all()
+
+        assert order == [ "preflight" ]   # aborted before the first suite
+        assert single_suite_job.state == JobState.FAILED
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Artifact-root creation (regression from 11ba6a1b — ts-102267b8 died on it)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestArtifactRootIsCreated:
+    """
+    🔴 THE CASE THE ISOLATION FIXTURE STRUCTURALLY CANNOT PRODUCE.
+
+    `_isolate_artifact_root` pins `_ARTIFACT_DIR` to pytest's `tmp_path` — **which
+    already exists**. So every test in this module wrote into a live directory, and the
+    whole suite stayed green while production died on the first real run:
+
+        FileNotFoundError: /var/lupin/io/test-suite/artifacts/unit-20260727-201637.log
+        job.py:1182  _write_stdout_log        (ts-102267b8, dead at 311s)
+
+    `/tmp` always existed, so no writer ever needed a mkdir. Moving the root to
+    `io/test-suite/artifacts/` replaced a path that is always there with one that must
+    be created — **the change that passes every unit test.**
+
+    ⇒ These tests point the root at a path that does NOT exist. That is the only way
+    the harness stops supplying what production doesn't.
+    """
+
+    def test_write_stdout_log_CREATES_a_missing_artifact_root( self, tmp_path, monkeypatch ):
+        import pathlib
+        missing = tmp_path / "does" / "not" / "exist"
+        assert not missing.exists(), "precondition: the root must be ABSENT, or this proves nothing"
+        monkeypatch.setattr( TestSuiteJob, "_ARTIFACT_DIR", str( missing ) )
+
+        path = TestSuiteJob._write_stdout_log( "unit", "hello\n" )
+
+        assert path is not None
+        assert pathlib.Path( path ).read_text() == "hello\n"
+        assert pathlib.Path( missing / "unit-latest.log" ).resolve() == pathlib.Path( path ).resolve()
+
+    def test_run_suite_RETURNS_its_error_dict_when_the_root_is_missing( self, single_suite_job, tmp_path, monkeypatch ):
+        """
+        The second half: `_write_stdout_log` raised on the main path AND again inside
+        `_run_suite`'s except handler, so the exception ESCAPED rather than returning the
+        error dict. A handler that re-invokes what just failed turns one failure into an
+        escape — and an escaped exception loses the whole result, the `8b93bcf5` family.
+        """
+        script = tmp_path / "src" / "tests" / "run-integration-tests.sh"
+        script.parent.mkdir( parents=True )
+        script.write_text( "#!/usr/bin/env bash\necho hi\n" )
+        script.chmod( 0o755 )
+        monkeypatch.setattr( TestSuiteJob, "_ARTIFACT_DIR", str( tmp_path / "absent" / "root" ) )
+
+        result = single_suite_job._run_suite( "integration", str( tmp_path ) )   # must NOT raise
+
+        assert isinstance( result, dict )
+        assert "log_path" in result

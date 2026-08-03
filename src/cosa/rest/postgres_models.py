@@ -19,7 +19,8 @@ from sqlalchemy import (
     Text,
     Index,
     CheckConstraint,
-    func
+    func,
+    text
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB, INET
 from sqlalchemy.orm import DeclarativeBase, relationship, Mapped, mapped_column
@@ -604,6 +605,16 @@ class Notification( Base ):
         DateTime( timezone=True ),
         nullable=True
     )
+    # The late-answer handback mark. Simultaneously the "owed" flag and the
+    # don't-deliver-twice guard: a row is owed a handback iff it was an answered
+    # ask that has not yet been confirmed-received. RECEIPT-gated — set only by
+    # the three setters in the §4.3 contract (a woken SSE waiter, the §4.4 pull
+    # ack, or a §4.5 re-attach land), NEVER by a send signal or an emit attempt.
+    # See src/rnd/v0.1.9/2026.08.01-late-answer-handback.md §4.1.
+    answer_delivered_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime( timezone=True ),
+        nullable=True
+    )
     expires_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime( timezone=True ),
         nullable=True
@@ -666,6 +677,18 @@ class Notification( Base ):
         Index( 'idx_notifications_state', 'state' ),
         Index( 'idx_notifications_created_at', 'created_at' ),
         Index( 'idx_notifications_sender_recipient', 'sender_id', 'recipient_id' ),
+        # Partial index over the answer-owed set — the one reader is §4.4's
+        # get_answers_owed_for_persona query. Declared here as the schema of
+        # record so `alembic autogenerate` does not report phantom drift
+        # (schema_drift.py checks columns only, never indexes); built
+        # CONCURRENTLY in the migration so the forever-kept table is never
+        # write-locked. The three predicate terms are character-identical to
+        # the migration and the repo query — see the plan §4.1 / §4.4.
+        Index(
+            'idx_notifications_answer_owed',
+            'sender_persona', 'responded_at',
+            postgresql_where=text( "response_requested AND responded_at IS NOT NULL AND answer_delivered_at IS NULL" ),
+        ),
     )
 
     def __repr__( self ) -> str:
@@ -1340,19 +1363,70 @@ class TaskItem( Base ):
         DateTime( timezone=True ),
         nullable=True
     )
+    park_reason: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True
+    )  # REQUIRED when status='parked' (CHECK below); MUST quote the row's own
+       # decisive sentence. A real COLUMN rather than the transition `reason`,
+       # which lands only on the TaskEvent trail: a parked row is hidden by
+       # default, so surfacing one to read WHY it is parked would cost an
+       # event-trail fetch per row, and the terse projection could not carry it
+       # at all. Nullable — rows that were never parked have none.
+    park_reason_captured_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime( timezone=True ),
+        nullable=True
+    )  # WHEN the park_reason quote was frozen. Set at park time to the POST-write
+       # `updated_ts` — the value the park write itself stamps, read back in the
+       # same transaction. NOT now() (races the stamp) and NOT the pre-write value
+       # (that makes captured_at < updated_ts the instant park commits, i.e. every
+       # row BORN STALE — the trap the design's own §3.4 prescribed in draft).
+       # Invariant immediately after park: park_reason_captured_at == updated_ts,
+       # EXACTLY. A later BODY CHANGE stamps body_changed_ts strictly greater, and
+       # task_store_owed.park_reason_is_stale reads THAT gap as the quote having
+       # expired. Design: src/rnd/v0.1.9/2026.07.19-park-reason-staleness-detection.md
+       #
+       # ⚠️ THE PREDICATE READS `body_changed_ts` (below), NOT `updated_ts`. That
+       # was bug 54924128 (2026-07-26): `updated_ts` moves on EVERY write, so a
+       # priority-only edit defamed a correct quote — 0 of 2 live parked rows
+       # correctly flagged at the moment it was found.
+    body_changed_ts: Mapped[Optional[datetime]] = mapped_column(
+        DateTime( timezone=True ),
+        nullable=True
+    )  # WHEN the row's `body` last actually CHANGED — the content-change marker
+       # `park_reason_is_stale` compares the frozen quote against. Stamped from the
+       # DATABASE clock (the SAME clock park_reason_captured_at is written from; a
+       # cross-clock comparison would surface skew as a false FRESH, i.e. in the
+       # silent direction) by exactly two paths:
+       #   apply_amendment -> ALWAYS (an amend only ever appends to body)
+       #   apply_patch     -> ONLY when `body` is in the payload AND its value differs
+       # That second condition IS the fix: title/priority/gate_class/urgency edits
+       # leave this alone, because none of them can make a park quote untrue.
+       # NULLABLE FOREVER, and deliberately NO CHECK: a row whose body has never
+       # changed since this shipped legitimately has no value, and a NOT NULL would
+       # assert a fact about history nobody recorded. NULL reads as FRESH
+       # (ambiguity -> FRESH), which is also why migration 38e025169a73 does not
+       # backfill — every value it could have written would be a fabrication.
     gate_class: Mapped[str] = mapped_column(
         String( 32 ),
         nullable=False,
         default="none",
         server_default="none",
         index=True
-    )  # Rick's court becomes SELECT ... WHERE gate_class='ricks_court'
+    )  # operator queue becomes SELECT ... WHERE gate_class='operator'
     priority: Mapped[str] = mapped_column(
         String( 2 ),
         nullable=False,
         default="P2",
         server_default="P2"
     )
+    urgency: Mapped[str] = mapped_column(
+        String( 8 ),
+        nullable=False,
+        default="normal",
+        server_default="normal",
+        index=True
+    )  # proactive-manager A2 (fcb5dbc0): operator-gate TIME-SENSITIVITY {urgent|normal|low},
+       # distinct from `priority` (importance). The arbiter routes operator gates by this.
 
     # Provenance + correlation
     source_qid: Mapped[Optional[str]] = mapped_column(
@@ -1394,9 +1468,42 @@ class TaskItem( Base ):
     __table_args__ = (
         Index( 'idx_task_items_owner_status', 'owner_persona', 'status' ),  # the oracle query shape
         Index( 'idx_task_items_correlation_key', 'correlation_key' ),
+        # I3 kind-aware chase requirement (eab1d7da, 2026-07-20). A chase time is
+        # required only when a PERSONA blocks (a peer is chaseable); a user/item-only
+        # block needs none — you cannot schedule Rick, and an item resolves on its
+        # own edge. `@>` (jsonb containment) is IMMUTABLE, so it is legal in a CHECK.
+        # This predicate is WEAKER than the old global rule (a superset of permitted
+        # rows), so ZERO existing rows violate it — no backfill needed (plan §3).
+        # ⚠️ This literal MUST match the Alembic migration string VERBATIM
+        # (i3_kind_aware_blocked_chase); a parity test asserts the two agree, because
+        # a model/migration divergence here is a CHECK that silently means two
+        # different things on a fresh-from-metadata DB vs a migrated one.
         CheckConstraint(
-            "status != 'blocked' OR next_chase_ts IS NOT NULL",
+            "status != 'blocked' OR next_chase_ts IS NOT NULL OR NOT (blocked_by @> '[{\"kind\": \"persona\"}]'::jsonb)",
             name="ck_task_items_blocked_requires_chase_ts"
+        ),
+        # Park's two required fields, mirroring the blocked rule above. TWO
+        # separate CHECKs rather than one conjunction, so a violation names WHICH
+        # field is missing. These are what give the rejection tests teeth BELOW
+        # Pydantic — a hand-written INSERT or a future non-ORM writer cannot
+        # create a park that never expires or a park with no stated reason.
+        CheckConstraint(
+            "status != 'parked' OR next_chase_ts IS NOT NULL",
+            name="ck_task_items_parked_requires_chase_ts"
+        ),
+        CheckConstraint(
+            "status != 'parked' OR park_reason IS NOT NULL",
+            name="ck_task_items_parked_requires_reason"
+        ),
+        # A park_reason with no capture time cannot be checked for staleness — it
+        # is a frozen quote with no frozen-at, which reads as permanently fresh.
+        # Same two-CHECK shape as above, for the same reason: name WHICH field is
+        # missing. Rows parked BEFORE this shipped are backfilled by the migration
+        # (captured_at = updated_ts) rather than exempted, so this holds over the
+        # whole table with no NOT VALID carve-out and no model/migration divergence.
+        CheckConstraint(
+            "status != 'parked' OR park_reason_captured_at IS NOT NULL",
+            name="ck_task_items_parked_requires_captured_at"
         ),
     )
 
@@ -1549,6 +1656,17 @@ class FcmToken( Base ):
 
     def __repr__( self ) -> str:
         return f"<FcmToken(user_id='{self.user_id}', platform='{self.platform}', token='…{self.token[ -8: ]}')>"
+
+
+# ============================================================================
+# pgvector Vector Store Models (v0.2.0 — LanceDB → Postgres migration)
+# ============================================================================
+# Import at module tail (AFTER Base + all relational models are defined) so the
+# vector-store tables register in Base.metadata for EVERY consumer of this module
+# — alembic env.py, auto_migrate create_all, and reflection — via a single point
+# of truth. The reverse import (vector_store_models → Base) resolves cleanly
+# because Base is already bound above. Kept last to avoid a forward-ref cycle.
+from cosa.rest.db import vector_store_models  # noqa: E402,F401  (registers vector tables on Base.metadata)
 
 
 def quick_smoke_test():

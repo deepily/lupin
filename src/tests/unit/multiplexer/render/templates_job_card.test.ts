@@ -60,12 +60,15 @@ test("renderJobCard NEVER sets data-id-hash on .job-delete-button (Pass 2 F23)",
   assert.equal(button!.getAttribute("data-id-hash"), null);
 });
 
-test("renderJobCard delete button is inert: aria-disabled='true', tabindex='-1', has tooltip (Q-A6 + C-6)", () => {
+test("renderJobCard delete button is ENABLED (W1): type=button, title='Delete', NO inert markers", () => {
   const el     = renderJobCard(makeJob());
   const button = el.querySelector(".job-delete-button") as HTMLButtonElement;
-  assert.equal(button.getAttribute("aria-disabled"), "true");
-  assert.equal(button.getAttribute("tabindex"),      "-1");
-  assert.equal(button.getAttribute("title"),         "Delete coming in Phase 6b");
+  // W1 — the Q-A6 inert markers are gone; the button is a live delete control.
+  assert.equal(button.getAttribute("aria-disabled"), null, "aria-disabled must be gone");
+  assert.equal(button.getAttribute("tabindex"),      null, "tabindex=-1 must be gone");
+  assert.notEqual(button.getAttribute("title"),      "Delete coming in Phase 6b");
+  assert.equal(button.getAttribute("title"),         "Delete");
+  assert.equal(button.getAttribute("type"),          "button");
   assert.equal(button.textContent,                   "×");
 });
 
@@ -298,4 +301,26 @@ test("populateJobMetaIfNeeded: card without <pre.job-meta-json> child is no-op (
   // Should not throw.
   populateJobMetaIfNeeded(card, { foo: "bar" });
   assert.equal(card.querySelector(".job-meta-json"), null);
+});
+
+// ---------------------------------------------------------------------------
+// W5 — retry ↻ button on terminal cards (opts.retryable)
+// ---------------------------------------------------------------------------
+
+test("renderJobCard: renders the retry ↻ button when opts.retryable, before the delete button (W5)", () => {
+  const el    = renderJobCard(makeJob({ status: "dead" }), { retryable: true });
+  const retry = el.querySelector(".job-retry-button") as HTMLButtonElement;
+  assert.notEqual(retry, null, "retry button present when retryable");
+  assert.equal(retry.type, "button");
+  assert.equal(retry.textContent, "↻");
+  assert.equal(retry.title, "Retry");
+  const del = el.querySelector(".job-delete-button") as HTMLElement;
+  assert.equal(retry.nextElementSibling, del, "retry sits immediately before the delete button");
+});
+
+test("renderJobCard: NO retry button when retryable is absent or false (live cards) (W5)", () => {
+  const noOpt = renderJobCard(makeJob({ status: "running" }));
+  assert.equal(noOpt.querySelector(".job-retry-button"), null, "no retry when opts omitted");
+  const falseOpt = renderJobCard(makeJob({ status: "done" }), { retryable: false });
+  assert.equal(falseOpt.querySelector(".job-retry-button"), null, "no retry when retryable=false");
 });

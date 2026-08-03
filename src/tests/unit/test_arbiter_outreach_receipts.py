@@ -195,7 +195,9 @@ def test_user_not_available_enters_pending_ledger( tmp_path ):
     assert len( entries ) == 1
     entry = next( iter( entries.values() ) )
     assert entry[ "kind" ] == "stall" and entry[ "case" ] == 11
-    assert entry[ "message" ] == "WHOLE-FLEET-STALL" and entry[ "attempts" ] == 1
+    # Item B (2026-06-24): the message now carries the "[YYYY.MM.DD at HH:MM:SS] " stamp
+    assert entry[ "message" ].endswith( "WHOLE-FLEET-STALL" ) and entry[ "attempts" ] == 1
+    assert entry[ "message" ].startswith( "[" )                          # stamp prefix present
     assert log.of( "arbiter_outreach_receipt" ) == [ ]                  # not terminal yet — pending
 
 
@@ -356,6 +358,106 @@ def test_gateway_read_blowup_degrades_to_window_governance():
     assert "oid1" in job._awaiting_ack
 
 
+# ── ping-storm durable Fix 3 (2026-06-24): suppress the one-shot resend when the
+# outreach target is CONFIRMED offline (no wasted -r2 to a dead pane). The resend
+# is otherwise an INTENTIONAL single retry gated on non-ACK — phantom advisories to
+# dead sessions never ACK, so every one resent, doubling the apparent volume. Strict
+# bias toward delivery: only a positively-offline target is suppressed; unknown /
+# alive / absent targets still get the resend. offline_personas default None →
+# byte-identical to the prior behavior (every existing test above exercises that).
+
+def test_window_elapsed_offline_target_suppresses_resend():
+    """Fix 3 RED-first: window elapsed, no ack, target CONFIRMED offline → the
+    one-shot resend is SUPPRESSED (no -r2). The loop closes terminal-unacked
+    (resends=0) and the fact still queues for Rick (milestone-must-land)."""
+    gw, log = _GW(), _Log()
+    job = _job( gw, log=log, outreach_ack_window_seconds=900 )
+    job._emit_dm( "oid1", "stall", "Tiberius", "body", expects_ack=True )
+    t1 = NOW + datetime.timedelta( seconds=901 )
+    assert job._check_outreach_receipts( t1, offline_personas={ "Tiberius" } ) == 0
+    assert len( gw.sent ) == 1                                          # NO resend — still just the original
+    assert job._awaiting_ack == { }                                    # loop closed terminal
+    receipt = log.of( "arbiter_outreach_receipt" )[ 0 ]
+    assert receipt[ "outcome" ] == "unacked" and receipt[ "resends" ] == 0   # suppressed → 0 resends
+    assert any( "Tiberius" in note for note in job._unacked_notes )     # Rick still learns it went unacked
+
+
+def test_window_elapsed_non_offline_target_still_resends():
+    """Fix 3 fail-safe: a target NOT in the confirmed-offline set still gets its
+    one-shot resend — bias toward delivery, never suppress on uncertainty."""
+    gw, log = _GW(), _Log()
+    job = _job( gw, log=log, outreach_ack_window_seconds=900 )
+    job._emit_dm( "oid1", "stall", "Tiberius", "body", expects_ack=True )
+    t1 = NOW + datetime.timedelta( seconds=901 )
+    assert job._check_outreach_receipts( t1, offline_personas={ "SomeoneElse" } ) == 0
+    assert len( gw.sent ) == 2 and gw.sent[ 1 ][ 2 ][ "question_id" ] == "oid1-r2"   # resend fired
+    assert job._awaiting_ack[ "oid1" ][ "resends" ] == 1
+
+
+def test_offline_target_that_acks_closes_acked_not_suppressed():
+    """An ACK always wins: a confirmed-offline target whose reply arrives still
+    closes 'acked' (the ack branch precedes the resend/suppress gate)."""
+    gw, log = _GW(), _Log()
+    job = _job( gw, log=log, outreach_ack_window_seconds=900 )
+    job._emit_dm( "oid1", "stall", "Tiberius", "body", expects_ack=True )
+    gw.replies[ "dm-tiberius" ] = [ _ack_entry( "oid1" ) ]
+    assert job._check_outreach_receipts( NOW + datetime.timedelta( seconds=10 ),
+                                         offline_personas={ "Tiberius" } ) == 1
+    assert job._awaiting_ack == { }
+
+
+# ── _confirmed_offline_personas — the positive-offline reader (Fix 3) ──────────
+
+def _snap( *rows ):
+    return { "sessions": list( rows ) }
+
+def _row( persona, verdict ):
+    return { "persona": persona, "liveness": { "verdict": verdict } }
+
+
+def test_confirmed_offline_none_snapshot_is_empty():
+    job = _job()
+    job._last_full_snapshot = None
+    assert job._confirmed_offline_personas() == set()
+
+
+def test_confirmed_offline_non_dict_snapshot_is_empty():
+    job = _job()
+    job._last_full_snapshot = [ "not", "a", "dict" ]
+    assert job._confirmed_offline_personas() == set()
+
+
+def test_confirmed_offline_collects_all_offline_persona():
+    job = _job()
+    job._last_full_snapshot = _snap( _row( "Tiberius", "offline" ) )
+    assert job._confirmed_offline_personas() == { "Tiberius" }
+
+
+def test_confirmed_offline_persona_with_any_live_row_excluded():
+    """Persona-collapse-safe: a persona with ANY non-offline row is NOT confirmed
+    offline (a live session can read the dm-board) — bias toward delivery."""
+    job = _job()
+    job._last_full_snapshot = _snap(
+        { "persona": "Clayton", "liveness": { "verdict": "offline" } },
+        { "persona": "Clayton", "liveness": { "verdict": "live 3s" } },   # a live twin
+    )
+    assert job._confirmed_offline_personas() == set()
+
+
+def test_confirmed_offline_skips_malformed_rows():
+    """Non-dict row, missing persona, and missing/non-dict liveness are skipped
+    without poisoning a clean offline persona."""
+    job = _job()
+    job._last_full_snapshot = _snap(
+        "not-a-dict",
+        { "liveness": { "verdict": "offline" } },          # no persona → skip
+        { "persona": "Krishna", "liveness": "garbage" },   # non-dict liveness → verdict None → not offline
+        { "persona": "Rio", "verdict": "offline" },        # liveness key absent → not offline (verdict lives under liveness)
+        { "persona": "Tiberius", "liveness": { "verdict": "offline" } },
+    )
+    assert job._confirmed_offline_personas() == { "Tiberius" }
+
+
 # ── _check_pending_outreach: re-announce-on-return ───────────────────────────
 
 def _pending_job( tmp_path, retry_outcomes, log=None, **overrides ):
@@ -500,6 +602,10 @@ def test_decision_cc_uses_emit_dm_with_ack():
     job._cc_decision_manager( { "sender_session_id": "s1", "body": "pick A or B" } )
     intent = log.of( "arbiter_outreach" )[ 0 ]
     assert intent[ "kind" ] == "decision_cc" and intent[ "outreach_id" ]
+    # e8eee4c4 (family-close): the decision-cc opening clause derives from the shared
+    # ARBITER_POKE_SENTINEL (b33c8e96 one-source-of-truth), not a drift-prone literal.
+    from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import ARBITER_POKE_SENTINEL
+    assert ARBITER_POKE_SENTINEL in gw.sent[ 0 ][ 1 ]   # sentinel-derived clause (after the _stamp timestamp)
     assert gw.sent[ 0 ][ 2 ][ "expects_ack" ] is True
     assert len( job._awaiting_ack ) == 1
 
@@ -514,6 +620,134 @@ def test_poll_error_escalation_rides_the_spine():
     result = log.of( "arbiter_outreach_result" )[ 0 ]
     assert result[ "outreach_id" ] == intent[ "outreach_id" ]
     assert log.of( "arbiter_outreach_receipt" )[ 0 ][ "outcome" ] == "delivered"
+
+
+# ── item 285c0343 Lever C: -r2 RESEND ACK-BY-ACTIVITY ─────────────────────────
+# The -r2 is the arbiter's INTENTIONAL one-shot resend of an un-ACK'd manager-bound
+# advisory (2026.06.30 prior art — a milestone-must-land mechanism, NOT a dup bug).
+# It fires whenever the recipient posted no THREADED reply and isn't confirmed-offline
+# — so an actively-building peer manager (who posts no reply) gets the duplicate.
+# Lever C: demonstrable recipient ACTIVITY since delivery (a fresh session-bridge
+# mtime in [sent_at, now]) counts as an IMPLICIT ACK → close acked_by_activity, skip
+# the -r2. The resend MECHANISM, Fix-3 offline suppression, and Rick note are UNTOUCHED.
+#
+# RED-first equivalence: each activity-ACK test is PAIRED with a seam-off/no-activity
+# case where the SAME window-elapsed scenario still RESENDS — proving the branch is
+# load-bearing (bridge_mtimes=None is byte-identical to today's behavior).
+
+_SENT = NOW.timestamp()                         # _emit_dm stamps sent_at = clock.now_iso() == NOW
+
+
+def test_active_recipient_acked_by_activity_no_resend():
+    """CORE (RED on main — main resends): window elapsed, no threaded reply, but a
+    FRESH recipient bridge mtime in [sent_at, now] ⇒ implicit ACK → acked_by_activity
+    receipt, tracker cleared, ZERO -r2."""
+    gw, log = _GW(), _Log()
+    job = _job( gw, log=log, outreach_ack_window_seconds=900 )
+    job._emit_dm( "oid1", "manager_stale_poke", "Tiberius", "body", expects_ack=True )
+    t1     = NOW + datetime.timedelta( seconds=901 )
+    active = { "tiberius": _SENT + 500 }        # bridge touched 500s after delivery, before now
+    assert job._check_outreach_receipts( t1, bridge_mtimes=active ) == 1
+    assert len( gw.sent ) == 1                                          # NO -r2 to an active peer
+    assert job._awaiting_ack == { }                                    # closed acked
+    receipt = log.of( "arbiter_outreach_receipt" )[ 0 ]
+    assert receipt[ "outcome" ] == "acked_by_activity" and receipt[ "latency_s" ] == 901
+
+
+def test_no_bridge_activity_still_resends():
+    """FAIL-SAFE / RED-equivalence: same window-elapsed scenario but the recipient has
+    NO bridge mtime (absent from the map) → the intentional one-shot -r2 still fires."""
+    gw, log = _GW(), _Log()
+    job = _job( gw, log=log, outreach_ack_window_seconds=900 )
+    job._emit_dm( "oid1", "manager_stale_poke", "Tiberius", "body", expects_ack=True )
+    t1 = NOW + datetime.timedelta( seconds=901 )
+    assert job._check_outreach_receipts( t1, bridge_mtimes={ "someone_else": _SENT + 500 } ) == 0
+    assert len( gw.sent ) == 2 and gw.sent[ 1 ][ 2 ][ "question_id" ] == "oid1-r2"
+
+
+def test_stale_mtime_before_delivery_still_resends():
+    """A bridge mtime BEFORE sent_at (activity predates delivery — not a response to
+    it) is NOT an implicit ACK → resend fires (fail toward delivery)."""
+    gw, log = _GW(), _Log()
+    job = _job( gw, log=log, outreach_ack_window_seconds=900 )
+    job._emit_dm( "oid1", "manager_stale_poke", "Tiberius", "body", expects_ack=True )
+    t1 = NOW + datetime.timedelta( seconds=901 )
+    assert job._check_outreach_receipts( t1, bridge_mtimes={ "tiberius": _SENT - 50 } ) == 0
+    assert len( gw.sent ) == 2                                          # resent — pre-delivery activity doesn't count
+
+
+def test_future_skew_mtime_does_not_ack():
+    """A future-skewed bridge mtime (> now, clock corruption) is rejected by the
+    [sent_at, now] upper bound → NOT counted active → resend (mirrors the 26dd3afb
+    veto's fail-toward-action discipline)."""
+    gw, log = _GW(), _Log()
+    job = _job( gw, log=log, outreach_ack_window_seconds=900 )
+    job._emit_dm( "oid1", "manager_stale_poke", "Tiberius", "body", expects_ack=True )
+    t1 = NOW + datetime.timedelta( seconds=901 )
+    future = { "tiberius": ( t1 + datetime.timedelta( seconds=100 ) ).timestamp() }
+    assert job._check_outreach_receipts( t1, bridge_mtimes=future ) == 0
+    assert len( gw.sent ) == 2                                          # future skew → resend, not ACK
+
+
+def test_bridge_mtimes_none_byte_identical_resend():
+    """bridge_mtimes=None (seam unwired / default) → Lever C inert → behavior
+    byte-identical to today: the one-shot -r2 still fires."""
+    gw, log = _GW(), _Log()
+    job = _job( gw, log=log, outreach_ack_window_seconds=900 )
+    job._emit_dm( "oid1", "manager_stale_poke", "Tiberius", "body", expects_ack=True )
+    t1 = NOW + datetime.timedelta( seconds=901 )
+    assert job._check_outreach_receipts( t1 ) == 0                      # no bridge_mtimes arg → None
+    assert len( gw.sent ) == 2
+
+
+def test_explicit_reply_ack_precedes_activity_ack():
+    """A threaded reply ACK still wins and closes 'acked' (not 'acked_by_activity') —
+    the explicit-reply branch precedes the activity short-circuit."""
+    gw, log = _GW(), _Log()
+    job = _job( gw, log=log, outreach_ack_window_seconds=900 )
+    job._emit_dm( "oid1", "manager_stale_poke", "Tiberius", "body", expects_ack=True )
+    gw.replies[ "dm-tiberius" ] = [ _ack_entry( "oid1" ) ]
+    t1 = NOW + datetime.timedelta( seconds=901 )
+    assert job._check_outreach_receipts( t1, bridge_mtimes={ "tiberius": _SENT + 500 } ) == 1
+    assert log.of( "arbiter_outreach_receipt" )[ 0 ][ "outcome" ] == "acked"   # explicit, not by-activity
+
+
+def test_within_window_activity_does_not_preempt_wait():
+    """Activity-ACK is checked only AFTER the ack window — within the window the poller
+    still just waits (the -r2 hasn't been considered yet, so there's nothing to skip)."""
+    gw, log = _GW(), _Log()
+    job = _job( gw, log=log, outreach_ack_window_seconds=900 )
+    job._emit_dm( "oid1", "manager_stale_poke", "Tiberius", "body", expects_ack=True )
+    t_early = NOW + datetime.timedelta( seconds=100 )
+    assert job._check_outreach_receipts( t_early, bridge_mtimes={ "tiberius": _SENT + 50 } ) == 0
+    assert "oid1" in job._awaiting_ack and len( gw.sent ) == 1          # still tracked, no premature close
+
+
+# ── _recipient_active_since — the Lever C predicate, in isolation ─────────────
+
+def test_recipient_active_since_unwired_and_empty():
+    job = _job()
+    assert job._recipient_active_since( "Tiberius", NOW, NOW, None ) is False   # seam unwired
+    assert job._recipient_active_since( "Tiberius", NOW, NOW, { } ) is False    # empty map
+
+
+def test_recipient_active_since_falsy_persona_and_missing_key():
+    job = _job()
+    assert job._recipient_active_since( "", NOW, NOW, { "tiberius": _SENT } ) is False
+    assert job._recipient_active_since( "Nobody", NOW, NOW, { "tiberius": _SENT } ) is False
+
+
+def test_recipient_active_since_bounds():
+    job = _job()
+    sent = NOW
+    now  = NOW + datetime.timedelta( seconds=900 )
+    key  = { "tiberius": None }
+    assert job._recipient_active_since( "Tiberius", sent, now, key ) is False   # mt None
+    # in-window (inclusive bounds), pre-sent, post-now
+    assert job._recipient_active_since( "Tiberius", sent, now, { "tiberius": sent.timestamp() } ) is True
+    assert job._recipient_active_since( "Tiberius", sent, now, { "tiberius": now.timestamp() } ) is True
+    assert job._recipient_active_since( "Tiberius", sent, now, { "tiberius": sent.timestamp() - 1 } ) is False
+    assert job._recipient_active_since( "Tiberius", sent, now, { "tiberius": now.timestamp() + 1 } ) is False
 
 
 if __name__ == "__main__":

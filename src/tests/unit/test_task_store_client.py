@@ -163,12 +163,49 @@ class TestWireShape:
         assert ok is True
 
 
+class TestQueryBlockedUserRows:
+    """be56bff8 — the per-USER gate-deferral source: full `blocked` rows for one
+    owner. Fail-safe toward LIVENESS: any bad read ⇒ ( False, [] )."""
+
+    def test_encodes_owner_and_status_and_returns_rows( self, capture ):
+        rows = [ { "id": "r1", "status": "blocked",
+                   "blocked_by": [ { "kind": "user", "id": "rick" } ] } ]
+        capture[ "outcome" ] = FakeResponse( 200, json.dumps( { "tasks": rows, "count": 1 } ) )
+        ok, got = tc.query_blocked_user_rows( SETTINGS, "k", "mr radio" )
+        req = capture[ "request" ]
+        assert req.get_method() == "GET" and req.data is None
+        assert req.full_url == "http://test:7999/api/tasks?owner_persona=mr+radio&status=blocked"
+        assert capture[ "timeout" ] == tc.DEFAULT_OWED_TIMEOUT_SECONDS   # hot-path budget, not settings
+        assert ( ok, got ) == ( True, rows )
+
+    def test_timeout_override_is_passed( self, capture ):
+        capture[ "outcome" ] = FakeResponse( 200, '{"tasks": []}' )
+        tc.query_blocked_user_rows( SETTINGS, "k", "krishna", timeout=0.25 )
+        assert capture[ "timeout" ] == 0.25
+
+    def test_non_list_tasks_is_not_ok( self, capture ):
+        capture[ "outcome" ] = FakeResponse( 200, '{"tasks": "oops"}' )
+        assert tc.query_blocked_user_rows( SETTINGS, "k", "krishna" ) == ( False, [ ] )
+
+    def test_missing_tasks_key_is_not_ok( self, capture ):
+        capture[ "outcome" ] = FakeResponse( 200, '{"count": 0}' )
+        assert tc.query_blocked_user_rows( SETTINGS, "k", "krishna" ) == ( False, [ ] )
+
+    def test_transport_failure_is_not_ok( self, capture ):
+        capture[ "outcome" ] = ConnectionError( "boom" )   # urlopen raises → transport failure
+        assert tc.query_blocked_user_rows( SETTINGS, "k", "krishna" ) == ( False, [ ] )
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # query_owed — Spine Step-2 store-count owed reader, O3 connection-reuse path
 # (_open_owed_connection + _count_on_connection + query_owed) — 100% L/B/F
 # ═════════════════════════════════════════════════════════════════════════════
 
-OWED = ( "queued", "in_progress" )
+# The OWED status tuple was DELETED here on 2026-07-19 (PARKED-STATUS). `query_owed`
+# no longer takes a `statuses` argument — the owed set is defined SERVER-side behind
+# `owed_only=true`. Deleted rather than left unused: a stale constant is the thing the
+# next reader re-wires a test to, and this one had already forked into four copies
+# across stop.py / task_store_drain.py / here.
 
 
 class FakeHTTPResponse:
@@ -228,98 +265,170 @@ def conn_seq( monkeypatch ):
     return state
 
 
-def _count_resp( count ):
-    return FakeHTTPResponse( 200, json.dumps( { "count": count } ) )
+def _count_resp( count, breakdown=None ):
+    """
+    A count_only response. `breakdown=None` OMITS the key entirely — that is the
+    pre-c191be39 wire shape, and the tests that use it assert the DEGRADE path
+    (server without the breakdown ⇒ ( ok, count, {} ), poke still fires).
+    """
+    body = { "count": count }
+    if breakdown is not None:
+        body[ "breakdown" ] = breakdown
+    return FakeHTTPResponse( 200, json.dumps( body ) )
 
 
 class TestQueryOwed:
+    """
+    PARKED-STATUS REWRITE (2026-07-19, Rachel 🕊️ seat 3).
 
-    def test_sums_counts_across_statuses( self, conn_seq ):
-        conn_seq[ "outcomes" ] = [ _count_resp( 2 ), _count_resp( 3 ) ]
-        ok, count = tc.query_owed( SETTINGS, "k", "krishna", OWED, project="lupin" )
-        assert ( ok, count ) == ( True, 5 )
-        # one GET per owed status, owner + status + project all wired on each path
-        assert len( conn_seq[ "requests" ] ) == 2
-        paths = [ path for _method, path, _headers in conn_seq[ "requests" ] ]
-        assert all( p.startswith( "/api/tasks?" ) for p in paths )
-        assert "owner_persona=krishna" in paths[ 0 ] and "status=queued" in paths[ 0 ] and "project=lupin" in paths[ 0 ]
-        assert "status=in_progress" in paths[ 1 ]
-        # method + the X-API-Key header ride each request
-        method, _path, headers = conn_seq[ "requests" ][ 0 ]
+    `query_owed` no longer takes a `statuses` tuple. The owed set moved SERVER-side
+    behind a single `owed_only=true` flag, so this class pins the ONE-CALL shape.
+
+    THREE TESTS WERE DELETED RATHER THAN RE-POINTED, deliberately:
+
+      · test_sums_counts_across_statuses      — pinned the per-status LOOP + SUM
+      · test_connection_reused_across_statuses — pinned socket reuse ACROSS the loop
+      · test_empty_statuses_is_ok_zero_no_socket — pinned the empty-tuple short-circuit
+
+    All three tested a MECHANISM THAT NO LONGER EXISTS. Re-pointing them at the new
+    shape would have preserved the appearance of coverage while asserting nothing:
+    there is no loop to sum, no second status to reuse a socket across, and no tuple
+    to be empty. Per Mr. Radio's ruling, a test whose subject died should die with it
+    rather than be quietly re-aimed. Their surviving VALUE — one socket, closed once,
+    exactly one request — is asserted by test_single_request_one_socket_closed_once.
+
+    ⚠️ The old `OWED` tuple was also passed POSITIONALLY as the 4th argument in most
+    of these tests. Under the new signature that slot is `project`, so those calls
+    were silently sending a tuple as the project filter and passing for the wrong
+    reason. All call sites now use keyword arguments.
+    """
+
+    def test_single_request_owed_only_no_status_enumeration( self, conn_seq ):
+        """
+        THE SHAPE PIN. Exactly ONE request, carrying owed_only=true and NO status
+        parameter.
+
+        Asserted on the SHAPE, not just the answer: a re-introduced per-status loop
+        can return a correct total on a board with no parked rows and still be
+        broken the moment one expires. Shape divergence is silent; this makes it loud.
+        """
+        conn_seq[ "outcomes" ] = [ _count_resp( 5 ) ]
+        ok, count, breakdown = tc.query_owed( SETTINGS, "k", "krishna", project="lupin" )
+        assert ( ok, count, breakdown ) == ( True, 5, { } )
+
+        assert len( conn_seq[ "requests" ] ) == 1, "more than one request — the per-status loop is back"
+        method, path, headers = conn_seq[ "requests" ][ 0 ]
+        assert path.startswith( "/api/tasks?" )
+        assert "owed_only=true" in path
+        assert "status=" not in path, "a status filter leaked back into the owed count"
+        assert "owner_persona=krishna" in path and "project=lupin" in path
         assert method == "GET" and headers == { "X-API-Key": "k" }
 
-    def test_connection_reused_across_statuses( self, conn_seq ):
-        # O3: ONE socket opened for the whole multi-status loop (not one per status),
-        # and it is closed exactly once on the way out.
-        conn_seq[ "outcomes" ] = [ _count_resp( 1 ), _count_resp( 1 ) ]
-        tc.query_owed( SETTINGS, "k", "p", OWED )
-        assert len( conn_seq[ "ctor" ] ) == 1                 # the reuse win
-        assert conn_seq[ "closed" ] == 1                      # always released
+    def test_expired_park_cannot_double_count( self, conn_seq ):
+        """
+        🔴 THE DOUBLE-COUNT GUARD at the transport seam (Krishna 🦚's defect #4).
+
+        The retired loop fired one count per status and SUMMED. With server-side
+        admission an expired-parked row would be admitted on the `queued` pass AND
+        the `in_progress` pass — counted TWICE, making a parked board look BUSIER
+        than an unparked one.
+
+        One request means the server's number is returned VERBATIM. Asserted as an
+        exact equality against a single seeded response: if any summation is ever
+        reintroduced, the returned value diverges from the response the store gave.
+        """
+        conn_seq[ "outcomes" ] = [ _count_resp( 7 ) ]
+        ok, count, breakdown = tc.query_owed( SETTINGS, "k", "p", project="lupin" )
+        assert ( ok, count, breakdown ) == ( True, 7, { } ), "count is not the server's number verbatim — summation reintroduced?"
+        assert len( conn_seq[ "requests" ] ) == 1
+
+    def test_single_request_one_socket_closed_once( self, conn_seq ):
+        """
+        O3, carried forward from the deleted reuse test: one socket, one request,
+        closed exactly once. The reuse WIN is gone with the loop; the release
+        DISCIPLINE is not.
+        """
+        conn_seq[ "outcomes" ] = [ _count_resp( 1 ) ]
+        tc.query_owed( SETTINGS, "k", "p" )
+        assert len( conn_seq[ "ctor" ] ) == 1
+        assert len( conn_seq[ "requests" ] ) == 1
+        assert conn_seq[ "closed" ] == 1
+
+    def test_owner_field_defaults_to_owner_persona( self, conn_seq ):
+        # Default owner_field preserves the owed-count behavior (filters owner_persona).
+        conn_seq[ "outcomes" ] = [ _count_resp( 1 ) ]
+        tc.query_owed( SETTINGS, "k", "krishna", project="lupin" )
+        _method, path, _headers = conn_seq[ "requests" ][ 0 ]
+        assert "owner_persona=krishna" in path and "accountable_manager" not in path
+
+    def test_owner_field_accountable_manager_filters_chase_list( self, conn_seq ):
+        # Face A (proactive-manager A1): owner_field="accountable_manager" counts a
+        # manager's chase-list instead of its own owned rows.
+        conn_seq[ "outcomes" ] = [ _count_resp( 6 ) ]
+        ok, count, breakdown = tc.query_owed( SETTINGS, "k", "mr radio", project="lupin",
+                                   owner_field="accountable_manager" )
+        assert ( ok, count, breakdown ) == ( True, 6, { } )
+        _method, path, _headers = conn_seq[ "requests" ][ 0 ]
+        assert "accountable_manager=mr+radio" in path and "owner_persona" not in path
 
     def test_store_up_zero_rows_is_ok_zero( self, conn_seq ):
-        conn_seq[ "outcomes" ] = [ _count_resp( 0 ), _count_resp( 0 ) ]
-        assert tc.query_owed( SETTINGS, "k", "p", OWED ) == ( True, 0 )
+        conn_seq[ "outcomes" ] = [ _count_resp( 0 ) ]
+        assert tc.query_owed( SETTINGS, "k", "p" ) == ( True, 0, { } )
 
-    def test_count_only_true_on_every_owed_query( self, conn_seq ):
-        # O2 / §G: each owed query rides count_only=true so the server returns a
-        # true COUNT(*), never a page-length saturating at the endpoint's limit.
-        conn_seq[ "outcomes" ] = [ _count_resp( 250 ), _count_resp( 175 ) ]
-        ok, count = tc.query_owed( SETTINGS, "k", "p", OWED )
-        assert ( ok, count ) == ( True, 425 )                 # >100 counted exactly, no saturation
-        paths = [ path for _method, path, _headers in conn_seq[ "requests" ] ]
-        assert all( "count_only=true" in p for p in paths )
+    def test_count_only_true_on_the_owed_query( self, conn_seq ):
+        # O2 / §G: the owed query rides count_only=true so the server returns a true
+        # COUNT(*), never a page-length saturating at the endpoint's limit.
+        conn_seq[ "outcomes" ] = [ _count_resp( 425 ) ]
+        ok, count, breakdown = tc.query_owed( SETTINGS, "k", "p" )
+        assert ( ok, count, breakdown ) == ( True, 425, { } )                 # >100 counted exactly, no saturation
+        _method, path, _headers = conn_seq[ "requests" ][ 0 ]
+        assert "count_only=true" in path
 
-    def test_transport_failure_short_circuits_and_closes( self, conn_seq ):
-        # first status raises (refused) → return immediately, second never attempted,
-        # and the connection is STILL closed (finally).
-        conn_seq[ "outcomes" ] = [ ConnectionRefusedError( "refused" ), _count_resp( 9 ) ]
-        assert tc.query_owed( SETTINGS, "k", "p", OWED ) == ( False, 0 )
-        assert len( conn_seq[ "requests" ] ) == 1             # short-circuit proven
+    def test_transport_failure_is_not_ok_and_closes( self, conn_seq ):
+        # The request raises (refused) → fail safe, and the connection is STILL
+        # closed (finally). The old "short-circuit" half died with the loop.
+        conn_seq[ "outcomes" ] = [ ConnectionRefusedError( "refused" ) ]
+        assert tc.query_owed( SETTINGS, "k", "p" ) == ( False, 0, { } )
         assert conn_seq[ "closed" ] == 1                      # released even on failure
 
     def test_timeout_is_not_ok( self, conn_seq ):
         conn_seq[ "outcomes" ] = [ TimeoutError( "slow store" ) ]
-        assert tc.query_owed( SETTINGS, "k", "p", OWED ) == ( False, 0 )
+        assert tc.query_owed( SETTINGS, "k", "p" ) == ( False, 0, { } )
 
     def test_http_error_is_not_ok( self, conn_seq ):
         conn_seq[ "outcomes" ] = [ FakeHTTPResponse( 500, '{"detail": "boom"}' ) ]
-        assert tc.query_owed( SETTINGS, "k", "p", OWED ) == ( False, 0 )
+        assert tc.query_owed( SETTINGS, "k", "p" ) == ( False, 0, { } )
 
     def test_malformed_unparseable_body( self, conn_seq ):
         conn_seq[ "outcomes" ] = [ FakeHTTPResponse( 200, "not json" ) ]
-        assert tc.query_owed( SETTINGS, "k", "p", OWED ) == ( False, 0 )
+        assert tc.query_owed( SETTINGS, "k", "p" ) == ( False, 0, { } )
 
     def test_malformed_non_dict_body( self, conn_seq ):
         conn_seq[ "outcomes" ] = [ FakeHTTPResponse( 200, "[1]" ) ]
-        assert tc.query_owed( SETTINGS, "k", "p", OWED ) == ( False, 0 )
+        assert tc.query_owed( SETTINGS, "k", "p" ) == ( False, 0, { } )
 
     def test_malformed_missing_count( self, conn_seq ):
         conn_seq[ "outcomes" ] = [ FakeHTTPResponse( 200, '{"tasks": []}' ) ]
-        assert tc.query_owed( SETTINGS, "k", "p", OWED ) == ( False, 0 )
+        assert tc.query_owed( SETTINGS, "k", "p" ) == ( False, 0, { } )
 
     def test_malformed_non_int_count( self, conn_seq ):
         conn_seq[ "outcomes" ] = [ FakeHTTPResponse( 200, '{"count": "5"}' ) ]
-        assert tc.query_owed( SETTINGS, "k", "p", OWED ) == ( False, 0 )
+        assert tc.query_owed( SETTINGS, "k", "p" ) == ( False, 0, { } )
 
     def test_malformed_bool_count_rejected( self, conn_seq ):
         # JSON `true` is a bool (an int subclass) — must NOT slip through as 1
         conn_seq[ "outcomes" ] = [ FakeHTTPResponse( 200, '{"count": true}' ) ]
-        assert tc.query_owed( SETTINGS, "k", "p", OWED ) == ( False, 0 )
-
-    def test_empty_statuses_is_ok_zero_no_socket( self, conn_seq ):
-        conn_seq[ "outcomes" ] = [ ]
-        assert tc.query_owed( SETTINGS, "k", "p", () ) == ( True, 0 )
-        assert conn_seq[ "ctor" ] == [ ] and conn_seq[ "requests" ] == [ ]   # no IO at all
+        assert tc.query_owed( SETTINGS, "k", "p" ) == ( False, 0, { } )
 
     def test_project_omitted_when_none( self, conn_seq ):
         conn_seq[ "outcomes" ] = [ _count_resp( 1 ) ]
-        tc.query_owed( SETTINGS, "k", "p", ( "queued", ) )            # no project
+        tc.query_owed( SETTINGS, "k", "p" )                           # no project
         _method, path, _headers = conn_seq[ "requests" ][ 0 ]
         assert "project=" not in path
 
     def test_uses_bounded_default_timeout( self, conn_seq ):
         conn_seq[ "outcomes" ] = [ _count_resp( 0 ) ]
-        tc.query_owed( SETTINGS, "k", "p", ( "queued", ) )
+        tc.query_owed( SETTINGS, "k", "p" )
         # §C/§J6: the Stop-hot-path read is bounded by an aggressive default,
         # applied as the connection's per-operation socket timeout.
         assert conn_seq[ "ctor" ][ 0 ][ "timeout" ] == tc.DEFAULT_OWED_TIMEOUT_SECONDS
@@ -327,27 +436,116 @@ class TestQueryOwed:
 
     def test_timeout_override_passed_through( self, conn_seq ):
         conn_seq[ "outcomes" ] = [ _count_resp( 0 ) ]
-        tc.query_owed( SETTINGS, "k", "p", ( "queued", ), timeout=0.5 )
+        tc.query_owed( SETTINGS, "k", "p", timeout=0.5 )
         assert conn_seq[ "ctor" ][ 0 ][ "timeout" ] == 0.5
 
     def test_http_scheme_uses_http_connection( self, conn_seq ):
         conn_seq[ "outcomes" ] = [ _count_resp( 0 ) ]
-        tc.query_owed( SETTINGS, "k", "p", ( "queued", ) )            # SETTINGS is http://
+        tc.query_owed( SETTINGS, "k", "p" )                           # SETTINGS is http://
         assert conn_seq[ "ctor" ][ 0 ][ "scheme" ] == "http"
         assert conn_seq[ "ctor" ][ 0 ][ "host" ] == "test" and conn_seq[ "ctor" ][ 0 ][ "port" ] == 7999
 
     def test_https_scheme_uses_https_connection( self, conn_seq ):
         conn_seq[ "outcomes" ] = [ _count_resp( 4 ) ]
         https_settings = { "api_base_url": "https://secure-store:8443", "timeout_seconds": 3.0 }
-        ok, count = tc.query_owed( https_settings, "k", "p", ( "queued", ) )
-        assert ( ok, count ) == ( True, 4 )
+        # NOTE (2026-07-20): this call used to pass ( "queued", ) as positional
+        # arg 4 — residue of the `statuses` parameter DELETED on 2026-07-19.
+        # Arg 4 is now `project`, so it was silently passing a TUPLE as the
+        # project filter and going green because the mock never inspects it.
+        # test_stop_hook_heartbeat.py:1369 asserts len( _args ) == 3 to catch
+        # exactly this shape — but it guards stop.py's CALL SITE, not this
+        # suite's own calls, so the residue slipped under a guard built for it.
+        ok, count, breakdown = tc.query_owed( https_settings, "k", "p" )
+        assert ( ok, count, breakdown ) == ( True, 4, { } )
         assert conn_seq[ "ctor" ][ 0 ][ "scheme" ] == "https"
         assert conn_seq[ "ctor" ][ 0 ][ "port" ] == 8443
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # PER-STATUS BREAKDOWN (c191be39, 2026-07-20) — the third return element
+    # ═════════════════════════════════════════════════════════════════════════
+
+    def test_breakdown_returned_verbatim_still_one_request( self, conn_seq ):
+        """
+        THE FIX, at the transport seam: the status survives the count.
+
+        ⚠️ NOTE THE REQUEST-COUNT ASSERTION. A breakdown is exactly what a
+        per-status client loop would ALSO produce, so this doubles as the guard
+        that we got it the forbidden shape's opposite way: ONE request, the
+        server's own GROUP BY, returned verbatim.
+        """
+        conn_seq[ "outcomes" ] = [ _count_resp( 16, { "in_progress": 2, "queued": 13, "parked": 1 } ) ]
+        ok, count, breakdown = tc.query_owed( SETTINGS, "k", "p", project="lupin" )
+
+        assert ( ok, count ) == ( True, 16 )
+        assert breakdown == { "in_progress": 2, "queued": 13, "parked": 1 }
+        assert len( conn_seq[ "requests" ] ) == 1, "more than one request — the per-status loop is back"
+
+    def test_count_equals_sum_of_breakdown( self, conn_seq ):
+        """
+        AC1 at this seam. `count` and `breakdown` come from TWO INDEPENDENT server
+        queries (a COUNT(*) and a GROUP BY), neither derived from the other — which
+        is what makes this assertion able to FAIL. Deriving one from the other would
+        make it true by construction: a green that could never go red, and therefore
+        one that reports nothing.
+        """
+        conn_seq[ "outcomes" ] = [ _count_resp( 16, { "in_progress": 2, "queued": 13, "parked": 1 } ) ]
+        _ok, count, breakdown = tc.query_owed( SETTINGS, "k", "p" )
+        assert sum( breakdown.values() ) == count
+
+    def test_absent_breakdown_degrades_to_empty_and_still_ok( self, conn_seq ):
+        """
+        A server that omits `breakdown` must NOT fail the read. The count carries the
+        fail-safe; the breakdown is a reporting refinement. Failing here would let a
+        cosmetic regression SUPPRESS the poke — strictly worse than reporting a right
+        total with a coarse status.
+        """
+        conn_seq[ "outcomes" ] = [ _count_resp( 9 ) ]                 # no breakdown key
+        assert tc.query_owed( SETTINGS, "k", "p" ) == ( True, 9, { } )
+
+    @pytest.mark.parametrize( "junk", [
+        "not-a-dict",                                                 # wrong type entirely
+        [ [ "queued", 3 ] ],                                          # a list, not an object
+        42,
+        None,
+    ] )
+    def test_malformed_breakdown_degrades_without_failing_the_read( self, conn_seq, junk ):
+        """A malformed breakdown degrades to {} — the count still governs."""
+        conn_seq[ "outcomes" ] = [ FakeHTTPResponse( 200, json.dumps( { "count": 3, "breakdown": junk } ) ) ]
+        assert tc.query_owed( SETTINGS, "k", "p" ) == ( True, 3, { } )
+
+    @pytest.mark.parametrize( "bad_pair,reason", [
+        ( { "queued": True }, "JSON true is a bool (int subclass) — must never read as 1" ),
+        ( { "queued": "13" }, "a string count is not a count" ),
+        ( { "queued": -1 },   "a negative count means the wire is lying, not a small bucket" ),
+        ( { "queued": None }, "null is not a count" ),
+    ] )
+    def test_breakdown_drops_bad_values_keeps_good_ones( self, conn_seq, bad_pair, reason ):
+        """
+        Per-ENTRY hygiene: one bad bucket is dropped, the rest survive. Rejecting the
+        WHOLE breakdown over one bad entry would discard true information; keeping the
+        bad entry would put a lie in the poke.
+        """
+        body = { "count": 5, "breakdown": { "in_progress": 5, **bad_pair } }
+        conn_seq[ "outcomes" ] = [ FakeHTTPResponse( 200, json.dumps( body ) ) ]
+        _ok, _count, breakdown = tc.query_owed( SETTINGS, "k", "p" )
+        assert breakdown == { "in_progress": 5 }, reason
+
+    def test_breakdown_drops_non_string_keys( self ):
+        """
+        A non-string key cannot name a status. JSON always gives string keys, so this
+        is the belt for any non-JSON caller of the parser.
+        """
+        assert tc._parse_breakdown( { 7: 1, "queued": 2 } ) == { "queued": 2 }
+
+    def test_transport_failure_returns_empty_breakdown( self, conn_seq ):
+        """The §C fail-safe extends to the third element: ( False, 0, {} )."""
+        conn_seq[ "outcomes" ] = [ ConnectionRefusedError( "refused" ) ]
+        assert tc.query_owed( SETTINGS, "k", "p" ) == ( False, 0, { } )
 
     def test_bad_base_url_fails_safe_no_request( self, conn_seq ):
         # A non-numeric port makes urlsplit.port raise ValueError → _open_owed_connection
         # returns None → fail safe ( False, 0 ), and NO request is ever issued.
         conn_seq[ "outcomes" ] = [ _count_resp( 9 ) ]
         bad_settings = { "api_base_url": "http://host:notaport", "timeout_seconds": 3.0 }
-        assert tc.query_owed( bad_settings, "k", "p", OWED ) == ( False, 0 )
+        assert tc.query_owed( bad_settings, "k", "p" ) == ( False, 0, { } )
         assert conn_seq[ "requests" ] == [ ] and conn_seq[ "closed" ] == 0

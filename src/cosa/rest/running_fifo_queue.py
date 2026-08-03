@@ -21,7 +21,7 @@ import traceback
 import pprint
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from typing import Optional, Any
+from typing import Optional, Any, List, Dict
 
 # Notification service imports for async correctness verification
 from lupin_cli.notifications.notify_user_sync import notify_user_sync
@@ -83,7 +83,19 @@ class RunningFifoQueue( FifoQueue ):
             max_workers        = self._pool_max_workers,
             thread_name_prefix = "AgenticPool"
         )
-        self._agentic_futures        = { }                   # { id_hash : Future }
+        # Shape-B hardening (bug fe375cf6): a DEDICATED single-worker executor for
+        # monopolize jobs, separate from the shared agentic pool. A monopolizer runs
+        # HERE so it no longer consumes a shared-pool worker — the full width N stays
+        # free for its own spawned (lineage) children. This makes pool_max==1
+        # deadlock-safe and 67473d91's budget math exact. Eager (D2): symmetric with
+        # _agentic_pool, no lazy-init race, one idle thread. Its Futures are tracked
+        # in the SAME _agentic_futures dict below, so the completion callback + ghost
+        # sweeper cover both executors with one scan / one lock (invariants I1-I3).
+        self._monopolize_pool        = ThreadPoolExecutor(
+            max_workers        = 1,                          # Gate B already serializes monopolizers at intake
+            thread_name_prefix = "MonopolizePool"
+        )
+        self._agentic_futures        = { }                   # { id_hash : Future } (BOTH executors)
         # RLock (not Lock): when a Future completes before add_done_callback
         # returns — possible for fast-running work — the callback fires
         # synchronously on the SAME thread inside add_done_callback. That thread
@@ -91,6 +103,14 @@ class RunningFifoQueue( FifoQueue ):
         # via _on_agentic_complete's `with self._agentic_futures_lock:` would
         # deadlock under a plain Lock. RLock permits same-thread re-entry.
         self._agentic_futures_lock   = threading.RLock()
+
+        # Option (a) true-monopoly (bug 30398595): id_hash of the monopolize job
+        # currently holding the pool, or None. Set in _submit_agentic_job when a
+        # monopolize job is dispatched; cleared from EVERY terminal path
+        # (_on_agentic_complete AND _ghost_job_sweep) via _release_monopolize_hold
+        # so a wedged sweep can never freeze intake permanently. Guarded by
+        # _agentic_futures_lock (same lifecycle as the futures dict).
+        self._monopolize_active      = None
 
         # Phase 3 (CJ Flow async multi-lane): ghost-job sweeper daemon thread
         # Periodically scans _agentic_futures for entries whose Future.done()
@@ -117,8 +137,19 @@ class RunningFifoQueue( FifoQueue ):
             )
         else:
             self._consumer_stall_threshold_seconds = 120
-    
-    
+
+        # Option (a) true-monopoly (bug 30398595): Gate-A drain budget. How long
+        # the consumer waits for the agentic pool to drain of foreign writers
+        # before dispatching a monopolize job; on timeout the sweep is
+        # dead-lettered (fail loud, never dispatch onto a contaminated DB).
+        if config_mgr is not None:
+            self._monopolize_drain_timeout_seconds = config_mgr.get(
+                "cj flow monopolize drain timeout seconds", default=300, return_type="int"
+            )
+        else:
+            self._monopolize_drain_timeout_seconds = 300
+
+
     def enter_running_loop( self ) -> None:
         """
         DEPRECATED: Enter the main job execution loop.
@@ -369,8 +400,26 @@ class RunningFifoQueue( FifoQueue ):
             - Future has _on_agentic_complete registered as done_callback
         """
         with self._agentic_futures_lock:
-            future = self._agentic_pool.submit( self._execute_agentic_in_pool, job )
+            # Shape-B (bug fe375cf6): route a monopolize job to the DEDICATED
+            # single-worker executor so it does NOT consume a shared-pool slot —
+            # the full width N stays free for its lineage children. Non-monopolize
+            # jobs use the shared pool (unchanged). The executor pick is the ONLY
+            # new behavior; everything below (track in the SAME _agentic_futures
+            # dict, set the hold, register the callback) is identical for both, so
+            # invariants I1-I3 (atomic track, release-before-transition, ghost
+            # sweep) hold regardless of which executor produced the Future.
+            is_mono = getattr( job, "monopolize", False ) and self._is_monopolize_enabled()
+            pool    = self._monopolize_pool if is_mono else self._agentic_pool
+            future  = pool.submit( self._execute_agentic_in_pool, job )
             self._agentic_futures[ job.id_hash ] = future
+            # Option (a) true-monopoly (bug 30398595): a monopolize job now holds
+            # the pool → Gate B (queue_consumer) defers foreign intake (admitting
+            # lineage children) until it clears. Set under the same lock as the
+            # futures dict so the flag and the future land atomically. Gated by the
+            # master kill-switch (read fresh via is_mono): when disabled the hold is
+            # never SET → old no-op AND the job routes to the shared pool.
+            if is_mono:
+                self._monopolize_active = job.id_hash
             future.add_done_callback(
                 lambda f, j=job: self._on_agentic_complete( j, f )
             )
@@ -410,6 +459,9 @@ class RunningFifoQueue( FifoQueue ):
             # INVARIANT: pop from futures dict BEFORE transitioning
             with self._agentic_futures_lock:
                 self._agentic_futures.pop( job.id_hash, None )
+            # Option (a) (bug 30398595): release the monopoly hold on ANY terminal
+            # outcome (done/exception/stalled/failed) so intake resumes.
+            self._release_monopolize_hold( job.id_hash )
 
             exc = future.exception()
             if exc is not None:
@@ -787,16 +839,29 @@ class RunningFifoQueue( FifoQueue ):
               when the singleton is initialised; omitted with a marker if not
         """
         with self._agentic_futures_lock:
-            inflight = sum( 1 for f in self._agentic_futures.values() if not f.done() )
+            # Shape-B (bug fe375cf6): the monopolizer runs on the DEDICATED executor,
+            # not the shared pool, so exclude its Future from the shared-pool counts —
+            # otherwise inflight_agentic_jobs (documented observability, CLAUDE.md
+            # §CJ Flow) would silently count a non-pool job and the UI's
+            # running = inflight - pending invariant would break. At most ONE
+            # monopolizer can be present (Gate B defers a 2nd at intake before it
+            # ever reaches _agentic_futures), so a single mono_id exclusion is complete.
+            mono_id  = self._monopolize_active
+            inflight = sum(
+                1 for h, f in self._agentic_futures.items()
+                if not f.done() and h != mono_id
+            )
             pending  = sum(
-                1 for f in self._agentic_futures.values()
-                if not f.running() and not f.done()
+                1 for h, f in self._agentic_futures.items()
+                if not f.running() and not f.done() and h != mono_id
             )
 
         payload = {
-            "inflight_agentic_jobs" : inflight,
+            "inflight_agentic_jobs" : inflight,                 # shared pool only — meaning UNCHANGED
             "max_agentic_workers"   : self._pool_max_workers,
             "pending_in_pool"       : pending,
+            "monopolize_inflight"   : mono_id is not None,      # Shape-B: the out-of-pool monopolizer
+            "monopolize_id"         : mono_id,                  # None when no monopolizer holds
         }
 
         # WG-8 (2026-04-28): consumer-thread heartbeat for stall detection.
@@ -831,6 +896,149 @@ class RunningFifoQueue( FifoQueue ):
 
         return payload
 
+    def get_non_test_inflight_agentic_jobs( self, exclude_id_hash: Optional[ str ] = None ) -> List[ Dict ]:
+        """
+        List inflight (submitted-but-not-done) agentic jobs whose backing job is
+        NOT a test_suite job. Backs the merge-gate sweep exclusivity preflight
+        (bug caf58f71 — concurrent-writer contamination).
+
+        A monopolize-mode test_suite sweep and ANY other agentic job share the
+        same lupin_db_test on :8000; a concurrent non-test writer corrupts the
+        in-flight suite's DB expectations (the refresh_tokens duplicate-jti
+        flood). `monopolize` is ENFORCED (bug 30398595): the consumer's Gate A
+        (drain-before-dispatch) uses this classifier as its drain oracle and
+        Gate B holds foreign intake for the sweep's duration. This method
+        surfaces the FOREIGN concurrent writers — it EXEMPTS the sweep's own
+        lineage children (bug 3a14292b): a job whose `spawned_by_id_hash` equals
+        `exclude_id_hash` was spawned BY the sweep and is part of its exclusive
+        window, not a contaminant. Exemption is keyed on explicit lineage, never
+        on `job_type`, so a future monopolizer spawning non-swe children is
+        covered too.
+
+        Requires:
+            - _agentic_futures / queue_dict initialised (always true post-__init__)
+
+        Ensures:
+            - returns one { "id_hash", "job_type" } dict per inflight FOREIGN
+              agentic job (Future present AND not done)
+            - the future named by exclude_id_hash (the sweep's own) is skipped
+            - a job whose spawned_by_id_hash == exclude_id_hash (a lineage child
+              of the sweep) is skipped — spawned BY the sweep is not foreign TO it
+            - a future whose backing job is absent from queue_dict is reported
+              with job_type "unknown" — fail-loud on the unclassifiable, it is
+              still a writer we cannot vouch for
+            - inflight snapshot is taken under _agentic_futures_lock; classifi-
+              cation never raises
+
+        Args:
+            exclude_id_hash: id_hash of the calling sweep, excluded from the count
+                (also the lineage key: its children are exempted)
+
+        Returns:
+            list of { "id_hash": str, "job_type": str } for foreign inflight writers
+        """
+        with self._agentic_futures_lock:
+            inflight_hashes = [ h for h, f in self._agentic_futures.items() if not f.done() ]
+
+        offenders = [ ]
+        for id_hash in inflight_hashes:
+            if id_hash == exclude_id_hash:
+                continue
+            job      = self.get_by_id_hash( id_hash ) if id_hash in self.queue_dict else None
+            # Lineage exemption (bug 3a14292b): a job SPAWNED BY the sweep is not
+            # foreign TO the sweep. Guarded on exclude_id_hash is not None so a
+            # None sweep key never matches a job's default-None lineage field.
+            if ( exclude_id_hash is not None and job is not None
+                 and job.spawned_by_id_hash == exclude_id_hash ):
+                continue
+            job_type = job.job_type if job is not None else "unknown"
+            if job_type == "test_suite":
+                continue
+            offenders.append( { "id_hash": id_hash, "job_type": job_type } )
+        return offenders
+
+    def _is_monopolize_enabled( self ) -> bool:
+        """
+        Read the master true-monopoly kill-switch FRESH each call (bug 30398595).
+
+        Read at gate-time — NOT cached at __init__ — so an INI-only flip of
+        `cj flow monopolize enabled` takes effect via hot config reload without a
+        server bounce. Gates all three surfaces atomically (the _submit set, Gate
+        A, Gate B all consult this one source), so no half-state (hold set while
+        gates disabled, or vice versa) is possible by construction.
+
+        Ensures:
+            - returns the current `cj flow monopolize enabled` boolean
+            - returns True when no config_mgr is bound (default-enforced)
+        """
+        if self._config_mgr is None:
+            return True
+        return self._config_mgr.get(
+            "cj flow monopolize enabled", default=True, return_type="boolean"
+        )
+
+    def _release_monopolize_hold( self, id_hash: str ) -> None:
+        """
+        Clear the monopolize intake hold iff `id_hash` owns it (bug 30398595).
+
+        Called from EVERY terminal path a monopolize job can exit by —
+        _on_agentic_complete (done/exception/stalled/failed) AND _ghost_job_sweep
+        (dead-letter of a wedged job). If the hold were cleared only in the
+        normal callback, a ghost-swept monopolize job would freeze ALL intake
+        permanently (Tiberius's added hazard).
+
+        Requires:
+            - id_hash is the terminating job's pool key
+
+        Ensures:
+            - _monopolize_active is set to None iff it currently equals id_hash
+            - a no-op when a DIFFERENT (or no) job holds the hold — idempotent,
+              safe to call from any terminal path more than once
+        """
+        with self._agentic_futures_lock:
+            if self._monopolize_active == id_hash:
+                self._monopolize_active = None
+
+    def await_monopolize_pool_drain( self, job: Any, timeout_seconds: float,
+                                     poll_seconds: float = 1.0, heartbeat_fn=None ) -> List[ Dict ]:
+        """
+        Gate A (bug 30398595): block until the agentic pool has no foreign
+        (non-test) inflight writers, or until timeout_seconds elapses. Reuses the
+        caf58f71 classifier (get_non_test_inflight_agentic_jobs) as the drain
+        oracle — the sweep's own future is excluded via job.id_hash.
+
+        Requires:
+            - job.id_hash is the monopolize sweep's pool key (excluded)
+            - timeout_seconds >= 0; poll_seconds > 0
+
+        Ensures:
+            - returns [] when the pool drained clean (safe to dispatch)
+            - returns the offender list (get_non_test_inflight_agentic_jobs shape)
+              when the timeout expired with foreign writers still inflight — the
+              caller MUST fail loud (dead-letter the sweep), never dispatch onto
+              a contaminated DB
+            - ticks heartbeat_fn (when supplied) once per poll so a healthy drain
+              wait never trips consumer-stall detection; sleeps poll_seconds
+              between probes (no busy-loop)
+
+        Args:
+            job: the monopolize job about to be dispatched
+            timeout_seconds: max seconds to wait for the pool to drain
+            poll_seconds: interval between drain probes
+            heartbeat_fn: optional zero-arg callback to refresh the consumer heartbeat
+
+        Returns:
+            list of offender dicts (empty when drained clean before timeout)
+        """
+        deadline  = time.monotonic() + timeout_seconds
+        offenders = self.get_non_test_inflight_agentic_jobs( exclude_id_hash=job.id_hash )
+        while offenders and time.monotonic() < deadline:
+            if heartbeat_fn is not None:
+                heartbeat_fn()
+            time.sleep( poll_seconds )
+            offenders = self.get_non_test_inflight_agentic_jobs( exclude_id_hash=job.id_hash )
+        return offenders
+
     def _ghost_job_sweep( self ) -> None:
         """
         Scan _agentic_futures for entries whose Future is done but whose job
@@ -861,6 +1069,9 @@ class RunningFifoQueue( FifoQueue ):
                 # Already transitioned by someone; clean up our tracker
                 with self._agentic_futures_lock:
                     self._agentic_futures.pop( id_hash, None )
+                # Idempotent belt: the normal callback already released the hold,
+                # but clear here too so no terminal path can leave it wedged.
+                self._release_monopolize_hold( id_hash )
                 continue
 
             cause = future.exception() or RuntimeError(
@@ -876,6 +1087,10 @@ class RunningFifoQueue( FifoQueue ):
 
             with self._agentic_futures_lock:
                 self._agentic_futures.pop( id_hash, None )
+            # Option (a) added hazard (bug 30398595): a ghost-swept monopolize job
+            # MUST release the hold here, else a wedged sweep freezes ALL intake
+            # permanently. _transition_to_dead does not touch the hold.
+            self._release_monopolize_hold( id_hash )
 
     def _ghost_job_sweep_loop( self ) -> None:
         """
@@ -919,6 +1134,9 @@ class RunningFifoQueue( FifoQueue ):
             print( "[AGENTIC-POOL] Warning: ghost-job sweeper did not exit within 5s" )
 
         self._agentic_pool.shutdown( wait=False, cancel_futures=False )
+        # Shape-B (bug fe375cf6): the dedicated monopolize executor shuts down on the
+        # same no-new-work flag as the shared pool.
+        self._monopolize_pool.shutdown( wait=False, cancel_futures=False )
         print( "[AGENTIC-POOL] shutdown_pool accepted no-new-work flag" )
 
         if not wait:
@@ -1427,7 +1645,7 @@ class RunningFifoQueue( FifoQueue ):
 
         Ensures:
             - Does NOT block the pipeline
-            - Thread-safe via LanceDBSolutionManager._save_lock
+            - Thread-safe via SolutionSnapshotManager._save_lock
             - Updates snapshot in LanceDB on yes/no response
         """
         def _ask_and_update():

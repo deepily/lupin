@@ -161,10 +161,18 @@ class TestTaskStoreLifecycle:
             assert r.status_code == 200, f"->{to_status}: {r.status_code}: {r.text}"
         assert r.json()[ "item" ][ "status" ] == "in_progress"
 
-        # 5. blocked REQUIRES chase_ts + typed refs (I3 + gate ruling #5)
+        # 5. blocked is KIND-AWARE (I3, eab1d7da): a bare ->blocked (no refs) yields
+        #    exactly 1 error (empty typed-refs); the chase requirement fires ONLY when
+        #    a {kind:persona} ref is present. (Was 2 errors pre-migration.)
         bare = _transition( headers, task_id, to_status="blocked", actor=actor )
         assert bare.status_code == 422
-        assert len( bare.json()[ "detail" ][ "errors" ] ) == 2
+        assert len( bare.json()[ "detail" ][ "errors" ] ) == 1
+
+        # a persona blocker WITHOUT a chase time = exactly the chase error (still 1)
+        persona_no_chase = _transition( headers, task_id, to_status="blocked", actor=actor,
+                                        blocked_by=[ { "kind": "persona", "id": "tiffany" } ] )
+        assert persona_no_chase.status_code == 422
+        assert any( "chase" in e for e in persona_no_chase.json()[ "detail" ][ "errors" ] )
 
         blocked = _transition( headers, task_id,
                                to_status     = "blocked",
@@ -281,7 +289,7 @@ class TestTaskStoreLifecycle:
 
 
 class TestTaskStorePhase2WritePaths:
-    """Phase 2 live wire: reason on ->dropped, correlation_key filter, /correlate."""
+    """Phase 2 live wire: reason on ->dropped, correlation_key filter, /correlate, /amend."""
 
     def test_dropped_requires_reason_and_persists_it( self, test_api_key ):
         """C12 live: ->dropped without reason 422s; with reason it lands on the event row."""
@@ -340,6 +348,63 @@ class TestTaskStorePhase2WritePaths:
                                 json={ "correlation_key": old_ck, "actor": "tiffany d03e6219" } )
         assert locked.status_code == 422
         assert any( "immutable" in e for e in locked.json()[ "detail" ][ "errors" ] )
+
+    def test_amend_appends_body_with_audit_event( self, test_api_key ):
+        """Append-only body amend live: original body preserved verbatim, 'amended' event, blank-note refuses, terminal lands as a post-terminal addendum."""
+        headers = { "X-API-Key": test_api_key[ "api_key" ] }
+        created = requests.post( ENDPOINT, json=_create_body( body="ORIGINAL SPEC verbatim." ),
+                                 headers=headers, timeout=10 )
+        task_id = created.json()[ "id" ]
+
+        r = requests.post( f"{ENDPOINT}/{task_id}/amend", headers=headers, timeout=10,
+                           json={ "note": "SCOPE REFRAME: subscriber path now.",
+                                  "actor": "arnold 8b7225c4", "reason": "manager ruling on cited evidence" } )
+        assert r.status_code == 200
+        body = r.json()
+        # Original preserved verbatim; the note appended below a persona+UTC divider.
+        assert body[ "item" ][ "body" ].startswith( "ORIGINAL SPEC verbatim.\n\n[amendment · arnold 8b7225c4 · " )
+        assert body[ "item" ][ "body" ].endswith( "SCOPE REFRAME: subscriber path now." )
+        assert body[ "item" ][ "status" ] == "queued"                     # status untouched (not a transition)
+        assert body[ "event" ][ "transition" ] == "amended"
+        assert body[ "event" ][ "reason" ] == "manager ruling on cited evidence"
+
+        # A second amend stacks below the first — full history reads inline.
+        r2 = requests.post( f"{ENDPOINT}/{task_id}/amend", headers=headers, timeout=10,
+                            json={ "note": "and one more clarification.", "actor": "arnold 8b7225c4" } )
+        assert r2.status_code == 200
+        stacked = r2.json()[ "item" ][ "body" ]
+        assert stacked.count( "[amendment · arnold 8b7225c4 · " ) == 2
+        assert stacked.startswith( "ORIGINAL SPEC verbatim." )           # earliest text still first
+        assert r2.json()[ "event" ][ "reason" ].startswith( "body amended (+" )   # auto-marker when reason absent
+
+        # Blank-note reject: min_length passes "   " at the wire; handler strip-guards it.
+        blank = requests.post( f"{ENDPOINT}/{task_id}/amend", headers=headers, timeout=10,
+                               json={ "note": "   ", "actor": "arnold 8b7225c4" } )
+        assert blank.status_code == 422
+        assert any( "note" in e for e in blank.json()[ "detail" ][ "errors" ] )
+
+        # Post-terminal addendum (Rick 2026-08-02): drop it, then amend must SUCCEED
+        # — a gate verdict written after a self-close has a durable home. The block
+        # is marked distinctly and the event is 'amended_post_terminal'; a closed
+        # row stays closed (status is NOT moved, so transition/edit/correlate on it
+        # still refuse — proven elsewhere).
+        _transition( headers, task_id, to_status="dropped", actor="arnold 8b7225c4", reason="probe cleanup" )
+        late = requests.post( f"{ENDPOINT}/{task_id}/amend", headers=headers, timeout=10,
+                              json={ "note": "GATE: verified on re-run.", "actor": "mr radio 4829ab05" } )
+        assert late.status_code == 200
+        late_body = late.json()
+        assert "[post-terminal addendum · mr radio 4829ab05 · " in late_body[ "item" ][ "body" ]
+        assert "row was 'dropped' at write — added after close, not a reopening]" in late_body[ "item" ][ "body" ]
+        assert late_body[ "item" ][ "body" ].startswith( "ORIGINAL SPEC verbatim." )   # earliest text still first
+        assert late_body[ "item" ][ "status" ] == "dropped"              # a closed row stays closed
+        assert late_body[ "event" ][ "transition" ] == "amended_post_terminal"
+
+        # And the state machine did NOT soften on that closed row: a transition out
+        # of dropped is STILL refused (append-only finality holds).
+        blocked_out = _transition( headers, task_id, to_status="in_progress",
+                                   actor="arnold 8b7225c4", reason="should be refused" )
+        assert blocked_out.status_code == 422
+        assert any( "append-only" in e for e in blocked_out.json()[ "detail" ][ "errors" ] )
 
 
 class TestTaskStoreWrapperE2E:
@@ -424,11 +489,19 @@ class TestTaskStoreWrapperE2E:
         task_transition_impl( api_base_url=BASE_URL, api_key=api_key, actor=actor,
                               task_id=task_id, to_status="in_progress" )
 
-        # blocked-gate: missing typed refs + chase ts → verbatim 422 (I3 — no "pending X" graves)
+        # blocked-gate KIND-AWARE (I3, eab1d7da): a bare ->blocked (no refs) → 1 error
+        # on the empty typed-refs; the chase requirement fires ONLY for a persona ref.
         bare = task_transition_impl( api_base_url=BASE_URL, api_key=api_key, actor=actor,
                                      task_id=task_id, to_status="blocked" )
         assert bare[ "status" ] == "error" and bare[ "http_status" ] == 422, bare
-        assert any( "next_chase_ts" in e for e in bare[ "errors" ] ), bare
+        assert any( "blocked_by" in e for e in bare[ "errors" ] ), bare
+
+        # a persona blocker WITHOUT a chase time surfaces the chase error verbatim
+        persona_no_chase = task_transition_impl( api_base_url=BASE_URL, api_key=api_key, actor=actor,
+                                                 task_id=task_id, to_status="blocked",
+                                                 blocked_by=[ { "kind": "persona", "id": "tiffany" } ] )
+        assert persona_no_chase[ "status" ] == "error" and persona_no_chase[ "http_status" ] == 422, persona_no_chase
+        assert any( "chase" in e for e in persona_no_chase[ "errors" ] ), persona_no_chase
 
         # blocked accepted with typed blocked_by + next_chase_ts
         ok = task_transition_impl( api_base_url=BASE_URL, api_key=api_key, actor=actor,

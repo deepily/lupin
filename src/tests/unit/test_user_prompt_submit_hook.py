@@ -45,15 +45,27 @@ def _write_buffer( tmp_dir, session_id, entries ):
     return buffer_path
 
 
-def _run_hook_main( payload, tmp_dir, session_id="abc12345-fake-uuid" ):
+def _run_hook_main( payload, tmp_dir, session_id="abc12345-fake-uuid",
+                    dm_reconcile_ctx="", dm_capture=None ):
     """
     Run the UserPromptSubmit hook main() with mocked stdin/stdout.
+
+    The store-backed DM inbox reconcile (surface_dm_inbox) is stubbed so the hook
+    test stays hermetic (no :7999 network, no HWM file written to the repo root):
+    it returns `dm_reconcile_ctx` and, when `dm_capture` is a dict, records the
+    call kwargs there.
 
     Returns the emitted JSON dict.
     """
     import io
     from lupin_cli.claude_code.hooks import user_prompt_submit
     from cosa.config.configuration_manager import ConfigurationManager
+
+    def _fake_surface( session_id, extra_surfaced_ids=() ):
+        if dm_capture is not None:
+            dm_capture[ "session_id" ]         = session_id
+            dm_capture[ "extra_surfaced_ids" ] = list( extra_surfaced_ids )
+        return dm_reconcile_ctx
 
     # Seed the ConfigurationManager singleton BEFORE capturing stdout — at a
     # virgin (hermetic) module boundary the hook's CM instantiation would
@@ -71,7 +83,9 @@ def _run_hook_main( payload, tmp_dir, session_id="abc12345-fake-uuid" ):
          patch( "lupin_cli.claude_code.hooks.lib.session_bridge.get_claude_session_id",
                 return_value=session_id ), \
          patch( "lupin_cli.claude_code.hooks.user_prompt_submit.resolve_stable_session_id",
-                side_effect=lambda x: x ):
+                side_effect=lambda x: x ), \
+         patch( "lupin_cli.claude_code.hooks.user_prompt_submit.surface_dm_inbox",
+                side_effect=_fake_surface ):
         try:
             user_prompt_submit.main()
         except SystemExit:
@@ -203,7 +217,11 @@ class TestUserPromptSubmitHook:
 
             ctx = result[ "hookSpecificOutput" ][ "additionalContext" ]
             assert "IMPORTANT:" in ctx
-            assert "mcp__cosa-voice__notify()" in ctx
+            from lupin_cli.claude_code.hooks.lib.hook_common import VOICE_ACK_RIDER
+            # Assert against the SHARED constant, never a re-typed literal (46a17f5a
+            # literal-drift lesson) — the rider's wording is deliberately churned to
+            # keep its byte cost down; a hardcoded copy here would rot on every trim.
+            assert VOICE_ACK_RIDER in ctx
 
     def test_no_voice_no_reminder_emits_empty( self ):
         """else branch: empty buffer AND empty rider → emit {} (no additionalContext)."""
@@ -230,6 +248,59 @@ class TestUserPromptSubmitHook:
             ctx = result[ "hookSpecificOutput" ][ "additionalContext" ]
             assert "[Voice]: do the thing" in ctx
             assert "IMPORTANT:" in ctx          # human-voice rider attached structurally
+
+
+class TestDmInboxReconcileWiring:
+    """Bug 59f355e0: the store-backed DM reconcile is folded into additionalContext."""
+
+    def test_dm_ctx_folded_alone( self ):
+        """Reconcile returns a DM block, no voice / no reminder → block is surfaced."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            payload = { "session_id": "abc12345-fake-uuid" }
+            with patch( "lupin_cli.claude_code.hooks.user_prompt_submit.speakerphone_reminder_block",
+                        return_value="" ):
+                result = _run_hook_main( payload, tmp_dir,
+                                         dm_reconcile_ctx="<system-reminder>\nPEER DM from sam\n</system-reminder>" )
+            ctx = result[ "hookSpecificOutput" ][ "additionalContext" ]
+            assert "PEER DM from sam" in ctx
+            assert "[Voice]" not in ctx
+
+    def test_dm_ctx_folded_after_voice_before_reminder( self ):
+        """Order: human voice first, reconciled DMs next, rider last."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            _write_buffer( tmp_dir, "abc12345", [ _make_buffer_entry( "voice line" ) ] )
+            payload = { "session_id": "abc12345-fake-uuid" }
+            result  = _run_hook_main( payload, tmp_dir,
+                                      dm_reconcile_ctx="RECONCILED_DM_BLOCK" )
+            ctx = result[ "hookSpecificOutput" ][ "additionalContext" ]
+            assert "[Voice]: voice line" in ctx
+            assert "RECONCILED_DM_BLOCK" in ctx
+            # voice < dm < rider ordering
+            assert ctx.index( "[Voice]: voice line" ) < ctx.index( "RECONCILED_DM_BLOCK" )
+            assert ctx.index( "RECONCILED_DM_BLOCK" ) < ctx.index( "<system-reminder>" )
+
+    def test_drained_ai_to_ai_ids_passed_as_extra_surfaced( self ):
+        """ai_to_ai entries drained THIS turn are threaded to the reconcile as
+        extra_surfaced_ids (so a both-paths DM isn't surfaced twice)."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            entry = {
+                "message"         : "peer dm body",
+                "priority"        : "normal",
+                "job_id"          : "abc12345",
+                "sender_id"       : "s",
+                "notification_id" : "nid-123",
+                "timestamp"       : "2026-07-02T10:00:00+00:00",
+                "buffered_at"     : "2026-07-02T10:00:00+00:00",
+                "direction"       : "ai_to_ai",
+                "sender_persona"  : "sam",
+                "sender_icon"     : "🎙️",
+                "thread_id"       : "t1",
+            }
+            _write_buffer( tmp_dir, "abc12345", [ entry ] )
+            capture = {}
+            payload = { "session_id": "abc12345-fake-uuid" }
+            _run_hook_main( payload, tmp_dir, dm_capture=capture )
+            assert capture[ "extra_surfaced_ids" ] == [ "nid-123" ]
 
 
 class TestHeartbeatPokeReset:
@@ -282,6 +353,23 @@ class TestHeartbeatPokeReset:
             with patch( "lupin_cli.claude_code.hooks.user_prompt_submit.reset_poke_count" ) as mock_reset:
                 _run_hook_main( payload, tmp_dir )
             mock_reset.assert_called_once_with( "abc12345-fake-uuid" )
+
+    # ── bug d0d7f068 Part 2 (option C): an injected peer-DM is NOT re-engagement ─
+
+    def test_reset_skipped_when_prompt_is_injected_peer_dm( self ):
+        """THE ENABLER FIX: a peer-DM inject arrives via tmux-wake as the prompt,
+        wrapped in build_peer_dm_reminder. It was NEVER genuine USER re-engagement,
+        so it must NOT reset the poke-cap — treating DMs/taps as re-engagement is
+        what kept reopening the budget so the relief valve never engaged. Frame
+        matched via the SHARED constant (46a17f5a: no re-typed literals)."""
+        from lupin_cli.claude_code.hooks.lib.hook_common import build_peer_dm_reminder
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            dm      = build_peer_dm_reminder( "where are we on X?", persona="mr radio",
+                                              icon="🦉", msg_id="mid1", thread_id="th1" )
+            payload = { "session_id": "abc12345-fake-uuid", "prompt": dm }
+            with patch( "lupin_cli.claude_code.hooks.user_prompt_submit.reset_poke_count" ) as mock_reset:
+                _run_hook_main( payload, tmp_dir )
+            mock_reset.assert_not_called()
 
 
 # ── Standalone ───────────────────────────────────────────────────────────────

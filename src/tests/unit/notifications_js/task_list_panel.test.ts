@@ -24,6 +24,13 @@ import vm from "node:vm";
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
+// The REAL shared constant, not a copy. notifications.js reads the query off
+// `window` (it is a classic script and cannot import), so the harness must stand
+// in for the <script type="module"> the page loads. Importing the actual module
+// rather than pasting the string keeps this test honest: if the constant changes,
+// the assertions below travel with it instead of pinning a stale literal.
+import { TASK_LIST_QUERY } from "../../../lupin_app/static/js/shared/task-list-query.js";
+
 const HERE = dirname( fileURLToPath( import.meta.url ) );
 const NOTIFICATIONS_JS = resolve( HERE, "../../../lupin_app/static/js/notifications.js" );
 
@@ -31,6 +38,11 @@ before( () => {
   if ( typeof globalThis.document === "undefined" ) {
     GlobalRegistrator.register();
   }
+  // Stand in for the page's module script. Without this every fetchTaskList call
+  // short-circuits to the `query_unavailable` deploy-defect branch — which is
+  // correct production behavior and exactly what broke 3 unrelated tests when the
+  // global was first introduced without a harness counterpart.
+  window.LUPIN_TASK_LIST_QUERY = TASK_LIST_QUERY;
   const fullSource = readFileSync( NOTIFICATIONS_JS, "utf8" );
   const initIdx    = fullSource.indexOf( "// Initialize when DOM is ready" );
   assert.ok( initIdx > 0, "bottom-of-file init marker must be found" );
@@ -54,6 +66,15 @@ type TaskUI = Record<string, unknown> & {
   groupTasksByOwner: ( tasks: unknown ) => { totalCount: number; groups: TaskGroupModel[] };
   _renderTaskRow: ( task: Record<string, unknown>, ianaZone?: unknown ) => string;
   renderTaskListTable: ( model: { groups: TaskGroupModel[] }, ianaZone?: unknown, collapsedOwners?: Set<string> ) => string;
+  // Row redesign (2026.06.29): id column + title truncation + 📄 body overlay
+  _taskIdLabel: ( task: unknown ) => string;
+  _truncateTaskTitle: ( label: unknown ) => string;
+  _taskBodyIsEmpty: ( task: unknown ) => boolean;
+  _handleTaskListClick: ( target: unknown ) => void;
+  openTaskBodyOverlay: ( bodyText: string, idLabel: string ) => void;
+  _dismissTaskBodyOverlay: () => void;
+  TASK_TITLE_TRUNCATE_LEN: number;
+  _taskBodyOverlayKeyListener: ( ( e: KeyboardEvent ) => void ) | null;
   // Per-persona accordion (2026-06-17)
   _taskGroupOwnerKey: ( group: TaskGroupModel ) => string | null;
   _taskGroupIdSlug: ( ownerKey: unknown ) => string;
@@ -103,6 +124,7 @@ function newUI(): TaskUI {
   ui.TASK_LIST_COLLAPSED_KEY    = "lupin.taskList.collapsedOwners";
   ui.TASK_LIST_UNASSIGNED_KEY   = "__unassigned__";
   ui._taskListAccordionWired    = false;
+  ui.TASK_TITLE_TRUNCATE_LEN    = 60;
   return ui;
 }
 
@@ -340,10 +362,11 @@ test( "groupTasksByOwner: all-owned input → no Unassigned bucket", () => {
 
 // ─────────────────────────── _renderTaskRow / renderTaskListTable (pure) ───────────────────────────
 
-test( "_renderTaskRow: status class on <tr>, status dot, all eight cells, blocked_by shown", () => {
+test( "_renderTaskRow: status class on <tr>, status dot, all ten cells, blocked_by shown", () => {
   const ui = newUI();
   const html = ui._renderTaskRow( T_BLOCKED, "America/New_York" );
   assert.match( html, /<tr class="task-row task-status-blocked">/ );
+  assert.match( html, /<td class="task-col-id">t1<\/td>/ );    // NEW leftmost ID col (first 8 of id)
   assert.match( html, /<td class="task-col-status"><span class="task-status-dot"><\/span>blocked<\/td>/ );
   assert.match( html, /Wire the seam/ );
   assert.match( html, /decision:abc/ );                 // blocked_by rendered
@@ -351,6 +374,7 @@ test( "_renderTaskRow: status class on <tr>, status dot, all eight cells, blocke
   assert.match( html, /task-col-priority task-prio-high/ );   // P1 → high tint
   assert.match( html, />lupin</ );                      // project
   assert.match( html, /task-class-badge task-class-task/ );
+  assert.match( html, /<td class="task-col-detail">/ );       // NEW rightmost Detail col
 } );
 
 test( "_renderTaskRow: 'none' blocked_by → em-dash; null next_chase → em-dash; no prio tint for missing", () => {
@@ -385,7 +409,7 @@ test( "_renderTaskRow: item_class is slug-sanitized in the class attr (no attrib
   assert.match( html, /task-class-taskonmouseoverx/ );   // stripped to alnum/_/-
 } );
 
-test( "renderTaskListTable: owner group header (owner · count) + Unassigned label, eight columns, colspan 8", () => {
+test( "renderTaskListTable: owner group header (owner · count) + Unassigned label, ten columns, colspan 10", () => {
   const ui = newUI();
   const model = ui.groupTasksByOwner( [ T_BLOCKED, T_QUEUED, T_ORPHAN ] );
   const html = ui.renderTaskListTable( model, undefined );
@@ -394,11 +418,244 @@ test( "renderTaskListTable: owner group header (owner · count) + Unassigned lab
   assert.match( html, /Krishna · 1/ );
   assert.match( html, /\(Unassigned\)/ );
   assert.match( html, /task-group-unassigned/ );
-  for ( const col of [ "Title", "Class", "Status", "Blocked by", "Next chase", "Accountable", "Priority", "Project" ] ) {
+  for ( const col of [ "ID", "Title", "Class", "Status", "Blocked by", "Next chase", "Accountable", "Priority", "Project", "Detail" ] ) {
     assert.ok( html.includes( col ), `header "${col}" present` );
   }
-  assert.match( html, /colspan="8"/ );
+  assert.match( html, /colspan="10"/ );                 // augmented 8 → 10 columns
   assert.ok( html.indexOf( "Krishna" ) < html.indexOf( "(Unassigned)" ), "Unassigned renders last" );
+} );
+
+// ─────────────── Row redesign 2026.06.29: id col + title truncation + 📄 body overlay ───────────────
+
+test( "_taskIdLabel: first 8 chars of id; long UUID truncated; absent/null → em-dash", () => {
+  const ui = newUI();
+  assert.equal( ui._taskIdLabel( { id: "3b85863e-ccb9-4948-948c-627e3922850e" } ), "3b85863e" );
+  assert.equal( ui._taskIdLabel( { id: "abc" } ), "abc" );      // shorter than 8 → verbatim
+  assert.equal( ui._taskIdLabel( { id: "" } ), "—" );
+  assert.equal( ui._taskIdLabel( { } ), "—" );                  // id absent
+  assert.equal( ui._taskIdLabel( { id: null } ), "—" );
+  assert.equal( ui._taskIdLabel( null ), "—" );                 // no task object
+} );
+
+test( "_truncateTaskTitle: under/at cap verbatim; over cap → slice(60)+ellipsis", () => {
+  const ui = newUI();
+  assert.equal( ui._truncateTaskTitle( "short title" ), "short title" );
+  const at = "x".repeat( 60 );
+  assert.equal( ui._truncateTaskTitle( at ), at );              // exactly at cap → no ellipsis
+  const over = "y".repeat( 90 );
+  assert.equal( ui._truncateTaskTitle( over ), "y".repeat( 60 ) + "…" );
+} );
+
+test( "_taskBodyIsEmpty: null/undefined/blank → true; non-blank → false", () => {
+  const ui = newUI();
+  assert.equal( ui._taskBodyIsEmpty( { body: null } ), true );
+  assert.equal( ui._taskBodyIsEmpty( { } ), true );             // body absent
+  assert.equal( ui._taskBodyIsEmpty( { body: "" } ), true );
+  assert.equal( ui._taskBodyIsEmpty( { body: "   \n\t " } ), true );
+  assert.equal( ui._taskBodyIsEmpty( null ), true );            // no task object
+  assert.equal( ui._taskBodyIsEmpty( { body: "detail here" } ), false );
+} );
+
+test( "_renderTaskRow: long title truncated in cell, FULL title in title= tooltip", () => {
+  const ui = newUI();
+  const longTitle = "Z".repeat( 90 );
+  const html = ui._renderTaskRow( { id: "abcdef12", title: longTitle, status: "queued" }, undefined );
+  assert.match( html, /<td class="task-col-id">abcdef12<\/td>/ );
+  assert.ok( html.includes( "Z".repeat( 60 ) + "…" ), "cell text truncated + ellipsis" );
+  assert.ok( html.includes( `title="${longTitle}"` ), "full title rides the tooltip attr" );
+} );
+
+test( "_renderTaskRow: body present → live clickable 📄 carrying data-task-body/-id", () => {
+  const ui = newUI();
+  const html = ui._renderTaskRow( { id: "feedface", title: "t", status: "queued", body: "the detail" }, undefined );
+  assert.match( html, /class="task-detail-emoji" role="button" tabindex="0"/ );
+  assert.match( html, /data-task-id="feedface"/ );
+  assert.match( html, /data-task-body="the detail"/ );
+  assert.ok( !html.includes( "task-detail-empty" ), "a live emoji is not dimmed" );
+} );
+
+test( "_renderTaskRow: empty body → DIMMED 📄 in place (disabled, no data-body)", () => {
+  const ui = newUI();
+  const html = ui._renderTaskRow( { id: "x", title: "t", status: "queued", body: "" }, undefined );
+  assert.match( html, /class="task-detail-emoji task-detail-empty" aria-disabled="true"/ );
+  assert.ok( !html.includes( "data-task-body=" ), "dimmed emoji carries no body payload" );
+} );
+
+test( "_renderTaskRow: a body containing quotes/markup is attribute-escaped (no injection)", () => {
+  const ui = newUI();
+  const html = ui._renderTaskRow( { id: "x", title: "t", status: "queued", body: '"><img onerror=alert(1)>' }, undefined );
+  assert.ok( !html.includes( '"><img' ), "raw quote+markup must not break out of the attribute" );
+  assert.match( html, /&quot;&gt;&lt;img/ );
+} );
+
+test( "_renderTaskRow: array blocked_by — typed ref, kind-less ref, and raw entry all rendered", () => {
+  const ui = newUI();
+  const html = ui._renderTaskRow(
+    { id: "x", title: "t", status: "blocked",
+      blocked_by: [ { kind: "persona", id: "rio" }, { id: "bare" }, "raw-str" ] }, undefined );
+  assert.match( html, /persona:rio/ );      // typed ref → kind:id
+  assert.match( html, /bare/ );             // object w/o kind → id only
+  assert.match( html, /raw-str/ );          // non-object entry → String(b)
+} );
+
+test( "_handleTaskListClick: a target lacking .closest is safely ignored (defensive guard)", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  ui._handleTaskListClick( {} );            // no .closest → emoji null → accordion toggle no-ops
+  assert.equal( document.getElementById( "task-body-overlay" ), null );
+} );
+
+test( "_handleTaskListClick: a LIVE 📄 with NO dataset opens overlay with empty body/id (|| '' fallback)", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  const emoji = document.createElement( "span" );
+  emoji.className = "task-detail-emoji";    // live (not dimmed) but carries no data-task-* attrs
+  document.getElementById( "task-list-container" )!.appendChild( emoji );
+  ui._handleTaskListClick( emoji );
+  const overlay = document.getElementById( "task-body-overlay" )!;
+  assert.ok( overlay, "overlay opened even with no dataset" );
+  assert.equal( overlay.querySelector( ".task-body-overlay-body" )!.textContent, "" );
+  assert.match( overlay.querySelector( ".task-body-overlay-header" )!.textContent!, /Task detail/ );
+  ui._dismissTaskBodyOverlay();
+} );
+
+test( "_handleTaskListClick: clicking a LIVE 📄 opens the body overlay", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  const container = document.getElementById( "task-list-container" )!;
+  container.innerHTML = ui._renderTaskRow( { id: "abcd1234", title: "t", status: "queued", body: "overlay body text" }, undefined );
+  const emoji = container.querySelector( ".task-detail-emoji" )!;
+  ui._handleTaskListClick( emoji );
+  const overlay = document.getElementById( "task-body-overlay" );
+  assert.ok( overlay, "overlay opened" );
+  assert.match( overlay!.querySelector( ".task-body-overlay-body" )!.textContent!, /overlay body text/ );
+  assert.match( overlay!.querySelector( ".task-body-overlay-header" )!.textContent!, /abcd1234/ );
+  ui._dismissTaskBodyOverlay();
+} );
+
+test( "_handleTaskListClick: a DIMMED 📄 is inert — no overlay, no accordion toggle", () => {
+  const ui = newUI();
+  buildAccordionDOM( ui );
+  const container = document.getElementById( "task-list-container" )!;
+  // Inject a dimmed emoji and click it: must neither open an overlay nor toggle a group.
+  const dimmed = document.createElement( "span" );
+  dimmed.className = "task-detail-emoji task-detail-empty";
+  container.appendChild( dimmed );
+  const before = container.innerHTML;
+  ui._handleTaskListClick( dimmed );
+  assert.equal( document.getElementById( "task-body-overlay" ), null, "no overlay for dimmed emoji" );
+  assert.equal( container.innerHTML, before, "no accordion toggle for dimmed emoji" );
+} );
+
+test( "_handleTaskListClick: a non-emoji target delegates to the accordion toggle", () => {
+  const ui = newUI();
+  buildAccordionDOM( ui );
+  const header = document.querySelector( ".task-group-header" ) as HTMLElement;
+  const tbody  = header.closest( "tbody.task-group" ) as HTMLElement;
+  assert.ok( !tbody.classList.contains( "collapsed" ) );
+  ui._handleTaskListClick( header );
+  assert.ok( tbody.classList.contains( "collapsed" ), "non-emoji click toggled the group (delegation intact)" );
+} );
+
+test( "openTaskBodyOverlay: backdrop click dismisses; inner panel click does NOT", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  ui.openTaskBodyOverlay( "body", "id8" );
+  const overlay = document.getElementById( "task-body-overlay" )!;
+  const panel   = overlay.querySelector( ".task-body-overlay-content" ) as HTMLElement;
+  panel.dispatchEvent( new Event( "click", { bubbles: true } ) );   // inner click bubbles to overlay but is stopped
+  assert.ok( document.getElementById( "task-body-overlay" ), "inner-panel click keeps overlay open" );
+  overlay.dispatchEvent( new Event( "click", { bubbles: true } ) ); // backdrop click
+  assert.equal( document.getElementById( "task-body-overlay" ), null, "backdrop click dismissed" );
+} );
+
+test( "openTaskBodyOverlay: Escape dismisses + detaches its keydown listener", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  ui.openTaskBodyOverlay( "body", "id8" );
+  assert.ok( ui._taskBodyOverlayKeyListener, "Esc listener stored while open" );
+  document.dispatchEvent( new KeyboardEvent( "keydown", { key: "Escape" } ) );
+  assert.equal( document.getElementById( "task-body-overlay" ), null, "Esc dismissed" );
+  assert.equal( ui._taskBodyOverlayKeyListener, null, "Esc listener detached on dismiss" );
+} );
+
+test( "openTaskBodyOverlay: a non-Escape key does NOT dismiss", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  ui.openTaskBodyOverlay( "body", "id8" );
+  document.dispatchEvent( new KeyboardEvent( "keydown", { key: "a" } ) );
+  assert.ok( document.getElementById( "task-body-overlay" ), "non-Esc key keeps overlay open" );
+  ui._dismissTaskBodyOverlay();
+} );
+
+test( "openTaskBodyOverlay: opening twice replaces the prior overlay (single instance)", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  ui.openTaskBodyOverlay( "first", "id1" );
+  ui.openTaskBodyOverlay( "second", "id2" );
+  assert.equal( document.querySelectorAll( "#task-body-overlay" ).length, 1, "only one overlay at a time" );
+  assert.match( document.querySelector( ".task-body-overlay-body" )!.textContent!, /second/ );
+  ui._dismissTaskBodyOverlay();
+} );
+
+test( "openTaskBodyOverlay: empty idLabel → generic 'Task detail' header", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  ui.openTaskBodyOverlay( "body", "" );
+  assert.match( document.querySelector( ".task-body-overlay-header" )!.textContent!, /Task detail/ );
+  ui._dismissTaskBodyOverlay();
+} );
+
+test( "openTaskBodyOverlay: no document.body → no-op (degrade-safe, no throw)", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  const body = document.body;
+  body.remove();                                        // document.body becomes null
+  assert.equal( document.body, null );
+  ui.openTaskBodyOverlay( "body", "id" );               // must not throw, must not create
+  document.documentElement.appendChild( body );         // restore for subsequent tests
+  assert.equal( document.getElementById( "task-body-overlay" ), null );
+} );
+
+test( "_dismissTaskBodyOverlay: idempotent when no overlay is open (no throw)", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  ui._dismissTaskBodyOverlay();                         // nothing open
+  assert.equal( document.getElementById( "task-body-overlay" ), null );
+} );
+
+test( "_wireTaskListAccordion: a delegated 📄 click through the wired listener opens the overlay", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  const container = document.getElementById( "task-list-container" )!;
+  container.innerHTML = ui._renderTaskRow( { id: "wired123", title: "t", status: "queued", body: "delegated body" }, undefined );
+  ui._wireTaskListAccordion();
+  const emoji = container.querySelector( ".task-detail-emoji" ) as HTMLElement;
+  emoji.dispatchEvent( new Event( "click", { bubbles: true } ) );
+  assert.ok( document.getElementById( "task-body-overlay" ), "wired delegation opened the overlay" );
+  ui._dismissTaskBodyOverlay();
+} );
+
+test( "_wireTaskListAccordion: Enter on a focused 📄 opens the overlay (keyboard a11y)", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  const container = document.getElementById( "task-list-container" )!;
+  container.innerHTML = ui._renderTaskRow( { id: "kbd12345", title: "t", status: "queued", body: "kbd body" }, undefined );
+  ui._wireTaskListAccordion();
+  const emoji = container.querySelector( ".task-detail-emoji" ) as HTMLElement;
+  emoji.dispatchEvent( new KeyboardEvent( "keydown", { key: "Enter", bubbles: true } ) );
+  assert.ok( document.getElementById( "task-body-overlay" ), "Enter on emoji opened the overlay" );
+  ui._dismissTaskBodyOverlay();
+} );
+
+test( "_wireTaskListAccordion: a keydown that is neither emoji nor header is ignored", () => {
+  const ui = newUI();
+  buildAccordionDOM( ui );
+  ui._wireTaskListAccordion();
+  const container = document.getElementById( "task-list-container" )!;
+  // Enter on the container itself (not on an emoji or header) → early return, no overlay/toggle.
+  container.dispatchEvent( new KeyboardEvent( "keydown", { key: "Enter", bubbles: true } ) );
+  assert.equal( document.getElementById( "task-body-overlay" ), null );
 } );
 
 // ─────────────────────────── renderTaskList (DOM dispatch) ───────────────────────────
@@ -549,6 +806,57 @@ test( "fetchTaskList: 200 ok → parsed { tasks, count }", async () => {
   assert.deepEqual( await ui.fetchTaskList(), body );
 } );
 
+test( "fetchTaskList: fetches the shared query — guard escapes in, terminal rows OUT", async () => {
+  // RE-CUT 2026-07-22. The old version of this test asserted
+  // `include_terminal=true` and its comment claimed that kept "the human's
+  // all-status view from ever being truncated". Measurement disproved both
+  // halves: include_terminal dragged done/dropped history in, inflating the
+  // result to 1,171 rows against a server `limit` hard-capped at 500, so 671
+  // rows were dropped with no indicator — and since ordering is newest-first,
+  // the evicted rows were the OPEN ones this panel exists to show. The comment
+  // promised an invariant the parameter was actively breaking.
+  const ui = newUI();
+  let seen = "";
+  ui.authedFetch = async ( url: string ) => { seen = url; return fakeResponse( 200, true, { tasks: [], count: 0 } ); };
+  await ui.fetchTaskList();
+  assert.ok( seen.includes( "/api/tasks?" ), "hits the tasks endpoint" );
+  assert.ok( seen.includes( "unscoped_audit=true" ), "passes unscoped_audit=true" );
+  assert.ok( seen.includes( "limit=500" ), "still caps at 500" );
+  assert.ok( seen.includes( "char_budget=0" ), "opts out of the response byte budget" );
+  assert.ok( seen.includes( "hide_parked=false" ), "asks for parked rows the server hides by default" );
+  assert.ok( !seen.includes( "include_terminal" ), "must NOT request terminal rows — that was the truncation bug" );
+} );
+
+test( "fetchTaskList: uses the SHARED constant, not a private literal", async () => {
+  // The whole point of the shared module: one string, two consumers. If this
+  // panel ever grows its own copy again, the two will drift exactly as they did
+  // before (char_budget=0 in one, absent in the other) and a fix applied to one
+  // will leave the bug live in the other.
+  const ui = newUI();
+  let seen = "";
+  ui.authedFetch = async ( url: string ) => { seen = url; return fakeResponse( 200, true, { tasks: [], count: 0 } ); };
+  await ui.fetchTaskList();
+  assert.equal( seen, TASK_LIST_QUERY, "fetches exactly the shared constant" );
+} );
+
+test( "fetchTaskList: missing query module → query_unavailable, NOT unreachable", async () => {
+  // A 404 on the static module is a DEPLOY defect. It must not borrow the
+  // store's transport-error state: same blank board, different remedy, and the
+  // poll repeats every 60s, so collapsing them has an operator triaging a
+  // missing asset as an outage indefinitely.
+  const ui = newUI();
+  let fetched = false;
+  ui.authedFetch = async () => { fetched = true; return fakeResponse( 200, true, { tasks: [], count: 0 } ); };
+  const saved = window.LUPIN_TASK_LIST_QUERY;
+  delete window.LUPIN_TASK_LIST_QUERY;
+  try {
+    assert.deepEqual( await ui.fetchTaskList(), { status: "query_unavailable", tasks: null } );
+    assert.equal( fetched, false, "never hits the network without a query" );
+  } finally {
+    window.LUPIN_TASK_LIST_QUERY = saved;
+  }
+} );
+
 test( "fetchTaskList: 401 → auth_required", async () => {
   const ui = newUI();
   ui.authedFetch = async () => fakeResponse( 401, false, null );
@@ -672,7 +980,7 @@ test( "renderTaskListTable: collapsed owner → collapsed class + ▸ + aria-exp
   const model = ui.groupTasksByOwner( [ T_BLOCKED, T_QUEUED ] );           // Rio, Krishna
   const html  = ui.renderTaskListTable( model, undefined, new Set( [ "Rio" ] ) );
   assert.match( html, /<tbody class="task-group collapsed" id="task-group-Rio" data-owner="Rio">/ );
-  assert.match( html, /aria-expanded="false"[^>]*>\s*<td colspan="8"><span class="task-group-chevron" aria-hidden="true">▸/ );
+  assert.match( html, /aria-expanded="false"[^>]*>\s*<td colspan="10"><span class="task-group-chevron" aria-hidden="true">▸/ );
   // Krishna (not in the set) stays expanded
   assert.match( html, /<tbody class="task-group" id="task-group-Krishna"/ );
 } );
@@ -923,6 +1231,321 @@ test( "renderTaskList: wires accordion delegation + renders persisted-collapsed 
   assert.ok( rio.classList.contains( "collapsed" ), "persisted collapse honored on render" );
   const krishna = document.querySelector( 'tbody.task-group[data-owner="Krishna"]' )!;
   assert.ok( !krishna.classList.contains( "collapsed" ) );
+} );
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PARK-ACTIVE predicate — the browser twin of park_is_active()
+// (cosa/rest/task_store_owed.py). That module exists because divergence across
+// its readers "has bitten this fleet repeatedly", and this panel is now a
+// FOURTH reader. Every case below is lifted from the Python twin's own
+// contract so a drift on either side shows up here.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// FIXTURE MARGINS ARE DELIBERATE (audit rule, María 2026-07-22): a fixture's
+// distance from the boundary must be SMALLER than the largest quantity that
+// could mask the bug, or the assertion cannot fail. The first draft of this
+// block used ±6h and a mutation deleting the timezone normalization outright
+// SURVIVED it — a 4h local offset cannot flip a 6h margin.
+//
+// These two are ZONED (explicit Z), so no offset applies and the masking
+// quantity is any accidental skew — ms/seconds confusion, a hardcoded fudge.
+// Five minutes is tighter than any such slip, so anything of the kind flips
+// them. The zone-less pair below is sized differently and for a different
+// reason; see that test.
+const NOW_MS   = Date.parse( "2026-07-22T12:00:00Z" );
+const FUTURE   = "2026-07-22T12:05:00Z";
+const PAST     = "2026-07-22T11:55:00Z";
+const PARKED   = ( over: Record<string, unknown> = {} ) =>
+  ( { id: "p1", item_class: "task", title: "Deferred", status: "parked",
+      owner_persona: "Rio", park_reason: "waiting on Rick", next_chase_ts: FUTURE, ...over } );
+
+// The RENDER path calls _taskIsParked( task ) with no `now`, so it reads the
+// wall clock. Freeze it, or these tests quietly depend on the hour they run in.
+//
+// This helper exists because tightening the fixtures above EXPOSED that
+// dependence: with FUTURE at +6h the render tests passed only because 18:00Z was
+// still ahead of real time when they were written — a time bomb that would have
+// gone red on its own that evening and looked like a regression in the code.
+// The clock is now an input, not an ambient condition.
+function withFrozenNow<T>( atMs: number, fn: () => T ): T {
+  const realNow = Date.now;
+  Date.now = () => atMs;
+  try { return fn(); } finally { Date.now = realNow; }
+}
+
+test( "_taskIsParked: parked + FUTURE chase → park-active", () => {
+  assert.equal( newUI()._taskIsParked( PARKED(), NOW_MS ), true );
+} );
+
+test( "_taskIsParked: parked + PAST chase → NOT parked (expired, rejoined owed)", () => {
+  // Self-expiry is computed at read time and never written back. A row whose
+  // chase has passed is workable again and must render normally — dimming it
+  // forever is the failure mode the whole read-time rule exists to avoid.
+  assert.equal( newUI()._taskIsParked( PARKED( { next_chase_ts: PAST } ), NOW_MS ), false );
+} );
+
+test( "_taskIsParked: parked + chase EXACTLY now → NOT parked (the boundary)", () => {
+  // The Python twin pins `chase == now -> False` explicitly: the chase has COME
+  // DUE. Pinned here because an off-by-one to >= is invisible in every other case.
+  assert.equal( newUI()._taskIsParked( PARKED( { next_chase_ts: "2026-07-22T12:00:00Z" } ), NOW_MS ), false );
+} );
+
+test( "_taskIsParked: parked + NULL chase → NOT parked (fail-loud-toward-owed)", () => {
+  // ⚠️ THE COUNTER-INTUITIVE ONE, and the reason the first draft of this
+  // predicate was overruled. A malformed park is VISIBLE work: the store's
+  // is_owed( "parked", None, now ) is True. Dimming it would have the dashboard
+  // whisper "deferred, ignore me" over a row the store is actively counting as
+  // owed — the same masquerade the marking exists to prevent, pointed backwards.
+  assert.equal( newUI()._taskIsParked( PARKED( { next_chase_ts: null } ), NOW_MS ), false );
+} );
+
+test( "_taskIsParked: parked + unparseable chase → NOT parked", () => {
+  assert.equal( newUI()._taskIsParked( PARKED( { next_chase_ts: "not-a-date" } ), NOW_MS ), false );
+} );
+
+test( "_taskIsParked: keyed on STATUS, not on park_reason", () => {
+  // park_reason is not the marker — `parked` is a real status. A queued row that
+  // merely carries a reason is not parked, and a parked row is parked whether or
+  // not the reason survived.
+  assert.equal( newUI()._taskIsParked( PARKED( { status: "queued" } ), NOW_MS ), false );
+  assert.equal( newUI()._taskIsParked( PARKED( { park_reason: null } ), NOW_MS ), true );
+} );
+
+test( "_taskIsParked: a ZONE-LESS chase is read as UTC, matching the Python twin", () => {
+  // Cross-language trap: Python does chase.replace( tzinfo=utc ) for a naive
+  // value, while Date.parse( "…T14:00:00" ) resolves as LOCAL time. Untreated,
+  // the twins disagree by the operator's UTC offset — silently, and only for
+  // zone-less rows.
+  //
+  // ⚠️ THE TIMES ARE CHOSEN, NOT ARBITRARY — this test's FIRST draft used ±6h
+  // from `now` and a mutation that deleted the normalization entirely SURVIVED
+  // it: a 4-hour local offset cannot flip a 6-hour margin, so both assertions
+  // passed either way and the test proved nothing. Both instants below sit
+  // INSIDE one UTC offset of `now` (12:00Z), and they straddle it in opposite
+  // directions so the pair is sensitive to offsets of either sign:
+  //
+  //   09:00 naive → as UTC 09:00Z (before now → false)
+  //                 read LOCAL at a NEGATIVE offset it lands after now → flips
+  //   13:00 naive → as UTC 13:00Z (after now  → true)
+  //                 read LOCAL at a POSITIVE offset it lands before now → flips
+  //
+  // Any non-zero offset flips at least one. Only a UTC±0 machine passes both
+  // under the mutation — and there the two readings are genuinely identical.
+  const ui = newUI();
+  assert.equal( ui._taskIsParked( PARKED( { next_chase_ts: "2026-07-22T09:00:00" } ), NOW_MS ), false,
+    "09:00 zone-less is 09:00Z — BEFORE now, so not parked" );
+  assert.equal( ui._taskIsParked( PARKED( { next_chase_ts: "2026-07-22T13:00:00" } ), NOW_MS ), true,
+    "13:00 zone-less is 13:00Z — AFTER now, so still parked" );
+} );
+
+test( "_taskIsParked: junk input never throws", () => {
+  const ui = newUI();
+  for ( const junk of [ null, undefined, {}, { status: "parked" }, { status: "parked", next_chase_ts: 42 } ] ) {
+    assert.equal( ui._taskIsParked( junk, NOW_MS ), false );
+  }
+} );
+
+test( "_renderTaskRow: park-active row is dimmed + badged; expired park is NOT", () => {
+  const ui = newUI();
+  withFrozenNow( NOW_MS, () => {
+    const active = ui._renderTaskRow( PARKED() );
+    assert.ok( active.includes( "task-row-parked" ), "park-active row carries the dim class" );
+    assert.ok( active.includes( "task-parked-badge" ), "and the badge" );
+    assert.ok( active.includes( "waiting on Rick" ), "badge tooltip carries the operator's own reason" );
+
+    const expired = ui._renderTaskRow( PARKED( { next_chase_ts: PAST } ) );
+    assert.ok( !expired.includes( "task-row-parked" ), "expired park renders as ordinary workable row" );
+  } );
+} );
+
+test( "parked rows are NON-terminal and survive the open-status filter", () => {
+  // The path that can actually regress. With include_terminal gone the renderer
+  // never receives done/dropped at all, so terminal-parked is moot by
+  // construction — but a parked row MUST reach the table, or asking the server
+  // for it with hide_parked=false accomplishes nothing.
+  const ui = newUI();
+  assert.equal( ui.isTaskOpenStatus( "parked" ), true, "parked is non-terminal" );
+  buildPanelDOM();
+  withFrozenNow( NOW_MS, () => {
+    ui.renderTaskList( { tasks: [ PARKED() ], count: 1, total: 1, has_more: false } );
+  } );
+  assert.equal( document.getElementById( "task-list-count" )!.textContent, "1", "parked row is counted" );
+  assert.ok( document.querySelector( "tr.task-row-parked" ), "parked row is rendered, dimmed" );
+} );
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TRUNCATION BANNER — the LOUD half. The defect was the silence, not the number.
+// ═══════════════════════════════════════════════════════════════════════════
+
+test( "truncation banner: absent when the server reports a complete board", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  ui.renderTaskList( { tasks: [ T_QUEUED ], count: 1, total: 1, has_more: false } );
+  assert.ok( !document.querySelector( ".task-list-truncated" ), "no banner on a complete board" );
+} );
+
+test( "truncation banner: fires on has_more, naming shown / total / remainder", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  ui.renderTaskList( { tasks: [ T_QUEUED ], count: 500, total: 1171, has_more: true } );
+  const banner = document.querySelector( ".task-list-truncated" );
+  assert.ok( banner, "banner present" );
+  const text = banner!.textContent ?? "";
+  assert.match( text, /500/, "names how many are shown" );
+  assert.match( text, /1171/, "names how many exist" );
+  assert.match( text, /671/, "names the remainder — the number nobody could see before" );
+} );
+
+test( "truncation banner: count < total fires it even when has_more is absent", () => {
+  // Two independent ways to notice, so one missing field cannot restore silence.
+  const ui = newUI();
+  buildPanelDOM();
+  ui.renderTaskList( { tasks: [ T_QUEUED ], count: 500, total: 1171 } );
+  assert.ok( document.querySelector( ".task-list-truncated" ), "cross-check fires without has_more" );
+} );
+
+test( "truncation banner: rows that DID arrive are still rendered beneath it", () => {
+  // The banner supplements the board; it never replaces it. A truncated board is
+  // still worth reading.
+  const ui = newUI();
+  buildPanelDOM();
+  ui.renderTaskList( { tasks: [ T_BLOCKED, T_QUEUED ], count: 500, total: 1171, has_more: true } );
+  assert.ok( document.querySelector( ".task-list-truncated" ), "banner present" );
+  assert.ok( document.querySelectorAll( "tr.task-row" ).length >= 2, "table still rendered" );
+} );
+
+test( "truncation banner: fires on an EMPTY page that the server says is partial", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  ui.renderTaskList( { tasks: [], count: 0, total: 40, has_more: true } );
+  assert.ok( document.querySelector( ".task-list-truncated" ), "banner survives the empty branch" );
+  assert.ok( document.querySelector( ".task-list-empty" ), "empty message still shown" );
+} );
+
+test( "truncation banner: garbage / missing totals are treated as no claim", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  ui.renderTaskList( { tasks: [ T_QUEUED ], count: 1 } );
+  assert.ok( !document.querySelector( ".task-list-truncated" ), "absent total makes no claim" );
+  buildPanelDOM();
+  ui.renderTaskList( { tasks: [ T_QUEUED ], count: 1, total: "lots", has_more: "yes" } );
+  assert.ok( !document.querySelector( ".task-list-truncated" ), "non-numeric total makes no claim" );
+} );
+
+// ── Trigger 3: the one that survives `total` going missing ────────────────────
+// has_more and count<total BOTH key on `total`. One shared dependency, and its
+// absence restores the exact silence this banner removes. This trigger needs
+// neither field.
+
+test( "truncation banner: a FULL page with no total says UNKNOWN, not nothing", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  // 500 rows === the limit in the shared query, and no `total` to check it
+  // against. Legitimately-exactly-500 is possible, which is why the wording is
+  // UNKNOWN rather than a truncation claim — unknown-and-loud beats
+  // assumed-complete-and-quiet.
+  ui.renderTaskList( { tasks: [ T_QUEUED ], count: 500 } );
+  const banner = document.querySelector( ".task-list-truncated" );
+  assert.ok( banner, "full page + no total still raises a banner" );
+  assert.match( banner!.textContent ?? "", /UNKNOWN/, "says completeness is unknown" );
+} );
+
+test( "truncation banner: a full page WITH a matching total is silent", () => {
+  // The discriminator. Same 500 rows; the server accounted for them, so there is
+  // nothing to warn about. Without this the trigger would fire on every full
+  // healthy page and train the operator to ignore the banner.
+  const ui = newUI();
+  buildPanelDOM();
+  ui.renderTaskList( { tasks: [ T_QUEUED ], count: 500, total: 500, has_more: false } );
+  assert.ok( !document.querySelector( ".task-list-truncated" ), "accounted-for full page is silent" );
+} );
+
+test( "truncation banner: a SHORT page with no total is silent", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  ui.renderTaskList( { tasks: [ T_QUEUED ], count: 499 } );
+  assert.ok( !document.querySelector( ".task-list-truncated" ), "a page under the limit implies the end of the board" );
+} );
+
+test( "_taskListQueryLimit: read from the shared query, not hardcoded", () => {
+  // A hardcoded 500 would stop matching the day the query is edited, and the
+  // full-page trigger would quietly never fire again — a guard that cannot fire.
+  const ui = newUI();
+  assert.equal( ui._taskListQueryLimit(), 500, "parses the live constant" );
+  const saved = window.LUPIN_TASK_LIST_QUERY;
+  try {
+    window.LUPIN_TASK_LIST_QUERY = "/api/tasks?limit=750&unscoped_audit=true";
+    assert.equal( ui._taskListQueryLimit(), 750, "tracks an edited limit" );
+    buildPanelDOM();
+    ui.renderTaskList( { tasks: [ T_QUEUED ], count: 750 } );
+    assert.ok( document.querySelector( ".task-list-truncated" ), "full-page trigger follows the new limit" );
+    window.LUPIN_TASK_LIST_QUERY = "/api/tasks?unscoped_audit=true";
+    assert.ok( Number.isNaN( ui._taskListQueryLimit() ), "absent limit → NaN, trigger simply does not fire" );
+  } finally {
+    window.LUPIN_TASK_LIST_QUERY = saved;
+  }
+} );
+
+// ── Server warnings[] — verbatim, own line, never in the arithmetic ───────────
+
+test( "server warnings render VERBATIM on their own line", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  ui.renderTaskList( { tasks: [ T_QUEUED ], count: 1, total: 1, has_more: false,
+                       warnings: [ "non-terse pull returned 900 full rows" ] } );
+  const bar = document.querySelector( ".task-list-truncated" );
+  assert.ok( bar, "a warning alone raises the bar even on a complete board" );
+  assert.match( bar!.textContent ?? "", /non-terse pull returned 900 full rows/, "server text unedited" );
+} );
+
+test( "server warnings do NOT feed the shown/total arithmetic", () => {
+  // An unrecognized warning has no numbers. Inventing them would be worse than
+  // silence, so the count sentence and the warning line stay separate elements.
+  const ui = newUI();
+  buildPanelDOM();
+  ui.renderTaskList( { tasks: [ T_QUEUED ], count: 500, total: 1171, has_more: true,
+                       warnings: [ "something new the client has never seen" ] } );
+  const bars = document.querySelectorAll( ".task-list-truncated" );
+  assert.equal( bars.length, 2, "two separate lines: the count claim and the server's own words" );
+  assert.match( bars[ 0 ]!.textContent ?? "", /671 not displayed/, "arithmetic line unchanged by the warning" );
+  assert.match( bars[ 1 ]!.textContent ?? "", /something new the client has never seen/ );
+} );
+
+test( "server warnings: empty / non-array is silent", () => {
+  const ui = newUI();
+  for ( const w of [ [], undefined, null, "a string", 42 ] ) {
+    buildPanelDOM();
+    ui.renderTaskList( { tasks: [ T_QUEUED ], count: 1, total: 1, has_more: false, warnings: w } );
+    assert.ok( !document.querySelector( ".task-list-truncated" ), `no bar for ${JSON.stringify( w )}` );
+  }
+} );
+
+// ═══════════════════════════════════════════════════════════════════════════
+// query_unavailable render branch — a deploy defect wearing its own face
+// ═══════════════════════════════════════════════════════════════════════════
+
+test( "renderTaskList: query_unavailable names the missing FILE and is not an outage", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  ui.renderTaskList( { status: "query_unavailable", tasks: null } );
+  const el = document.querySelector( ".task-list-query-unavailable" );
+  assert.ok( el, "renders its own distinct state" );
+  assert.match( el!.textContent ?? "", /task-list-query\.js/, "names the file an operator must go look for" );
+  assert.ok( !document.querySelector( ".task-list-unreachable" ), "does NOT masquerade as a store outage" );
+  assert.equal( document.getElementById( "task-list-count" )!.textContent, "0" );
+} );
+
+test( "renderTaskList: query_unavailable does NOT replay last-known rows", () => {
+  // Deliberate contrast with the unreachable branch, which replays. A stale
+  // board under a deploy error invites the operator to believe the panel is
+  // working; the unreachable branch replays because the data was once real and
+  // the outage is expected to end.
+  const ui = newUI();
+  buildPanelDOM();
+  ui.renderTaskList( { tasks: [ T_BLOCKED, T_QUEUED ], count: 2, total: 2 } );
+  assert.ok( document.querySelectorAll( "tr.task-row" ).length >= 2, "good board first" );
+  ui.renderTaskList( { status: "query_unavailable", tasks: null } );
+  assert.equal( document.querySelectorAll( "tr.task-row" ).length, 0, "no stale rows under a deploy error" );
 } );
 
 if ( typeof process !== "undefined" && process.argv.includes( "--run" ) ) { /* node --test entry */ }

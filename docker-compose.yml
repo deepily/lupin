@@ -2,8 +2,14 @@ version: '3.8'
 
 services:
   # PostgreSQL database server (hosts both lupin_db_dev and lupin_db_test)
+  # v0.2.0: image swapped stock postgres:16.3-alpine → pgvector/pgvector:pg16 so
+  # `CREATE EXTENSION vector` succeeds (LanceDB → pgvector migration). Same PG
+  # major 16 → the existing postgresql-dev-data volume is compatible (design §11).
+  # Applying this needs `docker compose up -d --force-recreate` (NOT restart) —
+  # SHARED-INFRA, coordinated with the operator, not applied from a build session.
+  # Cloud-SQL supports pgvector natively → cloud-test/prod compose need no change.
   postgres:
-    image: postgres:16.3-alpine
+    image: pgvector/pgvector:pg16
     container_name: lupin-postgres
     restart: unless-stopped
     environment:
@@ -80,14 +86,32 @@ services:
       LUPIN_MODEL_SERVER_CODE_EMBED: nomic-ai/CodeRankEmbed
       LUPIN_MODEL_SERVER_PROSE_EMBED: nomic-ai/nomic-embed-text-v1.5
       LUPIN_MODEL_SERVER_WARMUP_MP3: /var/lupin/src/conf/warmup/whisper-warmup-85s.mp3
-      # API key contract (post-2026-05-16 María-brief simplification):
-      # Model-server reuses the existing `notification-api-claude-code-dev`
-      # ck_live_* key via the volume-mounted src/conf/keys/ dir. At boot it
-      # reads the plaintext via du.get_api_key() and computes a bcrypt hash
-      # once; each incoming request is validated via bcrypt.checkpw() against
-      # that in-memory hash. No env-var ceremony, no parallel ck_internal_*
-      # namespace, no DB coupling.
-      LUPIN_MODEL_SERVER_API_KEY_NAME: notification-api-claude-code-dev
+      # API key contract — REVISED 2026-07-28 (rows 574fd1dc / 6cc52525).
+      #
+      # ⚠️ THIS BLOCK USED TO SAY: "Model-server REUSES the existing
+      # `notification-api-claude-code-dev` ck_live_* key ... No env-var ceremony,
+      # no parallel namespace, no DB coupling." That reuse read as thrift and was
+      # the defect. The two keys answer to DIFFERENT AUTHORITIES:
+      #
+      #   notification-api-claude-code-dev -> bcrypt-checked against THAT
+      #        DEPLOYMENT'S `api_keys` table. Correct value DIFFERS per host,
+      #        and it must be minted ON the target (env-contract.tsv:48,
+      #        "never ship it from dev" — reverted footgun 90b56fd4).
+      #   model-server-api                 -> mounted from ONE Secret Manager
+      #        version and bcrypt-hashed at BOOT. Correct value is IDENTICAL
+      #        everywhere, and it IS shipped to every caller host.
+      #
+      # One file cannot satisfy both. On this dev box they coincided by accident
+      # (dev's key had been seeded into Secret Manager), which is why the flaw
+      # was invisible here; on the VM they cannot, and /embeddings/generate
+      # returned 100% 401 for ~38h with the VM's key matching NEITHER secret
+      # version. /transcribe was failing the same way, unreported.
+      #
+      # The CLIENT reads this same var name (embedding_provider._http_api_key,
+      # speech_to_text_provider._model_server_api_key) so the two ends cannot
+      # drift by editing one of them.
+      # src/rnd/v0.1.9/2026.07.28-model-server-api-key-decoupling.md
+      LUPIN_MODEL_SERVER_API_KEY_NAME: model-server-api
       # GPU 0 pin (per memory rule feedback_lupin_models_always_gpu_0) — torch
       # sees only the device at index 0; the underlying device may be physical
       # GPU 0 or 1 depending on docker's enumeration, but we always present
@@ -119,7 +143,7 @@ services:
   # Always runs [Lupin: Development] config with lupin_db_dev.
   # uvicorn --reload enabled for live code changes during development.
   lupin-rest-dev:
-    image: lupin:1.1.0                       # 2026-06-10: local 1.1.0 soak (SDK 0.2.88 + bundled-CLI) before the GCP push — Rick/Tiberius gate. Prior: 1.0.0 (retagged from 1.0.0-fonts after WG-1).
+    image: lupin:1.1.2-agy-candidate    # 2026-07-11: agy (Antigravity CLI) baked in (Rio, Rick user_direct). Rollback: lupin:1.1.1-pgvector-candidate. Prior: 1.1.1-pgvector-candidate (v0.2.0 pgvector swap, gate d93a1edb).
     container_name: lupin-rest-dev
     restart: unless-stopped
     user: "1001:1001"
@@ -133,6 +157,28 @@ services:
       - ./src:/var/lupin/src
       - ./io:/var/lupin/io
       - ./pytest.ini:/var/lupin/pytest.ini:ro
+      # Repo-root deploy artifacts the unit suite ASSERTS ABOUT (bug b5b6d252).
+      # Without these, 19 unit tests fail in-container with FileNotFoundError
+      # while passing on the host — the merge gate publishing environment noise
+      # as test failures, which trains readers to discount its red. Read-only:
+      # the tests only ever read them, and a writable mount would let a test
+      # rewrite the deploy config it is asserting about.
+      - ./docker-compose.yml:/var/lupin/docker-compose.yml:ro
+      - ./docker-compose.cloud-gpu.yml:/var/lupin/docker-compose.cloud-gpu.yml:ro
+      - ./docker-compose.cloud-test.yml:/var/lupin/docker-compose.cloud-test.yml:ro
+      - ./docker:/var/lupin/docker:ro
+      - ./.dockerignore:/var/lupin/.dockerignore:ro
+      - ./.docview.yml:/var/lupin/.docview.yml:ro
+      - ./.gitleaks.toml:/var/lupin/.gitleaks.toml:ro
+      - ./.stylelintrc.json:/var/lupin/.stylelintrc.json:ro
+      - ./alembic.ini:/var/lupin/alembic.ini:ro
+      - ./cloud-test.env.example:/var/lupin/cloud-test.env.example:ro
+      - ./package.json:/var/lupin/package.json:ro
+      - ./package-lock.json:/var/lupin/package-lock.json:ro
+      - ./pyproject.toml:/var/lupin/pyproject.toml:ro
+      - ./tsconfig.json:/var/lupin/tsconfig.json:ro
+      - ./tsconfig.diagnostic.json:/var/lupin/tsconfig.diagnostic.json:ro
+      - ./tsconfig.nav.json:/var/lupin/tsconfig.nav.json:ro
       - ./.git:/var/lupin/.git
       # TFE/BFE worktrees preserved under host project root so operator can
       # inspect agent commits after Phase 5 even across container rm.
@@ -140,12 +186,38 @@ services:
       - ./.claude/worktrees:/var/lupin/.claude/worktrees
       - ~/.lora_env:/home/rruiz/.lora_env:ro
       - ~/.lupin:/home/rruiz/.lupin:ro
-      - ~/.claude/.credentials.json:/home/rruiz/.claude/.credentials.json:ro
-      # Read-write so the cosa-voice conversation-mode endpoint can flip
-      # conversation_mode_active in the per-session bridge files written by
-      # SessionStart hook. Container runs as rruiz (UID matches host) so file
-      # ownership is preserved on writes.
-      - ~/.claude/sessions:/home/rruiz/.claude/sessions
+      # CC OAuth login store — this container's OWN grant, not a share of the
+      # host's (row c7c60896, ruled 2026-08-02; same shape the cloud files have
+      # always used). Seed once with `docker exec -it lupin-rest-dev claude /login`.
+      #
+      # WHY NOT the host's ~/.claude/.credentials.json as a single-file bind — the
+      # shape this replaces: docker resolves a single-file bind ONCE, at container
+      # start. Claude Code renews its token by REPLACING the file (write temp, then
+      # rename), which mints a new inode. The container keeps holding the old one and
+      # 401s until somebody restarts it. The access token lives exactly 8h, so that
+      # fired ~3x/day. Dropping `:ro` does not help — rename-over-a-bind-mounted-FILE
+      # fails "Resource busy" regardless. A host symlink does not help either: rename
+      # replaces the SYMLINK, not its target (both measured, 2026-08-01/02).
+      - claude-creds-dev:/home/rruiz/.claude
+      # CC session bridges — the HOST hook writes these; the container reads/rewrites
+      # them via set_voice_persona(). Read-write so the cosa-voice conversation-mode
+      # endpoint can flip conversation_mode_active. Container runs as rruiz (uid 1001,
+      # matches host) so ownership is preserved on writes.
+      #
+      # ⚠️ MUST STAY BELOW claude-creds-dev. That volume mounts over the WHOLE
+      # /home/rruiz/.claude and SHADOWS this path; nested-deeper wins only because
+      # compose applies it after. Getting this wrong 404s request_persona() — the
+      # exact defect the VM hit on 2026-07-24. Verify BOTH mounts with `docker inspect`
+      # after any recreate.
+      #
+      # Long form + create_host_path:false on purpose: a short `~/...` bind silently
+      # CREATES an empty dir when the path is absent, which looks identical to
+      # "mounted but empty". Fail loud instead.
+      - type: bind
+        source: ${LUPIN_HOST_SESSIONS_DIR:-/home/rruiz/.claude/sessions}
+        target: /home/rruiz/.claude/sessions
+        bind:
+          create_host_path: false
       # Multi-repo doc viewer (2026-05-12) — exposes Rick's other repos as
       # named `scope`s in /api/docs/file. Read-only by design (viewer never writes).
       # See src/rnd/v0.1.7/2026.05.12-multi-repo-doc-viewer.md §3h.
@@ -158,6 +230,13 @@ services:
       DB_HOST: lupin-postgres
       LUPIN_API_URL: http://localhost:7999
       LUPIN_API_KEY_FILE: /var/lupin/src/conf/keys/notification-api-claude-code-dev
+      # The model-server client's own credential — NOT the notifications key
+      # above. That one is per-database and must never be shipped from dev;
+      # this one is a single mounted secret, identical on every host and
+      # shipped to all of them. Sharing them caused a 38h 100% 401 on
+      # /embeddings/generate plus an unreported one on /transcribe.
+      # src/rnd/v0.1.9/2026.07.28-model-server-api-key-decoupling.md
+      LUPIN_MODEL_SERVER_API_KEY_NAME: model-server-api
       # Model-server carve-out env vars (2026-05-16). Until Phase 3.6 lifespan
       # switch lands and `speech to text provider = model-server` in INI, these
       # are dormant — code reads them but doesn't act. See:
@@ -176,6 +255,26 @@ services:
       GH_TOKEN: ${GH_TOKEN:-}
       CHROME_PATH: /home/rruiz/.cache/ms-playwright/chromium-1208/chrome-linux64/chrome
       PYTHONUNBUFFERED: 1
+      # bug b39c350d — `./src` is bind-mounted, so `src/**/__pycache__` is SHARED between
+      # two interpreters whose repo roots differ (host /mnt/DATA01/…, container /var/lupin/…).
+      # A .pyc bakes co_filename as an absolute path, and both venues see identical source
+      # mtime+size, so neither recompiles: the venue that did NOT write the cache runs code
+      # naming a path that does not exist for it. Census of the shared tree, 4008 first-party
+      # entries: 2202 host-written, 708 container-written, 565 relative, 129 pointing at the
+      # project's pre-rename path. Measured consequence on the host at repo root — 708/708
+      # container-written and 129/129 pre-rename entries render NO SOURCE in a traceback
+      # (linecache.getlines returns []), and coverage keys on the same co_filename.
+      #
+      # Sending the container's bytecode to a container-LOCAL dir un-shares the directory.
+      # Confirmed rather than assumed (the two things this remedy depends on):
+      #   1. with pycache_prefix set, __cached__ resolves under the prefix and the in-tree
+      #      __pycache__ is IGNORED even when present — so the 4008 pre-existing shared
+      #      entries go inert for the container without having to be purged.
+      #   2. pytest's assertion rewriter honors it: the *-pytest-*.pyc lands under the
+      #      prefix, and the in-tree __pycache__ gains nothing.
+      # /tmp because it is container-local (only ./src and ./io are bind-mounted) and always
+      # writable by uid 1001; a bytecode cache needs no durability across restarts.
+      PYTHONPYCACHEPREFIX: /tmp/pycache
     deploy:
       resources:
         reservations:
@@ -201,7 +300,16 @@ services:
   # Companion credentials (admin user + API key) auto-seeded from dev DB
   # on every startup via seed_test_companions.py.
   lupin-rest-test:
-    image: lupin:1.1.0                       # 2026-06-10: local 1.1.0 soak (cutover FIRST per stagger) before the GCP push — Rick/Tiberius gate. Prior: 1.0.0.
+    # 2026-07-27 (Krishna, rows 719962ed/b5b6d252): test DIVERGES from dev by exactly
+    # three binaries — tmux, node v22.15.0, terraform v1.12.2 — so the scheduled tier
+    # stops silencing 6 tmux-gated assertions and can run the typescript tier at all.
+    # Measured a true delta, not an upstream jump: dpkg 523 -> 527 (tmux + libevent-core
+    # + libutempter0 + unzip), ZERO removed, ZERO version changes; chromium-1208, the
+    # pip freeze hash and the bundled CC 2.1.161 all byte-identical to 1.1.2 — so the
+    # e2e visual tier sees no drift. Dev stays on 1.1.2 ONLY because recreating
+    # lupin-rest-dev bounces Rick's live :7999; the image is correct for dev too.
+    # Rollback: lupin:1.1.2-agy-candidate.
+    image: lupin:1.1.3-testtoolchain-candidate
     container_name: lupin-rest-test
     restart: unless-stopped
     user: "1001:1001"
@@ -216,13 +324,50 @@ services:
       - ./src:/var/lupin/src
       - ./io:/var/lupin/io
       - ./pytest.ini:/var/lupin/pytest.ini:ro
+      # Repo-root deploy artifacts the unit suite ASSERTS ABOUT (bug b5b6d252).
+      # Without these, 19 unit tests fail in-container with FileNotFoundError
+      # while passing on the host — the merge gate publishing environment noise
+      # as test failures, which trains readers to discount its red. Read-only:
+      # the tests only ever read them, and a writable mount would let a test
+      # rewrite the deploy config it is asserting about.
+      - ./docker-compose.yml:/var/lupin/docker-compose.yml:ro
+      - ./docker-compose.cloud-gpu.yml:/var/lupin/docker-compose.cloud-gpu.yml:ro
+      - ./docker-compose.cloud-test.yml:/var/lupin/docker-compose.cloud-test.yml:ro
+      - ./docker:/var/lupin/docker:ro
+      - ./.dockerignore:/var/lupin/.dockerignore:ro
+      - ./.docview.yml:/var/lupin/.docview.yml:ro
+      - ./.gitleaks.toml:/var/lupin/.gitleaks.toml:ro
+      - ./.stylelintrc.json:/var/lupin/.stylelintrc.json:ro
+      - ./alembic.ini:/var/lupin/alembic.ini:ro
+      - ./cloud-test.env.example:/var/lupin/cloud-test.env.example:ro
+      - ./package.json:/var/lupin/package.json:ro
+      - ./package-lock.json:/var/lupin/package-lock.json:ro
+      # node_modules — the `typescript` tier's ONLY source of c8/tsx/esbuild.
+      # node is baked into the image (Dockerfile TEST-TIER TOOLCHAIN block) but
+      # node_modules is in .dockerignore and deliberately NOT baked, so `npx c8`
+      # would resolve to nothing without this bind. Binary present != tier runnable
+      # — that is the whole of row 719962ed. Read-only: the tier never installs.
+      # TEST-ONLY divergence, declared in test_compose_service_parity.py.
+      - ./node_modules:/var/lupin/node_modules:ro
+      - ./pyproject.toml:/var/lupin/pyproject.toml:ro
+      - ./tsconfig.json:/var/lupin/tsconfig.json:ro
+      - ./tsconfig.diagnostic.json:/var/lupin/tsconfig.diagnostic.json:ro
+      - ./tsconfig.nav.json:/var/lupin/tsconfig.nav.json:ro
       - ./.git:/var/lupin/.git
       # TFE/BFE worktrees preserved under host project root so operator can
       # inspect agent commits after Phase 5 even across container rm.
       # Added 2026-04-18 Session be57a252 alongside auto_cleanup=false flip.
       - ./.claude/worktrees:/var/lupin/.claude/worktrees
       - ~/.lora_env:/home/rruiz/.lora_env:ro
-      - ~/.claude/.credentials.json:/home/rruiz/.claude/.credentials.json:ro
+      # CC OAuth login store — this container's OWN grant. See the long note on
+      # lupin-rest-dev's claude-creds-dev mount for why the single-file bind this
+      # replaces went 401 ~3x/day (row c7c60896, ruled 2026-08-02).
+      #
+      # DELIBERATELY a SEPARATE volume from dev's, not a shared one: two containers
+      # renewing one credential would re-create the same two-writers race this change
+      # exists to remove, just between dev and test instead of host and container.
+      # The price is one `docker exec -it lupin-rest-test claude /login` of its own.
+      - claude-creds-test:/home/rruiz/.claude
       # 2026-04-28: dev-test parity fix. cosa-voice MCP validates lupin-project
       # credentials at startup by reading ~/.lupin/config; tests that hit the
       # notification dispatch path need this. Same mount as lupin-rest-dev.
@@ -231,7 +376,14 @@ services:
       # follow-ups). Conversation-mode endpoint reads the per-session bridge
       # files written by SessionStart hook; without this mount the endpoint
       # can't see them and tests that exercise conversation_mode_active fail.
-      - ~/.claude/sessions:/home/rruiz/.claude/sessions
+      #
+      # ⚠️ MUST STAY BELOW claude-creds-test — that volume shadows the whole
+      # /home/rruiz/.claude. Same trap as dev; see the note there.
+      - type: bind
+        source: ${LUPIN_HOST_SESSIONS_DIR:-/home/rruiz/.claude/sessions}
+        target: /home/rruiz/.claude/sessions
+        bind:
+          create_host_path: false
       # Multi-repo doc viewer (2026-05-12) — exposes Rick's other repos as
       # named `scope`s in /api/docs/file. Read-only by design (viewer never writes).
       # See src/rnd/v0.1.7/2026.05.12-multi-repo-doc-viewer.md §3h.
@@ -244,6 +396,13 @@ services:
       DB_HOST: lupin-postgres
       LUPIN_API_URL: http://localhost:7999
       LUPIN_API_KEY_FILE: /var/lupin/src/conf/keys/notification-api-claude-code-dev
+      # The model-server client's own credential — NOT the notifications key
+      # above. That one is per-database and must never be shipped from dev;
+      # this one is a single mounted secret, identical on every host and
+      # shipped to all of them. Sharing them caused a 38h 100% 401 on
+      # /embeddings/generate plus an unreported one on /transcribe.
+      # src/rnd/v0.1.9/2026.07.28-model-server-api-key-decoupling.md
+      LUPIN_MODEL_SERVER_API_KEY_NAME: model-server-api
       # Model-server carve-out env vars (2026-05-16). Dormant until Phase 3.6
       # lifespan switch + INI flip to `speech to text provider = model-server`.
       LUPIN_MODEL_SERVER_URL: ${LUPIN_MODEL_SERVER_URL:-http://lupin-model-server:7998}
@@ -262,6 +421,26 @@ services:
       GH_TOKEN: ${GH_TOKEN:-}
       CHROME_PATH: /home/rruiz/.cache/ms-playwright/chromium-1208/chrome-linux64/chrome
       PYTHONUNBUFFERED: 1
+      # bug b39c350d — `./src` is bind-mounted, so `src/**/__pycache__` is SHARED between
+      # two interpreters whose repo roots differ (host /mnt/DATA01/…, container /var/lupin/…).
+      # A .pyc bakes co_filename as an absolute path, and both venues see identical source
+      # mtime+size, so neither recompiles: the venue that did NOT write the cache runs code
+      # naming a path that does not exist for it. Census of the shared tree, 4008 first-party
+      # entries: 2202 host-written, 708 container-written, 565 relative, 129 pointing at the
+      # project's pre-rename path. Measured consequence on the host at repo root — 708/708
+      # container-written and 129/129 pre-rename entries render NO SOURCE in a traceback
+      # (linecache.getlines returns []), and coverage keys on the same co_filename.
+      #
+      # Sending the container's bytecode to a container-LOCAL dir un-shares the directory.
+      # Confirmed rather than assumed (the two things this remedy depends on):
+      #   1. with pycache_prefix set, __cached__ resolves under the prefix and the in-tree
+      #      __pycache__ is IGNORED even when present — so the 4008 pre-existing shared
+      #      entries go inert for the container without having to be purged.
+      #   2. pytest's assertion rewriter honors it: the *-pytest-*.pyc lands under the
+      #      prefix, and the in-tree __pycache__ gains nothing.
+      # /tmp because it is container-local (only ./src and ./io are bind-mounted) and always
+      # writable by uid 1001; a bytecode cache needs no durability across restarts.
+      PYTHONPYCACHEPREFIX: /tmp/pycache
     deploy:
       resources:
         reservations:
@@ -305,6 +484,16 @@ services:
 
 volumes:
   pgadmin_data:
+    driver: local
+  # CC OAuth login stores — one per container, each holding its OWN grant
+  # (row c7c60896, ruled 2026-08-02). Seed each once with `claude /login` inside
+  # the container; the login then renews itself and survives a recreate, which is
+  # the whole point — a single-file bind of the host credential could not follow
+  # the host's ~3x/day token replacement and 401'd until someone restarted it.
+  # Same shape docker-compose.cloud-{gpu,test}.yml have always used.
+  claude-creds-dev:
+    driver: local
+  claude-creds-test:
     driver: local
 
 networks:

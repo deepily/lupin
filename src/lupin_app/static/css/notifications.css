@@ -373,136 +373,6 @@
         }
 
         /* ========================================
-           CORNER PAUSE BUTTON (Conversation Mode)
-           Hidden by default; shown only on the <li> that is currently
-           playing or paused. Lets the user pause/resume from a distance
-           without targeting the small inline 4-button panel.
-           ======================================== */
-        .notification-corner-pause-btn {
-            display: none;
-            position: absolute;
-            top: 4px;
-            right: 4px;
-            width: 24px;
-            height: 24px;
-            padding: 0;
-            border: 1px solid rgba( 25, 135, 84, 0.5 );
-            border-radius: 50%;
-            background: rgba( 25, 135, 84, 0.15 );
-            color: #155724;
-            cursor: pointer;
-            font-size: 12px;
-            line-height: 1;
-            text-align: center;
-            transition: transform 0.15s ease, background 0.15s ease, opacity 0.15s ease;
-            z-index: 2;
-        }
-
-        li.is-playing-current .notification-corner-pause-btn,
-        .sender-message.tts-playing .notification-corner-pause-btn {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .notification-corner-pause-btn:hover {
-            background: rgba( 25, 135, 84, 0.3 );
-            transform: scale( 1.1 );
-        }
-
-        .notification-corner-pause-btn:active {
-            transform: scale( 0.95 );
-        }
-
-        /* Paused: subtle visual cue separate from the icon swap */
-        li.is-paused-current .notification-corner-pause-btn,
-        .sender-message.is-paused-current .notification-corner-pause-btn {
-            background: rgba( 255, 193, 7, 0.2 );
-            border-color: rgba( 255, 193, 7, 0.6 );
-            color: #856404;
-        }
-
-        li.is-paused-current .notification-corner-pause-btn:hover,
-        .sender-message.is-paused-current .notification-corner-pause-btn:hover {
-            background: rgba( 255, 193, 7, 0.35 );
-        }
-
-        /* Pending TTS rendering — applied 2026-05-14 by the decouple fix so high/urgent
-         * notifications can appear in the visible list immediately on WebSocket arrival,
-         * BEFORE the TTS queue actually engages playback (which may be paused mid-queue
-         * due to the preview-and-pause feature). The pending state is cleared by
-         * activateNextTTS when the item reaches the active playback slot.
-         *
-         * Treatment: subtle desaturation + left border stripe (amber to match the paused
-         * palette but lighter) + small ⏳ glyph in the corner that flips to ⏸/▶ when audio
-         * engages. The corner-pause button stays hidden (gated by .is-playing-current). */
-        li.is-tts-pending {
-            opacity: 0.78;
-            border-left: 3px solid rgba( 255, 193, 7, 0.55 );
-            transition: opacity 0.2s ease, border-left-color 0.2s ease;
-        }
-
-        li.is-tts-pending::after {
-            content: "⏳";
-            position: absolute;
-            top: 6px;
-            right: 8px;
-            font-size: 14px;
-            line-height: 1;
-            opacity: 0.7;
-            pointer-events: none;
-        }
-
-        /* When the queued item engages playback, .is-tts-pending is removed and
-         * .is-playing-current is added — the hourglass disappears and the pause
-         * button takes over the same corner via .notification-corner-pause-btn. */
-
-        /* Corner STOP button — sibling to pause/resume. Sits to the LEFT
-         * of the pause button (right: 32 = 4 + 24 + 4). Clicking stops
-         * the active TTS playback and advances the queue (dismisses this
-         * notification's rendering). */
-        .notification-corner-stop-btn {
-            display: none;
-            position: absolute;
-            top: 4px;
-            right: 32px;
-            width: 24px;
-            height: 24px;
-            padding: 0;
-            border: 1px solid rgba( 220, 53, 69, 0.5 );
-            border-radius: 50%;
-            background: rgba( 220, 53, 69, 0.15 );
-            color: #842029;
-            cursor: pointer;
-            font-size: 12px;
-            line-height: 1;
-            text-align: center;
-            transition: transform 0.15s ease, background 0.15s ease, opacity 0.15s ease;
-            z-index: 2;
-        }
-
-        /* Visibility rule mirrors .notification-corner-pause-btn exactly:
-         * gated by .tts-playing only. .is-paused-current persists across
-         * pause→stop and would strand this button if included here. The
-         * pause button hides correctly when stopTTSPlayingIndicator
-         * removes .tts-playing; we want the stop button to follow suit. */
-        li.is-playing-current .notification-corner-stop-btn,
-        .sender-message.tts-playing .notification-corner-stop-btn {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .notification-corner-stop-btn:hover {
-            background: rgba( 220, 53, 69, 0.30 );
-            transform: scale( 1.1 );
-        }
-
-        .notification-corner-stop-btn:active {
-            transform: scale( 0.95 );
-        }
-
-        /* ========================================
            PINNED CONVERSATION-MODE SENDER CARD
            Marks the sender card whose session currently holds conversation
            mode. Two responsibilities:
@@ -658,13 +528,9 @@
             font-style: italic;
         }
 
-        .tts-queue-empty-state {
-            padding: 10px;
-            text-align: center;
-            color: #6c757d;
-            font-size: 14px;
-            font-style: italic;
-        }
+        /* TTS empty-state rule MOVED to shared/notifications-surface.css
+           (WP7 single-source, 2026-07-02) — served here via the shared sheet
+           linked before this monolith (notifications.html:13). */
 
         .action-required-notification {
             position: relative;  /* For pseudo-element positioning */
@@ -2218,6 +2084,17 @@
             line-height: 1;
         }
 
+        /* Worker-badge silencing (Rick 2026-06-24, gap list §6 Decision A/B):
+         * a managed worker (data-worker="true", set by _applyManagerBadge when
+         * manager lineage is known) keeps its faint activity pulse (the
+         * [data-unread="true"] animation above stays) but NEVER shows the numeric
+         * count circle — hide the ::after. Workers reach Rick through their
+         * manager, so their per-session count is noise on the focus bar. Belt to
+         * the JS suspenders (the count attribute is also not written for workers). */
+        .cc-strip-icon[data-worker="true"][data-unread="true"]::after {
+            display: none;
+        }
+
         /* Manager-lineage badge (Rick 2026-06-08): the spawning manager's glyph +
          * initial, tinted with the manager's color, docked at the TOP-LEFT perimeter
          * (135°) — 180° opposite the bottom-right speaker ::before, and clear of the
@@ -2387,50 +2264,6 @@
         .cc-strip-toggle[data-hide-inactive="true"]:hover {
             background: #343a40;
             border-color: #212529;
-        }
-
-        /* TTS preview-fraction slider — added 2026-05-14 evening alongside the
-         * preview-and-pause → preview-and-advance refactor. Runtime control
-         * over the fraction of each high-priority notification that gets
-         * synthesized as TTS audio. Five stops: 0 / 25 / 50 / 75 / 100. State
-         * persists in localStorage under `notifications_tts_preview_fraction_runtime`.
-         * Lives inside #cc-session-strip between the persona-icon tray and the
-         * Focus/All toggles, sharing the strip's flex layout. */
-        .cc-tts-fraction-control {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 4px 10px;
-            border: 1px solid #ced4da;
-            border-radius: 12px;
-            background: #f8f9fa;
-            color: #495057;
-            font-size: 11px;
-            line-height: 1;
-        }
-
-        .cc-tts-fraction-label {
-            font-weight: 600;
-            opacity: 0.7;
-        }
-
-        .cc-tts-fraction-slider {
-            width: 80px;
-            cursor: pointer;
-            accent-color: rgba( 25, 135, 84, 0.85 );  /* matches existing is-active green */
-        }
-
-        .cc-tts-fraction-slider:focus-visible {
-            outline: 2px solid rgba( 25, 135, 84, 0.6 );
-            outline-offset: 2px;
-        }
-
-        .cc-tts-fraction-value {
-            min-width: 32px;
-            text-align: right;
-            font-variant-numeric: tabular-nums;
-            font-weight: 700;
-            color: #198754;  /* green to match the slider accent */
         }
 
         /* Strip filter: icons whose senderId has no allocated voice persona
@@ -2773,11 +2606,10 @@
             text-align: center;
         }
 
-        .date-label {
-            font-size: 13px;
-            font-weight: 500;
-            color: #495057;
-        }
+        /* `.date-label` rule REMOVED (WS2, 2026-06-22): it styled a class no DOM
+           ever emitted (legacy + mux both render `.date-text`), so it was dead.
+           The designed 13px/500/#495057 values now live on `.date-text` in the
+           shared sheet css/shared/notifications-surface.css. Rename completed. */
 
         .date-count {
             font-size: 11px;
@@ -3121,97 +2953,12 @@
             color: white;
         }
 
-        /* Active TTS Card - currently playing */
-        .tts-active-card {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 12px 16px;
-            border: 2px solid #198754;
-            border-radius: 8px;
-            background-color: #d1e7dd;
-            margin-bottom: 8px;
-        }
-
-        .tts-active-card .tts-type-icon {
-            font-size: 20px;
-            flex-shrink: 0;
-        }
-
-        .tts-active-card .tts-message {
-            flex: 1;
-            font-size: 14px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            color: #0f5132;
-        }
-
-        .tts-active-card .tts-stop-button {
-            background: #dc3545;
-            border: none;
-            color: white;
-            padding: 6px 12px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 13px;
-            flex-shrink: 0;
-            transition: background-color 0.2s ease;
-        }
-
-        .tts-active-card .tts-stop-button:hover {
-            background: #bb2d3b;
-        }
-
-        /* Minimized TTS Cards - waiting in queue */
-        .tts-minimized {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 10px 14px;
-            border: 1px solid #dee2e6;
-            border-radius: 6px;
-            background-color: #f8f9fa;
-            margin-bottom: 6px;
-        }
-
-        .tts-minimized .tts-position {
-            min-width: 24px;
-            height: 24px;
-            font-size: 11px;
-            font-weight: 600;
-            color: white;
-            background-color: #6c757d;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            flex-shrink: 0;
-        }
-
-        .tts-minimized .tts-type-badge {
-            font-size: 14px;
-            flex-shrink: 0;
-        }
-
-        .tts-minimized .tts-text {
-            flex: 1;
-            font-size: 13px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            color: #495057;
-        }
-
-        /* Priority indicator for action-required items in queue */
-        .tts-minimized.priority {
-            border-left: 3px solid #0d6efd;
-            background-color: #e7f3ff;
-        }
-
-        .tts-minimized.priority .tts-position {
-            background-color: #0d6efd;
-        }
+        /* TTS active/minimized/delete CARD rules MOVED to
+           shared/notifications-surface.css (WP7 single-source, 2026-07-02) —
+           the mux + legacy now render these cards from ONE declaration in the
+           shared sheet (linked before this monolith). The #tts-queue-section /
+           control-button / clear-all / resume CHROME rules below stay legacy-only
+           (divergent taxonomy from the mux's .tts-chrome/.tts-btn). */
 
         /* =========================================================================
            TTS FOCUS MODE - Paused state while responding to action-required
@@ -3306,30 +3053,12 @@
            TTS QUEUE DELETE CONTROLS - Per-item delete + Clear All
            ========================================================================= */
 
-        /* Per-item delete button on minimized queue cards */
-        .tts-delete-button {
-            width: 22px;
-            height: 22px;
-            border: none;
-            border-radius: 50%;
-            background: transparent;
-            color: #999;
-            font-size: 16px;
-            line-height: 22px;
-            text-align: center;
-            cursor: pointer;
-            flex-shrink: 0;
-            padding: 0;
-            transition: all 0.15s ease;
-        }
+        /* TTS per-item delete-button rule MOVED to
+           shared/notifications-surface.css (WP7 single-source, 2026-07-02). */
 
-        .tts-delete-button:hover {
-            background: rgba( 220, 53, 69, 0.15 );
-            color: #dc3545;
-            transform: scale( 1.1 );
-        }
-
-        /* Shrink-fade animation for minimized queue cards being deleted */
+        /* Shrink-fade animation for minimized queue cards being deleted (legacy-only:
+           the mux applies no .shrink-fade — no delete animation; keyframe shared
+           with a legacy-only rule below). */
         .tts-minimized.shrink-fade {
             animation: shrinkFadeOut 0.35s ease-out forwards;
             pointer-events: none;

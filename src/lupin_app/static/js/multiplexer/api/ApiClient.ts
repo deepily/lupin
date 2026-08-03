@@ -22,12 +22,73 @@ export interface ApiCallOptions {
   noAuth?    : boolean;
 }
 
+// ---------------------------------------------------------------------------
+// Broadcast-to-all-CC-sessions (Lane C, v0.1.9 focus-bar parity, 2026-06-24).
+// Typed shapes for POST /api/commons/broadcast-to-cc-sessions
+// (`commons.py:execute_broadcast` → 200 body). `require_ack` /
+// `include_originator` default true server-side; the client sends them
+// explicitly for legacy parity.
+// ---------------------------------------------------------------------------
+
+export interface BroadcastRequest {
+  message             : string;
+  require_ack?        : boolean;       // default true
+  include_originator? : boolean;       // default true
+  broadcast_id?       : string;        // omit → server mints a UUIDv4
+}
+
+// One `filtered_out` fanout-receipt entry (F3). `reason` ∈ {bridge_unreadable,
+// owner_mismatch, stale_bridge_mtime, bridge_vanished, originator_excluded};
+// the mtime gate adds age_seconds/threshold_seconds (kept open via index sig).
+export interface BroadcastFilteredOut {
+  session_id  : string;
+  reason      : string;
+  [k: string] : unknown;
+}
+
+export interface BroadcastResult {
+  broadcast_id      : string;
+  recipients        : number;                              // count of successful fanouts
+  failed_recipients : ReadonlyArray<unknown>;
+  filtered_out      : ReadonlyArray<BroadcastFilteredOut>;
+  status            : string;
+}
+
+// ---------------------------------------------------------------------------
+// Proxy-ratify acknowledge (B4 / 01-D, 2026-06-29). Typed shape for
+// POST /api/proxy/acknowledge (`decision_proxy.py:72 acknowledge_proxy_batch`
+// → 200 body). The legacy proxy-ratify-link (notifications.js:7176) POSTs this
+// body-less to retire the current proxy batch; the wrapper does the acknowledge
+// call ONLY — the page-open (window.open('/app/admin/proxy-ratify')) stays
+// renderer-side (F-Krishna-BD3 / F-Sam-BD3 / OSQ-B4.1).
+// ---------------------------------------------------------------------------
+
+export interface ProxyAcknowledgeResult {
+  status        : string;     // "success"
+  retired_batch : string;     // pr-{8hex}-{N}
+  new_batch     : string;     // pr-{8hex}-{N+1}
+}
+
+/** 202 body from POST /api/system/bounce (row 1b4211ac R2). A 409/503 arrives as
+ *  an ApiError whose `.message` is the JSON reason. */
+export interface BounceResult {
+  status     : string;    // "triggered"
+  detail    ?: string;
+  timestamp  : string;
+}
+
 export interface ApiClient {
   get<T>(path: string, opts?: ApiCallOptions): Promise<T>;
   post<T>(path: string, body: unknown, opts?: ApiCallOptions): Promise<T>;
   put<T>(path: string, body: unknown, opts?: ApiCallOptions): Promise<T>;
   patch<T>(path: string, body: unknown, opts?: ApiCallOptions): Promise<T>;
   delete<T>(path: string, opts?: ApiCallOptions): Promise<T>;
+  /** Fan out a broadcast to the caller's active CC sessions (Lane C). */
+  broadcastToCcSessions(req: BroadcastRequest, opts?: ApiCallOptions): Promise<BroadcastResult>;
+  /** Retire the current proxy notification batch (proxy-ratify-link acknowledge, B4). */
+  acknowledgeProxy(opts?: ApiCallOptions): Promise<ProxyAcknowledgeResult>;
+  /** Trigger a managed bounce of the dev server (:7999) via the host-side watcher. */
+  bounceDevServer(opts?: ApiCallOptions): Promise<BounceResult>;
 }
 
 export class ApiError extends Error {
@@ -75,6 +136,29 @@ class ApiClientImpl implements ApiClient {
 
   delete<T>(path: string, opts?: ApiCallOptions): Promise<T> {
     return this.request<T>("DELETE", path, undefined, opts);
+  }
+
+  broadcastToCcSessions(req: BroadcastRequest, opts?: ApiCallOptions): Promise<BroadcastResult> {
+    const body: Record<string, unknown> = {
+      message            : req.message,
+      require_ack        : req.require_ack ?? true,
+      include_originator : req.include_originator ?? true,
+    };
+    if (req.broadcast_id !== undefined) body["broadcast_id"] = req.broadcast_id;
+    return this.post<BroadcastResult>("/api/commons/broadcast-to-cc-sessions", body, opts);
+  }
+
+  acknowledgeProxy(opts?: ApiCallOptions): Promise<ProxyAcknowledgeResult> {
+    // Body-less POST — legacy parity (notifications.js:7176 sends only auth
+    // headers). The server retires the current batch + mints the next.
+    return this.post<ProxyAcknowledgeResult>("/api/proxy/acknowledge", undefined, opts);
+  }
+
+  bounceDevServer(opts?: ApiCallOptions): Promise<BounceResult> {
+    // Body-less admin POST. On 202 the host-side watcher was handed the bounce;
+    // a 409 (already bouncing) or 503 (watcher not running) surfaces as an
+    // ApiError whose message is the JSON reason — the caller decodes it.
+    return this.post<BounceResult>("/api/system/bounce", undefined, opts);
   }
 
   private async request<T>(

@@ -211,6 +211,16 @@ def test_multiplexer_phase5_notifications_pane_visual(
     # rendering varies with the moment the screenshot fires.
     page.evaluate( _STABILIZE_DOM_JS )
 
+    # Font-load barrier (Gate D font-load race, task 006cb393): sender/type/status
+    # icons render as NotoColorEmoji glyphs that load lazily; a screenshot taken
+    # before the color-emoji font is ready captures a FALLBACK glyph → intermittent
+    # visual FAIL. `networkidle` does NOT gate font loading. Await
+    # document.fonts.ready + two animation frames so the final glyph is committed
+    # before capture. Mirrors test_multiplexer_task_editing.py:316-318. Pure load
+    # barrier — comparators/tolerances untouched.
+    page.evaluate( "() => document.fonts.ready" )
+    page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
+
     # Brief settle window for any post-inject layout repaint.
     time.sleep( 0.2 )
 
@@ -220,3 +230,16 @@ def test_multiplexer_phase5_notifications_pane_visual(
     assert_snapshot( pane, name="multiplexer_phase5_notifications_pane.png" )
 
     print( "✓ multiplexer_phase5_notifications_pane: visual snapshot compared" )
+
+    # Broadened coverage (task c7745a76): mux commit 75a1bad3 (Lane 0a+0c) extracted
+    # #action-required-section OUT of #notifications-pane into its own standalone
+    # LEADING accordion — so the notifications-pane snapshot above now covers only
+    # the plain + markdown fixtures. Capture the action-required section separately
+    # so phase5 still covers ALL 3 injected fixtures (the action-required fixture in
+    # its NEW accordion home here). The countdown is already pinned by
+    # _STABILIZE_DOM_JS above; the AR widget was waited-for at
+    # `[data-testid="multiplexer-action-required"]`, so the section is rendered.
+    ar_section = page.locator( '[data-testid="multiplexer-action-required-section"]' )
+    assert_snapshot( ar_section, name="multiplexer_phase5_action_required_section.png" )
+
+    print( "✓ multiplexer_phase5_action_required_section: visual snapshot compared" )

@@ -38,6 +38,7 @@ def session():
     query.limit.return_value           = query
     query.offset.return_value          = query
     query.with_for_update.return_value = query
+    query.group_by.return_value        = query
     return mock
 
 
@@ -100,13 +101,82 @@ def test_create_item_passes_optional_fields_through( repo ):
         accountable_manager = "tiberius",
         gate_class          = "manager",
         priority            = "P1",
+        urgency             = "urgent",
         source_qid          = "fef1f7fa-0000-0000-0000-000000000000",
         correlation_key     = "harness-7",
     )
     assert item.owner_persona == "clayton" and item.accountable_manager == "tiberius"
-    assert item.gate_class == "manager" and item.priority == "P1"
+    assert item.gate_class == "manager" and item.priority == "P1" and item.urgency == "urgent"
     assert item.source_qid.startswith( "fef1f7fa" ) and item.correlation_key == "harness-7"
     assert item.body == "details"
+
+
+# create_item — one-call BLOCKED mint (Rick's ruling 2026-07-20, build 1b5483f4)
+
+def test_create_item_blocked_mint_persists_fields_and_stamps_blocked_event( repo, session ):
+    # A blocked mint sets status='blocked', persists blocked_by + next_chase_ts,
+    # and the creation event's transition label is '->blocked' (not '->queued').
+    refs  = [ { "kind": "persona", "id": "tiberius" } ]
+    chase = datetime( 2026, 6, 12, 9, 0, tzinfo=timezone.utc )
+    item  = repo.create_item(
+        item_class    = "task",
+        title         = "held on tiberius",
+        project       = "lupin",
+        created_by    = "mr radio 372f9dc9",
+        authority     = "manager_relay",
+        status        = "blocked",
+        blocked_by    = refs,
+        next_chase_ts = chase,
+    )
+    assert item.status == "blocked"
+    assert item.blocked_by == refs and item.next_chase_ts == chase
+    event = _added_instances( session, TaskEvent )[ 0 ]
+    assert event.transition == "->blocked"                      # label follows the mint status
+
+
+def test_create_item_blocked_mint_none_blocked_by_defaults_to_empty( repo ):
+    # A blocked mint given blocked_by=None resolves to [] (the None→[] branch) —
+    # the DB CHECK still holds (a []-blocked row has no persona ref → no chase req).
+    item = repo.create_item(
+        item_class    = "task",
+        title         = "held, refs TBD",
+        project       = "lupin",
+        created_by    = "mr radio 372f9dc9",
+        authority     = "standing",
+        status        = "blocked",
+        blocked_by    = None,
+        next_chase_ts = None,
+    )
+    assert item.status == "blocked" and item.blocked_by == [ ] and item.next_chase_ts is None
+
+
+def test_create_item_queued_mint_drops_stray_blocked_by_but_KEEPS_the_chase( repo ):
+    # CHANGED 2026-07-21 (86ce4c43 #2, Mr Radio GO). This test previously asserted
+    # that a queued mint nulled next_chase_ts too. That assertion encoded the
+    # DEFECT: a caller who scheduled a row got a 200 and an unscheduled row,
+    # silently, on the success path. Measured consequence — 47 of 51 operator
+    # gates carry no chase, and ZERO queued gates have one fleet-wide, all-time.
+    #
+    # The asymmetry below is the fix: blocked_by is a DEPENDENCY whose meaning is
+    # defined by the blocked status, so a queued row genuinely holds none. A chase
+    # is a SCHEDULE and is independent of status. "A queued row waits on nothing"
+    # is true about dependencies and says nothing about scheduling.
+    #
+    # Both paths now route through normalize_status_fields — see
+    # test_task_store_field_normalizer.py for the anti-divergence parity test.
+    chase = datetime( 2026, 6, 12, 9, 0, tzinfo=timezone.utc )
+    item  = repo.create_item(
+        item_class    = "task",
+        title         = "just queued",
+        project       = "lupin",
+        created_by    = "krishna 38d15e3b",
+        authority     = "standing",
+        status        = "queued",
+        blocked_by    = [ { "kind": "persona", "id": "tiberius" } ],   # stray — must be dropped
+        next_chase_ts = chase,                                         # a SCHEDULE — must SURVIVE
+    )
+    assert item.status == "queued" and item.blocked_by == [ ]
+    assert item.next_chase_ts == chase
 
 
 # ---------------------------------------------------------------------------
@@ -188,11 +258,15 @@ def test_transition_to_done_carries_receipts_onto_event( repo, session ):
 # ---------------------------------------------------------------------------
 
 def test_query_tasks_no_filters_skips_filter_calls( repo, session ):
+    # unscoped_audit=True + include_terminal=True reproduces the PRE-guard "raw,
+    # all-status" query_tasks() so this test isolates the filter-application
+    # mechanics (no guard COUNT(*), no terminal-exclusion filter) — the guard and
+    # terminal-default behaviors are covered by their own tests below.
     sentinel = [ _item() ]
     query    = session.query.return_value
     query.all.return_value = sentinel
 
-    result = repo.query_tasks()
+    result = repo.query_tasks( unscoped_audit=True, include_terminal=True )
 
     assert result is sentinel
     query.filter.assert_not_called()
@@ -208,7 +282,8 @@ def test_query_tasks_applies_every_provided_filter( repo, session ):
     repo.query_tasks(
         owner_persona       = "krishna",
         status              = "in_progress",
-        gate_class          = "ricks_court",
+        gate_class          = "operator",
+        urgency             = "urgent",
         accountable_manager = "tiberius",
         project             = "lupin",
         item_class          = "task",
@@ -217,7 +292,7 @@ def test_query_tasks_applies_every_provided_filter( repo, session ):
         offset              = 3,
     )
 
-    assert query.filter.call_count == 7                       # one per provided filter, AND semantics
+    assert query.filter.call_count == 8                       # one per provided filter, AND semantics
     query.limit.assert_called_once_with( 7 )
     query.offset.assert_called_once_with( 3 )
 
@@ -226,6 +301,7 @@ def test_query_tasks_applies_every_provided_filter( repo, session ):
     ( { "owner_persona": "krishna" }, 1 ),
     ( { "status": "queued" }, 1 ),
     ( { "gate_class": "manager" }, 1 ),
+    ( { "urgency": "low" }, 1 ),
     ( { "accountable_manager": "tiberius" }, 1 ),
     ( { "project": "lupin" }, 1 ),
     ( { "item_class": "bug" }, 1 ),
@@ -235,7 +311,10 @@ def test_query_tasks_applies_every_provided_filter( repo, session ):
 def test_query_tasks_filter_combinations( repo, session, kwargs, expected_filters ):
     query = session.query.return_value
     query.all.return_value = [ ]
-    repo.query_tasks( **kwargs )
+    # include_terminal=True + unscoped_audit=True → the raw pre-guard path, so the
+    # filter count equals exactly the provided-filter count (no terminal-exclusion
+    # filter, no guard COUNT(*) that a urgency-only unscoped case would otherwise trip).
+    repo.query_tasks( include_terminal=True, unscoped_audit=True, **kwargs )
     assert query.filter.call_count == expected_filters
 
 
@@ -246,7 +325,9 @@ def test_query_tasks_filter_combinations( repo, session, kwargs, expected_filter
 def test_count_tasks_no_filters_returns_scalar_no_pagination( repo, session ):
     query = session.query.return_value
     query.scalar.return_value = 273                            # >100: no page saturation
-    result = repo.count_tasks()
+    # include_terminal=True → count every status (the pre-terminal-default count),
+    # so this test stays about pagination/ordering, not terminal exclusion.
+    result = repo.count_tasks( include_terminal=True )
     assert result == 273
     query.filter.assert_not_called()
     query.scalar.assert_called_once()
@@ -262,19 +343,21 @@ def test_count_tasks_applies_every_provided_filter( repo, session ):
     repo.count_tasks(
         owner_persona       = "krishna",
         status              = "in_progress",
-        gate_class          = "ricks_court",
+        gate_class          = "operator",
+        urgency             = "urgent",
         accountable_manager = "tiberius",
         project             = "lupin",
         item_class          = "task",
         correlation_key     = "cc-task:sid:5",
     )
-    assert query.filter.call_count == 7                       # one per provided filter, AND semantics
+    assert query.filter.call_count == 8                       # one per provided filter, AND semantics
 
 
 @pytest.mark.parametrize( "kwargs, expected_filters", [
     ( { "owner_persona": "krishna" }, 1 ),
     ( { "status": "queued" }, 1 ),
     ( { "gate_class": "manager" }, 1 ),
+    ( { "urgency": "low" }, 1 ),
     ( { "accountable_manager": "tiberius" }, 1 ),
     ( { "project": "lupin" }, 1 ),
     ( { "item_class": "bug" }, 1 ),
@@ -284,8 +367,205 @@ def test_count_tasks_applies_every_provided_filter( repo, session ):
 def test_count_tasks_filter_combinations( repo, session, kwargs, expected_filters ):
     query = session.query.return_value
     query.scalar.return_value = 0
-    repo.count_tasks( **kwargs )
+    # include_terminal=True → no terminal-exclusion filter, so the filter count
+    # equals exactly the provided-filter count regardless of whether status is set.
+    repo.count_tasks( include_terminal=True, **kwargs )
     assert query.filter.call_count == expected_filters
+
+
+# ---------------------------------------------------------------------------
+# count_tasks_by_status (c191be39 — the per-status breakdown, ONE GROUP BY)
+# ---------------------------------------------------------------------------
+
+def test_count_tasks_by_status_groups_once_no_pagination( repo, session ):
+    query = session.query.return_value
+    query.all.return_value = [ ( "in_progress", 2 ), ( "queued", 13 ), ( "parked", 1 ) ]
+
+    result = repo.count_tasks_by_status( owed_only=True )
+
+    assert result == { "in_progress": 2, "queued": 13, "parked": 1 }
+    # ⛔ ONE GROUP BY — not one query per status. The forbidden shape (deleted
+    # 2026-07-19) fired N queries and summed; it could not see a park-expiry rejoin
+    # and double-counted expired-parked rows. A GROUP BY partitions ONE admitted
+    # set, so every row lands in exactly one bucket by construction.
+    query.group_by.assert_called_once()
+    # a breakdown is order- and page-independent
+    query.order_by.assert_not_called()
+    query.limit.assert_not_called()
+    query.offset.assert_not_called()
+
+
+def test_count_tasks_by_status_empty_result_is_empty_dict( repo, session ):
+    session.query.return_value.all.return_value = [ ]
+    assert repo.count_tasks_by_status( owed_only=True ) == { }
+
+
+def test_count_tasks_by_status_omits_absent_statuses_never_zero_fills( repo, session ):
+    """
+    A zero-filled key is a CLAIM about a status the query never saw. Only statuses
+    actually present in the admitted set appear.
+    """
+    session.query.return_value.all.return_value = [ ( "queued", 4 ) ]
+    result = repo.count_tasks_by_status( owed_only=True )
+    assert result == { "queued": 4 }
+    assert "in_progress" not in result and "parked" not in result
+
+
+def test_count_tasks_by_status_applies_every_provided_filter( repo, session ):
+    query = session.query.return_value
+    query.all.return_value = [ ]
+    repo.count_tasks_by_status(
+        owner_persona       = "krishna",
+        status              = "in_progress",
+        gate_class          = "operator",
+        urgency             = "urgent",
+        accountable_manager = "tiberius",
+        project             = "lupin",
+        item_class          = "task",
+        correlation_key     = "cc-task:sid:5",
+    )
+    assert query.filter.call_count == 8                        # one per provided filter, AND semantics
+
+
+def test_count_tasks_by_status_filter_set_matches_count_tasks_exactly( repo, session ):
+    """
+    🔴 THE PARITY PRECONDITION. `count` and `breakdown` are two INDEPENDENT queries
+    whose sum must agree — which is only meaningful if they select the SAME
+    population. If one grows a filter the other lacks, the sum-parity gate silently
+    starts comparing two different boards and its green stops meaning anything.
+
+    Asserted on the filter COUNT for an identical kwargs set, which is what would
+    diverge if a filter were added to one method and not the other.
+    """
+    kwargs = {
+        "owner_persona"       : "krishna",
+        "status"              : "queued",
+        "gate_class"          : "operator",
+        "urgency"             : "urgent",
+        "accountable_manager" : "tiberius",
+        "project"             : "lupin",
+        "item_class"          : "task",
+        "correlation_key"     : "cc-task:sid:5",
+        "include_terminal"    : True,
+    }
+    query = session.query.return_value
+
+    query.scalar.return_value = 0
+    repo.count_tasks( **kwargs )
+    count_filters = query.filter.call_count
+
+    query.filter.reset_mock()
+    query.all.return_value = [ ]
+    repo.count_tasks_by_status( **kwargs )
+    breakdown_filters = query.filter.call_count
+
+    assert count_filters == breakdown_filters, (
+        "count_tasks and count_tasks_by_status no longer select the same population — "
+        "the sum-parity gate is comparing two different boards" )
+
+
+# ---------------------------------------------------------------------------
+# Unscoped-query guard + terminal-exclusion default (design 2026.07.07)
+# ---------------------------------------------------------------------------
+
+from cosa.rest.task_store_rules import UnscopedQueryError, UNSCOPED_QUERY_THRESHOLD
+
+
+def test_query_tasks_guard_fires_on_bare_unscoped_over_threshold( repo, session ):
+    # A BARE unscoped pull whose non-terminal COUNT(*) exceeds the threshold, with
+    # no unscoped_audit escape, HARD-FAILS before a single row is materialized.
+    query = session.query.return_value
+    query.scalar.return_value = UNSCOPED_QUERY_THRESHOLD + 10   # the guard's COUNT(*)
+    with pytest.raises( UnscopedQueryError ) as exc:
+        repo.query_tasks()
+    assert exc.value.count == UNSCOPED_QUERY_THRESHOLD + 10
+    assert exc.value.threshold == UNSCOPED_QUERY_THRESHOLD
+    query.all.assert_not_called()                              # rejected before row fetch
+
+
+def test_query_tasks_guard_boundary_at_threshold_does_not_fire( repo, session ):
+    # EXACTLY the threshold is allowed (strictly-greater fails) — no raise, rows fetched.
+    sentinel = [ _item() ]
+    query    = session.query.return_value
+    query.scalar.return_value = UNSCOPED_QUERY_THRESHOLD        # == threshold, not >
+    query.all.return_value = sentinel
+    assert repo.query_tasks() is sentinel                       # no UnscopedQueryError raised
+    query.all.assert_called_once()
+
+
+def test_query_tasks_unscoped_audit_escape_bypasses_guard( repo, session ):
+    # unscoped_audit=True is the deliberate-full-sweep escape: even a huge count
+    # does NOT raise, and the guard's COUNT(*) is never consulted.
+    query = session.query.return_value
+    query.scalar.return_value = UNSCOPED_QUERY_THRESHOLD + 999
+    query.all.return_value = [ _item(), _item() ]
+    result = repo.query_tasks( unscoped_audit=True )
+    assert result == query.all.return_value
+    query.scalar.assert_not_called()                           # guard COUNT(*) skipped entirely
+
+
+@pytest.mark.parametrize( "scoping", [
+    { "owner_persona": "krishna" },
+    { "status": "in_progress" },
+    { "gate_class": "operator" },
+    { "accountable_manager": "tiberius" },
+    { "project": "lupin" },
+    { "item_class": "task" },
+    { "correlation_key": "cc-task:sid:5" },
+] )
+def test_query_tasks_scoped_query_skips_guard_even_when_large( repo, session, scoping ):
+    # A SCOPED query (any narrowing filter) never trips the guard, however large —
+    # the exact false-positive to avoid (owner=me with 60 rows must NOT fail).
+    sentinel = [ _item() ]
+    query    = session.query.return_value
+    query.scalar.return_value = UNSCOPED_QUERY_THRESHOLD + 500  # would trip IF consulted
+    query.all.return_value = sentinel
+    result = repo.query_tasks( **scoping )                      # no raise
+    assert result is sentinel
+    query.scalar.assert_not_called()                           # scoped → guard COUNT(*) never run
+
+
+def test_query_tasks_urgency_only_is_unscoped_and_guarded( repo, session ):
+    # urgency is deliberately NOT a scoping filter — a urgency-only query is still
+    # unscoped and still guarded (a bare urgency pull can't narrow the store enough).
+    query = session.query.return_value
+    query.scalar.return_value = UNSCOPED_QUERY_THRESHOLD + 1
+    with pytest.raises( UnscopedQueryError ):
+        repo.query_tasks( urgency="urgent" )
+
+
+def test_query_tasks_excludes_terminal_by_default_on_unstatused_scoped_query( repo, session ):
+    # status=None + include_terminal=False → the terminal-exclusion filter is added
+    # ON TOP of the scoping filter (owner). Scoped, so the guard never runs.
+    query = session.query.return_value
+    query.all.return_value = [ ]
+    repo.query_tasks( owner_persona="krishna" )
+    assert query.filter.call_count == 2                        # owner filter + terminal-exclusion
+
+
+def test_query_tasks_include_terminal_suppresses_terminal_filter( repo, session ):
+    # include_terminal=True on an un-status'd scoped query → NO terminal filter.
+    query = session.query.return_value
+    query.all.return_value = [ ]
+    repo.query_tasks( owner_persona="krishna", include_terminal=True )
+    assert query.filter.call_count == 1                        # owner filter only
+
+
+def test_query_tasks_explicit_terminal_status_overrides_exclusion( repo, session ):
+    # An explicit status=done governs alone — no terminal-exclusion double-filter.
+    query = session.query.return_value
+    query.all.return_value = [ ]
+    repo.query_tasks( status="done" )                          # scoped by status → guard skipped
+    assert query.filter.call_count == 1                        # status filter only, terminal returned
+
+
+def test_count_tasks_excludes_terminal_by_default_on_unstatused_query( repo, session ):
+    # count_tasks parity: status=None + include_terminal=False → terminal-exclusion
+    # filter applied, so the guard's non-terminal count matches the payload it guards.
+    query = session.query.return_value
+    query.scalar.return_value = 0
+    repo.count_tasks( owner_persona="krishna" )
+    assert query.filter.call_count == 2                        # owner + terminal-exclusion
 
 
 # ---------------------------------------------------------------------------
@@ -423,6 +703,58 @@ def test_apply_patch_no_change_records_noop_marker( repo ):
     assert event.transition == "patched"
 
 
+def test_apply_patch_caller_reason_wins_over_field_delta( repo ):
+    """
+    ITEM A (Tiffany's Phase-1 finding) — the caller-reason-WINS branch of
+    apply_patch's `event_reason = reason if reason else <auto-delta>` ternary is
+    COVERAGE-INVISIBLE: coverage.py reports the line 100% covered whether or not
+    its truthy arm ever runs (intra-line ternary branches are not tracked). The
+    caller-supplied reason IS the headline of task_reassign — recording the
+    manager's WHY — so the truthy arm must be proven directly.
+
+    WITH a reason: the caller's "why" is recorded verbatim and the auto-delta is
+    NOT used, even though the field genuinely changed (a delta string would
+    otherwise have been generated). WITHOUT a reason: the SAME field change falls
+    back to the field-delta string — proving the ternary's else-arm is the only
+    thing that flipped the outcome.
+    """
+    # Truthy-arm: caller reason wins, auto-delta suppressed (the headline path).
+    item  = _item( title="old title" )
+    event = repo.apply_patch(
+        item      = item,
+        fields    = { "title": "new title" },
+        actor     = "mr_radio a1b2c3",
+        authority = "standing",
+        reason    = "reassigned to balance the queue",
+    )
+    assert item.title       == "new title"                        # the edit still lands
+    assert event.reason     == "reassigned to balance the queue"  # caller reason WINS
+    assert "title:"     not in event.reason                       # the auto-delta is NOT used
+    assert event.transition == "patched"
+
+    # Else-arm parity: an absent reason on the SAME change falls back to the delta.
+    item2  = _item( title="old title" )
+    event2 = repo.apply_patch(
+        item      = item2,
+        fields    = { "title": "new title" },
+        actor     = "mr_radio a1b2c3",
+        authority = "standing",
+    )
+    assert event2.reason == "title: 'old title' -> 'new title'"   # absent-reason falls back to the delta
+
+    # Else-arm also covers an EMPTY-STRING reason — `reason if reason` gates on
+    # truthiness, not `is not None`, so "" must behave like absent, not win.
+    item3  = _item( title="old title" )
+    event3 = repo.apply_patch(
+        item      = item3,
+        fields    = { "title": "new title" },
+        actor     = "mr_radio a1b2c3",
+        authority = "standing",
+        reason    = "",
+    )
+    assert event3.reason == "title: 'old title' -> 'new title'"   # "" is falsy -> delta, not the empty reason
+
+
 # ---------------------------------------------------------------------------
 # Phase 2.1 — query_chase_due + apply_chase (chase consumer support)
 # ---------------------------------------------------------------------------
@@ -534,6 +866,187 @@ def test_query_events_filter_combinations( repo, session, kwargs, expected_filte
     repo.query_events( **kwargs )
     assert query.filter.call_count == expected_filters
     assert query.join.called is expect_join
+
+
+# ---------------------------------------------------------------------------
+# Phase 2.2 — apply_amendment (append-only body-amend seam; never rewrites)
+# ---------------------------------------------------------------------------
+
+_AMEND_NOW = datetime( 2026, 7, 2, 21, 55, 0, tzinfo=timezone.utc )
+
+
+def test_apply_amendment_appends_block_preserving_original_body( repo, session ):
+    item  = _item( body="ORIGINAL SPEC verbatim." )
+    event = repo.apply_amendment(
+        item      = item,
+        note      = "SCOPE REFRAME: now the subscriber path.",
+        actor     = "arnold 8b7225c4",
+        authority = "standing",
+        now       = _AMEND_NOW,
+        reason    = "manager ruling on cited evidence",
+    )
+    # Original preserved verbatim; the note lands below a persona+UTC divider.
+    assert item.body.startswith(
+        "ORIGINAL SPEC verbatim.\n\n[amendment · arnold 8b7225c4 · 2026-07-02T21:55:00+00:00]\n"
+    )
+    assert item.body.endswith( "SCOPE REFRAME: now the subscriber path." )
+    assert item.status        == "in_progress"                # status untouched (an amend is not a transition)
+    assert event.transition   == "amended"
+    assert event.receipt_refs is None
+    assert event.reason       == "manager ruling on cited evidence"
+    assert event.actor        == "arnold 8b7225c4"
+    added_events = _added_instances( session, TaskEvent )
+    assert len( added_events ) == 1 and added_events[ 0 ] is event
+
+
+def test_apply_amendment_on_empty_body_writes_block_alone( repo, session ):
+    # No original body -> the stamped block stands alone (no leading blank lines).
+    item = _item( body=None )
+    repo.apply_amendment(
+        item      = item, note="first note", actor="a b",
+        authority = "standing", now=_AMEND_NOW, reason=None,
+    )
+    assert item.body == "[amendment · a b · 2026-07-02T21:55:00+00:00]\nfirst note"
+
+
+def test_apply_amendment_auto_marker_reason_when_absent( repo, session ):
+    # reason falsy -> the audit event auto-describes the appended length.
+    item  = _item( body="x" )
+    event = repo.apply_amendment(
+        item      = item, note="abcde", actor="a b",
+        authority = "manager_relay", now=_AMEND_NOW, reason=None,
+    )
+    assert event.reason    == "body amended (+5 chars)"
+    assert event.authority == "manager_relay"
+
+
+# Post-terminal addendum (Rick's ruling 2026-08-02, row 3c569786) — amend is the
+# ONE write verb allowed on a closed row; the block + audit event are marked
+# distinctly so a late gate verdict is unmistakable from the original body.
+
+@pytest.mark.parametrize( "terminal", [ "done", "dropped" ] )
+def test_apply_amendment_on_terminal_row_marks_post_terminal_addendum( repo, session, terminal ):
+    item  = _item( status=terminal, body="CLOSED BY WORKER: 3 tests pass." )
+    event = repo.apply_amendment(
+        item      = item,
+        note      = "GATE (Mr. Radio): re-ran the collected suite — 1 failed / 125 passed on the first pass; worker fixed the pinned wording; verified green on the second.",
+        actor     = "mr radio 4829ab05",
+        authority = "manager_relay",
+        now       = _AMEND_NOW,
+        reason    = "gate verdict on cited receipts",
+    )
+    # Original body preserved verbatim; the addendum lands below a DISTINCT divider
+    # that names the pre-close status and says it is not a reopening.
+    assert item.body.startswith( "CLOSED BY WORKER: 3 tests pass.\n\n" )
+    assert f"[post-terminal addendum · mr radio 4829ab05 · 2026-07-02T21:55:00+00:00 · row was '{terminal}' at write — added after close, not a reopening]" in item.body
+    assert "[amendment · " not in item.body                    # NOT the ordinary live-row divider
+    assert item.body.rstrip().endswith( "verified green on the second." )
+    # DISTINCT audit transition so the history is queryable for late verdicts.
+    assert event.transition == "amended_post_terminal"
+    assert event.receipt_refs is None
+    assert event.reason     == "gate verdict on cited receipts"
+    # Status is NEVER moved — a closed row stays closed; nothing reads as reopened.
+    assert item.status == terminal
+    added_events = _added_instances( session, TaskEvent )
+    assert len( added_events ) == 1 and added_events[ 0 ] is event
+
+
+def test_apply_amendment_on_terminal_row_auto_marker_reason_when_absent( repo, session ):
+    # reason falsy on a terminal row -> auto length marker, but the transition is
+    # still the DISTINCT post-terminal one (the two are independent axes).
+    item  = _item( status="done", body="closed." )
+    event = repo.apply_amendment(
+        item      = item, note="late", actor="a b",
+        authority = "standing", now=_AMEND_NOW, reason=None,
+    )
+    assert event.transition == "amended_post_terminal"
+    assert event.reason     == "body amended (+4 chars)"
+
+
+def test_apply_amendment_live_row_keeps_ordinary_marker( repo, session ):
+    # The control for the branch: a NON-terminal row keeps the plain 'amended'
+    # event and the ordinary divider — the post-terminal shape must not leak onto
+    # a live amend.
+    item  = _item( status="in_progress", body="live." )
+    event = repo.apply_amendment(
+        item      = item, note="mid-flight note", actor="a b",
+        authority = "standing", now=_AMEND_NOW, reason=None,
+    )
+    assert event.transition == "amended"
+    assert "[amendment · a b · 2026-07-02T21:55:00+00:00]" in item.body
+    assert "post-terminal addendum" not in item.body
+
+
+# ---------------------------------------------------------------------------
+# Persona-key follow-on policy (2026-07-11, task c03d1870) — flag_suffix folds
+# the off-roster persona marker into the EXISTING creation / patched event reason
+# (zero schema, zero new events). Design:
+# src/rnd/v0.1.9/2026.07.11-persona-key-followon-policy.md
+# ---------------------------------------------------------------------------
+
+def test_create_item_folds_flag_suffix_into_queued_event_reason( repo, session ):
+    repo.create_item(
+        item_class  = "task",
+        title       = "t",
+        project     = "lupin",
+        created_by  = "ziggy 5a1f17f8",
+        authority   = "standing",
+        flag_suffix = "[persona_flag: owner 'ziggy' off-roster]",
+    )
+    event = _added_instances( session, TaskEvent )[ 0 ]
+    assert event.transition == "->queued"
+    assert event.reason     == "[persona_flag: owner 'ziggy' off-roster]"
+
+
+def test_create_item_no_flag_suffix_leaves_reason_none( repo, session ):
+    repo.create_item(
+        item_class = "task",
+        title      = "t",
+        project    = "lupin",
+        created_by = "krishna 38d15e3b",
+        authority  = "standing",
+    )
+    event = _added_instances( session, TaskEvent )[ 0 ]
+    assert event.reason is None                                # unchanged default — no marker
+
+
+def test_apply_patch_appends_flag_suffix_to_field_delta( repo ):
+    item  = _item( owner_persona="krishna" )
+    event = repo.apply_patch(
+        item        = item,
+        fields      = { "owner_persona": "ziggy stardust" },
+        actor       = "mr radio 372f9dc9",
+        authority   = "standing",
+        flag_suffix = "[persona_flag: owner 'ziggy stardust' off-roster]",
+    )
+    # field-delta PRESERVED, marker appended after it (both survive on one event)
+    assert "owner_persona: 'krishna' -> 'ziggy stardust'" in event.reason
+    assert event.reason.endswith( "[persona_flag: owner 'ziggy stardust' off-roster]" )
+
+
+def test_apply_patch_appends_flag_suffix_to_caller_reason( repo ):
+    item  = _item( owner_persona="krishna" )
+    event = repo.apply_patch(
+        item        = item,
+        fields      = { "owner_persona": "ziggy" },
+        actor       = "a b",
+        authority   = "standing",
+        reason      = "manager handoff",
+        flag_suffix = "[persona_flag: owner 'ziggy' off-roster]",
+    )
+    assert event.reason == "manager handoff [persona_flag: owner 'ziggy' off-roster]"
+
+
+def test_apply_patch_none_flag_suffix_is_noop( repo ):
+    item  = _item( title="old", priority="P2" )
+    event = repo.apply_patch(
+        item      = item,
+        fields    = { "priority": "P0" },
+        actor     = "a b",
+        authority = "standing",
+    )
+    assert "[persona_flag" not in event.reason
+    assert "priority: 'P2' -> 'P0'" in event.reason
 
 
 if __name__ == "__main__":

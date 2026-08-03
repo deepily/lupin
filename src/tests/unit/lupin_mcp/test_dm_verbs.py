@@ -38,6 +38,7 @@ def _respond( post_fn, api_key="k-123", recipient="tiberius", recipient_session_
         session_id           = "asker-sess-1",
         sender_persona       = "Clayton",
         sender_icon          = "😎",
+        sender_project       = "lupin",
         api_base_url         = "http://localhost:7999",
         api_key              = api_key,
         post_fn              = post_fn,
@@ -163,7 +164,8 @@ def test_get_transport_exception():
 # _dm_list_impl
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _list( get_fn, api_key="k-123", thread_id=None, since=None, limit=50 ):
+def _list( get_fn, api_key="k-123", thread_id=None, since=None, limit=50,
+           session_id=None, scope="session" ):
     return _dm_list_impl(
         thread_id    = thread_id,
         since        = since,
@@ -171,6 +173,8 @@ def _list( get_fn, api_key="k-123", thread_id=None, since=None, limit=50 ):
         api_base_url = "http://localhost:7999",
         api_key      = api_key,
         get_fn       = get_fn,
+        session_id   = session_id,
+        scope        = scope,
     )
 
 
@@ -223,6 +227,49 @@ def test_list_transport_exception():
     out = _list( get_fn )
     assert out[ "reason" ] == "request_failed"
     assert "slow" in out[ "detail" ]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Addressee scoping on the wire (row 2565956b)
+#
+# The server authenticates a USER, not a session, so it cannot know who is
+# asking. If this client does not SAY, the read is account-wide and returns the
+# whole fleet's DMs. These pin that the client says so by default, and that the
+# wide read is only ever an explicit request.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _capture_params( **kw ):
+    captured = {}
+    def get_fn( url, params=None, headers=None, timeout=None ):
+        captured.update( params or {} )
+        return _Resp( 200, { "count": 0, "messages": [] } )
+    _list( get_fn, **kw )
+    return captured
+
+
+def test_session_id_is_sent_so_the_default_read_is_scoped():
+    params = _capture_params( session_id="d43421a6" )
+    assert params[ "session_id" ] == "d43421a6"
+    assert "scope" not in params           # session is the default; no need to say it
+
+
+def test_account_scope_is_sent_explicitly():
+    params = _capture_params( session_id="d43421a6", scope="account" )
+    assert params[ "scope" ] == "account"
+
+
+def test_unknown_session_sends_no_session_id():
+    # Honest: we cannot narrow what we cannot identify. The server then reports
+    # scope="account" rather than pretending the read was scoped.
+    assert "session_id" not in _capture_params( session_id=None )
+
+
+def test_scoping_params_compose_with_thread_and_since():
+    params = _capture_params( session_id="d43421a6", thread_id="th-1",
+                              since="2026-07-21T00:00:00+00:00" )
+    assert params[ "thread_id" ]  == "th-1"
+    assert params[ "since" ]      == "2026-07-21T00:00:00+00:00"
+    assert params[ "session_id" ] == "d43421a6"
 
 
 if __name__ == "__main__":

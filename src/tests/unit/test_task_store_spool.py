@@ -27,11 +27,20 @@ class TestSpoolPath:
     def test_empty_session_collapses_to_unknown( self, tmp_path ):
         assert sp.spool_path( "", base_dir=tmp_path ).name == ".task-store-spool-unknown.jsonl"
 
-    def test_base_dir_none_resolves_project_root( self ):
+    def test_base_dir_none_resolves_the_FLEET_DATA_ROOT( self ):
+        """
+        Row 8758d0b1 / f56fc63b — runtime state moved OUT of the repo.
+
+        `base_dir=None` no longer means the project root: it means
+        `<DEEPILY_DATA_DIR>/<repo-name>`. A gitignored path INSIDE the tree is on
+        `git clean -xdf`'s kill list rather than shielded by it (measured: a dry run
+        listed 448 runtime files as "would remove", cargo-bearing holds among them).
+        """
         with pytest.MonkeyPatch.context() as mp:
             import cosa.utils.util as cu
             mp.setattr( cu, "get_project_root", lambda: "/proj/root" )
-            assert str( sp.spool_path( "s" ) ) == "/proj/root/.task-store-spool-s.jsonl"
+            mp.setenv( "DEEPILY_DATA_DIR", "/data" )
+            assert str( sp.spool_path( "s" ) ) == "/data/root/.task-store-spool-s.jsonl"
 
 
 class TestAppendAndRead:

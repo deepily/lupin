@@ -95,7 +95,11 @@ awk -v root="${LUPIN_ROOT}" -v cfg="${CONFIG_ARGS}" '
   /^Environment=LUPIN_ROOT=/      { print "Environment=LUPIN_ROOT=" root; next }
   /^Environment=LUPIN_CONFIG_MGR_CLI_ARGS=/ { next }   # drop any stale one; re-add below
   /^ExecStart=/ {
-      print "Environment=LUPIN_CONFIG_MGR_CLI_ARGS=" cfg
+      # QUOTE the value: it contains spaces (config_path=… splainer_path=… config_block_id=…),
+      # and systemd splits an UNQUOTED Environment= on whitespace → the var is truncated to the
+      # first token → ConfigurationManager gets an incomplete cli_args dict → KeyError at boot,
+      # Restart=always crash-loops forever. (Caught live on lupin-host-test 2026-07-22.)
+      print "Environment=\"LUPIN_CONFIG_MGR_CLI_ARGS=" cfg "\""
       # rewrite ExecStart absolute path to this host
       print "ExecStart=" root "/src/scripts/run-lupin-arbiter-app.sh"
       next

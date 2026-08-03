@@ -89,8 +89,8 @@ docker run -p 7999:7999 \
 # Build image once
 ./src/scripts/cloud-run-build.sh latest
 
-# Deploy to testing environment
-./src/scripts/cloud-run-deploy.sh latest 8080 testing
+# Deploy: the monolith cloud-run-deploy.sh path was RETIRED (2026-07-11).
+# Deploy via terraform instead: cd src/terraform/envs/test && terraform apply
 ```
 
 **Manual Deployment** (using gcloud directly):
@@ -126,7 +126,8 @@ gcloud run deploy lupin-test \
 
 ```bash
 # Use SAME image built in scenario 3
-./src/scripts/cloud-run-deploy.sh latest 8080 production
+# cloud-run-deploy.sh RETIRED (2026-07-11) — deploy via terraform
+# (src/terraform/envs/test) with the production tfvars.
 ```
 
 **Manual Deployment**:
@@ -317,11 +318,9 @@ docker run -p 7999:7999 \
 ### Deploy to Cloud Run
 
 ```bash
-# Testing deployment (default)
-./src/scripts/cloud-run-deploy.sh latest 8080 testing
-
-# Production deployment
-./src/scripts/cloud-run-deploy.sh latest 8080 production
+# cloud-run-deploy.sh RETIRED (2026-07-11, monolith-on-Cloud-Run path).
+# Deploy via terraform instead:
+#   cd src/terraform/envs/test && terraform apply   # testing (prod: production tfvars)
 ```
 
 ---
@@ -331,7 +330,7 @@ docker run -p 7999:7999 \
 - **Dockerfile**: `docker/lupin/Dockerfile` - Contains runtime configuration documentation
 - **Deployment Scripts**:
   - `src/scripts/cloud-run-build.sh` - Build multi-environment image
-  - `src/scripts/cloud-run-deploy.sh` - Deploy with environment selection
+  - Deploy: `src/terraform/envs/test` (terraform) — `cloud-run-deploy.sh` retired 2026-07-11 (monolith-on-Cloud-Run path)
 - **Configuration File**: `src/conf/lupin-app.ini` - Defines all config blocks
 - **ConfigurationManager**: `src/cosa/config/configuration_manager.py` - Handles env var parsing
 

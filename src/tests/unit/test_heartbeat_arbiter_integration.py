@@ -244,9 +244,17 @@ class TestGroupPCLoopClosure:
         Proves the two independently-built halves interoperate on disk — the one
         thing neither side's unit tests can show (each mocks the other half).
         """
-        # producer harness (real leaves, isolated roots)
-        monkeypatch.setattr( stop, "load_heartbeat_settings", lambda: { "enabled": True, "poke_cap": 3, "owed_source_from_store": False } )
+        # producer harness (real leaves, isolated roots). The settings mock carries
+        # the FULL key set the loader returns — incl. count_inbound_questions_as_owed
+        # (default False) which stop.py reads at the inbound-owed gate (else KeyError).
+        monkeypatch.setattr( stop, "load_heartbeat_settings", lambda: { "enabled": True, "poke_cap": 3, "owed_source_from_store": False, "verification_threshold_seconds": 600, "count_inbound_questions_as_owed": False } )
         monkeypatch.setattr( stop, "get_voice_persona", lambda _s: { "name": "Mr. Radio 🦉" } )
+        # HERMETIC: the persona is a REAL fleet persona, so the live-bridge inbound
+        # gatherer + the Face A store-backed backlog read would pull REAL DM/store
+        # state into this disk-chain test. Stub both to their empty/fail-safe shapes
+        # so the chain is driven ONLY by the owed transcript below (deterministic).
+        monkeypatch.setattr( stop, "_gather_unanswered_inbound_questions", lambda _s: { "owed": [ ], "stale": [ ] } )
+        monkeypatch.setattr( stop, "_backlog_count_from_store", lambda _s: ( 0, False ) )
         import cosa.utils.util as cu
         proj = tmp_path / "proj"; proj.mkdir()
         monkeypatch.setattr( cu, "get_project_root", lambda: str( proj ) )
@@ -314,18 +322,78 @@ class TestGroupPCLoopClosure:
         # Part-6 #4 rewrite: names the blocked worker + the ask (not "where are we?")
         assert "Alice" in body and "blocking worker" in body
 
+    def test_pc4b_awaiting_edge_without_store_backing_suppresses_ping( self, fleet ):
+        """B3 (bug d44b7068): a real awaiting:peer edge whose store has NO backing
+        obligation (the awaited peer owes the holder nothing — the Maria/Tiberius
+        and Krishna/Mr-Radio phantom) → the blocking ping is SUPPRESSED. The
+        single-edge analog of pc5b's deadlock store-corroboration."""
+        _emit( fleet, "s-hold", "honored", awaiting="peer:Bob", persona="Alice" )
+        arb     = _make_arbiter( fleet, owed_work_fn=lambda names: { "Alice": [ ], "Bob": [ ] } )
+        summary = arb._poll_once()
+        assert summary[ "edges" ] == 1                            # the derived edge still EXISTS
+        assert summary[ "pings_fired" ] == 0                      # but no store backing → no phantom ping
+        # Bob (the awaited peer) is NEVER pinged as a blocker (an incidental
+        # owning-manager tap may still fire — that is a different outreach).
+        assert all( recipient != "Bob" for recipient, _ in arb._commons.sent )
+
+    def test_pc4c_awaiting_edge_with_store_backing_fires_ping( self, fleet ):
+        """B3 (bug d44b7068): the SAME awaiting edge, now corroborated by a real
+        store blocked_by (Alice's item is blocked_by Bob's) → the ping FIRES (the
+        true-positive blocker is preserved)."""
+        _emit( fleet, "s-hold", "honored", awaiting="peer:Bob", persona="Alice" )
+        owed = {
+            "Alice": [ { "id": "tA", "status": "blocked", "gate_class": "none",
+                         "blocked_by": [ { "kind": "item", "id": "tB" } ] } ],
+            "Bob"  : [ { "id": "tB", "status": "running", "gate_class": "none", "blocked_by": [ ] } ],
+        }
+        arb     = _make_arbiter( fleet, owed_work_fn=lambda names: owed )
+        summary = arb._poll_once()
+        assert summary[ "edges" ] == 1 and summary[ "pings_fired" ] == 1
+        recipient, body = arb._commons.sent[ 0 ]
+        assert recipient == "Bob" and "Alice" in body and "blocking worker" in body
+
     def test_pc5_mutual_await_is_deadlock_escalated_not_broken( self, fleet ):
-        """Two real sessions awaiting each other → deadlock cycle → ESCALATE (never auto-broken)."""
+        """Two real sessions awaiting each other AND a corroborating STORE
+        dependency ring (Alice's task blocked_by Bob's, and vice versa) → deadlock
+        → ESCALATE (never auto-broken). Bug 436a366b: the derived ring alone is no
+        longer enough — it must be store-corroborated (dwell=0 fires on first
+        corroborated sight)."""
         _emit( fleet, "s1", "honored", awaiting="peer:Bob",   persona="Alice" )
         _emit( fleet, "s2", "honored", awaiting="peer:Alice", persona="Bob" )
+        # AUTHORITATIVE store ring: Alice↔Bob really block each other (item-kind).
+        owed = {
+            "Alice": [ { "id": "tA", "status": "blocked", "gate_class": "none",
+                         "blocked_by": [ { "kind": "item", "id": "tB" } ] } ],
+            "Bob"  : [ { "id": "tB", "status": "blocked", "gate_class": "none",
+                         "blocked_by": [ { "kind": "item", "id": "tA" } ] } ],
+        }
         escalations = [ ]
-        arb     = _make_arbiter( fleet, notify_fn=lambda m: escalations.append( m ) )
+        arb     = _make_arbiter( fleet, notify_fn=lambda m: escalations.append( m ),
+                                 owed_work_fn=lambda names: owed, deadlock_dwell_seconds=0 )
         summary = arb._poll_once()
         assert summary[ "cycles" ] == 1
         # Part-6 #5: surfaced to Rick (notify_fn) + active managers — not posted to a
         # roster topic (#6 dropped), and NEVER autonomously broken
         assert escalations and "DEADLOCK" in escalations[ 0 ]
+        assert "store-corroborated" in escalations[ 0 ]
         assert arb._commons.posts == [ ]                          # #6: no roster broadcast
+
+    def test_pc5b_mutual_await_without_store_backing_not_escalated( self, fleet ):
+        """Bug 436a366b regression (the false-fire that bit us all session): the
+        SAME derived mutual-await ring but with NO corroborating store rows (a
+        fresh, progressing sequencing wait — Krishna↔Mr Radio) → the cycle is
+        SEEN (summary cycles==1) but NOT escalated. Store-corroboration suppresses
+        the derived-only ring."""
+        _emit( fleet, "s1", "honored", awaiting="peer:Bob",   persona="Alice" )
+        _emit( fleet, "s2", "honored", awaiting="peer:Alice", persona="Bob" )
+        escalations = [ ]
+        # owed_work_fn returns ZERO owed items for both → empty store ring.
+        arb     = _make_arbiter( fleet, notify_fn=lambda m: escalations.append( m ),
+                                 owed_work_fn=lambda names: { "Alice": [ ], "Bob": [ ] },
+                                 deadlock_dwell_seconds=0 )
+        summary = arb._poll_once()
+        assert summary[ "cycles" ] == 1                           # the derived ring still EXISTS
+        assert escalations == [ ]                                 # but is NOT escalated (no store backing)
 
 
 # ═════════════════════════════════════════════════════════════════════════════

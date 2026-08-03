@@ -49,6 +49,7 @@ from cosa.agents.shared.fix_executor import FixExecutor
 from cosa.agents.swe_team.safety_limits import SafetyGuard, SafetyLimitError
 from cosa.agents.swe_team.hooks import build_can_use_tool, post_tool_hook, wrap_prompt_for_streaming
 from cosa.agents.swe_team.test_runner import run_pytest
+from cosa.agents.utils.voice_io import read_gate_answer
 
 # SDK imports — graceful fallback
 try:
@@ -350,18 +351,23 @@ class BFEOrchestrator:
 
         # --- Voice gate (natural break point) ---
         if not self._is_cancelled():
-            from cosa.agents.bug_fix_expediter.state import VoiceGateTimeoutError, StalledException
+            from cosa.agents.bug_fix_expediter.state import (
+                VoiceGateTimeoutError, VoiceGateUnreachableError, StalledException,
+            )
             try:
                 best_diagnosis = await self._voice_gate_diagnosis( best_diagnosis, voice_io, cosa_interface )
-            except VoiceGateTimeoutError:
-                # User unavailable at diagnosis gate — save checkpoint + stall.
-                # (Session 9056c113 doc 16 Phase 1)
+            except ( VoiceGateTimeoutError, VoiceGateUnreachableError ) as e:
+                # No human approved — whether the ask timed out or the gate itself
+                # broke. Same clean yield either way: checkpoint + stall so a human
+                # can answer on resume. The message names which, because the two
+                # are not the same event. (Session 9056c113 doc 16 Phase 1; row 421b9498)
                 self.diagnosis = best_diagnosis   # populate for save_checkpoint
                 checkpoint = self.save_checkpoint()
+                why = "timeout" if isinstance( e, VoiceGateTimeoutError ) else "unreachable"
                 raise StalledException(
                     checkpoint = checkpoint,
                     phase      = BFEPhase.DIAGNOSING.value,
-                    message    = "Voice gate timeout at diagnosis",
+                    message    = f"Voice gate {why} at diagnosis",
                 )
 
         # --- Completion notification ---
@@ -656,20 +662,24 @@ class BFEOrchestrator:
         # --- Voice gate (natural break point) ---
         selected_fix = None
         if not self._is_cancelled():
-            from cosa.agents.bug_fix_expediter.state import VoiceGateTimeoutError, StalledException
+            from cosa.agents.bug_fix_expediter.state import (
+                VoiceGateTimeoutError, VoiceGateUnreachableError, StalledException,
+            )
             try:
                 selected_fix = await self._voice_gate_proposal( fixes, voice_io, cosa_interface )
-            except VoiceGateTimeoutError:
-                # User unavailable at proposal gate — save checkpoint + stall.
+            except ( VoiceGateTimeoutError, VoiceGateUnreachableError ) as e:
+                # Nobody approved applying a fix — the ask timed out, or the gate
+                # broke. Either way: checkpoint + stall, never apply. (row 421b9498)
                 # Populate orchestrator state first so save_checkpoint captures it.
                 self.diagnosis      = diagnosis
                 self.proposed_fixes = fixes
                 self.plan_path      = plan_path
                 checkpoint = self.save_checkpoint()
+                why = "timeout" if isinstance( e, VoiceGateTimeoutError ) else "unreachable"
                 raise StalledException(
                     checkpoint = checkpoint,
                     phase      = BFEPhase.PROPOSING.value,
-                    message    = "Voice gate timeout at proposal",
+                    message    = f"Voice gate {why} at proposal",
                 )
 
             # Re-write plan with selection if user chose a fix
@@ -895,16 +905,18 @@ class BFEOrchestrator:
                 job_id   = self.job_id,
             )
         except Exception as e:
-            # Propagate VoiceGateTimeoutError up to the caller (run_diagnosis)
-            # so it can save a checkpoint and raise StalledException. Other
-            # errors still fall through to auto-approve (existing behavior).
-            # Session 9056c113 doc 16 Phase 1.
-            from cosa.agents.bug_fix_expediter.state import VoiceGateTimeoutError
+            # A gate that cannot reach a human does not answer for them.
+            # Timeout (asked, no answer) and unreachable (the asking broke) both
+            # mean no human approved, and both checkpoint-and-stall in the caller.
+            # They stay DISTINCT types so the record can say which occurred.
+            # Was: fall through to `return diagnosis` — an auto-approval whose
+            # return value was indistinguishable from a real one (row 421b9498).
+            from cosa.agents.bug_fix_expediter.state import VoiceGateTimeoutError, VoiceGateUnreachableError
             if isinstance( e, VoiceGateTimeoutError ):
                 raise
-            logger.warning( f"Voice gate confirmation failed: {e} — auto-approving" )
+            logger.warning( f"Voice gate confirmation failed: {e} — refusing to approve for an absent human" )
             await self._emit_state( BFEPhase.WAITING_CONFIRMATION, BFEPhase.DIAGNOSING )
-            return diagnosis
+            raise VoiceGateUnreachableError( BFEPhase.DIAGNOSING.value, e )
 
         if approved:
             if self.debug: print( "[BFEOrchestrator] Diagnosis approved by user" )
@@ -921,9 +933,23 @@ class BFEOrchestrator:
                 job_id  = self.job_id,
             )
         except Exception as e:
-            logger.warning( f"Feedback collection failed: {e} — returning diagnosis as-is" )
+            # The user has ALREADY REJECTED this diagnosis. Returning it here
+            # converted an explicit NO into a YES because a *second* call failed
+            # — the only site in this sweep that overrides a human who spoke,
+            # rather than filling in for one who was absent (row 421b9498).
+            #
+            # get_feedback raises VoiceGateTimeoutError in its own right
+            # (dispatcher: exit_code==2, 503-offline, ValidationError/ConnectionError). Let it
+            # through unwrapped: a timeout relabelled "unreachable" is a handler
+            # that cannot tell apart the two states this whole change exists to
+            # keep distinct. (Krishna 🦚, pre-commit review.)
+            from cosa.agents.bug_fix_expediter.state import VoiceGateTimeoutError, VoiceGateUnreachableError
+            if isinstance( e, VoiceGateTimeoutError ):
+                await self._emit_state( BFEPhase.WAITING_CONFIRMATION, BFEPhase.DIAGNOSING )
+                raise
+            logger.warning( f"Feedback collection failed after a REJECTION: {e} — refusing to proceed on the rejected diagnosis" )
             await self._emit_state( BFEPhase.WAITING_CONFIRMATION, BFEPhase.DIAGNOSING )
-            return diagnosis
+            raise VoiceGateUnreachableError( BFEPhase.DIAGNOSING.value, e )
 
         if not feedback:
             if self.debug: print( "[BFEOrchestrator] No feedback provided — returning diagnosis as-is" )
@@ -1007,15 +1033,17 @@ class BFEOrchestrator:
                     job_id   = self.job_id,
                 )
             except Exception as e:
-                # Propagate VoiceGateTimeoutError so the caller can stall with a
-                # checkpoint. Other errors fall through to auto-approve.
-                # Session 9056c113 doc 16 Phase 1.
-                from cosa.agents.bug_fix_expediter.state import VoiceGateTimeoutError
+                # This gate asks "Apply this fix?" — a broken gate must never
+                # answer yes on a human's behalf and hand back a fix for
+                # application. Both no-answer cases checkpoint-and-stall in the
+                # caller; they stay distinct types so the record says which.
+                # Was: fall through to `return auto` (row 421b9498).
+                from cosa.agents.bug_fix_expediter.state import VoiceGateTimeoutError, VoiceGateUnreachableError
                 if isinstance( e, VoiceGateTimeoutError ):
                     raise
-                logger.warning( f"Voice gate failed: {e} — auto-approving" )
+                logger.warning( f"Voice gate failed: {e} — refusing to apply a fix nobody approved" )
                 await self._emit_state( BFEPhase.WAITING_CONFIRMATION, BFEPhase.PROPOSING )
-                return auto
+                raise VoiceGateUnreachableError( BFEPhase.PROPOSING.value, e )
 
             if approved:
                 await self._emit_state( BFEPhase.WAITING_CONFIRMATION, BFEPhase.PROPOSING )
@@ -1044,7 +1072,10 @@ class BFEOrchestrator:
                     job_id   = self.job_id,
                 )
 
-                selection = result.get( "answers", {} ).get( "Fix Selection", "" )
+                # An ABSENT header is not "the user picked nothing" (row 2b604cdb).
+                selection = read_gate_answer(
+                    result, "Fix Selection", "BFE proposal gate", unattended_default=""
+                )
 
                 # Find selected fix
                 for fix in fixes:

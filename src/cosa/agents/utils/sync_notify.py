@@ -16,6 +16,38 @@ import requests
 from cosa.agents.utils.proxy_agents.base_config import DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT
 from cosa.utils.config_loader import get_api_config, load_api_key
 
+# Transport budget for out-of-process HTTP calls to `:7999` (row 204911ca).
+# ~30s = 1.60x the observed maximum reload window of 18.76s — a multiplier with
+# explicit headroom, NOT a coverage guarantee. `:7999` runs `uvicorn --reload`
+# and the reloader parent holds the listening socket across a restart, so the
+# kernel ACCEPTS a request nothing is there to answer and the caller hangs
+# instead of getting a fast ConnectionRefused. The prior 5s sat under the
+# 18.76s observed max (measured n=143: min 6.59s, median 6.91s).
+#
+# 🔴 EXPOSED VIA CLI MODE. `peer.py:354` reaches this helper INSIDE `:7999`,
+# where a reload tears the caller down too and a budget buys nothing. But
+# `python -m cosa.agents.notification_proxy` and `python -m
+# cosa.agents.decision_proxy` reach it in a SEPARATE OS process, and that mode
+# is the documented, actually-exercised one. Exposure is a property of the
+# INVOCATION, not of the call site — a per-site in/out classification cannot
+# express that, and an earlier pass excluded this helper because of it.
+#
+# Full derivation: src/rnd/v0.1.9/2026.07.19-dev-server-reload-availability.md §9(a).
+#
+# 🔴 DRIFT CONTROL — TWO SEARCHES, AND IT TOOK BOTH.
+# `grep -rn _SERVER_TRANSPORT_TIMEOUT_SECONDS` returns every DIRECT call site.
+# It does NOT return members whose budget is carried in a Pydantic FIELD rather
+# than passed at the call — `AsyncNotificationRequest( timeout=… )`, consumed at
+# `notify_user_async.py:197-201` as a bare `requests.post( timeout=request.timeout )`.
+# Two such members were missed on the first pass for exactly this reason.
+# The second search is: `grep -rn "AsyncNotificationRequest(" -A14 | grep timeout`.
+# Run BOTH, or the set you get back is the set the first grep can see.
+#
+# TRADE: a hung server now stalls a notify ~30s instead of ~5s.
+# The failure path returns False behind a `debug`-gated print, so a dropped
+# notification is SILENT by default — losing it is worse than waiting for it. Not free.
+_SERVER_TRANSPORT_TIMEOUT_SECONDS = 30
+
 
 def notify(
     message: str,
@@ -79,7 +111,8 @@ def notify(
         if debug: print( f"[SyncNotify] Failed to load API key: {e}" )
 
     try:
-        response = requests.post( url, params=params, headers=headers, timeout=5 )
+        response = requests.post( url, params=params, headers=headers,
+                                   timeout=_SERVER_TRANSPORT_TIMEOUT_SECONDS )
         if debug: print( f"[SyncNotify] Notification sent: {response.status_code}" )
         return response.status_code == 200
     except Exception as e:

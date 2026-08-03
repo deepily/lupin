@@ -21,6 +21,7 @@ class TestDeleteBySnapshotId:
 
         obj = MagicMock()
         obj.debug = True
+        obj._use_postgres = False          # exercise the LanceDB delete path (v0.2.0 §6 flag)
         obj._canonical_synonyms_table = MagicMock()
 
         # Import the real method and bind it
@@ -102,14 +103,14 @@ class TestDeleteBySnapshotId:
 
 
 class TestDeleteSnapshotSynonymCleanup:
-    """Tests that delete_snapshot() in LanceDBSolutionManager cleans up synonyms."""
+    """Tests that delete_snapshot() in SolutionSnapshotManager cleans up synonyms."""
 
     def test_synonym_cleanup_called_on_delete( self ):
         """delete_snapshot() calls delete_by_snapshot_id() when synonyms table is initialized."""
         mock_synonyms = MagicMock()
         mock_synonyms.delete_by_snapshot_id.return_value = 3
 
-        # Build a minimal mock of LanceDBSolutionManager
+        # Build a minimal mock of SolutionSnapshotManager
         mgr = MagicMock()
         mgr._canonical_synonyms = mock_synonyms
         mgr._question_lookup    = { "What is 4+4?" : "hash_abc" }

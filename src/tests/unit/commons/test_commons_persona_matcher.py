@@ -95,12 +95,15 @@ def test_empty_candidates_returns_none():
 
 
 def test_normalize_for_match_helper():
-    """_normalize_for_match strips non-alphanumeric and lowercases."""
+    """_normalize_for_match strips non-alphanumeric, lowercases, and (since the
+    2026-06-19 centralization onto canonical_persona_key) ALSO strips accents, so
+    an accented reference matches the store's accent-free key. Previously this
+    returned "maría" — the divergence that let accented personas miss the store."""
     assert _normalize_for_match( "Mr. Radio" ) == "mrradio"
     assert _normalize_for_match( "MR.RADIO" ) == "mrradio"
     assert _normalize_for_match( "" ) == ""
     assert _normalize_for_match( "..." ) == ""
-    assert _normalize_for_match( "María" ) == "maría"
+    assert _normalize_for_match( "María" ) == "maria"
 
 
 def test_disambiguate_via_llm_phase_1_stub_returns_none():

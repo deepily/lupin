@@ -4,8 +4,9 @@ Integration test — HeartbeatPokerJob end-to-end (task I6, integration tier).
 
 VENUE — :8000, scheduled via `POST /api/test-suite/submit` (§TESTING VENUES).
 This tier mutates persistent state (writes real commons topic files) and needs
-the running server for the Phase-3 `/api/commons/register-question` push, so it
-is NOT run locally and NOT on :7999.
+the running server for the `/api/dm/send` notification-native push (migrated off
+the deleted `/api/commons/register-question` route, cosa-voice token-reduction
+Phase 4), so it is NOT run locally and NOT on :7999.
 
 STATUS — module-skipped. Beyond the :8000 venue, this tier requires the
 `HeartbeatPokerJob` → CJ Flow ingestion wiring, which is not yet a completed
@@ -36,7 +37,7 @@ def test_poker_pokes_recipient_end_to_end():
     topic carrying the `poke_body` envelope.
 
     End-to-end path: real `HeartbeatPokerJob` + real `LupinCommonsGateway` +
-    real `CommonsStore` + the live :8000 server for the register-question push.
+    real `CommonsStore` + the live :8000 server for the `/api/dm/send` push.
 
     Steps to flesh once wiring lands:
       1. construct a poker (short cadence, low `max_duration_seconds`);

@@ -599,13 +599,13 @@ class TestEventHandling:
             mock_deliver.assert_not_called()
             mock_inject.assert_called_once_with( "Legacy voice" )
 
-    # ── §6 idle-aware delivery split: _deliver_peer_dm + _recipient_is_idle ─────
+    # ── §6 idle-aware delivery split: _deliver_peer_dm + _recipient_is_injectable ─────
 
     def test_deliver_peer_dm_active_buffers( self, listener ):
         """An ACTIVE recipient (not idle) → _buffer_message (clean, non-invasive),
         NOT a mid-turn tmux injection."""
         notif = { "direction": "ai_to_ai", "message": "hi", "job_id": "sess1234" }
-        with patch.object( listener, '_recipient_is_idle', return_value=False ), \
+        with patch.object( listener, '_recipient_is_injectable', return_value=False ), \
              patch.object( listener, '_buffer_message' ) as mock_buf, \
              patch.object( listener, '_handle_peer_dm' ) as mock_tmux:
             listener._deliver_peer_dm( notif )
@@ -616,110 +616,85 @@ class TestEventHandling:
         """An IDLE recipient → _handle_peer_dm (tmux-wake), NOT the buffer (nothing
         would drain a buffer at an idle pane)."""
         notif = { "direction": "ai_to_ai", "message": "hi", "job_id": "sess1234" }
-        with patch.object( listener, '_recipient_is_idle', return_value=True ), \
+        with patch.object( listener, '_recipient_is_injectable', return_value=True ), \
              patch.object( listener, '_buffer_message' ) as mock_buf, \
              patch.object( listener, '_handle_peer_dm' ) as mock_tmux:
             listener._deliver_peer_dm( notif )
             mock_tmux.assert_called_once_with( notif )
             mock_buf.assert_not_called()
 
-    # F1 (Cheech 2026-06-15): the 8-char hash MUST be resolved to the full stable
-    # UUID via the bridge before the heartbeat read (events keyed by full UUID,
-    # exact-match). FULL_ID's 8-char prefix == the listener fixture's "sess1234".
-    _FULL_ID = "sess1234-aaaa-bbbb-cccc-dddddddddddd"
+    # bug d1bb1456 (2026-07-02): _recipient_is_injectable no longer reads the
+    # heartbeat outcome log (it returned None → buffer for a parked pane that
+    # emitted only idle_prompt beacons or last-outcome "poked" → the DM-wake gap,
+    # residual of baf5ea6d). Injectability is now decided by a bounded, fail-open
+    # tmux PANE-IDLE PROBE that observes the pane's real state. The end-to-end
+    # ROUTING tests below drive the REAL _recipient_is_injectable → probe →
+    # classifier path, stubbing only the pane capture + the two terminal sinks.
+    _DIVIDER = "─" * 128
 
-    def test_recipient_is_idle_resolves_full_uuid_before_read( self, listener ):
-        """F1: idle outcome under the FULL uuid → idle; last_emitted_outcome is
-        called with the resolved full id, NOT the 8-char hash."""
-        with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id",
-                    return_value={ "stable_session_id": self._FULL_ID } ), \
-             patch( "lupin_cli.claude_code.hooks.lib.heartbeat_events.last_emitted_outcome",
-                    return_value="idle" ) as mock_last:
-            assert listener._recipient_is_idle() is True
-            mock_last.assert_called_once_with( self._FULL_ID )   # full id, not "sess1234"
+    def _idle_pane( self ):
+        return ( f"{self._DIVIDER}\n❯ \n{self._DIVIDER}\n"
+                 "  ⏵⏵ auto mode on (shift+tab to cycle)\n" )
 
-    def test_recipient_is_idle_false_when_active_outcome( self, listener ):
-        """A non-idle last outcome (poked) under the resolved full id → active."""
-        with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id",
-                    return_value={ "stable_session_id": self._FULL_ID } ), \
-             patch( "lupin_cli.claude_code.hooks.lib.heartbeat_events.last_emitted_outcome",
-                    return_value="poked" ):
-            assert listener._recipient_is_idle() is False
+    def _busy_pane( self ):
+        return ( f"{self._DIVIDER}\n❯ \n{self._DIVIDER}\n"
+                 "  ⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt · ← for agents\n" )
 
-    def test_recipient_is_idle_false_when_no_history( self, listener ):
-        """No heartbeat history (None) under the resolved full id → ACTIVE (buffer)."""
-        with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id",
-                    return_value={ "stable_session_id": self._FULL_ID } ), \
-             patch( "lupin_cli.claude_code.hooks.lib.heartbeat_events.last_emitted_outcome",
-                    return_value=None ):
-            assert listener._recipient_is_idle() is False
+    def _dialog_pane( self ):
+        return ( f"{self._DIVIDER}\nDo you want to proceed?\n❯ 1. Yes\n"
+                 "  2. No, and tell Claude what to do differently\n" )
 
-    def test_recipient_is_idle_falls_back_to_session_id_field( self, listener ):
-        """When the bridge lacks stable_session_id, fall back to the session_id field."""
-        with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id",
-                    return_value={ "session_id": self._FULL_ID } ), \
-             patch( "lupin_cli.claude_code.hooks.lib.heartbeat_events.last_emitted_outcome",
-                    return_value="idle" ) as mock_last:
-            assert listener._recipient_is_idle() is True
-            mock_last.assert_called_once_with( self._FULL_ID )
+    def test_deliver_peer_dm_idle_pane_wakes_end_to_end( self, listener ):
+        """d1bb1456 fix (cases A–D): a parked pane observably at an idle prompt →
+        the REAL _recipient_is_injectable probe returns True → _deliver_peer_dm
+        tmux-wakes, regardless of any heartbeat outcome (which is never consulted)."""
+        notif = { "direction": "ai_to_ai", "message": "hi", "job_id": "sess1234" }
+        with patch.object( listener, "_resolve_tmux_session", return_value="t" ), \
+             patch.object( listener, "_capture_pane", side_effect=[ self._idle_pane(), self._idle_pane() ] ), \
+             patch( "lupin_cli.claude_code.hooks.lib.cc_notification_listener.time.sleep" ), \
+             patch.object( listener, "_handle_peer_dm" ) as mock_tmux, \
+             patch.object( listener, "_buffer_message" ) as mock_buf:
+            listener._deliver_peer_dm( notif )
+            mock_tmux.assert_called_once_with( notif )
+            mock_buf.assert_not_called()
 
-    def test_recipient_is_idle_true_when_bridge_unresolvable( self, listener ):
-        """No live bridge (find_session_by_id → None) → can't resolve full id →
-        fail toward tmux-wake (True) so a DM is never lost to an undrained buffer."""
-        with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id",
-                    return_value=None ):
-            assert listener._recipient_is_idle() is True
+    def test_deliver_peer_dm_busy_pane_buffers_end_to_end( self, listener ):
+        """Mid-turn guard: a pane showing 'esc to interrupt' → NOT injectable →
+        _deliver_peer_dm buffers (never corrupt a running turn)."""
+        notif = { "direction": "ai_to_ai", "message": "hi", "job_id": "sess1234" }
+        with patch.object( listener, "_resolve_tmux_session", return_value="t" ), \
+             patch.object( listener, "_capture_pane", return_value=self._busy_pane() ), \
+             patch( "lupin_cli.claude_code.hooks.lib.cc_notification_listener.time.sleep" ), \
+             patch.object( listener, "_handle_peer_dm" ) as mock_tmux, \
+             patch.object( listener, "_buffer_message" ) as mock_buf:
+            listener._deliver_peer_dm( notif )
+            mock_buf.assert_called_once_with( notif )
+            mock_tmux.assert_not_called()
 
-    def test_recipient_is_idle_true_on_read_error( self, listener ):
-        """A read/import error fails toward tmux-wake (return True) so a DM is
-        never silently lost to a buffer nothing drains."""
-        with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id",
-                    return_value={ "stable_session_id": self._FULL_ID } ), \
-             patch( "lupin_cli.claude_code.hooks.lib.heartbeat_events.last_emitted_outcome",
-                    side_effect=RuntimeError( "store unreadable" ) ), \
-             patch.object( listener, '_log' ):
-            assert listener._recipient_is_idle() is True
+    def test_deliver_peer_dm_dialog_pane_buffers_end_to_end( self, listener ):
+        """Dialog guard: a permission/AskUserQuestion modal (no 'esc to interrupt',
+        divider present) → NOT injectable → buffer, so injected text can never
+        select a dialog option."""
+        notif = { "direction": "ai_to_ai", "message": "hi", "job_id": "sess1234" }
+        with patch.object( listener, "_resolve_tmux_session", return_value="t" ), \
+             patch.object( listener, "_capture_pane", return_value=self._dialog_pane() ), \
+             patch( "lupin_cli.claude_code.hooks.lib.cc_notification_listener.time.sleep" ), \
+             patch.object( listener, "_handle_peer_dm" ) as mock_tmux, \
+             patch.object( listener, "_buffer_message" ) as mock_buf:
+            listener._deliver_peer_dm( notif )
+            mock_buf.assert_called_once_with( notif )
+            mock_tmux.assert_not_called()
 
-    def test_recipient_is_idle_nonmocking_real_files( self, tmp_path, monkeypatch ):
-        """
-        F1 NON-MOCKING regression (Cheech 2026-06-15): construct the listener with
-        the 8-CHAR hash, write a REAL bridge file (8char→full uuid) + a REAL
-        heartbeat events file keyed by the FULL uuid with an idle outcome, and
-        assert _recipient_is_idle() resolves end-to-end to True. The pre-fix code
-        passed the 8-char hash to the full-uuid-keyed store → always None → False
-        (the idle→tmux-wake branch was dead). Only directory constants are
-        redirected to tmp — last_emitted_outcome + find_session_by_id run for real.
-        """
-        from lupin_cli.claude_code.hooks.lib import session_bridge, heartbeat_events
-
-        full_id  = "abcd1234-1111-2222-3333-444455556666"
-        short_id = full_id[ :8 ]   # "abcd1234"
-
-        sessions_dir = tmp_path / "sessions"
-        events_dir   = tmp_path / "heartbeat-events"
-        sessions_dir.mkdir(); events_dir.mkdir()
-        monkeypatch.setattr( session_bridge, "SESSION_DIR", sessions_dir )
-        monkeypatch.setattr( heartbeat_events, "FLEET_EVENTS_DIR", events_dir )
-
-        # Real bridge file: cc-<hex>.json is non-numeric → NOT PID-skipped.
-        ( sessions_dir / f"cc-{short_id}.json" ).write_text( json.dumps( {
-            "session_id"        : short_id,
-            "stable_session_id" : full_id,
-            "tmux_session"      : "lupin",
-        } ) )
-        # Real heartbeat events file keyed by the FULL uuid, last outcome = idle.
-        heartbeat_events.emit_outcome(
-            full_id, persona="maría", outcome=heartbeat_events.EVENT_IDLE,
-            poke_count=0, cap=1, base_dir=str( events_dir )
-        )
-
-        probe = CCNotificationListener(
-            email           = "test@test.ai",
-            password        = "pass",
-            session_id_hash = short_id,
-            buffer_path     = str( tmp_path / "buf.jsonl" ),
-        )
-        assert probe._recipient_is_idle() is True
+    # NOTE (bug d1bb1456, 2026-07-02): the F1 (8char→full-uuid resolution),
+    # baf5ea6d (trailing idle_prompt masking), and held-worker-inject (honored/
+    # cap_reached) end-to-end regressions that lived here tested the heartbeat-
+    # OUTCOME-log injectability mechanism, which is RETIRED. Injectability is now a
+    # tmux PANE-IDLE PROBE (a parked pane wakes regardless of outcome-log state, so
+    # those None/masking/honored cases are subsumed). Their behaviour — a parked
+    # pane wakes, a busy/dialog pane buffers — is covered end-to-end by
+    # test_deliver_peer_dm_{idle,busy,dialog}_pane_*_end_to_end above and unit-level
+    # in test_cc_notification_listener_coverage.py::TestClassifyCaptureIdle /
+    # TestPaneIsIdleAtPrompt / TestRecipientIsInjectableProbe.
 
     def test_peer_dm_builds_envelope_with_reply_affordance( self, listener ):
         """

@@ -127,11 +127,20 @@ class TestAskYesNoIntegration:
     We call ask_yes_no.fn() to invoke the underlying function directly.
     """
 
-    def _mock_response( self, exit_code=0, response_value="yes" ):
-        """Create a mock NotificationResponse."""
+    def _mock_response( self, exit_code=0, response_value="yes", default_used=False ):
+        """Create a mock NotificationResponse.
+
+        ⚠️ `default_used` MUST be set (row e5f21fff). An unset attribute on a
+        MagicMock is a TRUTHY Mock, so omitting it makes every mocked response
+        look like a substituted default now that the verb reads the field —
+        every real-answer assertion here would fail for a reason unrelated to
+        what it is testing. False mirrors a RespondedEvent carrying the server's
+        own False.
+        """
         mock = MagicMock()
-        mock.exit_code     = exit_code
+        mock.exit_code      = exit_code
         mock.response_value = response_value
+        mock.default_used   = default_used
         return mock
 
     @patch( "lupin_mcp.cosa_voice_mcp.NotificationRequest" )
@@ -195,21 +204,32 @@ class TestAskYesNoIntegration:
     @patch( "lupin_mcp.cosa_voice_mcp._wait_for_sender_id", return_value="claude.code@lupin.deepily.ai#test1234" )
     @patch( "lupin_mcp.cosa_voice_mcp.notify_user_sync" )
     def test_timeout_returns_default( self, mock_notify, mock_sender, mock_abstract, mock_request ):
-        """Timeout (exit_code=1) returns default value."""
+        """Timeout (exit_code=1) returns the default, MARKED as not-an-answer.
+
+        Row e5f21fff: this used to return a bare "no", indistinguishable from a
+        user pressing No. The value is still conveyed; what changed is that it no
+        longer impersonates a decision.
+        """
         mock_notify.return_value = self._mock_response( exit_code=1, response_value=None )
 
         from lupin_mcp.cosa_voice_mcp import ask_yes_no
         result = ask_yes_no.fn( "Proceed?", default="no" )
-        assert result == "no"
+        assert result == "[default used] no"
+        assert result != "no"
 
     @patch( "lupin_mcp.cosa_voice_mcp.NotificationRequest" )
     @patch( "lupin_mcp.cosa_voice_mcp._normalize_abstract", return_value=None )
     @patch( "lupin_mcp.cosa_voice_mcp._wait_for_sender_id", return_value="claude.code@lupin.deepily.ai#test1234" )
     @patch( "lupin_mcp.cosa_voice_mcp.notify_user_sync" )
     def test_empty_response_returns_default( self, mock_notify, mock_sender, mock_abstract, mock_request ):
-        """Empty response_value returns default."""
+        """Empty response_value returns the default, MARKED (row e5f21fff).
+
+        exit_code==0 with an EMPTY value is not an answer — it falls through to
+        the catch-all, so it must not read as a keypress either.
+        """
         mock_notify.return_value = self._mock_response( exit_code=0, response_value="" )
 
         from lupin_mcp.cosa_voice_mcp import ask_yes_no
         result = ask_yes_no.fn( "Proceed?", default="yes" )
-        assert result == "yes"
+        assert result == "[default used] yes"
+        assert result != "yes"

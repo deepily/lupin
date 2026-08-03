@@ -119,6 +119,12 @@ def test_multiplexer_phase6c_section_a_chip_visual(
     page.evaluate( _STABILIZE_LAST_ACTIVITY_JS )
     time.sleep( 0.3 )
 
+    # Font-load barrier (task 006cb393 — emoji glyph-render race): await
+    # document.fonts.ready + 2 RAFs so the persona/badge NotoColorEmoji glyphs are
+    # loaded before capture. networkidle does NOT gate fonts. See
+    # test_multiplexer_task_editing.py:316-318. Pure load barrier — comparator untouched.
+    page.evaluate( "() => document.fonts.ready" )
+    page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
     pane = page.locator( '#notifications-pane' )
     assert_snapshot( pane, name="multiplexer_phase6c_section_a_chip.png" )
     print( "✓ multiplexer_phase6c_section_a_chip: snapshot compared" )
@@ -153,13 +159,18 @@ def test_multiplexer_phase6c_section_a_popover_open_visual(
     # (unstable-baseline-by-construction → ValueError: Image sizes do not match).
     # The popover holds only the deterministic seeded surface this test asserts
     # (accent strip, name+icon row, voice_id row, no borrowed badge).
+    # Font-load barrier (task 006cb393 — emoji glyph-render race): await
+    # document.fonts.ready + 2 RAFs so the persona/badge NotoColorEmoji glyphs are
+    # loaded before capture. See test_multiplexer_task_editing.py:316-318.
+    page.evaluate( "() => document.fonts.ready" )
+    page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
     popover = page.locator( '#persona-popover-phase6c-a-visual' )
     assert_snapshot( popover, name="multiplexer_phase6c_section_a_popover_open.png" )
     print( "✓ multiplexer_phase6c_section_a_popover_open: snapshot compared" )
 
 
 def test_multiplexer_phase6c_section_a_popover_borrowed_visual(
-    request, clean_test_db, assert_snapshot, logged_in_page,
+    request, clean_test_db, assert_snapshot_content_shift_tolerant, logged_in_page,
 ):
     """AC-A12 snapshot #3: popover OPEN for a borrowed persona — borrowed
     badge surfaces (no `hidden` attribute), distinguishing visually from
@@ -185,6 +196,11 @@ def test_multiplexer_phase6c_section_a_popover_borrowed_visual(
     # ts-127620e1 fix: snapshot the popover element itself, NOT `main.container`
     # (same unstable-baseline-by-construction reason as popover_open above). The
     # borrowed-badge surface lives entirely inside the popover element.
+    # Font-load barrier (task 006cb393 — emoji glyph-render race): await
+    # document.fonts.ready + 2 RAFs so the persona/badge NotoColorEmoji glyphs are
+    # loaded before capture. See test_multiplexer_task_editing.py:316-318.
+    page.evaluate( "() => document.fonts.ready" )
+    page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
     popover = page.locator( '#persona-popover-phase6c-a-borrowed' )
-    assert_snapshot( popover, name="multiplexer_phase6c_section_a_popover_borrowed.png" )
+    assert_snapshot_content_shift_tolerant( popover, name="multiplexer_phase6c_section_a_popover_borrowed.png" )
     print( "✓ multiplexer_phase6c_section_a_popover_borrowed: snapshot compared" )

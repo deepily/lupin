@@ -20,6 +20,35 @@ from cosa.agents.utils.proxy_agents.base_config import (
     DEFAULT_SERVER_PORT,
 )
 
+# Transport budget for out-of-process HTTP calls to `:7999` (row 204911ca).
+# ~30s = 1.60x the observed maximum reload window of 18.76s — a multiplier with
+# explicit headroom, NOT a coverage guarantee. `:7999` runs `uvicorn --reload`
+# and the reloader parent holds the listening socket across a restart, so the
+# kernel ACCEPTS a request nothing is there to answer and the caller hangs
+# instead of getting a fast ConnectionRefused. The prior 10s sat under the
+# 18.76s observed max (measured n=143: min 6.59s, median 6.91s).
+#
+# 🔴 SHARED LAYER, BOTH PROXIES. This module sits under `notification_proxy`
+# AND `decision_proxy`, so it rides both `python -m` entry points into a
+# separate OS process. It was invisible to a per-package grep precisely
+# because it lives in `utils/` rather than in either package: entry-point
+# enumeration finds the packages, but only the transitive walk from them
+# finds the shared libraries underneath.
+#
+# Full derivation: src/rnd/v0.1.9/2026.07.19-dev-server-reload-availability.md §9(a).
+#
+# 🔴 DRIFT CONTROL — TWO SEARCHES, AND IT TOOK BOTH.
+# `grep -rn _SERVER_TRANSPORT_TIMEOUT_SECONDS` returns every DIRECT call site.
+# It does NOT return members whose budget is carried in a Pydantic FIELD rather
+# than passed at the call — `AsyncNotificationRequest( timeout=… )`, consumed at
+# `notify_user_async.py:197-201` as a bare `requests.post( timeout=request.timeout )`.
+# Two such members were missed on the first pass for exactly this reason.
+# The second search is: `grep -rn "AsyncNotificationRequest(" -A14 | grep timeout`.
+# Run BOTH, or the set you get back is the set the first grep can see.
+#
+# TRADE: a hung server now stalls a response submit ~30s instead of ~10s. Not free.
+_SERVER_TRANSPORT_TIMEOUT_SECONDS = 30
+
 
 def submit_notification_response(
     notification_id,
@@ -68,7 +97,7 @@ def submit_notification_response(
             url,
             json    = payload,
             headers = { "Content-Type": "application/json" },
-            timeout = 10
+            timeout = _SERVER_TRANSPORT_TIMEOUT_SECONDS
         )
 
         if response.status_code == 200:

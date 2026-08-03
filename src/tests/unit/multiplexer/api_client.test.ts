@@ -395,3 +395,40 @@ test("error response whose .text() throws falls back to statusText in ApiError m
       e instanceof ApiError && e.status === 500 && /Internal Server Error/.test(e.message),
   );
 });
+
+test("bounceDevServer() POSTs /api/system/bounce with auth and returns the 202 body (row 1b4211ac R2)", async () => {
+  const { authManager } = fakeAuthManager();
+  const { fetcher, calls } = recordingFetcher(async () =>
+    jsonResponse({ status: "triggered", timestamp: "t" }, 202),
+  );
+  const api = createApiClient({
+    baseUrl          : "http://localhost:7999",
+    defaultTimeoutMs : 5000,
+    authManager,
+    fetcher,
+  });
+
+  const res = await api.bounceDevServer();
+  assert.equal(calls[0]?.method, "POST");
+  assert.equal(calls[0]?.url, "http://localhost:7999/api/system/bounce");
+  assert.equal(calls[0]?.headers["Authorization"], "Bearer test-access");
+  assert.equal(res.status, "triggered");
+});
+
+test("bounceDevServer() raises ApiError(409) carrying the status when a bounce is already running", async () => {
+  const { authManager } = fakeAuthManager();
+  const { fetcher } = recordingFetcher(async () =>
+    jsonResponse({ status: "in_progress", reason: "already running" }, 409),
+  );
+  const api = createApiClient({
+    baseUrl          : "http://localhost:7999",
+    defaultTimeoutMs : 5000,
+    authManager,
+    fetcher,
+  });
+
+  await assert.rejects(
+    api.bounceDevServer(),
+    (e: unknown) => e instanceof ApiError && e.status === 409,
+  );
+});

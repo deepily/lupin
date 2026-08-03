@@ -1,6 +1,6 @@
 ---
 name: guided-decision-walkthrough
-description: Walk the user through their pending decisions ONE AT A TIME, each with pros, cons, and an explicit recommendation, via the cosa-voice ask_multiple_choice method, in descending priority. Use this whenever the user asks to "walk me through" the pending decisions / their options / the open items, "walk through my options one by one", "go through my pending decisions", "let's decide the open items", "present these as decisions I can make", "give me one informed decision at a time", or otherwise wants to be guided through a batch of open choices with recommendations. Also invocable explicitly as /plan-decide.
+description: Walk the user through their open decisions ONE AT A TIME, each with pros, cons, and an explicit recommendation, via the cosa-voice ask_multiple_choice method, in descending priority. Decisions can come from the LIVE CONVERSATION (open forks raised in the current design discussion, with nothing written down yet), a TODO "## Pending Decisions" queue, or a doc harvest — the queue is optional. Use this whenever the user asks to "walk me through" the pending decisions / the open items / "the decisions we've been discussing" / "the open issues from this conversation" / "the decisions from our design discussion", "walk through my options one by one", "go through my pending decisions", "let's decide the open items", "present these as decisions I can make", "give me one informed decision at a time", or otherwise wants to be guided through a batch of open choices with recommendations. Also invocable explicitly as /plan-decide.
 ---
 
 # Guided Decision Walkthrough
@@ -11,7 +11,11 @@ Drive a series of informed decisions for the user, one at a time, framed with pr
 
 1. **Read the canonical workflow** — `planning-is-prompting → workflow/decision-walkthrough.md` — and follow it in full. It is the authoritative source for the ritual, the queue convention, and the recording format.
 
-2. **Gather the queue** — read `## Pending Decisions` from this repo's `TODO.md`. Optionally harvest fresh decisions from open plan-docs / `## Open Questions` / "needs a decision" markers and confirm additions with the user.
+2. **Gather (multi-source — the queue is OPTIONAL)** — collect every in-scope unresolved decision:
+   - **Live conversation (primary):** reconstruct the open forks/decisions raised in the *current* design discussion from context — nothing need be written down. This is the source for "walk me through the decisions we've been discussing."
+   - **Persistent queue:** `## Pending Decisions` in this repo's `TODO.md` (cross-session).
+   - **Doc harvest:** open plan-docs / `## Open Questions` / "needs a decision" markers.
+   Dedupe. In a live chat, source 1 alone suffices. **During any design conversation, proactively keep a running "Open Decisions" tally** so "walk me through them" always has a ready list; persist *deferred* ones to the queue, send *resolved* ones to the Decisions Log.
 
 3. **Order** descending by priority. Apply the decision-class taxonomy — surface only genuine *user-decisions* (irreversible/outward-facing · prod-behavior needing a product/UX call · genuine ambiguity · scope expansion); pure mandated work is *sequencing*, not a gate. Never manufacture a gate.
 

@@ -164,3 +164,34 @@ def test_quick_smoke_test():
 
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )
+
+
+# ── 6929f4ac: build_arbiter_job wires the outward-twin hold reader ─────────────
+# Wiring-only regression guard (Rachel's deploy-honesty catch): build_arbiter_job
+# is the pragma'd IO boundary, but the hold_reader_fn WIRING must not silently
+# regress. We patch the one real-IO hop (LupinArbiterGateway.from_environment) and
+# feed a defaults-returning fake config, then assert the seam resolves to read_hold.
+
+class _DefaultsCfg:
+    """config_mgr stub: every key returns the caller's default (exercises the
+    build_arbiter_job param reads with valid ctor-passing defaults)."""
+    def get( self, key, default=None, return_type=None ):
+        return default
+
+
+def test_build_arbiter_job_wires_real_hold_reader( monkeypatch ):
+    from cosa.rest import arbiter_bootstrap as ab
+    from cosa.agents.heartbeat_arbiter.arbiter_gateway import LupinArbiterGateway
+    from lupin_cli.claude_code.hooks.lib.heartbeat_hold import read_hold
+
+    class _FakeGW:
+        def who( self, retention_hours=24 ): return [ ]
+        def send_to( self, r, b, metadata=None ): pass
+        def post( self, t, b ): pass
+        def read( self, topic, since=None, limit=50 ): return [ ]
+
+    monkeypatch.setattr( LupinArbiterGateway, "from_environment",
+                         classmethod( lambda cls, **kw: _FakeGW() ) )
+    job = ab.build_arbiter_job( _DefaultsCfg() )
+    assert job._hold_reader_fn is read_hold                   # non-None AND resolves to read_hold
+    assert job.user_gate_resurface_seconds == 1800           # default ceiling threaded

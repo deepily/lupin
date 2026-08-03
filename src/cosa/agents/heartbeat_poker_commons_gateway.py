@@ -2,9 +2,10 @@
 LupinCommonsGateway — production CommonsGateway for HeartbeatPokerJob.
 
 Implements the `CommonsGateway` protocol (defined in `heartbeat_poker_job.py`)
-over the server-side `CommonsStore` plus the `/api/commons/register-question`
-Phase-3 push. Reference pattern: `fire_heartbeat()` in
-`src/scripts/cascade_heartbeat_scheduler.py`.
+over the server-side `CommonsStore` plus the `/api/dm/send` notification-native
+push (migrated off the deleted `/api/commons/register-question` route,
+cosa-voice token-reduction Phase 4, 2026-06-15). The reference pattern was the
+legacy cascade scheduler's `fire_heartbeat()`, retired 2026-06-29 (I8 / ddaa2882).
 
 ARCHITECTURE — every external dependency (the `CommonsStore`, the HTTP-post
 callable, the API key, the base URL, the sender persona) is constructor-
@@ -21,11 +22,11 @@ Design: `src/rnd/v0.1.7/2026.05.22-heartbeat-poker-d1d4-class-spec.md` §2.3, §
 
 from __future__ import annotations
 
-import re
 import uuid
 from typing import Any, Callable, Dict, List, Optional
 
 from cosa.agents.heartbeat_poker_job import RecipientSpec
+from lupin_mcp.persona_normalization import canonical_persona_key, persona_slug
 
 
 class LupinCommonsGateway:
@@ -104,22 +105,36 @@ class LupinCommonsGateway:
         """
         Derive a server-pattern-safe DM topic from a recipient identifier.
 
-        Mirrors the cascade scheduler's `dm_topic_for` + the MCP DM layer:
-        `"mr radio"` → `"dm-mr_radio"`. Uses `re.UNICODE` so non-ASCII persona
-        names survive rather than being mangled.
+        Routes through the shared `persona_slug` root (Phase 4 of the
+        persona-name-normalization plan) so the topic ALWAYS equals
+        `dm-{persona_slug( identifier, sep='_' )}` — byte-identical to the
+        Arbiter gateway, the cascade scheduler, and the MCP DM layer
+        (`_derive_dm_topic`). Accent-proof: `"Mr Radio"` → `"dm-mr_radio"`,
+        `"María"` → `"dm-maria"`. The prior accent-leaky
+        `re.sub( ..., re.UNICODE )` kept accents, regenerating the SPLIT topic
+        `"dm-maría"` (the live bug: both `dm-maría.md` and `dm-maria.md`
+        existed) — this seam now converges on the canonical `"dm-maria"`.
         """
-        slug = re.sub( r"[^\w-]+", "_", identifier.strip().lower(), flags=re.UNICODE )
-        return f"dm-{slug}"
+        return f"dm-{persona_slug( identifier, sep='_' )}"
 
     def send_to( self, recipient: RecipientSpec, body: str ) -> None:
         """
         Deliver one poke: write the entry to the recipient's DM topic via the
-        `CommonsStore`, then fire the `/api/commons/register-question` Phase-3
-        push so the recipient's CC session sees a `COMMONS PEER MESSAGE`.
+        `CommonsStore`, then fire the `/api/dm/send` notification-native push so
+        the recipient's CC session receives the body INLINE (a direction
+        'ai_to_ai' DM the listener delivers directly).
 
         The disk post is authoritative; the push is best-effort — a recipient
         that misses the push still sees the poke on its next commons poll, so
         a push failure is swallowed (the disk post has already succeeded).
+
+        Migrated off the now-deleted `/api/commons/register-question` route
+        (cosa-voice token-reduction Phase 4, 2026-06-15) onto `/api/dm/send`,
+        mirroring the arbiter's `make_dm_push_fn` precedent: the body rides
+        INLINE (no commons claim-check), `thread_id` carries the same `qid` as
+        the disk post's metadata so board-polling receipts still correlate, and
+        the durable dm-<persona> board write above remains the receipt-polling
+        substrate.
         """
         qid   = str( uuid.uuid4() )
         topic = self.dm_topic_for( recipient.identifier )
@@ -140,20 +155,24 @@ class LupinCommonsGateway:
 
         try:
             self._http_post(
-                f"{self._api_base_url}/api/commons/register-question",
+                f"{self._api_base_url}/api/dm/send",
                 json    = {
-                    "topic"             : topic,
-                    "question_id"       : qid,
-                    "asker_session_id"  : self._sender_session_id,
+                    "sender_session_id" : self._sender_session_id,
                     "recipient_persona" : recipient.identifier,
-                    "expect_reply"      : False,
-                    "ttl_seconds"       : 60,
+                    "body"              : body,
+                    "thread_id"         : qid,
+                    # The arbiter's project, stated rather than left to the server
+                    # to guess (row 12b5a766). "lupin" is genuinely this poker's
+                    # project — unlike the server-side fallback, which returns
+                    # "lupin" for every caller regardless of whose DM it is, and
+                    # so happens to be right here for the wrong reason.
+                    "sender_project"    : "lupin",
                 },
                 headers = { "X-API-Key": self._api_key },
                 timeout = 5,
             )
         except Exception:
-            # Disk post already succeeded — the Phase-3 push is best-effort.
+            # Disk post already succeeded — the notification-native push is best-effort.
             pass
 
     def last_post_ts( self, recipient: RecipientSpec ) -> Optional[ str ]:
@@ -171,7 +190,11 @@ class LupinCommonsGateway:
                 if row.get( "session_id" ) == recipient.identifier:
                     return row.get( "last_post_ts" )
             else:
-                if ( row.get( "persona_name" ) or "" ).lower() == recipient.identifier.lower():
+                # Identity parity (Phase 2): match a persona-addressed recipient
+                # by the one canonical key so an accented/punctuated persona
+                # ("María", "Mr. Radio") matches its who()-row persona_name. Both
+                # compare sides moved in lockstep.
+                if canonical_persona_key( row.get( "persona_name" ) ) == canonical_persona_key( recipient.identifier ):
                     return row.get( "last_post_ts" )
         return None
 
