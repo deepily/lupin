@@ -135,24 +135,34 @@
                 .replace( /[-_]/g, ' ' )
                 .replace( /\b\w/g, c => c.toUpperCase() );
 
-            const audioSrc = '/api/io/file?path=' + encodeURIComponent( path );
+            const audioApiUrl = '/api/io/file?path=' + encodeURIComponent( path );
 
-            // Try HEAD request for file size
+            // /api/io/file requires an `Authorization: Bearer` header (HTTPBearer —
+            // no cookie, no ?token param). A native <audio src> tag cannot attach a
+            // header, so the mp3 401'd and the player has never produced sound
+            // (bug 4cfabc0f). Fix: BLOB-FETCH — GET the file WITH the header, wrap
+            // the bytes in an object URL, and hand THAT to <audio>. The player is
+            // same-origin with the app (also inside the notifications overlay
+            // iframe), so the JWT in localStorage is readable here.
+            const token    = localStorage.getItem( 'lupin_access_token' );
+            const authInit = token ? { headers: { Authorization: 'Bearer ' + token } } : {};
+
+            // File size via HEAD (auth'd; best-effort).
             let fileSizeStr = 'Unknown';
             try {
-                const head = await fetch( audioSrc, { method: 'HEAD' } );
+                const head = await fetch( audioApiUrl, { method: 'HEAD', headers: authInit.headers } );
                 if ( head.ok ) {
                     const bytes = parseInt( head.headers.get( 'content-length' ) || '0' );
                     if ( bytes > 0 ) fileSizeStr = ( bytes / ( 1024 * 1024 ) ).toFixed( 1 ) + ' MB';
                 }
             } catch ( e ) { /* ignore */ }
 
-            // Try to load companion script file for richer metadata
+            // Companion script file for a richer subtitle (auth'd; best-effort).
             let subtitle = '';
             try {
                 const scriptPath = path.replace( /\.mp3$/i, '-script.md' );
                 const scriptSrc  = '/api/io/file?path=' + encodeURIComponent( scriptPath );
-                const scriptResp = await fetch( scriptSrc );
+                const scriptResp = await fetch( scriptSrc, authInit );
                 if ( scriptResp.ok ) {
                     const scriptText = await scriptResp.text();
                     // Try frontmatter title first
@@ -171,16 +181,17 @@
                 ? `<p class="audio-player-subtitle">${subtitle.replace( /</g, '&lt;' ).replace( />/g, '&gt;' )}</p>`
                 : '';
 
+            // Render WITHOUT an <audio src> / download href — those are set to the
+            // blob object URL below, once the auth'd bytes are in hand.
             target.className = 'audio-player-content';
             target.innerHTML = `
                 <h1 class="audio-player-title">&#127911; ${displayTitle}</h1>
                 ${subtitleHtml}
-                <audio class="audio-player-element" controls preload="metadata"
-                       src="${audioSrc}">
+                <audio class="audio-player-element" controls preload="metadata">
                     Your browser does not support the audio element.
                 </audio>
                 <div class="audio-player-actions">
-                    <a href="${audioSrc}" download="${filename}" class="audio-player-download">
+                    <a download="${filename}" class="audio-player-download">
                         &#128229; Download MP3
                     </a>
                 </div>
@@ -190,14 +201,47 @@
                         <dt>Filename</dt><dd>${filename}</dd>
                         <dt>Path</dt><dd>${path}</dd>
                         <dt>Size</dt><dd>${fileSizeStr}</dd>
+                        <dt id="buffer-timing-dt" hidden>Buffer</dt><dd id="buffer-timing-dd" hidden></dd>
                     </dl>
                 </details>`;
+
+            const audioEl    = target.querySelector( 'audio.audio-player-element' );
+            const downloadEl = target.querySelector( 'a.audio-player-download' );
+
+            // Blob-fetch the mp3 WITH the header. This buffers the WHOLE file before
+            // playback can start; the elapsed fetch→blob time is the delay Mr Radio
+            // wants measured — logged as "[PLAYER-BLOB] ..." and shown in File Details.
+            try {
+                const t0   = performance.now();
+                const resp = await fetch( audioApiUrl, authInit );
+                if ( !resp.ok ) {
+                    throw new Error( 'HTTP ' + resp.status + ( resp.status === 401 ? ' (auth — missing/expired token)' : '' ) );
+                }
+                const blob      = await resp.blob();
+                const bufferMs  = performance.now() - t0;
+                const objectUrl = URL.createObjectURL( blob );
+                audioEl.src     = objectUrl;
+                downloadEl.href = objectUrl;
+                // Release the blob when the page / overlay iframe is torn down.
+                window.addEventListener( 'pagehide', () => URL.revokeObjectURL( objectUrl ), { once: true } );
+
+                const secs = ( bufferMs / 1000 ).toFixed( 2 );
+                const mb   = ( blob.size / ( 1024 * 1024 ) ).toFixed( 1 );
+                console.log( `[PLAYER-BLOB] buffered ${blob.size} bytes (${mb} MB) in ${bufferMs.toFixed( 0 )} ms (${secs}s) before playback` );
+                const dtEl = document.getElementById( 'buffer-timing-dt' );
+                const ddEl = document.getElementById( 'buffer-timing-dd' );
+                if ( dtEl && ddEl ) { dtEl.hidden = false; ddEl.hidden = false; ddEl.textContent = `${secs}s to buffer ${mb} MB`; }
+            } catch ( err ) {
+                target.className = 'audio-player-error';
+                target.textContent = 'Could not load audio: ' + err.message;
+                console.log( '[PLAYER-BLOB] ERROR ' + err.message );
+                return;
+            }
 
             // autoplay=1 — MEASUREMENT PROBE: attempt play() with no fresh gesture on
             // this frame and report whether the browser permitted it. Reports to a
             // visible element AND console ("[AUTOPLAY-PROBE] ...") for headless capture.
             if ( autoplay ) {
-                const audioEl  = target.querySelector( 'audio.audio-player-element' );
                 const resultEl = document.createElement( 'div' );
                 resultEl.id = 'autoplay-result';
                 resultEl.style.cssText = 'margin:16px 0;padding:12px;border-radius:6px;font-size:14px;font-family:monospace;';
