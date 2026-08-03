@@ -50,11 +50,57 @@ LEGACY_CSS    = os.path.join( STATIC, "css", "task-list.css" )
 MUX_CSS       = os.path.join( STATIC, "css", "multiplexer", "task-list.css" )
 NOTIF_HTML    = os.path.join( STATIC, "html", "notifications.html" )
 
-# repo-relative path git needs to resolve the CSS file's commit history
-LEGACY_CSS_REL = os.path.join( "src", "lupin_app", "static", "css", "task-list.css" )
-
 # the versioned <link> in notifications.html: /static/css/task-list.css?v=YYYYMMDD[suffix]
 TOKEN_LINK_RE = re.compile( r"/static/css/task-list\.css\?v=(\d{8})([a-z]?)" )
+
+# GENERALIZED guard (row 14e2c5c7): every versioned asset the page links, not just
+# task-list.css. A `?v=` token is part of the browser cache KEY, so ANY tokened
+# asset whose token date drifts behind the file's last commit serves a stale cached
+# copy to returning browsers. task-list.css was the only guarded one of SIX; bumping
+# just it would green the alarm while five siblings stayed broken (the failure mode
+# the row names). This regex discovers every `href`/`src` under /static/ carrying a
+# ?v=YYYYMMDD[suffix] token, so asset seven is covered the day it is linked.
+VERSIONED_ASSET_RE = re.compile( r'(?:href|src)="(/static/[^"?]+)\?v=(\d{8})([a-z]?)"' )
+
+# The versioned assets EXPECTED on the page — the non-vacuous-discovery anchor. If
+# the regex silently matches nothing (markup reshaped, quoting changed), the
+# parametrized freshness test would collect zero cases and pass VACUOUSLY; this set
+# makes that impossible by asserting discovery found exactly these. Update it
+# deliberately when the page's versioned-asset set genuinely changes.
+EXPECTED_VERSIONED_ASSETS = frozenset( {
+    "/static/css/notifications.css",
+    "/static/css/broadcast-panel.css",
+    "/static/css/task-list.css",
+    "/static/js/shared/task-list-query.js",
+    "/static/js/notifications.js",
+    "/static/js/broadcast-panel.js",
+} )
+
+
+def _static_url_to_repo_rel( static_url ):
+    """
+    Map a `/static/<rel>` asset URL to its repo-relative source path.
+
+    Requires:
+        - static_url starts with "/static/"
+
+    Ensures:
+        - returns "src/lupin_app/static/<rel>" (POSIX repo-relative — what git wants)
+    """
+    assert static_url.startswith( "/static/" ), static_url
+    return "src/lupin_app/static/" + static_url[ len( "/static/" ) : ]
+
+
+def _versioned_assets( html_text ):
+    """
+    Discover every versioned asset the page links: [ ( static_url, token_date ), ... ].
+
+    Ensures:
+        - one entry per `href`/`src="/static/...?v=YYYYMMDD[suffix]"` occurrence
+        - token_date is the 8-digit YYYYMMDD (suffix ignored — the guard compares dates)
+        - input order preserved
+    """
+    return [ ( m.group( 1 ), m.group( 2 ) ) for m in VERSIONED_ASSET_RE.finditer( html_text ) ]
 
 
 def _read( path ):
@@ -114,26 +160,54 @@ def test_notifications_links_versioned_task_list_css():
         "notifications.html must link task-list.css with a ?v=YYYYMMDD[suffix] cache-bust token"
 
 
-def test_notifications_task_list_token_not_stale_vs_css():
+# Discovered ONCE at collection time (after _read is defined) so the freshness test
+# can parametrize over it.
+_DISCOVERED_ASSETS = _versioned_assets( _read( NOTIF_HTML ) )
+
+
+def test_versioned_asset_discovery_is_nonvacuous():
     """
-    The cache-bust token date must be >= the CSS file's most-recent commit date.
+    Discovery must find EXACTLY the expected versioned-asset set (row 14e2c5c7).
 
-    This is the f7486a9d recurrence guard: editing task-list.css without bumping
-    the ?v= token leaves returning browsers serving the stale cached sheet. On
-    the bug shape (token 20260617 vs css commit 20260629) this assertion fails
-    loudly, naming the remedy.
+    The freshness test below parametrizes over `_DISCOVERED_ASSETS`; if the regex
+    matched nothing (markup reshaped, quoting changed), that test would collect
+    zero cases and pass VACUOUSLY — a green that certifies nothing. This anchor
+    fails loudly instead, and also catches a NEW versioned asset being added
+    without anyone extending the expected set (extend it deliberately).
     """
-    match = TOKEN_LINK_RE.search( _read( NOTIF_HTML ) )
-    assert match, "notifications.html lost its versioned task-list.css link"
-    token_date = match.group( 1 )
+    found = { url for url, _date in _DISCOVERED_ASSETS }
+    assert found == EXPECTED_VERSIONED_ASSETS, (
+        f"versioned-asset discovery drifted from the expected set.\n"
+        f"  missing (expected, not found): {sorted( EXPECTED_VERSIONED_ASSETS - found )}\n"
+        f"  unexpected (found, not listed): {sorted( found - EXPECTED_VERSIONED_ASSETS )}\n"
+        f"If the page's versioned assets genuinely changed, update "
+        f"EXPECTED_VERSIONED_ASSETS; a new asset must join the freshness guard."
+    )
 
-    css_date = _git_last_commit_date( LEGACY_CSS_REL )
-    assert re.fullmatch( r"\d{8}", css_date ), \
-        f"could not resolve task-list.css git commit date (got {css_date!r}); is the file tracked?"
 
-    assert token_date >= css_date, (
-        f"notifications.html task-list.css?v={token_date} is STALE vs the CSS file's "
-        f"last commit {css_date} — bump the ?v= token (e.g. ?v={css_date}a) so returning "
-        f"browsers refetch the .task-body-overlay rule. Without it the 📄 detail overlay "
-        f"renders position:static and dumps the body at the page foot (bug f7486a9d)."
+@pytest.mark.parametrize( "static_url,token_date",
+                          _DISCOVERED_ASSETS,
+                          ids=[ url for url, _d in _DISCOVERED_ASSETS ] )
+def test_versioned_asset_token_not_stale( static_url, token_date ):
+    """
+    EVERY versioned asset's ?v= token date must be >= that file's last commit date.
+
+    The generalized f7486a9d recurrence guard (row 14e2c5c7): a `?v=` token is part
+    of the browser cache KEY, so any asset whose token drifts behind its file's
+    last commit serves a STALE cached copy to returning browsers — a rendering
+    fault that looks like a bug on stage and cannot be diagnosed live. Naming
+    task-list.css alone let five siblings rot unguarded; this asserts the property
+    over the whole set, so bumping one token can never green the page while another
+    stays stale.
+    """
+    repo_rel      = _static_url_to_repo_rel( static_url )
+    commit_date   = _git_last_commit_date( repo_rel )
+    assert re.fullmatch( r"\d{8}", commit_date ), \
+        f"could not resolve {repo_rel} git commit date (got {commit_date!r}); is it tracked?"
+
+    assert token_date >= commit_date, (
+        f"notifications.html links {static_url}?v={token_date}, STALE vs the file's "
+        f"last commit {commit_date} — bump the ?v= token to >= {commit_date} (e.g. "
+        f"?v={commit_date}a) so returning browsers refetch it. A `?v=` token is part "
+        f"of the cache key, so a stale token permanently serves the old cached asset."
     )
