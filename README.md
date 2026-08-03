@@ -4,9 +4,24 @@
 
 **A voice-first AI agent platform that closes the voice loop from browser UI through agent execution into developer tooling and back -- with Bayesian trust learning, fine-tuned intent routing, and solution caching built in.**
 
-`FastAPI` | `Voice I/O` | `PEFT/LoRA` | `LanceDB` | `Claude Agent SDK` | `Bayesian Trust` | `MCP Protocol`
+`FastAPI` | `Voice I/O` | `PEFT/LoRA` | `PostgreSQL + pgvector` | `Claude Agent SDK` | `Bayesian Trust` | `MCP Protocol`
 
-Current version: **v0.1.8** | License: [Apache 2.0](LICENSE)
+Current version: **v0.1.9** | License: [Apache 2.0](LICENSE)
+
+---
+
+## What's New in v0.1.9 — off LanceDB, onto the cloud, and instruments you can believe
+
+v0.1.9 (June–August 2026) replaced the vector store under the whole platform, moved Lupin onto a real GCP deployment, and spent a lot of its effort on a less glamorous question: **how do you know a green test is telling the truth?**
+
+- **LanceDB → PostgreSQL + pgvector, live.** The vector store was swapped out in four lanes — ORM models + Alembic migration, eight per-table repositories behind a runtime backend flag, consumer routing, then the backfill. Cutover ran 2026-07-07: ~202,000 vectors backfilled, dual-engine equivalence proven against the legacy call sites, and exact scan chosen over HNSW once the keystone table turned out to be 97.2% duplicate vectors. `vector store backend = postgres` is live on both servers with a one-flag rollback still in place. Beforehand, the 90.46 GB LanceDB table with the broken version chain was rebuilt to 1.07 GB — ~89 GB reclaimed, all 176,877 rows preserved.
+- **GCP deployment went from "validated" to operator-usable.** The CPU-VM app-restore arc completed and was verified end to end (an MTU 1500→1460 mismatch was the last blocker); the GPU model server was costed and split onto Cloud Run; the VM got an IAP browser tunnel, a live fleet arbiter, repo-sync tooling, its own pgvector bring-up, and a written bring-up runbook. A 38-hour `/embeddings/generate` outage was closed by separating one key file that had been serving two consumers with incompatible authorities — a defect that was invisible on the dev box precisely because dev's two values coincided by accident.
+- **Fleet liveness, hardened by measurement rather than by guessing.** A 3,000-notification flood, a tmux fleet-killer, a Claude Code Stop-phase wedge (a fire-and-forget `notify()` that hung a turn for 54 minutes), arbiter double-delivery, DM double-stamping, ping storms, phantom blocks, and advisory loop-fire were each root-caused and fixed. The heartbeat-hold janitor's sweep reach went from 4 holds to 44 once it was pointed at the right root.
+- **The unified task store grew verbs and guards.** `task_edit` and `task_reassign` shipped; a closed row can now carry a post-terminal addendum so a gate verdict written after a worker self-closes has somewhere to go; rows can be *parked* with a self-expiring chase so the owed-work count stops being fiction; and a bare unscoped board query now hard-fails with an educational error instead of dragging the whole fleet's history back.
+- **The TypeScript multiplexer reached parity and shipped.** An adversarial gap matrix, a layout-parity oracle, and focus-bar parity work closed the distance to the legacy notifications UI — 724 TypeScript test cases across 114 files, still behind a hard 100% c8 gate on lines, branches, and functions.
+- **Instrument rigor became a first-class discipline.** A hash-chained, append-only tier-run attestation ledger now answers "did this tier actually run?"; the first execution of 8,799 previously-ungated CoSA tests found 4 real failures behind two years of assumed health; a bridge-contact guard and an import-discipline detector caught guards that fired without saying what to fix. The running rule this milestone earned: **a null is not evidence until the instrument is proven, and a green tier cannot vouch for an ungated twin.**
+- **Model and data plumbing.** Mistral Small 3.2 24B stood up on GPU1 (vLLM pinned at 0.16.0 — 0.26.0 is CUDA-13-only and this driver can't run it); `DEEPILY_DATA_DIR` moved 449 runtime files out of the repo and out of `git clean -xdf`'s reach; and an embedding-regeneration pipeline was built for all 578,364 logged texts with an adaptive GPU batch budget — gated, with zero live rows written.
+- **The test suite roughly tripled** — 12,436 unit tests (from 3,549), 432 integration, 678 Playwright E2E, 724 TypeScript.
 
 ---
 
@@ -115,7 +130,7 @@ Voice flows end-to-end: browser microphone through agent execution into Claude C
 
 ## Agent ecosystem
 
-**17 specialized agents** -- from sub-second sync responders to long-running autonomous research pipelines -- all routed through fine-tuned small models and unified by a single voice-first queue system.
+**21 specialized agents** -- from sub-second sync responders to long-running autonomous research pipelines -- all routed through fine-tuned small models and unified by a single voice-first queue system.
 
 ### Synchronous agents (respond in <1s via PEFT routing)
 
@@ -157,6 +172,8 @@ Voice flows end-to-end: browser microphone through agent execution into Claude C
 |-------|---------|
 | NotificationProxyAgent | Phi-4 fuzzy script matching for automated interactive testing |
 | DecisionProxyAgent | Universal Prediction Engine (7 slices) · Bayesian Beta-Bernoulli trust · Thompson Sampling · Conformal prediction · L1-L5 escalation · Circuit breaker |
+| HeartbeatArbiter | Fleet liveness detectors — session staleness, tap-ACK, whole-fleet stall — with per-family advisory cooldown |
+| DMQualityJudge | Scores peer-to-peer session messages to drive down cross-session token burn |
 
 ---
 
@@ -184,10 +201,12 @@ While most platforms route via system prompts or keyword matching, Lupin fine-tu
 
 ### Solution snapshot memory -- agents that learn from their own work
 
-When an agent solves a problem, the solution is embedded and cached in LanceDB. Next time the same (or similar) question arrives, the answer comes from vector search -- not from re-running the agent.
+When an agent solves a problem, the solution is embedded and cached in the vector store. Next time the same (or similar) question arrives, the answer comes from vector search -- not from re-running the agent.
 
-| Operation | File-Based | LanceDB | Speedup |
-|-----------|------------|---------|---------|
+**As of v0.1.9 the backend is PostgreSQL + pgvector** (cutover 2026-07-07; ~202,000 vectors backfilled, dual-engine equivalence proven, exact scan chosen over HNSW). The LanceDB path remains behind a one-flag rollback. The speedup numbers below are the original file-based → LanceDB benchmark that motivated a real vector store in the first place:
+
+| Operation | File-Based | Vector store | Speedup |
+|-----------|------------|--------------|---------|
 | Search (exact) | 96 ms | 0.1 ms | **960x** |
 | Add snapshot | 827 ms | 15 ms | **55x** |
 | Search (fuzzy) | 120 ms | 0.3 ms | **400x** |
@@ -214,17 +233,18 @@ The first decision proxy for AI agents with academic-grade statistical rigor:
 - **Morning coffee batch review**: Non-urgent decisions queued for human review at your convenience
 - **Ratification API**: Post-hoc approval with trust feedback loop
 
-### Battle-tested -- 4,180+ automated tests
+### Battle-tested -- 14,300+ automated tests
 
 | Suite | Count | Coverage |
 |-------|-------|----------|
-| Unit tests | 3,549+ | Core logic, trust engine, hooks, credentials, prediction engine, agentic orchestrators |
+| Unit tests (Python) | 12,436 | Core logic, trust engine, hooks, credentials, prediction engine, agentic orchestrators, task store, arbiter |
+| Unit tests (TypeScript) | 724 | Multiplexer audio, transport, stores, render — behind a hard 100% c8 gate |
 | WebSocket tests | 50 | Connection, auth, event routing, session management |
-| Integration tests | 228+ | End-to-end API workflows against dedicated dual-container test server |
-| E2E UI (Playwright) | 357+ | Full browser-driven flows including 12-page visual regression |
+| Integration tests | 432 | End-to-end API workflows against dedicated dual-container test server |
+| E2E UI (Playwright) | 678 | Full browser-driven flows including 12-page visual regression |
 | Interactive proxy tests | 12 scenarios | Calculator, CRUD, and Expediter agents via auto-proxy |
 
-Built and maintained by a single engineer. Every PR must pass all five tiers before merge.
+Built and maintained by a single engineer. Every PR must pass all tiers before merge, at 100% line, branch, and function coverage. A hash-chained attestation ledger records that each tier actually ran -- a green report that cannot prove it executed is not a green report.
 
 ---
 
@@ -242,10 +262,10 @@ src/scripts/run-fastapi-lupin.sh          # FastAPI on port 7999
 src/scripts/run-lupin-gui.sh              # Browser GUI client
 
 # Run tests
-pytest src/tests/unit/                     # 3,549+ unit tests
+pytest src/tests/unit/                     # 12,436 unit tests
 src/scripts/run-websocket-smoke-tests.sh   # 50 WebSocket tests
 src/tests/run-integration-tests.sh --bg -v # Integration gate (dual-container, :8000)
-src/scripts/run-e2e-ui-tests.sh --bg -v    # 357+ Playwright tests incl. visual regression
+src/scripts/run-e2e-ui-tests.sh --bg -v    # 678 Playwright tests incl. visual regression
 
 # Install cosa-voice MCP server (for Claude Code voice I/O)
 claude mcp add cosa-voice -- python ${LUPIN_ROOT}/src/lupin_mcp/cosa_voice_mcp.py
@@ -262,9 +282,11 @@ claude mcp add cosa-voice -- python ${LUPIN_ROOT}/src/lupin_mcp/cosa_voice_mcp.p
 - [REST API Reference](src/docs/rest-api-reference.md) — all HTTP and WebSocket endpoints
 - [WebSocket Architecture](src/docs/websocket-architecture.md) — dual-session design and event system
 - [Notification API](src/docs/notification-api.md) — comprehensive notification reference with Mermaid diagrams
-- [CJ Flow Packaging Guide](src/rnd/2026.02.12-cj-flow-bounded-job-packaging-guide.md) — how to add new QueueableJob types
+- [CJ Flow Packaging Guide](src/rnd/v0.1.4/2026.02.12-cj-flow-bounded-job-packaging-guide.md) — how to add new QueueableJob types
 - [cosa-voice MCP Server](src/lupin_mcp/README.md) — MCP server setup and tool reference
 - [Agentic Voice Workflow](src/workflow/agentic-voice-workflow.md) — building new agents with voice I/O
+- [Fleet Liveness & Task-Store Architecture](src/docs/fleet-liveness-and-task-store-architecture.md) — one store, three readers; heartbeat holds; the arbiter and how to bounce it
+- [Cost Model: Bounded CC vs Firewalled SDK](src/docs/cost-model-bounded-cc-vs-firewalled-sdk.md) — which LLM path an agent lands on, and why
 
 ### Agentic jobs, recovery & test scheduling
 
@@ -283,13 +305,17 @@ Bug Fix Expediter (dead-job auto-recovery), Test Fix Expediter (test-failure aut
 
 ### R&D archive
 
-Over 130 dated planning and research documents in [`src/rnd/`](src/rnd/README.md).
+Over 1,000 dated planning and research documents in [`src/rnd/`](src/rnd/README.md).
 
 **Codebase metrics**: [Lupin parent vs CoSA comparison](src/rnd/v0.1.6/2026.04.12-codebase-analysis-lupin-vs-cosa.md) — 2026-04-12 snapshot of LoC distribution with mermaid diagram, 60/40 Python split, docstring-ratio observations, and operational implications of the CoSA-never-commit rule.
 
 ---
 
 ## Version history
+
+**v0.1.9** (June–August 2026) — LanceDB → PostgreSQL + pgvector cutover across four lanes (models/Alembic, eight per-table repositories behind a runtime backend flag, consumer routing, ~202k-vector backfill), with dual-engine equivalence proven and exact scan chosen over HNSW; a 90.46 GB → 1.07 GB LanceDB rebuild reclaiming ~89 GB beforehand. GCP deployment made operator-usable: CPU-VM app restore verified end to end, GPU model server split onto Cloud Run, IAP browser tunnel, live fleet arbiter on the VM, bring-up runbook, and a 38-hour embeddings outage closed by decoupling one key file serving two incompatible authorities. Fleet liveness hardened against a notification flood, a tmux fleet-killer, a Stop-phase turn wedge, and a family of arbiter false positives. Task store gained `task_edit`, `task_reassign`, post-terminal amendment of closed rows, self-expiring row parking, and an unscoped-query guard. TypeScript multiplexer reached legacy parity (724 TS test cases, 100% c8). Instrument rigor formalized: hash-chained tier-run attestation ledger, first execution of 8,799 previously-ungated CoSA tests, bridge-contact and import-discipline guards. Mistral Small 3.2 24B stood up on GPU1; `DEEPILY_DATA_DIR` moved runtime state out of the repo; embedding-regeneration pipeline built for all 578,364 logged texts. 14,300+ tests.
+
+**v0.1.8** (May–June 2026) — Self-managing fleet, ready for the cloud. Unified task store as the single source of truth for owed work, read by the Stop-hook self-poke, the `:8001` fleet arbiter, and a human UI card, with honored heartbeat holds and the store-only cutover retiring the legacy transcript mirror. Manager/worker fleet lifecycle: worktree-isolated crews, a review queue, merge-on-approval, and continuity-preserving mementos. Notification-native AI↔AI DMs with inline bodies (~18× cheaper than the retired claim-check path). JS→TS multiplexer migration behind a hard 100% c8 gate. Podcast, Presentation, and Deep Research migrated from the firewalled Anthropic SDK to in-process bounded Claude Code. Alembic migration integrity: true baseline migration, ORM-drift reconciliation, hermetic idempotency regression tests. GCP cloud-test deployment validated end to end via IAP tunnel.
 
 **v0.1.7** (April–May 2026) — Multi-session voice cockpit. Per-session voice personas with chorus-mode disambiguation, overflow pool, `/clear`+`/compact` preservation, and `request_persona` MCP tool. Inter-session commons: cross-session blackboard, DMs, and async/sync questions surfaced in a live Recent Activity stream + broadcast panel. Manager-spawned headless reviewer sessions (`spawn_sessions` / `dismiss_sessions` / `list_spawned_sessions`) automating cascaded plan-review. Speakerphone mode (solo/chorus) replacing conversation mode with a per-turn hook rider. Notifications UI rebuilt as a TypeScript multiplexer behind a 100% c8 coverage gate. Multi-repo doc viewer with path-prefix scope routing, JWT gate, secrets blocklist, and source-code + image rendering. CJ Flow async multi-lane: agentic ThreadPoolExecutor pool, ghost-job sweeper, ApiResourceManager rate limiting, and `pool-status` endpoint. Bounded-CC zero-per-token billing empirically confirmed; BFE/TFE migrated. Heartbeat-poker liveness abstraction. WS reconnect circuit-breaker. 100% line+branch+function coverage adopted as a Lupin-wide merge gate.
 
@@ -307,7 +333,7 @@ Over 130 dated planning and research documents in [`src/rnd/`](src/rnd/README.md
 
 ## Project status
 
-Lupin is an active research platform at v0.1.7. Developed by a solo engineer, it combines voice-first agent orchestration, PEFT fine-tuning, and Bayesian decision theory into a production-grade stack backed by 4,180+ automated tests across five tiers (unit, WebSocket, integration, Playwright E2E, interactive proxy), full CI discipline, and a FastAPI + PostgreSQL + LanceDB architecture. Through a series of ambitious refactorings made possible by Claude Code and the [Planning is Prompting](https://github.com/deepily/planning-is-prompting) methodology, Lupin has evolved from single-user PoC sketches into a multi-user platform entering GCP testing.
+Lupin is an active research platform at v0.1.9. Developed by a solo engineer, it combines voice-first agent orchestration, PEFT fine-tuning, and Bayesian decision theory into a production-grade stack backed by 14,300+ automated tests across six tiers (Python unit, TypeScript unit, WebSocket, integration, Playwright E2E, interactive proxy), full CI discipline, and a FastAPI + PostgreSQL + pgvector architecture. Through a series of ambitious refactorings made possible by Claude Code and the [Planning is Prompting](https://github.com/deepily/planning-is-prompting) methodology, Lupin has evolved from single-user PoC sketches into a multi-user platform running on GCP.
 
 ---
 
