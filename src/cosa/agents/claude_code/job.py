@@ -308,6 +308,9 @@ class ClaudeCodeJob( AgenticJobBase ):
 
 **Output**: {self.output_text[ :200 ] if self.output_text else "No output"}..."""
 
+            # Store the abstract in artifacts so it rides the running→done transition (bug 9b481811 sweep)
+            self.artifacts[ "abstract" ] = completion_abstract
+
             # Notify completion
             await cosa_interface.notify_progress(
                 f"Claude Code task complete. Cost: {cost_str}",
@@ -424,6 +427,9 @@ class ClaudeCodeJob( AgenticJobBase ):
 - **Duration**: ~{total_duration:.0f}s (simulated)
 
 This was a dry-run simulation. No actual Claude Code execution occurred."""
+
+        # Store the abstract in artifacts so it rides the running→done transition (bug 9b481811 sweep)
+        self.artifacts[ "abstract" ] = completion_abstract
 
         await cosa_interface.notify_progress(
             f"Dry run complete: {self.id_hash}",
@@ -629,6 +635,9 @@ This was a dry-run simulation. No actual Claude Code execution occurred."""
 - **Context prompt**: {context_prompt_len} chars
 
 This was a dry-run simulation exercising MessageHistory and multi-turn context."""
+
+        # Store the abstract in artifacts so it rides the running→done transition (bug 9b481811 sweep)
+        self.artifacts[ "abstract" ] = completion_abstract
 
         await cosa_interface.notify_progress(
             f"Dry run complete: {self.id_hash}",

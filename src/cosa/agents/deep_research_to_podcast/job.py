@@ -355,6 +355,9 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
 
 **Stats**: $0.00 total | 0 tokens | 10.0s (simulated)"""
 
+        # Store the abstract in artifacts so it rides the running→done transition (bug 9b481811 sweep)
+        self.artifacts[ "abstract" ] = completion_abstract
+
         # Notify completion
         await voice_io.notify(
             "🧪 Dry run complete! Pipeline simulation finished.",

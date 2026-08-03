@@ -432,6 +432,8 @@ class TestFixExpediterJob( AgenticJobBase ):
                     )
 
             completion_abstract = "\n".join( lines )
+            # Rides the running→done transition (bug 9b481811 sweep)
+            self.artifacts[ "abstract" ] = completion_abstract
 
             try:
                 await voice_io.notify(

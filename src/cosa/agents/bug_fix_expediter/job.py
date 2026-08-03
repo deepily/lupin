@@ -408,6 +408,8 @@ class BugFixExpediterJob( AgenticJobBase ):
             )
 
             completion_abstract = "\n".join( lines )
+            # Rides the running→done transition (bug 9b481811 sweep)
+            self.artifacts[ "abstract" ] = completion_abstract
 
             try:
                 await voice_io.notify(
@@ -713,6 +715,8 @@ class BugFixExpediterJob( AgenticJobBase ):
 **Fix**: Simulated success (dry run)
 **Resubmit**: {resubmit_id or "skipped"}
 **Stats**: $0.00 | 0 tokens | 5.0s (simulated)"""
+            # Rides the running→done transition (bug 9b481811 sweep)
+            self.artifacts[ "abstract" ] = completion_abstract
 
             await voice_io.notify(
                 "🧪 Dry run complete! Phase 6 loop validated.",
