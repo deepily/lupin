@@ -1252,13 +1252,15 @@ class TestPostFixContractGuards:
     # ---- BUG A (fixed): Gate 4 uses the real present_choices signature -----
     def test_gate4_uses_correct_present_choices_signature( self, _silence_voice_io ):
         """Gate 4 invokes present_choices with the REAL signature (questions,
-        timeout, title, abstract, job_id) WITHOUT raising — `reached` proves the
-        stub body ran (a wrong-kwarg call would TypeError before it)."""
+        timeout, title, abstract, job_id, response_default, priority) WITHOUT
+        raising — `reached` proves the stub body ran (a wrong-kwarg call would
+        TypeError before it). The fail-open kwargs (response_default/priority)
+        are part of that real signature as of 2026-08-03."""
         agent = _agent()
         agent._presentation_state[ "visuals_rendered" ] = 2
         reached = { "ok": False }
 
-        async def strict_present_choices( questions, timeout=120, title=None, abstract=None, job_id=None ):
+        async def strict_present_choices( questions, timeout=120, title=None, abstract=None, job_id=None, response_default=None, priority="medium" ):
             reached[ "ok" ] = True
             return { "answers": { "Visual Review": "Approve" } }
 
@@ -1274,7 +1276,7 @@ class TestPostFixContractGuards:
         agent = _agent()
         agent._presentation_state[ "visuals_rendered" ] = 2
 
-        async def strict_present_choices( questions, timeout=120, title=None, abstract=None, job_id=None ):
+        async def strict_present_choices( questions, timeout=120, title=None, abstract=None, job_id=None, response_default=None, priority="medium" ):
             return { "answers": { "Visual Review": "Cancel" } }
 
         with patch.object( orch_mod.voice_io, "present_choices", new=strict_present_choices ), \

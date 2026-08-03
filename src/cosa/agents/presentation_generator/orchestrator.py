@@ -62,6 +62,45 @@ class VoiceGateNotAnsweredError( RuntimeError ):
     """
 
 
+def _build_auto_continue_disclosure( timeout_seconds: int ) -> str:
+    """
+    Build the "silence means keep going" sentence appended to a presentation
+    review-gate question.
+
+    Kept local (a mirror of podcast_generator.orchestrator.
+    build_auto_continue_disclosure, worded for presentations) rather than
+    imported, so building a gate prompt does not drag the whole
+    podcast_generator package __init__ at load. It is a small duplicated
+    one-liner; de-duping it into a shared helper is tracked separately (same
+    rationale as the label-map decoupling, bug 81040071).
+
+    The four presentation gates FAIL OPEN: if the user does not answer within
+    the review timeout — or the ask cannot be delivered — generation continues
+    on its own via response_default at the gate. The user must be able to
+    hear/read that silence does this, so this sentence rides in the QUESTION
+    text (format_questions_for_tts speaks the question, not the options).
+
+    Requires:
+        - timeout_seconds is a positive int
+
+    Ensures:
+        - returns one natural-language sentence naming the wait in whole minutes
+          (floored, minimum 1) and stating that silence continues generation
+
+    Raises:
+        - ValueError if timeout_seconds is not a positive int
+    """
+    if not isinstance( timeout_seconds, int ) or isinstance( timeout_seconds, bool ) or timeout_seconds <= 0:
+        raise ValueError( f"timeout_seconds must be a positive int, got {timeout_seconds!r}" )
+
+    minutes = max( 1, timeout_seconds // 60 )
+    unit    = "minute" if minutes == 1 else "minutes"
+    return (
+        f"If you don't respond within about {minutes} {unit}, "
+        f"I'll keep going and finish the presentation automatically."
+    )
+
+
 class PresentationOrchestratorAgent:
     """
     Top-level orchestrator for presentation generation — single job, multi-phase, async.
@@ -1645,6 +1684,60 @@ class PresentationOrchestratorAgent:
 
         return answers[ header ]
 
+    async def _present_fail_open_gate(
+        self,
+        *,
+        question: str,
+        header: str,
+        options: list,
+        title: str,
+        abstract: Optional[ str ] = None,
+        continue_label: str = "Approve",
+    ) -> dict:
+        """
+        Present a presentation review gate that FAILS OPEN.
+
+        All four presentation gates route through here so their fail-open shape
+        is identical and cannot drift gate-to-gate (a fail-open Gate 1 that dies
+        at Gate 2 is the same failure moved later). Mirrors the podcast
+        script-review gate (podcast_generator/orchestrator.py). Two things make
+        a silent OR undeliverable gate continue instead of dead-lettering the job:
+
+        1. The auto-continue disclosure (synced to the review timeout) is
+           appended to the question, so the user hears/reads that silence keeps
+           generation going — format_questions_for_tts speaks the question, not
+           the options, so the sentence must ride in the question.
+        2. response_default={header: continue_label} + a timeout, so voice_io
+           returns continue_label when no human answers within the timeout OR
+           the ask cannot be dispatched (503) — rather than raising
+           VoiceGateNoDefaultError, which is what dead-lettered job pr-b1ea3708.
+
+        Requires:
+            - self.config.review_timeout_seconds is a positive int
+            - options lists an entry whose label == continue_label
+
+        Ensures:
+            - the disclosure sentence is appended to the question
+            - returns voice_io.present_choices(...) with response_default set so
+              a silent/undeliverable gate resolves to {header: continue_label}
+        """
+        timeout = self.config.review_timeout_seconds
+        return await voice_io.present_choices(
+            questions        = [ {
+                "question"    : question + " " + _build_auto_continue_disclosure( timeout ),
+                "header"      : header,
+                "multiSelect" : False,
+                "options"     : options,
+            } ],
+            timeout          = timeout,
+            title            = title,
+            abstract         = abstract,
+            response_default = { header: continue_label },
+            # Blocking approval gate — alert at HIGH so the TTS reaches Rick
+            # driving by voice from across the room (mirrors the podcast gate).
+            priority         = "high",
+        )
+
     async def _gate_1_narrative_review( self, sections: List[ NarrativeSection ] ) -> bool:
         """
         Gate 1: User reviews narrative arc mapping.
@@ -1697,17 +1790,14 @@ class PresentationOrchestratorAgent:
 
         # Present to user via voice I/O
         try:
-            result = await voice_io.present_choices(
-                questions=[ {
-                    "question" : "How does this narrative arc look for your presentation?",
-                    "header"   : "Narrative Arc",
-                    "multiSelect" : False,
-                    "options"  : [
-                        { "label": "Approve", "description": "Proceed to slide outline generation" },
-                        { "label": "Revise",  "description": f"Re-analyze with feedback ({max_revisions - revision_count} revisions remaining)" },
-                        { "label": "Cancel",  "description": "Stop presentation generation" },
-                    ]
-                } ],
+            result = await self._present_fail_open_gate(
+                question = "How does this narrative arc look for your presentation?",
+                header   = "Narrative Arc",
+                options  = [
+                    { "label": "Approve", "description": "Proceed to slide outline generation" },
+                    { "label": "Revise",  "description": f"Re-analyze with feedback ({max_revisions - revision_count} revisions remaining)" },
+                    { "label": "Cancel",  "description": "Stop presentation generation" },
+                ],
                 title    = "Gate 1: Narrative Arc Review",
                 abstract = summary,
             )
@@ -1816,17 +1906,14 @@ class PresentationOrchestratorAgent:
         if self.debug: print( "[Orchestrator] Gate 2: Presenting outline for review" )
 
         try:
-            result = await voice_io.present_choices(
-                questions=[ {
-                    "question"    : "How does this slide outline look?",
-                    "header"      : "Slide Outline",
-                    "multiSelect" : False,
-                    "options"     : [
-                        { "label": "Approve", "description": "Proceed to content elaboration" },
-                        { "label": "Revise",  "description": f"Re-generate outline with feedback ({max_revisions - revision_count} revisions remaining)" },
-                        { "label": "Cancel",  "description": "Stop presentation generation" },
-                    ]
-                } ],
+            result = await self._present_fail_open_gate(
+                question = "How does this slide outline look?",
+                header   = "Slide Outline",
+                options  = [
+                    { "label": "Approve", "description": "Proceed to content elaboration" },
+                    { "label": "Revise",  "description": f"Re-generate outline with feedback ({max_revisions - revision_count} revisions remaining)" },
+                    { "label": "Cancel",  "description": "Stop presentation generation" },
+                ],
                 title    = "Gate 2: Slide Outline Review",
                 abstract = summary,
             )
@@ -1944,17 +2031,14 @@ class PresentationOrchestratorAgent:
         if self.debug: print( "[Orchestrator] Gate 3: Presenting content for review" )
 
         try:
-            result = await voice_io.present_choices(
-                questions=[ {
-                    "question"    : "How does the elaborated content look?",
-                    "header"      : "Content Review",
-                    "multiSelect" : False,
-                    "options"     : [
-                        { "label": "Approve", "description": "Proceed to serialization" },
-                        { "label": "Revise",  "description": f"Re-elaborate with feedback ({max_revisions - revision_count} revisions remaining)" },
-                        { "label": "Cancel",  "description": "Stop presentation generation" },
-                    ]
-                } ],
+            result = await self._present_fail_open_gate(
+                question = "How does the elaborated content look?",
+                header   = "Content Review",
+                options  = [
+                    { "label": "Approve", "description": "Proceed to serialization" },
+                    { "label": "Revise",  "description": f"Re-elaborate with feedback ({max_revisions - revision_count} revisions remaining)" },
+                    { "label": "Cancel",  "description": "Stop presentation generation" },
+                ],
                 title    = "Gate 3: Content Review",
                 abstract = summary,
             )
@@ -2040,16 +2124,13 @@ class PresentationOrchestratorAgent:
         )
 
         try:
-            result = await voice_io.present_choices(
-                questions=[ {
-                    "question"    : f"Gate 4: {visuals_rendered} visual{'s' if visuals_rendered != 1 else ''} rendered. Approve?",
-                    "header"      : "Visual Review",
-                    "multiSelect" : False,
-                    "options"     : [
-                        { "label": "Approve", "description": "Proceed to delivery" },
-                        { "label": "Cancel",  "description": "Stop presentation generation" },
-                    ]
-                } ],
+            result = await self._present_fail_open_gate(
+                question = f"Gate 4: {visuals_rendered} visual{'s' if visuals_rendered != 1 else ''} rendered. Approve?",
+                header   = "Visual Review",
+                options  = [
+                    { "label": "Approve", "description": "Proceed to delivery" },
+                    { "label": "Cancel",  "description": "Stop presentation generation" },
+                ],
                 title    = "Gate 4: Visual Review",
                 abstract = summary,
             )

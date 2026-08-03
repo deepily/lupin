@@ -61,6 +61,12 @@ class PresentationConfig:
     # PPTX export (requires Marp CLI binary in PATH)
     pptx_export_enabled      : bool  = True
 
+    # Fail-open review window: on timeout OR an undeliverable ask (503), each of
+    # the 4 gates continues on its own via response_default rather than
+    # dead-lettering the job. Mirror of the podcast script-review timeout
+    # (600s = 10 min, Rick's requirement).
+    review_timeout_seconds   : int   = 600
+
     @classmethod
     def from_config( cls, config_mgr, debug=False ):
         """
@@ -95,6 +101,7 @@ class PresentationConfig:
             audience                = _get( "audience",                default="general" ),
             veo_model               = _get( "veo model",              default="veo-2.0-generate-001" ),
             pptx_export_enabled     = _get( "pptx export enabled",    default=True, return_type="boolean" ),
+            review_timeout_seconds  = _get( "review timeout seconds", default=600,  return_type="int" ),
         )
 
     def get_output_path( self, user_id, topic, file_type="yaml" ):
