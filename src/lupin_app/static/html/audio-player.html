@@ -115,6 +115,7 @@
             const path     = params.get( 'path' );
             const embed    = params.get( 'embed' ) === '1';
             const autoplay = params.get( 'autoplay' ) === '1';
+            const probe    = params.get( 'probe' ) === '1';
 
             // embed=1 — hide nav + tighten chrome (set synchronously, before deferred nav renders)
             if ( embed ) document.body.classList.add( 'embed' );
@@ -238,21 +239,29 @@
                 return;
             }
 
-            // autoplay=1 — MEASUREMENT PROBE: attempt play() with no fresh gesture on
-            // this frame and report whether the browser permitted it. Reports to a
-            // visible element AND console ("[AUTOPLAY-PROBE] ...") for headless capture.
-            if ( autoplay ) {
-                const resultEl = document.createElement( 'div' );
-                resultEl.id = 'autoplay-result';
-                resultEl.style.cssText = 'margin:16px 0;padding:12px;border-radius:6px;font-size:14px;font-family:monospace;';
-                target.appendChild( resultEl );
-                const mark = ( ok, detail ) => {
-                    const tag = ok ? 'AUTOPLAY_FIRED' : 'AUTOPLAY_BLOCKED';
-                    resultEl.textContent = tag + ': ' + detail;
-                    resultEl.style.background = ok ? '#dcfce7' : '#fee2e2';
-                    resultEl.style.color      = ok ? '#166534' : '#991b1b';
-                    console.log( '[AUTOPLAY-PROBE] ' + tag + ' ' + detail );
-                };
+            // autoplay=1 — REAL auto-start on open: a user click (the "Play Here"
+            //   link) opened this frame, so the browser permits play() — the safe
+            //   half of the autoplay policy. No UI; controls stay for pause/dismiss.
+            // probe=1 — same play() PLUS a visible fired/blocked diagnostic div +
+            //   console line ("[AUTOPLAY-PROBE] ..."). DEBUG-ONLY, must NEVER ship:
+            //   a red AUTOPLAY_BLOCKED box on stage is its own demo failure
+            //   (Mr Radio ruling 2026-08-03). Gate the probe UI behind ?probe=1 so
+            //   ?autoplay=1 is safe to wire onto the overlay src.
+            if ( autoplay || probe ) {
+                let mark = () => {};
+                if ( probe ) {
+                    const resultEl = document.createElement( 'div' );
+                    resultEl.id = 'autoplay-result';
+                    resultEl.style.cssText = 'margin:16px 0;padding:12px;border-radius:6px;font-size:14px;font-family:monospace;';
+                    target.appendChild( resultEl );
+                    mark = ( ok, detail ) => {
+                        const tag = ok ? 'AUTOPLAY_FIRED' : 'AUTOPLAY_BLOCKED';
+                        resultEl.textContent = tag + ': ' + detail;
+                        resultEl.style.background = ok ? '#dcfce7' : '#fee2e2';
+                        resultEl.style.color      = ok ? '#166534' : '#991b1b';
+                        console.log( '[AUTOPLAY-PROBE] ' + tag + ' ' + detail );
+                    };
+                }
                 try {
                     const p = audioEl.play();
                     if ( p !== undefined ) {
