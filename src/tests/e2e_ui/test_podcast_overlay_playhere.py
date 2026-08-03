@@ -33,20 +33,14 @@ Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit). Submit via:
         "auto_fix_on_failure": false
     }
 
-SKIP GUARD: skipped until Rio's overlay SHA + Krishna's ?embed=1 page land on
-the branch. Remove the `pytestmark` line to schedule (that is the unskip).
+Surface landed: Rio's overlay 63dd16f1, Krishna's ?embed=1 page dd371040,
+Rachel's emit f03bf73f. Unskipped + scheduled on :8000 after a bounce (cache-bust
+20260803b).
 """
 
 from __future__ import annotations
 
-import pytest
-
 from .conftest import BASE_URL
-
-pytestmark = pytest.mark.skip(
-    reason="overlay surface lands with Rio's SHA + Krishna's ?embed=1 page; "
-           "unskip (remove this pytestmark) when scheduling the :8000 run"
-)
 
 # Real emit format — matches podcast_generator/job.py:342 (unit-verified in
 # test_job.py::test_completion_abstract_emits_play_here_and_listen_links).
