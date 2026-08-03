@@ -45,27 +45,43 @@ FIXTURE_ENC = "fixtures/podcast-dry-run/podcast-dry-run.mp3"
 
 def _capture_dry_run_abstract() -> str:
     """Run the REAL _execute_dry_run with voice_io mocked and return the completion
-    abstract it emits — the exact markdown a dry-run submit shows the user."""
+    abstract it emits — the exact markdown a dry-run submit shows the user.
+
+    Runs on a dedicated thread with its own event loop: the Playwright sync API
+    drives an event loop in the test thread, so `asyncio.run()` here would raise
+    'cannot be called from a running event loop'. A fresh thread has no ambient
+    loop, so `asyncio.run()` is safe there.
+    """
+    import threading
+
     from cosa.agents.podcast_generator.job import PodcastGeneratorJob
 
-    job = PodcastGeneratorJob(
-        research_path = "/io/dr/report.md",
-        user_id       = "u1",
-        user_email    = "dry-run-e2e@test.com",
-        session_id    = "s1",
-    )
-    voice_io       = MagicMock()
-    voice_io.notify = AsyncMock()
-    cosa_interface = MagicMock()
-    cosa_interface._get_sender_id.return_value = "sid"
+    box: dict = {}
 
-    with patch( "asyncio.sleep", AsyncMock() ):
-        asyncio.run( job._execute_dry_run( voice_io, cosa_interface ) )
+    def _worker():
+        job = PodcastGeneratorJob(
+            research_path = "/io/dr/report.md",
+            user_id       = "u1",
+            user_email    = "dry-run-e2e@test.com",
+            session_id    = "s1",
+        )
+        voice_io       = MagicMock()
+        voice_io.notify = AsyncMock()
+        cosa_interface = MagicMock()
+        cosa_interface._get_sender_id.return_value = "sid"
 
-    completion = next(
-        c for c in voice_io.notify.await_args_list if c.kwargs.get( "abstract" )
-    )
-    return completion.kwargs[ "abstract" ]
+        with patch( "asyncio.sleep", AsyncMock() ):
+            asyncio.run( job._execute_dry_run( voice_io, cosa_interface ) )
+
+        completion = next(
+            c for c in voice_io.notify.await_args_list if c.kwargs.get( "abstract" )
+        )
+        box[ "abstract" ] = completion.kwargs[ "abstract" ]
+
+    t = threading.Thread( target=_worker )
+    t.start()
+    t.join()
+    return box[ "abstract" ]
 
 
 def _render_md( page, md: str ):
