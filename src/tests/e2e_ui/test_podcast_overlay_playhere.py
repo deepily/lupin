@@ -44,7 +44,12 @@ from .conftest import BASE_URL
 
 # Real emit format — matches podcast_generator/job.py:342 (unit-verified in
 # test_job.py::test_completion_abstract_emits_play_here_and_listen_links).
-ENC           = "pod/ep.mp3"
+# A REAL, playable podcast the test user can read (/api/io/file gates on auth +
+# path-traversal, NOT ownership — proven empirically by Rio: the test-user token
+# reads this 6.3MB mp3, 200). The player JS-injects <audio> only after a
+# successful auth'd byte-fetch (blob → object URL), so a non-existent path lands
+# in the loud error state and never mounts audio — the file must be real.
+ENC           = "podcasts/ricardo.felipe.ruiz@gmail.com/2026.01.21-172309-quantum-computing-when-reality-gets-wei.mp3"
 PLAY_HERE_URL = f"/app/audio?path={ENC}&embed=1"
 LISTEN_URL    = f"/app/audio?path={ENC}"
 ABSTRACT_MD   = (
@@ -112,22 +117,21 @@ class TestPodcastOverlayPlayHere:
         # Overlay opens, iframe src is the &embed=1 URL verbatim.
         page.locator( OVERLAY ).wait_for( state="visible", timeout=5000 )
         src = page.locator( FRAME ).get_attribute( "src" )
-        assert src is not None and "/app/audio?path=" in src and src.endswith( "&embed=1" ), \
-            f"iframe src must be the &embed=1 player URL verbatim; got {src!r}"
+        assert src is not None and "/app/audio?path=" in src and "&embed=1" in src, \
+            f"iframe src must be the embed player URL; got {src!r}"
+        assert "autoplay=1" in src, f"overlay must auto-start (autoplay=1); got {src!r}"
 
-        # The embed page (Krishna) renders an <audio> control inside the iframe.
-        # Same-origin (/app/audio is SAMEORIGIN), so the frame content is inspectable.
-        page.frame_locator( FRAME ).locator( "audio" ).wait_for( state="attached", timeout=5000 )
+        # Prove ACTUAL playback inside the frame, not mere element presence.
+        _assert_frame_audio_playing( page )
 
     def test_dismiss_removes_the_iframe( self, notifications_page ):
         page = notifications_page
         _render_abstract( page )
         _click_play_here( page )
         page.locator( OVERLAY ).wait_for( state="visible", timeout=5000 )
-        # Prove the player actually LOADED before dismissing — an X-Frame-Options
-        # DENY leaves the iframe element in the DOM with the right src but an
-        # unrendered error document, so an element-only check would false-green.
-        page.frame_locator( FRAME ).locator( "audio" ).wait_for( state="attached", timeout=5000 )
+        # Dismiss must stop a LIVE player — prove it is actually playing first, so
+        # an element-only (or DENY-blocked, or error-state) frame can't false-green.
+        _assert_frame_audio_playing( page )
 
         # Dismiss removes the iframe → playback stops (Rio: ✕ removes the iframe).
         page.locator( DISMISS ).click()
@@ -142,9 +146,9 @@ class TestPodcastOverlayPlayHere:
         _render_abstract( page )
         _click_play_here( page )
         page.locator( OVERLAY ).wait_for( state="visible", timeout=5000 )
-        assert page.locator( FRAME ).get_attribute( "src" ).endswith( "&embed=1" )
-        # Not a src-only false-green: require the framed player document to load.
-        page.frame_locator( FRAME ).locator( "audio" ).wait_for( state="attached", timeout=5000 )
+        assert "&embed=1" in ( page.locator( FRAME ).get_attribute( "src" ) or "" )
+        # Not a src-only false-green: require the framed player to actually play.
+        _assert_frame_audio_playing( page )
 
     def test_listen_link_opens_a_tab_and_never_the_overlay( self, notifications_page ):
         # NEGATIVE: a plain /app/audio link (no &embed=1) is NOT intercepted —
@@ -152,7 +156,8 @@ class TestPodcastOverlayPlayHere:
         page = notifications_page
         _render_abstract( page )
 
-        listen = page.locator( f"{ABS_HOST} a[href$='path={ENC}']" )   # ends with path=…, no &embed=1
+        # Path-agnostic: the Listen link targets /app/audio WITHOUT &embed=1.
+        listen = page.locator( f"{ABS_HOST} a[href*='/app/audio']:not([href*='embed=1'])" )
         with page.context.expect_page() as popup_info:
             listen.click()
         popup = popup_info.value
