@@ -206,6 +206,7 @@ async def match_research_docs( user_email: str, description: str, debug: bool = 
     from cosa.agents.llm_client_factory import LlmClientFactory
     from cosa.config.configuration_manager import ConfigurationManager
     from cosa.agents.io_models.utils.prompt_template_processor import PromptTemplateProcessor
+    from cosa.agents.io_models.utils.fuzzy_file_prefilter import prefilter_docs_map_by_keywords
     from cosa.agents.io_models.xml_models import FuzzyFileMatchResponse
 
     config_mgr    = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
@@ -247,49 +248,11 @@ async def match_research_docs( user_email: str, description: str, debug: bool = 
         print( f"[match_research_docs] Found {len( docs_map )} documents across all search dirs" )
         print( f"[match_research_docs] Description: {description}" )
 
-    # ── Pre-filter: narrow candidate list using keyword scoring ──────────
-    # Voice transcriptions produce noisy descriptions ("no no no", filler words).
-    # Sending 1000+ file paths to a local LLM overwhelms it. Pre-filter to top
-    # candidates using keyword overlap, then let the LLM pick the best matches.
-    STOP_WORDS = {
-        "a", "an", "the", "in", "on", "at", "to", "for", "of", "and", "or",
-        "my", "your", "that", "this", "it", "is", "was", "be", "can", "do",
-        "no", "not", "if", "see", "find", "look", "get", "you", "me", "i",
-        "about", "from", "with", "up", "out", "so", "just", "like", "also",
-        "document", "file", "directory", "folder", "please", "could", "would",
-    }
-    MAX_CANDIDATES = 50
-
-    # Extract keywords from description (lowered, de-duped, stopwords removed)
-    desc_words = set(
-        w for w in description.lower().replace( "-", " " ).replace( "/", " " ).replace( ".", " " ).replace( "&", "" ).split()
-        if w not in STOP_WORDS and len( w ) > 2
-    )
-
-    if debug: print( f"[match_research_docs] Keywords extracted: {desc_words}" )
-
-    if desc_words and len( docs_map ) > MAX_CANDIDATES:
-        # Score each path by keyword overlap (match against path components)
-        scored = []
-        for rel_path in docs_map:
-            path_lower = rel_path.lower().replace( "-", " " ).replace( "/", " " ).replace( "_", " " ).replace( ".", " " )
-            path_words = set( path_lower.split() )
-            score = len( desc_words & path_words )
-            if score > 0:
-                scored.append( ( score, rel_path ) )
-
-        scored.sort( key=lambda x: x[ 0 ], reverse=True )
-
-        if scored:
-            # Take top candidates by score
-            candidates = { rel for _score, rel in scored[ :MAX_CANDIDATES ] }
-            filtered_docs_map = { k: v for k, v in docs_map.items() if k in candidates }
-            if debug:
-                print( f"[match_research_docs] Pre-filtered {len( docs_map )} → {len( filtered_docs_map )} candidates (top scores: {[ s for s, _ in scored[ :5 ] ]})" )
-            docs_map = filtered_docs_map
-        else:
-            if debug: print( f"[match_research_docs] No keyword matches, using full docs_map ({len( docs_map )} files)" )
-    # ── End pre-filter ───────────────────────────────────────────────────
+    # Pre-filter the candidate list by keyword overlap before the LLM call.
+    # Voice transcriptions produce noisy descriptions and a repo can hold
+    # thousands of markdown files; sending them all overwhelms the local LLM.
+    # Shared with the expeditor path so there is one behaviour instead of two.
+    docs_map = prefilter_docs_map_by_keywords( docs_map, description, debug=debug )
 
     # Load prompt template
     template_path = config_mgr.get( "prompt template for fuzzy file matching" )

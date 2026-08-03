@@ -26,6 +26,7 @@ from cosa.agents.runtime_argument_expeditor.agent_registry import (
 from cosa.agents.runtime_argument_expeditor.xml_models import ExpeditorResponse, ArgConfirmationResponse
 from cosa.agents.llm_client_factory import LlmClientFactory
 from cosa.agents.io_models.utils.prompt_template_processor import PromptTemplateProcessor
+from cosa.agents.io_models.utils.fuzzy_file_prefilter import prefilter_docs_map_by_keywords
 from lupin_cli.notifications.notify_user_sync import notify_user_sync
 from lupin_cli.notifications.notification_models import (
     NotificationRequest,
@@ -1092,6 +1093,13 @@ class RuntimeArgumentExpeditor:
         for rel_path, abs_path in docs_map.items():
             if os.path.basename( rel_path ) == description:
                 return abs_path
+
+        # Pre-filter the candidate map by keyword overlap before the LLM call.
+        # Without this, all markdown under the search paths (thousands of files)
+        # is sent to phi-4's 8k context and the request fails HTTP 400 before
+        # any description is judged. Shared with the router path so there is one
+        # behaviour instead of two.
+        docs_map = prefilter_docs_map_by_keywords( docs_map, description, debug=self.debug )
 
         # Try fuzzy matching via LLM
         try:

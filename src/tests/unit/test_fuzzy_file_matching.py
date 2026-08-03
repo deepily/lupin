@@ -238,73 +238,10 @@ class TestEdgeCases:
         assert len( result ) == 2
 
 
-# ============================================================================
-# Test 5: Keyword pre-filter logic (mirrors podcast_generator.py pre-filter)
-# ============================================================================
-
-class TestKeywordPreFilter:
-    """Verify keyword pre-filtering narrows candidate list correctly."""
-
-    STOP_WORDS = {
-        "a", "an", "the", "in", "on", "at", "to", "for", "of", "and", "or",
-        "my", "your", "that", "this", "it", "is", "was", "be", "can", "do",
-        "no", "not", "if", "see", "find", "look", "get", "you", "me", "i",
-        "about", "from", "with", "up", "out", "so", "just", "like", "also",
-        "document", "file", "directory", "folder", "please", "could", "would",
-    }
-
-    def _extract_keywords( self, description ):
-        return set(
-            w for w in description.lower().replace( "-", " " ).replace( "/", " " ).replace( ".", " " ).replace( "&", "" ).split()
-            if w not in self.STOP_WORDS and len( w ) > 2
-        )
-
-    def _score_path( self, rel_path, keywords ):
-        path_lower = rel_path.lower().replace( "-", " " ).replace( "/", " " ).replace( "_", " " ).replace( ".", " " )
-        path_words = set( path_lower.split() )
-        return len( keywords & path_words )
-
-    def test_voice_transcription_extracts_useful_keywords( self ):
-        """Voice noise like 'no no no' is filtered; content words survive."""
-        desc = "See if you can find that document in my end-to-end trust proxy overview in my R&D or the COSA No no no Lupine R&D directory"
-        keywords = self._extract_keywords( desc )
-        # Content words survive
-        assert "trust" in keywords
-        assert "proxy" in keywords
-        assert "overview" in keywords
-        assert "end" in keywords
-        # Noise/stopwords removed
-        assert "no" not in keywords
-        assert "see" not in keywords
-        assert "find" not in keywords
-        assert "my" not in keywords
-        assert "document" not in keywords
-
-    def test_target_file_scores_highest( self ):
-        """The intended file scores higher than unrelated files."""
-        desc = "end-to-end trust proxy overview in R&D"
-        keywords = self._extract_keywords( desc )
-
-        target = "src/rnd/2026.02.23-trust-proxy-preference-learning/2026.02.27-end-to-end-trust-proxy-overview.md"
-        decoy1 = "src/cosa/agents/podcast_generator/orchestrator.py"
-        decoy2 = "src/rnd/2026.01.10-some-unrelated-topic.md"
-        decoy3 = "src/docs/websocket-architecture.md"
-
-        target_score = self._score_path( target, keywords )
-        decoy1_score = self._score_path( decoy1, keywords )
-        decoy2_score = self._score_path( decoy2, keywords )
-        decoy3_score = self._score_path( decoy3, keywords )
-
-        assert target_score >= 4  # trust, proxy, overview, end, rnd
-        assert target_score > decoy1_score
-        assert target_score > decoy2_score
-        assert target_score > decoy3_score
-
-    def test_zero_score_files_excluded( self ):
-        """Files with zero keyword overlap are excluded from candidates."""
-        keywords = { "trust", "proxy", "overview" }
-        assert self._score_path( "src/cosa/utils/util.py", keywords ) == 0
-        assert self._score_path( "src/rnd/2026.02.27-end-to-end-trust-proxy-overview.md", keywords ) >= 2
+# NOTE: keyword pre-filter behaviour moved to the shared helper
+# cosa.agents.io_models.utils.fuzzy_file_prefilter and is covered by
+# src/tests/unit/test_fuzzy_file_prefilter.py. The former mirror-copy tests
+# here were deleted to avoid a second, drift-prone copy of the logic.
 
 
 if __name__ == "__main__":
