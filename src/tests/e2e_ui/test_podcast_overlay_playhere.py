@@ -104,6 +104,36 @@ def _click_play_here( page ):
     )
 
 
+def _assert_frame_audio_playing( page ):
+    """
+    Assert the framed player is ACTUALLY PLAYING — not merely that an <audio>
+    element exists (Mr Radio: that's the claim Rick cares about, and the one the
+    suite can hold onto). The overlay auto-starts on the Play Here click
+    (&autoplay=1), so the framed <audio> must be unpaused with currentTime
+    advancing. /app/audio is SAMEORIGIN, so the frame document is inspectable.
+
+    A blocked frame (X-Frame-Options), an error state (bad / unauth'd file), or a
+    paused player all fail here — none can false-green. No autoplay-policy override
+    is set (conftest only pins font/color determinism), so this proves the real
+    click gesture propagates into the iframe under DEFAULT policy.
+    """
+    frame = page.frame_locator( FRAME )
+    frame.locator( "audio.audio-player-element" ).wait_for( state="attached", timeout=15000 )
+    page.wait_for_function(
+        """() => {
+            const f = document.querySelector( '[data-testid="podcast-overlay-frame"]' );
+            const d = f && f.contentDocument;
+            const a = d && d.querySelector( 'audio.audio-player-element' );
+            return !!a && !a.paused && a.currentTime > 0 && a.readyState >= 2;
+        }""",
+        timeout=15000,
+    )
+    t0 = frame.locator( "audio.audio-player-element" ).evaluate( "a => a.currentTime" )
+    page.wait_for_timeout( 1200 )
+    t1 = frame.locator( "audio.audio-player-element" ).evaluate( "a => a.currentTime" )
+    assert t1 > t0, f"audio must be PLAYING (currentTime advancing); {t0} -> {t1}"
+
+
 class TestPodcastOverlayPlayHere:
     """Play Here → overlay; dismiss → closed; Listen → plain tab, unchanged."""
 
