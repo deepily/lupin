@@ -33,6 +33,10 @@ VM_ZONE="${LUPIN_VM_ZONE:-us-central1-a}"
 VM_ROOT="/mnt/lupin-data/lupin"                 # UID-1001-owned on-VM checkout (deploy-cloud-test.sh:31)
 VM_PIP_ROOT="/mnt/lupin-data/planning-is-prompting"  # sibling PIP checkout on the VM (push-env exports PLANNING_IS_PROMPTING_ROOT)
 VM_DEEPILY_PROJECTS_DIR="/mnt/lupin-data"       # parent of the on-VM checkouts; push-env exports DEEPILY_PROJECTS_DIR (referenced by the shipped alias library)
+# Per-machine state deliberately kept OUT of every repo (Rick 2026-08-04). On dev this is a
+# SIBLING of the projects dir (…/projects-data); the VM has no such sibling — /mnt/lupin-data IS
+# the projects dir — so it nests under the data disk instead. Holds claude-permissions.json.
+VM_DEEPILY_DATA_DIR="/mnt/lupin-data/projects-data"
 # The CPU VM (post GPU→CPU downgrade) runs the cloud-GPU topology: model-server on Cloud Run,
 # NO local nvidia container. Using cloud-test.yml here recreates a local GPU model-server that
 # cannot start on the CPU VM ("could not select device driver nvidia"). Source of truth:
@@ -659,6 +663,25 @@ bash src/scripts/preflight-vm.sh --phase post || echo 'POST-deploy preflight rep
             shipped=$(( shipped + 1 ))
         done < <( grep -v '^[[:space:]]*#' "$MANIFEST_FILE" | grep -v '^[[:space:]]*$' )
         log "push-unversioned done: $shipped shipped, $skipped_rows VM-local (assert-only)"
+
+        # ── APPLY the Claude permission stanza we just shipped ──────────────────────
+        # Shipping claude-permissions.json is only half the job: it is a SOURCE file, not a
+        # live settings file. Nothing reads it until the merge runs, so a ship-without-apply
+        # looks green in the manifest and changes nothing in behaviour. Merging here keeps
+        # the two halves in one verb rather than in an operator's memory.
+        # The merge is idempotent and touches ONLY the permissions block — the VM's own
+        # hooks / env / model keys survive, which a whole-file copy would not.
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "(dry-run) would apply the Claude permission stanza on $VM_NAME"
+        else
+            log "applying the Claude permission stanza on $VM_NAME"
+            gcloud compute ssh "$VM_NAME" --zone="$VM_ZONE" \
+                --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap $SSH_KEEPALIVE \
+                --command "python3 $VM_ROOT/src/scripts/apply_claude_permissions.py --source $VM_DEEPILY_DATA_DIR/claude-permissions.json" \
+                || log "WARN: permission merge did not complete — the VM may still prompt. Re-run: lupin-vm.sh run \"python3 $VM_ROOT/src/scripts/apply_claude_permissions.py\""
+            log "NOTE: Claude Code loads settings at STARTUP — restart any live VM session to pick this up."
+        fi
+
         log "verify with: lupin-vm.sh run \"cd $VM_ROOT && bash src/scripts/preflight-vm.sh --phase pre\""
         ;;
 
@@ -912,6 +935,7 @@ echo 'NEXT (manual, interactive): open a fresh shell, run  claude  once, complet
             [LUPIN_ROOT]="$VM_ROOT"
             [PLANNING_IS_PROMPTING_ROOT]="$VM_PIP_ROOT"
             [DEEPILY_PROJECTS_DIR]="$VM_DEEPILY_PROJECTS_DIR"
+            [DEEPILY_DATA_DIR]="$VM_DEEPILY_DATA_DIR"
             [LUPIN_CC_VENV]='$HOME/.venv-lupin-mcp'
             [LUPIN_DEV_EMAIL]='ricardo.felipe.ruiz@gmail.com'
         )

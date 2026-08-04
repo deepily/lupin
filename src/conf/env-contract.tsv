@@ -51,6 +51,7 @@
 LUPIN_ROOT	BOTH	push-env + compose	PATH_VM	REQUIRED	36 read sites. Container value is /var/lupin; host value is the checkout. cu.get_project_root() falls back to /var/lupin, which is CORRECT in a container and WRONG on a host — so an unset host value fails silently rather than loudly.
 PLANNING_IS_PROMPTING_ROOT	HOST	push-env	PATH_VM	REQUIRED	The alias library and the hook templates are relative to it. Aliases only REFERENCED it; nothing defined it until 5eb54324.
 DEEPILY_PROJECTS_DIR	HOST	push-env	PATH_VM	REQUIRED	The alias library depends on it (878df337).
+DEEPILY_DATA_DIR	HOST	push-env	PATH_VM	REQUIRED	Per-machine state that is deliberately NOT in any repo. Holds claude-permissions.json, the portable Claude Code permission stanza shipped by push-unversioned and applied by src/scripts/apply_claude_permissions.py. Dev value is a SIBLING of the projects dir (.../projects-data); the VM has no such sibling, so its value nests under the data disk.
 
 # ── Claude Code host integration ─────────────────────────────────────────────
 LUPIN_CC_VENV	HOST	push-env	PATH_ANY	REQUIRED	The interpreter for the MCP server AND the 8 hooks. Defaults to $LUPIN_ROOT/.venv, which on the VM is a SYMLINK to the arbiter's venv (uid 1001, py3.10) — missing deps and unwritable. The dev box masks this completely.

@@ -46,6 +46,19 @@ src/conf/contact-information.map	/mnt/lupin-data/lupin/src/conf/contact-informat
 # Listed so preflight ASSERTS ITS PRESENCE; push-unversioned SKIPS it (local_path '-').
 -	/mnt/lupin-data/lupin/cloud-gpu.env	-	-	REQUIRED
 
+# --- portable Claude Code permission stanza (NOT in any repo, by ruling) -------
+# Rick 2026-08-04: "I do not want this file in the repo ... put it outside of the project's
+# directory in the projects data directory." So it lives at $DEEPILY_DATA_DIR and git cannot
+# carry it — which is precisely this manifest's category.
+# Absent => every Claude Code session on the VM stops to ask permission for routine work,
+# because the VM's settings.json lacks the bare tool names ("Bash", "Read" — no parentheses,
+# therefore path-free) that the dev box grants.
+# SHIPPING IT IS HALF THE JOB: it is a SOURCE file, not a live settings file. Applying it is
+# `python3 $LUPIN_ROOT/src/scripts/apply_claude_permissions.py`, which MERGES the stanza into
+# ~/.claude/settings.json and leaves that file's machine-specific hooks/env/model keys alone.
+# Owner is the VM LOGIN user (not 1001) — Claude Code reads it as that user.
+/mnt/DATA01/include/www.deepily.ai/projects-data/claude-permissions.json	/mnt/lupin-data/projects-data/claude-permissions.json	1721846087:1721846087	644	REQUIRED
+
 # --- large out-of-band corpora (gitignored: size) ------------------------------
 # Shipped by tar.gz + scp, not by this verb; listed so preflight can report on them.
 -	/mnt/lupin-data/google/harvey-labs/io/markdown-exports/	-	-	OPTIONAL

@@ -342,6 +342,28 @@ else
     report unknown BLOCK "unversioned manifest unreadable at $MANIFEST" "deploy the repo to the VM"
 fi
 
+# B4 — the permission stanza is APPLIED, not merely present.
+# B3 above proves the SOURCE file arrived. That is half the job: nothing reads it until the
+# merge runs, so a shipped-but-unapplied stanza passes B3 and still leaves every session on
+# this box stopping to ask permission. This asserts the LIVE settings file carries the rules.
+# WARN, not BLOCK: a VM that prompts too much is annoying, not unfit to deploy onto.
+PERM_APPLIER="$REPO_ROOT/src/scripts/apply_claude_permissions.py"
+PERM_SOURCE="${DEEPILY_DATA_DIR:-}/claude-permissions.json"
+if [ -z "${DEEPILY_DATA_DIR:-}" ]; then
+    report fail WARN "DEEPILY_DATA_DIR unset — cannot check whether Claude permissions are applied" \
+                "lupin-vm.sh push-env   # then open a new shell"
+elif [ ! -r "$PERM_SOURCE" ]; then
+    report fail WARN "Claude permission stanza absent at $PERM_SOURCE" \
+                "lupin-vm.sh push-unversioned"
+elif [ ! -r "$PERM_APPLIER" ]; then
+    report fail WARN "permission applier missing at $PERM_APPLIER" "deploy the repo to the VM"
+elif python3 "$PERM_APPLIER" --source "$PERM_SOURCE" --verify >/dev/null 2>&1; then
+    report pass WARN "Claude permissions applied to ~/.claude/settings.json"
+else
+    report fail WARN "Claude permissions shipped but NOT applied — sessions here will keep prompting" \
+                "python3 $PERM_APPLIER   # then restart any live Claude Code session"
+fi
+
 if layer_runs B; then
 # B1/B2 — parity. POST-phase only: PRE runs before HEAD changes, so asserting the
 # old ref would be meaningless — and a meaningless assertion that passes is worse
