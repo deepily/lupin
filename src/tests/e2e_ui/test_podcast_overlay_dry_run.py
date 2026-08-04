@@ -172,103 +172,173 @@ class TestDryRunDoneCardConsumeSeam:
     DETECTION IS PROVEN TWO WAYS (phase-2 timed-revert is DROPPED, not deferred —
     :8000 and :7999 bind the same src mount, so reverting the fix to force a real
     red would revert it out from under a live rehearsal):
-      - The real test below rides the FULL running→done WebSocket promotion and
-        asserts the abstract renders.
+      - The real test below drives the app's OWN promotion handler
+        (handleJobStateTransition) with synthesized queued→running→completed
+        events — NO live job — and asserts the done card renders the abstract.
       - `test_negative_control_predicate_detects_omitted_abstract` proves the
         SAME predicate goes RED when the done event omits the abstract — the exact
         symptom the server bug produced — with no server on buggy code and no reload.
 
-    Venue: :8000 (scheduled) — a real dry-run submit enqueues + mutates queue
-    state and needs the consumer running. Dry run = no LLM/ElevenLabs spend.
+    REDESIGN (2026-08-03): the real test no longer submits a live dry-run job.
+    A real submit cannot complete inside a monopolizing test-suite run (Gate B
+    defers the foreign job), and is separately fragile because an approval gate
+    can be re-aimed at an offline operator. Both say a consume-seam test must not
+    depend on a live job completing — so it drives the client promotion path
+    directly. This proves the CLIENT renders what the server SAYS it sends; the
+    emit half (that the server sends it) is owned by the podcast_generator unit
+    tests, not this file.
+
+    Venue: :8000 (scheduled) per the E2E-UI venue convention. It no longer needs
+    server monopoly or the consumer — it drives client JS only, mutates no queue
+    state, and is immune to the monopolize-defer that killed the first version.
     """
 
-    def test_dry_run_done_card_renders_abstract_no_reload( self, notifications_page, test_user_credentials ):
-        import os
-        import cosa.utils.util as cu
+    def test_dry_run_done_card_renders_abstract_no_reload( self, notifications_page ):
+        """
+        The CONSUME seam, driven through the app's REAL WebSocket promotion
+        handler (handleJobStateTransition) with NO live job.
 
-        page  = notifications_page
-        email = test_user_credentials[ "email" ]
+        WHY NOT A REAL SUBMIT (this is the redesign — 2026-08-03). The first
+        version submitted a real dry-run podcast and waited for the queue to
+        promote it. That cannot work here for TWO independent reasons, both
+        proven the same night:
+          1. A test-suite job runs monopolize=True; Gate B defers any FOREIGN
+             submit's todo→running promotion while the monopolizer holds, so the
+             submitted job sits 'pending' and the wait times out (never the
+             consume bug — the job never runs).
+          2. Even outside a monopolizer, an approval gate can be re-aimed at an
+             offline operator (503, fail-closed), so a real job is not a reliable
+             way to reach 'done' in an unattended run.
+        Both say the same thing: a CONSUME-seam test must NOT depend on a live
+        job completing. So we drive the client's own promotion path directly.
 
-        # Seed a research doc so the submit's direct-mode existence check passes.
-        # podcast_generator.py:491 checks os.path.exists BEFORE the dry_run flag is
-        # applied (:501), so a fake path 404s at submit even for a dry run. dry_run
-        # then skips actually reading it, so the content is irrelevant.
-        research_dir = cu.get_project_root() + f"/io/deep-research/{email}"
-        os.makedirs( research_dir, exist_ok=True )
-        seed = research_dir + "/2026.08.03-dry-run-consume-e2e.md"
-        with open( seed, "w", encoding="utf-8" ) as f:
-            f.write( "# Dry-run consume E2E seed\n\nIrrelevant — dry_run skips reading this.\n" )
+        WHAT THIS PROVES: on a running→completed transition whose metadata carries
+        an abstract, the CLIENT renders that abstract (with a clickable Play Here)
+        into the done card via renderJobCard, WITHOUT a page reload.
 
-        try:
-            # Submit a DRY-RUN podcast through the app's own API AS THIS logged-in
-            # user, so the job's running/done events land on THIS page's WebSocket.
-            job_id = page.evaluate(
-                """async ( source ) => {
-                    const tok = localStorage.getItem( 'lupin_access_token' );
-                    const res = await fetch( '/api/podcast-generator/submit', {
-                        method  : 'POST',
-                        headers : { 'Authorization': 'Bearer ' + tok, 'Content-Type': 'application/json' },
-                        body    : JSON.stringify( { research_source: source, dry_run: true } )
-                    } );
-                    const j = await res.json();
-                    return j.job_id || null;
-                }""",
-                f"/io/deep-research/{email}/2026.08.03-dry-run-consume-e2e.md",
-            )
-            assert job_id, "podcast dry-run submit did not return a job_id"
+        WHAT THIS DOES NOT PROVE (stated so no future reader conflates the ends):
+        that the SERVER actually SENDS that abstract in the done-transition
+        metadata. Synthesized envelopes prove the client renders the shape the
+        server claims to send — not that the server sends it. The emit half is
+        owned by the podcast_generator unit tests (job.py 100%, bug 9b481811).
+        Only the two together close the seam.
 
-            # (req 3) Prove the card passes THROUGH a pre-done state during the test,
-            # so a stale done card can't false-pass. First wait for the card to exist
-            # (todo/running), then assert it is NOT already done.
-            page.wait_for_function(
-                "( jobId ) => !!document.getElementById( 'job-card-' + jobId )",
-                arg=job_id,
-                timeout=20000,
-            )
-            predone = page.evaluate(
-                """( jobId ) => {
-                    const c = document.getElementById( 'job-card-' + jobId );
-                    const r = c && c.querySelector( '.job-response' );
-                    const done = !!r && r.style.display !== 'none' && ( r.textContent || '' ).trim().length > 0;
-                    return done ? 'already-done' : 'pending';
-                }""",
-                job_id,
-            )
-            assert predone == "pending", \
-                f"card was already done at first observation ({predone}) — running→done not exercised"
+        FAITHFUL PAYLOAD: the abstract driven in is the REAL one captured from
+        _execute_dry_run (not hand-built), so if the emit shape drifts this test
+        drifts with it.
 
-            # NO RELOAD from here. Wait on the DONE SIGNAL, not the abstract:
-            # insertJobMetadata() shows .job-response (from response_text) on EVERY
-            # completion, independent of the abstract. Keying the wait on
-            # .job-response proves the running→done promotion happened WITHOUT a
-            # reload and decouples "reached done" from "abstract rendered" — so on
-            # pre-fix code the wait still SUCCEEDS and the failure surfaces as the
-            # abstract ASSERTION below, not a bare timeout a broken selector could
-            # also produce.
-            page.wait_for_function(
-                """( jobId ) => {
-                    const card = document.getElementById( 'job-card-' + jobId );
-                    if ( !card ) return false;
-                    const resp = card.querySelector( '.job-response' );
-                    return !!resp && resp.style.display !== 'none'
-                           && ( resp.textContent || '' ).trim().length > 0;
-                }""",
-                arg=job_id,
-                timeout=45000,
-            )
+        RED-BEFORE-GREEN: the shared predicate is validated by
+        test_negative_control_predicate_detects_omitted_abstract, which drives a
+        done payload OMITTING the abstract through the client and asserts the SAME
+        predicate goes RED on the bug's exact symptom. A predicate that has been
+        red on that symptom is what makes this green trustworthy.
+        """
+        page     = notifications_page
+        abstract = _capture_dry_run_abstract()
+        job_id   = "pg-e2e-consume-seam"        # synthetic — there is no real job
 
-            # Card promoted to DONE (no reload). Assert the CONSUME seam via the
-            # SHARED predicate. On pre-fix code the done event carries no abstract →
-            # .job-abstract stays empty → PREDICTED text, not a timeout.
-            state = _consume_predicate_by_job_id( page, job_id )
-            assert state[ "abstractText" ], "abstract empty on done card (no reload)"
-            assert state[ "playHref" ] and "embed=1" in state[ "playHref" ], \
-                "Play Here absent on done card (no reload)"
-            assert state[ "playVisible" ], "Play Here present but not clickable/visible"
-            assert state[ "ok" ], "shared consume predicate failed on the real done card"
-        finally:
-            if os.path.exists( seed ):
-                os.remove( seed )
+        # 1) queued→running: the app creates the card in the run container. This is
+        #    the pre-done state — a stale done card cannot false-pass. Driving the
+        #    REAL handler (not a hand-built card) exercises the app's own path.
+        page.evaluate(
+            """( jobId ) => window.notificationsUI.handleJobStateTransition( {
+                job_id     : jobId,
+                from_state : 'queued',
+                to_state   : 'running',
+                metadata   : { question_text: 'Dry-run consume seam', agent_type: 'podcast', status: 'running' }
+            } )""",
+            job_id,
+        )
+        predone = page.evaluate(
+            """( jobId ) => {
+                const c = document.getElementById( 'job-card-' + jobId );
+                if ( !c ) return 'absent';
+                const r = c.querySelector( '.job-response' );
+                const done = !!r && r.style.display !== 'none' && ( r.textContent || '' ).trim().length > 0;
+                return done ? 'already-done' : 'pending';
+            }""",
+            job_id,
+        )
+        assert predone == "pending", \
+            f"card not in a pre-done state after the running transition ({predone}) — running→done not exercised"
+
+        # 2) running→completed WITH the real abstract. handleJobStateTransition
+        #    re-renders the card into the done container via renderJobCard. NO RELOAD.
+        page.evaluate(
+            """( args ) => window.notificationsUI.handleJobStateTransition( {
+                job_id     : args.jobId,
+                from_state : 'running',
+                to_state   : 'completed',
+                metadata   : {
+                    question_text : 'Dry-run consume seam',
+                    agent_type    : 'podcast',
+                    status        : 'completed',
+                    response_text : 'Dry run complete.',
+                    abstract      : args.abstract
+                }
+            } )""",
+            { "jobId": job_id, "abstract": abstract },
+        )
+
+        # 3) Card promoted to DONE without a reload. Assert the CONSUME seam via the
+        #    SHARED predicate. With the abstract omitted (negative control) the same
+        #    predicate goes RED — so a green here is the abstract actually rendering.
+        state = _consume_predicate_by_job_id( page, job_id )
+        assert state[ "abstractText" ], "abstract empty on promoted done card (no reload)"
+        assert state[ "playHref" ] and "embed=1" in state[ "playHref" ], \
+            "Play Here absent on promoted done card (no reload)"
+        assert state[ "playVisible" ], "Play Here present but not clickable/visible"
+        assert state[ "ok" ], "shared consume predicate failed on the promoted done card"
+
+    def test_promotion_path_negative_control_omitted_abstract_is_red( self, notifications_page ):
+        """
+        PATH-MATCHED negative control — the red that makes the positive test's green
+        trustworthy on the SAME render path it uses.
+
+        `test_negative_control_predicate_detects_omitted_abstract` drives the
+        predicate through insertJobMetadata; the positive test above renders via
+        renderJobCard (handleJobStateTransition). A predicate proven red on one
+        render path does not prove it red on the other. This drives the EXACT
+        positive path — queued→running→completed with the abstract OMITTED — and
+        asserts (a) the promotion ran (card reached done, .job-response shown) and
+        (b) the shared predicate goes RED. Without this, the positive green could
+        hide a renderJobCard that shows .job-abstract unconditionally.
+        """
+        page   = notifications_page
+        job_id = "pg-e2e-consume-seam-negctrl"
+
+        page.evaluate(
+            """( jobId ) => window.notificationsUI.handleJobStateTransition( {
+                job_id: jobId, from_state: 'queued', to_state: 'running',
+                metadata: { question_text: 'Neg ctrl', agent_type: 'podcast', status: 'running' }
+            } )""",
+            job_id,
+        )
+        # Done transition with response_text but NO abstract — the bug's exact shape.
+        result = page.evaluate(
+            """( jobId ) => {
+                window.notificationsUI.handleJobStateTransition( {
+                    job_id: jobId, from_state: 'running', to_state: 'completed',
+                    metadata: { question_text: 'Neg ctrl', agent_type: 'podcast',
+                                status: 'completed', response_text: 'Dry run complete.' }
+                } );
+                const card = document.getElementById( 'job-card-' + jobId );
+                const resp = card && card.querySelector( '.job-response' );
+                const handlerRan = !!resp && resp.style.display !== 'none'
+                                   && ( resp.textContent || '' ).trim().length > 0;
+                const verdict = ( """ + _ABSTRACT_PREDICATE_JS + """ )( card );
+                return { handlerRan: handlerRan, verdict: verdict };
+            }""",
+            job_id,
+        )
+        # Promotion actually happened (so an empty abstract is because it was OMITTED,
+        # not because the card never reached done or the handler no-op'd).
+        assert result[ "handlerRan" ], \
+            "done promotion did not render on the renderJobCard path — control proves nothing"
+        v = result[ "verdict" ]
+        assert v[ "ok" ] is False, "predicate should be RED when the abstract is omitted (renderJobCard path)"
+        assert not v[ "abstractText" ], "abstract should be empty when omitted"
+        assert not v[ "playHref" ], "Play Here should be absent when abstract omitted"
 
     def test_negative_control_predicate_detects_omitted_abstract( self, notifications_page ):
         """
