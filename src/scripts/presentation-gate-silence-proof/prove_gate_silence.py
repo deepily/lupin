@@ -306,6 +306,35 @@ def _find( jobs, job_id ):
     return None
 
 
+def pool_status( base, jwt ):
+    r = requests.get(
+        f"{base}/api/queue/pool-status",
+        headers = { "Authorization": f"Bearer {jwt}" },
+        timeout = 15,
+    )
+    r.raise_for_status()
+    return r.json()
+
+
+def require_lock_clear( base, jwt ):
+    """
+    HARD precondition (row 19328449 finding): a directly-submitted non-monopolize
+    pr- job is deferred as FOREIGN intake while ANY monopolizer holds the pool
+    (queue_consumer.py:106-124 Gate B) — the exact mechanism that wedged Krishna's
+    ts-→pr- run. Refuse to submit unless monopolize_id is null, or the run silently
+    deadlocks and burns the ~15min window.
+    """
+    ps = pool_status( base, jwt )
+    mono_id = ps.get( "monopolize_id" )
+    if ps.get( "monopolize_inflight" ) or mono_id:
+        raise RuntimeError(
+            f"REFUSING to submit: a monopolizer holds the :8000 lock "
+            f"(monopolize_id={mono_id}). A foreign pr- would be deferred forever. "
+            f"Clear the monopolizer first, then re-run."
+        )
+    return ps
+
+
 def poll_until_terminal( base, jwt, job_id, overall_timeout, on_tick=None ):
     """
     Poll running/done/dead until the job lands in done or dead (or we time out).
@@ -388,6 +417,8 @@ def main():
     ap.add_argument( "--evidence", default=None, help="path to write the evidence JSON" )
     ap.add_argument( "--build-timeout", type=int, default=4200,
                      help="overall seconds to wait for the build (4 gates x 600s + LLM)" )
+    ap.add_argument( "--force", action="store_true",
+                     help="skip the monopolizer-lock precondition (deliberate override only)" )
     args = ap.parse_args()
 
     run_start = _now()
@@ -396,6 +427,15 @@ def main():
 
     jwt, email, user_id = register_and_login( args.base, args.email, password )
     print( f"[proof] authenticated user_id={user_id}" )
+
+    # HARD precondition — a monopolizer holding the lock would defer our foreign
+    # pr- forever (Gate B, queue_consumer.py:106-124). Verify BEFORE spending the
+    # window. --force only for a deliberate override.
+    if not args.force:
+        ps = require_lock_clear( args.base, jwt )
+        print( f"[proof] :8000 lock clear (monopolize_id={ps.get( 'monopolize_id' )}) — safe to submit" )
+    else:
+        print( "[proof] --force: skipping lock-clear precondition" )
 
     # Programmatic session id: ^[a-z][a-z0-9]*-[a-z0-9-]{1,47}$ (is_valid_session_id,
     # websocket.py:179). Spaces/uppercase fail it → close-before-accept → 403.
