@@ -1,5 +1,48 @@
 # TODO
 
+## 📋 DECISIONS LOG 2026-08-04 (Mr. Radio 🦉 `7802a03f`, five-worker crew) — Thursday demo: the line was refuted, replaced, and the root cause found
+
+**D1 — Chase a wording fix AND a code fix in parallel.** *Ruled by Rick, 12:43 EDT, on a menu with pros/cons.*
+The demo line `"make me a podcast on KISS"` routed correctly and then **crashed** — `FileNotFoundError: Research document not found: KISS`. Rick declined to bet on either fix alone. Rachel took the wording lane, Clayton the code lane. Both landed. **The wording fix won the race**, so the code fix stopped being the critical path and became durability.
+
+**D2 — Prosody: file it, do not touch the audio path before Thursday.** *Ruled by Rick, 12:04 EDT.*
+Rick asked for the translation to preserve prosody cues. Investigation showed the request pointed at the wrong layer: translation **already** preserves them (148 verified in the Spanish text), and the **text-to-speech engine strips every marker before synthesis, for every language including English**. So the cues have never been audible. Making translation "keep" them changes nothing. Real work is a TTS change; deferred rather than touching the one component whose failure means no podcast at all.
+
+**D3 — HOLD the `topic → research` alias drop until after Thursday.** *Ruled by me; raised to Rick to overrule.*
+⚠️ **My first justification was wrong and is recorded as such on row `bd0ce120`.** I called it "a behaviour change of unknown risk." Rachel's contrast then showed the presentation pair already does it the correct way — so it is *"match a proven-correct sibling"*, not a novel design. **The hold stands on redundancy** (Clayton's fix already covers Thursday), **not on risk.**
+
+**D4 — Split a landed fix from its unbounded follow-up.** *Ruled by me, on Krishna's question.*
+Closed the proxy-port fix on its receipts; minted the back-contamination audit as its own row. An open row hides that the fix landed, and unbounded forensics does not belong bundled with a one-line change.
+
+**D5 — Closing a latent gap does not outrank the demo.** *Ruled by me, on Tiffany's `:8000` fix.*
+Her diff touched the **podcast submit endpoints** — Rick's demo path, two days out, on a row that is not demo-blocking. Ruling: prove a normal submit is identical before and after, or drop those endpoints. She proved it with a **differential** (disable the stamps → only the 2 lineage tests red, all 48 normal-submit paths identical either way). Kept in the pass.
+
+### 🔎 THE ROOT CAUSE, and it traces to a bug we fixed the same morning
+
+The podcast command's **1200 training rows all emit a topic; zero emit file paths.** The registry then aliases that topic into `research`, **a file-path argument**. So the extractor did exactly what it was taught, and the registry put the answer in the wrong slot.
+
+It was **trained as "podcast from a topic" — the old, inverted label — and implemented as a file reader.** The label inversion fixed at 10:58 was never cosmetic; it had already propagated into the training data. The crash was that same mistake surfacing at runtime, hours after we thought we'd fixed it.
+
+**Scope checked, not assumed** (Rachel): the presentation pair is clean — 879/1200 real paths, no topic alias. **Isolated, not systemic.** A negative result worth as much as a positive.
+
+### 🪞 THE PATTERN THE DAY KEPT REPEATING — worth reusing
+
+**Five separate claims today were measured somewhere other than where the thing has to work**, and every one read as green:
+
+| Claim | Measured where | Where it had to hold |
+|---|---|---|
+| "Resolves to Rick's file 3/3" | The matcher, fed directly | The live flow — where the matcher is never called |
+| "473 tests pass" | A subset | The merge |
+| "21,562 passed" | An earlier run | The committed code |
+| "Prompt auto-submits after 5s" | A config field | An observed submission — there was none |
+| "Spanish loses its cues" | A metadata list | The translated text — the cues were there |
+
+Three of those were mine. The countermeasure that actually worked, every time, was **someone re-deriving the claim from the other end** — Rio refusing a subset, Clayton reading the consumer, Tiffany finding her own harness in the logs, Krishna retracting his own report.
+
+**Standing rule adopted from this**: a receipt must name **which run produced it**, and a "probably fine" gets answered with a differential, not a paragraph.
+
+---
+
 ## 📋 DECISIONS LOG 2026-08-03 (Cheech 🌿 `2c73cb48`) — DM verbosity pilot, live-gate verification
 
 **D1 — Prove the reject path with a real schedule slot, not the arm override.** *Ruled by me on Tiffany 💍's refutation, 2026-08-03.*
