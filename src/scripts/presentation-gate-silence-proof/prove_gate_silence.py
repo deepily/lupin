@@ -100,6 +100,23 @@ def _strong_password():
     return "Arnold!Gate9proof-" + uuid.uuid4().hex[ :10 ]
 
 
+def _headers_from_options( response_options ):
+    """
+    Pull the question headers out of a gate's response_options so we can answer
+    each one. response_options is {questions:[{header, options:[...]}]} — carried
+    on the frame as a dict or a JSON string. Returns [] if unparseable.
+    """
+    if response_options is None:
+        return []
+    if isinstance( response_options, str ):
+        try:
+            response_options = json.loads( response_options )
+        except Exception:
+            return []
+    questions = response_options.get( "questions", [] ) if isinstance( response_options, dict ) else []
+    return [ q.get( "header" ) for q in questions if q.get( "header" ) ]
+
+
 # ── auth ──────────────────────────────────────────────────────────────────────
 def register_and_login( base, email, password ):
     """
@@ -137,22 +154,26 @@ def register_and_login( base, email, password ):
 class SilentConnectedUser:
     """
     Hold a real authenticated queue WebSocket open as `email`, record every gate
-    ask (`notification_queue_update`) as delivery proof, sample liveness
-    continuously, and NEVER send a response frame. This is the human who is
-    present but silent.
+    ask (`notification_queue_update`) as delivery proof, and sample liveness
+    continuously. In answer_mode (Direction A) it ANSWERS each gate promptly by
+    posting the continue_label to /api/notify/response, so the job proceeds on a
+    HUMAN answer, not a declared default. With answer_mode off it stays silent.
     """
 
-    def __init__( self, base, session_id, jwt ):
-        self.base       = base
-        self.session_id = session_id
-        self.jwt        = jwt
+    def __init__( self, base, session_id, jwt, answer_mode=False, continue_label="Approve" ):
+        self.base           = base
+        self.session_id     = session_id
+        self.jwt            = jwt
+        self.answer_mode    = answer_mode
+        self.continue_label = continue_label
         self.ws_url     = (
             base.replace( "https://", "wss://" ).replace( "http://", "ws://" )
             + f"/ws/queue/{urllib.parse.quote( session_id )}"
         )
-        self.deliveries = []      # [{ts, notification_id, job_id, title, response_type, timeout_seconds}]
-        self.liveness   = []      # [{ts, kind}]  kind in {auth, recv, ping}
-        self.dropped_at = None    # iso ts if the socket ever closed/raised
+        self.deliveries    = []   # [{ts, notification_id, job_id, title, response_type, timeout_seconds, headers}]
+        self.answers_posted = []  # [{ts, notification_id, answers, status}]
+        self.liveness      = []   # [{ts, kind}]  kind in {auth, recv, ping}
+        self.dropped_at    = None # iso ts if the socket ever closed/raised
         self._ready     = threading.Event()
         self._stop      = threading.Event()
         self._err       = None
@@ -230,14 +251,44 @@ class SilentConnectedUser:
         # A gate ask is a response-required MULTIPLE_CHOICE notification.
         if not note.get( "response_requested" ):
             return
+        nid     = note.get( "id" ) or note.get( "notification_id" )
+        headers = _headers_from_options( note.get( "response_options" ) )
         self.deliveries.append( {
             "ts"              : _iso( _now() ),
-            "notification_id" : note.get( "id" ) or note.get( "notification_id" ),
+            "notification_id" : nid,
             "job_id"          : note.get( "job_id" ),
             "title"           : note.get( "title" ),
             "response_type"   : note.get( "response_type" ),
             "timeout_seconds" : note.get( "timeout_seconds" ),
+            "headers"         : headers,
         } )
+        # Direction A: answer promptly on a background thread so the recv loop
+        # keeps sampling liveness while the ~1s POST runs.
+        if self.answer_mode and nid and headers:
+            threading.Thread(
+                target=self._answer_gate, args=( nid, headers ), daemon=True
+            ).start()
+
+    def _answer_gate( self, nid, headers ):
+        # Answer every question header with the continue label ("Approve") — the
+        # fail-open continue option, which proceeds the build. Shape proven on
+        # :7999: {"answers": {header: label}} → status=responded, default_used=false.
+        answers = { h: self.continue_label for h in headers }
+        try:
+            r = requests.post(
+                f"{self.base}/api/notify/response",
+                json    = { "notification_id": nid, "response_value": { "answers": answers } },
+                timeout = 15,
+            )
+            self.answers_posted.append( {
+                "ts": _iso( _now() ), "notification_id": nid,
+                "answers": answers, "status": r.status_code,
+            } )
+        except Exception as e:
+            self.answers_posted.append( {
+                "ts": _iso( _now() ), "notification_id": nid,
+                "answers": answers, "status": f"ERR {e}",
+            } )
 
     def liveness_report( self ):
         """Max gap between consecutive liveness samples + drop status."""
@@ -306,6 +357,26 @@ def _find( jobs, job_id ):
     return None
 
 
+def read_notification_state( base, jwt, nid ):
+    """
+    PURE READ of {state, response_value, responded_at} for one gate ask
+    (GET /api/notifications/response/{id}). state=='responded' + a real
+    response_value == a HUMAN answer; 'expired' == a declared-default timeout.
+    This is the Direction-A discriminator, server-side, without container logs.
+    """
+    try:
+        r = requests.get(
+            f"{base}/api/notifications/response/{nid}",
+            headers = { "Authorization": f"Bearer {jwt}" },
+            timeout = 12,
+        )
+        if r.status_code != 200:
+            return { "state": f"HTTP {r.status_code}", "response_value": None }
+        return r.json()
+    except Exception as e:
+        return { "state": f"ERR {e}", "response_value": None }
+
+
 def pool_status( base, jwt ):
     r = requests.get(
         f"{base}/api/queue/pool-status",
@@ -358,54 +429,61 @@ def poll_until_terminal( base, jwt, job_id, overall_timeout, on_tick=None ):
     return ( "timeout", None )
 
 
-# ── verdict ───────────────────────────────────────────────────────────────────
-def build_verdict( silent, job_state, job, run_start ):
+# ── verdict (Direction A — human-answered) ────────────────────────────────────
+def build_verdict_direction_a( silent, job_state, job, gate_states ):
     """
-    The DISCRIMINATOR is the WALL TIME each gate sat silent, not the frame count
-    (Mr Radio 2026-08-03). Because the build proceeds to the next gate the moment
-    the prior one defaults, the delta between consecutive delivery frames IS the
-    prior gate's silence duration; the LAST gate's close is job.completed_at. We
-    keep every raw timestamp and assert EACH per-gate silence >= MIN_SILENCE_SECS,
-    so a single fast (503-shaped) gate cannot hide inside an average.
-    """
-    live       = silent.liveness_report()
-    deliveries = silent.deliveries
-    frame_ts   = [ datetime.fromisoformat( d[ "ts" ] ) for d in deliveries ]
+    DIRECTION A — the path nobody has seen work: the gate REACHES a connected
+    client and the job proceeds on the HUMAN's answer, not a declared default.
 
-    # Per-gate silence durations. Between consecutive frames for gates 1..n-1;
-    # for the last gate, frame -> job.completed_at (falls back to now()).
+    The discriminator is NOT timing (an answered gate and a pre-fix TypeError
+    gate both resolve fast). It is the notification's final STATE: 'responded'
+    with a real response_value == a human answer; 'expired' == a declared-default
+    timeout. Every gate must be delivered (frame), answered (POST 200), and
+    resolved 'responded' — and the job must reach done. gate_states maps each
+    delivered notification_id → its read {state, response_value}.
+    """
+    live         = silent.liveness_report()
+    deliveries   = silent.deliveries
+    delivered_ids = [ d[ "notification_id" ] for d in deliveries if d[ "notification_id" ] ]
+    answered_ids  = [ a[ "notification_id" ] for a in silent.answers_posted if a[ "status" ] == 200 ]
+
     per_gate = []
-    for a, b in zip( frame_ts, frame_ts[ 1: ] ):
-        per_gate.append( round( ( b - a ).total_seconds(), 1 ) )
-    if frame_ts:
-        close = _now()
-        if job and job.get( "completed_at" ):
-            try:
-                close = datetime.fromisoformat( job[ "completed_at" ] )
-            except Exception:
-                pass
-        per_gate.append( round( ( close - frame_ts[ -1 ] ).total_seconds(), 1 ) )
+    for d in deliveries:
+        nid = d[ "notification_id" ]
+        st  = ( gate_states.get( nid ) or {} ).get( "state" )
+        per_gate.append( {
+            "notification_id" : nid,
+            "title"           : d[ "title" ],
+            "delivered_ts"    : d[ "ts" ],
+            "answered"        : nid in answered_ids,
+            "state"           : st,
+            "response_value"  : ( gate_states.get( nid ) or {} ).get( "response_value" ),
+        } )
 
     checks = {
         "delivered"              : len( deliveries ) >= 1,
         "connected_through_wait" : ( live[ "dropped_at" ] is None
                                      and live[ "max_gap_seconds" ] <= MAX_LIVENESS_GAP ),
+        "every_gate_answered"    : bool( delivered_ids ) and set( delivered_ids ) <= set( answered_ids ),
+        # THE Direction-A discriminator: every delivered gate resolved by a HUMAN
+        # answer (state 'responded'), never a declared-default 'expired'.
+        "every_gate_human_resolved" : bool( delivered_ids ) and all(
+            ( gate_states.get( nid ) or {} ).get( "state" ) == "responded" for nid in delivered_ids
+        ),
         "job_reached_done"       : job_state == "done",
-        # EVERY gate must have genuinely waited ~the full timeout — not the
-        # seconds a 503 takes. A single sub-threshold gate fails the run.
-        "every_gate_silent_full" : bool( per_gate ) and all( d >= MIN_SILENCE_SECS for d in per_gate ),
     }
 
     return {
-        "PASS"                    : all( checks.values() ),
-        "checks"                  : checks,
-        "gates_delivered"         : len( deliveries ),
-        "per_gate_silence_secs"   : per_gate,
-        "delivery_frame_ts"       : [ d[ "ts" ] for d in deliveries ],
-        "job_completed_at"        : job.get( "completed_at" ) if job else None,
-        "liveness"                : live,
-        "deliveries"              : deliveries,
-        "job_state"               : job_state,
+        "PASS"             : all( checks.values() ),
+        "direction"        : "A (human-answered)",
+        "checks"           : checks,
+        "gates_delivered"  : len( deliveries ),
+        "gates_answered"   : len( answered_ids ),
+        "per_gate"         : per_gate,
+        "answers_posted"   : silent.answers_posted,
+        "job_completed_at" : job.get( "completed_at" ) if job else None,
+        "liveness"         : live,
+        "job_state"        : job_state,
     }
 
 
@@ -415,8 +493,8 @@ def main():
     ap.add_argument( "--source", default=DEFAULT_SOURCE )
     ap.add_argument( "--email", default=f"arnold.gate.proof+{uuid.uuid4().hex[:8]}@lupin.deepily.ai" )
     ap.add_argument( "--evidence", default=None, help="path to write the evidence JSON" )
-    ap.add_argument( "--build-timeout", type=int, default=4200,
-                     help="overall seconds to wait for the build (4 gates x 600s + LLM)" )
+    ap.add_argument( "--build-timeout", type=int, default=1500,
+                     help="overall seconds to wait (Direction A answers gates promptly ~7-10min)" )
     ap.add_argument( "--force", action="store_true",
                      help="skip the monopolizer-lock precondition (deliberate override only)" )
     args = ap.parse_args()
@@ -440,12 +518,12 @@ def main():
     # Programmatic session id: ^[a-z][a-z0-9]*-[a-z0-9-]{1,47}$ (is_valid_session_id,
     # websocket.py:179). Spaces/uppercase fail it → close-before-accept → 403.
     session_id = f"arnold-gate-{uuid.uuid4().hex[:8]}"
-    silent = SilentConnectedUser( args.base, session_id, jwt )
+    silent = SilentConnectedUser( args.base, session_id, jwt, answer_mode=True )
     silent.start()
-    print( f"[proof] silent WS connected as {email} (session '{session_id}')" )
+    print( f"[proof] connected WS as {email} (session '{session_id}') — ANSWER mode" )
 
     job_id = submit_build( args.base, jwt, args.source )
-    print( f"[proof] submitted real build job_id={job_id} — now staying SILENT at every gate" )
+    print( f"[proof] submitted real build job_id={job_id} — will ANSWER every gate 'Approve'" )
 
     def tick( seen_running ):
         n = len( silent.deliveries )
@@ -456,7 +534,17 @@ def main():
     print( f"[proof] job terminal state={state}" )
 
     silent.stop()
-    verdict = build_verdict( silent, state, job, run_start )
+
+    # Read each delivered gate's final resolution — 'responded' (human) vs
+    # 'expired' (declared default). This is the Direction-A discriminator.
+    gate_states = {}
+    for d in silent.deliveries:
+        nid = d[ "notification_id" ]
+        if nid:
+            gate_states[ nid ] = read_notification_state( args.base, jwt, nid )
+            print( f"[proof] gate {d.get('title')} nid={nid} -> state={gate_states[nid].get('state')}" )
+
+    verdict = build_verdict_direction_a( silent, state, job, gate_states )
 
     evidence = {
         "row"          : "19328449-17eb-407c-95b6-4b9bcecca714",
@@ -484,15 +572,15 @@ def main():
         json.dump( evidence, f, indent=2 )
 
     print( "\n" + "=" * 72 )
-    print( f"VERDICT: {'✅ PASS' if verdict[ 'PASS' ] else '❌ NOT PROVEN'}" )
+    print( f"VERDICT: {'✅ PASS' if verdict[ 'PASS' ] else '❌ NOT PROVEN'}  (Direction A — human-answered)" )
     for k, v in verdict[ "checks" ].items():
         print( f"  {'✅' if v else '❌'}  {k}" )
     print( f"  gates delivered   : {verdict[ 'gates_delivered' ]}" )
-    print( f"  per-gate silence  : {verdict[ 'per_gate_silence_secs' ]}s (each must be >= {MIN_SILENCE_SECS})" )
-    print( f"  delivery frame ts : {verdict[ 'delivery_frame_ts' ]}" )
-    print( f"  job completed_at  : {verdict[ 'job_completed_at' ]}" )
-    print( f"  ws max gap        : {verdict[ 'liveness' ][ 'max_gap_seconds' ]}s (max {MAX_LIVENESS_GAP})" )
-    print( f"  ws dropped_at     : {verdict[ 'liveness' ][ 'dropped_at' ]}" )
+    print( f"  gates answered    : {verdict[ 'gates_answered' ]}" )
+    for g in verdict[ "per_gate" ]:
+        print( f"    gate '{g['title']}' nid={g['notification_id']} answered={g['answered']} state={g['state']}" )
+    print( f"  job state         : {verdict[ 'job_state' ]}  completed_at={verdict[ 'job_completed_at' ]}" )
+    print( f"  ws max gap        : {verdict[ 'liveness' ][ 'max_gap_seconds' ]}s (max {MAX_LIVENESS_GAP}) dropped={verdict[ 'liveness' ][ 'dropped_at' ]}" )
     print( f"  evidence          : {out}" )
     print( "=" * 72 )
 
