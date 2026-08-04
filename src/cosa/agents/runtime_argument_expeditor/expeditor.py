@@ -365,7 +365,13 @@ class RuntimeArgumentExpeditor:
             for arg_name in special:
                 handler = special_handlers[ arg_name ]
                 if handler == "fuzzy_file_match":
-                    value = self._handle_fuzzy_file_match( user_email, agent_entry.get( "display_name" ) )
+                    # Auto-resolve (row bd0ce120) is SCOPED to the podcast route only.
+                    # Only the podcast command forwards original_question; every other
+                    # fuzzy_file_match consumer (e.g. the presentation generator's
+                    # `source` arg) receives None, so its auto pre-step can never fire
+                    # and its behaviour is STRUCTURALLY unchanged — not changed-and-tested.
+                    fuzzy_original = original_question if command == "agent router go to podcast generator" else None
+                    value = self._handle_fuzzy_file_match( user_email, agent_entry.get( "display_name" ), original_question=fuzzy_original )
                     # Auto-detect YAML → set render_only flag
                     if value and value.lower().endswith( ( ".yaml", ".yml" ) ):
                         final_args[ "render_only" ] = "true"
@@ -998,7 +1004,7 @@ class RuntimeArgumentExpeditor:
 
         return answers, BATCH_ANSWERED
 
-    def _handle_fuzzy_file_match( self, user_email, agent_display_name=None ):
+    def _handle_fuzzy_file_match( self, user_email, agent_display_name=None, original_question=None ):
         """
         Use fuzzy file matching to find a document by user description.
 
@@ -1006,15 +1012,26 @@ class RuntimeArgumentExpeditor:
         from the agent-specific source search paths config key, falling back
         to 'podcast generator source search paths'.
 
+        Auto-resolve (row bd0ce120): when the user already named the document in
+        their original request, resolve THAT without a prompt — but ONLY skip the
+        "which document?" ask when it lands on exactly one file. Zero or 2+ matches
+        fall through to the interactive ask, exactly as before. The chosen file is
+        NAMED to the user downstream (the confirmation summary; C's grace window),
+        so a wrong auto-resolve is always visible and vetoable — never silent.
+
         Requires:
             - user_email is a valid email
 
         Ensures:
-            - Returns full file path if user selects a match
+            - Returns full file path if user selects a match, or if original_question
+              auto-resolves to exactly one file
             - Returns None if no matches found or user cancels
 
         Args:
             user_email: User's email (determines research directory)
+            agent_display_name: Agent name for agent-specific search paths
+            original_question: The user's original voice command; when it resolves to
+                exactly one file, the document prompt is skipped (auto-resolve)
 
         Returns:
             str or None: Full path to selected document
@@ -1078,6 +1095,23 @@ class RuntimeArgumentExpeditor:
                 user_email
             )
 
+        # ── Auto-resolve (row bd0ce120) ──────────────────────────────────────
+        # Rick already named the document in his original request; try to resolve
+        # THAT with no prompt. Skip the "which document?" ask ONLY on an exactly-
+        # one-file resolve — 0 or 2+ falls through to the interactive ask below,
+        # exactly as before. A wrong pick is NOT silent: the resolved file is named
+        # to the user by the _confirm_and_iterate summary (Step 8), which gates on a
+        # yes/no before submission — that summary is the veto surface today.
+        if original_question:
+            auto_status, auto_matches = self._match_description_to_files(
+                original_question, docs_map, config_mgr, project_root
+            )
+            if auto_status in ( "exact", "fuzzy" ) and len( auto_matches ) == 1:
+                resolved = docs_map[ auto_matches[ 0 ] ]
+                if self.debug: print( f"[Expeditor] Auto-resolved research from original request → {resolved}" )
+                return resolved
+            if self.debug: print( f"[Expeditor] No single-file auto-resolve (status={auto_status}, matches={len( auto_matches )}) — asking" )
+
         # Ask user to describe which document
         description = self._ask_for_arg(
             "research",
@@ -1087,32 +1121,107 @@ class RuntimeArgumentExpeditor:
         if not description:
             return None
 
-        # Check if they gave an exact relative path or bare filename
-        if description in docs_map:
-            return docs_map[ description ]
-        for rel_path, abs_path in docs_map.items():
-            if os.path.basename( rel_path ) == description:
-                return abs_path
+        status, matches = self._match_description_to_files( description, docs_map, config_mgr, project_root )
 
-        # Pre-filter the candidate map by keyword overlap before the LLM call.
-        # Without this, all markdown under the search paths (thousands of files)
-        # is sent to phi-4's 8k context and the request fails HTTP 400 before
-        # any description is judged. Shared with the router path so there is one
-        # behaviour instead of two.
-        docs_map, arbitrary = prefilter_docs_map_by_keywords( docs_map, description, debug=self.debug )
-        if arbitrary:
-            # The candidate set was too large to send whole, and the description
-            # matched no path — a capped slice here is unranked and may not hold
-            # the target. Ask for an exact path rather than let the model pick
-            # confidently from a list that only looks like a shortlist.
-            if self.debug: print( "[Expeditor] No keyword overlap on a large candidate set — asking for an exact path instead of guessing" )
+        if status == "too_broad":
+            # Candidate set too large to send whole + no keyword overlap — a capped
+            # slice would be unranked. Ask for an exact path rather than guess.
             return self._ask_for_arg(
                 "research",
                 "I couldn't match that to a document. Please say the exact filename or path.",
                 user_email
             )
+        if status == "error":
+            return self._ask_for_arg(
+                "research",
+                "Matching failed. Please provide the exact filename or path.",
+                user_email
+            )
 
-        # Try fuzzy matching via LLM
+        if not matches:
+            if self.debug: print( "[Expeditor] No fuzzy matches found" )
+            return self._ask_for_arg(
+                "research",
+                "I couldn't find a matching document. Please say the exact filename or path.",
+                user_email
+            )
+
+        if len( matches ) == 1:
+            return docs_map[ matches[ 0 ] ]
+
+        # Multiple matches - ask user to pick
+        options_str = ", ".join( f"{i + 1}. {m}" for i, m in enumerate( matches ) )
+        pick = self._ask_for_arg(
+            "research",
+            f"I found multiple matches: {options_str}. Say the number or name of the one you want.",
+            user_email
+        )
+        if not pick:
+            return None
+
+        # Try to match by number
+        try:
+            idx = int( pick.strip() ) - 1
+            if 0 <= idx < len( matches ):
+                return docs_map[ matches[ idx ] ]
+        except ValueError:
+            pass
+
+        # Try to match by name
+        for m in matches:
+            if pick.lower().strip() in m.lower():
+                return docs_map[ m ]
+
+        # Fallback: use first match
+        return docs_map[ matches[ 0 ] ]
+
+    def _match_description_to_files( self, description, docs_map, config_mgr, project_root ):
+        """
+        Resolve a free-text description to candidate document paths — NO prompts.
+
+        The shared matching core used by BOTH the auto-resolve pre-step and the
+        interactive ask in _handle_fuzzy_file_match, so there is one matching
+        behaviour instead of two. Never asks the user; pure resolution.
+
+        Requires:
+            - description is a non-empty string
+            - docs_map maps relative_path -> absolute_path (non-empty)
+
+        Ensures:
+            - Returns a 2-tuple ( status, matches ):
+                ( "exact",     [ rel_path ] )   deterministic rel-path/basename hit (len 1)
+                ( "fuzzy",     [ rel, ... ] )   LLM matches validated against docs_map (0+)
+                ( "too_broad", [] )             candidate set too large + no keyword overlap
+                ( "error",     [] )             LLM/parse failure
+            - matches are relative-path keys into docs_map (caller maps to abs)
+            - docs_map is NOT mutated (the keyword prefilter runs on a copy)
+
+        Args:
+            description: The text to resolve (original question, or a typed answer)
+            docs_map: relative_path -> absolute_path candidate map
+            config_mgr: ConfigurationManager for the fuzzy-match template + LLM spec
+            project_root: absolute project root for template path resolution
+
+        Returns:
+            ( str, list ): ( status, matches )
+        """
+        from cosa.agents.io_models.xml_models import FuzzyFileMatchResponse
+
+        # 1. Exact relative-path or bare-filename hit → deterministic single match
+        if description in docs_map:
+            return ( "exact", [ description ] )
+        for rel_path in docs_map:
+            if os.path.basename( rel_path ) == description:
+                return ( "exact", [ rel_path ] )
+
+        # 2. Keyword prefilter before the LLM call (avoid phi-4 8k-context overflow).
+        #    Runs on a COPY so the caller's docs_map is untouched.
+        filtered_map, arbitrary = prefilter_docs_map_by_keywords( dict( docs_map ), description, debug=self.debug )
+        if arbitrary:
+            if self.debug: print( "[Expeditor] No keyword overlap on a large candidate set" )
+            return ( "too_broad", [] )
+
+        # 3. LLM fuzzy match, validated against the filtered map
         try:
             template_path = config_mgr.get( "prompt template for fuzzy file matching" )
             template = cu.get_file_as_string( project_root + template_path )
@@ -1120,7 +1229,7 @@ class RuntimeArgumentExpeditor:
             processor = PromptTemplateProcessor( debug=self.debug )
             template = processor.process_template( template, "fuzzy file matching" )
 
-            file_list = "\n".join( f"- {rel}" for rel in sorted( docs_map.keys() ) )
+            file_list = "\n".join( f"- {rel}" for rel in sorted( filtered_map.keys() ) )
             prompt = template.format( description=description, file_list=file_list )
 
             llm_client = self.llm_factory.get_client(
@@ -1132,61 +1241,22 @@ class RuntimeArgumentExpeditor:
             parsed  = FuzzyFileMatchResponse.from_xml( response )
             raw_matches = parsed.get_matches_list()
 
-            # Validate against docs_map (match relative paths or bare filenames)
+            # Validate against filtered_map (match relative paths or bare filenames)
             matches = []
             for m in raw_matches:
-                if m in docs_map:
+                if m in filtered_map:
                     matches.append( m )
                 else:
-                    for rel_path in docs_map:
+                    for rel_path in filtered_map:
                         if os.path.basename( rel_path ) == m:
                             matches.append( rel_path )
                             break
 
-            if not matches:
-                if self.debug: print( "[Expeditor] No fuzzy matches found" )
-                return self._ask_for_arg(
-                    "research",
-                    "I couldn't find a matching document. Please say the exact filename or path.",
-                    user_email
-                )
-
-            if len( matches ) == 1:
-                return docs_map[ matches[ 0 ] ]
-
-            # Multiple matches - ask user to pick
-            options_str = ", ".join( f"{i + 1}. {m}" for i, m in enumerate( matches ) )
-            pick = self._ask_for_arg(
-                "research",
-                f"I found multiple matches: {options_str}. Say the number or name of the one you want.",
-                user_email
-            )
-            if not pick:
-                return None
-
-            # Try to match by number
-            try:
-                idx = int( pick.strip() ) - 1
-                if 0 <= idx < len( matches ):
-                    return docs_map[ matches[ idx ] ]
-            except ValueError:
-                pass
-
-            # Try to match by name
-            for m in matches:
-                if pick.lower().strip() in m.lower():
-                    return docs_map[ m ]
-
-            # Fallback: use first match
-            return docs_map[ matches[ 0 ] ]
+            return ( "fuzzy", matches )
 
         except Exception as e:
             print( f"[Expeditor] Fuzzy match error: {e}" )
-            return self._ask_for_arg(
-                "research",
-                "Matching failed. Please provide the exact filename or path.",
-                user_email
-            )
+            return ( "error", [] )
 
     def _handle_tfe_checkpoint_match( self, user_email, user_description=None ):
         """

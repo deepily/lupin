@@ -213,6 +213,30 @@ class TestExpediteFlow( unittest.TestCase ):
         self.assertEqual( out[ "research" ], "/io/x/report.md" )
         self.assertNotIn( "render_only", out )
 
+    def test_auto_resolve_scoped_to_podcast_forwards_question( self ):
+        # SCOPE FENCE (row bd0ce120): the podcast command MUST forward
+        # original_question into the fuzzy handler so its auto pre-step can fire.
+        o = _mk_expeditor()
+        with _FlowFixture( o, user_visible=[ "research" ], parsed=_expeditor_resp() ), \
+             patch.object( o, "_build_request_context", return_value="ctx" ), \
+             patch.object( o, "_handle_fuzzy_file_match", return_value="/io/x/report.md" ) as fuzzy, \
+             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r: a ):
+            o.expedite( PG, "", "u@x", "s", "uid", "make a podcast about KISS" )
+        self.assertEqual( fuzzy.call_args.kwargs[ "original_question" ], "make a podcast about KISS" )
+
+    def test_auto_resolve_fence_presentation_gets_none( self ):
+        # SCOPE FENCE (row bd0ce120): the presentation command MUST pass
+        # original_question=None so its auto pre-step can NEVER fire — behaviour
+        # structurally unchanged, not changed-and-tested. This is the control that
+        # keeps the shared handler from silently altering the presentation surface.
+        o = _mk_expeditor()
+        with _FlowFixture( o, user_visible=[ "source" ], parsed=_expeditor_resp() ), \
+             patch.object( o, "_build_request_context", return_value="ctx" ), \
+             patch.object( o, "_handle_fuzzy_file_match", return_value="/io/x/deck.md" ) as fuzzy, \
+             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r: a ):
+            o.expedite( PR, "", "u@x", "s", "uid", "make a deck about KISS" )
+        self.assertIsNone( fuzzy.call_args.kwargs[ "original_question" ] )
+
     def test_special_tfe_checkpoint_match( self ):
         o = _mk_expeditor()
         with _FlowFixture( o, user_visible=[ "resume_from" ], parsed=_expeditor_resp() ), \

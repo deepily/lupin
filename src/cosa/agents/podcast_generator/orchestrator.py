@@ -1458,12 +1458,24 @@ class PodcastOrchestratorAgent:
                 for seg in result.get( "segments", [] )
             ]
 
+            # Regression 0913bb90 (twin of the translation mask): a revision that
+            # parsed to ZERO segments must NOT silently hand back the previous script
+            # as if it were revised. Raise so the except branch below notifies the
+            # user and returns the current script unchanged. The old `segments if
+            # segments else current_script.segments` substitution is the same silent
+            # pass-through one branch over from the translation bug.
+            if not segments:
+                raise ValueError(
+                    "Script revision parsed to zero segments — the model output "
+                    "could not be turned into a revised script."
+                )
+
             revised = PodcastScript(
                 title                      = result.get( "title", current_script.title ),
                 research_source            = current_script.research_source,
                 host_a_name                = current_script.host_a_name,
                 host_b_name                = current_script.host_b_name,
-                segments                   = segments if segments else current_script.segments,
+                segments                   = segments,
                 estimated_duration_minutes = result.get( "estimated_duration_minutes",
                                                           current_script.estimated_duration_minutes ),
                 key_topics                 = result.get( "key_topics", current_script.key_topics ),
@@ -1770,12 +1782,25 @@ Generate the {language_name} script in JSON format with the same structure:
                 for seg in result.get( "segments", [] )
             ]
 
+            # Regression 0913bb90: a translation that parsed to ZERO segments is a
+            # FAILED translation, not a reason to silently ship the English text.
+            # Raise so the except branch below notifies the user and titles the file
+            # "Translation Failed" — mirroring the initial-generation zero-segment
+            # floor. The old `segments if segments else english_script.segments`
+            # substitution is what let the English body reach Rick's approval gate
+            # looking like a Spanish script.
+            if not segments:
+                raise ValueError(
+                    f"{language_name} translation parsed to zero segments — the model "
+                    "output could not be turned into a translated script."
+                )
+
             translated_script = PodcastScript(
                 title                      = result.get( "title", f"{english_script.title} ({language_name})" ),
                 research_source            = english_script.research_source,
                 host_a_name                = english_script.host_a_name,
                 host_b_name                = english_script.host_b_name,
-                segments                   = segments if segments else english_script.segments,
+                segments                   = segments,
                 estimated_duration_minutes = result.get( "estimated_duration_minutes",
                                                           english_script.estimated_duration_minutes ),
                 key_topics                 = result.get( "key_topics", english_script.key_topics ),

@@ -77,8 +77,8 @@ MODE_METADATA = {
     "calculator"  : { "display_name": "Calculator",    "description": "Unit conversions, price comparison, mortgage" },
     # Agentic process modes (route through AGENTIC_MODE_MAP, not MODE_TO_AGENT)
     "deep_research"      : { "display_name": "Deep Research",       "description": "Investigate a topic in depth" },
-    "podcast"            : { "display_name": "Podcast Generator",   "description": "Create a podcast from a topic" },
-    "research_to_podcast": { "display_name": "Research to Podcast", "description": "Convert existing research to podcast" },
+    "podcast"            : { "display_name": "Podcast Generator",   "description": "Create a podcast from an existing document" },
+    "research_to_podcast": { "display_name": "Research to Podcast", "description": "Research a topic and create a podcast" },
     "claude_code"        : { "display_name": "Claude Code",         "description": "Run a coding task" },
     "swe_team"           : { "display_name": "SWE Team",            "description": "Multi-agent engineering team" },
     "presentation"              : { "display_name": "Presentation",              "description": "Generate slides from a document" },
@@ -1002,8 +1002,8 @@ class TodoFifoQueue( FifoQueue ):
     # Product name mapping for agentic command disambiguation
     PRODUCT_NAMES = {
         "agent router go to deep research"             : "Deep Dive (investigate a topic)",
-        "agent router go to podcast generator"         : "PodMaker (create a podcast from a topic)",
-        "agent router go to research to podcast"       : "Doc-to-Pod (convert existing research to podcast)",
+        "agent router go to podcast generator"         : "Doc-to-Pod (create a podcast from an existing document)",
+        "agent router go to research to podcast"       : "PodMaker (research a topic and create a podcast)",
         "agent router go to claude code"               : "Claude Code (run a coding task)",
         "agent router go to presentation generator"    : "SlideCraft (create a presentation from a document)",
         "agent router go to research to presentation"  : "Research-to-Slides (research a topic and create a presentation)",

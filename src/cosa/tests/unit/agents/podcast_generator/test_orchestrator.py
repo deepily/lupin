@@ -558,16 +558,25 @@ class TestReviseScript:
         assert revised.revision_count == current.revision_count + 1
         assert revised.segments[ 0 ].text == "new line"
 
-    def test_revise_empty_segments_falls_back_to_current( self ):
+    def test_revise_empty_segments_fails_loud( self, _silence_voice_io ):
+        """
+        A revision that parses to zero segments must FAIL LOUD, not silently
+        hand back the previous script as if it had been revised.
+
+        Regression 0913bb90: the old `segments if segments else current_script.segments`
+        substitution let an empty parse masquerade as a successful revision. Now the
+        empty case raises into the except branch, which notifies the user and returns
+        the current script UNCHANGED (same object, revision_count not incremented).
+        """
         agent = _agent()
         agent._api_client = _mock_api_client()
         current = _script( title="Original" )
-        parsed = { "segments": [] }  # no segments → keep current.segments
+        parsed = { "segments": [] }  # zero segments → must NOT masquerade as a revision
         with patch.object( orch_mod, "get_script_revision_prompt", return_value="P" ), \
              patch.object( orch_mod, "parse_script_response", return_value=parsed ):
             revised = _run( agent._revise_script_async( current, "fb" ) )
-        assert revised.segments == current.segments
-        assert revised.title == current.title
+        assert revised is current
+        _silence_voice_io[ "notify" ].assert_awaited()
 
     def test_revise_exception_returns_original( self ):
         agent = _agent()
@@ -703,16 +712,26 @@ class TestGenerateTranslated:
         assert translated.title == "ES"
         _silence_voice_io[ "notify" ].assert_awaited()
 
-    def test_translated_empty_segments_fallback( self ):
+    def test_translated_empty_segments_fails_loud( self, _silence_voice_io ):
+        """
+        A translation that parses to zero segments must FAIL LOUD, not silently
+        ship the English text under a normal-looking title.
+
+        Regression 0913bb90 (Rick's live find): the old
+        `segments if segments else english_script.segments` substitution produced an
+        English-body file titled "Untitled Podcast" that reached the approval gate
+        looking like a Spanish script. Now the empty case raises into the except
+        branch, which notifies the user and marks the title "Translation Failed".
+        """
         agent = _agent()
         agent._api_client = _mock_api_client()
         english = _script( title="EN" )
-        parsed = { "segments": [] }  # falls back to english.segments
-        with patch.object( orch_mod, "parse_script_response", return_value=parsed ), \
-             patch.object( orch_mod, "validate_prosody_preservation",
-                           return_value=( True, { "english_count": 0, "translated_count": 0, "missing": [], "extra": [] } ) ):
+        parsed = { "segments": [] }  # zero segments → must NOT silently pass through as English
+        with patch.object( orch_mod, "parse_script_response", return_value=parsed ):
             translated = _run( agent._generate_translated_script_async( english, "es-MX" ) )
+        assert "Translation Failed" in translated.title
         assert translated.segments == english.segments
+        _silence_voice_io[ "notify" ].assert_awaited()
 
     def test_translated_exception_returns_fallback( self, capsys ):
         agent = _agent( debug=True )

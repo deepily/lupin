@@ -14,7 +14,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 from lupin_cli.notifications.notification_models import NotificationResponse
-from cosa.rest.todo_fifo_queue import TodoFifoQueue
+from cosa.rest.todo_fifo_queue import TodoFifoQueue, MODE_METADATA
 from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
 
 
@@ -88,6 +88,60 @@ class TestProductNameMapping:
             assert "(" in name and ")" in name, (
                 f"Product name for '{cmd}' missing parenthetical description: '{name}'"
             )
+
+    def test_podcast_labels_match_agent_behavior( self ):
+        """
+        Guard against the label INVERSION fixed in bug fc8990c6 (demo 2026-08-06).
+
+        Behavioral contract (from each job's constructor):
+          - `podcast generator` -> PodcastGeneratorJob( research_path=... ): READS an
+            existing document. Its label must say so, never "from a topic".
+          - `research to podcast` -> DeepResearchToPodcastJob( query=... ): RESEARCHES
+            a topic from scratch, no file input. Its label must say so, never "document".
+
+        If the two labels swap, the agentic confirm step steers the user to the wrong
+        podcast agent — the exact defect this test exists to keep dead.
+        """
+        file_reader = TodoFifoQueue.PRODUCT_NAMES[ "agent router go to podcast generator" ].lower()
+        scratch     = TodoFifoQueue.PRODUCT_NAMES[ "agent router go to research to podcast" ].lower()
+
+        assert "document" in file_reader, (
+            f"podcast-generator (the file reader) label lost its 'document' anchor: '{file_reader}'"
+        )
+        assert "document" not in scratch, (
+            f"research-to-podcast (the scratch researcher) label wrongly claims a 'document': '{scratch}'"
+        )
+        assert "topic" in scratch, (
+            f"research-to-podcast (the scratch researcher) label lost its 'topic' anchor: '{scratch}'"
+        )
+        assert "topic" not in file_reader, (
+            f"podcast-generator (the file reader) label wrongly claims a 'topic': '{file_reader}'"
+        )
+
+    def test_podcast_mode_descriptions_match_agent_behavior( self ):
+        """
+        Sibling guard to test_podcast_labels_match_agent_behavior, for the MODE_METADATA
+        dropdown descriptions (off the pure-voice path, but the same inversion could recur).
+
+        Same behavioral contract:
+          - mode "podcast" -> PodcastGeneratorJob (research_path): READS a document.
+          - mode "research_to_podcast" -> DeepResearchToPodcastJob (query): RESEARCHES a topic.
+        """
+        file_reader = MODE_METADATA[ "podcast" ][ "description" ].lower()
+        scratch     = MODE_METADATA[ "research_to_podcast" ][ "description" ].lower()
+
+        assert "document" in file_reader, (
+            f"'podcast' mode desc (file reader) lost its 'document' anchor: '{file_reader}'"
+        )
+        assert "document" not in scratch, (
+            f"'research_to_podcast' mode desc (scratch) wrongly claims a 'document': '{scratch}'"
+        )
+        assert "topic" in scratch, (
+            f"'research_to_podcast' mode desc (scratch) lost its 'topic' anchor: '{scratch}'"
+        )
+        assert "topic" not in file_reader, (
+            f"'podcast' mode desc (file reader) wrongly claims a 'topic': '{file_reader}'"
+        )
 
 
 # ---------------------------------------------------------------------------
