@@ -28,8 +28,16 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 
 import requests
+
+
+# The server the auto-launched proxy must target — the SAME base URL the suite
+# itself polls. Single source of truth so the proxy can never connect to a
+# different server than the suite is exercising (bug f6627036: a :8000 suite
+# silently drove a proxy against :7999 because no --port was passed).
+DEFAULT_PROXY_BASE_URL = "http://localhost:7999"
 
 
 class EmbeddedProxyMixin:
@@ -96,6 +104,56 @@ class EmbeddedProxyMixin:
         except Exception:
             pass  # Process died or pipe closed
 
+    def _proxy_base_url( self ):
+        """
+        The base URL the auto-launched proxy must target — the SAME one the suite
+        polls (LUPIN_API_URL, default DEFAULT_PROXY_BASE_URL). Single source of
+        truth for both the launch command's --host/--port and the WS-auth poll.
+        """
+        return os.environ.get( "LUPIN_API_URL", DEFAULT_PROXY_BASE_URL )
+
+    def _resolve_proxy_target( self ):
+        """
+        Parse (host, port) from the suite base URL for the proxy's --host/--port.
+
+        Ensures:
+            - host / port come from LUPIN_API_URL when set, else the default
+            - a base URL missing a component falls back to the default's, never
+              to the proxy's own :7999 default (bug f6627036)
+        """
+        parsed   = urllib.parse.urlparse( self._proxy_base_url() )
+        fallback = urllib.parse.urlparse( DEFAULT_PROXY_BASE_URL )
+        host     = parsed.hostname or fallback.hostname
+        port     = parsed.port or fallback.port
+        return host, port
+
+    def _build_proxy_command( self, profile, strategy, debug=False, email=None, password=None ):
+        """
+        Build the notification-proxy launch argv, ALWAYS pinning --host/--port to
+        the suite's own target server.
+
+        Bug f6627036: the command omitted --port, so the proxy fell back to its
+        own DEFAULT_SERVER_PORT (:7999) and a :8000 --auto-proxy suite launched a
+        proxy that auto-answered interactive gates on the shared dev box. Threading
+        the port here means the proxy can only ever talk to the server the suite is
+        exercising; test_embedded_proxy_command asserts --port is always present.
+        """
+        host, port = self._resolve_proxy_target()
+        cmd = [
+            sys.executable, "-m", "cosa.agents.notification_proxy",
+            "--profile", profile,
+            "--strategy", strategy,
+            "--host", str( host ),
+            "--port", str( port ),
+        ]
+        if debug:
+            cmd.append( "--debug" )
+        if email:
+            cmd.extend( [ "--email", email ] )
+        if password:
+            cmd.extend( [ "--password", password ] )
+        return cmd
+
     def _start_proxy( self, profile=None, strategy=None, debug=False, email=None, password=None ):
         """
         Launch notification proxy as a subprocess and wait for WS-auth to complete.
@@ -124,18 +182,11 @@ class EmbeddedProxyMixin:
         strategy          = strategy or self.PROXY_STRATEGY
         self._proxy_debug = debug
 
-        # Build the command
-        cmd = [
-            sys.executable, "-m", "cosa.agents.notification_proxy",
-            "--profile", profile,
-            "--strategy", strategy,
-        ]
-        if debug:
-            cmd.append( "--debug" )
-        if email:
-            cmd.extend( [ "--email", email ] )
-        if password:
-            cmd.extend( [ "--password", password ] )
+        # Build the command — pins --host/--port to the suite's own target server
+        # (bug f6627036; never let the proxy default to :7999). Single testable seam.
+        cmd = self._build_proxy_command(
+            profile, strategy, debug=debug, email=email, password=password
+        )
 
         # Ensure PYTHONPATH includes src/
         env = os.environ.copy()
@@ -212,7 +263,7 @@ class EmbeddedProxyMixin:
         Raises:
             RuntimeError: On poll timeout or subprocess death.
         """
-        base_url   = os.environ.get( "LUPIN_API_URL", "http://localhost:7999" )
+        base_url   = self._proxy_base_url()
         poll_url   = f"{base_url}/api/debug/websocket-state"
         deadline   = time.time() + self.PROXY_WS_AUTH_TIMEOUT
         last_state = None
