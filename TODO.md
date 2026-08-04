@@ -1,5 +1,27 @@
 # TODO
 
+## 📋 DECISIONS LOG 2026-08-03 (Cheech 🌿 `2c73cb48`) — DM verbosity pilot, live-gate verification
+
+**D1 — Prove the reject path with a real schedule slot, not the arm override.** *Ruled by me on Tiffany 💍's refutation, 2026-08-03.*
+
+I planned to pin `dm experiment arm override = rejecting` and bounce. Tiffany refused to run it and cited `dm.py:1037`: the gate executes only when `assignment_at` returns a slot, and `override_arm` **re-labels a matched slot — it cannot create one**. Outside the Tue/Wed window `assignment_at` returns `None`, so the smoke would have returned an ordinary 201 and I would have called the gate proven.
+
+Chosen instead: a temporary `rejecting` slot dated **2026-08-03** (outside the pilot window, so its rows can never enter the Tue/Wed analysis), live for the smoke, then removed and the mirror re-verified from the live policy. Rejected: forcing the override active in code (a code change to prove a code path), and shipping on the in-process tier alone (no live proof before go-live).
+
+**Why it matters beyond this row**: an override that only re-labels looks identical, from the caller's side, to one that arms. The distinguishing evidence was in the source, not in the response.
+
+**D2 — Exclude `TEMP-` slots in code, not by remembering to delete them.** *Ruled by María 🌸, adopted 2026-08-03.*
+
+María did not object to the temp slot; she objected to its containment being **deletion-dependent**. Landed at `analyze_arms.eligible_rows()` — the single chokepoint feeding co-primaries, secondaries and counts — with two unit tests, so co-primaries, secondaries and counts all drop `TEMP-` rows whether or not the slot was ever removed. Same reasoning that put a janitor on the scratch project instead of a "delete when done" rule.
+
+**D3 — Wait out a running job rather than force the bounce.** *Ruled by Rick, 2026-08-03.* `bounce-dev-server.sh` exited 4 on `inflight_agentic_jobs=1` (his podcast job). Options were wait, `--force` (destroys the job), or skip live verification. He chose wait; there were ~11 hours of margin against a ten-minute remainder. The guard's refusal was the correct behaviour and is worth keeping in mind as *the* precedent: a dirty tree is recoverable, an in-flight job is not.
+
+### ⏳ Still open on this row
+
+- **The pilot has not RUN yet.** Build is complete and committed; Tuesday 09:00 ET opens the window. Store row `a3666252` (P1) carries items 7 (in-window audit of both arms) and 8 (23:00 counts) so they survive the tester's seat.
+- **Not pushed.** `2c73cb48` and everything before it sit on `wip-v0.2.0-2026.08.03-present-and-demo` with no upstream. Rick's call.
+- **`history.md` at 16.0k tokens** — past the 17k warning on the next entry. Next seat should archive.
+
 ## 📋 DECISIONS LOG 2026-08-02 (Cheech 🌿 `13459df0`) — embedding regeneration scope + venue
 
 **D1 — Regenerate EVERY row, not the subset that looks wrong.** *Ruled by Rick, 2026-08-02.*
