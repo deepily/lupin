@@ -237,16 +237,21 @@ The first decision proxy for AI agents with academic-grade statistical rigor:
 - **Morning coffee batch review**: Non-urgent decisions queued for human review at your convenience
 - **Ratification API**: Post-hoc approval with trust feedback loop
 
-### Battle-tested -- 14,300+ automated tests
+### Battle-tested -- 24,000+ automated tests
 
 | Suite | Count | Coverage |
 |-------|-------|----------|
-| Unit tests (Python) | 12,436 | Core logic, trust engine, hooks, credentials, prediction engine, agentic orchestrators, task store, arbiter |
-| Unit tests (TypeScript) | 724 | Multiplexer audio, transport, stores, render — behind a hard 100% c8 gate |
-| WebSocket tests | 50 | Connection, auth, event routing, session management |
-| Integration tests | 432 | End-to-end API workflows against dedicated dual-container test server |
-| E2E UI (Playwright) | 678 | Full browser-driven flows including 12-page visual regression |
-| Interactive proxy tests | 12 scenarios | Calculator, CRUD, and Expediter agents via auto-proxy |
+| Unit tests (Python) | 20,190 | Core logic, trust engine, hooks, credentials, prediction engine, agentic orchestrators, task store, arbiter -- 11,219 in the app tree, 8,971 in the in-tree CoSA framework |
+| Unit tests (TypeScript) | 2,271 | Multiplexer audio, transport, stores, render — behind a hard 100% c8 gate |
+| E2E UI (Playwright) | 636 | Full browser-driven flows including 12-page visual regression |
+| Smoke tests | 426 | Fast sanity sweeps across the app and the Lupin smoke suite |
+| Integration tests | 405 | End-to-end API workflows against dedicated dual-container test server |
+| Parity oracle, cutover E2E, and other suites | 71 | Multiplexer-vs-legacy parity, store-owed cutover, targeted end-to-end checks |
+| WebSocket tests | 43 | Connection, auth, event routing, session management |
+| **Total authored test cases** | **24,042** | 21,771 Python + 2,271 TypeScript |
+| Interactive proxy scenarios | 12 | Calculator, CRUD, and Expediter agents via auto-proxy (script-driven, not counted above) |
+
+Counts are of authored test functions (`def test_*` / `it(` / `test(`) across `src/tests/` and `src/cosa/tests/`, as of 2026-08-03. The test suite is 457,807 lines across 1,475 files -- a test-to-source ratio of 1.42 : 1.
 
 Built and maintained by a single engineer. Every PR must pass all tiers before merge, at 100% line, branch, and function coverage. A hash-chained attestation ledger records that each tier actually ran -- a green report that cannot prove it executed is not a green report.
 
