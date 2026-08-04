@@ -8,6 +8,22 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.08.04 - Session 7802a03f (Mr. Radio 🦉, five-worker crew) | Thursday demo: the rehearsed line crashed, and the label bug we fixed at 10:58 turned out to be its cause
+
+Rick asked for a status report and a cue sheet for driving Thursday's podcast demo by voice. What the crew found instead was that the rehearsed line did not work at all.
+
+**Landed for the demo** — `:7999` bounced at 11:22 (boot #30) after a drain watcher waited out an in-flight job; the podcast agents' inverted labels corrected and verified on the *live* menu; auto-resolve, the Dry Run default flip, and two pre-existing unit reds committed (`572db38b`, `568068bd`). Working tree clean, both-roots 21,576 / 0.
+
+**Then the line was refuted.** `"make me a podcast on KISS"` routed correctly and crashed — `FileNotFoundError: Research document not found: KISS`. The language model pre-fills the document argument with the literal topic word; special handlers only run for arguments still *missing*; so the file matcher never ran and a topic string reached a file-path parameter. Confirmed four ways before it was written down, then live.
+
+**Replaced within fifteen minutes.** A *bare* request — `"make me a podcast"`, topic supplied on turn two — leaves the argument empty, so the matcher fires and resolves the real file. Three backups measured identical. Rick's own suggested phrasing routed to the wrong agent, which Rachel predicted from her own data before testing it.
+
+**The root cause traces back to the same morning.** All 1200 podcast training rows emit a topic; none emit a path; the registry aliases that topic into the file-path argument. It was trained as *"podcast from a topic"* — the old, inverted label — and implemented as a file reader. The label fix was never cosmetic; it had already propagated into the training data. Scope checked, not assumed: the presentation pair is clean, so the defect is isolated.
+
+**Five claims were measured somewhere other than where they had to hold**, and every one read green: a matcher tested in isolation but never called in the live flow; a test subset quoted as a merge receipt; a figure from the wrong run; an auto-submit hazard read off a config field rather than an observed submission; and a prosody loss counted from a metadata list while the markers sat in the text. Three were mine. Each was caught by someone re-deriving the claim from the other end. Two rules taken from it: a receipt names *which run* produced it, and a "probably fine" is answered with a differential.
+
+**Also**: the `:8000` test proxy was found launching against `:7999` (no port argument), auto-answering gates on the shared dev box — fixed with a red-first guard. Speech synthesis strips every prosody marker for *all* languages, so those cues have never been audible; filed, not touched before the demo, on Rick's ruling. Docs, decisions log, and corrections committed across eight commits (`6882c740` … `c11a7a76`).
+
 ### 2026.08.03 - Session 93f75e9c (Cheech 🌿) | DM verbosity pilot: a live gate proven, after a worker refused my false green
 
 **Health**: 16.0k tokens at write time (measured, not quoted) — past the 17k WARNING threshold on the next entry; next seat should archive.
