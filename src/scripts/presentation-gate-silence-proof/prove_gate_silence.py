@@ -330,36 +330,53 @@ def poll_until_terminal( base, jwt, job_id, overall_timeout, on_tick=None ):
 
 
 # ── verdict ───────────────────────────────────────────────────────────────────
-def build_verdict( silent, job_state, run_start ):
-    live = silent.liveness_report()
+def build_verdict( silent, job_state, job, run_start ):
+    """
+    The DISCRIMINATOR is the WALL TIME each gate sat silent, not the frame count
+    (Mr Radio 2026-08-03). Because the build proceeds to the next gate the moment
+    the prior one defaults, the delta between consecutive delivery frames IS the
+    prior gate's silence duration; the LAST gate's close is job.completed_at. We
+    keep every raw timestamp and assert EACH per-gate silence >= MIN_SILENCE_SECS,
+    so a single fast (503-shaped) gate cannot hide inside an average.
+    """
+    live       = silent.liveness_report()
     deliveries = silent.deliveries
+    frame_ts   = [ datetime.fromisoformat( d[ "ts" ] ) for d in deliveries ]
+
+    # Per-gate silence durations. Between consecutive frames for gates 1..n-1;
+    # for the last gate, frame -> job.completed_at (falls back to now()).
+    per_gate = []
+    for a, b in zip( frame_ts, frame_ts[ 1: ] ):
+        per_gate.append( round( ( b - a ).total_seconds(), 1 ) )
+    if frame_ts:
+        close = _now()
+        if job and job.get( "completed_at" ):
+            try:
+                close = datetime.fromisoformat( job[ "completed_at" ] )
+            except Exception:
+                pass
+        per_gate.append( round( ( close - frame_ts[ -1 ] ).total_seconds(), 1 ) )
+
     checks = {
         "delivered"              : len( deliveries ) >= 1,
         "connected_through_wait" : ( live[ "dropped_at" ] is None
                                      and live[ "max_gap_seconds" ] <= MAX_LIVENESS_GAP ),
         "job_reached_done"       : job_state == "done",
+        # EVERY gate must have genuinely waited ~the full timeout — not the
+        # seconds a 503 takes. A single sub-threshold gate fails the run.
+        "every_gate_silent_full" : bool( per_gate ) and all( d >= MIN_SILENCE_SECS for d in per_gate ),
     }
-    # ~600s elapsed: measured from the FIRST gate delivery to job terminal, over
-    # the number of gates seen (each gate is a full timeout in the silent run).
-    elapsed_per_gate = None
-    if deliveries:
-        first = datetime.fromisoformat( deliveries[ 0 ][ "ts" ] )
-        elapsed_per_gate = round(
-            ( _now() - first ).total_seconds() / max( 1, len( deliveries ) ), 1
-        )
-        checks[ "silence_elapsed_ok" ] = elapsed_per_gate >= MIN_SILENCE_SECS
-    else:
-        checks[ "silence_elapsed_ok" ] = False
 
-    passed = all( checks.values() )
     return {
-        "PASS"               : passed,
-        "checks"             : checks,
-        "gates_delivered"    : len( deliveries ),
-        "elapsed_per_gate_s" : elapsed_per_gate,
-        "liveness"           : live,
-        "deliveries"         : deliveries,
-        "job_state"          : job_state,
+        "PASS"                    : all( checks.values() ),
+        "checks"                  : checks,
+        "gates_delivered"         : len( deliveries ),
+        "per_gate_silence_secs"   : per_gate,
+        "delivery_frame_ts"       : [ d[ "ts" ] for d in deliveries ],
+        "job_completed_at"        : job.get( "completed_at" ) if job else None,
+        "liveness"                : live,
+        "deliveries"              : deliveries,
+        "job_state"               : job_state,
     }
 
 
@@ -399,7 +416,7 @@ def main():
     print( f"[proof] job terminal state={state}" )
 
     silent.stop()
-    verdict = build_verdict( silent, state, run_start )
+    verdict = build_verdict( silent, state, job, run_start )
 
     evidence = {
         "row"          : "19328449-17eb-407c-95b6-4b9bcecca714",
@@ -431,7 +448,9 @@ def main():
     for k, v in verdict[ "checks" ].items():
         print( f"  {'✅' if v else '❌'}  {k}" )
     print( f"  gates delivered   : {verdict[ 'gates_delivered' ]}" )
-    print( f"  elapsed / gate    : {verdict[ 'elapsed_per_gate_s' ]}s (min {MIN_SILENCE_SECS})" )
+    print( f"  per-gate silence  : {verdict[ 'per_gate_silence_secs' ]}s (each must be >= {MIN_SILENCE_SECS})" )
+    print( f"  delivery frame ts : {verdict[ 'delivery_frame_ts' ]}" )
+    print( f"  job completed_at  : {verdict[ 'job_completed_at' ]}" )
     print( f"  ws max gap        : {verdict[ 'liveness' ][ 'max_gap_seconds' ]}s (max {MAX_LIVENESS_GAP})" )
     print( f"  ws dropped_at     : {verdict[ 'liveness' ][ 'dropped_at' ]}" )
     print( f"  evidence          : {out}" )
