@@ -1,0 +1,107 @@
+[proof] base=http://localhost:8000  target/submitter=arnold.gate.proof+784fd4cd@lupin.deepily.ai
+[proof] authenticated user_id=cc4d825d-72eb-4506-9d14-2ece3c5fcf1a
+[proof] :8000 lock clear (monopolize_id=None) — safe to submit
+[proof] connected WS as arnold.gate.proof+784fd4cd@lupin.deepily.ai (session 'arnold-gate-54ddcefd') — ANSWER mode
+[proof] submitted real build job_id=pr-d5431e32::cc4d825d-72eb-4506-9d14-2ece3c5fcf1a — will ANSWER every gate 'Approve'
+[proof] running=True gates_delivered=0 ws_dropped=None
+[proof] running=True gates_delivered=0 ws_dropped=None
+[proof] running=True gates_delivered=0 ws_dropped=None
+[proof] running=True gates_delivered=0 ws_dropped=None
+[proof] running=True gates_delivered=0 ws_dropped=None
+[proof] running=True gates_delivered=0 ws_dropped=None
+[proof] running=True gates_delivered=0 ws_dropped=None
+[proof] running=True gates_delivered=0 ws_dropped=None
+[proof] running=True gates_delivered=0 ws_dropped=None
+[proof] running=True gates_delivered=0 ws_dropped=None
+[proof] running=True gates_delivered=0 ws_dropped=None
+[proof] running=True gates_delivered=0 ws_dropped=None
+[proof] running=True gates_delivered=0 ws_dropped=None
+[proof] running=True gates_delivered=0 ws_dropped=None
+[proof] running=True gates_delivered=0 ws_dropped=None
+[proof] running=True gates_delivered=0 ws_dropped=None
+[proof] running=True gates_delivered=1 ws_dropped=None
+[proof] running=True gates_delivered=1 ws_dropped=None
+[proof] running=True gates_delivered=1 ws_dropped=None
+[proof] running=True gates_delivered=1 ws_dropped=None
+[proof] running=True gates_delivered=1 ws_dropped=None
+[proof] running=True gates_delivered=1 ws_dropped=None
+[proof] running=True gates_delivered=2 ws_dropped=None
+[proof] running=True gates_delivered=2 ws_dropped=None
+[proof] running=True gates_delivered=2 ws_dropped=None
+[proof] running=True gates_delivered=2 ws_dropped=None
+[proof] running=True gates_delivered=2 ws_dropped=None
+[proof] running=True gates_delivered=2 ws_dropped=None
+[proof] running=True gates_delivered=2 ws_dropped=None
+[proof] running=True gates_delivered=2 ws_dropped=None
+[proof] running=True gates_delivered=2 ws_dropped=None
+[proof] running=True gates_delivered=2 ws_dropped=None
+[proof] running=True gates_delivered=2 ws_dropped=None
+[proof] running=True gates_delivered=2 ws_dropped=None
+[proof] running=True gates_delivered=2 ws_dropped=None
+[proof] running=True gates_delivered=2 ws_dropped=None
+[proof] running=True gates_delivered=2 ws_dropped=None
+[proof] running=True gates_delivered=2 ws_dropped=None
+[proof] running=True gates_delivered=2 ws_dropped=None
+[proof] running=True gates_delivered=2 ws_dropped=None
+[proof] running=True gates_delivered=2 ws_dropped=None
+[proof] running=True gates_delivered=2 ws_dropped=None
+[proof] running=True gates_delivered=2 ws_dropped=None
+[proof] running=True gates_delivered=2 ws_dropped=None
+[proof] running=True gates_delivered=2 ws_dropped=None
+[proof] running=True gates_delivered=2 ws_dropped=None
+[proof] running=True gates_delivered=2 ws_dropped=None
+[proof] running=True gates_delivered=2 ws_dropped=None
+[proof] running=True gates_delivered=2 ws_dropped=None
+[proof] running=True gates_delivered=2 ws_dropped=None
+[proof] running=True gates_delivered=2 ws_dropped=None
+[proof] running=True gates_delivered=3 ws_dropped=None
+[proof] running=True gates_delivered=3 ws_dropped=None
+[proof] running=True gates_delivered=3 ws_dropped=None
+[proof] running=True gates_delivered=3 ws_dropped=None
+[proof] running=True gates_delivered=3 ws_dropped=None
+[proof] running=True gates_delivered=3 ws_dropped=None
+[proof] running=True gates_delivered=3 ws_dropped=None
+[proof] running=True gates_delivered=3 ws_dropped=None
+[proof] running=True gates_delivered=3 ws_dropped=None
+[proof] running=True gates_delivered=3 ws_dropped=None
+[proof] running=True gates_delivered=3 ws_dropped=None
+[proof] running=True gates_delivered=3 ws_dropped=None
+[proof] running=True gates_delivered=3 ws_dropped=None
+[proof] running=True gates_delivered=3 ws_dropped=None
+[proof] running=True gates_delivered=3 ws_dropped=None
+[proof] running=True gates_delivered=3 ws_dropped=None
+[proof] running=True gates_delivered=3 ws_dropped=None
+[proof] running=True gates_delivered=3 ws_dropped=None
+[proof] running=True gates_delivered=3 ws_dropped=None
+[proof] running=True gates_delivered=3 ws_dropped=None
+[proof] running=True gates_delivered=3 ws_dropped=None
+[proof] running=True gates_delivered=3 ws_dropped=None
+[proof] running=True gates_delivered=3 ws_dropped=None
+[proof] running=True gates_delivered=3 ws_dropped=None
+[proof] running=True gates_delivered=3 ws_dropped=None
+[proof] running=True gates_delivered=3 ws_dropped=None
+[proof] running=True gates_delivered=4 ws_dropped=None
+[proof] running=True gates_delivered=4 ws_dropped=None
+[proof] job terminal state=done
+[proof] gate Gate 1: Narrative Arc Review nid=b190f16b-c301-4011-87ab-b232ae59c060 -> state=responded
+[proof] gate Gate 2: Slide Outline Review nid=888e60a7-a6af-4d40-80ee-f45394f8da18 -> state=responded
+[proof] gate Gate 3: Content Review nid=9ad2d5f5-b044-4730-8ad3-584b17ade4a0 -> state=responded
+[proof] gate Gate 4: Visual Review nid=f7855703-dc73-41d5-bbe0-c8184a8c7f59 -> state=responded
+
+========================================================================
+VERDICT: ✅ PASS  (Direction A — human-answered)
+  ✅  delivered
+  ✅  connected_through_wait
+  ✅  every_gate_answered
+  ✅  every_gate_human_resolved
+  ✅  job_reached_done
+  gates delivered   : 4
+  gates answered    : 4
+    gate 'Gate 1: Narrative Arc Review' nid=b190f16b-c301-4011-87ab-b232ae59c060 answered=True state=responded
+    gate 'Gate 2: Slide Outline Review' nid=888e60a7-a6af-4d40-80ee-f45394f8da18 answered=True state=responded
+    gate 'Gate 3: Content Review' nid=9ad2d5f5-b044-4730-8ad3-584b17ade4a0 answered=True state=responded
+    gate 'Gate 4: Visual Review' nid=f7855703-dc73-41d5-bbe0-c8184a8c7f59 answered=True state=responded
+  job state         : done  completed_at=2026-08-03T22:16:55.588920-04:00
+  ws max gap        : 15.0s (max 60) dropped=None
+  evidence          : /mnt/DATA01/include/www.deepily.ai/projects/lupin/src/scripts/presentation-gate-silence-proof/evidence-20260804T021021Z.json
+========================================================================
