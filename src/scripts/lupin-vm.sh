@@ -336,11 +336,23 @@ case "$SUBCMD" in
         # on every browser connection. Pinning 127.0.0.1 avoids the IPv6 path. Browse http://127.0.0.1:PORT.
         # Even pinned, macOS gcloud still emits benign per-connection "[Errno 9] Bad file descriptor"
         # tracebacks + "Failed to send all data" WARNINGs as the browser opens/closes sockets — the
-        # tunnel is fully working. --verbosity=critical suppresses that log spam. Override for debugging:
+        # tunnel is fully working. --verbosity=error suppresses that log spam (it is all
+        # WARNING-level). Override for debugging:
         #   TUNNEL_VERBOSITY=info src/scripts/lupin-vm.sh tunnel 6999
-        # NOTE: a real startup failure still shows as the command exiting WITHOUT a "Listening on port"
-        # line (the browser then won't load), so quieting the logger does not hide a dead tunnel.
-        local_verbosity="${TUNNEL_VERBOSITY:-critical}"
+        # NOTE: a real startup failure ALSO shows as the command exiting WITHOUT a "Listening on port"
+        # line (the browser then won't load) — but that absence is not a diagnosis. At `error` the
+        # cause is now printed too; see the verbosity note below.
+        # `error`, NOT `critical`. The macOS spam this quieting exists for is all
+        # WARNING-level, so `error` still suppresses every line of it — but `critical`
+        # sits ABOVE error and also swallowed the one message that explains a REFUSED
+        # tunnel:
+        #   ERROR: ... [4003: 'failed to connect to backend']. (Failed to connect to port N)
+        # start-iap-tunnel PRE-TESTS the connection before binding locally ("Testing if
+        # tunnel connection works.") and aborts when the VM-side port has no listener.
+        # Under `critical` that printed the test line and then returned to the prompt
+        # with no reason given — indistinguishable from a silent no-op (2026-08-04,
+        # `tunnel 8889 8889` against a port nothing was serving yet).
+        local_verbosity="${TUNNEL_VERBOSITY:-error}"
         log "tunnel: 127.0.0.1:$local_port -> $VM_NAME:$remote_port  (browse http://127.0.0.1:$local_port ; Ctrl-C to end; TUNNEL_VERBOSITY=info for full logs)"
         runit gcloud compute start-iap-tunnel "$VM_NAME" "$remote_port" \
             --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" \
