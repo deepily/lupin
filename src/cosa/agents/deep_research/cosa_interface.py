@@ -242,7 +242,8 @@ async def present_choices(
     timeout: int = 120,
     title: Optional[ str ] = None,
     abstract: Optional[ str ] = None,
-    job_id: Optional[ str ] = None
+    job_id: Optional[ str ] = None,
+    priority: Optional[ str ] = None
 ) -> dict:
     """
     Present multiple-choice questions and get user's selection.
@@ -253,6 +254,14 @@ async def present_choices(
         title: Optional title for the notification
         abstract: Optional supplementary context
         job_id: Optional job ID for routing to job card
+        priority: Optional notification priority. Forwarded to the dispatcher
+            when the caller set one; a blocking gate passes priority="high" so
+            the gate notification reaches the user's TTS channel. Accepting this
+            kwarg brings deep_research to parity with podcast/presentation:
+            voice_io.present_choices forwards it here, and without the parameter
+            a gate that passes priority would raise TypeError and fail-open
+            before it could ever dispatch to a human. deep_research gates do not
+            pass priority today (this closes the latent gap, not a live one).
 
     Returns:
         dict: {"answers": {...}} with selections keyed by header
@@ -260,7 +269,8 @@ async def present_choices(
     _dispatcher.sender_id   = SENDER_ID
     _dispatcher.target_user = TARGET_USER
     return await _dispatcher.present_choices(
-        questions, timeout=timeout, title=title, abstract=abstract, job_id=job_id
+        questions, timeout=timeout, title=title, abstract=abstract, job_id=job_id,
+        priority=priority
     )
 
 
