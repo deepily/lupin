@@ -378,23 +378,20 @@ class LivePipelineTestBase:
 
         print( f"    Submitted, job_id={job_id}, polling (timeout={timeout}s)..." )
 
-        # Poll done queue
+        # Poll for a TERMINAL state. Check DONE (success) AND DEAD (failure) each
+        # iteration: a job that dies is reported as dead immediately instead of
+        # waiting out the full timeout and then reporting a bare "timeout".
         elapsed = 0
         while elapsed < timeout:
             try:
-                done_resp = requests.get(
-                    f"{self.BASE_URL}/api/get-queue/done",
-                    headers=headers,
-                    timeout=30
-                )
+                done_job = self._find_job_in_queue( job_id, "done", headers )
+                if done_job is not None:
+                    return done_job, None
 
-                if done_resp.status_code == 200:
-                    done_data = done_resp.json()
-                    jobs      = done_data.get( "done_jobs_metadata", [] )
-
-                    for job in jobs:
-                        if job.get( "job_id" ) == job_id:
-                            return job, None
+                dead_job = self._find_job_in_queue( job_id, "dead", headers )
+                if dead_job is not None:
+                    err = dead_job.get( "error" ) or dead_job.get( "response_text" ) or "(no error detail)"
+                    return None, f"Job {job_id} FAILED (dead queue): {err}"
 
             except Exception as e:
                 print( f"    Poll error: {e}" )
@@ -402,7 +399,72 @@ class LivePipelineTestBase:
             time.sleep( self.POLL_INTERVAL )
             elapsed += self.POLL_INTERVAL
 
-        return None, f"Timeout after {timeout}s waiting for job_id={job_id}"
+        # Timeout reached. The harness stopped waiting — that is NOT the same fact
+        # as "the job failed" (bug e5473a72: a 900s poll reported FAIL for a job that
+        # SUCCEEDED). Ask the server what actually happened to the job and report
+        # THAT with the job id, so a reader tells "the job died" / "still running" /
+        # "done but I missed it" apart from "I stopped waiting".
+        state, job = self._resolve_job_state( job_id, headers )
+        if state == "done":
+            # The job DID complete; the poll simply missed it (e.g. it landed in the
+            # final interval). A slow-but-done job is a PASS, not a timeout failure.
+            return job, None
+        if state == "dead":
+            err = ( job or {} ).get( "error" ) or ( job or {} ).get( "response_text" ) or "(no error detail)"
+            return None, f"Job {job_id} FAILED (dead queue) — found on timeout after {timeout}s: {err}"
+        if state in ( "run", "todo" ):
+            return None, (
+                f"Job {job_id} STILL RUNNING after {timeout}s (server queue: '{state}'). "
+                f"The harness stopped waiting; the job did NOT fail. Raise the timeout for "
+                f"this build or shorten the build if this recurs."
+            )
+        return None, (
+            f"Job {job_id} NOT FOUND in any queue (done/dead/run/todo) after {timeout}s — "
+            f"state indeterminate; check the server logs for this job id."
+        )
+
+    def _find_job_in_queue( self, job_id, queue_name, headers ):
+        """
+        Return the job's metadata dict from the named queue, or None if absent.
+
+        Requires:
+            - queue_name is one of 'todo' | 'run' | 'done' | 'dead'
+
+        Ensures:
+            - Returns the matching job dict, or None (absent OR endpoint non-200).
+            - Each endpoint returns its rows under f"{queue_name}_jobs_metadata"
+              (queues.py:548 / 606 / 637).
+        """
+        resp = requests.get(
+            f"{self.BASE_URL}/api/get-queue/{queue_name}",
+            headers=headers,
+            timeout=30
+        )
+        if resp.status_code != 200:
+            return None
+        for job in resp.json().get( f"{queue_name}_jobs_metadata", [] ):
+            if job.get( "job_id" ) == job_id:
+                return job
+        return None
+
+    def _resolve_job_state( self, job_id, headers ):
+        """
+        Ask the server WHERE a job actually is, on timeout.
+
+        Ensures:
+            - Returns ( 'done'|'dead'|'run'|'todo', metadata_dict ) if found.
+            - Returns ( None, None ) if the job is absent from every queue.
+            - Order matters: DONE first (a completed job is the point of the fix),
+              then DEAD, then the in-flight queues.
+        """
+        for queue_name in ( "done", "dead", "run", "todo" ):
+            try:
+                job = self._find_job_in_queue( job_id, queue_name, headers )
+                if job is not None:
+                    return queue_name, job
+            except Exception as e:
+                print( f"    State-resolve error on '{queue_name}': {e}" )
+        return None, None
 
     # ═══════════════════════════════════════════════════════════════════════
     # Validation

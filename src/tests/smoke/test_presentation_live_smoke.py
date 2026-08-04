@@ -73,7 +73,14 @@ from tests.smoke.utilities.interactive_smoke_test import InteractiveSmokeTest
 # Constants
 # ═══════════════════════════════════════════════════════════════════════════════
 
-SOURCE_DOC = "/src/rnd/v0.1.6/2026.03.14-presentation-generator/01-strategy-and-design.md"
+# Source research doc the presentation is built FROM. Overridable via env so a
+# scheduled test-suite run can target a specific doc (e.g. a user's own research
+# report) without editing this file. The env key uses the LUPIN_TEST_ prefix so
+# it survives TestSuiteJob's env_vars allowlist (_ENV_VAR_ALLOWED_PREFIXES).
+SOURCE_DOC = os.environ.get(
+    "LUPIN_TEST_PRESENTATION_SOURCE_DOC",
+    "/src/rnd/v0.1.6/2026.03.14-presentation-generator/01-strategy-and-design.md"
+)
 
 DEFAULT_COST_CAP_USD = 5.00
 
@@ -193,7 +200,13 @@ class PresentationLiveSmokeTest( InteractiveSmokeTest ):
 
     TEST_NAME       = "Presentation Generator Live E2E"
     SUBMIT_ENDPOINT = "/api/presentation-generator/submit"
-    DEFAULT_TIMEOUT = 900  # 15 min — includes ~400s test-suite scheduling overhead
+    # 900s equalled the real ~15-min build time with ZERO margin, so a normal build
+    # crossed the boundary and reported a false FAIL (bug e5473a72). Raised to 1800s
+    # (2x margin). This number is a FLOOR, not an estimate: only ONE real completed
+    # sample exists (job pr-bf7ac6f5, ~15 min, 15-slide deck). The real false-fail fix
+    # is _resolve_job_state in live_pipeline_base — on timeout the harness now reports
+    # the job's actual state (done/dead/run) instead of a bare "timeout".
+    DEFAULT_TIMEOUT = 1800
     POLL_INTERVAL   = 3
     REQUEST_TIMEOUT = 600
     SCENARIOS       = PRESENTATION_LIVE_SCENARIOS
