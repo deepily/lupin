@@ -170,7 +170,7 @@ class TestAsyncWrappers( unittest.IsolatedAsyncioTestCase ):
             )
         self.assertEqual( result, { "answers": { "h": "A" } } )
         self.mock_disp.present_choices.assert_awaited_once_with(
-            questions, timeout=15, title="T", abstract="abs", job_id="dr-4",
+            questions, timeout=15, title="T", abstract="abs", job_id="dr-4", priority=None,
         )
 
 

@@ -48,6 +48,7 @@ BUNCHING_LOW                   = 140               # bunching band [140, 149] ju
 BLIND                          = "blind"
 REJECTING                      = "rejecting"
 EXEMPT_GATE                    = "exempt"
+TEMP_SLOT_PREFIX               = "TEMP-"           # transient dogfood slots — never analysed
 DELIVERED                      = "delivered"
 EXPECTED_SLOTS_PER_ARM_PER_DAY = 7
 _EXACT_ENUM_MAX_PAIRS          = 18                # 2**18 = 262144 sign vectors — enumerate exactly at/below this
@@ -84,14 +85,22 @@ def is_experiment_row( row ):
 
 def eligible_rows( rows ):
     """
-    The behavioural population: in-experiment attempts that are NOT exempt.
+    The behavioural population: in-experiment attempts that are NOT exempt and
+    NOT transient TEMP- dogfood slots.
 
     Ensures:
         - returns experiment rows whose length_gate is not "exempt"
         - the exempt arbiter poker is excluded — it is out of the experiment by
           design, so it must not enter either arm's denominator
+        - rows whose slot_id starts with "TEMP-" are excluded IN CODE, not by
+          deletion — a transient live-gate-smoke slot must never reach the
+          analysis whether or not someone remembers to delete it. This is the
+          single chokepoint feeding co-primaries, secondaries, and counts.
     """
-    return [ r for r in rows if is_experiment_row( r ) and r.get( "length_gate" ) != EXEMPT_GATE ]
+    return [ r for r in rows
+             if is_experiment_row( r )
+             and r.get( "length_gate" ) != EXEMPT_GATE
+             and not r.get( "slot_id", "" ).startswith( TEMP_SLOT_PREFIX ) ]
 
 
 def slot_date( row ):

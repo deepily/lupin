@@ -87,6 +87,27 @@ def test_eligible_rows_excludes_exempt_and_baseline():
     assert elig[ 0 ][ "length_gate" ] == "passed"
 
 
+def test_eligible_rows_excludes_temp_slots():
+    # A transient live-gate-smoke slot (slot_id starts "TEMP-") must be dropped in
+    # code, not by deletion — the exclusion is deletion-independent.
+    rows = [
+        _row( f"{TUE}T09", "blind", 100 ),                                   # eligible
+        _row( "TEMP-live-gate-smoke", "rejecting", 200 ),                    # transient — excluded
+    ]
+    elig = AN.eligible_rows( rows )
+    assert len( elig ) == 1
+    assert elig[ 0 ][ "slot_id" ] == f"{TUE}T09"
+
+
+def test_temp_slot_has_zero_effect_on_counts_and_coprimary():
+    # End-to-end: adding a TEMP- row changes neither counts nor the co-primary pairs.
+    # (It also proves clock_hour is never called on "TEMP-…" — which would raise.)
+    base      = _retry_fixture()
+    with_temp = base + [ _row( "TEMP-live-gate-smoke", "rejecting", 200 ) ]
+    assert AN.counts_only( with_temp )       == AN.counts_only( base )
+    assert AN.matched_pair_diffs( with_temp ) == AN.matched_pair_diffs( base )
+
+
 def test_slot_date_and_clock_hour():
     r = _row( f"{WED}T14", "blind", 10 )
     assert AN.slot_date( r )  == WED

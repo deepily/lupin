@@ -234,6 +234,12 @@ def client( tmp_path, monkeypatch, corpus_path, pinned_inactive_policy ):
         lambda session_id=None: f"claude.code@lupin.deepily.ai#{( session_id or '' )[ :8 ]}",
     )
     monkeypatch.setattr( dm, "_persist_dm_send_sync", lambda **kw: "row-1" )
+    # Stub the judge to a FAKE non-null grade so the blind-arm test proves the response
+    # SUPPRESSES a grade that was actually computed (not merely that none existed), and
+    # so no test pays for a real LLM judge call.
+    monkeypatch.setattr( dm, "_maybe_grade_dm_quality",
+                         lambda body: { "length": { "weight": 1 }, "directness": { "weight": 1 },
+                                        "tone": { "weight": 1 }, "overall": { "weight": 1 } } )
 
     app = FastAPI()
     app.include_router( dm.router )
@@ -270,28 +276,78 @@ class TestTestClientScaffoldBaseline:
         assert row[ "origin" ] == "test"                   # written under pytest to the redirected sink
 
 
-# ─── LAYER B WORK-ORDER — un-skip and fill against Rachel's merged diff ───────
-#
-# Each needs the send-path gate + assignment_at() + the override key. Do NOT
-# write these against guessed field names; read them from the diff first, then
-# assert:
-#
-#   [rejecting, over 150w]  → HTTP 413 (NOT 422 — client maps 422 to
-#                             recipient_unresolved, cosa_voice_mcp.py:3370);
-#                             body names no number; corpus length_gate="rejected".
-#   [rejecting, under 150w] → 201; length_gate="passed"; effective_arm="rejecting".
-#   [blind, over 150w]      → 201 (no gate); `quality` key ABSENT (not null);
-#                             effective_arm="blind".
-#   [blind, under 150w]     → 201; effective_arm="blind".
-#   [arm resolves once]     → a request straddling an hour boundary uses ONE arm.
-#   [every length_gate × delivery_outcome combination] incl. delivery failure
-#                             AFTER a passed gate → delivery_outcome="failed".
-#
-@pytest.mark.skip( reason="Layer B — needs Rachel's send-path gate + assignment_at() + "
-                          "override key; fill against the merged diff, not guessed field names" )
+# ─── LAYER B — the arm gate over the real HTTP route, arm pinned in-process ───
+# override_arm only re-labels a MATCHED slot, so the pin gives the policy a wide
+# slot covering "now"; get_policy() returns it at request time. The `client`
+# fixture's pinned_inactive_policy resets the singleton in teardown.
+
+def _pin_arm( arm, *, threshold=REJECT_THRESHOLD_WORDS, exempt=None ):
+    import cosa.rest.dm_experiment as dm_experiment
+    wide = {
+        "slot_id"   : f"test-{arm}",
+        "arm"       : arm,
+        "start_utc" : "2000-01-01T00:00:00+00:00",
+        "end_utc"   : "2100-01-01T00:00:00+00:00",
+    }
+    dm_experiment.set_policy( dm_experiment.make_policy(
+        slots=[ wide ], reject_threshold=threshold, exempt_sender_session_ids=exempt ) )
+
+
+def _send( client, words, sender="sid-asker" ):
+    return client.post( "/api/dm/send", json = {
+        "sender_session_id" : sender,
+        "recipient_persona" : "cheech",
+        "body"              : _words( words ),
+        "sender_persona"    : "tiffany",
+        "sender_icon"       : "💍",
+        "sender_project"    : "lupin",
+    } )
+
+
+def _last_row( corpus_path ):
+    return json.loads( open( corpus_path, encoding="utf-8" ).read().splitlines()[ -1 ] )
+
+
 class TestArmGateOverHttp:
-    def test_rejecting_over_threshold_returns_413_not_422( self ):
-        raise NotImplementedError
+    """Layer B: the send-path gate over the real route, arm pinned in-process."""
+
+    def test_rejecting_over_threshold_returns_413_not_422( self, client ):
+        """The headline attack: over threshold in rejecting is 413, NOT the 422 the
+        client already maps to recipient_unresolved (cosa_voice_mcp.py:3370)."""
+        _pin_arm( "rejecting" )
+        r = _send( client, REJECT_THRESHOLD_WORDS + 50 )
+        assert r.status_code == 413, r.text
+        assert str( REJECT_THRESHOLD_WORDS ) not in r.text            # body names no number
+
+    def test_rejecting_under_threshold_passes_201( self, client, corpus_path ):
+        _pin_arm( "rejecting" )
+        r = _send( client, REJECT_THRESHOLD_WORDS - 50 )
+        assert r.status_code == 201, r.text
+        row = _last_row( corpus_path )
+        assert row[ "effective_arm" ]    == "rejecting"
+        assert row[ "length_gate" ]      == "passed"
+        assert row[ "delivery_outcome" ] == "delivered"
+
+    def test_blind_over_threshold_accepted_and_quality_suppressed( self, client, corpus_path ):
+        """Blind has no gate AND withholds the grade — assert the `quality` key is
+        ABSENT from the 201 even though the (stubbed) judge computed one."""
+        _pin_arm( "blind" )
+        r = _send( client, REJECT_THRESHOLD_WORDS + 50 )
+        assert r.status_code == 201, r.text
+        assert "quality" not in r.json()
+        row = _last_row( corpus_path )
+        assert row[ "effective_arm" ] == "blind"
+        assert row[ "length_gate" ]   == "passed"
+
+    def test_exempt_sender_skips_the_gate( self, client, corpus_path ):
+        """An exempt sender over threshold in rejecting is NOT rejected — length_gate
+        is `exempt`, and the row names the id that matched (the hit instrument)."""
+        _pin_arm( "rejecting", exempt="heartbeat-arbiter" )
+        r = _send( client, REJECT_THRESHOLD_WORDS + 50, sender="heartbeat-arbiter" )
+        assert r.status_code == 201, r.text
+        row = _last_row( corpus_path )
+        assert row[ "length_gate" ] == "exempt"
+        assert "heartbeat-arbiter" in row[ "exemption_reason" ]
 
 
 if __name__ == "__main__":

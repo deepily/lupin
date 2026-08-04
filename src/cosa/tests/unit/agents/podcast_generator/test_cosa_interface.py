@@ -125,5 +125,5 @@ class TestPresentChoices:
             out = _run( ci.present_choices( questions, timeout=30, title="T", abstract="A", job_id="pg-1" ) )
         assert out == { "answers": { "h": "A" } }
         disp.present_choices.assert_awaited_once_with(
-            questions, timeout=30, title="T", abstract="A", job_id="pg-1"
+            questions, timeout=30, title="T", abstract="A", job_id="pg-1", priority=None
         )
