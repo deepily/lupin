@@ -421,3 +421,65 @@ def test_format_report_shows_delivery_delay_with_its_denominator():
     out = AN.format_report( rows )
     assert "delivery_delay_s=2.000 (n=1)" in out
     assert "delivery_delay_s=4.000 (n=1)" in out
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Self-addressed exclusion (Rick's ruling, 2026-08-04)
+#
+# Audit-movement probes were sent as Cheech -> Cheech and landed in the live
+# rejecting slot at 23 words each, against real peer traffic averaging 86 —
+# dragging the arm 24 words toward the very result the pilot is testing for.
+# The rows stay in the corpus (append-only, auditable); they stop voting here.
+# ═════════════════════════════════════════════════════════════════════════════
+
+def _addressed_row( slot_id, arm, words, from_session, to_session, **kw ):
+    row = _row( slot_id, arm, words, **kw )
+    row[ "from_session" ] = from_session
+    row[ "to_session" ]   = to_session
+    return row
+
+
+def test_is_self_addressed_true_only_when_both_sessions_match():
+    assert AN.is_self_addressed( { "from_session": "abc", "to_session": "abc" } ) is True
+    assert AN.is_self_addressed( { "from_session": "abc", "to_session": "xyz" } ) is False
+
+
+@pytest.mark.parametrize( "row", [
+    { "from_session": "abc" },                          # recipient unknown
+    { "to_session":   "abc" },                          # sender unknown
+    {},                                                 # neither
+    { "from_session": "",    "to_session": ""    },     # both blank — not a match
+    { "from_session": None,  "to_session": None  },
+] )
+def test_is_self_addressed_false_when_a_session_is_unknown( row ):
+    """An unknown pair is not evidence of self-addressing — never guess a row out."""
+    assert AN.is_self_addressed( row ) is False
+
+
+def test_eligible_rows_drops_self_addressed_keeps_peer_rows():
+    rows = [
+        _addressed_row( f"{TUE}T09", "rejecting", 23, "cheech", "cheech" ),   # probe
+        _addressed_row( f"{TUE}T09", "rejecting", 86, "rachel", "mrradio" ),  # real
+    ]
+    kept = AN.eligible_rows( rows )
+    assert len( kept ) == 1
+    assert kept[ 0 ][ "words" ] == 86
+
+
+def test_self_addressed_rows_do_not_move_the_arm_mean():
+    """The measured harm, pinned: 3 probe rows at 23w must not pull 86 down to 62."""
+    peer  = [ _addressed_row( f"{TUE}T09", "rejecting", w, f"peer{i}", "mrradio" )
+              for i, w in enumerate( ( 123, 81, 60, 97, 69 ) ) ]
+    probe = [ _addressed_row( f"{TUE}T09", "rejecting", 23, "cheech", "cheech" )
+              for _ in range( 3 ) ]
+    sec = AN.secondaries( peer + probe )
+    assert sec[ "rejecting" ][ "attempts" ] == 5           # NOT 8
+    contaminated = AN.secondaries( [ dict( r, from_session=f"s{i}" )
+                                     for i, r in enumerate( peer + probe ) ] )
+    assert contaminated[ "rejecting" ][ "attempts" ] == 8  # the control: without the rule they DO vote
+
+
+def test_counts_only_ignores_self_addressed_slots():
+    """A slot whose only traffic is self-addressed must not count as covered."""
+    rows = [ _addressed_row( f"{TUE}T09", "rejecting", 23, "cheech", "cheech" ) ]
+    assert AN.counts_only( rows ) == {}

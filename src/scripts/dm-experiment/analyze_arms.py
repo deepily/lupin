@@ -84,10 +84,23 @@ def is_experiment_row( row ):
     return row.get( "experiment" ) == EXPERIMENT_TAG
 
 
+def is_self_addressed( row ):
+    """
+    Ensures:
+        - returns True iff the row's sender and recipient are the SAME session
+        - a row missing either session id returns False — an unknown pair is not
+          evidence of self-addressing, and guessing would silently shrink the
+          denominator
+    """
+    sender    = row.get( "from_session" )
+    recipient = row.get( "to_session" )
+    return bool( sender ) and bool( recipient ) and sender == recipient
+
+
 def eligible_rows( rows ):
     """
-    The behavioural population: in-experiment attempts that are NOT exempt and
-    NOT transient TEMP- dogfood slots.
+    The behavioural population: in-experiment attempts that are NOT exempt,
+    NOT transient TEMP- dogfood slots, and NOT self-addressed.
 
     Ensures:
         - returns experiment rows whose length_gate is not "exempt"
@@ -97,11 +110,18 @@ def eligible_rows( rows ):
           deletion — a transient live-gate-smoke slot must never reach the
           analysis whether or not someone remembers to delete it. This is the
           single chokepoint feeding co-primaries, secondaries, and counts.
+        - self-addressed rows (sender session == recipient session) are excluded
+          for the same reason and by the same mechanism. The pilot measures
+          PEER DM verbosity; a session messaging itself is not peer traffic, so
+          it belongs to no arm. Excluding in code rather than by deleting rows
+          keeps the corpus append-only and the exclusion auditable — the rows
+          stay readable, they just stop voting. Rick's ruling, 2026-08-04.
     """
     return [ r for r in rows
              if is_experiment_row( r )
              and r.get( "length_gate" ) != EXEMPT_GATE
-             and not r.get( "slot_id", "" ).startswith( TEMP_SLOT_PREFIX ) ]
+             and not r.get( "slot_id", "" ).startswith( TEMP_SLOT_PREFIX )
+             and not is_self_addressed( r ) ]
 
 
 def slot_date( row ):
