@@ -27,6 +27,16 @@
 #   surface       HOST      — the VM/dev shell (~/.bashrc, push-env)
 #                 CONTAINER — a compose `environment:` block
 #                 BOTH      — must agree on both surfaces
+#                 COMPOSE   — read by compose from the env-file at container CREATE
+#                             and consumed OUTSIDE any `environment:` block (a
+#                             `group_add:` entry, a mount `source:`). The value
+#                             shapes the container; it is never injected INTO it,
+#                             so neither the host shell nor `docker exec printenv`
+#                             can see it and both A1 and C6's env probe would ask
+#                             the wrong question. What proves a COMPOSE row instead
+#                             is compose's OWN `${VAR:?}` regime: unset aborts
+#                             `up`, so a RUNNING container is the evidence the
+#                             value was supplied. See preflight-vm.sh A1 + C6.
 #   writer        what is responsible for setting it.
 #   shape         PATH_VM      — must live under the VM data root on a VM
 #                 PATH_ANY     — a path, machine-specific, not otherwise constrained
@@ -49,8 +59,8 @@ LUPIN_API_KEY	HOST	minted ON the target	SECRET	REQUIRED	The X-API-Key (ck_live_ 
 
 # ── VM deployment identity ───────────────────────────────────────────────────
 LUPIN_GCP_PROJECT_ID	HOST	operator ~/.bashrc	LITERAL	REQUIRED	Required by lupin-vm.sh for every gcloud call. NB test_no_hardcoded_gcp_identifiers currently reports lupin-vm.sh hardcodes the sandbox value as well — an open pre-existing failure.
-LUPIN_BRIDGE_GID	CONTAINER	cloud-gpu.env	NUMERIC	REQUIRED	group_add for the app container so uid 1001 can read/write host-written CC session bridges. Absent => persona allocation 404s.
-LUPIN_HOST_SESSIONS_DIR	CONTAINER	cloud-gpu.env	PATH_ANY	REQUIRED	Bind source for the CC session bridges. A short ${HOME}-relative bind silently CREATES an empty dir when HOME is wrong — indistinguishable from "mounted but empty".
+LUPIN_BRIDGE_GID	COMPOSE	cloud-gpu.env	NUMERIC	REQUIRED	group_add for the app container so uid 1001 can read/write host-written CC session bridges. Absent => persona allocation 404s. Consumed at compose `group_add:` (cloud-gpu.yml:92), NOT an environment: entry — it shapes the container's supplementary groups at CREATE and is never injected into it. surface=COMPOSE: `${...:?}` means unset aborts `up`, so a running container IS the proof.
+LUPIN_HOST_SESSIONS_DIR	COMPOSE	cloud-gpu.env	PATH_ANY	REQUIRED	Bind source for the CC session bridges. A short ${HOME}-relative bind silently CREATES an empty dir when HOME is wrong — indistinguishable from "mounted but empty". Consumed at the bind mount `source:` (cloud-gpu.yml:114), NOT an environment: entry — it is resolved at container CREATE and never injected into it. surface=COMPOSE: `${...:?}` means unset aborts `up`, so a running container IS the proof.
 
 # ── runtime profile ──────────────────────────────────────────────────────────
 LUPIN_ENV	CONTAINER	compose	ENUM:development|testing|production	REQUIRED	Chooses the DATABASE. Per cloud-test.yml's own comment it is "never inferred". Must AGREE with the INI block below — nothing compares them today (R4).

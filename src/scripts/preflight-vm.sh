@@ -163,6 +163,13 @@ if [ -r "$CONTRACT" ]; then
         # true-by-coincidence for 2 of 2 rows and became false for 8 of 11 the day
         # nine more CONTAINER rows landed. PROSE IS NOT A DELEGATION.
         [ "$surface" = "CONTAINER" ] && continue
+        # COMPOSE-surface vars are read by compose from the env-file at container
+        # CREATE and consumed OUTSIDE any `environment:` block (group_add, a mount
+        # source). They are never exported into the operator's shell, so asking the
+        # host shell about them reports UNSET about a variable that is doing its job.
+        # C6 asserts them, by the only witness that can see them: compose's own
+        # `${VAR:?}` regime plus a container that actually came up.
+        [ "$surface" = "COMPOSE" ] && continue
         # Resolve OPTIONAL / REQUIRED / OPTIONAL_UNLESS:<VAR>=<VAL> against the LIVE
         # env before choosing a tier — a conditionally-required var is only required
         # when its condition holds.
@@ -497,11 +504,45 @@ PY
             csurface="$( pfv_contract_field "$row" 2 )"
             cshape="$(   pfv_contract_field "$row" 4 )"
             creq="$(     pfv_contract_field "$row" 5 )"
-            [ "$csurface" = "CONTAINER" ] || continue
+            case "$csurface" in CONTAINER|COMPOSE) ;; *) continue ;; esac
             c6_checked=$(( c6_checked + 1 ))
 
             regime="$( pfv_compose_var_regime "$COMPOSE_FILE" "$cname" )"
             derived="$( pfv_regime_requirement "$regime" )"
+
+            # ── COMPOSE surface ──────────────────────────────────────────────
+            # The value shapes the container at CREATE (group_add, mount source)
+            # and is never injected into it, so `docker exec printenv` asks a
+            # question that can only ever answer UNSET. Asserting it there is how
+            # LUPIN_BRIDGE_GID and LUPIN_HOST_SESSIONS_DIR blocked a deploy on
+            # 2026-08-04 while both were correctly set in cloud-gpu.env.
+            #
+            # This is NOT a skip. The witness is compose's own regime: `${VAR:?}`
+            # ABORTS `up` when unset, so a container that is running is proof the
+            # value was supplied. That is why C1's "container is running" check is
+            # a genuine precondition here and not decoration — if the container is
+            # NOT up, we have no witness and must say so rather than pass.
+            if [ "$csurface" = "COMPOSE" ]; then
+                case "$regime" in
+                    REQUIRED)
+                        if docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null | grep -q true; then
+                            report pass BLOCK "$cname supplied at container CREATE — $( basename "$COMPOSE_FILE" ) interpolates it \${VAR:?}, which aborts \`up\` when unset, and $CONTAINER is running   [surface: COMPOSE]"
+                        else
+                            report unknown BLOCK "$cname: cannot witness a COMPOSE-surface var while $CONTAINER is not running" \
+                                          "start the stack, then re-run: docker compose -f $( basename "$COMPOSE_FILE" ) --env-file $( basename "${PREFLIGHT_VM_ENVFILE:-cloud-gpu.env}" ) up -d"
+                        fi ;;
+                    ABSENT)
+                        report fail WARN "$cname declared surface=COMPOSE but $( basename "$COMPOSE_FILE" ) never references it" \
+                                      "add the interpolation to $( basename "$COMPOSE_FILE" ), or correct its surface in env-contract.tsv" ;;
+                    *)
+                        # DEFAULTED/LITERAL/BARE/CONFLICT/UNKNOWN: compose tolerates an
+                        # unset value, so a running container proves NOTHING about it.
+                        # Never launder that into a pass.
+                        report unknown BLOCK "$cname is surface=COMPOSE but $( basename "$COMPOSE_FILE" ) treats it as $regime, not \${VAR:?} — a running container is NOT evidence it was supplied" \
+                                      "either interpolate it \${VAR:?} so absence aborts \`up\`, or correct its surface in env-contract.tsv" ;;
+                esac
+                continue
+            fi
 
             case "$regime" in
                 ABSENT)
@@ -564,7 +605,7 @@ PY
             esac
         done < <( pfv_parse_manifest "$CONTRACT" )
         [ "$c6_checked" -gt 0 ] \
-            || report unknown BLOCK "no surface=CONTAINER rows found in the contract — C6 asserted nothing" \
+            || report unknown BLOCK "no surface=CONTAINER or COMPOSE rows found in the contract — C6 asserted nothing" \
                           "check $CONTRACT is the file you think it is"
     else
         report unknown BLOCK "env contract unreadable at $CONTRACT — C6 asserted NOTHING" "deploy the repo to the VM"
