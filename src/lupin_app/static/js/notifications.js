@@ -18328,6 +18328,35 @@ class NotificationsUI {
      *   - Each question has a numbered label, text, mic button, and text input
      *   - Single "Submit All" button at bottom
      */
+    /**
+     * Option D/C gate (row bd0ce120): the predicted per-question answers to use
+     * for an open_ended_batch, ONLY when the server-stamped auto-submit gate opens.
+     *
+     * The gate opens iff: the notification is an open_ended_batch, a prediction hint
+     * exists, `auto_submit_enabled` is true, the hint's confidence is at/above the
+     * server-stamped floor `auto_submit_min_confidence_threshold`, and the predicted
+     * value carries an `answers` map. All three gate fields are stamped by the server
+     * (notifications.py) so this client cannot drift from INI config.
+     *
+     * Requires:
+     *   - notification is a notification object (may lack prediction_hint)
+     *
+     * Ensures:
+     *   - Returns the { header: value } answers map when the gate opens
+     *   - Returns null otherwise (cold start, low confidence, disabled, wrong type)
+     */
+    _batchPredictedAnswers( notification ) {
+        if ( !notification || notification.response_type !== 'open_ended_batch' ) return null;
+        const hint = notification.prediction_hint;
+        if ( !hint || hint.auto_submit_enabled !== true ) return null;
+        const floor = hint.auto_submit_min_confidence_threshold;
+        if ( typeof floor !== 'number' ) return null;
+        if ( typeof hint.confidence !== 'number' || hint.confidence < floor ) return null;
+        const answers = hint.predicted_value?.answers;
+        if ( !answers || typeof answers !== 'object' ) return null;
+        return answers;
+    }
+
     renderOpenEndedBatchUI( notification ) {
         const questions = notification.response_options?.questions || [];
         const total     = questions.length;
@@ -18336,11 +18365,19 @@ class NotificationsUI {
             return '<div class="response-open-ended-batch"><p>No questions provided.</p></div>';
         }
 
+        // Option D (row bd0ce120): when a prediction at/above the auto-submit floor
+        // already holds the answers, prefill each input from the PREDICTION rather
+        // than the expeditor's weaker default (whose "query" default is the vague
+        // sentence itself). Returns null when the gate does not pass — then the
+        // legacy q.default_value stands.
+        const predicted = this._batchPredictedAnswers( notification );
+
         let questionsHTML = '';
         for ( let i = 0; i < total; i++ ) {
             const q = questions[ i ];
             const header       = q.header || `Question ${i + 1}`;
-            const defaultValue = q.default_value || '';
+            const predictedVal = predicted && predicted[ header ] != null ? String( predicted[ header ] ) : null;
+            const defaultValue = predictedVal != null ? predictedVal : ( q.default_value || '' );
 
             questionsHTML += `
                 <div class="batch-question" data-question-index="${i}" data-header="${this.escapeHtml( header )}">

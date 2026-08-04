@@ -1313,6 +1313,27 @@ async def notify_user(
                     prediction_hint[ "vote_min_confidence_threshold" ] = vote_engine.hint_vote_min_confidence_threshold
             except Exception as gate_error:
                 print( f"[PREDICTION] ⚠️ Vote-gate stamp error (non-fatal): {gate_error}" )
+
+        # Auto-submit gate (row bd0ce120, Option C→D): carry the floor + enabled flag
+        # IN the hint payload — SAME drift-proofing as the vote gate above — so the
+        # client cannot diverge from server config. The client uses these to decide
+        # whether a high-confidence prediction may prefill the batch (Option D) and
+        # auto-submit after a grace window (Option C). Stamped only when a hint exists.
+        if prediction_hint is not None and "auto_submit_min_confidence_threshold" not in prediction_hint:
+            try:
+                import lupin_app.main as main_module
+                cfg = main_module.config_mgr
+                prediction_hint[ "auto_submit_enabled" ] = cfg.get(
+                    "expeditor prediction auto submit enabled", default=False, return_type="boolean"
+                )
+                prediction_hint[ "auto_submit_min_confidence_threshold" ] = cfg.get(
+                    "expeditor prediction auto submit confidence floor", default=0.9, return_type="float"
+                )
+                prediction_hint[ "auto_submit_grace_window_seconds" ] = cfg.get(
+                    "expeditor prediction auto submit grace window seconds", default=5, return_type="int"
+                )
+            except Exception as auto_error:
+                print( f"[PREDICTION] ⚠️ Auto-submit gate stamp error (non-fatal): {auto_error}" )
         # ---- End Prediction Engine Hook ----
 
         # Push notification to WebSocket for UI rendering (Phase 2.2 with full fields).

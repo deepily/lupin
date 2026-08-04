@@ -120,7 +120,7 @@ The ratified ruling this executes: **(g)** total 13/13 parity — no obsolete dr
   Handler `submitResearchJob` (`notifications.js:3069`); endpoint switch `:3102-3106`; body `:3109-3115`;
   STT wiring `:2025`.
 - **Card 3 — Podcast** `notifications.html:275-319` (`#podcast-submit-card`): `#podcast-stt-button` +
-  `#podcast-source`, `#podcast-dry-run` (checked), `.schedule-section`, `#submit-podcast-job` +
+  `#podcast-source`, `#podcast-dry-run` (unchecked — flipped per finding ee4a4cb7 #1), `.schedule-section`, `#submit-podcast-job` +
   `#podcast-loading`, `#podcast-submit-status`. Handler `submitPodcastJob` (`notifications.js:3162`);
   `POST /api/podcast-generator/submit` (`:3190`); body `:3199-3203`; smart-input branch `:3213-3227`; STT
   wiring `:2033`.
