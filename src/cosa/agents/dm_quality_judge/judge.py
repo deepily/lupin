@@ -29,6 +29,7 @@ import re
 import time
 
 import cosa.utils.util as cu
+from cosa.utils.dm_text import dm_word_count
 from cosa.agents.llm_client_factory import LlmClientFactory
 from cosa.agents.dm_quality_judge.xml_models import DmQualityJudgeResponse, WEIGHT_TO_EMOJI, NONANSWER_EMOJI
 from cosa.agents.io_models.utils.prompt_template_processor import PromptTemplateProcessor
@@ -683,7 +684,7 @@ class DmQualityJudge:
         Returns:
             dict: the full quality grade
         """
-        word_count = len( body_text.split() )
+        word_count = dm_word_count( body_text )
         length     = length_bucket( word_count )
 
         # LENGTH-ONLY MODE (Rick, 2026-08-01, row ca7a2cbf). Measured that day, the 24B

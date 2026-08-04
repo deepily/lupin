@@ -98,6 +98,22 @@ def test_422_maps_to_recipient_unresolved():
     assert out[ "detail" ][ "error" ] == "recipient_not_found"
 
 
+def test_413_maps_to_dm_too_long():
+    # Rejecting arm refuses an over-long DM with 413 — must be distinct from 422
+    # (recipient_unresolved), or a too-long DM reports as a bad recipient.
+    out = _call( lambda *a, **k: _Resp( 413, { "detail": "DM refused: too long. Cut it substantially and resend." } ) )
+    assert out[ "status" ] == "error"
+    assert out[ "reason" ] == "dm_too_long"
+    assert "too long" in out[ "detail" ]
+
+
+def test_413_falls_back_to_text_when_no_json():
+    # Server returned a non-JSON body — the detail falls back to resp.text.
+    out = _call( lambda *a, **k: _Resp( 413, text="too long" ) )
+    assert out[ "reason" ] == "dm_too_long"
+    assert out[ "detail" ] == "too long"
+
+
 def test_other_status_maps_to_http_reason():
     out = _call( lambda *a, **k: _Resp( 500, text="boom" ) )
     assert out[ "status" ] == "error"

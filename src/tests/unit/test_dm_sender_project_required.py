@@ -119,6 +119,15 @@ class _CoreHarness( unittest.TestCase ):
         _corpus_patch = patch.object( dm, "_DM_TRAFFIC_JSONL", self.corpus_path )
         _corpus_patch.start()
         self.addCleanup( _corpus_patch.stop )
+        # The two-arm pilot (2026.08.04) forks execute_dm_send by the arrival instant.
+        # These baseline tests use the real clock, so once the schedule JSON is committed
+        # a run DURING the live window (Tue/Wed 09:00-23:00 ET) would flip them into the
+        # experiment path and break their arm/quality assertions. Pin the policy INACTIVE
+        # so assignment_at is always None here — the outside-window contract this suite
+        # was written against, independent of the wall clock.
+        import cosa.rest.dm_experiment as dm_experiment
+        dm_experiment.set_policy( dm_experiment.make_inactive_policy() )
+        self.addCleanup( dm_experiment.reset_policy )
 
     def _run( self, body ):
         return self.execute_dm_send(

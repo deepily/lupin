@@ -3330,6 +3330,7 @@ def _dm_send_impl(
         - missing api_key short-circuits to {"status":"error","reason":"missing_auth_header"}
         - 201 → {"status":"sent", **body_json}
         - 422 → {"status":"error","reason":"recipient_unresolved","detail":...}
+        - 413 → {"status":"error","reason":"dm_too_long","detail":...} (rejecting arm)
         - other status → {"status":"error","reason":"http_<code>","detail":...}
         - transport exception → {"status":"error","reason":"request_failed","detail":str(e)}
     """
@@ -3371,6 +3372,16 @@ def _dm_send_impl(
         except Exception:
             detail = resp.text[ :200 ]
         return { "status": "error", "reason": "recipient_unresolved", "detail": detail }
+    if resp.status_code == 413:
+        # DM-verbosity pilot: the server refuses an over-long DM under the rejecting
+        # arm with 413. Distinct from 422 (recipient_unresolved) — reusing it would
+        # make a too-long DM report as a bad recipient. The server is authoritative;
+        # forward its detail verbatim and never compute the arm client-side.
+        try:
+            detail = resp.json().get( "detail" )
+        except Exception:
+            detail = resp.text[ :200 ]
+        return { "status": "error", "reason": "dm_too_long", "detail": detail }
     return { "status": "error", "reason": f"http_{resp.status_code}", "detail": resp.text[ :200 ] }
 
 
@@ -3505,6 +3516,7 @@ def _dm_respond_impl(
         - missing api_key short-circuits to {"status":"error","reason":"missing_auth_header"}
         - 201 → {"status":"sent", **body_json}
         - 422 → {"status":"error","reason":"recipient_unresolved","detail":...}
+        - 413 → {"status":"error","reason":"dm_too_long","detail":...} (rejecting arm)
         - other status → {"status":"error","reason":"http_<code>","detail":...}
         - transport exception → {"status":"error","reason":"request_failed","detail":str(e)}
     """
@@ -3546,6 +3558,15 @@ def _dm_respond_impl(
         except Exception:
             detail = resp.text[ :200 ]
         return { "status": "error", "reason": "recipient_unresolved", "detail": detail }
+    if resp.status_code == 413:
+        # A too-long reply is refused with 413 the same way a send is (rejecting
+        # arm). Map it to dm_too_long here too so the reply path reports the refusal
+        # cleanly rather than falling through to a bare http_413.
+        try:
+            detail = resp.json().get( "detail" )
+        except Exception:
+            detail = resp.text[ :200 ]
+        return { "status": "error", "reason": "dm_too_long", "detail": detail }
     return { "status": "error", "reason": f"http_{resp.status_code}", "detail": resp.text[ :200 ] }
 
 

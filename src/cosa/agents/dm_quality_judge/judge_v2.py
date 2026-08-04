@@ -35,6 +35,7 @@ References:
 import time
 
 import cosa.utils.util as cu
+from cosa.utils.dm_text import dm_word_count
 from cosa.agents.llm_client_factory import LlmClientFactory
 from cosa.agents.io_models.utils.prompt_template_processor import PromptTemplateProcessor
 
@@ -221,7 +222,7 @@ class DmQualityJudgeV2:
         Returns:
             dict: the full quality grade
         """
-        word_count = len( body_text.split() )
+        word_count = dm_word_count( body_text )
         length     = length_bucket( word_count )
 
         if not self.qualitative_enabled:

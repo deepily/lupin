@@ -41,7 +41,7 @@ import urllib.error
 import urllib.parse
 
 from lupin_cli.claude_code.hooks.lib.hook_common import (
-    read_hook_input, log_payload, emit_json, send_tts
+    read_hook_input, log_payload, log_to_stream, emit_json, send_tts
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import atomic_write_json, build_sender_id_for_cc
 from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
@@ -1117,6 +1117,32 @@ def _resolve_window_tokens():
         return 1_000_000
 
 
+def emit_context_clear_marker( payload ):
+    """
+    Emit one JSONL context-clear marker when the payload reports source == "clear".
+
+    payload["source"] ∈ startup|resume|clear|compact is the authoritative
+    lifecycle signal the hook already receives but never read — exact where the
+    downstream UUID-rotation heuristic under-reports. The DM-verbosity pilot reads
+    this marker to correlate a session's context reset with a reset in its
+    DM-length behaviour.
+
+    Requires:
+        - payload is a dict (the SessionStart hook input)
+
+    Ensures:
+        - writes a {"marker":"context_cleared","source":"clear"} line via
+          log_to_stream when payload["source"] == "clear"
+        - does nothing for any other source (startup/resume/compact/absent)
+        - returns True when a marker was emitted, False otherwise
+    """
+    source = payload.get( "source", "" )
+    if source == "clear":
+        log_to_stream( "session_start", payload, extra={ "marker": "context_cleared", "source": source } )
+        return True
+    return False
+
+
 def main():
 
     # ── Phase 1: Read hook input ──────────────────────────────────────────
@@ -1143,6 +1169,9 @@ def main():
     session_id      = payload.get( "session_id", "" )
     transcript_path = payload.get( "transcript_path", "" )
     cwd             = payload.get( "cwd", "" )
+
+    # ── Context-clear marker (DM-verbosity pilot) ─────────────────────────
+    emit_context_clear_marker( payload )
 
     # 🔎 WITNESS FOR THE SECOND NO-BRIDGE EXIT (row e9822f8d). EVERYTHING in
     # Phase 2 — the lockfile, the /clear detection, the bridge write itself — is

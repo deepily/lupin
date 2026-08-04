@@ -22,6 +22,7 @@ Design: `src/rnd/v0.1.7/2026.05.22-heartbeat-poker-d1d4-class-spec.md` §2.3, §
 
 from __future__ import annotations
 
+import sys
 import uuid
 from typing import Any, Callable, Dict, List, Optional
 
@@ -125,8 +126,12 @@ class LupinCommonsGateway:
         'ai_to_ai' DM the listener delivers directly).
 
         The disk post is authoritative; the push is best-effort — a recipient
-        that misses the push still sees the poke on its next commons poll, so
-        a push failure is swallowed (the disk post has already succeeded).
+        that misses the push still sees the poke on its next commons poll, so a
+        push failure never loses the poke. It is LOGGED, not swallowed: the
+        DM-verbosity pilot's "any arbiter poke fails to send" stopping rule reads
+        this evidence, and a non-2xx RESPONSE (a 413 refusal under the rejecting
+        arm) does NOT raise through requests.post — it must be inspected
+        explicitly or it vanishes exactly as the swallowed exception once let it.
 
         Migrated off the now-deleted `/api/commons/register-question` route
         (cosa-voice token-reduction Phase 4, 2026-06-15) onto `/api/dm/send`,
@@ -154,7 +159,7 @@ class LupinCommonsGateway:
         )
 
         try:
-            self._http_post(
+            response = self._http_post(
                 f"{self._api_base_url}/api/dm/send",
                 json    = {
                     "sender_session_id" : self._sender_session_id,
@@ -171,9 +176,36 @@ class LupinCommonsGateway:
                 headers = { "X-API-Key": self._api_key },
                 timeout = 5,
             )
-        except Exception:
-            # Disk post already succeeded — the notification-native push is best-effort.
-            pass
+        except Exception as exception:
+            # Transport-level failure (timeout, refused connection). The disk post
+            # already succeeded, so the poke survives — but LOG the failure, never
+            # swallow it: the stopping rule needs this evidence.
+            self._log_push_failure( recipient, None, repr( exception ) )
+            return
+
+        # requests.post returns a Response on a 413 rather than raising, so the
+        # refusal only surfaces if the status code is inspected here.
+        if response.status_code >= 400:
+            self._log_push_failure( recipient, response.status_code, response.text )
+
+    def _log_push_failure( self, recipient: RecipientSpec, status_code: Optional[ int ], detail: str ) -> None:
+        """
+        Emit one greppable line recording a poke-push failure.
+
+        Requires:
+            - recipient is a RecipientSpec
+            - status_code is the HTTP status int, or None for a transport-level failure
+            - detail is a short string (exception repr or response body)
+
+        Ensures:
+            - writes one HEARTBEAT_POKE_SEND_FAILED line to stderr naming the
+              recipient and status code — the evidence the stopping rule reads
+        """
+        print(
+            f"[HEARTBEAT_POKE_SEND_FAILED] recipient={recipient.identifier} "
+            f"status={status_code} detail={detail}",
+            file = sys.stderr,
+        )
 
     def last_post_ts( self, recipient: RecipientSpec ) -> Optional[ str ]:
         """

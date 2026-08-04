@@ -1,0 +1,286 @@
+"""
+Unit tests for the DM-verbosity pilot analysis (`analyze_arms.py`, plan item 7).
+
+The headline test is the reason co-primary B exists: a fixture where rejection
+causes a retry with ZERO behaviour change — a 200-word intent becomes a 200-word
+refusal plus a 90-word resend — and co-primary A (all attempts) moves while
+co-primary B (first attempts only) does not. That split is the whole point:
+A alone moving means we measured retries, not restraint.
+
+Loads the dashed-directory script via importlib; its analysis logic imports no
+cosa, so these run in isolation.
+
+Venue: :7999-eligible (pure unit — no server, no DB, no state mutation).
+"""
+
+import os
+import json
+import importlib.util
+
+import pytest
+
+
+def _load_analyzer():
+    lupin_root = os.environ[ "LUPIN_ROOT" ]
+    path       = os.path.join( lupin_root, "src", "scripts", "dm-experiment", "analyze_arms.py" )
+    spec       = importlib.util.spec_from_file_location( "dm_analyze_arms", path )
+    module     = importlib.util.module_from_spec( spec )
+    spec.loader.exec_module( module )
+    return module
+
+
+AN = _load_analyzer()
+
+TUE = "2026-08-04"
+WED = "2026-08-05"
+
+
+def _row( slot_id, arm, words, follows_rejection=False, length_gate="passed",
+          delivery_outcome="delivered", experiment="two-arm-v1" ):
+    return {
+        "slot_id"           : slot_id,
+        "effective_arm"     : arm,
+        "words"             : words,
+        "follows_rejection" : follows_rejection,
+        "length_gate"       : length_gate,
+        "delivery_outcome"  : delivery_outcome,
+        "experiment"        : experiment,
+        "est_tokens"        : words * 6,       # arbitrary chars/4-shaped stand-in
+        "chars"             : words * 6,
+    }
+
+
+def _retry_fixture():
+    """
+    Three matched clock-hour pairs, each the zero-behaviour-change retry pattern:
+      blind day     — one 200-word delivery
+      rejecting day — a 200-word refusal (first attempt) + a 90-word resend
+    A must move (200 vs mean(200,90)=145 excess); B must not (both first attempts 200).
+    """
+    rows = []
+    for hour in ( 9, 10, 11 ):
+        rows.append( _row( f"{TUE}T{hour:02d}", "blind", 200 ) )
+        rows.append( _row( f"{WED}T{hour:02d}", "rejecting", 200, follows_rejection=False,
+                           length_gate="rejected", delivery_outcome="not_attempted" ) )
+        rows.append( _row( f"{WED}T{hour:02d}", "rejecting", 90, follows_rejection=True,
+                           length_gate="passed", delivery_outcome="delivered" ) )
+    return rows
+
+
+# --------------------------------------------------------------------------- #
+# classifier + eligibility                                                    #
+# --------------------------------------------------------------------------- #
+def test_is_experiment_row():
+    assert AN.is_experiment_row( { "experiment": "two-arm-v1" } ) is True
+    assert AN.is_experiment_row( { "arm": "signal_only" } ) is False
+    assert AN.is_experiment_row( {} ) is False
+
+
+def test_eligible_rows_excludes_exempt_and_baseline():
+    rows = [
+        _row( f"{TUE}T09", "blind", 100 ),                                    # eligible
+        _row( f"{TUE}T09", "blind", 100, length_gate="exempt" ),              # arbiter — excluded
+        { "arm": "signal_only", "words": 100, "slot_id": f"{TUE}T09" },       # baseline — excluded
+    ]
+    elig = AN.eligible_rows( rows )
+    assert len( elig ) == 1
+    assert elig[ 0 ][ "length_gate" ] == "passed"
+
+
+def test_slot_date_and_clock_hour():
+    r = _row( f"{WED}T14", "blind", 10 )
+    assert AN.slot_date( r )  == WED
+    assert AN.clock_hour( r ) == 14
+
+
+def test_excess_words():
+    assert AN.excess_words( 200 ) == 140
+    assert AN.excess_words( 60 )  == 0
+    assert AN.excess_words( 10 )  == 0
+
+
+# --------------------------------------------------------------------------- #
+# THE headline split — A moves, B does not                                    #
+# --------------------------------------------------------------------------- #
+def test_coprimary_A_moves_while_B_stays_flat():
+    rows = _retry_fixture()
+    a = AN.co_primary( rows, first_attempts_only=False )
+    b = AN.co_primary( rows, first_attempts_only=True )
+
+    assert a[ "test" ][ "n_pairs" ] == 3
+    assert b[ "test" ][ "n_pairs" ] == 3
+    # A: rejecting mean excess = mean(140,30)=85; blind=140; diff = -55 per pair
+    assert a[ "test" ][ "observed" ] == pytest.approx( -55.0 )
+    # B: first attempts only — both arms 200 words → diff 0, dead flat
+    assert b[ "test" ][ "observed" ] == pytest.approx( 0.0 )
+
+
+def test_matched_pair_diffs_drops_incomplete_hours():
+    rows = [
+        _row( f"{TUE}T09", "blind", 100 ),          # hour 9: blind only — no rejecting mirror
+        _row( f"{TUE}T10", "blind", 100 ),          # hour 10: complete pair
+        _row( f"{WED}T10", "rejecting", 100 ),
+    ]
+    pairs = AN.matched_pair_diffs( rows )
+    assert [ p[ "hour" ] for p in pairs ] == [ 10 ]
+
+
+def test_matched_pair_diffs_empty_pool_returns_empty():
+    assert AN.matched_pair_diffs( [ { "arm": "signal_only", "words": 1, "slot_id": f"{TUE}T09" } ] ) == []
+
+
+def test_first_day_arm_none_when_pair_only_on_later_date():
+    # first_day is TUE (a hour-10 row anchors it); the hour-9 pair lives only on WED,
+    # so first_day_rows is empty → first_day_arm is None (the else branch).
+    rows = [
+        _row( f"{TUE}T10", "blind", 100 ), _row( f"{WED}T10", "rejecting", 100 ),
+        _row( f"{WED}T09", "blind", 100 ), _row( f"{WED}T09", "rejecting", 100 ),
+    ]
+    pairs = { p[ "hour" ]: p for p in AN.matched_pair_diffs( rows ) }
+    assert pairs[ 9 ][ "first_day_arm" ] is None
+
+
+# --------------------------------------------------------------------------- #
+# randomization test + percentile                                            #
+# --------------------------------------------------------------------------- #
+def test_randomization_exact_known_values():
+    res = AN.randomization_test( [ 2.0, 4.0 ] )
+    assert res[ "method" ]      == "exact"
+    assert res[ "n_pairs" ]     == 2
+    assert res[ "observed" ]    == pytest.approx( 3.0 )
+    # null means over the four sign vectors: {-3,-1,1,3}; |m|>=3 for two of them
+    assert res[ "p_value" ]     == pytest.approx( 0.5 )
+    assert res[ "interval_lo" ] == pytest.approx( -3.0 )
+    assert res[ "interval_hi" ] == pytest.approx( 3.0 )
+
+
+def test_randomization_empty():
+    res = AN.randomization_test( [] )
+    assert res[ "n_pairs" ] == 0
+    assert res[ "observed" ] is None
+    assert res[ "method" ] == "none"
+
+
+def test_randomization_sampled_branch_for_large_n():
+    # 19 pairs exceeds the exact-enumeration cap → the sampled path with a fixed seed.
+    res = AN.randomization_test( [ 1.0 ] * 19 )
+    assert res[ "method" ]  == "sampled"
+    assert res[ "n_pairs" ] == 19
+    assert res[ "observed" ] == pytest.approx( 1.0 )
+
+
+def test_percentile_empty_is_none():
+    assert AN._percentile( [], 50 ) is None
+
+
+def test_percentile_basic():
+    assert AN._percentile( [ 0, 1, 2, 3, 4 ], 50 ) == 2
+
+
+# --------------------------------------------------------------------------- #
+# order effect + secondaries                                                  #
+# --------------------------------------------------------------------------- #
+def test_order_effect_groups_by_first_day_arm():
+    rows = _retry_fixture()             # first day is TUE (blind) → all pairs blind-first
+    oe   = AN.order_effect( rows )
+    assert oe[ "blind_first_n" ]        == 3
+    assert oe[ "rejecting_first_n" ]    == 0
+    assert oe[ "blind_first_mean" ]     == pytest.approx( -55.0 )
+    assert oe[ "rejecting_first_mean" ] is None
+
+
+def test_secondaries_metrics():
+    rows = _retry_fixture()
+    sec  = AN.secondaries( rows )
+    # blind: 3 attempts of 200 words, all delivered, all >= 150
+    assert sec[ "blind" ][ "attempts" ]               == 3
+    assert sec[ "blind" ][ "delivered" ]              == 3
+    assert sec[ "blind" ][ "pct_ge_threshold" ]       == pytest.approx( 1.0 )
+    assert sec[ "blind" ][ "attempts_per_delivered" ] == pytest.approx( 1.0 )
+    # rejecting: 6 attempts (3×200 rejected + 3×90 resend), 3 delivered
+    assert sec[ "rejecting" ][ "attempts" ]               == 6
+    assert sec[ "rejecting" ][ "delivered" ]              == 3
+    assert sec[ "rejecting" ][ "pct_ge_threshold" ]       == pytest.approx( 0.5 )
+    assert sec[ "rejecting" ][ "attempts_per_delivered" ] == pytest.approx( 2.0 )
+
+
+def test_secondaries_bunching_and_reject_loops():
+    rows = [
+        _row( f"{TUE}T09", "rejecting", 145 ),   # bunched just below 150
+        _row( f"{TUE}T09", "rejecting", 160, follows_rejection=True, length_gate="rejected" ),  # a loop
+    ]
+    sec = AN.secondaries( rows )[ "rejecting" ]
+    assert sec[ "bunching_share_140_149" ]   == pytest.approx( 0.5 )
+    assert sec[ "repeated_rejection_loops" ] == 1
+
+
+def test_secondaries_empty_arm_is_none():
+    sec = AN.secondaries( [] )[ "blind" ]
+    assert sec[ "attempts" ]         == 0
+    assert sec[ "pct_ge_threshold" ] is None
+    assert sec[ "attempts_per_delivered" ] is None
+    assert sec[ "mean_est_tokens_attempt" ] is None
+
+
+# --------------------------------------------------------------------------- #
+# counts-only                                                                 #
+# --------------------------------------------------------------------------- #
+def test_counts_only_flags_seven_ok_and_short_mismatch():
+    rows = [ _row( f"{TUE}T{h:02d}", "blind", 50 ) for h in range( 9, 16 ) ]   # 7 distinct slots
+    rows += [ _row( f"{TUE}T09", "rejecting", 50 ) ]                            # 1 slot only
+    report = AN.counts_only( rows )
+    assert report[ ( TUE, "blind" ) ]     == { "distinct_slots": 7, "ok": True }
+    assert report[ ( TUE, "rejecting" ) ] == { "distinct_slots": 1, "ok": False }
+
+
+def test_format_counts_empty_and_populated():
+    assert "no eligible experiment rows" in AN.format_counts( [] )
+    text = AN.format_counts( [ _row( f"{TUE}T09", "blind", 50 ) ] )
+    assert "MISMATCH" in text and f"{TUE} blind" in text
+
+
+# --------------------------------------------------------------------------- #
+# load_rows + format_report + main                                            #
+# --------------------------------------------------------------------------- #
+def _write_corpus( tmp_path, rows ):
+    path = tmp_path / "corpus.jsonl"
+    with open( path, "w", encoding="utf-8" ) as fh:
+        fh.write( "\n" )                                   # a blank line must be skipped
+        for r in rows:
+            fh.write( json.dumps( r ) + "\n" )
+    return str( path )
+
+
+def test_load_rows_skips_blank_lines( tmp_path ):
+    path = _write_corpus( tmp_path, _retry_fixture() )
+    assert len( AN.load_rows( path ) ) == 9
+
+
+def test_format_report_contains_both_coprimaries():
+    text = AN.format_report( _retry_fixture() )
+    assert "Co-primary A (all attempts)" in text
+    assert "Co-primary B (first attempts only)" in text
+    assert "chars/4 est" in text                           # est_tokens labelled an estimate
+
+
+def test_main_full_report( tmp_path, capsys ):
+    path = _write_corpus( tmp_path, _retry_fixture() )
+    assert AN.main( [ "--corpus", path ] ) == 0
+    assert "Co-primary A" in capsys.readouterr().out
+
+
+def test_main_counts_only( tmp_path, capsys ):
+    path = _write_corpus( tmp_path, _retry_fixture() )
+    assert AN.main( [ "--corpus", path, "--counts-only" ] ) == 0
+    assert "Slot coverage" in capsys.readouterr().out
+
+
+def test_main_defaults_to_corpus_path( tmp_path, monkeypatch, capsys ):
+    path = _write_corpus( tmp_path, _retry_fixture() )
+    monkeypatch.setattr( AN, "default_corpus_path", lambda: path )
+    assert AN.main( [] ) == 0
+    assert "Co-primary A" in capsys.readouterr().out
+
+
+def test_default_corpus_path_points_at_tmp():
+    assert AN.default_corpus_path().endswith( "/src/tmp/dm_traffic.jsonl" )

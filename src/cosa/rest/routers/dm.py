@@ -25,9 +25,11 @@ import json
 import os
 import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 import cosa.utils.util as cu
+from cosa.utils.dm_text import dm_word_count, WORD_COUNT_VERSION
+from cosa.rest import dm_experiment
 
 # Import dependencies and services
 from ..notification_fifo_queue import NotificationFifoQueue
@@ -328,7 +330,7 @@ def _record_dm_length( body_text ):
     """
     _dm_length_audit[ "count" ]           += 1
     _dm_length_audit[ "total_chars" ]     += len( body_text )
-    _dm_length_audit[ "total_words" ]     += len( body_text.split() )
+    _dm_length_audit[ "total_words" ]     += dm_word_count( body_text )
     _dm_length_audit[ "total_sentences" ] += _count_sentences( body_text )
     print( format_dm_length_audit_line() )
 
@@ -366,7 +368,7 @@ def _running_under_pytest():
 
 
 def _persist_dm_row( *, body_text, from_persona, from_session, from_project,
-                     to_persona, to_session, quality ):
+                     to_persona, to_session, quality, experiment=None ):
     """
     Append ONE JSON line describing this sent DM to the traffic corpus.
 
@@ -374,7 +376,10 @@ def _persist_dm_row( *, body_text, from_persona, from_session, from_project,
         - identities are passed IN by the caller (dm.py send path), where they are
           already resolved — this writer resolves nothing itself
         - quality is DmQualityJudge.judge()'s dict ({"length","directness","tone",
-          "overall"}) or None when the judge toggle is OFF
+          "overall"}) or None when the judge toggle is OFF / the DM was not delivered
+        - experiment is the two-arm-pilot field dict (schedule_id, effective_arm,
+          length_gate, delivery_outcome, ...) when the send fell INSIDE the experiment
+          window, or None outside it
 
     Ensures:
         - SELF-GUARD (row f5d6dc5e): refuses to write the PRODUCTION corpus from any
@@ -408,13 +413,12 @@ def _persist_dm_row( *, body_text, from_persona, from_session, from_project,
         row = {
             "ts"           : datetime.now().isoformat( timespec="seconds" ),
             "origin"       : "test" if under_pytest else "live",
-            "arm"          : get_dm_feedback_arm(),
             "from"         : from_persona,
             "from_session" : from_session,
             "from_project" : from_project,
             "to"           : to_persona,
             "to_session"   : to_session,
-            "words"        : len( body_text.split() ),
+            "words"        : dm_word_count( body_text ),
             "chars"        : len( body_text ),
             "sentences"    : _count_sentences( body_text ),
             "body"         : body_text,
@@ -423,6 +427,14 @@ def _persist_dm_row( *, body_text, from_persona, from_session, from_project,
             "tone"         : quality[ "tone"       ][ "weight" ] if quality else None,
             "overall"      : quality[ "overall"    ][ "weight" ] if quality else None,
         }
+        # BASELINE (outside the window): stamp the legacy feedback arm exactly as before.
+        # IN-WINDOW: the disjoint two-arm vocabulary applies — `arm` is ABSENT and the
+        # experiment fields (effective_arm, length_gate, ...) are merged in, so NO row
+        # ever carries both `arm` and `effective_arm` (María, 2026-08-03).
+        if experiment is None:
+            row[ "arm" ] = get_dm_feedback_arm()
+        else:
+            row.update( experiment )
         with open( _DM_TRAFFIC_JSONL, "a", encoding="utf-8" ) as f:
             f.write( json.dumps( row, ensure_ascii=False ) + "\n" )
     except Exception as e:
@@ -665,6 +677,242 @@ def _record_dm_project( sender_session_id, sender_project ):
     print( format_dm_project_audit_line() )
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Two-arm verbosity pilot — per-slot last-gate memory for `follows_rejection`
+# (plan item 4). Keyed by ( slot_id, sender_session_id ) → the last length_gate
+# outcome that sender saw IN THAT SLOT. Keying on slot_id is what resets the flag
+# at every hour boundary: the first attempt a sender makes in a new block finds no
+# entry and is always follows_rejection=False, so a rejecting hour never inherits a
+# flag from the blind hour before it (the boundary the mirrored schedule protects).
+# ─────────────────────────────────────────────────────────────────────────────
+_last_gate_by_slot_sender = {}
+
+
+def reset_dm_experiment_state():
+    """
+    Clear the per-slot last-gate memory.
+
+    Ensures:
+        - _last_gate_by_slot_sender is empty — a fresh window (and every test) starts
+          with no carried `follows_rejection` state
+    """
+    _last_gate_by_slot_sender.clear()
+
+
+def _prepare_outbound( *, body, target_session_id, build_sender_id, new_id_fn, now_fn ):
+    """
+    Build the sender_id, threading, and EDT-stamped body for an outbound DM.
+
+    This is the PRE-DELIVERY step: nothing here persists or pushes anything, so a
+    failure in it means the DM was never attempted (distinct from a delivery-time
+    failure). Shared verbatim by the baseline and experiment send paths.
+
+    Requires:
+        - build_sender_id( sender_session_id, sender_project ) -> sender_id str
+        - new_id_fn() -> a fresh message id str
+
+    Ensures:
+        - returns ( sender_id, job_id, message_id, thread_id, stamped_body )
+        - job_id is the recipient's 8-char session hash (the persisted addressee)
+        - stamped_body carries the central EDT prefix unless the body is already
+          stamped (idempotent, bug f49a8b34 / bc8d9d82)
+    """
+    sender_id    = build_sender_id( body.sender_session_id, body.sender_project )
+    job_id       = target_session_id[ :8 ]
+    message_id   = new_id_fn()
+    thread_id    = body.thread_id or message_id
+    stamped_body = body.body if is_already_stamped( body.body ) else \
+        f"{format_edt_timestamp( dt=now_fn() if now_fn is not None else None )} {body.body}"
+    return sender_id, job_id, message_id, thread_id, stamped_body
+
+
+def _dispatch_outbound( *, prep, body, authenticated_user_id, notification_queue,
+                        persist_fn, target_session_id, target_persona ):
+    """
+    Persist + push the ai_to_ai DM and build the 201 result dict.
+
+    This is the DELIVERY step: a failure here means delivery was ATTEMPTED (which is
+    why the experiment path marks the row "failed" before calling it). Shared verbatim
+    by the baseline and experiment send paths.
+
+    Requires:
+        - prep is the tuple from _prepare_outbound
+
+    Ensures:
+        - persists the DM (direction='ai_to_ai', stamped body inline) and pushes it
+        - returns the 201 result dict (message_id, thread_id, recipient_session,
+          recipient_session_hash8, recipient_persona, dispatched)
+
+    Raises:
+        - propagates any persist_fn / push_notification error to the caller
+    """
+    sender_id, job_id, message_id, thread_id, stamped_body = prep
+    db_id = persist_fn(
+        sender_id         = sender_id,
+        recipient_user_id = authenticated_user_id,
+        message           = stamped_body,
+        direction         = "ai_to_ai",
+        sender_persona    = body.sender_persona,
+        sender_icon       = body.sender_icon,
+        reply_to          = body.reply_to,
+        thread_id         = thread_id,
+        job_id            = job_id,
+    )
+    notification_queue.push_notification(
+        message        = stamped_body,
+        type           = "user_initiated_message",
+        priority       = "medium",
+        id             = db_id or message_id,
+        sender_id      = sender_id,
+        job_id         = job_id,
+        user_id        = authenticated_user_id,
+        suppress_ding  = True,
+        direction      = "ai_to_ai",
+        sender_persona = body.sender_persona,
+        sender_icon    = body.sender_icon,
+        reply_to       = body.reply_to,
+        thread_id      = thread_id,
+    )
+    return {
+        "http_status"             : 201,
+        "message_id"              : db_id or message_id,
+        "thread_id"               : thread_id,
+        "recipient_session"       : target_session_id,
+        "recipient_session_hash8" : job_id,
+        "recipient_persona"       : target_persona,
+        "dispatched"              : True,
+    }
+
+
+def _execute_experiment( *, body, assignment, arrival_utc, target_session_id, target_persona,
+                         authenticated_user_id, notification_queue, build_sender_id, persist_fn,
+                         new_id_fn, now_fn, grade_quality_fn ):
+    """
+    Run the in-window (experiment) send path: resolve the arm, apply the length gate,
+    and write ONE corpus row that survives a crash (plan items 3/4/5).
+
+    Requires:
+        - assignment is the slot dict from dm_experiment.assignment_at (non-None), so
+          this send fell inside a declared experiment interval
+        - arrival_utc is the SINGLE resolved arrival instant (never re-read here)
+
+    Ensures:
+        - arm resolution: an operator override (if set) beats the scheduled arm; the
+          arbiter sender is exempt from the gate; otherwise the slot's arm applies
+        - length gate: `rejecting` + over threshold + not exempt → HTTP 413 with a body
+          that states the action WITHOUT naming the threshold (undisclosed)
+        - the `quality` key is ABSENT from every in-window 201 (both arms) — a
+          present-but-empty grade would itself signal measurement
+        - exactly ONE corpus row is written, in a finally, so a crash before or during
+          delivery still persists an honest `delivery_outcome` (never null/absent):
+          not_attempted (never delivered), failed (delivery raised), delivered (ok)
+        - `follows_rejection` reflects this sender's previous attempt IN THIS SLOT only
+
+    Raises:
+        - propagates a delivery-time error after the row is flushed with "failed"
+    """
+    policy          = dm_experiment.get_policy()
+    scheduled_arm   = assignment[ "arm" ]
+    slot_id         = assignment[ "slot_id" ]
+    threshold       = policy.reject_threshold
+    is_exempt       = ( body.sender_session_id in policy.exempt_sender_session_ids )
+    override_arm    = policy.override_arm
+    override_reason = policy.override_reason if override_arm is not None else None
+    effective_arm   = override_arm if override_arm is not None else scheduled_arm
+
+    word_count      = dm_word_count( body.body )
+    # eligible_for_rejection: the gate is LIVE for this row (rejecting arm, not exempt).
+    eligible        = ( effective_arm == "rejecting" and not is_exempt )
+
+    # follows_rejection is stamped from the PREVIOUS attempt's gate outcome in THIS slot,
+    # BEFORE this attempt updates the memory below.
+    prior             = _last_gate_by_slot_sender.get( ( slot_id, body.sender_session_id ) )
+    follows_rejection = ( prior == "rejected" )
+
+    if is_exempt:
+        length_gate      = "exempt"
+        exemption_reason = f"arbiter sender exempt: '{body.sender_session_id}' matched the exempt list — gate skipped"
+        # LOG EVERY HIT with the id that matched (María, 2026-08-03). This turns the
+        # three-id hedge into an instrument: if ZERO exemptions fire on Tuesday, the
+        # arbiter's real id is a fourth string and its pokes have been silently
+        # rejected all along — without this line a working exemption and a completely
+        # missed one look identical. Same print convention as the audit lines above.
+        print(
+            f"[dm-experiment] EXEMPTION HIT: sender '{body.sender_session_id}' matched the "
+            f"exempt list — length gate skipped (slot {slot_id})"
+        )
+    elif eligible and word_count > threshold:
+        length_gate      = "rejected"
+        exemption_reason = None
+    else:
+        length_gate      = "passed"
+        exemption_reason = None
+
+    # Record THIS attempt's gate for the NEXT attempt in this slot (per-sender, per-slot).
+    _last_gate_by_slot_sender[ ( slot_id, body.sender_session_id ) ] = length_gate
+
+    row = {
+        "schedule_id"            : policy.schedule_id,
+        "slot_id"                : slot_id,
+        "scheduled_arm"          : scheduled_arm,
+        "effective_arm"          : effective_arm,
+        "assigned_at_utc"        : arrival_utc.isoformat(),
+        "reject_threshold"       : threshold,
+        "eligible_for_rejection" : eligible,
+        "exemption_reason"       : exemption_reason,
+        "length_gate"            : length_gate,
+        "delivery_outcome"       : "not_attempted",
+        # The delivery MOMENT (UTC ISO), or None when never delivered. `ts` is the
+        # row-WRITE time; the delivery-delay secondary (delivered_at − assigned_at_utc)
+        # is unrecoverable after Tuesday if it is not captured now (Cheech, 2026-08-03).
+        "delivered_at"           : None,
+        "follows_rejection"      : follows_rejection,
+        "est_tokens"             : len( body.body ) // 4,   # chars/4 ESTIMATE — no tokenizer before Tuesday
+        "word_count_version"     : WORD_COUNT_VERSION,
+        "override_reason"        : override_reason,
+        "experiment"             : policy.experiment,
+    }
+
+    quality_for_corpus = None
+    try:
+        if length_gate == "rejected":
+            # Undisclosed refusal: state the action, never the number (413, NOT 422 —
+            # the client maps 422 to recipient_unresolved, cosa_voice_mcp.py:3370).
+            return {
+                "http_status" : 413,
+                "detail"      : "DM refused: too long. Cut it substantially and resend.",
+            }
+        # PRE-DELIVERY: a crash in prep leaves delivery_outcome at not_attempted.
+        prep = _prepare_outbound(
+            body=body, target_session_id=target_session_id,
+            build_sender_id=build_sender_id, new_id_fn=new_id_fn, now_fn=now_fn,
+        )
+        # DELIVERY: mark "failed" first, so a persist/push raise persists an honest value.
+        row[ "delivery_outcome" ] = "failed"
+        result = _dispatch_outbound(
+            prep=prep, body=body, authenticated_user_id=authenticated_user_id,
+            notification_queue=notification_queue, persist_fn=persist_fn,
+            target_session_id=target_session_id, target_persona=target_persona,
+        )
+        row[ "delivery_outcome" ] = "delivered"
+        row[ "delivered_at" ]     = datetime.now( timezone.utc ).isoformat()
+        # The judge runs in-window for the corpus + audit tally; its grade is NOT
+        # returned to the sender (quality key absent in both arms).
+        quality_for_corpus = grade_quality_fn( body.body )
+        return result
+    finally:
+        _persist_dm_row(
+            body_text    = body.body,
+            from_persona = body.sender_persona,
+            from_session = body.sender_session_id,
+            from_project = body.sender_project,
+            to_persona   = target_persona,
+            to_session   = target_session_id,
+            quality      = quality_for_corpus,
+            experiment   = row,
+        )
+
+
 def execute_dm_send(
     *,
     authenticated_user_id,
@@ -676,6 +924,7 @@ def execute_dm_send(
     new_id_fn = None,
     now_fn    = None,
     grade_quality_fn = None,
+    arrival_utc_fn   = None,
 ):
     """
     Pure-logic core for POST /api/dm/send — notification-native AI↔AI DM.
@@ -734,6 +983,12 @@ def execute_dm_send(
     # which returns None (no `quality` field) whenever the judge toggle is OFF.
     if grade_quality_fn is None:
         grade_quality_fn = _maybe_grade_dm_quality
+    # Resolve the experiment arrival instant ONCE, here, before any slow resolution —
+    # then thread it through the gate, logging, and response so a send that crosses an
+    # hour boundary is scored against a single arm (arrival_utc_fn is the test seam).
+    if arrival_utc_fn is None:
+        arrival_utc_fn = lambda: datetime.now( timezone.utc )
+    arrival_utc = arrival_utc_fn()
 
     resolution = resolve_recipient_fn(
         recipient_session_id  = body.recipient_session_id,
@@ -776,69 +1031,36 @@ def execute_dm_send(
                 f"sends sender_project."
             ),
         }
-    sender_id         = build_sender_id( body.sender_session_id, body.sender_project )
-    job_id            = target_session_id[ :8 ]
+    # Two-arm pilot fork (plan item 3): resolve the slot for the ONE arrival instant.
+    # None → outside every interval → today's exact baseline behaviour. A slot dict →
+    # the experiment path (gate + suppressed grade + crash-safe corpus row).
+    assignment = dm_experiment.assignment_at( arrival_utc )
+    if assignment is not None:
+        return _execute_experiment(
+            body                  = body,
+            assignment            = assignment,
+            arrival_utc           = arrival_utc,
+            target_session_id     = target_session_id,
+            target_persona        = target_persona,
+            authenticated_user_id = authenticated_user_id,
+            notification_queue    = notification_queue,
+            build_sender_id       = build_sender_id,
+            persist_fn            = persist_fn,
+            new_id_fn             = new_id_fn,
+            now_fn                = now_fn,
+            grade_quality_fn      = grade_quality_fn,
+        )
 
-    message_id = new_id_fn()
-    thread_id  = body.thread_id or message_id
-
-    # Central EDT prefix on the outbound body — identical bracketed shape to the
-    # arbiter pings (f"[{stamp}] {body}"). now_fn is the test-only deterministic seam.
-    # IDEMPOTENT (bug f49a8b34 / bc8d9d82): skip the prepend when the body ALREADY
-    # leads with a bracketed stamp (an arbiter ping pre-stamped via _route, then
-    # pushed through this chokepoint) — else we'd produce a "[push-ts] [compose-ts]"
-    # double. An un-stamped body (human dm_send) still gets the central stamp.
-    stamped_body = body.body if is_already_stamped( body.body ) else \
-        f"{format_edt_timestamp( dt=now_fn() if now_fn is not None else None )} {body.body}"
-
-    db_id = persist_fn(
-        sender_id         = sender_id,
-        recipient_user_id = authenticated_user_id,
-        message           = stamped_body,
-        direction         = "ai_to_ai",
-        sender_persona    = body.sender_persona,
-        sender_icon       = body.sender_icon,
-        reply_to          = body.reply_to,
-        thread_id         = thread_id,
-        job_id            = job_id,
+    # ── BASELINE (outside the experiment window) — today's behaviour, unchanged ──
+    prep   = _prepare_outbound(
+        body=body, target_session_id=target_session_id,
+        build_sender_id=build_sender_id, new_id_fn=new_id_fn, now_fn=now_fn,
     )
-
-    notification_queue.push_notification(
-        message        = stamped_body,
-        type           = "user_initiated_message",
-        priority       = "medium",
-        id             = db_id or message_id,
-        sender_id      = sender_id,
-        job_id         = job_id,
-        user_id        = authenticated_user_id,
-        suppress_ding  = True,
-        direction      = "ai_to_ai",
-        sender_persona = body.sender_persona,
-        sender_icon    = body.sender_icon,
-        reply_to       = body.reply_to,
-        thread_id      = thread_id,
+    result = _dispatch_outbound(
+        prep=prep, body=body, authenticated_user_id=authenticated_user_id,
+        notification_queue=notification_queue, persist_fn=persist_fn,
+        target_session_id=target_session_id, target_persona=target_persona,
     )
-
-    result = {
-        "http_status"       : 201,
-        "message_id"        : db_id or message_id,
-        "thread_id"         : thread_id,
-        # BOTH SHAPES, EACH UNDER ITS OWN NAME (Rio's ruling, 2026-07-21).
-        # `recipient_session` is the FULL id and is UNCHANGED — it is a
-        # documented agent-facing contract, and `dm_send` accepts
-        # `recipient_session_id` for precise addressing, so a caller
-        # round-tripping this receipt into a SUBSEQUENT SEND needs the full
-        # value. Truncating it to match the list side would have quietly cost
-        # that. `recipient_session_hash8` is the width actually PERSISTED
-        # (job_id) and the width `/api/dm/list` filters on — so a caller can
-        # feed the right shape to the right place without knowing that a field
-        # named "job_id" is the addressee. One name per shape, nothing
-        # discarded, and no name meaning two things. See row 2565956b.
-        "recipient_session"       : target_session_id,
-        "recipient_session_hash8" : job_id,
-        "recipient_persona" : target_persona,
-        "dispatched"        : True,
-    }
 
     # Phase 2: append the judge's grade of the composed body IFF the toggle is on.
     # OFF (control) → grade_quality_fn returns None → the result shape is the Phase 1
@@ -849,10 +1071,9 @@ def execute_dm_send(
         result[ "quality" ] = quality
 
     # Row 334569d6: append this SENT DM (measurements + body + grades) to the per-DM
-    # JSONL corpus. Placed here, immediately before `return result`, on purpose: the
-    # DM was persisted (persist_fn) and pushed (push_notification) above and
-    # dispatched is already True, so this write runs AFTER delivery and rides along
-    # with the judge grades computed one line up. Fail-soft lives inside the writer.
+    # JSONL corpus. Runs AFTER delivery and rides along with the judge grades computed
+    # one line up. Fail-soft lives inside the writer. `experiment=None` → the row keeps
+    # its legacy `arm` stamp (no two-arm fields), the outside-window contract.
     _persist_dm_row(
         body_text    = body.body,
         from_persona = body.sender_persona,

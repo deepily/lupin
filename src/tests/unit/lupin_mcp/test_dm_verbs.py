@@ -90,6 +90,20 @@ def test_respond_422_non_json_falls_back_to_text():
     assert out[ "detail" ] == "boom-text"
 
 
+def test_respond_413_maps_to_dm_too_long():
+    # A too-long reply is refused with 413 just like a send — mapped to dm_too_long,
+    # not left to fall through to a bare http_413.
+    out = _respond( lambda *a, **k: _Resp( 413, { "detail": "too long, resubmit a shorter version" } ) )
+    assert out[ "reason" ] == "dm_too_long"
+    assert "too long" in out[ "detail" ]
+
+
+def test_respond_413_non_json_falls_back_to_text():
+    out = _respond( lambda *a, **k: _Resp( 413, json_data=None, text="too long" ) )
+    assert out[ "reason" ] == "dm_too_long"
+    assert out[ "detail" ] == "too long"
+
+
 def test_respond_other_status_maps_to_http_reason():
     out = _respond( lambda *a, **k: _Resp( 500, text="kaboom" ) )
     assert out[ "reason" ] == "http_500"
