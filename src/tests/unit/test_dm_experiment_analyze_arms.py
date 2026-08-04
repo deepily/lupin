@@ -305,3 +305,119 @@ def test_main_defaults_to_corpus_path( tmp_path, monkeypatch, capsys ):
 
 def test_default_corpus_path_points_at_tmp():
     assert AN.default_corpus_path().endswith( "/src/tmp/dm_traffic.jsonl" )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Delivery-delay secondary (row 1fc6b180)
+#
+# The stamp this reads — `delivered_at` on the corpus row — landed AFTER the
+# corpus started filling, so the honest hazard is a mean computed over a
+# denominator nobody named. Every test below pins BOTH the value and the count
+# it was built from; a mean whose n is unstated is what these exist to prevent.
+# ═════════════════════════════════════════════════════════════════════════════
+
+def _timed_row( slot_id, arm, words, assigned=None, delivered=None, **kw ):
+    """A _row with the two delivery stamps attached (either may be omitted)."""
+    row = _row( slot_id, arm, words, **kw )
+    if assigned  is not None: row[ "assigned_at_utc" ] = assigned
+    if delivered is not None: row[ "delivered_at" ]    = delivered
+    return row
+
+
+def test_parse_ts_returns_none_for_missing_or_unparseable():
+    assert AN._parse_ts( None )        is None
+    assert AN._parse_ts( "" )          is None
+    assert AN._parse_ts( "not-a-ts" )  is None
+
+
+def test_parse_ts_treats_naive_as_utc_and_preserves_aware():
+    naive = AN._parse_ts( "2026-08-04T13:53:17" )
+    aware = AN._parse_ts( "2026-08-04T13:53:17+00:00" )
+    assert naive.utcoffset().total_seconds() == 0
+    assert naive == aware                      # the whole point: the two forms compare
+
+
+def test_delivery_delay_seconds_computes_the_gap():
+    row = _timed_row( f"{TUE}T09", "rejecting", 23,
+                      assigned  = "2026-08-04T13:53:17.445054+00:00",
+                      delivered = "2026-08-04T13:53:17.482331+00:00" )
+    assert AN.delivery_delay_seconds( row ) == pytest.approx( 0.037277, abs=1e-6 )
+
+
+def test_delivery_delay_seconds_mixes_naive_and_aware_stamps():
+    """The live corpus writes one stamp naive and one aware — this must not raise."""
+    row = _timed_row( f"{TUE}T09", "rejecting", 23,
+                      assigned  = "2026-08-04T13:00:00",
+                      delivered = "2026-08-04T13:00:02+00:00" )
+    assert AN.delivery_delay_seconds( row ) == pytest.approx( 2.0 )
+
+
+@pytest.mark.parametrize( "assigned,delivered", [
+    ( None,                        "2026-08-04T13:53:17+00:00" ),
+    ( "2026-08-04T13:53:17+00:00", None                        ),
+    ( None,                        None                        ),
+    ( "garbage",                   "2026-08-04T13:53:17+00:00" ),
+] )
+def test_delivery_delay_seconds_is_none_without_both_stamps( assigned, delivered ):
+    row = _timed_row( f"{TUE}T09", "rejecting", 23, assigned=assigned, delivered=delivered )
+    assert AN.delivery_delay_seconds( row ) is None
+
+
+def test_delivery_delay_seconds_reports_a_backwards_clock_rather_than_hiding_it():
+    row = _timed_row( f"{TUE}T09", "rejecting", 23,
+                      assigned  = "2026-08-04T13:53:17+00:00",
+                      delivered = "2026-08-04T13:53:15+00:00" )
+    assert AN.delivery_delay_seconds( row ) == pytest.approx( -2.0 )
+
+
+def test_secondaries_delivery_delay_means_over_stamped_rows_only():
+    rows = [
+        _timed_row( f"{TUE}T09", "rejecting", 20,
+                    assigned="2026-08-04T13:00:00+00:00", delivered="2026-08-04T13:00:02+00:00" ),
+        _timed_row( f"{TUE}T09", "rejecting", 20,
+                    assigned="2026-08-04T13:10:00+00:00", delivered="2026-08-04T13:10:04+00:00" ),
+        # legacy row, written before the stamp landed — must NOT enter the mean
+        _row( f"{TUE}T09", "rejecting", 20 ),
+        _timed_row( f"{WED}T09", "blind", 20,
+                    assigned="2026-08-05T13:00:00+00:00", delivered="2026-08-05T13:00:10+00:00" ),
+    ]
+    sec = AN.secondaries( rows )
+    assert sec[ "rejecting" ][ "mean_delivery_delay_s" ] == pytest.approx( 3.0 )
+    assert sec[ "rejecting" ][ "delivery_delay_n" ]      == 2      # NOT 3 — the legacy row is out
+    assert sec[ "rejecting" ][ "delivered" ]             == 3      # …but it is still a delivery
+    assert sec[ "blind" ][ "mean_delivery_delay_s" ]     == pytest.approx( 10.0 )
+    assert sec[ "blind" ][ "delivery_delay_n" ]          == 1
+
+
+def test_secondaries_delivery_delay_ignores_undelivered_rows():
+    rows = [
+        _timed_row( f"{TUE}T09", "rejecting", 200, length_gate="rejected",
+                    delivery_outcome="rejected",
+                    assigned="2026-08-04T13:00:00+00:00", delivered="2026-08-04T13:00:99+00:00" ),
+        _timed_row( f"{TUE}T09", "rejecting", 20,
+                    assigned="2026-08-04T13:10:00+00:00", delivered="2026-08-04T13:10:05+00:00" ),
+    ]
+    sec = AN.secondaries( rows )
+    assert sec[ "rejecting" ][ "mean_delivery_delay_s" ] == pytest.approx( 5.0 )
+    assert sec[ "rejecting" ][ "delivery_delay_n" ]      == 1
+
+
+def test_secondaries_delivery_delay_is_none_with_zero_stamped_rows():
+    """An arm with deliveries but no stamps reports n/a over n=0, never 0.0 over n=0."""
+    sec = AN.secondaries( [ _row( f"{TUE}T09", "rejecting", 20 ) ] )
+    assert sec[ "rejecting" ][ "mean_delivery_delay_s" ] is None
+    assert sec[ "rejecting" ][ "delivery_delay_n" ]      == 0
+    assert sec[ "blind" ][ "mean_delivery_delay_s" ]     is None
+    assert sec[ "blind" ][ "delivery_delay_n" ]          == 0
+
+
+def test_format_report_shows_delivery_delay_with_its_denominator():
+    rows = [
+        _timed_row( f"{TUE}T09", "rejecting", 20,
+                    assigned="2026-08-04T13:00:00+00:00", delivered="2026-08-04T13:00:02+00:00" ),
+        _timed_row( f"{WED}T09", "blind", 20,
+                    assigned="2026-08-05T13:00:00+00:00", delivered="2026-08-05T13:00:04+00:00" ),
+    ]
+    out = AN.format_report( rows )
+    assert "delivery_delay_s=2.000 (n=1)" in out
+    assert "delivery_delay_s=4.000 (n=1)" in out

@@ -39,6 +39,7 @@ if src_path not in sys.path: sys.path.insert( 0, src_path )                # pra
 import json
 import random
 import argparse
+import datetime
 
 # ---------------------------------------------------------------------------
 EXPERIMENT_TAG                 = "two-arm-v1"
@@ -293,13 +294,56 @@ def _repeated_rejection_loops( arm_rows ):
                 if r.get( "length_gate" ) == "rejected" and r.get( "follows_rejection", False ) )
 
 
+def _parse_ts( value ):
+    """
+    Requires:
+        - value is an ISO-8601 string, or None
+
+    Ensures:
+        - returns a timezone-aware datetime, treating a naive stamp as UTC
+          (the corpus writes `ts` naive and `delivered_at`/`assigned_at_utc`
+          aware — comparing the two forms raises, so both are normalised here)
+        - returns None for None or an unparseable string, so one malformed
+          stamp drops ONE row instead of failing the whole analysis
+    """
+    if not value: return None
+    try:
+        parsed = datetime.datetime.fromisoformat( value )
+    except ValueError:
+        return None
+    if parsed.tzinfo is None: parsed = parsed.replace( tzinfo=datetime.timezone.utc )
+    return parsed
+
+
+def delivery_delay_seconds( row ):
+    """
+    Ensures:
+        - returns (delivered_at - assigned_at_utc) in seconds for a row that
+          carries BOTH stamps, else None
+        - a negative delta is returned as-is rather than clamped — a clock
+          that runs backwards is a finding, not something to hide
+        - `assigned_at_utc` is the arm-assignment instant, so this measures the
+          delay the SENDER waited, not the corpus write latency
+    """
+    assigned  = _parse_ts( row.get( "assigned_at_utc" ) )
+    delivered = _parse_ts( row.get( "delivered_at" ) )
+    if assigned is None or delivered is None: return None
+    return ( delivered - assigned ).total_seconds()
+
+
 def secondaries( rows ):
     """
     Ensures:
         - returns per-arm secondary metrics: pct >= threshold, attempts per
           delivered message, bunching share in [140,149], repeated-rejection
-          loops, and mean est_tokens per attempt and per delivered message
+          loops, mean est_tokens per attempt and per delivered message, and
+          mean delivery delay in seconds
         - est_tokens is labelled an estimate (chars/4) wherever reported
+        - mean_delivery_delay_s reports alongside delivery_delay_n, the number
+          of delivered rows that actually carried both stamps — a mean over an
+          unnamed denominator is not a measurement. Rows written before the
+          `delivered_at` stamp landed contribute nothing and are excluded here,
+          so the count is how many rows the number is actually built from
     """
     out = {}
     for arm in ( BLIND, REJECTING ):
@@ -308,6 +352,7 @@ def secondaries( rows ):
         delivered = [ r for r in arm_rows if r.get( "delivery_outcome" ) == DELIVERED ]
         over      = [ r for r in arm_rows if r[ "words" ] >= REJECT_THRESHOLD ]
         bunched   = [ r for r in arm_rows if BUNCHING_LOW <= r[ "words" ] < REJECT_THRESHOLD ]
+        delays    = [ d for d in ( delivery_delay_seconds( r ) for r in delivered ) if d is not None ]
         out[ arm ] = {
             "attempts"                  : n,
             "delivered"                 : len( delivered ),
@@ -317,6 +362,8 @@ def secondaries( rows ):
             "repeated_rejection_loops"  : _repeated_rejection_loops( arm_rows ),
             "mean_est_tokens_attempt"   : _mean( [ r[ "est_tokens" ] for r in arm_rows ] ),
             "mean_est_tokens_delivered" : _mean( [ r[ "est_tokens" ] for r in delivered ] ),
+            "mean_delivery_delay_s"     : _mean( delays ),
+            "delivery_delay_n"          : len( delays ),
         }
     return out
 
@@ -369,7 +416,8 @@ def format_report( rows ):
             f"pct>=150={_fmt(s['pct_ge_threshold'])} attempts/delivered={_fmt(s['attempts_per_delivered'])} "
             f"bunch[140,149]={_fmt(s['bunching_share_140_149'])} reject_loops={s['repeated_rejection_loops']} "
             f"est_tokens/attempt={_fmt(s['mean_est_tokens_attempt'])} (chars/4 est) "
-            f"est_tokens/delivered={_fmt(s['mean_est_tokens_delivered'])} (chars/4 est)" )
+            f"est_tokens/delivered={_fmt(s['mean_est_tokens_delivered'])} (chars/4 est) "
+            f"delivery_delay_s={_fmt(s['mean_delivery_delay_s'])} (n={s['delivery_delay_n']})" )
     return "\n".join( lines )
 
 
@@ -417,4 +465,4 @@ def main( argv=None ):
 
 
 if __name__ == "__main__":
-    sys.exit( main() )
+    sys.exit( main() )                                                     # pragma: no cover — CLI entry; main() itself is covered directly
