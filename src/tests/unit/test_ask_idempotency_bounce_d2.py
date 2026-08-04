@@ -56,19 +56,35 @@ def test_d2_ask_idempotency_survives_a_bounce():
     key = "d2-bounce-" + uuid.uuid4().hex
     original_nid = "notif-original-1"
 
+    # HERMETICITY (Tiffany, 2026-08-03): snapshot the module's original bindings BEFORE
+    # the reload. `importlib.reload` re-executes the module, rebinding every function in
+    # it — including `get_notification_queue` — to a NEW object, and reload has no undo.
+    # Left un-restored, that reloaded module outlived this test: any LATER test that keyed
+    # a dependency override on a RUNTIME-imported `notifications.get_notification_queue`
+    # then keyed the new object, while dm.py's route Depends still held the one captured at
+    # dm import — the override missed and the send fell through to the real (None-in-tests)
+    # queue, 500-ing a DM-send test ~150 files downstream. Restoring in `finally` contains
+    # the reload's blast radius to this test.
+    _saved_bindings = dict( N.__dict__ )
+
     # In-process, Clayton's index already dedups — sanity that we are testing the RIGHT
     # thing (not a vacuous red): the mapping resolves before the bounce.
     N._record_ask_idempotency( key, original_nid )
     assert N._lookup_ask_idempotency( key ) == original_nid
 
-    # Simulate a :7999 bounce: a restart re-imports the module with fresh, empty globals.
-    # importlib.reload reproduces exactly that — every in-memory index is wiped.
-    N = importlib.reload( N )
+    try:
+        # Simulate a :7999 bounce: a restart re-imports the module with fresh, empty globals.
+        # importlib.reload reproduces exactly that — every in-memory index is wiped.
+        N = importlib.reload( N )
 
-    # DESIRED (durable idempotency): the same key still resolves to the original ask
-    # after the restart, so the re-POST re-attaches instead of minting a duplicate.
-    # ACTUAL today: the in-memory index did not survive → None → duplicate card.
-    assert N._lookup_ask_idempotency( key ) == original_nid, (
-        "ask idempotency did not survive a simulated bounce — the same key mints a new "
-        "card after a restart (the D2 cross-bounce residual)"
-    )
+        # DESIRED (durable idempotency): the same key still resolves to the original ask
+        # after the restart, so the re-POST re-attaches instead of minting a duplicate.
+        # ACTUAL today: the in-memory index did not survive → None → duplicate card.
+        assert N._lookup_ask_idempotency( key ) == original_nid, (
+            "ask idempotency did not survive a simulated bounce — the same key mints a new "
+            "card after a restart (the D2 cross-bounce residual)"
+        )
+    finally:
+        # Put the pre-reload bindings back so module identity is preserved session-wide.
+        N.__dict__.clear()
+        N.__dict__.update( _saved_bindings )
