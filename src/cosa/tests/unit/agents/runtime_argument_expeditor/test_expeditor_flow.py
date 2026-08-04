@@ -294,5 +294,123 @@ class TestExpediteFlow( unittest.TestCase ):
             self.assertIsNone( o.expedite( DR, 'query="AI"', "u@x", "s", "uid", "research AI" ) )
 
 
+class TestPresentButUnresolvedFixB( unittest.TestCase ):
+    """
+    Fix B (row bd0ce120): when a fuzzy_file_match arg is PRESENT but its value is
+    not an existing path (a bare topic word "KISS" from a natural utterance), the
+    expeditor must run the SAME fuzzy matcher rather than hand the topic downstream
+    where the podcast job treats it as a file path and dies with FileNotFoundError
+    (job.py:216-223). SCOPED to the podcast command — presentation's `source` arg
+    (also fuzzy_file_match) must be structurally untouched.
+
+    Each behaviour test is control-proven: the docstring predicts the exact failure
+    text if the guarded code is mutated away, so a green here is a proof, not a claim.
+
+    Added 2026-08-04 by Clayton 😎 (SWE crew lane B, Fix B — Rick-ruled A+B parallel).
+    """
+
+    def test_helper_value_is_existing_path( self ):
+        # The trigger predicate mirrors job.py:216-223. Bare topic → False (fires
+        # the resolve); a real path → True (leaves it); None/"" → False.
+        o = _mk_expeditor()
+        with patch.object( ex_mod.cu, "get_project_root", return_value="/p" ), \
+             patch.object( ex_mod.os.path, "exists", side_effect=lambda p: p == "/p/io/real.md" ):
+            self.assertFalse( o._value_is_existing_path( "KISS" ) )          # bare topic → not a path
+            self.assertTrue(  o._value_is_existing_path( "io/real.md" ) )    # relative → resolved under root
+            self.assertFalse( o._value_is_existing_path( None ) )
+            self.assertFalse( o._value_is_existing_path( "" ) )
+        with patch.object( ex_mod.os.path, "exists", return_value=True ):
+            self.assertTrue( o._value_is_existing_path( "/abs/existing.md" ) )  # absolute → tested as-is
+
+    def test_present_unresolvable_research_runs_fuzzy_resolve( self ):
+        # CORE. research present="KISS" (not missing) + not an existing path →
+        # my new block runs the fuzzy matcher, seeded with original_question, and
+        # OVERWRITES research with the resolved path.
+        # CONTROL — remove the Fix-B block: research stays "KISS" and this fails
+        #   AssertionError: 'KISS' != '/io/x/kiss-protocol.md'
+        o = _mk_expeditor( debug=True )
+        with _FlowFixture( o, user_visible=[ "research" ],
+                           parsed=_expeditor_resp( present="research=KISS" ) ), \
+             patch.object( ex_mod.os.path, "exists", return_value=False ), \
+             patch.object( o, "_handle_fuzzy_file_match", return_value="/io/x/kiss-protocol.md" ) as fuzzy, \
+             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r: a ):
+            out = o.expedite( PG, "", "u@x", "s", "uid", "make me a podcast on KISS" )
+        self.assertEqual( out[ "research" ], "/io/x/kiss-protocol.md" )   # resolved, NOT the bare topic
+        self.assertEqual( fuzzy.call_args.kwargs[ "original_question" ], "make me a podcast on KISS" )
+
+    def test_present_existing_path_research_left_untouched( self ):
+        # CONTROL (idempotence). research present AND already a real path → my block
+        # must SKIP it; no re-resolve, value unchanged.
+        # If the block fired anyway it would overwrite with the mock — so a mutation
+        # dropping the os.path.exists guard fails: '/io/x/other.md' != 'io/deep-research/u/report.md'
+        o = _mk_expeditor()
+        with _FlowFixture( o, user_visible=[ "research" ],
+                           parsed=_expeditor_resp( present="research=io/deep-research/u/report.md" ) ), \
+             patch.object( ex_mod.os.path, "exists", return_value=True ), \
+             patch.object( o, "_handle_fuzzy_file_match", return_value="/io/x/other.md" ) as fuzzy, \
+             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r: a ):
+            out = o.expedite( PG, "", "u@x", "s", "uid", "make a podcast from io/deep-research/u/report.md" )
+        self.assertEqual( out[ "research" ], "io/deep-research/u/report.md" )
+        fuzzy.assert_not_called()
+
+    def test_present_unresolvable_scoped_to_podcast_presentation_untouched( self ):
+        # SCOPE CONTROL (Rio's leak check). presentation `source` present="KISS",
+        # not a path — my Fix-B block is fenced to the podcast command, so it must
+        # NOT fire here; presentation is structurally unchanged, source stays "KISS".
+        # CONTROL — remove the `command == PG` fence: source would resolve and this
+        #   fails AssertionError: '/io/x/deck.md' != 'KISS'  (and fuzzy.assert_not_called fails)
+        o = _mk_expeditor()
+        with _FlowFixture( o, user_visible=[ "source" ],
+                           parsed=_expeditor_resp( present="source=KISS" ) ), \
+             patch.object( ex_mod.os.path, "exists", return_value=False ), \
+             patch.object( o, "_handle_fuzzy_file_match", return_value="/io/x/deck.md" ) as fuzzy, \
+             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r: a ):
+            out = o.expedite( PR, "", "u@x", "s", "uid", "make a deck on KISS" )
+        self.assertEqual( out[ "source" ], "KISS" )   # untouched — Fix B does not widen presentation
+        fuzzy.assert_not_called()
+
+    def test_present_unresolvable_cancel_returns_none( self ):
+        # No-crash contract: when the fuzzy resolve's fall-through prompt is
+        # cancelled (handler returns None), expedite returns None cleanly — never a
+        # crash, never the bare topic passed downstream.
+        o = _mk_expeditor()
+        with _FlowFixture( o, user_visible=[ "research" ],
+                           parsed=_expeditor_resp( present="research=KISS" ) ), \
+             patch.object( ex_mod.os.path, "exists", return_value=False ), \
+             patch.object( o, "_handle_fuzzy_file_match", return_value=None ):
+            self.assertIsNone( o.expedite( PG, "", "u@x", "s", "uid", "make me a podcast on KISS" ) )
+
+    def test_missing_research_resolved_by_loop_is_not_double_resolved( self ):
+        # GUARD (regression caught by both-roots): when research was MISSING, the
+        # missing-args loop's special handler already resolves it. Fix B must NOT
+        # re-run the matcher on that just-resolved value — even when the resolved
+        # value isn't a real path on disk (a mock here, or a not-yet-written file).
+        # The missing-loop owns the missing case; Fix B owns only the present case.
+        # CONTROL — drop the `if arg_name in missing` guard: fuzzy is called TWICE
+        #   and this fails: "Expected '_handle_fuzzy_file_match' to be called once. Called 2 times."
+        o = _mk_expeditor()
+        with _FlowFixture( o, user_visible=[ "research" ], parsed=_expeditor_resp() ), \
+             patch.object( ex_mod.os.path, "exists", return_value=False ), \
+             patch.object( o, "_build_request_context", return_value="ctx" ), \
+             patch.object( o, "_handle_fuzzy_file_match", return_value="/io/x/resolved.md" ) as fuzzy, \
+             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r: a ):
+            out = o.expedite( PG, "", "u@x", "s", "uid", "make me a podcast on KISS" )
+        fuzzy.assert_called_once()   # missing-loop resolves it once; Fix B must NOT re-fire
+        self.assertEqual( out[ "research" ], "/io/x/resolved.md" )
+
+    def test_present_unresolvable_yaml_sets_render_only( self ):
+        # A .yaml resolve through the present-but-unresolvable branch sets render_only,
+        # matching the missing-arg branch's YAML handling.
+        o = _mk_expeditor()
+        with _FlowFixture( o, user_visible=[ "research" ],
+                           parsed=_expeditor_resp( present="research=KISS" ) ), \
+             patch.object( ex_mod.os.path, "exists", return_value=False ), \
+             patch.object( o, "_handle_fuzzy_file_match", return_value="/io/x/deck.yaml" ), \
+             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r: a ):
+            out = o.expedite( PG, "", "u@x", "s", "uid", "make me a podcast on KISS" )
+        self.assertEqual( out[ "research" ], "/io/x/deck.yaml" )
+        self.assertEqual( out[ "render_only" ], "true" )
+
+
 if __name__ == "__main__":
     unittest.main()

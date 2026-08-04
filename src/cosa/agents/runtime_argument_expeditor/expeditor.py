@@ -387,6 +387,36 @@ class RuntimeArgumentExpeditor:
                     return None
                 final_args[ arg_name ] = value
 
+        # Fix B (row bd0ce120): a special-handler arg can be PRESENT yet still
+        # unresolved. The LLM merge fills `research` with a bare topic word
+        # ("KISS") extracted from a natural utterance, so it is NOT in `missing`
+        # above and its fuzzy handler is skipped — then the bare topic is handed
+        # downstream where a file path is expected and the job dies with
+        # FileNotFoundError at runtime (podcast_generator/job.py:216-223). Treat a
+        # present-but-non-existing-path value as UNRESOLVED and run the same fuzzy
+        # matcher the missing case uses. SCOPED to the podcast command so the
+        # presentation generator's `source` arg (also a fuzzy_file_match consumer)
+        # is STRUCTURALLY untouched — same command fence as the auto-resolve
+        # pre-step. The matcher SEED is original_question (the full utterance, the
+        # validated input), not the bare pre-filled value; a zero-or-2+ match
+        # falls through to the "which document?" prompt inside
+        # _handle_fuzzy_file_match, never a crash.
+        if command == "agent router go to podcast generator":
+            for arg_name, handler in special_handlers.items():
+                if handler != "fuzzy_file_match":                          continue
+                if arg_name in missing:                                    continue  # the missing-loop above already ran its handler — never re-resolve
+                if arg_name not in final_args:                             continue  # not present at all — nothing to resolve
+                if self._value_is_existing_path( final_args[ arg_name ] ): continue  # already a real path — leave it
+                if self.debug: print( f"[Expeditor] Present-but-unresolvable '{arg_name}'={final_args[ arg_name ]!r} → running fuzzy resolve" )
+                value = self._handle_fuzzy_file_match( user_email, agent_entry.get( "display_name" ), original_question=original_question )
+                if value is None:
+                    print( f"[Expeditor] User cancelled resolving present-but-unresolvable arg '{arg_name}'" )
+                    return None
+                final_args[ arg_name ] = value
+                if value.lower().endswith( ( ".yaml", ".yml" ) ):
+                    final_args[ "render_only" ] = "true"
+                    if self.debug: print( f"[Expeditor] YAML detected → render_only=true" )
+
         if self.debug: print( f"[Expeditor] Final args: {final_args}" )
 
         # Step 8: Confirmation loop — user reviews args before submission
@@ -398,6 +428,30 @@ class RuntimeArgumentExpeditor:
         return self._inject_system_args(
             confirmed_args, agent_entry, user_email, session_id, user_id
         )
+
+    @staticmethod
+    def _value_is_existing_path( value ):
+        """
+        True iff ``value`` names a file/dir that exists on disk.
+
+        Mirrors the podcast job's own research-path check
+        (podcast_generator/job.py:216-223): absolute values are tested as-is;
+        relative values are resolved against the project root. A bare topic word
+        ("KISS") returns False — the signal, used by Fix B (row bd0ce120), that a
+        special-handler arg is present-but-unresolved and must be run through the
+        fuzzy matcher rather than handed downstream as a path.
+
+        Requires:
+            - value is a string or None
+
+        Ensures:
+            - returns False for None/empty
+            - returns os.path.exists() of the project-root-resolved value otherwise
+        """
+        if not value:
+            return False
+        full_path = value if value.startswith( "/" ) else cu.get_project_root() + "/" + value
+        return os.path.exists( full_path )
 
     @staticmethod
     def _resolve_display_name( agent_entry ):
