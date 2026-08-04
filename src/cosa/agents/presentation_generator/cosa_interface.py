@@ -157,7 +157,8 @@ async def present_choices(
     timeout: int = 120,
     title: Optional[ str ] = None,
     abstract: Optional[ str ] = None,
-    job_id: Optional[ str ] = None
+    job_id: Optional[ str ] = None,
+    priority: Optional[ str ] = None
 ) -> dict:
     """
     Present multiple-choice questions and get user's selection.
@@ -167,6 +168,13 @@ async def present_choices(
 
     Ensures:
         - Returns dict with "answers" key containing selections
+        - Forwards priority to the dispatcher when the caller set one; a
+          blocking presentation gate passes priority="high" so the gate
+          notification reaches the user's TTS channel. Accepting this kwarg
+          is required: voice_io.present_choices forwards it here, and without
+          the parameter every gate raised TypeError and fail-opened before it
+          could ever dispatch to a human (the human-answer path was
+          unreachable).
 
     Returns:
         dict: {"answers": {...}} with selections keyed by header
@@ -174,7 +182,8 @@ async def present_choices(
     _dispatcher.sender_id   = SENDER_ID
     _dispatcher.target_user = TARGET_USER
     return await _dispatcher.present_choices(
-        questions, timeout=timeout, title=title, abstract=abstract, job_id=job_id
+        questions, timeout=timeout, title=title, abstract=abstract, job_id=job_id,
+        priority=priority
     )
 
 
