@@ -10336,10 +10336,21 @@ class NotificationsUI {
                 e.stopPropagation();
                 const abstract = decodeURIComponent( indicator.dataset.abstract );
 
+                // Self-exception (bug 11c01fbc): when an action-required card is
+                // lifted into the Reading Pane (horizontal mode), its OWN 📋 indicator
+                // lives inside #action-required-content, which SHARES the pane with the
+                // live response buttons. Routing it through _openContentPane would wipe
+                // the pane body (_renderContentPaneEntry's innerHTML="") and destroy
+                // those buttons — the exact case the _openContentPane guard blocks. So
+                // the card's own abstract falls through to the in-tab tooltip below
+                // (vertical parity — a surface Rick already knows). Foreign indicators
+                // (center-column cards) still route to the pane, where the guard holds.
+                const isOwnActionRequired = !!indicator.closest( "#action-required-content" );
+
                 // Horizontal layout mode: route to Reading Pane instead of the
                 // legacy fixed-position tooltip. Design:
                 // src/rnd/v0.1.7/2026.05.21-master-detail-two-pane-layout-experiment.md
-                if ( this._layoutMode === "horizontal" ) {
+                if ( this._layoutMode === "horizontal" && !isOwnActionRequired ) {
                     // Toggle (Rick, 2026-06-08): a second click on the indicator whose
                     // abstract is ALREADY showing in the Reading Pane clears the pane
                     // instead of re-opening it. Clicking a DIFFERENT indicator — or when
@@ -12368,6 +12379,15 @@ class NotificationsUI {
             if ( this._layoutMode !== "horizontal" ) return;
             const anchor = ev.target.closest( "a[href]" );
             if ( !anchor ) return;
+            // Self-exception (bug 11c01fbc): a doc-link inside the action-required
+            // card that's lifted into the Reading Pane must NOT route to
+            // _openContentPane — the pane is SHARED with the live response buttons and
+            // _renderContentPaneEntry's innerHTML="" would destroy them. Bail without
+            // preventDefault so the anchor's baked-in target=_blank opens a new tab
+            // (vertical parity). Foreign doc-links (center column) still route to the
+            // pane. (Embedded-audio self-links are handled by a separate listener and
+            // stay in-tab, so this bail does not disturb them.)
+            if ( anchor.closest( "#action-required-content" ) ) return;
             // Iframe-internal clicks don't fire on the parent document anyway,
             // but defense-in-depth bail if the target somehow resolves inside.
             if ( ev.target.closest( "#content-pane-body iframe" ) ) return;
