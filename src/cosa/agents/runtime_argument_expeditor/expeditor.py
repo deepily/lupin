@@ -389,7 +389,18 @@ class RuntimeArgumentExpeditor:
                     fuzzy_original = original_question if is_podcast else None
                     # The first-turn choice card is podcast-only — the SAME command
                     # fence as fuzzy_original, so presentation's `source` is untouched.
-                    value = self._handle_fuzzy_file_match( user_email, agent_entry.get( "display_name" ), original_question=fuzzy_original, use_choice_card=is_podcast )
+                    #
+                    # arg_name/ask_question carry the CALLING agent's own identity into
+                    # the prompt. Previously both were hardcoded to the podcast's, so a
+                    # presentation job asked "Which document should I use for the
+                    # podcast?" under a card titled "Missing: research" (row ea184d06).
+                    # Wording only — the matching logic above is untouched.
+                    fuzzy_question = agent_entry.get( "fallback_questions", {} ).get( arg_name )
+                    value = self._handle_fuzzy_file_match(
+                        user_email, agent_entry.get( "display_name" ),
+                        original_question=fuzzy_original, use_choice_card=is_podcast,
+                        arg_name=arg_name, ask_question=fuzzy_question
+                    )
                     # Auto-detect YAML → set render_only flag
                     if value and value.lower().endswith( ( ".yaml", ".yml" ) ):
                         final_args[ "render_only" ] = "true"
@@ -1230,7 +1241,7 @@ class RuntimeArgumentExpeditor:
 
         return answers, BATCH_ANSWERED
 
-    def _handle_fuzzy_file_match( self, user_email, agent_display_name=None, original_question=None, use_choice_card=False ):
+    def _handle_fuzzy_file_match( self, user_email, agent_display_name=None, original_question=None, use_choice_card=False, arg_name="research", ask_question=None ):
         """
         Use fuzzy file matching to find a document by user description.
 
@@ -1258,6 +1269,13 @@ class RuntimeArgumentExpeditor:
             agent_display_name: Agent name for agent-specific search paths
             original_question: The user's original voice command; when it resolves to
                 exactly one file, the document prompt is skipped (auto-resolve)
+            arg_name: The argument being resolved, used as the prompt card's title
+                ("Missing: <arg_name>"). Defaults to "research" — the podcast
+                field — so existing callers are unchanged.
+            ask_question: The agent's own wording for the "which document?" ask,
+                normally the registry's fallback_questions entry for arg_name.
+                None falls back to the podcast phrasing (row ea184d06: this used
+                to be hardcoded, so a presentation job asked about "the podcast").
 
         Returns:
             str or None: Full path to selected document
@@ -1316,7 +1334,7 @@ class RuntimeArgumentExpeditor:
         if not docs_map:
             if self.debug: print( f"[Expeditor] No source files found in any search directory" )
             return self._ask_for_arg(
-                "research",
+                arg_name,
                 "No documents found. Please provide the path to a document.",
                 user_email
             )
@@ -1353,10 +1371,12 @@ class RuntimeArgumentExpeditor:
                     return chosen   # abs path, or None on Cancel/failure
             if self.debug: print( f"[Expeditor] No single-file auto-resolve (status={auto_status}, matches={len( auto_matches )}) — asking" )
 
-        # Ask user to describe which document
+        # Ask user to describe which document. The wording comes from the calling
+        # agent's registry entry — a presentation job must not ask about "the
+        # podcast" (row ea184d06).
         description = self._ask_for_arg(
-            "research",
-            "Which document should I use for the podcast? Describe it or say the filename.",
+            arg_name,
+            ask_question or "Which document should I use for the podcast? Describe it or say the filename.",
             user_email
         )
         if not description:
@@ -1368,13 +1388,13 @@ class RuntimeArgumentExpeditor:
             # Candidate set too large to send whole + no keyword overlap — a capped
             # slice would be unranked. Ask for an exact path rather than guess.
             return self._ask_for_arg(
-                "research",
+                arg_name,
                 "I couldn't match that to a document. Please say the exact filename or path.",
                 user_email
             )
         if status == "error":
             return self._ask_for_arg(
-                "research",
+                arg_name,
                 "Matching failed. Please provide the exact filename or path.",
                 user_email
             )
@@ -1382,7 +1402,7 @@ class RuntimeArgumentExpeditor:
         if not matches:
             if self.debug: print( "[Expeditor] No fuzzy matches found" )
             return self._ask_for_arg(
-                "research",
+                arg_name,
                 "I couldn't find a matching document. Please say the exact filename or path.",
                 user_email
             )
@@ -1402,15 +1422,16 @@ class RuntimeArgumentExpeditor:
                 if chosen != DOC_CHOICE_DESCRIBE_SENTINEL:
                     return chosen   # abs path, or None on Cancel/failure
             return self._ask_for_arg(
-                "research",
+                arg_name,
                 "Please say the exact filename or path of the document you want.",
                 user_email
             )
 
-        # Non-podcast consumers (e.g. presentation `source`) — unchanged numbered prompt.
+        # Non-podcast consumers (e.g. presentation `source`) — same numbered prompt,
+        # now titled with the caller's own arg name rather than always "research".
         options_str = ", ".join( f"{i + 1}. {m}" for i, m in enumerate( matches ) )
         pick = self._ask_for_arg(
-            "research",
+            arg_name,
             f"I found multiple matches: {options_str}. Say the number or name of the one you want.",
             user_email
         )
