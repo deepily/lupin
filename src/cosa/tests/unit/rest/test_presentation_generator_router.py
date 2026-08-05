@@ -233,6 +233,25 @@ class TestSubmitPresentationJob( unittest.TestCase ):
         self.assertEqual( job.scheduled_at, "2026-01-01T00:00:00" )
         self.assertTrue( job.monopolize )
 
+    def test_parent_id_hash_stamps_lineage( self ):
+        """5ed4f187 (mirrors 3a14292b): parent_id_hash threads onto job.spawned_by_id_hash
+        so the consumer's Gate B admits this child through a monopolizing test-suite's intake
+        hold instead of starving it 900s as a foreign writer. CONTROL: without the endpoint's
+        stamp line this assertion fails (job.spawned_by_id_hash never set to the parent)."""
+        self.queue.size.return_value = 1
+        tracker = MagicMock()
+        tracker.register_scoped_job.return_value = "pr-child"
+        job = _job()
+        with patch( "cosa.rest.routers.presentation_generator.validate_source_path",
+                    return_value=True ), \
+             patch( "cosa.rest.routers.presentation_generator.os.path.exists",
+                    return_value=True ), \
+             patch( "cosa.rest.routers.presentation_generator.create_agentic_job",
+                    return_value=job ), \
+             patch( "cosa.rest.routers.presentation_generator.user_job_tracker", tracker ):
+            self._call( PresentationSubmitRequest( source_path="io/deck.md", parent_id_hash="ts-parent" ) )
+        self.assertEqual( job.spawned_by_id_hash, "ts-parent" )
+
     def test_factory_none_500( self ):
         """Ensures: create_agentic_job None → 500."""
         with patch( "cosa.rest.routers.presentation_generator.validate_source_path",

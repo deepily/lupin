@@ -164,6 +164,19 @@ class TestSubmitResearch( unittest.TestCase ):
         self.assertEqual( job.scheduled_at, "2026-01-01T00:00:00" )
         self.assertTrue( job.monopolize )
 
+    def test_parent_id_hash_stamps_lineage( self ):
+        """5ed4f187 (mirrors 3a14292b): parent_id_hash threads onto job.spawned_by_id_hash so the
+        consumer's Gate B admits this child through a monopolizing test-suite's intake hold instead
+        of starving it 900s. CONTROL: without the endpoint stamp this fails (never set to parent)."""
+        self.queue.size.return_value = 1
+        tracker = MagicMock()
+        tracker.register_scoped_job.return_value = "dr-child"
+        job = _job()
+        with patch( f"{_MOD}.create_agentic_job", return_value=job ), \
+             patch( f"{_MOD}.user_job_tracker", tracker ):
+            self._call( DeepResearchSubmitRequest( query="state of AI", parent_id_hash="ts-parent" ) )
+        self.assertEqual( job.spawned_by_id_hash, "ts-parent" )
+
     def test_factory_none_500( self ):
         """Ensures: create_agentic_job None → 500 (inner HTTPException wrapped by broad except)."""
         with patch( f"{_MOD}.create_agentic_job", return_value=None ), \

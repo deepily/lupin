@@ -152,6 +152,16 @@ class TestSubmitResearchToPodcast( unittest.TestCase ):
         self.assertNotIn( "languages", kwargs[ "args_dict" ] )
         self.assertNotIn( "dry_run", kwargs[ "args_dict" ] )
 
+    def test_parent_id_hash_stamps_lineage( self ):
+        """5ed4f187 (mirrors 3a14292b): parent_id_hash threads onto job.spawned_by_id_hash so Gate B
+        admits this child through a monopolizing test-suite's intake hold instead of starving it 900s.
+        CONTROL: without the endpoint stamp this fails (spawned_by_id_hash never set to the parent)."""
+        job = _job()
+        _, (p_create, p_tracker) = self._patches( job, scoped="rp-child" )
+        with p_create, p_tracker:
+            self._call( ResearchToPodcastSubmitRequest( query="topic", parent_id_hash="ts-parent" ) )
+        self.assertEqual( job.spawned_by_id_hash, "ts-parent" )
+
     def test_factory_none_500( self ):
         """Ensures: create_agentic_job None → 500."""
         _, (p_create, p_tracker) = self._patches( None )

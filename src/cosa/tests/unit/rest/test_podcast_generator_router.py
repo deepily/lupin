@@ -527,6 +527,23 @@ class TestSubmitFlowA( unittest.TestCase ):
         self.assertTrue( job.monopolize )
         self.queue.push.assert_called_once_with( job )
 
+    def test_parent_id_hash_stamps_lineage( self ):
+        """5ed4f187 (mirrors 3a14292b): Flow A (direct path) threads parent_id_hash onto
+        job.spawned_by_id_hash so Gate B admits this child through a monopolizing test-suite's
+        intake hold. CONTROL: without the endpoint stamp this fails (never set to the parent)."""
+        self.queue.size.return_value = 1
+        job = MagicMock(); job.id_hash = "init"
+        tracker = MagicMock(); tracker.register_scoped_job.return_value = "pg-child"
+        body = PodcastSubmitRequest( research_source="/io/x.md", parent_id_hash="ts-parent" )
+        with patch( f"{M}.is_research_path", return_value=True ), \
+             patch( f"{M}.validate_source_path", return_value=True ), \
+             patch( f"{M}.cu.get_project_root", return_value=self.root ), \
+             patch( "os.path.exists", return_value=True ), \
+             patch( f"{M}.create_agentic_job", return_value=job ), \
+             patch( f"{M}.user_job_tracker", tracker ):
+            self._call( body )
+        self.assertEqual( job.spawned_by_id_hash, "ts-parent" )
+
     def test_minimal_happy_relative_no_debug( self ):
         """Ensures: relative path + no optional fields + debug-off → queued response (else-normalise arm)."""
         self.queue.size.return_value = 1
@@ -742,6 +759,25 @@ class TestSubmitFlowB( unittest.TestCase ):
             self.assertTrue( job.monopolize )
             self.queue.push.assert_called_once_with( job )
             self.voice.clear_job_id.assert_called_once()
+        finally:
+            self._exit( ctxs )
+
+    def test_parent_id_hash_stamps_lineage( self ):
+        """5ed4f187 (mirrors 3a14292b): Flow B (speculative path) threads parent_id_hash onto
+        job.spawned_by_id_hash so Gate B admits this child through a monopolizing test-suite's
+        intake hold. CONTROL: without the second stamp site this fails (never set to the parent)."""
+        self.queue.size.return_value = 1
+        selection = { "filename": "a.md", "relative_path": "io/a.md" }
+        job = MagicMock(); job.id_hash = "init"
+        tracker, ctxs = self._base_patches(
+            matches=[ selection ], selection=selection, job=job, tracker_ret="pg-child" )
+        ctxs.append( patch( f"{M}.validate_source_path", return_value=True ) )
+        ctxs.append( patch( "os.path.exists", return_value=True ) )
+        body = PodcastSubmitRequest( research_source="deep dive on agents", parent_id_hash="ts-parent" )
+        self._enter( ctxs )
+        try:
+            self._call( body )
+            self.assertEqual( job.spawned_by_id_hash, "ts-parent" )
         finally:
             self._exit( ctxs )
 

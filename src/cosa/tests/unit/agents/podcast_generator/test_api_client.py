@@ -245,7 +245,10 @@ class TestCallApi:
         assert "creative" in capture[ "options" ].system_prompt.lower()
         # bounded-CC options: no tools, read-only, capped turns
         assert capture[ "options" ].tools == []
-        assert capture[ "options" ].permission_mode == "plan"
+        # "default", not "plan" (5c45edf6): plan mode changes what the model
+        # PRODUCES — asked for a script it wrote a plan FOR a script, and the
+        # JSON parser correctly rejected it. tools=[] is what keeps it read-only.
+        assert capture[ "options" ].permission_mode == "default"
         assert capture[ "options" ].max_turns == c.config.script_max_turns
         # usage recorded
         assert c.cost_estimate.total_api_calls == 1

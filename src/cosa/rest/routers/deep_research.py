@@ -48,6 +48,7 @@ class DeepResearchSubmitRequest( BaseModel ):
     audience_context: Optional[ str ] = Field( None, description="Custom audience description" )
     scheduled_at: Optional[ str ] = Field( None, description="ISO datetime for deferred execution (None = immediate)" )
     monopolize: bool = Field( False, description="Run exclusively, block all other jobs until complete" )
+    parent_id_hash: Optional[ str ] = Field( None, description="Lineage token (bug 5ed4f187, mirrors 3a14292b): id_hash of a monopolize job that SPAWNED this child. When it matches the pool's active monopolizer, the consumer's Gate B (queue_consumer.py) uses this lineage to admit the child through the intake hold rather than defer it as a foreign writer. That admit-through behaviour is exercised by the swe_team monopolize sweep, NOT by this router's unit test — the unit test asserts only that the stamp lands on the job. Set from LUPIN_TEST_MONOPOLIZE_PARENT_ID." )
 
 
 class DeepResearchSubmitResponse( BaseModel ):
@@ -170,6 +171,9 @@ async def submit_research(
         # Scheduling attributes pass-through (CJ Flow timed execution + monopolize)
         if request_body.scheduled_at: job.scheduled_at = request_body.scheduled_at
         if request_body.monopolize:   job.monopolize   = request_body.monopolize
+        # Lineage pass-through (bug 5ed4f187, mirrors swe_team 3a14292b): stamp the
+        # spawning monopolizer's id so Gate B admits this child through the monopoly hold.
+        if request_body.parent_id_hash: job.spawned_by_id_hash = request_body.parent_id_hash
 
         # Atomic: scope ID + index for user filtering BEFORE push (race condition prevention)
         job.id_hash = user_job_tracker.register_scoped_job( job.id_hash, user_id, session_id )

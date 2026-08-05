@@ -42,6 +42,7 @@ class PresentationSubmitRequest( BaseModel ):
     force_failure_mode      : Optional[ str ] = Field( None, description="Phase 6 dry-run repair loop: 'code_bug' | 'infra_timeout' | 'rate_limit' to inject a failure at the end of dry-run" )
     scheduled_at            : Optional[ str ] = Field( None, description="ISO datetime for deferred execution (None = immediate)" )
     monopolize              : bool            = Field( False, description="Run exclusively, block all other jobs until complete" )
+    parent_id_hash          : Optional[ str ] = Field( None, description="Lineage token (bug 5ed4f187, mirrors 3a14292b): id_hash of a monopolize job that SPAWNED this child. When it matches the pool's active monopolizer, the consumer's Gate B (queue_consumer.py) uses this lineage to admit the child through the intake hold rather than defer it as a foreign writer. That admit-through behaviour is exercised by the swe_team monopolize sweep, NOT by this router's unit test — the unit test asserts only that the stamp lands on the job. Set by a monopolize sweep's pytest from LUPIN_TEST_MONOPOLIZE_PARENT_ID." )
 
 
 class PresentationSubmitResponse( BaseModel ):
@@ -212,6 +213,10 @@ async def submit_presentation_job(
     # Scheduling attributes pass-through (CJ Flow timed execution + monopolize)
     if request.scheduled_at: job.scheduled_at = request.scheduled_at
     if request.monopolize:   job.monopolize   = request.monopolize
+    # Lineage pass-through (bug 5ed4f187, mirrors swe_team 3a14292b): stamp the
+    # spawning monopolizer's id so Gate B admits this child through the monopoly
+    # intake hold instead of starving it 900s as a foreign writer.
+    if request.parent_id_hash: job.spawned_by_id_hash = request.parent_id_hash
 
     # Atomic: scope ID + index for user filtering BEFORE push
     job.id_hash = user_job_tracker.register_scoped_job( job.id_hash, user_id, session_id )
