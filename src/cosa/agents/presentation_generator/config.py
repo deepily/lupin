@@ -43,6 +43,11 @@ class PresentationConfig:
     # Presentation parameters
     target_duration_minutes  : int   = 15
     slides_per_minute        : float = 1.0
+    # Explicit slide count that OVERRIDES the target_duration_minutes ×
+    # slides_per_minute formula. None = derive the budget from duration
+    # (today's behavior). Loaded from the INI key
+    # `presentation generator target slide count` (empty/absent = None).
+    target_slide_count       : Optional[ int ] = None
     title_style              : str   = "assertion"
     max_revisions            : int   = 3
 
@@ -96,12 +101,19 @@ class PresentationConfig:
             if debug: print( f"  Config: presentation generator {key} = {val}" )
             return val
 
+        # Optional explicit slide count. Read RAW (return_type="str") then coerce:
+        # a None default with return_type="int" crashes on int(None) when the key
+        # is absent/empty. Empty or absent → None → duration formula (default path).
+        _raw_slide_count   = _get( "target slide count", default=None )
+        target_slide_count = int( _raw_slide_count ) if _raw_slide_count not in ( None, "" ) else None
+
         return cls(
             content_model           = _get( "content model",           default="claude-opus-4-6" ),
             automated_content_model = _get( "automated content model", default="claude-sonnet-4-6" ),
             content_max_turns       = _get( "content max turns",        default=5,     return_type="int" ),
             target_duration_minutes = _get( "target duration minutes", default=15,    return_type="int" ),
             slides_per_minute       = _get( "slides per minute",       default=1.0,   return_type="float" ),
+            target_slide_count      = target_slide_count,
             title_style             = _get( "title style",             default="assertion" ),
             max_revisions           = _get( "max revisions",           default=3,     return_type="int" ),
             default_theme           = _get( "default theme",           default="default" ),

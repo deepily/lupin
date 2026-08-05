@@ -133,6 +133,7 @@ class TestPresentationGeneratorJob:
             session_id  = "s1"
         )
         assert job.target_duration_minutes is None
+        assert job.target_slide_count is None
         assert job.audience is None
         assert job.theme is None
         assert job.dry_run is False
@@ -155,6 +156,7 @@ class TestPresentationConfig:
         assert default_config.default_theme == "default"
         assert default_config.audience == "general"
         assert default_config.audience_context is None       # new field, no INI default
+        assert default_config.target_slide_count is None     # unset -> derive from duration
         assert default_config.max_source_chars == 200000     # shared source ceiling default
 
     def test_get_output_path_yaml( self, default_config ):
@@ -192,6 +194,21 @@ class TestPresentationConfig:
         assert config.audience == "general"
         # Shared `agent source content max chars` base key (also read by podcast).
         assert config.max_source_chars == 200000
+        # Empty INI key `presentation generator target slide count` -> None (a None
+        # default with return_type="int" would crash on int(None); the raw read + coerce
+        # in from_config guards that). Unset -> the duration formula still governs.
+        assert config.target_slide_count is None
+
+    def test_from_config_coerces_explicit_slide_count( self ):
+        """A non-empty INI slide-count value is coerced to int (the override path)."""
+        class _FakeMgr:
+            """Returns '40' for the slide-count key, the passed default for all else."""
+            def get( self, key, default=None, return_type="string" ):
+                if key == "presentation generator target slide count":
+                    return "40"
+                return default
+        config = PresentationConfig.from_config( _FakeMgr() )
+        assert config.target_slide_count == 40
 
 
 class TestApplyJobOverrides:
@@ -236,6 +253,19 @@ class TestApplyJobOverrides:
         cfg = PresentationConfig()
         self._job( audience_context = "startup founders" )._apply_job_overrides( cfg )
         assert cfg.audience_context == "startup founders"
+
+    def test_target_slide_count_copied_when_set( self ):
+        """An explicit per-job slide count overlays onto config (T1)."""
+        cfg = PresentationConfig()
+        self._job( target_slide_count = 40 )._apply_job_overrides( cfg )
+        assert cfg.target_slide_count == 40
+
+    def test_target_slide_count_none_leaves_config_default( self ):
+        """No per-job slide count -> config keeps its INI/default value (None)."""
+        cfg = PresentationConfig()
+        assert cfg.target_slide_count is None
+        self._job()._apply_job_overrides( cfg )
+        assert cfg.target_slide_count is None
 
 
 # =============================================================================
@@ -567,7 +597,7 @@ class TestExpeditorIntegration:
         )
         assert result.returncode == 0, f"stderr: {result.stderr}"
         args_list = json.loads( result.stdout.strip() )
-        assert args_list == [ "source", "target_duration_minutes", "audience", "audience_context", "theme" ]
+        assert args_list == [ "source", "target_duration_minutes", "target_slide_count", "audience", "audience_context", "theme" ]
 
     def test_registry_entry_exists( self ):
         """Presentation generator is registered in AGENTIC_AGENTS."""

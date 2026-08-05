@@ -187,6 +187,54 @@ class TestGetNarrativeAnalysisPrompt:
         )
         assert "15 slides" in prompt  # 15 * 1.0 = 15 total
 
+    def test_resolved_budget_overrides_duration_formula( self ):
+        """T2: a passed-in slide_budget wins over the duration formula, so this
+        prompt and the outline prompt agree. Budget 40 -> '40 slides' total and
+        '37 content' (40 - 3 structural), and NOT the formula's 15."""
+        prompt = get_narrative_analysis_prompt(
+            source_content = "Test content",
+            raw_sections   = [],
+            target_duration   = 15,       # formula alone would say 15
+            slides_per_minute = 1.0,
+            slide_budget      = 40,       # explicit resolved budget wins
+        )
+        assert "40 slides" in prompt
+        assert "37 content" in prompt     # 40 - 3 structural
+        assert "15 slides" not in prompt
+
+    def test_falls_back_to_formula_when_budget_unset( self ):
+        """slide_budget None -> the duration formula still governs (today's behavior)."""
+        prompt = get_narrative_analysis_prompt(
+            source_content = "Test content",
+            raw_sections   = [],
+            target_duration   = 15,
+            slides_per_minute = 1.0,
+            slide_budget      = None,
+        )
+        assert "15 slides" in prompt
+
+    def test_gate1_human_feedback_injected( self ):
+        """Gate-1 'Revise' feedback lands in the prompt (was a no-op before wiring)."""
+        prompt = get_narrative_analysis_prompt(
+            source_content = "Test content",
+            raw_sections   = [],
+            target_duration   = 15,
+            slides_per_minute = 1.0,
+            human_feedback    = "merge sections 3 and 4",
+        )
+        assert "merge sections 3 and 4" in prompt
+        assert "Revision Feedback" in prompt
+
+    def test_no_feedback_block_without_feedback( self ):
+        """No human_feedback -> no Revision Feedback block (default path unchanged)."""
+        prompt = get_narrative_analysis_prompt(
+            source_content = "Test content",
+            raw_sections   = [],
+            target_duration   = 15,
+            slides_per_minute = 1.0,
+        )
+        assert "Revision Feedback" not in prompt
+
     def test_includes_audience_guidelines( self ):
         """Prompt includes audience-specific guidelines when provided."""
         prompt = get_narrative_analysis_prompt(

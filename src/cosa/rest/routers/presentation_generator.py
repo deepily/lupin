@@ -34,6 +34,7 @@ class PresentationSubmitRequest( BaseModel ):
     """Request body for presentation generation submission."""
     source_path             : str
     target_duration_minutes : Optional[ int ] = None
+    target_slide_count      : Optional[ int ] = None
     audience                : Optional[ str ] = None
     theme                   : Optional[ str ] = None
     content_model           : Optional[ str ] = Field( None, description="Override content model (e.g. claude-sonnet-4-6 for automated tests)" )
@@ -187,6 +188,8 @@ async def submit_presentation_job(
         args_dict[ "render_only" ] = True
     if request.target_duration_minutes:
         args_dict[ "target_duration_minutes" ] = str( request.target_duration_minutes )
+    if request.target_slide_count:
+        args_dict[ "target_slide_count" ] = str( request.target_slide_count )
     if request.dry_run:
         args_dict[ "dry_run" ] = True
     if request.force_failure_mode:

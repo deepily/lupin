@@ -202,6 +202,7 @@ class TestSubmitPresentationJob( unittest.TestCase ):
         body = PresentationSubmitRequest(
             source_path             = "io/source.md",
             target_duration_minutes = 15,
+            target_slide_count      = 40,
             audience                = "general",
             theme                   = "default",
             content_model           = "claude-sonnet-4-6",
@@ -225,6 +226,7 @@ class TestSubmitPresentationJob( unittest.TestCase ):
         self.assertEqual( ad[ "source" ], "/proj/io/source.md" )          # relative arm
         self.assertNotIn( "render_only", ad )                             # non-yaml, not requested
         self.assertEqual( ad[ "target_duration_minutes" ], "15" )
+        self.assertEqual( ad[ "target_slide_count" ], "40" )
         self.assertTrue( ad[ "dry_run" ] )
         self.assertEqual( ad[ "force_failure_mode" ], "code_bug" )
         self.assertEqual( ad[ "audience" ], "general" )

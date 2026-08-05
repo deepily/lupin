@@ -21,7 +21,7 @@ import sys
 
 # User-visible args: the canonical list of args that end users should see
 # and interact with. Engineering params (models, debug, etc.) are excluded.
-USER_VISIBLE_ARGS = [ "source", "target_duration_minutes", "audience", "audience_context", "theme" ]
+USER_VISIBLE_ARGS = [ "source", "target_duration_minutes", "target_slide_count", "audience", "audience_context", "theme" ]
 
 
 def run_all_smoke_tests():
@@ -95,6 +95,8 @@ async def run_presentation_generation( args ):
     print( f"User: {args.user_email}" )
     if args.target_duration_minutes:
         print( f"Target duration: {args.target_duration_minutes} minutes" )
+    if args.target_slide_count:
+        print( f"Target slide count: {args.target_slide_count} slides" )
     if args.audience:
         print( f"Audience: {args.audience}" )
     if args.audience_context:
@@ -112,6 +114,7 @@ async def run_presentation_generation( args ):
         user_email              = args.user_email,
         session_id              = args.session_id,
         target_duration_minutes = args.target_duration_minutes,
+        target_slide_count      = args.target_slide_count,
         audience                = args.audience,
         audience_context        = args.audience_context,
         theme                   = args.theme,
@@ -184,6 +187,13 @@ Examples:
         type    = int,
         default = None,
         help    = "Target presentation duration in minutes (default: 15 from config)"
+    )
+
+    parser.add_argument(
+        "--target-slide-count",
+        type    = int,
+        default = None,
+        help    = "Explicit slide count, overriding the duration formula (default: derive from duration)"
     )
 
     parser.add_argument(

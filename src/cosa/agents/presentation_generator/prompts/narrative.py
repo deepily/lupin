@@ -124,6 +124,8 @@ def get_narrative_analysis_prompt(
     audience: Optional[ str ] = None,
     audience_context: Optional[ str ] = None,
     max_source_chars: Optional[ int ] = None,
+    slide_budget: Optional[ int ] = None,
+    human_feedback: Optional[ str ] = None,
 ) -> str:
     """
     Build user message for narrative analysis.
@@ -146,13 +148,21 @@ def get_narrative_analysis_prompt(
         slides_per_minute: Slides-per-minute pacing heuristic
         audience: Audience level (beginner/general/expert/academic)
         audience_context: Optional free-text audience description
+        slide_budget: Resolved slide budget from the orchestrator (honors an
+            explicit target_slide_count); when None, derived from the duration formula
+        human_feedback: Optional Gate-1 revision feedback to fold into re-analysis
 
     Returns:
         str: Formatted user message for Claude
     """
-    # Calculate slide budget
-    slide_budget = int( target_duration * slides_per_minute )
-    # Add structural slides (title, agenda, Q&A)
+    # Slide budget: consume the resolved budget from the orchestrator
+    # (_slide_budget(), which honors an explicit target_slide_count) when it is
+    # passed. Fall back to the duration formula only when it is not — so this
+    # prompt and the outline prompt agree by construction (T2), instead of this
+    # one recomputing its own number and contradicting the outline.
+    if slide_budget is None:
+        slide_budget = int( target_duration * slides_per_minute )
+    # Structural slides (title, agenda, Q&A); content gets the rest.
     structural_slides = 3
     content_slide_budget = slide_budget - structural_slides
 
@@ -182,6 +192,13 @@ def get_narrative_analysis_prompt(
         truncated = source_content[ :max_source_chars ]
         truncation_note = f"\n\n[NOTE: Document was truncated to {max_source_chars:,} characters for analysis. Focus on the provided content.]"
 
+    # Gate 1 revision feedback. Before this was wired, get_narrative_analysis_prompt
+    # took no human_feedback, so Gate 1's "Revise" re-rolled the identical prompt and
+    # burned a revision. Inject it so re-analysis actually incorporates the feedback.
+    feedback_block = ""
+    if human_feedback:
+        feedback_block = f"\n\n## Revision Feedback\n\nThe user reviewed the previous narrative analysis and requested changes:\n\n> {human_feedback}\n\nPlease incorporate this feedback into the new analysis."
+
     prompt = f"""Analyze the following document for presentation conversion.
 
 ## Target Parameters
@@ -199,6 +216,7 @@ def get_narrative_analysis_prompt(
 {truncated}
 ```
 {truncation_note}
+{feedback_block}
 
 Analyze this document and return a JSON object classifying each section into narrative arc positions with proposed slide counts. The total proposed slides for content sections should be close to {content_slide_budget}."""
 

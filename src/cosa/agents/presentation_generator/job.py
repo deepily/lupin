@@ -56,6 +56,7 @@ class PresentationGeneratorJob( AgenticJobBase ):
         user_email: str,
         session_id: str,
         target_duration_minutes: Optional[ int ] = None,
+        target_slide_count: Optional[ int ] = None,
         audience: Optional[ str ] = None,
         audience_context: Optional[ str ] = None,
         theme: Optional[ str ] = None,
@@ -85,6 +86,7 @@ class PresentationGeneratorJob( AgenticJobBase ):
             user_email: Email address for output storage
             session_id: WebSocket session for notifications
             target_duration_minutes: Override target duration (None = use INI default)
+            target_slide_count: Explicit slide count overriding the duration formula (None = use INI default / derive from duration)
             audience: Override audience level (None = use INI default)
             audience_context: Custom audience description (None = use INI default)
             theme: Override theme name (None = use INI default)
@@ -104,6 +106,7 @@ class PresentationGeneratorJob( AgenticJobBase ):
         # Presentation parameters
         self.source_path             = source_path
         self.target_duration_minutes = target_duration_minutes
+        self.target_slide_count      = target_slide_count
         self.audience                = audience
         self.audience_context        = audience_context
         self.theme                   = theme
@@ -202,6 +205,8 @@ class PresentationGeneratorJob( AgenticJobBase ):
         """
         if self.target_duration_minutes is not None:
             config.target_duration_minutes = self.target_duration_minutes
+        if self.target_slide_count is not None:
+            config.target_slide_count = self.target_slide_count
         if self.audience is not None:
             config.audience = self.audience
         if self.theme is not None:

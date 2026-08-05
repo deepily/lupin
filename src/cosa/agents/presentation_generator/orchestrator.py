@@ -631,6 +631,51 @@ class PresentationOrchestratorAgent:
 
         return sections
 
+    def _slide_budget( self ):
+        """
+        Resolve the target slide budget for this run.
+
+        Requires:
+            - self.config.target_duration_minutes is a positive number
+            - self.config.slides_per_minute is a positive number
+
+        Ensures:
+            - Returns config.target_slide_count verbatim when it is not None
+              (explicit override — an author-set slide count)
+            - Otherwise returns int( target_duration_minutes * slides_per_minute )
+              (today's duration-driven formula)
+
+        Returns:
+            int: The resolved slide budget
+        """
+        if self.config.target_slide_count is not None:
+            return self.config.target_slide_count
+        return int( self.config.target_duration_minutes * self.config.slides_per_minute )
+
+    def _slide_count_drift_message( self, produced_count, budget ):
+        """
+        Build the soft-target drift-warning message, or None when no warning is due.
+
+        Requires:
+            - produced_count is a non-negative int (slides the outline produced)
+            - budget is a positive int (the resolved slide budget)
+
+        Ensures:
+            - Returns None when no explicit target_slide_count was set (the default
+              duration path is expected to drift toward budget-3 and must stay silent)
+            - Returns None when produced_count equals budget (target hit exactly)
+            - Otherwise returns a one-line message naming BOTH the requested budget
+              and the produced count (soft target — warn only, never fail/retry)
+
+        Returns:
+            Optional[str]: The drift message, or None
+        """
+        if self.config.target_slide_count is None:
+            return None
+        if produced_count == budget:
+            return None
+        return f"Slide-count drift: requested {budget} slides, outline produced {produced_count}."
+
     async def _analyze_async( self, source_content: str ) -> List[ NarrativeSection ]:
         """
         Phase 2: Analyze narrative structure using Claude.
@@ -695,6 +740,12 @@ class PresentationOrchestratorAgent:
                 audience          = self.config.audience,
                 audience_context  = self.config.audience_context,
                 max_source_chars  = self.config.max_source_chars,
+                # Resolved budget (honors an explicit target_slide_count) so this
+                # prompt and the outline prompt agree by construction (T2).
+                slide_budget      = self._slide_budget(),
+                # Gate-1 revision feedback, so "Revise" actually re-analyzes with it
+                # instead of re-rolling the identical prompt.
+                human_feedback    = self._presentation_state.get( "human_feedback" ),
             )
 
             # Call Claude
@@ -737,7 +788,7 @@ class PresentationOrchestratorAgent:
 
             # Calculate totals
             total_proposed = sum( s.proposed_slides for s in narrative_sections )
-            slide_budget = int( self.config.target_duration_minutes * self.config.slides_per_minute )
+            slide_budget = self._slide_budget()
 
             if self.debug:
                 print( f"[Orchestrator] Narrative analysis: {len( narrative_sections )} sections, "
@@ -799,7 +850,7 @@ class PresentationOrchestratorAgent:
             SLIDE_TYPES,
         )
 
-        slide_budget = int( self.config.target_duration_minutes * self.config.slides_per_minute )
+        slide_budget = self._slide_budget()
 
         # Dry-run: generate mock SlideOutlines from narrative sections
         if self.dry_run:
@@ -887,6 +938,14 @@ class PresentationOrchestratorAgent:
                 f"({opening_count} opening, {body_count} body, {closing_count} closing)",
                 priority="low"
             )
+
+            # T2b — soft-target drift warning (Rick's ruling: warn, do NOT fail/retry).
+            # Decision extracted to _slide_count_drift_message for unit-testability;
+            # it is gated on an EXPLICIT target_slide_count so the default duration
+            # path — where landing near budget-3 is expected — stays silent.
+            drift_message = self._slide_count_drift_message( len( outlines ), slide_budget )
+            if drift_message is not None:
+                await voice_io.notify( drift_message, priority="medium" )
 
             return outlines
 
@@ -1779,7 +1838,7 @@ class PresentationOrchestratorAgent:
 
         # Build summary for user
         total_slides = sum( s.proposed_slides for s in sections )
-        slide_budget = int( self.config.target_duration_minutes * self.config.slides_per_minute )
+        slide_budget = self._slide_budget()
 
         summary_lines = [ f"**Narrative Arc Analysis** ({len( sections )} sections, {total_slides} proposed slides, budget: {slide_budget})\n" ]
         for i, section in enumerate( sections, 1 ):

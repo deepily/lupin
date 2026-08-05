@@ -222,6 +222,7 @@ def create_agentic_job( command, args_dict, user_id, user_email, session_id, deb
             user_email              = user_email,
             session_id              = session_id,
             target_duration_minutes = _parse_optional_int( args_dict.get( "target_duration_minutes" ) ),
+            target_slide_count      = _parse_optional_int( args_dict.get( "target_slide_count" ) ),
             audience                = args_dict.get( "audience" ),
             audience_context        = args_dict.get( "audience_context" ),
             theme                   = args_dict.get( "theme" ),
