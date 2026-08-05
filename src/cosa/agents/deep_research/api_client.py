@@ -93,10 +93,25 @@ LEAD_TOOLS = []
 # maps onto CC's built-in WebSearch (issue queries) + WebFetch (read a page).
 SUBAGENT_TOOLS = [ "WebSearch", "WebFetch" ]
 
-# Research is strictly read-only (no file writes). "plan" keeps the session
-# read-only while still permitting read-only built-ins like WebSearch/WebFetch
-# (verified by the BFE Lead agent, which runs Read/Glob/Grep/Bash under "plan").
-RESEARCH_PERMISSION_MODE = "plan"
+# Two modes, chosen by whether the call has TOOLS — because "plan" does two very
+# different things depending on that.
+#
+# A TOOL-USING call (the research subagents, WebSearch/WebFetch): "plan" is a real
+# read-only guard and the tools still work. Verified by the BFE Lead agent, which
+# runs Read/Glob/Grep/Bash under "plan". Unchanged.
+#
+# A NO-TOOL call (the lead agent, LEAD_TOOLS = []): "plan" is not a guard at all —
+# with nothing permittable there is nothing to restrict — but it still changes what
+# the model PRODUCES. Asked to synthesise a report it writes a plan FOR a report,
+# and a strict parser correctly rejects the prose. That is not hypothetical: podcast
+# hit it 2026-08-04 (5c45edf6, "no recoverable JSON object", read as a flaky model
+# for most of a day) and presentation hit it the same night (f67189c3, job
+# pr-62254a7f, "Outline generation returned no usable entries"). Deep research is
+# the third instance of the same shape and is fixed here BEFORE it bit anyone —
+# no failure of this agent has been observed, so this removes an exposure rather
+# than repairing an outage.
+RESEARCH_PERMISSION_MODE_WITH_TOOLS = "plan"
+RESEARCH_PERMISSION_MODE_NO_TOOLS   = "default"
 
 
 def _temperature_to_steer( temperature: float ) -> str:
@@ -494,11 +509,15 @@ class ResearchAPIClient:
         if steer:
             effective_system = ( effective_system + "\n\n" + steer ).strip()
 
+        effective_tools = tools if tools is not None else LEAD_TOOLS
         option_kwargs = {
             "model"           : model,
             "system_prompt"   : effective_system or None,
-            "tools"           : tools if tools is not None else LEAD_TOOLS,
-            "permission_mode" : RESEARCH_PERMISSION_MODE,
+            "tools"           : effective_tools,
+            # Derived from the tool list, not hardcoded — see the constants above.
+            # With no tools "plan" guards nothing and only corrupts the output.
+            "permission_mode" : RESEARCH_PERMISSION_MODE_WITH_TOOLS if effective_tools
+                                else RESEARCH_PERMISSION_MODE_NO_TOOLS,
             "max_turns"       : self.config.max_research_turns,
         }
         if use_extended_thinking:

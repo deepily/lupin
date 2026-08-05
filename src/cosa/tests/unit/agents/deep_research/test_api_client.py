@@ -39,7 +39,8 @@ from cosa.agents.deep_research.api_client import (
     SDK_AVAILABLE,
     LEAD_TOOLS,
     SUBAGENT_TOOLS,
-    RESEARCH_PERMISSION_MODE,
+    RESEARCH_PERMISSION_MODE_WITH_TOOLS,
+    RESEARCH_PERMISSION_MODE_NO_TOOLS,
     extract_json_object,
     _temperature_to_steer,
 )
@@ -135,7 +136,11 @@ class TestModuleConstants:
     def test_tool_surfaces( self ):
         assert LEAD_TOOLS == []
         assert SUBAGENT_TOOLS == [ "WebSearch", "WebFetch" ]
-        assert RESEARCH_PERMISSION_MODE == "plan"
+        # Two modes, split by whether the call has tools. "plan" is a real read-only
+        # guard for a TOOL-USING call, but with tools=[] it guards nothing and only
+        # changes what the model produces — a plan FOR a report instead of a report.
+        assert RESEARCH_PERMISSION_MODE_WITH_TOOLS == "plan"
+        assert RESEARCH_PERMISSION_MODE_NO_TOOLS   == "default"
 
     def test_historical_key_constants_retained( self ):
         assert ac.ENV_VAR_NAME  == "ANTHROPIC_API_KEY_FIREWALLED"
@@ -425,6 +430,13 @@ class TestCallSdk:
         assert opts.system_prompt == "SYS"
         # tools defaults to LEAD_TOOLS when not supplied.
         assert opts.tools == LEAD_TOOLS
+        # ...and a NO-TOOL call must NOT run in plan mode. The paired assertion at
+        # the subagent test above proves the tool-using call still gets "plan", so
+        # the two together exercise both sides of the derivation rather than
+        # restating the constants. A constant can be right while the call site
+        # ignores it — that is the failure this pair is here to catch.
+        assert opts.permission_mode == RESEARCH_PERMISSION_MODE_NO_TOOLS
+        assert opts.permission_mode == "default"
 
     def test_empty_system_mid_temp_becomes_none( self ):
         with _make_client() as ( client, _rl ):
