@@ -635,6 +635,103 @@ class TestElaborateAsync:
         assert slides[ 0 ].presenter_notes.timing_seconds == 90
         assert agent.metrics[ "api_calls" ] == 1
 
+    def test_chunked_emits_one_pinned_progress_update_per_batch( self, _silence_voice_io ):
+        # Sign-of-life: batched elaboration was silent for 10m25s on a 32-slide
+        # deck (measured 2026-08-05), which reads as a hung job. Every batch must
+        # emit a progress line, and they must ALL share ONE progress_group_id so
+        # the UI pins/updates a single bubble instead of appending six.
+        agent  = _agent()
+        client = _mock_api_client()
+        agent._api_client = client
+        outline = [ _outline( number=i + 1 ) for i in range( 32 ) ]
+        parsed  = [ { "number": 1, "arc_position": "opening", "type": "title",
+                      "title": "T", "visual_type": "text_only" } ]
+        with patch( f"{_ELAB}.get_elaboration_prompt", return_value="P" ), \
+             patch( f"{_ELAB}.parse_elaboration_response", return_value=parsed ):
+            _run( agent._elaborate_chunked( outline, "src" ) )
+
+        calls = [ c for c in _silence_voice_io[ "notify" ].await_args_list
+                  if "batch" in str( c.args[ 0 ] if c.args else "" ) ]
+        assert len( calls ) == 6                                    # ceil(32/6)
+        group_ids = { c.kwargs.get( "progress_group_id" ) for c in calls }
+        assert len( group_ids ) == 1                                # ONE pinned bubble
+        gid = group_ids.pop()
+        assert gid and gid.startswith( "pg-" ) and len( gid ) == 11
+        assert "slides 1-6 of 32 (batch 1 of 6)"   in str( calls[  0 ].args[ 0 ] )
+        assert "slides 31-32 of 32 (batch 6 of 6)" in str( calls[ -1 ].args[ 0 ] )
+
+    def test_chunked_progress_notify_failure_does_not_abort_elaboration( self, _silence_voice_io ):
+        # THE RUNTIME RISK: a progress line must never kill a run that is already
+        # many paid API calls deep. Notify raises on EVERY batch; elaboration must
+        # still complete and return every slide.
+        agent  = _agent()
+        client = _mock_api_client()
+        agent._api_client = client
+        _silence_voice_io[ "notify" ].side_effect = RuntimeError( "notify channel down" )
+        outline = [ _outline( number=i + 1 ) for i in range( 32 ) ]
+        parsed  = [ { "number": 1, "arc_position": "opening", "type": "title",
+                      "title": "T", "visual_type": "text_only" } ]
+        with patch( f"{_ELAB}.get_elaboration_prompt", return_value="P" ), \
+             patch( f"{_ELAB}.parse_elaboration_response", return_value=parsed ):
+            dicts = _run( agent._elaborate_chunked( outline, "src" ) )
+
+        # The guard is only proven if the notify ACTUALLY raised — an unfired
+        # side_effect would make this pass vacuously.
+        assert _silence_voice_io[ "notify" ].await_count == 6
+        assert len( dicts ) == 6                       # one parsed dict per batch, nothing lost
+        assert client.call_for_elaboration.await_count == 6
+
+    def test_large_deck_elaborates_in_chunks_without_all_at_once( self, _silence_voice_io ):
+        # A deck ABOVE the threshold goes straight to batched elaboration and
+        # never issues the single all-at-once call. Guards the 2026-08-05
+        # finding: one call at 40/60 slides returns well-formed JSON with ZERO
+        # slides, and reports stop_reason "end_turn" so the truncation fallback
+        # cannot rescue it.
+        agent  = _agent()
+        client = _mock_api_client()
+        agent._api_client = client
+        n       = PresentationOrchestratorAgent.LARGE_DECK_CHUNK_THRESHOLD + 1
+        outline = [ _outline( number=i + 1 ) for i in range( n ) ]
+        chunk_dicts = [ { "number": i + 1, "arc_position": "opening", "type": "title",
+                          "title": f"T{i + 1}", "visual_type": "text_only" } for i in range( n ) ]
+        agent._elaborate_chunked = AsyncMock( return_value=chunk_dicts )
+
+        slides = _run( agent._elaborate_async( outline ) )
+
+        agent._elaborate_chunked.assert_awaited_once()
+        client.call_for_elaboration.assert_not_awaited()   # the failing call is never made
+        assert [ s.number for s in slides ] == list( range( 1, n + 1 ) )
+
+    def test_at_threshold_still_uses_all_at_once( self, _silence_voice_io ):
+        # Boundary: exactly AT the threshold keeps the original single-call path,
+        # so the change cannot silently alter decks that already worked.
+        agent  = _agent()
+        client = _mock_api_client()
+        agent._api_client = client
+        n       = PresentationOrchestratorAgent.LARGE_DECK_CHUNK_THRESHOLD
+        outline = [ _outline( number=i + 1 ) for i in range( n ) ]
+        parsed  = [ { "number": i + 1, "arc_position": "opening", "type": "title",
+                      "title": f"T{i + 1}", "visual_type": "text_only" } for i in range( n ) ]
+        agent._elaborate_chunked = AsyncMock()             # must NOT be called
+        with patch( f"{_ELAB}.get_elaboration_prompt", return_value="P" ), \
+             patch( f"{_ELAB}.parse_elaboration_response", return_value=parsed ):
+            slides = _run( agent._elaborate_async( outline ) )
+
+        agent._elaborate_chunked.assert_not_awaited()
+        client.call_for_elaboration.assert_awaited_once()
+        assert len( slides ) == n
+
+    def test_large_deck_chunked_empty_raises( self, _silence_voice_io ):
+        # Chunked mode yielding nothing fails LOUD — never an empty deck.
+        agent = _agent()
+        agent._api_client = _mock_api_client()
+        n       = PresentationOrchestratorAgent.LARGE_DECK_CHUNK_THRESHOLD + 1
+        outline = [ _outline( number=i + 1 ) for i in range( n ) ]
+        agent._elaborate_chunked = AsyncMock( return_value=[] )
+
+        with pytest.raises( ValueError, match="no slides in chunked mode" ):
+            _run( agent._elaborate_async( outline ) )
+
     def test_real_truncation_triggers_chunked_fallback( self, _silence_voice_io ):
         agent = _agent()
         client = _mock_api_client()

@@ -121,6 +121,13 @@ class PresentationOrchestratorAgent:
         - Can be stopped externally via request_stop()
     """
 
+    # Above this many slides, elaborate in batches instead of one call.
+    # Measured 2026-08-05 on the live test server: 20 slides built end to end,
+    # while 40 and 60 both returned well-formed JSON containing ZERO slides.
+    # Those failures reported stop_reason "end_turn" (not truncated), so the
+    # truncation-driven fallback could not rescue them.
+    LARGE_DECK_CHUNK_THRESHOLD = 20
+
     def __init__(
         self,
         source_path : str,
@@ -1029,6 +1036,26 @@ class PresentationOrchestratorAgent:
         source_content = self._presentation_state.get( "source_content", "" )
         human_feedback = self._presentation_state.get( "human_feedback" )
 
+        # PROACTIVE CHUNKING for large decks.
+        #
+        # A single all-at-once elaboration call reliably fails above ~20 slides:
+        # measured 2026-08-05, decks of 40 and 60 both came back as well-formed
+        # JSON carrying ZERO slides, while 20 built end to end. That failure is
+        # NOT truncation — stop_reason was "end_turn" — so the truncation-driven
+        # fallback below never fires for it and cannot rescue a large deck.
+        #
+        # Chunking up front is the same work the fallback already does (batches
+        # of 6, concatenated), just chosen by deck size instead of by a failure
+        # we now know does not get reported. The all-at-once path and its
+        # D6-STRICT fail-loud handling below are UNCHANGED for normal decks.
+        if len( slide_outline ) > self.LARGE_DECK_CHUNK_THRESHOLD:
+            if self.debug: print( f"[Orchestrator] Large deck ({len( slide_outline )} slides) — elaborating in batches" )
+            await voice_io.notify( f"Large deck ({len( slide_outline )} slides) — elaborating in batches...", priority="low" )
+            slide_dicts = await self._elaborate_chunked( slide_outline, source_content, human_feedback )
+            if not slide_dicts:
+                raise ValueError( "Elaboration produced no slides in chunked mode" )
+            return self._slides_from_dicts( slide_dicts )
+
         try:
             # Build prompt
             prompt = get_elaboration_prompt(
@@ -1080,26 +1107,7 @@ class PresentationOrchestratorAgent:
                 raise ValueError( "Elaboration produced no slides after truncation fallback" )
 
             # Convert to SlideModel instances
-            slides = []
-            for d in slide_dicts:
-                notes_dict = d.get( "presenter_notes", {} )
-                notes = PresenterNotes(
-                    transition     = notes_dict.get( "transition" ),
-                    talking_points = notes_dict.get( "talking_points", [] ),
-                    timing_seconds = notes_dict.get( "timing_seconds", 60 ),
-                    emphasis       = notes_dict.get( "emphasis" ),
-                )
-                slides.append( SlideModel(
-                    number             = d[ "number" ],
-                    arc_position       = d[ "arc_position" ],
-                    type               = d[ "type" ],
-                    title              = d[ "title" ],
-                    subtitle           = d.get( "subtitle" ),
-                    visual_type        = d[ "visual_type" ],
-                    visual_description = d.get( "visual_description" ),
-                    content_bullets    = d.get( "content_bullets", [] ),
-                    presenter_notes    = notes,
-                ) )
+            slides = self._slides_from_dicts( slide_dicts )
 
             # Calculate timing
             total_timing = sum( s.presenter_notes.timing_seconds for s in slides )
@@ -1135,6 +1143,45 @@ class PresentationOrchestratorAgent:
             await voice_io.notify( f"Elaboration error: {str( e )[ :80 ]}", priority="urgent" )
             return []
 
+    def _slides_from_dicts( self, slide_dicts: List[ dict ] ) -> List[ "SlideModel" ]:
+        """
+        Convert parsed elaboration dicts into SlideModel instances.
+
+        Shared by the all-at-once path and the chunked path so both produce
+        identical model construction.
+
+        Requires:
+            - each dict carries number, arc_position, type, title, visual_type
+
+        Ensures:
+            - returns one SlideModel per dict, in the order given
+            - presenter_notes defaults to 60s timing when unspecified
+        """
+        from .state import PresenterNotes
+
+        slides = []
+        for d in slide_dicts:
+            notes_dict = d.get( "presenter_notes", {} )
+            notes = PresenterNotes(
+                transition     = notes_dict.get( "transition" ),
+                talking_points = notes_dict.get( "talking_points", [] ),
+                timing_seconds = notes_dict.get( "timing_seconds", 60 ),
+                emphasis       = notes_dict.get( "emphasis" ),
+            )
+            slides.append( SlideModel(
+                number             = d[ "number" ],
+                arc_position       = d[ "arc_position" ],
+                type               = d[ "type" ],
+                title              = d[ "title" ],
+                subtitle           = d.get( "subtitle" ),
+                visual_type        = d[ "visual_type" ],
+                visual_description = d.get( "visual_description" ),
+                content_bullets    = d.get( "content_bullets", [] ),
+                presenter_notes    = notes,
+            ) )
+
+        return slides
+
     async def _elaborate_chunked(
         self,
         slide_outline: List[ SlideOutline ],
@@ -1158,11 +1205,35 @@ class PresentationOrchestratorAgent:
         batch_size = 6
         all_dicts  = []
 
+        # One PINNED progress bubble for the whole batch sequence: every update
+        # carries the same progress_group_id, so the UI updates one element in
+        # place instead of appending a message per batch (same pattern podcast
+        # uses per-language, podcast_generator/orchestrator.py:666-726).
+        #
+        # This exists because batched elaboration is SILENT for a long time: a
+        # 32-slide deck spent 10m25s between "Phase 4" and "Phase 5" with no
+        # output at all (measured 2026-08-05), which reads as a hung job.
+        batch_group_id = f"pg-{uuid.uuid4().hex[ :8 ]}"
+        total_batches  = ( len( slide_outline ) + batch_size - 1 ) // batch_size
+
         for i in range( 0, len( slide_outline ), batch_size ):
             batch = slide_outline[ i : i + batch_size ]
 
             if self.debug:
                 print( f"[Orchestrator] Chunked elaboration: slides {batch[ 0 ].number}-{batch[ -1 ].number}" )
+
+            # Sign of life, never a failure point. A progress line must NEVER
+            # abort an elaboration that is already many paid API calls deep, so
+            # every failure here is swallowed and logged.
+            try:
+                await voice_io.notify(
+                    f"Elaborating slides {batch[ 0 ].number}-{batch[ -1 ].number} of "
+                    f"{len( slide_outline )} (batch {i // batch_size + 1} of {total_batches})...",
+                    priority          = "low",
+                    progress_group_id = batch_group_id,
+                )
+            except Exception as e:
+                logger.warning( f"Batch progress notify failed (continuing): {e}" )
 
             prompt = get_elaboration_prompt(
                 slide_outlines          = batch,
