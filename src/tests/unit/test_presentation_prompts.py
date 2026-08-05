@@ -236,16 +236,32 @@ class TestGetNarrativeAnalysisPrompt:
         )
         assert "machine learning" in prompt
 
-    def test_truncation_note_for_long_content( self ):
-        """Long content gets truncated with a note."""
-        long_content = "x" * 40000
+    def test_truncation_note_at_configured_ceiling( self ):
+        """Content over the configured ceiling gets clipped, and the note cites that ceiling."""
+        ceiling = 100
+        long_content = "A" * ceiling + "B" * 50   # only the A's survive the clip
         prompt = get_narrative_analysis_prompt(
             source_content = long_content,
             raw_sections   = [],
             target_duration   = 15,
             slides_per_minute = 1.0,
+            max_source_chars  = ceiling,
         )
         assert "truncated" in prompt.lower()
+        assert f"truncated to {ceiling:,}" in prompt   # the CONFIGURED ceiling, not a literal
+        assert "B" * 50 not in prompt                  # dropped content really is dropped
+
+    def test_no_truncation_when_ceiling_unset( self ):
+        """With no ceiling (None), even very long content is passed through whole."""
+        long_content = "A" * 40000 + "TAIL_MARKER"
+        prompt = get_narrative_analysis_prompt(
+            source_content = long_content,
+            raw_sections   = [],
+            target_duration   = 15,
+            slides_per_minute = 1.0,
+        )   # max_source_chars omitted → None → no clip
+        assert "truncated" not in prompt.lower()
+        assert "TAIL_MARKER" in prompt
 
     def test_no_audience_no_guidelines( self ):
         """Prompt works without audience parameter."""

@@ -123,6 +123,7 @@ def get_narrative_analysis_prompt(
     slides_per_minute: float,
     audience: Optional[ str ] = None,
     audience_context: Optional[ str ] = None,
+    max_source_chars: Optional[ int ] = None,
 ) -> str:
     """
     Build user message for narrative analysis.
@@ -172,12 +173,14 @@ def get_narrative_analysis_prompt(
     if audience_context:
         audience_block += f"\n\nAdditional audience context: {audience_context}"
 
-    # Truncate source content if very long (preserve first 30k chars)
+    # Truncate source content if it exceeds the configured ceiling. The ceiling
+    # is passed in from config (see PresentationConfig.max_source_chars, loaded
+    # from the shared `agent source content max chars` INI key); None = no clip.
     truncated = source_content
     truncation_note = ""
-    if len( source_content ) > 30000:
-        truncated = source_content[ :30000 ]
-        truncation_note = "\n\n[NOTE: Document was truncated to 30,000 characters for analysis. Focus on the provided content.]"
+    if max_source_chars is not None and len( source_content ) > max_source_chars:
+        truncated = source_content[ :max_source_chars ]
+        truncation_note = f"\n\n[NOTE: Document was truncated to {max_source_chars:,} characters for analysis. Focus on the provided content.]"
 
     prompt = f"""Analyze the following document for presentation conversion.
 

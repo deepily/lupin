@@ -160,11 +160,19 @@ class TestGetElaborationPrompt:
         # 15 min = 900s / 4 slides = 225s
         assert "225 seconds" in prompt
 
-    def test_source_truncation( self, sample_outlines ):
-        long_source = "x" * 35000
-        prompt = get_elaboration_prompt( sample_outlines, long_source, 15 )
+    def test_source_truncation_at_configured_ceiling( self, sample_outlines ):
+        ceiling = 100
+        long_source = "A" * ceiling + "B" * 50
+        prompt = get_elaboration_prompt( sample_outlines, long_source, 15, max_source_chars=ceiling )
         assert "truncated" in prompt.lower()
-        assert len( prompt ) < len( long_source ) + 5000
+        assert f"truncated to {ceiling:,}" in prompt   # the CONFIGURED ceiling, not a literal
+        assert "B" * 50 not in prompt
+
+    def test_no_source_truncation_when_ceiling_unset( self, sample_outlines ):
+        long_source = "A" * 40000 + "TAIL_MARKER"
+        prompt = get_elaboration_prompt( sample_outlines, long_source, 15 )   # None → no clip
+        assert "truncated" not in prompt.lower()
+        assert "TAIL_MARKER" in prompt
 
     def test_single_slide_outline( self ):
         outlines = [ { "number": 1, "type": "title", "title": "Solo", "arc_position": "opening", "visual_type": "text_only" } ]

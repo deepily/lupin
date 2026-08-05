@@ -22,19 +22,21 @@ from cosa.agents.presentation_generator.state import NarrativeSection, SlideOutl
 class TestNarrativePrompt:
     def test_full_prompt_all_blocks( self ):
         raw_sections = [ ( "Intro", "some body words here", 1 ), ( "Plain", "", 0 ) ]
+        ceiling = 100                               # the CONFIGURED ceiling, passed in
         p = narrative.get_narrative_analysis_prompt(
-            source_content    = "x" * 35000,   # > 30000 → truncation note
+            source_content    = "x" * ( ceiling + 50 ),   # > ceiling → truncation note
             raw_sections      = raw_sections,
             target_duration   = 15,
             slides_per_minute = 1.0,
             audience          = "expert",
             audience_context  = "ML architects",
+            max_source_chars  = ceiling,
         )
         assert "Pre-Parsed Document Structure" in p
         assert "H1" in p and "text" in p            # level>0 and level==0 indicators
         assert "deep domain expertise" in p          # expert audience guideline
         assert "ML architects" in p                  # audience_context
-        assert "truncated to 30,000" in p            # truncation note
+        assert f"truncated to {ceiling:,}" in p      # note cites the CONFIGURED ceiling, not a literal
 
     def test_minimal_prompt_no_optional_blocks( self ):
         p = narrative.get_narrative_analysis_prompt(
@@ -198,18 +200,20 @@ class TestElaborationPrompt:
             SlideOutline( number=1, arc_position="opening", type="title", title="T", visual_type="text_only" ),
             SlideOutline( number=2, arc_position="body", type="key_point", title="K", visual_type="diagram", source_hint="Sec1" ),
         ]
+        ceiling = 100                             # the CONFIGURED ceiling, passed in
         p = elaboration.get_elaboration_prompt(
             slide_outlines          = outlines,
-            source_content          = "y" * 31000,
+            source_content          = "y" * ( ceiling + 50 ),
             target_duration_minutes = 10,
             audience                = "academic",
             audience_context        = "researchers",
             human_feedback          = "tighten timing",
+            max_source_chars        = ceiling,
         )
         assert "(source: Sec1)" in p
         assert "research-oriented" in p           # academic guideline
         assert "researchers" in p
-        assert "truncated to 30,000" in p
+        assert f"truncated to {ceiling:,}" in p   # note cites the CONFIGURED ceiling, not a literal
         assert "tighten timing" in p
 
     def test_prompt_with_dicts_minimal( self ):

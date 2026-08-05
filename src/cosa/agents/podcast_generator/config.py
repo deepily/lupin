@@ -287,6 +287,11 @@ class PodcastConfig:
     max_research_doc_tokens    : int   = 100000
     key_topics_to_extract      : int   = 5
     examples_per_topic         : int   = 2
+    # Max characters of research content fed to the content-analysis and
+    # script-generation prompts before clipping. Loaded from the SHARED base INI
+    # key `agent source content max chars` (also read by the presentation
+    # generator). Replaces two hardcoded literals (50000 analysis, 30000 script).
+    max_source_chars           : int   = 200000
 
     # === Execution Limits ===
     max_script_revisions          : int = 3
@@ -447,6 +452,9 @@ class PodcastConfig:
             include_outro             = _get( "podcast include outro",             "True", "boolean" ),
             prosody_annotation_level  = _get( "podcast prosody annotation level",  "moderate" ),
             max_research_doc_tokens   = _get( "podcast max research doc tokens",   "100000", "int" ),
+            # SHARED base key (NOT podcast-prefixed) — identical key read by the
+            # presentation generator. Single source of truth for the char ceiling.
+            max_source_chars          = _get( "agent source content max chars",   "200000", "int" ),
             key_topics_to_extract     = _get( "podcast key topics to extract",     "5",    "int" ),
             examples_per_topic        = _get( "podcast examples per topic",        "2",    "int" ),
             max_script_revisions      = _get( "podcast max script revisions",      "3",    "int" ),

@@ -187,6 +187,30 @@ class PresentationGeneratorJob( AgenticJobBase ):
             # Backlog item 5 (2026-04-29): canonical Future contract.
             raise
 
+    def _apply_job_overrides( self, config ) -> None:
+        """
+        Overlay this job's per-request args onto the INI-loaded config, in place.
+
+        Requires:
+            - config is a PresentationConfig instance
+
+        Ensures:
+            - Each job arg that is not None replaces the matching config field
+            - audience_context treats the expeditor "none" sentinel (and the empty
+              string) as "not provided" and is NOT copied — otherwise the prompt
+              builders would inject a bogus "Additional audience context: none" line
+        """
+        if self.target_duration_minutes is not None:
+            config.target_duration_minutes = self.target_duration_minutes
+        if self.audience is not None:
+            config.audience = self.audience
+        if self.theme is not None:
+            config.default_theme = self.theme
+        if self.content_model is not None:
+            config.content_model = self.content_model
+        if self.audience_context is not None and self.audience_context.strip().lower() not in ( "", "none" ):
+            config.audience_context = self.audience_context
+
     async def _execute( self ) -> str:
         """
         Internal async presentation generation execution.
@@ -245,15 +269,10 @@ class PresentationGeneratorJob( AgenticJobBase ):
             config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
             config = PresentationConfig.from_config( config_mgr, debug=self.debug )
 
-            # Job args override INI values
-            if self.target_duration_minutes is not None:
-                config.target_duration_minutes = self.target_duration_minutes
-            if self.audience is not None:
-                config.audience = self.audience
-            if self.theme is not None:
-                config.default_theme = self.theme
-            if self.content_model is not None:
-                config.content_model = self.content_model
+            # Apply this job's per-request args onto the INI-loaded config.
+            # Extracted to _apply_job_overrides for unit-testability (the copy
+            # otherwise runs only inside the full async pipeline).
+            self._apply_job_overrides( config )
 
             # Create orchestrator
             agent = PresentationOrchestratorAgent(

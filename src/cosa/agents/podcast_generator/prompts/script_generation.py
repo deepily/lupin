@@ -172,7 +172,8 @@ def get_content_analysis_prompt(
     research_content: str,
     max_topics: int = 5,
     audience: Optional[ str ] = None,
-    audience_context: Optional[ str ] = None
+    audience_context: Optional[ str ] = None,
+    max_source_chars: Optional[ int ] = None,
 ) -> str:
     """
     Generate prompt for content analysis phase.
@@ -194,8 +195,10 @@ def get_content_analysis_prompt(
     Returns:
         str: Complete prompt for content analysis
     """
-    # Truncate if very long to stay within context limits
-    content_preview = research_content[ :50000 ] if len( research_content ) > 50000 else research_content
+    # Truncate research to the configured ceiling (was a hardcoded 50000). The
+    # ceiling is passed in from config (PodcastConfig.max_source_chars, loaded
+    # from the shared `agent source content max chars` INI key); None = no clip.
+    content_preview = research_content[ :max_source_chars ] if ( max_source_chars is not None and len( research_content ) > max_source_chars ) else research_content
 
     audience_instruction = ""
     if audience:
@@ -228,6 +231,7 @@ def get_script_generation_prompt(
     target_language         : str = "en",
     audience                : Optional[ str ] = None,
     audience_context        : Optional[ str ] = None,
+    max_source_chars        : Optional[ int ] = None,
 ) -> str:
     """
     Generate prompt for script generation phase.
@@ -258,8 +262,10 @@ def get_script_generation_prompt(
     Returns:
         str: Complete prompt for script generation
     """
-    # Truncate research for context window management
-    research_preview = research_content[ :30000 ] if len( research_content ) > 30000 else research_content
+    # Truncate research to the configured ceiling (was a hardcoded 30000). The
+    # ceiling is passed in from config (PodcastConfig.max_source_chars, loaded
+    # from the shared `agent source content max chars` INI key); None = no clip.
+    research_preview = research_content[ :max_source_chars ] if ( max_source_chars is not None and len( research_content ) > max_source_chars ) else research_content
 
     # Build host descriptions
     host_a_desc = host_a_personality.to_prompt_description()

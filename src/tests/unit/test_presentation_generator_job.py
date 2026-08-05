@@ -154,6 +154,8 @@ class TestPresentationConfig:
         assert default_config.max_revisions == 3
         assert default_config.default_theme == "default"
         assert default_config.audience == "general"
+        assert default_config.audience_context is None       # new field, no INI default
+        assert default_config.max_source_chars == 200000     # shared source ceiling default
 
     def test_get_output_path_yaml( self, default_config ):
         """get_output_path generates correct YAML path."""
@@ -188,6 +190,52 @@ class TestPresentationConfig:
         assert config.title_style == "assertion"
         assert config.max_revisions == 3
         assert config.audience == "general"
+        # Shared `agent source content max chars` base key (also read by podcast).
+        assert config.max_source_chars == 200000
+
+
+class TestApplyJobOverrides:
+    """_apply_job_overrides overlays per-job args onto config; audience_context sentinel-guarded."""
+
+    def _job( self, **overrides ):
+        base = dict(
+            source_path = "/io/x.md", user_id = "u", user_email = "e@e.com",
+            session_id  = "s", dry_run = True,
+        )
+        base.update( overrides )
+        return PresentationGeneratorJob( **base )
+
+    def test_all_none_leaves_config_untouched( self ):
+        cfg    = PresentationConfig()
+        before = ( cfg.target_duration_minutes, cfg.audience, cfg.default_theme,
+                   cfg.content_model, cfg.audience_context )
+        self._job()._apply_job_overrides( cfg )
+        after  = ( cfg.target_duration_minutes, cfg.audience, cfg.default_theme,
+                   cfg.content_model, cfg.audience_context )
+        assert after == before
+
+    def test_all_set_overrides_config( self ):
+        cfg = PresentationConfig()
+        self._job(
+            target_duration_minutes = 60, audience = "expert", theme = "dark",
+            content_model = "claude-opus-5", audience_context = "PhD physicists",
+        )._apply_job_overrides( cfg )
+        assert cfg.target_duration_minutes == 60
+        assert cfg.audience              == "expert"
+        assert cfg.default_theme         == "dark"
+        assert cfg.content_model         == "claude-opus-5"
+        assert cfg.audience_context      == "PhD physicists"
+
+    @pytest.mark.parametrize( "sentinel", [ "none", "None", "  NONE  ", "", "   " ] )
+    def test_audience_context_sentinel_not_copied( self, sentinel ):
+        cfg = PresentationConfig()
+        self._job( audience_context = sentinel )._apply_job_overrides( cfg )
+        assert cfg.audience_context is None   # sentinel/empty treated as "not provided"
+
+    def test_audience_context_real_value_copied( self ):
+        cfg = PresentationConfig()
+        self._job( audience_context = "startup founders" )._apply_job_overrides( cfg )
+        assert cfg.audience_context == "startup founders"
 
 
 # =============================================================================

@@ -49,6 +49,15 @@ class TestPodcastConfig:
         assert config.target_duration_minutes == 10
         assert config.min_exchanges == 8
         assert config.max_exchanges == 20
+        # Shared `agent source content max chars` base key (also read by presentation).
+        assert config.max_source_chars == 200000
+
+    def test_from_config_loads_shared_source_ceiling( self ):
+        """from_config reads the shared `agent source content max chars` base key."""
+        from cosa.config.configuration_manager import ConfigurationManager
+        config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+        config = PodcastConfig.from_config( config_mgr )
+        assert config.max_source_chars == 200000
 
     def test_default_host_personalities( self ):
         """Test default host configurations."""
@@ -260,6 +269,33 @@ class TestPromptGeneration:
         assert "Maria" in prompt
         assert "Mr. Radio" in prompt
         assert "10 minutes" in prompt
+
+    def test_content_analysis_clips_at_configured_ceiling( self ):
+        """Research over the passed ceiling is clipped; None passes it through whole."""
+        research = "A" * 100 + "B" * 50
+        clipped  = get_content_analysis_prompt( research_content=research, max_source_chars=100 )
+        assert "A" * 100 in clipped and "B" * 50 not in clipped
+        whole    = get_content_analysis_prompt( research_content=research )   # None → no clip
+        assert "B" * 50 in whole
+
+    def test_script_generation_clips_at_configured_ceiling( self ):
+        """Same shared ceiling governs the script-generation prompt (was 30000, now configured)."""
+        research = "A" * 100 + "B" * 50
+        clipped  = get_script_generation_prompt(
+            content_analysis        = { "main_topic": "AI" },
+            research_content        = research,
+            host_a_personality      = DEFAULT_CURIOUS_HOST,
+            host_b_personality      = DEFAULT_EXPERT_HOST,
+            max_source_chars        = 100,
+        )
+        assert "A" * 100 in clipped and "B" * 50 not in clipped
+        whole = get_script_generation_prompt(
+            content_analysis        = { "main_topic": "AI" },
+            research_content        = research,
+            host_a_personality      = DEFAULT_CURIOUS_HOST,
+            host_b_personality      = DEFAULT_EXPERT_HOST,
+        )   # None → no clip
+        assert "B" * 50 in whole
 
 
 class TestResponseParsing:

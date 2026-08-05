@@ -693,7 +693,8 @@ class PresentationOrchestratorAgent:
                 target_duration   = self.config.target_duration_minutes,
                 slides_per_minute = self.config.slides_per_minute,
                 audience          = self.config.audience,
-                audience_context  = getattr( self.config, "audience_context", None ),
+                audience_context  = self.config.audience_context,
+                max_source_chars  = self.config.max_source_chars,
             )
 
             # Call Claude
@@ -840,7 +841,7 @@ class PresentationOrchestratorAgent:
                 slide_budget       = slide_budget,
                 title_style        = self.config.title_style,
                 audience           = self.config.audience,
-                audience_context   = getattr( self.config, "audience_context", None ),
+                audience_context   = self.config.audience_context,
                 human_feedback     = human_feedback,
             )
 
@@ -976,8 +977,9 @@ class PresentationOrchestratorAgent:
                 source_content          = source_content,
                 target_duration_minutes = self.config.target_duration_minutes,
                 audience                = self.config.audience,
-                audience_context        = getattr( self.config, "audience_context", None ),
+                audience_context        = self.config.audience_context,
                 human_feedback          = human_feedback,
+                max_source_chars        = self.config.max_source_chars,
             )
 
             # Call API
@@ -1108,8 +1110,9 @@ class PresentationOrchestratorAgent:
                 source_content          = source_content,
                 target_duration_minutes = self.config.target_duration_minutes,
                 audience                = self.config.audience,
-                audience_context        = getattr( self.config, "audience_context", None ),
+                audience_context        = self.config.audience_context,
                 human_feedback          = human_feedback,
+                max_source_chars        = self.config.max_source_chars,
             )
 
             response = await self.api_client.call_for_elaboration(

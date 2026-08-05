@@ -107,6 +107,7 @@ def get_elaboration_prompt(
     audience: Optional[ str ] = None,
     audience_context: Optional[ str ] = None,
     human_feedback: Optional[ str ] = None,
+    max_source_chars: Optional[ int ] = None,
 ) -> str:
     """
     Build user message for slide elaboration.
@@ -165,12 +166,14 @@ def get_elaboration_prompt(
     if audience_context:
         audience_block += f"\n\nAdditional audience context: {audience_context}"
 
-    # Truncate source content if very long
+    # Truncate source content if it exceeds the configured ceiling. The ceiling
+    # is passed in from config (see PresentationConfig.max_source_chars, loaded
+    # from the shared `agent source content max chars` INI key); None = no clip.
     truncated = source_content
     truncation_note = ""
-    if len( source_content ) > 30000:
-        truncated = source_content[ :30000 ]
-        truncation_note = "\n\n[NOTE: Document was truncated to 30,000 characters. Focus on the provided content.]"
+    if max_source_chars is not None and len( source_content ) > max_source_chars:
+        truncated = source_content[ :max_source_chars ]
+        truncation_note = f"\n\n[NOTE: Document was truncated to {max_source_chars:,} characters. Focus on the provided content.]"
 
     # Revision feedback
     feedback_block = ""

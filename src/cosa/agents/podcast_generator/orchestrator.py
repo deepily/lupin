@@ -1304,6 +1304,7 @@ class PodcastOrchestratorAgent:
                 max_topics       = self.config.key_topics_to_extract,
                 audience         = self.config.audience,
                 audience_context = self.config.audience_context,
+                max_source_chars = self.config.max_source_chars,
             )
 
             response = await self.api_client.call_for_analysis(
@@ -1372,6 +1373,7 @@ class PodcastOrchestratorAgent:
                 max_exchanges          = self.config.max_exchanges,
                 audience               = self.config.audience,
                 audience_context       = self.config.audience_context,
+                max_source_chars       = self.config.max_source_chars,
             )
 
             response = await self.api_client.call_for_script(
