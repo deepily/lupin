@@ -155,15 +155,17 @@ def choose_answer( note ):
 
     # multiple_choice — this is the ROUTING-CONFIRM ("I think you want ...").
     # On the PURE-VOICE path we must land on the podcast-generator (doc-resolution)
-    # product, NOT research-to-podcast. Prefer an option naming podcast generator /
-    # PodMaker; NEVER pick "Cancel"; fall back to the detected option[0].
+    # product, NOT research-to-podcast. Prefer the Doc-to-Pod (podcast generator)
+    # option; NEVER pick "Cancel"; fall back to the detected option[0].
+    # NOTE (label swap fc8990c6): "PodMaker" is now research-to-podcast — match
+    # "doc-to-pod", never "podmaker".
     if rtype == "multiple_choice":
         questions = _parse_questions( opts_raw )
         if questions:
             options = questions[ 0 ].get( "options", [] )
             for o in options:
                 lab = ( o.get( "label", "" ) ).lower()
-                if "podcast generator" in lab or "podmaker" in lab:
+                if "doc-to-pod" in lab or "podcast generator" in lab:
                     return o.get( "label" )
             for o in options:
                 if "kiss" in ( o.get( "label", "" ) ).lower():
@@ -354,7 +356,7 @@ def main( argv ):
     log( f"  PATH        : {'PURE VOICE (no mode) — the Thursday demo path' if args.no_mode else 'DROPDOWN (mode=' + MODE + ')'}" )
     log( f"  QUESTION    : {args.question[:80]}" )
     log( f"  SEED        : {'OFF (--no-seed)' if args.no_seed else 'ON (' + SEED_FILENAME + ')'}" )
-    log( f"  CONFIRM     : multiple_choice → prefer 'podcast generator'/'PodMaker'; open_ended_batch → defaults, languages=en" )
+    log( f"  CONFIRM     : multiple_choice → prefer 'Doc-to-Pod' (podcast generator); open_ended_batch → defaults, languages=en" )
     log( "══════════════════════" )
 
     results = {}
