@@ -60,6 +60,21 @@ BATCH_INTERNAL    = "internal"      # setup failed before the user could be aske
 
 
 # --------------------------------------------------------------------------- #
+# First-turn document disambiguation (plan 2026.08.04-first-turn-document-
+# disambiguation). When a workable number of documents match, show the SAME
+# multiple-choice card the routing confirm already uses instead of a blank
+# "which document?" question. The 5 is a UX judgment, NOT a technical limit —
+# the same card renders more (the routing confirm shows ~11); a dozen file
+# options just reads worse than a question, so beyond the cap we fall through
+# to the open exact-path ask.
+# --------------------------------------------------------------------------- #
+MAX_CHOICE_OPTIONS           = 5
+DOC_CHOICE_DESCRIBE_LABEL    = "Let me describe it instead"
+DOC_CHOICE_CANCEL_LABEL      = "Cancel"
+DOC_CHOICE_DESCRIBE_SENTINEL = "__describe_instead__"   # helper return: user opted for the open ask
+
+
+# --------------------------------------------------------------------------- #
 # Turning a failure reason into what the user hears (bug 68198c9f).
 #
 # expedite() used to return a bare None on every failure, so the caller said one
@@ -370,8 +385,11 @@ class RuntimeArgumentExpeditor:
                     # fuzzy_file_match consumer (e.g. the presentation generator's
                     # `source` arg) receives None, so its auto pre-step can never fire
                     # and its behaviour is STRUCTURALLY unchanged — not changed-and-tested.
-                    fuzzy_original = original_question if command == "agent router go to podcast generator" else None
-                    value = self._handle_fuzzy_file_match( user_email, agent_entry.get( "display_name" ), original_question=fuzzy_original )
+                    is_podcast     = command == "agent router go to podcast generator"
+                    fuzzy_original = original_question if is_podcast else None
+                    # The first-turn choice card is podcast-only — the SAME command
+                    # fence as fuzzy_original, so presentation's `source` is untouched.
+                    value = self._handle_fuzzy_file_match( user_email, agent_entry.get( "display_name" ), original_question=fuzzy_original, use_choice_card=is_podcast )
                     # Auto-detect YAML → set render_only flag
                     if value and value.lower().endswith( ( ".yaml", ".yml" ) ):
                         final_args[ "render_only" ] = "true"
@@ -408,7 +426,8 @@ class RuntimeArgumentExpeditor:
                 if arg_name not in final_args:                             continue  # not present at all — nothing to resolve
                 if self._value_is_existing_path( final_args[ arg_name ] ): continue  # already a real path — leave it
                 if self.debug: print( f"[Expeditor] Present-but-unresolvable '{arg_name}'={final_args[ arg_name ]!r} → running fuzzy resolve" )
-                value = self._handle_fuzzy_file_match( user_email, agent_entry.get( "display_name" ), original_question=original_question )
+                # Inside the podcast-only fence (L404) → opt into the choice card.
+                value = self._handle_fuzzy_file_match( user_email, agent_entry.get( "display_name" ), original_question=original_question, use_choice_card=True )
                 if value is None:
                     print( f"[Expeditor] User cancelled resolving present-but-unresolvable arg '{arg_name}'" )
                     return None
@@ -863,6 +882,159 @@ class RuntimeArgumentExpeditor:
         self._last_expedite_reason = self._classify_ask_failure( response )
         return None
 
+    def _ask_choice_for_arg( self, arg_name, question, options, user_email, abstract=None ):
+        """
+        Ask the user to pick a value for a missing arg from a fixed list, using the
+        SAME multiple-choice card the routing confirm uses — no new card, renderer,
+        or response shape. The request envelope is copied from
+        todo_fifo_queue._confirm_agentic_routing (MULTIPLE_CHOICE +
+        response_options={"questions":[…]}); the JSON answer parsing is copied from
+        the same site. Transport params (sender, timeout, token, job) follow the
+        sibling _ask_for_arg so the two asks behave identically.
+
+        Requires:
+            - arg_name is a non-empty string (used verbatim as the answer header)
+            - question is the prompt text (spoken + shown)
+            - options is a non-empty list of { "label": str, "description": str };
+              labels are unique and are the ONLY values the user can return
+            - user_email is the target user's email
+
+        Ensures:
+            - Returns the chosen option's label on a pick
+            - Returns None on Cancel, timeout, or delivery/parse failure (the
+              failure reason is recorded on self._last_expedite_reason)
+            - Returns DOC_CHOICE_DESCRIBE_SENTINEL when the user picks the
+              "Let me describe it instead" escape
+            - Never returns a value the caller did not put in `options`
+
+        Args:
+            arg_name: name of the missing argument (also the answer header)
+            question: the question text
+            options: list of { "label", "description" } choices (the caller adds
+                     any Describe/Cancel escapes)
+            user_email: target user for the notification
+            abstract: optional markdown context shown in UI, not spoken
+
+        Returns:
+            str or None: chosen label, DOC_CHOICE_DESCRIBE_SENTINEL, or None
+        """
+        request = NotificationRequest(
+            message          = question,
+            response_type    = ResponseType.MULTIPLE_CHOICE,
+            priority         = NotificationPriority.HIGH,
+            target_user      = user_email,
+            timeout_seconds  = 180,
+            sender_id        = self.SENDER_ID,
+            title            = f"Missing: {arg_name}",
+            suppress_ding    = False,
+            abstract         = abstract,
+            job_id           = self._job_id,
+            response_options = {
+                "questions": [ {
+                    "question"     : question,
+                    "header"       : arg_name,
+                    "multi_select" : False,
+                    "options"      : options
+                } ]
+            }
+        )
+
+        response = notify_user_sync( request=request, debug=self.debug, bearer_token=self._bearer_token )
+        self._last_notification_status = response.status
+
+        if not ( response.success and response.response_value ):
+            # Delivery/timeout/parse failure — a machine failure, never a user choice.
+            self._last_expedite_reason = self._classify_ask_failure( response )
+            return None
+
+        # MULTIPLE_CHOICE returns the raw label OR JSON { "answers": { <header>: label } }.
+        # Parsing copied verbatim in shape from todo_fifo_queue.py:1069-1077.
+        selected = response.response_value.strip()
+        if selected.startswith( "{" ):
+            try:
+                answers  = json.loads( selected ).get( "answers", {} )
+                selected = answers.get( arg_name, answers.get( "0", selected ) )
+            except ( json.JSONDecodeError, AttributeError ):
+                pass  # fall through with the raw value
+
+        if selected is None or selected == DOC_CHOICE_CANCEL_LABEL:
+            self._last_expedite_reason = BATCH_DECLINED
+            return None
+        if selected == DOC_CHOICE_DESCRIBE_LABEL:
+            return DOC_CHOICE_DESCRIBE_SENTINEL
+        return selected
+
+    def _describe_candidate( self, rel_path ):
+        """
+        Human hint for a candidate document: its folder, plus a yyyy.mm.dd date
+        parsed from the filename prefix when present. Cosmetic only — the label
+        carries the identity.
+
+        Requires:
+            - rel_path is a non-empty relative path string
+
+        Ensures:
+            - Returns a non-empty description string ("<folder> · YYYY-MM-DD" when a
+              date prefix is present, else "<folder>")
+        """
+        folder = os.path.dirname( rel_path ) or "."
+        m = re.match( r"(\d{4})\.(\d{2})\.(\d{2})", os.path.basename( rel_path ) )
+        return f"{folder} · {m.group( 1 )}-{m.group( 2 )}-{m.group( 3 )}" if m else folder
+
+    def _choose_document_from_matches( self, matches, docs_map, user_email ):
+        """
+        Present 2..MAX_CHOICE_OPTIONS candidate documents as the standard choice
+        card and map the pick back to an absolute path. The one doc-choice surface
+        the podcast ambiguity path uses.
+
+        Requires:
+            - matches is a list of relative-path keys into docs_map (caller has
+              already enforced 2..MAX_CHOICE_OPTIONS)
+            - docs_map maps relative_path -> absolute_path
+            - user_email is the target user's email
+
+        Ensures:
+            - Returns the chosen candidate's ABSOLUTE path on a pick
+            - Returns None on Cancel/timeout/failure
+            - Returns DOC_CHOICE_DESCRIBE_SENTINEL when the user opts to describe
+            - Never silently picks a file: a label outside the fixed option set
+              returns None with BATCH_MALFORMED, not matches[0]
+
+        Args:
+            matches: relative-path candidate keys (2..MAX_CHOICE_OPTIONS)
+            docs_map: relative_path -> absolute_path
+            user_email: target user for the notification
+
+        Returns:
+            str or None: absolute path, DOC_CHOICE_DESCRIBE_SENTINEL, or None
+        """
+        options      = []
+        label_to_rel = {}
+        for rel in matches:
+            base  = os.path.basename( rel )
+            label = base if base not in label_to_rel else rel   # basename collision → full rel path
+            label_to_rel[ label ] = rel
+            options.append( { "label": label, "description": self._describe_candidate( rel ) } )
+        options.append( { "label": DOC_CHOICE_DESCRIBE_LABEL, "description": "None of these — let me describe it" } )
+        options.append( { "label": DOC_CHOICE_CANCEL_LABEL,   "description": "Cancel this request" } )
+
+        chosen = self._ask_choice_for_arg(
+            "research",
+            "Which document should I use for the podcast?",
+            options,
+            user_email
+        )
+        if chosen is None or chosen == DOC_CHOICE_DESCRIBE_SENTINEL:
+            return chosen
+
+        rel = label_to_rel.get( chosen )
+        if rel is not None and rel in docs_map:
+            return docs_map[ rel ]
+        # A label outside the fixed option set — the card cannot produce this, so
+        # treat it as a non-answer rather than guessing (kills the old first-match).
+        self._last_expedite_reason = BATCH_MALFORMED
+        return None
+
     def _ask_for_confirmation( self, message, user_email, abstract=None ):
         """
         Ask the user a YES_NO confirmation question via synchronous notification.
@@ -1058,7 +1230,7 @@ class RuntimeArgumentExpeditor:
 
         return answers, BATCH_ANSWERED
 
-    def _handle_fuzzy_file_match( self, user_email, agent_display_name=None, original_question=None ):
+    def _handle_fuzzy_file_match( self, user_email, agent_display_name=None, original_question=None, use_choice_card=False ):
         """
         Use fuzzy file matching to find a document by user description.
 
@@ -1156,6 +1328,12 @@ class RuntimeArgumentExpeditor:
         # exactly as before. A wrong pick is NOT silent: the resolved file is named
         # to the user by the _confirm_and_iterate summary (Step 8), which gates on a
         # yes/no before submission — that summary is the veto surface today.
+        # card_shown gates the choice card to AT MOST ONCE per call: after a
+        # "describe instead" (or a first typed description), a second ambiguity
+        # falls to the exact-path ask, never back to the card — otherwise the
+        # card→describe→ask cycle would only exit on Cancel.
+        card_shown = False
+
         if original_question:
             auto_status, auto_matches = self._match_description_to_files(
                 original_question, docs_map, config_mgr, project_root
@@ -1164,6 +1342,15 @@ class RuntimeArgumentExpeditor:
                 resolved = docs_map[ auto_matches[ 0 ] ]
                 if self.debug: print( f"[Expeditor] Auto-resolved research from original request → {resolved}" )
                 return resolved
+            # 2..cap candidates on the FIRST turn → the standard choice card (opt-in
+            # per caller — podcast only). A pick returns the path; Cancel returns
+            # None; "describe instead" falls through to the open ask below.
+            if use_choice_card and auto_status in ( "exact", "fuzzy" ) and 2 <= len( auto_matches ) <= MAX_CHOICE_OPTIONS:
+                if self.debug: print( f"[Expeditor] {len( auto_matches )} first-turn matches — showing choice card" )
+                chosen     = self._choose_document_from_matches( auto_matches, docs_map, user_email )
+                card_shown = True
+                if chosen != DOC_CHOICE_DESCRIBE_SENTINEL:
+                    return chosen   # abs path, or None on Cancel/failure
             if self.debug: print( f"[Expeditor] No single-file auto-resolve (status={auto_status}, matches={len( auto_matches )}) — asking" )
 
         # Ask user to describe which document
@@ -1203,7 +1390,24 @@ class RuntimeArgumentExpeditor:
         if len( matches ) == 1:
             return docs_map[ matches[ 0 ] ]
 
-        # Multiple matches - ask user to pick
+        # Multiple matches. Podcast (use_choice_card) shows the standard choice
+        # card — but only if one has NOT already been shown this call, so a
+        # post-describe ambiguity terminates at the exact-path ask instead of
+        # looping back to the card. More than the UX cap also goes to the exact
+        # ask. Because the card carries no free text to mis-parse, the old silent
+        # first-match fallback below is unreachable on the podcast path.
+        if use_choice_card:
+            if not card_shown and len( matches ) <= MAX_CHOICE_OPTIONS:
+                chosen = self._choose_document_from_matches( matches, docs_map, user_email )
+                if chosen != DOC_CHOICE_DESCRIBE_SENTINEL:
+                    return chosen   # abs path, or None on Cancel/failure
+            return self._ask_for_arg(
+                "research",
+                "Please say the exact filename or path of the document you want.",
+                user_email
+            )
+
+        # Non-podcast consumers (e.g. presentation `source`) — unchanged numbered prompt.
         options_str = ", ".join( f"{i + 1}. {m}" for i, m in enumerate( matches ) )
         pick = self._ask_for_arg(
             "research",
