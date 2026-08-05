@@ -254,10 +254,23 @@ def parse_elaboration_response( response_content: str ) -> List[ dict ]:
         logger.debug( f"Raw content (first 500 chars): {response_content[ :500 ]}" )
         raise ValueError( "Elaboration response did not contain a recoverable JSON object" )
 
-    # Extract slides list (STRICT: missing / empty / non-list is a real defect)
-    slides = parsed.get( "slides", [] ) if isinstance( parsed, dict ) else []
-    if not isinstance( slides, list ) or not slides:
-        logger.error( f"Elaboration 'slides' missing/empty/not-a-list: {type( slides )}" )
+    # Extract slides list (STRICT: missing / empty / non-list is a real defect).
+    # Each branch names the predicate it actually failed. The prior single
+    # "missing/empty/not-a-list: <type>" message printed "<class 'list'>" for the
+    # empty-list case — a self-contradiction ("not-a-list: list") that hid which
+    # condition really fired (bug 957cb7b8).
+    if not isinstance( parsed, dict ):
+        logger.error( f"Elaboration parsed content is not a dict: {type( parsed ).__name__}" )
+        raise ValueError( "Elaboration returned no usable slides" )
+    if "slides" not in parsed:
+        logger.error( "Elaboration response missing 'slides' key" )
+        raise ValueError( "Elaboration returned no usable slides" )
+    slides = parsed[ "slides" ]
+    if not isinstance( slides, list ):
+        logger.error( f"Elaboration 'slides' is not a list: {type( slides ).__name__}" )
+        raise ValueError( "Elaboration returned no usable slides" )
+    if not slides:
+        logger.error( "Elaboration 'slides' is an empty list" )
         raise ValueError( "Elaboration returned no usable slides" )
 
     # Validate each slide

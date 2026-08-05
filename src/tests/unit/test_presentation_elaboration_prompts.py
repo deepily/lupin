@@ -241,6 +241,36 @@ class TestParseElaborationResponse:
         with pytest.raises( ValueError ):
             parse_elaboration_response( json.dumps( { "slides": [] } ) )
 
+    # -------------------------------------------------------------------------
+    # Diagnostic-message regression (bug 957cb7b8): each raise branch must log
+    # the predicate it ACTUALLY failed. The prior single "missing/empty/not-a-
+    # list: <type>" line printed "<class 'list'>" for an empty list — reading as
+    # "not-a-list: list", a self-contradiction that hid the real cause.
+    # -------------------------------------------------------------------------
+    def test_empty_slides_logs_empty_not_type_contradiction( self, caplog ):
+        """Empty list logs 'empty list' — never the self-contradictory type dump."""
+        with caplog.at_level( "ERROR" ):
+            with pytest.raises( ValueError ):
+                parse_elaboration_response( json.dumps( { "slides": [] } ) )
+        assert "empty list" in caplog.text
+        assert "not-a-list" not in caplog.text            # old contradictory wording gone
+        assert "<class 'list'>" not in caplog.text         # never print list-type on the empty path
+
+    def test_missing_slides_key_logs_missing( self, caplog ):
+        """Missing 'slides' key logs 'missing' — distinct from empty."""
+        with caplog.at_level( "ERROR" ):
+            with pytest.raises( ValueError ):
+                parse_elaboration_response( json.dumps( { "outline": [] } ) )
+        assert "missing 'slides' key" in caplog.text
+
+    def test_non_list_slides_logs_not_a_list_with_real_type( self, caplog ):
+        """Non-list 'slides' logs 'not a list' and the REAL offending type."""
+        with caplog.at_level( "ERROR" ):
+            with pytest.raises( ValueError ):
+                parse_elaboration_response( json.dumps( { "slides": "not a list" } ) )
+        assert "not a list" in caplog.text
+        assert "str" in caplog.text                        # names the actual type it saw
+
     def test_missing_presenter_notes_gets_defaults( self ):
         data = json.dumps( { "slides": [ { "title": "Test", "number": 1 } ] } )
         slides = parse_elaboration_response( data )

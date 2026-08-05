@@ -280,10 +280,23 @@ def parse_outline_response( response_content: str ) -> List[ dict ]:
         logger.debug( f"Raw content (first 500 chars): {response_content[ :500 ]}" )
         raise ValueError( "Outline response did not contain a recoverable JSON object" )
 
-    # Extract outline list (STRICT: missing / empty / non-list is a real defect)
-    outline = parsed.get( "outline", [] ) if isinstance( parsed, dict ) else []
-    if not isinstance( outline, list ) or not outline:
-        logger.error( f"Outline 'outline' missing/empty/not-a-list: {type( outline )}" )
+    # Extract outline list (STRICT: missing / empty / non-list is a real defect).
+    # Each branch names the predicate it actually failed — a single "missing/
+    # empty/not-a-list: <type>" message printed "<class 'list'>" for the empty
+    # case, a self-contradiction that hid which condition really fired (twin of
+    # bug 957cb7b8).
+    if not isinstance( parsed, dict ):
+        logger.error( f"Outline parsed content is not a dict: {type( parsed ).__name__}" )
+        raise ValueError( "Outline generation returned no usable entries" )
+    if "outline" not in parsed:
+        logger.error( "Outline response missing 'outline' key" )
+        raise ValueError( "Outline generation returned no usable entries" )
+    outline = parsed[ "outline" ]
+    if not isinstance( outline, list ):
+        logger.error( f"Outline 'outline' is not a list: {type( outline ).__name__}" )
+        raise ValueError( "Outline generation returned no usable entries" )
+    if not outline:
+        logger.error( "Outline 'outline' is an empty list" )
         raise ValueError( "Outline generation returned no usable entries" )
 
     # Validate each entry

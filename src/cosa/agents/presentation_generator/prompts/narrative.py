@@ -263,10 +263,23 @@ def parse_analysis_response( response_content: str ) -> List[ dict ]:
         logger.debug( f"Raw content (first 500 chars): {response_content[ :500 ]}" )
         raise ValueError( "Narrative analysis response did not contain a recoverable JSON object" )
 
-    # Extract sections list (STRICT: missing / empty / non-list is a real defect)
-    sections = parsed.get( "sections", [] ) if isinstance( parsed, dict ) else []
-    if not isinstance( sections, list ) or not sections:
-        logger.error( f"Narrative analysis 'sections' missing/empty/not-a-list: {type( sections )}" )
+    # Extract sections list (STRICT: missing / empty / non-list is a real defect).
+    # Each branch names the predicate it actually failed — a single "missing/
+    # empty/not-a-list: <type>" message printed "<class 'list'>" for the empty
+    # case, a self-contradiction that hid which condition really fired (twin of
+    # bug 957cb7b8).
+    if not isinstance( parsed, dict ):
+        logger.error( f"Narrative analysis parsed content is not a dict: {type( parsed ).__name__}" )
+        raise ValueError( "Narrative analysis returned no usable sections" )
+    if "sections" not in parsed:
+        logger.error( "Narrative analysis response missing 'sections' key" )
+        raise ValueError( "Narrative analysis returned no usable sections" )
+    sections = parsed[ "sections" ]
+    if not isinstance( sections, list ):
+        logger.error( f"Narrative analysis 'sections' is not a list: {type( sections ).__name__}" )
+        raise ValueError( "Narrative analysis returned no usable sections" )
+    if not sections:
+        logger.error( "Narrative analysis 'sections' is an empty list" )
         raise ValueError( "Narrative analysis returned no usable sections" )
 
     # Validate each section has required keys
