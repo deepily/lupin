@@ -269,7 +269,7 @@ class TestCallApi:
         assert out.input_tokens  == 0
         assert out.output_tokens == 0
         assert out.sdk_cost_usd  == 0.0
-        assert out.stop_reason   == "end_turn"
+        assert out.stop_reason   is None   # None stop_reason stays UNKNOWN, not coerced to "end_turn" (bug 98d937c2)
         assert capsys.readouterr().out == ""
 
 

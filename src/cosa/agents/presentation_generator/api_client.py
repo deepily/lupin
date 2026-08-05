@@ -108,7 +108,7 @@ class APIResponse:
     model         : str
     input_tokens  : int
     output_tokens : int
-    stop_reason   : str
+    stop_reason   : Optional[ str ]   # None = completion state UNKNOWN (not "end_turn")
     sdk_cost_usd  : float = 0.0
     raw_response  : Any   = None
 
@@ -425,7 +425,12 @@ class PresentationAPIClient:
         input_tokens  = 0
         output_tokens = 0
         sdk_cost_usd  = 0.0
-        stop_reason   = "end_turn"
+        # UNKNOWN until a ResultMessage reports it. Do NOT seed "end_turn": that
+        # coerces "no completion signal arrived" into "completed cleanly", and
+        # orchestrator._elaborate_async (is_truncated = stop_reason != "end_turn")
+        # would then skip the chunked fallback exactly when it is needed (bug
+        # 98d937c2, fail-open). None reads as truncated downstream — the safe way.
+        stop_reason   = None
 
         async for message in sdk_query( prompt=user_message, options=options ):
             if isinstance( message, AssistantMessage ):
@@ -439,7 +444,7 @@ class PresentationAPIClient:
                 input_tokens  = usage.get( "input_tokens", 0 )
                 output_tokens = usage.get( "output_tokens", 0 )
                 sdk_cost_usd  = message.total_cost_usd or 0.0
-                stop_reason   = message.stop_reason or "end_turn"
+                stop_reason   = message.stop_reason   # keep None as UNKNOWN — never coerce to "end_turn"
 
         content = "".join( collected ).strip()
 
