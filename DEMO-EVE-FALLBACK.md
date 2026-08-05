@@ -16,6 +16,35 @@ To return to the working branch afterward: `git checkout wip-v0.2.0-2026.08.03-p
 
 ---
 
+## Which DECK to open — a different question from which sha
+
+**Deck ≠ code.** `cecc18c7` below answers *"what code should the server run?"* It says
+nothing about which file to open. Do not read the one sha on this card as the answer to
+whatever you happen to be asking at 9am.
+
+**USE:** `2026.08.05-at-18:57-UTC-the-lever-one-year-of.pptx` (built from the `…18:53…`
+YAML) — **32 slides**, 9,331,512 bytes, 32 slide XMLs, valid zip. Verified independently
+by María 🌸 and by me.
+
+> ⚠️ **STALE PENDING REBUILD.** Both existing decks predate Rick's Archimedes strike,
+> which lives in slide-1 artwork and presenter notes — that needs a **regeneration, not an
+> edit**. If a build made *after* the outline was finalized exists, use that instead.
+
+**DO NOT USE:** `2026.08.05-at-17:21-UTC-one-question-four-scales-a.pptx` (20 slides).
+Superseded, **and its slide 2 displays the subtitle "Archimedes, restated for an engineer
+who can't type"** — a misstatement of Rick's own position. His wording is that typing is
+not impossible, it is expensive and paid for in pain.
+
+*(The `…17:19…` stem is that build's YAML/markdown; `…17:21…` is the rendered deck. Name
+the file you would actually open.)*
+
+> 🔎 **If you go looking for that phrase yourself, do not grep the PPTX.** Every slide in
+> these decks is a rendered **image**, so the slide XML carries no text at all and a text
+> search comes back clean on a deck that plainly shows the line. It has to be read off the
+> artwork. The phrase *is* greppable in the build's `.yaml` and `.md` sources.
+
+---
+
 ## The shas, safest first
 
 | Sha | State | Deck proof | Use it when |
