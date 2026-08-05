@@ -133,14 +133,22 @@ class TestGetContentAnalysisPrompt( unittest.TestCase ):
         self.assertNotIn( "Target Audience", out )
 
     def test_long_content_truncates_with_audience_and_context( self ):
-        long = "x" * 60000
+        ceiling = 100
+        long = "A" * ceiling + "B" * 50   # only the A's survive the configured clip
         out = get_content_analysis_prompt(
             long, max_topics=5, audience="beginner", audience_context="busy commuters",
+            max_source_chars=ceiling,
         )
         self.assertIn( "Target Audience: Beginner", out )
         self.assertIn( "busy commuters", out )
-        # Content was truncated to 50000 chars (plus the surrounding template).
-        self.assertNotIn( "x" * 50001, out )
+        # Clipped to the CONFIGURED ceiling (shared `agent source content max chars`),
+        # not the old hardcoded 50000 literal.
+        self.assertNotIn( "B" * 50, out )
+
+    def test_content_analysis_no_clip_when_ceiling_unset( self ):
+        long = "A" * 60000 + "TAIL_MARKER"
+        out = get_content_analysis_prompt( long, max_topics=5 )   # max_source_chars=None -> no clip
+        self.assertIn( "TAIL_MARKER", out )
 
     def test_unknown_audience_adds_no_guidelines( self ):
         out = get_content_analysis_prompt( "r", audience="martian" )
@@ -159,17 +167,30 @@ class TestGetScriptGenerationPrompt( unittest.TestCase ):
         self.assertIn( DEFAULT_CURIOUS_HOST.name, out )
 
     def test_spanish_truncates_with_language_audience_context( self ):
+        ceiling = 100
+        research = "A" * ceiling + "B" * 50   # only the A's survive the configured clip
         out = get_script_generation_prompt(
             content_analysis={ "main_topic": "Quantum", "key_subtopics": [ "qubits" ] },
-            research_content="y" * 40000, host_a_personality=DEFAULT_CURIOUS_HOST,
+            research_content=research, host_a_personality=DEFAULT_CURIOUS_HOST,
             host_b_personality=DEFAULT_EXPERT_HOST, target_language="es-MX",
             audience="expert", audience_context="grad students",
+            max_source_chars=ceiling,
         )
         self.assertIn( "LANGUAGE REQUIREMENT", out )
         self.assertIn( "Mexican Spanish", out )
         self.assertIn( "Target Audience: Expert", out )
         self.assertIn( "grad students", out )
-        self.assertNotIn( "y" * 30001, out )
+        # Clipped to the CONFIGURED ceiling, not the old hardcoded 30000 literal.
+        self.assertNotIn( "B" * 50, out )
+
+    def test_script_generation_no_clip_when_ceiling_unset( self ):
+        research = "A" * 40000 + "TAIL_MARKER"
+        out = get_script_generation_prompt(
+            content_analysis={ "main_topic": "T", "key_subtopics": [] },
+            research_content=research, host_a_personality=DEFAULT_CURIOUS_HOST,
+            host_b_personality=DEFAULT_EXPERT_HOST,
+        )   # max_source_chars=None -> no clip
+        self.assertIn( "TAIL_MARKER", out )
 
     def test_unknown_audience_no_guidelines( self ):
         out = get_script_generation_prompt(
