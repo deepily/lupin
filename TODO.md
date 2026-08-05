@@ -1,5 +1,39 @@
 # TODO
 
+## 🔴 FIRST THING 2026-08-05 — the Presentation Generator agent CRASHED, and Rick needs it in the morning
+
+**Rick's word, 2026-08-04 ~23:1x EDT**: *"return to debugging the Crashed Presentation Generator Agent — we're going to need this thing in the morning."*
+
+**Status at hand-off: NOT DIAGNOSED.** Nobody worked this tonight. The crash was observed by Rick, not by the crew, and no session has read the traceback — so the first act tomorrow is to **reproduce and read the actual error**, not to theorise from tonight's changes.
+
+**Where to look first, in this order:**
+1. `docker logs lupin-rest-dev` around the crash — get the real traceback before anything else. Compare timestamps against `docker inspect -f '{{.State.StartedAt}}' lupin-rest-dev` (a `--since` window that straddles a bounce mixes two different programs' output and reads as one — that cost this session a wrong defect call tonight).
+2. `pr-` job ids in the log; the presentation router is `src/cosa/rest/routers/presentation_generator.py`, the agent is `src/cosa/agents/presentation_generator/`.
+3. **Tonight's commits touched this surface** — check them, but do NOT assume: `587e399a` added a `parent_id_hash` lineage pass-through to the presentation routers (comment/plumbing only, 141/141 green), and `2d6de739` changed the shared `_handle_fuzzy_file_match` **behind a caller-passed flag that presentation does not set** — a live presentation run on boot #35 was measured and stayed on the old prompt path. Both are *checkable*, neither is *implicated*.
+
+**Do not repeat tonight's mistake**: timing plus a plausible filename is not evidence. Reproduce, read the traceback, name the failing line, then attribute.
+
+**Owner**: unassigned — first seat tomorrow takes it. Mint a store row when work starts.
+
+---
+
+## 📋 DECISIONS LOG 2026-08-04 evening (Mr. Radio 🦉 `7802a03f`) — the demo works; scope for the last two days
+
+**D6 — Verify only before Thursday; change no code.** *Ruled by Rick, 20:5x EDT, on a menu with pros/cons.*
+Rick's podcast ran end to end and he listened to it — the demo path is proven once, by hand. Remaining work is split into *verify* and *fix*, and only verify is authorized. Two runs go ahead: `3171c9dd` (the demo path through the automated harness — repeatable proof, not one good run) and `68198c9f` (a **vague** file description, the closest thing to how Rick will actually speak on stage). **The error-string fix `e0bb5a94` is explicitly NOT taken**, though it is small and genuinely valuable — it edits the demo path two days out, unreviewed, and today already showed what that costs. **Why**: today's failures all shared one shape — a green measured somewhere other than where it had to hold. More measurement helps; more change does not.
+
+**D7 — Spawn one fresh reviewer for the adversarial read.** *Ruled by Rick, same sitting.*
+`a4521768` has sat untouched all day; its owner Rio was reaped and nobody has ever read the demo path hostilely. Rick chose a **fresh** worker over me doing it — correctly: I got the routing safety-net wrong, reported audio rendering after the job had died, and had Spanish backwards an hour earlier. **Scope**: demo path only, findings and evidence, **no fix proposals** — which keeps it inside D6. Anything it finds is Rick's call, not an automatic change.
+
+**D8 — Spanish stays off, and the reason on record was wrong.** *Correction, Rick 2026-08-04.*
+I wrote in `lupin-app.ini` that English-only was about "doubling the work and adding a failure surface", and told Rick restoring Spanish was one config line. **Both were wrong.** The real reason is bug `0913bb90`: the translation step intermittently returns the **English** text unchanged, and two masking layers shipped it as a fake `es-MX` podcast — Rick got two English podcasts. Krishna's fix makes that **fail loud**; it does **not** make translation succeed, and the distinguishing run that would size how often it fires was deferred and never executed. So the odds are unmeasured. The config comment has been rewritten to say so. **Gates on Spanish**: fix `0913bb90`'s root cause, then run the N=5 distinguishing run.
+
+**D9 — The disambiguation card ships, and D6's "change no code" is superseded for it.** *Ruled by Rick, ~21:33 EDT, after a traced walkthrough.* Watching the path where two files both match "the KISS protocol", Rick asked what happens — the answer was a blank *"Which document should I use?"* with the candidates known and thrown away, because auto-resolve accepts only an exactly-one result. His words: *"if that works, it would be a very compelling demo of disambiguation"*, with the binding constraint *"a standard multiple choice UI that is used for all other lists of options. We want maximum reuse of code."* Shipped as `2d6de739`. **D6 still governs everything else** — this is one named exception granted explicitly, not a general re-opening. **Why it was safe to take two days out**: it was reviewed before a line was written (which caught a real defect in my plan), gated behind a caller-passed flag so the presentation path is untouched by construction, and proven by a live run that captured the card off the WebSocket rather than by unit tests alone.
+
+**D10 — English-only is FINAL for Thursday.** *Ruled by Rick, 22:2x EDT, on a menu with the measurement option offered and declined.* Ratifies D8 with one thing D8 did not say: there are **three** outcomes, not two. Beyond real Spanish and a visible "Translation Failed", a valid parse whose segments are still English **ships silently as a normally-titled es-MX script**, because nothing compares the translation to its source. Rick declined the N=5 distinguishing run rather than spend the night sizing a risk he had already decided not to take. **Gates on Spanish unchanged**: fix `0913bb90`'s root cause, then measure.
+
+---
+
 ## 📋 DECISIONS LOG 2026-08-04 (Mr. Radio 🦉 `7802a03f`, five-worker crew) — Thursday demo: the line was refuted, replaced, and the root cause found
 
 **D1 — Chase a wording fix AND a code fix in parallel.** *Ruled by Rick, 12:43 EDT, on a menu with pros/cons.*
