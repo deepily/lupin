@@ -1,19 +1,101 @@
 # TODO
 
-## 🔴 FIRST THING 2026-08-05 — the Presentation Generator agent CRASHED, and Rick needs it in the morning
+## ✅ SUPERSEDED 2026-08-05 morning (Mr. Radio 🦉 `2c3c8645`) — the crash was diagnosed and fixed the same night; this block was written before that and never updated
 
-**Rick's word, 2026-08-04 ~23:1x EDT**: *"return to debugging the Crashed Presentation Generator Agent — we're going to need this thing in the morning."*
+**What this block said**: *"Status at hand-off: NOT DIAGNOSED."* **That was true when written (~23:1x EDT) and false 15 minutes later.**
 
-**Status at hand-off: NOT DIAGNOSED.** Nobody worked this tonight. The crash was observed by Rick, not by the crew, and no session has read the traceback — so the first act tomorrow is to **reproduce and read the actual error**, not to theorise from tonight's changes.
+**The crash** (`pr-62254a7f`, 03:08:31 UTC — *"Outline generation returned no usable entries"*) was the plan-mode twin: `PRESENTATION_PERMISSION_MODE` was still `"plan"`. Fixed in `f67189c3` (committed 03:15:41 UTC), deployed at the 03:14:57 UTC bounce. **Proven fixed**: `pr-c07dbd3d` ran 03:20–03:30 UTC — 15 slides, PPTX 4844KB, `pres-56183c6e`.
 
-**Where to look first, in this order:**
-1. `docker logs lupin-rest-dev` around the crash — get the real traceback before anything else. Compare timestamps against `docker inspect -f '{{.State.StartedAt}}' lupin-rest-dev` (a `--since` window that straddles a bounce mixes two different programs' output and reads as one — that cost this session a wrong defect call tonight).
-2. `pr-` job ids in the log; the presentation router is `src/cosa/rest/routers/presentation_generator.py`, the agent is `src/cosa/agents/presentation_generator/`.
-3. **Tonight's commits touched this surface** — check them, but do NOT assume: `587e399a` added a `parent_id_hash` lineage pass-through to the presentation routers (comment/plumbing only, 141/141 green), and `2d6de739` changed the shared `_handle_fuzzy_file_match` **behind a caller-passed flag that presentation does not set** — a live presentation run on boot #35 was measured and stayed on the old prompt path. Both are *checkable*, neither is *implicated*.
+⚠️ **But the proof came through the CARD path only.** The Q&A-card path failed 7 minutes *before* the fix deployed and has never been retried on fixed code — the two paths were never compared on the same code. **That gap is the live P0**, not the crash.
 
-**Do not repeat tonight's mistake**: timing plus a plausible filename is not evidence. Reproduce, read the traceback, name the failing line, then attribute.
+**Today's two P0s (Rick, 2026-08-05)** — SWE crew live: Tiffany 💍 Tester · Clayton 😎 Implementer · Rachel 🕊️ Reviewer.
 
-**Owner**: unassigned — first seat tomorrow takes it. Mint a store row when work starts.
+1. **Q&A-card → presentation runs end to end** — Rick: *"I have to have it working for me today so I can hammer out various iterations of the presentation I'm giving tomorrow at noon."* Row `ffd46737` (P1). Spec: `src/rnd/v0.2.0/2026.08.05-qa-card-presentation-path-podcast-only-fences.md`. Three `fuzzy_file_match` features in `expeditor.py` are fenced to podcast only (L388–392 auto-resolve, L388–392 choice card, L422 present-but-unresolvable rescue), leaving presentation's `source` degraded.
+2. **User-specified duration + slide count** — Rick: *"It's a 60-minute presentation and there's no way in hell I can cram all of that into 12 slides."* **María owns the architecture**; the crew builds after she and Rick agree. Clayton is on recon only until then.
+
+### 🗳️ RULING 2026-08-05 ~11:37 EDT (Rick, on a 4-option menu with pros/cons) — build the two content fixes, hold the third
+
+**His words**: *"Let's do both context fixes per your recommendation and hold the third for now. I'd love to have this working but I don't think I'm going to demo file matching for presentation jobs. I definitely want to implement it though, so perhaps later make note of it — but not now."*
+
+| Item | Ruling | State |
+|---|---|---|
+| **Raise the 30,000-char source clip** → one shared INI ceiling, all 3 sites in one commit (`narrative.py:178`, `elaboration.py:171`, podcast `script_generation.py:262`) | ✅ **GO** | Clayton building |
+| **Land the dropped `audience_context`** (`job.py:249-256` copies 4 args and skips it; `config.py` has no field) | ✅ **GO** | Clayton building |
+| Generalize the expeditor podcast-only fences | ⏸️ **HELD — not dropped** | Row `5bc22180`; proposal written + Rachel-passed, needs only a GO |
+| María's T1/T2 (explicit slide count; the *"close to 12"* vs *"exactly 15"* prompt contradiction) + T2b drift warning + Gate-1 `human_feedback` | ✅ **GO** — Rick ruled directly to María at 11:38, **Scope B: soft target with a drift warning, not hard exactly-N** | **Cheech 🌿** owns the build (spun up by Rick, outside Mr. Radio's crew). Doc: `src/rnd/v0.2.0/2026.08.05-presentation-slide-count-control.md` |
+
+**⚠️ Two crews, one file — ordering ruled 2026-08-05 ~11:43 (Mr. Radio).** Clayton and Cheech both change the **signature of `get_narrative_analysis_prompt`** (his configured source-ceiling param; her `human_feedback` + budget param). A genuine conflict, not line-proximity: git merges lines 153-156 and 178 quietly and leaves callers half-updated, so **it fails at call time, not at merge time.** **Clayton lands first; Cheech rebases**, doing all of T1's plumbing outside `narrative.py` first and touching that file last. Rachel gates both and re-derives the complete call-site set at HEAD each time.
+
+**Scope grew to FOUR clip sites, ruled on evidence.** Clayton flagged a 50k twin at podcast `script_generation.py:198` rather than silently widening; Rachel pre-read it independently and reached the same verdict — an arbitrary literal with only boilerplate justification, same shape as `:262`. Folded in, because leaving a known 50k clip two functions above the 30k one we were fixing would have been *us* creating the fix-one-twin pattern, knowingly, in the same commit. Final: **2 presentation (30k) + 2 podcast (50k analysis, 30k script) → one neutral key `agent source content max chars`, `[Lupin: Baseline]`, default 200000.** The commit must state that both podcast clips **changed number** — a silent unification is a behaviour change wearing a refactor's clothes.
+
+### ✅ LANDED 2026-08-05 12:40–12:44 — both authorized fixes, verified before announcing
+
+| Sha | What | Verification |
+|---|---|---|
+| **`934b364b`** (Clayton 😎) | Shared ceiling `agent source content max chars = 200000` replacing bare literals at **all 4 clip sites** (`narrative.py`, `elaboration.py`, podcast `script_generation.py` ×2) + `audience_context` onto `PresentationConfig` + all 4 `getattr` defaults → explicit access | 15 files, 215/37. Zero `target_slide_count`/`_slide_budget` additions. Isolated-worktree touched-tests **247/247**. Rachel PASS 6/6 at the committed bytes |
+| **`f41aa1fe`** (Mr. Radio 🦉) | `d55f2f87` — **24 disambiguation tests were gate-reachable by nobody**, and the gated suite had *zero* choice-card coverage. Moved into the gated suite, not allowlisted | 24 pass in new location; census **31 passed** (was 1 failed). Pure rename, no production code |
+
+| **`8de931f8`** (Cheech 🌿 / María 🌸 spec) | T1/T2/T2b — author-set `target_slide_count` overriding the duration formula, across INI/CLI/REST/voice; `_slide_budget()` collapsing three duplicated sites; drift warning gated on an explicit count; Gate-1 `human_feedback` param | 14 files, +352/−9, **zero** foreign content, index empty. 696 passed on the committed sha |
+| **`54421d01`** (Mr. Radio 🦉) | **Seven R&D docs were untracked** while the code they specified was landing — including María's spec, the governing document for `8de931f8`. Caught by Cheech verifying her own commit | Docs only. Index verified empty before staging, contents after |
+| **`c6f7b45f`** (Clayton 😎) | The two podcast clip-pins in the **ungated** `src/cosa/tests/` tree still asserted the old 50k/30k literals against his intended change. Now parametric on the **configured** ceiling + a `None`-no-clip companion each | 1 file, 26/5. File 46/46. Whole-tree sweep for old clip literals across **both** test trees: clean |
+
+⇒ **Rick's 77,621-char source now reaches the model in full**, dictated `audience_context` lands, and slide count is author-settable instead of inferred from duration.
+
+**⚠️ The regression that only the full run could find.** `934b364b` shipped red on two tests nobody's gate collected: they live in `src/cosa/tests/`, which **no gate-invocable runner reaches**. Clayton's touched-tests run missed them; Rachel's gate missed them; **only Tiffany's 9,000-test both-roots pass found them.** Second time in one day that tree hid something — the first was the 24 doc-choice tests. ⇒ **`src/cosa/tests/` is a standing blind spot and deserves its own row after the demo.**
+
+**HEAD is now the composed tree** — `c6f7b45f → 54421d01 → 8de931f8 → f41aa1fe → 934b364b → 9b7abc98`, both crews plus both manager commits. Clayton's background both-roots run off `c6f7b45f` therefore **is** the composed-tree unit verification (row `ee679014`), by accident of ordering; Tiffany owns the live end-to-end half.
+
+### 🔴 THE COST OF TWO CREWS ON ONE TREE — worth more than the code
+
+**`git commit --only -- <paths>` commits the WORKING-TREE version of the named paths and IGNORES a clean index.** Clayton's index was verifiably clean (215/37, zero T1 by grep); `--only` bypassed it and re-bundled the other crew's work as `0d390b11`. He caught it himself from a 291-vs-215 file-stat mismatch, `reset --soft`, re-committed as `934b364b`. **The flag that sounds exactly like "commit only my paths" is the one that silently takes the working tree** — and this fleet's parallel-session doctrine actively points people at it.
+
+**`git diff -U0` cannot split two crews' CONTIGUOUS new lines** — hunk boundaries come from the pre-image, so a 61-line pure insertion authored by two people is one hunk with nothing to cut on. The INI split cleanly (13 lines apart, separated by originals); one test file took three rounds. **Class membership is not hunk separability.**
+
+**The rule neither manager had**: *"stage nothing" governs the index; **don't edit inside another crew's unlanded structure** governs the edit.* Perfect staging discipline does not save you from nested authorship.
+
+**Partial staging buys correct authorship at the cost of an untested artifact** — every test ran against a working tree holding both crews' code, while the commit held one crew's. Gate the committed artifact (`git show <sha>:<file>`, read whole), never the dirty tree.
+
+**`LUPIN_ROOT` must point at the worktree for isolated runs** — subprocess tests resolve `__main__.py` and config through it and will false-red off the dirty main tree. Cost Clayton one false red; not discoverable from the failure text.
+
+### 🪞 FOUR FACES OF ONE PATTERN — wrong instrument, not wrong thinking
+
+Recorded for the post-game; **graduation to `workflow/` deliberately withheld** (María's boundary — four faces in one morning from seats all in this room is one day of evidence; the qualifying instance must come from outside).
+
+| Face | What it produced |
+|---|---|
+| A grep count answering "what matches", not "what breaks if it's gone" | A 16-line delete list that was really 13 — three sat in a method whose removal breaks two live callers |
+| `git log --since="2026-08-05 15:00:00"` in EDT | A **future** window that cannot contain anything, returning a confident zero indistinguishable from a quiet branch |
+| A grep of `src/cosa/tests/` for tests living in `src/tests/` | An **empty result from the wrong tree**, which reads as "the tests don't assert this" |
+| A correct read of a method body, then a cited symbol that doesn't exist | *"The read was real, the citation was invented"* — a fabricated receipt passes every reader who trusts it and fails only the one who greps |
+
+**And the manager's own**: two correct observations of the same repo contradicted each other because a branch pointer moved between them — `0d390b11` went dangling, so `git log` showed one seat nothing while another had read the commit directly.
+
+### 🛟 DEMO-EVE SAFETY — row `ee679014` (P1), raised unprompted 2026-08-05 ~11:47
+
+**KNOWN-GOOD SHA: `9b7abc98`** — recorded **before** the tree moves. It is the last commit proven to produce a deck end to end, twice: `pr-a10a55aa` (Q&A path, PPTX 5,462 KB) and `pr-c07dbd3d` (card path, 4,844 KB). **If 2026-08-06 morning is broken, this is the number to go back to.** Reconstructing "what was good" from a git log at 9am on demo day is not a plan.
+
+**The gap nobody owned**: two crews land 4+ commits into the presentation path today. Each verifies its own diff; Rachel gates each. **Nobody measures the tree they jointly produce** — the same shape that has burned this fleet all week, a green measured somewhere other than where it has to hold.
+
+**Countermeasure**: after BOTH crews' commits are in and both passed, Tiffany runs **one live end-to-end pass on the composed tree** — freshly bounced, served bytes verified, whole user-observable chain (submit → expeditor → arc → outline → elaborate → render → PPTX). Acceptance: a finished PPTX **plus** the tail-reached probe green, which is what proves the ceiling took effect end to end rather than only in a unit test. It belongs to neither crew; it belongs to the manager.
+
+**Verification trap recorded (Rachel → María, step 6): the slide-count run must be LIVE, never `--dry-run`.** Dry run mocks every LLM call (`job.py:_execute_dry_run`, mock outline at `orchestrator.py:804-830`), so it returns the *mock's* count and measures the harness instead of the model — a green that proves nothing about the thing under test.
+
+**The reasoning that split them**: fixes 1-2 change what the **model** sees — a better deck, with no change to the flow Rick rehearses tonight. Fix 3 changes what **Rick** sees, the day before he presents. Same low risk, different exposure.
+
+### ✅ P0-1 CLOSED — the Q&A-card path runs end to end
+
+`pr-a10a55aa` (Tiffany 💍, `:7999`, current code, test user): **PPTX 5,462 KB, 15 slides**, full chain expeditor → outline → elaborate → YAML → Marp → 14 visuals → export. **Phase 3 — the step that killed `pr-62254a7f` last night — cleared in 22 seconds.** Writeup: `src/rnd/v0.2.0/2026.08.05-qa-presentation-path-e2e-verification.md`.
+
+### 🔍 What the morning found that nobody was looking for
+
+- **61% of Rick's source never reached the model.** His outline is 77,621 chars; the clip is 30,000, in *both* the arc and content phases. Every deck he has generated from it was built from the first 39%.
+- **`audience_context` is silently discarded.** He dictated *"presenting to forward deployed engineers at Google"*; it was stored on the job and never copied to the config the orchestrator reads.
+- **The same clip exists in podcast** (Rachel found it) — so the fix uses a shared key and podcast becomes a one-line follow-up instead of next month's twin-miss.
+- **The two prompts contradict each other**: narrative says *"close to 12"*, outline says *"exactly 15"*. No test covers the formula at all.
+- **Gate 1's "Revise" is a no-op** — feedback is stored but the prompt builder has no parameter to receive it, so it re-rolls the identical call and burns a revision.
+- **Two same-named files** — `src/rnd/…` at 48,473 and `io/deep-research/…` at 77,621. That collision produced a real disagreement between two seats' measurements; cite the full path or measure the wrong document.
+
+**The lesson this block earned**: a status line records what was true when written. This one sat at the top of TODO.md all night asserting "NOT DIAGNOSED" about a bug that was fixed, committed and verified before midnight — the same defect `history.md`'s own header names about its health stamp. **Nothing re-derives a stamp.**
 
 ---
 
