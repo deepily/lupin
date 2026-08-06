@@ -8,6 +8,22 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.08.05 evening - Session f8754825 (Cheech 🌿, solo) | The DM gate's break-even moved out from under it
+
+**The pilot's optimistic bound stopped being a saving.** Tuesday needed a 22.4% first-try reduction and was delivering 26.8% — just ahead. With Wednesday's partial data the requirement is **30.8%** against a delivered **23.8%**, because rewrite spend nearly tripled (16.1k → 46.4k est-tokens) while the pool of first tries to repay it not quite doubled. Both credit bounds are now losses (+10,558 full-credit, +46,421 no-credit); Tuesday's *"a 4.4-point error flips the sign"* no longer applies.
+
+**Behaviour still moves, and it reads as restraint.** 157.4 → 126.3 words per attempt, ≥150-word share 51.7% → 27.0%, and co-primary B — which reported `n_pairs=0` yesterday for want of a Wednesday — now has 5 pairs and moves the same direction as A. Neither is significant (p = 0.375 / 0.438, null band ±46 words against a −25 effect), and Wednesday holds only 7 of 14 slots.
+
+**Rick asked "words or tokens?" and the answer is both, in different places.** The effect is measured in **words** (excess over a 60-word target; the gate fires at 150 words); every cost figure is **chars ÷ 4 est-tokens**, not a tokenizer count. Written up as §0 of the new doc so the two units stop being quoted interchangeably.
+
+**Found the 32-slide deck he'd lost** — exactly one exists, under `claude.code@lupin.deepily.ai` rather than his own account, 9.3 MB, written 14:57 EDT. Located by counting `ppt/slides/slideN.xml` across all 20 decks in `io/`, which a repo grep cannot see because `io/` is gitignored.
+
+**Filed but not diagnosed**: the corpus has had no new rows since 16:10 EDT. Most likely the afternoon stand-down, but a stopped writer looks identical from inside the data — named as open rather than assumed quiet.
+
+**Files**: `src/rnd/v0.2.0/2026.08.04-dm-verbosity-reduction/2026.08.05-dm-two-arm-pilot-midpoint-status.md` (new) · both DM analysis docs moved into that subdir · `src/rnd/README.md` (v0.2.0 had no row; 40 docs unlinked)
+
+**No production code or corpus touched.** Related row: `35d0a451`.
+
 ### 2026.08.05 afternoon - Session 2c3c8645 (Mr. Radio 🦉, three-worker crew) | A safety net that had never once run, and a bug that was never in the code
 
 **The headline defect was a recovery path that could not be reached.** `api_client` seeded `stop_reason` to `"end_turn"` and then coerced the SDK's value with `message.stop_reason or "end_turn"`. `ResultMessage.stop_reason` is `Optional[str]` in Agent SDK 0.1.56, so two ordinary cases — the SDK reporting `None`, and no `ResultMessage` arriving at all, which is what a cut stream looks like — were relabelled as a clean completion. `orchestrator:1061` derives `is_truncated` from that value, so it was always False, the parse failure re-raised, and `:1073` — the only production caller of `_elaborate_chunked` — was unreachable. The truncation fallback had never executed once since it was written. Now fails closed (`cecc18c7`).
@@ -58,7 +74,7 @@ Rick asked what happens when two documents both match "the KISS protocol". The a
 
 **And the structural answer to "what reduction rate would justify it".** A refusal can never pay for itself on the message it refuses: blind costs D, rejecting costs D burned plus R rewritten. The draft is sunk. So the arm can only win through behaviour change on *future* messages — which makes this an investment with a payback period, not a per-message efficiency. Break-even: the 352 first-try messages must each be **22.4%** shorter than blind to repay the 16,115 spent on rewrites. Observed gap is **26.8%** — just above the line, ~3% net saving. Credit the arm fully and Tuesday saves 3,147 tokens; credit it with nothing and it burns 16,115. Those are bounds, not estimates, and **a 4.4-point error in the causal assumption flips the sign**. Co-primary B — "first attempts only" — is the designed test for exactly that, and reports `n_pairs=0` because it matches Tuesday against Wednesday and Wednesday has not run. Expected, not broken; Rick's ruling to extend collection is what makes it answerable.
 
-**Files**: `src/scripts/apply_claude_permissions.py` · `src/tests/unit/deploy/test_apply_claude_permissions.py` · `src/conf/env-contract.tsv` · `src/conf/vm-unversioned-manifest.tsv` · `src/scripts/lupin-vm.sh` · `src/scripts/preflight-vm.sh` · `src/rnd/v0.2.0/2026.08.04-claude-permission-sync-dev-to-vm.md` · `src/rnd/v0.2.0/2026.08.04-dm-arm-all-in-cost-and-breakeven.md`
+**Files**: `src/scripts/apply_claude_permissions.py` · `src/tests/unit/deploy/test_apply_claude_permissions.py` · `src/conf/env-contract.tsv` · `src/conf/vm-unversioned-manifest.tsv` · `src/scripts/lupin-vm.sh` · `src/scripts/preflight-vm.sh` · `src/rnd/v0.2.0/2026.08.04-claude-permission-sync-dev-to-vm.md` · `src/rnd/v0.2.0/2026.08.04-dm-verbosity-reduction/2026.08.04-dm-arm-all-in-cost-and-breakeven.md`
 
 **Checkpoint**: `5f926276`. Applier **100% lines/branches**, 28 tests; deploy suite **386 pass** — its own push-env contract guard caught the new `DEEPILY_DATA_DIR` row, which is the guard working. Rows filed: `35d0a451` (cost metric omits refused drafts) · `cdb5a76f` (expeditor CBR returned a different question set's answers at confidence 1.0, auto-submit armed — **not** confirmed to have fired). Row `b9b805b2` **done with receipts**. Deliberately NOT changed: how a live experiment's corpus is scored mid-flight — the corpus stays append-only, so both numbers remain computable. Known limit: settings load at Claude Code **startup**, so nothing here reaches a running session; the VM's checkout picks up the applier on its next ordinary deploy.
 

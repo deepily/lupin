@@ -159,6 +159,26 @@ Three of those were mine. The countermeasure that actually worked, every time, w
 
 ---
 
+## 📊 MIDPOINT 2026-08-05 evening (Cheech 🌿 `f8754825`) — DM pilot: the break-even moved, and the bounds stopped bracketing zero
+
+Doc: `src/rnd/v0.2.0/2026.08.04-dm-verbosity-reduction/2026.08.05-dm-two-arm-pilot-midpoint-status.md` (sequel to the 08-04 break-even doc, now a sibling in the same subdir).
+
+| | Tuesday | Tue + Wed (partial) |
+|---|---|---|
+| required first-try reduction | 22.4% | **30.8%** |
+| observed | 26.8% | 23.8% |
+| full-credit bound | −3,147 tok (saving) | **+10,558 tok (loss)** |
+| no-credit bound | +16,115 tok | **+46,421 tok** |
+
+The observed gap barely moved; the **requirement** rose, because rewrites nearly tripled while first tries not quite doubled. Behaviour still moves and reads as restraint (157.4 → 126.3 words/attempt; co-primary B answerable at last, n=5, same direction as A) but nothing is significant — p = 0.375 / 0.438 on a ±46-word null band.
+
+**Two things a later seat should not have to rediscover**: the effect is in **words**, every cost figure is in **chars÷4 est-tokens** (never a tokenizer), and they are not interchangeable. And bunching in \[140,149\] went 4.4% → 11.1% — senders steering *to* the threshold, not away.
+
+### ⏳ Still open on this row
+
+- **Wednesday is 7 of 14 slots**, and no rows have landed since 16:10 EDT. **Not diagnosed** — quiet fleet and stopped writer look identical from inside the corpus. Cheap to settle; decides whether tonight's slots fill on their own.
+- Row `35d0a451` (published metric omits refused drafts) is still queued — today's data widens the gap it describes (published −33.2% vs all-in +7.4%), so quoting either figure alone is now more misleading than it was Tuesday.
+
 ## 📋 DECISIONS LOG 2026-08-03 (Cheech 🌿 `2c73cb48`) — DM verbosity pilot, live-gate verification
 
 **D1 — Prove the reject path with a real schedule slot, not the arm override.** *Ruled by me on Tiffany 💍's refutation, 2026-08-03.*
