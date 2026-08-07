@@ -39,7 +39,20 @@ class DmCompressionAgent( AgentBase ):
     MAX_ATTEMPTS  = 3
     RETRY_BACKOFF = ( 0.5, 1.0 )
 
-    def __init__( self, frozen_text: str="", question: str="", question_gist: str="",
+    # Arm B of the prompt experiment. The base template states a target RANGE in
+    # the abstract; it never tells the model which band THIS message is in or
+    # what ratio to hit. Until that is tested, "Phi-4 cannot compress long
+    # messages" and "this prompt cannot get Phi-4 to compress long messages" are
+    # indistinguishable — and only one of them is a reason to abandon the arm.
+    # (María, 2026-08-07.)
+    BAND_TARGET_LINE = (
+        "\n\nRequirement: This particular message is {words} words long. Shorten it by "
+        "about {target:.0%} — aim for roughly {goal} words. Every requirement above "
+        "still holds; do not drop a placeholder or a number to hit the target."
+    )
+
+    def __init__( self, frozen_text: str="", band_target: float=None,
+                  question: str="", question_gist: str="",
                   last_question_asked: str="", push_counter: int=-1,
                   routing_command: str=ROUTING_COMMAND,
                   user_id: str="ricardo_felipe_ruiz_6bdc", user_email: str="",
@@ -90,7 +103,21 @@ class DmCompressionAgent( AgentBase ):
         # `str.format` reads every brace as a field and raises KeyError on the
         # first one it cannot resolve. The judge hit exactly this and documents
         # it at judge.py:748.
-        self.prompt = self.prompt_template.replace( "{dm_body}", frozen_text )
+        template = self.prompt_template
+
+        # Append the per-message target BEFORE the body is substituted, so the
+        # instruction sits with the other Requirements rather than after the
+        # message it describes.
+        if band_target is not None:
+            words = len( frozen_text.split() )
+            marker = "### Input:"
+            addition = self.BAND_TARGET_LINE.format(
+                words=words, target=band_target, goal=int( words * ( 1 - band_target ) )
+            )
+            template = template.replace( marker, addition.strip() + "\n\n" + marker, 1 )
+
+        self.band_target = band_target
+        self.prompt = template.replace( "{dm_body}", frozen_text )
 
         self.xml_response_tag_names = [ "thoughts", "compressed" ]
 

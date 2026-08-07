@@ -31,12 +31,15 @@ from cosa.agents.dm_compression.freeze import freeze, validate, compress_or_orig
 MIN_USEFUL_GAIN = 0.05
 
 
-def compress_dm( body, agent_factory=None, debug=False ):
+def compress_dm( body, agent_factory=None, band_target=None, debug=False ):
     """
     Compress one DM body, or return it unchanged.
 
     Requires:
         - body is a string
+        - band_target, when given, is the fraction to aim for (0.45 = 45%) and
+          is injected into the prompt as a per-message instruction. This is arm
+          B of the prompt experiment; None is the control.
         - agent_factory, when given, is a callable taking frozen_text and
           returning an object with .run_prompt() -> dict carrying a
           "compressed" key. That is AgentBase's real invocation method — there
@@ -61,7 +64,8 @@ def compress_dm( body, agent_factory=None, debug=False ):
 
     if agent_factory is None:
         from cosa.agents.dm_compression.compressor import DmCompressionAgent
-        agent_factory = lambda frozen_text: DmCompressionAgent( frozen_text=frozen_text, debug=debug )
+        agent_factory = lambda frozen_text: DmCompressionAgent(
+            frozen_text=frozen_text, band_target=band_target, debug=debug )
 
     try:
         agent    = agent_factory( frozen.frozen_text )
