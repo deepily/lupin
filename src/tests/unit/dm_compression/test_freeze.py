@@ -375,11 +375,83 @@ class TestRemovableBoilerplate:
 
         assert not validate( fm.frozen_text.replace( "✅", "" ), fm ).ok
 
+    def test_a_glyph_opening_a_LATER_line_is_CLAIMED_by_the_removable_rule( self ):
+        """
+        The gap between the two tiers — and note what this asserts.
+
+        The inline rule excluded a line-leading glyph as not-inline; the
+        removable rule anchored only at the start of the message and never saw
+        it. 68 occurrences across 59 messages sat in NEITHER tier and could be
+        deleted with no check at all.
+
+        ⚠️ Asserting that deleting it validates cleanly does NOT test this. An
+        unguarded glyph also validates cleanly — that is the bug. The assertion
+        has to be that the removable rule positively CLAIMS the glyph, which is
+        the only thing that distinguishes "allowed" from "unwatched".
+        """
+        import sys
+        module = sys.modules[ "cosa.agents.dm_compression.freeze" ]
+
+        text     = "First line about the queue.\n🦉 Second line with more detail here."
+        claimed  = [ kind for kind, pattern in module._REMOVABLE_BOILERPLATE if pattern.search( text ) ]
+
+        assert "LEADING_GLYPH" in claimed, "a line-leading glyph is in no tier — it can be deleted unchecked"
+
+        fm = freeze( text )
+        assert validate( fm.frozen_text.replace( "🦉 ", "" ), fm ).ok
+
     def test_removable_kinds_are_declared_not_implicit( self ):
         assert REMOVABLE_KINDS, "the removable set must be explicit — silence here means anything goes"
 
 
 class TestMutationRelocation:
+    """
+    🔴 This class does NOT establish that relocation is detected. It establishes
+    the opposite, on purpose.
+
+    A rewrite can swap which claim each placeholder belongs to while leaving the
+    tokens in ascending order inside one clause, and nothing here fires. Nothing
+    in this suite covers relocation. Do not read a green run as meaning
+    placeholders are attached to the right claims.
+    """
+
+    def test_a_realistic_in_clause_swap_is_NOT_detected( self ):
+        """
+        The case that matters, and it delivers clean.
+
+        Both signals miss it: order does not fire because the tokens are still
+        ascending, and confinement does not fire because nothing left its
+        clause. Only the claims moved, and claims are not structure.
+        """
+        text = "The bug is in judge.py:572 and the fix is in src/cosa/rest/queue.py today"
+        fm   = freeze( text )
+
+        tokens  = [ p.token for p in fm.placeholders ]
+        swapped = f"Fix in {tokens[ 0 ]} and bug in {tokens[ 1 ]} today"
+        result  = validate( swapped, fm )
+
+        assert result.ok, "structural validation cannot see this — that is the documented limit"
+        assert not result.warnings, \
+            "if a warning now fires here, the proxy got stronger — update the docs, do not delete this test"
+
+    def test_a_reshaped_rewrite_reports_that_confinement_could_not_be_checked( self ):
+        """
+        Silence and 'not checkable' are different answers.
+
+        Real compression reshapes clauses, so the confinement check is
+        unavailable precisely when compression worked. It used to skip silently,
+        which meant it only ever spoke up about rewrites that had barely changed
+        anything.
+        """
+        text = "The bug is in judge.py:572. The fix is in src/cosa/rest/queue.py."
+        fm   = freeze( text )
+
+        tokens   = [ p.token for p in fm.placeholders ]
+        reshaped = f"Bug {tokens[ 0 ]}, fix {tokens[ 1 ]}"
+        result   = validate( reshaped, fm )
+
+        assert result.ok
+        assert any( name == "clause_confinement_unavailable" for name, _ in result.warnings )
 
     def test_moving_a_placeholder_across_clauses_warns_but_does_not_fail( self ):
         text = "The bug is at judge.py:572. The fix is in src/cosa/rest/queue.py."
@@ -484,6 +556,14 @@ class TestSpanResolution:
         ( "job.py:249-256",                 "job.py:249-256" ),
         ( "file.py:12:34",                  "file.py:12:34" ),
         ( "config.py:297,298",              "config.py:297,298" ),
+        # Citations that END A SENTENCE. The closing guard used to be
+        # `(?![\w.])`, which refused to match `judge.py:572.` at all and matched
+        # `judge.py:249-256.` as `judge.py:249` — reintroducing the truncation
+        # bug whenever a citation landed at the end of a sentence. 21 of 647
+        # corpus citations do exactly that.
+        ( "the leak is at judge.py:572.",        "judge.py:572" ),
+        ( "the leak spans job.py:249-256.",      "job.py:249-256" ),
+        ( "see config.py:297,298. Then bounce.", "config.py:297,298" ),
     ] )
     def test_file_line_citations_are_frozen_whole( self, text, expected ):
         """
@@ -507,18 +587,46 @@ class TestSpanResolution:
 
         assert not validate( mutated, fm ).ok
 
-    def test_gate_pointer_does_not_swallow_the_next_word( self ):
+    @pytest.mark.parametrize( "text", [
+        "gate the queue and gate by hand",
+        "we should gate that behind a flag",
+        "gate before you bounce it",
+    ] )
+    def test_gate_pointer_does_not_swallow_the_next_word( self, text ):
         """
         The greedy pattern that produced 1,307 junk spans.
 
-        `gate the` matched as `gate t`. It never showed up as a high frozen
-        ratio because it spread thinly across the corpus, which is exactly why
-        it survived the first round of measurement.
+        `gate the` matched as `gate t` — it took the first letter of the
+        following word. It never showed up as a high frozen ratio because it
+        spread thinly across the corpus instead of dominating any one message,
+        which is exactly why it survived the first round of measurement.
         """
-        counts = count_verify_literals( "gate the queue and gate by hand", "" )
+        counts = count_verify_literals( text, "" )
+        junk   = [ k for k in counts if k.lower().startswith( "gate " ) and len( k ) == 6 ]
 
-        assert "gate t" not in counts
-        assert "gate b" not in counts
+        assert not junk, f"gate pointer swallowed a word: {junk}"
+
+    def test_verify_patterns_track_edits_to_the_taxonomy( self ):
+        """
+        The verify view must be DERIVED, never snapshotted.
+
+        A module-level snapshot is built once at import, so changing a pattern
+        afterwards leaves the freeze path and the verify path disagreeing. That
+        divergence fooled a falsification pass: reverting the section-pointer
+        fix left the verify path holding the fixed pattern, the guard test kept
+        passing, and a real guard was reported as absent.
+
+        This asserts the two views cannot drift apart again.
+        """
+        import sys
+        module = sys.modules[ "cosa.agents.dm_compression.freeze" ]
+
+        derived  = { kind for kind, _ in module._verify_patterns() }
+        declared = { kind for kind, tier, _ in module._PATTERNS if tier == "VERIFY" }
+
+        assert declared <= derived
+        assert not hasattr( module, "_VERIFY_PATTERNS" ), \
+            "a snapshot reappeared — it will drift from _PATTERNS and hide a broken guard"
 
     def test_gate_pointer_still_matches_real_references( self ):
         counts = count_verify_literals( "see gate (a) and gate 2 for the wording", "" )

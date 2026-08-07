@@ -79,8 +79,15 @@ _PATTERNS = [
     # Both shapes found by María against the corpus: ranges in the labeled
     # sample, comma lists in a follow-up sweep (11 live instances, 0 of 635
     # spans left uncovered by this pattern). 2026-08-07.
+    # ⚠️ The closing guard is `(?!\w)(?!\.\d)`, NOT `(?![\w.])`.
+    #
+    # `(?![\w.])` was there to stop `file.py:12.5` matching as `file.py:12`, and
+    # it did — while also refusing to match at all when a citation ends a
+    # sentence. `judge.py:572.` matched nothing, and `judge.py:249-256.` matched
+    # `judge.py:249`, silently reintroducing the truncation bug this pattern was
+    # widened to fix. 21 of 647 corpus citations end in a period.
     ( "FILELINE", "HARD", re.compile(
-        r"\b[\w./-]+\.\w{1,6}:\d+(?:[-–]\d+)?(?:,\d+(?:[-–]\d+)?)*(?::\d+)?(?![\w.])"
+        r"\b[\w./-]+\.\w{1,6}:\d+(?:[-–]\d+)?(?:,\d+(?:[-–]\d+)?)*(?::\d+)?(?!\w)(?!\.\d)"
     ) ),
     # Absolute-ish, or relative with a real extension. Deliberately NOT a bare
     # "a/b" — that matches "and/or" and every slash in prose.
@@ -237,12 +244,30 @@ _PATTERNS = [
 #
 # The margin this protects is thin: 5,799 tokens on 95,735, about 6%. Every
 # cheap class moved into the freeze tier eats it.
-_VERIFY_PATTERNS = (
-    [ ( kind, pattern ) for kind, tier, pattern in _PATTERNS if tier == "VERIFY" ] +
-    [ ( "INT", re.compile( r"(?<![\w.$€£])-?\d+(?:[.,]\d+)*(?![\w.])" ) ) ]
-)
+_INT_PATTERN = ( "INT", re.compile( r"(?<![\w.$€£])-?\d+(?:[.,]\d+)*(?![\w.])" ) )
 
-VERIFY_KINDS = tuple( kind for kind, _ in _VERIFY_PATTERNS )
+
+def _verify_patterns():
+    """
+    Derive the verify-tier patterns from _PATTERNS on every call.
+
+    Deliberately NOT snapshotted into a module-level list. A snapshot is taken
+    once at import, so anything that changes a pattern in _PATTERNS afterwards
+    leaves the two views disagreeing — the freeze path sees the new pattern and
+    the verify path keeps the old one.
+
+    That is not hypothetical. It fooled a falsification pass: reverting the
+    section-pointer fix in _PATTERNS left the verify path still holding the
+    fixed pattern, the guard test kept passing, and the guard looked absent when
+    it was real. A test harness that cannot reliably break the thing it is
+    testing reports the wrong answer in both directions.
+    """
+    return [ ( kind, pattern ) for kind, tier, pattern in _PATTERNS if tier == "VERIFY" ] + [ _INT_PATTERN ]
+
+
+VERIFY_KINDS = tuple(
+    [ kind for kind, tier, _ in _PATTERNS if tier == "VERIFY" ] + [ _INT_PATTERN[ 0 ] ]
+)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -268,8 +293,14 @@ VERIFY_KINDS = tuple( kind for kind, _ in _VERIFY_PATTERNS )
 # Anything added here is a deliberate widening of what the rewriter may destroy.
 # Measure before adding, and say what makes it redundant rather than merely
 # decorative.
+#
+# ⚠️ Anchored per LINE, not per message. Anchoring only at `\A` left the glyph
+# that opens a later line in neither tier — GLYPH excludes it as non-inline and
+# this rule never saw it — so 68 occurrences across 59 messages could be deleted
+# with no check at all. A gap between two tiers is worse than being in the
+# wrong one.
 _REMOVABLE_BOILERPLATE = [
-    ( "LEADING_GLYPH", re.compile( r"\A\s*" + _GLYPH_RUN + r"\s*" ) ),
+    ( "LEADING_GLYPH", re.compile( r"(?m)^[ \t]*" + _GLYPH_RUN + r"[ \t]*" ) ),
 ]
 
 REMOVABLE_KINDS = tuple( kind for kind, _ in _REMOVABLE_BOILERPLATE )
@@ -560,7 +591,7 @@ def count_verify_literals( text, namespace ):
 
     counts = {}
 
-    for _, pattern in _VERIFY_PATTERNS:
+    for _, pattern in _verify_patterns():
         for m in pattern.finditer( stripped ):
             counts[ m.group( 0 ) ] = counts.get( m.group( 0 ), 0 ) + 1
 
@@ -883,22 +914,44 @@ def validate( rewritten, frozen_msg ):
 
     # ── Check 5: order and clause confinement — WARNING ONLY ─────────────────
     #
-    # Relocation is the honest limit of this method: a placeholder can survive
-    # every check above and still be attached to the wrong claim. These are
-    # proxies, not guarantees, and gating delivery on them would reject good
-    # rewrites while still not catching the bad ones.
+    # 🔴 READ THIS BEFORE TRUSTING A CLEAN RESULT.
+    #
+    # Relocation is the honest limit of this method, and these two signals are
+    # WEAKER than they look. A rewrite can swap which claim each placeholder
+    # belongs to while leaving the tokens in ascending order inside a single
+    # clause — "The bug is in [[L00]] and the fix is in [[L01]]" coming back as
+    # "Fix in [[L00]] and bug in [[L01]]" — and neither signal fires. It is not
+    # a tuning problem; the information is not present in the structure.
+    #
+    # Do not read "no warnings" as "no relocation". Catching it needs a
+    # semantic check or a human, and neither exists yet.
     sequence = [ expected[ t ].occurrence_index for t in found_tokens if t in expected ]
     if sequence != sorted( sequence ):
         result.warn( "order", "placeholder order changed — possible relocation" )
 
     rewritten_clauses = segment_clauses( rewritten )
-    for m in found:
-        token = m.group( 0 )
-        if token not in expected: continue
-        landed = _clause_of( m.start(), rewritten_clauses )
-        origin = expected[ token ].clause_index
-        if landed != origin and len( rewritten_clauses ) == len( frozen_msg.clause_spans ):
-            result.warn( "clause_confinement", f"{token} moved clause {origin} -> {landed}" )
+
+    # When the rewrite changed the clause structure, origin and landing indices
+    # are not comparable and confinement cannot be evaluated.
+    #
+    # It used to be skipped silently in that case, which inverted the signal:
+    # compression that actually worked reshapes clauses, so the check went quiet
+    # exactly when it was most needed and spoke up only on rewrites that had
+    # barely changed anything. Say so instead of saying nothing.
+    if len( rewritten_clauses ) != len( frozen_msg.clause_spans ):
+        result.warn(
+            "clause_confinement_unavailable",
+            f"clause count changed {len( frozen_msg.clause_spans )} -> {len( rewritten_clauses )}; "
+            f"relocation could not be checked for this message"
+        )
+    else:
+        for m in found:
+            token = m.group( 0 )
+            if token not in expected: continue
+            landed = _clause_of( m.start(), rewritten_clauses )
+            origin = expected[ token ].clause_index
+            if landed != origin:
+                result.warn( "clause_confinement", f"{token} moved clause {origin} -> {landed}" )
 
     return result
 
