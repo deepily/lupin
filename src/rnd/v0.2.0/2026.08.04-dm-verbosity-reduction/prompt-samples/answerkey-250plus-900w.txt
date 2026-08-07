@@ -1,0 +1,60 @@
+ORIGINAL (900 words)
+======================================================================
+Sam 🎙️ — adversarial review of the Thursday podcast path, row a4521768. Read-only on :7999, no jobs submitted. Ranked by demo-bite probability. "PROVEN" = I read the code/log line; "SUSPECT" = mechanism is real, occurrence I couldn't settle.
+
+FIRST — one thing I CLOSED (good news): the label fix IS live. The running container (/var/lupin, started 08-04 21:45, after the 11:11 fix commit 572db38b) serves the corrected labels — I grepped the in-container file: line 1005 "Doc-to-Pod (create a podcast from an existing document)" = the file reader. The inverted-label menu in the logs is from 08-03 02:06, pre-fix. Preflight #2 currently passes. No bite here.
+
+=== FINDINGS, RANKED ===
+
+1. [PROVEN GAP — the today's-pattern one] The full voice→audio chain has NEVER been observed in one continuous run. Every piece is proven, but in DIFFERENT runs and DIFFERENT users: routing (Rachel), the two-turn "Which document should I use?" prompt firing (log 08-03 20:05, job pg-dbdb5b16, harness user), and a 45-segment render completing (pg-0a1de654, ElevenLabs 00:39–00:45 today). I could NOT find a single run that went bare-line → resolve-to-Rick's-file → render → 18MB mp3 in one pass. Rachel's own doc says exactly this: status "OPEN: final-audio content check (render declined)." The whole chain's only proof is the preflight #5 morning rehearsal. If that rehearsal is skipped or fails, there is zero prior evidence the seam holds. This is the same shape as today's failures — two proven halves, untested seam.
+
+2. [PROVEN mechanism, UNMEASURED cost] "Play Here" blob-fetches the ENTIRE mp3 before playback. audio-player.html:212–231: it does fetch()→.blob() of the whole file, then hands an object URL to <audio>. The code's own comment: "This buffers the WHOLE file before playback can start." For 18MB/16min nobody has measured that buffer delay — on localhost likely 1–2s, but it is a dead pause after the click with no progress UI. Also the fetch carries an Authorization: Bearer from localStorage (line 148); a 401 there renders "Could not load audio" (line 236). SUSPECT sub-risk: the token is 30-min (lupin-app.ini:1267). It IS auto-refreshed and written back to localStorage (notifications.js:1225), but audio-player.html runs NO refresh monitor of its own (grep = 0) — it depends on the notifications page's timer. A backgrounded/throttled demo tab could let that timer lapse and 401 the audio fetch. I did not prove the throttle occurs; I proved the dependency.
+
+3. [PROVEN mechanism, SUSPECT trigger] Snapshot-cache replay can bypass routing entirely. Log 08-02 18:33: "make me a podcast about brevity…" executed a cached SolutionSnapshot in 0ms and was replayed — router never ran — and the similarity scale was broken (logged "1024.2% similarity", true cosine 0.517). Threshold is still 90.0 (lupin-app.ini:462) and I found NO cosine-fix commit since 08-02. The BARE line "make me a podcast" currently routes cleanly (Rachel saw a route, not a replay) so it's safe TODAY. The trap: preflight #5's rehearsal run SAVES a snapshot for the exact demo line; the live demo minutes later could REPLAY the rehearsal instead of generating fresh. Replaying good audio is probably benign — but it's routing you didn't run, and if the rehearsal resolved to the wrong doc, so does the show. Worth knowing before you rehearse with the identical line.
+
+4. [SUSPECT — real mechanism, occurrence depends on Thursday's fleet] Concurrency. Podcast jobs default monopolize=False (podcast_generator.py:58), so Rick's job rides the shared agentic pool (size 3 in dev, lupin-app.ini:484) as an ordinary job. Two ways it stalls: (a) if ANY monopolize job is in flight, Gate B holds Rick's job at intake until that job drains (timeout 300s, lupin-app.ini:940); (b) if the 3 pool slots are busy with other agentic work, his queues behind them. The fleet is active (many worker sessions posting). Nobody has pinned down what else could be running on :7999 during the demo. If you want this dead, quiesce agentic work on :7999 for the demo window.
+
+5. [SUSPECT — low for the bare line] Mic/STT. The mic path is real and exercised (upload_and_transcribe_mp3_file, speech.py:221) and it DOES mangle long/filler speech — logs show "blog generator, I mean, podcast generator" transcribed verbatim. But the 3-word bare line was never observed to mis-transcribe, and Whisper handles it well. Secondary: Whisper runs on GPU; CUDA OOM → 503 (speech.py:367-369). That same model server hosts the routing LoRA, so mic + routing contend for one GPU. Under load the mic step could 503. I did not see it fire on the bare line; flagging the shared-GPU coupling.
+
+=== WHAT I COULD NOT SETTLE ===
+- Whether pg-0a1de654 (today's good render) actually came through the two-turn voice resolve or a direct submit — its intake didn't tie to a "Which document?" line in the logs I read. So finding #1 stays a gap, not a disproof.
+- Actual browser buffer time for 18MB (finding #2) — needs a real Play Here click on the day, which is preflight #5's job anyway.
+
+Net: nothing here is a proven showstopper, and the label scare is a false alarm. The one that matches today's failure shape is #1 — the end-to-end seam rests entirely on the morning rehearsal. My strongest concrete recommendations for the preflight: (a) do the rehearsal with a DIFFERENT throwaway line than the live line, to dodge the snapshot-replay in #3; (b) quiesce other :7999 agentic work for the demo window (#4); (c) after Play Here, expect a brief buffer pause and confirm no 401 (#2). — Sam 🎙️
+
+PLACEHOLDER MAP
+======================================================================
+[[L00]]    SHA       'a4521768'
+[[L01]]    QUOTE     '"PROVEN"'
+[[L02]]    QUOTE     '"SUSPECT"'
+[[L03]]    PATH      '/var/lupin'
+[[L04]]    SHA       '572db38b'
+[[L05]]    QUOTE     '"Doc-to-Pod (create a podcast from an existing document)"'
+[[L06]]    QUOTE     '"Which document should I use?"'
+[[L07]]    SHA       'dbdb5b16'
+[[L08]]    SHA       '0a1de654'
+[[L09]]    QUOTE     '"OPEN: final-audio content check (render declined)."'
+[[L10]]    QUOTE     '"Play Here"'
+[[L11]]    FILELINE  'audio-player.html:212–231'
+[[L12]]    QUOTE     '"Could not load audio"'
+[[L13]]    FILELINE  'lupin-app.ini:1267'
+[[L14]]    FILELINE  'notifications.js:1225'
+[[L15]]    FILENAME  'audio-player.html'
+[[L16]]    QUOTE     '"make me a podcast about brevity…"'
+[[L17]]    QUOTE     '"1024.2% similarity"'
+[[L18]]    FILELINE  'lupin-app.ini:462'
+[[L19]]    QUOTE     '"make me a podcast"'
+[[L20]]    KEYVAL    'monopolize=False'
+[[L21]]    FILELINE  'podcast_generator.py:58'
+[[L22]]    FILELINE  'lupin-app.ini:484'
+[[L23]]    FILELINE  'lupin-app.ini:940'
+[[L24]]    IDENT     'upload_and_transcribe_mp3_file'
+[[L25]]    FILELINE  'speech.py:221'
+[[L26]]    QUOTE     '"blog generator, I mean, podcast generator"'
+[[L27]]    FILELINE  'speech.py:367-369'
+[[L28]]    SHA       '0a1de654'
+[[L29]]    QUOTE     '"Which document?"'
+
+VERIFY-TIER (must survive unchanged, not substituted)
+======================================================================
+{'#1': 2, '#2': 3, '#3': 1, '#4': 1, '#5': 3, '0': 1, '0.517': 1, '00': 2, '02': 2, '03': 2, '04': 1, '05': 1, '06': 1, '08': 5, '08-02': 2, '08-03': 2, '08-04': 1, '0ms': 1, '1': 3, '1005': 1, '11': 2, '148': 1, '16min': 1, '18': 1, '18MB': 3, '1–2': 1, '2': 3, '20': 1, '21': 1, '236': 1, '2s': 1, '3': 4, '30': 1, '300s': 1, '33': 1, '39': 1, '39–00': 1, '4': 1, '401': 3, '45': 3, '5': 3, '503': 1, '7999': 4, '90.0': 1, ':7999': 4, 'Gate B': 1, '→': 6, '🎙️': 2}

@@ -1,0 +1,25 @@
+ORIGINAL (249 words)
+======================================================================
+Taken, and I measured the tree to see how it lands on us. **The cost is asymmetric, and it falls almost entirely on Clayton.**
+
+Right now: **nothing is staged**, and both crews' work sits unstaged across 20 files — his podcast trio (`podcast_generator/config.py`, `orchestrator.py`, `script_generation.py`, `test_podcast_generator.py`) plus the four we share plus our nine. He commits FIRST, out of a tree carrying our `target_slide_count`, so his sha is the artifact nobody executed. That's the real exposure and your instruction to him is the right one.
+
+**We commit LAST, which mostly dissolves it for us** — once his sha and your test move land, the only uncommitted work left in the tree should be ours, so our tree and our commit converge. But "should be" is the word doing the work, so I'm not letting my crew assume it: **before anyone claims green, run `git status` and confirm every remaining dirty file is one of ours.** If a foreign file is still dirty, our green vouches for a composition that isn't our commit, and we say that rather than report around it.
+
+Telling Tiberius and Krishna now: **discard the current baseline after the rebase and re-run from the rebased tree** — the numbers we have were taken with your crew's work in the tree and don't survive it.
+
+Your sentence is the one that should outlive today: *partial staging buys correct authorship at the cost of an untested artifact.* Both crews pay it; the difference is only who pays more.
+
+PLACEHOLDER MAP
+======================================================================
+[[L00]]    CODE      '`podcast_generator/config.py`'
+[[L01]]    CODE      '`orchestrator.py`'
+[[L02]]    CODE      '`script_generation.py`'
+[[L03]]    CODE      '`test_podcast_generator.py`'
+[[L04]]    CODE      '`target_slide_count`'
+[[L05]]    QUOTE     '"should be"'
+[[L06]]    CODE      '`git status`'
+
+VERIFY-TIER (must survive unchanged, not substituted)
+======================================================================
+{'20': 1}
