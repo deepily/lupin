@@ -12407,6 +12407,101 @@ class NotificationsUI {
         // /app/audio?path= link is deliberately left alone and still opens a
         // new tab (Rick wants both paths).
         document.addEventListener( "click", ( ev ) => this._handleEmbeddedAudioClick( ev ) );
+
+        // Authenticated-download interception. /api/io/file is guarded by a
+        // Bearer-token dependency that reads the Authorization HEADER only, and
+        // a plain browser navigation cannot send one — so every raw
+        // <a href="/api/io/file?..."> click 401s. Intercept and re-issue the
+        // request as an authenticated fetch, then save the response blob.
+        document.addEventListener( "click", ( ev ) => this._handleIoFileDownloadClick( ev ) );
+    }
+
+    /**
+     * Document-level click handler for /api/io/file links (the PPTX download
+     * button and any markdown abstract link that points at the same endpoint).
+     * Every other click is left untouched. Split out from the listener so the
+     * branching is testable without wiring the whole document.
+     */
+    _handleIoFileDownloadClick( ev ) {
+        const anchor = ev.target.closest( "a[href]" );
+        if ( !anchor ) return;
+        const normalized = this._normalizeDocLinkHref( anchor.getAttribute( "href" ) );
+        if ( !this._isIoFileHref( normalized ) ) return;
+        ev.preventDefault();
+        this._downloadIoFileWithAuth( normalized );
+    }
+
+    /**
+     * True for a same-origin /api/io/file request — the token-guarded file
+     * endpoint. Matches with or without the &download=true flag, since both
+     * forms are equally unreachable by an unauthenticated navigation.
+     */
+    _isIoFileHref( href ) {
+        if ( !href ) return false;
+        return href.startsWith( "/api/io/file?" );
+    }
+
+    /**
+     * Fetch a token-guarded io/ file and hand it to the browser as a download.
+     *
+     * Requires:
+     *     - url is a same-origin /api/io/file request path
+     *     - a JWT is present in localStorage or on this.authToken
+     *
+     * Ensures:
+     *     - on success, the response blob is saved under the filename from the
+     *       Content-Disposition header, falling back to the path's basename
+     *     - on failure, surfaces the server's status rather than failing silently
+     */
+    async _downloadIoFileWithAuth( url ) {
+        const token = localStorage.getItem( "lupin_access_token" ) || this.authToken;
+        if ( !token ) {
+            alert( "Please log in to download files" );
+            return;
+        }
+
+        let blobUrl = null;
+        try {
+            const response = await fetch( url, { headers: { "Authorization": `Bearer ${token}` } } );
+            if ( !response.ok ) {
+                alert( `Download failed: ${response.status} ${response.statusText}` );
+                return;
+            }
+
+            const blob   = await response.blob();
+            blobUrl      = URL.createObjectURL( blob );
+            const anchor = document.createElement( "a" );
+            anchor.href     = blobUrl;
+            anchor.download = this._filenameForIoDownload( url, response.headers.get( "Content-Disposition" ) );
+            anchor.rel      = "noopener";
+            anchor.style.display = "none";
+            document.body.appendChild( anchor );
+            anchor.click();
+            // Removing the anchor in the same tick as the click can cancel the
+            // download before the browser has serviced it — defer the cleanup.
+            setTimeout( () => anchor.remove(), 5000 );
+        } catch ( error ) {
+            alert( `Download failed: ${error.message}` );
+        } finally {
+            // Revoke on a delay — revoking synchronously can cancel the save in
+            // some browsers before the click has been serviced.
+            if ( blobUrl ) setTimeout( () => URL.revokeObjectURL( blobUrl ), 60000 );
+        }
+    }
+
+    /**
+     * Resolve the filename to save under: the server's Content-Disposition
+     * filename when it supplies one, otherwise the basename of the `path`
+     * query parameter, otherwise a generic fallback.
+     */
+    _filenameForIoDownload( url, contentDisposition ) {
+        if ( contentDisposition ) {
+            const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec( contentDisposition );
+            if ( match ) return decodeURIComponent( match[ 1 ] );
+        }
+        const path = new URLSearchParams( url.split( "?" )[ 1 ] || "" ).get( "path" );
+        if ( path ) return path.split( "/" ).pop();
+        return "download";
     }
 
     /**
