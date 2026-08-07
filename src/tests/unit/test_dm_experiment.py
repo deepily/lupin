@@ -145,12 +145,40 @@ class TestLoadSchedule( unittest.TestCase ):
         self.assertEqual( sid, "test-sched" )
         self.assertEqual( exp, "two-arm-v1" )
 
-    def test_the_real_committed_schedule_has_28_slots( self ):
-        """The pilot's actual input (Clayton's item 2). 28 slots, named schedule."""
+    def test_the_real_committed_schedule_has_56_slots( self ):
+        """
+        The pilot's actual input (Clayton's item 2). 56 slots since the Thu/Fri/Sat
+        extension (Rick, 2026-08-06): the original 28 Tue/Wed slots plus 28 more.
+        The schedule_id and experiment tag are UNCHANGED so the analyzer keeps
+        pooling both blocks under `two-arm-v1`.
+        """
         slots, sid, exp = dm_experiment._load_schedule( dm_experiment._DM_SCHEDULE_PATH )
-        self.assertEqual( len( slots ), 28 )
+        self.assertEqual( len( slots ), 56 )
         self.assertEqual( sid, "dm-verbosity-two-arm-v1" )
         self.assertEqual( exp, "two-arm-v1" )
+
+    def test_the_committed_schedule_covers_the_extension_window( self ):
+        """
+        A slot must actually resolve inside the extension, else the regenerated file
+        is armed on paper only. Probes one instant in each extension day.
+        """
+        import datetime as _dt
+        policy = dm_experiment.load_default_policy()
+        for label, instant in (
+            ( "Thu 20:00 EDT", _dt.datetime( 2026, 8, 7, 0, 30, tzinfo=_dt.timezone.utc ) ),
+            ( "Fri 12:00 EDT", _dt.datetime( 2026, 8, 7, 16, 30, tzinfo=_dt.timezone.utc ) ),
+            ( "Sat 15:00 EDT", _dt.datetime( 2026, 8, 8, 19, 30, tzinfo=_dt.timezone.utc ) ),
+        ):
+            with self.subTest( slot=label ):
+                assignment = policy.assignment_at( instant )
+                self.assertIsNotNone( assignment, f"{label} resolved to no slot" )
+                self.assertIn( assignment[ "arm" ], ( "blind", "rejecting" ) )
+
+    def test_the_committed_schedule_is_closed_after_saturday_evening( self ):
+        """The extension has a FIXED end — Sat 19:00 EDT. Nothing resolves after it."""
+        import datetime as _dt
+        policy = dm_experiment.load_default_policy()
+        self.assertIsNone( policy.assignment_at( _dt.datetime( 2026, 8, 8, 23, 30, tzinfo=_dt.timezone.utc ) ) )
 
 
 def _fake_cm( values ):

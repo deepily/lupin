@@ -382,7 +382,46 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
         printf 'VERTEX-ENV:'; printf ' %q' "${VERTEX_ENV_FLAGS[@]}"; printf '\n'
     fi
     echo "tmux new-session -d -s '$SESSION_NAME' <persona-env> <vertex-env> \"$INNER\""
-    exit 0
+
+    # ── Brief-length probe (dry_run ONLY) — row 9c5dccd4 ─────────────────────────
+    # A brief too large for tmux's command-length limit makes the REAL
+    # `tmux new-session` at the bottom of this script die "command too long". The
+    # live path now surfaces that verbatim (the spawner reads the failed child's
+    # stderr into `reason`), but dry_run EXITS HERE, above that call — so without
+    # this probe an oversized brief dry-runs clean and lies about a spawn that
+    # would fail.
+    #
+    # Probe the box's OWN tmux at RUNTIME — never a baked constant, which would be
+    # wrong on a box with a different tmux build or env size and fail in the
+    # direction that looks fine. Fire the same invocation shape (the forwarded -e
+    # flags + a payload of the assembled command's exact byte length) as a no-op
+    # into a uniquely-named throwaway session, then kill it. The tmux that judges
+    # here is the one that runs the real spawn.
+    _probe_session="__lenprobe_$$_${SECONDS}_${RANDOM}"
+    _inner_bytes=$( printf '%s' "$INNER" | wc -c )
+    # ':' + (_inner_bytes-1) spaces = a no-op command tmux parses in full, byte-
+    # for-byte the size of the real $INNER payload.
+    _probe_payload=":$( printf '%*s' "$(( _inner_bytes - 1 ))" '' )"
+    if _probe_err=$( tmux new-session -d -s "$_probe_session" \
+                        "${PERSONA_ENV_FLAGS[@]}" "${VERTEX_ENV_FLAGS[@]}" \
+                        "$_probe_payload" 2>&1 ); then
+        # Best-effort cleanup: the no-op payload usually self-exits and the
+        # session is already gone, so a failed kill is expected — never let it
+        # trip `set -e`.
+        tmux kill-session -t "$_probe_session" 2>/dev/null || true
+        echo "BRIEF-LENGTH-PROBE: ok — assembled command is $_inner_bytes bytes; this box's tmux accepts it."
+        exit 0
+    elif printf '%s' "$_probe_err" | grep -qi 'command too long'; then
+        # The decisive verdict: this brief WILL blow the live spawn. Fail loud,
+        # early, with the measured byte count — never a quiet dry_run pass.
+        echo "BRIEF-LENGTH-PROBE: FAIL — assembled command is $_inner_bytes bytes; this box's tmux rejects it as 'command too long'. The live spawn WILL fail; trim the brief/memento." >&2
+        exit 1
+    else
+        # Cannot probe (no tmux, or a non-length error). Per Cheech: dry_run SAYS
+        # it could not verify rather than passing quietly.
+        echo "BRIEF-LENGTH-PROBE: could NOT verify brief length — the probe tmux call errored for another reason: $_probe_err" >&2
+        exit 1
+    fi
 fi
 
 # ── F-A11 (REBUILT 2026-07-14) — NEVER BE THE PROCESS THAT BIRTHS A TAINTED SERVER ──────

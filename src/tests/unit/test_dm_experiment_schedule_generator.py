@@ -35,6 +35,43 @@ def _load_generator():
 GEN = _load_generator()
 
 
+# The Tue/Wed assignment as it stood when the Thu/Fri/Sat extension was authorized
+# (Rick, 2026-08-06). Recorded here as a LITERAL, not read back from the generator,
+# so this test can catch the generator re-randomizing the original block: the
+# 08-04/08-05 corpus rows were written against these arms, and pooling them with a
+# different assignment would silently re-label already-collected data.
+_ORIGINAL_BLOCK_AT_RULING_TIME = [
+    { "slot_id": "2026-08-04T09", "arm": "rejecting" },
+    { "slot_id": "2026-08-04T10", "arm": "blind"     },
+    { "slot_id": "2026-08-04T11", "arm": "rejecting" },
+    { "slot_id": "2026-08-04T12", "arm": "rejecting" },
+    { "slot_id": "2026-08-04T13", "arm": "blind"     },
+    { "slot_id": "2026-08-04T14", "arm": "rejecting" },
+    { "slot_id": "2026-08-04T15", "arm": "blind"     },
+    { "slot_id": "2026-08-04T16", "arm": "blind"     },
+    { "slot_id": "2026-08-04T17", "arm": "rejecting" },
+    { "slot_id": "2026-08-04T18", "arm": "rejecting" },
+    { "slot_id": "2026-08-04T19", "arm": "blind"     },
+    { "slot_id": "2026-08-04T20", "arm": "blind"     },
+    { "slot_id": "2026-08-04T21", "arm": "rejecting" },
+    { "slot_id": "2026-08-04T22", "arm": "blind"     },
+    { "slot_id": "2026-08-05T09", "arm": "blind"     },
+    { "slot_id": "2026-08-05T10", "arm": "rejecting" },
+    { "slot_id": "2026-08-05T11", "arm": "blind"     },
+    { "slot_id": "2026-08-05T12", "arm": "blind"     },
+    { "slot_id": "2026-08-05T13", "arm": "rejecting" },
+    { "slot_id": "2026-08-05T14", "arm": "blind"     },
+    { "slot_id": "2026-08-05T15", "arm": "rejecting" },
+    { "slot_id": "2026-08-05T16", "arm": "rejecting" },
+    { "slot_id": "2026-08-05T17", "arm": "blind"     },
+    { "slot_id": "2026-08-05T18", "arm": "blind"     },
+    { "slot_id": "2026-08-05T19", "arm": "rejecting" },
+    { "slot_id": "2026-08-05T20", "arm": "rejecting" },
+    { "slot_id": "2026-08-05T21", "arm": "blind"     },
+    { "slot_id": "2026-08-05T22", "arm": "rejecting" },
+]
+
+
 # --------------------------------------------------------------------------- #
 # _max_run_length                                                             #
 # --------------------------------------------------------------------------- #
@@ -94,12 +131,28 @@ def schedule():
     return GEN.build_schedule()
 
 
-def test_twenty_eight_slots( schedule ):
-    assert len( schedule[ "slots" ] ) == 28
+@pytest.fixture( scope="module" )
+def original_slots( schedule ):
+    """The Tue/Wed block only — the 28 slots these invariants were written for."""
+    return [ s for s in schedule[ "slots" ] if s[ "block" ] == GEN.SCHEDULE_ID ]
 
 
-def test_fourteen_per_arm_total( schedule ):
-    arms = [ s[ "arm" ] for s in schedule[ "slots" ] ]
+@pytest.fixture( scope="module" )
+def ext_slots( schedule ):
+    """The Thu/Fri/Sat extension block (Rick's ruling 2026-08-06)."""
+    return [ s for s in schedule[ "slots" ] if s[ "block" ] == GEN.EXT_BLOCK_ID ]
+
+
+def test_twenty_eight_slots( original_slots ):
+    assert len( original_slots ) == 28
+
+
+def test_fifty_six_slots_total_after_the_extension( schedule ):
+    assert len( schedule[ "slots" ] ) == 56
+
+
+def test_fourteen_per_arm_total( original_slots ):
+    arms = [ s[ "arm" ] for s in original_slots ]
     assert arms.count( "blind" )     == 14
     assert arms.count( "rejecting" ) == 14
 
@@ -125,6 +178,112 @@ def test_no_within_day_run_longer_than_two( schedule ):
             ( s for s in schedule[ "slots" ] if s[ "date" ] == date ),
             key=lambda s: s[ "local_hour" ] ) ]
         assert GEN._max_run_length( ordered ) <= 2
+
+
+# --------------------------------------------------------------------------- #
+# The extension block — Thu 19-22 / Fri 09-22 / Sat 09-18 (Rick, 2026-08-06)   #
+# --------------------------------------------------------------------------- #
+def test_extension_has_twenty_eight_slots( ext_slots ):
+    assert len( ext_slots ) == 28
+
+
+def test_extension_is_balanced_fourteen_per_arm( ext_slots ):
+    arms = [ s[ "arm" ] for s in ext_slots ]
+    assert arms.count( "blind" )     == 14
+    assert arms.count( "rejecting" ) == 14
+
+
+def test_extension_covers_the_declared_hours_per_day( ext_slots ):
+    expected = {
+        "2026-08-06" : set( range( 19, 23 ) ),          # ruling landed 18:10 — 19:00 is the first armable slot
+        "2026-08-07" : set( range(  9, 23 ) ),
+        "2026-08-08" : set( range(  9, 19 ) ),
+    }
+    for date, hours in expected.items():
+        assert { s[ "local_hour" ] for s in ext_slots if s[ "date" ] == date } == hours
+
+
+def test_extension_gives_every_clock_hour_both_arms( ext_slots ):
+    """The property the analyzer's clock-hour pairing needs — a one-armed hour is unusable."""
+    by_hour = {}
+    for s in ext_slots:
+        by_hour.setdefault( s[ "local_hour" ], set() ).add( s[ "arm" ] )
+    for hour in range( 9, 23 ):
+        assert by_hour[ hour ] == { "blind", "rejecting" }, f"hour {hour} is one-armed"
+
+
+def test_extension_no_within_day_run_longer_than_two( ext_slots ):
+    for date in ( "2026-08-06", "2026-08-07", "2026-08-08" ):
+        ordered = [ s[ "arm" ] for s in sorted(
+            ( s for s in ext_slots if s[ "date" ] == date ),
+            key=lambda s: s[ "local_hour" ] ) ]
+        assert GEN._max_run_length( ordered ) <= 2
+
+
+def test_extension_friday_mirrors_thursday_at_the_late_hours( ext_slots ):
+    thu = { s[ "local_hour" ]: s[ "arm" ] for s in ext_slots if s[ "date" ] == "2026-08-06" }
+    fri = { s[ "local_hour" ]: s[ "arm" ] for s in ext_slots if s[ "date" ] == "2026-08-07" }
+    for hour in range( 19, 23 ):
+        assert fri[ hour ] == GEN.mirror_arm( thu[ hour ] )
+
+
+def test_extension_saturday_mirrors_friday_at_the_early_hours( ext_slots ):
+    fri = { s[ "local_hour" ]: s[ "arm" ] for s in ext_slots if s[ "date" ] == "2026-08-07" }
+    sat = { s[ "local_hour" ]: s[ "arm" ] for s in ext_slots if s[ "date" ] == "2026-08-08" }
+    for hour in range( 9, 19 ):
+        assert sat[ hour ] == GEN.mirror_arm( fri[ hour ] )
+
+
+def test_extension_is_deterministic_for_its_seed():
+    assert GEN.build_extension_slots() == GEN.build_extension_slots()
+
+
+def test_extension_seed_changes_the_arms():
+    """A different seed must actually redraw — else the seed is decorative."""
+    a = [ s[ "arm" ] for s in GEN.build_extension_slots( GEN.EXT_SEED ) ]
+    b = [ s[ "arm" ] for s in GEN.build_extension_slots( GEN.EXT_SEED + 1 ) ]
+    assert a != b
+
+
+def test_extension_starts_after_the_original_block_ends( schedule ):
+    """No overlap: the extension's first instant is at or after the original's last end."""
+    orig_end = max( s[ "end_utc" ]   for s in schedule[ "slots" ] if s[ "block" ] == GEN.SCHEDULE_ID )
+    ext_start = min( s[ "start_utc" ] for s in schedule[ "slots" ] if s[ "block" ] == GEN.EXT_BLOCK_ID )
+    assert ext_start >= orig_end
+
+
+def test_original_block_arms_unchanged_by_the_extension():
+    """
+    The extension must not perturb the already-collected Tue/Wed assignment — the
+    corpus rows from 08-04/08-05 were written against those arms and pooling them
+    with a re-randomized schedule would silently re-label collected data.
+    """
+    slots = sorted( ( s for s in GEN.build_schedule()[ "slots" ] if s[ "block" ] == GEN.SCHEDULE_ID ),
+                    key=lambda s: s[ "start_utc" ] )
+    assert [ ( s[ "slot_id" ], s[ "arm" ] ) for s in slots ] == [
+        ( s[ "slot_id" ], s[ "arm" ] ) for s in _ORIGINAL_BLOCK_AT_RULING_TIME
+    ]
+
+
+def test_assert_extension_invariants_rejects_a_one_armed_hour():
+    slots = GEN.build_extension_slots()
+    broken = [ dict( s ) for s in slots ]
+    for s in broken:
+        if s[ "local_hour" ] == 9: s[ "arm" ] = "blind"       # flatten hour 9 to a single arm
+    with pytest.raises( AssertionError ):
+        GEN._assert_extension_invariants( broken )
+
+
+def test_assert_extension_invariants_rejects_a_short_block():
+    with pytest.raises( AssertionError ):
+        GEN._assert_extension_invariants( GEN.build_extension_slots()[ :-1 ] )
+
+
+def test_extension_day_arms_raises_when_impossible( monkeypatch ):
+    monkeypatch.setattr( GEN, "MAX_RUN", 0 )                  # no arrangement can satisfy this
+    monkeypatch.setattr( GEN, "MAX_SHUFFLE_ATTEMPTS", 50 )
+    with pytest.raises( ValueError ):
+        GEN._extension_day_arms( random.Random( 1 ) )
 
 
 def test_utc_intervals_are_one_hour_edt( schedule ):

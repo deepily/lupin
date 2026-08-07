@@ -1163,10 +1163,11 @@ class PresentationOrchestratorAgent:
         for d in slide_dicts:
             notes_dict = d.get( "presenter_notes", {} )
             notes = PresenterNotes(
-                transition     = notes_dict.get( "transition" ),
-                talking_points = notes_dict.get( "talking_points", [] ),
-                timing_seconds = notes_dict.get( "timing_seconds", 60 ),
-                emphasis       = notes_dict.get( "emphasis" ),
+                transition         = notes_dict.get( "transition" ),
+                talking_points     = notes_dict.get( "talking_points", [] ),
+                timing_seconds     = notes_dict.get( "timing_seconds", 60 ),
+                timing_seconds_raw = notes_dict.get( "timing_seconds_raw" ),
+                emphasis           = notes_dict.get( "emphasis" ),
             )
             slides.append( SlideModel(
                 number             = d[ "number" ],
@@ -2135,6 +2136,20 @@ class PresentationOrchestratorAgent:
         total_timing = sum( s.presenter_notes.timing_seconds for s in slides )
         total_minutes = total_timing / 60
 
+        # Disclose whether the reported duration is clamp-affected (bug d5ecb753).
+        # Gate 3 is where the deck duration is READ and acted on, so a clamped
+        # total presented as a plain number is the defect itself — an over-emitting
+        # model gets flattened to the ceiling and the estimate silently understates
+        # what the model asked for. summarize_timing_clamps reads the persisted raw
+        # values; SlideModel guarantees timing_seconds_raw, so no defensive access.
+        from .prompts.elaboration import MAX_TIMING_PER_SLIDE, summarize_timing_clamps
+        clamp_summary = summarize_timing_clamps( [
+            { "number": s.number, "presenter_notes": {
+                "timing_seconds"     : s.presenter_notes.timing_seconds,
+                "timing_seconds_raw" : s.presenter_notes.timing_seconds_raw,
+            } } for s in slides
+        ] )
+
         # Count visual types
         visual_counts = {}
         for s in slides:
@@ -2156,6 +2171,14 @@ class PresentationOrchestratorAgent:
             )
 
         summary_lines.append( f"\n**Total estimated**: {total_minutes:.1f}m (target: {self.config.target_duration_minutes}m)" )
+        if clamp_summary[ "clamped_count" ] > 0:
+            summary_lines.append(
+                f"**⚠ Duration is model-estimated and clamp-affected**: {clamp_summary[ 'clamped_count' ]} of "
+                f"{len( slides )} slides hit the {MAX_TIMING_PER_SLIDE}s ceiling. The model's raw total "
+                f"({clamp_summary[ 'raw_total' ] / 60:.1f}m) and the clamped {clamp_summary[ 'clamped_total' ] / 60:.1f}m "
+                f"shown above are BOTH unreliable — the model overshoots its own 60-90s/slide guidance, so raw is an "
+                f"overestimate and clamped is arbitrary. For a real duration, measure the script word count."
+            )
         if visual_total > 0:
             summary_lines.append( f"**Slides with visuals**: {visual_total} of {len( slides )} ({visual_summary})" )
 

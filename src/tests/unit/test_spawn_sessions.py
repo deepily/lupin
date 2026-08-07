@@ -67,14 +67,15 @@ class _Result:
 
 
 class FakeRunner:
-    """Records (argv, env) calls; returns a configurable returncode."""
-    def __init__( self, returncode=0 ):
+    """Records (argv, env) calls; returns a configurable returncode + stderr."""
+    def __init__( self, returncode=0, stderr="" ):
         self.returncode = returncode
+        self.stderr     = stderr
         self.calls      = []
 
     def __call__( self, argv, env=None ):
         self.calls.append( ( argv, env ) )
-        return _Result( returncode=self.returncode )
+        return _Result( returncode=self.returncode, stderr=self.stderr )
 
 
 # ── render_task_prompt ────────────────────────────────────────────────────────
@@ -407,6 +408,47 @@ class TestSpawnSessions:
         # the 5th call argv (index 4 of sid-i) carries "msg #4"
         last_argv = runner.calls[ -1 ][ 0 ]
         assert "msg #4" in last_argv
+
+
+# ── spawn_sessions silent-failure fix (row 9c5dccd4) ──────────────────────────
+
+class TestSpawnFailureReason:
+    """Row 9c5dccd4: a spawn that fails MUST say WHY. The runner captures the
+    child's stderr (tmux 'command too long', a bad script path, …); the row used
+    to read only returncode and drop the stderr, so a manager saw status:'failed'
+    with no cause and lost 20 minutes. A failed row now carries `reason`; a
+    spawned row does not.
+
+    FLIP: delete the `if not ok:` reason block in session_spawner.py and both
+    reason assertions below fail (KeyError) — the test measures the fix, not the
+    row shape."""
+
+    def test_failed_row_surfaces_stderr_as_reason( self, tmp_path ):
+        runner = FakeRunner( returncode=1, stderr="tmux: command too long\n" )
+        res = spawn_sessions( 1, "t", "sid-why", script_path="x",
+                              runner=runner, session_dir=tmp_path )
+        row = res[ "spawned" ][ 0 ]
+        assert row[ "status" ] == "failed"
+        assert row[ "reason" ] == "tmux: command too long"   # stripped, verbatim cause
+
+    def test_failed_row_without_stderr_names_the_exit_code( self, tmp_path ):
+        # A non-zero exit with an empty stderr must STILL say something actionable,
+        # never a bare 'failed'. (Covers the else branch of the reason block.)
+        runner = FakeRunner( returncode=3, stderr="   " )
+        res = spawn_sessions( 1, "t", "sid-rc", script_path="x",
+                              runner=runner, session_dir=tmp_path )
+        row = res[ "spawned" ][ 0 ]
+        assert row[ "status" ] == "failed"
+        assert "code 3" in row[ "reason" ] and "no stderr" in row[ "reason" ]
+
+    def test_spawned_row_has_no_reason( self, tmp_path ):
+        # A success carries no reason — the key exists ONLY to explain a failure.
+        runner = FakeRunner( returncode=0, stderr="ignored on success" )
+        res = spawn_sessions( 1, "t", "sid-ok", script_path="x",
+                              runner=runner, session_dir=tmp_path )
+        row = res[ "spawned" ][ 0 ]
+        assert row[ "status" ] == "spawned"
+        assert "reason" not in row
 
 
 # ── spawn_sessions model-directive (argv threading + roster echo) ─────────────

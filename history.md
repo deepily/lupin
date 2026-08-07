@@ -8,6 +8,20 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.08.06 night - Session 72343afa (Cheech 🌿, two-worker crew) | The DM pilot had not gone quiet — its schedule had expired
+
+1. **The 08-05 "quiet corpus, not diagnosed" question is answered: neither a quiet fleet nor a stopped writer — the schedule ran out.** It declared 28 slots ending 2026-08-06T03:00Z; outside a slot `assignment_at()` returns `None` by design, so traffic kept flowing untagged. The distinguishing check is grouping by day **and** experiment tag — a coverage report that cannot say "zero tagged today" is not a liveness check.
+2. **Extended to 56 slots through Sat 2026-08-08 19:00 EDT on Rick's word, with the extension disclosed as mid-flight.** The stopping rule is now data-dependent, so Saturday's pull must publish pooled **and** Tue/Wed-only side by side; the Tue/Wed arms are pinned as a test literal so regeneration cannot silently relabel already-collected rows.
+3. **Rio ⚡ — a failed spawn now says why.** `spawn_sessions` discarded the child's stderr and returned a bare `status:"failed"`; it now carries `reason`, and `--dry-run` probes the box's own tmux at runtime instead of passing quietly on a brief the live spawn would reject (row `9c5dccd4`).
+4. **Rio ⚡ — the deck-duration number was a clamped value presented as a measurement.** Per-slide timing is clamped to a 180s ceiling; the model's pre-clamp value is now persisted as `timing_seconds_raw`, and Gate 3 states plainly that both totals are unreliable estimates (row `d5ecb753`).
+5. **Tiberius 👑 — one order-dependent test polluter closed, and he found two holes in the lane he reviewed.** `test_cache_registry.py` cleared a process-global registry without restoring it, so anything it dropped stayed gone for the rest of the suite; his review of Rio's lane passed but named a bash half that ships green on a box with no tmux (row `0ab3c0cd`). Row `69fb89cd` stays open on polluter #2.
+
+**Checkpoint**: 365 targeted unit tests green across all three lanes; both worker lanes reviewed before staging; crew harvested with the memento verified on disk; the thrice-waived 08-05 post-game finally written.
+
+**Files**: `src/scripts/dm-experiment/generate_schedule.py` · `src/conf/dm-experiment-schedule.json` · `src/lupin_mcp/session_spawner.py` · `src/scripts/start-cc-with-tmux.sh` · `src/cosa/agents/presentation_generator/{orchestrator,state,prompts/elaboration}.py` · `src/cosa/tests/unit/config/test_cache_registry.py` · 7 test files · `src/rnd/v0.2.0/2026.08.04-dm-verbosity-reduction/2026.08.06-{dm-pilot-schedule-extension,three-arm-week-design-for-ratification}.md` · `src/rnd/v0.2.0/2026.08.06-postgame-slide-count-and-demo-deck-run.md`
+
+**Awaiting Rick**: the Mon–Sat three-arm week design. Left dirty, not mine: María 🌸's arm-4 compression plan docs.
+
 ### 2026.08.06 evening - Session 6cf5f947 (Mr. Radio 🦉, three-worker crew) | The arbiter could not see the hold it was poking through
 
 **Two rows closed, and both bug reports had the wrong premise.**

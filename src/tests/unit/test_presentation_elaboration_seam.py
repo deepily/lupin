@@ -136,3 +136,35 @@ def test_explicit_truncation_reason_across_seam_enters_chunked_fallback():
     """A real 'max_tokens' truncation signal → fallback ENTERED (unchanged by fix)."""
     spy = _drive_elaboration( [ _FakeResultMessage( stop_reason="max_tokens" ) ] )
     spy.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# _slides_from_dicts carries the raw pre-clamp timing onto the model (d5ecb753)
+# ---------------------------------------------------------------------------
+def test_slides_from_dicts_propagates_timing_seconds_raw():
+    """The dict→SlideModel conversion must carry timing_seconds_raw through, or
+    the persisted raw dies at the model boundary and Gate 3 / Phase 8 lose the
+    truth the parser captured. DELETE-THE-STEP: drop the timing_seconds_raw
+    kwarg in _slides_from_dicts and this assertion fails (None instead of 300)."""
+    agent = PresentationOrchestratorAgent( source_path="/x.md", user_id="u" )
+    dicts = [ {
+        "number": 1, "arc_position": "body", "type": "key_point", "title": "T",
+        "visual_type": "text_only", "content_bullets": [],
+        "presenter_notes": { "talking_points": [], "timing_seconds": 180,
+                             "timing_seconds_raw": 300 },
+    } ]
+    slides = agent._slides_from_dicts( dicts )
+    assert slides[ 0 ].presenter_notes.timing_seconds     == 180   # clamped, for layout
+    assert slides[ 0 ].presenter_notes.timing_seconds_raw == 300   # raw truth survives
+
+def test_slides_from_dicts_raw_absent_is_none():
+    """A dict lacking timing_seconds_raw (e.g. a legacy/partial payload) yields
+    None on the model — honest absence, never a guessed value."""
+    agent = PresentationOrchestratorAgent( source_path="/x.md", user_id="u" )
+    dicts = [ {
+        "number": 1, "arc_position": "body", "type": "key_point", "title": "T",
+        "visual_type": "text_only", "content_bullets": [],
+        "presenter_notes": { "talking_points": [], "timing_seconds": 60 },
+    } ]
+    slides = agent._slides_from_dicts( dicts )
+    assert slides[ 0 ].presenter_notes.timing_seconds_raw is None

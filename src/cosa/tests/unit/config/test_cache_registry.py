@@ -16,10 +16,19 @@ class TestCacheRegistry( unittest.TestCase ):
     """register_invalidator + invalidate_all + inspection helpers."""
 
     def setUp( self ):
+        # Snapshot the real import-time invalidators, then clear for an isolated
+        # registry. `_REGISTRY` is a PROCESS GLOBAL; modules self-register at
+        # import (once per process), so anything cleared and NOT restored stays
+        # gone for the REST of the suite — the order-dependent pollution tracked
+        # in rows 69fb89cd / 3b5be159. Mirrors the gated copy's _clean_registry
+        # fixture in src/tests/unit/test_cache_registry.py.
+        self._saved_registry = dict( cr._REGISTRY )
         cr._clear_for_tests()
 
     def tearDown( self ):
-        cr._clear_for_tests()
+        cr._clear_for_tests()                            # drop anything this test registered
+        for name, fn in self._saved_registry.items():    # then put the real ones back
+            cr.register_invalidator( name, fn )
 
     def test_register_rejects_empty_name( self ):
         with self.assertRaises( ValueError ):

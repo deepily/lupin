@@ -455,7 +455,7 @@ def spawn_sessions(
         result = runner( argv, env=env )
         ok     = getattr( result, "returncode", 1 ) == 0
 
-        spawned.append( {
+        row = {
             "session_name"   : session_name,
             "requested_role" : role,
             "project"        : project,
@@ -468,7 +468,20 @@ def spawn_sessions(
             # the ambiguity (nothing on disk can), but it is the evidence that
             # lets a caller tell a 3-second race from a 40-minute corpse.
             "spawned_ts"     : now_fn()
-        } )
+        }
+        # Silence fix (row 9c5dccd4): a failed spawn MUST carry WHY. The runner
+        # captures the child's stderr (tmux "command too long" on an oversized
+        # brief, a bad script path, a bootstrap crash); the row previously read
+        # ONLY returncode and discarded the stderr, so a manager saw
+        # status:"failed" with no cause and burned 20 minutes reconstructing it
+        # by hand. Attach the captured stderr as `reason` on failure only — a
+        # spawned row needs none. Empty stderr still names the exit code, never a
+        # bare "failed".
+        if not ok:
+            stderr = ( getattr( result, "stderr", "" ) or "" ).strip()
+            rc     = getattr( result, "returncode", None )
+            row[ "reason" ] = stderr if stderr else f"spawn script exited with code {rc} and no stderr"
+        spawned.append( row )
 
     if not dry_run:
         successful = [ s for s in spawned if s[ "status" ] == "spawned" ]

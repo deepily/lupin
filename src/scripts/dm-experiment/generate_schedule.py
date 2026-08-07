@@ -51,6 +51,33 @@ BLIND                = "blind"
 REJECTING            = "rejecting"
 SLOTS_PER_ARM_PER_DAY = 7
 
+# ---------------------------------------------------------------------------
+# Extension block (Rick's ruling 2026-08-06, ~18:10 EDT).
+#
+# The original 28 slots ran out at Wed 22:00 EDT and every DM since has been
+# written untagged — the fail-safe behaving as specified, not a defect. This
+# block adds 28 MORE slots so the pilot keeps accruing.
+#
+# ⚠️ The extension is declared with a FIXED end time BEFORE it runs. It is not
+# "run until it turns significant" — the pre-declared co-primaries and the
+# +/-46-word null band are unchanged. It carries its own block id so Tue/Wed can
+# still be reported standalone as well as pooled; the interim result was already
+# seen when this was authorized, and that is recorded in the R&D doc.
+#
+# Shape — every clock hour gets BOTH arms inside the extension:
+#   Thu 19-22 (4)  mirrored by  Fri 19-22 (4)
+#   Fri 09-18 (10) mirrored by  Sat 09-18 (10)
+# 28 slots, 14 per arm. Thursday starts at 19:00 because the ruling landed at
+# 18:10 and an already-elapsed slot cannot be armed.
+# ---------------------------------------------------------------------------
+EXT_SEED             = 20260806                    # Rick's ruling date, recorded
+EXT_BLOCK_ID         = "dm-verbosity-two-arm-v1-ext"
+THURSDAY_DATE        = datetime.date( 2026, 8, 6 )
+FRIDAY_DATE          = datetime.date( 2026, 8, 7 )
+SATURDAY_DATE        = datetime.date( 2026, 8, 8 )
+EXT_LATE_HOURS       = list( range( 19, 23 ) )     # 19,20,21,22 — Thu, mirrored Fri
+EXT_EARLY_HOURS      = list( range(  9, 19 ) )     # 09..18      — Fri, mirrored Sat
+
 
 def _max_run_length( seq ):
     """
@@ -117,22 +144,25 @@ def mirror_arm( arm ):
     raise ValueError( f"unknown arm: {arm!r}" )
 
 
-def _build_day_slots( date, arms, tz ):
+def _build_day_slots( date, arms, tz, hours=None ):
     """
     Build the per-hour slot dicts for one day.
 
     Requires:
         - date is a datetime.date
-        - arms is a list of arm labels, one per hour in the window
+        - arms is a list of arm labels, one per hour covered
         - tz is a zoneinfo.ZoneInfo for America/New_York
+        - hours is a list of local hours, or None for the full 09-22 window
 
     Ensures:
-        - returns one slot dict per window hour, each carrying slot_id, date,
+        - returns one slot dict per covered hour, each carrying slot_id, date,
           local_hour, local_start, start_utc, end_utc, arm
         - UTC instants are derived from the local wall time via zoneinfo (DST-safe)
+        - a partial `hours` list (the extension's Thu 19-22) is honoured verbatim,
+          so a block that cannot start at 09:00 is not silently back-filled
     """
     slots = []
-    hours = list( range( WINDOW_START_HOUR, WINDOW_END_HOUR ) )
+    if hours is None: hours = list( range( WINDOW_START_HOUR, WINDOW_END_HOUR ) )
     for hour, arm in zip( hours, arms ):
         local_start = datetime.datetime( date.year, date.month, date.day, hour, 0, 0, tzinfo=tz )
         start_utc   = local_start.astimezone( datetime.timezone.utc )
@@ -195,16 +225,123 @@ def _assert_invariants( schedule ):
         assert _max_run_length( ordered ) <= MAX_RUN, f"{label}: run longer than {MAX_RUN}"
 
 
-def build_schedule( seed=SEED ):
+def _extension_day_arms( rng ):
     """
-    Build the full schedule dict from a recorded seed.
+    Draw the two randomized arm sequences the extension block is built from.
+
+    The late sequence covers EXT_LATE_HOURS on Thursday; the early sequence covers
+    EXT_EARLY_HOURS on Friday. Their mirrors supply Friday-late and Saturday-early,
+    so every clock hour in 09-22 carries both arms inside the extension.
+
+    Rejection-samples the pair together, because Friday is assembled from the EARLY
+    sequence plus the MIRROR of the late one — its run length spans the join and
+    cannot be checked from either sequence alone.
+
+    Requires:
+        - rng is a seeded random.Random instance
+
+    Ensures:
+        - returns ( late_arms, early_arms ), balanced 2/2 and 5/5 respectively
+        - every assembled day (Thu, Fri, Sat) has max run <= MAX_RUN
+
+    Raises:
+        - ValueError if no arrangement is found within the attempt budget
+    """
+    late_pool  = [ BLIND ] * 2 + [ REJECTING ] * 2
+    early_pool = [ BLIND ] * 5 + [ REJECTING ] * 5
+    for _ in range( MAX_SHUFFLE_ATTEMPTS ):
+        late  = list( late_pool  ); rng.shuffle( late )
+        early = list( early_pool ); rng.shuffle( early )
+        thursday = late
+        friday   = early + [ mirror_arm( a ) for a in late ]          # 09..18 then 19..22
+        saturday = [ mirror_arm( a ) for a in early ]
+        if max( _max_run_length( thursday ), _max_run_length( friday ),
+                _max_run_length( saturday ) ) <= MAX_RUN:
+            return late, early
+    raise ValueError( f"no extension arrangement with max_run<={MAX_RUN} found in {MAX_SHUFFLE_ATTEMPTS} attempts" )
+
+
+def build_extension_slots( seed=EXT_SEED ):
+    """
+    Build the 28 extension slots (Thu 19-22, Fri 09-22, Sat 09-18).
 
     Requires:
         - seed is an integer
 
     Ensures:
-        - returns a dict with metadata plus 28 slots that pass _assert_invariants
-        - the same seed yields the same slot arms (deterministic)
+        - returns 28 slot dicts, 14 per arm, in chronological day order
+        - each carries block == EXT_BLOCK_ID so the extension can be reported
+          standalone as well as pooled with the original Tue/Wed block
+        - the same seed yields the same arms (deterministic)
+    """
+    rng          = random.Random( seed )
+    late, early  = _extension_day_arms( rng )
+    tz           = ZoneInfo( TIMEZONE )
+
+    slots  = _build_day_slots( THURSDAY_DATE, late, tz, hours=EXT_LATE_HOURS )
+    slots += _build_day_slots( FRIDAY_DATE,   early + [ mirror_arm( a ) for a in late ], tz,
+                               hours=EXT_EARLY_HOURS + EXT_LATE_HOURS )
+    slots += _build_day_slots( SATURDAY_DATE, [ mirror_arm( a ) for a in early ], tz,
+                               hours=EXT_EARLY_HOURS )
+    for slot in slots:
+        slot[ "block" ] = EXT_BLOCK_ID
+    return slots
+
+
+def _assert_extension_invariants( slots ):
+    """
+    Fail loudly unless the extension block honours its design constraints.
+
+    Requires:
+        - slots is the extension slot list from build_extension_slots
+
+    Ensures:
+        - returns None when 28 slots, 14 per arm, the declared per-day hour
+          coverage, both arms present at every clock hour 09-22, and no
+          within-day run > MAX_RUN all hold
+
+    Raises:
+        - AssertionError naming the first violated constraint
+    """
+    assert len( slots ) == 28, f"expected 28 extension slots, got {len( slots )}"
+
+    total = collections.Counter( s[ "arm" ] for s in slots )
+    assert total[ BLIND ]     == 14, f"extension blind {total[ BLIND ]}, expected 14"
+    assert total[ REJECTING ] == 14, f"extension rejecting {total[ REJECTING ]}, expected 14"
+
+    expected_hours = {
+        THURSDAY_DATE.isoformat() : set( EXT_LATE_HOURS ),
+        FRIDAY_DATE.isoformat()   : set( EXT_EARLY_HOURS + EXT_LATE_HOURS ),
+        SATURDAY_DATE.isoformat() : set( EXT_EARLY_HOURS ),
+    }
+    for date_str, hours in expected_hours.items():
+        day = [ s for s in slots if s[ "date" ] == date_str ]
+        assert { s[ "local_hour" ] for s in day } == hours, f"{date_str}: unexpected hour coverage"
+        ordered = [ s[ "arm" ] for s in sorted( day, key=lambda s: s[ "local_hour" ] ) ]
+        assert _max_run_length( ordered ) <= MAX_RUN, f"{date_str}: run longer than {MAX_RUN}"
+
+    # Both arms at every clock hour — the property the analyzer's pairing needs.
+    by_hour = collections.defaultdict( set )
+    for s in slots:
+        by_hour[ s[ "local_hour" ] ].add( s[ "arm" ] )
+    for hour in range( WINDOW_START_HOUR, WINDOW_END_HOUR ):
+        assert by_hour[ hour ] == { BLIND, REJECTING }, f"hour {hour} lacks both arms in the extension"
+
+
+def build_schedule( seed=SEED, ext_seed=EXT_SEED ):
+    """
+    Build the full schedule dict from a recorded seed.
+
+    Requires:
+        - seed and ext_seed are integers
+
+    Ensures:
+        - returns a dict with metadata plus 56 slots: the original 28 (Tue/Wed,
+          unchanged and byte-identical for a given seed) followed by the 28
+          extension slots (Thu/Fri/Sat)
+        - the original block still passes _assert_invariants and the extension
+          block passes _assert_extension_invariants
+        - the same seeds yield the same slot arms (deterministic)
 
     Raises:
         - AssertionError if any design constraint is violated
@@ -215,8 +352,10 @@ def build_schedule( seed=SEED ):
 
     tz    = ZoneInfo( TIMEZONE )
     slots = _build_day_slots( TUESDAY_DATE, tuesday_arms, tz ) + _build_day_slots( WEDNESDAY_DATE, wednesday_arms, tz )
+    for slot in slots:
+        slot[ "block" ] = SCHEDULE_ID
 
-    schedule = {
+    original = {
         "schedule_id" : SCHEDULE_ID,
         "experiment"  : EXPERIMENT,
         "seed"        : seed,
@@ -225,7 +364,15 @@ def build_schedule( seed=SEED ):
         "max_run"     : MAX_RUN,
         "slots"       : slots,
     }
-    _assert_invariants( schedule )
+    _assert_invariants( original )
+
+    ext_slots = build_extension_slots( ext_seed )
+    _assert_extension_invariants( ext_slots )
+
+    schedule = dict( original )
+    schedule[ "ext_seed" ]  = ext_seed
+    schedule[ "ext_block" ] = EXT_BLOCK_ID
+    schedule[ "slots" ]     = slots + ext_slots
     return schedule
 
 

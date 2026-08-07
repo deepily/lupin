@@ -71,15 +71,19 @@ def _outline():
 
 
 def _slides():
-    """Gate 3 input: elaborated slides."""
+    """Gate 3 input: elaborated slides. presenter_notes carries timing_seconds_raw
+    to match the real SlideModel contract (bug d5ecb753); here raw == clamped, so
+    no clamp disclosure fires for these baseline slides."""
     return [
         SimpleNamespace(
             number=1, type="title", title="Why this matters", visual_type="text_only",
-            content_bullets=[ "a", "b" ], presenter_notes=SimpleNamespace( timing_seconds=45 )
+            content_bullets=[ "a", "b" ],
+            presenter_notes=SimpleNamespace( timing_seconds=45, timing_seconds_raw=45 )
         ),
         SimpleNamespace(
             number=2, type="content", title="The mechanism", visual_type="diagram",
-            content_bullets=[ "c" ], presenter_notes=SimpleNamespace( timing_seconds=75 )
+            content_bullets=[ "c" ],
+            presenter_notes=SimpleNamespace( timing_seconds=75, timing_seconds_raw=75 )
         ),
     ]
 
@@ -264,6 +268,60 @@ class TestAutoContinueDisclosure:
     def test_non_positive_int_raises( self, bad ):
         with pytest.raises( ValueError ):
             _build_auto_continue_disclosure( bad )
+
+
+# =============================================================================
+# Gate 3 discloses a clamp-affected duration (bug d5ecb753)
+# =============================================================================
+
+def _clamped_slides():
+    """Gate 3 input where one slide's raw timing overshot the ceiling and was
+    clamped: slide 1 raw 300 → clamped 180, slide 2 raw 60 → 60 (untouched)."""
+    return [
+        SimpleNamespace(
+            number=1, type="content", title="Dense", visual_type="text_only",
+            content_bullets=[ "a" ],
+            presenter_notes=SimpleNamespace( timing_seconds=180, timing_seconds_raw=300 )
+        ),
+        SimpleNamespace(
+            number=2, type="title", title="Intro", visual_type="text_only",
+            content_bullets=[ "b" ],
+            presenter_notes=SimpleNamespace( timing_seconds=60, timing_seconds_raw=60 )
+        ),
+    ]
+
+
+class TestGate3ClampDisclosure:
+    """Gate 3 is the surface the reader acts on, so a clamp-affected duration must
+    be disclosed THERE — not only in a log (Cheech, bug d5ecb753)."""
+
+    async def _capture_abstract( self, slides ):
+        agent = _agent()
+        with patch( "cosa.agents.presentation_generator.orchestrator.voice_io" ) as vio:
+            vio.present_choices = AsyncMock( return_value={ "answers": { "Content Review": "Approve" }, "answered": True } )
+            vio.notify          = AsyncMock()
+            await agent._gate_3_content_review( slides )
+            return vio.present_choices.await_args.kwargs[ "abstract" ]
+
+    @pytest.mark.asyncio
+    async def test_discloses_clamp_with_counts_and_both_totals( self ):
+        abstract = await self._capture_abstract( _clamped_slides() )
+        assert "model-estimated and clamp-affected" in abstract
+        assert "1 of 2 slides" in abstract          # how many the clamp hit
+        assert "6.0m" in abstract                    # raw total (300+60)/60
+        assert "4.0m" in abstract                    # clamped total (180+60)/60
+        # Both model numbers are unreliable — the real measure is the script word
+        # count (Cheech: raw overshoots too; "floor" wrongly implied raw is truer).
+        assert "BOTH unreliable" in abstract
+        assert "word count" in abstract
+        assert "floor" not in abstract
+
+    @pytest.mark.asyncio
+    async def test_no_disclosure_when_nothing_clamped( self ):
+        # Baseline slides (raw == clamped) → the confident number stands alone,
+        # no false alarm.
+        abstract = await self._capture_abstract( _slides() )
+        assert "clamp-affected" not in abstract
 
 
 if __name__ == "__main__":

@@ -12,6 +12,8 @@ Tests cover:
 import json
 import pytest
 
+import logging
+
 from cosa.agents.presentation_generator.prompts.elaboration import (
     ELABORATION_SYSTEM_PROMPT,
     DEFAULT_TIMING_PER_SLIDE,
@@ -19,6 +21,7 @@ from cosa.agents.presentation_generator.prompts.elaboration import (
     MAX_TIMING_PER_SLIDE,
     get_elaboration_prompt,
     parse_elaboration_response,
+    summarize_timing_clamps,
 )
 
 
@@ -314,10 +317,136 @@ class TestParseElaborationResponse:
         slides = parse_elaboration_response( data )
         assert slides[ 0 ][ "presenter_notes" ][ "timing_seconds" ] == DEFAULT_TIMING_PER_SLIDE
 
+    # ── raw pre-clamp timing persistence (bug d5ecb753) ───────────────────────
+    # The clamp flattens every over-budget slide to a flat MAX (180), so the
+    # stored value can no longer say what the model actually asked for. These pin
+    # that the RAW model value survives alongside the clamped one. Delete the
+    # timing_seconds_raw line in the parser and every assertion below fails.
+
+    def _notes( self, timing ):
+        data = json.dumps( { "slides": [ {
+            "title": "T", "number": 1, "presenter_notes": { "timing_seconds": timing }
+        } ] } )
+        return parse_elaboration_response( data )[ 0 ][ "presenter_notes" ]
+
+    def test_excessive_timing_persists_raw_beside_clamp( self ):
+        notes = self._notes( 9999 )
+        assert notes[ "timing_seconds" ]     == MAX_TIMING_PER_SLIDE   # clamped for layout
+        assert notes[ "timing_seconds_raw" ] == 9999                   # truth preserved
+
+    def test_negative_timing_persists_raw_beside_clamp( self ):
+        notes = self._notes( -10 )
+        assert notes[ "timing_seconds" ]     == MIN_TIMING_PER_SLIDE
+        assert notes[ "timing_seconds_raw" ] == -10
+
+    def test_in_range_timing_raw_equals_clamped( self ):
+        notes = self._notes( 75 )
+        assert notes[ "timing_seconds" ] == 75 and notes[ "timing_seconds_raw" ] == 75
+
+    def test_missing_timing_raw_is_none( self ):
+        data   = json.dumps( { "slides": [ { "title": "T", "number": 1 } ] } )
+        notes  = parse_elaboration_response( data )[ 0 ][ "presenter_notes" ]
+        assert notes[ "timing_seconds" ]     == DEFAULT_TIMING_PER_SLIDE
+        assert notes[ "timing_seconds_raw" ] is None   # no model value to keep
+
+    def test_non_int_timing_raw_is_none( self ):
+        notes = self._notes( "sixty" )
+        assert notes[ "timing_seconds" ]     == DEFAULT_TIMING_PER_SLIDE
+        assert notes[ "timing_seconds_raw" ] is None
+
+
+class TestSummarizeTimingClamps:
+    """summarize_timing_clamps() — the clamp announcing itself (bug d5ecb753):
+    how many slides it hit and by how much, computed from the persisted raw
+    values so the flat-vs-varied question answers itself on the next real run."""
+
+    def _deck( self, *pairs ):
+        # pairs: (raw, clamped) per slide; raw None means the model omitted it.
+        return [ { "number": i + 1,
+                   "presenter_notes": { "timing_seconds": c, "timing_seconds_raw": r } }
+                 for i, ( r, c ) in enumerate( pairs ) ]
+
+    def test_counts_and_measures_clamped_slides( self ):
+        s = summarize_timing_clamps( self._deck( ( 300, 180 ), ( 240, 180 ), ( 75, 75 ) ) )
+        assert s[ "total_slides" ]  == 3
+        assert s[ "clamped_count" ] == 2                 # the two ≥180, not the 75
+        assert s[ "raw_total" ]     == 300 + 240 + 75
+        assert s[ "clamped_total" ] == 180 + 180 + 75
+        assert s[ "max_overshoot" ] == 300 - 180         # largest single overshoot
+        assert { c[ "number" ] for c in s[ "clamped" ] } == { 1, 2 }
+
+    def test_slide_without_raw_is_not_counted( self ):
+        # A model-omitted slide (raw None, clamped=60 default) had no value for
+        # the clamp to alter — it must not inflate the counts or totals.
+        s = summarize_timing_clamps( self._deck( ( None, 60 ), ( 300, 180 ) ) )
+        assert s[ "clamped_count" ] == 1
+        assert s[ "raw_total" ]     == 300      # the None slide contributes nothing
+        assert s[ "clamped_total" ] == 180
+
+    def test_nothing_clamped_reports_zero_and_zero_overshoot( self ):
+        s = summarize_timing_clamps( self._deck( ( 75, 75 ), ( 60, 60 ) ) )
+        assert s[ "clamped_count" ] == 0
+        assert s[ "max_overshoot" ] == 0        # default when no slide was clamped
+        assert s[ "clamped" ]       == []
+
+    def test_empty_deck_is_safe( self ):
+        s = summarize_timing_clamps( [] )
+        assert s[ "total_slides" ] == 0 and s[ "clamped_count" ] == 0 and s[ "max_overshoot" ] == 0
+
+    def test_non_dict_slide_is_tolerated( self ):
+        s = summarize_timing_clamps( [ "not a dict", *self._deck( ( 300, 180 ) ) ] )
+        assert s[ "clamped_count" ] == 1
+
+
+class TestClampAnnouncement:
+    """The parser must ANNOUNCE the clamp (log how many + by how much) when it
+    fires, and stay silent when it does not."""
+
+    def test_parser_warns_when_clamp_fires( self, caplog ):
+        data = json.dumps( { "slides": [
+            { "title": "A", "number": 1, "presenter_notes": { "timing_seconds": 300 } },
+            { "title": "B", "number": 2, "presenter_notes": { "timing_seconds": 75 } },
+        ] } )
+        with caplog.at_level( logging.WARNING ):
+            parse_elaboration_response( data )
+        msg = " ".join( r.getMessage() for r in caplog.records )
+        assert "clamp altered 1 of 2 slides" in msg
+        assert str( MAX_TIMING_PER_SLIDE ) in msg          # names the ceiling
+        # Same corrected framing as Gate 3 — both numbers unreliable, measure the
+        # word count; NOT "floor" (which wrongly implied raw is nearer the truth).
+        assert "word count" in msg
+        assert "floor" not in msg
+
+    def test_parser_silent_when_nothing_clamped( self, caplog ):
+        data = json.dumps( { "slides": [
+            { "title": "A", "number": 1, "presenter_notes": { "timing_seconds": 75 } },
+        ] } )
+        with caplog.at_level( logging.WARNING ):
+            parse_elaboration_response( data )
+        assert "clamp altered" not in " ".join( r.getMessage() for r in caplog.records )
+
     def test_non_dict_entries_skipped( self ):
         data = json.dumps( { "slides": [ "not a dict", { "title": "Valid", "number": 1 } ] } )
         slides = parse_elaboration_response( data )
         assert len( slides ) == 1
+
+    def test_all_non_dict_entries_raises( self ):
+        # {"slides": [1, 2]} yields zero usable slides — a real defect (D6-STRICT).
+        with pytest.raises( ValueError, match="no usable slides" ):
+            parse_elaboration_response( json.dumps( { "slides": [ 1, 2 ] } ) )
+
+    def test_recovered_non_dict_json_raises( self ):
+        # A bare JSON array recovers to a list, not a dict → no usable slides.
+        with pytest.raises( ValueError, match="no usable slides" ):
+            parse_elaboration_response( "[1, 2, 3]" )
+
+    def test_non_int_slide_number_falls_back_to_position( self ):
+        # A non-int slide number cannot be coerced → falls back to 1-based index.
+        data = json.dumps( { "slides": [ {
+            "title": "T", "number": "abc", "presenter_notes": { "timing_seconds": 60 }
+        } ] } )
+        slides = parse_elaboration_response( data )
+        assert slides[ 0 ][ "number" ] == 1
 
     def test_non_dict_presenter_notes_gets_defaults( self ):
         data = json.dumps( { "slides": [ {
