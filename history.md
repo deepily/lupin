@@ -8,6 +8,22 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.08.06 evening - Session 6cf5f947 (Mr. Radio 🦉, three-worker crew) | The arbiter could not see the hold it was poking through
+
+**Two rows closed, and both bug reports had the wrong premise.**
+
+1. **The reported bug did not exist.** `011f1f90` said a writer bypassed the hold resolver. There is no such writer — 14 of 14 repo-root holds carry keys `write_hold` has no field for, so they were hand-written by agents with the Write tool. One was mine.
+2. **The real defect was one reader.** The Stop hook already read both locations; the **arbiter** — the thing that actually pokes — read `fleet_data_root()` only, so a session parked via a repo-root hold was invisible to the component deciding whether to poke it. Fixed via `read_hold_via_bridge`, verified live on `:8001`.
+3. **The fix would have silenced its own symptom, so the detector ships with it.** Teaching the veto to read a repo-root hold makes a misplaced file *work* — the poke stops and the only noticed symptom disappears. Location is now first-class in the sweep; the first live run found **33** misplaced files against the 16 the row assumed.
+4. **`work_owed` is not the predicate for "is this the last copy".** Two obligations existed only in files about to be deleted: `a89026bd` (a client proxy can auto-answer Rick's gate — the file said it was never filed) and `a8db5010` (DM pilot audits whose windows passed unattended). Both recovered by reading every key rather than sampling.
+5. **A correct written rule changed nothing.** I published that `fleet-pause-resume.md:77` prescribed hand-writing; it hasn't since 2026-07-21 (`0f39b03`). All 14 lupin files postdate that fix — 14 of 14 written against correct documentation, which is why the CLAUDE.md note says plainly that the detector, not the note, is the remedy.
+
+**Checkpoint**: `d256e25a` DM judge stops disclosing the enforced bound (both sites, enforcement unmoved at 150); `09c945dd` arbiter reader + detector, 100% on new code; `2fb752c3` sweep of all 14 + doctrine note; `:8001` restarted on the fix, parity gate passed; crew reaped with mementos verified on disk.
+
+**Files**: `src/cosa/agents/dm_quality_judge/judge.py` · `judge_v2.py` · `src/lupin_cli/claude_code/hooks/lib/heartbeat_hold.py` · `src/lupin_arbiter_app/fleet_arbiter_loop.py` · `src/cosa/rest/arbiter_bootstrap.py` · `src/scripts/run-heartbeat-arbiter.py` · `CLAUDE.md` · `src/rnd/v0.1.9/2026.08.06-arbiter-repo-root-hold-visibility/` · 5 test files
+
+**Corrections I made to my own claims**: a six-hour log window read as a silent detector (the emit was 28 minutes outside it, caught by Rachel); the prescribed-doc root cause above. Rows filed: `859829a5`, `ce286cb9`. Out of scope, untouched: 1 hold in `google/harvey-labs`.
+
 ### 2026.08.05 evening - Session f8754825 (Cheech 🌿, solo) | The DM gate's break-even moved out from under it
 
 **The pilot's optimistic bound stopped being a saving.** Tuesday needed a 22.4% first-try reduction and was delivering 26.8% — just ahead. With Wednesday's partial data the requirement is **30.8%** against a delivered **23.8%**, because rewrite spend nearly tripled (16.1k → 46.4k est-tokens) while the pool of first tries to repay it not quite doubled. Both credit bounds are now losses (+10,558 full-credit, +46,421 no-credit); Tuesday's *"a 4.4-point error flips the sign"* no longer applies.
