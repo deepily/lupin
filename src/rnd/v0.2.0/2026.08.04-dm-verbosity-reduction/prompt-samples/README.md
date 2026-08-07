@@ -5,7 +5,7 @@ Phi-4-14B on `:3001`. Paste one into any other model and compare.
 
 | file | words | placeholders | prompt size | band target |
 |---|---|---|---|---|
-| `prompt-<80-79w.txt` | 79 | 4 | 3,853 ch | 15% |
+| `prompt-under80-79w.txt` | 79 | 4 | 3,853 ch | 15% |
 | `prompt-80-150-149w.txt` | 149 | 3 | 4,295 ch | 30% |
 | `prompt-150-250-249w.txt` | 249 | 7 | 4,791 ch | 45% |
 | `prompt-250plus-900w.txt` | 900 | 30 | 8,549 ch | 60% |
