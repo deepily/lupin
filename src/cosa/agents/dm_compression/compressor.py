@@ -15,8 +15,6 @@ per-token cost, so the only remaining budget is LATENCY, because this sits in
 the DM delivery path.
 """
 
-import time
-
 import cosa.utils.util as du
 
 from cosa.agents.agent_base import AgentBase
@@ -34,10 +32,23 @@ class DmCompressionAgent( AgentBase ):
 
     ROUTING_COMMAND = "dm compression rewrite"
 
-    # Retry shape copied from the judge. Three attempts total; a failure after
-    # that is not an error condition — the caller simply delivers the original.
-    MAX_ATTEMPTS  = 3
-    RETRY_BACKOFF = ( 0.5, 1.0 )
+    # 🔴 NO SYNCHRONOUS RETRY. This is deliberate and it is measured.
+    #
+    # An earlier version retried three times with backoff, copied from the
+    # judge's shape. The expert review had already ruled against it — "Begin
+    # with no synchronous retry. If validation fails, deliver the original
+    # immediately and retry offline for diagnosis" — and I added one anyway
+    # without noticing the contradiction.
+    #
+    # The n=200 run priced it. Of 1,066s of total model time, 894s — 83.9% —
+    # went to attempts that delivered nothing. Failing calls averaged 49.1s
+    # against 3.8s for successful ones, and five error rows alone consumed 23%
+    # of all model time. The retry loop spends 3x precisely on the cases least
+    # likely to recover, which is what produced a 168.5s tail in a path that
+    # sits between a sender and a recipient.
+    #
+    # A malformed-XML response is not a transient fault. Asking the same model
+    # the same question again mostly buys the same answer, slower.
 
     # Arm B of the prompt experiment. The base template states a target RANGE in
     # the abstract; it never tells the model which band THIS message is in or
@@ -120,34 +131,6 @@ class DmCompressionAgent( AgentBase ):
         self.prompt = template.replace( "{dm_body}", frozen_text )
 
         self.xml_response_tag_names = [ "thoughts", "compressed" ]
-
-    def run_prompt( self, **kwargs ):
-        """
-        Call the model, with a bounded retry on transient failure.
-
-        Requires:
-            - self.prompt is populated
-
-        Ensures:
-            - returns the parsed response dict on success
-            - retries at most MAX_ATTEMPTS times with the configured backoff
-            - re-raises the LAST exception when every attempt fails, so the
-              caller can fall back to delivering the original
-
-        Raises:
-            - whatever the underlying LLM client raised on the final attempt
-        """
-        last_error = None
-
-        for attempt in range( self.MAX_ATTEMPTS ):
-            try:
-                return super().run_prompt( **kwargs )
-            except Exception as e:
-                last_error = e
-                if self.debug: print( f"[dm-compression] attempt {attempt + 1}/{self.MAX_ATTEMPTS} failed: {e}" )
-                if attempt < len( self.RETRY_BACKOFF ): time.sleep( self.RETRY_BACKOFF[ attempt ] )
-
-        raise last_error
 
     def restore_from_serialized_state( self, file_path: str ) -> None:
         """

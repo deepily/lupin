@@ -208,6 +208,37 @@ class TestPromptConstruction:
         assert not isinstance( example, str )
         assert "</response>" in example.to_xml()
 
+    def test_the_control_path_is_UNCHANGED_by_the_band_target_feature( self ):
+        """
+        🔴 What makes the two prompt arms comparable at all.
+
+        Arm A was run by an earlier commit; arm B by the one that added
+        `band_target`. That is a prompt difference AND a code difference between
+        arms, which would confound the comparison — unless the new code is
+        provably inert when the feature is off.
+
+        It is, and this asserts it stays that way: with `band_target=None` the
+        prompt is byte-identical to a plain template substitution, which is
+        exactly what the pre-change code did. Arm B differs by the target line
+        and nothing else.
+
+        (María spotted the risk and cleared it by test rather than by reading
+        the diff, 2026-08-07.)
+        """
+        from cosa.agents.dm_compression.compressor import DmCompressionAgent
+
+        frozen  = "A message with [[L00]] and [[L01]] in it, long enough to matter."
+        control = DmCompressionAgent( frozen_text=frozen )
+        armed   = DmCompressionAgent( frozen_text=frozen, band_target=0.45 )
+
+        # The pre-change behaviour, reproduced: one replace, no branch.
+        assert control.prompt == control.prompt_template.replace( "{dm_body}", frozen ),             "the control path is no longer inert — the two arms are not comparable"
+        assert control.band_target is None
+        assert "This particular message is" not in control.prompt
+
+        assert len( armed.prompt ) > len( control.prompt )
+        assert "This particular message is" in armed.prompt
+
     def test_a_body_full_of_braces_does_not_break_substitution( self ):
         """
         `.replace()`, not `.format()`.
@@ -222,6 +253,50 @@ class TestPromptConstruction:
 
         assert '{ "a": 1' in agent.prompt
         assert "[[L00]]" in agent.prompt
+
+
+class TestNoSynchronousRetry:
+    """
+    🔴 The absence of a retry loop is a FEATURE, and it is measured.
+
+    An earlier version retried three times. The expert review had already ruled
+    against synchronous retry, and the n=200 run priced the mistake: 83.9% of
+    all model time went to attempts that delivered nothing, failing calls
+    averaged 49.1s against 3.8s for successful ones, and the tail reached 168.5s
+    in a path that sits between a sender and a recipient.
+
+    A malformed-XML response is not a transient fault. If someone reintroduces a
+    retry here, these tests should stop them.
+    """
+
+    def test_the_agent_exposes_no_retry_knobs( self ):
+        from cosa.agents.dm_compression.compressor import DmCompressionAgent
+
+        assert not hasattr( DmCompressionAgent, "MAX_ATTEMPTS" ),             "a retry budget reappeared — see the n=200 measurement before keeping it"
+        assert not hasattr( DmCompressionAgent, "RETRY_BACKOFF" )
+
+    def test_a_failing_call_is_attempted_exactly_once( self ):
+        """The count is the assertion. One failure in, one attempt out."""
+        attempts = []
+
+        class _CountingFailure:
+            def __init__( self, frozen_text ): pass
+            def run_prompt( self ):
+                attempts.append( 1 )
+                raise RuntimeError( "malformed XML" )
+
+        body = (
+            "I spent the morning tracing the leak and I am fairly confident it sits at "
+            "judge.py:572, which is the line that shipped in d256e25a last Tuesday. The "
+            "consumer thread returns before the pool callback has run, so the job stays "
+            "in the running queue even though the work behind it finished cleanly. Have "
+            "a look at src/cosa/rest/queue.py when you get a moment."
+        )
+        text, reason = compress_dm( body, agent_factory=_CountingFailure )
+
+        assert len( attempts ) == 1, f"the model was called {len(attempts)}x for one message"
+        assert text == body
+        assert reason is not None
 
 
 class TestPipelineFailClosed:
