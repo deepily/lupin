@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="images/lupin-hero.png" alt="Lupin AF — a voice-first AI agent platform" width="100%">
+</p>
+
 # Lupin AF
 
 *Named after Arsène Lupin, the gentleman thief. The **AF** is **Agent Factory** -- and, yes, the other thing too.*
@@ -10,7 +14,24 @@
 
 `FastAPI` | `Voice I/O` | `PEFT/LoRA` | `PostgreSQL + pgvector` | `Claude Agent SDK` | `Bayesian Trust` | `MCP Protocol`
 
-Current version: **v0.1.9** | License: [Apache 2.0](LICENSE)
+Current version: **v0.2.0** (dev) | License: [Apache 2.0](LICENSE)
+
+---
+
+## What's New in v0.2.0 (dev) — the demo that had to survive a real room
+
+v0.2.0 (August 2026, in progress on `wip-v0.2.0-2026.08.03-present-and-demo`) pointed the whole platform at one question: **can you hand Lupin a vague spoken request and get a finished artifact back, live, in front of people?**
+
+Rehearsal answered "not yet" repeatedly, and that was the value. Nearly every item below was found by *driving the path*, not by reading the code.
+
+- **The vague-request demo path, driven end to end.** Say "make me a podcast about that thing I was researching" and the Runtime Argument Expeditor notices what you didn't say and asks by voice. Document disambiguation now fires on the **first** turn when two documents match, rather than after a wasted round trip. The fuzzy matcher got a shared keyword pre-filter and a hard cap; the search-paths key was emptied after `/src` was found to be drowning the matcher with 6,670 candidates before it ever read the description.
+- **Human approval gates that fail open, and say so.** Podcast and presentation gates now wait 600 seconds and then resolve to their default, with the prompt disclosing up front that silence continues. Proven live on `:8000` in both directions — human-answered and silent-timeout — with a harness that refuses to fire into a monopolizer-locked server and reports a job's real state on timeout instead of a bare "timed out".
+- **Listen where you are.** A floating in-tab podcast overlay ("Play Here") plays a finished episode without leaving presentation mode, with real audio playback asserted under a genuine click gesture rather than mere element presence.
+- **Presentation slide-count control.** An author-set slide count now overrides the duration formula; large decks are chunked up front behind a pinned progress bubble. A truncation detector was found **failing open** — an unknown `stop_reason` was being read as "completed", so a clipped deck reported success.
+- **Cross-session message compression (arm 4).** The fleet's own DM traffic became the subject: a two-arm verbosity pilot (blind vs. rejecting at 150 words), a quality judge, and then a **literal freeze protocol** — extract, placehold, validate, restore — so a lossy rewrite can never corrupt a line number or a commit sha. 494 tests, identity round-trip byte-exact on all 2,951 real messages, and every guard proven by reverting it and watching the suite go red. The plan's original placeholder format was measured and rejected: it would have *added* 36,921 tokens before compressing a word.
+- **Root causes that were not where anyone looked.** An empty podcast script traced to a curly brace in the model's closing remarks. A demo-line crash traced to that same morning's label fix. Spanish prosody was **refuted** as marker loss — it was a measurement bug. A "safety net that had never run" and a "bug that was never in the code" both got written up, because a wrong premise costs more than a wrong fix.
+- **Ungated tests, found and closed.** 24 disambiguation tests were guarded by nobody. Three permanently-red tests were closed along with a catalogue that had been teaching the wrong cause. An unrestored `importlib.reload` was contained after it 500'd tests roughly 150 files later.
+- **Fleet housekeeping.** 33 stray heartbeat holds were swept — and the rule against them was already written; the arbiter was fixed so it can see the hold it is poking through; a DM pilot that looked dead turned out to have an expired schedule.
 
 ---
 
@@ -237,23 +258,25 @@ The first decision proxy for AI agents with academic-grade statistical rigor:
 - **Morning coffee batch review**: Non-urgent decisions queued for human review at your convenience
 - **Ratification API**: Post-hoc approval with trust feedback loop
 
-### Battle-tested -- 24,000+ automated tests
+### Battle-tested -- 24,500+ automated tests
 
 | Suite | Count | Coverage |
 |-------|-------|----------|
-| Unit tests (Python) | 20,190 | Core logic, trust engine, hooks, credentials, prediction engine, agentic orchestrators, task store, arbiter -- 11,219 in the app tree, 8,971 in the in-tree CoSA framework |
-| Unit tests (TypeScript) | 2,271 | Multiplexer audio, transport, stores, render — behind a hard 100% c8 gate |
-| E2E UI (Playwright) | 636 | Full browser-driven flows including 12-page visual regression |
-| Smoke tests | 426 | Fast sanity sweeps across the app and the Lupin smoke suite |
-| Integration tests | 405 | End-to-end API workflows against dedicated dual-container test server |
-| Parity oracle, cutover E2E, and other suites | 71 | Multiplexer-vs-legacy parity, store-owed cutover, targeted end-to-end checks |
+| Unit tests (Python) | 20,600 | Core logic, trust engine, hooks, credentials, prediction engine, agentic orchestrators, task store, arbiter -- 11,571 in the app tree, 9,029 in the in-tree CoSA framework |
+| Unit tests (TypeScript) | 2,307 | Multiplexer audio, transport, stores, render — behind a hard 100% c8 gate |
+| E2E UI (Playwright) | 678 | Full browser-driven flows including 12-page visual regression |
+| Smoke tests | 437 | Fast sanity sweeps across the app and the Lupin smoke suite |
+| Integration tests | 432 | End-to-end API workflows against dedicated dual-container test server |
+| Parity oracle, cutover E2E, and other suites | 50 | Multiplexer-vs-legacy parity, store-owed cutover, targeted end-to-end checks |
 | WebSocket tests | 43 | Connection, auth, event routing, session management |
-| **Total authored test cases** | **24,042** | 21,771 Python + 2,271 TypeScript |
+| **Total authored test cases** | **24,547** | 22,240 Python + 2,307 TypeScript |
 | Interactive proxy scenarios | 12 | Calculator, CRUD, and Expediter agents via auto-proxy (script-driven, not counted above) |
 
-Counts are of authored test functions (`def test_*` / `it(` / `test(`) across `src/tests/` and `src/cosa/tests/`, as of 2026-08-03. The test suite is 457,807 lines across 1,475 files -- a test-to-source ratio of 1.42 : 1.
+Counts are of authored test functions (`def test_*` / `it(` / `test(`) across `src/tests/` and `src/cosa/tests/`, as of 2026-08-07. A repo-wide grep returns a slightly larger number; the extra matches are self-test functions embedded in production modules, which are not part of any suite. **The suite figure is the one to quote.**
 
 Built and maintained by a single engineer. Every PR must pass all tiers before merge, at 100% line, branch, and function coverage. A hash-chained attestation ledger records that each tier actually ran -- a green report that cannot prove it executed is not a green report.
+
+**The rule behind all of it: the human is the designer and the user -- never the tester.** "Please try it and tell me if it works" is a prohibited sentence. That is not a preference. For a user who cannot type, manual QA is not an inconvenient fallback -- it is a fallback that does not exist. So the pyramid had to go all the way up. The test suite is an accessibility affordance: it is what lets one person who cannot manually click through a UI still know the software works.
 
 ---
 
@@ -322,7 +345,9 @@ Over 1,000 dated planning and research documents in [`src/rnd/`](src/rnd/README.
 
 ## Version history
 
-**v0.1.9** (June–August 2026) — LanceDB → PostgreSQL + pgvector cutover across four lanes (models/Alembic, eight per-table repositories behind a runtime backend flag, consumer routing, ~202k-vector backfill), with dual-engine equivalence proven and exact scan chosen over HNSW; a 90.46 GB → 1.07 GB LanceDB rebuild reclaiming ~89 GB beforehand. GCP deployment made operator-usable: CPU-VM app restore verified end to end, GPU model server split onto Cloud Run, IAP browser tunnel, live fleet arbiter on the VM, bring-up runbook, and a 38-hour embeddings outage closed by decoupling one key file serving two incompatible authorities. Fleet liveness hardened against a notification flood, a tmux fleet-killer, a Stop-phase turn wedge, and a family of arbiter false positives. Task store gained `task_edit`, `task_reassign`, post-terminal amendment of closed rows, self-expiring row parking, and an unscoped-query guard. TypeScript multiplexer reached legacy parity (724 TS test cases, 100% c8). Instrument rigor formalized: hash-chained tier-run attestation ledger, first execution of 8,799 previously-ungated CoSA tests, bridge-contact and import-discipline guards. Mistral Small 3.2 24B stood up on GPU1; `DEEPILY_DATA_DIR` moved runtime state out of the repo; embedding-regeneration pipeline built for all 578,364 logged texts. 14,300+ tests.
+**v0.2.0** (August 2026, in progress) — The demo that had to survive a real room. A vague spoken request ("make me a podcast about that thing I was researching") driven end to end through the Runtime Argument Expeditor, with first-turn document disambiguation, a shared keyword pre-filter and hard cap on the fuzzy matcher, and the search-paths key emptied after `/src` was found flooding the matcher with 6,670 candidates. Human approval gates for podcast and presentation now **fail open** — 600-second wait, timeout resolves the default, and the prompt discloses that silence continues — proven live on `:8000` in both the human-answered and silent-timeout directions. A floating in-tab podcast overlay ("Play Here") plays a finished episode without leaving presentation mode, with real playback asserted under a genuine click gesture. Presentation gained author-set slide-count override, up-front chunking of large decks behind a pinned progress bubble, and a fix for a truncation detector that was failing open on an unknown `stop_reason`. Cross-session DM verbosity became its own experiment: a two-arm pilot, a quality judge, and a **literal freeze protocol** (extract → placehold → validate → restore) with 494 tests, byte-exact identity round-trip across all 2,951 real messages, and every guard falsified by revert. Root causes that were not where anyone looked: an empty podcast script from a curly brace in the model's closing remarks; a demo crash caused by that morning's own label fix; Spanish prosody **refuted** as marker loss when it was a measurement bug. 24 ungated disambiguation tests found and closed; 33 stray heartbeat holds swept. 24,547 tests.
+
+**v0.1.9** (June–August 2026) — LanceDB → PostgreSQL + pgvector cutover across four lanes (models/Alembic, eight per-table repositories behind a runtime backend flag, consumer routing, ~202k-vector backfill), with dual-engine equivalence proven and exact scan chosen over HNSW; a 90.46 GB → 1.07 GB LanceDB rebuild reclaiming ~89 GB beforehand. GCP deployment made operator-usable: CPU-VM app restore verified end to end, GPU model server split onto Cloud Run, IAP browser tunnel, live fleet arbiter on the VM, bring-up runbook, and a 38-hour embeddings outage closed by decoupling one key file serving two incompatible authorities. Fleet liveness hardened against a notification flood, a tmux fleet-killer, a Stop-phase turn wedge, and a family of arbiter false positives. Task store gained `task_edit`, `task_reassign`, post-terminal amendment of closed rows, self-expiring row parking, and an unscoped-query guard. TypeScript multiplexer reached legacy parity (724 TS test cases, 100% c8). Instrument rigor formalized: hash-chained tier-run attestation ledger, first execution of 8,799 previously-ungated CoSA tests, bridge-contact and import-discipline guards. Mistral Small 3.2 24B stood up on GPU1; `DEEPILY_DATA_DIR` moved runtime state out of the repo; embedding-regeneration pipeline built for all 578,364 logged texts. 24,042 tests.
 
 **v0.1.8** (May–June 2026) — Self-managing fleet, ready for the cloud. Unified task store as the single source of truth for owed work, read by the Stop-hook self-poke, the `:8001` fleet arbiter, and a human UI card, with honored heartbeat holds and the store-only cutover retiring the legacy transcript mirror. Manager/worker fleet lifecycle: worktree-isolated crews, a review queue, merge-on-approval, and continuity-preserving mementos. Notification-native AI↔AI DMs with inline bodies (~18× cheaper than the retired claim-check path). JS→TS multiplexer migration behind a hard 100% c8 gate. Podcast, Presentation, and Deep Research migrated from the firewalled Anthropic SDK to in-process bounded Claude Code. Alembic migration integrity: true baseline migration, ORM-drift reconciliation, hermetic idempotency regression tests. GCP cloud-test deployment validated end to end via IAP tunnel.
 
@@ -342,7 +367,93 @@ Over 1,000 dated planning and research documents in [`src/rnd/`](src/rnd/README.
 
 ## Project status
 
-Lupin is an active research platform at v0.1.9. Developed by a solo engineer, it combines voice-first agent orchestration, PEFT fine-tuning, and Bayesian decision theory into a production-grade stack backed by 14,300+ automated tests across six tiers (Python unit, TypeScript unit, WebSocket, integration, Playwright E2E, interactive proxy), full CI discipline, and a FastAPI + PostgreSQL + pgvector architecture. Through a series of ambitious refactorings made possible by Claude Code and the [Planning is Prompting](https://github.com/deepily/planning-is-prompting) methodology, Lupin has evolved from single-user PoC sketches into a multi-user platform running on GCP.
+Lupin is an active research platform at v0.2.0 (dev). Developed by a solo engineer, it combines voice-first agent orchestration, PEFT fine-tuning, and Bayesian decision theory into a production-grade stack backed by 24,547 automated tests across seven tiers (Python unit, TypeScript unit, WebSocket, smoke, integration, Playwright E2E, parity oracle), full CI discipline, and a FastAPI + PostgreSQL + pgvector architecture. Through a series of ambitious refactorings made possible by Claude Code and the [Planning is Prompting](https://github.com/deepily/planning-is-prompting) methodology, Lupin has evolved from single-user PoC sketches into a multi-user platform running on GCP.
+
+---
+
+## The wall of technologies
+
+Fifteen months, two repositories, 1,199 research and design documents. This is not a
+capability boast — it's a map of the talks that aren't being given. **Every item on it is
+something that had to be learned, chosen, measured, or thrown away.**
+
+Semantic Caching · Mimetic Drift · PEFT/LoRA fine-tuning · Synthetic Training Data
+Generation · Phi-4 · Qwen · Llama · Ministral · Human in the Loop · vLLM ·
+GSM8K-validated quantization · Whisper ASR · streaming TTS · dual-channel WebSockets ·
+server-sent events (SSE) · FastAPI · PostgreSQL · pgvector · LanceDB · CodeRankEmbed ·
+nomic-embed · Bayesian Beta-Bernoulli trust · Thompson Sampling · conformal prediction ·
+circuit breakers · Claude Agent SDK · MCP servers · six Claude Code system hooks · tmux
+orchestration · git worktree isolation · Playwright visual regression · Docker · Cloud Run ·
+Cloud SQL · GCS · Terraform · GitHub Actions · Firebase push · Marp rendering ·
+hash-chained attestation ledgers · Alembic migrations · JWT/OAuth · Phi-4 fuzzy script
+matching · **the automate-everything test pyramid**
+
+### Breadth inventory
+
+Each band below is a talk that could exist.
+
+**Voice I/O foundations** — WebSocket TTS streaming · progressive TTS streaming · TTS mode
+switching · sequential audio chunk playback · audio caching · ASR via Whisper ·
+dual-channel WebSocket (queue events + audio) · voice injection into idle developer
+sessions via tmux
+
+**Notification and question architecture** — Three-level question representation ·
+server-sent events · sender-aware notification routing · notification authentication ·
+progressive-disclosure job cards · notification API with markdown and confidence rendering ·
+the interrogation framework (yes/no/neither, open-ended, multiple choice inclusive and
+exclusive, batched)
+
+**Intent routing with small models** — PEFT / LoRA fine-tuning on Phi-4, Qwen, and Llama ·
+39,871 training examples across 35 command intents · sub-second local-GPU classification
+with zero API calls · GSM8K-validated post-quantization math reasoning · vLLM latency
+analysis · dual-quant multi-LLM trainer · three-model comparative studies ·
+resume-from-merged and OOM allocator work
+
+**Memory and retrieval** — Solution snapshots, agents that cache their own solved problems ·
+file-based → LanceDB → PostgreSQL + pgvector migration (~202,000 vectors, dual-engine
+equivalence proven) · local GPU embeddings vs. hosted API (7×–398× measured) ·
+CodeRankEmbed and nomic-embed for code vs. prose · exact scan chosen over HNSW, with
+receipts
+
+**The agentic job system** — CJ Flow queue · 21 specialized agents · synchronous
+sub-second responders (math, calendar, CRUD, calculator, weather, receptionist) ·
+long-running async agents (deep research, podcast generation, presentation generation,
+chained research-to-artifact pipelines) · the Runtime Argument Expeditor, which notices
+what you didn't tell it and asks by voice · scheduled jobs surviving server bounces
+
+**Trust and autonomy** — Bayesian Beta-Bernoulli trust model with conjugate prior updates ·
+Thompson Sampling for explore/exploit · conformal prediction for calibrated confidence ·
+L1–L5 escalation with circuit breaker · Universal Prediction Engine across seven slices ·
+morning-coffee batch review of non-urgent decisions · post-hoc ratification with a trust
+feedback loop
+
+**Self-healing** — Bug Fix Expediter (diagnose, propose, fix, commit, retry) · Test Fix
+Expediter (cluster, diagnose, fix, rerun) · git worktree isolation per repair ·
+watchdog-triggered handoff from a scheduled test run
+
+**The multi-session fleet** — Per-session voice personas · solo and chorus TTS modes ·
+inter-session commons · direct messages between sessions · broadcasts · the heartbeat
+arbiter and its liveness detectors · the unified task store · focus bar and multiplexer UI ·
+memento-and-respin continuity across context clears · manager spawn/harvest autonomy ·
+proactive-manager mechanism
+
+**Workflow as infrastructure** ([planning-is-prompting](https://github.com/deepily/planning-is-prompting))
+— 53 canonical workflow documents · cascaded plan review and cascaded plan authoring ·
+SWE-team spin-up · post-game retrospectives · session start / checkpoint / end rituals ·
+history archival with velocity forecasting · bug-fix mode · skills management · the
+installation wizard · the KISS brevity mandate
+
+**The automate-everything test pyramid** — 24,547 authored test cases across seven tiers ·
+Python unit · TypeScript unit · integration · smoke · end-to-end UI · WebSocket · parity
+oracle · 100% line, branch, and function coverage gates · Playwright with 12-page visual
+regression · interactive proxy testing driven by a Phi-4 fuzzy script matcher · hash-chained
+attestation ledger · neutral-directory execution to defeat false greens · revert-to-verify
+discipline (**an assertion isn't a guard until you delete what it guards and watch it go
+red**) · self-healing repair agents that fix their own red tests
+
+**Cloud and infrastructure** — GCP migration · Cloud Run · Cloud SQL · GCS-backed storage ·
+Docker non-root hardening · CUDA/torch version pinning · GPU model-server split · CI/CD via
+GitHub Actions · Firebase push provisioning
 
 ---
 
