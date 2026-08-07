@@ -25,6 +25,12 @@ import cosa.utils.util as du
 from cosa.agents.dm_compression.freeze import freeze, validate, compress_or_original
 
 
+# The floor a rewrite must clear to be worth delivering. Below this, the message
+# is delivered unchanged: the latency was already spent either way, but a
+# recipient should not receive a rewrite that bought nothing.
+MIN_USEFUL_GAIN = 0.05
+
+
 def compress_dm( body, agent_factory=None, debug=False ):
     """
     Compress one DM body, or return it unchanged.
@@ -73,7 +79,22 @@ def compress_dm( body, agent_factory=None, debug=False ):
     # compress_or_original() runs the full validator and restores only on a
     # clean verdict. It is Phase 1's fail-closed decision point and it never
     # raises — see freeze.py.
-    return compress_or_original( rewritten, frozen )
+    delivered, reason = compress_or_original( rewritten, frozen )
+    if reason is not None: return delivered, reason
+
+    # 🔴 Did it actually get shorter?
+    #
+    # Nothing above asks this. Every structural check can pass on a rewrite that
+    # is LONGER than what went in, and the live run produced exactly that: three
+    # messages came back at -0.3%, -0.3% and -0.5% and were delivered as
+    # "compressed". Paying 3.6 seconds of delivery latency to make a message
+    # bigger is the worst outcome available, and it was invisible because
+    # "valid" and "shorter" are different questions and only one was being asked.
+    gain = 1 - ( len( delivered ) / len( body ) ) if body else 0.0
+    if gain < MIN_USEFUL_GAIN:
+        return body, f"no useful compression: {gain:.1%} (min {MIN_USEFUL_GAIN:.0%})"
+
+    return delivered, None
 
 
 def quick_smoke_test():

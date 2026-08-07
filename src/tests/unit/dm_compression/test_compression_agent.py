@@ -28,6 +28,11 @@ from cosa.agents.dm_compression.freeze import freeze
 SILENT_CORRUPTION_BODY = "Leak at [[L00]], fixed in [[L01]] & shipped Q&A"
 
 
+def agent_template_of( agent ):
+    """The template AFTER PromptTemplateProcessor ran, for change detection."""
+    return agent.prompt_template
+
+
 class TestXmlRoundTrip:
 
     @pytest.mark.parametrize( "payload", [
@@ -155,6 +160,27 @@ class TestPromptConstruction:
         assert "</stop>" in agent.prompt, \
             "no sentinel — the routing command is probably missing from MODEL_MAPPING"
 
+    def test_the_processor_actually_CHANGED_the_template( self, agent ):
+        """
+        The strongest form of this guard: assert processing did something.
+
+        Checking for `</stop>` and the absent marker are both checks on the
+        RESULT, and a future failure mode could satisfy them while the processor
+        did nothing useful. Comparing the processed template against the raw file
+        asserts the step ran at all — which is the thing two separate silent
+        paths defeat. (María's suggestion, 2026-08-07.)
+        """
+        import cosa.utils.util as du
+
+        raw = du.get_file_as_string(
+            du.get_project_root() + "/src/conf/prompts/agents/dm-compression.txt"
+        )
+
+        assert agent_template_of( agent ) != raw, \
+            "the processed template is byte-identical to the file on disk — processing did nothing"
+        assert len( agent_template_of( agent ) ) > len( raw ), \
+            "processing shortened the template; the XML example should have made it longer"
+
     def test_the_xml_marker_was_replaced( self, agent ):
         assert "{{PYDANTIC_XML_EXAMPLE}}" not in agent.prompt, \
             "the marker survived — template processing silently did nothing"
@@ -262,6 +288,35 @@ class TestPipelineFailClosed:
 
         assert text == self.BODY
         assert reason is not None
+
+    @pytest.mark.parametrize( "label,transform", [
+        ( "longer than the original", lambda t: t + " and some extra words tacked on the end here" ),
+        ( "byte-identical",           lambda t: t ),
+        ( "trivially shorter",        lambda t: t.replace( "perfectly ", "" ) ),
+    ] )
+    def test_a_rewrite_that_bought_nothing_delivers_the_original( self, label, transform ):
+        """
+        🔴 "Valid" and "shorter" are different questions.
+
+        Every structural check passes on a rewrite that is LONGER than what went
+        in. The live run produced exactly that — three messages came back at
+        -0.3%, -0.3% and -0.5% and were delivered as compressed. Paying seconds
+        of delivery latency to make a message bigger is the worst outcome
+        available, and nothing above this gate was asking.
+        """
+        text, reason = compress_dm( self.BODY, agent_factory=self._factory( transform ) )
+
+        assert text == self.BODY, f"{label} was delivered as a compression"
+        assert "no useful compression" in reason
+
+    def test_a_genuinely_shorter_rewrite_still_gets_through( self ):
+        """The gate must not reject real wins."""
+        shorten = lambda t: t.replace(
+            "I spent the morning tracing the leak and I am fairly confident it sits at", "Leak at" )
+        text, reason = compress_dm( self.BODY, agent_factory=self._factory( shorten ) )
+
+        assert reason is None
+        assert len( text ) < len( self.BODY )
 
     def test_a_short_message_bypasses_without_calling_the_model( self ):
         called = []
