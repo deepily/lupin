@@ -430,9 +430,12 @@ class TestJudgeContract:
         assert result[ "overall" ][ "weight" ]    == result[ "length" ][ "weight" ]
 
     def test_an_over_length_body_skips_the_model_entirely( self ):
+        from cosa.agents.dm_quality_judge.judge import _TOO_LONG_DETAIL, QUALITATIVE_WORD_LIMIT
         judge  = _judge_with_client( [ ] )
         result = judge.judge( "word " * 400 )
-        assert "too long" in result[ "directness" ][ "detail" ]
+        # Row 2cb46818: blunt, number-free refusal — the enforced ceiling is not disclosed.
+        assert result[ "directness" ][ "detail" ] == _TOO_LONG_DETAIL
+        assert str( QUALITATIVE_WORD_LIMIT ) not in result[ "directness" ][ "detail" ]
 
     def test_an_unavailable_client_degrades_without_raising( self ):
         with patch( "cosa.agents.dm_quality_judge.judge_v2.LlmClientFactory",
@@ -533,7 +536,7 @@ class TestANonAnswerNeverWearsAGradesFace:
     @pytest.mark.parametrize( "builder,kind", [
         ( lambda: __import__( "cosa.agents.dm_quality_judge.judge", fromlist=[ "x" ] )._fallback_dimension(), "unavailable" ),
         ( lambda: __import__( "cosa.agents.dm_quality_judge.judge", fromlist=[ "x" ] )._withheld_dimension(), "withheld" ),
-        ( lambda: __import__( "cosa.agents.dm_quality_judge.judge", fromlist=[ "x" ] )._too_long_dimension( 300 ), "too_long" ),
+        ( lambda: __import__( "cosa.agents.dm_quality_judge.judge", fromlist=[ "x" ] )._too_long_dimension(), "too_long" ),
         ( lambda: _extraction_failed_dimension( "why" ), "unverified" ),
     ] )
     def test_every_non_answer_path_returns_none_and_its_own_face( self, builder, kind ):

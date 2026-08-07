@@ -29,7 +29,8 @@ from cosa.agents.dm_quality_judge.xml_models import (
 )
 from cosa.agents.dm_quality_judge.judge import (
     DmQualityJudge, length_bucket, round_half_up, combine_overall,
-    _JUDGE_UNAVAILABLE_DETAIL, _repair_llm_xml, QUALITATIVE_WORD_LIMIT, _RETRY_NUDGE,
+    _JUDGE_UNAVAILABLE_DETAIL, _TOO_LONG_DETAIL, _repair_llm_xml, QUALITATIVE_WORD_LIMIT,
+    _RETRY_NUDGE, LENGTH_FACE_INTERVAL,
 )
 
 _FIXTURE_DIR = os.path.join( _src_path, "tests", "unit", "fixtures", "dm_judge" )
@@ -225,19 +226,32 @@ class TestLengthBucket:
         assert set( b[ "emoji" ] ) == { emoji }
 
     @pytest.mark.parametrize( "words, expected", [
-        ( 150, "🤷" ),                     # the qualitative cap itself → still single
-        ( 151, "👎" ),                     # one past the cap, 151//150 == 1 → single
-        ( 250, "👎" ),                     # 👎 band, single
-        ( 251, "😞" ),                     # 😞 band, single
-        ( 299, "😞" ),                     # last single before the doubling edge
-        ( 300, "😞😞" ),                   # 2×cap → the first DOUBLING
-        ( 800, "😞😞😞😞😞" ),             # 800 // 150 == 5
+        (  60, "⭐" ),                     # ≤ interval → single ⭐ (60//100 == 0 → max(1,·))
+        ( 150, "🤷" ),                     # 150//100 == 1 → still single
+        ( 199, "👎" ),                     # last single before the doubling edge (199 is 👎 band)
+        ( 200, "👎👎" ),                   # 2×interval → the first DOUBLING (band is 👎)
+        ( 300, "😞😞😞" ),                 # 300 // 100 == 3
+        ( 800, "😞😞😞😞😞😞😞😞" ),       # 800 // 100 == 8
     ] )
-    def test_length_emoji_repeats_per_qualitative_cap( self, words, expected ):
-        """Row f4bb1cdb boundaries (María's gate): the band face repeats
-        max(1, words // QUALITATIVE_WORD_LIMIT) times. 299 vs 300 is the doubling edge —
-        boundaries are where an off-by-one lives. Assumes the default cap of 150."""
+    def test_length_emoji_repeats_per_face_interval( self, words, expected ):
+        """Row 2cb46818: the band face repeats max(1, words // LENGTH_FACE_INTERVAL) times.
+        The interval is 100 — DECOUPLED from the enforced qualitative cap of 150 so counting
+        faces cannot recover the enforced bound. 199 vs 200 is the doubling edge, where an
+        off-by-one lives. Assumes the default interval of 100."""
         assert length_bucket( words )[ "emoji" ] == expected
+
+    @pytest.mark.parametrize( "words, face_count", [
+        ( 371, 3 ),   # row 2cb46818's OWN worked number: 371 // 100 == 3 (was 2 at interval 150)
+        ( 750, 7 ),   # row 2cb46818's OWN worked number: 750 // 100 == 7 (was 5 at interval 150)
+    ] )
+    def test_row_worked_face_counts_at_interval_100( self, words, face_count ):
+        """The two escalation examples row 2cb46818 states in its own text, pinned so the
+        interval can never silently drift back toward 150. Both land in the 😞 band (>250),
+        so the face is 😞 repeated; assert the COUNT, which is what the row promised moved
+        (371: 2→3, 750: 5→7)."""
+        emoji = length_bucket( words )[ "emoji" ]
+        assert emoji == "😞" * face_count
+        assert emoji.count( "😞" ) == face_count == words // LENGTH_FACE_INTERVAL
 
     def test_repetition_is_display_only_and_never_moves_the_weight( self ):
         """Gate (a): the faces are DISPLAY ONLY. An 800-word body still stores weight -2,
@@ -288,6 +302,22 @@ class TestLengthBucket:
         # clamp, and assumed by every reader of WEIGHT_TO_EMOJI.
         for words in ( 0, 60, 61, 150, 251, 10_000 ):
             assert -2 <= length_bucket( words )[ "weight" ] <= 2
+
+    def test_resolve_threshold_falls_back_to_default_when_config_raises( self, monkeypatch ):
+        """Covers the defensive except in _resolve_threshold (judge.py:109-110): a broken
+        config read must NOT stop this module resolving a threshold — it returns the
+        per-key default. The happy path never raises, so reaching the except needs
+        ConfigurationManager to blow up. `from ... import` runs on every call, so patching
+        the module attribute is what the function actually picks up."""
+        import cosa.config.configuration_manager as cm
+        from cosa.agents.dm_quality_judge import judge as judge_mod
+
+        class _Boom:
+            def __init__( self, *a, **k ):
+                raise RuntimeError( "config unreadable" )
+
+        monkeypatch.setattr( cm, "ConfigurationManager", _Boom )
+        assert judge_mod._resolve_threshold( "dm length good limit", 90 ) == 90
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -680,7 +710,13 @@ class TestQualitativeWordCeiling:
         client.run.assert_not_called()                                  # LLM never invoked
         assert result[ "directness" ][ "weight" ] is None
         assert result[ "tone" ][ "weight" ]       is None
-        assert "too long" in result[ "directness" ][ "detail" ]
+        # Row 2cb46818: the too-long detail is the blunt, number-free refusal and MUST NOT
+        # disclose the enforced qualitative ceiling — a sender who learns it writes to it.
+        # ONE hardcoded LITERAL on purpose (Mr Radio's ruling): asserting against
+        # _TOO_LONG_DETAIL would only prove the code equals itself. A literal is the sole
+        # tripwire that catches a wording change nobody meant — e.g. someone re-adds a number.
+        assert result[ "directness" ][ "detail" ] == "too f*cking long — cut it down and resubmit"
+        assert str( QUALITATIVE_WORD_LIMIT ) not in result[ "directness" ][ "detail" ]
         assert result[ "length" ][ "weight" ]     == -2                 # verbosity still penalized
 
     def test_body_at_limit_is_still_graded( self ):
@@ -689,6 +725,35 @@ class TestQualitativeWordCeiling:
         result = judge.judge( body )
         client.run.assert_called()                                      # at the limit → still judged
         assert result[ "directness" ][ "weight" ] == 1
+
+    def test_enforced_ceiling_did_not_move_off_150( self ):
+        """Row 2cb46818's central RISK: someone later reads the per-100 face change as a
+        LIMIT change. It is not. The enforced qualitative ceiling is still 150, and it is a
+        DIFFERENT number from the display interval (100) by design. This test pins the
+        enforcement bound independently of the face interval so the two can never be
+        conflated again.
+
+        Three facts, each severable:
+          (a) the constants are the values row 2cb46818 fixed, and they DIFFER;
+          (b) the band boundary sits at 150 — 150 → 🤷/0, 151 → 👎/−1 (length_bucket);
+          (c) the LLM gate fires at exactly 150 — 150 words is graded, 151 is refused."""
+        # (a) enforcement 150, display 100, and NOT the same number
+        assert QUALITATIVE_WORD_LIMIT == 150
+        assert LENGTH_FACE_INTERVAL   == 100
+        assert QUALITATIVE_WORD_LIMIT != LENGTH_FACE_INTERVAL
+
+        # (b) the 🤷/👎 band boundary is anchored on the enforced ceiling, not the interval
+        assert length_bucket( 150 )[ "weight" ] ==  0 and length_bucket( 150 )[ "emoji" ] == "🤷"
+        assert length_bucket( 151 )[ "weight" ] == -1 and set( length_bucket( 151 )[ "emoji" ] ) == { "👎" }
+
+        # (c) the LLM-skip gate fires at exactly the ceiling: 150 graded, 151 refused
+        judge, client = _make_judge( run_behaviour="<response><directness>good</directness><tone>good</tone></response>" )
+        judge.judge( " ".join( [ "word" ] * 150 ) )
+        client.run.assert_called()                                      # 150 → judged
+        judge2, client2 = _make_judge( run_behaviour="<response><directness>good</directness><tone>good</tone></response>" )
+        over = judge2.judge( " ".join( [ "word" ] * 151 ) )
+        client2.run.assert_not_called()                                 # 151 → LLM skipped
+        assert over[ "directness" ][ "weight" ] is None
 
 
 class TestExampleIsAChooseOnePlaceholder:
@@ -815,7 +880,9 @@ class TestLiveMistralRegression:
         )
         result = DmQualityJudge( qualitative_enabled=True ).judge( maria )
         assert result[ "directness" ][ "weight" ] is None
-        assert "too long" in result[ "directness" ][ "detail" ]
+        # Row 2cb46818: blunt, number-free refusal — no enforced ceiling disclosed.
+        assert result[ "directness" ][ "detail" ] == _TOO_LONG_DETAIL
+        assert str( QUALITATIVE_WORD_LIMIT ) not in result[ "directness" ][ "detail" ]
         assert result[ "length" ][ "weight" ] == -2
 
 

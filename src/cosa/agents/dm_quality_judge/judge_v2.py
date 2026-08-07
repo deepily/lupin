@@ -229,8 +229,8 @@ class DmQualityJudgeV2:
             directness = _withheld_dimension()
             tone       = _withheld_dimension()
         elif word_count > QUALITATIVE_WORD_LIMIT:
-            directness = _too_long_dimension( word_count )
-            tone       = _too_long_dimension( word_count )
+            directness = _too_long_dimension()
+            tone       = _too_long_dimension()
         else:
             directness = self._grade_directness( body_text )
             tone       = self._grade_tone( body_text )

@@ -146,8 +146,10 @@ def _reload_length_thresholds():
 
     # The four Length BUCKET boundaries — each its own config key so none is an inline
     # literal a named constant could silently drift apart from. 150 is deliberately NOT
-    # repeated here: the 🤷/👎 boundary IS the qualitative cap QUALITATIVE_WORD_LIMIT, which
-    # is also the emoji-repetition interval — the single reason Rick chose 150.
+    # repeated here: the 🤷/👎 boundary IS the qualitative cap QUALITATIVE_WORD_LIMIT, the
+    # word count past which the qualitative LLM pass is skipped. (It is NO LONGER the
+    # emoji-repetition interval — that was decoupled to its own LENGTH_FACE_INTERVAL in row
+    # 2cb46818 so the faces stop disclosing the enforced ceiling.)
     LENGTH_EXCELLENT_LIMIT = _resolve_threshold( "dm length excellent limit", 60 )    # ⭐ ≤ this
     LENGTH_GOOD_LIMIT      = _resolve_threshold( "dm length good limit", 90 )         # 👍 ≤ this
     LENGTH_VERBOSE_LIMIT   = _resolve_threshold( "dm length verbose limit", 250 )     # 👎 ≤ this
@@ -171,7 +173,19 @@ _reload_length_thresholds()
 from cosa.config.cache_registry import register_invalidator
 register_invalidator( "dm_length_thresholds", _reload_length_thresholds )
 
-_TOO_LONG_DETAIL            = "not judged: DM too long for reliable qualitative grading"
+# DISPLAY-ONLY face-repetition interval (row 2cb46818, Rick 2026-08-06). The length face
+# repeats once per LENGTH_FACE_INTERVAL words. This is DELIBERATELY its own constant and
+# DELIBERATELY NOT QUALITATIVE_WORD_LIMIT: the display interval (100) and the enforced
+# qualitative ceiling (150, still QUALITATIVE_WORD_LIMIT) must NOT be the same number, so
+# that counting the faces can never recover where the enforced bound sits. Enforcement is
+# unchanged — this touches display only. A fixed constant, not config-backed, because it is
+# an intentional 3:2 offset from the ceiling, not an operator-tunable threshold.
+LENGTH_FACE_INTERVAL       = 100
+
+# The blunt, number-free refusal shown when a body is past the qualitative ceiling (row
+# 2cb46818, Rick 2026-08-06). Carries NO threshold: a sender who learns the real bound
+# writes right up to it, converting the deterrent into a budget. Rick's register.
+_TOO_LONG_DETAIL           = "too f*cking long — cut it down and resubmit"
 
 
 # Matches ONE angle-bracket tag, tolerating the sloppiness the live models emit
@@ -421,7 +435,7 @@ def length_bucket( word_count ):
 
     Ensures:
         - returns {"emoji", "weight", "detail", "overage"} with a weight in [-2, 2]
-        - "emoji" is the band's face REPEATED max(1, word_count // QUALITATIVE_WORD_LIMIT)
+        - "emoji" is the band's face REPEATED max(1, word_count // LENGTH_FACE_INTERVAL)
           times (display-only intensity, row f4bb1cdb); "weight" is unaffected
         - the boundaries are the resolved config thresholds (defaults 60/90/150/250),
           inclusive-left as written above (≤60→⭐, 61→👍, ...); these are re-read on
@@ -436,16 +450,18 @@ def length_bucket( word_count ):
     elif word_count <= QUALITATIVE_WORD_LIMIT: emoji, weight = "🤷", 0
     elif word_count <= LENGTH_VERBOSE_LIMIT:   emoji, weight = "👎", -1
     else:                                      emoji, weight = "😞", -2
-    # DISPLAY-ONLY intensity (row f4bb1cdb, Rick 2026-08-02): repeat the message's OWN
-    # length-grade face once per QUALITATIVE_WORD_LIMIT words — 150 is where the
-    # qualitative grader stops, which is Rick's stated reason, so the interval IS that
-    # constant, not a fresh literal. count = max(1, word_count // QUALITATIVE_WORD_LIMIT):
+    # DISPLAY-ONLY intensity (row f4bb1cdb, Rick 2026-08-02; interval decoupled row
+    # 2cb46818, Rick 2026-08-06): repeat the message's OWN length-grade face once per
+    # LENGTH_FACE_INTERVAL words. The interval is a SEPARATE constant (100), NOT the
+    # qualitative ceiling QUALITATIVE_WORD_LIMIT (150) — they used to coincide, and that
+    # coincidence let a reader recover the enforced 150 by counting faces, so the two
+    # numbers are now deliberately different. count = max(1, word_count // LENGTH_FACE_INTERVAL):
     # the faces never contradict the band (a 160-word 👎 shows 👎, never 😞) and the first
-    # DOUBLING is at 2×the cap. This RENDERS intensity that `overage` already carries as a
-    # number — the `weight` is untouched and stays in [-2, 2], so combine_overall, the
+    # DOUBLING is at 2×the interval. This RENDERS intensity that `overage` already carries as
+    # a number — the `weight` is untouched and stays in [-2, 2], so combine_overall, the
     # audit, and the stored len_grade are unaffected. A wider weight would be clamped back
     # by combine_overall anyway AND would break the corpus mid-collection for the demo.
-    faces = emoji * max( 1, word_count // QUALITATIVE_WORD_LIMIT )
+    faces = emoji * max( 1, word_count // LENGTH_FACE_INTERVAL )
     return { "emoji"   : faces,
              "weight"  : weight,
              "detail"  : f"{word_count} words, target ~{LENGTH_TARGET_WORDS}",
@@ -566,10 +582,15 @@ def _withheld_dimension():
     return { "emoji": NONANSWER_EMOJI[ "withheld" ], "weight": None, "detail": _QUALITATIVE_OFF_DETAIL }
 
 
-def _too_long_dimension( word_count ):
-    """A neutral dimension result (🤷/0) for a body past QUALITATIVE_WORD_LIMIT — the
-    honest 'not graded at this length' signal, distinct from the judge-unavailable one."""
-    return { "emoji": NONANSWER_EMOJI[ "too_long" ], "weight": None, "detail": f"{_TOO_LONG_DETAIL} ({word_count} words > {QUALITATIVE_WORD_LIMIT})" }
+def _too_long_dimension():
+    """A non-answer dimension result for a body past QUALITATIVE_WORD_LIMIT — the honest
+    'not graded at this length' signal, distinct from the judge-unavailable one.
+
+    Takes no arguments: the detail carries NO threshold and NO word count (row 2cb46818,
+    Rick 2026-08-06). Disclosing the enforced 150 turns the deterrent into a budget, and a
+    bare word count only invites arithmetic against the advertised ~60 target — so the
+    former `word_count` parameter was dropped as dead once the detail stopped naming it."""
+    return { "emoji": NONANSWER_EMOJI[ "too_long" ], "weight": None, "detail": _TOO_LONG_DETAIL }
 
 
 def _get_qualitative_enabled():
@@ -702,8 +723,8 @@ class DmQualityJudge:
         # cannot reliably judge — skip the LLM call and return the honest 🤷/0. Length
         # (above) still penalizes the verbosity, which is what actually matters here.
         elif word_count > QUALITATIVE_WORD_LIMIT:
-            directness = _too_long_dimension( word_count )
-            tone       = _too_long_dimension( word_count )
+            directness = _too_long_dimension()
+            tone       = _too_long_dimension()
         else:
             directness, tone = self._grade_qualitative( body_text )
 
