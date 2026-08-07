@@ -1,5 +1,24 @@
 # TODO
 
+## ⚖️ RULED 2026-08-07 (Mr. Radio 🦉 `61c3d613`, with María 🌸) — Arm 4 compression: FAILED EXPERIMENT, closed
+
+**Rick's ruling**: *"Let's mark this down to a failed experiment. Even the larger models are unable to compress these messages…"*
+
+**Measured**: 600 live compressions, three runs of 200. **3.0% of DM tokens saved where the economics needed 38%** — ~2,537 tokens/day against the plan's 32,028 (7.9%) — at 49 min/day of added delivery latency, which is a **floor** because recipient fan-out is uncounted.
+
+**What is now excluded as the cause**:
+- ~~the model~~ — larger models tried by hand against the committed prompt samples, no material improvement
+- ~~the prompt's ratio instruction~~ — arm B named each message's exact target; 3.0% → 3.1%, and mildly counterproductive
+- ~~placeholders as *the* cause~~ — density hurts (delivery 28% → 18%) but near-placeholder-free messages still fail 72% of the time
+
+**Still open, and the one experiment that would settle it**: are these DMs compressible *at all* by a free-rewriting model? Most carry code, logs, citations and enumerated findings — material with little redundancy to remove. **The test**: run the compressor on *unfrozen* bodies, compare compression on the same messages, ignore the fidelity loss. Compression jumps → placeholders were the ceiling. Compression flat → the ceiling is the material. **Not run** — ruled closed. → `src/rnd/v0.2.0/2026.08.04-dm-verbosity-reduction/2026.08.07-arm-4-phase-2-findings-and-recommendation.md` §7
+
+**NOT reverted, and should not be**: Phase 1's freeze protocol. Zero corrupted messages across all 600, and fail-closed is why these numbers can be trusted. Two verify-tier classes caught corruptions a single-tier design would have shipped.
+
+**Prompt samples committed for anyone re-testing**: `src/rnd/v0.2.0/2026.08.04-dm-verbosity-reduction/prompt-samples/` — four real DMs, one per band, verbatim prompts plus answer keys for scoring.
+
+---
+
 ## 🌙 EOD 2026-08-06 (Cheech 🌿 `72343afa`) — crew harvested, two lanes landed, one design awaiting Rick
 
 **Committed tonight**: Rio ⚡'s two lanes (`9c5dccd4` spawn-failure reason + dry-run tmux probe; `d5ecb753` presentation timing clamp now disclosed rather than reported as a measurement) and Tiberius 👑's `69fb89cd` polluter #1 fix. 365 targeted unit tests green; both worker lanes reviewed before staging. Crew reaped, memento verified on disk.

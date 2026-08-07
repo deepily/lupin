@@ -8,6 +8,19 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.08.07 - Session 61c3d613 (Mr. Radio 🦉, with María 🌸) | Arm 4: built, measured, RULED a failed experiment
+
+1. **Phase 1 — the literal freeze protocol.** Extract → placehold → validate → restore, so a lossy DM rewrite cannot corrupt a line number or a commit sha. Two tiers: substitute what is worth more than a placeholder, **verify in place** what is cheaper (a bare integer is 1.06 tokens — no substitution can ever pay). Identity round-trip byte-exact on all 2,951 corpus bodies. The plan's `⟦L00⟧` delimiters were measured and rejected: absent from every BPE vocabulary, they would have **added 36,921 tokens before compressing a word**.
+2. **Phase 2 — the compression agent on local Phi-4.** XML I/O with a CDATA-aware `from_xml` override, because the base class's own ampersand repair corrupts CDATA payloads — and Phase 1's validator **cannot see that corruption**, since a bare `&` is neither a placeholder nor a verify-tier literal.
+3. **RULED a failed experiment (Rick).** 600 live compressions across three runs of 200: **3.0% of DM tokens saved where the economics needed 38%**, at ~3.6s on every DM. Arm B told the model its exact per-message target — 3.0% → 3.1%, 73 tokens on 51,854. The ratio lever is not connected, which closes the whole class of prompt fixes.
+4. **Rick's placeholder-noise hypothesis: contributing factor, not the cause.** Density correlates with worse delivery (28% → 18%), but near-placeholder-free messages still reach only 19.8% against 30–60% targets and still fail 72%. Recording it as *the* cause would have sent the next attempt down a placeholder-free road this data says also fails.
+5. **A retry loop that cost 84% of all model time.** The expert review said "begin with no synchronous retry"; one was built anyway. Removing it dropped the tail 168.5s → 18.9s.
+6. **What survived the negative result**: the freeze protocol delivered **zero corrupted messages across all 600**, and fail-closed is why the measurement is trustworthy at all.
+
+**Process findings** — both cases where *the safeguard existed and was walked past*: (a) **a file being written is not evidence anyone else can read it** — three instances, scratchpad → `io/` → the corpus itself, each failed fix looking successful because a file was demonstrably appearing; (b) **pre-registering a metric does not make you use it** — the attempted-basis metric was pre-registered, the survivor-bias warning was built into the comparison tool, and both of us argued from delivered-mean within the hour anyway.
+
+Also: README reorganised around v0.2.0 with the hero image and the wall of technologies; `WHATS-NEW.md` and `VERSION-HISTORY.md` split out. 22 commits, `6c5a5f06` → `189ccf7e`. 544 tests green.
+
 ### 2026.08.06 night - Session 72343afa (Cheech 🌿, two-worker crew) | The DM pilot had not gone quiet — its schedule had expired
 
 1. **The 08-05 "quiet corpus, not diagnosed" question is answered: neither a quiet fleet nor a stopped writer — the schedule ran out.** It declared 28 slots ending 2026-08-06T03:00Z; outside a slot `assignment_at()` returns `None` by design, so traffic kept flowing untagged. The distinguishing check is grouping by day **and** experiment tag — a coverage report that cannot say "zero tagged today" is not a liveness check.
