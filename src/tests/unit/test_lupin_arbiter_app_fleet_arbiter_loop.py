@@ -38,9 +38,19 @@ T0  = datetime.datetime( 2026, 6, 7, 12, 0, 0, tzinfo=UTC )
 
 def _report( files_found=0, roots_swept=( "/projects/lupin", ), prunable=0, keep=0,
              cargo_bearing=0, ttl_unusable=0, anchor_disagreement=0, kept_reasons=None,
-             roots_unreachable=(), skipped=(), roots_requested=None ):
+             roots_unreachable=(), skipped=(), roots_requested=None, misplaced_paths=(),
+             location_zone="/mnt/DATA01/include/www.deepily.ai/projects-data" ):
     """A report_hold_files-shaped result. The supervisor consumes the REPORT contract
-    (classify + count), never a prune list — it cannot delete a hold file."""
+    (classify + count), never a prune list — it cannot delete a hold file.
+
+    Row 011f1f90 added two location fields this fake MUST mirror or _sweep_hold_files
+    KeyErrors and the report event never fires:
+      - `misplaced_paths` (+ `counts["misplaced"] = len(...)`) — the leak signal.
+      - `location_zone` — str of the correct zone, or None when the zone was UNJUDGEABLE
+        (unresolved / fail-closed shallow). Defaults to a DEEP zone here so the
+        `fleet_arbiter_hold_location_unjudged` event stays quiet unless a test asks for
+        it by passing location_zone=None."""
+    misplaced_paths = list( misplaced_paths )
     return {
         "roots_requested"         : list( roots_requested if roots_requested is not None else roots_swept ),
         "roots_swept"             : list( roots_swept ),
@@ -48,10 +58,13 @@ def _report( files_found=0, roots_swept=( "/projects/lupin", ), prunable=0, keep
         "skipped_dirs_with_holds" : list( skipped ),
         "files_found"             : files_found,
         "files"                   : [ ],
+        "location_zone"           : location_zone,
+        "misplaced_paths"         : misplaced_paths,
         "counts"                  : { "prunable": prunable, "keep": keep,
                                       "cargo_bearing": cargo_bearing,
                                       "ttl_unusable": ttl_unusable,
                                       "anchor_disagreement": anchor_disagreement,
+                                      "misplaced": len( misplaced_paths ),
                                       "reachable_but_kept_reasons": kept_reasons or { } },
         "deleted"                 : 0,
     }
@@ -316,6 +329,7 @@ def test_sweep_report_carries_the_cargo_and_classification_tallies():
     _one_cycle( rec, hold_janitor_fn=lambda **kw: _report(
         files_found=45, prunable=20, keep=25, cargo_bearing=33, ttl_unusable=22,
         anchor_disagreement=1, kept_reasons={ "no_provable_age": 22 },
+        misplaced_paths=[ "/projects/lupin/.heartbeat-hold-leaked.json" ],
         skipped=[ { "dir": "/projects/lupin/.claude/worktrees", "hold_count": 1 } ] ) )
     r = [ kw for e, kw in rec.logs if e == "fleet_arbiter_hold_report" ][ 0 ]
     assert r[ "cargo_bearing" ]           == 33      # the population deletion must not touch
@@ -324,6 +338,50 @@ def test_sweep_report_carries_the_cargo_and_classification_tallies():
     assert r[ "kept_reasons" ]            == { "no_provable_age": 22 }
     assert r[ "skipped_dirs_with_holds" ] == [ { "dir": "/projects/lupin/.claude/worktrees",
                                                  "hold_count": 1 } ]
+    # row 011f1f90: LOCATION is a first-class field on the report line, carried as its own
+    # count + path list — NOT folded into cargo_bearing. The resilient veto now makes a
+    # misplaced hold FUNCTION, so this is the surviving signal that it is in the wrong place.
+    assert r[ "misplaced" ]               == 1
+    assert r[ "misplaced_paths" ]         == [ "/projects/lupin/.heartbeat-hold-leaked.json" ]
+    assert r[ "location_zone" ]           == "/mnt/DATA01/include/www.deepily.ai/projects-data"
+
+
+def test_sweep_UNJUDGEABLE_zone_fires_a_DISTINCT_event_from_zero_misplaced():
+    """Control C (Rachel's must-fix): when the correct zone is UNJUDGEABLE — a resolution
+    failure or a fail-closed shallow zone — report returns location_zone=None. That is NOT
+    the same fact as 'judged the zone and found 0 misplaced': a shallow zone would call
+    EVERY hold correctly-placed and go permanently silent while looking healthy. So the
+    supervisor fires its own event, exactly like the no-roots alarm, and the main report
+    still lands too (the loud event ADDS, never replaces)."""
+    rec = Recorder()
+    _one_cycle( rec, hold_janitor_fn=lambda **kw: _report( files_found=7, location_zone=None ) )
+    unjudged = [ kw for e, kw in rec.logs if e == "fleet_arbiter_hold_location_unjudged" ]
+    assert len( unjudged ) == 1
+    assert unjudged[ 0 ][ "files_seen" ] == 7
+    r = [ kw for e, kw in rec.logs if e == "fleet_arbiter_hold_report" ][ 0 ]
+    assert r[ "location_zone" ] is None              # carried on the main line too, distinctly
+    assert len( [ kw for e, kw in rec.logs if e == "fleet_arbiter_hold_report" ] ) == 1
+
+
+def test_sweep_JUDGED_zone_stays_quiet_on_the_unjudged_event():
+    """PRESENCE-control on Control C: the unjudged alarm must be capable of staying quiet,
+    or its firing proves nothing. A real (deep) location_zone → no unjudged event."""
+    rec = Recorder()
+    _one_cycle( rec, hold_janitor_fn=lambda **kw: _report( location_zone="/mnt/DATA01/projects-data" ) )
+    assert not [ e for e, _ in rec.logs if e == "fleet_arbiter_hold_location_unjudged" ]
+
+
+def test_sweep_STRUCTURAL_too_broad_zone_fires_the_unjudged_event_end_to_end():
+    """Control C, STRUCTURAL variant (Mr Radio's ruling): a zone that is deep but TOO BROAD
+    — a swept repo root sits under it (the /mnt-class case the parts-count floor can't catch)
+    — resolves to location_zone=None, same as the shallow case. The supervisor treats None
+    identically: it fires the distinct unjudged event so a too-broad zone can never
+    masquerade as '0 misplaced'. This drives the loop through the real report contract with
+    location_zone=None; hold_correct_zone's own structural branch is unit-tested in
+    test_heartbeat_hold_location_and_bridge.py."""
+    rec = Recorder()
+    _one_cycle( rec, hold_janitor_fn=lambda **kw: _report( files_found=3, location_zone=None ) )
+    assert len( [ kw for e, kw in rec.logs if e == "fleet_arbiter_hold_location_unjudged" ] ) == 1
 
 
 def test_sweep_roots_fn_returning_none_is_tolerated():
@@ -470,13 +528,30 @@ def test_build_factory_default_no_declared_managers():
 # are DECORATIVE on the actual :8001 deploy. This factory is the real deploy path
 # (NOT arbiter_bootstrap, which is the default-OFF in-process path).
 
-def test_build_factory_wires_real_hold_reader_by_default():
-    """The :8001 factory defaults hold_reader_fn to the real read_hold so the
-    outward-twin backstop is LIVE on deploy (regression guard against silent inertness)."""
+def test_build_factory_wires_real_hold_reader_by_default( monkeypatch ):
+    """The :8001 factory defaults hold_reader_fn to the bridge-aware reader (row 011f1f90):
+    the default is now a lambda wrapping read_hold_via_bridge, NOT bare read_hold, so the
+    honored-hold veto finds a repo-root hold in ANY project. Identity is gone — this asserts
+    the BEHAVIOR: the wired default delegates to read_hold_via_bridge and threads the
+    factory's own log_fn, so the fallback journal line stays visible on the real deploy."""
+    import lupin_arbiter_app.fleet_arbiter_loop as loop
     from lupin_cli.claude_code.hooks.lib.heartbeat_hold import read_hold
+    seen = { }
+    def _spy( session_id, log_fn=None ):
+        seen[ "session_id" ] = session_id
+        seen[ "log_fn" ]     = log_fn
+        return None
+    monkeypatch.setattr( loop, "read_hold_via_bridge", _spy )   # loop-global, picked up at lambda call
+
+    logs   = [ ]
+    log_fn = lambda *a, **k: logs.append( ( a, k ) )
     gw, store = FakeGateway(), LocalSnapshotStore()
-    job = build_fleet_arbiter_job_factory( gw, store, log_fn=lambda *a, **k: None )()
-    assert job._hold_reader_fn is read_hold                       # non-None AND resolves to read_hold
+    job = build_fleet_arbiter_job_factory( gw, store, log_fn=log_fn )()
+    assert job._hold_reader_fn is not None                        # wired, not inert
+    assert job._hold_reader_fn is not read_hold                   # NOT the blind fleet-only reader
+    job._hold_reader_fn( "sess-xyz" )                             # drive the default
+    assert seen[ "session_id" ] == "sess-xyz"                     # delegates to read_hold_via_bridge
+    assert seen[ "log_fn" ] is log_fn                            # the factory's journal fn is threaded
     assert job.user_gate_resurface_seconds == 1800               # default ceiling threaded
 
 

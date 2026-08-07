@@ -182,7 +182,7 @@ class _DefaultsCfg:
 def test_build_arbiter_job_wires_real_hold_reader( monkeypatch ):
     from cosa.rest import arbiter_bootstrap as ab
     from cosa.agents.heartbeat_arbiter.arbiter_gateway import LupinArbiterGateway
-    from lupin_cli.claude_code.hooks.lib.heartbeat_hold import read_hold
+    from lupin_cli.claude_code.hooks.lib.heartbeat_hold import read_hold_via_bridge
 
     class _FakeGW:
         def who( self, retention_hours=24 ): return [ ]
@@ -193,5 +193,8 @@ def test_build_arbiter_job_wires_real_hold_reader( monkeypatch ):
     monkeypatch.setattr( LupinArbiterGateway, "from_environment",
                          classmethod( lambda cls, **kw: _FakeGW() ) )
     job = ab.build_arbiter_job( _DefaultsCfg() )
-    assert job._hold_reader_fn is read_hold                   # non-None AND resolves to read_hold
+    # row 011f1f90: this gated-OFF in-process path wires the resilient per-session reader
+    # DIRECTLY (no log_fn wrapper — no journal on the dead path), so identity still holds.
+    # The live :8001 factory wraps it in a lambda to thread log_fn; that one is behavioral.
+    assert job._hold_reader_fn is read_hold_via_bridge       # non-None AND resolves to the bridge reader
     assert job.user_gate_resurface_seconds == 1800           # default ceiling threaded

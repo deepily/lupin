@@ -47,7 +47,14 @@ from cosa.agents.heartbeat_arbiter.operator_gate_routing import DEFAULT_DIGEST_C
 # 6929f4ac outward-twin backstop (§9.2): the per-session hold reader — defaulted
 # real here so the :8001 service actually resurfaces a dark session's aged user-gate
 # to Rick (without this wiring the seam stays None → the backstop is decorative).
-from lupin_cli.claude_code.hooks.lib.heartbeat_hold import read_hold as _default_hold_reader
+#
+# row 011f1f90 (2026-08-06): the default was plain read_hold, which resolves
+# fleet_data_root ONLY — so a hold leaked to a repo root was invisible to this VETO
+# and the parked session got poked forever. It is now read_hold_via_bridge, which
+# sources the session's OWN cwd from its bridge and finds a repo-root hold in ANY
+# project. The factory wraps it with the arbiter log_fn (below) so the cwd=None
+# fallback is visible, not a silent return to the blind path.
+from lupin_cli.claude_code.hooks.lib.heartbeat_hold import read_hold_via_bridge
 # The hold sweep is REPORT + RECLAIM as of 2026-07-26 (row 11461241, Rick's direct
 # ruling — "wire it: the arbiter calls the janitor"). It was report-only from
 # 2026-07-16 while hold files still carried untriaged hand-written memento cargo.
@@ -737,7 +744,11 @@ def build_fleet_arbiter_job_factory(
     # 6929f4ac: wire the real hold reader by default so the :8001 service activates
     # the outward-twin backstop (open-gate→ACTIVE classify override + dark-session
     # gate resurface); an injected fake overrides it for tests.
-    hold_reader_fn = hold_reader_fn if hold_reader_fn is not None else _default_hold_reader
+    # row 011f1f90: the default is read_hold_via_bridge wrapped with THIS factory's
+    # log_fn, so a repo-root hold is now visible to the veto AND the cwd=None
+    # fallback (no_bridge / bridge_without_cwd / bridge_error) emits one journal
+    # line instead of silently restoring the blind fleet-only read.
+    hold_reader_fn = hold_reader_fn if hold_reader_fn is not None else ( lambda sid: read_hold_via_bridge( sid, log_fn=log_fn ) )
     # A2/A3 (fcb5dbc0): wire the real fleet-wide operator-gate reader by default so the
     # :8001 service activates the operator-gate urgency routing; a fake overrides it.
     operator_gates_fn = operator_gates_fn if operator_gates_fn is not None else _default_operator_gates_fn
@@ -979,6 +990,13 @@ class FleetArbiterLoop:
                 self._log_fn( "fleet_arbiter_hold_report_no_roots",
                               roots_requested   = report[ "roots_requested" ],
                               roots_unreachable = report[ "roots_unreachable" ] )
+            if report[ "location_zone" ] is None:
+                # LOUD: the location zone was UNJUDGEABLE (unresolved or fail-closed
+                # shallow), so misplaced=0 below is NOT a clean bill of health — the
+                # detector could not judge location at all. Distinct event so a
+                # fail-closed zone never masquerades as "no leaks" (row 011f1f90).
+                self._log_fn( "fleet_arbiter_hold_location_unjudged",
+                              files_seen = report[ "files_found" ] )
             self._log_fn( "fleet_arbiter_hold_report",
                           roots_swept             = report[ "roots_swept" ],
                           roots_unreachable       = report[ "roots_unreachable" ],
@@ -988,6 +1006,13 @@ class FleetArbiterLoop:
                           cargo_bearing           = counts[ "cargo_bearing" ],
                           ttl_unusable            = counts[ "ttl_unusable" ],
                           anchor_disagreement     = counts[ "anchor_disagreement" ],
+                          # row 011f1f90: LOCATION as a first-class field, NOT folded into
+                          # cargo_bearing. The resilient veto now makes a misplaced hold
+                          # FUNCTION, so this count + the paths are the surviving signal that
+                          # the file is still in the wrong place. deleting them stays Rick's call.
+                          location_zone           = report[ "location_zone" ],
+                          misplaced               = counts[ "misplaced" ],
+                          misplaced_paths         = report[ "misplaced_paths" ],
                           kept_reasons            = counts[ "reachable_but_kept_reasons" ],
                           skipped_dirs_with_holds = report[ "skipped_dirs_with_holds" ],
                           deletion_enabled        = self._enable_hold_deletion,

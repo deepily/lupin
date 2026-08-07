@@ -401,6 +401,88 @@ def test_poll_once_no_hold_reader_is_inert( tmp_path ):
     assert summary[ "edges" ] == 1 and summary[ "pings_fired" ] == 1
 
 
+# ═════════════════════════════════════════════════════════════════════════════
+# Row 011f1f90 — Controls A & B: the honored-hold veto now SEES a repo-root hold
+#
+# The correctness bug: the arbiter's veto read holds from fleet_data_root ONLY, so a
+# hold that leaked to a REPO ROOT was invisible → the parked session got poked forever.
+# The fix reads via the session's OWN cwd (bridge-present) or the resilient LUPIN_ROOT +
+# fleet search (bridge-less). These two controls drive _classify_owed with the REAL
+# read_hold_via_bridge against an on-disk repo-root hold — the incident's actual shape —
+# and prove the veto FIRES. Everything is on tmp_path; every fleet-only read is redirected
+# to an empty tmp dir so nothing touches the live ~/.claude or fleet data store.
+# ═════════════════════════════════════════════════════════════════════════════
+
+def _write_work_owed_false_hold( directory, sid ):
+    """A fresh, honored hold that SELF-DECLARES work_owed=false — the DONE-equivalent
+    signal the veto keys on (25ba173e). Held 10s before NOW → not stale."""
+    held = ( datetime.datetime.fromisoformat( NOW_ISO ) - datetime.timedelta( seconds=10 ) ).isoformat()
+    ( directory / f".heartbeat-hold-{sid}.json" ).write_text( json.dumps(
+        { "session_id": sid, "held_at": held, "ttl_seconds": 900,
+          "work_owed": False, "reason": "parked — nothing owed" } ) )
+
+
+def test_CONTROL_A_bridge_present_repo_root_hold_fires_the_veto( tmp_path, monkeypatch ):
+    """Control A (Rachel REQUIRES): a parked session self-declares work_owed=false in a
+    hold that leaked to a REPO ROOT (planning-is-prompting), NOT fleet_data_root. Its
+    bridge carries that repo's cwd, so read_hold_via_bridge FINDS the hold and the veto
+    fires → clayton is CLASS_DONE, subtracted, NOT poked. Then repoint at the OLD fleet-
+    only read_hold: the repo-root hold is invisible → clayton stays ACTIVE → it WOULD be
+    poked. That difference IS the teeth."""
+    from lupin_cli.claude_code.hooks.lib import heartbeat_hold as hh
+    from cosa.agents.heartbeat_arbiter.arbiter_job import CLASS_DONE, CLASS_ACTIVE
+
+    empty_fleet = tmp_path / "projects-data" / "lupin"; empty_fleet.mkdir( parents=True )
+    repo_root   = tmp_path / "planning-is-prompting"; repo_root.mkdir()
+    monkeypatch.setattr( hh, "fleet_data_root", lambda repo_root=None: empty_fleet )   # fleet reads → empty tmp
+    _write_work_owed_false_hold( repo_root, "sess-clay" )                              # the leaked repo-root hold
+    monkeypatch.setattr( "lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id",
+                         lambda sid: { "cwd": str( repo_root ) } )                     # bridge → the repo cwd
+
+    fleet_view = { "sess-clay": { "persona": "clayton" } }
+    owed       = { "clayton": [ { "id": "x", "status": "in_progress", "gate_class": "none" } ] }  # ACTIVE absent the veto
+
+    job    = _make_job( tmp_path, hold_reader_fn=lambda sid: hh.read_hold_via_bridge( sid ) )
+    result = job._classify_owed( [ "clayton" ], fleet_view, owed=owed )
+    subtracted = { p for p, c in result.items() if c == CLASS_DONE }
+    # Predicted failure if the bridge reader ever regresses to fleet-only (can't see the
+    # repo-root hold): clayton is NOT subtracted and this reads `assert 'clayton' not in {'clayton'}`.
+    assert "clayton" in subtracted, "assert 'clayton' not in {'clayton'}"
+
+    # TEETH: the OLD fleet-only reader cannot see a repo-root hold → clayton stays owed.
+    job._hold_reader_fn = lambda sid: hh.read_hold( sid )               # base_dir=None → empty fleet → None
+    old = job._classify_owed( [ "clayton" ], fleet_view, owed=owed )
+    assert old[ "clayton" ] == CLASS_ACTIVE                             # invisible hold → no veto → WOULD poke
+
+
+def test_CONTROL_B_bridge_less_lupin_root_hold_STILL_fires_the_veto( tmp_path, monkeypatch ):
+    """Control B (Rachel REQUIRES): a session with NO resolvable bridge (dead-PID prune,
+    id-form mismatch) falls to cwd=None, but read_hold_resilient still searches LUPIN_ROOT
+    + fleet — so a LUPIN_ROOT hold declaring work_owed=false STILL fires the veto. A bridge-
+    less session must never regress to the blind fleet-only read."""
+    from lupin_cli.claude_code.hooks.lib import heartbeat_hold as hh
+    import cosa.utils.util as cu
+    from cosa.agents.heartbeat_arbiter.arbiter_job import CLASS_DONE
+
+    fake_lupin  = tmp_path / "lupin"; fake_lupin.mkdir()
+    empty_fleet = tmp_path / "projects-data" / "lupin"; empty_fleet.mkdir( parents=True )
+    monkeypatch.setattr( cu, "get_project_root", lambda: str( fake_lupin ) )           # LUPIN_ROOT → tmp
+    monkeypatch.setattr( hh, "fleet_data_root", lambda repo_root=None: empty_fleet )   # fleet → empty tmp
+    monkeypatch.setattr( "lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id",
+                         lambda sid: None )                                            # NO bridge
+    _write_work_owed_false_hold( fake_lupin, "sess-clay" )                             # hold at LUPIN_ROOT
+
+    fleet_view = { "sess-clay": { "persona": "clayton" } }
+    owed       = { "clayton": [ { "id": "x", "status": "in_progress", "gate_class": "none" } ] }
+
+    job    = _make_job( tmp_path, hold_reader_fn=lambda sid: hh.read_hold_via_bridge( sid ) )
+    result = job._classify_owed( [ "clayton" ], fleet_view, owed=owed )
+    subtracted = { p for p, c in result.items() if c == CLASS_DONE }
+    # Predicted failure if the bridge-less path regressed to blind fleet-only:
+    #   assert 'clayton' not in {'clayton'}
+    assert "clayton" in subtracted, "assert 'clayton' not in {'clayton'}"
+
+
 def test_poll_once_stale_participant_store_backed_cycle_still_escalates( tmp_path ):
     """María review of bc1bc373/c88a7431 (CHANGES-REQUESTED regression): a REAL
     store-backed deadlock must STILL escalate even when a participant's hold is

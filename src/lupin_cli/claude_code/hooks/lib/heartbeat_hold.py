@@ -224,6 +224,79 @@ def fleet_data_root( repo_root=None ):
     return Path( base ) / main.name
 
 
+def hold_correct_zone( swept_roots=None ):
+    """
+    The directory tree a correctly-placed hold MUST live under — the fleet data
+    root's PARENT (the shared `projects-data` dir), so a hold at
+    <projects-data>/<any-repo>/.heartbeat-hold-*.json is CORRECT and one at a repo
+    root or inside a worktree is NOT.
+
+    Requires:
+        - swept_roots is None or an iterable of the roots the sweep will scan (the
+          arbiter passes report_hold_files's roots_swept); None runs the floor only
+
+    Ensures:
+        - returns fleet_data_root().parent, resolved
+        - returns None if the root cannot be resolved — a resolution failure must
+          NOT make the sweep raise; the caller treats None as "cannot judge"
+        - FAIL-CLOSED, floor (row 011f1f90, Rachel/Mr Radio 2026-08-06): a zone at
+          the filesystem root ("/") is an ancestor of EVERY path, so
+          hold_is_misplaced would return False for everything and the detector would
+          go permanently silent WHILE LOOKING HEALTHY. A zone with fewer than 2 path
+          parts returns None. Cheap, but only catches "/".
+        - FAIL-CLOSED, STRUCTURAL (Mr Radio's ruling 2026-08-06 — structural over a
+          magic number): the zone is TOO BROAD if any swept REPO ROOT sits UNDER it
+          (e.g. DEEPILY_DATA_DIR=/mnt → zone "/mnt" is an ancestor of the repo roots
+          at /mnt/DATA01/.../<repo>, which the parts-count floor cannot catch). When
+          `swept_roots` is provided and any of them is under the zone, returns None —
+          EXCLUDING fleet_data_root's OWN subtree, which legitimately lives under the
+          zone (it is where correct holds go). Today's deep root passes both checks;
+          this makes the /mnt-class failure impossible rather than merely improbable.
+    """
+    try:
+        fdr = fleet_data_root().resolve()
+    except Exception:
+        return None
+    zone = fdr.parent
+    if len( zone.parts ) < 2:
+        return None
+    if swept_roots:
+        for root in swept_roots:
+            try:
+                rp = Path( root ).resolve()
+            except Exception:
+                continue
+            # a swept root UNDER the zone that is NOT fleet_data_root or its subtree
+            # ⇒ the zone spans real repo roots ⇒ too broad to judge misplacement.
+            if zone in rp.parents and rp != fdr and fdr not in rp.parents:
+                return None
+    return zone
+
+
+def hold_is_misplaced( path, correct_zone ):
+    """
+    Is this hold file OUTSIDE the fleet data root (row 011f1f90)? A repo-root or
+    worktree hold reads True.
+
+    This is the LOCATION signal the arbiter's resilient read now HIDES: teaching
+    the veto to read a repo-root hold makes a misplaced hold FUNCTION, so the only
+    symptom anyone noticed (the relentless poke) disappears. The sweep must still
+    surface the file as misplaced or the leak goes silent — hence location is a
+    first-class field, not folded into cargo_bearing (Mr Radio, 2026-08-06).
+
+    Ensures:
+        - True iff `correct_zone` is NOT an ancestor of `path`
+        - fail-safe: an unresolved zone (None) or an unresolvable path returns
+          False — the detector never OVER-flags a hold it cannot place
+    """
+    if correct_zone is None:
+        return False
+    try:
+        return correct_zone not in Path( path ).resolve().parents
+    except Exception:
+        return False
+
+
 def _resolve_base_dir( base_dir ):
     """
     Resolve the directory that holds the runtime-state families.
@@ -614,6 +687,66 @@ def read_hold_resilient( session_id, cwd=None ):
         if hold is not None:
             return hold
     return None
+
+
+def read_hold_via_bridge( session_id, log_fn=None ):
+    """
+    Resilient hold read for a caller that holds NO per-session cwd of its own —
+    the ARBITER (row 011f1f90). It sources the session's OWN cwd from its bridge
+    snapshot (SessionStart `cwd`, written once and stable for the session), then
+    delegates to read_hold_resilient so a hold written to ANY repo root — not just
+    LUPIN_ROOT — is found.
+
+    Why the arbiter needs this: read_hold (base_dir=None) resolves fleet_data_root
+    ONLY, so a hold that leaked to a repo root is invisible to the arbiter's
+    honored-hold VETO → the session is parked but keeps getting poked (the row's
+    correctness bug). read_hold_resilient closes it, but its cwd param is the
+    session's own working dir, which the arbiter does not carry per session; the
+    bridge does.
+
+    Requires:
+        - session_id is a string
+        - log_fn is None or a callable ( event_name, **fields ) — the arbiter's
+          journal fn, injected so the fallback below is VISIBLE
+
+    Ensures:
+        - Returns read_hold_resilient( session_id, cwd=<bridge cwd> ) — the bridge
+          cwd catches a repo-root hold in ANY project (planning-is-prompting,
+          worktrees), closing both gaps a bare cwd=None would strand
+        - A MISSING or unreadable bridge degrades to cwd=None, NOT a crash:
+          find_session_by_id returns None on a miss, so the guard `( … or {} )`
+          keeps this from AttributeError-ing (Rachel's must-fix) and cwd=None still
+          searches LUPIN_ROOT + fleet_data_root — a bridge-less session (dead-PID
+          prune, id-form mismatch) never regresses to the blind fleet-only read
+        - WHENEVER cwd resolves to None (no_bridge / bridge_without_cwd /
+          bridge_error) AND log_fn is provided, emits ONE
+          `arbiter_hold_reader_cwd_fallback` line with session_id + reason. A
+          SILENT degrade to cwd=None would restore the blind path invisibly
+          (Rachel/Mr Radio 2026-08-06) — so a future bridge regression that puts
+          the arbiter back to poking parked sessions is visible in the journal. The
+          cwd-PRESENT path never logs (no per-tick noise).
+        - Never raises (any bridge-resolution failure → cwd=None; the delegate
+          read_hold_resilient swallows its own IO errors)
+    """
+    cwd    = None
+    reason = None
+    try:
+        # Lazy import: session_bridge does NOT import this module, so there is no
+        # cycle at module load — but keep it local so a hold read never depends on
+        # the bridge module importing cleanly.
+        from lupin_cli.claude_code.hooks.lib.session_bridge import find_session_by_id
+        bridge = find_session_by_id( session_id )
+        if bridge is None:
+            reason = "no_bridge"
+        else:
+            cwd = bridge.get( "cwd" )
+            if not cwd:
+                cwd, reason = None, "bridge_without_cwd"
+    except Exception:
+        cwd, reason = None, "bridge_error"
+    if cwd is None and log_fn is not None:
+        log_fn( "arbiter_hold_reader_cwd_fallback", session_id=session_id, reason=reason )
+    return read_hold_resilient( session_id, cwd=cwd )
 
 
 def clear_hold( session_id, base_dir=None ):
@@ -1056,10 +1189,20 @@ def report_hold_files( base_dir=None, base_dirs=None, now=None,
     files  = [ classify_hold_file( p, now=now, grace_seconds=grace_seconds,
                                    live_session_ids=live_session_ids,
                                    allow_cargo_deletion=allow_cargo_deletion ) for p in paths ]
+    # LOCATION is first-class (row 011f1f90, Mr Radio 2026-08-06): flag every hold
+    # that sits OUTSIDE the fleet data root — a repo-root or worktree leak. The
+    # arbiter's resilient veto now makes such a hold FUNCTION, hiding the only
+    # symptom (the poke), so this is the surviving signal that the file is still in
+    # the wrong place. Not folded into cargo_bearing — a misplaced hold and a
+    # cargo-bearing one are orthogonal facts.
+    correct_zone = hold_correct_zone( swept_roots=roots_swept )
     reasons = { }
     for row in files:
+        row[ "misplaced" ] = hold_is_misplaced( row[ "path" ], correct_zone )
         if row[ "verdict" ] == VERDICT_KEEP:
             reasons[ row[ "reason" ] ] = reasons.get( row[ "reason" ], 0 ) + 1
+
+    misplaced_paths = [ r[ "path" ] for r in files if r[ "misplaced" ] ]
 
     return {
         "roots_requested"         : roots_requested if roots_requested is not None else roots_swept,
@@ -1068,12 +1211,18 @@ def report_hold_files( base_dir=None, base_dirs=None, now=None,
         "skipped_dirs_with_holds" : skipped,
         "files_found"             : len( files ),
         "files"                   : files,
+        # location_zone is None when the zone was UNJUDGEABLE (unresolved / shallow):
+        # the caller MUST treat that distinctly from a real "0 misplaced" so a
+        # fail-closed zone surfaces loudly instead of as a false all-clear (row 011f1f90).
+        "location_zone"           : str( correct_zone ) if correct_zone is not None else None,
+        "misplaced_paths"         : misplaced_paths,   # first-class location signal (row 011f1f90)
         "counts"                  : {
             "prunable"                 : sum( 1 for r in files if r[ "verdict" ] == VERDICT_PRUNABLE ),
             "keep"                     : sum( 1 for r in files if r[ "verdict" ] == VERDICT_KEEP ),
             "cargo_bearing"            : sum( 1 for r in files if r[ "cargo_bearing" ] ),
             "ttl_unusable"             : sum( 1 for r in files if not r[ "ttl_usable" ] ),
             "anchor_disagreement"      : sum( 1 for r in files if r[ "anchor_disagreement" ] ),
+            "misplaced"                : len( misplaced_paths ),
             "reachable_but_kept_reasons" : reasons,
         },
         "deleted"                 : 0,                 # structural: this path cannot delete

@@ -66,7 +66,7 @@ def build_arbiter_job( config_mgr ):   # pragma: no cover - production IO bounda
     """
     from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob, _default_operator_gates_fn
     from cosa.agents.heartbeat_arbiter.arbiter_gateway import LupinArbiterGateway
-    from lupin_cli.claude_code.hooks.lib.heartbeat_hold import read_hold
+    from lupin_cli.claude_code.hooks.lib.heartbeat_hold import read_hold_via_bridge
 
     poll_seconds      = int( config_mgr.get( "arbiter poll seconds", default=60, return_type="int" ) )
     manager_on_duty   = config_mgr.get( "arbiter manager on duty", default="manager-on-duty" ) or "manager-on-duty"
@@ -137,7 +137,7 @@ def build_arbiter_job( config_mgr ):   # pragma: no cover - production IO bounda
         tap_min_interval_seconds   = tap_min_interval,
         manager_ack_window_seconds = ack_window,
         fleet_stall_window_seconds = stall_window,
-        hold_reader_fn             = read_hold,               # 6929f4ac: real per-session hold reader (outward-twin backstop)
+        hold_reader_fn             = read_hold_via_bridge,    # 6929f4ac + row 011f1f90: resilient per-session reader (repo-root holds visible). log_fn omitted — this in-process path is the gated-OFF rollback with no journal wiring; the live :8001 factory supplies log_fn for the cwd fallback.
         user_gate_resurface_seconds = gate_resurface,         # 6929f4ac: aged-gate resurface ceiling
         operator_gates_fn          = _default_operator_gates_fn,   # A2/A3: real fleet-wide operator-gate store reader
         operator_digest_cadence_seconds = operator_digest_cadence, # A2/A3: normal-urgency digest cadence
