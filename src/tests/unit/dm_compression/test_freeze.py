@@ -375,30 +375,53 @@ class TestRemovableBoilerplate:
 
         assert not validate( fm.frozen_text.replace( "✅", "" ), fm ).ok
 
-    def test_a_glyph_opening_a_LATER_line_is_CLAIMED_by_the_removable_rule( self ):
+    def test_a_glyph_opening_a_LATER_line_is_PROTECTED_not_removable( self ):
         """
-        The gap between the two tiers — and note what this asserts.
+        The gap between the two tiers, closed on the safe side.
 
-        The inline rule excluded a line-leading glyph as not-inline; the
-        removable rule anchored only at the start of the message and never saw
-        it. 68 occurrences across 59 messages sat in NEITHER tier and could be
-        deleted with no check at all.
+        A line-leading glyph used to sit in NEITHER tier — the inline rule
+        excluded it, the removable rule anchored only at the message start — so
+        68 occurrences across 59 messages could be deleted with no check at all.
 
-        ⚠️ Asserting that deleting it validates cleanly does NOT test this. An
-        unguarded glyph also validates cleanly — that is the bug. The assertion
-        has to be that the removable rule positively CLAIMS the glyph, which is
-        the only thing that distinguishes "allowed" from "unwatched".
+        The first fix closed it by making every line-leading glyph REMOVABLE.
+        That was worse than the gap: those glyphs are ⇒ 27, ⚠️ 23, ✅ 4, 🔴 2 —
+        consequence markers and verdicts. Deleting a ✅ from the front of a line
+        turns a pass into an unmarked statement.
+
+        ⚠️ Asserting that deleting it validates cleanly would NOT test this. An
+        unguarded glyph validates cleanly too. The assertion has to be that
+        deleting it is REFUSED.
+        """
+        text = "First line about the queue.\n⚠️ Second line carries the warning."
+        fm   = freeze( text )
+
+        assert not validate( fm.frozen_text.replace( "⚠️ ", "" ), fm ).ok, \
+            "a line-leading glyph must be protected — it is a verdict, not ceremony"
+
+    @pytest.mark.parametrize( "glyph", [ "⇒", "⚠️", "✅", "🔴", "🟡" ] )
+    def test_the_line_leading_glyphs_that_actually_occur_are_all_protected( self, glyph ):
+        """The real distribution, not a hypothetical one."""
+        text = f"The run finished overnight.\n{glyph} the second lane is the one to look at."
+        fm   = freeze( text )
+
+        assert not validate( fm.frozen_text.replace( glyph + " ", "" ), fm ).ok
+
+    def test_only_the_MESSAGE_opening_glyph_is_removable( self ):
+        """
+        The narrow case, and the only argument that holds: the envelope's
+        `from` field already names the sender, so an opening 🦉 is redundant.
+        Nothing makes a mid-body glyph redundant.
         """
         import sys
         module = sys.modules[ "cosa.agents.dm_compression.freeze" ]
 
-        text     = "First line about the queue.\n🦉 Second line with more detail here."
-        claimed  = [ kind for kind, pattern in module._REMOVABLE_BOILERPLATE if pattern.search( text ) ]
+        opening   = "🦉 the queue drained cleanly overnight and nothing is outstanding"
+        mid_body  = "the queue drained cleanly overnight\n🦉 nothing is outstanding"
 
-        assert "LEADING_GLYPH" in claimed, "a line-leading glyph is in no tier — it can be deleted unchecked"
+        claims = lambda t: any( p.search( t ) for _, p in module._REMOVABLE_BOILERPLATE )
 
-        fm = freeze( text )
-        assert validate( fm.frozen_text.replace( "🦉 ", "" ), fm ).ok
+        assert claims( opening )
+        assert not claims( mid_body ), "the removable rule must not reach past the message opening"
 
     def test_removable_kinds_are_declared_not_implicit( self ):
         assert REMOVABLE_KINDS, "the removable set must be explicit — silence here means anything goes"

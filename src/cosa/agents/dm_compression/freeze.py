@@ -162,11 +162,18 @@ _PATTERNS = [
     # Persona glyphs and emoji. These carry sender identity and acknowledgement
     # semantics in this fleet — 🫡 is a reply, not decoration — and a rewriter
     # told to strip ornament will erase attribution.
-    # ⚠️ Only INLINE glyphs. A leading glyph run is removable ceremony and is
-    # handled by _REMOVABLE_BOILERPLATE below — see the note there.
-    ( "GLYPH", "VERIFY", re.compile(
-        r"(?<!\A)(?<![\n])" + _GLYPH_RUN
-    ) ),
+    # Every glyph EXCEPT the one opening the message.
+    #
+    # ⚠️ Line-leading glyphs belong here, not in the removable set. They read
+    # like ceremony and are not: across the corpus the non-opening line-leading
+    # glyphs are ⇒ 27, ⚠️ 23, → 5, ✅ 4, 🟡 3, 🔴 2 — consequence markers and
+    # verdicts. Deleting a ✅ from the front of a line turns a pass into an
+    # unmarked statement.
+    #
+    # Only the MESSAGE-opening glyph is removable, and only because the
+    # envelope's `from` field already carries the sender. Nothing makes a
+    # mid-body ⚠️ redundant. (María, 2026-08-07.)
+    ( "GLYPH", "VERIFY", re.compile( r"(?<!\A)" + _GLYPH_RUN ) ),
 
     # ─── SOFT: quantities and quoted material. ───────────────────────────────
     #
@@ -294,13 +301,18 @@ VERIFY_KINDS = tuple(
 # Measure before adding, and say what makes it redundant rather than merely
 # decorative.
 #
-# ⚠️ Anchored per LINE, not per message. Anchoring only at `\A` left the glyph
-# that opens a later line in neither tier — GLYPH excludes it as non-inline and
-# this rule never saw it — so 68 occurrences across 59 messages could be deleted
-# with no check at all. A gap between two tiers is worse than being in the
-# wrong one.
+# ⚠️ Anchored at `\A` — the MESSAGE opening, not every line opening.
+#
+# This was briefly `(?m)^`, to close a gap where a line-leading glyph sat in
+# neither tier. That fix was worse than the gap: it made all 68 non-opening
+# line-leading glyphs deletable, and those are overwhelmingly ⇒ ⚠️ ✅ 🔴 —
+# consequence markers and verdicts, not ceremony. The gap is properly closed on
+# the other side, by letting GLYPH claim them for the verify tier.
+#
+# The narrow argument is the only one that holds: a message-opening 🦉 is
+# redundant because the envelope's `from` field already names the sender.
 _REMOVABLE_BOILERPLATE = [
-    ( "LEADING_GLYPH", re.compile( r"(?m)^[ \t]*" + _GLYPH_RUN + r"[ \t]*" ) ),
+    ( "LEADING_GLYPH", re.compile( r"\A\s*" + _GLYPH_RUN + r"\s*" ) ),
 ]
 
 REMOVABLE_KINDS = tuple( kind for kind, _ in _REMOVABLE_BOILERPLATE )
