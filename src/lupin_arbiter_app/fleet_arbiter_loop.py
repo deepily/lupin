@@ -612,6 +612,28 @@ def make_follow_through_watcher_factory(
             log_fn( "follow_through_escalation_error", item=str( item.id ), error=str( e ) )
 
     def factory( job ) -> Any:
+        # GATE BEFORE IMPORT (2026-08-10). The watcher module's import chain reaches
+        # cosa.rest.db.database -> sqlalchemy -> pgvector -> psycopg2-binary. On the
+        # standalone :8001 host venv (deliberately LIGHT — see
+        # src/scripts/requirements-arbiter.txt) those are absent, so this import
+        # raised ModuleNotFoundError inside the ArbiterConsumerJob ctor and KILLED the
+        # fleet-arbiter thread on its first tick — while the flag was OFF. The service
+        # stayed active(running) and /health kept returning 200, so the fleet section
+        # sat at `status: awaiting, session_count: 0` for two days.
+        #
+        # Reading the flag FIRST makes the enable-gate mean what the docstring above
+        # already promises ("no DB ... until the flag is flipped"): disabled => no
+        # import, no DB dependency, nothing to install on the watcher host. The job
+        # ctor treats a None watcher as inert (layer (a) of _sweep_follow_through).
+        #
+        # Re-read per call, NOT hoisted to wiring time: the supervisor rebuilds the
+        # job every cycle (run() -> self._job_factory()), so a live config flip is
+        # picked up on the next tick without a service restart — the behavior the
+        # watcher's own per-sweep flag read already provided.
+        # Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
+        if not config_mgr.get( "follow through escalation enabled", default=False, return_type="boolean" ):
+            log_fn( "follow_through_watcher_inert", reason="follow through escalation enabled = false (no DB import)" )
+            return None
         from cosa.rest.follow_through_escalation_watcher import FollowThroughEscalationWatcher
         return FollowThroughEscalationWatcher(
             config_mgr,
@@ -849,6 +871,7 @@ class FleetArbiterLoop:
         hwm_janitor_fn       : Optional[ Callable ] = None,
         hwm_deleter_fn       : Optional[ Callable ] = None,
         enable_hwm_deletion  : bool = False,
+        construct_retry_seconds : float = 60.0,
     ) -> None:
         self._job_factory    = job_factory
         self._log_fn         = log_fn if log_fn is not None else _default_log_fn
@@ -893,6 +916,11 @@ class FleetArbiterLoop:
         self._current_job    = None
         self._thread         = None
         self.cycles          = 0
+        # Back-off between failed job CONSTRUCTIONS (2026-08-10). Without a pause a
+        # persistent ctor fault (e.g. a missing dependency) would spin the thread hot
+        # and flood the journal. Injectable so a unit test can drive the retry path
+        # without a real sleep.
+        self._construct_retry_seconds = float( construct_retry_seconds )
 
     def run( self ) -> None:
         """
@@ -901,13 +929,31 @@ class FleetArbiterLoop:
         Ensures:
             - relaunches a fresh job after each clean cap-exit until stop()
             - a job blow-up is swallowed+logged (the supervisor outlives one bad job)
+            - a job CONSTRUCTION blow-up is likewise swallowed+logged and retried on
+              the next cycle (2026-08-10) — see the comment at the try below
             - exits promptly when stop() has been signalled
             - never raises
         """
         while not self._stop.is_set():
             self._sweep_hold_files()             # b39562e4 pt2: hold janitor — REPORT-ONLY (deletes nothing)
             self._sweep_hwm_files()              # 8758d0b1: DM-inbox HWM janitor — its own switch
-            job = self._job_factory()
+            # CONSTRUCTION IS INSIDE THE GUARD (2026-08-10). This line used to sit
+            # OUTSIDE any try, so a raise in the job ctor propagated out of run(),
+            # killed the thread, and never retried — the supervisor's stated promise
+            # ("the supervisor outlives one bad job") covered do_all() only. A
+            # ModuleNotFoundError in the ctor's watcher-factory therefore turned a
+            # missing dependency into a permanently dead loop that no health surface
+            # reported. Retrying keeps a transient/self-healing fault self-healing,
+            # and makes a persistent one LOUD (one log line per cycle) instead of
+            # silent-once-at-boot.
+            # Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
+            try:
+                job = self._job_factory()
+            except Exception as e:
+                self._log_fn( "fleet_arbiter_job_construct_error", error=f"{type( e ).__name__}: {e}" )
+                if self._stop.wait( self._construct_retry_seconds ):
+                    break
+                continue
             self._current_job = job
             self.cycles += 1
             self._log_fn( "fleet_arbiter_job_start", cycle=self.cycles )

@@ -83,17 +83,64 @@ def create_app(
     app.state.context_pressure_loop  = context_pressure_loop
     app.state.turn_age_watchdog_loop = turn_age_watchdog_loop
 
+    def _loop_liveness() -> dict:
+        """
+        Per-loop thread liveness, read from the THREAD ITSELF (2026-08-10).
+
+        Why this exists: on 2026-08-08 the fleet-arbiter thread died on its first
+        tick (ModuleNotFoundError in the job ctor) and STAYED dead for two days.
+        The process was fine, so `systemctl status` said active(running) and this
+        very endpoint returned {"status":"ok"} the whole time. The only visible
+        symptom was an empty panel three hops downstream. A dead worker thread
+        inside a live process must be reportable AT the process.
+
+        `is_alive()` is asked of the real Thread object, never a "we started it"
+        flag — a flag records an intention, and the intention was true the entire
+        time the loop was dead.
+
+        Ensures:
+            - one entry per WIRED loop; absent loops are omitted (not reported dead)
+            - a loop object without a `_thread` reports "not_started"
+            - never raises — health must answer even when a loop is in a bad state
+        Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
+        """
+        out = { }
+        for name, lp in ( ( "health_watcher",          health_loop ),
+                          ( "fleet_arbiter",           fleet_arbiter_loop ),
+                          ( "context_pressure_writer", context_pressure_loop ),
+                          ( "turn_age_watchdog",       turn_age_watchdog_loop ) ):
+            if lp is None: continue
+            try:
+                thread = getattr( lp, "_thread", None )
+                if thread is None:
+                    out[ name ] = "not_started"
+                else:
+                    out[ name ] = "alive" if thread.is_alive() else "DEAD"
+            except Exception as e:                       # health never raises
+                out[ name ] = f"unknown ({type( e ).__name__})"
+        return out
+
     @app.get( "/health" )
     def health() -> dict:
-        """Cheap, always-answer liveness for systemd/cron supervision (deploy §7)."""
+        """
+        Cheap, always-answer liveness for systemd/cron supervision (deploy §7).
+
+        `status` stays "ok" whenever the PROCESS is answering — supervisors key on
+        it and must not be flapped by a worker-thread fault. The new `loops` map
+        and the `degraded` boolean carry the thread-level truth, so a dead loop is
+        greppable in one call instead of invisible (2026-08-10).
+        """
         now    = now_fn()
         uptime = ( now - started_at ).total_seconds()
+        loops  = _loop_liveness()
         return {
             "status"         : "ok",
             "service"        : "lupin-arbiter-app",
             "version"        : __version__,
             "started_at"     : started_at.isoformat(),
             "uptime_seconds" : uptime,
+            "loops"          : loops,
+            "degraded"       : any( v == "DEAD" for v in loops.values() ),
         }
 
     @app.get( "/state" )
@@ -128,6 +175,13 @@ def create_app(
                                  else { "status": "awaiting", "session_count": 0, "sessions": [ ] },
             "context_pressure" : context_pressure if context_pressure is not None
                                  else { "status": "awaiting", "personas": { } },
+            # 2026-08-10: carried here as well as /health because the :7999
+            # reverse-proxy (`GET /api/arbiter/fleet-state`) returns THIS body
+            # verbatim to the Fleet Status panel. Without it, a permanently dead
+            # fleet loop and a genuinely quiet fleet render identically — one
+            # `"status": "awaiting", "sessions": []` for both. The panel can now
+            # tell the operator which one it is looking at.
+            "loops"            : _loop_liveness(),
         }
 
     return app

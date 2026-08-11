@@ -607,13 +607,21 @@ class _FakeCfg:
     def get( self, key, default=None, return_type=None ): return self._v.get( key, default )
 
 
+# The watcher factory GATES ON `follow through escalation enabled` BEFORE importing
+# the watcher module (2026-08-10 — the import reaches sqlalchemy, which the light
+# :8001 host venv does not carry). Tests that want a REAL watcher must therefore
+# turn the flag ON explicitly; a bare _FakeCfg() now yields the inert None path.
+def _EnabledCfg():
+    return _FakeCfg( { "follow through escalation enabled": True } )
+
+
 def _item( id="i-1", title="Verify lane 4" ):
     return types.SimpleNamespace( id=id, title=title )
 
 
 def test_follow_through_factory_builds_watcher_with_bound_hold_check():
     from cosa.rest.follow_through_escalation_watcher import FollowThroughEscalationWatcher
-    cfg, gw, job = _FakeCfg(), FakeGateway(), _StubJob()
+    cfg, gw, job = _EnabledCfg(), FakeGateway(), _StubJob()
     factory = make_follow_through_watcher_factory( cfg, gw, log_fn=lambda *a, **k: None )
     watcher = factory( job )
     assert isinstance( watcher, FollowThroughEscalationWatcher )
@@ -624,7 +632,7 @@ def test_follow_through_factory_builds_watcher_with_bound_hold_check():
 
 def test_follow_through_escalate_fn_pokes_accountable_manager():
     gw, rec = FakeGateway(), Recorder()
-    watcher = make_follow_through_watcher_factory( _FakeCfg(), gw, log_fn=rec.log )( _StubJob() )
+    watcher = make_follow_through_watcher_factory( _EnabledCfg(), gw, log_fn=rec.log )( _StubJob() )
     awaited = T0
     watcher._escalate_fn( _item( id="i-9", title="Aged item" ), "Mr. Radio", "Rachel", awaited )
     assert len( gw.sends ) == 1
@@ -639,14 +647,14 @@ def test_follow_through_escalate_fn_error_swallowed():
     rec = Recorder()
     class BadGW( FakeGateway ):
         def send_to( self, recipient, body, metadata=None ): raise RuntimeError( "commons down" )
-    watcher = make_follow_through_watcher_factory( _FakeCfg(), BadGW(), log_fn=rec.log )( _StubJob() )
+    watcher = make_follow_through_watcher_factory( _EnabledCfg(), BadGW(), log_fn=rec.log )( _StubJob() )
     watcher._escalate_fn( _item(), "Mr. Radio", "Rachel", T0 )   # must NOT raise
     assert any( e == "follow_through_escalation_error" for e, _ in rec.logs )
 
 
 def test_follow_through_factory_default_log_fn( capsys ):
     # No log_fn → the module default (_default_log_fn) is used (else-branch cover).
-    watcher = make_follow_through_watcher_factory( _FakeCfg(), FakeGateway() )( _StubJob() )
+    watcher = make_follow_through_watcher_factory( _EnabledCfg(), FakeGateway() )( _StubJob() )
     watcher._escalate_fn( _item( id="i-d" ), "Mgr", "Wkr", T0 )
     p = json.loads( capsys.readouterr().out.strip() )
     assert p[ "event" ] == "follow_through_escalation" and p[ "item" ] == "i-d"
@@ -1225,3 +1233,161 @@ def test_the_ruled_root_source_still_CANNOT_delete_anything():
     hold_tree = ast.parse( inspect.getsource( hold_mod ) )
     assert [ n for n in ast.walk( hold_tree )
              if isinstance( n, ast.Attribute ) and n.attr == "unlink" ]   # prune_stale_hold_files has one
+
+
+# ── 2026-08-10: the disabled feature must not import the DB, and a ctor blow-up
+#    must not kill the supervisor.
+#    Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
+#
+#    Live failure: on lupin-host-test the watcher import chain
+#    (follow_through_escalation_watcher -> cosa.rest.db.database -> sqlalchemy)
+#    raised ModuleNotFoundError inside the ArbiterConsumerJob ctor and killed the
+#    fleet-arbiter thread on tick 1 — with the feature flag OFF. The service stayed
+#    active(running), /health kept returning 200, and the fleet section sat at
+#    session_count 0 for two days.
+#
+#    NOTE ON METHOD: the obvious control — block `sqlalchemy` and evict it from
+#    sys.modules — is FORBIDDEN here by src/conftest.py (row e1da2b5f): re-importing
+#    SQLAlchemy raises "Type <class 'object'> is already registered" and breaks a
+#    LATER test in a different file. So the gate is proven two ways that touch no
+#    imports at all: behaviourally (disabled -> None) and structurally (the flag is
+#    read BEFORE the import statement, asserted over the AST, with a positive
+#    control proving the AST check can fail).
+
+
+def test_watcher_factory_disabled_returns_none_and_logs_inert():
+    """Flag off → the inert None seam, not a watcher."""
+    rec     = Recorder()
+    factory = make_follow_through_watcher_factory( _FakeCfg(), FakeGateway(), log_fn=rec.log )
+    assert factory( _StubJob() ) is None
+    assert any( e == "follow_through_watcher_inert" for e, _ in rec.logs )
+
+
+def _gate_precedes_import( func_source ):
+    """
+    True iff, inside the inner `factory`, the enable-flag read appears BEFORE any
+    import of the watcher module. Returns False when the import comes first (the
+    pre-2026-08-10 shape) or when no gate is present at all.
+    """
+    import ast
+    tree = ast.parse( func_source )
+    for node in ast.walk( tree ):
+        if isinstance( node, ast.FunctionDef ) and node.name == "factory":
+            gate_line = import_line = None
+            for sub in ast.walk( node ):
+                if ( isinstance( sub, ast.Constant ) and isinstance( sub.value, str )
+                     and sub.value == "follow through escalation enabled" and gate_line is None ):
+                    gate_line = sub.lineno
+                if ( isinstance( sub, ast.ImportFrom ) and sub.module
+                     and "follow_through_escalation_watcher" in sub.module and import_line is None ):
+                    import_line = sub.lineno
+            return gate_line is not None and import_line is not None and gate_line < import_line
+    return False
+
+
+def test_gate_is_read_BEFORE_the_watcher_import():
+    """
+    The load-bearing assertion. If someone moves the import above the flag read —
+    or deletes the gate — this fails, and it fails for the production reason: on a
+    light venv that import is what kills the thread.
+    """
+    import inspect
+    import lupin_arbiter_app.fleet_arbiter_loop as mod
+    assert _gate_precedes_import( inspect.getsource( mod.make_follow_through_watcher_factory ) )
+
+
+def test_gate_order_check_is_non_vacuous():
+    """
+    POSITIVE CONTROL — the AST check must REJECT the ungated shape. Predicted
+    failure mode if this check were toothless: it returns True for source whose
+    import precedes any flag read.
+    """
+    ungated = (
+        "def make_x( config_mgr ):\n"
+        "    def factory( job ):\n"
+        "        from cosa.rest.follow_through_escalation_watcher import W\n"
+        "        if not config_mgr.get( 'follow through escalation enabled' ): return None\n"
+        "        return W()\n"
+        "    return factory\n"
+    )
+    no_gate = (
+        "def make_x( config_mgr ):\n"
+        "    def factory( job ):\n"
+        "        from cosa.rest.follow_through_escalation_watcher import W\n"
+        "        return W()\n"
+        "    return factory\n"
+    )
+    assert _gate_precedes_import( ungated ) is False      # import first → rejected
+    assert _gate_precedes_import( no_gate ) is False      # no gate at all → rejected
+
+
+def test_watcher_factory_enabled_still_builds_the_real_watcher():
+    """The gate must not disable the feature when the flag IS on."""
+    from cosa.rest.follow_through_escalation_watcher import FollowThroughEscalationWatcher
+    watcher = make_follow_through_watcher_factory( _EnabledCfg(), FakeGateway(),
+                                                   log_fn=lambda *a, **k: None )( _StubJob() )
+    assert isinstance( watcher, FollowThroughEscalationWatcher )
+
+
+def test_gate_is_re_read_per_call_not_hoisted():
+    """
+    The supervisor rebuilds the job every cycle, so a live config flip must be
+    picked up on the next tick without a service restart.
+    """
+    flag = { "follow through escalation enabled": False }
+    class _MutableCfg:
+        def get( self, key, default=None, return_type=None ): return flag.get( key, default )
+    factory = make_follow_through_watcher_factory( _MutableCfg(), FakeGateway(), log_fn=lambda *a, **k: None )
+    assert factory( _StubJob() ) is None
+    flag[ "follow through escalation enabled" ] = True
+    assert factory( _StubJob() ) is not None
+def test_run_survives_a_job_CONSTRUCTION_blowup_and_retries():
+    """
+    A ctor raise used to propagate out of run() and kill the thread permanently.
+    It must now be logged and retried on the next cycle.
+    """
+    logs  = [ ]
+    calls = { "n": 0 }
+    class _OneShotJob:
+        def do_all( self ): return { "ok": True }
+    def _factory():
+        calls[ "n" ] += 1
+        if calls[ "n" ] == 1:
+            raise ModuleNotFoundError( "No module named 'sqlalchemy'", name="sqlalchemy" )
+        return _OneShotJob()
+    holder = { }
+    def _log( event, **fields ):
+        logs.append( ( event, fields ) )
+        # stop once the post-failure cycle has completed, so run() terminates
+        if event == "fleet_arbiter_recycle": holder[ "loop" ]._stop.set()
+    loop = FleetArbiterLoop( _factory, log_fn=_log,
+                             hold_janitor_fn=lambda **k: [ ], hwm_janitor_fn=lambda **k: [ ],
+                             construct_retry_seconds=0.0 )
+    holder[ "loop" ] = loop
+    loop.run()                                                   # must return, not raise
+    events = [ e for e, _ in logs ]
+    assert "fleet_arbiter_job_construct_error" in events         # the failure was reported
+    assert "fleet_arbiter_job_start"           in events         # and the NEXT cycle ran
+    assert calls[ "n" ] >= 2                                     # it actually retried
+
+
+def test_run_exits_promptly_if_stopped_DURING_the_construct_backoff():
+    """
+    Covers the stop-during-backoff branch: a shutdown requested while the loop is
+    waiting out a failed construction must break immediately, not sleep out the
+    full retry interval and start another cycle.
+    """
+    logs  = [ ]
+    calls = { "n": 0 }
+    holder = { }
+    def _factory():
+        calls[ "n" ] += 1
+        holder[ "loop" ]._stop.set()                 # shutdown arrives mid-failure
+        raise ModuleNotFoundError( "No module named 'sqlalchemy'", name="sqlalchemy" )
+    loop = FleetArbiterLoop( _factory, log_fn=lambda e, **f: logs.append( ( e, f ) ),
+                             hold_janitor_fn=lambda **k: [ ], hwm_janitor_fn=lambda **k: [ ],
+                             construct_retry_seconds=30.0 )   # long — a real sleep would hang the test
+    holder[ "loop" ] = loop
+    loop.run()                                       # returns at once via the wait() True branch
+    assert calls[ "n" ] == 1                         # did NOT start a second cycle
+    assert any( e == "fleet_arbiter_job_construct_error" for e, _ in logs )

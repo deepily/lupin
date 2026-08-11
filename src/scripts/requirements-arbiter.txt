@@ -10,6 +10,29 @@
 #   VM host would be wasteful and slow; this closed set is everything the arbiter
 #   actually imports + the uvicorn server that runs it.
 #
+# ⚠️ "CLOSED + FROZEN" IS AN INTENTION, NOT A CONTROL — READ THIS BEFORE TRUSTING IT.
+# This file has now fallen behind the arbiter's import graph THREE times, and each
+# time the failure was silent in production:
+#   1. 2026-07-22  ModuleNotFoundError('yaml')        → pyyaml added (see below)
+#   2. 2026-08-08  ModuleNotFoundError('sqlalchemy')  → fleet-arbiter thread died on
+#      tick 1 and stayed dead for two days; `systemctl status` said active(running)
+#      and /health returned 200 the whole time. Root fix was NOT to add the package:
+#      the import came from a DISABLED feature, so the gate moved above the import
+#      (fleet_arbiter_loop.make_follow_through_watcher_factory) and the light venv
+#      stays light. See src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
+# THE CONTROL IS src/scripts/check-arbiter-venv.py — it imports the arbiter's real
+# runtime graph in the target venv and FAILS THE PROVISION. provision-arbiter-on-vm.sh
+# runs it after pip install; preflight-vm.sh asserts per-loop thread liveness. If you
+# grow the import graph, the gate tells you here rather than a panel telling you in
+# two days. Do not rely on this comment; it is the thing that already failed twice.
+#
+# CONDITIONAL DEPS (deliberately NOT installed by default): with
+# `follow through escalation enabled = true`, the watcher pulls
+# sqlalchemy==2.0.40, pgvector==0.4.2, psycopg2-binary==2.9.11 (+ greenlet, and
+# numpy via pgvector — which is why they are not here: numpy contradicts the
+# "no heavy modules" premise above). check-arbiter-venv.py requires them ONLY when
+# that flag is on. Flip the flag ⇒ install them ⇒ re-run the checker.
+#
 # CLOSED + FROZEN: pinned to the exact versions resolved in the working dev .venv
 # on 2026-06-10, so `pip install -r` on the VM reproduces the dev runtime exactly.
 # Every entry is a package the arbiter's import graph loads at runtime (live-notify

@@ -764,6 +764,35 @@ c="$( http_code "$ARBITER_URL/health" 10 )"
 [ "$c" = "200" ] && report pass WARN "arbiter /health 200" \
                  || report fail WARN "arbiter /health returned '$c'" "systemctl --user restart lupin-arbiter-app.service"
 
+# D3b — A 200 FROM /health DOES NOT MEAN THE WATCHER IS WATCHING (2026-08-10).
+#       The fleet-arbiter THREAD died on its first tick (missing sqlalchemy) and stayed
+#       dead for two days while this exact check returned a clean 200 every run — the
+#       process was healthy, only its worker was gone. /health now reports per-thread
+#       liveness, so assert on THAT, and name which loop is down.
+#       Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
+if [ "$c" = "200" ]; then
+    dead="$( curl -s --max-time 10 "$ARBITER_URL/health" 2>/dev/null \
+             | python3 -c "
+import json,sys
+try: b = json.load( sys.stdin )
+except Exception: print( 'UNPARSEABLE' ); raise SystemExit
+loops = b.get( 'loops' )
+if loops is None:
+    print( 'NO_LOOPS_FIELD' )                      # arbiter predates the liveness field
+else:
+    print( ','.join( sorted( n for n, v in loops.items() if v == 'DEAD' ) ) )
+" 2>/dev/null )"
+    case "$dead" in
+        "")                report pass WARN "arbiter loops all alive" ;;
+        NO_LOOPS_FIELD)    report fail WARN "arbiter /health has no 'loops' field — running code older than 2026-08-10; a dead worker thread would be invisible" \
+                                       "redeploy the arbiter checkout, then: systemctl --user restart lupin-arbiter-app.service" ;;
+        UNPARSEABLE)       report fail WARN "arbiter /health body did not parse as JSON" \
+                                       "curl -s $ARBITER_URL/health" ;;
+        *)                 report fail BLOCK "arbiter loop(s) DEAD: $dead — the service is up but not watching" \
+                                       "journalctl --user -u lupin-arbiter-app.service | grep -A20 'Exception in thread'; then fix the cause and restart" ;;
+    esac
+fi
+
 # D4 — ASSERT ACCEPTANCE, NOT PRESENCE, and prove the check can fail.
 #      os.path.exists() passes on the exact shape that broke (a mode-600 key), and a
 #      readable key from ANOTHER deployment sails through a readability check too —

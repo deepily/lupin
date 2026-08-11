@@ -69,6 +69,32 @@ log "installing/updating arbiter requirements (light — no torch)"
 "${VENV_DIR}/bin/python" -m pip install --quiet --upgrade pip
 "${VENV_DIR}/bin/python" -m pip install --quiet -r "${REQS}"
 
+# --- 2b. IMPORT GATE — fail the DEPLOY, not a runtime thread (2026-08-10) -----
+# Until today the only verification here was `/health`, which returns 200 even when
+# a worker thread is dead. That is exactly how a missing `sqlalchemy` killed the
+# fleet-arbiter loop on 2026-08-08 and went unnoticed for two days (third instance
+# of the requirements-file-drifts-behind-the-import-graph class; `pyyaml` was the
+# second, on this same VM, 2026-07-22).
+#
+# NOTE the pipe discipline: `cmd | tee` reports TEE's status, not cmd's. This runs
+# the checker unpiped and tests $? directly — the same trap silently reported a
+# FAILED pip install as exit 0 while this fix was being built.
+# Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
+CHECKER="${LUPIN_ROOT}/src/scripts/check-arbiter-venv.py"
+if [[ -f "${CHECKER}" ]]; then
+  log "verifying the venv can import everything the arbiter runs"
+  set +e
+  LUPIN_ROOT="${LUPIN_ROOT}" \
+  PYTHONPATH="${LUPIN_ROOT}/src" \
+  LUPIN_CONFIG_MGR_CLI_ARGS="${CONFIG_ARGS_FOR_CHECK:-config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=${CONFIG_BLOCK_ID}}" \
+    "${VENV_DIR}/bin/python" "${CHECKER}"
+  CHECK_RC=$?
+  set -e
+  [[ ${CHECK_RC} -eq 0 ]] || die "arbiter venv import check FAILED (exit ${CHECK_RC}) — see the remedy above. Refusing to provision a venv that cannot run the service."
+else
+  log "WARNING: ${CHECKER} not found — skipping the import gate (older checkout?)"
+fi
+
 # The run script hard-codes ${LUPIN_ROOT}/.venv/bin/python. On the VM the arbiter
 # venv is .venv-arbiter (the app stack uses the baked image, so there is no full
 # .venv on the host). Symlink .venv -> .venv-arbiter ONLY if no .venv exists, so a

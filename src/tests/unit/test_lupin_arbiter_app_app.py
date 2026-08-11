@@ -337,3 +337,83 @@ def test_assemble_app_no_roster_env_yields_empty_declared( monkeypatch ):
     app = assemble_app( _FakeCfg( enabled=False ), _FakeGateway(), log_fn=lambda *a, **k: None )
     job = app.state.fleet_arbiter_loop._job_factory()
     assert job.declared_managers == [ ]
+
+
+# ── 2026-08-10: per-loop thread liveness in /health and /state ────────────────
+#
+# The gap this closes: a worker thread died on 2026-08-08 and stayed dead for two
+# days while /health returned {"status":"ok"} on every poll. The process was fine;
+# only the thread was gone. Liveness is now read from the Thread object itself,
+# because the "did we start it" intention was true the whole time it was dead.
+# Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
+
+class _ThreadedFakeLoop:
+    """A loop whose `_thread` liveness we control, mimicking the real loops' attr."""
+    def __init__( self, alive=True, thread=True ):
+        self.started = self.stopped = False
+        class _T:
+            def __init__( self, alive ): self._alive = alive
+            def is_alive( self ): return self._alive
+        self._thread = _T( alive ) if thread else None
+    def start( self ): self.started = True
+    def stop( self ):  self.stopped = True
+
+
+class _ExplodingLoop:
+    """`_thread` access raises — /health must still answer."""
+    def start( self ): pass
+    def stop( self ):  pass
+    @property
+    def _thread( self ): raise RuntimeError( "boom" )
+
+
+def test_health_reports_a_dead_loop_as_DEAD_and_sets_degraded():
+    """THE regression test for the two-day silence."""
+    alive, dead = _ThreadedFakeLoop( alive=True ), _ThreadedFakeLoop( alive=False )
+    with TestClient( create_app( health_loop=alive, fleet_arbiter_loop=dead ) ) as client:
+        body = client.get( "/health" ).json()
+        assert body[ "status" ]   == "ok"          # process answers → supervisors unaffected
+        assert body[ "degraded" ] is True          # …but the fault is visible
+        assert body[ "loops" ][ "health_watcher" ] == "alive"
+        assert body[ "loops" ][ "fleet_arbiter" ]  == "DEAD"
+
+
+def test_health_all_alive_is_not_degraded():
+    a, b = _ThreadedFakeLoop( alive=True ), _ThreadedFakeLoop( alive=True )
+    with TestClient( create_app( health_loop=a, fleet_arbiter_loop=b ) ) as client:
+        body = client.get( "/health" ).json()
+        assert body[ "degraded" ] is False
+        assert set( body[ "loops" ].values() ) == { "alive" }
+
+
+def test_health_omits_loops_that_are_not_wired():
+    """An absent loop is NOT reported dead — omission and death are different facts."""
+    with TestClient( create_app( health_loop=_ThreadedFakeLoop() ) ) as client:
+        loops = client.get( "/health" ).json()[ "loops" ]
+        assert list( loops ) == [ "health_watcher" ]
+        assert "fleet_arbiter" not in loops
+
+
+def test_health_reports_not_started_when_thread_is_absent():
+    with TestClient( create_app( fleet_arbiter_loop=_ThreadedFakeLoop( thread=False ) ) ) as client:
+        assert client.get( "/health" ).json()[ "loops" ][ "fleet_arbiter" ] == "not_started"
+
+
+def test_health_never_raises_when_a_loop_misbehaves():
+    with TestClient( create_app( fleet_arbiter_loop=_ExplodingLoop() ) ) as client:
+        r = client.get( "/health" )
+        assert r.status_code == 200
+        assert r.json()[ "loops" ][ "fleet_arbiter" ].startswith( "unknown (RuntimeError" )
+        assert r.json()[ "degraded" ] is False      # "unknown" is not a death claim
+
+
+def test_state_carries_loop_liveness_so_the_panel_can_tell_dead_from_quiet():
+    """
+    `fleet_arbiter: {"status":"awaiting","sessions":[]}` is what BOTH a dead loop and
+    a genuinely quiet fleet produce. /state now ships the discriminator, and the
+    :7999 proxy returns this body verbatim to the panel.
+    """
+    with TestClient( create_app( fleet_arbiter_loop=_ThreadedFakeLoop( alive=False ) ) ) as client:
+        body = client.get( "/state" ).json()
+        assert body[ "fleet_arbiter" ][ "sessions" ] == [ ]      # indistinguishable on its own…
+        assert body[ "loops" ][ "fleet_arbiter" ] == "DEAD"      # …but not anymore
