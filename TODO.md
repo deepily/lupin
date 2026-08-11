@@ -1,5 +1,33 @@
 # TODO
 
+## 🌙 EOD 2026-08-10 (Mr. Radio 🦉 `df4207f2`) — pick up here tomorrow
+
+**Two commits, both pushed**: `481f6a8d` (arbiter fleet-loop fix + deploy gate + loop liveness) and `af406cc9` (arbiter venv out of the deploy tree). 121 tests green.
+
+### FIRST THING — one unverified claim
+
+**The VM was powered down mid-check**, so the restart onto the new light venv at `$HOME/.venvs/lupin-arbiter` was never confirmed. Everything up to it passed: provisioning ran clean and its own import gate approved that venv (12 modules, DB closure correctly not required). The unit is enabled, so it should come up on boot.
+
+```
+gcloud compute ssh lupin-host-test --zone=us-central1-a --project=hello-world-foo-423219 --tunnel-through-iap \
+  --command='systemctl --user is-active lupin-arbiter-app.service;
+             journalctl --user -u lupin-arbiter-app.service --since "5 min ago" --no-pager | grep -o "interpreter .*" | tail -1;
+             curl -s http://127.0.0.1:8001/health'
+```
+
+Expect: `active` · interpreter `/home/admin_rickruiz_altostrat_com/.venvs/lupin-arbiter/bin/python` · `degraded: false` with all four loops `alive`. **That last check is the light-venv proof** — the new venv has never had SQLAlchemy, so a live fleet loop on it proves the gate works in production, not just in a control.
+
+If it comes up on the OLD interpreter, the legacy symlink is winning — remove `/mnt/lupin-data/lupin/.venv` and `/mnt/lupin-data/lupin/.venv-arbiter` (provisioning prints both commands rather than deleting them for you).
+
+### Still open from tonight
+
+- **`live_notify_disabled` at every arbiter boot** — `Environment 'development' not found in ~/.lupin/config`. The VM arbiter cannot send live notifications. Found, not scoped.
+- **8 provider keys still absent from the VM** (`openai`, `gemini`, `groq`, `huggingface`, `kagi`, `mistral`, `google`, `anthropic-api-key-firewalled`). Each will fail exactly like `eleven11` did, and only in a log. Worth a preflight check that names them.
+- **The deploy still chowns the tree to uid 1001**, a user that does not exist on that box. The arbiter venv is out of the way now; anything else living in that tree is not.
+- Row `970002f1` stays open until the pickup check above passes.
+
+---
+
 ## ⚖️ RULED 2026-08-07 (Mr. Radio 🦉 `61c3d613`, with María 🌸) — Arm 4 compression: FAILED EXPERIMENT, closed
 
 **Rick's ruling**: *"Let's mark this down to a failed experiment. Even the larger models are unable to compress these messages…"*

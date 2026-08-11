@@ -8,6 +8,28 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.08.10 - Session df4207f2 (Mr. Radio 🦉, solo) | Two silent failures on the test VM: a missing key, and a dead thread inside a healthy process
+
+1. **ElevenLabs TTS on the cloud test server — fixed and proved.** María's diagnosis of the mechanism was right (`get_api_key` reads a FILE, `.gitignore` excludes `src/conf/keys/**`, so no checkout ever carries provider keys). Two corrections: the keys directory *was* mounted — it held two other keys, only `eleven11` was missing — and my first 401 was a red herring, since the key is scoped to synthesis only and the *working* dev key 401s on the account endpoint too. Verified with a real call from inside the container: **HTTP 200, 14,254 audio bytes**.
+
+2. **The Fleet Status panel read "No active sessions" because a thread was dead, not because the arbiter was down.** Both arbiters were `active (running)` with 11h uptime. Inside the VM's, the `fleet-arbiter-loop` thread had died on its **first tick** with `ModuleNotFoundError: sqlalchemy` and stayed dead since the 08-08 boot — while `health_watcher` (180 events/45min) and `context_pressure_writer` (45) kept ticking, `/health` returned 200, and the *same snapshot* listed María and Sam as live under `context_pressure`.
+
+3. **The import came from a feature that is OFF.** `follow through escalation enabled = false`, yet the watcher factory imported `cosa.rest.db.database` unconditionally at job construction. Its docstring already promised "no DB until the flag is flipped" — true for IO, false for the import. Fix: read the flag **before** the import. Measured closure was three packages (`sqlalchemy` + `pgvector` + `psycopg2-binary`, plus `numpy` via pgvector), so pinning them would have put a Postgres client stack in the deliberately light watcher venv to serve a disabled feature.
+
+4. **Two structural holes closed alongside it.** Job construction sat **outside** the supervisor's `try`, so a ctor raise killed the thread once, permanently — the promise "the supervisor outlives one bad job" covered `do_all()` only. And `/health` had no way to report a thread, so a dead loop and a quiet fleet both rendered as `{"status":"awaiting","sessions":[]}`. `/health` now carries `loops` + `degraded` read from `Thread.is_alive()`, and `/state` carries `loops` so the panel can tell the two apart.
+
+5. **Third instance of one class, so the control is now a gate, not a comment.** `requirements-arbiter.txt` says "CLOSED + FROZEN" and records `pyyaml` being added 2026-07-22 after the same failure on the same VM. New `check-arbiter-venv.py` imports the arbiter's real runtime graph in the target venv and **fails the provision**; `preflight-vm.sh` D3b asserts loop liveness instead of a bare 200.
+
+6. **The arbiter venv was owned by a user that does not exist.** 5,827 files under it owned by uid 1001 (`stat` → `UNKNOWN`), because it lived inside the tree that every deploy chowns — so my hand-chown was reverted by the very deploy that shipped the fix, and `pip uninstall` died with `PermissionError: RECORD`. Rick chose relocation: the venv now lives at `$HOME/.venvs/lupin-arbiter`, resolved `$LUPIN_ARBITER_VENV → $HOME/.venvs/lupin-arbiter → $LUPIN_ROOT/.venv` (dev box unchanged — verified). Also needed `python3.10-venv` installed on the VM: the script's precondition checked `import venv`, which passes while `ensurepip` is absent.
+
+**Process notes**: a pip install reported `exit=0` while failing, because I read a pipe's status instead of the command's — the import check immediately after is what caught it. And I concluded from a tunnel check on the dev box that Rick was viewing a local page; his tunnel runs from his laptop, invisible from here. **A negative observation on one host is not evidence about another** — that cost two turns.
+
+**Checkpoint**: `481f6a8d` + `af406cc9`, 14 files. 121 tests green; 100% lines/branches on `app.py` and on every line of the loop diff. Gate proven both directions on a purpose-built control venv. Row `970002f1`.
+
+**Files**: `src/lupin_arbiter_app/{app,fleet_arbiter_loop}.py` · `src/scripts/{check-arbiter-venv.py,provision-arbiter-on-vm.sh,preflight-vm.sh,run-lupin-arbiter-app.sh,requirements-arbiter.txt}` · 3 test files · `src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md` · `src/rnd/2026.07.22-arbiter-bringup-on-lupin-host-test.md` §7 · `CLAUDE.md`
+
+**Not verified — the VM was powered down mid-check**: the restart onto the new light venv. Provisioning passed its own gate on that venv (12 modules, no DB closure) and the unit is enabled, so it should come up clean; **confirm before trusting it**. Still open: the arbiter's `live_notify_disabled` at every boot (no `development` env in `~/.lupin/config`), and 8 provider keys still absent from the VM.
+
 ### 2026.08.07 - Session 61c3d613 (Mr. Radio 🦉, with María 🌸) | Arm 4: built, measured, RULED a failed experiment
 
 1. **Phase 1 — the literal freeze protocol.** Extract → placehold → validate → restore, so a lossy DM rewrite cannot corrupt a line number or a commit sha. Two tiers: substitute what is worth more than a placeholder, **verify in place** what is cheaper (a bare integer is 1.06 tokens — no substitution can ever pay). Identity round-trip byte-exact on all 2,951 corpus bodies. The plan's `⟦L00⟧` delimiters were measured and rejected: absent from every BPE vocabulary, they would have **added 36,921 tokens before compressing a word**.
