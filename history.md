@@ -8,6 +8,26 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.08.11 - Session c74141d6 (Mr. Radio 🦉, with María 🌸) | dm.txt becomes a real agent — and the promotion moved two variables, not one
+
+1. **`DmTutorAgent` on `AgentBase`, with the seam Rick asked for.** His addition at the understanding gate: *"out of this must come a DMTutor agent object that can be used within the DM send calls."* So `rewrite_dm( body )` is a free function with a fail-closed contract — the distilled lines, or `None`, and `None` always means deliver the original. Free rather than a method so **construction** failures fail closed too: a missing INI key must not raise into a sender's call stack.
+
+2. **The promotion changed TWO things, and only one was expected.** `AgentBase` adds the `</stop>` sentinel — known. It also swaps regex extraction for a strict XML parser — not noticed until the first live call died on a model that wrote `git show HEAD:<file>` in its prose. `re.search` shrugs at that; `xmltodict` reads an unclosed tag. Fixed by instructing CDATA per the sibling prompt's practice (`dm-compression.txt:34`), **flagged to Rick as a departure from the plan's "no rewording" rule rather than buried.**
+
+3. **The 200-run, both arms: 387/400 delivered.** Compression scales steeply — 76% → 41% → 30% → **17%**, so a 250+ word DM comes back at one sixth of its length. Against arm 4's 3.0%-where-38%-was-needed, this is a different mechanism: arm 4 preserved every message and rewrote conservatively; the tutor discards whatever is not the point.
+
+4. **The stop sentinel bought nothing measurable — and María asked for that in the record.** 195/200 against 192/200, a gap of 3 where the noise floor needs 4. Her single-message probe (3,004 words → 114) was not *confounded* as she put it — it varied the sentinel cleanly — but it revealed an **interaction**: the sentinel and CDATA guard the same failure, and once CDATA is in place the sentinel has nothing left to catch. She retracted her own headline unprompted.
+
+5. **The 9 "invented" paths were my checker, not the model.** `NOT IN DM` reads as a 2.3% hallucination rate. Reading all nine: `commit 32e659f1` — the sha is verbatim in **7 corpus bodies**, the model added the word "commit"; the other seven are two-to-four *real* paths comma-joined into a slot that holds one. **Zero fabrications.** `pointer in body` cannot pass a legitimately composed value, and the prompt never says "exactly one". Both named in §6, neither patched at 11pm on numbers that would then need re-running.
+
+6. **A bounce paid an unplanned dividend.** `:7999` restarted mid-session carrying my two registry edits; the server came up healthy on boot #52, which independently proved imports that a unit suite exercises but a startup path is the real judge of.
+
+**Checkpoint**: 99 new unit tests, **100% lines AND branches** on both new modules; full gate **13,529 passed, 0 failed**; live 8/8 across four bands. Row `7c23e9cf`.
+
+**Files**: `src/cosa/agents/dm_tutor/{xml_models,agent}.py` · `src/conf/prompts/agents/dm-tutor.txt` + `dm.txt` · `src/cosa/agents/io_models/utils/{prompt_template_processor,xml_parser_factory}.py` · `src/conf/lupin-app{,-splainer}.ini` · `src/rnd/.../dm_txt_run.py` · 2 test files · `src/rnd/v0.2.0/2026.08.04-dm-verbosity-reduction/2026.08.11-dm-tutor-agent-implementation-record.md` · `src/rnd/README.md`
+
+**Owed to Rick, and no harness can answer it**: his read of the rewrites — whether one quietly reverses a meaning, and whether the one technical detail in nine that survives is the right one. Also open: keep-or-veto on the CDATA prompt line. **Not done**: `rewrite_dm()` exists but nothing calls it yet — the send-path integration was not in this cut.
+
 ### 2026.08.10 - Session df4207f2 (Mr. Radio 🦉, solo) | Two silent failures on the test VM: a missing key, and a dead thread inside a healthy process
 
 1. **ElevenLabs TTS on the cloud test server — fixed and proved.** María's diagnosis of the mechanism was right (`get_api_key` reads a FILE, `.gitignore` excludes `src/conf/keys/**`, so no checkout ever carries provider keys). Two corrections: the keys directory *was* mounted — it held two other keys, only `eleven11` was missing — and my first 401 was a red herring, since the key is scoped to synthesis only and the *working* dev key 401s on the account endpoint too. Verified with a real call from inside the container: **HTTP 200, 14,254 audio bytes**.

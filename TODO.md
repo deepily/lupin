@@ -1,5 +1,36 @@
 # TODO
 
+## 🌙 EOD 2026-08-11 (Mr. Radio 🦉 `c74141d6`, with María 🌸) — DM tutor agent built, two rulings owed by Rick
+
+### FIRST THING — two things wait on Rick, neither is code
+
+1. **Keep or veto the CDATA prompt line.** The plan said no prompt rewording; I added one requirement line to `dm-tutor.txt`, copied from `dm-compression.txt:34`. **Without it the agent cannot parse any DM whose prose contains an angle bracket** — that killed the first live call (`git show HEAD:<file>`). My argument: it is format plumbing for the standard path, the same category as the `{{PYDANTIC_XML_EXAMPLE}}` marker, not a change to what the model is asked to say. If vetoed, the prompt cannot ride `AgentBase` and that becomes the finding.
+2. **His read of the 40 sample pairs** — still owed from earlier, and now the 200-run adds more. Every check we own is structural: slots present, pointer verbatim, word counts. **Whether a rewrite quietly reverses a meaning is the one question no harness answers.** Stamped doc: `/tmp/dm-tutor-samples-2026.08.11-1945.md` (⚠️ `/tmp` is swept nightly; regenerate with `tutor_sample_run.py`).
+
+### What landed
+
+`dm.txt` → `DmTutorAgent` on `AgentBase`, with `rewrite_dm()` as the fail-closed seam Rick asked for
+(*"a DMTutor agent object that can be used within the DM send calls"*). 99 unit tests, 100% lines and
+branches, full gate 13,529 green, 200-run 387/400 delivered, 250+ band compresses to **17%**.
+
+→ `src/rnd/v0.2.0/2026.08.04-dm-verbosity-reduction/2026.08.11-dm-tutor-agent-implementation-record.md`
+
+### Open, and small
+
+- **The path checker is too strict.** `pointer in body` fails a value the model legitimately composed from several real paths. Should test each comma/semicolon-separated element and strip a leading label word. Until fixed its `NOT IN DM` count reads as a hallucination rate and **is not one** — all 9 were verified as real literals.
+- **The prompt never says "exactly one" pointer.** "The most relevant" gets read as "the relevant ones" on long messages. One-word fix, but item 1 above should rule first.
+- **The `<80` band barely compresses** (76% delivered). Worth asking whether the tutor should run on short messages at all — 3.1s to remove a quarter of a 60-word message may not pay.
+- **Send-path integration is NOT done.** `rewrite_dm()` exists; nothing calls it. That is the "greater experiment" and was not in this cut.
+
+### Carried, not mine
+
+María 🌸 retracted her own headline on the stop sentinel after seeing n=200 (195 vs 192, floor of 4).
+Her probe was not confounded — it varied the sentinel cleanly — but the sentinel and CDATA guard the
+same failure, so once CDATA is in place the sentinel has nothing left to catch. **One message cannot
+tell you which of two overlapping guards did the work.**
+
+---
+
 ## 🌙 EOD 2026-08-10 (Mr. Radio 🦉 `df4207f2`) — pick up here tomorrow
 
 **Two commits, both pushed**: `481f6a8d` (arbiter fleet-loop fix + deploy gate + loop liveness) and `af406cc9` (arbiter venv out of the deploy tree). 121 tests green.

@@ -251,7 +251,19 @@ _PATTERNS = [
 #
 # The margin this protects is thin: 5,799 tokens on 95,735, about 6%. Every
 # cheap class moved into the freeze tier eats it.
-_INT_PATTERN = ( "INT", re.compile( r"(?<![\w.$€£])-?\d+(?:[.,]\d+)*(?![\w.])" ) )
+# 🔴 The trailing lookahead is `(?!\w|[.,]\d)`, NOT `(?![\w.])`.
+#
+# It used to be `(?![\w.])`, which rejected any integer immediately followed by a
+# period — that is, **every number that ends a sentence**. "not reproducible on
+# port 8000." counted zero verify literals, so a rewrite could change that port
+# to 8001 and pass every check. Measured 2026-08-11: `port 8000. Next` yielded
+# {} while `port 8000, next` yielded {'8000': 1}, so protection depended on the
+# punctuation that happened to follow.
+#
+# The lookahead exists to stop "1" matching inside "1.5". That needs to reject a
+# period only when a DIGIT follows it, which is what `[.,]\d` says. A sentence's
+# final period is no longer mistaken for a decimal point.
+_INT_PATTERN = ( "INT", re.compile( r"(?<![\w.$€£])-?\d+(?:[.,]\d+)*(?!\w|[.,]\d)" ) )
 
 
 def _verify_patterns():
@@ -606,6 +618,78 @@ def count_verify_literals( text, namespace ):
     for _, pattern in _verify_patterns():
         for m in pattern.finditer( stripped ):
             counts[ m.group( 0 ) ] = counts.get( m.group( 0 ), 0 ) + 1
+
+    return counts
+
+
+def count_all_literals( text, namespace="" ):
+    """
+    Count EVERY literal class in place — not just the cheap VERIFY tier.
+
+    🔴 WHY THIS EXISTS. `count_verify_literals` covers the VERIFY tier only:
+    PORT, ISSUE, SECTION, DELTA, GLYPH, MONEY, NUMUNIT, INT. Everything Rick
+    actually asked to protect — SHA, FILELINE, PATH, URL, IDENT, SEMVER, UUID,
+    EMAIL — is HARD or SOFT tier, substituted rather than checked, so a caller
+    that does not freeze gets NO protection for hashes from that function.
+
+    That gap was named as a blocker in the tutor plan and then walked into
+    anyway by the first tutor gate, which called the narrow function. It
+    surfaced on real output: a rewrite turned `lupin-app.ini:1398` into
+    `lupin-app.ini`, dropping the line number, and the gate passed it.
+
+    The tier split exists to decide what to SUBSTITUTE, and substitution costs
+    tokens. Checking in place costs nothing for any class, so there is nothing
+    to economise here and no reason to inherit that split.
+
+    Requires:
+        - text is a string
+        - namespace is the FrozenMessage namespace, or "" when nothing is frozen
+
+    Ensures:
+        - returns a dict mapping literal -> occurrence count, across all classes
+        - placeholder tokens contribute nothing
+        - declared removable boilerplate contributes nothing
+
+    Raises:
+        - nothing
+    """
+    stripped = _token_pattern( namespace ).sub( " ", text )
+
+    for _, pattern in _REMOVABLE_BOILERPLATE:
+        stripped = pattern.sub( " ", stripped )
+
+    # ⚠️ RESOLVE OVERLAPS. Counting each pattern independently is what the first
+    # version did, and it silently defeats the very check this function is for:
+    # `lupin-app.ini:1398` ALSO matches FILENAME as `lupin-app.ini`, so the
+    # truncated form is already present in the original's counts and a rewrite
+    # that drops the line number looks like it dropped nothing.
+    #
+    # `resolve_spans` is the module's existing answer — longest span wins, then
+    # taxonomy rank, then leftmost — so each position contributes exactly one
+    # literal, the enclosing one. Verified on the real case: the original now
+    # yields `lupin-app.ini:1398` and NOT `lupin-app.ini`, so the truncation
+    # registers as a literal that was never sent.
+    # Resolved here rather than through `resolve_spans`, which ranks by
+    # `_KIND_RANK` and therefore only knows the substitutable kinds — the
+    # VERIFY kinds and INT raise KeyError there. Same precedence rule, longest
+    # wins then leftmost, applied over both tiers at once.
+    candidates = [ ( m.start(), m.end(), m.group( 0 ) )
+                   for _kind, _tier, pattern in _PATTERNS
+                   for m in pattern.finditer( stripped ) if m.start() != m.end() ]
+
+    candidates += [ ( m.start(), m.end(), m.group( 0 ) )
+                    for _kind, pattern in _verify_patterns()
+                    for m in pattern.finditer( stripped ) if m.start() != m.end() ]
+
+    accepted = []
+    for start, end, text_ in sorted( candidates, key=lambda c: ( -( c[ 1 ] - c[ 0 ] ), c[ 0 ] ) ):
+        if any( start < kept_end and kept_start < end for kept_start, kept_end, _ in accepted ):
+            continue
+        accepted.append( ( start, end, text_ ) )
+
+    counts = {}
+    for _start, _end, text_ in accepted:
+        counts[ text_ ] = counts.get( text_, 0 ) + 1
 
     return counts
 
