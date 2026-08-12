@@ -1,5 +1,20 @@
 # TODO
 
+## ☀️ FIRST THING 2026-08-12 — resume the DM tutor (Rick's word, 2026-08-11 ~23:15)
+
+**Rick read the implementation record and greenlit continuing.** His words: *"this is insanely
+good news… let's return to this tomorrow first thing."* **This is the queued first item; start here
+before anything else on the board.**
+
+He also confirmed the short-band result reads as expected, not as a defect: *"obvious that DMs
+shorter than 80 words compress the least — no surprise there."* So **the `<80` band's 76% is
+understood behaviour**, and the open question below is about whether the tutor should *run* there
+at all, not about why it compresses poorly.
+
+**Pick up with the two rulings still owed** (below), then the small open items.
+
+---
+
 ## 🌙 EOD 2026-08-11 (Mr. Radio 🦉 `c74141d6`, with María 🌸) — DM tutor agent built, two rulings owed by Rick
 
 ### FIRST THING — two things wait on Rick, neither is code
