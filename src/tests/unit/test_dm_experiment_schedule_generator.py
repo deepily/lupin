@@ -147,8 +147,85 @@ def test_twenty_eight_slots( original_slots ):
     assert len( original_slots ) == 28
 
 
-def test_fifty_six_slots_total_after_the_extension( schedule ):
-    assert len( schedule[ "slots" ] ) == 56
+def test_slot_total_is_the_sum_of_the_declared_blocks( schedule ):
+    """
+    112 slots across three declared blocks: 28 original (Tue/Wed 08-04..05) + 28
+    extension (Thu/Fri/Sat 08-06..08) + 56 week-2 (Tue..Sat 08-11..15).
+
+    Asserted per block rather than as one total, because a bare count cannot tell
+    a new block from slots quietly moving between the existing ones.
+    """
+    counts = {}
+    for slot in schedule[ "slots" ]:
+        counts[ slot[ "block" ] ] = counts.get( slot[ "block" ], 0 ) + 1
+
+    assert counts[ "dm-verbosity-two-arm-v1" ]       == 28
+    assert counts[ "dm-verbosity-two-arm-v1-ext" ]   == 28
+    assert counts[ "dm-verbosity-two-arm-v1-week2" ] == 56
+    assert len( schedule[ "slots" ] ) == 112
+
+
+def test_week2_is_balanced_and_mirrored_at_every_clock_hour( schedule ):
+    """
+    The property the analyzer's pairing needs: inside the week-2 block every clock
+    hour in 09-22 carries BOTH arms, and the two arms are equally represented.
+
+    A block can be balanced overall while an individual hour is single-armed —
+    that hour then compares an arm against nothing, so the count and the coverage
+    are checked separately.
+    """
+    week2 = [ s for s in schedule[ "slots" ] if s[ "block" ] == "dm-verbosity-two-arm-v1-week2" ]
+    arms  = [ s[ "arm" ] for s in week2 ]
+
+    assert arms.count( "blind" )     == 28
+    assert arms.count( "rejecting" ) == 28
+
+    by_hour = {}
+    for slot in week2:
+        by_hour.setdefault( slot[ "local_hour" ], set() ).add( slot[ "arm" ] )
+    for hour in range( 9, 23 ):
+        assert by_hour[ hour ] == { "blind", "rejecting" }, f"hour {hour} is single-armed"
+
+
+def test_week2_opens_after_the_instruction_landed( schedule ):
+    """
+    Tuesday 2026-08-11 starts at 15:00 EDT, not 09:00. The instruction landed at
+    14:36 and an already-elapsed hour cannot be armed — slots covering it would
+    claim rows that were collected before the block existed.
+    """
+    tuesday = [ s for s in schedule[ "slots" ]
+                if s[ "block" ] == "dm-verbosity-two-arm-v1-week2" and s[ "date" ] == "2026-08-11" ]
+
+    assert len( tuesday ) == 8
+    assert min( s[ "local_hour" ] for s in tuesday ) == 15
+
+
+def test_week2_ends_where_it_was_declared_to_end( schedule ):
+    """
+    Saturday 2026-08-15 14:00 EDT is the last slot, closing at 15:00. The end is
+    fixed in the generator BEFORE the window runs, which is what keeps a
+    twice-extended pilot from becoming "run until it turns significant".
+    """
+    week2 = [ s for s in schedule[ "slots" ] if s[ "block" ] == "dm-verbosity-two-arm-v1-week2" ]
+    last  = max( week2, key=lambda s: s[ "start_utc" ] )
+
+    assert last[ "date" ]       == "2026-08-15"
+    assert last[ "local_hour" ] == 14
+    assert last[ "end_utc" ]    == "2026-08-15T19:00:00+00:00"
+
+
+def test_earlier_blocks_are_untouched_by_week2( schedule ):
+    """
+    Adding a block must not re-randomize the blocks already collected under. The
+    original Tue/Wed arms are compared against the recorded literal, so a
+    generator change that silently reshuffles history fails here.
+    """
+    original = { s[ "slot_id" ]: s[ "arm" ] for s in schedule[ "slots" ]
+                 if s[ "block" ] == "dm-verbosity-two-arm-v1" }
+
+    for recorded in _ORIGINAL_BLOCK_AT_RULING_TIME:
+        assert original[ recorded[ "slot_id" ] ] == recorded[ "arm" ], \
+               f"{recorded['slot_id']} was re-labelled — rows were already collected under it"
 
 
 def test_fourteen_per_arm_total( original_slots ):

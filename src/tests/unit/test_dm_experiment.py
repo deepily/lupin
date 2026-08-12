@@ -10,6 +10,7 @@ Unit tests for the DM verbosity two-arm pilot (plan items 3/4/5):
 Design: src/rnd/v0.2.0/2026.08.04-dm-verbosity-reduction/2026.08.04-dm-verbosity-pilot-plan.md
 """
 
+import collections
 import json
 import os
 import tempfile
@@ -145,17 +146,70 @@ class TestLoadSchedule( unittest.TestCase ):
         self.assertEqual( sid, "test-sched" )
         self.assertEqual( exp, "two-arm-v1" )
 
-    def test_the_real_committed_schedule_has_56_slots( self ):
+    def test_the_real_committed_schedule_has_112_slots_in_three_blocks( self ):
         """
-        The pilot's actual input (Clayton's item 2). 56 slots since the Thu/Fri/Sat
-        extension (Rick, 2026-08-06): the original 28 Tue/Wed slots plus 28 more.
-        The schedule_id and experiment tag are UNCHANGED so the analyzer keeps
-        pooling both blocks under `two-arm-v1`.
+        The pilot's actual input (Clayton's item 2). 112 slots across three declared
+        windows: the original 28 (Tue/Wed 08-04..05), the 28-slot Thu/Fri/Sat
+        extension (Rick, 2026-08-06), and the 56-slot week-2 block resuming
+        collection 08-11..15 (Rick, 2026-08-11).
+
+        The schedule_id and experiment tag are UNCHANGED, so the analyzer keeps
+        pooling every block under `two-arm-v1` — while each block's own id lets it
+        be reported standalone, which matters because the window was extended
+        twice after interim results had been seen.
         """
         slots, sid, exp = dm_experiment._load_schedule( dm_experiment._DM_SCHEDULE_PATH )
-        self.assertEqual( len( slots ), 56 )
+
+        # Block ids are counted from the FILE, not from the loaded slots: the
+        # loader projects a deliberately narrow public dict (arm, slot_id,
+        # local_hour, start_utc) that carries no block. Rows are therefore
+        # attributed to a block by timestamp, which works only because the three
+        # windows are disjoint.
+        with open( dm_experiment._DM_SCHEDULE_PATH ) as handle:
+            blocks = collections.Counter( s[ "block" ] for s in json.load( handle )[ "slots" ] )
+
+        self.assertEqual( len( slots ), 112 )
+        self.assertEqual( blocks[ "dm-verbosity-two-arm-v1" ],       28 )
+        self.assertEqual( blocks[ "dm-verbosity-two-arm-v1-ext" ],   28 )
+        self.assertEqual( blocks[ "dm-verbosity-two-arm-v1-week2" ], 56 )
         self.assertEqual( sid, "dm-verbosity-two-arm-v1" )
         self.assertEqual( exp, "two-arm-v1" )
+
+    def test_the_committed_schedule_covers_the_week2_window( self ):
+        """
+        Week 2 must actually resolve, else the regenerated file is armed on paper
+        only — the failure mode that left three days of rows untagged. Probes one
+        instant per day, including the Tuesday 15:00 open.
+        """
+        import datetime as _dt
+        policy = dm_experiment.load_default_policy()
+        for label, instant in (
+            ( "Tue 15:30 EDT", _dt.datetime( 2026, 8, 11, 19, 30, tzinfo=_dt.timezone.utc ) ),
+            ( "Wed 09:30 EDT", _dt.datetime( 2026, 8, 12, 13, 30, tzinfo=_dt.timezone.utc ) ),
+            ( "Thu 20:30 EDT", _dt.datetime( 2026, 8, 14,  0, 30, tzinfo=_dt.timezone.utc ) ),
+            ( "Fri 12:30 EDT", _dt.datetime( 2026, 8, 14, 16, 30, tzinfo=_dt.timezone.utc ) ),
+            ( "Sat 13:30 EDT", _dt.datetime( 2026, 8, 15, 17, 30, tzinfo=_dt.timezone.utc ) ),
+        ):
+            with self.subTest( slot=label ):
+                assignment = policy.assignment_at( instant )
+                self.assertIsNotNone( assignment, f"{label} resolved to no slot" )
+                self.assertIn( assignment[ "arm" ], ( "blind", "rejecting" ) )
+
+    def test_the_week2_block_does_not_arm_tuesday_morning( self ):
+        """
+        The instruction landed at 14:36 EDT. 09:00-14:00 that day must stay
+        unarmed — arming an elapsed hour would claim rows collected before the
+        block existed, which is re-labelling history rather than collecting.
+        """
+        import datetime as _dt
+        policy = dm_experiment.load_default_policy()
+        self.assertIsNone( policy.assignment_at( _dt.datetime( 2026, 8, 11, 15, 30, tzinfo=_dt.timezone.utc ) ) )
+
+    def test_the_committed_schedule_is_closed_after_week2_ends( self ):
+        """Week 2 has a FIXED end — Sat 2026-08-15 15:00 EDT. Nothing resolves after it."""
+        import datetime as _dt
+        policy = dm_experiment.load_default_policy()
+        self.assertIsNone( policy.assignment_at( _dt.datetime( 2026, 8, 15, 19, 30, tzinfo=_dt.timezone.utc ) ) )
 
     def test_the_committed_schedule_covers_the_extension_window( self ):
         """
