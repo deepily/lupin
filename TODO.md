@@ -294,15 +294,24 @@ jobs runnable headless on :8000:
   fail-open default is a unit test around the gate/proxy default; the junit shape is a unit test around
   `_parse_non_pytest_stdout` / the `SUITES_SUPPORTING_JUNIT_XML` decision. Exhaust these cheap instruments
   before buying a real-money :8000 regression run.
-- **Offline gate** — `{"detail":"User is offline and no default response provided"}`: a
-  blocking proxy ask fires during headless generation with no fail-open default. Needs a
-  headless/scheduled fail-open default so the tier can complete unattended.
-- **Junit shape** — the presentation runner is a **multi-tier orchestrator** (render-only +
-  Sonnet + …), not one pytest run, and does not emit the single `--junit-xml` file the
-  harness injects (`presentation` is in `SUITES_SUPPORTING_JUNIT_XML`). Either forward junit
-  per-tier and merge, or drop presentation from that set and teach `_parse_non_pytest_stdout`
-  the "Passed: N / Failed: N tiers" summary. Until then even a successful run parses as 0/0/0/0
-  (now correctly labeled NOT EXECUTED by fix #1).
+- **Junit shape — FIXED, commit `99fbca8d`.** Dropped `presentation` from `SUITES_SUPPORTING_JUNIT_XML`
+  (so no `--junit-xml` is injected into the multi-tier orchestrator that ignores it → no more phantom-file
+  FileNotFoundError) and taught `_parse_non_pytest_stdout` the presentation tier summary
+  (`Total: N tiers / Passed: N / Failed: N`), same treatment as the websocket runner. 5 new unit tests;
+  144 test_suite job tests pass. A successful run now parses as tier counts instead of 0/0/0/0.
+- **Offline gate — the fail-open default ALREADY EXISTS (no code owed for the primary gate).** The
+  presentation orchestrator's review gate sets `response_default` so a 503/undeliverable ask resolves to
+  the continue value instead of raising `VoiceGateNoDefaultError` (orchestrator.py ~1844-1847, from the
+  dead-letter fix for job `pr-b1ea3708`), and the notifications gate endpoint honors defaults
+  (`notifications.py:1227` returns the default on the offline path). So the row's "fail-open gate default"
+  is implemented. The 2026-08-05 503 was either pre-that-fix or a residual ungated ask on a path only a
+  LIVE run would surface — and that repro is **entangled with open P1 `0c4e8cfa`** (a monopolize test job
+  suspected of deferring its own presentation child as foreign intake, so no scheduled presentation test
+  may complete on :8000). Cannot pinpoint or verify without a run that is itself blocked.
+
+⇒ **Fix #2 status**: junit reporting FIXED (99fbca8d); fail-open gate already in place; submit-404
+not-reproducible. Residual = a live-run verification blocked on `0c4e8cfa`. Awaiting Cheech on whether
+89bfcc8f closes on this basis or holds for the run.
 
 **Why parked, not attempted now**: reproduction requires a live `:8000` run that spends real
 LLM money (~$0.46 Sonnet tier) and takes ~8 min, plus a scope call on the offline-gate default
