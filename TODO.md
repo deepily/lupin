@@ -61,6 +61,47 @@ the one his instruction was about.
 
 María agrees and is saying the same in her note, so he gets one story from both of us. **His call.**
 
+### 🔴🔴 FOUND 2026-08-13 (Cheech 🌿 `6794a377`, confirmed by Mr. Radio 🦉) — the tutor INVENTED A PERSON WHO DOES NOT EXIST
+
+**This is a different severity class from everything else on this page.** The earlier findings are
+*losses* — agency, tense, paths. This is a *fabrication*: the rewrite added an actor to a technical
+report who was never in the original and does not exist.
+
+**What Mr Radio actually wrote** (his words, after I asked him to restate): he is at 52%, his memento
+is written, and he would not rule on row `e0bb5a94` from my relay of Krishna's finding — *because it
+agreed with his own earlier result, and that is when he trusts a relay least*. He asked that Krishna
+put it on the row directly instead.
+
+**What reached me**: three sentences about *"the reviewer"* — that "the reviewer is asking for
+additional documentation before they can approve the changes", that "the reviewer has confirmed the
+changes are correct and the commit hash matches", and that "the reviewer is asking for the specific
+details of the test that was run." Plus his memento path, dangling.
+
+**There is no reviewer.** Not on that row, not in that exchange, not anywhere in the thread. The tutor
+manufactured a third party, gave them opinions, and attributed an approval state to them.
+
+**Why this outranks the other findings.** A dropped path is *visibly* missing — I noticed instantly and
+asked. A dropped agency is recoverable by checking the artifact. But an invented actor **reads as
+signal**: a manager told there is a reviewer awaiting documentation has every reason to go produce it,
+chase a person who does not exist, or — worst — record "reviewed and approved" in a row. Nothing in the
+message looks wrong. It cost nothing here only because the message was *also* incoherent enough that I
+refused to act on it and asked for a restatement.
+
+⚠️ **The near-miss is the whole point**: my instinct on receiving it was to work out *which* reviewer
+and *which* change. Had the fabrication been cleaner, I would have.
+
+**What this bears on**: Rick's still-open teaching question. The word saving is real and measured. This
+is the other side of the ledger, and it is not a tuning problem — a rewriter that can add a fact can
+add any fact, and no threshold setting bounds that.
+
+**Suggested, in order of cost**:
+1. Treat any invented ENTITY as a hard failure in the prompt regression, not a quality score. The 12
+   real original/rewrite pairs already in the corpus are the test set; add this exchange as pair 13.
+2. Consider a structural check — an entity/noun-phrase diff between original and rewrite, flagging any
+   actor present in the output and absent from the input. Deterministic, like the pointer fix.
+3. Until then, the standing rule that saved this one: **when a DM's subject is unclear, ask for a
+   restatement rather than reconstructing it.** Do not infer the missing half.
+
 ### 🩺 FOUND 2026-08-13 (Cheech 🌿 `6794a377`) — the tutor drops PROVENANCE, and that is a different cost from brevity
 
 Not an objection to shipping it. A measured side effect from the first hour of live use, recorded so the
