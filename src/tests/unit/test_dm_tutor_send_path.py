@@ -47,6 +47,26 @@ _VERBOSE = (
 )
 
 
+# A FAITHFUL rewrite of _VERBOSE — it reuses the sender's own vocabulary, which is what
+# a real rewrite does. Fixtures that invented new capitalised words ("Verdict. One. Two.")
+# are now REFUSED by the fabrication guard, correctly: on the 27 real corpus pairs that
+# guard has a 4% false-positive rate, so it was the FIXTURES that were unrealistic, not
+# the check. Keeping the old ones would have meant loosening a guard to protect a test.
+_FAITHFUL = (
+    "The leak sits in the queue module.\n"
+    "The line shipped last Tuesday.\n"
+    "Tell me whether you read it the same way."
+)
+
+# Six claims, still drawn entirely from _VERBOSE's vocabulary — for the output-gate tests,
+# which need an over-long rewrite that is not ALSO a fabrication.
+_FAITHFUL_LONG = (
+    "The leak sits in the queue module. The line shipped last Tuesday. "
+    "Tell me whether you read it the same way. I am fairly confident about the diagnosis. "
+    "Have a look when you get a moment. It sits in the module."
+)
+
+
 def _cfg( **overrides ):
     """A tutor config dict with explicit values — never read from the live ini."""
     base = { "enabled": True, "trigger_claims": 4, "gate_enabled": False, "gate_max_claims": 4 }
@@ -98,8 +118,8 @@ class TestApplyDmTutor( unittest.TestCase ):
         # Not an equality check: a delivered rewrite also carries the recipient notice
         # (see TestTheRecipientIsTold). What matters here is that the REWRITE is what
         # goes out and the sender's original does not.
-        text, meta = self.apply( _VERBOSE, config=_cfg(), rewrite_fn=lambda b: "Verdict.\nOne.\nTwo." )
-        self.assertIn( "Verdict.\nOne.\nTwo.", text )
+        text, meta = self.apply( _VERBOSE, config=_cfg(), rewrite_fn=lambda b: _FAITHFUL )
+        self.assertIn( _FAITHFUL, text )
         self.assertNotIn( "I spent the morning tracing the leak", text )
         self.assertEqual( meta[ "tutor_outcome" ], "rewritten" )
         self.assertTrue( meta[ "tutor_fired" ] )
@@ -142,7 +162,7 @@ class TestApplyDmTutor( unittest.TestCase ):
         self.assertIn( "vllm down", meta[ "tutor_error" ] )
 
     def test_the_gate_when_ON_discards_an_over_long_rewrite( self ):
-        long_rewrite = "One. Two. Three. Four. Five. Six."
+        long_rewrite = _FAITHFUL_LONG
         text, meta = self.apply( _VERBOSE, config=_cfg( gate_enabled=True, gate_max_claims=4 ),
                                  rewrite_fn=lambda b: long_rewrite )
         self.assertEqual( text, _VERBOSE, "the gate must fall back to the ORIGINAL, not the rewrite" )
@@ -153,7 +173,7 @@ class TestApplyDmTutor( unittest.TestCase ):
         The CONTROL for the gate test. Without it, an always-on gate and a correctly-off
         gate are indistinguishable — both green.
         """
-        long_rewrite = "One. Two. Three. Four. Five. Six."
+        long_rewrite = _FAITHFUL_LONG
         text, meta = self.apply( _VERBOSE, config=_cfg( gate_enabled=False ),
                                  rewrite_fn=lambda b: long_rewrite )
         self.assertIn( long_rewrite, text )          # + the recipient notice
@@ -177,7 +197,7 @@ class TestApplyDmTutor( unittest.TestCase ):
         self.assertTrue( get_dm_tutor_config()[ "enabled" ] )
 
     def test_measurements_are_recorded_in_and_out( self ):
-        _, meta = self.apply( _VERBOSE, config=_cfg(), rewrite_fn=lambda b: "Verdict.\nOne.\nTwo." )
+        _, meta = self.apply( _VERBOSE, config=_cfg(), rewrite_fn=lambda b: _FAITHFUL )
         self.assertEqual( meta[ "tutor_claims_in" ], 6 )
         self.assertEqual( meta[ "tutor_claims_out" ], 3 )
         self.assertGreater( meta[ "tutor_words_in" ], meta[ "tutor_words_out" ] )
@@ -207,10 +227,106 @@ class TestApplyDmTutor( unittest.TestCase ):
             self.apply( _VERBOSE,   config=_cfg(),               rewrite_fn=lambda b: "x." )[ 1 ][ "tutor_outcome" ],
             self.apply( _VERBOSE,   config=_cfg(),               rewrite_fn=lambda b: None )[ 1 ][ "tutor_outcome" ],
             self.apply( _VERBOSE,   config=_cfg( gate_enabled=True, gate_max_claims=1 ),
-                        rewrite_fn=lambda b: "One. Two. Three." )[ 1 ][ "tutor_outcome" ],
+                        rewrite_fn=lambda b: _FAITHFUL )[ 1 ][ "tutor_outcome" ],
         }
         self.assertEqual(
             outcomes, { "disabled", "under_trigger", "rewritten", "model_failed", "gate_rejected" }
+        )
+
+
+class TestFabricationIsRefused( unittest.TestCase ):
+    """
+    ⚠️ A rewrite that INVENTS a fact is refused (Cheech's finding, 2026-08-13).
+
+    THE INCIDENT: the tutor turned a message about a task-store row into three sentences
+    about "the reviewer" wanting documentation. There was no reviewer.
+
+    WHY THIS OUTRANKS THE LOSS DEFECTS, in Cheech's words and I agree: a DROPPED path is
+    visibly missing, so he asked. An INVENTED one READS AS SIGNAL — his first instinct
+    was to work out which reviewer and which change, and only the rest of the message
+    being incoherent stopped him. And it is UNBOUNDED: a rewriter that can add one fact
+    can add any fact, so no trigger value limits it. That is why raising the trigger was
+    withdrawn as the answer.
+    """
+
+    def setUp( self ):
+        from cosa.rest.routers.dm import _apply_dm_tutor, _fabricated_facts
+        self.apply    = _apply_dm_tutor
+        self.detect   = _fabricated_facts
+        self.original = ( "I recreated the container from committed code. "
+                          "I carried the credentials forward. Health is green. "
+                          "The mount landed. The env vars landed." )
+
+    def test_a_fabricated_hex_id_is_refused( self ):
+        found = self.detect( self.original, "Deployed from commit b8d10bd3." )
+        self.assertIn( "hex_id", found )
+
+    def test_a_fabricated_number_is_refused( self ):
+        self.assertIn( "number", self.detect( self.original, "Recreated 42 containers." ) )
+
+    def test_a_fabricated_path_is_refused( self ):
+        self.assertIn( "path", self.detect( self.original, "See src/cosa/rest/routers/dm.py." ) )
+
+    def test_a_fabricated_name_is_refused_ANYWHERE_in_the_sentence( self ):
+        """
+        Position-independence is load-bearing and was a real bug in my first draft: I
+        excluded sentence-initial words to cut false positives, which blinded the check
+        to a fabricated name in the commonest position there is. The control caught it
+        before it shipped, which is the entire reason to write controls.
+        """
+        self.assertIn( "name", self.detect( self.original, "Krishna recreated the container." ) )
+        self.assertIn( "name", self.detect( self.original, "The container was recreated by Krishna." ) )
+
+    def test_a_FAITHFUL_rewrite_is_not_refused( self ):
+        """The control that stops this guard from simply blocking everything."""
+        faithful = "The container was recreated from committed code.\nCredentials carried forward.\nHealth is green."
+        self.assertEqual( self.detect( self.original, faithful ), {} )
+
+    def test_a_faithful_REORDERING_is_not_refused( self ):
+        reordered = "Health is green.\nCredentials were carried forward.\nThe container was recreated."
+        self.assertEqual( self.detect( self.original, reordered ), {} )
+
+    def test_the_sender_original_is_delivered_when_a_rewrite_fabricates( self ):
+        text, meta = self.apply( self.original, config=_cfg(),
+                                 rewrite_fn=lambda b: "Krishna deployed from commit b8d10bd3." )
+        self.assertEqual( text, self.original, "a fabricating rewrite must not reach the recipient" )
+        self.assertEqual( meta[ "tutor_outcome" ], "fabrication_blocked" )
+
+    def test_what_was_fabricated_is_RECORDED_not_just_logged( self ):
+        """
+        "The tutor refused something" is unanswerable from a log line the next reader
+        does not have. The corpus row must say WHAT was invented.
+        """
+        _, meta = self.apply( self.original, config=_cfg(),
+                              rewrite_fn=lambda b: "Krishna deployed from commit b8d10bd3." )
+        self.assertIn( "b8d10bd3", meta[ "tutor_fabricated" ][ "hex_id" ] )
+        self.assertIn( "Krishna",  meta[ "tutor_fabricated" ][ "name" ] )
+
+    def test_a_clean_rewrite_records_no_fabrication( self ):
+        _, meta = self.apply( _VERBOSE, config=_cfg(), rewrite_fn=lambda b: _FAITHFUL )
+        self.assertEqual( meta[ "tutor_outcome" ], "rewritten" )
+        self.assertIsNone( meta[ "tutor_fabricated" ] )
+
+    def test_the_guard_never_raises_into_the_send_path( self ):
+        self.assertEqual( self.detect( None, None ), {} )
+
+    def test_the_KNOWN_LIMIT_is_real_and_documented( self ):
+        """
+        ⚠️ HONESTY TEST. This guard would NOT have caught the incident that prompted it:
+        "the reviewer" is a lowercase common noun, outside every class it checks. Pinning
+        that here stops anyone — including me — from later reading this suite as proof
+        the fabrication problem is solved. It is not; the remaining half needs the
+        fail-first prompt regression, which is not built.
+
+        The alternative was measured and rejected: a content-word novelty rule would have
+        blocked 23 of the 27 real corpus pairs, because paraphrasing is the whole point.
+        """
+        original = "I will not rule on row e0bb5a94 from your relay of Krishna's finding."
+        invented = "The reviewer is asking for additional documentation before approving."
+        self.assertEqual(
+            self.detect( original, invented ), {},
+            "if this now FIRES, the guard has been widened — update the docstring's stated "
+            "limit and re-measure the false-positive rate on the real corpus pairs"
         )
 
 
@@ -285,7 +401,7 @@ class TestThePathSurvives( unittest.TestCase ):
         self.assertEqual( meta[ "tutor_claims_out" ], 3 )
 
     def test_a_body_with_no_pointer_is_untouched( self ):
-        rewrite = "Verdict.\nOne.\nTwo."
+        rewrite = _FAITHFUL
         self.assertEqual( self.restore( "Some prose. More prose.", rewrite ), rewrite )
 
     def test_the_repair_never_costs_the_caller_the_rewrite( self ):
@@ -311,7 +427,7 @@ class TestTheRecipientIsTold( unittest.TestCase ):
         self.notice = DM_TUTOR_NOTICE
 
     def test_a_rewritten_dm_carries_the_notice( self ):
-        text, meta = self.apply( _VERBOSE, config=_cfg(), rewrite_fn=lambda b: "Verdict.\nOne.\nTwo." )
+        text, meta = self.apply( _VERBOSE, config=_cfg(), rewrite_fn=lambda b: _FAITHFUL )
         self.assertEqual( meta[ "tutor_outcome" ], "rewritten" )
         self.assertIn( self.notice, text )
 
@@ -346,12 +462,12 @@ class TestTheRecipientIsTold( unittest.TestCase ):
         from cosa.agents.dm_tutor.sentences import count_sentences
         self.assertEqual( count_sentences( self.notice ), 0 )
 
-        text, _ = self.apply( _VERBOSE, config=_cfg(), rewrite_fn=lambda b: "Verdict.\nOne.\nTwo." )
+        text, _ = self.apply( _VERBOSE, config=_cfg(), rewrite_fn=lambda b: _FAITHFUL )
         self.assertEqual( count_sentences( text ), 3, "the notice inflated the delivered claim count" )
 
     def test_a_tutored_message_resent_does_not_re_trigger( self ):
         """The end-to-end form of the trap: feeding a delivered message back in must not fire."""
-        text, _ = self.apply( _VERBOSE, config=_cfg(), rewrite_fn=lambda b: "Verdict.\nOne.\nTwo." )
+        text, _ = self.apply( _VERBOSE, config=_cfg(), rewrite_fn=lambda b: _FAITHFUL )
         _, meta = self.apply( text, config=_cfg(), rewrite_fn=lambda b: "SHOULD NOT FIRE" )
         self.assertEqual( meta[ "tutor_outcome" ], "under_trigger" )
 
@@ -464,16 +580,16 @@ class TestTheRewriteIsWhatGetsDelivered( _SendHarness ):
     """
 
     def test_the_recipient_receives_the_distilled_text( self ):
-        self._send( _VERBOSE, _cfg(), lambda b: "Verdict.\nOne.\nTwo." )
+        self._send( _VERBOSE, _cfg(), lambda b: _FAITHFUL )
         pushed = self.queue.push_notification.call_args.kwargs[ "message" ]
-        self.assertIn( "Verdict.", pushed )
+        self.assertIn( "The leak sits in the queue module.", pushed )
         self.assertNotIn( "I spent the morning tracing the leak", pushed )
 
     def test_the_stored_notification_carries_the_distilled_text_too( self ):
         """The recipient's history must agree with what they were pushed."""
-        self._send( _VERBOSE, _cfg(), lambda b: "Verdict.\nOne.\nTwo." )
+        self._send( _VERBOSE, _cfg(), lambda b: _FAITHFUL )
         stored = self.persist.call_args.kwargs[ "message" ]
-        self.assertIn( "Verdict.", stored )
+        self.assertIn( "The leak sits in the queue module.", stored )
         self.assertNotIn( "I spent the morning tracing the leak", stored )
 
     def test_a_compliant_dm_reaches_the_recipient_untouched( self ):
@@ -494,7 +610,7 @@ class TestTheRewriteIsWhatGetsDelivered( _SendHarness ):
         leaks the height by arithmetic, and senders then write to the number instead of
         to the shape.
         """
-        self._send( _VERBOSE, _cfg( trigger_claims=4 ), lambda b: "Verdict.\nOne.\nTwo." )
+        self._send( _VERBOSE, _cfg( trigger_claims=4 ), lambda b: _FAITHFUL )
         pushed = self.queue.push_notification.call_args.kwargs[ "message" ].lower()
         for leak in ( "4 claims", "four claims", "trigger", "over the limit", "too long" ):
             self.assertNotIn( leak, pushed )
@@ -509,10 +625,10 @@ class TestTheCorpusRowTellsTheTruth( _SendHarness ):
         built to measure it: the delivered text cannot recover what the sender wrote,
         and the submitted text cannot show what was sent.
         """
-        self._send( _VERBOSE, _cfg(), lambda b: "Verdict.\nOne.\nTwo." )
+        self._send( _VERBOSE, _cfg(), lambda b: _FAITHFUL )
         row = self._row()
         self.assertIn( "I spent the morning tracing the leak", row[ "body" ] )
-        self.assertIn( "Verdict.", row[ "delivered_body" ] )
+        self.assertIn( "The leak sits in the queue module.", row[ "delivered_body" ] )
         self.assertTrue( row[ "body_was_rewritten" ] )
         self.assertGreater( row[ "words" ], row[ "delivered_words" ] )
 
@@ -529,7 +645,7 @@ class TestTheCorpusRowTellsTheTruth( _SendHarness ):
         analysis. Re-pointing them at the delivered text would silently change what every
         historical query means without changing its name.
         """
-        self._send( _VERBOSE, _cfg(), lambda b: "Verdict.\nOne.\nTwo." )
+        self._send( _VERBOSE, _cfg(), lambda b: _FAITHFUL )
         row = self._row()
         self.assertEqual( row[ "body" ], _VERBOSE )
         self.assertEqual( row[ "words" ], self.dm.dm_word_count( _VERBOSE ) )
@@ -572,7 +688,7 @@ class TestTheCorpusRowTellsTheTruth( _SendHarness ):
         ):
             with self.subTest( case=label ):
                 if os.path.exists( self.corpus_path ): os.remove( self.corpus_path )
-                self._send( text, cfg, lambda b: "Verdict.\nOne.\nTwo." )
+                self._send( text, cfg, lambda b: _FAITHFUL )
                 self.assertIn( "tutor_outcome", self._row() )
 
 

@@ -786,6 +786,90 @@ def _restore_dropped_pointers( original, rewritten ):
         return rewritten
 
 
+_FAB_NUM  = re.compile( r"\b\d[\d,.]*\b" )
+_FAB_HEX  = re.compile( r"\b[0-9a-f]{7,40}\b" )
+_FAB_PATH = re.compile( r"(?:[A-Za-z][\w+.-]*://\S+|(?:[\w.@%+-]+/)+[\w.@%+-]*)" )
+_FAB_CAP  = re.compile( r"\b([A-Z][A-Za-z'’-]{2,})\b" )
+_FAB_WORD = re.compile( r"[A-Za-z'’-]+" )
+
+# Capitalised words that are NEVER names, however novel. A rewrite that opens a sentence
+# with "The" has not invented an entity — it has started a sentence. Without this the
+# guard refused a rewrite for fabricating the word "The", which is a false positive so
+# cheap to remove that leaving it in would have cost real compression for no safety.
+_FAB_NOT_NAMES = frozenset(
+    "the a an and but or nor so then than that this these those there here it its they "
+    "them their we our us you your i my me he she his her him if when while where what "
+    "which who whom whose why how all any both each every few many more most other some "
+    "such only same too very not no now also for from with without into onto over under "
+    "after before during since until about against between because as at by in on to of "
+    "is are was were be been being do does did done have has had will would can could "
+    "should may might must shall let please note yes".split()
+)
+
+
+def _fabricated_facts( original, rewritten ):
+    """
+    Checkable facts the rewrite asserts that the original never did. Empty = clean.
+
+    ⚠️ THE FAILURE THIS BOUNDS is a different class from losing something. On
+    2026-08-13 the tutor turned a message about a task-store row into three sentences
+    about "the reviewer" wanting documentation. There was no reviewer. Cheech put the
+    point better than I did: a DROPPED path is visibly missing, so he asked — an
+    INVENTED one READS AS SIGNAL, and his first instinct was to work out which reviewer
+    and which change. Only the rest of the message being incoherent stopped him.
+
+    And it is UNBOUNDED: a rewriter that can add one fact can add any fact. No trigger
+    value limits that, which is why raising the trigger was the wrong answer — it
+    changes how often the dice are rolled, not what happens when they land wrong.
+
+    Requires:
+        - original and rewritten are strings
+
+    Ensures:
+        - returns { class: [values] } for numbers, hex ids, paths and capitalised names
+          present in `rewritten` but NOT in `original`
+        - NAMES are matched POSITION-INDEPENDENTLY against every word of the original,
+          case-folded. An earlier version excluded sentence-initial words to cut false
+          positives and thereby missed a fabricated name in the commonest position of
+          all — the start of a sentence. The control caught that before it shipped.
+        - never raises
+
+    MEASURED against the 27 real rewrite pairs in the live corpus, not assumed:
+        · fires on a fabricated sha, number, path and name (controls)
+        · silent on a faithful rewrite and on a faithful reordering
+        · blocks 1 of 27 real pairs (4%) — and that one replaced "Force-recreated" with
+          "Deployed", a meaning change worth refusing anyway
+
+    KNOWN LIMIT, stated because glossing it would be the same defect this guards
+    against: it cannot see a fabricated COMMON NOUN. "the reviewer" is lowercase and
+    passes untouched. A content-word novelty rule was measured as the alternative and
+    REJECTED on the same corpus — it would have blocked 23 of 27, because paraphrasing
+    is the entire point of the tutor. That class needs the fail-first prompt regression,
+    which is not built.
+    """
+    try:
+        def classes( text ):
+            return {
+                "number" : set( _FAB_NUM.findall( text ) ),
+                "hex_id" : set( _FAB_HEX.findall( text ) ),
+                "path"   : set( _FAB_PATH.findall( text ) ),
+            }
+        before, after = classes( original ), classes( rewritten )
+        found = { k: sorted( after[ k ] - before[ k ] ) for k in before if after[ k ] - before[ k ] }
+
+        original_words = { w.lower() for w in _FAB_WORD.findall( original ) }
+        new_names      = sorted( { c for c in _FAB_CAP.findall( rewritten )
+                                   if c.lower() not in original_words
+                                   and c.lower() not in _FAB_NOT_NAMES } )
+        if new_names: found[ "name" ] = new_names
+        return found
+    except Exception:
+        # A guard that raises must not take the send path with it. An unreadable
+        # comparison means "nothing proven fabricated", which leaves the tutor exactly
+        # as safe as it was before this check existed.
+        return {}
+
+
 def _count_claims( body_text ):
     """
     The CANONICAL sentence count — the claim counter (ruling 4, 2026-08-12).
@@ -844,6 +928,10 @@ def _apply_dm_tutor( body_text, config=None, rewrite_fn=None ):
         "tutor_words_in"       : None,
         "tutor_words_out"      : None,
         "tutor_error"          : None,
+        # What the rewrite invented, when it was refused for inventing. Recorded rather
+        # than merely logged: "the tutor refused something" is not answerable from a
+        # log line the next reader does not have.
+        "tutor_fabricated"     : None,
     }
 
     try:
@@ -875,6 +963,17 @@ def _apply_dm_tutor( body_text, config=None, rewrite_fn=None ):
         # restored lines are structure, so they cannot change the claim count, but
         # measuring first would record a body that is not the one delivered.
         rewritten = _restore_dropped_pointers( body_text, rewritten )
+
+        # FABRICATION CHECK — refuse a rewrite that asserts a fact the sender never did.
+        # Runs AFTER the pointer restore so a path we put back is not itself read as
+        # fabricated, and BEFORE the gate so a fabricating rewrite is refused on the
+        # stronger ground of the two.
+        fabricated = _fabricated_facts( body_text, rewritten )
+        if fabricated:
+            meta[ "tutor_outcome" ]     = "fabrication_blocked"
+            meta[ "tutor_fabricated" ]  = fabricated
+            print( f"[dm-tutor] REFUSED a rewrite that invented facts: {fabricated}" )
+            return body_text, meta
 
         claims_out                 = _count_claims( rewritten )
         meta[ "tutor_claims_out" ] = claims_out
