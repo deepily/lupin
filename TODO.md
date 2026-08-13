@@ -47,6 +47,24 @@ on them BEFORE touching the prompt** — otherwise a prompt edit cannot be shown
 so a reader knows the wording is not the sender's before quoting it back at them. That closes the
 *provenance* gap, not the *fidelity* one above.
 
+### 📏 PRACTICE NOTE 2026-08-13 — a HELD row must be PARKED, not left queued
+
+Found while handing my board over: `5bc22180` carried **"HELD by Rick 2026-08-05"** in its own
+title and was still sitting in the **queued** count. So it read, every time anyone looked, as
+available work nobody was picking up — when the human had already ruled it not-now.
+
+**Why it matters beyond one row**: today's directive was to run the board down from 70, and a
+burn-down number that includes rows nobody is allowed to work is a fiction. The store already has
+the right shape for this — `parked` requires a `park_reason` quoting the row's own decisive
+sentence plus a `next_chase_ts`, so the hold is bounded and self-expiring rather than silent.
+
+**Scope, measured rather than assumed**: I checked the queued lupin board and found **this one
+row**, not a pattern. Recording it as practice, not as a systemic finding — the honest version is
+"one row was mis-statused", and it is now parked with a chase at 2026-08-20.
+
+**The rule**: when a human holds a row, park it that day. Leaving it queued costs nothing visible
+and quietly corrupts every count taken afterwards.
+
 ### ❓ OPEN FOR RICK — the spoken TTS rider still names a word count
 
 His DM instruction was *"three sentences and a path with no word counts to be found anywhere."* The DM
@@ -310,8 +328,23 @@ jobs runnable headless on :8000:
   may complete on :8000). Cannot pinpoint or verify without a run that is itself blocked.
 
 ⇒ **Fix #2 status**: junit reporting FIXED (99fbca8d); fail-open gate already in place; submit-404
-not-reproducible. Residual = a live-run verification blocked on `0c4e8cfa`. Awaiting Cheech on whether
-89bfcc8f closes on this basis or holds for the run.
+not-reproducible. `0c4e8cfa` is NOT a blocker (fixed 08-04 by 587e399a, per Cheech). Cheech authorized a
+minimal live verification.
+
+⭐ **LIVE :8000 VERIFICATION RUN SUBMITTED — RESULT TO COLLECT.** job_id
+`ts-3caa2ce9::50c73ba7-36dd-4eaf-a7e2-63256252c84f` (test_types=presentation, render+Sonnet only,
+auto_fix_on_failure=False, scheduled 2026-08-13T11:08:05-04:00, ~8min ~$0.46). Verifies the headless
+scheduled path completes with real tier counts and NO residual 503. **Collect it**: poll
+`/api/get-queue/done` on :8000 + read container logs for a "User is offline and no default response
+provided" 503; RECORD THE OUTCOME EITHER WAY (a clean no-503 run is the proof as much as a 503). Submitted
+under a re-spin checkpoint; Sam re-spun right after. Row 89bfcc8f amended with the same job_id.
+
+**Shuffle sweep FINAL (3 seeds, both roots):** seed 1337 (clean) = 6 reds; seed 202 (clean, box quiet —
+only DMs + the urllib submit ran, no concurrent pytest) = **3 reds = exactly the 3 genuine isolation-reds**;
+seed 101 = DISCARDED (contaminated — I ran concurrent pytest during it; its ~126 extra lancedb/normalizer/
+solution_snapshot reds appear in NO other seed). Cross-seed: the 3 isolation-reds are consistent (live
+branch reds); polluter #4 (bfe TestResubmit ×2 + config canary) is order-dependent (in 1337, absent in
+202) — confirmed live, correctly filed above. Polluters #2/#3 are GONE from every seed (fixes hold).
 
 **Why parked, not attempted now**: reproduction requires a live `:8000` run that spends real
 LLM money (~$0.46 Sonnet tier) and takes ~8 min, plus a scope call on the offline-gate default
