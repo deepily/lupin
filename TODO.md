@@ -1,5 +1,52 @@
 # TODO
 
+## 🚚 LIVE 2026-08-13 (Mr. Radio 🦉 `a31a20c5`) — the tutor is in use; two questions land here
+
+**Commit `b8d10bd3`, force-recreated onto `:7999` at 14:14:10 UTC (boot #56).** Rick's order:
+*"implement it fully and make sure it's actually in use."* Trigger lowered to **>4 claims**, two-arm pilot
+**suspended**, every corpus row **provenance-stamped**, corpus **moved out of the repo** to
+`<projects-data>/lupin/dm-corpus/`. Unit suite 13,562 + 386 deploy green.
+
+**Proven live, not asserted** — first real DM after the recreate (row 1 of the new corpus):
+`tutor_fired=True · outcome=rewritten · claims 5→3 · words 93→26 · git_sha=b8d10bd3 · port=7999`,
+and `effective_arm=None` confirming the pilot no longer assigns arms.
+
+Both items below are **for Rick's word, not owed work** — his 2026-08-13 broadcast prohibits adding board
+items today, so they are recorded here rather than minted as rows.
+
+### ❓ OPEN FOR RICK — the spoken TTS rider still names a word count
+
+His DM instruction was *"three sentences and a path with no word counts to be found anywhere."* The DM
+composition contract now matches that verbatim. **The spoken TTS rider still says "≤3 sentences AND ≤60
+words", and I deliberately did not strip it.**
+
+That number is not a style rule — it is derived from the server's hard ~500-character spoken cap
+(`spoken_word_budget()` in `hook_common.py`, at a deliberately pessimistic 8.3 chars/word). Overshooting
+the cap **rejects the whole call silently**, which reads as the assistant going mute. Removing the only
+countable form of it trades a visible instruction for an invisible failure, on a different channel from
+the one his instruction was about.
+
+María agrees and is saying the same in her note, so he gets one story from both of us. **His call.**
+
+### 🔎 FOUND 2026-08-13 (Mr. Radio + Cheech 🌿) — two thresholds collide at 150 words
+
+`dm qualitative word limit = 150` (above it the judge skips directness+tone) and `dm experiment reject
+threshold words = 150` (the rejecting arm refuses over it) are **the same number**. So the rejecting arm
+only ever admitted rows guaranteed to get a qualitative grade, while blind let longer ones through and
+their `overall` fell back to length-alone.
+
+**Measured by Cheech**: split on 150 words, both arms populate directness at *exactly* 96.5% under the
+ceiling; at or over it blind is 1.4% and rejecting has 5 such rows total. So there is **no arm effect on
+the judge** — the gate selects the population and the ceiling does the rest. Not a defect: it is behaving
+as designed. What survives is that **`overall` is not comparable across arms** (rejecting's set is 99.4%
+under the ceiling, blind's 55.5% — different formulas on different populations).
+
+`judge.py:179` already states that two related numbers must not coincide, for the same class of reason.
+Moot while the pilot is suspended, but it must be settled before any arm comparison is published or the
+pilot is ever resumed.
+
+---
+
 ## ⚖️ RULED 2026-08-12 (Rick) — ship the tutor FLEET-WIDE; the teaching question stays OPEN
 
 **The ruling**: *"Let's ship the tutor fleet-wide and leave teaching open."* Take the word saving now
