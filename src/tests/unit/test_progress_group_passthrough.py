@@ -56,13 +56,26 @@ def assert_valid_pg_id( value ):
 class TestPodcastGeneratorVoiceIoPassthrough:
     """Verify podcast_generator/voice_io.notify() forwards progress_group_id."""
 
+    # voice_io.notify's dispatch gate is `_force_cli_mode or _cosa_interface is None`
+    # — it does NOT read `_voice_available`. The core `_cosa_interface` global is
+    # None by default and is only set to the podcast interface as a side-effect of
+    # the FIRST import of podcast_generator.voice_io in the process. Once any earlier
+    # test has imported that module, this test's own import is a no-op and the gate
+    # sees whatever `_cosa_interface` was left at (None) — so notify prints and never
+    # reaches the dispatcher. These tests therefore pin BOTH gate inputs explicitly
+    # (context-managed, auto-restored) so the outcome does not depend on collection
+    # order (bug 69fb89cd, polluter #2 — an order-dependent victim, not a dirty
+    # teardown elsewhere).
+
     @pytest.mark.asyncio
     async def test_progress_group_id_passed_to_core( self ):
         """progress_group_id reaches the AsyncNotificationRequest via dispatcher."""
-        with patch( "cosa.agents.utils.voice_io._voice_available", True ), \
+        from cosa.agents.podcast_generator import voice_io
+        from cosa.agents.podcast_generator import cosa_interface as podcast_cosa_interface
+        with patch( "cosa.agents.utils.voice_io._cosa_interface", podcast_cosa_interface ), \
+             patch( "cosa.agents.utils.voice_io._force_cli_mode", False ), \
              patch( "cosa.agents.utils.agent_notification_dispatcher._notify_user_async" ) as mock_send:
 
-            from cosa.agents.podcast_generator import voice_io
             await voice_io.notify(
                 "Test message",
                 priority          = "low",
@@ -76,10 +89,12 @@ class TestPodcastGeneratorVoiceIoPassthrough:
     @pytest.mark.asyncio
     async def test_progress_group_id_none_by_default( self ):
         """progress_group_id defaults to None when not provided."""
-        with patch( "cosa.agents.utils.voice_io._voice_available", True ), \
+        from cosa.agents.podcast_generator import voice_io
+        from cosa.agents.podcast_generator import cosa_interface as podcast_cosa_interface
+        with patch( "cosa.agents.utils.voice_io._cosa_interface", podcast_cosa_interface ), \
+             patch( "cosa.agents.utils.voice_io._force_cli_mode", False ), \
              patch( "cosa.agents.utils.agent_notification_dispatcher._notify_user_async" ) as mock_send:
 
-            from cosa.agents.podcast_generator import voice_io
             await voice_io.notify( "No group" )
 
             request = mock_send.call_args[ 0 ][ 0 ]
