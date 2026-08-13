@@ -230,10 +230,18 @@ class PresentationRenderOnlySmokeTest( InteractiveSmokeTest ):
             - self._yaml_path is resolved (set in pre_run_hook)
 
         Ensures:
-            - Returns payload with render_only=True and YAML source path
+            - Returns payload with render_only=True and a REPO-RELATIVE source path
         """
+        # The submit endpoint treats a leading-"/" source_path as repo-relative
+        # and prepends project_root. _yaml_path is ABSOLUTE ({LUPIN_ROOT}/src/...),
+        # so sending it verbatim double-roots ({root}{root}/src/...) → 404. Strip
+        # the project root to a repo-relative path (keeps the leading "/").
+        project_root = os.environ.get( "LUPIN_ROOT", "/var/lupin" )
+        source_path  = self._yaml_path
+        if source_path.startswith( project_root ):
+            source_path = source_path[ len( project_root ): ]
         return {
-            "source_path" : self._yaml_path,
+            "source_path" : source_path,
             "render_only" : True,
             "dry_run"     : False,
         }

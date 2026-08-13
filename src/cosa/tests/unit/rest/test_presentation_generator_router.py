@@ -158,6 +158,24 @@ class TestSubmitPresentationJob( unittest.TestCase ):
         self.assertEqual( ctx.exception.status_code, 404 )
         self.assertIn( "Source file not found", ctx.exception.detail )
 
+    def test_absolute_path_under_root_400( self ):
+        """Ensures: an absolute source_path under the project root is rejected
+        LOUDLY with 400 (not silently double-rooted into a misleading 404)."""
+        with self.assertRaises( HTTPException ) as ctx:
+            # cu.get_project_root() is mocked to "/proj" in setUp; a caller sending
+            # "/proj/src/..." (an absolute FS path, not a repo-relative "/src/...")
+            # would otherwise double-root to "/proj/proj/src/..." → bogus 404.
+            self._call( PresentationSubmitRequest( source_path="/proj/src/tests/fixtures/x.yaml" ) )
+        self.assertEqual( ctx.exception.status_code, 400 )
+        self.assertIn( "must be repo-relative", ctx.exception.detail )
+
+    def test_source_path_equals_root_400( self ):
+        """Ensures: source_path exactly equal to the project root is rejected 400."""
+        with self.assertRaises( HTTPException ) as ctx:
+            self._call( PresentationSubmitRequest( source_path="/proj" ) )
+        self.assertEqual( ctx.exception.status_code, 400 )
+        self.assertIn( "must be repo-relative", ctx.exception.detail )
+
     def test_render_only_requested_non_yaml_400( self ):
         """Ensures: render_only=True on a non-YAML source raises 400."""
         with patch( "cosa.rest.routers.presentation_generator.validate_source_path",

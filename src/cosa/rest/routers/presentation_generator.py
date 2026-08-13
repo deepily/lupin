@@ -151,6 +151,19 @@ async def submit_presentation_job(
     if not source_path:
         raise HTTPException( status_code=400, detail="source_path cannot be empty" )
 
+    # Contract: source_path is REPO-RELATIVE (e.g. "/io/..." or "/src/...") and is
+    # prepended with project_root below. An absolute filesystem path under the
+    # project root (e.g. "/var/lupin/src/...") would silently double-root into a
+    # misleading "Source file not found" 404. Reject it LOUDLY instead so a caller
+    # sending an absolute path learns the real problem.
+    project_root = cu.get_project_root()
+    if source_path == project_root or source_path.startswith( project_root + "/" ):
+        raise HTTPException(
+            status_code=400,
+            detail=f"source_path must be repo-relative (e.g. /io/... or /src/...), "
+                   f"not an absolute path under the project root: {source_path}"
+        )
+
     # Security: validate path stays within project root
     if not validate_source_path( source_path ):
         raise HTTPException(
