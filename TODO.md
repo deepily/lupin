@@ -269,7 +269,7 @@ that touches the proxy path. Verify container freshness first, then decide.
 
 ---
 
-## 📥 FINDING 2026-08-13 (Sam 🎙️ `00aa8745`) — unit-suite polluter #2 FIXED (row 69fb89cd); shuffle sweep in flight
+## 📥 FINDING 2026-08-13 (Sam 🎙️ `00aa8745`) — unit-suite polluter #2 FIXED (row 69fb89cd); polluter #3 (terraform) identified + handed to Cheech; 3 unrelated live branch reds filed
 
 **Polluter #2 root cause + fix — commit `12e062f0`.** The two
 `test_progress_group_passthrough.py::TestPodcastGeneratorVoiceIoPassthrough` victims were
@@ -284,10 +284,34 @@ re-configures). Every test that touches the global restores it faithfully — th
 fix. **Fix**: pin both gate inputs as auto-restored `patch()` context managers. **Control-proven**
 (Cheech's condition): breaking notify's real dispatch turns BOTH pinned tests red — not a false green.
 
-**Still open — the shuffle sweep** (running as I write this): Tiberius saw `bfe/test_job::TestResubmit`
-and `presentation::test_narrative_outline_elaboration` redden under a seeded shuffle. My fix does not
-touch those. A 3-seed (1337/101/202) both-roots file-order shuffle at HEAD+fix is in flight to answer
-whether anything else moves with order. **Results will be appended here** — not filed as a new row.
+**Baseline both-roots run at HEAD+fix**: 4 failed / 22441 passed — and `progress_group` is GONE, so
+polluter #2 is confirmed fixed in a FULL run. The 4 split cleanly:
+
+- **`test_terraform_invariants::test_terraform_provider_cache_is_present` — ORDER-DEPENDENT (polluter
+  #3), mechanism identified, NOT yet fixed.** `test_envs_test_passes_terraform_validate` (a sibling
+  test — terraform IS installed here, so it is not skipped) runs `terraform init` with
+  `TF_PLUGIN_CACHE_DIR=PROVIDER_CACHE`, which POPULATES `src/terraform/envs/test/.terraform/providers`
+  (over the network on a cold cache). `test_terraform_provider_cache_is_present` merely asserts that
+  dir exists. On a cold tree the presence test FAILS if ordered before the init test; the cache then
+  persists on disk (gitignored, never cleaned), so the red **self-heals after one run and won't
+  reproduce without a fresh cold worktree** — exactly the "moves between runs" the test's own docstring
+  warns about. **Fix is a design call** (a session-scoped autouse fixture that runs the init once
+  before any terraform test, so both see a populated cache regardless of order), not a teardown tweak —
+  handed to Cheech per the 2-3-round timebox rather than chased further.
+
+- **THREE LIVE REDS ON THIS BRANCH — not pollution, not order-dependent, not row 69fb.** These FAIL in
+  ISOLATION at branch HEAD `3fc21826`, so the branch is genuinely red on them independent of anyone's
+  collection order:
+  - `test_gate_reachability_census::test_allowlist_has_no_stale_entries` — `find_stale_allowlist_entries`
+    returns non-empty; the gate allowlist ledger has stale entries needing an update.
+  - `test_gate_reachability_census::test_detector_reports_the_witness_when_not_allowlisted`
+  - `presentation_generator/prompts/test_narrative_outline_elaboration::TestElaborationParser::test_parse_full_validation`
+    — a real parser output mismatch on `out[1]["presenter_notes"]`.
+  These deserve their own owner; they are pre-existing branch failures surfaced by this sweep, filed
+  here per the no-new-rows order.
+
+The 3-seed shuffle sweep is still running for completeness, but the cache-persistence self-heal means
+it will likely show terraform GREEN now (cache already populated) — confirming the cold-start nature.
 
 ---
 
