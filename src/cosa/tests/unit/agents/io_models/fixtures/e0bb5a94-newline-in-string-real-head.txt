@@ -1,0 +1,25 @@
+{
+  "title": "Verbosity as a Defect: Instrumenting the Channel Nobody Was Reading",
+  "segments": [
+    {
+      "speaker": "Maria",
+      "role": "curious",
+      "text": "Mr. Radio, I want to start with the strangest receipt I've ever seen in a methods write-up. *[pause]* There's a slider in this system's interface that plays only a *fraction* of any spoken message. And the operator had it parked at twelve and a half percent.",
+      "topic_reference": "The TTS slider receipt"
+    },
+    {
+      "speaker": "Mr. Radio",
+      "role": "expert",
+      "text": "*[chuckles]* It's the best exhibit in the whole document, and here's the key thing — the direction of improvement is backwards from what you'd guess. After the brevity mandate landed, he moved it *up*, to twenty-five percent. Raising it is the recovery signal. Think of it as a dose-reduction dial in a clinical setting: it's a control built to protect the patient from the treatment, so the dial's setting is a readout of the treatment's toxicity. At an eighth of a bloated message you're sampling noise and praying the verdict is in the sample. At a quarter of a disciplined one, the verdict is already in sentence one.",
+      "topic_reference": "The TTS slider receipt"
+    },
+    {
+      "speaker": "Maria",
+      "role": "curious",
+      "text": "But here's what I'm wondering — is that just a nice story someone told after the fact? Because the headline number they lead with is eighty percent coordination overhead dropping to fifty. That's a huge effect size and I have *no idea* what design produced it.",
+      "topic_reference": "The 80→50 percent figure and its evidentiary status"
+    },
+    {
+      "speaker": "Mr. Radio",
+      "role": "expert",
+      "text": "*[thoughtful]* And to their credit, they flag it themselves. Those are daily operator readings of a command-line stats command, taken over roughly two months, bracketing the intervention. So methodologically: pre-post observational, no control condition, no 

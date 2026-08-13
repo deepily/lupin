@@ -32,6 +32,50 @@ logger = logging.getLogger( __name__ )
 # trailing prose that usually defeats recovery (P0 4317efd1).
 _RAW_BODY_LOG_CAP = 4000
 
+# Control chars that strict json.loads rejects inside string values but which are
+# benign whitespace. The recovery gate below relaxes ONLY these — never structure,
+# never any other control char — so a completion that is well-formed apart from an
+# unescaped newline in a string is recovered, while genuinely-corrupt output still
+# fails loudly (bug e0bb5a94 defect A: the script model emitted a literal newline
+# inside a "text" dialogue value, and the whole script read as unrecoverable).
+_BENIGN_WHITESPACE_CTRLS = frozenset( "\n\r\t" )
+
+
+def _loads_whitespace_tolerant( text: str ) -> Any:
+    """
+    json.loads(text) with a NARROW recovery gate.
+
+    Strict parsing first. If it fails ONLY because of unescaped benign whitespace
+    control chars (\\n \\r \\t) inside string values, retry with strict=False and
+    log at WARNING which chars were repaired (so a path carrying real volume is
+    countable, not a whisper). Any OTHER control char, or any structural error,
+    still raises — widening what a check accepts is the same disease as defect B,
+    trading a loud failure for a silent wrong answer.
+
+    Requires:
+        - text is a string
+
+    Ensures:
+        - returns the parsed JSON value on success
+        - raises json.JSONDecodeError if strict fails for any reason other than
+          benign-whitespace control chars, or if strict=False still fails
+    """
+    try:
+        return json.loads( text )
+    except json.JSONDecodeError:
+        offending = { c for c in text if ord( c ) < 0x20 and c not in _BENIGN_WHITESPACE_CTRLS }
+        if offending:
+            raise                                     # a non-whitespace control char → stay loud
+        value    = json.loads( text, strict=False )   # may still raise on a structural error
+        repaired = sorted( c for c in set( text ) if c in _BENIGN_WHITESPACE_CTRLS )
+        logger.warning(
+            "[json-recovery] recovered a completion whose ONLY control-char defect was "
+            "unescaped whitespace %s inside string values (strict=False gate, bug "
+            "e0bb5a94 defect A); a path carrying real volume here is now countable.",
+            [ repr( c ) for c in repaired ],
+        )
+        return value
+
 
 def extract_json_object( text: str ) -> Optional[ str ]:
     """
@@ -103,14 +147,14 @@ def recover_json_object( response_content: str ) -> Optional[ Any ]:
     content = content.strip()
 
     try:
-        return json.loads( content )
+        return _loads_whitespace_tolerant( content )
     except json.JSONDecodeError:
         pass
 
     extracted = extract_json_object( content )
     if extracted is not None:
         try:
-            return json.loads( extracted )
+            return _loads_whitespace_tolerant( extracted )
         except json.JSONDecodeError:
             pass
 
