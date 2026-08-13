@@ -133,6 +133,35 @@ def pytest_addoption( parser ):
         default = None,
         help    = "Filter to a single scenario ID (consumed by tests' own argparse)"
     )
+    # Flags below are defined by individual live-smoke tests' OWN argparse and
+    # passed through by run-presentation-regression.sh. pytest must ACCEPT them
+    # (else "unrecognized arguments" aborts the tier before collection); the
+    # tests still read the values from sys.argv themselves. Registered here to
+    # kill the drift class where a runner flag has no matching pytest option.
+    parser.addoption(
+        "--content-model",
+        action  = "store",
+        default = None,
+        help    = "Override presentation content model (consumed by "
+                  "test_presentation_live_smoke's own argparse)"
+    )
+    parser.addoption(
+        "--lead-model",
+        action  = "store",
+        default = None,
+        help    = "Override deep-research lead model (consumed by "
+                  "test_research_to_presentation_live_smoke's own argparse)"
+    )
+    # NOTE: --timeout is intentionally NOT registered here — pytest already
+    # provides it (pytest-timeout plugin), so re-adding it raises an argparse
+    # option conflict. The runner's --timeout is accepted by that plugin.
+    parser.addoption(
+        "--yaml-path",
+        action  = "store",
+        default = None,
+        help    = "Explicit YAML source path for render-only (consumed by "
+                  "test_presentation_render_only_smoke's own argparse)"
+    )
 
 
 @pytest.fixture( scope="module", autouse=True )
