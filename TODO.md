@@ -52,10 +52,15 @@ per-suite notify, overall banner, report table, and abstract.
 per Rick's 2026-08-13 no-new-rows order). Make the regression's internal presentation
 jobs runnable headless on :8000:
 
-- **Submit 404 — RESOLVED (stale container, not a code bug).** 2026-08-13: `preflight-test-container.sh`
-  is green (mounts applied), and an OpenAPI read of both servers shows `/api/presentation-generator/submit`
-  **is served on :8000 and :7999** (153 routes each). The 08-05 404 was a stale/unmounted container serving
-  code without the route. Nothing to fix here; a freshly-recreated container serves it.
+- **Submit 404 — NOT REPRODUCIBLE TODAY (presumed stale container; NOT "fixed").** 2026-08-13:
+  `preflight-test-container.sh` is green (mounts applied) and an OpenAPI read of both servers shows
+  `/api/presentation-generator/submit` **is served on :8000 and :7999** (153 routes each). Presumed cause of
+  the 08-05 404: a stale/unmounted container serving code without the route. A mount that went stale once can
+  go stale again — this is not a code fix, it is "cannot reproduce now". No code change owed unless it recurs.
+- **The other two are reachable by TARGETED tests, not a money run** (Cheech, 2026-08-13): the offline-gate
+  fail-open default is a unit test around the gate/proxy default; the junit shape is a unit test around
+  `_parse_non_pytest_stdout` / the `SUITES_SUPPORTING_JUNIT_XML` decision. Exhaust these cheap instruments
+  before buying a real-money :8000 regression run.
 - **Offline gate** — `{"detail":"User is offline and no default response provided"}`: a
   blocking proxy ask fires during headless generation with no fail-open default. Needs a
   headless/scheduled fail-open default so the tier can complete unattended.
