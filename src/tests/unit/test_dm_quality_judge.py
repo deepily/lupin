@@ -263,7 +263,7 @@ class TestLengthBucket:
             assert -2 <= length_bucket( words )[ "weight" ] <= 2
 
     def test_detail_names_the_word_count_and_target( self ):
-        assert length_bucket( 187 )[ "detail" ] == "187 words, target ~60"
+        assert length_bucket( 187 )[ "detail" ] == "well past the shape — cut it down"  # number-free (Rick 2026-08-13)
 
     # ── overage: the field that sees past the saturated weight (row 0fc5b8f0) ──
 

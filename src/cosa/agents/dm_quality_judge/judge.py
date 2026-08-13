@@ -187,6 +187,25 @@ LENGTH_FACE_INTERVAL       = 100
 # writes right up to it, converting the deterrent into a budget. Rick's register.
 _TOO_LONG_DETAIL           = "too f*cking long — cut it down and resubmit"
 
+# The LENGTH grade's sender-facing wording, keyed by the grade's own weight — the same
+# number-free discipline as _TOO_LONG_DETAIL above, extended to the whole scale (Rick
+# 2026-08-13, "no word counts to be found anywhere"; surface found by María).
+#
+# Keyed on `weight` rather than on word_count so it CANNOT drift from the band it
+# describes: the band decides the weight, the weight decides the words. A parallel
+# threshold ladder here would be a second place to get the boundaries wrong, and the
+# two could then disagree silently.
+#
+# Each line says which way to move without saying how far, because how-far is the
+# number. The shape is the target, not a count.
+_LENGTH_DETAIL = {
+     2 : "tight — this is the shape",
+     1 : "slightly long; tighten it",
+     0 : "long; cut it back to the shape",
+    -1 : "well past the shape — cut it down",
+    -2 : _TOO_LONG_DETAIL,
+}
+
 
 # Matches ONE angle-bracket tag, tolerating the sloppiness the live models emit
 # (bug a5f7b36d): leading/inner whitespace, a spaced slash (`< / tone >`), and
@@ -462,9 +481,25 @@ def length_bucket( word_count ):
     # audit, and the stored len_grade are unaffected. A wider weight would be clamped back
     # by combine_overall anyway AND would break the corpus mid-collection for the demo.
     faces = emoji * max( 1, word_count // LENGTH_FACE_INTERVAL )
+    # 🔴 THE SENDER-FACING STRING NAMES NO NUMBER (Rick 2026-08-13, found by María).
+    # It used to read "{word_count} words, target ~{LENGTH_TARGET_WORDS}", handing the
+    # sender both their count AND the target — in the DM response envelope, the exact
+    # channel his instruction was about.
+    #
+    # This is not a new principle, it is the one already ruled TWICE in this file:
+    # `_TOO_LONG_DETAIL` is deliberately number-free because "a sender who learns the
+    # real bound writes right up to it, converting the deterrent into a budget", and
+    # LENGTH_FACE_INTERVAL was decoupled from the ceiling precisely so nobody could
+    # recover the bound by counting faces. A detail line stating both numbers outright
+    # defeated both of those at once.
+    #
+    # ⚠️ THE DATA IS UNTOUCHED, and that separation is the whole design: `weight` and
+    # `overage` keep their exact prior values and the corpus keeps `words`, so every
+    # existing analysis still has the numbers. What changed is only what is SAID to the
+    # sender — the measurement stays, the disclosure goes.
     return { "emoji"   : faces,
              "weight"  : weight,
-             "detail"  : f"{word_count} words, target ~{LENGTH_TARGET_WORDS}",
+             "detail"  : _LENGTH_DETAIL[ weight ],
              "overage" : round( word_count / LENGTH_TARGET_WORDS, 1 ) }
 
 
