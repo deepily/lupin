@@ -1299,6 +1299,7 @@ class PodcastOrchestratorAgent:
             ContentAnalysis: Structured analysis of the content
         """
         try:
+            response = None   # bound before the API call so the except can read stop_reason safely (bug e0bb5a94 B)
             prompt = get_content_analysis_prompt(
                 research_content = research_content,
                 max_topics       = self.config.key_topics_to_extract,
@@ -1332,11 +1333,16 @@ class PodcastOrchestratorAgent:
             if self.debug:
                 print( f"[PodcastOrchestratorAgent] Analysis error: {e}" )
 
-            # Fail LOUDLY. A silent placeholder analysis would flow downstream into a
-            # fake 0-segment script that reaches the review gate looking review-ready.
+            # Fail LOUDLY, and with the REAL cause (bug e0bb5a94 B). Raising is right —
+            # a silent placeholder analysis flows downstream into a fake 0-segment
+            # script that reaches the review gate looking review-ready. The defect was
+            # the MESSAGE: "try again in a few minutes" asserts a transience this
+            # catch-all cannot verify. Surface `e`, plus the SDK stop_reason when we
+            # have it (captured at api_client.py:435, read by nobody). `from e` keeps
+            # the traceback chain.
+            stop = f" [stop_reason={response.stop_reason}]" if response is not None else ""
             raise PodcastGenerationError(
-                "Podcast generation failed: the AI service returned an error while "
-                "analyzing the research document. Please try again in a few minutes."
+                f"Podcast generation failed while analyzing the research document: {e}{stop}"
             ) from e
 
     async def _generate_script_async(
@@ -1355,6 +1361,7 @@ class PodcastOrchestratorAgent:
             PodcastScript: Generated script with dialogue segments
         """
         try:
+            response = None   # bound before the API call so the except can read stop_reason safely (bug e0bb5a94 B)
             # Build system prompt with host personalities
             duo_description = get_dynamic_duo_description(
                 host_a = self.config.host_a_personality,
@@ -1411,11 +1418,18 @@ class PodcastOrchestratorAgent:
             if self.debug:
                 print( f"[PodcastOrchestratorAgent] Script generation error: {e}" )
 
-            # Fail LOUDLY. A silent 0-segment placeholder script would reach the
-            # review gate looking like a normal (if empty) review-ready result.
+            # Fail LOUDLY, and with the REAL cause (bug e0bb5a94 B). Raising (not a
+            # silent 0-segment placeholder) is right — an empty script would reach the
+            # review gate looking review-ready. The defect was the MESSAGE: a hardcoded
+            # "try again in a few minutes" asserts a transience this catch-all cannot
+            # verify, and it made a reproducible parse failure read as a rate limit to
+            # three readers. Surface `e`, plus the SDK stop_reason when we have it — it
+            # distinguishes "the model wrote un-parseable output" from "the SDK cut the
+            # model off" (api_client captured stop_reason at :435 and nobody read it).
+            # `from e` keeps the traceback chain for a log reader.
+            stop = f" [stop_reason={response.stop_reason}]" if response is not None else ""
             raise PodcastGenerationError(
-                "Podcast generation failed: the AI service returned an error while "
-                "writing the podcast script. Please try again in a few minutes."
+                f"Podcast generation failed while writing the podcast script: {e}{stop}"
             ) from e
 
     async def _revise_script_async(
