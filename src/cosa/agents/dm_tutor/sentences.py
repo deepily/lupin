@@ -176,6 +176,42 @@ def prose_lines( text ):
     return kept
 
 
+def pointer_lines( text ):
+    """
+    The pointer lines in a body — paths and URLs standing alone.
+
+    WHY THIS EXISTS (Cheech, 2026-08-13): the tutor PARAPHRASED A PATH out of a live
+    DM, leaving the literal words "probe script path" where the path had been. The
+    house rule is "three sentences and a path", so the one element the rule names by
+    name is the element that did not survive the rewrite.
+
+    The fix is the same one this whole module rests on — Rick's "LLMs do not count
+    well", generalised: do not ASK a model to preserve something exactly when you can
+    take it out of the model's reach and put it back yourself. A prompt instruction to
+    keep paths verbatim is a request; this is a guarantee.
+
+    Requires:
+        - text is a string
+
+    Ensures:
+        - returns the pointer lines, in order, stripped
+        - returns [] when the body carries none
+        - uses the SAME pattern as the structure rule above, so a line that does not
+          count as a claim is exactly a line that gets preserved — the two cannot
+          disagree about what a pointer is
+
+    Raises:
+        - nothing
+    """
+    found = []
+    body  = _FENCE.sub( " ", text )
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped and _ATTACHMENT.match( stripped ):
+            found.append( stripped )
+    return found
+
+
 def count_sentences( text ):
     """
     Count the claim-carrying sentences in a DM body.

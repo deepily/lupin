@@ -745,6 +745,47 @@ def get_dm_tutor_config():
         return dict( _DM_TUTOR_DEFAULTS )
 
 
+def _restore_dropped_pointers( original, rewritten ):
+    """
+    Put back any path or URL the rewrite lost. Returns the repaired text.
+
+    ⚠️ THE DEFECT THIS FIXES WAS LIVE (Cheech, 2026-08-13): the tutor paraphrased a
+    path out of a real DM and left the literal words "probe script path" in its place.
+    The house rule the tutor exists to teach is "three sentences and A PATH" — so the
+    single element the rule names by name is the one the rewrite destroyed, and the
+    recipient was handed a message whose pointer had become prose.
+
+    WHY THIS IS CODE AND NOT A PROMPT LINE. Asking the model to reproduce a path
+    verbatim is a request that fails silently and only in the cases that matter — long
+    messages, unusual paths. Lifting the pointers out of the model's reach and putting
+    them back is a guarantee. It is the same reasoning that keeps the sentence COUNT in
+    code: a model is the wrong instrument for exactness.
+
+    Requires:
+        - original and rewritten are strings
+
+    Ensures:
+        - every pointer line present in `original` is present in the result
+        - a pointer the rewrite ALREADY kept is not duplicated — membership is checked
+          against the rewrite's whole text, so a path the model correctly carried
+          through inline (not as its own line) still counts as kept
+        - returns `rewritten` unchanged when nothing was dropped
+        - restored pointers are appended as their own lines, which the counter treats
+          as structure, so repairing a message can never push it back over the trigger
+
+    Raises:
+        - nothing
+    """
+    try:
+        from cosa.agents.dm_tutor.sentences import pointer_lines
+        dropped = [ p for p in pointer_lines( original ) if p not in rewritten ]
+        if not dropped: return rewritten
+        return rewritten.rstrip() + "\n" + "\n".join( dropped )
+    except Exception:
+        # A repair that raises must never cost the caller the rewrite it already has.
+        return rewritten
+
+
 def _count_claims( body_text ):
     """
     The CANONICAL sentence count — the claim counter (ruling 4, 2026-08-12).
@@ -829,6 +870,11 @@ def _apply_dm_tutor( body_text, config=None, rewrite_fn=None ):
             # label for the whole class, not a diagnosis of one cause.
             meta[ "tutor_outcome" ] = "model_failed"
             return body_text, meta
+
+        # Put back any pointer the model paraphrased away, BEFORE measuring — the
+        # restored lines are structure, so they cannot change the claim count, but
+        # measuring first would record a body that is not the one delivered.
+        rewritten = _restore_dropped_pointers( body_text, rewritten )
 
         claims_out                 = _count_claims( rewritten )
         meta[ "tutor_claims_out" ] = claims_out

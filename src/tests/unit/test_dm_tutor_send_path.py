@@ -214,6 +214,87 @@ class TestApplyDmTutor( unittest.TestCase ):
         )
 
 
+class TestThePathSurvives( unittest.TestCase ):
+    """
+    ⚠️ A LIVE DEFECT, found by Cheech 2026-08-13 in a real DM I sent him.
+
+    The tutor PARAPHRASED A PATH AWAY, leaving the literal words "probe script path"
+    where the path had been. The house rule the tutor exists to teach is "three
+    sentences and A PATH" — so the one element the rule names by name is the element
+    the rewrite destroyed, and it did so while the message otherwise looked compliant.
+
+    The repair is deterministic rather than a prompt instruction, for the reason this
+    whole module exists: asking a model to reproduce something exactly is a request
+    that fails silently and only in the cases that matter.
+    """
+
+    def setUp( self ):
+        from cosa.rest.routers.dm import _apply_dm_tutor, _restore_dropped_pointers
+        self.apply   = _apply_dm_tutor
+        self.restore = _restore_dropped_pointers
+
+    # The actual message that failed, reduced to its shape.
+    _WITH_PATH = (
+        "I handed the row to Krishna with my refutation written in.\n"
+        "The truncation theory is refuted by my own probe.\n"
+        "He should copy the probe before using it.\n"
+        "One more claim here.\n"
+        "And another one.\n"
+        "/tmp/claude-1001/scratchpad/repro_podcast_script.py"
+    )
+    _ATE_THE_PATH = (
+        "Krishna has the row and the refutation.\n"
+        "The truncation theory is refuted.\n"
+        "He should copy the probe script path first."
+    )
+
+    def test_a_paraphrased_away_path_is_restored( self ):
+        text, meta = self.apply( self._WITH_PATH, config=_cfg(),
+                                 rewrite_fn=lambda b: self._ATE_THE_PATH )
+        self.assertEqual( meta[ "tutor_outcome" ], "rewritten" )
+        self.assertIn( "/tmp/claude-1001/scratchpad/repro_podcast_script.py", text )
+
+    def test_the_instrument_can_fail( self ):
+        """
+        CONTROL. Without this, a restore that silently did nothing and a rewrite that
+        never dropped the path would look identical — the test above would pass on
+        unfixed code as long as the fixture happened to keep it.
+        """
+        self.assertNotIn( "/tmp/claude-1001/scratchpad/repro_podcast_script.py",
+                          self._ATE_THE_PATH,
+                          "the fixture no longer drops the path — this suite proves nothing" )
+
+    def test_a_kept_path_is_not_duplicated( self ):
+        kept = "Verdict.\nOne.\n/tmp/claude-1001/scratchpad/repro_podcast_script.py"
+        self.assertEqual( self.restore( self._WITH_PATH, kept ), kept )
+
+    def test_a_path_kept_INLINE_is_not_re_appended( self ):
+        """Membership is checked against the whole rewrite, not line by line — a model
+        that folded the path into a sentence still kept it."""
+        inline = "Verdict.\nThe probe is at /tmp/claude-1001/scratchpad/repro_podcast_script.py now.\nTwo."
+        self.assertEqual( self.restore( self._WITH_PATH, inline ), inline )
+
+    def test_restoring_cannot_push_a_message_back_over_the_trigger( self ):
+        """
+        A restored pointer is STRUCTURE, so repairing a message can never re-trigger it.
+        If it counted as a claim, the repair would arm the loop the canned P.S. taught.
+        """
+        from cosa.agents.dm_tutor.sentences import count_sentences
+        _, meta = self.apply( self._WITH_PATH, config=_cfg(),
+                              rewrite_fn=lambda b: self._ATE_THE_PATH )
+        self.assertEqual( meta[ "tutor_claims_out" ], 3 )
+
+    def test_a_body_with_no_pointer_is_untouched( self ):
+        rewrite = "Verdict.\nOne.\nTwo."
+        self.assertEqual( self.restore( "Some prose. More prose.", rewrite ), rewrite )
+
+    def test_the_repair_never_costs_the_caller_the_rewrite( self ):
+        """A failure inside the repair must return the rewrite, not raise into delivery."""
+        with patch( "cosa.agents.dm_tutor.sentences.pointer_lines",
+                    side_effect=RuntimeError( "boom" ) ):
+            self.assertEqual( self.restore( self._WITH_PATH, "Verdict." ), "Verdict." )
+
+
 class TestTheRecipientIsTold( unittest.TestCase ):
     """
     The reader is owed the fact that the prose is not the sender's (Cheech, 2026-08-13).
