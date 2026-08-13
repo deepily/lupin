@@ -367,6 +367,36 @@ class TestSuiteJob( AgenticJobBase ):
             # Backlog item 5 (2026-04-29): canonical Future contract.
             raise
 
+    # Compact per-suite icons for the report table + abstract, keyed by the
+    # 3-way outcome so a non-executed suite never renders as a red "FAIL".
+    _OUTCOME_ICON = {
+        "PASSED"       : "PASS",
+        "FAILED"       : "FAIL",
+        "NOT EXECUTED" : "NOT RUN",
+    }
+
+    @staticmethod
+    def _classify_outcome( passed: int, failed: int, errors: int, skipped: int ) -> str:
+        """
+        Classify a run outcome from its parsed counts.
+
+        Requires:
+            - passed, failed, errors, skipped are non-negative ints
+
+        Ensures:
+            - returns "NOT EXECUTED" when nothing was collected (all four
+              counts zero) — a zero-count run is NON-EXECUTION, not a failure
+              (bug 89bfcc8f: a harness reporting "FAILED — 0/0/0/0" is trusted
+              as a real red by the next reader; the JUnit XML was never produced
+              or no tests were collected, which is an ERROR condition, not a
+              test failure)
+            - returns "PASSED"  when tests ran and none failed or errored
+            - returns "FAILED"  when tests ran and at least one failed or errored
+        """
+        if ( passed + failed + errors + skipped ) == 0:
+            return "NOT EXECUTED"
+        return "PASSED" if ( failed + errors ) == 0 else "FAILED"
+
     async def _execute( self ) -> str:
         """
         Internal async test suite execution.
@@ -486,9 +516,12 @@ class TestSuiteJob( AgenticJobBase ):
                 finally:
                     self._attest_tier_run( suite_type, result, started_at )
 
-                # Report per-suite results
-                suite_found  = result[ "passed" ] + result[ "failed" ] + result[ "skipped" ] + result[ "errors" ]
-                status       = "PASSED" if suite_found > 0 and ( result[ "failed" ] + result[ "errors" ] ) == 0 else "FAILED"
+                # Report per-suite results. A zero-count outcome is NON-EXECUTION
+                # (no JUnit XML / nothing collected), reported as "NOT EXECUTED"
+                # rather than the false-red "FAILED" (bug 89bfcc8f).
+                status       = self._classify_outcome(
+                    result[ "passed" ], result[ "failed" ], result[ "errors" ], result[ "skipped" ]
+                )
                 await voice_io.notify(
                     f"{suite_type}: {status} — {result[ 'passed' ]} passed, "
                     f"{result[ 'failed' ]} failed, {result[ 'errors' ]} errors, "
@@ -522,7 +555,14 @@ class TestSuiteJob( AgenticJobBase ):
                 if result.get( "log_path" ):
                     self.artifacts[ f"{suite_type}_log" ] = result[ "log_path" ]
 
-            overall = "ALL PASSED" if all_passed else "FAILURES DETECTED"
+            # Non-execution (nothing collected across every suite) is reported as
+            # "NOT EXECUTED", never the false-red "FAILURES DETECTED" (bug 89bfcc8f).
+            if total_found == 0:
+                overall = "NOT EXECUTED"
+            elif all_passed:
+                overall = "ALL PASSED"
+            else:
+                overall = "FAILURES DETECTED"
 
             # ─── Write full report to io/ for the document viewer ───
             import urllib.parse
@@ -554,8 +594,9 @@ class TestSuiteJob( AgenticJobBase ):
             ]
 
             for suite_type, result in self.suite_results.items():
-                sf   = result[ "passed" ] + result[ "failed" ] + result[ "skipped" ] + result[ "errors" ]
-                icon = "PASS" if sf > 0 and ( result[ "failed" ] + result[ "errors" ] ) == 0 else "FAIL"
+                icon = self._OUTCOME_ICON[ self._classify_outcome(
+                    result[ "passed" ], result[ "failed" ], result[ "errors" ], result[ "skipped" ]
+                ) ]
                 report_lines.append( f"## {suite_type} — {icon}" )
                 report_lines.append( f"" )
                 report_lines.append( f"| Metric | Count |" )
@@ -628,8 +669,9 @@ class TestSuiteJob( AgenticJobBase ):
             # ─── Build abstract with summary ───
             suite_lines = []
             for suite_type, result in self.suite_results.items():
-                sf   = result[ "passed" ] + result[ "failed" ] + result[ "skipped" ] + result[ "errors" ]
-                icon = "PASS" if sf > 0 and ( result[ "failed" ] + result[ "errors" ] ) == 0 else "FAIL"
+                icon = self._OUTCOME_ICON[ self._classify_outcome(
+                    result[ "passed" ], result[ "failed" ], result[ "errors" ], result[ "skipped" ]
+                ) ]
                 line = ( f"- **{suite_type}**: {icon} — "
                          f"{result[ 'passed' ]} passed, {result[ 'failed' ]} failed, "
                          f"{result[ 'errors' ]} errors, {result[ 'skipped' ]} skipped" )

@@ -449,6 +449,55 @@ def test_execute_failures_write_snapshot_and_crash_branches( monkeypatch, tmp_pa
     assert "log file not available" in pathlib.Path( job.report_path ).read_text()
 
 
+# =========================================================================== #
+# _classify_outcome  (bug 89bfcc8f — non-execution is NOT a failure)
+# =========================================================================== #
+@pytest.mark.parametrize( "counts, expected", [
+    ( ( 0, 0, 0, 0 ), "NOT EXECUTED" ),                       # nothing collected → non-execution
+    ( ( 0, 0, 0, 3 ), "PASSED" ),                             # all skipped, but tests were collected
+    ( ( 5, 0, 0, 1 ), "PASSED" ),                             # ran clean
+    ( ( 4, 1, 0, 0 ), "FAILED" ),                             # a real failure
+    ( ( 0, 0, 1, 0 ), "FAILED" ),                             # a real error (e.g. subprocess crash)
+] )
+def test_classify_outcome( counts, expected ):
+    """Zero-count is NOT EXECUTED; skipped-only counts as collected; failed/errors → FAILED."""
+    assert TSJob._classify_outcome( *counts ) == expected
+
+
+def _zero_result( log_path=None ):
+    """A suite that collected nothing (no JUnit XML produced) — the false-red case."""
+    return {
+        "passed": 0, "failed": 0, "skipped": 0, "errors": 0,
+        "exit_code": 1, "log_path": log_path, "duration": 0.3,
+    }
+
+
+def test_execute_non_execution_reports_not_run_not_failed( monkeypatch, tmp_path, patched_voice ):
+    """A 0/0/0/0 suite is announced + summarized as NOT EXECUTED, never FAILED, and writes no snapshot."""
+    job = _make_job( test_types=[ "presentation" ] )
+    monkeypatch.setattr( job_mod.cu, "get_project_root", lambda: str( tmp_path ) )
+    monkeypatch.setattr( job, "_run_suite", lambda st, pr: _zero_result() )
+
+    summary = asyncio.run( job._execute() )
+
+    # Overall banner: NOT EXECUTED, not the false-red FAILURES DETECTED
+    assert "NOT EXECUTED" in summary
+    assert "FAILURES DETECTED" not in summary
+
+    # Per-suite spoken line says NOT EXECUTED, never FAILED
+    spoken = [ c.args[ 0 ] for c in patched_voice.call_args_list if c.args ]
+    per_suite = [ m for m in spoken if m.startswith( "presentation:" ) ]
+    assert per_suite and "NOT EXECUTED" in per_suite[ 0 ]
+    assert "FAILED" not in per_suite[ 0 ]
+
+    # Report table + abstract render "NOT RUN", not "FAIL"; no remediation snapshot
+    import pathlib
+    assert "presentation — NOT RUN" in pathlib.Path( job.report_path ).read_text()
+    assert "NOT RUN" in job.artifacts[ "abstract" ]
+    assert "remediation_snapshot_path" not in job.artifacts
+    assert job.cost_summary[ "all_passed" ] is False
+
+
 def test_execute_expands_all_with_debug( monkeypatch, tmp_path, patched_voice, capsys ):
     """test_types=['all'] + debug logs the expansion and runs each component."""
     job = _make_job( test_types=[ "all" ], debug=True )
