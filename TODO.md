@@ -269,7 +269,7 @@ that touches the proxy path. Verify container freshness first, then decide.
 
 ---
 
-## 📥 FINDING 2026-08-13 (Sam 🎙️ `00aa8745`) — unit-suite polluters #2 AND #3 FIXED (row 69fb89cd); 3 unrelated live branch reds filed for a separate owner
+## 📥 FINDING 2026-08-13 (Sam 🎙️ `00aa8745`) — unit-suite polluters #2 AND #3 FIXED (row 69fb89cd closed on those); polluter #4 (config-singleton canary) LIVE + separately filed; 3 unrelated live branch reds filed
 
 **Polluter #2 root cause + fix — commit `12e062f0`.** The two
 `test_progress_group_passthrough.py::TestPodcastGeneratorVoiceIoPassthrough` victims were
@@ -310,8 +310,31 @@ polluter #2 is confirmed fixed in a FULL run. The 4 split cleanly:
   These deserve their own owner; they are pre-existing branch failures surfaced by this sweep, filed
   here per the no-new-rows order.
 
-The 3-seed shuffle sweep is still running for completeness, but the cache-persistence self-heal means
-it will likely show terraform GREEN now (cache already populated) — confirming the cold-start nature.
+**Shuffle sweep — seed 1337 (both roots, file-order shuffle):** 6 failed / 22439 passed. `progress_group`
+and `terraform` are GONE (polluters #2 and #3 confirmed fixed under a shuffled order). The 6 split into
+the 3 live isolation-reds above (census x2, narrative) PLUS a NEW order-dependent set below.
+
+### 🔴 POLLUTER #4 — LIVE, a DETECTOR FIRING (config-singleton pollution) — separately filed, NOT part of the 69fb close
+
+Under the seed-1337 shuffle these three FAIL, and all three PASS in isolation (so: order-dependent, real
+pollution — the same class 69fb was about, but a different, still-live polluter):
+
+- `test_hermetic_config_fixture_b::TestHermeticModuleBoundary::test_config_singleton_is_virgin_at_module_boundary`
+- `bug_fix_expediter/test_job::TestResubmit::test_success_debug_off_skips_final_print`
+- `bug_fix_expediter/test_job::TestResubmit::test_success_pushes_and_returns_id`
+
+⚠️ **The first one is a CANARY, not a flaky test — it exists to catch `ConfigurationManager` singleton
+pollution.** Its red under shuffle means it is DOING ITS JOB: something really dirties the config singleton
+before it. **DO NOT "fix" it by making it pass** — that disables the detector, exactly as making the
+terraform presence watchdog green would have. The fix belongs in the POLLUTER (whoever leaves the
+`ConfigurationManager` singleton dirty without restoring it), not in the canary. The bfe `TestResubmit`
+pair are downstream victims of the same singleton pollution.
+
+**Bounded repro / handoff**: seed-1337 file order at `/tmp/claude-1001/sweep_order_1337.txt`, full log at
+`/tmp/claude-1001/sweep_seed_1337.log`. First step: bisect which earlier module leaves the
+`ConfigurationManager` singleton (`_instances` / cached config) mutated; the canary names the seam, the bfe
+victims are downstream. Needs its own owner — Sam handed off after closing 69fb on #2/#3 per Cheech's
+"a half-done row you can finish today beats an open-ended hunt."
 
 ---
 
