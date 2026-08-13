@@ -423,6 +423,37 @@ completed, 7.5s): "presentation: 0 passed, **2 failed**, 0 errors, 0 skipped" �
   will prove the HAPPY PATH only; the NOT-EXECUTED classification rests on the three offline controls (not one
   green run). Submitting after a bind-mount freshness check + list-pending.
 
+⭐ **:8000 RUN ts-0ae6e18f RESULT (Sam 🎙️ `5252b3a0`, 2026-08-13) — NOT green, but the fix is PROVEN LIVE + a
+new deeper defect surfaced.** Ran 1021s (~17min), so BOTH tiers reached real execution (the flags fix worked
+— Sonnet no longer fast-fails at 5s).
+- ✅ **Composition proven**: render-only submit returned **200** (repo-relative path fix live) → child job
+  `pr-9eafa885` enqueued. The Sonnet tier COLLECTED and ran (flags registered live via bind mount).
+- ✅ **D1 classifier proven LIVE on a GENUINE non-execution**: the script reported `⊘ NOT EXECUTED:
+  sonnet-full (exit code 124 — tier did not run, 900s)` and summary `Not executed: 2` — a real timeout,
+  correctly NOT EXECUTED (never a false FAILED). Stronger evidence than a happy path would have given.
+- ✅ **D2 proven on THIS run's real output, offline + free**: feeding the run's actual summary
+  ("Total: 2 tiers / Passed: 0 / Failed: 0 / Not executed: 2") through the NEW parser → `not_executed:2` →
+  `NOT EXECUTED`. Closes the loop without a re-run.
+- 🪞 **Irony (job-level 0/0/0/0)**: the :8000 server runs a BOOT-STALE parser (booted 13:21 UTC, predates D2),
+  so the job-level result read `0/0/0/0 NOT EXECUTED` + a "STARTUP CRASH" mislabel — the very fix that stops
+  0/0/0/0 is not being served yet. A `docker restart lupin-rest-test` (src/ is bind-mounted) serves D2 for
+  future runs; it will NOT re-parse this frozen job.
+- 🔴 **NEW DEFECT (goes here, not a row): the monopolize test-suite job defers its OWN presentation child as
+  FOREIGN intake, so no presentation tier can complete headless.** Run-window log: after `pr-9eafa885` was
+  enqueued (200), `[CONSUMER] Monopoly hold active — deferring FOREIGN intake (lineage children pass)` repeats
+  every second for the whole run. The child is NOT recognized as a lineage child of monopolizer `ts-0ae6e18f`
+  (the render-only/live smoke tests submit via `/api/presentation-generator/submit` with NO parent_id_hash
+  linking them to the test-suite job), so the monopoly hold defers it forever → render-only times out at 120s,
+  sonnet-full at 900s = ~1020s total (both exit 124). **This is the `0c4e8cfa` mechanism** the earlier TODO
+  believed fixed by 587e399a on 08-04 — it is NOT fixed for the presentation-regression path. Fix direction:
+  the smoke tests must stamp the child submit with the monopolizer's id as parent_id_hash (lineage), OR the
+  monopoly hold must recognize the test-user's presentation children as lineage. Needs an owner — beyond this
+  row's harness scope.
+- **Row 89bfcc8f scope**: fix #2's HARNESS bugs (0/0/0/0, junit, 503 fail-open, submit-404, flag-drift, tier
+  mislabel) are DONE + proven. The presentation regression still can't go GREEN headless because of the
+  monopoly-child-deferral defect above — a SEPARATE issue, correctly surfaced (not masked) by the now-honest
+  harness. Recommend the row close on harness scope with the monopoly defect tracked here.
+
 **Shuffle sweep FINAL (3 seeds, both roots):** seed 1337 (clean) = 6 reds; seed 202 (clean, box quiet —
 only DMs + the urllib submit ran, no concurrent pytest) = **3 reds = exactly the 3 genuine isolation-reds**;
 seed 101 = DISCARDED (contaminated — I ran concurrent pytest during it; its ~126 extra lancedb/normalizer/
