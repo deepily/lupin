@@ -72,6 +72,30 @@ class ProsodyAnnotation( Enum ):
 # Pydantic Models for Structured Outputs
 # =============================================================================
 
+# Prosody annotations are embedded in segment TEXT as *[annotation]* markers.
+# The TEXT is the authoritative source: the `prosody` LIST field is only filled
+# when a parser chooses to (from_markdown does; the translation path in the
+# orchestrator does not), so any COUNT of markers must read the text, not the
+# list (row 52912c4f). This single helper is shared by the parser and the
+# validator so the two can never drift.
+_PROSODY_MARKER_PATTERN = re.compile( r'\*\[([^\]]+)\]\*' )
+
+
+def extract_prosody_markers( text ):
+    """
+    Extract prosody annotations from segment TEXT.
+
+    Requires:
+        - text is a string or None
+
+    Ensures:
+        - returns a list of annotations (lowercased, stripped), in order of
+          appearance, one entry per *[annotation]* marker in the text
+        - returns [] for None / empty / marker-free text
+    """
+    return [ m.group( 1 ).lower().strip() for m in _PROSODY_MARKER_PATTERN.finditer( text or "" ) ]
+
+
 class ScriptSegment( BaseModel ):
     """
     A single dialogue segment in the podcast script.
@@ -284,9 +308,6 @@ class PodcastScript( BaseModel ):
         # Pattern: **[Speaker - Role]**: Text
         segment_pattern = r'^\*\*\[([^\]]+)\s*-\s*([^\]]+)\]\*\*:\s*(.+)$'
 
-        # Prosody extraction pattern: *[annotation]*
-        prosody_pattern = r'\*\[([^\]]+)\]\*'
-
         segments = []
         for line in lines:
             line = line.strip()
@@ -299,11 +320,9 @@ class PodcastScript( BaseModel ):
                 role    = match.group( 2 ).strip().lower()
                 text    = match.group( 3 ).strip()
 
-                # Extract prosody annotations
-                prosody_annotations = []
-                for prosody_match in re.finditer( prosody_pattern, text ):
-                    annotation = prosody_match.group( 1 ).lower().strip()
-                    prosody_annotations.append( annotation )
+                # Extract prosody annotations from the text (shared helper, so
+                # the parser and validate_prosody_preservation cannot drift).
+                prosody_annotations = extract_prosody_markers( text )
 
                 segment = ScriptSegment(
                     speaker = speaker,
@@ -453,15 +472,18 @@ def validate_prosody_preservation(
             - is_preserved: True if prosody markers match
             - details_dict: Contains 'english_count', 'translated_count', 'missing', 'extra'
     """
-    # Extract all prosody markers from English script
+    # Count markers from the segment TEXT, not seg.prosody — the list is [] on
+    # the translation path (the LLM does not return a "prosody" json field), so
+    # counting the list reported total prosody loss ("es-MX=0") for scripts
+    # whose text carried the markers inline (row 52912c4f). The text is the
+    # authoritative source for both languages.
     english_markers = []
     for seg in english_script.segments:
-        english_markers.extend( seg.prosody )
+        english_markers.extend( extract_prosody_markers( seg.text ) )
 
-    # Extract all prosody markers from translated script
     translated_markers = []
     for seg in translated_script.segments:
-        translated_markers.extend( seg.prosody )
+        translated_markers.extend( extract_prosody_markers( seg.text ) )
 
     # Compare marker sets
     english_set    = set( english_markers )
