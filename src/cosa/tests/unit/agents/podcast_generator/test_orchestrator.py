@@ -487,6 +487,38 @@ class TestAnalyzeContent:
         assert "analyzing the research document" in str( excinfo.value )
         assert "Analysis error" in capsys.readouterr().out
 
+    def test_analyze_surfaces_real_cause_and_stop_reason( self ):
+        """
+        Delete-the-step guard for bug e0bb5a94 B at the analysis site.
+
+        The B fix (085e5f63) replaced a hardcoded "try again in a few minutes"
+        with the REAL cause plus the SDK stop_reason. This fires the failure AFTER
+        the response is in hand (a real completion the parser rejects), so the
+        raised message MUST carry both `e` and stop_reason and MUST NOT reassert a
+        transience the catch-all cannot verify. Revert either half of the fix — the
+        cause, or the stop_reason suffix — and this goes RED. The sibling raises
+        tests fire the exception BEFORE `response` is set (stop stays empty); this
+        is the only one that exercises the `response is not None` arm.
+        """
+        agent = _agent()
+        agent._api_client = _mock_api_client()
+        response = MagicMock()
+        response.content     = "not json"
+        response.stop_reason = "end_turn"
+        agent._api_client.call_for_analysis = AsyncMock( return_value=response )
+
+        with patch.object( orch_mod, "get_content_analysis_prompt", return_value="P" ), \
+             patch.object( orch_mod, "parse_analysis_response",
+                           side_effect=ValueError( "no recoverable JSON object" ) ):
+            with pytest.raises( PodcastGenerationError ) as excinfo:
+                _run( agent._analyze_content_async( "research text" ) )
+
+        message = str( excinfo.value )
+        assert "no recoverable JSON object" in message          # the REAL cause `e`
+        assert "stop_reason=end_turn"       in message          # SDK stop_reason surfaced
+        assert "try again in a few minutes" not in message      # old reassurance is GONE
+        assert isinstance( excinfo.value.__cause__, ValueError )
+
 
 # ===========================================================================
 # _generate_script_async  (MID)
@@ -535,6 +567,36 @@ class TestGenerateScript:
         assert isinstance( excinfo.value.__cause__, RuntimeError )
         assert "writing the podcast script" in str( excinfo.value )
         assert "Script generation error" in capsys.readouterr().out
+
+    def test_generate_surfaces_real_cause_and_stop_reason( self ):
+        """
+        Delete-the-step guard for bug e0bb5a94 B at the script site — the symmetric
+        twin of test_analyze_surfaces_real_cause_and_stop_reason, and the exact
+        shape of the filed failure: the model returns a completion (stop_reason
+        end_turn), the parser rejects it ("no recoverable JSON object"), and the
+        user must see THAT, not "try again in a few minutes". Exercises the
+        `response is not None` arm at the script raise site.
+        """
+        agent = _agent()
+        agent._api_client = _mock_api_client()
+        analysis = ContentAnalysis( main_topic="Quantum" )
+        response = MagicMock()
+        response.content     = "not json"
+        response.stop_reason = "end_turn"
+        agent._api_client.call_for_script = AsyncMock( return_value=response )
+
+        with patch.object( orch_mod, "get_dynamic_duo_description", return_value="DUO" ), \
+             patch.object( orch_mod, "get_script_generation_prompt", return_value="P" ), \
+             patch.object( orch_mod, "parse_script_response",
+                           side_effect=ValueError( "no recoverable JSON object" ) ):
+            with pytest.raises( PodcastGenerationError ) as excinfo:
+                _run( agent._generate_script_async( "research", analysis ) )
+
+        message = str( excinfo.value )
+        assert "no recoverable JSON object" in message          # the REAL cause `e`
+        assert "stop_reason=end_turn"       in message          # SDK stop_reason surfaced
+        assert "try again in a few minutes" not in message      # old reassurance is GONE
+        assert isinstance( excinfo.value.__cause__, ValueError )
 
 
 # ===========================================================================

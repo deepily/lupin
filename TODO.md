@@ -1,5 +1,14 @@
 # TODO
 
+## 🦚 FINDING 2026-08-13 (Krishna `d901908f`, row e0bb5a94) — orchestrator.py pre-existing coverage gap
+
+While adding the defect-B assertion tests I found `orchestrator.py` sits at **99% branch coverage**, not the
+mandated 100%: three lines are uncovered — **85** (`timeout_seconds must be a positive int` raise), **114**
+(a `return (` continuation), **1164** (the `**Approval**: {auto_notice}` abstract line). All three blame to
+`414009c3c`, i.e. **pre-existing debt** unrelated to defect A/B — my two new tests only ADDED coverage (they
+closed the previously-uncovered stop_reason branches at 1343/1430). Left out of the A/B scope on purpose;
+recorded here per today's no-new-rows order.
+
 ## 🚚 LIVE 2026-08-13 (Mr. Radio 🦉 `a31a20c5`) — the tutor is in use; two questions land here
 
 **Commit `b8d10bd3`, force-recreated onto `:7999` at 14:14:10 UTC (boot #56).** Rick's order:
