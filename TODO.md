@@ -394,6 +394,26 @@ completed, 7.5s): "presentation: 0 passed, **2 failed**, 0 errors, 0 skipped" �
 - **Row status**: fix #2's HARNESS scope (0/0/0/0 + junit + 503 fail-open) is DONE and proven. Remaining to
   green-headless: the render-only double-root fix + tier-2 diagnosis. Row stays OPEN on those.
 
+⭐ **FIX #2 REMAINING WORK LANDED (Sam 🎙️ `5252b3a0`, 2026-08-13)** — all offline-proven, 5 commits (not pushed):
+- **Tier-2 diagnosed from the run's OWN stdout — no 2nd :8000 spend for diagnosis**:
+  `/tmp/presentation-regression-latest.log` showed `unrecognized arguments: --content-model` → pytest
+  rejected the flag pre-collection → tier failed in 5s (non-execution). Both failures were harness bugs.
+- `f136f965` (A): register `--content-model`/`--lead-model`/`--yaml-path` in `smoke/conftest.py` (--timeout
+  belongs to pytest-timeout). Control-proven: flags collect; unregistered still rejects.
+- `5c59d144` (B+C): render-only `get_submit_payload` sends repo-relative path; handler 400-guards an
+  absolute/==root path (Cheech both-ends ruling). Unit-proven (4).
+- `79fcf083` (D1): `run_tier` classifies by exit code — 0→PASSED, 1→FAILED, else→NOT EXECUTED (code named,
+  never green); summary emits Not-executed; script green only if FAILED==0 AND NOT_EXECUTED==0. `PYTEST_CMD`
+  seam; 5 control cases (Cheech's three incl. mixed + unmapped-never-green).
+- `c37443f5` (D2): `job.py` threads `not_executed` through `_classify_outcome` (5th arg), parser, notify,
+  report, abstract, totals, cost_summary. A tier that never ran now reads NOT EXECUTED, not FAILED — closing
+  the gap where the multi-tier script slipped a non-collected tier past fix #1. +9 tests; 108 green.
+- **Final :8000 run AUTHORIZED by Cheech** (2026-08-13): a lying-harness row needs a real scheduled run to
+  prove it now tells the truth; offline controls prove the classifier maps exit codes but NOT the composition
+  (runner actually passes the flags conftest registers) — only the deployed invocation exercises that. Green
+  will prove the HAPPY PATH only; the NOT-EXECUTED classification rests on the three offline controls (not one
+  green run). Submitting after a bind-mount freshness check + list-pending.
+
 **Shuffle sweep FINAL (3 seeds, both roots):** seed 1337 (clean) = 6 reds; seed 202 (clean, box quiet —
 only DMs + the urllib submit ran, no concurrent pytest) = **3 reds = exactly the 3 genuine isolation-reds**;
 seed 101 = DISCARDED (contaminated — I ran concurrent pytest during it; its ~126 extra lancedb/normalizer/
