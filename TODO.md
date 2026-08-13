@@ -14,6 +14,39 @@ and `effective_arm=None` confirming the pilot no longer assigns arms.
 Both items below are **for Rick's word, not owed work** — his 2026-08-13 broadcast prohibits adding board
 items today, so they are recorded here rather than minted as rows.
 
+### 📥 TAKEN 2026-08-13 (from María 🌸, diagnosis complete) — a no-git-ancestor cwd should say so ONCE
+
+María closed the "eight tmp MCP failures" investigation with a root cause rather than a question, and the
+finding worth remembering is that **our own documentation caused it**: the old `cd /tmp && claude mcp get …`
+line told people to do the thing that breaks project detection. Last incident is 2026-07-13, the day that
+line was removed; nothing in the month since. The worktree variant was closed by worktree-aware detection,
+and the remainder was one night of repros from a scratchpad.
+
+**What is left is mine and it is small**: a cwd with **no git ancestor** is a *knowable, permanent*
+condition, so firing `CRITICAL: COSA-VOICE MCP VALIDATION FAILED` on **every connection** is the wrong
+shape — it floods the operator with an urgent alarm that repetition cannot help. It should say it once.
+
+Diagnosis: `planning-is-prompting/src/rnd/2026.08.13-defaulted-cwd-tmp-sessions-diagnosis.md` (her `5ef637e`)
+
+### 🔬 OWED 2026-08-13 (Cheech 🌿) — the tutor loses AGENCY and TENSE, and there is a test set for it
+
+Not a threshold problem — a **prompt** problem, so raising the trigger would not touch it. Cheech's
+exhibit, from the live corpus: I wrote *"Force-recreated from committed code at b8d10bd3… I carried the
+real interactive-test credentials forward"*; what he received was *"Deployed from commit b8d10bd3…
+interactive-test credentials transferred."* Three losses in one sentence — active to passive, my agency
+erased, and **`force-recreated` flattened to `deployed`**, which destroys the exact
+restart-versus-recreate distinction that was load-bearing all morning.
+
+**Method, his and accepted verbatim**: the corpus holds **12 `tutor_fired` rows**, each carrying the
+original and the rewrite side by side. Build the regression from those real pairs and **require it to FAIL
+on them BEFORE touching the prompt** — otherwise a prompt edit cannot be shown to have fixed anything.
+
+**NOT STARTED.** Recorded so it is not assumed done.
+
+**Already shipped in response** (`a1df14f0`): the recipient now sees `DM_TUTOR_NOTICE` on any rewritten DM,
+so a reader knows the wording is not the sender's before quoting it back at them. That closes the
+*provenance* gap, not the *fidelity* one above.
+
 ### ❓ OPEN FOR RICK — the spoken TTS rider still names a word count
 
 His DM instruction was *"three sentences and a path with no word counts to be found anywhere."* The DM
