@@ -52,10 +52,10 @@ per-suite notify, overall banner, report table, and abstract.
 per Rick's 2026-08-13 no-new-rows order). Make the regression's internal presentation
 jobs runnable headless on :8000:
 
-- **Submit 404** — the 2026-08-05 log shows `POST /api/presentation-generator/submit → 404`.
-  The route **exists** in `src/cosa/rest/routers/presentation_generator.py:120`, so this was
-  almost certainly a **stale/unmounted test container** on 08-05, not a code bug. Confirm
-  against a freshly-recreated `:8000` before treating it as live.
+- **Submit 404 — RESOLVED (stale container, not a code bug).** 2026-08-13: `preflight-test-container.sh`
+  is green (mounts applied), and an OpenAPI read of both servers shows `/api/presentation-generator/submit`
+  **is served on :8000 and :7999** (153 routes each). The 08-05 404 was a stale/unmounted container serving
+  code without the route. Nothing to fix here; a freshly-recreated container serves it.
 - **Offline gate** — `{"detail":"User is offline and no default response provided"}`: a
   blocking proxy ask fires during headless generation with no fail-open default. Needs a
   headless/scheduled fail-open default so the tier can complete unattended.
