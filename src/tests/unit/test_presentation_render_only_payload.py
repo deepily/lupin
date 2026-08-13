@@ -53,6 +53,24 @@ class TestRenderOnlyPayload( unittest.TestCase ):
             payload = _obj( "/io/presentations/user/deck.yaml" ).get_submit_payload( {}, "ws" )
         self.assertEqual( payload[ "source_path" ], "/io/presentations/user/deck.yaml" )
 
+    def test_monopolize_parent_id_stamped_when_set( self ):
+        """Ensures: under a monopolize sweep, parent_id_hash is stamped from
+        LUPIN_TEST_MONOPOLIZE_PARENT_ID so Gate B admits the child (bug 5ed4f187)."""
+        with patch.dict( os.environ, { "LUPIN_ROOT": "/var/lupin",
+                                        "LUPIN_TEST_MONOPOLIZE_PARENT_ID": "ts-abc123" } ):
+            payload = _obj( "/var/lupin/src/tests/fixtures/presentations/render-only-example.yaml" ) \
+                          .get_submit_payload( {}, "ws" )
+        self.assertEqual( payload[ "parent_id_hash" ], "ts-abc123" )
+
+    def test_no_parent_id_hash_when_env_absent( self ):
+        """Ensures: outside a monopolize sweep (env unset), parent_id_hash is NOT
+        sent (a bogus lineage tag must never be fabricated)."""
+        env = { k: v for k, v in os.environ.items() if k != "LUPIN_TEST_MONOPOLIZE_PARENT_ID" }
+        env[ "LUPIN_ROOT" ] = "/var/lupin"
+        with patch.dict( os.environ, env, clear=True ):
+            payload = _obj( "/var/lupin/src/x.yaml" ).get_submit_payload( {}, "ws" )
+        self.assertNotIn( "parent_id_hash", payload )
+
 
 def quick_smoke_test():
     """Run this module's unit tests with a banner + pass/fail summary."""

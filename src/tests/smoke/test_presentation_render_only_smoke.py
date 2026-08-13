@@ -240,11 +240,21 @@ class PresentationRenderOnlySmokeTest( InteractiveSmokeTest ):
         source_path  = self._yaml_path
         if source_path.startswith( project_root ):
             source_path = source_path[ len( project_root ): ]
-        return {
+        payload = {
             "source_path" : source_path,
             "render_only" : True,
             "dry_run"     : False,
         }
+        # Lineage tag (bug 5ed4f187 / 0c4e8cfa): when this smoke runs as a child
+        # pytest inside a monopolizing test-suite job, the runner exports
+        # LUPIN_TEST_MONOPOLIZE_PARENT_ID (test_suite/job.py). Threading it as
+        # parent_id_hash lets the consumer's Gate B admit this child through the
+        # monopoly hold instead of deferring it as FOREIGN until it times out.
+        # The sibling live/r2p smokes already do this; render-only had missed it.
+        parent_id = os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" )
+        if parent_id:
+            payload[ "parent_id_hash" ] = parent_id
+        return payload
 
     def get_mode_for_scenario( self, scenario ):
         """No mode switching needed."""
