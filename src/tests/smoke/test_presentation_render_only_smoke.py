@@ -393,6 +393,7 @@ class PresentationRenderOnlySmokeTest( InteractiveSmokeTest ):
             ( "fast_completion", self._check_fast_completion( job_data ) ),
             ( "low_cost",        self._check_low_cost( job_data ) ),
             ( "slide_count",     self._check_slide_count( job_data ) ),
+            ( "deck_file",       self._check_deck_file( job_data ) ),
             ( "no_stack_trace",  self._check_no_stack_trace( job_data ) ),
         ]
 
@@ -474,6 +475,38 @@ class PresentationRenderOnlySmokeTest( InteractiveSmokeTest ):
             return { "ok": False, "detail": "slide_count=0 — render produced 0 slides" }
 
         return { "ok": False, "detail": "slide_count not found in artifacts or response_text" }
+
+    def _check_deck_file( self, job_data ):
+        """
+        Verify the FINISHED .pptx on disk via the authoritative recorded path
+        (job artifacts / done-queue metadata `pptx_path`) — NOT a basename
+        reconstructed from the .yaml stem, and NOT the intermediate slide-count
+        metadata `_check_slide_count` reads.
+
+        Row 63f4d4a6 (sibling of test_presentation_live_smoke): the render-only
+        harness also asserted only on metadata and never opened the deck. This
+        sub-check is the real-artifact gate — a render that never serialized a
+        .pptx (pptx_path absent/null) or produced a malformed one is a HARD
+        failure, so `validate_result`'s aggregate cannot be PASS without a real
+        multi-slide deck on disk. The verdict is the gated
+        `verify_presentation_deck` (unit-proven in tests/unit).
+        """
+        from cosa.agents.presentation_generator.deck_verdict import verify_presentation_deck
+
+        artifacts = job_data.get( "artifacts" ) or {}
+        recorded  = job_data.get( "pptx_path" ) or artifacts.get( "pptx_path" )
+        if not recorded:
+            return { "ok": False, "detail": "no pptx_path recorded — render never exported a deck (yaml-only)" }
+
+        abs_path = recorded
+        if not os.path.isabs( abs_path ):
+            import cosa.utils.util as cu
+            abs_path = os.path.join( cu.get_project_root(), recorded.lstrip( "/" ) )
+
+        verdict = verify_presentation_deck( abs_path )
+        if verdict:
+            return { "ok": True, "detail": f"real deck verified: {verdict.slide_count} slides, {verdict.size_bytes} bytes" }
+        return { "ok": False, "detail": f"deck check failed ({recorded}): {verdict.reason}" }
 
     def _check_no_stack_trace( self, job_data ):
         """Verify no stack_trace in job record."""
