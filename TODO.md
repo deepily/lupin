@@ -42,6 +42,30 @@ anything durable has to ride the memento or the spawn brief, not the tutor.
 
 ---
 
+## 📥 FOLLOW-UP 2026-08-13 (Krishna 🦚 `effddeae`) — the CBR store is 100% poison for batches; cleanup deferred (NOT a store row per today's order)
+
+**Parent**: bug cdb5a76f (expeditor CBR returned a different question set's answers). Fix landed in
+`src/cosa/agents/prediction_engine/prediction_engine.py` — batches now key on their per-question
+content, not the count preamble.
+
+**The poison count (read-only, live Postgres store, 2026-08-13)**: of 46 `open_ended_batch` rows in
+`prediction_decisions`, **all 46** are keyed on the content-free preamble. **32 share the exact string
+`"I have 3 questions for you."`** with conflicting answers in one bucket — Vertex/judge/push, a podcast
+`query`, and podcast `languages/audience` all collide there. (8× "5 questions", 5× "4 questions", 1× "6
+questions".)
+
+**Why cleanup is not urgent**: post-fix, retrieval embeds and exact-matches on the CONTENT key, so
+these preamble-keyed rows are never retrieved (their preamble embeddings don't match a content-key
+query) and never exact-match — they are **inert, not actively harmful**. Cleanup is hygiene.
+
+**Deferred to Rick**: deleting/re-keying 46 live rows is destructive; Cheech's call was "get the number
+first, don't delete." The number is above. Options when ready: (a) leave inert, (b) hard-delete the 46,
+(c) re-key by re-deriving content from each row's `decision_value` answers keys. Recommend (b) — the
+answers keys don't reconstruct the original question texts reliably.
+Read-only counter: `scratchpad/count_poison.py` (session effddeae).
+
+---
+
 ## 📥 FINDING 2026-08-13 (Sam 🎙️ `00aa8745`) — presentation regression fix #2: the internal jobs still can't run headless (row 89bfcc8f, fix #1 landed)
 
 Row 89bfcc8f had two fixes. **Fix #1 is landed** (commit `b9450146`): a 0/0/0/0 tier
