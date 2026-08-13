@@ -265,6 +265,15 @@ class PresentationLiveSmokeTest( InteractiveSmokeTest ):
         parent_id = os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" )
         if parent_id:
             payload[ "parent_id_hash" ] = parent_id
+        # Lineage probe (bug 0c4e8cfa diagnosis): when LUPIN_TEST_LINEAGE_PROBE_FILE
+        # is set, record — AT SUBMIT TIME, restart-proof — the env token this
+        # subprocess actually SAW and the parent_id_hash it actually STAMPED. Three
+        # readable states: env null → token never reached the subprocess; env set +
+        # stamp applied → harness OK; env set + stamp absent → get_submit_payload bug.
+        _probe = os.environ.get( "LUPIN_TEST_LINEAGE_PROBE_FILE" )
+        if _probe:
+            with open( _probe, "a" ) as _fh:
+                _fh.write( f"live_sonnet\t{parent_id}\t{payload.get( 'parent_id_hash' )}\n" )
         return payload
 
     def get_mode_for_scenario( self, scenario ):
