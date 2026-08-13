@@ -399,9 +399,25 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
     # here is the one that runs the real spawn.
     _probe_session="__lenprobe_$$_${SECONDS}_${RANDOM}"
     _inner_bytes=$( printf '%s' "$INNER" | wc -c )
-    # ':' + (_inner_bytes-1) spaces = a no-op command tmux parses in full, byte-
-    # for-byte the size of the real $INNER payload.
-    _probe_payload=":$( printf '%*s' "$(( _inner_bytes - 1 ))" '' )"
+    # tmux's "command too long" limit is on the WHOLE assembled command, not the
+    # payload arg alone (measured on tmux 3.2a: a session name 200 bytes longer
+    # lowered the max accepted payload by EXACTLY 200 bytes — row 0ab3c0cd F2).
+    # The real spawn (bottom of this script) differs from this probe by three
+    # things, and the session NAME is the only one that changes tmux's byte count:
+    #   - SERVER_SCRUB (`env -u …`) prefixes the real spawn but is consumed by env,
+    #     NOT part of tmux's argv, so it does not count toward the limit;
+    #   - the `-d` flag sits in a different position but the token multiset is
+    #     identical, so total bytes are unchanged;
+    #   - PERSONA/VERTEX -e flags are the same arrays at the same eval point.
+    # So byte-match the probe's TOTAL argv to the real spawn by folding the
+    # name-length delta into the payload. ':' + (len-1) spaces = a no-op command
+    # tmux parses in full.
+    _name_delta=$(( ${#SESSION_NAME} - ${#_probe_session} ))
+    _probe_payload_len=$(( _inner_bytes + _name_delta ))
+    # Clamp: only reachable far below the limit (tiny brief + long throwaway name),
+    # where the exact payload size is immaterial to the verdict.
+    if (( _probe_payload_len < 1 )); then _probe_payload_len=1; fi
+    _probe_payload=":$( printf '%*s' "$(( _probe_payload_len - 1 ))" '' )"
     if _probe_err=$( tmux new-session -d -s "$_probe_session" \
                         "${PERSONA_ENV_FLAGS[@]}" "${VERTEX_ENV_FLAGS[@]}" \
                         "$_probe_payload" 2>&1 ); then
