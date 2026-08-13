@@ -28,6 +28,32 @@ the one his instruction was about.
 
 María agrees and is saying the same in her note, so he gets one story from both of us. **His call.**
 
+### 🔧 FOUND 2026-08-13 (Mr. Radio 🦉, flagged by Cheech 🌿) — `--force` bundles three unrelated guards
+
+`bounce-dev-server.sh --force` waives **three** independent things at once: the unwarned-fleet pause, the
+running-job refusal, and the **dirty-tree confirmation**. I wanted the first and silently got the third,
+so boot #57 deployed five uncommitted `deep_research_to_presentation` files of Krishna's. No harm — the
+app booted clean and the added field is optional and additive — but it went out **ungated**, and Cheech
+proved it by diffing the *served* schema against committed HEAD rather than taking anyone's word.
+
+**The defect is not "somebody used `--force`"** — it is that one flag waives guards that protect against
+unrelated failures. A caller who wants to skip a five-second pause should not thereby stop checking whose
+uncommitted work they are about to serve. **Proposed**: split into `--no-pause` / `--allow-dirty` /
+`--kill-running-job`, keeping `--force` as all three for compatibility. Not done today — it is a change to
+the bounce path while the fleet is bouncing, which is the wrong hour for it.
+
+### 🗃️ DONE 2026-08-13 — the accumulating corpus was still inside the repo
+
+Caught while answering María's read-out. This morning's move relocated the six **tracked** run files but
+missed `src/tmp/dm_traffic.jsonl` — the live 4.5 MB sink, gitignored but still in the tree and therefore
+on `git clean -xdf`'s list. All **3,242** historical rows are now merged ahead of the post-recreate rows
+in `<projects-data>/lupin/dm-corpus/dm_traffic.jsonl`, verified chronological and line-for-line before the
+in-repo copy was retired (kept on disk as `.retired-2026.08.13`, delete on Rick's word).
+
+**Also answered**: the `blind`/`rejecting` split is NOT missing from the corpus. It lives in
+`effective_arm` (1,178 / 841 over 2,019 rows); `arm` and `effective_arm` are disjoint by María's own
+2026-08-03 design, so `arm` reading only `signal_only` is the design working. Zero rows carry both.
+
 ### 🔎 FOUND 2026-08-13 (Mr. Radio + Cheech 🌿) — two thresholds collide at 150 words
 
 `dm qualitative word limit = 150` (above it the judge skips directness+tone) and `dm experiment reject
