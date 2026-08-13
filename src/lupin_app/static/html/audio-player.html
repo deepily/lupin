@@ -148,10 +148,67 @@
             const token    = localStorage.getItem( 'lupin_access_token' );
             const authInit = token ? { headers: { Authorization: 'Bearer ' + token } } : {};
 
+            // ── REFRESH-AND-RETRY (bug 38943485, defect 2) ───────────────────────
+            // This page is STANDALONE — it is not the notifications app and has no
+            // access to its authedFetch/ensureValidToken wrapper, so every fetch below
+            // used to fire with whatever localStorage happened to hold and turn a 401
+            // into "Could not load audio" with no retry and no way forward but a
+            // manual reload.
+            //
+            // The window is small but real: the app's proactive refresh rides the
+            // WebSocket heartbeat, so when that socket is down or the tab is
+            // backgrounded (where browsers throttle timers) the token can age past
+            // expiry before anything renews it — and clicking Play is exactly what a
+            // user does in a backgrounded tab.
+            //
+            // `authedFetch` below refreshes ONCE on a 401 and retries. It deliberately
+            // does NOT pre-check expiry: this page cannot know what the app already
+            // refreshed a second ago, and a 401 is the only authority on whether the
+            // token this page holds still works. Reacting to the real answer beats
+            // predicting it from a clock this page does not own.
+            let bearer = token;
+
+            async function refreshAccessToken() {
+                const refreshToken = localStorage.getItem( 'lupin_refresh_token' );
+                if ( !refreshToken ) return false;
+                try {
+                    const resp = await fetch( '/auth/refresh', {
+                        method  : 'POST',
+                        headers : { 'Content-Type': 'application/json' },
+                        body    : JSON.stringify( { refresh_token: refreshToken } )
+                    } );
+                    if ( !resp.ok ) return false;
+                    const data = await resp.json();
+                    // Same storage keys the app uses — the two must never diverge, or a
+                    // refresh here would be invisible to the app and vice versa.
+                    localStorage.setItem( 'lupin_access_token',  data.tokens.access_token  );
+                    localStorage.setItem( 'lupin_refresh_token', data.tokens.refresh_token );
+                    bearer = data.tokens.access_token;
+                    return true;
+                } catch ( e ) {
+                    return false;
+                }
+            }
+
+            async function authedFetch( url, init ) {
+                const withAuth = ( t ) => {
+                    const merged = Object.assign( {}, init || {} );
+                    merged.headers = Object.assign( {}, ( init && init.headers ) || {} );
+                    if ( t ) merged.headers.Authorization = 'Bearer ' + t;
+                    return merged;
+                };
+                let resp = await fetch( url, withAuth( bearer ) );
+                if ( resp.status !== 401 ) return resp;
+                // ONE retry. A second 401 after a successful refresh is a real auth
+                // failure, not a stale token, and looping would only delay saying so.
+                if ( !( await refreshAccessToken() ) ) return resp;
+                return await fetch( url, withAuth( bearer ) );
+            }
+
             // File size via HEAD (auth'd; best-effort).
             let fileSizeStr = 'Unknown';
             try {
-                const head = await fetch( audioApiUrl, { method: 'HEAD', headers: authInit.headers } );
+                const head = await authedFetch( audioApiUrl, { method: 'HEAD' } );
                 if ( head.ok ) {
                     const bytes = parseInt( head.headers.get( 'content-length' ) || '0' );
                     if ( bytes > 0 ) fileSizeStr = ( bytes / ( 1024 * 1024 ) ).toFixed( 1 ) + ' MB';
@@ -163,7 +220,7 @@
             try {
                 const scriptPath = path.replace( /\.mp3$/i, '-script.md' );
                 const scriptSrc  = '/api/io/file?path=' + encodeURIComponent( scriptPath );
-                const scriptResp = await fetch( scriptSrc, authInit );
+                const scriptResp = await authedFetch( scriptSrc, {} );
                 if ( scriptResp.ok ) {
                     const scriptText = await scriptResp.text();
                     // Try frontmatter title first
@@ -214,7 +271,7 @@
             // wants measured — logged as "[PLAYER-BLOB] ..." and shown in File Details.
             try {
                 const t0   = performance.now();
-                const resp = await fetch( audioApiUrl, authInit );
+                const resp = await authedFetch( audioApiUrl, {} );
                 if ( !resp.ok ) {
                     throw new Error( 'HTTP ' + resp.status + ( resp.status === 401 ? ' (auth — missing/expired token)' : '' ) );
                 }

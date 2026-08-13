@@ -277,6 +277,56 @@
             const token   = localStorage.getItem( 'lupin_access_token' );
             const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
 
+            // ── REFRESH-AND-RETRY (bug 38943485, defect 2 — same shape as the audio
+            // player, found here by the guard written for that fix on its first run).
+            //
+            // This page is STANDALONE: it is not the notifications app and has no access
+            // to that app's authedFetch/ensureValidToken. It read the JWT from
+            // localStorage and fired bare — so an expired token turned every doc link in
+            // the fleet into a dead end with no retry.
+            //
+            // That matters more here than on the audio player: doc-viewer links are what
+            // every session emits in abstracts, and they are clicked long after they are
+            // sent, which is exactly when a token has had time to age out.
+            //
+            // Refreshes ONCE on a 401 and retries. No expiry pre-check — a 401 is the only
+            // authority on whether the token this page holds still works.
+            let bearer = token;
+
+            async function refreshAccessToken() {
+                const refreshToken = localStorage.getItem( 'lupin_refresh_token' );
+                if ( !refreshToken ) return false;
+                try {
+                    const resp = await fetch( '/auth/refresh', {
+                        method  : 'POST',
+                        headers : { 'Content-Type': 'application/json' },
+                        body    : JSON.stringify( { refresh_token: refreshToken } )
+                    } );
+                    if ( !resp.ok ) return false;
+                    const data = await resp.json();
+                    // Same storage keys the app uses — the two must never diverge.
+                    localStorage.setItem( 'lupin_access_token',  data.tokens.access_token  );
+                    localStorage.setItem( 'lupin_refresh_token', data.tokens.refresh_token );
+                    bearer = data.tokens.access_token;
+                    return true;
+                } catch ( e ) {
+                    return false;
+                }
+            }
+
+            async function authedFetch( url, init ) {
+                const withAuth = ( t ) => {
+                    const merged = Object.assign( {}, init || {} );
+                    merged.headers = Object.assign( {}, ( init && init.headers ) || {} );
+                    if ( t ) merged.headers[ 'Authorization' ] = 'Bearer ' + t;
+                    return merged;
+                };
+                let resp = await fetch( url, withAuth( bearer ) );
+                if ( resp.status !== 401 ) return resp;
+                if ( !( await refreshAccessToken() ) ) return resp;
+                return await fetch( url, withAuth( bearer ) );
+            }
+
             // First-segment routing per 2026-05-15 unification. See _scope_registry.py.
             //
             // Bug 3d41fcba (2026-07-13): this was a HARDCODED literal set. Every repo
@@ -290,7 +340,7 @@
             // repo is sufficient to make it viewable. No literal to forget.
             let knownProjects = new Set();
             try {
-                const scopesResp = await fetch( '/api/docs/scopes', { headers } );
+                const scopesResp = await authedFetch( '/api/docs/scopes', {} );
                 if ( scopesResp.ok ) {
                     const scopesData = await scopesResp.json();
                     knownProjects = new Set( ( scopesData.scopes ?? [] ).map( s => s.name ) );
@@ -326,7 +376,7 @@
             const fetchUrl = apiPath + '?path=' + encodeURIComponent( fetchPath );
 
             try {
-                const response = await fetch( fetchUrl, { headers } );
+                const response = await authedFetch( fetchUrl, {} );
 
                 // 401 → redirect to login, preserving the current URL as the
                 // post-login return target. Skip the redirect when there's no
