@@ -8,6 +8,24 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.08.12 - Session 4073ce01 (Mr. Radio 🦉, with María 🌸) | The corpus re-cut by sentences, and four experiment designs killed on the way to shipping
+
+1. **">4 sentences" is not a narrow gate — it fires on 79% of DMs**, because the median DM carries 7.8 claims. Priced the whole dial instead of the one number: `>4` keeps 94% of the achievable saving, `>7` halves the calls and keeps 71%.
+
+2. **The tutor's output is a CONSTANT — ~3.6 claims / 50 words back, whatever goes in.** So the saving from any message is *its length minus fifty*, which is what the old 76/42/28/17% word-band ladder was all along. Of 191 rewrites, the only 6 that came back longer sit in bands the trigger already skips.
+
+3. **Rick ruled `>6`, no output gate, and then re-opened the unit.** His correction — memory resets at every re-spin, so learning cannot cross a context lifetime — killed the hour-based design: **96% of messages come from sessions that straddle both arms**, so the control was not a control. Unit moved to the session; MDE went from 211 triples (5–15 months) to ~17 words in five weeks.
+
+4. **His reader-side design was better than mine, and the mitigation I offered it does not exist here.** Measuring outbound to third parties is impossible — **7 of 3,175 messages go to a partner the sender never heard from**. Only thread-openers survive the "less to reply to" confound, and they are 14% of traffic.
+
+5. **RULED: ship fleet-wide, leave teaching open.** Before/after against the existing corpus is dead — María's phase 1 shipped the same day, and 1,136 of 1,945 baseline rows were sent under the `rejecting` arm. Word saving is certain (~50% of all DM words); the teaching answer is parked with its routes documented.
+
+**Checkpoint**: 12 commits, `3998ca24`→`484b9643`; 264 tests green (165 experiment + 99 tutor), no product code touched — analysis and design only. Two self-retractions: a gate "crossover" that was my own comparison, and a share claim narrower than I stated.
+
+**Files**: `src/rnd/v0.2.0/2026.08.04-dm-verbosity-reduction/{2026.08.12-dm-sentence-band-economics,2026.08.12-three-arm-experiment-mechanics,2026.08.12-three-arm-experiment-mechanics-v2-session-level,2026.08.12-recipient-randomized-teaching-experiment}.md` · `sentence_band_{analysis,outputs,summary}.py` · `live-runs/sentence-band{s-2026.08.12.json,-outputs-2026.08.12.jsonl}` · `TODO.md`
+
+**Owed**: Rick's read on whether a rewrite reverses a meaning — still unanswered from 08-11, and no harness can settle it. `rewrite_dm()` is still unwired.
+
 ### 2026.08.11 - Session c74141d6 (Mr. Radio 🦉, with María 🌸) | dm.txt becomes a real agent — and the promotion moved two variables, not one
 
 1. **`DmTutorAgent` on `AgentBase`, with the seam Rick asked for.** His addition at the understanding gate: *"out of this must come a DMTutor agent object that can be used within the DM send calls."* So `rewrite_dm( body )` is a free function with a fail-closed contract — the distilled lines, or `None`, and `None` always means deliver the original. Free rather than a method so **construction** failures fail closed too: a missing INI key must not raise into a sender's call stack.

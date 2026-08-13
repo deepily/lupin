@@ -1,5 +1,47 @@
 # TODO
 
+## ⚖️ RULED 2026-08-12 (Rick) — ship the tutor FLEET-WIDE; the teaching question stays OPEN
+
+**The ruling**: *"Let's ship the tutor fleet-wide and leave teaching open."* Take the word saving now
+— it is certain and needs no experiment — and stop trying to buy the teaching answer in the same move.
+
+**What ships**: the tutor on every DM at the ruled trigger of **>6 claims**, runtime-configurable, **no
+output gate** (also runtime-configurable, default off). Expected: the average DM goes from ~8 sentences
+/ 123 words to **4 sentences / 62 words — half of every word the fleet sends**, on ~1,634 calls per
+2,951 DMs.
+
+**What is NOT built**: no third arm, no recipient randomization, no assigner, no ledger. The two-arm
+`blind`-vs-`rejecting` block is set aside as its **own finished question** — analyse and report it
+standalone (does refusing an over-long DM make senders write shorter), never folded into the tutor's.
+
+### 🔓 OPEN — does reading short DMs teach you to write them?
+
+Unanswered, deliberately. **Every cheap route to it is closed**, and that is why it is parked rather
+than queued:
+
+- **Before/after against the existing corpus is dead.** María's phase 1 (the sentence rule in global
+  `CLAUDE.md` + the spawn rider) shipped 2026-08-12, so any post-tutor comparison confounds the doc
+  rewrite with the tutor, inseparably. The baseline is also not untaught — 1,136 of 1,945
+  in-experiment rows were sent under the `rejecting` arm, which is itself a treatment.
+- **Day-level noise is large** even on the clean slice (blind + legacy `signal_only`, 2,001 rows):
+  SD of daily medians **31.6 words**, and only 7 usable baseline days — capping a pre-post design at
+  roughly a 40-word MDE no matter how long the "after" side runs.
+- **The design that would work** is recipient-randomized, costs ~5 weeks at MDE ~17 words, halves the
+  word saving while it runs, and needs `in_reply_to` + `context_epoch` + a disclosure change.
+  → `src/rnd/v0.2.0/2026.08.04-dm-verbosity-reduction/2026.08.12-recipient-randomized-teaching-experiment.md`
+
+**If it is ever reopened**: run it against a **post-doc-change** baseline so the instruction lever is
+already pulled on both sides. And note the ceiling — the tutor cannot teach across a re-spin, so
+anything durable has to ride the memento or the spawn brief, not the tutor.
+
+### Implementation order when the fleet-wide ship is picked up
+
+1. Wire `rewrite_dm()` into `execute_dm_send` (`dm.py:1008`) — it exists and is fail-closed; nothing calls it.
+2. Record **submitted** and **delivered** on the corpus row (`_persist_dm_row` takes one `body_text`, two call sites) plus `tutor_fired` / `tutor_outcome`, recorded not re-derived.
+3. Tests to the 100% gate at every tier.
+
+---
+
 ## ☀️ FIRST THING 2026-08-12 — resume the DM tutor (Rick's word, 2026-08-11 ~23:15)
 
 **Rick read the implementation record and greenlit continuing.** His words: *"this is insanely
