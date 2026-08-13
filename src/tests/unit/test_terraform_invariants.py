@@ -239,7 +239,10 @@ def test_terraform_provider_cache_is_present():
         f"test_envs_test_passes_terraform_validate cannot schema-validate anything without "
         f"reaching the registry over the network. Populate the cache ONCE with:\n"
         f"    cd {ENV_TEST} && terraform init -backend=false\n"
-        f"…or ship the providers in the CI image. Do NOT make the validate test skip."
+        f"…or ship the providers in the CI image. THIS watchdog is the loud red that names a "
+        f"missing cache; the validate test SKIPS on a cold cache (manager ruling 2026-08-13, "
+        f"row 69fb89cd) so it can never DOWNLOAD the providers and thereby manufacture the very "
+        f"cache this test guards — that write was the order-dependent shared state (polluter #3)."
     )
 
 
@@ -281,6 +284,23 @@ def test_envs_test_passes_terraform_validate():
     was the only genuinely moving part. What remains (the provider cache) is watched by
     test_terraform_provider_cache_is_present and fails LOUD with a remedy.
     """
+    # Skip LOUDLY on a cold cache instead of running `terraform init`, which would
+    # DOWNLOAD the providers into PROVIDER_CACHE over the network (row 69fb89cd,
+    # polluter #3). That download was a shared-state write: it populated the cache a
+    # sibling test (test_terraform_provider_cache_is_present) asserts, so whichever
+    # ran first decided the other's result — an order-dependent red that self-healed
+    # once the gitignored cache persisted. Skipping here removes the write entirely;
+    # the missing cache is still flagged RED by the presence watchdog, never masked.
+    # (Presence FAILS on a cold cache; validate SKIPS — manager ruling 2026-08-13.)
+    if not os.path.isdir( PROVIDER_CACHE ):
+        pytest.skip(
+            f"terraform provider cache is NOT provisioned at {PROVIDER_CACHE}, so validate "
+            f"SKIPS rather than reaching the registry over the network. Provision it ONCE with:\n"
+            f"    cd {ENV_TEST} && terraform init -backend=false\n"
+            f"…or ship the providers in the CI image. The missing cache is reported RED by "
+            f"test_terraform_provider_cache_is_present — this skip does not hide it."
+        )
+
     with tempfile.TemporaryDirectory() as tf_data_dir:
         env = {
             **os.environ,
