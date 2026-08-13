@@ -269,7 +269,7 @@ that touches the proxy path. Verify container freshness first, then decide.
 
 ---
 
-## 📥 FINDING 2026-08-13 (Sam 🎙️ `00aa8745`) — unit-suite polluter #2 FIXED (row 69fb89cd); polluter #3 (terraform) identified + handed to Cheech; 3 unrelated live branch reds filed
+## 📥 FINDING 2026-08-13 (Sam 🎙️ `00aa8745`) — unit-suite polluters #2 AND #3 FIXED (row 69fb89cd); 3 unrelated live branch reds filed for a separate owner
 
 **Polluter #2 root cause + fix — commit `12e062f0`.** The two
 `test_progress_group_passthrough.py::TestPodcastGeneratorVoiceIoPassthrough` victims were
@@ -287,17 +287,17 @@ fix. **Fix**: pin both gate inputs as auto-restored `patch()` context managers. 
 **Baseline both-roots run at HEAD+fix**: 4 failed / 22441 passed — and `progress_group` is GONE, so
 polluter #2 is confirmed fixed in a FULL run. The 4 split cleanly:
 
-- **`test_terraform_invariants::test_terraform_provider_cache_is_present` — ORDER-DEPENDENT (polluter
-  #3), mechanism identified, NOT yet fixed.** `test_envs_test_passes_terraform_validate` (a sibling
-  test — terraform IS installed here, so it is not skipped) runs `terraform init` with
-  `TF_PLUGIN_CACHE_DIR=PROVIDER_CACHE`, which POPULATES `src/terraform/envs/test/.terraform/providers`
-  (over the network on a cold cache). `test_terraform_provider_cache_is_present` merely asserts that
-  dir exists. On a cold tree the presence test FAILS if ordered before the init test; the cache then
-  persists on disk (gitignored, never cleaned), so the red **self-heals after one run and won't
-  reproduce without a fresh cold worktree** — exactly the "moves between runs" the test's own docstring
-  warns about. **Fix is a design call** (a session-scoped autouse fixture that runs the init once
-  before any terraform test, so both see a populated cache regardless of order), not a teardown tweak —
-  handed to Cheech per the 2-3-round timebox rather than chased further.
+- **`test_terraform_invariants` — polluter #3, FIXED — commit `f505c9f8`.** Mechanism:
+  `test_envs_test_passes_terraform_validate` ran `terraform init` with `TF_PLUGIN_CACHE_DIR=PROVIDER_CACHE`,
+  which DOWNLOADED the providers into `src/terraform/envs/test/.terraform/providers` on a cold cache — a
+  shared-state WRITE that populated the very dir `test_terraform_provider_cache_is_present` asserts, so
+  whichever ran first decided the other's result; the gitignored cache then persisted, self-healing the red
+  ("moves between runs"). **Fix (Cheech ruling 2026-08-13): validate SKIPS loudly on a cold cache** (never
+  runs init, never downloads, never populates; remedy in the skip reason), while **presence STAYS a hard
+  RED** watchdog (honoring the author's "do not skip" for presence). Not a fixture that inits — that would
+  MANUFACTURE the invariant under test and defeat the watchdog. **Delete-the-step verified both directions**
+  in a fresh cold worktree: cold → presence RED + validate SKIPPED, identical in both orders, cache stays
+  absent (neither repopulates); provisioned → both pass, full file 17 passed.
 
 - **THREE LIVE REDS ON THIS BRANCH — not pollution, not order-dependent, not row 69fb.** These FAIL in
   ISOLATION at branch HEAD `3fc21826`, so the branch is genuinely red on them independent of anyone's
