@@ -115,6 +115,25 @@ anything durable has to ride the memento or the spawn brief, not the tutor.
 
 ---
 
+## 📥 FINDING 2026-08-13 (Krishna 🦚 `effddeae`) — dr2p slide-count plumbed backend-only; the research→slides form has NO duration UI to mirror (row 880d2801)
+
+`target_slide_count` is now plumbed through the deep_research_to_presentation chain (factory → job →
+agent → inner PresentationConfig override), the dr2p REST request model, and the CLI (`--slide-count`),
+mirroring `target_duration_minutes` exactly. Landed in the same commit as this note; agent/job/router
+100% covered.
+
+**The frontend piece is a real scope fork, not a skip.** The row asked to "surface it in the frontend
+job-submit form," but the research→presentation path in `notifications.js:3124` **hardcodes**
+`body.target_duration_minutes = 15` with **no UI input** — there is no duration control to mirror for
+slide count on that panel. The only duration input (`#presentation-duration`, notifications.html:418)
+belongs to the DIRECT presentation panel (`/api/presentation-generator/submit`, notifications.js:3391),
+a different path. Options for a follow-up: (a) add a slide-count numeric input to the research panel
+(new UI — duration itself isn't exposed there either), (b) add it to the DIRECT presentation panel for
+parity, (c) leave the UI as-is since slide count is now controllable via API + CLI. Deferred to Rick's
+UI call per today's no-new-store-rows order.
+
+---
+
 ## 📥 FOLLOW-UP 2026-08-13 (Krishna 🦚 `effddeae`) — the CBR store is 100% poison for batches; cleanup deferred (NOT a store row per today's order)
 
 **Parent**: bug cdb5a76f (expeditor CBR returned a different question set's answers). Fix landed in

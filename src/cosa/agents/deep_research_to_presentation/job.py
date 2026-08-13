@@ -59,6 +59,7 @@ class DeepResearchToPresentationJob( AgenticJobBase ):
         session_id: str,
         budget: Optional[ float ] = None,
         target_duration_minutes: Optional[ int ] = None,
+        target_slide_count: Optional[ int ] = None,
         theme: Optional[ str ] = None,
         lead_model: Optional[ str ] = None,
         dry_run: bool = False,
@@ -87,6 +88,7 @@ class DeepResearchToPresentationJob( AgenticJobBase ):
             session_id: WebSocket session for notifications
             budget: Maximum budget in USD for Deep Research (None = unlimited)
             target_duration_minutes: Override presentation duration (None = use default)
+            target_slide_count: Explicit slide count overriding the duration formula (None = use default)
             theme: Override presentation theme (None = use default)
             dry_run: Simulate execution without API calls
             audience: Target audience level (beginner/general/expert/academic)
@@ -106,6 +108,7 @@ class DeepResearchToPresentationJob( AgenticJobBase ):
         self.query                   = query
         self.budget                  = budget
         self.target_duration_minutes = target_duration_minutes
+        self.target_slide_count      = target_slide_count
         self.theme                   = theme
         self.lead_model              = lead_model
         self.dry_run                 = dry_run
@@ -224,6 +227,7 @@ class DeepResearchToPresentationJob( AgenticJobBase ):
                 audience                = self.audience,
                 audience_context        = self.audience_context,
                 target_duration_minutes = self.target_duration_minutes,
+                target_slide_count      = self.target_slide_count,
                 theme                   = self.theme,
                 cli_mode                = False,  # Voice-driven mode for queue
                 debug                   = self.debug,
@@ -448,6 +452,7 @@ def quick_smoke_test():
             session_id              = "session456",
             budget                  = 2.00,
             target_duration_minutes = 15,
+            target_slide_count      = 12,
             theme                   = "default",
             debug                   = True
         )
@@ -474,6 +479,7 @@ def quick_smoke_test():
         assert job.query == "test query for smoke test"
         assert job.budget == 2.00
         assert job.target_duration_minutes == 15
+        assert job.target_slide_count == 12
         assert job.theme == "default"
         assert job.user_email == "test@test.com"
         assert job.state == JobState.PENDING

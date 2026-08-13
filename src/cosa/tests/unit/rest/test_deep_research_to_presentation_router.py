@@ -106,6 +106,7 @@ class TestSubmitResearchToPresentation( unittest.TestCase ):
             query                   = "  the topic  ",
             budget                  = 2.5,
             target_duration_minutes = 15,
+            target_slide_count      = 12,
             theme                   = "default",
             audience                = "general",
             audience_context        = "execs",
@@ -123,6 +124,7 @@ class TestSubmitResearchToPresentation( unittest.TestCase ):
         self.assertEqual( ad[ "query" ], "the topic" )                    # stripped
         self.assertEqual( ad[ "budget" ], "2.5" )
         self.assertEqual( ad[ "target_duration_minutes" ], "15" )
+        self.assertEqual( ad[ "target_slide_count" ], "12" )
         self.assertEqual( ad[ "theme" ], "default" )
         self.assertEqual( ad[ "audience" ], "general" )
         self.assertEqual( ad[ "audience_context" ], "execs" )

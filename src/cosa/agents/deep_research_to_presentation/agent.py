@@ -63,6 +63,7 @@ class DeepResearchToPresentationAgent:
         audience_context: Optional[ str ] = None,
         # Presentation Generator options
         target_duration_minutes: Optional[ int ] = None,
+        target_slide_count: Optional[ int ] = None,
         theme: Optional[ str ] = None,
         # Common options
         cli_mode: bool = False,
@@ -85,6 +86,7 @@ class DeepResearchToPresentationAgent:
 
             # Presentation Generator options
             target_duration_minutes: Override target duration (None = use default)
+            target_slide_count: Explicit slide count overriding the duration formula (None = use default)
             theme: Override theme name (None = use default)
 
             # Common options
@@ -104,6 +106,7 @@ class DeepResearchToPresentationAgent:
 
         # Presentation Generator options
         self.target_duration_minutes = target_duration_minutes
+        self.target_slide_count      = target_slide_count
         self.theme                   = theme
 
         # Common options
@@ -426,6 +429,8 @@ class DeepResearchToPresentationAgent:
         # Apply overrides
         if self.target_duration_minutes is not None:
             config.target_duration_minutes = self.target_duration_minutes
+        if self.target_slide_count is not None:
+            config.target_slide_count = self.target_slide_count
         if self.audience is not None:
             config.audience = self.audience
         if self.theme is not None:
@@ -522,6 +527,7 @@ def quick_smoke_test():
         assert agent.budget == 1.00
         assert agent.cli_mode is True
         assert agent.target_duration_minutes is None
+        assert agent.target_slide_count is None
         assert agent.theme is None
         print( "✓ Attributes set correctly" )
 

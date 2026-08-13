@@ -13,6 +13,7 @@ Example:
         "query": "State of AI safety in 2026",
         "budget": 3.00,
         "target_duration_minutes": 15,
+        "target_slide_count": 12,
         "theme": "default"
     }
 """
@@ -48,6 +49,7 @@ class ResearchToPresentationSubmitRequest( BaseModel ):
     query                   : str = Field( ..., description="Research topic/question to investigate" )
     budget                  : Optional[ float ] = Field( None, description="Maximum budget in USD for Deep Research" )
     target_duration_minutes : Optional[ int ]   = Field( None, description="Target presentation duration in minutes" )
+    target_slide_count      : Optional[ int ]   = Field( None, description="Explicit slide count overriding the duration formula (None = derive from duration)" )
     theme                   : Optional[ str ]   = Field( None, description="Presentation theme name" )
     audience                : Optional[ str ]   = Field( None, description="Target audience level" )
     audience_context        : Optional[ str ]   = Field( None, description="Custom audience description" )
@@ -143,6 +145,8 @@ async def submit_research_to_presentation(
         args_dict[ "budget" ] = str( request.budget )
     if request.target_duration_minutes is not None:
         args_dict[ "target_duration_minutes" ] = str( request.target_duration_minutes )
+    if request.target_slide_count is not None:
+        args_dict[ "target_slide_count" ] = str( request.target_slide_count )
     if request.theme is not None:
         args_dict[ "theme" ] = request.theme
     if request.audience is not None:
@@ -210,11 +214,13 @@ def quick_smoke_test():
             query                   = "test research topic",
             budget                  = 3.00,
             target_duration_minutes = 15,
+            target_slide_count      = 12,
             theme                   = "default"
         )
         assert req.query == "test research topic"
         assert req.budget == 3.00
         assert req.target_duration_minutes == 15
+        assert req.target_slide_count == 12
         assert req.theme == "default"
         print( "✓ Request model works correctly" )
 
