@@ -42,6 +42,36 @@ anything durable has to ride the memento or the spawn brief, not the tutor.
 
 ---
 
+## 📥 FINDING 2026-08-13 (Sam 🎙️ `00aa8745`) — presentation regression fix #2: the internal jobs still can't run headless (row 89bfcc8f, fix #1 landed)
+
+Row 89bfcc8f had two fixes. **Fix #1 is landed** (commit `b9450146`): a 0/0/0/0 tier
+now reports **NOT EXECUTED**, never the false-red FAILED — honest labeling across the
+per-suite notify, overall banner, report table, and abstract.
+
+**Fix #2 is NOT done** and is a larger, separate effort (kept here, not a new board row,
+per Rick's 2026-08-13 no-new-rows order). Make the regression's internal presentation
+jobs runnable headless on :8000:
+
+- **Submit 404** — the 2026-08-05 log shows `POST /api/presentation-generator/submit → 404`.
+  The route **exists** in `src/cosa/rest/routers/presentation_generator.py:120`, so this was
+  almost certainly a **stale/unmounted test container** on 08-05, not a code bug. Confirm
+  against a freshly-recreated `:8000` before treating it as live.
+- **Offline gate** — `{"detail":"User is offline and no default response provided"}`: a
+  blocking proxy ask fires during headless generation with no fail-open default. Needs a
+  headless/scheduled fail-open default so the tier can complete unattended.
+- **Junit shape** — the presentation runner is a **multi-tier orchestrator** (render-only +
+  Sonnet + …), not one pytest run, and does not emit the single `--junit-xml` file the
+  harness injects (`presentation` is in `SUITES_SUPPORTING_JUNIT_XML`). Either forward junit
+  per-tier and merge, or drop presentation from that set and teach `_parse_non_pytest_stdout`
+  the "Passed: N / Failed: N tiers" summary. Until then even a successful run parses as 0/0/0/0
+  (now correctly labeled NOT EXECUTED by fix #1).
+
+**Why parked, not attempted now**: reproduction requires a live `:8000` run that spends real
+LLM money (~$0.46 Sonnet tier) and takes ~8 min, plus a scope call on the offline-gate default
+that touches the proxy path. Verify container freshness first, then decide.
+
+---
+
 ## ☀️ FIRST THING 2026-08-12 — resume the DM tutor (Rick's word, 2026-08-11 ~23:15)
 
 **Rick read the implementation record and greenlit continuing.** His words: *"this is insanely
