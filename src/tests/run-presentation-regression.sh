@@ -42,12 +42,17 @@ VENV_ACTIVATE=".venv/bin/activate"
 # Use venv python on host, fall back to system python in Docker container
 VENV_PYTHON="$PROJECT_ROOT/.venv/bin/python3"
 if ! "$VENV_PYTHON" --version > /dev/null 2>&1; then VENV_PYTHON="python3"; fi
-PYTEST="$VENV_PYTHON -m pytest"
+# PYTEST_CMD is a test seam: a control-proof harness overrides it with a stub
+# that returns a chosen exit code, to exercise run_tier's 3-way classification
+# without spending on real LLM tiers. Defaults to the real pytest invocation.
+PYTEST="${PYTEST_CMD:-$VENV_PYTHON -m pytest}"
 
 TOTAL=0
 PASSED=0
 FAILED=0
+NOT_EXECUTED=0
 FAILED_TIERS=""
+NOT_EXECUTED_TIERS=""
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Argument Parsing
@@ -101,20 +106,32 @@ run_tier() {
 
     local start_time=$(date +%s)
 
-    if timeout "$timeout_secs" bash -c "$cmd" 2>&1 | tee -a "$LOG_FILE"; then
-        local end_time=$(date +%s)
-        local elapsed=$((end_time - start_time))
-        echo ""
+    # Capture the tier command's REAL exit code (PIPESTATUS[0] = the `timeout`
+    # arm, not `tee`). Classify 3-way so a tier that never ran is NOT counted as
+    # a failure (bug 89bfcc8f — non-execution wearing a failure's clothes):
+    #   exit 0        → PASSED
+    #   exit 1        → FAILED   (pytest: tests were collected and some failed)
+    #   any other !=0 → NOT EXECUTED, with the raw code named. Covers pytest
+    #                   4 (usage / unrecognized-arg), 5 (no tests collected),
+    #                   2 (interrupted), 3 (internal error), 124 (timeout), and
+    #                   any unknown code. NEVER falls through to PASSED — only
+    #                   exit 0 is ever green.
+    timeout "$timeout_secs" bash -c "$cmd" 2>&1 | tee -a "$LOG_FILE"
+    local exit_code=${PIPESTATUS[0]}
+    local end_time=$(date +%s)
+    local elapsed=$((end_time - start_time))
+    echo ""
+    if [ "$exit_code" -eq 0 ]; then
         echo "  ✓ PASS: $name (${elapsed}s)"
         PASSED=$((PASSED + 1))
-    else
-        local exit_code=$?
-        local end_time=$(date +%s)
-        local elapsed=$((end_time - start_time))
-        echo ""
-        echo "  ✗ FAIL: $name (exit code $exit_code, ${elapsed}s)"
+    elif [ "$exit_code" -eq 1 ]; then
+        echo "  ✗ FAIL: $name (exit code 1, ${elapsed}s)"
         FAILED=$((FAILED + 1))
         FAILED_TIERS="$FAILED_TIERS $name"
+    else
+        echo "  ⊘ NOT EXECUTED: $name (exit code $exit_code — tier did not run, ${elapsed}s)"
+        NOT_EXECUTED=$((NOT_EXECUTED + 1))
+        NOT_EXECUTED_TIERS="$NOT_EXECUTED_TIERS $name"
     fi
 }
 
@@ -168,8 +185,12 @@ echo ""
 echo "  Total:  $TOTAL tiers"
 echo "  Passed: $PASSED"
 echo "  Failed: $FAILED"
+echo "  Not executed: $NOT_EXECUTED"
 if [ -n "$FAILED_TIERS" ]; then
     echo "  Failed tiers:$FAILED_TIERS"
+fi
+if [ -n "$NOT_EXECUTED_TIERS" ]; then
+    echo "  Not executed tiers:$NOT_EXECUTED_TIERS"
 fi
 echo ""
 echo "  Log: $LOG_FILE"
@@ -177,4 +198,7 @@ echo "  Completed: $(date)"
 echo ""
 echo "═══════════════════════════════════════════════════════════════"
 
-[ "$FAILED" -eq 0 ] && exit 0 || exit 1
+# Green ONLY when every tier passed. A not-executed tier is NOT a pass — it must
+# make the script exit non-zero so the outer job never reads the suite as green
+# on a tier that never ran (bug 89bfcc8f).
+[ "$FAILED" -eq 0 ] && [ "$NOT_EXECUTED" -eq 0 ] && exit 0 || exit 1
