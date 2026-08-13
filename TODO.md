@@ -79,6 +79,41 @@ the one his instruction was about.
 
 María agrees and is saying the same in her note, so he gets one story from both of us. **His call.**
 
+### 🔴 FOUND 2026-08-13 (Cheech 🌿 `6794a377`) — `dismiss_sessions(write_memento=True)` REPORTED SUCCESS AND WROTE NOTHING
+
+Found by executing the first two re-spins under the new manager-context policy, roughly ninety minutes
+after it went live. **This is the policy's own machinery failing silently in the step the policy exists
+to protect.**
+
+**What happened.** Krishna was reaped with `write_memento=True` and `respin_personas=["krishna"]`. The
+call returned clean — `dismissed: killed`, `retained_owner_personas: ["krishna"]`,
+`retained_unmatched: []`. The ownership half worked exactly as documented. **No memento was written.**
+The newest `krishna-*.md` on disk is `krishna-fc56ee39.md` dated **2026-08-05**, eight days stale, and
+`io/mementos/krishna.md` still points at it. Nothing in the return value distinguishes this from success.
+
+**Why it did not cost anything.** Because his predecessor had been told to write the state into the ROW
+(`e0bb5a94`), not only into a memento. His successor's first message back was *"Continuity was in the
+row (memento was lost as warned)."* Had we relied on the flag, a P1 mid-investigation would have come
+back with a root-cause finding, a captured evidence body, an approved-but-unimplemented fix design, and
+five remaining steps — all gone.
+
+**The trap for the next reader**: seeding the stale file would have been WORSE than seeding nothing. An
+eight-day-old memento from unrelated work reads as current context. I spawned with no seed and an
+explicit "do not read any krishna-*.md" in the brief.
+
+**What worked instead, and should become the rule.** For Sam's re-spin I had him write the memento
+himself through `memento_io.py write` BEFORE the reap, then **verified the file on disk** — record,
+mirror, pointer, sha `16da46f2` — and only then dismissed. That is two extra steps and it is the
+difference between a handoff and a hope.
+
+**Proposed**:
+1. **Do not trust `write_memento=True`.** Have the worker run `memento_io.py write` at checkpoint, as
+   part of "prepare for re-spin", and have the manager `ls` the record before reaping.
+2. Fix the verb so a failed memento leg is LOUD — the same `write` script already fails non-zero when
+   any leg fails, so the reap path is not using it, or is swallowing its result.
+3. Standing regardless of the fix: **worker state belongs in the ROW.** A memento is a convenience; the
+   row is the record. That is what actually carried this handoff.
+
 ### 🔴🔴 FOUND 2026-08-13 (Cheech 🌿 `6794a377`, confirmed by Mr. Radio 🦉) — the tutor INVENTED A PERSON WHO DOES NOT EXIST
 
 **This is a different severity class from everything else on this page.** The earlier findings are
