@@ -45,6 +45,43 @@ _requires_tmux = pytest.mark.skipif(
     reason="bash + tmux + LUPIN_ROOT required for the live dry_run probe"
 )
 
+# F1 (row 0ab3c0cd): the real-tmux tests above SKIP on a box without tmux, so the
+# probe's shell BRANCH logic (ok / command-too-long / could-not-verify) shipped
+# GREEN and UNVERIFIED wherever tmux is absent — CI included. This gate needs only
+# bash + LUPIN_ROOT, never real tmux: the branch tests drive the probe with a STUB
+# `tmux`, so a regression in the shell logic FAILS on any box.
+_requires_bash = pytest.mark.skipif(
+    shutil.which( "bash" ) is None or not LUPIN_ROOT,
+    reason="bash + LUPIN_ROOT required to drive the probe with a stub tmux"
+)
+
+
+def _stub_tmux_source( behavior ):
+    """
+    Bash source for a fake `tmux` that drives one probe branch (no real tmux).
+
+    Requires:
+        - behavior in { "ok", "too_long", "other" }
+
+    Ensures:
+        - "ok"       → new-session exits 0 (accepts); kill-session/other exit 0
+        - "too_long" → new-session emits tmux's 'command too long' on stderr, exits 1
+        - "other"    → new-session emits an unrelated error on stderr, exits 1
+    """
+    verdicts = {
+        "ok"       : "exit 0",
+        "too_long" : "echo 'tmux: command too long' >&2; exit 1",
+        "other"    : "echo 'tmux: connection refused' >&2; exit 1",
+    }
+    new_session_line = verdicts[ behavior ]
+    return (
+        "#!/usr/bin/env bash\n"
+        'case "$1" in\n'
+        f"  new-session) {new_session_line} ;;\n"
+        "  *) exit 0 ;;\n"       # kill-session / anything else the probe issues
+        "esac\n"
+    )
+
 
 def _dry_run( prompt, session_name, path_prefix=None ):
     """
@@ -123,3 +160,43 @@ class TestBriefLengthProbe:
         assert rc != 0
         assert "BRIEF-LENGTH-PROBE: could NOT verify" in out
         assert "connection refused" in out        # the real reason is surfaced, not swallowed
+
+
+@_requires_bash
+class TestBriefLengthProbeBranchesWithStubTmux:
+    """
+    F1 gate (row 0ab3c0cd): exercise the probe's three shell branches with a STUB
+    `tmux` so the bash half is VERIFIED on any box with bash — the coverage the
+    real-tmux tests cannot give where tmux is absent. Delete a branch (or its
+    verdict grep) from the script and the matching test here fails, tmux or not.
+    """
+
+    def _run_with_stub( self, tmp_path, behavior, prompt="do the review", name="probe-stub" ):
+        stub_dir = tmp_path / "bin"
+        stub_dir.mkdir()
+        stub = stub_dir / "tmux"
+        stub.write_text( _stub_tmux_source( behavior ) )
+        stub.chmod( 0o755 )
+        return _dry_run( prompt, name, path_prefix=stub_dir )
+
+    def test_ok_branch_reports_ok_and_exits_zero( self, tmp_path ):
+        # Stub tmux accepts the no-op → the probe reports ok and passes dry_run.
+        rc, out = self._run_with_stub( tmp_path, "ok" )
+        assert rc == 0
+        assert "BRIEF-LENGTH-PROBE: ok" in out
+
+    def test_command_too_long_branch_fails_loud( self, tmp_path ):
+        # Stub tmux rejects with tmux's own verdict → the probe fails non-zero and
+        # names it. If the 'command too long' grep is broken/removed this reverts
+        # to the else branch or a quiet pass and this test catches it.
+        rc, out = self._run_with_stub( tmp_path, "too_long" )
+        assert rc != 0
+        assert "BRIEF-LENGTH-PROBE: FAIL" in out
+        assert "command too long" in out
+
+    def test_other_error_branch_reports_cannot_verify( self, tmp_path ):
+        # Stub tmux fails for a non-length reason → the probe must SAY it could not
+        # verify and exit non-zero, never pass quietly on an unproven brief.
+        rc, out = self._run_with_stub( tmp_path, "other" )
+        assert rc != 0
+        assert "BRIEF-LENGTH-PROBE: could NOT verify" in out
