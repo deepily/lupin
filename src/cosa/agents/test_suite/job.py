@@ -382,26 +382,35 @@ class TestSuiteJob( AgenticJobBase ):
     }
 
     @staticmethod
-    def _classify_outcome( passed: int, failed: int, errors: int, skipped: int ) -> str:
+    def _classify_outcome( passed: int, failed: int, errors: int, skipped: int,
+                           not_executed: int = 0 ) -> str:
         """
         Classify a run outcome from its parsed counts.
 
         Requires:
-            - passed, failed, errors, skipped are non-negative ints
+            - passed, failed, errors, skipped, not_executed are non-negative ints
 
         Ensures:
-            - returns "NOT EXECUTED" when nothing was collected (all four
-              counts zero) — a zero-count run is NON-EXECUTION, not a failure
-              (bug 89bfcc8f: a harness reporting "FAILED — 0/0/0/0" is trusted
-              as a real red by the next reader; the JUnit XML was never produced
-              or no tests were collected, which is an ERROR condition, not a
-              test failure)
-            - returns "PASSED"  when tests ran and none failed or errored
-            - returns "FAILED"  when tests ran and at least one failed or errored
+            - returns "NOT EXECUTED" when nothing was collected (all counts zero)
+              — a zero-count run is NON-EXECUTION, not a failure (bug 89bfcc8f: a
+              harness reporting "FAILED — 0/0/0/0" is trusted as a real red by the
+              next reader; the JUnit XML was never produced or no tests were
+              collected, which is an ERROR condition, not a test failure)
+            - returns "FAILED"  when at least one test failed or errored (a genuine
+              failure dominates — even if some tiers also did not run)
+            - returns "NOT EXECUTED" when nothing failed but at least one tier did
+              not run (multi-tier runner: a tier that never ran is not a pass and
+              not a failure — it must not read as green)
+            - returns "PASSED"  when tests ran, none failed or errored, and every
+              tier ran
         """
-        if ( passed + failed + errors + skipped ) == 0:
+        if ( passed + failed + errors + skipped + not_executed ) == 0:
             return "NOT EXECUTED"
-        return "PASSED" if ( failed + errors ) == 0 else "FAILED"
+        if ( failed + errors ) > 0:
+            return "FAILED"
+        if not_executed > 0:
+            return "NOT EXECUTED"
+        return "PASSED"
 
     async def _execute( self ) -> str:
         """
@@ -526,34 +535,42 @@ class TestSuiteJob( AgenticJobBase ):
                 # (no JUnit XML / nothing collected), reported as "NOT EXECUTED"
                 # rather than the false-red "FAILED" (bug 89bfcc8f).
                 status       = self._classify_outcome(
-                    result[ "passed" ], result[ "failed" ], result[ "errors" ], result[ "skipped" ]
+                    result[ "passed" ], result[ "failed" ], result[ "errors" ], result[ "skipped" ],
+                    result.get( "not_executed", 0 )
                 )
                 await voice_io.notify(
                     f"{suite_type}: {status} — {result[ 'passed' ]} passed, "
                     f"{result[ 'failed' ]} failed, {result[ 'errors' ]} errors, "
-                    f"{result[ 'skipped' ]} skipped",
+                    f"{result[ 'skipped' ]} skipped, "
+                    f"{result.get( 'not_executed', 0 )} not executed",
                     priority="low",
                     queue_name="run"
                 )
 
             # Build summary
-            total_passed  = sum( r[ "passed" ] for r in self.suite_results.values() )
-            total_failed  = sum( r[ "failed" ] for r in self.suite_results.values() )
-            total_skipped = sum( r[ "skipped" ] for r in self.suite_results.values() )
-            total_errors  = sum( r[ "errors" ] for r in self.suite_results.values() )
-            total_found   = total_passed + total_failed + total_skipped + total_errors
+            total_passed       = sum( r[ "passed" ]                     for r in self.suite_results.values() )
+            total_failed       = sum( r[ "failed" ]                     for r in self.suite_results.values() )
+            total_skipped      = sum( r[ "skipped" ]                    for r in self.suite_results.values() )
+            total_errors       = sum( r[ "errors" ]                     for r in self.suite_results.values() )
+            total_not_executed = sum( r.get( "not_executed", 0 )        for r in self.suite_results.values() )
             # Determine pass/fail from parsed results, not exit code — exit code can be
-            # non-zero for warnings or cleanup even when all tests pass (335/0/0 false positive)
-            all_passed    = total_found > 0 and ( total_failed + total_errors ) == 0
+            # non-zero for warnings or cleanup even when all tests pass (335/0/0 false positive).
+            # A not-executed tier is neither a pass nor a failure: it blocks "all passed"
+            # without inflating the failure count (bug 89bfcc8f).
+            overall_status = self._classify_outcome(
+                total_passed, total_failed, total_errors, total_skipped, total_not_executed
+            )
+            all_passed = ( overall_status == "PASSED" )
 
             # Store artifacts + cost_summary (required by queues.py unified interface)
             self.cost_summary = {
-                "suites_run"    : len( self.suite_results ),
-                "total_passed"  : total_passed,
-                "total_failed"  : total_failed,
-                "total_errors"  : total_errors,
-                "total_skipped" : total_skipped,
-                "all_passed"    : all_passed,
+                "suites_run"         : len( self.suite_results ),
+                "total_passed"       : total_passed,
+                "total_failed"       : total_failed,
+                "total_errors"       : total_errors,
+                "total_skipped"      : total_skipped,
+                "total_not_executed" : total_not_executed,
+                "all_passed"         : all_passed,
             }
             self.artifacts[ "suite_results" ] = self.suite_results
             self.artifacts[ "cost_summary" ]  = self.cost_summary
@@ -561,14 +578,15 @@ class TestSuiteJob( AgenticJobBase ):
                 if result.get( "log_path" ):
                     self.artifacts[ f"{suite_type}_log" ] = result[ "log_path" ]
 
-            # Non-execution (nothing collected across every suite) is reported as
-            # "NOT EXECUTED", never the false-red "FAILURES DETECTED" (bug 89bfcc8f).
-            if total_found == 0:
-                overall = "NOT EXECUTED"
-            elif all_passed:
-                overall = "ALL PASSED"
-            else:
-                overall = "FAILURES DETECTED"
+            # Non-execution (nothing collected, or tiers that never ran with no
+            # genuine failure) is reported as "NOT EXECUTED", never the false-red
+            # "FAILURES DETECTED" (bug 89bfcc8f). overall_status already encodes the
+            # 3-way rule (FAILED dominates; not-executed blocks a clean pass).
+            overall = {
+                "PASSED"       : "ALL PASSED",
+                "FAILED"       : "FAILURES DETECTED",
+                "NOT EXECUTED" : "NOT EXECUTED",
+            }[ overall_status ]
 
             # ─── Write full report to io/ for the document viewer ───
             import urllib.parse
@@ -601,7 +619,8 @@ class TestSuiteJob( AgenticJobBase ):
 
             for suite_type, result in self.suite_results.items():
                 icon = self._OUTCOME_ICON[ self._classify_outcome(
-                    result[ "passed" ], result[ "failed" ], result[ "errors" ], result[ "skipped" ]
+                    result[ "passed" ], result[ "failed" ], result[ "errors" ], result[ "skipped" ],
+                    result.get( "not_executed", 0 )
                 ) ]
                 report_lines.append( f"## {suite_type} — {icon}" )
                 report_lines.append( f"" )
@@ -611,6 +630,7 @@ class TestSuiteJob( AgenticJobBase ):
                 report_lines.append( f"| Failed | {result[ 'failed' ]} |" )
                 report_lines.append( f"| Skipped | {result[ 'skipped' ]} |" )
                 report_lines.append( f"| Errors | {result[ 'errors' ]} |" )
+                report_lines.append( f"| Not executed | {result.get( 'not_executed', 0 )} |" )
                 report_lines.append( f"| Duration | {result[ 'duration' ]:.1f}s |" )
                 report_lines.append( f"" )
 
@@ -676,11 +696,14 @@ class TestSuiteJob( AgenticJobBase ):
             suite_lines = []
             for suite_type, result in self.suite_results.items():
                 icon = self._OUTCOME_ICON[ self._classify_outcome(
-                    result[ "passed" ], result[ "failed" ], result[ "errors" ], result[ "skipped" ]
+                    result[ "passed" ], result[ "failed" ], result[ "errors" ], result[ "skipped" ],
+                    result.get( "not_executed", 0 )
                 ) ]
+                ne = result.get( "not_executed", 0 )
                 line = ( f"- **{suite_type}**: {icon} — "
                          f"{result[ 'passed' ]} passed, {result[ 'failed' ]} failed, "
-                         f"{result[ 'errors' ]} errors, {result[ 'skipped' ]} skipped" )
+                         f"{result[ 'errors' ]} errors, {result[ 'skipped' ]} skipped"
+                         + ( f", {ne} not executed" if ne else "" ) )
                 crash_output = result.get( "startup_crash_output" )
                 if crash_output:
                     line += f"\n  **STARTUP CRASH** (exit={result[ 'exit_code' ]}): `{crash_output[ :500 ]}`"
@@ -1556,13 +1579,14 @@ class TestSuiteJob( AgenticJobBase ):
             xml_path: Path to the junit-xml report file
 
         Returns:
-            dict: Parsed counts with keys: passed, failed, skipped, errors
+            dict: Parsed counts with keys: passed, failed, skipped, errors, not_executed
         """
         result = {
-            "passed"  : 0,
-            "failed"  : 0,
-            "skipped" : 0,
-            "errors"  : 0,
+            "passed"       : 0,
+            "failed"       : 0,
+            "skipped"      : 0,
+            "errors"       : 0,
+            "not_executed" : 0,   # tiers that never ran (multi-tier runners); 0 for pytest suites
         }
 
         # None path = suite is not pytest-backed (e.g. websocket). Skip parse,
@@ -1833,16 +1857,21 @@ class TestSuiteJob( AgenticJobBase ):
         # passed/failed the same way websocket's runner summary is parsed. The
         # shared Passed/Failed regexes below already match it (bug 89bfcc8f).
 
-        total_match  = re.search( r"Total Tests:\s*(\d+)", stdout )
-        passed_match = re.search( r"\bPassed:\s*(\d+)",   stdout )
-        failed_match = re.search( r"\bFailed:\s*(\d+)",   stdout )
+        total_match         = re.search( r"Total Tests:\s*(\d+)",   stdout )
+        passed_match        = re.search( r"\bPassed:\s*(\d+)",      stdout )
+        failed_match        = re.search( r"\bFailed:\s*(\d+)",      stdout )
+        # "Not executed: N" — tiers that never ran (multi-tier runners like
+        # run-presentation-regression.sh). Surfaced distinctly so a tier that
+        # did not run reads NOT EXECUTED, not FAILED (bug 89bfcc8f).
+        not_executed_match  = re.search( r"Not executed:\s*(\d+)",  stdout )
 
-        if not ( total_match or passed_match or failed_match ):
+        if not ( total_match or passed_match or failed_match or not_executed_match ):
             return None
 
-        total  = int( total_match.group( 1 ) )  if total_match  else 0
-        passed = int( passed_match.group( 1 ) ) if passed_match else 0
-        failed = int( failed_match.group( 1 ) ) if failed_match else 0
+        total        = int( total_match.group( 1 ) )        if total_match        else 0
+        passed       = int( passed_match.group( 1 ) )       if passed_match       else 0
+        failed       = int( failed_match.group( 1 ) )       if failed_match       else 0
+        not_executed = int( not_executed_match.group( 1 ) ) if not_executed_match else 0
 
         # Sanity: prefer Passed/Failed over Total subtraction; reconcile if both available.
         if passed_match and failed_match and not total_match:
@@ -1857,10 +1886,11 @@ class TestSuiteJob( AgenticJobBase ):
                 return None
 
         return {
-            "passed"  : passed,
-            "failed"  : failed,
-            "skipped" : 0,
-            "errors"  : 0,
+            "passed"       : passed,
+            "failed"       : failed,
+            "skipped"      : 0,
+            "errors"       : 0,
+            "not_executed" : not_executed,
         }
 
 

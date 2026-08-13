@@ -458,9 +458,17 @@ def test_execute_failures_write_snapshot_and_crash_branches( monkeypatch, tmp_pa
     ( ( 5, 0, 0, 1 ), "PASSED" ),                             # ran clean
     ( ( 4, 1, 0, 0 ), "FAILED" ),                             # a real failure
     ( ( 0, 0, 1, 0 ), "FAILED" ),                             # a real error (e.g. subprocess crash)
+    # not_executed (5th arg) — a tier that never ran (bug 89bfcc8f):
+    ( ( 0, 0, 0, 0, 0 ), "NOT EXECUTED" ),                    # explicit 5-arg all-zero
+    ( ( 3, 0, 0, 0, 0 ), "PASSED" ),                          # every tier ran, clean
+    ( ( 0, 0, 0, 0, 2 ), "NOT EXECUTED" ),                    # only not-executed tiers
+    ( ( 2, 0, 0, 0, 1 ), "NOT EXECUTED" ),                    # some passed but a tier didn't run → not green
+    ( ( 2, 1, 0, 0, 1 ), "FAILED" ),                          # a genuine failure dominates a not-run tier
+    ( ( 0, 0, 1, 0, 1 ), "FAILED" ),                          # a genuine error dominates a not-run tier
 ] )
 def test_classify_outcome( counts, expected ):
-    """Zero-count is NOT EXECUTED; skipped-only counts as collected; failed/errors → FAILED."""
+    """Zero-count is NOT EXECUTED; skipped-only counts as collected; failed/errors →
+    FAILED; a not-executed tier blocks a clean pass without inflating failures."""
     assert TSJob._classify_outcome( *counts ) == expected
 
 
@@ -496,6 +504,44 @@ def test_execute_non_execution_reports_not_run_not_failed( monkeypatch, tmp_path
     assert "NOT RUN" in job.artifacts[ "abstract" ]
     assert "remediation_snapshot_path" not in job.artifacts
     assert job.cost_summary[ "all_passed" ] is False
+
+
+def _not_executed_tier_result( log_path=None ):
+    """A multi-tier run where a tier PASSED but another NEVER RAN (bug 89bfcc8f):
+    one passed, zero failed/errored, one not-executed. Not green, not a failure."""
+    return {
+        "passed": 1, "failed": 0, "skipped": 0, "errors": 0, "not_executed": 1,
+        "exit_code": 1, "log_path": log_path, "duration": 0.5,
+    }
+
+
+def test_execute_not_executed_tier_reports_not_run_not_failed( monkeypatch, tmp_path, patched_voice ):
+    """A tier that never ran (with another that passed) reports NOT EXECUTED overall
+    — never the false-red FAILURES DETECTED, and never a clean pass (bug 89bfcc8f)."""
+    job = _make_job( test_types=[ "presentation" ] )
+    monkeypatch.setattr( job_mod.cu, "get_project_root", lambda: str( tmp_path ) )
+    monkeypatch.setattr( job, "_run_suite", lambda st, pr: _not_executed_tier_result() )
+
+    summary = asyncio.run( job._execute() )
+
+    # Overall: NOT EXECUTED — not FAILURES DETECTED, not ALL PASSED
+    assert "NOT EXECUTED" in summary
+    assert "FAILURES DETECTED" not in summary
+    assert "ALL PASSED" not in summary
+
+    # Per-suite spoken line names the not-executed count and reads NOT EXECUTED
+    spoken = [ c.args[ 0 ] for c in patched_voice.call_args_list if c.args ]
+    per_suite = [ m for m in spoken if m.startswith( "presentation:" ) ]
+    assert per_suite and "NOT EXECUTED" in per_suite[ 0 ]
+    assert "1 not executed" in per_suite[ 0 ]
+
+    # Report table carries the Not-executed row + NOT RUN icon; not green
+    import pathlib
+    report = pathlib.Path( job.report_path ).read_text()
+    assert "presentation — NOT RUN" in report
+    assert "| Not executed | 1 |" in report
+    assert job.cost_summary[ "all_passed" ] is False
+    assert job.cost_summary[ "total_not_executed" ] == 1
 
 
 def test_execute_expands_all_with_debug( monkeypatch, tmp_path, patched_voice, capsys ):
@@ -891,7 +937,7 @@ def test_synth_failure_detail_empty_traceback_defaults():
 def test_parse_junit_xml_none_path_returns_zeros():
     """A None/empty path (non-pytest suite) returns zero counts."""
     assert TSJob._parse_junit_xml( None ) == {
-        "passed": 0, "failed": 0, "skipped": 0, "errors": 0 }
+        "passed": 0, "failed": 0, "skipped": 0, "errors": 0, "not_executed": 0 }
 
 
 def test_parse_junit_xml_missing_file_returns_zeros():
@@ -909,7 +955,7 @@ def test_parse_junit_xml_root_is_testsuite( tmp_path ):
     )
     parsed = TSJob._parse_junit_xml( str( p ) )
     assert parsed == { "passed": 195, "failed": 3, "skipped": 32, "errors": 1,
-                       "failure_details": [] }
+                       "not_executed": 0, "failure_details": [] }
 
 
 def test_parse_junit_xml_nested_with_failure_details( tmp_path ):
@@ -937,7 +983,7 @@ def test_parse_junit_xml_no_testsuite_element( tmp_path ):
     p = tmp_path / "j.xml"
     p.write_text( "<other></other>" )
     parsed = TSJob._parse_junit_xml( str( p ) )
-    assert parsed == { "passed": 0, "failed": 0, "skipped": 0, "errors": 0 }
+    assert parsed == { "passed": 0, "failed": 0, "skipped": 0, "errors": 0, "not_executed": 0 }
 
 
 def test_parse_junit_xml_parse_error( tmp_path ):
@@ -971,21 +1017,21 @@ def test_parse_non_pytest_stdout_full_counts():
     """Total/Passed/Failed all present → parsed directly."""
     out = TSJob._parse_non_pytest_stdout(
         "websocket", "Total Tests: 50\nPassed: 48\nFailed: 2\n" )
-    assert out == { "passed": 48, "failed": 2, "skipped": 0, "errors": 0 }
+    assert out == { "passed": 48, "failed": 2, "skipped": 0, "errors": 0, "not_executed": 0 }
 
 
 def test_parse_non_pytest_stdout_passed_failed_no_total():
     """Passed+Failed present, no Total → total reconstructed (unused) but counts kept."""
     out = TSJob._parse_non_pytest_stdout(
         "websocket", "Passed: 7\nFailed: 3\n" )
-    assert out == { "passed": 7, "failed": 3, "skipped": 0, "errors": 0 }
+    assert out == { "passed": 7, "failed": 3, "skipped": 0, "errors": 0, "not_executed": 0 }
 
 
 def test_parse_non_pytest_stdout_total_only_all_passed():
     """Only Total + the ALL-PASSED marker → infer all passed."""
     out = TSJob._parse_non_pytest_stdout(
         "websocket", "Total Tests: 12\nALL SMOKE TESTS PASSED\n" )
-    assert out == { "passed": 12, "failed": 0, "skipped": 0, "errors": 0 }
+    assert out == { "passed": 12, "failed": 0, "skipped": 0, "errors": 0, "not_executed": 0 }
 
 
 def test_parse_non_pytest_stdout_total_only_no_marker_is_none():
@@ -1014,19 +1060,44 @@ def test_parse_non_pytest_stdout_presentation_tier_summary():
         "  Failed tiers: opus-full\n"
     )
     out = TSJob._parse_non_pytest_stdout( "presentation", stdout )
-    assert out == { "passed": 2, "failed": 1, "skipped": 0, "errors": 0 }
+    assert out == { "passed": 2, "failed": 1, "skipped": 0, "errors": 0, "not_executed": 0 }
 
 
 def test_parse_non_pytest_stdout_presentation_all_tiers_pass():
     """A clean presentation run (Failed: 0) parses to passed-only."""
     out = TSJob._parse_non_pytest_stdout(
         "presentation", "  Total:  2 tiers\n  Passed: 2\n  Failed: 0\n" )
-    assert out == { "passed": 2, "failed": 0, "skipped": 0, "errors": 0 }
+    assert out == { "passed": 2, "failed": 0, "skipped": 0, "errors": 0, "not_executed": 0 }
 
 
 def test_parse_non_pytest_stdout_presentation_empty_is_none():
     """Empty presentation stdout returns None (preserve zero-counts → NOT EXECUTED)."""
     assert TSJob._parse_non_pytest_stdout( "presentation", "" ) is None
+
+
+def test_parse_non_pytest_stdout_presentation_not_executed_tier():
+    """A tier that never ran surfaces as not_executed, NOT folded into failed
+    (bug 89bfcc8f — the mixed real-fail + not-run shape from the 2026-08-13 run)."""
+    stdout = (
+        "  PRESENTATION REGRESSION RESULTS\n"
+        "  Total:  2 tiers\n"
+        "  Passed: 0\n"
+        "  Failed: 1\n"
+        "  Not executed: 1\n"
+        "  Failed tiers: render-only\n"
+        "  Not executed tiers: sonnet-full\n"
+    )
+    out = TSJob._parse_non_pytest_stdout( "presentation", stdout )
+    assert out == { "passed": 0, "failed": 1, "skipped": 0, "errors": 0, "not_executed": 1 }
+
+
+def test_parse_non_pytest_stdout_presentation_only_not_executed():
+    """A run where every tier failed to launch (Not executed only) parses with a
+    zero failed count — so _classify_outcome reads NOT EXECUTED, never FAILED."""
+    stdout = "  Total:  2 tiers\n  Passed: 0\n  Failed: 0\n  Not executed: 2\n"
+    out = TSJob._parse_non_pytest_stdout( "presentation", stdout )
+    assert out == { "passed": 0, "failed": 0, "skipped": 0, "errors": 0, "not_executed": 2 }
+    assert TSJob._classify_outcome( **out ) == "NOT EXECUTED"
 
 
 def test_parse_non_pytest_stdout_presentation_no_markers_is_none():
