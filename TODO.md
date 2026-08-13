@@ -54,9 +54,13 @@ content, not the count preamble.
 `query`, and podcast `languages/audience` all collide there. (8× "5 questions", 5× "4 questions", 1× "6
 questions".)
 
-**Why cleanup is not urgent**: post-fix, retrieval embeds and exact-matches on the CONTENT key, so
-these preamble-keyed rows are never retrieved (their preamble embeddings don't match a content-key
-query) and never exact-match — they are **inert, not actively harmful**. Cleanup is hygiene.
+**Why cleanup is not urgent — MEASURED, not inferred**: (1) the auto-submit hazard is closed by
+construction and tested — confidence 1.0 came only from the exact-match string compare, and a content
+key never equals a legacy preamble. (2) Read-only real-embedding probe: cos(content key, legacy
+preamble) = **0.43** for both podcast and vertex batches, far below the **0.85** open_ended_cbr
+retrieval floor, so a poison row is not even retrieved for a content-key query; the two live batches
+sit at 0.53 to each other (also below floor). These rows are **inert by measurement**, not actively
+harmful. Cleanup removes the last theoretical wrong-suggestion path — hygiene, not a live-hazard fix.
 
 **Deferred to Rick**: deleting/re-keying 46 live rows is destructive; Cheech's call was "get the number
 first, don't delete." The number is above. Options when ready: (a) leave inert, (b) hard-delete the 46,

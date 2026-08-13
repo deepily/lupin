@@ -839,6 +839,29 @@ def test_store_decision_keys_batch_on_content_not_preamble( wired_engine, monkey
     assert store.added[ 0 ][ "question" ] != _BATCH_PREAMBLE
 
 
+def test_legacy_poison_case_cannot_exact_match_or_reach_confidence_one( engine, monkeypatch ):
+    """
+    Even if a legacy preamble-keyed poison row were retrieved (worst case), a
+    content-key batch query can neither exact-match it (no confidence 1.0, so it
+    cannot clear the 0.9 auto-submit floor) nor pick it up above the fallback's
+    max_similarity. Empirically the poison sits at ~0.43 cosine to a content key
+    (< the 0.85 retrieval floor), so in practice it is not even retrieved.
+    """
+    vertex_dv = json.dumps( { "answers": { "Vertex project": "hello-world-foo", "Push": "hold" } } )
+    poison    = _case( 88.0, question=_BATCH_PREAMBLE, decision_value=vertex_dv )
+    monkeypatch.setattr( engine, "_get_embedding_store", lambda: FakeStore( cases=[ poison ] ) )
+    # Force Tier-2 to fail so the WORST path (llm_fallback → top_case) is exercised.
+    monkeypatch.setattr( engine, "_build_synthesis_prompt", lambda m, c: "PROMPT" )
+    monkeypatch.setattr( engine, "_get_llm_client", lambda: FakeLlmClient( raise_on_run=True ) )
+
+    podcast_key = PredictionEngine._batch_question_key( _BATCH_PREAMBLE, _PODCAST_OPTS )
+    r = engine._predict_open_ended_batch( podcast_key, "uncategorized", [ 0.1 ] )
+
+    assert r.metadata[ "tier" ] != "exact_match"     # the 1.0 auto-submit path is closed
+    assert r.confidence < 1.0                          # capped at max_similarity (0.88), never 1.0
+    assert r.confidence == pytest.approx( 0.88 )
+
+
 def test_store_decision_non_batch_still_uses_original_message( wired_engine, monkeypatch ):
     """Non-batch types (no batch_question_key) still key on original_message."""
     store = FakeStore()
