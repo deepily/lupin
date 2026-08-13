@@ -688,6 +688,24 @@ DM_CORPUS_SCHEMA_VERSION = 3
 # same commit with different config are the same code and a different treatment.
 DM_TUTOR_VERSION = "dm-tutor-1"
 
+# 🔴 THE RECIPIENT IS TOLD. Added 2026-08-13 after Cheech asked what the READER is
+# owed — a question the disclosure rule had never asked, because it was written
+# entirely about what the SENDER must not learn.
+#
+# Without this the recipient holds distilled prose believing it is the sender's own
+# words, and may quote it back at them. That is a real failure and it was invisible
+# to every test, because every test was checking that the trigger stayed secret.
+#
+# It names NO number and carries NO measurement of the sender's message, so it is
+# compatible with the trigger staying unpublished: it says THAT the message was
+# shortened, never how long it was or what height fired.
+#
+# ⚠️ IT MUST COUNT AS STRUCTURE. The canned P.S. taught this the hard way: a marker
+# appended to every compliant rewrite reads as an extra claim, so the tutor would
+# start rewriting its own output forever. `sentences.py` treats this exact line as
+# structure, and a test pins the two together.
+DM_TUTOR_NOTICE = "— shortened by the DM tutor; the wording is not the sender's."
+
 _DM_TUTOR_DEFAULTS = {
     "enabled"         : False,   # OFF unless config says otherwise — see below
     "trigger_claims"  : 4,       # fires on MORE THAN this many claims
@@ -825,7 +843,8 @@ def _apply_dm_tutor( body_text, config=None, rewrite_fn=None ):
             return body_text, meta
 
         meta[ "tutor_outcome" ] = "rewritten"
-        return rewritten, meta
+        # Tell the RECIPIENT the prose is not the sender's (Cheech, 2026-08-13).
+        return rewritten.rstrip() + "\n" + DM_TUTOR_NOTICE, meta
 
     except Exception as e:
         # The send path must survive anything the tutor does. An exception here means

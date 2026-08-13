@@ -95,8 +95,12 @@ class TestApplyDmTutor( unittest.TestCase ):
         self.assertEqual( called, [], "a compliant DM was sent to the model" )
 
     def test_over_the_trigger_delivers_the_rewrite( self ):
+        # Not an equality check: a delivered rewrite also carries the recipient notice
+        # (see TestTheRecipientIsTold). What matters here is that the REWRITE is what
+        # goes out and the sender's original does not.
         text, meta = self.apply( _VERBOSE, config=_cfg(), rewrite_fn=lambda b: "Verdict.\nOne.\nTwo." )
-        self.assertEqual( text, "Verdict.\nOne.\nTwo." )
+        self.assertIn( "Verdict.\nOne.\nTwo.", text )
+        self.assertNotIn( "I spent the morning tracing the leak", text )
         self.assertEqual( meta[ "tutor_outcome" ], "rewritten" )
         self.assertTrue( meta[ "tutor_fired" ] )
 
@@ -152,7 +156,7 @@ class TestApplyDmTutor( unittest.TestCase ):
         long_rewrite = "One. Two. Three. Four. Five. Six."
         text, meta = self.apply( _VERBOSE, config=_cfg( gate_enabled=False ),
                                  rewrite_fn=lambda b: long_rewrite )
-        self.assertEqual( text, long_rewrite )
+        self.assertIn( long_rewrite, text )          # + the recipient notice
         self.assertEqual( meta[ "tutor_outcome" ], "rewritten" )
 
     def test_the_shipped_default_has_the_gate_OFF( self ):
@@ -207,6 +211,80 @@ class TestApplyDmTutor( unittest.TestCase ):
         }
         self.assertEqual(
             outcomes, { "disabled", "under_trigger", "rewritten", "model_failed", "gate_rejected" }
+        )
+
+
+class TestTheRecipientIsTold( unittest.TestCase ):
+    """
+    The reader is owed the fact that the prose is not the sender's (Cheech, 2026-08-13).
+
+    ⚠️ THE GAP THIS CLOSES was invisible to every other test in this file, and the
+    reason is worth stating: every disclosure test here checks what the SENDER must not
+    learn. Nobody asked what the RECIPIENT is owed. So a reader could quote distilled
+    wording back at the person who never wrote it, and the whole suite stayed green.
+    """
+
+    def setUp( self ):
+        from cosa.rest.routers.dm import _apply_dm_tutor, DM_TUTOR_NOTICE
+        self.apply  = _apply_dm_tutor
+        self.notice = DM_TUTOR_NOTICE
+
+    def test_a_rewritten_dm_carries_the_notice( self ):
+        text, meta = self.apply( _VERBOSE, config=_cfg(), rewrite_fn=lambda b: "Verdict.\nOne.\nTwo." )
+        self.assertEqual( meta[ "tutor_outcome" ], "rewritten" )
+        self.assertIn( self.notice, text )
+
+    def test_an_UNtouched_dm_carries_no_notice( self ):
+        """A notice on a message the tutor never rewrote would be a lie about provenance."""
+        for label, text_in, cfg in (
+            ( "under trigger", _COMPLIANT, _cfg() ),
+            ( "disabled",      _VERBOSE,   _cfg( enabled=False ) ),
+        ):
+            with self.subTest( case=label ):
+                text, _ = self.apply( text_in, config=cfg, rewrite_fn=lambda b: "x." )
+                self.assertNotIn( self.notice, text )
+
+    def test_a_failed_rewrite_carries_no_notice( self ):
+        """The sender's own words went out — saying otherwise would be backwards."""
+        text, _ = self.apply( _VERBOSE, config=_cfg(), rewrite_fn=lambda b: None )
+        self.assertNotIn( self.notice, text )
+
+    def test_the_notice_names_no_number( self ):
+        """It says THAT the message was shortened, never how long it was or what fired."""
+        import re
+        self.assertIsNone( re.search( r"\d", self.notice ),
+                           f"the recipient notice leaks a number: {self.notice!r}" )
+
+    def test_the_notice_is_STRUCTURE_not_a_claim( self ):
+        """
+        🔴 THE CANNED-P.S. TRAP, which this would have sprung identically. The notice is
+        appended to EVERY rewrite, so if it counted as a claim, a clean three-claim
+        distillation would arrive reading as four — and the tutor would rewrite its own
+        output forever, firing hardest on the messages it had just fixed.
+        """
+        from cosa.agents.dm_tutor.sentences import count_sentences
+        self.assertEqual( count_sentences( self.notice ), 0 )
+
+        text, _ = self.apply( _VERBOSE, config=_cfg(), rewrite_fn=lambda b: "Verdict.\nOne.\nTwo." )
+        self.assertEqual( count_sentences( text ), 3, "the notice inflated the delivered claim count" )
+
+    def test_a_tutored_message_resent_does_not_re_trigger( self ):
+        """The end-to-end form of the trap: feeding a delivered message back in must not fire."""
+        text, _ = self.apply( _VERBOSE, config=_cfg(), rewrite_fn=lambda b: "Verdict.\nOne.\nTwo." )
+        _, meta = self.apply( text, config=_cfg(), rewrite_fn=lambda b: "SHOULD NOT FIRE" )
+        self.assertEqual( meta[ "tutor_outcome" ], "under_trigger" )
+
+    def test_the_counter_and_the_constant_cannot_drift_apart( self ):
+        """
+        Pins the two sides together. They live in different modules, and editing the
+        wording in dm.py alone would silently turn the notice back into a claim —
+        re-arming the trap with no test noticing.
+        """
+        from cosa.agents.dm_tutor.sentences import count_sentences
+        self.assertEqual(
+            count_sentences( self.notice ), 0,
+            "DM_TUTOR_NOTICE no longer matches the structure pattern in sentences.py — "
+            "edit both, or the tutor will start rewriting its own output"
         )
 
 

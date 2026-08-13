@@ -112,7 +112,12 @@ pilot is ever resumed.
 **The ruling**: *"Let's ship the tutor fleet-wide and leave teaching open."* Take the word saving now
 — it is certain and needs no experiment — and stop trying to buy the teaching answer in the same move.
 
-**What ships**: the tutor on every DM at the ruled trigger of **>6 claims**, runtime-configurable, **no
+> ⚠️ **SUPERSEDED 2026-08-13** — this block records the 08-12 ruling **as it was made**, and its trigger
+> value is no longer in force: Rick lowered it to **>4 claims** on 08-13. Left standing rather than edited
+> because a decisions log that quietly rewrites itself cannot be audited; the live value is at the top of
+> this file and in `dm tutor trigger claims`. Flagged by Cheech 🌿, who correctly did not restate either number.
+
+**What ships**: the tutor on every DM at the then-ruled trigger of **>6 claims** (now >4), runtime-configurable, **no
 output gate** (also runtime-configurable, default off). Expected: the average DM goes from ~8 sentences
 / 123 words to **4 sentences / 62 words — half of every word the fleet sends**, on ~1,634 calls per
 2,951 DMs.

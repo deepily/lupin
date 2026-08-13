@@ -96,6 +96,18 @@ _ATTACHMENT = re.compile(
 # right, and the tutor would rewrite its own house style forever.
 _CANNED_PS = re.compile( r"^\s*P\.?\s?S\.?\s+Need more detail\?.*$", re.IGNORECASE )
 
+# 🔴 THE TUTOR'S OWN RECIPIENT NOTICE IS STRUCTURE — the same trap as the P.S. above,
+# and it would have sprung the same way. The notice is appended to EVERY rewrite, so if
+# it counted as a claim, a clean three-claim distillation would arrive reading as four
+# and the tutor would rewrite its own output forever.
+#
+# It asserts nothing about the subject: it labels the message's provenance, which is
+# exactly the "structure, not a claim" rule. Kept in sync with DM_TUTOR_NOTICE in
+# dm.py by a test that fails if either side is edited alone.
+_TUTOR_NOTICE = re.compile(
+    r"^\s*[—-]\s*shortened by the DM tutor;.*$", re.IGNORECASE
+)
+
 # Decimals, versions, file:line, IP-ish runs, ellipses — periods that are not
 # sentence ends. Masked wholesale rather than excluded case by case.
 _NOT_A_FULL_STOP = re.compile(
@@ -153,8 +165,9 @@ def prose_lines( text ):
         if _TABLE_ROW.match( line ):  continue
         if _HEADING.match( line ):    continue
         if _HRULE.match( line ):      continue
-        if _ATTACHMENT.match( line ): continue
-        if _CANNED_PS.match( line ):  continue
+        if _ATTACHMENT.match( line ):    continue
+        if _CANNED_PS.match( line ):     continue
+        if _TUTOR_NOTICE.match( line ):  continue
 
         line = _BULLET.sub( "", line )
         line = _QUOTE.sub( "", line )
