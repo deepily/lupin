@@ -126,6 +126,25 @@ class TestMakePolicy( unittest.TestCase ):
 
 class TestLoadSchedule( unittest.TestCase ):
 
+    def setUp( self ):
+        """
+        SUSPENSION OFF for this class only (2026-08-13).
+
+        These tests assert a property of the COMMITTED SCHEDULE FILE — that its slots
+        actually resolve inside the declared windows, i.e. it is armed in fact and not
+        only on paper. Rick suspended the pilot on 2026-08-13, which makes
+        load_default_policy() short-circuit to an inactive policy before it ever reads
+        the file, so every one of those assertions would pass vacuously by asserting
+        None against None.
+
+        Patching the switch off here keeps them testing what they were written to test.
+        The suspension itself is asserted separately and explicitly by
+        TestSuspension below — a test whose subject IS the switch.
+        """
+        patcher = patch.object( dm_experiment, "is_suspended", lambda: False )
+        patcher.start()
+        self.addCleanup( patcher.stop )
+
     def test_missing_file_is_inactive( self ):
         slots, sid, exp = dm_experiment._load_schedule( "/no/such/schedule.json" )
         self.assertEqual( ( slots, sid, exp ), ( [], None, None ) )
@@ -615,6 +634,63 @@ class TestOutsideWindowUnchanged( _ExperimentHarness ):
         row = self._row()
         self.assertIn( "arm", row )                              # legacy stamp present
         self.assertNotIn( "effective_arm", row )                 # no experiment fields
+
+
+class TestSuspension( unittest.TestCase ):
+    """
+    The pilot is SUSPENDED (Rick, 2026-08-13) — the switch, not the schedule.
+
+    Separate from TestLoadSchedule above, which patches suspension OFF to keep
+    asserting that the committed schedule file is armed. The two together say the
+    whole truth: the schedule remains valid AND it is deliberately not running.
+    """
+
+    def tearDown( self ):
+        dm_experiment.reset_policy()
+
+    def test_suspended_yields_an_inactive_policy_for_every_instant( self ):
+        """
+        The load-side behaviour that makes suspension real. A slot that WOULD resolve
+        (proven live by TestLoadSchedule, same instant) must resolve to None while
+        suspended — else the tutor and a rejecting hour could both be in force and no
+        corpus row could say which one produced the saving.
+        """
+        live_instant = datetime( 2026, 8, 7, 16, 30, tzinfo=timezone.utc )   # Fri 12:00 EDT
+        with patch.object( dm_experiment, "is_suspended", lambda: True ):
+            policy = dm_experiment.load_default_policy()
+        self.assertIsNone( policy.assignment_at( live_instant ) )
+        self.assertEqual( policy._slots, [] )
+        self.assertIsNone( policy.schedule_id )
+
+    def test_not_suspended_still_resolves_that_same_instant( self ):
+        """
+        The CONTROL for the test above. Without it, an inactive policy caused by a
+        broken schedule read would look exactly like a working suspension — the
+        assertion would pass for the wrong reason and keep passing forever.
+        """
+        live_instant = datetime( 2026, 8, 7, 16, 30, tzinfo=timezone.utc )
+        with patch.object( dm_experiment, "is_suspended", lambda: False ):
+            policy = dm_experiment.load_default_policy()
+        self.assertIsNotNone( policy.assignment_at( live_instant ) )
+
+    def test_config_read_failure_suspends_rather_than_resumes( self ):
+        """
+        FAIL-SAFE DIRECTION. A config that cannot be read must leave the pilot OFF: a
+        silent resume would gate live fleet traffic on an arm nobody chose, while a
+        silent suspend costs only that the pilot stays stopped — which is the ruled
+        state anyway.
+        """
+        with patch( "cosa.config.configuration_manager.ConfigurationManager",
+                    side_effect=RuntimeError( "config unreadable" ) ):
+            self.assertTrue( dm_experiment.is_suspended() )
+
+    def test_the_shipped_config_actually_has_the_pilot_suspended( self ):
+        """
+        Asserts the SHIPPED value, not the mechanism. Every test above patches the
+        switch, so all of them would still pass if lupin-app.ini said False and the
+        pilot were quietly running in production.
+        """
+        self.assertTrue( dm_experiment.is_suspended() )
 
 
 if __name__ == "__main__":

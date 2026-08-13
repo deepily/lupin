@@ -64,6 +64,17 @@ KNOWN_DIVERGENT_MOUNTS = {
         "cloud-test": "2026-07-26 — test-runner config; the cloud legs are not test venues.",
         "cloud-gpu" : "2026-07-26 — same.",
     },
+    "/var/lupin/dm-corpus": {
+        "cloud-test": "2026-08-13 Mr. Radio — the DM traffic corpus is bind-mounted from "
+                      "the DEV BOX's <projects-data>/lupin/dm-corpus, a host path that does "
+                      "not exist on a GCP VM. The writer degrades correctly without the "
+                      "mount: with LUPIN_DM_CORPUS_DIR unset it derives a path from the "
+                      "fleet data root, which is still OUTSIDE the repo (the property that "
+                      "matters) but container-local and therefore ephemeral. Accepted — the "
+                      "corpus is a dev-box research dataset, and the cloud legs send no "
+                      "fleet DM traffic to collect.",
+        "cloud-gpu" : "2026-08-13 — same.",
+    },
     # ── repo-root deploy artifacts the UNIT SUITE asserts about (bug b5b6d252) ──
     # Mounted read-only into dev + test because 19 unit tests read them and were
     # failing in-container with FileNotFoundError while passing on the host.
@@ -235,6 +246,22 @@ KNOWN_DIVERGENT_MOUNTS = {
 
 # ── KNOWN_DIVERGENT_ENV ───────────────────────────────────────────────────
 KNOWN_DIVERGENT_ENV = {
+    "LUPIN_DM_CORPUS_DIR": {
+        "cloud-test": "2026-08-13 Mr. Radio — names the dev-box bind-mount that the cloud "
+                      "legs do not have (see KNOWN_DIVERGENT_MOUNTS /var/lupin/dm-corpus). "
+                      "UNSET IS A SUPPORTED STATE, not a gap: the resolver falls back to a "
+                      "fleet-data-root derivation that is still outside the repo. Setting it "
+                      "on a leg with no such mount would be worse — it would name a directory "
+                      "nobody backs up and read as deliberate.",
+        "cloud-gpu" : "2026-08-13 — same.",
+    },
+    "LUPIN_SERVER_PORT": {
+        "cloud-test": "2026-08-13 Mr. Radio — corpus provenance only: it labels which server "
+                      "wrote a DM row so :7999 and :8000 traffic stays separable in one shared "
+                      "file. The cloud legs write no fleet DM traffic, and the row records "
+                      "'unknown' rather than guessing when it is absent.",
+        "cloud-gpu" : "2026-08-13 — same.",
+    },
     "CHROME_PATH": {
         "cloud-test": "2026-07-26 — Playwright/mux E2E is a dev-box venue.",
         "cloud-gpu" : "2026-07-26 — same.",

@@ -342,15 +342,126 @@ def _record_dm_length( body_text ):
 # row 49a76406 readout). This is a SEPARATE, ADDITIVE sink that stops discarding
 # the rows: one JSON object per DM, append-only, never read-modify-write.
 #
-# WHERE: src/tmp/ — gitignored (the bare `tmp` pattern, .gitignore:5; verified
-# with `git check-ignore -v`) and /var/lupin/src is bind-mounted READ-WRITE, so
-# the file appears in Rick's own repo shell the instant it is written — no compose
-# change, no recreate, no migration.
+# WHERE: OUTSIDE THE REPO, in the fleet data root (Rick, 2026-08-13). The corpus
+# used to live at src/tmp/dm_traffic.jsonl — gitignored, but INSIDE the tree, and
+# that is the defect his instruction names: a gitignored path inside the checkout
+# is on `git clean -xdf`'s kill list, not shielded by it (the same reasoning that
+# moved hold files and every other runtime artifact out, rows 8758d0b1 / f56fc63b).
 #
-# ⚠️ SAFE ONLY BECAUSE AUTO-RELOAD IS OFF (verified: LUPIN_RELOAD empty in the dev
-# container, live process is a plain `python3 -m lupin_app.main`, no --reload). A
-# watched-dir write under src/ with --reload ON would bounce the server per DM.
-_DM_TRAFFIC_JSONL = cu.get_project_root() + "/src/tmp/dm_traffic.jsonl"
+# The path resolves in this order:
+#   1. $LUPIN_DM_CORPUS_DIR        — what the containers set, pointing at the mount
+#   2. fleet_data_root()/dm-corpus — the host-side derivation every other runtime
+#                                    artifact already uses
+# Both name the SAME physical directory: docker-compose bind-mounts the host's
+# <projects-data>/lupin/dm-corpus at /var/lupin/dm-corpus. ⚠️ That mount and the
+# env var resolve at container CREATE, so picking them up needs
+# `docker compose up -d --force-recreate`, never a plain restart.
+_DM_CORPUS_DIR_ENV = "LUPIN_DM_CORPUS_DIR"
+
+
+def _resolve_dm_corpus_dir():
+    """
+    The directory the DM traffic corpus is written to — outside the repo, always.
+
+    Ensures:
+        - returns $LUPIN_DM_CORPUS_DIR when set (the container's mount point)
+        - otherwise returns <fleet data root>/dm-corpus, the same convention hold
+          files and the rest of the fleet's runtime state already use
+        - NEVER returns a path inside the repo checkout. The last-resort fallback,
+          used only if the fleet-root helper cannot be imported, derives the same
+          location arithmetically rather than degrading to src/tmp/ — a silent
+          degradation back into the tree would undo the whole point of the move.
+
+    Raises:
+        - nothing
+    """
+    override = os.environ.get( _DM_CORPUS_DIR_ENV )
+    if override: return override
+    try:
+        from lupin_cli.claude_code.hooks.lib.heartbeat_hold import fleet_data_root
+        return str( fleet_data_root() / "dm-corpus" )
+    except Exception:
+        # Same formula as fleet_data_root's own fallback: <projects-parent>/projects-data/<repo>.
+        root = os.path.abspath( cu.get_project_root() )
+        return os.path.join(
+            os.path.dirname( os.path.dirname( root ) ), "projects-data",
+            os.path.basename( root ), "dm-corpus"
+        )
+
+
+_DM_TRAFFIC_JSONL = os.path.join( _resolve_dm_corpus_dir(), "dm_traffic.jsonl" )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PROCESS PROVENANCE (Rick, 2026-08-13): "tag all DMs generated with enough
+# identifying information that we can understand exactly which process created
+# the serialized copies."
+#
+# The corpus is append-only and accumulates across restarts, code changes, config
+# changes, and both servers. Without this block, a reader holding two rows that
+# disagree has no way to tell whether they came from different CODE, different
+# CONFIG, or the same process on two days — and every such question has previously
+# been answered by inferring from timestamps, which is exactly the mistake the
+# `origin` stamp was added to retire.
+#
+# `boot_id` is the load-bearing field: it is unique per PROCESS, so all rows from
+# one server lifetime group exactly, and a restart is visible as a boundary rather
+# than reconstructed from a gap in `ts`.
+_PROCESS_BOOT_ID = uuid.uuid4().hex[ :12 ]
+
+
+def _resolve_git_sha():
+    """
+    The commit this process's tree was at when it booted — resolved ONCE.
+
+    A long-lived server imports its tree at boot and serves those bytes for its whole
+    life (auto-reload is off), so the sha that matters is the one read at import, not
+    the one a reader would get by running git later.
+
+    Ensures:
+        - returns a short sha string, or "unknown" on any failure
+        - never raises, never blocks longer than the subprocess timeout
+
+    Raises:
+        - nothing
+    """
+    try:
+        import subprocess
+        out = subprocess.run(
+            [ "git", "rev-parse", "--short", "HEAD" ], cwd=cu.get_project_root(),
+            capture_output=True, text=True, timeout=5,
+        )
+        return out.stdout.strip() or "unknown"
+    except Exception:
+        return "unknown"
+
+
+_PROCESS_GIT_SHA = _resolve_git_sha()
+
+
+def _process_provenance():
+    """
+    The identifying block stamped onto every corpus row.
+
+    Ensures:
+        - returns a fresh dict (a caller cannot mutate the shared stamp)
+        - every value is JSON-serializable
+        - identifies the PROCESS (boot_id, pid, host, port) and the CODE
+          (git_sha, writer, schema version) separately, because they answer
+          different questions and a single "version" field answers neither well
+
+    Raises:
+        - nothing
+    """
+    return {
+        "corpus_schema_version" : DM_CORPUS_SCHEMA_VERSION,
+        "writer"                : "dm.py:_persist_dm_row",
+        "boot_id"               : _PROCESS_BOOT_ID,
+        "pid"                   : os.getpid(),
+        "host"                  : os.environ.get( "HOSTNAME" ) or "unknown",
+        "server_port"           : os.environ.get( "LUPIN_SERVER_PORT" ) or "unknown",
+        "git_sha"               : _PROCESS_GIT_SHA,
+    }
 
 # The ONE TRUE production corpus path, captured as its own constant that the test
 # conftest's `patch.object(dm, "_DM_TRAFFIC_JSONL", tmp)` NEVER touches (row f5d6dc5e).
@@ -368,7 +479,8 @@ def _running_under_pytest():
 
 
 def _persist_dm_row( *, body_text, from_persona, from_session, from_project,
-                     to_persona, to_session, quality, experiment=None ):
+                     to_persona, to_session, quality, experiment=None,
+                     delivered_text=None, tutor=None ):
     """
     Append ONE JSON line describing this sent DM to the traffic corpus.
 
@@ -380,6 +492,9 @@ def _persist_dm_row( *, body_text, from_persona, from_session, from_project,
         - experiment is the two-arm-pilot field dict (schedule_id, effective_arm,
           length_gate, delivery_outcome, ...) when the send fell INSIDE the experiment
           window, or None outside it
+        - body_text is what the SENDER SUBMITTED; delivered_text is what the recipient
+          actually received (None means "identical to submitted")
+        - tutor is _apply_dm_tutor's meta dict, or None when the tutor never ran
 
     Ensures:
         - SELF-GUARD (row f5d6dc5e): refuses to write the PRODUCTION corpus from any
@@ -410,6 +525,14 @@ def _persist_dm_row( *, body_text, from_persona, from_session, from_project,
     if under_pytest and _DM_TRAFFIC_JSONL == _DM_TRAFFIC_PRODUCTION_PATH:
         return
     try:
+        # SUBMITTED vs DELIVERED. Before the tutor these were always the same string
+        # and one `body` field was honest. They can now differ, and recording only one
+        # would make the tutor's effect unmeasurable in the exact corpus built to
+        # measure it: with only the delivered text you cannot recover what the sender
+        # wrote, and with only the submitted text you cannot see what was sent.
+        # `delivered_text=None` means "identical", recorded explicitly rather than
+        # left for a reader to assume.
+        delivered = body_text if delivered_text is None else delivered_text
         row = {
             "ts"           : datetime.now().isoformat( timespec="seconds" ),
             "origin"       : "test" if under_pytest else "live",
@@ -418,15 +541,30 @@ def _persist_dm_row( *, body_text, from_persona, from_session, from_project,
             "from_project" : from_project,
             "to"           : to_persona,
             "to_session"   : to_session,
+            # UNCHANGED NAMES, UNCHANGED MEANING: `words`/`chars`/`sentences`/`body`
+            # keep describing what the SENDER SUBMITTED, so every query written
+            # against the existing corpus keeps returning what it returned before.
             "words"        : dm_word_count( body_text ),
             "chars"        : len( body_text ),
             "sentences"    : _count_sentences( body_text ),
             "body"         : body_text,
+            # The canonical CLAIM count (ruling 4) recorded ALONGSIDE the legacy naive
+            # count, never replacing it. Rows written before today carry only the naive
+            # one, so overwriting the field would silently make old and new rows
+            # incomparable while looking like a single clean column.
+            "claims"          : _count_claims( body_text ),
+            "delivered_body"  : delivered,
+            "delivered_words" : dm_word_count( delivered ),
+            "delivered_claims": _count_claims( delivered ),
+            "body_was_rewritten" : delivered != body_text,
             "len_grade"    : quality[ "length"     ][ "weight" ] if quality else None,
             "directness"   : quality[ "directness" ][ "weight" ] if quality else None,
             "tone"         : quality[ "tone"       ][ "weight" ] if quality else None,
             "overall"      : quality[ "overall"    ][ "weight" ] if quality else None,
         }
+        row.update( _process_provenance() )
+        if tutor is not None:
+            row.update( tutor )
         # BASELINE (outside the window): stamp the legacy feedback arm exactly as before.
         # IN-WINDOW: the disjoint two-arm vocabulary applies — `arm` is ABSENT and the
         # experiment fields (effective_arm, length_gate, ...) are merged in, so NO row
@@ -435,6 +573,9 @@ def _persist_dm_row( *, body_text, from_persona, from_session, from_project,
             row[ "arm" ] = get_dm_feedback_arm()
         else:
             row.update( experiment )
+        # The corpus dir lives outside the repo now, so it is not created by a
+        # checkout and will not exist on a fresh box or a fresh container mount.
+        os.makedirs( os.path.dirname( _DM_TRAFFIC_JSONL ), exist_ok=True )
         with open( _DM_TRAFFIC_JSONL, "a", encoding="utf-8" ) as f:
             f.write( json.dumps( row, ensure_ascii=False ) + "\n" )
     except Exception as e:
@@ -515,6 +656,184 @@ def get_dm_feedback_arm():
     except Exception:
         reject = False
     return "reject_on_overage" if reject else "signal_only"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# THE DM TUTOR — live on the send path (Rick, 2026-08-13: "implement it fully and
+# make sure it's actually in use").
+#
+# The tutor was built 2026-08-11 and shipped nothing, because nothing called it.
+# This is the call. Every DM over the trigger is distilled to the house shape —
+# a headline, two supporting statements, and the path when one is present —
+# before it is delivered.
+#
+# 🔴 THE TRIGGER NUMBER IS NEVER DISCLOSED, and that is a measurement decision, not
+# a preference. The tutor names the target ("here it is in three"), never the
+# height that fired it, and the rewritten DM carries no count of the sender's
+# original. A count shown only when the tutor fires leaks the trigger by
+# arithmetic — the reader subtracts and learns exactly where the line sits, then
+# writes to the line instead of to the shape.
+#
+# FAIL-CLOSED THROUGHOUT. Every failure — config unreadable, model down, malformed
+# response, gate rejection — delivers the SENDER'S ORIGINAL TEXT. A tutor that
+# occasionally mangles a message is worse than no tutor, because the recipient
+# cannot tell which kind of message they are holding.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Bumped when the row SHAPE changes, so a reader never has to infer the schema from
+# which keys happen to be present in the rows they sampled.
+DM_CORPUS_SCHEMA_VERSION = 3
+
+# Identifies the tutor's behaviour, independent of the git sha: two processes on the
+# same commit with different config are the same code and a different treatment.
+DM_TUTOR_VERSION = "dm-tutor-1"
+
+_DM_TUTOR_DEFAULTS = {
+    "enabled"         : False,   # OFF unless config says otherwise — see below
+    "trigger_claims"  : 4,       # fires on MORE THAN this many claims
+    "gate_enabled"    : False,   # Rick ruled: no output gate, default off
+    "gate_max_claims" : 4,
+}
+
+
+def get_dm_tutor_config():
+    """
+    Read the tutor's runtime knobs from lupin-app.ini.
+
+    Runtime-configurable was Rick's explicit requirement — "so that we can dial it
+    down if we find that the length of the DMs is rising to the enforced limit" —
+    so nothing here is a constant in code.
+
+    Ensures:
+        - returns a dict with enabled / trigger_claims / gate_enabled / gate_max_claims
+        - a config-read failure returns the defaults with enabled FALSE, so an
+          unreadable config delivers original messages rather than routing every DM
+          in the fleet through a model on assumptions
+
+    Raises:
+        - nothing
+    """
+    from cosa.config.configuration_manager import ConfigurationManager
+    try:
+        cm = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+        return {
+            "enabled"         : cm.get( "dm tutor enabled",                default=False, return_type="boolean" ),
+            "trigger_claims"  : cm.get( "dm tutor trigger claims",         default=4,     return_type="int" ),
+            "gate_enabled"    : cm.get( "dm tutor output gate enabled",    default=False, return_type="boolean" ),
+            "gate_max_claims" : cm.get( "dm tutor output gate max claims", default=4,     return_type="int" ),
+        }
+    except Exception as e:
+        print( f"[dm-tutor] WARNING: config read failed, tutor OFF for this send: {e}" )
+        return dict( _DM_TUTOR_DEFAULTS )
+
+
+def _count_claims( body_text ):
+    """
+    The CANONICAL sentence count — the claim counter (ruling 4, 2026-08-12).
+
+    A sentence is a unit that carries a claim; structure (tables, code fences,
+    headings, pointer lines, the canned P.S.) asserts nothing and is not counted.
+    This is the counter the tutor's trigger reads, so the audit and the trigger can
+    never disagree about how long a message is.
+
+    Ensures:
+        - returns a non-negative int
+        - returns 0 rather than raising if the counter module cannot be imported,
+          which reads as "no claims" and therefore never fires the tutor
+
+    Raises:
+        - nothing
+    """
+    try:
+        from cosa.agents.dm_tutor.sentences import count_sentences
+        return count_sentences( body_text )
+    except Exception:
+        return 0
+
+
+def _apply_dm_tutor( body_text, config=None, rewrite_fn=None ):
+    """
+    Distil one DM body if it is over the trigger. Returns ( delivered_text, meta ).
+
+    Requires:
+        - body_text is a string
+
+    Ensures:
+        - returns ( text_to_deliver, meta_dict ) and NEVER raises
+        - text_to_deliver is body_text UNCHANGED on every path except a successful,
+          gate-passing rewrite
+        - meta_dict always states the outcome explicitly, so a corpus reader can tell
+          "the tutor was off", "it did not fire", "it fired and failed" and "it fired
+          and rewrote" apart. These were one silence before; a row that merely lacks a
+          rewrite cannot say WHICH of those four happened
+        - `tutor_claims_out` is recorded only when a rewrite came back, so a null is
+          honestly "no output existed", not "output measured as zero"
+
+    Raises:
+        - nothing
+    """
+    config = config if config is not None else get_dm_tutor_config()
+    meta   = {
+        "tutor_version"        : DM_TUTOR_VERSION,
+        "tutor_enabled"        : bool( config[ "enabled" ] ),
+        "tutor_trigger_claims" : config[ "trigger_claims" ],
+        "tutor_gate_enabled"   : bool( config[ "gate_enabled" ] ),
+        "tutor_fired"          : False,
+        "tutor_outcome"        : "disabled",
+        "tutor_claims_in"      : None,
+        "tutor_claims_out"     : None,
+        "tutor_words_in"       : None,
+        "tutor_words_out"      : None,
+        "tutor_error"          : None,
+    }
+
+    try:
+        if not config[ "enabled" ]:
+            return body_text, meta
+
+        claims_in                 = _count_claims( body_text )
+        meta[ "tutor_claims_in" ] = claims_in
+        meta[ "tutor_words_in" ]  = dm_word_count( body_text )
+
+        if claims_in <= config[ "trigger_claims" ]:
+            meta[ "tutor_outcome" ] = "under_trigger"
+            return body_text, meta
+
+        # OVER THE TRIGGER — this is the one path that calls a model.
+        meta[ "tutor_fired" ] = True
+        if rewrite_fn is None:
+            from cosa.agents.dm_tutor.agent import rewrite_dm as rewrite_fn
+
+        rewritten = rewrite_fn( body_text )
+        if not rewritten or not rewritten.strip():
+            # rewrite_dm is itself fail-closed and returns None on every internal
+            # failure; it does not say why. "model_failed" is therefore the honest
+            # label for the whole class, not a diagnosis of one cause.
+            meta[ "tutor_outcome" ] = "model_failed"
+            return body_text, meta
+
+        claims_out                 = _count_claims( rewritten )
+        meta[ "tutor_claims_out" ] = claims_out
+        meta[ "tutor_words_out" ]  = dm_word_count( rewritten )
+
+        # OUTPUT GATE — ruled OFF by default. When an operator turns it on, a rewrite
+        # that is itself over the limit is discarded rather than delivered, and the
+        # original goes out. Kept configurable because it is the only defence if a
+        # future model starts returning long "distillations".
+        if config[ "gate_enabled" ] and claims_out > config[ "gate_max_claims" ]:
+            meta[ "tutor_outcome" ] = "gate_rejected"
+            return body_text, meta
+
+        meta[ "tutor_outcome" ] = "rewritten"
+        return rewritten, meta
+
+    except Exception as e:
+        # The send path must survive anything the tutor does. An exception here means
+        # the original message is delivered and the row says so.
+        meta[ "tutor_outcome" ] = "error"
+        meta[ "tutor_error" ]   = f"{type( e ).__name__}: {e}"
+        print( f"[dm-tutor] WARNING: tutor raised, delivering original: {meta[ 'tutor_error' ]}" )
+        return body_text, meta
 
 
 def reset_dm_quality_audit():
@@ -1051,7 +1370,22 @@ def execute_dm_send(
             grade_quality_fn      = grade_quality_fn,
         )
 
-    # ── BASELINE (outside the experiment window) — today's behaviour, unchanged ──
+    # ── BASELINE (outside the experiment window) — and, since the two-arm pilot is
+    # suspended, the ONLY live path. This is where the tutor runs.
+    #
+    # ORDER MATTERS: the tutor rewrites BEFORE _prepare_outbound, so the distilled
+    # text is what gets EDT-stamped, persisted to the notification store, and pushed
+    # to the recipient. Rewriting after prep would deliver the original and record a
+    # rewrite that nobody received — the corpus would then describe a treatment the
+    # fleet never got.
+    submitted_text     = body.body
+    delivered_text, tutor_meta = _apply_dm_tutor( submitted_text )
+    if delivered_text != submitted_text:
+        # Mutating the request model is deliberate: _prepare_outbound and
+        # _dispatch_outbound both read body.body, and threading a separate text
+        # through them would leave two sources of truth for "what are we sending".
+        body.body = delivered_text
+
     prep   = _prepare_outbound(
         body=body, target_session_id=target_session_id,
         build_sender_id=build_sender_id, new_id_fn=new_id_fn, now_fn=now_fn,
@@ -1066,6 +1400,10 @@ def execute_dm_send(
     # OFF (control) → grade_quality_fn returns None → the result shape is the Phase 1
     # baseline, unchanged. The judge grades body.body (the raw composed text), not the
     # EDT-stamped outbound body — the stamp is per-DM overhead, not the sender's prose.
+    # The judge grades what was actually DELIVERED (body.body carries the tutor's
+    # rewrite when one happened). Grading the submitted text instead would score a
+    # message nobody received, and the length grade in particular would then describe
+    # the problem the tutor had just solved.
     quality = grade_quality_fn( body.body )
     if quality is not None:
         result[ "quality" ] = quality
@@ -1075,13 +1413,15 @@ def execute_dm_send(
     # one line up. Fail-soft lives inside the writer. `experiment=None` → the row keeps
     # its legacy `arm` stamp (no two-arm fields), the outside-window contract.
     _persist_dm_row(
-        body_text    = body.body,
-        from_persona = body.sender_persona,
-        from_session = body.sender_session_id,
-        from_project = body.sender_project,
-        to_persona   = target_persona,
-        to_session   = target_session_id,
-        quality      = quality,
+        body_text      = submitted_text,
+        delivered_text = delivered_text,
+        tutor          = tutor_meta,
+        from_persona   = body.sender_persona,
+        from_session   = body.sender_session_id,
+        from_project   = body.sender_project,
+        to_persona     = target_persona,
+        to_session     = target_session_id,
+        quality        = quality,
     )
 
     return result

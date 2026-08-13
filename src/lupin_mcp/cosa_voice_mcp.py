@@ -627,8 +627,18 @@ _DM_STYLE_CONTRACT_SECTION = (
     "sentences — write it as a human colleague would read it, no invented "
     "vocabulary. Report only decisions, evidence, risks, and required "
     "actions; do not narrate routine reasoning or verification; no "
-    "metaphors, aphorisms, slogans, or redundant summaries. 3 lines / "
-    f"~60 words; longer ONLY WHEN ASKED. {DM_STYLE_TAG}\n\n"
+    "metaphors, aphorisms, slogans, or redundant summaries. "
+    # Rick, 2026-08-13: "3 sentences and a path with no word counts to be found
+    # anywhere." The word budget that used to sit here ("3 lines / ~60 words") is
+    # gone deliberately — a count in the composition contract is the same leak the
+    # tutor's trigger number is kept out of: it teaches the fleet to write TO a
+    # number rather than to the shape. The path clause is load-bearing, because
+    # without it the pointer reads as a fourth sentence and the compliant house
+    # style looks non-compliant (María, 2026-08-13).
+    "Say it in three sentences — a headline and two supporting statements. "
+    "When the detail lives somewhere, send the path instead of the detail. The "
+    "path is a pointer, not a fourth sentence, and does not count against the "
+    f"three. Longer ONLY WHEN ASKED. {DM_STYLE_TAG}\n\n"
 )
 
 

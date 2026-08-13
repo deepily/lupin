@@ -593,17 +593,48 @@ class TestDmTrafficJsonlCorpus( _CoreHarness ):
         self.assertFalse( os.path.exists( self.corpus_path ) )
 
     def test_write_failure_is_fail_soft_and_the_dm_still_sends( self ):
-        """GATE (c) — FORCE the except arm. The sink path points into a directory that
-        does not exist, so the append raises FileNotFoundError inside the writer. The
-        DM must still return 201 dispatched=True, and no file may appear (proving the
-        write genuinely threw and was swallowed, not silently succeeded)."""
+        """GATE (c) — FORCE the except arm. The DM must still return 201
+        dispatched=True, and no file may appear (proving the write genuinely threw and
+        was swallowed, not silently succeeded).
+
+        ⚠️ THE OLD FORCING TRICK NO LONGER FORCES ANYTHING (2026-08-13). This test used
+        to point the sink into a directory that did not exist. Since the corpus moved
+        OUT of the repo, the writer calls os.makedirs(exist_ok=True) first — because
+        the fleet data dir is not created by a checkout and will not exist on a fresh
+        box or a fresh container mount — so a missing parent is now CREATED and the
+        write SUCCEEDS. The test kept its name and its assertions and would have
+        quietly stopped exercising the except arm at all.
+
+        A regular FILE standing where the parent directory must be is unfixable by
+        makedirs (NotADirectoryError / FileExistsError), so the except arm is genuinely
+        forced again."""
         import cosa.rest.routers.dm as dm
-        missing = os.path.join( tempfile.mkdtemp(), "no_such_dir", "dm.jsonl" )
-        with patch.object( dm, "_DM_TRAFFIC_JSONL", missing ):
+        blocker = os.path.join( tempfile.mkdtemp(), "i_am_a_file_not_a_dir" )
+        with open( blocker, "w", encoding="utf-8" ) as f: f.write( "x" )
+        unwritable = os.path.join( blocker, "dm.jsonl" )
+        with patch.object( dm, "_DM_TRAFFIC_JSONL", unwritable ):
             result = self._run_with_grader( _make_send_body( sender_project="plan" ), lambda b: self._GRADE )
         self.assertEqual( result[ "http_status" ], 201 )
         self.assertTrue( result[ "dispatched" ] )
-        self.assertFalse( os.path.exists( missing ) )
+        self.assertFalse( os.path.exists( unwritable ) )
+
+    def test_a_missing_corpus_directory_is_created_rather_than_dropping_the_row( self ):
+        """The NEW behaviour the test above had to stop relying on, asserted directly.
+
+        The corpus lives outside the repo now, so its directory is not created by a
+        checkout — on a fresh box, a fresh container mount, or the first send after the
+        relocation, the parent simply is not there. If the writer treated that as a
+        write failure, the corpus would silently collect NOTHING until somebody
+        happened to mkdir it, and the fail-soft swallow means nobody would be told."""
+        import cosa.rest.routers.dm as dm
+        fresh = os.path.join( tempfile.mkdtemp(), "not_yet_created", "dm.jsonl" )
+        self.assertFalse( os.path.exists( os.path.dirname( fresh ) ) )
+        with patch.object( dm, "_DM_TRAFFIC_JSONL", fresh ):
+            result = self._run_with_grader( _make_send_body( sender_project="plan", body="short one." ), lambda b: None )
+        self.assertEqual( result[ "http_status" ], 201 )
+        self.assertTrue( os.path.exists( fresh ), "the row was dropped instead of the dir being created" )
+        row = json.loads( open( fresh, encoding="utf-8" ).read().splitlines()[ 0 ] )
+        self.assertEqual( row[ "words" ], 2 )
 
     def test_a_send_path_test_never_writes_the_real_production_corpus( self ):
         """GUARD (row 334569d6 CHANGES-REQUESTED). The harness MUST redirect the sink

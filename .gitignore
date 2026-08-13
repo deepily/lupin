@@ -191,3 +191,11 @@ coverage/
 .*-groundtruth-*.md
 io/mementos/
 lupin-worktrees/
+
+# DM traffic corpus — lives OUTSIDE the repo (Rick, 2026-08-13). The corpus is
+# accumulating runtime data, not source: it belongs in <projects-data>/lupin/dm-corpus.
+# These patterns are a BACKSTOP, not the mechanism — the writer resolves its path via
+# $LUPIN_DM_CORPUS_DIR / fleet_data_root() and cannot write here. They exist so a
+# hand-run harness that still writes into the tree cannot re-introduce a tracked corpus.
+src/tmp/dm_traffic.jsonl
+src/rnd/**/live-runs/*.jsonl

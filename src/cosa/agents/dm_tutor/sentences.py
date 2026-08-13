@@ -52,9 +52,37 @@ _HRULE      = re.compile( r"^\s*([-*_]\s*){3,}$" )
 _BULLET     = re.compile( r"^\s*(?:[-*+•]|\d+[.)])\s+" )
 _QUOTE      = re.compile( r"^\s*>\s?" )
 
-# An attachment pointer — the line that says "the table lives over there".
-# Structure by the rule: it is a reference to structure and asserts nothing.
-_ATTACHMENT = re.compile( r"^\s*(?:\[[^\]]*\]\(|see\s+)?/tmp/[\w.-]+\.md\)?\s*$", re.IGNORECASE )
+# A POINTER LINE — the line that says "it lives over there". Structure by the
+# rule: it references where something is and asserts nothing about it.
+#
+# WIDENED 2026-08-13 to match the house style verbatim. María's wording is "the
+# path is a pointer, not a fourth sentence, and does not count against the three",
+# but this pattern only recognised /tmp/*.md — so a message written exactly to the
+# rule counted FOUR, and the compliant house style sat on the trigger line with no
+# headroom. That is the trap the canned P.S. below already sprang once: the trigger
+# firing hardest on the messages that got it right.
+#
+# The narrowness is deliberate even after widening — a pointer line is a lead-in
+# and ONE whitespace-free target, nothing else. "Fix it at src/foo.py and tell me
+# what you think." keeps its slash AND its prose, so it still counts as the claim
+# it is; only a line that is nothing but a pointer is discarded.
+_URL_OR_PATH = (
+    r"(?:[A-Za-z][A-Za-z0-9+.-]*://[^\s)]+"     # a URL — https:// , vllm:// , file://
+    r"|~?/?(?:[\w.@%+-]+/)+[\w.@%+#?=&-]*"      # a path — at least one slash
+    r"(?::\d+)?)"                               # optional :line suffix
+)
+# A short lead-in is still a pointer line: "see <path>", "→ <path>", "detail: <path>".
+_POINTER_LEAD_IN = r"(?:(?:see|details?|detail|path|more|here|full\s+detail)\s*:?\s+|[→↳>]\s*)?"
+# In MARKDOWN-LINK form the `[label](target)` wrapper is itself the proof that the
+# line is a pointer, so the target only has to contain a slash — it does not have to
+# survive the stricter path shape above. A doc-viewer link carries `?path=…&…`, which
+# the bare-path pattern deliberately does not admit.
+_ATTACHMENT = re.compile(
+    rf"^\s*{_POINTER_LEAD_IN}"
+    rf"(?:\[[^\]]*\]\(\s*[^\s)]*/[^\s)]*\s*\)|{_URL_OR_PATH})"
+    rf"[.,;]?\s*$",
+    re.IGNORECASE,
+)
 
 # 🔴 THE CANNED P.S. IS STRUCTURE, and this is the case that would have bitten
 # hardest (María, 2026-08-11). It is a fixed invitation, not a claim about

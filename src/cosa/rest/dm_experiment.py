@@ -247,6 +247,35 @@ def _load_config():
     return override_arm, override_reason, reject_threshold, exempt_session
 
 
+def is_suspended():
+    """
+    True when the two-arm pilot is suspended by config (Rick, 2026-08-13).
+
+    SUSPENDED, NOT DELETED. The schedule JSON stays on disk and every row already
+    collected stays analysable — the `blind`-vs-`rejecting` question ("does refusing
+    an over-long DM make senders write shorter") remains its own finished study. This
+    only stops the pilot from RUNNING, so it cannot interact with the tutor now
+    shipping fleet-wide: a rejecting hour would refuse the very messages the tutor
+    exists to shorten, and no row could then say which mechanism did the work.
+
+    Ensures:
+        - returns the `dm experiment suspended` flag, defaulting to True
+        - a config-read failure returns True — the SAFE direction. An experiment that
+          silently resumed because a config read failed would gate live fleet traffic
+          on an arm nobody chose; the tutor is the live treatment now, so the pilot
+          staying off is the state that matches the ruling.
+
+    Raises:
+        - nothing
+    """
+    from cosa.config.configuration_manager import ConfigurationManager
+    try:
+        cm = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+        return cm.get( "dm experiment suspended", default=True, return_type="boolean" )
+    except Exception:
+        return True
+
+
 def load_default_policy():
     """
     Build the production policy from the committed schedule JSON + the ini config.
@@ -255,6 +284,15 @@ def load_default_policy():
         - reads _DM_SCHEDULE_PATH (patchable) and the ini exactly once
         - a missing schedule yields an inactive policy (assignment_at always None)
     """
+    # SUSPENDED (Rick, 2026-08-13) → an INACTIVE policy, which is the same shape a
+    # missing schedule already produces: assignment_at() returns None for every
+    # instant, so execute_dm_send takes the baseline path and the tutor is the only
+    # treatment in force. Suspending HERE rather than at the call site means every
+    # reader of the policy — the gate, the corpus stamp, the pool-status view —
+    # agrees the pilot is off, instead of one branch believing it is still running.
+    if is_suspended():
+        return make_inactive_policy()
+
     slots, schedule_id, experiment                              = _load_schedule( _DM_SCHEDULE_PATH )
     override_arm, override_reason, reject_threshold, exempt_ids  = _load_config()
     return ExperimentPolicy(

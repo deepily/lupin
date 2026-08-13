@@ -156,6 +156,11 @@ services:
     volumes:
       - ./src:/var/lupin/src
       - ./io:/var/lupin/io
+      # DM traffic corpus — lives OUTSIDE the repo (Rick 2026-08-13) so an
+      # accumulating data file is not sitting in the checkout where `git clean
+      # -xdf` would take it and `git status` keeps offering it. Same host dir
+      # for both servers; rows carry server_port + boot_id to stay separable.
+      - /mnt/DATA01/include/www.deepily.ai/projects-data/lupin/dm-corpus:/var/lupin/dm-corpus
       - ./pytest.ini:/var/lupin/pytest.ini:ro
       # Repo-root deploy artifacts the unit suite ASSERTS ABOUT (bug b5b6d252).
       # Without these, 19 unit tests fail in-container with FileNotFoundError
@@ -227,6 +232,12 @@ services:
       LUPIN_ROOT: /var/lupin
       LUPIN_ENV: development
       LUPIN_CONFIG_MGR_CLI_ARGS: "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development"
+      # DM traffic corpus — OUTSIDE the repo (Rick 2026-08-13). Points at the
+      # bind-mount below, which is the host's <projects-data>/lupin/dm-corpus.
+      # ⚠️ Env + mounts resolve at container CREATE: picking this up needs
+      # `docker compose up -d --force-recreate`, never a plain restart.
+      LUPIN_DM_CORPUS_DIR: /var/lupin/dm-corpus
+      LUPIN_SERVER_PORT: "7999"
       DB_HOST: lupin-postgres
       LUPIN_API_URL: http://localhost:7999
       LUPIN_API_KEY_FILE: /var/lupin/src/conf/keys/notification-api-claude-code-dev
@@ -323,6 +334,11 @@ services:
     volumes:
       - ./src:/var/lupin/src
       - ./io:/var/lupin/io
+      # DM traffic corpus — lives OUTSIDE the repo (Rick 2026-08-13) so an
+      # accumulating data file is not sitting in the checkout where `git clean
+      # -xdf` would take it and `git status` keeps offering it. Same host dir
+      # for both servers; rows carry server_port + boot_id to stay separable.
+      - /mnt/DATA01/include/www.deepily.ai/projects-data/lupin/dm-corpus:/var/lupin/dm-corpus
       - ./pytest.ini:/var/lupin/pytest.ini:ro
       # Repo-root deploy artifacts the unit suite ASSERTS ABOUT (bug b5b6d252).
       # Without these, 19 unit tests fail in-container with FileNotFoundError
@@ -393,6 +409,11 @@ services:
       LUPIN_ROOT: /var/lupin
       LUPIN_ENV: testing
       LUPIN_CONFIG_MGR_CLI_ARGS: "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing"
+      # DM traffic corpus — same host directory as :7999 (see the dev service).
+      # The two servers share ONE corpus; `server_port` + `boot_id` on every row
+      # are what keep their traffic tellable apart.
+      LUPIN_DM_CORPUS_DIR: /var/lupin/dm-corpus
+      LUPIN_SERVER_PORT: "8000"
       DB_HOST: lupin-postgres
       LUPIN_API_URL: http://localhost:7999
       LUPIN_API_KEY_FILE: /var/lupin/src/conf/keys/notification-api-claude-code-dev
