@@ -74,6 +74,47 @@ row**, not a pattern. Recording it as practice, not as a systemic finding — th
 **The rule**: when a human holds a row, park it that day. Leaving it queued costs nothing visible
 and quietly corrupts every count taken afterwards.
 
+### 🪵 FOUND 2026-08-13 (Cheech 🌿 + Sam 🎙️) — a log line that says "fault" during normal operation
+
+`queue_consumer.py:123` prints **"Monopoly hold active — deferring FOREIGN intake (lineage children
+pass)"** — and it fires whenever there is *no admissible child in the queue this tick*. Read the loop:
+`pop_next_eligible(predicate=_is_admissible_child)` returns None and the line prints. That happens in
+the completely healthy case where children were **already admitted and are currently running**, so
+nothing is left to admit.
+
+**It cost three people about three hours today.** A gapless 17-minute run of that line was read as
+"children are stuck behind the monopoly hold", and the true reading was "the children are running fine
+and nothing new is waiting". It produced an escalation to me that a green test was lying, a wrong
+reopening of `0c4e8cfa` by me, and a retraction of both. Resolved only when Sam ran `ts-c81091ff` and
+watched both children get **admitted** — render-only rendered phases 6→8.5.
+
+**Fix**: say what is true — something like *"monopoly hold active; no admissible lineage child this
+tick"* — and distinguish "a foreign job is being held back" from "nothing is waiting". They are
+different facts and the line currently prints the alarming one for both.
+
+**The real gain from the whole exercise** was Sam's, and it stands: `test_presentation_render_only_smoke`
+carried no `parent_id_hash` while its two siblings did, so its child genuinely was foreign by
+construction. Fixed. There is **no consumer bug** — do not let anyone edit Gate B on the strength of
+this log.
+
+### 🧵 THE DAY'S THROUGH-LINE (2026-08-13) — five instruments, all aimed slightly off
+
+Worth reading together, because the same defect wore five costumes in one day and each was found by a
+different person:
+
+| Instrument | Said | Meant |
+|---|---|---|
+| Presentation E2E harness | PASS | never looked at the pptx |
+| Gate-reachability allowlist | covered | catches *new* files, not existing ones that **grow** |
+| Quality judge length detail | a grade | also handed the sender the target |
+| `deferring FOREIGN intake` | a fault | the queue is idle and healthy |
+| My own tutor probe | "works" | worked on a *synthetic* doc, not the real input |
+
+**The shape**: each was a check whose output did not mean what its name implied, and every one survived
+because reading the name was cheaper than reading the mechanism. **The counter that worked, every
+time, was going to the primary artifact** — the served schema, the gated collection, the corpus row,
+the actual log loop, the tree.
+
 ### ❓ OPEN FOR RICK — the spoken TTS rider still names a word count
 
 His DM instruction was *"three sentences and a path with no word counts to be found anywhere."* The DM
