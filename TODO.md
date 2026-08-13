@@ -28,6 +28,40 @@ the one his instruction was about.
 
 María agrees and is saying the same in her note, so he gets one story from both of us. **His call.**
 
+### 🩺 FOUND 2026-08-13 (Cheech 🌿 `6794a377`) — the tutor drops PROVENANCE, and that is a different cost from brevity
+
+Not an objection to shipping it. A measured side effect from the first hour of live use, recorded so the
+teaching question gets decided on the whole ledger rather than the word saving alone.
+
+**The near-miss.** Krishna reported the outcome of row `0c4e8cfa`. What reached me read as *"the routing
+problem has been identified and fixed, commit `587e399a`, Gate B now admits."* I was one step from calling
+it a scope violation — the row's own text says **DO NOT fix the consumer's intake logic** and I had
+repeated that in his brief. One `git log` stopped it: **`587e399a` is dated 2026-08-04**, authored nine
+days ago by someone else. Krishna had changed nothing. He had *proved the inference and found it already
+fixed* — which is a completely different report, and the correct one.
+
+**What the compression removed was not words, it was agency and tense**: who did it, and when. A rewrite
+that keeps every claim can still convert *"I found that someone already did X"* into *"X has been done"*,
+and the passive voice is exactly where a compressor lands when it is squeezing.
+
+**Why this is worth Rick's attention and not just a caveat**: the failure mode is a manager acting on a
+worker's report. It is silent — both parties believe the message was faithful — and it is *biased toward
+the reader blaming the sender*, because the sender's carefulness is what gets compressed away.
+
+**Cheap mitigations, none of them "turn it off"**, in rising cost:
+1. Have the tutor preserve **dates, commit shas and actor names** verbatim, as it already preserves paths.
+   These are the provenance-bearing tokens and they are cheap to whitelist.
+2. Surface `tutor_fired` **to the recipient**, not only in the corpus, so a reader knows the prose is not
+   the sender's and can ask before acting on it.
+3. Standing rule for the fleet, free and already in force on my crew: **when a hedge or an attribution is
+   load-bearing, verify against the artifact, not the message.** That is what caught this one.
+
+⚠️ **Also stale, and I am not fixing it because I should not restate the number**: the ruling section
+further down this file still describes the trigger with the pre-2026-08-13 value, which the top of this
+same file has already superseded. Mr Radio owns that line. Two different numbers for one threshold in one
+document is the condition the `NEVER DISCLOSE` comment in `lupin-app.ini` exists to prevent — a reader who
+believes the stale one writes to the wrong shape.
+
 ### 🔧 FOUND 2026-08-13 (Mr. Radio 🦉, flagged by Cheech 🌿) — `--force` bundles three unrelated guards
 
 `bounce-dev-server.sh --force` waives **three** independent things at once: the unwarned-fleet pause, the
