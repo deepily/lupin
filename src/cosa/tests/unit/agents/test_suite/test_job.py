@@ -952,7 +952,8 @@ def test_parse_junit_xml_parse_error( tmp_path ):
 # _parse_non_pytest_stdout
 # =========================================================================== #
 def test_parse_non_pytest_stdout_non_websocket_is_none():
-    """Only the websocket suite is recognized; others return None."""
+    """Only non-pytest runners (websocket/typescript/presentation) are recognized;
+    a pytest suite like 'unit' returns None (it uses the junit path, not stdout)."""
     assert TSJob._parse_non_pytest_stdout( "unit", "Total Tests: 5" ) is None
 
 
@@ -992,6 +993,45 @@ def test_parse_non_pytest_stdout_total_only_no_marker_is_none():
     out = TSJob._parse_non_pytest_stdout(
         "websocket", "Total Tests: 12\n" )
     assert out is None
+
+
+# --- presentation: multi-tier orchestrator parsed from its stdout summary (bug 89bfcc8f) ---
+def test_presentation_not_in_junit_supporting_suites():
+    """presentation must NOT claim junit support — its runner ignores --junit-xml,
+    so the file is never produced and _parse_junit_xml would raise FileNotFoundError
+    (mis-reported as a 0/0/0/0 run). It is parsed from stdout instead."""
+    from cosa.agents.test_suite.job import SUITES_SUPPORTING_JUNIT_XML
+    assert "presentation" not in SUITES_SUPPORTING_JUNIT_XML
+
+
+def test_parse_non_pytest_stdout_presentation_tier_summary():
+    """The presentation tier summary (Total: N tiers / Passed: N / Failed: N) parses to tier counts."""
+    stdout = (
+        "  PRESENTATION REGRESSION RESULTS\n"
+        "  Total:  3 tiers\n"
+        "  Passed: 2\n"
+        "  Failed: 1\n"
+        "  Failed tiers: opus-full\n"
+    )
+    out = TSJob._parse_non_pytest_stdout( "presentation", stdout )
+    assert out == { "passed": 2, "failed": 1, "skipped": 0, "errors": 0 }
+
+
+def test_parse_non_pytest_stdout_presentation_all_tiers_pass():
+    """A clean presentation run (Failed: 0) parses to passed-only."""
+    out = TSJob._parse_non_pytest_stdout(
+        "presentation", "  Total:  2 tiers\n  Passed: 2\n  Failed: 0\n" )
+    assert out == { "passed": 2, "failed": 0, "skipped": 0, "errors": 0 }
+
+
+def test_parse_non_pytest_stdout_presentation_empty_is_none():
+    """Empty presentation stdout returns None (preserve zero-counts → NOT EXECUTED)."""
+    assert TSJob._parse_non_pytest_stdout( "presentation", "" ) is None
+
+
+def test_parse_non_pytest_stdout_presentation_no_markers_is_none():
+    """Presentation stdout without the tier summary returns None."""
+    assert TSJob._parse_non_pytest_stdout( "presentation", "nothing useful here" ) is None
 
 
 # ---------------------------------------------------------------------------

@@ -62,8 +62,14 @@ FILE_DRIVEN_TEST_TYPES = frozenset( { "smoke_direct", "pytest_direct" } )
 # non-pytest suites can be added here as the project grows.
 SUITES_SUPPORTING_JUNIT_XML = frozenset( {
     "unit", "smoke", "smoke_direct", "pytest_direct",
-    "integration", "e2e", "all", "presentation",
+    "integration", "e2e", "all",
 } )
+# NOTE (bug 89bfcc8f): "presentation" is deliberately NOT here. Its backing
+# script (run-presentation-regression.sh) is a MULTI-TIER orchestrator, not a
+# single pytest run — it ignores an injected --junit-xml, so the file is never
+# produced and _parse_junit_xml raised FileNotFoundError, mis-reporting a run as
+# 0/0/0/0. Presentation is parsed from its stdout tier summary instead (see
+# _parse_non_pytest_stdout), the same treatment as the websocket runner.
 
 # Per-suite max execution timeout (seconds). Process is killed if exceeded.
 # Values based on observed worst-case runtimes + 2x buffer. Tunable.
@@ -1809,7 +1815,7 @@ class TestSuiteJob( AgenticJobBase ):
         Returns:
             dict | None: Parsed counts or None if format unrecognized.
         """
-        if suite_type not in ( "websocket", "typescript" ):
+        if suite_type not in ( "websocket", "typescript", "presentation" ):
             return None
         if not stdout:
             return None
@@ -1818,6 +1824,14 @@ class TestSuiteJob( AgenticJobBase ):
 
         if suite_type == "typescript":
             return TestSuiteJob._parse_node_tap_summary( stdout )
+
+        # presentation (run-presentation-regression.sh) prints a tier summary:
+        #   Total:  N tiers
+        #   Passed: N
+        #   Failed: N
+        # Its "Passed:/Failed:" lines are counts of TIERS, which we surface as
+        # passed/failed the same way websocket's runner summary is parsed. The
+        # shared Passed/Failed regexes below already match it (bug 89bfcc8f).
 
         total_match  = re.search( r"Total Tests:\s*(\d+)", stdout )
         passed_match = re.search( r"\bPassed:\s*(\d+)",   stdout )
