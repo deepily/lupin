@@ -424,6 +424,7 @@ class PresentationLiveSmokeTest( InteractiveSmokeTest ):
             ( "cost_envelope",   self._check_cost_envelope( job_data ) ),
             ( "nonzero_cost",    self._check_nonzero_cost( job_data ) ),
             ( "slide_count",     self._check_slide_count( job_data ) ),
+            ( "deck_file",       self._check_deck_file( job_data ) ),
             ( "timestamps",      self._check_timestamps( job_data ) ),
             ( "no_stack_trace",  self._check_no_stack_trace( job_data ) ),
             ( "response_text",   self._check_response_text( job_data ) ),
@@ -509,6 +510,39 @@ class PresentationLiveSmokeTest( InteractiveSmokeTest ):
 
         # No slide count found anywhere — warn but don't fail (might be dry-run)
         return { "ok": False, "detail": "slide_count not found in artifacts or response_text" }
+
+    def _check_deck_file( self, job_data ):
+        """
+        Verify the FINISHED .pptx on disk via the authoritative recorded path
+        (job artifacts / done-queue metadata `pptx_path`) — NOT a basename
+        reconstructed from the .yaml stem, and NOT the intermediate slide-count
+        metadata `_check_slide_count` reads.
+
+        Row 63f4d4a6: the prior harness printed PASS off the yaml and never
+        opened the deck. This sub-check is the real-artifact gate — a deck that
+        never serialized (pptx_path absent/null) or is malformed is a HARD
+        failure, so `validate_result`'s aggregate cannot be PASS without a real
+        multi-slide deck on disk. The verdict is the gated
+        `verify_presentation_deck` (unit-proven in tests/unit).
+        """
+        from cosa.agents.presentation_generator.deck_verdict import verify_presentation_deck
+
+        artifacts = job_data.get( "artifacts" ) or {}
+        recorded  = job_data.get( "pptx_path" ) or artifacts.get( "pptx_path" )
+        if not recorded:
+            return { "ok": False, "detail": "no pptx_path recorded — deck never exported (yaml-only completion)" }
+
+        # The recorded path may be io-relative (job.artifacts) or absolute
+        # (job.pptx_path). Resolve to absolute against the project root.
+        abs_path = recorded
+        if not os.path.isabs( abs_path ):
+            import cosa.utils.util as cu
+            abs_path = os.path.join( cu.get_project_root(), recorded.lstrip( "/" ) )
+
+        verdict = verify_presentation_deck( abs_path )
+        if verdict:
+            return { "ok": True, "detail": f"real deck verified: {verdict.slide_count} slides, {verdict.size_bytes} bytes" }
+        return { "ok": False, "detail": f"deck check failed ({recorded}): {verdict.reason}" }
 
     def _check_timestamps( self, job_data ):
         """Verify started_at and completed_at are set."""
