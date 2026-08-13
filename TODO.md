@@ -363,8 +363,8 @@ jobs runnable headless on :8000:
   may complete on :8000). Cannot pinpoint or verify without a run that is itself blocked.
 
 ⇒ **Fix #2 status**: junit reporting FIXED (99fbca8d); fail-open gate already in place; submit-404
-not-reproducible. `0c4e8cfa` is NOT a blocker (fixed 08-04 by 587e399a, per Cheech). Cheech authorized a
-minimal live verification.
+~~not-reproducible~~ **IS reproducible — double-root path bug, see RUN COLLECTED below**. `0c4e8cfa` is NOT
+a blocker (fixed 08-04 by 587e399a, per Cheech). Cheech authorized a minimal live verification.
 
 ⭐ **LIVE :8000 VERIFICATION RUN SUBMITTED — RESULT TO COLLECT.** job_id
 `ts-3caa2ce9::50c73ba7-36dd-4eaf-a7e2-63256252c84f` (test_types=presentation, render+Sonnet only,
@@ -373,6 +373,26 @@ scheduled path completes with real tier counts and NO residual 503. **Collect it
 `/api/get-queue/done` on :8000 + read container logs for a "User is offline and no default response
 provided" 503; RECORD THE OUTCOME EITHER WAY (a clean no-503 run is the proof as much as a 503). Submitted
 under a re-spin checkpoint; Sam re-spun right after. Row 89bfcc8f amended with the same job_id.
+
+⭐ **RUN COLLECTED (Sam 🎙️ `5252b3a0`, 2026-08-13).** Job `ts-3caa2ce9` completed on :8000 (status
+completed, 7.5s): "presentation: 0 passed, **2 failed**, 0 errors, 0 skipped" — REAL tier counts, not
+0/0/0/0. Report: `io/test-suite/2026.08.13-at-11:08-EDT-presentation-results.md`.
+- **THREE HARNESS FIXES PROVEN GREEN in the live headless path**: (1) **NO 503** — zero "User is offline
+  and no default response provided" in the run window (`docker logs -t`, 15:08:05→15:08:14 UTC); fail-open
+  holds. (2) **junit clean** — no in-window junit exception (the log's FileNotFoundError is dated 20260805,
+  the OLD run). (3) **0/0/0/0 fixed** — honest "2 failed" reported.
+- **CORRECTION: submit-404 IS reproducible** (I had it wrong as "not reproducible"). Root cause reproduced:
+  the render-only smoke test (`src/tests/smoke/test_presentation_render_only_smoke.py`) sends `source_path`
+  = the ABSOLUTE fixture path (`_resolve_fixture_yaml` → `{LUPIN_ROOT}/src/tests/fixtures/presentations/
+  render-only-example.yaml`, passed verbatim). The submit handler (`presentation_generator.py:162-171`)
+  treats a leading-`/` path as REPO-RELATIVE and prepends project_root again → `/var/lupin/var/lupin/...`
+  → double-root → 404 "Source file not found". Live :8000 repro: absolute → 404; same file sent
+  repo-relative → 200 queued. **Fix (mine): send `os.path.relpath(self._yaml_path, LUPIN_ROOT)` with a
+  leading slash from `get_submit_payload`** (or a general relativizer). Control-prove before/after.
+- **Failure #2 (Sonnet tier) NOT yet isolated** — only one submit/404 in-window; 7.5s total means tier 2
+  never reached real generation; no second 404/error logged. Needs its own diagnosis.
+- **Row status**: fix #2's HARNESS scope (0/0/0/0 + junit + 503 fail-open) is DONE and proven. Remaining to
+  green-headless: the render-only double-root fix + tier-2 diagnosis. Row stays OPEN on those.
 
 **Shuffle sweep FINAL (3 seeds, both roots):** seed 1337 (clean) = 6 reds; seed 202 (clean, box quiet —
 only DMs + the urllib submit ran, no concurrent pytest) = **3 reds = exactly the 3 genuine isolation-reds**;
