@@ -129,6 +129,31 @@ the one his instruction was about.
 
 María agrees and is saying the same in her note, so he gets one story from both of us. **His call.**
 
+### 🧭 FOUND 2026-08-13 (Cheech 🌿 `6794a377`) — the fleet can MAKE a manager, and it took all day to notice
+
+**By ~13:30 all three managers were over budget** — María 63%, Mr Radio 75%, me 83% — while both
+workers sat at 21% and 28%. Workers are restorable by re-spin; **managers are not**, so capacity drains
+from the supervising layer while the layer that has a mechanism stays healthy.
+
+**Five people spent four hours optimising inside a frame nobody questioned.** We built: a transfer rule
+(rows move, seats do not), a precommitted trigger, an orphan-recovery note, staged respawn briefs, a
+reap-then-respawn-under-new-lineage move, and a placeholder rule for stale seed paths. Every one is
+correct and now in `4c`. **Not one of them asked whether the set of possible receivers was fixed.**
+
+⇒ **`spawn_sessions` takes `role="manager"`.** A fresh manager seat starts near zero. Handing an
+exhausted manager's seats to another exhausted manager relocates the wall; spawning a new one
+**restores capacity**. María fired it immediately on hearing the phrasing, and did it EARLY rather than
+at her trigger, because a new seat only helps if it is warm before the deadline.
+
+**Why this is a doctrine finding and not a tip**: the question "who can receive?" has a fixed-set
+shape, and a fixed set is exactly what a tired reader stops re-examining. The whole day's escalation
+ladder — precommit, stage, transfer, recover — is the shape of good work inside an unexamined
+constraint. **It was equally true at 09:00 and nobody said it.**
+
+**Suggested for `manager-context-monitoring.md`**: make "spawn a fresh manager" the FIRST option at the
+ceiling, ahead of transfer, and make it fire early enough that the new seat is warm. Transfer is the
+fallback when a fresh seat cannot be had, not the default.
+
 ### 🔴 FOUND 2026-08-13 (Cheech 🌿 `6794a377`) — `dismiss_sessions(write_memento=True)` REPORTED SUCCESS AND WROTE NOTHING
 
 Found by executing the first two re-spins under the new manager-context policy, roughly ninety minutes
