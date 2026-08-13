@@ -152,6 +152,28 @@ that touches the proxy path. Verify container freshness first, then decide.
 
 ---
 
+## 📥 FINDING 2026-08-13 (Sam 🎙️ `00aa8745`) — unit-suite polluter #2 FIXED (row 69fb89cd); shuffle sweep in flight
+
+**Polluter #2 root cause + fix — commit `12e062f0`.** The two
+`test_progress_group_passthrough.py::TestPodcastGeneratorVoiceIoPassthrough` victims were
+**order-dependent by construction**, not the downstream of a dirty teardown. `voice_io.notify`'s
+dispatch gate is `_force_cli_mode or _cosa_interface is None` — it does **not** read
+`_voice_available` (which the tests patched). The core `_cosa_interface` global is `None` by default
+and is set to the podcast interface **only as a side-effect of the first import** of
+`podcast_generator.voice_io`. Once any earlier test imports that module, the victim's own import is a
+no-op, the gate sees `None`, and notify prints instead of dispatching. Proven with a `sys.modules`
+probe (failing order: `podcast_preloaded=True`, `_cosa_interface=None`; passing order: the import
+re-configures). Every test that touches the global restores it faithfully — there was no polluter to
+fix. **Fix**: pin both gate inputs as auto-restored `patch()` context managers. **Control-proven**
+(Cheech's condition): breaking notify's real dispatch turns BOTH pinned tests red — not a false green.
+
+**Still open — the shuffle sweep** (running as I write this): Tiberius saw `bfe/test_job::TestResubmit`
+and `presentation::test_narrative_outline_elaboration` redden under a seeded shuffle. My fix does not
+touch those. A 3-seed (1337/101/202) both-roots file-order shuffle at HEAD+fix is in flight to answer
+whether anything else moves with order. **Results will be appended here** — not filed as a new row.
+
+---
+
 ## ☀️ FIRST THING 2026-08-12 — resume the DM tutor (Rick's word, 2026-08-11 ~23:15)
 
 **Rick read the implementation record and greenlit continuing.** His words: *"this is insanely
