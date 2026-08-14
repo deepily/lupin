@@ -30,6 +30,7 @@ from pathlib import Path
 from typing  import Any, Callable, Dict, List, Optional, Tuple
 
 from lupin_mcp.persona_normalization import persona_slug
+from lupin_mcp import reap_memento
 from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 
 
@@ -822,7 +823,8 @@ def dismiss_sessions(
     emit_reaped_fn     : Optional[ Callable ] = None,
     clear_hold_fn      : Optional[ Callable ] = None,
     reconcile_items_fn : Optional[ Callable ] = None,
-    respin_personas    : Optional[ List[ str ] ] = None
+    respin_personas    : Optional[ List[ str ] ] = None,
+    memento_coord_fn   : Optional[ Callable ] = None
 ) -> Dict[ str, Any ]:
     """
     Reap reviewer sessions this manager spawned: kill their tmux sessions and
@@ -839,12 +841,19 @@ def dismiss_sessions(
           (idempotent: already-dead sessions are fine — reported "already_gone")
         - Removes reaped names from the manifest; rewrites it (or deletes it when
           empty)
-        - `reason` and `write_memento` are echoed in the result (write_memento
-          coordination — surfacing a final memento prompt to the child before
-          kill — is handled by the MCP wrapper's pre-kill DM; this function does
-          the teardown)
+        - MEMENTO COORDINATION (row 0a36d83d): when `memento_coord_fn` is provided,
+          it runs BEFORE the kill loop (the kill used to be the first statement, so
+          a memento request without a wait lost the race) and returns a per-seat
+          `memento_outcomes` map — each reaped seat is proven to have (or asked to
+          write, then polled for) a fresh+complete memento on disk. FAIL-SAFE: a
+          raising coordinator NEVER breaks the reap, but the failure is SURFACED in
+          `memento_outcomes["_error"]` — never a silent success (that WAS the bug).
+          DEFAULT is None (skip) so unit reaps + the write_memento=False idle-TTL
+          path stay hermetic; the real coordinator is wired by the MCP wrapper.
+        - `reason` and `write_memento` are echoed in the result; `write_memento`
+          coordination is NO LONGER a no-op — see MEMENTO COORDINATION above
         - Returns { dismissed: [ {session_name, status} ], manager_session_id,
-                    reason, write_memento, remaining, reconciliation,
+                    reason, write_memento, memento_outcomes, remaining, reconciliation,
                     retained_owner_personas, retained_unmatched }
         - RE-SPIN RETENTION (4dfb2f3b): a persona named in `respin_personas` is
           reaped normally (tmux kill, bridge unlink, tombstone, hold-clear) but
@@ -878,6 +887,9 @@ def dismiss_sessions(
         respin_personas: persona names coming straight back in a re-spin — their
             rows keep their owner (slug-tolerant matching); None/[] = every reaped
             session is a true reap and reconciles as before
+        memento_coord_fn: pre-kill memento coordinator (identities) -> per-seat
+            outcome map; None = skip (hermetic default). The MCP wrapper wires the
+            live `reap_memento.coordinate_mementos`. See MEMENTO COORDINATION above.
 
     Returns:
         dict: dismissal result
@@ -892,6 +904,22 @@ def dismiss_sessions(
     # Capture each target's bridge identity (persona + sender_id) BEFORE teardown —
     # the bridge is unlinked below, and sender_id/persona both derive from it.
     identities = { name: _capture_reap_identity( session_dir, name ) for name in targets }
+
+    # MEMENTO COORDINATION (row 0a36d83d) — BEFORE any kill. Prove each seat the
+    # manager asked to preserve has (or, if not, is asked to write and then polled
+    # for) a fresh+complete memento on disk, recording an EXPLICIT per-seat outcome.
+    # The kill below used to be the FIRST statement in this function — a memento
+    # request without a wait lost the race — so this runs first and blocks on the
+    # verified-on-disk check. FAIL-SAFE: a raising coordinator NEVER breaks the reap,
+    # but the failure is SURFACED, never swallowed into a false success.
+    memento_outcomes: Dict[ str, Any ] = {}
+    if memento_coord_fn is not None:
+        try:
+            memento_outcomes = memento_coord_fn( identities )
+        except Exception as error:
+            memento_outcomes = { "_error": ( f"memento coordination raised "
+                                             f"({error.__class__.__name__}: {error}) — reap proceeded "
+                                             f"WITHOUT verified mementos" ) }
 
     for name in targets:
         result = runner( [ "tmux", "kill-session", "-t", name ] )
@@ -1033,6 +1061,7 @@ def dismiss_sessions(
         "manager_session_id" : manager_session_id,
         "reason"             : reason,
         "write_memento"      : write_memento,
+        "memento_outcomes"   : memento_outcomes,
         "remaining"          : [ r[ "session_name" ] for r in remaining ],
         "bridges_deleted"    : bridges_deleted,
         "holds_cleared"      : holds_cleared,
@@ -1537,6 +1566,11 @@ def resolve_spawn_config( config_mgr: Any ) -> Dict[ str, Any ]:
     ack    = 120
     wm     = True
     models = { "reviewer": None, "author": None, "observer": None, "default": None }
+    # Reap-memento coordination knobs (row 0a36d83d) — defaults track reap_memento's.
+    mem_window   = reap_memento.DEFAULT_WINDOW_SECONDS
+    mem_bytes    = reap_memento.DEFAULT_MIN_BYTES
+    mem_timeout  = reap_memento.DEFAULT_ASK_TIMEOUT_SEC
+    mem_interval = reap_memento.DEFAULT_POLL_INTERVAL_SEC
     if config_mgr is not None:
         cap = config_mgr.get( "cc session spawn max reviewers",
                               default=DEFAULT_SPAWN_CAP, return_type="int", silent=True )
@@ -1547,8 +1581,20 @@ def resolve_spawn_config( config_mgr: Any ) -> Dict[ str, Any ]:
         for spawn_role in models:
             models[ spawn_role ] = config_mgr.get( f"cc session spawn model {spawn_role}",
                                                    default=None, return_type="string", silent=True )
+        mem_window   = config_mgr.get( "cc session reap memento freshness window seconds",
+                                       default=reap_memento.DEFAULT_WINDOW_SECONDS, return_type="int", silent=True )
+        mem_bytes    = config_mgr.get( "cc session reap memento min bytes",
+                                       default=reap_memento.DEFAULT_MIN_BYTES, return_type="int", silent=True )
+        mem_timeout  = config_mgr.get( "cc session reap memento ask timeout seconds",
+                                       default=reap_memento.DEFAULT_ASK_TIMEOUT_SEC, return_type="int", silent=True )
+        mem_interval = config_mgr.get( "cc session reap memento poll interval seconds",
+                                       default=reap_memento.DEFAULT_POLL_INTERVAL_SEC, return_type="int", silent=True )
     return { "spawn_cap": cap, "ack_timeout_seconds": ack, "write_memento_default": wm,
-             "spawn_models": models }
+             "spawn_models": models,
+             "reap_memento_window_seconds"   : mem_window,
+             "reap_memento_min_bytes"        : mem_bytes,
+             "reap_memento_ask_timeout_sec"  : mem_timeout,
+             "reap_memento_poll_interval_sec": mem_interval }
 
 
 def _slug( text: str ) -> str:

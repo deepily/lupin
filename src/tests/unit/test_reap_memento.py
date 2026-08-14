@@ -1,0 +1,328 @@
+"""
+Unit tests for lupin_mcp.reap_memento — the reap-path memento coordinator (row 0a36d83d).
+
+THE DEFECT UNDER TEST: `dismiss_sessions( write_memento=True )` used to report
+success and write nothing. These tests assert the coordinator's ACTUAL verdicts —
+a memento proven (or not) on disk — not that a flag was echoed. Per Mr. Radio's
+review the guard must be shown to fail in BOTH directions: a skip that never fires
+is as broken as one that always fires, and the header-less file is a real input.
+
+Every seam (clock, file read, DM send, sleep) is injected — no live server.
+"""
+
+import datetime
+
+import pytest
+
+from lupin_mcp import reap_memento
+
+
+# ── Fixtures / helpers ────────────────────────────────────────────────────────
+_NOW = datetime.datetime( 2026, 8, 14, 15, 5, 0, tzinfo=datetime.timezone.utc )
+
+
+def _now_fn():
+    return _NOW
+
+
+def _memento( sid8="abc12345", written_at="2026-08-14T15:00:00+00:00", body_bytes=1200 ):
+    """A valid, fresh, complete memento with a line-1 memento-record header."""
+    header = ( f"<!-- memento-record: persona=Rio session_id={sid8} "
+               f"written_at={written_at} slot=io -->\n" )
+    return header + ( "x" * body_bytes )
+
+
+class _Disk:
+    """Injected file store: maps str(path) -> text; missing key reads as None."""
+    def __init__( self, files=None ):
+        self.files = dict( files or {} )
+    def read( self, path ):
+        return self.files.get( str( path ) )
+
+
+class _DM:
+    """Records every ask; optionally raises for a named persona."""
+    def __init__( self, raise_for=None ):
+        self.calls     = []
+        self.raise_for = set( raise_for or [] )
+    def __call__( self, persona, session_id, body ):
+        self.calls.append( { "persona": persona, "session_id": session_id, "body": body } )
+        if persona in self.raise_for:
+            raise RuntimeError( "dm boom" )
+        return { "status": "sent" }
+
+
+def _ident( name="Rio", sid="abc12345ffff" ):
+    return { "persona": { "name": name }, "session_id": sid }
+
+
+# ── seat_memento_slot ─────────────────────────────────────────────────────────
+def test_seat_memento_slot_uses_bare_persona_slug():
+    slot = reap_memento.seat_memento_slot( "/proj", "Mr. Radio" )
+    assert str( slot ) == "/proj/io/mementos/mr-radio.md"
+
+
+# ── parse_memento_header ──────────────────────────────────────────────────────
+def test_parse_header_empty_text_is_empty():
+    assert reap_memento.parse_memento_header( "" ) == {}
+    assert reap_memento.parse_memento_header( None ) == {}
+
+
+def test_parse_header_no_marker_is_empty():
+    assert reap_memento.parse_memento_header( "just a body, no header at all" ) == {}
+
+
+def test_parse_header_ignores_stray_header_below_line_one():
+    # The provenance stamp is line 1. A stray marker deeper in the body is not it.
+    text = "# a real memento body\nsome prose\n<!-- memento-record: session_id=abc12345 -->\n"
+    assert reap_memento.parse_memento_header( text ) == {}
+
+
+def test_parse_header_parses_fields_and_skips_bare_tokens():
+    text = "<!-- memento-record: persona=Rio bareword session_id=abc12345 slot=io -->\nbody"
+    fields = reap_memento.parse_memento_header( text )
+    assert fields[ "persona" ]    == "Rio"
+    assert fields[ "session_id" ] == "abc12345"
+    assert fields[ "slot" ]       == "io"
+    assert "bareword" not in fields          # a token without '=' is ignored
+
+
+# ── _parse_iso_aware ──────────────────────────────────────────────────────────
+def test_parse_iso_aware_accepts_aware():
+    dt = reap_memento._parse_iso_aware( "2026-08-14T15:00:00+00:00" )
+    assert dt is not None and dt.tzinfo is not None
+
+
+def test_parse_iso_aware_rejects_naive():
+    assert reap_memento._parse_iso_aware( "2026-08-14T15:00:00" ) is None
+
+
+def test_parse_iso_aware_rejects_garbage_and_none():
+    assert reap_memento._parse_iso_aware( "not-a-date" ) is None
+    assert reap_memento._parse_iso_aware( None ) is None
+
+
+# ── verify_seat_memento — the ALL-OR-ASK predicate ────────────────────────────
+def _verify( text, sid8="abc12345", window=1200, min_bytes=1000 ):
+    disk = _Disk( { "/slot.md": text } ) if text is not None else _Disk()
+    return reap_memento.verify_seat_memento(
+        "/slot.md", sid8, _NOW, read_text_fn=disk.read,
+        window_seconds=window, min_bytes=min_bytes )
+
+
+def test_verify_true_when_complete_matched_and_fresh():
+    ok, reason = _verify( _memento() )
+    assert ok is True
+    assert "verified" in reason
+
+
+def test_verify_false_when_file_absent():
+    ok, reason = _verify( None )
+    assert ok is False and "no memento at slot" in reason
+
+
+def test_verify_false_when_too_small_zero_byte_defeat():
+    # The zero-byte defeat Mr. Radio named: a freshness-only guard would pass this.
+    ok, reason = _verify( _memento( body_bytes=1 ) )
+    assert ok is False and "too small" in reason
+
+
+def test_verify_false_when_header_absent_big_body():
+    # Header-less file is a REAL input (older / hand-written mementos). Must ASK.
+    ok, reason = _verify( "y" * 5000 )
+    assert ok is False and "no parseable memento-record header" in reason
+
+
+def test_verify_false_when_header_has_no_session_id():
+    text = "<!-- memento-record: persona=Rio written_at=2026-08-14T15:00:00+00:00 -->\n" + "x" * 1200
+    ok, reason = _verify( text )
+    assert ok is False and "no session_id" in reason
+
+
+def test_verify_false_when_session_id_mismatch_prior_holder():
+    ok, reason = _verify( _memento( sid8="99999999" ) )
+    assert ok is False and "prior holder" in reason
+
+
+def test_verify_false_when_seat_sid_none_mismatches():
+    # exercises the `(seat_sid8 or "")` guard when the caller has no sid
+    ok, reason = _verify( _memento( sid8="abc12345" ), sid8=None )
+    assert ok is False and "prior holder" in reason
+
+
+def test_verify_false_when_written_at_naive_or_missing():
+    text = "<!-- memento-record: persona=Rio session_id=abc12345 written_at=2026-08-14T15:00:00 -->\n" + "x" * 1200
+    ok, reason = _verify( text )
+    assert ok is False and "naive" in reason
+
+
+def test_verify_false_when_written_at_future_dated():
+    ok, reason = _verify( _memento( written_at="2026-08-14T15:10:00+00:00" ) )
+    assert ok is False and "future-dated" in reason
+
+
+def test_verify_false_when_stale_beyond_window():
+    ok, reason = _verify( _memento( written_at="2026-08-14T14:00:00+00:00" ) )
+    assert ok is False and "stale" in reason
+
+
+def test_verify_true_case_folds_session_id():
+    # Header sid stored uppercase, seat sid lowercase → still a match (case-folded).
+    ok, reason = _verify( _memento( sid8="ABC12345" ), sid8="abc12345" )
+    assert ok is True and "verified" in reason
+
+
+# ── _identity_bits ────────────────────────────────────────────────────────────
+def test_identity_bits_none():
+    assert reap_memento._identity_bits( None ) == ( None, None )
+
+
+def test_identity_bits_persona_dict():
+    assert reap_memento._identity_bits( { "persona": { "name": "Rio" }, "session_id": "s1" } ) == ( "Rio", "s1" )
+
+
+def test_identity_bits_persona_bare_string():
+    assert reap_memento._identity_bits( { "persona": "Rio", "session_id": "s1" } ) == ( "Rio", "s1" )
+
+
+def test_identity_bits_persona_wrong_type_or_missing():
+    assert reap_memento._identity_bits( { "persona": 123, "session_id": "s1" } ) == ( None, "s1" )
+    assert reap_memento._identity_bits( { "session_id": "s1" } )                  == ( None, "s1" )
+
+
+# ── _default_read_text (the live file seam) ───────────────────────────────────
+def test_default_read_text_reads_and_returns_none_on_missing( tmp_path ):
+    target = tmp_path / "m.md"
+    target.write_text( "hello" )
+    assert reap_memento._default_read_text( str( target ) ) == "hello"
+    assert reap_memento._default_read_text( str( tmp_path / "nope.md" ) ) is None
+
+
+def test_default_read_text_none_on_invalid_utf8_not_crash( tmp_path ):
+    # A memento truncated mid-multibyte-char is invalid UTF-8 (UnicodeDecodeError,
+    # NOT OSError). It must read as unreadable → None → ASK, never crash the batch.
+    target = tmp_path / "bad.md"
+    target.write_bytes( b"\xff\xfe partial multibyte \x80\x81" )
+    assert reap_memento._default_read_text( str( target ) ) is None
+
+
+# ── coordinate_mementos — the orchestrator, BOTH directions ───────────────────
+def _coord( identities, disk, dm, sleep_fn=None, **kw ):
+    return reap_memento.coordinate_mementos(
+        identities, project_root="/proj", now_fn=_now_fn,
+        read_text_fn=disk.read, dm_fn=dm,
+        sleep_fn=sleep_fn if sleep_fn is not None else ( lambda _s: None ), **kw )
+
+
+def test_coordinate_not_requested_when_write_memento_false():
+    dm = _DM()
+    out = reap_memento.coordinate_mementos(
+        { "tmux-a": _ident() }, project_root="/proj", write_memento=False,
+        now_fn=_now_fn, read_text_fn=_Disk().read, dm_fn=dm )
+    assert out[ "tmux-a" ][ "status" ] == "not_requested"
+    assert dm.calls == []                          # no disk read, no DM
+
+
+def test_coordinate_skipped_when_no_identity():
+    dm  = _DM()
+    out = _coord( { "tmux-a": None }, _Disk(), dm, write_memento=True )
+    assert out[ "tmux-a" ][ "status" ] == "skipped"
+    assert dm.calls == []                          # a seat with no identity is never asked
+
+
+def test_coordinate_verified_skips_dm_the_skip_direction():
+    # SKIP FIRES: a fresh+complete memento already on disk → verified, NO ask.
+    slot = str( reap_memento.seat_memento_slot( "/proj", "Rio" ) )
+    disk = _Disk( { slot: _memento() } )
+    dm   = _DM()
+    out  = _coord( { "tmux-a": _ident() }, disk, dm, write_memento=True )
+    assert out[ "tmux-a" ][ "status" ] == "verified"
+    assert dm.calls == []                          # the double-send / gap guard held
+
+
+def test_coordinate_written_after_ask_appears_during_poll():
+    # ASK FIRES then WRITTEN: empty at first, child writes during the poll window.
+    slot = str( reap_memento.seat_memento_slot( "/proj", "Rio" ) )
+    disk = _Disk()                                 # slot empty at pass-1
+    dm   = _DM()
+
+    def _sleep( _sec ):                            # child "writes" on the first poll
+        disk.files[ slot ] = _memento()
+
+    out = _coord( { "tmux-a": _ident() }, disk, dm, sleep_fn=_sleep,
+                  write_memento=True, ask_timeout_sec=9, poll_interval_sec=3 )
+    assert len( dm.calls ) == 1                     # the seat WAS asked
+    assert out[ "tmux-a" ][ "status" ] == "written"
+    assert "appeared after ask" in out[ "tmux-a" ][ "reason" ]
+
+
+def test_coordinate_timeout_when_never_written_visible_failure():
+    # ASK FIRES then TIMEOUT: parked/declined child, memento never appears.
+    dm  = _DM()
+    out = _coord( { "tmux-a": _ident() }, _Disk(), dm,
+                  write_memento=True, ask_timeout_sec=6, poll_interval_sec=3 )
+    assert len( dm.calls ) == 1
+    assert out[ "tmux-a" ][ "status" ] == "timeout_no_memento"
+    assert "no fresh+complete memento within 6s" in out[ "tmux-a" ][ "reason" ]
+
+
+def test_coordinate_records_dm_send_failure_still_times_out():
+    dm  = _DM( raise_for=[ "Rio" ] )               # the ask itself raises
+    out = _coord( { "tmux-a": _ident() }, _Disk(), dm,
+                  write_memento=True, ask_timeout_sec=3, poll_interval_sec=3 )
+    assert out[ "tmux-a" ][ "status" ] == "timeout_no_memento"
+    assert "ask send raised: RuntimeError" in out[ "tmux-a" ][ "reason" ]
+
+
+def test_coordinate_mixed_batch_verified_written_timeout_and_skipped():
+    slot_v = str( reap_memento.seat_memento_slot( "/proj", "Rio" ) )     # verified
+    slot_w = str( reap_memento.seat_memento_slot( "/proj", "Sam" ) )     # written on poll
+    disk   = _Disk( { slot_v: _memento() } )
+    dm     = _DM()
+
+    def _sleep( _sec ):
+        disk.files[ slot_w ] = _memento( sid8="deadbeef" )
+
+    identities = {
+        "tmux-v"    : _ident( "Rio", "abc12345ffff" ),   # verified
+        "tmux-w"    : _ident( "Sam", "deadbeef0000" ),   # written after ask
+        "tmux-t"    : _ident( "Cleo", "11112222ffff" ),  # timeout (never appears)
+        "tmux-skip" : None,                              # no identity
+    }
+    out = _coord( identities, disk, dm, sleep_fn=_sleep,
+                  write_memento=True, ask_timeout_sec=9, poll_interval_sec=3 )
+    assert out[ "tmux-v" ][ "status" ]    == "verified"
+    assert out[ "tmux-w" ][ "status" ]    == "written"
+    assert out[ "tmux-t" ][ "status" ]    == "timeout_no_memento"
+    assert out[ "tmux-skip" ][ "status" ] == "skipped"
+    # only the two un-verified, identified seats were asked
+    assert { c[ "persona" ] for c in dm.calls } == { "Sam", "Cleo" }
+
+
+def test_coordinate_poll_interval_zero_is_clamped_not_hang():
+    # A misconfigured poll_interval_sec=0 must NOT hang the reap: the clamp to >=1
+    # bounds the wait, so an unwritten seat still reaches timeout_no_memento.
+    dm    = _DM()
+    slept = { "n": 0 }
+
+    def _sleep( _sec ):
+        slept[ "n" ] += 1
+        assert slept[ "n" ] < 100                   # a genuine hang would blow past this
+
+    out = _coord( { "tmux-a": _ident() }, _Disk(), dm, sleep_fn=_sleep,
+                  write_memento=True, ask_timeout_sec=3, poll_interval_sec=0 )
+    assert out[ "tmux-a" ][ "status" ] == "timeout_no_memento"
+
+
+def test_coordinate_all_verified_never_polls():
+    slot = str( reap_memento.seat_memento_slot( "/proj", "Rio" ) )
+    disk = _Disk( { slot: _memento() } )
+    dm   = _DM()
+    slept = { "n": 0 }
+
+    def _sleep( _sec ):
+        slept[ "n" ] += 1
+
+    out = _coord( { "tmux-a": _ident() }, disk, dm, sleep_fn=_sleep, write_memento=True )
+    assert out[ "tmux-a" ][ "status" ] == "verified"
+    assert slept[ "n" ] == 0                        # no pending → poll loop never entered

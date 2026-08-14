@@ -2716,9 +2716,15 @@ def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str
     reaps ALL sessions this manager spawned.
 
     `write_memento` (defaults to the INI `cc session spawn write memento default`)
-    signals that each child should be given a chance to write a memento (to
-    `io/mementos/<persona>-<timestamp>.md`) before kill, so its specialization
-    survives a future re-spawn (pass that path back as `seed_memento`).
+    makes the reap PROVE each seat has a fresh+complete memento on disk BEFORE kill,
+    at the derivable slot `io/mementos/<persona-slug>.md` — and, when one is absent,
+    DM the still-alive child to write it and WAIT (bounded) for it to appear, so its
+    specialization survives a future re-spawn (pass that path back as `seed_memento`).
+    The result's `memento_outcomes` carries an EXPLICIT per-seat verdict (verified /
+    written / timeout_no_memento / skipped) — a seat that produced no memento fails
+    VISIBLY, never as a silent success (row 0a36d83d — the flag used to be a no-op).
+    A seat already carrying a fresh memento (a manual "prepare for re-spin" the
+    manager already did) is NOT asked again — the guard suppresses the duplicate.
 
     ⚠️ **A REAP UN-ASSIGNS THE WORKER'S STORE ROWS. A RE-SPIN MUST SAY SO.**
     By default every reaped worker's non-terminal rows are reconciled away from
@@ -2752,14 +2758,29 @@ def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str
         respin_personas: personas coming straight back — keep their row ownership
 
     Returns:
-        dict: { dismissed:[{session_name, status}], remaining,
+        dict: { dismissed:[{session_name, status}], remaining, memento_outcomes,
                 retained_owner_personas, retained_unmatched, ... }
     """
+    import functools
+    import cosa.utils.util as cu
+    from lupin_mcp import session_spawner, reap_memento
     _wait_for_sender_id()
-    from lupin_mcp import session_spawner
     sid, _ = session_spawner.resolve_manager_identity( _get_cc_metadata(), fallback_session_id=SESSION_ID )
     cfg    = session_spawner.resolve_spawn_config( _spawn_config_mgr() )
     wm     = cfg[ "write_memento_default" ] if write_memento is None else write_memento
+    # MEMENTO COORDINATION (row 0a36d83d) → wire the LIVE coordinator so each reaped
+    # seat is proven to have (or is asked to write, then polled for) a fresh+complete
+    # memento on disk BEFORE kill — the flag was a no-op for 3 production failures.
+    # partial (not a closure) so the wrapper stays fully covered even when the inner
+    # dismiss_sessions is stubbed; coordinate_mementos has its own direct unit tests.
+    memento_coord = functools.partial(
+        reap_memento.coordinate_mementos,
+        project_root      = cu.get_project_root(),
+        write_memento     = wm,
+        window_seconds    = cfg[ "reap_memento_window_seconds" ],
+        min_bytes         = cfg[ "reap_memento_min_bytes" ],
+        ask_timeout_sec   = cfg[ "reap_memento_ask_timeout_sec" ],
+        poll_interval_sec = cfg[ "reap_memento_poll_interval_sec" ] )
     # LIVE reap path → wire the real reap-RECONCILE producer (d647b531) so a reaped
     # worker's non-terminal store items are auto-reconciled (close-if-receipt /
     # reassign-to-live-manager / surface) instead of orphaning. session_spawner
@@ -2768,7 +2789,7 @@ def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str
     return session_spawner.dismiss_sessions(
         sid, session_names=session_names, reason=reason, write_memento=wm,
         reconcile_items_fn=session_spawner._default_reconcile_store_items,
-        respin_personas=respin_personas )
+        respin_personas=respin_personas, memento_coord_fn=memento_coord )
 
 
 @mcp.tool
