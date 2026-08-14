@@ -14,6 +14,7 @@ Scope: Deep Research, Podcast Generator, Research-to-Podcast (3 agents).
 import json
 import os
 import re
+from dataclasses import dataclass
 from typing import Optional
 
 import cosa.utils.util as cu
@@ -57,6 +58,80 @@ BATCH_TIMEOUT     = "timeout"       # delivered or not, the budget elapsed with 
 BATCH_MALFORMED   = "malformed"     # delivered, but the response could not be parsed
 BATCH_INCOMPLETE  = "incomplete"    # answered, but a required arg came back missing or blank
 BATCH_INTERNAL    = "internal"      # setup failed before the user could be asked (e.g. unknown command)
+
+
+@dataclass
+class ExtractionResult:
+    """
+    The non-interactive half of expedite() — everything collect() needs to
+    drive user interaction, with zero prompts issued yet.
+
+    Requires:
+        - final_args is a dict of arg-name -> value already resolved (LORA +
+          LLM merge)
+        - missing is the list of user-visible arg names still to collect
+        - fallback_questions / fallback_defaults / special_handlers are the
+          agent-entry maps that govern how each missing arg is collected
+
+    Ensures:
+        - Carries no interaction state; safe to build without a live user socket
+    """
+    final_args         : dict
+    missing            : list
+    fallback_questions : dict
+    fallback_defaults  : dict
+    special_handlers   : dict
+
+
+@dataclass
+class ArgSpec:
+    """
+    The typed slice of an AGENTIC_AGENTS entry that extract() reads — every field
+    it needs, and nothing else. The expedite() shim builds one from the raw table
+    entry, so extract() never touches the registry.
+
+    Requires:
+        - arg_mapping maps LORA arg names -> CLI arg names
+        - system_provided / required_user_args are lists of arg-name strings
+        - fallback_questions maps arg-name -> question text
+        - fallback_defaults maps arg-name -> default value (may start empty; the
+          SAME dict the registry entry holds, so extract()'s in-place seeding of
+          required-arg defaults stays observable to the registry, unchanged)
+        - special_handlers maps arg-name -> handler tag
+
+    Ensures:
+        - Holds references, not copies; behavior matches reading the raw dict
+    """
+    arg_mapping        : dict
+    system_provided    : list
+    required_user_args : list
+    fallback_questions : dict
+    fallback_defaults  : dict
+    special_handlers   : dict
+
+    @classmethod
+    def from_entry( cls, entry ):
+        """
+        Build an ArgSpec from a raw AGENTIC_AGENTS entry, preserving the exact
+        reference semantics extract() relied on when it read the dict directly.
+
+        Requires:
+            - entry is an AGENTIC_AGENTS registry entry (has arg_mapping,
+              system_provided, required_user_args, fallback_questions)
+
+        Ensures:
+            - fallback_defaults / special_handlers use the entry's own object when
+              present, or a fresh {} when absent — identical to the former
+              entry.get( key, {} ) calls inside extract()
+        """
+        return cls(
+            arg_mapping        = entry[ "arg_mapping" ],
+            system_provided    = entry[ "system_provided" ],
+            required_user_args = entry[ "required_user_args" ],
+            fallback_questions = entry[ "fallback_questions" ],
+            fallback_defaults  = entry.get( "fallback_defaults", {} ),
+            special_handlers   = entry.get( "special_handlers", {} ),
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -225,6 +300,40 @@ class RuntimeArgumentExpeditor:
             self._last_expedite_reason = BATCH_INTERNAL
             return None
 
+        spec       = ArgSpec.from_entry( agent_entry )
+        extraction = self.extract( command, raw_args, original_question, spec )
+        return self.collect(
+            extraction, command, original_question, agent_entry,
+            user_email, session_id, user_id
+        )
+
+    def extract( self, command, raw_args, original_question, spec ):
+        """
+        Non-interactive half of expedite(): resolve known args and compute what
+        is still missing. Issues NO user prompts.
+
+        Requires:
+            - command is a key in AGENTIC_AGENTS
+            - raw_args is a string (may be empty)
+            - original_question is the full voice command string
+            - spec is an ArgSpec built from the command's registry entry (by the
+              caller) — extract() reads only spec, never the AGENTIC_AGENTS table
+
+        Ensures:
+            - Returns an ExtractionResult carrying final_args (LORA + LLM merge),
+              the list of still-missing user-visible args, and the fallback /
+              special-handler maps collect() needs
+            - Does not prompt the user or touch any notification socket
+
+        Args:
+            command: Routing command key (e.g., "agent router go to deep research")
+            raw_args: LORA-extracted arguments string
+            original_question: Full voice command transcription
+            spec: ArgSpec carrying the fields extract() reads for command
+
+        Returns:
+            ExtractionResult
+        """
         # Step 1: Capture --help output
         help_text = get_cli_help( command )
         if not help_text:
@@ -233,7 +342,7 @@ class RuntimeArgumentExpeditor:
         # Step 2: Parse LORA args and map to CLI names
         lora_args    = self._parse_lora_args( raw_args )
         mapped_args  = {}
-        arg_mapping  = agent_entry[ "arg_mapping" ]
+        arg_mapping  = spec.arg_mapping
 
         for lora_name, value in lora_args.items():
             cli_name = arg_mapping.get( lora_name, lora_name )
@@ -255,8 +364,8 @@ class RuntimeArgumentExpeditor:
         )
 
         # Fill runtime placeholders
-        system_args   = ", ".join( agent_entry[ "system_provided" ] )
-        required_args = ", ".join( agent_entry[ "required_user_args" ] )
+        system_args   = ", ".join( spec.system_provided )
+        required_args = ", ".join( spec.required_user_args )
         extracted_str = ", ".join( f"{k}={v}" for k, v in mapped_args.items() ) if mapped_args else "(none)"
 
         prompt = template_processed.format(
@@ -287,7 +396,7 @@ class RuntimeArgumentExpeditor:
             parsed = ExpeditorResponse(
                 all_required_met = "false",
                 args_present     = "",
-                args_missing     = ", ".join( agent_entry[ "required_user_args" ] )
+                args_missing     = ", ".join( spec.required_user_args )
             )
 
         # Step 6: Merge LLM-detected present args with LORA-mapped args
@@ -304,9 +413,9 @@ class RuntimeArgumentExpeditor:
         # This replaces the old if/else gate on parsed.is_complete() which
         # skipped optional arg prompting when all required args were present.
         user_visible       = get_user_visible_args( command )
-        fallback_questions = agent_entry[ "fallback_questions" ]
-        fallback_defaults  = agent_entry.get( "fallback_defaults", {} )
-        special_handlers   = agent_entry.get( "special_handlers", {} )
+        fallback_questions = spec.fallback_questions
+        fallback_defaults  = spec.fallback_defaults
+        special_handlers   = spec.special_handlers
 
         # Fallback: if CLI doesn't publish user-visible-args, use fallback_questions keys
         if user_visible is None:
@@ -317,12 +426,55 @@ class RuntimeArgumentExpeditor:
 
         # Pre-populate fallback defaults for required args that have no default.
         # The user's original question is the best default for "task" or "query" fields.
-        required_args = agent_entry[ "required_user_args" ]
+        required_args = spec.required_user_args
         for arg_name in required_args:
             if arg_name in missing and arg_name not in fallback_defaults:
                 fallback_defaults[ arg_name ] = original_question
 
         if self.debug: print( f"[Expeditor] Missing user-visible args: {missing}" )
+
+        return ExtractionResult(
+            final_args         = final_args,
+            missing            = missing,
+            fallback_questions = fallback_questions,
+            fallback_defaults  = fallback_defaults,
+            special_handlers   = special_handlers,
+        )
+
+    def collect( self, extraction, command, original_question, agent_entry, user_email, session_id, user_id ):
+        """
+        Interactive half of expedite(): prompt the user for the args extract()
+        found missing, run any special handlers, confirm, and inject system args.
+
+        Requires:
+            - extraction is an ExtractionResult from extract()
+            - command is a key in AGENTIC_AGENTS and agent_entry is its entry
+            - user_email, session_id, user_id are non-empty strings
+            - original_question is the full voice command string
+
+        Ensures:
+            - Returns the complete injected argument dict on success
+            - Returns None on user cancel / decline / timeout / transport failure
+            - On a non-user-decision failure, sets self._last_expedite_reason
+              and does not report it as a cancellation (bug 2aaab1bf)
+
+        Args:
+            extraction: ExtractionResult carrying final_args + missing + maps
+            command: Routing command key
+            original_question: Full voice command transcription
+            agent_entry: The AGENTIC_AGENTS registry entry for command
+            user_email: Authenticated user's email
+            session_id: WebSocket session ID
+            user_id: System user ID
+
+        Returns:
+            dict or None: Complete argument dictionary or None on cancel
+        """
+        final_args         = extraction.final_args
+        missing            = extraction.missing
+        fallback_questions = extraction.fallback_questions
+        fallback_defaults  = extraction.fallback_defaults
+        special_handlers   = extraction.special_handlers
 
         if missing:
             # Partition missing args into batchable and special

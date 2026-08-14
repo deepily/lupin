@@ -100,6 +100,54 @@ AGENTIC_MODE_MAP = {
     "test_suite"               : "agent router go to test suite",
 }
 
+
+def get_routing_command( question, config_mgr, llm_factory, debug=False, verbose=False ):
+    """
+    Determine the routing command for a question via the LLM agent router.
+
+    Requires:
+        - question is a non-empty string
+        - config_mgr exposes .get( "prompt template for agent router" ) and
+          .get( "llm spec key for agent router" )
+        - llm_factory exposes .get_client( spec_key, debug=, verbose= )
+
+    Ensures:
+        - Returns a ( command, args ) tuple of strings
+        - Uses the LLM to determine the appropriate agent
+        - Parses the XML response for command and args
+        - Returns ( "unknown", "" ) on any XML parse failure
+
+    Raises:
+        - FileNotFoundError if prompt template missing
+        - LLM errors propagated
+    """
+    router_prompt_template_path = config_mgr.get( "prompt template for agent router" )
+    router_prompt_template = du.get_file_as_string( du.get_project_root() + router_prompt_template_path )
+
+    prompt = router_prompt_template.format( voice_command=question )
+    if debug and verbose: print( f"\n===== ROUTER PROMPT START =====\n{prompt}\n===== ROUTER PROMPT END =====\n" )
+
+    llm_spec_key = config_mgr.get( "llm spec key for agent router" )
+    llm_client = llm_factory.get_client( llm_spec_key, debug=debug, verbose=verbose )
+    response = llm_client.run( prompt )
+    if debug: print( f"LLM response: [{response}]" )
+
+    # Parse results using Pydantic CommandResponse model
+    try:
+        parsed = CommandResponse.from_xml( response )
+        command = parsed.command
+        args    = parsed.args or ""
+        if debug: print( f"Pydantic parsing extracted: command='{command}', args='{args}'" )
+    except XMLParsingError as e:
+        if debug: print( f"XML parsing failed: {e}" )
+        command, args = "unknown", ""
+    except Exception as e:
+        if debug: print( f"Unexpected error during XML parsing: {e}" )
+        command, args = "unknown", ""
+
+    return command, args
+
+
 class TodoFifoQueue( FifoQueue ):
     """
     Queue for managing todo items with agent routing capabilities.
@@ -944,47 +992,22 @@ class TodoFifoQueue( FifoQueue ):
 
     def _get_routing_command( self, question: str ) -> tuple[str, str]:
         """
-        Determine the routing command for a question.
-        
+        Thin delegating shim over the module-level get_routing_command.
+
         Requires:
             - question is a non-empty string
-            - Config has agent router prompt path
-            - LLM configuration is available
-            
+            - self.config_mgr, self.llm_factory, self.debug, self.verbose are set
+
         Ensures:
-            - Returns tuple of (command, args)
-            - Uses LLM to determine the appropriate agent
-            - Parses XML response for command and args
-            
+            - Returns a ( command, args ) tuple by delegating to
+              get_routing_command with this queue's config + LLM factory
+            - Behavior is identical to the former inline implementation
+
         Raises:
             - FileNotFoundError if prompt template missing
             - LLM errors propagated
         """
-        router_prompt_template_path = self.config_mgr.get( "prompt template for agent router" )
-        router_prompt_template = du.get_file_as_string( du.get_project_root() + router_prompt_template_path )
-        
-        prompt = router_prompt_template.format( voice_command=question )
-        if self.debug and self.verbose: print( f"\n===== ROUTER PROMPT START =====\n{prompt}\n===== ROUTER PROMPT END =====\n" )
-
-        llm_spec_key = self.config_mgr.get( "llm spec key for agent router" )
-        llm_client = self.llm_factory.get_client( llm_spec_key, debug=self.debug, verbose=self.verbose )
-        response = llm_client.run( prompt )
-        if self.debug: print( f"LLM response: [{response}]" )
-
-        # Parse results using Pydantic CommandResponse model
-        try:
-            parsed = CommandResponse.from_xml( response )
-            command = parsed.command
-            args    = parsed.args or ""
-            if self.debug: print( f"Pydantic parsing extracted: command='{command}', args='{args}'" )
-        except XMLParsingError as e:
-            if self.debug: print( f"XML parsing failed: {e}" )
-            command, args = "unknown", ""
-        except Exception as e:
-            if self.debug: print( f"Unexpected error during XML parsing: {e}" )
-            command, args = "unknown", ""
-
-        return command, args
+        return get_routing_command( question, self.config_mgr, self.llm_factory, debug=self.debug, verbose=self.verbose )
 
     def _crud_agents_enabled( self ):
         """
