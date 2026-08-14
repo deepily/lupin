@@ -700,6 +700,55 @@ class RunningFifoQueue( FifoQueue ):
         except Exception as io_e:
             if self.debug: print( f"[AGENTIC-POOL] I/O table write skipped (stalled): {io_e}" )
 
+    def _claim_terminal_reclaim( self, job: Any ) -> bool:
+        """
+        Leg (c) — atomically claim a job's single terminal transition.
+
+        Returns True exactly once per job OBJECT (first caller wins) and False on
+        every subsequent call, so a terminal primitive can no-op a
+        double-transition. The marker lives on the job object (getattr default
+        False — heterogeneous job types may lack it until first claim; the
+        acceptable external-object case, mirroring the getattr at ~line 736), so a
+        resubmitted repair-chain job (a NEW object) is never falsely blocked.
+        Checked+set under _agentic_futures_lock (an RLock, already re-entrant for
+        the callback-on-same-thread case) so the read and the write are atomic
+        against a racing ghost-sweep / completion callback.
+
+        Requires:
+            - job is a queue job object (attribute-settable)
+
+        Ensures:
+            - First call for a given job object returns True and marks it
+            - Every later call for the same object returns False
+        """
+        with self._agentic_futures_lock:
+            if getattr( job, "_brake_terminal_claimed", False ):
+                return False
+            job._brake_terminal_claimed = True
+            return True
+
+    def _release_terminal_reclaim( self, job: Any ) -> None:
+        """
+        Leg (c) rollback — release a claim taken by _claim_terminal_reclaim when
+        the transition it guarded did NOT complete (raised mid-flight).
+
+        Without this, a claim set at the top of _transition_to_dead would stick
+        True even though emit/delete/push failed, leaving the job in
+        running_queue with every later retry no-op'd — a slot that never frees,
+        the exact runaway this brake exists to prevent (Tiberius P1, 2026-08-13).
+        Releasing lets the ghost-sweeper's next tick re-attempt the transition.
+        Idempotent; taken under _agentic_futures_lock so it is atomic against a
+        concurrent claim.
+
+        Requires:
+            - job is a queue job object (attribute-settable)
+
+        Ensures:
+            - job's terminal claim is cleared (a subsequent claim can succeed)
+        """
+        with self._agentic_futures_lock:
+            job._brake_terminal_claimed = False
+
     def _transition_to_dead( self, job: Any, cause: Any ) -> None:
         """
         Canonical failure transition. Thread-safe. `cause` may be an Exception
@@ -710,76 +759,128 @@ class RunningFifoQueue( FifoQueue ):
         482-532 (status-check fail) + 534-592 (exception). Phase 2 scope:
         shared with the pool callback only; fast-lane paths (_handle_error_case
         et al.) may migrate in Phase 3 cleanup.
+
+        Leg (c) idempotency: no-ops on a second entry for the SAME job object so a
+        late completion callback, or a ghost-sweep that snapshotted
+        _agentic_futures before _on_agentic_complete popped the future, cannot
+        double-transition a row already declared dead.
         """
-        # Normalise cause
-        if isinstance( cause, str ):
-            error_msg   = cause
-            stack_trace = cause
+        # Leg (c) — status-guarded idempotent reclaim (design §Leg c). Claim
+        # atomically so a concurrent ghost-sweep / completion callback cannot
+        # double-transition this row.
+        if not self._claim_terminal_reclaim( job ):
+            if self.debug:
+                print( "[AGENTIC-POOL] _transition_to_dead no-op — job already terminal (Leg c)" )
+            return
+
+        # The claim is now HELD. Everything below must either COMPLETE or roll the
+        # claim back — a claim that stuck through a FAILED transition (emit/delete/
+        # push raising) would leave the job in running_queue with every retry
+        # no-op'd forever: a slot that never frees, the exact runaway this brake
+        # exists to prevent (Tiberius P1, 2026-08-13). On any mid-transition
+        # exception, release the claim so the ghost-sweeper's next tick can
+        # re-attempt, then re-raise so the caller's error handling is unchanged.
+        try:
+            # Normalise cause
+            if isinstance( cause, str ):
+                error_msg   = cause
+                stack_trace = cause
+            else:
+                error_msg   = str( cause )
+                try:
+                    stack_trace = "".join( traceback.format_exception( type( cause ), cause, cause.__traceback__ ) )
+                except Exception:
+                    stack_trace = error_msg
+
+            # Ensure job.error reflects the failure (some paths set this already; some don't)
+            try:
+                if not job.error:
+                    job.error = error_msg
+                job.state = JobState.FAILED
+            except Exception:
+                pass  # Missing attributes on exotic job types — boundary tolerance
+
+            du.print_banner( f"AgenticJob failed: {error_msg}", prepend_nl=True )
+
+            # TTS notify — urgent priority
+            job_type_label = getattr( job, "JOB_TYPE", job.job_type )
+            self._notify(
+                f"The {job_type_label} job encountered an error: {error_msg[ :100 ]}",
+                job=job,
+                priority="urgent"
+            )
+
+            job_id       = job.id_hash
+            user_id      = job.user_id
+            completed_at = du.get_current_datetime_iso()
+            started_at   = job.started_at
+
+            duration_seconds = None
+            if started_at:
+                try:
+                    start = datetime.fromisoformat( started_at ) if isinstance( started_at, str ) else started_at
+                    end   = datetime.fromisoformat( completed_at )
+                    duration_seconds = ( end - start ).total_seconds()
+                except Exception:
+                    pass
+
+            metadata = {
+                "error"            : error_msg,
+                "stack_trace"      : stack_trace,
+                "question_text"    : job.last_question_asked,
+                "agent_type"       : job.job_type,
+                "timestamp"        : job.created_date,
+                "status"           : JobState.FAILED.value,
+                "has_interactions" : bool( job.session_id ),
+                "is_cache_hit"     : False,
+                "user_email"       : job.user_email,
+                "started_at"       : started_at,
+                "completed_at"     : completed_at,
+                "duration_seconds" : duration_seconds,
+            }
+            emit_job_state_transition(
+                self.websocket_mgr, job_id, JobState.RUNNING, JobState.FAILED, user_id, metadata
+            )
+
+            self.delete_by_id_hash( job.id_hash )
+            try:
+                self.jobs_dead_queue.push( job )
+            except BaseException:
+                # Tiberius residual (log-not-guard, María 2026-08-13): delete
+                # succeeded but the dead-queue push raised, so the row is now in
+                # NEITHER queue and the ghost-sweeper's queue_dict check will skip
+                # it. An in-memory push effectively never raises, so this earns a
+                # log line and nothing more — no recovery guard. Re-raise so the
+                # outer handler still rolls the reclaim back.
+                du.print_banner(
+                    f"[AGENTIC-POOL] dead-queue push raised AFTER delete for {job.id_hash} "
+                    f"— row orphaned (in neither queue); ghost-sweeper will skip it",
+                    prepend_nl=True
+                )
+                raise
+        except BaseException:
+            # Transition did NOT complete — release the claim so a retry can
+            # re-attempt (else the slot wedges forever), then re-raise unchanged.
+            self._release_terminal_reclaim( job )
+            raise
+
+        # Phase 6A: automated repair evaluation.
+        # Leg (b3): a runtime-brake timeout death must NOT re-arm the repair chain
+        # — the failure is a non-returning SDK call (a systemic/environmental
+        # hang), so a fresh attempt would just hang again. A brake that trips and
+        # immediately respawns the same runaway is not a brake. Skip the watchdog
+        # for BFETimeoutError deaths only; every other cause re-arms as before.
+        # (Outside the reclaim-rollback try: the transition has COMPLETED and the
+        # row is terminal by the time we get here; a watchdog hiccup must not undo
+        # a finished dead-letter — its own except already swallows failures.)
+        from cosa.agents.shared.fix_executor import BFETimeoutError
+        if isinstance( cause, BFETimeoutError ):
+            if self.debug: print( "[AGENTIC-POOL] auto-fix re-arm SKIPPED — runtime-brake timeout death (Leg b3)" )
         else:
-            error_msg   = str( cause )
             try:
-                stack_trace = "".join( traceback.format_exception( type( cause ), cause, cause.__traceback__ ) )
-            except Exception:
-                stack_trace = error_msg
-
-        # Ensure job.error reflects the failure (some paths set this already; some don't)
-        try:
-            if not job.error:
-                job.error = error_msg
-            job.state = JobState.FAILED
-        except Exception:
-            pass  # Missing attributes on exotic job types — boundary tolerance
-
-        du.print_banner( f"AgenticJob failed: {error_msg}", prepend_nl=True )
-
-        # TTS notify — urgent priority
-        job_type_label = getattr( job, "JOB_TYPE", job.job_type )
-        self._notify(
-            f"The {job_type_label} job encountered an error: {error_msg[ :100 ]}",
-            job=job,
-            priority="urgent"
-        )
-
-        job_id       = job.id_hash
-        user_id      = job.user_id
-        completed_at = du.get_current_datetime_iso()
-        started_at   = job.started_at
-
-        duration_seconds = None
-        if started_at:
-            try:
-                start = datetime.fromisoformat( started_at ) if isinstance( started_at, str ) else started_at
-                end   = datetime.fromisoformat( completed_at )
-                duration_seconds = ( end - start ).total_seconds()
-            except Exception:
-                pass
-
-        metadata = {
-            "error"            : error_msg,
-            "stack_trace"      : stack_trace,
-            "question_text"    : job.last_question_asked,
-            "agent_type"       : job.job_type,
-            "timestamp"        : job.created_date,
-            "status"           : JobState.FAILED.value,
-            "has_interactions" : bool( job.session_id ),
-            "is_cache_hit"     : False,
-            "user_email"       : job.user_email,
-            "started_at"       : started_at,
-            "completed_at"     : completed_at,
-            "duration_seconds" : duration_seconds,
-        }
-        emit_job_state_transition(
-            self.websocket_mgr, job_id, JobState.RUNNING, JobState.FAILED, user_id, metadata
-        )
-
-        self.delete_by_id_hash( job.id_hash )
-        self.jobs_dead_queue.push( job )
-
-        # Phase 6A: automated repair evaluation
-        try:
-            self._evaluate_for_auto_fix( job )
-        except Exception as e:
-            if self.debug: print( f"[AGENTIC-POOL] auto-fix eval skipped: {e}" )
+                self._evaluate_for_auto_fix( job )
+            except Exception as e:
+                if self.debug: print( f"[AGENTIC-POOL] auto-fix eval skipped: {e}" )
 
     def _process_fast_lane( self, job: Any ) -> Any:
         """

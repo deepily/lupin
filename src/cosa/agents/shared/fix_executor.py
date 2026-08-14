@@ -33,6 +33,7 @@ See:
   - src/rnd/v0.1.6/2026.04.10-test-fix-expediter/06-phase3-fix-delegation-plan.md
 """
 
+import asyncio
 import logging
 from typing import Callable, Optional
 
@@ -42,6 +43,24 @@ import cosa.utils.util as cu
 from cosa.agents.swe_team.safety_limits import SafetyGuard, SafetyLimitError
 
 logger = logging.getLogger( __name__ )
+
+
+class BFETimeoutError( Exception ):
+    """
+    Raised by the runtime brake (Leg a) when a single agentic SDK call exceeds
+    the wall-clock budget — the non-returning hang the cooperative SafetyGuard
+    cannot catch (SafetyGuard.check_timeout only fires *between* fix-loop
+    iterations; a call hung *inside* one iteration never reaches it).
+
+    Deliberately a plain Exception subclass, NOT a SafetyLimitError: a
+    SafetyLimitError is caught-and-softened into a failed FixResult by
+    execute_fix's handler, which would swallow the brake. This exception is
+    instead re-raised past execute_fix so it propagates out of the BFE job's
+    do_all() and is captured by the agentic-pool Future — where
+    _on_agentic_complete transitions the job to dead and releases the pool slot
+    (Leg b). See src/rnd/v0.2.0/2026.08.13-bfe-runtime-brake-design.md.
+    """
+    pass
 
 
 def _tail_lines( text: Optional[ str ], max_lines: int = 12, max_chars: int = 2000 ) -> str:
@@ -197,6 +216,43 @@ class FixExecutor:
 
     # ───── public API ─────
 
+    async def _await_with_brake( self, coro, phase_label: str ):
+        """
+        Leg (a) — the runtime brake. Await `coro` under a hard wall-clock
+        timeout so a non-returning SDK call raises instead of hanging the pool
+        slot forever.
+
+        Timeout provenance (design §Leg a): reads
+        self.config.wall_clock_timeout_secs — the SAME key the cooperative
+        SafetyGuard reads (bug fix expediter wall clock timeout seconds). No new
+        key, no literal seconds value here, by construction.
+
+        asyncio.wait_for cancels the inner coroutine on timeout (CancelledError,
+        a BaseException — NOT caught by the coder/verify callbacks' own
+        `except Exception`, so cancellation propagates cleanly), then raises
+        asyncio.TimeoutError, which this method converts to BFETimeoutError for
+        the Leg-(b) handler.
+
+        Requires:
+            - coro is an awaitable produced by a coder/verify callback
+            - self.config.wall_clock_timeout_secs is a positive number
+
+        Ensures:
+            - Returns coro's result when it completes within the budget
+            - Raises BFETimeoutError when the budget elapses first
+
+        Raises:
+            - BFETimeoutError if the call exceeds wall_clock_timeout_secs
+        """
+        budget = self.config.wall_clock_timeout_secs
+        try:
+            return await asyncio.wait_for( coro, timeout=budget )
+        except asyncio.TimeoutError:
+            raise BFETimeoutError(
+                f"BFE runtime brake: {phase_label} exceeded {budget}s wall-clock "
+                f"budget (job {self.job_id}) — non-returning SDK call, slot reclaimed"
+            )
+
     async def execute_fix(
         self,
         diagnosis,
@@ -242,8 +298,11 @@ class FixExecutor:
             # --- Initial coder delegation ---
             prompt = build_fix_prompt( selected_fix, diagnosis, self.fix_context )
 
-            coder_output, files_changed = await self._delegate_to_coder(
-                self._voice_io, prompt, guard, self._cosa_interface
+            coder_output, files_changed = await self._await_with_brake(
+                self._delegate_to_coder(
+                    self._voice_io, prompt, guard, self._cosa_interface
+                ),
+                "coder delegation",
             )
 
             if not coder_output:
@@ -271,9 +330,12 @@ class FixExecutor:
                     )
 
                     # --- Tester verification ---
-                    passed, tester_output = await self._verify_fix(
-                        self._voice_io, selected_fix, coder_output, files_changed,
-                        guard, self._cosa_interface
+                    passed, tester_output = await self._await_with_brake(
+                        self._verify_fix(
+                            self._voice_io, selected_fix, coder_output, files_changed,
+                            guard, self._cosa_interface
+                        ),
+                        f"tester verification (iteration {iteration})",
                     )
 
                     if passed:
@@ -325,8 +387,11 @@ class FixExecutor:
                     redelegate_prompt = build_redelegate_prompt(
                         selected_fix, coder_output, tester_output, iteration + 1
                     )
-                    coder_output, new_files = await self._delegate_to_coder(
-                        self._voice_io, redelegate_prompt, guard, self._cosa_interface
+                    coder_output, new_files = await self._await_with_brake(
+                        self._delegate_to_coder(
+                            self._voice_io, redelegate_prompt, guard, self._cosa_interface
+                        ),
+                        f"coder re-delegation (iteration {iteration + 1})",
                     )
                     files_changed.extend( f for f in new_files if f not in files_changed )
 
@@ -337,6 +402,15 @@ class FixExecutor:
                             details="Coder re-delegation failed",
                         )
                         break
+
+        except BFETimeoutError:
+            # Leg (a)→(b): the runtime brake. Do NOT soften into a FixResult the
+            # way SafetyLimitError/Exception below are handled — re-raise so the
+            # brake propagates out of do_all() → the agentic-pool Future →
+            # _on_agentic_complete → _transition_to_dead, which reclaims the pool
+            # slot. Softening here would turn the brake back into the silent
+            # stall the row exists to close.
+            raise
 
         except SafetyLimitError as e:
             logger.warning( f"Safety limit reached: {e}" )

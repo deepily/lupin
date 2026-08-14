@@ -28,6 +28,7 @@ from unittest.mock import MagicMock, patch
 from cosa.rest import running_fifo_queue as rfq
 from cosa.rest.running_fifo_queue import RunningFifoQueue
 from cosa.rest.job_state import JobState
+from cosa.agents.shared.fix_executor import BFETimeoutError
 
 
 # ── Lightweight fake job hierarchy (real instances, so isinstance works) ─────
@@ -442,6 +443,99 @@ class TestTransitionToDead( _RFQBase ):
             rq._transition_to_dead( job, "c" )
         # _notify is stubbed; assert it was called (urgent path)
         rq._notify.assert_called_once()
+
+
+# ── Runtime brake legs (b3) + (c) ───────────────────────────────────────────
+# design src/rnd/v0.2.0/2026.08.13-bfe-runtime-brake-design.md
+class TestRuntimeBrakeLegBC( _RFQBase ):
+    """
+    Leg (b3): a BFETimeoutError death must NOT re-arm the repair chain
+    (_evaluate_for_auto_fix skipped); any other cause re-arms as before.
+    Leg (c): _transition_to_dead is idempotent per job OBJECT — a second entry
+    no-ops (no double emit / double dead-queue push / double auto-fix eval), so a
+    late completion callback or a ghost-sweep snapshot race cannot
+    double-transition a row already declared dead.
+    """
+
+    # ---- Leg (b3): timeout death does not re-arm ----
+    def test_brake_timeout_death_skips_auto_fix_rearm( self ):
+        rq = self.build()
+        job = _AgenticFake( id_hash="bfe1" ); self._enqueue( rq, job )
+        with patch.object( rq, "_evaluate_for_auto_fix" ) as ev:
+            rq._transition_to_dead( job, BFETimeoutError( "brake: 600s budget" ) )
+        ev.assert_not_called()
+
+    def test_non_timeout_death_still_rearms_auto_fix( self ):
+        rq = self.build()
+        job = _AgenticFake( id_hash="bfe2" ); self._enqueue( rq, job )
+        with patch.object( rq, "_evaluate_for_auto_fix" ) as ev:
+            rq._transition_to_dead( job, ValueError( "ordinary crash" ) )
+        ev.assert_called_once_with( job )
+
+    # ---- Leg (c): idempotent terminal claim ----
+    def test_claim_terminal_reclaim_first_true_then_false( self ):
+        rq = self.build()
+        job = _AgenticFake( id_hash="c1" )
+        self.assertTrue( rq._claim_terminal_reclaim( job ) )
+        self.assertFalse( rq._claim_terminal_reclaim( job ) )
+
+    def test_claim_is_per_object_not_shared_by_id( self ):
+        # A resubmitted repair-chain job is a NEW object with the SAME id_hash —
+        # the per-object marker must NOT falsely block its distinct death.
+        rq = self.build()
+        j1 = _AgenticFake( id_hash="c2" )
+        j2 = _AgenticFake( id_hash="c2" )
+        self.assertTrue( rq._claim_terminal_reclaim( j1 ) )
+        self.assertTrue( rq._claim_terminal_reclaim( j2 ) )
+
+    def test_transition_to_dead_idempotent_second_call_noops( self ):
+        rq = self.build()
+        job = _AgenticFake( id_hash="c3" ); self._enqueue( rq, job )
+        with patch.object( rq, "_evaluate_for_auto_fix" ) as ev:
+            rq._transition_to_dead( job, "first death" )
+            emit_after_first = self.emit.call_count
+            push_after_first = rq.jobs_dead_queue.push.call_count
+            rq._transition_to_dead( job, "second death" )    # already terminal → no-op
+        self.assertEqual( self.emit.call_count, emit_after_first )            # no extra emit
+        self.assertEqual( rq.jobs_dead_queue.push.call_count, push_after_first )  # no extra push
+        ev.assert_called_once()                                              # eval fired only once
+
+    def test_mid_transition_error_rolls_back_claim_and_retry_succeeds( self ):
+        # Tiberius P1: if emit/delete/push raises mid-transition, the early claim
+        # must roll back so a later retry (ghost-sweeper) still completes — else
+        # the marker stays True, the job stays in running_queue, and the slot
+        # wedges forever. Proves the fix: raise mid-transition → claim released →
+        # retry succeeds.
+        rq = self.build()
+        job = _AgenticFake( id_hash="c4" ); self._enqueue( rq, job )
+        with patch.object( rq, "_evaluate_for_auto_fix" ) as ev:
+            # First attempt: emit raises AFTER the claim is taken.
+            self.emit.side_effect = RuntimeError( "emit boom" )
+            with self.assertRaises( RuntimeError ):
+                rq._transition_to_dead( job, "cause" )
+            # Claim rolled back → a retry is permitted (not wedged).
+            self.assertFalse( getattr( job, "_brake_terminal_claimed", False ) )
+            self.assertEqual( rq.jobs_dead_queue.push.call_count, 0 )   # nothing pushed on the failed attempt
+            # Retry: emit now succeeds → transition completes.
+            self.emit.side_effect = None
+            rq._transition_to_dead( job, "cause" )
+        rq.jobs_dead_queue.push.assert_called_once_with( job )          # retry pushed exactly once
+        ev.assert_called_once()                                        # retry re-armed exactly once
+
+    def test_dead_queue_push_raise_after_delete_logs_and_rolls_back( self ):
+        # Tiberius residual (log-not-guard, María 2026-08-13): delete succeeds,
+        # dead-queue push then raises → row orphaned (neither queue); we log and
+        # re-raise, and the outer handler rolls the reclaim back. In-memory push
+        # never raises in practice — this covers the documented edge, not a
+        # recovery path.
+        rq = self.build()
+        job = _AgenticFake( id_hash="c5" ); self._enqueue( rq, job )
+        rq.jobs_dead_queue.push.side_effect = RuntimeError( "push boom" )
+        with patch.object( rq, "_evaluate_for_auto_fix" ) as ev:
+            with self.assertRaises( RuntimeError ):
+                rq._transition_to_dead( job, "cause" )
+        self.assertFalse( getattr( job, "_brake_terminal_claimed", False ) )   # claim rolled back
+        ev.assert_not_called()                                                # auto-fix never reached
 
 
 # ── get_pool_status ─────────────────────────────────────────────────────────
