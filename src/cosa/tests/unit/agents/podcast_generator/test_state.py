@@ -201,14 +201,18 @@ class TestValidateProsodyPreservation:
             title="T", research_source="/r.md", host_a_name="A", host_b_name="B", segments=segs
         )
 
+    # Markers are counted from the segment TEXT (the *[marker]* inline form), NOT
+    # from seg.prosody — the prosody list arrives empty on the translation path
+    # (fix 3350742d / row 52912c4f). These mirror the gated twin
+    # src/tests/unit/test_prosody_validation.py so the two copies cannot drift.
     def test_preserved_when_marker_sets_match( self ):
         eng = self._script( [
-            ScriptSegment( speaker="A", role="curious", text="x", prosody=[ "pause" ] ),
-            ScriptSegment( speaker="B", role="expert", text="y", prosody=[ "excited" ] ),
+            ScriptSegment( speaker="A", role="curious", text="*[pause]* x" ),
+            ScriptSegment( speaker="B", role="expert", text="*[excited]* y" ),
         ] )
         trans = self._script( [
-            ScriptSegment( speaker="A", role="curious", text="x", prosody=[ "pause" ] ),
-            ScriptSegment( speaker="B", role="expert", text="y", prosody=[ "excited" ] ),
+            ScriptSegment( speaker="A", role="curious", text="*[pause]* x" ),
+            ScriptSegment( speaker="B", role="expert", text="*[excited]* y" ),
         ] )
         ok, details = validate_prosody_preservation( eng, trans )
         assert ok is True
@@ -218,16 +222,16 @@ class TestValidateProsodyPreservation:
         assert details[ "extra" ]   == []
 
     def test_missing_marker_detected( self ):
-        eng = self._script( [ ScriptSegment( speaker="A", role="expert", text="x", prosody=[ "pause", "excited" ] ) ] )
-        trans = self._script( [ ScriptSegment( speaker="A", role="expert", text="x", prosody=[ "excited" ] ) ] )
+        eng = self._script( [ ScriptSegment( speaker="A", role="expert", text="*[pause]* *[excited]* x" ) ] )
+        trans = self._script( [ ScriptSegment( speaker="A", role="expert", text="*[excited]* x" ) ] )
         ok, details = validate_prosody_preservation( eng, trans )
         assert ok is False
         assert "pause" in details[ "missing" ]
         assert details[ "extra" ] == []
 
     def test_extra_marker_detected( self ):
-        eng = self._script( [ ScriptSegment( speaker="A", role="expert", text="x", prosody=[ "pause" ] ) ] )
-        trans = self._script( [ ScriptSegment( speaker="A", role="expert", text="x", prosody=[ "pause", "laugh" ] ) ] )
+        eng = self._script( [ ScriptSegment( speaker="A", role="expert", text="*[pause]* x" ) ] )
+        trans = self._script( [ ScriptSegment( speaker="A", role="expert", text="*[pause]* *[laugh]* x" ) ] )
         ok, details = validate_prosody_preservation( eng, trans )
         assert ok is False
         assert details[ "missing" ] == []

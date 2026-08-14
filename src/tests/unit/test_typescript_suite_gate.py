@@ -317,6 +317,9 @@ def test_websocket_parser_is_untouched_by_the_typescript_branch():
 
     assert TestSuiteJob._parse_non_pytest_stdout( "websocket", stdout ) == {
         "passed": 50, "failed": 0, "skipped": 0, "errors": 0,
+        # not_executed joined the parser output at c37443f5 (89bfcc8f D2, 2026-08-13);
+        # this expected dict predated it (test last touched 2026-08-03) → the stale red.
+        "not_executed": 0,
     }
 
 

@@ -249,8 +249,11 @@ class TestElaborationParser:
         out = elaboration.parse_elaboration_response( raw )
         assert len( out ) == 2                                  # string skipped
         assert out[ 0 ][ "presenter_notes" ][ "timing_seconds" ] == 180   # clamped to MAX
+        # timing_seconds_raw preserves the model's pre-clamp value (None here, since
+        # this slide's presenter_notes was non-dict → the default fallback).
         assert out[ 1 ][ "presenter_notes" ] == {
-            "transition": None, "talking_points": [], "timing_seconds": 60, "emphasis": None
+            "transition": None, "talking_points": [], "timing_seconds": 60,
+            "timing_seconds_raw": None, "emphasis": None
         }
         assert out[ 1 ][ "content_bullets" ] == []             # non-list → []
         assert out[ 1 ][ "number" ] == 2                       # coerced
