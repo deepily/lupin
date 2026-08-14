@@ -1,0 +1,379 @@
+"""
+reap_memento.py — memento coordination for the reap path (row 0a36d83d).
+
+THE DEFECT THIS CLOSES: `dismiss_sessions( write_memento=True )` reported success
+and wrote NO memento — the flag travelled into the result dict and nowhere else.
+It failed 3-for-3 in production because the feature was never implemented: each
+of the two layers' docstrings named the OTHER as the owner of the pre-kill write,
+and neither did it. A reap that silently writes nothing is indistinguishable from
+success at the call site, so a manager reaps believing continuity was preserved
+and only learns otherwise when the re-spun seat boots empty.
+
+WHAT THIS MODULE DOES (the manager side of the fix): BEFORE any seat is killed,
+for each seat the manager asked to preserve, PROVE a fresh + complete memento is
+on disk — and if one is not, DM the still-alive child to write one and WAIT
+(bounded) for it to appear. Every seat gets an EXPLICIT per-seat outcome; a seat
+that produced no memento fails VISIBLY (never a silent success — that IS the bug).
+
+THE MANAGER SIDE CANNOT AUTHOR A CHILD'S MEMENTO — only the child can, from its
+own context. So this coordinator's job is ASK-then-VERIFY-on-disk, never write.
+The child writes to the derivable bare slot `io/mementos/<persona-slug>.md`
+(memento-management.md §3.2, "stable, one slot per persona") using `/plan-memento`
+/ memento_io, which stamps a machine-readable header as line 1 of every record:
+
+    <!-- memento-record: persona=<name> session_id=<sid8> written_at=<ISO> slot=<io|root> -->
+
+THE VERIFY PREDICATE IS ALL-OR-ASK (Mr. Radio, row 0a36d83d review). A memento
+is "verified" (skip the DM) ONLY when it clears EVERY gate: byte floor (complete,
+not a zero-byte/header-only stub), header present + parseable, header session_id
+matches THIS seat (kills the stale prior-holder slot — a re-granted persona name
+can point at another session's old memento), and header written_at is aware and
+within the freshness window. Any miss — no header, malformed, wrong session, naive
+or stale or future-dated timestamp, too small — falls toward ASKING. The header is
+SELF-REPORTED, so a parse miss must read as "ask", never "fresh enough": the first
+is a cheap duplicate ask, the second resurrects the original silent bug. mtime
+NEVER grants a skip (it is defeated by worktree-add/checkout, and io/mementos is
+gitignored so git author-date does not apply).
+
+THE FRESHNESS WINDOW IS BOTH A FLOOR AND A CEILING. Floor: it must cover the
+manual "prepare for re-spin" latency — a manager DMs the child by hand, the child
+writes, replies "ready", and the manager reaps some seconds-to-minutes later; the
+memento written at the start of that must still read as fresh at the reap, or we
+re-ask needlessly. Ceiling: short enough that a STALE memento from a PRIOR task
+does not read as fresh and skip the ask. 24h (memento_io's ENGAGEMENT_WINDOW_HOURS)
+answers a different question and is NOT reused here; ~20 min comfortably clears the
+floor and rejects prior-task staleness.
+
+NO COLLISION WITH self_respin, and NOT for the reason first supposed. This reap
+coordinator reads/asks the `--slot io` slot `io/mementos/<persona-slug>.md`;
+self_respin writes and rehydrates from the `--slot root` slot `.claude-memento.md`
+(memento-management.md §3: io = spawned-worker, root = self-`/clear`). Different
+files — a reap never reads what self_respin verifies, and the child answering a
+reap ask never rewrites what self_respin rehydrates from. It is also actor-disjoint:
+self_respin is a manager clearing its OWN pane, while a reap kills sessions a
+manager SPAWNED — a session is never both at once. The earlier "the verified-skip
+suppresses a DM in the gap" story assumed a shared slot and was wrong; the
+guarantee here is slot-disjointness + actor-disjointness, which does not depend on
+window tuning.
+
+THE TRADE, RECORDED EXPLICITLY (Mr. Radio's instruction): erring toward asking
+means a worker can receive a second "prepare for re-spin" it already answered.
+That is the cost we buy, and it is the right buy — a duplicate ask is VISIBLE and
+CHEAP; a silently-missing memento is the defect this row exists for. So every
+ambiguous case asks.
+
+PURITY: every side-effecting seam (clock, file read, DM send, sleep) is injected,
+so the whole decision tree — verified / written / timeout / skipped — is unit-
+provable with fakes and no live server.
+"""
+
+import datetime
+import re
+import time
+
+from pathlib import Path
+from typing  import Any, Callable, Dict, Optional, Tuple
+
+from lupin_mcp.persona_normalization import persona_slug
+
+
+# ── Defaults (the MCP wrapper overrides these from INI at the live call) ───────
+DEFAULT_WINDOW_SECONDS    = 20 * 60   # 1200 — freshness floor AND ceiling (see module doc)
+DEFAULT_MIN_BYTES         = 1000      # completeness floor — a header-only stub fails this
+DEFAULT_ASK_TIMEOUT_SEC   = 45        # total wait after the ask, shared across all asked seats
+DEFAULT_POLL_INTERVAL_SEC = 3         # re-check cadence while polling for a written memento
+
+# The trained fleet phrase a manager uses by hand today; children already respond to it.
+ASK_BODY = (
+    "prepare for re-spin — you are being reaped and your manager asked to preserve "
+    "your context. Write your memento NOW to {slot} (via /plan-memento or memento_io), "
+    "then reply \"ready for re-spin\". If you do not, your context is lost at kill."
+)
+
+_HEADER_RE = re.compile( r"<!--\s*memento-record:(?P<fields>.*?)-->" )
+
+
+# ── Slot derivation ───────────────────────────────────────────────────────────
+def seat_memento_slot( project_root, persona_name ):
+    """
+    Ensures:
+        - returns the derivable bare memento slot for a soon-to-be-reaped worker:
+          <project_root>/io/mementos/<persona-slug>.md (memento-management.md §3.2)
+        - the slug is accent/punctuation/case-proof via persona_slug
+    """
+    return Path( project_root ) / "io" / "mementos" / f"{persona_slug( persona_name )}.md"
+
+
+# ── Header parse (pure) ───────────────────────────────────────────────────────
+def parse_memento_header( text ):
+    """
+    Ensures:
+        - returns { key: value } parsed from the line-1 `<!-- memento-record: k=v ... -->`
+          header, or {} when the header is absent or malformed
+        - never raises
+    """
+    if not text:
+        return {}
+    # The record header is line 1 (memento_io stamps it there). Restrict the search
+    # to the first line so a stray `<!-- memento-record: ... -->` deeper in a body
+    # cannot be mistaken for the provenance stamp.
+    match = _HEADER_RE.search( text.splitlines()[ 0 ] )
+    if not match:
+        return {}
+    fields = {}
+    for token in match.group( "fields" ).split():
+        if "=" in token:
+            key, value = token.split( "=", 1 )
+            fields[ key.strip() ] = value.strip()
+    return fields
+
+
+def _parse_iso_aware( raw ):
+    """Ensures: returns an AWARE datetime parsed from `raw`, or None (naive/bad → None)."""
+    try:
+        parsed = datetime.datetime.fromisoformat( raw )
+    except ( ValueError, TypeError ):
+        return None
+    return parsed if parsed.tzinfo is not None else None
+
+
+# ── The verify predicate (pure) — ALL-OR-ASK ──────────────────────────────────
+def verify_seat_memento(
+    path,
+    seat_sid8,
+    now,
+    *,
+    read_text_fn,
+    window_seconds = DEFAULT_WINDOW_SECONDS,
+    min_bytes      = DEFAULT_MIN_BYTES
+) -> Tuple[ bool, str ]:
+    """
+    Prove the memento at `path` is USABLE for reaping seat `seat_sid8` — complete
+    AND self-attesting as THIS seat's, written this window. Anything else ASKS.
+
+    Requires:
+        - read_text_fn( path ) -> the file text, or None when unreadable
+        - seat_sid8 is the 8-char prefix of the seat's session id
+        - now is an AWARE datetime
+
+    Ensures:
+        - ( True, reason ) ONLY when ALL hold: file readable; byte length >= min_bytes;
+          a parseable memento-record header is present; header session_id's 8-char
+          prefix == seat_sid8; header written_at is aware, not future, and its age
+          <= window_seconds
+        - ( False, reason ) otherwise, the reason naming which gate failed — every
+          such case means ASK (a self-reported header that cannot be proven fresh is
+          never treated as fresh)
+        - mtime is NEVER consulted — it cannot grant a skip
+        - never raises
+    """
+    text = read_text_fn( path )
+    if text is None:
+        return False, "no memento at slot"
+    n_bytes = len( text.encode( "utf-8" ) )
+    if n_bytes < min_bytes:
+        return False, f"memento too small ({n_bytes}B < {min_bytes}B floor) — empty or partial write"
+
+    header = parse_memento_header( text )
+    if not header:
+        return False, "no parseable memento-record header — header-less or hand-written, cannot prove freshness"
+
+    hdr_sid = header.get( "session_id" )
+    if not hdr_sid:
+        return False, "memento header carries no session_id"
+    # Case-fold both sides: memento_io stamps session_id via short_sid() = .lower()[:8],
+    # while the seat's id is un-lowercased here. Standard uuid hex is already lowercase,
+    # so this only matters for an uppercase-hex id — where a raw compare would always
+    # ASK (fail-safe, just wasteful). Fold so a match is a match.
+    if hdr_sid[ :8 ].lower() != ( seat_sid8 or "" )[ :8 ].lower():
+        return False, ( f"memento header session_id ({hdr_sid[ :8 ]}) != seat ({( seat_sid8 or '' )[ :8 ]}) "
+                        f"— a prior holder's memento in this slot" )
+
+    written = _parse_iso_aware( header.get( "written_at" ) )
+    if written is None:
+        return False, "memento header written_at is missing, naive, or unparseable"
+    age = ( now - written ).total_seconds()
+    if age < 0:
+        return False, "memento header written_at is future-dated — corrupt or forged stamp"
+    if age > window_seconds:
+        return False, f"memento is stale ({int( age )}s old > {window_seconds}s window)"
+    return True, f"verified: complete, session-matched, fresh ({int( age )}s old)"
+
+
+# ── Identity helpers ──────────────────────────────────────────────────────────
+def _identity_bits( ident ):
+    """
+    Ensures:
+        - returns ( persona_name, session_id ) from a `_capture_reap_identity` dict
+        - persona is read from the voice_persona dict's `name` (or a bare string)
+        - ( None, ... ) / ( ..., None ) when the bridge identity is missing a piece
+        - never raises
+    """
+    if not ident:
+        return None, None
+    persona = ident.get( "persona" )
+    if isinstance( persona, dict ):
+        name = persona.get( "name" )
+    elif isinstance( persona, str ):
+        name = persona
+    else:
+        name = None
+    return name, ident.get( "session_id" )
+
+
+# ── Live default seams (injected away in tests) ───────────────────────────────
+def _default_now():   # pragma: no cover - trivial clock boundary
+    return datetime.datetime.now( datetime.timezone.utc )
+
+
+def _default_read_text( path ):
+    """
+    Ensures: returns the file's text, or None when unreadable (never raises).
+    A truncated write can leave an INVALID UTF-8 stream (a multibyte char cut in
+    half) — that raises UnicodeDecodeError, not OSError. It is exactly the partial
+    write the byte floor exists to reject, so it must read as "unreadable" → ASK,
+    never crash the whole coordination pass.
+    """
+    try:
+        with open( path, "r" ) as handle:
+            return handle.read()
+    except ( OSError, UnicodeDecodeError ):
+        return None
+
+
+def _default_dm( persona_name, session_id, body ):   # pragma: no cover - live MCP DM boundary
+    """
+    Ask a child, addressed by its FULL session id (name-reuse-proof), to write its
+    memento. Lazy-imports the MCP DM core so this module never pulls the server in
+    at import time (the server imports THIS module).
+    """
+    from lupin_mcp.cosa_voice_mcp import _dm_send_fn
+    return _dm_send_fn( recipient=persona_name, body=body, recipient_session_id=session_id )
+
+
+# ── The orchestrator — every side effect injectable ───────────────────────────
+def coordinate_mementos(
+    identities         : Dict[ str, Any ],
+    *,
+    project_root       : str,
+    write_memento      : bool,
+    now_fn             : Optional[ Callable ] = None,
+    read_text_fn       : Optional[ Callable ] = None,
+    dm_fn              : Optional[ Callable ] = None,
+    sleep_fn           : Callable = time.sleep,
+    window_seconds     : int = DEFAULT_WINDOW_SECONDS,
+    min_bytes          : int = DEFAULT_MIN_BYTES,
+    ask_timeout_sec    : int = DEFAULT_ASK_TIMEOUT_SEC,
+    poll_interval_sec  : int = DEFAULT_POLL_INTERVAL_SEC
+) -> Dict[ str, Dict[ str, Any ] ]:
+    """
+    Ensure a fresh + complete memento exists on disk for each reaped seat BEFORE
+    teardown, returning an EXPLICIT per-seat outcome. This runs BEFORE any kill —
+    the kill used to be the first statement in the reap, so a send with no wait
+    lost the race; here every ask completes and every slot is polled first.
+
+    Requires:
+        - identities maps tmux_session_name -> a `_capture_reap_identity` dict (or None)
+        - project_root is the repo root under which io/mementos/ lives
+        - now_fn/read_text_fn/dm_fn default to the live seams; sleep_fn defaults to
+          time.sleep (injected in tests so no real waiting happens)
+
+    Ensures:
+        - when write_memento is False → every seat's outcome is status "not_requested"
+          (no disk read, no DM)
+        - otherwise, per seat, status is one of:
+            "verified"           a fresh+complete session-matched memento already on
+                                 disk — NO DM sent (this same skip closes both the
+                                 double-send case and the self_respin gap)
+            "written"            no usable memento at first, the child was asked, and
+                                 a usable one appeared within ask_timeout_sec
+            "timeout_no_memento" the child was asked and no usable memento appeared —
+                                 parked / slow / declined. VISIBLE, never success
+            "skipped"            no persona/session in the bridge identity, so the
+                                 slot cannot be derived — surfaced, not silently ok
+        - a seat with no identity is NEVER asked and NEVER reported verified
+        - never raises on an injected-seam failure it can classify (a failed DM send
+          is recorded in the seat's reason, it does not abort coordination)
+
+    THE TRADE (Mr. Radio, recorded verbatim per instruction): erring toward asking
+    means a worker can get a second "prepare for re-spin" it already answered. That
+    duplicate ask is visible and cheap; a silently-missing memento is the defect —
+    so every ambiguous case asks.
+    """
+    now_fn       = now_fn       if now_fn       is not None else _default_now
+    read_text_fn = read_text_fn if read_text_fn is not None else _default_read_text
+    dm_fn        = dm_fn        if dm_fn        is not None else _default_dm
+    # Clamp the poll cadence to >= 1s: a misconfigured 0/negative would leave `elapsed`
+    # stuck and hang the reap forever (the kill never runs). A floor is fail-safe — the
+    # wait can be at most ask_timeout_sec, never unbounded.
+    poll_interval_sec = max( 1, poll_interval_sec )
+
+    outcomes : Dict[ str, Dict[ str, Any ] ] = {}
+
+    if not write_memento:
+        for name in identities:
+            outcomes[ name ] = { "status": "not_requested",
+                                 "reason": "write_memento=False — no memento asked for" }
+        return outcomes
+
+    # Pass 1 — classify every seat: already-verified (no DM) vs pending (must ask).
+    now     = now_fn()
+    pending : Dict[ str, Dict[ str, Any ] ] = {}
+    for name, ident in identities.items():
+        persona_name, session_id = _identity_bits( ident )
+        if not persona_name or not session_id:
+            outcomes[ name ] = { "status": "skipped",
+                                 "reason": "no persona/session in bridge identity — cannot derive memento slot",
+                                 "persona": persona_name, "session_id": session_id }
+            continue
+        slot          = seat_memento_slot( project_root, persona_name )
+        usable, reason = verify_seat_memento( slot, session_id[ :8 ], now,
+                                              read_text_fn=read_text_fn,
+                                              window_seconds=window_seconds, min_bytes=min_bytes )
+        if usable:
+            outcomes[ name ] = { "status": "verified", "reason": reason,
+                                 "persona": persona_name, "session_id": session_id, "slot": str( slot ) }
+        else:
+            pending[ name ] = { "persona": persona_name, "session_id": session_id,
+                                "slot": slot, "pre_ask_reason": reason }
+
+    if not pending:
+        return outcomes
+
+    # Pass 2 — ask every un-verified, still-alive seat (single fan-out).
+    for name, info in pending.items():
+        info[ "ask_note" ] = ""
+        try:
+            dm_fn( info[ "persona" ], info[ "session_id" ], ASK_BODY.format( slot=info[ "slot" ] ) )
+        except Exception as error:
+            info[ "ask_note" ] = f" (ask send raised: {error.__class__.__name__})"
+
+    # Pass 3 — poll every asked slot to ONE shared deadline (added latency is bounded
+    # to a single window regardless of seat count — the common all-verified case never
+    # reaches here).
+    elapsed = 0
+    while pending and elapsed < ask_timeout_sec:
+        sleep_fn( poll_interval_sec )
+        elapsed += poll_interval_sec
+        now = now_fn()
+        for name in list( pending ):
+            info           = pending[ name ]
+            usable, reason = verify_seat_memento( info[ "slot" ], info[ "session_id" ][ :8 ], now,
+                                                  read_text_fn=read_text_fn,
+                                                  window_seconds=window_seconds, min_bytes=min_bytes )
+            if usable:
+                outcomes[ name ] = { "status": "written", "reason": f"appeared after ask: {reason}",
+                                     "persona": info[ "persona" ], "session_id": info[ "session_id" ],
+                                     "slot": str( info[ "slot" ] ) }
+                del pending[ name ]
+
+    # Pass 4 — anything still un-written failed VISIBLY.
+    for name, info in pending.items():
+        outcomes[ name ] = {
+            "status"     : "timeout_no_memento",
+            "reason"     : ( f"asked{info[ 'ask_note' ]}, no fresh+complete memento within {ask_timeout_sec}s "
+                             f"(parked / slow / declined); at ask time: {info[ 'pre_ask_reason' ]}" ),
+            "persona"    : info[ "persona" ], "session_id": info[ "session_id" ],
+            "slot"       : str( info[ "slot" ] )
+        }
+    return outcomes

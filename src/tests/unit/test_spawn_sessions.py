@@ -577,10 +577,60 @@ class TestDismissSessions:
         assert res[ "dismissed" ] == [] and res[ "remaining" ] == []
 
     def test_write_memento_and_reason_echoed( self, tmp_path ):
+        # NOTE: this asserts only the ECHO — the false-confidence test María named.
+        # The FILE-level guard (a memento actually proven on disk) is enforced by
+        # test_reap_memento.py + TestDismissMementoCoordination below.
         self._seed( tmp_path, [ "a" ] )
         res = dismiss_sessions( "mgr", reason="cascade complete", write_memento=False,
                                 runner=FakeRunner(), session_dir=tmp_path )
         assert res[ "reason" ] == "cascade complete" and res[ "write_memento" ] is False
+
+
+class TestDismissMementoCoordination:
+    """row 0a36d83d: the reap must RUN the memento coordinator before kill and
+    surface its per-seat verdict — the flag used to be a pure no-op."""
+
+    def _seed( self, tmp_path, names ):
+        _write_manifest( _manifest_path( "mgr", tmp_path ),
+                         [ { "session_name": n, "requested_role": "reviewer" } for n in names ] )
+
+    def test_coord_runs_before_kill_and_outcomes_surface( self, tmp_path ):
+        self._seed( tmp_path, [ "a", "b" ] )
+        runner = FakeRunner( returncode=0 )
+        seen   = {}
+
+        def _coord( identities ):
+            seen[ "identities" ]     = identities
+            seen[ "kills_so_far" ]   = len( runner.calls )     # MUST be 0 — coord precedes kill
+            return { name: { "status": "verified" } for name in identities }
+
+        res = dismiss_sessions( "mgr", runner=runner, session_dir=tmp_path,
+                                memento_coord_fn=_coord )
+        assert seen[ "kills_so_far" ] == 0                     # sequencing: no kill before coordination
+        assert set( seen[ "identities" ] ) == { "a", "b" }     # got the captured identity map
+        assert res[ "memento_outcomes" ][ "a" ][ "status" ] == "verified"
+        assert res[ "memento_outcomes" ][ "b" ][ "status" ] == "verified"
+        assert len( runner.calls ) == 2                        # both still reaped afterward
+
+    def test_coord_raise_is_fail_safe_and_surfaced( self, tmp_path ):
+        self._seed( tmp_path, [ "a" ] )
+        runner = FakeRunner( returncode=0 )
+
+        def _coord( _identities ):
+            raise RuntimeError( "coordinator exploded" )
+
+        res = dismiss_sessions( "mgr", runner=runner, session_dir=tmp_path,
+                                memento_coord_fn=_coord )
+        # reap still completed …
+        assert res[ "dismissed" ][ 0 ][ "status" ] == "killed"
+        # … and the failure is VISIBLE, never a silent success
+        assert "coordinator exploded" in res[ "memento_outcomes" ][ "_error" ]
+        assert "RuntimeError" in res[ "memento_outcomes" ][ "_error" ]
+
+    def test_no_coord_fn_yields_empty_outcomes( self, tmp_path ):
+        self._seed( tmp_path, [ "a" ] )
+        res = dismiss_sessions( "mgr", runner=FakeRunner(), session_dir=tmp_path )
+        assert res[ "memento_outcomes" ] == {}
 
 
 # ── _capture_reap_identity + dismiss bridge-unlink edge arcs ──────────────────
@@ -1205,10 +1255,13 @@ class TestResolveManagerIdentity:
 class TestResolveSpawnConfig:
     _NO_MODELS = { "reviewer": None, "author": None, "observer": None, "default": None }
 
+    _MEM_DEFAULTS = { "reap_memento_window_seconds": 1200, "reap_memento_min_bytes": 1000,
+                      "reap_memento_ask_timeout_sec": 45, "reap_memento_poll_interval_sec": 3 }
+
     def test_defaults_when_none( self ):
         cfg = resolve_spawn_config( None )
         assert cfg == { "spawn_cap": 8, "ack_timeout_seconds": 120, "write_memento_default": True,
-                        "spawn_models": self._NO_MODELS }
+                        "spawn_models": self._NO_MODELS, **self._MEM_DEFAULTS }
 
     def test_reads_from_config_mgr( self ):
         mgr = _FakeConfigMgr( {
@@ -1223,7 +1276,8 @@ class TestResolveSpawnConfig:
         cfg = resolve_spawn_config( mgr )
         assert cfg == { "spawn_cap": 5, "ack_timeout_seconds": 90, "write_memento_default": False,
                         "spawn_models": { "reviewer": "claude-opus-4-8", "author": "claude-opus-4-8",
-                                          "observer": "claude-opus-4-8", "default": "claude-opus-4-8" } }
+                                          "observer": "claude-opus-4-8", "default": "claude-opus-4-8" },
+                        **self._MEM_DEFAULTS }
 
     def test_missing_keys_fall_back_to_defaults( self ):
         cfg = resolve_spawn_config( _FakeConfigMgr( {} ) )
@@ -1343,7 +1397,11 @@ class TestDismissSessionsWrapperCoercion:
                              lambda meta, fallback_session_id=None: ( "mgr-sid", "Krishna" ) )
         monkeypatch.setattr( ss, "resolve_spawn_config",
                              lambda mgr: { "spawn_cap": 8, "ack_timeout_seconds": 120,
-                                           "write_memento_default": write_memento_default } )
+                                           "write_memento_default": write_memento_default,
+                                           "reap_memento_window_seconds": 1200,
+                                           "reap_memento_min_bytes": 1000,
+                                           "reap_memento_ask_timeout_sec": 45,
+                                           "reap_memento_poll_interval_sec": 3 } )
         monkeypatch.setattr( ss, "dismiss_sessions", _spy_dismiss )
 
     def test_list_arg_arrives_as_list_not_chars( self, cv_mcp, monkeypatch ):
@@ -1394,7 +1452,11 @@ class TestDismissSessionsWrapperCoercion:
                              lambda meta, fallback_session_id=None: ( "mgr-sid", "Krishna" ) )
         monkeypatch.setattr( ss, "resolve_spawn_config",
                              lambda mgr: { "spawn_cap": 8, "ack_timeout_seconds": 120,
-                                           "write_memento_default": True } )
+                                           "write_memento_default": True,
+                                           "reap_memento_window_seconds": 1200,
+                                           "reap_memento_min_bytes": 1000,
+                                           "reap_memento_ask_timeout_sec": 45,
+                                           "reap_memento_poll_interval_sec": 3 } )
         monkeypatch.setattr( ss, "dismiss_sessions", _spy_dismiss )
         asyncio.run( cv_mcp.dismiss_sessions.run( {} ) )
         assert captured[ "reconcile_items_fn" ] is ss._default_reconcile_store_items
@@ -1424,6 +1486,25 @@ class TestDismissSessionsWrapperCoercion:
         monkeypatch.setattr( ss, "dismiss_sessions", _spy_dismiss )
         asyncio.run( cv_mcp.dismiss_sessions.run( { "respin_personas": [ "cheech", "rio" ] } ) )
         assert captured[ "respin_personas" ] == [ "cheech", "rio" ]   # a real list, not char-iterated
+
+    def test_wrapper_threads_memento_coordinator( self, cv_mcp, monkeypatch ):
+        """row 0a36d83d: the LIVE reap entrypoint MUST wire a memento coordinator —
+        the flag was a pure no-op because nothing was ever passed here. The bound
+        partial carries the INI-resolved knobs and the resolved write_memento."""
+        import functools
+        captured = {}
+        self._patch_wrapper_deps( cv_mcp, monkeypatch, captured )
+        import lupin_mcp.session_spawner as ss
+        def _spy_dismiss( manager_session_id, *, memento_coord_fn=None, **_kw ):
+            captured[ "memento_coord_fn" ] = memento_coord_fn
+            return { "dismissed": [], "remaining": [], "manager_session_id": manager_session_id }
+        monkeypatch.setattr( ss, "dismiss_sessions", _spy_dismiss )
+        asyncio.run( cv_mcp.dismiss_sessions.run( { "session_names": [ "x" ] } ) )
+        coord = captured[ "memento_coord_fn" ]
+        assert isinstance( coord, functools.partial )
+        assert coord.func is __import__( "lupin_mcp.reap_memento", fromlist=[ "x" ] ).coordinate_mementos
+        assert coord.keywords[ "window_seconds" ]  == 1200   # from the stubbed cfg
+        assert coord.keywords[ "write_memento" ]   is True   # resolved via the ternary
 
 
 # ── MCP-WRAPPER LAYER: spawn_sessions model-directive (2026-07-02) ────────────
