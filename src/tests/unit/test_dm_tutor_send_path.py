@@ -406,9 +406,90 @@ class TestThePathSurvives( unittest.TestCase ):
 
     def test_the_repair_never_costs_the_caller_the_rewrite( self ):
         """A failure inside the repair must return the rewrite, not raise into delivery."""
-        with patch( "cosa.agents.dm_tutor.sentences.pointer_lines",
+        with patch( "cosa.agents.dm_tutor.sentences.pointer_tokens",
                     side_effect=RuntimeError( "boom" ) ):
             self.assertEqual( self.restore( self._WITH_PATH, "Verdict." ), "Verdict." )
+
+
+class TestMidSentencePointersSurvive( unittest.TestCase ):
+    """
+    ⚠️ THE LINE-ANCHORED RESTORE ATE MID-SENTENCE POINTERS (row a74f2176).
+
+    The first fix scanned whole lines with the structure rule, so it only saw a
+    pointer that OWNED its line. A path or an 8-hex row id written INSIDE a sentence —
+    "(running_fifo_queue.py:422)", "recording to row e0bb5a94" — was invisible, and the
+    model paraphrased it away with the sentence around it. Measured on the served sha:
+    4 of 26 rewrites dropped a file path, 9 dropped a row id. The earlier suite could
+    not catch this because its one fixture put the path on its own line — exactly the
+    case the line-anchored code already handled.
+    """
+
+    def setUp( self ):
+        from cosa.rest.routers.dm import _apply_dm_tutor, _restore_dropped_pointers
+        self.apply   = _apply_dm_tutor
+        self.restore = _restore_dropped_pointers
+
+    # Pointers buried MID-SENTENCE, the shape the line-anchored restore could not see:
+    # a slashed path, a bare filename:line, a bare filename, and an 8-hex row id.
+    _WITH_MID = (
+        "I handed the row to Krishna and wrote in my refutation.\n"
+        "The truncation theory is refuted by the probe at "
+        "/tmp/claude-1001/scratchpad/repro.py which he should copy first.\n"
+        "The leak is in running_fifo_queue.py:422 and also job.py, "
+        "recording to row e0bb5a94 for continuity.\n"
+        "I am fairly confident about the whole diagnosis.\n"
+        "Tell me whether you read it the same way."
+    )
+    # A rewrite that keeps NONE of the four pointers — the failure this suite exists for.
+    _ATE_THEM = (
+        "Krishna has the row and the refutation.\n"
+        "The truncation theory is refuted by my own probe script.\n"
+        "The leak is in the running queue module; tell me if you agree."
+    )
+
+    def test_all_four_mid_sentence_pointers_are_restored( self ):
+        text, meta = self.apply( self._WITH_MID, config=_cfg(),
+                                 rewrite_fn=lambda b: self._ATE_THEM )
+        self.assertEqual( meta[ "tutor_outcome" ], "rewritten" )
+        for pointer in ( "/tmp/claude-1001/scratchpad/repro.py",
+                         "running_fifo_queue.py:422", "job.py", "e0bb5a94" ):
+            self.assertIn( pointer, text, f"{pointer} was not restored" )
+
+    def test_the_instrument_can_fail( self ):
+        """CONTROL — the fixture must actually DROP every pointer, or this proves nothing."""
+        for pointer in ( "/tmp/claude-1001/scratchpad/repro.py",
+                         "running_fifo_queue.py:422", "job.py", "e0bb5a94" ):
+            self.assertNotIn( pointer, self._ATE_THEM,
+                              f"fixture no longer drops {pointer} — suite proves nothing" )
+
+    def test_a_mid_sentence_pointer_kept_INLINE_is_not_re_appended( self ):
+        """A pointer the model carried through in prose must not be appended a second time."""
+        kept = "The leak is over in running_fifo_queue.py:422 now, look there."
+        result = self.restore( "See running_fifo_queue.py:422 for the leak.", kept )
+        self.assertEqual( result, kept )
+        self.assertEqual( result.count( "running_fifo_queue.py:422" ), 1 )
+
+    def test_restoring_mid_sentence_pointers_cannot_re_trigger( self ):
+        """
+        Each restored token is appended as its OWN line, which _ATTACHMENT now reads as
+        a whole-line pointer — so a bare filename or row id is structure once alone, and
+        the repair can never push the message back over the trigger.
+        """
+        from cosa.agents.dm_tutor.sentences import count_sentences
+        _, meta = self.apply( self._WITH_MID, config=_cfg(),
+                              rewrite_fn=lambda b: self._ATE_THEM )
+        self.assertEqual( meta[ "tutor_claims_out" ], count_sentences( self._ATE_THEM ) )
+        self.assertLessEqual( meta[ "tutor_claims_out" ], _cfg()[ "trigger_claims" ] )
+
+    def test_a_restored_row_id_is_not_read_as_fabricated( self ):
+        """
+        The restore runs BEFORE the fabrication check on purpose — a row id we put back
+        came from the original, so it must never be flagged as an invented hex id.
+        """
+        text, meta = self.apply( self._WITH_MID, config=_cfg(),
+                                 rewrite_fn=lambda b: self._ATE_THEM )
+        self.assertEqual( meta[ "tutor_outcome" ], "rewritten" )
+        self.assertIsNone( meta[ "tutor_fabricated" ] )
 
 
 class TestTheRecipientIsTold( unittest.TestCase ):

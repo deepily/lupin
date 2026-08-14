@@ -62,15 +62,32 @@ _QUOTE      = re.compile( r"^\s*>\s?" )
 # headroom. That is the trap the canned P.S. below already sprang once: the trigger
 # firing hardest on the messages that got it right.
 #
-# The narrowness is deliberate even after widening — a pointer line is a lead-in
+# The narrowness is deliberate even after widening — a WHOLE-LINE pointer is a lead-in
 # and ONE whitespace-free target, nothing else. "Fix it at src/foo.py and tell me
 # what you think." keeps its slash AND its prose, so it still counts as the claim
 # it is; only a line that is nothing but a pointer is discarded.
-_URL_OR_PATH = (
-    r"(?:[A-Za-z][A-Za-z0-9+.-]*://[^\s)]+"     # a URL — https:// , vllm:// , file://
-    r"|~?/?(?:[\w.@%+-]+/)+[\w.@%+#?=&-]*"      # a path — at least one slash
-    r"(?::\d+)?)"                               # optional :line suffix
+#
+# A POINTER TOKEN — the single reference this module recognises, in FOUR shapes.
+# WIDENED 2026-08-13 (row a74f2176) from URLs + slashed paths to also cover the two
+# shapes the fleet writes constantly and the old pattern could not see:
+#   · a BARE filename with an extension and an optional :line — "job.py:1163",
+#     "running_fifo_queue.py:422" — a path the house style writes without a slash;
+#   · a BARE 8-hex row id — "e0bb5a94" — the task-store handle, which carries no slash
+#     and no extension at all.
+# The token is used TWO ways that must never disagree: as the body of the whole-line
+# structure rule (_ATTACHMENT), so a line that is nothing but a pointer counts as
+# structure; and as the thing the restore lifts out of the model's reach anywhere in
+# the body (pointer_tokens). The 8-hex form requires at least one hex LETTER so a plain
+# 8-digit number (a year, a count) is never mistaken for a row id.
+_CODE_EXT = r"py|md|ini|sh|json|ya?ml|txt|js|jsx|ts|tsx|html|css|sql|toml|cfg|xml"
+_POINTER_TOKEN_SRC = (
+    r"(?:[A-Za-z][A-Za-z0-9+.-]*://[^\s)]+"         # a URL — https:// , vllm:// , file://
+    r"|~?/?(?:[\w.@%+-]+/)+[\w.@%+#?=&-]*(?::\d+)?" # a slashed path, optional :line
+    rf"|\b[\w-]+\.(?:{_CODE_EXT})\b(?::\d+)?"       # a bare filename.ext, optional :line
+    r"|\b(?=[0-9a-f]*[a-f])[0-9a-f]{8}\b)"          # a bare 8-hex row id (>=1 hex letter)
 )
+_POINTER_TOKEN = re.compile( _POINTER_TOKEN_SRC, re.IGNORECASE )
+
 # A short lead-in is still a pointer line: "see <path>", "→ <path>", "detail: <path>".
 _POINTER_LEAD_IN = r"(?:(?:see|details?|detail|path|more|here|full\s+detail)\s*:?\s+|[→↳>]\s*)?"
 # In MARKDOWN-LINK form the `[label](target)` wrapper is itself the proof that the
@@ -79,7 +96,7 @@ _POINTER_LEAD_IN = r"(?:(?:see|details?|detail|path|more|here|full\s+detail)\s*:
 # the bare-path pattern deliberately does not admit.
 _ATTACHMENT = re.compile(
     rf"^\s*{_POINTER_LEAD_IN}"
-    rf"(?:\[[^\]]*\]\(\s*[^\s)]*/[^\s)]*\s*\)|{_URL_OR_PATH})"
+    rf"(?:\[[^\]]*\]\(\s*[^\s)]*/[^\s)]*\s*\)|{_POINTER_TOKEN_SRC})"
     rf"[.,;]?\s*$",
     re.IGNORECASE,
 )
@@ -176,14 +193,23 @@ def prose_lines( text ):
     return kept
 
 
-def pointer_lines( text ):
+def pointer_tokens( text ):
     """
-    The pointer lines in a body — paths and URLs standing alone.
+    The pointer TOKENS in a body — paths, URLs, bare filenames and row ids, wherever
+    they sit, whole-line OR mid-sentence.
 
     WHY THIS EXISTS (Cheech, 2026-08-13): the tutor PARAPHRASED A PATH out of a live
     DM, leaving the literal words "probe script path" where the path had been. The
     house rule is "three sentences and a path", so the one element the rule names by
     name is the element that did not survive the rewrite.
+
+    WHY IT COUNTS TOKENS, NOT LINES (row a74f2176): the first fix scanned whole lines
+    with the structure rule, so it only saw a pointer that OWNED its line. A path or an
+    8-hex row id written mid-sentence — "(running_fifo_queue.py:422)", "recording to
+    row e0bb5a94" — was invisible to it and got paraphrased away with the sentence
+    around it. Measured on the served sha: 4 of 26 rewrites dropped a file path, 9
+    dropped a row id. This scans TOKENS anywhere, so a pointer buried in prose is
+    lifted out of the model's reach the same as one standing alone.
 
     The fix is the same one this whole module rests on — Rick's "LLMs do not count
     well", generalised: do not ASK a model to preserve something exactly when you can
@@ -194,21 +220,22 @@ def pointer_lines( text ):
         - text is a string
 
     Ensures:
-        - returns the pointer lines, in order, stripped
+        - returns the pointer tokens, first-seen order, de-duplicated
         - returns [] when the body carries none
-        - uses the SAME pattern as the structure rule above, so a line that does not
-          count as a claim is exactly a line that gets preserved — the two cannot
-          disagree about what a pointer is
+        - a restored token is re-appended as its own line, which _ATTACHMENT now
+          recognises as a whole-line pointer, so repairing a message can never push its
+          claim count back over the trigger
 
     Raises:
         - nothing
     """
-    found = []
     body  = _FENCE.sub( " ", text )
-    for line in body.splitlines():
-        stripped = line.strip()
-        if stripped and _ATTACHMENT.match( stripped ):
-            found.append( stripped )
+    found = []
+    seen  = set()
+    for token in _POINTER_TOKEN.findall( body ):
+        if token not in seen:
+            seen.add( token )
+            found.append( token )
     return found
 
 

@@ -765,7 +765,9 @@ def _restore_dropped_pointers( original, rewritten ):
         - original and rewritten are strings
 
     Ensures:
-        - every pointer line present in `original` is present in the result
+        - every pointer TOKEN present in `original` is present in the result — a path,
+          URL, bare filename OR 8-hex row id, whether it stood on its own line in the
+          original or was buried mid-sentence (row a74f2176)
         - a pointer the rewrite ALREADY kept is not duplicated — membership is checked
           against the rewrite's whole text, so a path the model correctly carried
           through inline (not as its own line) still counts as kept
@@ -777,8 +779,8 @@ def _restore_dropped_pointers( original, rewritten ):
         - nothing
     """
     try:
-        from cosa.agents.dm_tutor.sentences import pointer_lines
-        dropped = [ p for p in pointer_lines( original ) if p not in rewritten ]
+        from cosa.agents.dm_tutor.sentences import pointer_tokens
+        dropped = [ p for p in pointer_tokens( original ) if p not in rewritten ]
         if not dropped: return rewritten
         return rewritten.rstrip() + "\n" + "\n".join( dropped )
     except Exception:
