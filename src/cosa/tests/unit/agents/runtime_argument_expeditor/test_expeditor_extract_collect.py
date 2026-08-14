@@ -65,13 +65,17 @@ class TestArgSpecFromEntry( unittest.TestCase ):
         self.assertEqual( spec.fallback_defaults, {} )
         self.assertEqual( spec.special_handlers, {} )
 
-    def test_present_optional_fields_kept_by_reference( self ):
+    def test_fallback_defaults_is_copied_special_handlers_by_reference( self ):
+        # Bug 8aa89f42: fallback_defaults is COPIED at the seam (extract() writes
+        # into it), so the registry dict is never mutated. special_handlers is
+        # read-only downstream, so it stays a reference.
         fd    = { "query": "seed" }
         sh    = { "research": "fuzzy_file_match" }
         entry = { "arg_mapping": {}, "system_provided": [], "required_user_args": [],
                   "fallback_questions": {}, "fallback_defaults": fd, "special_handlers": sh }
         spec  = ArgSpec.from_entry( entry )
-        self.assertIs( spec.fallback_defaults, fd )
+        self.assertIsNot( spec.fallback_defaults, fd )
+        self.assertEqual( spec.fallback_defaults, fd )
         self.assertIs( spec.special_handlers, sh )
 
 

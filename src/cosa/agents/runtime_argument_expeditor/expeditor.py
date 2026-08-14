@@ -94,9 +94,9 @@ class ArgSpec:
         - arg_mapping maps LORA arg names -> CLI arg names
         - system_provided / required_user_args are lists of arg-name strings
         - fallback_questions maps arg-name -> question text
-        - fallback_defaults maps arg-name -> default value (may start empty; the
-          SAME dict the registry entry holds, so extract()'s in-place seeding of
-          required-arg defaults stays observable to the registry, unchanged)
+        - fallback_defaults maps arg-name -> default value (may start empty; a
+          COPY of the registry entry's dict per bug 8aa89f42, so extract()'s
+          in-place seeding never leaks one user's default to the next)
         - special_handlers maps arg-name -> handler tag
 
     Ensures:
@@ -120,16 +120,19 @@ class ArgSpec:
               system_provided, required_user_args, fallback_questions)
 
         Ensures:
-            - fallback_defaults / special_handlers use the entry's own object when
-              present, or a fresh {} when absent — identical to the former
-              entry.get( key, {} ) calls inside extract()
+            - fallback_defaults is a COPY of the entry's dict (bug 8aa89f42): the
+              seam is the one place extract() later writes, so copying here keeps
+              one user's seeded default from becoming the next user's default for
+              the life of the process, while the registry entry stays unmutated
+            - special_handlers / the other fields use the entry's own object
+              (extract() only reads them, never writes)
         """
         return cls(
             arg_mapping        = entry[ "arg_mapping" ],
             system_provided    = entry[ "system_provided" ],
             required_user_args = entry[ "required_user_args" ],
             fallback_questions = entry[ "fallback_questions" ],
-            fallback_defaults  = entry.get( "fallback_defaults", {} ),
+            fallback_defaults  = dict( entry.get( "fallback_defaults", {} ) ),
             special_handlers   = entry.get( "special_handlers", {} ),
         )
 
