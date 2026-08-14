@@ -20,6 +20,7 @@ from typing import Optional
 import cosa.utils.util as cu
 from cosa.agents.llm_client_factory import LlmClientFactory
 from cosa.agents.notification_proxy.config import DEFAULT_ACCEPTED_SENDERS
+from cosa.agents.notification_proxy.scalar_answers import drop_non_scalar_answers
 from cosa.agents.notification_proxy.xml_models import ScriptMatcherResponse, BatchScriptMatcherResponse
 from cosa.agents.io_models.utils.prompt_template_processor import PromptTemplateProcessor
 
@@ -326,6 +327,10 @@ class LlmScriptMatcherStrategy:
 
             if parsed.is_match():
                 answers = parsed.get_answers_dict()
+                # Drop (never coerce) non-scalar answers before stamping as a
+                # high-confidence predicted answer (row ceca10f3). Empty-after-drop
+                # falls through to the return-None path below.
+                answers = drop_non_scalar_answers( answers, "llm_script_matcher.batch" )
                 if answers:
                     if self.debug: print( f"[LlmScriptMatcher] Batch answers: {answers}" )
                     return json.dumps( { "answers": answers } )

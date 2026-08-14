@@ -15,6 +15,7 @@ import re
 from typing import Optional
 
 from cosa.agents.notification_proxy.config import TEST_PROFILES, DEFAULT_ACCEPTED_SENDERS
+from cosa.agents.notification_proxy.scalar_answers import drop_non_scalar_answers
 
 
 # ============================================================================
@@ -237,6 +238,13 @@ class ExpediterRuleStrategy:
                 continue
 
             if self.debug: print( f"[ExpediterRules] BATCH: no answer for header '{header}'" )
+
+        # Drop (never coerce) any non-scalar answer before it is stamped as a
+        # high-confidence predicted answer for the user (row ceca10f3). A dropped
+        # header becomes a question the user gets asked; a coerced one would be a
+        # wrong answer on their behalf. If dropping empties the map, the guard
+        # below returns None and the client cleanly falls back.
+        answers = drop_non_scalar_answers( answers, "expediter_rules.batch" )
 
         if not answers:
             return None
