@@ -103,7 +103,7 @@ class TestWholeLinePointerIsStructure( unittest.TestCase ):
             "## A heading\n"
             "***\n"
             "P.S. Need more detail? Ask me one question only!\n"
-            "— shortened by the DM tutor; the wording is not the sender's."
+            "This DM was condensed in transit. Need more detail? Ask the sender one question"
         )
         self.assertEqual( count_sentences( body ), 1 )
 

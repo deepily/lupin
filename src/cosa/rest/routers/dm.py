@@ -704,7 +704,7 @@ DM_TUTOR_VERSION = "dm-tutor-1"
 # appended to every compliant rewrite reads as an extra claim, so the tutor would
 # start rewriting its own output forever. `sentences.py` treats this exact line as
 # structure, and a test pins the two together.
-DM_TUTOR_NOTICE = "— shortened by the DM tutor; the wording is not the sender's."
+DM_TUTOR_NOTICE = "This DM was condensed in transit. Need more detail? Ask the sender one question"
 
 _DM_TUTOR_DEFAULTS = {
     "enabled"         : False,   # OFF unless config says otherwise — see below

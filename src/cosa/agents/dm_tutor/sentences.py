@@ -122,7 +122,7 @@ _CANNED_PS = re.compile( r"^\s*P\.?\s?S\.?\s+Need more detail\?.*$", re.IGNORECA
 # exactly the "structure, not a claim" rule. Kept in sync with DM_TUTOR_NOTICE in
 # dm.py by a test that fails if either side is edited alone.
 _TUTOR_NOTICE = re.compile(
-    r"^\s*[—-]\s*shortened by the DM tutor;.*$", re.IGNORECASE
+    r"^\s*This DM was condensed in transit\..*$", re.IGNORECASE
 )
 
 # Decimals, versions, file:line, IP-ish runs, ellipses — periods that are not
