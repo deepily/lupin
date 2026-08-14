@@ -41,6 +41,8 @@ class _Store:
 
 
 class _FakeSnapshotRepo:
+    """Records calls AND persists — the persisted row is what a later lookup reads,
+    so a write_back → lookup round trip closes through the SAME in-memory store."""
     def __init__( self, session ):
         self.store = session
     def get_snapshot_by_id( self, id_hash ):
@@ -49,10 +51,14 @@ class _FakeSnapshotRepo:
         return self.store.ann_result
     def upsert_snapshot( self, id_hash, **fields ):
         self.store.upserts.append( ( id_hash, fields ) )
-        return types.SimpleNamespace( id_hash=id_hash, **fields )
+        row = types.SimpleNamespace( id_hash=id_hash, **fields )
+        self.store.rows[ id_hash ] = row          # persist: a later lookup can find it
+        return row
 
 
 class _FakeSynRepo:
+    """Records calls AND persists the verbatim/normalized synonym keys, so a
+    write_back registration is visible to a later tier-1 lookup (the round trip)."""
     def __init__( self, session ):
         self.store = session
     def find_exact_verbatim( self, question ):
@@ -61,9 +67,14 @@ class _FakeSynRepo:
         return self.store.syn_normalized.get( question_normalized )
     def delete_by_snapshot_id( self, snapshot_id ):
         self.store.deleted_synonyms.append( snapshot_id )
+        # idempotent re-registration: drop any prior keys for this snapshot
+        self.store.syn_verbatim   = { q: s for q, s in self.store.syn_verbatim.items()   if s != snapshot_id }
+        self.store.syn_normalized = { q: s for q, s in self.store.syn_normalized.items() if s != snapshot_id }
         return 0
     def add_synonym( self, **kwargs ):
         self.store.added_synonyms.append( kwargs )
+        self.store.syn_verbatim[   kwargs[ "question_verbatim" ] ]   = kwargs[ "snapshot_id" ]
+        self.store.syn_normalized[ kwargs[ "question_normalized" ] ] = kwargs[ "snapshot_id" ]
         return kwargs
 
 
@@ -74,6 +85,7 @@ class _FakeQEmbRepo:
         return self.store.embeddings.get( question )
     def add_embedding( self, question, embedding ):
         self.store.added_embeddings.append( ( question, embedding ) )
+        self.store.embeddings[ question ] = embedding   # persist: a later probe is free
         return ( question, embedding )
 
 
@@ -383,6 +395,63 @@ def test_write_back_happy_path_persists_and_tags( wired, debug ):
     assert syn[ "question_gist" ]       == "gist::weather"
     # verbatim embedding cache populated
     assert store.added_embeddings == [ ( "what's the weather in Tokyo", [ 0.1 ] * 4 ) ]
+
+
+@pytest.mark.parametrize( "debug", [ False, True ] )
+def test_round_trip_write_back_then_identical_lookup_is_tier1_replay( wired, debug ):
+    """
+    THE CONTROL (row 41333974): a second identical request must hit the cache.
+
+    Every other test drives write_back OR lookup against a fresh store and proves
+    half the contract; none composes them. This writes a snapshot back, then looks
+    up the SAME verbatim question through the SAME store, and asserts the write
+    path made it a tier-1 exact replay — the composition 100% line/branch coverage
+    can't see, because every line already runs; what never ran is the round trip.
+
+    The flag being ON in a config file is a setting; THIS is the evidence the
+    write path actually populates what the read path reads.
+    """
+    build, store = wired
+    cache, provider, _f = build( debug=debug )
+    snap = _make_snapshot()                       # carries a question_embedding → no generation
+
+    written_id = cache.write_back( snap, created_at_iso="2026-08-14T02:30:00-04:00" )
+    assert written_id == "wb-1"
+
+    # Second identical request — must come back a deterministic tier-1 exact hit.
+    result = cache.lookup( snap.question )
+
+    assert result.is_replay_hit is True
+    assert result.tier         == "exact_verbatim"
+    assert result.similarity   == 100.0
+    assert result.snapshot is not None
+    # It is the row we wrote: the v2 tag survived the marshal round trip.
+    assert result.snapshot.runtime_stats[ "flow_version" ] == "v2"
+    assert result.snapshot.runtime_stats[ "created_by" ]   == "v2.ask"
+    # A tier-1 replay computes NO embedding on either leg — zero model calls end to end.
+    assert result.t_embed_ms is None
+    assert provider.calls == []
+
+
+def test_round_trip_normalized_variant_also_replays( wired ):
+    """
+    The round trip closes on tier-1b too: a casing/whitespace variant of the
+    written question normalizes to the same key and replays via exact_normalized.
+    """
+    build, store = wired
+    cache, provider, _f = build()
+    # question_normalized set to what _FakeNormalizer yields for the question, so the
+    # written key and the freshly-normalized lookup key agree (as they do in production,
+    # where one Normalizer produces both).
+    cache.write_back( _make_snapshot( question_normalized="what's the weather in tokyo" ) )
+
+    # A different surface form of the same question — verbatim misses, normalized hits.
+    result = cache.lookup( "  WHAT'S THE WEATHER IN TOKYO  " )
+
+    assert result.is_replay_hit is True
+    assert result.tier == "exact_normalized"
+    assert result.snapshot is not None
+    assert provider.calls == []
 
 
 def test_write_back_computes_gist_and_embedding_when_absent( wired ):
