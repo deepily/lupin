@@ -86,9 +86,12 @@ class ExtractionResult:
 @dataclass
 class ArgSpec:
     """
-    The typed slice of an AGENTIC_AGENTS entry that extract() reads — every field
-    it needs, and nothing else. The expedite() shim builds one from the raw table
-    entry, so extract() never touches the registry.
+    An AGENTIC_AGENTS entry, typed — every field the expeditor's extract() /
+    collect() halves and their helpers read, in one carrier. The expedite() shim
+    builds one from the raw table entry, so the whole pipeline runs off the spec
+    and a v2 caller can drive it (including resolving a display name) with no
+    registry entry at all. Not a minimal slice: it carries the entry's readable
+    surface so nothing downstream has to reach back into the table.
 
     Requires:
         - arg_mapping maps LORA arg names -> CLI arg names
@@ -98,9 +101,13 @@ class ArgSpec:
           COPY of the registry entry's dict per bug 8aa89f42, so extract()'s
           in-place seeding never leaks one user's default to the next)
         - special_handlers maps arg-name -> handler tag
+        - display_name is the human agent name, or None (derived from cli_module)
+        - cli_module is the agent's CLI module path, or None (test_suite has none
+          by design — invoked via API, not CLI)
 
     Ensures:
-        - Holds references, not copies; behavior matches reading the raw dict
+        - Holds references (except the copied fallback_defaults); behavior matches
+          reading the raw dict
     """
     arg_mapping        : dict
     system_provided    : list
@@ -108,12 +115,14 @@ class ArgSpec:
     fallback_questions : dict
     fallback_defaults  : dict
     special_handlers   : dict
+    display_name       : str
+    cli_module         : str
 
     @classmethod
     def from_entry( cls, entry ):
         """
         Build an ArgSpec from a raw AGENTIC_AGENTS entry, preserving the exact
-        reference semantics extract() relied on when it read the dict directly.
+        reference semantics the expeditor relied on when it read the dict directly.
 
         Requires:
             - entry is an AGENTIC_AGENTS registry entry (has arg_mapping,
@@ -125,7 +134,9 @@ class ArgSpec:
               one user's seeded default from becoming the next user's default for
               the life of the process, while the registry entry stays unmutated
             - special_handlers / the other fields use the entry's own object
-              (extract() only reads them, never writes)
+              (they are only read, never written)
+            - display_name / cli_module default to None when absent, matching the
+              former entry.get( key ) reads inside _resolve_display_name
         """
         return cls(
             arg_mapping        = entry[ "arg_mapping" ],
@@ -134,6 +145,8 @@ class ArgSpec:
             fallback_questions = entry[ "fallback_questions" ],
             fallback_defaults  = dict( entry.get( "fallback_defaults", {} ) ),
             special_handlers   = entry.get( "special_handlers", {} ),
+            display_name       = entry.get( "display_name" ),
+            cli_module         = entry.get( "cli_module" ),
         )
 
 
@@ -306,7 +319,7 @@ class RuntimeArgumentExpeditor:
         spec       = ArgSpec.from_entry( agent_entry )
         extraction = self.extract( command, raw_args, original_question, spec )
         return self.collect(
-            extraction, command, original_question, agent_entry,
+            extraction, command, original_question, spec,
             user_email, session_id, user_id
         )
 
@@ -444,14 +457,14 @@ class RuntimeArgumentExpeditor:
             special_handlers   = special_handlers,
         )
 
-    def collect( self, extraction, command, original_question, agent_entry, user_email, session_id, user_id ):
+    def collect( self, extraction, command, original_question, spec, user_email, session_id, user_id ):
         """
         Interactive half of expedite(): prompt the user for the args extract()
         found missing, run any special handlers, confirm, and inject system args.
 
         Requires:
             - extraction is an ExtractionResult from extract()
-            - command is a key in AGENTIC_AGENTS and agent_entry is its entry
+            - command is a key in AGENTIC_AGENTS and spec is its ArgSpec
             - user_email, session_id, user_id are non-empty strings
             - original_question is the full voice command string
 
@@ -465,7 +478,7 @@ class RuntimeArgumentExpeditor:
             extraction: ExtractionResult carrying final_args + missing + maps
             command: Routing command key
             original_question: Full voice command transcription
-            agent_entry: The AGENTIC_AGENTS registry entry for command
+            spec: ArgSpec for command (extract() + collect() run off the spec)
             user_email: Authenticated user's email
             session_id: WebSocket session ID
             user_id: System user ID
@@ -491,7 +504,7 @@ class RuntimeArgumentExpeditor:
 
             # Build request context abstract for notification UI
             request_abstract = self._build_request_context(
-                agent_entry, original_question, final_args, batchable + special
+                spec, command, original_question, final_args, batchable + special
             )
 
             # Batch-collect batchable args if more than one
@@ -550,9 +563,9 @@ class RuntimeArgumentExpeditor:
                     # presentation job asked "Which document should I use for the
                     # podcast?" under a card titled "Missing: research" (row ea184d06).
                     # Wording only — the matching logic above is untouched.
-                    fuzzy_question = agent_entry.get( "fallback_questions", {} ).get( arg_name )
+                    fuzzy_question = spec.fallback_questions.get( arg_name )
                     value = self._handle_fuzzy_file_match(
-                        user_email, agent_entry.get( "display_name" ),
+                        user_email, spec.display_name,
                         original_question=fuzzy_original, use_choice_card=is_podcast,
                         arg_name=arg_name, ask_question=fuzzy_question
                     )
@@ -593,7 +606,7 @@ class RuntimeArgumentExpeditor:
                 if self._value_is_existing_path( final_args[ arg_name ] ): continue  # already a real path — leave it
                 if self.debug: print( f"[Expeditor] Present-but-unresolvable '{arg_name}'={final_args[ arg_name ]!r} → running fuzzy resolve" )
                 # Inside the podcast-only fence (L404) → opt into the choice card.
-                value = self._handle_fuzzy_file_match( user_email, agent_entry.get( "display_name" ), original_question=original_question, use_choice_card=True )
+                value = self._handle_fuzzy_file_match( user_email, spec.display_name, original_question=original_question, use_choice_card=True )
                 if value is None:
                     print( f"[Expeditor] User cancelled resolving present-but-unresolvable arg '{arg_name}'" )
                     return None
@@ -605,13 +618,13 @@ class RuntimeArgumentExpeditor:
         if self.debug: print( f"[Expeditor] Final args: {final_args}" )
 
         # Step 8: Confirmation loop — user reviews args before submission
-        confirmed_args = self._confirm_and_iterate( final_args, agent_entry, command, user_email )
+        confirmed_args = self._confirm_and_iterate( final_args, spec, command, user_email )
         if confirmed_args is None:
             print( "[Expeditor] User cancelled during confirmation" )
             return None
 
         return self._inject_system_args(
-            confirmed_args, agent_entry, user_email, session_id, user_id
+            confirmed_args, spec, user_email, session_id, user_id
         )
 
     @staticmethod
@@ -639,9 +652,9 @@ class RuntimeArgumentExpeditor:
         return os.path.exists( full_path )
 
     @staticmethod
-    def _resolve_display_name( agent_entry ):
+    def _resolve_display_name( spec ):
         """
-        Resolve a human-readable agent name from a registry entry.
+        Resolve a human-readable agent name from an ArgSpec.
 
         Prefers explicit ``display_name``. Falls back to deriving from
         ``cli_module`` (e.g. ``cosa.agents.podcast_generator.cli`` →
@@ -656,15 +669,13 @@ class RuntimeArgumentExpeditor:
         (test_suite is invoked directly via API, not via CLI). See
         src/rnd/v0.1.7/2026.04.30-postmortem-2026.04.29-all-test-run.md §J.
         """
-        display_name = agent_entry.get( "display_name" )
-        if display_name:
-            return display_name
-        cli_module = agent_entry.get( "cli_module" )
-        if cli_module:
-            return cli_module.split( "." )[ -1 ].replace( "_", " " )
+        if spec.display_name:
+            return spec.display_name
+        if spec.cli_module:
+            return spec.cli_module.split( "." )[ -1 ].replace( "_", " " )
         return "agent"
 
-    def _confirm_and_iterate( self, args_dict, agent_entry, command_key, user_email ):
+    def _confirm_and_iterate( self, args_dict, spec, command_key, user_email ):
         """
         Present argument summary and iterate until user approves, modifies, or cancels.
 
@@ -673,7 +684,7 @@ class RuntimeArgumentExpeditor:
 
         Requires:
             - args_dict contains all collected user-facing args
-            - agent_entry is the registry entry for this agent
+            - spec is the ArgSpec for this agent
             - command_key is the agent's key in AGENTIC_AGENTS
 
         Ensures:
@@ -687,7 +698,7 @@ class RuntimeArgumentExpeditor:
 
         Args:
             args_dict: Collected argument dictionary
-            agent_entry: Registry entry for the target agent
+            spec: ArgSpec for the target agent
             command_key: Key in AGENTIC_AGENTS for user-visible-args lookup
             user_email: Target user for voice prompts
 
@@ -700,7 +711,7 @@ class RuntimeArgumentExpeditor:
         user_visible = get_user_visible_args( command_key )
         # Fallback: if agent doesn't publish, use fallback_questions keys
         if user_visible is None:
-            user_visible = list( agent_entry.get( "fallback_questions", {} ).keys() )
+            user_visible = list( spec.fallback_questions.keys() )
 
         for iteration in range( max_iterations ):
             # Build summary of user-visible args only → abstract (shown, not spoken)
@@ -709,7 +720,7 @@ class RuntimeArgumentExpeditor:
                 if k in user_visible:
                     summary_lines.append( f"- **{k}**: {v}" )
 
-            agent_name = self._resolve_display_name( agent_entry )
+            agent_name = self._resolve_display_name( spec )
 
             # Runtime scheduling section (universal, not agent-specific)
             summary_lines.append( "" )
@@ -741,7 +752,7 @@ class RuntimeArgumentExpeditor:
 
             if lower.startswith( "yes" ):
                 if comment:
-                    modification = self._parse_modification( comment, args_dict, agent_entry )
+                    modification = self._parse_modification( comment, args_dict, spec )
                     if modification and modification.is_modify() and modification.arg_name and modification.new_value:
                         args_dict[ modification.arg_name ] = modification.new_value
                         if self.debug: print( f"  Modified: {modification.arg_name} = {modification.new_value}" )
@@ -750,7 +761,7 @@ class RuntimeArgumentExpeditor:
 
             if lower.startswith( "no" ):
                 if comment:
-                    modification = self._parse_modification( comment, args_dict, agent_entry )
+                    modification = self._parse_modification( comment, args_dict, spec )
                     if modification and modification.is_modify() and modification.arg_name and modification.new_value:
                         args_dict[ modification.arg_name ] = modification.new_value
                         if self.debug: print( f"  Modified: {modification.arg_name} = {modification.new_value}" )
@@ -764,14 +775,14 @@ class RuntimeArgumentExpeditor:
         if self.debug: print( "[Expeditor] Max confirmation iterations reached, proceeding" )
         return args_dict
 
-    def _parse_modification( self, user_response, args_dict, agent_entry ):
+    def _parse_modification( self, user_response, args_dict, spec ):
         """
         Use LLM to parse a user's modification intent from their voice response.
 
         Requires:
             - user_response is a non-empty string
             - args_dict contains current arguments
-            - agent_entry contains the agent registry entry
+            - spec is the agent's ArgSpec
 
         Ensures:
             - Returns ArgConfirmationResponse on successful parse
@@ -780,7 +791,7 @@ class RuntimeArgumentExpeditor:
         Args:
             user_response: The user's voice response text
             args_dict: Current argument dictionary
-            agent_entry: Registry entry for context
+            spec: ArgSpec for context
 
         Returns:
             ArgConfirmationResponse or None
@@ -796,7 +807,7 @@ class RuntimeArgumentExpeditor:
             )
 
             # Build current args summary and arg names list
-            system_args = set( agent_entry.get( "system_provided", [] ) )
+            system_args = set( spec.system_provided )
             current_args_str = ", ".join(
                 f"{k}={v}" for k, v in args_dict.items()
                 if k not in system_args and k != "no_confirm"
@@ -807,7 +818,7 @@ class RuntimeArgumentExpeditor:
             )
 
             # Also include fallback question keys as valid arg names
-            fallback_keys = ", ".join( agent_entry.get( "fallback_questions", {} ).keys() )
+            fallback_keys = ", ".join( spec.fallback_questions.keys() )
             if fallback_keys:
                 arg_names_str = arg_names_str + ", " + fallback_keys if arg_names_str else fallback_keys
 
@@ -838,13 +849,13 @@ class RuntimeArgumentExpeditor:
             print( f"[Expeditor] Failed to parse confirmation response: {e}" )
             return None
 
-    def _inject_system_args( self, args_dict, agent_entry, user_email, session_id, user_id ):
+    def _inject_system_args( self, args_dict, spec, user_email, session_id, user_id ):
         """
         Inject system-provided arguments into the args dictionary.
 
         Requires:
             - args_dict is a dict of user-provided arguments
-            - agent_entry has "system_provided" list
+            - spec has a "system_provided" list
 
         Ensures:
             - Returns args_dict with system args injected
@@ -860,7 +871,7 @@ class RuntimeArgumentExpeditor:
             "no_confirm"  : True,
         }
 
-        for sys_arg in agent_entry[ "system_provided" ]:
+        for sys_arg in spec.system_provided:
             if sys_arg in system_map and sys_arg not in args_dict:
                 args_dict[ sys_arg ] = system_map[ sys_arg ]
 
@@ -932,7 +943,7 @@ class RuntimeArgumentExpeditor:
             return config_value
         return registry_default
 
-    def _build_request_context( self, agent_entry, original_question, final_args, missing_args ):
+    def _build_request_context( self, spec, command, original_question, final_args, missing_args ):
         """
         Build a markdown abstract summarizing the current request context.
 
@@ -940,7 +951,11 @@ class RuntimeArgumentExpeditor:
         Helps the user understand why they're being asked and what the system already knows.
 
         Requires:
-            - agent_entry is a valid registry entry with 'display_name'
+            - spec is the ArgSpec for command
+            - command is the routing command key (used for the user-visible-args
+              lookup — the spec is no longer identity-matchable against the
+              registry, so the caller passes the key directly; the result is
+              identical to the former reverse lookup by entry identity)
             - original_question is the user's voice command string
             - final_args is a dict of already-extracted arguments
             - missing_args is a list of arg names still needed
@@ -951,7 +966,8 @@ class RuntimeArgumentExpeditor:
             - Conditionally includes sections only when non-empty
 
         Args:
-            agent_entry: Registry entry for the target agent
+            spec: ArgSpec for the target agent
+            command: Routing command key for the user-visible-args lookup
             original_question: Full voice command transcription
             final_args: Dict of already-resolved arguments
             missing_args: List of arg names still needed
@@ -959,7 +975,7 @@ class RuntimeArgumentExpeditor:
         Returns:
             str: Markdown-formatted context summary
         """
-        display_name = self._resolve_display_name( agent_entry )
+        display_name = self._resolve_display_name( spec )
 
         lines = [
             f'**Your request**: "{original_question}"',
@@ -967,10 +983,8 @@ class RuntimeArgumentExpeditor:
         ]
 
         # Filter present args to user-visible only
-        user_visible = get_user_visible_args(
-            next( ( k for k, v in AGENTIC_AGENTS.items() if v is agent_entry ), None )
-        )
-        system_args = set( agent_entry.get( "system_provided", [] ) )
+        user_visible = get_user_visible_args( command )
+        system_args  = set( spec.system_provided )
 
         visible_present = {
             k: v for k, v in final_args.items()

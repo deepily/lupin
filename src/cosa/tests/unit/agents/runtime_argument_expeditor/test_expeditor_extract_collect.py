@@ -145,7 +145,7 @@ class TestCollect( unittest.TestCase ):
         entry = AGENTIC_AGENTS[ DR ]
         extraction = _extraction( { "query": "AI" }, [], entry )
         with patch.object( o, "_confirm_and_iterate", return_value={ "query": "AI" } ):
-            out = o.collect( extraction, DR, "research AI", entry, "u@x", "s", "uid" )
+            out = o.collect( extraction, DR, "research AI", _spec( entry ), "u@x", "s", "uid" )
         self.assertEqual( out[ "query" ], "AI" )
         self.assertEqual( out[ "user_email" ], "u@x" )   # system args injected
 
@@ -157,7 +157,7 @@ class TestCollect( unittest.TestCase ):
              patch.object( o, "_resolve_default",       return_value="research AI" ), \
              patch.object( o, "_ask_for_arg",           return_value="AI topic" ), \
              patch.object( o, "_confirm_and_iterate",   return_value={ "query": "AI topic" } ):
-            out = o.collect( extraction, DR, "research AI", entry, "u@x", "s", "uid" )
+            out = o.collect( extraction, DR, "research AI", _spec( entry ), "u@x", "s", "uid" )
         self.assertEqual( out[ "query" ], "AI topic" )
 
     def test_single_missing_user_cancels_returns_none( self ):
@@ -167,7 +167,7 @@ class TestCollect( unittest.TestCase ):
         with patch.object( o, "_build_request_context", return_value="ctx" ), \
              patch.object( o, "_resolve_default",       return_value="research AI" ), \
              patch.object( o, "_ask_for_arg",           return_value=None ):
-            out = o.collect( extraction, DR, "research AI", entry, "u@x", "s", "uid" )
+            out = o.collect( extraction, DR, "research AI", _spec( entry ), "u@x", "s", "uid" )
         self.assertIsNone( out )
 
     def test_confirmation_cancel_returns_none( self ):
@@ -175,7 +175,7 @@ class TestCollect( unittest.TestCase ):
         entry = AGENTIC_AGENTS[ DR ]
         extraction = _extraction( { "query": "AI" }, [], entry )
         with patch.object( o, "_confirm_and_iterate", return_value=None ):
-            out = o.collect( extraction, DR, "research AI", entry, "u@x", "s", "uid" )
+            out = o.collect( extraction, DR, "research AI", _spec( entry ), "u@x", "s", "uid" )
         self.assertIsNone( out )
 
 
@@ -192,7 +192,7 @@ class TestExpediteShimUnchanged( unittest.TestCase ):
         # extract() now receives an ArgSpec the shim built from the entry; collect()
         # still receives the raw entry.
         mx.assert_called_once_with( DR, "raw", "q", ArgSpec.from_entry( entry ) )
-        mc.assert_called_once_with( sentinel, DR, "q", entry, "u@x", "s", "uid" )
+        mc.assert_called_once_with( sentinel, DR, "q", _spec( entry ), "u@x", "s", "uid" )
         self.assertEqual( o._job_id, "j" )
         self.assertEqual( o._bearer_token, "b" )
 
@@ -219,7 +219,7 @@ class TestExpediteShimUnchanged( unittest.TestCase ):
         with _FlowFixture( o2, user_visible=[ "query" ], parsed=parsed ), \
              patch.object( o2, "_confirm_and_iterate", return_value={ "query": "AI" } ):
             extraction = o2.extract( DR, 'query="AI"', "research AI", _spec( entry ) )
-            via_manual = o2.collect( extraction, DR, "research AI", entry, "u@x", "s", "uid" )
+            via_manual = o2.collect( extraction, DR, "research AI", _spec( entry ), "u@x", "s", "uid" )
 
         self.assertEqual( via_expedite, via_manual )
         self.assertIsNotNone( via_expedite )
