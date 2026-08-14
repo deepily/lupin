@@ -1367,3 +1367,15 @@ def test_read_hold_exact_non_object_json_returns_none( tmp_path ):
     a non-dict as a shape it can inspect, so the reader rejects it here."""
     hh.hold_path( "sid-list", base_dir=tmp_path ).write_text( "[1, 2, 3]" )
     assert hh.read_hold_exact( "sid-list", base_dir=tmp_path ) is None
+
+
+def test_main_repo_path_git_failure_falls_back_to_resolved_repo_root( tmp_path, monkeypatch ):
+    """Covers heartbeat_hold.py 168-169: the `except (OSError, subprocess.SubprocessError)`
+    guard in _main_repo_path. When `git rev-parse --git-common-dir` cannot run (git
+    missing / not a repo), the function must NOT raise — it falls back to the resolved
+    repo_root. Force the wrapped subprocess.run to raise and assert the fallback."""
+    import pathlib, subprocess
+    def _boom( *a, **k ):
+        raise subprocess.SubprocessError( "git unavailable" )
+    monkeypatch.setattr( hh.subprocess, "run", _boom )
+    assert hh._main_repo_path( str( tmp_path ) ) == pathlib.Path( tmp_path ).resolve()

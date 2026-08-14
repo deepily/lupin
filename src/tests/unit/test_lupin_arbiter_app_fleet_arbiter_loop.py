@@ -1391,3 +1391,79 @@ def test_run_exits_promptly_if_stopped_DURING_the_construct_backoff():
     loop.run()                                       # returns at once via the wait() True branch
     assert calls[ "n" ] == 1                         # did NOT start a second cycle
     assert any( e == "fleet_arbiter_job_construct_error" for e, _ in logs )
+
+
+# ── row 859829a5: the four pre-existing defensive-except guards ──────────────
+
+def test_compute_hold_roots_fleet_data_root_derivation_failure_is_swallowed( tmp_path, monkeypatch ):
+    """Covers fleet_arbiter_loop.py 396-397: `except Exception: pass` guarding the
+    fleet_data_root append in _compute_hold_roots. A derivation failure must never
+    kill the sweep — host_root still comes back, just without the data-root candidate."""
+    import lupin_cli.claude_code.hooks.lib.heartbeat_hold as hold_mod
+    def _boom( *a, **k ):
+        raise RuntimeError( "data-root derivation exploded" )
+    monkeypatch.setattr( hold_mod, "fleet_data_root", _boom )
+    roots = _compute_hold_roots( FakeConfigMgr(), host_root=str( tmp_path ), scan_fn=lambda: [ ] )
+    assert roots == [ str( tmp_path ) ]                       # host_root survives; data root omitted, no raise
+
+
+def test_hold_reclaim_error_is_swallowed_and_logged():
+    """Covers fleet_arbiter_loop.py 1084-1085: `except Exception as e` around the hold
+    deleter. Reclamation must never kill the supervisor — a deleter blow-up is caught
+    and surfaced as fleet_arbiter_hold_reclaim_error, not raised."""
+    rec = Recorder()
+    def _boom_deleter( **kwargs ):
+        raise RuntimeError( "hold deleter exploded" )
+    loop = FleetArbiterLoop( lambda: None, log_fn=rec.log,
+                             hold_janitor_fn=lambda **k: _report(),
+                             hold_deleter_fn=_boom_deleter,
+                             hold_roots_fn=lambda: [ "/projects/lupin" ],
+                             live_session_ids_fn=lambda: set(),
+                             enable_hold_deletion=True )
+    loop._sweep_hold_files()                                  # must NOT raise
+    assert any( e == "fleet_arbiter_hold_reclaim_error" for e, _ in rec.logs )
+
+
+def _hwm_report( roots_swept=( "/projects/lupin", ), prunable=0 ):
+    """A _default_hwm_reporter-shaped result: only the fields _sweep_hwm_files reads."""
+    return {
+        "roots_requested"   : list( roots_swept ),
+        "roots_swept"       : list( roots_swept ),
+        "roots_unreachable" : [ ],
+        "files_found"       : 0,
+        "counts"            : { "prunable": prunable, "keep": 0, "reachable_but_kept_reasons": { } },
+    }
+
+
+def test_hwm_reclaim_error_is_swallowed_and_logged():
+    """Covers fleet_arbiter_loop.py 1153-1154: `except Exception as e` around the HWM
+    deleter. Same invariant as the hold path — a deleter blow-up is caught and surfaced
+    as fleet_arbiter_hwm_reclaim_error, not raised."""
+    rec = Recorder()
+    def _boom_deleter( **kwargs ):
+        raise RuntimeError( "hwm deleter exploded" )
+    loop = FleetArbiterLoop( lambda: None, log_fn=rec.log,
+                             hwm_janitor_fn=lambda **k: _hwm_report(),
+                             hwm_deleter_fn=_boom_deleter,
+                             hold_roots_fn=lambda: [ "/projects/lupin" ],
+                             live_session_ids_fn=lambda: set(),
+                             enable_hwm_deletion=True )
+    loop._sweep_hwm_files()                                   # must NOT raise
+    assert any( e == "fleet_arbiter_hwm_reclaim_error" for e, _ in rec.logs )
+
+
+def test_hwm_reclaim_success_emits_reclaimed_event():
+    """Covers fleet_arbiter_loop.py 1148-1152: the HWM reclaim SUCCESS path (sibling of
+    the guard above). With deletion opted in and a deleter that returns a prune list,
+    the supervisor emits fleet_arbiter_hwm_reclaimed with the deleted/agrees tallies."""
+    rec = Recorder()
+    loop = FleetArbiterLoop( lambda: None, log_fn=rec.log,
+                             hwm_janitor_fn=lambda **k: _hwm_report( prunable=1 ),
+                             hwm_deleter_fn=lambda **k: [ "/projects/lupin/.dm-inbox-hwm-dead.json" ],
+                             hold_roots_fn=lambda: [ "/projects/lupin" ],
+                             live_session_ids_fn=lambda: set(),
+                             enable_hwm_deletion=True )
+    loop._sweep_hwm_files()
+    reclaimed = [ f for e, f in rec.logs if e == "fleet_arbiter_hwm_reclaimed" ]
+    assert len( reclaimed ) == 1
+    assert reclaimed[ 0 ][ "deleted" ] == 1 and reclaimed[ 0 ][ "agrees" ] is True

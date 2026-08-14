@@ -142,8 +142,9 @@ and should not grow one. But narrow is not the same as blind: refusing loudly is
 what keeps the narrowness from being paid for by the caller's data.
 
 WHERE THE HOLD LANDS, SAID OUT LOUD (María, same day). `--base-dir` defaults to
-`write_hold`'s own default, `cu.get_project_root()` = **LUPIN_ROOT** — correct for
-a lupin session and wrong for every other. Measured from a `plan` session:
+`write_hold`'s own default, which since the 2026-07-26 relocation is
+`fleet_data_root()` = the `projects-data/<repo>` dir (was `cu.get_project_root()` =
+**LUPIN_ROOT** before that). Historically, measured from a `plan` session:
 `read --session-id <mine>` → "no hold found", while the same id with
 `--base-dir <PIP root>` → "honored yes". Same file, same session, opposite
 verdicts. The default is NOT changed here — diverging from the writer's default
@@ -595,8 +596,8 @@ def build_parser():
         sp.add_argument( "--session-id", required=True,
                          help="FULL session id (from get_session_info())" )
         sp.add_argument( "--base-dir", default=None,
-                         help="directory holding the artifact (default: the project root, "
-                              "exactly as write_hold resolves it)" )
+                         help="directory holding the artifact (default: fleet_data_root() "
+                              "= the projects-data/<repo> dir, exactly as write_hold resolves it)" )
 
     w = sub.add_parser( "write", help="declare a hold (RECORD + verify-by-read, in ONE call)" )
     common( w )
