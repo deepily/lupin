@@ -537,6 +537,57 @@ class TestRuntimeBrakeLegBC( _RFQBase ):
         self.assertFalse( getattr( job, "_brake_terminal_claimed", False ) )   # claim rolled back
         ev.assert_not_called()                                                # auto-fix never reached
 
+    # ---- Leg (c) P3: _transition_to_done claims the marker → closes done->dead race ----
+    def test_done_claims_marker_blocks_racing_dead( self ):
+        # A job that completed must not be re-dead-lettered by a racing ghost-sweep:
+        # _transition_to_done claims the SAME marker, so a follow-on _transition_to_dead
+        # no-ops (no double transition).
+        rq = self.build()
+        job = _AgenticFake( id_hash="c6" ); self._enqueue( rq, job )
+        with patch.object( rq, "_evaluate_for_auto_fix" ) as ev:
+            rq._transition_to_done( job, "out" )          # claims the terminal marker
+            rq._transition_to_dead( job, "racing dead" )  # already terminal → no-op
+        rq.jobs_dead_queue.push.assert_not_called()       # dead did NOT double-transition
+        ev.assert_not_called()
+
+    def test_done_rolls_back_claim_on_mid_transition_error( self ):
+        # A failed done must roll the claim back so the follow-on dead-letter still
+        # completes — else claim-in-done would wedge the slot (the regression a
+        # claim-only P3 would introduce).
+        rq = self.build()
+        job = _AgenticFake( id_hash="c7" ); self._enqueue( rq, job )
+        self.emit.side_effect = RuntimeError( "emit boom" )
+        with self.assertRaises( RuntimeError ):
+            rq._transition_to_done( job, "out" )
+        self.assertFalse( getattr( job, "_brake_terminal_claimed", False ) )   # rolled back
+        # follow-on dead-letter now succeeds (not wedged)
+        self.emit.side_effect = None
+        with patch.object( rq, "_evaluate_for_auto_fix" ):
+            rq._transition_to_dead( job, "cause" )
+        rq.jobs_dead_queue.push.assert_called_once_with( job )
+
+    # ---- Leg (c) P3: _transition_to_stalled claims too (Tiberius, resume is a fresh object) ----
+    def test_stalled_claims_marker_blocks_racing_dead( self ):
+        rq = self.build()
+        job = _AgenticFake( id_hash="c8", state=JobState.STALLED ); self._enqueue( rq, job )
+        with patch.object( rq, "_evaluate_for_auto_fix" ) as ev:
+            rq._transition_to_stalled( job, "out" )        # claims the terminal marker
+            rq._transition_to_dead( job, "racing dead" )   # already terminal → no-op
+        rq.jobs_dead_queue.push.assert_not_called()
+        ev.assert_not_called()
+
+    def test_stalled_rolls_back_claim_on_mid_transition_error( self ):
+        rq = self.build()
+        job = _AgenticFake( id_hash="c9", state=JobState.STALLED ); self._enqueue( rq, job )
+        self.emit.side_effect = RuntimeError( "emit boom" )
+        with self.assertRaises( RuntimeError ):
+            rq._transition_to_stalled( job, "out" )
+        self.assertFalse( getattr( job, "_brake_terminal_claimed", False ) )   # rolled back
+        self.emit.side_effect = None
+        with patch.object( rq, "_evaluate_for_auto_fix" ):
+            rq._transition_to_dead( job, "cause" )
+        rq.jobs_dead_queue.push.assert_called_once_with( job )
+
 
 # ── get_pool_status ─────────────────────────────────────────────────────────
 class TestGetPoolStatus( _RFQBase ):

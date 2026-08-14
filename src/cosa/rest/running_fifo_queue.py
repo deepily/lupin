@@ -542,53 +542,69 @@ class RunningFifoQueue( FifoQueue ):
           running_queue → push to done_queue → TFE watchdog evaluate →
           I/O table insert.
         """
-        # TTS Migration (Session 97): notify via notification service
-        self._notify( job.answer_conversational, job=job )
+        # Leg (c) P3 — close the done->dead sweeper race: claim the SAME terminal
+        # marker _transition_to_dead uses, so a racing ghost-sweep that dead-letters
+        # this job (or a late duplicate callback) no-ops instead of double-transitioning
+        # a row already completed. Claimed atomically; rolled back below on any
+        # mid-transition failure so a failed done never wedges the slot (a claim that
+        # stuck through a FAILED done would make the follow-on _transition_to_dead
+        # no-op too — the exact wedge leg (c) exists to prevent).
+        if not self._claim_terminal_reclaim( job ):
+            if self.debug:
+                print( "[AGENTIC-POOL] _transition_to_done no-op — job already terminal (Leg c P3)" )
+            return
 
-        job_id       = job.id_hash
-        user_id      = job.user_id
-        completed_at = du.get_current_datetime_iso()
-        started_at   = job.started_at
+        try:
+            # TTS Migration (Session 97): notify via notification service
+            self._notify( job.answer_conversational, job=job )
 
-        duration_seconds = None
-        if started_at and completed_at:
-            try:
-                start = datetime.fromisoformat( started_at ) if isinstance( started_at, str ) else started_at
-                end   = datetime.fromisoformat( completed_at )
-                duration_seconds = ( end - start ).total_seconds()
-            except Exception:
-                pass
+            job_id       = job.id_hash
+            user_id      = job.user_id
+            completed_at = du.get_current_datetime_iso()
+            started_at   = job.started_at
 
-        # artifacts-based fields are agentic-specific; fast-lane jobs have empty
-        # artifacts or no artifacts attribute — use getattr for boundary safety
-        artifacts = getattr( job, "artifacts", None ) or { }
-        metadata  = {
-            "response_text"             : job.answer_conversational,
-            "abstract"                  : artifacts.get( "abstract" ),
-            "report_link"               : artifacts.get( "report_path" ),
-            "remediation_snapshot_path" : artifacts.get( "remediation_snapshot_path" ),
-            "yaml_path"                 : artifacts.get( "yaml_path" ),
-            "pptx_path"                 : artifacts.get( "pptx_path" ),
-            "cost_summary"              : artifacts.get( "cost_summary" ),
-            "error"                     : None,
-            "question_text"             : job.last_question_asked,
-            "agent_type"                : job.job_type,
-            "timestamp"                 : job.created_date,
-            "status"                    : JobState.COMPLETED.value,
-            "has_interactions"          : bool( job.session_id ),
-            "is_cache_hit"              : job.is_cache_hit,
-            "user_email"                : job.user_email,
-            "started_at"                : started_at,
-            "completed_at"              : completed_at,
-            "duration_seconds"          : duration_seconds,
-        }
-        emit_job_state_transition(
-            self.websocket_mgr, job_id, JobState.RUNNING, JobState.COMPLETED, user_id, metadata
-        )
+            duration_seconds = None
+            if started_at and completed_at:
+                try:
+                    start = datetime.fromisoformat( started_at ) if isinstance( started_at, str ) else started_at
+                    end   = datetime.fromisoformat( completed_at )
+                    duration_seconds = ( end - start ).total_seconds()
+                except Exception:
+                    pass
 
-        # Queue transition (Phase 1 RLock protects both queues under concurrency)
-        self.delete_by_id_hash( job.id_hash )
-        self.jobs_done_queue.push( job )
+            # artifacts-based fields are agentic-specific; fast-lane jobs have empty
+            # artifacts or no artifacts attribute — use getattr for boundary safety
+            artifacts = getattr( job, "artifacts", None ) or { }
+            metadata  = {
+                "response_text"             : job.answer_conversational,
+                "abstract"                  : artifacts.get( "abstract" ),
+                "report_link"               : artifacts.get( "report_path" ),
+                "remediation_snapshot_path" : artifacts.get( "remediation_snapshot_path" ),
+                "yaml_path"                 : artifacts.get( "yaml_path" ),
+                "pptx_path"                 : artifacts.get( "pptx_path" ),
+                "cost_summary"              : artifacts.get( "cost_summary" ),
+                "error"                     : None,
+                "question_text"             : job.last_question_asked,
+                "agent_type"                : job.job_type,
+                "timestamp"                 : job.created_date,
+                "status"                    : JobState.COMPLETED.value,
+                "has_interactions"          : bool( job.session_id ),
+                "is_cache_hit"              : job.is_cache_hit,
+                "user_email"                : job.user_email,
+                "started_at"                : started_at,
+                "completed_at"              : completed_at,
+                "duration_seconds"          : duration_seconds,
+            }
+            emit_job_state_transition(
+                self.websocket_mgr, job_id, JobState.RUNNING, JobState.COMPLETED, user_id, metadata
+            )
+
+            # Queue transition (Phase 1 RLock protects both queues under concurrency)
+            self.delete_by_id_hash( job.id_hash )
+            self.jobs_done_queue.push( job )
+        except BaseException:
+            self._release_terminal_reclaim( job )   # failed done stays retryable
+            raise
 
         # TFE auto-dispatch (non-fatal if watchdog isn't initialized)
         try:
@@ -638,56 +654,71 @@ class RunningFifoQueue( FifoQueue ):
           auto-repair watchdog — the checkpoint IS the repair path; BFE would
           just swallow it on its own DB lookup.
         """
-        # TTS — informational tone (not urgent — this is a normal stall, not a crash)
-        self._notify( job.answer_conversational, job=job )
+        # Leg (c) P3 — claim the SAME terminal marker so a racing ghost-sweep
+        # dead-letter no-ops instead of stalling-then-dead double-transitioning.
+        # Safe for resume: a resumed stalled job is a FRESH object built by
+        # agentic_job_factory (_resume_checkpoint attached to a new construction),
+        # so this per-object marker never carries into the resumed run — verified
+        # 2026-08-13. Rolled back below on any mid-transition failure.
+        if not self._claim_terminal_reclaim( job ):
+            if self.debug:
+                print( "[AGENTIC-POOL] _transition_to_stalled no-op — job already terminal (Leg c P3)" )
+            return
 
-        job_id       = job.id_hash
-        user_id      = job.user_id
-        completed_at = du.get_current_datetime_iso()
-        started_at   = job.started_at
+        try:
+            # TTS — informational tone (not urgent — this is a normal stall, not a crash)
+            self._notify( job.answer_conversational, job=job )
 
-        duration_seconds = None
-        if started_at and completed_at:
-            try:
-                start = datetime.fromisoformat( started_at ) if isinstance( started_at, str ) else started_at
-                end   = datetime.fromisoformat( completed_at )
-                duration_seconds = ( end - start ).total_seconds()
-            except Exception:
-                pass
+            job_id       = job.id_hash
+            user_id      = job.user_id
+            completed_at = du.get_current_datetime_iso()
+            started_at   = job.started_at
 
-        artifacts = getattr( job, "artifacts", None ) or { }
-        metadata  = {
-            "response_text"             : job.answer_conversational,
-            "abstract"                  : artifacts.get( "abstract" ),
-            "report_link"               : artifacts.get( "report_path" ),
-            "remediation_snapshot_path" : artifacts.get( "remediation_snapshot_path" ),
-            "yaml_path"                 : artifacts.get( "yaml_path" ),
-            "pptx_path"                 : artifacts.get( "pptx_path" ),
-            "cost_summary"              : artifacts.get( "cost_summary" ),
-            # Stall-specific fields (the missing piece pre-fix):
-            "checkpoint"                : artifacts.get( "checkpoint" ),
-            "plan_path"                 : artifacts.get( "plan_path" ),
-            "error"                     : None,
-            "question_text"             : job.last_question_asked,
-            "agent_type"                : job.job_type,
-            "timestamp"                 : job.created_date,
-            "status"                    : JobState.STALLED.value,
-            "has_interactions"          : bool( job.session_id ),
-            "is_cache_hit"              : False,
-            "user_email"                : job.user_email,
-            "started_at"                : started_at,
-            "completed_at"              : completed_at,
-            "duration_seconds"          : duration_seconds,
-        }
-        emit_job_state_transition(
-            self.websocket_mgr, job_id, JobState.RUNNING, JobState.STALLED, user_id, metadata
-        )
+            duration_seconds = None
+            if started_at and completed_at:
+                try:
+                    start = datetime.fromisoformat( started_at ) if isinstance( started_at, str ) else started_at
+                    end   = datetime.fromisoformat( completed_at )
+                    duration_seconds = ( end - start ).total_seconds()
+                except Exception:
+                    pass
 
-        # Queue transition — same pattern as _transition_to_done but explicitly
-        # NOT firing the TFE auto-dispatch watchdog (stalled jobs are awaiting
-        # human review, not failed jobs needing repair).
-        self.delete_by_id_hash( job.id_hash )
-        self.jobs_done_queue.push( job )
+            artifacts = getattr( job, "artifacts", None ) or { }
+            metadata  = {
+                "response_text"             : job.answer_conversational,
+                "abstract"                  : artifacts.get( "abstract" ),
+                "report_link"               : artifacts.get( "report_path" ),
+                "remediation_snapshot_path" : artifacts.get( "remediation_snapshot_path" ),
+                "yaml_path"                 : artifacts.get( "yaml_path" ),
+                "pptx_path"                 : artifacts.get( "pptx_path" ),
+                "cost_summary"              : artifacts.get( "cost_summary" ),
+                # Stall-specific fields (the missing piece pre-fix):
+                "checkpoint"                : artifacts.get( "checkpoint" ),
+                "plan_path"                 : artifacts.get( "plan_path" ),
+                "error"                     : None,
+                "question_text"             : job.last_question_asked,
+                "agent_type"                : job.job_type,
+                "timestamp"                 : job.created_date,
+                "status"                    : JobState.STALLED.value,
+                "has_interactions"          : bool( job.session_id ),
+                "is_cache_hit"              : False,
+                "user_email"                : job.user_email,
+                "started_at"                : started_at,
+                "completed_at"              : completed_at,
+                "duration_seconds"          : duration_seconds,
+            }
+            emit_job_state_transition(
+                self.websocket_mgr, job_id, JobState.RUNNING, JobState.STALLED, user_id, metadata
+            )
+
+            # Queue transition — same pattern as _transition_to_done but explicitly
+            # NOT firing the TFE auto-dispatch watchdog (stalled jobs are awaiting
+            # human review, not failed jobs needing repair).
+            self.delete_by_id_hash( job.id_hash )
+            self.jobs_done_queue.push( job )
+        except BaseException:
+            self._release_terminal_reclaim( job )   # failed stall stays retryable
+            raise
 
         # I/O table (non-fatal if unavailable)
         try:
