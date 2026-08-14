@@ -143,7 +143,10 @@ def prefilter_docs_map_by_keywords( docs_map, description, debug=False ):
           holds <= MAX_CANDIDATES entries; such a map is returned UNCHANGED and
           arbitrary is False (a within-budget list is complete, never a guess)
         - on a larger map with keyword overlap, keeps the highest-scoring
-          MAX_CANDIDATES; arbitrary is False
+          MAX_CANDIDATES; arbitrary is False ONLY when the whole scored list fit
+          (nothing dropped). When the scored list exceeds MAX_CANDIDATES the
+          narrowing truncated — a real match may sit past the cut — so arbitrary
+          is True: the shortlist is lossy, not a complete narrowing (row c143fd84)
         - on a larger map with NO scoring signal (no usable keywords, or zero
           keyword overlap), caps to a deterministic sorted MAX_CANDIDATES slice
           AND sets arbitrary True: the slice is unranked and may not contain the
@@ -176,10 +179,16 @@ def prefilter_docs_map_by_keywords( docs_map, description, debug=False ):
     scored = _score_docs_by_keyword_overlap( docs_map, desc_words )
 
     if scored:
+        # A scored narrowing that TRUNCATES (more scored candidates than the cap)
+        # has silently dropped real matches — the true target may sit just past
+        # the 50th, so the shortlist is NOT a complete narrowing and must NOT be
+        # flagged trustworthy (row c143fd84). Only a scored list that fit whole
+        # (nothing dropped) is complete → arbitrary False.
+        truncated = len( scored ) > MAX_CANDIDATES
         keep = [ rel for _score, rel in scored[ :MAX_CANDIDATES ] ]
         if debug:
-            print( f"[fuzzy_file_prefilter] Pre-filtered {len( docs_map )} → {len( keep )} candidates (top scores: {[ s for s, _ in scored[ :5 ] ]})" )
-        return { k: docs_map[ k ] for k in keep }, False
+            print( f"[fuzzy_file_prefilter] Pre-filtered {len( docs_map )} → {len( keep )} candidates (top scores: {[ s for s, _ in scored[ :5 ] ]}; truncated={truncated})" )
+        return { k: docs_map[ k ] for k in keep }, truncated
 
     # No scoring signal (no usable keywords, or zero keyword overlap) on a LARGE
     # map. We MUST cap — returning the full map is the exact overflow that took

@@ -130,5 +130,41 @@ class TestPrefilterRegression( unittest.TestCase ):
         self.assertTrue( arbitrary )
 
 
+class TestPrefilterTruncationDisclosure( unittest.TestCase ):
+    """
+    Row c143fd84 (found by Rio ⚡): a keyword-scored narrowing that TRUNCATES —
+    len( scored ) > MAX_CANDIDATES, so a genuinely-scored target ranked past the
+    50th is silently dropped — still returns arbitrary=False, telling callers the
+    shortlist is a trustworthy, complete narrowing. The model then picks
+    confidently from a set that CANNOT contain the answer. A truncated shortlist
+    that drops a scored target MUST disclose incompleteness (arbitrary=True),
+    exactly as the zero-overlap path already does.
+    """
+
+    def test_target_ranked_past_cut_is_disclosed_not_silently_trusted( self ):
+        # 60 decoys each match TWO description keywords (score 2); the target
+        # matches only ONE (score 1). Sorted desc, the 60 score-2 decoys fill the
+        # top-50 and the target lands at rank 61 — outside scored[:MAX_CANDIDATES].
+        # 60 > 50 is a deliberate margin: the target CANNOT sneak into the slice.
+        docs_map = { f"io/decoy/alpha-bravo-{i}.md": f"/abs/decoy-{i}.md"
+                     for i in range( MAX_CANDIDATES + 10 ) }
+        target   = "io/target/charlie-notes.md"
+        docs_map[ target ] = "/abs/charlie.md"
+
+        out, arbitrary = prefilter_docs_map_by_keywords(
+            docs_map, "alpha bravo charlie", debug=True
+        )
+
+        # Precondition: the target really was dropped by the top-50 truncation.
+        self.assertNotIn( target, out, "target must be excluded by the cut for this case" )
+        self.assertEqual( len( out ), MAX_CANDIDATES, "narrowing must truncate to the cap" )
+        # The defect: it drops a scored target yet still flags the list trustworthy.
+        self.assertTrue(
+            arbitrary,
+            "a truncated shortlist that drops a scored target must disclose "
+            "incompleteness (arbitrary=True), not claim a complete narrowing",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
