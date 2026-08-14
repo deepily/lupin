@@ -644,8 +644,9 @@ def build_peer_dm_reminder( body, persona=None, icon=None, msg_id=None, thread_i
 
     Per §6a of
     src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/02-notification-native-aixai-design.md:
-    a peer DM is NOT human voice. The block carries the sender's persona + icon +
-    message_id + thread_id and a dm_send reply affordance — and deliberately NO
+    a peer DM is NOT human voice. The header carries the sender's persona + icon;
+    the message_id + thread_id ride the dm_send reply affordance ONLY (not repeated
+    in the header — that was pure duplication), and there is deliberately NO
     speakerphone voice rider / "user spoke" / notify-to-speak instruction. Peers
     reply via dm_send, never TTS.
 
@@ -706,8 +707,13 @@ def build_peer_dm_reminder( body, persona=None, icon=None, msg_id=None, thread_i
             f'reply_to="{msg_id}", thread_id="{thread_id}" )\n'
             f'↳ {DM_STYLE_TAG}'
         )
+    # Header carries ONLY the shared PEER_DM_FRAME_PREFIX + sender — the msg_id/thread_id
+    # are NOT repeated here: they already ride the reply affordance below (the string a
+    # reader pastes to reply), so printing them in the header too was pure duplication
+    # (72 chars of UUIDs twice). The prefix is left intact so is_injected_peer_dm + the
+    # Stop-hook poke-cap guard still match this envelope. (row: peer-DM header de-dup)
     reminder_body = (
-        f"{PEER_DM_FRAME_PREFIX}{sender_label} (message_id {msg_id}, thread {thread_id}):\n\n"
+        f"{PEER_DM_FRAME_PREFIX}{sender_label}:\n\n"
         f"{body}\n\n"
         f"{reply_affordance}"
     )

@@ -385,7 +385,8 @@ class TestBuildPeerDmReminder:
     """Tests for build_peer_dm_reminder() — the SINGLE source of peer-DM framing."""
 
     def test_full_envelope( self ):
-        """Full envelope: system-reminder wrapper, persona+icon label, ids, body, reply affordance."""
+        """Full envelope: system-reminder wrapper, persona+icon label, body, reply
+        affordance. The ids ride the footer reply affordance ONLY, not the header."""
         r = build_peer_dm_reminder(
             "Build is green, ready for review.",
             persona="maría", icon="🌸", msg_id="m-1", thread_id="t-1"
@@ -393,8 +394,9 @@ class TestBuildPeerDmReminder:
         assert r.startswith( "<system-reminder>" )
         assert r.endswith( "</system-reminder>" )
         assert "PEER DM from maría 🌸" in r
-        assert "message_id m-1" in r
-        assert "thread t-1" in r
+        # header de-dup: ids no longer printed as "message_id ../thread .." in the header
+        assert "message_id m-1" not in r
+        assert "thread t-1" not in r
         assert "Build is green, ready for review." in r
         # dm_send reply affordance threads via reply_to + thread_id
         assert 'dm_send( recipient="maría"' in r
@@ -410,8 +412,8 @@ class TestBuildPeerDmReminder:
     def test_icon_id_thread_fallbacks_to_empty( self ):
         """Missing icon/msg_id/thread_id degrade to empty strings (no 'None' leakage)."""
         r = build_peer_dm_reminder( "body", persona="maría", icon=None, msg_id=None, thread_id=None )
-        # icon empty → label is just the persona (no trailing space)
-        assert "PEER DM from maría (message_id , thread ):" in r
+        # icon empty → label is just the persona (no trailing space); no id parenthetical
+        assert "PEER DM from maría:" in r
         assert "None" not in r
 
     def test_no_voice_rider_strings( self ):
@@ -498,7 +500,7 @@ class TestFormatVoiceContextPeerDm:
             "id"             : "other",
         } ]
         result = format_voice_context( msgs )
-        assert "message_id nid" in result
+        assert 'reply_to="nid"' in result                 # id rides the reply affordance
         assert "other" not in result
 
     def test_id_fallback_when_no_notification_id( self ):
@@ -712,9 +714,9 @@ class TestDeliverPendingPeerDms:
         # First injected block carries the framed body + persona
         first_text = mock_inject.call_args_list[ 0 ].args[ 1 ]
         assert "dm one" in first_text and "maría" in first_text
-        # Second uses the id fallback (no notification_id)
+        # Second uses the id fallback (no notification_id) — id rides the reply affordance
         second_text = mock_inject.call_args_list[ 1 ].args[ 1 ]
-        assert "message_id m2" in second_text
+        assert 'reply_to="m2"' in second_text
 
     @patch( "lupin_cli.claude_code.hooks.lib.hook_common.inject_qualifier_via_tmux" )
     @patch( "lupin_cli.claude_code.hooks.lib.hook_common.drain_voice_buffer" )
@@ -808,6 +810,28 @@ class TestIsInjectedPeerDm:
         dm = build_peer_dm_reminder( "where are we on X?", persona="mr radio", icon="🦉",
                                      msg_id="m1", thread_id="t1" )
         assert PEER_DM_FRAME_PREFIX in dm                 # frame really is present
+        assert is_injected_peer_dm( dm ) is True
+
+    def test_ids_ride_footer_only_and_match_survives( self ):
+        """Peer-DM header de-dup: the msg_id/thread_id appear ONLY in the reply
+        affordance (footer), NOT duplicated in the PEER_DM_FRAME_PREFIX header — and
+        the SAME envelope is still recognized by is_injected_peer_dm AND the poke-cap
+        guard (both key on the untouched prefix). Emit + match pinned together so they
+        cannot drift apart."""
+        msg_id, thread_id = "mid-8f3a2b1c", "tid-4d5e6f70"
+        dm = build_peer_dm_reminder( "cut the header dupes", persona="maria", icon="🌸",
+                                     msg_id=msg_id, thread_id=thread_id )
+        # The header is the line bearing the shared frame prefix.
+        header = next( ln for ln in dm.splitlines() if PEER_DM_FRAME_PREFIX in ln )
+        assert msg_id     not in header                   # de-dup: ids gone from header
+        assert thread_id  not in header
+        assert "message_id" not in header and "thread" not in header
+        assert "maria" in header and "🌸" in header       # sender still named
+        # The ids still ride the reply affordance so a reader can paste-to-reply.
+        assert f'reply_to="{msg_id}"'   in dm
+        assert f'thread_id="{thread_id}"' in dm
+        # Emit/match coupling preserved — the prefix survived the cut.
+        assert PEER_DM_FRAME_PREFIX in dm
         assert is_injected_peer_dm( dm ) is True
 
     def test_false_on_genuine_user_prompt( self ):
