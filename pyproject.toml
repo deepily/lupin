@@ -184,10 +184,32 @@ no-build-isolation-package = ["flash-attn"]
 # ============================================================================
 [tool.coverage.run]
 branch = true
-source = [ "cosa" ]
+# Widened 2026-08-13 (row e2099400, Rick ruled Option C — widen with a ramp). Was
+# [ "cosa" ], which left ~40,581 lines across 85 files (the heartbeat/Stop-hook,
+# the MCP server, and the arbiter — the three surfaces the fleet's liveness runs
+# on) OUTSIDE every denominator, so --cov-fail-under passed while unable to see
+# them. The six packages below enter the frame at once; the first run is a
+# BASELINE, not a failure. fail_under (below) is set to that honest floor, NOT
+# 100 — the ramp back up to 100 has a named owner (Tiffany) and is tracked on
+# this row, per Rick's condition that a ramp without an owner is worse than none.
+# DIRECTORY PATHS, not package names, on purpose: coverage source-by-name only
+# counts a module once it is IMPORTED during the run, so an un-exercised file
+# stays OUT of the denominator (the same blindness this row is closing, one
+# mechanism over). Directory paths make coverage walk the tree and enter every
+# .py at 0%, which is what makes the baseline honest.
+source = [
+    "src/cosa",
+    "src/lupin_cli",
+    "src/lupin_mcp",
+    "src/lupin_arbiter_app",
+    "src/lupin_app",
+    "src/lib",
+    "src/lupin_model_server",
+]
 omit   = [
     "*/cosa/tests/*",               # CoSA's own test suites — test code, not a coverage denominator
     "*/cosa/agents/*/tests/*",      # per-agent test suites (podcast_generator, io_models)
+    "*/lupin_cli/notifications/test_notifications.py",  # the one inline test file under the widened packages — test code, not a denominator
     # NOTE: a broad "*/test_*.py" was REMOVED 2026-05-31 — it was redundant (real test
     # files already omitted by the two tests-dir globs above) and was HIDING three real
     # prod modules from the 100% mandate: swe_team/test_runner.py, rest/routers/test_suite.py,
@@ -198,6 +220,17 @@ omit   = [
 ]
 
 [tool.coverage.report]
+# BASELINE FLOOR, NOT the 100% target (row e2099400, Rick ruled Option C). When the
+# frame widened from cosa-only to the seven packages above, the honest measured
+# baseline was 96.26% (unit + cosa tiers: 59,432 stmts, 2,229 missing, measured
+# 2026-08-13, ~14 min). fail_under is set to the integer floor BELOW that so the
+# gate passes green at the truth instead of red. It is deliberately NOT 100 and
+# NOT per-package — a single global floor lets cosa's prior 100% regress silently;
+# the ramp back to 100 (per-package thresholds + dates) is owned by Tiffany on this
+# row. SCOPE CAVEAT: 96.26% reflects the unit+cosa tiers only; lupin_app (server
+# runtime) reads 27.2% here because its paths run under the :8000 integration/e2e
+# tiers, not measured in this baseline. Raise this floor as the ramp advances.
+fail_under = 96
 # exclude_also APPENDS to defaults (keeps `# pragma: no cover` working)
 exclude_also = [
     # ⚠️ EXCLUDED BY POLICY, NOT BECAUSE IT IS UNREACHABLE (row 3c0d3d1c, 2026-07-25).
