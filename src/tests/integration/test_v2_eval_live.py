@@ -20,12 +20,17 @@ Never :7999, never curl, never side-doored. On :7999 (or any server with the v2 
 gate off) the harness's own integrity guard fails the run loudly, which is correct.
 
 LIVE PRECONDITIONS (must hold on the target server or the run fails by construction):
-  1. `v2 flow enabled = True` in the target's INI block — else /api/v2/ask returns 503,
-     every request is a non-200, and the integrity guard (http-all-ok) raises. The
-     [Lupin: Testing] block does NOT set this today; it must be enabled for :8000.
-  2. `v2 trace dir` set — else no authoritative JSONL trace is written and the guard's
-     trace-parity property has nothing to check against, so it raises.
-  3. LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL / _PASSWORD set (the harness logs in itself).
+  1. The :8000 server must have been BOUNCED after unit D's route landed (2026-08-14 14:37).
+     A long-lived process imports the tree at boot, so a server older than the route serves
+     404 on /api/v2/ask — every request non-200, integrity guard (http-all-ok) raises. (The
+     `v2 flow enabled` flag is NOT the risk: [Lupin: Testing] inherits [Lupin: Development],
+     which sets it True; the flag is on. This corrects an earlier misdiagnosis of mine.)
+  2. LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL / _PASSWORD set (the harness logs in itself).
+
+  (NOT a precondition: `v2 trace dir` may be empty. StageTrace (trace.py:56) falls back to
+  project_root + "/io/v2-flow" when it is None, and v2_ask.py:99 maps the empty string to None
+  via `or None` — exactly where the guard's read_jsonl_trace_ids looks. So trace-parity has its
+  instrument regardless. An earlier draft wrongly called this a precondition.)
 
 Design: src/rnd/v0.2.0/2026.08.14-cj-flow-v2-phases-2-3-and-evaluation.md (§1, §7, §9);
 scope split: src/rnd/v0.2.0/2026.08.14-krishna-unit-f-wiring-scope.md.

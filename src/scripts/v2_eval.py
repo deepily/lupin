@@ -577,6 +577,7 @@ def run_pass(
     corpus    : List[ Tuple[ str, str ] ],
     ask       : Callable[ [ str ], Dict[ str, Any ] ],
     pass_kind : str,
+    fail_fast : bool = False,
 ) -> List[ Dict[ str, Any ] ]:
     """
     Run one pass over the corpus, attaching the expected command to each record.
@@ -589,13 +590,25 @@ def run_pass(
     Ensures:
         - returns one record per corpus pair, each carrying expected_command and
           pass_kind alongside the ask() result.
+        - when fail_fast is True and the FIRST request does not return 200, raises
+          immediately — a broken endpoint costs one request, not the whole corpus
+          (Cheech, thread 4fb7f475). The first real utterance doubles as the smoke,
+          so no extra probe request is spent.
+
+    Raises:
+        - EvalIntegrityError if fail_fast and the first request is not ok.
     """
     records : List[ Dict[ str, Any ] ] = []
-    for utterance, expected in corpus:
+    for index, ( utterance, expected ) in enumerate( corpus ):
         record = ask( utterance )
         record[ "expected_command" ] = expected
         record[ "pass_kind" ]        = pass_kind
         records.append( record )
+        if fail_fast and index == 0 and not record[ "ok" ]:
+            raise EvalIntegrityError(
+                f"fail-fast: first {pass_kind} request returned "
+                f"{record[ 'status_code' ]}, not 200 — aborting before spending the corpus"
+            )
     return records
 
 
@@ -751,7 +764,7 @@ def main(
     factory = client_factory if client_factory is not None else _default_client_factory
     client  = factory( args.base_url )
 
-    cold_records = run_pass( corpus, client.ask, "cold" )
+    cold_records = run_pass( corpus, client.ask, "cold", fail_fast=True )
     warm_records = run_pass( corpus, client.ask, "warm" )
 
     trace_path = os.path.join( root, "io", "v2-flow", f"trace-{stamp[ :10 ]}.jsonl" )

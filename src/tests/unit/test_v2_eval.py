@@ -346,6 +346,26 @@ def test_run_pass_attaches_expected_and_kind():
     assert all( r[ "pass_kind" ] == "cold" for r in records )
 
 
+def test_run_pass_fail_fast_aborts_on_first_bad():
+    # A broken endpoint costs ONE request, not the corpus (Cheech, thread 4fb7f475).
+    calls = []
+    def ask( q ):
+        calls.append( q )
+        return { "utterance": q, "ok": False, "status_code": 503, "payload": {} }
+    with pytest.raises( ve.EvalIntegrityError, match="fail-fast" ):
+        ve.run_pass( [ ( "u1", "cmd-a" ), ( "u2", "cmd-b" ) ], ask, "cold", fail_fast=True )
+    assert calls == [ "u1" ]                    # stopped after the first request
+
+
+def test_run_pass_fail_fast_only_guards_the_first_request():
+    # First OK ⇒ no abort; a LATER failure does not trip fail-fast (it guards index 0 only).
+    def ask( q ):
+        ok = ( q == "u1" )
+        return { "utterance": q, "ok": ok, "status_code": 200 if ok else 503, "payload": {} }
+    records = ve.run_pass( [ ( "u1", "cmd-a" ), ( "u2", "cmd-b" ) ], ask, "cold", fail_fast=True )
+    assert len( records ) == 2 and records[ 1 ][ "ok" ] is False
+
+
 # ---------------------------------------------------------------------------
 # rendering + output
 # ---------------------------------------------------------------------------
