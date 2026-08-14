@@ -8,6 +8,28 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.08.14 - Session c8f94419 (Cheech 🌿, with María 🌸 and Mr. Radio 🦉) | A board handed over at the ceiling, six merges, and three things that looked settled and were not
+
+1. **`self_respin` fired live and I came back through the clear** — the proof Rick asked for after adding `mcp__cosa-voice__*` to the allow list. The classifier had refused it the day before; an allow rule outranks it. The doctrine line *"a manager cannot re-spin himself"* is now stale, and it stopped being theoretical hours later when two peers crossed the line and I could point them at the verb instead of a handover.
+
+2. **Review cascade on María's phases 2/3 plan: 15 findings, and she folded all seven that survived — including three I never routed to her.** **The sharpest was Tiberius 👑's**: the v1 arm wrote into the store the comparison reads from, so v2's cold pass would have been warm and every headline number would have moved **in v2's favour** — the direction nobody audits. Each arm now runs against its own restored table, which he then called a stronger fix than the writeback-off one he had proposed.
+
+3. **Two reviewers found one mechanism from opposite ends: the router never says "I don't know."** María's probe emitted a fake command **6/10** with it absent from *both* prompt and trained vocabulary; Tiberius showed the capability-gap detector therefore cannot fire. So *"a new command costs a 3-4 hour retrain"* is wrong — a retrain buys reliability, not reachability. Live v1 defect filed (`d9ecd69e`): unknown commands fall through the `else` and **silently web-search the user's question**.
+
+4. **Took Mr. Radio's board at his 50.7% ceiling and merged six times** — C2 `245cdb61`, F `e12aa611`, round-trip control `92934eab`, live-cost wrapper `9b1382d0`, D `11a75649`, wired round-trip. **C2 ahead of D**, the order that mattered: D would otherwise have shipped with cache write-back off and the eval harness would have measured v2 with its write path disabled. Verified on the main tree every time, never on a worker's report. **201 → 315 v2 tests green.** I took the board immediately rather than let him finish, because seats do not transfer — a manager who hits the wall mid-merge orphans workers nobody can re-spin.
+
+5. **Two gaps 100% line-and-branch coverage could not see, one of them mine.** Parsing all 25 tests in `test_v2_cache.py`: **not one composed `write_back` → `lookup`** — every line ran, the composition never did. I then **closed row `41333974` on two of its three conditions**, and since `done` is terminal, filed `b7ecfec7` for the half still open. Tiffany 💍's `sender_id` defect went the other way — real, confirmed against the actual regex: `^[a-z]+(\.[a-z]+)+@…` forbids digits, so `v2.ask@…` returned **500 on every spoken v2 response**.
+
+6. **Krishna 🦚 found a hole in the verdict instrument itself**: there is no v1 synchronous ask path (`/api/push` + poll is it), so the arms differ in **transport**, not just control logic — and if queue dwell lands in v1's number, v2 wins for being synchronous. Same bias-direction failure as the baseline contamination. Ruled: v2-only down-payment now, labelled **not the go/no-go table**, then a paired harness with `t_first_useful` defined identically in both arms.
+
+7. **Every control was proven able to fail, and two blockers were misdiagnoses.** I disabled `add_synonym` in sam 🎙️'s worktree and watched all three round-trip tests go red — never on the main tree, which `:7999` imports from. Tiffany reported her `:8000` run blocked on D being unmerged; D had merged an hour earlier, and it was her own three commits that were outstanding. Krishna reported `/api/v2/ask` **503 from a config gap**; it was a **404**, because the container had been up 4 hours and never imported a route added at 14:37 — and `[Lupin: Testing]` inherits `Lupin: Development`, where the flag is already `True`. A plain restart fixed it and **rescued two overnight runs**, not one.
+
+**Checkpoint**: crew re-spun under my lineage after rescuing three mementos off `/tmp` scratchpads that die with the session; three `:8000` jobs deconflicted for tonight (02:30 / 03:00 / after). Nothing pushed — push is Rick's alone.
+
+**Files**: `src/cosa/rest/v2/{cache,flow}.py` · `src/cosa/rest/routers/v2_ask.py` · `src/scripts/{v2_eval,v2_embedding_cost}.py` · 8 v2 test files · `pytest.ini` · `src/rnd/v0.2.0/2026.08.14-cj-flow-v2-phase2-review-findings.md` · `TODO.md` (embedding-regeneration banner re-dated 08-14 → 08-15; it did not run, Rick was AFK)
+
+**Owed to Rick**: row `29e98243` (LanceDB ban scope vs. existing Postgres — build proceeded on option 2 throughout, nothing stalled) and the two open items on `5e848dd8` (rollback choice `ko6gqmox1`, and the end-to-end walkthrough he required before any write to `input_and_output`).
+
 ### 2026.08.12 - Session 4073ce01 (Mr. Radio 🦉, with María 🌸) | The corpus re-cut by sentences, and four experiment designs killed on the way to shipping
 
 1. **">4 sentences" is not a narrow gate — it fires on 79% of DMs**, because the median DM carries 7.8 claims. Priced the whole dial instead of the one number: `>4` keeps 94% of the achievable saving, `>7` halves the calls and keeps 71%.

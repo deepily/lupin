@@ -1,6 +1,12 @@
 # TODO
 
-## ☀️ FIRST THING TOMORROW — 2026-08-14, ~10–11am, Rick + Mr. Radio 🦉, and NOTHING ELSE BEFORE IT
+## ☀️ FIRST THING TOMORROW — 2026-08-15, ~10–11am, Rick + Mr. Radio 🦉, and NOTHING ELSE BEFORE IT
+
+> **Re-dated 08-14 → 08-15 by Cheech 🌿 on 2026-08-14.** It did not run on the 14th: Rick was AFK all day
+> (broadcast `ee1a49ce`), which put the whole day on the CJ Flow v2 plan. Row `5e848dd8` is still `blocked`
+> on Rick with its chase time already passed — the two open items remain his, unchanged: the **rollback
+> choice** (`ask_multiple_choice ko6gqmox1`, still unanswered) and the **end-to-end walkthrough** he required
+> before any write to `input_and_output`. Nothing about the job changed; only the date did.
 
 **Rick's instruction, 2026-08-13 (verbatim in substance)**: *"Make a note of it in the to-do document for it
 to be the first and only thing you and I begin the day with."*
