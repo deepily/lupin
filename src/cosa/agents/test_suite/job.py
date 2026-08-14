@@ -48,6 +48,7 @@ SUITE_SCRIPTS = {
     "e2e"          : "src/scripts/run-e2e-ui-tests.sh",
     "all"            : "src/tests/run-all-tests.sh",
     "presentation"   : "src/tests/run-presentation-regression.sh",
+    "cosa"           : "src/tests/run-cosa-tests.sh",   # in-tree CoSA test tree (row c9d3ddcb); NOT yet in the merge pyramid
 }
 
 # Test types that accept a file path as the first positional pytest arg
@@ -62,7 +63,7 @@ FILE_DRIVEN_TEST_TYPES = frozenset( { "smoke_direct", "pytest_direct" } )
 # non-pytest suites can be added here as the project grows.
 SUITES_SUPPORTING_JUNIT_XML = frozenset( {
     "unit", "smoke", "smoke_direct", "pytest_direct",
-    "integration", "e2e", "all",
+    "integration", "e2e", "all", "cosa",
 } )
 # NOTE (bug 89bfcc8f): "presentation" is deliberately NOT here. Its backing
 # script (run-presentation-regression.sh) is a MULTI-TIER orchestrator, not a
@@ -84,6 +85,7 @@ SUITE_TIMEOUTS_SECONDS = {
     "e2e"          : 3000,   # 50 min (bumped from 2400s on 2026-06-12: observed 2020.6s on ts-b51e63c9 — suite grew to ~593 tests, 2400s was only 1.19x margin; ~1.48x over observed)
     "all"            : 3600,   # 60 min (sequential pyramid, ~25-35 min observed)
     "presentation"   : 1800,   # 30 min (render-only + Sonnet; +Opus/R2P with flags)
+    "cosa"           : 900,    # 15 min (~8,800 tests; both-roots hand run was ~11 min for 21,721 on 2026-08-06 — ~1.5x margin)
 }
 SUITE_TIMEOUT_DEFAULT_SECONDS = 600  # 10 min fallback for unknown types
 

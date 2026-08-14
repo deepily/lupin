@@ -14,9 +14,10 @@ to look.
 
 THE LEDGER: `gate-reachability-allowlist.json` beside this file. Every entry is
 a file someone chose not to gate, with a dated reason. The point is not that
-the list is short — today it is 477 entries long. The point is that the gap is
-ENUMERATED instead of silent, and that adding the 478th requires editing a
-checked-in file rather than nobody noticing.
+the list is short — after the src/cosa/tests/** wire-in (row c9d3ddcb) it is 88
+entries long, down from 486 once those ~398 files became gate-reachable. The
+point is that the gap is ENUMERATED instead of silent, and that adding the next
+entry requires editing a checked-in file rather than nobody noticing.
 
 THE RED ARM: `test_detector_reports_the_witness_when_not_allowlisted` runs the
 detector against the original witness with the allowlist withdrawn and asserts
