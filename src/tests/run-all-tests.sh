@@ -6,10 +6,12 @@
 #
 # Suite sequence (cheapest → costliest):
 #   1. unit       (~30-60s, no server)
-#   2. smoke      (~2 min, server-dependent)
-#   3. websocket  (~1-2 min, server + WS)
-#   4. integration (~5-10 min, server + DB, hot-swaps config)
-#   5. e2e        (~17 min, Playwright + browser, hot-swaps config)
+#   2. cosa       (~5 min, no server; in-tree src/cosa/tests/** — row d83d025b)
+#   3. typescript (~8-25 min, c8 at 100%; no server)
+#   4. smoke      (~2 min, server-dependent)
+#   5. websocket  (~1-2 min, server + WS)
+#   6. integration (~5-10 min, server + DB, hot-swaps config)
+#   7. e2e        (~17 min, Playwright + browser, hot-swaps config)
 #
 # Usage:
 #   run-all-tests.sh                      # continue-on-failure (default)
@@ -58,9 +60,10 @@ done
 # cosa/agents/test_suite/job.py — test_typescript_suite_gate.py asserts they
 # match, because a suite present in one list and absent from the other runs or
 # skips depending on which door you came through.
-SUITES=( "unit" "typescript" "smoke" "websocket" "integration" "e2e" )
+SUITES=( "unit" "cosa" "typescript" "smoke" "websocket" "integration" "e2e" )
 declare -A SCRIPTS=(
     [unit]="src/tests/run-unit-tests.sh"
+    [cosa]="src/tests/run-cosa-tests.sh"
     [typescript]="src/tests/run-typescript-tests.sh"
     [smoke]="src/tests/run-smoke-tests.sh"
     [websocket]="src/scripts/run-websocket-smoke-tests.sh"

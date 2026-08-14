@@ -249,16 +249,38 @@ class TestFuzzyFileMatch( unittest.TestCase ):
         self.assertTrue( out.endswith( "/doc-3.md" ) )   # resolved, did not bail
 
     def test_large_map_narrowed_by_keyword_through_handler( self ):
-        # 200 decoys + one keyword-matching target; the description narrows to it
-        # and the LLM receives a capped, target-bearing list.
+        # 200 decoys + TWO files sharing the top keyword score → a tie at the top,
+        # so the deterministic dominant-match check declines (row 8e70a34d) and the
+        # LLM-narrowing path under test runs: the model receives a capped,
+        # target-bearing list and picks the target.
         o = _mk_expeditor()
         target = "kissbrevity-target.md"
         out, prompt = self._run_with_large_walk(
-            o, "kissbrevity target", [ f"src/{target}" ], extra_files=[ target ]
+            o, "kissbrevity target", [ f"src/{target}" ],
+            extra_files=[ target, "kissbrevity-target-two.md" ],
         )
         self.assertLessEqual( prompt.count( "- src/" ), MAX_CANDIDATES )
         self.assertIn( f"- src/{target}", prompt )
         self.assertTrue( out.endswith( f"/{target}" ) )
+
+    def test_large_map_unique_dominant_resolves_without_llm( self ):
+        # 200 decoys + ONE uniquely-named target → the deterministic dominant-match
+        # check resolves it and the phi-4 LLM is NEVER consulted (row 8e70a34d: the
+        # clearly-named doc removes a model turn).
+        o = _mk_expeditor()
+        target = "kissbrevity-target.md"
+        files  = [ target ] + [ f"doc-{i}.md" for i in range( MAX_CANDIDATES * 4 ) ]
+        cm = _inner_config_mgr()
+        llm_client = MagicMock( run=MagicMock( return_value="<xml/>" ) )
+        with _patch_config_mgr( cm ), \
+             patch.object( ex_mod.cu, "get_project_root", return_value="/p" ), \
+             patch.object( ex_mod.os.path, "exists", side_effect=lambda p: p.endswith( "/src" ) ), \
+             patch.object( ex_mod.os, "walk", return_value=[ ( "/p/src", [], files ) ] ), \
+             patch.object( o, "_ask_for_arg", return_value="kissbrevity target" ):
+            o.llm_factory.get_client = MagicMock( return_value=llm_client )
+            out = o._handle_fuzzy_file_match( "u@x" )
+        self.assertTrue( out.endswith( f"/{target}" ) )
+        llm_client.run.assert_not_called()
 
     def test_fuzzy_no_matches_asks_fallback( self ):
         o = _mk_expeditor( debug=True )

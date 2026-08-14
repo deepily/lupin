@@ -26,7 +26,7 @@ from cosa.agents.runtime_argument_expeditor.agent_registry import (
 from cosa.agents.runtime_argument_expeditor.xml_models import ExpeditorResponse, ArgConfirmationResponse
 from cosa.agents.llm_client_factory import LlmClientFactory
 from cosa.agents.io_models.utils.prompt_template_processor import PromptTemplateProcessor
-from cosa.agents.io_models.utils.fuzzy_file_prefilter import prefilter_docs_map_by_keywords
+from cosa.agents.io_models.utils.fuzzy_file_prefilter import prefilter_docs_map_by_keywords, dominant_keyword_match
 from lupin_cli.notifications.notify_user_sync import notify_user_sync
 from lupin_cli.notifications.notification_models import (
     NotificationRequest,
@@ -1468,7 +1468,9 @@ class RuntimeArgumentExpeditor:
 
         Ensures:
             - Returns a 2-tuple ( status, matches ):
-                ( "exact",     [ rel_path ] )   deterministic rel-path/basename hit (len 1)
+                ( "exact",     [ rel_path ] )   deterministic hit (len 1): a rel-path/
+                                                basename hit, OR a strictly-dominant
+                                                keyword-overlap winner (row 8e70a34d)
                 ( "fuzzy",     [ rel, ... ] )   LLM matches validated against docs_map (0+)
                 ( "too_broad", [] )             candidate set too large + no keyword overlap
                 ( "error",     [] )             LLM/parse failure
@@ -1492,6 +1494,15 @@ class RuntimeArgumentExpeditor:
         for rel_path in docs_map:
             if os.path.basename( rel_path ) == description:
                 return ( "exact", [ rel_path ] )
+
+        # 1b. Deterministic keyword-overlap winner → skip the nondeterministic
+        #     phi-4 pick. When exactly one candidate dominates keyword overlap the
+        #     description clearly names it; a top-score tie falls through to the LLM
+        #     below, unchanged (row 8e70a34d).
+        dominant = dominant_keyword_match( docs_map, description )
+        if dominant is not None:
+            if self.debug: print( f"[Expeditor] Dominant keyword match → deterministic resolve: {dominant!r}" )
+            return ( "exact", [ dominant ] )
 
         # 2. Keyword prefilter before the LLM call (avoid phi-4 8k-context overflow).
         #    Runs on a COPY so the caller's docs_map is untouched.

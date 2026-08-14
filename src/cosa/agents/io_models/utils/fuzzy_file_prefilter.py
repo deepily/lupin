@@ -31,6 +31,101 @@ STOP_WORDS = {
 MAX_CANDIDATES = 50
 
 
+def _extract_keywords( description ):
+    """
+    Lower-case, split, and drop stopwords + short tokens → a keyword set.
+
+    The single tokenizer shared by the prefilter and the deterministic
+    dominant-match check so both narrow on IDENTICAL keyword rules.
+
+    Requires:
+        - description is a string
+
+    Ensures:
+        - returns a set of lower-cased tokens (len > 2, not in STOP_WORDS)
+        - never returns None; never raises on empty input
+
+    Args:
+        description: user's natural-language description
+
+    Returns:
+        set[str]: the signal-bearing keywords
+    """
+    return set(
+        w for w in description.lower().replace( "-", " " ).replace( "/", " " ).replace( ".", " " ).replace( "&", "" ).split()
+        if w not in STOP_WORDS and len( w ) > 2
+    )
+
+
+def _score_docs_by_keyword_overlap( docs_map, desc_words ):
+    """
+    Score each candidate path by keyword overlap with the description.
+
+    Requires:
+        - docs_map maps relative_path (str) -> abs_path (str)
+        - desc_words is a set of keywords (may be empty)
+
+    Ensures:
+        - returns a list of ( score, rel_path ) for paths with score > 0,
+          sorted by score DESCENDING
+        - returns [] when desc_words is empty or nothing overlaps
+        - never mutates docs_map
+
+    Args:
+        docs_map: candidate map { relative_path -> abs_path }
+        desc_words: keyword set from _extract_keywords
+
+    Returns:
+        list[ tuple[ int, str ] ]: scored, non-zero, sorted desc
+    """
+    scored = []
+    if desc_words:
+        for rel_path in docs_map:
+            path_lower = rel_path.lower().replace( "-", " " ).replace( "/", " " ).replace( "_", " " ).replace( ".", " " )
+            path_words = set( path_lower.split() )
+            score = len( desc_words & path_words )
+            if score > 0:
+                scored.append( ( score, rel_path ) )
+        scored.sort( key=lambda x: x[ 0 ], reverse=True )
+    return scored
+
+
+def dominant_keyword_match( docs_map, description ):
+    """
+    Return the ONE rel-path whose keyword overlap dominates, else None.
+
+    Deterministic pre-empt of the nondeterministic phi-4 pick (row 8e70a34d):
+    at <= MAX_CANDIDATES the prefilter is a pass-through, so today EVERY
+    candidate reaches the LLM and the LLM makes the choice. When exactly one
+    candidate holds a strictly-unique top keyword-overlap score, the description
+    already names that document — resolve it without the model. A TIE at the top
+    is genuine ambiguity: return None and let the LLM decide, exactly as before.
+
+    Requires:
+        - docs_map maps relative_path (str) -> abs_path (str)
+        - description is a string
+
+    Ensures:
+        - returns a rel_path KEY of docs_map when its overlap score is strictly
+          greater than every other candidate's AND that score > 0
+        - returns None on no keyword signal, zero overlap, or a top-score tie
+        - never mutates docs_map
+
+    Args:
+        docs_map: candidate map { relative_path -> abs_path }
+        description: user's natural-language description of the wanted file
+
+    Returns:
+        str or None: the dominant rel_path, or None when ambiguous.
+    """
+    scored = _score_docs_by_keyword_overlap( docs_map, _extract_keywords( description ) )
+    if not scored: return None
+    top_score = scored[ 0 ][ 0 ]
+    winners   = [ rel for score, rel in scored if score == top_score ]
+    if len( winners ) == 1: return winners[ 0 ]
+    return None
+
+
 def prefilter_docs_map_by_keywords( docs_map, description, debug=False ):
     """
     Narrow a candidate document map to the top keyword-overlap matches.
@@ -73,23 +168,12 @@ def prefilter_docs_map_by_keywords( docs_map, description, debug=False ):
         return docs_map, False
 
     # Extract keywords from description (lowered, de-duped, stopwords removed).
-    desc_words = set(
-        w for w in description.lower().replace( "-", " " ).replace( "/", " " ).replace( ".", " " ).replace( "&", "" ).split()
-        if w not in STOP_WORDS and len( w ) > 2
-    )
+    desc_words = _extract_keywords( description )
 
     if debug: print( f"[fuzzy_file_prefilter] Keywords extracted: {desc_words}" )
 
     # Score each path by keyword overlap against its path components.
-    scored = []
-    if desc_words:
-        for rel_path in docs_map:
-            path_lower = rel_path.lower().replace( "-", " " ).replace( "/", " " ).replace( "_", " " ).replace( ".", " " )
-            path_words = set( path_lower.split() )
-            score = len( desc_words & path_words )
-            if score > 0:
-                scored.append( ( score, rel_path ) )
-        scored.sort( key=lambda x: x[ 0 ], reverse=True )
+    scored = _score_docs_by_keyword_overlap( docs_map, desc_words )
 
     if scored:
         keep = [ rel for _score, rel in scored[ :MAX_CANDIDATES ] ]

@@ -71,6 +71,8 @@ class TestMatchDescriptionToFiles( unittest.TestCase ):
         """The prefilter runs on a COPY — the caller's docs_map must be untouched."""
         o = _mk_expeditor()
         original = dict( DOCS )
+        # "alpha bravo charlie" shares NO keyword with either DOCS path, so the
+        # deterministic dominant-match check declines and the LLM path runs.
         with patch.object( ex_mod, "prefilter_docs_map_by_keywords",
                            side_effect=lambda m, d, debug=False: ( { k: m[ k ] for k in list( m )[ :1 ] }, False ) ) as pf, \
              patch.object( ex_mod.cu, "get_file_as_string", return_value="{description} {file_list}" ), \
@@ -79,7 +81,7 @@ class TestMatchDescriptionToFiles( unittest.TestCase ):
             proc.return_value.process_template.return_value = "{description} {file_list}"
             from_xml.return_value.get_matches_list.return_value = []
             o.llm_factory = MagicMock()
-            o._match_description_to_files( "kiss", DOCS, MagicMock(), "/root" )
+            o._match_description_to_files( "alpha bravo charlie", DOCS, MagicMock(), "/root" )
         passed = pf.call_args[ 0 ][ 0 ]
         self.assertIsNot( passed, DOCS )
         self.assertEqual( DOCS, original )
@@ -93,7 +95,9 @@ class TestMatchDescriptionToFiles( unittest.TestCase ):
             proc.return_value.process_template.return_value = "{description} {file_list}"
             from_xml.return_value.get_matches_list.return_value = raw_matches
             o.llm_factory = MagicMock()
-            return o._match_description_to_files( "kiss protocol", DOCS, MagicMock(), "/root" )
+            # No-overlap description so the deterministic dominant-match check
+            # declines and the LLM (mocked) path under test actually runs.
+            return o._match_description_to_files( "alpha bravo charlie", DOCS, MagicMock(), "/root" )
 
     def test_fuzzy_single_match( self ):
         o = _mk_expeditor()
@@ -119,9 +123,40 @@ class TestMatchDescriptionToFiles( unittest.TestCase ):
         with patch.object( ex_mod, "prefilter_docs_map_by_keywords",
                            side_effect=lambda m, d, debug=False: ( dict( m ), False ) ), \
              patch.object( ex_mod.cu, "get_file_as_string", side_effect=RuntimeError( "boom" ) ):
-            status, matches = o._match_description_to_files( "kiss", DOCS, MagicMock(), "/root" )
+            status, matches = o._match_description_to_files( "alpha bravo charlie", DOCS, MagicMock(), "/root" )
         self.assertEqual( status, "error" )
         self.assertEqual( matches, [] )
+
+    def test_dominant_keyword_match_resolves_deterministically( self ):
+        """One candidate dominates keyword overlap → 'exact', LLM never consulted."""
+        o = _mk_expeditor()
+        # "kiss protocol" overlaps kiss-protocol.md (2) and quantum.md (0) → unique top.
+        # Patch the LLM boundary to explode: if it is reached, the test fails loudly.
+        with patch.object( ex_mod, "prefilter_docs_map_by_keywords",
+                           side_effect=AssertionError( "LLM path must not run on a dominant match" ) ):
+            status, matches = o._match_description_to_files( "kiss protocol", DOCS, MagicMock(), "/root" )
+        self.assertEqual( status, "exact" )
+        self.assertEqual( matches, [ "io/deep-research/u/kiss-protocol.md" ] )
+
+    def test_top_score_tie_falls_through_to_llm( self ):
+        """A keyword shared equally by two candidates is a tie → LLM decides (unchanged)."""
+        o = _mk_expeditor()
+        # "deep research" scores 2 on BOTH DOCS paths (io/DEEP-RESEARCH/...) → tie.
+        status, matches = self._fuzzy_desc( o, "deep research", [ "io/deep-research/u/quantum.md" ] )
+        self.assertEqual( status, "fuzzy" )
+        self.assertEqual( matches, [ "io/deep-research/u/quantum.md" ] )
+
+    def _fuzzy_desc( self, o, description, raw_matches ):
+        """Like _fuzzy but with a caller-supplied description (to exercise a tie)."""
+        with patch.object( ex_mod, "prefilter_docs_map_by_keywords",
+                           side_effect=lambda m, d, debug=False: ( dict( m ), False ) ), \
+             patch.object( ex_mod.cu, "get_file_as_string", return_value="{description} {file_list}" ), \
+             patch.object( ex_mod, "PromptTemplateProcessor", MagicMock() ) as proc, \
+             patch( "cosa.agents.io_models.xml_models.FuzzyFileMatchResponse.from_xml" ) as from_xml:
+            proc.return_value.process_template.return_value = "{description} {file_list}"
+            from_xml.return_value.get_matches_list.return_value = raw_matches
+            o.llm_factory = MagicMock()
+            return o._match_description_to_files( description, DOCS, MagicMock(), "/root" )
 
 
 class TestAutoResolvePreStep( unittest.TestCase ):

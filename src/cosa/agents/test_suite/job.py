@@ -48,7 +48,7 @@ SUITE_SCRIPTS = {
     "e2e"          : "src/scripts/run-e2e-ui-tests.sh",
     "all"            : "src/tests/run-all-tests.sh",
     "presentation"   : "src/tests/run-presentation-regression.sh",
-    "cosa"           : "src/tests/run-cosa-tests.sh",   # in-tree CoSA test tree (row c9d3ddcb); NOT yet in the merge pyramid
+    "cosa"           : "src/tests/run-cosa-tests.sh",   # in-tree CoSA test tree (row c9d3ddcb); joined the merge pyramid 2026-08-13 (row d83d025b)
 }
 
 # Test types that accept a file path as the first positional pytest arg
@@ -117,7 +117,14 @@ STDOUT_DRAIN_BUDGET_SECONDS = 5.0
 # types.ts / index.ts, each with a dated reason) live in
 # src/tests/run-typescript-tests.sh; that file is where the denominator is
 # defined and audited, not here.
-ALL_SUITE_COMPONENTS = [ "unit", "typescript", "smoke", "websocket", "integration", "e2e" ]
+# "cosa" joined the pyramid 2026-08-13 (row d83d025b) once its 4 stale-twin reds
+# were fixed. Before that the whole src/cosa/tests/** tree (~8,800 tests) had a
+# runner (row c9d3ddcb) but no gate RAN it — a green merge did not exercise it,
+# so its rot emitted nothing (the exact gap the gate-reachability census exists
+# to catch). Placed right after "unit": both are fast, server-free pytest, so
+# they fail early together. Keep this list identical (order included) to
+# run-all-tests.sh's SUITES array — test_typescript_suite_gate.py asserts it.
+ALL_SUITE_COMPONENTS = [ "unit", "cosa", "typescript", "smoke", "websocket", "integration", "e2e" ]
 
 
 def _expand_all( test_types: List[ str ] ) -> List[ str ]:
