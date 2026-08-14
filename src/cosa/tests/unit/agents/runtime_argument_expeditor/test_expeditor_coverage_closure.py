@@ -31,6 +31,7 @@ import cosa.agents.runtime_argument_expeditor.expeditor as ex_mod
 from cosa.agents.runtime_argument_expeditor.expeditor import (
     RuntimeArgumentExpeditor,
     ExtractionResult,
+    ArgSpec,
     user_message_for_expedite_reason,
     BATCH_DECLINED,
     BATCH_UNREACHABLE,
@@ -213,7 +214,7 @@ class TestCollectPodcastSpecialHandlerSkips( unittest.TestCase ):
         with patch.object( o, "_handle_fuzzy_file_match" ) as fuzzy, \
              patch.object( o, "_confirm_and_iterate", return_value={ "query": "AI" } ), \
              patch.object( o, "_inject_system_args", return_value={ "query": "AI", "user_email": "u@x" } ):
-            out = o.collect( extraction, PG, "make a podcast", entry, "u@x", "s", "uid" )
+            out = o.collect( extraction, PG, "make a podcast", ArgSpec.from_entry( entry ), "u@x", "s", "uid" )
         self.assertEqual( out[ "query" ], "AI" )
         fuzzy.assert_not_called()   # both branches were skips, no resolve fired
 
