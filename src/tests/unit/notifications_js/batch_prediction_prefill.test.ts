@@ -142,3 +142,67 @@ test( "render falls back to the expeditor default_value when the gate is closed"
   assert.ok( html.includes( 'value="make me a podcast"' ),
     "with no prediction, the legacy default_value must stand" );
 } );
+
+// ---- regression guard: the prediction PREFILLS, it must NEVER auto-submit ----
+// Row a89026bd: the standing risk is a client proxy answering Rick's gate before
+// he sees it. The gate opening (even at confidence 1.0) is allowed to prefill the
+// inputs — it must NOT call submitResponse. That call is the human's, made by
+// clicking "Submit All ✓". This pins the boundary so a future change cannot wire
+// the confidence gate into an auto-answer without turning this test red.
+
+test( "gate OPEN at confidence 1.0 PREFILLS but NEVER calls submitResponse (a89026bd)", () => {
+  const ui = makeUI();
+  let submitCalls = 0;
+  ( ui as Record<string, unknown> ).submitResponse = (): void => { submitCalls += 1; };
+
+  // The full render path a card takes when the gate is wide open.
+  const answers = ui._batchPredictedAnswers( batchNotification( OPEN_HINT ) );
+  const html    = ui.renderOpenEndedBatchUI( batchNotification( OPEN_HINT ) );
+
+  assert.deepEqual( answers, { query: "the KISS explainer in docs/explainer", budget: "no limit" },
+    "control: the gate really did open at confidence 1.0 (else this proves nothing)" );
+  assert.equal( submitCalls, 0,
+    "prediction must NOT auto-answer the gate — no submitResponse during gate/render" );
+  assert.ok( html.includes( 'class="response-submit-button batch-submit-all"' ),
+    "the human's Submit-All button must still be present and unpressed — Rick's gate is intact" );
+} );
+
+// ---- row 922b2db9: refuse a non-scalar answer at the gate, never coerce ----
+// A non-scalar predicted answer (object / array / null) must NOT prefill or arm
+// auto-submit. String()-coercing it would launder "[object Object]" into a
+// >=floor-confidence answer. The gate refuses the whole map; the expeditor
+// default stands and the user is asked.
+
+function nonScalarHint( badValue: unknown ): unknown {
+  return { ...OPEN_HINT, predicted_value: { answers: { query: badValue, budget: "no limit" } } };
+}
+
+test( "gate CLOSED — an object-valued answer is refused (922b2db9)", () => {
+  const ui = makeUI();
+  assert.equal( ui._batchPredictedAnswers( batchNotification( nonScalarHint( { x: 1 } ) ) ), null );
+} );
+
+test( "gate CLOSED — an array-valued answer is refused (922b2db9)", () => {
+  const ui = makeUI();
+  assert.equal( ui._batchPredictedAnswers( batchNotification( nonScalarHint( [ 1, 2 ] ) ) ), null );
+} );
+
+test( "gate CLOSED — a null-valued answer is refused (922b2db9)", () => {
+  const ui = makeUI();
+  assert.equal( ui._batchPredictedAnswers( batchNotification( nonScalarHint( null ) ) ), null );
+} );
+
+test( "gate OPENS — number and boolean answers are scalars, kept (922b2db9)", () => {
+  const ui = makeUI();
+  const hint = { ...OPEN_HINT, predicted_value: { answers: { query: 42, budget: true } } };
+  assert.deepEqual( ui._batchPredictedAnswers( batchNotification( hint ) ), { query: 42, budget: true } );
+} );
+
+test( "render falls back to default_value and never prints [object Object] on a non-scalar (922b2db9)", () => {
+  const ui   = makeUI();
+  const html = ui.renderOpenEndedBatchUI( batchNotification( nonScalarHint( { x: 1 } ) ) );
+  assert.ok( !html.includes( "[object Object]" ),
+    "a non-scalar prediction must never render as [object Object]" );
+  assert.ok( html.includes( 'value="make me a podcast"' ),
+    "the gate refused, so the expeditor default_value must stand" );
+} );

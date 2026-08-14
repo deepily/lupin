@@ -18469,7 +18469,25 @@ class NotificationsUI {
         if ( typeof hint.confidence !== 'number' || hint.confidence < floor ) return null;
         const answers = hint.predicted_value?.answers;
         if ( !answers || typeof answers !== 'object' ) return null;
+        // Refuse (never coerce) a payload where ANY answer is non-scalar (row 922b2db9).
+        // String()-coercing an object would launder "[object Object]" into a >=floor-
+        // confidence answer AND keep auto-submit armed. Refusing at the gate means no
+        // prefill, no auto-submit eligibility, and the expeditor default stands. Upstream
+        // drops these too (commit 3882f55c); this is the downstream catch-all for any
+        // producer not enumerated there.
+        for ( const val of Object.values( answers ) ) {
+            if ( !this._isScalarAnswer( val ) ) return null;
+        }
         return answers;
+    }
+
+    /**
+     * True iff a predicted answer value is a scalar safe to render/submit
+     * (string, number, or boolean). Objects, arrays and null are non-scalar.
+     */
+    _isScalarAnswer( val ) {
+        const t = typeof val;
+        return t === 'string' || t === 'number' || t === 'boolean';
     }
 
     renderOpenEndedBatchUI( notification ) {
@@ -18574,9 +18592,11 @@ class NotificationsUI {
         } else if ( responseType === 'open_ended_batch' ) {
             const answers = hint.predicted_value?.answers;
             if ( answers ) {
-                const parts = Object.entries( answers ).map( ( [ header, val ] ) =>
-                    `${header}: "${val}"`
-                );
+                // Label non-scalar values rather than print "[object Object]" (row 922b2db9).
+                const parts = Object.entries( answers ).map( ( [ header, val ] ) => {
+                    const shown = this._isScalarAnswer( val ) ? val : '[unavailable]';
+                    return `${header}: "${shown}"`;
+                } );
                 predictedText = `Predicted: ${parts.join( '; ' )} (${confidence}%)`;
             }
         }
