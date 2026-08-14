@@ -83,6 +83,25 @@ class TestFindSessionById:
             assert result is not None
             assert result[ "session_id" ] == sid
 
+    def test_exact_mode_rejects_8char_prefix_collision( self ):
+        """MERGE GATE (self_respin): two live seats sharing a first-8-char prefix
+        must not cross-resolve. The DEFAULT prefix behaviour WRONGLY returns seat A
+        for seat B's full id (the bug that would aim an irreversible /clear at the
+        wrong pane); exact=True refuses it and still matches the true full id."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            sid_a = "abcd1234-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+            sid_b = "abcd1234-bbbb-4bbb-8bbb-bbbbbbbbbbbb"   # same first 8 chars, DIFFERENT seat
+            _write_session_file( sessions_dir, os.getpid(), _make_session_data( sid_a, tmux_session="seat-a" ) )
+
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
+                # default (prefix-tolerant): the collision resolves to seat A — the hazard
+                assert find_session_by_id( sid_b )[ "tmux_session" ] == "seat-a"
+                # exact: refuses the wrong seat entirely
+                assert find_session_by_id( sid_b, exact=True ) is None
+                # exact: still matches the genuine full id
+                assert find_session_by_id( sid_a, exact=True )[ "tmux_session" ] == "seat-a"
+
     def test_no_match_returns_none( self ):
         """No matching session -> None."""
         with tempfile.TemporaryDirectory() as tmp:

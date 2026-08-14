@@ -2191,6 +2191,59 @@ def get_session_info() -> dict:
     return info
 
 
+@mcp.tool
+def self_respin( memento_path: str, memento_nonce: str, delay_seconds: int = 20, cycle_window_seconds: int = 300 ) -> dict:  # pragma: no cover - live MCP boundary; all logic + branches are covered in self_respin_core
+    """
+    Self-re-spin: schedule a `/clear` into THIS session's OWN pane so it rehydrates
+    as the same seat (same session id, tmux, persona, board, lineage) at low
+    context — for the price of one memento write instead of a whole successor's
+    context. IRREVERSIBLE; every guard lives INSIDE this verb.
+
+    BEFORE CALLING: write your memento to disk THIS cycle, stamping into its body
+    the nonce line that self_respin_core.build_nonce_line( nonce_uuid, ts ) produces,
+    and pass that nonce_uuid as `memento_nonce`. The verb confirms that exact nonce
+    (and a fresh timestamp) on disk before it will schedule anything — a stale or
+    partial memento aborts the clear, so you never clear into nothing.
+
+    The verb then: (a) verifies the memento is complete + fresh this cycle;
+    (b) asks you a yes/no confirmation on the human surface, DEFAULTING TO YES so an
+    absent user does not cost the fleet a manager (offline / timeout → proceed; a
+    real "no" schedules nothing); (c) writes the observer's liveness marker plus a
+    one-shot fire token; (d) schedules a detached `/clear` that consumes the token
+    at the fire point, so a second fire after rehydrate no-ops.
+
+    The session id is resolved from the local bridge — NEVER taken from a caller
+    argument — so this can only ever aim at your own pane. There is deliberately no
+    parameter to pre-supply the confirmation, substitute the ask, or target another
+    session: the irreversible guard is not skippable.
+
+    Requires:
+        - you have written your memento this cycle with the stamped nonce line
+        - memento_path points at that memento; memento_nonce is its nonce uuid
+        - delay_seconds is the detached sleep before the clear fires
+        - cycle_window_seconds bounds how old the memento nonce may be
+
+    Ensures:
+        - returns { status: scheduled|declined|aborted, reason, marker_path,
+          fire_token_path, expected_return_by }
+        - schedules NOTHING unless the memento verified AND the ask resolved yes/
+          default-yes AND the observer marker is durable on disk
+        - makes NO task-store calls (the observer owns done-state; this seat is
+          cleared before it could mark its own row)
+    """
+    from dataclasses import asdict
+    from lupin_mcp.self_respin_core import self_respin_from_bridge, _live_own_pressure, resolve_own_identity
+
+    result = self_respin_from_bridge(
+        memento_path, memento_nonce,
+        delay_seconds        = delay_seconds,
+        cycle_window_seconds = cycle_window_seconds,
+        identity_fn          = lambda: resolve_own_identity( _get_cc_metadata, SESSION_ID ),
+        pressure_fn          = _live_own_pressure,
+    )
+    return asdict( result )
+
+
 def _flip_speakerphone( active: bool ) -> dict:
     """
     Internal helper: flip speakerphone_on for this session.

@@ -765,12 +765,19 @@ def get_session_metadata() -> dict:
     }
 
 
-def find_session_by_id( session_id ):
+def find_session_by_id( session_id, exact=False ):
     """
     Scan ~/.claude/sessions/cc-*.json for a session_id match.
 
     Supports both full UUID and 8-char prefix matching. Skips files
     from dead PIDs to avoid returning stale sessions.
+
+    ⚠️ EXACT MODE (opt-in, `exact=True`): full-UUID compare ONLY — the 8-char
+    prefix fallback is disabled. Callers targeting an IRREVERSIBLE, self-aimed
+    action (self_respin's `/clear`) MUST use this: two live seats whose ids share
+    a first-8-char prefix would otherwise resolve to the wrong pane, aiming the
+    clear at someone else's session. The DEFAULT stays prefix-tolerant so the
+    existing callers (arbiter poke, manager_resolver, arbiter_job) are unchanged.
 
     Requires:
         - session_id is a non-empty string
@@ -778,11 +785,14 @@ def find_session_by_id( session_id ):
     Ensures:
         - Returns full session data dict if a match is found
         - Returns None if no match or session_id is empty
+        - exact=True: matches ONLY on full-id equality (no prefix fallback)
+        - exact=False (default): full-id OR 8-char-prefix equality (legacy)
         - Skips bridge files whose PID is dead
         - Never raises exceptions
 
     Args:
-        session_id: Full session UUID or 8-char prefix to match
+        session_id: Full session UUID (or, when exact=False, an 8-char prefix) to match
+        exact: when True, require a full-id match — no 8-char prefix fallback
 
     Returns:
         dict or None: Session data dict, or None
@@ -812,9 +822,9 @@ def find_session_by_id( session_id ):
                 if val and val not in all_ids:
                     all_ids.append( val )
 
-            # Full match or 8-char prefix match against any known ID
+            # Full match always; 8-char prefix match ONLY when not in exact mode
             for known_id in all_ids:
-                if known_id == session_id or known_id[:8] == session_id[:8]:
+                if known_id == session_id or ( not exact and known_id[:8] == session_id[:8] ):
                     return data
 
         except ( json.JSONDecodeError, OSError ):
