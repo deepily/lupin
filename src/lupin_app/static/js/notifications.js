@@ -12387,7 +12387,12 @@ class NotificationsUI {
             // (vertical parity). Foreign doc-links (center column) still route to the
             // pane. (Embedded-audio self-links are handled by a separate listener and
             // stay in-tab, so this bail does not disturb them.)
-            if ( anchor.closest( "#action-required-content" ) ) return;
+            // `.abstract-tooltip` is a self surface too (bug 17ce50a5): the tooltip
+            // is fixed-position and appended to <body>, so it is NOT a descendant of
+            // #action-required-content — an ancestry-only test misses it. It only ever
+            // shows the abstract just clicked, so a doc-link in it is self-content by
+            // construction and must fall through to its baked-in target=_blank.
+            if ( anchor.closest( "#action-required-content, .abstract-tooltip" ) ) return;
             // Iframe-internal clicks don't fire on the parent document anyway,
             // but defense-in-depth bail if the target somehow resolves inside.
             if ( ev.target.closest( "#content-pane-body iframe" ) ) return;

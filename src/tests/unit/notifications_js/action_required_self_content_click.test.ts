@@ -72,14 +72,25 @@ before( () => {
 function buildDOM(): {
   selfIndicator: HTMLElement; selfAnchor: HTMLElement;
   foreignIndicator: HTMLElement; foreignAnchor: HTMLElement;
+  tooltipAnchor: HTMLElement;
 } {
   document.body.replaceChildren();
 
-  // Tooltip surface (in-tab) that the self 📋 must reach.
+  // Tooltip surface (in-tab) that the self 📋 must reach. Mirrors the real
+  // element built by initAbstractTooltip: id AND class `abstract-tooltip`,
+  // appended directly to <body> (a SIBLING of #action-required-content, not a
+  // descendant — which is exactly why an ancestry-only self-test misses it).
   const tooltip = document.createElement( "div" );
   tooltip.id = "abstract-tooltip";
+  tooltip.className = "abstract-tooltip";
   const tipContent = document.createElement( "div" );
   tipContent.className = "abstract-tooltip-content";
+  // A doc-link rendered INSIDE the tooltip (bug 17ce50a5): the tooltip only
+  // ever shows the abstract just clicked, so a link in it is self-content.
+  const tooltipAnchor = document.createElement( "a" );
+  tooltipAnchor.setAttribute( "href", "/app/docs?path=lupin/tooltip.md" );
+  tooltipAnchor.textContent = "tooltip doc";
+  tipContent.appendChild( tooltipAnchor );
   tooltip.appendChild( tipContent );
   document.body.appendChild( tooltip );
 
@@ -109,7 +120,7 @@ function buildDOM(): {
   foreignCard.appendChild( foreignAnchor );
   document.body.appendChild( foreignCard );
 
-  return { selfIndicator, selfAnchor, foreignIndicator, foreignAnchor };
+  return { selfIndicator, selfAnchor, foreignIndicator, foreignAnchor, tooltipAnchor };
 }
 
 function click( el: HTMLElement ): MouseEvent {
@@ -179,6 +190,16 @@ test( "foreign doc-link → routed to the pane and prevented (foreign→blocked)
   assert.equal( calls[ 0 ][ 0 ], "doc" );
   assert.equal( calls[ 0 ][ 1 ], "/app/docs?path=lupin/foreign.md" );
   assert.equal( ev.defaultPrevented, true, "foreign doc-link default nav prevented (pane handles it)" );
+} );
+
+test( "doc-link INSIDE the tooltip → native new tab (not prevented), NOT the pane (bug 17ce50a5)", () => {
+  const { tooltipAnchor } = buildDOM();
+  const ev = click( tooltipAnchor );
+
+  assert.equal( ( ui._openContentPaneCalls as unknown[] ).length, 0,
+    "tooltip doc-link must NOT route to _openContentPane — the tooltip shows self-content" );
+  assert.equal( ev.defaultPrevented, false,
+    "tooltip doc-link keeps default nav so target=_blank opens a new tab; ancestry-only self-test misses it" );
 } );
 
 // ── Guard intact (control) — the real _openContentPane still blocks foreign ──
