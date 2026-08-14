@@ -250,7 +250,7 @@ class AskFlow:
             return
         self.notifier( AsyncNotificationRequest(
             message=message, notification_type="task", priority="high", suppress_ding=True,
-            target_user=ctx[ 1 ], job_id=job_id, sender_id="v2.ask@lupin.deepily.ai",
+            target_user=ctx[ 1 ], job_id=job_id, sender_id="ask.flow@lupin.deepily.ai",
         ) )
         trace.mark( "t_tts_dispatch" )
 
