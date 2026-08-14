@@ -60,20 +60,22 @@ some random output that doesn't match any known runner format
 def test_websocket_pass_full_summary():
     parsed = TestSuiteJob._parse_non_pytest_stdout( "websocket", WEBSOCKET_PASS_STDOUT )
     assert parsed == {
-        "passed"  : 50,
-        "failed"  : 0,
-        "skipped" : 0,
-        "errors"  : 0,
+        "passed"       : 50,
+        "failed"       : 0,
+        "skipped"      : 0,
+        "errors"       : 0,
+        "not_executed" : 0,   # joined the parser output at c37443f5 (89bfcc8f D2, 2026-08-13)
     }
 
 
 def test_websocket_fail_full_summary():
     parsed = TestSuiteJob._parse_non_pytest_stdout( "websocket", WEBSOCKET_FAIL_STDOUT )
     assert parsed == {
-        "passed"  : 47,
-        "failed"  : 3,
-        "skipped" : 0,
-        "errors"  : 0,
+        "passed"       : 47,
+        "failed"       : 3,
+        "skipped"      : 0,
+        "errors"       : 0,
+        "not_executed" : 0,   # joined the parser output at c37443f5 (89bfcc8f D2, 2026-08-13)
     }
 
 
@@ -81,10 +83,11 @@ def test_websocket_total_only_with_pass_marker():
     """When only 'Total Tests: N' is parseable but 'ALL SMOKE TESTS PASSED' is present."""
     parsed = TestSuiteJob._parse_non_pytest_stdout( "websocket", WEBSOCKET_PARTIAL_STDOUT_TOTAL_ONLY )
     assert parsed == {
-        "passed"  : 50,
-        "failed"  : 0,
-        "skipped" : 0,
-        "errors"  : 0,
+        "passed"       : 50,
+        "failed"       : 0,
+        "skipped"      : 0,
+        "errors"       : 0,
+        "not_executed" : 0,   # joined the parser output at c37443f5 (89bfcc8f D2, 2026-08-13)
     }
 
 
@@ -115,8 +118,9 @@ def test_passed_failed_no_total_reconciled():
     stdout = "Passed: 30\nFailed: 5\n"
     parsed = TestSuiteJob._parse_non_pytest_stdout( "websocket", stdout )
     assert parsed == {
-        "passed"  : 30,
-        "failed"  : 5,
-        "skipped" : 0,
-        "errors"  : 0,
+        "passed"       : 30,
+        "failed"       : 5,
+        "skipped"      : 0,
+        "errors"       : 0,
+        "not_executed" : 0,   # joined the parser output at c37443f5 (89bfcc8f D2, 2026-08-13)
     }
