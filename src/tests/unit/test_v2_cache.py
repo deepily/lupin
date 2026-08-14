@@ -1,0 +1,526 @@
+#!/usr/bin/env python3
+"""
+Unit tests for the CJ Flow v2 cache adapter (unit C2) — src/cosa/rest/v2/cache.py.
+
+Hermetic: every collaborator (repositories, embedding provider, normalizers,
+db scope) is a fake, so the whole two-tier lookup + tagged write-back is
+exercised with NO live Postgres and NO model server. :7999-eligible.
+
+Carries the two behavioural C2 guards, each proven able to fail (the paste-the-red
+receipts live in the unit's report):
+    - R-C1: the replay signal is a tier-1 EXACT hit, never an ANN float score —
+            an ANN candidate at 100.0 must NOT replay.
+    - R-D2: write-back REBINDS runtime_stats with { **... }, never mutates the
+            shared mutable default in place.
+"""
+
+import json
+import types
+
+import pytest
+
+from cosa.rest.v2 import cache as cache_mod
+from cosa.rest.v2.cache import V2Cache, CacheLookup
+
+
+# ────────────────────────────────────────────────────────────── fakes
+
+class _Store:
+    """In-memory stand-in for the DB, shared by the fake repositories."""
+
+    def __init__( self ):
+        self.rows             = {}   # id_hash -> fake ORM row
+        self.syn_verbatim     = {}   # question -> snapshot_id
+        self.syn_normalized   = {}   # normalized -> snapshot_id
+        self.embeddings       = {}   # question -> vector
+        self.ann_result       = []   # list[ (pct, row) ]
+        self.upserts          = []   # list[ (id_hash, fields) ]
+        self.added_synonyms   = []   # list[ kwargs ]
+        self.added_embeddings = []   # list[ (question, vec) ]
+        self.deleted_synonyms = []   # list[ snapshot_id ]
+
+
+class _FakeSnapshotRepo:
+    def __init__( self, session ):
+        self.store = session
+    def get_snapshot_by_id( self, id_hash ):
+        return self.store.rows.get( id_hash )
+    def get_snapshots_by_question( self, embedding, threshold, limit ):
+        return self.store.ann_result
+    def upsert_snapshot( self, id_hash, **fields ):
+        self.store.upserts.append( ( id_hash, fields ) )
+        return types.SimpleNamespace( id_hash=id_hash, **fields )
+
+
+class _FakeSynRepo:
+    def __init__( self, session ):
+        self.store = session
+    def find_exact_verbatim( self, question ):
+        return self.store.syn_verbatim.get( question )
+    def find_exact_normalized( self, question_normalized ):
+        return self.store.syn_normalized.get( question_normalized )
+    def delete_by_snapshot_id( self, snapshot_id ):
+        self.store.deleted_synonyms.append( snapshot_id )
+        return 0
+    def add_synonym( self, **kwargs ):
+        self.store.added_synonyms.append( kwargs )
+        return kwargs
+
+
+class _FakeQEmbRepo:
+    def __init__( self, session ):
+        self.store = session
+    def get_embedding( self, question ):
+        return self.store.embeddings.get( question )
+    def add_embedding( self, question, embedding ):
+        self.store.added_embeddings.append( ( question, embedding ) )
+        return ( question, embedding )
+
+
+class _RecordingFactory:
+    """Stands in for SolutionSnapshot — records constructor kwargs."""
+    def __init__( self ):
+        self.calls = []
+    def __call__( self, **kwargs ):
+        self.calls.append( kwargs )
+        return types.SimpleNamespace( marshalled=True, **kwargs )
+
+
+class _FakeProvider:
+    def __init__( self, vector ):
+        self.vector = vector
+        self.calls  = []
+    def generate_embedding( self, text, content_type="prose" ):
+        self.calls.append( ( text, content_type ) )
+        return self.vector
+
+
+class _FakeNormalizer:
+    def normalize( self, question ):
+        return question.strip().lower()
+
+
+class _FakeGist:
+    def __init__( self ):
+        self.calls = []
+    def get_normalized_gist( self, text ):
+        self.calls.append( text )
+        return "gist::" + text
+
+
+def _db_scope_for( store ):
+    class _CM:
+        def __enter__( self_ ):
+            return store
+        def __exit__( self_, *a ):
+            return False
+    def _scope():
+        return _CM()
+    return _scope
+
+
+def _make_orm_row( **over ):
+    """A fake solution_snapshots ORM row with all columns defaulted."""
+    row = types.SimpleNamespace(
+        id_hash="id-1", user_id="u1",
+        question="What time is it?", question_normalized="what time is it?",
+        question_gist="", answer="10:00", answer_conversational="It is ten.",
+        solution_summary="", thoughts="", error="", routing_command="agent router go to time",
+        agent_class_name="DateAndTimeAgent", code=[], solution_summary_gist="",
+        code_returns="", code_example="", code_type="", programming_language="python",
+        language_version="3.10", non_synonymous_questions=[], last_question_asked="",
+        created_date="", updated_date="", run_date="",
+        synonymous_questions="{}", synonymous_question_gists="{}",
+        runtime_stats='{"flow_version": "v1"}', replay_history="[]", replay_stats="{}",
+        answer_is_correct="null", is_cache_hit=False,
+        question_embedding=[], question_normalized_embedding=[], question_gist_embedding=[],
+        solution_embedding=[], code_embedding=[], thoughts_embedding=[], solution_gist_embedding=[],
+    )
+    for key, value in over.items():
+        setattr( row, key, value )
+    return row
+
+
+def _make_snapshot( **over ):
+    """A fake memory SolutionSnapshot with every attribute write_back reads."""
+    snap = types.SimpleNamespace(
+        id_hash="wb-1", user_id="u1",
+        question="what's the weather in Tokyo", question_normalized="whats the weather in tokyo",
+        question_gist="gist::weather", answer="Sunny", answer_conversational="It's sunny in Tokyo.",
+        solution_summary="", thoughts="", error="", routing_command="agent router go to weather",
+        agent_class_name="WeatherAgent", code=[], solution_summary_gist="",
+        code_returns="", code_example="", code_type="", programming_language="python",
+        language_version="3.10", synonymous_questions={}, synonymous_question_gists={},
+        non_synonymous_questions=[], last_question_asked="", created_date="d", updated_date="d",
+        run_date="", runtime_stats={}, replay_history=[], replay_stats={}, is_cache_hit=False,
+        answer_is_correct=None,
+        question_embedding=[ 0.1 ] * 4, question_normalized_embedding=[], question_gist_embedding=[],
+        solution_embedding=[], code_embedding=[], thoughts_embedding=[], solution_gist_embedding=[],
+    )
+    for key, value in over.items():
+        setattr( snap, key, value )
+    return snap
+
+
+@pytest.fixture
+def wired( monkeypatch ):
+    """Monkeypatch the three repositories to fakes; return a builder + store."""
+    store = _Store()
+    monkeypatch.setattr( cache_mod, "SolutionSnapshotRepository", _FakeSnapshotRepo )
+    monkeypatch.setattr( cache_mod, "CanonicalSynonymRepository", _FakeSynRepo )
+    monkeypatch.setattr( cache_mod, "QuestionEmbeddingRepository", _FakeQEmbRepo )
+
+    def _build( *, provider_vec=None, factory=None, debug=False ):
+        provider = _FakeProvider( provider_vec if provider_vec is not None else [ 0.2 ] * 4 )
+        factory  = factory if factory is not None else _RecordingFactory()
+        cache = V2Cache(
+            embedding_provider=provider, snapshot_factory=factory,
+            normalizer=_FakeNormalizer(), gist_normalizer=_FakeGist(),
+            db_scope=_db_scope_for( store ), query_floor=70.0, ann_limit=7,
+            embedding_dim=4, debug=debug, verbose=debug,
+        )
+        return cache, provider, factory
+
+    return _build, store
+
+
+# ────────────────────────────────────────────────────────────── lookup
+
+def test_lookup_empty_question_raises( wired ):
+    build, _store = wired
+    cache, _p, _f = build()
+    with pytest.raises( ValueError ):
+        cache.lookup( "" )
+
+
+@pytest.mark.parametrize( "debug", [ False, True ] )
+def test_lookup_exact_verbatim_hit( wired, debug ):
+    build, store = wired
+    cache, provider, factory = build( debug=debug )
+    store.syn_verbatim[ "What time is it?" ] = "id-1"
+    store.rows[ "id-1" ] = _make_orm_row( id_hash="id-1" )
+
+    result = cache.lookup( "What time is it?" )
+
+    assert isinstance( result, CacheLookup )
+    assert result.is_replay_hit is True
+    assert result.tier == "exact_verbatim"
+    assert result.similarity == 100.0
+    assert result.best_score == 100.0
+    assert result.snapshot is not None
+    assert result.t_embed_ms is None       # tier 1 computes NO embedding
+    assert result.embed_cached is None
+    assert provider.calls == []            # no model call on an exact hit
+
+
+@pytest.mark.parametrize( "debug", [ False, True ] )
+def test_lookup_verbatim_ghost_falls_through_to_normalized( wired, debug ):
+    build, store = wired
+    cache, _p, _f = build( debug=debug )
+    # verbatim synonym exists but points at a MISSING row (a ghost)
+    store.syn_verbatim[ "What time is it?" ]     = "ghost-id"
+    store.syn_normalized[ "what time is it?" ]   = "id-1"
+    store.rows[ "id-1" ]                         = _make_orm_row( id_hash="id-1" )
+
+    result = cache.lookup( "What time is it?" )
+
+    assert result.is_replay_hit is True
+    assert result.tier == "exact_normalized"
+
+
+@pytest.mark.parametrize( "debug", [ False, True ] )
+def test_lookup_normalized_ghost_falls_through_to_tier2( wired, debug ):
+    build, store = wired
+    cache, provider, _f = build( provider_vec=[ 0.3 ] * 4, debug=debug )
+    store.syn_normalized[ "what time is it?" ] = "ghost-id"   # ghost → tier 2
+    store.ann_result = [ ( 88.0, _make_orm_row( id_hash="ann-1" ) ) ]
+
+    result = cache.lookup( "What time is it?" )
+
+    assert result.is_replay_hit is False
+    assert result.tier == "ann"
+    assert result.best_score == 88.0
+
+
+@pytest.mark.parametrize( "debug", [ False, True ] )
+def test_lookup_tier2_embedding_cache_hit( wired, debug ):
+    build, store = wired
+    cache, provider, _f = build( debug=debug )
+    store.embeddings[ "some new q" ] = [ 0.9 ] * 4          # cache hit → free
+    store.ann_result = [ ( 91.5, _make_orm_row( id_hash="ann-1" ) ) ]
+
+    result = cache.lookup( "some new q" )
+
+    assert result.tier == "ann"
+    assert result.embed_cached is True
+    assert result.t_embed_ms is not None
+    assert result.t_ann_ms is not None
+    assert result.best_candidate is not None
+    assert provider.calls == []                            # served from cache
+
+
+@pytest.mark.parametrize( "debug", [ False, True ] )
+def test_lookup_tier2_embedding_generated( wired, debug ):
+    build, store = wired
+    cache, provider, _f = build( provider_vec=[ 0.4 ] * 4, debug=debug )
+    store.ann_result = [ ( 90.0, _make_orm_row( id_hash="ann-1" ) ) ]
+
+    result = cache.lookup( "brand new question" )
+
+    assert result.embed_cached is False
+    assert provider.calls == [ ( "brand new question", "prose" ) ]   # verbatim, prose
+
+
+@pytest.mark.parametrize( "debug", [ False, True ] )
+def test_lookup_tier2_empty_embedding_is_miss( wired, debug ):
+    build, store = wired
+    cache, _p, _f = build( provider_vec=[], debug=debug )      # generate returns []
+    result = cache.lookup( "unembeddable" )
+
+    assert result.tier == "miss"
+    assert result.is_replay_hit is False
+    assert result.best_score is None
+    assert result.t_ann_ms is None
+    assert result.embed_cached is False
+
+
+@pytest.mark.parametrize( "debug", [ False, True ] )
+def test_lookup_tier2_no_candidate_is_miss( wired, debug ):
+    build, store = wired
+    cache, _p, _f = build( provider_vec=[ 0.5 ] * 4, debug=debug )
+    store.ann_result = []                                      # nothing above floor
+
+    result = cache.lookup( "lonely question" )
+
+    assert result.tier == "miss"
+    assert result.best_score is None
+    assert result.t_ann_ms is not None                        # the probe DID run
+
+
+def test_lookup_ann_candidate_marshalled_fields( wired ):
+    build, store = wired
+    factory = _RecordingFactory()
+    cache, _p, _f = build( provider_vec=[ 0.6 ] * 4, factory=factory )
+    store.ann_result = [ ( 84.0, _make_orm_row( id_hash="ann-9", runtime_stats='{"flow_version": "v1"}' ) ) ]
+
+    cache.lookup( "marshal me" )
+
+    assert factory.calls[ -1 ][ "id_hash" ] == "ann-9"
+    assert factory.calls[ -1 ][ "runtime_stats" ] == { "flow_version": "v1" }   # JSON decoded
+    assert len( factory.calls[ -1 ][ "question_embedding" ] ) == 4              # fitted to dim
+
+
+# ────────────────────────────────────────── R-C1 guard (replay signal)
+
+def test_r_c1_ann_at_100_does_not_replay( wired ):
+    """
+    R-C1: replay fires on a tier-1 EXACT hit, never on an ANN float score — even
+    an ANN candidate at a perfect 100.0 must route, not replay.
+    """
+    build, store = wired
+    cache, _p, _f = build( provider_vec=[ 0.7 ] * 4 )
+    store.ann_result = [ ( 100.0, _make_orm_row( id_hash="ann-100" ) ) ]
+
+    result = cache.lookup( "self match at one hundred" )
+
+    assert result.tier == "ann"
+    assert result.is_replay_hit is False        # the whole point of R-C1
+    assert result.best_score == 100.0
+
+
+def test_r_c1_exact_normalized_is_the_replay_signal( wired ):
+    """R-C1: the deterministic exact-normalized match IS the replay signal."""
+    build, store = wired
+    cache, _p, _f = build()
+    store.syn_normalized[ "what time is it?" ] = "id-1"
+    store.rows[ "id-1" ] = _make_orm_row( id_hash="id-1" )
+
+    result = cache.lookup( "  What Time Is It?  " )   # normalizes to the key
+
+    assert result.is_replay_hit is True
+    assert result.tier == "exact_normalized"
+
+
+# ────────────────────────────────────────────────────────────── write-back
+
+def test_write_back_empty_question_raises( wired ):
+    build, _store = wired
+    cache, _p, _f = build()
+    with pytest.raises( ValueError ):
+        cache.write_back( _make_snapshot( question="" ) )
+
+
+def test_write_back_empty_id_hash_raises( wired ):
+    build, _store = wired
+    cache, _p, _f = build()
+    with pytest.raises( ValueError ):
+        cache.write_back( _make_snapshot( id_hash="" ) )
+
+
+@pytest.mark.parametrize( "debug", [ False, True ] )
+def test_write_back_happy_path_persists_and_tags( wired, debug ):
+    build, store = wired
+    cache, provider, _f = build( debug=debug )
+    snap = _make_snapshot( runtime_stats={ "prior": 1 } )
+
+    id_hash = cache.write_back( snap, created_at_iso="2026-08-14T02:30:00-04:00" )
+
+    assert id_hash == "wb-1"
+    # snapshot row upserted with the v2 tag in serialized runtime_stats
+    assert len( store.upserts ) == 1
+    up_id, fields = store.upserts[ 0 ]
+    assert up_id == "wb-1"
+    stats = json.loads( fields[ "runtime_stats" ] )
+    assert stats[ "flow_version" ] == "v2"
+    assert stats[ "created_by" ] == "v2.ask"
+    assert stats[ "created_at" ] == "2026-08-14T02:30:00-04:00"
+    assert stats[ "prior" ] == 1                              # prior keys preserved
+    # canonical synonym re-registered (idempotent reset then add)
+    assert store.deleted_synonyms == [ "wb-1" ]
+    syn = store.added_synonyms[ 0 ]
+    assert syn[ "question_verbatim" ]   == "what's the weather in Tokyo"
+    assert syn[ "question_normalized" ] == "whats the weather in tokyo"
+    assert syn[ "question_gist" ]       == "gist::weather"
+    # verbatim embedding cache populated
+    assert store.added_embeddings == [ ( "what's the weather in Tokyo", [ 0.1 ] * 4 ) ]
+
+
+def test_write_back_computes_gist_and_embedding_when_absent( wired ):
+    build, store = wired
+    cache, provider, _f = build( provider_vec=[ 0.8 ] * 4 )
+    snap = _make_snapshot( question_gist="", question_embedding=[] )
+
+    cache.write_back( snap )                                  # created_at_iso=None branch
+
+    assert snap.question_gist == "gist::what's the weather in Tokyo"   # gist computed
+    assert provider.calls == [ ( "what's the weather in Tokyo", "prose" ) ]
+    assert snap.question_embedding == [ 0.8 ] * 4
+
+
+# ─────────────────────────────────────── snapshot_from_result (construction)
+
+def test_snapshot_from_result_builds_with_normalized_question( wired ):
+    build, _store = wired
+    cache, _p, factory = build()
+
+    cache.snapshot_from_result(
+        question="What TIME is it?", answer="ten", answer_conversational="It is ten.",
+        routing_command="agent router go to time", agent_class_name="DateAndTimeAgent",
+        user_id="u1", session_id="s1",
+    )
+
+    call = factory.calls[ -1 ]
+    assert call[ "question" ]              == "What TIME is it?"
+    assert call[ "question_normalized" ]   == "what time is it?"      # via the normalizer
+    assert call[ "answer" ]                == "ten"
+    assert call[ "answer_conversational" ] == "It is ten."
+    assert call[ "routing_command" ]       == "agent router go to time"
+    assert call[ "agent_class_name" ]      == "DateAndTimeAgent"
+    assert call[ "last_question_asked" ]   == "What TIME is it?"
+    assert call[ "user_id" ]               == "u1"
+    assert call[ "session_id" ]            == "s1"
+
+
+def test_snapshot_from_result_empty_question_raises( wired ):
+    build, _store = wired
+    cache, _p, _f = build()
+    with pytest.raises( ValueError ):
+        cache.snapshot_from_result( question="", answer="a", answer_conversational="c",
+                                    routing_command="cmd", agent_class_name="Cls" )
+
+
+# ───────────────────────────────────────────── write-back kill-switch
+
+@pytest.mark.parametrize( "debug", [ False, True ] )
+def test_write_back_disabled_records_nothing( wired, debug ):
+    build, store = wired
+    cache, _p, _f = build( debug=debug )
+
+    result = cache.write_back( _make_snapshot(), writeback_enabled=False )
+
+    assert result is None
+    assert store.upserts          == []
+    assert store.added_synonyms   == []
+    assert store.added_embeddings == []
+    assert store.deleted_synonyms == []
+
+
+def test_write_back_enabled_missing_db_scope_raises( monkeypatch ):
+    # A missing persist dependency with the flag ON must fail loud, never no-op.
+    monkeypatch.setattr( cache_mod, "SolutionSnapshotRepository", _FakeSnapshotRepo )
+    cache = V2Cache(
+        embedding_provider=_FakeProvider( [ 0.1 ] * 4 ), normalizer=_FakeNormalizer(),
+        gist_normalizer=_FakeGist(), snapshot_factory=_RecordingFactory(),
+        db_scope=None, embedding_dim=4,
+    )
+    with pytest.raises( RuntimeError ):
+        cache.write_back( _make_snapshot(), writeback_enabled=True )
+
+
+# ────────────────────────────────────────── R-D2 guard (rebind, no mutate)
+
+def test_r_d2_write_back_rebinds_runtime_stats_never_mutates( wired ):
+    """
+    R-D2: write-back must REBIND runtime_stats with { **old, **tag }. Mutating in
+    place would tag the shared mutable default for every default-constructed
+    snapshot in the process.
+    """
+    build, store = wired
+    cache, _p, _f = build()
+    original = { "prior": 1 }
+    snap = _make_snapshot( runtime_stats=original )
+
+    cache.write_back( snap, created_at_iso="2026-08-14T02:30:00-04:00" )
+
+    assert snap.runtime_stats is not original          # rebound to a NEW dict
+    assert "flow_version" not in original              # the shared default is untouched
+    assert original == { "prior": 1 }
+
+
+# ────────────────────────────────────────────────────────────── helpers
+
+def _bare_cache():
+    return V2Cache(
+        embedding_provider=_FakeProvider( [] ), normalizer=_FakeNormalizer(),
+        gist_normalizer=_FakeGist(), snapshot_factory=_RecordingFactory(),
+        db_scope=_db_scope_for( _Store() ), embedding_dim=4,
+    )
+
+
+def test_fit_embedding_variants():
+    cache = _bare_cache()
+    assert cache._fit_embedding( [] )             == [ 0.0, 0.0, 0.0, 0.0 ]   # empty → zeros
+    assert cache._fit_embedding( None )           == [ 0.0, 0.0, 0.0, 0.0 ]
+    assert cache._fit_embedding( [ 1, 2, 3, 4 ] ) == [ 1.0, 2.0, 3.0, 4.0 ]   # exact dim
+    assert cache._fit_embedding( [ 1, 2 ] )       == [ 1.0, 2.0, 0.0, 0.0 ]   # pad
+    assert cache._fit_embedding( [ 1, 2, 3, 4, 5 ] ) == [ 1.0, 2.0, 3.0, 4.0 ]  # truncate
+
+
+def test_ensure_list_variants():
+    cache = _bare_cache()
+    assert cache._ensure_list( None )     == []
+    assert cache._ensure_list( [ 1, 2 ] ) == [ 1, 2 ]
+    assert cache._ensure_list( ( 1, 2 ) ) == [ 1, 2 ]
+
+
+def test_loads_or_variants():
+    cache = _bare_cache()
+    assert cache._loads_or( None, {} )       == {}
+    assert cache._loads_or( "", [] )         == []
+    assert cache._loads_or( '{"a": 1}', {} ) == { "a": 1 }
+
+
+def test_synonym_id_is_deterministic():
+    cache = _bare_cache()
+    a = cache._synonym_id( "id-1", "hello" )
+    b = cache._synonym_id( "id-1", "hello" )
+    c = cache._synonym_id( "id-2", "hello" )
+    assert a == b
+    assert a != c
+    assert len( a ) == 64        # sha256 hexdigest
+
+
+def test_ms_since_is_nonnegative():
+    import time
+    cache = _bare_cache()
+    assert cache._ms_since( time.perf_counter_ns() ) >= 0.0
