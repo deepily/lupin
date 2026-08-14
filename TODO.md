@@ -42,6 +42,47 @@ is EMBEDDING TIME ONLY. Step 3 exists to replace that guess with a number before
 
 ---
 
+## 📉 TO QUANTIFY 2026-08-14+ (Rick's observation, recorded by Cheech 🌿) — the token-burn drop
+
+**Rick, 2026-08-13 end of day, explicitly flagged as ANECDOTAL and to be revisited "after a couple full days
+of hard burn."** Recording the numbers now so tomorrow's quantification has a baseline to argue with, not a
+memory to reconstruct.
+
+**What he observed** — two independent readings, same direction:
+
+| Reading | Before | After |
+|---|---|---|
+| Share of all tokens burned via the cosa-voice MCP server | **80+%** pre-KISS-protocol → **50+%** post-KISS | **~30-some %** today, first partial day of the DM tutor |
+| Fleet-wide burn rate (third-party aggregator, all Claude Code calls) | **14,000–22,000 tok/min** | **~7,000 tok/min** today, with **11 agents** running simultaneously |
+
+**Before anyone converts this into a claim, the confounds have to be named.** I ran the DM verbosity pilot
+that got fooled by exactly this shape of before/after comparison — it published p=0.047 at 14:00Z and the
+final pull retracted it (no effect at this dose, A 0.051 / B 0.058, and **+7.3% tokens all-in** once the
+75,506 burned on 272 refused drafts were counted). The failure was never bad arithmetic; it was comparing
+periods that differed in more than one thing. Today differs in at least five:
+
+1. **Three interventions landed together** — the KISS/brevity mandate, the DM tutor (live 14:14 UTC, boot
+   #56), and the tutor's own same-day fixes (dropped agency, dropped paths `06c3eb29`, invented-person
+   refusal `a28c24b6`). A single before/after cannot apportion credit among them.
+2. **"Share of tokens via MCP" has a denominator.** A drop in the share is equally consistent with MCP
+   traffic falling *or* with non-MCP work rising. Both numbers have to be reported, never the ratio alone.
+3. **Tokens per minute is not tokens per unit of work.** 11 agents at 7,000 tok/min is a rate, not an
+   efficiency — the same figure results from agents thinking harder about less, or from a quiet evening.
+4. **A partial day is not a day**, and today's shape was unusual: a fleet-wide wind-down from ~23:30.
+5. **The tutor clips the tail by construction** — measured on the pilot corpus (`6bfd4223`): rejecting at
+   p99 = 149 and max = 150, the threshold itself visible in the data, while sentence count barely moved
+   (8 → 7). María's corollary stands: a delivered tail under a gate is the gate's configuration, so
+   delivered tails must never be compared across a gated and an ungated period.
+
+**What would actually settle it**: tokens per delivered unit of work (per DM, per row closed, per commit),
+segmented by MCP vs non-MCP, over two full comparable days — the "couple full days of hard burn" Rick
+already named. The corpus for the DM half exists at `<projects-data>/lupin/dm-corpus/` with every row
+provenance-stamped, and `analyze_arms.py` raises `FileNotFoundError` rather than silently reading the
+retired file, so the measurement is reproducible.
+
+**Sequencing**: this is explicitly AFTER the embedding regeneration above — that is the first and only thing
+tomorrow starts with.
+
 ## 🦚 FINDING 2026-08-13 (Krishna `d901908f`, row e0bb5a94) — orchestrator.py pre-existing coverage gap
 
 While adding the defect-B assertion tests I found `orchestrator.py` sits at **99% branch coverage**, not the
