@@ -364,6 +364,8 @@ def test_render_report_carries_sections_and_caveat():
     assert "Cache-hit rate vs threshold" in report
     assert ve.WOULD_BE_WRONG_CAVEAT in report
     assert "`replay`" in report          # by_path section rendered
+    assert ve.NOT_GONOGO_BANNER in report                    # v2-only label pinned (Cheech, thread 4fb7f475)
+    assert "NOT the go/no-go decision table" in report       # the label is legible, not just the constant
 
 
 def test_write_outputs( tmp_path ):

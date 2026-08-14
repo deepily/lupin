@@ -79,6 +79,17 @@ FIRST_USEFUL_MARK = "t_first_useful"
 # data rather than re-running the corpus once per candidate value.
 THRESHOLD_FLOORS = ( 100.0, 98.0, 95.0, 90.0 )
 
+# This harness measures ONE arm (v2). It has no v1 baseline, so it CANNOT produce
+# the §1 go/no-go verdict (INVEST / STOP / SPLIT) — that is the paired v1-vs-v2
+# harness. This banner is printed at the top of every report so a v2-only cache-hit
+# or latency number is never mistaken for the decision it is a down-payment on.
+# (Cheech, 2026-08-14, thread 4fb7f475.)
+NOT_GONOGO_BANNER = (
+    "> ⚠️ **v2-only — NOT the go/no-go decision table.** No v1 baseline runs here, so "
+    "these numbers report v2's own cache-hit rate and latency distribution and DO NOT "
+    "decide INVEST / STOP / SPLIT (§1). The paired v1-vs-v2 harness produces that verdict."
+)
+
 # The would-be-wrong caveat, kept VERBATIM (cascade ruling R-C2): command-match
 # is a lower bound — same command at a different location still scores "right" —
 # so this column under-counts. A semantic oracle is phase 2.
@@ -614,6 +625,8 @@ def render_report(
     """
     lines : List[ str ] = []
     lines.append( f"# CJ Flow v2 eval — corpus `{corpus_name}` — {timestamp}" )
+    lines.append( "" )
+    lines.append( NOT_GONOGO_BANNER )
     lines.append( "" )
     lines.append( "**EXECUTOR: AI** · venue :8000 scheduled (post-midnight off-peak) · `speak=false, interactive=false`" )
     lines.append( "" )
