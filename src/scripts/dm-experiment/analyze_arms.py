@@ -356,8 +356,14 @@ def secondaries( rows ):
     Ensures:
         - returns per-arm secondary metrics: pct >= threshold, attempts per
           delivered message, bunching share in [140,149], repeated-rejection
-          loops, mean est_tokens per attempt and per delivered message, and
-          mean delivery delay in seconds
+          loops, mean est_tokens per attempt and per delivered message, mean
+          est_tokens per delivered message ALL-IN (total spent over delivered,
+          so refused drafts are counted, not hidden — row 35d0a451), and mean
+          delivery delay in seconds
+        - the delivered-only and all-in means are reported SIDE BY SIDE, neither
+          replacing the other: for an arm with no refusals they are equal; for
+          the rejecting arm the all-in figure is higher by exactly the tokens
+          burned on drafts the gate refused
         - est_tokens is labelled an estimate (chars/4) wherever reported
         - mean_delivery_delay_s reports alongside delivery_delay_n, the number
           of delivered rows that actually carried both stamps — a mean over an
@@ -382,6 +388,15 @@ def secondaries( rows ):
             "repeated_rejection_loops"  : _repeated_rejection_loops( arm_rows ),
             "mean_est_tokens_attempt"   : _mean( [ r[ "est_tokens" ] for r in arm_rows ] ),
             "mean_est_tokens_delivered" : _mean( [ r[ "est_tokens" ] for r in delivered ] ),
+            # ALL-IN: total tokens spent by the arm (every attempt, INCLUDING drafts the
+            # gate refused) divided by messages that landed. Reported BESIDE the
+            # delivered-only mean, not instead of it (row 35d0a451). The delivered-only
+            # number answers "how long is a message that lands?"; this answers "what did
+            # a landed message COST?" — and for the rejecting arm those differ, because
+            # a refused draft is paid for and then rewritten. Same denominator as the
+            # delivered-only mean; the numerator is every token spent, not just the ones
+            # that survived the gate.
+            "mean_est_tokens_delivered_all_in" : ( sum( r[ "est_tokens" ] for r in arm_rows ) / len( delivered ) ) if delivered else None,
             "mean_delivery_delay_s"     : _mean( delays ),
             "delivery_delay_n"          : len( delays ),
         }
@@ -437,6 +452,7 @@ def format_report( rows ):
             f"bunch[140,149]={_fmt(s['bunching_share_140_149'])} reject_loops={s['repeated_rejection_loops']} "
             f"est_tokens/attempt={_fmt(s['mean_est_tokens_attempt'])} (chars/4 est) "
             f"est_tokens/delivered={_fmt(s['mean_est_tokens_delivered'])} (chars/4 est) "
+            f"est_tokens/delivered_all_in={_fmt(s['mean_est_tokens_delivered_all_in'])} (chars/4 est, incl refused drafts) "
             f"delivery_delay_s={_fmt(s['mean_delivery_delay_s'])} (n={s['delivery_delay_n']})" )
     return "\n".join( lines )
 

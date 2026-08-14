@@ -223,6 +223,9 @@ def test_secondaries_metrics():
     assert sec[ "rejecting" ][ "delivered" ]              == 3
     assert sec[ "rejecting" ][ "pct_ge_threshold" ]       == pytest.approx( 0.5 )
     assert sec[ "rejecting" ][ "attempts_per_delivered" ] == pytest.approx( 2.0 )
+    # blind never refuses a draft, so all-in == delivered-only (200 words × 6 = 1200).
+    assert sec[ "blind" ][ "mean_est_tokens_delivered" ]        == pytest.approx( 1200.0 )
+    assert sec[ "blind" ][ "mean_est_tokens_delivered_all_in" ] == pytest.approx( 1200.0 )
 
 
 def test_secondaries_bunching_and_reject_loops():
@@ -235,12 +238,33 @@ def test_secondaries_bunching_and_reject_loops():
     assert sec[ "repeated_rejection_loops" ] == 1
 
 
+def test_secondaries_all_in_counts_refused_draft_tokens():
+    """
+    Row 35d0a451: the delivered-only mean HID tokens burned on refused drafts. The
+    all-in figure counts every token the arm spent over the messages that landed, so
+    for an arm that refuses drafts it is strictly higher — and the gap is exactly the
+    refused-draft tokens amortised over deliveries.
+    """
+    rows = _retry_fixture()
+    sec  = AN.secondaries( rows )[ "rejecting" ]
+    # delivered-only: the 3 resends of 90 words × 6 = 540 each -> mean 540.
+    assert sec[ "mean_est_tokens_delivered" ] == pytest.approx( 540.0 )
+    # all-in: every token spent (3×1200 refused + 3×540 delivered = 5220) over 3 landed.
+    assert sec[ "mean_est_tokens_delivered_all_in" ] == pytest.approx( 5220.0 / 3.0 )
+    # the point of the row — the refused drafts are no longer invisible.
+    assert sec[ "mean_est_tokens_delivered_all_in" ] > sec[ "mean_est_tokens_delivered" ]
+    burned_over_delivered = ( 3 * 1200 ) / 3.0   # the refused 200-word drafts, per delivery
+    assert ( sec[ "mean_est_tokens_delivered_all_in" ]
+             - sec[ "mean_est_tokens_delivered" ] ) == pytest.approx( burned_over_delivered )
+
+
 def test_secondaries_empty_arm_is_none():
     sec = AN.secondaries( [] )[ "blind" ]
     assert sec[ "attempts" ]         == 0
     assert sec[ "pct_ge_threshold" ] is None
     assert sec[ "attempts_per_delivered" ] is None
     assert sec[ "mean_est_tokens_attempt" ] is None
+    assert sec[ "mean_est_tokens_delivered_all_in" ] is None
 
 
 # --------------------------------------------------------------------------- #
@@ -282,6 +306,8 @@ def test_format_report_contains_both_coprimaries():
     assert "Co-primary A (all attempts)" in text
     assert "Co-primary B (first attempts only)" in text
     assert "chars/4 est" in text                           # est_tokens labelled an estimate
+    assert "est_tokens/delivered_all_in=" in text          # the all-in figure is reported beside it (row 35d0a451)
+    assert "incl refused drafts" in text                   # and labelled as counting refused drafts
 
 
 def test_main_full_report( tmp_path, capsys ):
