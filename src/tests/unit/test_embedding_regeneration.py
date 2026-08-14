@@ -15,6 +15,7 @@ import pytest
 from cosa.rest.db.embedding_regeneration import (
     DEFAULT_CHAR_BUDGET,
     MAX_CHAR_BUDGET,
+    OFF_PEAK_END_HOUR,
     MIN_CHAR_BUDGET,
     AdaptiveBudget,
     EMBEDDING_DIM,
@@ -197,9 +198,26 @@ class TestIsOffPeak:
     def test_inside_window( self, hour ):
         assert is_off_peak( hour ) is True
 
-    @pytest.mark.parametrize( "hour", [ 9, 14, 21, 23 ] )
+    @pytest.mark.parametrize( "hour", [ 14, 21, 23 ] )
     def test_outside_window( self, hour ):
         assert is_off_peak( hour ) is False
+
+    @pytest.mark.parametrize( "hour", [ 9, 10 ] )
+    def test_the_morning_hours_rick_widened_the_window_for( self, hour ):
+        # Rick, 2026-08-13: the run starts after breakfast, not before 9am. These two
+        # hours used to be REFUSED and are the whole reason OFF_PEAK_END_HOUR moved.
+        assert is_off_peak( hour ) is True
+
+    def test_the_window_still_closes( self, ):
+        # Widening is not removing. 11:00 is the first hour outside, and a window that
+        # accepted every hour would make the check decorative.
+        assert is_off_peak( OFF_PEAK_END_HOUR ) is False
+
+    def test_end_hour_is_a_parameter_not_a_hardcode( self ):
+        # The boundary travels with the argument, so a caller can tighten it without
+        # editing the module.
+        assert is_off_peak( 5, end_hour=4 ) is False
+        assert is_off_peak( 3, end_hour=4 ) is True
 
 
 class TestShouldProceed:

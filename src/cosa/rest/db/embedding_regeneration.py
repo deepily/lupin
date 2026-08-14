@@ -100,6 +100,20 @@ DEFAULT_CHAR_BUDGET = 40_000
 MIN_CHAR_BUDGET = 5_000
 MAX_CHAR_BUDGET = 2_000_000
 
+# The hour the off-peak window CLOSES (EDT). Midnight is always the open.
+#
+# WAS 9. Rick, 2026-08-13: "we're probably not going to get started on this
+# regeneration before 9 o'clock tomorrow morning, so you're going to have to open
+# that window up a little bit — maybe make it 10 or 11 in the morning so that we
+# can do that first thing after breakfast."
+#
+# The window was only ever a courtesy anyway: the REAL gate in should_proceed() is
+# the busy check, which asks the live server whether work is in flight and refuses
+# on an unknown answer. A clock cannot tell you the box is free; only the box can.
+# So widening this trades nothing away — it just stops the courtesy check refusing
+# a run at a time the operator has deliberately chosen to be at the keyboard for.
+OFF_PEAK_END_HOUR = 11
+
 
 class RegenSpec( NamedTuple ):
     """One (table, text column → vector column) regeneration target."""
@@ -388,17 +402,20 @@ def split_batch( batch: Sequence[Any] ) -> List[List[Any]]:
     return [ list( batch[ :middle ] ), list( batch[ middle: ] ) ]
 
 
-def is_off_peak( hour_edt: int ) -> bool:
+def is_off_peak( hour_edt: int, end_hour: int = OFF_PEAK_END_HOUR ) -> bool:
     """
-    True iff an hour falls in the sanctioned batch window (midnight - 9am EDT).
+    True iff an hour falls in the sanctioned batch window (midnight - end_hour EDT).
 
     Requires:
         - hour_edt is an int hour-of-day in 0..23, EDT
+        - end_hour is an int hour-of-day in 1..24
 
     Ensures:
-        - returns True for 0 <= hour_edt < 9, False otherwise
+        - returns True for 0 <= hour_edt < end_hour, False otherwise
+        - the default end_hour is OFF_PEAK_END_HOUR, so callers that do not care
+          about the boundary never have to name it
     """
-    return 0 <= hour_edt < 9
+    return 0 <= hour_edt < end_hour
 
 
 def should_proceed( *, busy: Optional[bool], hour_edt: Optional[int],
@@ -425,7 +442,8 @@ def should_proceed( *, busy: Optional[bool], hour_edt: Optional[int],
     if busy:
         return "server is busy (jobs in flight) — refusing to add embedding load"
     if not force and hour_edt is not None and not is_off_peak( hour_edt ):
-        return f"hour {hour_edt:02d} EDT is outside the off-peak window (00:00-09:00); pass --force to override"
+        return ( f"hour {hour_edt:02d} EDT is outside the off-peak window "
+                 f"(00:00-{OFF_PEAK_END_HOUR:02d}:00); pass --force to override" )
     return None
 
 

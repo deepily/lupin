@@ -1,5 +1,47 @@
 # TODO
 
+## ☀️ FIRST THING TOMORROW — 2026-08-14, ~10–11am, Rick + Mr. Radio 🦉, and NOTHING ELSE BEFORE IT
+
+**Rick's instruction, 2026-08-13 (verbatim in substance)**: *"Make a note of it in the to-do document for it
+to be the first and only thing you and I begin the day with."*
+
+**THE JOB**: run the embedding regeneration together — row `5e848dd8`. Not a backfill-normalize; a full
+REGENERATION into shadow columns, then a swap. ~287,200 rows across `input_and_output` (input + output_final)
+and `prediction_decisions`.
+
+**READ THIS FIRST, it is the whole walkthrough**:
+`src/rnd/v0.2.0/2026.08.13-embedding-regeneration-run-walkthrough.md`
+
+**The order of the morning**:
+
+| # | Step | Who |
+|---|---|---|
+| 0 | **Unload the dev + test models** to clear GPU 0 | **Rick** |
+| 1 | Confirm nothing queued/running; confirm we are inside the window | Mr. Radio |
+| 2 | `plan` — read the norm histogram together, confirm TWO populations (a third stops us) | both |
+| 3 | `fill --limit=500 --apply` — bounded pass into shadow columns; **this is where the DB write side finally gets measured** | Mr. Radio |
+| 4 | Look at that number, decide continue-now or schedule | **Rick** |
+| 5 | `fill --apply` — full run, checkpointed and resumable | Mr. Radio |
+| 6 | `verify` — must pass clean, zero bad norms, or we do not proceed | Mr. Radio |
+| 7 | `swap --apply` — the ONE irreversible command, with Rick present | both |
+
+**Settled overnight, do not re-litigate**:
+- **Window widened to 11am** (`OFF_PEAK_END_HOUR = 11`, was 9) so a post-breakfast start is not refused.
+  Code + 4 new tests + doc; suite green 122 passing, 100% lines/branches. The clock was always the courtesy
+  check — the busy probe is the real gate, and `--force` still cannot override it.
+- **Rollback RULED — shadow columns only, no `pg_dump`.** Rick: *"Either we successfully write all of the
+  shadow columns with the new embeddings or we don't… If it fails we drop the shadow column."* Failure mode
+  is a wasted GPU hour, not lost data.
+- **The GPU is NOT the constraint the old write-up implied.** `AdaptiveBudget` grows the batch empirically
+  (×1.5 per success, halve on refusal, floor 5k / ceiling 2M chars), so on an emptied card it climbs on its
+  own — 40,000 is a starting point, not a ceiling. Watch the "final char budget" the fill prints; that number
+  is the empirical ceiling of the real hardware and it is the measurement we still lack.
+
+**The one honest unknown**: the DB write side (~289,000 UPDATEs) is unmeasured. The oft-quoted ~16 minutes
+is EMBEDDING TIME ONLY. Step 3 exists to replace that guess with a number before anything large runs.
+
+---
+
 ## 🦚 FINDING 2026-08-13 (Krishna `d901908f`, row e0bb5a94) — orchestrator.py pre-existing coverage gap
 
 While adding the defect-B assertion tests I found `orchestrator.py` sits at **99% branch coverage**, not the
@@ -402,6 +444,29 @@ answers keys don't reconstruct the original question texts reliably.
 Read-only counter: `scratchpad/count_poison.py` (session effddeae).
 
 ---
+
+## ✅ CLOSED 2026-08-13 (Sam 🎙️ `94f3bfed`) — row 89bfcc8f done on harness scope; two residual lessons kept here
+
+Row 89bfcc8f closed `done` on harness scope. All six harness defects are fixed and proven
+live end-to-end on :8000 run `ts-c81091ff`: the classification reads honest **NOT EXECUTED**,
+never a false `FAILED 0/0/0/0` and never a false green. Commits (held for Rick, NOT pushed):
+`b9450146 99fbca8d f136f965 5c59d144 79fcf083 c37443f5 df866b60 7b630a42`.
+
+**Not the harness's fault (out of scope, unreproducible):** the real-generation Sonnet child
+`pr-aeeaef3c` died — *"Elaboration returned no usable slides"* after ~10.5 min (~$0.46 lost, no
+deck). It got a well-formed 15-slide outline; the elaboration LLM response simply lacked the
+top-level `slides` key and the strict parser refused to fail-open. The code that produced it was
+Rick's reverted-uncommitted deploy, so there is no repo copy to fix — belongs in front of
+whoever next stands in the elaboration path.
+
+**Two residual lessons (no owner, no row):**
+1. **A deferred job lives only in memory — capture evidence at submit time, not by polling.** A
+   16:10 `docker restart lupin-rest-test` (to serve a fix) erased the in-memory deferred children
+   from an earlier run, making their lineage unrecoverable. The submit-time lineage probe
+   (`7b630a42`) is the durable fix: log `{harness, env token, stamp}` at submit, restart-proof.
+2. **`test_presentation_dry_run_smoke.py` still lacks the `parent_id_hash` stamp** (Mr Radio noted).
+   Latent, low priority — it is NOT in the regression runner, so it can't cause a deferral there.
+   Cheech's call: do not sweep it now.
 
 ## 📥 FINDING 2026-08-13 (Sam 🎙️ `00aa8745`) — presentation regression fix #2: the internal jobs still can't run headless (row 89bfcc8f, fix #1 landed)
 
