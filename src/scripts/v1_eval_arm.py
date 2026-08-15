@@ -292,6 +292,62 @@ def compute_v1_metrics( records: List[V1Record] ) -> Dict[str, Any]:
     }
 
 
+# ─────────────────────────────── transition-event parsing (collector core)
+
+# The v1 JobState string values (job_state.py) the WS events carry in `to_state`.
+_ST_QUEUED    = "queued"
+_ST_RUNNING   = "running"
+_ST_COMPLETED = "completed"
+
+
+def _iso_to_epoch( iso: Any ) -> Optional[float]:
+    """
+    Ensures:
+        - parses an ISO-8601 string (the event `timestamp`, aware) to epoch seconds
+        - returns None for None / non-string / unparseable — never raises, so one
+          malformed stamp cannot crash a whole pass
+    """
+    import datetime
+    if not isinstance( iso, str ):
+        return None
+    try:
+        return datetime.datetime.fromisoformat( iso ).timestamp()
+    except ValueError:
+        return None
+
+
+def parse_transitions( events: Sequence[Dict[str, Any]] ) -> Dict[str, Any]:
+    """
+    Reduce ONE job's `job_state_transition` events into the transitions dict
+    assemble_v1_record consumes.
+
+    Requires:
+        - events is the list of job_state_transition payloads for a SINGLE job
+          (each { to_state, timestamp (ISO), metadata? }), already job-filtered
+
+    Ensures:
+        - returns { queued_ts, running_ts, completed_ts, metadata }, timestamps in
+          epoch seconds (QUEUED/RUNNING/COMPLETED transitions); metadata is the
+          COMPLETED event's metadata (the completion payload), else None
+        - a terminal FAILURE (failed/cancelled/…) leaves completed_ts + metadata
+          None ⇒ the record reads no_completion (honest: no usable span), never a
+          fabricated completion
+        - never raises (a malformed timestamp becomes None via _iso_to_epoch)
+    """
+    out: Dict[str, Any] = { "queued_ts": None, "running_ts": None, "completed_ts": None, "metadata": None }
+    for ev in events:
+        to = ev.get( "to_state" )
+        ts = _iso_to_epoch( ev.get( "timestamp" ) )
+        if to == _ST_QUEUED:
+            out[ "queued_ts" ] = ts
+        elif to == _ST_RUNNING:
+            out[ "running_ts" ] = ts
+        elif to == _ST_COMPLETED:
+            out[ "completed_ts" ] = ts
+            out[ "metadata" ]     = ev.get( "metadata" )
+    return out
+
+
 # ──────────────────────────────────── routing-command map (R-A1 seam)
 
 DEFAULT_COMMAND_TEMPLATE = "agent router go to {mode}"
@@ -474,6 +530,32 @@ def _default_push_fn( base_url: str, websocket_id: str,
         except Exception as e:
             return { "error": str( e ) }
     return _push
+
+
+def _default_collect_fn( ws_recv_events: Callable[[str], Sequence[Dict[str, Any]]] ) -> Callable[[str], Dict[str, Any]]:   # pragma: no cover - live WS boundary
+    """
+    Build a collect_fn from a raw WS-event source. `ws_recv_events( job_id )` is
+    the live boundary — it subscribes to the queue WebSocket and returns that
+    job's `job_state_transition` payloads (until COMPLETED or a timeout). The
+    REDUCTION of those events into timestamps is the pure, tested parse_transitions
+    — so the only unproven surface here is the socket receive itself.
+    """
+    def _collect( job_id: str ) -> Dict[str, Any]:
+        return parse_transitions( ws_recv_events( job_id ) )
+    return _collect
+
+
+def load_v1_class_to_command():   # pragma: no cover - imports the live v1 registry from the pinned worktree
+    """
+    Build the routing-command map from the LIVE v1 registry (MODE_TO_AGENT),
+    resolved through LUPIN_ROOT — so it reads the PINNED WORKTREE's v1 code, not
+    the dirty main tree (design §2a). Returns ( class_to_command, ambiguous ).
+    The WS-transition collector is deliberately NOT stubbed here: it is built and
+    exercised WITH the live run against the worktree server, never shipped as an
+    untested boundary that reads as done.
+    """
+    from cosa.rest.todo_fifo_queue import MODE_TO_AGENT
+    return build_class_to_command( MODE_TO_AGENT )
 
 
 def build_arg_parser() -> argparse.ArgumentParser:

@@ -147,6 +147,44 @@ def test_run_pass_push_non_dict_short_circuits():
     assert calls == [ ] and recs[ 0 ].failure == "push_failed"
 
 
+# ───────────────────────────────────────────── transition parsing
+
+def test_iso_to_epoch_valid_and_invalid():
+    import datetime as _dt
+    iso      = "2026-08-15T10:00:00+00:00"
+    expected = _dt.datetime.fromisoformat( iso ).timestamp()
+    assert v1._iso_to_epoch( iso ) == expected
+    assert v1._iso_to_epoch( None ) is None
+    assert v1._iso_to_epoch( 12345 ) is None          # non-string
+    assert v1._iso_to_epoch( "not-a-date" ) is None   # unparseable
+
+def test_parse_transitions_full_sequence():
+    events = [
+        { "to_state": "queued",    "timestamp": "2026-08-15T10:00:00+00:00" },
+        { "to_state": "running",   "timestamp": "2026-08-15T10:00:01+00:00" },
+        { "to_state": "completed", "timestamp": "2026-08-15T10:00:02+00:00",
+          "metadata": { "is_cache_hit": True, "agent_type": "CalendarAgent" } },
+    ]
+    tr = v1.parse_transitions( events )
+    assert tr[ "queued_ts" ] is not None and tr[ "running_ts" ] is not None
+    assert tr[ "completed_ts" ] - tr[ "running_ts" ] == pytest.approx( 1.0 )
+    assert tr[ "metadata" ][ "agent_type" ] == "CalendarAgent"
+
+def test_parse_transitions_failure_leaves_no_completion():
+    events = [
+        { "to_state": "queued",  "timestamp": "2026-08-15T10:00:00+00:00" },
+        { "to_state": "running", "timestamp": "2026-08-15T10:00:01+00:00" },
+        { "to_state": "failed",  "timestamp": "2026-08-15T10:00:02+00:00", "metadata": { "error": "boom" } },
+    ]
+    tr = v1.parse_transitions( events )
+    assert tr[ "completed_ts" ] is None and tr[ "metadata" ] is None   # no fabricated completion
+    assert tr[ "running_ts" ] is not None
+
+def test_parse_transitions_empty():
+    tr = v1.parse_transitions( [ ] )
+    assert tr == { "queued_ts": None, "running_ts": None, "completed_ts": None, "metadata": None }
+
+
 # ───────────────────────────────────────────── build_class_to_command
 
 class _Math: pass
