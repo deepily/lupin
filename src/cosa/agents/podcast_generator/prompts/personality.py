@@ -209,27 +209,25 @@ def get_prosody_guidelines() -> str:
     Returns:
         str: Prosody annotation guidelines for prompts
     """
-    return """PROSODY ANNOTATION GUIDELINES:
+    return """PACING & EMPHASIS GUIDELINES:
 
-Use these markers sparingly for natural expressiveness:
+Write these markers DIRECTLY into the dialogue — they are the only ones our
+voice engine renders. Use them sparingly for natural expressiveness:
 
-EMOTIONAL MARKERS (use 2-3 per minute of content):
-- *[laughs]* or *[chuckles]* - Light laughter at humor or irony
-- *[whispers]* - Conspiratorial or surprising information
-- *[excited]* - Genuine enthusiasm about a discovery
-- *[thoughtful]* - Considering implications deeply
+PAUSE MARKERS (use strategically):
+- <break time="1.5s"/> - Explicit silent pause, maximum 3.0 seconds
+- Ellipsis ( ... ) - Short, hesitant pause mid-thought
+- Dash ( - ) - Brief pause or self-interruption
 
-PACING MARKERS (use strategically):
-- *[pause]* - Brief 0.5s pause for emphasis or breath
-- *[long_pause]* - 2-3s pause for dramatic effect or topic transition
-- *[emphasis]* - Stress on the following word or phrase
+EMPHASIS MARKER:
+- CAPITALIZATION of a word - Vocal emphasis on that word
 
 USAGE TIPS:
 1. Don't over-annotate - let natural dialogue shine
-2. Use *[pause]* before important revelations
-3. Use *[excited]* sparingly to maintain impact
-4. *[chuckles]* is more subtle than *[laughs]*
-5. Place annotations before the affected text"""
+2. Use <break time="x.xs"/> before important revelations
+3. Reserve CAPS for the single word that matters most
+4. Do NOT use bracketed emotion tags like [excited] or *[laughs]* - our voice
+   engine ignores them"""
 
 
 def quick_smoke_test():
@@ -286,9 +284,9 @@ def quick_smoke_test():
         # Test 4: Get prosody guidelines
         print( "Testing get_prosody_guidelines..." )
         guidelines = get_prosody_guidelines()
-        assert "*[pause]*" in guidelines
-        assert "*[excited]*" in guidelines
-        assert "EMOTIONAL MARKERS" in guidelines
+        assert '<break time="1.5s"/>' in guidelines
+        assert "CAPITALIZATION" in guidelines
+        assert "PAUSE MARKERS" in guidelines
         print( "✓ Prosody guidelines generated" )
 
         # Test 5: Default prompt sections exist

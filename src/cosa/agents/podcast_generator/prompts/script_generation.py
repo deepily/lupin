@@ -124,18 +124,19 @@ Your task is to transform research content into natural, engaging conversation.
 SCRIPT FORMAT:
 Use this minimalist markdown format for each dialogue segment:
 
-**[Host Name - Role]**: Dialogue text with *[prosody annotations]* as needed.
+**[Host Name - Role]**: Dialogue text with pacing markers like <break time="1.0s"/> as needed.
 
-PROSODY ANNOTATIONS:
-Embed these markers in the text where appropriate:
-- *[pause]* - Brief pause for effect
-- *[long_pause]* - Longer pause (2-3 seconds)
-- *[laughs]* or *[chuckles]* - Light laughter
-- *[whispers]* - Lower volume, conspiratorial tone
-- *[excited]* - Higher energy, faster pace
-- *[thoughtful]* - Slower, contemplative
-- *[emphasis]* - Stress on next few words
-- *[questioning]* - Upward inflection
+PACING & EMPHASIS MARKERS:
+Write these DIRECTLY into the dialogue text — they are the ONLY markers our
+voice engine renders. Use them sparingly and only where they add impact:
+- <break time="1.5s"/> - An explicit silent pause. Maximum 3.0 seconds. Use
+  before a revelation or at a topic shift. Write it verbatim, in seconds.
+- Ellipsis ( ... ) - A short, hesitant pause mid-thought.
+- Dash ( - ) - A brief pause or a self-interruption.
+- CAPITALIZATION of a word - Vocal emphasis on that word.
+
+DO NOT use bracketed emotion tags such as [excited], [laughs], *[pause]*, or
+*[whispers]* — our voice engine ignores them and they will be stripped.
 
 DIALOGUE GUIDELINES:
 1. Make conversation feel natural, not scripted
@@ -155,7 +156,7 @@ Return a JSON object with this structure:
         {
             "speaker": "Host Name",
             "role": "curious|expert",
-            "text": "Dialogue with *[prosody]* markers",
+            "text": "Dialogue with <break time=\"1.0s\"/> pacing markers",
             "topic_reference": "which topic this covers"
         }
     ],
@@ -282,7 +283,7 @@ def get_script_generation_prompt(
 IMPORTANT - LANGUAGE REQUIREMENT:
 Generate this podcast script in {language_name}.
 - Write natural, conversational dialogue as native speakers would speak
-- Preserve all prosody markers (*[pause]*, *[excited]*, etc.) UNCHANGED in English
+- Preserve all pacing markers (<break time="x.xs"/>, ellipsis, dashes, CAPS) UNCHANGED
 - Keep host names (Maria, Mr. Radio) UNCHANGED
 - Adapt idioms, examples, and cultural references to be appropriate for {language_name} speakers
 - Do NOT translate literally - create authentic, natural-sounding dialogue
@@ -369,7 +370,7 @@ USER FEEDBACK:
 INSTRUCTIONS:
 1. Address all points in the feedback
 2. Maintain the same overall structure unless changes are requested
-3. Keep prosody annotations where appropriate
+3. Keep pacing markers (<break time="x.xs"/>, ellipsis, dashes, CAPS) where appropriate
 4. Ensure the revised script still flows naturally
 
 Return the revised script in the same JSON format."""
@@ -564,7 +565,7 @@ def quick_smoke_test():
         )
         assert "Mexican Spanish" in spanish_prompt
         assert "LANGUAGE REQUIREMENT" in spanish_prompt
-        assert "Preserve all prosody markers" in spanish_prompt
+        assert "Preserve all pacing markers" in spanish_prompt
         assert "Keep host names" in spanish_prompt
         print( "✓ Spanish script prompt includes language instruction" )
 

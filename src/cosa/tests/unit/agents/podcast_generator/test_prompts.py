@@ -110,8 +110,9 @@ class TestGetProsodyGuidelines( unittest.TestCase ):
 
     def test_contains_markers( self ):
         out = get_prosody_guidelines()
-        self.assertIn( "*[pause]*", out )
-        self.assertIn( "EMOTIONAL MARKERS", out )
+        self.assertIn( '<break time="1.5s"/>', out )
+        self.assertIn( "PAUSE MARKERS", out )
+        self.assertIn( "CAPITALIZATION", out )
 
 
 class TestPersonalityModuleConstants( unittest.TestCase ):
