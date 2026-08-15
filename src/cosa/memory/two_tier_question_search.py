@@ -207,7 +207,7 @@ class TwoTierQuestionSearch:
 
             # Tier 2 — embed (cache-wired) then cosine nearest-k.
             embedding, embed_cached, t_embed_ms = self._query_embedding( session, question )
-            if not embedding:
+            if embedding is None or len( embedding ) == 0:
                 if self.debug: print( "(two-tier) tier-2 miss: empty query embedding" )
                 return CacheLookup(
                     is_replay_hit=False, tier="miss", snapshot=None, best_candidate=None,
@@ -384,7 +384,7 @@ class TwoTierQuestionSearch:
         NULL/short/long vector: zero-fill an empty, pad a short, truncate a long.
         """
         dim = self._embedding_dim
-        if not embedding:
+        if embedding is None or len( embedding ) == 0:
             return [ 0.0 ] * dim
         values = [ float( x ) for x in embedding ]
         if len( values ) == dim:

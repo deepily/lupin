@@ -17,6 +17,7 @@ receipts live in the unit's report):
 import json
 import types
 
+import numpy as np
 import pytest
 
 from cosa.rest.v2 import cache as cache_mod
@@ -563,6 +564,18 @@ def test_fit_embedding_variants():
     assert cache._fit_embedding( [ 1, 2, 3, 4 ] ) == [ 1.0, 2.0, 3.0, 4.0 ]   # exact dim
     assert cache._fit_embedding( [ 1, 2 ] )       == [ 1.0, 2.0, 0.0, 0.0 ]   # pad
     assert cache._fit_embedding( [ 1, 2, 3, 4, 5 ] ) == [ 1.0, 2.0, 3.0, 4.0 ]  # truncate
+
+
+def test_fit_embedding_numpy_array_readback():
+    # Bug 60b5221e: the write-back read path hands _fit_embedding a real numpy
+    # ndarray, not a list. The old `if not embedding:` guard raised
+    # "truth value of an array with more than one element is ambiguous" on any
+    # multi-element vector. Guard on length instead so ndarrays fit like lists.
+    cache = _bare_cache()
+    assert cache._fit_embedding( np.array( [ 1, 2, 3, 4 ] ) )    == [ 1.0, 2.0, 3.0, 4.0 ]   # exact dim
+    assert cache._fit_embedding( np.array( [ 1, 2 ] ) )          == [ 1.0, 2.0, 0.0, 0.0 ]   # pad
+    assert cache._fit_embedding( np.array( [ 1, 2, 3, 4, 5 ] ) ) == [ 1.0, 2.0, 3.0, 4.0 ]   # truncate
+    assert cache._fit_embedding( np.array( [] ) )                == [ 0.0, 0.0, 0.0, 0.0 ]   # empty → zeros
 
 
 def test_ensure_list_variants():
