@@ -16,16 +16,22 @@ THE TRANSPORT DIFFERENCE THAT DRIVES THE DESIGN (design §2):
 
 THE LATENCY-PARITY RULE (design §3, as CORRECTED by review F1, 2026-08-15): the
 ONLY cross-arm-comparable latency is measured from a CLIENT-SIDE send timestamp —
-the instant just before the client POSTs (`/api/push` for v1, `/api/v2/ask` for
-v2) → the moment the client observes completion. Symmetric by construction: no
-server-side boundary is trusted, so v1's PRE-QUEUE routing+embedding+cache-lookup
-(which `push_job` runs synchronously inside `/api/push`, BEFORE the QUEUED/RUNNING
-transitions) and v2's inline routing+extract+replay are BOTH inside the measured
-span. The earlier `RUNNING → COMPLETED` framing was WRONG — it silently dropped
-v1's pre-queue work while v2's `first_useful` counted it, flattering v1. The
-server-side spans (`RUNNING→COMPLETED`, `QUEUED→COMPLETED`) are kept as
-INFORMATIONAL sub-spans only (the queue-dwell breakdown), clearly labelled NOT the
+the instant just before the client POSTs → the moment the client observes
+completion. No server-side boundary is trusted, so THIS arm's PRE-QUEUE
+routing+embedding+cache-lookup (which `push_job` runs synchronously inside
+`/api/push`, BEFORE the QUEUED/RUNNING transitions) is inside the measured span.
+The earlier `RUNNING → COMPLETED` framing was WRONG — it silently dropped v1's
+pre-queue work. The server-side spans (`RUNNING→COMPLETED`, `QUEUED→COMPLETED`)
+are kept as INFORMATIONAL sub-spans only (the queue-dwell breakdown), NOT the
 cross-arm comparison.
+
+⚠️ HALF DONE — DO NOT DIFF THE ARMS' LATENCY YET. This client-side anchor is
+implemented in the v1 arm (HERE) ONLY. The v2 arm (`v2_eval.py`) still measures
+`first_useful_ms` from SERVER-SIDE request receipt (v2_eval.py:409) — it has no
+send_ts / client_span. Until v2_eval.py is switched to the SAME client-side
+anchor, the two arms measure DIFFERENT spans and their latency is NOT comparable
+(the exact defect F1 exists to kill, just on the other arm). The paired median-Δ
+gate must not be computed until both arms match.
 
 RUN CONTEXT (design §2a — enforced by the RUN wrapper, not this pure module):
     • The v1 pipeline is EXPIRING CODE; run this against a WORKTREE PINNED at
@@ -502,7 +508,8 @@ def build_report_header( *, seed: int, corpus: str, n_per_command: int, base_url
         f"seed       : {seed}\n"
         f"corpus     : {corpus}   n_per_command={n_per_command}\n"
         f"base_url   : {base_url}\n"
-        f"comparable : CLIENT send -> observed completion (F1 — the ONLY cross-arm latency comparison)\n"
+        f"comparable : CLIENT send -> observed completion (F1). ⚠️ v1 arm ONLY so far — v2_eval.py still\n"
+        f"             measures server-side first_useful; DO NOT diff arm latency until v2 matches.\n"
         f"server sub-spans (informational): RUNNING->COMPLETED (dwell excl), QUEUED->COMPLETED (dwell incl)\n"
     )
 
