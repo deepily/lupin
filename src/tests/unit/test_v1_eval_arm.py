@@ -71,7 +71,9 @@ def test_degradation_clean_is_none():
 def _ok_transitions( **meta ):
     md = { "is_cache_hit": True, "agent_type": "CalendarAgent" }
     md.update( meta )
-    return { "running_ts": 10.0, "completed_ts": 10.25, "metadata": md }
+    # queued 9.5 → running 10.0 → completed 10.25:
+    #   compute span = 250ms (running→completed), wall-clock = 750ms (queued→completed)
+    return { "queued_ts": 9.5, "running_ts": 10.0, "completed_ts": 10.25, "metadata": md }
 
 MAP = { "CalendarAgent": "agent go calendar" }
 
@@ -104,6 +106,14 @@ def test_assemble_ok_records_command_cachehit_span_degradation():
     assert r.ok is True and r.failure is None
     assert r.actual_command == "agent go calendar" and r.is_cache_hit is True
     assert r.span_ms == 250.0 and r.degradation == "agent_error"
+    assert r.wall_clock_ms == 750.0                 # queued→completed, dwell included
+
+def test_assemble_ok_without_queued_ts_has_no_wall_clock():
+    tr = _ok_transitions()
+    tr.pop( "queued_ts" )                            # dwell anchor not observed
+    r  = v1.assemble_v1_record( "u", "agent go calendar", { "job_id": "j1" }, tr, MAP )
+    assert r.ok is True and r.span_ms == 250.0       # compute span still gates ok
+    assert r.wall_clock_ms is None                   # wall-clock informational, absent
 
 def test_assemble_ok_cachehit_false_and_unmapped_command():
     r = v1.assemble_v1_record( "u", "agent go calendar", { "job_id": "j1" },
@@ -139,16 +149,16 @@ def test_run_pass_push_non_dict_short_circuits():
 
 # ───────────────────────────────────────────── compute_v1_metrics
 
-def _rec( ok=True, cache=False, span=200.0, actual="agent go calendar",
+def _rec( ok=True, cache=False, span=200.0, wall=None, actual="agent go calendar",
           expected="agent go calendar", degradation=None, failure=None ):
     return v1.V1Record( utterance="u", expected_command=expected, actual_command=actual,
-                        is_cache_hit=cache, span_ms=span if ok else None, ok=ok,
-                        failure=failure, degradation=degradation )
+                        is_cache_hit=cache, span_ms=span if ok else None,
+                        wall_clock_ms=wall, ok=ok, failure=failure, degradation=degradation )
 
 def test_metrics_full():
     recs = [
-        _rec( cache=True, span=100.0 ),
-        _rec( cache=False, span=300.0, actual="wrong command", degradation="router_error" ),
+        _rec( cache=True, span=100.0, wall=400.0 ),
+        _rec( cache=False, span=300.0, wall=900.0, actual="wrong command", degradation="router_error" ),
         _rec( ok=False, failure="push_failed", degradation="agent_error" ),
     ]
     m = v1.compute_v1_metrics( recs )
@@ -156,17 +166,20 @@ def test_metrics_full():
     assert m[ "failure_rate" ] == 0.3333          # _rate rounds to 4 places
     assert m[ "routing_accuracy" ] == 0.5                          # 1 of 2 ok routed right
     assert m[ "cache_hit_rate" ] == 0.5
-    assert m[ "latency_p50_ms" ] is not None and m[ "latency_p95_ms" ] is not None
+    assert m[ "compute_p50_ms" ] is not None and m[ "compute_p95_ms" ] is not None
+    assert m[ "wall_clock_p50_ms" ] is not None and m[ "wall_clock_p95_ms" ] is not None
     assert m[ "degradation_paths_seen" ] == [ "agent_error", "router_error" ]
     assert sorted( m[ "spans" ] ) == [ 100.0, 300.0 ]
+    assert sorted( m[ "wall_clock_spans" ] ) == [ 400.0, 900.0 ]   # wall-clock > compute (dwell)
 
 def test_metrics_empty_rates_are_none_not_zero():
     m = v1.compute_v1_metrics( [ ] )
     assert m[ "n" ] == 0 and m[ "ok_n" ] == 0
     assert m[ "failure_rate" ] is None and m[ "routing_accuracy" ] is None
     assert m[ "cache_hit_rate" ] is None
-    assert m[ "latency_p50_ms" ] is None and m[ "latency_p95_ms" ] is None
-    assert m[ "degradation_paths_seen" ] == [ ] and m[ "spans" ] == [ ]
+    assert m[ "compute_p50_ms" ] is None and m[ "compute_p95_ms" ] is None
+    assert m[ "wall_clock_p50_ms" ] is None and m[ "wall_clock_p95_ms" ] is None
+    assert m[ "degradation_paths_seen" ] == [ ] and m[ "spans" ] == [ ] and m[ "wall_clock_spans" ] == [ ]
 
 
 # ───────────────────────────────────────────── reporting
@@ -180,15 +193,17 @@ def test_fmt_none_and_value():
     assert v1._fmt( 12.34 ) == "12.3"
 
 def test_render_report_with_values():
-    m = v1.compute_v1_metrics( [ _rec( cache=True, span=100.0 ) ] )
+    m = v1.compute_v1_metrics( [ _rec( cache=True, span=100.0, wall=400.0 ) ] )
     out = v1.render_v1_report( m, seed=7, corpus="simple", n_per_command=60, base_url="http://x" )
-    assert "routing_accuracy : 100.0%" in out and "cache_hit_rate   : 100.0%" in out
+    assert "routing_accuracy  : 100.0%" in out and "cache_hit_rate    : 100.0%" in out
+    assert "compute_p50_ms    : 100.0" in out and "wall_clock_p50_ms : 400.0" in out
     assert v1.V1_PIN_SHA in out
 
 def test_render_report_with_none_rates():
     m = v1.compute_v1_metrics( [ ] )
     out = v1.render_v1_report( m, seed=7, corpus="simple", n_per_command=60, base_url="http://x" )
-    assert "routing_accuracy : <n/a>%" in out and "degradation_seen : (none)" in out
+    assert "routing_accuracy  : <n/a>%" in out and "degradation_seen  : (none)" in out
+    assert "wall_clock_p50_ms : <n/a>" in out
 
 
 # ───────────────────────────────────────────── CLI

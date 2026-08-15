@@ -101,9 +101,11 @@ class V1Record:
     job_id           : Optional[str]           = None
     actual_command   : Optional[str]           = None
     is_cache_hit     : bool                     = False
+    queued_ts        : Optional[float]          = None   # QUEUED transition (≈ request received), epoch seconds
     running_ts       : Optional[float]          = None   # RUNNING transition (work-start), epoch seconds
     completed_ts     : Optional[float]          = None   # COMPLETED transition, epoch seconds
-    span_ms          : Optional[float]          = None   # completed_ts - running_ts (EXCLUDES queue dwell)
+    span_ms          : Optional[float]          = None   # COMPUTE span: completed_ts - running_ts (EXCLUDES queue dwell)
+    wall_clock_ms    : Optional[float]          = None   # WALL-CLOCK: completed_ts - queued_ts (what the user waits, dwell INCLUDED)
     ok               : bool                     = False
     failure          : Optional[str]            = None
     degradation      : Optional[str]            = None   # which DEGRADATION_PATH this job exercised, if any
@@ -170,6 +172,7 @@ def assemble_v1_record( utterance: str, expected_command: str, push_result: Dict
         rec.failure = "push_failed"
         return rec
     rec.job_id     = job_id
+    rec.queued_ts  = transitions.get( "queued_ts" )
     rec.running_ts = transitions.get( "running_ts" )
 
     metadata = transitions.get( "metadata" )
@@ -182,8 +185,14 @@ def assemble_v1_record( utterance: str, expected_command: str, push_result: Dict
     rec.is_cache_hit   = bool( metadata.get( "is_cache_hit" ) )
     rec.actual_command = resolve_command( metadata.get( "agent_type" ), class_to_command )
     rec.degradation    = _classify_degradation( metadata )
-    rec.span_ms        = span_ms_between( rec.running_ts, rec.completed_ts )
-    rec.ok             = rec.span_ms is not None
+    # Two spans answering two questions (Cheech, design §3 + wall-clock addendum):
+    #   COMPUTE (comparable across arms): RUNNING → COMPLETED, dwell EXCLUDED.
+    #   WALL-CLOCK (what the v1 user feels): QUEUED → COMPLETED, dwell INCLUDED.
+    # `ok` is gated on the COMPUTE span (the comparable number); wall-clock is
+    # informational and may be None when queued_ts was not observed.
+    rec.span_ms       = span_ms_between( rec.running_ts, rec.completed_ts )
+    rec.wall_clock_ms = span_ms_between( rec.queued_ts, rec.completed_ts )
+    rec.ok            = rec.span_ms is not None
     if not rec.ok:
         rec.failure = "bad_span"
     return rec
@@ -217,8 +226,8 @@ def run_v1_pass( pairs: Sequence[Tuple[str, str]], *, push_fn: Callable[[str], D
 
     Requires:
         - push_fn( utterance ) → the /api/push response dict (carries job_id)
-        - collect_fn( job_id ) → { running_ts, completed_ts, metadata } observed
-          from the job's transition events (both seams injected in tests)
+        - collect_fn( job_id ) → { queued_ts, running_ts, completed_ts, metadata }
+          observed from the job's transition events (both seams injected in tests)
         - the pairs are already sampled/ordered by the caller (pairing preserved
           across arms — design §6)
 
@@ -261,6 +270,7 @@ def compute_v1_metrics( records: List[V1Record] ) -> Dict[str, Any]:
     routed_right = sum( 1 for r in ok if route_matches( r.actual_command, r.expected_command ) )
     cache_hits   = sum( 1 for r in ok if r.is_cache_hit )
     spans        = [ r.span_ms for r in ok if r.span_ms is not None ]
+    wall_spans   = [ r.wall_clock_ms for r in ok if r.wall_clock_ms is not None ]
     seen_paths   = sorted( { r.degradation for r in records if r.degradation } )
 
     return {
@@ -269,10 +279,16 @@ def compute_v1_metrics( records: List[V1Record] ) -> Dict[str, Any]:
         "failure_rate"           : _rate( n - ok_n, n ),
         "routing_accuracy"       : _rate( routed_right, ok_n ),
         "cache_hit_rate"         : _rate( cache_hits, ok_n ),
-        "latency_p50_ms"         : percentile( spans, 50.0 ),
-        "latency_p95_ms"         : percentile( spans, 95.0 ),
+        # COMPUTE span — comparable across arms (dwell excluded); the paired gate.
+        "compute_p50_ms"         : percentile( spans, 50.0 ),
+        "compute_p95_ms"         : percentile( spans, 95.0 ),
+        # WALL-CLOCK — what the v1 user actually waits (dwell included); a DIFFERENT
+        # question, reported so v1 is never quoted as faster than anyone experiences.
+        "wall_clock_p50_ms"      : percentile( wall_spans, 50.0 ),
+        "wall_clock_p95_ms"      : percentile( wall_spans, 95.0 ),
         "degradation_paths_seen" : seen_paths,
-        "spans"                  : spans,
+        "spans"                  : spans,             # raw COMPUTE spans (for the paired median-Δ gate)
+        "wall_clock_spans"       : wall_spans,        # raw WALL-CLOCK spans (informational)
     }
 
 
@@ -290,7 +306,8 @@ def build_report_header( *, seed: int, corpus: str, n_per_command: int, base_url
         f"seed       : {seed}\n"
         f"corpus     : {corpus}   n_per_command={n_per_command}\n"
         f"base_url   : {base_url}\n"
-        f"span       : RUNNING->COMPLETED (queue dwell EXCLUDED, design §3)\n"
+        f"compute    : RUNNING->COMPLETED (queue dwell EXCLUDED — comparable across arms, design §3)\n"
+        f"wall-clock : QUEUED->COMPLETED (queue dwell INCLUDED — what the v1 user waits)\n"
     )
 
 
@@ -312,13 +329,17 @@ def render_v1_report( metrics: Dict[str, Any], *, seed: int, corpus: str,
     fail   = metrics[ "failure_rate" ]
     rows   = [
         header,
-        f"utterances       : {metrics['n']} (ok {metrics['ok_n']})",
-        f"failure_rate     : {_fmt( None if fail is None else fail * 100 )}%",
-        f"routing_accuracy : {_fmt( None if acc is None else acc * 100 )}%  (command-match LOWER BOUND, R-C2)",
-        f"cache_hit_rate   : {_fmt( None if chr_ is None else chr_ * 100 )}%",
-        f"latency_p50_ms   : {_fmt( metrics['latency_p50_ms'] )}",
-        f"latency_p95_ms   : {_fmt( metrics['latency_p95_ms'] )}  (INFORMATIONAL, n too small to gate)",
-        f"degradation_seen : {', '.join( metrics['degradation_paths_seen'] ) or '(none)'}",
+        f"utterances        : {metrics['n']} (ok {metrics['ok_n']})",
+        f"failure_rate      : {_fmt( None if fail is None else fail * 100 )}%",
+        f"routing_accuracy  : {_fmt( None if acc is None else acc * 100 )}%  (command-match LOWER BOUND, R-C2)",
+        f"cache_hit_rate    : {_fmt( None if chr_ is None else chr_ * 100 )}%",
+        "-- COMPUTE span (comparable across arms; dwell EXCLUDED; the paired gate) --",
+        f"compute_p50_ms    : {_fmt( metrics['compute_p50_ms'] )}",
+        f"compute_p95_ms    : {_fmt( metrics['compute_p95_ms'] )}  (INFORMATIONAL, n too small to gate)",
+        "-- WALL-CLOCK to answer (what the v1 user WAITS; dwell INCLUDED; a DIFFERENT question) --",
+        f"wall_clock_p50_ms : {_fmt( metrics['wall_clock_p50_ms'] )}",
+        f"wall_clock_p95_ms : {_fmt( metrics['wall_clock_p95_ms'] )}",
+        f"degradation_seen  : {', '.join( metrics['degradation_paths_seen'] ) or '(none)'}",
     ]
     return "\n".join( rows )
 
