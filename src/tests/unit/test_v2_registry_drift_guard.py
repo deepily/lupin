@@ -319,6 +319,10 @@ class TestPromptExemptionFacility( unittest.TestCase ):
         # Falsifiability: bad entries hitting all three failure modes.
         # - phantom: empty reason AND not an owned command
         # - weather: a real CONVERSATIONAL template command → stale exemption
+        # Precondition (Tiffany): the stale arm relies on "weather" being a real
+        # in-prompt command. Assert it, so this test FAILS LOUDLY if weather ever
+        # leaves the template rather than silently ceasing to exercise staleness.
+        self.assertIn( "agent router go to weather", _template_commands() )
         problems = _validate_prompt_exemptions(
             { "agent router go to phantom": "",
               "agent router go to weather": "some reason" },
