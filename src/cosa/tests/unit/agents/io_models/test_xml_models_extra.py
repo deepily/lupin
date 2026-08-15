@@ -917,6 +917,34 @@ def test_fuzzy_file_match_get_example_for_template():
     assert "claude-code-analysis.md" in ex.matches
 
 
+def test_fuzzy_file_match_EMPTY_TAG_is_a_real_zero_match_not_an_error():
+    """
+    Row b2aae1e8 — the model must be able to represent its own correct answer.
+
+    "0 matches" is the RIGHT answer for "make me a podcast", which names no document.
+    The LLM says so as `<matches></matches>`; xmltodict turns an empty tag into None;
+    a required `str` field then fails validation and RAISES. Upstream that exception is
+    swallowed by a blanket `except Exception` in expeditor.py, so the caller sees
+    status="error" — a legitimate zero-match becomes indistinguishable from a parse
+    failure, and the "never crash" guarantee rests on a bare except.
+
+    WHY THE EXISTING TESTS MISSED IT, and this is the point of the test: every one of
+    them either constructs `FuzzyFileMatchResponse( matches="" )` directly — which was
+    never the broken path — or mocks `from_xml` away entirely. The fall-through was
+    proven against a mock that could not reproduce the defect. This test drives the
+    REAL model with the REAL empty-tag XML.
+    """
+    r = FuzzyFileMatchResponse.from_xml( "<response><matches></matches></response>" )
+    assert r.matches == ""
+    assert r.get_matches_list() == []
+
+
+def test_fuzzy_file_match_self_closing_tag_is_also_a_zero_match():
+    """The other spelling of the same empty answer — `<matches/>` also arrives as None."""
+    r = FuzzyFileMatchResponse.from_xml( "<response><matches/></response>" )
+    assert r.get_matches_list() == []
+
+
 # =========================================================================== #
 # TFEResumeMatchResponse
 # =========================================================================== #

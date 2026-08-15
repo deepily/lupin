@@ -231,5 +231,60 @@ class TestAutoResolvePreStep( unittest.TestCase ):
         self.assertGreaterEqual( ask_count, 1, "no original_question ⇒ must ask, unchanged" )
 
 
+class TestRealZeroMatchXmlReachesTheCaller( unittest.TestCase ):
+    """
+    Row b2aae1e8, at the level that actually matters — the caller's STATUS.
+
+    Every other test in this file patches `FuzzyFileMatchResponse.from_xml`, so the
+    real model never runs and the defect is mocked out of existence. That is how the
+    original "no match falls through, never crash" gate passed while the bug was live:
+    the guarantee held at the user level (the blanket `except Exception` caught it),
+    but a legitimate zero-match was arriving as status="error" — indistinguishable
+    from a genuine parse failure.
+
+    Here ONLY the LLM boundary is mocked. The real response XML, the real model, and
+    the real parse all run.
+    """
+
+    ZERO_MATCH_XML = "<response><matches></matches></response>"
+
+    def test_an_empty_matches_tag_yields_fuzzy_not_error( self ):
+        o = _mk_expeditor()
+        with patch.object( ex_mod, "prefilter_docs_map_by_keywords",
+                           side_effect=lambda m, d, debug=False: ( dict( m ), False ) ), \
+             patch.object( ex_mod.cu, "get_file_as_string", return_value="{description} {file_list}" ), \
+             patch.object( ex_mod, "PromptTemplateProcessor", MagicMock() ) as proc:
+            proc.return_value.process_template.return_value = "{description} {file_list}"
+            o.llm_factory = MagicMock()
+            o.llm_factory.get_client.return_value.run.return_value = self.ZERO_MATCH_XML
+            status, matches = o._match_description_to_files(
+                "alpha bravo charlie", DOCS, MagicMock(), "/root" )
+
+        self.assertEqual( status, "fuzzy",
+                          "a real zero-match must be reported as a MATCH RESULT, not an error" )
+        self.assertEqual( matches, [] )
+
+    def test_a_genuinely_malformed_response_is_STILL_an_error( self ):
+        """
+        The control, and the reason this fix is not just 'stop raising'. Widening the
+        model to accept an empty tag must not also make unparseable junk look like a
+        clean zero-match — then the caller could never tell the two apart in the other
+        direction, which is the same defect wearing the fix's clothes.
+        """
+        o = _mk_expeditor()
+        with patch.object( ex_mod, "prefilter_docs_map_by_keywords",
+                           side_effect=lambda m, d, debug=False: ( dict( m ), False ) ), \
+             patch.object( ex_mod.cu, "get_file_as_string", return_value="{description} {file_list}" ), \
+             patch.object( ex_mod, "PromptTemplateProcessor", MagicMock() ) as proc:
+            proc.return_value.process_template.return_value = "{description} {file_list}"
+            o.llm_factory = MagicMock()
+            o.llm_factory.get_client.return_value.run.return_value = "not xml at all"
+            status, matches = o._match_description_to_files(
+                "alpha bravo charlie", DOCS, MagicMock(), "/root" )
+
+        self.assertEqual( status, "error" )
+        self.assertEqual( matches, [] )
+
+
 if __name__ == "__main__":
     unittest.main()
