@@ -32,10 +32,12 @@ import cosa.utils.util as cu
 from cosa.rest.v2.registry import (
     AgentSpec,
     V2_AGENTS,
+    AGENTIC_COMMANDS,
     DEFERRED_COMMANDS,
     CONTROL_COMMANDS,
     RECEPTIONIST_OR_NONE,
     resolve,
+    resolve_agentic,
 )
 from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
 
@@ -71,13 +73,30 @@ class TestRegistryDriftGuard( unittest.TestCase ):
         for a, b in combinations( buckets, 2 ):
             self.assertEqual( a & b, set(), f"command in two buckets: {a & b}" )
 
-    def test_bucket_counts( self ):
-        self.assertEqual( len( V2_AGENTS ),            6 )
-        self.assertEqual( len( DEFERRED_COMMANDS ),    7 )
-        self.assertEqual( len( CONTROL_COMMANDS ),     1 )
-        self.assertEqual( len( RECEPTIONIST_OR_NONE ), 2 )   # receptionist + none
-        # 6 + 7 + 1 + 2 == every emittable command (15 agent-routing + none).
-        self.assertEqual( len( _template_commands() ), 16 )
+    # test_bucket_counts REMOVED (phase 1, Rachel's ruling 2026-08-15): a count
+    # derived from the registry and asserted against the registry is a tautology
+    # that can never go red, and the set-equality above proves strictly more — a
+    # count cannot fail unless a set-equality would have failed first.
+
+
+class TestAgenticSetOwnership( unittest.TestCase ):
+    """The registry now OWNS the agentic set (§5.1); these guard the two seams
+    that ownership opens — cls vs the source table, and the interim DEFERRED name."""
+
+    # test_cls_agentic_matches_agentic_agents REMOVED (Rachel 2026-08-15): the
+    # AGENTIC specs are built by iterating AGENTIC_AGENTS, so set(AGENTIC_COMMANDS)
+    # == set(AGENTIC_AGENTS) is true BY CONSTRUCTION — a tautology like the count.
+    # The invariant is enforced instead by the construction warning at registry.py's
+    # _AGENTIC comprehension.
+
+    def test_deferred_is_template_emittable_agentic_subset( self ):
+        # DEFERRED_COMMANDS is a bounded interim (retired phase 2). Pin it to the
+        # template-emittable agentic subset so it cannot silently drift from the
+        # owned set: the 3 AGENTIC commands absent from the template (bug fix
+        # expediter, test fix expediter resume, test suite) are excluded here.
+        template          = _template_commands()
+        emittable_agentic = { c for c in AGENTIC_COMMANDS if c in template }
+        self.assertEqual( DEFERRED_COMMANDS, emittable_agentic )
 
 
 class TestResolve( unittest.TestCase ):
@@ -102,6 +121,22 @@ class TestResolve( unittest.TestCase ):
 
     def test_unknown_command_resolves_to_none( self ):
         self.assertIsNone( resolve( "agent router go to nowhere" ) )
+
+    def test_agentic_command_resolves_to_none_in_resolve( self ):
+        # §5.1.3: resolve() stays scoped to CONVERSATIONAL — an owned agentic
+        # command must still return None here, unchanged from before phase 1.
+        self.assertIsNone( resolve( "agent router go to deep research" ) )
+
+    def test_resolve_agentic_returns_spec( self ):
+        spec = resolve_agentic( "agent router go to deep research" )
+        self.assertIsInstance( spec, AgentSpec )
+        self.assertEqual( spec.command, "agent router go to deep research" )
+
+    def test_resolve_agentic_returns_none_for_conversational( self ):
+        self.assertIsNone( resolve_agentic( "agent router go to weather" ) )
+
+    def test_resolve_agentic_returns_none_for_unknown( self ):
+        self.assertIsNone( resolve_agentic( "agent router go to nowhere" ) )
 
 
 class TestRequiredArgsResolutionOrder( unittest.TestCase ):
