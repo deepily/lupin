@@ -110,6 +110,67 @@ def test_load_corpus_empty_raises( tmp_path ):
 
 
 # ---------------------------------------------------------------------------
+# stratified_sample
+# ---------------------------------------------------------------------------
+def _pairs( **by_command ):
+    """Build a corpus: _pairs( math=["a","b"], todo=["x"] ) -> [(u, cmd), ...]."""
+    out = []
+    for command, utterances in by_command.items():
+        for utterance in utterances:
+            out.append( ( utterance, command ) )
+    return out
+
+
+def test_stratified_sample_empty_raises():
+    with pytest.raises( ValueError ):
+        ve.stratified_sample( [], 2, seed=1 )
+
+
+def test_stratified_sample_bad_n_raises():
+    with pytest.raises( ValueError ):
+        ve.stratified_sample( _pairs( math=[ "a", "b" ] ), 0, seed=1 )
+
+
+def test_stratified_sample_caps_per_command_and_is_reproducible():
+    corpus = _pairs( math=[ "a", "b", "c", "d" ], todo=[ "x", "y", "z" ] )
+    sampled_a, manifest_a = ve.stratified_sample( corpus, 2, seed=7 )
+    sampled_b, manifest_b = ve.stratified_sample( corpus, 2, seed=7 )
+    # exactly n per command, and the same seed reproduces the exact sample
+    assert sampled_a == sampled_b
+    assert manifest_a == manifest_b
+    assert sum( 1 for _, c in sampled_a if c == "math" ) == 2
+    assert sum( 1 for _, c in sampled_a if c == "todo" ) == 2
+    assert manifest_a[ "seed" ] == 7
+    assert manifest_a[ "n_per_command" ] == 2
+    assert manifest_a[ "total_kept" ] == 4
+    assert manifest_a[ "under_quota" ] == []
+    assert manifest_a[ "per_command" ][ "math" ] == { "kept": 2, "available": 4 }
+
+
+def test_stratified_sample_under_quota_keeps_all_and_names_short_commands():
+    corpus = _pairs( math=[ "a", "b" ], todo=[ "x" ] )
+    sampled, manifest = ve.stratified_sample( corpus, 5, seed=1 )
+    assert len( sampled ) == 3                       # all kept, nothing invented
+    assert manifest[ "under_quota" ] == [ "math", "todo" ]
+    assert manifest[ "per_command" ][ "todo" ] == { "kept": 1, "available": 1 }
+
+
+def test_stratified_sample_is_order_independent_within_a_command():
+    forward  = _pairs( math=[ "a", "b", "c", "d" ] )
+    reversed_ = _pairs( math=[ "d", "c", "b", "a" ] )
+    sampled_f, _ = ve.stratified_sample( forward,  2, seed=3 )
+    sampled_r, _ = ve.stratified_sample( reversed_, 2, seed=3 )
+    assert set( sampled_f ) == set( sampled_r )      # same set chosen regardless of input order
+
+
+def test_stratified_sample_preserves_first_appearance_command_order():
+    corpus = _pairs( todo=[ "x", "y" ], math=[ "a", "b" ] )   # todo appears first
+    sampled, _ = ve.stratified_sample( corpus, 1, seed=2 )
+    commands = [ c for _, c in sampled ]
+    assert commands == [ "todo", "math" ]
+
+
+# ---------------------------------------------------------------------------
 # field accessors
 # ---------------------------------------------------------------------------
 def test_accessors_on_failed_record_return_none():

@@ -39,6 +39,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import random
 import statistics
 import sys
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
@@ -203,6 +204,76 @@ def _apply_limit(
             kept.append( ( utterance, command ) )
             seen[ command ] = count + 1
     return kept
+
+
+def stratified_sample(
+    pairs         : List[ Tuple[ str, str ] ],
+    n_per_command : int,
+    seed          : int,
+) -> Tuple[ List[ Tuple[ str, str ] ], Dict[ str, Any ] ]:
+    """
+    A seeded, per-command random sample of the corpus (the paired-harness sampler).
+
+    Unlike `_apply_limit` (first-N per command — order-dependent, no randomness), this
+    draws a REPRODUCIBLE random sample of `n_per_command` utterances per command so the
+    biggest command cannot dominate a "system-wide" number and the smallest ones are not
+    starved (plan §5, §1.4a). The sample is a pure function of (utterance set, n, seed):
+    each command's utterances are sorted before sampling, so the source file's line order
+    does not change which utterances are chosen.
+
+    Requires:
+        - pairs is a non-empty list of (utterance, expected_command).
+        - n_per_command is a positive integer (the target per-command sample size).
+        - seed is an integer, recorded in the report so the exact sample reproduces.
+
+    Ensures:
+        - each command contributes min( n_per_command, available ) utterances, chosen with
+          a `random.Random( seed )` draw over that command's sorted utterance set.
+        - commands appear in first-appearance order; a command with fewer than
+          n_per_command utterances contributes all of them and is listed in
+          manifest["under_quota"] so the report names what fell short (never a silent cap).
+        - returns ( sampled_pairs, manifest ); manifest carries seed, n_per_command,
+          per-command {kept, available}, the under_quota command list, and total_kept.
+
+    Raises:
+        - ValueError if pairs is empty or n_per_command < 1.
+    """
+    if not pairs:
+        raise ValueError( "stratified_sample: refusing to sample an empty corpus" )
+    if n_per_command < 1:
+        raise ValueError( "stratified_sample: n_per_command must be >= 1" )
+
+    order   : List[ str ]              = []
+    grouped : Dict[ str, List[ str ] ] = {}
+    for utterance, command in pairs:
+        if command not in grouped:
+            grouped[ command ] = []
+            order.append( command )
+        grouped[ command ].append( utterance )
+
+    rng         = random.Random( seed )
+    sampled     : List[ Tuple[ str, str ] ]      = []
+    per_command : Dict[ str, Dict[ str, int ] ]  = {}
+    under_quota : List[ str ]                     = []
+    for command in order:
+        utterances = sorted( grouped[ command ] )          # order-independent sample base
+        available  = len( utterances )
+        keep       = min( n_per_command, available )
+        chosen     = rng.sample( utterances, keep )        # seeded, reproducible
+        for utterance in chosen:
+            sampled.append( ( utterance, command ) )
+        per_command[ command ] = { "kept": keep, "available": available }
+        if available < n_per_command:
+            under_quota.append( command )
+
+    manifest = {
+        "seed"          : seed,
+        "n_per_command" : n_per_command,
+        "per_command"   : per_command,
+        "under_quota"   : under_quota,
+        "total_kept"    : len( sampled ),
+    }
+    return sampled, manifest
 
 
 # ---------------------------------------------------------------------------
