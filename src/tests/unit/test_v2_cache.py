@@ -354,6 +354,48 @@ def test_r_c1_exact_normalized_is_the_replay_signal( wired ):
     assert result.tier == "exact_normalized"
 
 
+# ──────────────────────────────────────── R-C3 guard (verbatim embedding key)
+
+def test_r_c3_embedding_cache_is_keyed_by_verbatim_question( wired ):
+    """
+    R-C3: the ANN vectors are the snapshot's `question_embedding`, generated from
+    its RAW question — so the embedding cache MUST be probed by the verbatim
+    string, not the normalized one. Seed the cache at a verbatim key whose
+    normalized form DIFFERS, and the tier-2 probe must hit it for free. A
+    regression to a normalized-keyed lookup would query "what time is it", miss,
+    and this goes red — the silent-miss Cheech flagged, made loud.
+    """
+    build, store = wired
+    cache, provider, _f = build()
+    verbatim = "What TIME Is It"                    # normalizes to "what time is it" — DIFFERS
+    store.embeddings[ verbatim ] = [ 0.9 ] * 4      # cached ONLY at the verbatim key
+    store.ann_result = [ ( 88.0, _make_orm_row( id_hash="ann-1" ) ) ]
+
+    result = cache.lookup( verbatim )
+
+    assert result.embed_cached is True              # verbatim probe hit → free
+    assert provider.calls == []                     # no model call
+
+
+def test_r_c3_normalized_key_alone_does_not_serve_the_verbatim_probe( wired ):
+    """
+    R-C3 (symmetric): a cache holding ONLY the normalized key must NOT satisfy the
+    verbatim probe — the wrong (normalized-keyed) cache would silently hit here.
+    Under the correct code the verbatim probe misses and generates; a normalized-
+    keyed regression would wrongly report embed_cached=True, so this goes red.
+    """
+    build, store = wired
+    cache, provider, _f = build( provider_vec=[ 0.3 ] * 4 )
+    verbatim = "What TIME Is It"
+    store.embeddings[ "what time is it" ] = [ 0.9 ] * 4   # ONLY the normalized key present
+    store.ann_result = [ ( 88.0, _make_orm_row( id_hash="ann-1" ) ) ]
+
+    result = cache.lookup( verbatim )
+
+    assert result.embed_cached is False                  # verbatim probe missed → generated
+    assert provider.calls == [ ( verbatim, "prose" ) ]   # generated from the VERBATIM question
+
+
 # ────────────────────────────────────────────────────────────── write-back
 
 def test_write_back_empty_question_raises( wired ):
