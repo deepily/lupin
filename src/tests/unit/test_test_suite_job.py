@@ -894,16 +894,17 @@ class TestJunitFlagGating:
             assert s in SUITES_SUPPORTING_JUNIT_XML
 
     # not_executed joined the zero-counts dict at c37443f5 (89bfcc8f D2, 2026-08-13);
-    # these expected dicts predated it (file last touched pre-August) → stale reds.
+    # deselected joined at f3beb6d5 (2026-08-15) — the junit XML carries no deselect
+    # info, so the key is always 0 here and the slice count is parsed from stdout.
     def test_parse_junit_xml_handles_none_path( self ):
         """_parse_junit_xml(None) returns zero-counts dict without raising."""
         result = TestSuiteJob._parse_junit_xml( None )
-        assert result == { "passed": 0, "failed": 0, "skipped": 0, "errors": 0, "not_executed": 0 }
+        assert result == { "passed": 0, "failed": 0, "skipped": 0, "errors": 0, "not_executed": 0, "deselected": 0 }
 
     def test_parse_junit_xml_handles_empty_string( self ):
         """Empty-string path treated same as None (non-pytest suites)."""
         result = TestSuiteJob._parse_junit_xml( "" )
-        assert result == { "passed": 0, "failed": 0, "skipped": 0, "errors": 0, "not_executed": 0 }
+        assert result == { "passed": 0, "failed": 0, "skipped": 0, "errors": 0, "not_executed": 0, "deselected": 0 }
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

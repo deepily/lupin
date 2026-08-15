@@ -562,6 +562,13 @@ class TestSuiteJob( AgenticJobBase ):
             total_skipped      = sum( r[ "skipped" ]                    for r in self.suite_results.values() )
             total_errors       = sum( r[ "errors" ]                     for r in self.suite_results.values() )
             total_not_executed = sum( r.get( "not_executed", 0 )        for r in self.suite_results.values() )
+            total_deselected   = sum( r.get( "deselected", 0 )          for r in self.suite_results.values() )
+            # A filtered run (any deselected test) is a SLICE, not a full-suite
+            # gate (row f3beb6d5). This does NOT touch _classify_outcome —
+            # `all_passed` still reflects what actually ran; `filtered` tells the
+            # dashboard + watchdog the run was scoped so a slice can't masquerade
+            # as a full green.
+            filtered = ( total_deselected > 0 )
             # Determine pass/fail from parsed results, not exit code — exit code can be
             # non-zero for warnings or cleanup even when all tests pass (335/0/0 false positive).
             # A not-executed tier is neither a pass nor a failure: it blocks "all passed"
@@ -579,6 +586,8 @@ class TestSuiteJob( AgenticJobBase ):
                 "total_errors"       : total_errors,
                 "total_skipped"      : total_skipped,
                 "total_not_executed" : total_not_executed,
+                "total_deselected"   : total_deselected,
+                "filtered"           : filtered,
                 "all_passed"         : all_passed,
             }
             self.artifacts[ "suite_results" ] = self.suite_results
@@ -614,13 +623,21 @@ class TestSuiteJob( AgenticJobBase ):
             report_rel = f"test-suite/{timestamp}-{suites_str}-results.md"
             report_abs = f"{io_base}/{report_rel}"
 
+            # Name the scope in the header when the run was FILTERED (row f3beb6d5):
+            # a -k/-m slice must never read as a full-suite gate. selected =
+            # what actually ran; collected = selected + deselected.
+            selected_total  = total_passed + total_failed + total_errors + total_skipped
+            collected_total = selected_total + total_deselected
+            header_scope    = f" — FILTERED — {selected_total} of {collected_total} selected" if filtered else ""
+
             # Build markdown report with full stdout for each suite
             report_lines = [
-                f"# Test Suite Report — {overall}",
+                f"# Test Suite Report — {overall}{header_scope}",
                 f"",
                 f"**Date**: {now_local.strftime( '%Y-%m-%d %H:%M:%S %Z' )}  ",
                 f"**Suites**: {', '.join( self.test_types )}  ",
-                f"**Total**: {total_passed} passed, {total_failed} failed, {total_errors} errors, {total_skipped} skipped",
+                f"**Total**: {total_passed} passed, {total_failed} failed, {total_errors} errors, {total_skipped} skipped"
+                + ( f", {total_deselected} deselected" if filtered else "" ),
                 f"",
                 f"---",
                 f"",
@@ -640,6 +657,7 @@ class TestSuiteJob( AgenticJobBase ):
                 report_lines.append( f"| Skipped | {result[ 'skipped' ]} |" )
                 report_lines.append( f"| Errors | {result[ 'errors' ]} |" )
                 report_lines.append( f"| Not executed | {result.get( 'not_executed', 0 )} |" )
+                report_lines.append( f"| Deselected | {result.get( 'deselected', 0 )} |" )
                 report_lines.append( f"| Duration | {result[ 'duration' ]:.1f}s |" )
                 report_lines.append( f"" )
 
@@ -708,19 +726,22 @@ class TestSuiteJob( AgenticJobBase ):
                     result[ "passed" ], result[ "failed" ], result[ "errors" ], result[ "skipped" ],
                     result.get( "not_executed", 0 )
                 ) ]
-                ne = result.get( "not_executed", 0 )
+                ne  = result.get( "not_executed", 0 )
+                des = result.get( "deselected", 0 )
                 line = ( f"- **{suite_type}**: {icon} — "
                          f"{result[ 'passed' ]} passed, {result[ 'failed' ]} failed, "
                          f"{result[ 'errors' ]} errors, {result[ 'skipped' ]} skipped"
-                         + ( f", {ne} not executed" if ne else "" ) )
+                         + ( f", {ne} not executed" if ne else "" )
+                         + ( f", {des} deselected" if des else "" ) )
                 crash_output = result.get( "startup_crash_output" )
                 if crash_output:
                     line += f"\n  **STARTUP CRASH** (exit={result[ 'exit_code' ]}): `{crash_output[ :500 ]}`"
                 suite_lines.append( line )
 
-            abstract = ( f"**Test Suite Results: {overall}**\n\n"
+            abstract = ( f"**Test Suite Results: {overall}{header_scope}**\n\n"
                          + "\n".join( suite_lines )
-                         + f"\n\n**Total**: {total_passed} passed, {total_failed} failed, {total_errors} errors, {total_skipped} skipped" )
+                         + f"\n\n**Total**: {total_passed} passed, {total_failed} failed, {total_errors} errors, {total_skipped} skipped"
+                         + ( f", {total_deselected} deselected" if filtered else "" ) )
             self.artifacts[ "abstract" ] = abstract
 
             await voice_io.notify(
@@ -1388,6 +1409,12 @@ class TestSuiteJob( AgenticJobBase ):
                 if fallback is not None:
                     parsed.update( fallback )
 
+            # Deselect count is stdout-only (junit-xml counts selected tests
+            # only), so a -k/-m slice would otherwise read as a full pass
+            # (row f3beb6d5). Kept SEPARATE from not_executed — deselection is
+            # intentional scoping, not a tier that failed to run.
+            parsed[ "deselected" ] = self._parse_deselected( stdout )
+
             parsed[ "exit_code" ] = exit_code
             parsed[ "log_path" ]  = log_path
             parsed[ "duration" ]  = duration
@@ -1596,6 +1623,7 @@ class TestSuiteJob( AgenticJobBase ):
             "skipped"      : 0,
             "errors"       : 0,
             "not_executed" : 0,   # tiers that never ran (multi-tier runners); 0 for pytest suites
+            "deselected"   : 0,   # -k/-m slice size (row f3beb6d5); parsed from stdout, NOT this XML
         }
 
         # None path = suite is not pytest-backed (e.g. websocket). Skip parse,
@@ -1741,6 +1769,43 @@ class TestSuiteJob( AgenticJobBase ):
                 process.wait( timeout=10 )
             except subprocess.TimeoutExpired:
                 pass
+
+    @staticmethod
+    def _parse_deselected( stdout: str ) -> int:
+        """
+        Parse pytest's deselect count from captured stdout (row f3beb6d5).
+
+        The junit-xml carries NO deselect information — its `tests` attribute
+        counts only what was selected — so a `-k`/`-m` slice is invisible to
+        _parse_junit_xml, and a 5-of-692 run looks byte-identical to a full
+        green. This recovers the slice size so cost_summary can flag the run
+        as `filtered` and the report header can name the scope.
+
+        ⚠️ Deselection is INTENTIONAL SCOPING, not non-execution (bug 89bfcc8f).
+        The count returned here must NEVER be routed into `not_executed` — that
+        would red every filtered run, including the TFE landing/confirm runs
+        which are filtered BY DESIGN.
+
+        Two pytest forms carry the count; either one suffices:
+            collected 692 items / 687 deselected / 5 selected
+            ============== 5 passed, 687 deselected in 23.08s ==============
+
+        Requires:
+            - stdout is the captured runner stdout (may be empty)
+
+        Ensures:
+            - returns the deselected count when either form is present
+            - returns 0 when neither is present (an unfiltered run)
+            - prefers the collection form (the authoritative "/ M deselected /")
+              when both are present; the two forms agree in practice
+        """
+        collected = re.search( r"collected\s+\d+\s+items?\s*/\s*(\d+)\s+deselected", stdout )
+        if collected:
+            return int( collected.group( 1 ) )
+        trailer = re.search( r"(\d+)\s+deselected", stdout )
+        if trailer:
+            return int( trailer.group( 1 ) )
+        return 0
 
     @staticmethod
     def _parse_pytest_progress_stdout( stdout: str ) -> Optional[ Dict ]:
