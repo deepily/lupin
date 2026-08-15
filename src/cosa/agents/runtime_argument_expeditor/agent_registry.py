@@ -253,6 +253,33 @@ AGENTIC_AGENTS = {
         },
     },
 
+    "agent router go to test fix expediter" : {
+        # START a fresh TFE run — SYSTEM-TRIGGERED, not voice. The test-suite
+        # completion watchdog dispatches this command
+        # (test_suite_completion_watchdog.py:259) with source_test_suite_job_id =
+        # the just-failed job's id_hash. That arg is a job hash no user can speak, so
+        # this command is EXEMPT from the router prompt (the drift-guard exemption
+        # carries the stated reason + the still-trained residual). It keeps a registry
+        # entry so the watchdog's dispatch resolves and the registry OWNS it.
+        # cli_module is None (like test_suite): system-dispatched with the arg already
+        # supplied, so the voice expeditor never interviews for it — no CLI help, and
+        # no shared-module help conflict with the resume entry below.
+        "job_prefix"         : "tfe",
+        "cli_module"         : None,
+        "job_class_path"     : "cosa.agents.test_fix_expediter.job.TestFixExpediterJob",
+        "display_name"       : "Test Fix Expediter",
+        "required_user_args" : [ "source_test_suite_job_id" ],
+        "system_provided"    : [ "user_id", "user_email", "session_id" ],
+        "arg_mapping"        : {
+            "source_test_suite_job_id" : "source_test_suite_job_id",
+            "job_id"                   : "source_test_suite_job_id",
+        },
+        "fallback_questions" : {
+            "source_test_suite_job_id" : "Which test-suite job's failures should I fix? Paste its job ID.",
+        },
+        "fallback_defaults"  : {},
+    },
+
     "agent router go to test fix expediter resume" : {
         # Voice-driven resume of a stalled Test Fix Expediter job.
         # Session 9056c113 doc 16 Phase 2 — wires into existing REST endpoint

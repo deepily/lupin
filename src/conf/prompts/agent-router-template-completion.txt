@@ -22,6 +22,7 @@ You will be given a human voice command as INPUT as well as a list of possible s
     <command>agent router go to swe team</command>
     <command>agent router go to presentation generator</command>
     <command>agent router go to research to presentation</command>
+    <command>agent router go to test fix expediter resume</command>
     <command>agent router go to automatic</command>
     <command>none</command>
 </agent-routing-commands>
