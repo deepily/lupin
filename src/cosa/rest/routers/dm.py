@@ -975,6 +975,125 @@ def _rescoped_quantities( original, rewritten ):
         return {}
 
 
+# A bare hex id — a store row id and a git sha are indistinguishable by shape, which is
+# the whole reason the condenser guesses wrong.
+_LABEL_HEX_ID = re.compile( r"(?<![\w/-])[0-9a-f]{7,40}(?![\w/-])" )
+#
+# THE HEX ALTERNATIVE MUST COME FIRST. With the word pattern leading, `b8d10bd3` tokenised
+# as "b", "8", "d"… because the first alternative matches the leading letter — so every id
+# beginning with a letter, roughly half of them, was invisible to this guard. The suite was
+# green: one test passed because the id was never seen at all, rather than for the reason it
+# asserted. An unrun branch is what surfaced it.
+_LABEL_TOKEN  = re.compile( r"[0-9a-f]{7,40}(?![\w-])|[A-Za-z'’#-]+|\d[\d,]*" )
+
+# The nouns that CLASSIFY an id. Carrying one the sender wrote is fine; supplying one
+# they did not is a fact they never asserted.
+_LABEL_NOUNS = frozenset(
+    "commit sha hash revision rev row task bug job session branch tag pr issue "
+    "message thread ticket id".split()
+)
+
+_LABEL_WINDOW = 3
+
+
+def _id_label_bindings( text ):
+    """
+    Map each bare hex id in `text` to the type nouns sitting just before it.
+
+    Requires:
+        - text is a string
+
+    Ensures:
+        - returns { hex_id: set( nouns ) } over a 3-token preceding window
+    """
+    ids = { m.group( 0 ) for m in _LABEL_HEX_ID.finditer( text ) }
+    out = {}
+    # PER LINE, and that is load-bearing: `_restore_dropped_pointers` appends recovered
+    # pointers on their own lines, so a window that crossed a newline read the last word
+    # of the previous sentence as this id's label and refused a perfectly good rewrite.
+    # A noun on another line is not labelling this id.
+    for line in ( text or "" ).splitlines():
+        toks = _LABEL_TOKEN.findall( line )
+        for i, t in enumerate( toks ):
+            if t not in ids: continue
+            window = { w.lower().strip( "#" ) for w in toks[ max( 0, i - _LABEL_WINDOW ) : i ] }
+            out.setdefault( t, set() ).update( window & _LABEL_NOUNS )
+    return out
+
+
+def _invented_id_labels( original, rewritten ):
+    """
+    Type nouns the rewrite attached to an id that the sender never attached. Empty = clean.
+
+    ⚠️ THE FAILURE THIS BOUNDS is a fabricated fact that the fabrication guard cannot see,
+    because the invented word is a lowercase COMMON NOUN — the limit `_fabricated_facts`
+    names in its own docstring. Observed live: a store row `0c4e8cfa` delivered as
+    "commit hash 0c4e8cfa", and a session `6794a377` delivered as "bug 6794a377".
+
+    The reader's natural recovery — go look up that commit — fails silently, because the
+    id resolves to nothing in git. It is invisible to the sender, who sees only what they
+    wrote, and it reads exactly like the sender being sloppy: the filer of this row
+    corrected a peer twice for mislabelling ids the peer had labelled correctly.
+
+    A CORRECT guess is still reported. When the condenser calls row `52912c4f` a "row" it
+    happens to be right — and a reader cannot distinguish that from a wrong guess, which
+    is the failure itself.
+
+    Requires:
+        - original and rewritten are strings
+
+    Ensures:
+        - returns { hex_id: [ nouns gained ] } for ids present in BOTH texts
+        - an id only the REWRITE carries is ignored — that is the fabrication guard's job
+        - never raises
+    """
+    try:
+        before, after = _id_label_bindings( original ), _id_label_bindings( rewritten )
+        found = {}
+        for hex_id, nouns in after.items():
+            if hex_id not in before: continue
+            gained = sorted( nouns - before[ hex_id ] )
+            if gained: found[ hex_id ] = gained
+        return found
+    except Exception:
+        return {}
+
+
+def _strip_invented_id_labels( original, rewritten ):
+    """
+    Delete type nouns the rewrite invented, keeping the compression. Repair, not refusal.
+
+    WHY REPAIR RATHER THAN REFUSE, measured on the live corpus (134 rewrite pairs carrying
+    a bare hex id): 18 invent a noun. Refusing all 18 costs 13.4% of the tutor's output on
+    a defect that is usually precisely repairable — one word, deletable without touching
+    anything else the sender meant. Stripping fixes 12 of them cleanly.
+
+    THE OTHER 6 ARE WHY THE CALLER MUST RE-CHECK. A naive strip cannot reach a noun that
+    sits AFTER its id ("92062fe2, the commit, ...") or one exposed only once another is
+    removed. A repair that reports success while the wrong noun is still on the wire is
+    worse than a refusal, so `_apply_dm_tutor` re-runs the detector on the repaired body
+    and refuses if anything survives.
+
+    Requires:
+        - original and rewritten are strings
+
+    Ensures:
+        - returns `rewritten` with invented type nouns removed where they can be reached
+        - the ID ITSELF is never touched — losing it would be the pointer defect again
+        - returns `rewritten` unchanged if anything raises
+    """
+    try:
+        repaired = rewritten
+        for hex_id, nouns in _invented_id_labels( original, rewritten ).items():
+            for noun in nouns:
+                repaired = re.sub(
+                    r"(?i)\b" + re.escape( noun ) + r"\b[ ]+(?=(?:[A-Za-z]+[ ]+){0,2}" + re.escape( hex_id ) + r"\b)",
+                    "", repaired )
+        return repaired
+    except Exception:
+        return rewritten
+
+
 def _count_claims( body_text ):
     """
     The CANONICAL sentence count — the claim counter (ruling 4, 2026-08-12).
@@ -1041,6 +1160,10 @@ def _apply_dm_tutor( body_text, config=None, rewrite_fn=None ):
         # reasoning as `tutor_fabricated`: "it refused something" is unanswerable from a
         # log line the next reader does not have.
         "tutor_rescoped"       : None,
+        # Which ids had an invented type noun stripped (delivered) or left standing
+        # (refused). Recorded either way, so a corpus reader can tell a repair from a
+        # clean rewrite — a silent repair is an unauditable one.
+        "tutor_id_labels"      : None,
     }
 
     try:
@@ -1072,6 +1195,23 @@ def _apply_dm_tutor( body_text, config=None, rewrite_fn=None ):
         # restored lines are structure, so they cannot change the claim count, but
         # measuring first would record a body that is not the one delivered.
         rewritten = _restore_dropped_pointers( body_text, rewritten )
+
+        # INVENTED-ID-LABEL REPAIR — strip a type noun the sender never wrote, then
+        # re-read. Runs BEFORE the fabrication and re-scoping checks so those judge the
+        # body that will actually be delivered. Removing a word cannot invent a fact or
+        # move a quantity, so this ordering cannot mask either of them. Row b1f3d2df.
+        invented = _invented_id_labels( body_text, rewritten )
+        if invented:
+            meta[ "tutor_id_labels" ] = invented
+            rewritten = _strip_invented_id_labels( body_text, rewritten )
+            survived  = _invented_id_labels( body_text, rewritten )
+            if survived:
+                # The repair did not take — a noun the strip could not reach. Deliver the
+                # sender's own words rather than a body that still mislabels an id.
+                meta[ "tutor_outcome" ]   = "label_blocked"
+                meta[ "tutor_id_labels" ] = survived
+                print( f"[dm-tutor] REFUSED a rewrite that mislabels an id: {survived}" )
+                return body_text, meta
 
         # FABRICATION CHECK — refuse a rewrite that asserts a fact the sender never did.
         # Runs AFTER the pointer restore so a path we put back is not itself read as

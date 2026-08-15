@@ -67,6 +67,12 @@ _FAITHFUL_LONG = (
 )
 
 
+def _count_claims_helper( text ):
+    """The canonical claim counter, for fixture-straddle CONTROLS in this file."""
+    from cosa.rest.routers.dm import _count_claims
+    return _count_claims( text )
+
+
 def _cfg( **overrides ):
     """A tutor config dict with explicit values — never read from the live ini."""
     base = { "enabled": True, "trigger_claims": 4, "gate_enabled": False, "gate_max_claims": 4 }
@@ -891,6 +897,164 @@ class TestAQuantityMayNotChangeSides( unittest.TestCase ):
     def test_the_guard_never_takes_the_send_path_down( self ):
         """A check that raises must fail open, exactly as the fabrication guard does."""
         self.assertEqual( self.detect( 5, "the roll-up undercounts by 72 commits" ), {} )
+
+
+class TestTheCondenserMayNotInventAnIdsType( unittest.TestCase ):
+    """
+    Row b1f3d2df — the rewrite may not supply a type noun the sender never wrote.
+
+    A store row id and a git sha are both bare hex, so the condenser guesses a plausible
+    noun and sometimes picks the wrong one. Observed live on 2026-08-13/14, verbatim from
+    the corpus:
+
+        sent      "DO NOT CLOSE 0c4e8cfa"                        (a store ROW)
+        delivered "the mechanism identified by commit hash 0c4e8cfa"
+
+        sent      "same session 6794a377 + same tmux"            (a SESSION)
+        delivered "bug 6794a377"
+
+    The reader's natural recovery — "go look up that commit" — fails silently, because
+    the id resolves to nothing in git. And it is invisible to the sender, who sees only
+    what they wrote. Mr. Radio corrected the SENDER twice for sloppy labelling; the
+    sender had written it correctly both times.
+
+    A LUCKY GUESS IS STILL REFUSED. When the condenser labels row `52912c4f` as "row" it
+    happens to be right, and this still counts as invented — because a reader cannot tell
+    a lucky guess from a wrong one, which is the entire failure.
+
+    REPAIR FIRST, REFUSE ONLY IF THE REPAIR DOES NOT TAKE. Measured over the live corpus
+    (134 rewrite pairs carrying a bare hex id):
+
+        invented a type noun          18  (13.4%)
+          repaired clean, delivered   12  ( 9.0%)  <- compression kept, false noun gone
+          residual, so refused         6  ( 4.5%)  <- sender's original goes out
+
+    Refusing all 18 was the obvious design and it throws away the tutor's whole purpose
+    on a defect that is usually precisely repairable. Repairing WITHOUT re-checking was
+    the tempting one, and it is worse than refusing: 6 of 18 keep a false label after a
+    naive strip, so the repair would report success while the wrong noun was still on the
+    wire. The re-check IS the gate.
+    """
+
+    def setUp( self ):
+        from cosa.rest.routers.dm import (
+            _apply_dm_tutor, _invented_id_labels, _strip_invented_id_labels )
+        self.apply  = _apply_dm_tutor
+        self.detect = _invented_id_labels
+        self.strip  = _strip_invented_id_labels
+
+    def test_a_row_id_relabelled_as_a_commit_is_caught( self ):
+        found = self.detect( "DO NOT CLOSE 0c4e8cfa — Sam has live evidence.",
+                             "The mechanism identified by commit hash 0c4e8cfa still fires." )
+        self.assertIn( "0c4e8cfa", found )
+        self.assertIn( "commit", found[ "0c4e8cfa" ] )
+
+    def test_a_session_relabelled_as_a_bug_is_caught( self ):
+        found = self.detect( "same session 6794a377 + same tmux returned at 11.2%",
+                             "bug 6794a377 returned at 11.2%" )
+        self.assertIn( "bug", found[ "6794a377" ] )
+
+    def test_a_label_the_sender_WROTE_is_carried_forward_freely( self ):
+        """The control. Keeping the sender's own noun is the whole point of not inventing."""
+        self.assertEqual(
+            self.detect( "Merged commit 341aeb8a after review.", "Merged commit 341aeb8a." ), {} )
+
+    def test_a_bare_id_that_STAYS_bare_is_fine( self ):
+        self.assertEqual( self.detect( "Row closed, see 29e98243.", "Closed. 29e98243" ), {} )
+
+    def test_a_CORRECT_guess_is_still_invented( self ):
+        """`52912c4f` really is a row — and the reader cannot tell that from a wrong guess."""
+        self.assertIn( "row", self.detect( "52912c4f DONE (held)", "row 52912c4f is done" )[ "52912c4f" ] )
+
+    def test_an_id_only_the_rewrite_mentions_is_the_fabrication_guards_job( self ):
+        self.assertEqual( self.detect( "Nothing to see.", "See commit b8d10bd3." ), {} )
+
+    def test_the_repair_removes_the_invented_noun_and_keeps_the_sentence( self ):
+        original  = "DO NOT CLOSE 0c4e8cfa — Sam has live evidence."
+        rewritten = "The mechanism identified by commit hash 0c4e8cfa still fires."
+        repaired  = self.strip( original, rewritten )
+        self.assertIn( "0c4e8cfa", repaired,  "the id itself must survive the repair" )
+        self.assertNotIn( "commit", repaired )
+        self.assertIn( "identified by 0c4e8cfa", repaired )
+        self.assertEqual( self.detect( original, repaired ), {},
+                          "a repaired body must be clean by this guard's own reading" )
+
+    def test_a_repaired_rewrite_is_DELIVERED_not_refused( self ):
+        original  = ( "DO NOT CLOSE 0c4e8cfa — Sam has live evidence the mechanism still fires. "
+                      "It contradicts the verdict I relayed this morning. "
+                      "His run enqueued a child job. The submit returned 200. "
+                      "Tell me if you read it differently." )
+        text, meta = self.apply( original, config=_cfg(),
+                                 rewrite_fn=lambda b: "The mechanism identified by commit hash 0c4e8cfa still fires." )
+        self.assertEqual( meta[ "tutor_outcome" ], "rewritten",
+                          "a repairable label must not cost the sender the compression" )
+        self.assertNotIn( "commit", text )
+        self.assertIn( "0c4e8cfa", text )
+        self.assertIn( "0c4e8cfa", meta[ "tutor_id_labels" ],
+                       "the repair must be RECORDED — a silent repair is unauditable" )
+
+    def test_a_rewrite_whose_label_SURVIVES_the_repair_is_refused( self ):
+        """
+        The gate that makes the repair honest — and this is a REAL corpus case
+        (2026-08-13 16:11:44, Mr. Radio → Cheech), not an invented shape.
+
+        Stripping "commit hash" slides the window back and EXPOSES a second invented noun
+        that was previously out of reach:
+
+            rewrite   "The task with commit hash 0c4e8cfa was closed incorrectly"
+            stripped  "The task with 0c4e8cfa was closed incorrectly"   <- "task" now visible
+
+        A one-pass repair would have delivered that, having "fixed" the message, while it
+        still mislabels a row as a task. The re-check is what turns the repair from a
+        claim into a gate.
+        """
+        original  = ( "Sam is right and my close was wrong — I closed 0c4e8cfa this morning "
+                      "on a green test and his live run shows the behaviour still happening. "
+                      "I have written the correction onto the row. "
+                      "You need to know before you act on my earlier verdict. "
+                      "Tell me if you read it differently." )
+        self.assertGreater( _count_claims_helper( original ), 3,
+                            "CONTROL: the fixture must clear the trigger, or this measures a tutor that never ran" )
+        text, meta = self.apply(
+            original, config=_cfg( trigger_claims=3 ),
+            rewrite_fn=lambda b: "The task with commit hash 0c4e8cfa was closed incorrectly." )
+        self.assertEqual( meta[ "tutor_outcome" ], "label_blocked" )
+        self.assertEqual( text, original, "an unrepairable false label must not reach the recipient" )
+        self.assertIn( "task", meta[ "tutor_id_labels" ][ "0c4e8cfa" ],
+                       "the row must record the noun that SURVIVED, not the one already stripped" )
+
+    def test_KNOWN_LIMIT_a_noun_placed_AFTER_the_id_is_not_seen( self ):
+        """
+        Stated rather than glossed, because the guard's silence here is not innocence.
+
+        The window looks BEFORE an id only. "92062fe2, the commit, should be added"
+        carries the same false label and this guard does not fire on it. Widening to a
+        following window was not measured, so it is not claimed — if this test ever goes
+        red, somebody widened the window and should re-price the whole rule on the corpus.
+        """
+        self.assertEqual(
+            self.detect( "Closing 92062fe2 today.", "92062fe2, the commit, should be added." ),
+            {} )
+
+    def test_the_guard_never_takes_the_send_path_down( self ):
+        self.assertEqual( self.detect( 5, "commit 0c4e8cfa" ), {} )
+        self.assertEqual( self.strip( 5, "commit 0c4e8cfa" ), "commit 0c4e8cfa" )
+
+    def test_a_repair_that_RAISES_costs_the_caller_nothing( self ):
+        """
+        The fail-open contract, pinned rather than assumed. `_invented_id_labels` swallows
+        its own failures, so the strip's own except is not reachable through bad input —
+        it is reachable only if the substitution itself blows up. Forcing that is the
+        difference between a defensive branch that is tested and one that is merely
+        believed.
+        """
+        from unittest.mock import patch
+        import cosa.rest.routers.dm as dm
+
+        original, rewritten = "Closed 0c4e8cfa today.", "Closed commit 0c4e8cfa today."
+        with patch.object( dm.re, "sub", side_effect=RuntimeError( "boom" ) ):
+            self.assertEqual( self.strip( original, rewritten ), rewritten,
+                              "a raising repair must return the rewrite untouched, never lose it" )
 
 
 if __name__ == "__main__":
