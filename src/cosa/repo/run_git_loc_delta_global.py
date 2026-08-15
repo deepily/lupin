@@ -50,6 +50,7 @@ Rewritten to compute from git by Mr. Radio 🦉 (Lupin session `cec2ec5b`, 2026-
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import date as _date
@@ -59,9 +60,151 @@ import pandas as pd
 
 import cosa.utils.util as cu
 
-from cosa.repo.git_loc_delta.analyzer   import GitLogLocDeltaAnalyzer
-from cosa.repo.git_loc_delta.exceptions import GitCommandError, GitLocDeltaError
-from cosa.repo.git_loc_delta.plotter    import plot_summary
+from cosa.repo.git_loc_delta.analyzer      import GitLogLocDeltaAnalyzer
+from cosa.repo.git_loc_delta.exceptions    import GitCommandError, GitLocDeltaError
+from cosa.repo.git_loc_delta.git_log_parser import GitLogParser
+from cosa.repo.git_loc_delta.plotter       import plot_summary
+
+
+# A date with no time component: exactly YYYY-MM-DD and nothing else. Mirrors
+# date_bounds._BARE_ISO_DATE deliberately — this module pins BOTH bounds locally
+# rather than lean on the shared normalizers, because normalize_until is a
+# deliberate no-op (it pins only --since). A DIRECT CLI caller of THIS aggregator
+# bypasses the slash wrapper, so it needs --until pinned too (row d5bfe470, item 2).
+_BARE_ISO_DATE = re.compile( r"^\d{4}-\d{2}-\d{2}$" )
+
+
+def _normalize_window_bounds( since: Optional[str], until: Optional[str] ) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Pin a bare YYYY-MM-DD window to full-day boundaries git cannot drift.
+
+    git's approxidate resolves a BARE date to that date AT THE CURRENT WALL-CLOCK
+    TIME, not midnight. So `--since=D --until=D` is an empty interval by
+    construction, and a bare `--since=D` silently drops a different set of the
+    day's early commits every hour the tool runs. The slash wrapper normalizes
+    for its own callers; a direct CLI caller of this aggregator bypasses it and
+    hits the raw defect — so pin here, where every one of this tool's git walks
+    reads the bound (row d5bfe470, item 2).
+
+    Requires:
+        - since / until are date/datetime strings git accepts, or None
+
+    Ensures:
+        - None passes through unchanged
+        - a BARE ISO date becomes the START of its day for `since` (" 00:00:00")
+          and the END of its day for `until` (" 23:59:59") — the inclusive
+          full-day window the caller meant
+        - any value already carrying a time, or a relative expression like
+          "1 day ago", passes through verbatim; it is already unambiguous and
+          must not be second-guessed
+    """
+    norm_since = since
+    norm_until = until
+    if since is not None and _BARE_ISO_DATE.match( since ):
+        norm_since = f"{since} 00:00:00"
+    if until is not None and _BARE_ISO_DATE.match( until ):
+        norm_until = f"{until} 23:59:59"
+    return ( norm_since, norm_until )
+
+
+def _largest_commit_for_repo(
+    repo_path:      str,
+    repo_name:      str,
+    since:          Optional[str],
+    until:          Optional[str],
+    all_branches:   bool,
+    include_merges: bool,
+    debug:          bool,
+    verbose:        bool,
+) -> Optional[dict]:
+    """
+    Return the single largest-churn commit in the window for one repo, or None.
+
+    "Largest" is the commit with the greatest (added + deleted) summed over its
+    non-binary file rows. Reuses GitLogParser with the SAME selection flags the
+    analyzer walked, so this figure cannot skew from the totals it sits beside —
+    same repo, same window, same branch scope, same merge policy (row d5bfe470,
+    item 1). This is REPORTED, never used to filter: a squash-merge that folds
+    already-counted work into one dated commit is exactly what inflates a window,
+    and surfacing concentration lets the reader see it without guessing at the
+    commit's shape (remedy b was withdrawn for keying on shape).
+
+    Requires:
+        - repo_path is an absolute path to a git repository with commits
+        - since / until are already time-normalized (see _normalize_window_bounds)
+
+    Ensures:
+        - Returns None iff the window holds no counted commits for this repo
+        - Otherwise returns { repo, repo_path, sha, added, deleted,
+          files_touched, date } for the highest-churn commit; ties break on the
+          SHA string so the choice is deterministic
+
+    Raises:
+        - GitCommandError if the underlying git walk fails
+    """
+    parser = GitLogParser(
+        repo_path      = repo_path,
+        since          = since,
+        until          = until,
+        rev_range      = None,
+        all_branches   = all_branches,
+        include_merges = include_merges,
+        debug          = debug,
+        verbose        = verbose,
+    )
+
+    per_sha: Dict[str, dict] = {}
+    for change in parser.iter_changes():
+        sha = change[ "sha" ]
+        rec = per_sha.get( sha )
+        if rec is None:
+            rec = { "added": 0, "deleted": 0, "files": set(), "date": change[ "date" ] }
+            per_sha[ sha ] = rec
+        rec[ "added"   ] += int( change[ "added"   ] )
+        rec[ "deleted" ] += int( change[ "deleted" ] )
+        rec[ "files"   ].add( change[ "path" ] )
+
+    if not per_sha:
+        return None
+
+    best_sha = max( per_sha, key=lambda s: ( per_sha[ s ][ "added" ] + per_sha[ s ][ "deleted" ], s ) )
+    best     = per_sha[ best_sha ]
+    return {
+        "repo":          repo_name,
+        "repo_path":     repo_path,
+        "sha":           best_sha,
+        "added":         best[ "added"   ],
+        "deleted":       best[ "deleted" ],
+        "files_touched": len( best[ "files" ] ),
+        "date":          best[ "date"    ],
+    }
+
+
+def _commit_subject( repo_path: str, sha: str, timeout: int = 30 ) -> str:
+    """
+    Return the one-line subject of `sha` in `repo_path`, or "" if git can't say.
+
+    Best-effort annotation only: the subject lets a reader recognize a squash-merge
+    by name on the largest-commit line. A failure here degrades to an empty subject,
+    never a crash — the churn figures are the load-bearing part.
+
+    Ensures:
+        - Returns the commit subject stripped of surrounding whitespace on success
+        - Returns "" on any git failure; never raises
+    """
+    try:
+        result = subprocess.run(
+            [ "git", "show", "-s", "--format=%s", sha ],
+            capture_output = True,
+            text           = True,
+            timeout        = timeout,
+            cwd            = repo_path,
+        )
+    except ( subprocess.TimeoutExpired, FileNotFoundError, OSError ):
+        return ""
+    if result.returncode != 0:
+        return ""
+    return result.stdout.strip()
 
 
 # Exit codes
@@ -335,17 +478,22 @@ def _analyze_repos(
     include_merges: bool,
     verbose:        bool,
     debug:          bool,
-) -> Tuple[pd.DataFrame, Dict[Tuple[str, str], int], List[dict], List[str], List[str]]:
+) -> Tuple[pd.DataFrame, Dict[Tuple[str, str], int], List[dict], List[str], List[str], Optional[dict]]:
     """
     Analyze each repo directly from git and return the combined tidy-long frame.
 
     Requires:
         - repo_paths are absolute paths
-        - since / until are ISO date strings or None
+        - since / until are ISO date strings (ideally time-normalized) or None
 
     Ensures:
         - Returns ( combined_df, commits_by_repo_date, coverage_reports,
-                    empty_repos, skipped_repos )
+                    empty_repos, skipped_repos, largest_commit )
+        - `largest_commit` is the single highest-churn commit ACROSS all analyzed
+          repos in the window (see _largest_commit_for_repo), or None when the
+          window holds no commits. Reported alongside the total so a reader can
+          see concentration — one squashed PR folding already-counted work — with
+          no rule firing (row d5bfe470, item 1).
         - `combined_df` has CSV_COLUMNS; one row per (repo, date, file_type).
           `repo_date_commits` repeats the (repo, date) unique-commit count across that
           group's file-type rows — see CSV_COLUMNS for why it must never be summed
@@ -363,6 +511,7 @@ def _analyze_repos(
     coverage_reports:     List[dict]                  = []
     empty_repos:          List[str]                   = []
     skipped_repos:        List[str]                   = []
+    largest_commit:       Optional[dict]             = None
 
     repo_names = _resolve_repo_names( repo_paths )
 
@@ -503,8 +652,24 @@ def _analyze_repos(
             print( f"[analyze] {repo_name}: +{s['total_added']} / -{s['total_deleted']} "
                    f"across {s['total_commits']} commits", file=sys.stderr )
 
+        # Largest single commit for this repo (same flags as the walk above, so it
+        # cannot skew from these totals). Keep the global max across repos. We are
+        # past the empty-window continue, so this repo has counted commits and
+        # _largest_commit_for_repo returns a dict, never None — no guard needed.
+        repo_largest = _largest_commit_for_repo(
+            repo_path, repo_name, since, until,
+            all_branches=all_branches, include_merges=include_merges,
+            debug=debug, verbose=verbose,
+        )
+        repo_churn = repo_largest[ "added" ] + repo_largest[ "deleted" ]
+        best_churn = ( largest_commit[ "added" ] + largest_commit[ "deleted" ] ) if largest_commit else -1
+        best_sha   = largest_commit[ "sha" ] if largest_commit else ""
+        # Deterministic tie-break on SHA so a re-run picks the same commit.
+        if ( repo_churn, repo_largest[ "sha" ] ) > ( best_churn, best_sha ):
+            largest_commit = repo_largest
+
     combined = pd.DataFrame( rows, columns=CSV_COLUMNS )
-    return combined, commits_by_repo_date, coverage_reports, empty_repos, skipped_repos
+    return combined, commits_by_repo_date, coverage_reports, empty_repos, skipped_repos, largest_commit
 
 
 def _build_aggregated_daily( df: pd.DataFrame, commits_by_repo_date: Dict[Tuple[str, str], int] ) -> dict:
@@ -609,6 +774,25 @@ def _format_console( daily: dict, summary: dict, since: Optional[str], until: Op
         f"  Repos: {repos_str}",
         f"  Window: {since or 'all'} .. {until or 'all'}",
         f"  Total: +{summary['total_added']} / -{summary['total_deleted']} (net {summary['net']:+d}), {summary['total_commits']} commits, {summary['total_days']} days",
+    ]
+
+    # Largest single commit, always — remedy (c). Surfaces concentration (a squash
+    # folding already-counted work) with no threshold to guess and no shape to
+    # detect (row d5bfe470). Present whether or not concentration exists.
+    lc = summary.get( "largest_commit" )
+    if lc is not None:
+        churn     = lc[ "added" ] + lc[ "deleted" ]
+        win_churn = summary[ "total_added" ] + summary[ "total_deleted" ]
+        pct       = ( 100.0 * churn / win_churn ) if win_churn else 0.0
+        subject   = lc.get( "subject" ) or ""
+        subj_tail = f'  "{subject}"' if subject else ""
+        lines.append(
+            f"  Largest single commit: {lc['repo']} {lc['sha'][:8]} on {lc['date']} — "
+            f"+{lc['added']} / -{lc['deleted']} across {lc['files_touched']} files "
+            f"({pct:.0f}% of window churn){subj_tail}"
+        )
+
+    lines += [
         "─" * 80,
         "",
         "Daily Totals (all repos summed):",
@@ -650,11 +834,23 @@ def _format_json( daily: dict, summary: dict, since: Optional[str], until: Optio
             "by_file_type":  d[ "by_file_type"  ],
         })
 
+    # largest_commit rides inside `summary`; enrich it with its share of window
+    # churn so a JSON consumer sees the concentration figure the console prints.
+    summary_payload = { k: v for k, v in summary.items() if k != "repos" }
+    lc = summary.get( "largest_commit" )
+    if lc is not None:
+        churn     = lc[ "added" ] + lc[ "deleted" ]
+        win_churn = summary[ "total_added" ] + summary[ "total_deleted" ]
+        summary_payload[ "largest_commit" ] = {
+            **lc,
+            "pct_of_window_churn": round( 100.0 * churn / win_churn, 1 ) if win_churn else 0.0,
+        }
+
     payload = {
         "since":   since,
         "until":   until,
         "repos":   summary[ "repos" ],
-        "summary": { k: v for k, v in summary.items() if k != "repos" },
+        "summary": summary_payload,
         "days":    days,
     }
     return json.dumps( payload, indent=2 )
@@ -691,11 +887,17 @@ def main( argv: Optional[list] = None ) -> int:
 
     repo_paths = [ os.path.abspath( p ) for p in args.repos ]
 
+    # Pin bare-date bounds to full-day boundaries BEFORE any git selection runs, so
+    # a direct CLI caller (bypassing the slash wrapper) never hits the approxidate
+    # bare-date defect. args.since/args.until stay verbatim for display; the git
+    # walk uses the pinned values (row d5bfe470, item 2).
+    norm_since, norm_until = _normalize_window_bounds( args.since, args.until )
+
     try:
-        combined, commits_by_repo_date, coverage_reports, empty_repos, skipped_repos = _analyze_repos(
+        combined, commits_by_repo_date, coverage_reports, empty_repos, skipped_repos, largest_commit = _analyze_repos(
             repo_paths     = repo_paths,
-            since          = args.since,
-            until          = args.until,
+            since          = norm_since,
+            until          = norm_until,
             all_branches   = not args.head_only,
             include_merges = args.include_merges,
             verbose        = args.verbose,
@@ -718,6 +920,14 @@ def main( argv: Optional[list] = None ) -> int:
 
     daily   = _build_aggregated_daily( combined, commits_by_repo_date )
     summary = _build_summary( combined, commits_by_repo_date )
+
+    # Attach the largest single commit (remedy c) and annotate it with its subject
+    # so a squash-merge is recognizable by name. repo_path was internal plumbing —
+    # drop it before it reaches any rendered surface.
+    if largest_commit is not None:
+        subject = _commit_subject( largest_commit.pop( "repo_path" ), largest_commit[ "sha" ] )
+        largest_commit[ "subject" ]  = subject
+        summary[ "largest_commit" ]  = largest_commit
 
     if empty_repos:   summary[ "empty_repos"   ] = empty_repos
     if skipped_repos: summary[ "skipped_repos" ] = [ os.path.basename( p ) for p in skipped_repos ]
@@ -878,7 +1088,7 @@ def quick_smoke_test() -> None:
         try:
             # Test 1: main-only repo is counted (bbff93a3 regression)
             print( "Test 1: repo whose ONLY work is on main reports its delta (bug bbff93a3)..." )
-            df, commits, cov, empty, skipped = _analyze_repos(
+            df, commits, cov, empty, skipped, _largest = _analyze_repos(
                 [ repo_main_only ], "2026-07-09", "2026-07-12",
                 all_branches=True, include_merges=False, verbose=False, debug=False,
             )
@@ -890,7 +1100,7 @@ def quick_smoke_test() -> None:
 
             # Test 2: branched repo counts BOTH main-side and branch-side work
             print( "Test 2: main-side + branch-side work both counted..." )
-            df, commits, cov, empty, skipped = _analyze_repos(
+            df, commits, cov, empty, skipped, _largest = _analyze_repos(
                 [ repo_branched ], "2026-07-09", "2026-07-12",
                 all_branches=True, include_merges=False, verbose=False, debug=False,
             )
@@ -901,7 +1111,7 @@ def quick_smoke_test() -> None:
 
             # Test 3: a commit touching 2 file types counts ONCE (37a8beeb regression)
             print( "Test 3: one commit touching .py + .md counts ONCE (bug 37a8beeb)..." )
-            df, commits, cov, empty, skipped = _analyze_repos(
+            df, commits, cov, empty, skipped, _largest = _analyze_repos(
                 [ repo_multitype ], "2026-07-09", "2026-07-12",
                 all_branches=True, include_merges=False, verbose=False, debug=False,
             )
@@ -920,7 +1130,7 @@ def quick_smoke_test() -> None:
 
             # Test 5: non-git path is skipped, not fatal
             print( "Test 5: non-git path skipped gracefully..." )
-            df, commits, cov, empty, skipped = _analyze_repos(
+            df, commits, cov, empty, skipped, _largest = _analyze_repos(
                 [ repo_main_only, not_a_repo ], "2026-07-09", "2026-07-12",
                 all_branches=True, include_merges=False, verbose=False, debug=False,
             )
@@ -930,7 +1140,7 @@ def quick_smoke_test() -> None:
 
             # Test 6: window exclusion — a window with no commits yields empty
             print( "Test 6: empty window yields no data (graceful)..." )
-            df, commits, cov, empty, skipped = _analyze_repos(
+            df, commits, cov, empty, skipped, _largest = _analyze_repos(
                 all_repos, "2099-01-01", "2099-01-02",
                 all_branches=True, include_merges=False, verbose=False, debug=False,
             )
@@ -940,7 +1150,7 @@ def quick_smoke_test() -> None:
 
             # Test 7: multi-repo aggregation totals
             print( "Test 7: cross-repo aggregation..." )
-            df, commits, cov, empty, skipped = _analyze_repos(
+            df, commits, cov, empty, skipped, _largest = _analyze_repos(
                 all_repos, "2026-07-09", "2026-07-12",
                 all_branches=True, include_merges=False, verbose=False, debug=False,
             )
@@ -982,7 +1192,7 @@ def quick_smoke_test() -> None:
 
             # Test 11: --head-only scopes to the checked-out line
             print( "Test 11: --head-only excludes sibling-branch work..." )
-            df_head, commits_head, _, _, _ = _analyze_repos(
+            df_head, commits_head, _, _, _, _ = _analyze_repos(
                 [ repo_branched ], "2026-07-09", "2026-07-12",
                 all_branches=False, include_merges=False, verbose=False, debug=False,
             )
