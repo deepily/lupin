@@ -416,6 +416,48 @@ def render_v1_report( metrics: Dict[str, Any], *, seed: int, corpus: str,
     return "\n".join( rows )
 
 
+# ─────────────────────────────────────────────────── run orchestrator
+
+def run_v1_baseline( *, corpus: str = "simple", seed: int = 1024, n_per_command: int = 60,
+                     base_url: str = "http://localhost:8000",
+                     push_fn: Callable[[str], Dict[str, Any]],
+                     collect_fn: Callable[[str], Dict[str, Any]],
+                     class_to_command: Dict[str, str], limit: Optional[int] = None,
+                     load_corpus_fn: Callable[..., Any] = load_corpus,
+                     sample_fn: Callable[..., Any] = stratified_sample ) -> Dict[str, Any]:
+    """
+    Compose the full v1 baseline: load the corpus → seeded stratified sample →
+    COLD/WARM two-pass → metrics → rendered report (warm pass is the headline).
+
+    Requires:
+        - push_fn / collect_fn drive the LIVE v1 server (injected; the RUN wrapper
+          supplies the real WS-listening seams against the pinned-worktree server)
+        - class_to_command is the R-A1 map (build_class_to_command output)
+        - load_corpus_fn / sample_fn default to the shipped v2_eval helpers (same
+          corpus + same seeded stratified sampler as the v2 arm — pairing preserved)
+
+    Ensures:
+        - returns { cold, warm, manifest, report, sampled_n }; the report header
+          stamps the v1 pin sha + the seed (reproducibility, design §2a/§5) and
+          both span boundaries (compute vs wall-clock)
+        - the SAME sampled utterance list runs both passes (cache warms between
+          them); never raises on seams that return cleanly
+    """
+    pairs             = load_corpus_fn( corpus, limit=limit )
+    sampled, manifest = sample_fn( pairs, n_per_command, seed )
+    passes            = run_two_pass( sampled, push_fn=push_fn, collect_fn=collect_fn,
+                                      class_to_command=class_to_command )
+    report            = render_v1_report( passes[ "warm" ], seed=seed, corpus=corpus,
+                                          n_per_command=n_per_command, base_url=base_url )
+    return {
+        "cold"      : passes[ "cold" ],
+        "warm"      : passes[ "warm" ],
+        "manifest"  : manifest,
+        "report"    : report,
+        "sampled_n" : len( sampled ),
+    }
+
+
 # ────────────────────────────────────────── live IO seams (injected away)
 
 def _default_push_fn( base_url: str, websocket_id: str,

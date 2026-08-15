@@ -224,6 +224,27 @@ def test_metrics_empty_rates_are_none_not_zero():
     assert m[ "degradation_paths_seen" ] == [ ] and m[ "spans" ] == [ ] and m[ "wall_clock_spans" ] == [ ]
 
 
+# ───────────────────────────────────────────── run_v1_baseline
+
+def test_run_v1_baseline_composes_corpus_sample_twopass_report():
+    def fake_load( name, limit=None ):
+        return [ ( "a", "agent go calendar" ), ( "b", "agent go calendar" ) ]
+    def fake_sample( pairs, n, seed ):
+        return pairs, { "seed": seed, "n_per_command": n, "under_quota": [ ] }
+    seen = { }
+    def push( u ):
+        n = seen.get( u, 0 ); seen[ u ] = n + 1
+        return { "job_id": f"{u}#{n}" }
+    def collect( jid ):
+        return { "queued_ts": 9.5, "running_ts": 10.0, "completed_ts": 10.25,
+                 "metadata": { "is_cache_hit": jid.endswith( "#1" ), "agent_type": "CalendarAgent" } }
+    res = v1.run_v1_baseline( seed=7, n_per_command=5, push_fn=push, collect_fn=collect,
+                              class_to_command=MAP, load_corpus_fn=fake_load, sample_fn=fake_sample )
+    assert res[ "cold" ][ "cache_hit_rate" ] == 0.0 and res[ "warm" ][ "cache_hit_rate" ] == 1.0
+    assert res[ "manifest" ][ "seed" ] == 7 and res[ "sampled_n" ] == 2
+    assert v1.V1_PIN_SHA in res[ "report" ] and "seed       : 7" in res[ "report" ]
+
+
 # ───────────────────────────────────────────── reporting
 
 def test_report_header_stamps_pin_sha_and_seed():
