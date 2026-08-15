@@ -239,12 +239,11 @@ class TestCliHelpNamesDeclaredArgs( unittest.TestCase ):
         deep_research_to_presentation, swe_team): an INDEPENDENT source, so this is a
         real cross-check that the CLI documents what the registry declares.
 
-    Arg-name arm is PRIMARY. There is NO blanket 'usage' fallback: any command that
-    genuinely cannot name its args in --help is listed in _USAGE_FALLBACK below and
-    checked for 'usage' instead — visible as the weaker arm, never the default. An
-    empty set means every command satisfies the strong arm."""
-
-    _USAGE_FALLBACK = frozenset()   # commands that fall back to the weaker 'usage' arm
+    Arg-name arm ONLY. There is no 'usage' fallback: verified 2026-08-15 (sha
+    2564e115), all six hand-written CLIs document the args the registry declares for
+    them, so the weaker arm was never needed and is dropped — a fallback nobody uses
+    is a branch that cannot go red. If a future CLI genuinely cannot name its args,
+    that is a real finding: leave it red, don't reintroduce a soft arm to hide it."""
 
     def test_cached_help_names_each_commands_declared_args( self ):
         from cosa.agents.runtime_argument_expeditor.agent_registry import (
@@ -256,11 +255,7 @@ class TestCliHelpNamesDeclaredArgs( unittest.TestCase ):
                 continue                                  # API-invoked (test_suite)
             help_text = ( get_cli_help( command ) or "" ).lower()
             required  = [ a.lower() for a in AGENTIC_AGENTS[ command ][ "required_user_args" ] ]
-            if command in self._USAGE_FALLBACK:
-                if "usage" not in help_text:
-                    failures.append( f"{command}: fallback arm — help carries no 'usage'" )
-                continue
-            missing = [ a for a in required if a not in help_text ]
+            missing   = [ a for a in required if a not in help_text ]
             if not help_text or missing:
                 failures.append( f"{command} ({spec.cli_module}): help does not name {missing or '(help empty)'}" )
         self.assertEqual(
