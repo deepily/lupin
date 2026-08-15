@@ -9,11 +9,14 @@ relaxing a check.
 
 What this guards (§6): FOUR-LIST DRIFT CONSISTENCY across the four consumers of a
 routing command — the registry (owner), the router prompt template, the training
-corpus keys, and the job factory's branches. Three reachability gaps are OUT OF
+corpus keys, and the job factory's branches. TWO reachability gaps remain OUT OF
 SCOPE by design and stated in §6 so nobody reads this name as a reachability proof:
-(1) no-retrain (training keys on disk vs LoRA weights), (2) runtime template ≠
-checked-in template, (3) emitted string ≠ registry key. This guard proves the four
-lists agree — it does not prove the deployed router will emit any given string.
+(1) no-retrain (training keys on disk vs LoRA weights) and (3) emitted string ≠
+registry key. A third, (2) runtime template ≠ checked-in template, is VERIFIED
+CLOSED (Tiffany, 2026-08-15): the live router loads the template fresh from disk via
+config key `prompt template for agent router` = the exact file this guard reads
+(todo_fifo_queue.py:124-127; v2 router_client.py; splainer:477). This guard proves
+the four lists agree — it does not prove the deployed router will emit any string.
 
 Assertions, class-aware (§6):
   1  agentic: registry ⊆ prompt, registry == training keys, registry == factory (1a/1b/1c)
@@ -110,14 +113,41 @@ def _cli_module_returncode( module, timeout=60 ):
     return proc.returncode, tail
 
 
+# -- Exemption facility (§7) — an INTENTIONAL absence, explicit and reasoned -----
+# A command that is owned but deliberately NOT in the router prompt (because it is
+# not user-voice-reachable) gets an EXPLICIT exemption here carrying a machine-checked
+# reason — never a quietly loosened assertion. 1a excludes these. Landed EMPTY;
+# decided entries are added per-item in a separate commit, each with evidence (the
+# dispatch call site) in its reason.
+PROMPT_REACHABILITY_EXEMPTIONS = {
+    # "agent router go to <command>": "why it is NOT voice-reachable (call site: file:line)",
+}
+
+
+def _validate_prompt_exemptions( exemptions, owned, template ):
+    """Problems with an exemption map: no reason, not an owned agentic command, or
+    stale (the command IS in the prompt, so the exemption is a lie). Empty ⇒ valid."""
+    problems = []
+    for command, reason in exemptions.items():
+        if not ( reason and reason.strip() ):
+            problems.append( f"{command}: exemption has no reason" )
+        if command not in owned:
+            problems.append( f"{command}: not an owned agentic command" )
+        if command in template:
+            problems.append( f"{command}: IS in the prompt — stale exemption" )
+    return problems
+
+
 # -- Assertion 1 — the agentic set agrees across all four sources --------------
 class TestAgenticDriftGuard( unittest.TestCase ):
 
     def test_1a_every_owned_agentic_command_is_router_listed( self ):
-        missing = set( AGENTIC_COMMANDS ) - _template_commands()
+        # Owned agentic commands must be router-listed, UNLESS explicitly exempted
+        # (§7): an exemption is an intentional, reasoned absence, not a loosening.
+        missing = set( AGENTIC_COMMANDS ) - _template_commands() - set( PROMPT_REACHABILITY_EXEMPTIONS )
         self.assertEqual(
             missing, set(),
-            f"owned agentic commands the router prompt never lists (unreachable by voice): {sorted( missing )}"
+            f"owned agentic commands the router prompt never lists and are not exempted: {sorted( missing )}"
         )
 
     def test_1b_factory_branches_equal_the_owned_agentic_set( self ):
@@ -262,6 +292,29 @@ class TestCliHelpNamesDeclaredArgs( unittest.TestCase ):
             failures, [],
             "§4 — cached CLI help does not name declared args:\n  " + "\n  ".join( failures )
         )
+
+
+# -- Exemption facility validity (§7) ------------------------------------------
+class TestPromptExemptionFacility( unittest.TestCase ):
+    """Every exemption must be real (owned), genuinely absent from the prompt, and
+    carry a reason. The validator itself must be able to go red."""
+
+    def test_real_exemptions_are_all_valid( self ):
+        problems = _validate_prompt_exemptions(
+            PROMPT_REACHABILITY_EXEMPTIONS, set( AGENTIC_COMMANDS ), _template_commands() )
+        self.assertEqual( problems, [], f"invalid prompt exemptions: {problems}" )
+
+    def test_validator_flags_no_reason_not_owned_and_stale( self ):
+        # Falsifiability: bad entries hitting all three failure modes.
+        # - phantom: empty reason AND not an owned command
+        # - weather: a real CONVERSATIONAL template command → stale exemption
+        problems = _validate_prompt_exemptions(
+            { "agent router go to phantom": "",
+              "agent router go to weather": "some reason" },
+            set( AGENTIC_COMMANDS ), _template_commands() )
+        self.assertIn( "agent router go to phantom: exemption has no reason", problems )
+        self.assertIn( "agent router go to phantom: not an owned agentic command", problems )
+        self.assertIn( "agent router go to weather: IS in the prompt — stale exemption", problems )
 
 
 # -- Falsifiability — each assertion above can go red (§6) ----------------------
