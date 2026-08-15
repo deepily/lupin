@@ -773,5 +773,125 @@ class TestTheCorpusRowTellsTheTruth( _SendHarness ):
                 self.assertIn( "tutor_outcome", self._row() )
 
 
+class TestAQuantityMayNotChangeSides( unittest.TestCase ):
+    """
+    Row c1a2e859 — a rewrite may not move a number from one side of a ledger to the other.
+
+    THE INCIDENT (2026-08-14 03:51:21, live, in the corpus, Mr. Radio → María):
+
+        sent      "tonight's 72 commits undercount by whatever is in them"
+                  → the 72 ARE counted; the undercount is the 7 uncommitted files
+        delivered "The roll-up undercounts by 72 commits plus whatever is in the 7
+                   modified files"
+                  → the 72 are now the MISSING amount
+
+    María had just published the roll-up with those 72 commits in it. As delivered, a
+    peer appeared to be telling her the number was wrong. She asked whether the line was
+    mine, which is the only reason it was caught.
+
+    WHY `_fabricated_facts` CANNOT SEE IT: nothing was invented. Both numbers appear in
+    the input. What changed is which clause a quantity is bound to, and that guard has
+    no notion of binding — it compares sets of values.
+
+    THE PREDICATE, and what it costs, MEASURED on the live corpus (315 rewrite pairs,
+    193 carrying a real quantity) rather than assumed:
+
+        · refuse any sentence carrying a numeral that was altered  → blocks 104/193 (54%)
+        · refuse on ANY scope word gained before a quantity        → blocks   5/193 (2.6%)
+        · refuse on a LEDGER marker gained before a quantity       → blocks   1/193 (0.5%)
+
+    The third is what ships: it refuses the known inversion and nothing else in a day's
+    real traffic. The four the second rule adds were all read and all benign ("Section D
+    IS sections 7, 9, 10" → "Section D INCLUDES sections 7, 9, 10").
+
+    KNOWN LIMIT, stated rather than glossed: the ledger vocabulary is a closed set, so
+    this catches the shape that actually occurred, not every possible re-scoping. A
+    rewrite that inverts meaning without one of those markers passes untouched.
+    """
+
+    # Verbatim from the corpus row, trimmed to the sentences that carry the quantity.
+    ORIGINAL  = ( "One loose end before you go: the roll-up you said you were running. "
+                  "If it has not shipped, say so plainly to Rick rather than leaving it implied, "
+                  "and if it has, it needs a caveat — lupin's working tree still holds 7 modified "
+                  "files, so tonight's 72 commits undercount by whatever is in them. "
+                  "Pushed and clean are not the same claim." )
+    DELIVERED = ( "Has the roll-up shipped? "
+                  "If not shipped, state plainly to Rick; if shipped, note lupin's working tree "
+                  "holds 7 modified files. "
+                  "The roll-up undercounts by 72 commits plus whatever is in the 7 modified files." )
+
+    def setUp( self ):
+        from cosa.rest.routers.dm import _apply_dm_tutor, _rescoped_quantities
+        self.apply  = _apply_dm_tutor
+        self.detect = _rescoped_quantities
+
+    def test_the_real_inversion_is_caught( self ):
+        """The one that happened. If this ever goes quiet, the guard has stopped working."""
+        self.assertIn( "72", self.detect( self.ORIGINAL, self.DELIVERED ) )
+
+    def test_a_FAITHFUL_compression_of_the_same_message_is_not_refused( self ):
+        """
+        The control. A guard that refuses the honest rewrite too is not a guard, it is an
+        off switch — and it would be switched off.
+        """
+        faithful = ( "The roll-up needs a caveat: lupin's working tree holds 7 modified files, "
+                     "so tonight's 72 commits undercount by whatever is in them." )
+        self.assertEqual( self.detect( self.ORIGINAL, faithful ), {} )
+
+    def test_a_quantity_the_rewrite_never_mentions_is_not_our_business( self ):
+        """Dropping a number is the pointer-restore's problem; this guard only judges bindings."""
+        self.assertEqual( self.detect( self.ORIGINAL, "The roll-up needs a caveat." ), {} )
+
+    def test_a_NEW_number_is_left_to_the_fabrication_guard( self ):
+        """Two guards, two jobs. Double-reporting would make each one's count unreadable."""
+        self.assertEqual( self.detect( "Seven files are dirty.", "Nine files are dirty by 400." ), {} )
+
+    def test_a_row_id_is_not_a_quantity( self ):
+        """
+        `41333974` is an identifier and is never on a side of a ledger. Measured as a live
+        false positive on the corpus before this exclusion existed — the first cut of the
+        harness also split `0c4e8cfa` into a `0`, and reported eight hits of which six
+        were id fragments. The count looked like a finding and was an artefact.
+        """
+        self.assertEqual(
+            self.detect( "Row 41333974 is a precondition for merging D.",
+                         "Sam's builder lands first, ensuring no redundancy. Row 41333974 is a precondition." ),
+            {} )
+
+    def test_the_sender_original_is_delivered_when_a_rewrite_RE_SCOPES( self ):
+        """The whole point: the recipient must get the sender's words, not the inversion."""
+        text, meta = self.apply( self.ORIGINAL, config=_cfg( trigger_claims=2 ),
+                                 rewrite_fn=lambda b: self.DELIVERED )
+        self.assertEqual( text, self.ORIGINAL, "a re-scoping rewrite must not reach the recipient" )
+        self.assertEqual( meta[ "tutor_outcome" ], "rescope_blocked" )
+
+    def test_what_was_re_scoped_is_RECORDED_on_the_row( self ):
+        """A corpus reader must be able to answer WHICH quantity moved, not just that one did."""
+        _, meta = self.apply( self.ORIGINAL, config=_cfg( trigger_claims=2 ),
+                              rewrite_fn=lambda b: self.DELIVERED )
+        self.assertIn( "72", meta[ "tutor_rescoped" ] )
+
+    def test_a_clean_rewrite_still_gets_delivered( self ):
+        """The other half of the control, at the send path rather than the predicate."""
+        text, meta = self.apply( _VERBOSE, config=_cfg(), rewrite_fn=lambda b: _FAITHFUL )
+        self.assertEqual( meta[ "tutor_outcome" ], "rewritten" )
+        self.assertIn( _FAITHFUL.split( "\n" )[ 0 ], text )
+
+    def test_the_fixture_is_over_the_trigger_the_send_path_tests_use( self ):
+        """
+        CONTROL, and it earned its place on the first run: the corpus excerpt counts 3
+        claims, so at the house trigger of 4 the tutor never fired and the two send-path
+        tests above were measuring a tutor that never ran. If the claim counter moves,
+        this fails instead of those two going quiet.
+        """
+        from cosa.rest.routers.dm import _count_claims
+        self.assertGreater( _count_claims( self.ORIGINAL ), 2,
+                            "the excerpt no longer clears trigger_claims=2" )
+
+    def test_the_guard_never_takes_the_send_path_down( self ):
+        """A check that raises must fail open, exactly as the fabrication guard does."""
+        self.assertEqual( self.detect( 5, "the roll-up undercounts by 72 commits" ), {} )
+
+
 if __name__ == "__main__":
     unittest.main()

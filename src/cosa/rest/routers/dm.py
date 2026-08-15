@@ -682,7 +682,9 @@ def get_dm_feedback_arm():
 
 # Bumped when the row SHAPE changes, so a reader never has to infer the schema from
 # which keys happen to be present in the rows they sampled.
-DM_CORPUS_SCHEMA_VERSION = 3
+# 4 — adds `tutor_rescoped` (row c1a2e859). A reader must be able to tell "no quantity
+# moved" from "this row predates the check"; without the bump both look like a null.
+DM_CORPUS_SCHEMA_VERSION = 4
 
 # Identifies the tutor's behaviour, independent of the git sha: two processes on the
 # same commit with different config are the same code and a different treatment.
@@ -872,6 +874,107 @@ def _fabricated_facts( original, rewritten ):
         return {}
 
 
+# A QUANTITY is a standalone number. A digit inside an identifier is not one: `0c4e8cfa`
+# is a row id, `v0.2.0` a version, `:8000` a port. The first cut of the measuring harness
+# tokenised on digits alone, reported 8 corpus hits, and 6 of them were id fragments — the
+# count read as a finding and was an artefact of the tokeniser.
+#
+# The trailing lookahead deliberately does NOT exclude a following "." — an earlier cut
+# did, which made every sentence-FINAL quantity invisible to this guard ("…undercount by
+# 400.") while every mid-sentence one was seen. A branch that never ran is what surfaced
+# it; the suite was green at the time.
+_RESCOPE_QUANTITY = re.compile( r"(?<![\w:/-])(?<!\.)\d[\d,]*(?!\.?\d)(?![\w:/-])" )
+_RESCOPE_ROW_ID   = re.compile( r"^\d{8}$" )
+_RESCOPE_TOKEN    = re.compile( r"[A-Za-z'’-]+|\d[\d,]*" )
+
+# The closed vocabulary in which this fleet writes which SIDE of a ledger a quantity sits
+# on. Not a grammar — the words that actually carried the distinction in a day's traffic.
+_RESCOPE_LEDGER = frozenset(
+    "by plus minus not no never without missing undercount undercounts undercounted "
+    "excludes excluding excluded dropped lost short".split()
+)
+
+
+def _quantity_bindings( text ):
+    """
+    Map each standalone quantity in `text` to the ledger markers just before it.
+
+    Requires:
+        - text is a string
+
+    Ensures:
+        - returns { quantity: set( markers ) } over a 3-token window preceding each
+          quantity, restricted to `_RESCOPE_LEDGER`
+        - row-id-shaped tokens (8 digits) are excluded — an identifier is never on a
+          side of a ledger
+    """
+    quants = { m.group( 0 ) for m in _RESCOPE_QUANTITY.finditer( text )
+               if not _RESCOPE_ROW_ID.match( m.group( 0 ) ) }
+    toks   = _RESCOPE_TOKEN.findall( text )
+    out    = {}
+    for i, t in enumerate( toks ):
+        if t not in quants: continue
+        window = { w.lower() for w in toks[ max( 0, i - 3 ) : i ] }
+        out.setdefault( t, set() ).update( window & _RESCOPE_LEDGER )
+    return out
+
+
+def _rescoped_quantities( original, rewritten ):
+    """
+    Quantities the rewrite moved to the other side of a ledger. Empty = clean.
+
+    ⚠️ THE FAILURE THIS BOUNDS is not fabrication, and `_fabricated_facts` is blind to it
+    by construction. On 2026-08-14 the tutor turned
+
+        "tonight's 72 commits undercount by whatever is in them"   (the 72 are COUNTED)
+
+    into
+
+        "the roll-up undercounts by 72 commits plus whatever is in the 7 modified files"
+                                                                   (the 72 are MISSING)
+
+    Every number in the output was in the input, so nothing was invented — a quantity
+    changed which clause it was bound to. María had just published a roll-up containing
+    those 72 commits; as delivered, a peer appeared to be telling her the number was
+    wrong. She asked whether the line was the sender's, and that is the only reason it
+    was caught.
+
+    Requires:
+        - original and rewritten are strings
+
+    Ensures:
+        - returns { quantity: [ markers gained ] } for quantities present in BOTH texts
+          that gained a ledger marker they did not have
+        - a quantity only the rewrite carries is IGNORED — that is the fabrication
+          guard's job, and double-reporting would make each guard's count unreadable
+        - never raises
+
+    MEASURED on the live corpus — 315 real rewrite pairs, 193 carrying a quantity:
+        · refusing any altered sentence with a numeral   → 104/193 (54%), unusable
+        · refusing on ANY scope word gained              →   5/193 (2.6%), and all four
+          extra blocks were read and benign ("D IS sections 7, 9" → "D INCLUDES …")
+        · refusing on a LEDGER marker gained             →   1/193 (0.5%) — the real
+          inversion, and nothing else in a day's traffic
+
+    KNOWN LIMIT, stated rather than glossed: the ledger vocabulary is a closed set, so
+    this catches the shape that occurred, not every re-scoping. A rewrite that inverts a
+    meaning without one of those markers passes untouched.
+    """
+    try:
+        before, after = _quantity_bindings( original ), _quantity_bindings( rewritten )
+        found = {}
+        for quantity, markers in after.items():
+            if quantity not in before: continue
+            gained = sorted( ( markers & _RESCOPE_LEDGER ) - before[ quantity ] )
+            if gained: found[ quantity ] = gained
+        return found
+    except Exception:
+        # Same call as the fabrication guard: a check that raises must not take the send
+        # path with it. An unreadable comparison means "nothing proven re-scoped", which
+        # leaves the tutor exactly as safe as it was before this existed.
+        return {}
+
+
 def _count_claims( body_text ):
     """
     The CANONICAL sentence count — the claim counter (ruling 4, 2026-08-12).
@@ -934,6 +1037,10 @@ def _apply_dm_tutor( body_text, config=None, rewrite_fn=None ):
         # than merely logged: "the tutor refused something" is not answerable from a
         # log line the next reader does not have.
         "tutor_fabricated"     : None,
+        # Which quantity changed sides, when a rewrite was refused for moving one. Same
+        # reasoning as `tutor_fabricated`: "it refused something" is unanswerable from a
+        # log line the next reader does not have.
+        "tutor_rescoped"       : None,
     }
 
     try:
@@ -975,6 +1082,18 @@ def _apply_dm_tutor( body_text, config=None, rewrite_fn=None ):
             meta[ "tutor_outcome" ]     = "fabrication_blocked"
             meta[ "tutor_fabricated" ]  = fabricated
             print( f"[dm-tutor] REFUSED a rewrite that invented facts: {fabricated}" )
+            return body_text, meta
+
+        # RE-SCOPING CHECK — refuse a rewrite that moved a quantity to the other side of a
+        # ledger. Runs next to the fabrication check because it is the same class of harm
+        # arriving by a different route: the fabrication guard compares WHICH facts are
+        # present, this one compares WHAT THEY ARE BOUND TO. Neither can see the other's
+        # failure. Row c1a2e859.
+        rescoped = _rescoped_quantities( body_text, rewritten )
+        if rescoped:
+            meta[ "tutor_outcome" ]  = "rescope_blocked"
+            meta[ "tutor_rescoped" ] = rescoped
+            print( f"[dm-tutor] REFUSED a rewrite that moved a quantity across a ledger: {rescoped}" )
             return body_text, meta
 
         claims_out                 = _count_claims( rewritten )
