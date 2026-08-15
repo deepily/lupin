@@ -624,24 +624,35 @@ def assert_test_db( db_url: Any ) -> None:
         )
 
 
-def truncate_snapshots( execute_fn: Callable[[str], Any], db_url: Any ) -> str:
+def _connection_url( connection: Any ) -> str:
+    """
+    Derive the DB url FROM the connection that will execute (SQLAlchemy
+    `connection.engine.url`). Single source of truth: the url we CHECK is the url
+    that will RUN — a separate db_url argument could name the test DB while the
+    connection points elsewhere (the mismatch Cheech flagged). Ensures: str url.
+    """
+    return str( connection.engine.url )
+
+
+def truncate_snapshots( connection: Any ) -> str:
     """
     Empty the snapshot table so the cold pass starts genuinely cold — but ONLY
-    after proving the target is the :8000 test DB.
+    after proving, from the connection ITSELF, that the target is the :8000 test DB.
 
     Requires:
-        - execute_fn( sql ) runs a statement against the SAME connection db_url
-          describes (the live boundary; a real cursor.execute in the wrapper)
-        - db_url is the connection's url string
+        - connection is the live DB connection the TRUNCATE will run on; its url is
+          read off `connection.engine.url` (not a separate, possibly-mismatched arg)
+          and it exposes `.execute( sql )`
 
     Ensures:
-        - assert_test_db(db_url) runs FIRST — on a wrong target it RAISES and
-          execute_fn is NEVER called (no TRUNCATE fires on the wrong DB)
+        - the guard url is DERIVED from `connection` (no decoupled db_url can lie
+          about the target); assert_test_db runs FIRST — on a wrong target it
+          RAISES and connection.execute is NEVER called (no TRUNCATE on the wrong DB)
         - on the test DB, truncates the FIXED SNAPSHOT_TABLE (a constant, never a
           caller-supplied identifier → no injection surface) and returns its name
     """
-    assert_test_db( db_url )                       # raises before any execute on a wrong target
-    execute_fn( f"TRUNCATE TABLE {SNAPSHOT_TABLE}" )
+    assert_test_db( _connection_url( connection ) )   # url derived from the executing connection
+    connection.execute( f"TRUNCATE TABLE {SNAPSHOT_TABLE}" )
     return SNAPSHOT_TABLE
 
 

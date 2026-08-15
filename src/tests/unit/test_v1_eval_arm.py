@@ -325,19 +325,27 @@ def test_assert_test_db_refuses_non_string():
     with pytest.raises( v1.EvalIntegrityError ):
         v1.assert_test_db( None )
 
-def test_truncate_snapshots_runs_only_against_test_db():
-    calls = []
-    table = v1.truncate_snapshots( lambda sql: calls.append( sql ),
-                                   "postgresql://u:p@localhost/lupin_db_test" )
+class _FakeEngine:
+    def __init__( self, url ): self.url = url
+
+class _FakeConn:
+    """A connection whose url and executor are ONE object — no decoupled db_url."""
+    def __init__( self, url ):
+        self.engine   = _FakeEngine( url )
+        self.executed = []
+    def execute( self, sql ): self.executed.append( sql )
+
+def test_truncate_snapshots_derives_url_and_runs_on_test_db():
+    conn  = _FakeConn( "postgresql://u:p@localhost/lupin_db_test" )
+    table = v1.truncate_snapshots( conn )
     assert table == v1.SNAPSHOT_TABLE
-    assert calls == [ f"TRUNCATE TABLE {v1.SNAPSHOT_TABLE}" ]
+    assert conn.executed == [ f"TRUNCATE TABLE {v1.SNAPSHOT_TABLE}" ]
 
 def test_truncate_snapshots_never_executes_on_wrong_db():
-    calls = []
+    conn = _FakeConn( "postgresql://u:p@localhost/lupin_db_dev" )
     with pytest.raises( v1.EvalIntegrityError ):
-        v1.truncate_snapshots( lambda sql: calls.append( sql ),
-                               "postgresql://u:p@localhost/lupin_db_dev" )
-    assert calls == [ ]                       # TRUNCATE NEVER fired on the wrong target
+        v1.truncate_snapshots( conn )
+    assert conn.executed == [ ]               # url derived from the SAME conn; TRUNCATE never fired
 
 
 # ───────────────────────────────────────────── reporting
