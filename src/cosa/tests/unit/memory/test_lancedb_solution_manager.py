@@ -21,6 +21,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, MagicMock, patch
 
+import numpy as np
 import pandas as pd
 
 from cosa.memory.lancedb_solution_manager import SolutionSnapshotManager
@@ -445,6 +446,22 @@ class TestSchemaAndConversion( unittest.TestCase ):
         rec = self.mgr._snapshot_to_record( _fake_snapshot( question_embedding=3.14 ) )
         self.assertEqual( rec[ "question_embedding" ], [ 0.0, 0.0, 0.0, 0.0 ] )
 
+    def test_normalize_embedding_numpy_array_shapes( self ):
+        # Bug 60b5221e (third site): normalize_embedding on the WRITE path
+        # crashed on `if not embedding:` for a numpy ndarray, and a guard-only
+        # fix would zero-fill one (list-only branch). Assert the VALUES survive —
+        # a real ndarray must round-trip to its own numbers, not zeros.
+        self.mgr._embedding_dim = 4
+        rec = self.mgr._snapshot_to_record( _fake_snapshot( question_embedding=np.array( [ 1.0, 2.0, 3.0, 4.0 ] ) ) )
+        self.assertEqual( rec[ "question_embedding" ], [ 1.0, 2.0, 3.0, 4.0 ] )   # exact → preserved, NOT zeros
+        self.assertNotEqual( rec[ "question_embedding" ], [ 0.0, 0.0, 0.0, 0.0 ] )
+        rec = self.mgr._snapshot_to_record( _fake_snapshot( question_embedding=np.array( [ 9.0, 8.0 ] ) ) )
+        self.assertEqual( rec[ "question_embedding" ], [ 9.0, 8.0, 0.0, 0.0 ] )   # short → padded, values kept
+        rec = self.mgr._snapshot_to_record( _fake_snapshot( question_embedding=np.array( [ 1, 2, 3, 4, 5, 6 ] ) ) )
+        self.assertEqual( rec[ "question_embedding" ], [ 1.0, 2.0, 3.0, 4.0 ] )   # long → truncated
+        rec = self.mgr._snapshot_to_record( _fake_snapshot( question_embedding=np.array( [] ) ) )
+        self.assertEqual( rec[ "question_embedding" ], [ 0.0, 0.0, 0.0, 0.0 ] )   # empty → zeros
+
     def test_ensure_list_variants( self ):
         self.assertEqual( self.mgr._ensure_list( None ), [] )
         self.assertEqual( self.mgr._ensure_list( "" ), [] )
@@ -455,7 +472,9 @@ class TestSchemaAndConversion( unittest.TestCase ):
 
     def test_record_to_snapshot_passes_fields_to_constructor( self ):
         record = _full_record()
-        with patch( "cosa.memory.lancedb_solution_manager.SolutionSnapshot" ) as MockSnap:
+        # Construction moved to two_tier_question_search.pg_record_to_snapshot
+        # (additive step-2 lift); patch it where the symbol is now used.
+        with patch( "cosa.memory.two_tier_question_search.SolutionSnapshot" ) as MockSnap:
             self.mgr._record_to_snapshot( record )
         kwargs = MockSnap.call_args.kwargs
         self.assertEqual( kwargs[ "question" ], "What time is it?" )
@@ -473,7 +492,9 @@ class TestSchemaAndConversion( unittest.TestCase ):
             replay_stats              = "{bad",
             answer_is_correct         = "not json",
         )
-        with patch( "cosa.memory.lancedb_solution_manager.SolutionSnapshot" ) as MockSnap:
+        # Construction moved to two_tier_question_search.pg_record_to_snapshot
+        # (additive step-2 lift); patch it where the symbol is now used.
+        with patch( "cosa.memory.two_tier_question_search.SolutionSnapshot" ) as MockSnap:
             self.mgr._record_to_snapshot( record )
         kwargs = MockSnap.call_args.kwargs
         self.assertEqual( kwargs[ "synonymous_questions" ], {} )

@@ -25,7 +25,13 @@ from cosa.memory.snapshot_manager_interface import (
 )
 from cosa.memory.solution_snapshot import SolutionSnapshot
 from cosa.memory.question_embeddings_table import QuestionEmbeddingsTable
-from cosa.memory.two_tier_question_search import pg_hierarchical_search
+from cosa.memory.two_tier_question_search import (
+    pg_hierarchical_search,
+    snapshot_to_pg_record,
+    pg_record_to_snapshot,
+    update_canonical_synonyms,
+    pg_similarity_search,
+)
 from cosa.rest.db.repositories.vector_store_backend import is_postgres_backend, resolve_lancedb_path
 
 
@@ -344,83 +350,11 @@ class SolutionSnapshotManager( SolutionSnapshotManagerInterface ):
         Raises:
             - ValueError if snapshot invalid
         """
-        if not snapshot or not snapshot.question:
-            raise ValueError( "Invalid snapshot: question cannot be empty" )
-
-        # Preserve original snapshot ID hash (SHA256 of timestamp)
-        id_hash = snapshot.id_hash
-        
-        # Helper function to ensure vector is proper format
-        def normalize_embedding( embedding ):
-            dim = self._embedding_dim
-            if not embedding:
-                return [0.0] * dim
-            if isinstance( embedding, list ):
-                if len( embedding ) == dim:
-                    return [float( x ) for x in embedding]
-                elif len( embedding ) < dim:
-                    # Pad with zeros
-                    return [float( x ) for x in embedding] + [0.0] * ( dim - len( embedding ) )
-                else:
-                    # Truncate
-                    return [float( x ) for x in embedding[ :dim ]]
-            return [0.0] * dim
-        
-        record = {
-            # Primary identifiers
-            "id_hash": id_hash,
-            "user_id": getattr( snapshot, 'user_id', 'default_user' ),
-            
-            # Content fields
-            "question": snapshot.question,
-            "question_normalized": getattr( snapshot, 'question_normalized', '' ) or '',
-            "question_gist": getattr( snapshot, 'question_gist', '' ) or '',
-            "answer": getattr( snapshot, 'answer', '' ) or '',
-            "answer_conversational": getattr( snapshot, 'answer_conversational', '' ) or '',
-            "solution_summary": getattr( snapshot, 'solution_summary', '' ) or '',
-            "thoughts": getattr( snapshot, 'thoughts', '' ) or '',
-            "error": getattr( snapshot, 'error', '' ) or '',
-            "routing_command": getattr( snapshot, 'routing_command', '' ) or '',
-            "agent_class_name": getattr( snapshot, 'agent_class_name', '' ) or '',
-
-            # Code execution data - ensure code is always a list for LanceDB schema compatibility
-            "code": self._ensure_list( getattr( snapshot, 'code', [] ) ),
-            "solution_summary_gist": getattr( snapshot, 'solution_summary_gist', '' ) or '',  # Gist of solution_summary
-            "code_returns": getattr( snapshot, 'code_returns', '' ) or '',
-            "code_example": getattr( snapshot, 'code_example', '' ) or '',
-            "code_type": getattr( snapshot, 'code_type', '' ) or '',
-            "programming_language": getattr( snapshot, 'programming_language', 'python' ),
-            "language_version": getattr( snapshot, 'language_version', '3.10' ),
-            
-            # Synonymous questions (convert dict to JSON string)
-            "synonymous_questions": json.dumps( getattr( snapshot, 'synonymous_questions', {} ) ),
-            "synonymous_question_gists": json.dumps( getattr( snapshot, 'synonymous_question_gists', {} ) ),
-            "non_synonymous_questions": self._ensure_list( getattr( snapshot, 'non_synonymous_questions', [] ) ),
-            "last_question_asked": getattr( snapshot, 'last_question_asked', '' ) or '',
-            
-            # Temporal data
-            "created_date": getattr( snapshot, 'created_date', time.strftime( "%Y-%m-%d @ %H:%M:%S %Z" ) ),
-            "updated_date": getattr( snapshot, 'updated_date', time.strftime( "%Y-%m-%d @ %H:%M:%S %Z" ) ),
-            "run_date": getattr( snapshot, 'run_date', '' ) or '',
-            "runtime_stats": json.dumps( getattr( snapshot, 'runtime_stats', {} ) ),
-
-            # Replay tracking for Time Saved Dashboard
-            "replay_history": json.dumps( getattr( snapshot, 'replay_history', [] ) ),
-            "replay_stats": json.dumps( getattr( snapshot, 'replay_stats', {} ) ),
-            "is_cache_hit": getattr( snapshot, 'is_cache_hit', False ),
-            "answer_is_correct": json.dumps( snapshot.answer_is_correct ),
-
-            # Vector embeddings
-            "question_embedding": normalize_embedding( getattr( snapshot, 'question_embedding', [] ) ),
-            "question_normalized_embedding": normalize_embedding( getattr( snapshot, 'question_normalized_embedding', [] ) ),
-            "question_gist_embedding": normalize_embedding( getattr( snapshot, 'question_gist_embedding', [] ) ),
-            "solution_embedding": normalize_embedding( getattr( snapshot, 'solution_embedding', [] ) ),
-            "code_embedding": normalize_embedding( getattr( snapshot, 'code_embedding', [] ) ),
-            "thoughts_embedding": normalize_embedding( getattr( snapshot, 'thoughts_embedding', [] ) ),
-            "solution_gist_embedding": normalize_embedding( getattr( snapshot, 'solution_gist_embedding', [] ) ),
-        }
-        
-        return record
+        # Delegating shim — the record marshalling now lives in
+        # cosa.memory.two_tier_question_search.snapshot_to_pg_record (additive
+        # step-2 lift, Cheech 2026-08-15), a verbatim copy taking ``self`` as
+        # ``manager``. Behaviour is byte-for-byte unchanged.
+        return snapshot_to_pg_record( self, snapshot )
     
     def _ensure_list( self, value ) -> list:
         """
@@ -475,85 +409,11 @@ class SolutionSnapshotManager( SolutionSnapshotManagerInterface ):
         Returns:
             Reconstructed SolutionSnapshot
         """
-        # Deserialize JSON fields first for constructor
-        try:
-            synonymous_questions = json.loads( record.get( "synonymous_questions", "{}" ) )
-        except:
-            synonymous_questions = {}
-
-        try:
-            synonymous_question_gists = json.loads( record.get( "synonymous_question_gists", "{}" ) )
-        except:
-            synonymous_question_gists = {}
-
-        try:
-            runtime_stats = json.loads( record.get( "runtime_stats", "{}" ) )
-        except:
-            runtime_stats = {}
-
-        # Deserialize replay tracking fields
-        try:
-            replay_history = json.loads( record.get( "replay_history", "[]" ) )
-        except:
-            replay_history = []
-
-        try:
-            replay_stats = json.loads( record.get( "replay_stats", "{}" ) )
-        except:
-            replay_stats = {}
-
-        is_cache_hit = record.get( "is_cache_hit", False )
-
-        try:
-            answer_is_correct = json.loads( record.get( "answer_is_correct", "null" ) )
-        except:
-            answer_is_correct = None
-
-        # Create SolutionSnapshot with ALL fields INCLUDING embeddings
-        # CRITICAL: Passing embeddings to constructor prevents 977ms regeneration
-        snapshot = SolutionSnapshot(
-            question=record["question"],
-            question_normalized=record.get( "question_normalized", "" ),
-            question_gist=record.get( "question_gist", "" ),
-            answer=record.get( "answer", "" ),
-            answer_conversational=record.get( "answer_conversational", "" ),
-            thoughts=record.get( "thoughts", "" ),
-            error=record.get( "error", "" ),
-            routing_command=record.get( "routing_command", "" ),
-            agent_class_name=record.get( "agent_class_name", None ),
-            synonymous_questions=synonymous_questions,
-            synonymous_question_gists=synonymous_question_gists,
-            non_synonymous_questions=record.get( "non_synonymous_questions", [] ),
-            last_question_asked=record.get( "last_question_asked", "" ),
-            created_date=record.get( "created_date", "" ),
-            updated_date=record.get( "updated_date", "" ),
-            run_date=record.get( "run_date", "" ),
-            runtime_stats=runtime_stats,
-            id_hash=record["id_hash"],  # CRITICAL: Preserve existing hash from database
-            solution_summary=record.get( "solution_summary", "" ),
-            code=self._ensure_list( record.get( "code", [] ) ),  # Ensure code is list, not NumPy array
-            solution_summary_gist=record.get( "solution_summary_gist", "" ),  # Gist of solution_summary
-            code_returns=record.get( "code_returns", "" ),
-            code_example=record.get( "code_example", "" ),
-            code_type=record.get( "code_type", "" ),
-            programming_language=record.get( "programming_language", "python" ),
-            language_version=record.get( "language_version", "3.10" ),
-            # CRITICAL: Pass embeddings to constructor to prevent regeneration
-            question_embedding=self._ensure_list( record.get( "question_embedding", [] ) ),
-            question_normalized_embedding=self._ensure_list( record.get( "question_normalized_embedding", [] ) ),
-            question_gist_embedding=self._ensure_list( record.get( "question_gist_embedding", [] ) ),
-            solution_embedding=self._ensure_list( record.get( "solution_embedding", [] ) ),
-            code_embedding=self._ensure_list( record.get( "code_embedding", [] ) ),
-            thoughts_embedding=self._ensure_list( record.get( "thoughts_embedding", [] ) ),
-            solution_gist_embedding=self._ensure_list( record.get( "solution_gist_embedding", [] ) ),
-            # Replay tracking for Time Saved Dashboard
-            replay_history=replay_history,
-            replay_stats=replay_stats,
-            is_cache_hit=is_cache_hit,
-            answer_is_correct=answer_is_correct
-        )
-
-        return snapshot
+        # Delegating shim — the record→snapshot marshalling now lives in
+        # cosa.memory.two_tier_question_search.pg_record_to_snapshot (additive
+        # step-2 lift, Cheech 2026-08-15), a verbatim copy taking ``self`` as
+        # ``manager``. Behaviour is byte-for-byte unchanged.
+        return pg_record_to_snapshot( self, record )
     
     def initialize( self ) -> None:
         """
@@ -1109,34 +969,11 @@ class SolutionSnapshotManager( SolutionSnapshotManagerInterface ):
         Args:
             snapshot: The SolutionSnapshot to extract questions from
         """
-        # Check if CanonicalSynonyms is available
-        if not self._canonical_synonyms or self._canonical_synonyms is False:
-            if self.debug and self.verbose:
-                print( "  ⓘ CanonicalSynonyms not available, skipping synonym update" )
-            return
-
-        # Add the primary question (last_question_asked)
-        if snapshot.last_question_asked:
-            try:
-                self._canonical_synonyms.add_synonym(
-                    snapshot_id=snapshot.id_hash,
-                    question_verbatim=snapshot.last_question_asked,
-                    confidence_score=100.0,
-                    source="runtime"
-                )
-                if self.debug:
-                    print( f"  ✓ Added primary question to canonical synonyms: '{snapshot.last_question_asked[:50]}...'" )
-            except Exception as e:
-                if self.debug:
-                    print( f"  ⚠ Failed to add primary question to synonyms: {e}" )
-
-        # Skip synonymous_questions - contains historical corruption from deprecated remove_non_alphanumerics()
-        # The deprecated method stripped math operators: "What's 2+2?" → "whats 22"
-        # Future synonyms will be added correctly now that add_synonymous_question() uses Normalizer.normalize()
-        # Canonical table will rebuild with correct normalization as users ask questions
-        if self.debug and self.verbose:
-            if hasattr( snapshot, 'synonymous_questions' ) and snapshot.synonymous_questions:
-                print( f"  ⓘ Skipping {len( snapshot.synonymous_questions )} synonymous questions (legacy corrupted data)" )
+        # Delegating shim — the synonym cascade now lives in
+        # cosa.memory.two_tier_question_search.update_canonical_synonyms
+        # (additive step-2 lift, Cheech 2026-08-15), a verbatim copy taking
+        # ``self`` as ``manager``. Behaviour is byte-for-byte unchanged.
+        return update_canonical_synonyms( self, snapshot )
 
     def get_snapshot_by_id( self, snapshot_id: str ) -> Optional[Any]:
         """
@@ -2113,43 +1950,12 @@ class SolutionSnapshotManager( SolutionSnapshotManagerInterface ):
             - RuntimeError if not initialized
             - ValueError if exemplar_snapshot None or threshold out of range
         """
-        if not self.is_initialized():
-            raise RuntimeError( "Manager must be initialized before searching" )
-        if not exemplar_snapshot:
-            raise ValueError( "Exemplar snapshot cannot be None" )
-        if not (0.0 <= threshold <= 100.0):
-            raise ValueError( "Threshold must be between 0.0 and 100.0" )
-
-        query_embedding = getattr( exemplar_snapshot, embedding_attr )
-        if not query_embedding:
-            return []
-        if all( v == 0.0 for v in query_embedding[:100] ):
-            return []
-
-        effective_limit = ( limit + 1 ) if exclude_self else ( limit if limit > 0 else 100 )
-
-        from cosa.rest.db.database import get_db
-        from cosa.rest.db.repositories.solution_snapshot_repository import SolutionSnapshotRepository
-
-        similar_snapshots     = []
-        best_below_threshold  = None
-        with get_db() as session:
-            repo = SolutionSnapshotRepository( session )
-            hits = getattr( repo, repo_method_name )( query_embedding, threshold=None, limit=effective_limit )
-            for pct, entity in hits:
-                if exclude_self and entity.id_hash == exemplar_snapshot.id_hash:
-                    continue
-                if pct >= threshold:
-                    similar_snapshots.append( ( pct, self._record_to_snapshot( self._pg_record_from_entity( entity ) ) ) )
-                elif ensure_top_result and best_below_threshold is None:
-                    best_below_threshold = ( pct, self._record_to_snapshot( self._pg_record_from_entity( entity ) ) )
-
-        similar_snapshots.sort( key=lambda x: x[0], reverse=True )
-        if limit > 0:
-            similar_snapshots = similar_snapshots[:limit]
-        if len( similar_snapshots ) == 0 and ensure_top_result and best_below_threshold is not None:
-            similar_snapshots.append( best_below_threshold )
-        return similar_snapshots
+        # Delegating shim — the shared pgvector similarity search now lives in
+        # cosa.memory.two_tier_question_search.pg_similarity_search (additive
+        # step-2 lift, Cheech 2026-08-15), a verbatim copy taking ``self`` as
+        # ``manager``. Behaviour is byte-for-byte unchanged.
+        return pg_similarity_search( self, exemplar_snapshot, embedding_attr, repo_method_name,
+                                     threshold, limit, exclude_self, ensure_top_result )
 
     def _pg_get_snapshots_by_code_similarity( self, exemplar_snapshot, threshold=85.0, limit=20,
                                               exclude_self=True, ensure_top_result=True, debug=False ):
