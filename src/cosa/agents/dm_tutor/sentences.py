@@ -88,6 +88,50 @@ _POINTER_TOKEN_SRC = (
 )
 _POINTER_TOKEN = re.compile( _POINTER_TOKEN_SRC, re.IGNORECASE )
 
+# 🔴 THE SLASHED-PATH SHAPE ABOVE ALSO MATCHES THINGS THAT ARE NOT PATHS. The
+# repeated `[\w.@%+-]+/` group happily matches a slash-separated ENUMERATION
+# ("SCHEDULED/PAUSED", "pending/running/terminal") or a bare RATIO ("10/10",
+# "6/10"), and a single word with a trailing slash ("training/"). None of those
+# is a pointer, but `pointer_tokens` would lift each one out and
+# `_restore_dropped_pointers` would append it as its own line — so a clean
+# three-line rewrite arrives with a garbage final line that reads as a message
+# truncated mid-word. (María, 2026-08-15, row 206dd6ea: a DM pointer line
+# delivered the bare fragment "training/"; two more delivered "SCHEDULED/PAUSED"
+# and "pending/running/terminal".)
+#
+# A slashed token is a real pointer only when it carries a POSITIVE path signal:
+# a URL scheme, an absolute or home root, a filename with a code extension, or a
+# trailing-slash directory of at least two segments. Everything else with a
+# slash is prose that happens to contain one.
+_HAS_CODE_EXT = re.compile( rf"\.(?:{_CODE_EXT})\b(?::\d+)?$", re.IGNORECASE )
+
+
+def _is_real_pointer( token ):
+    """
+    True when a matched token is a genuine path/URL/id, not a slash-enumeration.
+
+    Requires:
+        - token is a non-empty string produced by _POINTER_TOKEN
+
+    Ensures:
+        - True for URLs, absolute/home paths, filenames carrying a code
+          extension, bare filenames and hex ids (which have no slash), and
+          trailing-slash directories of two or more segments
+        - False for slash-separated enumerations and numeric ratios, which carry
+          no path signal ("SCHEDULED/PAUSED", "pending/running/terminal", "10/10")
+
+    Raises:
+        - nothing
+    """
+    if "://" in token:                    return True   # a URL
+    if "/" not in token:                  return True   # a bare filename or hex id
+    if token.startswith( ( "/", "~/" ) ): return True   # an absolute or home path
+    if _HAS_CODE_EXT.search( token ):     return True   # ends in a real filename.ext
+    if token.endswith( "/" ):                            # a directory reference…
+        segments = [ segment for segment in token.rstrip( "/" ).split( "/" ) if segment ]
+        return len( segments ) >= 2                      # …but only a real, multi-segment one
+    return False
+
 # A short lead-in is still a pointer line: "see <path>", "→ <path>", "detail: <path>".
 _POINTER_LEAD_IN = r"(?:(?:see|details?|detail|path|more|here|full\s+detail)\s*:?\s+|[→↳>]\s*)?"
 # In MARKDOWN-LINK form the `[label](target)` wrapper is itself the proof that the
@@ -233,9 +277,12 @@ def pointer_tokens( text ):
     found = []
     seen  = set()
     for token in _POINTER_TOKEN.findall( body ):
-        if token not in seen:
-            seen.add( token )
-            found.append( token )
+        if token in seen: continue
+        seen.add( token )
+        # Drop a slash-enumeration or ratio the regex mistook for a path, so the
+        # restore step never appends a garbage pointer line. See _is_real_pointer.
+        if not _is_real_pointer( token ): continue
+        found.append( token )
     return found
 
 

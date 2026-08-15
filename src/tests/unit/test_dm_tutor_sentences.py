@@ -65,6 +65,50 @@ class TestPointerTokens( unittest.TestCase ):
         self.assertEqual( pointer_tokens( "```\nsrc/foo.py:42\n```" ), [] )
 
 
+class TestSlashEnumerationsAreNotPointers( unittest.TestCase ):
+    """
+    🔴 REGRESSION, row 206dd6ea (María, 2026-08-15). The slashed-path shape matched a
+    slash-separated ENUMERATION and a bare RATIO as if it were a file path. The token
+    was then lifted out and re-appended as its own line, so a clean rewrite arrived with
+    a garbage final line that read as a message truncated mid-word — three live DMs
+    delivered "training/", "SCHEDULED/PAUSED", and "pending/running/terminal" that way.
+
+    The predicate now keeps a token only when it carries a positive path signal.
+    """
+
+    def test_a_bare_word_with_a_trailing_slash_is_not_a_pointer( self ):
+        """The exact fragment that shipped: "§5.3: training/ has five files"."""
+        self.assertEqual( pointer_tokens( "§5.3: training/ has five files in two namespaces" ), [] )
+
+    def test_a_numeric_ratio_is_not_a_pointer( self ):
+        self.assertEqual( pointer_tokens( "Tiberius reads 10/10 where you cite 6/10 today" ), [] )
+
+    def test_an_uppercase_two_way_enumeration_is_not_a_pointer( self ):
+        self.assertEqual( pointer_tokens( "answer the SCHEDULED/PAUSED question in the doc" ), [] )
+
+    def test_a_lowercase_three_way_enumeration_is_not_a_pointer( self ):
+        """Two slashes is not enough on its own — the enum has no path signal."""
+        self.assertEqual( pointer_tokens( "the states pending/running/terminal are covered" ), [] )
+
+    def test_a_real_trailing_slash_directory_still_survives( self ):
+        """A genuine multi-segment directory keeps its trailing-slash form."""
+        self.assertEqual( pointer_tokens( "src/conf/training/ holds two namespaces" ),
+                          [ "src/conf/training/" ] )
+
+    def test_an_absolute_path_survives( self ):
+        self.assertEqual( pointer_tokens( "written to /mnt/DATA01/x.md just now" ),
+                          [ "/mnt/DATA01/x.md" ] )
+
+    def test_a_home_path_survives( self ):
+        self.assertEqual( pointer_tokens( "the key is in ~/.claude/settings.json today" ),
+                          [ "~/.claude/settings.json" ] )
+
+    def test_a_real_path_and_a_ratio_in_one_body_keeps_only_the_path( self ):
+        """The mixed shape from the live DM: a real filename:line beside a ratio and an enum."""
+        body = "leak at test_suite.py:181, answer SCHEDULED/PAUSED, Tiberius reads 10/10"
+        self.assertEqual( pointer_tokens( body ), [ "test_suite.py:181" ] )
+
+
 class TestWholeLinePointerIsStructure( unittest.TestCase ):
     """
     Each pointer shape, ALONE on its line, asserts nothing → structure → 0 claims. The

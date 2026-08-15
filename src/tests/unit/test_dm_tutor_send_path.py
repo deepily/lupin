@@ -1057,5 +1057,74 @@ class TestTheCondenserMayNotInventAnIdsType( unittest.TestCase ):
                               "a raising repair must return the rewrite untouched, never lose it" )
 
 
+class TestSlashEnumerationsAreNotRestoredAsPointers( unittest.TestCase ):
+    """
+    🔴 REGRESSION, row 206dd6ea (María, 2026-08-15). A clean rewrite arrived with a
+    garbage final line — "training/" — that read as a message truncated mid-word. The
+    cause was NOT XML truncation (that fails closed correctly): the sender's own prose
+    carried a slash-enumeration ("§5.3: training/ ...") and a ratio ("10/10", "6/10")
+    that the pointer regex mistook for file paths, so `_restore_dropped_pointers`
+    appended one as its own line. The restore must append a real path and NOTHING else.
+
+    The steer: a faithful shorter body is safe, a fragment is not. Here the fix delivers
+    the faithful three-line rewrite WITHOUT the mis-read fragment.
+    """
+
+    def setUp( self ):
+        from cosa.rest.routers.dm import _apply_dm_tutor, _restore_dropped_pointers, DM_TUTOR_NOTICE
+        self.apply   = _apply_dm_tutor
+        self.restore = _restore_dropped_pointers
+        self.notice  = DM_TUTOR_NOTICE
+
+    # Rachel's real DM to María, reduced to its shape: three claims plus prose that
+    # happens to contain a slash-enumeration and two ratios.
+    _WITH_ENUMS = (
+        "Short form. Design stands; two gates don't.\n"
+        "§6: assertions 5 and 6 can't fail as written.\n"
+        "§5.3: training/ has five files in two namespaces; a glob false-orphans 21.\n"
+        "§5.4: unresolved — Tiberius reads 10/10 where you cite 6/10."
+    )
+    # A faithful rewrite that (correctly) drops the enum fragment and keeps the ratios
+    # inside its §5.4 sentence.
+    _FAITHFUL_REWRITE = (
+        "Design stands; two gates don't.\n"
+        "§6: assertions 5 and 6 can't fail as written.\n"
+        "§5.4: unresolved — Tiberius reads 10/10 where you cite 6/10."
+    )
+
+    def test_the_delivered_body_gains_no_garbage_pointer_line( self ):
+        text, meta = self.apply( self._WITH_ENUMS, config=_cfg(),
+                                 rewrite_fn=lambda b: self._FAITHFUL_REWRITE )
+        self.assertEqual( meta[ "tutor_outcome" ], "rewritten" )
+        self.assertNotIn( "training/", text,
+                          "a slash-enumeration was mis-restored as a pointer line" )
+        # The faithful three claims survive; nothing was appended below them.
+        body = text.split( self.notice )[ 0 ].rstrip()
+        self.assertEqual( body, self._FAITHFUL_REWRITE )
+
+    def test_the_restore_appends_nothing_for_a_body_of_only_enums( self ):
+        self.assertEqual( self.restore( self._WITH_ENUMS, self._FAITHFUL_REWRITE ),
+                          self._FAITHFUL_REWRITE )
+
+    def test_the_instrument_can_fail( self ):
+        """
+        CONTROL. The fixture MUST carry a token the old regex would have mis-read, or
+        the assertion above proves nothing. Delete `_is_real_pointer`'s filtering and
+        the un-fixed regex yields "training/" here, turning both tests above red.
+        """
+        from cosa.agents.dm_tutor.sentences import _POINTER_TOKEN
+        raw = _POINTER_TOKEN.findall( self._WITH_ENUMS )
+        self.assertIn( "training/", raw,
+                       "fixture lost the mis-read fragment — this suite proves nothing" )
+
+    def test_a_real_path_beside_the_enums_is_still_restored( self ):
+        """The fix must not over-correct: a genuine dropped path is still put back."""
+        with_path = self._WITH_ENUMS + "\nfull detail in src/rnd/v0.2.0/cascade-r2.md"
+        text, meta = self.apply( with_path, config=_cfg(),
+                                 rewrite_fn=lambda b: self._FAITHFUL_REWRITE )
+        self.assertIn( "src/rnd/v0.2.0/cascade-r2.md", text )
+        self.assertNotIn( "training/", text )
+
+
 if __name__ == "__main__":
     unittest.main()
