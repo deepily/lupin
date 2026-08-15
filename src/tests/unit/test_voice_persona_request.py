@@ -879,6 +879,39 @@ class TestPersonaChainQueryParam:
         push_types = [ call.kwargs.get( "type" ) for call in mock_queue.push_notification.call_args_list ]
         assert "voice_persona_conflict" not in push_types
 
+    def test_chain_nonexistent_name_then_named_hit_is_distinguishable( self, test_app ):
+        """A chain naming a NONEXISTENT persona that lands on a later NAMED element
+        must not return a body the caller cannot tell from a clean first-element
+        hit (row 462b985c). Both land on Rio; the not_in_pool skip is a caller
+        error, not expressed intent, so it stays visible on chain_outcomes."""
+        _setup_overrides( test_app )
+
+        with patch( "cosa.rest.routers.voice_persona.find_session_path_by_id", return_value="/tmp/cc-1.json" ), \
+             patch( "cosa.rest.routers.voice_persona.get_voice_persona", return_value=None ), \
+             patch( "cosa.rest.routers.voice_persona.set_voice_persona", return_value=True ), \
+             patch( "lupin_cli.claude_code.hooks.lib.session_bridge.find_active_voice_persona_sessions",
+                    return_value=[] ):
+
+            client   = TestClient( test_app )
+            degraded = client.post(
+                "/api/cosa-voice/voice-persona/sid-mine/allocate?persona_chain=Frobozz,Rio"
+            ).json()
+            clean    = client.post(
+                "/api/cosa-voice/voice-persona/sid-mine/allocate?persona_chain=Rio"
+            ).json()
+
+        # Same landing persona — the ONLY real difference is the skipped typo.
+        assert degraded[ "voice_persona" ][ "name" ] == "Rio"
+        assert clean[ "voice_persona" ][ "name" ]    == "Rio"
+        # The headline invariant: a degraded chain is NOT indistinguishable from a
+        # clean hit. Without the fix both bodies are byte-identical and this fails.
+        assert degraded != clean, "degraded chain is identical to a clean hit — the not_in_pool skip vanished"
+        # Specifically: the nonexistent name is named, with status not_in_pool.
+        assert [ ( o[ "name" ], o[ "status" ] ) for o in degraded[ "chain_outcomes" ][ "outcomes" ] ] == [ ( "Frobozz", "not_in_pool" ) ]
+        assert degraded[ "chain_outcomes" ][ "satisfied_by" ] == "Rio"
+        # A clean single-name hit carries no skips.
+        assert clean[ "chain_outcomes" ][ "outcomes" ] == []
+
     def test_chain_exhausted_409_with_conflict_notification( self, test_app ):
         """Every named element missed, no `*` → 409 + conflict notify; session stays persona-less."""
         mock_queue = _setup_overrides( test_app )
