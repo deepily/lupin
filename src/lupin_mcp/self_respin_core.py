@@ -467,26 +467,44 @@ def resolve_own_identity( get_cc_meta_fn, fallback_sid ):
     return resolve_identity_from_cc_meta( cc_meta, fallback_sid )
 
 
-def _live_own_pressure( persona ):   # pragma: no cover - live :8001 pressure read (tests inject pressure_fn)
+def parse_own_pressure( section, persona ):
+    """
+    Extract ( status, consumption_pct_of_window ) for `persona` from a
+    context-pressure section dict — PURE, so both arms are unit-covered (this is
+    the logic that held a wrong default for a day under a pragma; R1 lifts it out).
+
+    Requires:
+        - section is the context-pressure section ({ "personas": { name: record } })
+          or anything defensively; persona is the seat's persona name
+
+    Ensures:
+        - a present persona record carrying a `status` ⇒ ( status, pct )
+        - an absent persona, a missing/blank `status`, a non-dict `personas`, or a
+          non-dict `section` ⇒ ( "unknown", None ) — a missed reading is recorded
+          as unknown, NEVER a manufactured "over_budget" (Krishna condition #3). A
+          forged status would be a CLAIM that a reading happened; unknown is honest.
+        - never raises
+    """
+    personas = section.get( "personas" ) if isinstance( section, dict ) else None
+    record   = ( personas.get( persona ) if isinstance( personas, dict ) else None ) or {}
+    status   = record.get( "status" ) or "unknown"
+    return status, record.get( "consumption_pct_of_window" )
+
+
+def _live_own_pressure( persona ):   # pragma: no cover - live :8001 httpx fetch ONLY; parse covered by parse_own_pressure
     """
     Read THIS persona's own context-pressure record for the pre-clear stamp.
 
-    Ensures:
-        - returns ( status, consumption_pct_of_window ) from the live payload
-        - when the sensor is unreachable or the persona is absent, records the
-          status as "unknown" with pct None — NEVER a manufactured "over_budget".
-          A forged status is a CLAIM that a reading happened; a missed reading is
-          "unknown", recorded as unknown. The observer then treats it as an
-          unobserved pre-clear state rather than an observed over-budget one.
+    Only the live httpx fetch (+ its failure fallback to {}) lives here under the
+    pragma; the parse/default logic is `parse_own_pressure` (unit-covered). A fetch
+    failure yields {} ⇒ parse returns ( "unknown", None ), never a forged status.
     """
     try:
         from cosa.agents.heartbeat_arbiter.self_respin_observer import _fetch_live_pressure
         section = _fetch_live_pressure() or {}
-        record  = ( section.get( "personas" ) or {} ).get( persona ) or {}
-        status  = record.get( "status" ) or "unknown"
-        return status, record.get( "consumption_pct_of_window" )
     except Exception:
-        return "unknown", None
+        section = {}
+    return parse_own_pressure( section, persona )
 
 
 def _default_ask():   # pragma: no cover - live MCP ask boundary (tests inject ask_fn)

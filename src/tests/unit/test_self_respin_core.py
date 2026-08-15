@@ -436,3 +436,39 @@ def test_schedule_path_never_applies_speakerphone_rider( tmp_path, monkeypatch )
     assert wraps == []                              # the rider was NEVER applied
     assert scheduled[ 0 ][ 6 ] == "/clear"          # verbatim slash command, not a wrapped blob
     assert not any( "WRAPPED" in part for part in scheduled[ 0 ] )
+
+
+# ---------------------------------------------------------------------------
+# parse_own_pressure — the pure parse lifted out of _live_own_pressure's pragma
+# (R1: the logic that held a wrong default for a day is now covered, both arms)
+# ---------------------------------------------------------------------------
+def test_parse_own_pressure_present_persona_returns_status_and_pct():
+    section = { "personas": { "cheech": { "status": "over_budget", "consumption_pct_of_window": 61.0 } } }
+    assert sr.parse_own_pressure( section, "cheech" ) == ( "over_budget", 61.0 )
+
+
+def test_parse_own_pressure_absent_persona_is_unknown_none():
+    section = { "personas": { "someone_else": { "status": "within_budget" } } }
+    assert sr.parse_own_pressure( section, "cheech" ) == ( "unknown", None )
+
+
+def test_parse_own_pressure_missing_status_is_unknown_but_keeps_pct():
+    # a record present without a status must NOT manufacture over_budget
+    section = { "personas": { "cheech": { "consumption_pct_of_window": 42.0 } } }
+    assert sr.parse_own_pressure( section, "cheech" ) == ( "unknown", 42.0 )
+
+
+def test_parse_own_pressure_blank_status_is_unknown():
+    section = { "personas": { "cheech": { "status": "", "consumption_pct_of_window": 5.0 } } }
+    assert sr.parse_own_pressure( section, "cheech" ) == ( "unknown", 5.0 )
+
+
+def test_parse_own_pressure_personas_not_a_dict_is_unknown_none():
+    assert sr.parse_own_pressure( { "personas": None }, "cheech" ) == ( "unknown", None )
+    assert sr.parse_own_pressure( { "personas": [ "not", "a", "dict" ] }, "cheech" ) == ( "unknown", None )
+
+
+def test_parse_own_pressure_section_not_a_dict_is_unknown_none():
+    # the fetch-failure path feeds {} (or a stray non-dict) — must be unknown, never over_budget
+    assert sr.parse_own_pressure( {}, "cheech" ) == ( "unknown", None )
+    assert sr.parse_own_pressure( None, "cheech" ) == ( "unknown", None )
