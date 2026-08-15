@@ -27,6 +27,12 @@ replacement for the retired soft-preference `preferred_persona_name`):
 """
 import os
 import sys
+import sqlalchemy.sql.compiler  # noqa: F401 — module-scope (row cda78c70): keep it resident in
+                                # sys.modules for the whole test. Some fixture reimports it MID-TEST
+                                # (instrumented: 2 in-test reimports without this line, 0 with it).
+                                # The evicting mechanism is NOT patch.dict — verified zero snapshot
+                                # drops in both arms — and remains UNIDENTIFIED. Removing this line
+                                # re-fires conftest's protected-module-reimport guard; that is its test.
 from unittest.mock import MagicMock, patch
 
 import pytest
