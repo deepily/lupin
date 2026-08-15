@@ -597,6 +597,54 @@ def run_v1_baseline( *, corpus: str = "simple", seed: int = 1024, n_per_command:
     }
 
 
+# ───────────────────────── cold-start truncation (F3, :8000-guarded)
+
+SNAPSHOT_TABLE = "solution_snapshots"   # the fixed Postgres snapshot table (ORM __tablename__)
+TEST_DB_MARKER = "lupin_db_test"        # the :8000 test database name — the ONLY legal TRUNCATE target
+
+
+def assert_test_db( db_url: Any ) -> None:
+    """
+    Refuse to proceed unless the connection targets the :8000 TEST database.
+
+    The truncation MAKES the cold pass cold (the stronger guarantee that pairs
+    with the assert-cold floor). But a TRUNCATE is irreversible, so this is the
+    hard precondition (Cheech): fire LOUD and never proceed on an unexpected
+    target — never the dev DB, never prod, never an unparented url.
+
+    Ensures:
+        - returns None when db_url is a string naming the test DB (lupin_db_test)
+        - raises EvalIntegrityError for any other / missing / non-string target,
+          with the offending value quoted — the caller must not TRUNCATE
+    """
+    if not isinstance( db_url, str ) or TEST_DB_MARKER not in db_url:
+        raise EvalIntegrityError(
+            f"refusing to TRUNCATE: the DB target is not the :8000 test database "
+            f"(expected '{TEST_DB_MARKER}' in the url); got {db_url!r}. Fail loud, never proceed."
+        )
+
+
+def truncate_snapshots( execute_fn: Callable[[str], Any], db_url: Any ) -> str:
+    """
+    Empty the snapshot table so the cold pass starts genuinely cold — but ONLY
+    after proving the target is the :8000 test DB.
+
+    Requires:
+        - execute_fn( sql ) runs a statement against the SAME connection db_url
+          describes (the live boundary; a real cursor.execute in the wrapper)
+        - db_url is the connection's url string
+
+    Ensures:
+        - assert_test_db(db_url) runs FIRST — on a wrong target it RAISES and
+          execute_fn is NEVER called (no TRUNCATE fires on the wrong DB)
+        - on the test DB, truncates the FIXED SNAPSHOT_TABLE (a constant, never a
+          caller-supplied identifier → no injection surface) and returns its name
+    """
+    assert_test_db( db_url )                       # raises before any execute on a wrong target
+    execute_fn( f"TRUNCATE TABLE {SNAPSHOT_TABLE}" )
+    return SNAPSHOT_TABLE
+
+
 # ────────────────────────────────────────── live IO seams (injected away)
 
 def _default_push_fn( base_url: str, websocket_id: str,

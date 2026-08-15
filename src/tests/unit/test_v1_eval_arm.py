@@ -312,6 +312,34 @@ def test_run_v1_baseline_composes():
     assert v1.V1_PIN_SHA in res[ "report" ] and "seed       : 7" in res[ "report" ]
 
 
+# ───────────────────────────────────────────── truncate guard (F3, :8000)
+
+def test_assert_test_db_accepts_test_target():
+    assert v1.assert_test_db( "postgresql://u:p@localhost/lupin_db_test" ) is None
+
+def test_assert_test_db_refuses_dev_target():
+    with pytest.raises( v1.EvalIntegrityError ):
+        v1.assert_test_db( "postgresql://u:p@localhost/lupin_db_dev" )
+
+def test_assert_test_db_refuses_non_string():
+    with pytest.raises( v1.EvalIntegrityError ):
+        v1.assert_test_db( None )
+
+def test_truncate_snapshots_runs_only_against_test_db():
+    calls = []
+    table = v1.truncate_snapshots( lambda sql: calls.append( sql ),
+                                   "postgresql://u:p@localhost/lupin_db_test" )
+    assert table == v1.SNAPSHOT_TABLE
+    assert calls == [ f"TRUNCATE TABLE {v1.SNAPSHOT_TABLE}" ]
+
+def test_truncate_snapshots_never_executes_on_wrong_db():
+    calls = []
+    with pytest.raises( v1.EvalIntegrityError ):
+        v1.truncate_snapshots( lambda sql: calls.append( sql ),
+                               "postgresql://u:p@localhost/lupin_db_dev" )
+    assert calls == [ ]                       # TRUNCATE NEVER fired on the wrong target
+
+
 # ───────────────────────────────────────────── reporting
 
 def test_report_header_stamps_pin_sha_and_seed():
