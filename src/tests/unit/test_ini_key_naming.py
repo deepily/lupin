@@ -118,7 +118,6 @@ class TestNoUnderscoreKeysInIni:
 class TestIniSplainerParity:
     """Verify both INI files have matching key names."""
 
-    @pytest.mark.xfail( reason="17 pre-existing splainer gaps — out of scope for naming migration" )
     def test_all_ini_keys_have_splainer_entries( self ):
         """Every key in lupin-app.ini should have a matching entry in lupin-app-splainer.ini."""
         ini_config, _ = _load_config( "lupin-app.ini" )
