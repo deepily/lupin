@@ -113,39 +113,65 @@ def _cli_module_returncode( module, timeout=60 ):
     return proc.returncode, tail
 
 
-# -- Exemption facility (§7) — an INTENTIONAL absence, explicit and reasoned -----
-# A command that is owned but deliberately NOT in the router prompt (because it is
-# not user-voice-reachable) gets an EXPLICIT exemption here carrying a machine-checked
-# reason — never a quietly loosened assertion. 1a excludes these. Landed EMPTY;
-# decided entries are added per-item in a separate commit, each with evidence (the
-# dispatch call site) in its reason.
-PROMPT_REACHABILITY_EXEMPTIONS = {
-    # "agent router go to <command>": "why it is NOT voice-reachable (call site: file:line)",
-    "agent router go to test fix expediter":
-        "START is SYSTEM-triggered by the test-suite completion watchdog "
-        "(test_suite_completion_watchdog.py:259) with a non-speakable "
-        "source_test_suite_job_id; no fuzzy-human-input path, so not user-voice-reachable. "
-        "RESIDUAL is BOUNDED by the prompt absence: a live A/B probe shows router emission "
-        "is gated on the PROMPT LINE, not training presence — 0/5 emitted when unlisted vs "
-        "5/5 when listed (src/rnd/v0.2.0/2026.08.15-router-emission-probe.md); the earlier "
-        "6/10 invention rate did NOT reproduce. START is absent from the template, so "
-        "exempting it holds the emission risk at the low, prompt-gated end — it reduces "
-        "the chance materially, not merely nominally. Follow-up to drop the still-present "
-        "training key at next retrain: store row e5a840c9.",
+# -- Exemption facility (§7) — an INTENTIONAL absence, explicit, reasoned, SCOPED --
+# A command owned but NEVER an INITIAL ROUTER DETECTION gets an EXPLICIT exemption
+# here. Each entry NAMES the surfaces it waives — "prompt" (1a) and/or "training"
+# (1c's owned-must-be-trained arm) — so one exemption can NEVER silently silence a
+# guard it was not meant to (Rachel). A command may still be user-REACHABLE by another
+# path (e.g. a confirmation-card alternative); the surfaces name only the
+# initial-detection guards waived. Each reason carries evidence (the call site).
+INITIAL_DETECTION_EXEMPTIONS = {
+    "agent router go to test fix expediter": {
+        "surfaces": [ "prompt" ],   # START is TRAINED today, so it does NOT waive 1c
+        "reason":
+            "START is SYSTEM-triggered by the test-suite completion watchdog "
+            "(test_suite_completion_watchdog.py:259) with a non-speakable "
+            "source_test_suite_job_id; no fuzzy-human-input path, so not user-voice-reachable. "
+            "RESIDUAL is BOUNDED by the prompt absence: a live A/B probe shows router emission "
+            "is gated on the PROMPT LINE, not training presence — 0/5 emitted when unlisted vs "
+            "5/5 when listed (src/rnd/v0.2.0/2026.08.15-router-emission-probe.md); the earlier "
+            "6/10 invention rate did NOT reproduce. START is absent from the template, so "
+            "exempting it holds the emission risk at the low, prompt-gated end — it reduces "
+            "the chance materially, not merely nominally. Follow-up to drop the still-present "
+            "training key at next retrain: store row e5a840c9.",
+    },
+    "agent router go to bug fix expediter": {
+        "surfaces": [ "prompt", "training" ],
+        "reason":
+            "BFE is never an INITIAL router detection — the prompt AND the training corpus "
+            "govern initial-detection emission, and BFE is intentionally neither listed nor "
+            "trained. It IS user-reachable AND completable by another path: PRODUCT_NAMES "
+            "(todo_fifo_queue.py:1026) is offered as a 'Switch to this instead' alternative by "
+            "_confirm_agentic_routing:1039, and its dead_job_id is then collected by the RAE "
+            "fallback questions. So its absence from prompt+training is correct-by-design "
+            "(only ever a user-picked alternative, never an initial detection), not a defect.",
+    },
 }
 
+_VALID_SURFACES = { "prompt", "training" }
 
-def _validate_prompt_exemptions( exemptions, owned, template ):
-    """Problems with an exemption map: no reason, not an owned agentic command, or
-    stale (the command IS in the prompt, so the exemption is a lie). Empty ⇒ valid."""
+
+def _exempt_on( surface ):
+    """Commands whose exemption waives the given initial-detection surface."""
+    return { c for c, e in INITIAL_DETECTION_EXEMPTIONS.items() if surface in e.get( "surfaces", [] ) }
+
+
+def _validate_exemptions( exemptions, owned, template ):
+    """Problems with an exemption map: surfaces not a non-empty subset of the valid
+    set, no reason, command not owned, or STALE on a waived surface (present on a
+    surface it claims to waive). Empty ⇒ valid."""
     problems = []
-    for command, reason in exemptions.items():
+    for command, entry in exemptions.items():
+        surfaces = set( entry.get( "surfaces", [] ) )
+        reason   = entry.get( "reason", "" )
+        if not surfaces or not ( surfaces <= _VALID_SURFACES ):
+            problems.append( f"{command}: surfaces must be a non-empty subset of {sorted( _VALID_SURFACES )}, got {sorted( surfaces )}" )
         if not ( reason and reason.strip() ):
             problems.append( f"{command}: exemption has no reason" )
         if command not in owned:
             problems.append( f"{command}: not an owned agentic command" )
-        if command in template:
-            problems.append( f"{command}: IS in the prompt — stale exemption" )
+        if "prompt" in surfaces and command in template:
+            problems.append( f"{command}: waives 'prompt' but IS in the prompt — stale exemption" )
     return problems
 
 
@@ -155,10 +181,10 @@ class TestAgenticDriftGuard( unittest.TestCase ):
     def test_1a_every_owned_agentic_command_is_router_listed( self ):
         # Owned agentic commands must be router-listed, UNLESS explicitly exempted
         # (§7): an exemption is an intentional, reasoned absence, not a loosening.
-        missing = set( AGENTIC_COMMANDS ) - _template_commands() - set( PROMPT_REACHABILITY_EXEMPTIONS )
+        missing = set( AGENTIC_COMMANDS ) - _template_commands() - _exempt_on( "prompt" )
         self.assertEqual(
             missing, set(),
-            f"owned agentic commands the router prompt never lists and are not exempted: {sorted( missing )}"
+            f"owned agentic commands the router prompt never lists and do not waive 'prompt': {sorted( missing )}"
         )
 
     def test_1b_factory_branches_equal_the_owned_agentic_set( self ):
@@ -173,10 +199,12 @@ class TestAgenticDriftGuard( unittest.TestCase ):
     def test_1c_training_agentic_keys_equal_the_owned_agentic_set( self ):
         training = _training_agentic_keys()
         owned    = set( AGENTIC_COMMANDS )
+        trained_not_owned = training - owned                             # a training key MUST be owned
+        owned_not_trained = owned - training - _exempt_on( "training" )  # owned MUST be trained unless it waives "training"
         self.assertEqual(
-            training, owned,
-            f"training<->registry drift — in training not owned: {sorted( training - owned )}; "
-            f"owned but not trained: {sorted( owned - training )}"
+            trained_not_owned | owned_not_trained, set(),
+            f"training<->registry drift — in training not owned: {sorted( trained_not_owned )}; "
+            f"owned (initial-detection) but not trained: {sorted( owned_not_trained )}"
         )
 
 
@@ -306,30 +334,49 @@ class TestCliHelpNamesDeclaredArgs( unittest.TestCase ):
 
 
 # -- Exemption facility validity (§7) ------------------------------------------
-class TestPromptExemptionFacility( unittest.TestCase ):
-    """Every exemption must be real (owned), genuinely absent from the prompt, and
-    carry a reason. The validator itself must be able to go red."""
+class TestInitialDetectionExemptionFacility( unittest.TestCase ):
+    """Every exemption must be real (owned), carry a reason, name valid surfaces, and
+    not be stale on a waived surface. The validator itself must be able to go red, and
+    a surface it does NOT name must NOT be silenced."""
 
     def test_real_exemptions_are_all_valid( self ):
-        problems = _validate_prompt_exemptions(
-            PROMPT_REACHABILITY_EXEMPTIONS, set( AGENTIC_COMMANDS ), _template_commands() )
-        self.assertEqual( problems, [], f"invalid prompt exemptions: {problems}" )
+        problems = _validate_exemptions(
+            INITIAL_DETECTION_EXEMPTIONS, set( AGENTIC_COMMANDS ), _template_commands() )
+        self.assertEqual( problems, [], f"invalid exemptions: {problems}" )
 
-    def test_validator_flags_no_reason_not_owned_and_stale( self ):
-        # Falsifiability: bad entries hitting all three failure modes.
-        # - phantom: empty reason AND not an owned command
-        # - weather: a real CONVERSATIONAL template command → stale exemption
+    def test_validator_flags_bad_surfaces_no_reason_not_owned_and_stale( self ):
+        # Falsifiability: bad entries hitting every failure mode.
+        # - phantom: empty surfaces AND empty reason AND not an owned command
+        # - weather: a real CONVERSATIONAL template command waiving 'prompt' → stale
         # Precondition (Tiffany): the stale arm relies on "weather" being a real
         # in-prompt command. Assert it, so this test FAILS LOUDLY if weather ever
         # leaves the template rather than silently ceasing to exercise staleness.
         self.assertIn( "agent router go to weather", _template_commands() )
-        problems = _validate_prompt_exemptions(
-            { "agent router go to phantom": "",
-              "agent router go to weather": "some reason" },
+        problems = _validate_exemptions(
+            { "agent router go to phantom": { "surfaces": [], "reason": "" },
+              "agent router go to weather": { "surfaces": [ "prompt" ], "reason": "x" } },
             set( AGENTIC_COMMANDS ), _template_commands() )
+        self.assertTrue( any( "surfaces must be a non-empty subset" in p for p in problems ), problems )
         self.assertIn( "agent router go to phantom: exemption has no reason", problems )
         self.assertIn( "agent router go to phantom: not an owned agentic command", problems )
-        self.assertIn( "agent router go to weather: IS in the prompt — stale exemption", problems )
+        self.assertIn( "agent router go to weather: waives 'prompt' but IS in the prompt — stale exemption", problems )
+
+    def test_prompt_only_surface_cannot_silence_the_training_guard( self ):
+        # Rachel's control — the proof the `surfaces` field is load-bearing, not
+        # decoration. START waives ONLY "prompt", so it is invisible to 1c; BFE waives
+        # both. And a synthetic ["prompt"]-only exemption on an owned-not-trained
+        # command clears 1a's shape but leaves 1c's shape RED.
+        self.assertIn(    "agent router go to test fix expediter", _exempt_on( "prompt" ) )
+        self.assertNotIn( "agent router go to test fix expediter", _exempt_on( "training" ) )
+        self.assertIn(    "agent router go to bug fix expediter",  _exempt_on( "prompt" ) )
+        self.assertIn(    "agent router go to bug fix expediter",  _exempt_on( "training" ) )
+
+        synth       = { "agent router go to synth": { "surfaces": [ "prompt" ], "reason": "r" } }
+        on_prompt   = { c for c, e in synth.items() if "prompt"   in e[ "surfaces" ] }
+        on_training = { c for c, e in synth.items() if "training" in e[ "surfaces" ] }
+        owned, trained = { "agent router go to synth" }, set()
+        self.assertEqual( owned - on_prompt, set() )                  # 1a-shape: cleared
+        self.assertEqual( owned - trained - on_training, owned )      # 1c-shape: STILL red
 
 
 # -- Falsifiability — each assertion above can go red (§6) ----------------------
