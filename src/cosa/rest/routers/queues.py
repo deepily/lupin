@@ -1631,6 +1631,11 @@ async def pause_job(
     except Exception as e:
         print( f"[API] Warning: WebSocket emission failed for pause transition: {e}" )
 
+    # Durably record the pause so a container bounce restores it PAUSED, not active
+    # (row 2817b0f5). No-op for non-agentic jobs absent from job_history.
+    from cosa.rest.job_persistence import persist_job_paused_state
+    persist_job_paused_state( job_id, True )
+
     print( f"[API] Job paused: {job_id} by user {user_id}" )
 
     return {
@@ -1702,6 +1707,11 @@ async def resume_job(
         )
     except Exception as e:
         print( f"[API] Warning: WebSocket emission failed for resume transition: {e}" )
+
+    # Clear the durable pause flag so a later restore does not re-hold a resumed job
+    # (row 2817b0f5). No-op for non-agentic jobs absent from job_history.
+    from cosa.rest.job_persistence import persist_job_paused_state
+    persist_job_paused_state( job_id, False )
 
     # Notify consumer to recalculate eligibility (may wake from timed sleep)
     with todo_queue.condition:

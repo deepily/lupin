@@ -1060,42 +1060,20 @@ async def lifespan( app: FastAPI ):
     from cosa.utils.api_resource_manager import init_arm
     init_arm()
 
-    # Restore scheduled jobs that survived the restart (preserved by mark_interrupted_jobs)
+    # Restore pre-execution jobs that survived the restart (preserved by
+    # mark_interrupted_jobs): future-scheduled, downtime-catch-up, AND immediate
+    # submits with no scheduled_at (row 2817b0f5 — a queued job must survive a bounce).
     try:
-        from cosa.rest.job_persistence import get_restorable_jobs
+        from cosa.rest.job_persistence import get_restorable_jobs, restore_pending_jobs
         from cosa.rest.agentic_job_factory import create_agentic_job
+        from cosa.rest.queue_extensions import user_job_tracker
 
-        restorable = get_restorable_jobs()
-        for job_data in restorable:
-            routing_cmd = job_data[ "routing_command" ]
-            if not routing_cmd:
-                print( f"[CJ-PERSIST] Cannot restore {job_data[ 'id_hash' ]}: no routing_command" )
-                continue
-
-            job = create_agentic_job(
-                command    = routing_cmd,
-                args_dict  = job_data.get( "metadata_json", {} ),
-                user_id    = job_data[ "user_id" ],
-                user_email = job_data[ "user_email" ],
-                session_id = job_data[ "session_id" ],
-                debug      = app_debug,
-            )
-            if job is None:
-                print( f"[CJ-PERSIST] Cannot restore {job_data[ 'id_hash' ]}: factory returned None" )
-                continue
-
-            job.scheduled_at = job_data[ "scheduled_at" ]
-            if job_data.get( "monopolize" ):
-                job.monopolize = True
-
-            jobs_todo_queue.push( job )
-            print( f"[CJ-PERSIST] Restored scheduled job: {job_data[ 'id_hash' ]} "
-                   f"(type={job_data[ 'job_type' ]}, scheduled_at={job_data[ 'scheduled_at' ]})" )
-
-        if restorable:
-            print( f"[CJ-PERSIST] Restored {len( restorable )} scheduled job(s)" )
+        restore_pending_jobs(
+            get_restorable_jobs(), create_agentic_job, jobs_todo_queue,
+            register_scoped_job=user_job_tracker.register_scoped_job, debug=app_debug
+        )
     except Exception as e:
-        print( f"[WARN] Scheduled job restoration failed: {e}" )
+        print( f"[WARN] Job restoration failed: {e}" )
 
     # v2.2 closed-loop (B1 standing cadence): auto-submit ONE standing
     # Heartbeat-Arbiter observer into CJ Flow. Single-instance-guarded (skips if a

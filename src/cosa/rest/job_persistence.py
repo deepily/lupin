@@ -213,6 +213,7 @@ def _build_metadata_json( metadata ):
         "cost_summary", "artifacts", "answer_conversational",
         "push_counter", "agent_type", "stack_trace",
         "scheduled_at", "monopolize",
+        "paused",         # Durable-queue restore (row 2817b0f5): a user-paused job must come back paused, not active
         "original_args",  # CJ Flow persistence: exact args a job was submitted with (for BFE resubmit)
         "checkpoint",     # Checkpoint-resume: serialized state for stalled jobs (Session 9056c113)
         "yaml_path",                  # Presentation re-render from YAML
@@ -252,6 +253,15 @@ def persist_job_created_from_metadata( job_id, user_id, metadata ):
 
     try:
         with get_db() as session:
+            # Idempotent create (row 2817b0f5): on restart the durable-queue restore
+            # re-pushes preserved jobs under their ORIGINAL id_hash, which re-fires the
+            # PENDING->QUEUED transition and reaches here again. id_hash is the PK, so a
+            # blind INSERT would raise IntegrityError; skipping when the row already
+            # exists makes re-enqueue a clean no-op rather than a swallowed error, and
+            # keeps the no-resurrect guarantee off the exception path.
+            if session.get( JobHistory, job_id ) is not None:
+                return
+
             job = JobHistory(
                 id_hash         = job_id,
                 job_type        = metadata.get( "agent_type", "unknown" ),
@@ -267,6 +277,43 @@ def persist_job_created_from_metadata( job_id, user_id, metadata ):
             session.add( job )
     except Exception as e:
         print( f"[WARN] persist_job_created_from_metadata failed for {job_id}: {e}" )
+
+
+def persist_job_paused_state( job_id, paused ):
+    """
+    Patch a job_history row's metadata_json `paused` flag (row 2817b0f5).
+
+    Pause/resume are in-memory-only state changes on the todo queue; job_history
+    stores every pre-execution job as `pending` and never learned whether it was
+    paused. Without this, the durable-queue restore would bring a user-paused job
+    back ACTIVE (silently un-paused). Recording the flag lets restore re-hold it.
+
+    Requires:
+        - job_id is a non-empty string (the id_hash)
+        - paused is a bool
+
+    Ensures:
+        - metadata_json.paused is set to `paused` for the matching row (no-op if the
+          row does not exist — e.g. a non-agentic job absent from job_history)
+        - status is NOT touched — a paused job stays `pending` in the ledger
+        - Never raises — logs a warning on failure
+    """
+    if not _is_persistence_enabled():
+        return
+
+    try:
+        with get_db() as session:
+            row = session.get( JobHistory, job_id )
+            if row is None:
+                return
+            # SQLAlchemy does not track in-place mutation of a JSONB dict, so build a
+            # NEW dict and reassign the attribute to mark the column dirty.
+            metadata             = dict( row.metadata_json or {} )
+            metadata[ "paused" ] = paused
+            row.metadata_json    = metadata
+            row.updated_at       = datetime.now( timezone.utc )
+    except Exception as e:
+        print( f"[WARN] persist_job_paused_state failed for {job_id}: {e}" )
 
 
 def persist_job_started_from_metadata( job_id, metadata ):
@@ -469,7 +516,9 @@ def mark_interrupted_jobs():
     - PENDING jobs with future scheduled_at: preserved for re-enqueue → stays PENDING
     - PENDING jobs whose scheduled_at fell within the measured downtime window
       [last_available, now]: preserved for an immediate catch-up run → stays PENDING
-    - PENDING jobs without scheduled_at, or scheduled BEFORE the downtime window → INTERRUPTED
+    - PENDING jobs with NO scheduled_at (immediate submits that never ran): preserved
+      for re-enqueue → stays PENDING (row 2817b0f5 — a queued job must survive a bounce)
+    - PENDING jobs scheduled BEFORE the downtime window (anomalous scheduler miss) → INTERRUPTED
 
     Called at server startup by main.py. Reads the last-available marker
     (record_server_available) to compute the exact downtime window.
@@ -523,9 +572,19 @@ def mark_interrupted_jobs():
                     print( f"[CJ-PERSIST] Catch-up: scheduled job {row.id_hash} missed during "
                            f"downtime (scheduled_at={scheduled_at}, last_available={last_available}) "
                            f"— preserving for immediate re-run" )
+                elif scheduled_at is None:
+                    # Immediate submit (no scheduled_at) that never got its turn before
+                    # the restart (row 2817b0f5). It never ran, so PRESERVE it (stays
+                    # PENDING) for re-enqueue by get_restorable_jobs() — losing it is the
+                    # exact bug this fix closes. A container bounce must not vaporize a
+                    # job that was simply waiting in line.
+                    counts[ "pending_preserved" ] += 1
+                    print( f"[CJ-PERSIST] Preserving immediate job {row.id_hash} "
+                           f"(no scheduled_at) for re-enqueue" )
                 else:
-                    # No schedule, or scheduled BEFORE the downtime window (anomalous scheduler
-                    # miss while the server was up) — mark interrupted, don't silently resurrect.
+                    # Has a scheduled_at that is PAST and BEFORE the downtime window — an
+                    # anomalous scheduler miss while the server was up. Do NOT silently
+                    # resurrect a schedule the server already passed: mark interrupted.
                     row.status       = JobState.INTERRUPTED.value
                     row.completed_at = now
                     row.updated_at   = now
@@ -582,19 +641,21 @@ def _is_future_scheduled( scheduled_at_str, now=None ):
 
 def get_restorable_jobs():
     """
-    Query pending jobs that have a future scheduled_at for re-enqueue at startup.
+    Query PENDING jobs preserved by mark_interrupted_jobs() for re-enqueue at startup.
 
-    Called after mark_interrupted_jobs() to find jobs that were preserved
-    because they had a future scheduled_at.
+    Called after mark_interrupted_jobs(), which has already marked every non-restorable
+    case INTERRUPTED. Every row still PENDING here is meant to come back: future-scheduled,
+    downtime-catch-up, AND immediate (no scheduled_at — row 2817b0f5).
 
     Ensures:
         - Returns list of dicts with job metadata sufficient for reconstruction
         - Only returns jobs with status='pending' (preserved by mark_interrupted_jobs)
+        - scheduled_at may be None (an immediate job); paused carries the held state
         - Returns empty list on failure
 
     Returns:
         list of dicts with: id_hash, job_type, user_id, user_email, session_id,
-        routing_command, question_text, scheduled_at, metadata_json
+        routing_command, question_text, scheduled_at, monopolize, paused, metadata_json
     """
     try:
         with get_db() as session:
@@ -607,25 +668,132 @@ def get_restorable_jobs():
             for row in rows:
                 metadata     = row.metadata_json or {}
                 scheduled_at = metadata.get( "scheduled_at" )
-                if scheduled_at:
-                    restorable.append( {
-                        "id_hash"         : row.id_hash,
-                        "job_type"        : row.job_type,
-                        "user_id"         : row.user_id,
-                        "user_email"      : row.user_email or "",
-                        "session_id"      : row.session_id or "",
-                        "routing_command" : row.routing_command or "",
-                        "question_text"   : row.question_text or "",
-                        "scheduled_at"    : scheduled_at,
-                        "monopolize"      : metadata.get( "monopolize", False ),
-                        "metadata_json"   : metadata,
-                    } )
+                # Return EVERY surviving PENDING row (row 2817b0f5), not just the
+                # scheduled ones. By the time this runs, mark_interrupted_jobs() has
+                # already marked the anomalous cases INTERRUPTED, so the rows left as
+                # PENDING are exactly the ones we want back: future-scheduled,
+                # downtime-catch-up, AND immediate (scheduled_at is None). A None
+                # scheduled_at rides through as an immediate job that runs on next
+                # consume.
+                restorable.append( {
+                    "id_hash"         : row.id_hash,
+                    "job_type"        : row.job_type,
+                    "user_id"         : row.user_id,
+                    "user_email"      : row.user_email or "",
+                    "session_id"      : row.session_id or "",
+                    "routing_command" : row.routing_command or "",
+                    "question_text"   : row.question_text or "",
+                    "scheduled_at"    : scheduled_at,
+                    "monopolize"      : metadata.get( "monopolize", False ),
+                    "paused"          : metadata.get( "paused", False ),
+                    "metadata_json"   : metadata,
+                } )
 
             return restorable
 
     except Exception as e:
         print( f"[WARN] get_restorable_jobs failed: {e}" )
         return []
+
+
+def restore_pending_jobs( restorable, job_factory, todo_queue, register_scoped_job=None, debug=False ):
+    """
+    Rebuild and re-enqueue the jobs get_restorable_jobs() returned (row 2817b0f5).
+
+    Extracted from the startup lifespan so the no-resurrect + paused-carry WIRING
+    is unit-testable without a live server: inject a fake factory + fake queue.
+
+    Requires:
+        - restorable is a list of dicts from get_restorable_jobs()
+        - job_factory( command, args_dict, user_id, user_email, session_id, debug )
+          returns a job object (or None on failure) — normally create_agentic_job
+        - todo_queue exposes push( job )
+        - register_scoped_job, if given, is user_job_tracker.register_scoped_job
+          (base_hash, user_id, session_id) -> scoped_hash. The user-job tracker is
+          NOT rebuilt at startup, so WITHOUT this a restored job still runs (the
+          consumer reads the queue directly) but is INVISIBLE to /api/get-queue and
+          unresumable (that view filters by the tracker). Registering makes the
+          restored job show up and be resumable; the verb strips + re-appends
+          ::user_id, so passing the already-scoped id returns the same id_hash.
+
+    Ensures:
+        - the job is rebuilt from metadata_json["original_args"] (the exact submit
+          args), so test_types / dry_run / pytest_args survive — NOT from the whole
+          metadata envelope, which loses them to factory defaults
+        - each rebuilt job REUSES its original id_hash, so it re-drives its OWN
+          durable row (pending -> running -> terminal) and cannot resurrect on a
+          later boot (one row, one identity, one restore)
+        - scheduled_at rides through verbatim (None => immediate)
+        - a job that was paused before the bounce is re-held (state = PAUSED) BEFORE
+          push, so it is never eligible and comes back paused, not silently running
+        - a row missing routing_command, or whose factory returns None, is skipped
+          with a logged reason — never a hard failure that strands the rest
+        - returns the count actually pushed
+
+    Raises:
+        - nothing from a single job; the caller wraps the whole restore in a guard
+    """
+    restored = 0
+    for job_data in restorable:
+        routing_cmd = job_data[ "routing_command" ]
+        if not routing_cmd:
+            print( f"[CJ-PERSIST] Cannot restore {job_data[ 'id_hash' ]}: no routing_command" )
+            continue
+
+        # Reconstruct from the ORIGINAL submit args (test_types, dry_run,
+        # pytest_args, ...), which persistence nests under
+        # metadata_json["original_args"]. Passing the whole metadata envelope as
+        # args_dict loses them and the job rebuilds with factory DEFAULTS — proven
+        # live (row 2817b0f5 E2E): a restored dry_run "unit" job came back as a
+        # REAL "integration, e2e" run.
+        original_args = ( job_data.get( "metadata_json" ) or {} ).get( "original_args" ) or {}
+        job = job_factory(
+            command    = routing_cmd,
+            args_dict  = original_args,
+            user_id    = job_data[ "user_id" ],
+            user_email = job_data[ "user_email" ],
+            session_id = job_data[ "session_id" ],
+            debug      = debug,
+        )
+        if job is None:
+            print( f"[CJ-PERSIST] Cannot restore {job_data[ 'id_hash' ]}: factory returned None" )
+            continue
+
+        # Reuse the ORIGINAL id_hash so the job re-drives its OWN durable row —
+        # a fresh id would leave the original PENDING forever and re-restore a NEW
+        # copy on every boot (unbounded resurrection).
+        job.id_hash = job_data[ "id_hash" ]
+
+        # Re-register in the user-job tracker so the restored job is VISIBLE in the
+        # user's queue view and resumable (see the register_scoped_job contract
+        # above). Passing the already-scoped id returns the same value.
+        if register_scoped_job is not None:
+            job.id_hash = register_scoped_job(
+                job_data[ "id_hash" ], job_data[ "user_id" ], job_data[ "session_id" ]
+            )
+
+        job.scheduled_at = job_data[ "scheduled_at" ]   # None => immediate
+        if job_data.get( "monopolize" ):
+            job.monopolize = True
+
+        # Re-hold a paused job BEFORE push, not after. push() notifies the consumer,
+        # so a state set AFTER push races it — the consumer can start the job before
+        # it is marked paused (proven live: a restored paused job RAN). Setting
+        # PAUSED first means the job is never eligible in the first place.
+        if job_data.get( "paused" ):
+            job.state = JobState.PAUSED
+
+        todo_queue.push( job )
+
+        restored += 1
+        kind = "immediate" if job_data[ "scheduled_at" ] is None else "scheduled"
+        held = " (paused)" if job_data.get( "paused" ) else ""
+        print( f"[CJ-PERSIST] Restored {kind} job{held}: {job_data[ 'id_hash' ]} "
+               f"(type={job_data[ 'job_type' ]}, scheduled_at={job_data[ 'scheduled_at' ]})" )
+
+    if restored:
+        print( f"[CJ-PERSIST] Restored {restored} pre-execution job(s)" )
+    return restored
 
 
 def get_active_job_ids_by_user():

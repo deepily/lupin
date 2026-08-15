@@ -102,8 +102,8 @@ class TestMarkInterruptedJobsLogic:
     Validates the logic of the split mark_interrupted_jobs():
     - RUNNING → always INTERRUPTED
     - PENDING + future scheduled_at → preserved
-    - PENDING + no scheduled_at → INTERRUPTED
-    - PENDING + past scheduled_at → INTERRUPTED
+    - PENDING + no scheduled_at → PRESERVED (immediate submit, row 2817b0f5)
+    - PENDING + past scheduled_at (before downtime) → INTERRUPTED
 
     These test the decision logic via _is_future_scheduled().
     Full DB integration tests require a live database.
@@ -121,11 +121,13 @@ class TestMarkInterruptedJobsLogic:
         assert _is_future_scheduled( future ) is True
         # mark_interrupted_jobs() skips this row (leaves as PENDING)
 
-    def test_pending_without_schedule_interrupted( self ):
-        """PENDING + no scheduled_at → _is_future_scheduled returns False → interrupt."""
+    def test_pending_without_schedule_preserved( self ):
+        """PENDING + no scheduled_at → immediate submit → PRESERVED (row 2817b0f5)."""
+        # _is_future_scheduled is still False for None/"", but the None branch now
+        # PRESERVES (re-enqueue) instead of interrupting — see the DB-branch test
+        # test_immediate_no_schedule_is_preserved for the authoritative assertion.
         assert _is_future_scheduled( None ) is False
         assert _is_future_scheduled( "" ) is False
-        # mark_interrupted_jobs() marks this row as INTERRUPTED
 
     def test_pending_with_past_schedule_interrupted( self ):
         """PENDING + past scheduled_at → _is_future_scheduled returns False → interrupt."""
@@ -139,10 +141,10 @@ class TestMarkInterruptedJobsLogic:
         future = "2026-04-08T03:00:00+00:00"  # 5 hours ahead
         past   = "2026-04-07T18:00:00+00:00"  # 4 hours ago
 
-        assert _is_future_scheduled( future, now ) is True    # preserve
-        assert _is_future_scheduled( past, now ) is False     # interrupt
-        assert _is_future_scheduled( None, now ) is False     # interrupt
-        assert _is_future_scheduled( "", now ) is False       # interrupt
+        assert _is_future_scheduled( future, now ) is True    # preserve (future)
+        assert _is_future_scheduled( past, now ) is False     # interrupt (past, before downtime)
+        assert _is_future_scheduled( None, now ) is False     # None → preserved by the immediate branch, not this helper
+        assert _is_future_scheduled( "", now ) is False       # empty string → same as None
 
 
 # =============================================================================
@@ -357,7 +359,7 @@ class TestMarkInterruptedJobsCatchup:
             _pending_row( "a", ( last_available + timedelta( minutes=2 ) ).isoformat() ),  # catch-up
             _pending_row( "b", ( last_available - timedelta( minutes=5 ) ).isoformat() ),  # before → interrupt
             _pending_row( "c", ( now + timedelta( hours=1 ) ).isoformat() ),               # future → preserve
-            _pending_row( "d", None ),                                                     # no schedule → interrupt
+            _pending_row( "d", None ),                                                     # no schedule → preserve (row 2817b0f5)
         ]
         pending_res = MagicMock()
         pending_res.scalars.return_value.all.return_value = rows
@@ -365,10 +367,10 @@ class TestMarkInterruptedJobsCatchup:
 
         counts = mark_interrupted_jobs()
         assert counts[ "pending_catchup" ]     == 1   # 'a'
-        assert counts[ "pending_preserved" ]   == 1   # 'c'
-        assert counts[ "pending_interrupted" ] == 2   # 'b' + 'd'
+        assert counts[ "pending_preserved" ]   == 2   # 'c' (future) + 'd' (immediate — row 2817b0f5)
+        assert counts[ "pending_interrupted" ] == 1   # 'b' only
         assert rows[ 1 ].status == JobState.INTERRUPTED.value   # before-window
-        assert rows[ 3 ].status == JobState.INTERRUPTED.value   # no schedule
+        assert rows[ 3 ].status != JobState.INTERRUPTED.value   # no schedule → preserved, NOT interrupted
 
     @patch( "cosa.rest.job_persistence.get_last_available", return_value=None )
     @patch( "cosa.rest.job_persistence.get_db" )
