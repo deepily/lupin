@@ -147,6 +147,48 @@ def test_run_pass_push_non_dict_short_circuits():
     assert calls == [ ] and recs[ 0 ].failure == "push_failed"
 
 
+# ───────────────────────────────────────────── build_class_to_command
+
+class _Math: pass
+class _Cal:  pass
+
+def test_build_class_to_command_inverts_mode_map():
+    m, amb = v1.build_class_to_command( { "math": _Math, "calendar": _Cal } )
+    assert m == { "_Math": "agent router go to math", "_Cal": "agent router go to calendar" }
+    assert amb == [ ]
+
+def test_build_class_to_command_ambiguous_class_is_dropped():
+    # one class reachable from TWO modes ⇒ two commands ⇒ dropped, named, not guessed
+    m, amb = v1.build_class_to_command( { "math": _Math, "maths": _Math } )
+    assert "_Math" not in m and amb == [ "_Math" ]
+
+def test_build_class_to_command_same_command_not_ambiguous():
+    # same class + a mode-independent template ⇒ same command ⇒ NOT ambiguous
+    m, amb = v1.build_class_to_command( { "a": _Math, "b": _Math }, template="fixed" )
+    assert m == { "_Math": "fixed" } and amb == [ ]
+
+def test_build_class_to_command_non_class_value_uses_str():
+    m, amb = v1.build_class_to_command( { "m": "raw" } )
+    assert m == { "raw": "agent router go to m" } and amb == [ ]
+
+
+# ───────────────────────────────────────────── run_two_pass
+
+def test_run_two_pass_cold_empty_then_warm_cache():
+    seen = { }
+    def push( u ):
+        n = seen.get( u, 0 ); seen[ u ] = n + 1
+        return { "job_id": f"{u}#{n}" }
+    def collect( jid ):
+        warm = jid.endswith( "#1" )                     # 2nd occurrence ⇒ warm cache hit
+        return { "queued_ts": 9.5, "running_ts": 10.0, "completed_ts": 10.25,
+                 "metadata": { "is_cache_hit": warm, "agent_type": "CalendarAgent" } }
+    res = v1.run_two_pass( [ ( "a", "agent go calendar" ) ], push_fn=push, collect_fn=collect,
+                           class_to_command=MAP )
+    assert res[ "cold" ][ "cache_hit_rate" ] == 0.0     # nothing cached on the cold pass
+    assert res[ "warm" ][ "cache_hit_rate" ] == 1.0     # the warm pass replays
+
+
 # ───────────────────────────────────────────── compute_v1_metrics
 
 def _rec( ok=True, cache=False, span=200.0, wall=None, actual="agent go calendar",

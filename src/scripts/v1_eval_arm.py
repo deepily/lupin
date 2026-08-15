@@ -292,6 +292,78 @@ def compute_v1_metrics( records: List[V1Record] ) -> Dict[str, Any]:
     }
 
 
+# ──────────────────────────────────── routing-command map (R-A1 seam)
+
+DEFAULT_COMMAND_TEMPLATE = "agent router go to {mode}"
+
+
+def build_class_to_command( mode_to_agent: Dict[str, Any],
+                            template: str = DEFAULT_COMMAND_TEMPLATE ) -> Tuple[Dict[str, str], List[str]]:
+    """
+    Invert v1's MODE_TO_AGENT ({mode: AgentClass}) into {agent_class_name: command},
+    the map `resolve_command` needs (the v1 done metadata carries the CLASS name,
+    not the command — R-A1).
+
+    Requires:
+        - mode_to_agent maps a mode string → an agent class (has `__name__`)
+        - template formats a mode into its routing command ("...go to {mode}")
+
+    Ensures:
+        - returns ( class_to_command, ambiguous ) where class_to_command maps each
+          agent class name to its command
+        - AMBIGUITY IS EXCLUDED, NOT GUESSED: if one class is reachable from >1
+          mode (⇒ >1 command), it is DROPPED from the map and named in `ambiguous`
+          — resolve_command then returns None for it (a routing MISS), never a
+          coin-flip between two commands (honest under-count, R-A1 lower bound)
+        - never raises
+
+    KNOWN GAP (named, not hidden): agentic modes route via AGENTIC_MODE_MAP with
+    full command strings, NOT through MODE_TO_AGENT, so they are absent here and
+    their utterances score as misses — the command-match lower bound (R-C2), made
+    explicit rather than papered over.
+    """
+    by_class: Dict[str, str] = {}
+    ambiguous: set = set()
+    for mode, agent_cls in mode_to_agent.items():
+        name    = getattr( agent_cls, "__name__", str( agent_cls ) )
+        command = template.format( mode=mode )
+        if name in by_class and by_class[ name ] != command:
+            ambiguous.add( name )
+        else:
+            by_class[ name ] = command
+    for name in ambiguous:
+        by_class.pop( name, None )
+    return by_class, sorted( ambiguous )
+
+
+# ─────────────────────────────────────────── cold/warm two-pass driver
+
+def run_two_pass( pairs: Sequence[Tuple[str, str]], *, push_fn: Callable[[str], Dict[str, Any]],
+                  collect_fn: Callable[[str], Dict[str, Any]],
+                  class_to_command: Dict[str, str] ) -> Dict[str, Any]:
+    """
+    Run the corpus twice (COLD then WARM) — the pair a single pass cannot produce
+    (design §6): COLD measures routing + first-response against an empty cache;
+    WARM, immediately after, measures the cache-hit rate the warm pass generates.
+
+    Requires:
+        - pairs already sampled + ordered (identical list both passes, pairing
+          preserved); the seams populate/serve the cache between passes
+        - push_fn / collect_fn / class_to_command as for run_v1_pass
+
+    Ensures:
+        - returns { "cold": <metrics>, "warm": <metrics> }, each the
+          compute_v1_metrics dict for that pass — the warm cache_hit_rate is the
+          headline the v2 arm is compared against
+        - never raises on a seam that returns cleanly
+    """
+    cold = compute_v1_metrics( run_v1_pass( pairs, push_fn=push_fn, collect_fn=collect_fn,
+                                            class_to_command=class_to_command ) )
+    warm = compute_v1_metrics( run_v1_pass( pairs, push_fn=push_fn, collect_fn=collect_fn,
+                                            class_to_command=class_to_command ) )
+    return { "cold": cold, "warm": warm }
+
+
 # ───────────────────────────────────────────────────────────── reporting
 
 def build_report_header( *, seed: int, corpus: str, n_per_command: int, base_url: str ) -> str:
