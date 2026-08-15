@@ -121,6 +121,17 @@ def _cli_module_returncode( module, timeout=60 ):
 # dispatch call site) in its reason.
 PROMPT_REACHABILITY_EXEMPTIONS = {
     # "agent router go to <command>": "why it is NOT voice-reachable (call site: file:line)",
+    "agent router go to test fix expediter":
+        "START is SYSTEM-triggered by the test-suite completion watchdog "
+        "(test_suite_completion_watchdog.py:259) with a non-speakable "
+        "source_test_suite_job_id; no fuzzy-human-input path, so not user-voice-reachable. "
+        "RESIDUAL is BOUNDED by the prompt absence: a live A/B probe shows router emission "
+        "is gated on the PROMPT LINE, not training presence — 0/5 emitted when unlisted vs "
+        "5/5 when listed (src/rnd/v0.2.0/2026.08.15-router-emission-probe.md); the earlier "
+        "6/10 invention rate did NOT reproduce. START is absent from the template, so "
+        "exempting it holds the emission risk at the low, prompt-gated end — it reduces "
+        "the chance materially, not merely nominally. Follow-up to drop the still-present "
+        "training key at next retrain: store row e5a840c9.",
 }
 
 
