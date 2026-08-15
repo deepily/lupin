@@ -67,6 +67,7 @@ TRAINING_ROUTER  = ( "/agent-router-agentic-commands.json",
                      "/agent-router-compound-commands.json",
                      "/agent-router-simple-commands.json" )
 FACTORY_SOURCE   = "/src/cosa/rest/agentic_job_factory.py"
+TODO_QUEUE_SOURCE = "/src/cosa/rest/todo_fifo_queue.py"   # holds PRODUCT_NAMES (the card)
 
 
 def _template_commands():
@@ -99,6 +100,36 @@ def _factory_commands():
     return set( re.findall( r'command\s*==\s*"([^"]+)"', text ) )
 
 
+def _card_commands():
+    """The confirmation-card alternatives a user can pick — the KEYS of
+    PRODUCT_NAMES (todo_fifo_queue.py:1026), each offered as a 'Switch to this
+    instead' option by _confirm_agentic_routing:1058. Read from SOURCE (like the
+    prompt/factory readers) so this guards what is CHECKED IN, not a live object —
+    a live import could resolve PRODUCT_NAMES differently than the tree on disk."""
+    text  = cu.get_file_as_string( cu.get_project_root() + TODO_QUEUE_SOURCE )
+    block = re.search( r"PRODUCT_NAMES\s*=\s*\{(.*?)\}", text, re.DOTALL ).group( 1 )
+    return set( re.findall( r'"(agent router go to [^"]+)"\s*:', block ) )
+
+
+def _card_drift( carded, owned, exempt ):
+    """THE card-drift predicate (§7 card surface) — ONE function, called by BOTH the
+    live card guard (test_1d) AND its must-fail control, so the control exercises the
+    exact code the guard trusts (never a parallel re-implementation). Returns a list
+    of problem strings (empty ⇒ clean):
+      - PHANTOM: a card entry that is not an owned agentic command.
+      - DEAD-CARD: an owned agentic command absent from the card that does NOT waive
+        the 'card' surface (Rachel's invariant §2: owned − carded must be empty
+        except commands whose exemption names 'card').
+    The control drives it with REAL command strings, one side withheld — never an
+    invented 'phantom' token (Rachel)."""
+    problems = []
+    for c in sorted( set( carded ) - set( owned ) ):
+        problems.append( f"{c}: on the confirmation card but not an owned agentic command (phantom)" )
+    for c in sorted( set( owned ) - set( carded ) - set( exempt ) ):
+        problems.append( f"{c}: owned agentic command absent from the card and does not waive 'card'" )
+    return problems
+
+
 def _cli_module_returncode( module, timeout=60 ):
     """Run `python -m <module> --help` in a subprocess; return ( returncode, tail ).
     0 => runnable; non-zero => missing __main__.py, wrong module form, OR an
@@ -122,11 +153,15 @@ def _cli_module_returncode( module, timeout=60 ):
 # initial-detection guards waived. Each reason carries evidence (the call site).
 INITIAL_DETECTION_EXEMPTIONS = {
     "agent router go to test fix expediter": {
-        "surfaces": [ "prompt" ],   # START is TRAINED today, so it does NOT waive 1c
+        "surfaces": [ "prompt", "card" ],   # TRAINED today (does NOT waive 1c); OFF the card (waives card)
         "reason":
             "START is SYSTEM-triggered by the test-suite completion watchdog "
             "(test_suite_completion_watchdog.py:259) with a non-speakable "
             "source_test_suite_job_id; no fuzzy-human-input path, so not user-voice-reachable. "
+            "It is also OFF the confirmation card: START is absent from PRODUCT_NAMES "
+            "(todo_fifo_queue.py:1026), so _confirm_agentic_routing:1058 never offers it as a "
+            "'Switch to this instead' alternative — correct, because completing a START run needs "
+            "a pasted source_test_suite_job_id that no card alternative supplies. Hence it waives 'card'. "
             "RESIDUAL is BOUNDED by the prompt absence: a live A/B probe shows router emission "
             "is gated on the PROMPT LINE, not training presence — 0/5 emitted when unlisted vs "
             "5/5 when listed (src/rnd/v0.2.0/2026.08.15-router-emission-probe.md); the earlier "
@@ -136,19 +171,21 @@ INITIAL_DETECTION_EXEMPTIONS = {
             "training key at next retrain: store row e5a840c9.",
     },
     "agent router go to bug fix expediter": {
-        "surfaces": [ "prompt", "training" ],
+        "surfaces": [ "prompt", "training" ],   # NOT router-emittable (waives prompt+training); ON the card (no card waiver)
         "reason":
-            "BFE is never an INITIAL router detection — the prompt AND the training corpus "
-            "govern initial-detection emission, and BFE is intentionally neither listed nor "
-            "trained. It IS user-reachable AND completable by another path: PRODUCT_NAMES "
-            "(todo_fifo_queue.py:1026) is offered as a 'Switch to this instead' alternative by "
-            "_confirm_agentic_routing:1039, and its dead_job_id is then collected by the RAE "
-            "fallback questions. So its absence from prompt+training is correct-by-design "
-            "(only ever a user-picked alternative, never an initial detection), not a defect.",
+            "BFE is not router-EMITTABLE — the prompt AND the training corpus govern "
+            "initial-detection emission, and BFE is intentionally neither listed nor trained, so "
+            "the router never emits it as an initial detection. This is NOT the same as "
+            "'not voice-reachable': the confirmation card IS a voice path, and BFE is reachable "
+            "on it. PRODUCT_NAMES (todo_fifo_queue.py:1026) offers BFE as a 'Switch to this "
+            "instead' alternative via _confirm_agentic_routing:1058, and its dead_job_id is then "
+            "collected by the RAE fallback questions. So BFE waives prompt+training (never an "
+            "initial detection) but does NOT waive 'card' — it must stay ON the card, which is "
+            "its only reachability path; losing card membership would invalidate this exemption.",
     },
 }
 
-_VALID_SURFACES = { "prompt", "training" }
+_VALID_SURFACES = { "prompt", "training", "card" }
 
 
 def _exempt_on( surface ):
@@ -156,10 +193,14 @@ def _exempt_on( surface ):
     return { c for c, e in INITIAL_DETECTION_EXEMPTIONS.items() if surface in e.get( "surfaces", [] ) }
 
 
-def _validate_exemptions( exemptions, owned, template ):
+def _validate_exemptions( exemptions, owned, template, carded ):
     """Problems with an exemption map: surfaces not a non-empty subset of the valid
-    set, no reason, command not owned, or STALE on a waived surface (present on a
-    surface it claims to waive). Empty ⇒ valid."""
+    set, no reason, command not owned, or STALE on a waived surface. A surface is
+    STALE when the command is still PRESENT on the reachability path it claims to
+    waive — waiving 'prompt' while in the template, or waiving 'card' while in
+    PRODUCT_NAMES — because then the exemption is silencing a guard that has nothing
+    to silence. ('training' has no staleness arm here: a training key IS a legitimate
+    reason to waive 1c, so presence is not staleness.) Empty ⇒ valid."""
     problems = []
     for command, entry in exemptions.items():
         surfaces = set( entry.get( "surfaces", [] ) )
@@ -172,6 +213,8 @@ def _validate_exemptions( exemptions, owned, template ):
             problems.append( f"{command}: not an owned agentic command" )
         if "prompt" in surfaces and command in template:
             problems.append( f"{command}: waives 'prompt' but IS in the prompt — stale exemption" )
+        if "card" in surfaces and command in carded:
+            problems.append( f"{command}: waives 'card' but IS on the card — stale exemption" )
     return problems
 
 
@@ -341,25 +384,31 @@ class TestInitialDetectionExemptionFacility( unittest.TestCase ):
 
     def test_real_exemptions_are_all_valid( self ):
         problems = _validate_exemptions(
-            INITIAL_DETECTION_EXEMPTIONS, set( AGENTIC_COMMANDS ), _template_commands() )
+            INITIAL_DETECTION_EXEMPTIONS, set( AGENTIC_COMMANDS ),
+            _template_commands(), _card_commands() )
         self.assertEqual( problems, [], f"invalid exemptions: {problems}" )
 
     def test_validator_flags_bad_surfaces_no_reason_not_owned_and_stale( self ):
         # Falsifiability: bad entries hitting every failure mode.
         # - phantom: empty surfaces AND empty reason AND not an owned command
         # - weather: a real CONVERSATIONAL template command waiving 'prompt' → stale
-        # Precondition (Tiffany): the stale arm relies on "weather" being a real
-        # in-prompt command. Assert it, so this test FAILS LOUDLY if weather ever
-        # leaves the template rather than silently ceasing to exercise staleness.
+        # - bug fix expediter: a REAL on-card command waiving 'card' → card-stale
+        # Preconditions (Tiffany): the stale arms rely on real membership. Assert both
+        # — "weather" really in the template, BFE really on the card — so this test
+        # FAILS LOUDLY if either leaves its surface rather than silently ceasing to
+        # exercise staleness. BFE is a REAL one-sided entry, not an invented string (Rachel).
         self.assertIn( "agent router go to weather", _template_commands() )
+        self.assertIn( "agent router go to bug fix expediter", _card_commands() )
         problems = _validate_exemptions(
             { "agent router go to phantom": { "surfaces": [], "reason": "" },
-              "agent router go to weather": { "surfaces": [ "prompt" ], "reason": "x" } },
-            set( AGENTIC_COMMANDS ), _template_commands() )
+              "agent router go to weather": { "surfaces": [ "prompt" ], "reason": "x" },
+              "agent router go to bug fix expediter": { "surfaces": [ "card" ], "reason": "x" } },
+            set( AGENTIC_COMMANDS ), _template_commands(), _card_commands() )
         self.assertTrue( any( "surfaces must be a non-empty subset" in p for p in problems ), problems )
         self.assertIn( "agent router go to phantom: exemption has no reason", problems )
         self.assertIn( "agent router go to phantom: not an owned agentic command", problems )
         self.assertIn( "agent router go to weather: waives 'prompt' but IS in the prompt — stale exemption", problems )
+        self.assertIn( "agent router go to bug fix expediter: waives 'card' but IS on the card — stale exemption", problems )
 
     def test_prompt_only_surface_cannot_silence_the_training_guard( self ):
         # Rachel's control — the proof the `surfaces` field is load-bearing, not
@@ -370,6 +419,10 @@ class TestInitialDetectionExemptionFacility( unittest.TestCase ):
         self.assertNotIn( "agent router go to test fix expediter", _exempt_on( "training" ) )
         self.assertIn(    "agent router go to bug fix expediter",  _exempt_on( "prompt" ) )
         self.assertIn(    "agent router go to bug fix expediter",  _exempt_on( "training" ) )
+        # card surface is load-bearing too: START is OFF the card so it waives 'card';
+        # BFE is ON the card (its only reachability path) so it must NOT waive 'card'.
+        self.assertIn(    "agent router go to test fix expediter", _exempt_on( "card" ) )
+        self.assertNotIn( "agent router go to bug fix expediter",  _exempt_on( "card" ) )
 
         synth       = { "agent router go to synth": { "surfaces": [ "prompt" ], "reason": "r" } }
         on_prompt   = { c for c, e in synth.items() if "prompt"   in e[ "surfaces" ] }
@@ -377,6 +430,47 @@ class TestInitialDetectionExemptionFacility( unittest.TestCase ):
         owned, trained = { "agent router go to synth" }, set()
         self.assertEqual( owned - on_prompt, set() )                  # 1a-shape: cleared
         self.assertEqual( owned - trained - on_training, owned )      # 1c-shape: STILL red
+
+
+# -- Card-drift predicate control (§7 card surface) ----------------------------
+class TestCardDriftPredicateControl( unittest.TestCase ):
+    """The committed must-fail control for the shared `_card_drift` predicate, so the
+    instrument is never ungated. The POSITIVE real-data guard (owned − carded − card-
+    exempt is clean) is test_1d, owned by the card-guard author and landing on top —
+    both call this same `_card_drift`, never a parallel re-implementation.
+
+    Rachel's rule: drive the control with REAL command strings, one side withheld —
+    never an invented 'phantom' token. Each arm asserts its real precondition first,
+    so it FAILS LOUDLY if the command ever leaves the surface rather than silently
+    ceasing to exercise the arm."""
+
+    def test_dead_card_arm_fires_on_a_real_owned_not_carded_command( self ):
+        # START is genuinely owned AND off the card — the real dead-card entry. With
+        # its 'card' waiver WITHHELD (exempt=set()), the predicate must flag it.
+        start = "agent router go to test fix expediter"
+        self.assertIn(    start, set( AGENTIC_COMMANDS ) )   # really owned
+        self.assertNotIn( start, _card_commands() )          # really off the card
+        problems = _card_drift( _card_commands(), set( AGENTIC_COMMANDS ), exempt=set() )
+        self.assertTrue(
+            any( p.startswith( start ) and "does not waive 'card'" in p for p in problems ),
+            f"dead-card arm did not fire on real owned-not-carded {start!r}: {problems}"
+        )
+        # and WITH its real waiver, the same predicate clears START (no false red).
+        self.assertFalse(
+            any( p.startswith( start ) for p in
+                 _card_drift( _card_commands(), set( AGENTIC_COMMANDS ), exempt=_exempt_on( "card" ) ) )
+        )
+
+    def test_phantom_arm_fires_on_a_real_carded_command_when_owned_withheld( self ):
+        # A real card entry with the owned set withheld surfaces as a phantom — a real
+        # command string, not an invented token.
+        real_carded = "agent router go to deep research"
+        self.assertIn( real_carded, _card_commands() )       # really on the card
+        problems = _card_drift( { real_carded }, owned=set(), exempt=set() )
+        self.assertTrue(
+            any( p.startswith( real_carded ) and "phantom" in p for p in problems ),
+            f"phantom arm did not fire on real carded {real_carded!r} with owned withheld: {problems}"
+        )
 
 
 # -- Falsifiability — each assertion above can go red (§6) ----------------------
