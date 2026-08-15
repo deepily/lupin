@@ -31,6 +31,7 @@ from itertools import combinations
 import cosa.utils.util as cu
 from cosa.rest.v2.registry import (
     AgentSpec,
+    CommandClass,
     V2_AGENTS,
     AGENTIC_COMMANDS,
     DEFERRED_COMMANDS,
@@ -38,6 +39,7 @@ from cosa.rest.v2.registry import (
     RECEPTIONIST_OR_NONE,
     resolve,
     resolve_agentic,
+    _build_registry,
 )
 from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
 
@@ -77,6 +79,26 @@ class TestRegistryDriftGuard( unittest.TestCase ):
     # derived from the registry and asserted against the registry is a tautology
     # that can never go red, and the set-equality above proves strictly more — a
     # count cannot fail unless a set-equality would have failed first.
+
+
+class TestRegistryConstruction( unittest.TestCase ):
+    """M4 (Tiffany's mutation): a duplicate command must FAIL LOUD, not be silently
+    dropped by a dict comprehension (last-wins). The invariant is now ENFORCED at
+    construction — a raise — so there is no count-comparison guard over it (that
+    would be vacuous: a violation raises at import before any test could observe an
+    inequality). This falsifiable check is what survives."""
+
+    def test_duplicate_command_raises( self ):
+        a = AgentSpec( "agent router go to dup", cls=CommandClass.CONVERSATIONAL )
+        b = AgentSpec( "agent router go to dup", cls=CommandClass.CONTROL )
+        with self.assertRaises( ValueError ):
+            _build_registry( ( a, ), ( b, ) )
+
+    def test_build_registry_keeps_every_distinct_command( self ):
+        a = AgentSpec( "agent router go to a", cls=CommandClass.CONVERSATIONAL )
+        b = AgentSpec( "agent router go to b", cls=CommandClass.CONTROL )
+        built = _build_registry( ( a, ), ( b, ) )
+        self.assertEqual( set( built ), { "agent router go to a", "agent router go to b" } )
 
 
 class TestAgenticSetOwnership( unittest.TestCase ):

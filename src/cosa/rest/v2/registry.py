@@ -180,7 +180,38 @@ _NONE = (
 
 
 # ── The one table (§5.1) ──────────────────────────────────────────────────────
-REGISTRY = { spec.command: spec for spec in ( *_CONVERSATIONAL, *_AGENTIC, *_CONTROL, *_NONE ) }
+def _build_registry( *groups ):
+    """
+    Build the command→spec table, FAILING LOUD on a duplicate command (M4).
+
+    A dict comprehension over the spec tuples silently drops a duplicate — last
+    one wins, no error — so a command declared twice in two different class groups
+    would vanish, and the partition guard would pass on a corrupted table because
+    the dedup already happened. Raise instead: a command is declared exactly once,
+    in exactly one class. The invariant is now ENFORCED at construction, not
+    ASSERTED by a test — so no count-comparison guard sits over it (a violation
+    raises at import, before any test could observe an inequality; that guard would
+    be vacuous). The falsifiable check that survives is "a dup RAISES".
+
+    Requires:
+        - each group is an iterable of AgentSpec
+
+    Ensures:
+        - Returns { command: spec } for every spec across the groups
+        - Raises ValueError on the first command that appears twice
+    """
+    registry = {}
+    for spec in ( s for group in groups for s in group ):
+        if spec.command in registry:
+            raise ValueError(
+                f"duplicate command in registry: {spec.command!r} — a command may be "
+                f"declared exactly once, in one class"
+            )
+        registry[ spec.command ] = spec
+    return registry
+
+
+REGISTRY = _build_registry( _CONVERSATIONAL, _AGENTIC, _CONTROL, _NONE )
 
 
 # ── The four template buckets, DERIVED from cls (§5.1.2) ──────────────────────

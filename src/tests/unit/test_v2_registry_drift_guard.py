@@ -46,6 +46,9 @@ from itertools import combinations
 
 import cosa.utils.util as cu
 from cosa.rest.v2.registry import (
+    AgentSpec,
+    CommandClass,
+    REGISTRY,
     V2_AGENTS,
     AGENTIC_COMMANDS,
     CONTROL_COMMANDS,
@@ -174,6 +177,34 @@ class TestClassPartition( unittest.TestCase ):
             self.assertEqual( a & b, set(), f"command in two class buckets: {a & b}" )
 
 
+# -- M2 — an INDEPENDENT structural oracle on class labels ---------------------
+class TestClassStructuralOracle( unittest.TestCase ):
+    """M2 (Tiffany's mutation): the class assertions read `cls`, and assertion 3's
+    residue subtracts BOTH conversational and agentic — so relabelling a command
+    between two of those classes cancels out and is invisible. This adds an oracle
+    INDEPENDENT of `cls`: a conversational command carries an agent `factory`;
+    control, none, and agentic commands do not. Relabelling `automatic`
+    CONTROL->CONVERSATIONAL is then caught (its factory is None).
+
+    STATED BLIND SPOT (§6, named not silent): this does NOT catch a CONTROL<->NONE
+    mislabel — both carry `factory=None`, and the registry has no independent oracle
+    to separate them. A control command mislabelled `none`, or vice versa, passes
+    every check here. Recorded so nobody reads this guard as covering that swap."""
+
+    def test_conversational_iff_spec_has_a_factory( self ):
+        for command, spec in REGISTRY.items():
+            if spec.cls is CommandClass.CONVERSATIONAL:
+                self.assertIsNotNone(
+                    spec.factory,
+                    f"conversational command {command!r} must carry an agent factory"
+                )
+            else:
+                self.assertIsNone(
+                    spec.factory,
+                    f"non-conversational command {command!r} must not carry an agent factory (cls={spec.cls})"
+                )
+
+
 # -- Assertion 5' — every cli_module runs --------------------------------------
 class TestCliModulesRun( unittest.TestCase ):
 
@@ -216,6 +247,12 @@ class TestFalsifiability( unittest.TestCase ):
         # signal the real check asserts against. Proves the returncode predicate is live.
         rc, _tail = _cli_module_returncode( "cosa.agents.__nonexistent_drift_guard_probe__" )
         self.assertNotEqual( rc, 0 )
+
+    def test_demo_class_mislabel_is_detected( self ):
+        # M2 shape: a control command relabelled CONVERSATIONAL keeps factory=None, so
+        # the oracle's "conversational => factory is not None" predicate fires red.
+        mislabelled = AgentSpec( "agent router go to automatic", cls=CommandClass.CONVERSATIONAL )
+        self.assertIsNone( mislabelled.factory )   # what the structural oracle catches
 
 
 if __name__ == "__main__":
