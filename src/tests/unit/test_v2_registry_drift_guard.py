@@ -223,6 +223,52 @@ class TestCliModulesRun( unittest.TestCase ):
         )
 
 
+# -- §4 — cached help must NAME the declared args, not merely exit 0 ------------
+class TestCliHelpNamesDeclaredArgs( unittest.TestCase ):
+    """§4: 5' proves each cli_module RUNS; this proves it HELPS. `get_cli_help`
+    caches `python -m <mod> --help` and feeds it to the phi4 extraction prompt, so
+    the check whose ABSENCE let 'No module named …__main__' become an agent's help
+    text is: the cached help must NAME that command's declared required args.
+
+    Two arms of the SAME assertion, by how the help is produced:
+      - STRUCTURAL — claude_code, bug_fix_expediter, test_fix_expediter: their help
+        is GENERATED from the registry entry (cli_help.py), so naming the declared
+        args is near-tautological here; this arm confirms the generator, little more.
+      - FALSIFIABLE — the six hand-written CLIs (deep_research, podcast_generator,
+        deep_research_to_podcast, presentation_generator,
+        deep_research_to_presentation, swe_team): an INDEPENDENT source, so this is a
+        real cross-check that the CLI documents what the registry declares.
+
+    Arg-name arm is PRIMARY. There is NO blanket 'usage' fallback: any command that
+    genuinely cannot name its args in --help is listed in _USAGE_FALLBACK below and
+    checked for 'usage' instead — visible as the weaker arm, never the default. An
+    empty set means every command satisfies the strong arm."""
+
+    _USAGE_FALLBACK = frozenset()   # commands that fall back to the weaker 'usage' arm
+
+    def test_cached_help_names_each_commands_declared_args( self ):
+        from cosa.agents.runtime_argument_expeditor.agent_registry import (
+            AGENTIC_AGENTS, get_cli_help,
+        )
+        failures = []
+        for command, spec in sorted( AGENTIC_COMMANDS.items() ):
+            if spec.cli_module is None:
+                continue                                  # API-invoked (test_suite)
+            help_text = ( get_cli_help( command ) or "" ).lower()
+            required  = [ a.lower() for a in AGENTIC_AGENTS[ command ][ "required_user_args" ] ]
+            if command in self._USAGE_FALLBACK:
+                if "usage" not in help_text:
+                    failures.append( f"{command}: fallback arm — help carries no 'usage'" )
+                continue
+            missing = [ a for a in required if a not in help_text ]
+            if not help_text or missing:
+                failures.append( f"{command} ({spec.cli_module}): help does not name {missing or '(help empty)'}" )
+        self.assertEqual(
+            failures, [],
+            "§4 — cached CLI help does not name declared args:\n  " + "\n  ".join( failures )
+        )
+
+
 # -- Falsifiability — each assertion above can go red (§6) ----------------------
 class TestFalsifiability( unittest.TestCase ):
     """Synthetic broken inputs prove each predicate FIRES. These PASS."""
