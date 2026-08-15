@@ -21,11 +21,24 @@ the LONGEST CONTINUOUS NEAR-SILENT RUN in the PCM: only an honored break inserts
 a real ~1.5s silence. ARM 3 is the control that separates "silent gap" from
 "spoken tag".
 
-PREDICTION (stated before the run, per Cheech 2026-08-15):
-  - ARM 2 longest silent run >= 1.2s (target ~1.5s)
-  - ARM 2 silent run >= ARM 1 silent run + 1.0s
-  - ARM 2 silent run >= ARM 3 silent run + 1.0s   (proves the FLAG, not the text)
-A smaller ARM-2 gap = flag not honored = FAIL.
+PREDICTION — ABSOLUTE, mechanism-derived (per Cheech 2026-08-15):
+A rendered 1.5s <break> leaves a silent run near 1.5s; an unrendered one leaves
+only the ~0.3s breath/edge floor — the two are ~4x apart. Thresholds sit inside
+that gap, NOT fitted to any observed number, and can still genuinely fail:
+  - ARM 2 silent run >= 1.0s          (break honored)
+  - ARM 3 silent run <= 0.6s          (flag OFF => no rendered silence)
+  - ARM 3 total >= ARM 1 total + 0.8s (flag OFF => the tag is SPOKEN ALOUD)
+  - ARM 2 total >= ARM 1 total + 1.0s (honored break adds ~its length)
+
+Operational finding worth its own note: a flag regression does NOT degrade
+gracefully — with parsing OFF the listener HEARS "<break time...>" read aloud
+(ARM 3: total balloons, silence stays at floor). The committed unit guard
+test_url_enables_ssml_parsing pins the flag on so this cannot regress silently.
+
+FIRST RUN (ts-705a00bc, 2026-08-15): arm1 silence 0.290s / arm2 1.344s /
+arm3 0.359s; arm3 total 3.204s vs arm1 1.765s — all four claims above hold.
+The first cut carried an over-strict `sil2 >= sil3 + 1.0` (actual separation
+0.985s); that arm-vs-arm subtraction was never the claim and was dropped.
 """
 
 import asyncio
@@ -113,15 +126,25 @@ def test_break_tag_renders_a_silent_gap():
     print( f"{'1 plain (flag ON)':<26} {dur1:>9.3f} {sil1:>14.3f}" )
     print( f"{'2 <break> (flag ON)':<26} {dur2:>9.3f} {sil2:>14.3f}" )
     print( f"{'3 <break> (flag OFF)':<26} {dur3:>9.3f} {sil3:>14.3f}" )
-    print( f"PREDICTION: arm2 silence >=1.2s, >= arm1+1.0s, >= arm3+1.0s" )
+    print( "PREDICTION: arm2 silence >=1.0s; arm3 silence <=0.6s; arm3 total >= arm1+0.8s (tag spoken); arm2 total >= arm1+1.0s" )
 
-    # An honored 1.5s break must show a real silent gap...
-    assert sil2 >= 1.2, f"arm2 silence {sil2:.3f}s < 1.2s — break not honored"
-    # ...that the plain baseline does not have...
-    assert sil2 >= sil1 + 1.0, f"arm2 silence {sil2:.3f}s not >= arm1 {sil1:.3f}s + 1.0s"
-    # ...and that a flag-OFF run does not have (proves the FLAG, not the tag text).
-    assert sil2 >= sil3 + 1.0, f"arm2 silence {sil2:.3f}s not >= arm3 {sil3:.3f}s + 1.0s"
-    # Total duration also grows by roughly the break length.
+    # ABSOLUTE, mechanism-derived thresholds (NOT fitted to observed numbers):
+    # a rendered 1.5s <break> yields a silent run near 1.5s; an unrendered one
+    # leaves only the ~0.3s breath/edge floor. The two populations are ~4x apart,
+    # so a floor of 1.0s and a ceiling of 0.6s both sit inside that gap and can
+    # genuinely fail if the flag stops working. No arm-vs-arm subtraction — each
+    # arm's ABSOLUTE value is the claim.
+    HONORED_MIN_S  = 1.0   # honored 1.5s break >> this
+    NO_GAP_MAX_S   = 0.6   # 2x the ~0.3s floor; unrendered break stays below
+
+    # ARM 2 — the honored break inserts a REAL silent gap:
+    assert sil2 >= HONORED_MIN_S, f"arm2 silence {sil2:.3f}s < {HONORED_MIN_S}s — break not honored"
+    # ARM 3 control — flag OFF => NO silent gap, yet its TOTAL balloons because the
+    # markup is SPOKEN ALOUD. A flag regression does NOT degrade gracefully: the
+    # listener hears the tag read out. Both facts asserted:
+    assert sil3 <= NO_GAP_MAX_S, f"arm3 silence {sil3:.3f}s > {NO_GAP_MAX_S}s — unexpected gap without the flag"
+    assert dur3 >= dur1 + 0.8, f"arm3 total {dur3:.3f}s not inflated — expected the tag spoken aloud"
+    # The honored arm's total also grows by roughly the break length.
     assert dur2 >= dur1 + 1.0, f"arm2 total {dur2:.3f}s not >= arm1 {dur1:.3f}s + 1.0s"
 
 

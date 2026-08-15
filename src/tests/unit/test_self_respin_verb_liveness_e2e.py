@@ -153,6 +153,24 @@ def test_verb_written_marker_is_observed_as_returned( tmp_path ):
     assert a.session_id == SESSION and a.persona == PERSONA   # identity tuple carried through
 
 
+def test_verdict_rides_the_verb_marker_not_thin_air( tmp_path ):
+    """Load-bearing control: the verb writes its marker to tmp_path, but an
+    observer pointed at a DIFFERENT (empty) directory sees nothing — proving the
+    RETURNED verdict rides the verb's real on-disk marker, not the pressure
+    payload alone. Same pressure that yields RETURNED at the right dir yields an
+    empty result at the wrong one."""
+    other_dir = tmp_path / "elsewhere"
+    other_dir.mkdir()
+    _fire_the_verb( tmp_path, _Schedule() )
+    pressure = lambda: _pressure( status="within_budget", last_turn_age_s=10 )
+
+    right = observe_fleet_self_respin( base_dir=str( tmp_path ),  now=_AFTER, fetch_pressure=pressure )
+    wrong = observe_fleet_self_respin( base_dir=str( other_dir ), now=_AFTER, fetch_pressure=pressure )
+
+    assert len( right ) == 1 and right[ 0 ].verdict is SelfRespinVerdict.RETURNED
+    assert wrong == []                                   # no marker there ⇒ no verdict, same pressure
+
+
 def test_scheduled_argv_is_the_one_shot_guarded_clear( tmp_path ):
     """The chain scheduled a detached argv whose rm-then-send-keys consumes the
     real fire token the verb wrote — the double-fire guard, end to end."""
