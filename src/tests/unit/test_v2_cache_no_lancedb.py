@@ -64,6 +64,34 @@ def test_lancedb_solution_manager_absent_from_v2_transitive_closure():
     )
 
 
+def test_lancedb_solution_manager_absent_from_two_tier_module_closure():
+    """
+    The extracted module cosa.memory.two_tier_question_search is what v2 now reuses
+    (row 29e98243). Guard it DIRECTLY, not only through v2/cache: import it in a
+    CLEAN interpreter and assert the banned manager module never entered sys.modules.
+    Importing SolutionSnapshot still pulls the third-party lancedb PACKAGE (allowed);
+    the MODULE must stay out.
+
+    Proven able to fail: an `import cosa.memory.lancedb_solution_manager` in the new
+    module makes this list non-empty and reds (receipt in the unit report).
+    """
+    env = dict( os.environ )
+    env[ "PYTHONPATH" ] = os.pathsep.join( [ str( _SRC ), env.get( "PYTHONPATH", "" ) ] )
+    probe = (
+        "import cosa.memory.two_tier_question_search, sys; "
+        "print( [ m for m in sys.modules if 'lancedb_solution_manager' in m ] )"
+    )
+    completed = subprocess.run(
+        [ sys.executable, "-c", probe ],
+        env=env, capture_output=True, text=True, check=True,
+    )
+    leaked = completed.stdout.strip().splitlines()[ -1 ] if completed.stdout.strip() else "[]"
+    assert leaked == "[]", (
+        f"{BANNED_MODULE} reached two_tier_question_search's transitive import graph: {leaked}\n"
+        f"stderr: {completed.stderr}"
+    )
+
+
 def _v2_source_files():
     return sorted( _V2_DIR.glob( "*.py" ) )
 

@@ -25,6 +25,7 @@ from cosa.memory.snapshot_manager_interface import (
 )
 from cosa.memory.solution_snapshot import SolutionSnapshot
 from cosa.memory.question_embeddings_table import QuestionEmbeddingsTable
+from cosa.memory.two_tier_question_search import pg_hierarchical_search
 from cosa.rest.db.repositories.vector_store_backend import is_postgres_backend, resolve_lancedb_path
 
 
@@ -2070,10 +2071,14 @@ class SolutionSnapshotManager( SolutionSnapshotManagerInterface ):
                                        limit: int = 7,
                                        debug: bool = False ) -> List[Tuple[float, Any]]:
         """
-        Hierarchical question search against Postgres, MIRRORING the LanceDB hierarchy
-        minus the in-memory cache tier (cache bypass): Level 1 exact-verbatim -> Level 2
-        exact-normalized (both via the already-postgres-routed canonical_synonyms) ->
-        Level 4 pgvector dot similarity.
+        Delegating shim — the hierarchical Postgres two-tier lookup now lives in
+        the properly-named module cosa.memory.two_tier_question_search (Rick's
+        ruling 2026-08-15, decision row 29e98243: the lookup touches no LanceDB,
+        so it must not live in a LanceDB-named file). This method keeps its exact
+        signature and behaviour by forwarding to pg_hierarchical_search, which is
+        a verbatim lift of the former body; ``self`` supplies every collaborator
+        it drives, so the manager's ghost-cleanup + threshold + tuple contract are
+        preserved byte-for-byte.
 
         Requires:
             - manager is initialized; question non-empty; thresholds in [0,100]
@@ -2086,97 +2091,7 @@ class SolutionSnapshotManager( SolutionSnapshotManagerInterface ):
             - RuntimeError if not initialized
             - ValueError if question empty or a threshold is out of range
         """
-        if not self.is_initialized():
-            raise RuntimeError( "Manager must be initialized before searching" )
-
-        if not question:
-            raise ValueError( "Question cannot be empty" )
-
-        if not (0.0 <= threshold_question <= 100.0) or not (0.0 <= threshold_gist <= 100.0):
-            raise ValueError( "Thresholds must be between 0.0 and 100.0" )
-
-        monitor = PerformanceMonitor( "get_snapshots_by_question" )
-        monitor.start()
-
-        try:
-            # Lazy-init hierarchical search components (mirrors the LanceDB path)
-            if self._canonical_synonyms is None:
-                try:
-                    from cosa.memory.canonical_synonyms_table import CanonicalSynonymsTable
-                    self._canonical_synonyms = CanonicalSynonymsTable( db_path=self.db_path, debug=self.debug, verbose=self.verbose )
-                    if self.debug: print( "Initialized CanonicalSynonyms for hierarchical search" )
-                except Exception as e:
-                    if self.debug: print( f"Could not initialize CanonicalSynonyms, using direct search: {e}" )
-                    self._canonical_synonyms = False
-
-            if self._normalizer is None:
-                try:
-                    from cosa.memory.normalizer import Normalizer
-                    self._normalizer = Normalizer()
-                    if self.debug: print( "Initialized Normalizer for hierarchical search" )
-                except Exception as e:
-                    if self.debug: print( f"Could not initialize Normalizer: {e}" )
-                    self._normalizer = False
-
-            # Level 1: exact verbatim match in CanonicalSynonyms
-            if self._canonical_synonyms and self._canonical_synonyms is not False:
-                snapshot_id = self._canonical_synonyms.find_exact_verbatim( question )
-                if snapshot_id:
-                    if self.debug: print( f"✓ LEVEL 1: Exact verbatim match found for snapshot: {snapshot_id}" )
-                    snapshot = self.get_snapshot_by_id( snapshot_id )
-                    if snapshot:
-                        monitor.stop()
-                        return [ ( 100.0, snapshot ) ]
-                    else:
-                        print( f"[GHOST] WARNING: Level 1 synonym points to missing snapshot {snapshot_id[:8]}... — auto-cleaning" )
-                        self._canonical_synonyms.delete_by_snapshot_id( snapshot_id )
-
-                # Level 2: exact normalized match
-                if self._normalizer and self._normalizer is not False:
-                    question_normalized = self._normalizer.normalize( question )
-                    snapshot_id = self._canonical_synonyms.find_exact_normalized( question_normalized )
-                    if snapshot_id:
-                        if self.debug: print( f"✓ LEVEL 2: Exact normalized match found for snapshot: {snapshot_id}" )
-                        snapshot = self.get_snapshot_by_id( snapshot_id )
-                        if snapshot:
-                            monitor.stop()
-                            return [ ( 100.0, snapshot ) ]
-                        else:
-                            print( f"[GHOST] WARNING: Level 2 synonym points to missing snapshot {snapshot_id[:8]}... — auto-cleaning" )
-                            self._canonical_synonyms.delete_by_snapshot_id( snapshot_id )
-
-            # (Level-3 gist tier + in-memory cache tier are SKIPPED — postgres cache bypass)
-
-            # Level 4: pgvector dot similarity search
-            if self.debug: print( "LEVEL 4: No exact matches found, performing vector similarity search..." )
-
-            query_embedding = self._question_embeddings_tbl.get_embedding( question )
-            if not query_embedding:
-                if self.debug: print( "Failed to generate query embedding, returning empty results" )
-                monitor.stop()
-                return []
-
-            from cosa.rest.db.database import get_db
-            from cosa.rest.db.repositories.solution_snapshot_repository import SolutionSnapshotRepository
-
-            similar_snapshots = []
-            with get_db() as session:
-                # threshold=None => no SQL threshold (top-1 + confirm: return all, caller decides)
-                hits = SolutionSnapshotRepository( session ).get_snapshots_by_question(
-                    query_embedding, threshold=None, limit=limit if limit > 0 else 100
-                )
-                for pct, entity in hits:
-                    similar_snapshots.append( ( pct, self._record_to_snapshot( self._pg_record_from_entity( entity ) ) ) )
-
-            similar_snapshots.sort( key=lambda x: x[0], reverse=True )
-
-        except Exception as e:
-            if self.debug: print( f"✗ Search failed: {e}" )
-            raise
-        finally:
-            monitor.stop()
-
-        return similar_snapshots
+        return pg_hierarchical_search( self, question, question_gist, threshold_question, threshold_gist, limit, debug )
 
     def _pg_similarity_search( self, exemplar_snapshot, embedding_attr, repo_method_name,
                                threshold, limit, exclude_self, ensure_top_result ):
