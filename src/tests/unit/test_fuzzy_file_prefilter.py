@@ -71,7 +71,12 @@ class TestNarrowing:
 
     def test_narrowed_keys_are_a_subset( self, large_map ):
         out, arbitrary = prefilter_docs_map_by_keywords( large_map, "unrelated topic", debug=False )
-        assert arbitrary is False
+        # "unrelated topic" matches ALL 120 fixture docs (score 2 each), so the
+        # scored list exceeds MAX_CANDIDATES and the narrowing TRUNCATES — a real
+        # match may sit past the cut, so the shortlist is lossy and arbitrary is
+        # True (row c143fd84 / commit e10ba803). The load-bearing invariant here is
+        # that the kept keys are a value-preserving subset, which holds regardless.
+        assert arbitrary is True
         assert set( out.keys() ).issubset( set( large_map.keys() ) )
         for k in out:
             assert out[ k ] == large_map[ k ]

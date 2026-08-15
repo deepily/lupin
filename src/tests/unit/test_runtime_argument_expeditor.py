@@ -33,7 +33,7 @@ from unittest.mock import patch, MagicMock
 import subprocess
 
 from cosa.agents.runtime_argument_expeditor.xml_models import ExpeditorResponse, ArgConfirmationResponse
-from cosa.agents.runtime_argument_expeditor.expeditor import RuntimeArgumentExpeditor
+from cosa.agents.runtime_argument_expeditor.expeditor import RuntimeArgumentExpeditor, ArgSpec
 from cosa.agents.runtime_argument_expeditor.agent_registry import (
     AGENTIC_AGENTS,
     get_cli_help,
@@ -42,6 +42,35 @@ from cosa.agents.runtime_argument_expeditor.agent_registry import (
     _user_visible_cache
 )
 from cosa.rest.agentic_job_factory import create_agentic_job, _parse_boolean
+
+
+def _spec( entry ):
+    """
+    Build a real ArgSpec from a registry-style dict for the collect()/helper tests.
+
+    Commit 27834c64 migrated collect() and its five helpers to take the typed
+    ArgSpec instead of the raw AGENTIC_AGENTS entry. These fixtures pass the entry,
+    so wrap it here. Absent keys fall back to empty defaults so partial fixtures
+    (display_name / cli_module only) still build; a full registry entry produces an
+    ArgSpec identical to ArgSpec.from_entry.
+
+    Requires:
+        - entry is a dict (may be partial — any AGENTIC_AGENTS key may be absent)
+
+    Ensures:
+        - returns an ArgSpec whose 8 fields mirror entry (missing keys → empty)
+        - fallback_defaults is a COPY, matching ArgSpec.from_entry semantics
+    """
+    return ArgSpec(
+        arg_mapping        = entry.get( "arg_mapping", {} ),
+        system_provided    = entry.get( "system_provided", [] ),
+        required_user_args = entry.get( "required_user_args", [] ),
+        fallback_questions = entry.get( "fallback_questions", {} ),
+        fallback_defaults  = dict( entry.get( "fallback_defaults", {} ) ),
+        special_handlers   = entry.get( "special_handlers", {} ),
+        display_name       = entry.get( "display_name" ),
+        cli_module         = entry.get( "cli_module" ),
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -289,7 +318,7 @@ class TestInjectSystemArgs:
         args_dict   = {}
 
         result = self.expeditor._inject_system_args(
-            args_dict, agent_entry,
+            args_dict, _spec( agent_entry ),
             user_email = "test@test.com",
             session_id = "sess-123",
             user_id    = "uid-456"
@@ -306,7 +335,7 @@ class TestInjectSystemArgs:
         args_dict   = { "user_email": "original@test.com" }
 
         result = self.expeditor._inject_system_args(
-            args_dict, agent_entry,
+            args_dict, _spec( agent_entry ),
             user_email = "new@test.com",
             session_id = "sess-123",
             user_id    = "uid-456"
@@ -320,7 +349,7 @@ class TestInjectSystemArgs:
         args_dict   = {}
 
         result = self.expeditor._inject_system_args(
-            args_dict, agent_entry,
+            args_dict, _spec( agent_entry ),
             user_email = "test@test.com",
             session_id = "sess-123",
             user_id    = "uid-456"
@@ -335,7 +364,7 @@ class TestInjectSystemArgs:
         args_dict   = {}
 
         result = self.expeditor._inject_system_args(
-            args_dict, agent_entry,
+            args_dict, _spec( agent_entry ),
             user_email = "test@test.com",
             session_id = "sess-123",
             user_id    = "uid-456"
@@ -864,7 +893,7 @@ class TestConfirmAndIterate:
         mock_confirm.return_value = "yes"
         args = { "query": "quantum computing" }
 
-        result = self.expeditor._confirm_and_iterate( args, self.agent_entry, self.DR_COMMAND_KEY, "test@test.com" )
+        result = self.expeditor._confirm_and_iterate( args, _spec( self.agent_entry ), self.DR_COMMAND_KEY, "test@test.com" )
 
         assert result == args
         mock_confirm.assert_called_once()
@@ -877,7 +906,7 @@ class TestConfirmAndIterate:
         mock_confirm.return_value = "yes"
         args = { "query": "AI safety" }
 
-        result = self.expeditor._confirm_and_iterate( args, self.agent_entry, self.DR_COMMAND_KEY, "test@test.com" )
+        result = self.expeditor._confirm_and_iterate( args, _spec( self.agent_entry ), self.DR_COMMAND_KEY, "test@test.com" )
 
         assert result == args
 
@@ -889,7 +918,7 @@ class TestConfirmAndIterate:
         mock_confirm.return_value = "no"
         args = { "query": "test" }
 
-        result = self.expeditor._confirm_and_iterate( args, self.agent_entry, self.DR_COMMAND_KEY, "test@test.com" )
+        result = self.expeditor._confirm_and_iterate( args, _spec( self.agent_entry ), self.DR_COMMAND_KEY, "test@test.com" )
 
         assert result is None
 
@@ -901,7 +930,7 @@ class TestConfirmAndIterate:
         mock_confirm.return_value = None
         args = { "query": "test" }
 
-        result = self.expeditor._confirm_and_iterate( args, self.agent_entry, self.DR_COMMAND_KEY, "test@test.com" )
+        result = self.expeditor._confirm_and_iterate( args, _spec( self.agent_entry ), self.DR_COMMAND_KEY, "test@test.com" )
 
         assert result is None
 
@@ -917,7 +946,7 @@ class TestConfirmAndIterate:
         )
         args = { "query": "quantum computing" }
 
-        result = self.expeditor._confirm_and_iterate( args, self.agent_entry, self.DR_COMMAND_KEY, "test@test.com" )
+        result = self.expeditor._confirm_and_iterate( args, _spec( self.agent_entry ), self.DR_COMMAND_KEY, "test@test.com" )
 
         assert result is not None
         assert result[ "budget" ] == "50"
@@ -931,7 +960,7 @@ class TestConfirmAndIterate:
         mock_confirm.return_value = "no"
         args = { "query": "test" }
 
-        result = self.expeditor._confirm_and_iterate( args, self.agent_entry, self.DR_COMMAND_KEY, "test@test.com" )
+        result = self.expeditor._confirm_and_iterate( args, _spec( self.agent_entry ), self.DR_COMMAND_KEY, "test@test.com" )
 
         assert result is None
 
@@ -948,7 +977,7 @@ class TestConfirmAndIterate:
             "debug"      : True,
         }
 
-        result = self.expeditor._confirm_and_iterate( args, self.agent_entry, self.DR_COMMAND_KEY, "test@test.com" )
+        result = self.expeditor._confirm_and_iterate( args, _spec( self.agent_entry ), self.DR_COMMAND_KEY, "test@test.com" )
 
         assert result == args
         # Verify the abstract kwarg sent to _ask_for_confirmation
@@ -970,7 +999,7 @@ class TestConfirmAndIterate:
             "lead_model" : "claude-opus-4-6",
         }
 
-        result = self.expeditor._confirm_and_iterate( args, self.agent_entry, self.DR_COMMAND_KEY, "test@test.com" )
+        result = self.expeditor._confirm_and_iterate( args, _spec( self.agent_entry ), self.DR_COMMAND_KEY, "test@test.com" )
 
         assert result == args
         # Verify the abstract uses fallback_questions keys
@@ -993,14 +1022,15 @@ class TestConfirmAndIterate:
             action="modify", arg_name="budget", new_value="10"
         )
         args = { "query": "quantum computing" }
+        spec = _spec( self.agent_entry )
 
-        result = self.expeditor._confirm_and_iterate( args, self.agent_entry, self.DR_COMMAND_KEY, "test@test.com" )
+        result = self.expeditor._confirm_and_iterate( args, spec, self.DR_COMMAND_KEY, "test@test.com" )
 
         assert result is not None
         assert result[ "budget" ] == "10"
         assert result[ "query" ] == "quantum computing"
-        # Verify parse was called with the comment text, not the full response
-        mock_parse.assert_called_once_with( "change budget to 10", args, self.agent_entry )
+        # Verify parse was called with the comment text, not the full response, and the spec
+        mock_parse.assert_called_once_with( "change budget to 10", args, spec )
 
     @patch( "cosa.agents.runtime_argument_expeditor.expeditor.get_user_visible_args" )
     @patch.object( RuntimeArgumentExpeditor, "_parse_modification" )
@@ -1014,7 +1044,7 @@ class TestConfirmAndIterate:
         )
         args = { "query": "quantum computing" }
 
-        result = self.expeditor._confirm_and_iterate( args, self.agent_entry, self.DR_COMMAND_KEY, "test@test.com" )
+        result = self.expeditor._confirm_and_iterate( args, _spec( self.agent_entry ), self.DR_COMMAND_KEY, "test@test.com" )
 
         assert result is not None
         assert result[ "budget" ] == "10"
@@ -1030,7 +1060,7 @@ class TestConfirmAndIterate:
         mock_parse.return_value = None  # Parse failure
         args = { "query": "quantum computing" }
 
-        result = self.expeditor._confirm_and_iterate( args, self.agent_entry, self.DR_COMMAND_KEY, "test@test.com" )
+        result = self.expeditor._confirm_and_iterate( args, _spec( self.agent_entry ), self.DR_COMMAND_KEY, "test@test.com" )
 
         assert result == args  # Proceeds because user said "yes"
 
@@ -1044,7 +1074,7 @@ class TestConfirmAndIterate:
         mock_parse.return_value = None  # Parse failure
         args = { "query": "quantum computing" }
 
-        result = self.expeditor._confirm_and_iterate( args, self.agent_entry, self.DR_COMMAND_KEY, "test@test.com" )
+        result = self.expeditor._confirm_and_iterate( args, _spec( self.agent_entry ), self.DR_COMMAND_KEY, "test@test.com" )
 
         assert result is None  # Cancels because user said "no"
 
@@ -1333,7 +1363,7 @@ class TestRequestContext:
         """Abstract contains the user's original voice command."""
         mock_uva.return_value = [ "query", "budget", "audience", "audience_context" ]
         result = self.expeditor._build_request_context(
-            self.agent_entry, "do deep research on quantum computing",
+            _spec( self.agent_entry ), self.DR_COMMAND_KEY,"do deep research on quantum computing",
             { "query": "quantum computing" }, [ "budget", "audience" ]
         )
         assert '"do deep research on quantum computing"' in result
@@ -1343,7 +1373,7 @@ class TestRequestContext:
         """Abstract contains the agent's display name."""
         mock_uva.return_value = [ "query", "budget", "audience", "audience_context" ]
         result = self.expeditor._build_request_context(
-            self.agent_entry, "research AI", { "query": "AI" }, [ "budget" ]
+            _spec( self.agent_entry ), self.DR_COMMAND_KEY,"research AI", { "query": "AI" }, [ "budget" ]
         )
         assert "Deep Research" in result
 
@@ -1352,7 +1382,7 @@ class TestRequestContext:
         """Abstract lists already-extracted args when present."""
         mock_uva.return_value = [ "query", "budget", "audience", "audience_context" ]
         result = self.expeditor._build_request_context(
-            self.agent_entry, "research quantum",
+            _spec( self.agent_entry ), self.DR_COMMAND_KEY,"research quantum",
             { "query": "quantum computing" }, [ "budget" ]
         )
         assert "**Already extracted**:" in result
@@ -1363,7 +1393,7 @@ class TestRequestContext:
         """Abstract lists still-needed args."""
         mock_uva.return_value = [ "query", "budget", "audience", "audience_context" ]
         result = self.expeditor._build_request_context(
-            self.agent_entry, "research quantum",
+            _spec( self.agent_entry ), self.DR_COMMAND_KEY,"research quantum",
             { "query": "quantum" }, [ "budget", "audience" ]
         )
         assert "**Still needed**: budget, audience" in result
@@ -1373,7 +1403,7 @@ class TestRequestContext:
         """When no args extracted, 'Already extracted' section is omitted."""
         mock_uva.return_value = [ "query", "budget", "audience", "audience_context" ]
         result = self.expeditor._build_request_context(
-            self.agent_entry, "make me a podcast",
+            _spec( self.agent_entry ), self.DR_COMMAND_KEY,"make me a podcast",
             {}, [ "query", "budget" ]
         )
         assert "**Already extracted**:" not in result
@@ -1383,7 +1413,7 @@ class TestRequestContext:
         """When no args missing, 'Still needed' section is omitted."""
         mock_uva.return_value = [ "query", "budget", "audience", "audience_context" ]
         result = self.expeditor._build_request_context(
-            self.agent_entry, "research quantum",
+            _spec( self.agent_entry ), self.DR_COMMAND_KEY,"research quantum",
             { "query": "quantum" }, []
         )
         assert "**Still needed**" not in result
@@ -1393,7 +1423,7 @@ class TestRequestContext:
         """System-provided args (user_email, session_id) excluded from 'Already extracted'."""
         mock_uva.return_value = [ "query", "budget", "audience", "audience_context" ]
         result = self.expeditor._build_request_context(
-            self.agent_entry, "research quantum",
+            _spec( self.agent_entry ), self.DR_COMMAND_KEY,"research quantum",
             { "query": "quantum", "user_email": "test@test.com", "no_confirm": True }, [ "budget" ]
         )
         assert "user_email" not in result
@@ -1408,7 +1438,7 @@ class TestRequestContext:
         entry_no_name = dict( self.agent_entry )
         del entry_no_name[ "display_name" ]
         result = self.expeditor._build_request_context(
-            entry_no_name, "test", {}, [ "budget" ]
+            _spec( entry_no_name ), self.DR_COMMAND_KEY, "test", {}, [ "budget" ]
         )
         # Should fallback to "cli" from "cosa.agents.deep_research.cli"
         assert "**Agent**: cli" in result
@@ -2058,7 +2088,7 @@ class TestDryRunVisibility:
         """SWE Team shows dry_run in context when it's in user_visible list."""
         mock_uva.return_value = [ "task", "budget", "timeout", "dry_run" ]
         result = self.expeditor._build_request_context(
-            self.swe_entry, "run swe team task",
+            _spec( self.swe_entry ), self.SWE_COMMAND_KEY,"run swe team task",
             { "task": "add health check", "dry_run": "yes" }, [ "budget", "timeout" ]
         )
         assert "dry_run" in result
@@ -2068,7 +2098,7 @@ class TestDryRunVisibility:
         """Deep Research hides dry_run from context (not in user_visible list)."""
         mock_uva.return_value = [ "query", "budget", "audience", "audience_context" ]
         result = self.expeditor._build_request_context(
-            self.dr_entry, "research quantum",
+            _spec( self.dr_entry ), self.DR_COMMAND_KEY,"research quantum",
             { "query": "quantum", "dry_run": "yes" }, [ "budget" ]
         )
         assert "dry_run" not in result
@@ -2078,7 +2108,7 @@ class TestDryRunVisibility:
         """SWE Team shows dry_run value in 'Already extracted' section."""
         mock_uva.return_value = [ "task", "budget", "timeout", "dry_run" ]
         result = self.expeditor._build_request_context(
-            self.swe_entry, "run swe team dry run",
+            _spec( self.swe_entry ), self.SWE_COMMAND_KEY,"run swe team dry run",
             { "task": "add health check", "dry_run": "yes" }, [ "budget" ]
         )
         assert "dry_run: yes" in result
@@ -2088,7 +2118,7 @@ class TestDryRunVisibility:
         """SWE Team shows dry_run=no in 'Already extracted' when set to 'no'."""
         mock_uva.return_value = [ "task", "budget", "timeout", "dry_run" ]
         result = self.expeditor._build_request_context(
-            self.swe_entry, "run swe team task",
+            _spec( self.swe_entry ), self.SWE_COMMAND_KEY,"run swe team task",
             { "task": "fix bug", "dry_run": "no" }, [ "budget" ]
         )
         assert "dry_run: no" in result
@@ -2098,7 +2128,7 @@ class TestDryRunVisibility:
         """When user_visible is None (fallback), dry_run shown for any agent."""
         mock_uva.return_value = None
         result = self.expeditor._build_request_context(
-            self.dr_entry, "research quantum",
+            _spec( self.dr_entry ), self.DR_COMMAND_KEY,"research quantum",
             { "query": "quantum", "dry_run": "yes" }, [ "budget" ]
         )
         assert "dry_run: yes" in result
@@ -2135,7 +2165,7 @@ class TestRuntimeSchedulingConfirmation:
         mock_confirm.return_value = "yes"
         args = { "query": "test" }
 
-        self.expeditor._confirm_and_iterate( args, self.agent_entry, self.DR_COMMAND_KEY, "test@test.com" )
+        self.expeditor._confirm_and_iterate( args, _spec( self.agent_entry ), self.DR_COMMAND_KEY, "test@test.com" )
 
         # The abstract passed to _ask_for_confirmation should contain scheduling
         call_args = mock_confirm.call_args
@@ -2152,7 +2182,7 @@ class TestRuntimeSchedulingConfirmation:
         mock_confirm.return_value = "yes"
         args = { "query": "test", "scheduled_at": "2026-03-31T02:00:00" }
 
-        self.expeditor._confirm_and_iterate( args, self.agent_entry, self.DR_COMMAND_KEY, "test@test.com" )
+        self.expeditor._confirm_and_iterate( args, _spec( self.agent_entry ), self.DR_COMMAND_KEY, "test@test.com" )
 
         call_args = mock_confirm.call_args
         abstract = call_args[ 1 ][ "abstract" ] if "abstract" in call_args[ 1 ] else call_args[ 0 ][ 2 ]
@@ -2166,7 +2196,7 @@ class TestRuntimeSchedulingConfirmation:
         mock_confirm.return_value = "yes"
         args = { "query": "test", "monopolize": True }
 
-        self.expeditor._confirm_and_iterate( args, self.agent_entry, self.DR_COMMAND_KEY, "test@test.com" )
+        self.expeditor._confirm_and_iterate( args, _spec( self.agent_entry ), self.DR_COMMAND_KEY, "test@test.com" )
 
         call_args = mock_confirm.call_args
         abstract = call_args[ 1 ][ "abstract" ] if "abstract" in call_args[ 1 ] else call_args[ 0 ][ 2 ]
@@ -2184,7 +2214,7 @@ class TestRuntimeSchedulingConfirmation:
         mock_parse.return_value = MagicMock( is_modify=lambda: False )
         args = { "query": "test" }
 
-        self.expeditor._confirm_and_iterate( args, self.agent_entry, self.DR_COMMAND_KEY, "test@test.com" )
+        self.expeditor._confirm_and_iterate( args, _spec( self.agent_entry ), self.DR_COMMAND_KEY, "test@test.com" )
 
         # The modification parser should have been called with the comment
         mock_parse.assert_called_once()
@@ -2266,7 +2296,7 @@ class TestResolveDisplayName:
             "display_name" : "Test Suite",
             "cli_module"   : None,        # ← intentional None for API-only agents
         }
-        assert RuntimeArgumentExpeditor._resolve_display_name( entry ) == "Test Suite"
+        assert RuntimeArgumentExpeditor._resolve_display_name( _spec( entry ) ) == "Test Suite"
 
     def test_display_name_preferred_when_both_set( self ):
         """display_name wins over cli_module derivation."""
@@ -2274,17 +2304,17 @@ class TestResolveDisplayName:
             "display_name" : "Deep Research",
             "cli_module"   : "cosa.agents.deep_research.cli",
         }
-        assert RuntimeArgumentExpeditor._resolve_display_name( entry ) == "Deep Research"
+        assert RuntimeArgumentExpeditor._resolve_display_name( _spec( entry ) ) == "Deep Research"
 
     def test_cli_module_derivation_when_display_name_missing( self ):
         """Last dotted segment becomes the name when display_name is absent."""
         entry = { "cli_module": "cosa.agents.podcast_generator.cli" }
-        assert RuntimeArgumentExpeditor._resolve_display_name( entry ) == "cli"
+        assert RuntimeArgumentExpeditor._resolve_display_name( _spec( entry ) ) == "cli"
 
     def test_cli_module_underscore_to_space( self ):
         """Underscores become spaces in derived names."""
         entry = { "cli_module": "cosa.agents.research_to_presentation" }
-        assert RuntimeArgumentExpeditor._resolve_display_name( entry ) == "research to presentation"
+        assert RuntimeArgumentExpeditor._resolve_display_name( _spec( entry ) ) == "research to presentation"
 
     def test_empty_display_name_falls_through_to_cli_module( self ):
         """Empty string is falsy — falls through to cli_module derivation."""
@@ -2292,16 +2322,16 @@ class TestResolveDisplayName:
             "display_name" : "",
             "cli_module"   : "cosa.agents.bug_fix_expediter",
         }
-        assert RuntimeArgumentExpeditor._resolve_display_name( entry ) == "bug fix expediter"
+        assert RuntimeArgumentExpeditor._resolve_display_name( _spec( entry ) ) == "bug fix expediter"
 
     def test_both_missing_returns_agent_sentinel( self ):
         """Neither display_name nor cli_module → 'agent' fallback."""
-        assert RuntimeArgumentExpeditor._resolve_display_name( {} ) == "agent"
+        assert RuntimeArgumentExpeditor._resolve_display_name( _spec( {} ) ) == "agent"
 
     def test_both_none_returns_agent_sentinel( self ):
         """Both explicitly None → 'agent' fallback."""
         entry = { "display_name": None, "cli_module": None }
-        assert RuntimeArgumentExpeditor._resolve_display_name( entry ) == "agent"
+        assert RuntimeArgumentExpeditor._resolve_display_name( _spec( entry ) ) == "agent"
 
     def test_does_not_crash_on_real_test_suite_registry_entry( self ):
         """
@@ -2316,5 +2346,5 @@ class TestResolveDisplayName:
             "job_class_path" : "cosa.agents.test_suite.job.TestSuiteJob",
             "display_name"   : "Test Suite",
         }
-        result = RuntimeArgumentExpeditor._resolve_display_name( entry )
+        result = RuntimeArgumentExpeditor._resolve_display_name( _spec( entry ) )
         assert result == "Test Suite"

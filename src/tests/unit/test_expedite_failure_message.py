@@ -28,6 +28,7 @@ from unittest.mock import MagicMock, patch
 
 from cosa.agents.runtime_argument_expeditor.expeditor import (
     RuntimeArgumentExpeditor,
+    ArgSpec,
     BATCH_DECLINED,
     BATCH_UNREACHABLE,
     BATCH_TIMEOUT,
@@ -129,7 +130,10 @@ def test_ask_for_confirmation_timeout_is_timeout():
 def test_confirm_and_iterate_plain_no_is_declined():
     """A confirmation the user answered 'no' to IS a user decision."""
     exp = _expeditor()
-    agent_entry = { "fallback_questions": {} }
+    agent_entry = ArgSpec(
+        arg_mapping={}, system_provided=[], required_user_args=[], fallback_questions={},
+        fallback_defaults={}, special_handlers={}, display_name=None, cli_module=None,
+    )
     with patch.object( exp, "_ask_for_confirmation", return_value="no" ):
         result = exp._confirm_and_iterate( { "query": "brevity" }, agent_entry, "cmd", "someone@example.com" )
     assert result is None
@@ -139,7 +143,10 @@ def test_confirm_and_iterate_plain_no_is_declined():
 def test_confirm_and_iterate_undelivered_keeps_machine_reason():
     """When the confirm never reached the user, the reason stays a machine failure."""
     exp = _expeditor()
-    agent_entry = { "fallback_questions": {} }
+    agent_entry = ArgSpec(
+        arg_mapping={}, system_provided=[], required_user_args=[], fallback_questions={},
+        fallback_defaults={}, special_handlers={}, display_name=None, cli_module=None,
+    )
     # _ask_for_confirmation returns None AND records unreachable (as it would live).
     def _fake_confirm( *a, **k ):
         exp._last_expedite_reason = BATCH_UNREACHABLE
