@@ -811,7 +811,8 @@ class TodoFifoQueue( FifoQueue ):
                         command, args, user_id, user_email, salutation_plus_question
                     )
                     if confirmed_command is None:
-                        msg = "Command cancelled by user."
+                        # None now covers explicit Cancel AND timeout/error abort (row cad45cf1)
+                        msg = "Command cancelled — no confirmation received."
                     else:
                         msg = self._handle_agentic_command(
                             confirmed_command, args, user_id, user_email, websocket_id, salutation_plus_question
@@ -1048,9 +1049,15 @@ class TodoFifoQueue( FifoQueue ):
         Ensures:
             - Returns confirmed command string, or None if cancelled
             - User sees product name, not internal command string
-            - On timeout, returns original detected command (safe default)
+            - On timeout or notification error, returns None (ABORTS): a silent
+              timeout must not masquerade as a confirmation of a possibly-wrong
+              detection, so the detected command is NOT auto-run. Row cad45cf1.
+            - The wait window is read from config key
+              "agentic routing confirm timeout seconds" (default 30), not a literal.
         """
         detected_name = self.PRODUCT_NAMES.get( command, command )
+
+        timeout_seconds = self.config_mgr.get( "agentic routing confirm timeout seconds", default=30, return_type="int" )
 
         # Build multiple choice options: detected option always first, then alternatives, then cancel
         options = []
@@ -1064,7 +1071,7 @@ class TodoFifoQueue( FifoQueue ):
             message         = f"I think you want {detected_name}. Is that right?",
             response_type   = ResponseType.MULTIPLE_CHOICE,
             target_user     = user_email,
-            timeout_seconds = 30,
+            timeout_seconds = timeout_seconds,
             sender_id       = "agentic.router@lupin.deepily.ai",
             priority        = "high",
             title           = "Confirm Command",
@@ -1082,8 +1089,8 @@ class TodoFifoQueue( FifoQueue ):
         response = notify_user_sync( request, debug=self.debug )
 
         if response.is_timeout or response.is_error:
-            if self.debug: print( f"Confirmation timeout/error — proceeding with detected command [{command}]" )
-            return command  # Default: proceed with detected command on timeout
+            if self.debug: print( f"Confirmation timeout/error — ABORTING, not auto-running detected command [{command}]" )
+            return None  # No confirmation received: abort rather than masquerade a silent timeout as a "yes"
 
         # Parse response — handle both raw string and JSON formats
         selected = response.response_value

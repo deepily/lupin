@@ -482,11 +482,30 @@ class TestConfirmAgenticRouting( _TFQBase ):
     def _cmd( self ):
         return next( iter( self.queue.PRODUCT_NAMES ) )
 
-    def test_timeout_returns_command( self ):
+    def test_timeout_aborts_none( self ):
+        # Row cad45cf1: a silent timeout must NOT masquerade as a confirmation of
+        # the detected command — it aborts (returns None) instead of auto-running.
         cmd = self._cmd()
         resp = Mock(); resp.is_timeout = True; resp.is_error = False
         with patch.object( tfq, "notify_user_sync", return_value=resp ), patch( "builtins.print" ):
-            self.assertEqual( self.queue._confirm_agentic_routing( cmd, "", "u1", "u@x.com", "q" ), cmd )
+            self.assertIsNone( self.queue._confirm_agentic_routing( cmd, "", "u1", "u@x.com", "q" ) )
+
+    def test_error_aborts_none( self ):
+        # Row cad45cf1: a notification-system error is also not a confirmation → abort.
+        cmd = self._cmd()
+        resp = Mock(); resp.is_timeout = False; resp.is_error = True
+        with patch.object( tfq, "notify_user_sync", return_value=resp ), patch( "builtins.print" ):
+            self.assertIsNone( self.queue._confirm_agentic_routing( cmd, "", "u1", "u@x.com", "q" ) )
+
+    def test_timeout_seconds_read_from_config_not_literal( self ):
+        # Row cad45cf1: the wait window comes from the config key, not a hardcoded 30.
+        cmd = self._cmd()
+        self.queue.config_mgr = _cfg( { "agentic routing confirm timeout seconds": 47 } )
+        resp = Mock(); resp.is_timeout = False; resp.is_error = False; resp.response_value = "Cancel"
+        with patch.object( tfq, "notify_user_sync", return_value=resp ) as m_notify, patch( "builtins.print" ):
+            self.queue._confirm_agentic_routing( cmd, "", "u1", "u@x.com", "q" )
+        sent_request = m_notify.call_args[ 0 ][ 0 ]
+        self.assertEqual( sent_request.timeout_seconds, 47 )
 
     def test_cancel_returns_none( self ):
         cmd = self._cmd()
