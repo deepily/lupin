@@ -61,6 +61,9 @@ DEFAULT_CLAIMS = {
     "smoke the API-key surface first"   : "there is no API-key surface to smoke",
     "Developer-API mode first"          : "there is no API-key surface to smoke",
     "GOOGLE_CLOUD_PROJECT"              : "assertable override; read LUPIN_GCP_PROJECT_ID instead",
+    "no ADC"                            : "ADC were on disk all along; a live Vertex call answered OK",
+    "cannot authenticate to Vertex"     : "it authenticated; smoked 2026-08-16",
+    "us-central1"                       : "404s for this model — use location=global",
 }
 
 WINDOW = 2   # lines either side to search for a marker — these documents are hard-wrapped
