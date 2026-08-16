@@ -4,9 +4,12 @@ handoff §3.A, R-A1/R-A2/R-A3; agentic set folded in by the 2026.08.15
 single-source design, phase 1).
 
 Replaces the three v1 routing mechanisms the survey found drifting apart — the
-if/elif chain (`todo_fifo_queue.py:697-777`), `MODE_TO_AGENT` (`:58`), and the
-second if/elif in `agentic_job_factory.py:103`. One map, keyed on the FULL routing
-string, is what the §9 registry-guard test defends so that drift cannot reappear.
+LLM-routing if/elif chain reached from `push_job()` / `get_routing_command()` in
+`todo_fifo_queue.py`, the `MODE_TO_AGENT` map in `todo_fifo_queue.py`, and the
+command if/elif in `create_agentic_job()` in `agentic_job_factory.py`. (Symbols,
+not line numbers — grep the name; line numbers drift and mislead.) One map, keyed on
+the FULL routing string, is what the §9 registry-guard test defends so that drift
+cannot reappear.
 
 Resolution order for `required_args` is the MIGRATION PATH, not a fallback chain
 (§3a): the agent declares its own args first (phase 2), then the `AGENTIC_AGENTS`
