@@ -37,6 +37,7 @@ import os
 import sys
 import threading
 import time
+from urllib.parse import urlparse
 
 import requests
 
@@ -47,9 +48,21 @@ except ImportError:
     websockets = None
 
 # ── Config ──────────────────────────────────────────────────────────────────
-BASE_HTTP   = "http://localhost:7999"
-WS_HOST     = "localhost"
-WS_PORT     = 7999
+# Host/port are PARAMETERIZED (row c076245f). They were hardcoded to :7999, which
+# is what made this harness impossible to submit as a gated :8000 suite — an
+# ~11-minute, state-mutating, job-enqueuing run has to go where the venue rubric
+# sends it, and it failed all three :7999 criteria. Hand-running it on the shared
+# dev box once left a real pg- job orphaned there; it completed, but that was luck.
+#
+# LUPIN_API_URL sets everything: the websocket host and port are DERIVED from it,
+# so there is no second knob to forget and no way to point HTTP at one server while
+# the socket listens to another. Default stays :7999 so existing hand-runs are
+# unchanged.
+BASE_HTTP   = os.environ.get( "LUPIN_API_URL", "http://localhost:7999" ).rstrip( "/" )
+_parsed     = urlparse( BASE_HTTP )
+WS_HOST     = _parsed.hostname or "localhost"
+WS_PORT     = _parsed.port or ( 443 if _parsed.scheme == "https" else 80 )
+WS_SCHEME   = "wss" if _parsed.scheme == "https" else "ws"
 SESSION_ID  = "tiffany-lane2-e2e"
 MODE        = "podcast"          # the "Podcast Generator" dropdown
 TIMEOUT_S   = 720                # 12 min — real audio generation
@@ -213,7 +226,7 @@ class WsAutoAnswer:
 
     async def _listen( self ):
         from urllib.parse import quote
-        uri = f"ws://{WS_HOST}:{WS_PORT}/ws/queue/{quote( SESSION_ID )}"
+        uri = f"{WS_SCHEME}://{WS_HOST}:{WS_PORT}/ws/queue/{quote( SESSION_ID )}"
         try:
             async with websockets.connect( uri, max_size=None ) as ws:
                 await ws.send( json.dumps( {
@@ -336,13 +349,41 @@ def find_job( headers, queue, job_id ):
 
 
 # ── Main ────────────────────────────────────────────────────────────────────
+def _retarget( base_url ):
+    """
+    Point the harness at a different server (row c076245f).
+
+    Rebinds BASE_HTTP and every websocket field DERIVED from it, together, so the
+    HTTP calls and the socket can never end up on different servers — that split is
+    the failure this function exists to make impossible.
+
+    Requires:
+        - base_url is an absolute http(s) URL, e.g. "http://localhost:8000"
+
+    Ensures:
+        - BASE_HTTP / WS_HOST / WS_PORT / WS_SCHEME all describe the same target
+        - a trailing slash is tolerated
+    """
+    global BASE_HTTP, WS_HOST, WS_PORT, WS_SCHEME
+    BASE_HTTP = base_url.rstrip( "/" )
+    parsed    = urlparse( BASE_HTTP )
+    WS_HOST   = parsed.hostname or "localhost"
+    WS_PORT   = parsed.port or ( 443 if parsed.scheme == "https" else 80 )
+    WS_SCHEME = "wss" if parsed.scheme == "https" else "ws"
+
+
 def main( argv ):
     ap = argparse.ArgumentParser()
     ap.add_argument( "--no-seed",  action="store_true" )
     ap.add_argument( "--keep",     action="store_true" )
     ap.add_argument( "--no-mode",  action="store_true", help="PURE-VOICE path: do NOT set the dropdown mode (the actual Thursday demo path)" )
     ap.add_argument( "--question", default=VAGUE_QUESTION, help="override the posted utterance (use Rachel's measured no-mode candidate)" )
+    ap.add_argument( "--base-url", default=None, help="target server, e.g. http://localhost:8000 (overrides LUPIN_API_URL; default :7999)" )
     args = ap.parse_args( argv )
+
+    if args.base_url:
+        _retarget( args.base_url )
+    log( f"target: {BASE_HTTP} (ws {WS_SCHEME}://{WS_HOST}:{WS_PORT})" )
 
     if websockets is None:
         log( "FATAL: `websockets` not importable in this interpreter" ); return 2
