@@ -29,6 +29,7 @@ from lupin_cli.claude_code.hooks.register_session import (
     _persona_of,
     _persona_slugs,
     _resolve_memento_path,
+    _resolve_repo_root,
     _truncate_visibly,
     _written_at_of,
 )
@@ -302,10 +303,67 @@ def test_block_survives_an_unreadable_memento( repo, monkeypatch ):
     assert _build_memento_block( SID_CHEECH, "Cheech", repo ) == ""
 
 
-def test_repo_root_defaults_to_lupin_root( repo, monkeypatch ):
-    path = _write_memento( repo, "cheech", "80c17315", amendments=[ "HELD" ] )
-    monkeypatch.setenv( "LUPIN_ROOT", repo )
-    assert path in _build_memento_block( SID_CHEECH, "Cheech" )
+def test_root_resolves_from_the_seats_own_cwd_not_lupin_root( repo, monkeypatch ):
+    """
+    CONTROL FOR A REAL DEFECT (María 🌸, reproduced against 8ff014e2).
+
+    This hook is installed fleet-wide, not only in lupin. The first cut read
+    the root from LUPIN_ROOT, so every non-lupin seat searched lupin's
+    directory — where its memento does not live — and rehydrated blank with its
+    own record sitting beside it. That was her stall.
+
+    Here LUPIN_ROOT deliberately points somewhere ELSE, so pointing at the env
+    var can never silently win again.
+    """
+    other = str( repo )
+    path  = _write_memento( other, "maria", "e02f9c93", amendments=[ "HELD" ] )
+    os.mkdir( os.path.join( other, ".git" ) )
+
+    monkeypatch.setenv( "LUPIN_ROOT", "/somewhere/else/entirely" )
+    block = _build_memento_block( "e02f9c93-0351-4508-ac0b-ddf11ec1900e", "María", cwd=other )
+    assert path in block, "resolution followed LUPIN_ROOT instead of the seat's own repo"
+
+
+def test_root_walks_up_to_the_nearest_git_ancestor( repo ):
+    """cwd is usually a subdirectory, not the repo root itself."""
+    os.mkdir( os.path.join( repo, ".git" ) )
+    nested = os.path.join( repo, "src", "deep", "nested" )
+    os.makedirs( nested )
+    assert _resolve_repo_root( nested ) == repo
+
+
+def test_root_accepts_a_git_FILE_not_only_a_directory( repo ):
+    """
+    A worktree's `.git` is a FILE, not a directory — `exists`, never `isdir`.
+    Every spawned worker runs in a worktree, so an isdir check would skip the
+    whole crew.
+    """
+    with open( os.path.join( repo, ".git" ), "w", encoding="utf-8" ) as fh:
+        fh.write( "gitdir: /somewhere/.git/worktrees/wt\n" )
+    assert _resolve_repo_root( repo ) == repo
+
+
+def test_root_falls_back_to_lupin_root_when_no_git_ancestor( tmp_path, monkeypatch ):
+    """An unrooted cwd still has to produce an answer rather than an error."""
+    monkeypatch.setenv( "LUPIN_ROOT", "/fallback/root" )
+    assert _resolve_repo_root( str( tmp_path ) ) == "/fallback/root"
+
+
+def test_root_handles_an_unusable_cwd( monkeypatch ):
+    monkeypatch.setenv( "LUPIN_ROOT", "/fallback/root" )
+
+    import lupin_cli.claude_code.hooks.register_session as rs
+    def exploding_abspath( p ):
+        raise OSError( "no such cwd" )
+    monkeypatch.setattr( rs.os.path, "abspath", exploding_abspath )
+
+    assert _resolve_repo_root( "/gone" ) == "/fallback/root"
+
+
+def test_root_defaults_to_process_cwd_when_none_given( repo, monkeypatch ):
+    os.mkdir( os.path.join( repo, ".git" ) )
+    monkeypatch.chdir( repo )
+    assert _resolve_repo_root( None ) == repo
 
 
 # ---------------------------------------------------------------------------

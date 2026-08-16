@@ -1308,7 +1308,47 @@ def _truncate_visibly( text, path, max_bytes=_MEMENTO_MAX_BYTES ):
     )
 
 
-def _build_memento_block( stable_session_id, persona_name, repo_root=None ):
+def _resolve_repo_root( cwd=None ):
+    """
+    Find the repo whose mementos this seat should read: the nearest `.git`
+    ancestor of the session's own cwd.
+
+    WHY NOT `LUPIN_ROOT` (María 🌸, 2026-08-15, reproduced against 8ff014e2).
+    This hook is installed fleet-wide, not just in lupin. Reading the root from
+    `LUPIN_ROOT` sent every non-lupin seat looking in lupin's directory, where
+    its memento does not live — so a planning-is-prompting session resolved to
+    nothing and rehydrated blank while its own record sat beside it. Her repro:
+    `_resolve_memento_path(sid, "maria", $LUPIN_ROOT)` -> None, the same call
+    against her repo root -> `.claude-memento-maria-e02f9c93.md`.
+
+    Walking up to the nearest `.git` is the convention this codebase already
+    uses to answer "which project am I in" (`detect_project`), so this follows
+    the house rule rather than inventing a second one. `LUPIN_ROOT` survives
+    only as the last fallback, for the case where cwd is absent or unrooted.
+
+    Requires:
+        - cwd is the session's working directory, or None
+
+    Ensures:
+        - Returns the nearest ancestor of cwd containing `.git`
+        - Falls back to LUPIN_ROOT, then os.getcwd(), when no ancestor has one
+        - Never raises
+    """
+    start = cwd or os.getcwd()
+    try:
+        path = os.path.abspath( start )
+        while True:
+            if os.path.exists( os.path.join( path, ".git" ) ): return path
+            parent = os.path.dirname( path )
+            if parent == path: break          # reached filesystem root
+            path = parent
+    except OSError:
+        pass
+
+    return os.environ.get( "LUPIN_ROOT", os.getcwd() )
+
+
+def _build_memento_block( stable_session_id, persona_name, repo_root=None, cwd=None ):
     """
     Render this seat's memento pointer + newest amendment as a block for the
     SessionStart hook's `additionalContext` — the channel the SESSION ITSELF
@@ -1335,7 +1375,9 @@ def _build_memento_block( stable_session_id, persona_name, repo_root=None ):
     Requires:
         - stable_session_id is a string or None
         - persona_name is this seat's allocated persona, or None
-        - repo_root is a directory path, or None to resolve from LUPIN_ROOT
+        - repo_root is a directory path, or None to resolve from `cwd`
+        - cwd is the session's working directory (the hook payload's `cwd`),
+          used to find the repo this seat actually sits in
 
     Ensures:
         - Returns "" when no memento resolves for this seat (no noise on the
@@ -1344,7 +1386,7 @@ def _build_memento_block( stable_session_id, persona_name, repo_root=None ):
           amendment, visibly truncated if it exceeds the byte cap
         - Never raises
     """
-    repo_root = repo_root if repo_root is not None else os.environ.get( "LUPIN_ROOT", os.getcwd() )
+    repo_root = repo_root if repo_root is not None else _resolve_repo_root( cwd )
 
     path = _resolve_memento_path( stable_session_id, persona_name, repo_root )
     if not path: return ""
@@ -1926,7 +1968,7 @@ def main():
         alarm_block = _build_persona_failure_block( voice_persona_failure, stable_session_id )
         try:
             allocated_persona = ( session_data.get( "voice_persona" ) or {} ).get( "name" )
-            memento_block     = _build_memento_block( stable_session_id, allocated_persona )
+            memento_block     = _build_memento_block( stable_session_id, allocated_persona, cwd=cwd )
         except Exception as e:
             print( f"[register_session] WARNING: memento block failed ({type( e ).__name__}: {e})",
                    file=sys.stderr )
