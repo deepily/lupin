@@ -271,9 +271,11 @@ claude mcp add cosa-voice -- python ${LUPIN_ROOT}/src/lupin_mcp/cosa_voice_mcp.p
 - [WebSocket Architecture](src/docs/websocket-architecture.md) — dual-session design and event system
 - [Notification API](src/docs/notification-api.md) — comprehensive notification reference with Mermaid diagrams
 - [CJ Flow Packaging Guide](src/rnd/v0.1.4/2026.02.12-cj-flow-bounded-job-packaging-guide.md) — how to add new QueueableJob types
+- [Durable Submit-Queue Restore](src/rnd/v0.2.0/2026.08.15-durable-submit-queue-restore.md) — why immediate queued jobs survive a container bounce (row 2817b0f5)
 - [cosa-voice MCP Server](src/lupin_mcp/README.md) — MCP server setup and tool reference
 - [Agentic Voice Workflow](src/workflow/agentic-voice-workflow.md) — building new agents with voice I/O
 - [Fleet Liveness & Task-Store Architecture](src/docs/fleet-liveness-and-task-store-architecture.md) — one store, three readers; heartbeat holds; the arbiter and how to bounce it
+- [The Worker-Poke Flag Is On and Cannot Fire](src/rnd/v0.2.0/2026.08.15-worker-poke-flag-cannot-fire.md) — why enabling worker pokes changed nothing: `stuck` means repeated cap-reached, and the staleness tier is manager-only
 - [Cost Model: Bounded CC vs Firewalled SDK](src/docs/cost-model-bounded-cc-vs-firewalled-sdk.md) — which LLM path an agent lands on, and why
 
 ### Agentic jobs, recovery & test scheduling
