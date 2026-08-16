@@ -1295,7 +1295,8 @@ async def add_security_headers( request: Request, call_next ):
     Ensures:
         - Security headers added to response
         - X-Content-Type-Options: nosniff (prevent MIME sniffing)
-        - X-Frame-Options: DENY (prevent clickjacking)
+        - X-Frame-Options: SAMEORIGIN (blocks cross-origin clickjacking, permits
+          this app framing its own pages)
         - X-XSS-Protection: 1; mode=block (XSS protection)
         - Strict-Transport-Security: enforce HTTPS
 
@@ -1305,19 +1306,22 @@ async def add_security_headers( request: Request, call_next ):
     response = await call_next( request )
 
     response.headers["X-Content-Type-Options"] = "nosniff"
-    # X-Frame-Options: DENY everywhere EXCEPT pages we intentionally embed
-    # SAME-ORIGIN in a notifications-client iframe. DENY blocks ALL framing —
-    # even same-origin — which surfaces as Chrome's "localhost refused to
-    # connect" inside the frame. SAMEORIGIN still blocks cross-origin
-    # clickjacking (only this same app can frame these).
-    #   /app/docs  — document viewer in the Reading Pane iframe (2026-05-21)
-    #   /app/audio — podcast player in the floating overlay iframe (2026-08-03,
-    #                bug 4cfabc0f: DENY left the overlay blank, standalone worked
-    #                because top-level navigation ignores X-Frame-Options)
-    if request.url.path in ( "/app/docs", "/app/audio" ):
-        response.headers["X-Frame-Options"] = "SAMEORIGIN"
-    else:
-        response.headers["X-Frame-Options"] = "DENY"
+    # X-Frame-Options: SAMEORIGIN globally — a RULE, not a list (row c9ef4ef5).
+    #
+    # This used to be blanket DENY plus a hardcoded exact-path allowlist that had
+    # already grown twice for the identical reason: /app/docs (2026-05-21, Reading
+    # Pane iframe) and /app/audio (2026-08-03, bug 4cfabc0f, podcast overlay).
+    # Two instances is a pattern, and the failure mode is silent — a new embeddable
+    # page renders BLANK inside the frame with Chrome's "refused to connect" and no
+    # error anywhere, until someone remembers to hand-edit a tuple in this file. The
+    # cost landed on whoever added the NEXT overlay, never on whoever set the rule.
+    #
+    # Every framing in this app is same-origin: Cheech's 2026-08-03 sweep measured
+    # the notifications client setting exactly two iframe srcs and no others. So
+    # SAMEORIGIN is not a relaxation of the real control — it still blocks every
+    # cross-origin framer, which is what clickjacking needs — it just stops the
+    # allowlist from ever needing a fourth entry.
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
 
