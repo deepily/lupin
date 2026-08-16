@@ -42,6 +42,7 @@ def create_app(
     fleet_arbiter_loop    : Optional[ Any ]                = None,
     context_pressure_loop : Optional[ Any ]                = None,
     turn_age_watchdog_loop : Optional[ Any ]               = None,
+    self_respin_observer_loop : Optional[ Any ]            = None,
 ) -> FastAPI:
     """
     Build the lupin-arbiter-app FastAPI app.
@@ -50,7 +51,8 @@ def create_app(
         - now_fn (if provided) is a 0-arg callable returning an aware datetime
         - started_at (if provided) is an aware datetime
         - health_loop / fleet_arbiter_loop / context_pressure_loop /
-          turn_age_watchdog_loop (if provided) expose start() / stop()
+          turn_age_watchdog_loop / self_respin_observer_loop (if provided) expose
+          start() / stop()
 
     Ensures:
         - returns a FastAPI app exposing GET /health
@@ -67,11 +69,11 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan( _app: FastAPI ):
-        for lp in ( health_loop, fleet_arbiter_loop, context_pressure_loop, turn_age_watchdog_loop ):
+        for lp in ( health_loop, fleet_arbiter_loop, context_pressure_loop, turn_age_watchdog_loop, self_respin_observer_loop ):
             if lp is not None:
                 lp.start()
         yield
-        for lp in ( turn_age_watchdog_loop, context_pressure_loop, fleet_arbiter_loop, health_loop ):   # stop in reverse start order
+        for lp in ( self_respin_observer_loop, turn_age_watchdog_loop, context_pressure_loop, fleet_arbiter_loop, health_loop ):   # stop in reverse start order
             if lp is not None:
                 lp.stop()
 
@@ -82,6 +84,7 @@ def create_app(
     app.state.fleet_arbiter_loop     = fleet_arbiter_loop
     app.state.context_pressure_loop  = context_pressure_loop
     app.state.turn_age_watchdog_loop = turn_age_watchdog_loop
+    app.state.self_respin_observer_loop = self_respin_observer_loop
 
     def _loop_liveness() -> dict:
         """
@@ -108,7 +111,8 @@ def create_app(
         for name, lp in ( ( "health_watcher",          health_loop ),
                           ( "fleet_arbiter",           fleet_arbiter_loop ),
                           ( "context_pressure_writer", context_pressure_loop ),
-                          ( "turn_age_watchdog",       turn_age_watchdog_loop ) ):
+                          ( "turn_age_watchdog",       turn_age_watchdog_loop ),
+                          ( "self_respin_observer",    self_respin_observer_loop ) ):
             if lp is None: continue
             try:
                 thread = getattr( lp, "_thread", None )
@@ -527,12 +531,33 @@ def assemble_app(
         advisory_fn = make_escalation_notify_fn( gateway, live_notify_fn=live_notify_fn, log_fn=arbiter_log_fn ),
     )
 
+    # ── self-re-spin observer (row 275cb0b9, GAP 2): the production caller ──
+    # observe_fleet_self_respin + sweep_returned_markers had NO caller outside a smoke
+    # test, so DEAD_NO_RETURN never fired and RETURNED markers never swept (11 piled
+    # up). This runs both on the live tick. The pressure read is the arbiter's OWN
+    # in-process store section (NOT an HTTP self-call — and NOT the container-scoped
+    # host.docker.internal URL that broke the host-side verb). Self-gates on `arbiter
+    # self respin observer enabled` (default false): start() no-ops until it flips, so
+    # wiring it in is behavior-neutral. The FLAG IS READ BEFORE THE IMPORT (a disabled
+    # feature must not impose its deps — the 2026-08-08 fleet-loop-down lesson).
+    if cfg.get( "arbiter self respin observer enabled", default=False, return_type="boolean" ):
+        from cosa.agents.heartbeat_arbiter.self_respin_observer import SelfRespinObserverLoop
+        self_respin_observer_loop = SelfRespinObserverLoop(
+            cfg,
+            fetch_pressure_fn = lambda: ( store.get().get( "context_pressure" ) or { "personas": None } ),
+            advisory_fn       = make_escalation_notify_fn( gateway, live_notify_fn=live_notify_fn, log_fn=arbiter_log_fn ),
+        )
+    else:
+        log_fn( "self_respin_observer_disabled", reason="arbiter self respin observer enabled = false" )
+        self_respin_observer_loop = None
+
     # ── health watcher (L2): gated on the master enable ──
     if not cfg.get( "arbiter health watch enabled", default=True, return_type="boolean" ):
         log_fn( "health_watcher_disabled", reason="arbiter health watch enabled = false" )
         return create_app( snapshot_store=store, health_loop=None, fleet_arbiter_loop=fleet_arbiter_loop,
                            context_pressure_loop=context_pressure_loop,
-                           turn_age_watchdog_loop=turn_age_watchdog_loop )
+                           turn_age_watchdog_loop=turn_age_watchdog_loop,
+                           self_respin_observer_loop=self_respin_observer_loop )
 
     def _csv( key, default ):
         raw = cfg.get( key, default=default ) or default
@@ -570,7 +595,8 @@ def assemble_app(
     )
     return create_app( snapshot_store=store, health_loop=health_loop, fleet_arbiter_loop=fleet_arbiter_loop,
                        context_pressure_loop=context_pressure_loop,
-                       turn_age_watchdog_loop=turn_age_watchdog_loop )
+                       turn_age_watchdog_loop=turn_age_watchdog_loop,
+                       self_respin_observer_loop=self_respin_observer_loop )
 
 
 def _pending_ledger_path( cfg ):

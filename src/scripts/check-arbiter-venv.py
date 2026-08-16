@@ -61,6 +61,7 @@ ALWAYS_REQUIRED = [
     "cosa.config.configuration_manager",
     "cosa.agents.heartbeat_arbiter.arbiter_job",
     "cosa.agents.heartbeat_arbiter.turn_age_watchdog",
+    "cosa.agents.heartbeat_arbiter.self_respin_observer",   # added 2026-08-16 (row 275cb0b9: SelfRespinObserverLoop wired into app.py; stdlib-only at module scope, so ALWAYS-safe regardless of its enable flag)
 ]
 
 # Required ONLY when `follow through escalation enabled` is true. This is the

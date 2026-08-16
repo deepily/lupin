@@ -30,6 +30,7 @@ import datetime
 import glob
 import json
 import os
+import threading
 
 from dataclasses import dataclass
 from enum        import Enum
@@ -464,6 +465,16 @@ def _fetch_live_pressure():   # pragma: no cover - live HTTP boundary, exercised
     """
     Fetch the live `context_pressure` section from the arbiter state service.
 
+    HOST-SIDE reader. Every caller of this function — the self_respin MCP verb's
+    `_live_own_pressure` and the observer loop's default fetch — runs on the HOST
+    (the MCP child in a tmux pane; the arbiter as a `systemctl --user` service),
+    NOT in a container. So it reads `arbiter local state url` (loopback,
+    http://127.0.0.1:8001/state), NEVER the container-scoped `arbiter vigilance
+    state url` (http://host.docker.internal:8001/state) — that hostname does not
+    resolve on the host, and reading it made EVERY self_respin marker record
+    pre_clear_status "unknown" (row 275cb0b9). The :7999 reverse-proxy router keeps
+    reading the vigilance key directly; it is unaffected.
+
     Ensures:
         - returns the section dict, or { "personas": None } on any failure
         - never raises
@@ -472,13 +483,189 @@ def _fetch_live_pressure():   # pragma: no cover - live HTTP boundary, exercised
         import httpx
         from cosa.rest.dependencies.config import get_config_manager
         config_mgr = get_config_manager()
-        url     = config_mgr.get( "arbiter vigilance state url", default="http://127.0.0.1:8001/state" )
+        url     = config_mgr.get( "arbiter local state url", default="http://127.0.0.1:8001/state" )
         timeout = config_mgr.get( "arbiter vigilance state timeout seconds", default=5, return_type="int" )
         state   = httpx.get( url, timeout=timeout ).raise_for_status().json()
         section = state.get( "context_pressure" ) if isinstance( state, dict ) else None
         return section if section is not None else { "personas": None }
     except Exception:
         return { "personas": None }
+
+
+# ---------------------------------------------------------------------------
+# The daemon loop — the PRODUCTION caller the observer never had (row 275cb0b9,
+# GAP 2). observe_fleet_self_respin + sweep_returned_markers had NO caller outside
+# quick_smoke_test, so DEAD_NO_RETURN never fired and RETURNED markers never swept
+# (11 piled up, oldest 2026-08-13). This runs both on the arbiter's live tick,
+# mirroring TurnAgeWatchdog: INI-gated (default OFF → start() no-ops, sweep_once
+# does zero work), injectable seams, one-shot-per-alarm flood guard, daemon lifecycle.
+# ---------------------------------------------------------------------------
+class SelfRespinObserverLoop:
+    """
+    Standing self-re-spin liveness loop. Inert unless `arbiter self respin observer
+    enabled` is True. Each tick it (a) classifies every in-flight marker against the
+    live pressure and fires ONE advisory per alarm marker (DEAD_NO_RETURN /
+    IDENTITY_MISMATCH / MALFORMED_MARKER), and (b) sweeps confirmed-RETURNED markers
+    past their TTL. The pressure read, advisory sink, clock, and marker base dir are
+    ALL injectable, so the detection + flood-guard logic is unit-provable with fakes.
+    """
+
+    def __init__(
+        self,
+        config_mgr,
+        *,
+        fetch_pressure_fn = None,
+        base_dir          = None,
+        advisory_fn       = None,
+        now_fn            = None,
+    ):
+        """
+        Requires:
+            - config_mgr exposes .get( key, default=, return_type= )
+            - fetch_pressure_fn() -> the context_pressure section ({personas: {...}}),
+              or None to use the live host-loopback reader. Production injects an
+              IN-PROCESS store read (the arbiter already holds the section — no HTTP
+              self-call); tests inject a fake.
+            - base_dir is the marker directory or None (None ⇒ fleet_data_root())
+            - advisory_fn( message ) -> None emits ONE operator advisory (default: a
+              banner print; production injects the throttled escalation rail)
+            - now_fn() -> aware datetime (default: datetime.now(utc))
+
+        Ensures:
+            - no thread is started at construction (call start() explicitly)
+            - the one-shot `_advised` marker set starts empty
+        """
+        self._config_mgr        = config_mgr
+        self._fetch_pressure_fn = fetch_pressure_fn
+        self._base_dir          = base_dir
+        self._advisory_fn       = advisory_fn if advisory_fn is not None else self._default_advisory_signal
+        self._now_fn            = now_fn      if now_fn      is not None else ( lambda: datetime.datetime.now( datetime.timezone.utc ) )
+        self._advised           = set()       # (session_id, verdict) advised once — flood-guard one-shot
+        self._stop_event        = threading.Event()
+        self._thread            = None
+
+    # -- config accessors -----------------------------------------------------
+
+    def _enabled( self ) -> bool:
+        return self._config_mgr.get( "arbiter self respin observer enabled", default=False, return_type="boolean" )
+
+    def _tick_seconds( self ) -> int:
+        # the SAME live tick the :8001 fleet-arbiter loop polls on (no separate knob).
+        return self._config_mgr.get( "arbiter poll seconds", default=60, return_type="int" )
+
+    def _returned_ttl_seconds( self ) -> int:
+        return self._config_mgr.get(
+            "arbiter self respin observer returned ttl seconds",
+            default=DEFAULT_RETURNED_TTL_SECONDS, return_type="int",
+        )
+
+    # -- core (unit-testable, no thread) --------------------------------------
+
+    def sweep_once( self ) -> dict:
+        """
+        Run one observe + sweep pass.
+
+        Ensures:
+            - flag OFF -> no IO; returns {enabled:False, alarms:0, advised:0, swept:0}
+            - flag ON  -> classify every marker; fire ONE advisory per alarm marker
+              (one-shot per (session_id, verdict) — a still-alarming marker across
+              ticks fires nothing more), then sweep confirmed-RETURNED-past-TTL markers
+            - `_advised` is intersected with the live alarm set after the pass, so a
+              marker that stops alarming (swept, or came back) drops its one-shot key
+            - never raises: observe/sweep already swallow per-marker errors; a total
+              failure is caught and demoted to a zero summary so the daemon survives
+
+        Returns:
+            { "enabled": bool, "alarms": int, "advised": int, "swept": int }
+        """
+        if not self._enabled():
+            return { "enabled": False, "alarms": 0, "advised": 0, "swept": 0 }
+
+        now     = self._now_fn()
+        advised = 0
+        alarms  = 0
+        live    = set()                                # (session_id, verdict) alarming this pass
+        try:
+            assessments = observe_fleet_self_respin(
+                base_dir=self._base_dir, now=now, fetch_pressure=self._fetch_pressure_fn )
+            for a in assessments:
+                if not a.is_alarm:
+                    continue
+                alarms += 1
+                key = ( a.session_id, a.verdict.value )
+                live.add( key )
+                if key in self._advised:
+                    continue                           # one-shot — already advised this alarm
+                self._emit_advisory( a )
+                self._advised.add( key )
+                advised += 1
+
+            swept = len( sweep_returned_markers(
+                base_dir=self._base_dir, now=now, fetch_pressure=self._fetch_pressure_fn,
+                ttl_seconds=self._returned_ttl_seconds() ) )
+        except Exception as e:                         # observer invariant: never kill the daemon
+            self._log_skip( f"self-respin observer sweep error (continuing): {e!r}" )
+            return { "enabled": True, "alarms": alarms, "advised": advised, "swept": 0 }
+
+        # flood-guard clear: an alarm that is gone (returned or swept) drops its marker
+        self._advised &= live
+        return { "enabled": True, "alarms": alarms, "advised": advised, "swept": swept }
+
+    def _emit_advisory( self, assessment ) -> None:
+        """
+        Compose + fire the ONE operator advisory for an alarming marker.
+
+        Ensures:
+            - names the persona/session, the verdict, and the reason; delegates
+              delivery to the injected advisory_fn; never raises (sweep_once guards)
+        """
+        message = (
+            f"SELF-RESPIN OBSERVER — {assessment.verdict.value} for session "
+            f"{assessment.session_id} (persona {assessment.persona or 'unknown'}): "
+            f"{assessment.reason}. A manager typed /clear into its own pane and the "
+            f"observer cannot confirm it came back at low context."
+        )
+        self._advisory_fn( message )
+
+    # -- default IO boundaries (pragma'd — injected fakes exercise the logic) --
+
+    def _default_advisory_signal( self, message ) -> None:   # pragma: no cover - default sink; production injects the rail
+        """Default advisory sink: a plain print (production injects the escalation rail)."""
+        print( f"[self-respin-observer] {message}" )
+
+    def _log_skip( self, message ) -> None:   # pragma: no cover - diagnostic print boundary
+        print( message )
+
+    # -- daemon lifecycle -----------------------------------------------------
+
+    def _loop( self ) -> None:   # pragma: no cover - thread body; sweep_once covered directly
+        """Daemon loop until stop(); each sweep is exception-guarded so a transient error never kills it."""
+        while not self._stop_event.is_set():
+            try:
+                self.sweep_once()
+            except Exception as e:
+                self._log_skip( f"self-respin observer loop caught exception (continuing): {e!r}" )
+            self._stop_event.wait( timeout=self._tick_seconds() )
+
+    def start( self ) -> bool:
+        """
+        Spawn the daemon thread — ONLY if the flag is enabled and no thread runs.
+        Returns True if a thread was started, else False (the no-op rollout gate).
+        """
+        if not self._enabled():
+            return False
+        if self._thread is not None and self._thread.is_alive():
+            return False
+        self._stop_event.clear()
+        self._thread = threading.Thread( target=self._loop, daemon=True, name="SelfRespinObserverLoop" )
+        self._thread.start()
+        return True
+
+    def stop( self, timeout: float = 5.0 ) -> None:
+        """Signal the daemon to exit and join it (idempotent — safe if never started)."""
+        self._stop_event.set()
+        if self._thread is not None and self._thread.is_alive():
+            self._thread.join( timeout=timeout )
 
 
 # ---------------------------------------------------------------------------

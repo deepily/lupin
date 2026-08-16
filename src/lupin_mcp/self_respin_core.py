@@ -63,6 +63,17 @@ NONCE_LINE_PREFIX            = "SELF-RESPIN-NONCE:"     # caller stamps: "SELF-R
 DEFAULT_DELAY_SECONDS        = 20
 DEFAULT_CYCLE_WINDOW_SECONDS = 300                      # memento nonce ts must be within this of now
 
+# The wake-after-clear readiness gate (row 275cb0b9, GAP 1 + John's ruling 1). The
+# rehydrated seat is proven ready by its BRIDGE FILE being rewritten (SessionStart
+# fires on the /clear path and atomic_write_json's the bridge — register_session.py),
+# NOT by a send-keys exit code (tmux returns 0 for "keystrokes delivered" regardless
+# of what the app did — gating on it rebuilds this very row's bug inside its fix). The
+# detached injector polls the bridge mtime up to READY_TIMEOUT_POLLS × POLL_INTERVAL
+# seconds; on timeout it gives up LOUDLY (stderr) and types NOTHING rather than landing
+# the wake in the pre-reset (old) context.
+DEFAULT_READY_TIMEOUT_POLLS   = 40                     # 40 × 0.5s = 20s bounded wait for the rehydrate write
+DEFAULT_POLL_INTERVAL_SECONDS = 0.5
+
 
 @dataclass
 class SelfRespinResult:
@@ -166,7 +177,24 @@ def verify_memento_content( content, nonce_uuid, now, *, cycle_window_seconds=DE
 # ---------------------------------------------------------------------------
 # (c) The guarded, fire-point-consuming injector argv — pure
 # ---------------------------------------------------------------------------
-def build_guarded_clear_argv( tmux_session, fire_token_path, delay, text="/clear" ):
+def build_wake_text( memento_path ):
+    """
+    Ensures:
+        - returns the rehydrate prompt the injector types AFTER the /clear proves out:
+          a plain-English instruction to read the memento at `memento_path` and resume
+    """
+    return (
+        f"You just self-re-spun — you typed /clear into your own pane and rehydrated as "
+        f"the same seat at low context. Read your memento at {memento_path}, then resume your board."
+    )
+
+
+def build_guarded_clear_argv(
+    tmux_session, fire_token_path, delay, text="/clear",
+    *, wake_text=None, bridge_path=None,
+    ready_timeout_polls=DEFAULT_READY_TIMEOUT_POLLS,
+    poll_interval_seconds=DEFAULT_POLL_INTERVAL_SECONDS,
+):
     """
     Build the detached Popen argv that types `text` into a pane AFTER consuming a
     one-shot fire token — the double-fire guard sits where the keystrokes land.
@@ -175,25 +203,76 @@ def build_guarded_clear_argv( tmux_session, fire_token_path, delay, text="/clear
         - tmux_session is the target pane's tmux session name
         - fire_token_path is the one-shot token the FIRST fire rm's
         - delay is seconds the detached process sleeps before firing
+        - wake_text (optional): when given, a rehydrate prompt typed AFTER the /clear
+          is PROVEN to have reset; bridge_path must also be given
+        - bridge_path (optional): the seat's bridge file; the injector waits for ITS
+          mtime to change (SessionStart rewrites it on the /clear path) before typing
+          the wake — the readiness proof (John's ruling 1), never a send-keys exit code
 
     Ensures:
-        - returns a `bash -c` argv whose script is
+        - DEFAULT (wake_text is None): returns the original single-chain argv
           `sleep $1 && rm $4 && tmux send-keys -t $2 -l -- $3 && sleep 0.25 && tmux send-keys -t $2 Enter`
-          — `rm $4` (no -f) SHORT-CIRCUITS send-keys when the token is already
-          gone, so a second detached fire after rehydrate no-ops
-        - `text` is passed VERBATIM as a positional arg — never wrapped by the
-          speakerphone rider (a wrapped "/clear" would never fire as a slash cmd)
+          — `rm $4` (no -f) SHORT-CIRCUITS send-keys when the token is already gone,
+          so a second detached fire after rehydrate no-ops
+        - WAKE (wake_text given): returns ONE bash script (ruling 3 — no second Popen)
+          that, in the SAME chain, fires the guarded /clear, then captures the bridge
+          mtime, polls it (bounded by ready_timeout_polls × poll_interval_seconds) until
+          it CHANGES, then types the wake with `-l` (literal); on timeout it writes a
+          loud stderr line and types nothing (a mute seat is left for the observer to
+          alarm, never a wake into the old context)
+        - `text` (and the wake) are passed VERBATIM as positional args — never wrapped
+          by the speakerphone rider (a wrapped "/clear" would never fire as a slash cmd)
     """
+    if wake_text is None:
+        bash = (
+            'sleep "$1" && rm "$4" && tmux send-keys -t "$2" -l -- "$3" '
+            '&& sleep 0.25 && tmux send-keys -t "$2" Enter'
+        )
+        return [ "bash", "-c", bash,
+                 "_",                       # $0 placeholder
+                 str( delay ),             # $1
+                 tmux_session,             # $2
+                 text,                     # $3  (verbatim "/clear" — NOT wrapped)
+                 fire_token_path ]         # $4  (the one-shot, rm'd at the fire point)
+
+    # Wake path — ONE chain: guarded /clear, then a bridge-mtime readiness gate, then
+    # the wake. `date -r <bridge> +%s%N` reads the mtime in NANOSECONDS so a same-second
+    # rewrite is still detected (a strictly-greater compare is race-free). `m0` is taken
+    # right before /clear, so any pre-clear touch is already folded in; only the
+    # post-reset SessionStart rewrite moves it. `rm "$4" || exit 0` keeps the one-shot
+    # guard (a second fire finds the token gone and does nothing).
     bash = (
-        'sleep "$1" && rm "$4" && tmux send-keys -t "$2" -l -- "$3" '
-        '&& sleep 0.25 && tmux send-keys -t "$2" Enter'
+        'sleep "$1" || exit 0\n'
+        'rm "$4" || exit 0\n'
+        'm0=$(date -r "$6" +%s%N 2>/dev/null || echo 0)\n'
+        'tmux send-keys -t "$2" -l -- "$3" || exit 0\n'
+        'sleep 0.25\n'
+        'tmux send-keys -t "$2" Enter || exit 0\n'
+        'polls=0\n'
+        'while :; do\n'
+        '  m=$(date -r "$6" +%s%N 2>/dev/null || echo 0)\n'
+        '  if [ "$m" -gt "$m0" ]; then break; fi\n'
+        '  polls=$((polls + 1))\n'
+        '  if [ "$polls" -ge "$7" ]; then\n'
+        '    echo "self-respin wake: bridge $6 mtime unchanged after $7 polls — reset not proven; NOT sending wake (seat may be mute; the observer will alarm)" >&2\n'
+        '    exit 3\n'
+        '  fi\n'
+        '  sleep "$8"\n'
+        'done\n'
+        'tmux send-keys -t "$2" -l -- "$5"\n'
+        'sleep 0.25\n'
+        'tmux send-keys -t "$2" Enter\n'
     )
     return [ "bash", "-c", bash,
-             "_",                       # $0 placeholder
-             str( delay ),             # $1
-             tmux_session,             # $2
-             text,                     # $3  (verbatim "/clear" — NOT wrapped)
-             fire_token_path ]         # $4  (the one-shot, rm'd at the fire point)
+             "_",                              # $0 placeholder
+             str( delay ),                    # $1
+             tmux_session,                    # $2
+             text,                            # $3  (verbatim "/clear" — NOT wrapped)
+             fire_token_path,                 # $4  (the one-shot, rm'd at the fire point)
+             wake_text,                       # $5  (the rehydrate prompt — typed -l)
+             bridge_path,                     # $6  (readiness oracle: mtime must change)
+             str( ready_timeout_polls ),      # $7  (bounded poll count)
+             str( poll_interval_seconds ) ]   # $8  (seconds between polls)
 
 
 # ---------------------------------------------------------------------------
@@ -209,6 +288,20 @@ def _default_resolve_tmux( session_id ):   # pragma: no cover - live bridge read
     from lupin_cli.claude_code.hooks.lib.session_bridge import find_session_by_id
     data = find_session_by_id( session_id, exact=True )
     return data.get( "tmux_session" ) if data else None
+
+
+def _default_resolve_bridge_path( session_id ):   # pragma: no cover - live bridge-path read
+    """
+    Ensures: returns the seat's bridge file path (str) for `session_id`, or None. The
+    path is `cc-{pid}.json` and the pid SURVIVES /clear, so the same path's mtime is
+    what SessionStart bumps on rehydrate — the wake readiness oracle keys on it.
+    Resolved by EXACT full-id match (exact=True), the SAME guard the tmux resolver
+    uses: an 8-char-prefix collision would poll another live seat's bridge and type
+    the wake into the un-cleared pane (row 275cb0b9).
+    """
+    from lupin_cli.claude_code.hooks.lib.session_bridge import find_session_path_by_id
+    p = find_session_path_by_id( session_id, exact=True )
+    return str( p ) if p else None
 
 
 def _default_read_text( path ):
@@ -250,9 +343,13 @@ def perform_self_respin(
     delay_seconds        = DEFAULT_DELAY_SECONDS,
     cycle_window_seconds = DEFAULT_CYCLE_WINDOW_SECONDS,
     grace_seconds        = None,
+    wake_text            = None,
+    ready_timeout_polls  = DEFAULT_READY_TIMEOUT_POLLS,
+    poll_interval_seconds = DEFAULT_POLL_INTERVAL_SECONDS,
     base_dir             = None,
     now                  = None,
     resolve_tmux_fn      = None,
+    resolve_bridge_path_fn = None,
     ask_fn               = None,
     schedule_fn          = None,
     read_text_fn         = None,
@@ -263,11 +360,17 @@ def perform_self_respin(
 
     ORDER (each guard is a hard gate; a failure returns without scheduling):
       1. resolve the seat's tmux session          — no session ⇒ aborted
-      2. verify the memento (nonce + freshness)    — fail ⇒ aborted (clear into nothing averted)
-      3. fire the confirmation ask, always         — real "no"/"neither" ⇒ declined
-      4. write the persistent OBSERVER marker + read it back for durability
+      2. prove OVER-BUDGET grounds to clear        — status != "over_budget" ⇒ aborted
+         (row 275cb0b9, John's ruling 2: the ONLY justification for an irreversible
+         clear is a real over_budget reading. A failed pressure fetch degrades to
+         "unknown"; forging or defaulting it turns a visible unknown into an invisible
+         lie, and a non-over_budget marker can NEVER be classified RETURNED anyway.)
+      3. verify the memento (nonce + freshness)    — fail ⇒ aborted (clear into nothing averted)
+      4. fire the confirmation ask, always         — real "no"/"neither" ⇒ declined
+      5. write the persistent OBSERVER marker + read it back for durability
          AND write the one-shot FIRE token         — read-back fail ⇒ aborted
-      5. schedule the guarded, fire-point-consuming detached /clear
+      6. schedule the guarded, fire-point-consuming detached /clear (+ the wake that
+         rides the SAME chain once the rehydrate bridge write proves the reset)
 
     Requires:
         - session_id, persona non-empty; memento_path points at the seat's memento
@@ -287,6 +390,7 @@ def perform_self_respin(
     """
     now             = now             if now             is not None else datetime.datetime.now( datetime.timezone.utc )
     resolve_tmux_fn = resolve_tmux_fn if resolve_tmux_fn is not None else _default_resolve_tmux
+    resolve_bridge_path_fn = resolve_bridge_path_fn if resolve_bridge_path_fn is not None else _default_resolve_bridge_path
     ask_fn          = ask_fn          if ask_fn          is not None else _default_ask
     schedule_fn     = schedule_fn     if schedule_fn     is not None else _default_schedule
     read_text_fn    = read_text_fn    if read_text_fn    is not None else _default_read_text
@@ -297,19 +401,29 @@ def perform_self_respin(
     if not tmux_session:
         return SelfRespinResult( status="aborted", reason="no tmux session in the bridge for this seat" )
 
-    # 2. memento verify — BEFORE the ask (no point asking to clear into nothing)
+    # 2. prove over-budget grounds to clear (ruling 2) — a fetch failure reads as
+    # "unknown"; without a REAL over_budget reading the irreversible clear has no
+    # justification, so abort rather than fire (and rather than record a marker the
+    # RETURNED oracle could never satisfy).
+    if pre_clear_status != "over_budget":
+        return SelfRespinResult(
+            status="aborted",
+            reason=f"pre-clear status is {pre_clear_status!r}, not a proven 'over_budget' reading — no grounds to clear",
+        )
+
+    # 3. memento verify — BEFORE the ask (no point asking to clear into nothing)
     ok, reason = verify_memento_content(
         read_text_fn( memento_path ), memento_nonce, now, cycle_window_seconds=cycle_window_seconds
     )
     if not ok:
         return SelfRespinResult( status="aborted", reason=f"memento verify failed: {reason}" )
 
-    # 3. confirmation ask — ALWAYS runs on this path; no skip kwarg exists
+    # 4. confirmation ask — ALWAYS runs on this path; no skip kwarg exists
     proceed, gate_reason = gate_proceed( ask_fn() )
     if not proceed:
         return SelfRespinResult( status="declined", reason=gate_reason )
 
-    # 4. persistent observer marker (durability read-back) + one-shot fire token
+    # 5. persistent observer marker (durability read-back) + one-shot fire token
     marker = build_marker_dict(
         session_id=session_id, persona=persona, tmux_session=tmux_session,
         fired_at=now, delay_seconds=delay_seconds,
@@ -340,8 +454,20 @@ def perform_self_respin(
             reason="fire token did not survive read-back — refusing to schedule a clear that would self-cancel",
         )
 
-    # 5. schedule the guarded, fire-point-consuming detached /clear
-    schedule_fn( build_guarded_clear_argv( tmux_session, fire_token_path, delay_seconds ) )
+    # 6. schedule the guarded, fire-point-consuming detached /clear. When a wake_text
+    # is supplied AND the seat's bridge path resolves, the wake rides the SAME chain
+    # (ruling 3 — no second Popen) behind the bridge-mtime readiness gate. If the
+    # bridge path cannot be resolved we fall back to the plain clear (still a valid
+    # re-spin; the seat is merely left for the observer to wake/alarm rather than
+    # self-waking) — never block the clear on an un-resolvable wake.
+    bridge_path = resolve_bridge_path_fn( session_id ) if wake_text else None
+    schedule_fn( build_guarded_clear_argv(
+        tmux_session, fire_token_path, delay_seconds,
+        wake_text             = wake_text if ( wake_text and bridge_path ) else None,
+        bridge_path           = bridge_path,
+        ready_timeout_polls   = ready_timeout_polls,
+        poll_interval_seconds = poll_interval_seconds,
+    ) )
 
     return SelfRespinResult(
         status="scheduled",
@@ -422,6 +548,7 @@ def self_respin_from_bridge(
         pre_clear_pct        = pre_clear_pct,
         delay_seconds        = delay_seconds,
         cycle_window_seconds = cycle_window_seconds,
+        wake_text            = build_wake_text( memento_path ),   # rehydrate prompt (GAP 1)
     )
 
 

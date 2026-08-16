@@ -150,6 +150,106 @@ def test_guarded_argv_carries_verbatim_clear_and_token():
 
 
 # ---------------------------------------------------------------------------
+# build_wake_text + build_guarded_clear_argv WAKE path (row 275cb0b9, GAP 1)
+# ---------------------------------------------------------------------------
+def test_build_wake_text_names_memento_and_is_plain_english():
+    txt = sr.build_wake_text( "/data/lupin/.claude-memento.md" )
+    assert "/data/lupin/.claude-memento.md" in txt
+    assert "self-re-sp" in txt.lower()           # "self-re-spun"
+    assert "memento" in txt.lower()
+    assert "resume" in txt.lower()
+
+
+def test_guarded_argv_wake_path_appends_wake_bridge_and_poll_args():
+    argv = sr.build_guarded_clear_argv(
+        "sess", "/data/.fire.token", 20,
+        wake_text="READ YOUR MEMENTO", bridge_path="/s/cc-42.json",
+        ready_timeout_polls=7, poll_interval_seconds=0.5,
+    )
+    # $1-$4 unchanged (existing index contract preserved), $5-$8 appended
+    assert argv[ 6 ] == "/clear"
+    assert argv[ 7 ] == "/data/.fire.token"
+    assert argv[ 8 ] == "READ YOUR MEMENTO"      # $5 wake, typed -l
+    assert argv[ 9 ] == "/s/cc-42.json"          # $6 bridge (readiness oracle)
+    assert argv[ 10 ] == "7"                     # $7 bounded poll count
+    assert argv[ 11 ] == "0.5"                   # $8 poll interval
+
+
+def test_guarded_argv_wake_path_gates_on_bridge_mtime_not_send_keys_exit():
+    """Ruling 1: readiness is the bridge-file rewrite (mtime change), never a
+    send-keys exit code; ruling 3: ONE chain; ruling 4: literal wake keystroke."""
+    script = sr.build_guarded_clear_argv(
+        "sess", "/f.token", 20, wake_text="WAKE", bridge_path="/s/cc-42.json" )[ 2 ]
+    assert 'date -r "$6" +%s%N' in script            # bridge mtime is the oracle
+    assert '[ "$m" -gt "$m0" ]' in script            # strictly-greater (race-free) compare
+    assert 'rm "$4" || exit 0' in script             # one-shot guard preserved
+    assert 'send-keys -t "$2" -l -- "$5"' in script  # literal (-l) wake keystroke
+    assert "exit 3" in script                        # loud, bounded give-up on timeout
+    # the wake is typed AFTER the readiness gate, never before it
+    assert script.index( 'date -r "$6"' ) < script.index( '-l -- "$5"' )
+
+
+# ---------------------------------------------------------------------------
+# perform_self_respin — over-budget grounds gate (row 275cb0b9, ruling 2)
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize( "status", [ "within_budget", "unknown", "idle", None ] )
+def test_perform_aborts_when_not_over_budget( tmp_path, status ):
+    """No proven over_budget reading ⇒ no grounds to clear ⇒ abort. Covers the exact
+    GAP-3 systemic case (status 'unknown' from a failed pressure fetch)."""
+    mp    = _write_memento( tmp_path, "u1", _dt( 20 ) )
+    ask   = _Spy()
+    sched = _Spy()
+    r = sr.perform_self_respin(
+        "sid1", persona="cheech", memento_path=mp, memento_nonce="u1",
+        pre_clear_status=status, pre_clear_pct=None,
+        now=_dt( 21 ), resolve_tmux_fn=_seat(), ask_fn=ask, schedule_fn=sched,
+        base_dir=str( tmp_path ),
+    )
+    assert r.status == "aborted"
+    assert "no grounds to clear" in r.reason
+    assert ask.calls   == 0                                        # never asked
+    assert sched.calls == 0                                        # never scheduled
+    assert list( tmp_path.glob( ".self-respin-*" ) ) == []        # no marker/token written
+
+
+# ---------------------------------------------------------------------------
+# perform_self_respin — the WAKE go-path (row 275cb0b9, GAP 1)
+# ---------------------------------------------------------------------------
+def test_perform_schedules_wake_argv_when_bridge_resolves( tmp_path ):
+    mp        = _write_memento( tmp_path, "u1", _dt( 20 ) )
+    scheduled = []
+    r = sr.perform_self_respin(
+        "sid1", persona="cheech", memento_path=mp, memento_nonce="u1",
+        pre_clear_status="over_budget", pre_clear_pct=61.0,
+        now=_dt( 21 ), resolve_tmux_fn=_seat(), ask_fn=lambda: "yes",
+        wake_text="WAKE UP", resolve_bridge_path_fn=lambda sid: "/s/cc-42.json",
+        schedule_fn=lambda argv: scheduled.append( argv ), base_dir=str( tmp_path ),
+    )
+    assert r.status == "scheduled"
+    argv = scheduled[ 0 ]
+    assert argv[ 8 ] == "WAKE UP"                 # wake rode the SAME chain
+    assert argv[ 9 ] == "/s/cc-42.json"           # gated on this bridge's mtime
+
+
+def test_perform_falls_back_to_plain_clear_when_bridge_unresolvable( tmp_path ):
+    """A wake was requested but the bridge path can't be resolved → schedule the
+    plain clear anyway (never block the re-spin on an un-resolvable wake)."""
+    mp        = _write_memento( tmp_path, "u1", _dt( 20 ) )
+    scheduled = []
+    r = sr.perform_self_respin(
+        "sid1", persona="cheech", memento_path=mp, memento_nonce="u1",
+        pre_clear_status="over_budget", pre_clear_pct=61.0,
+        now=_dt( 21 ), resolve_tmux_fn=_seat(), ask_fn=lambda: "yes",
+        wake_text="WAKE UP", resolve_bridge_path_fn=lambda sid: None,
+        schedule_fn=lambda argv: scheduled.append( argv ), base_dir=str( tmp_path ),
+    )
+    assert r.status == "scheduled"
+    argv = scheduled[ 0 ]
+    assert len( argv ) == 8                        # plain single-chain argv, no wake args
+    assert argv[ 6 ] == "/clear"
+
+
+# ---------------------------------------------------------------------------
 # perform_self_respin — the full ordered decision tree
 # ---------------------------------------------------------------------------
 class _Spy:
@@ -365,6 +465,20 @@ def test_from_bridge_passes_resolved_identity_and_pressure_to_perform():
     assert seen[ "memento_nonce" ]    == "nonce-9"
     assert seen[ "delay_seconds" ]    == 30
     assert seen[ "cycle_window_seconds" ] == 120
+
+
+def test_from_bridge_builds_and_passes_wake_text():
+    seen = {}
+    def fake_perform( session_id, **k ):
+        seen.update( k )
+        return sr.SelfRespinResult( status="scheduled", reason="ok" )
+    sr.self_respin_from_bridge(
+        "/data/.claude-memento.md", "n1",
+        identity_fn = lambda: ( "sid-self", "cheech" ),
+        pressure_fn = lambda persona: ( "over_budget", 61.0 ),
+        perform_fn  = fake_perform,
+    )
+    assert "/data/.claude-memento.md" in seen[ "wake_text" ]     # rehydrate prompt names the memento
 
 
 def test_from_bridge_default_perform_fn_is_the_real_verb():

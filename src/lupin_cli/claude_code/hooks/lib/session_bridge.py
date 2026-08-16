@@ -833,7 +833,7 @@ def find_session_by_id( session_id, exact=False ):
     return None
 
 
-def find_session_path_by_id( session_id ):
+def find_session_path_by_id( session_id, exact=False ):
     """
     Scan ~/.claude/sessions/cc-*.json for a session_id match and return the file path.
 
@@ -842,17 +842,29 @@ def find_session_path_by_id( session_id ):
 
     Supports both full UUID and 8-char prefix matching. Skips files from dead PIDs.
 
+    ⚠️ EXACT MODE (opt-in, `exact=True`): full-UUID compare ONLY — the 8-char prefix
+    fallback is disabled, mirroring find_session_by_id(exact=True). Callers targeting
+    an IRREVERSIBLE, self-aimed action MUST use it: self_respin resolves this seat's
+    bridge to poll its post-/clear rewrite mtime, and a first-8-char prefix collision
+    with another live seat would poll the WRONG pane's bridge — reading its write as
+    "reset proven" and typing the wake into the un-cleared pane. Same reason the
+    sibling tmux resolver uses exact (row 275cb0b9). The DEFAULT stays prefix-tolerant
+    so the existing caller (speakerphone toggle) is unchanged.
+
     Requires:
         - session_id is a non-empty string
 
     Ensures:
         - Returns Path if a match is found
         - Returns None if no match or session_id is empty
+        - exact=True: matches ONLY on full-id equality (no prefix fallback)
+        - exact=False (default): full-id OR 8-char-prefix equality (legacy)
         - Skips bridge files whose PID is dead
         - Never raises exceptions
 
     Args:
-        session_id: Full session UUID or 8-char prefix to match
+        session_id: Full session UUID (or, when exact=False, an 8-char prefix) to match
+        exact: when True, require a full-id match — no 8-char prefix fallback
 
     Returns:
         Path or None: Bridge file path on match, or None
@@ -882,7 +894,7 @@ def find_session_path_by_id( session_id ):
                     all_ids.append( val )
 
             for known_id in all_ids:
-                if known_id == session_id or known_id[:8] == session_id[:8]:
+                if known_id == session_id or ( not exact and known_id[:8] == session_id[:8] ):
                     return path
 
         except ( json.JSONDecodeError, OSError ):

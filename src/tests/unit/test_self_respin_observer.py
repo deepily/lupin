@@ -513,3 +513,111 @@ def test_best_effort_unlink_success_and_failure( tmp_path ):
     assert obs._best_effort_unlink( str( p ) ) is True
     assert not p.exists()
     assert obs._best_effort_unlink( str( tmp_path / "already-gone.json" ) ) is False
+
+
+# ---------------------------------------------------------------------------
+# SelfRespinObserverLoop — the production caller (row 275cb0b9, GAP 2)
+# ---------------------------------------------------------------------------
+class _FakeCfg:
+    """Minimal ConfigurationManager stand-in: .get( key, default=, return_type= )."""
+    def __init__( self, **overrides ):
+        self._o = overrides
+    def get( self, key, default=None, return_type=None ):
+        return self._o.get( key, default )
+
+
+def _dead_fetch():
+    """Pressure with no personas ⇒ an unmatched marker past its deadline ⇒ DEAD_NO_RETURN."""
+    return { "personas": None }
+
+
+def _loop( cfg, *, base_dir, now, fetch ):
+    advised = []
+    lp = obs.SelfRespinObserverLoop(
+        cfg, fetch_pressure_fn=fetch, base_dir=base_dir,
+        advisory_fn=lambda m: advised.append( m ), now_fn=lambda: now )
+    return lp, advised
+
+
+def test_loop_disabled_is_a_noop( tmp_path ):
+    _write_marker( tmp_path, "cheech", expected_return_by=_iso( _dt( 22 ) ) )
+    fetched = []
+    lp, advised = _loop(
+        _FakeCfg( **{ "arbiter self respin observer enabled": False } ),
+        base_dir=str( tmp_path ),
+        now=_dt( 30 ), fetch=lambda: fetched.append( 1 ) or { "personas": None } )
+    summary = lp.sweep_once()
+    assert summary == { "enabled": False, "alarms": 0, "advised": 0, "swept": 0 }
+    assert fetched == []                                    # zero IO when disabled
+    assert lp.start() is False                              # start refuses the disabled gate
+
+
+def test_loop_fires_one_advisory_per_alarm_and_is_one_shot( tmp_path ):
+    _write_marker( tmp_path, "cheech", expected_return_by=_iso( _dt( 22 ) ) )   # deadline 02:22
+    lp, advised = _loop(
+        _FakeCfg( **{ "arbiter self respin observer enabled": True } ),
+        base_dir=str( tmp_path ), now=_dt( 30 ),   # 8m past deadline ⇒ DEAD
+        fetch=_dead_fetch )
+    s1 = lp.sweep_once()
+    assert s1[ "enabled" ] and s1[ "alarms" ] == 1 and s1[ "advised" ] == 1
+    assert "DEAD_NO_RETURN" in advised[ 0 ]
+    # a still-alarming marker on the next tick fires NOTHING (one-shot)
+    s2 = lp.sweep_once()
+    assert s2[ "alarms" ] == 1 and s2[ "advised" ] == 0
+    assert len( advised ) == 1
+
+
+def test_loop_intersect_clear_readvises_after_alarm_gone( tmp_path ):
+    m = _write_marker( tmp_path, "cheech", expected_return_by=_iso( _dt( 22 ) ) )
+    lp, advised = _loop(
+        _FakeCfg( **{ "arbiter self respin observer enabled": True } ),
+        base_dir=str( tmp_path ), now=_dt( 30 ), fetch=_dead_fetch )
+    assert lp.sweep_once()[ "advised" ] == 1
+    m.unlink()                                              # alarm gone (marker removed)
+    assert lp.sweep_once()[ "alarms" ] == 0
+    assert lp._advised == set()                             # one-shot key cleared
+
+
+def test_loop_sweeps_returned_markers( tmp_path ):
+    _write_marker( tmp_path, "cheech", fired_at=_iso( _dt( 20 ) ), expected_return_by=_iso( _dt( 22 ) ) )
+    lp, advised = _loop(
+        _FakeCfg( **{ "arbiter self respin observer enabled": True,
+                      "arbiter self respin observer returned ttl seconds": 900 } ),
+        base_dir=str( tmp_path ), now=_dt( 40 ),   # 1200s > 900 TTL
+        fetch=_returned_fetch( "cheech" ) )
+    s = lp.sweep_once()
+    assert s[ "alarms" ] == 0 and s[ "advised" ] == 0 and s[ "swept" ] == 1
+    assert list( tmp_path.glob( f"{obs.MARKER_PREFIX}*.json" ) ) == []
+
+
+def test_loop_demotes_exception_to_zero_summary( tmp_path ):
+    _write_marker( tmp_path, "cheech", expected_return_by=_iso( _dt( 22 ) ) )
+    def boom():
+        raise RuntimeError( "pressure store exploded" )
+    lp = obs.SelfRespinObserverLoop(
+        _FakeCfg( **{ "arbiter self respin observer enabled": True } ),
+        fetch_pressure_fn=boom, base_dir=str( tmp_path ),
+        advisory_fn=lambda m: None, now_fn=lambda: _dt( 30 ) )
+    s = lp.sweep_once()                                     # must NOT raise
+    assert s == { "enabled": True, "alarms": 0, "advised": 0, "swept": 0 }
+
+
+def test_loop_config_accessors_read_the_keys():
+    lp = obs.SelfRespinObserverLoop(
+        _FakeCfg( **{ "arbiter poll seconds": 45,
+                      "arbiter self respin observer returned ttl seconds": 120 } ) )
+    assert lp._tick_seconds() == 45
+    assert lp._returned_ttl_seconds() == 120
+    assert lp._enabled() is False                           # default when key absent
+
+
+def test_loop_start_spawns_and_stop_is_idempotent( tmp_path ):
+    lp = obs.SelfRespinObserverLoop(
+        _FakeCfg( **{ "arbiter self respin observer enabled": True, "arbiter poll seconds": 3600 } ),
+        fetch_pressure_fn=lambda: { "personas": None }, base_dir=str( tmp_path ),
+        advisory_fn=lambda m: None )
+    lp.stop()                                               # idempotent before start
+    assert lp.start() is True
+    assert lp.start() is False                              # already running
+    lp.stop()
+    assert lp._thread is not None and not lp._thread.is_alive()

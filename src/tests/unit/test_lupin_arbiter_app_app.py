@@ -151,12 +151,15 @@ def test_lifespan_starts_and_stops_turn_age_watchdog_loop():
 
 class _FakeCfg:
     """Fake ConfigurationManager for assemble_app's enable-gate branches."""
-    def __init__( self, enabled, context_enabled=True ):
-        self._enabled         = enabled
-        self._context_enabled = context_enabled
+    def __init__( self, enabled, context_enabled=True, observer_enabled=False ):
+        self._enabled          = enabled
+        self._context_enabled  = context_enabled
+        self._observer_enabled = observer_enabled
     def get( self, key, default=None, return_type="string" ):
         if key == "arbiter health watch enabled":
             return self._enabled                              # bool (boolean return_type)
+        if key == "arbiter self respin observer enabled":
+            return self._observer_enabled
         if key == "arbiter context watch enabled":
             return self._context_enabled
         if key == "arbiter health watch containers":
@@ -208,6 +211,39 @@ def test_assemble_app_wires_turn_age_watchdog_in_both_paths():
     app_disabled = assemble_app( _FakeCfg( enabled=False ), _FakeGateway() )
     assert isinstance( app_enabled.state.turn_age_watchdog_loop, TurnAgeWatchdog )
     assert isinstance( app_disabled.state.turn_age_watchdog_loop, TurnAgeWatchdog )
+
+
+def test_assemble_app_self_respin_observer_gated_off_by_default( capsys ):
+    """Default (flag false) → observer loop None + a disabled log; import is skipped."""
+    app = assemble_app( _FakeCfg( enabled=True ), _FakeGateway() )
+    assert app.state.self_respin_observer_loop is None
+    assert "self_respin_observer_disabled" in capsys.readouterr().out
+
+
+def test_assemble_app_self_respin_observer_wired_when_flag_on():
+    """flag true → the SelfRespinObserverLoop is built (row 275cb0b9, GAP 2)."""
+    from cosa.agents.heartbeat_arbiter.self_respin_observer import SelfRespinObserverLoop
+    app = assemble_app( _FakeCfg( enabled=True, observer_enabled=True ), _FakeGateway() )
+    assert isinstance( app.state.self_respin_observer_loop, SelfRespinObserverLoop )
+
+
+def test_assemble_app_self_respin_observer_wired_in_health_disabled_path():
+    """The observer is threaded into BOTH create_app calls — cover the health-disabled early return."""
+    from cosa.agents.heartbeat_arbiter.self_respin_observer import SelfRespinObserverLoop
+    app = assemble_app( _FakeCfg( enabled=False, observer_enabled=True ), _FakeGateway() )
+    assert isinstance( app.state.self_respin_observer_loop, SelfRespinObserverLoop )
+
+
+def test_lifespan_starts_and_stops_self_respin_observer_loop():
+    """The self-re-spin observer is the fifth lifespan-managed loop (start + stop + liveness)."""
+    a, b, c, d, e = _FakeLoop(), _FakeLoop(), _FakeLoop(), _FakeLoop(), _FakeLoop()
+    with TestClient( create_app( health_loop=a, fleet_arbiter_loop=b, context_pressure_loop=c,
+                                 turn_age_watchdog_loop=d, self_respin_observer_loop=e ) ) as client:
+        assert a.started and b.started and c.started and d.started and e.started
+        assert client.app.state.self_respin_observer_loop is e
+        # the loop appears in the thread-liveness map (_FakeLoop has no _thread → not_started)
+        assert client.get( "/health" ).json()[ "loops" ][ "self_respin_observer" ] == "not_started"
+    assert e.stopped is True
 
 
 def test_build_context_pressure_loop_reads_budget_policy_and_cadence():

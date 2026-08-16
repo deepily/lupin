@@ -749,6 +749,20 @@ class TestFindSessionPathById:
 
             assert result == written
 
+    def test_exact_mode_disables_prefix_fallback_but_keeps_full_match( self ):
+        """exact=True (self_respin's irreversible /clear): an 8-char prefix must NOT
+        match (a prefix collision would poll the wrong pane's bridge), while the full
+        id still resolves. Row 275cb0b9."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            sid     = "deadbeef-1111-2222-3333-444455556666"
+            data    = _make_session_data( sid )
+            written = _write_session_file( sessions_dir, os.getpid(), data )
+
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
+                assert find_session_path_by_id( "deadbeef", exact=True ) is None   # prefix rejected
+                assert find_session_path_by_id( sid, exact=True ) == written       # full id resolves
+
     def test_returns_none_on_no_match( self ):
         """No match returns None."""
         with tempfile.TemporaryDirectory() as tmp:
