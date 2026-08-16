@@ -62,6 +62,7 @@ import sys
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from urllib.parse import urlsplit
 
 
 class EvalIntegrityError( RuntimeError ):
@@ -102,6 +103,62 @@ DEGRADATION_PATHS = (
     "router_error", "extract_error", "replay_error",
     "agent_error", "queue_error", "timeout_error",
 )
+
+
+# ───────────────────────── the measured-sha stamp (root-cause countermeasure)
+# ROOT CAUSE, one line across three layers (subprocess / worktree tests / container
+# mount): code that resolves a path at runtime does not know which tree it was meant
+# to measure, and every wrong answer arrives as a plausible number rather than an
+# error. The countermeasure: read the sha back from the RUNNING process and ASSERT
+# it — so a wrong tree fails LOUD instead of stamping a false baseline.
+
+def _sha_matches( observed: str, expected: str ) -> bool:
+    """
+    True iff `observed` agrees with `expected` on `expected`'s length — so a full
+    40-char sha reported by the running server matches the short pin. Both must be
+    non-empty (an 8-hex-char prefix is collision-safe for this use).
+    """
+    return bool( observed ) and bool( expected ) and observed[ :len( expected ) ] == expected
+
+
+def assert_measured_sha( observed_sha: Any, expected: str = V1_PIN_SHA ) -> str:
+    """
+    Assert the sha READ BACK FROM THE RUNNING SERVER is the pinned v1 sha — never
+    trust the launcher's config/env for this. This turns the report's sha from a
+    LABEL into an ASSERTION: on mismatch the run fails LOUD rather than recording a
+    baseline measured against the wrong tree (the root cause named above).
+
+    Requires:
+        - observed_sha is the sha the LIVE process reports it booted from
+          (container: the build-baked value it serves; bare host: git rev-parse of
+          the process's actual code path) — NOT the launcher's intended sha
+
+    Ensures:
+        - returns the observed sha (str) when it matches `expected` on the pin length
+        - raises EvalIntegrityError for a non-string / empty / mismatched observed
+          sha, quoting both values — the caller must NOT record the baseline
+    """
+    if not isinstance( observed_sha, str ) or not _sha_matches( observed_sha, expected ):
+        raise EvalIntegrityError(
+            f"refusing to record the baseline: the RUNNING server reports sha "
+            f"{observed_sha!r}, not the pinned v1 sha {expected!r}. The measured tree is "
+            f"not the tree we meant to measure — fail loud, never stamp a false baseline."
+        )
+    return observed_sha
+
+
+def read_running_server_sha( base_url: str ) -> str:   # pragma: no cover - live HTTP boundary
+    """
+    Ask the RUNNING server what sha it booted from — a value the v1 container BAKES
+    at build (`git rev-parse HEAD` → served on /health), NOT the launcher's env.
+    Paired with assert_measured_sha so a mismatch fails the run. (Live boundary; the
+    pure, tested assertion is assert_measured_sha. The /health `git_sha` field is
+    provided by the container build — design constraint: the stamp.)
+    """
+    import json, urllib.request
+    req  = urllib.request.Request( base_url + "/health" )
+    data = json.loads( urllib.request.urlopen( req, timeout=10 ).read().decode() )
+    return data.get( "git_sha", "" )   # missing -> "" -> assert_measured_sha RAISES (fail-loud, not hidden)
 
 
 # ─────────────────────────────────────────────────────────── record shape
@@ -612,12 +669,19 @@ MEASUREMENT_DB_NAMES = frozenset( { "lupin_db_test", "lupin_db_v1baseline" } )
 
 def _db_name( db_url: str ) -> str:
     """
-    The database name = the url's final '/'-separated segment, minus any '?...'
-    query suffix. 'postgresql://u:p@h:5432/lupin_db_test?sslmode=require' ->
-    'lupin_db_test'; a url with no '/' yields the whole string, matched as-is
-    against the allow-list. Ensures: returns a str.
+    The database name = the PATH component of the url, minus its leading '/'.
+    Parsed with urlsplit so a query ('?...') or fragment ('#...') — either of
+    which can contain a '/' — can NEVER be mistaken for the db name.
+
+    This closes the de9c32d0 hole (Cheech): a naive rsplit('/') picked up a
+    '/lupin_db_test' smuggled into the query/fragment and would have TRUNCATEd the
+    real db in the path, e.g.
+      'postgresql://u:p@h/lupin_db_dev?options=-c search_path=/lupin_db_test'
+      'postgresql://u:p@h/lupin_db_dev#/lupin_db_test'
+    both now resolve to 'lupin_db_dev' (refused). 'postgresql://.../lupin_db_test?
+    sslmode=require' -> 'lupin_db_test'; a path-less url yields ''. Ensures: a str.
     """
-    return db_url.rsplit( "/", 1 )[ -1 ].split( "?", 1 )[ 0 ]
+    return urlsplit( db_url ).path.lstrip( "/" )
 
 
 def assert_test_db( db_url: Any ) -> None:

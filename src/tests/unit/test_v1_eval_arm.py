@@ -343,6 +343,44 @@ def test_db_name_strips_query_suffix():
     assert v1._db_name( "postgresql://u:p@h:5432/lupin_db_test?sslmode=require" ) == "lupin_db_test"
     assert v1._db_name( "postgresql://u:p@h:5432/lupin_db_v1baseline" ) == "lupin_db_v1baseline"
 
+def test_db_name_ignores_query_and_fragment_slash():
+    # de9c32d0 hole (Cheech): a '/lupin_db_test' smuggled into the query or fragment
+    # must NOT become the db name — the PATH (lupin_db_dev) wins.
+    assert v1._db_name( "postgresql://u:p@h:5432/lupin_db_dev?options=-c search_path=/lupin_db_test" ) == "lupin_db_dev"
+    assert v1._db_name( "postgresql://u:p@h:5432/lupin_db_dev#/lupin_db_test" ) == "lupin_db_dev"
+
+def test_assert_test_db_refuses_query_or_fragment_smuggled_test_name():
+    for url in (
+        "postgresql://u:p@h:5432/lupin_db_dev?options=-c search_path=/lupin_db_test",
+        "postgresql://u:p@h:5432/lupin_db_dev#/lupin_db_test",
+    ):
+        with pytest.raises( v1.EvalIntegrityError ):
+            v1.assert_test_db( url )
+
+
+# ─────────────────────────────────── measured-sha stamp (root-cause countermeasure)
+
+def test_sha_matches_variants():
+    assert v1._sha_matches( "b0735467abcdef", "b0735467" ) is True   # full sha vs short pin
+    assert v1._sha_matches( "b0735467", "b0735467" ) is True         # exact
+    assert v1._sha_matches( "deadbeef", "b0735467" ) is False        # mismatch
+    assert v1._sha_matches( "", "b0735467" ) is False                # empty observed
+    assert v1._sha_matches( "b0735467", "" ) is False                # empty expected
+
+def test_assert_measured_sha_accepts_full_and_short():
+    assert v1.assert_measured_sha( "b0735467deadbeef" ) == "b0735467deadbeef"
+    assert v1.assert_measured_sha( "b0735467" ) == "b0735467"
+
+def test_assert_measured_sha_raises_on_wrong_tree():
+    with pytest.raises( v1.EvalIntegrityError ):
+        v1.assert_measured_sha( "deadbeef" )
+
+def test_assert_measured_sha_raises_on_non_string_and_empty():
+    with pytest.raises( v1.EvalIntegrityError ):
+        v1.assert_measured_sha( None )
+    with pytest.raises( v1.EvalIntegrityError ):
+        v1.assert_measured_sha( "" )
+
 class _FakeEngine:
     def __init__( self, url ): self.url = url
 
