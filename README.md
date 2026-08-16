@@ -280,6 +280,11 @@ claude mcp add cosa-voice -- python ${LUPIN_ROOT}/src/lupin_mcp/cosa_voice_mcp.p
 - [Cost Model: Bounded CC vs Firewalled SDK](src/docs/cost-model-bounded-cc-vs-firewalled-sdk.md) — which LLM path an agent lands on, and why
 - [Cascade Review: v2 as the Brain in the Todo Queue](src/rnd/v0.2.0/2026.08.15-cascade-review-v2-brain-in-todo-queue.md) — 19 findings against the v2-brain plan; the design held, most of the receipts did not. Includes the `needs_input` path that was dead-ended twice (since fixed) and a five-site routing inventory the plan counted as four
 - [Cascade §4 Findings](src/rnd/v0.2.0/2026.08.15-cascade-section4-findings.md) — Krishna's line-by-line trace of v1's argument interview against v2's `needs_input`
+- [v2 as the Brain in the Todo Queue](src/rnd/v0.2.0/2026.08.15-v2-as-the-brain-in-todo-queue.md) — María's plan for v2 owning the todo queue; the document Clayton's three-round cascade reviewed
+- [Cascade R1 Findings](src/rnd/v0.2.0/2026.08.15-cascade-r1-findings.md) · [R2](src/rnd/v0.2.0/2026.08.15-cascade-r2-findings.md) · [R3](src/rnd/v0.2.0/2026.08.15-cascade-r3-findings.md) — the three review rounds against that plan
+- [Cascade Consolidation and Re-check](src/rnd/v0.2.0/2026.08.15-cascade-consolidation-and-recheck.md) — the merged verdict across all three rounds
+- [Persona-Chain Allocator](src/rnd/v0.2.0/2026.08.15-persona-chain-allocator.md) — how a spawn walks its persona chain, and what a chain with no `*` fallback costs
+- [Phase 2 Falsifiability Mutations](src/rnd/v0.2.0/2026.08.15-phase2-falsifiability-mutations.md) — the mutations each phase-2 guard must fail on, so a green gate proves something
 - [Self-Re-Spin: 8-Gate Verification](src/rnd/v0.2.0/2026.08.15-arnold-self-respin-8-gate-verification.md) — all 8 spec gates verified as code properties; gate 5's "the proxy cannot answer no" was false and is fixed by `3f8cec99`. Three findings were spec defects rather than code defects
 - [v2-Arm Adversarial Review](src/rnd/v0.2.0/2026.08.15-extra2-v2-arm-adversarial-review.md) — v2's own instruments are honest; the paired gate is defined, tested, and wired into nothing
 
