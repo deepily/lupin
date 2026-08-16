@@ -54,6 +54,7 @@ _HONORIFIC_TOKENS = { "mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st" }
 # whole-string rendering.
 _DISPLAY_OVERRIDES = {
     "maria" : "María",
+    "chloe" : "Chloé",
 }
 
 
