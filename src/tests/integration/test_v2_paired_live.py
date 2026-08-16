@@ -185,6 +185,55 @@ def _clean_v2_arm_store( config_mgr ) -> str:
         connection.close()
 
 
+def _run_v1_arm( *, corpus, seed, n_per_command, base_url ):   # pragma: no cover - live boundary (real push to :7997 + WS collect + inference)
+    """
+    Run the v1 baseline arm against the pinned :7997 server and return its {metrics, provenance}
+    artifact (headline = the WARM pass — the same pass run_v1_baseline reports).
+
+    Live boundary: the real push, WS collect, and inference happen ONLY in the scheduled :8000
+    run; the :7999 reachability test injects a canned artifact so no live work fires here. Assembles
+    the seams the RUN wrapper is documented to supply — a WsJobEventListener (make_ws_recv_events)
+    feeding _default_collect_fn, _default_push_fn, and the class→command map read from the PINNED
+    worktree registry (load_v1_class_to_command, resolved through LUPIN_ROOT). run_v1_baseline itself
+    proves the server is the pin (sha readback) before it spends.
+    """
+    import v1_eval_arm
+    email                        = os.environ[ "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" ]
+    token                        = f"mock_token_email_{email}"
+    websocket_id                 = "v1-eval-listener"
+    class_to_command, _ambiguous = v1_eval_arm.load_v1_class_to_command()
+    listener, ws_recv_events     = v1_eval_arm.make_ws_recv_events( base_url, token, websocket_id )
+    try:
+        result = v1_eval_arm.run_v1_baseline(
+            corpus=corpus, seed=seed, n_per_command=n_per_command, base_url=base_url,
+            push_fn=v1_eval_arm._default_push_fn( base_url, websocket_id, token ),
+            collect_fn=v1_eval_arm._default_collect_fn( ws_recv_events ),
+            class_to_command=class_to_command,
+        )
+    finally:
+        listener.stop()
+    return { "metrics": result[ "warm" ], "provenance": result[ "provenance" ] }
+
+
+def _run_v2_arm( *, corpus, seed, n_per_command, base_url ):   # pragma: no cover - live boundary (real two-pass inference + serialize)
+    """
+    Run the v2 arm (two-pass) against `base_url` and return its {metrics, provenance} artifact
+    (headline = the WARM pass).
+
+    Live boundary — real inference happens ONLY in the scheduled :8000 run; the :7999 reachability
+    test injects a canned artifact. Delegates to v2_eval.main, which self-assembles the HttpAskClient
+    from LUPIN_TEST_INTERACTIVE_MOCK_JOBS_* and stamps the v2 provenance over the SAME (corpus, seed,
+    n_per_command) the v1 arm uses — so the two arms' sample_signatures MATCH by construction and the
+    paired provenance check binds them.
+    """
+    import v2_eval
+    result = v2_eval.main( argv=[
+        "--corpus", corpus, "--seed", str( seed ), "--n-per-command", str( n_per_command ),
+        "--base-url", base_url, "--passes", "2",
+    ] )
+    return { "metrics": result[ "warm" ], "provenance": result[ "provenance" ] }
+
+
 @pytest.mark.paired_eval_live
 @pytest.mark.integration
 def test_v2_paired_go_no_go_live():
@@ -241,7 +290,35 @@ def test_v2_paired_go_no_go_live():
     v1_store = _resolve_v1_paired_store()
     guard.assert_paired_isolation( v1_store, v2_store, rowcount_fn=guard.count_store_rows )
 
-    # REMAINING WIRING (a–d in the module docstring) runs only once all preconditions pass.
-    # It is intentionally not stubbed as a fake pass: a paired verdict that never ran both
-    # arms is exactly the failure this bridge exists to prevent.
-    pytest.fail( "unreachable: a precondition guard must have refused before this line" )
+    # ---- a–d: run BOTH arms and produce the PROVENANCE-GATED paired verdict (row d8d019f6) ----
+    # This is the caller the paired verdict lacked: build_paired_verdict was wired into nothing,
+    # so two arms that measured DIFFERENT samples would have passed a shape-only gate. The arm runs
+    # are injected live boundaries — mocked on :7999, real only in the scheduled :8000 run.
+    import paired_eval
+
+    # a. ONE sampling spec drives BOTH arms: identical (corpus, seed, n_per_command) → identical
+    #    seeded stratified sample → identical sample_signature, which paired_provenance_check BINDS
+    #    in step d (design §6). The corpus is the same one precondition 0 proved leak-free.
+    seed          = int( os.environ.get( "LUPIN_PAIRED_SEED", "1024" ) )
+    n_per_command = int( os.environ.get( "LUPIN_PAIRED_N", "60" ) )
+    v2_base_url   = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
+
+    # b + c. Each arm → {metrics, provenance} (headline = the WARM pass). Live boundaries.
+    v1_artifact = _run_v1_arm( corpus=corpus_name, seed=seed, n_per_command=n_per_command,
+                               base_url=os.environ[ "LUPIN_V1_ARM_BASE_URL" ] )
+    v2_artifact = _run_v2_arm( corpus=corpus_name, seed=seed, n_per_command=n_per_command,
+                               base_url=v2_base_url )
+
+    # d. The provenance-gated verdict. build_paired_verdict runs paired_provenance_check FIRST —
+    #    binding both arms to the SAME corpus/seed/sample by SIGNATURE, not a shape-only compare —
+    #    and only then fires the median-Δ gate. Both arms must have produced usable records.
+    assert v1_artifact[ "metrics" ][ "n_ok" ] > 0, "paired run: v1 arm produced 0 usable records"
+    assert v2_artifact[ "metrics" ][ "n_ok" ] > 0, "paired run: v2 arm produced 0 usable records"
+    verdict = paired_eval.build_paired_verdict( v1_artifact, v2_artifact )
+    assert verdict[ "provenance_ok" ], (
+        "paired run REFUSED — the two arms are not provenance-bound (they did not measure the same "
+        f"sample): {verdict.get( 'reason' )}"
+    )
+    rendered = paired_eval.render_paired_verdict( verdict )
+    assert rendered.strip(), "paired run: verdict rendered empty"
+    return verdict

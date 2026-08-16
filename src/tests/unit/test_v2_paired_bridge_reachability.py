@@ -23,7 +23,6 @@ import sys
 from unittest.mock import patch, MagicMock
 
 import pytest
-from _pytest.outcomes import Failed
 
 _LUPIN_ROOT = os.environ.get( "LUPIN_ROOT" )
 if _LUPIN_ROOT:
@@ -38,6 +37,24 @@ from tests.integration import test_v2_paired_live as bridge   # noqa: E402
 _V2_STORE = "lupin_db_test.solution_snapshots"           # SAFETY-blessed v2 destination (patched precondition 1)
 _V1_STORE = "lupin_db_v1baseline.solution_snapshots"     # distinct v1 destination (patched _resolve_v1_paired_store)
 
+_PAIRS = [ ( "u1", "c1" ), ( "u2", "c2" ), ( "u3", "c3" ) ]
+
+
+def _canned_artifact( arm, *, spans, pairs=_PAIRS ):
+    """A mocked arm {metrics, provenance} artifact — a REAL provenance stamp (so the paired
+    provenance check runs for real, not a fake pass) over `pairs`, plus per-utterance client spans."""
+    import paired_eval
+    return {
+        "metrics"    : { "n_ok": len( spans ), "spans_by_utterance": dict( spans ) },
+        "provenance" : paired_eval.make_provenance( arm, "simple", 1024, 60, pairs ),
+    }
+
+
+# Matching-provenance artifacts (same pairs → same sample_signature); v1 slower than v2 so the
+# median-Δ gate has a positive delta to render.
+_V1_ART = _canned_artifact( "v1", spans={ "u1": 120.0, "u2": 130.0, "u3": 140.0 } )
+_V2_ART = _canned_artifact( "v2", spans={ "u1":  40.0, "u2":  50.0, "u3":  60.0 } )
+
 
 def test_bridge_reaches_and_fires_validity_check():
     """Preconditions 1+2 pass and both stores read empty -> the bridge MUST invoke
@@ -50,12 +67,13 @@ def test_bridge_reaches_and_fires_validity_check():
          patch.object( bridge, "_clean_v2_arm_store", lambda config_mgr: "solution_snapshots" ), \
          patch.object( bridge, "_resolve_v1_paired_store", return_value=_V1_STORE ), \
          patch.object( guard, "count_store_rows", return_value=0 ), \
+         patch.dict( os.environ, { "LUPIN_V1_ARM_BASE_URL": "http://stub-v1:7997" } ), \
+         patch.object( bridge, "_run_v1_arm", return_value=_V1_ART ), \
+         patch.object( bridge, "_run_v2_arm", return_value=_V2_ART ), \
          patch.object( guard, "require_arms_distinct_and_clean", spy ):
-        # All preconditions satisfied, so control reaches the terminal "unreachable" guard —
-        # that raise IS the proof the VALIDITY line was passed, not skipped.
-        with pytest.raises( Failed ) as exc:
-            bridge.test_v2_paired_go_no_go_live()
-        assert "unreachable" in str( exc.value )
+        # All preconditions satisfied and both arms mocked -> the bridge runs a–d to completion
+        # and returns a verdict; reaching here at all proves the VALIDITY line was passed.
+        bridge.test_v2_paired_go_no_go_live()
 
     # The VALIDITY check fired exactly once, on the two REAL resolved arm targets, with the
     # live-queried (here patched-to-0) clean-start counts. This is the caller it lacked.
@@ -123,12 +141,13 @@ def test_bridge_reaches_and_fires_v2_clean_step():
          patch.object( bridge, "_open_v2_arm_connection", return_value=fake_conn ), \
          patch.object( bridge, "_resolve_v1_paired_store", return_value=_V1_STORE ), \
          patch.object( guard, "count_store_rows", return_value=0 ), \
+         patch.dict( os.environ, { "LUPIN_V1_ARM_BASE_URL": "http://stub-v1:7997" } ), \
+         patch.object( bridge, "_run_v1_arm", return_value=_V1_ART ), \
+         patch.object( bridge, "_run_v2_arm", return_value=_V2_ART ), \
          patch.object( v2_eval, "clean_v2_snapshot_store", spy ):
-        # Preconditions satisfied -> control reaches the terminal "unreachable" guard; that raise
-        # IS the proof the clean-step line was passed, not skipped.
-        with pytest.raises( Failed ) as exc:
-            bridge.test_v2_paired_go_no_go_live()
-        assert "unreachable" in str( exc.value )
+        # Preconditions satisfied and both arms mocked -> the bridge runs a–d to completion; the
+        # clean-step fired on the way past, which is what this test proves.
+        bridge.test_v2_paired_go_no_go_live()
 
     # The clean-step fired exactly once, on the injected connection + config.
     spy.assert_called_once_with( fake_conn, cfg )
@@ -153,3 +172,58 @@ def test_bridge_never_reaches_v2_clean_when_safety_refuses():
             bridge.test_v2_paired_go_no_go_live()
 
     spy.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# a-d ARM-RUNNING wiring — the PROVENANCE-GATED paired verdict is REACHED and FIRES (row d8d019f6).
+#
+# WHY THIS EXISTS. build_paired_verdict (provenance-check -> median-delta gate) was wired into
+# nothing: the bridge ended at a pytest.fail("unreachable") stub, so two arms that measured
+# DIFFERENT samples would never have met a real caller. The bridge now runs both arms (injected,
+# mocked here -> no live push/inference on :7999) and hands their artifacts to build_paired_verdict.
+# These tests prove the verdict step is REACHED and that the provenance check genuinely GATES
+# (binds the arms by sample signature), not a shape-only pass.
+# ---------------------------------------------------------------------------
+def test_bridge_runs_both_arms_and_builds_provenance_gated_verdict():
+    """Preconditions pass, both arms mocked with MATCHING provenance -> the bridge MUST call the
+    REAL build_paired_verdict with the two artifacts and complete with provenance_ok True. Reverting
+    the a-d wiring to the stub makes this RED (the real verdict is never built)."""
+    import paired_eval
+    spy = MagicMock( wraps=paired_eval.build_paired_verdict )   # the REAL fn, delegated to
+    with patch( "cosa.config.configuration_manager.ConfigurationManager", MagicMock() ), \
+         patch( "v2_eval.load_corpus", return_value=[ ( "u", "agent router go to todo" ) ] ), \
+         patch.object( guard, "require_isolated_snapshot_table", return_value=_V2_STORE ), \
+         patch.object( bridge, "_require_v1_live_seam_and_worktree", lambda: None ), \
+         patch.object( bridge, "_clean_v2_arm_store", lambda config_mgr: "solution_snapshots" ), \
+         patch.object( bridge, "_resolve_v1_paired_store", return_value=_V1_STORE ), \
+         patch.object( guard, "count_store_rows", return_value=0 ), \
+         patch.dict( os.environ, { "LUPIN_V1_ARM_BASE_URL": "http://stub-v1:7997" } ), \
+         patch.object( bridge, "_run_v1_arm", return_value=_V1_ART ), \
+         patch.object( bridge, "_run_v2_arm", return_value=_V2_ART ), \
+         patch.object( paired_eval, "build_paired_verdict", spy ):
+        verdict = bridge.test_v2_paired_go_no_go_live()
+
+    spy.assert_called_once_with( _V1_ART, _V2_ART )   # the caller the verdict lacked
+    assert verdict[ "provenance_ok" ] is True         # provenance-bound, not a shape-only pass
+
+
+def test_bridge_refuses_when_arms_measured_different_samples():
+    """Provenance BINDING control: if the two arms measured DIFFERENT samples, build_paired_verdict
+    returns provenance_ok=False and the bridge REFUSES with an AssertionError naming the un-bound
+    arms — proving the gate is provenance-checked, not shape-only. A weakening that skipped the
+    provenance check would let this pass -> RED."""
+    v2_mismatch = _canned_artifact( "v2", spans={ "x1": 40.0, "x2": 50.0 },
+                                    pairs=[ ( "x1", "c1" ), ( "x2", "c2" ) ] )   # different pairs -> different signature
+    with patch( "cosa.config.configuration_manager.ConfigurationManager", MagicMock() ), \
+         patch( "v2_eval.load_corpus", return_value=[ ( "u", "agent router go to todo" ) ] ), \
+         patch.object( guard, "require_isolated_snapshot_table", return_value=_V2_STORE ), \
+         patch.object( bridge, "_require_v1_live_seam_and_worktree", lambda: None ), \
+         patch.object( bridge, "_clean_v2_arm_store", lambda config_mgr: "solution_snapshots" ), \
+         patch.object( bridge, "_resolve_v1_paired_store", return_value=_V1_STORE ), \
+         patch.object( guard, "count_store_rows", return_value=0 ), \
+         patch.dict( os.environ, { "LUPIN_V1_ARM_BASE_URL": "http://stub-v1:7997" } ), \
+         patch.object( bridge, "_run_v1_arm", return_value=_V1_ART ), \
+         patch.object( bridge, "_run_v2_arm", return_value=v2_mismatch ):
+        with pytest.raises( AssertionError ) as exc:
+            bridge.test_v2_paired_go_no_go_live()
+        assert "provenance" in str( exc.value ).lower()
