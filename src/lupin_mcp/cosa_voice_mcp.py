@@ -1493,7 +1493,8 @@ def ask_yes_no(
     priority: str = "medium",
     abstract: Optional[ str ] = None,
     job_id: Optional[ str ] = None,
-    override_size_limitation: bool = False
+    override_size_limitation: bool = False,
+    human_only: bool = False
 ) -> str:
     """
     Ask a yes/no question and get the user's response as a string.
@@ -1561,6 +1562,7 @@ def ask_yes_no(
             priority=NotificationPriority( priority ),
             timeout_seconds=timeout_seconds,
             response_default=default,
+            human_only=human_only,
             sender_id=_wait_for_sender_id(),
             abstract=_normalize_abstract( abstract ),
             job_id=job_id

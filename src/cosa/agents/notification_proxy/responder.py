@@ -269,6 +269,18 @@ class NotificationResponder:
             print( f"[Responder] ERROR: No notification_id in event" )
             return
 
+        # human_only: this ask is reserved for a HUMAN (or its offline default) —
+        # the auto-answer proxy must LEAVE IT ALONE. Checked BEFORE the dry_run
+        # blanket-decline AND ahead of the strategy chain, so NO path submits an
+        # answer (row 804afce6: a proxy "no" to the self-re-spin ask would abort a
+        # manager's own re-spin — the "an absent user must not cost a manager"
+        # failure). Skipped, not answered — the human or the offline default decides.
+        if notification.get( "human_only" ):
+            self.stats[ "skipped" ] += 1
+            if self.verbose:
+                print( f"[Responder] Skipped (human_only — proxy must not answer): {title or message[ :50 ]}" )
+            return
+
         # Dry run: display notification, send cancel, skip strategies
         if self.dry_run:
             cancel_value = "no" if response_type == "yes_no" else "cancel"

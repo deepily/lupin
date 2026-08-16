@@ -30,7 +30,8 @@ class NotificationItem:
                  sender_persona: Optional[str] = None,
                  sender_icon: Optional[str] = None,
                  reply_to: Optional[str] = None,
-                 thread_id: Optional[str] = None ) -> None:
+                 thread_id: Optional[str] = None,
+                 human_only: bool = False ) -> None:
         """
         Initialize a notification item.
 
@@ -71,6 +72,13 @@ class NotificationItem:
         self.response_default   = response_default
         self.response_options   = response_options  # Multiple-choice options
         self.timeout_seconds    = timeout_seconds
+
+        # human_only: this ask must be answered by a HUMAN (or its offline
+        # default) ONLY — the auto-answer proxy must LEAVE IT ALONE. Rides the
+        # WS event (see to_dict) so the NotificationProxy Responder can honor it
+        # (row 804afce6: a proxy "no" to the self-re-spin ask would abort a
+        # manager's own re-spin).
+        self.human_only         = human_only
 
         # Sender identification for multi-project grouping
         self.sender_id          = sender_id or "claude.code@unknown.deepily.ai"
@@ -193,6 +201,8 @@ class NotificationItem:
             "response_default"   : self.response_default,
             "response_options"   : self.response_options,  # Multiple-choice options
             "timeout_seconds"    : self.timeout_seconds,
+            # Proxy-exemption: the auto-answer Responder must NOT answer this ask
+            "human_only"         : self.human_only,
             # Sender identification
             "sender_id"          : self.sender_id,
             # Supplementary context
@@ -315,7 +325,8 @@ class NotificationFifoQueue( FifoQueue ):
                          sender_persona: Optional[str] = None,
                          sender_icon: Optional[str] = None,
                          reply_to: Optional[str] = None,
-                         thread_id: Optional[str] = None ) -> NotificationItem:
+                         thread_id: Optional[str] = None,
+                         human_only: bool = False ) -> NotificationItem:
         """
         Push a notification with priority handling and io_tbl logging.
 
@@ -350,6 +361,7 @@ class NotificationFifoQueue( FifoQueue ):
             response_default   = response_default,
             response_options   = response_options,  # Multiple-choice options
             timeout_seconds    = timeout_seconds,
+            human_only         = human_only,
             sender_id          = sender_id,
             abstract           = abstract,
             suppress_ding      = suppress_ding,

@@ -204,6 +204,13 @@ class NotificationRequest(BaseModel):
         description="Default response value for timeout/offline"
     )
 
+    human_only: bool = Field(
+        default=False,
+        description="Reserve this ask for a HUMAN (or its offline default) only — "
+                    "the auto-answer proxy must NOT answer it. Rides the WS event so "
+                    "the NotificationProxy Responder can skip it (row 804afce6)."
+    )
+
     title: Optional[str] = Field(
         default=None,
         min_length=1,
@@ -391,6 +398,10 @@ class NotificationRequest(BaseModel):
         # Add optional parameters
         if self.response_default is not None:
             params["response_default"] = self.response_default
+
+        # Proxy-exemption: only send when set (server + WS event default False)
+        if self.human_only:
+            params["human_only"] = "true"
 
         if self.title is not None:
             params["title"] = self.title

@@ -521,6 +521,9 @@ def _default_ask():   # pragma: no cover - live MCP ask boundary (tests inject a
         priority="high",
         abstract="Manager self-re-spin: I will write my memento, verify it on disk, and type /clear into my "
                  "own pane, rehydrating as the same seat at low context. Defaults to YES if you are away.",
+        # human_only: the auto-answer proxy must NOT veto a manager's own re-spin.
+        # Only a real human "no" (or the offline default=yes) decides (row 804afce6).
+        human_only=True,
     )
 
 

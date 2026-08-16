@@ -288,3 +288,43 @@ class TestPrintStats:
     def test_print_stats_runs( self ):
         r, _, _, _ = _make_responder()
         r.print_stats()   # smoke — exercises the stats-formatting loop
+
+
+class TestHumanOnlyExemption:
+    """
+    A notification flagged human_only must NEVER be auto-answered by the proxy —
+    not in dry_run (which blanket-declines yes_no), not via any strategy. This is
+    the honor-side of the self-re-spin fix (row 804afce6): a proxy 'no' to the
+    self-re-spin ask would abort a manager's own re-spin, the exact
+    "an absent user must not cost a manager" failure.
+
+    Written to FAIL on current code (no human_only check anywhere) before the fix.
+    """
+
+    def _run( self, r, event ):
+        asyncio.run( r._handle_notification_update( event ) )
+
+    def test_human_only_not_answered_in_dry_run( self ):
+        r, _, _, _ = _make_responder( dry_run=True, verbose=True )
+        posted = { "called": False }
+        def fake_post( url, **kw ):
+            posted[ "called" ] = True
+            return MagicMock( status_code=200, json=lambda: {} )
+        with patch.object( rr.requests, "post", side_effect=fake_post ):
+            self._run( r, _notif( response_type="yes_no", human_only=True ) )
+        assert posted[ "called" ] is False, "proxy answered a human_only ask in dry_run — it must not"
+        assert r.stats[ "skipped" ] == 1
+
+    def test_human_only_not_answered_by_strategy( self ):
+        r, rule, script, llm = _make_responder( verbose=True )
+        script.can_handle.return_value = False
+        rule.can_handle.return_value   = True
+        rule.respond.return_value      = "no"          # a strategy that WOULD veto
+        posted = { "called": False }
+        def fake_post( url, **kw ):
+            posted[ "called" ] = True
+            return MagicMock( status_code=200, json=lambda: {} )
+        with patch.object( rr.requests, "post", side_effect=fake_post ):
+            self._run( r, _notif( response_type="yes_no", human_only=True ) )
+        assert posted[ "called" ] is False, "a strategy answered a human_only ask — it must be skipped first"
+        assert r.stats[ "skipped" ] == 1

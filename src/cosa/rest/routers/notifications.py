@@ -696,6 +696,7 @@ async def notify_user(
     response_type: Optional[str] = Query(None, description="Response type: yes_no or open_ended (Phase 2.1)"),
     timeout_seconds: int = Query(120, description="Timeout in seconds for response-required notifications"),
     response_default: Optional[str] = Query(None, description="Default response value for timeout/offline (Phase 2.1)"),
+    human_only: bool = Query(False, description="Reserve this ask for a HUMAN (or its offline default) only — the auto-answer proxy must NOT answer it. Rides the WS event so the NotificationProxy Responder skips it (row 804afce6)."),
     title: Optional[str] = Query(None, description="Terse technical title for voice-first UX (Phase 2.1)"),
     sender_id: Optional[str] = Query(None, description="Sender ID (e.g., claude.code@lupin.deepily.ai). Auto-extracted from [PREFIX] in message if not provided."),
     response_options: Optional[str] = Query(None, description="JSON string of options for multiple_choice type. Structure: {questions: [{question, header, multi_select, options: [{label, description}]}]}"),
@@ -1352,6 +1353,7 @@ async def notify_user(
             response_default         = response_default,
             response_options         = parsed_response_options,  # Multiple-choice options
             timeout_seconds          = timeout_seconds,
+            human_only               = human_only,  # Proxy-exemption: auto-answer must skip this ask
             sender_id                = resolved_sender_id,  # Sender-aware notification system
             abstract                 = abstract,  # Supplementary context for action-required cards
             suppress_ding            = suppress_ding,  # Skip notification sound (conversational TTS)
