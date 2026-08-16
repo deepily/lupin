@@ -1550,3 +1550,58 @@ class TestReachabilityNeverRaises:
             { "commit": reachable_sha }, scope_roots=roots, require_checkable=True
         )
         assert errors == [ ]
+
+
+class TestQidIsContextNeverAClose:
+    """
+    María's ruling, 2026-08-15: "A qid is CONTEXT and may ride ALONGSIDE a real
+    receipt, but it must never carry a close ALONE — resolving or not."
+
+    WHY "resolving or not" is the load-bearing half. The tempting fix was to make
+    a qid admissible once it resolves to a completed job. Measured against the
+    live store before building it: of the 71 distinct qids ever cited as a SOLE
+    receipt on a ->done, 53 resolve to a notifications row and 18 resolve to
+    nothing — and of the 53 that resolve, `responded_at` is null on every one,
+    `response_requested` is not even true on any of them, and all 53 sit in state
+    "created". Not one was a question, let alone an answered one.
+
+    So a qid names a message that was SENT. That is an artifact existing, not
+    work happening — the exact property this whole gate rejects. A resolution
+    check would have admitted ZERO of the 99 historical closes while adding a
+    subprocess-free lookup and the appearance of rigour.
+    """
+
+    def test_qid_alone_cannot_close_a_row( self, scope_roots ):
+        errors = rules.validate_receipt_refs(
+            { "qid": "4288dd53-6779-460a-88bd-a7365fb734b2" },
+            scope_roots=scope_roots, require_checkable=True
+        )
+        assert errors, "a qid alone closed a row — it attests a message was sent, not that work happened"
+        assert "INDEPENDENTLY CHECKABLE" in errors[ 0 ]
+
+    def test_qid_rides_alongside_a_real_receipt( self, scope_roots, reachable_sha ):
+        """The other half of the ruling — context is welcome, it just cannot be the close."""
+        errors = rules.validate_receipt_refs(
+            { "commit": reachable_sha, "qid": "4288dd53-6779-460a-88bd-a7365fb734b2" },
+            scope_roots=scope_roots, require_checkable=True
+        )
+        assert errors == [ ]
+
+    def test_qid_stays_whitelisted_and_shape_checked( self, scope_roots ):
+        """
+        Not dropped from the whitelist: it remains legal as context, and its shape
+        is still enforced so a non-UUID cannot ride along unnoticed.
+        """
+        assert "qid" in rules.RECEIPT_KEY_WHITELIST
+        assert "qid" not in rules.CHECKABLE_RECEIPT_KEYS
+        errors = rules.validate_receipt_refs(
+            { "qid": "not-a-uuid" }, scope_roots=scope_roots, require_checkable=False
+        )
+        assert errors and "canonical lowercase UUID" in errors[ 0 ]
+
+    def test_qid_alone_is_still_fine_OFF_the_done_path( self, scope_roots ):
+        errors = rules.validate_receipt_refs(
+            { "qid": "4288dd53-6779-460a-88bd-a7365fb734b2" },
+            scope_roots=scope_roots, require_checkable=False
+        )
+        assert errors == [ ]
