@@ -185,10 +185,12 @@ class TestPersistCreated( _PersistBase ):
         self.session.add.assert_not_called()
 
     def test_inserts_row( self ):
+        self.session.get.return_value = None   # row absent → idempotent create INSERTs (row 2817b0f5)
         jp.persist_job_created_from_metadata( "j1", "u1", { "agent_type": "deep_research", "user_email": "e" } )
         self.session.add.assert_called_once()
 
     def test_exception_logged( self ):
+        self.session.get.return_value = None   # reach the INSERT so add() raises
         self.session.add.side_effect = RuntimeError( "boom" )
         with patch( "builtins.print" ) as mp:
             jp.persist_job_created_from_metadata( "j1", "u1", {} )
@@ -287,9 +289,9 @@ class TestMarkInterruptedJobs( _PersistBase ):
              patch( "builtins.print" ):
             counts = jp.mark_interrupted_jobs()
         self.assertEqual( counts[ "running" ], 2 )
-        self.assertEqual( counts[ "pending_preserved" ], 1 )
+        self.assertEqual( counts[ "pending_preserved" ], 2 )     # future + no-schedule (row 9f06c28a: no-schedule now PRESERVED)
         self.assertEqual( counts[ "pending_catchup" ], 1 )
-        self.assertEqual( counts[ "pending_interrupted" ], 2 )   # before-window + no-schedule
+        self.assertEqual( counts[ "pending_interrupted" ], 1 )   # before-window only
 
     def test_all_zero_counts_skip_summary_prints( self ):
         # nothing running, no pending rows → total/preserved/catchup all 0 → all
@@ -330,17 +332,20 @@ class TestIsFutureScheduled( unittest.TestCase ):
 
 
 class TestGetRestorableJobs( _PersistBase ):
-    def test_returns_only_scheduled( self ):
+    def test_returns_all_pending( self ):
+        # row 9f06c28a: get_restorable_jobs now returns EVERY surviving PENDING row —
+        # future-scheduled AND immediate (no scheduled_at) — because mark_interrupted_jobs
+        # has already flipped the anomalous cases to INTERRUPTED.
         r1 = SimpleNamespace( id_hash="a", job_type="t", user_id="u", user_email=None,
                               session_id=None, routing_command=None, question_text=None,
                               metadata_json={ "scheduled_at": "2099-01-01T00:00:00+00:00", "monopolize": True } )
         r2 = SimpleNamespace( id_hash="b", job_type="t", user_id="u", user_email="e",
                               session_id="s", routing_command="c", question_text="q",
-                              metadata_json={} )   # no scheduled_at → skipped
+                              metadata_json={} )   # no scheduled_at → still restorable (immediate)
         self.session.execute.return_value.scalars.return_value.all.return_value = [ r1, r2 ]
         out = jp.get_restorable_jobs()
-        self.assertEqual( len( out ), 1 )
-        self.assertEqual( out[ 0 ][ "id_hash" ], "a" )
+        self.assertEqual( len( out ), 2 )
+        self.assertEqual( { j[ "id_hash" ] for j in out }, { "a", "b" } )
 
     def test_exception_returns_empty( self ):
         self.session.execute.side_effect = RuntimeError( "boom" )

@@ -100,7 +100,10 @@ class _GitRepoFixtureMixin:
 
 def _analyze( repos, since="2026-07-09", until="2026-07-12", all_branches=True,
               include_merges=False, verbose=False, debug=False ):
-    return g._analyze_repos(
+    # Source returns 6 values as of b6b2deb8 (…, largest_commit). This twin does not
+    # assert on the largest-commit emission, so drop it here to keep the 5-tuple these
+    # tests unpack. Largest-commit is covered directly in src/tests/unit/test_git_loc_delta_global.py.
+    df, commits, cov, empty, skipped, _largest = g._analyze_repos(
         repo_paths     = repos,
         since          = since,
         until          = until,
@@ -109,6 +112,7 @@ def _analyze( repos, since="2026-07-09", until="2026-07-12", all_branches=True,
         verbose        = verbose,
         debug          = debug,
     )
+    return df, commits, cov, empty, skipped
 
 
 # ─────────────────────────────────────────────────────────────────────────────
