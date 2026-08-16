@@ -315,6 +315,42 @@ def test_needs_input_non_interactive_does_not_park( tmp_path, notifier, monkeypa
     assert pending.put_calls == []
 
 
+def test_non_interactive_spawns_no_background_thread( tmp_path, notifier, monkeypatch ):
+    """
+    The OTHER half of the never-blocks guarantee (plan DoD 3).
+
+    Its sibling above pins "PendingRequests stays empty". The plan asks for two
+    things, and this is the second: "and no background thread spawns". They are
+    different failures — a flow that parks anyway returns a clean-looking 200
+    while LEAKING a thread, which the eval cannot see because the response body
+    looks identical.
+
+    Today this passes because nothing in v2 spawns a thread at all. That is
+    exactly why it is worth writing now rather than later: the resume path is
+    still unbuilt, so the moment it lands this assertion is already standing
+    guard. A guarantee nobody pinned while it was free stops holding silently.
+    """
+    import threading
+
+    monkeypatch.setattr( flow_mod, "resolve",
+                         lambda command: FakeSpec( required_args=( "location", ) ) )
+    router     = FakeRouter( command="agent router go to weather" )
+    extraction = _extraction( final_args={}, missing=[ "location" ], fallback_questions={} )
+    expeditor  = FakeExpeditor( extraction=extraction )
+    pending    = FakePending()
+    f = _make_flow( tmp_path, FakeCache(), router, expeditor, FakeExecutor(), pending, notifier )
+
+    before = { t.ident for t in threading.enumerate() }
+    r      = f.run( "what's the weather", **_CTX, interactive=False )
+    after  = { t.ident for t in threading.enumerate() }
+
+    assert r[ "status" ] == "needs_input"
+    assert after == before, (
+        "non-interactive run spawned a background thread — the never-blocks "
+        f"guarantee is broken. new thread ids: {after - before}"
+    )
+
+
 # ────────────────────────────────────────────────────────────── branch — args_complete
 
 def test_args_complete_runs_agent_and_writes_back( tmp_path, notifier, monkeypatch ):
