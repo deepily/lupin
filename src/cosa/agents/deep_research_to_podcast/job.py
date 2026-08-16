@@ -28,18 +28,12 @@ from cosa.agents.agentic_job_base import AgenticJobBase
 from cosa.rest.job_state import JobState
 
 
-# Display labels for the completion-abstract per-language lines. Kept local (not
-# imported from cosa.agents.podcast_generator.config) so building a card does not
-# drag in the whole podcast_generator package __init__ at runtime — that chain
-# pulls mcp/pydantic and is heavier than a text abstract needs. Unknown codes fall
-# back to the raw code via .get(lang, lang). Mirror of that module's LANGUAGE_NAMES.
-_LANGUAGE_NAMES = {
-    "en"    : "English",
-    "es"    : "Spanish",
-    "es-ES" : "Castilian Spanish (Spain)",
-    "es-MX" : "Mexican Spanish",
-    "es-AR" : "Argentinian Spanish",
-}
+# Display labels for the completion-abstract per-language lines. Imported from the
+# canonical LEAF map (row 81040071) — cosa.agents.language_names has NO heavy
+# imports, so building a card does not drag in the podcast_generator package
+# __init__ (mcp/pydantic, ~900 modules) the way importing config.py would. One
+# copy, so the labels can never drift. Unknown codes fall back via .get(lang, lang).
+from cosa.agents.language_names import LANGUAGE_NAMES as _LANGUAGE_NAMES
 
 
 class DeepResearchToPodcastJob( AgenticJobBase ):

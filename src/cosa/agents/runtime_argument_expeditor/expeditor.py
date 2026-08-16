@@ -1691,7 +1691,10 @@ class RuntimeArgumentExpeditor:
         #    Runs on a COPY so the caller's docs_map is untouched.
         filtered_map, arbitrary = prefilter_docs_map_by_keywords( dict( docs_map ), description, debug=self.debug )
         if arbitrary:
-            if self.debug: print( "[Expeditor] No keyword overlap on a large candidate set" )
+            # Weak or lossy narrowing on a large set: no keyword overlap, a thin
+            # single-keyword best match, or a truncated scored list — the shortlist
+            # can't be trusted, so ask for an exact path (rows c143fd84 / 888711f0).
+            if self.debug: print( "[Expeditor] Weak/lossy narrowing on a large candidate set — asking for an exact path" )
             return ( "too_broad", [] )
 
         # 3. LLM fuzzy match, validated against the filtered map

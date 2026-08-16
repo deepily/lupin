@@ -449,3 +449,25 @@ class TestRealPathCompletionAbstract:
         assert "Research Report" not in abstract       # research_path was None
         assert "Pipeline complete!" in out             # run completed despite notify raise
         assert "completion notify failed" in capsys.readouterr().out
+
+
+class TestLanguageLabelSingleSource:
+    """
+    Row 81040071: the DRP job once hand-copied podcast_generator's LANGUAGE_NAMES
+    into a module-level _LANGUAGE_NAMES — two label maps that WILL drift and
+    mislabel a language in front of an audience. The fix moved the map to a leaf
+    module both consumers import. These identity assertions BITE the moment anyone
+    re-inlines a copy: a fresh dict literal breaks `is` even if the values match.
+    """
+
+    def test_drp_job_uses_the_canonical_leaf_map( self ):
+        from cosa.agents.language_names import LANGUAGE_NAMES
+        from cosa.agents.deep_research_to_podcast import job as drp_job
+        assert drp_job._LANGUAGE_NAMES is LANGUAGE_NAMES, \
+            "DRP job must import the single-source map, not re-inline it (row 81040071)"
+
+    def test_podcast_config_reexports_the_canonical_leaf_map( self ):
+        from cosa.agents.language_names import LANGUAGE_NAMES
+        from cosa.agents.podcast_generator.config import LANGUAGE_NAMES as cfg_names
+        assert cfg_names is LANGUAGE_NAMES, \
+            "podcast_generator.config must re-export the single-source map (row 81040071)"

@@ -255,11 +255,13 @@ async def match_research_docs( user_email: str, description: str, debug: bool = 
     # Shared with the expeditor path so there is one behaviour instead of two.
     docs_map, arbitrary = prefilter_docs_map_by_keywords( docs_map, description, debug=debug )
     if arbitrary:
-        # Too many candidates to send whole, and the description matched no path.
+        # The narrowing was too weak or lossy to trust: too many candidates to
+        # send whole AND either no keyword overlap, a thin single-keyword best
+        # match (a zero-overlap target could beat it), or a truncated scored list.
         # Returning no matches surfaces a visible "no document matched" to the
-        # user (404) rather than letting the model pick confidently from an
-        # unranked slice that only looks like a shortlist.
-        if debug: print( f"[match_research_docs] No keyword overlap on {len( docs_map )}-file cap — returning no matches so the user is asked for an exact path" )
+        # user (404) rather than letting the model pick confidently from a
+        # shortlist the target may never have entered (rows c143fd84 / 888711f0).
+        if debug: print( f"[match_research_docs] Weak/lossy narrowing on {len( docs_map )}-file cap — returning no matches so the user is asked for an exact path" )
         return []
 
     # Load prompt template

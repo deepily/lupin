@@ -12,6 +12,11 @@ Design decisions:
 from dataclasses import dataclass, field, fields
 from typing import Literal, Optional, List
 
+# Re-exported from the canonical leaf module so this package and the DRP job share
+# ONE label map that cannot drift (row 81040071). Consumers keep importing it as
+# `from cosa.agents.podcast_generator.config import LANGUAGE_NAMES`.
+from cosa.agents.language_names import LANGUAGE_NAMES
+
 
 @dataclass
 class HostPersonality:
@@ -199,14 +204,8 @@ DEFAULT_VOICE_EXPERT = VoiceProfile(
 # =============================================================================
 # Language Configuration
 # =============================================================================
-
-LANGUAGE_NAMES = {
-    "en"    : "English",
-    "es"    : "Spanish",
-    "es-ES" : "Castilian Spanish (Spain)",
-    "es-MX" : "Mexican Spanish",
-    "es-AR" : "Argentinian Spanish",
-}
+# LANGUAGE_NAMES is the single source of truth in cosa.agents.language_names,
+# re-exported at the top of this module (see import above). Do NOT re-inline it.
 
 
 # =============================================================================
