@@ -26,6 +26,7 @@ from lupin_cli.claude_code.hooks.register_session import (
     _build_memento_block,
     _extract_amendment_tail,
     _memento_candidates,
+    _names_this_seat,
     _persona_of,
     _persona_slugs,
     _resolve_memento_path,
@@ -119,6 +120,97 @@ def test_never_returns_another_personas_record( repo ):
     assert _resolve_memento_path( SID_FRESH, "Rio", repo ) is None
 
 
+# ---------------------------------------------------------------------------
+# The io slot — the third cause of a blank rehydrate
+# ---------------------------------------------------------------------------
+def _write_io_memento( root, persona, sid8, *, amendments=(), written_at="2026-08-15T19:12:47-04:00" ):
+    """A record in the io slot: `io/mementos/<persona>-<sid8>.md`, no filename prefix."""
+    slot = os.path.join( root, "io", "mementos" )
+    os.makedirs( slot, exist_ok=True )
+    path = os.path.join( slot, f"{persona}-{sid8}.md" )
+    body = [ f"<!-- memento-record: persona={persona} session_id={sid8} written_at={written_at} slot=io -->\n",
+             f"# Memento — {persona}\nheld state\n" ]
+    for text in amendments:
+        body.append( f"\n<!-- memento-amendment: by={persona} session_id={sid8} -->\n{text}\n" )
+    with open( path, "w", encoding="utf-8" ) as fh:
+        fh.write( "".join( body ) )
+    return path
+
+
+def test_resolves_a_record_in_the_io_slot( repo ):
+    """
+    CONTROL FOR A REAL DEFECT (Rachel 🕊️, reproduced against 8b9a10e9).
+
+    There are TWO slot families. The first cut enumerated only repo-root files
+    named `.claude-memento-*`, so a record at `io/mementos/<persona>-<sid8>.md`
+    — hers was a real 23KB memento whose own header says `slot=io` — was
+    invisible, and she rehydrated blank on the third distinct cause in one
+    night.
+    """
+    path = _write_io_memento( repo, "rachel", "9eb9253c", amendments=[ "BOARD IS 5 ROWS" ] )
+    assert _resolve_memento_path( "9eb9253c-3dc1-45a7-a148-37b03964915a", "Rachel", repo ) == path
+    assert "BOARD IS 5 ROWS" in _build_memento_block( "9eb9253c-3dc1-45a7-a148-37b03964915a", "Rachel", repo )
+
+
+def test_io_slot_resolves_by_persona_after_a_respawn( repo ):
+    """Same persona-carries-over rule as the root slot, in the other family."""
+    path = _write_io_memento( repo, "rachel", "9eb9253c" )
+    assert _resolve_memento_path( SID_FRESH, "Rachel", repo ) == path
+
+
+def test_io_slot_never_leaks_across_personas( repo ):
+    _write_io_memento( repo, "rachel", "9eb9253c" )
+    _write_io_memento( repo, "arnold", "ca8fbfcc" )
+    assert _resolve_memento_path( SID_FRESH, "Rio", repo ) is None
+
+
+def test_both_slots_are_searched_and_the_newest_wins( repo ):
+    """A seat can hold records in BOTH families; recency still decides."""
+    _write_memento(    repo, "rachel", "aaaaaaaa", written_at="2026-08-01T09:00:00-04:00" )
+    io_new = _write_io_memento( repo, "rachel", "9eb9253c", written_at="2026-08-15T19:12:47-04:00" )
+    assert _resolve_memento_path( SID_FRESH, "Rachel", repo ) == io_new
+
+
+def test_a_bare_persona_filename_resolves( repo ):
+    """`io/mementos/arnold.md` — no session id in the name at all."""
+    slot = os.path.join( repo, "io", "mementos" )
+    os.makedirs( slot, exist_ok=True )
+    path = os.path.join( slot, "arnold.md" )
+    with open( path, "w", encoding="utf-8" ) as fh:
+        fh.write( "<!-- memento-record: persona=arnold session_id=ca8fbfcc written_at=2026-08-15T18:37:00-04:00 slot=io -->\n# Memento\n" )
+    assert _resolve_memento_path( SID_FRESH, "arnold", repo ) == path
+
+
+def test_unrelated_files_in_the_io_slot_are_not_candidates( repo ):
+    """
+    The pre-filter must not admit another seat's record. The io slot holds
+    hundreds of files fleet-wide, so a resolver that reads them all is both
+    slow and one bad header away from handing over the wrong state.
+    """
+    _write_io_memento( repo, "rio",    "11111111" )
+    _write_io_memento( repo, "arnold", "22222222" )
+    rows = _memento_candidates( repo, sid8=None, slugs=[ "rachel" ] )
+    assert rows == []
+
+
+def test_the_pre_filter_bounds_the_boot_cost( repo ):
+    """
+    Every session in the fleet pays this on boot. With no pre-filter the
+    resolver would open every record in the slot; with one it opens only the
+    seat's own. This asserts the mechanism, not a wall-clock number.
+    """
+    for i in range( 30 ):
+        _write_io_memento( repo, f"other{i}", f"{i:08d}" )
+    mine = _write_io_memento( repo, "rachel", "9eb9253c" )
+
+    filtered = _memento_candidates( repo, sid8="9eb9253c", slugs=[ "rachel" ] )
+    assert [ p for p, _, _ in filtered ] == [ mine ]
+
+    # Unfiltered sees all 31 — which is exactly the cost the pre-filter avoids,
+    # and the reason resolution must never be called without an identity.
+    assert len( _memento_candidates( repo ) ) == 31
+
+
 def test_root_pointer_is_never_treated_as_a_record( repo ):
     """
     `.claude-memento.md` is a POINTER and is single-occupancy for the whole
@@ -192,8 +284,19 @@ def test_persona_of_prefers_header_then_filename( header, expected ):
     assert _persona_of( "/x/.claude-memento-cheech-80c17315.md", header ) == expected
 
 
-def test_persona_of_returns_none_for_an_unparseable_name( ):
-    assert _persona_of( "/x/.claude-memento-nodash.md", None ) is None
+def test_a_name_with_no_session_id_is_still_a_persona( ):
+    """
+    Rewritten when the io slot landed: `arnold.md` and
+    `.claude-memento-nodash.md` are legitimate bare-persona shapes, so a
+    missing session id is no longer unparseable. The old assertion encoded the
+    root-slot-only rule.
+    """
+    assert _persona_of( "/x/.claude-memento-nodash.md", None ) == "nodash"
+    assert _persona_of( "/x/io/mementos/arnold.md",     None ) == "arnold"
+
+
+def test_persona_of_returns_none_when_there_is_no_name_at_all( ):
+    assert _persona_of( "/x/.claude-memento-.md", None ) is None
 
 
 @pytest.mark.parametrize( "header,expected", [
@@ -423,3 +526,84 @@ def test_resolver_exhausts_without_a_match( repo ):
     """Candidates exist, none belong to this seat — the loop must fall through."""
     _write_memento( repo, "mr-radio", "bb44a838" )
     assert _resolve_memento_path( SID_FRESH, "Cheech", repo ) is None
+
+
+def test_a_non_markdown_name_is_never_this_seats( ):
+    """The cheap filter rejects on extension before it looks at identity."""
+    assert _names_this_seat( "rachel-9eb9253c.txt", "9eb9253c", [ "rachel" ] ) is False
+    assert _names_this_seat( "rachel-9eb9253c.md",  "9eb9253c", [ "rachel" ] ) is True
+
+
+def test_the_same_record_reachable_twice_is_listed_once( repo ):
+    """
+    The mirror and the in-repo slot can be the same file. Listing it twice
+    would let one record outvote another purely by being reachable by two
+    paths, so dedupe is on realpath, not on name.
+    """
+    real = _write_io_memento( repo, "rachel", "9eb9253c" )
+    slot = os.path.join( repo, "io", "mementos" )
+    os.symlink( real, os.path.join( slot, "rachel-mirror.md" ) )
+
+    rows = _memento_candidates( repo, sid8="9eb9253c", slugs=[ "rachel" ] )
+    assert len( rows ) == 1, "the same record was counted twice"
+
+
+def test_persona_search_exhausts_every_slug_without_a_match( repo ):
+    """Both accent forms tried, neither present — falls through to None."""
+    _write_io_memento( repo, "arnold", "ca8fbfcc" )
+    assert _resolve_memento_path( SID_FRESH, "María", repo ) is None
+
+
+def test_header_persona_overrules_a_misleading_filename( repo ):
+    """
+    Closes the last branch, and pins the property that matters: a file NAMED
+    for one persona whose header declares another belongs to the header's
+    owner. The cheap filename filter admits it; the header confirmation is what
+    refuses it. Without that split, renaming a file would hand over its
+    contents.
+    """
+    slot = os.path.join( repo, "io", "mementos" )
+    os.makedirs( slot, exist_ok=True )
+    path = os.path.join( slot, "maria-9eb9253c.md" )
+    with open( path, "w", encoding="utf-8" ) as fh:
+        fh.write( "<!-- memento-record: persona=rachel session_id=9eb9253c written_at=2026-08-15T19:12:47-04:00 slot=io -->\n# Memento\n" )
+
+    # The name says maría; the header says rachel. María must NOT get it.
+    assert _resolve_memento_path( SID_FRESH, "María", repo ) is None
+
+    # Rachel reaches it by SESSION ID, which the filename also carries.
+    assert _resolve_memento_path( "9eb9253c-3dc1-45a7-a148-37b03964915a", "Rachel", repo ) == path
+
+    # THE LIMITATION, STATED RATHER THAN HIDDEN: with a fresh session id and
+    # only a persona to go on, the true owner cannot reach a record filed under
+    # someone else's name — the filename pre-filter never admits it. That is the
+    # price of not reading 679 headers on every boot. It fails CLOSED (no
+    # memento), never open (someone else's memento), which is the safe
+    # direction; a record filed under the wrong persona is a writer-side bug.
+    assert _resolve_memento_path( SID_FRESH, "Rachel", repo ) is None
+
+
+def test_the_mirror_root_slot_is_searched_too( repo, monkeypatch, tmp_path ):
+    """
+    CONTROL FOR THE FOURTH SLOT (Rachel 🕊️, 2026-08-15). Records also live at
+    `~/.claude/mementos/<project>/.claude-memento-<persona>-<sid8>.md` — four of
+    hers do. Missing it is the same blank rehydrate one directory over.
+
+    Note this slot uses the DOTTED filename shape while the io slot beneath it
+    uses the bare one, so a directory cannot be trusted to imply its own naming
+    convention.
+    """
+    home    = tmp_path / "fakehome"
+    project = os.path.basename( os.path.normpath( repo ) )
+    mirror  = home / ".claude" / "mementos" / project
+    mirror.mkdir( parents=True )
+    path = mirror / ".claude-memento-rachel-35d5ced0.md"
+    path.write_text(
+        "<!-- memento-record: persona=rachel session_id=35d5ced0 written_at=2026-08-01T18:36:00-04:00 slot=root -->\n"
+        "# Memento\n<!-- memento-amendment: by=rachel -->\nMIRROR ROOT RECORD\n",
+        encoding="utf-8" )
+
+    monkeypatch.setenv( "HOME", str( home ) )
+    assert _resolve_memento_path( "35d5ced0-0000-0000-0000-000000000000", "Rachel", repo ) == str( path )
+    assert "MIRROR ROOT RECORD" in _build_memento_block( "35d5ced0-0000-0000-0000-000000000000", "Rachel", repo )
+    assert _resolve_memento_path( SID_FRESH, "Rio", repo ) is None

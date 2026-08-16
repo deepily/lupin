@@ -1090,9 +1090,77 @@ def _written_at_of( header ):
     return match.group( 1 ) if match else None
 
 
-def _memento_candidates( repo_root ):
+def _memento_dirs( repo_root ):
     """
-    List memento RECORDS at the repo root, newest first.
+    Every directory a memento RECORD can live in, for this repo.
+
+    FOUR of them, and the first cut knew about one (Rachel 🕊️, 2026-08-15,
+    reproduced against 8b9a10e9). Her record sat at
+    `io/mementos/rachel-9eb9253c.md` — a real 23KB memento whose own header
+    declares `slot=io` — and the resolver never looked there, so she rehydrated
+    blank for the third time tonight on the third distinct cause. She then
+    named a fourth, `~/.claude/mementos/<project>/.claude-memento-<persona>-
+    <sid8>.md`, which holds four more of her records.
+
+    Note the two filename shapes do NOT line up with the two roots: the mirror
+    carries BOTH the dotted repo-root shape at its top level and the bare
+    `<persona>-<sid8>.md` shape under `io/mementos`. So a directory does not
+    tell you its naming convention — enumerate all four and let the header
+    decide, rather than reasoning about which slot is "current". Writers have
+    moved between these over time and old records stay put; a resolver that
+    backs the wrong one rehydrates a seat blank while its state sits on disk.
+
+    Requires:
+        - repo_root is a directory path
+
+    Ensures:
+        - Returns [ repo root, in-repo io slot, mirror root, mirror io slot ]
+        - Never raises
+    """
+    project = os.path.basename( os.path.normpath( repo_root ) )
+    mirror  = os.path.join( os.path.expanduser( "~/.claude/mementos" ), project )
+    return [
+        repo_root,
+        os.path.join( repo_root, "io", "mementos" ),
+        mirror,                                      # `.claude-memento-<persona>-<sid8>.md`
+        os.path.join( mirror, "io", "mementos" ),    # `<persona>-<sid8>.md`
+    ]
+
+
+def _names_this_seat( name, sid8, slugs ):
+    """
+    Cheap filename test: could this file belong to this seat at all?
+
+    WHY A PRE-FILTER AND NOT JUST HEADER CONFIRMATION. The io slot holds 337
+    files in the mirror and 338 in the repo. Opening every one to read its
+    header would put ~675 file reads on the boot path of every session in the
+    fleet, to find one record. So the filename decides who is even a candidate,
+    and the header still confirms the survivors — cheap test first, honest test
+    second.
+
+    Requires:
+        - name is a bare filename; sid8 is an 8-char id or None; slugs is a list
+
+    Ensures:
+        - True when the name carries this seat's id or leads with its persona
+        - Accepts both slot shapes: `.claude-memento-<persona>-<sid8>.md` at the
+          repo root and `<persona>[-<anything>].md` in an io slot
+        - Never raises
+    """
+    if not name.endswith( ".md" ): return False
+
+    stem = name[ :-3 ]
+    if stem.startswith( _MEMENTO_FILE_PREFIX ): stem = stem[ len( _MEMENTO_FILE_PREFIX ): ]
+
+    if sid8 and sid8 in stem: return True
+    for slug in slugs:
+        if stem == slug or stem.startswith( f"{slug}-" ): return True
+    return False
+
+
+def _memento_candidates( repo_root, sid8=None, slugs=() ):
+    """
+    Memento RECORDS visible to this seat, across both slot families, newest first.
 
     Deliberately excludes `.claude-memento.md` — that file is a POINTER, not a
     record, and it is single-occupancy for the entire repo. It currently names
@@ -1106,33 +1174,45 @@ def _memento_candidates( repo_root ):
 
     Requires:
         - repo_root is a directory path
+        - sid8 / slugs identify the seat; both empty means "no pre-filter",
+          which is only safe on the small repo-root slot
 
     Ensures:
         - Returns [ (path, header, sort_key), … ] newest-first, records only
-        - Returns [] when the directory is unreadable
+        - Returns [] when no directory is readable
         - Never raises
     """
-    try:
-        names = os.listdir( repo_root )
-    except OSError:
-        return []
+    out  = []
+    seen = set()
+    for directory in _memento_dirs( repo_root ):
+        try:
+            names = os.listdir( directory )
+        except OSError:
+            continue
 
-    out = []
-    for name in sorted( names ):
-        if not name.startswith( _MEMENTO_FILE_PREFIX ): continue
-        if not name.endswith( ".md" ):                  continue
-        path   = os.path.join( repo_root, name )
-        header = _header_of( path )
-        stamp  = _written_at_of( header )
-        if stamp:
-            # ISO strings sort lexicographically; the "1" tier outranks mtime.
-            sort_key = ( 1, stamp )
-        else:
-            try:
-                sort_key = ( 0, str( os.path.getmtime( path ) ) )
-            except OSError:
-                sort_key = ( 0, "" )
-        out.append( ( path, header, sort_key ) )
+        at_root = os.path.normpath( directory ) == os.path.normpath( repo_root )
+        for name in sorted( names ):
+            # The repo root holds unrelated files; only the prefixed ones are records.
+            if at_root and not name.startswith( _MEMENTO_FILE_PREFIX ): continue
+            if not name.endswith( ".md" ):                              continue
+            if ( sid8 or slugs ) and not _names_this_seat( name, sid8, slugs ): continue
+
+            path = os.path.join( directory, name )
+            real = os.path.realpath( path )
+            if real in seen: continue      # the mirror and the repo can hold the same record
+            seen.add( real )
+
+            header = _header_of( path )
+            stamp  = _written_at_of( header )
+            if stamp:
+                # ISO strings sort lexicographically; the "1" tier outranks mtime.
+                sort_key = ( 1, stamp )
+            else:
+                try:
+                    sort_key = ( 0, str( os.path.getmtime( path ) ) )
+                except OSError:
+                    sort_key = ( 0, "" )
+            out.append( ( path, header, sort_key ) )
 
     return sorted( out, key=lambda row: row[2], reverse=True )
 
@@ -1174,11 +1254,15 @@ def _persona_of( path, header ):
         match = re.search( r"persona=([^\s]+)", header )
         if match: return match.group( 1 ).strip().lower()
 
-    # `.claude-memento-<slug>-<sid8>.md` -> <slug>
-    stem = os.path.basename( path )[ len( _MEMENTO_FILE_PREFIX ): ]
-    if stem.endswith( ".md" ): stem = stem[ :-3 ]
-    if "-" not in stem: return None
-    return stem.rsplit( "-", 1 )[0].strip().lower() or None
+    # Two shapes: `.claude-memento-<slug>-<sid8>.md` at the repo root, and
+    # `<slug>[-<sid8>|-<anything>].md` in an io slot. Strip the optional prefix,
+    # then take the leading segment — the io slot's `rachel-9eb9253c.md` and the
+    # bare `arnold.md` both resolve, and neither can leak across personas.
+    stem = os.path.basename( path )
+    if stem.endswith( ".md" ):                  stem = stem[ :-3 ]
+    if stem.startswith( _MEMENTO_FILE_PREFIX ): stem = stem[ len( _MEMENTO_FILE_PREFIX ): ]
+    if not stem: return None
+    return stem.split( "-", 1 )[0].strip().lower() or None
 
 
 def _resolve_memento_path( stable_session_id, persona_name, repo_root ):
@@ -1211,11 +1295,11 @@ def _resolve_memento_path( stable_session_id, persona_name, repo_root ):
         - Never returns a record belonging to a different persona
         - Never raises
     """
-    candidates = _memento_candidates( repo_root )
-    if not candidates: return None
-
     sid8  = stable_session_id[:8] if stable_session_id and len( stable_session_id ) >= 8 else None
     slugs = _persona_slugs( persona_name )
+
+    candidates = _memento_candidates( repo_root, sid8=sid8, slugs=slugs )
+    if not candidates: return None
 
     # 1. Exact session-id match — a self-re-spin keeps its id, so a record
     #    naming it is unambiguously ours. Match on the header when there is
