@@ -366,7 +366,16 @@ def test_transition_happy_path_returns_item_and_event( client, repo ):
 
 
 def test_transition_to_done_with_valid_receipts_passes_them_through( client, repo ):
-    receipts = { "commit": "6be15f46" }
+    # A test_run, not a commit. This test is about PASS-THROUGH plumbing — that
+    # whatever receipts arrive reach the repository and come back on the event.
+    # The done-gate (row 9bfb4b73) now checks a commit for branch REACHABILITY
+    # via the scope registry, and the registry resolves ZERO scopes on a
+    # developer host (its external paths are container paths). So a commit here
+    # made the test's result depend on WHERE it ran, and it would 422 before the
+    # plumbing under test was ever reached. A ts- run id is an equally valid
+    # checkable receipt and needs no repo, which keeps this test hermetic and
+    # about its own subject.
+    receipts = { "test_run": "ts-5cc305c7" }
     item     = make_item( status="done" )
     repo.get_by_id_for_update.return_value        = make_item( status="review" )
     repo.apply_transition.return_value = make_event( item.id, transition="review->done", receipt_refs=receipts )
