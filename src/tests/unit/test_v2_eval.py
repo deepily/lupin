@@ -537,3 +537,173 @@ def test_default_client_factory_logs_in( monkeypatch ):
     client = ve._default_client_factory( "http://localhost:8000/" )
     assert isinstance( client, ve.HttpAskClient )
     assert client.bearer == "jwt-123"
+
+
+# ---------------------------------------------------------------------------
+# F1 — the client-send instrument (ask stamps it; compute_metrics reports it)
+# ---------------------------------------------------------------------------
+def _clock_from( values ):
+    """A fake monotonic clock that returns the given values in order."""
+    seq = iter( values )
+    return lambda: next( seq )
+
+
+def test_ask_stamps_client_span_ms_from_injected_clock():
+    # send at 10.0, reply in hand at 10.5 -> a 500 ms client-send span (deterministic).
+    client = ve.HttpAskClient(
+        "http://localhost:8000", bearer="j",
+        post_fn=lambda url, json, headers, timeout: _FakeReply( 200, { "path": "replay" } ),
+        clock=_clock_from( [ 10.0, 10.5 ] ),
+    )
+    rec = client.ask( "what time is it" )
+    assert rec[ "client_span_ms" ] == 500.0
+
+
+def test_ask_stamps_client_span_ms_even_on_http_error():
+    # The span is send->reply regardless of status; a failed call is still timed.
+    client = ve.HttpAskClient(
+        "http://localhost:8000", bearer="j",
+        post_fn=lambda url, json, headers, timeout: _FakeReply( 500, {} ),
+        clock=_clock_from( [ 1.0, 1.2 ] ),
+    )
+    rec = client.ask( "x" )
+    assert rec[ "ok" ] is False
+    assert round( rec[ "client_span_ms" ], 6 ) == 200.0
+
+
+def _rec_cs( client_span_ms, **kw ):
+    """An ok record carrying a client_span_ms (the F1 instrument)."""
+    r = _rec( **kw )
+    r[ "client_span_ms" ] = client_span_ms
+    return r
+
+
+def test_compute_metrics_reports_client_instrument_when_present():
+    records = [
+        _rec_cs( 100.0, path="agent", command="agent router go to math", timings_ms={ "t_first_useful": 1.0 } ),
+        _rec_cs( 200.0, path="agent", command="agent router go to math", timings_ms={ "t_first_useful": 2.0 } ),
+        _rec_cs( 300.0, path="agent", command="agent router go to math", timings_ms={ "t_first_useful": 3.0 } ),
+    ]
+    m = ve.compute_metrics( records )
+    assert m[ "spans" ]         == [ 100.0, 200.0, 300.0 ]
+    assert m[ "client_p50_ms" ] == 200.0
+    assert m[ "client_p95_ms" ] == 290.0
+    # additive: the server-stamped mark is still reported, untouched.
+    assert m[ "p50_first_useful_ms" ] == 2.0
+
+
+def test_compute_metrics_client_instrument_empty_when_absent():
+    # Records without client_span_ms -> the instrument reports no usable spans.
+    m = ve.compute_metrics( [ _rec( path="agent", command="agent router go to math" ) ] )
+    assert m[ "spans" ]         == []
+    assert m[ "client_p50_ms" ] is None
+    assert m[ "client_p95_ms" ] is None
+
+
+def test_render_report_carries_client_rows_and_instrument_caveat():
+    m = ve.compute_metrics( [ _rec_cs( 120.0, path="replay", similarity=99.0,
+                                       command="agent router go to math",
+                                       timings_ms={ "t_first_useful": 4.0 } ) ] )
+    report = ve.render_report( m, m, ve.threshold_table( [ _rec( path="replay", similarity=99.0 ) ] ),
+                               { "p50_delta_ms": 0.0, "p95_delta_ms": 0.0 }, "simple", "2026-08-15-02-30-00" )
+    assert "client-send (ms)" in report
+    assert "client-send** is the F1 cross-arm span" in report
+    assert "proxy" in report
+
+
+# ---------------------------------------------------------------------------
+# F2/paired — the median-Δ gate REFUSES unless both arms carry the instrument
+# ---------------------------------------------------------------------------
+def test_arm_client_instrument_reason_variants():
+    assert ve._arm_client_instrument_reason( { "client_p50_ms": 1.0, "spans": [ 1.0 ] }, "v2" ) is None
+    assert "no client_p50_ms" in ve._arm_client_instrument_reason( { "spans": [ 1.0 ] }, "v1" )
+    assert "no usable spans"  in ve._arm_client_instrument_reason( { "client_p50_ms": None, "spans": [] }, "v2" )
+    assert "no usable spans"  in ve._arm_client_instrument_reason( { "client_p50_ms": 1.0, "spans": "nope" }, "v1" )
+
+
+def _arm( *spans ):
+    """A minimal arm-metrics dict carrying the client instrument."""
+    return { "client_p50_ms": ve.percentile( list( spans ), 50 ), "spans": list( spans ) }
+
+
+def test_paired_gate_declines_and_names_each_disqualified_arm():
+    # v1 missing the instrument -> declined, names v1, no number.
+    g = ve.paired_median_delta_gate( { "spans": [ 1.0 ] }, _arm( 5.0 ) )
+    assert g[ "fired" ] is False
+    assert "v1 arm" in g[ "reason" ] and "v2" not in g[ "reason" ]
+    assert "v1_median_ms" not in g
+
+    # both disqualified -> both named.
+    g2 = ve.paired_median_delta_gate( { "spans": [] }, { "client_p50_ms": 1.0, "spans": [] } )
+    assert g2[ "fired" ] is False
+    assert "v1 arm" in g2[ "reason" ] and "v2 arm" in g2[ "reason" ]
+
+
+def test_paired_gate_fires_with_delta_and_faster_arm():
+    v2_faster = ve.paired_median_delta_gate( _arm( 100.0, 100.0, 100.0 ), _arm( 40.0, 40.0, 40.0 ) )
+    assert v2_faster[ "fired" ] is True
+    assert v2_faster[ "v1_median_ms" ] == 100.0 and v2_faster[ "v2_median_ms" ] == 40.0
+    assert v2_faster[ "delta_ms" ] == -60.0 and v2_faster[ "faster_arm" ] == "v2"
+    assert v2_faster[ "n_v1" ] == 3 and v2_faster[ "n_v2" ] == 3
+
+    v1_faster = ve.paired_median_delta_gate( _arm( 10.0 ), _arm( 30.0 ) )
+    assert v1_faster[ "delta_ms" ] == 20.0 and v1_faster[ "faster_arm" ] == "v1"
+
+    tie = ve.paired_median_delta_gate( _arm( 50.0 ), _arm( 50.0 ) )
+    assert tie[ "delta_ms" ] == 0.0 and tie[ "faster_arm" ] == "tie"
+
+
+def test_render_paired_verdict_declined_and_fired():
+    declined = ve.render_paired_verdict( { "fired": False, "reason": "paired latency gate DECLINED — v1 arm ..." } )
+    assert "DECLINED — no number emitted." in declined
+    assert "ms" not in declined                          # no latency number leaks on a refusal
+
+    fired = ve.render_paired_verdict( ve.paired_median_delta_gate( _arm( 100.0 ), _arm( 40.0 ) ) )
+    assert "v1 median: 100.0 ms" in fired
+    assert "v2 median: 40.0 ms" in fired
+    assert "faster arm: v2" in fired
+
+
+# ---------------------------------------------------------------------------
+# F3 — the cold-start guard (prove it can fail)
+# ---------------------------------------------------------------------------
+def test_guard_cold_start_passes_when_cold():
+    assert ve.guard_cold_start( { "cache_hit_rate": 0.0 } ) is None
+    assert ve.guard_cold_start( { "cache_hit_rate": None } ) is None   # no 200s -> nothing to contaminate
+
+
+def test_guard_cold_start_raises_on_prewarmed_store():
+    with pytest.raises( ve.EvalIntegrityError, match="cold-start integrity failed" ):
+        ve.guard_cold_start( { "cache_hit_rate": 0.5 } )
+
+
+class _ReplayClient:
+    """Every ask returns a cache hit — so the COLD pass reads warmth (a contaminated baseline)."""
+    def ask( self, question ):
+        return { "utterance": question, "ok": True, "status_code": 200,
+                 "payload": { "path": "replay", "similarity": 99.0,
+                              "command": "agent router go to weather",
+                              "trace_id": "tid-" + question,
+                              "timings_ms": { "t_first_useful": 3.0 } } }
+
+
+def test_main_cold_guard_raises_on_warm_cold( tmp_path ):
+    _seed_trace( tmp_path, _WEATHER_QUESTIONS )
+    with pytest.raises( ve.EvalIntegrityError, match="cold-start integrity failed" ):
+        ve.main(
+            argv=[ "--corpus", "weather", "--max-router-error-rate", "1.0" ],
+            client_factory=lambda url: _ReplayClient(),
+            project_root=str( tmp_path ),
+            timestamp="2026-08-14-02-30-00",
+        )
+
+
+def test_main_allow_warm_cold_skips_the_guard( tmp_path ):
+    _seed_trace( tmp_path, _WEATHER_QUESTIONS )
+    result = ve.main(
+        argv=[ "--corpus", "weather", "--max-router-error-rate", "1.0", "--allow-warm-cold" ],
+        client_factory=lambda url: _ReplayClient(),
+        project_root=str( tmp_path ),
+        timestamp="2026-08-14-02-30-00",
+    )
+    assert result[ "warm" ][ "cache_hit_rate" ] == 1.0

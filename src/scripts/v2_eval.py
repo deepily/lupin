@@ -42,6 +42,7 @@ import os
 import random
 import statistics
 import sys
+import time
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 # ---------------------------------------------------------------------------
@@ -408,6 +409,11 @@ def compute_metrics( records: List[ Dict[ str, Any ] ] ) -> Dict[ str, Any ]:
 
     latencies = [ v for v in ( first_useful_ms( r ) for r in ok ) if v is not None ]
 
+    # F1 client-send instrument (additive): the comparable-across-arms span. Server-stamped
+    # first_useful stays exactly as-is above; this is a SECOND, client-clock number measured
+    # the same way the v1 arm measures around /api/push, so the paired gate has one instrument.
+    client_spans = [ r[ "client_span_ms" ] for r in ok if r.get( "client_span_ms" ) is not None ]
+
     routed_right = [ r for r in ok if route_matches( matched_command( r ), r[ "expected_command" ] ) ]
 
     would_be_wrong = [
@@ -434,6 +440,14 @@ def compute_metrics( records: List[ Dict[ str, Any ] ] ) -> Dict[ str, Any ]:
         "routing_accuracy"    : _rate( len( routed_right ),     n_ok ),
         "p50_first_useful_ms" : percentile( latencies, 50 ),
         "p95_first_useful_ms" : percentile( latencies, 95 ),
+        # F1 client-send instrument (additive; the paired median-Δ gate reads `spans` +
+        # `client_p50_ms`). These three keys ARE an arm's report that it measured the
+        # client-send instrument — the same shape v1's compute_v1_metrics emits. The
+        # gate requires them of BOTH arms; either arm missing them (an old pre-F1 run)
+        # or with an empty `spans` makes the gate refuse-with-reason rather than emit.
+        "client_p50_ms"       : percentile( client_spans, 50 ),
+        "client_p95_ms"       : percentile( client_spans, 95 ),
+        "spans"               : client_spans,
         "would_be_wrong"      : len( would_be_wrong ),
         "cache_hits"          : len( cache_hits ),
         "by_path"             : by_path,
@@ -499,6 +513,108 @@ def latency_delta( cold: Dict[ str, Any ], warm: Dict[ str, Any ] ) -> Dict[ str
 
 
 # ---------------------------------------------------------------------------
+# The paired median-Δ gate — the cross-arm latency verdict.
+#
+# Mr. Radio's ruling (2026-08-15): the gate must REFUSE rather than emit a number
+# unless BOTH arms carry the F1 client-send instrument — "a gate that can't tell
+# you it's disqualified is worse than no gate." So it never diffs a v2 client span
+# against a v1 server span (the F1 apples-to-oranges the whole review exists to
+# kill); when either arm is missing the client instrument it names WHICH arm and
+# WHY and emits no number.
+#
+# An arm "reports the client-send instrument" iff its metrics dict carries
+# `client_p50_ms` (the F1 span was computed) AND a non-empty `spans` list (it has
+# usable measurements). Both arms emit exactly that shape — v2's compute_metrics
+# and v1's compute_v1_metrics — so the gate needs no per-arm marker argument.
+# ---------------------------------------------------------------------------
+def _arm_client_instrument_reason( metrics: Dict[ str, Any ], arm: str ) -> Optional[ str ]:
+    """
+    None iff `metrics` reports the F1 client-send instrument; else a reason string
+    naming `arm` and why it is disqualified. Never raises.
+    """
+    if "client_p50_ms" not in metrics:
+        return f"{arm} arm did not report the client-send instrument (no client_p50_ms — a pre-F1 run)"
+    spans = metrics.get( "spans" )
+    if not isinstance( spans, list ) or len( spans ) == 0:
+        return f"{arm} arm reported the client-send instrument but has no usable spans (0 comparable measurements)"
+    return None
+
+
+def paired_median_delta_gate(
+    v1_metrics : Dict[ str, Any ],
+    v2_metrics : Dict[ str, Any ],
+) -> Dict[ str, Any ]:
+    """
+    The cross-arm median-latency verdict, on the F1 client-send instrument only.
+
+    Requires:
+        - v1_metrics is a v1-arm metrics dict (compute_v1_metrics); v2_metrics is a
+          v2-arm metrics dict (compute_metrics).
+
+    Ensures:
+        - returns {"fired": False, "reason": <str>} — naming EVERY disqualified arm —
+          when either arm does not report the client-send instrument (missing
+          client_p50_ms, or an empty `spans`). No number is emitted.
+        - returns {"fired": True, instrument, n_v1, n_v2, v1_median_ms, v2_median_ms,
+          delta_ms, faster_arm} when BOTH arms report it; delta_ms = v2 − v1 (positive
+          ⇒ v2 slower), faster_arm is the arm with the lower median (or "tie").
+        - the verdict is explicitly on the client-send PROXY (network + serialization
+          included), NOT v2's server-stamped first_useful — stated in `instrument`.
+        - never raises.
+    """
+    reasons = [
+        r for r in (
+            _arm_client_instrument_reason( v1_metrics, "v1" ),
+            _arm_client_instrument_reason( v2_metrics, "v2" ),
+        ) if r is not None
+    ]
+    if reasons:
+        return {
+            "fired"  : False,
+            "reason" : "paired latency gate DECLINED — " + "; ".join( reasons ),
+        }
+
+    v1_spans = v1_metrics[ "spans" ]
+    v2_spans = v2_metrics[ "spans" ]
+    v1_median = round( statistics.median( v1_spans ), 3 )
+    v2_median = round( statistics.median( v2_spans ), 3 )
+    delta     = round( v2_median - v1_median, 3 )
+    if   delta < 0: faster = "v2"
+    elif delta > 0: faster = "v1"
+    else:           faster = "tie"
+    return {
+        "fired"        : True,
+        "instrument"   : "client_send (proxy: includes network + serialization; NOT v2's server-stamped first_useful)",
+        "n_v1"         : len( v1_spans ),
+        "n_v2"         : len( v2_spans ),
+        "v1_median_ms" : v1_median,
+        "v2_median_ms" : v2_median,
+        "delta_ms"     : delta,
+        "faster_arm"   : faster,
+    }
+
+
+def render_paired_verdict( gate: Dict[ str, Any ] ) -> str:
+    """
+    Render the paired median-Δ gate result as a markdown block.
+
+    Ensures:
+        - a DECLINED gate renders its refusal reason verbatim and NO latency number.
+        - a fired gate renders both medians, the delta, the faster arm, and the
+          client-send-proxy residual so the number is never read as server-precise.
+    """
+    lines : List[ str ] = [ "## Paired median-Δ latency gate (v1 vs v2)", "" ]
+    if not gate[ "fired" ]:
+        lines.append( f"**DECLINED — no number emitted.** {gate[ 'reason' ]}" )
+        return "\n".join( lines )
+    lines.append( f"- instrument: {gate[ 'instrument' ]}" )
+    lines.append( f"- v1 median: {gate[ 'v1_median_ms' ]} ms (n={gate[ 'n_v1' ]})" )
+    lines.append( f"- v2 median: {gate[ 'v2_median_ms' ]} ms (n={gate[ 'n_v2' ]})" )
+    lines.append( f"- delta (v2 − v1): {gate[ 'delta_ms' ]} ms — faster arm: {gate[ 'faster_arm' ]}" )
+    return "\n".join( lines )
+
+
+# ---------------------------------------------------------------------------
 # Run-integrity guard — the control that MUST be able to fail. It asserts three
 # PROPERTIES of a run (never walks a list of expected values): every response
 # was 200, every landed trace is in the authoritative JSONL, and the router was
@@ -554,6 +670,33 @@ def guard_run_integrity(
         raise EvalIntegrityError( "run integrity failed — " + "; ".join( violations ) )
 
 
+def guard_cold_start( cold_metrics: Dict[ str, Any ] ) -> None:
+    """
+    Raise EvalIntegrityError when the COLD pass was not actually cold (F3).
+
+    The review's F3: `guard_run_integrity` runs on the WARM pass only, so a store
+    pre-warmed by a prior run — or by the other arm — makes the "cold" pass read
+    cache hits, understating cold latency and contaminating the cold→warm delta.
+    A cold pass with any cache hit is a contaminated baseline reported as clean.
+
+    Requires:
+        - cold_metrics is the compute_metrics dict for the cold pass.
+
+    Ensures:
+        - returns None when cold cache_hit_rate is None (no 200s) or 0.0 (truly cold).
+        - raises EvalIntegrityError when cold cache_hit_rate > 0 — a pre-warmed store.
+
+    Raises:
+        - EvalIntegrityError on a warm cold pass.
+    """
+    rate = cold_metrics[ "cache_hit_rate" ]
+    if rate is not None and rate > 0:
+        raise EvalIntegrityError(
+            f"cold-start integrity failed — cold pass cache_hit_rate {rate} > 0: the store was "
+            f"pre-warmed (prior run or the other arm), so this cold baseline is contaminated"
+        )
+
+
 def read_jsonl_trace_ids( trace_path: str ) -> List[ str ]:
     """
     The trace ids recorded in one JSONL trace file.
@@ -602,12 +745,14 @@ class HttpAskClient:
         websocket_id : str                       = "v2-eval",
         post_fn      : Optional[ Callable ]      = None,
         timeout      : float                     = 120.0,
+        clock        : Callable[ [], float ]     = time.monotonic,
     ) -> None:
         self.base_url     = base_url.rstrip( "/" )
         self.bearer       = bearer
         self.websocket_id = websocket_id
         self.post_fn      = post_fn
         self.timeout      = timeout
+        self.clock        = clock                # injected monotonic clock — the F1 client-send stopwatch
 
     def _post( self, url: str, payload: Dict[ str, Any ], headers: Dict[ str, str ] ) -> Any:
         """POST via the injected transport, defaulting to requests.post."""
@@ -623,7 +768,16 @@ class HttpAskClient:
         Ensures:
             - runs speak=false, interactive=false (the flow executes, TTS is skipped,
               nothing blocks).
-            - returns {utterance, ok, status_code, payload}; ok is (status_code == 200).
+            - returns {utterance, ok, status_code, payload, client_span_ms}; ok is
+              (status_code == 200).
+            - client_span_ms is the CLIENT-SEND span (F1): monotonic clock from the
+              instant just before the POST to the instant the reply is in hand. It
+              encloses ALL of v2's server-side work (routing + extract + cache lookup +
+              replay), so it is the SAME kind of measurement the v1 arm takes around
+              /api/push — the one number the paired median-Δ gate may compare. It is a
+              proxy (it also carries network + serialization), NOT v2's precise
+              server-stamped first_useful; both are reported, and the report says which
+              is which.
         """
         url     = self.base_url + "/api/v2/ask"
         headers = { "Authorization": f"Bearer {self.bearer}" }
@@ -633,14 +787,17 @@ class HttpAskClient:
             "speak"        : False,
             "interactive"  : False,
         }
+        send_ts = self.clock()
         reply   = self._post( url, body, headers )
+        recv_ts = self.clock()
         ok      = ( reply.status_code == 200 )
         payload = reply.json() if ok else {}
         return {
-            "utterance"   : question,
-            "ok"          : ok,
-            "status_code" : reply.status_code,
-            "payload"     : payload,
+            "utterance"      : question,
+            "ok"             : ok,
+            "status_code"    : reply.status_code,
+            "payload"        : payload,
+            "client_span_ms" : ( recv_ts - send_ts ) * 1000.0,   # F1 client-send instrument
         }
 
 
@@ -730,10 +887,21 @@ def render_report(
         ( "routing accuracy",      "routing_accuracy" ),
         ( "p50 first-useful (ms)", "p50_first_useful_ms" ),
         ( "p95 first-useful (ms)", "p95_first_useful_ms" ),
+        ( "p50 client-send (ms)",  "client_p50_ms" ),
+        ( "p95 client-send (ms)",  "client_p95_ms" ),
         ( "would-be-wrong (count)","would_be_wrong" ),
     ]
     for label, key in rows:
         lines.append( f"| {label} | {_fmt( cold_metrics[ key ] )} | {_fmt( warm_metrics[ key ] )} |" )
+    lines.append( "" )
+    lines.append(
+        "> instruments: **first-useful** is v2's server-stamped mark (routing→answer, "
+        "server-precise). **client-send** is the F1 cross-arm span — the client stopwatch "
+        "from just-before-POST to reply-in-hand — the ONLY number comparable to the v1 arm. "
+        "It is a proxy: it also carries network + serialization, so it is close to, but not "
+        "the same instrument as, the server-stamped mark. The paired median-Δ gate uses "
+        "client-send; first-useful is v2-internal detail."
+    )
     lines.append( "" )
     lines.append( "## Cold → warm latency delta" )
     lines.append( "" )
@@ -797,6 +965,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument( "--limit",   type=int, default=None, help="cap utterances per command" )
     parser.add_argument( "--max-router-error-rate", type=float, default=0.20,
                          help="run-integrity ceiling on router_error_rate" )
+    parser.add_argument( "--allow-warm-cold", action="store_true",
+                         help="skip the F3 cold-start guard (use only when the store is deliberately pre-warmed)" )
     return parser
 
 
@@ -817,12 +987,14 @@ def main(
 
     Ensures:
         - loads the corpus, runs cold then warm, guards run integrity on the warm pass,
+          guards cold-start integrity on the cold pass (F3; unless --allow-warm-cold),
           renders the report, and writes it under io/v2-flow/eval-<timestamp>/.
         - returns {out_dir, paths, cold, warm}.
 
     Raises:
         - ValueError if passes != 2.
-        - EvalIntegrityError if the warm pass fails an integrity property.
+        - EvalIntegrityError if the warm pass fails an integrity property, or (unless
+          --allow-warm-cold) the cold pass shows cache hits (a pre-warmed store).
     """
     args   = build_arg_parser().parse_args( argv )
     if args.passes != 2:
@@ -844,6 +1016,8 @@ def main(
 
     cold_metrics = compute_metrics( cold_records )
     warm_metrics = compute_metrics( warm_records )
+    if not args.allow_warm_cold:
+        guard_cold_start( cold_metrics )          # F3: a contaminated cold baseline raises, never reports clean
     warm_table   = threshold_table( warm_records )
     delta        = latency_delta( cold_metrics, warm_metrics )
     report_md    = render_report( cold_metrics, warm_metrics, warm_table, delta, args.corpus, stamp )
