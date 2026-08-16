@@ -379,11 +379,10 @@ class TestRegistryEntry:
         assert mapping[ "duration" ] == "target_duration_minutes"
         assert mapping[ "theme" ]    == "theme"
 
-    def test_registry_agent_count( self ):
-        """Total agent count is 10 after TFE Resume agent was added."""
-        from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
-
-        assert len( AGENTIC_AGENTS ) == 10
+    # test_registry_agent_count DELETED 2026-08-15 (María): a bare len()==N count reads
+    # its own source and can only catch stale-count churn, never a real defect. The
+    # content invariant is guarded by the drift guard's set-equality checks
+    # (test_v2_registry_drift_guard: registry vs prompt/training/factory/card).
 
     def test_registry_no_special_handlers( self ):
         """Chained job has no special_handlers (query-driven, not file-driven)."""

@@ -389,9 +389,10 @@ class TestAgentRegistry:
         _help_cache.clear()
         _user_visible_cache.clear()
 
-    def test_registry_has_ten_agents( self ):
-        """Registry contains exactly 10 agentic agents."""
-        assert len( AGENTIC_AGENTS ) == 10
+    # test_registry_has_ten_agents DELETED 2026-08-15 (María): a bare len()==N count
+    # reads its own source and can only catch stale-count churn, never a real defect.
+    # The content invariant is guarded by the drift guard's set-equality checks
+    # (test_v2_registry_drift_guard: registry vs prompt/training/factory/card).
 
     def test_all_entries_required_keys( self ):
         """All registry entries have the required keys."""

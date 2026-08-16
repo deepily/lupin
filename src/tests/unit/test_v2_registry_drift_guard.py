@@ -183,6 +183,27 @@ INITIAL_DETECTION_EXEMPTIONS = {
             "initial detection) but does NOT waive 'card' — it must stay ON the card, which is "
             "its only reachability path; losing card membership would invalidate this exemption.",
     },
+    "agent router go to heartbeat poker": {
+        "surfaces": [ "prompt", "training", "card" ],   # never a user-routing target on ANY surface
+        "reason":
+            "Heartbeat poker is a SYSTEM/programmatic agentic job with NO production dispatch "
+            "path today — DO NOT read this as wired. Closed enumeration over every non-test "
+            "create_agentic_job CALL SITE shows none CAN pass this command: the watchdog, the "
+            "dead-queue watchdog, and the per-agent routers all pass fixed OTHER commands; the "
+            "queue/resume/restore sites carry only router output. The enumeration is closed over "
+            "call sites, NOT paths: the router arm rests on EMPIRICAL prompt-gating (0/10 "
+            "observed), not a structurally-proven-closed vocabulary. The factory branch "
+            "(agentic_job_factory.py:374 -> HeartbeatPokerJob at :392) is reached only by tests. "
+            "It is REGISTERED (not deleted) because it is a documented, tested capability "
+            "(design src/rnd/v0.1.7/2026.05.20-generic-heartbeat-poker-abstraction-design.md, "
+            "2026.05.22-heartbeat-poker-d1d4-class-spec.md) AND because the single-source endgame "
+            "(phase 4/5) derives the factory FROM this registry, so an unowned factory branch is "
+            "exactly the drift being eliminated — registering greens 1b by a FIX. The asymmetry "
+            "itself favors registering: if the router ever did emit it, an owned command with an "
+            "honest exemption degrades far better than a deleted branch. It waives prompt+training"
+            "+card because it is absent from all three (never user-reachable). Wire-or-remove is "
+            "tracked in store row 91ca9e80 so 'unwired' cannot quietly become permanent.",
+    },
 }
 
 _VALID_SURFACES = { "prompt", "training", "card" }
