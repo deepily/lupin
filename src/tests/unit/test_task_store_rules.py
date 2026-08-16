@@ -14,6 +14,9 @@ tmpdir scope-roots injection — no registry, no config, no DB.
 import os
 import sys
 
+import pathlib
+import subprocess
+
 import pytest
 
 # Bootstrap
@@ -32,10 +35,55 @@ NOW_TS = _dt( 2026, 6, 12, 9, 0, tzinfo=_tz.utc )
 
 @pytest.fixture
 def scope_roots( tmp_path ):
-    """A tmpdir-backed scope map with one existing receipt file."""
+    """
+    A tmpdir-backed scope map with one existing receipt file.
+
+    It is a REAL git repo with one real commit (row 9bfb4b73). A ->done receipt
+    now has its `commit` checked for branch reachability, and the store REFUSES
+    what it cannot check — so a non-repo tmpdir would make every ->done test fail
+    for the wrong reason (cannot-verify), hiding whatever they were actually
+    asserting. `REACHABLE_SHA` below is that commit.
+    """
     ( tmp_path / "src" ).mkdir()
     ( tmp_path / "src" / "receipt.md" ).write_text( "receipt\n" )
+    _git( tmp_path, "init", "-q", "." )
+    _git( tmp_path, "config", "user.email", "test@example.com" )
+    _git( tmp_path, "config", "user.name",  "test" )
+    _git( tmp_path, "add", "src/receipt.md" )
+    _git( tmp_path, "commit", "-qm", "seed" )
     return { "lupin": str( tmp_path ) }
+
+
+def _git( cwd, *args ):
+    """Run one git command in `cwd`, returning stripped stdout. Raises on failure."""
+    return subprocess.run( [ "git", "-C", str( cwd ), *args ],
+                           capture_output=True, text=True, check=True ).stdout.strip()
+
+
+@pytest.fixture
+def reachable_sha( scope_roots ):
+    """The short sha of the seed commit in the scope_roots repo — on a branch."""
+    return _git( scope_roots[ "lupin" ], "rev-parse", "--short=8", "HEAD" )
+
+
+@pytest.fixture
+def orphaned_sha( scope_roots ):
+    """
+    A sha that RESOLVES but sits on no branch — the gc-decay case.
+
+    Built by committing and then resetting away from it, which is exactly how a
+    real one appears (a reset or a rebase). `git cat-file -t` still says "commit",
+    so any check weaker than reachability passes it.
+    """
+    root = scope_roots[ "lupin" ]
+    ( pathlib.Path( root ) / "src" / "doomed.md" ).write_text( "doomed\n" )
+    _git( root, "add", "src/doomed.md" )
+    _git( root, "commit", "-qm", "will be orphaned" )
+    sha = _git( root, "rev-parse", "--short=8", "HEAD" )
+    _git( root, "reset", "-q", "--hard", "HEAD~1" )
+    assert _git( root, "cat-file", "-t", sha ) == "commit", "fixture is not an orphan — it does not resolve"
+    assert _git( root, "branch", "--all", "--contains", sha ) == "", "fixture is not an orphan — it is on a branch"
+    return sha
 
 
 # ---------------------------------------------------------------------------
@@ -328,14 +376,20 @@ def test_transition_to_done_requires_receipts():
 
 
 def test_transition_to_done_rejects_junk_receipts( scope_roots ):
+    # Two errors now, and both are correct: the path is malformed AND nothing
+    # checkable was cited (row 9bfb4b73). Asserting an exact count here would be
+    # asserting that the second rule does not exist, so assert the shape error is
+    # reported and let the closing gate speak for itself.
     errors = rules.validate_transition( "review", "done", "standing",
                                         receipt_refs={ "doc_path": "trust me" }, scope_roots=scope_roots )
-    assert len( errors ) == 1 and "<scope>/<relative-path>" in errors[ 0 ]
+    assert any( "<scope>/<relative-path>" in e for e in errors )
 
 
-def test_transition_to_done_accepts_valid_receipts( scope_roots ):
+def test_transition_to_done_accepts_valid_receipts( scope_roots, reachable_sha ):
+    # The sha must be REACHABLE in the fixture repo now (row 9bfb4b73) — the old
+    # hardcoded literal was a shape-valid string that existed nowhere.
     errors = rules.validate_transition( "review", "done", "standing",
-                                        receipt_refs={ "commit": "6be15f46" }, scope_roots=scope_roots )
+                                        receipt_refs={ "commit": reachable_sha }, scope_roots=scope_roots )
     assert errors == [ ]
 
 
@@ -1298,3 +1352,201 @@ def test_the_persona_chase_requirement_is_unaffected_by_the_stamp():
         [ { "kind": "persona", "id": "maria", "session_id": "s" } ] ) is True
     assert rules.validate_blocked_fields(
         [ { "kind": "persona", "id": "maria", "session_id": "s" } ], None ) != [ ]
+
+
+# ---------------------------------------------------------------------------
+# The done-gate: a receipt must be independently CHECKABLE (row 9bfb4b73)
+#
+# The defect these close: a row was marked done citing receipt_refs that named
+# the closer's own EDITED FILE, while the same close's reason said "Uncommitted"
+# — and the store accepted it. Two gaps allowed it, and each gets its own case.
+# Both falsification cases below were specified by María as the acceptance gate.
+# ---------------------------------------------------------------------------
+
+class TestDoneReceiptMustBeCheckable:
+
+    def test_replaying_arnolds_close_is_refused( self, scope_roots ):
+        """
+        FALSIFICATION CASE 1 — the exact payload shape that got through.
+
+        A doc_path proves a file EXISTS. A file exists whether or not any work
+        landed; you can satisfy it by touching one. So it may accompany a close
+        and may not BE the close.
+        """
+        errors = rules.validate_receipt_refs(
+            { "doc_path": "lupin/src/receipt.md" }, scope_roots=scope_roots, require_checkable=True
+        )
+        assert errors, "arnold's close payload was ACCEPTED — the hole is open again"
+        assert "INDEPENDENTLY CHECKABLE" in errors[ 0 ]
+
+    def test_log_line_alone_is_also_refused( self, scope_roots ):
+        """The sibling of case 1 — log_line is unverifiable for the same reason."""
+        errors = rules.validate_receipt_refs(
+            { "log_line": "lupin/src/receipt.md:1" }, scope_roots=scope_roots, require_checkable=True
+        )
+        assert errors and "INDEPENDENTLY CHECKABLE" in errors[ 0 ]
+
+    def test_a_path_is_still_legal_as_CONTEXT_alongside_a_commit( self, scope_roots, reachable_sha ):
+        """
+        The other direction, so the fix cannot degrade into "paths are junk".
+        They are context; they simply cannot carry the close alone.
+        """
+        errors = rules.validate_receipt_refs(
+            { "commit": reachable_sha, "doc_path": "lupin/src/receipt.md" },
+            scope_roots=scope_roots, require_checkable=True
+        )
+        assert errors == [ ]
+
+    def test_a_path_is_still_legal_OFF_the_done_path( self, scope_roots ):
+        """
+        require_checkable is False everywhere but ->done. A receipt attached to a
+        progress note must not be gated behind work that has not happened yet.
+        """
+        errors = rules.validate_receipt_refs(
+            { "doc_path": "lupin/src/receipt.md" }, scope_roots=scope_roots, require_checkable=False
+        )
+        assert errors == [ ]
+
+    def test_test_run_alone_satisfies_the_gate( self, scope_roots ):
+        """A ts- run id is third-party checkable, so it closes a row on its own."""
+        errors = rules.validate_receipt_refs(
+            { "test_run": "ts-5cc305c7" }, scope_roots=scope_roots, require_checkable=True
+        )
+        assert errors == [ ]
+
+
+class TestDoneReceiptCommitMustBeReachable:
+
+    @pytest.mark.parametrize( "fabricated", [ "deadbeef", "ffffffffff" ] )
+    def test_fabricated_sha_is_refused( self, scope_roots, fabricated ):
+        """
+        These are SHAPE-VALID — 7-40 lowercase hex — and were accepted before.
+        Shape was the whole check.
+        """
+        errors = rules.validate_receipt_refs(
+            { "commit": fabricated }, scope_roots=scope_roots, require_checkable=True
+        )
+        assert errors, f"fabricated sha {fabricated!r} was ACCEPTED"
+        assert "not reachable from any branch" in errors[ 0 ]
+
+    def test_orphaned_but_resolvable_sha_is_refused( self, scope_roots, orphaned_sha ):
+        """
+        FALSIFICATION CASE 2 — the hard one, and the reason the bar is
+        reachability rather than existence.
+
+        This sha RESOLVES: `git cat-file -t` says "commit". A rev-parse check
+        would pass it. But it sits on no branch, so it is gone at the next gc —
+        a receipt pointing at it decays into a receipt pointing at nothing.
+        """
+        errors = rules.validate_receipt_refs(
+            { "commit": orphaned_sha }, scope_roots=scope_roots, require_checkable=True
+        )
+        assert errors, "an orphaned-but-resolvable sha was ACCEPTED — receipts can still decay"
+        assert "not reachable from any branch" in errors[ 0 ]
+
+    def test_commit_on_a_NON_MAIN_branch_is_accepted( self, scope_roots, reachable_sha ):
+        """
+        ANY branch counts. Requiring main would refuse every legitimate pre-merge
+        close and push people back to citing file paths — reintroducing the first
+        gap while looking stricter.
+        """
+        errors = rules.validate_receipt_refs(
+            { "commit": reachable_sha }, scope_roots=scope_roots, require_checkable=True
+        )
+        assert errors == [ ]
+
+    def test_reachability_is_NOT_checked_off_the_done_path( self, scope_roots ):
+        """A fabricated sha on a progress note stays legal — shape rules only."""
+        errors = rules.validate_receipt_refs(
+            { "commit": "deadbeef" }, scope_roots=scope_roots, require_checkable=False
+        )
+        assert errors == [ ]
+
+    def test_malformed_sha_gets_ONE_error_not_two( self, scope_roots ):
+        """
+        A sha that fails the shape check is not also run through reachability —
+        one mistake, one error, and the second would only confuse.
+        """
+        errors = rules.validate_receipt_refs(
+            { "commit": "ZZZZZZZ" }, scope_roots=scope_roots, require_checkable=True
+        )
+        assert len( errors ) == 1 and "7-40 lowercase hex" in errors[ 0 ]
+
+    def test_store_REFUSES_when_it_cannot_verify( self, reachable_sha ):
+        """
+        No registered scope is a git work tree ⇒ refuse and say why.
+
+        An unverifiable receipt accepted quietly is the same hole with extra
+        steps, so cannot-check must never resolve to a pass.
+        """
+        errors = rules.validate_receipt_refs(
+            { "commit": reachable_sha }, scope_roots={ "nowhere": "/var/empty/not-a-repo" },
+            require_checkable=True
+        )
+        assert errors, "an unverifiable receipt was accepted quietly"
+        assert "could NOT be verified" in errors[ 0 ]
+
+
+class TestDoneGateWiredIntoTransition:
+
+    def test_transition_to_done_refuses_a_path_only_receipt( self, scope_roots ):
+        """The gate is reached through the real entry point, not just the helper."""
+        errors = rules.validate_transition(
+            "review", "done", "standing",
+            receipt_refs={ "doc_path": "lupin/src/receipt.md" }, scope_roots=scope_roots
+        )
+        assert errors and "INDEPENDENTLY CHECKABLE" in errors[ 0 ]
+
+    def test_transition_to_done_refuses_an_orphaned_commit( self, scope_roots, orphaned_sha ):
+        errors = rules.validate_transition(
+            "review", "done", "standing",
+            receipt_refs={ "commit": orphaned_sha }, scope_roots=scope_roots
+        )
+        assert errors and "not reachable from any branch" in errors[ 0 ]
+
+    def test_transition_to_IN_PROGRESS_keeps_accepting_a_path_receipt( self, scope_roots ):
+        """
+        The done-only scoping, asserted at the entry point. A progress transition
+        carrying a path receipt must stay legal.
+        """
+        errors = rules.validate_transition(
+            "queued", "in_progress", "standing",
+            receipt_refs={ "doc_path": "lupin/src/receipt.md" }, scope_roots=scope_roots
+        )
+        assert errors == [ ]
+
+
+class TestReachabilityNeverRaises:
+    """
+    The cannot-check path must degrade to a REFUSAL, never to an exception and
+    never to a pass. A git binary that is missing, wedged, or slow is an
+    operational fact; letting it raise would turn a receipt check into a 500, and
+    letting it pass would be the silent-acceptance hole wearing a different hat.
+    """
+
+    @pytest.mark.parametrize( "boom", [ OSError( "git not found" ),
+                                        subprocess.TimeoutExpired( "git", 15 ) ] )
+    def test_git_failure_refuses_rather_than_raising( self, scope_roots, reachable_sha, monkeypatch, boom ):
+        def _explode( *a, **kw ):
+            raise boom
+        monkeypatch.setattr( rules.subprocess, "run", _explode )
+
+        errors = rules.validate_receipt_refs(
+            { "commit": reachable_sha }, scope_roots=scope_roots, require_checkable=True
+        )
+        assert errors, "a git failure was treated as a PASS — receipts stop meaning anything"
+        assert "could NOT be verified" in errors[ 0 ], (
+            f"a git failure must report cannot-verify, not a false orphan verdict; got {errors[ 0 ]!r}"
+        )
+
+    def test_a_scope_that_is_not_a_repo_is_skipped_not_fatal( self, scope_roots, reachable_sha, tmp_path ):
+        """
+        A registry holding one real repo and one non-repo still resolves against
+        the real one. Only when NO scope is usable does it refuse.
+        """
+        roots = dict( scope_roots )
+        roots[ "notarepo" ] = str( tmp_path / "nope" )
+        errors = rules.validate_receipt_refs(
+            { "commit": reachable_sha }, scope_roots=roots, require_checkable=True
+        )
+        assert errors == [ ]
