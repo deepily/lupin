@@ -145,3 +145,34 @@ def test_validity_names_both_dirty_arms():
         guard.require_arms_distinct_and_clean( "db1.t", "db2.t", v1_rowcount=3, v2_rowcount=7 )
     msg = str( exc.value )
     assert "db1.t" in msg and "db2.t" in msg
+
+
+# ---------------------------------------------------------------------------
+# assert_paired_isolation — the composing caller (queries counts, then checks)
+# ---------------------------------------------------------------------------
+def test_assert_paired_isolation_queries_both_stores_and_passes_when_clean():
+    seen = []
+    def rowcount_fn( target ):
+        seen.append( target )
+        return 0
+    result = guard.assert_paired_isolation( "dbA.t", "dbB.t", rowcount_fn=rowcount_fn )
+    assert result == ( "dbA.t", "dbB.t" )
+    assert seen == [ "dbA.t", "dbB.t" ]        # BOTH stores were queried, in order
+
+
+def test_assert_paired_isolation_refuses_a_dirty_arm():
+    def rowcount_fn( target ):
+        return 9 if target == "dbA.t" else 0
+    with pytest.raises( guard.PairedTargetsNotIsolated ) as exc:
+        guard.assert_paired_isolation( "dbA.t", "dbB.t", rowcount_fn=rowcount_fn )
+    assert "START CLEAN" in str( exc.value ) and "dbA.t" in str( exc.value )
+
+
+def test_assert_paired_isolation_refuses_shared_destination_at_zero_counts():
+    # Rowcounts held at 0/0, so the refusal can ONLY come from the DISTINCT check —
+    # this proves the shared-destination branch fired and was not masked by a dirty count.
+    def rowcount_fn( target ):
+        return 0
+    with pytest.raises( guard.PairedTargetsNotIsolated ) as exc:
+        guard.assert_paired_isolation( "dbA.t", "dbA.t", rowcount_fn=rowcount_fn )
+    assert "SAME destination" in str( exc.value )

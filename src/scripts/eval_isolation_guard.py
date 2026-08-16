@@ -32,7 +32,7 @@ error with its own message so the paired bridge declines LOUDLY, naming which pr
 
 from __future__ import annotations
 
-from typing import Any, Optional, Set, Tuple
+from typing import Any, Callable, Optional, Set, Tuple
 from urllib.parse import urlsplit
 
 
@@ -203,3 +203,61 @@ def require_arms_distinct_and_clean(
             "cold baseline just as one arm warming the other would: " + "; ".join( dirty ) + ". Refusing (validity)."
         )
     return ( v1_target, v2_target )
+
+
+def assert_paired_isolation(
+    v1_target   : str,
+    v2_target   : str,
+    *,
+    rowcount_fn : Callable[ [ str ], int ],
+) -> Tuple[ str, str ]:
+    """
+    The pre-run VALIDITY step: query each store's LIVE row count, then require distinct-and-clean.
+
+    This is the caller require_arms_distinct_and_clean needs — a check with no caller is no
+    check. It separates the pure decision (require_arms_distinct_and_clean) from the live IO
+    (rowcount_fn), so the composition is unit-testable with a fake counter and the bridge
+    supplies count_store_rows for the real run.
+
+    The row count and the SAFETY membership decision key on the SAME fully-qualified
+    `database.table` string — the single identity — so the count can never attest to a
+    different store than the one that was blessed.
+
+    Requires:
+        - v1_target / v2_target are the two arms' fully-qualified `database.table` destinations.
+        - rowcount_fn(fully_qualified) returns the current row count of THAT store (live in the
+          bridge via count_store_rows, faked in tests).
+
+    Ensures:
+        - queries BOTH stores' counts via rowcount_fn and forwards them to
+          require_arms_distinct_and_clean, returning its ( v1_target, v2_target ) on success.
+        - raises PairedTargetsNotIsolated (from the inner check) when the arms share a store or
+          either store is non-empty.
+    """
+    return require_arms_distinct_and_clean(
+        v1_target, v2_target,
+        v1_rowcount=rowcount_fn( v1_target ),
+        v2_rowcount=rowcount_fn( v2_target ),
+    )
+
+
+def count_store_rows( fully_qualified: str ) -> int:   # pragma: no cover - live DB boundary (real SELECT COUNT)
+    """
+    The LIVE row count of a `database.table` store — the bridge's rowcount_fn for the real run.
+
+    Connects to the DATABASE NAMED IN `fully_qualified` (not the app's default engine): it takes
+    get_database_url()'s host/credentials and swaps the db-path to the target database via
+    urlsplit (so a query/fragment cannot smuggle a different db), so the count is OF the exact
+    store the SAFETY check blessed — never a same-named table in a different db. Live boundary (a
+    real SELECT COUNT(*)); the pure composition it feeds (assert_paired_isolation) is unit-tested.
+    """
+    from sqlalchemy import create_engine, text
+    from cosa.rest.db.database import get_database_url
+    database, _, table = fully_qualified.partition( "." )
+    target_url = urlsplit( get_database_url() )._replace( path=f"/{database}" ).geturl()
+    target_engine = create_engine( target_url )
+    try:
+        with target_engine.connect() as connection:
+            return int( connection.execute( text( f"SELECT COUNT(*) FROM {table}" ) ).scalar() )
+    finally:
+        target_engine.dispose()

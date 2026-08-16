@@ -33,7 +33,14 @@ The scheduled paired run selects it explicitly: `POST /api/test-suite/submit` wi
 pytest_args `-m paired_eval_live`, :8000, post-midnight off-peak. Never :7999, never
 curl, never side-doored (same pattern as test_v2_embedding_cost_live.py).
 
-REMAINING WIRING once preconditions 1+2 land (kept as a checklist so nobody mistakes
+Precondition 3 (VALIDITY, now wired) — the two arms must write DISTINCT, CLEAN stores
+(design §4): `eval_isolation_guard.assert_paired_isolation` queries each store's live
+rowcount (`count_store_rows`, which targets the exact db.table the string names) and calls
+`require_arms_distinct_and_clean`. It runs after preconditions 1+2 pass; the pure
+distinct-and-clean decision + its composing caller are unit-proven in
+test_eval_isolation_guard.py with a fake counter (happy / dirty / shared).
+
+REMAINING WIRING once preconditions 1+2+3 land (kept as a checklist so nobody mistakes
 the refusing scaffold for a finished run):
   a. one seed → stratified_sample once → drive BOTH arms with the SAME sampled list.
   b. v1 arm: run_v1_baseline( push_fn, collect_fn(ws_recv_events), class_to_command ) →
@@ -97,6 +104,17 @@ def _require_v1_live_seam_and_worktree():
     )
 
 
+def _resolve_v1_paired_store() -> str:
+    """
+    The v1 arm's fully-qualified `database.table` snapshot store — its DEDICATED measurement
+    database (lupin_db_v1baseline, design §2a/§4) and the snapshot table it writes. Resolved
+    from the v1 arm's own constants so it tracks a rename, and kept distinct from the v2 store
+    by construction (different database) so the VALIDITY check has two real targets to compare.
+    """
+    import v1_eval_arm
+    return guard.fully_qualified( "lupin_db_v1baseline", v1_eval_arm.SNAPSHOT_TABLE )
+
+
 @pytest.mark.paired_eval_live
 @pytest.mark.integration
 def test_v2_paired_go_no_go_live():
@@ -118,14 +136,22 @@ def test_v2_paired_go_no_go_live():
 
     config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
 
-    # Precondition 1 — snapshot-table isolation. Refuses TODAY (writeback on, no isolated
-    # table wired), which is the proof the guard fires at the integration boundary too.
-    guard.require_isolated_snapshot_table( config_mgr )
+    # Precondition 1 — SAFETY: the v2 write destination must be a permitted non-live store.
+    # Refuses TODAY (writeback on, empty allowlist), proving the guard fires at the integration
+    # boundary too. The blessed fully-qualified destination is captured for precondition 3, so
+    # the clean-start rowcount attests to the SAME store SAFETY approved (one identity).
+    v2_store = guard.require_isolated_snapshot_table( config_mgr )
 
     # Precondition 2 — v1-arm live seam + pinned-worktree server. Refuses until step 1 lands.
     _require_v1_live_seam_and_worktree()
 
-    # REMAINING WIRING (a–d in the module docstring) runs only once both preconditions pass.
+    # Precondition 3 — VALIDITY: the two arms must write DISTINCT, CLEAN stores (design §4).
+    # Queries each store's LIVE rowcount and calls the distinct-and-clean check; count_store_rows
+    # targets the exact db.table each string names. Reached only once preconditions 1+2 pass.
+    v1_store = _resolve_v1_paired_store()
+    guard.assert_paired_isolation( v1_store, v2_store, rowcount_fn=guard.count_store_rows )
+
+    # REMAINING WIRING (a–d in the module docstring) runs only once all preconditions pass.
     # It is intentionally not stubbed as a fake pass: a paired verdict that never ran both
     # arms is exactly the failure this bridge exists to prevent.
     pytest.fail( "unreachable: a precondition guard must have refused before this line" )
