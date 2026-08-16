@@ -422,6 +422,46 @@ def test_assert_measured_sha_raises_on_non_string_and_empty():
     with pytest.raises( v1.EvalIntegrityError ):
         v1.assert_measured_sha( "" )
 
+def test_assert_measured_sha_raises_on_unavailable_sentinel():
+    # code_identity reports git_sha as the STRING "unavailable" (not "") when git cannot
+    # answer at import — a non-empty sentinel. It must REFUSE, not pass: a server that
+    # can't name its own sha is exactly the wrong-tree risk this assertion exists to catch.
+    from cosa.rest.code_identity import UNAVAILABLE
+    assert UNAVAILABLE == "unavailable"                 # pin the sentinel this test guards
+    with pytest.raises( v1.EvalIntegrityError ):
+        v1.assert_measured_sha( UNAVAILABLE )
+
+
+class _FakeHttpResp:
+    """A urlopen() stand-in return: .read() yields the JSON body bytes (no context mgr —
+    read_running_server_sha calls urlopen(...).read() directly)."""
+    def __init__( self, body ): self._body = body
+    def read( self ):           return self._body.encode()
+
+def test_read_running_server_sha_requests_code_identity_and_parses_top_level( monkeypatch ):
+    # TARGET assertion (the delete-the-fix control): the URL actually requested must END IN
+    # /api/code-identity. This goes RED if line 168 is reverted to /health — the exact
+    # regression guarded. A parse-only test would pass just as happily against /health, so
+    # it proves nothing about the target; this one does.
+    import json, urllib.request
+    captured = {}
+    def _fake_urlopen( req, timeout=None ):
+        captured[ "url" ] = req.full_url
+        return _FakeHttpResp( json.dumps( { "git_sha": "b0735467deadbeef", "git_branch": "main" } ) )
+    monkeypatch.setattr( urllib.request, "urlopen", _fake_urlopen )
+    sha = v1.read_running_server_sha( "http://v1-arm:9999" )
+    assert sha == "b0735467deadbeef"                          # parsed from the TOP-LEVEL git_sha key
+    assert captured[ "url" ].endswith( "/api/code-identity" ) # RED if someone puts /health back
+
+def test_read_running_server_sha_returns_empty_on_health_shaped_body( monkeypatch ):
+    # PARSE assertion: a /health-shaped body ({status,timestamp}, no git_sha) yields "" so
+    # assert_measured_sha then RAISES — proves the fail-loud path (not the target endpoint).
+    import json, urllib.request
+    def _fake_urlopen( req, timeout=None ):
+        return _FakeHttpResp( json.dumps( { "status": "ok", "timestamp": "2026-08-16T00:00:00" } ) )
+    monkeypatch.setattr( urllib.request, "urlopen", _fake_urlopen )
+    assert v1.read_running_server_sha( "http://v1-arm:9999" ) == ""
+
 class _FakeEngine:
     def __init__( self, url ): self.url = url
 

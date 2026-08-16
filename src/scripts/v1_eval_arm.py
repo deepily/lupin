@@ -158,14 +158,24 @@ def assert_measured_sha( observed_sha: Any, expected: str = V1_PIN_SHA ) -> str:
 
 def read_running_server_sha( base_url: str ) -> str:   # pragma: no cover - live HTTP boundary
     """
-    Ask the RUNNING server what sha it booted from — a value the v1 container BAKES
-    at build (`git rev-parse HEAD` → served on /health), NOT the launcher's env.
-    Paired with assert_measured_sha so a mismatch fails the run. (Live boundary; the
-    pure, tested assertion is assert_measured_sha. The /health `git_sha` field is
-    provided by the container build — design constraint: the stamp.)
+    Ask the RUNNING server what sha it booted from — a value it reports from its OWN
+    loaded code (`git rev-parse HEAD` read at import, baked into the container build),
+    NOT the launcher's env. Read from GET /api/code-identity, whose JSON body IS the
+    code_identity dict and carries `git_sha` at the TOP LEVEL.
+
+    NOT /health — that endpoint returns ONLY {status, timestamp}. code_identity was
+    added to /health once and DELIBERATELY REVERTED; it lives on `/` (nested under
+    `code_identity`) and on `/api/code-identity` (top-level) instead. Reading /health
+    for a sha silently yields "" and would fail the run against the CORRECT server. The
+    earlier "served on /health" line here sent two readers to the wrong endpoint inside
+    ten minutes — named explicitly so it stops the third.
+
+    Paired with assert_measured_sha so a mismatch — or a missing / UNAVAILABLE sha (the
+    latter a non-empty sentinel STRING, "unavailable", not "") — fails the run loud.
+    (Live boundary; the pure, tested assertion is assert_measured_sha.)
     """
     import json, urllib.request
-    req  = urllib.request.Request( base_url + "/health" )
+    req  = urllib.request.Request( base_url + "/api/code-identity" )   # NOT /health — see docstring
     data = json.loads( urllib.request.urlopen( req, timeout=10 ).read().decode() )
     return data.get( "git_sha", "" )   # missing -> "" -> assert_measured_sha RAISES (fail-loud, not hidden)
 
