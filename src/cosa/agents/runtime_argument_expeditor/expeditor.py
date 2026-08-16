@@ -927,6 +927,16 @@ class RuntimeArgumentExpeditor:
 
         Ensures:
             - Returns config override if present, else registry default, else None
+            - A REQUIRED user arg is never looked up in config (row fb49da08).
+              The "expeditor default value" key family covers optional args only
+              — budget / audience / audience_context / languages. Asking it for a
+              required arg like `query` or `prompt` always misses, and the miss
+              is not silent: splain_me then prints
+              "¿WUH? key [expeditor default value for research to podcast query]
+              NOT found in splainer" on every single run. Adding a splainer entry
+              would have documented a key that should never exist, so the fix is
+              to stop asking. A required arg has no default by definition — that
+              is what makes it required.
 
         Args:
             command_key: Routing command key (e.g., "agent router go to deep research")
@@ -936,6 +946,10 @@ class RuntimeArgumentExpeditor:
         Returns:
             str or None: Resolved default value
         """
+        entry = AGENTIC_AGENTS.get( command_key )
+        if entry is not None and arg_name in entry[ "required_user_args" ]:
+            return registry_default
+
         agent_short = command_key.replace( "agent router go to ", "" )
         config_key  = f"expeditor default value for {agent_short} {arg_name}"
         config_value = self.config_mgr.get( config_key, default=None )
