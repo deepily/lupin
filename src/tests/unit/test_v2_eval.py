@@ -692,3 +692,84 @@ def test_main_allow_warm_cold_skips_the_guard( tmp_path ):
         timestamp="2026-08-14-02-30-00",
     )
     assert result[ "warm" ][ "cache_hit_rate" ] == 1.0
+
+
+# ---------------------------------------------------------------------------
+# Per-arm clean-step — clean_v2_snapshot_store (design §4, decision B)
+#
+# MUST-FAIL CONTROLS: a config-drift and a wrong-db each RAISE before any TRUNCATE runs.
+# The fake connection RECORDS every .execute, so "connection.execute was never called" is
+# asserted, not assumed — the ordering (guards first, execute last) is the safety property.
+# ---------------------------------------------------------------------------
+class _FakeEngine:
+    def __init__( self, url ):
+        self.url = url
+
+
+class _FakeConnection:
+    """A DB connection stand-in: exposes .engine.url and records .execute( sql ) calls."""
+    def __init__( self, url ):
+        self.engine   = _FakeEngine( url )
+        self.executed = []
+    def execute( self, sql ):
+        self.executed.append( sql )
+        return None
+
+
+class _FakeCfgV2:
+    """Minimal ConfigurationManager stand-in: .get( key, default, return_type )."""
+    def __init__( self, values ):
+        self.values = values
+    def get( self, key, default=None, return_type=None ):
+        return self.values.get( key, default )
+
+
+def _clean_cfg( declared ):
+    return _FakeCfgV2( { "v2 snapshot table": declared } )
+
+
+def test_clean_v2_snapshot_store_truncates_after_both_guards( monkeypatch ):
+    # Pin the ORM write target so the test does not depend on the live model attribute.
+    import eval_isolation_guard as guard
+    monkeypatch.setattr( guard, "resolve_write_target", lambda: "solution_snapshots" )
+    conn = _FakeConnection( "postgresql://u:p@h/lupin_db_test" )
+    cfg  = _clean_cfg( "solution_snapshots" )
+    result = ve.clean_v2_snapshot_store( conn, cfg )
+    assert result == "solution_snapshots"
+    # The TRUNCATE identifier is the RESOLVED target, never the raw config string.
+    assert conn.executed == [ "TRUNCATE TABLE solution_snapshots" ]
+
+
+def test_clean_v2_snapshot_store_refuses_config_drift_without_truncating( monkeypatch ):
+    # CONTROL A: declared table != ORM write target -> raises, connection.execute NEVER called.
+    import eval_isolation_guard as guard
+    monkeypatch.setattr( guard, "resolve_write_target", lambda: "solution_snapshots" )
+    conn = _FakeConnection( "postgresql://u:p@h/lupin_db_test" )
+    cfg  = _clean_cfg( "v2_paired_snapshots" )
+    with pytest.raises( guard.ConfigTableMismatch ):
+        ve.clean_v2_snapshot_store( conn, cfg )
+    assert conn.executed == []                       # no TRUNCATE on a drifted config
+
+
+def test_clean_v2_snapshot_store_refuses_wrong_db_without_truncating( monkeypatch ):
+    # CONTROL B: config matches but the connection points at the live dev db -> raises,
+    # connection.execute NEVER called.
+    import eval_isolation_guard as guard
+    monkeypatch.setattr( guard, "resolve_write_target", lambda: "solution_snapshots" )
+    conn = _FakeConnection( "postgresql://u:p@h/lupin_db_dev" )
+    cfg  = _clean_cfg( "solution_snapshots" )
+    with pytest.raises( guard.NotAMeasurementDatabase ):
+        ve.clean_v2_snapshot_store( conn, cfg )
+    assert conn.executed == []                       # no TRUNCATE on a wrong db
+
+
+def test_clean_v2_snapshot_store_config_check_fires_before_db_check( monkeypatch ):
+    # Ordering: BOTH wrong (drifted config AND wrong db) -> the config mismatch is raised
+    # first, so a misconfigured operator is told the actionable cause and no db is touched.
+    import eval_isolation_guard as guard
+    monkeypatch.setattr( guard, "resolve_write_target", lambda: "solution_snapshots" )
+    conn = _FakeConnection( "postgresql://u:p@h/lupin_db_dev" )
+    cfg  = _clean_cfg( "v2_paired_snapshots" )
+    with pytest.raises( guard.ConfigTableMismatch ):
+        ve.clean_v2_snapshot_store( conn, cfg )
+    assert conn.executed == []

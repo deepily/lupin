@@ -176,3 +176,86 @@ def test_assert_paired_isolation_refuses_shared_destination_at_zero_counts():
     with pytest.raises( guard.PairedTargetsNotIsolated ) as exc:
         guard.assert_paired_isolation( "dbA.t", "dbA.t", rowcount_fn=rowcount_fn )
     assert "SAME destination" in str( exc.value )
+
+
+# ---------------------------------------------------------------------------
+# CONFIG cross-check — require_config_table_matches_write_target
+#
+# MUST-FAIL CONTROLS (predict the text first, then break it): a declared table that
+# differs from the ORM write target must RAISE (the "wired but pointing wrong" defect),
+# and an absent/blank declaration must RAISE too — it can never equal a real table name.
+# ---------------------------------------------------------------------------
+def _cfg_table( declared ):
+    """A fake config carrying only the `v2 snapshot table` declaration (None to omit)."""
+    values = {} if declared is None else { guard.CONFIG_SNAPSHOT_TABLE_KEY: declared }
+    return _FakeConfig( values )
+
+
+def test_config_table_match_returns_the_write_target():
+    cfg = _cfg_table( "solution_snapshots" )
+    assert guard.require_config_table_matches_write_target( cfg, write_target="solution_snapshots" ) == "solution_snapshots"
+
+
+def test_config_table_match_strips_surrounding_whitespace():
+    cfg = _cfg_table( "  solution_snapshots  " )
+    assert guard.require_config_table_matches_write_target( cfg, write_target="solution_snapshots" ) == "solution_snapshots"
+
+
+def test_config_table_drift_refuses_naming_both_values():
+    # CONTROL: declared table != ORM write target -> the "wired but pointing wrong" defect.
+    cfg = _cfg_table( "v2_paired_snapshots" )
+    with pytest.raises( guard.ConfigTableMismatch ) as exc:
+        guard.require_config_table_matches_write_target( cfg, write_target="solution_snapshots" )
+    msg = str( exc.value )
+    assert "v2_paired_snapshots" in msg and "solution_snapshots" in msg
+
+
+def test_config_table_absent_declaration_refuses():
+    # CONTROL: no declaration at all -> blank normalizes to "" which is never a real table.
+    cfg = _cfg_table( None )
+    with pytest.raises( guard.ConfigTableMismatch ):
+        guard.require_config_table_matches_write_target( cfg, write_target="solution_snapshots" )
+
+
+def test_config_table_blank_declaration_refuses():
+    # CONTROL: whitespace-only declaration -> same refusal, distinct from a real name.
+    cfg = _cfg_table( "   " )
+    with pytest.raises( guard.ConfigTableMismatch ):
+        guard.require_config_table_matches_write_target( cfg, write_target="solution_snapshots" )
+
+
+# ---------------------------------------------------------------------------
+# SAFETY (destructive-truncate) — assert_measurement_db
+#
+# MUST-FAIL CONTROLS: the dev/prod db, a substring-smuggled name, and a non-string
+# target each REFUSE — a TRUNCATE is irreversible, so anything but the exact allowlist
+# raises before the caller can execute it.
+# ---------------------------------------------------------------------------
+def test_assert_measurement_db_allows_the_two_measurement_dbs():
+    assert guard.assert_measurement_db( "postgresql://u:p@h/lupin_db_test" ) is None
+    assert guard.assert_measurement_db( "postgresql://u:p@h/lupin_db_v1baseline" ) is None
+
+
+def test_assert_measurement_db_ignores_query_and_fragment():
+    # The db name is the PATH, so a '/lupin_db_test' smuggled into the query cannot flip a dev url.
+    with pytest.raises( guard.NotAMeasurementDatabase ):
+        guard.assert_measurement_db( "postgresql://u:p@h/lupin_db_dev?options=/lupin_db_test" )
+
+
+def test_assert_measurement_db_refuses_the_dev_db():
+    # CONTROL: the live dev store must never be truncatable.
+    with pytest.raises( guard.NotAMeasurementDatabase ) as exc:
+        guard.assert_measurement_db( "postgresql://u:p@h/lupin_db_dev" )
+    assert "lupin_db_dev" in str( exc.value )
+
+
+def test_assert_measurement_db_refuses_a_substring_smuggle():
+    # CONTROL: exact-name match, so 'lupin_db_test_shadow' cannot ride in on the prefix.
+    with pytest.raises( guard.NotAMeasurementDatabase ):
+        guard.assert_measurement_db( "postgresql://u:p@h/lupin_db_test_shadow" )
+
+
+def test_assert_measurement_db_refuses_a_non_string_target():
+    # CONTROL: a missing / non-string url is refused, never coerced.
+    with pytest.raises( guard.NotAMeasurementDatabase ):
+        guard.assert_measurement_db( None )

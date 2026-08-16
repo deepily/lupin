@@ -62,6 +62,14 @@ import cosa.utils.util as du   # noqa: E402
 # measured, so the paired gate can bind this arm to the v1 arm by signature.
 from paired_eval import make_provenance   # noqa: E402
 
+# The snapshot-isolation guard is the neutral home both arms reach acyclically (it imports
+# neither arm). v2's per-arm clean-step composes its config cross-check + measurement-db
+# assertion; v2 -> guard is safe (v1 -> v2 -> guard is acyclic).
+from eval_isolation_guard import (   # noqa: E402
+    assert_measurement_db,
+    require_config_table_matches_write_target,
+)
+
 
 # ---------------------------------------------------------------------------
 # Contract vocabulary — the §8 `path` and `route_reason` strings this harness
@@ -635,6 +643,52 @@ def read_jsonl_trace_ids( trace_path: str ) -> List[ str ]:
                 continue
             ids.append( json.loads( line )[ "trace_id" ] )
     return ids
+
+
+# ---------------------------------------------------------------------------
+# Per-arm clean-step (design §4, decision B). The v2 peer of v1_eval_arm.truncate_snapshots.
+#
+# NOT YET WIRED — this is a BRIDGE-COMPOSABLE PRIMITIVE with NO caller outside its own tests.
+# Under decision B (Mr Radio, 2026-08-16) isolation is on the DATABASE axis: both arms write
+# the same table NAME (solution_snapshots) but on their own measurement db (v1 -> lupin_db_v1baseline,
+# v2 -> lupin_db_test). Sam's paired integration bridge (row d212f54b, currently blocked) is the
+# REAL caller; the paired run MUST NOT proceed until that bridge calls this AND a test proves the
+# call happens. Do not claim it "wired" on a green unit suite — that is the exact orphan defect
+# (row d8d019f6 / require_arms_distinct_and_clean) this row is closing, and it must not recur here.
+# ---------------------------------------------------------------------------
+def clean_v2_snapshot_store( connection: Any, config_mgr: Any ) -> str:
+    """
+    Empty v2's snapshot table so the cold pass starts genuinely cold — TWO guards fire first.
+
+    Ordering is the safety property. Both guards run and can RAISE before connection.execute is
+    ever reached, so a wrong config or a wrong db never reaches a TRUNCATE:
+      1. CONFIG cross-check (require_config_table_matches_write_target) — the declared
+         `v2 snapshot table` equals the ORM write target; the TRUNCATE identifier is then the
+         RESOLVED __tablename__ it returns, never the raw config string (no injection surface).
+      2. DB assertion (assert_measurement_db) — the connection's OWN db (read off
+         connection.engine.url, never a decoupled arg) is a measurement db, never dev/prod.
+
+    Requires:
+        - connection is the live DB connection the TRUNCATE will run on; it exposes
+          `.engine.url` and `.execute( sql )`. Under decision B its db is v2's own measurement
+          db (lupin_db_test), which assert_measurement_db verifies.
+        - config_mgr exposes .get( key, default, return_type ).
+
+    Ensures:
+        - runs the config cross-check FIRST (raises ConfigTableMismatch on drift), then the db
+          assertion (raises NotAMeasurementDatabase on a wrong db) — connection.execute is
+          NEVER called if either raises.
+        - on a measurement db with a matching config, TRUNCATEs the ORM write target (the value
+          the cross-check returned) and returns its table name.
+
+    Raises:
+        - ConfigTableMismatch when the declared table does not equal the ORM write target.
+        - NotAMeasurementDatabase when the connection's db is not a measurement db.
+    """
+    target = require_config_table_matches_write_target( config_mgr )   # raises on config drift
+    assert_measurement_db( str( connection.engine.url ) )              # raises on a wrong db
+    connection.execute( f"TRUNCATE TABLE {target}" )                   # identifier = resolved __tablename__
+    return target
 
 
 # ---------------------------------------------------------------------------

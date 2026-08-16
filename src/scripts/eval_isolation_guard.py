@@ -39,6 +39,20 @@ from urllib.parse import urlsplit
 # The config allowlist key (fail-closed): fully-qualified `database.table` non-live stores.
 PERMITTED_STORES_KEY = "v2 eval permitted snapshot stores"
 
+# The operator-declared snapshot-table key (lupin-app.ini). It exists to be CROSS-CHECKED
+# against the table the ORM actually writes through — a declaration, not a source of truth.
+CONFIG_SNAPSHOT_TABLE_KEY = "v2 snapshot table"
+
+# The measurement databases a destructive per-arm clean-step MAY truncate — exactly these
+# two, matched on the url's db NAME (not a substring). This is the guard's own authoritative
+# copy for the v2 arm's clean-step; it intentionally equals v1_eval_arm.MEASUREMENT_DB_NAMES
+# (the v1 arm's destructive-truncate allowlist). It is NOT shared with v1 by import because
+# v1_eval_arm imports v2_eval (v1 -> v2), and v2's clean-step imports THIS module (v2 -> guard),
+# so a single shared home in either arm would risk the v1<->v2 cycle; the guard is the neutral
+# home both arms can reach acyclically. Consolidating v1's local copy onto this one is deferred
+# (it would edit v1_eval_arm.py + its tests, wider than this row).
+MEASUREMENT_DB_NAMES = frozenset( { "lupin_db_test", "lupin_db_v1baseline" } )
+
 
 class IsolationNotConfigured( RuntimeError ):
     """SAFETY failure — the write destination is not a PROVABLY non-live measurement store."""
@@ -46,6 +60,20 @@ class IsolationNotConfigured( RuntimeError ):
 
 class PairedTargetsNotIsolated( RuntimeError ):
     """VALIDITY failure — the two arms' destinations are not DISTINCT-and-CLEAN."""
+
+
+class ConfigTableMismatch( RuntimeError ):
+    """CONFIG failure — the declared `v2 snapshot table` names a table the ORM never writes.
+
+    The "wired but pointing wrong" defect (Mr Radio, 2026-08-16): a config value that names a
+    table the write-back never reaches would make the per-arm clean-step TRUNCATE the wrong
+    table, leaving the real write target dirty while every check reports clean. Raised loudly so
+    a drifted config cannot silently pass.
+    """
+
+
+class NotAMeasurementDatabase( RuntimeError ):
+    """SAFETY failure — a destructive clean-step was aimed at a non-measurement database."""
 
 
 # ---------------------------------------------------------------------------
@@ -63,6 +91,48 @@ def resolve_write_target() -> str:
     return SolutionSnapshot.__tablename__
 
 
+def require_config_table_matches_write_target(
+    config_mgr   : Any,
+    *,
+    write_target : Optional[ str ] = None,
+) -> str:
+    """
+    Refuse a paired run unless the declared `v2 snapshot table` equals the ORM write target.
+
+    The per-arm clean-step TRUNCATEs the table the ORM writes through; the config key exists so
+    an operator can DECLARE that table, and this cross-check proves the declaration matches
+    reality (SolutionSnapshot.__tablename__). A config naming a table the writes never reach is
+    the "wired but pointing wrong" defect — it would truncate an unrelated table and leave the
+    real destination dirty. The clean-step calls this FIRST so the TRUNCATE identifier is only
+    ever the resolved ORM __tablename__, never a raw config string (no injection surface).
+
+    Requires:
+        - config_mgr exposes .get( key, default, return_type ).
+        - write_target, when passed, is the table the ORM writes through (injected for tests);
+          when None it is resolved live via resolve_write_target().
+
+    Ensures:
+        - returns the write target (the ORM __tablename__) when the declared value equals it,
+          after stripping surrounding whitespace.
+        - raises ConfigTableMismatch otherwise, with BOTH values quoted — including the case of
+          an absent/blank declaration (which can never equal a real table name).
+
+    Raises:
+        - ConfigTableMismatch on any drift between the declared table and the ORM write target.
+    """
+    target   = write_target if write_target is not None else resolve_write_target()
+    declared = config_mgr.get( CONFIG_SNAPSHOT_TABLE_KEY, default=None, return_type="string" )
+    declared_norm = ( declared or "" ).strip()
+    if declared_norm != target:
+        raise ConfigTableMismatch(
+            f"the declared '{CONFIG_SNAPSHOT_TABLE_KEY}' = {declared!r} does NOT equal the table the "
+            f"ORM writes through ({target!r}). A per-arm clean-step would TRUNCATE the declared table "
+            f"and leave the real write target dirty. Refusing (config). Set '{CONFIG_SNAPSHOT_TABLE_KEY}' "
+            f"= '{target}' to match SolutionSnapshot.__tablename__."
+        )
+    return target
+
+
 def _db_name( db_url: str ) -> str:
     """
     The database NAME = the PATH component of the connection url, minus its leading '/'.
@@ -70,6 +140,35 @@ def _db_name( db_url: str ) -> str:
     be mistaken for the db name.
     """
     return urlsplit( db_url ).path.lstrip( "/" )
+
+
+def assert_measurement_db( db_url: Any ) -> None:
+    """
+    Refuse a destructive clean-step unless it targets a MEASUREMENT database.
+
+    The peer of v1_eval_arm.assert_test_db, living here so v2's clean-step reaches it without
+    the v1<->v2 import cycle. A TRUNCATE is irreversible, so this is a HARD precondition: fire
+    LOUD and never proceed on anything but lupin_db_test / lupin_db_v1baseline. The db NAME must
+    match the set EXACTLY (a substring check would let 'lupin_db_test_shadow' smuggle in).
+
+    Requires:
+        - db_url is the url of the connection the TRUNCATE will run on (read off
+          connection.engine.url by the caller, never a decoupled arg — the de9c32d0 lesson).
+
+    Ensures:
+        - returns None when db_url is a string whose db name is in MEASUREMENT_DB_NAMES.
+        - raises NotAMeasurementDatabase for any other / missing / non-string target, with the
+          offending value quoted — the caller must not TRUNCATE.
+
+    Raises:
+        - NotAMeasurementDatabase on any non-measurement / missing / non-string target.
+    """
+    if not isinstance( db_url, str ) or _db_name( db_url ) not in MEASUREMENT_DB_NAMES:
+        raise NotAMeasurementDatabase(
+            f"refusing to TRUNCATE: the DB target is not a measurement database "
+            f"(allowed db names: {sorted( MEASUREMENT_DB_NAMES )}); got {db_url!r}. "
+            f"Fail loud, never proceed."
+        )
 
 
 def resolve_write_database() -> str:   # pragma: no cover - live DB boundary (get_database_url reads env)
