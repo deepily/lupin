@@ -134,6 +134,40 @@ def is_already_stamped( text: Any ) -> bool:
     return isinstance( text, str ) and _LEADING_EDT_STAMP_RE.match( text ) is not None
 
 
+def split_leading_stamp( text ):
+    """
+    Split a leading EDT stamp off `text` → ( stamp, rest ).
+
+    Anchored to `_LEADING_EDT_STAMP_RE` — the SAME exact "[YYYY.MM.DD at HH:MM:SS]"
+    shape `is_already_stamped` uses (tolerating one optional leading space). A no-op
+    pass-through when there is no leading stamp: it never eats a non-timestamp leading
+    bracket (e.g. "[URGENT] ..." is returned unchanged).
+
+    Used by the peer-DM framing (`hook_common.build_peer_dm_reminder`) to fold the
+    stored body's leading stamp INTO the header line — a RENDER-LAYER extraction that
+    leaves the stored body untouched (never origin-suppress).
+
+    Requires:
+        - text is any value (defensive — a non-string has no stamp)
+
+    Ensures:
+        - text begins with a stamp → ( stamp, rest ): stamp is the bracketed timestamp
+          string, surrounding whitespace stripped (e.g. "[2026.08.15 at 21:29:37]");
+          rest is text with that stamp AND the whitespace immediately after it removed
+        - no leading stamp (or a non-string) → ( None, text ) with text UNCHANGED
+          (byte-identical pass-through)
+        - never raises (pure)
+    """
+    if not isinstance( text, str ):
+        return None, text
+    m = _LEADING_EDT_STAMP_RE.match( text )
+    if m is None:
+        return None, text
+    stamp = m.group( 0 ).strip()
+    rest  = text[ m.end(): ].lstrip()
+    return stamp, rest
+
+
 def quick_smoke_test():
     """Self-contained smoke test (no IO). Returns True or raises AssertionError."""
     june = datetime.datetime( 2026, 6, 11, 21, 28, 46, tzinfo=datetime.timezone.utc )
@@ -158,6 +192,17 @@ def quick_smoke_test():
     # None dt renders "now" — just assert the bracketed shape (length + delimiters)
     now_prefix = format_edt_timestamp()
     assert now_prefix.startswith( "[" ) and now_prefix.endswith( "]" ) and " at " in now_prefix
+
+    # split_leading_stamp — BOTH branches (falsifiable):
+    # stamp present → (stamp, clean rest); the stamp round-trips is_already_stamped.
+    stamp, rest = split_leading_stamp( "[2026.08.15 at 21:29:37] hello there" )
+    assert stamp == "[2026.08.15 at 21:29:37]" and rest == "hello there"
+    assert is_already_stamped( stamp )
+    # no leading stamp → (None, text) byte-identical pass-through, and a non-timestamp
+    # leading bracket is NEVER eaten.
+    assert split_leading_stamp( "[URGENT] ship it" )     == ( None, "[URGENT] ship it" )
+    assert split_leading_stamp( "no stamp at all" )      == ( None, "no stamp at all" )
+    assert split_leading_stamp( 12345 )                  == ( None, 12345 )   # non-string
     return True
 
 
