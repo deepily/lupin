@@ -253,6 +253,33 @@ AGENTIC_AGENTS = {
         },
     },
 
+    "agent router go to test fix expediter" : {
+        # START a fresh TFE run — SYSTEM-TRIGGERED, not voice. The test-suite
+        # completion watchdog dispatches this command
+        # (test_suite_completion_watchdog.py:259) with source_test_suite_job_id =
+        # the just-failed job's id_hash. That arg is a job hash no user can speak, so
+        # this command is EXEMPT from the router prompt (the drift-guard exemption
+        # carries the stated reason + the still-trained residual). It keeps a registry
+        # entry so the watchdog's dispatch resolves and the registry OWNS it.
+        # cli_module is None (like test_suite): system-dispatched with the arg already
+        # supplied, so the voice expeditor never interviews for it — no CLI help, and
+        # no shared-module help conflict with the resume entry below.
+        "job_prefix"         : "tfe",
+        "cli_module"         : None,
+        "job_class_path"     : "cosa.agents.test_fix_expediter.job.TestFixExpediterJob",
+        "display_name"       : "Test Fix Expediter",
+        "required_user_args" : [ "source_test_suite_job_id" ],
+        "system_provided"    : [ "user_id", "user_email", "session_id" ],
+        "arg_mapping"        : {
+            "source_test_suite_job_id" : "source_test_suite_job_id",
+            "job_id"                   : "source_test_suite_job_id",
+        },
+        "fallback_questions" : {
+            "source_test_suite_job_id" : "Which test-suite job's failures should I fix? Paste its job ID.",
+        },
+        "fallback_defaults"  : {},
+    },
+
     "agent router go to test fix expediter resume" : {
         # Voice-driven resume of a stalled Test Fix Expediter job.
         # Session 9056c113 doc 16 Phase 2 — wires into existing REST endpoint
@@ -306,6 +333,41 @@ AGENTIC_AGENTS = {
             "pytest_args" : "none",
             "dry_run"     : "no",
         },
+    },
+
+    "agent router go to heartbeat poker" : {
+        # SYSTEM/programmatic agentic job — NO production dispatch path today. Closed
+        # enumeration over every non-test create_agentic_job CALL SITE shows none can
+        # pass this command (the router arm is EMPIRICAL prompt-gating, 0/10 observed,
+        # not a proven-closed vocabulary). The factory branch
+        # (agentic_job_factory.py:374 -> HeartbeatPokerJob:392) is reached only by
+        # tests. It keeps a registry entry because it is a documented, tested
+        # capability (design src/rnd/v0.1.7/2026.05.20-generic-heartbeat-poker-
+        # abstraction-design.md, 2026.05.22-...class-spec.md) and because the
+        # single-source endgame (phase 4/5) derives the factory FROM this registry, so
+        # an unowned factory branch IS the drift being eliminated. Wire-or-remove is
+        # tracked in store row 91ca9e80. cli_module=None (system-dispatched, no voice
+        # interview); drift-guard exemption waives prompt+training+card.
+        "job_prefix"         : "hb",
+        "cli_module"         : None,
+        "job_class_path"     : "cosa.agents.heartbeat_poker_job.HeartbeatPokerJob",
+        "display_name"       : "Heartbeat Poker",
+        "required_user_args" : [ "recipients" ],
+        "system_provided"    : [ "user_id", "user_email", "session_id" ],
+        "arg_mapping"        : {
+            "recipients"                : "recipients",
+            "cadence_seconds"           : "cadence_seconds",
+            "termination_topic"         : "termination_topic",
+            "termination_signal_kinds"  : "termination_signal_kinds",
+            "workstream_id"             : "workstream_id",
+            "deadman_consecutive_pokes" : "deadman_consecutive_pokes",
+            "max_duration_seconds"      : "max_duration_seconds",
+            "monopolize"                : "monopolize",
+        },
+        "fallback_questions" : {
+            "recipients" : "Who should the heartbeat poker monitor? (system-dispatched — no voice path today.)",
+        },
+        "fallback_defaults"  : {},
     },
 }
 
@@ -440,7 +502,8 @@ def quick_smoke_test():
     # Test 1: Registry structure
     print( "\n1. Testing registry structure..." )
     try:
-        assert len( AGENTIC_AGENTS ) == 10, f"Expected 10 agents, got {len( AGENTIC_AGENTS )}"
+        # (count guard deleted 2026-08-15, María: len()==N reads its own source and
+        # catches nothing; the drift guard's set-equality is the real content check.)
         for key, entry in AGENTIC_AGENTS.items():
             assert "cli_module" in entry, f"Missing cli_module in {key}"
             assert "required_user_args" in entry, f"Missing required_user_args in {key}"

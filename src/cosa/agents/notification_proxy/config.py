@@ -113,6 +113,8 @@ TEST_PROFILES = {
         "theme"                    : "default",
         "dead_job_id"              : "dr-mock1234::user1",
         "resume_from"              : "tfe-mock1234::user1",
+        "source_test_suite_job_id" : "ts-mock1234::user1",     # START (test fix expediter)
+        "recipients"               : "persona:test-recipient",  # heartbeat poker
         "extra_context"            : "none",
         "pytest_args"              : "none",
         "test_types"               : "integration,e2e",

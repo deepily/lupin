@@ -349,6 +349,28 @@ def create_agentic_job( command, args_dict, user_id, user_email, session_id, deb
             verbose                   = verbose,
         )
 
+    elif command == "agent router go to test fix expediter resume":
+        # Voice resume — mirrors POST /api/test-fix-expediter/resume-from
+        # (queues.py:1857). resume_from is already fuzzy-matched by the expeditor's
+        # tfe_checkpoint_match handler; resolve it to a single stalled job, then
+        # rebuild via resume_job(). No single match (not-found / still-ambiguous) →
+        # return None so the flow routes to the receptionist to speak the failure
+        # (the voice path has no HTTP channel for a 404/ambiguous response).
+        from cosa.agents.test_fix_expediter.resume_resolver import resolve_resume_target
+        target = resolve_resume_target( args_dict.get( "resume_from", "" ), user_email )
+        if target.job_id is None:
+            return None
+        overrides = {
+            "lead_model_override"   : args_dict.get( "lead_model_override" ),
+            "worker_model_override" : args_dict.get( "worker_model_override" ),
+            "thinking_effort"       : args_dict.get( "thinking_effort" ),
+        }
+        overrides = { k: v for k, v in overrides.items() if v is not None }
+        # resume_job() returns a fully-formed job carrying its ORIGINAL routing_command
+        # and args from job_history; return it directly rather than falling through to
+        # the common tail, which would overwrite those with the resume args.
+        return resume_job( target.job_id, args_overrides=overrides or None )
+
     elif command == "agent router go to heartbeat poker":
         # recipients: list of {identifier, identifier_type, role} dicts → RecipientSpec list
         recipients = [

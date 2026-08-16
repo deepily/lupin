@@ -20,8 +20,10 @@ import cosa.agents.runtime_argument_expeditor.agent_registry as ar
 
 class TestRegistryStructure( unittest.TestCase ):
 
-    def test_ten_agents_with_required_keys( self ):
-        self.assertEqual( len( ar.AGENTIC_AGENTS ), 10 )
+    def test_every_agent_has_required_keys( self ):
+        # count assert deleted 2026-08-15 (Rachel): len(AGENTIC_AGENTS)==N reads its own
+        # source and catches only stale-count churn; the drift guard's four-way set-equality
+        # subsumes it. The per-entry required-field loop below is the real structural check.
         for key, entry in ar.AGENTIC_AGENTS.items():
             for field in ( "cli_module", "required_user_args", "system_provided",
                            "arg_mapping", "fallback_questions", "fallback_defaults",
