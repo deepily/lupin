@@ -253,8 +253,9 @@ class SolutionSnapshot( RunnableCode ):
 
         # QueueableJob protocol compliance - status tracking attributes
         self.state                 = JobState.PENDING
-        self.started_at            = ""
-        self.completed_at          = ""
+        # None, not "" — see agent_base.py and row 4a9ebc4b.
+        self.started_at            = None
+        self.completed_at          = None
 
         # Scheduling attributes (CJ Flow) — snapshots are always immediate, never monopolize/pause
         self.scheduled_at          = None

@@ -174,8 +174,10 @@ class AgentBase( RunnableCode, abc.ABC ):
         self.error        = ""  # Must be str, not None (protocol requirement)
         self.state        = JobState.PENDING
         self.is_cache_hit = False
-        self.started_at   = ""
-        self.completed_at = ""
+        # None, not "" — an absent timestamp is absent, not an empty string. The
+        # empty string is what made a datetime field stringly-typed (row 4a9ebc4b).
+        self.started_at   = None
+        self.completed_at = None
 
         # Scheduling attributes (CJ Flow) — sync agents are always immediate, never monopolize
         self.scheduled_at = None

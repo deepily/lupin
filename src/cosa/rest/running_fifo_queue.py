@@ -30,6 +30,35 @@ from lupin_cli.notifications.notification_models import (
     ResponseType
 )
 
+def compute_duration_seconds( started_at: Any, completed_at: Any ) -> Optional[ float ]:
+    """
+    Elapsed seconds between two timestamps, or None when either is absent.
+
+    The single place that knows a timestamp may arrive as an ISO string OR a
+    datetime. Fast-lane jobs and agentic jobs disagree on which they carry
+    (row 4a9ebc4b), so callers must not have to guess — six copies of this
+    logic used to, and two of them forgot to require completed_at.
+
+    Requires:
+        - started_at / completed_at are each an ISO-8601 string, a datetime,
+          None, or "" — nothing else is assumed
+
+    Ensures:
+        - returns None if either value is empty ("" or None)
+        - returns None if either value fails to parse, rather than raising —
+          a card's duration must never take the request down with it
+        - otherwise returns ( completed_at - started_at ).total_seconds()
+    """
+    if not started_at or not completed_at: return None
+
+    try:
+        start = datetime.fromisoformat( started_at )   if isinstance( started_at, str )   else started_at
+        end   = datetime.fromisoformat( completed_at ) if isinstance( completed_at, str ) else completed_at
+        return ( end - start ).total_seconds()
+    except Exception:
+        return None
+
+
 class RunningFifoQueue( FifoQueue ):
     """
     CJ Flow execution engine — processes running jobs with agents and solution snapshots.
@@ -563,14 +592,7 @@ class RunningFifoQueue( FifoQueue ):
             completed_at = du.get_current_datetime_iso()
             started_at   = job.started_at
 
-            duration_seconds = None
-            if started_at and completed_at:
-                try:
-                    start = datetime.fromisoformat( started_at ) if isinstance( started_at, str ) else started_at
-                    end   = datetime.fromisoformat( completed_at )
-                    duration_seconds = ( end - start ).total_seconds()
-                except Exception:
-                    pass
+            duration_seconds = compute_duration_seconds( started_at, completed_at )
 
             # artifacts-based fields are agentic-specific; fast-lane jobs have empty
             # artifacts or no artifacts attribute — use getattr for boundary safety
@@ -674,14 +696,7 @@ class RunningFifoQueue( FifoQueue ):
             completed_at = du.get_current_datetime_iso()
             started_at   = job.started_at
 
-            duration_seconds = None
-            if started_at and completed_at:
-                try:
-                    start = datetime.fromisoformat( started_at ) if isinstance( started_at, str ) else started_at
-                    end   = datetime.fromisoformat( completed_at )
-                    duration_seconds = ( end - start ).total_seconds()
-                except Exception:
-                    pass
+            duration_seconds = compute_duration_seconds( started_at, completed_at )
 
             artifacts = getattr( job, "artifacts", None ) or { }
             metadata  = {
@@ -846,14 +861,7 @@ class RunningFifoQueue( FifoQueue ):
             completed_at = du.get_current_datetime_iso()
             started_at   = job.started_at
 
-            duration_seconds = None
-            if started_at:
-                try:
-                    start = datetime.fromisoformat( started_at ) if isinstance( started_at, str ) else started_at
-                    end   = datetime.fromisoformat( completed_at )
-                    duration_seconds = ( end - start ).total_seconds()
-                except Exception:
-                    pass
+            duration_seconds = compute_duration_seconds( started_at, completed_at )
 
             metadata = {
                 "error"            : error_msg,
@@ -1345,14 +1353,7 @@ class RunningFifoQueue( FifoQueue ):
                 completed_at = du.get_current_datetime_iso()
                 started_at   = running_job.started_at
 
-                duration_seconds = None
-                if started_at:
-                    try:
-                        start = datetime.fromisoformat( started_at ) if isinstance( started_at, str ) else started_at
-                        end   = datetime.fromisoformat( completed_at )
-                        duration_seconds = ( end - start ).total_seconds()
-                    except Exception:
-                        pass
+                duration_seconds = compute_duration_seconds( started_at, completed_at )
 
                 metadata = {
                     'response_text'   : running_job.answer_conversational,
@@ -1402,14 +1403,7 @@ class RunningFifoQueue( FifoQueue ):
                 started_at   = running_job.started_at
 
                 # Calculate duration_seconds if both timestamps exist
-                duration_seconds = None
-                if started_at and completed_at:
-                    try:
-                        start = datetime.fromisoformat( started_at ) if isinstance( started_at, str ) else started_at
-                        end   = datetime.fromisoformat( completed_at )
-                        duration_seconds = ( end - start ).total_seconds()
-                    except Exception:
-                        pass
+                duration_seconds = compute_duration_seconds( started_at, completed_at )
 
                 metadata = {
                     'response_text'   : running_job.answer_conversational,
@@ -1537,6 +1531,12 @@ class RunningFifoQueue( FifoQueue ):
         }
         
         formatted_output = "ERROR: Formatted output not yet generated!?!"
+
+        # Stamp the start. Without this the fast lane never records one, so every
+        # duration below reads None and the card shows no elapsed time — the live
+        # half of row 4a9ebc4b. The agentic lane already does this for itself.
+        running_job.started_at = du.get_current_datetime_iso()
+
         try:
             formatted_output    = running_job.do_all()
         
@@ -1612,14 +1612,7 @@ class RunningFifoQueue( FifoQueue ):
             started_at   = running_job.started_at
 
             # Calculate duration_seconds if both timestamps exist
-            duration_seconds = None
-            if started_at and completed_at:
-                try:
-                    start = datetime.fromisoformat( started_at ) if isinstance( started_at, str ) else started_at
-                    end   = datetime.fromisoformat( completed_at )
-                    duration_seconds = ( end - start ).total_seconds()
-                except Exception:
-                    pass
+            duration_seconds = compute_duration_seconds( started_at, completed_at )
 
             metadata = {
                 'response_text'   : running_job.answer_conversational,
@@ -1695,14 +1688,7 @@ class RunningFifoQueue( FifoQueue ):
         started_at   = running_job.started_at
 
         # Calculate duration_seconds if both timestamps exist
-        duration_seconds = None
-        if started_at and completed_at:
-            try:
-                start = datetime.fromisoformat( started_at ) if isinstance( started_at, str ) else started_at
-                end   = datetime.fromisoformat( completed_at )
-                duration_seconds = ( end - start ).total_seconds()
-            except Exception:
-                pass
+        duration_seconds = compute_duration_seconds( started_at, completed_at )
 
         metadata = {
             'response_text'   : running_job.answer_conversational,
@@ -1910,14 +1896,7 @@ class RunningFifoQueue( FifoQueue ):
         started_at   = original_job.started_at
 
         # Calculate duration_seconds if both timestamps exist (will be very short for cache hits)
-        duration_seconds = None
-        if started_at and completed_at:
-            try:
-                start = datetime.fromisoformat( started_at ) if isinstance( started_at, str ) else started_at
-                end   = datetime.fromisoformat( completed_at )
-                duration_seconds = ( end - start ).total_seconds()
-            except Exception:
-                pass
+        duration_seconds = compute_duration_seconds( started_at, completed_at )
 
         metadata = {
             'response_text'   : cached_snapshot.answer_conversational,
