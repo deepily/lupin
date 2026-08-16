@@ -1,13 +1,14 @@
-"""Unit tests for the paired-eval snapshot-table isolation guard.
+"""Unit tests for the paired-eval snapshot-store isolation guard (two checks).
 
-Proves the guard BOTH fires (refuses an unisolated run) AND lets through (a run
-rebound to a dedicated table) — a guard that only ever says no is the same as no
-guard. The passes-when-isolated arm uses a synthetic table name that cannot
-plausibly be the real one, so the test can never accidentally match production.
+VENUE: :7999 — pure, injected sources, no server, no DB.
 
-A live control (test_resolve_write_target_reads_the_real_orm_table) reads the
-ORM's actual __tablename__ so a rename of the shared table is caught here instead
-of silently defeating the guard.
+Two must-fail CONTROLS carry the SAFETY check, one per direction the old table-name-only
+predicate got wrong:
+  · test_safety_refuses_a_shared_db_write — the old guard ALLOWED a shared-db write (it
+    only compared table names); the new one refuses the fully-qualified dev.solution_snapshots.
+  · test_safety_allows_same_table_in_an_isolated_db — the old guard BLOCKED a genuinely
+    isolated different-database write with the same table name; the new one allows it.
+Each goes red on the old predicate, for the right reason (the database half of the identity).
 """
 
 import os
@@ -24,9 +25,10 @@ if _LUPIN_ROOT:
 import eval_isolation_guard as guard   # noqa: E402
 
 
-# A name that cannot plausibly become the real production table.
-_SYNTHETIC_ISOLATED = "v2_paired_eval_isolated_DO_NOT_USE_IN_PROD"
-_SHARED             = "solution_snapshots"
+_SHARED_TABLE = "solution_snapshots"                     # the ORM shipped default table
+_SHARED_DEV   = "lupin_db_dev.solution_snapshots"        # the LIVE shared store (never permitted)
+_ISO_DEDICATED = "lupin_db_test.v2_paired_snapshots"     # a dedicated isolated store
+_ISO_SAME_TABLE = "lupin_db_test.solution_snapshots"     # same table name, ISOLATED by database
 
 
 class _FakeConfig:
@@ -37,55 +39,109 @@ class _FakeConfig:
         return self.values.get( key, default )
 
 
+def _cfg( *, writeback=True, allowlist=None ):
+    values = { "v2 snapshot writeback enabled": writeback }
+    if allowlist is not None:
+        values[ guard.PERMITTED_STORES_KEY ] = allowlist
+    return _FakeConfig( values )
+
+
+# ---------------------------------------------------------------------------
+# helpers: parse / db-name / fully-qualified
+# ---------------------------------------------------------------------------
+def test_parse_permitted_stores_variants():
+    assert guard.parse_permitted_stores( None ) == set()
+    assert guard.parse_permitted_stores( "   " ) == set()
+    assert guard.parse_permitted_stores( "a.b" ) == { "a.b" }
+    assert guard.parse_permitted_stores( " a.b , c.d ,, " ) == { "a.b", "c.d" }
+
+
+def test_db_name_strips_leading_slash_and_ignores_query_fragment():
+    assert guard._db_name( "postgresql://u:p@h/lupin_db_test?sslmode=require" ) == "lupin_db_test"
+    assert guard._db_name( "postgresql://u:p@h/lupin_db_dev#/lupin_db_test" ) == "lupin_db_dev"
+
+
+def test_fully_qualified_joins_db_and_table():
+    assert guard.fully_qualified( "lupin_db_test", "solution_snapshots" ) == "lupin_db_test.solution_snapshots"
+
+
+# ---------------------------------------------------------------------------
+# SAFETY — require_isolated_snapshot_table
+# ---------------------------------------------------------------------------
 def test_writeback_off_needs_no_isolation():
-    cfg = _FakeConfig( { "v2 snapshot writeback enabled": False } )
-    # No write happens, so the guard returns None without inspecting the table.
-    assert guard.require_isolated_snapshot_table( cfg, write_target=_SHARED ) is None
+    cfg = _cfg( writeback=False )
+    # No write happens, so the guard returns None without inspecting the destination.
+    assert guard.require_isolated_snapshot_table( cfg, write_target=_SHARED_TABLE, write_database="lupin_db_dev" ) is None
 
 
-def test_refuses_when_writeback_on_and_no_isolated_table_configured():
-    cfg = _FakeConfig( { "v2 snapshot writeback enabled": True } )   # 'v2 snapshot table' absent — today's state
+def test_fail_closed_when_allowlist_is_empty_or_absent():
+    # Writeback ON, no allowlist configured -> the destination cannot be PROVEN non-live.
+    cfg = _cfg( allowlist=None )
     with pytest.raises( guard.IsolationNotConfigured ) as exc:
-        guard.require_isolated_snapshot_table( cfg, write_target=_SHARED )
-    assert "no 'v2 snapshot table'" in str( exc.value )
-    assert _SHARED in str( exc.value )
-
-
-def test_refuses_when_config_set_but_app_still_writes_shared():
-    # The false-isolation case: the INI key is set, but the ORM still writes the
-    # shared table because the wiring (bug 080821da) does not exist. MUST refuse.
-    cfg = _FakeConfig( {
-        "v2 snapshot writeback enabled": True,
-        "v2 snapshot table"            : _SYNTHETIC_ISOLATED,
-    } )
-    with pytest.raises( guard.IsolationNotConfigured ) as exc:
-        guard.require_isolated_snapshot_table( cfg, write_target=_SHARED )
-    assert "isolation is NOT wired" in str( exc.value )
-
-
-def test_refuses_when_resolving_write_target_live_and_it_is_shared():
-    # write_target omitted -> resolved live via resolve_write_target(); today that is
-    # the shared table, so an on-writeback run with an isolated cfg still refuses.
-    cfg = _FakeConfig( {
-        "v2 snapshot writeback enabled": True,
-        "v2 snapshot table"            : _SYNTHETIC_ISOLATED,
-    } )
+        guard.require_isolated_snapshot_table( cfg, write_target=_SHARED_TABLE, write_database="lupin_db_test" )
+    assert "allowlist is empty" in str( exc.value )
+    # An explicitly blank allowlist is the same fail-closed refusal.
+    cfg_blank = _cfg( allowlist="   " )
     with pytest.raises( guard.IsolationNotConfigured ):
-        guard.require_isolated_snapshot_table( cfg )   # live resolve of __tablename__
+        guard.require_isolated_snapshot_table( cfg_blank, write_target=_SHARED_TABLE, write_database="lupin_db_test" )
 
 
-def test_passes_when_app_write_target_matches_configured_isolated_table():
-    # The only path that lets a paired run proceed: the app's live write target IS
-    # the configured, synthetic, dedicated isolated table.
-    cfg = _FakeConfig( {
-        "v2 snapshot writeback enabled": True,
-        "v2 snapshot table"            : _SYNTHETIC_ISOLATED,
-    } )
-    result = guard.require_isolated_snapshot_table( cfg, write_target=_SYNTHETIC_ISOLATED )
-    assert result == _SYNTHETIC_ISOLATED
+def test_safety_refuses_a_shared_db_write():
+    """MUST-FAIL CONTROL (direction 1). The app would write dev.solution_snapshots — a LIVE
+    store. The OLD table-name-only guard, with its isolated cfg set to 'solution_snapshots',
+    passed this (table == table). The new guard refuses the fully-qualified destination."""
+    cfg = _cfg( allowlist=_ISO_DEDICATED )
+    with pytest.raises( guard.IsolationNotConfigured ) as exc:
+        guard.require_isolated_snapshot_table( cfg, write_target=_SHARED_TABLE, write_database="lupin_db_dev" )
+    assert "NOT in the permitted" in str( exc.value ) and _SHARED_DEV in str( exc.value )
+
+
+def test_safety_allows_same_table_in_an_isolated_db():
+    """MUST-FAIL CONTROL (direction 2). Same table name 'solution_snapshots' but in the
+    ISOLATED lupin_db_test database. The OLD table-name-only guard BLOCKED this (table ==
+    shared name, != a synthetic isolated cfg). The new guard ALLOWS it — the db isolates."""
+    cfg = _cfg( allowlist=_ISO_SAME_TABLE )
+    result = guard.require_isolated_snapshot_table( cfg, write_target=_SHARED_TABLE, write_database="lupin_db_test" )
+    assert result == _ISO_SAME_TABLE
+
+
+def test_safety_allows_a_dedicated_isolated_store():
+    cfg = _cfg( allowlist=f"{_ISO_DEDICATED}, {_ISO_SAME_TABLE}" )
+    result = guard.require_isolated_snapshot_table( cfg, write_target="v2_paired_snapshots", write_database="lupin_db_test" )
+    assert result == _ISO_DEDICATED
 
 
 def test_resolve_write_target_reads_the_real_orm_table():
-    # Live control: the guard's shared-side source is the ORM attribute the app
-    # actually writes through. If the shared table is renamed, this catches it.
-    assert guard.resolve_write_target() == _SHARED
+    # Live control: the guard's table source is the ORM attribute the app writes through.
+    # A rename of the shared table is caught here instead of silently defeating the guard.
+    assert guard.resolve_write_target() == _SHARED_TABLE
+
+
+# ---------------------------------------------------------------------------
+# VALIDITY — require_arms_distinct_and_clean
+# ---------------------------------------------------------------------------
+def test_validity_passes_when_arms_are_distinct_and_clean():
+    result = guard.require_arms_distinct_and_clean(
+        "lupin_db_v1baseline.solution_snapshots", "lupin_db_test.solution_snapshots",
+        v1_rowcount=0, v2_rowcount=0,
+    )
+    assert result == ( "lupin_db_v1baseline.solution_snapshots", "lupin_db_test.solution_snapshots" )
+
+
+def test_validity_refuses_when_arms_share_a_destination():
+    with pytest.raises( guard.PairedTargetsNotIsolated ) as exc:
+        guard.require_arms_distinct_and_clean( _ISO_SAME_TABLE, _ISO_SAME_TABLE, v1_rowcount=0, v2_rowcount=0 )
+    assert "SAME destination" in str( exc.value )
+
+
+def test_validity_refuses_when_a_destination_is_dirty():
+    with pytest.raises( guard.PairedTargetsNotIsolated ) as exc:
+        guard.require_arms_distinct_and_clean( "db1.t", "db2.t", v1_rowcount=5, v2_rowcount=0 )
+    assert "START CLEAN" in str( exc.value ) and "db1.t" in str( exc.value )
+
+
+def test_validity_names_both_dirty_arms():
+    with pytest.raises( guard.PairedTargetsNotIsolated ) as exc:
+        guard.require_arms_distinct_and_clean( "db1.t", "db2.t", v1_rowcount=3, v2_rowcount=7 )
+    msg = str( exc.value )
+    assert "db1.t" in msg and "db2.t" in msg
