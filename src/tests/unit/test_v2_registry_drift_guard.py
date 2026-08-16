@@ -52,8 +52,8 @@ from cosa.rest.v2.registry import (
     AgentSpec,
     CommandClass,
     REGISTRY,
-    V2_AGENTS,
-    AGENTIC_COMMANDS,
+    ANSWER_COMMANDS,
+    JOB_COMMANDS,
     CONTROL_COMMANDS,
     RECEPTIONIST_OR_NONE,
 )
@@ -248,7 +248,7 @@ class TestAgenticDriftGuard( unittest.TestCase ):
     def test_1a_every_owned_agentic_command_is_router_listed( self ):
         # Owned agentic commands must be router-listed, UNLESS explicitly exempted
         # (§7): an exemption is an intentional, reasoned absence, not a loosening.
-        missing = set( AGENTIC_COMMANDS ) - _template_commands() - _exempt_on( "prompt" )
+        missing = set( JOB_COMMANDS ) - _template_commands() - _exempt_on( "prompt" )
         self.assertEqual(
             missing, set(),
             f"owned agentic commands the router prompt never lists and do not waive 'prompt': {sorted( missing )}"
@@ -256,7 +256,7 @@ class TestAgenticDriftGuard( unittest.TestCase ):
 
     def test_1b_factory_branches_equal_the_owned_agentic_set( self ):
         factory = _factory_commands()
-        owned   = set( AGENTIC_COMMANDS )
+        owned   = set( JOB_COMMANDS )
         self.assertEqual(
             factory, owned,
             f"factory<->registry drift — in factory not owned: {sorted( factory - owned )}; "
@@ -265,7 +265,7 @@ class TestAgenticDriftGuard( unittest.TestCase ):
 
     def test_1c_training_agentic_keys_equal_the_owned_agentic_set( self ):
         training = _training_agentic_keys()
-        owned    = set( AGENTIC_COMMANDS )
+        owned    = set( JOB_COMMANDS )
         trained_not_owned = training - owned                             # a training key MUST be owned
         owned_not_trained = owned - training - _exempt_on( "training" )  # owned MUST be trained unless it waives "training"
         self.assertEqual(
@@ -279,7 +279,7 @@ class TestAgenticDriftGuard( unittest.TestCase ):
 class TestConversationalDriftGuard( unittest.TestCase ):
 
     def test_2_conversational_in_prompt_and_training_and_not_factory( self ):
-        conv = set( V2_AGENTS )
+        conv = set( ANSWER_COMMANDS )
         self.assertEqual( conv - _template_commands(), set(),
                           "conversational commands missing from the router prompt" )
         self.assertEqual( conv - _training_all_keys(), set(),
@@ -296,7 +296,7 @@ class TestControlNoneDriftGuard( unittest.TestCase ):
         # Both directions (arnold): the control+none set must EQUAL the prompt∩training
         # commands that are neither conversational nor agentic — catches a missing
         # membership AND an extra one.
-        residue = ( _template_commands() & _training_all_keys() ) - set( V2_AGENTS ) - set( AGENTIC_COMMANDS )
+        residue = ( _template_commands() & _training_all_keys() ) - set( ANSWER_COMMANDS ) - set( JOB_COMMANDS )
         self.assertEqual( cn, residue,
                           f"control/none drift — labelled: {sorted( cn )}; prompt∩training residue: {sorted( residue )}" )
         self.assertEqual( cn & _factory_commands(), set(),
@@ -307,7 +307,7 @@ class TestControlNoneDriftGuard( unittest.TestCase ):
 class TestClassPartition( unittest.TestCase ):
 
     def test_4_no_command_in_two_class_buckets( self ):
-        buckets = [ set( V2_AGENTS ), set( AGENTIC_COMMANDS ),
+        buckets = [ set( ANSWER_COMMANDS ), set( JOB_COMMANDS ),
                     set( CONTROL_COMMANDS ), set( RECEPTIONIST_OR_NONE ) ]
         for a, b in combinations( buckets, 2 ):
             self.assertEqual( a & b, set(), f"command in two class buckets: {a & b}" )
@@ -346,7 +346,7 @@ class TestCliModulesRun( unittest.TestCase ):
 
     def test_5_every_agentic_cli_module_runs( self ):
         failures = []
-        for command, spec in sorted( AGENTIC_COMMANDS.items() ):
+        for command, spec in sorted( JOB_COMMANDS.items() ):
             module = spec.cli_module
             if module is None:
                 continue                                  # API-invoked (test_suite)
@@ -386,7 +386,7 @@ class TestCliHelpNamesDeclaredArgs( unittest.TestCase ):
             AGENTIC_AGENTS, get_cli_help,
         )
         failures = []
-        for command, spec in sorted( AGENTIC_COMMANDS.items() ):
+        for command, spec in sorted( JOB_COMMANDS.items() ):
             if spec.cli_module is None:
                 continue                                  # API-invoked (test_suite)
             help_text = ( get_cli_help( command ) or "" ).lower()
@@ -408,7 +408,7 @@ class TestInitialDetectionExemptionFacility( unittest.TestCase ):
 
     def test_real_exemptions_are_all_valid( self ):
         problems = _validate_exemptions(
-            INITIAL_DETECTION_EXEMPTIONS, set( AGENTIC_COMMANDS ),
+            INITIAL_DETECTION_EXEMPTIONS, set( JOB_COMMANDS ),
             _template_commands(), _card_commands() )
         self.assertEqual( problems, [], f"invalid exemptions: {problems}" )
 
@@ -427,7 +427,7 @@ class TestInitialDetectionExemptionFacility( unittest.TestCase ):
             { "agent router go to phantom": { "surfaces": [], "reason": "" },
               "agent router go to weather": { "surfaces": [ "prompt" ], "reason": "x" },
               "agent router go to bug fix expediter": { "surfaces": [ "card" ], "reason": "x" } },
-            set( AGENTIC_COMMANDS ), _template_commands(), _card_commands() )
+            set( JOB_COMMANDS ), _template_commands(), _card_commands() )
         self.assertTrue( any( "surfaces must be a non-empty subset" in p for p in problems ), problems )
         self.assertIn( "agent router go to phantom: exemption has no reason", problems )
         self.assertIn( "agent router go to phantom: not an owned agentic command", problems )
@@ -472,9 +472,9 @@ class TestCardDriftPredicateControl( unittest.TestCase ):
         # START is genuinely owned AND off the card — the real dead-card entry. With
         # its 'card' waiver WITHHELD (exempt=set()), the predicate must flag it.
         start = "agent router go to test fix expediter"
-        self.assertIn(    start, set( AGENTIC_COMMANDS ) )   # really owned
+        self.assertIn(    start, set( JOB_COMMANDS ) )   # really owned
         self.assertNotIn( start, _card_commands() )          # really off the card
-        problems = _card_drift( _card_commands(), set( AGENTIC_COMMANDS ), exempt=set() )
+        problems = _card_drift( _card_commands(), set( JOB_COMMANDS ), exempt=set() )
         self.assertTrue(
             any( p.startswith( start ) and "does not waive 'card'" in p for p in problems ),
             f"dead-card arm did not fire on real owned-not-carded {start!r}: {problems}"
@@ -482,7 +482,7 @@ class TestCardDriftPredicateControl( unittest.TestCase ):
         # and WITH its real waiver, the same predicate clears START (no false red).
         self.assertFalse(
             any( p.startswith( start ) for p in
-                 _card_drift( _card_commands(), set( AGENTIC_COMMANDS ), exempt=_exempt_on( "card" ) ) )
+                 _card_drift( _card_commands(), set( JOB_COMMANDS ), exempt=_exempt_on( "card" ) ) )
         )
 
     def test_phantom_arm_fires_on_a_real_carded_command_when_owned_withheld( self ):
@@ -513,7 +513,7 @@ class TestCardSurfaceDriftGuard( unittest.TestCase ):
 
     def test_1d_card_surface_agrees_with_the_owned_agentic_set( self ):
         problems = _card_drift(
-            _card_commands(), set( AGENTIC_COMMANDS ), exempt=_exempt_on( "card" ) )
+            _card_commands(), set( JOB_COMMANDS ), exempt=_exempt_on( "card" ) )
         self.assertEqual(
             problems, [],
             "card<->registry drift (§7):\n  " + "\n  ".join( problems ) )

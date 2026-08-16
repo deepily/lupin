@@ -15,7 +15,7 @@ Run: PYTHONPATH=src src/cosa/.venv/bin/python -m pytest \
      src/tests/unit/test_v2_registry_resolve_scope_guard.py -v
 
 FORWARD-COMPAT NOTE for the builder: the agentic bucket is DEFERRED_COMMANDS
-today and becomes AGENTIC_COMMANDS after design §5.1.2 renames it. This file
+today and becomes JOB_COMMANDS after design §5.1.2 renames it. This file
 imports whichever exists, so it guards the invariant across the phase-1 rename
 WITHOUT edit. The resolve_agentic() half skips until §5.1.3 lands the split
 reader, then becomes a live guard automatically.
@@ -25,11 +25,11 @@ import unittest
 
 from cosa.rest.v2.registry import resolve
 
-# The agentic bucket: DEFERRED_COMMANDS pre-move, AGENTIC_COMMANDS post-move
+# The agentic bucket: DEFERRED_COMMANDS pre-move, JOB_COMMANDS post-move
 # (§5.1.2). Import whichever the tree currently exposes so this guard survives
 # the rename untouched.
 try:
-    from cosa.rest.v2.registry import AGENTIC_COMMANDS as _AGENTIC_BUCKET
+    from cosa.rest.v2.registry import JOB_COMMANDS as _AGENTIC_BUCKET
 except ImportError:
     from cosa.rest.v2.registry import DEFERRED_COMMANDS as _AGENTIC_BUCKET
 

@@ -157,7 +157,7 @@ def _agentic_spec( command, entry ):
 
 # ── The agentic set — now OWNED by the registry (§5.1) ────────────────────────
 # One spec per AGENTIC_AGENTS entry (10), built by iterating the table itself. So
-# AGENTIC_COMMANDS (derived below from the CommandClass.AGENTIC label) equals the
+# JOB_COMMANDS (derived below from the CommandClass.AGENTIC label) equals the
 # AGENTIC_AGENTS key set BY CONSTRUCTION — there is no second hand-written list to
 # drift from it. (Tiberius's §3b cross-check resolved as construction, not a
 # runtime test: a set-equality asserted against a set derived from the same table
@@ -220,14 +220,24 @@ REGISTRY = _build_registry( _CONVERSATIONAL, _AGENTIC, _CONTROL, _NONE )
 # ── The four template buckets, DERIVED from cls (§5.1.2) ──────────────────────
 # These replace the four hand-maintained constants with one label per spec: the
 # buckets are now a projection of the table, not a fifth list to keep in sync.
-V2_AGENTS            = { c: s for c, s in REGISTRY.items() if s.cls is CommandClass.CONVERSATIONAL }
-AGENTIC_COMMANDS     = { c: s for c, s in REGISTRY.items() if s.cls is CommandClass.AGENTIC }
+# ANSWER_COMMANDS vs JOB_COMMANDS — Rick's ruling, 2026-08-16: "one gives you an answer, the other
+# gives you a job." The load-bearing difference is FOLLOW-UP QUESTIONS: an answer command never asks
+# one; a job command runs an argument interview first. Then what comes back — an answer, versus an
+# artifact (podcast, deck, document, code change) — and answers are snapshotable where jobs are not.
+#
+# It is NOT a speed distinction, and the code says so: todo_fifo_queue.py:831-834 registers BOTH
+# kinds with user_job_tracker and pushes them onto the SAME queue, both surfacing a card. `weather`
+# calls an external API; `todo` and `calendar` hit a database. An earlier proposal named these six
+# INSTANT_COMMANDS and described them as answering "in the same breath, no job, no card" — that
+# would have shipped a name asserting something the implementation contradicts.
+ANSWER_COMMANDS      = { c: s for c, s in REGISTRY.items() if s.cls is CommandClass.CONVERSATIONAL }
+JOB_COMMANDS         = { c: s for c, s in REGISTRY.items() if s.cls is CommandClass.AGENTIC }
 CONTROL_COMMANDS     = frozenset( c for c, s in REGISTRY.items() if s.cls is CommandClass.CONTROL )
 RECEPTIONIST_OR_NONE = frozenset( c for c, s in REGISTRY.items() if s.cls is CommandClass.NONE )
 
 # ── DEFERRED_COMMANDS — a deliberate BOUNDED INTERIM, retired in phase 2 ───────
 # The §9 drift guard (test_v2_registry.py:59) imports this name and asserts
-#   template == V2_AGENTS ∪ DEFERRED_COMMANDS ∪ CONTROL_COMMANDS ∪ RECEPTIONIST_OR_NONE.
+#   template == ANSWER_COMMANDS ∪ DEFERRED_COMMANDS ∪ CONTROL_COMMANDS ∪ RECEPTIONIST_OR_NONE.
 # DEFERRED_COMMANDS is the template-EMITTABLE agentic subset (9), NOT the full
 # agentic set (12): the owned agentic commands absent from the router template —
 # `bug fix expediter` (card-reachable, never an initial detection), `test fix
@@ -238,7 +248,7 @@ RECEPTIONIST_OR_NONE = frozenset( c for c, s in REGISTRY.items() if s.cls is Com
 # phase 3 by ruling B (completion). Deriving from cls alone would make it the 12 and
 # break the guard; it is therefore kept as an explicit set here.
 # `test_deferred_is_template_emittable_agentic_subset` pins it to
-# AGENTIC_COMMANDS ∩ template so it cannot silently drift from the owned set.
+# JOB_COMMANDS ∩ template so it cannot silently drift from the owned set.
 # Phase 2 retires this name when the drift guard is rewritten class-aware.
 DEFERRED_COMMANDS = frozenset( {
     "agent router go to deep research",
@@ -279,10 +289,10 @@ def resolve( command ):
     Returns:
         AgentSpec or None
     """
-    spec = V2_AGENTS.get( command )
+    spec = ANSWER_COMMANDS.get( command )
     if spec is not None:
         return spec
-    for candidate in V2_AGENTS.values():
+    for candidate in ANSWER_COMMANDS.values():
         if command in candidate.aliases:
             return candidate
     return None
@@ -311,4 +321,4 @@ def resolve_agentic( command ):
     Returns:
         AgentSpec or None
     """
-    return AGENTIC_COMMANDS.get( command )
+    return JOB_COMMANDS.get( command )

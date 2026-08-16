@@ -32,8 +32,8 @@ import cosa.utils.util as cu
 from cosa.rest.v2.registry import (
     AgentSpec,
     CommandClass,
-    V2_AGENTS,
-    AGENTIC_COMMANDS,
+    ANSWER_COMMANDS,
+    JOB_COMMANDS,
     DEFERRED_COMMANDS,
     CONTROL_COMMANDS,
     RECEPTIONIST_OR_NONE,
@@ -63,7 +63,7 @@ class TestRegistryDriftGuard( unittest.TestCase ):
 
     def test_every_template_command_is_bucketed_exactly_once( self ):
         template = _template_commands()
-        buckets = [ set( V2_AGENTS ), set( DEFERRED_COMMANDS ),
+        buckets = [ set( ANSWER_COMMANDS ), set( DEFERRED_COMMANDS ),
                     set( CONTROL_COMMANDS ), set( RECEPTIONIST_OR_NONE ) ]
         covered = set().union( *buckets )
 
@@ -106,7 +106,7 @@ class TestAgenticSetOwnership( unittest.TestCase ):
     that ownership opens — cls vs the source table, and the interim DEFERRED name."""
 
     # test_cls_agentic_matches_agentic_agents REMOVED (Rachel 2026-08-15): the
-    # AGENTIC specs are built by iterating AGENTIC_AGENTS, so set(AGENTIC_COMMANDS)
+    # AGENTIC specs are built by iterating AGENTIC_AGENTS, so set(JOB_COMMANDS)
     # == set(AGENTIC_AGENTS) is true BY CONSTRUCTION — a tautology like the count.
     # The invariant is enforced instead by the construction warning at registry.py's
     # _AGENTIC comprehension.
@@ -118,7 +118,7 @@ class TestAgenticSetOwnership( unittest.TestCase ):
         # test fix expediter [START], heartbeat poker) are excluded here. (test suite
         # and test fix expediter resume ARE in the template and so ARE in the set.)
         template          = _template_commands()
-        emittable_agentic = { c for c in AGENTIC_COMMANDS if c in template }
+        emittable_agentic = { c for c in JOB_COMMANDS if c in template }
         self.assertEqual( DEFERRED_COMMANDS, emittable_agentic )
 
 
