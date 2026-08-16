@@ -384,10 +384,16 @@ def test_block_names_the_path_and_quotes_the_amendments( repo ):
 
 
 def test_block_says_so_when_there_is_no_amendment( repo ):
+    """
+    Wording tightened 2026-08-15 after Rachel's three-seat measurement — see
+    test_a_record_with_no_amendment_is_flagged_not_congratulated for why the
+    soft version was a hazard. This keeps the original intent (the seat is told
+    the record is thin) against the current, louder text.
+    """
     _write_memento( repo, "cheech", "80c17315" )
     block = _build_memento_block( SID_CHEECH, "Cheech", repo )
-    assert "no amendment block" in block
-    assert "Read it in full"    in block
+    assert "NO amendment block"      in block
+    assert "Read the full record"    in block
 
 
 def test_block_truncates_a_fat_amendment_visibly( repo ):
@@ -607,3 +613,51 @@ def test_the_mirror_root_slot_is_searched_too( repo, monkeypatch, tmp_path ):
     assert _resolve_memento_path( "35d5ced0-0000-0000-0000-000000000000", "Rachel", repo ) == str( path )
     assert "MIRROR ROOT RECORD" in _build_memento_block( "35d5ced0-0000-0000-0000-000000000000", "Rachel", repo )
     assert _resolve_memento_path( SID_FRESH, "Rio", repo ) is None
+
+
+# ---------------------------------------------------------------------------
+# A near-blank return must not wear a success banner
+# ---------------------------------------------------------------------------
+def test_a_record_with_no_amendment_is_flagged_not_congratulated( repo ):
+    """
+    CONTROL FOR A REAL HAZARD (Rachel 🕊️, 2026-08-15). Three seats re-spun;
+    two of their records carried no amendment, so the block was ~440 bytes
+    against ~8,700 for one with a tail — and it arrived under a "YOU HAVE A
+    MEMENTO" banner. A seat gets a pointer, no state, and no signal anything is
+    missing. A near-blank rehydrate wearing a green banner is worse than a red
+    one, because nobody goes looking.
+    """
+    _write_io_memento( repo, "tiffany", "74225471" )   # no amendments
+    block = _build_memento_block( SID_FRESH, "Tiffany", repo )
+
+    assert "CARRIES NO STATE"    in block
+    assert "NEAR-BLANK RETURN"   in block
+    assert "YOU HAVE A MEMENTO" not in block, "a stateless record must not read as success"
+    assert "the store is the authority" in block, "must point at the surface that IS current"
+
+
+def test_a_record_with_an_amendment_keeps_the_success_banner( repo ):
+    """The warning must not fire on the good case, or it stops meaning anything."""
+    _write_io_memento( repo, "rachel", "9eb9253c", amendments=[ "BOARD IS 5 ROWS" ] )
+    block = _build_memento_block( SID_FRESH, "Rachel", repo )
+
+    assert "YOU HAVE A MEMENTO" in block
+    assert "CARRIES NO STATE"   not in block
+
+
+def test_the_block_always_states_when_the_record_was_written( repo ):
+    """
+    Staleness is invisible without it: a record written 20 minutes ago and one
+    written three days ago are the same pointer on the page.
+    """
+    _write_io_memento( repo, "rachel", "9eb9253c",
+                       amendments=[ "HELD" ], written_at="2026-08-15T19:12:47-04:00" )
+    assert "written 2026-08-15T19:12:47-04:00" in _build_memento_block( SID_FRESH, "Rachel", repo )
+
+
+def test_an_undated_record_says_so_rather_than_omitting_it( repo ):
+    """Silence about the date reads as 'recent'; UNDATED reads as 'unknown'."""
+    path = _write_memento( repo, "cheech", "80c17315", written_at=None, amendments=[ "HELD" ] )
+    assert path  # written to the root slot, no written_at stamp
+    block = _build_memento_block( SID_CHEECH, "Cheech", repo )
+    assert "UNDATED" in block

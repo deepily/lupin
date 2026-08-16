@@ -1481,9 +1481,13 @@ def _build_memento_block( stable_session_id, persona_name, repo_root=None, cwd=N
     except OSError:
         return ""
 
+    written   = _written_at_of( _header_of( path ) )
+    stamp     = f"  written {written}\n" if written else "  written: UNDATED — this record carries no timestamp\n"
+
     amendment = _extract_amendment_tail( content )
     if amendment:
         body    = _truncate_visibly( amendment, path )
+        headline = "  🧠  YOU HAVE A MEMENTO — YOU WROTE IT BEFORE THIS CONTEXT RESET"
         section = (
             "  Your amendments — what you wrote down but had not yet acted on —\n"
             "  follow. The full record is one read away at the path above.\n"
@@ -1491,17 +1495,31 @@ def _build_memento_block( stable_session_id, persona_name, repo_root=None, cwd=N
             f"{body}\n"
         )
     else:
+        # 🔴 SAY IT LOUDLY. Measured 2026-08-15 (Rachel 🕊️): three seats
+        # re-spun; two of their records carried no amendment, and the block
+        # they got was ~440 bytes against ~8,700 for a record with a tail.
+        # Under the old wording that arrived inside a "YOU HAVE A MEMENTO"
+        # banner, which reads as success — a seat gets a pointer, no state, and
+        # no signal that anything is missing. A near-blank rehydrate wearing a
+        # green banner is worse than a red one, because nobody goes looking.
+        headline = "  ⚠️  MEMENTO FOUND BUT IT CARRIES NO STATE — TREAT AS A NEAR-BLANK RETURN"
         section = (
-            "  It carries no amendment block, so nothing is quoted here.\n"
-            "  Read it in full before you act.\n"
+            "  The record exists and is yours, but it has NO amendment block —\n"
+            "  nothing was written down since it was first created, so there is\n"
+            "  nothing here about what you were doing.\n"
+            "\n"
+            "  Read the full record before acting, and expect it to be thin.\n"
+            "  If you owe anyone work, the store is the authority, not this file:\n"
+            "  query it, and re-derive rather than trusting this to be current.\n"
         )
 
     return (
         "\n"
         "════════════════════════════════════════════════════════════════\n"
-        "  🧠  YOU HAVE A MEMENTO — YOU WROTE IT BEFORE THIS CONTEXT RESET\n"
+        f"{headline}\n"
         "════════════════════════════════════════════════════════════════\n"
         f"  {path}\n"
+        f"{stamp}"
         "\n"
         f"{section}"
         "════════════════════════════════════════════════════════════════\n"
