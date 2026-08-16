@@ -76,6 +76,10 @@ from lupin_cli.claude_code.hooks.lib.heartbeat_hold import prune_stale_hold_file
 # would keep every one of them forever and report a clean green.
 from lupin_cli.claude_code.hooks.lib.dm_inbox_hwm_janitor import report_hwm_files as _default_hwm_reporter
 from lupin_cli.claude_code.hooks.lib.dm_inbox_hwm_janitor import sweep_and_reclaim_hwm_files as _default_hwm_deleter
+# The three milder bookmark families (ask-answer / task-store-map / heartbeat-acked),
+# row bd5c27e1 — the same live-set-gated mechanism as the dm-inbox sweep above.
+from lupin_cli.claude_code.hooks.lib.bookmark_janitor import report_bookmark_files as _default_bookmark_reporter
+from lupin_cli.claude_code.hooks.lib.bookmark_janitor import sweep_and_reclaim_bookmark_files as _default_bookmark_deleter
 from lupin_cli.claude_code.hooks.lib.session_bridge import find_active_voice_persona_sessions as _find_active_voice_persona_sessions
 from lupin_cli.claude_code.hooks.lib.session_bridge import find_active_sessions as _find_active_sessions
 from lupin_mcp.persona_normalization import canonical_persona_key
@@ -871,6 +875,9 @@ class FleetArbiterLoop:
         hwm_janitor_fn       : Optional[ Callable ] = None,
         hwm_deleter_fn       : Optional[ Callable ] = None,
         enable_hwm_deletion  : bool = False,
+        bookmark_janitor_fn  : Optional[ Callable ] = None,
+        bookmark_deleter_fn  : Optional[ Callable ] = None,
+        enable_bookmark_deletion : bool = False,
         construct_retry_seconds : float = 60.0,
     ) -> None:
         self._job_factory    = job_factory
@@ -912,6 +919,11 @@ class FleetArbiterLoop:
         self._hwm_janitor_fn      = hwm_janitor_fn if hwm_janitor_fn is not None else _default_hwm_reporter
         self._hwm_deleter_fn      = hwm_deleter_fn if hwm_deleter_fn is not None else _default_hwm_deleter
         self._enable_hwm_deletion = bool( enable_hwm_deletion )
+        # The three milder bookmark families ride the same seam, their own switch —
+        # FALSE by default for the same reason: an omitted parameter must never delete.
+        self._bookmark_janitor_fn      = bookmark_janitor_fn if bookmark_janitor_fn is not None else _default_bookmark_reporter
+        self._bookmark_deleter_fn      = bookmark_deleter_fn if bookmark_deleter_fn is not None else _default_bookmark_deleter
+        self._enable_bookmark_deletion = bool( enable_bookmark_deletion )
         self._stop           = threading.Event()
         self._current_job    = None
         self._thread         = None
@@ -937,6 +949,7 @@ class FleetArbiterLoop:
         while not self._stop.is_set():
             self._sweep_hold_files()             # b39562e4 pt2: hold janitor — REPORT-ONLY (deletes nothing)
             self._sweep_hwm_files()              # 8758d0b1: DM-inbox HWM janitor — its own switch
+            self._sweep_bookmark_files()         # bd5c27e1: ask-answer / task-map / acked — its own switch
             # CONSTRUCTION IS INSIDE THE GUARD (2026-08-10). This line used to sit
             # OUTSIDE any try, so a raise in the job ctor propagated out of run(),
             # killed the thread, and never retried — the supervisor's stated promise
@@ -1152,6 +1165,67 @@ class FleetArbiterLoop:
                           paths              = pruned )
         except Exception as e:               # reclamation must never kill the supervisor
             self._log_fn( "fleet_arbiter_hwm_reclaim_error", error=str( e ) )
+
+    def _sweep_bookmark_files( self ) -> None:
+        """
+        REACH and CLASSIFY the three milder bookmark families — `.ask-answer-hwm-*`,
+        `.task-store-map-*`, `.heartbeat-acked-*` — then RECLAIM what the same-clock,
+        same-live-set classification proved orphaned AND aged. Row bd5c27e1.
+
+        A SIBLING of _sweep_hwm_files, deliberately separate from the dm-inbox sweep:
+        that family's mis-deletion silently loses DMs and keeps its own proven module;
+        these three are strictly milder (a benign duplicate, and two that regenerate).
+        The live-set gate still protects every one of them — a live session's bookmark
+        is never reaped, at any age — and a None live-set keeps EVERYTHING, the same
+        fail-safe that makes the dm-inbox sweep affordable.
+
+        SAME CLOCK, SAME LIVE-SET for report and act (one frozen `now_ts`), so the
+        report's `prunable` tally is a PREDICTION of the deletion count; a
+        disagreement is itself the finding.
+
+        Ensures:
+            - emits `fleet_arbiter_bookmark_report` EVERY cycle (per-family tallies), so
+              "swept nothing" is never inferred from silence
+            - emits `fleet_arbiter_bookmark_report_no_roots` distinctly on zero roots
+            - deletes ONLY when enable_bookmark_deletion is set, and only what the
+              same-clock classification marked prunable
+            - swallows + logs any exception; a janitor must never kill the supervisor
+        """
+        try:
+            roots  = list( self._hold_roots_fn() or [ ] )     # same roots — same runtime-state family location
+            live   = self._live_session_ids_fn()
+            now_ts = time.time()                              # ONE clock: evidence AND act
+            report = self._bookmark_janitor_fn( base_dirs=roots, live_session_ids=live, now_ts=now_ts )
+            counts = report[ "counts" ]
+            if not report[ "roots_swept" ]:
+                self._log_fn( "fleet_arbiter_bookmark_report_no_roots",
+                              roots_requested   = report[ "roots_requested" ],
+                              roots_unreachable = report[ "roots_unreachable" ] )
+            self._log_fn( "fleet_arbiter_bookmark_report",
+                          roots_swept       = report[ "roots_swept" ],
+                          roots_unreachable = report[ "roots_unreachable" ],
+                          files_seen        = report[ "files_found" ],
+                          prunable          = counts[ "prunable" ],
+                          kept              = counts[ "keep" ],
+                          kept_reasons      = counts[ "reachable_but_kept_reasons" ],
+                          per_family        = counts[ "per_family" ],
+                          live_set_present  = ( live is not None ),
+                          deletion_enabled  = self._enable_bookmark_deletion )
+        except Exception as e:                   # janitor must never kill the supervisor
+            self._log_fn( "fleet_arbiter_bookmark_janitor_error", error=str( e ) )
+            return                               # no classification ⇒ nothing is proven prunable
+
+        if not self._enable_bookmark_deletion:
+            return
+        try:
+            pruned = self._bookmark_deleter_fn( base_dirs=roots, live_session_ids=live, now_ts=now_ts )
+            self._log_fn( "fleet_arbiter_bookmark_reclaimed",
+                          deleted            = len( pruned ),
+                          predicted_prunable = counts[ "prunable" ],
+                          agrees             = ( len( pruned ) == counts[ "prunable" ] ),
+                          paths              = pruned )
+        except Exception as e:               # reclamation must never kill the supervisor
+            self._log_fn( "fleet_arbiter_bookmark_reclaim_error", error=str( e ) )
 
     def start( self ) -> None:
         """Spawn the daemon supervisor thread."""

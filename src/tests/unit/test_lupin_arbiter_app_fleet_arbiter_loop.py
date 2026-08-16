@@ -1467,3 +1467,99 @@ def test_hwm_reclaim_success_emits_reclaimed_event():
     reclaimed = [ f for e, f in rec.logs if e == "fleet_arbiter_hwm_reclaimed" ]
     assert len( reclaimed ) == 1
     assert reclaimed[ 0 ][ "deleted" ] == 1 and reclaimed[ 0 ][ "agrees" ] is True
+
+
+# ── bookmark sweep (row bd5c27e1) — the three milder families ──────────────
+
+def _bookmark_report( roots_swept=( "/projects/lupin", ), prunable=0, files_found=0 ):
+    """A _default_bookmark_reporter-shaped result: only the fields _sweep_bookmark_files reads."""
+    return {
+        "roots_requested"   : list( roots_swept ),
+        "roots_swept"       : list( roots_swept ),
+        "roots_unreachable" : [ ],
+        "files_found"       : files_found,
+        "counts"            : { "prunable": prunable, "keep": 0,
+                                "reachable_but_kept_reasons": { }, "per_family": { } },
+    }
+
+
+def test_bookmark_report_emitted_every_cycle_report_only_by_default():
+    """Default: enable_bookmark_deletion is False → report emitted, nothing deleted."""
+    rec = Recorder()
+    deleted = { "called": False }
+    def _deleter( **k ):
+        deleted[ "called" ] = True
+        return [ ]
+    loop = FleetArbiterLoop( lambda: None, log_fn=rec.log,
+                             bookmark_janitor_fn=lambda **k: _bookmark_report( prunable=2, files_found=5 ),
+                             bookmark_deleter_fn=_deleter,
+                             hold_roots_fn=lambda: [ "/projects/lupin" ],
+                             live_session_ids_fn=lambda: set() )
+    loop._sweep_bookmark_files()
+    report = [ f for e, f in rec.logs if e == "fleet_arbiter_bookmark_report" ]
+    assert len( report ) == 1 and report[ 0 ][ "prunable" ] == 2
+    assert report[ 0 ][ "deletion_enabled" ] is False
+    assert deleted[ "called" ] is False, "deletion ran while the switch was off"
+
+
+def test_bookmark_report_no_roots_is_emitted_distinctly():
+    """Zero roots swept → the no_roots event fires (found-nothing ≠ swept-nothing)."""
+    rec = Recorder()
+    loop = FleetArbiterLoop( lambda: None, log_fn=rec.log,
+                             bookmark_janitor_fn=lambda **k: _bookmark_report( roots_swept=( ) ),
+                             hold_roots_fn=lambda: [ ],
+                             live_session_ids_fn=lambda: set() )
+    loop._sweep_bookmark_files()
+    assert any( e == "fleet_arbiter_bookmark_report_no_roots" for e, _ in rec.logs )
+
+
+def test_bookmark_janitor_error_is_swallowed_and_logged():
+    """A janitor blow-up is caught and surfaced, never raised — a janitor must not kill the loop."""
+    rec = Recorder()
+    def _boom( **k ):
+        raise RuntimeError( "bookmark janitor exploded" )
+    loop = FleetArbiterLoop( lambda: None, log_fn=rec.log,
+                             bookmark_janitor_fn=_boom,
+                             hold_roots_fn=lambda: [ "/projects/lupin" ],
+                             live_session_ids_fn=lambda: set() )
+    loop._sweep_bookmark_files()                              # must NOT raise
+    assert any( e == "fleet_arbiter_bookmark_janitor_error" for e, _ in rec.logs )
+
+
+def test_bookmark_reclaim_success_emits_reclaimed_event():
+    """Deletion opted in + a deleter returning a prune list → reclaimed event with tallies."""
+    rec = Recorder()
+    loop = FleetArbiterLoop( lambda: None, log_fn=rec.log,
+                             bookmark_janitor_fn=lambda **k: _bookmark_report( prunable=1 ),
+                             bookmark_deleter_fn=lambda **k: [ "/projects/lupin/.ask-answer-hwm-dead.json" ],
+                             hold_roots_fn=lambda: [ "/projects/lupin" ],
+                             live_session_ids_fn=lambda: set(),
+                             enable_bookmark_deletion=True )
+    loop._sweep_bookmark_files()
+    reclaimed = [ f for e, f in rec.logs if e == "fleet_arbiter_bookmark_reclaimed" ]
+    assert len( reclaimed ) == 1
+    assert reclaimed[ 0 ][ "deleted" ] == 1 and reclaimed[ 0 ][ "agrees" ] is True
+
+
+def test_bookmark_reclaim_error_is_swallowed_and_logged():
+    """A deleter blow-up under the deletion switch is caught and surfaced, not raised."""
+    rec = Recorder()
+    def _boom_deleter( **k ):
+        raise RuntimeError( "bookmark deleter exploded" )
+    loop = FleetArbiterLoop( lambda: None, log_fn=rec.log,
+                             bookmark_janitor_fn=lambda **k: _bookmark_report( prunable=1 ),
+                             bookmark_deleter_fn=_boom_deleter,
+                             hold_roots_fn=lambda: [ "/projects/lupin" ],
+                             live_session_ids_fn=lambda: set(),
+                             enable_bookmark_deletion=True )
+    loop._sweep_bookmark_files()                             # must NOT raise
+    assert any( e == "fleet_arbiter_bookmark_reclaim_error" for e, _ in rec.logs )
+
+
+def test_bookmark_janitor_fns_default_to_the_real_module():
+    """An omitted janitor/deleter wires to the real bookmark_janitor functions."""
+    import lupin_cli.claude_code.hooks.lib.bookmark_janitor as bj
+    loop = FleetArbiterLoop( lambda: None )
+    assert loop._bookmark_janitor_fn is bj.report_bookmark_files
+    assert loop._bookmark_deleter_fn is bj.sweep_and_reclaim_bookmark_files
+    assert loop._enable_bookmark_deletion is False           # fail-safe default

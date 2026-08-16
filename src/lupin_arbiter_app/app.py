@@ -492,10 +492,19 @@ def assemble_app(
     # whose failure is invisible does not get to be on out of the box; an operator
     # turns it on once the live-set fail-safe has been watched in the report logs,
     # which this emits every cycle whether deletion is enabled or not.
+    #
+    # The three milder bookmark families — ask-answer HWM, task-store-map, heartbeat-acked
+    # (row bd5c27e1) — ride a THIRD switch. Their failure modes are strictly milder than the
+    # dm-inbox HWM's silent DM loss: a reaped ask-answer HWM merely RE-SURFACES owed answers
+    # (a benign duplicate — no seed suppression), and the other two REGENERATE on next need.
+    # Still DEFAULT FALSE (report-only) to start: the same live-set fail-safe is watched in the
+    # per-cycle report logs before an operator opts deletion in, and put-into-service of a
+    # destructive capability stays a deliberate, INI-revocable act — not an out-of-the-box default.
     fleet_arbiter_loop = FleetArbiterLoop(
         fleet_arbiter_factory, log_fn=arbiter_log_fn,
-        enable_hold_deletion = cfg.get( "arbiter enable hold deletion", default=True, return_type="boolean" ),
-        enable_hwm_deletion  = cfg.get( "arbiter enable hwm deletion",  default=False, return_type="boolean" ),
+        enable_hold_deletion     = cfg.get( "arbiter enable hold deletion",     default=True,  return_type="boolean" ),
+        enable_hwm_deletion      = cfg.get( "arbiter enable hwm deletion",      default=False, return_type="boolean" ),
+        enable_bookmark_deletion = cfg.get( "arbiter enable bookmark deletion", default=False, return_type="boolean" ),
     )
 
     # ── context-headroom writer: gated on `arbiter context watch enabled` ──
