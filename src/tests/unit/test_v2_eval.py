@@ -26,10 +26,10 @@ def _load_module():
 ve = _load_module()
 
 
-def _rec( ok=True, status=200, expected="agent router go to math", **payload ):
+def _rec( ok=True, status=200, expected="agent router go to math", utterance="u", **payload ):
     """Build one per-request record with the given §8 payload fields."""
     return {
-        "utterance"        : "u",
+        "utterance"        : utterance,
         "expected_command" : expected,
         "ok"               : ok,
         "status_code"      : status,
@@ -439,7 +439,7 @@ def test_render_report_carries_sections_and_caveat():
     m = ve.compute_metrics( _mixed_records() )
     table = ve.threshold_table( _mixed_records() )
     delta = { "p50_delta_ms": -1.0, "p95_delta_ms": None }
-    report = ve.render_report( m, m, table, delta, "simple", "2026-08-14-02-30-00" )
+    report = ve.render_report( m, m, table, delta, "simple", "2026-08-14-02-30-00", seed=1024, n_per_command=60 )
     assert "# CJ Flow v2 eval" in report
     assert "EXECUTOR: AI" in report
     assert "Cache-hit rate vs threshold" in report
@@ -499,6 +499,31 @@ def test_main_happy_path_explicit_args( tmp_path ):
     assert result[ "warm" ][ "n" ] == 2
 
 
+def test_main_stamps_provenance_and_writes_paired_artifact( tmp_path ):
+    # B3 + wiring: main stratified-samples (seed/n stamped), stamps a v2 provenance record,
+    # and writes the {metrics, provenance} artifact paired_eval consumes.
+    import json as _json
+    _seed_trace( tmp_path, _WEATHER_QUESTIONS )
+    result = ve.main(
+        argv=[ "--corpus", "weather", "--max-router-error-rate", "1.0", "--seed", "7", "--n-per-command", "5" ],
+        client_factory=lambda url: _StubClient(),
+        project_root=str( tmp_path ),
+        timestamp="2026-08-14-02-30-00",
+    )
+    prov = result[ "provenance" ]
+    assert prov[ "arm" ] == "v2" and prov[ "corpus" ] == "weather"
+    assert prov[ "seed" ] == 7 and prov[ "n_per_command" ] == 5 and prov[ "sampled_n" ] == 2
+
+    artifact_path = result[ "paths" ][ "artifact" ]
+    assert os.path.exists( artifact_path )
+    with open( artifact_path ) as h:
+        artifact = _json.load( h )
+    assert artifact[ "provenance" ] == prov
+    assert "spans_by_utterance" in artifact[ "metrics" ]
+    # The report stamps the seed so the sample reproduces.
+    assert "seed `7`" in open( result[ "paths" ][ "report" ] ).read()
+
+
 def test_main_defaults_use_injected_helpers( tmp_path, monkeypatch ):
     root = str( tmp_path )
     _seed_trace( tmp_path, _WEATHER_QUESTIONS )
@@ -527,7 +552,9 @@ def test_default_client_factory_logs_in( monkeypatch ):
         def raise_for_status( self ):
             return None
         def json( self ):
-            return { "access_token": "jwt-123" }
+            # REAL /auth/login shape (B1): the token is NESTED under "tokens". This fixture
+            # exercises the real seam — it goes RED against the old flat read at v2_eval.py:1052.
+            return { "tokens": { "access_token": "jwt-123" } }
     class _FakeRequests:
         @staticmethod
         def post( url, json, timeout ):
@@ -580,12 +607,13 @@ def _rec_cs( client_span_ms, **kw ):
 
 def test_compute_metrics_reports_client_instrument_when_present():
     records = [
-        _rec_cs( 100.0, path="agent", command="agent router go to math", timings_ms={ "t_first_useful": 1.0 } ),
-        _rec_cs( 200.0, path="agent", command="agent router go to math", timings_ms={ "t_first_useful": 2.0 } ),
-        _rec_cs( 300.0, path="agent", command="agent router go to math", timings_ms={ "t_first_useful": 3.0 } ),
+        _rec_cs( 100.0, utterance="a", path="agent", command="agent router go to math", timings_ms={ "t_first_useful": 1.0 } ),
+        _rec_cs( 200.0, utterance="b", path="agent", command="agent router go to math", timings_ms={ "t_first_useful": 2.0 } ),
+        _rec_cs( 300.0, utterance="c", path="agent", command="agent router go to math", timings_ms={ "t_first_useful": 3.0 } ),
     ]
     m = ve.compute_metrics( records )
-    assert m[ "spans" ]         == [ 100.0, 200.0, 300.0 ]
+    # The paired gate's input: per-utterance client spans (keyed by utterance, not a flat list).
+    assert m[ "spans_by_utterance" ] == { "a": 100.0, "b": 200.0, "c": 300.0 }
     assert m[ "client_p50_ms" ] == 200.0
     assert m[ "client_p95_ms" ] == 290.0
     # additive: the server-stamped mark is still reported, untouched.
@@ -593,9 +621,9 @@ def test_compute_metrics_reports_client_instrument_when_present():
 
 
 def test_compute_metrics_client_instrument_empty_when_absent():
-    # Records without client_span_ms -> the instrument reports no usable spans.
+    # Records without client_span_ms -> the instrument reports no usable per-utterance spans.
     m = ve.compute_metrics( [ _rec( path="agent", command="agent router go to math" ) ] )
-    assert m[ "spans" ]         == []
+    assert m[ "spans_by_utterance" ] == {}
     assert m[ "client_p50_ms" ] is None
     assert m[ "client_p95_ms" ] is None
 
@@ -605,63 +633,20 @@ def test_render_report_carries_client_rows_and_instrument_caveat():
                                        command="agent router go to math",
                                        timings_ms={ "t_first_useful": 4.0 } ) ] )
     report = ve.render_report( m, m, ve.threshold_table( [ _rec( path="replay", similarity=99.0 ) ] ),
-                               { "p50_delta_ms": 0.0, "p95_delta_ms": 0.0 }, "simple", "2026-08-15-02-30-00" )
+                               { "p50_delta_ms": 0.0, "p95_delta_ms": 0.0 }, "simple", "2026-08-15-02-30-00",
+                               seed=1024, n_per_command=60 )
     assert "client-send (ms)" in report
     assert "client-send** is the F1 cross-arm span" in report
     assert "proxy" in report
+    # B3: the seed is stamped so the report is reproducible.
+    assert "seed `1024`" in report and "n_per_command `60`" in report
 
 
 # ---------------------------------------------------------------------------
-# F2/paired — the median-Δ gate REFUSES unless both arms carry the instrument
+# The paired median-Δ gate MOVED to paired_eval.py (row d8d019f6) — its tests live in
+# test_paired_eval.py. v2 now only EMITS spans_by_utterance (covered above); the cross-arm
+# gate, the provenance check, and the ≥20% median-of-Δ verdict are tested there.
 # ---------------------------------------------------------------------------
-def test_arm_client_instrument_reason_variants():
-    assert ve._arm_client_instrument_reason( { "client_p50_ms": 1.0, "spans": [ 1.0 ] }, "v2" ) is None
-    assert "no client_p50_ms" in ve._arm_client_instrument_reason( { "spans": [ 1.0 ] }, "v1" )
-    assert "no usable spans"  in ve._arm_client_instrument_reason( { "client_p50_ms": None, "spans": [] }, "v2" )
-    assert "no usable spans"  in ve._arm_client_instrument_reason( { "client_p50_ms": 1.0, "spans": "nope" }, "v1" )
-
-
-def _arm( *spans ):
-    """A minimal arm-metrics dict carrying the client instrument."""
-    return { "client_p50_ms": ve.percentile( list( spans ), 50 ), "spans": list( spans ) }
-
-
-def test_paired_gate_declines_and_names_each_disqualified_arm():
-    # v1 missing the instrument -> declined, names v1, no number.
-    g = ve.paired_median_delta_gate( { "spans": [ 1.0 ] }, _arm( 5.0 ) )
-    assert g[ "fired" ] is False
-    assert "v1 arm" in g[ "reason" ] and "v2" not in g[ "reason" ]
-    assert "v1_median_ms" not in g
-
-    # both disqualified -> both named.
-    g2 = ve.paired_median_delta_gate( { "spans": [] }, { "client_p50_ms": 1.0, "spans": [] } )
-    assert g2[ "fired" ] is False
-    assert "v1 arm" in g2[ "reason" ] and "v2 arm" in g2[ "reason" ]
-
-
-def test_paired_gate_fires_with_delta_and_faster_arm():
-    v2_faster = ve.paired_median_delta_gate( _arm( 100.0, 100.0, 100.0 ), _arm( 40.0, 40.0, 40.0 ) )
-    assert v2_faster[ "fired" ] is True
-    assert v2_faster[ "v1_median_ms" ] == 100.0 and v2_faster[ "v2_median_ms" ] == 40.0
-    assert v2_faster[ "delta_ms" ] == -60.0 and v2_faster[ "faster_arm" ] == "v2"
-    assert v2_faster[ "n_v1" ] == 3 and v2_faster[ "n_v2" ] == 3
-
-    v1_faster = ve.paired_median_delta_gate( _arm( 10.0 ), _arm( 30.0 ) )
-    assert v1_faster[ "delta_ms" ] == 20.0 and v1_faster[ "faster_arm" ] == "v1"
-
-    tie = ve.paired_median_delta_gate( _arm( 50.0 ), _arm( 50.0 ) )
-    assert tie[ "delta_ms" ] == 0.0 and tie[ "faster_arm" ] == "tie"
-
-
-def test_render_paired_verdict_declined_and_fired():
-    declined = ve.render_paired_verdict( { "fired": False, "reason": "paired latency gate DECLINED — v1 arm ..." } )
-    assert "DECLINED — no number emitted." in declined
-    assert "ms" not in declined                          # no latency number leaks on a refusal
-
-    fired = ve.render_paired_verdict( ve.paired_median_delta_gate( _arm( 100.0 ), _arm( 40.0 ) ) )
-    assert "v1 median: 100.0 ms" in fired
-    assert "v2 median: 40.0 ms" in fired
-    assert "faster arm: v2" in fired
 
 
 # ---------------------------------------------------------------------------

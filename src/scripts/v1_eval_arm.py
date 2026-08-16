@@ -91,6 +91,12 @@ from v2_eval import (            # noqa: E402
     route_matches,
 )
 
+# The provenance-stamp contract (make_provenance / the sample signature) lives in
+# paired_eval, the paired orchestrator. Importing it here binds THIS arm's report to
+# the exact sample it measured, so the paired gate can prove both arms saw the same
+# utterances. paired_eval imports only v2_eval, so there is no import cycle.
+from paired_eval import make_provenance   # noqa: E402
+
 # The v1 pin sha this arm is measured against (design §2a). Stamped in the report
 # header so the baseline is non-expiring and the comparison reproducible.
 V1_PIN_SHA = "b0735467"
@@ -386,6 +392,9 @@ def compute_v1_metrics( records: List[V1Record] ) -> Dict[str, Any]:
 
     cache_hits    = sum( 1 for r in ok if r.is_cache_hit )
     client_spans  = [ r.client_span_ms    for r in ok if r.client_span_ms    is not None ]
+    # Per-utterance client spans — the paired median-Δ gate (paired_eval) pairs v1's span
+    # for utterance u against v2's span for the SAME u, so it needs identity, not a flat list.
+    spans_by_utterance = { r.utterance: r.client_span_ms for r in ok if r.client_span_ms is not None }
     compute_spans = [ r.server_compute_ms for r in ok if r.server_compute_ms is not None ]
     wall_spans    = [ r.server_wall_ms    for r in ok if r.server_wall_ms    is not None ]
     seen_paths    = sorted( { r.degradation for r in records if r.degradation } )
@@ -403,7 +412,7 @@ def compute_v1_metrics( records: List[V1Record] ) -> Dict[str, Any]:
         # F1 — the CROSS-ARM COMPARABLE span: client send → observed completion.
         "client_p50_ms"          : percentile( client_spans, 50.0 ),
         "client_p95_ms"          : percentile( client_spans, 95.0 ),
-        "spans"                  : client_spans,      # raw COMPARABLE spans (the paired median-Δ gate)
+        "spans_by_utterance"     : spans_by_utterance,  # per-utterance COMPARABLE spans (the paired median-Δ gate)
         # INFORMATIONAL server sub-spans (NOT the comparison): the dwell breakdown.
         "server_compute_p50_ms"  : percentile( compute_spans, 50.0 ),
         "server_wall_p50_ms"     : percentile( wall_spans, 50.0 ),
@@ -632,11 +641,15 @@ def run_v1_baseline( *, corpus: str = "simple", seed: int = 1024, n_per_command:
           corpus + same seeded stratified sampler as the v2 arm — pairing preserved)
 
     Ensures:
-        - returns { cold, warm, manifest, report, sampled_n }; the report header
-          stamps the v1 pin sha + the seed (reproducibility, design §2a/§5) and
+        - returns { cold, warm, manifest, report, sampled_n, provenance }; the report
+          header stamps the v1 pin sha + the seed (reproducibility, design §2a/§5) and
           both span boundaries (compute vs wall-clock)
         - the SAME sampled utterance list runs both passes (cache warms between
           them); never raises on seams that return cleanly
+        - `provenance` is the make_provenance stamp over the EXACT `sampled` set that
+          run_two_pass measured — corpus + seed + n_per_command + a signature of the
+          (utterance, command) pairs — so the paired gate can prove this arm and the
+          v2 arm saw the same utterances (never a shape-only comparison)
     """
     pairs             = load_corpus_fn( corpus, limit=limit )
     sampled, manifest = sample_fn( pairs, n_per_command, seed )
@@ -646,11 +659,14 @@ def run_v1_baseline( *, corpus: str = "simple", seed: int = 1024, n_per_command:
     report            = render_v1_report( passes[ "warm" ], seed=seed, corpus=corpus,
                                           n_per_command=n_per_command, base_url=base_url )
     return {
-        "cold"      : passes[ "cold" ],
-        "warm"      : passes[ "warm" ],
-        "manifest"  : manifest,
-        "report"    : report,
-        "sampled_n" : len( sampled ),
+        "cold"       : passes[ "cold" ],
+        "warm"       : passes[ "warm" ],
+        "manifest"   : manifest,
+        "report"     : report,
+        "sampled_n"  : len( sampled ),
+        # Stamp the EXACT measured sample (the same `sampled` list run_two_pass drove),
+        # so the paired provenance check binds this arm to the v2 arm by signature.
+        "provenance" : make_provenance( "v1", corpus, seed, n_per_command, sampled ),
     }
 
 

@@ -222,8 +222,8 @@ def test_run_pass_push_non_dict_short_circuits():
 # ───────────────────────────────────────────── compute_v1_metrics
 
 def _rec( ok=True, cache=False, client=200.0, compute=100.0, wall=400.0, actual="agent go calendar",
-          expected="agent go calendar", eligible=True, degradation=None, failure=None ):
-    return v1.V1Record( utterance="u", expected_command=expected, actual_command=actual,
+          expected="agent go calendar", eligible=True, degradation=None, failure=None, utterance="u" ):
+    return v1.V1Record( utterance=utterance, expected_command=expected, actual_command=actual,
                         is_cache_hit=cache, routing_eligible=eligible,
                         client_span_ms=client if ok else None, server_compute_ms=compute if ok else None,
                         server_wall_ms=wall if ok else None, ok=ok, failure=failure, degradation=degradation )
@@ -250,7 +250,18 @@ def test_metrics_empty_rates_are_none_not_zero():
     assert m[ "failure_rate" ] is None and m[ "routing_accuracy" ] is None
     assert m[ "cache_hit_rate" ] is None and m[ "routing_excluded_share" ] is None
     assert m[ "client_p50_ms" ] is None and m[ "server_compute_p50_ms" ] is None
-    assert m[ "spans" ] == [ ] and m[ "degradation_paths_seen" ] == [ ]
+    assert m[ "spans_by_utterance" ] == { } and m[ "degradation_paths_seen" ] == [ ]
+
+
+def test_metrics_spans_by_utterance_keys_ok_records():
+    # The paired gate keys on utterance; only OK records with a client span appear.
+    recs = [
+        _rec( utterance="alpha", client=120.0 ),
+        _rec( utterance="beta",  client=340.0 ),
+        _rec( utterance="gamma", ok=False, failure="push_failed" ),   # no span -> excluded
+    ]
+    m = v1.compute_v1_metrics( recs )
+    assert m[ "spans_by_utterance" ] == { "alpha": 120.0, "beta": 340.0 }
 
 
 # ───────────────────────────────────────────── run_two_pass (F3, F4)
@@ -310,6 +321,36 @@ def test_run_v1_baseline_composes():
     assert res[ "cold" ][ "cache_hit_rate" ] == 0.0 and res[ "warm" ][ "cache_hit_rate" ] == 1.0
     assert res[ "manifest" ][ "seed" ] == 7 and res[ "sampled_n" ] == 2
     assert v1.V1_PIN_SHA in res[ "report" ] and "seed       : 7" in res[ "report" ]
+
+
+def test_run_v1_baseline_stamps_provenance_over_the_measured_sample():
+    """SEAM-CROSSING: the stamp must reflect the pairs run_two_pass ACTUALLY measured,
+    not the pre-sample corpus. Uses the REAL stratified_sample (not injected) to take a
+    strict subset (2 of 4), a spy push_fn that records every utterance measured, then
+    asserts the stamp signature equals the signature of exactly those pairs — and does
+    NOT equal the full-corpus signature. A stamp built over the wrong set fails here."""
+    from paired_eval import compute_sample_signature
+    corpus_pairs = [ ( f"u{i}", "agent go calendar" ) for i in range( 4 ) ]
+    def fake_load( name, limit=None ): return list( corpus_pairs )
+    measured = [ ]
+    def push( u ): measured.append( u ); return { "job_id": "j" }
+    def collect( job_id ): return { }                    # no_completion — sample is still measured + stamped
+    res  = v1.run_v1_baseline( corpus="simple", seed=7, n_per_command=2,
+                               push_fn=push, collect_fn=collect, class_to_command=MAP,
+                               clock=_counter_clock(), load_corpus_fn=fake_load )
+    prov = res[ "provenance" ]
+
+    # The real sampler took a strict subset; cold measures it, then warm measures it again.
+    cold_utterances = measured[ :len( measured ) // 2 ]
+    assert len( cold_utterances ) == 2 and res[ "sampled_n" ] == 2
+    reconstructed = [ ( u, "agent go calendar" ) for u in cold_utterances ]
+
+    assert prov[ "arm" ] == "v1" and prov[ "corpus" ] == "simple"
+    assert prov[ "seed" ] == 7 and prov[ "n_per_command" ] == 2 and prov[ "sampled_n" ] == 2
+    # The stamp is over exactly what was measured …
+    assert prov[ "sample_signature" ] == compute_sample_signature( reconstructed )
+    # … and NOT over the full corpus (proves it is the sample, not the pre-sample set).
+    assert prov[ "sample_signature" ] != compute_sample_signature( corpus_pairs )
 
 
 # ───────────────────────────────────────────── truncate guard (F3, :8000)

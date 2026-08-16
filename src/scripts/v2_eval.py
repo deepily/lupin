@@ -40,7 +40,6 @@ import argparse
 import json
 import os
 import random
-import statistics
 import sys
 import time
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
@@ -57,6 +56,11 @@ if _SRC_PATH not in sys.path:              # pragma: no cover - bootstrap: src-p
     sys.path.insert( 0, _SRC_PATH )
 
 import cosa.utils.util as du   # noqa: E402
+
+# The provenance-stamp contract lives in paired_eval (the paired orchestrator, which imports
+# neither arm, so there is no cycle). v2's main stamps make_provenance over the sample it
+# measured, so the paired gate can bind this arm to the v1 arm by signature.
+from paired_eval import make_provenance   # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -413,6 +417,10 @@ def compute_metrics( records: List[ Dict[ str, Any ] ] ) -> Dict[ str, Any ]:
     # first_useful stays exactly as-is above; this is a SECOND, client-clock number measured
     # the same way the v1 arm measures around /api/push, so the paired gate has one instrument.
     client_spans = [ r[ "client_span_ms" ] for r in ok if r.get( "client_span_ms" ) is not None ]
+    # The paired median-Δ gate (paired_eval) needs per-utterance identity, not a flat list —
+    # it pairs v2's span for utterance u against v1's span for the SAME u. Key by utterance so
+    # the two arms can be aligned; provenance guarantees both measured the same utterance set.
+    spans_by_utterance = { r[ "utterance" ]: r[ "client_span_ms" ] for r in ok if r.get( "client_span_ms" ) is not None }
 
     routed_right = [ r for r in ok if route_matches( matched_command( r ), r[ "expected_command" ] ) ]
 
@@ -440,14 +448,14 @@ def compute_metrics( records: List[ Dict[ str, Any ] ] ) -> Dict[ str, Any ]:
         "routing_accuracy"    : _rate( len( routed_right ),     n_ok ),
         "p50_first_useful_ms" : percentile( latencies, 50 ),
         "p95_first_useful_ms" : percentile( latencies, 95 ),
-        # F1 client-send instrument (additive; the paired median-Δ gate reads `spans` +
-        # `client_p50_ms`). These three keys ARE an arm's report that it measured the
-        # client-send instrument — the same shape v1's compute_v1_metrics emits. The
-        # gate requires them of BOTH arms; either arm missing them (an old pre-F1 run)
-        # or with an empty `spans` makes the gate refuse-with-reason rather than emit.
+        # F1 client-send instrument. `client_p50_ms`/`client_p95_ms` are the arm's
+        # own percentiles; `spans_by_utterance` is the paired gate's input — the same
+        # per-utterance shape v1's compute_v1_metrics emits. An arm with an empty
+        # spans_by_utterance (a pre-F1 or zero-200 run) makes the paired gate
+        # refuse-with-reason rather than emit a number.
         "client_p50_ms"       : percentile( client_spans, 50 ),
         "client_p95_ms"       : percentile( client_spans, 95 ),
-        "spans"               : client_spans,
+        "spans_by_utterance"  : spans_by_utterance,
         "would_be_wrong"      : len( would_be_wrong ),
         "cache_hits"          : len( cache_hits ),
         "by_path"             : by_path,
@@ -513,105 +521,15 @@ def latency_delta( cold: Dict[ str, Any ], warm: Dict[ str, Any ] ) -> Dict[ str
 
 
 # ---------------------------------------------------------------------------
-# The paired median-Δ gate — the cross-arm latency verdict.
+# The paired median-Δ gate MOVED to src/scripts/paired_eval.py (row d8d019f6).
 #
-# Mr. Radio's ruling (2026-08-15): the gate must REFUSE rather than emit a number
-# unless BOTH arms carry the F1 client-send instrument — "a gate that can't tell
-# you it's disqualified is worse than no gate." So it never diffs a v2 client span
-# against a v1 server span (the F1 apples-to-oranges the whole review exists to
-# kill); when either arm is missing the client instrument it names WHICH arm and
-# WHY and emits no number.
-#
-# An arm "reports the client-send instrument" iff its metrics dict carries
-# `client_p50_ms` (the F1 span was computed) AND a non-empty `spans` list (it has
-# usable measurements). Both arms emit exactly that shape — v2's compute_metrics
-# and v1's compute_v1_metrics — so the gate needs no per-arm marker argument.
+# It is a CROSS-ARM concern — it pairs v2's and v1's per-utterance client spans and
+# computes the design-§6 median-OF-deltas with a ≥20% PASS/FAIL. The version that once
+# lived here computed difference-OF-medians over a flat `spans` list, a different
+# statistic with no threshold (Tiffany's B2, 2026.08.16-v2-eval-adversarial-review.md),
+# so it was deleted rather than left importable. v2's compute_metrics now emits
+# `spans_by_utterance`; paired_eval aligns it against the v1 arm's and fires the gate.
 # ---------------------------------------------------------------------------
-def _arm_client_instrument_reason( metrics: Dict[ str, Any ], arm: str ) -> Optional[ str ]:
-    """
-    None iff `metrics` reports the F1 client-send instrument; else a reason string
-    naming `arm` and why it is disqualified. Never raises.
-    """
-    if "client_p50_ms" not in metrics:
-        return f"{arm} arm did not report the client-send instrument (no client_p50_ms — a pre-F1 run)"
-    spans = metrics.get( "spans" )
-    if not isinstance( spans, list ) or len( spans ) == 0:
-        return f"{arm} arm reported the client-send instrument but has no usable spans (0 comparable measurements)"
-    return None
-
-
-def paired_median_delta_gate(
-    v1_metrics : Dict[ str, Any ],
-    v2_metrics : Dict[ str, Any ],
-) -> Dict[ str, Any ]:
-    """
-    The cross-arm median-latency verdict, on the F1 client-send instrument only.
-
-    Requires:
-        - v1_metrics is a v1-arm metrics dict (compute_v1_metrics); v2_metrics is a
-          v2-arm metrics dict (compute_metrics).
-
-    Ensures:
-        - returns {"fired": False, "reason": <str>} — naming EVERY disqualified arm —
-          when either arm does not report the client-send instrument (missing
-          client_p50_ms, or an empty `spans`). No number is emitted.
-        - returns {"fired": True, instrument, n_v1, n_v2, v1_median_ms, v2_median_ms,
-          delta_ms, faster_arm} when BOTH arms report it; delta_ms = v2 − v1 (positive
-          ⇒ v2 slower), faster_arm is the arm with the lower median (or "tie").
-        - the verdict is explicitly on the client-send PROXY (network + serialization
-          included), NOT v2's server-stamped first_useful — stated in `instrument`.
-        - never raises.
-    """
-    reasons = [
-        r for r in (
-            _arm_client_instrument_reason( v1_metrics, "v1" ),
-            _arm_client_instrument_reason( v2_metrics, "v2" ),
-        ) if r is not None
-    ]
-    if reasons:
-        return {
-            "fired"  : False,
-            "reason" : "paired latency gate DECLINED — " + "; ".join( reasons ),
-        }
-
-    v1_spans = v1_metrics[ "spans" ]
-    v2_spans = v2_metrics[ "spans" ]
-    v1_median = round( statistics.median( v1_spans ), 3 )
-    v2_median = round( statistics.median( v2_spans ), 3 )
-    delta     = round( v2_median - v1_median, 3 )
-    if   delta < 0: faster = "v2"
-    elif delta > 0: faster = "v1"
-    else:           faster = "tie"
-    return {
-        "fired"        : True,
-        "instrument"   : "client_send (proxy: includes network + serialization; NOT v2's server-stamped first_useful)",
-        "n_v1"         : len( v1_spans ),
-        "n_v2"         : len( v2_spans ),
-        "v1_median_ms" : v1_median,
-        "v2_median_ms" : v2_median,
-        "delta_ms"     : delta,
-        "faster_arm"   : faster,
-    }
-
-
-def render_paired_verdict( gate: Dict[ str, Any ] ) -> str:
-    """
-    Render the paired median-Δ gate result as a markdown block.
-
-    Ensures:
-        - a DECLINED gate renders its refusal reason verbatim and NO latency number.
-        - a fired gate renders both medians, the delta, the faster arm, and the
-          client-send-proxy residual so the number is never read as server-precise.
-    """
-    lines : List[ str ] = [ "## Paired median-Δ latency gate (v1 vs v2)", "" ]
-    if not gate[ "fired" ]:
-        lines.append( f"**DECLINED — no number emitted.** {gate[ 'reason' ]}" )
-        return "\n".join( lines )
-    lines.append( f"- instrument: {gate[ 'instrument' ]}" )
-    lines.append( f"- v1 median: {gate[ 'v1_median_ms' ]} ms (n={gate[ 'n_v1' ]})" )
-    lines.append( f"- v2 median: {gate[ 'v2_median_ms' ]} ms (n={gate[ 'n_v2' ]})" )
-    lines.append( f"- delta (v2 − v1): {gate[ 'delta_ms' ]} ms — faster arm: {gate[ 'faster_arm' ]}" )
-    return "\n".join( lines )
 
 
 # ---------------------------------------------------------------------------
@@ -849,12 +767,14 @@ def _fmt( value: Optional[ float ] ) -> str:
 
 
 def render_report(
-    cold_metrics : Dict[ str, Any ],
-    warm_metrics : Dict[ str, Any ],
-    warm_table   : List[ Dict[ str, Any ] ],
-    delta        : Dict[ str, Optional[ float ] ],
-    corpus_name  : str,
-    timestamp    : str,
+    cold_metrics  : Dict[ str, Any ],
+    warm_metrics  : Dict[ str, Any ],
+    warm_table    : List[ Dict[ str, Any ] ],
+    delta         : Dict[ str, Optional[ float ] ],
+    corpus_name   : str,
+    timestamp     : str,
+    seed          : int,
+    n_per_command : int,
 ) -> str:
     """
     The markdown report for a two-pass run.
@@ -863,6 +783,9 @@ def render_report(
         - returns a markdown string carrying the metric table (cold vs warm), the
           cold->warm latency delta, the §6a threshold table (from the warm pass), and
           the R-C2 would-be-wrong caveat verbatim.
+        - STAMPS the sample seed + n_per_command (B3) so the v2 report is reproducible
+          and its stratified sample is auditable — the same reproducibility facts the
+          v1 arm's header carries.
     """
     lines : List[ str ] = []
     lines.append( f"# CJ Flow v2 eval — corpus `{corpus_name}` — {timestamp}" )
@@ -870,6 +793,7 @@ def render_report(
     lines.append( NOT_GONOGO_BANNER )
     lines.append( "" )
     lines.append( "**EXECUTOR: AI** · venue :8000 scheduled (post-midnight off-peak) · `speak=false, interactive=false`" )
+    lines.append( f"**sample**: stratified, seed `{seed}`, n_per_command `{n_per_command}` (reproducible — same seed, same sample)" )
     lines.append( "" )
     lines.append( "## Headline metrics (cold vs warm)" )
     lines.append( "" )
@@ -962,7 +886,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument( "--corpus",  default="simple", help="corpus name (simple|weather)" )
     parser.add_argument( "--passes",  type=int, default=2, help="number of passes (must be 2 for cache-hit)" )
     parser.add_argument( "--base-url", default="http://localhost:8000", help="server base url (:8000 scheduled)" )
-    parser.add_argument( "--limit",   type=int, default=None, help="cap utterances per command" )
+    parser.add_argument( "--limit",   type=int, default=None, help="cap utterances per command (pre-sample)" )
+    parser.add_argument( "--seed",    type=int, default=1024,
+                         help="stratified-sample seed (stamped in the report; reproducibility, design §5)" )
+    parser.add_argument( "--n-per-command", type=int, default=60,
+                         help="stratified sample size per command (PER ARM, design §5)" )
     parser.add_argument( "--max-router-error-rate", type=float, default=0.20,
                          help="run-integrity ceiling on router_error_rate" )
     parser.add_argument( "--allow-warm-cold", action="store_true",
@@ -986,10 +914,16 @@ def main(
         - passes must be 2 — a single pass cannot produce the cache-hit number.
 
     Ensures:
-        - loads the corpus, runs cold then warm, guards run integrity on the warm pass,
-          guards cold-start integrity on the cold pass (F3; unless --allow-warm-cold),
-          renders the report, and writes it under io/v2-flow/eval-<timestamp>/.
-        - returns {out_dir, paths, cold, warm}.
+        - loads the corpus, STRATIFIED-SAMPLES it (seed + n_per_command, design §5 —
+          the same sampler + seed the v1 arm uses, so the two arms measure the same
+          population and the v2 report is reproducible), runs cold then warm, guards
+          run integrity on the warm pass, guards cold-start integrity on the cold pass
+          (F3; unless --allow-warm-cold), renders the seed-stamped report, and writes it
+          under io/v2-flow/eval-<timestamp>/.
+        - stamps a v2 provenance record (make_provenance over the sampled set) and writes
+          a v2-arm-artifact.json = {metrics: warm, provenance} — the input paired_eval
+          consumes to fire the paired median-Δ gate against the v1 arm.
+        - returns {out_dir, paths, cold, warm, provenance}.
 
     Raises:
         - ValueError if passes != 2.
@@ -1002,7 +936,11 @@ def main(
 
     root   = project_root if project_root is not None else du.get_project_root()
     stamp  = timestamp if timestamp is not None else du.get_current_datetime_raw().strftime( "%Y-%m-%d-%H-%M-%S" )
-    corpus = load_corpus( args.corpus, project_root=root, limit=args.limit )
+    pairs  = load_corpus( args.corpus, project_root=root, limit=args.limit )
+    # B3: stratified + seeded PER ARM (design §5) — same sampler as v1, so the arms measure
+    # the same population; a flat first-N would let the biggest command dominate.
+    corpus, _sample_manifest = stratified_sample( pairs, args.n_per_command, args.seed )
+    provenance = make_provenance( "v2", args.corpus, args.seed, args.n_per_command, corpus )
 
     factory = client_factory if client_factory is not None else _default_client_factory
     client  = factory( args.base_url )
@@ -1020,12 +958,19 @@ def main(
         guard_cold_start( cold_metrics )          # F3: a contaminated cold baseline raises, never reports clean
     warm_table   = threshold_table( warm_records )
     delta        = latency_delta( cold_metrics, warm_metrics )
-    report_md    = render_report( cold_metrics, warm_metrics, warm_table, delta, args.corpus, stamp )
+    report_md    = render_report( cold_metrics, warm_metrics, warm_table, delta,
+                                  args.corpus, stamp, args.seed, args.n_per_command )
 
     out_dir = os.path.join( root, "io", "v2-flow", f"eval-{stamp}" )
     paths   = write_outputs( out_dir, report_md, cold_records, warm_records )
 
-    return { "out_dir": out_dir, "paths": paths, "cold": cold_metrics, "warm": warm_metrics }
+    # The paired step (paired_eval) consumes {metrics, provenance}; write the v2 arm artifact.
+    artifact_path = os.path.join( out_dir, "v2-arm-artifact.json" )
+    with open( artifact_path, "w" ) as handle:
+        json.dump( { "metrics": warm_metrics, "provenance": provenance }, handle )
+    paths[ "artifact" ] = artifact_path
+
+    return { "out_dir": out_dir, "paths": paths, "cold": cold_metrics, "warm": warm_metrics, "provenance": provenance }
 
 
 def _default_client_factory( base_url: str ) -> HttpAskClient:
@@ -1049,7 +994,7 @@ def _default_client_factory( base_url: str ) -> HttpAskClient:
     reply = requests.post( base_url.rstrip( "/" ) + "/auth/login",
                            json={ "email": email, "password": password }, timeout=30.0 )
     reply.raise_for_status()
-    bearer = reply.json()[ "access_token" ]
+    bearer = reply.json()[ "tokens" ][ "access_token" ]   # /auth/login nests the token under "tokens" (B1)
     return HttpAskClient( base_url, bearer=bearer )
 
 
