@@ -27,18 +27,38 @@ from cosa.agents.presentation_generator.deck_verdict import (
 _SLIDE_MARKER = b"SLIDE-CONTENT-MARKER-1"
 
 
-def _write_pptx( path, n_slides, decoys=(), compression=zipfile.ZIP_STORED ):
+def _write_pptx( path, n_slides, decoys=(), compression=zipfile.ZIP_STORED, text_runs_per_slide=1 ):
     """
     Write a minimal OPC-shaped zip: a content-types part, n_slides real slide
     parts (ppt/slides/slideN.xml), plus any decoy member names verbatim.
     ZIP_STORED so a data byte can be corrupted at a known location later.
+
+    Each slide carries `text_runs_per_slide` DrawingML text runs (<a:t>…</a:t>)
+    so a real deck also clears the text-layer gate. Set it to 0 to model the
+    all-image deck from row f507034e (slides present, zero selectable text).
     """
     with zipfile.ZipFile( str( path ), "w", compression=compression ) as zf:
         zf.writestr( "[Content_Types].xml", "<Types/>" )
         for i in range( 1, n_slides + 1 ):
-            zf.writestr( f"ppt/slides/slide{i}.xml", f"<p:sld>SLIDE-CONTENT-MARKER-{i}</p:sld>" )
+            runs = "".join( f"<a:t>Run {i}.{j}</a:t>" for j in range( text_runs_per_slide ) )
+            zf.writestr( f"ppt/slides/slide{i}.xml", f"<p:sld>SLIDE-CONTENT-MARKER-{i}{runs}</p:sld>" )
         for name in decoys:
             zf.writestr( name, "<decoy/>" )
+    return str( path )
+
+
+def _write_pptx_raw( path, slide_xmls, notes_xmls=() ):
+    """
+    Write a deck with caller-supplied raw slide XML bodies — for exercising the
+    text-run counter's tag matching directly. `notes_xmls` land under
+    ppt/notesSlides/ to prove notes text is NEVER counted as slide text.
+    """
+    with zipfile.ZipFile( str( path ), "w" ) as zf:
+        zf.writestr( "[Content_Types].xml", "<Types/>" )
+        for i, body in enumerate( slide_xmls, start=1 ):
+            zf.writestr( f"ppt/slides/slide{i}.xml", body )
+        for i, body in enumerate( notes_xmls, start=1 ):
+            zf.writestr( f"ppt/notesSlides/notesSlide{i}.xml", body )
     return str( path )
 
 
@@ -130,10 +150,80 @@ def test_decoy_slide_parts_are_not_counted( tmp_path ):
     assert v.slide_count == 2                     # decoys excluded
 
 
+# ---- the text-layer gate: row f507034e ------------------------------------
+
+def test_image_only_deck_fails_text_gate( tmp_path ):
+    # Slides present, but zero <a:t> runs — the all-image deck the row measured.
+    p = _write_pptx( tmp_path / "image-only.pptx", n_slides=20, text_runs_per_slide=0 )
+    v = verify_presentation_deck( p )
+    assert not v
+    assert v.slide_count == 20
+    assert v.text_run_count == 0
+    assert "no selectable text" in v.reason
+
+
+def test_text_bearing_deck_passes_text_gate( tmp_path ):
+    p = _write_pptx( tmp_path / "with-text.pptx", n_slides=4, text_runs_per_slide=3 )
+    v = verify_presentation_deck( p )
+    assert v
+    assert v.slide_count == 4
+    assert v.text_run_count == 12                 # 4 slides * 3 runs
+    assert "text runs" in v.reason
+
+
+def test_min_text_runs_threshold_fails( tmp_path ):
+    p = _write_pptx( tmp_path / "thin-text.pptx", n_slides=2, text_runs_per_slide=1 )
+    v = verify_presentation_deck( p, min_text_runs=5 )
+    assert not v
+    assert v.text_run_count == 2
+    assert "need >= 5" in v.reason
+
+
+def test_min_text_runs_zero_skips_gate( tmp_path ):
+    # Opt out of the text gate: an image-only deck passes when the floor is 0.
+    p = _write_pptx( tmp_path / "opt-out.pptx", n_slides=3, text_runs_per_slide=0 )
+    v = verify_presentation_deck( p, min_text_runs=0 )
+    assert v
+    assert v.text_run_count == 0
+
+
+def test_empty_self_closing_run_not_counted( tmp_path ):
+    # <a:t/> is an empty run — not selectable text, so it must not count.
+    p = _write_pptx_raw( tmp_path / "empty-run.pptx", slide_xmls=[ "<p:sld><a:t/></p:sld>" ] )
+    v = verify_presentation_deck( p )
+    assert not v
+    assert v.text_run_count == 0
+
+
+def test_text_run_with_attributes_is_counted( tmp_path ):
+    # <a:t xml:space="preserve"> is a real run — the space after `t` must match.
+    p = _write_pptx_raw(
+        tmp_path / "attr-run.pptx",
+        slide_xmls=[ '<p:sld><a:t xml:space="preserve">Hi</a:t></p:sld>' ],
+    )
+    v = verify_presentation_deck( p )
+    assert v
+    assert v.text_run_count == 1
+
+
+def test_notes_text_never_counts_as_slide_text( tmp_path ):
+    # Notes are real text but live under notesSlides/ — the exact shape of the
+    # deck the row separated out. Slides have zero runs; the deck must FAIL.
+    p = _write_pptx_raw(
+        tmp_path / "notes-only.pptx",
+        slide_xmls=[ "<p:sld></p:sld>", "<p:sld></p:sld>" ],
+        notes_xmls=[ "<p:notes><a:t>lots of talking points</a:t></p:notes>" ],
+    )
+    v = verify_presentation_deck( p )
+    assert not v
+    assert v.text_run_count == 0                  # notes text excluded
+
+
 # ---- the verdict object is the single source of truth ----------------------
 
 def test_verdict_truthiness_and_repr():
-    ok  = DeckVerdict( True,  "valid deck: 15 slides", "/x.pptx", 100, 15 )
+    ok  = DeckVerdict( True,  "valid deck: 15 slides", "/x.pptx", 100, 15, 42 )
     bad = DeckVerdict( False, "no pptx_path recorded", None )
     assert bool( ok ) is True and bool( bad ) is False
     assert "PASS" in repr( ok ) and "FAIL" in repr( bad )
+    assert "text_runs=42" in repr( ok )

@@ -2,6 +2,7 @@
 """Visual and text renderers for Presentation Generator Agent."""
 
 from .marp_text_renderer import MarpTextRenderer
+from .pptx_deck_renderer import PptxDeckRenderer
 from .visual_registry import VisualRenderer, VisualRendererRegistry
 from .mermaid import MermaidRenderer
 from .matplotlib_renderer import MatplotlibRenderer
@@ -12,6 +13,7 @@ from .placeholder import PlaceholderRenderer
 
 __all__ = [
     "MarpTextRenderer",
+    "PptxDeckRenderer",
     "VisualRenderer",
     "VisualRendererRegistry",
     "MermaidRenderer",

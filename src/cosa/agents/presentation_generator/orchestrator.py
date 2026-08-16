@@ -1717,13 +1717,17 @@ class PresentationOrchestratorAgent:
 
     async def _export_pptx_async( self, presentation: Optional[ PresentationModel ] ) -> None:
         """
-        Phase 8.5: Export Marp Markdown to PowerPoint via Marp CLI.
+        Phase 8.5: Build a PowerPoint deck from the PresentationModel via python-pptx.
+
+        Row f507034e. Marp's ``--pptx`` rasterized every slide to a PNG, so decks
+        carried zero selectable text. Rick ruled python-pptx (2026-08-16): build
+        the deck from the structured model so every slide gets real, selectable
+        text runs. Genuine raster visuals rendered by Phase 7 into ``visuals/``
+        are embedded as pictures. The look differs from Marp — an accepted trade.
 
         Requires:
             - presentation is a valid PresentationModel
-            - self._presentation_state[ "marp_path" ] is set by Phase 6
             - self.config.pptx_export_enabled is True
-            - Marp CLI binary available in PATH
 
         Ensures:
             - PPTX file written alongside .md and .yaml
@@ -1738,31 +1742,26 @@ class PresentationOrchestratorAgent:
             if self.debug: print( "[Orchestrator] PPTX export skipped (dry run)" )
             return
 
-        marp_path = self._presentation_state.get( "marp_path" )
-        if not marp_path or not os.path.exists( marp_path ):
-            logger.warning( "Phase 8.5: No marp_path — skipping PPTX export" )
+        if presentation is None:
+            logger.warning( "Phase 8.5: No presentation model — skipping PPTX export" )
             return
 
         try:
-            user_id = self._presentation_state.get( "user_id", "unknown" )
-            pptx_path = self.config.get_output_path( user_id, presentation.title, file_type="pptx" )
-            marp_dir  = os.path.dirname( marp_path )
+            user_id     = self._presentation_state.get( "user_id", "unknown" )
+            pptx_path   = self.config.get_output_path( user_id, presentation.title, file_type="pptx" )
+            visuals_dir = os.path.join( os.path.dirname( pptx_path ), "visuals" )
 
-            if self.debug: print( f"[Orchestrator] Phase 8.5: Exporting PPTX → {pptx_path}" )
-
-            proc = await asyncio.create_subprocess_exec(
-                "marp", "--pptx", "--allow-local-files", marp_path, "-o", pptx_path,
-                cwd    = marp_dir,
-                stdout = asyncio.subprocess.PIPE,
-                stderr = asyncio.subprocess.PIPE,
+            theme_config = self._load_theme_config(
+                self.config.templates_path, self.config.default_theme, debug=self.debug
             )
-            stdout, stderr = await proc.communicate()
 
-            if proc.returncode != 0:
-                error_msg = stderr.decode( "utf-8", errors="replace" ).strip()
-                logger.warning( f"Phase 8.5: Marp CLI exited {proc.returncode}: {error_msg[ :200 ]}" )
-                await voice_io.notify( f"PPTX export failed: {error_msg[ :100 ]}", priority="medium" )
-                return
+            if self.debug: print( f"[Orchestrator] Phase 8.5: Building PPTX → {pptx_path}" )
+
+            from .renderers import PptxDeckRenderer
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None, PptxDeckRenderer.build, presentation, theme_config, visuals_dir, pptx_path
+            )
 
             self._presentation_state[ "pptx_path" ] = pptx_path
 
@@ -1771,9 +1770,6 @@ class PresentationOrchestratorAgent:
 
             await voice_io.notify( f"PPTX exported: {file_size // 1024}KB", priority="low" )
 
-        except FileNotFoundError:
-            logger.warning( "Phase 8.5: Marp CLI binary not found in PATH — skipping PPTX export" )
-            await voice_io.notify( "PPTX export skipped: Marp CLI not installed", priority="medium" )
         except Exception as e:
             logger.error( f"Phase 8.5 failed: {e}", exc_info=True )
             await voice_io.notify( f"PPTX export failed: {str( e )[ :100 ]}", priority="medium" )

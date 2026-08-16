@@ -1052,13 +1052,9 @@ class TestDeliverAsync:
 
 
 # ===========================================================================
-# Render/deliver — _export_pptx_async (THORNY — subprocess) (MID)
+# Render/deliver — _export_pptx_async (python-pptx builder, row f507034e) (MID)
 # ===========================================================================
-def _proc( returncode=0, out=b"", err=b"" ):
-    proc = MagicMock()
-    proc.returncode = returncode
-    proc.communicate = AsyncMock( return_value=( out, err ) )
-    return proc
+_BUILD_TARGET = "cosa.agents.presentation_generator.renderers.PptxDeckRenderer.build"
 
 
 class TestExportPptxAsync:
@@ -1074,64 +1070,40 @@ class TestExportPptxAsync:
         _run( agent._export_pptx_async( _presentation() ) )
         assert "PPTX export skipped (dry run)" in capsys.readouterr().out
 
-    def test_no_marp_path_skips( self, _silence_voice_io ):
+    def test_no_presentation_skips( self, _silence_voice_io ):
+        # A None model has no text to build from — skip, do not crash.
         agent = _agent()
         agent.config.pptx_export_enabled = True
-        agent._presentation_state[ "marp_path" ] = None
-        _run( agent._export_pptx_async( _presentation() ) )
+        with patch( _BUILD_TARGET ) as build:
+            _run( agent._export_pptx_async( None ) )
+        build.assert_not_called()
+        assert "pptx_path" not in agent._presentation_state
 
-    def test_marp_path_missing_on_disk_skips( self, _silence_voice_io ):
-        agent = _agent()
-        agent.config.pptx_export_enabled = True
-        agent._presentation_state[ "marp_path" ] = "/p/x.md"
-        with patch( "os.path.exists", return_value=False ):
-            _run( agent._export_pptx_async( _presentation() ) )
-
-    def test_success( self, capsys, _silence_voice_io ):
+    def test_success_builds_and_records_path( self, capsys, _silence_voice_io ):
         agent = _agent( debug=True )
         agent.config.pptx_export_enabled = True
-        agent._presentation_state[ "marp_path" ] = "/p/x.md"
+        agent._load_theme_config = MagicMock( return_value={} )
         with patch( "os.path.exists", return_value=True ), \
              patch( "os.path.getsize", return_value=51200 ), \
              patch( "cosa.utils.util.get_project_root", return_value="/proj" ), \
-             patch.object( orch_mod.asyncio, "create_subprocess_exec",
-                           new=AsyncMock( return_value=_proc( returncode=0 ) ) ):
+             patch( _BUILD_TARGET ) as build:
             _run( agent._export_pptx_async( _presentation() ) )
+        build.assert_called_once()
+        # build( presentation, theme_config, visuals_dir, pptx_path )
+        args = build.call_args.args
+        assert args[ 3 ].endswith( ".pptx" )              # output path
+        assert args[ 2 ].endswith( "/visuals" )           # visuals dir
         assert agent._presentation_state[ "pptx_path" ].endswith( ".pptx" )
         assert "PPTX written" in capsys.readouterr().out
 
-    def test_nonzero_returncode_warns( self, _silence_voice_io ):
+    def test_build_exception_is_non_fatal( self, _silence_voice_io ):
         agent = _agent()
         agent.config.pptx_export_enabled = True
-        agent._presentation_state[ "marp_path" ] = "/p/x.md"
-        with patch( "os.path.exists", return_value=True ), \
-             patch( "cosa.utils.util.get_project_root", return_value="/proj" ), \
-             patch.object( orch_mod.asyncio, "create_subprocess_exec",
-                           new=AsyncMock( return_value=_proc( returncode=1, err=b"marp broke" ) ) ):
+        agent._load_theme_config = MagicMock( return_value={} )
+        with patch( "cosa.utils.util.get_project_root", return_value="/proj" ), \
+             patch( _BUILD_TARGET, side_effect=RuntimeError( "kaboom" ) ):
             _run( agent._export_pptx_async( _presentation() ) )
         assert "pptx_path" not in agent._presentation_state
-
-    def test_marp_cli_not_found( self, _silence_voice_io ):
-        agent = _agent()
-        agent.config.pptx_export_enabled = True
-        agent._presentation_state[ "marp_path" ] = "/p/x.md"
-        with patch( "os.path.exists", return_value=True ), \
-             patch( "cosa.utils.util.get_project_root", return_value="/proj" ), \
-             patch.object( orch_mod.asyncio, "create_subprocess_exec",
-                           new=AsyncMock( side_effect=FileNotFoundError() ) ):
-            _run( agent._export_pptx_async( _presentation() ) )
-        msgs = [ c.args[ 0 ] for c in _silence_voice_io[ "notify" ].await_args_list ]
-        assert any( "Marp CLI not installed" in m for m in msgs )
-
-    def test_generic_exception( self, _silence_voice_io ):
-        agent = _agent()
-        agent.config.pptx_export_enabled = True
-        agent._presentation_state[ "marp_path" ] = "/p/x.md"
-        with patch( "os.path.exists", return_value=True ), \
-             patch( "cosa.utils.util.get_project_root", return_value="/proj" ), \
-             patch.object( orch_mod.asyncio, "create_subprocess_exec",
-                           new=AsyncMock( side_effect=RuntimeError( "kaboom" ) ) ):
-            _run( agent._export_pptx_async( _presentation() ) )
         assert any( c.kwargs.get( "priority" ) == "medium"
                     for c in _silence_voice_io[ "notify" ].await_args_list )
 

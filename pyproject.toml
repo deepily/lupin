@@ -101,6 +101,9 @@ dependencies = [
   "seaborn==0.13.2",
   "pillow==11.1.0",
   "pixelmatch==0.4.0",
+  "python-pptx==1.0.2",                    # row f507034e: build PPTX decks from the
+                                           # PresentationModel so slides carry real
+                                           # selectable text (replaces Marp's raster export).
 
   # --- Utilities ---
   "pandas>=2.2,<3",
