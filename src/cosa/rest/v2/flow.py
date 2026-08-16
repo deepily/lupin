@@ -127,6 +127,66 @@ class AskFlow:
             return self._needs_input( trace, command, extraction, question, ctx, interactive )
         return self._run_agent( trace, spec, command, question, extraction.final_args, ctx, "args_complete" )
 
+    # ---------------------------------------------------------------- the second turn
+    def resume( self, pending_id: str, answer: str, websocket_id: str, speak: bool=True ) -> dict:
+        """Fold a human's answer into a parked request and drive it to a terminal
+        result — SYNCHRONOUSLY. There is no background thread; that absence is a
+        permanent invariant of the design (the park site was storing a receipt,
+        not a continuation, until this second turn existed).
+
+        Requires:
+            - pending_id identifies a parked entry; answer is the human's reply to
+              that entry's FIRST missing argument.
+
+        Ensures:
+            - a missing/expired pending_id REFUSES loudly (status='expired',
+              route_reason='pending_expired') — never a 500, never a silent no-op.
+            - the answer fills the first missing arg; if more remain, the SAME
+              pending_id is re-asked (status stays 'pending'); if complete, the
+              agent runs and the entry advances pending -> running -> done|failed
+              (the AI-observable completion seam).
+        """
+        trace = StageTrace( trace_dir=self.trace_dir )
+        trace.mark( "t_recv" )
+        trace.set( "pending_id", pending_id )
+
+        entry = self.pending.get( pending_id )
+        if entry is None:
+            trace.set( "resume_error", "pending_expired_or_unknown" )
+            return self._emit( trace, path="needs_input", status="expired",
+                               route_reason="pending_expired", answer=None, answer_raw=None,
+                               command=None, ctx=( "", "", "", websocket_id, speak ),
+                               pending_id=pending_id )
+
+        ctx        = ( entry.user_id, entry.user_email, entry.session_id, websocket_id, speak )
+        extraction = entry.extraction
+        first_arg  = extraction.missing[ 0 ]
+        extraction.final_args[ first_arg ] = answer
+        extraction.missing = [ m for m in extraction.missing if m != first_arg ]
+        trace.update( args_known=sorted( extraction.final_args.keys() ), args_missing=list( extraction.missing ) )
+
+        if extraction.missing:
+            # Interview continues — re-ask the next arg on the SAME pending_id.
+            next_arg = extraction.missing[ 0 ]
+            next_q   = extraction.fallback_questions.get( next_arg ) or f"What {next_arg} would you like?"
+            trace.mark( "t_first_useful" )
+            self._speak( trace, next_q, None, ctx )
+            return self._emit( trace, path="needs_input", status="parked",
+                               route_reason="args_incomplete", answer=next_q, answer_raw=None,
+                               command=entry.command, ctx=ctx, pending_id=pending_id,
+                               args_missing=list( extraction.missing ),
+                               args_known=sorted( extraction.final_args.keys() ) )
+
+        # Complete — run the agent to a terminal result, advancing the seam.
+        self.pending.set_status( pending_id, "running" )
+        spec = resolve( entry.command )
+        if spec is None:
+            self.pending.set_status( pending_id, "failed", error="unknown_command" )
+            return self._receptionist( trace, entry.question, ctx, "unknown_command" )
+        result = self._run_agent( trace, spec, entry.command, entry.question, extraction.final_args, ctx, "resumed" )
+        self.pending.set_status( pending_id, result[ "status" ], answer=result.get( "answer" ), error=result.get( "error" ) )
+        return result
+
     # ---------------------------------------------------------------- helpers
     def _record_lookup( self, trace: StageTrace, lookup: Any ) -> None:
         """Stamp the cache's own timings + score fields onto the trace."""
@@ -207,7 +267,8 @@ class AskFlow:
         trace.mark( "t_first_useful" )
         pending_id = None
         if interactive:
-            pending_id = self.pending.put( extraction=extraction, user_email=ctx[ 1 ], session_id=ctx[ 2 ], user_id=ctx[ 0 ] )
+            pending_id = self.pending.put( extraction=extraction, user_email=ctx[ 1 ], session_id=ctx[ 2 ],
+                                           user_id=ctx[ 0 ], command=command, question=question )
             trace.set( "pending_id", pending_id )
         self._speak( trace, first_q, None, ctx )
         return self._emit( trace, path="needs_input", status=( "parked" if interactive else "needs_input" ),

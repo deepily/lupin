@@ -38,11 +38,16 @@ def _full_result( **overrides ):
 
 class FakeFlow:
     def __init__( self, result=None ):
-        self._result   = result if result is not None else _full_result()
-        self.run_calls = []
+        self._result      = result if result is not None else _full_result()
+        self.run_calls    = []
+        self.resume_calls = []
 
     def run( self, **kwargs ):
         self.run_calls.append( kwargs )
+        return self._result
+
+    def resume( self, **kwargs ):
+        self.resume_calls.append( kwargs )
         return self._result
 
 
@@ -112,6 +117,63 @@ def test_ask_422_on_oversized_question():
     flow = FakeFlow()
     client = TestClient( _app( { "uid": "u1", "email": "u@x.com" }, flow ) )
     resp = client.post( "/api/v2/ask", json={ "question": "x" * 4001 } )
+    assert resp.status_code == 422
+
+
+# ────────────────────────────────────────────────────────────── resume endpoint (DoD 4)
+
+def test_resume_happy_path_forwards_to_flow():
+    flow = FakeFlow( _full_result( path="agent", route_reason="resumed", answer="sunny" ) )
+    client = TestClient( _app( { "uid": "u1", "email": "u@x.com" }, flow ) )
+    resp = client.post( "/api/v2/resume", json={ "pending_id": "pend-1", "answer": "Boston" } )
+    assert resp.status_code == 200
+    assert resp.json()[ "route_reason" ] == "resumed"
+    call = flow.resume_calls[ 0 ]
+    assert call[ "pending_id" ] == "pend-1"
+    assert call[ "answer" ] == "Boston"
+    # no websocket_id → synthesized from uid, forwarded to the flow
+    assert call[ "websocket_id" ] == "api-u1"
+    assert call[ "speak" ] is True
+
+
+def test_resume_uses_supplied_websocket_id_and_speak():
+    flow = FakeFlow()
+    client = TestClient( _app( { "uid": "u1", "email": "u@x.com" }, flow ) )
+    resp = client.post( "/api/v2/resume",
+                        json={ "pending_id": "p", "answer": "Boston", "websocket_id": "ws-9", "speak": False } )
+    assert resp.status_code == 200
+    call = flow.resume_calls[ 0 ]
+    assert call[ "websocket_id" ] == "ws-9"
+    assert call[ "speak" ] is False
+
+
+def test_resume_401_when_uid_missing():
+    flow = FakeFlow()
+    client = TestClient( _app( { "email": "u@x.com" }, flow ) )
+    resp = client.post( "/api/v2/resume", json={ "pending_id": "p", "answer": "x" } )
+    assert resp.status_code == 401
+    assert "id not found" in resp.json()[ "detail" ]
+
+
+def test_resume_401_when_email_missing():
+    flow = FakeFlow()
+    client = TestClient( _app( { "uid": "u1" }, flow ) )
+    resp = client.post( "/api/v2/resume", json={ "pending_id": "p", "answer": "x" } )
+    assert resp.status_code == 401
+    assert "email not found" in resp.json()[ "detail" ]
+
+
+def test_resume_422_on_empty_answer():
+    flow = FakeFlow()
+    client = TestClient( _app( { "uid": "u1", "email": "u@x.com" }, flow ) )
+    resp = client.post( "/api/v2/resume", json={ "pending_id": "p", "answer": "" } )
+    assert resp.status_code == 422
+
+
+def test_resume_422_on_missing_pending_id():
+    flow = FakeFlow()
+    client = TestClient( _app( { "uid": "u1", "email": "u@x.com" }, flow ) )
+    resp = client.post( "/api/v2/resume", json={ "answer": "Boston" } )
     assert resp.status_code == 422
 
 

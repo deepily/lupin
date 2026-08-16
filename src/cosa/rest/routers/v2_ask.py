@@ -41,6 +41,16 @@ class AskRequest( BaseModel ):
     interactive  : bool           = Field( True, description="Park + resume on a missing argument (else return needs_input)" )
 
 
+class ResumeRequest( BaseModel ):
+    """Request body for POST /api/v2/resume — the second turn of a parked flow."""
+    pending_id   : str            = Field( ..., min_length=1,
+                                           description="The parked-request id returned by a prior needs_input response" )
+    answer       : str            = Field( ..., min_length=1, max_length=4000,
+                                           description="The human's reply to the parked question" )
+    websocket_id : Optional[ str ] = Field( None, description="WebSocket session ID for TTS routing" )
+    speak        : bool           = Field( True, description="Dispatch the answer as a TTS notification" )
+
+
 class AskResponse( BaseModel ):
     """The §8 terminal result of one v2 request."""
     path           : str                 = Field( ..., description="replay | agent | needs_input | receptionist" )
@@ -167,5 +177,40 @@ async def v2_ask(
         websocket_id= request.websocket_id or session_id,
         speak       = request.speak,
         interactive = request.interactive,
+    )
+    return AskResponse( **result )
+
+
+@router.post( "/api/v2/resume", response_model=AskResponse )
+async def v2_resume(
+    request      : ResumeRequest,
+    current_user : dict = Depends( get_current_user ),
+    flow         : Any  = Depends( get_ask_flow ),
+) -> AskResponse:
+    """
+    Resume a parked v2 flow with the human's answer — the second turn.
+
+    Requires:
+        - an authenticated user (get_current_user).
+        - request.pending_id is a parked id; request.answer is the reply (Field-validated).
+
+    Ensures:
+        - returns AskResponse; an expired/unknown pending_id degrades to a
+          needs_input refusal (status='expired'), never a 500.
+        - resume runs synchronously — no background thread is ever spawned.
+    """
+    user_id    = current_user.get( "uid" )
+    user_email = current_user.get( "email" )
+    if not user_id:
+        raise HTTPException( status_code=401, detail="User id not found in authentication token." )
+    if not user_email:
+        raise HTTPException( status_code=401, detail="User email not found in authentication token." )
+
+    session_id = request.websocket_id or f"api-{user_id[ :8 ]}"
+    result = flow.resume(
+        pending_id   = request.pending_id,
+        answer       = request.answer,
+        websocket_id = request.websocket_id or session_id,
+        speak        = request.speak,
     )
     return AskResponse( **result )

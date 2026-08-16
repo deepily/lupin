@@ -19,6 +19,7 @@ import pytest
 
 from cosa.rest.v2 import flow as flow_mod
 from cosa.rest.v2.flow import AskFlow
+from cosa.rest.v2.pending import PendingRequests
 
 
 # ────────────────────────────────────────────────────────────── fakes
@@ -511,3 +512,111 @@ def test_arg_spec_for_uses_table_entry_when_present( tmp_path, notifier, monkeyp
     spec = f._arg_spec_for( "agent router go to foo", ( "foo", ) )
     assert spec.required_user_args == [ "foo" ]
     assert spec.fallback_questions == { "foo": "Which foo?" }
+
+
+# ────────────────────────────────────────────────────────────── the second turn — resume (DoD 4)
+#
+# These use the REAL PendingRequests, not a fake, on purpose: the plan's finding
+# (§ reachability) was that the parked-request lifecycle was 100% covered and 0%
+# reachable — put/get/set_status had no caller outside their own tests. Driving
+# resume through the real store is the reachability assertion: it proves the flow
+# is the caller that closes the loop. Still hermetic (in-process dict), :7999-safe.
+
+def _park( pending, *, command="agent router go to weather", question="what's the weather",
+           final_args=None, missing=( "location", ), fallback_questions=None ):
+    """Park a real entry and return (pending_id, extraction) (mirrors flow.py:210's put)."""
+    extraction = _extraction(
+        final_args=final_args if final_args is not None else {},
+        missing=missing,
+        fallback_questions=fallback_questions if fallback_questions is not None else { "location": "Which city?" },
+    )
+    pid = pending.put( extraction=extraction, user_email="u@x.com", session_id="s1",
+                       user_id="u1", command=command, question=question )
+    return pid, extraction
+
+
+def test_resume_completes_when_answer_fills_last_arg( tmp_path, notifier, monkeypatch ):
+    monkeypatch.setattr( flow_mod, "resolve",
+                         lambda command: FakeSpec( required_args=( "location", ), snapshotable=False ) )
+    pending      = PendingRequests()
+    pid, _       = _park( pending )
+    exe          = FakeExecutor( _outcome( status="done", answer="sunny", answer_raw="sunny raw" ) )
+    f            = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(), exe, pending, notifier )
+    r = f.resume( pending_id=pid, answer="Boston", websocket_id="ws1" )
+    assert r[ "path" ] == "agent"
+    assert r[ "route_reason" ] == "resumed"
+    assert r[ "status" ] == "done"
+    assert r[ "answer" ] == "sunny"
+    # the executor saw the resumed arg folded into the composed question (R-B4)
+    assert "Boston" in exe.works[ 0 ].job.kwargs[ "question" ]
+    # the AI-observable seam advanced the real entry pending -> running -> done
+    assert pending.get( pid ).status == "done"
+    assert pending.get( pid ).answer == "sunny"
+
+
+def test_resume_reasks_when_more_args_remain( tmp_path, notifier, monkeypatch ):
+    monkeypatch.setattr( flow_mod, "resolve",
+                         lambda command: FakeSpec( required_args=( "location", "date" ) ) )
+    pending  = PendingRequests()
+    pid, _   = _park( pending, missing=[ "location", "date" ],
+                      fallback_questions={ "location": "Which city?", "date": "Which day?" } )
+    f = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(), FakeExecutor(), pending, notifier )
+    r = f.resume( pending_id=pid, answer="Boston", websocket_id="ws1" )
+    assert r[ "path" ] == "needs_input"
+    assert r[ "status" ] == "parked"
+    assert r[ "answer" ] == "Which day?"          # the NEXT question
+    assert r[ "pending_id" ] == pid               # same id — the interview continues
+    assert r[ "args_missing" ] == [ "date" ]
+    # still parked, still pending — not advanced to running
+    assert pending.get( pid ).status == "pending"
+
+
+def test_resume_missing_pending_id_refuses_loudly( tmp_path, notifier ):
+    pending = PendingRequests()
+    f = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(), FakeExecutor(), pending, notifier )
+    r = f.resume( pending_id="does-not-exist", answer="Boston", websocket_id="ws1" )
+    assert r[ "status" ] == "expired"
+    assert r[ "route_reason" ] == "pending_expired"
+    assert r[ "path" ] == "needs_input"
+    assert r[ "answer" ] is None                  # nothing rebuilt — a refusal, not a 500
+
+
+def test_resume_expired_entry_refuses( tmp_path, notifier ):
+    # a zero-TTL store expires the entry the instant it is read back.
+    clock   = [ 0 ]
+    pending = PendingRequests( ttl_seconds=0.0, clock=lambda: clock[ 0 ] )
+    pid, _  = _park( pending )
+    clock[ 0 ] = 1                                # advance past the (zero) TTL
+    f = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(), FakeExecutor(), pending, notifier )
+    r = f.resume( pending_id=pid, answer="Boston", websocket_id="ws1" )
+    assert r[ "status" ] == "expired"
+    assert r[ "route_reason" ] == "pending_expired"
+
+
+def test_resume_unknown_command_degrades_and_marks_failed( tmp_path, notifier, monkeypatch ):
+    monkeypatch.setattr( flow_mod, "resolve", lambda command: None )   # command no longer resolvable
+    pending = PendingRequests()
+    pid, _  = _park( pending, command="agent router go to ghost" )
+    f = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(), FakeExecutor(), pending, notifier )
+    r = f.resume( pending_id=pid, answer="Boston", websocket_id="ws1" )
+    assert r[ "path" ] == "receptionist"
+    assert r[ "route_reason" ] == "unknown_command"
+    assert pending.get( pid ).status == "failed"
+
+
+def test_resume_spawns_no_background_thread( tmp_path, notifier, monkeypatch ):
+    """With resume synchronous, 'no background thread spawns' is a PERMANENT design
+    invariant — the sibling guard on run() pins the park side; this pins the resume
+    side, so the guarantee holds across the whole two-turn mechanism."""
+    import threading
+
+    monkeypatch.setattr( flow_mod, "resolve",
+                         lambda command: FakeSpec( required_args=( "location", ), snapshotable=False ) )
+    pending = PendingRequests()
+    pid, _  = _park( pending )
+    f = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(), FakeExecutor(), pending, notifier )
+
+    before = { t.ident for t in threading.enumerate() }
+    f.resume( pending_id=pid, answer="Boston", websocket_id="ws1" )
+    after  = { t.ident for t in threading.enumerate() }
+    assert after == before, f"resume spawned a background thread: {after - before}"

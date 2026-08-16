@@ -46,6 +46,8 @@ class PendingEntry:
     session_id : str
     user_id    : str
     created_ns : int
+    command    : str                 = ""      # routing command — needed to rebuild the agent on resume
+    question   : str                 = ""      # original question — folded with the resumed args (R-B4)
     status     : str                 = "pending"
     answer     : Optional[ str ]     = None
     error      : Optional[ str ]     = None
@@ -83,6 +85,8 @@ class PendingRequests:
         user_email  : str,
         session_id  : str,
         user_id     : str,
+        command     : str             = "",
+        question    : str             = "",
         pending_id  : Optional[ str ] = None,
     ) -> str:
         """
@@ -94,6 +98,8 @@ class PendingRequests:
         Ensures:
             - a PendingEntry is stored under a fresh (or supplied) pending_id.
             - a dict/list/set extraction is copied so no shared reference is held.
+            - command + question are persisted so resume can rebuild the agent —
+              without them the parked entry is a receipt, not a continuation.
             - returns the pending_id.
         """
         pid     = pending_id if pending_id is not None else uuid.uuid4().hex
@@ -105,6 +111,8 @@ class PendingRequests:
             session_id = session_id,
             user_id    = user_id,
             created_ns = self._clock(),
+            command    = command,
+            question   = question,
         )
         with self._lock:
             self._entries[ pid ] = entry
