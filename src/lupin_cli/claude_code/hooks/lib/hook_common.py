@@ -30,6 +30,7 @@ from pathlib import Path
 # Canonical path resolution via cu.get_project_root() — keeps runtime output
 # in io/ directory, consistent with existing io/log/ convention.
 import cosa.utils.util as cu
+from cosa.utils.edt_timestamp import split_leading_stamp
 from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 
 
@@ -707,14 +708,26 @@ def build_peer_dm_reminder( body, persona=None, icon=None, msg_id=None, thread_i
             f'reply_to="{msg_id}", thread_id="{thread_id}" )\n'
             f'↳ {DM_STYLE_TAG}'
         )
-    # Header carries ONLY the shared PEER_DM_FRAME_PREFIX + sender — the msg_id/thread_id
+    # Header carries the shared PEER_DM_FRAME_PREFIX + sender — the msg_id/thread_id
     # are NOT repeated here: they already ride the reply affordance below (the string a
     # reader pastes to reply), so printing them in the header too was pure duplication
     # (72 chars of UUIDs twice). The prefix is left intact so is_injected_peer_dm + the
     # Stop-hook poke-cap guard still match this envelope. (row: peer-DM header de-dup)
+    #
+    # Fold a leading EDT stamp INTO the header (row e990722a, Rick 23:24 / Rachel-approved
+    # RENDER-LAYER extraction — the stored body is NOT mutated): when the body begins with
+    # a stamp, the header reads "PEER DM from <sender> <icon> at [ts]" and the body is the
+    # stamp-stripped rest; with no leading stamp, split_leading_stamp returns the body
+    # byte-identical and the header keeps its trailing ":". PEER_DM_FRAME_PREFIX is intact
+    # in both branches.
+    stamp, clean_body = split_leading_stamp( body )
+    header = (
+        f"{PEER_DM_FRAME_PREFIX}{sender_label} at {stamp}" if stamp
+        else f"{PEER_DM_FRAME_PREFIX}{sender_label}:"
+    )
     reminder_body = (
-        f"{PEER_DM_FRAME_PREFIX}{sender_label}:\n\n"
-        f"{body}\n\n"
+        f"{header}\n\n"
+        f"{clean_body}\n\n"
         f"{reply_affordance}"
     )
     return f"<system-reminder>\n{reminder_body}\n</system-reminder>"
