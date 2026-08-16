@@ -166,5 +166,38 @@ class TestPrefilterTruncationDisclosure( unittest.TestCase ):
         )
 
 
+class TestPartialSignalThinScore( unittest.TestCase ):
+    """
+    Row 888711f0 (found by Rachel): a large map where only a thin, incidental
+    keyword hit scores (top score 1) while the user's true target shares ZERO
+    keyword tokens with the description. The target never enters `scored`, so it
+    is silently dropped and the best-of-one shortlist is trusted (arbitrary
+    False) — a confident answer chosen from a list the target was never in. A
+    single incidental hit is not a reliable narrowing, so it must be flagged
+    arbitrary (option 3: ask when the top score is weak in absolute terms). A
+    genuine multi-token match stays trustworthy (c143fd84 preserved).
+    """
+
+    def test_thin_single_hit_flags_arbitrary_and_drops_target( self ):
+        big = { f"io/x/unrelated-{i}.md": f"/abs/{i}.md" for i in range( MAX_CANDIDATES + 10 ) }
+        big[ "io/x/widget-summary.md" ] = "/abs/widget.md"   # scores 1 on "widget"
+        target = "io/x/nova-briefing.md"                      # zero overlap with "widget"
+        big[ target ] = "/abs/nova.md"
+        out, arbitrary = prefilter_docs_map_by_keywords( big, "widget", debug=True )
+        self.assertNotIn( target, out, "the zero-overlap target is dropped from the shortlist" )
+        self.assertTrue(
+            arbitrary,
+            "a thin single-keyword narrowing must disclose incompleteness "
+            "(arbitrary=True) so the caller asks for an exact path (row 888711f0)",
+        )
+
+    def test_genuine_multi_token_match_stays_trustworthy( self ):
+        big = { f"io/x/unrelated-{i}.md": f"/abs/{i}.md" for i in range( MAX_CANDIDATES + 10 ) }
+        big[ "io/x/widget-gadget-report.md" ] = "/abs/wg.md"  # scores 2 on "widget gadget"
+        out, arbitrary = prefilter_docs_map_by_keywords( big, "widget gadget", debug=False )
+        self.assertFalse( arbitrary, "a genuine multi-token match stays trustworthy" )
+        self.assertIn( "io/x/widget-gadget-report.md", out )
+
+
 if __name__ == "__main__":
     unittest.main()

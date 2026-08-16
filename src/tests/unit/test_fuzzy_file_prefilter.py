@@ -145,6 +145,37 @@ class TestHardCapAndArbitrary:
 
 
 # ============================================================================
+# PARTIAL-SIGNAL THIN SCORE — row 888711f0 (found by Rachel). A target sharing
+# NO keyword token with the description is silently cut when a decoy scores above
+# zero. On a large map the zero-overlap target never enters `scored`, so a
+# shortlist built from a single incidental hit (top score 1) is trusted while the
+# true target is gone. A thin top score must flag arbitrary (option 3: ask when
+# the top score is weak in absolute terms). A genuine multi-token match stays
+# trustworthy (c143fd84 preserved).
+# ============================================================================
+class TestPartialSignalThinScore:
+
+    def test_thin_single_hit_flags_arbitrary_and_drops_zero_overlap_target( self ):
+        big = { f"io/x/unrelated-{i}.md": f"/abs/{i}.md" for i in range( MAX_CANDIDATES + 10 ) }
+        big[ "io/x/widget-summary.md" ] = "/abs/widget.md"   # scores 1 on "widget"
+        target = "io/x/nova-briefing.md"                      # zero overlap with "widget"
+        big[ target ] = "/abs/nova.md"
+        out, arbitrary = prefilter_docs_map_by_keywords( big, "widget", debug=True )
+        # The silent drop: the zero-overlap target is gone from the shortlist.
+        assert target not in out
+        # The fix: a thin best-of-one narrowing is disclosed, not trusted (888711f0).
+        assert arbitrary is True
+
+    def test_genuine_multi_token_match_stays_trustworthy( self ):
+        # A two-token match is a real narrowing → still trusted (c143fd84 kept).
+        big = { f"io/x/unrelated-{i}.md": f"/abs/{i}.md" for i in range( MAX_CANDIDATES + 10 ) }
+        big[ "io/x/widget-gadget-report.md" ] = "/abs/wg.md"  # scores 2 on "widget gadget"
+        out, arbitrary = prefilter_docs_map_by_keywords( big, "widget gadget", debug=False )
+        assert arbitrary is False
+        assert "io/x/widget-gadget-report.md" in out
+
+
+# ============================================================================
 # Input hygiene
 # ============================================================================
 class TestInputHygiene:
@@ -155,9 +186,12 @@ class TestInputHygiene:
         assert large_map == before
 
     def test_stopwords_and_short_tokens_dropped( self, large_map ):
-        # "kiss" is the only usable token → still narrows on it (not arbitrary).
+        # "kiss" is the only usable token → still narrows on it (the KISS doc is
+        # the kept candidate). But a lone incidental hit (top score 1) is a
+        # best-of-list guess a zero-overlap target could beat, so it is now
+        # flagged arbitrary — ask, don't trust silently (row 888711f0).
         out, arbitrary = prefilter_docs_map_by_keywords( large_map, "the kiss is of", debug=False )
-        assert arbitrary is False
+        assert arbitrary is True
         assert "io/deep-research/x/2026.07.25-the-kiss-protocol-brevity.md" in out
 
     def test_stop_words_is_a_nonempty_set( self ):

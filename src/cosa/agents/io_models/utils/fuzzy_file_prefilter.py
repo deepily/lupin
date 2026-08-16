@@ -30,6 +30,16 @@ STOP_WORDS = {
 # local model's context window.
 MAX_CANDIDATES = 50
 
+# A scored shortlist is trusted as a complete narrowing only when its BEST
+# candidate shares at least this many keyword tokens with the description. A top
+# overlap of exactly one is a single incidental hit — a best-of-list guess that a
+# zero-overlap target could plausibly beat — so it is flagged arbitrary and the
+# caller asks for an exact path rather than trusting a shortlist the target may
+# never have entered (row 888711f0). This is a DIFFERENT lever than MAX_CANDIDATES:
+# widening the cap only moves the threshold; this removes the silence for thin
+# matches by turning a weak narrowing into a visible ask.
+MIN_TRUSTWORTHY_TOP_SCORE = 2
+
 
 def _extract_keywords( description ):
     """
@@ -144,9 +154,12 @@ def prefilter_docs_map_by_keywords( docs_map, description, debug=False ):
           arbitrary is False (a within-budget list is complete, never a guess)
         - on a larger map with keyword overlap, keeps the highest-scoring
           MAX_CANDIDATES; arbitrary is False ONLY when the whole scored list fit
-          (nothing dropped). When the scored list exceeds MAX_CANDIDATES the
-          narrowing truncated — a real match may sit past the cut — so arbitrary
-          is True: the shortlist is lossy, not a complete narrowing (row c143fd84)
+          (nothing scored dropped) AND the top overlap score is a genuine
+          multi-token match (>= MIN_TRUSTWORTHY_TOP_SCORE). arbitrary is True when
+          the scored list exceeds MAX_CANDIDATES — a real match may sit past the
+          cut (row c143fd84) — OR when the top score is thin (a single incidental
+          keyword hit): a zero-overlap target could beat a best-of-list-of-one, so
+          the shortlist it was dropped from is not trustworthy (row 888711f0)
         - on a larger map with NO scoring signal (no usable keywords, or zero
           keyword overlap), caps to a deterministic sorted MAX_CANDIDATES slice
           AND sets arbitrary True: the slice is unranked and may not contain the
@@ -179,16 +192,27 @@ def prefilter_docs_map_by_keywords( docs_map, description, debug=False ):
     scored = _score_docs_by_keyword_overlap( docs_map, desc_words )
 
     if scored:
-        # A scored narrowing that TRUNCATES (more scored candidates than the cap)
-        # has silently dropped real matches — the true target may sit just past
-        # the 50th, so the shortlist is NOT a complete narrowing and must NOT be
-        # flagged trustworthy (row c143fd84). Only a scored list that fit whole
-        # (nothing dropped) is complete → arbitrary False.
+        # A scored narrowing on a LARGE map ALWAYS drops the zero-overlap
+        # candidates — they never enter `scored` — and a target that shares no
+        # keyword token with the description scores zero, so it is dropped
+        # silently. Two conditions make the shortlist untrustworthy (arbitrary):
+        #   (1) TRUNCATION — more scored candidates than the cap, so a genuinely
+        #       scored target may rank past the cut (row c143fd84); or
+        #   (2) a THIN top score — the best path shares only ONE keyword token
+        #       with the description. A single incidental hit is best-of-list,
+        #       not a reliable narrowing, and a zero-overlap target could well be
+        #       the real one, so the caller must ask rather than trust the
+        #       shortlist (row 888711f0). A top score at or above
+        #       MIN_TRUSTWORTHY_TOP_SCORE is a genuine multi-token match and
+        #       stays trustworthy, preserving the c143fd84 narrowing benefit.
         truncated = len( scored ) > MAX_CANDIDATES
+        top_score = scored[ 0 ][ 0 ]
+        thin      = top_score < MIN_TRUSTWORTHY_TOP_SCORE
+        arbitrary = truncated or thin
         keep = [ rel for _score, rel in scored[ :MAX_CANDIDATES ] ]
         if debug:
-            print( f"[fuzzy_file_prefilter] Pre-filtered {len( docs_map )} → {len( keep )} candidates (top scores: {[ s for s, _ in scored[ :5 ] ]}; truncated={truncated})" )
-        return { k: docs_map[ k ] for k in keep }, truncated
+            print( f"[fuzzy_file_prefilter] Pre-filtered {len( docs_map )} → {len( keep )} candidates (top scores: {[ s for s, _ in scored[ :5 ] ]}; truncated={truncated}; thin={thin})" )
+        return { k: docs_map[ k ] for k in keep }, arbitrary
 
     # No scoring signal (no usable keywords, or zero keyword overlap) on a LARGE
     # map. We MUST cap — returning the full map is the exact overflow that took
@@ -235,6 +259,15 @@ def quick_smoke_test():
         assert len( out ) == MAX_CANDIDATES and arbitrary is True, "zero-overlap large map must cap + flag arbitrary"
         assert list( out.keys() ) == sorted( big_map.keys() )[ :MAX_CANDIDATES ], "arbitrary slice must be deterministic"
         print( "✓ zero-overlap large map hard-capped (deterministic, arbitrary)" )
+
+        # 5) Thin partial signal — only a single incidental keyword hit scores; a
+        #    zero-overlap target could be the real one, so the shortlist is a
+        #    best-of-list guess and must be flagged arbitrary (row 888711f0).
+        thin_map = { f"io/x/unrelated-{i}.md": f"/abs/{i}.md" for i in range( MAX_CANDIDATES + 10 ) }
+        thin_map[ "io/x/widget-summary.md" ] = "/abs/widget.md"
+        out, arbitrary = prefilter_docs_map_by_keywords( thin_map, "widget", debug=False )
+        assert arbitrary is True, "a single incidental keyword hit must flag arbitrary"
+        print( "✓ thin single-keyword narrowing flagged arbitrary" )
 
         print( "\n✓ ALL fuzzy_file_prefilter smoke tests passed" )
     except AssertionError as e:
