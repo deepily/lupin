@@ -600,27 +600,50 @@ def run_v1_baseline( *, corpus: str = "simple", seed: int = 1024, n_per_command:
 # ───────────────────────── cold-start truncation (F3, :8000-guarded)
 
 SNAPSHOT_TABLE = "solution_snapshots"   # the fixed Postgres snapshot table (ORM __tablename__)
-TEST_DB_MARKER = "lupin_db_test"        # the :8000 test database name — the ONLY legal TRUNCATE target
+
+# The measurement databases the destructive cold-truncate MAY target — exactly
+# these two, matched on the url's db NAME (not a substring), so dev/prod/unparented
+# are refused even when they share a prefix. The v1 baseline server runs on its OWN
+# db (lupin_db_v1baseline), never the shared :8000 test db, so a cold TRUNCATE can
+# never wipe a live :8000 run; lupin_db_test stays allowed for the v2 arm's own runs
+# (design src/rnd/v0.2.0/2026.08.15-v1-baseline-standalone-server-design.md, constraint A).
+MEASUREMENT_DB_NAMES = frozenset( { "lupin_db_test", "lupin_db_v1baseline" } )
+
+
+def _db_name( db_url: str ) -> str:
+    """
+    The database name = the url's final '/'-separated segment, minus any '?...'
+    query suffix. 'postgresql://u:p@h:5432/lupin_db_test?sslmode=require' ->
+    'lupin_db_test'; a url with no '/' yields the whole string, matched as-is
+    against the allow-list. Ensures: returns a str.
+    """
+    return db_url.rsplit( "/", 1 )[ -1 ].split( "?", 1 )[ 0 ]
 
 
 def assert_test_db( db_url: Any ) -> None:
     """
-    Refuse to proceed unless the connection targets the :8000 TEST database.
+    Refuse to proceed unless the connection targets a MEASUREMENT database — the
+    shared :8000 test db (lupin_db_test) OR the dedicated v1-baseline db
+    (lupin_db_v1baseline). Never the dev db, never prod, never an unparented url.
 
     The truncation MAKES the cold pass cold (the stronger guarantee that pairs
     with the assert-cold floor). But a TRUNCATE is irreversible, so this is the
     hard precondition (Cheech): fire LOUD and never proceed on an unexpected
-    target — never the dev DB, never prod, never an unparented url.
+    target. The v1 baseline uses its OWN db, so this can never wipe a live :8000
+    run; widening to an allow-list did NOT weaken the dev/prod refusal — the db
+    NAME must match the set EXACTLY (a substring check would let 'lupin_db_test'
+    smuggle in a 'lupin_db_test_shadow'; exact-name closes that).
 
     Ensures:
-        - returns None when db_url is a string naming the test DB (lupin_db_test)
+        - returns None when db_url is a string whose db name is in MEASUREMENT_DB_NAMES
         - raises EvalIntegrityError for any other / missing / non-string target,
           with the offending value quoted — the caller must not TRUNCATE
     """
-    if not isinstance( db_url, str ) or TEST_DB_MARKER not in db_url:
+    if not isinstance( db_url, str ) or _db_name( db_url ) not in MEASUREMENT_DB_NAMES:
         raise EvalIntegrityError(
-            f"refusing to TRUNCATE: the DB target is not the :8000 test database "
-            f"(expected '{TEST_DB_MARKER}' in the url); got {db_url!r}. Fail loud, never proceed."
+            f"refusing to TRUNCATE: the DB target is not a measurement database "
+            f"(allowed db names: {sorted( MEASUREMENT_DB_NAMES )}); got {db_url!r}. "
+            f"Fail loud, never proceed."
         )
 
 

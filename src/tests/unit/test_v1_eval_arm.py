@@ -321,9 +321,27 @@ def test_assert_test_db_refuses_dev_target():
     with pytest.raises( v1.EvalIntegrityError ):
         v1.assert_test_db( "postgresql://u:p@localhost/lupin_db_dev" )
 
+def test_assert_test_db_accepts_v1baseline_target():
+    # the dedicated v1-baseline db is on the allow-list (design constraint A)
+    assert v1.assert_test_db( "postgresql://u:p@localhost/lupin_db_v1baseline" ) is None
+
+def test_assert_test_db_refuses_prefix_smuggle():
+    # exact db-NAME match: a name that merely CONTAINS an allowed name is refused
+    with pytest.raises( v1.EvalIntegrityError ):
+        v1.assert_test_db( "postgresql://u:p@localhost/lupin_db_test_shadow" )
+
+def test_assert_test_db_refuses_empty_db_name():
+    # an unparented url (trailing slash, no db name) yields "" -> refused
+    with pytest.raises( v1.EvalIntegrityError ):
+        v1.assert_test_db( "postgresql://u:p@localhost/" )
+
 def test_assert_test_db_refuses_non_string():
     with pytest.raises( v1.EvalIntegrityError ):
         v1.assert_test_db( None )
+
+def test_db_name_strips_query_suffix():
+    assert v1._db_name( "postgresql://u:p@h:5432/lupin_db_test?sslmode=require" ) == "lupin_db_test"
+    assert v1._db_name( "postgresql://u:p@h:5432/lupin_db_v1baseline" ) == "lupin_db_v1baseline"
 
 class _FakeEngine:
     def __init__( self, url ): self.url = url
