@@ -100,8 +100,15 @@ def _require_v1_live_seam_and_worktree():
           pinned-b0735467 worktree server must be running with LUPIN_ROOT exported to it,
           or the v1 arm would measure the dirty main tree. The message states the seam is
           wired so no one re-builds it.
+        - set-ness is NOT enough: after the var is present, PROVES the server is the
+          pinned tree by reading its OWN sha (GET /api/code-identity) and asserting it
+          equals the pin. Refuses — NAMING the sha it saw — when a wrong-tree (e.g. main)
+          server answers, which satisfies the env var identically (row 275cb0b9 follow-up).
     """
-    from v1_eval_arm import V1_PIN_SHA, make_ws_recv_events   # noqa: F401 - import PROVES the seam is present
+    from v1_eval_arm import (                                  # noqa: E402
+        V1_PIN_SHA, make_ws_recv_events,                       # noqa: F401 - import PROVES the seam is present
+        read_running_server_sha, assert_measured_sha, EvalIntegrityError,
+    )
     v1_base = os.environ.get( "LUPIN_V1_ARM_BASE_URL" )       # the pinned-worktree server, when stood up
     if not v1_base:
         raise PairedPreconditionMissing(
@@ -109,6 +116,21 @@ def _require_v1_live_seam_and_worktree():
             f"tested) — the remaining gate is the pinned-worktree server: set LUPIN_V1_ARM_BASE_URL to a "
             f"v1 server at pin {V1_PIN_SHA} with LUPIN_ROOT exported to that worktree. Refusing the paired run."
         )
+
+    # Set-ness proves a URL is configured, NOT that the server behind it is the right
+    # tree: a main-tree server pointed at this var passes the check above identically.
+    # PROVE the tree — ask the running server its OWN sha and assert it IS the pin, before
+    # any measurement is recorded. On mismatch the refusal NAMES the sha it saw, so the
+    # operator learns which tree answered instead of a bare "wrong server".
+    observed_sha = read_running_server_sha( v1_base )
+    try:
+        assert_measured_sha( observed_sha )                  # raises EvalIntegrityError, quoting observed vs pin
+    except EvalIntegrityError as e:
+        raise PairedPreconditionMissing(
+            f"LUPIN_V1_ARM_BASE_URL={v1_base} is set, but the server there reports sha "
+            f"{observed_sha!r}, not the pinned v1 sha {V1_PIN_SHA!r} — it is NOT the b0735467 "
+            f"worktree. Point the var at the pinned-worktree server. Refusing the paired run."
+        ) from e
 
 
 def _resolve_v1_paired_store() -> str:
