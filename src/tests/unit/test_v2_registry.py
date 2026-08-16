@@ -114,8 +114,9 @@ class TestAgenticSetOwnership( unittest.TestCase ):
     def test_deferred_is_template_emittable_agentic_subset( self ):
         # DEFERRED_COMMANDS is a bounded interim (retired phase 2). Pin it to the
         # template-emittable agentic subset so it cannot silently drift from the
-        # owned set: the 3 AGENTIC commands absent from the template (bug fix
-        # expediter, test fix expediter resume, test suite) are excluded here.
+        # owned set: the AGENTIC commands absent from the template (bug fix expediter,
+        # test fix expediter [START], heartbeat poker) are excluded here. (test suite
+        # and test fix expediter resume ARE in the template and so ARE in the set.)
         template          = _template_commands()
         emittable_agentic = { c for c in AGENTIC_COMMANDS if c in template }
         self.assertEqual( DEFERRED_COMMANDS, emittable_agentic )

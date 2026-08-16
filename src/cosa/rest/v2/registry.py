@@ -225,14 +225,15 @@ RECEPTIONIST_OR_NONE = frozenset( c for c, s in REGISTRY.items() if s.cls is Com
 # ── DEFERRED_COMMANDS — a deliberate BOUNDED INTERIM, retired in phase 2 ───────
 # The §9 drift guard (test_v2_registry.py:59) imports this name and asserts
 #   template == V2_AGENTS ∪ DEFERRED_COMMANDS ∪ CONTROL_COMMANDS ∪ RECEPTIONIST_OR_NONE.
-# DEFERRED_COMMANDS is the template-EMITTABLE agentic subset (8), NOT the full
-# agentic set (11): the owned agentic commands absent from the router template —
-# `bug fix expediter` and `test suite` (§3 drifts pending a reachability decision)
-# and `test fix expediter` (START, system-triggered, EXEMPT — non-speakable job-id
-# arg) — cannot sit in a bucket the guard equates with the template. `test fix
-# expediter resume` joined the template in phase 3 (voice-reachable) and so joins
-# this set. Deriving from cls alone would make it the 11 and break the guard; it is
-# therefore kept as an explicit set here.
+# DEFERRED_COMMANDS is the template-EMITTABLE agentic subset (9), NOT the full
+# agentic set (12): the owned agentic commands absent from the router template —
+# `bug fix expediter` (card-reachable, never an initial detection), `test fix
+# expediter` (START, system-triggered, EXEMPT — non-speakable job-id arg), and
+# `heartbeat poker` (system/programmatic, no production dispatch path today) —
+# cannot sit in a bucket the guard equates with the template. `test fix expediter
+# resume` joined the template in phase 3 (voice-reachable); `test suite` joined it in
+# phase 3 by ruling B (completion). Deriving from cls alone would make it the 12 and
+# break the guard; it is therefore kept as an explicit set here.
 # `test_deferred_is_template_emittable_agentic_subset` pins it to
 # AGENTIC_COMMANDS ∩ template so it cannot silently drift from the owned set.
 # Phase 2 retires this name when the drift guard is rewritten class-aware.
@@ -245,6 +246,7 @@ DEFERRED_COMMANDS = frozenset( {
     "agent router go to claude code",
     "agent router go to swe team",
     "agent router go to test fix expediter resume",   # phase 3: voice-reachable, now router-listed
+    "agent router go to test suite",                  # phase 3: ruling B — router-listed (completion)
 } )
 
 
