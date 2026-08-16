@@ -1052,6 +1052,6 @@ def _default_client_factory( base_url: str ) -> HttpAskClient:
     return HttpAskClient( base_url, bearer=bearer )
 
 
-if __name__ == "__main__":                    # pragma: no cover - CLI wrapper, exercised by the scheduled :8000 run
+if __name__ == "__main__":                    # pragma: no cover - CLI entry stub, not unit-testable (login logic covered via _default_client_factory)
     result = main()
     print( f"wrote {result[ 'paths' ][ 'report' ]}" )
