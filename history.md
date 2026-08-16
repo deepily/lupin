@@ -1,12 +1,36 @@
 # Lupin Project History
 
-> **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-07-21 to 07-27](history/2026-07-21-to-27-history.md).
+> **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-08-02 to 08-03](history/2026-08-02-to-03-history.md).
 >
-> **Last archived**: 2026-08-04 by Mr. Radio 🦉 (`7802a03f`) — cut at the 19k CRITICAL threshold, 10.5k tokens moved (07-21 through 07-27). Measured 18.9k before, 8.4k after; tonight's entry would have crossed the line.
+> **Last archived**: 2026-08-15 by Cheech 🌿 during the night wrap — three cuts, 18.2k → 13.1k tokens (07-28 to 07-31, and 08-02 to 08-03). Cut at the 17k WARNING threshold, measured not quoted; character accounting balanced on every cut. Still 1.1k above the 8-12k retention target — the next session should trim 08-04 if it grows.
 >
 > ⚠️ **This line records PROVENANCE, not health — do not read it as a status.** It says when the file was last archived, not how big it is now. The previous header asserted *"✅ HEALTHY at ~7.9k tokens (31% of 25k)"*; six days later the file was **21.0k — past the 19k CRITICAL threshold** — and the header still said 31%, because nothing re-derives a stamp. **On 2026-07-27 that stale figure was quoted into a commit message as a health claim in the same command that measured the real number.** Same defect as a calibration stamp standing in for its instrument.
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
+
+### 2026.08.15 - Session 80c17315 (Cheech 🌿, with María 🌸, Rachel 🕊️, Mr. Radio 🦉, sam 🎙️, arnold 🪨) | The night a re-spin came back empty, three times, for three different reasons
+
+**The seat that reported the bug was the bug.** The prior Cheech fired `self_respin` at 20:41 and this one came back with the same session id, board and persona — and no memento. Rick had seen it twice, on this seat and on María's. Everything below came out of that.
+
+**Root cause was not the `/clear`.** The boot path already had the session id, the persona and a derivable filename at the repo root, and never looked. The remedy was to make SessionStart carry the memento itself, not to type a reminder at the seat afterwards.
+
+**Three defects in that fix, each found by a different peer running it — none by reading it:**
+
+| Found by | Defect |
+|---|---|
+| María 🌸 | root resolved from `LUPIN_ROOT`, so every non-lupin seat searched the wrong repo |
+| Rachel 🕊️ | the `io/mementos` slot was never scanned; then a fourth slot under the mirror |
+| Rachel 🕊️ | a record with no amendment produced a 440-byte block under a success banner |
+
+**Commits** (all with the full unit tier green, 14,474 / exit 0): `8ff014e2` memento reaches the boot path · `8b9a10e9` resolve the root from the seat's own cwd · `7a9e5d22` enumerate all four slots · `965e8d41` a stateless memento must not read as success · `04faac08` the DM tutor can no longer attribute a position to someone who never took it · `3bac5ccb` arnold's TTL sweep · `6930c332` crew review docs.
+
+**Still open, and no commit covers it: context is not a turn.** The memento now arrives; nothing wakes a rehydrated seat. It sits at an empty prompt behind ghost placeholder text that reads like queued work and is not. A poke cannot reach a quiet worker, a DM cannot either — **four seats were recovered tonight only by typing into the pane.**
+
+**Instruments that lied, all verified against the pane or the disk instead:** two workers read `idle` for over an hour while stuck behind a `Set up auto mode?` modal (one nearly reaped over it, which would have destroyed a finished review); `dismiss_sessions` reported `timeout_no_memento` for both seats whose records were verified present seconds earlier (row `dffebbd6` — it reads the pointer, not the record).
+
+**Also**: caught a hole in sam's TRUNCATE guard where a query string could impersonate the database name (`…/lupin_db_dev?x=/lupin_db_test` passed), fixed in `b0e52174`; reassigned P0 `92062fe2` to Mr. Radio with its accountable manager, since the handoff doc always addressed the build to him.
+
+**Wrap**: both workers reaped with mementos verified on disk, branch pushed to origin (358 commits, new remote branch), backup synced 6.22G to DATA02.
 
 ### 2026.08.14 - Session c8f94419 (Cheech 🌿, with María 🌸 and Mr. Radio 🦉) | A board handed over at the ceiling, six merges, and three things that looked settled and were not
 
@@ -234,104 +258,4 @@ Rick asked for a status report and a cue sheet for driving Thursday's podcast de
 **Five claims were measured somewhere other than where they had to hold**, and every one read green: a matcher tested in isolation but never called in the live flow; a test subset quoted as a merge receipt; a figure from the wrong run; an auto-submit hazard read off a config field rather than an observed submission; and a prosody loss counted from a metadata list while the markers sat in the text. Three were mine. Each was caught by someone re-deriving the claim from the other end. Two rules taken from it: a receipt names *which run* produced it, and a "probably fine" is answered with a differential.
 
 **Also**: the `:8000` test proxy was found launching against `:7999` (no port argument), auto-answering gates on the shared dev box — fixed with a red-first guard. Speech synthesis strips every prosody marker for *all* languages, so those cues have never been audible; filed, not touched before the demo, on Rick's ruling. Docs, decisions log, and corrections committed across eight commits (`6882c740` … `c11a7a76`).
-
-### 2026.08.03 - Session 93f75e9c (Cheech 🌿) | DM verbosity pilot: a live gate proven, after a worker refused my false green
-
-**Health**: 16.0k tokens at write time (measured, not quoted) — past the 17k WARNING threshold on the next entry; next seat should archive.
-
-Manager seat for María's two-arm DM verbosity pilot (`blind` vs `rejecting` at 150 words, 28 hourly slots, Wed mirroring Tue), inherited mid-flight after a `/clear` with one deliverable outstanding and a hard deadline of Tue 09:00 ET.
-
-1. **The plan I arrived with would have produced a false green, and my tester refused to run it** (commit `2c73cb48`). I intended to pin `dm experiment arm override = rejecting`, bounce, and let the live smoke prove the reject path. Tiffany 💍 stopped it with a receipt at `dm.py:1037`: the gate runs **only** when `assignment_at` returns a slot, and `override_arm` merely **re-labels** a slot that already matched — it cannot create one. Outside the Tue/Wed window there is no slot, so the smoke would have seen an ordinary 201 and I would have read it as a working gate. Replaced with a temporary `rejecting` slot dated **2026-08-03** — outside the window, so nothing it produced could enter the Tue/Wed analysis.
-2. **Live gate proven on the deployed server, 10/10**: over 150 words → **413, not 422** (the client maps 422 to `recipient_unresolved`), no threshold number in the body, `effective_arm=rejecting`, `slot_id` on the row; under → 201 with `delivery_outcome` set. Then the temp slot came out and the mirror was re-verified **from the live policy, not the file**: 28 slots, Wednesday the exact complement of Tuesday across all 14 hours.
-3. **A missing grade that wasn't a lost measurement.** María 🌸 and I independently noticed DMs coming back with no quality block the moment the slot went live. She settled it by reading the corpus directly — 91 rows, grades present (`len_grade`/`directness`/`tone`/`overall`) alongside `effective_arm` and `length_gate`. The suppression is **caller-facing only and deliberate**: showing a sender their grade mid-window is feedback, and feedback is the thing being measured. Two independent observers reaching the same wrong reading is why it got checked instead of assumed.
-4. **"Don't make it deletion-dependent" — María's catch, adopted.** My temp slot was kept out of the analysis only because I intended to delete it. Her ruling: exclude any `slot_id` starting with `TEMP-` in code. Clayton 😎 landed it at `analyze_arms.eligible_rows()`, the single chokepoint feeding co-primaries, secondaries and counts, with two unit tests. *A rule someone must remember is a rule someone will forget.*
-5. **The bounce refused, and the refusal was correct.** `bounce-dev-server.sh` exited 4 on `inflight_agentic_jobs=1` — Rick's podcast job — rather than destroying it. I diagnosed it by running the probe rather than inferring from a hung terminal, and did **not** fall back to `docker restart`, which would have skipped the fleet warning and ack window the script exists to provide. Two clean bounces afterwards, boots #26 and #27.
-6. **Three stale tests fixed, none of them ours** (Rio ⚡, test-only, no production code touched). `podcast/test_cosa_interface` — `present_choices` legitimately forwards `priority=None` and the assertion omitted it. `git_loc_delta/test_git_log_parser` — `_build_command` day-boundary-normalizes `since` (my own `bff47f4e`) and the test asserted the pre-normalization date. `deep_research/test_cosa_interface` — surfaced by the gate itself, bisected by Clayton to `5d5cf224` (another lane, 22:00 tonight) which added the `priority` kwarg plus a new `forwards_priority` test and left the sibling's await-assertion behind. **I reproduced that failure myself before accepting the attribution.**
-7. **Merge gate: the pilot introduces zero new reds.** `pytest src/tests/unit src/cosa/tests/unit --cov=cosa --cov-branch` — **21,532 passed / 3 failed / 25 skipped / 5 xfailed**, both roots. All three reds attributed off the pilot with receipts. Clayton killed an earlier run himself because my temp slot had contaminated its byte-identity check; reporting that green would have been the easier move. **Both roots matter**: a "full suite" naming only `src/tests/unit` misses ~9000 tests, which is how two of those reds stayed invisible.
-8. **Verified independently of every crew report** — I ran the four changed test files myself: 51 passed.
-
-**Crew**: Rachel 🕊️ (`dm.py` lane) · Clayton 😎 (tooling/analysis) · Rio ⚡ (reviewer, then both red-fix rows) · Tiffany 💍 (tester). All four live and identity-verified via `list_spawned_sessions`, never the requested names.
-
-**Successor row minted** `a3666252` (P1) — Tuesday's items 7 and 8 (in-window audit of both arms, 23:00 counts) do not die with the tester's seat; the row carries what is already proven so the next seat doesn't re-litigate it.
-
-**Commits**: `2c73cb48` (7 files — Rio's three fixes, Clayton's `TEMP-` exclusion + tests, Tiffany's smoke + integration tiers). **Not pushed** — Rick's call. `README.md`, the lane2 rehearsal doc and `src/scripts/loc-analysis/` were left out; they predate this crew by hours and belong to another seat.
-
-**Files**: src/scripts/dm-experiment/analyze_arms.py, src/tests/unit/{test_dm_experiment_analyze_arms,test_dm_experiment_integration}.py, src/tests/smoke/test_dm_experiment_live_smoke.py, src/cosa/tests/unit/agents/{deep_research,podcast_generator}/test_cosa_interface.py, src/cosa/tests/unit/repo/git_loc_delta/test_git_log_parser.py
-
-### 2026.08.02 - Session b07d59ac (Cheech 🌿) | Embedding regeneration built; a norm can't identify a model
-
-**Health**: 14.5k tokens at close (re-measured after this entry grew; the 13.1k I wrote mid-session was true when written and stale by the end — which is the defect this file's own header names).
-
-1. **Regeneration pipeline for every stored embedding** (row `5e848dd8`, commit `13459df0`). The model changed 2026-05-16 with no data migration, leaving vectors from two producers that share a dimension count and nothing else — cosine between them on identical text is ~0.008. Four subcommands, each asked for by name: `plan` (read-only) / `fill` (shadow columns only) / `verify` / `swap` (the one destructive step, refuses unless verify is clean). 83 unit tests, 100% lines + branches. **Zero live rows written** — every write path is still gated.
-2. **My first cut selected by vector norm and Rick overruled it.** I regenerated only the 79,318 rows reading norm 1.0, calling the other 209,468 "already correct." A norm says whether a vector was **normalized**, not which model produced it — it separates OpenAI from local only because those two differ in normalization, and it is blind to any change *inside* the local era. Selection is now by source text: 578,364 calls, whole table. `verify`'s denominator widened to match, so a partial run can no longer report clean.
-3. **Read-only survey answered "how do I test this without touching the table"** — 288,932 rows, zero missing vectors, zero rows with a vector but no text, crisp 05-16 cutover, no row mixing producers. Plus a fixture that must NOT be regenerated: `prediction_decisions.clamp-001` ("non-unit vector", norm exactly 3.0) asserts the out-of-range clamp.
-4. **`--today` on the LoC delta tool reported ZERO for today's commits — found, fixed, closed** (row `d0b3cd84`, commit `bff47f4e`). Bare `--since=<today>` returns 0 from git; the same date with `00:00` returns 35. It is the default mode and the one session-end calls, so every seat handed the roll-up a silent zero that reads as an empty day. Fixed at the shared seam **both** the walk and the coverage guard import — the guard mirrors the walk's flags deliberately, so both got the same wrong predicate and *agreed*; a guard that mirrors the flags cannot audit the flags. 25 tests, 100%, red-proofed; `--today` now agrees with raw git at 37. María reproduced it independently at fleet scope: **0 active repos on a 43-commit day**.
-5. **Batch timing found a CUDA OOM that would have killed the run** (commits `0310aa05`, `d7e02562`). Embedding is cheap — 0.41s per 256, ~16 min for all 578,364 — but 8 of the longest texts together **500 the model server**: GPU 0 had 23 MiB free with a 16.7 GiB vLLM sharing it. A fixed batch of 256 works on the short head and dies on the tail, mid-run, with a checkpoint full of successes. Now batched by total size with split-on-refusal retry. Then Rick pointed out we can unload the other models first, which invalidated the constant I'd just committed — so the budget **grows on success and halves on refusal** and finds the real ceiling on whatever card it gets. I declined to scale the constant by a chars-per-MiB rate: one calibrated point can't produce one, and inventing it would repeat the norm/provenance mistake. 119 tests, 100% lines + branches.
-6. **The Thursday-demo E2E fails, and my own afternoon fix is incomplete** (row `68198c9f`). Routing **passes** — correctly picks the podcast path. The chain then dies at a confirmation ask fired *before* the expeditor: push 02:06:21.34 → "Job cancelled" 02:06:28.73, **7 seconds against a 30-second budget**. It didn't time out; delivery failed (`user … is not connected`) and undeliverable was reported as user-cancelled. Worse: commit `b326d015` from this afternoon was meant to end exactly that confusion, and doesn't reach the seam — `expedite()` still returns bare `None` on every path, so the recorded reason is printed to a console nobody reads and `todo_fifo_queue.py:1170` emits the same generic line. **I committed that believing it fixed the user-facing message; the message is unchanged.**
-7. **Container OAuth row re-parked, not closed** (`c7c60896`). Its chase was sized to a host refresh that Design E made irrelevant — each container now holds its own grant. Correct criterion is each container's own expiry (02:10:31 / 02:16:31 EDT); chase moved to 02:30.
-8. **Corrected my own board mis-set.** I marked `68198c9f` blocked-on-Rick from my memento's one-line summary; the row body says it was mine to run. Re-derive from the artifact, not from a summary of it — including my own.
-
-**Peer catch**: María 🌸 flagged my test file sitting under `src/cosa/tests/`, which no gate-invocable runner collects. Moved to `src/tests/unit/` rather than allowlisted — it is a plain no-DB unit test and belongs where the gate runs it.
-
-**Also fixed**: `test_presentation_generator_job` still asserted `claude-opus-4-6` after `976498af` moved the config to Opus 5; swept the other Opus assertions, they are hardcoded fixtures and fine.
-
-**Commits**: `13459df0` (regeneration pipeline) · `eb5e0416` (tracking docs) · `bff47f4e` (LoC `--today` fix) · `0310aa05` (batch by size) · `d7e02562` (adaptive budget). **Not pushed** — Rick's word at session end was no push, no backup.
-
-**Files**: src/cosa/rest/db/embedding_regeneration.py, src/cosa/repo/git_loc_delta/{date_bounds,git_log_parser,coverage_guard}.py, src/tests/unit/{test_embedding_regeneration,test_git_loc_delta_date_bounds,test_presentation_generator_job}.py, src/scripts/embedding_regen_probe.py, src/rnd/v0.1.9/2026.08.02-embedding-regeneration-from-logged-text.md
-
-### 2026.08.02 - Session 4829ab05 (Mr. Radio 🦉) | Three store/tooling rows, gated not relayed
-
-**Health**: 9.5k tokens at write time (measured, not quoted).
-
-1. **A gate verdict written after a worker self-closes now has a durable home** (row `3c569786`, commit `310aa290`). Rick ruled amend-on-closed-rows; the block is stamped a post-terminal addendum naming the status at write, the event is `amended_post_terminal`, and the close is never reopened.
-2. **A bounce now names whose saved files it will deploy** (row `7de5a09f`, commit `0dc2b281`). Two channels, because one cannot reach both audiences: a human at a terminal gets a y/N; a non-TTY caller is named the files and **proceeds**, with the list riding the warning broadcast so the owning seat can object during the ack window.
-3. **I failed that row's first pass** — the guard aborted with no TTY, which is every Claude session, on a tree that is essentially always dirty. Proved it by running it (`exit 3`, no restart) rather than reasoning about it; the `--force` escape would also have disarmed the pre-existing unwarned-fleet pause.
-4. **A test fixture emptied a process-global registry and never put it back** (row `3b5be159`, commit `5a9c9ebf`). `test_cache_registry.py` cleared `cache_registry._REGISTRY` in teardown, wiping `judge.py`'s import-time registration for the rest of the process; fixed at the polluter, not the victim.
-5. **"A peer is churning that file" was wrong and worth catching.** The file's mtime was stable and it was already committed — the red was an ordering dependency, not noise. Taken at face value it would have been waved through and the fixture would still be wiping registries.
-
-**Crew**: Rachel 💐 built all three; I gated each and re-ran the full suite myself both sides — 12262 passed/2 failed → **12264 passed/0 failed**. Memento `io/mementos/rachel-94da8f37.md`, reaped at session end.
-
-**Files**: src/cosa/rest/db/repositories/task_repository.py, src/cosa/rest/routers/tasks.py, src/lupin_mcp/cosa_voice_mcp.py, src/lupin_mcp/task_store_tools.py, src/scripts/bounce-dev-server.sh, src/scripts/bounce_dev_warn.py, src/cosa/rest/managed_bounce_broadcast.py, src/tests/unit/ (5 files), src/tests/integration/test_task_store_integration.py
-
-### 2026.07.31 - Session 7846bfcb (Mr. Radio 🦉) | Mistral Small 24B stood up on GPU1, config cutover from Phi-4
-
-**Health**: 11.8k tokens at write time (measured, not quoted).
-
-1. **Disk cleanup freed ~1.05TB on `/mnt/DATA01`** (95%→35% used), gated on a verified DATA02 backup of the live `svllmr` checkpoint before any deletion ran.
-2. **vLLM 0.26.0 (latest) is CUDA-13-only** — its compiled extension needs `libcudart.so.13`, which driver 535 cannot run. Bisected to `vllm==0.16.0`+`torch+cu129` as the newest version that actually works on this hardware.
-3. **`ConfidentialMind/Mistral-Small-3.2-24B-Instruct-2506-GPTQ-AutoRound-TextOnly` is live** on GPU1:3001 — dedicated venv at `$DEEPILY_PROJECTS_DIR/vllm-mistral-small-24b`, verified with a real inference call (0.32s, ~25 tok/s).
-4. **Config cutover**: all 29 references to `kaitchup/phi_4_14b` renamed to a new `confidentialmind/mistral_small_24b` spec key across `lupin-app.ini`/`lupin-app-splainer.ini` — the old spec is preserved as a comment, not deleted. New `svllmm` alias added next to `svllmc`.
-5. **Gister-path testing found two real gaps this cutover closes**: a model-name mismatch (404 against the old hardcoded name) and an inert `stop` token list (`</s>`/`</stop>` never emitted by this checkpoint — confirmed via a forced-length test).
-
-#### Checkpoint | 2026.07.31 15:49 | Mistral Small 24B config cutover
-
-**Files**: src/conf/lupin-app.ini, src/conf/lupin-app-splainer.ini, src/rnd/README.md (+2 new R&D docs)
-**Commit**: `5499fdbf`
-
-6. **DM Quality Judge live A/B run + 3-bug fix.** Flipped `dm quality judgment enabled` on for a live treatment window; Maria (peer session) diagnosed 3 real judge bugs from the run (self-contradicting XML-declaration instruction, no fallback for unclosed child tags, no garbage-output pre-check) and handed them off. Fixed all 3, verified against the unit suite (95/96 pass — the 1 fail is the toggle-state test, expected since the toggle is standing ON per Rick's instruction).
-7. **Caught and reverted a regression from Maria's own suggested fix.** Her proposed BUG-1 fix (strip the `<?xml?>` declaration in the shared `prompt_template_processor.py`) demonstrably broke live good-vs-bad discrimination — verified 3/3 reproducible via `git stash` isolation. Root-caused and fixed differently: deleted just the contradicting instruction line from `dm-quality-judge.txt` instead, leaving the injected example's declaration untouched (the parser already strips it regardless). Discrimination test passes 2/2 post-fix.
-8. **BUG 3's guard was also over-broad as suggested** — a "no `<` present" check would have broken the pre-existing curly-brace degenerate-mode recovery (`{ directness_meh } { tone _ good }` has no angle brackets and IS legitimately recoverable). Narrowed to the repeated-single-character signature only.
-
-#### Checkpoint | 2026.08.01 02:15 | DM Quality Judge 3-bug fix (Maria's diagnosis)
-
-**Files**: src/cosa/agents/dm_quality_judge/judge.py, src/conf/prompts/dm-quality-judge.txt, src/conf/lupin-app.ini
-**Commit**: `43cb37e7`
-
-### 2026.07.28 - Session 951a4459 (Mr. Radio 🦉) | One key file, two authorities — a 38-hour outage closed, and dev was the only host where the defect was invisible
-
-**Health**: 10.7k tokens at write time (measured, not quoted).
-
-1. **`574fd1dc` P1 CLOSED — `/embeddings/generate` had been 100% 401 for ~38h.** Not drift, not the rotation. One key file served two consumers whose authorities are incompatible: Lupin's own API bcrypt-checks against a **per-deployment `api_keys` table** (correct value differs per host), while the model server bcrypt-hashes **one mounted secret version at boot** (identical everywhere). A file holds one string. **On dev the two coincide by accident** — dev's key had been seeded into Secret Manager — **which is exactly why no test caught it: the defect is invisible on the machine the tests run on.** The VM's key matched *neither* secret version (`ccfc494d8084` vs `26e3c096d4df`/`09baaa60e463`) because it was minted into the VM's own database, correct for the *other* consumer. ⇒ The 07-26 rotation didn't break the VM; **it removed the coincidence that had been making a broken design look healthy.** Both branches of the row's decision table assumed the VM held one of the two versions — neither could ever fire. Commit `d3d2f22f`, doc `src/rnd/v0.1.9/2026.07.28-model-server-api-key-decoupling.md`.
-
-2. **Full deploy, verified end to end.** Secret `lupin-model-server-api` v1 seeded (parity `dbda9daf8dbf`) · `terraform apply` 1 add/1 change/0 destroy, mount moved to its own secret and **pinned to version 1** (closing `6cc52525`) · key to the VM · dev model-server recreated · `push-bundle --checkout` · VM `lupin-rest` recreated with `--no-deps`. **Close measured from inside the VM's container: new key HTTP 200 (768 dims), OLD key HTTP 401** — the negative control is what makes it a close rather than a hope.
-
-3. **`/transcribe` was failing identically and unreported.** `speech_to_text_provider` took the same key to the same service; only embeddings logged loudly. **Consumer B was two call sites, found by grepping the key name, not by any alarm.**
-
-4. **A near-miss the plan would have caused.** The plan said migrate `prediction_engine` "or neither" — it POSTs to `localhost/api/embeddings/generate`, **Lupin's own server**, per-database key. The instruction came from a docstring calling it "the same pattern": **the reading IDIOM is shared, the AUTHORITY is not.** Migrating it would have 401'd it on every host. Pinned by `test_prediction_engine_still_uses_the_notifications_key`.
-
-5. **Rick's rename ruling, and why it was a diagnosis.** `docker-compose.yml:90` said the model server *"reuses the existing"* key — **that reads as thrift only because the name doesn't say who the key is for.** Eight of nine credentials in `src/conf/keys/` are named by purpose alone; the outlier carried API + caller + environment, and `-dev` was **false** (the VM held a file so named). Phase 2 (renaming consumer A to `notification-api`) is deliberately **deferred** — its name is *generated*, lives on every host and in Secret Manager, and `outbound_api_key.py:30` holds it as a module constant gating fleet MCP auth.
-
-6. **Two errors of mine, both caught by verification, both recorded.** I created the secret with the seeder *before* Terraform declared it — apply would have 409'd (fixed by `terraform import`; the module owns containers, the script owns versions). And I **briefly broke dev embeddings** by moving the client before the server — the exact ordering the document I had just written warns against, committed on the box where the warning was written.
-
-7. **Rows minted**: `b93841ca` **P1** (a `--reload` wipes `ws_manager`, so blocking asks 503 as "user offline" while the user is present; **no idempotency on blocking asks**, which is why Rick was re-asked; notifications stranded at `created`) · `16788079` (preflight D8 asserts key *presence*, not installation — 8 empty arrays pass green) · `8a416a96` (preflight E greps **one literal** Vertex override var) · `7266b98f` (two VM env vars absent from `cloud-gpu.env`; **survived a force-recreate**, which is what proves them pre-existing).
 

@@ -1,5 +1,52 @@
 # TODO
 
+## 📌 UNFILED 2026-08-15 NIGHT (Cheech 🌿) — four findings held out of the store on Rick's no-new-tasks order
+
+Rick's 23:0x directive was **"no new bugs allowed"** while driving the board down, so none of
+these became rows. They are real, they are reproduced, and they need rows the moment the
+directive lifts. Recorded here so the order costs us nothing.
+
+1. **CONTEXT IS NOT A TURN — the biggest one.** The memento now reaches a rehydrated seat
+   (`8ff014e2`, `8b9a10e9`, `7a9e5d22`, `965e8d41`), but **nothing makes the seat act on it**.
+   It sits at an empty prompt behind **ghost placeholder text that reads like queued work and
+   is not** — proven by typing a string that replaced the supposed "pending" line.
+   - a **poke** cannot reach a quiet worker (Mr. Radio's `98350737`: 52 gate evaluations, 0 pokes)
+   - a **DM** cannot either — arnold sat 72 minutes through one
+   - **typing into the pane CAN**; plain `Enter` submits once the box has content
+   - **four seats recovered this way tonight**: arnold, sam, Rachel, and Rachel's crew
+   ⇒ Wanted: something that hands a rehydrated seat its first turn. Until then, a re-spin is a
+   two-person operation and the second person is a human.
+
+2. **`list-pending` does not exist.** Both `CLAUDE.md` and `CLAUDE.local.md` instruct sessions
+   to run it *first* before scheduling on `:8000`; `src/cosa/rest/routers/test_suite.py` has
+   exactly one route, the POST submit. The real pre-check is
+   `GET /api/get-queue/{todo,run,done}` with a JWT. **Two traps for the next seat**: the login
+   route is `/auth/login`, NOT `/api/auth/login`, and the token is nested at
+   `tokens.access_token`, not top-level. Creds: `~/.lupin/config` `[lupin]`.
+   ⇒ The documentation is wrong, not the capability. Fix the docs.
+
+3. **The self-respin observer has no periodic caller.** arnold's TTL sweep (`3bac5ccb`) is
+   correct and 100% covered, and **armed but not firing** — nothing calls
+   `observe_fleet_self_respin` on a schedule. Three real markers were created tonight (mine,
+   Rachel's, Mr. Radio's) and none will ever be swept. He flagged this himself rather than
+   shipping a green row over it.
+
+4. **Tiffany-class mementos.** A record with **no amendment block** yields a near-blank return:
+   the seat gets a pointer and no state. `965e8d41` now labels that case loudly instead of
+   showing it under a success banner, but the writer-side habit is the actual fix — Rachel has
+   told both her seats to write real mementos.
+
+### Two instruments that lied tonight — distrust these specifically
+
+- **`dismiss_sessions` reported `timeout_no_memento` for BOTH workers** whose records I had
+  verified on disk seconds earlier. Known: row `dffebbd6` — it reads the *pointer* at
+  `io/mementos/<persona>.md`, not the *record* it names. **Verify the record yourself; never
+  take the verb's verdict.**
+- **`context-pressure` said `idle` for two seats that were stuck behind a
+  `Set up auto mode for your environment?` modal** for over an hour. I nearly reaped arnold
+  over it, which would have destroyed a finished review's delivery.
+  **Read the pane before believing the instrument.**
+
 ## ☀️ FIRST THING TOMORROW — 2026-08-15, ~10–11am, Rick + Mr. Radio 🦉, and NOTHING ELSE BEFORE IT
 
 > **Re-dated 08-14 → 08-15 by Cheech 🌿 on 2026-08-14.** It did not run on the 14th: Rick was AFK all day
