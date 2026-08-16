@@ -473,6 +473,28 @@ class TestCardDriftPredicateControl( unittest.TestCase ):
         )
 
 
+# -- Assertion 1d — the card surface (§7): the POSITIVE real-data guard ---------
+class TestCardSurfaceDriftGuard( unittest.TestCase ):
+    """§7 card surface — the live guard on top of Tiberius's facility. PRODUCT_NAMES
+    (todo_fifo_queue.py:1026) is the confirmation-card alternatives
+    _confirm_agentic_routing:1058 offers as 'Switch to this instead' — a FIFTH
+    registration list that was instrumented but not guarded until this. Routed through
+    the SHARED `_card_drift` predicate (the same one TestCardDriftPredicateControl
+    drives red on both arms), so this guard and its control can never diverge:
+      - PHANTOM: a card entry that is not an owned agentic command.
+      - DEAD-CARD: an owned agentic command off the card that does NOT waive 'card'.
+    Currently clean: owned − carded = {START}, and START waives 'card'. María's framing:
+    one registry is the source of truth; a card list that silently drops an owned
+    command is the exact defect this consolidation removes."""
+
+    def test_1d_card_surface_agrees_with_the_owned_agentic_set( self ):
+        problems = _card_drift(
+            _card_commands(), set( AGENTIC_COMMANDS ), exempt=_exempt_on( "card" ) )
+        self.assertEqual(
+            problems, [],
+            "card<->registry drift (§7):\n  " + "\n  ".join( problems ) )
+
+
 # -- Falsifiability — each assertion above can go red (§6) ----------------------
 class TestFalsifiability( unittest.TestCase ):
     """Synthetic broken inputs prove each predicate FIRES. These PASS."""
