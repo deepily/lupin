@@ -134,6 +134,40 @@ class PodcastGenerationError( Exception ):
     pass
 
 
+def _require_revision_feedback( feedback, script_label="script" ):
+    """
+    Guard the explicit-"Revise script" path against a silent drop. Row 936c7ef5.
+
+    Requires:
+        - feedback is the value voice_io.get_input returned AFTER the user
+          actively selected "Revise script"
+        - script_label is a short human string naming which script (e.g.
+          "script", "French script")
+
+    Ensures:
+        - returns feedback unchanged when it is non-empty
+        - raises PodcastGenerationError when feedback is falsy (None on
+          timeout/silence, or empty) so the job DEAD-LETTERS with a reason that
+          names THIS silence — revise-then-silence, where a human asked for a
+          change and then went quiet. It is distinct from the review gate's own
+          fail-open silence (nobody there → auto-approve), which resolves before
+          this branch and never reaches here. Honoring the explicit change
+          request as a visible failure beats silently auto-approving the
+          un-revised draft.
+
+    Raises:
+        - PodcastGenerationError if feedback is None or empty
+    """
+    if not feedback:
+        raise PodcastGenerationError(
+            f"Revision requested for the {script_label} but no feedback was provided "
+            "(revise-then-silence). The explicit change request cannot be honored "
+            "unattended, so the job is dead-lettered rather than silently "
+            "auto-approving the un-revised draft."
+        )
+    return feedback
+
+
 class PodcastOrchestratorAgent:
     """
     Top-level orchestrator for podcast generation - single job, multi-phase, async.
@@ -500,6 +534,9 @@ class PodcastOrchestratorAgent:
                             "What changes would you like to the script?",
                             timeout = self.config.feedback_timeout_seconds
                         )
+                        # Row 936c7ef5: an explicit Revise then silence must not
+                        # be silently dropped into an auto-approve of the un-revised draft.
+                        feedback = _require_revision_feedback( feedback, "script" )
                     else:
                         # "Other" - custom text IS the feedback
                         feedback = review_choice
@@ -638,6 +675,9 @@ class PodcastOrchestratorAgent:
                                 f"What changes would you like to the {lang_name} script?",
                                 timeout = self.config.feedback_timeout_seconds
                             )
+                            # Row 936c7ef5: explicit Revise then silence → dead-letter,
+                            # not a silent drop back into the fail-open auto-approve.
+                            feedback = _require_revision_feedback( feedback, f"{lang_name} script" )
                         else:
                             feedback = review_choice
 
@@ -955,6 +995,9 @@ class PodcastOrchestratorAgent:
                             "What changes would you like to the script?",
                             timeout = self.config.feedback_timeout_seconds
                         )
+                        # Row 936c7ef5: an explicit Revise then silence must not
+                        # be silently dropped into an auto-approve of the un-revised draft.
+                        feedback = _require_revision_feedback( feedback, "script" )
                     else:
                         # "Other" - custom text IS the feedback
                         feedback = review_choice

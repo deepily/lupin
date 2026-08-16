@@ -28,7 +28,11 @@ from unittest.mock import MagicMock, AsyncMock, patch
 import pytest
 
 from cosa.agents.podcast_generator import orchestrator as orch_mod
-from cosa.agents.podcast_generator.orchestrator import PodcastOrchestratorAgent, PodcastGenerationError
+from cosa.agents.podcast_generator.orchestrator import (
+    PodcastOrchestratorAgent,
+    PodcastGenerationError,
+    _require_revision_feedback,
+)
 from cosa.agents.podcast_generator.state import (
     OrchestratorState,
     PodcastScript,
@@ -983,21 +987,20 @@ class TestDoAllAsync:
         _silence_voice_io[ "choices" ].assert_not_called()   # never reached the gate
         assert agent.state == OrchestratorState.FAILED
 
-    def test_revise_empty_then_custom_then_approve( self, _silence_voice_io ):
+    def test_revise_custom_other_then_approve( self, _silence_voice_io ):
         agent = _agent( target_languages=[ "en" ] )
         _wire_pipeline( agent )
-        # 1) Revise w/ empty feedback (loops), 2) "Other" custom text feedback, 3) Approve
+        # "Other" custom text feedback, then Approve. (Empty-Revise no longer loops —
+        # it dead-letters; see test_english_revise_then_silence_deadletters.)
         _silence_voice_io[ "choices" ].side_effect = [
-            { "answers": { "Script Review": "Revise script" } },
             { "answers": { "Script Review": "Make it shorter" } },   # custom "Other"
             { "answers": { "Script Review": "Approve script" } },
         ]
-        _silence_voice_io[ "input" ].return_value = ""   # empty feedback first revise
         with patch( "cosa.utils.util.get_project_root", return_value="/proj" ), \
              patch( "os.path.exists", return_value=False ):
             result = _run( agent.do_all_async() )
         assert agent.state == OrchestratorState.COMPLETED
-        assert agent._podcast_state[ "revision_count" ] == 1   # only the custom-text revise counted
+        assert agent._podcast_state[ "revision_count" ] == 1   # the custom-text revise counted
 
     def test_revise_with_feedback_then_approve( self, _silence_voice_io ):
         agent = _agent( target_languages=[ "en" ] )
@@ -1267,9 +1270,10 @@ class TestDoAllAsync:
              patch( "os.path.exists", return_value=False ):
             assert _run( agent.do_all_async() ) is not None
 
-    def test_translation_custom_feedback_and_empty_and_nonio_link( self, _silence_voice_io ):
-        # covers translated "Other" custom feedback (542), empty-feedback loop (544->496),
-        # and the non-io translated link else branch (492)
+    def test_translation_custom_feedback_and_nonio_link( self, _silence_voice_io ):
+        # covers translated "Other" custom feedback (feedback=review_choice) and the
+        # non-io translated link else branch. (The old empty-Revise "loops" arm is
+        # gone: an explicit Revise then silence now dead-letters — row 936c7ef5.)
         agent = _agent( target_languages=[ "en", "es-MX" ] )
         _wire_pipeline( agent )
         async def save( s, is_revision=False, language="en" ):
@@ -1277,19 +1281,64 @@ class TestDoAllAsync:
         agent._save_script_async = AsyncMock( side_effect=save )
         _silence_voice_io[ "choices" ].side_effect = [
             { "answers": { "Script Review": "Approve script" } },
-            { "answers": { "Mexican Spanish Review": "Revise script" } },     # empty feedback → loops
             { "answers": { "Mexican Spanish Review": "Make it warmer" } },    # custom "Other"
             { "answers": { "Mexican Spanish Review": "Approve script" } },
         ]
-        _silence_voice_io[ "input" ].return_value = ""   # empty for the first revise
         with patch( "cosa.utils.util.get_project_root", return_value="/proj" ), \
              patch( "os.path.exists", return_value=False ):
             assert _run( agent.do_all_async() ) is not None
+
+    def test_translated_revise_then_silence_deadletters( self, _silence_voice_io ):
+        # Row 936c7ef5 (site 680): explicit Revise on the translated script + silence
+        # → PodcastGenerationError, NOT a silent drop back into fail-open auto-approve.
+        agent = _agent( target_languages=[ "en", "es-MX" ] )
+        _wire_pipeline( agent )
+        _silence_voice_io[ "choices" ].side_effect = [
+            { "answers": { "Script Review": "Approve script" } },
+            { "answers": { "Mexican Spanish Review": "Revise script" } },
+        ]
+        _silence_voice_io[ "input" ].return_value = None   # human asked to revise, then went silent
+        with patch( "cosa.utils.util.get_project_root", return_value="/proj" ), \
+             patch( "os.path.exists", return_value=False ):
+            with pytest.raises( PodcastGenerationError, match="revise-then-silence" ):
+                _run( agent.do_all_async() )
+        assert agent.state == OrchestratorState.FAILED
+
+    def test_english_revise_then_silence_deadletters( self, _silence_voice_io ):
+        # Row 936c7ef5 (site 539): explicit Revise on the English script + silence
+        # → PodcastGenerationError. This is the ONLY path here; the unattended
+        # nobody-there case resolves at the review gate (auto-approve) and never
+        # reaches the Revise branch, so this does not regress unattended survival.
+        agent = _agent( target_languages=[ "en" ] )
+        _wire_pipeline( agent )
+        _silence_voice_io[ "choices" ].return_value = { "answers": { "Script Review": "Revise script" } }
+        _silence_voice_io[ "input" ].return_value = None
+        with patch( "cosa.utils.util.get_project_root", return_value="/proj" ), \
+             patch( "os.path.exists", return_value=False ):
+            with pytest.raises( PodcastGenerationError, match="revise-then-silence" ):
+                _run( agent.do_all_async() )
+        assert agent.state == OrchestratorState.FAILED
 
 
 # ===========================================================================
 # Helper debug=False branch fillers
 # ===========================================================================
+class TestRequireRevisionFeedback:
+    """Row 936c7ef5: the revise-then-silence guard, both branches."""
+
+    def test_returns_nonempty_feedback_unchanged( self ):
+        assert _require_revision_feedback( "make it warmer", "script" ) == "make it warmer"
+
+    @pytest.mark.parametrize( "empty", [ None, "" ] )
+    def test_raises_on_silence_or_empty( self, empty ):
+        with pytest.raises( PodcastGenerationError, match="revise-then-silence" ):
+            _require_revision_feedback( empty, "French script" )
+
+    def test_reason_names_the_script_label( self ):
+        with pytest.raises( PodcastGenerationError, match="French script" ):
+            _require_revision_feedback( None, "French script" )
+
+
 class TestHelperDebugFalseBranches:
     def test_analyze_refuses_with_debug_off( self, capsys ):
         """
@@ -1392,18 +1441,41 @@ class TestDoReviewOnlyAsync:
         assert agent._podcast_state[ "revision_count" ] == 1
         agent._revise_script_async.assert_awaited()
 
-    def test_revise_empty_then_custom_then_approve_nonio_link( self, _silence_voice_io ):
+    def test_revise_custom_other_then_approve_nonio_link( self, _silence_voice_io ):
+        # "Other" custom feedback (feedback=review_choice) + non-io link + revision_count.
+        # (The old empty-Revise "loops" step is gone — see the dead-letter test below.)
         agent = _review_agent( original_path="/tmp/s.md", draft_path="/tmp/s.md" )
         agent._save_script_async = AsyncMock( side_effect=lambda s, is_revision=False, language="en": "/tmp/s.md" )
         _silence_voice_io[ "choices" ].side_effect = [
-            { "answers": { "Script Review": "Revise script" } },   # empty feedback → loops
             { "answers": { "Script Review": "Trim the middle" } }, # custom "Other"
             { "answers": { "Script Review": "Approve script" } },
         ]
-        _silence_voice_io[ "input" ].return_value = ""
         with patch( "cosa.utils.util.get_project_root", return_value="/proj" ):
             assert _run( agent.do_review_only_async() ) is not None
         assert agent._podcast_state[ "revision_count" ] == 1
+
+    def test_unrecognized_choice_skips_and_loops( self, _silence_voice_io ):
+        # An unrecognized/empty gate answer falls to else → feedback="" → the
+        # `if feedback:` FALSE arm (no revision) → loop re-presents → approve.
+        agent = _review_agent()
+        _silence_voice_io[ "choices" ].side_effect = [
+            { "answers": { "Script Review": "" } },                # unknown → skip, loop
+            { "answers": { "Script Review": "Approve script" } },
+        ]
+        with patch( "cosa.utils.util.get_project_root", return_value="/proj" ):
+            assert _run( agent.do_review_only_async() ) is not None
+        assert agent._podcast_state[ "revision_count" ] == 0
+
+    def test_review_only_revise_then_silence_deadletters( self, _silence_voice_io ):
+        # Row 936c7ef5 (site 1000): explicit Revise + silence → dead-letter, not a
+        # silent auto-approve of the un-revised draft.
+        agent = _review_agent()
+        _silence_voice_io[ "choices" ].return_value = { "answers": { "Script Review": "Revise script" } }
+        _silence_voice_io[ "input" ].return_value = None
+        with patch( "cosa.utils.util.get_project_root", return_value="/proj" ):
+            with pytest.raises( PodcastGenerationError, match="revise-then-silence" ):
+                _run( agent.do_review_only_async() )
+        assert agent.state == OrchestratorState.FAILED
 
     def test_exception_propagates_failed( self, _silence_voice_io ):
         agent = _review_agent()
