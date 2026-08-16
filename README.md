@@ -278,6 +278,8 @@ claude mcp add cosa-voice -- python ${LUPIN_ROOT}/src/lupin_mcp/cosa_voice_mcp.p
 - [The Worker-Poke Flag Is On and Cannot Fire](src/rnd/v0.2.0/2026.08.15-worker-poke-flag-cannot-fire.md) — why enabling worker pokes changed nothing: `stuck` means repeated cap-reached, and the staleness tier is manager-only
 - [v1 Baseline Standalone Server Design](src/rnd/v0.2.0/2026.08.15-v1-baseline-standalone-server-design.md) — measure pinned sha `b0735467` on its own server + own DB, not a `:8000` job that measures today's main tree (row d212f54b)
 - [Cost Model: Bounded CC vs Firewalled SDK](src/docs/cost-model-bounded-cc-vs-firewalled-sdk.md) — which LLM path an agent lands on, and why
+- [Cascade Review: v2 as the Brain in the Todo Queue](src/rnd/v0.2.0/2026.08.15-cascade-review-v2-brain-in-todo-queue.md) — 19 findings against the v2-brain plan; the design held, most of the receipts did not. Includes the `needs_input` path that was dead-ended twice (since fixed) and a five-site routing inventory the plan counted as four
+- [Cascade §4 Findings](src/rnd/v0.2.0/2026.08.15-cascade-section4-findings.md) — Krishna's line-by-line trace of v1's argument interview against v2's `needs_input`
 
 ### Agentic jobs, recovery & test scheduling
 
