@@ -310,10 +310,12 @@ def _validate_commit_reachable( sha: str, scope_roots: Optional[dict] ) -> list:
     any repo the store serves is a sha a human can go read.
     """
     roots     = scope_roots if scope_roots is not None else _get_default_scope_roots()
-    searched  = 0
+    searched  = [ ]
+    unsearched = [ ]
 
     for scope, root in sorted( roots.items() ):
         if not root or not os.path.isdir( os.path.join( root, ".git" ) ):
+            unsearched.append( scope )
             continue
         try:
             proc = subprocess.run(
@@ -323,27 +325,38 @@ def _validate_commit_reachable( sha: str, scope_roots: Optional[dict] ) -> list:
                 timeout        = 15,
             )
         except ( OSError, subprocess.SubprocessError ):
+            unsearched.append( scope )
             continue
 
-        searched += 1
+        searched.append( scope )
         # A non-zero exit means the object is unknown to THIS repo — not fatal,
         # another scope may still have it. Empty stdout on a zero exit means the
         # object exists but sits on no branch: the orphan case.
         if proc.returncode == 0 and proc.stdout.strip():
             return [ ]
 
-    if searched == 0:
+    if not searched:
         return [
             f"receipt commit '{sha}' could NOT be verified — no registered scope is a usable "
             f"git work tree (checked: {sorted( roots ) or 'none'}). The store refuses a receipt "
             f"it cannot check rather than accepting it quietly (row 9bfb4b73)."
         ]
 
+    # WORDING IS LOAD-BEARING (María, 2026-08-15). This refusal must NOT lead with
+    # "fabricated". A commit that is perfectly real and on a branch reads exactly
+    # like this one when its repo is simply not mounted on the server — and being
+    # told your own sha looks fabricated sends an honest person hunting a bug that
+    # does not exist. The one cause they will never guess is the unmounted repo, so
+    # the message names the repos actually searched and the ones that were not. The
+    # refusal is right either way; the accusation is not.
+    not_searched = f" NOT searched (no git tree on this server): {unsearched}." if unsearched else ""
     return [
-        f"receipt commit '{sha}' is not reachable from any branch in the {searched} repo(s) "
-        f"the store can check. It may be fabricated, or orphaned by a reset or rebase — an "
-        f"orphaned object resolves today and is gone at the next gc, leaving a receipt that "
-        f"points at nothing. ANY branch counts, not just main (row 9bfb4b73)."
+        f"receipt commit '{sha}' could not be found on any branch of the repos this server "
+        f"can search: {searched}.{not_searched} If your repo is in that not-searched list, the "
+        f"sha is probably fine and simply unreachable from here — cite a ts- test_run instead, "
+        f"or a commit from a searched repo, and put this sha in the reason. If your repo IS "
+        f"searched, the object is not on any branch: an orphan from a reset or rebase resolves "
+        f"today and is gone at the next gc. ANY branch counts, not just main (row 9bfb4b73)."
     ]
 
 

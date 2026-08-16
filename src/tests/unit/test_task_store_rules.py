@@ -1427,7 +1427,7 @@ class TestDoneReceiptCommitMustBeReachable:
             { "commit": fabricated }, scope_roots=scope_roots, require_checkable=True
         )
         assert errors, f"fabricated sha {fabricated!r} was ACCEPTED"
-        assert "not reachable from any branch" in errors[ 0 ]
+        assert "could not be found on any branch" in errors[ 0 ]
 
     def test_orphaned_but_resolvable_sha_is_refused( self, scope_roots, orphaned_sha ):
         """
@@ -1442,7 +1442,7 @@ class TestDoneReceiptCommitMustBeReachable:
             { "commit": orphaned_sha }, scope_roots=scope_roots, require_checkable=True
         )
         assert errors, "an orphaned-but-resolvable sha was ACCEPTED — receipts can still decay"
-        assert "not reachable from any branch" in errors[ 0 ]
+        assert "could not be found on any branch" in errors[ 0 ]
 
     def test_commit_on_a_NON_MAIN_branch_is_accepted( self, scope_roots, reachable_sha ):
         """
@@ -1502,7 +1502,7 @@ class TestDoneGateWiredIntoTransition:
             "review", "done", "standing",
             receipt_refs={ "commit": orphaned_sha }, scope_roots=scope_roots
         )
-        assert errors and "not reachable from any branch" in errors[ 0 ]
+        assert errors and "could not be found on any branch" in errors[ 0 ]
 
     def test_transition_to_IN_PROGRESS_keeps_accepting_a_path_receipt( self, scope_roots ):
         """
@@ -1605,3 +1605,54 @@ class TestQidIsContextNeverAClose:
             scope_roots=scope_roots, require_checkable=False
         )
         assert errors == [ ]
+
+
+class TestRefusalWordingDoesNotAccuse:
+    """
+    María's ruling, 2026-08-15: the refusal must not call an honest person's real
+    commit fabricated.
+
+    A perfectly good sha, on a branch, reads EXACTLY like a bad one when its repo
+    is simply not mounted on this server. Told their sha "may be fabricated", an
+    honest closer believes the tool over their own git log and goes hunting a bug
+    that does not exist — and the one cause they will never guess is the unmounted
+    repo. The refusal is correct either way; the accusation is not.
+    """
+
+    def test_refusal_does_not_lead_with_an_accusation( self, scope_roots ):
+        errors = rules.validate_receipt_refs(
+            { "commit": "deadbeef" }, scope_roots=scope_roots, require_checkable=True
+        )
+        assert errors
+        assert "fabricated" not in errors[ 0 ].lower(), (
+            f"the refusal accuses the closer; a real sha from an unmounted repo looks "
+            f"identical to this case. got: {errors[ 0 ]!r}"
+        )
+
+    def test_refusal_names_the_repos_it_actually_searched( self, scope_roots ):
+        """
+        Naming them is the whole remedy: it is how a reader discovers their repo is
+        not in the list, which is the thing they would never otherwise guess.
+        """
+        errors = rules.validate_receipt_refs(
+            { "commit": "deadbeef" }, scope_roots=scope_roots, require_checkable=True
+        )
+        assert "lupin" in errors[ 0 ], f"searched repos not named; got {errors[ 0 ]!r}"
+
+    def test_refusal_names_the_repos_it_could_NOT_search( self, scope_roots, tmp_path ):
+        """An unmounted repo must appear by name, so the reader can spot their own."""
+        roots = dict( scope_roots )
+        roots[ "cosa-voice" ] = str( tmp_path / "absent" )
+        errors = rules.validate_receipt_refs(
+            { "commit": "deadbeef" }, scope_roots=roots, require_checkable=True
+        )
+        assert "NOT searched" in errors[ 0 ] and "cosa-voice" in errors[ 0 ], (
+            f"the unmounted repo is invisible in the message; got {errors[ 0 ]!r}"
+        )
+
+    def test_refusal_still_refuses( self, scope_roots ):
+        """Softening the wording must not soften the gate."""
+        errors = rules.validate_receipt_refs(
+            { "commit": "deadbeef" }, scope_roots=scope_roots, require_checkable=True
+        )
+        assert errors, "wording change relaxed the gate — the refusal is still required"
