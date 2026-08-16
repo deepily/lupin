@@ -179,6 +179,49 @@ def test_assert_paired_isolation_refuses_shared_destination_at_zero_counts():
 
 
 # ---------------------------------------------------------------------------
+# CORPUS — require_leak_free_corpus (the corpus must not route to arg extraction)
+# ---------------------------------------------------------------------------
+_SIMPLE_CMDS  = { "agent router go to todo", "agent router go to math",
+                  "agent router go to calculator", "agent router go to automatic", "none" }
+_AGENTIC_CMDS = { "agent router go to deep research", "agent router go to claude code" }
+
+
+def test_corpus_passes_when_disjoint_from_arg_extraction():
+    # Injected leaky set; the simple commands never route to arg extraction, so it passes.
+    result = guard.require_leak_free_corpus( _SIMPLE_CMDS, agentic_commands=_AGENTIC_CMDS )
+    assert result == _SIMPLE_CMDS
+
+
+def test_corpus_refuses_and_names_the_offending_command():
+    corpus = _SIMPLE_CMDS | { "agent router go to deep research" }
+    with pytest.raises( guard.PairedCorpusExercisesLeak ) as exc:
+        guard.require_leak_free_corpus( corpus, agentic_commands=_AGENTIC_CMDS )
+    msg = str( exc.value )
+    assert "agent router go to deep research" in msg and "b0735467" in msg
+
+
+def test_corpus_names_every_offender():
+    corpus = { "none", "agent router go to deep research", "agent router go to claude code" }
+    with pytest.raises( guard.PairedCorpusExercisesLeak ) as exc:
+        guard.require_leak_free_corpus( corpus, agentic_commands=_AGENTIC_CMDS )
+    msg = str( exc.value )
+    assert "agent router go to deep research" in msg and "agent router go to claude code" in msg
+
+
+def test_agentic_command_names_reads_the_live_registry_and_simple_is_disjoint():
+    # LIVE control (the assertion Mr Radio recomputed by hand): the real registry is non-empty,
+    # and the shipped 'simple' corpus commands are disjoint from it — so the default paired run
+    # never routes to arg extraction. This goes RED the day someone maps a simple command to an
+    # AGENTIC_AGENTS entry, which is exactly when the pin's leak would start biting.
+    leaky = guard.agentic_command_names()
+    assert leaky                                   # registry is populated (not silently empty)
+    assert _SIMPLE_CMDS.isdisjoint( leaky )        # 'simple' routes to nothing arg-extracting
+    # And the live set genuinely refuses a corpus built from it:
+    with pytest.raises( guard.PairedCorpusExercisesLeak ):
+        guard.require_leak_free_corpus( { next( iter( leaky ) ) } )
+
+
+# ---------------------------------------------------------------------------
 # CONFIG cross-check — require_config_table_matches_write_target
 #
 # MUST-FAIL CONTROLS (predict the text first, then break it): a declared table that

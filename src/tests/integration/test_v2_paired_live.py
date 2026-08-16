@@ -136,6 +136,16 @@ def test_v2_paired_go_no_go_live():
 
     config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
 
+    # Precondition 0 — CORPUS: the corpus must not route to an arg-extracting command whose
+    # fallback_defaults leak (bug 8aa89f42) is unfixed at the pinned v1 sha b0735467. Runs FIRST,
+    # BEFORE SAFETY, so it is ALWAYS reached — a guard behind a guard that refuses today never
+    # runs. Corpus name from the run env (default the pure-routing 'simple'); load_corpus gives
+    # the (utterance, command) pairs, and the command set is what the leak check keys on.
+    from v2_eval import load_corpus
+    corpus_name     = os.environ.get( "LUPIN_PAIRED_CORPUS", "simple" )
+    corpus_commands = { command for _utterance, command in load_corpus( corpus_name ) }
+    guard.require_leak_free_corpus( corpus_commands )
+
     # Precondition 1 — SAFETY: the v2 write destination must be a permitted non-live store.
     # Refuses TODAY (writeback on, empty allowlist), proving the guard fires at the integration
     # boundary too. The blessed fully-qualified destination is captured for precondition 3, so

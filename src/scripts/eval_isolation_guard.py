@@ -76,6 +76,21 @@ class NotAMeasurementDatabase( RuntimeError ):
     """SAFETY failure — a destructive clean-step was aimed at a non-measurement database."""
 
 
+class PairedCorpusExercisesLeak( RuntimeError ):
+    """CORPUS failure — the corpus routes to an arg-extracting command whose fallback_defaults
+    leak (bug 8aa89f42, fixed at bf77852b) is UNFIXED at the pinned v1 sha b0735467.
+
+    The v1 arm runs against a worktree pinned at b0735467 (design §2a) — the last sha before the
+    9805783d request-path refactor, and bf77852b (the leak fix) sits on top of that refactor, so
+    the fix cannot be taken without changing the very path being measured. That leaves the leak
+    live at the pin: the runtime-argument expeditor hands out a registry entry's OWN
+    fallback_defaults dict, so the first replayed body's extracted arg STICKS as every later
+    body's default for the process life — a cross-body contaminant in a SEQUENTIAL replay. The
+    'simple' corpus is safe because its commands are pure routing and never reach arg extraction;
+    a corpus containing any AGENTIC_AGENTS command is not. Raised loudly, naming the offender.
+    """
+
+
 # ---------------------------------------------------------------------------
 # Fully-qualified target resolution (database + table), read from the app's own sources.
 # ---------------------------------------------------------------------------
@@ -360,3 +375,54 @@ def count_store_rows( fully_qualified: str ) -> int:   # pragma: no cover - live
             return int( connection.execute( text( f"SELECT COUNT(*) FROM {table}" ) ).scalar() )
     finally:
         target_engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# CORPUS — the paired corpus must not route to an arg-extracting command.
+# ---------------------------------------------------------------------------
+def agentic_command_names() -> Set[ str ]:
+    """
+    The router commands that invoke runtime-argument extraction — the fallback_defaults leak site.
+
+    Read LIVE from the registry (AGENTIC_AGENTS) rather than a frozen list, so the guard tracks
+    a thirteenth agent the moment someone adds one — detect the contact, do not model a snapshot
+    of it.
+
+    Ensures:
+        - returns the set of command keys the runtime-argument expeditor extracts args for.
+    """
+    from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+    return set( AGENTIC_AGENTS.keys() )
+
+
+def require_leak_free_corpus( corpus_commands, *, agentic_commands: Optional[ Set[ str ] ] = None ) -> Set[ str ]:
+    """
+    Refuse a paired run whose corpus routes to any arg-extracting command (the leak site).
+
+    Requires:
+        - corpus_commands is an iterable of the router command strings the corpus's utterances
+          resolve to (the second element of each (utterance, command) pair from load_corpus).
+        - agentic_commands, when given, is the leak-carrying command set (injected in tests);
+          when None it is read LIVE from the registry via agentic_command_names().
+
+    Ensures:
+        - returns the corpus_commands as a set, unchanged, when it is DISJOINT from the
+          arg-extracting commands — the fallback_defaults leak is never reached.
+        - raises PairedCorpusExercisesLeak, NAMING every offending command (sorted), when the
+          corpus routes to one or more arg-extracting commands: at the pinned v1 sha b0735467
+          that leak is unfixed and would contaminate the sequential replay.
+
+    Raises:
+        - PairedCorpusExercisesLeak on any non-empty intersection.
+    """
+    commands = set( corpus_commands )
+    leaky    = agentic_commands if agentic_commands is not None else agentic_command_names()
+    tripped  = sorted( commands & leaky )
+    if tripped:
+        raise PairedCorpusExercisesLeak(
+            "corpus routes to arg-extracting command(s) whose fallback_defaults leak (bug "
+            "8aa89f42) is UNFIXED at the pinned v1 sha b0735467 and would contaminate the "
+            "sequential replay: " + ", ".join( tripped ) + ". Use a pure-routing corpus (e.g. "
+            "'simple'). Refusing (corpus)."
+        )
+    return commands

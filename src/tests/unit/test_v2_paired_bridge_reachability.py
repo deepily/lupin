@@ -44,6 +44,7 @@ def test_bridge_reaches_and_fires_validity_check():
     require_arms_distinct_and_clean with the two resolved targets, then run past it."""
     spy = MagicMock( wraps=guard.require_arms_distinct_and_clean )   # records the call, delegates to the real check
     with patch( "cosa.config.configuration_manager.ConfigurationManager", MagicMock() ), \
+         patch( "v2_eval.load_corpus", return_value=[ ( "u", "agent router go to todo" ) ] ), \
          patch.object( guard, "require_isolated_snapshot_table", return_value=_V2_STORE ), \
          patch.object( bridge, "_require_v1_live_seam_and_worktree", lambda: None ), \
          patch.object( bridge, "_resolve_v1_paired_store", return_value=_V1_STORE ), \
@@ -68,9 +69,25 @@ def test_bridge_never_reaches_validity_when_safety_refuses():
     spy = MagicMock( wraps=guard.require_arms_distinct_and_clean )
     refuse = guard.IsolationNotConfigured( "SAFETY refuses (simulated precondition 1)" )
     with patch( "cosa.config.configuration_manager.ConfigurationManager", MagicMock() ), \
+         patch( "v2_eval.load_corpus", return_value=[ ( "u", "agent router go to todo" ) ] ), \
          patch.object( guard, "require_isolated_snapshot_table", side_effect=refuse ), \
          patch.object( guard, "require_arms_distinct_and_clean", spy ):
         with pytest.raises( guard.IsolationNotConfigured ):
             bridge.test_v2_paired_go_no_go_live()
 
     spy.assert_not_called()
+
+
+def test_bridge_refuses_a_leaky_corpus_at_precondition_0_before_safety():
+    """Precondition 0 (CORPUS) runs BEFORE SAFETY: a corpus routing to an arg-extracting command
+    refuses at the leak check, and SAFETY is never even consulted. This is what makes the guard
+    a real precondition and not a note — it fires first, on the shipped default path."""
+    safety_spy = MagicMock( return_value=_V2_STORE )
+    with patch( "cosa.config.configuration_manager.ConfigurationManager", MagicMock() ), \
+         patch( "v2_eval.load_corpus", return_value=[ ( "u", "agent router go to deep research" ) ] ), \
+         patch.object( guard, "require_isolated_snapshot_table", safety_spy ):
+        with pytest.raises( guard.PairedCorpusExercisesLeak ) as exc:
+            bridge.test_v2_paired_go_no_go_live()
+        assert "agent router go to deep research" in str( exc.value )
+
+    safety_spy.assert_not_called()   # precondition 0 refused before SAFETY was reached
