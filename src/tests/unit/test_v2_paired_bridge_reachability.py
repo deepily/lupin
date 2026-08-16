@@ -47,6 +47,7 @@ def test_bridge_reaches_and_fires_validity_check():
          patch( "v2_eval.load_corpus", return_value=[ ( "u", "agent router go to todo" ) ] ), \
          patch.object( guard, "require_isolated_snapshot_table", return_value=_V2_STORE ), \
          patch.object( bridge, "_require_v1_live_seam_and_worktree", lambda: None ), \
+         patch.object( bridge, "_clean_v2_arm_store", lambda config_mgr: "solution_snapshots" ), \
          patch.object( bridge, "_resolve_v1_paired_store", return_value=_V1_STORE ), \
          patch.object( guard, "count_store_rows", return_value=0 ), \
          patch.object( guard, "require_arms_distinct_and_clean", spy ):
@@ -91,3 +92,64 @@ def test_bridge_refuses_a_leaky_corpus_at_precondition_0_before_safety():
         assert "agent router go to deep research" in str( exc.value )
 
     safety_spy.assert_not_called()   # precondition 0 refused before SAFETY was reached
+
+
+# ---------------------------------------------------------------------------
+# Per-arm CLEAN-step wiring — clean_v2_snapshot_store is REACHED and FIRES (bug 080821da).
+#
+# WHY THIS EXISTS. clean_v2_snapshot_store had no caller outside its own unit tests — its own
+# docstring flagged the orphan and named this the recurrence of row d8d019f6 (a check wired into
+# nothing) inside the fix for it. The bridge now calls it via _clean_v2_arm_store, between
+# precondition 2 and the VALIDITY clean-start check. These two tests prove the call happens on the
+# REAL fn (not a stub) and is GATED behind the preconditions — with NO live TRUNCATE on :7999
+# (the connection is injected, the real fn's execute lands on a MagicMock).
+# ---------------------------------------------------------------------------
+def test_bridge_reaches_and_fires_v2_clean_step():
+    """Preconditions 0-2 pass -> the bridge MUST invoke the REAL v2_eval.clean_v2_snapshot_store
+    with the v2 arm's connection + config, running its two guards through to the TRUNCATE. The
+    connection is injected (fake), so the real fn's TRUNCATE lands on a MagicMock — no live DB."""
+    import v2_eval
+
+    fake_conn = MagicMock()
+    fake_conn.engine.url = "postgresql://u:p@h/lupin_db_test"   # a measurement db -> assert_measurement_db passes
+    cfg = MagicMock()
+    cfg.get.return_value = "solution_snapshots"                 # == ORM __tablename__ -> config cross-check passes
+    spy = MagicMock( wraps=v2_eval.clean_v2_snapshot_store )    # the REAL fn, delegated to (not a stub)
+
+    with patch( "cosa.config.configuration_manager.ConfigurationManager", return_value=cfg ), \
+         patch( "v2_eval.load_corpus", return_value=[ ( "u", "agent router go to todo" ) ] ), \
+         patch.object( guard, "require_isolated_snapshot_table", return_value=_V2_STORE ), \
+         patch.object( bridge, "_require_v1_live_seam_and_worktree", lambda: None ), \
+         patch.object( bridge, "_open_v2_arm_connection", return_value=fake_conn ), \
+         patch.object( bridge, "_resolve_v1_paired_store", return_value=_V1_STORE ), \
+         patch.object( guard, "count_store_rows", return_value=0 ), \
+         patch.object( v2_eval, "clean_v2_snapshot_store", spy ):
+        # Preconditions satisfied -> control reaches the terminal "unreachable" guard; that raise
+        # IS the proof the clean-step line was passed, not skipped.
+        with pytest.raises( Failed ) as exc:
+            bridge.test_v2_paired_go_no_go_live()
+        assert "unreachable" in str( exc.value )
+
+    # The clean-step fired exactly once, on the injected connection + config.
+    spy.assert_called_once_with( fake_conn, cfg )
+    # The REAL fn ran through BOTH guards to the TRUNCATE on the injected connection (no live DB) —
+    # proving it is the real primitive, not a mock that always passes.
+    fake_conn.execute.assert_called_once_with( "TRUNCATE TABLE solution_snapshots" )
+    fake_conn.close.assert_called_once()
+
+
+def test_bridge_never_reaches_v2_clean_when_safety_refuses():
+    """Negative control: precondition 1 (SAFETY) refuses -> the v2 clean-step is NEVER called (no
+    TRUNCATE). Proves the positive test above is gated behind the preconditions, not free-standing."""
+    import v2_eval
+
+    spy = MagicMock( wraps=v2_eval.clean_v2_snapshot_store )
+    refuse = guard.IsolationNotConfigured( "SAFETY refuses (simulated precondition 1)" )
+    with patch( "cosa.config.configuration_manager.ConfigurationManager", MagicMock() ), \
+         patch( "v2_eval.load_corpus", return_value=[ ( "u", "agent router go to todo" ) ] ), \
+         patch.object( guard, "require_isolated_snapshot_table", side_effect=refuse ), \
+         patch.object( v2_eval, "clean_v2_snapshot_store", spy ):
+        with pytest.raises( guard.IsolationNotConfigured ):
+            bridge.test_v2_paired_go_no_go_live()
+
+    spy.assert_not_called()

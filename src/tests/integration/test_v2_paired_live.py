@@ -144,6 +144,47 @@ def _resolve_v1_paired_store() -> str:
     return guard.fully_qualified( "lupin_db_v1baseline", v1_eval_arm.SNAPSHOT_TABLE )
 
 
+def _open_v2_arm_connection():   # pragma: no cover - live DB boundary (real engine connect)
+    """
+    Open the v2 arm's LIVE DB connection for the per-arm clean-step.
+
+    The v2 arm writes its own measurement database (lupin_db_test under LUPIN_ENV=testing,
+    design decision B); this opens a real connection to it. Live boundary — the :7999
+    reachability test injects a fake connection so no real TRUNCATE fires, and the real
+    connect happens only in the scheduled :8000 run.
+    """
+    from sqlalchemy import create_engine
+    from cosa.rest.db.database import get_database_url
+    return create_engine( get_database_url() ).connect()
+
+
+def _clean_v2_arm_store( config_mgr ) -> str:
+    """
+    Wire clean_v2_snapshot_store (the per-arm clean primitive) into the paired bridge.
+
+    Opens the v2 arm's live connection (_open_v2_arm_connection, the injected boundary) and hands
+    it + config_mgr to v2_eval.clean_v2_snapshot_store, which runs the CONFIG cross-check and the
+    measurement-db assertion BEFORE any TRUNCATE (so a wrong config or wrong db never truncates).
+
+    This is the caller the primitive lacked — bug 080821da: clean_v2_snapshot_store was unit-proven
+    but nothing invoked it (the orphan defect, the exact shape of row d8d019f6 recurring inside the
+    fix for it). The :7999 reachability test spies the REAL fn so the wiring is proven WITHOUT a
+    live TRUNCATE; the scheduled :8000 run performs the real one (Tiberius's check).
+
+    Ensures:
+        - invokes v2_eval.clean_v2_snapshot_store( connection, config_mgr ) via the module attribute
+          (late-bound, so a test spy on v2_eval.clean_v2_snapshot_store intercepts it) and returns
+          the TRUNCATEd table name.
+        - always closes the connection, even if the clean-step raises.
+    """
+    import v2_eval
+    connection = _open_v2_arm_connection()
+    try:
+        return v2_eval.clean_v2_snapshot_store( connection, config_mgr )
+    finally:
+        connection.close()
+
+
 @pytest.mark.paired_eval_live
 @pytest.mark.integration
 def test_v2_paired_go_no_go_live():
@@ -183,6 +224,16 @@ def test_v2_paired_go_no_go_live():
 
     # Precondition 2 — v1-arm live seam + pinned-worktree server. Refuses until step 1 lands.
     _require_v1_live_seam_and_worktree()
+
+    # Per-arm clean-step (design §4, decision B) — TRUNCATE the v2 arm's isolated snapshot store
+    # so its cold pass starts genuinely cold, BEFORE the VALIDITY clean-start check below reads the
+    # live rowcounts (truncate MAKES cold, exactly as v1_eval_arm.truncate_snapshots does; placing
+    # it here is the only position where the clean-step is genuinely REACHABLE — VALIDITY would
+    # otherwise refuse on a dirty store before clean ever ran). This is the caller
+    # clean_v2_snapshot_store lacked — bug 080821da (the orphan defect). The live DB connection is
+    # the injected boundary: a real TRUNCATE fires ONLY in the scheduled :8000 run; the :7999
+    # reachability test spies the real fn so no live TRUNCATE happens here.
+    _clean_v2_arm_store( config_mgr )
 
     # Precondition 3 — VALIDITY: the two arms must write DISTINCT, CLEAN stores (design §4).
     # Queries each store's LIVE rowcount and calls the distinct-and-clean check; count_store_rows
