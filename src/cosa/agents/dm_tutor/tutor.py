@@ -396,6 +396,98 @@ def literal_violations( original, rewrite ):
     return violations
 
 
+# Speech-act verbs — the ones that bind a NAME to a POSITION. Deliberately a
+# closed list: it must fire on "María proposes" and stay silent on "María ran
+# the suite", because only the first invents a stance she may not hold.
+_SPEECH_ACTS = (
+    "propose[sd]?|suggest(?:s|ed)?|recommend(?:s|ed)?|say[s]?|said|ask(?:s|ed)?|"
+    "want[s]?|wanted|claim(?:s|ed)?|argue[sd]?|think[s]?|thought|believe[sd]?|"
+    "state[sd]?|note[sd]?|report(?:s|ed)?|insist(?:s|ed)?|prefer(?:s|red)?"
+)
+
+# "<Name> <speech-act>" — a capitalised name (optionally accented or two words,
+# e.g. "Mr Radio") immediately governing a speech-act verb.
+_ATTRIBUTION = re.compile(
+    rf"\b([A-ZÁÉÍÓÚÑÜ][\wÁÉÍÓÚÑÜáéíóúñü]+(?:\s+[A-Z][\w]+)?)\s+(?:{_SPEECH_ACTS})\b"
+)
+
+
+# Capitalised words that are NOT names. Without these, "The proposed fix is a
+# second keystroke" reads as a person called "The" holding a position — a false
+# accusation that would block a perfectly clean rewrite. A guard that fires on
+# good text gets switched off, so the stop-list is part of the guard working.
+_NOT_A_NAME = frozenset( {
+    "the", "this", "that", "these", "those", "it", "he", "she", "they", "we",
+    "i", "you", "a", "an", "his", "her", "their", "our", "my", "your", "its",
+    "what", "who", "which", "some", "both", "neither", "either", "one", "no",
+    "if", "when", "as", "and", "but", "so", "then", "there", "here", "nobody",
+    "everyone", "anyone", "someone", "nothing", "everything", "all", "most",
+} )
+
+
+def attribution_bindings( text ):
+    """
+    Every "<Name> <speech-act verb>" pair a body asserts, lowercased.
+
+    Ensures:
+        - returns a set of names bound to a speech act in `text`
+        - returns an empty set when the body attributes nothing
+        - a capitalised non-name ("The proposed fix…") is never a binding
+        - never raises
+    """
+    if not text: return set()
+    found = set()
+    for match in _ATTRIBUTION.finditer( text ):
+        name = match.group( 1 ).strip().lower()
+        if name in _NOT_A_NAME:              continue
+        if name.split()[ 0 ] in _NOT_A_NAME: continue
+        found.add( name )
+    return found
+
+
+def attribution_violations( original, rewrite ):
+    """
+    Names the rewrite put BEHIND A POSITION that the original never put there.
+
+    WHY THIS EXISTS (Cheech, 2026-08-15, row 897a8db1). A DM whose body read
+    "My proposal, which matches Rick's instinct: follow the /clear with a
+    SECOND delayed send-keys" was condensed to "María proposes sending a second
+    keystroke with a prompt to address this issue" and delivered to María. She
+    opened her reply with "Check your source before building on it — I did not
+    propose that," correctly rejecting a proposal she had never made and the
+    sender had never attributed to her.
+
+    Note what a presence check cannot catch here: "María" WAS in the original —
+    as the addressee. The condenser did not invent a token, it invented a
+    RELATIONSHIP, moving a name from who-is-being-written-to into who-holds-
+    the-position. So `literal_violations` passes it cleanly; only the binding
+    is new.
+
+    Why it earns a gate rather than a note. `gate` already draws the line at
+    "structurally checkable" and leaves meaning-reversal to the human reader.
+    This sits on the checkable side: who is bound to a speech act is a surface
+    property of the text, and the rule is narrow — a binding present in the
+    rewrite and absent from the original. It stays silent on "María ran the
+    suite", which reports an action rather than manufacturing a stance.
+
+    Why it matters more than an ordinary summarisation slip: it manufactures
+    provenance. A position laundered into a peer's name reads to that peer as
+    something they must own or disown, and to everyone downstream as their
+    settled view — so a condenser free to attribute can synthesise the
+    appearance of peer agreement out of one session's suggestion.
+
+    Requires:
+        - original and rewrite are strings
+
+    Ensures:
+        - returns the sorted names bound to a speech act in the rewrite but not
+          in the original
+        - returns [] when the rewrite attributes nothing new
+        - never raises
+    """
+    return sorted( attribution_bindings( rewrite ) - attribution_bindings( original ) )
+
+
 def gate( original, rewrite, ask_outside="lead2" ):
     """
     The tutor's pass condition — form, never ratio.
@@ -432,6 +524,17 @@ def gate( original, rewrite, ask_outside="lead2" ):
     if altered:
         shown = ", ".join( f"{lit!r} sent {s}x, got {g}x" for lit, s, g in altered[ :3 ] )
         return False, f"{len(altered)} literal(s) altered: {shown}"
+
+    # 🔴 THE REWRITE MUST NOT INVENT WHO HOLDS A POSITION.
+    #
+    # Row 897a8db1: a body reading "My proposal, which matches Rick's instinct"
+    # arrived at its recipient as "María proposes…". She correctly rejected a
+    # proposal she had never made. `literal_violations` cannot see it — her name
+    # WAS in the original, as the addressee — so the invented thing is the
+    # binding, not the token. See attribution_violations.
+    invented = attribution_violations( original, rewrite )
+    if invented:
+        return False, f"attributed a position to {', '.join( repr( n ) for n in invented[ :3 ] )} — not in the original"
 
     # A refusal or a comment about the message rather than a rewrite of it.
     if re.match( r"^\s*(?:I (?:cannot|can't|am unable)|Sorry|As an AI)", rewrite, re.IGNORECASE ):
