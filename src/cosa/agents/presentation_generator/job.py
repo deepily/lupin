@@ -466,7 +466,7 @@ class PresentationGeneratorJob( AgenticJobBase ):
 
 **Marp**: {self.marp_path} (mock - not actually created)
 
-**Stats**: $0.00 | 15 slides | 3.0s (simulated)"""
+**Stats**: $0.00 | slide_count={self.artifacts[ "slide_count" ]} (no deck built) | simulated (no real work)"""
 
             # Notify completion
             await voice_io.notify(

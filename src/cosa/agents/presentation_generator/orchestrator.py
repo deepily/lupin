@@ -144,7 +144,16 @@ class PresentationOrchestratorAgent:
             source_path: Path to the source document (markdown/text)
             user_id: System user ID for event routing
             config: Presentation configuration (uses defaults if None)
-            dry_run: Run without API calls — ingest real, analyze/outline/elaborate mock
+            dry_run: OFFLINE / MOCK-LLM mode — NOT a true no-side-effects dry run.
+                It does REAL document ingest and WRITES A REAL YAML to disk (Phase 5
+                _serialize_async runs unguarded); only the LLM-driven steps are mocked
+                (analyze/outline/elaborate return fixtures, visuals use PlaceholderRenderer,
+                and the human review gates auto-approve without voice). No Anthropic/Gemini
+                API calls are made. Production never constructs the orchestrator this way —
+                the job's dry-run path returns its own breadcrumb simulator BEFORE building
+                the orchestrator — so this flag is exercised ONLY by the orchestrator's unit
+                tests to run the pipeline offline. (For a true writes-nothing dry run see
+                PresentationGeneratorJob._execute_dry_run.)
             debug: Enable debug output
             verbose: Enable verbose output
         """

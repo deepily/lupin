@@ -105,7 +105,7 @@ async def run_presentation_generation( args ):
         print( f"Theme: {args.theme}" )
 
     if args.dry_run:
-        print( "\n[DRY RUN MODE — Real ingest, mock analysis/outline/elaborate, real YAML serialization]" )
+        print( "\n[DRY RUN MODE — breadcrumb simulation only: skips ingest, analysis, outline, elaborate, and YAML serialization; emits mock paths + slide_count=0, writes nothing to disk]" )
 
     # Create job
     job = PresentationGeneratorJob(
