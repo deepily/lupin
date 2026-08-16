@@ -139,6 +139,48 @@ across 6 existing job implementations (see `src/rnd/v0.1.6/2026.03.27-bug-fix-ex
 - [ ] Factory branch added to `agentic_job_factory.py`
 - [ ] Dedicated REST router in `src/cosa/rest/routers/`
 
+### Voice Reachability — REQUIRED, or the agent cannot be reached by voice
+🔴 **The three items above register an agent; they do not make it reachable.**
+The router only emits commands it has been *told about*. An agent that satisfies
+every other item in this checklist and skips these two is callable by API and
+**mute by voice** — the exact failure this section was added to stop
+(2026-08-15; see `src/rnd/v0.2.0/2026.08.15-agent-registration-single-source.md` §3).
+
+- [ ] `<command>` line added to the router prompt template
+      `src/conf/prompts/agent-router-template-completion.txt`
+      — **this is what makes the command reachable at all.** Measured: a command
+      listed in the prompt is emitted 10/10; absent from every list it still
+      fires 6/10, so a missing entry produces *intermittent* failure, not a clean one.
+- [ ] Command key added to the training corpus, `src/conf/training/agent-router-*.json`
+      — ⚠️ **scope matters**: `agent-router-*.json` only. The same folder holds
+      `vox-cmd-*.json`, a separate browser-command namespace that shares nothing
+      with this registry except the key `none`.
+      — ⏱️ **Consumed at TRAIN time, baked into the LoRA weights.** Adding the key
+      does not make the command live today; it makes it *dependable* after the next
+      retrain. Retraining buys reliability, not reachability — the prompt line above
+      is what buys reachability.
+
+**Verify, don't assume**: after adding both, confirm the command actually routes
+before calling the work done.
+
+### Confirmation Card + Test Coverage — the other two registration surfaces
+🔴 **These are registration lists too**, defended by the single-source drift guard
+(`src/tests/unit/test_v2_registry_drift_guard.py`). Registering and voice-reaching an
+agent (the sections above) is still not the whole story: an agentic command that skips
+these two is card-unreachable and/or turns the auto-proxy suite red.
+
+- [ ] **Confirmation-card entry** — add the command → product-name mapping to
+      `PRODUCT_NAMES` in `todo_fifo_queue.py`. This is what lets `_confirm_agentic_routing()`
+      offer the command as a "Switch to this instead" alternative on the voice
+      confirmation card. Omit it and the command is invisible on the card even when the
+      router emits it. (A command deliberately NEVER card-reachable — e.g. a
+      system-triggered job needing a pasted job hash — instead carries a drift-guard
+      exemption that *waives* the `card` surface, with a stated reason.)
+- [ ] **Auto-proxy test profile** — add each of the agent's `fallback_questions` arg
+      names to the `all_agents` profile in `notification_proxy/config.py`. The proxy
+      coverage test asserts that union profile can auto-answer every agent's interview;
+      a new agent whose args are absent turns that test red.
+
 ### Reference Implementation
 Use `src/cosa/agents/deep_research/job.py` as the gold standard — it satisfies
 every item in this checklist.
