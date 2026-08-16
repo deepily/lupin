@@ -153,11 +153,15 @@ def test_guarded_argv_carries_verbatim_clear_and_token():
 # build_wake_text + build_guarded_clear_argv WAKE path (row 275cb0b9, GAP 1)
 # ---------------------------------------------------------------------------
 def test_build_wake_text_names_memento_and_is_plain_english():
-    txt = sr.build_wake_text( "/data/lupin/.claude-memento.md" )
+    txt = sr.build_wake_text( "/data/lupin/.claude-memento.md", "nonce-7", "/data/.wake-proof.marker" )
     assert "/data/lupin/.claude-memento.md" in txt
     assert "self-re-sp" in txt.lower()           # "self-re-spun"
     assert "memento" in txt.lower()
     assert "resume" in txt.lower()
+    # consumer-proof instruction: the seat must write the nonce-echoing proof line
+    assert "/data/.wake-proof.marker" in txt                       # names the proof artifact
+    assert f"{sr._WAKE_PROOF_NONCE_LINE} nonce-7" in txt           # the exact line to echo
+    assert "\n" not in txt                                         # single line (send-keys -l + one Enter)
 
 
 def test_guarded_argv_wake_path_appends_wake_bridge_and_poll_args():
@@ -222,13 +226,17 @@ def test_perform_schedules_wake_argv_when_bridge_resolves( tmp_path ):
         "sid1", persona="cheech", memento_path=mp, memento_nonce="u1",
         pre_clear_status="over_budget", pre_clear_pct=61.0,
         now=_dt( 21 ), resolve_tmux_fn=_seat(), ask_fn=lambda: "yes",
-        wake_text="WAKE UP", resolve_bridge_path_fn=lambda sid: "/s/cc-42.json",
+        wake_nonce="wn-1", resolve_bridge_path_fn=lambda sid: "/s/cc-42.json",
         schedule_fn=lambda argv: scheduled.append( argv ), base_dir=str( tmp_path ),
     )
     assert r.status == "scheduled"
     argv = scheduled[ 0 ]
-    assert argv[ 8 ] == "WAKE UP"                 # wake rode the SAME chain
+    # argv[8] is the FULL built wake text — it carries the proof instruction + nonce
+    assert f"{sr._WAKE_PROOF_NONCE_LINE} wn-1" in argv[ 8 ]        # wake rode the SAME chain, nonce-bound
     assert argv[ 9 ] == "/s/cc-42.json"           # gated on this bridge's mtime
+    # the marker records the wake_nonce the seat must echo; a stale proof was pre-removed
+    marker = json.loads( ( tmp_path / ".self-respin-sid1.json" ).read_text() )
+    assert marker[ "wake_nonce" ] == "wn-1"
 
 
 def test_perform_falls_back_to_plain_clear_when_bridge_unresolvable( tmp_path ):
@@ -240,13 +248,16 @@ def test_perform_falls_back_to_plain_clear_when_bridge_unresolvable( tmp_path ):
         "sid1", persona="cheech", memento_path=mp, memento_nonce="u1",
         pre_clear_status="over_budget", pre_clear_pct=61.0,
         now=_dt( 21 ), resolve_tmux_fn=_seat(), ask_fn=lambda: "yes",
-        wake_text="WAKE UP", resolve_bridge_path_fn=lambda sid: None,
+        wake_nonce="wn-1", resolve_bridge_path_fn=lambda sid: None,
         schedule_fn=lambda argv: scheduled.append( argv ), base_dir=str( tmp_path ),
     )
     assert r.status == "scheduled"
     argv = scheduled[ 0 ]
     assert len( argv ) == 8                        # plain single-chain argv, no wake args
     assert argv[ 6 ] == "/clear"
+    # no wake ⇒ no wake_nonce requirement recorded in the marker
+    marker = json.loads( ( tmp_path / ".self-respin-sid1.json" ).read_text() )
+    assert marker[ "wake_nonce" ] is None
 
 
 # ---------------------------------------------------------------------------
@@ -467,7 +478,7 @@ def test_from_bridge_passes_resolved_identity_and_pressure_to_perform():
     assert seen[ "cycle_window_seconds" ] == 120
 
 
-def test_from_bridge_builds_and_passes_wake_text():
+def test_from_bridge_mints_and_passes_wake_nonce():
     seen = {}
     def fake_perform( session_id, **k ):
         seen.update( k )
@@ -478,7 +489,26 @@ def test_from_bridge_builds_and_passes_wake_text():
         pressure_fn = lambda persona: ( "over_budget", 61.0 ),
         perform_fn  = fake_perform,
     )
-    assert "/data/.claude-memento.md" in seen[ "wake_text" ]     # rehydrate prompt names the memento
+    # from_bridge mints the consumer-proof nonce (default uuid) and hands it to perform;
+    # perform builds the wake TEXT internally (proof is consumer-side, not caller-supplied)
+    assert isinstance( seen[ "wake_nonce" ], str ) and seen[ "wake_nonce" ]
+    assert "wake_text" not in seen                               # no longer a from_bridge arg
+
+
+def test_from_bridge_uses_injected_wake_nonce_fn():
+    """The nonce seam is injectable — a supplied wake_nonce_fn is used verbatim."""
+    seen = {}
+    def fake_perform( session_id, **k ):
+        seen.update( k )
+        return sr.SelfRespinResult( status="scheduled", reason="ok" )
+    sr.self_respin_from_bridge(
+        "/m", "n1",
+        identity_fn   = lambda: ( "sid-self", "cheech" ),
+        pressure_fn   = lambda persona: ( "over_budget", 61.0 ),
+        wake_nonce_fn = lambda: "fixed-nonce-42",
+        perform_fn    = fake_perform,
+    )
+    assert seen[ "wake_nonce" ] == "fixed-nonce-42"
 
 
 def test_from_bridge_default_perform_fn_is_the_real_verb():

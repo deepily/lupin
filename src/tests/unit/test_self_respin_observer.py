@@ -47,10 +47,14 @@ def _iso( dt ):
 # ---------------------------------------------------------------------------
 # Fixture builders
 # ---------------------------------------------------------------------------
+WAKE_NONCE = "wake-nonce-obs"   # the marker's expected proof nonce (the seat must echo it)
+
+
 def _marker( *, session_id="a2715c0f", persona="cheech", tmux_session="cheech-mgr",
              fired_at=None, expected_return_by=None,
              pre_clear_status="over_budget", pre_clear_pct=62.4,
-             memento_path="/data/lupin/.claude-memento.md", memento_verified=True ):
+             memento_path="/data/lupin/.claude-memento.md", memento_verified=True,
+             wake_nonce=WAKE_NONCE ):
     """A synthetic self-respin marker dict (the on-disk schema)."""
     fired_at           = fired_at           if fired_at           is not None else _iso( _dt( 20 ) )
     expected_return_by = expected_return_by if expected_return_by is not None else _iso( _dt( 22 ) )
@@ -64,6 +68,7 @@ def _marker( *, session_id="a2715c0f", persona="cheech", tmux_session="cheech-mg
         "pre_clear_pct"      : pre_clear_pct,
         "memento_path"       : memento_path,
         "memento_verified"   : memento_verified,
+        "wake_nonce"         : wake_nonce,
     }
 
 
@@ -142,9 +147,48 @@ def test_negative_arm_over_budget_after_deadline_never_returns():
 def test_returned_on_over_to_within_transition_same_seat_fresh():
     marker = _marker()
     rec    = _pressure_record( status="within_budget", last_turn_age_s=5.0 )
-    a = obs.classify_marker( marker, rec, now=_dt( 23 ) )  # last turn at 02:22:55, after fired 02:20
+    # a nonce-matched proof written AFTER fired_at (02:20) — proof the self-wake reached a turn
+    a = obs.classify_marker( marker, rec, now=_dt( 23 ), wake_proof_nonce=WAKE_NONCE, wake_proof_at=_dt( 21 ) )
     assert a.verdict  == obs.SelfRespinVerdict.RETURNED
     assert a.is_alarm is False
+
+
+def test_no_return_without_wake_proof_even_on_budget_transition():
+    """THE STRANGER'S-HELLO GUARD (row 275cb0b9 follow-up): a within_budget seat with a
+    fresh turn but NO wake proof is NOT RETURNED — it could have been woken by a peer
+    DM, not the self-wake. Without this, the oracle greens a wake that typed nothing."""
+    marker = _marker()
+    rec    = _pressure_record( status="within_budget", last_turn_age_s=5.0 )
+    a = obs.classify_marker( marker, rec, now=_dt( 21 ), wake_proof_nonce=None, wake_proof_at=None )  # before deadline 02:22
+    assert a.verdict != obs.SelfRespinVerdict.RETURNED
+    assert a.verdict == obs.SelfRespinVerdict.PENDING
+
+
+def test_no_return_when_proof_nonce_mismatches_the_marker():
+    """THE FORGE GUARD: a proof exists, dated after the clear, but its nonce is NOT the
+    marker's — a stranger who wrote a proof without knowing the nonce. Not RETURNED."""
+    marker = _marker()
+    rec    = _pressure_record( status="within_budget", last_turn_age_s=5.0 )
+    a = obs.classify_marker( marker, rec, now=_dt( 21 ), wake_proof_nonce="WRONG-NONCE", wake_proof_at=_dt( 20, 30 ) )
+    assert a.verdict == obs.SelfRespinVerdict.PENDING
+
+
+def test_no_return_when_marker_has_no_wake_nonce():
+    """A marker minted without a wake_nonce (no wake attempted) can never be matched by
+    any proof — RETURNED is impossible, so it can only PEND then DEAD, never green."""
+    marker = _marker( wake_nonce=None )
+    rec    = _pressure_record( status="within_budget", last_turn_age_s=5.0 )
+    a = obs.classify_marker( marker, rec, now=_dt( 21 ), wake_proof_nonce="anything", wake_proof_at=_dt( 20, 30 ) )
+    assert a.verdict == obs.SelfRespinVerdict.PENDING
+
+
+def test_no_return_when_wake_proof_predates_the_clear():
+    """A proof from a PRIOR cycle (before this fired_at) proves nothing about this
+    re-spin — RETURNED still requires a proof dated at/after fired_at."""
+    marker = _marker( fired_at=_iso( _dt( 20 ) ) )
+    rec    = _pressure_record( status="within_budget", last_turn_age_s=5.0 )
+    a = obs.classify_marker( marker, rec, now=_dt( 21 ), wake_proof_nonce=WAKE_NONCE, wake_proof_at=_dt( 18 ) )  # 02:18 < 02:20
+    assert a.verdict == obs.SelfRespinVerdict.PENDING
 
 
 def test_returned_requires_fresh_turn_after_fired_at():
@@ -159,8 +203,22 @@ def test_returned_requires_fresh_turn_after_fired_at():
 def test_returned_not_confirmed_when_last_turn_age_missing():
     marker = _marker()
     rec    = _pressure_record( status="within_budget", last_turn_age_s=None )
-    a = obs.classify_marker( marker, rec, now=_dt( 21 ) )
+    # a nonce-matched proof IS present (so we reach the age check, not the proof gate) — still PENDING
+    a = obs.classify_marker( marker, rec, now=_dt( 21 ), wake_proof_nonce=WAKE_NONCE, wake_proof_at=_dt( 20, 30 ) )
     assert a.verdict == obs.SelfRespinVerdict.PENDING
+
+
+def test_read_wake_proof_none_missing_present_and_no_nonce_line( tmp_path ):
+    """The proof reader: blank id ⇒ (None,None); missing file ⇒ (None,None); a file with
+    no nonce line ⇒ (None, aware mtime); a proper proof ⇒ (nonce, aware mtime)."""
+    assert obs.read_wake_proof( str( tmp_path ), "" ) == ( None, None )        # blank session id
+    assert obs.read_wake_proof( str( tmp_path ), "nope" ) == ( None, None )    # no proof file
+    ( tmp_path / f"{obs.WAKE_PROOF_PREFIX}blank.marker" ).write_text( "no nonce here\n" )
+    nonce, at = obs.read_wake_proof( str( tmp_path ), "blank" )
+    assert nonce is None and at is not None and at.tzinfo is not None          # file present, no nonce line
+    _write_proof( tmp_path, "cheech", nonce="NX" )
+    nonce, at = obs.read_wake_proof( str( tmp_path ), "cheech" )
+    assert nonce == "NX" and at is not None and at.tzinfo is not None          # nonce parsed + aware mtime
 
 
 def test_returned_requires_marker_recorded_over_budget():
@@ -304,6 +362,7 @@ def test_resolve_base_dir_none_uses_fleet_data_root( monkeypatch, tmp_path ):
 # ---------------------------------------------------------------------------
 def test_observe_fleet_matches_by_session_id( tmp_path ):
     ( tmp_path / f"{obs.MARKER_PREFIX}a2715c0f.json" ).write_text( json.dumps( _marker() ) )
+    _write_proof( tmp_path, "a2715c0f" )   # RETURNED requires a wake receipt
 
     def fake_fetch():
         return { "personas": { "cheech": _pressure_record( status="within_budget", last_turn_age_s=5.0 ) } }
@@ -407,6 +466,16 @@ def _write_marker( tmp_path, sid, **kw ):
     return path
 
 
+def _write_proof( tmp_path, sid, nonce=WAKE_NONCE ):
+    """Write a consumer wake proof for `sid`, echoing `nonce` (current mtime — later
+    than any _dt(...) fired_at in these fixtures, which live on 2026-08-14). Returns its
+    path. RETURNED requires this to exist AND echo the marker's nonce — its absence, or
+    a wrong nonce, is the stranger's-hello case."""
+    path = tmp_path / f"{obs.WAKE_PROOF_PREFIX}{sid}.marker"
+    path.write_text( f"{obs.WAKE_PROOF_NONCE_LINE} {nonce}\n" )
+    return path
+
+
 def _returned_fetch( sid ):
     """A fetch whose record makes `sid` classify RETURNED (within_budget, fresh turn)."""
     def fake_fetch():
@@ -421,16 +490,19 @@ def test_sweep_empty_dir_returns_empty_and_defaults( tmp_path ):
 
 
 def test_sweep_deletes_returned_older_than_ttl( tmp_path ):
-    path = _write_marker( tmp_path, "cheech", fired_at=_iso( _dt( 20 ) ), expected_return_by=_iso( _dt( 22 ) ) )
+    path    = _write_marker( tmp_path, "cheech", fired_at=_iso( _dt( 20 ) ), expected_return_by=_iso( _dt( 22 ) ) )
+    receipt = _write_proof( tmp_path, "cheech" )
     # now = 20 min after fired_at (1200s) > 900s TTL ⇒ swept.
     swept = obs.sweep_returned_markers(
         base_dir=str( tmp_path ), now=_dt( 40 ), fetch_pressure=_returned_fetch( "cheech" ), ttl_seconds=900 )
     assert swept == [ "cheech" ]
     assert not path.exists()
+    assert not receipt.exists()                           # the receipt is swept with the marker
 
 
 def test_sweep_keeps_returned_within_ttl( tmp_path ):
     path = _write_marker( tmp_path, "rachel", fired_at=_iso( _dt( 20 ) ), expected_return_by=_iso( _dt( 22 ) ) )
+    _write_proof( tmp_path, "rachel" )   # genuinely RETURNED (has a receipt), just too young to sweep
     # now = 5 min after fired_at (300s) <= 900s TTL ⇒ RETURNED but too young, kept.
     swept = obs.sweep_returned_markers(
         base_dir=str( tmp_path ), now=_dt( 25 ), fetch_pressure=_returned_fetch( "rachel" ), ttl_seconds=900 )
@@ -471,6 +543,7 @@ def test_sweep_tolerates_non_dict_section( tmp_path ):
 def test_sweep_skips_bad_pressure_records_and_still_deletes( tmp_path ):
     """Junk records in the personas map are ignored; the good RETURNED+old marker still sweeps."""
     path = _write_marker( tmp_path, "cheech", fired_at=_iso( _dt( 20 ) ), expected_return_by=_iso( _dt( 22 ) ) )
+    _write_proof( tmp_path, "cheech" )
     def fake_fetch():
         return { "personas": {
             "cheech" : _pressure_record( session_id="cheech", tmux_session="cheech-mgr",
@@ -487,6 +560,7 @@ def test_sweep_skips_bad_pressure_records_and_still_deletes( tmp_path ):
 def test_sweep_unlink_failure_is_not_counted( tmp_path, monkeypatch ):
     """A failed unlink ⇒ the session id is NOT reported swept (and no raise)."""
     path = _write_marker( tmp_path, "cheech", fired_at=_iso( _dt( 20 ) ), expected_return_by=_iso( _dt( 22 ) ) )
+    _write_proof( tmp_path, "cheech" )   # genuinely RETURNED so the unlink path is reached
     monkeypatch.setattr( obs, "_best_effort_unlink", lambda p: False )
     swept = obs.sweep_returned_markers(
         base_dir=str( tmp_path ), now=_dt( 40 ), fetch_pressure=_returned_fetch( "cheech" ), ttl_seconds=900 )
@@ -580,6 +654,7 @@ def test_loop_intersect_clear_readvises_after_alarm_gone( tmp_path ):
 
 def test_loop_sweeps_returned_markers( tmp_path ):
     _write_marker( tmp_path, "cheech", fired_at=_iso( _dt( 20 ) ), expected_return_by=_iso( _dt( 22 ) ) )
+    _write_proof( tmp_path, "cheech" )   # RETURNED requires the wake receipt
     lp, advised = _loop(
         _FakeCfg( **{ "arbiter self respin observer enabled": True,
                       "arbiter self respin observer returned ttl seconds": 900 } ),

@@ -50,6 +50,8 @@ from cosa.agents.heartbeat_arbiter.self_respin_observer import (
     observe_fleet_self_respin,
     SelfRespinVerdict,
     MARKER_PREFIX,
+    WAKE_PROOF_PREFIX,
+    WAKE_PROOF_NONCE_LINE,
 )
 
 UTC     = datetime.timezone.utc
@@ -57,6 +59,7 @@ FIRED   = datetime.datetime( 2026, 8, 15, 2, 0, 0, tzinfo=UTC )
 SESSION = "d15fa6fa"
 PERSONA = "tiberius"
 TMUX    = "cc-tiberius-1"
+WAKE_NONCE = "wake-nonce-e2e"
 DELAY   = 5                                              # deadline = FIRED + DELAY + grace(120) = FIRED+125s
 
 _INSIDE   = FIRED + datetime.timedelta( seconds=40 )    # before expected_return_by
@@ -113,9 +116,11 @@ def _fire_the_verb( tmp_path, schedule, *, ask="[default used] ", nonce_uuid="no
         pre_clear_status     = "over_budget",
         pre_clear_pct        = 61.0,
         delay_seconds        = DELAY,
+        wake_nonce           = WAKE_NONCE,   # mint the proof nonce into the marker
         base_dir             = str( tmp_path ),
         now                  = now,
         resolve_tmux_fn      = lambda sid: TMUX if sid == SESSION else None,
+        resolve_bridge_path_fn = lambda sid: str( tmp_path / f"cc-{sid}.json" ),   # bridge resolves ⇒ do_wake
         ask_fn               = lambda: ask,
         schedule_fn          = schedule,
         read_text_fn         = _real_read_text,
@@ -128,6 +133,17 @@ def _pressure( **record ):
     return { "personas": { PERSONA: { "session_id": SESSION, "tmux_session": TMUX, **record } } }
 
 
+def _simulate_wake_typed( tmp_path, nonce=None ):
+    """Stand in for the REHYDRATED SEAT writing its consumer proof once it takes a turn
+    on the wake (the schedule seam captures the argv but never runs the bash, and no
+    real CC seat rehydrates in a unit test). RETURNED requires this proof to echo the
+    marker's nonce — without it, or with the wrong nonce, a within_budget+fresh-turn
+    reading is a stranger's hello. Current mtime is after FIRED, satisfying >= fired_at."""
+    ( tmp_path / f"{WAKE_PROOF_PREFIX}{SESSION}.marker" ).write_text(
+        f"{WAKE_PROOF_NONCE_LINE} {nonce or WAKE_NONCE}\n"
+    )
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 #  1. The connected chain: verb WRITES → external observer READS → RETURNED
 # ═══════════════════════════════════════════════════════════════════════════
@@ -135,6 +151,7 @@ def _pressure( **record ):
 def test_verb_written_marker_is_observed_as_returned( tmp_path ):
     schedule = _Schedule()
     result   = _fire_the_verb( tmp_path, schedule )
+    _simulate_wake_typed( tmp_path )                          # the injector typed → receipt on disk
 
     # writer half: a real marker landed on disk under the observer's own glob
     assert result.status == "scheduled"
@@ -162,6 +179,7 @@ def test_verdict_rides_the_verb_marker_not_thin_air( tmp_path ):
     other_dir = tmp_path / "elsewhere"
     other_dir.mkdir()
     _fire_the_verb( tmp_path, _Schedule() )
+    _simulate_wake_typed( tmp_path )                          # receipt rides the marker's own dir
     pressure = lambda: _pressure( status="within_budget", last_turn_age_s=10 )
 
     right = observe_fleet_self_respin( base_dir=str( tmp_path ),  now=_AFTER, fetch_pressure=pressure )

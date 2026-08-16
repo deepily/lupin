@@ -47,6 +47,7 @@ done (it is cleared before it could; the observer owns done-state).
 import datetime
 import os
 import subprocess
+import uuid
 
 from dataclasses import dataclass
 
@@ -177,15 +178,22 @@ def verify_memento_content( content, nonce_uuid, now, *, cycle_window_seconds=DE
 # ---------------------------------------------------------------------------
 # (c) The guarded, fire-point-consuming injector argv — pure
 # ---------------------------------------------------------------------------
-def build_wake_text( memento_path ):
+def build_wake_text( memento_path, wake_nonce, wake_proof_path ):
     """
     Ensures:
-        - returns the rehydrate prompt the injector types AFTER the /clear proves out:
-          a plain-English instruction to read the memento at `memento_path` and resume
+        - returns a SINGLE-LINE rehydrate prompt (no embedded newlines — it is typed
+          via `send-keys -l` then one Enter, so a newline would submit early) that:
+          (a) tells the seat it just self-re-spun and to read its memento at
+          `memento_path`; (b) instructs it to CONFIRM the wake by writing the file
+          `wake_proof_path` containing the exact line "SELF-RESPIN-WAKE-PROOF: <nonce>".
+          The nonce is what proves the wake reached a real turn and was OURS — the
+          observer keys RETURNED on that proof (a peer DM cannot echo an unknown nonce).
     """
     return (
-        f"You just self-re-spun — you typed /clear into your own pane and rehydrated as "
-        f"the same seat at low context. Read your memento at {memento_path}, then resume your board."
+        f"You just self-re-spun — you typed /clear into your own pane and rehydrated as the "
+        f"same seat at low context. FIRST, confirm this wake reached you: write the file "
+        f"{wake_proof_path} containing exactly this line: "
+        f"{_WAKE_PROOF_NONCE_LINE} {wake_nonce} — then read your memento at {memento_path} and resume your board."
     )
 
 
@@ -220,6 +228,12 @@ def build_guarded_clear_argv(
           it CHANGES, then types the wake with `-l` (literal); on timeout it writes a
           loud stderr line and types nothing (a mute seat is left for the observer to
           alarm, never a wake into the old context)
+        - the injector writes NO receipt: a receipt written HERE would prove only that
+          the injector reached the line, never that the pane ingested the keystrokes
+          (`tmux send-keys` has no ingestion feedback). Proof of a real wake is
+          CONSUMER-side — the wake text (built by build_wake_text) instructs the
+          rehydrated seat to write a nonce-echoing proof artifact, which the observer
+          keys RETURNED on. This function only delivers the wake behind the readiness gate.
         - `text` (and the wake) are passed VERBATIM as positional args — never wrapped
           by the speakerphone rider (a wrapped "/clear" would never fire as a slash cmd)
     """
@@ -343,7 +357,7 @@ def perform_self_respin(
     delay_seconds        = DEFAULT_DELAY_SECONDS,
     cycle_window_seconds = DEFAULT_CYCLE_WINDOW_SECONDS,
     grace_seconds        = None,
-    wake_text            = None,
+    wake_nonce           = None,
     ready_timeout_polls  = DEFAULT_READY_TIMEOUT_POLLS,
     poll_interval_seconds = DEFAULT_POLL_INTERVAL_SECONDS,
     base_dir             = None,
@@ -423,15 +437,30 @@ def perform_self_respin(
     if not proceed:
         return SelfRespinResult( status="declined", reason=gate_reason )
 
-    # 5. persistent observer marker (durability read-back) + one-shot fire token
+    # 5. resolve the wake BEFORE the marker so the marker records the wake_nonce the
+    # seat must echo. The wake rides the SAME chain (ruling 3) behind the bridge-mtime
+    # readiness gate; if the bridge can't be resolved we fall back to a plain clear
+    # (still a valid re-spin — the seat is left for the observer to wake/alarm). The
+    # wake TEXT (not the injector) carries the proof instruction: proof is CONSUMER-side.
+    base            = base_dir if base_dir is not None else _resolve_base_dir()
+    bridge_path     = resolve_bridge_path_fn( session_id ) if wake_nonce else None
+    do_wake         = bool( wake_nonce and bridge_path )
+    wake_proof_path = os.path.join( base, f"{_WAKE_PROOF_PREFIX}{session_id}.marker" ) if do_wake else None
+    # A stale proof from a PRIOR cycle must not pre-satisfy this cycle's oracle; remove
+    # it so only the seat's THIS-cycle proof (mtime >= this fired_at) can confirm RETURNED.
+    if wake_proof_path:
+        _best_effort_remove( wake_proof_path )
+    wake_text = build_wake_text( memento_path, wake_nonce, wake_proof_path ) if do_wake else None
+
+    # persistent observer marker (durability read-back) + one-shot fire token
     marker = build_marker_dict(
         session_id=session_id, persona=persona, tmux_session=tmux_session,
         fired_at=now, delay_seconds=delay_seconds,
         pre_clear_status=pre_clear_status, pre_clear_pct=pre_clear_pct,
         memento_path=memento_path, memento_verified=True,
+        wake_nonce=wake_nonce if do_wake else None,   # only require a proof when we actually wake
         **( { "grace_seconds": grace_seconds } if grace_seconds is not None else {} ),
     )
-    base            = base_dir if base_dir is not None else _resolve_base_dir()
     marker_path     = os.path.join( base, f"{_MARKER_PREFIX}{session_id}.json" )
     fire_token_path = os.path.join( base, f"{FIRE_TOKEN_PREFIX}{session_id}.token" )
 
@@ -454,16 +483,11 @@ def perform_self_respin(
             reason="fire token did not survive read-back — refusing to schedule a clear that would self-cancel",
         )
 
-    # 6. schedule the guarded, fire-point-consuming detached /clear. When a wake_text
-    # is supplied AND the seat's bridge path resolves, the wake rides the SAME chain
-    # (ruling 3 — no second Popen) behind the bridge-mtime readiness gate. If the
-    # bridge path cannot be resolved we fall back to the plain clear (still a valid
-    # re-spin; the seat is merely left for the observer to wake/alarm rather than
-    # self-waking) — never block the clear on an un-resolvable wake.
-    bridge_path = resolve_bridge_path_fn( session_id ) if wake_text else None
+    # 6. schedule the guarded, fire-point-consuming detached /clear (+ the readiness-
+    # gated wake built above).
     schedule_fn( build_guarded_clear_argv(
         tmux_session, fire_token_path, delay_seconds,
-        wake_text             = wake_text if ( wake_text and bridge_path ) else None,
+        wake_text             = wake_text,
         bridge_path           = bridge_path,
         ready_timeout_polls   = ready_timeout_polls,
         poll_interval_seconds = poll_interval_seconds,
@@ -511,6 +535,7 @@ def self_respin_from_bridge(
     cycle_window_seconds = DEFAULT_CYCLE_WINDOW_SECONDS,
     identity_fn,
     pressure_fn,
+    wake_nonce_fn        = None,
     perform_fn           = perform_self_respin,
 ):
     """
@@ -539,6 +564,7 @@ def self_respin_from_bridge(
         return SelfRespinResult( status="aborted", reason="could not resolve own session id from the bridge" )
 
     pre_clear_status, pre_clear_pct = pressure_fn( persona )
+    wake_nonce = ( wake_nonce_fn or ( lambda: str( uuid.uuid4() ) ) )()   # mint the proof nonce THIS cycle
     return perform_fn(
         session_id,
         persona              = persona,
@@ -548,7 +574,7 @@ def self_respin_from_bridge(
         pre_clear_pct        = pre_clear_pct,
         delay_seconds        = delay_seconds,
         cycle_window_seconds = cycle_window_seconds,
-        wake_text            = build_wake_text( memento_path ),   # rehydrate prompt (GAP 1)
+        wake_nonce           = wake_nonce,   # the seat must echo this in its wake proof (GAP 1 + consumer proof)
     )
 
 
@@ -654,6 +680,12 @@ def _default_ask():   # pragma: no cover - live MCP ask boundary (tests inject a
     )
 
 
-# The observer's marker prefix — imported by name so the two files agree on the
-# ONE filename shape (build_marker_dict's schema, MARKER_PREFIX's name).
-from cosa.agents.heartbeat_arbiter.self_respin_observer import MARKER_PREFIX as _MARKER_PREFIX
+# The observer's marker + wake-proof names — imported by name so the two files agree
+# on the ONE shape each: the marker filename (MARKER_PREFIX), the wake-proof artifact
+# filename (WAKE_PROOF_PREFIX), and the proof's nonce line (WAKE_PROOF_NONCE_LINE) the
+# seat echoes and the observer reads back.
+from cosa.agents.heartbeat_arbiter.self_respin_observer import (
+    MARKER_PREFIX as _MARKER_PREFIX,
+    WAKE_PROOF_PREFIX as _WAKE_PROOF_PREFIX,
+    WAKE_PROOF_NONCE_LINE as _WAKE_PROOF_NONCE_LINE,
+)

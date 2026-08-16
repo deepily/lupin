@@ -43,6 +43,9 @@ SESSION = "9662b5ac"
 TMUX    = "cc-author-maria-1"
 
 
+WAKE_NONCE = "wake-nonce-control"
+
+
 def _marker( **overrides ):
     m = build_marker_dict(
         session_id       = SESSION,
@@ -54,6 +57,7 @@ def _marker( **overrides ):
         pre_clear_pct    = 61.0,
         memento_path     = "io/mementos/maria.md",
         memento_verified = True,
+        wake_nonce       = WAKE_NONCE,
         grace_seconds    = 120,        # expected_return_by = FIRED + 125s
     )
     m.update( overrides )
@@ -76,7 +80,8 @@ def test_real_observer_confirms_a_genuine_return():
     no alarm. The one green the oracle is allowed to give."""
     record = _record( status="within_budget", last_turn_age_s=10 )   # last turn ~10s ago, after FIRED
     now    = FIRED + datetime.timedelta( seconds=30 )
-    a = classify_marker( _marker(), record, now=now )
+    proof_at = FIRED + datetime.timedelta( seconds=10 )             # the seat wrote its proof, after the clear
+    a = classify_marker( _marker(), record, now=now, wake_proof_nonce=WAKE_NONCE, wake_proof_at=proof_at )
     assert a.verdict == SelfRespinVerdict.RETURNED
     assert a.is_alarm is False
 

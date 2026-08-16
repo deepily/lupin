@@ -57,7 +57,13 @@ def _fake_tmux_dir( tmp_path, *, bridge_to_touch ):
 
 def _run_gate( tmp_path, *, touch_bridge, ready_timeout_polls, poll_interval_seconds=0.05 ):
     """Build the REAL wake argv and execute it with a fake tmux on PATH. Returns
-    ( returncode, tmux_log_text )."""
+    ( returncode, tmux_log_text, stderr ).
+
+    NOTE: the injector writes NO receipt — a receipt written here would only prove the
+    injector reached the line, never that the pane ingested the keystrokes (send-keys has
+    no ingestion feedback). This test proves the gate TYPES the wake (or doesn't); proof of
+    a REAL wake is consumer-side (the rehydrated seat writes a nonce-echoing artifact), which
+    the observer suite covers."""
     bridge      = tmp_path / "cc-4242.json"
     bridge.write_text( "{}" )                                  # pre-existing bridge (mtime = now)
     fire_token  = tmp_path / ".self-respin-fire-sid.token"

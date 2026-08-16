@@ -27,7 +27,11 @@ if _e2e_path not in sys.path:
     sys.path.insert( 0, _e2e_path )
 
 import self_respin_disposable_seat_harness as H
-from cosa.agents.heartbeat_arbiter.self_respin_observer import build_marker_dict, MARKER_PREFIX
+from cosa.agents.heartbeat_arbiter.self_respin_observer import (
+    build_marker_dict, MARKER_PREFIX, WAKE_PROOF_PREFIX, WAKE_PROOF_NONCE_LINE,
+)
+
+WAKE_NONCE = "wake-nonce-harness"
 
 UTC     = datetime.timezone.utc
 FIRED   = datetime.datetime( 2026, 8, 14, 2, 0, 0, tzinfo=UTC )
@@ -39,9 +43,14 @@ def _write_marker( base_dir ):
     m = build_marker_dict(
         session_id=SESSION, persona="maria", tmux_session=TMUX, fired_at=FIRED,
         delay_seconds=5, pre_clear_status="over_budget", pre_clear_pct=61.0,
-        memento_path="io/mementos/maria.md", memento_verified=True, grace_seconds=120,
+        memento_path="io/mementos/maria.md", memento_verified=True,
+        wake_nonce=WAKE_NONCE, grace_seconds=120,
     )
     ( base_dir / f"{MARKER_PREFIX}{SESSION}.json" ).write_text( json.dumps( m ) )
+    # the seat's consumer proof, echoing the marker's nonce (RETURNED requires it; its
+    # real-now mtime is after FIRED). Harmless for the non-RETURNED cases (identity
+    # mismatch, dead) — they fail for other reasons.
+    ( base_dir / f"{WAKE_PROOF_PREFIX}{SESSION}.marker" ).write_text( f"{WAKE_PROOF_NONCE_LINE} {WAKE_NONCE}\n" )
 
 
 def _section( **record ):

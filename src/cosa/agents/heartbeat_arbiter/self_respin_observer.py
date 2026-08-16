@@ -41,6 +41,26 @@ from enum        import Enum
 # as heartbeat holds, so the fleet's readers actually see it).
 MARKER_PREFIX = ".self-respin-"
 
+# The WAKE PROOF (row 275cb0b9 follow-up, John's ruling). Two failure modes had to
+# close at once:
+#   (1) STRANGER'S HELLO — the over_budget→within_budget-with-a-fresh-turn transition
+#       cannot tell a self-wake from a colleague's DM: any fresh turn satisfies it.
+#   (2) INJECTOR SELF-CERTIFICATION — a receipt WRITTEN BY THE INJECTOR proves only
+#       that the injector reached the write line, never that the pane INGESTED the
+#       keystrokes (`tmux send-keys` has no ingestion feedback) — the exit-code defect
+#       one layer out.
+# Both close with a CONSUMER-WRITTEN, NONCE-BOUND proof. The verb mints a nonce into
+# the marker; the wake text instructs the rehydrated seat to write THIS artifact
+# echoing that nonce. RETURNED requires the artifact to exist, ECHO THE MARKER'S
+# NONCE, and be dated after the clear fired — plus the budget transition. Only a seat
+# that actually took a turn on our wake can produce it (proving ingestion → a real
+# turn, stronger than "reached the pane"), and a peer DM cannot forge it (it does not
+# know the nonce) — the stranger's hole closes BY CONSTRUCTION, the same way the
+# memento nonce proves a this-cycle memento. Mechanism-agnostic: whatever delivers the
+# wake (this injector or a future peer-message path), the CONSUMER writes the proof.
+WAKE_PROOF_PREFIX      = ".self-respin-wake-proof-"
+WAKE_PROOF_NONCE_LINE  = "SELF-RESPIN-WAKE-PROOF:"     # the seat writes: "SELF-RESPIN-WAKE-PROOF: <nonce>"
+
 # How much slack past (fired_at + delay) before a still-not-returned seat is
 # declared dead. The verb writes expected_return_by = fired_at + delay + grace;
 # this default only feeds build_marker_dict when a caller omits grace.
@@ -115,7 +135,7 @@ def _parse_iso( value ):
 # ---------------------------------------------------------------------------
 def build_marker_dict( *, session_id, persona, tmux_session, fired_at, delay_seconds,
                        pre_clear_status, pre_clear_pct, memento_path, memento_verified,
-                       grace_seconds=DEFAULT_GRACE_SECONDS ):
+                       wake_nonce=None, grace_seconds=DEFAULT_GRACE_SECONDS ):
     """
     Build the self-re-spin marker dict the verb writes to disk BEFORE it schedules
     the clear (the pre-clear facts must survive the context wipe — the cleared
@@ -147,6 +167,7 @@ def build_marker_dict( *, session_id, persona, tmux_session, fired_at, delay_sec
         "pre_clear_pct"      : pre_clear_pct,
         "memento_path"       : memento_path,
         "memento_verified"   : memento_verified,
+        "wake_nonce"         : wake_nonce,     # the seat must echo THIS in its wake proof for RETURNED
     }
 
 
@@ -165,28 +186,44 @@ def _identity_matches( marker, pressure_record ):
     )
 
 
-def _is_confirmed_return( marker, pressure_record, fired_at, now ):
+def _is_confirmed_return( marker, pressure_record, fired_at, now, wake_proof_nonce, wake_proof_at ):
     """
-    Is this a proven over_budget → within_budget return for the same seat?
+    Is this a proven over_budget → within_budget return for the same seat, woken by
+    OUR OWN wake (not a stranger's hello) and PROVEN by the seat's own turn?
 
     Requires:
         - pressure_record is a dict (the matched record; caller guarantees non-None)
         - fired_at is an aware datetime (the caller parsed + validated it)
         - now is an aware datetime
+        - wake_proof_nonce is the nonce the rehydrated seat ECHOED in its wake proof
+          artifact (str), or None when no proof exists
+        - wake_proof_at is the aware datetime that proof was written, or None
 
     Ensures:
         - True iff ALL hold:
             * the marker recorded pre_clear_status == "over_budget" (there was a
               high state to fall FROM — no transition otherwise)
             * the record's current status == "within_budget" (fell to low)
-            * the record's last turn is FRESH: dated at/after the marker's
-              fired_at (a stale low reading from before the clear proves nothing)
+            * the record's last turn is FRESH: dated at/after the marker's fired_at
+            * a WAKE PROOF exists, written at/after fired_at, whose nonce EQUALS the
+              marker's own wake_nonce. This is CONSUMER-written (the seat had to take a
+              turn on our wake to produce it — proving ingestion, not just delivery)
+              and NONCE-BOUND (a peer DM cannot forge it — it does not know the nonce).
+              A blank marker nonce can never be matched, so a marker minted without a
+              nonce is never falsely RETURNED.
         - a missing last_turn_age_s ⇒ not confirmed
+        - a missing / pre-fire / nonce-mismatched proof ⇒ not confirmed
         - never raises
     """
     if marker.get( "pre_clear_status" ) != "over_budget":
         return False
     if pressure_record.get( "status" ) != "within_budget":
+        return False
+
+    marker_nonce = marker.get( "wake_nonce" )
+    if not marker_nonce or wake_proof_nonce != marker_nonce:
+        return False
+    if wake_proof_at is None or wake_proof_at < fired_at:
         return False
 
     age = pressure_record.get( "last_turn_age_s" )
@@ -197,7 +234,7 @@ def _is_confirmed_return( marker, pressure_record, fired_at, now ):
     return last_turn_ts >= fired_at
 
 
-def classify_marker( marker, pressure_record, *, now ):
+def classify_marker( marker, pressure_record, *, now, wake_proof_nonce=None, wake_proof_at=None ):
     """
     Classify ONE self-re-spin marker against the seat's live pressure record.
 
@@ -206,6 +243,9 @@ def classify_marker( marker, pressure_record, *, now ):
         - pressure_record is the arbiter context_pressure record for the SAME
           session_id, or None when the seat is absent from the pressure map
         - now is an aware datetime
+        - wake_proof_nonce / wake_proof_at describe the seat's consumer-written wake
+          proof (the nonce it echoed + when), or None/None when no proof exists —
+          RETURNED requires a proof whose nonce matches the marker's own wake_nonce
 
     Ensures:
         - MALFORMED_MARKER (alarm) when fired_at OR expected_return_by is missing,
@@ -247,12 +287,12 @@ def classify_marker( marker, pressure_record, *, now ):
                 reason     = "a seat answered under this marker but its session_id/tmux differ — different seat",
                 is_alarm   = True,
             )
-        if _is_confirmed_return( marker, pressure_record, fired_at, now ):
+        if _is_confirmed_return( marker, pressure_record, fired_at, now, wake_proof_nonce, wake_proof_at ):
             return SelfRespinAssessment(
                 session_id = session_id,
                 persona    = persona,
                 verdict    = SelfRespinVerdict.RETURNED,
-                reason     = "over_budget → within_budget on the same seat, fresh turn after the clear fired",
+                reason     = "over_budget → within_budget on the same seat, fresh turn AND a nonce-matched wake proof after the clear fired",
                 is_alarm   = False,
             )
 
@@ -315,6 +355,48 @@ def _resolve_base_dir( base_dir ):
     return str( fleet_data_root() )
 
 
+def wake_proof_path( base, session_id ):
+    """Ensures: the canonical wake-proof artifact path for `session_id` (the ONE shape
+    the verb tells the seat to write and the observer reads back)."""
+    return os.path.join( base, f"{WAKE_PROOF_PREFIX}{session_id}.marker" )
+
+
+def read_wake_proof( base, session_id ):
+    """
+    Read the CONSUMER-written wake proof for `session_id` — the artifact the rehydrated
+    seat writes, echoing the marker's nonce, once it takes a turn on our wake.
+
+    Requires:
+        - base is a resolved directory path; session_id is the seat's id
+
+    Ensures:
+        - returns ( nonce, proof_at ): the nonce the seat echoed on the
+          `SELF-RESPIN-WAKE-PROOF: <nonce>` line, and the file's mtime as an aware UTC
+          datetime. The nonce is the token proving the wake reached a TURN and was OURS
+          (a peer cannot echo an unknown nonce).
+        - ( None, None ) when the artifact is absent, unreadable, or carries no
+          proof-nonce line — no proof ⇒ the oracle will not confirm RETURNED
+        - never raises
+    """
+    if not session_id:
+        return ( None, None )
+    path = wake_proof_path( base, session_id )
+    try:
+        proof_at = datetime.datetime.fromtimestamp( os.path.getmtime( path ), tz=datetime.timezone.utc )
+        with open( path, "r" ) as f:
+            content = f.read()
+    except OSError:
+        return ( None, None )
+    nonce  = None
+    needle = f"{WAKE_PROOF_NONCE_LINE} "
+    for line in content.splitlines():
+        stripped = line.strip()
+        if stripped.startswith( needle ):
+            nonce = stripped[ len( needle ): ].strip() or None
+            break
+    return ( nonce, proof_at )
+
+
 # ---------------------------------------------------------------------------
 # Fleet helper — glob markers, fetch pressure, match by session_id, classify
 # ---------------------------------------------------------------------------
@@ -346,6 +428,7 @@ def observe_fleet_self_respin( *, base_dir=None, now=None, fetch_pressure=None )
     if not markers:
         return []
 
+    base     = _resolve_base_dir( base_dir )
     section  = fetch_pressure() or {}
     personas = section.get( "personas" ) if isinstance( section, dict ) else None
     by_id    = {}
@@ -354,10 +437,13 @@ def observe_fleet_self_respin( *, base_dir=None, now=None, fetch_pressure=None )
             if isinstance( record, dict ) and record.get( "session_id" ):
                 by_id[ record[ "session_id" ] ] = record
 
-    return [
-        classify_marker( m, by_id.get( m.get( "session_id" ) ), now=now )
-        for m in markers
-    ]
+    def _classify( m ):
+        nonce, proof_at = read_wake_proof( base, m.get( "session_id" ) )
+        return classify_marker(
+            m, by_id.get( m.get( "session_id" ) ), now=now,
+            wake_proof_nonce=nonce, wake_proof_at=proof_at,
+        )
+    return [ _classify( m ) for m in markers ]
 
 
 # ---------------------------------------------------------------------------
@@ -438,6 +524,7 @@ def sweep_returned_markers( *, base_dir=None, now=None, fetch_pressure=None,
     if not pairs:
         return []
 
+    base     = _resolve_base_dir( base_dir )
     section  = fetch_pressure() or {}
     personas = section.get( "personas" ) if isinstance( section, dict ) else None
     by_id    = {}
@@ -448,7 +535,11 @@ def sweep_returned_markers( *, base_dir=None, now=None, fetch_pressure=None,
 
     swept = []
     for path, marker in pairs:
-        assessment = classify_marker( marker, by_id.get( marker.get( "session_id" ) ), now=now )
+        nonce, proof_at = read_wake_proof( base, marker.get( "session_id" ) )
+        assessment = classify_marker(
+            marker, by_id.get( marker.get( "session_id" ) ), now=now,
+            wake_proof_nonce=nonce, wake_proof_at=proof_at,
+        )
         if assessment.verdict is not SelfRespinVerdict.RETURNED:
             continue
         # RETURNED ⇒ classify_marker parsed fired_at (else it would be MALFORMED),
@@ -457,6 +548,10 @@ def sweep_returned_markers( *, base_dir=None, now=None, fetch_pressure=None,
         if ( now - fired_at ).total_seconds() <= ttl_seconds:
             continue
         if _best_effort_unlink( path ):
+            # the proof has done its job too (it proved the RETURN) — sweep it with the
+            # marker so proofs don't accumulate. Best-effort; a missing one is fine (the
+            # marker is already gone, so nothing re-reads it).
+            _best_effort_unlink( wake_proof_path( base, marker.get( "session_id" ) ) )
             swept.append( marker.get( "session_id" ) )
     return swept
 
