@@ -543,6 +543,28 @@ def test_present_choices_voice_failure_names_the_path_in_its_provenance():
     assert out[ "default_source" ] == mod._DEFAULT_SOURCE_DISPATCH_FAILED
 
 
+def test_present_choices_delivered_timeout_labels_answer_timeout():
+    """Row 38a0b373: a timeout that REACHED a human (delivered=True) is labelled
+    answer_timeout — distinct from a delivery failure."""
+    from cosa.agents.test_fix_expediter.state import VoiceGateTimeoutError
+    err   = VoiceGateTimeoutError( "choices", "no answer", delivered=True )
+    iface = _fake_iface( present_choices=AsyncMock( side_effect=err ) )
+    _enter_voice_mode( iface )
+    out = _run( mod.present_choices( _Q_SINGLE, response_default={ "Pick": "b" } ) )
+    assert out[ "default_source" ] == mod._DEFAULT_SOURCE_ANSWER_TIMEOUT
+
+
+def test_present_choices_undelivered_timeout_labels_dispatch_failed():
+    """Row 38a0b373: a timeout that never reached a human (delivered=False, the
+    default) keeps dispatch_failed — the two silences must not collapse."""
+    from cosa.agents.test_fix_expediter.state import VoiceGateTimeoutError
+    err   = VoiceGateTimeoutError( "choices", "never delivered" )   # delivered defaults False
+    iface = _fake_iface( present_choices=AsyncMock( side_effect=err ) )
+    _enter_voice_mode( iface )
+    out = _run( mod.present_choices( _Q_SINGLE, response_default={ "Pick": "b" } ) )
+    assert out[ "default_source" ] == mod._DEFAULT_SOURCE_DISPATCH_FAILED
+
+
 # =========================================================================== #
 # select_themes
 # =========================================================================== #
