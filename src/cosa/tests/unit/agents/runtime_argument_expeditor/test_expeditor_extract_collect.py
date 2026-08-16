@@ -4,7 +4,7 @@ Unit tests for the extract() / collect() split of RuntimeArgumentExpeditor.exped
 (v1 behavior-preserving refactor, store row e010d5e2).
 
 - extract(): non-interactive half — resolves known args, computes what is missing,
-  returns an ExtractionResult. Takes agent_entry as a parameter (the AGENTIC_AGENTS
+  returns an ExtractionResult. Takes agent_entry as a parameter (the JOB_ARG_CONTRACTS
   lookup stays in the expedite() shim).
 - collect(): interactive half — prompts for missing args, confirms, injects system args.
 - expedite(): thin shim = extract() then collect(). One test proves its output is
@@ -21,7 +21,7 @@ from unittest.mock import MagicMock, patch
 
 import cosa.agents.runtime_argument_expeditor.expeditor as ex_mod
 from cosa.agents.runtime_argument_expeditor.expeditor import ExtractionResult, ArgSpec
-from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 
 
 def _spec( entry ):
@@ -50,7 +50,7 @@ def _extraction( final_args, missing, entry, fallback_defaults=None ):
 class TestArgSpecFromEntry( unittest.TestCase ):
 
     def test_carries_required_fields_by_reference( self ):
-        entry = AGENTIC_AGENTS[ DR ]
+        entry = JOB_ARG_CONTRACTS[ DR ]
         spec  = ArgSpec.from_entry( entry )
         self.assertIs( spec.arg_mapping,        entry[ "arg_mapping" ] )
         self.assertIs( spec.fallback_questions, entry[ "fallback_questions" ] )
@@ -83,7 +83,7 @@ class TestExtract( unittest.TestCase ):
 
     def test_returns_extraction_result_with_missing( self ):
         o     = _mk_expeditor( debug=True )
-        entry = AGENTIC_AGENTS[ DR ]
+        entry = JOB_ARG_CONTRACTS[ DR ]
         with _FlowFixture( o, user_visible=[ "query" ], parsed=_expeditor_resp() ):
             result = o.extract( DR, "", "research AI", _spec( entry ) )
         self.assertIsInstance( result, ExtractionResult )
@@ -94,7 +94,7 @@ class TestExtract( unittest.TestCase ):
 
     def test_all_present_no_missing( self ):
         o     = _mk_expeditor()
-        entry = AGENTIC_AGENTS[ DR ]
+        entry = JOB_ARG_CONTRACTS[ DR ]
         with _FlowFixture( o, user_visible=[ "query" ], parsed=_expeditor_resp( present="query=AI" ) ):
             result = o.extract( DR, 'query="AI"', "research AI", _spec( entry ) )
         self.assertEqual( result.missing, [] )
@@ -102,7 +102,7 @@ class TestExtract( unittest.TestCase ):
 
     def test_help_none_uses_placeholder_and_still_extracts( self ):
         o     = _mk_expeditor()
-        entry = AGENTIC_AGENTS[ DR ]
+        entry = JOB_ARG_CONTRACTS[ DR ]
         with _FlowFixture( o, help_text=None, user_visible=[ "query" ],
                            parsed=_expeditor_resp( present="query=AI" ) ):
             result = o.extract( DR, 'query="AI"', "research AI", _spec( entry ) )
@@ -110,14 +110,14 @@ class TestExtract( unittest.TestCase ):
 
     def test_parse_exception_falls_back_to_all_missing( self ):
         o     = _mk_expeditor( debug=True )
-        entry = AGENTIC_AGENTS[ DR ]
+        entry = JOB_ARG_CONTRACTS[ DR ]
         with _FlowFixture( o, user_visible=[ "query" ], parse_raises=True ):
             result = o.extract( DR, "", "research AI", _spec( entry ) )
         self.assertIn( "query", result.missing )
 
     def test_user_visible_none_falls_back_to_fallback_question_keys( self ):
         o     = _mk_expeditor()
-        entry = AGENTIC_AGENTS[ DR ]
+        entry = JOB_ARG_CONTRACTS[ DR ]
         with _FlowFixture( o, user_visible=None, parsed=_expeditor_resp( present="query=AI" ) ):
             result = o.extract( DR, 'query="AI"', "research AI", _spec( entry ) )
         # user_visible None → keys of fallback_questions; query already present so
@@ -127,12 +127,12 @@ class TestExtract( unittest.TestCase ):
 
     def test_extract_does_not_consult_agentic_agents_registry( self ):
         # Mr. Radio's bar: extract() resolves off the agent_entry PARAMETER, never
-        # a registry lookup. With AGENTIC_AGENTS emptied, a self-lookup would
+        # a registry lookup. With JOB_ARG_CONTRACTS emptied, a self-lookup would
         # KeyError/None; passing the spec in must still work. This guard is
         # PROVEN to fail if the lookup is reinstated (red receipt in the report).
         o     = _mk_expeditor()
-        entry = AGENTIC_AGENTS[ DR ]
-        with patch.object( ex_mod, "AGENTIC_AGENTS", {} ), \
+        entry = JOB_ARG_CONTRACTS[ DR ]
+        with patch.object( ex_mod, "JOB_ARG_CONTRACTS", {} ), \
              _FlowFixture( o, user_visible=[ "query" ], parsed=_expeditor_resp( present="query=AI" ) ):
             result = o.extract( DR, 'query="AI"', "research AI", _spec( entry ) )
         self.assertEqual( result.final_args[ "query" ], "AI" )
@@ -142,7 +142,7 @@ class TestCollect( unittest.TestCase ):
 
     def test_no_missing_confirms_and_injects( self ):
         o     = _mk_expeditor()
-        entry = AGENTIC_AGENTS[ DR ]
+        entry = JOB_ARG_CONTRACTS[ DR ]
         extraction = _extraction( { "query": "AI" }, [], entry )
         with patch.object( o, "_confirm_and_iterate", return_value={ "query": "AI" } ):
             out = o.collect( extraction, DR, "research AI", _spec( entry ), "u@x", "s", "uid" )
@@ -151,7 +151,7 @@ class TestCollect( unittest.TestCase ):
 
     def test_single_missing_asks_and_injects( self ):
         o     = _mk_expeditor()
-        entry = AGENTIC_AGENTS[ DR ]
+        entry = JOB_ARG_CONTRACTS[ DR ]
         extraction = _extraction( {}, [ "query" ], entry, fallback_defaults={ "query": "research AI" } )
         with patch.object( o, "_build_request_context", return_value="ctx" ), \
              patch.object( o, "_resolve_default",       return_value="research AI" ), \
@@ -162,7 +162,7 @@ class TestCollect( unittest.TestCase ):
 
     def test_single_missing_user_cancels_returns_none( self ):
         o     = _mk_expeditor()
-        entry = AGENTIC_AGENTS[ DR ]
+        entry = JOB_ARG_CONTRACTS[ DR ]
         extraction = _extraction( {}, [ "query" ], entry, fallback_defaults={ "query": "research AI" } )
         with patch.object( o, "_build_request_context", return_value="ctx" ), \
              patch.object( o, "_resolve_default",       return_value="research AI" ), \
@@ -172,7 +172,7 @@ class TestCollect( unittest.TestCase ):
 
     def test_confirmation_cancel_returns_none( self ):
         o     = _mk_expeditor()
-        entry = AGENTIC_AGENTS[ DR ]
+        entry = JOB_ARG_CONTRACTS[ DR ]
         extraction = _extraction( { "query": "AI" }, [], entry )
         with patch.object( o, "_confirm_and_iterate", return_value=None ):
             out = o.collect( extraction, DR, "research AI", _spec( entry ), "u@x", "s", "uid" )
@@ -183,7 +183,7 @@ class TestExpediteShimUnchanged( unittest.TestCase ):
 
     def test_expedite_delegates_extract_then_collect( self ):
         o     = _mk_expeditor()
-        entry = AGENTIC_AGENTS[ DR ]
+        entry = JOB_ARG_CONTRACTS[ DR ]
         sentinel = MagicMock( name="extraction" )
         with patch.object( o, "extract", return_value=sentinel ) as mx, \
              patch.object( o, "collect", return_value={ "ok": 1 } ) as mc:
@@ -207,7 +207,7 @@ class TestExpediteShimUnchanged( unittest.TestCase ):
     def test_expedite_output_equals_manual_extract_then_collect( self ):
         # María's bar: expedite() must produce EXACTLY what the two halves produce
         # when composed by hand under identical seams.
-        entry  = AGENTIC_AGENTS[ DR ]
+        entry  = JOB_ARG_CONTRACTS[ DR ]
         parsed = _expeditor_resp( present="query=AI" )
 
         o1 = _mk_expeditor()

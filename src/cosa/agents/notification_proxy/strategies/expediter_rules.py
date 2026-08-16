@@ -6,7 +6,7 @@ Matches notification messages against known question patterns from the
 agent_registry and provides deterministic answers from the active test profile.
 
 References:
-    - src/cosa/agents/runtime_argument_expeditor/agent_registry.py (AGENTIC_AGENTS)
+    - src/cosa/agents/runtime_argument_expeditor/agent_registry.py (JOB_ARG_CONTRACTS)
     - src/cosa/agents/runtime_argument_expeditor/expeditor.py (question flow)
 """
 

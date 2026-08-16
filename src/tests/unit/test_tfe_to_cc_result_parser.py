@@ -185,7 +185,7 @@ class TestGitLogFallback:
         assert r[ "summary" ] == "0/2 fixed"
 
     def test_single_commit_parsed( self ):
-        git_log = "abc1234 fix(tfe): C1 Add missing PRODUCT_NAMES entry"
+        git_log = "abc1234 fix(tfe): C1 Add missing CARD_LABELS entry"
         r = parse_result_from_git_log( git_log )
         assert r is not None
         assert r[ "clusters" ][ "C1" ][ "verdict" ] == "fixed"

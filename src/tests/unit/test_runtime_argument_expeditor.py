@@ -35,7 +35,7 @@ import subprocess
 from cosa.agents.runtime_argument_expeditor.xml_models import ExpeditorResponse, ArgConfirmationResponse
 from cosa.agents.runtime_argument_expeditor.expeditor import RuntimeArgumentExpeditor, ArgSpec
 from cosa.agents.runtime_argument_expeditor.agent_registry import (
-    AGENTIC_AGENTS,
+    JOB_ARG_CONTRACTS,
     get_cli_help,
     get_user_visible_args,
     _help_cache,
@@ -49,13 +49,13 @@ def _spec( entry ):
     Build a real ArgSpec from a registry-style dict for the collect()/helper tests.
 
     Commit 27834c64 migrated collect() and its five helpers to take the typed
-    ArgSpec instead of the raw AGENTIC_AGENTS entry. These fixtures pass the entry,
+    ArgSpec instead of the raw JOB_ARG_CONTRACTS entry. These fixtures pass the entry,
     so wrap it here. Absent keys fall back to empty defaults so partial fixtures
     (display_name / cli_module only) still build; a full registry entry produces an
     ArgSpec identical to ArgSpec.from_entry.
 
     Requires:
-        - entry is a dict (may be partial — any AGENTIC_AGENTS key may be absent)
+        - entry is a dict (may be partial — any JOB_ARG_CONTRACTS key may be absent)
 
     Ensures:
         - returns an ArgSpec whose 8 fields mirror entry (missing keys → empty)
@@ -314,7 +314,7 @@ class TestInjectSystemArgs:
 
     def test_injects_all_system_args( self ):
         """Empty args_dict gets all system args injected."""
-        agent_entry = AGENTIC_AGENTS[ "agent router go to deep research" ]
+        agent_entry = JOB_ARG_CONTRACTS[ "agent router go to deep research" ]
         args_dict   = {}
 
         result = self.expeditor._inject_system_args(
@@ -331,7 +331,7 @@ class TestInjectSystemArgs:
 
     def test_preserves_existing( self ):
         """Pre-existing values are NOT overwritten."""
-        agent_entry = AGENTIC_AGENTS[ "agent router go to deep research" ]
+        agent_entry = JOB_ARG_CONTRACTS[ "agent router go to deep research" ]
         args_dict   = { "user_email": "original@test.com" }
 
         result = self.expeditor._inject_system_args(
@@ -345,7 +345,7 @@ class TestInjectSystemArgs:
 
     def test_no_confirm_always_true( self ):
         """no_confirm is always injected as True."""
-        agent_entry = AGENTIC_AGENTS[ "agent router go to deep research" ]
+        agent_entry = JOB_ARG_CONTRACTS[ "agent router go to deep research" ]
         args_dict   = {}
 
         result = self.expeditor._inject_system_args(
@@ -360,7 +360,7 @@ class TestInjectSystemArgs:
     def test_only_injects_listed_args( self ):
         """Only system args listed in agent entry are injected."""
         # Podcast generator doesn't have no_confirm in system_provided
-        agent_entry = AGENTIC_AGENTS[ "agent router go to podcast generator" ]
+        agent_entry = JOB_ARG_CONTRACTS[ "agent router go to podcast generator" ]
         args_dict   = {}
 
         result = self.expeditor._inject_system_args(
@@ -382,7 +382,7 @@ class TestInjectSystemArgs:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestAgentRegistry:
-    """Tests for AGENTIC_AGENTS dict, get_cli_help(), and get_user_visible_args()."""
+    """Tests for JOB_ARG_CONTRACTS dict, get_cli_help(), and get_user_visible_args()."""
 
     def setup_method( self ):
         """Clear help and user-visible caches before each test."""
@@ -397,29 +397,29 @@ class TestAgentRegistry:
     def test_all_entries_required_keys( self ):
         """All registry entries have the required keys."""
         required_keys = [ "cli_module", "required_user_args", "system_provided", "arg_mapping", "fallback_questions" ]
-        for cmd_key, entry in AGENTIC_AGENTS.items():
+        for cmd_key, entry in JOB_ARG_CONTRACTS.items():
             for key in required_keys:
                 assert key in entry, f"Missing '{key}' in entry '{cmd_key}'"
 
     def test_deep_research_required_args( self ):
         """Deep research requires only 'query'."""
-        entry = AGENTIC_AGENTS[ "agent router go to deep research" ]
+        entry = JOB_ARG_CONTRACTS[ "agent router go to deep research" ]
         assert entry[ "required_user_args" ] == [ "query" ]
 
     def test_podcast_special_handlers( self ):
         """Podcast generator has fuzzy_file_match handler for 'research'."""
-        entry = AGENTIC_AGENTS[ "agent router go to podcast generator" ]
+        entry = JOB_ARG_CONTRACTS[ "agent router go to podcast generator" ]
         assert "special_handlers" in entry
         assert entry[ "special_handlers" ][ "research" ] == "fuzzy_file_match"
 
     def test_rtp_required_args( self ):
         """Research-to-podcast requires only 'query'."""
-        entry = AGENTIC_AGENTS[ "agent router go to research to podcast" ]
+        entry = JOB_ARG_CONTRACTS[ "agent router go to research to podcast" ]
         assert entry[ "required_user_args" ] == [ "query" ]
 
     def test_missing_command_returns_none( self ):
         """Nonexistent registry key returns None."""
-        assert AGENTIC_AGENTS.get( "nonexistent command" ) is None
+        assert JOB_ARG_CONTRACTS.get( "nonexistent command" ) is None
 
     @patch( "cosa.agents.runtime_argument_expeditor.agent_registry.subprocess.run" )
     def test_get_cli_help_success( self, mock_run ):
@@ -471,7 +471,7 @@ class TestAgentRegistry:
             "agent router go to research to podcast",
         ]
         for cmd_key in content_agents:
-            entry   = AGENTIC_AGENTS[ cmd_key ]
+            entry   = JOB_ARG_CONTRACTS[ cmd_key ]
             mapping = entry[ "arg_mapping" ]
             assert "audience" in mapping, f"Missing 'audience' in arg_mapping for '{cmd_key}'"
             assert mapping[ "audience" ] == "audience"
@@ -486,14 +486,14 @@ class TestAgentRegistry:
             "agent router go to research to podcast",
         ]
         for cmd_key in content_agents:
-            entry     = AGENTIC_AGENTS[ cmd_key ]
+            entry     = JOB_ARG_CONTRACTS[ cmd_key ]
             questions = entry[ "fallback_questions" ]
             assert "audience" in questions, f"Missing 'audience' in fallback_questions for '{cmd_key}'"
             assert "audience_context" in questions, f"Missing 'audience_context' in fallback_questions for '{cmd_key}'"
 
     def test_deep_research_audience_mapping( self ):
         """Deep research maps audience args correctly."""
-        entry = AGENTIC_AGENTS[ "agent router go to deep research" ]
+        entry = JOB_ARG_CONTRACTS[ "agent router go to deep research" ]
         assert entry[ "arg_mapping" ][ "audience" ] == "audience"
         assert entry[ "arg_mapping" ][ "audience_context" ] == "audience_context"
         assert "beginner" in entry[ "fallback_questions" ][ "audience" ].lower() or \
@@ -501,7 +501,7 @@ class TestAgentRegistry:
 
     def test_all_agents_have_display_name( self ):
         """All three agents have a 'display_name' key."""
-        for cmd_key, entry in AGENTIC_AGENTS.items():
+        for cmd_key, entry in JOB_ARG_CONTRACTS.items():
             assert "display_name" in entry, f"Missing 'display_name' in '{cmd_key}'"
             assert isinstance( entry[ "display_name" ], str )
             assert len( entry[ "display_name" ] ) > 0
@@ -884,7 +884,7 @@ class TestConfirmAndIterate:
         self.expeditor.llm_spec_key             = "test_key"
         self.expeditor.llm_factory              = MagicMock()
 
-        self.agent_entry = AGENTIC_AGENTS[ self.DR_COMMAND_KEY ]
+        self.agent_entry = JOB_ARG_CONTRACTS[ self.DR_COMMAND_KEY ]
 
     @patch( "cosa.agents.runtime_argument_expeditor.expeditor.get_user_visible_args" )
     @patch.object( RuntimeArgumentExpeditor, "_ask_for_confirmation" )
@@ -1114,7 +1114,7 @@ class TestBatchCollectArgs:
         mock_config_mgr.get       = MagicMock( return_value=None )
         self.expeditor.config_mgr = mock_config_mgr
 
-        self.agent_entry        = AGENTIC_AGENTS[ self.DR_COMMAND_KEY ]
+        self.agent_entry        = JOB_ARG_CONTRACTS[ self.DR_COMMAND_KEY ]
         self.fallback_questions = self.agent_entry[ "fallback_questions" ]
 
     @patch( "cosa.agents.runtime_argument_expeditor.expeditor.notify_user_sync" )
@@ -1357,7 +1357,7 @@ class TestRequestContext:
         """Create a minimal expeditor instance."""
         self.expeditor       = RuntimeArgumentExpeditor.__new__( RuntimeArgumentExpeditor )
         self.expeditor.debug = False
-        self.agent_entry     = AGENTIC_AGENTS[ self.DR_COMMAND_KEY ]
+        self.agent_entry     = JOB_ARG_CONTRACTS[ self.DR_COMMAND_KEY ]
 
     @patch( "cosa.agents.runtime_argument_expeditor.expeditor.get_user_visible_args" )
     def test_includes_original_question( self, mock_uva ):
@@ -1477,7 +1477,7 @@ class TestBatchAbstractPassthrough:
             response_value = json.dumps( { "answers": { "budget": "10", "audience": "expert" } } )
         )
 
-        agent_entry        = AGENTIC_AGENTS[ "agent router go to deep research" ]
+        agent_entry        = JOB_ARG_CONTRACTS[ "agent router go to deep research" ]
         fallback_questions = agent_entry[ "fallback_questions" ]
         test_abstract      = '**Your request**: "research quantum"\n**Agent**: Deep Research'
 
@@ -1600,7 +1600,7 @@ class TestBatchDefaultValues:
             response_value = json.dumps( { "answers": { "budget": "10", "audience": "expert" } } )
         )
 
-        agent_entry        = AGENTIC_AGENTS[ self.DR_COMMAND_KEY ]
+        agent_entry        = JOB_ARG_CONTRACTS[ self.DR_COMMAND_KEY ]
         fallback_questions = agent_entry[ "fallback_questions" ]
         fallback_defaults  = agent_entry[ "fallback_defaults" ]
 
@@ -1636,7 +1636,7 @@ class TestBatchDefaultValues:
 
         self.mock_config_mgr.get = MagicMock( side_effect=config_get_side_effect )
 
-        agent_entry        = AGENTIC_AGENTS[ self.DR_COMMAND_KEY ]
+        agent_entry        = JOB_ARG_CONTRACTS[ self.DR_COMMAND_KEY ]
         fallback_questions = agent_entry[ "fallback_questions" ]
         fallback_defaults  = agent_entry[ "fallback_defaults" ]
 
@@ -1664,7 +1664,7 @@ class TestBatchDefaultValues:
             response_value = json.dumps( { "answers": { "query": "quantum computing" } } )
         )
 
-        agent_entry        = AGENTIC_AGENTS[ self.DR_COMMAND_KEY ]
+        agent_entry        = JOB_ARG_CONTRACTS[ self.DR_COMMAND_KEY ]
         fallback_questions = agent_entry[ "fallback_questions" ]
 
         # No fallback_defaults for query, and config returns None
@@ -1689,7 +1689,7 @@ class TestBatchDefaultValues:
             response_value = json.dumps( { "answers": { "budget": "10", "audience": "expert" } } )
         )
 
-        agent_entry        = AGENTIC_AGENTS[ self.DR_COMMAND_KEY ]
+        agent_entry        = JOB_ARG_CONTRACTS[ self.DR_COMMAND_KEY ]
         fallback_questions = agent_entry[ "fallback_questions" ]
         fallback_defaults  = agent_entry[ "fallback_defaults" ]
 
@@ -2081,8 +2081,8 @@ class TestDryRunVisibility:
         """Create a minimal expeditor instance."""
         self.expeditor       = RuntimeArgumentExpeditor.__new__( RuntimeArgumentExpeditor )
         self.expeditor.debug = False
-        self.swe_entry       = AGENTIC_AGENTS[ self.SWE_COMMAND_KEY ]
-        self.dr_entry        = AGENTIC_AGENTS[ self.DR_COMMAND_KEY ]
+        self.swe_entry       = JOB_ARG_CONTRACTS[ self.SWE_COMMAND_KEY ]
+        self.dr_entry        = JOB_ARG_CONTRACTS[ self.DR_COMMAND_KEY ]
 
     @patch( "cosa.agents.runtime_argument_expeditor.expeditor.get_user_visible_args" )
     def test_swe_team_shows_dry_run( self, mock_uva ):
@@ -2154,7 +2154,7 @@ class TestRuntimeSchedulingConfirmation:
         self.expeditor.llm_spec_key             = "test_key"
         self.expeditor.llm_factory              = MagicMock()
         self.expeditor._job_id                  = None
-        self.agent_entry = AGENTIC_AGENTS[ self.DR_COMMAND_KEY ]
+        self.agent_entry = JOB_ARG_CONTRACTS[ self.DR_COMMAND_KEY ]
 
     # ── Confirmation summary includes scheduling section ──────────────
 

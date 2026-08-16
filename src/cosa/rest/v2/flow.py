@@ -25,7 +25,7 @@ from __future__ import annotations
 from typing import Any, Callable, Optional
 
 from cosa.agents.receptionist_agent import ReceptionistAgent
-from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 from cosa.agents.runtime_argument_expeditor.expeditor import ArgSpec
 from cosa.rest.v2.executor import Work
 from cosa.rest.v2.registry import resolve
@@ -199,10 +199,10 @@ class AskFlow:
 
     def _arg_spec_for( self, command: str, required: tuple ) -> ArgSpec:
         """Build the expeditor ArgSpec: from the table, or synthesized (weather)."""
-        entry = AGENTIC_AGENTS.get( command )
+        entry = JOB_ARG_CONTRACTS.get( command )
         if entry is not None:
             return ArgSpec.from_entry( entry )
-        # Not in AGENTIC_AGENTS (weather): synthesize at the call site — do NOT add
+        # Not in JOB_ARG_CONTRACTS (weather): synthesize at the call site — do NOT add
         # a table entry (R-B3, María's line). fallback_questions drives extract()'s
         # user_visible computation for a command with no CLI.
         return ArgSpec(

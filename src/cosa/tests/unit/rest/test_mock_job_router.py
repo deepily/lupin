@@ -193,7 +193,7 @@ class TestHandleExpeditorTest( unittest.TestCase ):
     Unit tests for `_handle_expeditor_test`.
 
     Requires:
-        - AGENTIC_AGENTS, RuntimeArgumentExpeditor, create_agentic_job,
+        - JOB_ARG_CONTRACTS, RuntimeArgumentExpeditor, create_agentic_job,
           ConfigurationManager, user_job_tracker, asyncio.to_thread, uuid mocked
 
     Ensures:
@@ -214,7 +214,7 @@ class TestHandleExpeditorTest( unittest.TestCase ):
         tracker.register_scoped_job.side_effect = lambda h, u, s: f"scoped-{h}"
         self.queue.size.return_value = 4
 
-        with patch( "cosa.agents.runtime_argument_expeditor.agent_registry.AGENTIC_AGENTS", agents ), \
+        with patch( "cosa.agents.runtime_argument_expeditor.agent_registry.JOB_ARG_CONTRACTS", agents ), \
              patch( "cosa.agents.runtime_argument_expeditor.expeditor.RuntimeArgumentExpeditor",
                     return_value=expeditor ), \
              patch( "cosa.config.configuration_manager.ConfigurationManager", return_value=MagicMock() ), \
@@ -235,7 +235,7 @@ class TestHandleExpeditorTest( unittest.TestCase ):
     def test_keyword_match_dry_run_success( self ):
         """
         Ensures:
-            - An AGENTIC_AGENTS keyword match resolves + queues a dry-run job.
+            - An JOB_ARG_CONTRACTS keyword match resolves + queues a dry-run job.
             - A non-matching key listed FIRST exercises the loop-continue arm
               (all(...) False → next iteration) before the match.
         """

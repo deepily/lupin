@@ -208,7 +208,7 @@ class TestBuildRequestContext( unittest.TestCase ):
     def test_uses_passed_command_not_registry_identity_lookup( self ):
         # New seam (row 5982e19b): a spec is not identity-matchable against the
         # registry, so _build_request_context resolves user-visible args via the
-        # command passed in. A hand-built spec (NOT in AGENTIC_AGENTS) must still
+        # command passed in. A hand-built spec (NOT in JOB_ARG_CONTRACTS) must still
         # forward the real command — the former reverse lookup would pass None.
         # Proven RED against the reverse-lookup code (receipt in the crew report).
         o    = _mk_expeditor()

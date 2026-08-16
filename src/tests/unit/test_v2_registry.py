@@ -8,7 +8,7 @@ no inference. Runs on :7999-class unit venue (pure import + file read).
 
 Coverage: this file exercises all of `src/cosa/rest/v2/registry.py` — resolve()'s
 hit / alias / miss arms, AgentSpec.required_args' three arms (declared_args →
-AGENTIC_AGENTS → literal), and the four-bucket partition. Asserts 100% lines +
+JOB_ARG_CONTRACTS → literal), and the four-bucket partition. Asserts 100% lines +
 branches of registry.py when run with
   --cov=cosa.rest.v2.registry --cov-branch --cov-report=term-missing
 
@@ -34,14 +34,14 @@ from cosa.rest.v2.registry import (
     CommandClass,
     ANSWER_COMMANDS,
     JOB_COMMANDS,
-    DEFERRED_COMMANDS,
+    SPEAKABLE_JOBS,
     CONTROL_COMMANDS,
-    RECEPTIONIST_OR_NONE,
+    NO_MATCH,
     resolve,
     resolve_agentic,
     _build_registry,
 )
-from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 
 ROUTER_TEMPLATE = "/src/conf/prompts/agent-router-template-completion.txt"
 
@@ -63,8 +63,8 @@ class TestRegistryDriftGuard( unittest.TestCase ):
 
     def test_every_template_command_is_bucketed_exactly_once( self ):
         template = _template_commands()
-        buckets = [ set( ANSWER_COMMANDS ), set( DEFERRED_COMMANDS ),
-                    set( CONTROL_COMMANDS ), set( RECEPTIONIST_OR_NONE ) ]
+        buckets = [ set( ANSWER_COMMANDS ), set( SPEAKABLE_JOBS ),
+                    set( CONTROL_COMMANDS ), set( NO_MATCH ) ]
         covered = set().union( *buckets )
 
         # Both directions: no template command uncovered, and no bucket carries a
@@ -106,20 +106,20 @@ class TestAgenticSetOwnership( unittest.TestCase ):
     that ownership opens — cls vs the source table, and the interim DEFERRED name."""
 
     # test_cls_agentic_matches_agentic_agents REMOVED (Rachel 2026-08-15): the
-    # AGENTIC specs are built by iterating AGENTIC_AGENTS, so set(JOB_COMMANDS)
-    # == set(AGENTIC_AGENTS) is true BY CONSTRUCTION — a tautology like the count.
+    # AGENTIC specs are built by iterating JOB_ARG_CONTRACTS, so set(JOB_COMMANDS)
+    # == set(JOB_ARG_CONTRACTS) is true BY CONSTRUCTION — a tautology like the count.
     # The invariant is enforced instead by the construction warning at registry.py's
     # _AGENTIC comprehension.
 
     def test_deferred_is_template_emittable_agentic_subset( self ):
-        # DEFERRED_COMMANDS is a bounded interim (retired phase 2). Pin it to the
+        # SPEAKABLE_JOBS is a bounded interim (retired phase 2). Pin it to the
         # template-emittable agentic subset so it cannot silently drift from the
         # owned set: the AGENTIC commands absent from the template (bug fix expediter,
         # test fix expediter [START], heartbeat poker) are excluded here. (test suite
         # and test fix expediter resume ARE in the template and so ARE in the set.)
         template          = _template_commands()
         emittable_agentic = { c for c in JOB_COMMANDS if c in template }
-        self.assertEqual( DEFERRED_COMMANDS, emittable_agentic )
+        self.assertEqual( SPEAKABLE_JOBS, emittable_agentic )
 
 
 class TestResolve( unittest.TestCase ):
@@ -163,26 +163,26 @@ class TestResolve( unittest.TestCase ):
 
 
 class TestRequiredArgsResolutionOrder( unittest.TestCase ):
-    """The §3a migration path — declared_args → AGENTIC_AGENTS → literal tuple."""
+    """The §3a migration path — declared_args → JOB_ARG_CONTRACTS → literal tuple."""
 
     def test_literal_tuple_arm( self ):
-        # weather has no declared_args and is not in AGENTIC_AGENTS → literal tuple.
+        # weather has no declared_args and is not in JOB_ARG_CONTRACTS → literal tuple.
         self.assertEqual( resolve( "agent router go to weather" ).required_args, ( "location", ) )
 
     def test_empty_when_no_source( self ):
-        # math: no declared_args, not in AGENTIC_AGENTS, no literal → ().
+        # math: no declared_args, not in JOB_ARG_CONTRACTS, no literal → ().
         self.assertEqual( resolve( "agent router go to math" ).required_args, () )
 
     def test_agentic_agents_table_arm( self ):
-        # A spec whose command IS in AGENTIC_AGENTS reads its required_user_args.
+        # A spec whose command IS in JOB_ARG_CONTRACTS reads its required_user_args.
         command = "agent router go to deep research"
-        expected = tuple( AGENTIC_AGENTS[ command ][ "required_user_args" ] )
+        expected = tuple( JOB_ARG_CONTRACTS[ command ][ "required_user_args" ] )
         spec = AgentSpec( command, factory=object )   # object has no declared_args
         self.assertEqual( spec.required_args, expected )
 
     def test_agent_declared_args_arm_wins( self ):
         # A factory that declares its own args short-circuits the tables (phase-2
-        # destination). Uses a command that IS in AGENTIC_AGENTS to prove the
+        # destination). Uses a command that IS in JOB_ARG_CONTRACTS to prove the
         # declaration wins over the table.
         class _Declaring:
             @classmethod

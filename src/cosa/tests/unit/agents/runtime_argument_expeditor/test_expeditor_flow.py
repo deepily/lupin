@@ -279,7 +279,7 @@ class TestExpediteFlow( unittest.TestCase ):
                 "special_handlers"   : { "thing": "unrecognized_handler" },
             }
         }
-        with patch.object( ex_mod, "AGENTIC_AGENTS", custom ), \
+        with patch.object( ex_mod, "JOB_ARG_CONTRACTS", custom ), \
              _FlowFixture( o, user_visible=[ "thing" ], parsed=_expeditor_resp() ), \
              patch.object( o, "_build_request_context", return_value="ctx" ), \
              patch.object( o, "_ask_for_arg", return_value="a thing" ), \

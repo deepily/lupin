@@ -212,7 +212,7 @@ def test_agentic_command_names_reads_the_live_registry_and_simple_is_disjoint():
     # LIVE control (the assertion Mr Radio recomputed by hand): the real registry is non-empty,
     # and the shipped 'simple' corpus commands are disjoint from it — so the default paired run
     # never routes to arg extraction. This goes RED the day someone maps a simple command to an
-    # AGENTIC_AGENTS entry, which is exactly when the pin's leak would start biting.
+    # JOB_ARG_CONTRACTS entry, which is exactly when the pin's leak would start biting.
     leaky = guard.agentic_command_names()
     assert leaky                                   # registry is populated (not silently empty)
     assert _SIMPLE_CMDS.isdisjoint( leaky )        # 'simple' routes to nothing arg-extracting

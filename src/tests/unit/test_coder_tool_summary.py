@@ -70,7 +70,7 @@ def test_file_path_truncation_keeps_tail():
 
 def test_grep_and_glob_show_pattern():
     for f in SUMMARIZERS:
-        assert f( _block( "Grep", pattern="AGENTIC_AGENTS" ) ) == "Grep: AGENTIC_AGENTS"
+        assert f( _block( "Grep", pattern="JOB_ARG_CONTRACTS" ) ) == "Grep: JOB_ARG_CONTRACTS"
         assert f( _block( "Glob", pattern="**/*.py" ) ) == "Glob: **/*.py"
 
 

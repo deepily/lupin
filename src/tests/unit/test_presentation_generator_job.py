@@ -600,19 +600,19 @@ class TestExpeditorIntegration:
         assert args_list == [ "source", "target_duration_minutes", "target_slide_count", "audience", "audience_context", "theme" ]
 
     def test_registry_entry_exists( self ):
-        """Presentation generator is registered in AGENTIC_AGENTS."""
-        from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+        """Presentation generator is registered in JOB_ARG_CONTRACTS."""
+        from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 
-        entry = AGENTIC_AGENTS.get( "agent router go to presentation generator" )
+        entry = JOB_ARG_CONTRACTS.get( "agent router go to presentation generator" )
         assert entry is not None
         assert entry[ "job_prefix" ] == "pr"
         assert entry[ "display_name" ] == "Presentation Generator"
 
     def test_registry_entry_required_keys( self ):
         """Registry entry has all required keys."""
-        from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+        from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 
-        entry = AGENTIC_AGENTS[ "agent router go to presentation generator" ]
+        entry = JOB_ARG_CONTRACTS[ "agent router go to presentation generator" ]
         required_keys = {
             "job_prefix", "cli_module", "job_class_path", "display_name",
             "required_user_args", "system_provided", "arg_mapping",
@@ -622,24 +622,24 @@ class TestExpeditorIntegration:
 
     def test_registry_required_user_args( self ):
         """Only 'source' is a required user arg."""
-        from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+        from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 
-        entry = AGENTIC_AGENTS[ "agent router go to presentation generator" ]
+        entry = JOB_ARG_CONTRACTS[ "agent router go to presentation generator" ]
         assert entry[ "required_user_args" ] == [ "source" ]
 
     def test_registry_special_handlers( self ):
         """Source arg uses fuzzy_file_match handler."""
-        from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+        from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 
-        entry = AGENTIC_AGENTS[ "agent router go to presentation generator" ]
+        entry = JOB_ARG_CONTRACTS[ "agent router go to presentation generator" ]
         assert "special_handlers" in entry
         assert entry[ "special_handlers" ][ "source" ] == "fuzzy_file_match"
 
     def test_registry_arg_mapping_aliases( self ):
         """Arg mapping includes common voice aliases for source."""
-        from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+        from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 
-        mapping = AGENTIC_AGENTS[ "agent router go to presentation generator" ][ "arg_mapping" ]
+        mapping = JOB_ARG_CONTRACTS[ "agent router go to presentation generator" ][ "arg_mapping" ]
         # All these voice aliases should map to "source"
         for alias in [ "source", "source_path", "document", "file", "doc" ]:
             assert mapping[ alias ] == "source", f"Alias '{alias}' should map to 'source'"

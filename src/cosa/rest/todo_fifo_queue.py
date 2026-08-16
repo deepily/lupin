@@ -48,7 +48,7 @@ from lupin_cli.notifications.notification_models import (
 )
 
 # Runtime Argument Expeditor imports for agentic job routing
-from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 from cosa.agents.runtime_argument_expeditor.expeditor import (
     RuntimeArgumentExpeditor,
     user_message_for_expedite_reason,
@@ -86,9 +86,9 @@ MODE_METADATA = {
     "test_suite"                : { "display_name": "Test Suite",                "description": "Run integration and E2E tests" },
 }
 
-# Agentic mode keys → AGENTIC_AGENTS routing command strings
+# Agentic mode keys → JOB_ARG_CONTRACTS routing command strings
 # When user selects an agentic mode, this maps directly to the command
-# that enters the `elif command in AGENTIC_AGENTS:` branch
+# that enters the `elif command in JOB_ARG_CONTRACTS:` branch
 AGENTIC_MODE_MAP = {
     "deep_research"            : "agent router go to deep research",
     "podcast"                  : "agent router go to podcast generator",
@@ -799,7 +799,7 @@ class TodoFifoQueue( FifoQueue ):
                 # Randomly grab hemming and hawing string and prepend it to a randomly chosen thinking string
                 msg = f"{self.hemming_and_hawing[ random.randint( 0, len( self.hemming_and_hawing ) - 1 ) ]} {self.thinking[ random.randint( 0, len( self.thinking ) - 1 ) ]}".strip()
                 # ding_for_new_job = False
-            elif command in AGENTIC_AGENTS:
+            elif command in JOB_ARG_CONTRACTS:
                 # Skip disambiguation if user explicitly selected this agentic mode from dropdown
                 if user_mode and user_mode in AGENTIC_MODE_MAP:
                     msg = self._handle_agentic_command(
@@ -1024,7 +1024,7 @@ class TodoFifoQueue( FifoQueue ):
         return self.config_mgr.get( "crud for dataframes agents enabled", default="true" ).strip().lower() == "true"
 
     # Product name mapping for agentic command disambiguation
-    PRODUCT_NAMES = {
+    CARD_LABELS = {
         "agent router go to deep research"             : "Deep Dive (investigate a topic)",
         "agent router go to podcast generator"         : "Doc-to-Pod (create a podcast from an existing document)",
         "agent router go to research to podcast"       : "PodMaker (research a topic and create a podcast)",
@@ -1043,7 +1043,7 @@ class TodoFifoQueue( FifoQueue ):
         Shows what was detected and offers alternatives from the same confusable group.
 
         Requires:
-            - command is a valid AGENTIC_AGENTS key
+            - command is a valid JOB_ARG_CONTRACTS key
             - user_email is set for notification routing
 
         Ensures:
@@ -1055,14 +1055,14 @@ class TodoFifoQueue( FifoQueue ):
             - The wait window is read from config key
               "agentic routing confirm timeout seconds" (default 30), not a literal.
         """
-        detected_name = self.PRODUCT_NAMES.get( command, command )
+        detected_name = self.CARD_LABELS.get( command, command )
 
         timeout_seconds = self.config_mgr.get( "agentic routing confirm timeout seconds", default=30, return_type="int" )
 
         # Build multiple choice options: detected option always first, then alternatives, then cancel
         options = []
         options.append( { "label": detected_name, "description": "This is what I detected" } )
-        for cmd, name in self.PRODUCT_NAMES.items():
+        for cmd, name in self.CARD_LABELS.items():
             if cmd != command:
                 options.append( { "label": name, "description": "Switch to this instead" } )
         options.append( { "label": "Cancel", "description": "Nevermind, cancel this command" } )
@@ -1112,7 +1112,7 @@ class TodoFifoQueue( FifoQueue ):
             return None
 
         # Reverse lookup: product name → command
-        for cmd, name in self.PRODUCT_NAMES.items():
+        for cmd, name in self.CARD_LABELS.items():
             if name == selected:
                 return cmd
 
@@ -1129,7 +1129,7 @@ class TodoFifoQueue( FifoQueue ):
         speculative ID; on cancel/failure the card moves to the dead queue.
 
         Requires:
-            - command is a key in AGENTIC_AGENTS
+            - command is a key in JOB_ARG_CONTRACTS
             - raw_args is a string (may be empty)
             - user_id, user_email, session_id are non-empty strings
             - original_question is the full voice command string
@@ -1158,7 +1158,7 @@ class TodoFifoQueue( FifoQueue ):
             return f"Runtime argument expeditor is disabled. Cannot process command: {command}"
 
         # ── Step 1: Generate speculative job ID ──────────────────────────
-        agent_entry = AGENTIC_AGENTS.get( command, {} )
+        agent_entry = JOB_ARG_CONTRACTS.get( command, {} )
         job_prefix  = agent_entry.get( "job_prefix", "aj" )
         spec_id     = f"{job_prefix}-{uuid.uuid4().hex[ :8 ]}"
         spec_id     = self.user_job_tracker.register_scoped_job( spec_id, user_id, session_id )
@@ -1289,7 +1289,7 @@ class TodoFifoQueue( FifoQueue ):
             - On unknown command or construction failure: returns error message
               with job_id=None and emits no state transitions
         """
-        agent_entry = AGENTIC_AGENTS.get( routing_command, {} )
+        agent_entry = JOB_ARG_CONTRACTS.get( routing_command, {} )
         job_prefix  = agent_entry.get( "job_prefix", "aj" )
 
         # Speculative card for UI consistency with /api/push flow

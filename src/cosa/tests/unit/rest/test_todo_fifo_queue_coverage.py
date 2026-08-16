@@ -384,7 +384,7 @@ class TestPushJobRouting( _TFQBase ):
         self.ws.emit.assert_any_call( 'notification_sound_update', { 'soundFile': '/static/gentle-gong.mp3' } )
 
     def test_agentic_command_via_llm_disambiguation( self ):
-        cmd = next( iter( tfq.AGENTIC_AGENTS ) )
+        cmd = next( iter( tfq.JOB_ARG_CONTRACTS ) )
         with patch.object( self.queue, "_get_routing_command", return_value=( cmd, "args" ) ), \
              patch.object( self.queue, "_confirm_agentic_routing", return_value=cmd ), \
              patch.object( self.queue, "_handle_agentic_command", return_value="submitted" ) as mk, \
@@ -394,7 +394,7 @@ class TestPushJobRouting( _TFQBase ):
         mk.assert_called_once()
 
     def test_agentic_command_user_cancels( self ):
-        cmd = next( iter( tfq.AGENTIC_AGENTS ) )
+        cmd = next( iter( tfq.JOB_ARG_CONTRACTS ) )
         with patch.object( self.queue, "_get_routing_command", return_value=( cmd, "args" ) ), \
              patch.object( self.queue, "_confirm_agentic_routing", return_value=None ), \
              patch( "builtins.print" ):
@@ -402,11 +402,11 @@ class TestPushJobRouting( _TFQBase ):
         self.assertIn( "cancelled", r[ "message" ].lower() )
 
     def test_agentic_command_explicit_mode_skips_disambiguation( self ):
-        # find an agentic mode whose mapped command is in AGENTIC_AGENTS
+        # find an agentic mode whose mapped command is in JOB_ARG_CONTRACTS
         mode = next( iter( AGENTIC_MODE_MAP ) )
         cmd  = AGENTIC_MODE_MAP[ mode ]
-        if cmd not in tfq.AGENTIC_AGENTS:
-            self.skipTest( "mapped command not in AGENTIC_AGENTS registry" )
+        if cmd not in tfq.JOB_ARG_CONTRACTS:
+            self.skipTest( "mapped command not in JOB_ARG_CONTRACTS registry" )
         self.queue.set_user_mode( "u1", mode )
         with patch.object( self.queue, "_handle_agentic_command", return_value="ok" ) as mk, \
              patch( "builtins.print" ):
@@ -480,7 +480,7 @@ class TestConfirmAgenticRouting( _TFQBase ):
     """Exercises _confirm_agentic_routing timeout/cancel/parse/reverse-lookup arms."""
 
     def _cmd( self ):
-        return next( iter( self.queue.PRODUCT_NAMES ) )
+        return next( iter( self.queue.CARD_LABELS ) )
 
     def test_timeout_aborts_none( self ):
         # Row cad45cf1: a silent timeout must NOT masquerade as a confirmation of
@@ -515,7 +515,7 @@ class TestConfirmAgenticRouting( _TFQBase ):
 
     def test_json_answer_reverse_lookup( self ):
         cmd  = self._cmd()
-        name = self.queue.PRODUCT_NAMES[ cmd ]
+        name = self.queue.CARD_LABELS[ cmd ]
         resp = Mock(); resp.is_timeout = False; resp.is_error = False
         resp.response_value = '{"answers": {"Command": "' + name + '"}}'
         with patch.object( tfq, "notify_user_sync", return_value=resp ), patch( "builtins.print" ):
@@ -535,7 +535,7 @@ class TestHandleAgenticCommand( _TFQBase ):
     """Exercises _handle_agentic_command disabled/cancel/job-None/success arms."""
 
     def _cmd( self ):
-        return next( iter( tfq.AGENTIC_AGENTS ) )
+        return next( iter( tfq.JOB_ARG_CONTRACTS ) )
 
     def test_disabled( self ):
         self.queue.config_mgr = _cfg( { "runtime argument expeditor enabled": False } )
@@ -599,7 +599,7 @@ class TestPushJobAgentic( _TFQBase ):
     """Exercises push_job_agentic success / unknown-command / construction-exception arms."""
 
     def _cmd( self ):
-        return next( iter( tfq.AGENTIC_AGENTS ) )
+        return next( iter( tfq.JOB_ARG_CONTRACTS ) )
 
     def test_success( self ):
         job = Mock(); job.JOB_TYPE = "deep_research"; job.id_hash = "x"
@@ -743,8 +743,8 @@ class TestBranchFills( _TFQBase ):
         self.queue.debug = True
         mode = next( iter( AGENTIC_MODE_MAP ) )
         cmd  = AGENTIC_MODE_MAP[ mode ]
-        if cmd not in tfq.AGENTIC_AGENTS:
-            self.skipTest( "mapped command not in AGENTIC_AGENTS registry" )
+        if cmd not in tfq.JOB_ARG_CONTRACTS:
+            self.skipTest( "mapped command not in JOB_ARG_CONTRACTS registry" )
         self.queue.set_user_mode( "u1", mode )
         self.snap_mgr.get_snapshots_by_question.return_value = []
         with patch.object( self.queue, "_handle_agentic_command", return_value="ok" ), patch( "builtins.print" ):
@@ -752,7 +752,7 @@ class TestBranchFills( _TFQBase ):
 
     def test_handle_agentic_command_debug( self ):
         self.queue.debug = True
-        cmd = next( iter( tfq.AGENTIC_AGENTS ) )
+        cmd = next( iter( tfq.JOB_ARG_CONTRACTS ) )
         exp = Mock(); exp.expedite.return_value = { "query": "q" }
         job = Mock(); job.JOB_TYPE = "deep_research"; job.id_hash = "x"
         with patch.object( tfq, "RuntimeArgumentExpeditor", return_value=exp ), \

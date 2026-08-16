@@ -55,7 +55,7 @@ from cosa.rest.v2.registry import (
     ANSWER_COMMANDS,
     JOB_COMMANDS,
     CONTROL_COMMANDS,
-    RECEPTIONIST_OR_NONE,
+    NO_MATCH,
 )
 
 ROUTER_TEMPLATE  = "/src/conf/prompts/agent-router-template-completion.txt"
@@ -67,7 +67,7 @@ TRAINING_ROUTER  = ( "/agent-router-agentic-commands.json",
                      "/agent-router-compound-commands.json",
                      "/agent-router-simple-commands.json" )
 FACTORY_SOURCE   = "/src/cosa/rest/agentic_job_factory.py"
-TODO_QUEUE_SOURCE = "/src/cosa/rest/todo_fifo_queue.py"   # holds PRODUCT_NAMES (the card)
+TODO_QUEUE_SOURCE = "/src/cosa/rest/todo_fifo_queue.py"   # holds CARD_LABELS (the card)
 
 
 def _template_commands():
@@ -102,12 +102,12 @@ def _factory_commands():
 
 def _card_commands():
     """The confirmation-card alternatives a user can pick — the KEYS of
-    PRODUCT_NAMES (todo_fifo_queue.py:1026), each offered as a 'Switch to this
+    CARD_LABELS (todo_fifo_queue.py:1026), each offered as a 'Switch to this
     instead' option by _confirm_agentic_routing:1058. Read from SOURCE (like the
     prompt/factory readers) so this guards what is CHECKED IN, not a live object —
-    a live import could resolve PRODUCT_NAMES differently than the tree on disk."""
+    a live import could resolve CARD_LABELS differently than the tree on disk."""
     text  = cu.get_file_as_string( cu.get_project_root() + TODO_QUEUE_SOURCE )
-    block = re.search( r"PRODUCT_NAMES\s*=\s*\{(.*?)\}", text, re.DOTALL ).group( 1 )
+    block = re.search( r"CARD_LABELS\s*=\s*\{(.*?)\}", text, re.DOTALL ).group( 1 )
     # Match ANY quoted dict KEY (a string immediately followed by a colon), NOT only
     # the "agent router go to …" prefix (Tiffany): a future non-prefixed card key would
     # otherwise be invisible here, and the phantom arm of _card_drift could not flag it.
@@ -161,7 +161,7 @@ INITIAL_DETECTION_EXEMPTIONS = {
             "START is SYSTEM-triggered by the test-suite completion watchdog "
             "(test_suite_completion_watchdog.py:259) with a non-speakable "
             "source_test_suite_job_id; no fuzzy-human-input path, so not user-voice-reachable. "
-            "It is also OFF the confirmation card: START is absent from PRODUCT_NAMES "
+            "It is also OFF the confirmation card: START is absent from CARD_LABELS "
             "(todo_fifo_queue.py:1026), so _confirm_agentic_routing:1058 never offers it as a "
             "'Switch to this instead' alternative — correct, because completing a START run needs "
             "a pasted source_test_suite_job_id that no card alternative supplies. Hence it waives 'card'. "
@@ -180,7 +180,7 @@ INITIAL_DETECTION_EXEMPTIONS = {
             "initial-detection emission, and BFE is intentionally neither listed nor trained, so "
             "the router never emits it as an initial detection. This is NOT the same as "
             "'not voice-reachable': the confirmation card IS a voice path, and BFE is reachable "
-            "on it. PRODUCT_NAMES (todo_fifo_queue.py:1026) offers BFE as a 'Switch to this "
+            "on it. CARD_LABELS (todo_fifo_queue.py:1026) offers BFE as a 'Switch to this "
             "instead' alternative via _confirm_agentic_routing:1058, and its dead_job_id is then "
             "collected by the RAE fallback questions. So BFE waives prompt+training (never an "
             "initial detection) but does NOT waive 'card' — it must stay ON the card, which is "
@@ -222,7 +222,7 @@ def _validate_exemptions( exemptions, owned, template, carded ):
     set, no reason, command not owned, or STALE on a waived surface. A surface is
     STALE when the command is still PRESENT on the reachability path it claims to
     waive — waiving 'prompt' while in the template, or waiving 'card' while in
-    PRODUCT_NAMES — because then the exemption is silencing a guard that has nothing
+    CARD_LABELS — because then the exemption is silencing a guard that has nothing
     to silence. ('training' has no staleness arm here: a training key IS a legitimate
     reason to waive 1c, so presence is not staleness.) Empty ⇒ valid."""
     problems = []
@@ -292,7 +292,7 @@ class TestConversationalDriftGuard( unittest.TestCase ):
 class TestControlNoneDriftGuard( unittest.TestCase ):
 
     def test_3_control_and_none_in_prompt_and_training_only( self ):
-        cn = set( CONTROL_COMMANDS ) | set( RECEPTIONIST_OR_NONE )
+        cn = set( CONTROL_COMMANDS ) | set( NO_MATCH )
         # Both directions (arnold): the control+none set must EQUAL the prompt∩training
         # commands that are neither conversational nor agentic — catches a missing
         # membership AND an extra one.
@@ -308,7 +308,7 @@ class TestClassPartition( unittest.TestCase ):
 
     def test_4_no_command_in_two_class_buckets( self ):
         buckets = [ set( ANSWER_COMMANDS ), set( JOB_COMMANDS ),
-                    set( CONTROL_COMMANDS ), set( RECEPTIONIST_OR_NONE ) ]
+                    set( CONTROL_COMMANDS ), set( NO_MATCH ) ]
         for a, b in combinations( buckets, 2 ):
             self.assertEqual( a & b, set(), f"command in two class buckets: {a & b}" )
 
@@ -383,14 +383,14 @@ class TestCliHelpNamesDeclaredArgs( unittest.TestCase ):
 
     def test_cached_help_names_each_commands_declared_args( self ):
         from cosa.agents.runtime_argument_expeditor.agent_registry import (
-            AGENTIC_AGENTS, get_cli_help,
+            JOB_ARG_CONTRACTS, get_cli_help,
         )
         failures = []
         for command, spec in sorted( JOB_COMMANDS.items() ):
             if spec.cli_module is None:
                 continue                                  # API-invoked (test_suite)
             help_text = ( get_cli_help( command ) or "" ).lower()
-            required  = [ a.lower() for a in AGENTIC_AGENTS[ command ][ "required_user_args" ] ]
+            required  = [ a.lower() for a in JOB_ARG_CONTRACTS[ command ][ "required_user_args" ] ]
             missing   = [ a for a in required if a not in help_text ]
             if not help_text or missing:
                 failures.append( f"{command} ({spec.cli_module}): help does not name {missing or '(help empty)'}" )
@@ -499,7 +499,7 @@ class TestCardDriftPredicateControl( unittest.TestCase ):
 
 # -- Assertion 1d — the card surface (§7): the POSITIVE real-data guard ---------
 class TestCardSurfaceDriftGuard( unittest.TestCase ):
-    """§7 card surface — the live guard on top of Tiberius's facility. PRODUCT_NAMES
+    """§7 card surface — the live guard on top of Tiberius's facility. CARD_LABELS
     (todo_fifo_queue.py:1026) is the confirmation-card alternatives
     _confirm_agentic_routing:1058 offers as 'Switch to this instead' — a FIFTH
     registration list that was instrumented but not guarded until this. Routed through

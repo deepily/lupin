@@ -31,7 +31,7 @@ from unittest.mock import patch, MagicMock
 
 import cosa.agents.runtime_argument_expeditor.expeditor as ex_mod
 from cosa.agents.runtime_argument_expeditor.expeditor import RuntimeArgumentExpeditor
-from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 
 PODCAST_CMD      = "agent router go to podcast generator"
 PRESENTATION_CMD = "agent router go to presentation generator"
@@ -80,14 +80,14 @@ class TestAgentSpecificDocumentPrompt( unittest.TestCase ):
     # ── the registry already holds the right words ───────────────────────────
     def test_registry_supplies_a_presentation_specific_question( self ):
         """The correct wording exists in the registry — the bug was never reading it."""
-        q = AGENTIC_AGENTS[ PRESENTATION_CMD ][ "fallback_questions" ][ "source" ]
+        q = JOB_ARG_CONTRACTS[ PRESENTATION_CMD ][ "fallback_questions" ][ "source" ]
         self.assertIn( "presentation", q.lower() )
         self.assertNotIn( "podcast", q.lower() )
 
     # ── 1. the question follows the caller ───────────────────────────────────
     def test_presentation_ask_does_not_mention_podcast( self ):
         """RED before the fix: the hardcoded string said 'the podcast'."""
-        question = AGENTIC_AGENTS[ PRESENTATION_CMD ][ "fallback_questions" ][ "source" ]
+        question = JOB_ARG_CONTRACTS[ PRESENTATION_CMD ][ "fallback_questions" ][ "source" ]
         _arg, asked = self._ask( "source", question )
         self.assertNotIn( "podcast", asked.lower(),
                           "a presentation job must not ask the user about 'the podcast'" )
@@ -95,7 +95,7 @@ class TestAgentSpecificDocumentPrompt( unittest.TestCase ):
 
     def test_podcast_ask_still_mentions_podcast( self ):
         """The podcast path keeps its own wording — this fix must not flip it."""
-        question = AGENTIC_AGENTS[ PODCAST_CMD ][ "fallback_questions" ].get( "research" )
+        question = JOB_ARG_CONTRACTS[ PODCAST_CMD ][ "fallback_questions" ].get( "research" )
         _arg, asked = self._ask( "research", question )
         self.assertIn( "podcast", asked.lower() )
 

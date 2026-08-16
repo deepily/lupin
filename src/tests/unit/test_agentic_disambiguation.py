@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 
 from lupin_cli.notifications.notification_models import NotificationResponse
 from cosa.rest.todo_fifo_queue import TodoFifoQueue, MODE_METADATA
-from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 
 
 # ---------------------------------------------------------------------------
@@ -31,12 +31,12 @@ def mock_queue():
         - None
 
     Ensures:
-        - Returns MagicMock with .debug and .PRODUCT_NAMES bound
+        - Returns MagicMock with .debug and .CARD_LABELS bound
         - _confirm_agentic_routing is the real unbound method
     """
     queue       = MagicMock()
     queue.debug = True
-    queue.PRODUCT_NAMES = TodoFifoQueue.PRODUCT_NAMES
+    queue.CARD_LABELS = TodoFifoQueue.CARD_LABELS
     # Bind the real method to our mock instance
     queue._confirm_agentic_routing = TodoFifoQueue._confirm_agentic_routing.__get__( queue )
     return queue
@@ -65,28 +65,28 @@ def _make_response( response_value=None, exit_code=0, status="responded", is_tim
 # ---------------------------------------------------------------------------
 
 class TestProductNameMapping:
-    """Verify the PRODUCT_NAMES class variable is consistent with AGENTIC_AGENTS."""
+    """Verify the CARD_LABELS class variable is consistent with JOB_ARG_CONTRACTS."""
 
     def test_all_agentic_agents_have_product_names( self ):
-        """Every AGENTIC_AGENTS key is a confirmation-card alternative (in PRODUCT_NAMES)
+        """Every JOB_ARG_CONTRACTS key is a confirmation-card alternative (in CARD_LABELS)
         UNLESS its drift-guard exemption waives the 'card' surface — a command that is
         never card-reachable (START needs a pasted, non-speakable job hash; heartbeat
         poker has no production dispatch path today). The card-waiver set is the SINGLE
         source, imported from the drift guard (`_exempt_on('card')`) and never
         re-derived here. NOTE the deliberate reader split (Rachel): this test reads
-        PRODUCT_NAMES by IMPORTING TodoFifoQueue, while test_1d parses it from source —
+        CARD_LABELS by IMPORTING TodoFifoQueue, while test_1d parses it from source —
         if the two ever disagree, THAT is the finding (the source parser drifting from
         what the app actually loads), so the readings are kept independent on purpose."""
         from test_v2_registry_drift_guard import _exempt_on
         card_exempt = _exempt_on( "card" )
-        for key in AGENTIC_AGENTS:
-            assert key in TodoFifoQueue.PRODUCT_NAMES or key in card_exempt, (
-                f"AGENTIC_AGENTS key '{key}' has no PRODUCT_NAMES entry and does not waive 'card'"
+        for key in JOB_ARG_CONTRACTS:
+            assert key in TodoFifoQueue.CARD_LABELS or key in card_exempt, (
+                f"JOB_ARG_CONTRACTS key '{key}' has no CARD_LABELS entry and does not waive 'card'"
             )
 
     def test_product_names_are_unique( self ):
         """No two agentic commands share the same product name."""
-        names  = list( TodoFifoQueue.PRODUCT_NAMES.values() )
+        names  = list( TodoFifoQueue.CARD_LABELS.values() )
         unique = set( names )
         assert len( names ) == len( unique ), (
             f"Duplicate product names detected: {names}"
@@ -94,7 +94,7 @@ class TestProductNameMapping:
 
     def test_product_names_contain_descriptions( self ):
         """Each product name contains a parenthetical description."""
-        for cmd, name in TodoFifoQueue.PRODUCT_NAMES.items():
+        for cmd, name in TodoFifoQueue.CARD_LABELS.items():
             assert "(" in name and ")" in name, (
                 f"Product name for '{cmd}' missing parenthetical description: '{name}'"
             )
@@ -112,8 +112,8 @@ class TestProductNameMapping:
         If the two labels swap, the agentic confirm step steers the user to the wrong
         podcast agent — the exact defect this test exists to keep dead.
         """
-        file_reader = TodoFifoQueue.PRODUCT_NAMES[ "agent router go to podcast generator" ].lower()
-        scratch     = TodoFifoQueue.PRODUCT_NAMES[ "agent router go to research to podcast" ].lower()
+        file_reader = TodoFifoQueue.CARD_LABELS[ "agent router go to podcast generator" ].lower()
+        scratch     = TodoFifoQueue.CARD_LABELS[ "agent router go to research to podcast" ].lower()
 
         assert "document" in file_reader, (
             f"podcast-generator (the file reader) label lost its 'document' anchor: '{file_reader}'"
@@ -168,7 +168,7 @@ class TestConfirmAgenticRouting:
     @patch( "cosa.rest.todo_fifo_queue.notify_user_sync" )
     def test_confirm_detected_command( self, mock_notify, mock_queue ):
         """User confirms the detected command → returns same command."""
-        detected_name = TodoFifoQueue.PRODUCT_NAMES[ self.DEEP_RESEARCH ]
+        detected_name = TodoFifoQueue.CARD_LABELS[ self.DEEP_RESEARCH ]
         mock_notify.return_value = _make_response( response_value=detected_name )
 
         result = mock_queue._confirm_agentic_routing(
@@ -182,7 +182,7 @@ class TestConfirmAgenticRouting:
     def test_switch_to_alternative( self, mock_notify, mock_queue ):
         """User picks a different product name → returns that command."""
         # Detected: deep research, but user switches to podcast generator
-        alt_name = TodoFifoQueue.PRODUCT_NAMES[ self.PODCAST_GEN ]
+        alt_name = TodoFifoQueue.CARD_LABELS[ self.PODCAST_GEN ]
         mock_notify.return_value = _make_response( response_value=alt_name )
 
         result = mock_queue._confirm_agentic_routing(
@@ -244,7 +244,7 @@ class TestConfirmAgenticRouting:
     @patch( "cosa.rest.todo_fifo_queue.notify_user_sync" )
     def test_json_response_format( self, mock_notify, mock_queue ):
         """Response in JSON format {"answers": {"Command": "..."}} → parses correctly."""
-        detected_name = TodoFifoQueue.PRODUCT_NAMES[ self.RES_TO_POD ]
+        detected_name = TodoFifoQueue.CARD_LABELS[ self.RES_TO_POD ]
         json_response = json.dumps( { "answers": { "Command": detected_name } } )
         mock_notify.return_value = _make_response( response_value=json_response )
 
@@ -278,9 +278,9 @@ class TestConfirmAgenticRouting:
 
     @patch( "cosa.rest.todo_fifo_queue.notify_user_sync" )
     def test_options_detected_first( self, mock_notify, mock_queue ):
-        """Detected command is always the FIRST option in the list, regardless of PRODUCT_NAMES order."""
+        """Detected command is always the FIRST option in the list, regardless of CARD_LABELS order."""
         # Use podcast_generator (NOT deep_research which is naturally first in dict)
-        detected_name = TodoFifoQueue.PRODUCT_NAMES[ self.PODCAST_GEN ]
+        detected_name = TodoFifoQueue.CARD_LABELS[ self.PODCAST_GEN ]
         mock_notify.return_value = _make_response( response_value=detected_name )
 
         mock_queue._confirm_agentic_routing(
@@ -312,7 +312,7 @@ class TestConfirmAgenticRouting:
     @patch( "cosa.rest.todo_fifo_queue.notify_user_sync" )
     def test_json_response_keyed_by_index( self, mock_notify, mock_queue ):
         """Response as {"answers": {"0": "PodMaker ..."}} (index key) → parses correctly."""
-        alt_name = TodoFifoQueue.PRODUCT_NAMES[ self.RES_TO_POD ]
+        alt_name = TodoFifoQueue.CARD_LABELS[ self.RES_TO_POD ]
         json_response = json.dumps( { "answers": { "0": alt_name } } )
         mock_notify.return_value = _make_response( response_value=json_response )
 
@@ -338,7 +338,7 @@ class TestConfirmAgenticRouting:
     def test_all_three_commands_route_correctly( self, mock_notify, mock_queue ):
         """Each of the 3 agentic commands can be confirmed individually."""
         for command in [ self.DEEP_RESEARCH, self.PODCAST_GEN, self.RES_TO_POD ]:
-            name = TodoFifoQueue.PRODUCT_NAMES[ command ]
+            name = TodoFifoQueue.CARD_LABELS[ command ]
             mock_notify.return_value = _make_response( response_value=name )
 
             result = mock_queue._confirm_agentic_routing(

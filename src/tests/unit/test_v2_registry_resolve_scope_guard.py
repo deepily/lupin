@@ -14,7 +14,7 @@ EXECUTOR: AI — pure import, no server, no human step. :7999-class unit venue.
 Run: PYTHONPATH=src src/cosa/.venv/bin/python -m pytest \
      src/tests/unit/test_v2_registry_resolve_scope_guard.py -v
 
-FORWARD-COMPAT NOTE for the builder: the agentic bucket is DEFERRED_COMMANDS
+FORWARD-COMPAT NOTE for the builder: the agentic bucket is SPEAKABLE_JOBS
 today and becomes JOB_COMMANDS after design §5.1.2 renames it. This file
 imports whichever exists, so it guards the invariant across the phase-1 rename
 WITHOUT edit. The resolve_agentic() half skips until §5.1.3 lands the split
@@ -25,13 +25,13 @@ import unittest
 
 from cosa.rest.v2.registry import resolve
 
-# The agentic bucket: DEFERRED_COMMANDS pre-move, JOB_COMMANDS post-move
+# The agentic bucket: SPEAKABLE_JOBS pre-move, JOB_COMMANDS post-move
 # (§5.1.2). Import whichever the tree currently exposes so this guard survives
 # the rename untouched.
 try:
     from cosa.rest.v2.registry import JOB_COMMANDS as _AGENTIC_BUCKET
 except ImportError:
-    from cosa.rest.v2.registry import DEFERRED_COMMANDS as _AGENTIC_BUCKET
+    from cosa.rest.v2.registry import SPEAKABLE_JOBS as _AGENTIC_BUCKET
 
 # The split reader the design mandates (§5.1.3). Absent until phase 1 builds it.
 try:

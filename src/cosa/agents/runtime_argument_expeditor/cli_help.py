@@ -18,15 +18,15 @@ package's `__main__.py` is two lines that call `run_help_for_module( __package__
 
 import argparse
 
-from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 
 
 def build_parser( command_key ):
     """
-    Build an argparse parser for an agentic command from its AGENTIC_AGENTS entry.
+    Build an argparse parser for an agentic command from its JOB_ARG_CONTRACTS entry.
 
     Requires:
-        - command_key is a key of AGENTIC_AGENTS
+        - command_key is a key of JOB_ARG_CONTRACTS
 
     Ensures:
         - Every declared required_user_arg is a REQUIRED --option whose dest is the
@@ -34,7 +34,7 @@ def build_parser( command_key ):
         - arg_mapping targets not already required are added as optional --options
         - The parser's --help names each declared required argument
     """
-    entry     = AGENTIC_AGENTS[ command_key ]
+    entry     = JOB_ARG_CONTRACTS[ command_key ]
     parser    = argparse.ArgumentParser(
         prog        = command_key,
         description = f"{entry.get( 'display_name' ) or command_key}: argument surface for the runtime argument expeditor.",
@@ -65,7 +65,7 @@ def run_help_for_module( module_name, argv=None ):
           prints usage naming the declared args and exits 0
         - Raises SystemExit with a clear message when no command names this module
     """
-    for command_key, entry in AGENTIC_AGENTS.items():
+    for command_key, entry in JOB_ARG_CONTRACTS.items():
         if entry.get( "cli_module" ) == module_name:
             build_parser( command_key ).parse_args( argv )
             return

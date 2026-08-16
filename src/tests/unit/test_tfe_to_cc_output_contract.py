@@ -142,7 +142,7 @@ class TestValidateDiagnosisPayload:
         payload = {
             "clusters": {
                 "C1": {
-                    "root_cause": "The test asserts the wrong count because AGENTIC_AGENTS now has 10 entries, not 5.",
+                    "root_cause": "The test asserts the wrong count because JOB_ARG_CONTRACTS now has 10 entries, not 5.",
                     "error_category": "test_bug",
                     "confidence": 0.95,
                 }

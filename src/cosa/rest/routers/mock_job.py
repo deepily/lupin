@@ -247,7 +247,7 @@ async def _handle_expeditor_test( voice_command, current_user, todo_queue, beare
     Returns:
         MockJobSubmitResponse with expeditor results
     """
-    from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+    from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
     from cosa.agents.runtime_argument_expeditor.expeditor import RuntimeArgumentExpeditor
     from cosa.rest.agentic_job_factory import create_agentic_job
     from cosa.config.configuration_manager import ConfigurationManager
@@ -258,7 +258,7 @@ async def _handle_expeditor_test( voice_command, current_user, todo_queue, beare
 
     # Simple keyword matching to find the command
     matched_command = None
-    for cmd_key in AGENTIC_AGENTS.keys():
+    for cmd_key in JOB_ARG_CONTRACTS.keys():
         # Extract keywords from command (e.g., "deep research", "podcast", "research to podcast")
         keywords = cmd_key.replace( "agent router go to ", "" ).split()
         if all( kw in voice_command.lower() for kw in keywords ):
@@ -284,7 +284,7 @@ async def _handle_expeditor_test( voice_command, current_user, todo_queue, beare
     if not matched_command:
         raise HTTPException(
             status_code=400,
-            detail=f"Could not match voice command to any agentic agent. Available: {list( AGENTIC_AGENTS.keys() )}"
+            detail=f"Could not match voice command to any agentic agent. Available: {list( JOB_ARG_CONTRACTS.keys() )}"
         )
 
     # Run through expeditor

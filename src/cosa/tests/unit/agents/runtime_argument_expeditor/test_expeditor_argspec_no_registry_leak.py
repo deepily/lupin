@@ -34,7 +34,7 @@ from dataclasses import fields, MISSING
 from unittest.mock import patch
 
 from cosa.agents.runtime_argument_expeditor.expeditor import ArgSpec
-from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 
 from cosa.tests.unit.agents.runtime_argument_expeditor.test_expeditor_flow import (
     _mk_expeditor,
@@ -49,18 +49,18 @@ class TestArgSpecNoRegistryLeak( unittest.TestCase ):
     def setUp( self ):
         # Snapshot the registry entry and restore it after each test, so a
         # regressed (leaking) run cannot poison sibling tests.
-        self._snapshot = copy.deepcopy( AGENTIC_AGENTS[ DR ] )
+        self._snapshot = copy.deepcopy( JOB_ARG_CONTRACTS[ DR ] )
 
     def tearDown( self ):
-        AGENTIC_AGENTS[ DR ] = self._snapshot
+        JOB_ARG_CONTRACTS[ DR ] = self._snapshot
 
     def _extract_with_question( self, o, question ):
-        spec = ArgSpec.from_entry( AGENTIC_AGENTS[ DR ] )
+        spec = ArgSpec.from_entry( JOB_ARG_CONTRACTS[ DR ] )
         with _FlowFixture( o, user_visible=[ "query" ], parsed=_expeditor_resp() ):
             return o.extract( DR, "", question, spec )
 
     def test_second_user_default_is_not_first_users_question( self ):
-        before = copy.deepcopy( AGENTIC_AGENTS[ DR ][ "fallback_defaults" ] )
+        before = copy.deepcopy( JOB_ARG_CONTRACTS[ DR ][ "fallback_defaults" ] )
         o  = _mk_expeditor()
         r1 = self._extract_with_question( o, "FIRST user question" )
         r2 = self._extract_with_question( o, "SECOND user question" )
@@ -69,11 +69,11 @@ class TestArgSpecNoRegistryLeak( unittest.TestCase ):
         self.assertEqual( r1.fallback_defaults[ "query" ], "FIRST user question" )
         self.assertEqual( r2.fallback_defaults[ "query" ], "SECOND user question" )
         # And the registry entry never grew a "query" key at all.
-        self.assertEqual( AGENTIC_AGENTS[ DR ][ "fallback_defaults" ], before )
-        self.assertNotIn( "query", AGENTIC_AGENTS[ DR ][ "fallback_defaults" ] )
+        self.assertEqual( JOB_ARG_CONTRACTS[ DR ][ "fallback_defaults" ], before )
+        self.assertNotIn( "query", JOB_ARG_CONTRACTS[ DR ][ "fallback_defaults" ] )
 
     def test_registry_entry_unchanged_after_full_expedite( self ):
-        before = copy.deepcopy( AGENTIC_AGENTS[ DR ] )
+        before = copy.deepcopy( JOB_ARG_CONTRACTS[ DR ] )
         o = _mk_expeditor()
         with _FlowFixture( o, user_visible=[ "query" ], parsed=_expeditor_resp() ), \
              patch.object( o, "_build_request_context", return_value="ctx" ), \
@@ -82,13 +82,13 @@ class TestArgSpecNoRegistryLeak( unittest.TestCase ):
              patch.object( o, "_confirm_and_iterate",   return_value={ "query": "quantum computing" } ):
             out = o.expedite( DR, "", "u@x", "s", "uid", "please research topic X" )
         self.assertIsNotNone( out )
-        self.assertEqual( AGENTIC_AGENTS[ DR ], before )
+        self.assertEqual( JOB_ARG_CONTRACTS[ DR ], before )
 
     def test_from_entry_copies_fallback_defaults_for_every_command( self ):
         # Whole-table scope (9 of 10 agents carry a fallback_defaults dict): the
         # spec's dict must never BE the registry entry's own object.
         checked = 0
-        for command, entry in AGENTIC_AGENTS.items():
+        for command, entry in JOB_ARG_CONTRACTS.items():
             if "fallback_defaults" not in entry:
                 continue
             spec = ArgSpec.from_entry( entry )

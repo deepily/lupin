@@ -22,7 +22,7 @@ def _make_mock_queue():
     """Lightweight mock of TodoFifoQueue — avoids heavy __init__."""
     queue       = MagicMock()
     queue.debug = False
-    queue.PRODUCT_NAMES = TodoFifoQueue.PRODUCT_NAMES
+    queue.CARD_LABELS = TodoFifoQueue.CARD_LABELS
     queue._confirm_agentic_routing = TodoFifoQueue._confirm_agentic_routing.__get__( queue )
     return queue
 
@@ -59,7 +59,7 @@ def quick_smoke_test():
     try:
         queue = _make_mock_queue()
         cmd   = "agent router go to deep research"
-        name  = TodoFifoQueue.PRODUCT_NAMES[ cmd ]
+        name  = TodoFifoQueue.CARD_LABELS[ cmd ]
 
         with patch( "cosa.rest.todo_fifo_queue.notify_user_sync" ) as mock_notify:
 
@@ -75,7 +75,7 @@ def quick_smoke_test():
             # 2. Switch to different command
             print( "2. Switch to different command..." )
             podcast_cmd  = "agent router go to podcast generator"
-            podcast_name = TodoFifoQueue.PRODUCT_NAMES[ podcast_cmd ]
+            podcast_name = TodoFifoQueue.CARD_LABELS[ podcast_cmd ]
             mock_notify.return_value = _make_response(
                 response_value=json.dumps( { "answers": { "Command": podcast_name } } )
             )

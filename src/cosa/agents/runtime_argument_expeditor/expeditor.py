@@ -20,7 +20,7 @@ from typing import Optional
 import cosa.utils.util as cu
 
 from cosa.agents.runtime_argument_expeditor.agent_registry import (
-    AGENTIC_AGENTS,
+    JOB_ARG_CONTRACTS,
     get_cli_help,
     get_user_visible_args
 )
@@ -86,7 +86,7 @@ class ExtractionResult:
 @dataclass
 class ArgSpec:
     """
-    An AGENTIC_AGENTS entry, typed — every field the expeditor's extract() /
+    An JOB_ARG_CONTRACTS entry, typed — every field the expeditor's extract() /
     collect() halves and their helpers read, in one carrier. The expedite() shim
     builds one from the raw table entry, so the whole pipeline runs off the spec
     and a v2 caller can drive it (including resolving a display name) with no
@@ -121,11 +121,11 @@ class ArgSpec:
     @classmethod
     def from_entry( cls, entry ):
         """
-        Build an ArgSpec from a raw AGENTIC_AGENTS entry, preserving the exact
+        Build an ArgSpec from a raw JOB_ARG_CONTRACTS entry, preserving the exact
         reference semantics the expeditor relied on when it read the dict directly.
 
         Requires:
-            - entry is an AGENTIC_AGENTS registry entry (has arg_mapping,
+            - entry is an JOB_ARG_CONTRACTS registry entry (has arg_mapping,
               system_provided, required_user_args, fallback_questions)
 
         Ensures:
@@ -283,7 +283,7 @@ class RuntimeArgumentExpeditor:
         Run argument gap analysis and collect missing arguments from user.
 
         Requires:
-            - command is a key in AGENTIC_AGENTS
+            - command is a key in JOB_ARG_CONTRACTS
             - raw_args is a string (may be empty)
             - user_email, session_id, user_id are non-empty strings
             - original_question is the full voice command string
@@ -310,7 +310,7 @@ class RuntimeArgumentExpeditor:
         self._bearer_token         = bearer_token
         self._last_expedite_reason = None
 
-        agent_entry = AGENTIC_AGENTS.get( command )
+        agent_entry = JOB_ARG_CONTRACTS.get( command )
         if not agent_entry:
             print( f"[Expeditor] Unknown command: {command}" )
             self._last_expedite_reason = BATCH_INTERNAL
@@ -329,11 +329,11 @@ class RuntimeArgumentExpeditor:
         is still missing. Issues NO user prompts.
 
         Requires:
-            - command is a key in AGENTIC_AGENTS
+            - command is a key in JOB_ARG_CONTRACTS
             - raw_args is a string (may be empty)
             - original_question is the full voice command string
             - spec is an ArgSpec built from the command's registry entry (by the
-              caller) — extract() reads only spec, never the AGENTIC_AGENTS table
+              caller) — extract() reads only spec, never the JOB_ARG_CONTRACTS table
 
         Ensures:
             - Returns an ExtractionResult carrying final_args (LORA + LLM merge),
@@ -464,7 +464,7 @@ class RuntimeArgumentExpeditor:
 
         Requires:
             - extraction is an ExtractionResult from extract()
-            - command is a key in AGENTIC_AGENTS and spec is its ArgSpec
+            - command is a key in JOB_ARG_CONTRACTS and spec is its ArgSpec
             - user_email, session_id, user_id are non-empty strings
             - original_question is the full voice command string
 
@@ -685,7 +685,7 @@ class RuntimeArgumentExpeditor:
         Requires:
             - args_dict contains all collected user-facing args
             - spec is the ArgSpec for this agent
-            - command_key is the agent's key in AGENTIC_AGENTS
+            - command_key is the agent's key in JOB_ARG_CONTRACTS
 
         Ensures:
             - Returns approved args_dict, or None if cancelled
@@ -699,7 +699,7 @@ class RuntimeArgumentExpeditor:
         Args:
             args_dict: Collected argument dictionary
             spec: ArgSpec for the target agent
-            command_key: Key in AGENTIC_AGENTS for user-visible-args lookup
+            command_key: Key in JOB_ARG_CONTRACTS for user-visible-args lookup
             user_email: Target user for voice prompts
 
         Returns:
@@ -921,7 +921,7 @@ class RuntimeArgumentExpeditor:
         Resolve default value for an argument: config override > registry > None.
 
         Requires:
-            - command_key is a key in AGENTIC_AGENTS
+            - command_key is a key in JOB_ARG_CONTRACTS
             - arg_name is the CLI argument name
             - registry_default is the fallback_defaults value (or None)
 
@@ -946,7 +946,7 @@ class RuntimeArgumentExpeditor:
         Returns:
             str or None: Resolved default value
         """
-        entry = AGENTIC_AGENTS.get( command_key )
+        entry = JOB_ARG_CONTRACTS.get( command_key )
         if entry is not None and arg_name in entry[ "required_user_args" ]:
             return registry_default
 
@@ -1862,7 +1862,7 @@ def quick_smoke_test():
     # Test 1: Imports
     print( "\n1. Testing imports..." )
     try:
-        from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS, get_cli_help
+        from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS, get_cli_help
         from cosa.agents.runtime_argument_expeditor.xml_models import ExpeditorResponse
         from cosa.agents.runtime_argument_expeditor.expeditor import RuntimeArgumentExpeditor
         print( "   ✓ All imports successful" )
@@ -1911,12 +1911,12 @@ def quick_smoke_test():
     # Test 3: Registry lookup
     print( "\n3. Testing registry lookup..." )
     try:
-        entry = AGENTIC_AGENTS.get( "agent router go to deep research" )
+        entry = JOB_ARG_CONTRACTS.get( "agent router go to deep research" )
         assert entry is not None
         assert "query" in entry[ "required_user_args" ]
         print( "   ✓ Deep research registry entry found" )
 
-        entry = AGENTIC_AGENTS.get( "agent router go to podcast generator" )
+        entry = JOB_ARG_CONTRACTS.get( "agent router go to podcast generator" )
         assert entry is not None
         assert "research" in entry[ "required_user_args" ]
         assert entry[ "special_handlers" ][ "research" ] == "fuzzy_file_match"

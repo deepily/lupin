@@ -43,7 +43,7 @@ from cosa.agents.runtime_argument_expeditor.expeditor import (
     DOC_CHOICE_DESCRIBE_LABEL,
     DOC_CHOICE_DESCRIBE_SENTINEL,
 )
-from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 
 from cosa.tests.unit.agents.runtime_argument_expeditor.test_expeditor_auto_resolve import (
     _mk_expeditor,
@@ -200,7 +200,7 @@ class TestCollectPodcastSpecialHandlerSkips( unittest.TestCase ):
 
     def test_non_fuzzy_and_present_absent_args_are_skipped( self ):
         o     = _mk_expeditor()
-        entry = AGENTIC_AGENTS[ PG ]
+        entry = JOB_ARG_CONTRACTS[ PG ]
         # missing=[] → the interactive block is skipped; the podcast post-loop runs.
         # "other" handler → 534->533 continue; "research" fuzzy but NOT in final_args
         #   and NOT in missing → 536->533 continue. Neither invokes a matcher.

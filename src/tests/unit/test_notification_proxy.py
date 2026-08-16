@@ -607,9 +607,9 @@ class TestProfileCoverage:
 
     def test_deep_research_covers_all_fallback_questions( self ):
         """Deep research profile covers all known question args."""
-        from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+        from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 
-        agent = AGENTIC_AGENTS[ "agent router go to deep research" ]
+        agent = JOB_ARG_CONTRACTS[ "agent router go to deep research" ]
         profile = TEST_PROFILES[ "deep_research" ]
 
         for arg_name in agent[ "fallback_questions" ]:
@@ -618,9 +618,9 @@ class TestProfileCoverage:
 
     def test_podcast_covers_all_fallback_questions( self ):
         """Podcast profile covers all known question args."""
-        from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+        from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 
-        agent = AGENTIC_AGENTS[ "agent router go to podcast generator" ]
+        agent = JOB_ARG_CONTRACTS[ "agent router go to podcast generator" ]
         profile = TEST_PROFILES[ "podcast" ]
 
         for arg_name in agent[ "fallback_questions" ]:
@@ -629,9 +629,9 @@ class TestProfileCoverage:
 
     def test_research_to_podcast_covers_all_fallback_questions( self ):
         """Research-to-podcast profile covers all known question args."""
-        from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+        from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 
-        agent = AGENTIC_AGENTS[ "agent router go to research to podcast" ]
+        agent = JOB_ARG_CONTRACTS[ "agent router go to research to podcast" ]
         profile = TEST_PROFILES[ "research_to_podcast" ]
 
         for arg_name in agent[ "fallback_questions" ]:
@@ -640,13 +640,13 @@ class TestProfileCoverage:
 
     def test_all_agents_profile_covers_all_arg_names( self ):
         """all_agents union profile covers every arg name across all 3 agents."""
-        from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+        from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 
         profile = TEST_PROFILES[ "all_agents" ]
 
         # Collect all unique arg names across all agents
         all_arg_names = set()
-        for key, agent in AGENTIC_AGENTS.items():
+        for key, agent in JOB_ARG_CONTRACTS.items():
             for arg_name in agent[ "fallback_questions" ]:
                 all_arg_names.add( arg_name )
 

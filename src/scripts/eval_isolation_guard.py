@@ -87,7 +87,7 @@ class PairedCorpusExercisesLeak( RuntimeError ):
     fallback_defaults dict, so the first replayed body's extracted arg STICKS as every later
     body's default for the process life — a cross-body contaminant in a SEQUENTIAL replay. The
     'simple' corpus is safe because its commands are pure routing and never reach arg extraction;
-    a corpus containing any AGENTIC_AGENTS command is not. Raised loudly, naming the offender.
+    a corpus containing any JOB_ARG_CONTRACTS command is not. Raised loudly, naming the offender.
     """
 
 
@@ -384,15 +384,15 @@ def agentic_command_names() -> Set[ str ]:
     """
     The router commands that invoke runtime-argument extraction — the fallback_defaults leak site.
 
-    Read LIVE from the registry (AGENTIC_AGENTS) rather than a frozen list, so the guard tracks
+    Read LIVE from the registry (JOB_ARG_CONTRACTS) rather than a frozen list, so the guard tracks
     a thirteenth agent the moment someone adds one — detect the contact, do not model a snapshot
     of it.
 
     Ensures:
         - returns the set of command keys the runtime-argument expeditor extracts args for.
     """
-    from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
-    return set( AGENTIC_AGENTS.keys() )
+    from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
+    return set( JOB_ARG_CONTRACTS.keys() )
 
 
 def require_leak_free_corpus( corpus_commands, *, agentic_commands: Optional[ Set[ str ] ] = None ) -> Set[ str ]:

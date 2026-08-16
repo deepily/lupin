@@ -12,7 +12,7 @@ the FULL routing string, is what the §9 registry-guard test defends so that dri
 cannot reappear.
 
 Resolution order for `required_args` is the MIGRATION PATH, not a fallback chain
-(§3a): the agent declares its own args first (phase 2), then the `AGENTIC_AGENTS`
+(§3a): the agent declares its own args first (phase 2), then the `JOB_ARG_CONTRACTS`
 table (today, for the agentic commands), then the spec's literal tuple (today, for
 the conversational agents). In phase 1 no agent declares, so every lookup lands on
 a table exactly as it does now.
@@ -36,7 +36,7 @@ from cosa.agents.date_and_time_agent import DateAndTimeAgent
 from cosa.agents.todo_list_agent     import TodoListAgent
 from cosa.agents.calendaring_agent   import CalendaringAgent
 from cosa.agents.weather_agent       import WeatherAgent
-from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 from cosa.agents.runtime_argument_expeditor.expeditor      import ArgSpec
 
 
@@ -68,7 +68,7 @@ class AgentSpec:
           agentic / control / none commands, which resolve() never returns
 
     Ensures:
-        - required_args resolves agent-first (declared_args), then AGENTIC_AGENTS,
+        - required_args resolves agent-first (declared_args), then JOB_ARG_CONTRACTS,
           then the literal _required_args tuple (§3a migration path)
         - frozen: specs are immutable table data
         - arg_spec, when present, is an ArgSpec built via ArgSpec.from_entry so the
@@ -92,17 +92,17 @@ class AgentSpec:
         Resolve this command's required arguments along the §3a migration path.
 
         Requires:
-            - AGENTIC_AGENTS is importable
+            - JOB_ARG_CONTRACTS is importable
 
         Ensures:
             - Returns the agent's own declared required args when its factory
               implements declared_args() (phase 2 destination)
-            - Else the AGENTIC_AGENTS entry's required_user_args when present
+            - Else the JOB_ARG_CONTRACTS entry's required_user_args when present
             - Else this spec's literal _required_args, or () when unset
         """
         if hasattr( self.factory, "declared_args" ):
             return self.factory.declared_args().required
-        entry = AGENTIC_AGENTS.get( self.command )
+        entry = JOB_ARG_CONTRACTS.get( self.command )
         if entry:
             return tuple( entry[ "required_user_args" ] )
         return self._required_args or ()
@@ -128,7 +128,7 @@ _CONVERSATIONAL = (
 
 def _agentic_spec( command, entry ):
     """
-    Build an AGENTIC AgentSpec from a raw AGENTIC_AGENTS entry (§5.1 / §5.1.1).
+    Build an AGENTIC AgentSpec from a raw JOB_ARG_CONTRACTS entry (§5.1 / §5.1.1).
 
     Ensures:
         - arg_spec is ArgSpec.from_entry( entry ) — the eight expeditor fields are
@@ -156,16 +156,16 @@ def _agentic_spec( command, entry ):
 
 
 # ── The agentic set — now OWNED by the registry (§5.1) ────────────────────────
-# One spec per AGENTIC_AGENTS entry (10), built by iterating the table itself. So
+# One spec per JOB_ARG_CONTRACTS entry (10), built by iterating the table itself. So
 # JOB_COMMANDS (derived below from the CommandClass.AGENTIC label) equals the
-# AGENTIC_AGENTS key set BY CONSTRUCTION — there is no second hand-written list to
+# JOB_ARG_CONTRACTS key set BY CONSTRUCTION — there is no second hand-written list to
 # drift from it. (Tiberius's §3b cross-check resolved as construction, not a
 # runtime test: a set-equality asserted against a set derived from the same table
 # is a tautology that can never go red.)
 # ⚠️ Do NOT hand-declare an AGENTIC AgentSpec anywhere but this comprehension.
-# Adding one by hand is the ONLY way to reintroduce the cls↔AGENTIC_AGENTS drift,
+# Adding one by hand is the ONLY way to reintroduce the cls↔JOB_ARG_CONTRACTS drift,
 # and — precisely because the invariant is structural — no test would catch it.
-_AGENTIC = tuple( _agentic_spec( command, entry ) for command, entry in AGENTIC_AGENTS.items() )
+_AGENTIC = tuple( _agentic_spec( command, entry ) for command, entry in JOB_ARG_CONTRACTS.items() )
 
 # ── Mode-control and the receptionist/none outcomes, as class-labelled specs ──
 # So the four template buckets can be DERIVED from cls (§5.1.2). `automatic` clears
@@ -233,12 +233,12 @@ REGISTRY = _build_registry( _CONVERSATIONAL, _AGENTIC, _CONTROL, _NONE )
 ANSWER_COMMANDS      = { c: s for c, s in REGISTRY.items() if s.cls is CommandClass.CONVERSATIONAL }
 JOB_COMMANDS         = { c: s for c, s in REGISTRY.items() if s.cls is CommandClass.AGENTIC }
 CONTROL_COMMANDS     = frozenset( c for c, s in REGISTRY.items() if s.cls is CommandClass.CONTROL )
-RECEPTIONIST_OR_NONE = frozenset( c for c, s in REGISTRY.items() if s.cls is CommandClass.NONE )
+NO_MATCH = frozenset( c for c, s in REGISTRY.items() if s.cls is CommandClass.NONE )
 
-# ── DEFERRED_COMMANDS — a deliberate BOUNDED INTERIM, retired in phase 2 ───────
+# ── SPEAKABLE_JOBS — a deliberate BOUNDED INTERIM, retired in phase 2 ───────
 # The §9 drift guard (test_v2_registry.py:59) imports this name and asserts
-#   template == ANSWER_COMMANDS ∪ DEFERRED_COMMANDS ∪ CONTROL_COMMANDS ∪ RECEPTIONIST_OR_NONE.
-# DEFERRED_COMMANDS is the template-EMITTABLE agentic subset (9), NOT the full
+#   template == ANSWER_COMMANDS ∪ SPEAKABLE_JOBS ∪ CONTROL_COMMANDS ∪ NO_MATCH.
+# SPEAKABLE_JOBS is the template-EMITTABLE agentic subset (9), NOT the full
 # agentic set (12): the owned agentic commands absent from the router template —
 # `bug fix expediter` (card-reachable, never an initial detection), `test fix
 # expediter` (START, system-triggered, EXEMPT — non-speakable job-id arg), and
@@ -250,7 +250,7 @@ RECEPTIONIST_OR_NONE = frozenset( c for c, s in REGISTRY.items() if s.cls is Com
 # `test_deferred_is_template_emittable_agentic_subset` pins it to
 # JOB_COMMANDS ∩ template so it cannot silently drift from the owned set.
 # Phase 2 retires this name when the drift guard is rewritten class-aware.
-DEFERRED_COMMANDS = frozenset( {
+SPEAKABLE_JOBS = frozenset( {
     "agent router go to deep research",
     "agent router go to podcast generator",
     "agent router go to research to podcast",

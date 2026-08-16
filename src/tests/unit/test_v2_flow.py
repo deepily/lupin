@@ -3,7 +3,7 @@
 Unit tests for CJ Flow v2's branch logic (unit D) — src/cosa/rest/v2/flow.py.
 
 Hermetic: every collaborator (cache, router, expeditor, executor, pending,
-notifier) is a fake, and `resolve` / `AGENTIC_AGENTS` are patched at the flow
+notifier) is a fake, and `resolve` / `JOB_ARG_CONTRACTS` are patched at the flow
 module boundary, so the four branches + every degradation are exercised with NO
 live Postgres, NO model server, and NO TTS network call. :7999-eligible.
 
@@ -487,7 +487,7 @@ def test_compose_question_appends_missing_skips_present_and_empty( tmp_path, not
 # ────────────────────────────────────────────────────────────── _arg_spec_for forks
 
 def test_arg_spec_for_synthesizes_weather_when_not_in_table( tmp_path, notifier, monkeypatch ):
-    # weather is NOT in AGENTIC_AGENTS → the call-site ArgSpec is synthesized (R-B3).
+    # weather is NOT in JOB_ARG_CONTRACTS → the call-site ArgSpec is synthesized (R-B3).
     monkeypatch.setattr( flow_mod, "resolve",
                          lambda command: FakeSpec( required_args=( "location", ) ) )
     router  = FakeRouter( command="agent router go to weather" )
@@ -506,7 +506,7 @@ def test_arg_spec_for_uses_table_entry_when_present( tmp_path, notifier, monkeyp
         "required_user_args" : [ "foo" ],
         "fallback_questions" : { "foo": "Which foo?" },
     }
-    monkeypatch.setattr( flow_mod, "AGENTIC_AGENTS", { "agent router go to foo": entry } )
+    monkeypatch.setattr( flow_mod, "JOB_ARG_CONTRACTS", { "agent router go to foo": entry } )
     f = AskFlow( FakeCache(), FakeRouter(), FakeExpeditor(), FakeExecutor(), FakePending(),
                  notifier=notifier, trace_dir=str( tmp_path ) )
     spec = f._arg_spec_for( "agent router go to foo", ( "foo", ) )

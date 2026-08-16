@@ -19,7 +19,7 @@ from typing import Optional
 # Agent Registry
 # ============================================================================
 
-AGENTIC_AGENTS = {
+JOB_ARG_CONTRACTS = {
     "agent router go to deep research" : {
         "job_prefix"         : "dr",
         "cli_module"         : "cosa.agents.deep_research.cli",
@@ -384,7 +384,7 @@ def get_cli_help( command_key ):
     Capture --help output for an agentic agent's CLI module.
 
     Requires:
-        - command_key is a key in AGENTIC_AGENTS
+        - command_key is a key in JOB_ARG_CONTRACTS
 
     Ensures:
         - Returns help text string on success
@@ -392,7 +392,7 @@ def get_cli_help( command_key ):
         - Results are cached per-process-lifetime in _help_cache
 
     Args:
-        command_key: Key from AGENTIC_AGENTS (e.g., "agent router go to deep research")
+        command_key: Key from JOB_ARG_CONTRACTS (e.g., "agent router go to deep research")
 
     Returns:
         str or None: CLI help text or None on failure
@@ -400,7 +400,7 @@ def get_cli_help( command_key ):
     if command_key in _help_cache:
         return _help_cache[ command_key ]
 
-    agent_entry = AGENTIC_AGENTS.get( command_key )
+    agent_entry = JOB_ARG_CONTRACTS.get( command_key )
     if not agent_entry:
         return None
 
@@ -440,14 +440,14 @@ def get_user_visible_args( command_key ):
     Get list of user-visible args for an agent by calling its CLI with --user-visible-args.
 
     Requires:
-        - command_key exists in AGENTIC_AGENTS
+        - command_key exists in JOB_ARG_CONTRACTS
 
     Ensures:
         - Returns list of arg name strings, or None on failure
         - Results are cached for process lifetime
 
     Args:
-        command_key: Key from AGENTIC_AGENTS (e.g., "agent router go to deep research")
+        command_key: Key from JOB_ARG_CONTRACTS (e.g., "agent router go to deep research")
 
     Returns:
         list or None: List of user-visible arg names, or None on failure
@@ -455,7 +455,7 @@ def get_user_visible_args( command_key ):
     if command_key in _user_visible_cache:
         return _user_visible_cache[ command_key ]
 
-    entry = AGENTIC_AGENTS.get( command_key )
+    entry = JOB_ARG_CONTRACTS.get( command_key )
     if not entry:
         return None
 
@@ -504,7 +504,7 @@ def quick_smoke_test():
     try:
         # (count guard deleted 2026-08-15, María: len()==N reads its own source and
         # catches nothing; the drift guard's set-equality is the real content check.)
-        for key, entry in AGENTIC_AGENTS.items():
+        for key, entry in JOB_ARG_CONTRACTS.items():
             assert "cli_module" in entry, f"Missing cli_module in {key}"
             assert "required_user_args" in entry, f"Missing required_user_args in {key}"
             assert "system_provided" in entry, f"Missing system_provided in {key}"
@@ -522,29 +522,29 @@ def quick_smoke_test():
     # Test 2: Key lookups
     print( "\n2. Testing key lookups..." )
     try:
-        dr = AGENTIC_AGENTS.get( "agent router go to deep research" )
+        dr = JOB_ARG_CONTRACTS.get( "agent router go to deep research" )
         assert dr is not None
         assert dr[ "required_user_args" ] == [ "query" ]
         print( "   ✓ Deep research lookup works" )
 
-        pg = AGENTIC_AGENTS.get( "agent router go to podcast generator" )
+        pg = JOB_ARG_CONTRACTS.get( "agent router go to podcast generator" )
         assert pg is not None
         assert pg[ "required_user_args" ] == [ "research" ]
         assert "special_handlers" in pg
         print( "   ✓ Podcast generator lookup works (has special_handlers)" )
 
-        rp = AGENTIC_AGENTS.get( "agent router go to research to podcast" )
+        rp = JOB_ARG_CONTRACTS.get( "agent router go to research to podcast" )
         assert rp is not None
         assert rp[ "required_user_args" ] == [ "query" ]
         print( "   ✓ Research to podcast lookup works" )
 
-        st = AGENTIC_AGENTS.get( "agent router go to swe team" )
+        st = JOB_ARG_CONTRACTS.get( "agent router go to swe team" )
         assert st is not None
         assert st[ "required_user_args" ] == [ "task" ]
         assert st[ "display_name" ] == "SWE Team"
         print( "   ✓ SWE Team lookup works" )
 
-        missing = AGENTIC_AGENTS.get( "nonexistent command" )
+        missing = JOB_ARG_CONTRACTS.get( "nonexistent command" )
         assert missing is None
         print( "   ✓ Missing key returns None" )
 

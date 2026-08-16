@@ -9,7 +9,7 @@ Validates that:
   - All 7 agent-base modes are accepted
   - All 6 agentic modes are accepted
   - Invalid modes are rejected with ValueError
-  - AGENTIC_MODE_MAP values are valid AGENTIC_AGENTS keys
+  - AGENTIC_MODE_MAP values are valid JOB_ARG_CONTRACTS keys
   - get_available_modes() returns all 15 entries (system + 7 agents + 7 agentic)
   - MODE_METADATA has entries for every mode key plus "system"
 """
@@ -23,7 +23,7 @@ from cosa.rest.todo_fifo_queue import (
     AGENTIC_MODE_MAP,
     MODE_METADATA,
 )
-from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 
 
 # ---------------------------------------------------------------------------
@@ -62,10 +62,10 @@ class TestModuleDicts:
     """Tests for MODE_TO_AGENT, AGENTIC_MODE_MAP, and MODE_METADATA consistency."""
 
     def test_agentic_mode_map_values_are_valid_agentic_agents( self ):
-        """Every AGENTIC_MODE_MAP value must be a key in AGENTIC_AGENTS."""
+        """Every AGENTIC_MODE_MAP value must be a key in JOB_ARG_CONTRACTS."""
         for mode_key, command in AGENTIC_MODE_MAP.items():
-            assert command in AGENTIC_AGENTS, (
-                f"AGENTIC_MODE_MAP['{mode_key}'] = '{command}' is not a valid AGENTIC_AGENTS key"
+            assert command in JOB_ARG_CONTRACTS, (
+                f"AGENTIC_MODE_MAP['{mode_key}'] = '{command}' is not a valid JOB_ARG_CONTRACTS key"
             )
 
     def test_agentic_mode_map_has_seven_entries( self ):

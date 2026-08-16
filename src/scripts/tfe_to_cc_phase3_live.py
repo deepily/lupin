@@ -76,22 +76,22 @@ SELECTED_FIXES = [
     },
     {
         "cluster_id"    : "C2",
-        "title"         : "Add missing PRODUCT_NAMES entry for TFE Resume agent",
+        "title"         : "Add missing CARD_LABELS entry for TFE Resume agent",
         "fix_type"      : "code_patch",
         "confidence"    : 0.97,
         "target_files"  : [ "src/cosa/rest/todo_fifo_queue.py" ],
         "failing_tests" : [ "test_all_agentic_agents_have_product_names" ],
         "description"   : (
-            "The `PRODUCT_NAMES` class-level dict in `TodoFifoQueue` (lines 941-951 of `todo_fifo_queue.py`) is "
+            "The `CARD_LABELS` class-level dict in `TodoFifoQueue` (lines 941-951 of `todo_fifo_queue.py`) is "
             "missing the key `'agent router go to test fix expediter resume'` that was introduced in "
             "`agent_registry.py` line 251. The test `test_all_agentic_agents_have_product_names` iterates every "
-            "key in `AGENTIC_AGENTS` and asserts a matching `PRODUCT_NAMES` entry exists. Add the display name "
-            "`'Test Fix Expediter Resume (resume a stalled TFE job)'` to the `PRODUCT_NAMES` dict."
+            "key in `JOB_ARG_CONTRACTS` and asserts a matching `CARD_LABELS` entry exists. Add the display name "
+            "`'Test Fix Expediter Resume (resume a stalled TFE job)'` to the `CARD_LABELS` dict."
         ),
     },
     {
         "cluster_id"    : "C3",
-        "title"         : "Fix stale AGENTIC_AGENTS count assertions (9\u219210)",
+        "title"         : "Fix stale JOB_ARG_CONTRACTS count assertions (9\u219210)",
         "fix_type"      : "test_patch",
         "confidence"    : 0.97,
         "target_files"  : [
@@ -101,7 +101,7 @@ SELECTED_FIXES = [
         ],
         "failing_tests" : [ "test_registry_agent_count", "test_registry_has_nine_agents" ],
         "description"   : (
-            "A 10th agent was added to `AGENTIC_AGENTS` in `agent_registry.py` after the count-guard assertions "
+            "A 10th agent was added to `JOB_ARG_CONTRACTS` in `agent_registry.py` after the count-guard assertions "
             "were last written. Grep reveals the stale literal `== 9` in three places: the directly failing test "
             "(`test_deep_research_to_presentation.py:386`), a parallel test file "
             "(`test_runtime_argument_expeditor.py:365`), and the production `quick_smoke_test()` helper "
@@ -118,7 +118,7 @@ SELECTED_FIXES = [
         "failing_tests" : [ "test_registry_agent_count" ],
         "description"   : (
             "Narrower variant of C3: touch only `src/tests/unit/test_deep_research_to_presentation.py` line 386. "
-            "Update `assert len( AGENTIC_AGENTS ) == 9` to `== 10`. NOTE: C3 above may already have landed this "
+            "Update `assert len( JOB_ARG_CONTRACTS ) == 9` to `== 10`. NOTE: C3 above may already have landed this "
             "file's change. If the file already asserts `== 10`, verdict=\"unclear\" with note \"superseded by C3\"."
         ),
     },
@@ -246,11 +246,11 @@ DIAGNOSES = {
         "error_category": "fixture_bug",
     },
     "C2"  : {
-        "root_cause"    : "A new agent entry `'agent router go to test fix expediter resume'` was added to `AGENTIC_AGENTS` in `agent_registry.py`, but the parallel `PRODUCT_NAMES` dict was not updated.",
+        "root_cause"    : "A new agent entry `'agent router go to test fix expediter resume'` was added to `JOB_ARG_CONTRACTS` in `agent_registry.py`, but the parallel `CARD_LABELS` dict was not updated.",
         "error_category": "code_bug",
     },
     "C3"  : {
-        "root_cause"    : "The test `test_registry_agent_count` has a stale hardcoded assertion `assert len(AGENTIC_AGENTS) == 9`, but the registry now contains 10 entries.",
+        "root_cause"    : "The test `test_registry_agent_count` has a stale hardcoded assertion `assert len(JOB_ARG_CONTRACTS) == 9`, but the registry now contains 10 entries.",
         "error_category": "test_bug",
     },
     "C3b" : {
