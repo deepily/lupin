@@ -85,23 +85,30 @@ class PairedPreconditionMissing( RuntimeError ):
 
 def _require_v1_live_seam_and_worktree():
     """
-    Refuse unless the v1-arm live WS-recv seam and the pinned-worktree server are wired.
+    Refuse unless the pinned-worktree v1 server is configured. The WS-recv seam is SHIPPED.
+
+    The live capture seam (`ws_recv_events`) now exists — WsJobEventListener /
+    make_ws_recv_events in v1_eval_arm, tested against a real socket — so this guard no
+    longer names it as missing (a precondition that keeps refusing after its condition is
+    met is the next reader's wasted hour). What remains is the pinned-worktree server,
+    which is stood up out of band (Mr. Radio owns it).
 
     Ensures:
-        - raises PairedPreconditionMissing while `ws_recv_events` has no shipped
-          implementation (design §9 step 1 open) or the v1 worktree base url / pin sha
-          is unset — so the paired run declines loudly instead of half-running one arm.
+        - imports the seam, so a REGRESSION that removed it fails loudly here rather than
+          at run time.
+        - raises PairedPreconditionMissing while LUPIN_V1_ARM_BASE_URL is unset — the
+          pinned-b0735467 worktree server must be running with LUPIN_ROOT exported to it,
+          or the v1 arm would measure the dirty main tree. The message states the seam is
+          wired so no one re-builds it.
     """
-    from v1_eval_arm import V1_PIN_SHA          # the pin the v1 arm must run against (§2a)
-    v1_base = os.environ.get( "LUPIN_V1_ARM_BASE_URL" )   # the pinned-worktree server, when stood up
-    # No shipped ws_recv_events source exists yet (only _default_collect_fn CONSUMES one),
-    # so there is nothing to drive run_v1_baseline's live capture with.
-    raise PairedPreconditionMissing(
-        f"v1-arm live seam not wired: no ws_recv_events(job_id) implementation exists "
-        f"(design §9 step 1 open), and the pinned-worktree server "
-        f"({'set' if v1_base else 'UNSET LUPIN_V1_ARM_BASE_URL'}, pin {V1_PIN_SHA}) must be "
-        f"stood up with LUPIN_ROOT exported to it. Refusing the paired run."
-    )
+    from v1_eval_arm import V1_PIN_SHA, make_ws_recv_events   # noqa: F401 - import PROVES the seam is present
+    v1_base = os.environ.get( "LUPIN_V1_ARM_BASE_URL" )       # the pinned-worktree server, when stood up
+    if not v1_base:
+        raise PairedPreconditionMissing(
+            f"v1-arm live WS-recv seam IS wired (make_ws_recv_events / WsJobEventListener, real-socket "
+            f"tested) — the remaining gate is the pinned-worktree server: set LUPIN_V1_ARM_BASE_URL to a "
+            f"v1 server at pin {V1_PIN_SHA} with LUPIN_ROOT exported to that worktree. Refusing the paired run."
+        )
 
 
 def _resolve_v1_paired_store() -> str:
