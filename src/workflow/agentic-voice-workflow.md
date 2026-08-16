@@ -1676,6 +1676,8 @@ targeted to the correct user via `user_job_tracker`. The browser receives these 
 [LUPIN] Add dry-run mode with breadcrumb notifications
 [LUPIN] Register agent in agent_registry.py (AGENTIC_AGENTS dict)
 [LUPIN] Add factory elif branch in agentic_job_factory.py
+[LUPIN] Add <command> line to src/conf/prompts/agent-router-template-completion.txt  <-- REQUIRED for voice reachability
+[LUPIN] Add command key to src/conf/training/agent-router-*.json (NOT vox-cmd-*)     <-- reliability after next retrain
 [LUPIN] Create dedicated FastAPI router (Phase 5b)
 [LUPIN] Register router in main.py
 [LUPIN] Run smoke tests for job.py
@@ -1871,7 +1873,19 @@ session resolution, submit-and-poll, validation, and reporting.
 [ ] Live pipeline test passes
 [ ] Q&A script created (if interactive): src/conf/notification-proxy-scripts/{agent-name}.json
 [ ] Proxy integration passes (if interactive)
+[ ] Command listed in src/conf/prompts/agent-router-template-completion.txt
+[ ] Command key present in src/conf/training/agent-router-*.json
+[ ] PRODUCT_NAMES entry in src/cosa/rest/todo_fifo_queue.py (confirmation-card alternative — or a drift-guard exemption that waives the "card" surface if never card-reachable)
+[ ] all_agents profile answers each fallback_questions arg in src/cosa/agents/notification_proxy/config.py (auto-proxy coverage — absent args turn the proxy test red)
+[ ] Voice route confirmed end-to-end — the router actually emits the command
 ```
+
+> 🔴 **A green pipeline test does not mean the agent is reachable by voice.** The
+> pipeline test submits by API; the router is a separate surface. Five agents
+> reached production API-callable and voice-mute this way — see
+> `src/rnd/v0.2.0/2026.08.15-agent-registration-single-source.md` §3 for the five
+> and what each one did to the user who asked for it. The last three lines above
+> are what close that gap.
 
 ### Phase 5b TodoWrite Template
 
