@@ -45,6 +45,14 @@ MARKER_PREFIX = ".self-respin-"
 # this default only feeds build_marker_dict when a caller omits grace.
 DEFAULT_GRACE_SECONDS = 120
 
+# How long a CONFIRMED-RETURNED marker is kept before the janitor sweeps it. A
+# RETURNED marker has done its whole job — it proved the seat came back — so it
+# is pure accumulation from then on. The TTL is deliberately long relative to the
+# 60s observer cadence (~15 ticks) so the RETURN is witnessed many times before
+# the record is deleted; the sweep NEVER touches a PENDING or alarm marker, whose
+# job is not yet done. Only RETURNED + older-than-TTL is swept.
+DEFAULT_RETURNED_TTL_SECONDS = 900
+
 
 class SelfRespinVerdict( str, Enum ):
     PENDING           = "PENDING"            # in flight; inside the window, not yet a proven return
@@ -349,6 +357,107 @@ def observe_fleet_self_respin( *, base_dir=None, now=None, fetch_pressure=None )
         classify_marker( m, by_id.get( m.get( "session_id" ) ), now=now )
         for m in markers
     ]
+
+
+# ---------------------------------------------------------------------------
+# The janitor — TTL-sweep confirmed-RETURNED markers so they don't accumulate
+#
+# WHY (row 6d6a9da2). A successful self-respin leaves its .self-respin-<sid>.json
+# marker on disk forever — the verb never removes it (it is cleared before it
+# could), and the observer keeps re-classifying it RETURNED every tick. That is
+# harmless but unbounded. This sweep deletes a marker ONLY once it is BOTH
+# confirmed-RETURNED (the observer's own oracle said so — this reuses
+# classify_marker read-only, it does NOT reimplement the verdict) AND older than
+# the TTL (so many ticks have witnessed the RETURN first). A PENDING marker (job
+# not done) or any alarm marker (DEAD_NO_RETURN / IDENTITY_MISMATCH /
+# MALFORMED_MARKER — must stay visible) is NEVER swept.
+# ---------------------------------------------------------------------------
+def _read_markers_with_paths( base_dir=None ):
+    """
+    Like read_markers, but pairs each parsed marker with its file path so the
+    janitor can delete it. Kept separate so read_markers stays untouched.
+
+    Ensures:
+        - returns a list of ( path, marker_dict ), sorted by path
+        - a missing directory ⇒ [] ; an unreadable/malformed file is skipped
+        - never raises
+    """
+    base    = _resolve_base_dir( base_dir )
+    results = []
+    for path in sorted( glob.glob( os.path.join( base, f"{MARKER_PREFIX}*.json" ) ) ):
+        try:
+            with open( path, "r" ) as f:
+                obj = json.load( f )
+        except ( OSError, ValueError ):
+            continue
+        if isinstance( obj, dict ):
+            results.append( ( path, obj ) )
+    return results
+
+
+def _best_effort_unlink( path ):
+    """Ensures: removes `path`, returning True on success and False on any OSError; never raises."""
+    try:
+        os.remove( path )
+        return True
+    except OSError:
+        return False
+
+
+def sweep_returned_markers( *, base_dir=None, now=None, fetch_pressure=None,
+                            ttl_seconds=DEFAULT_RETURNED_TTL_SECONDS ):
+    """
+    Delete self-re-spin markers that are DONE: confirmed RETURNED AND older than
+    the TTL. Hygiene only — the verb and observer both work without it.
+
+    Requires:
+        - base_dir is a directory path or None (None ⇒ fleet_data_root())
+        - now is an aware datetime or None (None ⇒ datetime.now(UTC))
+        - fetch_pressure is a zero-arg callable returning the context_pressure
+          section, or None to use the live reader
+        - ttl_seconds is a non-negative number of seconds
+
+    Ensures:
+        - returns the list of session_ids whose markers were deleted (may be empty)
+        - deletes a marker IFF classify_marker(...) == RETURNED AND
+          (now - fired_at) > ttl_seconds — a RETURNED verdict guarantees the
+          classifier already parsed fired_at, so no separate parse-guard is needed
+        - a marker that is PENDING, any alarm verdict, or RETURNED-but-younger than
+          the TTL is LEFT in place
+        - reuses classify_marker READ-ONLY (the oracle is not reimplemented here)
+        - a failed unlink is skipped (not counted, not raised)
+        - never raises on a single bad marker or an unreachable pressure fetch
+    """
+    if now is None:
+        now = datetime.datetime.now( datetime.timezone.utc )
+    if fetch_pressure is None:
+        fetch_pressure = _fetch_live_pressure
+
+    pairs = _read_markers_with_paths( base_dir )
+    if not pairs:
+        return []
+
+    section  = fetch_pressure() or {}
+    personas = section.get( "personas" ) if isinstance( section, dict ) else None
+    by_id    = {}
+    if isinstance( personas, dict ):
+        for record in personas.values():
+            if isinstance( record, dict ) and record.get( "session_id" ):
+                by_id[ record[ "session_id" ] ] = record
+
+    swept = []
+    for path, marker in pairs:
+        assessment = classify_marker( marker, by_id.get( marker.get( "session_id" ) ), now=now )
+        if assessment.verdict is not SelfRespinVerdict.RETURNED:
+            continue
+        # RETURNED ⇒ classify_marker parsed fired_at (else it would be MALFORMED),
+        # so this parse always yields an aware datetime.
+        fired_at = _parse_iso( marker.get( "fired_at" ) )
+        if ( now - fired_at ).total_seconds() <= ttl_seconds:
+            continue
+        if _best_effort_unlink( path ):
+            swept.append( marker.get( "session_id" ) )
+    return swept
 
 
 def _fetch_live_pressure():   # pragma: no cover - live HTTP boundary, exercised via injected fetch in tests

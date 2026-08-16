@@ -390,3 +390,126 @@ def test_quick_smoke_test_runs( monkeypatch, capsys ):
     monkeypatch.setattr( obs, "observe_fleet_self_respin", lambda **kw: [] )
     obs.quick_smoke_test()
     assert "self-re-spin" in capsys.readouterr().out.lower()
+
+
+# ---------------------------------------------------------------------------
+# TTL janitor — sweep confirmed-RETURNED markers (row 6d6a9da2)
+#
+# The safety property under test: a marker is deleted ONLY when it is BOTH
+# confirmed RETURNED (via the real classifier) AND older than the TTL. A PENDING
+# marker, any ALARM marker (even an old one), and a young RETURNED marker are all
+# kept — the sweep never removes a record whose job is not yet done.
+# ---------------------------------------------------------------------------
+def _write_marker( tmp_path, sid, **kw ):
+    """Write a marker file for `sid`, returning its path."""
+    path = tmp_path / f"{obs.MARKER_PREFIX}{sid}.json"
+    path.write_text( json.dumps( _marker( session_id=sid, persona=sid, tmux_session=f"{sid}-mgr", **kw ) ) )
+    return path
+
+
+def _returned_fetch( sid ):
+    """A fetch whose record makes `sid` classify RETURNED (within_budget, fresh turn)."""
+    def fake_fetch():
+        return { "personas": { sid: _pressure_record(
+            session_id=sid, tmux_session=f"{sid}-mgr", status="within_budget", last_turn_age_s=5.0 ) } }
+    return fake_fetch
+
+
+def test_sweep_empty_dir_returns_empty_and_defaults( tmp_path ):
+    """No markers ⇒ [] before any fetch — exercises the now=None / fetch_pressure=None default arms."""
+    assert obs.sweep_returned_markers( base_dir=str( tmp_path ) ) == []
+
+
+def test_sweep_deletes_returned_older_than_ttl( tmp_path ):
+    path = _write_marker( tmp_path, "cheech", fired_at=_iso( _dt( 20 ) ), expected_return_by=_iso( _dt( 22 ) ) )
+    # now = 20 min after fired_at (1200s) > 900s TTL ⇒ swept.
+    swept = obs.sweep_returned_markers(
+        base_dir=str( tmp_path ), now=_dt( 40 ), fetch_pressure=_returned_fetch( "cheech" ), ttl_seconds=900 )
+    assert swept == [ "cheech" ]
+    assert not path.exists()
+
+
+def test_sweep_keeps_returned_within_ttl( tmp_path ):
+    path = _write_marker( tmp_path, "rachel", fired_at=_iso( _dt( 20 ) ), expected_return_by=_iso( _dt( 22 ) ) )
+    # now = 5 min after fired_at (300s) <= 900s TTL ⇒ RETURNED but too young, kept.
+    swept = obs.sweep_returned_markers(
+        base_dir=str( tmp_path ), now=_dt( 25 ), fetch_pressure=_returned_fetch( "rachel" ), ttl_seconds=900 )
+    assert swept == []
+    assert path.exists()
+
+
+def test_sweep_leaves_pending_marker( tmp_path ):
+    path = _write_marker( tmp_path, "mrradio", fired_at=_iso( _dt( 20 ) ), expected_return_by=_iso( _dt( 22 ) ) )
+    def fake_fetch():
+        return { "personas": {} }                         # no record ⇒ before deadline ⇒ PENDING
+    swept = obs.sweep_returned_markers(
+        base_dir=str( tmp_path ), now=_dt( 21 ), fetch_pressure=fake_fetch, ttl_seconds=1 )
+    assert swept == []
+    assert path.exists()
+
+
+def test_sweep_never_removes_old_alarm_marker( tmp_path ):
+    """The critical safety case: a DEAD_NO_RETURN alarm, even far past the TTL, is KEPT."""
+    path = _write_marker( tmp_path, "ghost", fired_at=_iso( _dt( 20 ) ), expected_return_by=_iso( _dt( 22 ) ) )
+    def fake_fetch():
+        return { "personas": None }                       # unreachable ⇒ past deadline ⇒ DEAD_NO_RETURN
+    swept = obs.sweep_returned_markers(
+        base_dir=str( tmp_path ), now=_dt( 55 ), fetch_pressure=fake_fetch, ttl_seconds=1 )
+    assert swept == []
+    assert path.exists()
+
+
+def test_sweep_tolerates_non_dict_section( tmp_path ):
+    """A truthy non-dict pressure section ⇒ no records ⇒ marker matches nothing (kept as DEAD)."""
+    path = _write_marker( tmp_path, "weird", fired_at=_iso( _dt( 20 ) ), expected_return_by=_iso( _dt( 22 ) ) )
+    swept = obs.sweep_returned_markers(
+        base_dir=str( tmp_path ), now=_dt( 55 ), fetch_pressure=lambda: "not-a-section", ttl_seconds=1 )
+    assert swept == []
+    assert path.exists()
+
+
+def test_sweep_skips_bad_pressure_records_and_still_deletes( tmp_path ):
+    """Junk records in the personas map are ignored; the good RETURNED+old marker still sweeps."""
+    path = _write_marker( tmp_path, "cheech", fired_at=_iso( _dt( 20 ) ), expected_return_by=_iso( _dt( 22 ) ) )
+    def fake_fetch():
+        return { "personas": {
+            "cheech" : _pressure_record( session_id="cheech", tmux_session="cheech-mgr",
+                                         status="within_budget", last_turn_age_s=5.0 ),
+            "junk"   : "not-a-dict",                       # skipped (not a dict)
+            "no_id"  : { "status": "within_budget" },      # skipped (no session_id)
+        } }
+    swept = obs.sweep_returned_markers(
+        base_dir=str( tmp_path ), now=_dt( 40 ), fetch_pressure=fake_fetch, ttl_seconds=900 )
+    assert swept == [ "cheech" ]
+    assert not path.exists()
+
+
+def test_sweep_unlink_failure_is_not_counted( tmp_path, monkeypatch ):
+    """A failed unlink ⇒ the session id is NOT reported swept (and no raise)."""
+    path = _write_marker( tmp_path, "cheech", fired_at=_iso( _dt( 20 ) ), expected_return_by=_iso( _dt( 22 ) ) )
+    monkeypatch.setattr( obs, "_best_effort_unlink", lambda p: False )
+    swept = obs.sweep_returned_markers(
+        base_dir=str( tmp_path ), now=_dt( 40 ), fetch_pressure=_returned_fetch( "cheech" ), ttl_seconds=900 )
+    assert swept == []
+    assert path.exists()                                  # our fake unlink left it in place
+
+
+# ---------------------------------------------------------------------------
+# _read_markers_with_paths + _best_effort_unlink — the janitor's IO leaves
+# ---------------------------------------------------------------------------
+def test_read_markers_with_paths_missing_dir_and_skips( tmp_path ):
+    assert obs._read_markers_with_paths( base_dir=str( tmp_path / "nope" ) ) == []
+    ( tmp_path / f"{obs.MARKER_PREFIX}good1.json" ).write_text( json.dumps( _marker( session_id="good1" ) ) )
+    ( tmp_path / f"{obs.MARKER_PREFIX}bad.json" ).write_text( "{not json" )                 # ValueError → skipped
+    ( tmp_path / f"{obs.MARKER_PREFIX}list.json" ).write_text( json.dumps( [ 1, 2 ] ) )     # non-dict → skipped
+    pairs = obs._read_markers_with_paths( base_dir=str( tmp_path ) )
+    assert [ sid for _, m in pairs for sid in [ m[ "session_id" ] ] ] == [ "good1" ]
+    assert pairs[ 0 ][ 0 ].endswith( f"{obs.MARKER_PREFIX}good1.json" )
+
+
+def test_best_effort_unlink_success_and_failure( tmp_path ):
+    p = tmp_path / "victim.json"
+    p.write_text( "x" )
+    assert obs._best_effort_unlink( str( p ) ) is True
+    assert not p.exists()
+    assert obs._best_effort_unlink( str( tmp_path / "already-gone.json" ) ) is False
