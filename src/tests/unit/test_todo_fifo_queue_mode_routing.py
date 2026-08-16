@@ -25,6 +25,14 @@ import pytest
 from cosa.rest.todo_fifo_queue import MODE_TO_AGENT, AGENTIC_MODE_MAP
 
 
+def _mode_key_overlap( agentic, direct ):
+    """THE disjointness predicate — the mode keys claimed by BOTH routing maps.
+    Empty ⇒ AGENTIC_MODE_MAP and MODE_TO_AGENT partition the mode space. ONE
+    function, called by BOTH the live guard AND its must-fail control, so the
+    control exercises the exact code the guard trusts — never a parallel `&`."""
+    return set( agentic ) & set( direct )
+
+
 # ---------------------------------------------------------------------------
 # Direct dispatch test — what command would each user_mode produce?
 # ---------------------------------------------------------------------------
@@ -98,13 +106,30 @@ def test_agentic_and_direct_dicts_disjoint_today():
     This test fails if disjointness is broken AND the dispatch order
     has not been verified — see the PARAMETRIZE test above.
     """
-    overlap = set( AGENTIC_MODE_MAP.keys() ) & set( MODE_TO_AGENT.keys() )
+    overlap = _mode_key_overlap( AGENTIC_MODE_MAP, MODE_TO_AGENT )
     assert overlap == set(), (
         f"AGENTIC_MODE_MAP and MODE_TO_AGENT now overlap: {overlap}. "
         f"Verify dispatch order in todo_fifo_queue.py:634 still has "
         f"AGENTIC_MODE_MAP checked FIRST so the canonical command string "
         f"wins over f-string synthesis with underscore."
     )
+
+
+def test_disjointness_control_fires_on_a_real_shared_key():
+    """Committed must-fail control (card-guard pattern): drive the REAL predicate
+    with a REAL AGENTIC_MODE_MAP key injected into a copy of MODE_TO_AGENT — never a
+    synthetic token, one side withheld. Proves the disjointness guard goes RED on a
+    genuine collision, so a green guard means the maps are disjoint, not that the
+    assertion is dead. Preconditions assert the key is really agentic and really
+    absent from the direct map, so this FAILS LOUDLY if the key ever moves rather
+    than silently ceasing to exercise a collision."""
+    real_agentic_key = "test_suite"
+    assert real_agentic_key in AGENTIC_MODE_MAP           # really an agentic-mode key
+    assert real_agentic_key not in MODE_TO_AGENT          # really absent from the direct map today
+    collided = dict( MODE_TO_AGENT )
+    collided[ real_agentic_key ] = MODE_TO_AGENT[ "math" ]   # a real agent value, not a stub
+    overlap = _mode_key_overlap( AGENTIC_MODE_MAP, collided )
+    assert overlap == { real_agentic_key }, overlap
 
 
 def test_underscore_synthesis_fails_for_test_suite():

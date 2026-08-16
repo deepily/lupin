@@ -706,15 +706,15 @@ class TodoFifoQueue( FifoQueue ):
             # NEW: Check user mode BEFORE LLM routing
             user_mode = self.get_user_mode( user_id )
 
-            # NOTE: AGENTIC_MODE_MAP MUST be checked BEFORE MODE_TO_AGENT.
-            # Agentic mode keys (test_suite, deep_research, podcast,
-            # research_to_podcast, claude_code, swe_team, presentation,
-            # research_to_presentation) appear in BOTH dicts. The f-string
-            # synthesis below produces e.g. "agent router go to test_suite"
-            # (with underscore), which doesn't match any registered command —
-            # AGENTIC_MODE_MAP holds the canonical "agent router go to test
-            # suite" (with space). Reversed order would land in the else
-            # branch downstream and trigger HTTP 500 with 'NoneType' .split.
+            # AGENTIC_MODE_MAP is checked before MODE_TO_AGENT for deterministic
+            # precedence. The two maps are DISJOINT by invariant — MODE_TO_AGENT
+            # holds only the direct single-token agents, AGENTIC_MODE_MAP the 8
+            # agentic modes; their key sets do not overlap (guarded by
+            # test_todo_fifo_queue_mode_routing.py::test_agentic_and_direct_dicts_disjoint_today,
+            # with a must-fail control). If a future change ever lets an agentic key
+            # into MODE_TO_AGENT, this order keeps the canonical "agent router go to
+            # <name>" (with spaces) winning over f-string synthesis, which would emit
+            # an underscore command ("...test_suite") that matches no registered command.
             if user_mode and user_mode in AGENTIC_MODE_MAP:
                 # Agentic mode - bypass LLM router, produce agentic routing command
                 command = AGENTIC_MODE_MAP[ user_mode ]
