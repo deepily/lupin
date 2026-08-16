@@ -92,32 +92,76 @@ ASK_BODY = (
 
 _HEADER_RE = re.compile( r"<!--\s*memento-record:(?P<fields>.*?)-->" )
 
+# The pointer line memento_io writes at the top of a bare slot: `<!-- current: <path> -->`.
+# The slot io/mementos/<slug>.md is a POINTER, not the record; `current:` names the real
+# record file (which carries the completeness bytes and the authoritative header).
+_POINTER_CURRENT_RE = re.compile( r"<!--\s*current:\s*(?P<target>\S+)\s*-->" )
+
+# The pointer's self-declaring banner line. A file carrying this banner DECLARES itself a
+# pointer (NOT the record); if it also lacks a `current:` line it is a corrupt/hand-mangled
+# pointer that names no record to resolve — verify must fail loud rather than fall through
+# and parse the pointer's OWN embedded header as if it were a record (Tiffany, case3).
+_POINTER_BANNER_RE = re.compile( r"<!--\s*MEMENTO POINTER\b" )
+
 
 # ── Slot derivation ───────────────────────────────────────────────────────────
 def seat_memento_slot( project_root, persona_name ):
     """
     Ensures:
-        - returns the derivable bare memento slot for a soon-to-be-reaped worker:
-          <project_root>/io/mementos/<persona-slug>.md (memento-management.md §3.2)
+        - returns the derivable bare memento SLOT for a soon-to-be-reaped worker:
+          <project_root>/io/mementos/<persona-slug>.md (memento-management.md §3.2).
+          This slot is a POINTER file; resolve_pointer_target follows its `current:`
+          line to the record at read time (the pointer is tiny and carries neither the
+          completeness bytes nor — reliably — a line-1 header).
         - the slug is accent/punctuation/case-proof via persona_slug
     """
     return Path( project_root ) / "io" / "mementos" / f"{persona_slug( persona_name )}.md"
+
+
+def resolve_pointer_target( slot_path, text ):
+    """
+    Follow a pointer slot's `current:` line to the record file BESIDE it.
+
+    Ensures:
+        - when `text` is a memento POINTER (carries `<!-- current: <path> -->`), returns
+          the record path resolved as that value's BASENAME joined to the slot's own
+          directory — memento_io keeps the record next to the pointer, and using only
+          the basename makes a `current:` value path-traversal-proof.
+        - returns None when `text` is empty or not a pointer (the slot IS the record).
+        - never raises
+    """
+    if not text:
+        return None
+    match = _POINTER_CURRENT_RE.search( text )
+    if not match:
+        return None
+    return Path( slot_path ).parent / Path( match.group( "target" ) ).name
 
 
 # ── Header parse (pure) ───────────────────────────────────────────────────────
 def parse_memento_header( text ):
     """
     Ensures:
-        - returns { key: value } parsed from the line-1 `<!-- memento-record: k=v ... -->`
-          header, or {} when the header is absent or malformed
+        - returns { key: value } parsed from the `<!-- memento-record: k=v ... -->`
+          header, searched within the LEADING html-comment block (every blank/`<!-- -->`
+          line before the first content line), or {} when absent or malformed
         - never raises
     """
     if not text:
         return {}
-    # The record header is line 1 (memento_io stamps it there). Restrict the search
-    # to the first line so a stray `<!-- memento-record: ... -->` deeper in a body
-    # cannot be mistaken for the provenance stamp.
-    match = _HEADER_RE.search( text.splitlines()[ 0 ] )
+    # The header is line 1 in a RECORD but line 5 in a POINTER (behind current:/mirror:
+    # comment lines), so a line-0-only search misses the pointer's stamp. Search the
+    # leading run of blank + html-comment lines — everything before the first content
+    # line (e.g. the `# ` title). A stray `<!-- memento-record: ... -->` deeper in a
+    # body, after the title, is still excluded (the original anti-spoof intent).
+    header_region = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped == "" or stripped.startswith( "<!--" ):
+            header_region.append( line )
+            continue
+        break
+    match = _HEADER_RE.search( "\n".join( header_region ) )
     if not match:
         return {}
     fields = {}
@@ -170,6 +214,20 @@ def verify_seat_memento(
     text = read_text_fn( path )
     if text is None:
         return False, "no memento at slot"
+    # The slot is a POINTER — follow `current:` to the record BESIDE it and verify THAT
+    # (its bytes, its header). Verifying the tiny pointer instead would fail the byte
+    # floor and read the pointer's own stamp, not the record's. A non-pointer slot (the
+    # record written directly) has no `current:` line and is verified as-is.
+    record_path = resolve_pointer_target( path, text )
+    if record_path is not None:
+        record_text = read_text_fn( record_path )
+        if record_text is None:
+            return False, "pointer's `current:` record is unreadable or absent"
+        text = record_text
+    elif _POINTER_BANNER_RE.search( text ):
+        # Banner present but NO `current:` — a corrupt pointer that declares itself not the
+        # record yet names none. Fail loud, never parse the pointer's own embedded header.
+        return False, "pointer declares itself NOT the record but names no `current:` record — cannot resolve"
     n_bytes = len( text.encode( "utf-8" ) )
     if n_bytes < min_bytes:
         return False, f"memento too small ({n_bytes}B < {min_bytes}B floor) — empty or partial write"

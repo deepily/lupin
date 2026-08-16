@@ -326,3 +326,90 @@ def test_coordinate_all_verified_never_polls():
     out = _coord( { "tmux-a": _ident() }, disk, dm, sleep_fn=_sleep, write_memento=True )
     assert out[ "tmux-a" ][ "status" ] == "verified"
     assert slept[ "n" ] == 0                        # no pending → poll loop never entered
+
+
+# ── resolve_pointer_target + pointer-following (defects at reap_memento.py:104,120) ──
+def _pointer( record_name="rio-80d0e093.md", sid8="80d0e093" ):
+    """A real-shape POINTER slot: current:/mirror:/regenerate: preamble, header on line 5."""
+    return (
+        "<!-- MEMENTO POINTER — NOT THE RECORD. Safe to overwrite. -->\n"
+        f"<!-- current: io/mementos/{record_name} -->\n"
+        "<!-- mirror:  /home/x/.claude/mementos/lupin/io/mementos/" + record_name + " -->\n"
+        "<!-- regenerate: python3 memento_io.py regenerate-pointer -->\n"
+        f"<!-- memento-record: persona=rio session_id={sid8} written_at=2026-08-14T15:00:00+00:00 slot=io -->\n"
+        "# Rio ⚡ pointer copy title\n"
+    )
+
+
+def test_resolve_pointer_target_follows_current_beside_slot():
+    target = reap_memento.resolve_pointer_target( "/proj/io/mementos/rio.md", _pointer() )
+    # Resolved as the basename beside the slot dir — never the current: value's own path.
+    assert str( target ) == "/proj/io/mementos/rio-80d0e093.md"
+
+
+def test_resolve_pointer_target_uses_basename_only_traversal_proof():
+    text = "<!-- current: ../../etc/passwd -->\n"
+    target = reap_memento.resolve_pointer_target( "/proj/io/mementos/rio.md", text )
+    assert str( target ) == "/proj/io/mementos/passwd"     # traversal stripped to basename
+
+
+def test_resolve_pointer_target_none_when_not_a_pointer():
+    assert reap_memento.resolve_pointer_target( "/slot.md", _memento() ) is None
+    assert reap_memento.resolve_pointer_target( "/slot.md", "" ) is None
+    assert reap_memento.resolve_pointer_target( "/slot.md", None ) is None
+
+
+# ── parse_memento_header: Defect 2 — the header is on line 5 in a pointer ──────
+def test_parse_header_found_below_line_one_in_pointer_preamble():
+    # REGRESSION for the splitlines()[0]-only bug: the pointer's memento-record header
+    # is line 5, behind the current:/mirror: comments. It MUST be parsed.
+    fields = reap_memento.parse_memento_header( _pointer( sid8="80d0e093" ) )
+    assert fields[ "session_id" ] == "80d0e093"
+    assert fields[ "persona" ]    == "rio"
+
+
+def test_parse_header_still_parses_a_line_one_record():
+    fields = reap_memento.parse_memento_header( _memento( sid8="abc12345" ) )
+    assert fields[ "session_id" ] == "abc12345"
+
+
+# ── verify_seat_memento through a POINTER slot (Defect 1) ──────────────────────
+def _verify_via( slot_text, record_text, sid8="80d0e093", window=1200, min_bytes=1000 ):
+    files = { "/proj/io/mementos/rio.md": slot_text }
+    if record_text is not None:
+        files[ "/proj/io/mementos/rio-80d0e093.md" ] = record_text
+    disk = _Disk( files )
+    return reap_memento.verify_seat_memento(
+        "/proj/io/mementos/rio.md", sid8, _NOW, read_text_fn=disk.read,
+        window_seconds=window, min_bytes=min_bytes )
+
+
+def test_verify_follows_pointer_and_verifies_the_record():
+    # The pointer is tiny (would fail the byte floor); the record is the complete memento.
+    ok, reason = _verify_via( _pointer(), _memento( sid8="80d0e093" ) )
+    assert ok is True and "verified" in reason
+
+
+def test_verify_false_when_pointer_names_an_absent_record():
+    ok, reason = _verify_via( _pointer(), None )
+    assert ok is False and "current:" in reason
+
+
+def test_verify_false_when_pointed_record_is_stale():
+    # Following the pointer must carry the record's OWN freshness, not the pointer's.
+    stale = _memento( sid8="80d0e093", written_at="2026-08-14T14:00:00+00:00" )   # 65 min old > 20 min window
+    ok, reason = _verify_via( _pointer(), stale )
+    assert ok is False and "stale" in reason
+
+
+def test_verify_false_when_pointed_record_session_mismatch():
+    # A re-granted persona slot: pointer/record belong to a PRIOR holder, not this seat.
+    ok, reason = _verify_via( _pointer(), _memento( sid8="80d0e093" ), sid8="ffff0000" )
+    assert ok is False and "prior holder" in reason
+
+
+def test_parse_header_when_text_is_all_comment_lines_no_content():
+    # Covers the loop exhausting with no content line (a header-only comment block).
+    text = "<!-- memento-record: persona=Rio session_id=abc12345 slot=io -->\n"
+    fields = reap_memento.parse_memento_header( text )
+    assert fields[ "session_id" ] == "abc12345"
