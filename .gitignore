@@ -190,6 +190,11 @@ coverage/
 # .clayton-lane2-groundtruth-b980080e.md
 .*-groundtruth-*.md
 io/mementos/
+# A FIFTH memento slot, found 2026-08-15: a worker wrote to .claude/mementos/ rather
+# than io/mementos/. Ignored for consistency — mementos are working state, never source.
+# NOTE for the SessionStart resolver (register_session.py _memento_dirs): it scans four
+# slots and NOT this one, so a record written here is invisible to a rehydrating seat.
+.claude/mementos/
 lupin-worktrees/
 
 # DM traffic corpus — lives OUTSIDE the repo (Rick, 2026-08-13). The corpus is
