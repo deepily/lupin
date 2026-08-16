@@ -108,7 +108,10 @@ def _card_commands():
     a live import could resolve PRODUCT_NAMES differently than the tree on disk."""
     text  = cu.get_file_as_string( cu.get_project_root() + TODO_QUEUE_SOURCE )
     block = re.search( r"PRODUCT_NAMES\s*=\s*\{(.*?)\}", text, re.DOTALL ).group( 1 )
-    return set( re.findall( r'"(agent router go to [^"]+)"\s*:', block ) )
+    # Match ANY quoted dict KEY (a string immediately followed by a colon), NOT only
+    # the "agent router go to …" prefix (Tiffany): a future non-prefixed card key would
+    # otherwise be invisible here, and the phantom arm of _card_drift could not flag it.
+    return set( re.findall( r'"([^"]+)"\s*:', block ) )
 
 
 def _card_drift( carded, owned, exempt ):
