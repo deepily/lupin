@@ -641,7 +641,8 @@ def run_v1_baseline( *, corpus: str = "simple", seed: int = 1024, n_per_command:
                      class_to_command: Dict[str, str], limit: Optional[int] = None,
                      clock: Callable[[], float] = time.monotonic, assert_cold: bool = True,
                      load_corpus_fn: Callable[..., Any] = load_corpus,
-                     sample_fn: Callable[..., Any] = stratified_sample ) -> Dict[str, Any]:
+                     sample_fn: Callable[..., Any] = stratified_sample,
+                     read_sha_fn: Callable[[str], str] = read_running_server_sha ) -> Dict[str, Any]:
     """
     Compose the full v1 baseline: load the corpus → seeded stratified sample →
     COLD/WARM two-pass → metrics → rendered report (warm pass is the headline).
@@ -663,23 +664,36 @@ def run_v1_baseline( *, corpus: str = "simple", seed: int = 1024, n_per_command:
           run_two_pass measured — corpus + seed + n_per_command + a signature of the
           (utterance, command) pairs — so the paired gate can prove this arm and the
           v2 arm saw the same utterances (never a shape-only comparison)
+        - RUN-PATH sha guard (row 221de5d2 half A): BEFORE the first push, reads the live
+          v1 server's OWN sha and asserts it IS the pin; on a wrong tree it raises
+          EvalIntegrityError NAMING the sha it saw, so the run refuses before it spends —
+          the guard lives on the run path, not only in a caller's precondition
+        - `provenance[ "v1_arm_git_sha" ]` (half B) is that OBSERVED sha, NEVER the pin
+          constant: stamping V1_PIN_SHA would read b0735467 no matter what actually ran,
+          the exact false baseline the stamp exists to prevent
     """
     pairs             = load_corpus_fn( corpus, limit=limit )
     sampled, manifest = sample_fn( pairs, n_per_command, seed )
+    # PROVE the tree before spending: read the running server's sha and assert it IS the
+    # pin (raises, naming what it saw, on a wrong tree). observed_sha is the value actually
+    # reported — carried into provenance below so the report records what RAN, not a label.
+    observed_sha      = assert_measured_sha( read_sha_fn( base_url ) )
     passes            = run_two_pass( sampled, push_fn=push_fn, collect_fn=collect_fn,
                                       class_to_command=class_to_command, clock=clock,
                                       assert_cold=assert_cold )
     report            = render_v1_report( passes[ "warm" ], seed=seed, corpus=corpus,
                                           n_per_command=n_per_command, base_url=base_url )
+    # Stamp the EXACT measured sample (the same `sampled` list run_two_pass drove), so the
+    # paired provenance check binds this arm to the v2 arm by signature.
+    provenance        = make_provenance( "v1", corpus, seed, n_per_command, sampled )
+    provenance[ "v1_arm_git_sha" ] = observed_sha   # the OBSERVED sha (half B), never V1_PIN_SHA
     return {
         "cold"       : passes[ "cold" ],
         "warm"       : passes[ "warm" ],
         "manifest"   : manifest,
         "report"     : report,
         "sampled_n"  : len( sampled ),
-        # Stamp the EXACT measured sample (the same `sampled` list run_two_pass drove),
-        # so the paired provenance check binds this arm to the v2 arm by signature.
-        "provenance" : make_provenance( "v1", corpus, seed, n_per_command, sampled ),
+        "provenance" : provenance,
     }
 
 

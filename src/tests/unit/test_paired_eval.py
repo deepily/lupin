@@ -276,6 +276,20 @@ def test_render_provenance_block_handles_non_string_signature():
     assert "None" in block and "MISMATCH" in block
 
 
+def test_render_provenance_block_stamps_the_v1_arm_sha():
+    # HALF B (row 221de5d2): the block renders the v1 arm's MEASURED sha so a reader can
+    # audit the report back to the tree that produced the numbers; the v2 arm has none.
+    v1p   = { **_prov( "v1" ), "v1_arm_git_sha": "b0735467cafe" }
+    block = pe.render_provenance_block( v1p, _prov( "v2" ) )
+    assert "v1 arm sha" in block and "b0735467cafe" in block
+
+
+def test_render_provenance_block_v1_sha_absent_renders_dash():
+    # A provenance with no stamp (e.g. a legacy artifact) renders the em-dash, never crashes.
+    block = pe.render_provenance_block( _prov( "v1" ), _prov( "v2" ) )
+    assert "v1 arm sha | — |" in block
+
+
 def test_render_paired_report_carries_provenance_and_verdict():
     v1 = _artifact( { "a": 100.0, "b": 100.0 }, _prov( "v1" ) )
     v2 = _artifact( { "a": 40.0,  "b": 40.0 },  _prov( "v2" ) )

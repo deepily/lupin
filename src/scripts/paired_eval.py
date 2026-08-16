@@ -383,6 +383,10 @@ def render_provenance_block(
         "|---|---|---|",
         f"| corpus | {v1_provenance.get( 'corpus' )} | {v2_provenance.get( 'corpus' )} |",
         f"| seed | {v1_provenance.get( 'seed' )} | {v2_provenance.get( 'seed' )} |",
+        # The v1 arm's MEASURED git sha (row 221de5d2 half B) — the sha the running v1
+        # server reported, so the report is auditable back to the tree that produced these
+        # numbers. v1-only (the v2 arm has no pinned-tree constraint), so v2 renders "—".
+        f"| v1 arm sha | {v1_provenance.get( 'v1_arm_git_sha', '—' )} | — |",
         f"| n_per_command | {v1_provenance.get( 'n_per_command' )} | {v2_provenance.get( 'n_per_command' )} |",
         f"| sampled_n | {v1_provenance.get( 'sampled_n' )} | {v2_provenance.get( 'sampled_n' )} |",
         f"| signature | {_short( v1_provenance )} | {_short( v2_provenance )} |",

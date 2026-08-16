@@ -317,7 +317,8 @@ def test_run_v1_baseline_composes():
     push, collect = _warming_seams()
     res = v1.run_v1_baseline( seed=7, n_per_command=5, push_fn=push, collect_fn=collect,
                               class_to_command=MAP, clock=_counter_clock(),
-                              load_corpus_fn=fake_load, sample_fn=fake_sample )
+                              load_corpus_fn=fake_load, sample_fn=fake_sample,
+                              read_sha_fn=lambda base: v1.V1_PIN_SHA )   # pinned tree — no live read
     assert res[ "cold" ][ "cache_hit_rate" ] == 0.0 and res[ "warm" ][ "cache_hit_rate" ] == 1.0
     assert res[ "manifest" ][ "seed" ] == 7 and res[ "sampled_n" ] == 2
     assert v1.V1_PIN_SHA in res[ "report" ] and "seed       : 7" in res[ "report" ]
@@ -337,7 +338,8 @@ def test_run_v1_baseline_stamps_provenance_over_the_measured_sample():
     def collect( job_id ): return { }                    # no_completion — sample is still measured + stamped
     res  = v1.run_v1_baseline( corpus="simple", seed=7, n_per_command=2,
                                push_fn=push, collect_fn=collect, class_to_command=MAP,
-                               clock=_counter_clock(), load_corpus_fn=fake_load )
+                               clock=_counter_clock(), load_corpus_fn=fake_load,
+                               read_sha_fn=lambda base: v1.V1_PIN_SHA )   # pinned tree — no live read
     prov = res[ "provenance" ]
 
     # The real sampler took a strict subset; cold measures it, then warm measures it again.
@@ -351,6 +353,41 @@ def test_run_v1_baseline_stamps_provenance_over_the_measured_sample():
     assert prov[ "sample_signature" ] == compute_sample_signature( reconstructed )
     # … and NOT over the full corpus (proves it is the sample, not the pre-sample set).
     assert prov[ "sample_signature" ] != compute_sample_signature( corpus_pairs )
+
+
+def test_run_v1_baseline_refuses_a_wrong_tree_sha_before_spending():
+    """HALF A control (row 221de5d2): the RUN path itself proves the tree. A server that
+    reports a NON-pin sha must be REFUSED before a single push, and the refusal must NAME
+    the sha it saw. Goes RED if the assert is removed from run_v1_baseline (the wrong-tree
+    run would proceed). The spy push_fn asserts it is never called — proof the refusal beat
+    the spend."""
+    def fake_load( name, limit=None ): return [ ( "a", "agent go calendar" ) ]
+    def fake_sample( pairs, n, seed ): return pairs, { "seed": seed, "under_quota": [ ] }
+    def never_push( u ): raise AssertionError( "run_v1_baseline spent before proving the tree" )
+    def never_collect( job_id ): raise AssertionError( "run_v1_baseline collected before proving the tree" )
+    with pytest.raises( v1.EvalIntegrityError ) as exc:
+        v1.run_v1_baseline( seed=7, n_per_command=5, push_fn=never_push, collect_fn=never_collect,
+                            class_to_command=MAP, clock=_counter_clock(),
+                            load_corpus_fn=fake_load, sample_fn=fake_sample,
+                            read_sha_fn=lambda base: "deadbeef" )   # a wrong tree
+    assert "deadbeef" in str( exc.value )   # names the sha it saw
+
+
+def test_run_v1_baseline_stamps_the_observed_sha_not_the_pin():
+    """HALF B control (row 221de5d2): the provenance stamp is the OBSERVED sha, not the pin.
+    The server reports 'b0735467cafe' — pin-PREFIXED (so assert_measured_sha passes) but NOT
+    the bare pin. The stamp must equal that full observed value. Goes RED if someone stamps
+    V1_PIN_SHA instead (the false-baseline bug this exists to prevent)."""
+    def fake_load( name, limit=None ): return [ ( "a", "agent go calendar" ), ( "b", "agent go calendar" ) ]
+    def fake_sample( pairs, n, seed ): return pairs, { "seed": seed, "under_quota": [ ] }
+    push, collect = _warming_seams()
+    observed = v1.V1_PIN_SHA + "cafe"                   # passes the pin-length match, != bare pin
+    res  = v1.run_v1_baseline( seed=7, n_per_command=5, push_fn=push, collect_fn=collect,
+                               class_to_command=MAP, clock=_counter_clock(),
+                               load_corpus_fn=fake_load, sample_fn=fake_sample,
+                               read_sha_fn=lambda base: observed )
+    assert res[ "provenance" ][ "v1_arm_git_sha" ] == observed        # the OBSERVED value …
+    assert res[ "provenance" ][ "v1_arm_git_sha" ] != v1.V1_PIN_SHA   # … NOT the pin constant
 
 
 # ───────────────────────────────────────────── truncate guard (F3, :8000)
