@@ -180,7 +180,38 @@ _NONE = (
 
 
 # ── The one table (§5.1) ──────────────────────────────────────────────────────
-REGISTRY = { spec.command: spec for spec in ( *_CONVERSATIONAL, *_AGENTIC, *_CONTROL, *_NONE ) }
+def _build_registry( *groups ):
+    """
+    Build the command→spec table, FAILING LOUD on a duplicate command (M4).
+
+    A dict comprehension over the spec tuples silently drops a duplicate — last
+    one wins, no error — so a command declared twice in two different class groups
+    would vanish, and the partition guard would pass on a corrupted table because
+    the dedup already happened. Raise instead: a command is declared exactly once,
+    in exactly one class. The invariant is now ENFORCED at construction, not
+    ASSERTED by a test — so no count-comparison guard sits over it (a violation
+    raises at import, before any test could observe an inequality; that guard would
+    be vacuous). The falsifiable check that survives is "a dup RAISES".
+
+    Requires:
+        - each group is an iterable of AgentSpec
+
+    Ensures:
+        - Returns { command: spec } for every spec across the groups
+        - Raises ValueError on the first command that appears twice
+    """
+    registry = {}
+    for spec in ( s for group in groups for s in group ):
+        if spec.command in registry:
+            raise ValueError(
+                f"duplicate command in registry: {spec.command!r} — a command may be "
+                f"declared exactly once, in one class"
+            )
+        registry[ spec.command ] = spec
+    return registry
+
+
+REGISTRY = _build_registry( _CONVERSATIONAL, _AGENTIC, _CONTROL, _NONE )
 
 
 # ── The four template buckets, DERIVED from cls (§5.1.2) ──────────────────────
@@ -194,12 +225,15 @@ RECEPTIONIST_OR_NONE = frozenset( c for c, s in REGISTRY.items() if s.cls is Com
 # ── DEFERRED_COMMANDS — a deliberate BOUNDED INTERIM, retired in phase 2 ───────
 # The §9 drift guard (test_v2_registry.py:59) imports this name and asserts
 #   template == V2_AGENTS ∪ DEFERRED_COMMANDS ∪ CONTROL_COMMANDS ∪ RECEPTIONIST_OR_NONE.
-# DEFERRED_COMMANDS is the template-EMITTABLE agentic subset (7), NOT the full
-# agentic set (10): the three extra AGENTIC_AGENTS commands — `bug fix expediter`,
-# `test fix expediter resume`, `test suite` — are the §3 "unreachable by voice"
-# drifts and are intentionally absent from the router template, so they cannot sit
-# in a bucket the guard equates with the template. Deriving it from cls alone would
-# make it the 10 and break the guard; it is therefore kept as an explicit set here.
+# DEFERRED_COMMANDS is the template-EMITTABLE agentic subset (9), NOT the full
+# agentic set (12): the owned agentic commands absent from the router template —
+# `bug fix expediter` (card-reachable, never an initial detection), `test fix
+# expediter` (START, system-triggered, EXEMPT — non-speakable job-id arg), and
+# `heartbeat poker` (system/programmatic, no production dispatch path today) —
+# cannot sit in a bucket the guard equates with the template. `test fix expediter
+# resume` joined the template in phase 3 (voice-reachable); `test suite` joined it in
+# phase 3 by ruling B (completion). Deriving from cls alone would make it the 12 and
+# break the guard; it is therefore kept as an explicit set here.
 # `test_deferred_is_template_emittable_agentic_subset` pins it to
 # AGENTIC_COMMANDS ∩ template so it cannot silently drift from the owned set.
 # Phase 2 retires this name when the drift guard is rewritten class-aware.
@@ -211,6 +245,8 @@ DEFERRED_COMMANDS = frozenset( {
     "agent router go to research to presentation",
     "agent router go to claude code",
     "agent router go to swe team",
+    "agent router go to test fix expediter resume",   # phase 3: voice-reachable, now router-listed
+    "agent router go to test suite",                  # phase 3: ruling B — router-listed (completion)
 } )
 
 

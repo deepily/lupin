@@ -31,6 +31,7 @@ from itertools import combinations
 import cosa.utils.util as cu
 from cosa.rest.v2.registry import (
     AgentSpec,
+    CommandClass,
     V2_AGENTS,
     AGENTIC_COMMANDS,
     DEFERRED_COMMANDS,
@@ -38,6 +39,7 @@ from cosa.rest.v2.registry import (
     RECEPTIONIST_OR_NONE,
     resolve,
     resolve_agentic,
+    _build_registry,
 )
 from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
 
@@ -79,6 +81,26 @@ class TestRegistryDriftGuard( unittest.TestCase ):
     # count cannot fail unless a set-equality would have failed first.
 
 
+class TestRegistryConstruction( unittest.TestCase ):
+    """M4 (Tiffany's mutation): a duplicate command must FAIL LOUD, not be silently
+    dropped by a dict comprehension (last-wins). The invariant is now ENFORCED at
+    construction — a raise — so there is no count-comparison guard over it (that
+    would be vacuous: a violation raises at import before any test could observe an
+    inequality). This falsifiable check is what survives."""
+
+    def test_duplicate_command_raises( self ):
+        a = AgentSpec( "agent router go to dup", cls=CommandClass.CONVERSATIONAL )
+        b = AgentSpec( "agent router go to dup", cls=CommandClass.CONTROL )
+        with self.assertRaises( ValueError ):
+            _build_registry( ( a, ), ( b, ) )
+
+    def test_build_registry_keeps_every_distinct_command( self ):
+        a = AgentSpec( "agent router go to a", cls=CommandClass.CONVERSATIONAL )
+        b = AgentSpec( "agent router go to b", cls=CommandClass.CONTROL )
+        built = _build_registry( ( a, ), ( b, ) )
+        self.assertEqual( set( built ), { "agent router go to a", "agent router go to b" } )
+
+
 class TestAgenticSetOwnership( unittest.TestCase ):
     """The registry now OWNS the agentic set (§5.1); these guard the two seams
     that ownership opens — cls vs the source table, and the interim DEFERRED name."""
@@ -92,8 +114,9 @@ class TestAgenticSetOwnership( unittest.TestCase ):
     def test_deferred_is_template_emittable_agentic_subset( self ):
         # DEFERRED_COMMANDS is a bounded interim (retired phase 2). Pin it to the
         # template-emittable agentic subset so it cannot silently drift from the
-        # owned set: the 3 AGENTIC commands absent from the template (bug fix
-        # expediter, test fix expediter resume, test suite) are excluded here.
+        # owned set: the AGENTIC commands absent from the template (bug fix expediter,
+        # test fix expediter [START], heartbeat poker) are excluded here. (test suite
+        # and test fix expediter resume ARE in the template and so ARE in the set.)
         template          = _template_commands()
         emittable_agentic = { c for c in AGENTIC_COMMANDS if c in template }
         self.assertEqual( DEFERRED_COMMANDS, emittable_agentic )

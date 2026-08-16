@@ -68,10 +68,20 @@ class TestProductNameMapping:
     """Verify the PRODUCT_NAMES class variable is consistent with AGENTIC_AGENTS."""
 
     def test_all_agentic_agents_have_product_names( self ):
-        """Every key in AGENTIC_AGENTS has a corresponding PRODUCT_NAMES entry."""
+        """Every AGENTIC_AGENTS key is a confirmation-card alternative (in PRODUCT_NAMES)
+        UNLESS its drift-guard exemption waives the 'card' surface — a command that is
+        never card-reachable (START needs a pasted, non-speakable job hash; heartbeat
+        poker has no production dispatch path today). The card-waiver set is the SINGLE
+        source, imported from the drift guard (`_exempt_on('card')`) and never
+        re-derived here. NOTE the deliberate reader split (Rachel): this test reads
+        PRODUCT_NAMES by IMPORTING TodoFifoQueue, while test_1d parses it from source —
+        if the two ever disagree, THAT is the finding (the source parser drifting from
+        what the app actually loads), so the readings are kept independent on purpose."""
+        from test_v2_registry_drift_guard import _exempt_on
+        card_exempt = _exempt_on( "card" )
         for key in AGENTIC_AGENTS:
-            assert key in TodoFifoQueue.PRODUCT_NAMES, (
-                f"AGENTIC_AGENTS key '{key}' has no PRODUCT_NAMES entry"
+            assert key in TodoFifoQueue.PRODUCT_NAMES or key in card_exempt, (
+                f"AGENTIC_AGENTS key '{key}' has no PRODUCT_NAMES entry and does not waive 'card'"
             )
 
     def test_product_names_are_unique( self ):
