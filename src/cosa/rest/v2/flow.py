@@ -320,7 +320,19 @@ class AskFlow:
                snapshot_id: Optional[ str ]=None, pending_id: Optional[ str ]=None,
                cache_hit: bool=False, args_known: Optional[ list ]=None, args_missing: Optional[ list ]=None,
                error: Optional[ str ]=None ) -> dict:
-        """Assemble the §8 response dict and write the authoritative trace line."""
+        """Assemble the §8 response dict and write the authoritative trace line.
+
+        Stamps t_complete here — the single chokepoint every terminal exit funnels
+        through (agent/replay/receptionist via _finish, needs_input, resume's
+        interview-continue, and the expired refusal). This makes t_recv -> t_complete
+        the completion-symmetric span for v1's RUNNING->COMPLETED (report note, not a
+        gate; row 76a3c32d). Because _finish calls _maybe_write_back BEFORE _emit,
+        t_complete is always stamped after the snapshot write. It follows _speak on the
+        answer path, so a few microseconds of TTS-dispatch land inside v2's span — a
+        conservative bias (v2 reads slightly slower, never faster), the audit-safe
+        direction for the paired harness.
+        """
+        trace.mark( "t_complete" )
         trace.update( path=path, status=status, route_reason=route_reason, cache_hit=cache_hit,
                       wrote_snapshot=snapshot_id is not None )
         trace.write()

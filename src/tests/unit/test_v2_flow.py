@@ -620,3 +620,73 @@ def test_resume_spawns_no_background_thread( tmp_path, notifier, monkeypatch ):
     f.resume( pending_id=pid, answer="Boston", websocket_id="ws1" )
     after  = { t.ident for t in threading.enumerate() }
     assert after == before, f"resume spawned a background thread: {after - before}"
+
+
+# ────────────────────────────────────────────────────────────── t_complete span (row 76a3c32d)
+#
+# t_complete is the closing bookend of the completion-symmetric span (t_recv ->
+# t_complete), mirroring v1's RUNNING->COMPLETED for the paired harness report
+# note. It is stamped once at the _emit chokepoint, so EVERY terminal exit carries
+# it. Each test below would go red if the mark were removed (KeyError → the `in`
+# assertion fails) — RED-provable per the 100% mandate. perf_counter_ns is
+# monotonic, so t_complete >= t_first_useful >= t_recv holds without an injected clock.
+
+def test_agent_path_stamps_t_complete_after_first_useful( tmp_path, notifier, monkeypatch ):
+    monkeypatch.setattr( flow_mod, "resolve",
+                         lambda command: FakeSpec( required_args=(), snapshotable=True ) )
+    exe = FakeExecutor( _outcome( status="done", answer="42", answer_raw="42" ) )
+    f = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(), exe,
+                    FakePending(), notifier )
+    r = f.run( "what time is it", **_CTX )
+    timings = r[ "timings_ms" ]
+    assert "t_complete" in timings                              # the completion bookend exists
+    assert timings[ "t_complete" ] >= timings[ "t_first_useful" ]  # after the useful answer
+    assert timings[ "t_complete" ] >= timings[ "t_recv" ]         # after the anchor (0.0)
+
+
+def test_replay_path_stamps_t_complete( tmp_path, notifier ):
+    snap  = types.SimpleNamespace( routing_command="agent router go to math" )
+    cache = FakeCache( lookup_result=_lookup( is_replay_hit=True, snapshot=snap ) )
+    exe   = FakeExecutor( _outcome( status="done", answer="4", answer_raw="4" ) )
+    f     = _make_flow( tmp_path, cache, FakeRouter(), FakeExpeditor(), exe, FakePending(), notifier )
+    r = f.run( "what is 2+2", **_CTX )
+    assert "t_complete" in r[ "timings_ms" ]
+    assert r[ "timings_ms" ][ "t_complete" ] >= r[ "timings_ms" ][ "t_first_useful" ]
+
+
+def test_needs_input_path_stamps_t_complete( tmp_path, notifier, monkeypatch ):
+    monkeypatch.setattr( flow_mod, "resolve",
+                         lambda command: FakeSpec( required_args=( "location", ) ) )
+    router     = FakeRouter( command="agent router go to weather" )
+    extraction = _extraction( final_args={}, missing=[ "location" ],
+                              fallback_questions={ "location": "Which city?" } )
+    expeditor  = FakeExpeditor( extraction=extraction )
+    f = _make_flow( tmp_path, FakeCache(), router, expeditor, FakeExecutor(), FakePending(), notifier )
+    r = f.run( "what's the weather", **_CTX, interactive=True )
+    timings = r[ "timings_ms" ]
+    assert r[ "path" ] == "needs_input"
+    assert "t_complete" in timings                              # needs_input turn is bookended too
+    assert timings[ "t_complete" ] >= timings[ "t_first_useful" ]
+
+
+def test_resume_complete_stamps_t_complete( tmp_path, notifier, monkeypatch ):
+    monkeypatch.setattr( flow_mod, "resolve",
+                         lambda command: FakeSpec( required_args=( "location", ), snapshotable=False ) )
+    pending = PendingRequests()
+    pid, _  = _park( pending )
+    exe     = FakeExecutor( _outcome( status="done", answer="sunny", answer_raw="sunny raw" ) )
+    f       = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(), exe, pending, notifier )
+    r = f.resume( pending_id=pid, answer="Boston", websocket_id="ws1" )
+    assert r[ "status" ] == "done"
+    assert "t_complete" in r[ "timings_ms" ]
+
+
+def test_resume_expired_stamps_t_complete( tmp_path, notifier ):
+    # even the refusal path is bookended: t_recv + t_complete, no t_first_useful.
+    pending = PendingRequests()
+    f = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(), FakeExecutor(), pending, notifier )
+    r = f.resume( pending_id="does-not-exist", answer="Boston", websocket_id="ws1" )
+    timings = r[ "timings_ms" ]
+    assert r[ "status" ] == "expired"
+    assert "t_complete" in timings
+    assert timings[ "t_complete" ] >= timings[ "t_recv" ]
