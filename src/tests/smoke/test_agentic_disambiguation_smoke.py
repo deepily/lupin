@@ -92,14 +92,14 @@ def quick_smoke_test():
             assert result is None
             print( "   PASS: Cancel returns None" )
 
-            # 4. Timeout returns original command
-            print( "4. Timeout returns original..." )
+            # 4. Timeout ABORTS — silence is not a confirmation (row cad45cf1)
+            print( "4. Timeout aborts (returns None)..." )
             mock_notify.return_value = _make_response(
                 response_value=None, exit_code=2, status="expired", is_timeout=True,
             )
             result = queue._confirm_agentic_routing( cmd, "", "u", "u@e.com", "timeout test" )
-            assert result == cmd
-            print( "   PASS: Timeout returns original command" )
+            assert result is None
+            print( "   PASS: Timeout aborts instead of running the detected command" )
 
         print( "\n  ALL AGENTIC DISAMBIGUATION SMOKE TESTS PASSED (4/4)" )
         return True

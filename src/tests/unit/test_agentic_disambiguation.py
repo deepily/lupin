@@ -193,8 +193,16 @@ class TestConfirmAgenticRouting:
         assert result is None
 
     @patch( "cosa.rest.todo_fifo_queue.notify_user_sync" )
-    def test_timeout_returns_original( self, mock_notify, mock_queue ):
-        """Timeout → returns original command (safe default)."""
+    def test_timeout_aborts_returns_none( self, mock_notify, mock_queue ):
+        """
+        Timeout → ABORTS (None), row cad45cf1.
+
+        This used to assert the detected command came back, on the reasoning
+        that proceeding was the safe default. It is not: silence is not a
+        confirmation, and detection is the very thing this gate exists to
+        doubt. fc4ccfe6 measured a whole class of sentences that route wrong,
+        so proceeding on silence lands the wrong agent and looks like it worked.
+        """
         mock_notify.return_value = _make_response(
             exit_code=2, status="expired", is_timeout=True
         )
@@ -203,11 +211,16 @@ class TestConfirmAgenticRouting:
             self.PODCAST_GEN, "", "user1", "user@test.com", "create a podcast"
         )
 
-        assert result == self.PODCAST_GEN
+        assert result is None
 
     @patch( "cosa.rest.todo_fifo_queue.notify_user_sync" )
-    def test_error_returns_original( self, mock_notify, mock_queue ):
-        """Error → returns original command (safe default)."""
+    def test_error_aborts_returns_none( self, mock_notify, mock_queue ):
+        """
+        Notification error → ABORTS (None), row cad45cf1.
+
+        A failed notification is not a confirmation either — nobody was asked,
+        so nothing was answered.
+        """
         mock_notify.return_value = _make_response(
             exit_code=1, status="connection_error"
         )
@@ -216,7 +229,7 @@ class TestConfirmAgenticRouting:
             self.RES_TO_POD, "", "user1", "user@test.com", "convert research"
         )
 
-        assert result == self.RES_TO_POD
+        assert result is None
 
     @patch( "cosa.rest.todo_fifo_queue.notify_user_sync" )
     def test_json_response_format( self, mock_notify, mock_queue ):
