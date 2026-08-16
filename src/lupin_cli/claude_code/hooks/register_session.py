@@ -29,6 +29,7 @@ import signal
 import subprocess
 import sys
 import time
+import unicodedata
 from datetime import datetime, timezone
 
 # Bootstrap: ensure src/ is on PYTHONPATH for lupin_cli imports
@@ -1015,6 +1016,372 @@ def _build_persona_failure_block( failure, stable_session_id ):
     )
 
 
+_MEMENTO_AMENDMENT_MARKER = "<!-- memento-amendment:"
+_MEMENTO_HEADER_MARKER    = "<!-- memento-record:"
+_MEMENTO_FILE_PREFIX      = ".claude-memento-"
+_MEMENTO_MAX_BYTES        = 8000
+
+
+def _persona_slugs( persona_name ):
+    """
+    Every slug a persona's mementos might be filed under, best first.
+
+    ACCENTS ARE THE WHOLE REASON THIS RETURNS A LIST. "María" naively slugs to
+    "mar-a", because a non-ASCII letter falls into the punctuation class and
+    becomes a separator. That is not hypothetical: planning-is-prompting holds
+    18 records named `.claude-memento-maria-*.md` and exactly one named
+    `.claude-memento-mar-a-3bd9e86c.md`. A resolver keyed on the naive slug
+    matches the single broken file and misses all 18 good ones — confidently
+    wrong, which is the failure mode this whole block exists to prevent.
+
+    So we fold accents first (María -> maria), which is what writers produce,
+    and ALSO return the mangled form so records already written under it stay
+    reachable. Normalizing on write is the real fix; until every legacy file is
+    renamed, the resolver has to know both.
+
+    Requires:
+        - persona_name is a string or None
+
+    Ensures:
+        - Returns [ ascii_slug, … ] with the accent-folded form first, the
+          naive form appended only when it differs
+        - Returns [] for an empty/None name or a name with no alphanumerics
+        - Never raises
+    """
+    if not persona_name: return []
+
+    lowered = persona_name.strip().lower()
+
+    # Accent-folded: "maría" -> "maria". NFKD splits the letter from its accent;
+    # dropping combining marks leaves the base letter.
+    folded  = "".join( ch for ch in unicodedata.normalize( "NFKD", lowered )
+                       if not unicodedata.combining( ch ) )
+
+    out = []
+    for candidate in ( folded, lowered ):
+        slug = re.sub( r"[^a-z0-9]+", "-", candidate ).strip( "-" )
+        if slug and slug not in out: out.append( slug )
+
+    return out
+
+
+def _written_at_of( header ):
+    """
+    Pull the `written_at=<ISO>` stamp out of a memento-record header.
+
+    This is the honest recency key. mtime is NOT: mementos are mirrored to
+    ~/.claude/mementos/<project>/ and moved around by copies and rsync, every
+    one of which resets mtime, so the newest mtime can easily be the oldest
+    memento. The header stamp travels with the content.
+
+    Requires:
+        - header is a header line, or None
+
+    Ensures:
+        - Returns the ISO string when the stamp is present
+        - Returns None when header is None or carries no stamp — NOT an error;
+          real records exist without one (measured: 3 in planning-is-prompting,
+          including .claude-memento-maria-350ac4c2.md). The caller ranks those
+          last rather than crashing or silently dropping them.
+        - Never raises
+    """
+    if not header: return None
+    match = re.search( r"written_at=(\S+)", header )
+    return match.group( 1 ) if match else None
+
+
+def _memento_candidates( repo_root ):
+    """
+    List memento RECORDS at the repo root, newest first.
+
+    Deliberately excludes `.claude-memento.md` — that file is a POINTER, not a
+    record, and it is single-occupancy for the entire repo. It currently names
+    whichever seat wrote last, so resolving a seat's memento through it would
+    hand one persona another persona's state. Empty is a safe answer; another
+    seat's held merge and crew is not.
+
+    Ordering key is the header's `written_at` stamp, falling back to mtime only
+    when a record carries none. A record with neither still appears — it ranks
+    last, but it is never silently dropped.
+
+    Requires:
+        - repo_root is a directory path
+
+    Ensures:
+        - Returns [ (path, header, sort_key), … ] newest-first, records only
+        - Returns [] when the directory is unreadable
+        - Never raises
+    """
+    try:
+        names = os.listdir( repo_root )
+    except OSError:
+        return []
+
+    out = []
+    for name in sorted( names ):
+        if not name.startswith( _MEMENTO_FILE_PREFIX ): continue
+        if not name.endswith( ".md" ):                  continue
+        path   = os.path.join( repo_root, name )
+        header = _header_of( path )
+        stamp  = _written_at_of( header )
+        if stamp:
+            # ISO strings sort lexicographically; the "1" tier outranks mtime.
+            sort_key = ( 1, stamp )
+        else:
+            try:
+                sort_key = ( 0, str( os.path.getmtime( path ) ) )
+            except OSError:
+                sort_key = ( 0, "" )
+        out.append( ( path, header, sort_key ) )
+
+    return sorted( out, key=lambda row: row[2], reverse=True )
+
+
+def _header_of( path ):
+    """
+    Ensures: returns the memento's first line when it is a memento-record
+    header, else None. Never raises.
+    """
+    try:
+        with open( path, "r", encoding="utf-8", errors="replace" ) as fh:
+            first = fh.readline()
+    except OSError:
+        return None
+    return first if _MEMENTO_HEADER_MARKER in first else None
+
+
+def _persona_of( path, header ):
+    """
+    Determine which persona a memento belongs to.
+
+    Two sources, header first. The header's `persona=` field is authoritative
+    when present; when it is absent — and it is absent on real records, e.g.
+    `.claude-memento-maria-350ac4c2.md`, whose first line is a human heading
+    rather than a machine header — the FILENAME carries the persona slug
+    unambiguously. Falling back to the filename keeps those records reachable.
+
+    Both sources are persona-scoped, so neither can leak one seat's memento to
+    another. That is the property that matters here; recency is secondary.
+
+    Requires:
+        - path is a memento path; header is its header line or None
+
+    Ensures:
+        - Returns the persona slug, or None when neither source yields one
+        - Never raises
+    """
+    if header:
+        match = re.search( r"persona=([^\s]+)", header )
+        if match: return match.group( 1 ).strip().lower()
+
+    # `.claude-memento-<slug>-<sid8>.md` -> <slug>
+    stem = os.path.basename( path )[ len( _MEMENTO_FILE_PREFIX ): ]
+    if stem.endswith( ".md" ): stem = stem[ :-3 ]
+    if "-" not in stem: return None
+    return stem.rsplit( "-", 1 )[0].strip().lower() or None
+
+
+def _resolve_memento_path( stable_session_id, persona_name, repo_root ):
+    """
+    Find THIS seat's memento at the repo root.
+
+    Two-step, and the ORDER is the whole design:
+
+      1. Exact session-id match. A self-re-spin types `/clear` into its own
+         pane and keeps its session id, so when a record names this id it is
+         unambiguously ours — the strongest signal available.
+      2. Newest record for this PERSONA. A re-spin done as dismiss-then-spawn
+         arrives as a brand-new session, so step 1 finds nothing while the
+         memento sits right there named for the OLD id. The persona is what
+         actually carries across that boundary, so it is what we match on.
+         Newest-mtime breaks the tie when a persona has several.
+
+    Every candidate is confirmed by its `<!-- memento-record: … -->` header
+    before it is accepted. A filename that merely matches is a guess, and a
+    memento is the one artifact a rehydrating seat cannot afford to be wrong
+    about — handing it someone else's state is worse than handing it none.
+
+    Requires:
+        - stable_session_id is a string (full uuid) or None
+        - persona_name is this seat's allocated persona, or None
+        - repo_root is a directory path
+
+    Ensures:
+        - Returns a confirmed memento path, or None when nothing resolves
+        - Never returns a record belonging to a different persona
+        - Never raises
+    """
+    candidates = _memento_candidates( repo_root )
+    if not candidates: return None
+
+    sid8  = stable_session_id[:8] if stable_session_id and len( stable_session_id ) >= 8 else None
+    slugs = _persona_slugs( persona_name )
+
+    # 1. Exact session-id match — a self-re-spin keeps its id, so a record
+    #    naming it is unambiguously ours. Match on the header when there is
+    #    one, else on the filename's trailing id.
+    if sid8:
+        for path, header, _ in candidates:
+            if header and f"session_id={sid8}" in header:      return path
+            if os.path.basename( path ).endswith( f"-{sid8}.md" ): return path
+
+    # 2. Newest record for this persona — survives dismiss-then-spawn, where
+    #    the seat is new but the persona carried over. Slugs are tried in
+    #    order, accent-folded first.
+    for slug in slugs:
+        for path, header, _ in candidates:
+            if _persona_of( path, header ) == slug:
+                return path
+
+    return None
+
+
+def _extract_amendment_tail( content ):
+    """
+    Return the memento's whole AMENDMENT TAIL — everything from the FIRST
+    `<!-- memento-amendment:` marker to the end of the file.
+
+    Note `find`, not `rfind`, and the reason is empirical: the last marker in a
+    real memento is frequently NOT the substantive one. `self_respin` appends a
+    tiny bookkeeping amendment carrying only the nonce stamp it needs to prove
+    freshness, so "the last block" resolves to four lines of plumbing while the
+    block before it — the held merge, the crew, the correction owed — is
+    dropped. Measured on cheech/80c17315: last-marker yielded 4 lines of nonce;
+    first-marker yielded the 3.5KB that actually mattered.
+
+    So the tail is the unit, not the block. A memento accretes: body written
+    once, then amended before each re-spin. Everything after the first
+    amendment is the part written but not yet acted on.
+
+    Requires:
+        - content is the memento text, or None
+
+    Ensures:
+        - Returns the full trailing amendment region when a marker exists
+        - Returns None when content is empty or carries no amendment marker
+          (the caller then points at the file without quoting a section)
+        - Never raises
+    """
+    if not content: return None
+    idx = content.find( _MEMENTO_AMENDMENT_MARKER )
+    if idx == -1: return None
+    return content[ idx: ].strip()
+
+
+def _truncate_visibly( text, path, max_bytes=_MEMENTO_MAX_BYTES ):
+    """
+    Cap `text` at max_bytes KEEPING THE END, and say so IN BAND when it bites.
+
+    Two decisions, both deliberate:
+
+    - We keep the TAIL and drop the head. Amendments accrete oldest-first, so
+      cutting from the end would discard the newest — precisely the state the
+      seat has not yet acted on. Recency is the whole reason this block exists.
+    - The cut announces itself. A silent cut hands the seat partial state it
+      cannot tell is partial, which is worse than no state at all, because
+      partial state reads as complete. So it counts the bytes it dropped and
+      names the file holding them.
+
+    Requires:
+        - text is a string; path is the memento path the text came from
+        - max_bytes is a positive int
+
+    Ensures:
+        - Returns text unchanged when it fits
+        - Otherwise returns an explicit CUT marker naming the omitted byte
+          count and the full path, followed by the NEWEST max_bytes of text
+        - Never raises
+    """
+    raw = text.encode( "utf-8" )
+    if len( raw ) <= max_bytes: return text
+
+    tail    = raw[ -max_bytes: ].decode( "utf-8", errors="ignore" )
+    omitted = len( raw ) - len( tail.encode( "utf-8" ) )
+    return (
+        f"──── CUT HERE — {omitted} earlier bytes omitted ────\n"
+        f"Older amendments were dropped to keep boot context cheap; what follows\n"
+        f"is the NEWEST portion and is INCOMPLETE. Read the full record before\n"
+        f"acting on it:\n"
+        f"  {path}\n"
+        f"────────────────────────────────────────────────────\n"
+        f"{tail}"
+    )
+
+
+def _build_memento_block( stable_session_id, persona_name, repo_root=None ):
+    """
+    Render this seat's memento pointer + newest amendment as a block for the
+    SessionStart hook's `additionalContext` — the channel the SESSION ITSELF
+    reads at boot.
+
+    WHY THIS EXISTS (2026-08-15, rows cc5477c9 / 9e0678f6). A self-re-spin
+    typed `/clear` into a manager's own pane and nothing else. The seat came
+    back with a fresh context and no idea a memento existed — the boot path had
+    the session id, had the persona, had a derivable filename sitting at the
+    repo root, and walked straight past it. Rick saw it twice in one day; one
+    of those seats lost a held merge, a two-worker crew mid-lane, and a
+    correction it owed a peer. The fix is not to type a reminder at the seat
+    after the fact — it is for the boot path to carry the memento itself, so
+    the state is present before the first turn rather than dependent on someone
+    thinking to ask for it.
+
+    Deliberately NOT gated on `source == "clear"`. The hook's own docstring
+    says source is startup|resume|clear|compact, and a re-spin done as
+    dismiss-then-spawn arrives as a NEW session — i.e. `startup`, not `clear`.
+    Gating on the source would silently skip exactly the paths most likely to
+    need it, so we attempt the lookup on every boot and emit only when one
+    actually resolves. The cost of the miss case is one directory listing.
+
+    Requires:
+        - stable_session_id is a string or None
+        - persona_name is this seat's allocated persona, or None
+        - repo_root is a directory path, or None to resolve from LUPIN_ROOT
+
+    Ensures:
+        - Returns "" when no memento resolves for this seat (no noise on the
+          overwhelmingly common boot that has none)
+        - Otherwise returns a block naming the path and quoting the newest
+          amendment, visibly truncated if it exceeds the byte cap
+        - Never raises
+    """
+    repo_root = repo_root if repo_root is not None else os.environ.get( "LUPIN_ROOT", os.getcwd() )
+
+    path = _resolve_memento_path( stable_session_id, persona_name, repo_root )
+    if not path: return ""
+
+    try:
+        with open( path, "r", encoding="utf-8", errors="replace" ) as fh:
+            content = fh.read()
+    except OSError:
+        return ""
+
+    amendment = _extract_amendment_tail( content )
+    if amendment:
+        body    = _truncate_visibly( amendment, path )
+        section = (
+            "  Your amendments — what you wrote down but had not yet acted on —\n"
+            "  follow. The full record is one read away at the path above.\n"
+            "\n"
+            f"{body}\n"
+        )
+    else:
+        section = (
+            "  It carries no amendment block, so nothing is quoted here.\n"
+            "  Read it in full before you act.\n"
+        )
+
+    return (
+        "\n"
+        "════════════════════════════════════════════════════════════════\n"
+        "  🧠  YOU HAVE A MEMENTO — YOU WROTE IT BEFORE THIS CONTEXT RESET\n"
+        "════════════════════════════════════════════════════════════════\n"
+        f"  {path}\n"
+        "\n"
+        f"{section}"
+        "════════════════════════════════════════════════════════════════\n"
+    )
+
+
 def _release_voice_persona_via_http( server_url, project, stable_session_id ):
     """
     Release the currently-allocated voice persona for the given session by
@@ -1557,8 +1924,15 @@ def main():
         except Exception:
             status_block = ""
         alarm_block = _build_persona_failure_block( voice_persona_failure, stable_session_id )
+        try:
+            allocated_persona = ( session_data.get( "voice_persona" ) or {} ).get( "name" )
+            memento_block     = _build_memento_block( stable_session_id, allocated_persona )
+        except Exception as e:
+            print( f"[register_session] WARNING: memento block failed ({type( e ).__name__}: {e})",
+                   file=sys.stderr )
+            memento_block = ""
         emit_json( {
-            "additionalContext": f"Session ID: {session_id}\n\n{status_block}{alarm_block}"
+            "additionalContext": f"Session ID: {session_id}\n\n{status_block}{alarm_block}{memento_block}"
         } )
     else:
         emit_json( {} )
