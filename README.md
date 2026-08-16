@@ -276,6 +276,7 @@ claude mcp add cosa-voice -- python ${LUPIN_ROOT}/src/lupin_mcp/cosa_voice_mcp.p
 - [Agentic Voice Workflow](src/workflow/agentic-voice-workflow.md) — building new agents with voice I/O
 - [Fleet Liveness & Task-Store Architecture](src/docs/fleet-liveness-and-task-store-architecture.md) — one store, three readers; heartbeat holds; the arbiter and how to bounce it
 - [The Worker-Poke Flag Is On and Cannot Fire](src/rnd/v0.2.0/2026.08.15-worker-poke-flag-cannot-fire.md) — why enabling worker pokes changed nothing: `stuck` means repeated cap-reached, and the staleness tier is manager-only
+- [v1 Baseline Standalone Server Design](src/rnd/v0.2.0/2026.08.15-v1-baseline-standalone-server-design.md) — measure pinned sha `b0735467` on its own server + own DB, not a `:8000` job that measures today's main tree (row d212f54b)
 - [Cost Model: Bounded CC vs Firewalled SDK](src/docs/cost-model-bounded-cc-vs-firewalled-sdk.md) — which LLM path an agent lands on, and why
 
 ### Agentic jobs, recovery & test scheduling
