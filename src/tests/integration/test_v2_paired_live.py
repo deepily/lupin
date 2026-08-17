@@ -53,6 +53,7 @@ the refusing scaffold for a finished run):
 Design: src/rnd/v0.2.0/2026.08.14-v2-paired-go-no-go-harness-design.md (§4, §6, §9).
 """
 
+import datetime
 import json
 import os
 import sys
@@ -260,16 +261,35 @@ def _dump_paired_artifacts( v1_artifact, v2_artifact ):   # pragma: no cover - b
     bug costs seconds, not hours. Best-effort: never let a dump failure mask the real run outcome.
 
     Ensures:
-        - writes io/v2-flow/paired-run-latest/{v1,v2}-arm-artifact.json (overwrite = always the newest).
+        - writes {v1,v2}-arm-artifact.json under LUPIN_PAIRED_ARTIFACT_DIR when set, else
+          io/v2-flow/paired-run-latest/ (overwrite = always the newest).
+        - stamps each file with written_at + written_by, so a reader can tell a LIVE run's
+          artifact from one a test wrote. See the warning below for why that is not optional.
         - swallows any I/O error (the run's verdict is the product; this is only insurance).
+
+    ⚠️ THIS FUNCTION WRITES A DIRECTORY PEOPLE TREAT AS RESULTS. It runs BEFORE the provenance
+    assertion (that is the whole point — a downstream error must not destroy recoverable data),
+    which means ANY caller that reaches this line publishes to paired-run-latest, including a
+    unit test that patched both arms with canned fixtures. That is not hypothetical: on
+    2026-08-17 this directory held a fake v1 n=3 / v2 n=2 pair written by
+    test_v2_paired_bridge_reachability, and a previous session nearly read it as a real result.
+    Tests MUST point LUPIN_PAIRED_ARTIFACT_DIR at a tmp path; the stamp below is the backstop
+    for when someone forgets.
     """
     try:
         import cosa.utils.util as cu
-        out_dir = os.path.join( cu.get_project_root(), "io", "v2-flow", "paired-run-latest" )
+        out_dir = os.environ.get( "LUPIN_PAIRED_ARTIFACT_DIR" ) or os.path.join(
+            cu.get_project_root(), "io", "v2-flow", "paired-run-latest" )
         os.makedirs( out_dir, exist_ok=True )
+        # A run id proves provenance of the FILE, the way git_sha proves provenance of the numbers
+        # (row c9b43538). "unknown-caller" is the tell that nothing identified itself as a real run.
+        written_by = os.environ.get( "LUPIN_TEST_SUITE_JOB_ID" ) or "unknown-caller"
         for name, art in ( ( "v1", v1_artifact ), ( "v2", v2_artifact ) ):
+            stamped = dict( art )
+            stamped[ "written_at" ] = datetime.datetime.now().isoformat()
+            stamped[ "written_by" ] = written_by
             with open( os.path.join( out_dir, f"{name}-arm-artifact.json" ), "w" ) as fh:
-                json.dump( art, fh, indent=2, default=str )
+                json.dump( stamped, fh, indent=2, default=str )
     except Exception as e:                                 # insurance must never mask the run outcome
         print( f"[paired] artifact-dump insurance failed (non-fatal): {e}" )
 

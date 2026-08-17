@@ -18,6 +18,7 @@ a real caller AND a test proves the call happens. These two tests are that proof
     is what makes the positive test non-tautological — it proves the call is gated, not free.
 """
 
+import json
 import os
 import sys
 from unittest.mock import patch, MagicMock
@@ -36,6 +37,14 @@ from tests.integration import test_v2_paired_live as bridge   # noqa: E402
 
 _V2_STORE = "lupin_db_test.solution_snapshots"           # SAFETY-blessed v2 destination (patched precondition 1)
 _V1_STORE = "lupin_db_v1baseline.solution_snapshots"     # distinct v1 destination (patched _resolve_v1_paired_store)
+
+# Where this file's canned artifacts are allowed to land. The bridge's dump runs BEFORE the
+# provenance assertion (deliberately — a downstream error must not destroy recoverable data),
+# so every test below that reaches the bridge WOULD otherwise write io/v2-flow/paired-run-latest,
+# the directory people read as results. On 2026-08-17 it did exactly that, leaving a fake
+# v1 n=3 / v2 n=2 pair a session nearly mistook for a real run.
+import tempfile                                            # noqa: E402
+_ARTIFACT_TMPDIR = tempfile.mkdtemp( prefix="paired-artifacts-unit-" )
 
 _PAIRS = [ ( "u1", "c1" ), ( "u2", "c2" ), ( "u3", "c3" ) ]
 
@@ -74,7 +83,12 @@ def test_bridge_reaches_and_fires_validity_check():
          patch.object( bridge, "_clean_v2_arm_store", lambda config_mgr: "solution_snapshots" ), \
          patch.object( bridge, "_resolve_v1_paired_store", return_value=_V1_STORE ), \
          patch.object( guard, "count_store_rows", return_value=0 ), \
-         patch.dict( os.environ, { "LUPIN_V1_ARM_BASE_URL": "http://stub-v1:7997" } ), \
+         patch.dict( os.environ, { "LUPIN_V1_ARM_BASE_URL": "http://stub-v1:7997",
+                                   # NEVER let a unit test publish to the live results dir:
+                                   # the artifact dump runs BEFORE the provenance assertion,
+                                   # so canned fixtures reached paired-run-latest and a
+                                   # session nearly read them as a real run (2026-08-17).
+                                   "LUPIN_PAIRED_ARTIFACT_DIR": _ARTIFACT_TMPDIR } ), \
          patch.object( bridge, "_run_v1_arm", return_value=_V1_ART ), \
          patch.object( bridge, "_run_v2_arm", return_value=_V2_ART ), \
          patch.object( guard, "require_arms_distinct_and_clean", spy ):
@@ -148,7 +162,12 @@ def test_bridge_reaches_and_fires_v2_clean_step():
          patch.object( bridge, "_open_v2_arm_connection", return_value=fake_conn ), \
          patch.object( bridge, "_resolve_v1_paired_store", return_value=_V1_STORE ), \
          patch.object( guard, "count_store_rows", return_value=0 ), \
-         patch.dict( os.environ, { "LUPIN_V1_ARM_BASE_URL": "http://stub-v1:7997" } ), \
+         patch.dict( os.environ, { "LUPIN_V1_ARM_BASE_URL": "http://stub-v1:7997",
+                                   # NEVER let a unit test publish to the live results dir:
+                                   # the artifact dump runs BEFORE the provenance assertion,
+                                   # so canned fixtures reached paired-run-latest and a
+                                   # session nearly read them as a real run (2026-08-17).
+                                   "LUPIN_PAIRED_ARTIFACT_DIR": _ARTIFACT_TMPDIR } ), \
          patch.object( bridge, "_run_v1_arm", return_value=_V1_ART ), \
          patch.object( bridge, "_run_v2_arm", return_value=_V2_ART ), \
          patch.object( v2_eval, "clean_v2_snapshot_store", spy ):
@@ -217,7 +236,12 @@ def test_bridge_runs_both_arms_and_builds_provenance_gated_verdict():
          patch.object( bridge, "_clean_v2_arm_store", lambda config_mgr: "solution_snapshots" ), \
          patch.object( bridge, "_resolve_v1_paired_store", return_value=_V1_STORE ), \
          patch.object( guard, "count_store_rows", return_value=0 ), \
-         patch.dict( os.environ, { "LUPIN_V1_ARM_BASE_URL": "http://stub-v1:7997" } ), \
+         patch.dict( os.environ, { "LUPIN_V1_ARM_BASE_URL": "http://stub-v1:7997",
+                                   # NEVER let a unit test publish to the live results dir:
+                                   # the artifact dump runs BEFORE the provenance assertion,
+                                   # so canned fixtures reached paired-run-latest and a
+                                   # session nearly read them as a real run (2026-08-17).
+                                   "LUPIN_PAIRED_ARTIFACT_DIR": _ARTIFACT_TMPDIR } ), \
          patch.object( bridge, "_run_v1_arm", return_value=_V1_ART ), \
          patch.object( bridge, "_run_v2_arm", return_value=_V2_ART ), \
          patch.object( paired_eval, "build_paired_verdict", spy ):
@@ -241,7 +265,12 @@ def test_bridge_refuses_when_arms_measured_different_samples():
          patch.object( bridge, "_clean_v2_arm_store", lambda config_mgr: "solution_snapshots" ), \
          patch.object( bridge, "_resolve_v1_paired_store", return_value=_V1_STORE ), \
          patch.object( guard, "count_store_rows", return_value=0 ), \
-         patch.dict( os.environ, { "LUPIN_V1_ARM_BASE_URL": "http://stub-v1:7997" } ), \
+         patch.dict( os.environ, { "LUPIN_V1_ARM_BASE_URL": "http://stub-v1:7997",
+                                   # NEVER let a unit test publish to the live results dir:
+                                   # the artifact dump runs BEFORE the provenance assertion,
+                                   # so canned fixtures reached paired-run-latest and a
+                                   # session nearly read them as a real run (2026-08-17).
+                                   "LUPIN_PAIRED_ARTIFACT_DIR": _ARTIFACT_TMPDIR } ), \
          patch.object( bridge, "_run_v1_arm", return_value=_V1_ART ), \
          patch.object( bridge, "_run_v2_arm", return_value=v2_mismatch ):
         with pytest.raises( AssertionError ) as exc:
@@ -281,3 +310,46 @@ def test_v2_arm_passes_allow_warm_cold():
     _args, kwargs = spy.call_args
     argv = kwargs.get( "argv" ) if kwargs.get( "argv" ) is not None else ( _args[ 0 ] if _args else [] )
     assert "--allow-warm-cold" in argv            # RED if dropped -> v2 cold-start guard re-arms
+
+
+# ---------------------------------------------------------------------------
+# The publish-containment control (2026-08-17). A unit test must never be able to write
+# io/v2-flow/paired-run-latest — that directory is read as RESULTS.
+# ---------------------------------------------------------------------------
+def test_unit_fixtures_cannot_publish_to_the_live_results_dir():
+    """RED if the artifact dump stops honoring LUPIN_PAIRED_ARTIFACT_DIR.
+
+    This file's canned artifacts DID reach io/v2-flow/paired-run-latest, because the dump runs
+    before the provenance assertion and therefore fires for any caller that gets that far. The
+    result was a fake v1 n=3 / v2 n=2 pair sitting where a real median-Δ belongs. Redirecting the
+    dump is the containment; this asserts the redirect actually holds, and that the live path is
+    what gets used when nobody redirects.
+    """
+    import cosa.utils.util as cu
+    live = os.path.join( cu.get_project_root(), "io", "v2-flow", "paired-run-latest" )
+    with tempfile.TemporaryDirectory() as sandbox:
+        with patch.dict( os.environ, { "LUPIN_PAIRED_ARTIFACT_DIR": sandbox } ):
+            bridge._dump_paired_artifacts( _V1_ART, _V2_ART )
+        assert sorted( os.listdir( sandbox ) ) == [ "v1-arm-artifact.json", "v2-arm-artifact.json" ]
+        written = json.load( open( os.path.join( sandbox, "v1-arm-artifact.json" ) ) )
+        # The stamp is the backstop for when someone forgets to redirect: a reader can tell a
+        # real run's artifact from a test's by who wrote it.
+        assert "written_at" in written and written[ "written_by" ] == "unknown-caller"
+    assert sandbox != live
+
+
+def test_artifact_dump_defaults_to_the_live_dir_when_unredirected():
+    """The other half: without the env var the dump still targets the real results directory,
+    so the containment above is a REDIRECT and not an accidental disabling of the insurance."""
+    import cosa.utils.util as cu
+    live = os.path.join( cu.get_project_root(), "io", "v2-flow", "paired-run-latest" )
+    seen = {}
+    real_makedirs = os.makedirs
+    def spy_makedirs( path, **kw ):
+        seen[ "path" ] = path
+        raise RuntimeError( "stop before writing — we only need the resolved target" )
+    with patch.dict( os.environ, {}, clear=False ):
+        os.environ.pop( "LUPIN_PAIRED_ARTIFACT_DIR", None )
+        with patch.object( os, "makedirs", spy_makedirs ):
+            bridge._dump_paired_artifacts( _V1_ART, _V2_ART )   # best-effort: swallows the raise
+    assert seen[ "path" ] == live
