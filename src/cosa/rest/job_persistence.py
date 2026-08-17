@@ -190,6 +190,48 @@ def _is_within_downtime( scheduled_at_str, last_available, now ):
         return False
 
 
+def _downtime_catchup_announcement( job_id, scheduled_at_str, now ):
+    """
+    Build the LOUD announcement for a job resurrected by the downtime-restore
+    branch — naming scheduled_at vs actual run time and how many hours late its
+    slot fired (row f0b3f630).
+
+    A downtime catch-up run is otherwise SILENT: the job reports as a normal
+    completion with no signal that its requested slot was missed by hours. A
+    seat that submitted into the overnight window and later sees a completed run
+    has no way to know the schedule was ignored. This produces that signal.
+
+    Requires:
+        - job_id is a non-empty string (the id_hash)
+        - scheduled_at_str is the job's requested-slot ISO datetime string
+        - now is a timezone-aware datetime (the actual catch-up run time)
+
+    Ensures:
+        - Returns a single-line string tagged with the [CJ-CATCHUP-LATE] marker,
+          naming job_id, scheduled_at, the actual run time, and hours-late (one
+          decimal)
+        - hours-late is ( now - scheduled_at ) in hours, floored at 0.0
+        - A naive scheduled_at is treated as UTC
+        - On a parse error returns a marked line naming the unparseable value
+          rather than raising — this path must never break startup recovery
+    """
+    try:
+        scheduled_dt = datetime.fromisoformat( scheduled_at_str )
+        if scheduled_dt.tzinfo is None:
+            scheduled_dt = scheduled_dt.replace( tzinfo=timezone.utc )
+        hours_late = ( now - scheduled_dt ).total_seconds() / 3600.0
+        if hours_late < 0:
+            hours_late = 0.0
+        return ( f"[CJ-CATCHUP-LATE] Job {job_id} fired as a downtime catch-up: "
+                 f"scheduled_at={scheduled_at_str}, actual={now.isoformat()}, "
+                 f"{hours_late:.1f}h past its slot — the requested schedule was MISSED "
+                 f"(server was down for that window)." )
+    except ( ValueError, TypeError ):
+        return ( f"[CJ-CATCHUP-LATE] Job {job_id} fired as a downtime catch-up with an "
+                 f"unparseable scheduled_at={scheduled_at_str!r} — the requested schedule "
+                 f"was MISSED (server was down for that window)." )
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -569,9 +611,11 @@ def mark_interrupted_jobs():
                     # preserve (stays PENDING) so get_restorable_jobs() re-enqueues it; it is
                     # immediately eligible (scheduled_at <= now) and fires as a catch-up run.
                     counts[ "pending_catchup" ] += 1
-                    print( f"[CJ-PERSIST] Catch-up: scheduled job {row.id_hash} missed during "
-                           f"downtime (scheduled_at={scheduled_at}, last_available={last_available}) "
-                           f"— preserving for immediate re-run" )
+                    # LOUD signal (row f0b3f630): this catch-up is otherwise silent — the job
+                    # will report as a normal run with no flag that its slot fired hours late.
+                    # Emit a marked line naming scheduled_at vs actual + hours-late so a seat
+                    # that submitted into the dead window learns the schedule was missed.
+                    print( _downtime_catchup_announcement( row.id_hash, scheduled_at, now ) )
                 elif scheduled_at is None:
                     # Immediate submit (no scheduled_at) that never got its turn before
                     # the restart (row 2817b0f5). It never ran, so PRESERVE it (stays

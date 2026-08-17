@@ -5,7 +5,8 @@ Covers every public + private function to genuine 100% line + branch + function:
 is_agentic_job_type, _is_persistence_enabled (true/false/except), _get_history_days
 (value/except), record_server_available (disabled/insert/update/except),
 get_last_available (none/naive-tz/aware/except), _is_within_downtime (no-last/in/
-out/parse-error), _build_metadata_json (empty/extract), the four persist_* writers
+out/parse-error), _downtime_catchup_announcement (slot/naive/floored/unparseable —
+the loud late-drain signal, row f0b3f630), _build_metadata_json (empty/extract), the four persist_* writers
 (disabled-skip / write / except + completed/stalled/failed merge-and-duration arcs),
 mark_interrupted_jobs (running + pending future/catchup/before-window/no-schedule +
 except), _is_future_scheduled (future/past/parse-error/naive-now), get_restorable_jobs
@@ -155,6 +156,38 @@ class TestIsWithinDowntime( unittest.TestCase ):
         self.assertFalse( jp._is_within_downtime( "not-a-date", last, datetime.now( timezone.utc ) ) )
 
 
+class TestDowntimeCatchupAnnouncement( unittest.TestCase ):
+    """The LOUD late-drain signal (row f0b3f630) — scheduled_at vs actual + hours-late."""
+
+    def test_names_slot_actual_and_hours_late( self ):
+        scheduled = "2026-08-16T01:15:00+00:00"
+        now       = datetime( 2026, 8, 16, 10, 7, 0, tzinfo=timezone.utc )   # ~8.9h later
+        msg = jp._downtime_catchup_announcement( "ts-e793257b", scheduled, now )
+        self.assertIn( "[CJ-CATCHUP-LATE]", msg )
+        self.assertIn( "ts-e793257b", msg )
+        self.assertIn( scheduled, msg )
+        self.assertIn( now.isoformat(), msg )
+        self.assertIn( "8.9h", msg )                                         # (10:07 - 01:15) = 8.87h
+
+    def test_naive_scheduled_treated_as_utc( self ):
+        now = datetime( 2026, 1, 1, 3, 0, 0, tzinfo=timezone.utc )
+        msg = jp._downtime_catchup_announcement( "j", "2026-01-01T00:00:00", now )   # naive slot
+        self.assertIn( "3.0h", msg )
+
+    def test_negative_delta_floored_to_zero( self ):
+        # A future slot (should never reach here from the branch, but the helper is
+        # pure): hours-late clamps at 0.0 rather than going negative.
+        now = datetime( 2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc )
+        msg = jp._downtime_catchup_announcement( "j", "2026-01-01T05:00:00+00:00", now )
+        self.assertIn( "0.0h", msg )
+
+    def test_unparseable_scheduled_at_does_not_raise( self ):
+        now = datetime( 2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc )
+        msg = jp._downtime_catchup_announcement( "j", "not-a-date", now )
+        self.assertIn( "[CJ-CATCHUP-LATE]", msg )
+        self.assertIn( "unparseable", msg )
+
+
 class TestBuildMetadataJson( unittest.TestCase ):
     def test_empty( self ):
         self.assertEqual( jp._build_metadata_json( None ), {} )
@@ -292,6 +325,24 @@ class TestMarkInterruptedJobs( _PersistBase ):
         self.assertEqual( counts[ "pending_preserved" ], 2 )     # future + no-schedule (row 9f06c28a: no-schedule now PRESERVED)
         self.assertEqual( counts[ "pending_catchup" ], 1 )
         self.assertEqual( counts[ "pending_interrupted" ], 1 )   # before-window only
+
+    def test_catchup_branch_emits_loud_late_signal( self ):
+        # RED without the announcement (row f0b3f630): a downtime catch-up must print a
+        # [CJ-CATCHUP-LATE] line naming scheduled_at + hours-late, not a silent preserve.
+        update_result = MagicMock(); update_result.rowcount = 0
+        catch = SimpleNamespace( id_hash="ts-e793257b",
+                                 metadata_json={ "scheduled_at": "2021-01-01T00:00:00+00:00" } )
+        select_result = MagicMock()
+        select_result.scalars.return_value.all.return_value = [ catch ]
+        self.session.execute.side_effect = [ update_result, select_result ]
+        with patch.object( jp, "get_last_available",
+                           return_value=datetime( 2020, 1, 1, tzinfo=timezone.utc ) ), \
+             patch( "builtins.print" ) as mp:
+            counts = jp.mark_interrupted_jobs()
+        self.assertEqual( counts[ "pending_catchup" ], 1 )
+        printed = " ".join( str( c ) for c in mp.call_args_list )
+        self.assertIn( "[CJ-CATCHUP-LATE]", printed )
+        self.assertIn( "ts-e793257b", printed )
 
     def test_all_zero_counts_skip_summary_prints( self ):
         # nothing running, no pending rows → total/preserved/catchup all 0 → all
