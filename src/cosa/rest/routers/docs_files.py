@@ -365,6 +365,26 @@ def _serve( full_path: str, rel_path: str, scope: str, parent_validator ) -> JSO
     if media_type.startswith( "image/" ):
         return FileResponse( path=full_path, media_type=media_type )
 
+    # 🔴 LAST LINE OF DEFENCE (bug afdc938f). The whitelist said yes and the NAME
+    # blocklist said yes; the BYTES get the final word. This family has been patched
+    # by filename twice — application_default_credentials.json (023e72cb), then seven
+    # more still served — and the next name nobody predicted is served the moment
+    # someone commits it. A name is a guess about content; this reads the content.
+    #
+    # Runs on EVERY text file, not just *.json: gating on the extension would let
+    # key.txt walk through and re-introduce the filename dependency one layer down.
+    # FAIL CLOSED — unreadable or undecodable BLOCKS, because a check that serves
+    # what it could not read looks like protection while providing none.
+    from cosa.rest.routers._scope_registry import is_credential_file
+    if is_credential_file( full_path ):
+        raise HTTPException(
+            status_code = 400,
+            detail      = ( "Refused: this file's CONTENT is credential material (service-account "
+                            "key, OAuth token, or private key), or could not be read to rule that "
+                            "out. The doc viewer never serves key material, whatever the file is "
+                            "named." )
+        )
+
     # Text branch: utf-8 read + PlainTextResponse (existing behavior preserved).
     try:
         with open( full_path, "r", encoding="utf-8" ) as f:
