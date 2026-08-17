@@ -51,3 +51,16 @@ def test_profile_load_failure_reports_false_and_leaves_allowlist_empty():
     assert loaded is False
     assert r.accepted_senders == []
     assert r.domain_strategy is None
+
+
+def test_profile_load_non_import_error_is_caught_not_propagated():
+    # extra-2 review: a NON-ImportError out of the config factory or strategy
+    # constructor must NOT escape and crash main() with a traceback. The widened
+    # `except Exception` turns any load failure into a clean False (→ refuse-to-start).
+    r = DecisionResponder()
+    with patch( "cosa.agents.swe_team.proxy.EngineeringStrategy",
+                side_effect=RuntimeError( "constructor blew up" ) ):
+        loaded = dpmain._load_swe_team_profile( r )   # must return, not raise
+    assert loaded is False
+    assert r.accepted_senders == []
+    assert r.domain_strategy is None

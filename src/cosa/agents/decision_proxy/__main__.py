@@ -81,8 +81,15 @@ def _load_swe_team_profile( responder, debug=False ):
         if debug: print( "[DecisionProxy] SWE team profile loaded" )
         return True
 
-    except ImportError as e:
-        print( f"[DecisionProxy] SWE team profile failed to load: {e}" )
+    except Exception as e:
+        # Widened from ImportError (extra-2 review): a NON-import failure out of
+        # swe_proxy_config_from_config_mgr or EngineeringStrategy construction would
+        # otherwise escape this handler and crash main() with a traceback — the same
+        # "dead profile" outcome, just louder and uglier. ANY load failure returns
+        # False so main() makes ONE clean refuse-to-start decision. Broad is correct
+        # here because the caller treats False as "refuse to start", never "continue
+        # degraded" — so nothing is masked, it is surfaced and then halted.
+        print( f"[DecisionProxy] SWE team profile failed to load ({type( e ).__name__}): {e}" )
         return False
 
 
