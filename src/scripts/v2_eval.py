@@ -730,6 +730,8 @@ class HttpAskClient:
         timeout      : float                     = ASK_READ_TIMEOUT_SECONDS,
         clock        : Callable[ [], float ]     = time.monotonic,
         relogin_fn   : Optional[ Callable[ [], str ] ] = None,
+        attempt_log_fn : Optional[ Callable[ [ Dict[ str, Any ] ], None ] ] = None,
+        wall_clock   : Callable[ [], float ]     = time.time,
     ) -> None:
         self.base_url     = base_url.rstrip( "/" )
         self.bearer       = bearer
@@ -738,6 +740,31 @@ class HttpAskClient:
         self.timeout      = timeout
         self.clock        = clock                # injected monotonic clock — the F1 client-send stopwatch
         self.relogin_fn   = relogin_fn           # re-mint a fresh bearer on 401 (token-expiry refresh, row d8d019f6)
+        self.attempt_log_fn = attempt_log_fn     # start/end/error rows so a HANG names itself (see _log_attempt)
+        self.wall_clock   = wall_clock           # wall time for the log rows (monotonic is meaningless in a file)
+        self._attempt_seq = 0
+
+    def _log_attempt( self, **fields: Any ) -> None:
+        """
+        Record one attempt-lifecycle row, if a sink is wired.
+
+        WHY THIS EXISTS (María, row d8d019f6). The v2 flow trace writes a row only at
+        COMPLETION, so the one call you most need to see — the one that hung — is the only one
+        guaranteed to leave no evidence. 983 calls survived the last run and the single request
+        that blew the read wall left nothing, which is why the timeout is sized at 4x
+        worst-OBSERVED rather than to a known worst case. A row at START fixes that: a hang
+        leaves a dangling start with no matching end, and that dangling row names the utterance.
+
+        Ensures:
+            - never raises. An instrument that can kill the run it is measuring is worse than
+              no instrument, so a sink failure is swallowed deliberately.
+        """
+        if self.attempt_log_fn is None:
+            return
+        try:
+            self.attempt_log_fn( { "wall_ts": self.wall_clock(), **fields } )
+        except Exception:   # pragma: no cover - defensive: the instrument must never break the run
+            pass
 
     def _post( self, url: str, payload: Dict[ str, Any ], headers: Dict[ str, str ] ) -> Any:
         """POST via the injected transport, defaulting to requests.post."""
@@ -772,8 +799,21 @@ class HttpAskClient:
             "speak"        : False,
             "interactive"  : False,
         }
-        send_ts = self.clock()
-        reply   = self._post( url, body, headers )
+        self._attempt_seq += 1
+        seq      = self._attempt_seq
+        send_ts  = self.clock()
+        # START row BEFORE the POST. A call that never returns leaves this row with no matching
+        # "end", so the hang identifies itself instead of vanishing (María, row d8d019f6).
+        self._log_attempt( phase="start", seq=seq, attempt=1, utterance=question, timeout_s=self.timeout )
+        try:
+            reply = self._post( url, body, headers )
+        except BaseException as failure:
+            # A read timeout is the exact failure this instrument exists for: name the utterance
+            # and how long we waited, then re-raise unchanged so behaviour is untouched.
+            self._log_attempt( phase="error", seq=seq, attempt=1, utterance=question,
+                               timeout_s=self.timeout, waited_s=self.clock() - send_ts,
+                               error=type( failure ).__name__, detail=str( failure ) )
+            raise
         recv_ts = self.clock()
         # Token-refresh on expiry (row d8d019f6): a long paired run outlives the JWT (~30min), so
         # late requests 401. On a 401, re-login for a fresh bearer and retry ONCE, resetting the
@@ -784,16 +824,27 @@ class HttpAskClient:
             self.bearer = self.relogin_fn()
             headers     = { "Authorization": f"Bearer {self.bearer}" }
             send_ts     = self.clock()
-            reply       = self._post( url, body, headers )
+            self._log_attempt( phase="start", seq=seq, attempt=2, utterance=question,
+                               timeout_s=self.timeout, note="retry after 401 + relogin" )
+            try:
+                reply = self._post( url, body, headers )
+            except BaseException as failure:
+                self._log_attempt( phase="error", seq=seq, attempt=2, utterance=question,
+                                   timeout_s=self.timeout, waited_s=self.clock() - send_ts,
+                                   error=type( failure ).__name__, detail=str( failure ) )
+                raise
             recv_ts     = self.clock()
         ok      = ( reply.status_code == 200 )
         payload = reply.json() if ok else {}
+        span_ms = ( recv_ts - send_ts ) * 1000.0                 # F1 client-send instrument
+        self._log_attempt( phase="end", seq=seq, utterance=question, ok=ok,
+                           status_code=reply.status_code, client_span_ms=span_ms )
         return {
             "utterance"      : question,
             "ok"             : ok,
             "status_code"    : reply.status_code,
             "payload"        : payload,
-            "client_span_ms" : ( recv_ts - send_ts ) * 1000.0,   # F1 client-send instrument
+            "client_span_ms" : span_ms,
         }
 
 
@@ -1113,7 +1164,38 @@ def _default_client_factory( base_url: str ) -> HttpAskClient:
     # timeout: ASK_READ_TIMEOUT_SECONDS unless a run overrides it — a read wall must never again be
     # the thing that destroys 3 hours of unwritten arm data (ts-1686ce29, row d8d019f6).
     ask_timeout = float( os.environ.get( "LUPIN_V2_ASK_TIMEOUT_SECONDS", ASK_READ_TIMEOUT_SECONDS ) )
-    return HttpAskClient( base_url, bearer=_login(), relogin_fn=_login, timeout=ask_timeout )
+    return HttpAskClient( base_url, bearer=_login(), relogin_fn=_login, timeout=ask_timeout,
+                          attempt_log_fn=make_attempt_logger() )
+
+
+def make_attempt_logger( path: Optional[ str ] = None ) -> Callable[ [ Dict[ str, Any ] ], None ]:
+    """
+    Build the append-a-JSON-line sink for HttpAskClient's start/end/error rows.
+
+    Requires:
+        - path, when given, is the file to append to; otherwise LUPIN_V2_ASK_ATTEMPT_LOG,
+          otherwise <project root>/io/v2-flow/ask-attempts.jsonl.
+
+    Ensures:
+        - returns a callable that opens, appends ONE json line, and closes — per record. The
+          open/close per row is the durability property that matters: a row still sitting in a
+          buffer when the process dies is a row that does not exist, and that is the failure
+          this instrument was built to end. (An explicit flush() would be redundant, since
+          closing the file already flushes it — there is none, so none can be misread as
+          the control.)
+        - creates the parent directory if absent.
+    """
+    if path is None:
+        path = os.environ.get( "LUPIN_V2_ASK_ATTEMPT_LOG" )
+    if path is None:
+        path = os.path.join( du.get_project_root(), "io", "v2-flow", "ask-attempts.jsonl" )
+
+    def _append( record: Dict[ str, Any ] ) -> None:
+        os.makedirs( os.path.dirname( path ), exist_ok=True )
+        with open( path, "a" ) as handle:
+            handle.write( json.dumps( record ) + "\n" )
+
+    return _append
 
 
 if __name__ == "__main__":                    # pragma: no cover - CLI entry stub, not unit-testable (login logic covered via _default_client_factory)

@@ -459,6 +459,81 @@ def test_default_client_factory_read_timeout_default_and_env_override( monkeypat
     assert ve._default_client_factory( "http://localhost:8000" ).timeout == 900.0
 
 
+def test_a_hanging_ask_leaves_a_dangling_start_that_names_the_utterance():
+    """THE SURVIVORSHIP CONTROL (María, row d8d019f6).
+
+    The v2 flow trace writes a row only at COMPLETION, so the one call worth seeing — the one
+    that hung — was the only one guaranteed to leave no evidence. 983 calls survived the last
+    run and the single request that blew the read wall left nothing, which is why the timeout
+    is sized at 4x worst-OBSERVED instead of to a known worst case.
+
+    Here the transport raises the way a real read timeout does. The rows must show a start with
+    NO matching end, so the hang identifies itself, and the utterance must be named. RED if the
+    start row is moved to after the POST, or dropped.
+    """
+    rows = []
+    def hanging_post( url, json, headers, timeout ):
+        raise TimeoutError( "read timed out" )
+    client = ve.HttpAskClient( "http://localhost:8000", bearer="j", post_fn=hanging_post,
+                               attempt_log_fn=rows.append, wall_clock=lambda: 1000.0 )
+    with pytest.raises( TimeoutError ):
+        client.ask( "how many items are left in my grocery list" )
+
+    phases = [ r[ "phase" ] for r in rows ]
+    assert "start" in phases and "end" not in phases          # a dangling start — the whole point
+    start = rows[ 0 ]
+    assert start[ "utterance" ] == "how many items are left in my grocery list"
+    assert start[ "timeout_s" ] == ve.ASK_READ_TIMEOUT_SECONDS and start[ "wall_ts" ] == 1000.0
+    # …and the error row names what was waited on, so the outlier has an identity next time.
+    assert rows[ -1 ][ "phase" ] == "error" and rows[ -1 ][ "error" ] == "TimeoutError"
+
+
+def test_a_completed_ask_logs_a_matching_start_and_end():
+    # The other half of the property: every completed call closes its own start row, so a
+    # dangling start is unambiguous evidence of a hang rather than a routine gap.
+    rows   = []
+    client = ve.HttpAskClient( "http://localhost:8000", bearer="j",
+                               post_fn=lambda url, json, headers, timeout: _FakeReply( 200, { "path": "replay" } ),
+                               attempt_log_fn=rows.append )
+    client.ask( "what time is it" )
+    client.ask( "and now" )
+    assert [ r[ "phase" ] for r in rows ] == [ "start", "end", "start", "end" ]
+    assert [ r[ "seq" ] for r in rows ] == [ 1, 1, 2, 2 ]      # rows pair up by sequence number
+    assert rows[ 1 ][ "ok" ] is True and rows[ 1 ][ "client_span_ms" ] is not None
+
+
+def test_attempt_logging_is_off_and_harmless_without_a_sink():
+    # No sink wired -> no rows, no crash. Keeps the instrument optional for callers that
+    # inject their own transport (every other test in this file).
+    client = ve.HttpAskClient( "http://localhost:8000", bearer="j",
+                               post_fn=lambda url, json, headers, timeout: _FakeReply( 200, {} ) )
+    assert client.ask( "x" )[ "ok" ] is True
+
+
+def test_make_attempt_logger_closes_each_row_to_disk_before_the_next( tmp_path ):
+    # Durability is the point: a row still buffered when the process dies is a row that does
+    # not exist — the exact failure this instrument was built to end. Reading the first row
+    # BEFORE the second write is what proves it landed rather than sat in a buffer.
+    path   = str( tmp_path / "nested" / "ask-attempts.jsonl" )
+    logger = ve.make_attempt_logger( path )
+    logger( { "phase": "start", "utterance": "u1" } )
+    with open( path ) as handle:                              # read BEFORE the second write
+        assert json.loads( handle.read().strip() )[ "utterance" ] == "u1"
+    logger( { "phase": "end", "utterance": "u1" } )
+    lines = [ json.loads( l ) for l in open( path ).read().strip().split( "\n" ) ]
+    assert [ r[ "phase" ] for r in lines ] == [ "start", "end" ]
+
+
+def test_make_attempt_logger_path_precedence( tmp_path, monkeypatch ):
+    # Explicit path wins; otherwise the env var; the default lands under io/v2-flow.
+    monkeypatch.setenv( "LUPIN_V2_ASK_ATTEMPT_LOG", str( tmp_path / "from-env.jsonl" ) )
+    ve.make_attempt_logger()( { "phase": "start" } )
+    assert ( tmp_path / "from-env.jsonl" ).exists()
+    explicit = str( tmp_path / "explicit.jsonl" )
+    ve.make_attempt_logger( explicit )( { "phase": "start" } )
+    assert os.path.exists( explicit )
+
+
 def test_http_ask_client_default_transport_imports_requests( monkeypatch ):
     sent = {}
     class _FakeRequests:
