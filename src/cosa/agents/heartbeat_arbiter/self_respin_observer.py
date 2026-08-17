@@ -103,6 +103,14 @@ RESPIN_SAMPLE_SCHEMA_VERSION = 1
 RESPIN_SAMPLES_MAX_BYTES = 5_000_000
 
 
+# Which anchor an assessment's timing rests on (row 855e4dd0) — stamped on every
+# verdict so a reader never has to guess whether a DEAD_NO_RETURN came from the
+# strong anchor or from the weak one that is all a stampless marker can offer.
+# Full rationale at the `effective_deadline` block below.
+ANCHOR_FIRE      = "fire"        # fired_at + delay + grace — the schedule-time anchor
+ANCHOR_KEYS_SENT = "keys_sent"   # the same window, measured from keys_sent_at
+
+
 class SelfRespinVerdict( str, Enum ):
     PENDING           = "PENDING"            # in flight; inside the window, not yet a proven return
     RETURNED          = "RETURNED"           # over_budget → within_budget, same seat, fresh turn
@@ -126,7 +134,13 @@ class SelfRespinAssessment:
     landed after expected_return_by. On every other verdict they stay
     None / False. Making lateness visible (without turning RETURNED into an
     alarm) is option 1 of the row: a wake that keeps arriving but ever later
-    can no longer hide behind a green verdict."""
+    can no longer hide behind a green verdict.
+
+    anchor names WHICH clock the timing rests on (row 855e4dd0): ANCHOR_KEYS_SENT
+    when the marker carried a usable keys_sent_at, ANCHOR_FIRE when it did not and
+    the verdict fell back to the schedule-time deadline. A stampless marker still
+    alarms — it just alarms on the weaker anchor, and this field is how a reader
+    tells which one produced the verdict instead of having to assume."""
     session_id       : str
     persona          : str
     verdict          : SelfRespinVerdict
@@ -134,6 +148,7 @@ class SelfRespinAssessment:
     is_alarm         : bool
     return_latency_s : "float | None" = None
     late             : bool           = False
+    anchor           : str            = ANCHOR_FIRE
 
 
 # ---------------------------------------------------------------------------
@@ -167,6 +182,69 @@ def _parse_iso( value ):
     if parsed.tzinfo is None:
         return None
     return parsed
+
+
+# ---------------------------------------------------------------------------
+# Send re-anchor (row 855e4dd0) — measure "is it dead" from when the keystrokes
+# were SENT to the pane, not from when the clear was SCHEDULED
+# ---------------------------------------------------------------------------
+# THE FAILURE THIS CLOSES. `expected_return_by` is fired_at + delay + grace, and
+# fired_at is the moment the verb SCHEDULED the clear. But the detached job only
+# types `/clear` into the pane; a pane that is mid-turn buffers those keystrokes
+# and acts on them at its next turn boundary. Measured 2026-08-17: an IDLE seat
+# cleared at exactly fire+delay, while a continuously-BUSY seat cleared at
+# fire+262s against a 150s window. Nothing was lost — the clear was QUEUED.
+# For that whole queued interval the observer's only available verdict was
+# DEAD_NO_RETURN on a seat that was perfectly healthy.
+#
+# WHY "SENT" AND NOT "DELIVERED" (María's ruling, 2026-08-17). `tmux send-keys`
+# has no ingestion feedback, so the injector can prove it SENT the keystrokes and
+# can never prove the pane took them. Naming the field `keys_sent_at` claims
+# exactly what the mechanism supports. That is also what keeps it clear of the
+# "the injector writes NO receipt" rule at self_respin_core.py:231-236: that rule
+# exists because an injector-written receipt cannot prove INGESTION, and a stamp
+# that only ever claims "sent" never pretends to.
+#
+# THE ANCHOR. When the marker carries `keys_sent_at`, the seat gets its SAME total
+# window measured from the send instead of from the schedule. Two properties:
+#   · DEGRADES TO THE OLD ANCHOR, AND THE OLD ANCHOR STILL ALARMS. Absent,
+#     unparseable, naive, or not-after-fired_at ⇒ the original expected_return_by
+#     is used unchanged, so a stampless marker keeps raising DEAD_NO_RETURN exactly
+#     as it does today. A missing stamp NEVER buys silence — it only means the
+#     verdict rests on the weaker anchor, and every assessment says which anchor
+#     produced it so a reader can tell the two apart. It is likewise never a
+#     MALFORMED_MARKER: a marker without the field is an ordinary old marker.
+#   · MONOTONE. the send is always at/after the fire, so the effective deadline is
+#     never EARLIER than expected_return_by. This can only retire false
+#     DEAD_NO_RETURN alarms; it can never manufacture a new one.
+KEYS_SENT_AT = "keys_sent_at"
+
+
+def effective_deadline( marker, fired_at, deadline ):
+    """
+    Resolve the deadline a not-yet-returned seat is judged against.
+
+    Requires:
+        - marker is a parsed marker dict
+        - fired_at and deadline are AWARE datetimes (the caller parsed + validated
+          both; this function never re-judges them)
+
+    Ensures:
+        - returns ( effective, anchor )
+        - when the marker carries a well-formed `keys_sent_at` STRICTLY AFTER
+          fired_at, effective = keys_sent_at + ( deadline - fired_at ) — the same
+          total window, measured from the send — and anchor is ANCHOR_KEYS_SENT
+        - otherwise returns ( deadline, ANCHOR_FIRE ) UNCHANGED: absent, non-string,
+          unparseable, naive, or at/before fired_at all take the old anchor, which
+          still reaches DEAD_NO_RETURN on time. A missing or junk stamp degrades to
+          today's behaviour — never to silence, never to an alarm of its own.
+        - effective is NEVER earlier than deadline
+        - never raises
+    """
+    sent = _parse_iso( marker.get( KEYS_SENT_AT ) )
+    if sent is None or sent <= fired_at:
+        return deadline, ANCHOR_FIRE
+    return sent + ( deadline - fired_at ), ANCHOR_KEYS_SENT
 
 
 # ---------------------------------------------------------------------------
@@ -295,8 +373,14 @@ def classify_marker( marker, pressure_record, *, now, wake_proof_nonce=None, wak
           tmux_session disagree with the marker — a different seat answered
         - RETURNED (no alarm) on a confirmed over→within transition, same seat,
           fresh turn after fired_at
-        - DEAD_NO_RETURN (alarm) when not returned AND now >= expected_return_by
+        - DEAD_NO_RETURN (alarm) when not returned AND now >= the EFFECTIVE deadline
+          — expected_return_by re-anchored on the marker's keys_sent_at when it
+          carries a usable one (row 855e4dd0). With no usable stamp the effective
+          deadline IS expected_return_by, so a stampless marker alarms exactly when
+          it does today: the fallback never buys a dead seat silence.
         - PENDING (no alarm) otherwise (inside the window)
+        - every assessment carries `anchor` naming which clock decided its timing,
+          so a reader can tell a strong-anchor verdict from a fallback one
         - never raises
     """
     session_id = marker.get( "session_id", "" )
@@ -343,6 +427,13 @@ def classify_marker( marker, pressure_record, *, now, wake_proof_nonce=None, wak
                     f"over_budget → within_budget on the same seat, fresh turn AND a nonce-matched "
                     f"wake proof {return_latency_s:.0f}s after fire, within the return window"
                 )
+            # DELIBERATELY THE FIRE ANCHOR, even when the marker carries keys_sent_at.
+            # `late` exists (row 491d5db8) to make a wake that keeps arriving ever
+            # later visible instead of permanently green, and that is an END-TO-END
+            # measure: how long the whole cycle took from the moment it was asked for.
+            # Re-anchoring it on the send would quietly forgive exactly the slowness
+            # that row was built to expose. "Did it come back in time" and "is it
+            # dead" are different questions and get different clocks on purpose.
             return SelfRespinAssessment(
                 session_id       = session_id,
                 persona          = persona,
@@ -351,23 +442,51 @@ def classify_marker( marker, pressure_record, *, now, wake_proof_nonce=None, wak
                 is_alarm         = False,
                 return_latency_s = return_latency_s,
                 late             = late,
+                anchor           = ANCHOR_FIRE,
             )
 
-    if now >= deadline:
+    # DEATH is judged from when the keystrokes were SENT, not from when the clear
+    # was scheduled (row 855e4dd0). A busy pane buffers `/clear` until its next
+    # turn boundary, and across that queued interval a healthy seat is
+    # indistinguishable from a dead one against the schedule-time anchor. With no
+    # usable stamp this falls back to expected_return_by, which STILL ALARMS on
+    # time — the fallback costs certainty about which clock was right, never the
+    # alarm itself, and `anchor` records which one it was.
+    effective, anchor = effective_deadline( marker, fired_at, deadline )
+
+    if now >= effective:
+        if anchor == ANCHOR_KEYS_SENT:
+            reason = (
+                "past the send-anchored return window with no proven return — the keystrokes "
+                "were sent and the seat still did not come back"
+            )
+        else:
+            reason = (
+                "past expected_return_by with no proven return — fired and did not come back "
+                "(no keys_sent_at on this marker, so this rests on the schedule-time anchor)"
+            )
         return SelfRespinAssessment(
             session_id = session_id,
             persona    = persona,
             verdict    = SelfRespinVerdict.DEAD_NO_RETURN,
-            reason     = "past expected_return_by with no proven return — fired and did not come back",
+            reason     = reason,
             is_alarm   = True,
+            anchor     = anchor,
         )
 
+    reason = "in flight — inside the return window, no confirmed return yet"
+    if anchor == ANCHOR_KEYS_SENT and now >= deadline:
+        reason = (
+            "in flight — past expected_return_by, but the keystrokes were sent later than the "
+            "schedule assumed, so the seat is still inside its send-anchored window"
+        )
     return SelfRespinAssessment(
         session_id = session_id,
         persona    = persona,
         verdict    = SelfRespinVerdict.PENDING,
-        reason     = "in flight — inside the return window, no confirmed return yet",
+        reason     = reason,
         is_alarm   = False,
+        anchor     = anchor,
     )
 
 
