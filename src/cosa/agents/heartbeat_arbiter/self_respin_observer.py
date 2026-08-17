@@ -61,6 +61,14 @@ MARKER_PREFIX = ".self-respin-"
 WAKE_PROOF_PREFIX      = ".self-respin-wake-proof-"
 WAKE_PROOF_NONCE_LINE  = "SELF-RESPIN-WAKE-PROOF:"     # the seat writes: "SELF-RESPIN-WAKE-PROOF: <nonce>"
 
+# The NEGATIVE receipt: what a seat writes when the wake reached it but it did NOT
+# rehydrate (bug e88ebfae). It is deliberately NOT a wake proof — the observer keys
+# RETURNED on the proof alone, so a disputed wake leaves the marker PENDING and the
+# alarm fires, which is the correct outcome for a seat that never came back. The file
+# exists so the evidence lands somewhere a human reads instead of dying in one pane's
+# scrollback; Cheech wrote the first one by hand before the wake text knew to ask.
+DISPUTE_PREFIX         = ".self-respin-DISPUTED-"
+
 # How much slack past (fired_at + delay) before a still-not-returned seat is
 # declared dead. The verb writes expected_return_by = fired_at + delay + grace;
 # this default only feeds build_marker_dict when a caller omits grace.

@@ -155,13 +155,46 @@ def test_guarded_argv_carries_verbatim_clear_and_token():
 def test_build_wake_text_names_memento_and_is_plain_english():
     txt = sr.build_wake_text( "/data/lupin/.claude-memento.md", "nonce-7", "/data/.wake-proof.marker" )
     assert "/data/lupin/.claude-memento.md" in txt
-    assert "self-re-sp" in txt.lower()           # "self-re-spun"
+    assert "re-spun" in txt.lower()
     assert "memento" in txt.lower()
     assert "resume" in txt.lower()
     # consumer-proof instruction: the seat must write the nonce-echoing proof line
     assert "/data/.wake-proof.marker" in txt                       # names the proof artifact
     assert f"{sr._WAKE_PROOF_NONCE_LINE} nonce-7" in txt           # the exact line to echo
     assert "\n" not in txt                                         # single line (send-keys -l + one Enter)
+
+
+def test_build_wake_text_asks_instead_of_asserting_the_rehydrate():
+    """
+    Bug e88ebfae. The wake is composed from the SCHEDULING artifact, so it can prove a
+    clear was scheduled and its token consumed — never that the pane actually reset.
+    It must therefore ASK the seat, and must not tell it in the second person that it
+    rehydrated at low context.
+    """
+    txt = sr.build_wake_text( "/m/memento.md", "nonce-7", "/p/proof.marker" ).lower()
+
+    # It hedges rather than asserts.
+    assert "probably" in txt
+    assert "only you can confirm" in txt
+
+    # The exact false claims the disputed run received are gone.
+    assert "you just self-re-spun" not in txt
+    assert "you typed /clear into your own pane" not in txt
+    assert "rehydrated as the same seat at low context" not in txt
+
+    # It names the check that separates the two cases, and both branches.
+    assert "remember the work of this session" in txt
+    assert "if you rehydrated" in txt
+    assert "if you did not" in txt
+
+
+def test_build_wake_text_routes_a_disputed_wake_to_a_file_not_a_proof():
+    """A seat that did NOT rehydrate must be told to write a dispute, never a proof —
+    a proof marker is a receipt, and the observer keys RETURNED on it."""
+    txt = sr.build_wake_text( "/m/memento.md", "nonce-7", "/p/proof.marker" )
+    assert sr._DISPUTE_PREFIX in txt
+    assert "write NO proof" in txt
+    assert "tell your manager" in txt.lower()
 
 
 def test_guarded_argv_wake_path_appends_wake_bridge_and_poll_args():
@@ -179,18 +212,51 @@ def test_guarded_argv_wake_path_appends_wake_bridge_and_poll_args():
     assert argv[ 11 ] == "0.5"                   # $8 poll interval
 
 
-def test_guarded_argv_wake_path_gates_on_bridge_mtime_not_send_keys_exit():
-    """Ruling 1: readiness is the bridge-file rewrite (mtime change), never a
+def test_guarded_argv_wake_path_gates_on_bridge_session_id_not_send_keys_exit():
+    """Ruling 1: readiness is the bridge's own report of a NEW session, never a
     send-keys exit code; ruling 3: ONE chain; ruling 4: literal wake keystroke."""
     script = sr.build_guarded_clear_argv(
         "sess", "/f.token", 20, wake_text="WAKE", bridge_path="/s/cc-42.json" )[ 2 ]
-    assert 'date -r "$6" +%s%N' in script            # bridge mtime is the oracle
-    assert '[ "$m" -gt "$m0" ]' in script            # strictly-greater (race-free) compare
+    assert '"session_id"' in script                  # the bridge's session_id is the oracle
+    assert '[ "$s" != "$s0" ]' in script             # value-change compare
     assert 'rm "$4" || exit 0' in script             # one-shot guard preserved
     assert 'send-keys -t "$2" -l -- "$5"' in script  # literal (-l) wake keystroke
     assert "exit 3" in script                        # loud, bounded give-up on timeout
     # the wake is typed AFTER the readiness gate, never before it
-    assert script.index( 'date -r "$6"' ) < script.index( '-l -- "$5"' )
+    assert script.index( 's0=$(' ) < script.index( '-l -- "$5"' )
+
+
+def test_wake_gate_does_not_key_on_mtime():
+    """
+    Bug e88ebfae, the root cause. `touch_bridge_mtime()` runs from the PostToolUse hook
+    on EVERY tool call of EVERY session (session_bridge.py REDLINE C1 — a bare
+    os.utime with no content write). A gate that polls the mtime therefore cannot tell
+    'the seat made a tool call' from 'the seat rehydrated', and on a busy seat — the
+    very seat whose /clear is buffered — it opens on the seat's own next tool call.
+    """
+    script = sr.build_guarded_clear_argv(
+        "sess", "/f.token", 20, wake_text="WAKE", bridge_path="/s/cc-42.json" )[ 2 ]
+    assert "date -r" not in script, "mtime must not be the readiness oracle"
+    assert "%s%N" not in script
+
+
+def test_wake_gate_ignores_the_stable_session_id_line():
+    """
+    `"stable_session_id"` CONTAINS `"session_id"` as a substring, and it is the one
+    field that does NOT change across a clear. Matching it would make the gate compare
+    a constant to itself and never open. The pattern anchors past json.dump's indent.
+    """
+    script = sr.build_guarded_clear_argv(
+        "sess", "/f.token", 20, wake_text="WAKE", bridge_path="/s/cc-42.json" )[ 2 ]
+    assert '^ *"session_id"' in script
+
+
+def test_wake_gate_treats_an_unreadable_bridge_as_not_ready():
+    """An empty read must never count as a change — the failure direction is
+    mute-and-alarm, never wake-into-the-old-context."""
+    script = sr.build_guarded_clear_argv(
+        "sess", "/f.token", 20, wake_text="WAKE", bridge_path="/s/cc-42.json" )[ 2 ]
+    assert '[ -n "$s" ]' in script
 
 
 # ---------------------------------------------------------------------------

@@ -183,17 +183,40 @@ def build_wake_text( memento_path, wake_nonce, wake_proof_path ):
     Ensures:
         - returns a SINGLE-LINE rehydrate prompt (no embedded newlines — it is typed
           via `send-keys -l` then one Enter, so a newline would submit early) that:
-          (a) tells the seat it just self-re-spun and to read its memento at
-          `memento_path`; (b) instructs it to CONFIRM the wake by writing the file
-          `wake_proof_path` containing the exact line "SELF-RESPIN-WAKE-PROOF: <nonce>".
-          The nonce is what proves the wake reached a real turn and was OURS — the
-          observer keys RETURNED on that proof (a peer DM cannot echo an unknown nonce).
+          (a) states only what THIS side can prove — a /clear was fired at the pane and
+          the bridge then reported a new session — and asks the seat to decide whether
+          it actually rehydrated; (b) instructs it to write `wake_proof_path` containing
+          the exact line "SELF-RESPIN-WAKE-PROOF: <nonce>" ONLY IF it did, and to write
+          a dispute instead if it did not. The nonce is what proves the wake reached a
+          real turn and was OURS — the observer keys RETURNED on that proof (a peer DM
+          cannot echo an unknown nonce).
+
+    🔴 WHY THIS DOES NOT SAY "you just re-spun" (bug e88ebfae, Cheech 2026-08-17).
+    It used to. The wake is composed from the SCHEDULING artifact — the nonce it quotes
+    comes from the marker written before the /clear was even sent — so it can prove
+    "a clear was scheduled and its token was consumed" and nothing more. On the run
+    that found this, the pane never cleared: the seat read 519,378 tokens / 51.9% of
+    window at the moment the wake arrived, and the wake told it, in the second person,
+    that it had rehydrated at low context. The seat correctly refused to write the
+    proof, because a proof marker is a receipt and a receipt for an event that did not
+    happen is a plausible fact on disk that the observer, a peer, or a later reader
+    takes as evidence.
+
+    Only the process can answer whether it was cleared, so the wake ASKS instead of
+    asserting, and names the check that separates the two cases: a rehydrated seat has
+    no memory of the work and has to read its memento to learn what it was doing. That
+    check costs the seat one sentence of self-examination and closes the gap that no
+    amount of disk-side evidence can.
     """
     return (
-        f"You just self-re-spun — you typed /clear into your own pane and rehydrated as the "
-        f"same seat at low context. FIRST, confirm this wake reached you: write the file "
-        f"{wake_proof_path} containing exactly this line: "
-        f"{_WAKE_PROOF_NONCE_LINE} {wake_nonce} — then read your memento at {memento_path} and resume your board."
+        f"A /clear was fired at this pane and the bridge then reported a new session, so you "
+        f"were PROBABLY just re-spun as the same seat — but only you can confirm it. Check: do you "
+        f"remember the work of this session, or is your context near-empty and this the first you "
+        f"have seen of it? IF you rehydrated, write {wake_proof_path} containing exactly this line: "
+        f"{_WAKE_PROOF_NONCE_LINE} {wake_nonce} — then read your memento at {memento_path} and resume "
+        f"your board. IF YOU DID NOT — you still hold the session in memory — write NO proof; instead "
+        f"put the evidence in {_DISPUTE_PREFIX}<your-full-session-id>.md and tell your manager the "
+        f"wake fired without a clear."
     )
 
 
@@ -269,27 +292,51 @@ def build_guarded_clear_argv(
                  fire_token_path,          # $4  (the one-shot, rm'd at the fire point)
                  keys_sent_path or "" ]    # $5  (send stamp; mtime IS the timestamp)
 
-    # Wake path — ONE chain: guarded /clear, then a bridge-mtime readiness gate, then
-    # the wake. `date -r <bridge> +%s%N` reads the mtime in NANOSECONDS so a same-second
-    # rewrite is still detected (a strictly-greater compare is race-free). `m0` is taken
-    # right before /clear, so any pre-clear touch is already folded in; only the
-    # post-reset SessionStart rewrite moves it. `rm "$4" || exit 0` keeps the one-shot
-    # guard (a second fire finds the token gone and does nothing).
+    # Wake path — ONE chain: guarded /clear, then a bridge-SESSION-ID readiness gate,
+    # then the wake. `rm "$4" || exit 0` keeps the one-shot guard (a second fire finds
+    # the token gone and does nothing).
+    #
+    # 🔴 THE GATE READS THE BRIDGE'S session_id VALUE, NOT ITS MTIME (bug e88ebfae).
+    # It used to poll the mtime and break on any bump. That gate cannot tell a rehydrate
+    # from ordinary work, because `touch_bridge_mtime()` — session_bridge.py, REDLINE C1
+    # — is called from the PostToolUse hook on EVERY tool call of EVERY session. A seat
+    # still running its turn (exactly the seat whose `/clear` is buffered until the next
+    # turn boundary) bumps its own bridge mtime within milliseconds, the gate opens on
+    # that bump, and the wake is typed into the UN-cleared pane. That is how Cheech's
+    # 2026-08-17 run got a wake at 519,378 tokens / 51.9% of window. It is intermittent
+    # for exactly this reason: on a QUIET seat no tool call intervenes, so the first
+    # bump really is SessionStart's rewrite and the gate is accidentally right.
+    #
+    # The transient `session_id` is immune to that confusion. C1 makes
+    # touch_bridge_mtime a BARE `os.utime()` with no content write, so no amount of
+    # tool-call activity can change the value; only a SessionStart re-registration
+    # rewrites it, and on a clear the transient id diverges from stable_session_id
+    # (register_session.py: "On subsequent lifecycle events (compact, clear), they
+    # diverge"). Honest limit: a COMPACT also mints a new transient id, so this proves
+    # "a new session began", not "a clear specifically" — which is why the wake text it
+    # gates asks the seat to confirm rather than asserting the rehydrate outright.
+    #
+    # `^ *"session_id"` anchors past the leading indent of json.dump(indent=2) so it
+    # cannot match the `"stable_session_id"` line, whose key merely CONTAINS the same
+    # substring. An empty read (bridge briefly absent or unreadable) is NOT a change:
+    # the `[ -n "$s" ]` guard keeps a failed read from opening the gate, so the failure
+    # direction stays mute-and-alarm rather than wake-into-the-old-context.
+    _sid = 'grep -o \'^ *"session_id"[[:space:]]*:[[:space:]]*"[^"]*"\' "$6" 2>/dev/null | head -1'
     bash = (
         'sleep "$1" || exit 0\n'
         'rm "$4" || exit 0\n'
-        'm0=$(date -r "$6" +%s%N 2>/dev/null || echo 0)\n'
+        f's0=$({_sid})\n'
         'tmux send-keys -t "$2" -l -- "$3" || exit 0\n'
         'sleep 0.25\n'
         'tmux send-keys -t "$2" Enter || exit 0\n'
         '[ -n "$9" ] && : > "$9"\n'
         'polls=0\n'
         'while :; do\n'
-        '  m=$(date -r "$6" +%s%N 2>/dev/null || echo 0)\n'
-        '  if [ "$m" -gt "$m0" ]; then break; fi\n'
+        f'  s=$({_sid})\n'
+        '  if [ -n "$s" ] && [ "$s" != "$s0" ]; then break; fi\n'
         '  polls=$((polls + 1))\n'
         '  if [ "$polls" -ge "$7" ]; then\n'
-        '    echo "self-respin wake: bridge $6 mtime unchanged after $7 polls — reset not proven; NOT sending wake (seat may be mute; the observer will alarm)" >&2\n'
+        '    echo "self-respin wake: bridge $6 still reports the same session_id after $7 polls — reset not proven; NOT sending wake (seat may be mute; the observer will alarm)" >&2\n'
         '    exit 3\n'
         '  fi\n'
         '  sleep "$8"\n'
@@ -793,5 +840,6 @@ from cosa.agents.heartbeat_arbiter.self_respin_observer import (
     MARKER_PREFIX as _MARKER_PREFIX,
     WAKE_PROOF_PREFIX as _WAKE_PROOF_PREFIX,
     WAKE_PROOF_NONCE_LINE as _WAKE_PROOF_NONCE_LINE,
+    DISPUTE_PREFIX as _DISPUTE_PREFIX,
     KEYS_SENT_PREFIX,
 )
