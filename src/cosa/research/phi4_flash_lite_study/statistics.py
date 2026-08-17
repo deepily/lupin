@@ -261,8 +261,18 @@ def compare_arms( b, c, operational_floor, arm_a="phi_4", arm_b="flash_lite",
     The study's verdict on one outcome: McNemar exact plus a Wilson interval.
 
     The proportion the interval covers is b / ( b + c ) — among the pairs where the
-    arms DISAGREED, the share that went arm_a's way. That is the quantity McNemar
-    tests, so the interval and the p-value describe the same number.
+    arms DISAGREED, the share where ARM_A was the one that hit the outcome. That is
+    the quantity McNemar tests, so the interval and the p-value describe the same
+    number.
+
+    ⚠️ "THE SHARE THAT WENT ARM_A'S WAY" IS THE WRONG READING, and this docstring
+    used to say it. For `fabrication_blocked`, hitting the outcome means the guard
+    REFUSED that arm's rewrite — so a high proportion counts AGAINST arm_a, not for
+    it. The same slip named a field `proportion_favouring_a` and inverted the finding
+    in the discordant counts (Sam, 2026-08-17). A raw share carries no merit
+    direction; whether it is good or bad is a property of the OUTCOME being counted,
+    so this reports the fact and leaves the judgement to a reader who knows what the
+    outcome means.
 
     Requires:
         - b, c are the discordant counts from `replay_harness.discordant_counts`
@@ -285,8 +295,17 @@ def compare_arms( b, c, operational_floor, arm_a="phi_4", arm_b="flash_lite",
         "arm_a"                  : arm_a,
         "arm_b"                  : arm_b,
         "mcnemar"                : test,
-        "proportion_favouring_a" : b / float( b + c ),
+        # Named for WHAT IT COUNTS, not for who it flatters. `proportion_favouring_a`
+        # was the old name and it inverted the finding: for fabrication_blocked a high
+        # share means arm_a was REFUSED more often.
+        "proportion_arm_a_hit"   : b / float( b + c ),
+        "proportion_means"       : (
+            f"of the {b + c} rows where the arms disagreed, the share where {arm_a} was "
+            f"the one that hit the outcome. For fabrication_blocked that means {arm_a}'s "
+            f"rewrite was REFUSED, which counts against it — a high number is not a win."
+        ),
         "wilson_interval"        : { "lower": lower, "upper": upper, "confidence": confidence },
+        "wilson_covers"          : f"proportion_arm_a_hit ({arm_a})",
         "operational_floor"      : operational_floor,
         "arithmetic_floor"       : ARITHMETIC_DISCORDANT_FLOOR,
         "must_fail_control"      : must_fail_control(),

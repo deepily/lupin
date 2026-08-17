@@ -882,8 +882,25 @@ def discordant_counts( paired, arm_a, arm_b, outcome="fabrication_blocked" ):
         "c_means"            : f"rows where ONLY {arm_b} hit {outcome}",
         "n_discordant"       : b + c,
         "n_concordant"       : len( paired ) - b - c,
-        "direction"          : ( f"favours {arm_b}" if c > b else
-                                 f"favours {arm_a}" if b > c else "even" ),
+        # 🔴 "favours" IS THE WRONG WORD AND IT INVERTED THE FINDING (Sam, 2026-08-17).
+        # This used to read `favours {arm_b}` when c > b. But c counts the rows where
+        # arm_b was BLOCKED — the guard caught it inventing facts — so the arm with the
+        # higher count is the arm that fabricated MORE, and the label said the opposite
+        # of what the cells meant. Anyone reading the label instead of the numbers got
+        # the result backwards.
+        #
+        # A raw count carries no merit direction on its own: whether hitting an outcome
+        # is good or bad is a property of the OUTCOME, not of the arithmetic. So this
+        # states the fact and refuses the judgement.
+        "more_often"         : ( arm_b if c > b else arm_a if b > c else None ),
+        "direction"          : ( f"{arm_b} hit {outcome} more often" if c > b else
+                                 f"{arm_a} hit {outcome} more often" if b > c else
+                                 f"neither arm hit {outcome} more often" ),
+        "reading_the_direction": (
+            f"this says WHICH arm hit {outcome} more, not which arm is better — for "
+            f"fabrication_blocked, hitting it more means the guard refused that arm's "
+            f"rewrites more often, which counts AGAINST it"
+        ),
     }
 
 

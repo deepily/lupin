@@ -438,10 +438,49 @@ def test_discordant_counts_names_the_arm_not_just_the_letter():
 
     assert counts[ "only_flash_lite" ] == 5
     assert counts[ "only_phi_4" ]      == 0
-    assert counts[ "direction" ]       == "favours flash_lite"
     assert "ONLY phi_4" in counts[ "b_means" ]
     assert "ONLY flash_lite" in counts[ "c_means" ]
     assert counts[ "outcome" ] == "fabrication_blocked"
+
+
+def test_the_direction_label_does_not_invert_the_finding():
+    """
+    Sam caught this on the real run: the label used to read "favours flash_lite" when
+    flash_lite was the arm the guard BLOCKED more — i.e. the arm that fabricated more.
+    A raw count carries no merit direction; whether hitting an outcome is good or bad
+    is a property of the OUTCOME. The label states the fact and refuses the judgement.
+    """
+    def rec( index, arm, outcome ):
+        return { "row_index": index, "frozen_index": index, "arm": arm, "body": "b",
+                 "meta": _meta( outcome=outcome ) }
+
+    paired = [
+        { "row_index": i, "frozen_index": i, "body": "b",
+          "phi_4"     : rec( i, "phi_4", "rewritten" ),
+          "flash_lite": rec( i, "flash_lite", "fabrication_blocked" ) }
+        for i in range( 5 )
+    ]
+
+    counts = RH.discordant_counts( paired, "phi_4", "flash_lite" )
+
+    assert counts[ "more_often" ] == "flash_lite"
+    assert counts[ "direction" ]  == "flash_lite hit fabrication_blocked more often"
+    assert "favours" not in counts[ "direction" ], \
+        "a raw count must not be labelled as favouring anyone — it inverted the finding"
+    assert "counts AGAINST it" in counts[ "reading_the_direction" ]
+
+
+def test_the_direction_label_names_the_other_arm_when_the_cells_flip():
+    def rec( index, arm, outcome ):
+        return { "row_index": index, "arm": arm, "body": "b", "meta": _meta( outcome=outcome ) }
+
+    paired = [ { "row_index": 0, "body": "b",
+                 "phi_4"     : rec( 0, "phi_4", "fabrication_blocked" ),
+                 "flash_lite": rec( 0, "flash_lite", "rewritten" ) } ]
+
+    counts = RH.discordant_counts( paired, "phi_4", "flash_lite" )
+    assert counts[ "more_often" ] == "phi_4"
+    assert counts[ "direction" ]  == "phi_4 hit fabrication_blocked more often"
 
 
 def test_discordant_direction_reads_even_when_the_cells_match():
@@ -454,7 +493,9 @@ def test_discordant_direction_reads_even_when_the_cells_match():
         { "row_index": 1, "body": "b", "phi_4": rec( 1, "phi_4", "rewritten" ),
                                        "flash_lite": rec( 1, "flash_lite", "fabrication_blocked" ) },
     ]
-    assert RH.discordant_counts( paired, "phi_4", "flash_lite" )[ "direction" ] == "even"
+    counts = RH.discordant_counts( paired, "phi_4", "flash_lite" )
+    assert counts[ "more_often" ] is None
+    assert counts[ "direction" ]  == "neither arm hit fabrication_blocked more often"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

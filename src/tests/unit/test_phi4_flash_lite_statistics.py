@@ -271,7 +271,10 @@ def test_compare_arms_reports_test_interval_control_and_version():
     result = ST.compare_arms( 11, 2, operational_floor=6 )
 
     assert result[ "mcnemar" ][ "p_value" ] == pytest.approx( 0.02246, abs=1e-4 )
-    assert result[ "proportion_favouring_a" ] == pytest.approx( 11 / 13 )
+    assert result[ "proportion_arm_a_hit" ] == pytest.approx( 11 / 13 )
+    assert "not a win" in result[ "proportion_means" ], \
+        "the share must not be labelled as favouring the arm — for fabrication_blocked it is the opposite"
+    assert "phi_4" in result[ "wilson_covers" ]
     assert result[ "wilson_interval" ][ "lower" ] > 0.5
     assert result[ "must_fail_control" ][ "distinguishes" ]
     assert result[ "operational_floor" ] == 6
@@ -283,8 +286,9 @@ def test_compare_arms_reports_test_interval_control_and_version():
 def test_compare_arms_interval_and_p_value_describe_the_same_quantity():
     """
     The Wilson interval covers b/(b+c) — the share of DISAGREEMENTS that went arm A's
-    way — which is exactly the proportion McNemar tests against 0.5. An interval
-    straddling 0.5 and a significant p would be incoherent.
+    way: the share where ARM A was the one that HIT the outcome, which is exactly the
+    proportion McNemar tests against 0.5. An interval straddling 0.5 and a significant
+    p would be incoherent.
     """
     result = ST.compare_arms( 11, 2, operational_floor=6 )
     lower  = result[ "wilson_interval" ][ "lower" ]
