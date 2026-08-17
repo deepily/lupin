@@ -67,7 +67,9 @@ class TestHeaderLine:
     def test_leading_stamp_is_folded_into_the_header( self ):
         out    = _render( f"{STAMP} {BODY}" )
         header = out.splitlines()[ 1 ]
-        assert header == f"PEER DM from {PERSONA} {ICON} at {STAMP}", header
+        # " on " — not " at ". The stamp already carries its own "at"
+        # ("[2026.08.15 at 22:16:49]"), so " at " stuttered in the rendered header.
+        assert header == f"PEER DM from {PERSONA} {ICON} on {STAMP}", header
 
     def test_stamp_is_removed_from_the_body_not_duplicated( self ):
         # A render-layer extraction: the stamp moves, it does not appear twice.
@@ -164,7 +166,7 @@ class TestTheseAssertionsCanFail:
         header = _render( BODY ).splitlines()[ 1 ]
         assert header != f"{PERSONA} says:", "renderer produced an unpinned header shape"
         assert re.fullmatch(
-            r"PEER DM from .+?(:| at \[\d{4}\.\d{2}\.\d{2} at \d{2}:\d{2}:\d{2}\])",
+            r"PEER DM from .+?(:| on \[\d{4}\.\d{2}\.\d{2} at \d{2}:\d{2}:\d{2}\])",
             header,
         ), header
 

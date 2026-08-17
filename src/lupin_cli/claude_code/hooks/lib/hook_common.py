@@ -722,7 +722,7 @@ def build_peer_dm_reminder( body, persona=None, icon=None, msg_id=None, thread_i
     # in both branches.
     stamp, clean_body = split_leading_stamp( body )
     header = (
-        f"{PEER_DM_FRAME_PREFIX}{sender_label} at {stamp}" if stamp
+        f"{PEER_DM_FRAME_PREFIX}{sender_label} on {stamp}" if stamp
         else f"{PEER_DM_FRAME_PREFIX}{sender_label}:"
     )
     reminder_body = (
