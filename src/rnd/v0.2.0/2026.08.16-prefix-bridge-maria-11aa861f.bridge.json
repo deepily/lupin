@@ -1,0 +1,33 @@
+{
+  "session_id": "aa10be38-cfff-433b-a4f6-cc1ead71aaa9",
+  "stable_session_id": "11aa861f-23d3-465e-afc2-603a940ad4fc",
+  "session_ids": [
+    "11aa861f-23d3-465e-afc2-603a940ad4fc",
+    "d9370a8b-a444-4414-bd67-f13989282533",
+    "aa10be38-cfff-433b-a4f6-cc1ead71aaa9"
+  ],
+  "transcript_path": "/home/rruiz/.claude/projects/-mnt-DATA01-include-www-deepily-ai-projects-planning-is-prompting/aa10be38-cfff-433b-a4f6-cc1ead71aaa9.jsonl",
+  "cwd": "/mnt/DATA01/include/www.deepily.ai/projects/planning-is-prompting",
+  "cc_pid": 83757,
+  "hook_ppid": 1460133,
+  "tmux_session": "cc-tmux-session-f0e56f3c",
+  "window_size": 1000000,
+  "voice_persona": {
+    "name": "maria",
+    "display_name": "Mar\u00eda",
+    "voice_id": "kcQkGnn0HAT2JRDQ4Ljp",
+    "icon": "\ud83c\udf38",
+    "color": "#F06292",
+    "profile": "Warm, inquisitive female",
+    "borrowed": false,
+    "assigned_at": "2026-08-16T15:18:45+00:00"
+  },
+  "idle_detection": {
+    "last_interaction_at": "2026-08-16T23:58:29-04:00",
+    "backoff_index": 0,
+    "waiter_pid": null
+  },
+  "listener_pid": 1460140,
+  "session_topic": "Auditing heartbeat stop-poke enablement",
+  "last_autonarrated_turn_id": "ddecf693-004c-4e60-abd6-d0a42ee60293"
+}
