@@ -52,8 +52,13 @@ class _DM:
         return { "status": "sent" }
 
 
-def _ident( name="Rio", sid="abc12345ffff" ):
-    return { "persona": { "name": name }, "session_id": sid }
+def _ident( name="Rio", sid="abc12345ffff", cwd="/proj" ):
+    # `cwd` is the seat's own repo, and it is NOT optional in a real bridge — all 23
+    # live bridges carry one (row 80b930e6). The slot is now derived per-seat from
+    # this field rather than from the batch-wide project_root, so a fixture without
+    # it would describe a seat that cannot exist. It defaults to "/proj" to match the
+    # project_root these tests already pass, keeping every verdict below unchanged.
+    return { "persona": { "name": name }, "session_id": sid, "cwd": cwd }
 
 
 # ── seat_memento_slot ─────────────────────────────────────────────────────────

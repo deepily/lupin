@@ -118,6 +118,42 @@ def seat_memento_slot( project_root, persona_name ):
     return Path( project_root ) / "io" / "mementos" / f"{persona_slug( persona_name )}.md"
 
 
+def seat_repo_root( ident ):
+    """
+    The repo a reaped seat ACTUALLY sits in, read from its own bridge `cwd`
+    (row 80b930e6).
+
+    Mirrors the cure already adopted for holds — heartbeat_hold.resolve_hold_base_dir,
+    whose docstring records the identical defect: "Resolving it from the hardwired
+    LUPIN_ROOT (cu.get_project_root) made every NON-lupin session's hold land under
+    lupin." A memento slot has the same shape and must not grow a second convention
+    for "which repo is this seat in?".
+
+    ⚠️ WHERE IT DELIBERATELY DIVERGES FROM THE HOLD CURE, AND WHY. The hold falls
+    back to LUPIN_ROOT when cwd is absent; this returns None instead. For a hold
+    that fallback is recoverable — read_hold_resilient searches BOTH roots, so a
+    misplaced hold is still found. The reap has no such second look: it renders ONE
+    verdict about ONE file, and a guessed root does not fail to find a memento — it
+    finds a DIFFERENT persona's live memento sitting at the same-named slot and
+    reports on that. Guessing is the defect, so the caller refuses rather than
+    guesses (`skipped_no_cwd`).
+
+    Requires:
+        - ident is a `_capture_reap_identity` dict, or None
+
+    Ensures:
+        - truthy `cwd` in ident → that path as a str (the seat's own repo)
+        - missing ident / missing or empty cwd / non-str cwd → None (caller refuses)
+        - never raises
+    """
+    if not isinstance( ident, dict ):
+        return None
+    cwd = ident.get( "cwd" )
+    if isinstance( cwd, str ) and cwd.strip():
+        return cwd
+    return None
+
+
 def resolve_pointer_target( slot_path, text ):
     """
     Follow a pointer slot's `current:` line to the record file BESIDE it.
@@ -362,7 +398,10 @@ def coordinate_mementos(
 
     Requires:
         - identities maps tmux_session_name -> a `_capture_reap_identity` dict (or None)
-        - project_root is the repo root under which io/mementos/ lives
+        - project_root is the host's batch-wide fallback root. It is NOT the per-seat
+          answer: each seat's slot is derived from that seat's OWN bridge `cwd`
+          (seat_repo_root, row 80b930e6), because one batch can span repos and this
+          value describes the HOST
         - now_fn/read_text_fn/dm_fn default to the live seams; sleep_fn defaults to
           time.sleep (injected in tests so no real waiting happens)
 
@@ -389,6 +428,13 @@ def coordinate_mementos(
                                  distinct from absent, on which a manager cannot act
             "skipped"            no persona/session in the bridge identity, so the
                                  slot cannot be derived — surfaced, not silently ok
+            "skipped_no_cwd"     persona+session known but the bridge carries no `cwd`,
+                                 so the seat's REPO is unknown (row 80b930e6). Distinct
+                                 from "skipped" and from the unparseable/absent verdicts
+                                 on purpose: guessing a root does not fail to find a
+                                 memento, it finds ANOTHER persona's live memento at the
+                                 same-named slot. "I do not know which repo" must never
+                                 read like "the file is corrupt"
         - a seat with no identity is NEVER asked and NEVER reported verified
         - never raises on an injected-seam failure it can classify (a failed DM send
           is recorded in the seat's reason, it does not abort coordination)
@@ -424,7 +470,19 @@ def coordinate_mementos(
                                  "reason": "no persona/session in bridge identity — cannot derive memento slot",
                                  "persona": persona_name, "session_id": session_id }
             continue
-        slot          = seat_memento_slot( project_root, persona_name )
+        # PER-SEAT root (row 80b930e6). The batch-wide `project_root` is derived from
+        # LUPIN_ROOT by the host and describes the HOST, not this seat — using it here
+        # verified every non-lupin seat against lupin's io/mementos/, i.e. against a
+        # DIFFERENT persona's live memento. The seat's own bridge cwd is the only
+        # ground truth (present in 23/23 live bridges); absent it we refuse to guess.
+        repo_root = seat_repo_root( ident )
+        if repo_root is None:
+            outcomes[ name ] = { "status": "skipped_no_cwd",
+                                 "reason": "no cwd in bridge identity — the seat's repo is unknown "
+                                           "and guessing one reads another persona's memento",
+                                 "persona": persona_name, "session_id": session_id }
+            continue
+        slot          = seat_memento_slot( repo_root, persona_name )
         usable, reason = verify_seat_memento( slot, session_id[ :8 ], now,
                                               read_text_fn=read_text_fn,
                                               window_seconds=window_seconds, min_bytes=min_bytes )

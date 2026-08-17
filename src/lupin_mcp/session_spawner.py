@@ -556,6 +556,12 @@ def _capture_reap_identity( session_dir: Path, tmux_session: str ) -> Optional[ 
             "persona"     : data.get( "voice_persona" ),
             "sender_id"   : sender_id,
             "session_id"  : session_id,
+            # The seat's OWN repo (row 80b930e6). Carried so the memento coordinator
+            # derives THAT seat's io/mementos/ slot instead of the host's LUPIN_ROOT —
+            # which verified every non-lupin seat against lupin's slot, i.e. against a
+            # different persona's live memento. `data` was already parsed from the
+            # bridge here; the field was simply being dropped on the floor.
+            "cwd"         : data.get( "cwd" ),
         }
     return None
 
