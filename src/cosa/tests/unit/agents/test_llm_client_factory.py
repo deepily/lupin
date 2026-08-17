@@ -378,3 +378,47 @@ def test_agentwrapper_run_reraises_quietly_when_no_debug( monkeypatch, capsys ):
     with pytest.raises( ValueError, match="boom" ):
         w.run( "hi" )
     assert "Error in AgentWrapper.run" not in capsys.readouterr().out
+
+
+# =========================================================================== #
+# google-genai (Vertex) vendor dispatch — row 3405f0b2
+# =========================================================================== #
+class _StubGenai:
+    """Record-only stand-in for GeminiVertexClient (no ADC / genai import)."""
+    instances = []
+    def __init__( self, **kwargs ):
+        self.kwargs = kwargs
+        _StubGenai.instances.append( self )
+
+
+def test_google_genai_dispatches_to_gemini_vertex_client( make_factory, monkeypatch ):
+    """A `google-genai:` descriptor routes to GeminiVertexClient — the new genai
+    shape — not ChatClient / CompletionClient."""
+    _StubGenai.instances = []
+    monkeypatch.setattr( factory_mod, "GeminiVertexClient", _StubGenai )
+    f = make_factory()                                       # no exists keys -> vendor path
+    client = f.get_client( "google-genai:gemini-3.1-flash-lite" )
+    assert isinstance( client, _StubGenai )
+    assert not isinstance( client, ( _StubChat, _StubCompletion ) )
+    assert _StubGenai.instances[ 0 ].kwargs[ "model_name" ] == "gemini-3.1-flash-lite"
+
+
+def test_google_genai_touches_no_api_key_env( make_factory, monkeypatch ):
+    """This vendor carries NO env_var, so the path must neither read nor write any
+    API-key env var (ADC only) — the two-env-var google-gla pattern (7f361ccf) is
+    structurally impossible here."""
+    monkeypatch.setattr( factory_mod, "GeminiVertexClient", _StubGenai )
+    monkeypatch.delenv( "GOOGLE_API_KEY", raising=False )
+    monkeypatch.delenv( "GEMINI_API_KEY", raising=False )
+    f = make_factory()
+    f.get_client( "google-genai:gemini-3.1-flash-lite" )
+    assert "GOOGLE_API_KEY" not in os.environ
+    assert "GEMINI_API_KEY" not in os.environ
+
+
+def test_google_genai_vendor_entry_is_adc_only( make_factory ):
+    """The vendor entry is ADC-only by construction: client_type genai, no env_var."""
+    f = make_factory()
+    entry = f.VENDOR_CONFIG[ "google-genai" ]
+    assert entry[ "client_type" ] == "genai"
+    assert "env_var" not in entry
