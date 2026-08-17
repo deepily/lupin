@@ -30,6 +30,58 @@ def _on_disk_prompt():
     return cu.get_file_as_string( cu.get_project_root() + gen.TEMPLATE_REL_PATH )
 
 
+# ── Independent GOLDEN scaffolding (Pocholo's finding, via Rachel 2026-08-16) ──
+# The generator's _HEADER / _FOOTER are the ONLY source of the served prose, so the
+# on-disk==render pin cannot catch a prose reword: edit the constant, regenerate,
+# and BOTH sides move together — green. This is the by-construction hole that lived
+# in `speakable`, now in the prose half. These goldens are a SECOND, independent
+# copy the generator never writes: render() must start with _GOLDEN_HEADER and end
+# with _GOLDEN_FOOTER, so rewording a Requirement/Task line in the generator moves
+# only one side and goes RED. Changing the served prose then costs a deliberate
+# TWO-file edit (generator constant + this golden), never a silent one.
+_GOLDEN_HEADER = (
+    "<s>[INST]### Instruction:\n"
+    "\n"
+    "Use the Task and Input given below to write a Response that can solve the following Task.\n"
+    "\n"
+    "### Task:\n"
+    "\n"
+    "Your job is to discern the intent of a human voice command transcription and translate it "
+    "into a standardized agent routing command that another LLM would understand.\n"
+    "\n"
+    "You will be given a human voice command as INPUT as well as a list of possible standardized "
+    "commands. You must choose the correct standardized command from the following list:\n"
+    "<agent-routing-commands>"
+)
+
+_GOLDEN_FOOTER = (
+    "</agent-routing-commands>\n"
+    "\n"
+    "Requirement: You MUST NOT use python code to answer this question.\n"
+    "Requirement: You MUST use your linguistic knowledge and intuition to answer this question.\n"
+    "Requirement: The first word of your response MUST be `<response>`\n"
+    "Hint: Anything that isn't a part of the command itself should be treated as arguments "
+    "related to the command.\n"
+    "\n"
+    "### Input:\n"
+    "\n"
+    "Below is the raw human voice command transcription formatted using simple XML:\n"
+    "\n"
+    "<human>\n"
+    "    <voice-command>{voice_command}</voice-command>\n"
+    "</human>\n"
+    "\n"
+    "The standardized command that you translate MUST be returned wrapped in simple, well-formed XML:\n"
+    "\n"
+    "<response>\n"
+    "    <command></command>\n"
+    "    <args></args>\n"
+    "</response>\n"
+    "[/INST]\n"
+    "### Response:\n"
+)
+
+
 class TestGeneratorPin( unittest.TestCase ):
     """The preventer: on-disk == generated (a provable no-op on the served file)."""
 
@@ -114,17 +166,34 @@ class TestOrderCrossCheck( unittest.TestCase ):
                 gen.speakable_commands()
 
 
-class TestScaffoldingSurvives( unittest.TestCase ):
-    """Generation must not disturb the hand-authored scaffolding."""
+class TestScaffoldingGolden( unittest.TestCase ):
+    """The served prose is pinned to an INDEPENDENT golden the generator never writes.
+
+    A substring-present check (the earlier version of this class) could not catch a
+    reworded Requirement or Task line. start-with / end-with the full golden pins
+    every scaffolding byte: the command block is the only thing between them.
+    """
+
+    def test_header_prose_matches_the_independent_golden( self ):
+        self.assertTrue( gen.render_router_prompt().startswith( _GOLDEN_HEADER ),
+                         "header prose drifted from the golden — a reword that moved only the generator" )
+
+    def test_footer_prose_matches_the_independent_golden( self ):
+        self.assertTrue( gen.render_router_prompt().endswith( _GOLDEN_FOOTER ),
+                         "footer prose drifted from the golden — a reword that moved only the generator" )
+
+    def test_golden_detects_a_prose_reword( self ):
+        """
+        Control: prove the golden pin CAN go red. A one-word reword of the header
+        must break start-with — so a green golden means the prose is intact, not a
+        check that cannot fail.
+        """
+        reworded = gen.render_router_prompt().replace( "### Task:", "### Tusk:", 1 )
+        self.assertFalse( reworded.startswith( _GOLDEN_HEADER ) )
 
     def test_voice_command_slot_is_a_literal( self ):
         """`{voice_command}` must reach the file unsubstituted for serve-time format()."""
         self.assertIn( "<voice-command>{voice_command}</voice-command>", gen.render_router_prompt() )
-
-    def test_response_block_is_present( self ):
-        emitted = gen.render_router_prompt()
-        self.assertIn( "<response>", emitted )
-        self.assertIn( "<command></command>", emitted )   # the empty answer slot, not a command
 
 
 class TestWriter( unittest.TestCase ):
