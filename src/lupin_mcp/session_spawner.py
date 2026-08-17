@@ -877,9 +877,14 @@ def dismiss_sessions(
           path stay hermetic; the real coordinator is wired by the MCP wrapper.
         - `reason` and `write_memento` are echoed in the result; `write_memento`
           coordination is NO LONGER a no-op — see MEMENTO COORDINATION above
+        - `memento_alarm` (row 3b0c5f90) is a single TOP-LEVEL line naming every seat
+          being killed without a proven memento, or None when there is none to name.
+          The per-seat verdicts under `memento_outcomes` were already honest and still
+          got missed — they sit in a nested dict while the reap reports success around
+          them, so the losing seats need a place the reader cannot walk past
         - Returns { dismissed: [ {session_name, status} ], manager_session_id,
-                    reason, write_memento, memento_outcomes, remaining, reconciliation,
-                    retained_owner_personas, retained_unmatched }
+                    reason, write_memento, memento_alarm, memento_outcomes, remaining,
+                    reconciliation, retained_owner_personas, retained_unmatched }
         - RE-SPIN RETENTION (4dfb2f3b): a persona named in `respin_personas` is
           reaped normally (tmux kill, bridge unlink, tombstone, hold-clear) but
           its store rows are NOT reconciled — the reconciler is not called for it
@@ -1086,6 +1091,11 @@ def dismiss_sessions(
         "manager_session_id" : manager_session_id,
         "reason"             : reason,
         "write_memento"      : write_memento,
+        # TOP-LEVEL AND LOUD (row 3b0c5f90). The per-seat verdicts below were already
+        # honest and already missed — a manager reads the top of a result, not a nested
+        # dict, and the reap reports success around them either way. None when nothing
+        # was lost, so the line only appears when it means something.
+        "memento_alarm"      : reap_memento.memento_alarm( memento_outcomes ),
         "memento_outcomes"   : memento_outcomes,
         "remaining"          : [ r[ "session_name" ] for r in remaining ],
         "bridges_deleted"    : bridges_deleted,

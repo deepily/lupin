@@ -330,6 +330,99 @@ def classify_slot_presence( slot_path, read_text_fn ):
     return "present"
 
 
+# ── Whose file is in the slot? (pure) ─────────────────────────────────────────
+def classify_slot_owner( slot_path, seat_sid8, read_text_fn ):
+    """
+    Name the OTHER seat whose memento is sitting in this seat's slot.
+
+    THE DEFECT THIS SPLITS (row 3b0c5f90). "A file is here but I could not prove it"
+    was one verdict covering two opposite facts. Once it meant a RACE — the child's
+    own memento, mid-write, fine ten seconds later. Once it meant a PRIOR HOLDER's
+    file was in the slot and the child's memento did not exist at all. Same words,
+    ten minutes apart, opposite recovery actions. A manager who must open the file
+    every time to learn which one it was will eventually stop opening it.
+
+    The evidence to tell them apart was already read and thrown away: the header
+    carries a session_id, and comparing it to the seat is a string compare. When
+    they differ, the honest verdict is not "unparseable" — it is "this is somebody
+    else's file, and yours is not at the slot".
+
+    Requires:
+        - read_text_fn( path ) -> the file text, or None when unreadable
+        - seat_sid8 is the 8-char prefix of the seat's session id
+
+    Ensures:
+        - returns the OTHER seat's 8-char session id (lowercased) when the slot's
+          record carries a parseable header naming a session that is not this seat
+        - returns None when the slot is unreadable, the pointer's record is
+          unreadable, no header parses, the header carries no session_id, the seat
+          id is unknown, or the header names THIS seat
+        - resolves a pointer slot to its record first, exactly as verify_seat_memento
+          does, so the two never disagree about which bytes carry the header
+        - never raises
+    """
+    text = read_text_fn( slot_path )
+    if text is None:
+        return None
+    record_path = resolve_pointer_target( slot_path, text )
+    if record_path is not None:
+        record_text = read_text_fn( record_path )
+        if record_text is None:
+            return None
+        text = record_text
+    header  = parse_memento_header( text )
+    hdr_sid = ( header or {} ).get( "session_id" )
+    if not hdr_sid:
+        return None
+    hdr8  = hdr_sid[ :8 ].lower()
+    seat8 = ( seat_sid8 or "" )[ :8 ].lower()
+    if not seat8 or hdr8 == seat8:
+        return None
+    return hdr8
+
+
+# ── The loud line (pure) ──────────────────────────────────────────────────────
+def memento_alarm( outcomes ):
+    """
+    One sentence, for the TOP of the reap result, naming every seat about to be
+    killed without a usable memento.
+
+    WHY IT EXISTS (row 3b0c5f90, second bullet). The per-seat verdicts were already
+    honest, and already ignored: they sit in a nested dict under a key the caller
+    has to go looking for, while the reap proceeds and reports success around them.
+    A verdict nobody reads is the same as no verdict. This is the line the caller
+    puts where it cannot be missed.
+
+    Requires:
+        - outcomes maps seat name -> a coordinate_mementos outcome dict; the
+          reserved `_error` key (a coordination failure, not a seat) is tolerated
+
+    Ensures:
+        - returns None when every seat is verified / written / not_requested — the
+          quiet case stays quiet, so the line means something when it appears
+        - otherwise returns a single string naming each losing seat, its persona and
+          its verdict, sorted by seat name so the same reap reads the same way twice
+        - never raises
+    """
+    LOSING = ( "timeout_no_memento", "prior_holder_present", "unparseable_present",
+               "skipped", "skipped_no_cwd" )
+    losers = []
+    for name in sorted( outcomes ):
+        if name == "_error":
+            continue
+        outcome = outcomes[ name ]
+        if not isinstance( outcome, dict ):
+            continue
+        if outcome.get( "status" ) in LOSING:
+            losers.append( f"{name} ({outcome.get( 'persona' ) or 'unknown persona'}): "
+                           f"{outcome.get( 'status' )}" )
+    if not losers:
+        return None
+    return ( f"REAPED WITHOUT A PROVEN MEMENTO — {len( losers )} seat(s): "
+             + "; ".join( losers )
+             + ". See memento_outcomes for each seat's reason before re-spinning." )
+
+
 # ── Identity helpers ──────────────────────────────────────────────────────────
 def _identity_bits( ident ):
     """
@@ -426,13 +519,20 @@ def coordinate_mementos(
                                  whitespace-only file (a write that started and died).
                                  ABSENT for recovery, unrecoverable. VISIBLE, never
                                  success. The empty case keeps its evidence in the reason
+            "prior_holder_present" the child was asked and the slot still holds a file whose
+                                 header PARSED and named a DIFFERENT seat. This seat's
+                                 memento is NOT at the slot — the file is another seat's
+                                 (row 3b0c5f90). Split out of "unparseable_present"
+                                 because the recovery actions are opposite: here, opening
+                                 the file teaches you about somebody else's work, and the
+                                 thing to hunt for is a memento written to the wrong place
             "unparseable_present" the child was asked and still no PROVABLE memento, but a
                                  file IS on disk at the slot — a manager can OPEN and READ
                                  it (RECOVERABLE). The present-but-unparseable case the
                                  rows asked to split out (dffebbd6 / ebcb763e): a real
-                                 memento with only a markdown H1 header, a pointer whose
-                                 record vanished, or a prior-holder's file all land here —
-                                 distinct from absent, on which a manager cannot act
+                                 memento with only a markdown H1 header, or a pointer whose
+                                 record vanished. A prior-holder's file NO LONGER lands
+                                 here — it has its own verdict above
             "skipped"            no persona/session in the bridge identity, so the
                                  slot cannot be derived — surfaced, not silently ok
             "skipped_no_cwd"     persona+session known but the bridge carries no `cwd`,
@@ -549,7 +649,18 @@ def coordinate_mementos(
     # collapse inverted, so empty buckets as absent but keeps its evidence in the reason.
     for name, info in pending.items():
         presence = classify_slot_presence( info[ "slot" ], read_text_fn )
-        if presence == "present":
+        foreign  = classify_slot_owner( info[ "slot" ], info[ "session_id" ][ :8 ], read_text_fn )
+        if presence == "present" and foreign is not None:
+            # NOT "unparseable" — the header parsed fine and named somebody else. This
+            # seat's memento is not at the slot, and opening the file teaches a manager
+            # about a different seat's work (row 3b0c5f90).
+            status = "prior_holder_present"
+            reason = ( f"asked{info[ 'ask_note' ]}, and after {ask_timeout_sec}s the slot still holds "
+                       f"ANOTHER seat's memento (session {foreign}) — THIS seat's memento is NOT at the "
+                       f"slot. Do not open it expecting this seat's context. If the seat wrote one "
+                       f"elsewhere (the repo root is the usual wrong place), move it to the slot before "
+                       f"re-spinning; otherwise it was never written; at ask time: {info[ 'pre_ask_reason' ]}" )
+        elif presence == "present":
             status = "unparseable_present"
             reason = ( f"asked{info[ 'ask_note' ]}, a file is on disk at the slot but could not be "
                        f"proven fresh+complete within {ask_timeout_sec}s — OPEN AND READ IT "
@@ -567,3 +678,111 @@ def coordinate_mementos(
             "slot"       : str( info[ "slot" ] )
         }
     return outcomes
+
+
+# ── "Is this seat's memento actually at the slot?" — one command ──────────────
+def describe_slot(
+    repo_root,
+    persona_name,
+    seat_sid8,
+    now,
+    *,
+    read_text_fn   = None,
+    window_seconds = DEFAULT_WINDOW_SECONDS,
+    min_bytes      = DEFAULT_MIN_BYTES
+):
+    """
+    Answer the ONE question a "ready for re-spin" claim does not answer: is the
+    memento at THE SLOT THE REAPER READS, and is it THIS seat's?
+
+    WHY THIS EXISTS (row 3b0c5f90, third bullet). A worker reported ready with an
+    impeccable receipt — a real path, its own session id, a mirror, a sha256, every
+    element true — and its memento was in the repo root while the slot resolved to a
+    four-hour-old holder. A receipt can be completely accurate and still not answer
+    the question being asked of it. So the check is not "did you write one", it is
+    "does the slot resolve to you", and only the slot can answer that.
+
+    The manager was already doing this by hand before every reap. Doing it by hand is
+    how it gets skipped on a busy evening.
+
+    Requires:
+        - repo_root is the seat's OWN repo root (its bridge `cwd`), never the host's
+        - seat_sid8 is the 8-char prefix of the seat's session id
+        - now is an AWARE datetime
+
+    Ensures:
+        - returns { slot, verdict, detail, foreign_session_id }
+        - verdict is "ready" ONLY when verify_seat_memento proves the slot — the same
+          predicate the reap uses, so this command and the reap can never disagree
+        - verdict is "prior_holder" when the slot names a DIFFERENT session, and
+          foreign_session_id names it
+        - verdict is "absent" when nothing readable with content is at the slot
+        - verdict is "present_unproven" otherwise — present, this seat's or nobody's,
+          but not provable (the race case)
+        - foreign_session_id is None for every verdict but "prior_holder"
+        - never raises
+    """
+    read_text_fn = read_text_fn if read_text_fn is not None else _default_read_text
+    slot         = seat_memento_slot( repo_root, persona_name )
+    usable, detail = verify_seat_memento( slot, seat_sid8, now, read_text_fn=read_text_fn,
+                                          window_seconds=window_seconds, min_bytes=min_bytes )
+    if usable:
+        return { "slot": str( slot ), "verdict": "ready", "detail": detail,
+                 "foreign_session_id": None }
+    foreign = classify_slot_owner( slot, seat_sid8, read_text_fn )
+    if foreign is not None:
+        return { "slot": str( slot ), "verdict": "prior_holder", "detail": detail,
+                 "foreign_session_id": foreign }
+    if classify_slot_presence( slot, read_text_fn ) == "present":
+        return { "slot": str( slot ), "verdict": "present_unproven", "detail": detail,
+                 "foreign_session_id": None }
+    return { "slot": str( slot ), "verdict": "absent", "detail": detail,
+             "foreign_session_id": None }
+
+
+def format_slot_report( report, persona_name, seat_sid8 ):
+    """
+    Ensures:
+        - returns the human lines for a `describe_slot` result, leading with the
+          verdict and naming the slot on every one of them (the slot IS the answer)
+        - never raises
+    """
+    verdict = report[ "verdict" ]
+    head    = {
+        "ready"            : f"READY — {persona_name} ({seat_sid8}) resolves at the slot. Safe to reap.",
+        "prior_holder"     : ( f"NOT AT THE SLOT — the slot holds session "
+                               f"{report[ 'foreign_session_id' ]}, not {seat_sid8}. "
+                               f"{persona_name}'s memento is somewhere else or was never written; "
+                               f"check the repo root before reaping." ),
+        "absent"           : f"NOTHING AT THE SLOT — {persona_name} ({seat_sid8}) has no memento to reap.",
+        "present_unproven" : ( f"PRESENT BUT UNPROVEN — a file is at the slot and it is not another "
+                               f"session's, but it could not be proven fresh and complete. Re-run in "
+                               f"a few seconds if {persona_name} is mid-write." ),
+    }[ verdict ]
+    return f"{head}\n  slot:   {report[ 'slot' ]}\n  detail: {report[ 'detail' ]}"
+
+
+def main( argv=None ):   # pragma: no cover - thin argv/stdout boundary over tested parts
+    """
+    Ensures:
+        - prints the slot report for one seat and exits 0 only when it is "ready",
+          so a manager can gate a reap on it instead of eyeballing a DM
+    """
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog        = "python3 -m lupin_mcp.reap_memento",
+        description = "Does this seat's memento resolve at the slot the reaper reads?" )
+    parser.add_argument( "--repo-root",  required=True, help="the SEAT's repo root (its bridge cwd)" )
+    parser.add_argument( "--persona",    required=True )
+    parser.add_argument( "--session-id", required=True, help="the seat's session id (8-char prefix is enough)" )
+    args = parser.parse_args( argv )
+
+    report = describe_slot( args.repo_root, args.persona, args.session_id[ :8 ], _default_now() )
+    print( format_slot_report( report, args.persona, args.session_id[ :8 ] ) )
+    return 0 if report[ "verdict" ] == "ready" else 1
+
+
+if __name__ == "__main__":   # pragma: no cover - process entry point
+    import sys
+    sys.exit( main() )

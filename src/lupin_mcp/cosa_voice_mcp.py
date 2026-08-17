@@ -2723,11 +2723,22 @@ def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str
     DM the still-alive child to write it and WAIT (bounded) for it to appear, so its
     specialization survives a future re-spawn (pass that path back as `seed_memento`).
     The result's `memento_outcomes` carries an EXPLICIT per-seat verdict (verified /
-    written / unparseable_present / timeout_no_memento / skipped) — a seat that produced
-    no PROVABLE memento fails VISIBLY, never as a silent success (row 0a36d83d — the flag
-    used to be a no-op). The verdict splits present-but-unparseable (a file IS on disk —
-    OPEN AND READ it, RECOVERABLE) from timeout_no_memento (nothing on disk — ABSENT,
-    unrecoverable), so a manager acts on the first and never mistakes it for the second.
+    written / prior_holder_present / unparseable_present / timeout_no_memento / skipped)
+    — a seat that produced no PROVABLE memento fails VISIBLY, never as a silent success
+    (row 0a36d83d — the flag used to be a no-op). The verdict splits three recovery
+    actions apart: `unparseable_present` (a file IS on disk and it may well be this
+    seat's — OPEN AND READ it, RECOVERABLE), `prior_holder_present` (the file at the
+    slot parsed fine and names ANOTHER session — this seat's memento is NOT there, so
+    do not read it expecting their context; hunt for one written to the wrong place,
+    usually the repo root, or accept it was never written), and `timeout_no_memento`
+    (nothing readable on disk at all — ABSENT, unrecoverable). Before the middle one
+    existed, a race and a lost memento returned the SAME verdict ten minutes apart
+    (row 3b0c5f90), which forced a manual check on every reap.
+
+    ⚠️ **Read `memento_alarm` FIRST.** It is a single top-level line naming every seat
+    about to be killed without a proven memento, and it is `None` when there is nothing
+    to say. The per-seat verdicts were already honest and still got missed, because they
+    sit in a nested dict while the reap reports success around them (row 3b0c5f90).
     A seat already carrying a fresh memento (a manual "prepare for re-spin" the
     manager already did) is NOT asked again — the guard suppresses the duplicate.
 
@@ -2763,8 +2774,8 @@ def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str
         respin_personas: personas coming straight back — keep their row ownership
 
     Returns:
-        dict: { dismissed:[{session_name, status}], remaining, memento_outcomes,
-                retained_owner_personas, retained_unmatched, ... }
+        dict: { dismissed:[{session_name, status}], remaining, memento_alarm,
+                memento_outcomes, retained_owner_personas, retained_unmatched, ... }
     """
     import functools
     import cosa.utils.util as cu
