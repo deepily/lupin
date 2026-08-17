@@ -56,11 +56,17 @@ class GeminiVertexClient( LlmClientInterface ):
     # GenerateContentConfig field names. `max_tokens` -> `max_output_tokens` is the
     # mapping bug 3067adf6 named: a straight **params splat would error or silently
     # drop the value. Only generation knobs live here.
+    # `seed` added 2026-08-17 (row ae43a37c): temperature 0.0 alone does NOT make a
+    # Gemini call reproducible — with no seed the backend picks one per request, so
+    # re-running the same prompt can return different text. GenerateContentConfig
+    # carries a real `seed` field (google-genai 1.73.1), so the value maps 1:1; before
+    # this line a "seed" key in the INI raised "unknown generation param".
     _GEN_KEY_MAP = {
         "temperature" : "temperature",
         "max_tokens"  : "max_output_tokens",
         "top_p"       : "top_p",
         "top_k"       : "top_k",
+        "seed"        : "seed",
     }
     # Control-plane keys the factory carries in the same dict but that are NOT
     # generation params — dropped, not forwarded to the SDK config.

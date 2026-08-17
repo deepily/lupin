@@ -157,6 +157,39 @@ class TestGenerationParamsReachSDK:
         # stream never becomes an SDK field
         assert getattr( cfg, "stream", None ) is None
 
+    def test_debug_construction_line_prints_project_location_model( self, capsys ):
+        """The debug line is the only record of WHICH project/location/model a run used;
+        it was the one uncovered line in this module, so a broken f-string there would
+        have shipped unnoticed."""
+        fake_client = MagicMock()
+        fake_client.models.generate_content.return_value = MagicMock( text="OK" )
+        with patch( "google.genai.Client", return_value=fake_client ):
+            _client( debug=True ).run( "hi" )
+        out = capsys.readouterr().out
+        assert "project=test-proj"                in out
+        assert "location=global"                  in out
+        assert "model=gemini-3.1-flash-lite"      in out
+
+    def test_seed_reaches_the_sdk_config( self ):
+        """Row ae43a37c: temperature 0.0 alone does not pin a Gemini call — the seed has
+        to arrive at generate_content too. Before the _GEN_KEY_MAP entry this dict raised
+        "unknown generation param 'seed'", so this test goes red on any revert."""
+        cfg = self._config_from_run( { "temperature": 0.0, "max_tokens": 4096, "seed": 20260817 } )
+        assert cfg.temperature       == 0.0
+        assert cfg.max_output_tokens == 4096
+        assert cfg.seed              == 20260817
+
+    def test_seed_reaches_the_sdk_config_on_the_async_path( self ):
+        """The study's harness can run either path; a seed that only lands on the sync
+        twin leaves the regeneration unpinned wherever the async twin is used."""
+        import asyncio
+        fake_client = MagicMock()
+        fake_client.aio.models.generate_content = AsyncMock( return_value=MagicMock( text="OK" ) )
+        with patch( "google.genai.Client", return_value=fake_client ):
+            asyncio.run( _client( generation_params={ "seed": 20260817 } ).run_async( "hi" ) )
+        _, kwargs = fake_client.aio.models.generate_content.call_args
+        assert kwargs[ "config" ].seed == 20260817
+
     def test_unknown_param_fails_loud( self ):
         """A typo like `maxtokens` must raise at construction, never silent-drop —
         silent drop is the exact bug class 3067adf6 is."""
