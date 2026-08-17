@@ -20,7 +20,7 @@ import os
 # This ensures config_mgr singleton initializes with Testing block
 os.environ["LUPIN_CONFIG_MGR_CLI_ARGS"] = "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing"
 
-# GCS (LanceDB) integration tests resolve the project through google.auth.default(),
+# GCS integration tests resolve the project through google.auth.default(),
 # which reads ADC — see gcs_utils.py. They do NOT need GOOGLE_CLOUD_PROJECT, and
 # hardcoding it here is actively dangerous: GOOGLE_CLOUD_PROJECT OUTRANKS
 # ANTHROPIC_VERTEX_PROJECT_ID for Vertex clients, so a literal here can silently
@@ -498,11 +498,9 @@ def gcs_credentials_available():
         Inject into GCS-dependent fixtures:
 
         @pytest.fixture
-        def gcs_manager(gcs_credentials_available):
+        def gcs_client(gcs_credentials_available):
             # gcs_credentials_available validates before this runs
-            manager = SolutionSnapshotManager( gcs_config )
-            manager.initialize()  # Won't fail due to auth
-            return manager
+            return storage.Client()  # Won't fail due to auth
 
     Returns:
         bool: True if credentials valid (otherwise skips)
