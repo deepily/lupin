@@ -411,8 +411,50 @@ def test_discordant_counts_ignores_the_concordant_rows():
         { "row_index": 3, "body": "b", "phi_4": rec( 3, "phi_4", "rewritten" ),
                                         "flash_lite": rec( 3, "flash_lite", "rewritten" ) },
     ]
-    b, c = RH.discordant_counts( paired, "phi_4", "flash_lite" )
-    assert ( b, c ) == ( 1, 1 )
+    counts = RH.discordant_counts( paired, "phi_4", "flash_lite" )
+    assert ( counts[ "b" ], counts[ "c" ] ) == ( 1, 1 )
+    assert counts[ "n_discordant" ] == 2
+    assert counts[ "n_concordant" ] == 2          # rows 2 and 3 agreed and are excluded
+
+
+def test_discordant_counts_names_the_arm_not_just_the_letter():
+    """
+    Sam and I label the two cells in OPPOSITE orders — my b=0,c=5 is his b=5,c=0 for
+    the same data. A bare tuple travels without the fact that makes it readable, so
+    the first person to quote it gets the direction backwards.
+    """
+    def rec( index, arm, outcome ):
+        return { "row_index": index, "frozen_index": index, "arm": arm, "body": "b",
+                 "meta": _meta( outcome=outcome ) }
+
+    paired = [
+        { "row_index": i, "frozen_index": i, "body": "b",
+          "phi_4"     : rec( i, "phi_4", "rewritten" ),
+          "flash_lite": rec( i, "flash_lite", "fabrication_blocked" ) }
+        for i in range( 5 )
+    ]
+
+    counts = RH.discordant_counts( paired, "phi_4", "flash_lite" )
+
+    assert counts[ "only_flash_lite" ] == 5
+    assert counts[ "only_phi_4" ]      == 0
+    assert counts[ "direction" ]       == "favours flash_lite"
+    assert "ONLY phi_4" in counts[ "b_means" ]
+    assert "ONLY flash_lite" in counts[ "c_means" ]
+    assert counts[ "outcome" ] == "fabrication_blocked"
+
+
+def test_discordant_direction_reads_even_when_the_cells_match():
+    def rec( index, arm, outcome ):
+        return { "row_index": index, "arm": arm, "body": "b", "meta": _meta( outcome=outcome ) }
+
+    paired = [
+        { "row_index": 0, "body": "b", "phi_4": rec( 0, "phi_4", "fabrication_blocked" ),
+                                       "flash_lite": rec( 0, "flash_lite", "rewritten" ) },
+        { "row_index": 1, "body": "b", "phi_4": rec( 1, "phi_4", "rewritten" ),
+                                       "flash_lite": rec( 1, "flash_lite", "fabrication_blocked" ) },
+    ]
+    assert RH.discordant_counts( paired, "phi_4", "flash_lite" )[ "direction" ] == "even"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -680,6 +722,84 @@ def test_verify_surface_can_be_disabled_for_hermetic_replays( monkeypatch ):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# BACKFILLING PROVENANCE ONTO PRE-FIELD RUNS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_backfill_stamps_provenance_from_the_run_header():
+    """Sam's 400-row run predates both fields; its header carries them, so nothing is guessed."""
+    records = [ { "row_index": 0, "arm": "phi_4", "body": "a", "elapsed_seconds": 1.0,
+                  "meta": _meta() },
+                { "row_index": 1, "arm": "phi_4", "body": "b", "elapsed_seconds": 2.0,
+                  "meta": _meta() } ]
+
+    filled = RH.backfill_provenance( records, "sha-from-header", drawn_frozen_indices=[ 272, 382 ] )
+
+    assert [ r[ "frozen_index" ] for r in filled ]    == [ 272, 382 ]
+    assert { r[ "snapshot_sha256" ] for r in filled } == { "sha-from-header" }
+    assert all( r[ "provenance_backfilled" ] for r in filled )
+
+
+def test_backfill_does_not_mutate_the_caller_s_records():
+    records = [ { "row_index": 0, "arm": "phi_4", "body": "a", "elapsed_seconds": 1.0, "meta": _meta() } ]
+    RH.backfill_provenance( records, "sha", drawn_frozen_indices=[ 5 ] )
+    assert "frozen_index" not in records[ 0 ]
+    assert "snapshot_sha256" not in records[ 0 ]
+
+
+def test_backfill_never_overwrites_real_provenance():
+    """A backfill must not replace a recorded fact with a reconstructed one."""
+    records = [ { "row_index": 0, "frozen_index": 99, "snapshot_sha256": "real",
+                  "arm": "phi_4", "body": "a", "elapsed_seconds": 1.0, "meta": _meta() } ]
+
+    filled = RH.backfill_provenance( records, "reconstructed", drawn_frozen_indices=[ 7 ] )
+    assert filled[ 0 ][ "frozen_index" ]    == 99
+    assert filled[ 0 ][ "snapshot_sha256" ] == "real"
+
+
+def test_backfill_refuses_a_mismatched_index_list():
+    """A silent zip would misattribute every row to the wrong body."""
+    records = [ { "row_index": i, "arm": "phi_4", "body": "b", "elapsed_seconds": 1.0,
+                  "meta": _meta() } for i in range( 3 ) ]
+
+    with pytest.raises( ValueError ) as excinfo:
+        RH.backfill_provenance( records, "sha", drawn_frozen_indices=[ 1, 2 ] )
+    assert "misattribute every row" in str( excinfo.value )
+
+
+def test_backfill_falls_back_to_row_index_without_a_draw():
+    """Correct ONLY for an unsampled full-population run, and documented as such."""
+    records = [ { "row_index": 3, "arm": "phi_4", "body": "b", "elapsed_seconds": 1.0, "meta": _meta() } ]
+    assert RH.backfill_provenance( records, "sha" )[ 0 ][ "frozen_index" ] == 3
+
+
+def test_backfilled_records_pair_successfully():
+    """The point of the backfill: pair_records must accept the result."""
+    def raw( index, arm ):
+        return { "row_index": index, "arm": arm, "body": f"body {index}",
+                 "elapsed_seconds": 1.0, "meta": _meta() }
+
+    a = RH.backfill_provenance( [ raw( 0, "phi_4" ), raw( 1, "phi_4" ) ], "sha", [ 10, 20 ] )
+    b = RH.backfill_provenance( [ raw( 0, "flash_lite" ), raw( 1, "flash_lite" ) ], "sha", [ 10, 20 ] )
+
+    paired = RH.pair_records( a, b )
+    assert [ p[ "frozen_index" ] for p in paired ] == [ 10, 20 ]
+
+
+def test_backfilled_records_still_refuse_a_snapshot_mismatch():
+    """The backfill must not weaken the guard it exists to satisfy."""
+    def raw( index, arm ):
+        return { "row_index": index, "arm": arm, "body": f"body {index}",
+                 "elapsed_seconds": 1.0, "meta": _meta() }
+
+    a = RH.backfill_provenance( [ raw( 0, "phi_4" ) ], "freeze-one", [ 10 ] )
+    b = RH.backfill_provenance( [ raw( 0, "flash_lite" ) ], "freeze-two", [ 10 ] )
+
+    with pytest.raises( ValueError ) as excinfo:
+        RH.pair_records( a, b )
+    assert "different frozen snapshots" in str( excinfo.value )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # LATENCY — the tiebreaker, and the split that keeps it meaning what it says
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -776,6 +896,54 @@ def test_latency_ratio_survives_a_zero_denominator():
     result = RH.latency_ratio( a, b )
     assert result[ "paired_median_ratio" ] == pytest.approx( 2.0 )    # the 0.0 row is skipped
     assert result[ "ratio_of_medians" ]    == pytest.approx( 3.5 )
+
+
+def test_latency_reports_p90_and_p99_per_arm():
+    """Rick's condition 2: the internet leg is the variable one and p99 is where it shows."""
+    records = [ _timed( "rewritten", float( t ), i ) for i, t in enumerate( range( 1, 101 ) ) ]
+    answered = RH.latency_summary( records )[ "answered" ]
+
+    assert answered[ "p90" ] == pytest.approx( 90.1, abs=0.5 )
+    assert answered[ "p99" ] == pytest.approx( 99.0, abs=0.5 )
+    assert answered[ "p90" ] < answered[ "p99" ]
+    assert answered[ "median" ] < answered[ "p90" ]
+
+
+def test_p99_catches_a_tail_the_median_hides():
+    """The whole reason Rick asked for it: two arms with the SAME median, different tails."""
+    steady  = [ _timed( "rewritten", 2.0, i ) for i in range( 19 ) ] + [ _timed( "rewritten", 2.0, 19 ) ]
+    spiky   = [ _timed( "rewritten", 2.0, i ) for i in range( 19 ) ] + [ _timed( "rewritten", 60.0, 19 ) ]
+
+    a = RH.latency_summary( steady )[ "answered" ]
+    b = RH.latency_summary( spiky )[ "answered" ]
+
+    assert a[ "median" ] == b[ "median" ]                  # identical by the headline...
+    assert b[ "p99" ] > a[ "p99" ] * 5                     # ...and nothing like it in the tail
+
+
+def test_percentile_handles_empty_and_single():
+    assert RH._percentile( [], 0.9 )      is None
+    assert RH._percentile( [ 4.0 ], 0.99 ) == 4.0
+
+
+def test_percentile_interpolates_between_neighbours():
+    assert RH._percentile( [ 0.0, 10.0 ], 0.5 ) == pytest.approx( 5.0 )
+    assert RH._percentile( [ 0.0, 10.0 ], 0.0 ) == 0.0
+    assert RH._percentile( [ 0.0, 10.0 ], 1.0 ) == 10.0
+
+
+def test_latency_payload_carries_the_deployment_framing():
+    """
+    Rick's condition 1, and it must be in the PAYLOAD — a caveat that lives only where
+    the number does not travel is a caveat nobody reads.
+    """
+    result = RH.latency_ratio( [ _timed( "rewritten", 1.0 ) ], [ _timed( "rewritten", 2.0 ) ] )
+
+    assert result[ "comparison_kind" ] == "DEPLOYMENT, not model speed"
+    assert "LAN hop" in result[ "what_this_measures" ]
+    assert "internet round trip" in result[ "what_this_measures" ]
+    assert "NOT a claim that one model is intrinsically faster" in result[ "what_this_measures" ]
+    assert "p99" in result[ "tail_note" ]
 
 
 def test_latency_ratio_says_out_loud_that_it_is_only_a_tiebreaker():

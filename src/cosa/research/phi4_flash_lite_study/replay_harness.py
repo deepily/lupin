@@ -385,6 +385,39 @@ def summarize_arm( metas, denominator=None ):
     }
 
 
+def _percentile( sorted_values, q ):
+    """
+    The q-th percentile of an already-sorted list, by linear interpolation.
+
+    ⚠️ A p99 OVER A SMALL SAMPLE IS NEARLY THE MAXIMUM. With n rows there are only
+    n distinct observations, so at n=8 the "p99" is essentially the slowest row.
+    That is not wrong, but it is not a tail estimate either — read it as such until
+    the sample is large. The number is reported rather than suppressed because
+    hiding it would hide the very tail Rick asked to see.
+
+    Requires:
+        - sorted_values is sorted ascending
+        - 0 <= q <= 1
+
+    Ensures:
+        - returns None for an empty list rather than raising
+        - returns the single value for a one-element list
+        - interpolates between neighbours, matching the standard "linear" method
+
+    Raises:
+        - nothing
+    """
+    n = len( sorted_values )
+    if n == 0: return None
+    if n == 1: return sorted_values[ 0 ]
+
+    position = q * ( n - 1 )
+    lower    = int( position )
+    upper    = min( lower + 1, n - 1 )
+    fraction = position - lower
+    return sorted_values[ lower ] + ( sorted_values[ upper ] - sorted_values[ lower ] ) * fraction
+
+
 def _median( sorted_values ):
     """
     Median of an already-sorted list.
@@ -607,6 +640,53 @@ def pair_records( arm_a_records, arm_b_records ):
     return paired
 
 
+def backfill_provenance( records, snapshot_sha256, drawn_frozen_indices=None ):
+    """
+    Stamp snapshot + frozen-index provenance onto records written before those fields existed.
+
+    ⚠️ WHY THIS IS NARROW ON PURPOSE. `pair_records` refuses records that do not carry
+    `snapshot_sha256` and `frozen_index`, and that refusal is the guard against joining
+    two different draws. A backfill therefore weakens the guard by exactly as much as it
+    is trusted, so it takes the provenance from the RUN HEADER — which the run itself
+    wrote — and never invents it. Sam 🎙️'s 400-row run predates both fields; its header
+    carries `snapshot_sha256` and the drawn indices, so nothing here is guessed.
+
+    Requires:
+        - records are one arm's rows, IN THE ORDER THE ARM REPLAYED THEM
+        - snapshot_sha256 comes from the run's own header, not from a later freeze
+        - drawn_frozen_indices, when given, is that run's header list and has exactly
+          one entry per record
+
+    Ensures:
+        - returns NEW dicts; the caller's records are not mutated
+        - a record that already carries a field keeps its own value — a backfill never
+          overwrites real provenance with reconstructed provenance
+        - without drawn_frozen_indices, frozen_index falls back to row_index, which is
+          correct ONLY for an unsampled full-population run
+
+    Raises:
+        - ValueError when drawn_frozen_indices is given and its length does not match
+          the record count, since a silent zip would misattribute every row
+    """
+    if drawn_frozen_indices is not None and len( drawn_frozen_indices ) != len( records ):
+        raise ValueError(
+            f"{len( drawn_frozen_indices )} drawn indices for {len( records )} records — these "
+            f"cannot be the same run, and pairing them would misattribute every row."
+        )
+
+    filled = []
+    for position, record in enumerate( records ):
+        stamped = dict( record )
+        stamped.setdefault( "snapshot_sha256", snapshot_sha256 )
+        if "frozen_index" not in stamped:
+            stamped[ "frozen_index" ] = ( drawn_frozen_indices[ position ]
+                                          if drawn_frozen_indices is not None
+                                          else stamped[ "row_index" ] )
+        stamped[ "provenance_backfilled" ] = True
+        filled.append( stamped )
+    return filled
+
+
 def latency_summary( records ):
     """
     Per-arm latency, split by whether the model actually answered.
@@ -641,6 +721,11 @@ def latency_summary( records ):
             "n"      : len( times ),
             "median" : _median( times ),
             "mean"   : ( sum( times ) / len( times ) ) if times else None,
+            # Rick's condition: p90 AND p99. The internet leg is the variable one and
+            # p99 is where it shows — a median hides exactly the tail that decides
+            # whether a deployment is pleasant to use.
+            "p90"    : _percentile( times, 0.90 ),
+            "p99"    : _percentile( times, 0.99 ),
         }
 
     return {
@@ -696,6 +781,17 @@ def latency_ratio( arm_a_records, arm_b_records, arm_a="phi_4", arm_b="flash_lit
         faster = arm_b if ratio_of_medians > 1 else arm_a if ratio_of_medians < 1 else "tie"
 
     return {
+        # Rick's condition 1, in the PAYLOAD and not only in the doc — a caveat that
+        # lives somewhere the number does not travel to is a caveat nobody reads.
+        "comparison_kind"    : "DEPLOYMENT, not model speed",
+        "what_this_measures" : (
+            f"end-to-end time as each arm WOULD BE DEPLOYED: {arm_a} over the LAN hop to the "
+            f"local vLLM host, {arm_b} over the internet round trip to Vertex. Both were "
+            f"measured exactly as they would run in production, which is what makes the "
+            f"comparison fair — and what makes it a statement about two deployments, NOT a "
+            f"claim that one model is intrinsically faster than the other. Move either arm to "
+            f"different infrastructure and this number no longer applies."
+        ),
         "basis"              : "answered rows only — model_failed timings are a different kind of number",
         "tiebreaker_only"    : "applies ONLY after the statistical test comes back tied",
         arm_a                : a_summary,
@@ -704,6 +800,11 @@ def latency_ratio( arm_a_records, arm_b_records, arm_a="phi_4", arm_b="flash_lit
         "ratio_meaning"      : f"{arm_a} median / {arm_b} median; > 1 means {arm_a} is slower",
         "paired_median_ratio": _median( per_row ),
         "faster_arm"         : faster,
+        "tail_note"          : (
+            "p99 over a small sample is close to the maximum, not a tail estimate. The "
+            "internet leg is the variable one, so the p90/p99 gap between the arms is where "
+            "a deployment difference shows."
+        ),
     }
 
 
@@ -715,9 +816,20 @@ def discordant_counts( paired, arm_a, arm_b, outcome="fabrication_blocked" ):
         - paired came from pair_records
         - both arm names are keys in every paired entry
 
+    ⚠️ RETURNS A SELF-DESCRIBING DICT, NOT A BARE ( b, c ) TUPLE. Sam 🎙️ and I label
+    the two cells in OPPOSITE orders — my b=0, c=5 is his b=5, c=0 for the same data —
+    so a bare tuple travels without the one fact that makes it readable, and the first
+    person to quote it gets the direction backwards. The arm-named keys carry the
+    meaning with the number; `b` and `c` remain for the arithmetic.
+
+    Requires:
+        - paired came from pair_records
+        - both arm names are keys in every paired entry
+
     Ensures:
-        - returns ( b, c ) where b = rows where ONLY arm_a hit the outcome and
-          c = rows where ONLY arm_b did
+        - returns a dict whose keys NAME the arm each count belongs to
+        - `b` = rows where ONLY arm_a hit the outcome; `c` = only arm_b — kept for
+          McNemar, which needs an order, and spelled out in `b_means` / `c_means`
         - concordant rows contribute to neither, which is McNemar's whole point
 
     Raises:
@@ -730,7 +842,20 @@ def discordant_counts( paired, arm_a, arm_b, outcome="fabrication_blocked" ):
         b_hit = entry[ arm_b ][ "meta" ].get( "tutor_outcome" ) == outcome
         if a_hit and not b_hit: b += 1
         if b_hit and not a_hit: c += 1
-    return b, c
+
+    return {
+        "outcome"            : outcome,
+        f"only_{arm_a}"      : b,
+        f"only_{arm_b}"      : c,
+        "b"                  : b,
+        "c"                  : c,
+        "b_means"            : f"rows where ONLY {arm_a} hit {outcome}",
+        "c_means"            : f"rows where ONLY {arm_b} hit {outcome}",
+        "n_discordant"       : b + c,
+        "n_concordant"       : len( paired ) - b - c,
+        "direction"          : ( f"favours {arm_b}" if c > b else
+                                 f"favours {arm_a}" if b > c else "even" ),
+    }
 
 
 def main( argv=None, printer=print, runner=None ):
