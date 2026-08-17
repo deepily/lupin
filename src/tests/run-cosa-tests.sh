@@ -30,6 +30,9 @@ cd "$PROJECT_ROOT"
 export PYTHONPATH="$PROJECT_ROOT/src:${PYTHONPATH}"
 export LUPIN_ROOT="$PROJECT_ROOT"
 
+# Same network guard as the Lupin unit tier (row 7c84b8b8) — count mode.
+export LUPIN_UNIT_NETWORK="${LUPIN_UNIT_NETWORK:-count}"
+
 # Use venv pytest on host, fall back to system pytest in Docker container
 VENV_PYTEST="$PROJECT_ROOT/.venv/bin/pytest"
 if [ -x "$VENV_PYTEST" ] && "$VENV_PYTEST" --version > /dev/null 2>&1; then PYTEST="$VENV_PYTEST"; else PYTEST="python3 -m pytest"; fi

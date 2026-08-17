@@ -23,6 +23,13 @@ cd "$PROJECT_ROOT"
 export PYTHONPATH="$PROJECT_ROOT/src:${PYTHONPATH}"
 export LUPIN_ROOT="$PROJECT_ROOT"
 
+# Arm the unit tier's network guard in COUNT mode (row 7c84b8b8): every outbound
+# connection a "unit" test makes is reported by test id, address and the STACK that
+# dialled. Count, not block, until the known fallout is cleared — a collection-time
+# probe in test_dm_quality_judge.py and the inline DM grader (row ec5cf83a), which is
+# another lane's row. Flipping this to "block" is the last step of 7c84b8b8.
+export LUPIN_UNIT_NETWORK="${LUPIN_UNIT_NETWORK:-count}"
+
 # Require an EXPLICIT venv pytest — never silently fall back to a bare `python3 -m pytest`.
 # The old fallback quietly ran whatever `python3` resolved to on PATH; when that interpreter
 # was under-provisioned (e.g. the container's /opt/venv missing pytest-timeout), a collection
