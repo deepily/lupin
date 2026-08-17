@@ -1131,6 +1131,27 @@ def allocate_persona_chain_for_session(
                 "outcomes"      : outcomes
             }
 
+        # EMPTY-GUARD (row e071e834, fix part 3 — ALARM, do NOT abort). A NON-wildcard
+        # element that canonicalizes to EMPTY (all-punctuation junk — e.g. a mangled
+        # '"*"]' from a legacy JSON-array transport) can never match a pool name; left
+        # unflagged it degrades to a silent miss. Make it LOUD (log + a recorded
+        # outcome) but CONTINUE the walk — skipping it, never aborting — so the chain's
+        # `*` still guarantees the seat a name. A 422/abort here would defeat the very
+        # thing the wildcard exists to protect (Cheech, 2026-08-17).
+        #
+        # ⚠️ THE WILDCARD IS EXEMPTED EXPLICITLY, not just by branch order (maria,
+        # 2026-08-17): canonical_persona_key('*') == '' on CLEAN input, so a guard that
+        # only checked the empty key WOULD catch a legitimate `*` and skip it — defeating
+        # the wildcard. The `element != PERSONA_CHAIN_WILDCARD` term makes the exemption
+        # survive any future reordering of this loop, independent of the identity branch
+        # above.
+        if element != PERSONA_CHAIN_WILDCARD and canonical_persona_key( element ) == "":
+            print( f"[VOICE-PERSONA] ⚠️ chain element {element!r} canonicalizes to EMPTY "
+                   f"(malformed / all-punctuation) — skipping it, continuing the walk "
+                   f"(row e071e834)" )
+            outcomes.append( { "name": element, "status": "malformed_empty_key" } )
+            continue
+
         result = allocate_requested_persona_for_session( config_mgr, stable_session_id, element )
         if result is None:
             return { "status": "pool_error", "persona": None, "outcomes": outcomes, "available": available }

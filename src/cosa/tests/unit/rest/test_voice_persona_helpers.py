@@ -720,6 +720,70 @@ class TestAllocatePersonaChainForSession( unittest.TestCase ):
         self.assertEqual( res[ "persona" ][ "name" ], "nora" )
         mock_wild.assert_called_once_with( ANY, "sid", declared_managers=None )
 
+    # ── Empty-guard (row e071e834, fix part 3): a NON-wildcard element that
+    # canonicalizes to EMPTY is ALARMED + SKIPPED, never aborts — the walk
+    # continues to the wildcard so `*` still guarantees a name. ────────────────
+    @patch( "cosa.rest.voice_persona_helpers.allocate_persona_for_session" )
+    @patch( "cosa.rest.voice_persona_helpers.allocate_requested_persona_for_session" )
+    def test_empty_key_element_skipped_wildcard_still_fires( self, mock_named, mock_wild ):
+        # "!!!" canonicalizes to "" (all punctuation). It must be recorded + skipped,
+        # NOT allocated and NOT abort; the `*` then allocates so the seat gets a name.
+        mock_wild.return_value = { "name": "nora", "assigned_at": "t" }
+        res = allocate_persona_chain_for_session( _MockConfig(), "sid", "!!!,*" )
+        self.assertEqual( res[ "status" ], "ok" )
+        self.assertEqual( res[ "satisfied_by" ], PERSONA_CHAIN_WILDCARD )
+        self.assertTrue( res[ "wildcard_used" ] )
+        self.assertEqual( res[ "outcomes" ], [ { "name": "!!!", "status": "malformed_empty_key" } ] )
+        self.assertEqual( res[ "persona" ][ "name" ], "nora" )
+        # the malformed element was NEVER handed to the named allocator
+        mock_named.assert_not_called()
+        mock_wild.assert_called_once_with( ANY, "sid", declared_managers=None )
+
+    @patch( "cosa.rest.voice_persona_helpers.allocate_persona_for_session" )
+    @patch( "cosa.rest.voice_persona_helpers.allocate_requested_persona_for_session" )
+    def test_empty_key_element_does_not_block_a_following_named( self, mock_named, mock_wild ):
+        # A malformed element must not stop the walk reaching a legit NAMED element.
+        mock_named.return_value = { "status": "ok", "persona": { "name": "nora", "assigned_at": "t" }, "available": [] }
+        res = allocate_persona_chain_for_session( _MockConfig(), "sid", "!!!,Nora" )
+        self.assertEqual( res[ "status" ], "ok" )
+        self.assertEqual( res[ "satisfied_by" ], "Nora" )
+        self.assertFalse( res[ "wildcard_used" ] )
+        self.assertEqual( res[ "outcomes" ], [ { "name": "!!!", "status": "malformed_empty_key" } ] )
+        # only the LEGIT named element reached the allocator, not the malformed one
+        mock_named.assert_called_once_with( ANY, "sid", "Nora" )
+        mock_wild.assert_not_called()
+
+    @patch( "cosa.rest.voice_persona_helpers.allocate_persona_for_session" )
+    @patch( "cosa.rest.voice_persona_helpers.allocate_requested_persona_for_session" )
+    def test_all_malformed_no_wildcard_is_exhausted( self, mock_named, mock_wild ):
+        # Every element canonicalizes to empty and there is no `*` → exhausted
+        # (the existing LOUD 409 path), and the named allocator is never called.
+        res = allocate_persona_chain_for_session( _MockConfig(), "sid", "!!!,@@@" )
+        self.assertEqual( res[ "status" ], "exhausted" )
+        self.assertEqual(
+            res[ "outcomes" ],
+            [ { "name": "!!!", "status": "malformed_empty_key" },
+              { "name": "@@@", "status": "malformed_empty_key" } ],
+        )
+        mock_named.assert_not_called()
+        mock_wild.assert_not_called()
+
+    @patch( "cosa.rest.voice_persona_helpers.allocate_persona_for_session" )
+    @patch( "cosa.rest.voice_persona_helpers.allocate_requested_persona_for_session" )
+    def test_wildcard_exempt_from_empty_guard_despite_empty_canonical( self, mock_named, mock_wild ):
+        # maria's catch (2026-08-17): canonical_persona_key('*') == '' on CLEAN input,
+        # so the empty-guard MUST exempt the wildcard explicitly — otherwise it would
+        # skip a legit `*` and defeat the whole point. Prove the trap AND the exemption.
+        from lupin_mcp.persona_normalization import canonical_persona_key
+        self.assertEqual( canonical_persona_key( "*" ), "" )   # the trap: wildcard → empty
+        mock_wild.return_value = { "name": "nora", "assigned_at": "t" }
+        res = allocate_persona_chain_for_session( _MockConfig(), "sid", "*" )
+        self.assertEqual( res[ "status" ], "ok" )
+        self.assertTrue( res[ "wildcard_used" ] )
+        self.assertEqual( res[ "satisfied_by" ], PERSONA_CHAIN_WILDCARD )
+        self.assertEqual( res[ "outcomes" ], [] )             # `*` NOT flagged malformed
+        mock_wild.assert_called_once_with( ANY, "sid", declared_managers=None )
+
     @patch( "cosa.rest.voice_persona_helpers.allocate_persona_for_session" )
     @patch( "cosa.rest.voice_persona_helpers.allocate_requested_persona_for_session" )
     def test_wildcard_threads_declared_managers( self, mock_named, mock_wild ):
