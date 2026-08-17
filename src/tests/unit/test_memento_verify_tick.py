@@ -195,6 +195,48 @@ def test_missing_env_var_is_loud( ledger, monkeypatch ):
     assert "SKIPPED" in line and "not a clean result" in line
 
 
+# ── scope: the verdict must not claim more than it checked (row 890c07d3) ─────
+
+def test_findings_line_names_the_repo_it_actually_checked( ledger, script ):
+    """
+    This tick reads ONE repo — the LUPIN_ROOT one. It used to report "N finding(s)
+    in this repo's mementos", which a reader sitting in a DIFFERENT repo takes to
+    mean theirs; six of the 23 live seats are planning-is-prompting-resident and
+    none are covered here. The verdict must name its subject so it cannot be read
+    fleet-wide.
+    """
+    with patch.object( subprocess, "run", return_value=_completed( "--- FINDINGS : 3" ) ):
+        line = tick.verify_tick_line( repo_root="/repos/lupin", now=NOW, force=True )
+
+    assert "lupin" in line, "the verdict does not name the repo it read"
+    assert "this repo's mementos" not in line, "unscoped phrasing is back"
+    assert "ONLY" in line, "the line does not say the check covers that repo alone"
+    # The remedy must be runnable as printed, not a <lupin> placeholder to fill in.
+    assert "/repos/lupin" in line and "<lupin>" not in line
+
+
+def test_scope_naming_follows_the_repo_actually_passed( ledger, script ):
+    """
+    The name must come from the repo under test, not a constant — otherwise the
+    assertion above passes for a hardcoded "lupin" while the tick reads elsewhere.
+    This is the input where those two possibilities diverge.
+    """
+    with patch.object( subprocess, "run", return_value=_completed( "--- FINDINGS : 2" ) ):
+        line = tick.verify_tick_line( repo_root="/repos/planning-is-prompting", now=NOW, force=True )
+
+    assert "planning-is-prompting" in line
+    assert "/repos/lupin" not in line
+
+
+def test_unreadable_findings_line_also_names_its_repo( ledger, script ):
+    """The unknown-result path makes a claim too, so it carries the same scope."""
+    with patch.object( subprocess, "run", return_value=_completed( "ran, but no summary" ) ):
+        line = tick.verify_tick_line( repo_root="/repos/lupin", now=NOW, force=True )
+
+    assert "unknown rather than clean" in line
+    assert "lupin" in line and "<lupin>" not in line
+
+
 def test_missing_repo_root_is_loud( ledger, script, monkeypatch ):
     monkeypatch.delenv( "LUPIN_ROOT", raising=False )
     line = tick.verify_tick_line( now=NOW, force=True, repo_root=None )

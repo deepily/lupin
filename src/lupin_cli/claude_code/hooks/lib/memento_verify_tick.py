@@ -162,7 +162,14 @@ def verify_tick_line( repo_root=None, now=None, force=False ):
     Run `memento_io.py verify` at most once a day and return one line about it.
 
     Requires:
-        - repo_root is the repo whose mementos are checked (defaults to LUPIN_ROOT)
+        - repo_root is the repo whose mementos are checked (defaults to LUPIN_ROOT).
+          ⚠️ THAT IS ONE REPO, NOT THE FLEET (row 890c07d3). Nothing here checks any
+          other repo's mementos, and a 0-findings run is silent, so "no line" means
+          "lupin was clean" — NEVER "the fleet's mementos are verified". Every line
+          this returns names the repo it actually read, so the verdict cannot be read
+          wider than its scope. Widening the scope needs a fleet root LIST, which is
+          the open design question heartbeat_hold:86-93 refused to answer inside a
+          module, and it is not answered here either
         - now is a timezone-aware datetime (defaults to real now)
         - force=True bypasses the TTL, for the CLI and for tests
 
@@ -207,15 +214,24 @@ def verify_tick_line( repo_root=None, now=None, force=False ):
         findings = _parse_findings( proc.stdout )
         _write_last_run( path, now, findings )
 
+        # NAME THE REPO THAT WAS CHECKED (row 890c07d3). This tick only ever reads the
+        # LUPIN_ROOT repo, but it used to say "this repo's mementos" — which a reader
+        # sitting in a DIFFERENT repo reasonably takes to mean THEIRS. Six of the 23
+        # live seats are planning-is-prompting-resident and none of their mementos are
+        # covered here, so an unscoped verdict claims more than it checked. Naming the
+        # repo does not widen coverage; it stops the report overstating it.
+        repo_name = Path( repo_root ).name or str( repo_root )
+
         if findings is None:
-            return ( "⚠️ memento verify ran but its FINDINGS line could not be read, so the "
-                     "result is unknown rather than clean. Re-run it by hand: "
-                     "memento_io.py verify --repo <lupin>" )
+            return ( f"⚠️ memento verify ran against {repo_name} but its FINDINGS line could "
+                     "not be read, so the result is unknown rather than clean. Re-run it by "
+                     f"hand: memento_io.py verify --repo {repo_root}" )
         if findings == 0:
             return ""
-        return ( f"⚠️ memento verify: {findings} finding(s) in this repo's mementos. "
-                 "A BARE-SLOT is a live data-loss window — the next pointer write destroys "
-                 "the record. Preserve first: memento_io.py migrate --repo <lupin> --apply. "
+        return ( f"⚠️ memento verify: {findings} finding(s) in {repo_name}'s mementos — this "
+                 "check covers that repo ONLY. A BARE-SLOT is a live data-loss window — the "
+                 "next pointer write destroys the record. Preserve first: "
+                 f"memento_io.py migrate --repo {repo_root} --apply. "
                  "Nothing has been changed for you." )
     except Exception as e:
         return ( f"⚠️ memento verify tick failed ({type( e ).__name__}). Mirror integrity is "
