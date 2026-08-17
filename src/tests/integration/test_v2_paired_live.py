@@ -209,6 +209,16 @@ def _run_v1_arm( *, corpus, seed, n_per_command, base_url ):   # pragma: no cove
             push_fn=v1_eval_arm._default_push_fn( base_url, websocket_id, token ),
             collect_fn=v1_eval_arm._default_collect_fn( ws_recv_events ),
             class_to_command=class_to_command,
+            # assert_cold=False — RULED by Tiberius 2026-08-17 (row d8d019f6). The F3 cold-start guard
+            # demands cache_hit_rate==0, but the snapshot manager's SIMILARITY cache self-warms within
+            # the cold pass (deterministic 0.0126 over 300 UNIQUE utterances, IDENTICAL across a full
+            # :7997 restart — so it is intra-pass, not stale state). The paired median-Δ is computed
+            # WARM-vs-WARM over shared utterances (the gate never reads the cold pass), and the two
+            # stores are ISOLATED (v1→lupin_db_v1baseline, v2→lupin_db_test) so no cross-arm warming.
+            # Clean-start is still guarded by assert_paired_isolation (rowcount==0 at START); F3 only
+            # caught the self-warming false positive. Disabling it forgoes a clean cold-start SECONDARY
+            # number, never the gated warm-Δ.
+            assert_cold=False,
         )
     finally:
         listener.stop()
@@ -230,6 +240,11 @@ def _run_v2_arm( *, corpus, seed, n_per_command, base_url ):   # pragma: no cove
     result = v2_eval.main( argv=[
         "--corpus", corpus, "--seed", str( seed ), "--n-per-command", str( n_per_command ),
         "--base-url", base_url, "--passes", "2",
+        # --allow-warm-cold: SAME ruling as the v1 arm's assert_cold=False (Tiberius, row d8d019f6).
+        # The similarity cache self-warms the cold pass; the Δ is warm-vs-warm and never reads cold;
+        # stores are isolated so no cross-arm warming; VALIDITY still guards clean-start. Keeps the arms
+        # SYMMETRIC — both skip the cold-start guard, so neither arm's cold-pass hit rate enters anything.
+        "--allow-warm-cold",
     ] )
     return { "metrics": result[ "warm" ], "provenance": result[ "provenance" ] }
 

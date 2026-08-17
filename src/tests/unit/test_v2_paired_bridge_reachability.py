@@ -240,3 +240,37 @@ def test_bridge_refuses_when_arms_measured_different_samples():
         with pytest.raises( AssertionError ) as exc:
             bridge.test_v2_paired_go_no_go_live()
         assert "provenance" in str( exc.value ).lower()
+
+
+# ---------------------------------------------------------------------------
+# Cold-start guard OFF on both arms — RULED by Tiberius 2026-08-17 (row d8d019f6).
+# F3 demands cache_hit_rate==0, but the snapshot manager's SIMILARITY cache self-warms
+# within the cold pass (deterministic 0.0126 over 300 UNIQUE utterances, identical across
+# a full :7997 restart). The Δ is warm-vs-warm and never reads the cold pass; stores are
+# isolated (no cross-arm warming); VALIDITY still guards clean-start. Both arms skip the
+# guard SYMMETRICALLY. These assert the flags are actually threaded — RED if dropped.
+# ---------------------------------------------------------------------------
+def test_v1_arm_threads_assert_cold_false():
+    import v1_eval_arm
+    listener = MagicMock()
+    spy = MagicMock( return_value={ "warm": {}, "provenance": {} } )
+    with patch.dict( os.environ, { "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL": "t@e.com" } ), \
+         patch.object( v1_eval_arm, "load_v1_class_to_command", return_value=( {}, [] ) ), \
+         patch.object( v1_eval_arm, "make_ws_recv_events", return_value=( listener, MagicMock() ) ), \
+         patch.object( v1_eval_arm, "_default_push_fn", return_value=MagicMock() ), \
+         patch.object( v1_eval_arm, "_default_collect_fn", return_value=MagicMock() ), \
+         patch.object( v1_eval_arm, "run_v1_baseline", spy ):
+        bridge._run_v1_arm( corpus="simple", seed=1024, n_per_command=60, base_url="http://stub:7997" )
+    _args, kwargs = spy.call_args
+    assert kwargs.get( "assert_cold" ) is False   # RED if dropped -> defaults True -> F3 re-arms
+    listener.stop.assert_called_once()
+
+
+def test_v2_arm_passes_allow_warm_cold():
+    import v2_eval
+    spy = MagicMock( return_value={ "warm": {}, "provenance": {} } )
+    with patch.object( v2_eval, "main", spy ):
+        bridge._run_v2_arm( corpus="simple", seed=1024, n_per_command=60, base_url="http://stub:8000" )
+    _args, kwargs = spy.call_args
+    argv = kwargs.get( "argv" ) if kwargs.get( "argv" ) is not None else ( _args[ 0 ] if _args else [] )
+    assert "--allow-warm-cold" in argv            # RED if dropped -> v2 cold-start guard re-arms
