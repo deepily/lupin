@@ -156,7 +156,7 @@ def _cli_module_returncode( module, timeout=60 ):
 # initial-detection guards waived. Each reason carries evidence (the call site).
 INITIAL_DETECTION_EXEMPTIONS = {
     "agent router go to test fix expediter": {
-        "surfaces": [ "prompt", "card" ],   # TRAINED today (does NOT waive 1c); OFF the card (waives card)
+        "surfaces": [ "prompt", "training", "card" ],   # NOT listed, NOT trained (e5a840c9 executed), OFF the card
         "reason":
             "START is SYSTEM-triggered by the test-suite completion watchdog "
             "(test_suite_completion_watchdog.py:259) with a non-speakable "
@@ -165,13 +165,14 @@ INITIAL_DETECTION_EXEMPTIONS = {
             "(todo_fifo_queue.py:1026), so _confirm_agentic_routing:1058 never offers it as a "
             "'Switch to this instead' alternative — correct, because completing a START run needs "
             "a pasted source_test_suite_job_id that no card alternative supplies. Hence it waives 'card'. "
-            "RESIDUAL is BOUNDED by the prompt absence: a live A/B probe shows router emission "
-            "is gated on the PROMPT LINE, not training presence — 0/5 emitted when unlisted vs "
-            "5/5 when listed (src/rnd/v0.2.0/2026.08.15-router-emission-probe.md); the earlier "
-            "6/10 invention rate did NOT reproduce. START is absent from the template, so "
-            "exempting it holds the emission risk at the low, prompt-gated end — it reduces "
-            "the chance materially, not merely nominally. Follow-up to drop the still-present "
-            "training key at next retrain: store row e5a840c9.",
+            "It now ALSO waives 'training': row e5a840c9 (folded into the 95924f2d step-4 corpus "
+            "single-sourcing) DROPPED the START key from agent-router-agentic-commands.json, so the "
+            "corpus no longer trains it — the removal of its training examples is the point, not a "
+            "side effect. A live A/B probe confirms emission is gated on the PROMPT LINE, not "
+            "training presence — 0/5 emitted when unlisted vs 5/5 when listed "
+            "(src/rnd/v0.2.0/2026.08.15-router-emission-probe.md); the earlier 6/10 invention rate "
+            "did NOT reproduce. START is now absent from BOTH the template and the corpus, holding "
+            "the emission risk at the low, prompt-gated end.",
     },
     "agent router go to bug fix expediter": {
         "surfaces": [ "prompt", "training" ],   # NOT router-emittable (waives prompt+training); ON the card (no card waiver)
@@ -436,11 +437,14 @@ class TestInitialDetectionExemptionFacility( unittest.TestCase ):
 
     def test_prompt_only_surface_cannot_silence_the_training_guard( self ):
         # Rachel's control — the proof the `surfaces` field is load-bearing, not
-        # decoration. START waives ONLY "prompt", so it is invisible to 1c; BFE waives
-        # both. And a synthetic ["prompt"]-only exemption on an owned-not-trained
-        # command clears 1a's shape but leaves 1c's shape RED.
+        # decoration. The load-bearing proof is the SYNTHETIC ["prompt"]-only
+        # exemption below: it clears 1a's shape but leaves 1c's shape RED, so a
+        # prompt waiver cannot silence the training guard. (START no longer serves as
+        # that example — e5a840c9 dropped its training key, so it now legitimately
+        # waives 'training' too; the real surfaces of the live exemptions are checked
+        # here, and the synthetic case carries the invariant.)
         self.assertIn(    "agent router go to test fix expediter", _exempt_on( "prompt" ) )
-        self.assertNotIn( "agent router go to test fix expediter", _exempt_on( "training" ) )
+        self.assertIn(    "agent router go to test fix expediter", _exempt_on( "training" ) )   # e5a840c9: no longer trained
         self.assertIn(    "agent router go to bug fix expediter",  _exempt_on( "prompt" ) )
         self.assertIn(    "agent router go to bug fix expediter",  _exempt_on( "training" ) )
         # card surface is load-bearing too: START is OFF the card so it waives 'card';

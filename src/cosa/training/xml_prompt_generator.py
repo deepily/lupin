@@ -226,22 +226,27 @@ class XmlPromptGenerator:
     
     def _compile_agent_router_commands( self ) -> str:
         """
-        Compiles compound, simple, and agentic agent router commands into XML format.
+        Compile the router command MENU that every training instruction interpolates.
+
+        Single-sourced from the v2 registry (2026.08.16 single-source design §2.4):
+        the menu is exactly the speakable commands the served router prompt lists, so
+        the training menu and the served prompt cannot disagree by construction — the
+        18-vs-19 drift this row exists to end. The three agent-router JSONs REMAIN the
+        source of the example phrasings (row generation, §5.3); they no longer define
+        WHICH commands exist. `speakable_commands()` fails loud if its order tuple and
+        the registry ever disagree, so a stale menu cannot pass silently.
 
         Requires:
-            - agent_router_compound_commands initialized
-            - agent_router_simple_commands initialized
-            - agent_router_agentic_commands initialized
+            - cosa.rest.v2.router_prompt_generator.speakable_commands is importable
 
         Ensures:
-            - Returns XML formatted commands
-            - Combines compound, simple, and agentic commands
+            - Returns the 8-space-indented <command> lines for speakable_commands(),
+              in served order, matching the sibling builders' interpolation format
         """
-        compound_categories = "".join( [ "        <command>" + command + "</command>\n" for command in self.agent_router_compound_commands.keys() ] )
-        simple_categories   = "".join( [ "        <command>" + command + "</command>\n" for command in self.agent_router_simple_commands.keys() ] )
-        agentic_categories  = "".join( [ "        <command>" + command + "</command>\n" for command in self.agent_router_agentic_commands.keys() ] )
-
-        return ( compound_categories + simple_categories + agentic_categories ).strip()
+        from cosa.rest.v2.router_prompt_generator import speakable_commands
+        return "".join(
+            [ "        <command>" + command + "</command>\n" for command in speakable_commands() ]
+        ).strip()
     
     def _init_common_templates( self ) -> None:
         """
