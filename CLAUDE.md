@@ -100,20 +100,31 @@ Migration candidates (tracked in TODO.md): the three ratified bounded-CC migrati
 
 Max-plan usage has rolling-window limits. Batch bounded jobs running during Rick's interactive peak window can throttle his real Claude Code work.
 
-- **Peak (avoid scheduling here)**: 9 PM – 12 AM EDT
-- **Optimal (schedule batch work here)**: 12 AM – 9 AM EDT (Rick asleep, zero interactive use)
-- **Acceptable**: 9 AM – 9 PM EDT (some interactive use but well below peak)
+⚠️ **CORRECTED 2026-08-17 (Rick's ruling, row `f0b3f630`). The old window pointed at hours the box is powered OFF.** It read "Optimal: 12 AM – 9 AM EDT (Rick asleep, zero interactive use)" — true about Rick, false about the machine. Measured boot history, unbroken since Aug 5: the host is **DOWN ~10:53 PM – 7:17 AM**. Every seat that followed the rule correctly still had its job sit dead until the next boot and drain hours late — two jobs scheduled for 00:30 and 01:15 ran at ~10:07 the next morning.
 
-**Rule**: any non-interactive bounded job (batch generation, scheduled regression sweeps, podcast/presentation/research) MUST set `scheduled_at` to the post-midnight window via `/api/claude-code/submit` (field defined at `src/cosa/rest/routers/claude_code_queue.py:49`). User-clicked synchronous bounded jobs are exempt.
+**The constraint is the box, not just Rick's sleep:**
+
+| Window (EDT) | Verdict | Why |
+|---|---|---|
+| ~10:53 PM – 7:17 AM | ☠️ **DEAD — never schedule here** | Host is powered off. The job does not run late, it does not run at all until boot. |
+| 9 PM – 10:53 PM | ❌ Peak — avoid | Rick's interactive window; competes with his real work. |
+| **7:30 AM – 10 AM** | ✅ **OPTIMAL — schedule batch work here** | Box is up, Rick is barely on. The only window that is both awake and quiet. |
+| 10 AM – 9 PM | 🟡 Acceptable | Box up, some interactive use, well below peak. |
+
+**Rule**: any non-interactive bounded job (batch generation, scheduled regression sweeps, podcast/presentation/research) MUST set `scheduled_at` inside a window the box is UP for — **prefer 7:30–10 AM EDT** — via `/api/claude-code/submit` (field defined at `src/cosa/rest/routers/claude_code_queue.py:49`). User-clicked synchronous bounded jobs are exempt.
+
+**If a job does land in the dead window**, the catch-up is no longer silent: `job_persistence.py` emits a `[CJ-CATCHUP-LATE]` line naming `scheduled_at` vs actual and hours-late (`fef78ce3`, with a negative control at `f0b7c589` proving it stays quiet on every non-catch-up path). A late drain is now visible rather than reported as a normal run — but visible-and-late is still late.
 
 Example:
 ```json
 {
   "prompt"       : "…",
   "task_type"    : "BOUNDED",
-  "scheduled_at" : "2026-05-13T02:30:00-04:00"
+  "scheduled_at" : "2026-05-13T08:00:00-04:00"
 }
 ```
+
+(This example used to read `02:30` — inside the dead window. A copied example is how a bad window propagates faster than the prose that describes it.)
 
 **Mandate for new design**: any proposal for a new LLM-driven feature MUST first answer "can this be a bounded CC job?" and document the answer. If "no", document which guardrail it hits.
 
