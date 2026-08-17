@@ -184,14 +184,33 @@ def persona_chain_csv( persona_preference ) -> Optional[ str ]:
         - Never raises
 
     Examples:
-        "Rio"                      → "Rio"
-        "Rio, Krishna ,*"          → "Rio, Krishna ,*"   (server-side parser strips)
-        [ "Rio", "Krishna", "*" ]  → "Rio,Krishna,*"
-        [] / None / "   " / 42     → None
+        "Rio"                       → "Rio"
+        "Rio, Krishna ,*"           → "Rio, Krishna ,*"   (server-side parser strips)
+        [ "Rio", "Krishna", "*" ]   → "Rio,Krishna,*"
+        '["Rio", "Krishna", "*"]'   → "Rio,Krishna,*"     (JSON-array STRING, row e071e834)
+        [] / None / "   " / 42      → None
     """
     if isinstance( persona_preference, str ):
         stripped = persona_preference.strip()
-        return stripped if stripped else None
+        if not stripped:
+            return None
+        # PRODUCER NORMALIZE (row e071e834, fix part 2 — defense in depth). A caller
+        # that passes a STRINGIFIED list (json.dumps(list) → '["Rio","Krishna","*"]')
+        # must NOT be forwarded verbatim: downstream that JSON-array string mangles in
+        # parse_persona_chain and kills the `*` wildcard (→ 409 → nameless seat). Part 1
+        # made the parser tolerate the JSON form; this normalizes it at the SOURCE so
+        # the parser is not the only line of defense. If the string parses as a JSON
+        # list, emit clean CSV exactly like a real list input; a non-JSON string is the
+        # intended bare-CSV form and passes through unchanged.
+        if stripped.startswith( "[" ):
+            try:
+                decoded = json.loads( stripped )
+            except ( ValueError, TypeError ):
+                decoded = None
+            if isinstance( decoded, list ):
+                items = [ item.strip() for item in decoded if isinstance( item, str ) and item.strip() ]
+                return ",".join( items ) if items else None
+        return stripped
     if isinstance( persona_preference, list ):
         items = [ item.strip() for item in persona_preference if isinstance( item, str ) and item.strip() ]
         return ",".join( items ) if items else None

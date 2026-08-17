@@ -134,6 +134,33 @@ class TestPersonaChainCsv:
         assert persona_chain_csv( 42 )      is None
         assert persona_chain_csv( { "x": 1 } ) is None
 
+    # ── JSON-array-string normalization (row e071e834, fix part 2) ────────────
+    # A caller that passed persona_preference as json.dumps(list) sent a STRINGIFIED
+    # list; forwarding it verbatim let the JSON-array string mangle downstream in
+    # parse_persona_chain and kill the `*` wildcard (→ 409 → nameless seat). The
+    # producer now emits clean CSV for that form, so the parser is not the only line.
+    def test_json_array_string_normalized_to_csv( self ):
+        # THE bug shape at the SOURCE: without this it returned the string verbatim.
+        assert persona_chain_csv( '["Rio", "Krishna", "*"]' ) == "Rio,Krishna,*"
+
+    def test_json_array_string_single_element( self ):
+        assert persona_chain_csv( '["Tiberius"]' ) == "Tiberius"
+
+    def test_json_array_string_skips_non_str_and_empty( self ):
+        assert persona_chain_csv( '["Rio", 42, null, "", "*"]' ) == "Rio,*"
+
+    def test_json_array_string_all_invalid_returns_none( self ):
+        assert persona_chain_csv( '[42, null]' ) is None
+
+    def test_malformed_bracket_string_passes_through_verbatim( self ):
+        # Starts with '[' but is NOT valid JSON → the intended verbatim passthrough,
+        # not a crash. (Part 1's parser handles whatever this becomes downstream.)
+        assert persona_chain_csv( "[not-valid-json" ) == "[not-valid-json"
+
+    def test_bare_csv_string_unchanged_after_normalization( self ):
+        # No regression: a non-'[' string is the intended CSV form, verbatim.
+        assert persona_chain_csv( "Rio, Krishna ,*" ) == "Rio, Krishna ,*"
+
 
 # ── build_spawn_argv ──────────────────────────────────────────────────────────
 
