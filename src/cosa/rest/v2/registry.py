@@ -85,6 +85,7 @@ class AgentSpec:
     cli_module    : Optional[ str ]   = None                  # None ⇒ API-invoked (test_suite)
     cli_style     : Optional[ str ]   = None                  # "package" | "module" — documentation only (§6)
     arg_spec      : Optional[ ArgSpec ] = None                # the expeditor's carrier, §5.1.1
+    speakable     : bool              = False                 # belongs in the router prompt — RATIFIED (§2.1a), NOT derived from the template (trap 3)
 
     @property
     def required_args( self ) -> tuple[ str, ... ]:
@@ -116,13 +117,13 @@ class AgentSpec:
 # a v2 bug. The executor calls spec.factory with the shared 11-kwarg signature and
 # the BARE question for every agent (v2 drops MathAgent's salutation quirk, risk 10).
 _CONVERSATIONAL = (
-    AgentSpec( "agent router go to math",       MathAgent,        aliases=( "math", ) ),
-    AgentSpec( "agent router go to calculator", CalculatorAgent,  aliases=( "calculator", ) ),
-    AgentSpec( "agent router go to datetime",   DateAndTimeAgent, aliases=( "datetime", ) ),
-    AgentSpec( "agent router go to todo",       TodoListAgent,    aliases=( "todo", "todo list" ) ),
-    AgentSpec( "agent router go to calendar",   CalendaringAgent, aliases=( "calendar", ) ),
+    AgentSpec( "agent router go to math",       MathAgent,        aliases=( "math", ),             speakable=True ),
+    AgentSpec( "agent router go to calculator", CalculatorAgent,  aliases=( "calculator", ),       speakable=True ),
+    AgentSpec( "agent router go to datetime",   DateAndTimeAgent, aliases=( "datetime", ),         speakable=True ),
+    AgentSpec( "agent router go to todo",       TodoListAgent,    aliases=( "todo", "todo list" ), speakable=True ),
+    AgentSpec( "agent router go to calendar",   CalendaringAgent, aliases=( "calendar", ),         speakable=True ),
     AgentSpec( "agent router go to weather",    WeatherAgent,
-               aliases=( "weather", ), snapshotable=False, _required_args=( "location", ) ),
+               aliases=( "weather", ), snapshotable=False, _required_args=( "location", ), speakable=True ),
 )
 
 
@@ -152,7 +153,33 @@ def _agentic_spec( command, entry ):
         cli_module = cli_module,
         cli_style  = cli_style,
         arg_spec   = ArgSpec.from_entry( entry ),
+        speakable  = command in _SPEAKABLE_AGENTIC,
     )
+
+
+# ── The RATIFIED speakable-agentic set (§2.1a) ────────────────────────────────
+# `speakable` can be neither GENERATED (trap 3 forbids deriving it from today's
+# template) nor TESTED (no oracle proves which commands a person should be able to
+# say out loud — that is a human design judgement). So it is a RATIFIED, checked-in
+# decision, and the generator's pin proves NO DRIFT, never correctness.
+#
+# The nine below are voice-reachable agentic commands. The THREE agentic commands
+# held OUT are held out for a stated REASON, not by omission — set `speakable` from
+# the reason, so the prompt file must agree with this list, never the reverse:
+#   • "agent router go to bug fix expediter"  — card-reachable only; never an initial voice detection
+#   • "agent router go to test fix expediter" — START, system-triggered; its job-id arg is not speakable
+#   • "agent router go to heartbeat poker"    — system/programmatic; no production voice dispatch path
+_SPEAKABLE_AGENTIC = frozenset( {
+    "agent router go to deep research",
+    "agent router go to podcast generator",
+    "agent router go to research to podcast",
+    "agent router go to presentation generator",
+    "agent router go to research to presentation",
+    "agent router go to claude code",
+    "agent router go to swe team",
+    "agent router go to test fix expediter resume",   # voice-reachable (phase 3)
+    "agent router go to test suite",                  # voice-reachable — ruling B, completion (phase 3)
+} )
 
 
 # ── The agentic set — now OWNED by the registry (§5.1) ────────────────────────
@@ -174,11 +201,11 @@ _AGENTIC = tuple( _agentic_spec( command, entry ) for command, entry in JOB_ARG_
 # no-command outcome. None of the three is an agent, so factory stays None and
 # resolve() returns None for all of them (unchanged, §4).
 _CONTROL = (
-    AgentSpec( "agent router go to automatic", cls=CommandClass.CONTROL ),
+    AgentSpec( "agent router go to automatic", cls=CommandClass.CONTROL, speakable=True ),
 )
 _NONE = (
-    AgentSpec( "agent router go to receptionist", cls=CommandClass.NONE ),
-    AgentSpec( "none",                            cls=CommandClass.NONE ),
+    AgentSpec( "agent router go to receptionist", cls=CommandClass.NONE, speakable=True ),
+    AgentSpec( "none",                            cls=CommandClass.NONE, speakable=True ),
 )
 
 
@@ -235,32 +262,15 @@ JOB_COMMANDS         = { c: s for c, s in REGISTRY.items() if s.cls is CommandCl
 CONTROL_COMMANDS     = frozenset( c for c, s in REGISTRY.items() if s.cls is CommandClass.CONTROL )
 NO_MATCH = frozenset( c for c, s in REGISTRY.items() if s.cls is CommandClass.NONE )
 
-# ── SPEAKABLE_JOBS — a deliberate BOUNDED INTERIM, retired in phase 2 ───────
-# The §9 drift guard (test_v2_registry.py:59) imports this name and asserts
+# ── SPEAKABLE_JOBS — now DERIVED from the `speakable` field (§2.1, 2026.08.16) ──
+# Was a hand-kept frozenset of 9 that had to equal JOB_COMMANDS ∩ template. The
+# hand-kept LIST is gone: this is a PROJECTION of the ratified `speakable` field
+# (_SPEAKABLE_AGENTIC), the template-emittable agentic subset. The §9 drift guard
+# (test_v2_registry.py:59) still imports this name and asserts
 #   template == ANSWER_COMMANDS ∪ SPEAKABLE_JOBS ∪ CONTROL_COMMANDS ∪ NO_MATCH.
-# SPEAKABLE_JOBS is the template-EMITTABLE agentic subset (9), NOT the full
-# agentic set (12): the owned agentic commands absent from the router template —
-# `bug fix expediter` (card-reachable, never an initial detection), `test fix
-# expediter` (START, system-triggered, EXEMPT — non-speakable job-id arg), and
-# `heartbeat poker` (system/programmatic, no production dispatch path today) —
-# cannot sit in a bucket the guard equates with the template. `test fix expediter
-# resume` joined the template in phase 3 (voice-reachable); `test suite` joined it in
-# phase 3 by ruling B (completion). Deriving from cls alone would make it the 12 and
-# break the guard; it is therefore kept as an explicit set here.
-# `test_deferred_is_template_emittable_agentic_subset` pins it to
-# JOB_COMMANDS ∩ template so it cannot silently drift from the owned set.
-# Phase 2 retires this name when the drift guard is rewritten class-aware.
-SPEAKABLE_JOBS = frozenset( {
-    "agent router go to deep research",
-    "agent router go to podcast generator",
-    "agent router go to research to podcast",
-    "agent router go to presentation generator",
-    "agent router go to research to presentation",
-    "agent router go to claude code",
-    "agent router go to swe team",
-    "agent router go to test fix expediter resume",   # phase 3: voice-reachable, now router-listed
-    "agent router go to test suite",                  # phase 3: ruling B — router-listed (completion)
-} )
+# Phase 2 retires the NAME when that guard is rewritten class-aware; there is no
+# longer a second definition to drift from the owned set.
+SPEAKABLE_JOBS = frozenset( c for c, s in JOB_COMMANDS.items() if s.speakable )
 
 
 def resolve( command ):
