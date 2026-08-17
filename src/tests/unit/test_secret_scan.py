@@ -178,6 +178,39 @@ def test_hook_reads_added_line_numbers_from_the_diff():
     assert added[ "README.md" ]    == { 11, 12 }
 
 
+def test_a_detector_change_forces_a_full_rescan():
+    """
+    The trigger a calendar cannot cover (Mr Radio, 2026-08-17).
+
+    The pre-commit gate only ever sees ADDED lines, so nothing in it can find a secret
+    already sitting in the tree. A full re-scan is what finds those, and the moment it
+    pays most is a DETECTOR IMPROVEMENT: on 2026-08-17 one word-boundary fix made every
+    SCREAMING_SNAKE secret visible for the first time, two of them live at the public
+    tip. A weekly cadence would have sat on them for up to six more days.
+
+    So the detector is pinned to the last full scan run with it. Change the scanner and
+    this goes red until somebody re-scans and records what they found.
+    """
+    import hashlib
+    import json
+
+    scanner = cu.get_project_root() + "/src/scripts/secret_scan.py"
+    record  = cu.get_project_root() + "/src/tests/unit/fixtures/secret_scan_last_full_scan.json"
+
+    actual   = hashlib.sha256( open( scanner, "rb" ).read() ).hexdigest()
+    recorded = json.load( open( record ) )
+
+    assert actual == recorded[ "detector_sha256" ], (
+        "THE DETECTOR CHANGED SINCE THE LAST FULL SCAN.\n"
+        "A better detector sees things the old one could not, and the gate cannot find them "
+        "because it only reads added lines. Re-scan, triage, and record the result:\n"
+        f"  {chr(10).join( '  ' + step for step in recorded[ '_how_to_clear_the_red' ] )}\n"
+        f"  last full scan: {recorded[ 'scanned_at' ]} against {recorded[ 'scanned_ref' ]} "
+        f"({recorded[ 'distinct_values_at_tip' ]} distinct values, {recorded[ 'real_findings' ]} real)\n"
+        f"  new detector sha256: {actual}"
+    )
+
+
 def test_findings_never_carry_the_value():
     """A report that quotes the secret has spread it. Masked output is part of the contract."""
     secret   = "Xq7vNb2Rt9zLm4w"
