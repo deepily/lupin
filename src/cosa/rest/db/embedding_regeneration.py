@@ -51,6 +51,7 @@ addressed at all.
 
 Run (from repo root, PYTHONPATH=src):
     python -m cosa.rest.db.embedding_regeneration plan
+    python -m cosa.rest.db.embedding_regeneration ensure-columns --apply
     python -m cosa.rest.db.embedding_regeneration plan --table-prefix=regen_probe.
     python -m cosa.rest.db.embedding_regeneration fill --table-prefix=regen_probe. --limit=500
     python -m cosa.rest.db.embedding_regeneration verify --table-prefix=regen_probe.
@@ -795,6 +796,52 @@ def _swap( session, spec, prefix="", apply=False ):   # pragma: no cover - live 
     return 0
 
 
+def shadow_column_ddl( specs=None, prefix="" ) -> List[str]:
+    """
+    Build the ADD COLUMN statements for every spec's shadow column.
+
+    The `fill` step writes into shadow columns that nothing in this module used to
+    create — the DDL was simply never written, so the first live fill died on
+    `column "input_embedding_regen" does not exist` (2026-08-17). Generating the
+    statements from REGEN_SPECS keeps them from drifting: add a spec and its column
+    is created, with no second list to remember.
+
+    IF NOT EXISTS makes the result safe to apply repeatedly, which matters because
+    a resumed run should not have to know whether an earlier attempt got this far.
+
+    Requires:
+        - specs is a list of RegenSpec, or None for REGEN_SPECS
+        - prefix is a table-name prefix, "" for the live tables
+
+    Ensures:
+        - returns one statement per spec, in spec order
+        - every statement is a nullable ADD COLUMN IF NOT EXISTS at EMBEDDING_DIM
+        - no statement carries a DEFAULT — that is what keeps it metadata-only
+    """
+    return [
+        f"ALTER TABLE {qualify( spec.table, prefix )} "
+        f"ADD COLUMN IF NOT EXISTS {spec.shadow_column} vector({EMBEDDING_DIM})"
+        for spec in ( REGEN_SPECS if specs is None else specs )
+    ]
+
+
+def _ensure_columns( session, specs, prefix="", apply=False ):   # pragma: no cover - live DB boundary
+    """Create the shadow columns the fill writes into. Dry-run unless --apply."""
+    from sqlalchemy import text as sql_text
+
+    statements = shadow_column_ddl( specs, prefix )
+    if not apply:
+        for statement in statements:
+            print( f"  [DRY-RUN] {statement}" )
+        return 0
+
+    for statement in statements:
+        session.execute( sql_text( statement ) )
+        print( f"  applied: {statement}" )
+    session.commit()
+    return 0
+
+
 def _run( command="plan", prefix="", apply=False, force=False, limit=None,
           batch_size=DEFAULT_BATCH_SIZE, char_budget=DEFAULT_CHAR_BUDGET,
           only=None ):   # pragma: no cover - CLI/DB/HTTP boundary
@@ -815,6 +862,9 @@ def _run( command="plan", prefix="", apply=False, force=False, limit=None,
         if command == "plan":
             _plan( session, prefix )
             return 0
+
+        if command == "ensure-columns":
+            return _ensure_columns( session, specs, prefix, apply )
 
         if command == "verify":
             return 0 if all( _verify( session, spec, prefix )[ "ok" ] for spec in specs ) else 1
@@ -848,7 +898,7 @@ def _run( command="plan", prefix="", apply=False, force=False, limit=None,
         if command == "swap":
             return max( _swap( session, spec, prefix, apply ) for spec in specs )
 
-    print( f"unknown command {command!r}; valid: plan / fill / verify / swap" )
+    print( f"unknown command {command!r}; valid: plan / ensure-columns / fill / verify / swap" )
     return 1
 
 

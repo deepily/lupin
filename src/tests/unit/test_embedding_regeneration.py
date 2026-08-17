@@ -565,6 +565,57 @@ class TestUnreachableServerIsNotABatchSizeProblem:
 
 
 # --------------------------------------------------------------------------- #
+# shadow_column_ddl — the step that did not exist.
+#
+# fill wrote into three columns that nothing created. The first live fill died on
+# `column "input_embedding_regen" does not exist` (2026-08-17). Generating the DDL
+# from REGEN_SPECS means adding a spec cannot leave its column uncreated.
+# --------------------------------------------------------------------------- #
+class TestShadowColumnDdl:
+
+    def test_one_statement_per_spec_in_spec_order( self ):
+        from cosa.rest.db.embedding_regeneration import shadow_column_ddl, REGEN_SPECS
+        statements = shadow_column_ddl()
+        assert len( statements ) == len( REGEN_SPECS )
+        for statement, spec in zip( statements, REGEN_SPECS ):
+            assert spec.shadow_column in statement
+            assert spec.table in statement
+
+    def test_every_shadow_column_in_the_specs_is_covered( self ):
+        # The anti-drift property: no spec may be silently missing its DDL.
+        from cosa.rest.db.embedding_regeneration import shadow_column_ddl, REGEN_SPECS
+        blob = " ".join( shadow_column_ddl() )
+        for spec in REGEN_SPECS:
+            assert spec.shadow_column in blob, f"{spec.label} has no DDL"
+
+    def test_statements_are_idempotent_and_carry_the_right_dimension( self ):
+        from cosa.rest.db.embedding_regeneration import shadow_column_ddl, EMBEDDING_DIM
+        for statement in shadow_column_ddl():
+            assert "ADD COLUMN IF NOT EXISTS" in statement
+            assert f"vector({EMBEDDING_DIM})" in statement
+
+    def test_no_default_clause_so_the_add_stays_metadata_only( self ):
+        # A DEFAULT would force Postgres to rewrite a 351,000-row table. The absence
+        # of that keyword is the whole reason this is safe to run on a live table.
+        from cosa.rest.db.embedding_regeneration import shadow_column_ddl
+        for statement in shadow_column_ddl():
+            assert "DEFAULT" not in statement.upper()
+
+    def test_the_prefix_reaches_the_ddl_so_a_clone_can_be_built( self ):
+        from cosa.rest.db.embedding_regeneration import shadow_column_ddl
+        for statement in shadow_column_ddl( prefix="regen_probe." ):
+            assert "regen_probe." in statement
+
+    def test_a_narrowed_spec_list_produces_only_its_own_ddl( self ):
+        from cosa.rest.db.embedding_regeneration import shadow_column_ddl, REGEN_SPECS
+        one = [ REGEN_SPECS[ 0 ] ]
+        statements = shadow_column_ddl( one )
+        assert len( statements ) == 1
+        assert REGEN_SPECS[ 0 ].shadow_column in statements[ 0 ]
+        assert REGEN_SPECS[ 1 ].shadow_column not in statements[ 0 ]
+
+
+# --------------------------------------------------------------------------- #
 # AdaptiveBudget — the answer to "we can unload the other models first".
 #
 # DEFAULT_CHAR_BUDGET was calibrated on a GPU with 23 MiB free, because a
