@@ -468,11 +468,29 @@ services:
       # filtered to TFE_/BFE_/LUPIN_TEST_ (attestation.py:27) and would drop
       # this var silently. host.docker.internal resolves via extra_hosts host-gateway.
       LUPIN_V1_ARM_BASE_URL: http://host.docker.internal:7997
-      # v2 paired-eval sample size (row d8d019f6). Design default is 60, but the full
-      # n=60 run (v1+v2, 2 passes each ≈ 1200 real calls, ~2h) far exceeds the test-suite
-      # integration timeout (2000s, job.py:84) and gets SIGTERM'd mid-flight. n=10 fits the
-      # budget (~200 calls, ~20min) and still yields a genuine median-Δ verdict (50 samples/pass).
-      # TEMPORARY run param for the overnight paired run — revert to design default afterward.
+      # v2 paired-eval sample size (row d8d019f6). n=60 is the design default AND what the
+      # closing run uses. The integration timeout was raised to match it: job.py:84 is now
+      # 30000s, and its own note measures n=60 ≈ 4.8h (v1 ~6.7s/push + v2 ~22s/call,
+      # ≈ 1200 real calls) ⇒ ~288s per unit of n.
+      #
+      # The comment that used to sit here argued for n=10 against a 2000s timeout while this
+      # line carried 60, and both of its numbers are now stale (row d7691334). Its "n=10 fits
+      # in ~20min" estimate was also optimistic — at the measured ~288s/unit, n=10 is ~48min
+      # and would have overrun the old 2000s budget too. Kept as MEASURED, not as argued.
+      #
+      # 🔴 The value below and the timeout in job.py:84 are COUPLED — reverting one without the
+      #    other schedules a run that dies mid-flight. The line beneath binds them, and
+      #    test_paired_n_fits_integration_timeout.py fails if either drifts.
+      # CONFIRMED 2026-08-17: n=60 fits integration timeout 30000s
+      #
+      # ⚠️ TEST SERVICE ONLY. Deliberately absent from lupin-rest-dev — the paired eval is a
+      #    :8000 monopolize-mode suite. See the "LUPIN_PAIRED_N" dev-dev exemption in
+      #    src/tests/unit/deploy/test_compose_service_parity.py.
+      # ⚠️ ENV RESOLVES AT CONTAINER **CREATE**. `docker restart` silently keeps the OLD value,
+      #    so editing this line changes nothing on its own. Apply with
+      #      docker compose up -d --force-recreate lupin-rest-test
+      #    and PROVE it with
+      #      docker exec lupin-rest-test printenv LUPIN_PAIRED_N
       LUPIN_PAIRED_N: "60"
     deploy:
       resources:
