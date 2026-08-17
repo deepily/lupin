@@ -160,6 +160,57 @@ def test_a_non_utf8_file_BLOCKS( tmp_path ):
     assert is_credential_file( str( path ) )
 
 
+SA_KEY_NO_PEM = {
+    "type"           : "service_account",
+    "project_id"     : "some-project",
+    "private_key_id" : "0123456789abcdef",
+    # base64 body with NO PEM header — so the PEM branch cannot do the work here.
+    "private_key"    : "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQ",
+    "client_email"   : "svc@some-project.iam.gserviceaccount.com",
+}
+
+
+@pytest.mark.parametrize( "payload,label", [
+    ( ADC_USER_CREDENTIAL, "ADC user credential" ),
+    ( SA_KEY_NO_PEM,       "service-account key with no PEM header" ),
+    ( SERVICE_ACCOUNT_KEY, "service-account key with a PEM header" ),
+] )
+def test_a_BOM_prefixed_credential_BLOCKS( tmp_path, payload, label ):
+    """
+    THE BYPASS I INTRODUCED, found by Tiffany. A UTF-8 byte-order mark read under
+    encoding="utf-8" arrives as a literal \\ufeff, and it is NOT whitespace — so
+    `lstrip()` leaves it. That defeated both branches at once: json.loads raised on
+    the leading mark, and the `startswith("{")` narrowing I added for the prose
+    false-positive then concluded "this is prose, serve it".
+
+    MEASURED before the fix: the first two payloads here were SERVED. The third
+    blocked anyway, because its PEM header fires before any parsing — which is
+    exactly why the hole hid, and why the table now covers the no-PEM shapes.
+    """
+    path = tmp_path / "creds.json"
+    path.write_text( json.dumps( payload ), encoding="utf-8-sig" )
+
+    assert path.read_bytes().startswith( b"\xef\xbb\xbf" ), "fixture must actually carry a BOM"
+    assert is_credential_file( str( path ) ), f"BOM-prefixed {label} was SERVED"
+
+
+def test_a_BOM_does_not_start_a_false_positive( tmp_path ):
+    """Stripping the BOM must not make ordinary BOM'd documents look like keys."""
+    path = tmp_path / "notes.md"
+    path.write_text( "# Notes\n\nOrdinary document.\n", encoding="utf-8-sig" )
+    assert not is_credential_file( str( path ) )
+
+
+@pytest.mark.parametrize( "lead", [ "", " ", "\n", "\t", "\r\n  ", "﻿", "﻿\n  " ] )
+def test_leading_whitespace_and_marks_do_not_smuggle_a_credential( lead ):
+    """
+    The narrowing keys on the opening brace, so anything that can sit BEFORE that
+    brace is a candidate bypass. Whitespace was already handled by lstrip(); the BOM
+    was not, and is the one that got through.
+    """
+    assert _prefix_looks_like_credential( lead + json.dumps( ADC_USER_CREDENTIAL ) )
+
+
 def test_a_truncated_key_still_BLOCKS():
     """
     The bounded read must not become an escape hatch: a key larger than the sniff

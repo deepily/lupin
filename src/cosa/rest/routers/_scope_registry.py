@@ -288,6 +288,19 @@ def _prefix_looks_like_credential( prefix: str ) -> bool:
     if not prefix:
         return False
 
+    # 🔴 STRIP THE BOM BEFORE ANYTHING LOOKS AT THE TEXT. A UTF-8 byte-order mark
+    # read under encoding="utf-8" arrives as a literal ﻿ character, and it is
+    # NOT whitespace — `"﻿".isspace()` is False — so `lstrip()` leaves it in
+    # place. That defeated BOTH branches at once: `json.loads` raised on the leading
+    # mark, and the `startswith("{")` narrowing then said "this is prose, serve it".
+    #
+    # MEASURED before the fix: a BOM-prefixed ADC credential (refresh_token +
+    # client_secret) and a service-account key whose private_key carries no PEM
+    # header were both SERVED. The PEM shape still blocked, which is why this hid —
+    # the fixture that would have caught it had a PEM header doing the work.
+    # (Found by Tiffany on review of my own brace narrowing, which introduced it.)
+    prefix = prefix.lstrip( "﻿" )
+
     # PEM first: decisive, needs no parsing, catches a key pasted into any wrapper.
     if _PEM_PRIVATE_KEY.search( prefix ):
         return True
