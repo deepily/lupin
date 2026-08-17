@@ -143,8 +143,25 @@ def test_decision_event_sender_accepted_proceeds_to_shadow():
     assert r.stats[ "decisions_shadowed" ] == 1
 
 
+def test_empty_allowlist_rejects_every_sender_fail_closed():
+    # 960a4ec9 Option C: fail-closed. An empty allowlist means "trust no one", so
+    # the default sender is rejected at the gate and nothing downstream runs. Goes
+    # RED under the old fail-open guard (empty list => check skipped => shadowed==1).
+    #
+    # This is NOT a hypothetical state: __main__._load_swe_profile's `except
+    # ImportError` arm leaves accepted_senders empty (and domain_strategy None), so
+    # a profile-import failure lands a live Responder in exactly this shape. This
+    # test is that reachable path.
+    r = _responder()                                # empty allowlist (the default)
+    r.submit_response = MagicMock( return_value=True )
+    _run( r._handle_decision_event( _event() ) )    # sender "s@x"
+    assert r.stats[ "sender_rejected" ] == 1
+    assert r.stats[ "decisions_shadowed" ] == 0
+    r.submit_response.assert_not_called()           # rejected at the gate → nothing acts
+
+
 def test_decision_event_dry_run_yes_no_sends_no():
-    r = _responder( dry_run=True )
+    r = _responder( dry_run=True, accepted_senders=[ "s@x" ] )
     r.submit_response = MagicMock( return_value=True )
     _run( r._handle_decision_event( _event( response_type="yes_no" ) ) )
     r.submit_response.assert_called_once_with( "nid-1", "no" )
@@ -152,20 +169,20 @@ def test_decision_event_dry_run_yes_no_sends_no():
 
 
 def test_decision_event_dry_run_non_yes_no_sends_cancel():
-    r = _responder( dry_run=True )
+    r = _responder( dry_run=True, accepted_senders=[ "s@x" ] )
     r.submit_response = MagicMock( return_value=True )
     _run( r._handle_decision_event( _event( response_type="text" ) ) )
     r.submit_response.assert_called_once_with( "nid-1", "cancel" )
 
 
 def test_decision_event_no_strategy_shadows_quiet():
-    r = _responder()
+    r = _responder( accepted_senders=[ "s@x" ] )
     _run( r._handle_decision_event( _event() ) )
     assert r.stats[ "decisions_shadowed" ] == 1
 
 
 def test_decision_event_no_strategy_shadows_debug( capsys ):
-    r = _responder( debug=True )
+    r = _responder( debug=True, accepted_senders=[ "s@x" ] )
     _run( r._handle_decision_event( _event() ) )
     assert "No strategy loaded" in capsys.readouterr().out
 
@@ -174,6 +191,9 @@ def test_decision_event_no_strategy_shadows_debug( capsys ):
 # _handle_decision_event — strategy actions
 # ============================================================================
 def _with_strategy( result, **kwargs ):
+    # Fail-closed sender gate (960a4ec9 C): a responder that should PROCEED must
+    # allow the default _event() sender, or it is rejected before the strategy runs.
+    kwargs.setdefault( "accepted_senders", [ "s@x" ] )
     r = _responder( **kwargs )
     ds = MagicMock()
     ds.evaluate.return_value = result
@@ -265,14 +285,14 @@ def test_decision_event_unknown_action_falls_through():
 # notification extraction variants
 # ----------------------------------------------------------------------------
 def test_decision_event_nested_notification_payload():
-    r = _responder()
+    r = _responder( accepted_senders=[ "s@x" ] )
     _run( r._handle_decision_event( { "notification": _event() } ) )
     assert r.stats[ "decisions_shadowed" ] == 1     # reached no-strategy shadow → id resolved
 
 
 def test_decision_event_notification_id_falls_back_to_id_field():
-    r = _responder()
-    payload = { "response_requested": True, "id": "by-id", "message": "?" }
+    r = _responder( accepted_senders=[ "s@x" ] )
+    payload = { "response_requested": True, "id": "by-id", "message": "?", "sender_id": "s@x" }
     _run( r._handle_decision_event( payload ) )
     assert r.stats[ "decisions_shadowed" ] == 1     # `id` used as notification_id
 
@@ -506,7 +526,7 @@ def test_print_stats_outputs_all_counters( capsys ):
 # The contrast test proves the guard is not simply blocking everything.
 # ============================================================================
 def _act_responder( enabled, dry_run=False ):
-    r = _responder( enabled=enabled, dry_run=dry_run )
+    r = _responder( enabled=enabled, dry_run=dry_run, accepted_senders=[ "s@x" ] )
     r.submit_response = MagicMock( return_value=True )
     strategy = MagicMock()
     strategy.evaluate = MagicMock( return_value=_result( action="act", value="yes" ) )
