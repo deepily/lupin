@@ -536,3 +536,80 @@ class TestFalsifiability( unittest.TestCase ):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# THE JSONs CANNOT INVENT A COMMAND — row 95924f2d step 4, cheap version.
+#
+# The MENU is already single-sourced: XmlPromptGenerator._compile_agent_router_commands
+# reads speakable_commands(), and no JSON can move it — measured by deletion, drop one
+# from the registry oracle and the menu goes 18 to 17; add one to a JSON and it does
+# not move.
+#
+# The JSONs still decide WHICH commands get rows, though: xml_coordinator iterates
+# their keys and formats each row's ANSWER with the key it is on. So a key the registry
+# has never heard of yields rows teaching a command the menu inside those same rows
+# never offers, and the LoRA learns both halves. The guard below makes that impossible
+# to build rather than possible to detect.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _generator():
+    import cosa.utils.util as cu
+    from cosa.training.xml_prompt_generator import XmlPromptGenerator
+    return XmlPromptGenerator( path_prefix=cu.get_project_root() )
+
+
+def test_the_training_jsons_name_only_commands_the_registry_lists():
+    """The state today: every agent-router JSON key is a registered command."""
+    from cosa.rest.v2.registry import REGISTRY
+
+    generator = _generator()
+    json_commands = (
+        set( generator.agent_router_compound_commands )
+        | set( generator.agent_router_simple_commands )
+        | set( generator.agent_router_agentic_commands )
+    )
+
+    assert json_commands, "fixture check — the JSONs must actually have loaded"
+    assert not ( json_commands - set( REGISTRY ) )
+
+
+def test_a_json_key_the_registry_does_not_list_REFUSES_THE_BUILD():
+    """
+    THE FALSIFICATION, same shape as step 3's: invent a command in a JSON and the
+    build must refuse rather than quietly emit rows for it. Proven here rather than
+    described, because a guard nobody has watched fail is a comment with a green tick.
+    """
+    import pytest
+    from unittest.mock import patch
+    from cosa.training.xml_prompt_generator import XmlPromptGenerator
+
+    with patch.object( XmlPromptGenerator, "_get_simple_agent_router_commands",
+                       lambda self: { "agent router go to invented": "x.txt" } ):
+        with pytest.raises( ValueError ) as caught:
+            _generator()
+
+    message = str( caught.value )
+    assert "agent router go to invented" in message
+    assert "registry" in message.lower()
+
+
+def test_a_REGISTERED_but_non_speakable_command_is_still_allowed():
+    """
+    ⚠️ THE EXEMPTION, and the reason the oracle is the whole registry rather than
+    speakable_commands(). The expediters are system-triggered: deliberately in the
+    registry, deliberately out of the router prompt. Checking against the speakable
+    set would flag a documented exemption as drift, which is how a guard teaches
+    people to ignore it.
+    """
+    from unittest.mock import patch
+    from cosa.rest.v2.registry import REGISTRY
+    from cosa.rest.v2.router_prompt_generator import speakable_commands
+    from cosa.training.xml_prompt_generator import XmlPromptGenerator
+
+    exempt = sorted( set( REGISTRY ) - set( speakable_commands() ) )
+    assert exempt, "fixture check — this test is meaningless if nothing is exempt"
+
+    with patch.object( XmlPromptGenerator, "_get_simple_agent_router_commands",
+                       lambda self: { exempt[ 0 ]: "x.txt" } ):
+        _generator()        # must not raise
