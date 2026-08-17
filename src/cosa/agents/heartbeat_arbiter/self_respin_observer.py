@@ -74,6 +74,34 @@ DEFAULT_GRACE_SECONDS = 120
 # job is not yet done. Only RETURNED + older-than-TTL is swept.
 DEFAULT_RETURNED_TTL_SECONDS = 900
 
+# ── Self-respin sample INSTRUMENT (row 39c88ee7, Krishna 2026-08-16) ──────────
+# A no-alarm recorder. Cheech + Mr Radio ruled instrument-over-detect: a
+# self-respin gate would have rested on the UNMEASURED claim "a partial
+# compaction can't reach a fresh-respin baseline." Rather than ship a gate nobody
+# can justify, RECORD the raw magnitudes on every in-flight respin and DECIDE
+# NOTHING — this file cannot be wrong because it classifies nothing new. It exists
+# so the SETTLE DISTRIBUTION (which no single snapshot can give) and the
+# compaction-vs-clear magnitude question can be answered from real data weeks
+# later. A gate, if the data ever justifies one, is a NEW row with this
+# distribution attached as its evidence.
+RESPIN_SAMPLES_FILENAME = "self-respin-samples.jsonl"
+
+# SCHEMA VERSION stamped on every line (Cheech's requirement). The whole value of
+# this file is being read later by someone deciding whether a gate is justified; a
+# field added without a marker would make the early samples silently
+# non-comparable. Bump this whenever the sample dict shape changes.
+RESPIN_SAMPLE_SCHEMA_VERSION = 1
+
+# RETENTION (Cheech's requirement): a per-tick per-marker append-only log on a
+# shared box grows without bound. Bound it by SINGLE-FILE ROTATION at a size cap —
+# BEFORE a write that would push the live file past the cap it is renamed to
+# `<name>.1` (overwriting any prior `.1`) and a fresh file is started. Checking
+# before (not after) the write keeps each file <= the cap for a batch <= the cap,
+# so the live file plus `.1` together stay UNDER 2× the cap; the OLDEST samples
+# (the previous `.1`) are the ones dropped. Cost is a stat + a rename per overflow,
+# never a full rewrite. At ~200 B/line a 5 MB cap holds ~25k samples/file.
+RESPIN_SAMPLES_MAX_BYTES = 5_000_000
+
 
 class SelfRespinVerdict( str, Enum ):
     PENDING           = "PENDING"            # in flight; inside the window, not yet a proven return
@@ -426,6 +454,25 @@ def read_wake_proof( base, session_id ):
     return ( nonce, proof_at )
 
 
+def _pressure_by_id( section ):
+    """
+    Index a context_pressure section's persona records by session_id.
+
+    Ensures:
+        - returns { session_id: record } for every dict record under
+          section["personas"] that carries a truthy session_id
+        - returns {} for a None/non-dict section or a missing/non-dict personas map
+        - never raises
+    """
+    personas = section.get( "personas" ) if isinstance( section, dict ) else None
+    by_id    = {}
+    if isinstance( personas, dict ):
+        for record in personas.values():
+            if isinstance( record, dict ) and record.get( "session_id" ):
+                by_id[ record[ "session_id" ] ] = record
+    return by_id
+
+
 # ---------------------------------------------------------------------------
 # Fleet helper — glob markers, fetch pressure, match by session_id, classify
 # ---------------------------------------------------------------------------
@@ -459,12 +506,7 @@ def observe_fleet_self_respin( *, base_dir=None, now=None, fetch_pressure=None )
 
     base     = _resolve_base_dir( base_dir )
     section  = fetch_pressure() or {}
-    personas = section.get( "personas" ) if isinstance( section, dict ) else None
-    by_id    = {}
-    if isinstance( personas, dict ):
-        for record in personas.values():
-            if isinstance( record, dict ) and record.get( "session_id" ):
-                by_id[ record[ "session_id" ] ] = record
+    by_id    = _pressure_by_id( section )
 
     def _classify( m ):
         nonce, proof_at = read_wake_proof( base, m.get( "session_id" ) )
@@ -555,12 +597,7 @@ def sweep_returned_markers( *, base_dir=None, now=None, fetch_pressure=None,
 
     base     = _resolve_base_dir( base_dir )
     section  = fetch_pressure() or {}
-    personas = section.get( "personas" ) if isinstance( section, dict ) else None
-    by_id    = {}
-    if isinstance( personas, dict ):
-        for record in personas.values():
-            if isinstance( record, dict ) and record.get( "session_id" ):
-                by_id[ record[ "session_id" ] ] = record
+    by_id    = _pressure_by_id( section )
 
     swept = []
     for path, marker in pairs:
@@ -583,6 +620,134 @@ def sweep_returned_markers( *, base_dir=None, now=None, fetch_pressure=None,
             _best_effort_unlink( wake_proof_path( base, marker.get( "session_id" ) ) )
             swept.append( marker.get( "session_id" ) )
     return swept
+
+
+# ---------------------------------------------------------------------------
+# The INSTRUMENT — record raw magnitudes on every in-flight respin, decide nothing
+# (row 39c88ee7). Pure builder + collector + best-effort appender, so the whole
+# path is unit-provable with fakes and NOTHING here emits an alarm or changes a
+# verdict. classify_marker is reused READ-ONLY, only to stamp the observed verdict
+# alongside the magnitudes — the recording never feeds back into classification.
+# ---------------------------------------------------------------------------
+def build_respin_sample( marker, pressure_record, assessment, now ):
+    """
+    Build ONE no-alarm sample row for an in-flight self-respin marker.
+
+    Requires:
+        - marker is a parsed marker dict; assessment is its SelfRespinAssessment
+        - pressure_record is the matched context_pressure record, or None
+        - now is an aware datetime
+
+    Ensures:
+        - returns a JSON-serializable dict carrying schema_version, the marker's
+          pre_clear_status/pre_clear_pct, the CURRENT consumption_pct_of_window
+          (post_settle_pct — None when the record is absent or the field is
+          non-numeric), elapsed_s since fired_at (None when fired_at is
+          missing/naive/unparseable), and the observed verdict
+        - decides NOTHING and emits NOTHING — pure construction
+        - never raises
+    """
+    fired_at = _parse_iso( marker.get( "fired_at" ) )
+    elapsed  = ( now - fired_at ).total_seconds() if fired_at is not None else None
+    post_pct = pressure_record.get( "consumption_pct_of_window" ) if isinstance( pressure_record, dict ) else None
+    if not isinstance( post_pct, ( int, float ) ):
+        post_pct = None
+    return {
+        "schema_version"   : RESPIN_SAMPLE_SCHEMA_VERSION,
+        "recorded_at"      : now.isoformat(),
+        "session_id"       : marker.get( "session_id" ),
+        "persona"          : marker.get( "persona" ),
+        "pre_clear_status" : marker.get( "pre_clear_status" ),
+        "pre_clear_pct"    : marker.get( "pre_clear_pct" ),
+        "post_settle_pct"  : post_pct,
+        "elapsed_s"        : elapsed,
+        "verdict"          : assessment.verdict.value,
+    }
+
+
+def collect_respin_samples( *, base_dir=None, now=None, fetch_pressure=None ):
+    """
+    Build one no-alarm sample per in-flight self-respin marker for THIS tick.
+
+    Mirrors observe_fleet_self_respin's glob + fetch + match, but instead of
+    returning verdicts it returns the raw sample rows (schema-versioned). Reuses
+    classify_marker READ-ONLY to stamp the observed verdict beside the magnitudes.
+
+    Requires / Ensures: same seams as observe_fleet_self_respin (all injectable);
+    returns list[ sample_dict ] (one per marker), [] when no markers exist, and
+    records with a None pressure record when the fetch is unreachable. Never raises
+    on a single bad marker.
+    """
+    if now is None:
+        now = datetime.datetime.now( datetime.timezone.utc )
+    if fetch_pressure is None:
+        fetch_pressure = _fetch_live_pressure
+
+    markers = read_markers( base_dir )
+    if not markers:
+        return []
+
+    base    = _resolve_base_dir( base_dir )
+    by_id   = _pressure_by_id( fetch_pressure() or {} )
+
+    def _sample( m ):
+        record          = by_id.get( m.get( "session_id" ) )
+        nonce, proof_at = read_wake_proof( base, m.get( "session_id" ) )
+        assessment      = classify_marker(
+            m, record, now=now, wake_proof_nonce=nonce, wake_proof_at=proof_at,
+        )
+        return build_respin_sample( m, record, assessment, now )
+
+    return [ _sample( m ) for m in markers ]
+
+
+def append_respin_samples( samples, base_dir=None ):
+    """
+    Append no-alarm sample rows to the JSONL instrument, with size-capped rotation.
+
+    Requires:
+        - samples is a list of JSON-serializable dicts (build_respin_sample shape)
+        - base_dir is a directory path or None (None ⇒ fleet_data_root())
+
+    Ensures:
+        - appends one JSON line per sample to <base>/RESPIN_SAMPLES_FILENAME
+        - RETENTION: rotation happens BEFORE a write that WOULD push the live file
+          past RESPIN_SAMPLES_MAX_BYTES — the live file is renamed to `<file>.1`
+          (os.replace, overwriting any prior `.1`) and a fresh file started. Because
+          the cap is checked before (not after) the write, each file stays <= the
+          cap for any batch <= the cap, so `<file>` + `<file>.1` together stay UNDER
+          2× the cap, and the OLDEST samples (the previous `.1`) are the ones
+          dropped. Stat + rename per overflow; never a full rewrite.
+        - a serialization failure writes NOTHING and returns 0 (the batch is
+          serialized up front, before any file is touched)
+        - returns the number of lines successfully written
+        - best-effort: an OSError mid-write returns the count so far; NEVER raises
+          (this rides the observer tick)
+    """
+    if not samples:
+        return 0
+    base = _resolve_base_dir( base_dir )
+    path = os.path.join( base, RESPIN_SAMPLES_FILENAME )
+    # Serialize the whole batch FIRST — a non-serializable sample fails cleanly
+    # (write nothing) instead of leaving a partial line, and it lets the rotation
+    # decision size the incoming payload exactly.
+    try:
+        lines = [ json.dumps( s ) + "\n" for s in samples ]
+    except ( TypeError, ValueError ):
+        return 0
+    payload_bytes = len( "".join( lines ).encode( "utf-8" ) )
+    written = 0
+    try:
+        current_size = os.path.getsize( path ) if os.path.exists( path ) else 0
+        if current_size > 0 and current_size + payload_bytes > RESPIN_SAMPLES_MAX_BYTES:
+            os.replace( path, path + ".1" )   # rotate: overwrite prior .1, drop the oldest
+        with open( path, "a" ) as f:
+            for line in lines:
+                f.write( line )
+                written += 1
+    except OSError:
+        return written
+    return written
 
 
 def _fetch_live_pressure():   # pragma: no cover - live HTTP boundary, exercised via injected fetch in tests
@@ -735,6 +900,36 @@ class SelfRespinObserverLoop:
         self._advised &= live
         return { "enabled": True, "alarms": alarms, "advised": advised, "swept": swept }
 
+    def record_once( self ) -> dict:
+        """
+        Record ONE no-alarm instrument pass (row 39c88ee7): append this tick's
+        respin samples to the JSONL. This is the WHOLE deliverable of the
+        instrument row — it emits NOTHING, changes no verdict, and fires no
+        advisory; it only captures the raw magnitudes (pre_clear_pct, post-settle
+        pct, elapsed, verdict) for later calibration. Kept SEPARATE from sweep_once
+        precisely so the recorder can never perturb the alarm/sweep path.
+
+        Ensures:
+            - flag OFF ⇒ no IO; returns { "enabled": False, "recorded": 0 }
+            - flag ON  ⇒ collect + append; returns { "enabled": True,
+              "recorded": <lines written> }
+            - never raises (collector/appender already swallow per-tick errors; a
+              total failure is demoted to a zero count so the daemon survives)
+        """
+        if not self._enabled():
+            return { "enabled": False, "recorded": 0 }
+        try:
+            recorded = append_respin_samples(
+                collect_respin_samples(
+                    base_dir=self._base_dir, now=self._now_fn(),
+                    fetch_pressure=self._fetch_pressure_fn ),
+                base_dir=self._base_dir,
+            )
+        except Exception as e:                         # instrument invariant: never kill the daemon
+            self._log_skip( f"self-respin sample recording error (continuing): {e!r}" )
+            return { "enabled": True, "recorded": 0 }
+        return { "enabled": True, "recorded": recorded }
+
     def _emit_advisory( self, assessment ) -> None:
         """
         Compose + fire the ONE operator advisory for an alarming marker.
@@ -767,6 +962,7 @@ class SelfRespinObserverLoop:
         while not self._stop_event.is_set():
             try:
                 self.sweep_once()
+                self.record_once()   # no-alarm instrument (row 39c88ee7) — capture only
             except Exception as e:
                 self._log_skip( f"self-respin observer loop caught exception (continuing): {e!r}" )
             self._stop_event.wait( timeout=self._tick_seconds() )
