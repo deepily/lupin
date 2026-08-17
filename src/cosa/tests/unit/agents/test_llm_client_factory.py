@@ -378,3 +378,120 @@ def test_agentwrapper_run_reraises_quietly_when_no_debug( monkeypatch, capsys ):
     with pytest.raises( ValueError, match="boom" ):
         w.run( "hi" )
     assert "Error in AgentWrapper.run" not in capsys.readouterr().out
+
+
+# =========================================================================== #
+# google-genai (Vertex) vendor dispatch — row 3405f0b2
+# =========================================================================== #
+class _StubGenai:
+    """Record-only stand-in for GeminiVertexClient (no ADC / genai import)."""
+    instances = []
+    def __init__( self, **kwargs ):
+        self.kwargs = kwargs
+        _StubGenai.instances.append( self )
+
+
+def test_google_genai_dispatches_to_gemini_vertex_client( make_factory, monkeypatch ):
+    """A `google-genai:` descriptor routes to GeminiVertexClient — the new genai
+    shape — not ChatClient / CompletionClient."""
+    _StubGenai.instances = []
+    monkeypatch.setattr( factory_mod, "GeminiVertexClient", _StubGenai )
+    f = make_factory()                                       # no exists keys -> vendor path
+    client = f.get_client( "google-genai:gemini-3.1-flash-lite" )
+    assert isinstance( client, _StubGenai )
+    assert not isinstance( client, ( _StubChat, _StubCompletion ) )
+    assert _StubGenai.instances[ 0 ].kwargs[ "model_name" ] == "gemini-3.1-flash-lite"
+
+
+def test_google_genai_touches_no_api_key_env( make_factory, monkeypatch ):
+    """This vendor carries NO env_var, so the path must neither read nor write any
+    API-key env var (ADC only) — the two-env-var google-gla pattern (7f361ccf) is
+    structurally impossible here."""
+    monkeypatch.setattr( factory_mod, "GeminiVertexClient", _StubGenai )
+    monkeypatch.delenv( "GOOGLE_API_KEY", raising=False )
+    monkeypatch.delenv( "GEMINI_API_KEY", raising=False )
+    f = make_factory()
+    f.get_client( "google-genai:gemini-3.1-flash-lite" )
+    assert "GOOGLE_API_KEY" not in os.environ
+    assert "GEMINI_API_KEY" not in os.environ
+
+
+def test_google_genai_vendor_entry_is_adc_only( make_factory ):
+    """The vendor entry is ADC-only by construction: client_type genai, no env_var."""
+    f = make_factory()
+    entry = f.VENDOR_CONFIG[ "google-genai" ]
+    assert entry[ "client_type" ] == "genai"
+    assert "env_var" not in entry
+
+
+# =========================================================================== #
+# vertex:// CONFIG-KEY reachability — row 3405f0b2 (the silent-wrong-client fix)
+# =========================================================================== #
+# The tutor names its model by a CONFIG KEY (llm spec key for dm tutor rewrite =
+# dm_tutor/phi_4). get_client() takes the exists->config path for such a key and
+# NEVER consults VENDOR_CONFIG, so the google-genai vendor entry alone is
+# unreachable via that route — a config spec would silently build a ChatClient and
+# the study would run on the wrong client without knowing. The vertex:// prefix arm
+# (an elif BEFORE the ChatClient else; the else is untouched) closes that.
+import cosa.agents.gemini_vertex_client as gvc_mod
+from cosa.agents.gemini_vertex_client import GeminiVertexClient
+
+
+def test_vertex_config_key_reaches_gemini_client( make_factory, monkeypatch ):
+    """get_client on a CONFIG KEY whose value is vertex://<location>@<model_id>
+    returns a GeminiVertexClient — NOT a silently-substituted ChatClient."""
+    monkeypatch.setattr( gvc_mod, "resolve_gcp_project_id", lambda *a, **k: "test-proj" )
+    f = make_factory(
+        exists_keys = [ "dm_tutor/flash_lite" ],
+        values      = {
+            "dm_tutor/flash_lite"        : "vertex://global@gemini-3.1-flash-lite",
+            "dm_tutor/flash_lite_params" : {},
+        },
+    )
+    client = f.get_client( "dm_tutor/flash_lite" )
+    assert isinstance( client, GeminiVertexClient )          # the fix: reachable
+    assert not isinstance( client, _StubChat )               # and NOT a silent ChatClient
+    assert client.model_name == "gemini-3.1-flash-lite"
+    assert client.location   == "global"                     # location is recorded, not defaulted
+
+
+def test_vertex_spec_without_location_fails_loud( make_factory, monkeypatch ):
+    """A vertex:// spec missing the <location>@ segment RAISES — the paired study
+    must record where each arm ran, so this never defaults silently."""
+    monkeypatch.setattr( gvc_mod, "resolve_gcp_project_id", lambda *a, **k: "test-proj" )
+    f = make_factory(
+        exists_keys = [ "no_loc" ],
+        values      = { "no_loc": "vertex://gemini-3.1-flash-lite", "no_loc_params": {} },
+    )
+    with pytest.raises( ValueError ):
+        f.get_client( "no_loc" )
+
+
+def test_non_vertex_config_spec_still_returns_chat( make_factory ):
+    """The ChatClient else is untouched: an ordinary config spec still builds a chat client."""
+    f = make_factory(
+        exists_keys = [ "plain" ],
+        values      = { "plain": "gpt-4o", "plain_params": {} },
+    )
+    assert isinstance( f.get_client( "plain" ), _StubChat )
+
+
+# =========================================================================== #
+# client_type dispatch: unknown EXPLICIT value fails loud — row 3405f0b2 adjacent
+# =========================================================================== #
+def test_unknown_explicit_client_type_raises( make_factory, monkeypatch ):
+    """A vendor entry with an EXPLICIT unknown client_type RAISES rather than silently
+    returning a ChatClient — a typo'd/future-unwired type must not become a wrong client."""
+    f = make_factory()
+    monkeypatch.setitem( f.VENDOR_CONFIG, "bogusvendor", { "client_type": "bogus" } )
+    with pytest.raises( ValueError, match="Unknown client_type" ):
+        f.get_client( "bogusvendor:some-model" )
+
+
+def test_omitted_client_type_still_defaults_to_chat( make_factory, monkeypatch ):
+    """An OMITTED client_type still defaults to 'chat' → ChatClient — the default is
+    preserved; only an explicit unknown value fails loud."""
+    f = make_factory()
+    # groq, minus its explicit client_type key: omitted -> config.get default 'chat'.
+    monkeypatch.setitem( f.VENDOR_CONFIG, "groq", { "env_var": "GROQ_API_KEY", "key_name": "groq" } )
+    assert isinstance( f.get_client( "groq:llama-x" ), _StubChat )

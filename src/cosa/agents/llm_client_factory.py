@@ -11,6 +11,7 @@ import cosa.utils.util as du
 from cosa.agents.llm_client import LlmClient
 from cosa.agents.chat_client import ChatClient
 from cosa.agents.completion_client import CompletionClient
+from cosa.agents.gemini_vertex_client import GeminiVertexClient
 from cosa.agents.base_llm_client import LlmClientInterface
 from cosa.config.configuration_manager import ConfigurationManager
 
@@ -209,6 +210,34 @@ class LlmClientFactory:
                         verbose=self.verbose,
                         **model_params
                     )
+            elif model_spec.startswith( "vertex://" ):
+                # row 3405f0b2 — a CONFIG-KEY spec whose value is a Vertex descriptor
+                # must build the Vertex genai client, NOT fall through to the ChatClient
+                # else below. Without this arm, get_client( "dm_tutor/flash_lite" ) takes
+                # the exists->config path and silently returns a ChatClient, so the study
+                # would run on the wrong client and never say so. Mirrors the vllm://
+                # prefix scheme. Keeps the google-genai vendor entry too — that serves
+                # callers who pass a raw "google-genai:" descriptor instead of a config key.
+                #
+                # Format (Rachel-ratified): vertex://<location>@<model_id>, e.g.
+                # vertex://global@gemini-3.1-flash-lite. The LOCATION is REQUIRED — the
+                # paired study must record where each arm ran, so a spec that omits it
+                # fails LOUD here rather than defaulting silently. `project` still resolves
+                # fail-loud inside GeminiVertexClient (cosa.utils.gcp_project).
+                body = model_spec[ len( "vertex://" ): ]
+                if "@" not in body:
+                    raise ValueError(
+                        f"vertex:// spec must be 'vertex://<location>@<model_id>' "
+                        f"(location required so the study records where the arm ran); got '{model_spec}'"
+                    )
+                location, model_name = body.split( "@", 1 )
+                if self.debug: print( f"Creating GeminiVertexClient for vertex:// spec: location={location}, model={model_name}" )
+                return GeminiVertexClient(
+                    model_name = model_name,
+                    location   = location,
+                    debug      = self.debug,
+                    verbose    = self.verbose,
+                )
             else:
                 # Assume chat-based model (OpenAI, Groq, Google, etc.)
                 return ChatClient(
@@ -292,7 +321,16 @@ class LlmClientFactory:
         },
         "deepily"   : {
             "client_type": "completion",  # Default to completion for local models
-        }
+        },
+        # Vertex-hosted Gemini text via the google-genai SDK (ADC auth). Deliberately
+        # NO "env_var": Vertex mode uses Application Default Credentials, so there is
+        # no API key to resolve — which also makes the two-env-var google-gla pattern
+        # (bug 7f361ccf) structurally impossible for this vendor. client_type "genai"
+        # dispatches to GeminiVertexClient, a genuinely new client shape (not ChatClient
+        # /CompletionClient), which still implements LlmClientInterface.
+        "google-genai": {
+            "client_type": "genai",
+        },
     }
     
     class AgentWrapper:
@@ -489,7 +527,20 @@ class LlmClientFactory:
                 
         # Create client based on vendor configuration
         client_type = config.get( "client_type", "chat" )
-        
+
+        if client_type == "genai":
+            # Vertex-hosted Gemini text via the google-genai SDK. ADC auth — no api_key
+            # was resolved above (this vendor carries no env_var, so the api-key block
+            # is skipped). GeminiVertexClient resolves its own project (fail-loud) and
+            # location ("global") from cosa.utils.gcp_project. A genuinely new client
+            # shape, but it implements LlmClientInterface so callers are unaffected.
+            if debug: print( f"Creating GeminiVertexClient for model={model_name}" )
+            return GeminiVertexClient(
+                model_name = model_name,
+                debug      = debug,
+                verbose    = verbose,
+            )
+
         if client_type == "completion":
             # For vendors using completion API
             if debug: print( f"Creating CompletionClient with base_url={base_url}, model={model_name}" )
@@ -515,12 +566,12 @@ class LlmClientFactory:
                 verbose=verbose,
                 **self.CLIENT_DEFAULT_PARAMS
             )
-        else:
+        elif client_type == "chat":
             # For vendors using chat API
             full_model_string = f"{vendor}:{model_name}"
-            
+
             if debug: print( f"Creating ChatClient with model string: {full_model_string}" )
-            
+
             return ChatClient(
                 model_name=full_model_string,
                 api_key=api_key,
@@ -529,6 +580,18 @@ class LlmClientFactory:
                 debug=debug,
                 verbose=verbose,
                 **self.CLIENT_DEFAULT_PARAMS
+            )
+        else:
+            # An OMITTED client_type defaulted to "chat" above (config.get default), so
+            # reaching here means the vendor entry set an EXPLICIT unknown value. Fail
+            # loud rather than silently building a ChatClient — a typo'd or future-unwired
+            # client_type must not quietly produce a working-looking wrong client (row
+            # 3405f0b2 adjacent finding).
+            raise ValueError(
+                f"Unknown client_type '{client_type}' for vendor '{vendor_key}' — expected "
+                f"one of 'chat', 'completion', 'genai'. An omitted client_type defaults to "
+                f"'chat'; an explicit unknown value fails loud instead of silently building "
+                f"a ChatClient."
             )
 
 
