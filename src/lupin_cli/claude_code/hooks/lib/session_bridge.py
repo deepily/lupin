@@ -1905,7 +1905,48 @@ def prune_dead_persona_bridges():
     return pruned
 
 
-def find_active_sessions( stale_threshold_seconds: int = 43200, require_persona: bool = True ):
+def _append_stale_bridge( stale_out, path, mtime_age, pid_alive ):
+    """
+    Record an aged-out bridge in the caller's visibility bucket.
+
+    Requires:
+        - stale_out is a list the caller owns
+        - mtime_age is the bridge's age in seconds
+
+    Ensures:
+        - appends a dict naming the bridge, its age, whether its PID is alive, and
+          whether it was KEPT — so an exclusion is never invisible
+        - never raises; a bridge that cannot be read still gets an entry, because a
+          silently-dropped unreadable bridge is the same failure this bucket exists
+          to prevent
+
+    Raises:
+        - nothing
+    """
+    session_id = None
+    try:
+        with open( path ) as handle:
+            data       = json.load( handle )
+        session_id = data.get( "stable_session_id" ) or data.get( "session_id" )
+    except ( json.JSONDecodeError, OSError ):
+        pass
+
+    stale_out.append( {
+        "bridge"        : path.name,
+        "session_id"    : session_id,
+        "mtime_age_s"   : round( mtime_age, 1 ),
+        "mtime_age_h"   : round( mtime_age / 3600.0, 2 ),
+        "pid_alive"     : pid_alive,
+        # The whole point of the bucket: say which way it went.
+        "included"      : pid_alive,
+        "why"           : ( "bridge aged out but the PROCESS IS ALIVE — kept, because PID "
+                            "liveness outranks mtime (bug 6afc8b3e)" if pid_alive else
+                            "bridge aged out and liveness could not be confirmed — excluded" ),
+    } )
+
+
+def find_active_sessions( stale_threshold_seconds: int = 43200, require_persona: bool = True,
+                          stale_out=None ):
     """
     Scan all bridge files for live CC sessions, with an optional persona filter.
 
@@ -1937,16 +1978,36 @@ def find_active_sessions( stale_threshold_seconds: int = 43200, require_persona:
        skipped. Inside a container this check is bypassed because host PIDs
        are invisible from the container's PID namespace.
 
-    2. **mtime TTL** (both host and container) — bridges whose file mtime
-       is older than `stale_threshold_seconds` are skipped regardless of
-       context. Belt-and-suspenders against the residual case where the
+    2. **mtime TTL** (fallback ONLY) — bridges older than
+       `stale_threshold_seconds` are skipped **unless their PID is proven
+       alive**. Belt-and-suspenders against the residual case where the
        host-side prune at SessionStart didn't fire (e.g., server bounced
-       mid-day with no new sessions). The cc-notification-listener
-       heartbeat updates bridge mtime periodically, so an actively-used
-       session keeps its mtime fresh within this window.
+       mid-day with no new sessions), and the only liveness signal available
+       inside a container, where host PIDs are invisible.
 
-    A dead-PID OR stale-mtime bridge is treated as "free" — its slot is
-    implicitly reclaimed by being filtered out here.
+    🔴 **PID LIVENESS OUTRANKS mtime (bug 6afc8b3e).** This TTL used to apply
+    unconditionally, which silently deleted LIVE sessions from every roster:
+    a seat whose process was running but whose bridge had not been rewritten
+    in 12h was filtered out as dead and appeared in no bucket at all — not
+    `personas`, not `unnamed_seats`, not any count. Two real seats were
+    invisible for 14h+ while `ps` showed them up. The monitor exists to catch
+    the seat that has been alive longest, and that was the one seat it could
+    not see. The docstring claimed "the cc-notification-listener heartbeat
+    updates bridge mtime periodically"; those listeners were alive and the
+    mtime had not moved, so an IDLE-but-alive seat aged out — and an idle seat
+    still holds context and can be woken.
+
+    Raising the constant is the DIAGNOSTIC, not the fix — a bigger number only
+    moves the cliff.
+
+    A dead-PID bridge, or an aged-out bridge whose liveness cannot be
+    confirmed, is treated as "free" — its slot is implicitly reclaimed by
+    being filtered out here.
+
+    **`stale_out`** — pass a list to receive every aged-out bridge, INCLUDING
+    the ones that were kept, each entry saying which way it went and why.
+    Silent exclusion is the failure this bucket closes: a monitor that returns
+    fewer sessions than exist is a monitor that lies.
 
     See: src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md
          src/rnd/v0.1.8/2026.06.17-unified-task-store-followups-plan.md (L4 / d57dbfea)
@@ -1979,17 +2040,36 @@ def find_active_sessions( stale_threshold_seconds: int = 43200, require_persona:
         if "buffer" in path.name or "listener" in path.name:
             continue
 
+        pid_is_alive = False
         if trust_host_pids:
             file_pid = _extract_pid_from_filename( path.name )
             if file_pid is not None and not _is_pid_alive( file_pid ):
                 continue
+            pid_is_alive = file_pid is not None
 
         try:
             mtime_age = now - path.stat().st_mtime
-            if mtime_age > stale_threshold_seconds:
-                continue
         except OSError:
             continue
+
+        # 🔴 PID LIVENESS OUTRANKS mtime (bug 6afc8b3e, Rio). The mtime TTL used to run
+        # unconditionally, so a session whose PROCESS IS PROVEN ALIVE vanished from every
+        # roster once its bridge went 12h without a rewrite — and the monitor exists to
+        # catch exactly the long-lived seat that ages out. Two real seats were invisible
+        # for 14h+ while `ps` showed them running.
+        #
+        # Raising the constant is the DIAGNOSTIC, not the fix: a bigger number only moves
+        # the cliff. The TTL keeps its real job — bridges we CANNOT check, i.e. inside a
+        # container where host PIDs are invisible, or a filename carrying no PID.
+        if mtime_age > stale_threshold_seconds:
+            if not pid_is_alive:
+                if stale_out is not None:
+                    _append_stale_bridge( stale_out, path, mtime_age, pid_alive=False )
+                continue
+            # Alive but aged out: KEPT, and also surfaced so the anomaly is visible
+            # rather than merely survived.
+            if stale_out is not None:
+                _append_stale_bridge( stale_out, path, mtime_age, pid_alive=True )
 
         try:
             with open( path ) as f:
