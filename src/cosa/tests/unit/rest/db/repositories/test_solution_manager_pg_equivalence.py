@@ -1,21 +1,22 @@
 """
-RIDER-1 equivalence harness — SolutionSnapshotManager postgres backend on a REAL,
-disposable pgvector database (inherits the Lane-B conftest: db_session / pg_engine,
+RIDER-1 equivalence harness — PostgresSolutionManager on a REAL, disposable
+pgvector database (inherits the Lane-B conftest: db_session / pg_engine,
 honest-skip when no pgvector Postgres is reachable).
 
 WHAT THIS PROVES (v0.2.0 Lane C batch 3b, cache-BYPASS design):
-  In postgres mode the manager DELIBERATELY does NOT build the in-memory
-  _question_lookup / _id_lookup caches the LanceDB path used. This harness proves
-  the caller-visible cache-hit SEMANTICS survive that bypass:
+  This manager DELIBERATELY does NOT build the in-memory _question_lookup /
+  _id_lookup caches the older on-disk store needed — it has no such attributes at
+  all. This harness proves the caller-visible cache-hit SEMANTICS survive that
+  bypass:
 
-    1. initialize() builds NO caches (both lookups stay {}).
-    2. save_snapshot() persists WITHOUT populating any cache.
+    1. initialize() builds NO caches (neither lookup attribute exists).
+    2. save_snapshot() persists WITHOUT creating any cache.
     3. get_snapshot_by_id() round-trips a saved snapshot marshalled off REAL pgvector.
     4. get_snapshots_by_question() returns the SAME snapshot for the SAME question
        (top hit, ~100%) via the pgvector dot tier — the cache-hit equivalent —
-       while the caches stay empty throughout.
+       while no cache appears at any point.
 
-The unit-mock suite (test_lancedb_solution_manager.py TestPg*) owns branch coverage;
+The unit-mock suite (test_postgres_solution_manager.py) owns branch coverage;
 THIS file is the behavioral contract on real infrastructure.
 """
 
@@ -43,13 +44,10 @@ def _vec( *first ):
 
 def _make_pg_manager( db_session, monkeypatch ):
     """
-    Build a SolutionSnapshotManager flipped into postgres mode, with get_db routed to
-    the test's transactional db_session and QuestionEmbeddingsTable stubbed (no I/O).
+    Build a PostgresSolutionManager with get_db routed to the test's transactional
+    db_session and QuestionEmbeddingsTable stubbed (no I/O).
     """
-    from cosa.memory import lancedb_solution_manager as lsm
-
-    # Flip the backend flag the manager reads in __init__.
-    monkeypatch.setattr( lsm, "is_postgres_backend", lambda *a, **k: True )
+    from cosa.memory.postgres_solution_manager import PostgresSolutionManager
 
     # Route every `with get_db()` in the _pg_* helpers at the test session (no commit,
     # no close — the conftest fixture owns lifecycle and rolls back at teardown).
@@ -58,17 +56,14 @@ def _make_pg_manager( db_session, monkeypatch ):
         yield db_session
     monkeypatch.setattr( "cosa.rest.db.database.get_db", _fake_get_db )
 
-    # No db_path (decision 2b20a6d6): this fixture builds the POSTGRES manager, which
-    # honors no LanceDB location — passing one asserted a redirection that never
-    # existed, and resolve_lancedb_path now raises on it. `storage backend` is dropped
-    # with it; under postgres nothing consults it either.
+    # No storage location (decision 2b20a6d6): this backend honors none, and the
+    # table name is reporting-only because the ORM model fixes the real table.
     config = { "table_name": "solution_snapshots" }
-    with patch.object( lsm, "QuestionEmbeddingsTable" ):
-        mgr = lsm.SolutionSnapshotManager( config, debug=False )
+    with patch( "cosa.memory.question_embeddings_table.QuestionEmbeddingsTable" ):
+        mgr = PostgresSolutionManager( config, debug=False )
 
-    # Control: the postgres flip must actually have taken, and no path may survive.
-    assert mgr._use_postgres is True, "postgres flip failed — this fixture tests the wrong path"
-    assert mgr.db_path is None,       "a db_path survived on the postgres path"
+    # Control: no on-disk location may be advertised by this backend.
+    assert mgr.db_path is None, "a db_path survived on the postgres path"
     return mgr
 
 
@@ -84,12 +79,11 @@ def _snap( id_hash, question, embedding ):
 
 def test_initialize_builds_no_caches( db_session, monkeypatch ):
     mgr = _make_pg_manager( db_session, monkeypatch )
-    assert mgr._use_postgres is True
     mgr.initialize()
     assert mgr.is_initialized() is True
-    # BYPASS PROOF: no in-memory lookups built.
-    assert mgr._question_lookup == {}
-    assert mgr._id_lookup == {}
+    # BYPASS PROOF: no in-memory lookups exist to build.
+    assert not hasattr( mgr, "_question_lookup" )
+    assert not hasattr( mgr, "_id_lookup" )
 
 
 def test_save_does_not_populate_cache( db_session, monkeypatch ):
@@ -99,9 +93,9 @@ def test_save_does_not_populate_cache( db_session, monkeypatch ):
     assert mgr.save_snapshot( _snap( "hash_A", "What is A?", _vec( 1.0, 0.0 ) ) ) is True
     assert mgr.save_snapshot( _snap( "hash_B", "What is B?", _vec( 0.0, 1.0 ) ) ) is True
 
-    # Caches STILL empty after two saves — every lookup queries pgvector directly.
-    assert mgr._question_lookup == {}
-    assert mgr._id_lookup == {}
+    # STILL no caches after two saves — every lookup queries pgvector directly.
+    assert not hasattr( mgr, "_question_lookup" )
+    assert not hasattr( mgr, "_id_lookup" )
 
 
 def test_get_snapshot_by_id_round_trips( db_session, monkeypatch ):
@@ -139,5 +133,5 @@ def test_same_question_returns_same_snapshot_cache_free( db_session, monkeypatch
     assert top_pct == pytest.approx( 100.0, abs=0.5 )
 
     # BYPASS still holds after a query.
-    assert mgr._question_lookup == {}
-    assert mgr._id_lookup == {}
+    assert not hasattr( mgr, "_question_lookup" )
+    assert not hasattr( mgr, "_id_lookup" )

@@ -2,7 +2,7 @@
 Abstract interface for solution snapshot storage and retrieval systems.
 
 This module defines the contract that all solution snapshot managers must implement,
-enabling swappable backends (file-based, LanceDB, etc.) with identical APIs.
+enabling swappable backends (file-based, Postgres, etc.) with identical APIs.
 """
 
 from abc import ABC, abstractmethod
@@ -118,7 +118,7 @@ class SolutionSnapshotManagerInterface( ABC ):
     """
     Abstract interface for solution snapshot storage and retrieval.
     
-    This interface ensures both file-based and LanceDB implementations
+    This interface ensures the file-based and Postgres implementations
     are truly swappable with identical contracts and testable behaviors.
     
     All implementations must:
@@ -397,7 +397,7 @@ class SolutionSnapshotManagerInterface( ABC ):
             - Nothing
             
         Ensures:
-            - Returns descriptive name (e.g., "FileBased", "LanceDB")
+            - Returns descriptive name (e.g., "FileBased", "Postgres")
             - Used for logging and comparison reports
             
         Raises:

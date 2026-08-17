@@ -1,12 +1,10 @@
 """
 Two-tier question search — the Postgres/pgvector solution-snapshot lookup.
 
-THE PROPERLY-NAMED HOME (Rick's ruling 2026-08-15, decision row 29e98243): the
-Postgres two-tier lookup used to live inside a LanceDB-*named* file
-(`lancedb_solution_manager._pg_get_snapshots_by_question`) even though it touches
-no LanceDB. "LanceDB is out, do not use in any way shape or form" — so the lookup
-moves HERE, a module named for what it does, and the old name stays as a
-delegating shim. Reuse, not rebuild.
+THE PROPERLY-NAMED HOME (Rick's ruling 2026-08-15, decision row 29e98243): this
+Postgres two-tier lookup used to live inside a wrongly-named file, in a class
+named for a store it never touched. So the lookup moved HERE, to a module named
+for what it does. Reuse, not rebuild.
 
 WHAT LIVES HERE, AND WHY TWO SHAPES (not a duplication — a policy difference,
 ratified by Cheech 2026-08-15):
@@ -18,20 +16,17 @@ ratified by Cheech 2026-08-15):
         (R-C1: the replay signal is a tier-1 exact hit, never a float score).
         v2's V2Cache extends this with tagged write-back.
 
-    pg_hierarchical_search — the LanceDB manager's OWN two-tier lookup, lifted
+    pg_hierarchical_search — the snapshot manager's OWN two-tier lookup, lifted
         verbatim from `_pg_get_snapshots_by_question`. It has a DIFFERENT contract
         on purpose: it returns [(pct, snapshot)] tuples, auto-cleans ghost
-        synonyms (a WRITE), and queries the ANN tier with no SQL threshold. Its
-        old method delegates here so the manager keeps byte-for-byte behaviour.
+        synonyms (a WRITE), and queries the ANN tier with no SQL threshold. The
+        manager's method delegates here so it keeps byte-for-byte behaviour.
         Forcing both shapes through one core would smuggle a write into v2's read
         path — which is exactly why they stay two functions with one home.
 
-NO LANCEDB MODULE IN THIS MODULE'S IMPORT GRAPH: this file imports the Postgres
-repositories, the embedding provider, the normalizers, and SolutionSnapshot —
-never `cosa.memory.lancedb_solution_manager`. Importing SolutionSnapshot does pull
-the third-party `lancedb` PACKAGE (55 modules, unavoidable while snapshots have
-their current shape — Mr. Radio's measurement 2026-08-14), but the guard that
-protects v2 bans the MODULE, not the package. See tests/unit/test_v2_cache_no_lancedb.py.
+THIS MODULE'S IMPORT GRAPH: it imports the Postgres repositories, the embedding
+provider, the normalizers, and SolutionSnapshot — nothing else. The guard that
+protects v2 is in tests/unit/test_v2_cache_no_lancedb.py.
 
 Created: 2026-08-15 (CJ Flow v2 · row 29e98243 · Tiberius 👑)
 """
@@ -402,18 +397,18 @@ def pg_hierarchical_search( manager: Any,
                             limit: int = 7,
                             debug: bool = False ) -> List[Tuple[float, Any]]:
     """
-    Hierarchical question search against Postgres, MIRRORING the LanceDB hierarchy
-    minus the in-memory cache tier (cache bypass): Level 1 exact-verbatim -> Level 2
+    Hierarchical question search against Postgres, MIRRORING the manager's original
+    hierarchy minus the in-memory cache tier (cache bypass): Level 1 exact-verbatim -> Level 2
     exact-normalized (both via the already-postgres-routed canonical_synonyms) ->
     Level 4 pgvector dot similarity.
 
-    Lifted VERBATIM from SolutionSnapshotManager._pg_get_snapshots_by_question
-    (Rick's ruling 2026-08-15): the manager's own two-tier lookup, which WRITES
+    Lifted VERBATIM from the manager's `_pg_get_snapshots_by_question` (Rick's
+    ruling 2026-08-15): the manager's own two-tier lookup, which WRITES
     (auto-cleans ghost synonyms), returns [(pct, snapshot)] tuples, and queries
     the ANN tier with no SQL threshold — a deliberately different contract from
     TwoTierQuestionSearch's read-only, instrumented one. ``manager`` is the
-    SolutionSnapshotManager whose collaborators the search drives; the old method
-    is now a one-line delegating shim to this function so behaviour is byte-exact.
+    snapshot manager whose collaborators the search drives; its method is now a
+    one-line delegating shim to this function so behaviour is byte-exact.
 
     Requires:
         - manager is initialized; question non-empty; thresholds in [0,100]
@@ -439,11 +434,11 @@ def pg_hierarchical_search( manager: Any,
     monitor.start()
 
     try:
-        # Lazy-init hierarchical search components (mirrors the LanceDB path)
+        # Lazy-init hierarchical search components
         if manager._canonical_synonyms is None:
             try:
                 from cosa.memory.canonical_synonyms_table import CanonicalSynonymsTable
-                manager._canonical_synonyms = CanonicalSynonymsTable( db_path=manager.db_path, debug=manager.debug, verbose=manager.verbose )
+                manager._canonical_synonyms = CanonicalSynonymsTable( debug=manager.debug, verbose=manager.verbose )
                 if manager.debug: print( "Initialized CanonicalSynonyms for hierarchical search" )
             except Exception as e:
                 if manager.debug: print( f"Could not initialize CanonicalSynonyms, using direct search: {e}" )
@@ -521,9 +516,9 @@ def pg_hierarchical_search( manager: Any,
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Additive step-2 lift (Cheech 2026-08-15): the record marshalling, the synonym
-# cascade, and the shared pgvector similarity search — none of which touch
-# LanceDB — move here beside the two-tier lookup, each a VERBATIM copy of its
-# former SolutionSnapshotManager method with ``self`` renamed to ``manager``.
+# cascade, and the shared pgvector similarity search — all pure Postgres — move
+# here beside the two-tier lookup, each a VERBATIM copy of its former manager
+# method with ``self`` renamed to ``manager``.
 # The manager keeps its old method names as one-line delegating shims, so every
 # collaborator (``manager._ensure_list``, ``manager._record_to_snapshot``,
 # ``manager._pg_record_from_entity``, ``manager._canonical_synonyms``) resolves
@@ -534,14 +529,14 @@ def pg_hierarchical_search( manager: Any,
 
 def snapshot_to_pg_record( manager: Any, snapshot: SolutionSnapshot ) -> Dict[str, Any]:
     """
-    Convert SolutionSnapshot to LanceDB record format.
+    Convert SolutionSnapshot to the Postgres record format.
 
     Requires:
         - snapshot is valid SolutionSnapshot instance
         - snapshot.question is not empty
 
     Ensures:
-        - Returns dictionary compatible with LanceDB schema
+        - Returns dictionary compatible with the Postgres snapshot columns
         - Handles missing fields gracefully with defaults
         - Converts embeddings to proper format
 
@@ -549,7 +544,7 @@ def snapshot_to_pg_record( manager: Any, snapshot: SolutionSnapshot ) -> Dict[st
         snapshot: SolutionSnapshot to convert
 
     Returns:
-        Dictionary record for LanceDB insertion
+        Dictionary record for Postgres insertion
 
     Raises:
         - ValueError if snapshot invalid
@@ -595,7 +590,7 @@ def snapshot_to_pg_record( manager: Any, snapshot: SolutionSnapshot ) -> Dict[st
         "routing_command": getattr( snapshot, 'routing_command', '' ) or '',
         "agent_class_name": getattr( snapshot, 'agent_class_name', '' ) or '',
 
-        # Code execution data - ensure code is always a list for LanceDB schema compatibility
+        # Code execution data - ensure code is always a list for schema compatibility
         "code": manager._ensure_list( getattr( snapshot, 'code', [] ) ),
         "solution_summary_gist": getattr( snapshot, 'solution_summary_gist', '' ) or '',  # Gist of solution_summary
         "code_returns": getattr( snapshot, 'code_returns', '' ) or '',
@@ -637,7 +632,7 @@ def snapshot_to_pg_record( manager: Any, snapshot: SolutionSnapshot ) -> Dict[st
 
 def pg_record_to_snapshot( manager: Any, record: Dict[str, Any] ) -> SolutionSnapshot:
     """
-    Convert LanceDB record back to SolutionSnapshot.
+    Convert a Postgres record back to SolutionSnapshot.
 
     Requires:
         - record contains all required fields
@@ -650,7 +645,7 @@ def pg_record_to_snapshot( manager: Any, record: Dict[str, Any] ) -> SolutionSna
         - CRITICAL: Passes embeddings to constructor to prevent regeneration (977ms savings)
 
     Args:
-        record: LanceDB record dictionary
+        record: Postgres record dictionary
 
     Returns:
         Reconstructed SolutionSnapshot
@@ -792,7 +787,7 @@ def pg_similarity_search( manager: Any, exemplar_snapshot, embedding_attr, repo_
     Shared pgvector dot similarity search backing the code + solution similarity paths.
 
     Fetches WITHOUT a SQL threshold/exclusion (threshold=None) then replicates the
-    LanceDB Python-side self-skip + threshold split + ensure_top_result + limit —
+    original Python-side self-skip + threshold split + ensure_top_result + limit —
     byte-exact behavior including the best-below-threshold fallback.
 
     Requires:
