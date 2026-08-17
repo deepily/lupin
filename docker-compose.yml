@@ -462,6 +462,12 @@ services:
       # /tmp because it is container-local (only ./src and ./io are bind-mounted) and always
       # writable by uid 1001; a bytecode cache needs no durability across restarts.
       PYTHONPYCACHEPREFIX: /tmp/pycache
+      # v2 paired-eval live run (row d8d019f6): the v1 arm reads the pinned
+      # v1 baseline server standing on the HOST at :7997 (git_sha b0735467).
+      # Must live on the CONTAINER env — the submit `env` field is prefix-
+      # filtered to TFE_/BFE_/LUPIN_TEST_ (attestation.py:27) and would drop
+      # this var silently. host.docker.internal resolves via extra_hosts host-gateway.
+      LUPIN_V1_ARM_BASE_URL: http://host.docker.internal:7997
     deploy:
       resources:
         reservations:

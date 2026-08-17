@@ -153,7 +153,15 @@ def test_bridge_reaches_and_fires_v2_clean_step():
     spy.assert_called_once_with( fake_conn, cfg )
     # The REAL fn ran through BOTH guards to the TRUNCATE on the injected connection (no live DB) —
     # proving it is the real primitive, not a mock that always passes.
-    fake_conn.execute.assert_called_once_with( "TRUNCATE TABLE solution_snapshots" )
+    fake_conn.execute.assert_called_once()
+    # The TRUNCATE must be a SQLAlchemy *executable* (a `text()` clause), NOT a bare str — a raw
+    # string passes a MagicMock silently but SQLAlchemy 2.x rejects it with AttributeError on the
+    # live :8000 run (bug: 'str' object has no attribute '_execute_on_connection'). Asserting the
+    # arg type here is the control that goes RED on the pre-fix raw-string code.
+    ( truncate_stmt, ), _kwargs = fake_conn.execute.call_args
+    from sqlalchemy.sql.elements import TextClause
+    assert isinstance( truncate_stmt, TextClause ), f"TRUNCATE must be a text() clause, got {type( truncate_stmt )}"
+    assert str( truncate_stmt ) == "TRUNCATE TABLE solution_snapshots"
     fake_conn.close.assert_called_once()
 
 

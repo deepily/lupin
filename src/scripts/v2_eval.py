@@ -685,9 +685,11 @@ def clean_v2_snapshot_store( connection: Any, config_mgr: Any ) -> str:
         - ConfigTableMismatch when the declared table does not equal the ORM write target.
         - NotAMeasurementDatabase when the connection's db is not a measurement db.
     """
+    from sqlalchemy import text   # SQLAlchemy 2.x rejects a raw string here — statements must be executable
+
     target = require_config_table_matches_write_target( config_mgr )   # raises on config drift
     assert_measurement_db( str( connection.engine.url ) )              # raises on a wrong db
-    connection.execute( f"TRUNCATE TABLE {target}" )                   # identifier = resolved __tablename__
+    connection.execute( text( f"TRUNCATE TABLE {target}" ) )           # identifier = resolved __tablename__
     return target
 
 
