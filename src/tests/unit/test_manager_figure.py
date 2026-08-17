@@ -262,3 +262,99 @@ class TestResolveImplicitManagerFigure:
     def test_maria_named_entry_under_own_chain_is_true( self ):
         env = { "LUPIN_ROOT": "/x/lupin", "COSA_VOICE_PREFERRED_PERSONA__LUPIN": "María,*" }
         assert mf.resolve_implicit_manager_figure( "María", env ) is True
+
+
+# Real pre-fix bridge captured 2026-08-16 22:35 EDT (session c1404a70), before the
+# manager_figure_implicit stamp existed. Committed alongside its R&D evidence doc so
+# the legacy path is verified against a bridge a real session actually wrote, not one
+# a test invented to match its own expectations (row a4d483e0). MEASURED shape: the
+# key is ABSENT (not present-and-null); the null shape is derived from this same
+# artifact below so BOTH legacy shapes are covered from one real source.
+_CAPTURED_LEGACY_BRIDGE = os.path.join(
+    os.environ.get( "LUPIN_ROOT", os.getcwd() ),
+    "src/rnd/v0.2.0/2026.08.16-nameless-seat-e071e834-live-evidence.md.bridge.json"
+)
+
+
+def _load_captured_legacy_bridge():
+    """
+    Load the real captured pre-fix bridge as a fresh dict (row a4d483e0).
+
+    Fail-LOUD if the artifact is missing: a silently-skipped legacy test would
+    let the fallback path rot unnoticed, which is the exact failure class this
+    row exists to prevent.
+    """
+    with open( _CAPTURED_LEGACY_BRIDGE ) as f:
+        return json.load( f )
+
+
+class TestLegacyBridgeFromCapturedArtifact:
+    """
+    Row a4d483e0 — legacy-bridge fallback verified against the REAL captured
+    artifact (session c1404a70), covering BOTH field shapes:
+      - ABSENT  : the key never written (the artifact's true on-disk shape)
+      - NULL    : the key present with an explicit JSON null
+    _read_bridge_fields uses data.get(FIELD), which returns None for both, and
+    is_manager_figure branches on `if implicit_flag is not None`, so both take
+    the env-fallback path. These tests prove that equivalence on a real bridge,
+    and prove the fallback is LIVE (can still resolve True) rather than a dead
+    always-False.
+    """
+
+    def test_captured_artifact_is_the_absent_shape( self ):
+        # Guards the fixture itself: the committed artifact must be the ABSENT
+        # shape. If a future re-capture changes it, this fails loudly rather than
+        # letting the "absent" cases silently test the null shape instead.
+        data = _load_captured_legacy_bridge()
+        assert "manager_figure_implicit" not in data
+        assert data.get( "voice_persona" ) is None   # the real seat was persona-null
+
+    def test_absent_shape_reads_flag_none( self, tmp_path ):
+        write, find = bridge_factory( tmp_path )
+        write( "legacy", _load_captured_legacy_bridge() )         # key absent, as captured
+        _role, _name, flag = mf._read_bridge_fields( "legacy", _find_path=find )
+        assert flag is None
+
+    def test_null_shape_reads_flag_none( self, tmp_path ):
+        write, find = bridge_factory( tmp_path )
+        data = _load_captured_legacy_bridge()
+        data[ "manager_figure_implicit" ] = None                 # present-and-null
+        write( "legacy", data )
+        _role, _name, flag = mf._read_bridge_fields( "legacy", _find_path=find )
+        assert flag is None
+
+    def test_absent_shape_fails_closed_server_env( self, tmp_path, monkeypatch ):
+        # The real seat's true behavior: persona-null legacy bridge, server-shaped
+        # env (no chain) → fail-CLOSED. This is the F4 write-gate guarantee.
+        monkeypatch.setattr( mf, "resolve_project_name", lambda environ=None: "lupin" )
+        write, find = bridge_factory( tmp_path )
+        write( "legacy", _load_captured_legacy_bridge() )
+        assert mf.is_manager_figure( "legacy", environ={ "LUPIN_ROOT": "/var/lupin" }, _find_path=find ) is False
+
+    def test_null_shape_fails_closed_server_env( self, tmp_path, monkeypatch ):
+        monkeypatch.setattr( mf, "resolve_project_name", lambda environ=None: "lupin" )
+        write, find = bridge_factory( tmp_path )
+        data = _load_captured_legacy_bridge()
+        data[ "manager_figure_implicit" ] = None
+        write( "legacy", data )
+        assert mf.is_manager_figure( "legacy", environ={ "LUPIN_ROOT": "/var/lupin" }, _find_path=find ) is False
+
+    def test_absent_shape_fallback_is_live( self, tmp_path, monkeypatch ):
+        # Prove the None flag routes to the env fallback and the fallback WORKS —
+        # not a dead always-False. Inject a named LUPIN persona onto the real
+        # artifact and a matching chain env: legacy fallback must resolve True.
+        monkeypatch.setattr( mf, "resolve_project_name", lambda environ=None: "lupin" )
+        write, find = bridge_factory( tmp_path )
+        data = _load_captured_legacy_bridge()
+        data[ "voice_persona" ] = { "name": "Tiberius" }         # a named LUPIN chain entry
+        write( "legacy", data )
+        assert mf.is_manager_figure( "legacy", environ=ENV_LUPIN, _find_path=find ) is True
+
+    def test_null_shape_fallback_is_live( self, tmp_path, monkeypatch ):
+        monkeypatch.setattr( mf, "resolve_project_name", lambda environ=None: "lupin" )
+        write, find = bridge_factory( tmp_path )
+        data = _load_captured_legacy_bridge()
+        data[ "voice_persona" ]            = { "name": "Tiberius" }
+        data[ "manager_figure_implicit" ]  = None
+        write( "legacy", data )
+        assert mf.is_manager_figure( "legacy", environ=ENV_LUPIN, _find_path=find ) is True
