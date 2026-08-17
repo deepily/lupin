@@ -381,47 +381,12 @@ def test_agentwrapper_run_reraises_quietly_when_no_debug( monkeypatch, capsys ):
 
 
 # =========================================================================== #
-# google-genai (Vertex) vendor dispatch — row 3405f0b2
+# The google-genai VENDOR dispatch (raw "google-genai:" descriptor + client_type
+# =="genai" branch) was a SECOND route to GeminiVertexClient with no real caller —
+# no INI descriptor used it, nothing constructed the key dynamically. Removed as
+# dead code (bug 1b6c0b1f); its 3 tests went with it. The LIVE route is the
+# vertex:// config-key path, covered below.
 # =========================================================================== #
-class _StubGenai:
-    """Record-only stand-in for GeminiVertexClient (no ADC / genai import)."""
-    instances = []
-    def __init__( self, **kwargs ):
-        self.kwargs = kwargs
-        _StubGenai.instances.append( self )
-
-
-def test_google_genai_dispatches_to_gemini_vertex_client( make_factory, monkeypatch ):
-    """A `google-genai:` descriptor routes to GeminiVertexClient — the new genai
-    shape — not ChatClient / CompletionClient."""
-    _StubGenai.instances = []
-    monkeypatch.setattr( factory_mod, "GeminiVertexClient", _StubGenai )
-    f = make_factory()                                       # no exists keys -> vendor path
-    client = f.get_client( "google-genai:gemini-3.1-flash-lite" )
-    assert isinstance( client, _StubGenai )
-    assert not isinstance( client, ( _StubChat, _StubCompletion ) )
-    assert _StubGenai.instances[ 0 ].kwargs[ "model_name" ] == "gemini-3.1-flash-lite"
-
-
-def test_google_genai_touches_no_api_key_env( make_factory, monkeypatch ):
-    """This vendor carries NO env_var, so the path must neither read nor write any
-    API-key env var (ADC only) — the two-env-var google-gla pattern (7f361ccf) is
-    structurally impossible here."""
-    monkeypatch.setattr( factory_mod, "GeminiVertexClient", _StubGenai )
-    monkeypatch.delenv( "GOOGLE_API_KEY", raising=False )
-    monkeypatch.delenv( "GEMINI_API_KEY", raising=False )
-    f = make_factory()
-    f.get_client( "google-genai:gemini-3.1-flash-lite" )
-    assert "GOOGLE_API_KEY" not in os.environ
-    assert "GEMINI_API_KEY" not in os.environ
-
-
-def test_google_genai_vendor_entry_is_adc_only( make_factory ):
-    """The vendor entry is ADC-only by construction: client_type genai, no env_var."""
-    f = make_factory()
-    entry = f.VENDOR_CONFIG[ "google-genai" ]
-    assert entry[ "client_type" ] == "genai"
-    assert "env_var" not in entry
 
 
 # =========================================================================== #
@@ -455,6 +420,25 @@ def test_vertex_config_key_reaches_gemini_client( make_factory, monkeypatch ):
     assert client.location   == "global"                     # location is recorded, not defaulted
 
 
+def test_vertex_config_key_forwards_params_to_client( make_factory, monkeypatch ):
+    """Bug 3067adf6: the factory must thread the spec-key `_params` dict into the
+    GeminiVertexClient so temperature/max_tokens actually reach generate_content —
+    they were dropped, running the Flash-Lite arm at the SDK default and confounding
+    the paired comparison. Asserts the values arrive MAPPED to SDK field names."""
+    monkeypatch.setattr( gvc_mod, "resolve_gcp_project_id", lambda *a, **k: "test-proj" )
+    f = make_factory(
+        exists_keys = [ "dm_tutor/flash_lite" ],
+        values      = {
+            "dm_tutor/flash_lite"        : "vertex://global@gemini-3.1-flash-lite",
+            "dm_tutor/flash_lite_params" : { "temperature": 0.0, "max_tokens": 4096 },
+        },
+    )
+    client = f.get_client( "dm_tutor/flash_lite" )
+    assert isinstance( client, GeminiVertexClient )
+    # the params were threaded AND key-mapped (max_tokens -> max_output_tokens)
+    assert client._gen_config_kwargs == { "temperature": 0.0, "max_output_tokens": 4096 }
+
+
 def test_vertex_spec_without_location_fails_loud( make_factory, monkeypatch ):
     """A vertex:// spec missing the <location>@ segment RAISES — the paired study
     must record where each arm ran, so this never defaults silently."""
@@ -465,6 +449,22 @@ def test_vertex_spec_without_location_fails_loud( make_factory, monkeypatch ):
     )
     with pytest.raises( ValueError ):
         f.get_client( "no_loc" )
+
+
+def test_vertex_spec_known_bad_region_fails_loud( make_factory, monkeypatch ):
+    """Bug 1b79bef5: the vertex:// arm only checked for the '@' separator, so a spec
+    with a known-bad region (us-central1, which 404s for this model) built a client
+    that would fail at first call. It must RAISE at get_client(), before construction."""
+    monkeypatch.setattr( gvc_mod, "resolve_gcp_project_id", lambda *a, **k: "test-proj" )
+    f = make_factory(
+        exists_keys = [ "bad_region" ],
+        values      = {
+            "bad_region"        : "vertex://us-central1@gemini-3.1-flash-lite",
+            "bad_region_params" : {},
+        },
+    )
+    with pytest.raises( ValueError, match="known-bad" ):
+        f.get_client( "bad_region" )
 
 
 def test_non_vertex_config_spec_still_returns_chat( make_factory ):
