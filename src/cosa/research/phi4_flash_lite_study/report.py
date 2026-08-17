@@ -354,7 +354,15 @@ def main( argv=None, printer=print ):
         for arm in arms:
             metas = [ r[ "meta" ] for r in records if r[ "arm" ] == arm ]
             summary = rh.summarize_arm( metas, denominator=args.denominator )
-            printer( f"  {arm:12} {summary[ 'fabrication_blocked' ]}/{summary[ 'rows' ]} rows | "
+            # Print the rate's OWN denominator, not the row count. It read
+            # "130/400 rows | rate 0.3316" — two numbers that do not divide to the third,
+            # because 400 is how many rows ran while the narrow rate divides by
+            # blocked + rewritten (392 here). A reader doing the arithmetic gets a
+            # different answer than the printed rate, which is how a real number starts
+            # looking wrong. Mr. Radio caught it by quoting 130/392 back at me.
+            attempts = summary[ 'fabrication_blocked' ] + summary[ 'rewritten' ]
+            printer( f"  {arm:12} {summary[ 'fabrication_blocked' ]}/{attempts} "
+                     f"(blocked+rewritten; {summary[ 'rows' ]} rows ran) | "
                      f"rate {summary[ 'fabrication_rate' ]:.4f} | model_failed {summary[ 'model_failed' ]}" )
 
     if args.floor is None:
