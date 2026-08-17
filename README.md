@@ -289,6 +289,10 @@ claude mcp add cosa-voice -- python ${LUPIN_ROOT}/src/lupin_mcp/cosa_voice_mcp.p
 - [Phase 2 Falsifiability Mutations](src/rnd/v0.2.0/2026.08.15-phase2-falsifiability-mutations.md) — the mutations each phase-2 guard must fail on, so a green gate proves something
 - [Self-Re-Spin: 8-Gate Verification](src/rnd/v0.2.0/2026.08.15-arnold-self-respin-8-gate-verification.md) — all 8 spec gates verified as code properties; gate 5's "the proxy cannot answer no" was false and is fixed by `3f8cec99`. Three findings were spec defects rather than code defects
 - [v2-Arm Adversarial Review](src/rnd/v0.2.0/2026.08.15-extra2-v2-arm-adversarial-review.md) — v2's own instruments are honest; the paired gate is defined, tested, and wired into nothing
+- [v2 Ask Slowdown Investigation](src/rnd/v0.2.0/2026.08.17-v2-ask-slowdown-investigation.md) — the calls that looked like a degrading model server are the todo agent's normal ~65s cost; why the run died at the 120s read wall, and what the re-run actually costs
+- [Adversarial Check on the Credential Detector](src/rnd/v0.2.0/2026.08.17-clayton-adversarial-check-tiffany-credential-fix.md) — the lead-in fix holds against 15 attacks, but the check is depth-blind: six shapes still serve, led by the `client_secret_*.json` file the GCP console hands you
+- [Novelty-Check Casefold: Premise Check](src/rnd/v0.2.0/2026.08.17-novelty-check-casefold-premise-check.md) — the check was already case-insensitive, so casefolding drops zero rejections; the words being flagged as invented names are ordinary English, and excluding them takes Flash-Lite from 130 blocks to 40
+- [Lane-2 Harness Observability](src/rnd/v0.2.0/2026.08.17-lane2-harness-observability-row-1cd30181.md) — the E2E harness stopped watching 13 seconds before the product finished and called it a failure; stages now start INCONCLUSIVE so a red has to be earned too
 
 ### Agentic jobs, recovery & test scheduling
 
