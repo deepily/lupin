@@ -276,9 +276,15 @@ def main( argv=None, printer=print ):
     arm_a, arm_b = arms
     paired       = rh.pair_records( [ r for r in records if r[ "arm" ] == arm_a ],
                                     [ r for r in records if r[ "arm" ] == arm_b ] )
-    b, c         = rh.discordant_counts( paired, arm_a, arm_b, outcome=args.outcome )
+    # discordant_counts returns a NAMED dict (Clayton, 500e2a1b), not a bare (b, c) —
+    # deliberately, because the two of us had labelled the cells in opposite orders and
+    # a tuple lets the next reader quote the direction backwards. Read the arm-named
+    # keys, never positions.
+    cells        = rh.discordant_counts( paired, arm_a, arm_b, outcome=args.outcome )
+    b, c         = cells[ f"only_{arm_a}" ], cells[ f"only_{arm_b}" ]
     printer( f"paired {len( paired )} rows | discordant on '{args.outcome}': "
-             f"b={b} (only {arm_a}) c={c} (only {arm_b}) | b+c={b + c}" )
+             f"only_{arm_a}={b}, only_{arm_b}={c} | n_discordant={cells[ 'n_discordant' ]} | "
+             f"{cells[ 'direction' ]}" )
 
     if args.denominator is None:
         printer( "RATES WITHHELD — no denominator. Rick's ruling (narrow vs wide); a reader that "
