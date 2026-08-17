@@ -224,5 +224,30 @@ class TestExemptions( unittest.TestCase ):
         self.assertEqual( [ l[ 0 ] for l in live ], [ 4 ] )   # only the un-exempt line
 
 
+class TestFinding7DefaultClaims( unittest.TestCase ):
+    """Finding 7: the four table families the checker did not enforce are now in
+    DEFAULT_CLAIMS with the table's EXACT wording, so the table and checker agree."""
+
+    FAMILIES = (
+        "the model id is Rick's half",
+        "smoke the Developer API first",
+        "read the corpus",
+        "which project is open/unconfirmed",
+    )
+
+    def test_each_family_is_enforced_with_table_wording( self ):
+        for phrase in self.FAMILIES:
+            self.assertIn( phrase, cdc.DEFAULT_CLAIMS )
+
+    def test_each_family_catches_when_injected( self ):
+        # Inject each phrase as an unmarked live line and confirm the default claim
+        # set now reports it — the inject-and-watch proof each addition actually bites.
+        for phrase in self.FAMILIES:
+            text = f"## 1. Body\n\nthe plan still says {phrase} today\n"
+            live = cdc.find_live_claims( text, cdc.DEFAULT_CLAIMS )
+            self.assertTrue( any( p == phrase for _, p, _, _ in live ),
+                             f"{phrase!r} not caught after adding to DEFAULT_CLAIMS" )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -65,6 +65,12 @@ DEFAULT_CLAIMS = {
     "no ADC"                            : "ADC were on disk all along; a live Vertex call answered OK",
     "cannot authenticate to Vertex"     : "it authenticated; smoked 2026-08-16",
     "us-central1"                       : "404s for this model — use location=global",
+    # Finding 7: table families the checker did not enforce, added with the TABLE's exact
+    # wording (row 6/7/11 canonical strings) so the human table and the checker agree.
+    "the model id is Rick's half"       : "given: gemini-3.1-flash-lite (Rick, 2026-08-16)",
+    "smoke the Developer API first"     : "there is no API-key surface to smoke",
+    "which project is open/unconfirmed" : "Rick confirmed LUPIN_GCP_PROJECT_ID",
+    "read the corpus"                   : "the live log grows ~5 rows/min and unpairs the arms; snapshot it (§1.2)",
 }
 
 WINDOW = 2   # lines either side to search for a marker — these documents are hard-wrapped
