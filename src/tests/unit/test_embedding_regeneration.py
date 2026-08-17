@@ -198,19 +198,23 @@ class TestIsOffPeak:
     def test_inside_window( self, hour ):
         assert is_off_peak( hour ) is True
 
-    @pytest.mark.parametrize( "hour", [ 14, 21, 23 ] )
-    def test_outside_window( self, hour ):
-        assert is_off_peak( hour ) is False
-
     @pytest.mark.parametrize( "hour", [ 9, 10 ] )
     def test_the_morning_hours_rick_widened_the_window_for( self, hour ):
         # Rick, 2026-08-13: the run starts after breakfast, not before 9am. These two
         # hours used to be REFUSED and are the whole reason OFF_PEAK_END_HOUR moved.
         assert is_off_peak( hour ) is True
 
-    def test_the_window_still_closes( self, ):
-        # Widening is not removing. 11:00 is the first hour outside, and a window that
-        # accepted every hour would make the check decorative.
+    @pytest.mark.parametrize( "hour", [ 11, 14, 21, 23 ] )
+    def test_the_default_window_now_accepts_every_hour( self, hour ):
+        # Rick, 2026-08-17: "update the clock/gate so it's permissive and runs at my
+        # discretion." These hours were REFUSED under end_hour=11 and are accepted now.
+        # This supersedes the earlier test_the_window_still_closes, which asserted 11:00
+        # was the first hour outside — that boundary is gone by ruling, not by accident.
+        assert is_off_peak( hour ) is True
+
+    def test_the_default_boundary_is_the_end_of_the_day( self ):
+        # 24 is the open interval's edge: every real hour 0..23 is inside.
+        assert OFF_PEAK_END_HOUR == 24
         assert is_off_peak( OFF_PEAK_END_HOUR ) is False
 
     def test_end_hour_is_a_parameter_not_a_hardcode( self ):
@@ -238,12 +242,26 @@ class TestShouldProceed:
     def test_unknown_busy_state_blocks_even_with_force( self ):
         assert "refusing to guess" in should_proceed( busy=None, hour_edt=2, force=True )
 
-    def test_on_peak_blocks_without_force( self ):
-        reason = should_proceed( busy=False, hour_edt=21 )
-        assert "off-peak" in reason and "--force" in reason
+    def test_no_hour_is_refused_by_the_default_clock( self ):
+        # Rick's 2026-08-17 ruling: the clock is permissive, the run is at his
+        # discretion. 21:00 was the canonical refusal case and now proceeds unforced.
+        assert should_proceed( busy=False, hour_edt=21 ) is None
 
     def test_on_peak_proceeds_with_force( self ):
         assert should_proceed( busy=False, hour_edt=21, force=True ) is None
+
+    def test_the_clock_refusal_path_still_exists_for_a_tightened_window( self, monkeypatch ):
+        # The permissive DEFAULT is a policy choice, not a deleted mechanism. Reimpose a
+        # window and the refusal still fires, still names --force, and --force still
+        # bypasses the clock only. Patching is_off_peak rather than OFF_PEAK_END_HOUR is
+        # deliberate: is_off_peak binds end_hour as a DEFAULT ARGUMENT at definition time,
+        # so rebinding the module constant would not reach it and the test would pass
+        # while proving nothing.
+        import cosa.rest.db.embedding_regeneration as er
+        monkeypatch.setattr( er, "is_off_peak", lambda hour, end_hour=11: False )
+        reason = er.should_proceed( busy=False, hour_edt=21 )
+        assert "off-peak" in reason and "--force" in reason
+        assert er.should_proceed( busy=False, hour_edt=21, force=True ) is None
 
     def test_clock_check_is_skipped_when_hour_is_none( self ):
         assert should_proceed( busy=False, hour_edt=None ) is None
@@ -490,6 +508,60 @@ class TestSplitBatch:
             if not halves: singles += 1
             else: work.extend( halves )
         assert singles == 8
+
+
+# --------------------------------------------------------------------------- #
+# Split-retry vs a DEAD SERVER — bug 13b35b37.
+#
+# The splitter exists for one failure: the batch was too big for the memory free
+# at that instant. Shrinking is the remedy. A server that is not answering is the
+# opposite case — every size fails identically — and splitting there produces one
+# doomed retry per row. Observed 2026-08-17: a 100-row batch split to 100 single
+# rows, each failing on the same dead socket, consuming the whole run budget and
+# regenerating nothing.
+# --------------------------------------------------------------------------- #
+class TestUnreachableServerIsNotABatchSizeProblem:
+
+    class _CountingProvider:
+        """Records how many times the splitter asked for embeddings."""
+        def __init__( self, error ):
+            self.error = error
+            self.calls = 0
+        def generate_embeddings_batch( self, texts, content_type=None ):
+            self.calls += 1
+            raise self.error
+
+    def test_transport_failure_aborts_after_exactly_one_attempt( self ):
+        # The whole point: ONE call, then propagate. Not 2, not 199.
+        import cosa.rest.db.embedding_regeneration as er
+        from cosa.memory.embedding_provider import EmbeddingProviderUnreachable
+
+        provider = self._CountingProvider( EmbeddingProviderUnreachable( "nothing is listening" ) )
+        rows     = [ ( i, f"text {i}" ) for i in range( 100 ) ]
+
+        with pytest.raises( EmbeddingProviderUnreachable ):
+            er._embed_with_split_retry( provider, rows, "prose" )
+
+        assert provider.calls == 1, ( f"a dead server was retried {provider.calls} times; "
+                                      f"splitting cannot revive a socket" )
+
+    def test_a_compute_failure_still_splits( self ):
+        # The fix must not disarm the splitter for the case it was built for.
+        import cosa.rest.db.embedding_regeneration as er
+
+        provider = self._CountingProvider( RuntimeError( "CUDA out of memory" ) )
+        rows     = [ ( i, f"text {i}" ) for i in range( 4 ) ]
+
+        result = er._embed_with_split_retry( provider, rows, "prose" )
+
+        assert provider.calls > 1, "an oversized batch must still be split and retried"
+        assert [ r[ 0 ] for r in result ] == [ 0, 1, 2, 3 ]
+        assert all( vector is None for _, vector in result )
+
+    def test_the_exception_is_a_runtimeerror_so_existing_callers_still_catch_it( self ):
+        # Subclassing is what keeps this a safe change for every other call site.
+        from cosa.memory.embedding_provider import EmbeddingProviderUnreachable
+        assert issubclass( EmbeddingProviderUnreachable, RuntimeError )
 
 
 # --------------------------------------------------------------------------- #

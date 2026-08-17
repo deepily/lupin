@@ -102,17 +102,22 @@ MAX_CHAR_BUDGET = 2_000_000
 
 # The hour the off-peak window CLOSES (EDT). Midnight is always the open.
 #
-# WAS 9. Rick, 2026-08-13: "we're probably not going to get started on this
-# regeneration before 9 o'clock tomorrow morning, so you're going to have to open
-# that window up a little bit — maybe make it 10 or 11 in the morning so that we
-# can do that first thing after breakfast."
+# WAS 9, then 11. Rick, 2026-08-17: "You can update the clock to run for as long as
+# we need it to. I am the human at the console. Nothing else will run or interfere.
+# Let's not be too official on this — update the clock/gate so it's permissive and
+# runs at my discretion."
 #
-# The window was only ever a courtesy anyway: the REAL gate in should_proceed() is
-# the busy check, which asks the live server whether work is in flight and refuses
-# on an unknown answer. A clock cannot tell you the box is free; only the box can.
-# So widening this trades nothing away — it just stops the courtesy check refusing
-# a run at a time the operator has deliberately chosen to be at the keyboard for.
-OFF_PEAK_END_HOUR = 11
+# 24 means every hour is inside the window, i.e. the clock no longer refuses anyone.
+# That is deliberate and it costs nothing, because the clock was never the real gate:
+# should_proceed() still asks the live server whether work is in flight and still
+# refuses on a busy box AND on an unknown answer. A clock cannot tell you the box is
+# free; only the box can. What the clock was actually protecting was Rick's own
+# interactive hours — and when Rick is the one at the keyboard asking for the run,
+# there is nobody left for it to protect.
+#
+# The boundary is still a parameter: is_off_peak( hour, end_hour=N ) lets any caller
+# reimpose a tighter window without editing this module.
+OFF_PEAK_END_HOUR = 24
 
 
 class RegenSpec( NamedTuple ):
@@ -649,11 +654,24 @@ def _embed_with_split_retry( provider, rows, content_type, depth=0, budget=None 
 
     Returns [ ( row_id, vector_or_None ), ... ]; a None means that single row
     genuinely could not be embedded on its own.
+
+    A TRANSPORT failure is not split. `EmbeddingProviderUnreachable` means the
+    service is not answering at all — the provider already spent every retry it
+    has before raising — so a smaller batch would fail on the same dead socket.
+    Splitting there turns one dead dependency into one doomed retry per row and
+    burns the entire run producing nothing (bug 13b35b37). It propagates instead,
+    which stops the run loudly and immediately.
     """
+    from cosa.memory.embedding_provider import EmbeddingProviderUnreachable
+
     try:
         vectors = provider.generate_embeddings_batch( [ r[ 1 ] for r in rows ], content_type=content_type )
         if budget is not None and depth == 0: budget.record_success()
         return list( zip( [ r[ 0 ] for r in rows ], vectors ) )
+    except EmbeddingProviderUnreachable:
+        # Deliberately NOT recorded as a batch-size failure: the budget's job is to
+        # learn how big a batch the GPU tolerates, and a dead server teaches it nothing.
+        raise
     except Exception as error:
         if budget is not None: budget.record_failure()
         halves = split_batch( rows )
@@ -810,11 +828,21 @@ def _run( command="plan", prefix="", apply=False, force=False, limit=None,
             if refusal:
                 print( f"  REFUSING: {refusal}" )
                 return 1
-            from cosa.memory.embedding_provider import get_embedding_provider
+            from cosa.memory.embedding_provider import ( get_embedding_provider,
+                                                          EmbeddingProviderUnreachable )
             provider = get_embedding_provider()
-            for spec in specs:
-                _fill( session, spec, provider, prefix=prefix, batch_size=batch_size,
-                       char_budget=char_budget, limit=limit, apply=apply )
+            try:
+                for spec in specs:
+                    _fill( session, spec, provider, prefix=prefix, batch_size=batch_size,
+                           char_budget=char_budget, limit=limit, apply=apply )
+            except EmbeddingProviderUnreachable as error:
+                # One loud stop beats 703,471 identical failures. Whatever committed
+                # before this point stays committed — fill is resumable from its
+                # checkpoint, so the remedy is "fix the server, run again".
+                print( f"  ABORTING: the embedding service is not reachable.\n    {error}" )
+                print(  "    Nothing further was attempted. Fix the service, then re-run —"
+                        " completed batches are checkpointed and will not be redone." )
+                return 1
             return 0
 
         if command == "swap":
