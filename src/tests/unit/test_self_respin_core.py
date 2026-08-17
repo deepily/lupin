@@ -681,3 +681,46 @@ def test_the_default_ask_receives_the_persona( tmp_path, monkeypatch ):
 
     assert seen[ "persona" ] == "Tiberius"      # ...and NOT a zero-arg call
     assert r.status == "declined"
+
+
+# ---------------------------------------------------------------------------
+# Every argument the ask is fired with — pinned, not changed
+# ---------------------------------------------------------------------------
+
+def test_confirmation_kwargs_pins_every_argument_the_ask_is_fired_with():
+    """
+    `_default_ask` is pragma-no-cover, so anything left inside it is the part of
+    this feature nothing can test. These are pinned as they stand — NOT changed.
+    """
+    kwargs = sr.confirmation_kwargs( "Mr. Radio" )
+
+    assert set( kwargs ) == { "question", "default", "timeout_seconds",
+                              "priority", "abstract", "human_only" }
+    assert kwargs[ "default" ]         == "yes"      # the OFFLINE SAFETY NET
+    assert kwargs[ "human_only" ]      is True       # row 804afce6 — no proxy veto
+    assert kwargs[ "timeout_seconds" ] == 120
+    assert kwargs[ "priority" ]        == "high"
+
+
+def test_confirmation_kwargs_default_yes_is_the_offline_safety_net():
+    """A seat at its ceiling with the human away must still re-spin; "no" strands it."""
+    assert sr.confirmation_kwargs( "anyone" )[ "default" ] == "yes"
+
+
+def test_confirmation_kwargs_human_only_blocks_the_auto_answer_proxy():
+    """Row 804afce6: only a real human "no" (or the offline default) may decide."""
+    assert sr.confirmation_kwargs( "anyone" )[ "human_only" ] is True
+
+
+def test_confirmation_kwargs_takes_its_wording_from_confirmation_text():
+    """One definition of the words, not two that drift."""
+    question, abstract = sr.confirmation_text( "María" )
+    kwargs             = sr.confirmation_kwargs( "María" )
+
+    assert kwargs[ "question" ] == question
+    assert kwargs[ "abstract" ] == abstract
+
+
+def test_confirmation_kwargs_degrades_the_persona_like_the_text_does():
+    kwargs = sr.confirmation_kwargs( "unknown" )
+    assert kwargs[ "question" ].startswith( f"{sr.UNNAMED_SEAT} is at their context ceiling" )

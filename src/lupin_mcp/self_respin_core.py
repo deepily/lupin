@@ -704,25 +704,56 @@ def confirmation_text( persona ):
     return question, abstract
 
 
+def confirmation_kwargs( persona ):
+    """
+    EVERY argument the confirmation ask is fired with — pure, so all of it is pinnable.
+
+    ⚠️ WHY THIS IS SEPARATE FROM `_default_ask`. That function is
+    `# pragma: no cover`, because it is a live MCP boundary. Anything left inside it
+    is, by construction, the part of this feature no test can see — and three of
+    these values are behaviour, not decoration:
+
+      · `default="yes"` — the OFFLINE SAFETY NET. A seat at its ceiling with the
+        human away must still re-spin; flipping this to "no" would strand it silently.
+      · `human_only=True` — LOAD-BEARING (row 804afce6). The auto-answer proxy must
+        NOT veto a manager's own re-spin; only a real human "no", or the offline
+        default-yes, decides. Drop this and a proxy can quietly block every re-spin
+        in the fleet.
+      · `timeout_seconds=120` — how long "away" takes to mean away.
+
+    None of the values change here; they are lifted verbatim so they can be pinned.
+
+    Requires:
+        - persona is the seat's persona name, or None/blank/"unknown"
+
+    Ensures:
+        - returns the complete kwargs dict for `ask_yes_no.fn`
+        - question and abstract come from `confirmation_text`, so the wording has
+          exactly one definition
+
+    Raises:
+        - nothing
+    """
+    question, abstract = confirmation_text( persona )
+    return {
+        "question"        : question,
+        "default"         : "yes",
+        "timeout_seconds" : 120,
+        "priority"        : "high",
+        "abstract"        : abstract,
+        "human_only"      : True,
+    }
+
+
 def _default_ask( persona ):   # pragma: no cover - live MCP ask boundary (tests inject ask_fn)
     """
-    Fire the confirmation ask on the human surface, default=yes, and return the
-    raw ask_yes_no string. Imported lazily so this module never pulls the MCP
-    server in at import time. The wording comes from `confirmation_text`, which is
-    a pure function so the words themselves are testable without the MCP.
+    Fire the confirmation ask on the human surface and return the raw ask_yes_no
+    string. Imported lazily so this module never pulls the MCP server in at import
+    time. Everything decidable — the wording AND every argument — comes from the
+    pure functions above, so this boundary carries no untested behaviour of its own.
     """
     from lupin_mcp.cosa_voice_mcp import ask_yes_no, DEFAULT_USED_MARKER as _M   # noqa: F401
-    question, abstract = confirmation_text( persona )
-    return ask_yes_no.fn(
-        question=question,
-        default="yes",
-        timeout_seconds=120,
-        priority="high",
-        abstract=abstract,
-        # human_only: the auto-answer proxy must NOT veto a manager's own re-spin.
-        # Only a real human "no" (or the offline default=yes) decides (row 804afce6).
-        human_only=True,
-    )
+    return ask_yes_no.fn( **confirmation_kwargs( persona ) )
 
 
 # The observer's marker + wake-proof names — imported by name so the two files agree
