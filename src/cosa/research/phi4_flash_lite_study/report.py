@@ -24,11 +24,54 @@ Usage:
 import argparse
 import collections
 import json
-import statistics as py_statistics
 import sys
 
 from cosa.research.phi4_flash_lite_study import replay_harness as rh
 from cosa.research.phi4_flash_lite_study import statistics as study_statistics
+
+
+# ⚠️ DO NOT `import statistics` IN THIS PACKAGE. It sat here as
+# `import statistics as py_statistics` and worked in every test, then crashed the FIRST
+# real 400-row run: this package contains its own `statistics.py`, and running the file
+# directly (`python …/report.py`) puts its directory first on sys.path, so the name
+# resolves to the sibling module instead of the standard library. The data was already
+# safely on disk, but a reader that dies after a 42-minute paid run is a reader that
+# failed when it mattered. `median` and `fmean` are three lines each — owning them costs
+# less than the shadow.
+def _median( values ):
+    """
+    Median of a list, without importing a name this package shadows.
+
+    Requires:
+        - values is a non-empty list of numbers
+
+    Ensures:
+        - returns the middle value, averaging the middle pair on an even count
+        - does not assume the input is sorted
+
+    Raises:
+        - IndexError on an empty list — callers here guard for empty first
+    """
+    ordered = sorted( values )
+    n       = len( ordered )
+    mid     = n // 2
+    return ordered[ mid ] if n % 2 else ( ordered[ mid - 1 ] + ordered[ mid ] ) / 2
+
+
+def _mean( values ):
+    """
+    Arithmetic mean, same reasoning as _median.
+
+    Requires:
+        - values is a non-empty list of numbers
+
+    Ensures:
+        - returns sum / count
+
+    Raises:
+        - ZeroDivisionError on an empty list — callers here guard for empty first
+    """
+    return sum( values ) / len( values )
 
 
 def load_run( path ):
@@ -190,8 +233,8 @@ def latency_block( records ):
             continue
         block[ arm ] = {
             "fired_rows" : len( secs ),
-            "median_s"   : round( py_statistics.median( secs ), 3 ),
-            "mean_s"     : round( py_statistics.fmean( secs ), 3 ),
+            "median_s"   : round( _median( secs ), 3 ),
+            "mean_s"     : round( _mean( secs ), 3 ),
             "p90_s"      : _percentile( secs, 0.90 ),
             "p99_s"      : _percentile( secs, 0.99 ),
             "min_s"      : round( secs[ 0 ], 3 ),
@@ -232,8 +275,8 @@ def per_arm_table( records ):
             "rows"             : len( rows ),
             "spec_key"         : rows[ 0 ].get( "spec_key" ),
             "outcomes"         : dict( outcomes ),
-            "median_words_out" : py_statistics.median( words ) if words else None,
-            "median_seconds"   : py_statistics.median( secs )  if secs  else None,
+            "median_words_out" : _median( words ) if words else None,
+            "median_seconds"   : _median( secs )  if secs  else None,
             "total_seconds"    : round( sum( secs ), 1 )       if secs  else None,
         }
     return table
