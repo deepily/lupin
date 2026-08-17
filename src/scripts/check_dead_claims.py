@@ -144,6 +144,54 @@ def unenforced_table_claims( text, claims, table_after="DEAD CLAIMS" ):
              if phrase not in enforced ]
 
 
+# A per-line, REASONED exemption: this exact line legitimately carries a dead phrase
+# live, and the reason is stated inline so the exemption can be audited and refuted.
+# The reason is REQUIRED — `<!-- claim-exempt: -->` with no reason does not match, so a
+# blank suppress cannot slip through. The keyword is deliberately free of every MARKERS
+# token, so an exemption is the explicit mechanism, never the fuzzy window heuristic.
+_EXEMPTION = re.compile( r"<!--\s*claim-exempt:\s*(.+?)\s*-->" )
+
+
+def _exemption_reason( line ):
+    """
+    Requires:
+        - line is a single line of the document
+    Ensures:
+        - returns the stated reason (trimmed) of a reasoned `claim-exempt` marker on
+          this line, or None when the line carries no such marker OR its reason is
+          blank/whitespace-only — a reason is REQUIRED, a blank suppress cannot slip in
+    """
+    match = _EXEMPTION.search( line )
+    if match is None:
+        return None
+    reason = match.group( 1 ).strip()
+    return reason if reason else None
+
+
+def find_exemptions( text, claims ):
+    """
+    List every per-line dead-claim exemption in the document, so they can be audited
+    and never accumulate unnoticed.
+
+    Requires:
+        - text is the document's full text
+        - claims maps a phrase to the reason it is dead
+    Ensures:
+        - returns ( lineno, reason, stale, line ) for each line carrying a reasoned
+          `claim-exempt` marker, in document order
+        - stale is True when NO dead phrase appears on that line — the exemption now
+          guards nothing and should be removed
+    """
+    out = []
+    for i, line in enumerate( text.splitlines() ):
+        reason = _exemption_reason( line )
+        if reason is None:
+            continue
+        stale = not any( phrase in line for phrase in claims )
+        out.append( ( i + 1, reason, stale, line.strip()[ :100 ] ) )
+    return out
+
+
 def find_live_claims( text, claims, skip_until=None ):
     """
     Find dead claims that read as live.
@@ -159,6 +207,8 @@ def find_live_claims( text, claims, skip_until=None ):
           because a hard-wrapped banner puts its marker on a neighbouring line
         - everything before skip_until is ignored, so a document's own dead-claims TABLE does not
           report itself
+        - a line carrying a reasoned `claim-exempt` marker is not reported — an explicit,
+          per-line, auditable exemption distinct from the fuzzy +/- WINDOW marker heuristic
     """
     lines = text.splitlines()
     start = 0
@@ -171,9 +221,12 @@ def find_live_claims( text, claims, skip_until=None ):
 
     found = []
     for i in range( start, len( lines ) ):
+        exempt = _exemption_reason( lines[ i ] ) is not None
         window = "\n".join( lines[ max( 0, i - WINDOW ) : i + WINDOW + 1 ] )
         for phrase, reason in claims.items():
             if phrase in lines[ i ] and not any( m in window for m in MARKERS ):
+                if exempt:
+                    continue   # explicit per-line reasoned exemption suppresses this hit
                 found.append( ( i + 1, phrase, reason, lines[ i ].strip()[ :100 ] ) )
     return found
 
@@ -196,6 +249,8 @@ def main( argv=None ):
                          help="ignore everything before this line prefix (the doc's own dead-claims table)" )
     parser.add_argument( "--check-table-sync", action="store_true",
                          help="also fail when the doc's dead-claims TABLE lists a claim the checker does not enforce" )
+    parser.add_argument( "--list-exemptions", action="store_true",
+                         help="list every per-line claim-exempt marker with its reason (audit), then exit" )
     args = parser.parse_args( argv )
 
     doc = Path( args.doc )
@@ -208,7 +263,17 @@ def main( argv=None ):
         claims = json.loads( Path( args.claims ).read_text( encoding="utf-8" ) )
 
     content = doc.read_text( encoding="utf-8" )
-    live    = find_live_claims( content, claims, skip_until=args.skip_until )
+
+    if args.list_exemptions:
+        exemptions = find_exemptions( content, claims )
+        for lineno, reason, stale, line in exemptions:
+            tag = " STALE" if stale else ""
+            print( f"EXEMPT{tag}  {doc}:{lineno}  \"{reason}\"\n        {line}" )
+        note = " Some guard nothing (STALE) — remove them." if any( e[ 2 ] for e in exemptions ) else ""
+        print( f"\n{len( exemptions )} active exemption(s).{note}" )
+        return 0
+
+    live = find_live_claims( content, claims, skip_until=args.skip_until )
 
     for lineno, phrase, reason, line in live:
         print( f"LIVE  {doc}:{lineno}  \"{phrase}\"  — {reason}\n        {line}" )

@@ -172,6 +172,57 @@ class TestMain( unittest.TestCase ):
         claims = self._doc( '{ "read the corpus": "snapshot it" }' )
         self.assertEqual( cdc.main( [ doc, "--claims", claims, "--check-table-sync" ] ), 1 )
 
+    def test_list_exemptions_empty_returns_0( self ):
+        doc = self._doc( "## 1. Body\n\nnothing exempt here\n" )
+        self.assertEqual( cdc.main( [ doc, "--list-exemptions" ] ), 0 )
+
+    def test_list_exemptions_reports_active_and_stale_returns_0( self ):
+        # One exemption guards a live phrase (active); one guards nothing (stale) →
+        # audit mode always returns 0, and the stale note is printed.
+        doc = self._doc(
+            "## 1. Body\n\n"
+            "cite us-central1 <!-- claim-exempt: historical quote -->\n"
+            "unrelated line <!-- claim-exempt: guards nothing now -->\n" )
+        claims = self._doc( '{ "us-central1": "use global" }' )
+        self.assertEqual( cdc.main( [ doc, "--claims", claims, "--list-exemptions" ] ), 0 )
+
+
+class TestExemptions( unittest.TestCase ):
+    def test_reason_returned_trimmed( self ):
+        self.assertEqual(
+            cdc._exemption_reason( "x <!-- claim-exempt:  a good reason  -->" ),
+            "a good reason" )
+
+    def test_no_marker_returns_none( self ):
+        self.assertIsNone( cdc._exemption_reason( "just a plain line" ) )
+
+    def test_blank_reason_returns_none( self ):
+        # A reason is REQUIRED — a whitespace-only marker does not exempt.
+        self.assertIsNone( cdc._exemption_reason( "y <!-- claim-exempt:  -->" ) )
+
+    def test_find_exemptions_lists_reason_and_order( self ):
+        text = (
+            "line one <!-- claim-exempt: first reason -->\n"
+            "plain line\n"
+            "line three <!-- claim-exempt: second reason -->\n"
+        )
+        found = cdc.find_exemptions( text, { "line": "x" } )   # "line" is on both marked rows
+        self.assertEqual( [ ( f[ 0 ], f[ 1 ], f[ 2 ] ) for f in found ],
+                          [ ( 1, "first reason", False ), ( 3, "second reason", False ) ] )
+
+    def test_find_exemptions_flags_stale( self ):
+        text  = "nothing dead-worthy here <!-- claim-exempt: guards nothing -->\n"
+        found = cdc.find_exemptions( text, { "us-central1": "use global" } )
+        self.assertEqual( len( found ), 1 )
+        self.assertTrue( found[ 0 ][ 2 ] )   # stale: no enforced phrase on the line
+
+    def test_live_scan_honours_per_line_exemption( self ):
+        exempt = "we cite us-central1 <!-- claim-exempt: historical quote -->"
+        plain  = "we still target us-central1 today"
+        text   = "## 1. Body\n\n" + exempt + "\n" + plain + "\n"
+        live   = cdc.find_live_claims( text, { "us-central1": "use global" } )
+        self.assertEqual( [ l[ 0 ] for l in live ], [ 4 ] )   # only the un-exempt line
+
 
 if __name__ == "__main__":
     unittest.main()
