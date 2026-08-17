@@ -18,6 +18,7 @@ Coverage: --cov=cosa.rest.v2.router_prompt_generator --cov-branch --cov-report=t
 """
 
 import os
+import re
 import tempfile
 import unittest
 from unittest import mock
@@ -170,8 +171,23 @@ class TestScaffoldingGolden( unittest.TestCase ):
 
     A substring-present check (the earlier version of this class) could not catch a
     reworded Requirement or Task line. start-with / end-with the full golden pins
-    every scaffolding byte: the command block is the only thing between them.
+    every scaffolding byte OUTSIDE the command block. But start/end anchors do NOT
+    pin the SEAM — text injected between the command block and the closing tag (e.g.
+    a stray line prepended to the generator's _FOOTER) lands in the unpinned middle
+    and slides through both anchors green (found in break-testing, Sam 2026-08-16).
+    test_command_region_holds_only_command_lines closes that seam: the region
+    between the two goldens must contain ONLY well-formed <command> lines.
     """
+
+    # 4-space-indented <command>NAME</command>, the ONLY shape allowed in the block.
+    _COMMAND_LINE = re.compile( r"^    <command>[^<>]*</command>$" )
+
+    def _command_region( self ):
+        """The bytes render() places BETWEEN the two goldens — the command block."""
+        rendered = gen.render_router_prompt()
+        self.assertTrue( rendered.startswith( _GOLDEN_HEADER ) )
+        self.assertTrue( rendered.endswith( _GOLDEN_FOOTER ) )
+        return rendered[ len( _GOLDEN_HEADER ) : len( rendered ) - len( _GOLDEN_FOOTER ) ]
 
     def test_header_prose_matches_the_independent_golden( self ):
         self.assertTrue( gen.render_router_prompt().startswith( _GOLDEN_HEADER ),
@@ -189,6 +205,28 @@ class TestScaffoldingGolden( unittest.TestCase ):
         """
         reworded = gen.render_router_prompt().replace( "### Task:", "### Tusk:", 1 )
         self.assertFalse( reworded.startswith( _GOLDEN_HEADER ) )
+
+    def test_command_region_holds_only_command_lines( self ):
+        """
+        Seam pin: the region between the two goldens is the command block and NOTHING
+        else. Every non-empty line must be a well-formed <command> line — so junk
+        injected at the block/footer seam (which the start/end anchors miss) is caught.
+        """
+        for line in self._command_region().split( "\n" ):
+            if line == "": continue
+            self.assertRegex( line, self._COMMAND_LINE,
+                              f"non-command line in the pinned command region: {line!r}" )
+
+    def test_seam_pin_detects_injected_junk( self ):
+        """
+        Control: prove the seam pin CAN go red. Inject a stray line at the seam and
+        confirm at least one region line no longer reads as a command line — so a
+        green seam pin means the block is clean, not a check that cannot fail.
+        """
+        corrupted = self._command_region() + "ZZZDRIFT injected at the seam\n"
+        offenders = [ ln for ln in corrupted.split( "\n" )
+                      if ln != "" and not self._COMMAND_LINE.match( ln ) ]
+        self.assertTrue( offenders, "seam pin could not detect injected junk" )
 
     def test_voice_command_slot_is_a_literal( self ):
         """`{voice_command}` must reach the file unsubstituted for serve-time format()."""
