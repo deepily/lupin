@@ -81,7 +81,7 @@ _TYPE_ANNOT  = re.compile( r"""(?ix) ^ (?P<key>[A-Za-z_][\w\-\.\[\]"']*) \s* : \
 
 _ASSIGN = re.compile(
     r"""(?ix)
-    (?P<key>[A-Za-z_][A-Za-z0-9_\-\.\[\]"']{0,60}?)
+    (?P<key>["']?[A-Za-z_][A-Za-z0-9_\-\.\[\]"']{0,60}?)
     \s* (?P<sep> [:=] ) \s*
     (?P<val> .+ ) $ """ )
 
@@ -108,6 +108,34 @@ _BLOCK_INDICATOR = re.compile( r"^[>|][-+]?$" )
 _B64ISH          = re.compile( r"^[A-Za-z0-9+/=_\-]{24,}$" )
 
 
+_LONG_B64_RUN = re.compile( r"[A-Za-z0-9+/=_\-]{24,}" )
+
+
+def _carries_key_material( v ):
+    """
+    True when the VALUE is itself a credential payload rather than a container.
+
+    The doc-viewer detector blocks these; this scanner used to drop them as "template"
+    or "structure" because they contain braces or brackets (Rachel's F1, measured).
+
+    Requires:
+        - v is the stripped value text
+
+    Ensures:
+        - True for a JSON blob carrying a credential field, or a list/blob holding a long
+          base64 run — a service-account key pasted as a string, key material as lines
+        - False for an ordinary structure, template or short list
+    """
+    if not ( v.startswith( ( "{", "[", '"{', '"[' ) ) or v.startswith( ( "'{", "'[" ) ) ):
+        return False
+    if "-----BEGIN" in v:
+        return True
+    if _FIELD.search( v ) and _LONG_B64_RUN.search( v ):
+        return True
+    # key material split across list entries: ["MIIEvQIBADAN…", …]
+    return bool( _LONG_B64_RUN.search( v ) ) and v.count( '"' ) >= 2
+
+
 def _looks_like_a_reference( value ):
     """A pointer to a secret is not a secret. Paths, env lookups, code."""
     v = value.strip().strip( '",\'' ).strip()
@@ -126,6 +154,16 @@ def _looks_like_a_reference( value ):
         return "path"
     if low in ( "none", "null", "true", "false", "''", '""', "[]", "{}", "0", "1" ):
         return "literal non-secret"
+    # F1 (Rachel, 2026-08-17) — a credential PAYLOAD is not a structure and not a template.
+    # A whole service-account key carried as a JSON string, or key material as a list of
+    # lines, was read as "template" / "structure" and dropped. Checked BEFORE those arms.
+    if _carries_key_material( v ):              return None
+    # F5 — a bare number is a size or a count, not a secret (CREDENTIAL_SNIFF_BYTES =
+    # 8192 was being reported). UNQUOTED only: a quoted digit string is how an account id
+    # or a numeric key is written, and that stays a candidate. The trade this accepts is
+    # a bare numeric secret — a PIN, an unquoted numeric id.
+    if '"' not in value and "'" not in value \
+       and re.match( r"^[+-]?\d[\d_]*(?:\.\d+)?$", v ):      return "numeric literal"
     if v.startswith( ( "{", "[" ) ) and not v.startswith( '{"' ):  return "structure"
     if re.match( r"^[A-Za-z_][A-Za-z0-9_]*$", v ) and "_" in v and v.isupper():
         return "constant name"
@@ -139,6 +177,14 @@ def _looks_like_a_reference( value ):
     ident = v.strip( "`" )
     if re.match( r"^[a-z][a-z_\-]*$", ident ) and len( re.findall( r"[_\-]", ident ) ) >= 2:
         return "identifier name"        # lupin_queue_session_id, lupin-notification-api-key
+    # a subscript into something else is a lookup, not a value: creds[ "password" ]
+    if re.match( r"^[A-Za-z_][\w\.]*\s*\[", v ):             return "subscript ref"
+    # an UNQUOTED run of plain words is a docstring line describing the field, not setting
+    # it — "password: User password". Quoted stays a candidate, so a two-word passphrase
+    # in quotes survives; an unquoted one is the trade.
+    if '"' not in value and "'" not in value \
+       and re.match( r"^[A-Za-z][A-Za-z ]+$", v ) and len( v.split() ) >= 2:
+        return "field description"
     if re.match( r"^f?['\"].*\{.*\}", v ):                   return "f-string template"
     if "{" in v and "}" in v:                                 return "template"
     if len( v.split() ) > 4:                                  return "prose"
@@ -250,9 +296,18 @@ _TEXT_EXT = ( ".md", ".ini", ".env", ".cfg", ".conf", ".yaml", ".yml", ".json",
               ".py", ".tf", ".sh", ".ts", ".js", ".toml", ".properties", ".xml" )
 
 
+# This scanner's OWN fixtures plant fake credentials on purpose. They are excluded by
+# name — and nothing else is. An earlier version skipped the whole test tree, which meant
+# a real credential in a test fixture was invisible to both the gate and the scan
+# (Rachel's F3, measured). Tiffany found a live sandbox project id in test fixtures on
+# this very afternoon, so "it is only a test file" is not a reason to stop looking.
+_SELF_PLANTED = ( "src/tests/unit/test_secret_scan.py",
+                  "src/tests/unit/fixtures/secret_scan_last_full_scan.json" )
+
+
 def _is_text_path( p ):
     low = p.lower()
-    if "/tests/" in low or low.startswith( "tests/" ) or "/test_" in low:
+    if any( low.endswith( s ) for s in _SELF_PLANTED ):
         return False
     return low.endswith( _TEXT_EXT ) or low.rsplit( "/", 1 )[ -1 ] in ( ".env", "Dockerfile" )
 
