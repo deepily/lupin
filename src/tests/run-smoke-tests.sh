@@ -36,4 +36,9 @@ if [ -x "$VENV_PYTEST" ] && "$VENV_PYTEST" --version > /dev/null 2>&1; then PYTE
 # (python src/tests/smoke/test_proxy_integration.py --group all --auto-proxy),
 # never as part of the pytest-discoverable smoke leg. Observed riding along on
 # ts-b51e63c9 (2026-06-12), blowing the smoke leg to 3806.9s.
-exec $PYTEST src/tests/smoke/ --ignore=src/tests/smoke/test_proxy_integration.py "$@"
+# A collection error is the suite NEVER RUNNING, and its conftest shape fires no pytest
+# hook at all — so the exit code, read out here, is the only thing that can report it
+# (row 73c6819d). The wrapper re-raises pytest's status verbatim.
+source "$PROJECT_ROOT/src/scripts/lib/pytest-with-diagnosis.sh"
+run_pytest_with_diagnosis $PYTEST src/tests/smoke/ --ignore=src/tests/smoke/test_proxy_integration.py "$@"
+exit $?

@@ -35,7 +35,13 @@ if [ -x "$VENV_PYTEST" ] && "$VENV_PYTEST" --version > /dev/null 2>&1; then PYTE
 
 # `-m serial_bridge_guard` OVERRIDES the addopts `-m` expression, selecting exactly
 # the deselected-by-default guard tests. Both files carry one.
-exec $PYTEST \
+#
+# A collection error is the guard NEVER RUNNING, and its conftest shape fires no pytest
+# hook at all — so the exit code, read out here, is the only thing that can report it
+# (row 73c6819d). The wrapper re-raises pytest's status verbatim.
+source "$PROJECT_ROOT/src/scripts/lib/pytest-with-diagnosis.sh"
+run_pytest_with_diagnosis $PYTEST \
     src/tests/unit/test_sessions_dir_seam.py \
     src/tests/unit/test_register_session_bridge_write_contract.py \
     -m serial_bridge_guard -v "$@"
+exit $?

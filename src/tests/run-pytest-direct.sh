@@ -40,5 +40,10 @@ if [ -f "$HOME/.lupin/test-env.sh" ]; then
     source "$HOME/.lupin/test-env.sh"
 fi
 
-# Delegate to pytest — first arg is the test file, remaining args are pytest flags
-exec python3 -m pytest "$@"
+# Delegate to pytest — first arg is the test file, remaining args are pytest flags.
+# A collection error is the suite NEVER RUNNING, and its conftest shape fires no pytest
+# hook at all — so the exit code, read out here, is the only thing that can report it
+# (row 73c6819d). The wrapper re-raises pytest's status verbatim.
+source "$PROJECT_ROOT/src/scripts/lib/pytest-with-diagnosis.sh"
+run_pytest_with_diagnosis python3 -m pytest "$@"
+exit $?

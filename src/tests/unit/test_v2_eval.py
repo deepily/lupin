@@ -635,6 +635,26 @@ def _seed_trace( tmp_path, questions ):
 
 _WEATHER_QUESTIONS = [ "what's the weather in Tokyo", "what's the weather" ]
 
+# ⚠️ A LIVE DEPENDENCY THAT WAS HIDING IN A UNIT TEST (found 2026-08-17 by the frozen-tree
+# tier for row 73c6819d). `main` reads the running server's git sha before the passes, and
+# these tests injected a client factory but NOT that reader — so they dialled the real
+# :8000 over the network. They passed whenever that server happened to be free, and went
+# red for ten seconds of socket timeout whenever it was busy (it was: a monopolize-mode
+# paired run held it). The verdict had nothing to do with the code under test, which is the
+# whole failure mode: a test that reports on something it is not measuring. Injecting the
+# reader makes these tests measure v2_eval and nothing else.
+#
+# The accidental network call WAS the only thing exercising the sha path in this file, so
+# removing it without replacement would trade a flaky test for a blind spot. The two tests
+# at the end of this section cover it deliberately instead: the reported sha reaches the
+# provenance record, and a server that cannot identify itself stops the run.
+_STUB_SHA = "0123456789abcdef0123456789abcdef01234567"
+
+# The model-server probe is a LIVE SOCKET, so a unit test must inject its own. Leaving it
+# to the default would put back exactly the hidden network dependency described above,
+# one dependency over: the tests would pass whenever the box happened to be up.
+_NO_PROBE = lambda context: None
+
 
 def test_main_happy_path_explicit_args( tmp_path ):
     root  = str( tmp_path )
@@ -644,6 +664,8 @@ def test_main_happy_path_explicit_args( tmp_path ):
         client_factory=lambda url: _StubClient(),
         project_root=root,
         timestamp="2026-08-14-02-30-00",
+        read_sha_fn=lambda base_url: _STUB_SHA,
+        probe_models_fn=_NO_PROBE,
     )
     assert os.path.exists( result[ "paths" ][ "report" ] )
     assert result[ "warm" ][ "n" ] == 2
@@ -659,6 +681,8 @@ def test_main_stamps_provenance_and_writes_paired_artifact( tmp_path ):
         client_factory=lambda url: _StubClient(),
         project_root=str( tmp_path ),
         timestamp="2026-08-14-02-30-00",
+        read_sha_fn=lambda base_url: _STUB_SHA,
+        probe_models_fn=_NO_PROBE,
     )
     prov = result[ "provenance" ]
     assert prov[ "arm" ] == "v2" and prov[ "corpus" ] == "weather"
@@ -683,6 +707,12 @@ def test_main_defaults_use_injected_helpers( tmp_path, monkeypatch ):
     monkeypatch.setattr( ve.du, "get_project_root", lambda: root )
     monkeypatch.setattr( ve.du, "get_current_datetime_raw", lambda: _FixedDT() )
     monkeypatch.setattr( ve, "_default_client_factory", lambda url: _StubClient() )
+    # The DEFAULT sha reader is patched rather than injected, because this test is about
+    # what main does when nothing is passed in — injecting would defeat its own point.
+    monkeypatch.setattr( ve, "read_running_server_sha", lambda base_url: _STUB_SHA )
+    # Same reasoning for the model-server probe: patch the DEFAULT rather than inject one,
+    # since this test is about what main reaches for when nothing is passed in.
+    monkeypatch.setattr( ve, "_default_model_probe", _NO_PROBE )
     result = ve.main( argv=[ "--corpus", "weather", "--max-router-error-rate", "1.0" ] )
     assert result[ "cold" ][ "n" ] == 2
     assert os.path.isdir( result[ "out_dir" ] )
@@ -830,6 +860,8 @@ def test_main_cold_guard_raises_on_warm_cold( tmp_path ):
             client_factory=lambda url: _ReplayClient(),
             project_root=str( tmp_path ),
             timestamp="2026-08-14-02-30-00",
+            read_sha_fn=lambda base_url: _STUB_SHA,
+            probe_models_fn=_NO_PROBE,
         )
 
 
@@ -840,8 +872,95 @@ def test_main_allow_warm_cold_skips_the_guard( tmp_path ):
         client_factory=lambda url: _ReplayClient(),
         project_root=str( tmp_path ),
         timestamp="2026-08-14-02-30-00",
+        read_sha_fn=lambda base_url: _STUB_SHA,
+        probe_models_fn=_NO_PROBE,
     )
     assert result[ "warm" ][ "cache_hit_rate" ] == 1.0
+
+
+def test_main_refuses_before_any_question_when_a_model_port_is_dead( tmp_path, monkeypatch ):
+    """
+    ROW b9604f8c, THE FIRING ARM. The run must stop at second one, not at hour three. The
+    control that makes it evidence is `asked`: if a single question went out, the refusal
+    came too late to have saved anything.
+    """
+    from cosa.utils.model_server_liveness import ModelServerUnavailable
+    _seed_trace( tmp_path, _WEATHER_QUESTIONS )
+    asked = []
+
+    class _CountingClient:
+        def ask( self, question ):
+            asked.append( question )
+            return { "utterance": question, "ok": True, "status_code": 200, "payload": {} }
+
+    def _dead_probe( context ):
+        raise ModelServerUnavailable( "192.168.1.21:3000 did not answer" )
+
+    with pytest.raises( ModelServerUnavailable, match="3000" ):
+        ve.main(
+            argv=[ "--corpus", "weather", "--max-router-error-rate", "1.0" ],
+            client_factory=lambda url: _CountingClient(),
+            project_root=str( tmp_path ),
+            timestamp="2026-08-14-02-30-00",
+            read_sha_fn=lambda base_url: _STUB_SHA,
+            probe_models_fn=_dead_probe,
+        )
+    assert asked == [], "the run asked questions after the dependency was known dead"
+
+
+def test_main_probes_again_between_the_passes( tmp_path ):
+    """
+    A three-hour run can OUTLIVE its dependency, so one probe at the start is not enough.
+    The contexts are asserted, not just the count: "twice" would still pass if both probes
+    fired before the cold pass, which would leave the expensive half unguarded.
+    """
+    _seed_trace( tmp_path, _WEATHER_QUESTIONS )
+    contexts = []
+    ve.main(
+        argv=[ "--corpus", "weather", "--max-router-error-rate", "1.0" ],
+        client_factory=lambda url: _StubClient(),
+        project_root=str( tmp_path ),
+        timestamp="2026-08-14-02-30-00",
+        read_sha_fn=lambda base_url: _STUB_SHA,
+        probe_models_fn=lambda context: contexts.append( context ),
+    )
+    assert contexts == [ "before the cold pass", "between the cold and warm passes" ]
+
+
+def test_main_records_the_sha_the_server_reported( tmp_path ):
+    """
+    REPLACES THE COVERAGE THE ACCIDENTAL NETWORK CALL WAS PROVIDING. Which tree produced
+    the numbers is the load-bearing provenance field (row c9b43538), so the sha the reader
+    returns must reach the record rather than being read and dropped.
+    """
+    _seed_trace( tmp_path, _WEATHER_QUESTIONS )
+    result = ve.main(
+        argv=[ "--corpus", "weather", "--max-router-error-rate", "1.0" ],
+        client_factory=lambda url: _StubClient(),
+        project_root=str( tmp_path ),
+        timestamp="2026-08-14-02-30-00",
+        read_sha_fn=lambda base_url: _STUB_SHA,
+        probe_models_fn=_NO_PROBE,
+    )
+    assert result[ "provenance" ][ "git_sha" ] == _STUB_SHA
+
+
+def test_main_refuses_when_the_server_cannot_identify_itself( tmp_path ):
+    """
+    THE OTHER HALF, AND THE ONE THAT MATTERS. A server that returns no sha means numbers
+    that cannot be traced to a tree — the run must stop before spending hours, not record
+    an untraceable result.
+    """
+    _seed_trace( tmp_path, _WEATHER_QUESTIONS )
+    with pytest.raises( ve.EvalIntegrityError, match="did not report a git sha" ):
+        ve.main(
+            argv=[ "--corpus", "weather", "--max-router-error-rate", "1.0" ],
+            client_factory=lambda url: _StubClient(),
+            project_root=str( tmp_path ),
+            timestamp="2026-08-14-02-30-00",
+            read_sha_fn=lambda base_url: "",
+            probe_models_fn=_NO_PROBE,
+        )
 
 
 # ---------------------------------------------------------------------------

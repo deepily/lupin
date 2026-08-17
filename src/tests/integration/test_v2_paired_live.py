@@ -135,6 +135,25 @@ def _require_v1_live_seam_and_worktree():
         ) from e
 
 
+def _require_model_servers_live( config_mgr ):
+    """
+    Refuse the paired run unless EVERY configured vLLM endpoint answers.
+
+    WHY IT IS A PRECONDITION AND NOT A RUNTIME ERROR. Both arms call the model server for
+    hours. On 2026-08-17 the router at :3000 went down while :3001 stayed up, so the box
+    read as alive to any check that probed one port, and the outage surfaced only when a
+    THREE-HOUR job died on it with an API error three layers from the cause (row b9604f8c).
+
+    Ensures:
+        - raises ModelServerUnavailable NAMING the endpoint that did not answer, and what
+          it did, before any measurement is taken
+        - is a module-level seam so the bridge-reachability tests can neutralise it the
+          same way they neutralise the other preconditions, without stubbing a socket
+    """
+    from cosa.utils.model_server_liveness import require_live
+    return require_live( config_mgr=config_mgr, context="the paired go/no-go run" )
+
+
 def _resolve_v1_paired_store() -> str:
     """
     The v1 arm's fully-qualified `database.table` snapshot store — its DEDICATED measurement
@@ -333,6 +352,9 @@ def test_v2_paired_go_no_go_live():
 
     # Precondition 2 — v1-arm live seam + pinned-worktree server. Refuses until step 1 lands.
     _require_v1_live_seam_and_worktree()
+
+    # Precondition 2b — DEPENDENCY: every configured vLLM endpoint must answer (row b9604f8c).
+    _require_model_servers_live( config_mgr )
 
     # Per-arm clean-step (design §4, decision B) — TRUNCATE the v2 arm's isolated snapshot store
     # so its cold pass starts genuinely cold, BEFORE the VALIDITY clean-start check below reads the

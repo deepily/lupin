@@ -61,13 +61,23 @@ class TestPytestDirectScript:
 
     def test_script_delegates_to_pytest( self, script_path ):
         """The script must invoke `python3 -m pytest`, not `python3` directly
-        (otherwise fixtures / markers / parametrize won't work)."""
+        (otherwise fixtures / markers / parametrize won't work).
+
+        ⚠️ THIS TEST USED TO ASSERT ON `exec` ITSELF, and that made it a test of the
+        delivery mechanism rather than of the delegation. Row 73c6819d had to DROP the
+        exec: `exec` replaces the shell, so nothing is left to read pytest's exit code —
+        and on a conftest collection error that code is the only signal there is. The
+        proposition worth keeping is "pytest gets the caller's arguments", so that is what
+        is asserted now; the copy-paste guard against a bare `python3 file.py` stays.
+        """
         with open( script_path, "r" ) as f:
             content = f.read()
-        # The exec line must call pytest
-        assert "python3 -m pytest" in content or "pytest" in content.split( "exec " )[ -1 ]
-        # Must NOT be a plain python3 invocation like smoke_direct
-        # (guard against accidental copy-paste regression)
-        exec_lines = [ l for l in content.splitlines() if l.strip().startswith( "exec " ) ]
-        assert any( "pytest" in l for l in exec_lines ), \
-            f"No `exec ... pytest ...` line found in {script_path}"
+        invocations = [ l.strip() for l in content.splitlines()
+                        if "pytest" in l and "$@" in l and not l.strip().startswith( "#" ) ]
+
+        assert invocations, f"No line passing \"$@\" to pytest found in {script_path}"
+        assert any( "-m pytest" in l for l in invocations ), (
+            f"{script_path} must delegate to `python3 -m pytest`, not run a file with plain "
+            f"python3 the way run-smoke-direct.sh does — fixtures, markers and parametrize "
+            f"do not work that way. Lines seen: {invocations}"
+        )

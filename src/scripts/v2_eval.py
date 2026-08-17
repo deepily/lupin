@@ -1054,6 +1054,7 @@ def main(
     project_root   : Optional[ str ] = None,
     timestamp      : Optional[ str ] = None,
     read_sha_fn    : Optional[ Callable[ [ str ], str ] ] = None,
+    probe_models_fn: Optional[ Callable[ [ str ], None ] ] = None,
 ) -> Dict[ str, Any ]:
     """
     Run the two-pass eval and write the report.
@@ -1109,7 +1110,19 @@ def main(
     factory = client_factory if client_factory is not None else _default_client_factory
     client  = factory( args.base_url )
 
+    # The model server is a dependency this run cannot see fail. Probe EVERY port the
+    # configuration names BEFORE a single question is asked, and refuse naming the one that
+    # did not answer — a half-alive box (one port up, one down) reads as alive to any check
+    # that probes a single port, which is how the last outage stayed invisible until a
+    # three-hour job died on it (row b9604f8c).
+    probe = probe_models_fn if probe_models_fn is not None else _default_model_probe
+    probe( "before the cold pass" )
+
     cold_records = run_pass( corpus, client.ask, "cold", fail_fast=True )
+    # AGAIN between the passes. A long run can OUTLIVE its dependency: the box can die at
+    # minute ten as easily as before minute zero, and the warm pass is the expensive half.
+    # The pass boundary is the cheapest point where a mid-run death is still catchable.
+    probe( "between the cold and warm passes" )
     warm_records = run_pass( corpus, client.ask, "warm" )
 
     trace_path = os.path.join( root, "io", "v2-flow", f"trace-{stamp[ :10 ]}.jsonl" )
@@ -1135,6 +1148,24 @@ def main(
     paths[ "artifact" ] = artifact_path
 
     return { "out_dir": out_dir, "paths": paths, "cold": cold_metrics, "warm": warm_metrics, "provenance": provenance }
+
+
+def _default_model_probe( context: str ) -> None:   # pragma: no cover - live socket boundary
+    """
+    Refuse the run unless EVERY configured vLLM endpoint answers.
+
+    WHY IT IS HERE. On 2026-08-17 the router at :3000 went down while :3001 stayed up. The
+    box read as alive to any check that probed one port, and the outage surfaced only when
+    a THREE-HOUR job died on it, with an API error three layers from the cause (row
+    b9604f8c). Probing every configured endpoint before the first question turns those
+    hours into a refusal at second one that names the port.
+
+    Injected as `probe_models_fn` in tests, so the unit tier never opens a socket.
+    """
+    from cosa.config.configuration_manager import ConfigurationManager
+    from cosa.utils.model_server_liveness import require_live
+    require_live( config_mgr=ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ),
+                  context=context )
 
 
 def _default_client_factory( base_url: str ) -> HttpAskClient:

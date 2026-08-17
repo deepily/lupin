@@ -132,6 +132,13 @@ run_tier() {
         echo "  ⊘ NOT EXECUTED: $name (exit code $exit_code — tier did not run, ${elapsed}s)"
         NOT_EXECUTED=$((NOT_EXECUTED + 1))
         NOT_EXECUTED_TIERS="$NOT_EXECUTED_TIERS $name"
+        # "NOT EXECUTED, exit 4" names the state but not the cause. When the code says a
+        # collection error, say WHICH one — the conftest shape fires no pytest hook, so
+        # this is the only place it can be reported (row 73c6819d). Fails soft: the
+        # diagnoser's own status is discarded and the tier's classification stands.
+        "$VENV_PYTHON" "$PROJECT_ROOT/src/cosa/utils/pytest_collection_diagnosis.py" \
+            --exit-code "$exit_code" --output-file "$LOG_FILE" \
+            --project-root "$PROJECT_ROOT" 2>&1 | tee -a "$LOG_FILE" || true
     fi
 }
 

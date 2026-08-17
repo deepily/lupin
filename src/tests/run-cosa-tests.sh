@@ -34,4 +34,9 @@ export LUPIN_ROOT="$PROJECT_ROOT"
 VENV_PYTEST="$PROJECT_ROOT/.venv/bin/pytest"
 if [ -x "$VENV_PYTEST" ] && "$VENV_PYTEST" --version > /dev/null 2>&1; then PYTEST="$VENV_PYTEST"; else PYTEST="python3 -m pytest"; fi
 
-exec $PYTEST src/cosa/tests/ "$@"
+# A collection error is the suite NEVER RUNNING, and its conftest shape fires no pytest
+# hook at all — so the exit code, read out here, is the only thing that can report it
+# (row 73c6819d). The wrapper re-raises pytest's status verbatim.
+source "$PROJECT_ROOT/src/scripts/lib/pytest-with-diagnosis.sh"
+run_pytest_with_diagnosis $PYTEST src/cosa/tests/ "$@"
+exit $?

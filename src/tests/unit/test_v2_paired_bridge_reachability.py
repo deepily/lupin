@@ -80,6 +80,7 @@ def test_bridge_reaches_and_fires_validity_check():
          patch( "v2_eval.load_corpus", return_value=[ ( "u", "agent router go to todo" ) ] ), \
          patch.object( guard, "require_isolated_snapshot_table", return_value=_V2_STORE ), \
          patch.object( bridge, "_require_v1_live_seam_and_worktree", lambda: None ), \
+         patch.object( bridge, "_require_model_servers_live", lambda cfg: None ), \
          patch.object( bridge, "_clean_v2_arm_store", lambda config_mgr: "solution_snapshots" ), \
          patch.object( bridge, "_resolve_v1_paired_store", return_value=_V1_STORE ), \
          patch.object( guard, "count_store_rows", return_value=0 ), \
@@ -159,6 +160,7 @@ def test_bridge_reaches_and_fires_v2_clean_step():
          patch( "v2_eval.load_corpus", return_value=[ ( "u", "agent router go to todo" ) ] ), \
          patch.object( guard, "require_isolated_snapshot_table", return_value=_V2_STORE ), \
          patch.object( bridge, "_require_v1_live_seam_and_worktree", lambda: None ), \
+         patch.object( bridge, "_require_model_servers_live", lambda cfg: None ), \
          patch.object( bridge, "_open_v2_arm_connection", return_value=fake_conn ), \
          patch.object( bridge, "_resolve_v1_paired_store", return_value=_V1_STORE ), \
          patch.object( guard, "count_store_rows", return_value=0 ), \
@@ -233,6 +235,7 @@ def test_bridge_runs_both_arms_and_builds_provenance_gated_verdict():
          patch( "v2_eval.load_corpus", return_value=[ ( "u", "agent router go to todo" ) ] ), \
          patch.object( guard, "require_isolated_snapshot_table", return_value=_V2_STORE ), \
          patch.object( bridge, "_require_v1_live_seam_and_worktree", lambda: None ), \
+         patch.object( bridge, "_require_model_servers_live", lambda cfg: None ), \
          patch.object( bridge, "_clean_v2_arm_store", lambda config_mgr: "solution_snapshots" ), \
          patch.object( bridge, "_resolve_v1_paired_store", return_value=_V1_STORE ), \
          patch.object( guard, "count_store_rows", return_value=0 ), \
@@ -262,6 +265,7 @@ def test_bridge_refuses_when_arms_measured_different_samples():
          patch( "v2_eval.load_corpus", return_value=[ ( "u", "agent router go to todo" ) ] ), \
          patch.object( guard, "require_isolated_snapshot_table", return_value=_V2_STORE ), \
          patch.object( bridge, "_require_v1_live_seam_and_worktree", lambda: None ), \
+         patch.object( bridge, "_require_model_servers_live", lambda cfg: None ), \
          patch.object( bridge, "_clean_v2_arm_store", lambda config_mgr: "solution_snapshots" ), \
          patch.object( bridge, "_resolve_v1_paired_store", return_value=_V1_STORE ), \
          patch.object( guard, "count_store_rows", return_value=0 ), \
@@ -353,3 +357,64 @@ def test_artifact_dump_defaults_to_the_live_dir_when_unredirected():
         with patch.object( os, "makedirs", spy_makedirs ):
             bridge._dump_paired_artifacts( _V1_ART, _V2_ART )   # best-effort: swallows the raise
     assert seen[ "path" ] == live
+
+
+# ---------------------------------------------------------------------------
+# Precondition 2b — the model-server DEPENDENCY guard is REACHED and GATES the run
+# (row b9604f8c). The other tests in this file neutralise it, exactly as they neutralise
+# every other precondition; these two are the pair that prove it is really there.
+# ---------------------------------------------------------------------------
+def test_bridge_refuses_when_a_model_server_port_is_dead():
+    """
+    THE FIRING ARM. A dead endpoint must stop the paired run BEFORE either arm measures
+    anything — the whole point is that the refusal costs seconds rather than three hours.
+    `_run_v1_arm` is the control: if it ran, the guard fired too late to save the run.
+    """
+    import v2_eval
+    from cosa.utils.model_server_liveness import ModelServerUnavailable
+
+    cfg      = MagicMock()
+    cfg.get.return_value = "solution_snapshots"
+    v1_spy   = MagicMock( return_value=_V1_ART )
+    refusal  = ModelServerUnavailable( "192.168.1.21:3000 did not answer" )
+
+    with patch( "cosa.config.configuration_manager.ConfigurationManager", return_value=cfg ), \
+         patch( "v2_eval.load_corpus", return_value=[ ( "u", "agent router go to todo" ) ] ), \
+         patch.object( guard, "require_isolated_snapshot_table", return_value=_V2_STORE ), \
+         patch.object( bridge, "_require_v1_live_seam_and_worktree", lambda: None ), \
+         patch.object( bridge, "_require_model_servers_live", MagicMock( side_effect=refusal ) ), \
+         patch.object( bridge, "_run_v1_arm", v1_spy ):
+        with pytest.raises( ModelServerUnavailable, match="3000" ):
+            bridge.test_v2_paired_go_no_go_live()
+
+    v1_spy.assert_not_called()
+
+
+def test_bridge_reaches_the_model_server_guard_with_the_run_s_own_config():
+    """
+    The guard must be handed the SAME config object the run resolved its stores from —
+    probing a different configuration would answer a question nobody asked.
+    """
+    import v2_eval
+
+    fake_conn = MagicMock()
+    fake_conn.engine.url = "postgresql://u:p@h/lupin_db_test"
+    cfg = MagicMock()
+    cfg.get.return_value = "solution_snapshots"
+    probe_spy = MagicMock( return_value=[] )
+
+    with patch( "cosa.config.configuration_manager.ConfigurationManager", return_value=cfg ), \
+         patch( "v2_eval.load_corpus", return_value=[ ( "u", "agent router go to todo" ) ] ), \
+         patch.object( guard, "require_isolated_snapshot_table", return_value=_V2_STORE ), \
+         patch.object( bridge, "_require_v1_live_seam_and_worktree", lambda: None ), \
+         patch.object( bridge, "_require_model_servers_live", probe_spy ), \
+         patch.object( bridge, "_open_v2_arm_connection", return_value=fake_conn ), \
+         patch.object( bridge, "_resolve_v1_paired_store", return_value=_V1_STORE ), \
+         patch.object( guard, "count_store_rows", return_value=0 ), \
+         patch.dict( os.environ, { "LUPIN_V1_ARM_BASE_URL": "http://stub-v1:7997",
+                                   "LUPIN_PAIRED_ARTIFACT_DIR": _ARTIFACT_TMPDIR } ), \
+         patch.object( bridge, "_run_v1_arm", return_value=_V1_ART ), \
+         patch.object( bridge, "_run_v2_arm", return_value=_V2_ART ):
+        bridge.test_v2_paired_go_no_go_live()
+
+    probe_spy.assert_called_once_with( cfg )

@@ -257,9 +257,13 @@ echo ""
 
 cd "$PROJECT_ROOT"
 
-# Run pytest and capture exit code
+# Run pytest and capture exit code. The wrapper adds one thing only: when the code says
+# the suite never RAN (a collection error — exit 4's conftest shape fires no pytest hook
+# and writes no junit), it prints the cause instead of leaving a bare traceback. The
+# status is re-raised verbatim, so the reporting below is unchanged. Row 73c6819d.
+source "$PROJECT_ROOT/src/scripts/lib/pytest-with-diagnosis.sh"
 set +e  # Don't exit on pytest failure
-$VENV_PYTHON -m pytest src/tests/e2e_ui/ --browser chromium "${REMAINING_ARGS[@]}"
+run_pytest_with_diagnosis $VENV_PYTHON -m pytest src/tests/e2e_ui/ --browser chromium "${REMAINING_ARGS[@]}"
 PYTEST_EXIT_CODE=$?
 set -e
 

@@ -34,9 +34,11 @@ captured output and returns a description, so both the in-pytest plugin and the 
 job can render the SAME diagnosis. Judgement about pass/fail belongs to the caller.
 """
 
+import argparse
 import os
 import re
 import subprocess
+import sys
 from typing import Dict, List, Optional
 
 
@@ -86,6 +88,27 @@ def _find_uncommitted_python( project_root: Optional[ str ] = None ) -> List[ st
         if path.endswith( ".py" ):
             files.append( path )
     return files
+
+
+# A terminal-colour escape sequence, e.g. the "\x1b[31m" pytest wraps an error line in.
+# ⚠️ WHY THIS EXISTS. The runner wrappers pipe pytest through `tee`, which makes stdout a
+# pipe, which makes pytest drop colour — so the wrappers ask for `--color=yes` to keep a
+# human's terminal readable. That puts escape codes INSIDE the captured text the regexes
+# below run against, and "E   ModuleNotFoundError" wearing a colour code does not match a
+# pattern written for the plain string. Stripping first is what keeps the diagnosis from
+# going quiet for the exact reason the wrapper exists.
+_ANSI_RE = re.compile( r"\x1b\[[0-9;?]*[ -/]*[@-~]" )
+
+
+def _strip_ansi( text: str ) -> str:
+    """
+    Remove terminal colour/cursor escape sequences from captured output.
+
+    Ensures:
+        - returns text unchanged when it carries no escape sequences
+        - is idempotent: stripping twice equals stripping once
+    """
+    return _ANSI_RE.sub( "", text )
 
 
 def _classify_cause( output: str ) -> Dict[ str, str ]:
@@ -166,7 +189,7 @@ def diagnose( exit_code: int, output: str, project_root: Optional[ str ] = None,
     """
     if exit_code in ( 0, 1 ):
         return None
-    output = output or ""
+    output = _strip_ansi( output or "" )
 
     if where_hint:
         where = where_hint
@@ -247,6 +270,75 @@ def render( diag: Dict ) -> str:
     return "\n".join( lines )
 
 
+# How much of a captured log to read. A collection error happens BEFORE anything runs, so
+# its output is short; the cap exists so a wrapper pointed at a 200MB suite log cannot make
+# the diagnosis itself the expensive step.
+_TAIL_BYTES = 262144
+
+
+def _read_tail( path: str, max_bytes: int = _TAIL_BYTES ) -> str:
+    """
+    Read at most the last `max_bytes` of a file.
+
+    Ensures:
+        - returns "" rather than raising when the file is missing or unreadable
+        - returns whole-file content when the file is smaller than the cap
+    """
+    try:
+        size = os.path.getsize( path )
+        with open( path, "rb" ) as fh:
+            if size > max_bytes:
+                fh.seek( size - max_bytes )
+            return fh.read().decode( "utf-8", errors="replace" )
+    except Exception:
+        return ""
+
+
+def main( argv: Optional[ List[ str ] ] = None ) -> int:
+    """
+    Command-line entry point for the RUNNER SCRIPTS — the one caller that can see shape B.
+
+    Requires:
+        - --exit-code is pytest's exit code from a run the caller already finished
+        - --output-file, when given, is that run's captured combined output
+
+    Ensures:
+        - prints the diagnosis block when the exit code plus output describe a collection
+          error, and prints NOTHING otherwise — a run that executed is not this tool's
+          business, and a block on every run would make the block meaningless
+        - ALWAYS returns 0. This process's status says whether the DIAGNOSER ran, never
+          whether the SUITE passed; a non-zero here would be read as the run's verdict by
+          the next `$?`, which is the same confusion this module exists to end
+        - never raises, whatever the input
+
+    WHY A CLI AND NOT AN IMPORT. A conftest collection error fires no pytest hook and
+    writes no junit, so the exit code — seen from OUTSIDE the process — is the only signal
+    that survives it. A shell runner cannot import Python state; it can call a program.
+    """
+    parser = argparse.ArgumentParser(
+        prog="pytest_collection_diagnosis",
+        description="Print a diagnosis when a finished pytest run was a collection error.",
+    )
+    parser.add_argument( "--exit-code",   type=int, required=True, help="pytest's exit code" )
+    parser.add_argument( "--output-file", default=None, help="file holding that run's captured output" )
+    parser.add_argument( "--project-root", default=None, help="repo root for the uncommitted-file scan" )
+    parser.add_argument( "--where-hint",   default=None, help="state WHERE collection failed, when known" )
+    try:
+        args   = parser.parse_args( argv )
+        output = _read_tail( args.output_file ) if args.output_file else ""
+        diag   = diagnose( args.exit_code, output,
+                           project_root=args.project_root, where_hint=args.where_hint )
+        if diag is not None:
+            print( render( diag ) )
+    except SystemExit:
+        # argparse's own exit for a malformed call. Say so, and still return 0 — a broken
+        # diagnostic must not be able to change the verdict of the run it was describing.
+        print( "[collection-diagnosis] bad arguments; no diagnosis rendered.", file=sys.stderr )
+    except Exception as e:
+        print( f"[collection-diagnosis] could not render a diagnosis: {e!r}", file=sys.stderr )
+    return 0
+
+
 def quick_smoke_test():
     """Exercise both measured shapes plus the two must-stay-silent controls."""
     import cosa.utils.util as du
@@ -269,4 +361,8 @@ def quick_smoke_test():
 
 
 if __name__ == "__main__":
+    # No arguments keeps the module's smoke test as the default, unchanged. Arguments mean
+    # a runner script is asking about a finished run.
+    if len( sys.argv ) > 1:
+        sys.exit( main() )
     quick_smoke_test()

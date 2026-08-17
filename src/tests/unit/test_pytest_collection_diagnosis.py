@@ -25,7 +25,10 @@ import pytest
 from cosa.agents.test_suite.job import TestSuiteJob
 from cosa.utils.pytest_collection_diagnosis import (
     COLLECTION_ERROR,
+    _read_tail,
+    _strip_ansi,
     diagnose,
+    main,
     render,
 )
 
@@ -288,3 +291,177 @@ def test_unrecognised_shape_is_admitted_rather_than_guessed():
     assert diag is not None
     assert diag[ "cause_class" ] == "unrecognised import-time failure"
     assert "kaboom" in diag[ "detail" ]
+
+
+# ── 4. THE CLI — the surface the RUNNER SCRIPTS call (row 73c6819d) ─────────
+# The suite job imports this module; a shell script cannot. The conftest shape fires no
+# hook, so a runner's only route to a diagnosis is to run this file as a program, keyed on
+# the exit code it just captured. These cover that entry point; the end-to-end proof that
+# real runner scripts print real blocks lives in test_runner_collection_diagnosis.py.
+def test_strip_ansi_removes_colour_and_is_idempotent():
+    """
+    Runner wrappers pipe pytest through `tee`, which kills colour, so they ask for it back
+    with PY_COLORS — putting escape codes in the very text the cause regexes match against.
+    """
+    coloured = "\x1b[31mE   ModuleNotFoundError: No module named 'x'\x1b[0m"
+
+    assert _strip_ansi( coloured ) == "E   ModuleNotFoundError: No module named 'x'"
+    assert _strip_ansi( _strip_ansi( coloured ) ) == _strip_ansi( coloured )
+    assert _strip_ansi( "plain text" ) == "plain text"
+
+
+def test_a_coloured_traceback_is_still_classified():
+    """The point of stripping: colour must not be able to silence the diagnosis."""
+    coloured = ( "\x1b[1m!!!! Interrupted: 1 error during collection !!!!\x1b[0m\n"
+                 "\x1b[31mE   ModuleNotFoundError: No module named 'cosa.gone'\x1b[0m\n" )
+    diag = diagnose( 2, coloured )
+
+    assert diag is not None
+    assert "orphaned import" in diag[ "cause_class" ]
+    assert "cosa.gone" in diag[ "detail" ]
+
+
+def test_read_tail_returns_whole_small_files_and_caps_large_ones( tmp_path ):
+    """A collection error's output is short; the cap stops a 200MB suite log being read."""
+    small = tmp_path / "small.log"; small.write_text( "short output\n" )
+    big   = tmp_path / "big.log";   big.write_text( "A" * 500 + "TAIL_MARKER" )
+
+    assert _read_tail( str( small ) ) == "short output\n"
+    tail = _read_tail( str( big ), max_bytes=20 )
+    assert tail.endswith( "TAIL_MARKER" ) and len( tail ) == 20
+
+
+def test_read_tail_is_silent_about_a_file_that_is_not_there( tmp_path ):
+    """A missing capture must degrade to no diagnosis, never to an exception."""
+    assert _read_tail( str( tmp_path / "never_written.log" ) ) == ""
+
+
+def test_cli_prints_the_block_for_a_collection_error( tmp_path, capsys ):
+    log = tmp_path / "run.log"
+    log.write_text( "ImportError while loading conftest '/x/conftest.py'.\n"
+                    "E   TypeError: make_provenance() missing 1 required positional argument: 'run_id'\n" )
+
+    rc  = main( [ "--exit-code", "4", "--output-file", str( log ), "--project-root", str( tmp_path ) ] )
+    out = capsys.readouterr().out
+
+    assert rc == 0, "the diagnoser's status describes the DIAGNOSER, never the suite"
+    assert COLLECTION_ERROR in out
+    assert "signature change ahead of its callers" in out
+
+
+def test_cli_says_nothing_about_a_run_that_actually_ran( tmp_path, capsys ):
+    """THE CONTROL. A block on a pass or a plain failure would make the block meaningless."""
+    log = tmp_path / "run.log"; log.write_text( "5 passed, 1 failed\n" )
+
+    for code in ( 0, 1 ):
+        assert main( [ "--exit-code", str( code ), "--output-file", str( log ) ] ) == 0
+        assert capsys.readouterr().out == ""
+
+
+def test_cli_accepts_a_where_hint_for_a_caller_that_already_knows( tmp_path, capsys ):
+    log = tmp_path / "run.log"
+    log.write_text( "E   ModuleNotFoundError: No module named 'cosa.retired'\n" )
+
+    assert main( [ "--exit-code", "2", "--output-file", str( log ), "--where-hint", "test module" ] ) == 0
+    assert "Where        : test module" in capsys.readouterr().out
+
+
+def test_cli_runs_without_an_output_file( capsys ):
+    """Exit 5 needs no output to be diagnosable — nothing was collected, and that is the fact."""
+    assert main( [ "--exit-code", "5" ] ) == 0
+    assert "no tests matched" in capsys.readouterr().out
+
+
+def test_cli_returns_zero_on_a_malformed_call( capsys ):
+    """
+    argparse exits the process on bad arguments. Letting that escape would hand the shell a
+    non-zero status for the DIAGNOSER, which the next `$?` would read as the run's verdict.
+    """
+    rc = main( [ "--exit-code", "not-a-number" ] )
+
+    assert rc == 0
+    assert "bad arguments" in capsys.readouterr().err
+
+
+# ── 5. THE PATHS NOTHING HAD EXERCISED YET ─────────────────────────────────
+# Found while measuring this file for the 100% gate: five branches of the original module
+# had no test. Each is a place the diagnosis could go quiet or go wrong, so they are closed
+# here rather than left as a number nobody looks at.
+def test_uncommitted_scan_stays_quiet_when_git_is_unavailable( monkeypatch ):
+    """
+    The scan is a courtesy, not the diagnosis. A box without git, or a directory outside a
+    work tree, must cost the reader the suspect list — never the whole block.
+    """
+    import cosa.utils.pytest_collection_diagnosis as mod
+
+    def _no_git( *a, **kw ): raise FileNotFoundError( "git not found" )
+    monkeypatch.setattr( mod.subprocess, "run", _no_git )
+    assert mod._find_uncommitted_python( "/tmp" ) == []
+
+
+def test_uncommitted_scan_ignores_non_python_and_malformed_porcelain_lines( monkeypatch ):
+    """`git status --porcelain` carries two-char status flags, blank lines, and non-.py paths."""
+    import cosa.utils.pytest_collection_diagnosis as mod
+
+    class _Out:
+        returncode = 0
+        stdout     = " M src/a.py\n?? notes.md\n\n M src/b.py\n"
+
+    monkeypatch.setattr( mod.subprocess, "run", lambda *a, **kw: _Out() )
+    assert mod._find_uncommitted_python( "/tmp" ) == [ "src/a.py", "src/b.py" ]
+
+
+def test_uncommitted_scan_stays_quiet_when_git_reports_failure( monkeypatch ):
+    """A non-zero git (e.g. not a repository) is not a diagnosis failure."""
+    import cosa.utils.pytest_collection_diagnosis as mod
+
+    class _Fail:
+        returncode = 128
+        stdout     = ""
+
+    monkeypatch.setattr( mod.subprocess, "run", lambda *a, **kw: _Fail() )
+    assert mod._find_uncommitted_python( "/tmp" ) == []
+
+
+def test_a_removed_symbol_is_named_as_an_orphaned_import():
+    """The third cause class: the module still exists, the name in it does not."""
+    diag = diagnose( 2, "!!!! Interrupted: 1 error during collection !!!!\n"
+                        "E   ImportError: cannot import name 'make_provenance' from 'cosa.eval.provenance'" )
+
+    assert diag[ "cause_class" ] == "orphaned import — the name is gone from a module that still exists"
+    assert "make_provenance" in diag[ "detail" ] and "cosa.eval.provenance" in diag[ "detail" ]
+
+
+def test_output_with_no_exception_line_is_admitted_rather_than_guessed():
+    """Nothing recognisable at all still gets an honest answer instead of a confident one."""
+    diag = diagnose( 4, "ImportError while loading conftest '/x/conftest.py'." )
+
+    assert diag[ "cause_class" ] == "unrecognised import-time failure"
+    assert diag[ "detail" ] == "no recognisable exception line in the captured output"
+
+
+def test_a_long_suspect_list_is_truncated_and_says_how_many_it_hid():
+    """Ten names is a list a human reads; forty is a wall they skip — so it says '… and N more'."""
+    diag = {
+        "state"                : COLLECTION_ERROR,
+        "where"                : "conftest",
+        "cause_class"          : "x",
+        "detail"               : "y",
+        "remedy"               : "z",
+        "uncommitted_suspects" : [ f"src/f{i}.py" for i in range( 14 ) ],
+    }
+    text = render( diag )
+
+    assert "src/f9.py" in text and "src/f10.py" not in text
+    assert "… and 4 more" in text
+
+
+def test_cli_returns_zero_when_the_diagnosis_itself_blows_up( monkeypatch, capsys ):
+    """A broken diagnostic must not be able to change the outcome of the run it describes."""
+    import cosa.utils.pytest_collection_diagnosis as mod
+
+    def _boom( *a, **kw ): raise RuntimeError( "diagnoser is broken" )
+    monkeypatch.setattr( mod, "diagnose", _boom )
+
+    assert mod.main( [ "--exit-code", "4" ] ) == 0
+    assert "could not render a diagnosis" in capsys.readouterr().err
