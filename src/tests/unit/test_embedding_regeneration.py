@@ -571,6 +571,67 @@ class TestUnreachableServerIsNotABatchSizeProblem:
 # `column "input_embedding_regen" does not exist` (2026-08-17). Generating the DDL
 # from REGEN_SPECS means adding a spec cannot leave its column uncreated.
 # --------------------------------------------------------------------------- #
+class TestExcludedIdsClause:
+    """
+    fill skips EXCLUDED_IDS in Python; verify counts scope in SQL. Until 2026-08-17
+    those two disagreed, so an excluded row sat in verify's denominator forever —
+    unfillable by design, uncountable as filled. The decisions spec could never
+    verify clean and the swap it gates could never run. Found live: `1 of 909
+    in-scope row(s) have no regenerated vector`, that row being clamp-001.
+    """
+
+    def test_returns_empty_for_a_table_with_no_exclusions( self ):
+        from cosa.rest.db.embedding_regeneration import excluded_ids_clause
+        assert excluded_ids_clause( "input_and_output", "id" ) == ""
+
+    def test_excludes_the_registered_id( self ):
+        from cosa.rest.db.embedding_regeneration import excluded_ids_clause
+        clause = excluded_ids_clause( "prediction_decisions", "id" )
+        assert "clamp-001" in clause
+        assert "NOT IN" in clause
+
+    def test_starts_with_and_so_it_appends_to_an_existing_where( self ):
+        # It is concatenated onto a WHERE that already has a predicate.
+        from cosa.rest.db.embedding_regeneration import excluded_ids_clause
+        assert excluded_ids_clause( "prediction_decisions", "id" ).startswith( " AND " )
+
+    def test_uses_the_given_pk_column( self ):
+        from cosa.rest.db.embedding_regeneration import excluded_ids_clause
+        assert "id::text NOT IN" in excluded_ids_clause( "prediction_decisions", "id" )
+
+    def test_quotes_are_doubled_so_an_id_cannot_break_the_statement( self ):
+        import cosa.rest.db.embedding_regeneration as er
+        original = er.EXCLUDED_IDS
+        try:
+            er.EXCLUDED_IDS = { "t": frozenset( { "o'brien" } ) }
+            clause = er.excluded_ids_clause( "t", "id" )
+            assert "'o''brien'" in clause
+        finally:
+            er.EXCLUDED_IDS = original
+
+    def test_every_excluded_id_appears( self ):
+        import cosa.rest.db.embedding_regeneration as er
+        original = er.EXCLUDED_IDS
+        try:
+            er.EXCLUDED_IDS = { "t": frozenset( { "a", "b", "c" } ) }
+            clause = er.excluded_ids_clause( "t", "id" )
+            for row_id in ( "a", "b", "c" ):
+                assert f"'{row_id}'" in clause
+        finally:
+            er.EXCLUDED_IDS = original
+
+    def test_scope_and_skip_agree_for_every_spec( self ):
+        # The property that was violated: a row fill skips must not be counted by
+        # the scope query. Asserted against the real specs, not a fixture.
+        from cosa.rest.db.embedding_regeneration import ( excluded_ids_clause, is_excluded,
+                                                          REGEN_SPECS, EXCLUDED_IDS )
+        for spec in REGEN_SPECS:
+            clause = excluded_ids_clause( spec.table, spec.pk )
+            for row_id in EXCLUDED_IDS.get( spec.table, frozenset() ):
+                assert is_excluded( spec.table, row_id ), "fill must skip it"
+                assert str( row_id ) in clause,           "and scope must not count it"
+
+
 class TestBulkUpdateShadowSql:
     """
     The batched-write template that collapses a whole 1024-row chunk into one

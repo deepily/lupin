@@ -240,6 +240,35 @@ def is_excluded( table: str, row_id: Any ) -> bool:
     return str( row_id ) in EXCLUDED_IDS.get( table, frozenset() )
 
 
+def excluded_ids_clause( table: str, pk: str ) -> str:
+    """
+    Build the SQL fragment that removes EXCLUDED_IDS rows from a scope query.
+
+    `fill` skips excluded rows in Python via is_excluded(). `verify` counts scope
+    in SQL, and originally had no matching filter — so an excluded row sat in the
+    denominator forever, unfillable by design and uncountable as filled. The
+    decisions spec could therefore NEVER verify clean, and the swap it gates could
+    never run (found live 2026-08-17: `1 of 909 in-scope row(s) have no
+    regenerated vector`, that one row being clamp-001).
+
+    Keeping the fragment here means the two paths share one definition of scope
+    instead of agreeing by coincidence.
+
+    Requires:
+        - table is a spec table name; pk is its primary-key column name
+
+    Ensures:
+        - returns "" when the table has no excluded ids
+        - otherwise returns a leading-AND fragment excluding exactly those ids
+        - ids are single-quoted, with embedded quotes doubled
+    """
+    excluded = EXCLUDED_IDS.get( table, frozenset() )
+    if not excluded:
+        return ""
+    quoted = ", ".join( "'" + str( row_id ).replace( "'", "''" ) + "'" for row_id in sorted( excluded ) )
+    return f" AND {pk}::text NOT IN ( {quoted} )"
+
+
 def plan_batches( row_ids: Sequence[Any], batch_size: int = DEFAULT_BATCH_SIZE ) -> List[List[Any]]:
     """
     Split row ids into fixed-size batches.
@@ -617,7 +646,7 @@ def remaining_ids( all_ids: Sequence[Any], done_ids: Sequence[Any] ) -> List[Any
 # space by construction rather than by inference.
 _TARGET_COUNT_SQL = """
 SELECT count(*) FROM {table}
-WHERE {text} IS NOT NULL AND btrim({text}) <> ''
+WHERE {text} IS NOT NULL AND btrim({text}) <> ''{excluded}
 """
 
 _TARGET_IDS_SQL = """
@@ -663,7 +692,10 @@ def _plan( session, prefix="" ):   # pragma: no cover - live DB boundary
     print( f"{'spec':12} {'table':22} {'to regen':>12} {'missing vec':>12} {'no text':>9}" )
     for spec in REGEN_SPECS:
         table   = qualify( spec.table, prefix )
-        fields  = { "table": table, "text": spec.text_column, "vector": spec.vector_column }
+        # `excluded` keeps plan's headline count honest against what fill will
+        # actually attempt — an excluded row is not an embedding call anyone owes.
+        fields  = { "table": table, "text": spec.text_column, "vector": spec.vector_column,
+                    "excluded": excluded_ids_clause( spec.table, spec.pk ) }
         count   = session.execute( sql_text( _TARGET_COUNT_SQL.format( **fields ) ) ).scalar()
         missing = session.execute( sql_text( _MISSING_VECTOR_SQL.format( **fields ) ) ).scalar()
         orphan  = session.execute( sql_text( _ORPHAN_VECTOR_SQL.format( **fields ) ) ).scalar()
@@ -811,9 +843,12 @@ def _verify( session, spec, prefix="" ):   # pragma: no cover - live DB boundary
     """Compare shadow coverage against scope, read-only, and return the swap verdict."""
     from sqlalchemy import text as sql_text
 
-    # Denominator is every row with source text — the same predicate `fill` used.
-    # Counting only the norm-1.0 rows here would let a partial run verify clean.
-    table = qualify( spec.table, prefix )
+    # Denominator is every row with source text, MINUS the ids fill deliberately
+    # skips — the same predicate `fill` used. Counting only the norm-1.0 rows here
+    # would let a partial run verify clean; counting the excluded rows makes a
+    # complete run verify dirty forever, which is how clamp-001 blocked the swap.
+    table    = qualify( spec.table, prefix )
+    excluded = excluded_ids_clause( spec.table, spec.pk )
     row = session.execute( sql_text( f"""
         SELECT count(*),
                count(*) FILTER (WHERE {spec.shadow_column} IS NOT NULL),
@@ -822,7 +857,7 @@ def _verify( session, spec, prefix="" ):   # pragma: no cover - live DB boundary
                count(*) FILTER (WHERE {spec.shadow_column} IS NOT NULL
                             AND vector_dims({spec.shadow_column}) <> {EMBEDDING_DIM})
         FROM {table}
-        WHERE {spec.text_column} IS NOT NULL AND btrim({spec.text_column}) <> ''
+        WHERE {spec.text_column} IS NOT NULL AND btrim({spec.text_column}) <> ''{excluded}
     """ ) ).one()
 
     report = summarize_verification( total=row[ 0 ], filled=row[ 1 ], bad_norms=row[ 2 ], dim_mismatches=row[ 3 ] )
