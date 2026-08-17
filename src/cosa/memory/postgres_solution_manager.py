@@ -17,12 +17,19 @@ on in-memory exact-match hits — an expected trade-off of the design, not a sur
 Caller-visible cache-hit semantics (same question -> same snapshot) are preserved.
 
 IMPORT-GRAPH NOTE, stated precisely because it is easy to overclaim: this module
-imports NO lancedb at module level. It is NOT yet free of lancedb transitively —
-importing SolutionSnapshot still pulls the package in through
-solution_snapshot.py -> embedding_manager.py -> embedding_cache_table.py, and
-QuestionEmbeddingsTable does the same. Those six cache-layer modules already route
-to Postgres at runtime and still import lancedb at module level; fixing them is a
-separate unit of work. Measured 2026-08-17: 55 lancedb package modules resident.
+imports NO lancedb at module level, and as of the teardown it is free of lancedb
+transitively as well. The six cache-layer modules that used to drag the package in
+through solution_snapshot.py -> embedding_manager.py -> embedding_cache_table.py
+(and QuestionEmbeddingsTable alongside them) no longer import it.
+
+Measured 2026-08-17, by importing SolutionSnapshot and counting sys.modules:
+55 lancedb package modules resident BEFORE the teardown, 0 after. The package is
+still present in the venv; nothing in the import graph reaches it.
+
+That earlier 55-module measurement is left visible rather than deleted: it was the
+constraint that shaped the whole sweep — it proved the unit of work was the snapshot
+type's import chain, not "the files with lancedb in the name", so a sweep scoped by
+filename would have looked complete while leaving the package resident.
 
 Created: 2026-08-17 (Cheech, store row 5ff7b8f5) · v0.2.0
 """
