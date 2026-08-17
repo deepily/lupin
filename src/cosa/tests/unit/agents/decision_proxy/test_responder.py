@@ -147,10 +147,17 @@ def test_empty_allowlist_rejects_every_sender_fail_closed():
     # 960a4ec9 Option C: fail-closed. An empty allowlist means "trust no one", so
     # the default sender is rejected at the gate and nothing downstream runs. Goes
     # RED under the old fail-open guard (empty list => check skipped => shadowed==1).
+    #
+    # This is NOT a hypothetical state: __main__._load_swe_profile's `except
+    # ImportError` arm leaves accepted_senders empty (and domain_strategy None), so
+    # a profile-import failure lands a live Responder in exactly this shape. This
+    # test is that reachable path.
     r = _responder()                                # empty allowlist (the default)
+    r.submit_response = MagicMock( return_value=True )
     _run( r._handle_decision_event( _event() ) )    # sender "s@x"
     assert r.stats[ "sender_rejected" ] == 1
     assert r.stats[ "decisions_shadowed" ] == 0
+    r.submit_response.assert_not_called()           # rejected at the gate → nothing acts
 
 
 def test_decision_event_dry_run_yes_no_sends_no():

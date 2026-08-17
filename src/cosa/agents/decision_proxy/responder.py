@@ -201,11 +201,20 @@ class DecisionResponder( BaseResponder ):
         # Check sender ID against accepted list — FAIL-CLOSED (960a4ec9 Option C).
         # An EMPTY allowlist now means "trust no one", not "trust everyone": the
         # previous `self.accepted_senders and ...` guard skipped the check whenever
-        # the list was empty, so a Responder built without a profile did no sender
-        # filtering at all (fail-open). The only shipped construction path
-        # (__main__.py sets the three swe.* addresses) supplies a NON-empty list and
-        # behaves identically under both forms, so this closes the empty-default hole
-        # without changing live behaviour.
+        # the list was empty, so a Responder with an empty allowlist did no sender
+        # filtering at all (fail-open).
+        #
+        # The empty allowlist IS reachable in production — do NOT justify this flip
+        # with "no caller hits the empty default": __main__._load_swe_profile sets
+        # the three swe.* addresses on SUCCESS, but its `except ImportError` arm
+        # leaves accepted_senders at the empty default AND leaves domain_strategy
+        # None. Under the old fail-open guard that path let every sender past this
+        # gate and relied on the None-strategy shadow layer as the SOLE backstop.
+        # Fail-closed rejects them here instead. Either way nothing submits (a None
+        # strategy shadows everything), so the flip changes no OUTCOME on that path —
+        # its value is restoring sender filtering as an INDEPENDENT layer rather than
+        # trusting the shadow layer to be the only one. The shipped success path
+        # (a non-empty list) behaves identically under both forms.
         if sender_id not in self.accepted_senders:
             self.stats[ "sender_rejected" ] += 1
             if self.debug: print( f"{self.LOG_PREFIX} Sender rejected: {sender_id}" )
