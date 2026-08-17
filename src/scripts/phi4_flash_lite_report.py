@@ -56,6 +56,110 @@ def load_run( path ):
     return header, records
 
 
+def backfill_provenance( header, records, printer=print ):
+    """
+    Restore `snapshot_sha256` and `frozen_index` on records written before the harness
+    carried them per row.
+
+    WHY THIS IS RECOVERY AND NOT INVENTION. `pair_records` refuses to pair records that
+    do not agree on which freeze they came from — correctly, since matching indices
+    across two different snapshots is not a pairing. Records written by the earlier
+    driver carry that provenance in the RUN HEADER instead of on each row: the header
+    names the snapshot checksum and the exact drawn row indices, so both fields are
+    derivable, not guessed. If the header is absent, nothing is backfilled and the
+    pairing is allowed to fail loudly.
+
+    Requires:
+        - header is the run header dict, or None
+        - records are the per-row records from the same file
+
+    Ensures:
+        - fills `snapshot_sha256` from the header and `frozen_index` from the header's
+          drawn indices, ONLY where the field is missing
+        - says out loud what it backfilled — a silently repaired file is one nobody can
+          audit later
+        - returns the number of records touched
+
+    Raises:
+        - nothing
+    """
+    if header is None:
+        return 0
+
+    sha   = header.get( "snapshot_sha256" )
+    drawn = header.get( "drawn_row_indices" ) or []
+    fixed = 0
+    for record in records:
+        touched = False
+        if "snapshot_sha256" not in record and sha:
+            record[ "snapshot_sha256" ] = sha
+            touched = True
+        if "frozen_index" not in record and drawn:
+            index = record.get( "row_index" )
+            if isinstance( index, int ) and 0 <= index < len( drawn ):
+                record[ "frozen_index" ] = drawn[ index ]
+                touched = True
+        fixed += 1 if touched else 0
+
+    if fixed:
+        printer( f"backfilled provenance on {fixed} record(s) from the run header "
+                 f"(snapshot {str( sha )[ :16 ]}) — written before the harness carried it per row" )
+    return fixed
+
+
+def latency_block( records ):
+    """
+    Per-arm wall-clock latency, over FIRED rows only, plus the between-arm ratio.
+
+    WHAT THE NUMBER CONTAINS, said before anyone quotes it: `elapsed_seconds` wraps the
+    whole `_apply_dm_tutor` call — claim counting, the model call, the pointer restore
+    and the guards. On a fired row the model dominates; on a row the tutor never fired
+    it is microseconds of counting. Mixing those two populations would drag a median
+    toward zero in whichever arm happened to fire less, so only FIRED rows are counted.
+
+    It is wall clock from one host: the phi_4 arm reaches a LAN vLLM and the flash_lite
+    arm crosses the public internet to Vertex, and the two arms ran SEQUENTIALLY, not
+    under matched load.
+
+    Requires:
+        - records carry `arm`, `meta` and `elapsed_seconds`
+
+    Ensures:
+        - returns { arm: {...} } with n / median / mean / p90 / min / max / total, and
+          a "ratio" entry giving flash_lite ÷ phi_4 on the median and on the total when
+          both arms are present
+        - reports the RATIO, never a verdict about it
+
+    Raises:
+        - nothing
+    """
+    block = {}
+    for arm in sorted( { r[ "arm" ] for r in records } ):
+        fired = [ r for r in records
+                  if r[ "arm" ] == arm and r[ "meta" ].get( "tutor_fired" ) and r.get( "elapsed_seconds" ) is not None ]
+        secs  = sorted( r[ "elapsed_seconds" ] for r in fired )
+        if not secs:
+            block[ arm ] = { "fired_rows": 0 }
+            continue
+        block[ arm ] = {
+            "fired_rows" : len( secs ),
+            "median_s"   : round( py_statistics.median( secs ), 3 ),
+            "mean_s"     : round( py_statistics.fmean( secs ), 3 ),
+            "p90_s"      : round( secs[ min( len( secs ) - 1, int( 0.90 * len( secs ) ) ) ], 3 ),
+            "min_s"      : round( secs[ 0 ], 3 ),
+            "max_s"      : round( secs[ -1 ], 3 ),
+            "total_s"    : round( sum( secs ), 1 ),
+        }
+
+    if { "phi_4", "flash_lite" } <= set( block ) and block[ "phi_4" ].get( "median_s" ) and block[ "flash_lite" ].get( "median_s" ):
+        block[ "ratio" ] = {
+            "basis"    : "flash_lite ÷ phi_4, fired rows only",
+            "median_x" : round( block[ "flash_lite" ][ "median_s" ] / block[ "phi_4" ][ "median_s" ], 2 ),
+            "total_x"  : round( block[ "flash_lite" ][ "total_s" ]  / block[ "phi_4" ][ "total_s" ],  2 ),
+        }
+    return block
+
+
 def per_arm_table( records ):
     """
     One row per arm: outcome counts, median words out, elapsed seconds.
@@ -119,9 +223,17 @@ def main( argv=None, printer=print ):
                  f"{header.get( 'sample_size' )} of {header.get( 'frozen_set_rows' )} rows | "
                  f"snapshot {str( header.get( 'snapshot_sha256' ) )[ :16 ]}" )
 
+    backfill_provenance( header, records, printer=printer )
+
     for arm, stats in per_arm_table( records ).items():
         printer( f"{arm:12} {stats[ 'rows' ]:>4} rows | {stats[ 'spec_key' ]:<22} | {stats[ 'outcomes' ]} | "
                  f"median words {stats[ 'median_words_out' ]} | median {stats[ 'median_seconds' ]}s | total {stats[ 'total_seconds' ]}s" )
+
+    printer( "" )
+    printer( "latency — FIRED rows only; wall clock around the whole _apply_dm_tutor call, one host," )
+    printer( "arms run sequentially, phi_4 over the LAN and flash_lite over the public internet:" )
+    for name, stats in latency_block( records ).items():
+        printer( f"  {name:12} {stats}" )
 
     if len( arms ) != 2:
         printer( f"only {len( arms )} arm(s) present — nothing to pair" )
