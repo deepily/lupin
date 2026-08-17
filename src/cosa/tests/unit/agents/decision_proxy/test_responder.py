@@ -494,3 +494,51 @@ def test_print_stats_outputs_all_counters( capsys ):
     out = capsys.readouterr().out
     assert "Decision Proxy Statistics" in out
     assert "Events Received" in out
+
+
+# ============================================================================
+# `enabled` master switch (row 960a4ec9) — a disabled proxy cannot submit
+# ----------------------------------------------------------------------------
+# The splainer promises "when false, the proxy will not run"; before this the
+# flag was read into config and never consulted. These assert the ENFORCEMENT:
+# with enabled=False the decision pipeline is a no-op and submit_response is
+# never reached — on the ACT path (the real submit) and the DRY-RUN path alike.
+# The contrast test proves the guard is not simply blocking everything.
+# ============================================================================
+def _act_responder( enabled, dry_run=False ):
+    r = _responder( enabled=enabled, dry_run=dry_run )
+    r.submit_response = MagicMock( return_value=True )
+    strategy = MagicMock()
+    strategy.evaluate = MagicMock( return_value=_result( action="act", value="yes" ) )
+    r.set_domain_strategy( strategy )
+    return r
+
+
+def test_disabled_proxy_cannot_submit_on_act_path():
+    r = _act_responder( enabled=False )
+    _run( r._handle_decision_event( _event() ) )
+    r.submit_response.assert_not_called()
+    assert r.stats[ "disabled_skipped" ] == 1
+    assert r.stats[ "decisions_acted" ] == 0
+    assert r.stats[ "responses_sent" ] == 0
+
+
+def test_disabled_proxy_cannot_submit_on_dry_run_path():
+    # dry-run submits a cancel BEFORE any strategy runs — the disabled guard must
+    # still preempt it, or a disabled proxy would emit cancels.
+    r = _responder( enabled=False, dry_run=True )
+    r.submit_response = MagicMock( return_value=True )
+    _run( r._handle_decision_event( _event( response_type="yes_no" ) ) )
+    r.submit_response.assert_not_called()
+    assert r.stats[ "disabled_skipped" ] == 1
+
+
+def test_enabled_proxy_still_submits_on_act_path():
+    # The load-bearing contrast: the SAME event with enabled=True DOES reach
+    # submit — so the disabled assertions above mean "the flag stopped it", not
+    # "this path never submits anyway".
+    r = _act_responder( enabled=True )
+    _run( r._handle_decision_event( _event() ) )
+    r.submit_response.assert_called_once_with( "nid-1", "yes" )
+    assert r.stats[ "disabled_skipped" ] == 0
+    assert r.stats[ "responses_sent" ] == 1

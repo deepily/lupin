@@ -53,7 +53,8 @@ class DecisionResponder( BaseResponder ):
         port                = DEFAULT_SERVER_PORT,
         dry_run             = False,
         debug               = False,
-        verbose             = False
+        verbose             = False,
+        enabled             = True
     ):
         """
         Initialize the decision responder.
@@ -67,6 +68,11 @@ class DecisionResponder( BaseResponder ):
             dry_run: Display decisions without acting
             debug: Enable debug output
             verbose: Enable verbose output
+            enabled: Master run switch (960a4ec9). When False the proxy processes
+                     no decision events and cannot submit — enforcing the
+                     `decision proxy enabled` INI flag the splainer promises
+                     ("when false, the proxy will not run"). Constructor default is
+                     True (permissive library default); __main__ passes the INI value.
         """
         super().__init__(
             host    = host,
@@ -77,6 +83,7 @@ class DecisionResponder( BaseResponder ):
         )
 
         self.trust_mode         = trust_mode
+        self.enabled            = enabled
         self.accepted_senders   = accepted_senders or []
         self.smart_router       = SmartRouter( debug=debug )
         self.domain_strategy    = None  # Set by profile loader
@@ -91,6 +98,7 @@ class DecisionResponder( BaseResponder ):
             "decisions_acted"      : 0,
             "decisions_deferred"   : 0,
             "sender_rejected"      : 0,
+            "disabled_skipped"     : 0,
         } )
 
     def set_domain_strategy( self, strategy ):
@@ -149,6 +157,15 @@ class DecisionResponder( BaseResponder ):
         Args:
             event_data: notification_queue_update event payload
         """
+        # Master run switch (960a4ec9): a disabled proxy processes nothing and
+        # therefore cannot submit — this is the enforcement that makes the splainer
+        # promise ("when false, the proxy will not run") true. Guard is FIRST, before
+        # any extraction/classification, so nothing downstream can reach submit_response.
+        if not self.enabled:
+            self.stats[ "disabled_skipped" ] += 1
+            if self.debug: print( f"{self.LOG_PREFIX} Disabled (decision proxy enabled=false) — no-op" )
+            return
+
         # Extract notification from the event
         notification = event_data.get( "notification", event_data )
 

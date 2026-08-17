@@ -132,6 +132,17 @@ async def main():
         print( f"\n[DecisionProxy] Credential error: {e}" )
         sys.exit( 1 )
 
+    # decision proxy enabled flag (960a4ec9): enforce the master switch the splainer
+    # promises ("when false, the proxy will not run"). Read the INI flag and refuse to
+    # start before connecting to the WebSocket — the flag is no longer inert.
+    from cosa.config.configuration_manager import ConfigurationManager
+    config_mgr    = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+    proxy_enabled = config_mgr.get( "decision proxy enabled", default=False, return_type="boolean" )
+    if not proxy_enabled:
+        print( "\n[DecisionProxy] `decision proxy enabled` is false — the proxy will not run. "
+               "Set it true in lupin-app.ini to start." )
+        return
+
     # Show startup banner
     profile_info = AVAILABLE_PROFILES.get( args.profile, {} )
     print( "=" * 60 )
@@ -159,7 +170,8 @@ async def main():
         port       = args.port,
         dry_run    = args.dry_run,
         debug      = args.debug,
-        verbose    = args.verbose
+        verbose    = args.verbose,
+        enabled    = proxy_enabled
     )
 
     # Load domain profile
