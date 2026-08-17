@@ -71,25 +71,18 @@ from tests.venue_routing import (                # noqa: E402  (needs the sys.pa
     host_is_reachable, partition_by_venue, deselection_report,
 )
 
-# ── Worktree false-green guard (row a9f87d29, candidate 5) ────────────────────
-# Fail loud when a collected test FILE lives in a different git tree than LUPIN_ROOT
-# — the exact setup where conftest's sys.path bootstrap imports cosa from the WRONG
-# tree and a worktree RED check reports a false GREEN. Fail-SAFE: silent unless both
-# tree roots resolve AND differ, so a correct main-tree or matched-worktree run never
-# trips. Pure logic in tests/worktree_tree_guard.py so it is testable in both directions.
-from tests.worktree_tree_guard import check_paths as _worktree_check_paths   # noqa: E402
+# ── Worktree false-green guard — MOVED to the ROOT src/conftest.py (row 71249e0f)
+# It was wired ONLY here, but src/cosa/tests/ never loads this tests-tree conftest,
+# so the cosa tier (a merge-pyramid gate since 2026-08-13) had no protection
+# (finding 2ed1be74). It now lives in src/conftest.py — the root conftest BOTH
+# trees load — as a single call site that cannot drift. Nothing to wire here.
 
 _deselected_by_venue = []
 
 
 def pytest_collection_modifyitems( config, items ):
-    _drift = _worktree_check_paths(
-        [ str( item.path ) for item in items if getattr( item, "path", None ) is not None ],
-        os.environ.get( "LUPIN_ROOT" ),
-    )
-    if _drift is not None:
-        raise pytest.UsageError( _drift )
-
+    # Worktree false-green guard lives in the ROOT src/conftest.py now (row
+    # 71249e0f) so it also covers src/cosa/tests/. This hook keeps only venue routing.
     kept, deselected = partition_by_venue( items, host_is_reachable() )
     if not deselected: return
     config.hook.pytest_deselected( items=deselected )

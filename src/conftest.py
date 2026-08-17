@@ -9,6 +9,7 @@ tree-specific fixtures belong in `src/tests/conftest.py` /
 """
 
 import importlib._bootstrap
+import os
 import sys
 from unittest.mock import patch
 
@@ -68,6 +69,36 @@ def _find_and_load_watching_reimports( name, import_ ):
 
 
 importlib._bootstrap._find_and_load = _find_and_load_watching_reimports
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# GUARD: worktree false-green — ROOT wiring (row 71249e0f; guard by Rio, a9f87d29)
+# ══════════════════════════════════════════════════════════════════════════════
+# MOVED here from src/tests/conftest.py so ONE call site covers BOTH test trees.
+# pytest loads THIS root conftest for src/tests/** AND src/cosa/tests/**, but it
+# never loads src/tests/conftest.py for the cosa tree — so wiring the guard only
+# there left the cosa tier (a merge-pyramid gate since 2026-08-13) UNPROTECTED: a
+# worktree run with LUPIN_ROOT pointing at another tree imports `cosa` from the
+# WRONG tree via conftest's sys.path bootstrap, and a revert-to-verify RED check
+# reports a false GREEN — unguarded and unwarned (finding 2ed1be74). Wiring it at
+# the root closes that gap with no second call site to drift.
+#
+# The pure predicate is Rio's tests/worktree_tree_guard.py (unchanged); this is
+# thin wiring only. The import is DEFERRED into the hook on purpose: this root
+# conftest loads BEFORE the per-tree conftests that bootstrap `src` onto sys.path,
+# so a module-level `from tests...` here could precede that bootstrap. By
+# collection-modify time the invoking tree's conftest (src/tests/ or
+# src/cosa/tests/) has run and `tests` is importable. Fail-SAFE lives in the pure
+# predicate: it is silent unless BOTH tree roots resolve AND differ, so a correct
+# main-tree or matched-worktree run never trips.
+def pytest_collection_modifyitems( config, items ):
+    from tests.worktree_tree_guard import check_paths as _worktree_check_paths
+    _drift = _worktree_check_paths(
+        [ str( item.path ) for item in items if getattr( item, "path", None ) is not None ],
+        os.environ.get( "LUPIN_ROOT" ),
+    )
+    if _drift is not None:
+        raise pytest.UsageError( _drift )
 
 
 @pytest.fixture( autouse=True )
