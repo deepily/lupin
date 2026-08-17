@@ -73,7 +73,18 @@ import cosa.utils.util as du   # noqa: E402
 
 # The provenance-stamp fields every arm artifact must carry. `sample_signature` is the
 # load-bearing one: two arms measured the same utterances IFF their signatures match.
-PROVENANCE_FIELDS = ( "arm", "corpus", "seed", "n_per_command", "sample_signature", "sampled_n" )
+# `git_sha` is the load-bearing one for WHICH TREE: it is the sha the arm read back from the
+# server it actually measured, so a number is auditable to the code that produced it. It is
+# in this tuple — not merely printed — so an absent sha is a MISSING FIELD that refuses the
+# pairing, rather than a blank the report renders as if it were fine (row c9b43538).
+PROVENANCE_FIELDS = ( "arm", "corpus", "seed", "n_per_command", "sample_signature", "sampled_n", "git_sha" )
+
+# What a git_sha field must NOT be. `read_running_server_sha` returns "" when the server
+# does not answer, so "present but empty" is the shape a skipped read actually takes — it has
+# to refuse alongside an outright missing key, or the check only catches the tidy failure.
+def _is_recorded_sha( value: Any ) -> bool:
+    """True iff `value` is a non-blank string — a sha that was actually read off a server."""
+    return isinstance( value, str ) and value.strip() != ""
 
 # The §6 gate bar: v2 must be at least this fraction faster than v1 (median-Δ ≥ 20% of the
 # v1 median). Named so the threshold is one edit, never a magic literal in the arithmetic.
@@ -118,6 +129,7 @@ def make_provenance(
     seed          : Optional[ int ],
     n_per_command : Optional[ int ],
     sampled_pairs : Sequence[ Tuple[ str, str ] ],
+    git_sha       : str,
 ) -> Dict[ str, Any ]:
     """
     Build the provenance stamp an arm attaches to its serialized result.
@@ -127,6 +139,11 @@ def make_provenance(
         - seed / n_per_command describe the sampler (None on a limit-based run that
           did not sample — such an arm can never pair with a seeded one, by design).
         - sampled_pairs is the exact (utterance, expected_command) set the arm measured.
+        - git_sha is the sha READ BACK from the server this arm measured — never a
+          constant and never a guess. It is a REQUIRED argument rather than an optional
+          one on purpose: an arm that cannot say which tree it ran on must fail at the
+          stamp, where the caller can still fix it, and not at the report, where a blank
+          is indistinguishable from a legitimate one (row c9b43538).
 
     Ensures:
         - returns a dict carrying exactly PROVENANCE_FIELDS, with sample_signature
@@ -139,6 +156,7 @@ def make_provenance(
         "n_per_command"    : n_per_command,
         "sample_signature" : compute_sample_signature( sampled_pairs ),
         "sampled_n"        : len( sampled_pairs ),
+        "git_sha"          : git_sha,
     }
 
 
@@ -182,6 +200,18 @@ def paired_provenance_check(
         reasons.append( "v1 measured 0 utterances (an empty arm cannot be paired)" )
     if v2_provenance[ "sampled_n" ] == 0:
         reasons.append( "v2 measured 0 utterances (an empty arm cannot be paired)" )
+
+    # WHICH TREE (row c9b43538). The two shas legitimately DIFFER — v1 runs a pinned worktree,
+    # v2 runs whatever is deployed — so this is a presence check, never an equality check. It
+    # lives here because this is the one layer that already refuses BEFORE the gate fires: the
+    # gate arithmetic does not care which tree produced its numbers, and the report renders a
+    # blank sha as an ordinary dash. Refusing here is what makes the other three moot.
+    for arm, provenance in ( ( "v1", v1_provenance ), ( "v2", v2_provenance ) ):
+        if not _is_recorded_sha( provenance[ "git_sha" ] ):
+            reasons.append(
+                f"{arm} did not record the git sha of the server it measured "
+                f"(got {provenance[ 'git_sha' ]!r}) — the numbers cannot be traced to a tree"
+            )
 
     for field in ( "corpus", "seed", "n_per_command", "sample_signature" ):
         if v1_provenance[ field ] != v2_provenance[ field ]:
@@ -375,6 +405,16 @@ def render_provenance_block(
         signature = provenance.get( "sample_signature" )
         return signature[ :12 ] if isinstance( signature, str ) else str( signature )
 
+    def _sha( provenance: Dict[ str, Any ] ) -> str:
+        """The arm's measured sha, or a marker that CANNOT be misread as a normal value.
+
+        The old rendering was `.get( key, "—" )`, so an arm whose tree nobody recorded printed
+        the same dash as an arm that legitimately had nothing to print. A reader had no way to
+        tell "no pin by design" from "never checked". An unrecorded sha now says so (c9b43538).
+        """
+        value = provenance.get( "git_sha" )
+        return value if _is_recorded_sha( value ) else "⚠ NOT RECORDED"
+
     matched = paired_provenance_check( v1_provenance, v2_provenance ) is None
     lines   = [
         "## Sample provenance",
@@ -383,10 +423,12 @@ def render_provenance_block(
         "|---|---|---|",
         f"| corpus | {v1_provenance.get( 'corpus' )} | {v2_provenance.get( 'corpus' )} |",
         f"| seed | {v1_provenance.get( 'seed' )} | {v2_provenance.get( 'seed' )} |",
-        # The v1 arm's MEASURED git sha (row 221de5d2 half B) — the sha the running v1
-        # server reported, so the report is auditable back to the tree that produced these
-        # numbers. v1-only (the v2 arm has no pinned-tree constraint), so v2 renders "—".
-        f"| v1 arm sha | {v1_provenance.get( 'v1_arm_git_sha', '—' )} | — |",
+        # Each arm's MEASURED git sha (row 221de5d2 half B, extended to both arms by c9b43538)
+        # — the sha each server reported about ITSELF, so every number here is auditable back
+        # to the tree that produced it. The two legitimately DIFFER: v1 runs the pinned
+        # worktree, v2 runs whatever is deployed. Both are now required, so this row can no
+        # longer be blank on a run that reached the report.
+        f"| arm sha | {_sha( v1_provenance )} | {_sha( v2_provenance )} |",
         f"| n_per_command | {v1_provenance.get( 'n_per_command' )} | {v2_provenance.get( 'n_per_command' )} |",
         f"| sampled_n | {v1_provenance.get( 'sampled_n' )} | {v2_provenance.get( 'sampled_n' )} |",
         f"| signature | {_short( v1_provenance )} | {_short( v2_provenance )} |",

@@ -797,6 +797,27 @@ class HttpAskClient:
         }
 
 
+def read_running_server_sha( base_url: str ) -> str:   # pragma: no cover - live HTTP boundary
+    """
+    Ask the RUNNING v2 server what sha it booted from, so this arm's numbers are auditable
+    back to the tree that produced them (row c9b43538).
+
+    Read from GET /api/code-identity, whose JSON body carries `git_sha` at the TOP LEVEL.
+    NOT /health — that returns only {status, timestamp}, so reading it yields "" against a
+    perfectly healthy server. The v1 arm's twin (v1_eval_arm.read_running_server_sha) carries
+    the long form of that warning; this is a deliberate duplicate rather than an import,
+    because v1_eval_arm imports v2_eval and reaching back would make the cycle.
+
+    Ensures:
+        - returns the reported sha, or "" when the key is absent — "" is a REFUSAL upstream,
+          never a value that reaches a report.
+    """
+    import json, urllib.request
+    req  = urllib.request.Request( base_url.rstrip( "/" ) + "/api/code-identity" )
+    data = json.loads( urllib.request.urlopen( req, timeout=10 ).read().decode() )
+    return data.get( "git_sha", "" )
+
+
 def run_pass(
     corpus    : List[ Tuple[ str, str ] ],
     ask       : Callable[ [ str ], Dict[ str, Any ] ],
@@ -981,6 +1002,7 @@ def main(
     client_factory : Optional[ Callable[ [ str ], Any ] ] = None,
     project_root   : Optional[ str ] = None,
     timestamp      : Optional[ str ] = None,
+    read_sha_fn    : Optional[ Callable[ [ str ], str ] ] = None,
 ) -> Dict[ str, Any ]:
     """
     Run the two-pass eval and write the report.
@@ -1018,7 +1040,20 @@ def main(
     # B3: stratified + seeded PER ARM (design §5) — same sampler as v1, so the arms measure
     # the same population; a flat first-N would let the biggest command dominate.
     corpus, _sample_manifest = stratified_sample( pairs, args.n_per_command, args.seed )
-    provenance = make_provenance( "v2", args.corpus, args.seed, args.n_per_command, corpus )
+    # WHICH TREE served the v2 numbers (row c9b43538). The v1 arm has always read its sha back
+    # from the running server; v2 had no equivalent, so even a forced check covered half the
+    # comparison. There is no pin to assert against here — v2 runs whatever is deployed — so
+    # this RECORDS rather than asserts. Reading it before the passes means a server that cannot
+    # identify itself stops the run before it spends hours, not after.
+    read_sha    = read_sha_fn if read_sha_fn is not None else read_running_server_sha
+    v2_git_sha  = read_sha( args.base_url )
+    if not isinstance( v2_git_sha, str ) or v2_git_sha.strip() == "":
+        raise EvalIntegrityError(
+            f"the v2 server at {args.base_url} did not report a git sha (got {v2_git_sha!r}); "
+            f"refusing to measure numbers that could not be traced back to a tree"
+        )
+    provenance = make_provenance( "v2", args.corpus, args.seed, args.n_per_command, corpus,
+                                  git_sha=v2_git_sha )
 
     factory = client_factory if client_factory is not None else _default_client_factory
     client  = factory( args.base_url )

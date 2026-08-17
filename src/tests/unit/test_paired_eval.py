@@ -38,8 +38,16 @@ _PAIRS_A = [ ( "turn on the lights", "cmd_lights" ), ( "what time is it", "cmd_t
 _PAIRS_B = [ ( "play some jazz",     "cmd_music" ) ]
 
 
-def _prov( arm, pairs=_PAIRS_A, corpus="simple", seed=1024, n=60 ):
-    return pe.make_provenance( arm, corpus, seed, n, pairs )
+# The two arms legitimately run DIFFERENT trees — v1 a pinned worktree, v2 whatever is
+# deployed — so these differ on purpose. The sha check is presence, never equality.
+_V1_SHA = "b0735467"
+_V2_SHA = "f7c5e349"
+
+
+def _prov( arm, pairs=_PAIRS_A, corpus="simple", seed=1024, n=60, git_sha=None ):
+    if git_sha is None:
+        git_sha = _V1_SHA if arm == "v1" else _V2_SHA
+    return pe.make_provenance( arm, corpus, seed, n, pairs, git_sha=git_sha )
 
 
 def _metrics( spans_by_utt, p95=None ):
@@ -71,7 +79,7 @@ def test_signature_separator_prevents_boundary_collision():
 # make_provenance / _missing_provenance_fields
 # ---------------------------------------------------------------------------
 def test_make_provenance_carries_all_fields_and_counts():
-    p = pe.make_provenance( "v1", "simple", 1024, 60, _PAIRS_A )
+    p = pe.make_provenance( "v1", "simple", 1024, 60, _PAIRS_A, git_sha=_V1_SHA )
     assert set( p.keys() ) == set( pe.PROVENANCE_FIELDS )
     assert p[ "arm" ] == "v1" and p[ "corpus" ] == "simple" and p[ "seed" ] == 1024
     assert p[ "n_per_command" ] == 60 and p[ "sampled_n" ] == 2
@@ -97,8 +105,8 @@ def test_provenance_check_names_missing_fields_on_either_arm():
 
 
 def test_provenance_check_flags_empty_arm():
-    v1_empty = pe.make_provenance( "v1", "simple", 1024, 60, [] )
-    v2_empty = pe.make_provenance( "v2", "simple", 1024, 60, [] )
+    v1_empty = pe.make_provenance( "v1", "simple", 1024, 60, [], git_sha=_V1_SHA )
+    v2_empty = pe.make_provenance( "v2", "simple", 1024, 60, [], git_sha=_V2_SHA )
     assert "v1 measured 0 utterances" in pe.paired_provenance_check( v1_empty, _prov( "v2" ) )
     assert "v2 measured 0 utterances" in pe.paired_provenance_check( _prov( "v1" ), v2_empty )
 
@@ -109,6 +117,50 @@ def test_provenance_check_names_each_disagreeing_field():
     reason = pe.paired_provenance_check( v1, v2 )
     for field in ( "corpus differs", "seed differs", "n_per_command differs", "sample_signature differs" ):
         assert field in reason
+
+
+def test_an_unrecorded_tree_refuses_a_gate_that_would_otherwise_pass():
+    """THE c9b43538 CONTROL — proven by deletion, not by coverage.
+
+    Before the fix, this exact fixture produced `provenance_ok: True`, `fired: True`,
+    `verdict: PASS`, `median_delta_ms: 1500.0`, and a report reading
+    "Provenance: MATCH — arms measured the same sample." Nobody had recorded which tree
+    produced either arm's numbers, and nothing downstream noticed: the sha was absent from
+    PROVENANCE_FIELDS, never compared across arms, ignored by the gate arithmetic, and
+    rendered as an ordinary em-dash.
+
+    The pairing is otherwise PERFECT — same corpus, seed, n_per_command and signature — so
+    the only thing that can decline it is the missing tree. Restore the em-dash default or
+    drop git_sha from PROVENANCE_FIELDS and this flips back to a confident PASS.
+    """
+    pairs = [ ( f"utterance {i}", "agent router go to math" ) for i in range( 30 ) ]
+    # A stamp that has the KEY but no value — the shape a skipped read actually takes,
+    # since read_running_server_sha returns "" when the server does not answer.
+    v1 = { **_prov( "v1", pairs=pairs ), "git_sha": "" }
+    v2 = { **_prov( "v2", pairs=pairs ), "git_sha": "" }
+
+    verdict = pe.build_paired_verdict(
+        _artifact( { u: 2000.0 for u, _ in pairs }, v1 ),
+        _artifact( { u:  500.0 for u, _ in pairs }, v2 ),
+    )
+    assert verdict[ "fired" ] is False and verdict[ "provenance_ok" ] is False
+    assert "v1 did not record the git sha" in verdict[ "reason" ]
+    assert "v2 did not record the git sha" in verdict[ "reason" ]
+    assert "median_delta_ms" not in verdict          # no number escapes an untraceable pair
+
+
+def test_provenance_check_accepts_two_arms_on_different_trees():
+    # The arms run DIFFERENT trees by design — v1 a pinned worktree, v2 whatever is deployed.
+    # The sha check must be presence, never equality; an equality check would refuse every
+    # legitimate paired run. Guards against over-tightening the fix above.
+    assert pe.paired_provenance_check( _prov( "v1", git_sha="b0735467" ),
+                                       _prov( "v2", git_sha="f7c5e349" ) ) is None
+
+
+def test_provenance_check_names_a_blank_sha_on_one_arm_only():
+    # Half-recorded provenance is still untraceable: one arm's sha does not cover the pair.
+    reason = pe.paired_provenance_check( _prov( "v1" ), { **_prov( "v2" ), "git_sha": "   " } )
+    assert "v2 did not record the git sha" in reason and "v1 did not record" not in reason
 
 
 def test_provenance_check_catches_signature_mismatch_alone():
@@ -276,18 +328,27 @@ def test_render_provenance_block_handles_non_string_signature():
     assert "None" in block and "MISMATCH" in block
 
 
-def test_render_provenance_block_stamps_the_v1_arm_sha():
-    # HALF B (row 221de5d2): the block renders the v1 arm's MEASURED sha so a reader can
-    # audit the report back to the tree that produced the numbers; the v2 arm has none.
-    v1p   = { **_prov( "v1" ), "v1_arm_git_sha": "b0735467cafe" }
-    block = pe.render_provenance_block( v1p, _prov( "v2" ) )
-    assert "v1 arm sha" in block and "b0735467cafe" in block
+def test_render_provenance_block_stamps_both_arms_measured_shas():
+    # HALF B (row 221de5d2), extended to BOTH arms by c9b43538: the block renders each arm's
+    # MEASURED sha so a reader can audit the report back to the trees that produced the
+    # numbers. One-armed provenance cannot validate a paired comparison, so v2 is no longer
+    # a hard-coded dash. The two shas legitimately differ — presence is the property, not
+    # equality.
+    block = pe.render_provenance_block( _prov( "v1", git_sha="b0735467cafe" ),
+                                        _prov( "v2", git_sha="f7c5e349beef" ) )
+    assert "arm sha" in block
+    assert "b0735467cafe" in block and "f7c5e349beef" in block
 
 
-def test_render_provenance_block_v1_sha_absent_renders_dash():
-    # A provenance with no stamp (e.g. a legacy artifact) renders the em-dash, never crashes.
-    block = pe.render_provenance_block( _prov( "v1" ), _prov( "v2" ) )
-    assert "v1 arm sha | — |" in block
+def test_render_provenance_block_unrecorded_sha_cannot_be_misread_as_normal():
+    # LAYER 4 CONTROL (c9b43538). The old renderer printed `.get( key, "—" )`, so an arm
+    # whose tree nobody recorded looked exactly like an arm that legitimately had nothing to
+    # show. A reader could not tell "no pin by design" from "never checked". An unrecorded
+    # sha must now announce itself. RED against the old em-dash default.
+    block = pe.render_provenance_block( { **_prov( "v1" ), "git_sha": "" },
+                                        { **_prov( "v2" ), "git_sha": None } )
+    assert block.count( "NOT RECORDED" ) == 2
+    assert "| arm sha | — |" not in block          # never the silent dash again
 
 
 def test_render_paired_report_carries_provenance_and_verdict():

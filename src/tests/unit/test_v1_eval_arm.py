@@ -386,8 +386,8 @@ def test_run_v1_baseline_stamps_the_observed_sha_not_the_pin():
                                class_to_command=MAP, clock=_counter_clock(),
                                load_corpus_fn=fake_load, sample_fn=fake_sample,
                                read_sha_fn=lambda base: observed )
-    assert res[ "provenance" ][ "v1_arm_git_sha" ] == observed        # the OBSERVED value …
-    assert res[ "provenance" ][ "v1_arm_git_sha" ] != v1.V1_PIN_SHA   # … NOT the pin constant
+    assert res[ "provenance" ][ "git_sha" ] == observed        # the OBSERVED value …
+    assert res[ "provenance" ][ "git_sha" ] != v1.V1_PIN_SHA   # … NOT the pin constant
 
 
 # ───────────────────────────────────────────── truncate guard (F3, :8000)

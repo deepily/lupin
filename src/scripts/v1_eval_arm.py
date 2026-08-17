@@ -685,8 +685,12 @@ def run_v1_baseline( *, corpus: str = "simple", seed: int = 1024, n_per_command:
                                           n_per_command=n_per_command, base_url=base_url )
     # Stamp the EXACT measured sample (the same `sampled` list run_two_pass drove), so the
     # paired provenance check binds this arm to the v2 arm by signature.
-    provenance        = make_provenance( "v1", corpus, seed, n_per_command, sampled )
-    provenance[ "v1_arm_git_sha" ] = observed_sha   # the OBSERVED sha (half B), never V1_PIN_SHA
+    # git_sha is the OBSERVED sha (half B), never the V1_PIN_SHA constant — a constant would
+    # read b0735467 no matter what actually served the requests. It goes in as a REQUIRED
+    # make_provenance argument, so an arm that never read a sha cannot reach the report at all
+    # (row c9b43538: it used to be bolted on afterwards, and nothing downstream missed it).
+    provenance        = make_provenance( "v1", corpus, seed, n_per_command, sampled,
+                                         git_sha=observed_sha )
     return {
         "cold"       : passes[ "cold" ],
         "warm"       : passes[ "warm" ],

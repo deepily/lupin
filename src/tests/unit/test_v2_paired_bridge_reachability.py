@@ -51,7 +51,9 @@ def _canned_artifact( arm, *, spans, pairs=_PAIRS ):
     count_key = "ok_n" if arm == "v1" else "n_ok"
     return {
         "metrics"    : { count_key: len( spans ), "spans_by_utterance": dict( spans ) },
-        "provenance" : paired_eval.make_provenance( arm, "simple", 1024, 60, pairs ),
+        # Each arm records the tree it measured (row c9b43538); the two differ by design.
+        "provenance" : paired_eval.make_provenance( arm, "simple", 1024, 60, pairs,
+                                                    git_sha="b0735467" if arm == "v1" else "f7c5e349" ),
     }
 
 
