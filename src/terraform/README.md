@@ -54,6 +54,13 @@ terraform plan
 
 Foundation + `gcs-buckets` + `artifact-registry` authored and `terraform validate`
 green. The buckets module defaults to **reuse** for the test env (Phase-0 V4 found
-`lupin-lancedb-test` + `lupin-deep-research-test` already present); the registry
-module provisions `lupin-images` fresh (Phase-0 V8 found none). Remaining five
-modules are sequenced in the execution log.
+`lupin-deep-research-test` already present); the registry module provisions
+`lupin-images` fresh (Phase-0 V8 found none). Remaining five modules are sequenced
+in the execution log.
+
+**2026-08-17**: the LanceDB bucket left this module with the LanceDB teardown
+(row `281e52e6`). Phase-0 V4 had also found `lupin-lancedb-test` present, which is
+why it appeared here — but `create_buckets` was false in every environment, so
+terraform never created either LanceDB bucket and held no state for them.
+`gs://lupin-lancedb-prod` did not exist at all; `gs://lupin-lancedb-test` was empty
+and was deleted by hand.

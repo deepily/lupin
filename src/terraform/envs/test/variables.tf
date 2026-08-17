@@ -17,7 +17,7 @@ variable "app_vpc_self_link" {
 
 variable "environment" {
   type        = string
-  description = "Environment name; composes resource names (e.g. lupin-lancedb-<env>)."
+  description = "Environment name; composes resource names (e.g. lupin-deep-research-<env>)."
   default     = "test"
 
   validation {
