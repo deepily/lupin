@@ -1,9 +1,9 @@
 """
 File-based solution snapshot manager implementing the swappable interface.
 
-⚠️ DEPRECATED: This implementation is deprecated in favor of SolutionSnapshotManager.
+⚠️ DEPRECATED: This implementation is deprecated in favor of PostgresSolutionManager.
 This module is retained for backwards compatibility only and will be removed
-in a future release. Please use SolutionSnapshotManager for all new development.
+in a future release. Please use PostgresSolutionManager for all new development.
 
 This module provides a complete file-based implementation of the
 SolutionSnapshotManagerInterface with JSON storage, performance monitoring
@@ -35,7 +35,7 @@ class FileBasedSolutionManager( SolutionSnapshotManagerInterface ):
     """
     File-based solution snapshot manager with interface compliance.
 
-    ⚠️ DEPRECATED: This class is deprecated. Use SolutionSnapshotManager instead.
+    ⚠️ DEPRECATED: This class is deprecated. Use PostgresSolutionManager instead.
 
     Complete file-based implementation that manages JSON storage directly,
     providing performance monitoring and standardized error handling.
@@ -46,7 +46,7 @@ class FileBasedSolutionManager( SolutionSnapshotManagerInterface ):
         """
         Initialize file-based solution snapshot manager.
 
-        ⚠️ DEPRECATED: This class is deprecated. Use SolutionSnapshotManager instead.
+        ⚠️ DEPRECATED: This class is deprecated. Use PostgresSolutionManager instead.
 
         Requires:
             - config["path"] contains valid directory path for JSON files
@@ -72,7 +72,7 @@ class FileBasedSolutionManager( SolutionSnapshotManagerInterface ):
         # Issue deprecation warning
         warnings.warn(
             "FileBasedSolutionManager is deprecated and will be removed in a future release. "
-            "Please use SolutionSnapshotManager instead for better performance and features.",
+            "Please use PostgresSolutionManager instead for better performance and features.",
             DeprecationWarning,
             stacklevel=2
         )
