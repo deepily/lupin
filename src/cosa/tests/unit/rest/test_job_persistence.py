@@ -367,6 +367,66 @@ class TestMarkInterruptedJobs( _PersistBase ):
                                     "pending_preserved": 0, "pending_catchup": 0 } )
 
 
+class TestMarkInterruptedJobsSilenceControl( _PersistBase ):
+    """
+    Negative control for the LOUD downtime catch-up marker (row f0b3f630).
+
+    test_catchup_branch_emits_loud_late_signal proves [CJ-CATCHUP-LATE] PRINTS on
+    the catch-up branch. That alone does not prove the marker STAYS SILENT on the
+    other branches — a detector that fired on everything would pass a
+    presence-only test too (Rachel's finding). These three assert the marker is
+    ABSENT on every NON-catch-up path of mark_interrupted_jobs(): a
+    future-scheduled preserve, a before-window interrupt, and a plain running
+    interrupt. Each captures ALL print output and asserts the tag never appears.
+
+    Leak-proof: this control was verified RED by temporarily forcing the
+    future-scheduled elif to emit _downtime_catchup_announcement(...) — the
+    future-scheduled case then printed [CJ-CATCHUP-LATE] and this test failed,
+    confirming the control catches a real leak. The forced leak was removed.
+    """
+    def _run_and_capture( self, pending_rows, update_rowcount, last_available ):
+        update_result = MagicMock(); update_result.rowcount = update_rowcount
+        select_result = MagicMock()
+        select_result.scalars.return_value.all.return_value = pending_rows
+        self.session.execute.side_effect = [ update_result, select_result ]
+        with patch.object( jp, "get_last_available", return_value=last_available ), \
+             patch( "builtins.print" ) as mp:
+            counts = jp.mark_interrupted_jobs()
+        printed = " ".join( str( c ) for c in mp.call_args_list )
+        return counts, printed
+
+    def test_future_scheduled_preserve_is_silent( self ):
+        # Future scheduled_at → preserved (stays PENDING), NOT a catch-up. No marker.
+        future = SimpleNamespace( id_hash="fut-1",
+                                  metadata_json={ "scheduled_at": "2099-01-01T00:00:00+00:00" } )
+        counts, printed = self._run_and_capture(
+            [ future ], 0, datetime( 2020, 1, 1, tzinfo=timezone.utc ) )
+        self.assertEqual( counts[ "pending_preserved" ], 1 )
+        self.assertEqual( counts[ "pending_catchup" ], 0 )
+        self.assertNotIn( "[CJ-CATCHUP-LATE]", printed )
+
+    def test_before_window_interrupt_is_silent( self ):
+        # scheduled_at PAST and BEFORE the downtime window → INTERRUPTED, not a
+        # catch-up. No marker.
+        before = SimpleNamespace( id_hash="bef-1",
+                                  metadata_json={ "scheduled_at": "2019-01-01T00:00:00+00:00" },
+                                  status=None, completed_at=None, updated_at=None )
+        counts, printed = self._run_and_capture(
+            [ before ], 0, datetime( 2020, 1, 1, tzinfo=timezone.utc ) )
+        self.assertEqual( counts[ "pending_interrupted" ], 1 )
+        self.assertEqual( counts[ "pending_catchup" ], 0 )
+        self.assertNotIn( "[CJ-CATCHUP-LATE]", printed )
+
+    def test_plain_running_interrupt_is_silent( self ):
+        # A RUNNING job interrupted at startup, no pending rows → not a catch-up.
+        # No marker.
+        counts, printed = self._run_and_capture(
+            [], 1, datetime( 2020, 1, 1, tzinfo=timezone.utc ) )
+        self.assertEqual( counts[ "running" ], 1 )
+        self.assertEqual( counts[ "pending_catchup" ], 0 )
+        self.assertNotIn( "[CJ-CATCHUP-LATE]", printed )
+
+
 class TestIsFutureScheduled( unittest.TestCase ):
     def test_future( self ):
         self.assertTrue( jp._is_future_scheduled( "2099-01-01T00:00:00+00:00" ) )
