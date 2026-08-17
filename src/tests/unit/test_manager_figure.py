@@ -201,6 +201,28 @@ class TestStampedImplicitFlag:
         write( "s1", { "voice_persona": { "name": "Tiberius" } } )
         assert mf.is_manager_figure( "s1", environ=ENV_LUPIN, _find_path=find ) is True
 
+    def test_maria_server_env_GREEN( self, tmp_path, monkeypatch ):
+        # RED→GREEN receipt (bug e5d600bd), as a re-runnable test. María is a named
+        # standing manager; pre-fix, the server-shaped caller (no chain in env) read
+        # False — the reported bug. Post-fix, the registration-time stamp carries
+        # the answer, so the SAME server-shaped caller reads True.
+        monkeypatch.setattr( mf, "resolve_project_name", lambda environ=None: "lupin" )
+        write, find = bridge_factory( tmp_path )
+        write( "s1", { "role": "author", "voice_persona": { "name": "María" },
+                       "manager_figure_implicit": True } )
+        # environ carries NO COSA_VOICE_PREFERRED_PERSONA__* — the container shape.
+        assert mf.is_manager_figure( "s1", environ={ "LUPIN_ROOT": "/var/lupin" }, _find_path=find ) is True
+
+    def test_sam_overflow_under_maria_chain_stays_false( self, tmp_path, monkeypatch ):
+        # Sam is the overflow default persona, never a named standing manager.
+        # Stamped False at registration; the server-shaped caller must keep it a
+        # worker — the stratum half: an overflow seat must NOT bias the manager arm.
+        monkeypatch.setattr( mf, "resolve_project_name", lambda environ=None: "lupin" )
+        write, find = bridge_factory( tmp_path )
+        write( "s1", { "role": "author", "voice_persona": { "name": "Sam" },
+                       "manager_figure_implicit": False } )
+        assert mf.is_manager_figure( "s1", environ={ "LUPIN_ROOT": "/var/lupin" }, _find_path=find ) is False
+
 
 class TestResolveImplicitManagerFigure:
     """The pure resolver register_session calls to compute the stamp."""
@@ -229,3 +251,14 @@ class TestResolveImplicitManagerFigure:
             def get( self, *a, **k ):
                 raise RuntimeError( "boom" )
         assert mf.resolve_implicit_manager_figure( "Tiberius", ExplodingEnv() ) is False
+
+    def test_sam_overflow_persona_under_maria_chain_is_false( self ):
+        # Pair 2 (Cheech's ask): allocated="Sam" under chain "María,*" — the `*`
+        # matches "anything free" for ALLOCATION but is NEVER a manager claim, and
+        # Sam is not the named entry, so the implicit source is False.
+        env = { "LUPIN_ROOT": "/x/lupin", "COSA_VOICE_PREFERRED_PERSONA__LUPIN": "María,*" }
+        assert mf.resolve_implicit_manager_figure( "Sam", env ) is False
+
+    def test_maria_named_entry_under_own_chain_is_true( self ):
+        env = { "LUPIN_ROOT": "/x/lupin", "COSA_VOICE_PREFERRED_PERSONA__LUPIN": "María,*" }
+        assert mf.resolve_implicit_manager_figure( "María", env ) is True
