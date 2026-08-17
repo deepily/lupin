@@ -89,6 +89,14 @@ ROUTE_REPLAY_ERROR  = "replay_error"
 # The mark whose offset from the anchor is "latency to first useful response".
 FIRST_USEFUL_MARK = "t_first_useful"
 
+# Read budget for one POST /api/v2/ask. The v2 arm's ask is a SYNCHRONOUS full Phi-4
+# inference — ~22s typical, 34-67s observed, and past 120s late in a long run when the
+# model server is under contention. The n=60 closer ts-1686ce29 ran 3h02m and then died
+# on a ReadTimeoutError at the old 120s limit, BEFORE either arm's artifact was dumped,
+# so the whole run was unrecoverable. 300s is the budget; LUPIN_V2_ASK_TIMEOUT_SECONDS
+# raises or lowers it for a run without a code edit. (Row d8d019f6.)
+ASK_READ_TIMEOUT_SECONDS = 300.0
+
 # §6a: the decision floors the threshold table reports, choosing the floor from
 # data rather than re-running the corpus once per candidate value.
 THRESHOLD_FLOORS = ( 100.0, 98.0, 95.0, 90.0 )
@@ -719,7 +727,7 @@ class HttpAskClient:
         bearer       : str,
         websocket_id : str                       = "v2-eval",
         post_fn      : Optional[ Callable ]      = None,
-        timeout      : float                     = 120.0,
+        timeout      : float                     = ASK_READ_TIMEOUT_SECONDS,
         clock        : Callable[ [], float ]     = time.monotonic,
         relogin_fn   : Optional[ Callable[ [], str ] ] = None,
     ) -> None:
@@ -1067,7 +1075,10 @@ def _default_client_factory( base_url: str ) -> HttpAskClient:
         reply.raise_for_status()
         return reply.json()[ "tokens" ][ "access_token" ]   # /auth/login nests the token under "tokens" (B1)
     # relogin_fn = the SAME login, re-minted on 401 so a >30min paired run survives JWT expiry (d8d019f6).
-    return HttpAskClient( base_url, bearer=_login(), relogin_fn=_login )
+    # timeout: ASK_READ_TIMEOUT_SECONDS unless a run overrides it — a read wall must never again be
+    # the thing that destroys 3 hours of unwritten arm data (ts-1686ce29, row d8d019f6).
+    ask_timeout = float( os.environ.get( "LUPIN_V2_ASK_TIMEOUT_SECONDS", ASK_READ_TIMEOUT_SECONDS ) )
+    return HttpAskClient( base_url, bearer=_login(), relogin_fn=_login, timeout=ask_timeout )
 
 
 if __name__ == "__main__":                    # pragma: no cover - CLI entry stub, not unit-testable (login logic covered via _default_client_factory)

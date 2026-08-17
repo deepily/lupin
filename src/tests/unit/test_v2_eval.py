@@ -418,6 +418,47 @@ def test_http_ask_client_no_relogin_leaves_401_failed():
     assert rec[ "status_code" ] == 401
 
 
+def test_http_ask_client_read_timeout_survives_a_slow_inference():
+    # RED control for the 6th blocker. The n=60 closer ran 3h02m and then died on a
+    # ReadTimeoutError: one POST /api/v2/ask exceeded the old 120s read wall, BEFORE either
+    # arm's artifact was dumped, so the whole run was unrecoverable. The timeout the client
+    # hands the transport must be the one that survives the SLOWEST call actually observed
+    # (v2 inference degraded to ~60s+/call, one over 120s), not the old 120.
+    seen = []
+    client = ve.HttpAskClient(
+        "http://localhost:8000", bearer="j",
+        post_fn=lambda url, json, headers, timeout: seen.append( timeout ) or _FakeReply( 200, { "path": "replay" } ),
+    )
+    client.ask( "what time is it" )
+    assert seen == [ ve.ASK_READ_TIMEOUT_SECONDS ]        # the constant reaches the transport, not a literal
+    assert ve.ASK_READ_TIMEOUT_SECONDS >= 300.0           # RED at the old 120.0
+    assert seen[ 0 ] > 120.0                              # RED if the default is reverted
+
+
+def test_default_client_factory_read_timeout_default_and_env_override( monkeypatch ):
+    # The live run builds its client through the factory, so the factory — not just the
+    # class default — is where the read budget has to land. Env override exists so a run can
+    # move the wall without a code edit; RED if the factory drops the timeout argument.
+    monkeypatch.setenv( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL", "a@b.c" )
+    monkeypatch.setenv( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD", "pw" )
+    class _LoginReply:
+        def raise_for_status( self ):
+            return None
+        def json( self ):
+            return { "tokens": { "access_token": "jwt-123" } }
+    class _FakeRequests:
+        @staticmethod
+        def post( url, json, timeout ):
+            return _LoginReply()
+    monkeypatch.setitem( sys.modules, "requests", _FakeRequests )
+
+    monkeypatch.delenv( "LUPIN_V2_ASK_TIMEOUT_SECONDS", raising=False )
+    assert ve._default_client_factory( "http://localhost:8000" ).timeout == ve.ASK_READ_TIMEOUT_SECONDS
+
+    monkeypatch.setenv( "LUPIN_V2_ASK_TIMEOUT_SECONDS", "900" )
+    assert ve._default_client_factory( "http://localhost:8000" ).timeout == 900.0
+
+
 def test_http_ask_client_default_transport_imports_requests( monkeypatch ):
     sent = {}
     class _FakeRequests:
@@ -741,13 +782,21 @@ class _FakeEngine:
 
 
 class _FakeConnection:
-    """A DB connection stand-in: exposes .engine.url and records .execute( sql ) calls."""
+    """A DB connection stand-in: exposes .engine.url and records .execute( sql ) + .commit() calls.
+
+    Records the SQL as a STRING because 291fb3fa wraps the statement in SQLAlchemy `text()`,
+    and a TextClause compared with `==` builds an expression instead of answering True/False.
+    Records commits because 9b90ae5d made the TRUNCATE's commit the thing under test.
+    """
     def __init__( self, url ):
-        self.engine   = _FakeEngine( url )
-        self.executed = []
+        self.engine    = _FakeEngine( url )
+        self.executed  = []
+        self.committed = 0
     def execute( self, sql ):
-        self.executed.append( sql )
+        self.executed.append( str( sql ) )
         return None
+    def commit( self ):
+        self.committed += 1
 
 
 class _FakeCfgV2:
@@ -772,6 +821,9 @@ def test_clean_v2_snapshot_store_truncates_after_both_guards( monkeypatch ):
     assert result == "solution_snapshots"
     # The TRUNCATE identifier is the RESOLVED target, never the raw config string.
     assert conn.executed == [ "TRUNCATE TABLE solution_snapshots" ]
+    # And it is COMMITTED: SQLAlchemy 2.x is commit-as-you-go, so an uncommitted TRUNCATE rolls
+    # back on close and the store stays dirty (9b90ae5d). RED if connection.commit() is removed.
+    assert conn.committed == 1
 
 
 def test_clean_v2_snapshot_store_refuses_config_drift_without_truncating( monkeypatch ):
@@ -782,7 +834,7 @@ def test_clean_v2_snapshot_store_refuses_config_drift_without_truncating( monkey
     cfg  = _clean_cfg( "v2_paired_snapshots" )
     with pytest.raises( guard.ConfigTableMismatch ):
         ve.clean_v2_snapshot_store( conn, cfg )
-    assert conn.executed == []                       # no TRUNCATE on a drifted config
+    assert conn.executed == [] and conn.committed == 0    # no TRUNCATE, and nothing committed
 
 
 def test_clean_v2_snapshot_store_refuses_wrong_db_without_truncating( monkeypatch ):
@@ -794,7 +846,7 @@ def test_clean_v2_snapshot_store_refuses_wrong_db_without_truncating( monkeypatc
     cfg  = _clean_cfg( "solution_snapshots" )
     with pytest.raises( guard.NotAMeasurementDatabase ):
         ve.clean_v2_snapshot_store( conn, cfg )
-    assert conn.executed == []                       # no TRUNCATE on a wrong db
+    assert conn.executed == [] and conn.committed == 0    # no TRUNCATE, and nothing committed
 
 
 def test_clean_v2_snapshot_store_config_check_fires_before_db_check( monkeypatch ):
@@ -806,4 +858,4 @@ def test_clean_v2_snapshot_store_config_check_fires_before_db_check( monkeypatch
     cfg  = _clean_cfg( "v2_paired_snapshots" )
     with pytest.raises( guard.ConfigTableMismatch ):
         ve.clean_v2_snapshot_store( conn, cfg )
-    assert conn.executed == []
+    assert conn.executed == [] and conn.committed == 0
