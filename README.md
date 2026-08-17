@@ -272,6 +272,7 @@ claude mcp add cosa-voice -- python ${LUPIN_ROOT}/src/lupin_mcp/cosa_voice_mcp.p
 - [Notification API](src/docs/notification-api.md) — comprehensive notification reference with Mermaid diagrams
 - [CJ Flow Packaging Guide](src/rnd/v0.1.4/2026.02.12-cj-flow-bounded-job-packaging-guide.md) — how to add new QueueableJob types
 - [Durable Submit-Queue Restore](src/rnd/v0.2.0/2026.08.15-durable-submit-queue-restore.md) — why immediate queued jobs survive a container bounce (row 2817b0f5)
+- [Flash-Lite on the GCP VM, and the Seed That Was Never Set](src/rnd/v0.2.0/2026.08.17-flash-lite-on-the-gcp-vm-and-the-missing-seed.md) — temperature was always 0.0, the seed did not exist and the client would have rejected one, and nothing on the VM supplied the GCP project id (row ae43a37c)
 - [cosa-voice MCP Server](src/lupin_mcp/README.md) — MCP server setup and tool reference
 - [Agentic Voice Workflow](src/workflow/agentic-voice-workflow.md) — building new agents with voice I/O
 - [Fleet Liveness & Task-Store Architecture](src/docs/fleet-liveness-and-task-store-architecture.md) — one store, three readers; heartbeat holds; the arbiter and how to bounce it

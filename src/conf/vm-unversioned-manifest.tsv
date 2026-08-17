@@ -46,6 +46,17 @@ src/conf/contact-information.map	/mnt/lupin-data/lupin/src/conf/contact-informat
 # Listed so preflight ASSERTS ITS PRESENCE; push-unversioned SKIPS it (local_path '-').
 -	/mnt/lupin-data/lupin/cloud-gpu.env	-	-	REQUIRED
 
+# --- GCP project id for in-app Vertex calls (gitignored: deploy config) --------
+# Row ae43a37c. Nothing on the VM supplies LUPIN_GCP_PROJECT_ID — the env contract
+# declares it HOST-side only, for lupin-vm.sh's gcloud calls, and neither the host
+# shell nor the lupin-rest container has it. resolve_gcp_project_id() then falls back
+# to $LUPIN_ROOT/src/scripts/cloud-run.env, which git cannot deliver. Absent => every
+# Vertex client (the Gemini Flash-Lite arm) raises at CONSTRUCTION with "LUPIN_GCP_
+# PROJECT_ID is not set", so the arm cannot run on the VM at all — measured 2026-08-17,
+# inside lupin-rest-cloud-gpu, after the config key itself resolved correctly.
+# No secrets in it: project id + region + Artifact Registry repo.
+src/scripts/cloud-run.env	/mnt/lupin-data/lupin/src/scripts/cloud-run.env	1001:1001	644	REQUIRED
+
 # --- portable Claude Code permission stanza (NOT in any repo, by ruling) -------
 # Rick 2026-08-04: "I do not want this file in the repo ... put it outside of the project's
 # directory in the projects data directory." So it lives at $DEEPILY_DATA_DIR and git cannot
