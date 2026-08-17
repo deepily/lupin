@@ -185,6 +185,26 @@ def _scan_fingerprint( findings ):
     return hashlib.sha256( "\n".join( rows ).encode() ).hexdigest()
 
 
+def _require_ref( ref, root ):
+    """
+    Skip loudly when the ref cannot be read, rather than failing for the wrong reason.
+
+    Rachel's F6: on a `git archive` export with no git metadata, the re-scan tests fail —
+    not because a credential is loose, but because there is no repository to read. A red
+    that means "wrong environment" trains people to ignore a red that means "secret".
+
+    The skip names what went unverified, because a silent skip is how a control quietly
+    stops being one.
+    """
+    import subprocess
+    probe = subprocess.run( [ "git", "rev-parse", "--verify", "--quiet", ref ], cwd=root,
+                            capture_output=True, text=True )
+    if probe.returncode != 0 or not probe.stdout.strip():
+        pytest.skip( f"NOT VERIFIED HERE: ref '{ref}' is unreadable in this checkout "
+                     "(no git metadata, or the ref was never fetched), so the standing "
+                     "credential inventory was not re-measured on this run." )
+
+
 def _masked_rows( findings ):
     """
     The masked identity of each finding, WITHOUT its line number.
@@ -234,6 +254,8 @@ def test_a_detector_change_forces_a_full_rescan():
     scanner  = root + "/src/scripts/secret_scan.py"
     record   = root + "/src/tests/unit/fixtures/secret_scan_last_full_scan.json"
     recorded = json.load( open( record ) )
+
+    _require_ref( recorded[ "scanned_ref" ], root )
 
     detector_now = hashlib.sha256( open( scanner, "rb" ).read() ).hexdigest()
     ref_now      = subprocess.run( [ "git", "rev-parse", recorded[ "scanned_ref" ] ], cwd=root,
@@ -294,6 +316,8 @@ def test_the_branch_we_commit_to_carries_no_untriaged_finding():
     root     = cu.get_project_root()
     record   = root + "/src/tests/unit/fixtures/secret_scan_last_full_scan.json"
     recorded = json.load( open( record ) )
+
+    _require_ref( recorded[ "branch_ref" ], root )
 
     accepted = set( recorded[ "branch_accepted" ] )
     measured = _masked_rows( secret_scan.scan_ref( recorded[ "branch_ref" ], cwd=root ) )

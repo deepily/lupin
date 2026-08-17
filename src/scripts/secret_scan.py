@@ -302,6 +302,7 @@ _TEXT_EXT = ( ".md", ".ini", ".env", ".cfg", ".conf", ".yaml", ".yml", ".json",
 # (Rachel's F3, measured). Tiffany found a live sandbox project id in test fixtures on
 # this very afternoon, so "it is only a test file" is not a reason to stop looking.
 _SELF_PLANTED = ( "src/tests/unit/test_secret_scan.py",
+                  "src/tests/unit/test_secret_scan_payload_shapes.py",
                   "src/tests/unit/fixtures/secret_scan_last_full_scan.json" )
 
 
