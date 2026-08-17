@@ -571,6 +571,51 @@ class TestUnreachableServerIsNotABatchSizeProblem:
 # `column "input_embedding_regen" does not exist` (2026-08-17). Generating the DDL
 # from REGEN_SPECS means adding a spec cannot leave its column uncreated.
 # --------------------------------------------------------------------------- #
+class TestBulkUpdateShadowSql:
+    """
+    The batched-write template that collapses a whole 1024-row chunk into one
+    execute_values round trip. Measured 2026-08-16 (row 5e848dd8): the bottleneck
+    was Python/SQLAlchemy per-statement overhead, not Postgres.
+    """
+
+    def test_has_single_values_placeholder_for_execute_values( self ):
+        # execute_values expands exactly one %s into the VALUES rows.
+        from cosa.rest.db.embedding_regeneration import bulk_update_shadow_sql
+        sql = bulk_update_shadow_sql( "public.input_and_output", "id", "input_embedding_regen" )
+        assert sql.count( "%s" ) == 1
+
+    def test_updates_the_named_shadow_column_from_the_values_alias( self ):
+        from cosa.rest.db.embedding_regeneration import bulk_update_shadow_sql
+        sql = bulk_update_shadow_sql( "public.input_and_output", "id", "input_embedding_regen" )
+        assert "SET input_embedding_regen = data.vec::vector" in sql
+
+    def test_casts_the_text_literal_back_to_a_vector( self ):
+        # The pending pairs carry vec as str(list(...)); without ::vector the
+        # assignment against a pgvector column would fail.
+        from cosa.rest.db.embedding_regeneration import bulk_update_shadow_sql
+        sql = bulk_update_shadow_sql( "regen_probe.io_clone", "id", "output_final_embedding_regen" )
+        assert "data.vec::vector" in sql
+
+    def test_aliases_target_so_schema_qualified_name_still_yields_legal_pk_ref( self ):
+        # A bare "schema.table.pk" in WHERE is brittle; aliasing to t keeps it legal.
+        from cosa.rest.db.embedding_regeneration import bulk_update_shadow_sql
+        sql = bulk_update_shadow_sql( "regen_probe.io_clone", "id", "input_embedding_regen" )
+        assert "UPDATE regen_probe.io_clone AS t " in sql
+        assert "WHERE t.id = data.id" in sql
+
+    def test_join_key_uses_the_given_primary_key_name( self ):
+        from cosa.rest.db.embedding_regeneration import bulk_update_shadow_sql
+        sql = bulk_update_shadow_sql( "public.prediction_decisions", "id", "question_embedding_regen" )
+        assert "WHERE t.id = data.id" in sql
+
+    def test_every_regen_spec_produces_a_wellformed_statement( self ):
+        from cosa.rest.db.embedding_regeneration import bulk_update_shadow_sql, REGEN_SPECS
+        for spec in REGEN_SPECS:
+            sql = bulk_update_shadow_sql( f"public.{spec.table}", spec.pk, spec.shadow_column )
+            assert sql.startswith( f"UPDATE public.{spec.table} AS t SET {spec.shadow_column} = data.vec::vector" )
+            assert sql.count( "%s" ) == 1
+
+
 class TestShadowColumnDdl:
 
     def test_one_statement_per_spec_in_spec_order( self ):

@@ -310,6 +310,36 @@ def plan_batches_by_budget( items: Sequence[Any], size_of, *,
     return batches
 
 
+def bulk_update_shadow_sql( table: str, pk: str, shadow_column: str ) -> str:
+    """
+    Build the ONE-statement, many-row shadow UPDATE used by the batched write path.
+
+    Measured 2026-08-16 (row 5e848dd8): the per-statement Python/SQLAlchemy
+    overhead — NOT Postgres — dominates the write side, and collapsing a chunk
+    into a single round trip roughly doubles throughput (~4,575 -> ~8,940 rows/s
+    on a properly-indexed clone). This is the psycopg2 `execute_values` template
+    that does the collapsing while leaving the commit cadence alone.
+
+    The `%s` placeholder is expanded by execute_values into the VALUES rows; each
+    row is `(id, vec_text)`, and `data.vec::vector` casts the pgvector literal
+    back to a vector on the way in. The target is aliased `t` so a
+    schema-qualified table name still yields a legal `t.<pk>` reference.
+
+    Requires:
+        - table, pk, shadow_column are non-empty identifiers (already qualified
+          by the caller via qualify(); this function does no quoting)
+
+    Ensures:
+        - returns a single UPDATE ... FROM (VALUES %s) ... statement string whose
+          only bind point is the execute_values %s marker
+    """
+    return (
+        f"UPDATE {table} AS t SET {shadow_column} = data.vec::vector "
+        f"FROM ( VALUES %s ) AS data( id, vec ) "
+        f"WHERE t.{pk} = data.id"
+    )
+
+
 class AdaptiveBudget:
     """
     A character budget that FINDS its own ceiling instead of being told one.
@@ -686,6 +716,28 @@ def _embed_with_split_retry( provider, rows, content_type, depth=0, budget=None 
         return out
 
 
+def _bulk_write_shadow( session, table, pk, shadow_column, pairs ):   # pragma: no cover - live DB boundary
+    """
+    Write a whole chunk of (id, vec_text) pairs in ONE psycopg2 execute_values
+    call, inside the session's current transaction (caller still commits).
+
+    Reaches through the SQLAlchemy session to the underlying psycopg2 cursor
+    because execute_values is a psycopg2 extension — the write lands in the same
+    transaction the session manages, so the caller's session.commit() covers it.
+    """
+    from psycopg2.extras import execute_values
+
+    raw    = session.connection().connection          # DBAPI (psycopg2) connection
+    cursor = raw.cursor()
+    execute_values(
+        cursor,
+        bulk_update_shadow_sql( table, pk, shadow_column ),
+        pairs,
+        template  = "(%s, %s)",
+        page_size = len( pairs ),
+    )
+
+
 def _fill( session, spec, provider, prefix="", batch_size=DEFAULT_BATCH_SIZE,
            char_budget=DEFAULT_CHAR_BUDGET, limit=None, scratch_dir="/tmp",
            apply=False ):   # pragma: no cover - live DB + embedder boundary
@@ -722,6 +774,12 @@ def _fill( session, spec, provider, prefix="", batch_size=DEFAULT_BATCH_SIZE,
             f"SELECT {spec.pk}, {spec.text_column} FROM {table} WHERE {spec.pk} = ANY(:ids)"
         ), { "ids": id_chunk } ).all()
 
+        # Accumulate this chunk's (id, vec_text) pairs, then write them in ONE
+        # execute_values round trip below. Measured 2026-08-16 (row 5e848dd8): the
+        # Python/SQLAlchemy per-statement overhead, not Postgres, was the write-side
+        # bottleneck — batching roughly doubles throughput. The commit stays per
+        # chunk, so the 1024-row cadence is unchanged.
+        pending = []
         for batch in plan_batches_by_budget(
             [ ( row[ 0 ], row[ 1 ] ) for row in fetched ],
             size_of     = lambda pair: len( pair[ 1 ] or "" ),
@@ -734,11 +792,12 @@ def _fill( session, spec, provider, prefix="", batch_size=DEFAULT_BATCH_SIZE,
                     print( f"    REJECTED {spec.pk}={row_id}: {reason}" )
                     rejected += 1
                     continue
-                session.execute( sql_text(
-                    f"UPDATE {table} SET {spec.shadow_column} = :vec WHERE {spec.pk} = :id"
-                ), { "vec": str( list( vector ) ), "id": row_id } )
-                written += 1
+                pending.append( ( row_id, str( list( vector ) ) ) )
                 done.append( row_id )
+
+        if pending:
+            _bulk_write_shadow( session, table, spec.pk, spec.shadow_column, pending )
+            written += len( pending )
 
         session.commit()
         save_checkpoint( path, done )
