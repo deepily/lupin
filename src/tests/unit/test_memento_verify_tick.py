@@ -210,7 +210,6 @@ def test_findings_line_names_the_repo_it_actually_checked( ledger, script ):
 
     assert "lupin" in line, "the verdict does not name the repo it read"
     assert "this repo's mementos" not in line, "unscoped phrasing is back"
-    assert "ONLY" in line, "the line does not say the check covers that repo alone"
     # The remedy must be runnable as printed, not a <lupin> placeholder to fill in.
     assert "/repos/lupin" in line and "<lupin>" not in line
 
@@ -238,9 +237,105 @@ def test_unreadable_findings_line_also_names_its_repo( ledger, script ):
 
 
 def test_missing_repo_root_is_loud( ledger, script, monkeypatch ):
+    # Since row 890c07d3 an unset LUPIN_ROOT is no longer enough to mean "nothing to
+    # check" — the bridges are consulted too. Stub discovery empty so this asserts the
+    # nothing-to-check path rather than whatever repos happen to be live on this box;
+    # without the stub the test silently depended on the real sessions dir.
     monkeypatch.delenv( "LUPIN_ROOT", raising=False )
+    monkeypatch.setattr( tick, "fleet_repo_roots", lambda *a, **k: [] )
     line = tick.verify_tick_line( now=NOW, force=True, repo_root=None )
-    assert "SKIPPED" in line and "LUPIN_ROOT" in line
+    assert "SKIPPED" in line and "no repo to check" in line
+
+
+# ── fleet coverage: the sweep spans repos (row 890c07d3, Rick's ruling) ───────
+
+def test_fleet_repo_roots_reads_cwd_from_bridges_and_needs_io_mementos( tmp_path ):
+    """
+    The list is OBSERVED from live bridges, not declared. A repo only qualifies if it
+    actually holds io/mementos — otherwise there is nothing to verify and naming it
+    would be noise dressed as coverage.
+    """
+    bridges = tmp_path / "sessions"; bridges.mkdir()
+    has     = tmp_path / "has-mementos"; ( has / "io" / "mementos" ).mkdir( parents=True )
+    without = tmp_path / "no-mementos"; without.mkdir()
+
+    ( bridges / "cc-1.json" ).write_text( json.dumps( { "cwd": str( has ) } ) )
+    ( bridges / "cc-2.json" ).write_text( json.dumps( { "cwd": str( without ) } ) )
+    ( bridges / "cc-3.json" ).write_text( "{ half-written" )          # must not be fatal
+    ( bridges / "cc-4-buffer.json" ).write_text( json.dumps( { "cwd": str( has ) } ) )
+
+    roots = tick.fleet_repo_roots( bridges_dir=bridges )
+    assert roots == [ str( has ) ]
+
+
+def test_fleet_repo_roots_is_empty_not_raising_when_the_dir_is_missing( tmp_path ):
+    assert tick.fleet_repo_roots( bridges_dir=tmp_path / "nope" ) == []
+
+
+def test_sweep_checks_every_discovered_repo_and_attributes_each_finding( ledger, script, monkeypatch ):
+    """
+    🔴 THE GUARD THIS ROW EXISTS FOR. Before the ruling only lupin was ever checked,
+    so a divergence in planning-is-prompting was never looked at and the silence read
+    as clean. Both repos must be verified, and each finding must name ITS OWN repo —
+    a sweep that reported "2 findings" without saying where would be unactionable.
+    """
+    monkeypatch.setattr( tick, "fleet_repo_roots",
+                         lambda *a, **k: [ "/repos/lupin", "/repos/planning-is-prompting" ] )
+    monkeypatch.delenv( "LUPIN_ROOT", raising=False )
+
+    seen = []
+    def _run( argv, **kw ):
+        seen.append( argv[ argv.index( "--repo" ) + 1 ] )
+        return _completed( "--- FINDINGS : 2" if "planning" in argv[ -1 ] else "--- FINDINGS : 0" )
+
+    with patch.object( subprocess, "run", side_effect=_run ):
+        line = tick.verify_tick_line( now=NOW, force=True )
+
+    assert sorted( seen ) == [ "/repos/lupin", "/repos/planning-is-prompting" ], \
+        "the sweep did not visit every discovered repo"
+    # lupin was clean, so it must stay silent; the other repo's findings must surface
+    # AND be attributed, or a reader cannot tell which repo to go fix.
+    assert "planning-is-prompting" in line and "2 finding" in line
+    assert "lupin's mementos" not in line, "a clean repo was reported as having findings"
+
+
+def test_lupin_is_swept_even_when_no_lupin_seat_is_live( ledger, script, monkeypatch ):
+    """
+    The union with LUPIN_ROOT is load-bearing: discovery alone would drop lupin the
+    moment no lupin seat happens to be live, trading one blind spot for another.
+    """
+    monkeypatch.setattr( tick, "fleet_repo_roots", lambda *a, **k: [ "/repos/planning-is-prompting" ] )
+    monkeypatch.setenv( "LUPIN_ROOT", "/repos/lupin" )
+
+    seen = []
+    def _run( argv, **kw ):
+        seen.append( argv[ argv.index( "--repo" ) + 1 ] )
+        return _completed( "--- FINDINGS : 0" )
+
+    with patch.object( subprocess, "run", side_effect=_run ):
+        tick.verify_tick_line( now=NOW, force=True )
+
+    assert "/repos/lupin" in seen, "lupin dropped out of the sweep when no lupin seat was live"
+
+
+def test_one_repo_failing_does_not_silence_another( ledger, script, monkeypatch ):
+    """
+    A timeout on the first repo must not swallow the second's findings — that would
+    reinstate exactly the silence this row is about, one level up.
+    """
+    monkeypatch.setattr( tick, "fleet_repo_roots",
+                         lambda *a, **k: [ "/repos/aaa", "/repos/zzz" ] )
+    monkeypatch.delenv( "LUPIN_ROOT", raising=False )
+
+    def _run( argv, **kw ):
+        if "aaa" in argv[ -1 ]: raise subprocess.TimeoutExpired( "cmd", 120 )
+        return _completed( "--- FINDINGS : 4" )
+
+    with patch.object( subprocess, "run", side_effect=_run ):
+        line = tick.verify_tick_line( now=NOW, force=True )
+
+    assert "TIMED OUT" in line and "aaa" in line
+    assert "4 finding" in line and "zzz" in line
 
 
 def test_timeout_is_loud( ledger, script ):

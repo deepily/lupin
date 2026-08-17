@@ -62,9 +62,63 @@ MEMENTO_VERIFY_TTL_SECONDS = 24 * 3600
 
 # The scan walks a few hundred files and hashes each against its mirror. Generous, because
 # the cost of a false "timed out" line is a reader chasing a problem that is not there.
+#
+# ⚠️ THIS IS PER REPO, AND THE SWEEP IS NOW MULTI-REPO (row 890c07d3). The worst case
+# is therefore this timeout × the number of discovered repos, on the ONE turn a day the
+# TTL lets through — two repos today, so ~240s worst case rather than ~120s. Stated
+# because it is a real cost paid on a Stop hook: if the fleet ever spans many repos this
+# wants a total budget rather than a per-repo one.
 MEMENTO_VERIFY_TIMEOUT_SECONDS = 120
 
 _LEDGER_NAME = ".memento-verify-tick.json"
+
+
+def fleet_repo_roots( bridges_dir=None ):
+    """
+    The repos the fleet is ACTUALLY sitting in, read from live session bridges
+    (row 890c07d3, Rick's ruling 2026-08-17).
+
+    WHY BRIDGES AND NOT CONFIG. heartbeat_hold:86-93 left "where do the fleet's
+    roots come from" open on purpose, and named the trap: a config-derived list
+    "resolves to CONTAINER paths that do not exist on the host, where the arbiter
+    actually runs". A bridge's `cwd` is written BY the session, ON the host, and was
+    correct in 23 of 23 live bridges when this was measured — it is the same ground
+    truth that fixed the reap's slot derivation. So the list is OBSERVED, never
+    declared, and host-side by construction.
+
+    ⚠️ ITS HONEST LIMIT, which callers must not paper over: this sees only repos with
+    a CURRENTLY LIVE seat. A repo whose sessions have all been reaped drops off the
+    list and stops being checked. That is a real gap, stated rather than hidden — the
+    alternative was a declared list that is wrong in a way nobody can see.
+
+    Requires:
+        - bridges_dir is a path-like, or None to use the real sessions dir
+
+    Ensures:
+        - returns a SORTED list of distinct existing repo roots that actually contain
+          an io/mementos directory — a repo with no mementos has nothing to verify,
+          and reporting on it would be noise, not coverage
+        - unreadable / partial / non-JSON bridge files are skipped, never fatal
+        - returns [] rather than raising when the sessions dir is missing
+    """
+    roots = set()
+    try:
+        base = Path( bridges_dir ) if bridges_dir is not None else Path( sessions_dir() )
+        for path in base.glob( "cc-*.json" ):
+            if "buffer" in path.name or "listener" in path.name:
+                continue
+            try:
+                cwd = json.loads( path.read_text( encoding="utf-8" ) ).get( "cwd" )
+            except Exception:
+                continue                       # a half-written bridge is not a repo claim
+            if not isinstance( cwd, str ) or not cwd.strip():
+                continue
+            root = Path( cwd )
+            if ( root / "io" / "mementos" ).is_dir():
+                roots.add( str( root ) )
+    except Exception:
+        return []
+    return sorted( roots )
 
 
 def _ledger_path():
@@ -157,27 +211,55 @@ def _parse_findings( stdout ):
     return None
 
 
+def _resolve_roots( repo_root ):
+    """
+    The repos this tick will check, and nothing else decides it (row 890c07d3).
+
+    Ensures:
+        - an EXPLICIT repo_root wins outright — one caller, one repo, no discovery
+        - otherwise: every repo the live bridges say the fleet is sitting in, UNIONED
+          with LUPIN_ROOT. The union matters — losing lupin because no lupin seat
+          happens to be live right now would trade one blind spot for another
+        - returns [] when nothing can be resolved, so the caller can say so loudly
+    """
+    if repo_root:
+        return [ str( repo_root ) ]
+    roots  = set( fleet_repo_roots() )
+    lupin  = os.environ.get( "LUPIN_ROOT" )
+    if lupin:
+        roots.add( str( lupin ) )
+    return sorted( roots )
+
+
 def verify_tick_line( repo_root=None, now=None, force=False ):
     """
     Run `memento_io.py verify` at most once a day and return one line about it.
 
+    SCOPE (row 890c07d3, Rick's ruling 2026-08-17): with no explicit repo_root this
+    checks EVERY repo the live session bridges say the fleet is sitting in, unioned
+    with LUPIN_ROOT — not lupin alone. Before that ruling only lupin was ever checked,
+    so half the live fleet's mementos (the continuity record a re-spin rehydrates
+    from) were never looked at, and the silence was indistinguishable from a clean
+    result.
+
+    ⚠️ THE REMAINING BLIND SPOT, stated rather than hidden: the bridge-derived list
+    sees only repos with a CURRENTLY LIVE seat. A repo whose sessions have all been
+    reaped drops off and stops being checked. See fleet_repo_roots for why an
+    observed list beats a declared one anyway.
+
     Requires:
-        - repo_root is the repo whose mementos are checked (defaults to LUPIN_ROOT).
-          ⚠️ THAT IS ONE REPO, NOT THE FLEET (row 890c07d3). Nothing here checks any
-          other repo's mementos, and a 0-findings run is silent, so "no line" means
-          "lupin was clean" — NEVER "the fleet's mementos are verified". Every line
-          this returns names the repo it actually read, so the verdict cannot be read
-          wider than its scope. Widening the scope needs a fleet root LIST, which is
-          the open design question heartbeat_hold:86-93 refused to answer inside a
-          module, and it is not answered here either
+        - repo_root pins the check to ONE repo (the CLI and the tests use this);
+          None means discover, as above
         - now is a timezone-aware datetime (defaults to real now)
         - force=True bypasses the TTL, for the CLI and for tests
 
     Ensures:
-        - returns "" ONLY when the TTL has not expired, or the run found nothing —
-          the two states that genuinely mean nothing to say
+        - returns "" ONLY when the TTL has not expired, or every checked repo came
+          back clean — the two states that genuinely mean nothing to say
         - returns a LOUD line on every failure (no env var, missing script, timeout,
           unreadable output), never ""
+        - every line NAMES the repo it read, so no verdict can be read wider than its
+          scope, and one repo's failure never suppresses another's result
         - NEVER restores, deletes, or migrates anything; it reports
         - never raises
     """
@@ -196,46 +278,68 @@ def verify_tick_line( repo_root=None, now=None, force=False ):
                      "workflow/scripts/memento_io.py is missing. The mirror-integrity check "
                      "has not run; this is not a clean result." )
 
-        repo_root = repo_root or os.environ.get( "LUPIN_ROOT" )
-        if not repo_root:
+        roots = _resolve_roots( repo_root )
+        if not roots:
             _write_last_run( path, now, None )
-            return "⚠️ memento verify SKIPPED — LUPIN_ROOT is unset, so there is no repo to check."
+            return ( "⚠️ memento verify SKIPPED — no repo to check: LUPIN_ROOT is unset and no "
+                     "live session bridge names a repo holding io/mementos." )
 
-        try:
-            proc = subprocess.run(
-                [ "python", str( script ), "verify", "--repo", str( repo_root ) ],
-                capture_output=True, text=True, timeout=MEMENTO_VERIFY_TIMEOUT_SECONDS,
-            )
-        except subprocess.TimeoutExpired:
-            _write_last_run( path, now, None )
-            return ( f"⚠️ memento verify TIMED OUT after {MEMENTO_VERIFY_TIMEOUT_SECONDS}s. "
-                     "Mirror integrity is UNVERIFIED, not confirmed." )
+        lines  = []
+        totals = []
+        for root in roots:
+            line, found = _verify_one_repo( script, root )
+            if line:  lines.append( line )
+            if found is not None: totals.append( found )
 
-        findings = _parse_findings( proc.stdout )
-        _write_last_run( path, now, findings )
-
-        # NAME THE REPO THAT WAS CHECKED (row 890c07d3). This tick only ever reads the
-        # LUPIN_ROOT repo, but it used to say "this repo's mementos" — which a reader
-        # sitting in a DIFFERENT repo reasonably takes to mean THEIRS. Six of the 23
-        # live seats are planning-is-prompting-resident and none of their mementos are
-        # covered here, so an unscoped verdict claims more than it checked. Naming the
-        # repo does not widen coverage; it stops the report overstating it.
-        repo_name = Path( repo_root ).name or str( repo_root )
-
-        if findings is None:
-            return ( f"⚠️ memento verify ran against {repo_name} but its FINDINGS line could "
-                     "not be read, so the result is unknown rather than clean. Re-run it by "
-                     f"hand: memento_io.py verify --repo {repo_root}" )
-        if findings == 0:
-            return ""
-        return ( f"⚠️ memento verify: {findings} finding(s) in {repo_name}'s mementos — this "
-                 "check covers that repo ONLY. A BARE-SLOT is a live data-loss window — the "
-                 "next pointer write destroys the record. Preserve first: "
-                 f"memento_io.py migrate --repo {repo_root} --apply. "
-                 "Nothing has been changed for you." )
+        # One stamp for the whole sweep. None when NOTHING produced a readable count —
+        # an unreadable sweep must not stamp as a clean zero.
+        _write_last_run( path, now, sum( totals ) if totals else None )
+        return " ".join( lines )
     except Exception as e:
         return ( f"⚠️ memento verify tick failed ({type( e ).__name__}). Mirror integrity is "
                  "UNVERIFIED — this is not a clean result." )
+
+
+def _verify_one_repo( script, repo_root ):
+    """
+    Verify ONE repo's mementos; return (line, findings_count).
+
+    Ensures:
+        - line is "" only when that repo verified clean; every other outcome is loud
+        - findings_count is None when no count could be read (unknown, NOT zero)
+        - a timeout or crash in one repo is reported and never raised, so one bad repo
+          cannot silence the rest of the sweep
+    """
+    # NAME THE REPO THAT WAS READ (row 890c07d3). This used to say "this repo's
+    # mementos", which a reader sitting in a DIFFERENT repo reasonably takes to mean
+    # theirs. Now that the sweep spans repos, an unnamed verdict would be worse still:
+    # the reader could not tell WHICH repo the findings belong to.
+    repo_name = Path( repo_root ).name or str( repo_root )
+    try:
+        proc = subprocess.run(
+            [ "python", str( script ), "verify", "--repo", str( repo_root ) ],
+            capture_output=True, text=True, timeout=MEMENTO_VERIFY_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return ( f"⚠️ memento verify TIMED OUT after {MEMENTO_VERIFY_TIMEOUT_SECONDS}s on "
+                 f"{repo_name}. Mirror integrity there is UNVERIFIED, not confirmed.", None )
+    except Exception as e:
+        return ( f"⚠️ memento verify could not run against {repo_name} "
+                 f"({type( e ).__name__}). That repo is UNVERIFIED, not clean.", None )
+
+    findings = _parse_findings( proc.stdout )
+
+    if findings is None:
+        return ( f"⚠️ memento verify ran against {repo_name} but its FINDINGS line could "
+                 "not be read, so the result is unknown rather than clean. Re-run it by "
+                 f"hand: memento_io.py verify --repo {repo_root}", None )
+    if findings == 0:
+        return ( "", 0 )
+    return ( f"⚠️ memento verify: {findings} finding(s) in {repo_name}'s mementos. "
+             "A BARE-SLOT is a live data-loss window — the next pointer write destroys "
+             "the record. Preserve first: "
+             f"memento_io.py migrate --repo {repo_root} --apply. "
+             "Nothing has been changed for you.", findings )
 
 
 def quick_smoke_test():
