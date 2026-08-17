@@ -1,5 +1,16 @@
 # TODO
 
+## 🧩 HELD OUT OF THE STORE 2026-08-17 (Tiberius 👑) — BRAIN INTEGRATION has no row (Rick's no-new-rows ban)
+
+María (`89b27996`) flagged that her P1's two-part gate — *"pass 2 lands only after BOTH the registration
+consolidation AND the brain integration have landed"* — has **NO ROW for half two**. Half one (registration
+consolidation) = **`95924f2d`**, moved to in_progress tonight after we cleared its false Rick-block (steps 1-4
+done `d110c26e`, step 5 retrain gated on Rick's explicit go). Half two, **BRAIN INTEGRATION = AskFlow called
+from `todo_fifo_queue`**, is homeless: it is NEW unbuilt work, so the no-new-rows ban forbids a store row.
+Recorded here (ban-neutral backlog) so it is not lost. **Mint a store row the moment the ban lifts** (or on a
+Rick waiver — a §5.5 + brain-integration waiver was asked for earlier tonight and the ask timed out). It gates
+`89b27996` pass-2; until brain-integration lands, that pass-2 cannot.
+
 ## 📌 UNFILED 2026-08-15 NIGHT (Cheech 🌿) — four findings held out of the store on Rick's no-new-tasks order
 
 Rick's 23:0x directive was **"no new bugs allowed"** while driving the board down, so none of

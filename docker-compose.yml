@@ -468,6 +468,12 @@ services:
       # filtered to TFE_/BFE_/LUPIN_TEST_ (attestation.py:27) and would drop
       # this var silently. host.docker.internal resolves via extra_hosts host-gateway.
       LUPIN_V1_ARM_BASE_URL: http://host.docker.internal:7997
+      # v2 paired-eval sample size (row d8d019f6). Design default is 60, but the full
+      # n=60 run (v1+v2, 2 passes each ≈ 1200 real calls, ~2h) far exceeds the test-suite
+      # integration timeout (2000s, job.py:84) and gets SIGTERM'd mid-flight. n=10 fits the
+      # budget (~200 calls, ~20min) and still yields a genuine median-Δ verdict (50 samples/pass).
+      # TEMPORARY run param for the overnight paired run — revert to design default afterward.
+      LUPIN_PAIRED_N: "60"
     deploy:
       resources:
         reservations:

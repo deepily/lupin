@@ -81,7 +81,7 @@ SUITE_TIMEOUTS_SECONDS = {
     "smoke_direct" : 1200,   # 20 min (longest: Phase D live ~10 min)
     "pytest_direct": 1200,   # 20 min (arbitrary pytest file — match smoke_direct budget)
     "websocket"    : 300,    #  5 min (~50 tests, server + WS)
-    "integration"  : 2000,   # 33 min (bumped from 1200s on 2026-04-21: observed 1392s when SWE-team dry-run tests ran — ~1.44x margin)
+    "integration"  : 30000,  # TEMP 2026-08-17 (row d8d019f6): 2000→30000 (~8.3h) for the full n=60 v2 paired CLOSING run — measured n=60 ≈ 4.8h (v1 ~6.7s/push + v2 ~22s/call), margin for the poweroff window. REVERT to 2000 at close. Prior: 33 min (bumped from 1200s on 2026-04-21: observed 1392s SWE-team dry-run — ~1.44x margin)
     "e2e"          : 3000,   # 50 min (bumped from 2400s on 2026-06-12: observed 2020.6s on ts-b51e63c9 — suite grew to ~593 tests, 2400s was only 1.19x margin; ~1.48x over observed)
     "all"            : 3600,   # 60 min (sequential pyramid, ~25-35 min observed)
     "presentation"   : 1800,   # 30 min (render-only + Sonnet; +Opus/R2P with flags)
