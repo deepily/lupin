@@ -178,36 +178,72 @@ def test_hook_reads_added_line_numbers_from_the_diff():
     assert added[ "README.md" ]    == { 11, 12 }
 
 
+def _scan_fingerprint( findings ):
+    """One digest over the whole masked result set — location, key and value digest."""
+    import hashlib
+    rows = sorted( f"{o}|{n}|{k}|{d}" for o, n, k, _len, d in findings )
+    return hashlib.sha256( "\n".join( rows ).encode() ).hexdigest()
+
+
 def test_a_detector_change_forces_a_full_rescan():
     """
-    The trigger a calendar cannot cover (Mr Radio, 2026-08-17).
+    The trigger a calendar cannot cover (Mr Radio, 2026-08-17), built so it cannot be
+    cleared by editing a number.
 
-    The pre-commit gate only ever sees ADDED lines, so nothing in it can find a secret
-    already sitting in the tree. A full re-scan is what finds those, and the moment it
-    pays most is a DETECTOR IMPROVEMENT: on 2026-08-17 one word-boundary fix made every
-    SCREAMING_SNAKE secret visible for the first time, two of them live at the public
-    tip. A weekly cadence would have sat on them for up to six more days.
+    WHY THE TRIGGER. The pre-commit gate only ever sees ADDED lines, so nothing in it can
+    find a secret already sitting in the tree. A full re-scan finds those, and the moment
+    it pays most is a DETECTOR IMPROVEMENT: one word-boundary fix made every
+    SCREAMING_SNAKE secret visible for the first time, two of them live at the public tip.
+    A weekly cadence would have sat on those for up to six more days.
 
-    So the detector is pinned to the last full scan run with it. Change the scanner and
-    this goes red until somebody re-scans and records what they found.
+    WHY IT IS NOT AN HONOUR SYSTEM. "What stops someone updating the pinned hash without
+    running the scan?" — Mr Radio, and he was right to ask. A recorded hash proves nothing
+    on its own. So this test does not compare hashes at all: it RE-RUNS the scan over the
+    published ref every time and checks the recorded fingerprint against what it just
+    measured. The only way to write a fingerprint that passes is to have scanned.
+
+    An earlier version of this test skipped the scan when the recorded detector hash still
+    matched. That was the hole: paste the new hash and the skip fires. It was removed
+    rather than argued with, and the cost is the ~5s this test spends re-scanning.
+
+    It goes red whenever origin/main moves, by design. Pushes here are rare and gated, and
+    a moved public tip is exactly when somebody should look again.
+
+    The planted positives above are the other half: a detector change that BLINDS the
+    scanner turns several of them red regardless of what is recorded here. This test is
+    aimed at the change that WIDENS it — where the positives stay green, the scanner now
+    sees things it could not before, and nobody re-scanned the tree.
     """
     import hashlib
     import json
+    import subprocess
 
-    scanner = cu.get_project_root() + "/src/scripts/secret_scan.py"
-    record  = cu.get_project_root() + "/src/tests/unit/fixtures/secret_scan_last_full_scan.json"
-
-    actual   = hashlib.sha256( open( scanner, "rb" ).read() ).hexdigest()
+    root     = cu.get_project_root()
+    scanner  = root + "/src/scripts/secret_scan.py"
+    record   = root + "/src/tests/unit/fixtures/secret_scan_last_full_scan.json"
     recorded = json.load( open( record ) )
 
-    assert actual == recorded[ "detector_sha256" ], (
-        "THE DETECTOR CHANGED SINCE THE LAST FULL SCAN.\n"
-        "A better detector sees things the old one could not, and the gate cannot find them "
-        "because it only reads added lines. Re-scan, triage, and record the result:\n"
-        f"  {chr(10).join( '  ' + step for step in recorded[ '_how_to_clear_the_red' ] )}\n"
-        f"  last full scan: {recorded[ 'scanned_at' ]} against {recorded[ 'scanned_ref' ]} "
-        f"({recorded[ 'distinct_values_at_tip' ]} distinct values, {recorded[ 'real_findings' ]} real)\n"
-        f"  new detector sha256: {actual}"
+    detector_now = hashlib.sha256( open( scanner, "rb" ).read() ).hexdigest()
+    ref_now      = subprocess.run( [ "git", "rev-parse", recorded[ "scanned_ref" ] ], cwd=root,
+                                   capture_output=True, text=True ).stdout.strip()
+
+    steps = chr( 10 ).join( "    " + s for s in recorded[ "_how_to_clear_the_red" ] )
+    what  = ( "THE DETECTOR CHANGED" if detector_now != recorded[ "detector_sha256" ]
+              else "THE PUBLISHED TIP MOVED" if ref_now != recorded[ "scanned_ref_sha" ]
+              else "THE RECORDED SCAN DOES NOT MATCH WHAT THIS SCANNER MEASURES" )
+
+    measured = _scan_fingerprint( secret_scan.scan_ref( recorded[ "scanned_ref" ], cwd=root ) )
+    assert measured == recorded.get( "scan_fingerprint" ), (
+        f"{what} SINCE THE LAST RECORDED FULL SCAN, and re-running it here does not match "
+        "what is on record. Re-scan, TRIAGE the output, and record the result — the "
+        "fingerprint is measured by this test, so it cannot be filled in without scanning:\n"
+        f"{steps}\n"
+        f"    detector_sha256   : {detector_now}\n"
+        f"    scanned_ref_sha   : {ref_now}\n"
+        f"    scan_fingerprint  : {measured}\n"
+        f"    last recorded     : {recorded[ 'scanned_at' ]}, "
+        f"{recorded[ 'distinct_values_at_tip' ]} distinct values, "
+        f"{recorded[ 'real_findings' ]} real"
     )
 
 

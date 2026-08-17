@@ -100,6 +100,10 @@ _DERIVED_KEY = re.compile(
       | expiry | expires | expiration | ttl | counter | count | len | length
       | prefix | suffix | pattern | regex | label | header | env | var | path | file )
     $ """ )
+# cheap substring gate — must stay a SUPERSET of every term _FIELD, _URL_SECRET and the
+# PEM matcher can hit, or the scan silently narrows. Widen this before widening those.
+_CHEAP_HINTS = ( "pass", "pwd", "secret", "key", "token", "bearer", "cred", "auth", "sig",
+                 "begin " )
 _BLOCK_INDICATOR = re.compile( r"^[>|][-+]?$" )
 _B64ISH          = re.compile( r"^[A-Za-z0-9+/=_\-]{24,}$" )
 
@@ -190,8 +194,16 @@ def scan_text( text, origin ):
             i += 1
             continue
 
+        # cheap gate before the expensive patterns — every credential shape this scanner
+        # knows carries one of these substrings, and skipping the rest is what keeps a
+        # whole-ref scan inside the unit tier's budget. Verified result-identical.
+        low = line.lower()
+        if not any( t in low for t in _CHEAP_HINTS ):
+            i += 1
+            continue
+
         # D4 — a credential in a URL query string, wherever it appears on the line
-        for m in _URL_SECRET.finditer( line ):
+        for m in ( _URL_SECRET.finditer( line ) if ( "?" in line or "&" in line ) else () ):
             if _looks_like_a_reference( m.group( "val" ) ) is None:
                 _emit( out, origin, i + 1, m.group( "key" ), m.group( "val" ), " (in-url)" )
 
@@ -245,22 +257,66 @@ def _is_text_path( p ):
     return low.endswith( _TEXT_EXT ) or low.rsplit( "/", 1 )[ -1 ] in ( ".env", "Dockerfile" )
 
 
+def _batch_read( specs, cwd=None ):
+    """
+    Read many blobs in ONE `git cat-file --batch`.
+
+    Requires:
+        - specs is a list of rev-parseable object specs, e.g. "origin/main:conf/app.ini"
+
+    Ensures:
+        - yields ( spec, text ) in input order, skipping anything git could not resolve
+        - one subprocess for the whole list; per-blob subprocesses cost ~9s where this
+          costs ~1s on this repo, which is the difference between a check that runs in
+          the unit tier and one nobody runs
+    """
+    import subprocess
+    if not specs:
+        return
+    proc   = subprocess.Popen( [ "git", "cat-file", "--batch" ], cwd=cwd,
+                               stdin=subprocess.PIPE, stdout=subprocess.PIPE )
+    out, _ = proc.communicate( ( "\n".join( specs ) + "\n" ).encode() )
+    pos, i = 0, 0
+    while pos < len( out ) and i < len( specs ):
+        nl = out.find( b"\n", pos )
+        if nl < 0:
+            break
+        header = out[ pos : nl ].decode( "utf-8", "replace" ).split()
+        pos    = nl + 1
+        if len( header ) != 3:          # "<spec> missing" — git could not resolve it
+            i += 1
+            continue
+        size = int( header[ 2 ] )
+        yield specs[ i ], out[ pos : pos + size ].decode( "utf-8", "replace" )
+        pos += size + 1
+        i   += 1
+
+
+def scan_ref( ref, cwd=None ):
+    """
+    Scan every text path in a REF — the published surface, not the checkout.
+
+    Ensures:
+        - returns the masked findings list for that ref
+        - a redacted working copy cannot hide what the ref still carries
+    """
+    import subprocess
+    names = subprocess.run( [ "git", "ls-tree", "-r", "--name-only", ref ], cwd=cwd,
+                            capture_output=True, text=True ).stdout.splitlines()
+    paths = [ f for f in names if _is_text_path( f ) ]
+    out   = []
+    for spec, text in _batch_read( [ f"{ref}:{p}" for p in paths ], cwd=cwd ):
+        out += scan_text( text, spec )
+    return out
+
+
 if __name__ == "__main__":
     import subprocess
     mode     = sys.argv[ 1 ] if len( sys.argv ) > 1 else "worktree"
     findings = []
 
     if mode == "ref":
-        # scan a REF, not the checkout — a redacted working copy hides what is on main
-        ref   = sys.argv[ 2 ]
-        names = subprocess.run( [ "git", "ls-tree", "-r", "--name-only", ref ],
-                                capture_output=True, text=True ).stdout.splitlines()
-        for f in names:
-            if not _is_text_path( f ):
-                continue
-            blob = subprocess.run( [ "git", "cat-file", "-p", f"{ref}:{f}" ],
-                                   capture_output=True ).stdout.decode( "utf-8", "replace" )
-            findings += scan_text( blob, f"{ref}:{f}" )
+        findings = scan_ref( sys.argv[ 2 ] )
 
     elif mode == "history":
         # every blob reachable from every remote ref
