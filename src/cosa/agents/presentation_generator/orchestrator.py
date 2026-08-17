@@ -130,12 +130,12 @@ class PresentationOrchestratorAgent:
 
     def __init__(
         self,
-        source_path : str,
-        user_id     : str,
-        config      : Optional[ PresentationConfig ] = None,
-        dry_run     : bool = False,
-        debug       : bool = False,
-        verbose     : bool = False
+        source_path  : str,
+        user_id      : str,
+        config       : Optional[ PresentationConfig ] = None,
+        offline_mode : bool = False,
+        debug        : bool = False,
+        verbose      : bool = False
     ):
         """
         Initialize the presentation orchestrator.
@@ -144,7 +144,7 @@ class PresentationOrchestratorAgent:
             source_path: Path to the source document (markdown/text)
             user_id: System user ID for event routing
             config: Presentation configuration (uses defaults if None)
-            dry_run: OFFLINE / MOCK-LLM mode — NOT a true no-side-effects dry run.
+            offline_mode: OFFLINE / MOCK-LLM mode — NOT a true no-side-effects dry run.
                 It does REAL document ingest and WRITES A REAL YAML to disk (Phase 5
                 _serialize_async runs unguarded); only the LLM-driven steps are mocked
                 (analyze/outline/elaborate return fixtures, visuals use PlaceholderRenderer,
@@ -152,17 +152,18 @@ class PresentationOrchestratorAgent:
                 API calls are made. Production never constructs the orchestrator this way —
                 the job's dry-run path returns its own breadcrumb simulator BEFORE building
                 the orchestrator — so this flag is exercised ONLY by the orchestrator's unit
-                tests to run the pipeline offline. (For a true writes-nothing dry run see
-                PresentationGeneratorJob._execute_dry_run.)
+                tests to run the pipeline offline. Renamed from dry_run (row ec8ca1ce) so it
+                stops sharing a word with the JOB's dry_run, which writes NOTHING. (For that
+                true writes-nothing dry run see PresentationGeneratorJob._execute_dry_run.)
             debug: Enable debug output
             verbose: Enable verbose output
         """
-        self.source_path = source_path
-        self.user_id     = user_id
-        self.config      = config or PresentationConfig()
-        self.dry_run     = dry_run
-        self.debug       = debug
-        self.verbose     = verbose
+        self.source_path  = source_path
+        self.user_id      = user_id
+        self.config       = config or PresentationConfig()
+        self.offline_mode = offline_mode
+        self.debug        = debug
+        self.verbose      = verbose
 
         # State management
         self.state            = OrchestratorState.INITIALIZED
@@ -727,7 +728,7 @@ class PresentationOrchestratorAgent:
         raw_sections = self._presentation_state.get( "raw_sections", [] )
 
         # Dry-run: generate mock NarrativeSections from parsed sections
-        if self.dry_run:
+        if self.offline_mode:
             if self.debug: print( "[Orchestrator] Phase 2: Analyze — DRY RUN (mock)" )
             arc_cycle = [ ArcPosition.SETUP, ArcPosition.ARGUMENT, ArcPosition.EVIDENCE,
                           ArcPosition.CONCLUSION, ArcPosition.CTA ]
@@ -869,7 +870,7 @@ class PresentationOrchestratorAgent:
         slide_budget = self._slide_budget()
 
         # Dry-run: generate mock SlideOutlines from narrative sections
-        if self.dry_run:
+        if self.offline_mode:
             if self.debug: print( "[Orchestrator] Phase 3: Outline — DRY RUN (mock)" )
             outlines = []
             # Structural formula: 2 opening + N body + 3 closing
@@ -1018,7 +1019,7 @@ class PresentationOrchestratorAgent:
         from .state import PresenterNotes
 
         # Dry-run: generate mock SlideModels from outlines
-        if self.dry_run:
+        if self.offline_mode:
             if self.debug: print( "[Orchestrator] Phase 4: Elaborate — DRY RUN (mock)" )
             avg_timing = ( self.config.target_duration_minutes * 60 ) // max( 1, len( slide_outline ) )
             slides = []
@@ -1547,7 +1548,7 @@ class PresentationOrchestratorAgent:
                 rendered = await renderer.render(
                     visual_type        = visual_type,
                     visual_description = visual_desc,
-                    api_client         = self.api_client if not self.dry_run else None,
+                    api_client         = self.api_client if not self.offline_mode else None,
                     slide_title        = slide_title,
                     output_dir         = visuals_dir,
                     slide_index        = i,
@@ -1593,7 +1594,7 @@ class PresentationOrchestratorAgent:
         """
         Build the visual renderer registry for Phase 7.
 
-        In dry_run mode, all types use PlaceholderRenderer (no API calls).
+        In offline_mode, all types use PlaceholderRenderer (no API calls).
 
         Returns:
             VisualRendererRegistry: Configured registry
@@ -1603,7 +1604,7 @@ class PresentationOrchestratorAgent:
         fallback = PlaceholderRenderer()
         registry = VisualRendererRegistry( fallback=fallback, debug=self.debug )
 
-        if not self.dry_run:
+        if not self.offline_mode:
             mermaid = MermaidRenderer( debug=self.debug, verbose=self.verbose )
             registry.register( mermaid )
             matplotlib_renderer = MatplotlibRenderer( debug=self.debug, verbose=self.verbose )
@@ -1738,7 +1739,7 @@ class PresentationOrchestratorAgent:
             if self.debug: print( "[Orchestrator] PPTX export disabled in config" )
             return
 
-        if self.dry_run:
+        if self.offline_mode:
             if self.debug: print( "[Orchestrator] PPTX export skipped (dry run)" )
             return
 
@@ -1906,7 +1907,7 @@ class PresentationOrchestratorAgent:
             if self.debug: print( "[Orchestrator] Gate 1: No sections to review — refusing to proceed" )
             return False
 
-        if self.dry_run:
+        if self.offline_mode:
             if self.debug: print( "[Orchestrator] Gate 1: DRY RUN — auto-approve" )
             return True
 
@@ -2017,7 +2018,7 @@ class PresentationOrchestratorAgent:
             if self.debug: print( "[Orchestrator] Gate 2: No outline to review — refusing to proceed" )
             return False
 
-        if self.dry_run:
+        if self.offline_mode:
             if self.debug: print( "[Orchestrator] Gate 2: DRY RUN — auto-approve" )
             return True
 
@@ -2130,7 +2131,7 @@ class PresentationOrchestratorAgent:
             if self.debug: print( "[Orchestrator] Gate 3: No slides to review — refusing to proceed" )
             return False
 
-        if self.dry_run:
+        if self.offline_mode:
             if self.debug: print( "[Orchestrator] Gate 3: DRY RUN — auto-approve" )
             return True
 
@@ -2255,7 +2256,7 @@ class PresentationOrchestratorAgent:
         Gate 4: User reviews final rendered output.
 
         Presents a summary of rendered visuals to the user for approval.
-        In dry_run mode, auto-approves without voice interaction.
+        In offline_mode, auto-approves without voice interaction.
 
         Requires:
             - presentation is a PresentationModel (may be None)
@@ -2266,7 +2267,7 @@ class PresentationOrchestratorAgent:
         Returns:
             bool: True if approved, False if cancelled
         """
-        if self.dry_run:
+        if self.offline_mode:
             if self.debug: print( "[Orchestrator] Gate 4: DRY RUN — auto-approve" )
             return True
 

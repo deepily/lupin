@@ -94,12 +94,12 @@ def _presentation():
 
 
 def _agent():
-    """A non-dry-run orchestrator — dry_run short-circuits every gate to True."""
+    """A non-offline orchestrator — offline_mode short-circuits every gate to True."""
     return PresentationOrchestratorAgent(
-        source_path = "/tmp/does-not-need-to-exist.md",
-        user_id     = "test-user",
-        dry_run     = False,
-        debug       = False,
+        source_path  = "/tmp/does-not-need-to-exist.md",
+        user_id      = "test-user",
+        offline_mode = False,
+        debug        = False,
     )
 
 

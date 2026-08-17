@@ -67,14 +67,14 @@ def _run( coro ):
 
 
 def _agent( source_path="/io/src/doc.md", user_id="u@test.com", config=None,
-            dry_run=False, debug=False, verbose=False ):
+            offline_mode=False, debug=False, verbose=False ):
     return PresentationOrchestratorAgent(
-        source_path = source_path,
-        user_id     = user_id,
-        config      = config or PresentationConfig(),
-        dry_run     = dry_run,
-        debug       = debug,
-        verbose     = verbose,
+        source_path  = source_path,
+        user_id      = user_id,
+        config       = config or PresentationConfig(),
+        offline_mode = offline_mode,
+        debug        = debug,
+        verbose      = verbose,
     )
 
 
@@ -457,8 +457,8 @@ _ELAB = "cosa.agents.presentation_generator.prompts.elaboration"
 
 
 class TestAnalyzeAsync:
-    def test_dry_run_with_raw_sections( self, capsys, _silence_voice_io ):
-        agent = _agent( dry_run=True, debug=True )
+    def test_offline_with_raw_sections( self, capsys, _silence_voice_io ):
+        agent = _agent( offline_mode=True, debug=True )
         agent._presentation_state[ "raw_sections" ] = [
             ( "H1", "word " * 250, 1 ), ( "H2", "short body", 2 ),
         ]
@@ -469,8 +469,8 @@ class TestAnalyzeAsync:
         assert sections[ 0 ].proposed_slides >= 1
         assert "DRY RUN" in capsys.readouterr().out
 
-    def test_dry_run_no_raw_sections_uses_default( self, _silence_voice_io ):
-        agent = _agent( dry_run=True )
+    def test_offline_no_raw_sections_uses_default( self, _silence_voice_io ):
+        agent = _agent( offline_mode=True )
         agent._presentation_state[ "raw_sections" ] = []
         sections = _run( agent._analyze_async( "src" ) )
         assert len( sections ) == 1
@@ -529,8 +529,8 @@ class TestAnalyzeAsync:
 # Content-gen — _outline_async (MID)
 # ===========================================================================
 class TestOutlineAsync:
-    def test_dry_run_with_sections( self, capsys, _silence_voice_io ):
-        agent = _agent( dry_run=True, debug=True )
+    def test_offline_with_sections( self, capsys, _silence_voice_io ):
+        agent = _agent( offline_mode=True, debug=True )
         outlines = _run( agent._outline_async( [ _section( "S1" ), _section( "S2" ) ] ) )
         # 2 opening + body + 3 closing; budget 15 → 10 body
         assert len( outlines ) == 15
@@ -538,8 +538,8 @@ class TestOutlineAsync:
         assert outlines[ -1 ].arc_position == "closing"
         assert "DRY RUN" in capsys.readouterr().out
 
-    def test_dry_run_no_sections_body_point_titles( self, _silence_voice_io ):
-        agent = _agent( dry_run=True )
+    def test_offline_no_sections_body_point_titles( self, _silence_voice_io ):
+        agent = _agent( offline_mode=True )
         outlines = _run( agent._outline_async( [] ) )
         body = [ o for o in outlines if o.arc_position == "body" ]
         assert body and body[ 0 ].title.startswith( "[Mock] Body Point" )
@@ -604,8 +604,8 @@ class TestOutlineAsync:
 # Content-gen — _elaborate_async + _elaborate_chunked (MID)
 # ===========================================================================
 class TestElaborateAsync:
-    def test_dry_run_title_and_keypoint_branches( self, capsys, _silence_voice_io ):
-        agent = _agent( dry_run=True, debug=True )
+    def test_offline_title_and_keypoint_branches( self, capsys, _silence_voice_io ):
+        agent = _agent( offline_mode=True, debug=True )
         outline = [
             _outline( number=1, type="title", visual_type="text_only" ),
             _outline( number=2, arc="body", type="key_point", visual_type="diagram" ),
@@ -981,16 +981,16 @@ class TestRenderVisualsAsync:
 
 
 class TestBuildVisualRegistry:
-    def test_dry_run_only_fallback( self ):
-        agent = _agent( dry_run=True )
+    def test_offline_only_fallback( self ):
+        agent = _agent( offline_mode=True )
         with patch( f"{_RENDERERS}.VisualRendererRegistry" ) as VRR, \
              patch( f"{_RENDERERS}.PlaceholderRenderer" ) as PH:
             registry = agent._build_visual_registry()
         assert registry is VRR.return_value
-        registry.register.assert_not_called()  # dry_run → no renderers registered
+        registry.register.assert_not_called()  # offline_mode → no renderers registered
 
     def test_real_registers_all_with_gemini( self ):
-        agent = _agent( dry_run=False )
+        agent = _agent( offline_mode=False )
         with patch( f"{_RENDERERS}.VisualRendererRegistry" ) as VRR, \
              patch( f"{_RENDERERS}.PlaceholderRenderer" ), \
              patch( f"{_RENDERERS}.MermaidRenderer" ), \
@@ -1004,7 +1004,7 @@ class TestBuildVisualRegistry:
         assert VRR.return_value.register.call_count == 5
 
     def test_real_gemini_unavailable_warns( self ):
-        agent = _agent( dry_run=False )
+        agent = _agent( offline_mode=False )
         with patch( f"{_RENDERERS}.VisualRendererRegistry" ) as VRR, \
              patch( f"{_RENDERERS}.PlaceholderRenderer" ), \
              patch( f"{_RENDERERS}.MermaidRenderer" ), \
@@ -1064,8 +1064,8 @@ class TestExportPptxAsync:
         _run( agent._export_pptx_async( _presentation() ) )
         assert "PPTX export disabled" in capsys.readouterr().out
 
-    def test_dry_run_skips( self, capsys, _silence_voice_io ):
-        agent = _agent( dry_run=True, debug=True )
+    def test_offline_skips( self, capsys, _silence_voice_io ):
+        agent = _agent( offline_mode=True, debug=True )
         agent.config.pptx_export_enabled = True
         _run( agent._export_pptx_async( _presentation() ) )
         assert "PPTX export skipped (dry run)" in capsys.readouterr().out
@@ -1121,8 +1121,8 @@ class TestGate1NarrativeReview:
         agent = _agent( debug=True )
         assert _run( agent._gate_1_narrative_review( [] ) ) is False
 
-    def test_dry_run_auto_approve( self, _silence_voice_io ):
-        agent = _agent( dry_run=True )
+    def test_offline_auto_approve( self, _silence_voice_io ):
+        agent = _agent( offline_mode=True )
         assert _run( agent._gate_1_narrative_review( [ _section() ] ) ) is True
 
     def test_approve( self, _silence_voice_io ):
@@ -1172,8 +1172,8 @@ class TestGate2OutlineReview:
         # D6-STRICT: empty outline → do NOT auto-approve (was return True).
         assert _run( _agent( debug=True )._gate_2_outline_review( [] ) ) is False
 
-    def test_dry_run_auto_approve( self, _silence_voice_io ):
-        assert _run( _agent( dry_run=True )._gate_2_outline_review( [ _outline() ] ) ) is True
+    def test_offline_auto_approve( self, _silence_voice_io ):
+        assert _run( _agent( offline_mode=True )._gate_2_outline_review( [ _outline() ] ) ) is True
 
     def test_approve_clears_feedback( self, _silence_voice_io ):
         agent = _agent()
@@ -1225,8 +1225,8 @@ class TestGate3ContentReview:
         # D6-STRICT: empty slides → do NOT auto-approve (was return True).
         assert _run( _agent( debug=True )._gate_3_content_review( [] ) ) is False
 
-    def test_dry_run_auto_approve( self, _silence_voice_io ):
-        assert _run( _agent( dry_run=True )._gate_3_content_review( self._slides_with_visual() ) ) is True
+    def test_offline_auto_approve( self, _silence_voice_io ):
+        assert _run( _agent( offline_mode=True )._gate_3_content_review( self._slides_with_visual() ) ) is True
 
     def test_approve_clears_feedback( self, _silence_voice_io ):
         agent = _agent()
@@ -1274,8 +1274,8 @@ class TestGate3ContentReview:
 # /title=) + dict parse on header "Visual Review", mirroring Gates 1-3).
 # ===========================================================================
 class TestGate4RenderReview:
-    def test_dry_run_auto_approve( self, _silence_voice_io ):
-        assert _run( _agent( dry_run=True )._gate_4_render_review( _presentation() ) ) is True
+    def test_offline_auto_approve( self, _silence_voice_io ):
+        assert _run( _agent( offline_mode=True )._gate_4_render_review( _presentation() ) ) is True
 
     def test_no_visuals_auto_approve( self, _silence_voice_io ):
         agent = _agent( debug=True )

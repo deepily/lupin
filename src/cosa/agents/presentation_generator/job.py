@@ -281,12 +281,12 @@ class PresentationGeneratorJob( AgenticJobBase ):
 
             # Create orchestrator
             agent = PresentationOrchestratorAgent(
-                source_path = full_path,
-                user_id     = self.user_email,
-                config      = config,
-                dry_run     = self.dry_run,
-                debug       = self.debug,
-                verbose     = self.verbose,
+                source_path  = full_path,
+                user_id      = self.user_email,
+                config       = config,
+                offline_mode = self.dry_run,   # JOB dry_run early-returns before here; this only ever passes False. Renamed keyword (row ec8ca1ce); RHS is the JOB flag and stays.
+                debug        = self.debug,
+                verbose      = self.verbose,
             )
             self._orchestrator = agent  # Store ref for cancellation from API thread
 

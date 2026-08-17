@@ -393,25 +393,25 @@ class TestOrchestratorVisualIntegration:
         from cosa.agents.presentation_generator.config import PresentationConfig
 
         agent = PresentationOrchestratorAgent(
-            source_path = "/test/doc.md",
-            user_id     = "test@test.com",
-            config      = PresentationConfig(),
-            dry_run     = False,
+            source_path  = "/test/doc.md",
+            user_id      = "test@test.com",
+            config       = PresentationConfig(),
+            offline_mode = False,
         )
         registry = agent._build_visual_registry()
         assert "diagram" in registry.registered_types
         assert "chart" in registry.registered_types
 
-    def test_build_visual_registry_dry_run( self ):
-        """Dry run mode does NOT register MermaidRenderer (no API calls)."""
+    def test_build_visual_registry_offline_mode( self ):
+        """Offline mode does NOT register MermaidRenderer (no API calls)."""
         from cosa.agents.presentation_generator.orchestrator import PresentationOrchestratorAgent
         from cosa.agents.presentation_generator.config import PresentationConfig
 
         agent = PresentationOrchestratorAgent(
-            source_path = "/test/doc.md",
-            user_id     = "test@test.com",
-            config      = PresentationConfig(),
-            dry_run     = True,
+            source_path  = "/test/doc.md",
+            user_id      = "test@test.com",
+            config       = PresentationConfig(),
+            offline_mode = True,
         )
         registry = agent._build_visual_registry()
         assert registry.registered_types == []

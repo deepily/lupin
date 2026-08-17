@@ -438,12 +438,12 @@ class DeepResearchToPresentationAgent:
 
         # Create orchestrator
         agent = PresentationOrchestratorAgent(
-            source_path = research_path,
-            user_id     = self.user_email,
-            config      = config,
-            dry_run     = False,
-            debug       = self.debug,
-            verbose     = self.verbose,
+            source_path  = research_path,
+            user_id      = self.user_email,
+            config       = config,
+            offline_mode = False,
+            debug        = self.debug,
+            verbose      = self.verbose,
         )
 
         if self.debug:
