@@ -42,10 +42,10 @@ from cosa.rest.routers._scope_registry import (
 
 SERVICE_ACCOUNT_KEY = {
     "type"                        : "service_account",
-    "project_id"                  : "hello-world-foo-423219",
+    "project_id"                  : "not-a-real-project-000000",
     "private_key_id"              : "0123456789abcdef0123456789abcdef01234567",
     "private_key"                 : "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADAN\n-----END PRIVATE KEY-----\n",
-    "client_email"                : "svc@hello-world-foo-423219.iam.gserviceaccount.com",
+    "client_email"                : "svc@not-a-real-project-000000.iam.gserviceaccount.com",
     "client_id"                   : "123456789012345678901",
     "token_uri"                   : "https://oauth2.googleapis.com/token",
 }
@@ -400,7 +400,7 @@ def test_a_service_account_key_in_a_subdirectory_is_blocked_by_name():
 GCP_CONSOLE_CLIENT_SECRET_INSTALLED = {
     "installed" : {
         "client_id"                   : "764086051850-6qr4p6gpi6hn506pt8ejuq83di341hur.apps.googleusercontent.com",
-        "project_id"                  : "hello-world-foo-423219",
+        "project_id"                  : "not-a-real-project-000000",
         "auth_uri"                    : "https://accounts.google.com/o/oauth2/auth",
         "token_uri"                   : "https://oauth2.googleapis.com/token",
         "auth_provider_x509_cert_url" : "https://www.googleapis.com/oauth2/v1/certs",
@@ -413,7 +413,7 @@ GCP_CONSOLE_CLIENT_SECRET_INSTALLED = {
 GCP_CONSOLE_CLIENT_SECRET_WEB = {
     "web" : {
         "client_id"                   : "764086051850-6qr4p6gpi6hn506pt8ejuq83di341hur.apps.googleusercontent.com",
-        "project_id"                  : "hello-world-foo-423219",
+        "project_id"                  : "not-a-real-project-000000",
         "auth_uri"                    : "https://accounts.google.com/o/oauth2/auth",
         "token_uri"                   : "https://oauth2.googleapis.com/token",
         "auth_provider_x509_cert_url" : "https://www.googleapis.com/oauth2/v1/certs",
