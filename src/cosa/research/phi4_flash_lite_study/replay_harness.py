@@ -38,13 +38,20 @@ not an alarm.
 Run:
     python -m cosa.research.phi4_flash_lite_study.replay_harness \
         --snapshot-dir <frozen dir> --out <results.jsonl> \
-        --max-model-failed-rate 0.05 --preflight 25 [--limit N] [--arm phi_4|flash_lite]
+        --max-model-failed-rate 0.05 --preflight 25 \
+        [--sample-size N --seed S] [--arm phi_4|flash_lite]
+
+⚠️ To bound a run's cost, use `--sample-size` (a seeded random draw), NOT `--limit`.
+The frozen set is in corpus order, so the first N rows are a TIME-WINDOW sample —
+whatever the fleet happened to be saying that afternoon — and that is a caveat every
+number coming off the run has to carry.
 """
 
 import os
 import sys
 import json
 import time
+import random
 import argparse
 import datetime
 
@@ -456,6 +463,10 @@ def replay_arm( rows, arm, tutor_fn=None, rewrite_fn=None, config=None,
 
         record = {
             "row_index"      : index,
+            # Where this row sits in the FROZEN SET, when the run sampled from it.
+            # row_index is the position in the replayed list; on a seeded subset the
+            # two differ, and only this one traces back to the snapshot.
+            "frozen_index"   : row.get( "frozen_index", index ),
             "arm"            : arm,
             "spec_key"       : ARM_SPEC_KEYS[ arm ],
             "ts"             : row.get( "ts" ),
@@ -477,6 +488,49 @@ def replay_arm( rows, arm, tutor_fn=None, rewrite_fn=None, config=None,
 
     assert_arm_is_alive( metas, max_model_failed_rate, arm, "final" )
     return records
+
+
+def draw_seeded_subset( rows, sample_size, seed ):
+    """
+    Draw a reproducible random subset of the frozen set, keeping each row's origin.
+
+    ⚠️ WHY `--limit` IS NOT THIS. `--limit N` takes the FIRST N rows, and the frozen
+    set is in corpus order — so it is a TIME-WINDOW sample: whatever the fleet
+    happened to be saying that afternoon, not a sample of the study's population.
+    That is a caveat every number coming off it has to carry. A seeded draw does not
+    need the caveat, and costs one line. (Sam 🎙️ raised this mid-run.)
+
+    The official snapshot stays the one frozen set: this samples FROM it rather than
+    re-freezing, so the manifest checksum still describes the population.
+
+    Requires:
+        - rows is the loaded frozen set
+        - sample_size is a positive int
+        - seed is an int, recorded by the caller alongside the results
+
+    Ensures:
+        - returns ( subset, drawn_indices ) with drawn_indices sorted ascending and
+          indexing into the ORIGINAL frozen set
+        - the subset is in frozen-set order, so both arms walk it identically
+        - each returned row is a COPY carrying `frozen_index`, so a record can be
+          traced back to its row in the snapshot rather than only to its position
+          in the draw
+        - same rows + same size + same seed gives the same draw on any machine
+        - returns every row when sample_size >= len( rows )
+        - never mutates the input rows
+
+    Raises:
+        - ValueError if sample_size is not positive
+    """
+    if sample_size <= 0:
+        raise ValueError( f"sample_size must be positive, got {sample_size}" )
+
+    if sample_size >= len( rows ):
+        drawn = list( range( len( rows ) ) )
+    else:
+        drawn = sorted( random.Random( seed ).sample( range( len( rows ) ), sample_size ) )
+
+    return [ dict( rows[ i ], frozen_index=i ) for i in drawn ], drawn
 
 
 def pair_records( arm_a_records, arm_b_records ):
@@ -567,17 +621,43 @@ def main( argv=None, printer=print, runner=None ):
     parser.add_argument( "--denominator",           default=None, choices=list( VALID_DENOMINATORS ),
                          help="Rick's open decision (row 76755526); unset until he rules (F1)" )
     parser.add_argument( "--preflight",             type=int, default=25 )
-    parser.add_argument( "--limit",                 type=int, default=None )
+    parser.add_argument( "--sample-size",           type=int, default=None,
+                         help="replay a SEEDED RANDOM subset of the frozen set — the "
+                              "statistically defensible way to bound a run's cost" )
+    parser.add_argument( "--seed",                  type=int, default=20260817,
+                         help="seed for --sample-size; recorded in the run header" )
+    parser.add_argument( "--limit",                 type=int, default=None,
+                         help="take the FIRST N rows. The frozen set is in corpus order, so "
+                              "this is a TIME-WINDOW sample, not a sample of the population — "
+                              "fine for a smoke, a caveat on every number otherwise. Prefer "
+                              "--sample-size" )
     parser.add_argument( "--arm",                   default=None, choices=[ ARM_PHI4, ARM_FLASH_LITE ],
                          help="run one arm only; omit to run both" )
     args = parser.parse_args( argv )
 
     run = runner if runner is not None else replay_arm
 
+    if args.sample_size is not None and args.limit is not None:
+        parser.error( "--sample-size and --limit both select rows; pass one. --sample-size draws "
+                      "at random from the whole frozen set, --limit takes the first N in corpus "
+                      "order (a time-window sample)." )
+
     rows, manifest = load_frozen_rows( args.snapshot_dir )
-    if args.limit is not None: rows = rows[ : args.limit ]
-    printer( f"[replay] {len( rows )} frozen rows from {manifest[ 'snapshot_path' ]}" )
+    population     = len( rows )
+    selection      = { "mode": "all", "population": population }
+
+    if args.sample_size is not None:
+        rows, drawn = draw_seeded_subset( rows, args.sample_size, args.seed )
+        selection   = { "mode": "seeded_random", "population": population, "sample_size": len( rows ),
+                        "seed": args.seed, "drawn_frozen_indices": drawn }
+    elif args.limit is not None:
+        rows      = rows[ : args.limit ]
+        selection = { "mode": "first_n_corpus_order", "population": population, "limit": args.limit,
+                      "caveat": "TIME-WINDOW sample, not a sample of the population" }
+
+    printer( f"[replay] {len( rows )} of {population} frozen rows from {manifest[ 'snapshot_path' ]}" )
     printer( f"[replay] snapshot sha256 {manifest[ 'snapshot_sha256' ]}" )
+    printer( f"[replay] selection {selection[ 'mode' ]}" )
 
     arms    = [ args.arm ] if args.arm else [ ARM_PHI4, ARM_FLASH_LITE ]
     results = {}
@@ -597,6 +677,7 @@ def main( argv=None, printer=print, runner=None ):
         "ran_at_utc"     : datetime.datetime.now( datetime.timezone.utc ).isoformat(),
         "snapshot_sha256": manifest[ "snapshot_sha256" ],
         "rows"           : len( rows ),
+        "selection"      : selection,
         "arms"           : { arm: summarize_arm( [ r[ "meta" ] for r in recs ], denominator=args.denominator )
                              for arm, recs in results.items() } if args.denominator else
                            { arm: "summary withheld — --denominator unset (F1, Rick's row 76755526)"

@@ -665,6 +665,147 @@ def test_main_reports_the_summary_once_a_denominator_is_given( tmp_path ):
     assert report[ "arms" ][ RH.ARM_PHI4 ][ "denominator" ] == "narrow"
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# SAMPLING — a seeded draw, not the first N in corpus order
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _many_rows( n ):
+    return [ { "ts": f"2026-08-17T{i:04d}", "from": "maria", "to": "rio", "body": f"body {i}" }
+             for i in range( n ) ]
+
+
+def test_seeded_subset_is_reproducible_and_not_the_first_n():
+    """
+    The whole point. `--limit` returns rows 0..9 every time; a seeded draw returns
+    the SAME ten rows on any machine without them being a time window.
+    """
+    rows = _many_rows( 200 )
+
+    first, drawn_a  = RH.draw_seeded_subset( rows, 10, 42 )
+    second, drawn_b = RH.draw_seeded_subset( rows, 10, 42 )
+    other, drawn_c  = RH.draw_seeded_subset( rows, 10, 43 )
+
+    assert drawn_a == drawn_b                       # same seed, same draw
+    assert drawn_a != drawn_c                       # different seed, different draw
+    assert drawn_a != list( range( 10 ) ), "a seeded draw that returns the first N is not a draw"
+    assert [ r[ "body" ] for r in first ] == [ r[ "body" ] for r in second ]
+    assert len( first ) == 10
+
+
+def test_seeded_subset_stays_in_frozen_set_order():
+    """Both arms walk the subset identically, so it must be ordered, not shuffled."""
+    _, drawn = RH.draw_seeded_subset( _many_rows( 100 ), 12, 7 )
+    assert drawn == sorted( drawn )
+
+
+def test_seeded_subset_carries_the_frozen_index_back_to_the_snapshot():
+    """
+    A record must be traceable to its row in the snapshot, not merely to its
+    position in the draw — those differ the moment you sample.
+    """
+    rows          = _many_rows( 100 )
+    subset, drawn = RH.draw_seeded_subset( rows, 5, 99 )
+
+    assert [ r[ "frozen_index" ] for r in subset ] == drawn
+    for row in subset:
+        assert row[ "body" ] == rows[ row[ "frozen_index" ] ][ "body" ]
+
+
+def test_seeded_subset_does_not_mutate_the_frozen_rows():
+    rows = _many_rows( 50 )
+    RH.draw_seeded_subset( rows, 5, 1 )
+    assert all( "frozen_index" not in row for row in rows )
+
+
+def test_seeded_subset_returns_everything_when_the_sample_exceeds_the_population():
+    subset, drawn = RH.draw_seeded_subset( _many_rows( 8 ), 99, 1 )
+    assert len( subset ) == 8
+    assert drawn == list( range( 8 ) )
+
+
+def test_seeded_subset_rejects_a_non_positive_size():
+    with pytest.raises( ValueError ):
+        RH.draw_seeded_subset( _many_rows( 5 ), 0, 1 )
+
+
+def test_records_carry_the_frozen_index_of_a_sampled_row():
+    rows, _ = RH.draw_seeded_subset( _many_rows( 100 ), 3, 5 )
+    records = RH.replay_arm( rows, RH.ARM_PHI4, tutor_fn=_tutor_returning( [ "rewritten" ] * 3 ),
+                             rewrite_fn=lambda b: "x", max_model_failed_rate=0.5 )
+
+    assert [ r[ "row_index" ] for r in records ]    == [ 0, 1, 2 ]          # position in the draw
+    assert [ r[ "frozen_index" ] for r in records ] == [ r[ "frozen_index" ] for r in rows ]
+    assert [ r[ "frozen_index" ] for r in records ] != [ 0, 1, 2 ]          # ...and not the same thing
+
+
+def test_records_frozen_index_falls_back_to_row_index_on_a_full_run():
+    """An unsampled run has no draw, so the two indices coincide."""
+    records = RH.replay_arm( _rows( 2 ), RH.ARM_PHI4, tutor_fn=_tutor_returning( [ "rewritten" ] * 2 ),
+                             rewrite_fn=lambda b: "x", max_model_failed_rate=0.5 )
+    assert [ r[ "frozen_index" ] for r in records ] == [ 0, 1 ]
+
+
+def test_main_records_the_seed_and_drawn_indices_in_the_report( tmp_path ):
+    """A sample nobody can reproduce is not evidence."""
+    out_dir = _make_snapshot( tmp_path )
+    printed = []
+
+    RH.main(
+        [ "--snapshot-dir", str( out_dir ), "--out", str( tmp_path / "r.jsonl" ),
+          "--max-model-failed-rate", "0.5", "--sample-size", "2", "--seed", "77" ],
+        printer=printed.append,
+        runner=_fake_runner( { RH.ARM_PHI4: [ "rewritten" ] * 2, RH.ARM_FLASH_LITE: [ "rewritten" ] * 2 } ),
+    )
+
+    selection = json.loads( printed[ -1 ] )[ "selection" ]
+    assert selection[ "mode" ]        == "seeded_random"
+    assert selection[ "seed" ]        == 77
+    assert selection[ "sample_size" ] == 2
+    assert selection[ "population" ]  == 3
+    assert len( selection[ "drawn_frozen_indices" ] ) == 2
+
+
+def test_main_labels_a_limit_run_as_a_time_window_sample( tmp_path ):
+    """--limit still works, and the report says out loud what kind of sample it is."""
+    out_dir = _make_snapshot( tmp_path )
+    printed = []
+
+    RH.main(
+        [ "--snapshot-dir", str( out_dir ), "--out", str( tmp_path / "r.jsonl" ),
+          "--max-model-failed-rate", "0.5", "--limit", "2" ],
+        printer=printed.append,
+        runner=_fake_runner( { RH.ARM_PHI4: [ "rewritten" ] * 2, RH.ARM_FLASH_LITE: [ "rewritten" ] * 2 } ),
+    )
+
+    selection = json.loads( printed[ -1 ] )[ "selection" ]
+    assert selection[ "mode" ] == "first_n_corpus_order"
+    assert "TIME-WINDOW" in selection[ "caveat" ]
+
+
+def test_main_refuses_both_selectors_at_once( tmp_path ):
+    """They select rows two different ways; silently letting one win would be a lie."""
+    out_dir = _make_snapshot( tmp_path )
+
+    with pytest.raises( SystemExit ):
+        RH.main( [ "--snapshot-dir", str( out_dir ), "--out", str( tmp_path / "r.jsonl" ),
+                   "--max-model-failed-rate", "0.5", "--limit", "2", "--sample-size", "2" ],
+                 printer=lambda *a: None, runner=_fake_runner( {} ) )
+
+
+def test_main_reports_the_full_population_when_unsampled( tmp_path ):
+    out_dir = _make_snapshot( tmp_path )
+    printed = []
+
+    RH.main(
+        [ "--snapshot-dir", str( out_dir ), "--out", str( tmp_path / "r.jsonl" ),
+          "--max-model-failed-rate", "0.5" ],
+        printer=printed.append,
+        runner=_fake_runner( { RH.ARM_PHI4: [ "rewritten" ] * 3, RH.ARM_FLASH_LITE: [ "rewritten" ] * 3 } ),
+    )
+
+    assert json.loads( printed[ -1 ] )[ "selection" ] == { "mode": "all", "population": 3 }
+
+
 def test_main_single_arm_and_limit( tmp_path ):
     out_dir = _make_snapshot( tmp_path )
     results = tmp_path / "one.jsonl"
