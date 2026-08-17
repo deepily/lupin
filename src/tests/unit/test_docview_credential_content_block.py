@@ -32,6 +32,7 @@ from cosa.rest.routers._scope_registry import (
     _object_declares_a_credential,
     _parsed_value_carries_a_credential,
     _prefix_looks_like_credential,
+    _strip_leadin_noise,
     _the_window_may_be_hiding_the_signature,
     _value_is_secret_material,
     is_credential_file,
@@ -611,3 +612,77 @@ def test_text_without_escapes_comes_back_unchanged():
     """The decoder only puts escapes back; it must not rewrite anything else."""
     assert _decode_json_unicode_escapes( '{"refresh_token": "1//0abc"}' ) == '{"refresh_token": "1//0abc"}'
     assert _decode_json_unicode_escapes( '{"\\u0072efresh_token"' ) == '{"refresh_token"'
+
+
+# ─── which lead-in strip is load-bearing, and which one cannot fail ──────────
+#
+# Extra 1 🪨 observed that gutting the lead-in strip at ONE call site leaves this
+# suite green, and read that as the tests proving nothing. Half right: it IS a gap in
+# my tests, and it is NOT evidence the two sites are redundant. Measured, the sites
+# differ — but only on the FALSE-POSITIVE side, which is why no blocking test could
+# separate them.
+#
+#   lead-in + payload                     full    early strip gutted
+#   plain mark  + a template              SERVED  SERVED
+#   SPACE+mark  + a template              SERVED  *** BLOCK ***   <- the difference
+#   SPACE+mark  + a real credential       BLOCK   BLOCK
+#
+# WHY: with the early strip, `json.loads` succeeds, so the decision goes through the
+# PARSED path, where a placeholder value is recognised as a template. Without it, the
+# parse fails on the mark and the decision falls to the TRUNCATED branch — a raw
+# substring scan with no placeholder rule — which sees `"client_secret"` and refuses a
+# document. The early strip is what keeps the strong path reachable; blocking a real
+# credential still works either way, via the weaker path.
+
+PLACEHOLDER_TEMPLATE = {
+    "client_id"     : "<your client id>",
+    "client_secret" : "<your client secret>",
+}
+
+SPEC_NAMING_THE_FIELD = {
+    "components" : { "parameters" : { "client_secret" : { "in" : "query", "schema" : { "type" : "string" } } } },
+}
+
+
+@pytest.mark.parametrize( "lead,lead_label", [
+    ( " ﻿",   "space then mark" ),
+    ( "\t﻿", "tab then mark" ),
+    ( "\n﻿", "newline then mark" ),
+    ( "​",   "zero-width space" ),
+] )
+@pytest.mark.parametrize( "payload,payload_label", [
+    ( PLACEHOLDER_TEMPLATE,    "a template showing the field" ),
+    ( SPEC_NAMING_THE_FIELD,   "a spec naming the field" ),
+] )
+def test_an_invisible_leadin_must_not_turn_a_DOCUMENT_into_a_refusal(
+    tmp_path, lead, lead_label, payload, payload_label
+):
+    """
+    THE ARM THAT PINS THE EARLY STRIP. Gut `_strip_leadin_noise` in
+    `_prefix_looks_like_credential` and these go RED — a document becomes a refusal
+    because the parse failed on an invisible character and the raw-text fallback took
+    over. Every other lead-in test in this file passes with that line gone.
+    """
+    path = tmp_path / "notes.json"
+    path.write_text( lead + json.dumps( payload ), encoding="utf-8" )
+
+    assert not is_credential_file( str( path ) ), \
+        f"{lead_label} + {payload_label} was refused"
+
+
+def test_the_narrowing_strip_is_DEFENSIVE_and_cannot_currently_fire():
+    """
+    ⚠️ STATED, not asserted away. The SECOND `_strip_leadin_noise` call — the one at
+    the brace narrowing — cannot change an answer today, because the first call has
+    already stripped the same prefix by the time control reaches it. Gutting it alone
+    leaves this suite green, and that is correct rather than a missing test.
+
+    It is kept as defense in depth for the case where the truncated branch is reached
+    with an unstripped prefix, which no current path produces. Recorded here because a
+    line that cannot fail is indistinguishable from an absent one, and the next reader
+    deserves to know which of the two strips is doing the work.
+    """
+    already_stripped = _strip_leadin_noise( " ﻿" + '{"client_secret": "s3cret"}' )
+
+    assert _strip_leadin_noise( already_stripped ) == already_stripped
+    assert already_stripped.startswith( "{" )
