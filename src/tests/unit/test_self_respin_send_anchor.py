@@ -261,3 +261,218 @@ def test_malformed_marker_still_wins_over_the_send_anchor():
     a = obs.classify_marker( marker, _stuck_seat(), now=_dt( 40 ) )
     assert a.verdict  == obs.SelfRespinVerdict.MALFORMED_MARKER
     assert a.is_alarm is True
+
+
+# ---------------------------------------------------------------------------
+# The SIDECAR reader — the injector's send stamp, whose MTIME is the timestamp
+# ---------------------------------------------------------------------------
+def test_read_keys_sent_at_absent_blank_and_present( tmp_path ):
+    """Absent ⇒ None (the ordinary case for every marker written before this
+    existed). Blank session id ⇒ None. Present ⇒ an AWARE mtime.
+
+    GUARD-PROOF: return a naive datetime instead and the tzinfo assertion goes red —
+    a naive value would make effective_deadline's comparison raise.
+    """
+    assert obs.read_keys_sent_at( str( tmp_path ), "nope" ) is None
+    assert obs.read_keys_sent_at( str( tmp_path ), "" )     is None
+
+    ( tmp_path / f"{obs.KEYS_SENT_PREFIX}sid1.marker" ).write_text( "" )
+    at = obs.read_keys_sent_at( str( tmp_path ), "sid1" )
+    assert at is not None
+    assert at.tzinfo is not None
+
+
+def test_with_keys_sent_merges_absent_and_never_clobbers( tmp_path ):
+    """The merge is what carries the sidecar into the pure classifier.
+
+    GUARD-PROOF: let the merge overwrite an existing value and the third block goes
+    red; drop the dict() copy and the caller's marker is mutated — the fourth block
+    catches that.
+    """
+    base = str( tmp_path )
+
+    # no sidecar ⇒ the marker comes back untouched, same object
+    m = _marker()
+    assert obs.with_keys_sent( m, base ) is m
+
+    # sidecar present ⇒ the field is filled in and parses as aware
+    ( tmp_path / f"{obs.KEYS_SENT_PREFIX}a2715c0f.marker" ).write_text( "" )
+    merged = obs.with_keys_sent( m, base )
+    assert obs._parse_iso( merged[ obs.KEYS_SENT_AT ] ) is not None
+
+    # an EXPLICIT value always wins over the file — a stale sidecar never overrides it
+    explicit = _marker( keys_sent_at=_iso( _dt( 21 ) ) )
+    assert obs.with_keys_sent( explicit, base )[ obs.KEYS_SENT_AT ] == _iso( _dt( 21 ) )
+
+    # the caller's dict is never mutated
+    assert obs.KEYS_SENT_AT not in m
+
+
+def test_sample_records_the_send_delay_and_the_anchor():
+    """The instrument has to carry the number the whole row turned on.
+
+    GUARD-PROOF: drop send_delay_s from the sample dict and the first block goes red;
+    compute it without the at-or-before-fire guard and the second block reports a
+    NEGATIVE delay instead of None.
+    """
+    sent   = FIRED + datetime.timedelta( seconds=90 )
+    marker = _marker( keys_sent_at=_iso( sent ) )
+    a      = obs.classify_marker( marker, _stuck_seat(), now=DUE )
+    s      = obs.build_respin_sample( marker, None, a, DUE )
+    assert s[ "send_delay_s" ] == 90.0
+    assert s[ "anchor" ]       == obs.ANCHOR_KEYS_SENT
+
+    # a nonsense pre-fire stamp is recorded as UNMEASURED, never as a negative delay
+    bogus = _marker( keys_sent_at=_iso( FIRED - datetime.timedelta( seconds=30 ) ) )
+    b     = obs.classify_marker( bogus, _stuck_seat(), now=DUE )
+    s2    = obs.build_respin_sample( bogus, None, b, DUE )
+    assert s2[ "send_delay_s" ] is None
+    assert s2[ "anchor" ]       == obs.ANCHOR_FIRE
+
+    # and a stampless marker likewise
+    s3 = obs.build_respin_sample( _marker(), None,
+                                  obs.classify_marker( _marker(), _stuck_seat(), now=DUE ), DUE )
+    assert s3[ "send_delay_s" ] is None
+
+
+# ---------------------------------------------------------------------------
+# The INJECTOR chain — does it ACTUALLY create the stamp?
+#
+# WHY THESE RUN BASH. An argv assertion ("the stamp path is argument 9") passes
+# whether or not the chain ever writes the file — proven: mutations that deleted
+# the write from both chains left the argv tests green. The only assertion that
+# can tell the difference is one that EXECUTES the chain and looks on disk. `tmux`
+# is stubbed with a script that exits 0, so nothing touches a real pane.
+# ---------------------------------------------------------------------------
+import os
+import subprocess
+
+import lupin_mcp.self_respin_core as sr
+
+
+def _stub_tmux( tmp_path ):
+    """A PATH containing a `tmux` that succeeds and does nothing."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    stub = bin_dir / "tmux"
+    stub.write_text( "#!/bin/sh\nexit 0\n" )
+    stub.chmod( 0o755 )
+    env = dict( os.environ )
+    env[ "PATH" ] = f"{bin_dir}:{env['PATH']}"
+    return env
+
+
+def _run( argv, env ):
+    return subprocess.run( argv, capture_output=True, text=True, timeout=30, env=env )
+
+
+def test_plain_chain_actually_creates_the_send_stamp( tmp_path ):
+    """GUARD-PROOF: delete the `: > "$5"` clause from the plain chain and this goes
+    red. The argv-shape test does NOT — that mutation survived it.
+    """
+    env   = _stub_tmux( tmp_path )
+    token = tmp_path / "fire.token"; token.write_text( "{}" )
+    stamp = tmp_path / ".self-respin-keys-sent-sid1.marker"
+
+    argv = sr.build_guarded_clear_argv( "sess", str( token ), 0, keys_sent_path=str( stamp ) )
+    r    = _run( argv, env )
+
+    assert r.returncode == 0, r.stderr
+    assert stamp.exists()          # the stamp was written
+    assert not token.exists()      # ...and the one-shot token was still consumed
+
+
+def test_wake_chain_creates_the_send_stamp_before_the_readiness_poll( tmp_path ):
+    """The wake chain stamps right after Enter, BEFORE it waits on the bridge mtime.
+    Here the poll deliberately times out (exit 3, no wake typed) — the stamp must
+    already exist anyway, because the send happened regardless of the wake.
+
+    GUARD-PROOF: delete the `[ -n "$9" ] && : > "$9"` line and this goes red; move it
+    below the poll loop and it goes red too, since the poll never succeeds here.
+    """
+    env    = _stub_tmux( tmp_path )
+    token  = tmp_path / "fire.token"; token.write_text( "{}" )
+    bridge = tmp_path / "cc-1.json";  bridge.write_text( "{}" )
+    stamp  = tmp_path / ".self-respin-keys-sent-sid2.marker"
+
+    argv = sr.build_guarded_clear_argv(
+        "sess", str( token ), 0,
+        wake_text="hello", bridge_path=str( bridge ), keys_sent_path=str( stamp ),
+        ready_timeout_polls=1, poll_interval_seconds=0,
+    )
+    r = _run( argv, env )
+
+    assert r.returncode == 3        # readiness never proven — the wake was NOT typed
+    assert stamp.exists()           # ...but the send stamp is there regardless
+
+
+def test_a_second_fire_after_rehydrate_writes_no_stamp( tmp_path ):
+    """The one-shot guard must still short-circuit EVERYTHING, stamp included. A
+    second detached fire finds the token gone and must not move the deadline by
+    stamping a fresh send that never happened.
+
+    GUARD-PROOF: change the plain chain's `&&` before the stamp to `;` and this goes
+    red — the stamp would appear even though no keystrokes were sent.
+    """
+    env   = _stub_tmux( tmp_path )
+    stamp = tmp_path / ".self-respin-keys-sent-sid3.marker"
+
+    # no token on disk at all — this is the post-rehydrate second fire
+    argv = sr.build_guarded_clear_argv( "sess", str( tmp_path / "gone.token" ), 0,
+                                        keys_sent_path=str( stamp ) )
+    r    = _run( argv, env )
+
+    assert r.returncode != 0        # rm failed ⇒ the chain short-circuited
+    assert not stamp.exists()       # ...and nothing was stamped
+
+
+def test_chain_still_works_when_no_stamp_path_is_given( tmp_path ):
+    """Back-compat: a caller that passes no keys_sent_path gets the old behaviour and
+    no stray file. The bash must not choke on the empty argument.
+
+    GUARD-PROOF: drop the `[ -n "$5" ]` emptiness check and bash tries to create a
+    file named "" — the chain fails and this goes red on the returncode.
+    """
+    env   = _stub_tmux( tmp_path )
+    token = tmp_path / "fire.token"; token.write_text( "{}" )
+
+    r = _run( sr.build_guarded_clear_argv( "sess", str( token ), 0 ), env )
+
+    assert r.returncode == 0, r.stderr
+    assert not token.exists()
+    assert not any( p.name.startswith( ".self-respin-keys-sent-" ) for p in tmp_path.iterdir() )
+
+
+def test_scheduling_clears_a_stale_send_stamp_from_a_prior_cycle( tmp_path ):
+    """A stamp left over from an EARLIER re-spin would anchor THIS cycle's window on
+    a send that already happened — a deadline in the past, which is worse than no
+    stamp at all: it would make a healthy seat look dead immediately, the exact
+    failure this whole row exists to remove. The verb clears it at schedule time and
+    the injector re-creates it at the fire point.
+
+    GUARD-PROOF: delete the `_best_effort_remove( keys_sent_path )` line in
+    perform_self_respin and this goes red — that mutation survived every other test
+    in this file.
+    """
+    memento = tmp_path / ".claude-memento.md"
+    nonce   = "stale-cycle-uuid"
+    memento.write_text(
+        "# memento\n" + sr.build_nonce_line( nonce, _dt( 20 ) ) + "\n"
+    )
+
+    stale = tmp_path / ".self-respin-keys-sent-sid9.marker"
+    stale.write_text( "" )                      # the prior cycle's stamp
+    assert stale.exists()
+
+    scheduled = []
+    r = sr.perform_self_respin(
+        "sid9", persona="cheech", memento_path=str( memento ), memento_nonce=nonce,
+        pre_clear_status="over_budget", pre_clear_pct=61.0,
+        now=_dt( 21 ), resolve_tmux_fn=lambda sid: "cheech-mgr", ask_fn=lambda: "yes",
+        schedule_fn=lambda argv: scheduled.append( argv ), base_dir=str( tmp_path ),
+    )
+
+    assert r.status == "scheduled"
+    assert not stale.exists()                   # cleared before the new cycle armed
+    # ...and the path the injector will re-create is the SAME one that was cleared
+    assert str( stale ) in scheduled[ 0 ]

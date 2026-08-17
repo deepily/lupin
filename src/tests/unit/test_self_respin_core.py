@@ -253,8 +253,13 @@ def test_perform_falls_back_to_plain_clear_when_bridge_unresolvable( tmp_path ):
     )
     assert r.status == "scheduled"
     argv = scheduled[ 0 ]
-    assert len( argv ) == 8                        # plain single-chain argv, no wake args
+    assert len( argv ) == 9                        # plain single-chain argv, no wake args
     assert argv[ 6 ] == "/clear"
+    # $5 is the send stamp (row 855e4dd0) — present on the PLAIN chain too, because the
+    # deadline it anchors has nothing to do with whether a wake was scheduled.
+    assert argv[ 8 ].endswith( "/.self-respin-keys-sent-sid1.marker" )
+    # ...and the WAKE args are what is still absent: no bridge path, no proof path.
+    assert not any( "self-respin-wake-proof" in a for a in argv )
     # no wake ⇒ no wake_nonce requirement recorded in the marker
     marker = json.loads( ( tmp_path / ".self-respin-sid1.json" ).read_text() )
     assert marker[ "wake_nonce" ] is None

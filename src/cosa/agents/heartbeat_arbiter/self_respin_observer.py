@@ -90,7 +90,11 @@ RESPIN_SAMPLES_FILENAME = "self-respin-samples.jsonl"
 # this file is being read later by someone deciding whether a gate is justified; a
 # field added without a marker would make the early samples silently
 # non-comparable. Bump this whenever the sample dict shape changes.
-RESPIN_SAMPLE_SCHEMA_VERSION = 1
+#   v1 → v2 (row 855e4dd0): added `anchor` and `send_delay_s`. Every v1 line was
+#   written before the send stamp existed, so a v1 sample is not "send_delay_s
+#   missing", it is "send_delay_s unmeasurable" — do not pool the two when reading
+#   the distribution.
+RESPIN_SAMPLE_SCHEMA_VERSION = 2
 
 # RETENTION (Cheech's requirement): a per-tick per-marker append-only log on a
 # shared box grows without bound. Bound it by SINGLE-FILE ROTATION at a size cap —
@@ -200,10 +204,18 @@ def _parse_iso( value ):
 # WHY "SENT" AND NOT "DELIVERED" (María's ruling, 2026-08-17). `tmux send-keys`
 # has no ingestion feedback, so the injector can prove it SENT the keystrokes and
 # can never prove the pane took them. Naming the field `keys_sent_at` claims
-# exactly what the mechanism supports. That is also what keeps it clear of the
-# "the injector writes NO receipt" rule at self_respin_core.py:231-236: that rule
-# exists because an injector-written receipt cannot prove INGESTION, and a stamp
-# that only ever claims "sent" never pretends to.
+# exactly what the mechanism supports; "delivered" would claim a certainty nothing
+# in this path can provide.
+#
+# WHY A SENT STAMP DOES NOT BREACH THE NO-RECEIPT RULE — Mr Radio's ruling,
+# 2026-08-17, permitting the injector-side write at self_respin_core.py:231-236.
+# The argument is not "sent is all we can prove." It is that ANCHORING ON ARRIVAL
+# WOULD BE CIRCULAR: DEAD_NO_RETURN exists precisely to fire when no proof of
+# arrival ever shows up, so a clock started at arrival could never start in the one
+# case the alarm exists to catch. The deadline has to measure HOW LONG SINCE WE
+# TRIED — a fact about the injector's own action, and the only thing the injector
+# genuinely knows. A stamp of that fact is not a receipt for something it cannot
+# witness, which is what the no-receipt rule forbids.
 #
 # THE ANCHOR. When the marker carries `keys_sent_at`, the seat gets its SAME total
 # window measured from the send instead of from the schedule. Two properties:
@@ -218,6 +230,11 @@ def _parse_iso( value ):
 #     never EARLIER than expected_return_by. This can only retire false
 #     DEAD_NO_RETURN alarms; it can never manufacture a new one.
 KEYS_SENT_AT = "keys_sent_at"
+
+# The injector's send stamp lives in its OWN file, not inside the marker JSON —
+# `<KEYS_SENT_PREFIX><session_id>.marker`, whose MTIME is the timestamp. Rationale
+# in read_keys_sent_at. The `.marker` suffix keeps it out of the `.json` marker glob.
+KEYS_SENT_PREFIX = ".self-respin-keys-sent-"
 
 
 def effective_deadline( marker, fired_at, deadline ):
@@ -573,6 +590,67 @@ def read_wake_proof( base, session_id ):
     return ( nonce, proof_at )
 
 
+def keys_sent_path( base, session_id ):
+    """Ensures: returns the send-stamp sidecar path for `session_id`."""
+    return os.path.join( base, f"{KEYS_SENT_PREFIX}{session_id}.marker" )
+
+
+def read_keys_sent_at( base, session_id ):
+    """
+    Read the injector's send stamp for `session_id` — the moment the detached job
+    finished typing `/clear` + Enter into the pane.
+
+    WHY A SIDECAR AND NOT A FIELD IN THE MARKER (row 855e4dd0). The injector is a
+    bash chain, and the marker is a JSON file this observer is reading on a 60s
+    tick. Having the chain read-modify-write that JSON risks handing the observer a
+    torn file for a tick; creating an empty sidecar is a single atomic operation
+    that cannot corrupt anything. The FILE'S MTIME IS THE TIMESTAMP, so the chain
+    formats no dates and the two sides cannot disagree on a format — exactly the
+    shape `read_wake_proof` already uses.
+
+    Requires:
+        - base is a resolved directory path; session_id is the seat's id
+
+    Ensures:
+        - returns the sidecar's mtime as an AWARE UTC datetime
+        - returns None when session_id is blank, or the sidecar is absent or
+          unreadable — which is the ordinary case for every marker written before
+          this existed, and degrades to the schedule-time anchor
+        - never raises
+    """
+    if not session_id:
+        return None
+    try:
+        return datetime.datetime.fromtimestamp(
+            os.path.getmtime( keys_sent_path( base, session_id ) ), tz=datetime.timezone.utc
+        )
+    except OSError:
+        return None
+
+
+def with_keys_sent( marker, base ):
+    """
+    Return `marker` with its `keys_sent_at` filled in from the sidecar on disk.
+
+    Ensures:
+        - returns a marker dict carrying KEYS_SENT_AT when the sidecar exists
+        - returns the marker UNCHANGED (same object) when no sidecar exists, or when
+          the marker already carries the field — an explicit value always wins, so a
+          test fixture or a future in-marker writer is never clobbered by a stale file
+        - never mutates the caller's dict when it does add the field (copies first),
+          so a marker read once can be classified more than once safely
+        - never raises
+    """
+    if not isinstance( marker, dict ) or marker.get( KEYS_SENT_AT ) is not None:
+        return marker
+    sent_at = read_keys_sent_at( base, marker.get( "session_id" ) )
+    if sent_at is None:
+        return marker
+    merged                 = dict( marker )
+    merged[ KEYS_SENT_AT ] = sent_at.isoformat()
+    return merged
+
+
 def _pressure_by_id( section ):
     """
     Index a context_pressure section's persona records by session_id.
@@ -630,7 +708,7 @@ def observe_fleet_self_respin( *, base_dir=None, now=None, fetch_pressure=None )
     def _classify( m ):
         nonce, proof_at = read_wake_proof( base, m.get( "session_id" ) )
         return classify_marker(
-            m, by_id.get( m.get( "session_id" ) ), now=now,
+            with_keys_sent( m, base ), by_id.get( m.get( "session_id" ) ), now=now,
             wake_proof_nonce=nonce, wake_proof_at=proof_at,
         )
     return [ _classify( m ) for m in markers ]
@@ -722,7 +800,7 @@ def sweep_returned_markers( *, base_dir=None, now=None, fetch_pressure=None,
     for path, marker in pairs:
         nonce, proof_at = read_wake_proof( base, marker.get( "session_id" ) )
         assessment = classify_marker(
-            marker, by_id.get( marker.get( "session_id" ) ), now=now,
+            with_keys_sent( marker, base ), by_id.get( marker.get( "session_id" ) ), now=now,
             wake_proof_nonce=nonce, wake_proof_at=proof_at,
         )
         if assessment.verdict is not SelfRespinVerdict.RETURNED:
@@ -737,6 +815,10 @@ def sweep_returned_markers( *, base_dir=None, now=None, fetch_pressure=None,
             # marker so proofs don't accumulate. Best-effort; a missing one is fine (the
             # marker is already gone, so nothing re-reads it).
             _best_effort_unlink( wake_proof_path( base, marker.get( "session_id" ) ) )
+            # the send stamp is swept with its marker for the same reason: it exists to
+            # time THIS cycle's window, and a stamp outliving its marker would anchor the
+            # NEXT cycle's window on a send that already happened — a deadline in the past.
+            _best_effort_unlink( keys_sent_path( base, marker.get( "session_id" ) ) )
             swept.append( marker.get( "session_id" ) )
     return swept
 
@@ -762,15 +844,31 @@ def build_respin_sample( marker, pressure_record, assessment, now ):
           pre_clear_status/pre_clear_pct, the CURRENT consumption_pct_of_window
           (post_settle_pct — None when the record is absent or the field is
           non-numeric), elapsed_s since fired_at (None when fired_at is
-          missing/naive/unparseable), and the observed verdict
+          missing/naive/unparseable), the observed verdict, the ANCHOR that verdict's
+          timing rested on, and send_delay_s — the seconds between the fire and the
+          send, None whenever the marker carries no usable keys_sent_at
         - decides NOTHING and emits NOTHING — pure construction
         - never raises
+
+    WHY send_delay_s IS RECORDED (row 855e4dd0). The whole row turned on a number
+    nobody had: how long a BUSY pane sits on a queued `/clear` before it takes it.
+    Two hand-measured points existed — an idle seat at ~0s and a busy seat at
+    ~232s — and a grace window was being argued over on that. This is the sample
+    that turns the argument into a distribution. It costs one subtraction and,
+    exactly like the rest of this instrument, decides nothing.
     """
     fired_at = _parse_iso( marker.get( "fired_at" ) )
     elapsed  = ( now - fired_at ).total_seconds() if fired_at is not None else None
     post_pct = pressure_record.get( "consumption_pct_of_window" ) if isinstance( pressure_record, dict ) else None
     if not isinstance( post_pct, ( int, float ) ):
         post_pct = None
+
+    # The SAME acceptance rule as effective_deadline — a stamp at/before the fire is
+    # nonsense and is recorded as absent, never as a negative delay.
+    keys_sent    = _parse_iso( marker.get( KEYS_SENT_AT ) )
+    send_delay_s = ( keys_sent - fired_at ).total_seconds() \
+                   if ( keys_sent is not None and fired_at is not None and keys_sent > fired_at ) else None
+
     return {
         "schema_version"   : RESPIN_SAMPLE_SCHEMA_VERSION,
         "recorded_at"      : now.isoformat(),
@@ -781,6 +879,8 @@ def build_respin_sample( marker, pressure_record, assessment, now ):
         "post_settle_pct"  : post_pct,
         "elapsed_s"        : elapsed,
         "verdict"          : assessment.verdict.value,
+        "anchor"           : assessment.anchor,
+        "send_delay_s"     : send_delay_s,
     }
 
 
@@ -812,10 +912,14 @@ def collect_respin_samples( *, base_dir=None, now=None, fetch_pressure=None ):
     def _sample( m ):
         record          = by_id.get( m.get( "session_id" ) )
         nonce, proof_at = read_wake_proof( base, m.get( "session_id" ) )
+        # merged FIRST so the sample and the assessment describe the same marker —
+        # a sample whose send_delay_s disagreed with its own anchor would be worse
+        # than no sample at all.
+        merged          = with_keys_sent( m, base )
         assessment      = classify_marker(
-            m, record, now=now, wake_proof_nonce=nonce, wake_proof_at=proof_at,
+            merged, record, now=now, wake_proof_nonce=nonce, wake_proof_at=proof_at,
         )
-        return build_respin_sample( m, record, assessment, now )
+        return build_respin_sample( merged, record, assessment, now )
 
     return [ _sample( m ) for m in markers ]
 
@@ -1054,14 +1158,30 @@ class SelfRespinObserverLoop:
         Compose + fire the ONE operator advisory for an alarming marker.
 
         Ensures:
-            - names the persona/session, the verdict, and the reason; delegates
-              delivery to the injected advisory_fn; never raises (sweep_once guards)
+            - names the persona/session, the verdict, the reason, AND the anchor the
+              timing rested on; delegates delivery to the injected advisory_fn;
+              never raises (sweep_once guards)
+
+        The anchor is spelled out here rather than left to the dataclass because
+        this string IS the surface an operator reads under time pressure (row
+        855e4dd0). A DEAD_NO_RETURN that rests on the schedule-time anchor is a
+        weaker claim than one that rests on a real send stamp — the seat may simply
+        not have reached a turn boundary yet — and an alarm that hides which of the
+        two it is asks the reader to assume.
         """
+        if assessment.anchor == ANCHOR_KEYS_SENT:
+            anchor_note = "timed from when the keystrokes were sent"
+        else:
+            anchor_note = (
+                "timed from when the clear was SCHEDULED (this marker carries no keys_sent_at), "
+                "so a seat that has not reached a turn boundary can look like this too"
+            )
         message = (
             f"SELF-RESPIN OBSERVER — {assessment.verdict.value} for session "
             f"{assessment.session_id} (persona {assessment.persona or 'unknown'}): "
             f"{assessment.reason}. A manager typed /clear into its own pane and the "
-            f"observer cannot confirm it came back at low context."
+            f"observer cannot confirm it came back at low context. "
+            f"[anchor: {assessment.anchor} — {anchor_note}]"
         )
         self._advisory_fn( message )
 
@@ -1118,7 +1238,8 @@ def render_observer_table( assessments ):
     """
     if not assessments:
         return "(no self-re-spin markers in flight)"
-    header = f"{'PERSONA':<12} {'SESSION':<10} {'VERDICT':<18} {'ALARM':<6} {'LATENCY':<9} {'LATE':<5} REASON"
+    header = ( f"{'PERSONA':<12} {'SESSION':<10} {'VERDICT':<18} {'ALARM':<6} "
+               f"{'LATENCY':<9} {'LATE':<5} {'ANCHOR':<10} REASON" )
     rows   = [ header, "-" * len( header ) ]
     for a in assessments:
         alarm   = "ALARM" if a.is_alarm else ""
@@ -1126,7 +1247,7 @@ def render_observer_table( assessments ):
         late    = "LATE" if a.late else ""
         rows.append(
             f"{a.persona:<12} {a.session_id[:8]:<10} {a.verdict.value:<18} {alarm:<6} "
-            f"{latency:<9} {late:<5} {a.reason}"
+            f"{latency:<9} {late:<5} {a.anchor:<10} {a.reason}"
         )
     return "\n".join( rows )
 

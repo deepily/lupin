@@ -199,7 +199,7 @@ def build_wake_text( memento_path, wake_nonce, wake_proof_path ):
 
 def build_guarded_clear_argv(
     tmux_session, fire_token_path, delay, text="/clear",
-    *, wake_text=None, bridge_path=None,
+    *, wake_text=None, bridge_path=None, keys_sent_path=None,
     ready_timeout_polls=DEFAULT_READY_TIMEOUT_POLLS,
     poll_interval_seconds=DEFAULT_POLL_INTERVAL_SECONDS,
 ):
@@ -228,26 +228,46 @@ def build_guarded_clear_argv(
           it CHANGES, then types the wake with `-l` (literal); on timeout it writes a
           loud stderr line and types nothing (a mute seat is left for the observer to
           alarm, never a wake into the old context)
-        - the injector writes NO receipt: a receipt written HERE would prove only that
-          the injector reached the line, never that the pane ingested the keystrokes
-          (`tmux send-keys` has no ingestion feedback). Proof of a real wake is
-          CONSUMER-side — the wake text (built by build_wake_text) instructs the
+        - the injector writes NO ARRIVAL receipt: a receipt written HERE would prove
+          only that the injector reached the line, never that the pane ingested the
+          keystrokes (`tmux send-keys` has no ingestion feedback). Proof of a real wake
+          is CONSUMER-side — the wake text (built by build_wake_text) instructs the
           rehydrated seat to write a nonce-echoing proof artifact, which the observer
           keys RETURNED on. This function only delivers the wake behind the readiness gate.
+        - `keys_sent_path` (optional) is the ONE thing the injector does stamp, and it is
+          NOT an exception to the rule above (row 855e4dd0, Mr Radio's ruling 2026-08-17).
+          It records WHEN WE TRIED — a fact about this chain's own action, the only thing
+          it genuinely knows — by creating an empty file whose MTIME is the timestamp.
+          The observer measures its DEAD_NO_RETURN window from that instead of from the
+          schedule, because a busy pane buffers `/clear` until its next turn boundary and
+          would otherwise be called dead while merely queued.
+          WHY THIS IS NOT THE FORBIDDEN RECEIPT: anchoring on ARRIVAL would be circular —
+          DEAD_NO_RETURN exists precisely to fire when no proof of arrival EVER shows up,
+          so a clock started at arrival could never start in the one case the alarm exists
+          to catch. The deadline has to measure how long since we tried.
+          Failing to write it is NEVER fatal: the chain proceeds, and a missing stamp
+          simply leaves the observer on its old schedule-time anchor, which still alarms.
         - `text` (and the wake) are passed VERBATIM as positional args — never wrapped
           by the speakerphone rider (a wrapped "/clear" would never fire as a slash cmd)
     """
     if wake_text is None:
         bash = (
             'sleep "$1" && rm "$4" && tmux send-keys -t "$2" -l -- "$3" '
-            '&& sleep 0.25 && tmux send-keys -t "$2" Enter'
+            # The stamp hangs off the SAME && chain, so a short-circuited fire (the
+            # one-shot token already gone) never stamps a send that did not happen.
+            # `[ -z "$5" ] ||` skips it when no path was given, and the trailing
+            # `|| true` swallows ONLY a failed redirect — it must never wrap the whole
+            # chain, or a short-circuited fire would report success.
+            '&& sleep 0.25 && tmux send-keys -t "$2" Enter '
+            '&& { [ -z "$5" ] || : > "$5" || true; }'
         )
         return [ "bash", "-c", bash,
                  "_",                       # $0 placeholder
                  str( delay ),             # $1
                  tmux_session,             # $2
                  text,                     # $3  (verbatim "/clear" — NOT wrapped)
-                 fire_token_path ]         # $4  (the one-shot, rm'd at the fire point)
+                 fire_token_path,          # $4  (the one-shot, rm'd at the fire point)
+                 keys_sent_path or "" ]    # $5  (send stamp; mtime IS the timestamp)
 
     # Wake path — ONE chain: guarded /clear, then a bridge-mtime readiness gate, then
     # the wake. `date -r <bridge> +%s%N` reads the mtime in NANOSECONDS so a same-second
@@ -262,6 +282,7 @@ def build_guarded_clear_argv(
         'tmux send-keys -t "$2" -l -- "$3" || exit 0\n'
         'sleep 0.25\n'
         'tmux send-keys -t "$2" Enter || exit 0\n'
+        '[ -n "$9" ] && : > "$9"\n'
         'polls=0\n'
         'while :; do\n'
         '  m=$(date -r "$6" +%s%N 2>/dev/null || echo 0)\n'
@@ -286,7 +307,8 @@ def build_guarded_clear_argv(
              wake_text,                       # $5  (the rehydrate prompt — typed -l)
              bridge_path,                     # $6  (readiness oracle: mtime must change)
              str( ready_timeout_polls ),      # $7  (bounded poll count)
-             str( poll_interval_seconds ) ]   # $8  (seconds between polls)
+             str( poll_interval_seconds ),    # $8  (seconds between polls)
+             keys_sent_path or "" ]           # $9  (send stamp; mtime IS the timestamp)
 
 
 # ---------------------------------------------------------------------------
@@ -466,6 +488,11 @@ def perform_self_respin(
     )
     marker_path     = os.path.join( base, f"{_MARKER_PREFIX}{session_id}.json" )
     fire_token_path = os.path.join( base, f"{FIRE_TOKEN_PREFIX}{session_id}.token" )
+    # The send stamp the fire point creates (row 855e4dd0). A stamp left over from a
+    # PRIOR cycle would anchor this cycle's window on a send that already happened —
+    # a deadline in the past — so it is cleared here, exactly as the wake proof is.
+    keys_sent_path  = os.path.join( base, f"{KEYS_SENT_PREFIX}{session_id}.marker" )
+    _best_effort_remove( keys_sent_path )
 
     write_json_fn( marker_path, marker )
     if not _readback_ok( read_text_fn, marker_path, session_id ):
@@ -492,6 +519,7 @@ def perform_self_respin(
         tmux_session, fire_token_path, delay_seconds,
         wake_text             = wake_text,
         bridge_path           = bridge_path,
+        keys_sent_path        = keys_sent_path,
         ready_timeout_polls   = ready_timeout_polls,
         poll_interval_seconds = poll_interval_seconds,
     ) )
@@ -756,12 +784,14 @@ def _default_ask( persona ):   # pragma: no cover - live MCP ask boundary (tests
     return ask_yes_no.fn( **confirmation_kwargs( persona ) )
 
 
-# The observer's marker + wake-proof names — imported by name so the two files agree
-# on the ONE shape each: the marker filename (MARKER_PREFIX), the wake-proof artifact
-# filename (WAKE_PROOF_PREFIX), and the proof's nonce line (WAKE_PROOF_NONCE_LINE) the
-# seat echoes and the observer reads back.
+# The observer's marker + wake-proof + send-stamp names — imported by name so the two
+# files agree on the ONE shape each: the marker filename (MARKER_PREFIX), the wake-proof
+# artifact filename (WAKE_PROOF_PREFIX), the proof's nonce line (WAKE_PROOF_NONCE_LINE)
+# the seat echoes and the observer reads back, and the send-stamp filename
+# (KEYS_SENT_PREFIX) this injector creates and the observer times its window from.
 from cosa.agents.heartbeat_arbiter.self_respin_observer import (
     MARKER_PREFIX as _MARKER_PREFIX,
     WAKE_PROOF_PREFIX as _WAKE_PROOF_PREFIX,
     WAKE_PROOF_NONCE_LINE as _WAKE_PROOF_NONCE_LINE,
+    KEYS_SENT_PREFIX,
 )
