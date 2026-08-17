@@ -61,7 +61,10 @@ class DecisionResponder( BaseResponder ):
 
         Args:
             trust_mode: Operating mode ("shadow", "suggest", "active")
-            accepted_senders: List of sender IDs this proxy will respond to
+            accepted_senders: Allowlist of sender IDs this proxy will respond to.
+                     FAIL-CLOSED (960a4ec9): an empty/omitted list rejects EVERY
+                     sender, never accepts all. The shipped path populates it with
+                     the swe.* bot addresses.
             embedding_provider: Optional EmbeddingProvider for generating question embeddings
             host: Server hostname for REST API
             port: Server port for REST API
@@ -195,8 +198,15 @@ class DecisionResponder( BaseResponder ):
             print( f"{self.LOG_PREFIX} ERROR: No notification_id in event" )
             return
 
-        # Check sender ID against accepted list
-        if self.accepted_senders and sender_id not in self.accepted_senders:
+        # Check sender ID against accepted list — FAIL-CLOSED (960a4ec9 Option C).
+        # An EMPTY allowlist now means "trust no one", not "trust everyone": the
+        # previous `self.accepted_senders and ...` guard skipped the check whenever
+        # the list was empty, so a Responder built without a profile did no sender
+        # filtering at all (fail-open). The only shipped construction path
+        # (__main__.py sets the three swe.* addresses) supplies a NON-empty list and
+        # behaves identically under both forms, so this closes the empty-default hole
+        # without changing live behaviour.
+        if sender_id not in self.accepted_senders:
             self.stats[ "sender_rejected" ] += 1
             if self.debug: print( f"{self.LOG_PREFIX} Sender rejected: {sender_id}" )
             return
