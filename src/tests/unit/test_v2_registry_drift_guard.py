@@ -158,14 +158,14 @@ INITIAL_DETECTION_EXEMPTIONS = {
     "agent router go to test fix expediter": {
         "surfaces": [ "prompt", "training", "card" ],   # NOT listed, NOT trained (e5a840c9 executed), OFF the card
         "reason":
-            "START is SYSTEM-triggered by the test-suite completion watchdog "
-            "(test_suite_completion_watchdog.py:259) with a non-speakable "
-            "source_test_suite_job_id; no fuzzy-human-input path, so not user-voice-reachable. "
-            "It is also OFF the confirmation card: START is absent from CARD_LABELS "
+            "Never reached by initial router detection; system/card-triggered. START is "
+            "SYSTEM-triggered via test_suite_completion_watchdog.py:258 (create_agentic_job) with a "
+            "non-speakable source_test_suite_job_id — no fuzzy-human-input path, so not "
+            "user-voice-reachable. It is OFF the confirmation card: absent from CARD_LABELS "
             "(todo_fifo_queue.py:1026), so _confirm_agentic_routing:1058 never offers it as a "
             "'Switch to this instead' alternative — correct, because completing a START run needs "
             "a pasted source_test_suite_job_id that no card alternative supplies. Hence it waives 'card'. "
-            "It now ALSO waives 'training': row e5a840c9 (folded into the 95924f2d step-4 corpus "
+            "It ALSO waives 'training': row e5a840c9 (folded into the 95924f2d step-4 corpus "
             "single-sourcing) DROPPED the START key from agent-router-agentic-commands.json, so the "
             "corpus no longer trains it — the removal of its training examples is the point, not a "
             "side effect. A live A/B probe confirms emission is gated on the PROMPT LINE, not "
@@ -177,15 +177,15 @@ INITIAL_DETECTION_EXEMPTIONS = {
     "agent router go to bug fix expediter": {
         "surfaces": [ "prompt", "training" ],   # NOT router-emittable (waives prompt+training); ON the card (no card waiver)
         "reason":
-            "BFE is not router-EMITTABLE — the prompt AND the training corpus govern "
-            "initial-detection emission, and BFE is intentionally neither listed nor trained, so "
-            "the router never emits it as an initial detection. This is NOT the same as "
-            "'not voice-reachable': the confirmation card IS a voice path, and BFE is reachable "
-            "on it. CARD_LABELS (todo_fifo_queue.py:1026) offers BFE as a 'Switch to this "
-            "instead' alternative via _confirm_agentic_routing:1058, and its dead_job_id is then "
-            "collected by the RAE fallback questions. So BFE waives prompt+training (never an "
-            "initial detection) but does NOT waive 'card' — it must stay ON the card, which is "
-            "its only reachability path; losing card membership would invalidate this exemption.",
+            "Never reached by initial router detection; system/card-triggered. The prompt AND the "
+            "training corpus govern initial-detection emission, and BFE is intentionally neither "
+            "listed nor trained, so the router never emits it as an initial detection (waives "
+            "'prompt'+'training'). It is reached instead via dead_queue_watchdog.py:470 "
+            "(create_agentic_job), the BFE resubmit path, and the confirmation card: CARD_LABELS "
+            "(todo_fifo_queue.py:1026) offers BFE as a 'Switch to this instead' alternative via "
+            "_confirm_agentic_routing:1058, and its dead_job_id is then collected by the RAE fallback "
+            "questions. So BFE does NOT waive 'card' — it must stay ON the card, which is its only "
+            "reachability path; losing card membership would invalidate this exemption.",
     },
 }
 
