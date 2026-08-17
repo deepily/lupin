@@ -428,3 +428,40 @@ class TestPreFixPopulationResidual:
         write, find = bridge_factory( tmp_path )
         write( "maria", _load_maria_prefix_bridge() )
         assert mf.is_manager_figure( "maria", environ={ "LUPIN_ROOT": "/var/lupin" }, _find_path=find ) is True
+
+
+class TestClassifyManagerFigureDenial:
+    """
+    Bug dd3b3666 — the blocked-mint 403 must distinguish "resolved and NOT a
+    manager" (denied) from "the stamp field the check reads is ABSENT" (stale
+    bridge, self-healed by a session restart). The absent-vs-false distinction is
+    the whole point: absent → STALE, present-and-false → DENIED.
+    """
+
+    def test_none_session_id_is_no_session_id( self ):
+        assert mf.classify_manager_figure_denial( None ) == mf.DENIAL_NO_SESSION_ID
+
+    def test_absent_stamp_is_stale_bridge_via_maria_raw_bridge( self, tmp_path ):
+        # María's REAL pre-fix bridge (role ABSENT, manager_figure_implicit ABSENT)
+        # is the authoritative stale-shape input — sourced from the RAW .bridge.json,
+        # NOT the markdown doc (which renders absent keys as null; f008951a).
+        write, find = bridge_factory( tmp_path )
+        write( "maria", _load_maria_prefix_bridge() )
+        assert mf.classify_manager_figure_denial( "maria", _find_path=find ) == mf.DENIAL_STALE_BRIDGE
+
+    def test_missing_bridge_is_stale_bridge( self, tmp_path ):
+        _write, find = bridge_factory( tmp_path )
+        assert mf.classify_manager_figure_denial( "ghost", _find_path=find ) == mf.DENIAL_STALE_BRIDGE
+
+    def test_present_false_stamp_is_denied( self, tmp_path ):
+        write, find = bridge_factory( tmp_path )
+        write( "worker", { "role": "worker", "voice_persona": { "name": "Nobody" },
+                           "manager_figure_implicit": False } )
+        assert mf.classify_manager_figure_denial( "worker", _find_path=find ) == mf.DENIAL_DENIED
+
+    def test_explicit_manager_role_on_reject_path_is_denied_not_stale( self, tmp_path ):
+        # Defensive branch: role=="manager" would resolve True upstream, so reaching
+        # the classifier means the caller was already rejected — report denied, not stale.
+        write, find = bridge_factory( tmp_path )
+        write( "mgr", { "role": "manager" } )
+        assert mf.classify_manager_figure_denial( "mgr", _find_path=find ) == mf.DENIAL_DENIED

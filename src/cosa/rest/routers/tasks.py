@@ -48,7 +48,10 @@ from lupin_mcp.persona_normalization import canonical_persona_key
 # blocked rows are spawned INTO role=manager (the explicit source). The bridge dir
 # is bind-mounted into the container (docker-compose ~/.claude/sessions), so the
 # explicit lookup is reachable server-side.
-from lupin_cli.claude_code.hooks.lib.manager_figure import is_manager_figure
+from lupin_cli.claude_code.hooks.lib.manager_figure import (
+    is_manager_figure, classify_manager_figure_denial,
+    DENIAL_STALE_BRIDGE, DENIAL_NO_SESSION_ID,
+)
 
 router = APIRouter( prefix="/api", tags=[ "tasks" ] )
 
@@ -597,6 +600,46 @@ def _reject_if_errors( errors: list ) -> None:
         raise HTTPException( status_code=422, detail={ "errors": errors } )
 
 
+def _blocked_mint_denial_detail( reason: str ) -> str:
+    """
+    Build the 403 detail for a rejected blocked-MINT, keyed on the classifier
+    reason (bug dd3b3666). The old single message asserted "you are not a
+    manager" even when the truth was "your bridge predates the stamp field the
+    check reads — restart" — misdiagnosing every session alive across a future
+    bridge-schema addition.
+
+    Requires:
+        - reason is one of the manager_figure.DENIAL_* constants
+
+    Ensures:
+        - DENIAL_STALE_BRIDGE → names the ABSENT stamp field and prescribes a
+          session RESTART (which re-stamps the bridge at SessionStart)
+        - DENIAL_NO_SESSION_ID / DENIAL_DENIED → the permission message, unchanged
+          in intent (a genuinely-denied caller is still told it is not a manager)
+    """
+    if reason == DENIAL_STALE_BRIDGE:
+        return (
+            "cannot verify manager status to mint a 'blocked' task: the caller's "
+            "session bridge is missing the 'manager_figure_implicit' stamp that the "
+            "manager-figure check reads (field ABSENT, not false) — this session "
+            "started before the stamp existed. RESTART the session to re-stamp the "
+            "bridge, then retry. (If you are intentionally a non-manager: create the "
+            "item queued and transition it to blocked, or have a manager mint it directly.)"
+        )
+    if reason == DENIAL_NO_SESSION_ID:
+        return (
+            "only a manager may mint a 'blocked' task at create — no parseable session "
+            "id in created_by, so manager status cannot be established. Create the item "
+            "queued and transition it to blocked, or have a manager mint it directly."
+        )
+    return (
+        "only a manager may mint a 'blocked' task at create — the caller resolved and "
+        "is not a manager figure ('manager_figure_implicit' is false and role is not "
+        "'manager'). Create the item queued and transition it to blocked, or have a "
+        "manager mint it directly."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Endpoints (ALL sync `def` — threadpool lane, C4 debt-clean)
 # ---------------------------------------------------------------------------
@@ -652,11 +695,8 @@ def create_task(
         if session_id is None or not is_manager_figure( session_id ):
             raise HTTPException(
                 status_code = 403,
-                detail      = (
-                    "only a manager may mint a 'blocked' task at create — "
-                    "is_manager_figure is false or unresolved for the caller. Create "
-                    "the item queued and transition it to blocked, or have a manager "
-                    "mint it directly."
+                detail      = _blocked_mint_denial_detail(
+                    classify_manager_figure_denial( session_id )
                 ),
             )
 

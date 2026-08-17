@@ -264,11 +264,30 @@ def test_create_blocked_mint_by_manager_succeeds( client, repo, monkeypatch ):
 
 
 def test_create_blocked_mint_by_non_manager_rejected_403( client, repo, monkeypatch ):
-    # AC2 REJECT path: a NON-manager (is_manager_figure False) is 403'd — no write.
+    # AC2 REJECT path: a genuinely-DENIED caller (resolved, not a manager) is 403'd
+    # with the permission message — no write. bug dd3b3666: pin the message that a
+    # RESOLVED non-manager gets, distinct from the stale-bridge message below.
     monkeypatch.setattr( tasks, "is_manager_figure", lambda sid: False )
+    monkeypatch.setattr( tasks, "classify_manager_figure_denial", lambda sid: "denied" )
     r = client.post( "/api/tasks", json=_BLOCKED_BODY )
     assert r.status_code == 403
     assert "only a manager may mint" in r.json()[ "detail" ]
+    assert "manager_figure_implicit' is false" in r.json()[ "detail" ]
+    repo.create_item.assert_not_called()
+
+
+def test_create_blocked_mint_stale_bridge_rejected_403_with_restart_hint( client, repo, monkeypatch ):
+    # bug dd3b3666: a caller whose bridge is missing the manager_figure_implicit
+    # stamp (schema-vintage, not a permission fact) is 403'd, but the message names
+    # the ABSENT field and prescribes a session RESTART — NOT "you are not a manager".
+    monkeypatch.setattr( tasks, "is_manager_figure", lambda sid: False )
+    monkeypatch.setattr( tasks, "classify_manager_figure_denial",
+                         lambda sid: tasks.DENIAL_STALE_BRIDGE )
+    r = client.post( "/api/tasks", json=_BLOCKED_BODY )
+    assert r.status_code == 403
+    detail = r.json()[ "detail" ]
+    assert "manager_figure_implicit" in detail and "RESTART" in detail
+    assert "not a manager figure" not in detail          # must NOT misdiagnose as denial
     repo.create_item.assert_not_called()
 
 

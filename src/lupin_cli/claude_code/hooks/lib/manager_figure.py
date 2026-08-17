@@ -146,3 +146,53 @@ def is_manager_figure( session_id, environ=None, _find_path=find_session_path_by
 
     # Legacy (un-stamped) bridge: fall back to the env-based compute.
     return resolve_implicit_manager_figure( persona_name, environ )
+
+
+# Denial reasons for the blocked-mint 403 message (bug dd3b3666). These let the
+# caller-facing message distinguish "resolved and NOT a manager" (working as
+# designed) from "nothing resolved — the stamp field the predicate reads is
+# ABSENT" (a schema-vintage fact, self-healed by a session restart). The old
+# single message asserted the first for BOTH, misdiagnosing every session alive
+# across a future bridge-schema addition.
+DENIAL_NO_SESSION_ID = "no_session_id"
+DENIAL_STALE_BRIDGE  = "stale_bridge"
+DENIAL_DENIED        = "denied"
+
+
+def classify_manager_figure_denial( session_id, environ=None, _find_path=find_session_path_by_id ) -> str:
+    """
+    Classify WHY manager-hood was NOT established, for a caller-facing message.
+
+    Call ONLY on the reject path — i.e. after is_manager_figure() returned False
+    or session_id resolved to None. This is a message-shaping helper, NOT a second
+    permission predicate: is_manager_figure remains the single gate.
+
+    The absent-vs-false distinction (the whole point of dd3b3666): the implicit
+    stamp is a bool on post-fix bridges and ABSENT (→ None via data.get) on
+    bridges written before the field existed. `flag is None` is therefore the
+    reliable "stale bridge" signal, distinct from `flag is False` ("denied").
+
+    Requires:
+        - session_id is a string (full UUID or 8-char prefix) or None
+        - _find_path is the bridge locator (injectable for tests)
+
+    Ensures:
+        - Returns DENIAL_NO_SESSION_ID when session_id is None (no parseable id).
+        - Returns DENIAL_STALE_BRIDGE when the implicit stamp field is ABSENT on
+          the bridge (field never written) — remedy is a session RESTART, which
+          re-stamps it at SessionStart. Also covers a missing/unreadable bridge.
+        - Returns DENIAL_DENIED when the stamp resolved present-and-False (the
+          caller is genuinely not a manager figure).
+        - Never raises (_read_bridge_fields is no-raise).
+    """
+    if session_id is None:
+        return DENIAL_NO_SESSION_ID
+    role, _persona_name, implicit_flag = _read_bridge_fields( session_id, _find_path=_find_path )
+    # Defensive: a live role=="manager" would have returned True upstream; if we
+    # are on the reject path anyway, treat it as denied rather than stale.
+    if role == MANAGER_ROLE:
+        return DENIAL_DENIED
+    # ABSENT stamp (None) → stale/legacy bridge; PRESENT-and-False → genuine deny.
+    if implicit_flag is None:
+        return DENIAL_STALE_BRIDGE
+    return DENIAL_DENIED
