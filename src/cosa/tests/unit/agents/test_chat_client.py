@@ -81,8 +81,8 @@ def _make( **kw ):
 # __init__
 # =========================================================================== #
 def test_init_sets_env_and_attrs():
-    """api_key + base_url populate env; attrs + Agent are configured."""
-    c = _make( api_key="sk-test", base_url="http://host/v1", temperature=0.5 )
+    """set_openai_env=True + api_key + base_url populate env; attrs + Agent are configured."""
+    c = _make( api_key="sk-test", base_url="http://host/v1", set_openai_env=True, temperature=0.5 )
     assert os.environ[ "OPENAI_API_KEY" ] == "sk-test"
     assert os.environ[ "OPENAI_BASE_URL" ] == "http://host/v1"
     assert c.model_name == "openai:gpt-4"
@@ -95,6 +95,36 @@ def test_init_without_api_key_or_base_url_skips_env():
     """No api_key/base_url → those env vars are not written by the client."""
     os.environ.pop( "OPENAI_BASE_URL", None )
     _make()
+    assert "OPENAI_BASE_URL" not in os.environ
+
+
+def test_init_gates_openai_env_on_flag():
+    """Without set_openai_env, api_key/base_url do NOT touch the OpenAI env vars.
+
+    Regression for e515a5c5: constructing a non-OpenAI-protocol arm (e.g. google-gla)
+    must not clobber OPENAI_API_KEY/OPENAI_BASE_URL process-global with another
+    vendor's credential.
+    """
+    os.environ.pop( "OPENAI_API_KEY", None )
+    os.environ.pop( "OPENAI_BASE_URL", None )
+    _make( api_key="gemini-key", base_url="https://generativelanguage.googleapis.com/v1" )
+    assert "OPENAI_API_KEY"  not in os.environ
+    assert "OPENAI_BASE_URL" not in os.environ
+
+
+def test_init_sets_openai_env_when_flag_true():
+    """set_openai_env=True → api_key/base_url populate the OpenAI-compat env vars."""
+    c = _make( api_key="sk-test", base_url="http://host/v1", set_openai_env=True )
+    assert os.environ[ "OPENAI_API_KEY" ]  == "sk-test"
+    assert os.environ[ "OPENAI_BASE_URL" ] == "http://host/v1"
+
+
+def test_init_set_openai_env_true_but_no_creds():
+    """set_openai_env=True with no api_key/base_url writes nothing (inner guards false)."""
+    os.environ.pop( "OPENAI_API_KEY", None )
+    os.environ.pop( "OPENAI_BASE_URL", None )
+    _make( set_openai_env=True )
+    assert "OPENAI_API_KEY"  not in os.environ
     assert "OPENAI_BASE_URL" not in os.environ
 
 

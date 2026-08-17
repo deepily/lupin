@@ -88,25 +88,20 @@ def test_init_runs_only_once( make_factory ):
 
 
 def test_init_loads_vendor_config( make_factory ):
-    """__init__ populates vendor URL/env-var/default-param maps."""
+    """__init__ populates vendor URL + default-param maps (env-var NAME lives in VENDOR_CONFIG)."""
     f = make_factory()
     assert f.VENDOR_URLS[ "openai" ] == "https://api.openai.com/v1"
-    assert f.VENDOR_API_ENV_VARS[ "openai" ] == "OPENAI_API_KEY"
-    assert f.VENDOR_API_ENV_VARS[ "vllm" ] is None            # local vendor → None
+    assert f.VENDOR_CONFIG[ "openai" ][ "env_var" ] == "OPENAI_API_KEY"
     assert f.CLIENT_DEFAULT_PARAMS[ "temperature" ] == "0.7"
 
 
 # =========================================================================== #
-# _load_vendor_urls / _load_vendor_env_vars override paths
+# _load_vendor_urls override path
 # =========================================================================== #
-def test_vendor_maps_honor_ini_overrides( make_factory ):
-    """INI values override the hardcoded vendor URL + env-var defaults."""
-    f = make_factory( values={
-        "llm vendor url openai"     : "http://override/v1",
-        "llm vendor env var openai" : "MY_OPENAI_KEY",
-    } )
+def test_vendor_urls_honor_ini_overrides( make_factory ):
+    """INI values override the hardcoded vendor URL defaults (URL is a per-deployment axis)."""
+    f = make_factory( values={ "llm vendor url openai": "http://override/v1" } )
     assert f.VENDOR_URLS[ "openai" ] == "http://override/v1"
-    assert f.VENDOR_API_ENV_VARS[ "openai" ] == "MY_OPENAI_KEY"
 
 
 # =========================================================================== #
@@ -208,13 +203,27 @@ def test_vendor_client_unsupported_raises( make_factory ):
 
 
 def test_vendor_client_chat_env_key_from_environment( make_factory ):
-    """A chat vendor whose env-var is already set uses it (no get_api_key)."""
+    """A chat vendor whose env-var is trusted (nobody else writes it) uses the env value."""
     f = make_factory()
-    os.environ[ "OPENAI_API_KEY" ] = "env-key"
-    client = f._get_vendor_specific_client( "openai:gpt-4", debug=True )
+    os.environ[ "ANTHROPIC_API_KEY" ] = "env-key"
+    client = f._get_vendor_specific_client( "anthropic:claude-3", debug=True )
     assert isinstance( client, _StubChat )
-    assert client.kwargs[ "model_name" ] == "openai:gpt-4"
+    assert client.kwargs[ "model_name" ] == "anthropic:claude-3"
     assert client.kwargs[ "api_key" ] == "env-key"
+
+
+def test_vendor_client_openai_ignores_shared_env_key( make_factory ):
+    """openai's env var doubles as the shared compat target, so it resolves its OWN key fresh.
+
+    Even with OPENAI_API_KEY already set process-global (e.g. a groq compat-write), openai
+    must NOT adopt it — it fetches key-for-openai via du.get_api_key. Guards the api_key half
+    of the cross-client leak Arnold's isolation test asserts.
+    """
+    f = make_factory()
+    os.environ[ "OPENAI_API_KEY" ] = "leaked-from-another-vendor"
+    client = f._get_vendor_specific_client( "openai:gpt-4", debug=True )
+    assert client.kwargs[ "api_key" ] == "key-for-openai"          # own key, not the leaked env value
+    assert os.environ[ "OPENAI_API_KEY" ] == "key-for-openai"      # and it reclaims the shared var
 
 
 def test_vendor_client_chat_env_key_via_get_api_key( make_factory ):
@@ -233,6 +242,33 @@ def test_vendor_client_set_openai_env_compat( make_factory ):
     f._get_vendor_specific_client( "groq:llama-3", debug=True )
     assert os.environ[ "OPENAI_API_KEY" ] == "key-for-groq"
     assert os.environ[ "OPENAI_BASE_URL" ] == f.VENDOR_URLS[ "groq" ]
+
+
+def test_vendor_client_env_var_name_from_vendor_config( make_factory ):
+    """The env-var NAME comes from VENDOR_CONFIG (a provider constant), and google-gla → GEMINI_API_KEY.
+
+    Regression for 7f361ccf (fix b): the env-var name is NOT an INI knob. google-gla's
+    provider hardcodes GEMINI_API_KEY, so that is the name the factory writes.
+    """
+    f = make_factory()
+    os.environ.pop( "GEMINI_API_KEY", None )
+    client = f._get_vendor_specific_client( "google-gla:gemini-2.0", debug=True )
+    assert isinstance( client, _StubChat )
+    assert client.kwargs[ "api_key" ] == "key-for-gemini"
+    assert os.environ[ "GEMINI_API_KEY" ] == "key-for-gemini"
+
+
+def test_vendor_client_missing_key_raises_readable_error( make_factory, monkeypatch ):
+    """A missing key file (du.get_api_key → None) raises a readable auth error, not TypeError.
+
+    Regression for 7f361ccf near-miss: `os.environ[env_var] = None` raised an opaque
+    TypeError. It must fail with a ValueError naming the vendor + env var + key file.
+    """
+    f = make_factory()
+    monkeypatch.setattr( factory_mod.du, "get_api_key", lambda name: None )
+    os.environ.pop( "GEMINI_API_KEY", None )
+    with pytest.raises( ValueError, match="No API key for vendor 'google-gla'" ):
+        f._get_vendor_specific_client( "google-gla:gemini-2.0" )
 
 
 def test_vendor_client_local_vllm_completion( make_factory ):

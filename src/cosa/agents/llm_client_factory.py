@@ -90,9 +90,10 @@ class LlmClientFactory:
         self.debug        = debug
         self.verbose      = verbose
 
-        # Load vendor config from INI (with hardcoded fallbacks)
-        self.VENDOR_URLS          = self._load_vendor_urls()
-        self.VENDOR_API_ENV_VARS  = self._load_vendor_env_vars()
+        # Load vendor config from INI (with hardcoded fallbacks). The API-key env-var
+        # NAME is a provider constant (e.g. pydantic-ai hardcodes GEMINI_API_KEY), not a
+        # per-deployment axis like the URL — so it stays in VENDOR_CONFIG, not the INI.
+        self.VENDOR_URLS           = self._load_vendor_urls()
         self.CLIENT_DEFAULT_PARAMS = self._load_client_defaults()
     
     def get_client( self, model_config_key: str, debug: bool=None, verbose: bool=None ) -> LlmClientInterface:
@@ -203,6 +204,7 @@ class LlmClientFactory:
                         api_key="EMPTY",
                         base_url=base_url,
                         model_tokenizer_map=model_tokenizer_map,
+                        set_openai_env=True,   # openai:-prefixed local vLLM genuinely needs OPENAI_BASE_URL/KEY
                         debug=self.debug,
                         verbose=self.verbose,
                         **model_params
@@ -241,32 +243,6 @@ class LlmClientFactory:
             )
         return result
 
-    def _load_vendor_env_vars( self ) -> dict[ str, Optional[ str ] ]:
-        """
-        Load vendor API key environment variable names from ConfigManager.
-
-        Ensures:
-            - Returns dict mapping vendor name to env var name (or None for local)
-        """
-        defaults = {
-            "openai"    : "OPENAI_API_KEY",
-            "groq"      : "GROQ_API_KEY",
-            "anthropic" : "ANTHROPIC_API_KEY",
-            "google-gla": "GOOGLE_API_KEY",
-            "vllm"      : None,
-            "deepily"   : None,
-            "mistralai" : "MISTRAL_API_KEY",
-        }
-        result = {}
-        for vendor, default_var in defaults.items():
-            if default_var is None:
-                result[ vendor ] = None
-            else:
-                result[ vendor ] = self.config_mgr.get(
-                    f"llm vendor env var {vendor}", default=default_var, silent=True
-                )
-        return result
-
     def _load_client_defaults( self ) -> dict[ str, Any ]:
         """
         Load default client parameters from ConfigManager.
@@ -281,9 +257,13 @@ class LlmClientFactory:
     # Comprehensive vendor configuration
     VENDOR_CONFIG: dict[str, dict[str, Any]] = {
         "openai"    : {
-            "env_var"     : "OPENAI_API_KEY",
-            "key_name"    : "openai",
-            "client_type" : "chat",
+            "env_var"       : "OPENAI_API_KEY",
+            "key_name"      : "openai",
+            "client_type"   : "chat",
+            "set_openai_env": True,   # OpenAI IS the OpenAI protocol — must reclaim OPENAI_BASE_URL
+            # OPENAI_API_KEY doubles as the shared compat target other vendors write, so an
+            # in-process value cannot be trusted as openai's OWN key — always resolve fresh.
+            "env_var_is_shared_compat_target": True,
         },
         "groq"      : {
             "env_var"       : "GROQ_API_KEY",
@@ -469,19 +449,35 @@ class LlmClientFactory:
         # Get base URL from vendor URLs map
         base_url = self.VENDOR_URLS.get( vendor_key )
         
-        # Handle API keys if needed
+        # Handle API keys if needed. The env-var NAME is a provider constant, so it lives
+        # in VENDOR_CONFIG (authoritative) — not an INI knob that could only ever be set
+        # wrong (bug 7f361ccf, fix b).
         if "env_var" in config:
             env_var  = config[ "env_var" ]
             key_name = config[ "key_name" ]
-            
-            # Get API key from environment or utility function
-            if env_var in os.environ:
+
+            # Get API key from environment or utility function. The env-first shortcut is
+            # safe ONLY for a vendor whose env var nobody else writes. openai's env var
+            # (OPENAI_API_KEY) doubles as the shared compat target that set_openai_env
+            # vendors (groq/mistralai) write process-global, so an in-process value there
+            # may be another vendor's leaked key — always resolve openai's key fresh.
+            trust_env = not config.get( "env_var_is_shared_compat_target", False )
+            if trust_env and env_var in os.environ:
                 if debug: print( f"Using {env_var} from environment" )
                 api_key = os.environ[env_var]
             else:
-                if debug: print( f"{env_var} not found in environment, using du.get_api_key()..." )
+                if debug: print( f"{env_var} not read from environment, using du.get_api_key()..." )
                 api_key = du.get_api_key( key_name )
-                
+
+            # du.get_api_key() returns None when the key file is missing; assigning None to
+            # os.environ raises an opaque TypeError. Fail with a readable auth error instead.
+            if api_key is None:
+                raise ValueError(
+                    f"No API key for vendor '{vendor_key}': environment variable '{env_var}' "
+                    f"is unset and du.get_api_key( '{key_name}' ) returned None "
+                    f"(missing key file src/conf/keys/{key_name})"
+                )
+
             # Set environment variable
             os.environ[env_var] = api_key
             
@@ -529,6 +525,7 @@ class LlmClientFactory:
                 model_name=full_model_string,
                 api_key=api_key,
                 base_url=base_url,
+                set_openai_env=config.get( "set_openai_env", False ),
                 debug=debug,
                 verbose=verbose,
                 **self.CLIENT_DEFAULT_PARAMS
