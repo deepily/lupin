@@ -99,15 +99,15 @@ class TestGister( unittest.TestCase ):
         Ensures:
             - cache_enabled flag is True
             - _gist_cache is the constructed cache table
-            - config consulted for the lancedb path + table name
+            - config consulted for the table name (no location — Postgres store)
         """
         gister, mocks = self._build_gister( cache_enabled=True )
 
         self.assertTrue( gister.cache_enabled )
         self.assertIs( gister._gist_cache, mocks["cache"] )
         consulted = [ c.args[0] for c in mocks["config"].get.call_args_list ]
-        self.assertIn( "solution snapshots lancedb path", consulted )
         self.assertIn( "gister cache table name", consulted )
+        self.assertNotIn( "solution snapshots lancedb path", consulted )
 
     def test_init_cache_disabled_skips_cache_table( self ):
         """
@@ -116,14 +116,14 @@ class TestGister( unittest.TestCase ):
         Ensures:
             - cache_enabled flag is False
             - _gist_cache stays None (table never constructed)
-            - the lancedb path key is NOT consulted
+            - the cache table-name key is NOT consulted
         """
         gister, mocks = self._build_gister( cache_enabled=False )
 
         self.assertFalse( gister.cache_enabled )
         self.assertIsNone( gister._gist_cache )
         consulted = [ c.args[0] for c in mocks["config"].get.call_args_list ]
-        self.assertNotIn( "solution snapshots lancedb path", consulted )
+        self.assertNotIn( "gister cache table name", consulted )
 
     def test_init_debug_status_print_both_states( self ):
         """

@@ -1,5 +1,5 @@
 """
-QueryLog Table for LanceDB storage - Two-Level Question Representation Architecture.
+QueryLog Table backed by Postgres — Two-Level Question Representation Architecture.
 
 Manages append-only logging of all user queries with two-level representation:
 - Verbatim: Exactly what the user typed/spoke
@@ -9,22 +9,18 @@ Note: query_gist (text field) is still populated by the normalizer but gist
 embeddings were removed in commit 38f9704 ("Jettison gist embeddings").
 
 This table supports the hierarchical search algorithm and provides analytics
-for understanding user query patterns and system performance.
+for understanding user query patterns and system performance. Storage runs
+through QueryLogRepository on a short-lived get_db() session per call.
 """
 
-import lancedb
-import pyarrow as pa
 from typing import Optional, Dict, Any
-from datetime import datetime
 import cosa.utils.util as du
 from cosa.config.configuration_manager import ConfigurationManager
-from cosa.utils.util_stopwatch import Stopwatch
-from cosa.rest.db.repositories.vector_store_backend import is_postgres_backend
 
 
 class QueryLogTable:
     """
-    Manages query logging in LanceDB with two-level question representation.
+    Manages query logging in Postgres with two-level question representation.
 
     This table is append-only and captures every query attempt with full context,
     match results, and performance metrics. Supports the two-level architecture
@@ -38,16 +34,13 @@ class QueryLogTable:
 
         Requires:
             - LUPIN_CONFIG_MGR_CLI_ARGS environment variable is set
-            - Database path is valid in configuration
 
         Ensures:
-            - Opens connection to LanceDB
-            - Creates query_log table if not exists
-            - Prints table row count
+            - Reads the standardized embedding dimension from configuration
+            - Opens no connection of its own; storage sessions are per-call
 
         Raises:
-            - FileNotFoundError if database path invalid
-            - lancedb errors propagated
+            - ConfigurationManager errors propagated
         """
 
         self.debug   = debug
@@ -56,151 +49,6 @@ class QueryLogTable:
 
         # Get standardized embedding dimension from config
         self._embedding_dim = int( self._config_mgr.get( "embedding dimensions", default="768" ) )
-
-        # v0.2.0 backend flag (§6): when 'postgres', route storage through the
-        # QueryLogRepository and skip LanceDB entirely. 'lancedb' (default)
-        # preserves the legacy path below byte-for-byte.
-        self._use_postgres = is_postgres_backend( self._config_mgr )
-
-        if not self._use_postgres:
-            # Get database path from config
-            uri = du.get_project_root() + self._config_mgr.get( "path to database wo root" )
-
-            if self.debug:
-                print( f"Connecting to LanceDB at: {uri}" )
-
-            db = lancedb.connect( uri )
-
-            # Validate existing table dimensions match config before creating/opening
-            self._validate_embedding_dimensions( db, "query_log", "embedding_verbatim" )
-
-            # Check if table exists, create if it doesn't
-            if "query_log" not in db.table_names():
-                if self.debug:
-                    print( "Table 'query_log' doesn't exist, creating it..." )
-                self._create_table_if_needed( db )
-            else:
-                self._query_log_table = db.open_table( "query_log" )
-
-            if self.verbose:
-                print( f"Opened query_log table w/ [{self._query_log_table.count_rows()}] rows" )
-
-    def _validate_embedding_dimensions( self, db, table_name, embedding_field_name ):
-        """
-        Validate that existing table's embedding dimensions match current config.
-
-        Requires:
-            - db is a valid lancedb connection
-            - table_name is a string
-            - embedding_field_name is the name of an embedding column in the table
-
-        Ensures:
-            - No-op if table doesn't exist (will be created fresh)
-            - No-op if dimensions match
-            - Drops table if dimensions mismatch (will be recreated by caller)
-        """
-        if table_name not in db.table_names():
-            return
-
-        table        = db.open_table( table_name )
-        schema       = table.schema
-        field        = schema.field( embedding_field_name )
-        existing_dim = field.type.list_size
-
-        if existing_dim == self._embedding_dim:
-            return
-
-        du.print_banner( f"EMBEDDING DIMENSION MISMATCH: {table_name}" )
-        print( f"  Table schema expects: {existing_dim} dims" )
-        print( f"  Current config has:   {self._embedding_dim} dims" )
-        print( f"  Action: Dropping table (will be recreated with correct dimensions)" )
-
-        db.drop_table( table_name )
-
-    def _create_table_if_needed( self, db ) -> None:
-        """
-        Create the query log table with proper two-level schema.
-
-        Requires:
-            - db is a valid LanceDB connection
-
-        Ensures:
-            - Creates table with two-level question representation
-            - Sets up embedding fields for verbatim and normalized levels
-            - Includes user context and performance metrics
-            - Creates appropriate indexes
-
-        Raises:
-            - lancedb errors propagated
-        """
-        if self.debug:
-            du.print_banner( "Creating query_log table schema..." )
-
-        schema = self._get_schema()
-
-        self._query_log_table = db.create_table( "query_log", schema=schema, mode="overwrite" )
-
-        # Create indexes for common queries
-        try:
-            self._query_log_table.create_fts_index( "query_verbatim", replace=True )
-            self._query_log_table.create_fts_index( "query_normalized", replace=True )
-
-            if self.debug:
-                print( "✓ Created FTS indexes on query fields" )
-        except Exception as e:
-            if self.debug:
-                print( f"Warning: Could not create FTS indexes: {e}" )
-
-        if self.debug:
-            print( f"✓ Created query_log table with schema: {schema}" )
-
-    def _get_schema( self ) -> pa.Schema:
-        """
-        Get PyArrow schema for query log table.
-
-        Requires:
-            - Nothing
-
-        Ensures:
-            - Returns complete schema for two-level query logging
-            - Includes all necessary fields for analytics
-            - Optimizes embedding fields for LanceDB
-
-        Returns:
-            PyArrow schema for query log table
-        """
-        return pa.schema( [
-            # Primary identifiers
-            pa.field( "id", pa.string() ),
-            pa.field( "timestamp", pa.timestamp( 'ms' ) ),
-            pa.field( "user_id", pa.string() ),
-            pa.field( "session_id", pa.string() ),
-
-            # Question representation (text fields)
-            pa.field( "query_verbatim", pa.string() ),         # Exactly what user asked
-            pa.field( "query_normalized", pa.string() ),       # Normalized version
-            pa.field( "query_gist", pa.string() ),             # LLM-extracted gist (text only, no embedding)
-
-            # Embeddings for two levels (configurable: 768 for local, 1536 for openai)
-            pa.field( "embedding_verbatim", pa.list_( pa.float32(), self._embedding_dim ) ),
-            pa.field( "embedding_normalized", pa.list_( pa.float32(), self._embedding_dim ) ),
-
-            # Match results and performance
-            pa.field( "matched_snapshot_id", pa.string() ),    # What solution was returned
-            pa.field( "match_type", pa.string() ),             # 'exact_verbatim', 'exact_normalized', 'similarity', 'none'
-            pa.field( "match_confidence", pa.float32() ),      # How confident was the match
-            pa.field( "processing_time_ms", pa.int32() ),      # How long to find answer
-
-            # Context and metadata
-            pa.field( "input_type", pa.string() ),             # 'voice', 'text', 'api'
-            pa.field( "user_satisfaction", pa.string() ),      # 'satisfied', 'unsatisfied', 'unknown'
-            pa.field( "normalization version", pa.string() ),   # Track algorithm version
-            pa.field( "gist_model_version", pa.string() ),     # Track which LLM generated gist
-
-            # Cache performance metrics
-            pa.field( "cache_hit_verbatim", pa.bool_() ),      # Was verbatim embedding cached
-            pa.field( "cache_hit_normalized", pa.bool_() ),    # Was normalized embedding cached
-        ] )
 
     def log_query( self,
                   query_verbatim: str,
@@ -221,13 +69,11 @@ class QueryLogTable:
             - query_normalized is the normalized version
             - query_gist is the LLM-extracted gist (text only, no embedding)
             - user_id is a valid system ID
-            - Table is initialized
 
         Ensures:
-            - Adds row to table with text fields and verbatim/normalized embeddings
-            - Includes embeddings if provided
+            - Appends a row with text fields and verbatim/normalized embeddings
             - Records match results and performance metrics
-            - Returns unique query log ID
+            - Returns the unique query log ID, or "" when the write failed
 
         Args:
             query_verbatim: Exactly what the user typed/spoke
@@ -247,164 +93,6 @@ class QueryLogTable:
         Raises:
             - None (catches and logs errors)
         """
-        if self._use_postgres:
-            return self._pg_log_query(
-                query_verbatim, query_normalized, query_gist, user_id, session_id,
-                input_type, embeddings, match_result, processing_time_ms, cache_hits,
-            )
-
-        if self.debug:
-            timer = Stopwatch( msg=f"Logging query: '{du.truncate_string( query_verbatim )}'" )
-
-        try:
-            # Generate unique ID
-            query_id = du.get_current_datetime( format_str='%Y%m%d_%H%M%S_%f' )
-
-            # Prepare row data
-            row_data = {
-                "id": query_id,
-                "timestamp": du.get_timestamp_ms(),
-                "user_id": user_id,
-                "session_id": session_id,
-
-                # Question text fields
-                "query_verbatim": query_verbatim,
-                "query_normalized": query_normalized,
-                "query_gist": query_gist,
-
-                # Embeddings (use empty lists if not provided)
-                "embedding_verbatim": embeddings.get( 'verbatim', [] ) if embeddings else [],
-                "embedding_normalized": embeddings.get( 'normalized', [] ) if embeddings else [],
-
-                # Match results
-                "matched_snapshot_id": match_result.get( 'snapshot_id', '' ) if match_result else '',
-                "match_type": match_result.get( 'type', 'none' ) if match_result else 'none',
-                "match_confidence": match_result.get( 'confidence', 0.0 ) if match_result else 0.0,
-                "processing_time_ms": processing_time_ms,
-
-                # Context
-                "input_type": input_type,
-                "user_satisfaction": "unknown",  # Can be updated later
-                "normalization version": self._config_mgr.get( "normalization version", "v2.0" ),
-                "gist_model_version": self._config_mgr.get( "llm spec key for gist generation", "unknown" ),
-
-                # Cache performance
-                "cache_hit_verbatim": cache_hits.get( 'verbatim', False ) if cache_hits else False,
-                "cache_hit_normalized": cache_hits.get( 'normalized', False ) if cache_hits else False,
-            }
-
-            # Add to table
-            self._query_log_table.add( [row_data] )
-
-            if self.debug:
-                timer.print( f"Done! Query logged with ID: {query_id}", use_millis=True )
-
-            return query_id
-
-        except Exception as e:
-            if self.debug:
-                timer.print( f"Error: {e}", use_millis=True )
-            du.print_stack_trace( e, explanation="log_query() failed", caller="QueryLogTable.log_query()" )
-            return ""
-
-    def get_recent_queries( self, limit: int = 100, user_id: Optional[str] = None ) -> list[Dict[str, Any]]:
-        """
-        Get recent queries from the log.
-
-        Requires:
-            - limit is a positive integer
-            - user_id is optional string filter
-
-        Ensures:
-            - Returns list of recent query records
-            - Filters by user_id if provided
-            - Orders by timestamp descending
-
-        Args:
-            limit: Maximum number of queries to return
-            user_id: Optional filter by user ID
-
-        Returns:
-            List of query log records
-        """
-        if self._use_postgres: return self._pg_get_recent_queries( limit, user_id )
-
-        try:
-            query = self._query_log_table.search()
-
-            if user_id:
-                query = query.where( f"user_id = '{user_id}'" )
-
-            results = query.limit( limit ).to_list()
-
-            # Sort by timestamp descending (most recent first)
-            results.sort( key=lambda x: x.get( 'timestamp', '' ), reverse=True )
-
-            return results
-
-        except Exception as e:
-            if self.debug:
-                print( f"Error getting recent queries: {e}" )
-            return []
-
-    def get_cache_hit_stats( self, days: int = 7 ) -> Dict[str, float]:
-        """
-        Get cache hit rate statistics for the last N days.
-
-        Requires:
-            - days is a positive integer
-
-        Ensures:
-            - Returns cache hit rates for each level
-            - Calculates percentages for the specified time period
-
-        Args:
-            days: Number of days to analyze
-
-        Returns:
-            Dict with cache hit percentages for each level
-        """
-        if self._use_postgres: return self._pg_get_cache_hit_stats( days )
-
-        try:
-            # Calculate date threshold
-            from datetime import timedelta
-            threshold_date = du.get_timestamp_ms() - timedelta( days=days )
-            threshold_str = threshold_date.strftime( '%Y-%m-%d' )
-
-            # Get recent queries
-            query = self._query_log_table.search()
-            query = query.where( f"timestamp >= '{threshold_str}'" )
-            results = query.to_list()
-
-            if not results:
-                return { "verbatim": 0.0, "normalized": 0.0 }
-
-            # Calculate hit rates
-            total = len( results )
-            verbatim_hits = sum( 1 for r in results if r.get( 'cache_hit_verbatim', False ) )
-            normalized_hits = sum( 1 for r in results if r.get( 'cache_hit_normalized', False ) )
-
-            return {
-                "verbatim": ( verbatim_hits / total ) * 100.0,
-                "normalized": ( normalized_hits / total ) * 100.0,
-                "total_queries": total
-            }
-
-        except Exception as e:
-            if self.debug:
-                print( f"Error calculating cache hit stats: {e}" )
-            return { "verbatim": 0.0, "normalized": 0.0 }
-
-    # ----------------------------------------------------------------------- #
-    # Postgres+pgvector backend (v0.2.0 §6). Append-only telemetry via
-    # QueryLogRepository; id generation + config reads preserved here so log_query
-    # returns the identical query_id contract.
-    # ----------------------------------------------------------------------- #
-    def _pg_log_query( self, query_verbatim, query_normalized, query_gist, user_id,
-                       session_id, input_type, embeddings, match_result,
-                       processing_time_ms, cache_hits ) -> str:
-        """Postgres mirror of log_query (same id-generation + field mapping; returns query_id)."""
         from cosa.rest.db.database import get_db
         from cosa.rest.db.repositories.query_log_repository import QueryLogRepository
         try:
@@ -433,11 +121,29 @@ class QueryLogTable:
                 )
             return query_id
         except Exception as e:
-            du.print_stack_trace( e, explanation="log_query() failed", caller="QueryLogTable._pg_log_query()" )
+            du.print_stack_trace( e, explanation="log_query() failed", caller="QueryLogTable.log_query()" )
             return ""
 
-    def _pg_get_recent_queries( self, limit: int, user_id: Optional[str] ) -> list[Dict[str, Any]]:
-        """Postgres mirror of get_recent_queries (newest first; ORM rows, telemetry read)."""
+    def get_recent_queries( self, limit: int = 100, user_id: Optional[str] = None ) -> list[Dict[str, Any]]:
+        """
+        Get recent queries from the log.
+
+        Requires:
+            - limit is a positive integer
+            - user_id is optional string filter
+
+        Ensures:
+            - Returns list of recent query records, newest first
+            - Filters by user_id if provided
+            - Returns [] on read failure
+
+        Args:
+            limit: Maximum number of queries to return
+            user_id: Optional filter by user ID
+
+        Returns:
+            List of query log records
+        """
         from cosa.rest.db.database import get_db
         from cosa.rest.db.repositories.query_log_repository import QueryLogRepository
         try:
@@ -448,8 +154,23 @@ class QueryLogTable:
                 print( f"Error getting recent queries: {e}" )
             return []
 
-    def _pg_get_cache_hit_stats( self, days: int ) -> Dict[str, float]:
-        """Postgres mirror of get_cache_hit_stats (percentages + total_queries, same shape)."""
+    def get_cache_hit_stats( self, days: int = 7 ) -> Dict[str, float]:
+        """
+        Get cache hit rate statistics for the last N days.
+
+        Requires:
+            - days is a positive integer
+
+        Ensures:
+            - Returns cache hit percentages for each level, plus total_queries
+            - Returns zeroed rates when there is nothing in the window, or on failure
+
+        Args:
+            days: Number of days to analyze
+
+        Returns:
+            Dict with cache hit percentages for each level
+        """
         from datetime import timedelta
         from cosa.rest.db.database import get_db
         from cosa.rest.db.repositories.query_log_repository import QueryLogRepository

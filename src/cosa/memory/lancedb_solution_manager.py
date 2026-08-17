@@ -1155,7 +1155,7 @@ class SolutionSnapshotManager( SolutionSnapshotManagerInterface ):
             if self._canonical_synonyms is None:
                 try:
                     from cosa.memory.canonical_synonyms_table import CanonicalSynonymsTable
-                    self._canonical_synonyms = CanonicalSynonymsTable( db_path=self.db_path, debug=self.debug, verbose=self.verbose )
+                    self._canonical_synonyms = CanonicalSynonymsTable( debug=self.debug, verbose=self.verbose )
                     if self.debug:
                         print( "Initialized CanonicalSynonyms for hierarchical search" )
                 except Exception as e:

@@ -1,21 +1,18 @@
 """
 Unit tests for cosa.memory.question_embeddings_table.QuestionEmbeddingsTable.
 
-REWRITTEN 2026-05-31 by Sam 🎙️ (memory takeover, CoSA coverage campaign). The
-prior tests left `get_embedding_provider` UNMOCKED in the construction helper
-(so __init__ did real config/model-server I/O → the
-"/project/root/src/conf/lupin-app.ini" sanity-check failure), used a scalar
-config mock (so `int(config.get("embedding dimensions"))` broke), and asserted a
-stale embedding call (`generate_embedding(q, normalize_for_cache=True)` on the
-manager — the real path is `_embedding_provider.generate_embedding(q,
-content_type="prose")`). The debug-timing test also forgot that the Stopwatch
-arc is gated on debug AND verbose.
+REWRITTEN 2026-08-17 by Pocholo 📣 (LanceDB total-removal sweep, Lane A, rows
+5ff7b8f5 / 8098838f). The LanceDB path is gone, and with it the ctor's
+connect/validate/create/open branches, the `.search().where()` query chain and
+the Stopwatch timing arcs. The tests that covered them were testing deleted
+code and were DELETED, not skipped.
 
-The full construction dependency chain (ConfigurationManager [per-key
-side_effect], EmbeddingManager, get_embedding_provider, lancedb.connect) is
-mocked so no real DB / embedding I/O occurs. Reviewed by Mr. Radio (no
-self-audit).
+What remains is the Postgres path, which was already the only one running in
+every INI section: a config-only ctor, storage delegated to
+QuestionEmbeddingRepository per call, and generate-on-miss (never stored) kept
+here in the memory layer.
 """
+import contextlib
 import unittest
 from unittest.mock import Mock, MagicMock, patch
 
@@ -27,51 +24,49 @@ _EMBEDDING = [ 0.1 ] * 768
 
 def _cfg_get( key, default=None, **kwargs ):
     return {
-        "embedding dimensions":       "768",
-        "path to database wo root":   "/test/db",
+        "embedding dimensions": "768",
     }.get( key, default )
 
 
 def _make_table( debug=False, verbose=False ):
-    """
-    Build a QuestionEmbeddingsTable with its full ctor dep chain mocked.
-    Returns (table, mock_table, mock_provider).
-    """
+    """Build a QuestionEmbeddingsTable with its ctor dep chain mocked. Returns (table, provider)."""
     cfg = Mock()
     cfg.get.side_effect = _cfg_get
     provider = Mock()
     provider.generate_embedding.return_value = _EMBEDDING
 
-    mock_db = MagicMock()
-    mock_db.table_names.return_value = []          # validate no-op + create path
-    mock_table = MagicMock()
-    mock_db.create_table.return_value = mock_table
-    mock_db.open_table.return_value = mock_table
-
     with patch( "cosa.memory.question_embeddings_table.ConfigurationManager", return_value=cfg ), \
          patch( "cosa.memory.question_embeddings_table.EmbeddingManager" ), \
-         patch( "cosa.memory.question_embeddings_table.get_embedding_provider", return_value=provider ), \
-         patch( "cosa.memory.question_embeddings_table.lancedb.connect", return_value=mock_db ), \
-         patch( "builtins.print" ):
+         patch( "cosa.memory.question_embeddings_table.get_embedding_provider", return_value=provider ):
         table = QuestionEmbeddingsTable( debug=debug, verbose=verbose )
-    return table, mock_table, provider
+    return table, provider
+
+
+def _patch_repo():
+    """Patch get_db (ctx mgr → mock session) + the repo class; return (repo_instance, ctx, repo_ctx)."""
+    session   = MagicMock()
+    repo_inst = MagicMock()
+
+    @contextlib.contextmanager
+    def fake_get_db():
+        yield session
+
+    ctx      = patch( "cosa.rest.db.database.get_db", fake_get_db )
+    repo_ctx = patch( "cosa.rest.db.repositories.question_embedding_repository.QuestionEmbeddingRepository",
+                      return_value=repo_inst )
+    return repo_inst, ctx, repo_ctx
 
 
 class TestInitialization( unittest.TestCase ):
-    """__init__ wires config + deps and opens the table."""
+    """__init__ wires config + deps and opens no connection of its own."""
 
     def test_init_wires_dependencies( self ):
         cfg = Mock()
         cfg.get.side_effect = _cfg_get
-        mock_db = MagicMock()
-        mock_db.table_names.return_value = []
-        mock_db.open_table.return_value = MagicMock()
 
         with patch( "cosa.memory.question_embeddings_table.ConfigurationManager", return_value=cfg ) as cfg_cls, \
              patch( "cosa.memory.question_embeddings_table.EmbeddingManager" ) as em_cls, \
-             patch( "cosa.memory.question_embeddings_table.get_embedding_provider" ) as gep, \
-             patch( "cosa.memory.question_embeddings_table.lancedb.connect", return_value=mock_db ), \
-             patch( "builtins.print" ):
+             patch( "cosa.memory.question_embeddings_table.get_embedding_provider" ) as gep:
             table = QuestionEmbeddingsTable( debug=True, verbose=True )
 
         cfg_cls.assert_called_once_with( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
@@ -79,214 +74,72 @@ class TestInitialization( unittest.TestCase ):
         gep.assert_called_once_with( debug=True, verbose=True )
         self.assertEqual( table._embedding_dim, 768 )
         self.assertTrue( table.debug )
-        mock_db.open_table.assert_called_once_with( "question_embeddings_tbl" )
+        self.assertTrue( table.verbose )
 
 
 class TestHas( unittest.TestCase ):
-    """has() — existence check with SQL-quote escaping."""
-
-    def _wire_search( self, mock_table, to_list_result ):
-        chain = mock_table.search.return_value.where.return_value.limit.return_value.select.return_value
-        chain.to_list.return_value = to_list_result
+    """has() delegates to the repository."""
 
     def test_returns_true_when_found( self ):
-        table, mock_table, _ = _make_table()
-        self._wire_search( mock_table, [ { "question": "q" } ] )
-        self.assertTrue( table.has( "What is 2+2?" ) )
-        mock_table.search.return_value.where.assert_called_once_with( "question = 'What is 2+2?'" )
+        table, _ = _make_table()
+        repo, ctx, repo_ctx = _patch_repo()
+        repo.has.return_value = True
+        with ctx, repo_ctx:
+            self.assertTrue( table.has( "What is 2+2?" ) )
+        repo.has.assert_called_once_with( "What is 2+2?" )
 
     def test_returns_false_when_absent( self ):
-        table, mock_table, _ = _make_table()
-        self._wire_search( mock_table, [] )
-        self.assertFalse( table.has( "nope" ) )
-
-    def test_escapes_single_quotes( self ):
-        table, mock_table, _ = _make_table()
-        self._wire_search( mock_table, [] )
-        table.has( "What's up'; DROP TABLE x; --" )
-        mock_table.search.return_value.where.assert_called_once_with(
-            "question = 'What''s up''; DROP TABLE x; --'"
-        )
+        table, _ = _make_table()
+        repo, ctx, repo_ctx = _patch_repo()
+        repo.has.return_value = False
+        with ctx, repo_ctx:
+            self.assertFalse( table.has( "nope" ) )
 
 
 class TestGetEmbedding( unittest.TestCase ):
-    """get_embedding() — table hit, generate-on-miss, error fallback."""
+    """get_embedding() — cache hit returns stored; miss generates but does not persist."""
 
-    def _wire_search( self, mock_table, to_list_result=None, side_effect=None ):
-        sel = mock_table.search.return_value.where.return_value.limit.return_value.select.return_value
-        if side_effect is not None:
-            mock_table.search.side_effect = side_effect
-        else:
-            sel.to_list.return_value = to_list_result
-
-    def test_returns_table_embedding_without_generating( self ):
-        table, mock_table, provider = _make_table()
-        self._wire_search( mock_table, [ { "embedding": _EMBEDDING } ] )
-        result = table.get_embedding( "What is 2+2?" )
-        self.assertEqual( result, _EMBEDDING )
-        provider.generate_embedding.assert_not_called()
-
-    def test_generates_on_miss( self ):
-        table, mock_table, provider = _make_table()
-        self._wire_search( mock_table, [] )
-        result = table.get_embedding( "What is 2+2?" )
-        self.assertEqual( result, _EMBEDDING )
-        provider.generate_embedding.assert_called_once_with( "What is 2+2?", content_type="prose" )
-
-    def test_search_error_falls_back_to_generate( self ):
-        table, mock_table, provider = _make_table()
-        self._wire_search( mock_table, side_effect=RuntimeError( "db down" ) )
-        with patch( "cosa.memory.question_embeddings_table.du.print_stack_trace" ) as trace:
-            result = table.get_embedding( "What is 2+2?" )
-        self.assertEqual( result, _EMBEDDING )
-        provider.generate_embedding.assert_called_once_with( "What is 2+2?", content_type="prose" )
-        trace.assert_called_once()
-
-
-class TestAddEmbedding( unittest.TestCase ):
-    """add_embedding() — happy path + error swallowed-and-logged."""
-
-    def test_adds_row( self ):
-        table, mock_table, _ = _make_table()
-        table.add_embedding( "What is 2+2?", _EMBEDDING )
-        mock_table.add.assert_called_once_with(
-            [ { "question": "What is 2+2?", "embedding": _EMBEDDING } ]
-        )
-
-    def test_add_error_is_logged_not_raised( self ):
-        table, mock_table, _ = _make_table()
-        mock_table.add.side_effect = RuntimeError( "write failed" )
-        with patch( "cosa.memory.question_embeddings_table.du.print_stack_trace" ) as trace:
-            table.add_embedding( "q", _EMBEDDING )      # must not raise
-        trace.assert_called_once()
-        self.assertEqual( trace.call_args.kwargs[ "explanation" ], "add() failed" )
-        self.assertEqual( trace.call_args.kwargs[ "caller" ], "QuestionEmbeddingsTable.add_embedding()" )
-
-
-class TestDebugTiming( unittest.TestCase ):
-    """The Stopwatch arc in has() fires only under debug AND verbose."""
-
-    def test_stopwatch_used_when_debug_and_verbose( self ):
-        table, mock_table, _ = _make_table( debug=True, verbose=True )
-        chain = mock_table.search.return_value.where.return_value.limit.return_value.select.return_value
-        chain.to_list.return_value = []
-        with patch( "cosa.memory.question_embeddings_table.Stopwatch" ) as sw_cls, \
-             patch( "cosa.memory.question_embeddings_table.du.print_banner" ):
-            sw = Mock()
-            sw_cls.return_value = sw
-            table.has( "What is 2+2?" )
-        sw_cls.assert_called_once_with( msg="has( 'What is 2+2?' )" )
-        sw.print.assert_called_once_with( "Done!", use_millis=True )
-
-
-class TestValidateDimensions( unittest.TestCase ):
-    """
-    _validate_embedding_dimensions when the table ALREADY exists: a dim-match is
-    a no-op (table reused), a dim-mismatch drops the table for recreation.
-    Also exercises the _create_table_if_needed 'table exists → skip' arc.
-    """
-
-    def _build( self, list_size ):
-        cfg = Mock()
-        cfg.get.side_effect = _cfg_get
-        mock_db = MagicMock()
-        mock_db.table_names.return_value = [ "question_embeddings_tbl" ]   # table exists
-        mock_table = MagicMock()
-        mock_table.schema.field.return_value.type.list_size = list_size
-        mock_db.open_table.return_value = mock_table
-        with patch( "cosa.memory.question_embeddings_table.ConfigurationManager", return_value=cfg ), \
-             patch( "cosa.memory.question_embeddings_table.EmbeddingManager" ), \
-             patch( "cosa.memory.question_embeddings_table.get_embedding_provider", return_value=Mock() ), \
-             patch( "cosa.memory.question_embeddings_table.lancedb.connect", return_value=mock_db ), \
-             patch( "builtins.print" ):
-            QuestionEmbeddingsTable()
-        return mock_db
-
-    def test_matching_dim_does_not_drop( self ):
-        mock_db = self._build( list_size=768 )           # matches config (768)
-        mock_db.drop_table.assert_not_called()
-
-    def test_mismatched_dim_drops_table( self ):
-        mock_db = self._build( list_size=512 )           # != 768 → drop for recreation
-        mock_db.drop_table.assert_called_once_with( "question_embeddings_tbl" )
-
-
-class TestPostgresBackend( unittest.TestCase ):
-    """v0.2.0 §6 postgres backend: __init__ skips LanceDB; storage via repo; gen-on-miss stays here."""
-
-    @staticmethod
-    def _pg_cfg_get( key, default=None, **kwargs ):
-        return {
-            "embedding dimensions":     "768",
-            "path to database wo root": "/test/db",
-            "vector store backend":     "postgres",
-        }.get( key, default )
-
-    def _make_pg( self ):
-        cfg = Mock()
-        cfg.get.side_effect = self._pg_cfg_get
-        provider = Mock()
-        provider.generate_embedding.return_value = _EMBEDDING
-        with patch( "cosa.memory.question_embeddings_table.ConfigurationManager", return_value=cfg ), \
-             patch( "cosa.memory.question_embeddings_table.EmbeddingManager" ), \
-             patch( "cosa.memory.question_embeddings_table.get_embedding_provider", return_value=provider ), \
-             patch( "cosa.memory.question_embeddings_table.lancedb.connect",
-                    side_effect=AssertionError( "postgres ctor must not connect to LanceDB" ) ), \
-             patch( "builtins.print" ):
-            table = QuestionEmbeddingsTable()
-        return table, provider
-
-    @staticmethod
-    def _patch_repo():
-        import contextlib
-        session   = MagicMock()
-        repo_inst = MagicMock()
-
-        @contextlib.contextmanager
-        def fake_get_db():
-            yield session
-
-        ctx      = patch( "cosa.rest.db.database.get_db", fake_get_db )
-        repo_ctx = patch( "cosa.rest.db.repositories.question_embedding_repository.QuestionEmbeddingRepository",
-                          return_value=repo_inst )
-        return repo_inst, ctx, repo_ctx
-
-    def test_init_uses_postgres( self ):
-        table, _ = self._make_pg()
-        self.assertTrue( table._use_postgres )
-
-    def test_has_delegates( self ):
-        table, _ = self._make_pg()
-        repo, ctx, repo_ctx = self._patch_repo()
-        repo.has.return_value = True
-        with ctx, repo_ctx:
-            self.assertTrue( table.has( "q" ) )
-        repo.has.assert_called_once_with( "q" )
-
-    def test_get_embedding_cache_hit_returns_stored( self ):
-        table, provider = self._make_pg()
-        repo, ctx, repo_ctx = self._patch_repo()
+    def test_cache_hit_returns_stored( self ):
+        table, provider = _make_table()
+        repo, ctx, repo_ctx = _patch_repo()
         repo.get_embedding.return_value = _EMBEDDING
         with ctx, repo_ctx:
             self.assertEqual( table.get_embedding( "q" ), _EMBEDDING )
-        provider.generate_embedding.assert_not_called()      # no generation on hit
+        provider.generate_embedding.assert_not_called()
 
-    def test_get_embedding_miss_generates_but_does_not_store( self ):
-        table, provider = self._make_pg()
-        repo, ctx, repo_ctx = self._patch_repo()
+    def test_miss_generates_but_does_not_store( self ):
+        table, provider = _make_table()
+        repo, ctx, repo_ctx = _patch_repo()
         repo.get_embedding.return_value = None               # cache miss
         with ctx, repo_ctx:
             result = table.get_embedding( "q" )
         self.assertEqual( result, _EMBEDDING )
         provider.generate_embedding.assert_called_once_with( "q", content_type="prose" )
-        repo.add_embedding.assert_not_called()               # generate-on-miss does NOT persist
+        repo.add_embedding.assert_not_called()
 
-    def test_add_embedding_delegates( self ):
-        table, _ = self._make_pg()
-        repo, ctx, repo_ctx = self._patch_repo()
+
+class TestAddEmbedding( unittest.TestCase ):
+    """add_embedding() delegates to the repository."""
+
+    def test_delegates( self ):
+        table, _ = _make_table()
+        repo, ctx, repo_ctx = _patch_repo()
         with ctx, repo_ctx:
             self.assertIsNone( table.add_embedding( "q", _EMBEDDING ) )
         repo.add_embedding.assert_called_once_with( "q", _EMBEDDING )
+
+
+class TestNoLancedbSurface( unittest.TestCase ):
+    """The removal itself, pinned."""
+
+    def test_module_does_not_import_lancedb( self ):
+        import cosa.memory.question_embeddings_table as mod
+        self.assertFalse( hasattr( mod, "lancedb" ) )
+        self.assertFalse( hasattr( mod, "pa" ) )
+
+    def test_lancedb_only_members_are_gone( self ):
+        for name in ( "_validate_embedding_dimensions", "_create_table_if_needed", "_pg_has" ):
+            self.assertFalse( hasattr( QuestionEmbeddingsTable, name ), f"{name} should be deleted" )
 
 
 if __name__ == "__main__":

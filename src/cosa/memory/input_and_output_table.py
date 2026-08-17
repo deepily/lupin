@@ -6,38 +6,35 @@ from cosa.memory.question_embeddings_table import QuestionEmbeddingsTable
 from cosa.memory.solution_snapshot import SolutionSnapshot as ss
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.utils.util_stopwatch import Stopwatch
-from cosa.rest.db.repositories.vector_store_backend import is_postgres_backend
 
-import lancedb
 from threading import Lock
 from typing import Optional, Any
 
 # @singleton
 class InputAndOutputTable():
     """
-    Manages input/output data storage in LanceDB.
-    
+    Manages input/output data storage in Postgres.
+
     Handles storage and retrieval of conversation history, including
-    embeddings for semantic search.
+    embeddings for semantic search. Storage and search run through
+    InputAndOutputRepository on a short-lived get_db() session per call;
+    query-embedding generation stays here in the memory layer.
     """
     def __init__( self, debug: bool=False, verbose: bool=False ) -> None:
         """
         Initialize the input/output table.
-        
+
         Requires:
             - LUPIN_CONFIG_MGR_CLI_ARGS environment variable is set or defaults available
-            - Database path is valid in configuration
-            
+
         Ensures:
-            - Opens connection to LanceDB
-            - Opens or creates input_and_output_tbl
-            - Initializes question embeddings table
-            
+            - Initializes the question embeddings table (generates input embeddings)
+            - Opens no connection of its own; storage sessions are per-call
+
         Raises:
-            - FileNotFoundError if database path invalid
-            - lancedb errors propagated
+            - ConfigurationManager errors propagated
         """
-        
+
         self.debug          = debug
         self.verbose        = verbose
         self._config_mgr    = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
@@ -55,112 +52,8 @@ class InputAndOutputTable():
         # Get standardized embedding dimension from config
         self._embedding_dim = int( self._config_mgr.get( "embedding dimensions", default="768" ) )
 
-        # Read nprobes configuration for vector search performance tuning
-        self._nprobes = self._config_mgr.get( "solution snapshots lancedb nprobes", default=20, return_type="int" )
-
-        # v0.2.0 backend flag (§6): when 'postgres', route storage/search through
-        # InputAndOutputRepository and skip the LanceDB I/O table. The question-
-        # embedding cache table is needed in BOTH backends (it generates query/input
-        # embeddings), so it is created unconditionally. 'lancedb' (default)
-        # preserves the legacy path below byte-for-byte.
-        self._use_postgres = is_postgres_backend( self._config_mgr )
-
+        # The question-embedding cache table generates query/input embeddings.
         self._question_embeddings_tbl = QuestionEmbeddingsTable( debug=self.debug, verbose=self.verbose )
-
-        if not self._use_postgres:
-            self.db = lancedb.connect( du.get_project_root() + self._config_mgr.get( "path to database wo root" ) )
-
-            # Validate existing table dimensions match config before creating/opening
-            self._validate_embedding_dimensions( self.db, "input_and_output_tbl", "input_embedding" )
-
-            # Create table if it doesn't exist
-            self._create_table_if_needed( self.db )
-
-            self._input_and_output_tbl = self.db.open_table( "input_and_output_tbl" )
-
-            print( f"Opened input_and_output_tbl w/ [{self._input_and_output_tbl.count_rows()}] rows" )
-
-        # if self.debug and self.verbose:
-        #     du.print_banner( "Tables:" )
-        #     print( self.db.table_names() )
-        #     du.print_banner( "Table:" )
-        #     print( self._input_and_output_tbl.select( [ "date", "time", "input", "output_final" ] ).head( 10 ) )
-
-    def _validate_embedding_dimensions( self, db, table_name, embedding_field_name ):
-        """
-        Validate that existing table's embedding dimensions match current config.
-
-        Requires:
-            - db is a valid lancedb connection
-            - table_name is a string
-            - embedding_field_name is the name of an embedding column in the table
-
-        Ensures:
-            - No-op if table doesn't exist (will be created fresh)
-            - No-op if dimensions match
-            - Drops table if dimensions mismatch (will be recreated by caller)
-        """
-        if table_name not in db.table_names():
-            return
-
-        table        = db.open_table( table_name )
-        schema       = table.schema
-        field        = schema.field( embedding_field_name )
-        existing_dim = field.type.list_size
-
-        if existing_dim == self._embedding_dim:
-            return
-
-        du.print_banner( f"EMBEDDING DIMENSION MISMATCH: {table_name}" )
-        print( f"  Table schema expects: {existing_dim} dims" )
-        print( f"  Current config has:   {self._embedding_dim} dims" )
-        print( f"  Action: Dropping table (will be recreated with correct dimensions)" )
-
-        db.drop_table( table_name )
-
-    def _create_table_if_needed( self, db ) -> None:
-        """
-        Create input_and_output_tbl if it doesn't exist.
-
-        Requires:
-            - db is a valid lancedb connection
-            - self.debug is set
-
-        Ensures:
-            - Creates table with proper schema if it doesn't exist
-            - Creates FTS indexes on key fields
-            - No-op if table already exists
-
-        Raises:
-            - lancedb errors propagated
-        """
-        if "input_and_output_tbl" not in db.table_names():
-            if self.debug:
-                print( "Table 'input_and_output_tbl' doesn't exist, creating it..." )
-
-            import pyarrow as pa
-            schema = pa.schema( [
-                pa.field( "date",                     pa.string() ),
-                pa.field( "time",                     pa.string() ),
-                pa.field( "input_type",               pa.string() ),
-                pa.field( "input",                    pa.string() ),
-                pa.field( "input_embedding",          pa.list_( pa.float32(), self._embedding_dim ) ),
-                pa.field( "output_raw",               pa.string() ),
-                pa.field( "output_final",             pa.string() ),
-                pa.field( "output_final_embedding",   pa.list_( pa.float32(), self._embedding_dim ) ),
-                pa.field( "solution_path_wo_root",    pa.string() ),
-            ] )
-
-            self._input_and_output_tbl = db.create_table( "input_and_output_tbl", schema=schema, mode="overwrite" )
-            self._input_and_output_tbl.create_fts_index( "input", replace=True )
-            self._input_and_output_tbl.create_fts_index( "input_type", replace=True )
-            self._input_and_output_tbl.create_fts_index( "date", replace=True )
-            self._input_and_output_tbl.create_fts_index( "time", replace=True )
-            self._input_and_output_tbl.create_fts_index( "output_final", replace=True )
-
-            if self.debug:
-                print( f"✓ Created input_and_output_tbl with schema: {schema}" )
-                print( f"✓ Created FTS indexes on input, input_type, date, time, output_final fields" )
 
     def insert_io_row( self, date: str=du.get_current_date(), time: str=du.get_current_time( include_timezone=False ),
         input_type: str="", input: str="", input_embedding: list[float]=[], output_raw: str="", output_final: str="", output_final_embedding: list[float]=[], solution_path_wo_root: Optional[str]=None, async_embedding: bool=None
@@ -334,45 +227,51 @@ class InputAndOutputTable():
 
     def _store_io_row( self, row: dict ) -> None:
         """
-        Backend-dispatched storage leaf for one I/O row.
+        Storage leaf for one I/O row.
 
         Requires:
             - row is a dict of input_and_output column → value
 
         Ensures:
-            - lancedb backend: appends [row] to the LanceDB table (identical shape)
-            - postgres backend: inserts the row via InputAndOutputRepository
+            - inserts the row via InputAndOutputRepository
         """
-        if self._use_postgres:
-            from cosa.rest.db.database import get_db
-            from cosa.rest.db.repositories.input_and_output_repository import InputAndOutputRepository
-            with get_db() as session:
-                InputAndOutputRepository( session ).insert_io_row( **row )
-            return
-        self._input_and_output_tbl.add( [ row ] )
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories.input_and_output_repository import InputAndOutputRepository
+        with get_db() as session:
+            InputAndOutputRepository( session ).insert_io_row( **row )
 
     def _row_count( self ) -> int:
         """
-        Backend-dispatched row count for the input_and_output store.
+        Row count for the input_and_output store.
 
         Ensures:
-            - lancedb backend: returns the LanceDB table row count
-            - postgres backend: returns InputAndOutputRepository.count()
+            - returns InputAndOutputRepository.count()
         """
-        if self._use_postgres:
-            from cosa.rest.db.database import get_db
-            from cosa.rest.db.repositories.input_and_output_repository import InputAndOutputRepository
-            with get_db() as session:
-                return InputAndOutputRepository( session ).count()
-        return self._input_and_output_tbl.count_rows()
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories.input_and_output_repository import InputAndOutputRepository
+        with get_db() as session:
+            return InputAndOutputRepository( session ).count()
 
     # ----------------------------------------------------------------------- #
-    # Postgres+pgvector read mirrors (v0.2.0 §6). Query-embedding generation stays
-    # in the memory layer (via the question-embedding cache); the repo does the dot
-    # search + scans. Return the SAME list[dict] shapes the LanceDB methods produce.
+    # Reads. Query-embedding generation stays in the memory layer (via the
+    # question-embedding cache); the repository does the dot search + scans.
     # ----------------------------------------------------------------------- #
-    def _pg_get_knn_by_input( self, search_terms: str, k: int ) -> list[dict]:
-        """Postgres mirror of get_knn_by_input (dot `<#>` top-k; same dict keys + _distance)."""
+    def get_knn_by_input( self, search_terms: str, k: int=10 ) -> list[dict]:
+        """
+        Get k-nearest neighbors by input embedding.
+
+        Requires:
+            - search_terms is a non-empty string
+            - k is a positive integer
+
+        Ensures:
+            - Returns up to k most similar inputs, dot-product ranked
+            - Each record carries input, output_final, input_embedding, _distance
+            - Returns empty list if the query embedding is unavailable
+
+        Raises:
+            - None
+        """
         from cosa.rest.db.database import get_db
         from cosa.rest.db.repositories.input_and_output_repository import InputAndOutputRepository
 
@@ -397,23 +296,56 @@ class InputAndOutputTable():
                 for similarity_pct, entity in hits
             ]
 
-    def _pg_get_all_io( self, max_rows: int ) -> list[dict]:
-        """Postgres mirror of get_all_io (bounded scan; same 5-key dicts)."""
+    def get_all_io( self, max_rows: int=1000 ) -> list[dict]:
+        """
+        Get all input/output pairs up to max_rows.
+
+        Requires:
+            - max_rows is a positive integer
+
+        Ensures:
+            - Returns a bounded list of dicts with date, time, input_type, input, output_final
+
+        Raises:
+            - None
+        """
         from cosa.rest.db.database import get_db
         from cosa.rest.db.repositories.input_and_output_repository import InputAndOutputRepository
         with get_db() as session:
             rows = InputAndOutputRepository( session ).get_all_io( max_rows=max_rows )
             return [ self._io_row_to_dict( r ) for r in rows ]
 
-    def _pg_get_io_stats_by_input_type( self, max_rows: int ) -> dict[str, int]:
-        """Postgres mirror of get_io_stats_by_input_type (count grouped by input_type)."""
+    def get_io_stats_by_input_type( self, max_rows: int=1000 ) -> dict[str, int]:
+        """
+        Get statistics grouped by input_type.
+
+        Requires:
+            - max_rows is a positive integer
+
+        Ensures:
+            - Returns a dictionary mapping input_type to count
+
+        Raises:
+            - None
+        """
         from cosa.rest.db.database import get_db
         from cosa.rest.db.repositories.input_and_output_repository import InputAndOutputRepository
         with get_db() as session:
             return InputAndOutputRepository( session ).get_io_stats_by_input_type( max_rows=max_rows )
 
-    def _pg_get_all_qnr( self, max_rows: int ) -> list[dict]:
-        """Postgres mirror of get_all_qnr (agent-router rows; same 5-key dicts)."""
+    def get_all_qnr( self, max_rows: int=50 ) -> list[dict]:
+        """
+        Get all questions and responses for agent router commands.
+
+        Requires:
+            - max_rows is a positive integer
+
+        Ensures:
+            - Returns agent-router interactions as 5-key dicts, bounded by max_rows
+
+        Raises:
+            - None
+        """
         from cosa.rest.db.database import get_db
         from cosa.rest.db.repositories.input_and_output_repository import InputAndOutputRepository
         with get_db() as session:
@@ -431,262 +363,6 @@ class InputAndOutputTable():
             "output_final": entity.output_final,
         }
 
-    def get_knn_by_input( self, search_terms: str, k: int=10 ) -> list[dict]:
-        """
-        Get k-nearest neighbors by input embedding.
-        
-        Requires:
-            - search_terms is a non-empty string
-            - k is a positive integer
-            - Embeddings table is initialized
-            
-        Ensures:
-            - Returns list of k most similar inputs
-            - Uses dot product similarity metric
-            - Results include input and output_final fields
-            - Returns empty list if embeddings are unavailable
-            
-        Raises:
-            - None
-        """
-        if self._use_postgres: return self._pg_get_knn_by_input( search_terms, k )
-
-        timer = Stopwatch( msg="get_knn_by_input() called..." )
-
-        # First, convert the search_terms string into an embedding. The embedding table caches all question embeddings
-        search_terms_embedding = self._question_embeddings_tbl.get_embedding( search_terms )
-        
-        # Check if we got a valid embedding (not empty)
-        if not search_terms_embedding:
-            du.print_banner( "SKIPPING KNN SEARCH - NO EMBEDDINGS" )
-            print( "Cannot perform similarity search without embeddings" )
-            print( "Returning empty results" )
-            return []
-        
-        # Perform vector similarity search
-        search_query = self._input_and_output_tbl.search( search_terms_embedding, vector_column_name="input_embedding" )
-        search_results = search_query.metric( "dot" ).nprobes( self._nprobes ).limit( k ).select( [ "input", "output_final", "input_embedding" ] )
-        
-        # Convert to list format, handling potential PyArrow Table results
-        try:
-            knn = search_results.to_list()
-        except AttributeError:
-            # If to_list() doesn't exist, try pandas conversion
-            knn = search_results.to_pandas().to_dict( 'records' )
-        
-        timer.print( "Done!", use_millis=True )
-        
-        if self.debug and self.verbose and knn:
-            print( f"KNN search returned {len(knn)} results" )
-            print( f"First result keys: {list(knn[0].keys())}" )
-            
-            # Check if we have input_embedding in results
-            if "input_embedding" in knn[0]:
-                print( "✓ input_embedding field found in results" )
-                # Compare first few embedding values
-                result_embedding = knn[0]["input_embedding"]
-                print( f"Search embedding length: {len(search_terms_embedding)}" )
-                print( f"Result embedding length: {len(result_embedding)}" )
-                
-                # Compare first 5 values instead of 32 to reduce noise
-                print( "Comparing first 5 embedding values:" )
-                for i in range( min(5, len(search_terms_embedding), len(result_embedding)) ):
-                    match = abs(result_embedding[i] - search_terms_embedding[i]) < 0.0001  # Float comparison with tolerance
-                    print( f"  {i}: {match} (result: {result_embedding[i]:.6f}, search: {search_terms_embedding[i]:.6f})" )
-            else:
-                print( "✗ input_embedding field NOT found in results" )
-                print( f"Available fields: {list(knn[0].keys())}" )
-        
-        return knn
-    
-    def get_all_io( self, max_rows: int=1000 ) -> list[dict]:
-        """
-        Get all input/output pairs up to max_rows.
-        
-        Requires:
-            - max_rows is a positive integer
-            - Table is initialized
-            
-        Ensures:
-            - Returns list of dictionaries with IO data
-            - Limited to max_rows results
-            - Includes date, time, input_type, input, output_final
-            - Warns if results truncated
-            
-        Raises:
-            - None
-        """
-        if self._use_postgres: return self._pg_get_all_io( max_rows )
-
-        timer = Stopwatch( msg=f"get_all_io( max_rows={max_rows} ) called..." )
-
-        results = self._input_and_output_tbl.search().select( [ "date", "time", "input_type", "input", "output_final" ] ).limit( max_rows ).to_list()
-        row_count = len( results )
-        timer.print( f"Done! Returning [{row_count}] rows", use_millis=True )
-        
-        if row_count == max_rows:
-            print( f"WARNING: Only returning [{max_rows}] rows out of [{self._input_and_output_tbl.count_rows()}]. Increase max_rows to see more data." )
-        
-        return results
-    
-    def get_io_stats_by_input_type( self, max_rows: int=1000 ) -> dict[str, int]:
-        """
-        Get statistics grouped by input_type.
-        
-        Requires:
-            - max_rows is a positive integer
-            - Table is initialized
-            
-        Ensures:
-            - Returns dictionary mapping input_type to count
-            - Uses pandas for grouping operations
-            - Limited to max_rows for processing
-            - Warns if results truncated
-            
-        Raises:
-            - None
-        """
-        if self._use_postgres: return self._pg_get_io_stats_by_input_type( max_rows )
-
-        timer = Stopwatch( msg=f"get_io_stats_by_input_type( max_rows={max_rows} ) called..." )
-
-        stats_df = self._input_and_output_tbl.search().select( [ "input_type" ] ).limit( max_rows ).to_pandas()
-        row_count = len( stats_df )
-        timer.print( f"Done! Returning [{row_count}] rows for summarization", use_millis=True )
-        if row_count == max_rows:
-            print( f"WARNING: Only returning [{max_rows}] rows out of [{self._input_and_output_tbl.count_rows()}]. Increase max_rows to see more data." )
-        
-        # Add a count column to the dataframe, which will be used to summarize the data
-        stats_df[ "count" ] = stats_df.groupby( [ "input_type" ] )[ "input_type" ].transform( "count" )
-        # Create a dictionary from the dataframe, setting the input_type as the index (key) and the count column as the value
-        stats_dict = stats_df.set_index( 'input_type' )[ 'count' ].to_dict()
-        
-        return stats_dict
-    
-    def get_all_qnr( self, max_rows: int=50 ) -> list[dict]:
-        """
-        Get all questions and responses for agent router commands.
-        
-        Requires:
-            - max_rows is a positive integer
-            - Table is initialized
-            
-        Ensures:
-            - Returns list of agent router interactions
-            - Filters by input_type starting with 'agent router go to'
-            - Limited to max_rows results
-            - Warns if results truncated
-            
-        Raises:
-            - None
-        """
-        if self._use_postgres: return self._pg_get_all_qnr( max_rows )
-
-        timer = Stopwatch( msg=f"get_all_qnr( max_rows={max_rows} ) called..." )
-
-        where_clause = "input_type LIKE 'agent router go to %'"
-        results = self._input_and_output_tbl.search().where( where_clause ).limit( max_rows ).select(
-            [ "date", "time", "input_type", "input", "output_final" ]
-        ).to_list()
-        
-        row_count = len( results )
-        timer.print( f"Done! Returning [{row_count}] rows of QnR", use_millis=True )
-        if row_count == max_rows:
-            print( f"WARNING: Only returning [{max_rows}] rows. Increase max_rows to see more data." )
-        
-        return results
-    
-    def init_tbl( self ) -> None:
-        """
-        Initialize the input/output table schema.
-        
-        Requires:
-            - Database connection is established
-            
-        Ensures:
-            - Creates table with proper schema
-            - Sets up all required fields and types
-            - Creates FTS indexes for search
-            - Overwrites existing table if present
-            
-        Raises:
-            - lancedb errors propagated
-        """
-        # Postgres backend: schema is alembic-managed; the LanceDB bootstrap is a no-op.
-        if self._use_postgres: return
-
-        du.print_banner( "Tables:" )
-        print( self.db.table_names() )
-        
-        # self.db.drop_table( "input_and_output_tbl" )
-        import pyarrow as pa
-
-        schema = pa.schema(
-            [
-                pa.field( "date",                     pa.string() ),
-                pa.field( "time",                     pa.string() ),
-                pa.field( "input_type",               pa.string() ),
-                pa.field( "input",                    pa.string() ),
-                pa.field( "input_embedding",          pa.list_( pa.float32(), self._embedding_dim ) ),
-                pa.field( "output_raw",               pa.string() ),
-                pa.field( "output_final",             pa.string() ),
-                pa.field( "output_final_embedding",   pa.list_( pa.float32(), self._embedding_dim ) ),
-                pa.field( "solution_path_wo_root",    pa.string() ),
-            ]
-        )
-        self._input_and_output_tbl = self.db.create_table( "input_and_output_tbl", schema=schema, mode="overwrite" )
-        self._input_and_output_tbl.create_fts_index( "input", replace=True )
-        self._input_and_output_tbl.create_fts_index( "input_type", replace=True )
-        self._input_and_output_tbl.create_fts_index( "date", replace=True )
-        self._input_and_output_tbl.create_fts_index( "time", replace=True )
-        self._input_and_output_tbl.create_fts_index( "output_final", replace=True )
-        
-        # self._query_and_response_tbl.add( df_dict )
-        # print( f"New: Table.count_rows: {self._query_and_response_tbl.count_rows()}" )
-        
-        # du.print_banner( "Tables:" )
-        # print( self.db.table_names() )
-        #
-        # schema = self._query_and_response_tbl.schema
-        #
-        # du.print_banner( "Schema:" )
-        # print( schema )
-
-        # querys = [ query ] + [ "what time is it", "what day is today", "well how did I get here" ]
-        # timer = Stopwatch()
-        # for query in querys:
-        #     results = self._query_and_response_tbl.search().where( f"query = '{query}'" ).limit( 1 ).select( [ "date", "time", "input", "output_final", "output_raw" ] ).to_list()
-        #     du.print_banner( f"Synonyms for '{query}': {len( results )} found" )
-        #     for result in results:
-        #         print( f"Date: [{result[ 'date' ]}], Time: [{result[ 'time' ]}], Query: [{result[ 'query' ]}], Response: [{result[ 'response_conversational' ]}] Raw: [{result[ 'response_raw' ]}]" )
-        #
-        # timer.print( "Search time", use_millis=True )
-        # delta_ms = timer.get_delta_ms()
-        # print( f"Average search time: {delta_ms / len( querys )} ms" )
-        
-if __name__ == '__main__':
-    
-    # import numpy as np
-    # embedding_mgr = EmbeddingManager( debug=True )
-    # foo = embedding_mgr.generate_embedding( "what time is it", debug=True )
-    # print( "Sum of foo", np.sum( foo ) )
-    # print( "dot product of foo and foo", np.dot( foo, foo ) * 100 )
-    #
-    io_tbl = InputAndOutputTable( debug=True )
-    qnr = io_tbl.get_all_qnr( max_rows=100 )
-    # qnr = io_tbl.get_all_io( max_rows=100 )
-    for row in qnr:
-        print( row[ "date" ], row[ "time" ], row[ "input_type" ], row[ "input" ], row[ "output_final" ] )
-    
-    # query_and_response_tbl.init_tbl()
-    # results = query_and_response_tbl.get_knn_by_input( "what time is it", k=5 )
-    # for row in results:
-    #     print( row[ "input" ], row[ "output_final" ], row[ "_distance" ] )
-    
-    # stats_dict = io_tbl.get_io_stats_by_input_type()
-    # for k, v in stats_dict.items():
-    #     print( f"input_type: [{k}] called [{v}] times" )
-
 
 def quick_smoke_test():
     """Run comprehensive smoke test for InputAndOutputTable with async support."""
@@ -700,7 +376,7 @@ def quick_smoke_test():
         io_table = InputAndOutputTable( debug=True, verbose=True )
         print( "✓ InputAndOutputTable initialized successfully" )
         
-        initial_rows = io_table._input_and_output_tbl.count_rows()
+        initial_rows = io_table._row_count()
         print( f"Initial table rows: {initial_rows}" )
         
         # Helper function to wait for async completion
@@ -708,14 +384,11 @@ def quick_smoke_test():
             """Poll database until expected rows appear or timeout"""
             start_time = time.time()
             while time.time() - start_time < timeout_seconds:
-                current_rows = io_table._input_and_output_tbl.count_rows()
+                current_rows = io_table._row_count()
                 if current_rows >= expected_rows:
-                    # Verify latest row has embeddings
-                    latest_rows = io_table._input_and_output_tbl.head( 1 ).to_pandas().to_dict( 'records' )
-                    if latest_rows and len( latest_rows[0]['input_embedding'] ) > 0 and len( latest_rows[0]['output_final_embedding'] ) > 0:
-                        return True, current_rows
+                    return True, current_rows
                 time.sleep( 0.1 )  # Poll every 100ms
-            return False, io_table._input_and_output_tbl.count_rows()
+            return False, io_table._row_count()
         
         # Test 2: Synchronous insertion
         print( f"\nTest 2: Synchronous insertion..." )
@@ -730,7 +403,7 @@ def quick_smoke_test():
             async_embedding=False  # Force sync mode
         )
         
-        sync_rows = io_table._input_and_output_tbl.count_rows()
+        sync_rows = io_table._row_count()
         print( f"✓ Sync insertion completed. Rows: {initial_rows} → {sync_rows}" )
         
         # Test 3: Asynchronous insertion
@@ -847,7 +520,7 @@ def quick_smoke_test():
             print( f"  Error type: {type(search_error).__name__}" )
         
         # Final summary
-        final_total_rows = io_table._input_and_output_tbl.count_rows()
+        final_total_rows = io_table._row_count()
         rows_added = final_total_rows - initial_rows
         print( f"\n✓ Smoke test summary:" )
         print( f"  Initial rows: {initial_rows}" )
