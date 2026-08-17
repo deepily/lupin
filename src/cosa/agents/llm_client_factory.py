@@ -210,6 +210,34 @@ class LlmClientFactory:
                         verbose=self.verbose,
                         **model_params
                     )
+            elif model_spec.startswith( "vertex://" ):
+                # row 3405f0b2 — a CONFIG-KEY spec whose value is a Vertex descriptor
+                # must build the Vertex genai client, NOT fall through to the ChatClient
+                # else below. Without this arm, get_client( "dm_tutor/flash_lite" ) takes
+                # the exists->config path and silently returns a ChatClient, so the study
+                # would run on the wrong client and never say so. Mirrors the vllm://
+                # prefix scheme. Keeps the google-genai vendor entry too — that serves
+                # callers who pass a raw "google-genai:" descriptor instead of a config key.
+                #
+                # Format (Rachel-ratified): vertex://<location>@<model_id>, e.g.
+                # vertex://global@gemini-3.1-flash-lite. The LOCATION is REQUIRED — the
+                # paired study must record where each arm ran, so a spec that omits it
+                # fails LOUD here rather than defaulting silently. `project` still resolves
+                # fail-loud inside GeminiVertexClient (cosa.utils.gcp_project).
+                body = model_spec[ len( "vertex://" ): ]
+                if "@" not in body:
+                    raise ValueError(
+                        f"vertex:// spec must be 'vertex://<location>@<model_id>' "
+                        f"(location required so the study records where the arm ran); got '{model_spec}'"
+                    )
+                location, model_name = body.split( "@", 1 )
+                if self.debug: print( f"Creating GeminiVertexClient for vertex:// spec: location={location}, model={model_name}" )
+                return GeminiVertexClient(
+                    model_name = model_name,
+                    location   = location,
+                    debug      = self.debug,
+                    verbose    = self.verbose,
+                )
             else:
                 # Assume chat-based model (OpenAI, Groq, Google, etc.)
                 return ChatClient(
