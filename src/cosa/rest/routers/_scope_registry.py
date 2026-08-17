@@ -75,12 +75,27 @@ SECRETS_BLOCKLIST_PATTERNS = (
     re.compile( r"^\.pgpass$" ),
     re.compile( r"^\.credentials" ),                              # F4/F5: any .credentials*
 
-    # Common credential-bearing names (word-boundary anchored to avoid
-    # false-positives on substrings like "secretive_methods" or
-    # "credentialism" — both legitimate filenames that should NOT be blocked).
-    re.compile( r"\bcredentials?\b", re.IGNORECASE ),
-    re.compile( r"\bsecrets?\b",     re.IGNORECASE ),
-    re.compile( r"\bpassword\b",     re.IGNORECASE ),             # F4 add
+    # Common credential-bearing names. The boundary is anchored to avoid
+    # false-positives on substrings like "secretive_methods" or "credentialism"
+    # — both legitimate filenames that should NOT be blocked.
+    #
+    # ⚠️ `\b` IS THE WRONG BOUNDARY HERE, and it left a real hole open.
+    # An underscore is a WORD character, so `\bcredentials\b` does not match
+    # inside `application_default_credentials.json` — the default filename
+    # gcloud writes for Application Default Credentials. Measured 2026-08-17:
+    # `credentials.json` was blocked while `application_default_credentials.json`
+    # was SERVED, and the doc viewer serves anything under `src`. Found by
+    # Tiffany 💍 while reviewing whether to mount those very credentials into a
+    # test container — the file we were about to place on disk was the file the
+    # blocklist did not cover.
+    #
+    # `(?<![a-z0-9])` / `(?![a-z0-9])` treat `_`, `-` and `.` as separators the
+    # way a filename does, while still refusing to fire inside a longer word.
+    # So `credentialism.txt` and `secretive_methods.py` stay served, and
+    # `application_default_credentials.json` / `my_secrets.yaml` do not.
+    re.compile( r"(?<![a-z0-9])credentials?(?![a-z0-9])", re.IGNORECASE ),
+    re.compile( r"(?<![a-z0-9])secrets?(?![a-z0-9])",     re.IGNORECASE ),
+    re.compile( r"(?<![a-z0-9])password(?![a-z0-9])",     re.IGNORECASE ),
 
     # Key/cert file extensions
     re.compile( r"\.pem$", re.IGNORECASE ),
