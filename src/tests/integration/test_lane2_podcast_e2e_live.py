@@ -120,7 +120,27 @@ def test_lane2_voice_driven_podcast_e2e():
         f"websocket target {harness.WS_HOST}:{harness.WS_PORT} does not match "
         f"{BASE_URL} — HTTP and socket are pointed at different servers"
     )
+    # The harness returns three codes, and the difference is the whole point of
+    # row 1cd30181: 0 = every stage observed and green, 1 = the harness watched the
+    # product do the wrong thing, 2 = the harness could not tell.
+    #
+    # Both 1 and 2 fail this test, because a gate that cannot tell must never go
+    # green. They are reported differently on purpose. Before the fix, a run whose
+    # job finished a few seconds after the poll cutoff came back as a red that read
+    # like a broken podcast chain; whoever picked it up would go looking for a
+    # product defect that was not there.
+    if rc == 2:
+        pytest.fail(
+            "Lane-2 podcast E2E is INCONCLUSIVE (exit 2) — the harness could not "
+            "observe some stages, so this is an INSTRUMENT result and not evidence "
+            "of a product defect. Check the [observe] lines in the captured output: "
+            "the usual causes are the run outrunning LANE2_TIMEOUT_S (the script-review "
+            "gate fails open after 600s, so a run nobody answers lands near 733s), the "
+            "auto-answer websocket dying, or the queue API not answering. Do not open a "
+            "product bug from this result."
+        )
     assert rc == 0, (
-        f"Lane-2 podcast E2E failed with exit code {rc}. The harness logs each "
-        f"acceptance stage as it passes; the last stage logged is where it stopped."
+        f"Lane-2 podcast E2E FAILED with exit code {rc} — the harness observed the "
+        f"product doing the wrong thing. The stage table above names which stage; "
+        f"stages marked INCONCLUSIVE are not part of this verdict."
     )

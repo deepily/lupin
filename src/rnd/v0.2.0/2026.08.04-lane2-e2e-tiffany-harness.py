@@ -65,8 +65,37 @@ WS_PORT     = _parsed.port or ( 443 if _parsed.scheme == "https" else 80 )
 WS_SCHEME   = "wss" if _parsed.scheme == "https" else "ws"
 SESSION_ID  = "tiffany-lane2-e2e"
 MODE        = "podcast"          # the "Podcast Generator" dropdown
-TIMEOUT_S   = 720                # 12 min — real audio generation
+
+# TIMEOUT_S was 720 (12 min) and that number could not observe its own subject
+# (row 1cd30181). The podcast chain contains a script-review gate that the test
+# user never receives, so the job only advances when that gate AUTO-APPROVES;
+# measured completions land ~733s — about 13 seconds past the old cutoff. The
+# harness therefore stopped watching a few seconds before the product finished
+# and reported the product broken.
+#
+# Raising the number is necessary and NOT sufficient. A wider window alone just
+# converts a false FAIL into a false PASS on the next slow run. The actual fix is
+# the three-state stage table below: an expiry is INCONCLUSIVE, never FAIL and
+# never PASS. This value only has to be generous enough that INCONCLUSIVE is rare
+# — correctness no longer depends on it being exactly right.
+TIMEOUT_S   = int( os.environ.get( "LANE2_TIMEOUT_S", "1200" ) )   # 20 min
 POLL_EVERY  = 3
+
+# Stage-3 evidence is a log grep. Its window used to be a hardcoded `--since 10m`
+# evaluated AFTER the poll loop, so on any run longer than 10 minutes the
+# "Initialized for" line — written at push time — had already aged out of the
+# window before it was ever looked for. The window is now derived from the
+# harness's own start time (see doc_resolved_from_logs), plus this slack.
+LOG_WINDOW_SLACK_S = 120
+
+# The three stage states. A stage is INCONCLUSIVE until the harness actually
+# observes something; it must EARN a PASS and equally must EARN a FAIL.
+PASS         = "PASS"
+FAIL         = "FAIL"
+INCONCLUSIVE = "INCONCLUSIVE"
+
+# find_job sentinel: "I could not ask the server", which is NOT "the job is absent".
+UNOBSERVED = object()
 
 # The vague request — verbatim from the row.
 VAGUE_QUESTION = (
@@ -210,6 +239,8 @@ class WsAutoAnswer:
         self.log      = log
         self.answered = []
         self.job_id   = None      # THIS run's pg- id, captured from ws events
+        self.authed   = False     # did the socket ever successfully authenticate?
+        self.error    = None      # why the listener died, if it did
         self._running = True
         self._thread  = None
 
@@ -219,6 +250,19 @@ class WsAutoAnswer:
 
     def stop( self ):
         self._running = False
+
+    def is_alive( self ):
+        """
+        True iff the auto-answer listener is still running.
+
+        This harness's whole premise is that it supplies the live websocket a
+        remote voice user would supply. If this thread dies, every interactive ask
+        goes unanswered and the job stalls — which looks EXACTLY like a product
+        that never finished. The failure that costs the most produces no signal at
+        all, so the harness watches its own observer for disappearing, not just for
+        writing.
+        """
+        return self._thread is not None and self._thread.is_alive()
 
     def _run( self ):
         asyncio.set_event_loop( asyncio.new_event_loop() )
@@ -237,6 +281,7 @@ class WsAutoAnswer:
                 } ) )
                 auth = json.loads( await asyncio.wait_for( ws.recv(), timeout=10 ) )
                 self.log( f"[ws] auth: {auth.get('type')}" )
+                self.authed = True
                 while self._running:
                     try:
                         raw = await asyncio.wait_for( ws.recv(), timeout=2 )
@@ -264,7 +309,11 @@ class WsAutoAnswer:
                     if etype == "notification_queue_update":
                         self._maybe_answer( data )
         except Exception as e:
-            self.log( f"[ws] listener error: {e}" )
+            # Record it, do not just print it. A one-line error at second 5 scrolls
+            # away and the run then looks like a product timeout for the next 20
+            # minutes. main() reads this field and reports INCONCLUSIVE instead.
+            self.error = repr( e )
+            self.log( f"[ws] listener DIED: {e} — auto-answer is no longer running" )
 
     def _maybe_answer( self, data ):
         note = data.get( "notification", data )
@@ -334,14 +383,27 @@ def remove_seed():
 
 
 def find_job( headers, queue, job_id ):
-    """Return THIS run's job from `queue`, matched on the EXACT job_id — never a
+    """
+    Return THIS run's job from `queue`, matched on the EXACT job_id — never a
     loose `startswith pg-` (that matched a STALE prior-run job and false-failed).
+
+    Ensures:
+        - returns the job dict when the server answered AND the job is present
+        - returns None when the server answered AND the job is genuinely absent
+        - returns UNOBSERVED when the server could not be asked (non-200, timeout,
+          connection error). This is NOT the same as absent, and collapsing the two
+          is how a dead API reads as a product that never finished.
     """
     if not job_id:
         return None
-    r = requests.get( f"{BASE_HTTP}/api/get-queue/{queue}", headers=headers, timeout=20 )
+    try:
+        r = requests.get( f"{BASE_HTTP}/api/get-queue/{queue}", headers=headers, timeout=20 )
+    except Exception as e:
+        log( f"[observe] cannot reach /api/get-queue/{queue}: {e}" )
+        return UNOBSERVED
     if r.status_code != 200:
-        return None
+        log( f"[observe] /api/get-queue/{queue} → HTTP {r.status_code} (not an answer about the job)" )
+        return UNOBSERVED
     for j in r.json().get( f"{queue}_jobs_metadata", [] ):
         if j.get( "job_id", "" ) == job_id:
             return j
@@ -403,15 +465,26 @@ def main( argv ):
     results = {}
     email, jwt, headers = login()
     log( f"logged in as {email}" )
-    results[ "1_push_accepted" ] = False
-    results[ "2_route_podcast" ] = False
-    results[ "3_doc_resolved" ]  = False
-    results[ "4_job_running" ]   = False
-    results[ "5_job_done" ]      = False
-    results[ "6_content_ok" ]    = False
+    # Every stage starts INCONCLUSIVE, not False. This is the fix for row 1cd30181,
+    # and it is the part that matters more than the timeout. Under the old table a
+    # stage the harness never managed to observe was indistinguishable from a stage
+    # it observed to be broken — both printed FAIL — so an instrument that stopped
+    # watching too early accused the product. A stage now has to be EARNED in both
+    # directions: PASS on positive evidence, FAIL on evidence of the negative, and
+    # INCONCLUSIVE whenever the harness simply could not tell.
+    results[ "1_push_accepted" ] = INCONCLUSIVE
+    results[ "2_route_podcast" ] = INCONCLUSIVE
+    results[ "3_doc_resolved" ]  = INCONCLUSIVE
+    results[ "4_job_running" ]   = INCONCLUSIVE
+    results[ "5_job_done" ]      = INCONCLUSIVE
+    results[ "6_content_ok" ]    = INCONCLUSIVE
 
     if not args.no_seed:
         write_seed()
+
+    # Stamped BEFORE anything is pushed, so the stage-3 log window can be derived
+    # from the real age of this run instead of a fixed guess.
+    run_started = time.monotonic()
 
     # WS auto-answer up first, so asks are deliverable the instant they fire.
     ws = WsAutoAnswer( jwt, { "Authorization": f"Bearer {jwt}" }, log )
@@ -430,7 +503,7 @@ def main( argv ):
                            headers=headers, timeout=180 )
         push = r.json()
         log( f"push: {r.status_code} job_id={push.get('job_id')} result={push.get('result','')[:80]}" )
-        results[ "1_push_accepted" ] = ( r.status_code == 200 )
+        results[ "1_push_accepted" ] = PASS if r.status_code == 200 else FAIL
 
         # The push response's job_id is often null even though the job exists;
         # the AUTHORITATIVE id for THIS run is the one the ws watched get created.
@@ -445,44 +518,116 @@ def main( argv ):
         # Stage 2 = routed to the PODCAST GENERATOR (pg-), the doc-resolution path.
         # An rp- job means the router picked research-to-podcast — a routing MISS.
         if job_id and job_id.startswith( "pg-" ):
-            results[ "2_route_podcast" ] = True
+            results[ "2_route_podcast" ] = PASS
         elif job_id and job_id.startswith( "rp-" ):
             log( f"ROUTING MISS: got {job_id[:12]} (research-to-podcast), NOT podcast generator" )
+            results[ "2_route_podcast" ] = FAIL
+        else:
+            # No job id at all. We never saw the router decide, so we do not know
+            # what it decided. That is not a routing failure.
+            log( "no job_id captured — routing was never observed" )
 
         # Poll for terminal — scoped to THIS run's exact job_id.
-        elapsed = 0
+        #
+        # The clock is now WALL CLOCK (time.monotonic), not a counter incremented by
+        # POLL_EVERY. The old loop added 3 per iteration while each iteration also
+        # made up to three HTTP calls with a 20s timeout apiece, so `elapsed` was not
+        # seconds and the harness could not state its own cutoff.
+        deadline   = time.monotonic() + TIMEOUT_S
+        started_at = time.monotonic()
         done_job = dead_job = None
-        while elapsed < TIMEOUT_S:
-            done_job = find_job( headers, "done", job_id )
-            if done_job:
+        timed_out = False
+        observation_failures = 0
+        while True:
+            if time.monotonic() >= deadline:
+                timed_out = True
                 break
-            dead_job = find_job( headers, "dead", job_id )
-            if dead_job:
+            d = find_job( headers, "done", job_id )
+            if d is UNOBSERVED:
+                observation_failures += 1
+            elif d:
+                done_job = d
                 break
-            if find_job( headers, "run", job_id ):
-                results[ "4_job_running" ] = True
-            time.sleep( POLL_EVERY ); elapsed += POLL_EVERY
+            else:
+                x = find_job( headers, "dead", job_id )
+                if x is UNOBSERVED:
+                    observation_failures += 1
+                elif x:
+                    dead_job = x
+                    break
+                else:
+                    running = find_job( headers, "run", job_id )
+                    if running is UNOBSERVED:
+                        observation_failures += 1
+                    elif running:
+                        results[ "4_job_running" ] = PASS
+            # The auto-answer socket is this harness's reason for existing. If it
+            # died, every later ask goes unanswered and the job stalls — a stall we
+            # would otherwise report as the product failing to finish.
+            if not ws.is_alive():
+                log( "[observe] auto-answer listener is gone; remaining asks cannot be answered" )
+                break
+            time.sleep( POLL_EVERY )
+        waited = int( time.monotonic() - started_at )
 
         # Stage 3 is proven INDEPENDENTLY of completion: the orchestrator logs
         # the exact source file it resolved. Never infer resolution from the
         # content check (that needs stage 5 done — a name that would claim more
         # than the test proves).
-        results[ "3_doc_resolved" ] = doc_resolved_from_logs()
+        results[ "3_doc_resolved" ] = doc_resolved_from_logs( run_started_monotonic=run_started )
+
+        # An observer that stopped watching, or that never authenticated, cannot
+        # convict the product of anything.
+        observer_broken = ( not ws.authed ) or ( ws.error is not None ) or observation_failures > 0
+        if observer_broken:
+            log( f"[observe] OBSERVER DEGRADED — ws_authed={ws.authed} ws_error={ws.error} "
+                 f"unanswerable_queue_reads={observation_failures}" )
 
         if done_job:
-            results[ "2_route_podcast" ] = True
-            results[ "5_job_done" ] = True
-            log( f"JOB DONE: {done_job.get('job_id')}" )
-            ok = verify_content( headers, done_job )
-            results[ "6_content_ok" ] = ok
+            results[ "2_route_podcast" ] = PASS
+            results[ "5_job_done" ] = PASS
+            log( f"JOB DONE after {waited}s: {done_job.get('job_id')}" )
+            results[ "6_content_ok" ] = verify_content( headers, done_job )
         elif dead_job:
-            results[ "2_route_podcast" ] = True
+            results[ "2_route_podcast" ] = PASS
             err = dead_job.get( "error" ) or dead_job.get( "response_text" ) or ""
             transient = any( s in err.lower() for s in ( "try again in a few minutes", "rate limit", "returned an error while writing" ) )
             tag = "TRANSIENT (phi-4 rate limit — retry, NOT a chain defect)" if transient else "DEFECT"
             log( f"JOB DEAD [{tag}]: {dead_job.get('job_id')} err={err}" )
+            # A dead job is a real, observed negative — the one case that earns a FAIL.
+            # A transient upstream rate limit is not the chain being broken, so it stays
+            # INCONCLUSIVE rather than convicting the product.
+            results[ "5_job_done" ]   = INCONCLUSIVE if transient else FAIL
+            results[ "6_content_ok" ] = INCONCLUSIVE
+        elif timed_out:
+            # THE CASE THIS WHOLE ROW IS ABOUT. The harness stopped watching before
+            # the product finished. It does not know how the job ended, so it says so.
+            log( f"STOPPED WATCHING after {waited}s (limit {TIMEOUT_S}s) — the job had "
+                 f"not reached a terminal queue YET. This is the harness running out "
+                 f"of patience, NOT the product failing. Raise LANE2_TIMEOUT_S." )
+            results[ "5_job_done" ]   = INCONCLUSIVE
+            results[ "6_content_ok" ] = INCONCLUSIVE
         else:
-            log( f"no terminal pg- job after {TIMEOUT_S}s" )
+            log( f"stopped watching after {waited}s — observer unavailable" )
+            results[ "5_job_done" ]   = INCONCLUSIVE
+            results[ "6_content_ok" ] = INCONCLUSIVE
+
+        if results[ "4_job_running" ] == INCONCLUSIVE and results[ "5_job_done" ] == PASS:
+            # A job in the done queue necessarily passed through the run queue; we
+            # just polled either side of it. Left INCONCLUSIVE, this would report
+            # exit 2 on a run where the product did everything right — a false
+            # inconclusive is a smaller lie than a false FAIL, but it is still a
+            # lie about what the harness knows.
+            log( "4_job_running: never caught mid-flight, but the job reached done — "
+                 "it cannot have finished without running" )
+            results[ "4_job_running" ] = PASS
+
+        if observer_broken:
+            for k in ( "3_doc_resolved", "5_job_done", "6_content_ok" ):
+                if results[ k ] == FAIL:
+                    log( f"[observe] downgrading {k} FAIL→INCONCLUSIVE: the observer was degraded, "
+                         f"so this red is not trustworthy" )
+                    results[ k ] = INCONCLUSIVE
 
     finally:
         ws.stop()
@@ -498,35 +643,94 @@ def main( argv ):
     print( "  LANE 2 E2E — STAGE TABLE (row 68198c9f)" )
     print( "=" * 70 )
     for k in sorted( results.keys() ):
-        print( f"  {'PASS' if results[k] else 'FAIL'}  {k}" )
+        print( f"  {results[k]:<13}{k}" )
     print( "=" * 70 )
-    return 0 if all( results.values() ) else 1
+
+    n_fail = sum( 1 for v in results.values() if v == FAIL )
+    n_inc  = sum( 1 for v in results.values() if v == INCONCLUSIVE )
+    n_pass = sum( 1 for v in results.values() if v == PASS )
+    print( f"  {n_pass} passed · {n_fail} failed · {n_inc} inconclusive" )
+
+    # Exit codes are three-valued for the same reason the table is.
+    #   0 — every stage PASSED, and every one of them was actually observed.
+    #   1 — the harness observed the product doing the wrong thing. A real red.
+    #   2 — the harness could not tell. NOT a product verdict; look at the log.
+    # 2 is deliberately non-zero: the pytest wrapper asserts rc == 0, so an
+    # inconclusive run still fails its suite. That is the point — it must never be
+    # possible to report a green that was not earned. What changes is that an
+    # inconclusive run no longer ACCUSES the product of a defect it never saw.
+    if n_fail:
+        print( "  VERDICT: FAIL — the harness observed the product doing the wrong thing." )
+        print( "=" * 70 )
+        return 1
+    if n_inc:
+        print( "  VERDICT: INCONCLUSIVE — the harness could not observe some stages." )
+        print( "           This is NOT a product defect. Read the [observe] lines above." )
+        print( "=" * 70 )
+        return 2
+    print( "  VERDICT: PASS — every stage observed and green." )
+    print( "=" * 70 )
+    return 0
 
 
-def doc_resolved_from_logs():
+def doc_resolved_from_logs( run_started_monotonic=None, container=None ):
     """
     Stage 3 proof: the orchestrator logs the exact file it resolved. Grep the
-    dev container's log for our seed filename after `Initialized for`. This is
+    server container's log for our seed filename after `Initialized for`. This is
     independent of whether the job later completes.
+
+    Requires:
+        - run_started_monotonic is a time.monotonic() stamp taken BEFORE the push,
+          or None to fall back to a wide window
+
+    Ensures:
+        - the log window spans the WHOLE run, not a fixed 10 minutes. The
+          "Initialized for" line is written at push time; this function is called
+          after the poll loop, so a fixed 10m window mechanically excluded the very
+          line it was looking for on any run longer than 10 minutes (row 1cd30181).
+        - returns PASS when the line is found
+        - returns FAIL when the log was READ successfully and the line is absent
+        - returns INCONCLUSIVE when the log could not be read at all — an
+          unreadable log is not evidence that the document failed to resolve
     """
     import subprocess
+    container = container or os.environ.get( "LANE2_LOG_CONTAINER", "lupin-rest-dev" )
+    if run_started_monotonic is None:
+        window_s = TIMEOUT_S + LOG_WINDOW_SLACK_S
+    else:
+        window_s = int( time.monotonic() - run_started_monotonic ) + LOG_WINDOW_SLACK_S
     try:
         out = subprocess.run(
-            [ "docker", "logs", "lupin-rest-dev", "--since", "10m" ],
-            capture_output=True, text=True, timeout=20,
+            [ "docker", "logs", container, "--since", f"{window_s}s" ],
+            capture_output=True, text=True, timeout=60,
         )
-        blob = out.stdout + out.stderr
-        for line in blob.splitlines():
-            if "Initialized for" in line and SEED_FILENAME in line:
-                log( f"stage3 proof: {line.strip()[:120]}" )
-                return True
     except Exception as e:
-        log( f"doc_resolved_from_logs error: {e}" )
-    return False
+        log( f"[observe] stage3 log read failed ({e}) — INCONCLUSIVE, not a resolution failure" )
+        return INCONCLUSIVE
+    if out.returncode != 0:
+        log( f"[observe] docker logs {container} exited {out.returncode} — INCONCLUSIVE" )
+        return INCONCLUSIVE
+    blob = out.stdout + out.stderr
+    log( f"stage3: searched {len(blob.splitlines())} log lines over a {window_s}s window" )
+    for line in blob.splitlines():
+        if "Initialized for" in line and SEED_FILENAME in line:
+            log( f"stage3 proof: {line.strip()[:120]}" )
+            return PASS
+    return FAIL
 
 
 def verify_content( headers, done_job ):
-    """Fetch the podcast artifact and check it names the planted facts."""
+    """
+    Fetch the podcast artifact and check it names the planted facts.
+
+    Ensures:
+        - PASS when at least two planted facts appear in the fetched text
+        - FAIL when text WAS fetched and the facts are not in it
+        - INCONCLUSIVE when no text could be fetched at all. An empty haystack
+          finds nothing, which is not the same as the podcast being about the
+          wrong document — and reporting it as FAIL would blame the product for
+          an artifact-fetch problem.
+    """
     # The done card carries a completion abstract + artifact paths. Try the
     # script .md first (cheap text), fall back to the abstract.
     blobs = []
@@ -543,10 +747,14 @@ def verify_content( headers, done_job ):
                     blobs.append( r.text )
             except Exception:
                 pass
-    hay = " ".join( blobs ).lower()
+    hay = " ".join( blobs ).strip().lower()
+    if not hay:
+        log( "content check: NO artifact text could be fetched — INCONCLUSIVE, not a content failure" )
+        return INCONCLUSIVE
     hits = [ v for v in SEED_FACTS.values() if v.lower() in hay ]
-    log( f"content check: {len(hits)}/{len(SEED_FACTS)} planted facts present: {hits}" )
-    return len( hits ) >= 2
+    log( f"content check: {len(hits)}/{len(SEED_FACTS)} planted facts present over "
+         f"{len(hay)} chars of artifact text: {hits}" )
+    return PASS if len( hits ) >= 2 else FAIL
 
 
 if __name__ == "__main__":
