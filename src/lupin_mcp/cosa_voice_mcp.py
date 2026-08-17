@@ -1250,6 +1250,11 @@ def converse(
             return f"[timeout - using default] {response_default}"
         return "[timeout - no response received]"
     else:
+        if response.status == "user_not_available":
+            # Provably-offline user, no default — a NAMED condition (mirrors the
+            # async notify path), not a transport failure. The caller blocks the
+            # row with a chase per the offline-user doctrine rather than retrying.
+            return "[user_not_available]"
         return f"[error: {response.status}]"
 
 
@@ -1818,6 +1823,12 @@ def ask_multiple_choice(
             return { "answers": default, "default_used": True, "answered": False }
         return { "error": "timeout - no response received", "timeout": True }
 
+    # Provably-offline user with no default — a NAMED condition, not a transport
+    # failure. Surface it so the caller blocks the row with a chase per the
+    # offline-user doctrine instead of retrying as it would on a bare 503.
+    if response.status == "user_not_available":
+        return { "status": "user_not_available" }
+
     # Genuine error (connection, HTTP, stream, unexpected) — surface the status
     # so real failures stay visible rather than being masked by the default.
     return { "error": f"error: {response.status}" }
@@ -2048,6 +2059,9 @@ def ask_open_ended_batch(
     elif response.exit_code == 2:
         return { "error": "timeout - no response received", "timeout": True }
     else:
+        if response.status == "user_not_available":
+            # Named offline condition (mirrors async notify), not a transport error.
+            return { "status": "user_not_available" }
         return { "error": f"error: {response.status}" }
 
 

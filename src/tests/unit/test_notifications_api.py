@@ -564,7 +564,16 @@ class TestNotifyResponseRequired:
             user_service.get_user_by_email = original_get_user
 
     def test_notify_response_required_offline_no_default(self, app, mock_db_session):
-        """Test response-required mode returns 503 when user offline and no default provided."""
+        """Row 0c3ad4b5: offline + NO default emits a NAMED terminal OfflineEvent
+        (default_used=False, response=null) over a 200 SSE stream — NOT a bare 503.
+
+        A 503 reads as 'server down, retry', the opposite of the correct
+        offline-user response (stop asking, block the row with a chase). This
+        named signal lets the sync ask degrade the way the async notify path
+        already does. No default is forged: response stays null."""
+        from unittest.mock import patch
+        import uuid as uuid_module
+
         # Setup mocks
         mock_user_service = Mock()
         mock_user_service.get_user_by_email = Mock( return_value={"id": "550e8400-e29b-41d4-a716-446655440000", "email": "test@example.com"} )
@@ -578,6 +587,13 @@ class TestNotifyResponseRequired:
 
         mock_queue_instance = Mock()
 
+        # Setup mock database session — the named-signal path persists
+        # (state='expired') + records idempotency, mirroring the with-default branch.
+        db_context_manager, mock_session = mock_db_session
+
+        mock_notification = MagicMock()
+        mock_notification.id = uuid_module.UUID( "550e8400-e29b-41d4-a716-446655440001" )
+
         # Override FastAPI dependencies - including API key auth
         app.dependency_overrides[require_api_key_or_jwt] = lambda: "service_account_123"
         app.dependency_overrides[get_websocket_manager] = lambda: mock_ws_instance
@@ -588,24 +604,44 @@ class TestNotifyResponseRequired:
         user_service.get_user_by_email = mock_user_service.get_user_by_email
 
         try:
-            client = TestClient( app )
+            with patch( 'cosa.rest.routers.notifications.get_db', return_value=db_context_manager ):
+                with patch( 'cosa.rest.routers.notifications.NotificationRepository' ) as MockRepo:
+                    mock_repo_instance = MagicMock()
+                    mock_repo_instance.create_notification.return_value = mock_notification
+                    mock_repo_instance.update_state.return_value = mock_notification
+                    MockRepo.return_value = mock_repo_instance
 
-            response = client.post(
-                "/api/notify",
-                params={
-                    "message"           : "Test notification",
-                    "type"              : "task",
-                    "priority"          : "high",
-                    "target_user"       : "test@example.com",
-                    "response_requested": True,
-                    "response_type"     : "yes_no"
-                    # No response_default provided
-                },
-                headers={"X-API-Key": "claude_code_simple_key"}
-            )
+                    client = TestClient( app )
 
-            assert response.status_code == 503
-            assert "offline" in response.json()["detail"].lower()
+                    response = client.post(
+                        "/api/notify",
+                        params={
+                            "message"           : "Test notification",
+                            "type"              : "task",
+                            "priority"          : "high",
+                            "target_user"       : "test@example.com",
+                            "response_requested": True,
+                            "response_type"     : "yes_no"
+                            # No response_default provided
+                        },
+                        headers={"X-API-Key": "claude_code_simple_key"}
+                    )
+
+                    # Row 0c3ad4b5: NOT a 503. A 200 SSE stream — ack (re-attach
+                    # handle) then a NAMED OfflineEvent with default_used=False and
+                    # response=null: the "user unavailable, no answer to give"
+                    # signal a caller can branch on. No default is forged.
+                    assert response.status_code == 200
+                    assert response.headers[ "content-type" ].startswith( "text/event-stream" )
+
+                    frames = _parse_sse_frames( response.text )
+                    assert len( frames ) == 2
+                    ack, offline = frames
+                    assert ack[ "status" ] == "ack"
+                    assert "notification_id" in ack                  # re-attach handle
+                    assert offline[ "status" ] == "offline"
+                    assert offline[ "response" ] is None             # NO default forged
+                    assert offline[ "default_used" ] is False        # named user-unavailable
 
         finally:
             # Restore original function

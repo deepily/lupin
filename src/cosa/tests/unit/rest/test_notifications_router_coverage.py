@@ -443,14 +443,34 @@ class TestNotifyUser( unittest.IsolatedAsyncioTestCase ):
         self.assertEqual( offline[ "response" ], "no" )         # the default is DELIVERED
         self.assertIs( offline[ "default_used" ], True )        # MARKED as a substitution
 
-    async def test_response_required_offline_no_default_503( self ):
+    async def test_response_required_offline_no_default_named_signal( self ):
+        # Row 0c3ad4b5: offline + NO default no longer raises 503. It emits a NAMED
+        # terminal OfflineEvent (default_used=False, response=None) over an SSE
+        # StreamingResponse — the sync mirror of notify's async graceful degrade. A
+        # 503 reads as "server down, retry"; this lets the caller block the row with
+        # a chase instead. No default is forged: response stays None.
         ws = _ws_manager( is_connected=False, connection_count=0 )
+        mock_db = Mock(); repo = Mock(); repo.create_notification.return_value = Mock( id=uuid.uuid4() )
         with patch( "cosa.rest.user_service.get_user_by_email", return_value={ "id": UID_STR } ), \
+             patch.object( N, "get_db", _ctx_db( mock_db ) ), \
+             patch.object( N, "NotificationRepository", return_value=repo ), \
              _patch_fastapi_main( self._user_main() ), patch( "builtins.print" ):
-            with self.assertRaises( HTTPException ) as ctx:
-                await self._call( Mock(), ws, response_requested=True, response_type="yes_no",
-                                  response_default=None )
-        self.assertEqual( ctx.exception.status_code, 503 )
+            out = await self._call( Mock(), ws, response_requested=True, response_type="yes_no",
+                                    response_default=None )
+
+        self.assertIsInstance( out, StreamingResponse )
+
+        import json as _json
+        chunks = [ c async for c in out.body_iterator ]
+        frames = [ _json.loads( c.split( "data: ", 1 )[ 1 ].strip() ) for c in chunks if "data: " in c ]
+
+        self.assertEqual( len( frames ), 2 )
+        ack, offline = frames
+        self.assertEqual( ack[ "status" ], "ack" )
+        self.assertIn( "notification_id", ack )                  # re-attach handle present
+        self.assertEqual( offline[ "status" ], "offline" )
+        self.assertIsNone( offline[ "response" ] )              # NO default forged
+        self.assertIs( offline[ "default_used" ], False )       # named user-unavailable
 
     # ---- response-required online (prediction + SSE) ----
     def _online_repo( self ):

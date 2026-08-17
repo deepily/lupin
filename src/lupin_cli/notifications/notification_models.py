@@ -486,15 +486,20 @@ class ExpiredEvent(SSEEventBase):
 
 class OfflineEvent(SSEEventBase):
     """
-    User was offline, used default value immediately.
+    User was offline. Two shapes on one event:
+      * a default WAS supplied  -> response carries it, default_used=True
+        (the graceful substitution; the caller stamps answered=False).
+      * NO default was supplied -> response is None, default_used=False
+        (a NAMED "user unavailable" signal — NOT a forged answer, NOT a 503).
 
     Attributes:
         status: Always "offline"
-        response: Default value (required for offline)
-        default_used: Always True
+        response: The default value when one was supplied, else None
+        default_used: True when a default was substituted; False when the
+            offline condition is reported with no answer to give
     """
     status: Literal["offline"] = "offline"
-    response: str
+    response: Optional[str] = None
     default_used: bool = True
 
 

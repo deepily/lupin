@@ -423,13 +423,26 @@ def _send_sync_notification(
                 )
 
         elif isinstance( event, OfflineEvent ):
+            if event.default_used:
+                if debug:
+                    print( f"⚠️ User offline - used default: {event.response}", file=sys.stderr )
+                return NotificationResponse(
+                    response_value = event.response,
+                    exit_code      = 0,  # Offline with default = success
+                    status         = "offline",
+                    default_used   = True
+                )
+            # Offline, NO default supplied. Return a NAMED condition the caller can
+            # branch on — the sync mirror of the async notify path's
+            # "user_not_available". NOT a forged default, NOT a bare transport
+            # error: response_value stays None and the status names the cause.
             if debug:
-                print( f"⚠️ User offline - used default: {event.response}", file=sys.stderr )
+                print( "⚠️ User offline - no default, reporting user_not_available", file=sys.stderr )
             return NotificationResponse(
-                response_value = event.response,
-                exit_code      = 0,  # Offline with default = success
-                status         = "offline",
-                default_used   = True
+                response_value = None,
+                exit_code      = 1,
+                status         = "user_not_available",
+                default_used   = False
             )
 
         elif isinstance( event, ErrorEvent ):

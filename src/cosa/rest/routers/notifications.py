@@ -1233,9 +1233,39 @@ async def notify_user(
                     headers    = _sse_headers()
                 )
             else:
-                raise HTTPException(
-                    status_code = 503,
-                    detail      = "User is offline and no default response provided"
+                # User offline AND no default to substitute. Do NOT 503 here — a
+                # bare transport error reads as "server down, retry", the opposite
+                # of the correct offline-user response (stop asking, block the row
+                # with a chase). Instead emit a NAMED terminal OfflineEvent with
+                # default_used=False, so the sync ask path degrades the way the
+                # async notify path already does. No default is forged: response
+                # is null and default_used is False.
+                print("[NOTIFY] User offline, no default - streaming named user-unavailable signal")
+
+                # Persist (state='expired') + record idempotency so a same-key
+                # retry re-attaches here too, mirroring the with-default branch.
+                notification_id = await asyncio.to_thread(
+                    _persist_response_required_sync,
+                    resolved_sender_id, target_system_id, message, type, priority,
+                    title, abstract, response_type, response_default,
+                    parsed_response_options, timeout_seconds, job_id,
+                    progress_group_id, "expired",
+                    sender_persona, sender_icon
+                )
+                _record_ask_idempotency( idempotency_key, notification_id )
+
+                async def offline_no_default_event_generator():
+                    # ack first — hands the client this ask's notification_id so a
+                    # mid-stream death can re-attach (§4.5 E-a), same as every path.
+                    yield f"data: {json.dumps({'status': 'ack', 'notification_id': notification_id})}\n\n"
+                    # OfflineEvent, default_used=False, response=null: the NAMED
+                    # "user unavailable, no answer to give" terminal event.
+                    yield f"data: {json.dumps({'status': 'offline', 'response': None, 'default_used': False})}\n\n"
+
+                return StreamingResponse(
+                    offline_no_default_event_generator(),
+                    media_type = "text/event-stream",
+                    headers    = _sse_headers()
                 )
 
         # User is online - create notification in PostgreSQL (marked delivered).
