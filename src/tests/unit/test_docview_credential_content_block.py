@@ -27,9 +27,15 @@ import os
 import pytest
 
 from cosa.rest.routers._scope_registry import (
+    _decode_json_unicode_escapes,
     _is_secrets_path,
+    _object_declares_a_credential,
+    _parsed_value_carries_a_credential,
     _prefix_looks_like_credential,
+    _the_window_may_be_hiding_the_signature,
+    _value_is_secret_material,
     is_credential_file,
+    CREDENTIAL_MAX_SNIFF_BYTES,
     CREDENTIAL_SNIFF_BYTES,
 )
 
@@ -372,3 +378,236 @@ def test_ambiguous_names_are_NOT_blocked_by_name( filename ):
 
 def test_a_service_account_key_in_a_subdirectory_is_blocked_by_name():
     assert _is_secrets_path( "deploy/keys/service-account.json" )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AXIS 3 — DEPTH. Bug 2d57a998: the check read the TOP LEVEL of the parsed
+# object only, and six shapes carrying real credential material walked through.
+#
+# WHY THE EARLIER TABLES COULD NOT REACH THIS: both of them varied what sits in
+# FRONT of the payload (whitespace, BOM, other invisible marks) and held the
+# payload itself at a flat top-level object. A top-level-only check fails on
+# NESTED payloads, so no number of lead-ins can find it. The lead-in fix above
+# is sound — 15 attacks against it all blocked — and it says nothing about depth.
+#
+# The first shape is the one that matters most: it is not a synthetic nesting,
+# it is the file the GCP console hands you when you create an OAuth client, and
+# it is committed by accident under exactly that name.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# The client_secret_<...>.json download, in the shape the console actually emits:
+# every field one level down under "installed", and no "type" field at all.
+GCP_CONSOLE_CLIENT_SECRET_INSTALLED = {
+    "installed" : {
+        "client_id"                   : "764086051850-6qr4p6gpi6hn506pt8ejuq83di341hur.apps.googleusercontent.com",
+        "project_id"                  : "hello-world-foo-423219",
+        "auth_uri"                    : "https://accounts.google.com/o/oauth2/auth",
+        "token_uri"                   : "https://oauth2.googleapis.com/token",
+        "auth_provider_x509_cert_url" : "https://www.googleapis.com/oauth2/v1/certs",
+        "client_secret"               : "GOCSPX-9dQ2mVn4rTb7xLpKs0WyZaEuHc",
+        "redirect_uris"               : [ "http://localhost" ],
+    }
+}
+
+# The web-application variant of the same download.
+GCP_CONSOLE_CLIENT_SECRET_WEB = {
+    "web" : {
+        "client_id"                   : "764086051850-6qr4p6gpi6hn506pt8ejuq83di341hur.apps.googleusercontent.com",
+        "project_id"                  : "hello-world-foo-423219",
+        "auth_uri"                    : "https://accounts.google.com/o/oauth2/auth",
+        "token_uri"                   : "https://oauth2.googleapis.com/token",
+        "auth_provider_x509_cert_url" : "https://www.googleapis.com/oauth2/v1/certs",
+        "client_secret"               : "GOCSPX-9dQ2mVn4rTb7xLpKs0WyZaEuHc",
+        "javascript_origins"          : [ "http://localhost:7999" ],
+    }
+}
+
+
+def _adc_with_the_signature_past_the_first_window():
+    """A real ADC behind one big leading field, so the signature sits past 8192."""
+    padded = { "notes" : "x" * ( CREDENTIAL_SNIFF_BYTES * 2 ) }
+    padded.update( ADC_USER_CREDENTIAL )
+    return json.dumps( padded )
+
+
+# Each entry is one of the six shapes Clayton measured as SERVED, named as he
+# named it. Fixed together, not one at a time: 1-4 are the depth-and-container
+# hole, 5-6 are the truncated branch reading a bounded window of raw text.
+SIX_SHAPES_THAT_STILL_SERVED = [
+    ( "1 GCP console client_secret json, fields under 'installed'",
+      json.dumps( GCP_CONSOLE_CLIENT_SECRET_INSTALLED, indent=2 ) ),
+    ( "2 the same download, 'web' variant",
+      json.dumps( GCP_CONSOLE_CLIENT_SECRET_WEB, indent=2 ) ),
+    ( "3 service-account key nested under a config wrapper, no PEM header",
+      json.dumps( { "gcp" : SA_KEY_NO_PEM } ) ),
+    ( "4 a credential inside a JSON array",
+      json.dumps( [ ADC_USER_CREDENTIAL ] ) ),
+    ( "5 an ADC whose signature sits past the first sniff window",
+      _adc_with_the_signature_past_the_first_window() ),
+    ( "6 a truncated object whose key is spelled with JSON \\u escapes",
+      '{"\\u0072efresh_token": "1//0abcdefghijklmnop", "client_id": "764086051850-6qr4p' ),
+]
+
+
+@pytest.mark.parametrize( "label,body", SIX_SHAPES_THAT_STILL_SERVED,
+                          ids=[ entry[ 0 ][ : 1 ] for entry in SIX_SHAPES_THAT_STILL_SERVED ] )
+def test_the_six_shapes_that_still_served_are_all_REFUSED( tmp_path, label, body ):
+    """
+    THE HEADLINE for this bug. All six measured SERVED before the depth fix, on
+    this exact fixture set, and all six must refuse now.
+    """
+    path = tmp_path / "fixture.json"
+    path.write_text( body, encoding="utf-8" )
+
+    assert is_credential_file( str( path ) ), f"shape SERVED a credential: {label}"
+
+
+def test_the_gcp_console_download_is_refused_under_its_real_name( tmp_path ):
+    """
+    The name the console gives it, so the fixture is the whole real case: the
+    file as downloaded, under the filename it downloads as.
+    """
+    path = tmp_path / "client_secret_764086051850-6qr4p6gpi6hn506pt8ejuq83di341hur.apps.googleusercontent.com.json"
+    path.write_text( json.dumps( GCP_CONSOLE_CLIENT_SECRET_INSTALLED, indent=2 ), encoding="utf-8" )
+
+    assert is_credential_file( str( path ) )
+
+
+def test_depth_is_not_capped_at_a_tuned_number():
+    """
+    "Arbitrary depth" asserted, not assumed. A credential thirty wrappers down is
+    the same credential — a bounded walk would have to pick a number, and the
+    number would be the next hole.
+    """
+    buried = ADC_USER_CREDENTIAL
+    for _ in range( 30 ):
+        buried = { "wrapper" : buried }
+
+    assert _prefix_looks_like_credential( json.dumps( buried ) )
+
+
+def test_a_credential_nested_inside_an_array_inside_an_object_is_refused():
+    """Containers alternate; the walk must cross both kinds, not just objects."""
+    nested = { "accounts" : [ { "keys" : [ SA_KEY_NO_PEM ] } ] }
+
+    assert _prefix_looks_like_credential( json.dumps( nested ) )
+
+
+def test_a_truncated_ARRAY_of_credentials_still_BLOCKS():
+    """
+    The truncated branch keyed on `{` alone, so an array that ran past the window
+    was read as prose and served. A truncated array is still a truncated
+    credential file.
+    """
+    truncated = json.dumps( [ ADC_USER_CREDENTIAL ] )[ : 140 ]
+
+    assert truncated.startswith( "[" )
+    assert '"client_secret"' in truncated, "fixture must carry a signature field to act on"
+    assert _prefix_looks_like_credential( truncated )
+
+
+def test_a_lead_in_mark_in_front_of_a_NESTED_credential_still_BLOCKS():
+    """
+    The two fixes have to hold at the same time. This is the cell neither table
+    had: an invisible lead-in AND a nested payload.
+    """
+    assert _prefix_looks_like_credential( " ﻿" + json.dumps( GCP_CONSOLE_CLIENT_SECRET_INSTALLED ) )
+
+
+# ─── the accepted limit, stated rather than assumed ──────────────────────────
+
+def test_a_credential_past_the_SECOND_window_is_SERVED_and_that_is_the_stated_limit( tmp_path ):
+    """
+    ⚠️ ACCEPTED LIMIT, asserted so it stays a decision instead of drifting into an
+    assumption. The read widens once to CREDENTIAL_MAX_SNIFF_BYTES; material past
+    that mark is not seen. Closing it would mean refusing every large JSON
+    document on the grounds it might be hiding something.
+
+    If this test ever goes red, the bound moved — that is a change to state, not
+    a failure to fix.
+    """
+    padded = { "notes" : "x" * ( CREDENTIAL_MAX_SNIFF_BYTES + 1024 ) }
+    padded.update( ADC_USER_CREDENTIAL )
+    path = tmp_path / "huge.json"
+    path.write_text( json.dumps( padded ), encoding="utf-8" )
+
+    assert not is_credential_file( str( path ) )
+
+
+def test_the_second_read_is_what_catches_the_past_the_window_shape( tmp_path ):
+    """
+    The widened read fires on a filled window that opens a JSON container, and on
+    nothing else — a short file and a long document are both decided in one pass.
+    """
+    assert not _the_window_may_be_hiding_the_signature( '{"short": "file"}' )
+    assert not _the_window_may_be_hiding_the_signature( "p" * CREDENTIAL_SNIFF_BYTES )
+    assert _the_window_may_be_hiding_the_signature( "{" + "p" * ( CREDENTIAL_SNIFF_BYTES - 1 ) )
+    assert _the_window_may_be_hiding_the_signature( " ﻿[" + "p" * CREDENTIAL_SNIFF_BYTES )
+
+
+# ─── NO FALSE POSITIVES at depth — the cost of the fix, decided deliberately ──
+
+def test_an_openapi_spec_naming_client_secret_at_depth_is_STILL_SERVED( tmp_path ):
+    """
+    The price of searching at any depth: a bare key NAME can no longer be enough
+    to refuse on, or every spec that documents an OAuth flow becomes a credential.
+    A spec carries an OBJECT under the field; a credential carries the secret.
+    """
+    path = tmp_path / "openapi.json"
+    path.write_text( json.dumps( {
+        "openapi"    : "3.0.0",
+        "components" : { "securitySchemes" : { "oauth" : { "type" : "oauth2", "flows" : {
+            "clientCredentials" : { "tokenUrl" : "/token", "x-params" : {
+                "client_secret" : { "type" : "string", "description" : "the client secret" },
+                "refresh_token" : { "type" : "string" },
+            } } } } } },
+    } ) )
+
+    assert not is_credential_file( str( path ) )
+
+
+@pytest.mark.parametrize( "placeholder", [
+    "<your client secret>", "<REDACTED>", "${CLIENT_SECRET}", "{{ client_secret }}", "   ",
+] )
+def test_a_template_showing_a_credential_field_is_STILL_SERVED( tmp_path, placeholder ):
+    """
+    A setup guide that shows the field with a placeholder in it is a document.
+    This is a SHAPE test, not a list of words — a real secret cannot be written
+    this way and still be the secret.
+    """
+    path = tmp_path / "example.json"
+    path.write_text( json.dumps( { "installed" : { "client_secret" : placeholder } } ) )
+
+    assert not is_credential_file( str( path ) )
+
+
+def test_a_field_carrying_a_schema_rather_than_a_secret_is_not_credential_material():
+    """The unit under the trade above: only a real string counts."""
+    assert _value_is_secret_material( "GOCSPX-9dQ2mVn4rTb7xLpKs0WyZaEuHc" )
+    assert not _value_is_secret_material( { "type": "string" } )
+    assert not _value_is_secret_material( [ "client_secret" ] )
+    assert not _value_is_secret_material( 42 )
+    assert not _value_is_secret_material( None )
+
+
+def test_a_declared_credential_type_at_depth_needs_no_secret_string():
+    """
+    The type value is decisive on its own — a service-account key whose fields
+    were stripped to nothing is still announcing what it is.
+    """
+    assert _object_declares_a_credential( { "type" : "external_account" } )
+    assert not _object_declares_a_credential( { "type" : "report" } )
+    assert not _object_declares_a_credential( { "type" : 3 } )
+
+
+def test_a_parsed_scalar_carries_nothing_to_decide_on():
+    """A JSON file that is just a string or a number has no object to inspect."""
+    assert not _parsed_value_carries_a_credential( "client_secret" )
+    assert not _parsed_value_carries_a_credential( 7 )
+    assert not _parsed_value_carries_a_credential( None )
+
+
+def test_text_without_escapes_comes_back_unchanged():
+    """The decoder only puts escapes back; it must not rewrite anything else."""
+    assert _decode_json_unicode_escapes( '{"refresh_token": "1//0abc"}' ) == '{"refresh_token": "1//0abc"}'
+    assert _decode_json_unicode_escapes( '{"\\u0072efresh_token"' ) == '{"refresh_token"'

@@ -225,11 +225,20 @@ SECRETS_BLOCKLIST_PATTERNS = (
 # the top), small enough that deciding never means slurping an arbitrary file.
 CREDENTIAL_SNIFF_BYTES = 8192
 
+# The SECOND-stage bound, used only when the first window was filled by something
+# that is trying to be a JSON container. Clayton measured a real ADC whose signature
+# fields sat past 8192 behind one big leading field: the truncated branch scans the
+# window as text, so a signature outside the window is a signature that does not
+# exist. Reading further is what closes that, and it stays BOUNDED — a credential is
+# a few KB, so a megabyte is generous by three orders of magnitude while still never
+# meaning "slurp an arbitrary file".
+CREDENTIAL_MAX_SNIFF_BYTES = 1_048_576
+
 # The field SIGNATURES, per Tiffany's constraint 1 — a GCP service-account key is
 # identified by carrying type=service_account + private_key + client_email, and a
 # user ADC file by refresh_token + client_secret. Any ONE of these fields is enough
 # to refuse: a document with a legitimate reason to contain `private_key` as a
-# top-level JSON key is not a document, it is a key.
+# JSON key holding a real secret string is not a document, it is a key.
 _CREDENTIAL_JSON_KEYS = (
     "private_key",              # GCP SA keys, and any PKCS#8 blob carried in JSON
     "private_key_id",
@@ -247,6 +256,22 @@ _CREDENTIAL_TYPE_VALUES = (
 _PEM_PRIVATE_KEY = re.compile(
     r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----"
 )
+
+# Syntactic placeholder values — `<your client secret>`, `${CLIENT_SECRET}`,
+# `{{ client_secret }}`. A credential FIELD whose value is one of these carries no
+# secret, so a spec or a template that shows the field keeps being served. This is a
+# shape test, not a vocabulary list: no word has to be guessed in advance, and a real
+# secret cannot be spelled this way without ceasing to be the secret.
+_PLACEHOLDER_VALUE = re.compile( r"^\s*(?:<[^>]*>|\$\{[^}]*\}|\{\{[^}]*\}\})\s*$" )
+
+# A JSON \uXXXX escape. The truncated branch scans RAW TEXT, so a key spelled
+# `"refresh_token"` reads as a different string there than it does once parsed.
+# Putting the escapes back before the scan is what closes that.
+_JSON_UNICODE_ESCAPE = re.compile( r"\\u([0-9a-fA-F]{4})" )
+
+# What a JSON container starts with, once the invisible lead-in is gone. An ARRAY
+# counts: `[ {ADC} ]` is a credential file, and reading only objects served it.
+_JSON_CONTAINER_OPENERS = ( "{", "[" )
 
 
 def is_credential_file( full_path: str ) -> bool:
@@ -267,17 +292,26 @@ def is_credential_file( full_path: str ) -> bool:
     would re-introduce, one layer down, the exact filename dependency this check
     exists to remove.
 
-    🔴 BOUNDED READ (constraint 4). Only the first CREDENTIAL_SNIFF_BYTES are read;
-    the signature fields of both credential shapes sit well inside that, and
-    deciding whether to serve a file must never mean slurping an arbitrary one.
+    🔴 BOUNDED READ, IN TWO STAGES (constraint 4). The first CREDENTIAL_SNIFF_BYTES
+    decide almost every file. If that window is FILLED by something that is trying to
+    be a JSON container, the read widens once to CREDENTIAL_MAX_SNIFF_BYTES, because
+    a signature outside the window is a signature this function cannot see — Clayton
+    measured a real credential hidden that way behind one big leading field. Both
+    stages are bounded, so deciding still never means slurping an arbitrary file.
+
+    ⚠️ ACCEPTED LIMIT, stated rather than assumed: a JSON container larger than
+    CREDENTIAL_MAX_SNIFF_BYTES whose only credential material sits past that mark is
+    SERVED. Closing that would mean refusing every large JSON document on the grounds
+    that it might be hiding something, which costs more than it buys.
 
     Requires:
         - full_path is a filesystem path the caller intends to serve
 
     Ensures:
-        - True for a JSON object declaring type service_account / authorized_user /
-          external_account, or carrying private_key / private_key_id /
-          refresh_token / client_secret
+        - True for a JSON object AT ANY NESTING DEPTH, inside objects or arrays,
+          declaring type service_account / authorized_user / external_account, or
+          carrying private_key / private_key_id / refresh_token / client_secret with
+          a real string value
         - True for any PEM PRIVATE KEY block, bare or wrapped
         - True when the file cannot be read or decoded, for ANY reason
         - False only when the prefix was read successfully AND carries no signature —
@@ -290,11 +324,38 @@ def is_credential_file( full_path: str ) -> bool:
     try:
         with open( full_path, "r", encoding="utf-8" ) as handle:
             prefix = handle.read( CREDENTIAL_SNIFF_BYTES )
+            if _the_window_may_be_hiding_the_signature( prefix ):
+                prefix += handle.read( CREDENTIAL_MAX_SNIFF_BYTES - CREDENTIAL_SNIFF_BYTES )
     except Exception:
         # Unreadable, missing, permission-denied, or not utf-8 — all BLOCK.
         return True
 
     return _prefix_looks_like_credential( prefix )
+
+
+def _the_window_may_be_hiding_the_signature( prefix: str ) -> bool:
+    """
+    Return True iff the first window ran out mid-file on a JSON container, which is
+    the only case where reading further can change the answer.
+
+    A file SHORTER than the window was read whole, so there is nothing further to
+    see. Text that is not a JSON container is decided as prose and reading more of it
+    changes nothing. Everything else stops at one window.
+
+    Requires:
+        - prefix is the text read by the first stage
+
+    Ensures:
+        - True only when the window was filled AND the text opens a JSON object or
+          array once the invisible lead-in is stripped
+
+    Raises:
+        - nothing
+    """
+    if len( prefix ) < CREDENTIAL_SNIFF_BYTES:
+        return False
+
+    return _strip_leadin_noise( prefix )[ : 1 ] in _JSON_CONTAINER_OPENERS
 
 
 def _strip_leadin_noise( text: str ) -> str:
@@ -336,8 +397,9 @@ def _prefix_looks_like_credential( prefix: str ) -> bool:
 
     Ensures:
         - True on a PEM private-key header, which needs no parsing
-        - True on a parseable JSON object carrying a credential type or field
-        - True when the prefix is a TRUNCATED JSON object that already shows a
+        - True on a parseable JSON value carrying a credential type or field AT ANY
+          DEPTH, inside objects or arrays
+        - True when the prefix is a TRUNCATED JSON container that already shows a
           credential field — a key does not become safe because the read stopped
           early, which is the same fail-closed rule applied to truncation
         - False for an empty prefix, which carries no signature to act on
@@ -379,26 +441,130 @@ def _prefix_looks_like_credential( prefix: str ) -> bool:
         # TRUNCATED or non-JSON. A service-account key longer than the sniff window
         # lands here, so falling through to "serve it" would defeat the bounded read.
         #
-        # ⚠️ ONLY for text that is TRYING to be a JSON object. Scanning arbitrary
+        # ⚠️ ONLY for text that is TRYING to be a JSON container. Scanning arbitrary
         # prose for these strings blocks documentation ABOUT credentials — an auth
         # guide quoting `"type": "service_account"` is a document, and this test file
-        # itself would be refused. A truncated key still starts with `{`; prose does
-        # not, so the opening brace is what separates them.
-        if not _strip_leadin_noise( prefix ).startswith( "{" ):
+        # itself would be refused. A truncated key still starts with `{` or `[`;
+        # prose does not, so the opening bracket is what separates them.
+        if _strip_leadin_noise( prefix )[ : 1 ] not in _JSON_CONTAINER_OPENERS:
             return False
-        lowered = prefix.lower()
+
+        # Put JSON escapes back before scanning. This branch reads RAW TEXT, so a key
+        # written `"refresh_token"` is the same key to a parser and a different
+        # string to a substring scan — which is exactly how one walked through.
+        lowered = _decode_json_unicode_escapes( prefix ).lower()
         if any( f'"{key}"' in lowered for key in _CREDENTIAL_JSON_KEYS ):
             return True
         return any( f'"{value}"' in lowered for value in _CREDENTIAL_TYPE_VALUES )
 
-    if not isinstance( parsed, dict ):
+    return _parsed_value_carries_a_credential( parsed )
+
+
+def _decode_json_unicode_escapes( text: str ) -> str:
+    """
+    Return `text` with every `\\uXXXX` escape replaced by the character it names.
+
+    Requires:
+        - text is decoded text, possibly truncated mid-token
+
+    Ensures:
+        - returns text with each \\uXXXX escape replaced by chr( XXXX )
+        - returns text unchanged when it carries no such escape
+
+    Raises:
+        - nothing
+    """
+    return _JSON_UNICODE_ESCAPE.sub( lambda match: chr( int( match.group( 1 ), 16 ) ), text )
+
+
+def _value_is_secret_material( value ) -> bool:
+    """
+    Return True iff `value` is a real secret string rather than a schema or a
+    template.
+
+    THE TRADE THIS ENCODES, decided deliberately rather than discovered later: once
+    the search goes to any depth, a bare key NAME stops being enough to refuse on. An
+    OpenAPI spec names `client_secret` under `securitySchemes` and a template shows
+    `"client_secret": "<yours>"` — both are documents, and both would be refused by a
+    name-only rule the moment it stopped looking only at the top level. A credential
+    carries the secret AS A STRING; a schema carries an object, and a template carries
+    a placeholder.
+
+    Requires:
+        - nothing; any parsed JSON value is acceptable
+
+    Ensures:
+        - True only for a non-blank string that is not a syntactic placeholder
+        - False for objects, arrays, numbers, booleans and null
+
+    Raises:
+        - nothing
+    """
+    if not isinstance( value, str ):
+        return False
+    if not value.strip():
         return False
 
-    declared_type = parsed.get( "type" )
+    return _PLACEHOLDER_VALUE.match( value ) is None
+
+
+def _object_declares_a_credential( node: dict ) -> bool:
+    """
+    Return True iff this ONE object is itself credential material.
+
+    Requires:
+        - node is a parsed JSON object
+
+    Ensures:
+        - True when its `type` names a credential type value
+        - True when it carries a credential key holding secret material
+        - False otherwise
+
+    Raises:
+        - nothing
+    """
+    declared_type = node.get( "type" )
     if isinstance( declared_type, str ) and declared_type.strip() in _CREDENTIAL_TYPE_VALUES:
         return True
 
-    return any( key in parsed for key in _CREDENTIAL_JSON_KEYS )
+    return any( _value_is_secret_material( node.get( key ) ) for key in _CREDENTIAL_JSON_KEYS )
+
+
+def _parsed_value_carries_a_credential( parsed ) -> bool:
+    """
+    Return True iff a credential object sits ANYWHERE in the parsed value.
+
+    🔴 THE DEPTH FIX. The previous check read `key in parsed` on the top-level object
+    only, so six shapes walked through — the first of them being the client_secret
+    JSON the GCP console hands you, which puts every field one level down under
+    `"installed"` or `"web"`. Arrays were served outright. Nesting is not an attack
+    here so much as the NORMAL shape of a downloaded credential.
+
+    Walks with an explicit stack rather than recursion, so nesting depth is bounded by
+    the file, not by the interpreter's stack — no depth cap to tune, and no crash on a
+    deeply nested document.
+
+    Requires:
+        - parsed is a value returned by json.loads
+
+    Ensures:
+        - True iff some object inside it satisfies _object_declares_a_credential
+        - False for scalars, which carry no fields to test
+
+    Raises:
+        - nothing
+    """
+    pending = [ parsed ]
+    while pending:
+        node = pending.pop()
+        if isinstance( node, dict ):
+            if _object_declares_a_credential( node ):
+                return True
+            pending.extend( node.values() )
+        elif isinstance( node, list ):
+            pending.extend( node )
+
+    return False
 
 
 def _is_secrets_path( relative_path: str ) -> bool:
