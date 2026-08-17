@@ -631,7 +631,11 @@ class XmlCoordinator:
                     _, augmented_line = self.prompt_generator.insert_interjection( augmented_line, self.prompt_generator.interjections )
                     _, augmented_line = self.prompt_generator.prepend_salutation( augmented_line, self.prompt_generator.salutations )
 
-                    instruction = self.prompt_generator.vox_cmd_instruction_template.format( command_choices=self.prompt_generator.agent_router_commands )
+                    # 14ba1437: use the AGENT-ROUTER wrapper, matching the sibling builders at :387 (compound)
+                    # and :805 (agentic). This site trained 5 simple commands (todo/math/calculator/automatic/none)
+                    # under the BROWSER wrapper ("a browser on your computer would understand", <browser-commands>),
+                    # a train/serve mismatch against the served agent-routing prompt.
+                    instruction = self.prompt_generator.agent_router_instruction_template.format( command_choices=self.prompt_generator.agent_router_commands )
                     human_says  = self.prompt_generator.common_human_says_template.format( voice_command=augmented_line )
                     input_text  = self.prompt_generator.common_input_template.format( human_says=human_says, response_format=self.prompt_generator.common_response_format )
                     output      = self.prompt_generator.common_output_template.format( command=simple_command, args="" )
