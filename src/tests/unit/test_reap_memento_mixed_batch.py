@@ -101,11 +101,13 @@ def _mixed_disk():
 
 def _coord( identities, disk, dm, **kw ):
     """
-    `project_root` remains the LUPIN_ROOT-derived batch fallback the host still
-    passes; the point of the fix is that it stops being the per-seat answer.
+    NO root is passed. `coordinate_mementos` no longer accepts one (Tiberius
+    review): a batch-wide root left in the signature is a root something will
+    eventually fall back to, and the ruling is REFUSE. Each seat's slot comes
+    from its own identity `cwd`.
     """
     return reap_memento.coordinate_mementos(
-        identities, project_root=LUPIN_REPO, write_memento=True,
+        identities, write_memento=True,
         now_fn=_now_fn, read_text_fn=disk.read, dm_fn=dm,
         sleep_fn=lambda _s: None, **kw )
 

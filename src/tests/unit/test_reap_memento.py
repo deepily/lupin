@@ -55,9 +55,23 @@ class _DM:
 def _ident( name="Rio", sid="abc12345ffff", cwd="/proj" ):
     # `cwd` is the seat's own repo, and it is NOT optional in a real bridge — all 23
     # live bridges carry one (row 80b930e6). The slot is now derived per-seat from
-    # this field rather than from the batch-wide project_root, so a fixture without
-    # it would describe a seat that cannot exist. It defaults to "/proj" to match the
-    # project_root these tests already pass, keeping every verdict below unchanged.
+    # this field; the batch-wide project_root these tests used to pass is gone from
+    # the signature entirely. It defaults to "/proj", the exact root these tests
+    # passed before, so every slot path below is byte-identical and no assertion
+    # changes meaning.
+    #
+    # WHY THAT DEFAULT IS SAFE, stated precisely — the reason first written here was
+    # the WRONG one (Tiberius review). It is NOT "a seat with no cwd cannot exist":
+    # that argues from the world rather than from the suite, and a fixture that
+    # supplies the value under test could still mask the branch that reads it. The
+    # actual guarantee is that the refuse branch is exercised by an identity this
+    # default CANNOT REACH — test_seat_without_cwd_refuses_to_guess_a_repo, in
+    # test_reap_memento_mixed_batch.py, builds its dict inline with no cwd and never
+    # calls _ident at all.
+    #
+    # Supporting check (not the argument, just evidence it is load-bearing): pointing
+    # this default at a bogus root turns 7 of these tests red, so they still genuinely
+    # depend on the slot resolving; the other 42 never exercised the slot.
     return { "persona": { "name": name }, "session_id": sid, "cwd": cwd }
 
 
@@ -214,7 +228,7 @@ def test_default_read_text_none_on_invalid_utf8_not_crash( tmp_path ):
 # ── coordinate_mementos — the orchestrator, BOTH directions ───────────────────
 def _coord( identities, disk, dm, sleep_fn=None, **kw ):
     return reap_memento.coordinate_mementos(
-        identities, project_root="/proj", now_fn=_now_fn,
+        identities, now_fn=_now_fn,
         read_text_fn=disk.read, dm_fn=dm,
         sleep_fn=sleep_fn if sleep_fn is not None else ( lambda _s: None ), **kw )
 
@@ -222,7 +236,7 @@ def _coord( identities, disk, dm, sleep_fn=None, **kw ):
 def test_coordinate_not_requested_when_write_memento_false():
     dm = _DM()
     out = reap_memento.coordinate_mementos(
-        { "tmux-a": _ident() }, project_root="/proj", write_memento=False,
+        { "tmux-a": _ident() }, write_memento=False,
         now_fn=_now_fn, read_text_fn=_Disk().read, dm_fn=dm )
     assert out[ "tmux-a" ][ "status" ] == "not_requested"
     assert dm.calls == []                          # no disk read, no DM
