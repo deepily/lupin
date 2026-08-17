@@ -49,6 +49,84 @@ import cosa.utils.util as cu
 # exist but ``alembic_version`` does not, the DB is an unstamped legacy schema.
 _SENTINEL_APP_TABLE = "users"
 
+# How long to keep trying to reach the database before giving up at boot.
+#
+# WHY THIS EXISTS (2026-08-17, lupin-host-test): the app connected exactly ONCE
+# and any failure was fatal — `Application startup failed. Exiting.` On the
+# cloud-gpu topology the database is reached through a Cloud SQL Auth Proxy
+# sidecar, so "not ready yet" is a NORMAL transient state at boot, not an error.
+# The compose file gates the app on `condition: service_healthy`, but Docker's
+# RESTART POLICY ignores depends_on entirely — on a VM reboot or resume both
+# containers come back independently, and the app can easily win the race.
+#
+# A bounded wait converts a permanent boot failure into a short delay. It does
+# NOT paper over a real outage: when the budget is spent the original error is
+# re-raised unchanged, so fail-loud still holds — it just stops treating a
+# five-second startup skew as a reason to take the server down for good.
+DB_WAIT_TIMEOUT_SECONDS  = 60.0
+DB_WAIT_INITIAL_BACKOFF  = 1.0
+DB_WAIT_MAX_BACKOFF      = 8.0
+
+
+def next_backoff( current, maximum=DB_WAIT_MAX_BACKOFF ):
+    """
+    Double a retry delay, capped.
+
+    Requires:
+        - current is a positive number; maximum is a positive number
+
+    Ensures:
+        - returns min( current * 2, maximum )
+        - never returns more than maximum, so a long budget cannot turn into
+          one enormous sleep that blows past the deadline in a single step
+    """
+    return min( current * 2, maximum )
+
+
+def wait_for_database( probe, timeout=DB_WAIT_TIMEOUT_SECONDS,
+                       initial_backoff=DB_WAIT_INITIAL_BACKOFF,
+                       sleep=None, now=None, on_retry=None ):
+    """
+    Call ``probe`` until it succeeds or the timeout is spent; re-raise the last error.
+
+    ``probe`` is any zero-argument callable that raises on an unreachable
+    database. Injecting it — along with ``sleep`` and ``now`` — is what keeps
+    this testable without a database, a clock, or a real wait.
+
+    Requires:
+        - probe is callable and raises on failure
+        - timeout and initial_backoff are non-negative numbers
+
+    Ensures:
+        - returns probe's return value on the first success
+        - a probe that succeeds immediately costs ZERO sleeps — the common case
+          pays nothing for this guard
+        - retries with exponential backoff until the deadline passes
+        - re-raises the LAST exception unchanged when the budget is spent, so
+          the operator sees the real driver error and not a wrapper
+        - never sleeps past the deadline
+    """
+    import time as _time
+
+    sleep = sleep or _time.sleep
+    now   = now   or _time.monotonic
+
+    deadline = now() + timeout
+    backoff  = initial_backoff
+    attempt  = 0
+
+    while True:
+        attempt += 1
+        try:
+            return probe()
+        except Exception as error:
+            remaining = deadline - now()
+            if remaining <= 0:
+                raise
+            if on_retry: on_retry( attempt, error, min( backoff, remaining ) )
+            sleep( min( backoff, remaining ) )
+            backoff = next_backoff( backoff )
+
 
 def resolve_database_url( database_url=None ):
     """
@@ -195,7 +273,17 @@ def run_migrations_to_head( database_url=None, debug=False ):
     url    = resolve_database_url( database_url )
     config = build_alembic_config( database_url=url )
 
-    has_version_table, has_app_tables = _inspect_db_state( url )
+    # The database may not be reachable the instant this process boots — behind a
+    # Cloud SQL Auth Proxy sidecar that is still coming up, "not yet" is normal.
+    # Wait a bounded amount rather than exiting; a spent budget re-raises the
+    # driver's own error, so a genuine outage still fails loud.
+    def _report( attempt, error, delay ):
+        print( f"[auto-migrate] database not reachable (attempt {attempt}): "
+               f"{type( error ).__name__} — retrying in {delay:.1f}s" )
+
+    has_version_table, has_app_tables = wait_for_database(
+        lambda: _inspect_db_state( url ), on_retry=_report
+    )
     before = _read_current_revision( url )
 
     if not has_version_table and not has_app_tables:
