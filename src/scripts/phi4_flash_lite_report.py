@@ -249,6 +249,14 @@ def main( argv=None, printer=print ):
     if args.denominator is None:
         printer( "RATES WITHHELD — no denominator. Rick's ruling (narrow vs wide); a reader that "
                  "picks one silently publishes his decision under his name." )
+    else:
+        printer( "" )
+        printer( f"fabrication rate, denominator '{args.denominator}' (Rick's ruling — the reader never picks one):" )
+        for arm in arms:
+            metas = [ r[ "meta" ] for r in records if r[ "arm" ] == arm ]
+            summary = rh.summarize_arm( metas, denominator=args.denominator )
+            printer( f"  {arm:12} {summary[ 'fabrication_blocked' ]}/{summary[ 'rows' ]} rows | "
+                     f"rate {summary[ 'fabrication_rate' ]:.4f} | model_failed {summary[ 'model_failed' ]}" )
 
     if args.floor is None:
         printer( f"STATISTICS WITHHELD — no pre-stated operational floor. The arithmetic minimum is "
