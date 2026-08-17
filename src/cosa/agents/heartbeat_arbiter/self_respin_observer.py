@@ -89,12 +89,23 @@ class SelfRespinVerdict( str, Enum ):
 
 @dataclass
 class SelfRespinAssessment:
-    """One marker's verdict + the human-readable reason + the alarm flag."""
-    session_id : str
-    persona    : str
-    verdict    : SelfRespinVerdict
-    reason     : str
-    is_alarm   : bool
+    """One marker's verdict + the human-readable reason + the alarm flag.
+
+    return_latency_s / late are the LATENESS STAMP (row 491d5db8). RETURNED
+    answers "it came back"; these answer "did it come back IN TIME." They are
+    populated ONLY on a RETURNED verdict — return_latency_s is the observed
+    seconds from fired_at to the wake proof, and late is True when that proof
+    landed after expected_return_by. On every other verdict they stay
+    None / False. Making lateness visible (without turning RETURNED into an
+    alarm) is option 1 of the row: a wake that keeps arriving but ever later
+    can no longer hide behind a green verdict."""
+    session_id       : str
+    persona          : str
+    verdict          : SelfRespinVerdict
+    reason           : str
+    is_alarm         : bool
+    return_latency_s : "float | None" = None
+    late             : bool           = False
 
 
 # ---------------------------------------------------------------------------
@@ -288,12 +299,30 @@ def classify_marker( marker, pressure_record, *, now, wake_proof_nonce=None, wak
                 is_alarm   = True,
             )
         if _is_confirmed_return( marker, pressure_record, fired_at, now, wake_proof_nonce, wake_proof_at ):
+            # _is_confirmed_return already rejected a None wake_proof_at, so it is an
+            # aware datetime here; fired_at/deadline were parsed + validated up top.
+            # Stamp the observed return latency (from fire) and whether it beat the
+            # deadline, so a real-but-slow wake is visible instead of silently green.
+            return_latency_s = ( wake_proof_at - fired_at ).total_seconds()
+            late             = wake_proof_at > deadline
+            if late:
+                reason = (
+                    f"over_budget → within_budget on the same seat with a nonce-matched wake "
+                    f"proof, but the return landed {return_latency_s:.0f}s after fire — PAST the deadline"
+                )
+            else:
+                reason = (
+                    f"over_budget → within_budget on the same seat, fresh turn AND a nonce-matched "
+                    f"wake proof {return_latency_s:.0f}s after fire, within the return window"
+                )
             return SelfRespinAssessment(
-                session_id = session_id,
-                persona    = persona,
-                verdict    = SelfRespinVerdict.RETURNED,
-                reason     = "over_budget → within_budget on the same seat, fresh turn AND a nonce-matched wake proof after the clear fired",
-                is_alarm   = False,
+                session_id       = session_id,
+                persona          = persona,
+                verdict          = SelfRespinVerdict.RETURNED,
+                reason           = reason,
+                is_alarm         = False,
+                return_latency_s = return_latency_s,
+                late             = late,
             )
 
     if now >= deadline:
@@ -774,11 +803,16 @@ def render_observer_table( assessments ):
     """
     if not assessments:
         return "(no self-re-spin markers in flight)"
-    header = f"{'PERSONA':<12} {'SESSION':<10} {'VERDICT':<18} {'ALARM':<6} REASON"
+    header = f"{'PERSONA':<12} {'SESSION':<10} {'VERDICT':<18} {'ALARM':<6} {'LATENCY':<9} {'LATE':<5} REASON"
     rows   = [ header, "-" * len( header ) ]
     for a in assessments:
-        alarm = "ALARM" if a.is_alarm else ""
-        rows.append( f"{a.persona:<12} {a.session_id[:8]:<10} {a.verdict.value:<18} {alarm:<6} {a.reason}" )
+        alarm   = "ALARM" if a.is_alarm else ""
+        latency = f"{a.return_latency_s:.0f}s" if a.return_latency_s is not None else ""
+        late    = "LATE" if a.late else ""
+        rows.append(
+            f"{a.persona:<12} {a.session_id[:8]:<10} {a.verdict.value:<18} {alarm:<6} "
+            f"{latency:<9} {late:<5} {a.reason}"
+        )
     return "\n".join( rows )
 
 

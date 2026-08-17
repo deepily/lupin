@@ -153,6 +153,58 @@ def test_returned_on_over_to_within_transition_same_seat_fresh():
     assert a.is_alarm is False
 
 
+# ---------------------------------------------------------------------------
+# LATENCY STAMP (row 491d5db8) — RETURNED must record HOW LATE the return was.
+# "It came back" and "it came back in time" are two different claims; the
+# observer used to answer only the first. A proof landing past the deadline
+# still classifies RETURNED (it DID return), but the observed latency and a
+# late flag must be stamped so a degrading wake latency cannot hide behind a
+# green verdict — option 1 of the row: make lateness VISIBLE, not a new alarm.
+# ---------------------------------------------------------------------------
+def test_returned_stamps_latency_and_flags_a_late_return():
+    """A wake proof landing 30 min past the deadline still RETURNs, but the
+    observed latency (from fire) and the late flag must be stamped."""
+    marker = _marker()                                          # fired 02:20, deadline 02:22
+    rec    = _pressure_record( status="within_budget", last_turn_age_s=5.0 )
+    a = obs.classify_marker(
+        marker, rec, now=_dt( 51 ),                             # 02:51 now
+        wake_proof_nonce=WAKE_NONCE, wake_proof_at=_dt( 50 ),   # proof 02:50 — 30 min after fire
+    )
+    assert a.verdict          == obs.SelfRespinVerdict.RETURNED  # it DID come back
+    assert a.is_alarm         is False                           # visible, not a new alarm
+    assert a.return_latency_s == 1800.0                          # 02:50 - 02:20 = 30 min
+    assert a.late             is True                            # 02:50 > 02:22 deadline
+    assert "past the deadline" in a.reason.lower() or "late" in a.reason.lower()
+
+
+def test_returned_on_time_stamps_latency_with_late_false():
+    """An in-window return also stamps latency, with late=False — the field is
+    always populated on RETURNED, so a reader never infers 'on time' from a
+    missing value (silence and absence must not look the same)."""
+    marker = _marker()                                          # fired 02:20, deadline 02:22
+    rec    = _pressure_record( status="within_budget", last_turn_age_s=5.0 )
+    a = obs.classify_marker(
+        marker, rec, now=_dt( 23 ),
+        wake_proof_nonce=WAKE_NONCE, wake_proof_at=_dt( 21 ),   # proof 02:21 — before deadline
+    )
+    assert a.verdict          == obs.SelfRespinVerdict.RETURNED
+    assert a.return_latency_s == 60.0                           # 02:21 - 02:20
+    assert a.late             is False                          # 02:21 <= 02:22
+
+
+def test_non_returned_verdicts_carry_no_latency_stamp():
+    """DEAD/PENDING carry return_latency_s=None and late=False — the stamp is
+    meaningful only on a proven return."""
+    dead = obs.classify_marker( _marker(), _pressure_record( status="over_budget" ), now=_dt( 25 ) )
+    assert dead.verdict          == obs.SelfRespinVerdict.DEAD_NO_RETURN
+    assert dead.return_latency_s is None
+    assert dead.late             is False
+    pend = obs.classify_marker( _marker(), None, now=_dt( 21 ) )
+    assert pend.verdict          == obs.SelfRespinVerdict.PENDING
+    assert pend.return_latency_s is None
+    assert pend.late             is False
+
+
 def test_no_return_without_wake_proof_even_on_budget_transition():
     """THE STRANGER'S-HELLO GUARD (row 275cb0b9 follow-up): a within_budget seat with a
     fresh turn but NO wake proof is NOT RETURNED — it could have been woken by a peer
@@ -443,6 +495,23 @@ def test_render_table_has_header_and_rows_alarm_and_clean():
 
 def test_render_table_empty():
     assert "no self-re-spin markers" in obs.render_observer_table( [] ).lower()
+
+
+def test_render_table_flags_a_late_return( ):
+    """A late RETURNED row shows its observed latency + a LATE marker in the
+    table so an operator scanning it sees lateness without reading the reason."""
+    late = obs.classify_marker(
+        _marker(), _pressure_record( status="within_budget", last_turn_age_s=5.0 ),
+        now=_dt( 51 ), wake_proof_nonce=WAKE_NONCE, wake_proof_at=_dt( 50 ),
+    )
+    on_time = obs.classify_marker(
+        _marker(), _pressure_record( status="within_budget", last_turn_age_s=5.0 ),
+        now=_dt( 23 ), wake_proof_nonce=WAKE_NONCE, wake_proof_at=_dt( 21 ),
+    )
+    table = obs.render_observer_table( [ late, on_time ] )
+    assert "LATE" in table               # header column present
+    assert "1800s" in table              # the late row's observed latency
+    assert "60s"   in table              # the on-time row's latency, no LATE flag on it
 
 
 def test_quick_smoke_test_runs( monkeypatch, capsys ):

@@ -44,7 +44,10 @@ FLEET_STATE_ENDPOINT = f"{BASE_URL}/api/arbiter/fleet-state"
 # are strings, so the policy echo stringifies the window sizes.
 EXPECTED_POLICY = { "1000000": 0.50, "200000": 0.75, "default": 0.50 }
 
-SUMMARY_KEYS = { "personas", "within_budget", "over_budget", "idle_or_unknown" }
+# unnamed_live_seats joined the summary when nameless live seats became visible
+# (row 9c720767) — a seat with no persona allocated is reported explicitly now,
+# not omitted.
+SUMMARY_KEYS = { "personas", "unnamed_live_seats", "within_budget", "over_budget", "idle_or_unknown" }
 
 
 # ── test_api_key fixture (replicated from the proven test_notification_auth.py /
@@ -145,15 +148,21 @@ class TestContextPressurePublishedObject:
         assert isinstance( body[ "generated_at" ], str ) and body[ "generated_at" ]
         assert body[ "policy" ] == EXPECTED_POLICY
         assert isinstance( body[ "personas" ], dict )
+        assert isinstance( body[ "unnamed_seats" ], list )        # nameless live seats, reported explicitly
+        for rec in body[ "unnamed_seats" ]:
+            assert rec[ "persona" ] is None, rec                  # a nameless row states persona null
         assert set( body[ "summary" ].keys() ) == SUMMARY_KEYS
 
     def test_summary_arithmetic_is_consistent( self, test_api_key ):
-        """summary.personas == len(personas) and the three buckets partition it exactly."""
+        """summary.personas == len(personas), summary.unnamed_live_seats ==
+        len(unnamed_seats), and the three status buckets partition ALL live
+        seats — named AND nameless — exactly."""
         body    = _get_live_section( { "X-API-Key": test_api_key[ "api_key" ] } )
         summary = body[ "summary" ]
-        assert summary[ "personas" ] == len( body[ "personas" ] )
-        assert ( summary[ "within_budget" ] + summary[ "over_budget" ]
-                 + summary[ "idle_or_unknown" ] ) == summary[ "personas" ]
+        assert summary[ "personas" ]           == len( body[ "personas" ] )
+        assert summary[ "unnamed_live_seats" ] == len( body[ "unnamed_seats" ] )
+        assert ( summary[ "within_budget" ] + summary[ "over_budget" ] + summary[ "idle_or_unknown" ] ) \
+               == summary[ "personas" ] + summary[ "unnamed_live_seats" ]
 
     def test_budget_math_self_consistent_on_live_records( self, test_api_key ):
         """

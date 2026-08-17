@@ -182,19 +182,33 @@ def build_context_pressure_section(
         - generated_at is an ISO-8601 UTC string
 
     Ensures:
-        - returns { generated_at, policy, personas, summary }
+        - returns { generated_at, policy, personas, unnamed_seats, summary }
         - policy echoes budget_fractions with str keys (JSON-stable, §4)
-        - summary counts: personas (total), within_budget, over_budget,
-          idle_or_unknown (every unmeasured record: idle/dead/unknown)
+        - a NAMED worker (truthy persona) keys the persona map, preserving the
+          Decision-2 uniqueness invariant (voice-persona names never collide)
+        - a NAMELESS live worker (persona None/"") does NOT key the map — it is
+          appended to `unnamed_seats` as an explicit row carrying persona=null +
+          its age (row 9c720767). Keying it would collapse every nameless seat
+          under one null key, so silence (no over-budget) and absence (nameless,
+          unmeasured) would look identical. A nameless seat is the one nobody
+          watches; it must be visible AS a row, not missing from the list.
+        - summary counts: personas (named total), unnamed_live_seats,
+          within_budget, over_budget, idle_or_unknown — the status buckets span
+          BOTH named and nameless, so a nameless over-budget seat still alarms
         - raises KeyError when budget_fractions lacks "default" and an unmapped
           window appears (fail loudly — the config wiring always provides it)
     """
-    personas : Dict[ str, Any ] = { }
+    personas : Dict[ str, Any ]  = { }
+    unnamed  : List[ Any ]       = [ ]
     within = over = idle_or_unknown = 0
 
     for worker in workers:
         record = _persona_record( worker, budget_fractions )
-        personas[ worker.persona ] = record
+        if worker.persona:                             # named → persona-keyed map (uniqueness invariant)
+            personas[ worker.persona ] = record
+        else:                                          # nameless live seat → explicit, never dropped
+            record[ "persona" ] = None                 # state it plainly: this seat has no persona
+            unnamed.append( record )
         if record[ "status" ] == "within_budget":
             within += 1
         elif record[ "status" ] == "over_budget":
@@ -203,14 +217,16 @@ def build_context_pressure_section(
             idle_or_unknown += 1
 
     return {
-        "generated_at" : generated_at,
-        "policy"       : { str( k ): v for k, v in budget_fractions.items() },
-        "personas"     : personas,
-        "summary"      : {
-            "personas"        : len( personas ),
-            "within_budget"   : within,
-            "over_budget"     : over,
-            "idle_or_unknown" : idle_or_unknown,
+        "generated_at"  : generated_at,
+        "policy"        : { str( k ): v for k, v in budget_fractions.items() },
+        "personas"      : personas,
+        "unnamed_seats" : unnamed,
+        "summary"       : {
+            "personas"           : len( personas ),
+            "unnamed_live_seats" : len( unnamed ),
+            "within_budget"      : within,
+            "over_budget"        : over,
+            "idle_or_unknown"    : idle_or_unknown,
         },
     }
 
