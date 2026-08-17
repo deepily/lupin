@@ -273,6 +273,17 @@ _JSON_UNICODE_ESCAPE = re.compile( r"\\u([0-9a-fA-F]{4})" )
 # counts: `[ {ADC} ]` is a credential file, and reading only objects served it.
 _JSON_CONTAINER_OPENERS = ( "{", "[" )
 
+# How many JSON-shaped STRINGS one file may be re-parsed for. The walk crosses objects
+# and arrays, and it used to stop at a string — so a whole key carried as JSON TEXT
+# inside another JSON file was never opened. That is the normal shape of terraform
+# tfvars, a kubernetes secret and a compose env file, not an exotic attack.
+#
+# BOUNDED on purpose: without a budget, a document full of JSON-shaped strings turns
+# one serve/refuse decision into thousands of parses. Sixty-four is far past any real
+# nesting — the measured shapes carry one or two — and far short of a cost anyone
+# notices on a single file fetch.
+CREDENTIAL_MAX_NESTED_PARSES = 64
+
 
 def is_credential_file( full_path: str ) -> bool:
     """
@@ -308,10 +319,11 @@ def is_credential_file( full_path: str ) -> bool:
         - full_path is a filesystem path the caller intends to serve
 
     Ensures:
-        - True for a JSON object AT ANY NESTING DEPTH, inside objects or arrays,
-          declaring type service_account / authorized_user / external_account, or
-          carrying private_key / private_key_id / refresh_token / client_secret with
-          a real string value
+        - True for a JSON object AT ANY NESTING DEPTH, inside objects or arrays, or
+          carried as JSON TEXT inside a string, declaring type service_account /
+          authorized_user / external_account, or carrying private_key /
+          private_key_id / refresh_token / client_secret with a real string value, or
+          with a list holding one
         - True for any PEM PRIVATE KEY block, bare or wrapped
         - True when the file cannot be read or decoded, for ANY reason
         - False only when the prefix was read successfully AND carries no signature —
@@ -527,7 +539,48 @@ def _object_declares_a_credential( node: dict ) -> bool:
     if isinstance( declared_type, str ) and declared_type.strip() in _CREDENTIAL_TYPE_VALUES:
         return True
 
-    return any( _value_is_secret_material( node.get( key ) ) for key in _CREDENTIAL_JSON_KEYS )
+    return any( _credential_field_carries_secret_material( node.get( key ) )
+                for key in _CREDENTIAL_JSON_KEYS )
+
+
+def _credential_field_carries_secret_material( value ) -> bool:
+    """
+    Return True iff a credential FIELD's value carries secret material, whether it
+    holds the secret directly or holds a LIST of secret lines.
+
+    WHY THE LIST ARM EXISTS (bug 0cbf69c0, found by Tiffany reviewing the depth fix):
+    `_value_is_secret_material` answers about ONE value and correctly says no to a
+    list, because a list is not a string. The walk then descends into the list's
+    ITEMS — but they are strings, not objects, so nothing ever tests them. A key
+    written as an array of PEM-less lines fell straight between the two, and with no
+    `type` field to catch it the file was SERVED.
+
+    Placeholder discrimination is kept, item by item: a list of `<your key here>`
+    lines is still a template, and templates are documents.
+
+    Requires:
+        - nothing; any parsed JSON value is acceptable, including None for a key the
+          object does not carry
+
+    Ensures:
+        - True for a real non-placeholder secret string
+        - True for a list holding at least one such string, at any list depth
+        - False for objects, numbers, booleans, null, and lists of placeholders
+
+    Raises:
+        - nothing
+    """
+    pending = [ value ]
+    while pending:
+        item = pending.pop()
+        if isinstance( item, list ):
+            # An explicit stack, like the walk above: list depth comes from the file,
+            # so recursion here would put the interpreter's stack in a file's hands.
+            pending.extend( item )
+        elif _value_is_secret_material( item ):
+            return True
+
+    return False
 
 
 def _parsed_value_carries_a_credential( parsed ) -> bool:
@@ -544,17 +597,29 @@ def _parsed_value_carries_a_credential( parsed ) -> bool:
     the file, not by the interpreter's stack — no depth cap to tune, and no crash on a
     deeply nested document.
 
+    🔴 THE PAYLOAD FIX (bug b17ffefd). The walk crossed objects and arrays and STOPPED
+    AT A STRING, so a whole credential carried as JSON TEXT inside another JSON file
+    was never opened: `{"google_credentials": "{\\"type\\": \\"service_account\\", ...}"}`
+    was served. That is the ordinary shape of terraform tfvars, a kubernetes secret and
+    a compose env file — the credential is a string as far as the outer document is
+    concerned, and a real key as far as anything reading it is concerned. A string that
+    opens a JSON container is now re-parsed and pushed back onto the stack, up to
+    CREDENTIAL_MAX_NESTED_PARSES times per file.
+
     Requires:
         - parsed is a value returned by json.loads
 
     Ensures:
-        - True iff some object inside it satisfies _object_declares_a_credential
+        - True iff some object inside it satisfies _object_declares_a_credential,
+          including objects recovered from JSON carried inside a string
         - False for scalars, which carry no fields to test
 
     Raises:
         - nothing
     """
-    pending = [ parsed ]
+    pending       = [ parsed ]
+    reparses_left = CREDENTIAL_MAX_NESTED_PARSES
+
     while pending:
         node = pending.pop()
         if isinstance( node, dict ):
@@ -563,8 +628,55 @@ def _parsed_value_carries_a_credential( parsed ) -> bool:
             pending.extend( node.values() )
         elif isinstance( node, list ):
             pending.extend( node )
+        elif isinstance( node, str ) and reparses_left > 0 and _opens_a_json_container( node ):
+            reparses_left -= 1
+            carried = _json_carried_in_a_string( node )
+            if carried is not None:
+                pending.append( carried )
 
     return False
+
+
+def _opens_a_json_container( text: str ) -> bool:
+    """
+    Return True iff `text` starts a JSON object or array once the invisible lead-in is
+    gone. The cheap test that decides whether a parse is worth attempting at all.
+
+    Requires:
+        - text is decoded text, possibly empty
+
+    Ensures:
+        - True only when the first visible character is `{` or `[`
+
+    Raises:
+        - nothing
+    """
+    return _strip_leadin_noise( text )[ : 1 ] in _JSON_CONTAINER_OPENERS
+
+
+def _json_carried_in_a_string( text: str ) -> object:
+    """
+    Return the value parsed out of a string that carries JSON, or None when it does
+    not parse.
+
+    None means "there is nothing here to walk". A string that looked like a container
+    and did not parse is text — it carries no object for the field test to read, and
+    guessing at it would be the raw-substring scan the parsed path exists to avoid.
+
+    Requires:
+        - text is a string whose first visible character opens a JSON container
+
+    Ensures:
+        - returns the parsed value on success
+        - returns None when the text is not parseable JSON
+
+    Raises:
+        - nothing
+    """
+    try:
+        return json.loads( text )
+    except ( ValueError, TypeError ):
+        return None
 
 
 def _is_secrets_path( relative_path: str ) -> bool:

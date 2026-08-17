@@ -27,15 +27,19 @@ import os
 import pytest
 
 from cosa.rest.routers._scope_registry import (
+    _credential_field_carries_secret_material,
     _decode_json_unicode_escapes,
     _is_secrets_path,
+    _json_carried_in_a_string,
     _object_declares_a_credential,
+    _opens_a_json_container,
     _parsed_value_carries_a_credential,
     _prefix_looks_like_credential,
     _strip_leadin_noise,
     _the_window_may_be_hiding_the_signature,
     _value_is_secret_material,
     is_credential_file,
+    CREDENTIAL_MAX_NESTED_PARSES,
     CREDENTIAL_MAX_SNIFF_BYTES,
     CREDENTIAL_SNIFF_BYTES,
 )
@@ -686,3 +690,235 @@ def test_the_narrowing_strip_is_DEFENSIVE_and_cannot_currently_fire():
 
     assert _strip_leadin_noise( already_stripped ) == already_stripped
     assert already_stripped.startswith( "{" )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AXIS 4 — PAYLOAD. Bugs b17ffefd and 0cbf69c0: the walk crossed objects and
+# arrays and then STOPPED, twice over.
+#
+#   · it stopped at a STRING, so a whole credential carried as JSON text inside
+#     another JSON file was never opened (b17ffefd, shapes A1-A3)
+#   · it stopped at a LIST under a credential key, because the value test wants a
+#     string and the walk only descends into objects (b17ffefd A7, 0cbf69c0)
+#
+# WHY AXIS 3 COULD NOT REACH THIS: axis 3 varies the DEPTH and the CONTAINER of a
+# payload that is always a plain object with plain string fields. Both holes here
+# are about what the payload is MADE OF, which that axis holds fixed. Same lesson
+# as axis 3 learning it from axis 1 and 2: a table that varies one thing proves
+# one thing.
+#
+# All six shapes below were measured SERVED at ce943c5d, on these exact fixtures.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# The terraform / kubernetes / compose shape: the whole key is one string value.
+CREDENTIAL_AS_A_JSON_STRING = { "google_credentials" : json.dumps( SA_KEY_NO_PEM ) }
+
+TFVARS_SHAPED_FILE = {
+    "project"            : "not-a-real-project-000000",
+    "region"             : "us-central1",
+    "google_credentials" : json.dumps( SA_KEY_NO_PEM ),
+}
+
+CREDENTIAL_AS_A_STRING_INSIDE_AN_ARRAY = [ { "env" : json.dumps( ADC_USER_CREDENTIAL ) } ]
+
+TWO_LEVELS_OF_STRING_NESTING = {
+    "outer" : json.dumps( { "inner" : json.dumps( SA_KEY_NO_PEM ) } )
+}
+
+# 0cbf69c0's shape: the key material is a LIST of lines and there is no `type`
+# field to catch the object on its declaration instead.
+PRIVATE_KEY_AS_A_LIST_OF_LINES = {
+    "private_key" : [
+        "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQ",
+        "DGx0ArLmT7dEwlYCJoJqzZ0nQ5eYbHkPvNsRxUiFgAoIBAQCkfz",
+    ],
+}
+
+# the same, with a `type` that is NOT a credential type — so the type arm cannot
+# be what does the work here
+PRIVATE_KEY_AS_A_LIST_WITH_A_DECOY_TYPE = {
+    "type"        : "svc",
+    "private_key" : [ "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQ" ],
+}
+
+
+SIX_PAYLOAD_SHAPES_THAT_STILL_SERVED = [
+    ( "A1  a service-account key carried as a JSON STRING under a config key",
+      CREDENTIAL_AS_A_JSON_STRING ),
+    ( "A1b the same string inside a terraform-tfvars-shaped file",
+      TFVARS_SHAPED_FILE ),
+    ( "A2  an ADC carried as a JSON STRING inside an array",
+      CREDENTIAL_AS_A_STRING_INSIDE_AN_ARRAY ),
+    ( "A3  two levels of string nesting",
+      TWO_LEVELS_OF_STRING_NESTING ),
+    ( "A7  private_key as a LIST, with a decoy type value",
+      PRIVATE_KEY_AS_A_LIST_WITH_A_DECOY_TYPE ),
+    ( "L1  private_key as a LIST of PEM-less lines, no type field at all",
+      PRIVATE_KEY_AS_A_LIST_OF_LINES ),
+]
+
+
+@pytest.mark.parametrize( "label,payload", SIX_PAYLOAD_SHAPES_THAT_STILL_SERVED,
+                          ids=[ entry[ 0 ].split()[ 0 ] for entry in SIX_PAYLOAD_SHAPES_THAT_STILL_SERVED ] )
+def test_the_six_payload_shapes_that_still_served_are_all_REFUSED( tmp_path, label, payload ):
+    """
+    THE HEADLINE for both payload bugs, driven end-to-end through the surface the
+    doc viewer actually calls. All six measured SERVED at ce943c5d.
+    """
+    path = tmp_path / "fixture.json"
+    path.write_text( json.dumps( payload ), encoding="utf-8" )
+
+    assert is_credential_file( str( path ) ), f"shape SERVED a credential: {label}"
+
+
+def test_a_credential_smuggled_in_a_string_is_found_under_an_innocent_name( tmp_path ):
+    """
+    The real filename this arrives under. `terraform.tfvars.json` is a config file
+    nobody thinks of as a key, and the key is sitting in it as a string.
+    """
+    path = tmp_path / "terraform.tfvars.json"
+    path.write_text( json.dumps( TFVARS_SHAPED_FILE ), encoding="utf-8" )
+
+    assert is_credential_file( str( path ) )
+
+
+def test_a_list_of_secret_lines_is_secret_material_and_a_list_of_placeholders_is_not():
+    """
+    The unit under 0cbf69c0. The placeholder rule survives the list arm item by
+    item — a template written as an array of lines is still a template.
+    """
+    assert _credential_field_carries_secret_material( [ "MIIEvQIBADANBgkqhkiG9w0B" ] )
+    assert _credential_field_carries_secret_material( [ [ "MIIEvQIBADANBgkqhkiG9w0B" ] ] )
+    assert _credential_field_carries_secret_material( "MIIEvQIBADANBgkqhkiG9w0B" )
+
+    assert not _credential_field_carries_secret_material( [ "<your key here>", "${KEY_BODY}" ] )
+    assert not _credential_field_carries_secret_material( [] )
+    assert not _credential_field_carries_secret_material( [ { "type" : "string" } ] )
+    assert not _credential_field_carries_secret_material( None )
+
+
+def test_the_scalar_value_test_still_answers_only_about_a_scalar():
+    """
+    ⚠️ THE LINE THAT WAS TEMPTING TO MOVE. Row 0cbf69c0 says a list of secret
+    strings should count, and the shortest way to get there is to make
+    `_value_is_secret_material` say yes to a list. That would flip the assertion
+    Tiffany pinned at the depth fix — a list is not a string, and that function
+    answers about ONE value.
+
+    So the list arm lives one layer up, in the field test, and this stays true.
+    """
+    assert not _value_is_secret_material( [ "client_secret" ] )
+    assert not _value_is_secret_material( [ "MIIEvQIBADANBgkqhkiG9w0B" ] )
+
+
+def test_a_string_that_is_not_json_is_not_re_parsed():
+    """The cheap opener test is what keeps ordinary prose out of the parser."""
+    assert _opens_a_json_container( '{"a": 1}' )
+    assert _opens_a_json_container( "  ﻿[1, 2]" )
+    assert not _opens_a_json_container( "just a sentence about client_secret" )
+    assert not _opens_a_json_container( "" )
+
+
+def test_a_string_that_opens_a_container_but_does_not_parse_carries_nothing():
+    """
+    Returning None must mean "nothing here to walk", and the walk must survive it
+    rather than treating a broken string as a signature.
+    """
+    assert _json_carried_in_a_string( '{"a": 1}' ) == { "a" : 1 }
+    assert _json_carried_in_a_string( '{"a": ' ) is None
+
+    assert not _parsed_value_carries_a_credential( { "note" : '{"client_secret": ' } )
+
+
+def test_an_ordinary_document_carrying_json_in_a_string_is_STILL_SERVED( tmp_path ):
+    """
+    Re-parsing strings must not start refusing documents. A config file that
+    carries an embedded JSON blob with nothing secret in it is a document.
+    """
+    path = tmp_path / "settings.json"
+    path.write_text( json.dumps( {
+        "name"    : "widget",
+        "options" : json.dumps( { "retries" : 3, "type" : "report" } ),
+        "schema"  : json.dumps( { "client_secret" : { "type" : "string" } } ),
+    } ) )
+
+    assert not is_credential_file( str( path ) )
+
+
+def test_a_template_carried_inside_a_string_is_STILL_SERVED( tmp_path ):
+    """
+    The placeholder rule has to survive the trip through a string, or every setup
+    guide that ships an example blob becomes a credential.
+    """
+    path = tmp_path / "example.tfvars.json"
+    path.write_text( json.dumps( {
+        "google_credentials" : json.dumps( { "type" : "service", "private_key" : "<paste yours>" } ),
+    } ) )
+
+    assert not is_credential_file( str( path ) )
+
+
+# ─── the accepted costs of the payload fix, decided rather than discovered ────
+
+def test_documentation_that_embeds_a_WHOLE_REAL_KEY_in_a_string_is_now_REFUSED( tmp_path ):
+    """
+    ⚠️ ACCEPTED COST, asserted so it stays a decision. A document whose example is
+    a REAL key rather than a placeholder is now refused — the detector cannot tell
+    a key quoted for teaching from a key stored for use, and a real key pasted into
+    a doc is a real key that is being served.
+
+    A template keeps working (asserted above), which is the shape documentation
+    should be using anyway.
+    """
+    path = tmp_path / "how-to-auth.json"
+    path.write_text( json.dumps( {
+        "title"   : "How to configure the exporter",
+        "example" : json.dumps( SA_KEY_NO_PEM ),
+    } ) )
+
+    assert is_credential_file( str( path ) )
+
+
+def _a_file_with_json_shaped_decoys( decoy_count ):
+    """A credential string at the bottom of the stack, behind `decoy_count` decoys."""
+    payload = { "credential" : json.dumps( SA_KEY_NO_PEM ) }
+    for index in range( decoy_count ):
+        payload[ f"decoy_{index}" ] = json.dumps( { "n" : index } )
+    return json.dumps( payload )
+
+
+def test_json_shaped_decoys_do_not_hide_a_credential_within_the_budget( tmp_path ):
+    """A handful of embedded blobs is ordinary, and the credential is still found."""
+    path = tmp_path / "config.json"
+    path.write_text( _a_file_with_json_shaped_decoys( 10 ), encoding="utf-8" )
+
+    assert is_credential_file( str( path ) )
+
+
+def test_a_credential_past_the_RE_PARSE_BUDGET_is_SERVED_and_that_is_the_stated_limit( tmp_path ):
+    """
+    ⚠️ ACCEPTED LIMIT, asserted rather than assumed — the same treatment the 1 MiB
+    read bound gets. Re-parsing is capped at CREDENTIAL_MAX_NESTED_PARSES per file,
+    so a document that spends the whole budget on JSON-shaped strings before the
+    walk reaches the credential serves it.
+
+    Removing the cap turns one serve/refuse decision on a hostile file into
+    thousands of parses, which is a worse thing to own than this limit.
+
+    If this ever goes red the budget or the walk order moved — that is a change to
+    state, not a failure to fix.
+    """
+    path = tmp_path / "many-blobs.json"
+    path.write_text( _a_file_with_json_shaped_decoys( CREDENTIAL_MAX_NESTED_PARSES * 2 ),
+                     encoding="utf-8" )
+
+    assert not is_credential_file( str( path ) )
+
+
+def test_the_re_parse_budget_is_generous_next_to_any_real_nesting():
+    """
+    The number itself, stated. The measured shapes carry one or two levels; the cap
+    is two orders of magnitude above that, so it bounds a hostile file without ever
+    being reached by a real one.
+    """
+    assert CREDENTIAL_MAX_NESTED_PARSES == 64
