@@ -358,3 +358,73 @@ class TestLegacyBridgeFromCapturedArtifact:
         data[ "manager_figure_implicit" ]  = None
         write( "legacy", data )
         assert mf.is_manager_figure( "legacy", environ=ENV_LUPIN, _find_path=find ) is True
+
+
+# María's REAL pre-fix bridge (session 11aa861f), raw `cp` captured 2026-08-16 23:59
+# before her seat could self-heal (commit 773ed129). She is a NAMED standing manager
+# for project "plan" — COSA_VOICE_PREFERRED_PERSONA__PLAN=María,* — yet her session
+# registered BEFORE the stamp fix landed (22:47), so the bridge carries NEITHER
+# role=="manager" NOR manager_figure_implicit. This is the pre-fix POPULATION: sessions
+# already alive when the fix landed, which Rick's Option A (stamp-at-registration) only
+# heals on their NEXT SessionStart. Her live 403 at 23:54 is condition 1 of a4d483e0
+# EXECUTED and FAILED. MEASURED shape: role ABSENT, manager_figure_implicit ABSENT.
+_MARIA_PREFIX_BRIDGE = os.path.join(
+    os.environ.get( "LUPIN_ROOT", os.getcwd() ),
+    "src/rnd/v0.2.0/2026.08.16-prefix-bridge-maria-11aa861f.bridge.json"
+)
+
+
+def _load_maria_prefix_bridge():
+    """Load María's real pre-fix bridge as a fresh dict. Fail-LOUD if it is gone."""
+    with open( _MARIA_PREFIX_BRIDGE ) as f:
+        return json.load( f )
+
+
+class TestPreFixPopulationResidual:
+    """
+    Row a4d483e0 — the RESIDUAL the stamp fix does NOT close: a session that
+    registered BEFORE the fix carries neither the explicit role nor the stamped
+    implicit flag, so the SERVER (LUPIN_ROOT=/var/lupin, zero
+    COSA_VOICE_PREFERRED_PERSONA__* vars) resolves a NAMED standing manager to
+    False — María's live 403. Test-only; no SessionStart change here. These tests
+    pin the requirement against her REAL captured bridge so the morning run
+    cannot pass on fresh post-fix seats while the failing case goes untouched.
+    """
+
+    def test_fixture_is_the_pre_fix_shape( self ):
+        # Guard the fixture: role AND the stamp must both be absent, persona = María.
+        data = _load_maria_prefix_bridge()
+        assert "role" not in data
+        assert "manager_figure_implicit" not in data
+        assert ( data.get( "voice_persona" ) or {} ).get( "name" ) == "maria"
+
+    def test_maria_prefix_bridge_is_false_today__the_residual_bug( self, tmp_path ):
+        # DOCUMENTS the current wrong behavior as a fact: server-shaped call (the
+        # production container env, LUPIN_ROOT=/var/lupin, no chain) resolves the
+        # named manager María to False. Flips to True — breaking this assertion —
+        # the moment the pre-fix population is genuinely handled, forcing a look.
+        write, find = bridge_factory( tmp_path )
+        write( "maria", _load_maria_prefix_bridge() )
+        assert mf.is_manager_figure( "maria", environ={ "LUPIN_ROOT": "/var/lupin" }, _find_path=find ) is False
+
+    @pytest.mark.xfail(
+        strict = True,
+        reason = (
+            "PRE-FIX POPULATION UNHANDLED (row a4d483e0). María's session registered "
+            "before the stamp fix, so her bridge has neither role=='manager' nor "
+            "manager_figure_implicit; the server (LUPIN_ROOT=/var/lupin, empty persona "
+            "chain) therefore resolves a NAMED standing manager to False — her live 403. "
+            "Rick's Option A stamps at REGISTRATION, so this only self-heals on the "
+            "seat's next SessionStart; an un-restarted pre-fix seat stays mis-resolved. "
+            "Remove this xfail — do NOT change SessionStart — only when the pre-fix "
+            "population is genuinely handled server-side and this resolves True."
+        ),
+    )
+    def test_maria_prefix_bridge_should_resolve_manager_when_handled( self, tmp_path ):
+        # THE requirement, RED today. Passes (and strict-xfail then ERRORS, forcing
+        # the mark's removal) only when a genuine server-side handling of the pre-fix
+        # population makes a named standing manager resolve True with no stamp and no
+        # caller chain env — the exact condition that fails her 403 today.
+        write, find = bridge_factory( tmp_path )
+        write( "maria", _load_maria_prefix_bridge() )
+        assert mf.is_manager_figure( "maria", environ={ "LUPIN_ROOT": "/var/lupin" }, _find_path=find ) is True
