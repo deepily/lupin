@@ -384,6 +384,40 @@ def test_http_ask_client_ok_and_error():
     assert err[ "payload" ] == {}
 
 
+def test_http_ask_client_refreshes_bearer_on_401():
+    # A long paired run outlives the JWT (~30min): a 401 must trigger a re-login + retry, so the
+    # record is ok=True with the FRESH bearer and the span is measured on the successful retry.
+    # Without the refresh (pre-fix code) the 401 stays ok=False — 4 such late 401s tripped
+    # http-all-ok and the integrity guard refused a median-Δ (ts-d0f50349, row d8d019f6). RED control.
+    replies      = [ _FakeReply( 401, {} ), _FakeReply( 200, { "path": "replay", "trace_id": "y" } ) ]
+    seen_headers = []
+    def post_fn( url, json, headers, timeout ):
+        seen_headers.append( headers[ "Authorization" ] )
+        return replies.pop( 0 )
+    relogins = []
+    def relogin_fn():
+        relogins.append( 1 )
+        return "fresh-jwt"
+    client = ve.HttpAskClient( "http://localhost:8000", bearer="stale-jwt",
+                               post_fn=post_fn, relogin_fn=relogin_fn )
+    rec = client.ask( "what time is it" )
+    assert rec[ "ok" ] is True                                       # the retry succeeded
+    assert rec[ "status_code" ] == 200
+    assert len( relogins ) == 1                                      # re-login fired exactly once
+    assert seen_headers == [ "Bearer stale-jwt", "Bearer fresh-jwt" ]  # 1st stale, retry with fresh
+    assert client.bearer == "fresh-jwt"                             # bearer updated for later asks
+
+
+def test_http_ask_client_no_relogin_leaves_401_failed():
+    # Negative control: with NO relogin_fn a 401 is a plain failure (ok=False) — proves the refresh
+    # is what rescues the request, not something free-standing.
+    client = ve.HttpAskClient( "http://localhost:8000", bearer="stale",
+                               post_fn=lambda url, json, headers, timeout: _FakeReply( 401, {} ) )
+    rec = client.ask( "x" )
+    assert rec[ "ok" ] is False
+    assert rec[ "status_code" ] == 401
+
+
 def test_http_ask_client_default_transport_imports_requests( monkeypatch ):
     sent = {}
     class _FakeRequests:

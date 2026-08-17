@@ -721,6 +721,7 @@ class HttpAskClient:
         post_fn      : Optional[ Callable ]      = None,
         timeout      : float                     = 120.0,
         clock        : Callable[ [], float ]     = time.monotonic,
+        relogin_fn   : Optional[ Callable[ [], str ] ] = None,
     ) -> None:
         self.base_url     = base_url.rstrip( "/" )
         self.bearer       = bearer
@@ -728,6 +729,7 @@ class HttpAskClient:
         self.post_fn      = post_fn
         self.timeout      = timeout
         self.clock        = clock                # injected monotonic clock — the F1 client-send stopwatch
+        self.relogin_fn   = relogin_fn           # re-mint a fresh bearer on 401 (token-expiry refresh, row d8d019f6)
 
     def _post( self, url: str, payload: Dict[ str, Any ], headers: Dict[ str, str ] ) -> Any:
         """POST via the injected transport, defaulting to requests.post."""
@@ -765,6 +767,17 @@ class HttpAskClient:
         send_ts = self.clock()
         reply   = self._post( url, body, headers )
         recv_ts = self.clock()
+        # Token-refresh on expiry (row d8d019f6): a long paired run outlives the JWT (~30min), so
+        # late requests 401. On a 401, re-login for a fresh bearer and retry ONCE, resetting the
+        # stopwatch so the recorded client_span_ms is the SUCCESSFUL retry — never the 401+relogin.
+        # Without this a >30min run fails http-all-ok and the integrity guard refuses (ts-d0f50349:
+        # 4 of 50 late requests 401'd, no median-Δ).
+        if reply.status_code == 401 and self.relogin_fn is not None:
+            self.bearer = self.relogin_fn()
+            headers     = { "Authorization": f"Bearer {self.bearer}" }
+            send_ts     = self.clock()
+            reply       = self._post( url, body, headers )
+            recv_ts     = self.clock()
         ok      = ( reply.status_code == 200 )
         payload = reply.json() if ok else {}
         return {
@@ -1048,11 +1061,13 @@ def _default_client_factory( base_url: str ) -> HttpAskClient:
             "set LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL and LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD"
         )
     import requests
-    reply = requests.post( base_url.rstrip( "/" ) + "/auth/login",
-                           json={ "email": email, "password": password }, timeout=30.0 )
-    reply.raise_for_status()
-    bearer = reply.json()[ "tokens" ][ "access_token" ]   # /auth/login nests the token under "tokens" (B1)
-    return HttpAskClient( base_url, bearer=bearer )
+    def _login() -> str:
+        reply = requests.post( base_url.rstrip( "/" ) + "/auth/login",
+                               json={ "email": email, "password": password }, timeout=30.0 )
+        reply.raise_for_status()
+        return reply.json()[ "tokens" ][ "access_token" ]   # /auth/login nests the token under "tokens" (B1)
+    # relogin_fn = the SAME login, re-minted on 401 so a >30min paired run survives JWT expiry (d8d019f6).
+    return HttpAskClient( base_url, bearer=_login(), relogin_fn=_login )
 
 
 if __name__ == "__main__":                    # pragma: no cover - CLI entry stub, not unit-testable (login logic covered via _default_client_factory)
