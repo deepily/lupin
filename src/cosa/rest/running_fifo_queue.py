@@ -1735,7 +1735,7 @@ class RunningFifoQueue( FifoQueue ):
         running_job.update_runtime_stats( run_timer )
         du.print_banner( f"Job [{running_job.question}] complete!", prepend_nl=True, end="\n" )
 
-        # Persist updated runtime stats to LanceDB
+        # Persist updated runtime stats to the snapshot store
         print( f"Saving snapshot with runtime stats for [{truncated_question}]..." )
         self.snapshot_mgr.save_snapshot( running_job )
         print( f"Saving snapshot with runtime stats for [{truncated_question}]... Done!" )
@@ -1757,14 +1757,14 @@ class RunningFifoQueue( FifoQueue ):
         On timeout or error, leaves answer_is_correct as None (unverified).
 
         Requires:
-            - snapshot is a SolutionSnapshot that has been saved to LanceDB
+            - snapshot is a SolutionSnapshot that has been saved to the store
             - truncated_question is a short string for the prompt
             - truncated_answer is a short string for the prompt
 
         Ensures:
             - Does NOT block the pipeline
             - Thread-safe via SolutionSnapshotManager._save_lock
-            - Updates snapshot in LanceDB on yes/no response
+            - Updates the stored snapshot on yes/no response
         """
         def _ask_and_update():
             try:
@@ -1859,7 +1859,7 @@ class RunningFifoQueue( FifoQueue ):
         current_user_id    = original_job.user_id
         current_session_id = original_job.session_id
 
-        # Record replay on canonical snapshot (updates LanceDB record for analytics)
+        # Record replay on canonical snapshot (updates the stored record for analytics)
         cached_snapshot.record_replay(
             user_id=current_user_id,
             session_id=current_session_id,
@@ -1869,7 +1869,7 @@ class RunningFifoQueue( FifoQueue ):
         # Update runtime stats on canonical snapshot
         cached_snapshot.update_runtime_stats( run_timer )
 
-        # Persist updated stats to LanceDB (canonical snapshot with replay history)
+        # Persist updated stats to the store (canonical snapshot with replay history)
         self.snapshot_mgr.save_snapshot( cached_snapshot )
 
         # Create user-contextualized copy for done queue (FIX: use current user, not original creator)

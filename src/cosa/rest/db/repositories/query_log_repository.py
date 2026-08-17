@@ -1,6 +1,5 @@
 """
-QueryLogRepository — Postgres storage for the ``query_log`` telemetry table
-(LanceDB source: QueryLogTable).
+QueryLogRepository — Postgres storage for the ``query_log`` telemetry table.
 
 Write-only telemetry: the 3 embedding columns are stored but NEVER ANN-searched
 (no vector index). Storage-only; embeddings + cache-hit flags are supplied by the

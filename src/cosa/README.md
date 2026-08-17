@@ -372,7 +372,7 @@ organized around five feature pillars plus a broad hardening pass.
 - **Bayesian Beta-Bernoulli Trust Model** — Per-agent trust learning with conjugate prior updates
 - **Thompson Sampling** — Exploration-exploitation balance for auto-approve vs. escalate decisions
 - **Conformal Prediction** — Calibrated confidence intervals with statistical guarantees
-- **LanceDB Preference Embeddings** — Semantic similarity search with `response_type` filtering and MC option validation
+- **pgvector Preference Embeddings** — Semantic similarity search with `response_type` filtering and MC option validation
 - **L1-L5 Trust Escalation** — Five trust levels from "always ask" to "full autonomy" with circuit breaker pattern
 
 ### Integration Test Infrastructure

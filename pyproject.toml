@@ -40,10 +40,7 @@ dependencies = [
   "fastmcp==2.14.2",
 
   # --- Data / search / memory ---
-  "lancedb>=0.13,<1",
-  "pylance==0.36.0",
   "kagiapi",
-  "tantivy",
   "llama-index==0.14.14",
   "llama-index-embeddings-nomic==0.7.1",
 

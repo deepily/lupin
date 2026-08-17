@@ -1,8 +1,8 @@
 """
 InputAndOutputRepository — Postgres+pgvector storage for the keystone
-``input_and_output`` table (LanceDB source: InputAndOutputTable).
+``input_and_output`` table.
 
-Storage-only mirror of the LanceDB surface: embeddings are SUPPLIED by the caller
+Storage-only: embeddings are SUPPLIED by the caller
 (the Lane-C memory layer keeps embedding generation), and ``get_knn_by_input``
 takes a pre-computed query embedding and runs the dot (`<#>`) nearest-k search.
 
@@ -70,7 +70,7 @@ class InputAndOutputRepository( BaseRepository[InputAndOutput] ):
 
         Ensures:
             - returns up to k ``( similarity_pct, entity )`` tuples, strongest
-              dot first (similarity_pct = dot * 100, LanceDB scale)
+              dot first (similarity_pct = dot * 100)
         """
         return dot_topk( self.session, InputAndOutput, InputAndOutput.input_embedding,
                          query_embedding, limit=k )

@@ -1,6 +1,6 @@
 """
 CanonicalSynonymRepository — Postgres storage for the ``canonical_synonyms``
-table (LanceDB source: CanonicalSynonymsTable).
+table.
 
 Exact-match lookups on the three text keys (btree on question_normalized +
 snapshot_id) — the 3 embedding columns are stored but NOT ANN-searched.

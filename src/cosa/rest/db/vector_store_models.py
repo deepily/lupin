@@ -1,16 +1,14 @@
 """
-SQLAlchemy ORM models for the pgvector vector store (v0.2.0 LanceDB → Postgres migration).
+SQLAlchemy ORM models for the pgvector vector store (v0.2.0).
 
-Mirrors the shape of the LIVE LanceDB tables (grounded in the P0 inventory —
-src/rnd/v0.2.0/2026.07.01-lane-a-p0-live-lancedb-schema-inventory.md) onto the
+Grounded in the P0 schema inventory (src/rnd/v0.2.0/) and registered on the
 SAME declarative ``Base`` used by ``cosa.rest.postgres_models`` so these tables
 register in ``Base.metadata`` for both alembic autogenerate and the empty-DB
 ``create_all`` bootstrap.
 
 Metric ruling (design §4.2, Pass-1 F1 + Pass-2 H2, confirmed by P0):
-    Live LanceDB search uses ``.metric("dot")`` on every ANN column. The safe
-    pgvector mirror is INNER-PRODUCT (``vector_ip_ops`` / the ``<#>`` operator),
-    NOT cosine — the keystone ``input_and_output`` vectors are NOT L2-normalized
+    Every ANN column is searched by DOT PRODUCT, so the operator is
+    INNER-PRODUCT (``vector_ip_ops`` / ``<#>``), NOT cosine — the keystone ``input_and_output`` vectors are NOT L2-normalized
     (live norm ≈ 22); dot is correct because it is the IDENTICAL metric, not
     because of any normalization invariant. NEVER substitute cosine ``<=>``.
 
@@ -18,15 +16,15 @@ Index rule (design §4.2, per-column, gated on "is it ANN-searched?"):
     Only the 4 columns actually ANN-searched get an HNSW ``vector_ip_ops`` index:
         - input_and_output.input_embedding          (input_and_output_table.py:303)
         - prediction_decisions.question_embedding    (proxy_decision_embeddings.py:227)
-        - solution_snapshots.question_embedding      (lancedb_solution_manager.py:1382)
-        - solution_snapshots.code_embedding          (lancedb_solution_manager.py:1502)
+        - solution_snapshots.question_embedding
+        - solution_snapshots.code_embedding
     Scalar KV lookup keys get btree; write-only telemetry / never-searched vectors
     get NO index until a real ANN consumer appears.
 
-Synthetic-PK note (Rachel review N1): the four tables whose LanceDB source carried
+Synthetic-PK note (Rachel review N1): the four tables that carry
 no natural key — ``input_and_output``, ``question_embeddings``, ``embedding_cache``,
 ``gist_cache`` — get a synthetic ``BigInteger autoincrement`` surrogate PK (Postgres
-requires a primary key; LanceDB did not). Tables with an authoritative natural key
+requires a primary key). Tables with an authoritative natural key
 (``canonical_synonyms``, ``query_log``, ``prediction_decisions``, ``solution_snapshots``)
 keep that key as their PK instead.
 
@@ -58,7 +56,7 @@ from cosa.rest.postgres_models import Base
 
 # --------------------------------------------------------------------------- #
 # Module constants — single source of truth for dim + HNSW params.
-# EMBEDDING_DIM is grounded: EVERY live LanceDB vector column is dim 768 (P0).
+# EMBEDDING_DIM is grounded: EVERY live vector column is dim 768 (P0).
 # HNSW params mirror pgvector defaults; design §4.4 promotes them to config keys
 # (`vector index m` / `ef_construction`) at the config layer (Lane A §4.4 / P2).
 # --------------------------------------------------------------------------- #
@@ -92,8 +90,7 @@ def _hnsw_index( index_name, column_name ):
 
 
 # =========================================================================== #
-# 1. input_and_output — keystone solution/IO store (LanceDB: input_and_output_tbl,
-#    190,677 rows). ONLY input_embedding is ANN-searched (HNSW dot).
+# 1. input_and_output — keystone solution/IO store (190,677 rows at migration). ONLY input_embedding is ANN-searched (HNSW dot).
 # =========================================================================== #
 class InputAndOutput( Base ):
     """Keystone input/output store; the sole design-scope ANN table."""
@@ -113,8 +110,8 @@ class InputAndOutput( Base ):
     # NO vector index — EXACT-scan ruling (Rick, 2026-07-07 cutover; migration
     # e1f2a3b4c5d6): the live table is 97.2% duplicate vectors, which traps HNSW
     # beam search in duplicate plateaus (wrong neighbors at default ef_search).
-    # Exact `<#>` scan is guaranteed LanceDB-parity and 2.7x faster than the
-    # legacy LanceDB flat scan. Revisit HNSW after the notification-spam purge.
+    # Exact `<#>` scan returns identical neighbors and is 2.7x faster than the
+    # legacy flat scan. Revisit HNSW after the notification-spam purge.
     # output_final_embedding: not ANN-searched → deliberately NO index either.
 
 
@@ -161,9 +158,9 @@ class GistCache( Base ):
     question_verbatim:   Mapped[Optional[str]] = mapped_column( Text )
     question_normalized: Mapped[Optional[str]] = mapped_column( Text )
     question_gist:       Mapped[Optional[str]] = mapped_column( Text )
-    created_date:        Mapped[Optional[str]] = mapped_column( Text )   # live LanceDB stored this as string
+    created_date:        Mapped[Optional[str]] = mapped_column( Text )   # stored as a string, not a timestamp type
     access_count:        Mapped[Optional[int]] = mapped_column( Integer )
-    last_accessed:       Mapped[Optional[str]] = mapped_column( Text )   # live LanceDB stored this as string
+    last_accessed:       Mapped[Optional[str]] = mapped_column( Text )   # stored as a string, not a timestamp type
 
     __table_args__ = (
         Index( "idx_gist_cache_question_normalized", "question_normalized" ),
@@ -236,9 +233,8 @@ class QueryLog( Base ):
 
 
 # =========================================================================== #
-# 7. prediction_decisions — decision-proxy VECTOR store (LanceDB-only; the
-#    Postgres proxy_decisions table is a SEPARATE relational log with no vector
-#    search). question_embedding IS ANN-searched (HNSW dot). Mirrored 1:1 — NOT
+# 7. prediction_decisions — decision-proxy VECTOR store (the proxy_decisions
+#    table is a SEPARATE relational log with no vector search). question_embedding IS ANN-searched (HNSW dot). Mirrored 1:1 — NOT
 #    folded into proxy_decisions (that unification is a future Lane C decision).
 # =========================================================================== #
 class PredictionDecision( Base ):
@@ -253,7 +249,7 @@ class PredictionDecision( Base ):
     data_origin:        Mapped[Optional[str]]  = mapped_column( Text )
     response_type:      Mapped[Optional[str]]  = mapped_column( Text )
     question_embedding: Mapped[Optional[list]] = mapped_column( Vector( EMBEDDING_DIM ) )
-    created_at:         Mapped[Optional[str]]  = mapped_column( Text )   # live LanceDB stored created_at as string
+    created_at:         Mapped[Optional[str]]  = mapped_column( Text )   # stored as a string, not a timestamp type
 
     __table_args__ = (
         _hnsw_index( "idx_prediction_decisions_question_embedding_hnsw", "question_embedding" ),
@@ -262,7 +258,7 @@ class PredictionDecision( Base ):
 
 
 # =========================================================================== #
-# 8. solution_snapshots — lancedb_solution_manager store (DISTINCT from
+# 8. solution_snapshots — snapshot-manager store (DISTINCT from
 #    input_and_output). 7 vector columns; question_embedding + code_embedding are
 #    ANN-searched (HNSW dot); the other 5 are not searched → no index.
 # =========================================================================== #
@@ -282,16 +278,16 @@ class SolutionSnapshot( Base ):
     error:                       Mapped[Optional[str]]       = mapped_column( Text )
     routing_command:             Mapped[Optional[str]]       = mapped_column( Text )
     agent_class_name:            Mapped[Optional[str]]       = mapped_column( Text )
-    code:                        Mapped[Optional[List[str]]] = mapped_column( ARRAY( Text ) )   # LanceDB list<string>
+    code:                        Mapped[Optional[List[str]]] = mapped_column( ARRAY( Text ) )   # list of strings
     solution_summary_gist:       Mapped[Optional[str]]       = mapped_column( Text )
     code_returns:                Mapped[Optional[str]]       = mapped_column( Text )
     code_example:                Mapped[Optional[str]]       = mapped_column( Text )
     code_type:                   Mapped[Optional[str]]       = mapped_column( Text )
     programming_language:        Mapped[Optional[str]]       = mapped_column( Text )
     language_version:            Mapped[Optional[str]]       = mapped_column( Text )
-    synonymous_questions:        Mapped[Optional[str]]       = mapped_column( Text )   # LanceDB string (not a list)
-    synonymous_question_gists:   Mapped[Optional[str]]       = mapped_column( Text )   # LanceDB string (not a list)
-    non_synonymous_questions:    Mapped[Optional[List[str]]] = mapped_column( ARRAY( Text ) )   # LanceDB list<string>
+    synonymous_questions:        Mapped[Optional[str]]       = mapped_column( Text )   # a single string, NOT a list
+    synonymous_question_gists:   Mapped[Optional[str]]       = mapped_column( Text )   # a single string, NOT a list
+    non_synonymous_questions:    Mapped[Optional[List[str]]] = mapped_column( ARRAY( Text ) )   # list of strings
     last_question_asked:         Mapped[Optional[str]]       = mapped_column( Text )
     created_date:                Mapped[Optional[str]]       = mapped_column( Text )
     updated_date:                Mapped[Optional[str]]       = mapped_column( Text )
@@ -331,7 +327,7 @@ VECTOR_STORE_MODELS = [
 # The ANN-searched (table, col) pairs that carry an HNSW vector_ip_ops index.
 # input_and_output.input_embedding is deliberately ABSENT — exact-scan ruling
 # (Rick 2026-07-07, migration e1f2a3b4c5d6): 97.2% duplicate vectors break HNSW
-# recall; exact `<#>` scan is LanceDB-parity-guaranteed and faster than legacy.
+# recall; exact `<#>` scan returns identical neighbors and is faster than legacy.
 HNSW_DOT_INDEXES = [
     ( "prediction_decisions", "question_embedding" ),
     ( "solution_snapshots",   "question_embedding" ),

@@ -2,8 +2,8 @@
 """
 Seed proxy decisions for preference learning bootstrap (Phases 0-1).
 
-Populates PostgreSQL (proxy_decisions table) and LanceDB (proxy_decisions vector
-store) with 50 realistic decision scenarios across all 6 engineering categories,
+Populates the Postgres proxy_decisions table and its pgvector embedding store
+with 50 realistic decision scenarios across all 6 engineering categories,
 then optionally batch-ratifies them to create training signal for the CBR engine.
 
 Usage:
@@ -17,11 +17,10 @@ Requires:
     - LUPIN_ROOT environment variable set
     - LUPIN_CONFIG_MGR_CLI_ARGS environment variable set
     - PostgreSQL running with proxy_decisions table
-    - LanceDB database directory accessible
 
 Ensures:
     - --dry-run prints scenario catalog with no side effects
-    - Default mode inserts 50 decisions into PG + LanceDB
+    - Default mode inserts 50 decisions into Postgres + the pgvector store
     - --ratify applies suggested approve/reject to all seed decisions
     - --verify confirms CBR predictions return non-None verdicts
     - --clean removes all seed data (metadata_json.seed_data == True)
@@ -724,15 +723,18 @@ def _get_embedding_store():
     """
     Create and return a ProxyDecisionEmbeddings instance using config.
 
+    No storage path is built. The store lives in Postgres+pgvector, so the only
+    thing to resolve is the table name. Passing a path here used to raise: the
+    store's path guard rejects a db_path it would silently ignore, which made
+    this script fail on every invocation after the July cutover.
+
     Ensures:
         - Returns configured ProxyDecisionEmbeddings instance
     """
     config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
-    db_path    = cu.get_project_root() + config_mgr.get( "solution snapshots lancedb path" )
     table_name = config_mgr.get( "swe team trust proxy lancedb table", default="proxy_decisions" )
 
     return ProxyDecisionEmbeddings(
-        db_path    = db_path,
         table_name = table_name,
         debug      = True,
     )
@@ -744,14 +746,14 @@ def _get_embedding_store():
 
 def seed_decisions( scenarios, dry_run=False, category_filter=None ):
     """
-    Insert seed decisions into PostgreSQL and LanceDB.
+    Insert seed decisions into Postgres and the pgvector embedding store.
 
     Requires:
         - scenarios is a non-empty list of scenario dicts
         - Database is accessible if dry_run is False
 
     Ensures:
-        - Each scenario creates one ProxyDecision in PG + one vector in LanceDB
+        - Each scenario creates one ProxyDecision row + one vector in the store
         - All records have metadata_json.seed_data = True for cleanup
         - Returns list of ( pg_uuid, scenario_id ) tuples
 
@@ -816,7 +818,7 @@ def seed_decisions( scenarios, dry_run=False, category_filter=None ):
             # Step 2: Generate embedding via server API
             embedding = generate_embedding_via_api( scenario[ "question" ], headers )
 
-            # Step 3: Store in LanceDB
+            # Step 3: Store the embedding
             store.add_decision(
                 id                 = str( decision.id ),
                 question           = scenario[ "question" ],
@@ -831,7 +833,7 @@ def seed_decisions( scenarios, dry_run=False, category_filter=None ):
             results.append( ( str( decision.id ), scenario[ "id" ] ) )
             print( f"  [{i + 1:>2}/{len( scenarios )}] {scenario[ 'id' ]:<20} → PG {decision.id}" )
 
-    print( f"\nSeeded {len( results )} decisions into PostgreSQL + LanceDB" )
+    print( f"\nSeeded {len( results )} decisions into Postgres + the pgvector store" )
     _print_distribution_table()
     return results
 
@@ -846,7 +848,7 @@ def ratify_suggested( user_email ):
 
     Ensures:
         - Each seed decision is ratified (approved or rejected) per its scenario
-        - LanceDB ratification_state is updated to match
+        - The embedding store's ratification_state is updated to match
         - Returns summary dict: { approved: N, rejected: N }
 
     Args:
@@ -888,7 +890,7 @@ def ratify_suggested( user_email ):
                 feedback    = f"Seed ratification: {suggested}",
             )
 
-            # Step 2: Update LanceDB
+            # Step 2: Update the embedding store
             new_state = "approved" if is_approve else "rejected"
             store.update_ratification_state( str( decision.id ), new_state )
 
@@ -910,7 +912,7 @@ def verify():
 
     Ensures:
         - Counts PG decisions (pending + ratified)
-        - Tests LanceDB similarity search with a known query
+        - Tests vector similarity search with a known query
         - Tests CBR prediction returns non-None verdict (if ratified data exists)
         - Prints verification results
     """
@@ -943,8 +945,8 @@ def verify():
         print( f"  Seed ratified: {len( seed_ratified )}" )
         print( f"  Total seed:    {len( seed_pending ) + len( seed_ratified )}" )
 
-    # Check 2: LanceDB similarity search
-    print( "\n--- LanceDB Similarity Search ---" )
+    # Check 2: vector similarity search
+    print( "\n--- Vector Similarity Search ---" )
     test_query   = "Should I run the pytest suite?"
     test_embed   = generate_embedding_via_api( test_query, headers )
     similar      = store.find_similar( test_embed, category="testing", limit=3, threshold=0.0 )
@@ -997,11 +999,11 @@ def verify():
 
 def clean_seed_data():
     """
-    Remove all seed data from PostgreSQL and LanceDB.
+    Remove all seed data from Postgres and the pgvector embedding store.
 
     Ensures:
         - Deletes PG records where metadata_json.seed_data == True
-        - Removes corresponding LanceDB records
+        - Removes the corresponding embedding-store records
         - Prints deletion count
     """
     store = _get_embedding_store()
@@ -1029,13 +1031,13 @@ def clean_seed_data():
         for d in seed_decisions:
             decision_id = str( d.id )
 
-            # Remove from LanceDB (best-effort)
+            # Remove from the embedding store (best-effort)
             try:
                 if store._ensure_table():
                     escaped = decision_id.replace( "'", "''" )
                     store._table.delete( f"id = '{escaped}'" )
             except Exception as e:
-                print( f"  Warning: LanceDB delete failed for {decision_id}: {e}" )
+                print( f"  Warning: embedding-store delete failed for {decision_id}: {e}" )
 
             # Remove from PostgreSQL
             # Reset ratification state to pending so delete_pending works
@@ -1046,7 +1048,7 @@ def clean_seed_data():
             repo.delete_pending( d.id )
             deleted_count += 1
 
-        print( f"  Deleted {deleted_count} seed decisions from PostgreSQL + LanceDB" )
+        print( f"  Deleted {deleted_count} seed decisions from Postgres + the pgvector store" )
 
 
 # ---------------------------------------------------------------------------
@@ -1074,11 +1076,11 @@ def main():
     )
     parser.add_argument(
         "--verify", action="store_true",
-        help="Verify seed data is functioning (PG counts, LanceDB search, CBR prediction)"
+        help="Verify seed data is functioning (row counts, vector search, CBR prediction)"
     )
     parser.add_argument(
         "--clean", action="store_true",
-        help="Remove all seed data from PostgreSQL and LanceDB"
+        help="Remove all seed data from Postgres and the pgvector store"
     )
     parser.add_argument(
         "--category", type=str, default=None,

@@ -2,16 +2,14 @@
 CJ Flow v2 — cache adapter (unit C2).
 
 A two-tier solution-snapshot cache over the Postgres/pgvector repositories, plus
-tagged write-back. LanceDB appears NOWHERE in this module's import graph — v2
-talks to the Postgres repositories directly (Rick's ruling 2026-08-14: "LanceDB
-is out, do not use in any way shape or form").
+tagged write-back. V2 talks to the Postgres repositories directly.
 
 REUSE, NOT REBUILD (Rick's ruling 2026-08-15, decision row 29e98243): the two-tier
 lookup itself now lives in the properly-named module
 ``cosa.memory.two_tier_question_search`` as ``TwoTierQuestionSearch``. V2Cache
 SUBCLASSES it — inheriting ``lookup`` and all the ORM→snapshot marshalling — and
 adds only the v2-specific pieces below (tagged write-back + snapshot construction).
-So the read path is shared with the LanceDB manager's own shim rather than
+So the read path is shared with the snapshot manager's own shim rather than
 duplicated, while V2Cache stays read-only on lookup and instrumented for the eval.
 
 The two tiers (design doc §6, revised by handoff §3.C) live in the base class:

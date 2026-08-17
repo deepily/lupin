@@ -7,7 +7,7 @@ break the queue pipeline.
 
 Scope: AgenticJobBase subclasses only (deep_research, podcast, presentation,
 claude_code, swe_team, research_to_podcast, research_to_presentation,
-bug_fix_expediter). Sync agents are cached in LanceDB.
+bug_fix_expediter). Sync agents are cached in Postgres.
 
 Usage:
     from cosa.rest.job_persistence import (

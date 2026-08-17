@@ -70,7 +70,7 @@ echo "[build-local-venv] installing the en_core_web_sm spaCy model..."
 .venv/bin/python -m spacy download en_core_web_sm
 
 echo "[build-local-venv] sanity check..."
-.venv/bin/python -c "import torch, fastapi, pydantic, lancedb, transformers, pytest, spacy; \
+.venv/bin/python -c "import torch, fastapi, pydantic, pgvector, transformers, pytest, spacy; \
 spacy.load('en_core_web_sm'); \
 print('OK | torch', torch.__version__, '| cuda', torch.cuda.is_available())"
 

@@ -1,6 +1,6 @@
 """
 QuestionEmbeddingRepository — Postgres storage for the ``question_embeddings``
-text→embedding cache (LanceDB source: QuestionEmbeddingsTable).
+text→embedding cache.
 
 Exact-match KV cache (btree on ``question``) — NOT ANN-searched. Storage-only:
 ``get_embedding`` returns the cached vector or None (the Lane-C memory layer

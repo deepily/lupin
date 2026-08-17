@@ -1,6 +1,5 @@
 """
-GistCacheRepository — Postgres storage for the ``gist_cache`` table (LanceDB
-source: GistCacheTable).
+GistCacheRepository — Postgres storage for the ``gist_cache`` table.
 
 RELATIONAL ONLY — P0-confirmed no vector column. Two-tier exact lookup (verbatim
 then normalized). Text normalization stays in the Lane-C memory layer; this

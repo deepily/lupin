@@ -3,7 +3,8 @@
 Baseline performance measurement for solution snapshot systems.
 
 This script establishes baseline performance metrics for the current file-based
-solution snapshot system to enable empirical comparison with the LanceDB implementation.
+solution snapshot system to enable empirical comparison with the Postgres+pgvector
+implementation.
 """
 
 import os
@@ -240,7 +241,7 @@ def run_baseline_performance_tests( debug: bool = False ) -> Dict[str, Any]:
         print( f"  ✓ Overall Performance: {summary['overall_performance']}" )
         print( f"  ✓ Average Search Time: {summary['average_search_time_ms']:.1f}ms" )
         print( f"  ✓ Storage Efficiency: {summary['storage_efficiency_kb_per_snapshot']:.1f} KB per snapshot" )
-        print( f"  ✓ Ready for LanceDB comparison: {summary['ready_for_comparison']}" )
+        print( f"  ✓ Ready for Postgres comparison: {summary['ready_for_comparison']}" )
         
         return baseline_results
         

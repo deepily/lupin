@@ -232,11 +232,11 @@ class TestNotifyPathDoesNotStarveLoop:
 
 
 class TestMarkPlayedPathDoesNotStarveLoop:
-    """POST /api/notifications/{id}/played with slow embeddings+LanceDB must not stall the loop."""
+    """POST /api/notifications/{id}/played with slow embeddings+store writes must not stall the loop."""
 
     @pytest.mark.asyncio
     async def test_slow_mark_played_does_not_stall_loop( self ):
-        """A 0.8s-blocking mark_played (2 embeddings + LanceDB write — the
+        """A 0.8s-blocking mark_played (2 embeddings + a store write — the
         2026-06-11 wedge smoking gun) leaves the loop ticking (T4 offload)."""
         _warm_main_module_import()
         ws_manager         = _online_ws_manager()
@@ -261,6 +261,6 @@ class TestMarkPlayedPathDoesNotStarveLoop:
         assert played_response.status_code == 200
         assert played_response.json()[ "status" ] == "success"
         assert max_lag_seconds < LAG_MAX_SECONDS, (
-            f"event loop stalled {max_lag_seconds:.3f}s while mark_played's embedding+LanceDB work "
+            f"event loop stalled {max_lag_seconds:.3f}s while mark_played's embedding+store work "
             f"was in flight — blocking I/O is back ON the loop (the 2026-06-11 wedge mechanism)"
         )

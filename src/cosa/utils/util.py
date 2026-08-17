@@ -214,21 +214,21 @@ def get_current_time(tz_name: str = "US/Eastern", include_timezone: bool = True,
 
 def get_timestamp_ms() -> dt:
     """
-    Get current timestamp with millisecond precision for LanceDB compatibility.
+    Get current timestamp truncated to millisecond precision.
 
     Requires:
         - Nothing
 
     Ensures:
         - Returns datetime object with microseconds truncated to millisecond precision
-        - Compatible with PyArrow timestamp('ms') schema fields
-        - Avoids LanceDB casting errors from microsecond to millisecond precision
+        - Millisecond precision is what every caller's stored timestamp column
+          expects; sub-millisecond digits are dropped, not rounded
 
     Returns:
         datetime object with millisecond precision
     """
     now = dt.now()
-    # Truncate to milliseconds to match LanceDB schema expectations
+    # Truncate to milliseconds to match the stored timestamp precision
     return now.replace(microsecond=(now.microsecond // 1000) * 1000)
 
 
