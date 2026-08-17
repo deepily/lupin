@@ -18,6 +18,7 @@ class ManagerType( Enum ):
     """Enumeration of available solution snapshot manager implementations."""
     FILE_BASED = "file_based"
     LANCEDB = "lancedb"
+    POSTGRES = "postgres"
     
     @classmethod
     def from_string( cls, value: str ) -> 'ManagerType':
@@ -105,6 +106,8 @@ class SolutionSnapshotManagerFactory:
             return SolutionSnapshotManagerFactory._create_file_based_manager( config, debug, verbose )
         elif manager_type == ManagerType.LANCEDB:
             return SolutionSnapshotManagerFactory._create_lancedb_manager( config, debug, verbose )
+        elif manager_type == ManagerType.POSTGRES:
+            return SolutionSnapshotManagerFactory._create_postgres_manager( config, debug, verbose )
         else:
             raise ValueError( f"Unsupported manager type: {manager_type}" )
     
@@ -177,7 +180,32 @@ class SolutionSnapshotManagerFactory:
             raise KeyError( f"Missing required config keys for lancedb manager: {missing_keys}" )
 
         return SolutionSnapshotManager( config, debug, verbose )
-    
+
+    @staticmethod
+    def _create_postgres_manager( config: Dict[str, Any], debug: bool, verbose: bool ) -> SolutionSnapshotManagerInterface:
+        """
+        Create the Postgres+pgvector solution snapshot manager.
+
+        Requires:
+            - config may be empty; there is NO storage location to validate and
+              config["table_name"] is optional (reporting-only — the table is fixed
+              by the ORM model)
+
+        Ensures:
+            - Returns PostgresSolutionManager instance
+            - Validates nothing about LanceDB paths: demanding a db_path/gcs_uri here
+              would reject the only correct config for this backend
+
+        Raises:
+            - ImportError if PostgresSolutionManager not available
+        """
+        try:
+            from cosa.memory.postgres_solution_manager import PostgresSolutionManager
+        except ImportError as e:
+            raise ImportError( f"PostgresSolutionManager not available: {e}" )
+
+        return PostgresSolutionManager( config, debug, verbose )
+
     @staticmethod
     def get_available_types() -> List[str]:
         """
@@ -218,7 +246,8 @@ class SolutionSnapshotManagerFactory:
             verbose: Enable verbose output
             
         Expected Config Keys:
-            - "solution snapshots manager type": "file_based" or "lancedb"
+            - "solution snapshots manager type": "file_based", "lancedb" or "postgres"
+            - "solution snapshots postgres table": Reporting-only table name (postgres only)
             - "solution snapshots file based path": Path for file-based storage (file_based only)
             - "storage backend": "local" or "gcs" (lancedb only, defaults to "local")
             - "solution snapshots lancedb path": Local DB path (lancedb with backend=local)
@@ -248,7 +277,17 @@ class SolutionSnapshotManagerFactory:
             if not config["path"]:
                 raise KeyError( "Configuration key 'solution snapshots file based path' not found" )
                 
-        elif manager_type == ManagerType.LANCEDB:  # pragma: no branch - ManagerType is a 2-value enum (FILE_BASED/LANCEDB), validated upstream; not-FILE_BASED implies LANCEDB, so the elif-False arc is unreachable
+        elif manager_type == ManagerType.POSTGRES:
+            # No storage location to read: the table is fixed by the ORM model and the
+            # connection comes from the DB layer, so the only knobs are reporting-only.
+            config = {
+                "table_name": config_mgr.get( "solution snapshots postgres table", default="solution_snapshots" ),
+                "enable_performance_monitoring": config_mgr.get(
+                    "solution snapshots enable performance monitoring", default=True, return_type="boolean"
+                )
+            }
+
+        elif manager_type == ManagerType.LANCEDB:  # pragma: no branch - ManagerType members are validated upstream by from_string; FILE_BASED and POSTGRES are handled above, so not-those implies LANCEDB and the elif-False arc is unreachable
             # Read storage backend configuration
             storage_backend = config_mgr.get( "storage backend", default="development" )
 
@@ -313,7 +352,7 @@ def quick_smoke_test():
         # Test available types
         print( "\nTesting available types retrieval..." )
         available = SolutionSnapshotManagerFactory.get_available_types()
-        expected_types = {"file_based", "lancedb"}
+        expected_types = {"file_based", "lancedb", "postgres"}
         
         if set( available ) == expected_types:
             print( f"✓ Available types correct: {available}" )

@@ -2665,14 +2665,14 @@ def spawn_sessions(
             walk the same chain and take successive unclaimed elements.
         seed_memento: path/ref to a prior memento; restores author continuity
         dry_run: build + print the spawn commands without launching
-        model: explicit model id to pin each child to (e.g. "claude-opus-4-8").
+        model: explicit model id to pin each child to (e.g. "claude-opus-5").
             Resolution: this explicit param → the INI role key
             `cc session spawn model <role>` → the INI `cc session spawn model
             default` key (covers unknown/new roles) → None. None resolves to NO
             `--model` flag, so the child inherits the user default (fail-open;
             today's behavior, zero-risk rollout). The cost-split default posture
-            (2026-07-02) is Fable-5-managers (via Rick's user default, zero code)
-            / Opus-4.8-workers (the `claude-opus-4-8` INI keys). The resolved
+            (2026-08-17) is Fable-5-managers (via Rick's user default, zero code)
+            / Opus-5-workers (the `claude-opus-5` INI keys). The resolved
             model is echoed on every roster entry + at the top level (spawn-ack
             verification).
 

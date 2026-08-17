@@ -490,15 +490,15 @@ class TestSpawnSessionsModel:
     def test_model_threads_into_argv_before_prompt( self, tmp_path ):
         runner = FakeRunner( returncode=0 )
         res = spawn_sessions( 1, "t", "sid-m", script_path="/s.sh", manager_persona="Rio",
-                              model="claude-opus-4-8", runner=runner, session_dir=tmp_path )
+                              model="claude-opus-5", runner=runner, session_dir=tmp_path )
         argv = self._argv_of( runner )
         # --model <id> present, and inserted BEFORE --prompt (the claude_args seam)
         assert "--model" in argv
-        assert argv[ argv.index( "--model" ) + 1 ] == "claude-opus-4-8"
+        assert argv[ argv.index( "--model" ) + 1 ] == "claude-opus-5"
         assert argv.index( "--model" ) < argv.index( "--prompt" )
         # echoed on the roster entry AND the top-level result
-        assert res[ "spawned" ][ 0 ][ "model" ] == "claude-opus-4-8"
-        assert res[ "model" ] == "claude-opus-4-8"
+        assert res[ "spawned" ][ 0 ][ "model" ] == "claude-opus-5"
+        assert res[ "model" ] == "claude-opus-5"
 
     def test_model_none_omits_flag_and_echoes_none( self, tmp_path ):
         runner = FakeRunner( returncode=0 )
@@ -520,15 +520,15 @@ class TestSpawnSessionsModel:
     def test_model_on_every_child_in_a_batch( self, tmp_path ):
         runner = FakeRunner( returncode=0 )
         res = spawn_sessions( 3, "t", "sid-mb", script_path="/s.sh", manager_persona="Rio",
-                              model="claude-opus-4-8", runner=runner, session_dir=tmp_path )
-        assert all( s[ "model" ] == "claude-opus-4-8" for s in res[ "spawned" ] )
+                              model="claude-opus-5", runner=runner, session_dir=tmp_path )
+        assert all( s[ "model" ] == "claude-opus-5" for s in res[ "spawned" ] )
         for i in range( 3 ):
             assert "--model" in self._argv_of( runner, i )
 
     def test_model_coexists_with_dry_run( self, tmp_path ):
         runner = FakeRunner( returncode=0 )
         spawn_sessions( 1, "t", "sid-md", script_path="/s.sh", dry_run=True,
-                        model="claude-opus-4-8", runner=runner, session_dir=tmp_path )
+                        model="claude-opus-5", runner=runner, session_dir=tmp_path )
         argv = self._argv_of( runner )
         # both flags present; --dry-run precedes the session name, --model follows it
         assert "--dry-run" in argv and "--model" in argv
@@ -551,12 +551,12 @@ class TestListSpawnedSessionsModel:
         # two DIFFERENT model ids prove the row echoes the PERSISTED value,
         # not a hardcoded opus default.
         self._seed( tmp_path, [
-            { "session_name": "cc-author-rio",  "requested_role": "author", "model": "claude-opus-4-8" },
+            { "session_name": "cc-author-rio",  "requested_role": "author", "model": "claude-opus-5" },
             { "session_name": "cc-tester-clay", "requested_role": "tester", "model": "claude-sonnet-5"  },
         ] )
         res  = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ), session_dir=tmp_path )
         rows = { r[ "session_name" ]: r for r in res[ "sessions" ] }
-        assert rows[ "cc-author-rio"  ][ "model" ] == "claude-opus-4-8"
+        assert rows[ "cc-author-rio"  ][ "model" ] == "claude-opus-5"
         assert rows[ "cc-tester-clay" ][ "model" ] == "claude-sonnet-5"
         # contract: EVERY row carries the key, not just the asserted ones
         assert all( "model" in r for r in res[ "sessions" ] )
@@ -1295,15 +1295,15 @@ class TestResolveSpawnConfig:
             "cc session spawn max reviewers"                 : 5,
             "cc session spawn reviewer ack timeout seconds"  : 90,
             "cc session spawn write memento default"         : False,
-            "cc session spawn model reviewer"                : "claude-opus-4-8",
-            "cc session spawn model author"                  : "claude-opus-4-8",
-            "cc session spawn model observer"                : "claude-opus-4-8",
-            "cc session spawn model default"                 : "claude-opus-4-8",
+            "cc session spawn model reviewer"                : "claude-opus-5",
+            "cc session spawn model author"                  : "claude-opus-5",
+            "cc session spawn model observer"                : "claude-opus-5",
+            "cc session spawn model default"                 : "claude-opus-5",
         } )
         cfg = resolve_spawn_config( mgr )
         assert cfg == { "spawn_cap": 5, "ack_timeout_seconds": 90, "write_memento_default": False,
-                        "spawn_models": { "reviewer": "claude-opus-4-8", "author": "claude-opus-4-8",
-                                          "observer": "claude-opus-4-8", "default": "claude-opus-4-8" },
+                        "spawn_models": { "reviewer": "claude-opus-5", "author": "claude-opus-5",
+                                          "observer": "claude-opus-5", "default": "claude-opus-5" },
                         **self._MEM_DEFAULTS }
 
     def test_missing_keys_fall_back_to_defaults( self ):
@@ -1580,8 +1580,8 @@ class TestSpawnSessionsWrapperResolution:
         monkeypatch.setattr( ss, "spawn_sessions", _spy_spawn )
         return ss
 
-    _ALL_OPUS = { "reviewer": "claude-opus-4-8", "author": "claude-opus-4-8",
-                  "observer": "claude-opus-4-8", "default": "claude-opus-4-8" }
+    _ALL_OPUS = { "reviewer": "claude-opus-5", "author": "claude-opus-5",
+                  "observer": "claude-opus-5", "default": "claude-opus-5" }
 
     def test_explicit_param_wins_over_ini( self, cv_mcp, monkeypatch ):
         captured = {}
@@ -1592,25 +1592,25 @@ class TestSpawnSessionsWrapperResolution:
     def test_role_key_used_when_no_explicit( self, cv_mcp, monkeypatch ):
         captured = {}
         self._patch( cv_mcp, monkeypatch, captured,
-                     { "reviewer": "claude-opus-4-8", "author": None, "observer": None, "default": None } )
+                     { "reviewer": "claude-opus-5", "author": None, "observer": None, "default": None } )
         cv_mcp.spawn_sessions.fn( 1, "t", role="reviewer" )
-        assert captured[ "model" ] == "claude-opus-4-8"  # from the reviewer role key
+        assert captured[ "model" ] == "claude-opus-5"  # from the reviewer role key
 
     def test_role_specific_beats_default( self, cv_mcp, monkeypatch ):
         captured = {}
         self._patch( cv_mcp, monkeypatch, captured,
-                     { "reviewer": "claude-opus-4-8", "author": None, "observer": None,
+                     { "reviewer": "claude-opus-5", "author": None, "observer": None,
                        "default": "claude-fable-5" } )
         cv_mcp.spawn_sessions.fn( 1, "t", role="reviewer" )
-        assert captured[ "model" ] == "claude-opus-4-8"  # role key beats the default key
+        assert captured[ "model" ] == "claude-opus-5"  # role key beats the default key
 
     def test_falls_to_default_key_for_unkeyed_role( self, cv_mcp, monkeypatch ):
         captured = {}
         self._patch( cv_mcp, monkeypatch, captured,
-                     { "reviewer": None, "author": None, "observer": None, "default": "claude-opus-4-8" } )
+                     { "reviewer": None, "author": None, "observer": None, "default": "claude-opus-5" } )
         # an unknown/new role has no map entry → .get(role) is None → the default key
         cv_mcp.spawn_sessions.fn( 1, "t", role="manager" )
-        assert captured[ "model" ] == "claude-opus-4-8"
+        assert captured[ "model" ] == "claude-opus-5"
 
     def test_all_none_resolves_to_none_no_flag( self, cv_mcp, monkeypatch ):
         captured = {}
@@ -1636,3 +1636,43 @@ class TestSpawnSessionsWrapperResolution:
         monkeypatch.setattr( ss, "spawn_sessions", _raise )
         res = cv_mcp.spawn_sessions.fn( 99, "t" )
         assert res[ "status" ] == "error" and "cap" in res[ "reason" ]
+
+
+# ── shipped-INI worker model pin (row e90129d6) ───────────────────────────────
+
+class TestShippedIniWorkerModelPin:
+    """The four `cc session spawn model` keys that ship in lupin-app.ini decide what
+    model every headless worker boots on. Every other model test in this file feeds
+    its own fixture value, so a silent edit of the shipped file would break nothing —
+    this is the test that reads the real file (Rick's 2026-08-17 call: workers on
+    Opus 5, full id so a release can't upgrade us behind our back)."""
+
+    _EXPECTED_MODEL = "claude-opus-5"
+    _ROLE_KEYS      = [ "cc session spawn model reviewer",
+                        "cc session spawn model author",
+                        "cc session spawn model observer",
+                        "cc session spawn model default" ]
+
+    def _shipped_ini( self ):
+        import configparser
+        ini_path = Path( os.environ.get( "LUPIN_ROOT", os.getcwd() ) ) / "src" / "conf" / "lupin-app.ini"
+        parser   = configparser.ConfigParser( interpolation=None )
+        parser.read( ini_path )
+        return parser
+
+    def test_all_four_worker_keys_pin_opus_5( self ):
+        parser = self._shipped_ini()
+        pinned = { key: parser.get( "Lupin: Baseline", key ) for key in self._ROLE_KEYS }
+        assert pinned == { key: self._EXPECTED_MODEL for key in self._ROLE_KEYS }
+
+    def test_pin_is_a_full_id_not_an_alias( self ):
+        # An alias ("opus") lets a release move the model — and the cost — under us.
+        parser = self._shipped_ini()
+        for key in self._ROLE_KEYS:
+            value = parser.get( "Lupin: Baseline", key )
+            assert value.startswith( "claude-" ), f"{key} = {value} is not a full model id"
+
+    def test_no_manager_key_ships( self ):
+        # Managers boot interactively on Rick's user default — ruling #2, zero code.
+        parser = self._shipped_ini()
+        assert not parser.has_option( "Lupin: Baseline", "cc session spawn model manager" )

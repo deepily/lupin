@@ -6,8 +6,8 @@ Covers the ManagerType enum and the SolutionSnapshotManagerFactory:
 - ManagerType.from_string (exact / case-insensitive / unknown→ValueError)
 - create_manager: str→enum coercion, debug/verbose logging, file_based / lancedb
   dispatch, and the defensive unsupported-type ValueError
-- _create_file_based_manager / _create_lancedb_manager: lazy-import success,
-  ImportError-wrap, and missing-config-key KeyError arms
+- _create_file_based_manager / _create_lancedb_manager / _create_postgres_manager:
+  lazy-import success, ImportError-wrap, and missing-config-key KeyError arms
 - get_available_types
 - create_from_config_manager: missing-type ValueError, file_based (success +
   missing-path KeyError), lancedb local (success + missing-db_path KeyError),
@@ -46,6 +46,7 @@ def _fake_module( name, attr_name ):
 
 _FILE_MOD  = "cosa.memory.file_based_solution_manager"
 _LANCE_MOD = "cosa.memory.lancedb_solution_manager"
+_PG_MOD    = "cosa.memory.postgres_solution_manager"
 
 
 class TestManagerType( unittest.TestCase ):
@@ -203,7 +204,7 @@ class TestCreateLancedbManager( unittest.TestCase ):
 class TestGetAvailableTypes( unittest.TestCase ):
     def test_returns_all_values( self ):
         self.assertEqual( set( SolutionSnapshotManagerFactory.get_available_types() ),
-                          { "file_based", "lancedb" } )
+                          { "file_based", "lancedb", "postgres" } )
 
 
 class TestCreateFromConfigManager( unittest.TestCase ):
@@ -315,6 +316,91 @@ class TestCreateFromConfigManager( unittest.TestCase ):
         } )
         with self.assertRaises( KeyError ):
             SolutionSnapshotManagerFactory.create_from_config_manager( cfg )
+
+
+class TestCreatePostgresManager( unittest.TestCase ):
+    """_create_postgres_manager — dispatch, lazy import, and the no-validation contract.
+
+    Added 2026-08-17 (row 5ff7b8f5) with ManagerType.POSTGRES: the Postgres backend
+    has NO storage location to validate, so an empty config must be accepted — the
+    LanceDB db_path/gcs_uri demand would reject this backend's only correct config.
+    """
+
+    def test_create_manager_dispatches_to_postgres( self ):
+        mod, cls, created = _fake_module( _PG_MOD, "PostgresSolutionManager" )
+        with patch.dict( sys.modules, { _PG_MOD: mod } ):
+            result = SolutionSnapshotManagerFactory.create_manager( "postgres", {} )
+        self.assertIs( result, created )
+        cls.assert_called_once_with( {}, False, False )
+
+    def test_empty_config_is_accepted( self ):
+        """No required keys: nothing about a LanceDB path may be demanded here."""
+        mod, cls, created = _fake_module( _PG_MOD, "PostgresSolutionManager" )
+        with patch.dict( sys.modules, { _PG_MOD: mod } ):
+            result = SolutionSnapshotManagerFactory._create_postgres_manager( {}, False, False )
+        self.assertIs( result, created )
+
+    def test_table_name_and_flags_pass_through( self ):
+        mod, cls, created = _fake_module( _PG_MOD, "PostgresSolutionManager" )
+        config = { "table_name": "snaps" }
+        with patch.dict( sys.modules, { _PG_MOD: mod } ):
+            SolutionSnapshotManagerFactory._create_postgres_manager( config, True, True )
+        cls.assert_called_once_with( config, True, True )
+
+    def test_import_failure_is_wrapped( self ):
+        with patch.dict( sys.modules, { _PG_MOD: None } ):
+            with self.assertRaises( ImportError ) as caught:
+                SolutionSnapshotManagerFactory._create_postgres_manager( {}, False, False )
+        self.assertIn( "PostgresSolutionManager not available", str( caught.exception ) )
+
+
+class TestCreateFromConfigManagerPostgres( unittest.TestCase ):
+    """create_from_config_manager — the postgres branch reads reporting-only keys."""
+
+    def _cfg( self, mapping ):
+        cfg = Mock()
+        cfg.get.side_effect = lambda key, default=None, **kw: mapping.get( key, default )
+        return cfg
+
+    def test_postgres_success_with_explicit_table( self ):
+        cfg = self._cfg( {
+            "solution snapshots manager type"   : "postgres",
+            "solution snapshots postgres table" : "snaps",
+        } )
+        mod, cls, created = _fake_module( _PG_MOD, "PostgresSolutionManager" )
+        with patch.dict( sys.modules, { _PG_MOD: mod } ):
+            result = SolutionSnapshotManagerFactory.create_from_config_manager( cfg )
+        self.assertIs( result, created )
+        built_config = cls.call_args[ 0 ][ 0 ]
+        self.assertEqual( built_config[ "table_name" ], "snaps" )
+        self.assertTrue( built_config[ "enable_performance_monitoring" ] )
+
+    def test_postgres_table_defaults_when_key_absent( self ):
+        """An absent table key defaults rather than raising — it is reporting-only."""
+        cfg = self._cfg( { "solution snapshots manager type": "postgres" } )
+        mod, cls, created = _fake_module( _PG_MOD, "PostgresSolutionManager" )
+        with patch.dict( sys.modules, { _PG_MOD: mod } ):
+            SolutionSnapshotManagerFactory.create_from_config_manager( cfg )
+        self.assertEqual( cls.call_args[ 0 ][ 0 ][ "table_name" ], "solution_snapshots" )
+
+    def test_postgres_needs_no_storage_location( self ):
+        """No db_path / gcs_uri / storage-backend key is read for this backend."""
+        cfg = self._cfg( { "solution snapshots manager type": "postgres" } )
+        mod, cls, created = _fake_module( _PG_MOD, "PostgresSolutionManager" )
+        with patch.dict( sys.modules, { _PG_MOD: mod } ):
+            SolutionSnapshotManagerFactory.create_from_config_manager( cfg )
+        read_keys = [ call.args[ 0 ] for call in cfg.get.call_args_list ]
+        for storage_key in ( "solution snapshots lancedb path",
+                             "solution snapshots lancedb gcs uri",
+                             "solution snapshots lancedb table" ):
+            self.assertNotIn( storage_key, read_keys )
+
+    def test_postgres_debug_verbose_logging( self ):
+        cfg = self._cfg( { "solution snapshots manager type": "postgres" } )
+        mod, cls, created = _fake_module( _PG_MOD, "PostgresSolutionManager" )
+        with patch.dict( sys.modules, { _PG_MOD: mod } ):
+            SolutionSnapshotManagerFactory.create_from_config_manager( cfg, debug=True, verbose=True )
+        self.assertIs( cls.call_args[ 0 ][ 0 ][ "enable_performance_monitoring" ], True )
 
 
 if __name__ == "__main__":
