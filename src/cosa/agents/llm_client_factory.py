@@ -566,12 +566,12 @@ class LlmClientFactory:
                 verbose=verbose,
                 **self.CLIENT_DEFAULT_PARAMS
             )
-        else:
+        elif client_type == "chat":
             # For vendors using chat API
             full_model_string = f"{vendor}:{model_name}"
-            
+
             if debug: print( f"Creating ChatClient with model string: {full_model_string}" )
-            
+
             return ChatClient(
                 model_name=full_model_string,
                 api_key=api_key,
@@ -580,6 +580,18 @@ class LlmClientFactory:
                 debug=debug,
                 verbose=verbose,
                 **self.CLIENT_DEFAULT_PARAMS
+            )
+        else:
+            # An OMITTED client_type defaulted to "chat" above (config.get default), so
+            # reaching here means the vendor entry set an EXPLICIT unknown value. Fail
+            # loud rather than silently building a ChatClient — a typo'd or future-unwired
+            # client_type must not quietly produce a working-looking wrong client (row
+            # 3405f0b2 adjacent finding).
+            raise ValueError(
+                f"Unknown client_type '{client_type}' for vendor '{vendor_key}' — expected "
+                f"one of 'chat', 'completion', 'genai'. An omitted client_type defaults to "
+                f"'chat'; an explicit unknown value fails loud instead of silently building "
+                f"a ChatClient."
             )
 
 

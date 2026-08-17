@@ -474,3 +474,24 @@ def test_non_vertex_config_spec_still_returns_chat( make_factory ):
         values      = { "plain": "gpt-4o", "plain_params": {} },
     )
     assert isinstance( f.get_client( "plain" ), _StubChat )
+
+
+# =========================================================================== #
+# client_type dispatch: unknown EXPLICIT value fails loud — row 3405f0b2 adjacent
+# =========================================================================== #
+def test_unknown_explicit_client_type_raises( make_factory, monkeypatch ):
+    """A vendor entry with an EXPLICIT unknown client_type RAISES rather than silently
+    returning a ChatClient — a typo'd/future-unwired type must not become a wrong client."""
+    f = make_factory()
+    monkeypatch.setitem( f.VENDOR_CONFIG, "bogusvendor", { "client_type": "bogus" } )
+    with pytest.raises( ValueError, match="Unknown client_type" ):
+        f.get_client( "bogusvendor:some-model" )
+
+
+def test_omitted_client_type_still_defaults_to_chat( make_factory, monkeypatch ):
+    """An OMITTED client_type still defaults to 'chat' → ChatClient — the default is
+    preserved; only an explicit unknown value fails loud."""
+    f = make_factory()
+    # groq, minus its explicit client_type key: omitted -> config.get default 'chat'.
+    monkeypatch.setitem( f.VENDOR_CONFIG, "groq", { "env_var": "GROQ_API_KEY", "key_name": "groq" } )
+    assert isinstance( f.get_client( "groq:llama-x" ), _StubChat )
