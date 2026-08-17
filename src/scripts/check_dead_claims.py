@@ -26,6 +26,7 @@ Exit codes:
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -67,6 +68,80 @@ DEFAULT_CLAIMS = {
 }
 
 WINDOW = 2   # lines either side to search for a marker — these documents are hard-wrapped
+
+# The first backticked `phrase` OR the first "phrase" in a table cell — the canonical
+# grep string a dead-claims table row declares. Backtick and double-quote only; a row
+# lists several strings for one family and we pin the FIRST, not every substring, so an
+# ordinary reword of the row's prose does not trip the sync guard (Rachel's ruling).
+_QUOTED = re.compile( r"`([^`]+)`|\"([^\"]+)\"" )
+
+
+def _first_quoted( text ):
+    """
+    Requires:
+        - text is a single table cell's raw text
+    Ensures:
+        - returns the inner text of the FIRST backticked or double-quoted token, or
+          None when the cell carries neither (a header/separator cell)
+    """
+    match = _QUOTED.search( text )
+    if match is None:
+        return None
+    return match.group( 1 ) if match.group( 1 ) is not None else match.group( 2 )
+
+
+def extract_table_claims( text, table_after="DEAD CLAIMS" ):
+    """
+    Extract the canonical phrase from each row of a document's dead-claims table.
+
+    Requires:
+        - text is the document's full text
+        - table_after is a substring identifying the heading line the table follows
+    Ensures:
+        - returns the canonical phrases (first quoted token in column one) of the
+          first contiguous markdown table after that heading, in table order
+        - returns [] when the heading is absent
+        - header and separator rows carry no quoted token in column one, so they
+          contribute nothing
+    """
+    lines = text.splitlines()
+    start = None
+    for i, line in enumerate( lines ):
+        if table_after in line:
+            start = i
+            break
+    if start is None:
+        return []
+
+    claims   = []
+    in_table = False
+    for line in lines[ start + 1 : ]:
+        stripped = line.strip()
+        if stripped.startswith( "|" ):
+            in_table = True
+            phrase   = _first_quoted( stripped.split( "|" )[ 1 ] )
+            if phrase is not None:
+                claims.append( phrase )
+        elif in_table:
+            break   # first non-table line after the table started ends it
+    return claims
+
+
+def unenforced_table_claims( text, claims, table_after="DEAD CLAIMS" ):
+    """
+    The canonical table phrases the checker does NOT enforce — the drift between the
+    human dead-claims table and the claims the checker actually greps for.
+
+    Requires:
+        - text is the document's full text
+        - claims maps a phrase to the reason it is dead (the enforced set)
+    Ensures:
+        - returns the table's canonical phrases absent from `claims` as an exact key,
+          in table order — a new table row with no matching claim is reported here
+    """
+    enforced = set( claims )
+    return [ phrase for phrase in extract_table_claims( text, table_after=table_after )
+             if phrase not in enforced ]
 
 
 def find_live_claims( text, claims, skip_until=None ):
@@ -111,12 +186,16 @@ def main( argv=None ):
     Ensures:
         - prints one line per live dead claim, and a clean/failed summary
         - exit 1 when anything is live, so this can gate a publish step
+        - with --check-table-sync, also reports table claims the checker does not
+          enforce, exit 3 when the table and the checker have drifted
     """
     parser = argparse.ArgumentParser( description="Find dead claims still asserted in a design doc." )
     parser.add_argument( "doc" )
     parser.add_argument( "--claims", default=None, help="JSON file mapping phrase -> reason" )
     parser.add_argument( "--skip-until", default="## 0. ",
                          help="ignore everything before this line prefix (the doc's own dead-claims table)" )
+    parser.add_argument( "--check-table-sync", action="store_true",
+                         help="also fail when the doc's dead-claims TABLE lists a claim the checker does not enforce" )
     args = parser.parse_args( argv )
 
     doc = Path( args.doc )
@@ -128,18 +207,32 @@ def main( argv=None ):
     if args.claims:
         claims = json.loads( Path( args.claims ).read_text( encoding="utf-8" ) )
 
-    live = find_live_claims( doc.read_text( encoding="utf-8" ), claims, skip_until=args.skip_until )
+    content = doc.read_text( encoding="utf-8" )
+    live    = find_live_claims( content, claims, skip_until=args.skip_until )
 
     for lineno, phrase, reason, line in live:
         print( f"LIVE  {doc}:{lineno}  \"{phrase}\"  — {reason}\n        {line}" )
+
+    unenforced = []
+    if args.check_table_sync:
+        unenforced = unenforced_table_claims( content, claims )
+        for phrase in unenforced:
+            print( f"UNENFORCED  \"{phrase}\"  — in the dead-claims table but not in the checker's claim set" )
 
     if live:
         print( f"\n{len( live )} dead claim(s) read as LIVE. A revision is not done until this is clean." )
         return 1
 
-    print( f"clean — {len( claims )} dead claim(s) checked, none reads as live" )
+    if unenforced:
+        print( f"\n{len( unenforced )} table claim(s) the checker does not enforce. The table and the checker have drifted." )
+        return 3
+
+    summary = f"clean — {len( claims )} dead claim(s) checked, none reads as live"
+    if args.check_table_sync:
+        summary += "; table and checker in sync"
+    print( summary )
     return 0
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":   # pragma: no cover - CLI entry, exercised via main( argv )
     sys.exit( main() )
