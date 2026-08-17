@@ -673,51 +673,25 @@ async def lifespan( app: FastAPI ):
     # Initialize solution snapshot manager using factory pattern
     manager_type = config_mgr.get( "solution snapshots manager type", default="file_based" )
     
-    if manager_type.lower() == "lancedb":
-        lancedb_table = config_mgr.get( "solution snapshots lancedb table", default="solution_snapshots" )
-
-        # TWO AUTHORITIES, RECONCILED (decision 2b20a6d6). `solution snapshots manager
-        # type` names the MANAGER class; `vector store backend` names the STORAGE the
-        # manager routes to. Nothing compared them before, so this block built a LanceDB
-        # path unconditionally and the manager silently ignored it under postgres.
-        # `vector store backend` is the storage authority — ask it before building a path.
-        # SEAM FREED 2026-08-17 (row 8098838f): the `is_postgres_backend()` call that
-        # used to guard this is gone, because there is one backend now. Measured before
-        # cutting: `vector store backend = postgres` is declared once in
-        # [Lupin: Baseline] and overridden by no section, so the flag returned True in
-        # Baseline / Development / Production / Testing / Testing-GCS alike — the
-        # LanceDB arm this replaces was unreachable in every environment. Behaviour is
-        # unchanged; the branch that could not run is simply not written down any more.
-        #
-        # This block stays for as long as [Lupin: Production] still says
-        # `manager type = lancedb` (lupin-app.ini:15). It builds the same
-        # table-name-only config the postgres branch below does, so prod keeps working
-        # while that key waits on Rick, and it goes when the key flips.
-        config = {
-            "table_name" : lancedb_table
-        }
-
-        if app_debug:
-            print( "Using Postgres+pgvector solution snapshot storage (no LanceDB path built)" )
-
-
-    elif manager_type.lower() == "postgres":
+    if manager_type.lower() == "postgres":
         # The Postgres-native manager (row 5ff7b8f5, 2026-08-17). No storage location
         # to build: the table is fixed by the ORM model and the connection comes from
         # the DB layer, so the only key read here is the reporting-only table name.
         #
         # This branch is what makes `solution snapshots manager type = postgres` a
-        # legal value at STARTUP. Without it the else-arm below rejected every value
-        # but "lancedb", so flipping the dev key would have failed the server on its
-        # next bounce — latent, because reload is off and the running process still
-        # held the pre-flip config. Caught by Rachel during the removal sweep before
-        # it bit anyone; the unit suites never exercised this startup block.
+        # legal value at STARTUP. It was added on 2026-08-17 after the else-arm below
+        # was found rejecting every value but "lancedb", which would have failed the
+        # server on its next bounce — latent, because reload is off and the running
+        # process still held the pre-flip config. The LanceDB arm that sat above this
+        # one is gone with the manager class it named (row 8098838f); it had already
+        # been building this same table-name-only config, so nothing about what runs
+        # here has changed.
         config = {
             "table_name" : config_mgr.get( "solution snapshots postgres table", default="solution_snapshots" )
         }
 
         if app_debug:
-            print( "Using Postgres+pgvector solution snapshot manager (no LanceDB path built)" )
+            print( "Using Postgres+pgvector solution snapshot manager" )
 
     else:
         # # Use file-based backend (default)
@@ -731,7 +705,7 @@ async def lifespan( app: FastAPI ):
         # throw value error
         raise ValueError(
             f"Unsupported 'solution snapshots manager type' = {manager_type!r}; "
-            "supported values are 'postgres' and 'lancedb'"
+            "the only supported value is 'postgres'"
         )
     
     # Create manager using factory pattern for true swappability

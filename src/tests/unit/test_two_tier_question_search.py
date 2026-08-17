@@ -4,8 +4,8 @@ Own-gate tests for cosa.memory.two_tier_question_search (row 29e98243).
 
 The module's two entry points are already exercised 100% line+branch by their
 consumers (TwoTierQuestionSearch via test_v2_cache; pg_hierarchical_search via
-test_lancedb_solution_manager's TestPg*). This file gives the module its OWN
-committed gates so that coverage does not depend on a consumer's suite, and
+test_postgres_solution_manager). This file gives the module its OWN committed
+gates so that coverage does not depend on a consumer's suite, and
 carries the TRACE-NULL guard Cheech required for the reuse swap:
 
     A read path that silently drops one of the fields flow._record_lookup stamps
