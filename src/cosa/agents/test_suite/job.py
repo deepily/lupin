@@ -385,21 +385,31 @@ class TestSuiteJob( AgenticJobBase ):
     # Compact per-suite icons for the report table + abstract, keyed by the
     # 3-way outcome so a non-executed suite never renders as a red "FAIL".
     _OUTCOME_ICON = {
-        "PASSED"       : "PASS",
-        "FAILED"       : "FAIL",
-        "NOT EXECUTED" : "NOT RUN",
+        "PASSED"           : "PASS",
+        "FAILED"           : "FAIL",
+        "NOT EXECUTED"     : "NOT RUN",
+        "COLLECTION ERROR" : "COLLECT ERR",
     }
 
     @staticmethod
     def _classify_outcome( passed: int, failed: int, errors: int, skipped: int,
-                           not_executed: int = 0 ) -> str:
+                           not_executed: int = 0, collection_error: bool = False ) -> str:
         """
         Classify a run outcome from its parsed counts.
 
         Requires:
             - passed, failed, errors, skipped, not_executed are non-negative ints
+            - collection_error is True only when pytest failed during COLLECTION
 
         Ensures:
+            - returns "COLLECTION ERROR" when collection_error is set, BEFORE any count
+              is consulted (row bc83f2df). A collection error in a TEST module writes a
+              junit carrying errors=1, which this method used to read as "FAILED" — a
+              string byte-identical to a genuine red. It is not a red: nothing ran. The
+              measured case held 3 tests across 2 files and the junit accounted for 1,
+              so the report also understated its own blast radius while sounding precise.
+              Counts cannot distinguish these cases, which is why the caller passes the
+              exit-code-derived fact instead of it being re-derived here.
             - returns "NOT EXECUTED" when nothing was collected (all counts zero)
               — a zero-count run is NON-EXECUTION, not a failure (bug 89bfcc8f: a
               harness reporting "FAILED — 0/0/0/0" is trusted as a real red by the
@@ -413,6 +423,8 @@ class TestSuiteJob( AgenticJobBase ):
             - returns "PASSED"  when tests ran, none failed or errored, and every
               tier ran
         """
+        if collection_error:
+            return "COLLECTION ERROR"
         if ( passed + failed + errors + skipped + not_executed ) == 0:
             return "NOT EXECUTED"
         if ( failed + errors ) > 0:
@@ -545,7 +557,8 @@ class TestSuiteJob( AgenticJobBase ):
                 # rather than the false-red "FAILED" (bug 89bfcc8f).
                 status       = self._classify_outcome(
                     result[ "passed" ], result[ "failed" ], result[ "errors" ], result[ "skipped" ],
-                    result.get( "not_executed", 0 )
+                    result.get( "not_executed", 0 ),
+                    collection_error = result.get( "collection_diagnosis" ) is not None
                 )
                 await voice_io.notify(
                     f"{suite_type}: {status} — {result[ 'passed' ]} passed, "
@@ -573,8 +586,16 @@ class TestSuiteJob( AgenticJobBase ):
             # non-zero for warnings or cleanup even when all tests pass (335/0/0 false positive).
             # A not-executed tier is neither a pass nor a failure: it blocks "all passed"
             # without inflating the failure count (bug 89bfcc8f).
+            # A genuine failure anywhere still dominates the overall verdict — a suite
+            # that collected fine and went red is a red, and must not be softened into
+            # "collection error" because a DIFFERENT tier failed to collect. The
+            # collection state applies only when nothing actually failed.
+            any_collection_error = any(
+                r.get( "collection_diagnosis" ) is not None for r in self.suite_results.values()
+            )
             overall_status = self._classify_outcome(
-                total_passed, total_failed, total_errors, total_skipped, total_not_executed
+                total_passed, total_failed, total_errors, total_skipped, total_not_executed,
+                collection_error = any_collection_error and ( total_failed + total_errors ) == 0
             )
             all_passed = ( overall_status == "PASSED" )
 
@@ -601,9 +622,10 @@ class TestSuiteJob( AgenticJobBase ):
             # "FAILURES DETECTED" (bug 89bfcc8f). overall_status already encodes the
             # 3-way rule (FAILED dominates; not-executed blocks a clean pass).
             overall = {
-                "PASSED"       : "ALL PASSED",
-                "FAILED"       : "FAILURES DETECTED",
-                "NOT EXECUTED" : "NOT EXECUTED",
+                "PASSED"           : "ALL PASSED",
+                "FAILED"           : "FAILURES DETECTED",
+                "NOT EXECUTED"     : "NOT EXECUTED",
+                "COLLECTION ERROR" : "COLLECTION ERROR — THE SUITE DID NOT RUN",
             }[ overall_status ]
 
             # ─── Write full report to io/ for the document viewer ───
@@ -646,7 +668,8 @@ class TestSuiteJob( AgenticJobBase ):
             for suite_type, result in self.suite_results.items():
                 icon = self._OUTCOME_ICON[ self._classify_outcome(
                     result[ "passed" ], result[ "failed" ], result[ "errors" ], result[ "skipped" ],
-                    result.get( "not_executed", 0 )
+                    result.get( "not_executed", 0 ),
+                    collection_error = result.get( "collection_diagnosis" ) is not None
                 ) ]
                 report_lines.append( f"## {suite_type} — {icon}" )
                 report_lines.append( f"" )
@@ -724,7 +747,8 @@ class TestSuiteJob( AgenticJobBase ):
             for suite_type, result in self.suite_results.items():
                 icon = self._OUTCOME_ICON[ self._classify_outcome(
                     result[ "passed" ], result[ "failed" ], result[ "errors" ], result[ "skipped" ],
-                    result.get( "not_executed", 0 )
+                    result.get( "not_executed", 0 ),
+                    collection_error = result.get( "collection_diagnosis" ) is not None
                 ) ]
                 ne  = result.get( "not_executed", 0 )
                 des = result.get( "deselected", 0 )
@@ -1418,6 +1442,19 @@ class TestSuiteJob( AgenticJobBase ):
             parsed[ "exit_code" ] = exit_code
             parsed[ "log_path" ]  = log_path
             parsed[ "duration" ]  = duration
+
+            # A collection error is SILENCE, not a red (row bc83f2df). Detect it from
+            # the exit code, which is the only signal that survives BOTH shapes: an error
+            # in a test module writes a junit (and used to read as FAILED), while an error
+            # in a conftest writes no junit and fires no pytest hook at all, so nothing
+            # in-process can see it. Failing soft on purpose — a diagnostic must never be
+            # able to change a suite's outcome by raising.
+            try:
+                from cosa.utils.pytest_collection_diagnosis import diagnose
+                parsed[ "collection_diagnosis" ] = diagnose( exit_code, stdout )
+            except Exception as e:
+                parsed[ "collection_diagnosis" ] = None
+                if self.debug: print( f"[TestSuiteJob] collection diagnosis unavailable: {e!r}" )
 
             # Capture stdout tail when subprocess crashed with no test output
             total_found = parsed[ "passed" ] + parsed[ "failed" ] + parsed[ "skipped" ] + parsed[ "errors" ]

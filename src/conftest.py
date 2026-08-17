@@ -101,6 +101,60 @@ def pytest_collection_modifyitems( config, items ):
         raise pytest.UsageError( _drift )
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# DIAGNOSIS: a collection error is SILENCE, not a red test (row bc83f2df)
+# ══════════════════════════════════════════════════════════════════════════════
+# A collection error takes the whole DIRECTORY down before anything runs. Read it as a
+# regression and you hunt a breakage that does not exist; read the absence of a red as a
+# pass and you ship on a suite that never executed. Cheech hit two of them in one
+# afternoon, from different causes, and each was diagnosed from scratch. That repetition
+# is the defect — the two individual causes were both fixed the same day.
+#
+# ⚠️ THIS HOOK COVERS ONLY ONE OF THE TWO SHAPES, and the docstring says so rather than
+# implying full cover. Measured 2026-08-17:
+#   · error in a TEST module   -> exit 2, hooks DO fire  -> caught here
+#   · error in a CONFTEST      -> exit 4, NO hook fires at all, not even in this root
+#                                 conftest, and no junit is written -> INVISIBLE here
+# The conftest shape is reachable only from outside the process, by exit code, which is
+# why the shared logic lives in cosa.utils.pytest_collection_diagnosis and is called
+# from the suite runner too. A fix that handled only this half would still go quiet on
+# the case that cost the most time.
+_collect_failures = []
+
+
+def pytest_collectreport( report ):
+    """Record a failed collection so sessionfinish can explain it."""
+    if report.failed:
+        _collect_failures.append( getattr( report, "longreprtext", "" ) or str( report.longrepr ) )
+
+
+def pytest_sessionfinish( session, exitstatus ):
+    """
+    Print the diagnosis block for a collection error, in place of leaving a bare
+    "Interrupted" line that reads like a run which finished.
+
+    Ensures:
+        - prints only when collection actually failed; a normal pass or a normal failure
+          is untouched, because a diagnoser that fires on everything makes the state
+          meaningless
+        - never raises: a broken diagnostic must not be able to change a suite's outcome
+    """
+    if not _collect_failures:
+        return
+    try:
+        from cosa.utils.pytest_collection_diagnosis import diagnose, render
+        # where_hint is stated, not inferred: this hook only ever fires because a collect
+        # report FAILED, and the "Interrupted" banner it would otherwise be matched on is
+        # written by the terminal reporter, not carried in the report's traceback.
+        diag = diagnose( int( exitstatus ), "\n".join( _collect_failures ),
+                         where_hint="test module" )
+        if diag is not None:
+            print( render( diag ) )
+    except Exception as e:
+        print( f"\n[collection-diagnosis] could not render a diagnosis: {e!r}\n"
+               f"  The collection error above is still real — read the traceback.\n" )
+
+
 @pytest.fixture( autouse=True )
 def _fail_on_protected_module_reimport():
     """
