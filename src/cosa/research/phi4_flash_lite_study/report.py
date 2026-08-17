@@ -109,25 +109,32 @@ def backfill_provenance( header, records, printer=print ):
 
 def _percentile( sorted_values, fraction ):
     """
-    Nearest-rank percentile, stated rather than assumed.
+    The package's ONE percentile, rounded for display.
+
+    ⚠️ THIS USED TO BE A SECOND IMPLEMENTATION. Sam wrote nearest-rank here while
+    Clayton wrote linear interpolation in `replay_harness`, and on the same 8 rows
+    that gave flash_lite a p90 of 24.524 from this module and 14.225 from the other —
+    two readers disagreeing about identical data. Now it delegates, so the method
+    lives in exactly one place (`replay_harness.PERCENTILE_METHOD`, currently
+    nearest-rank, which is this module's original behaviour).
 
     Requires:
         - sorted_values is a non-empty ascending list
         - fraction is in (0, 1]
 
     Ensures:
-        - returns the value at ceil( fraction * n ), the nearest-rank definition — no
-          interpolation, so the number returned is one that was actually MEASURED
-        - on a small sample a high percentile collapses onto the maximum: with n=8 the
-          p99 IS the max, and saying so beats implying a tail resolution the sample
-          does not have
+        - returns the shared percentile, rounded to 3 dp for the printed report
+        - preserves this module's prior behaviour while PERCENTILE_METHOD is
+          "nearest_rank": the value returned is one that was actually MEASURED
+        - on a small sample a high percentile collapses onto the maximum — with n=8
+          the p99 IS the max, and saying so beats implying a tail resolution the
+          sample does not have
 
     Raises:
         - nothing
     """
-    import math
-    rank = max( 1, math.ceil( fraction * len( sorted_values ) ) )
-    return round( sorted_values[ rank - 1 ], 3 )
+    from cosa.research.phi4_flash_lite_study.replay_harness import _percentile as shared
+    return round( shared( sorted_values, fraction ), 3 )
 
 
 def latency_block( records ):
@@ -164,7 +171,16 @@ def latency_block( records ):
     Raises:
         - nothing
     """
-    block = {}
+    # Mr. Radio's ask: SAY which definition produced these figures. A p90 whose method
+    # is unstated is a number two readers can compute differently and both be right —
+    # which is exactly what happened here before the definitions were merged.
+    from cosa.research.phi4_flash_lite_study.replay_harness import PERCENTILE_METHOD
+
+    block = { "percentile_definition": (
+        f"{PERCENTILE_METHOD} — every figure is a value that was actually MEASURED; no "
+        f"interpolation. On a small sample a high percentile collapses onto the maximum "
+        f"(at n=8, p99 IS the max)."
+    ) }
     for arm in sorted( { r[ "arm" ] for r in records } ):
         fired = [ r for r in records
                   if r[ "arm" ] == arm and r[ "meta" ].get( "tutor_fired" ) and r.get( "elapsed_seconds" ) is not None ]

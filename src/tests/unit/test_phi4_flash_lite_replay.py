@@ -926,10 +926,55 @@ def test_percentile_handles_empty_and_single():
     assert RH._percentile( [ 4.0 ], 0.99 ) == 4.0
 
 
-def test_percentile_interpolates_between_neighbours():
-    assert RH._percentile( [ 0.0, 10.0 ], 0.5 ) == pytest.approx( 5.0 )
-    assert RH._percentile( [ 0.0, 10.0 ], 0.0 ) == 0.0
-    assert RH._percentile( [ 0.0, 10.0 ], 1.0 ) == 10.0
+def test_the_package_percentile_is_nearest_rank():
+    """
+    Mr. Radio's ruling: nearest-rank, so every figure on the page is one a request
+    actually took. A study about a model inventing facts must not report a latency
+    nothing measured.
+    """
+    assert RH.PERCENTILE_METHOD == "nearest_rank"
+
+    values = [ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0 ]
+    for q in ( 0.5, 0.9, 0.95, 0.99 ):
+        assert RH._percentile( values, q ) in values, "nearest-rank must never invent a value"
+
+
+def test_nearest_rank_and_linear_genuinely_differ():
+    """
+    The ruling is not cosmetic. On the real 8-row shape these disagreed by 10 seconds,
+    which is why two implementations could not both survive.
+    """
+    values = [ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 24.5 ]
+
+    nearest = RH._percentile( values, 0.90, method="nearest_rank" )
+    linear  = RH._percentile( values, 0.90, method="linear" )
+
+    assert nearest == 24.5                       # a value that was measured
+    assert linear  != nearest
+    assert linear not in values                  # ...against one that never happened
+
+
+def test_percentile_rejects_an_unknown_method():
+    """Silently picking one is how two definitions got here in the first place."""
+    with pytest.raises( ValueError ):
+        RH._percentile( [ 1.0, 2.0 ], 0.9, method="whatever" )
+
+
+def test_the_two_call_sites_agree_on_identical_input():
+    """
+    Mr. Radio's explicit ask: feed the same input to BOTH call sites and assert
+    identical output, so the package cannot silently diverge again. The reader
+    rounds for display, so compare against the shared value rounded the same way.
+    """
+    from cosa.research.phi4_flash_lite_study import report
+
+    for values in ( [ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 24.5 ],
+                    [ 0.5 ],
+                    [ 2.0, 2.0, 2.0, 60.0 ],
+                    [ float( i ) for i in range( 1, 401 ) ] ):
+        for q in ( 0.90, 0.99 ):
+            assert report._percentile( values, q ) == round( RH._percentile( values, q ), 3 ), \
+                f"the two call sites disagree on {values[ :3 ]}... at q={q}"
 
 
 def test_latency_payload_carries_the_deployment_framing():

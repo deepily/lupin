@@ -50,6 +50,7 @@ number coming off the run has to carry.
 import os
 import sys
 import json
+import math
 import time
 import random
 import argparse
@@ -385,31 +386,59 @@ def summarize_arm( metas, denominator=None ):
     }
 
 
-def _percentile( sorted_values, q ):
-    """
-    The q-th percentile of an already-sorted list, by linear interpolation.
+# ⚠️ ONE DEFINITION FOR THE WHOLE PACKAGE. Sam 🎙️ and I independently implemented
+# p90/p99 in different modules with DIFFERENT METHODS — nearest-rank in `report.py`,
+# linear interpolation here. On the same 8 rows that gave flash_lite a p90 of 24.524
+# from one and 14.225 from the other, which is two components disagreeing about the
+# same data and would have cost the first reader an hour. `report.py` now imports
+# this function, so there is one implementation and this constant is the only place
+# the choice lives.
+#
+# NEAREST-RANK IS THE DEFAULT, and the reason is Sam's: every number printed is one
+# a request actually took. Interpolation invents a value between two observations,
+# and a study about a model inventing facts should not report a latency nothing
+# measured. Linear matches numpy's default and is the better estimator at large n —
+# it is one word away, below.
+#
+# 🔴 Mr. Radio's ruling stands above this line. Flipping it is a one-word change
+# here, not a rewrite in two modules.
+PERCENTILE_METHOD = "nearest_rank"        # or "linear"
 
-    ⚠️ A p99 OVER A SMALL SAMPLE IS NEARLY THE MAXIMUM. With n rows there are only
-    n distinct observations, so at n=8 the "p99" is essentially the slowest row.
-    That is not wrong, but it is not a tail estimate either — read it as such until
-    the sample is large. The number is reported rather than suppressed because
-    hiding it would hide the very tail Rick asked to see.
+
+def _percentile( sorted_values, q, method=None ):
+    """
+    The q-th percentile of an already-sorted list.
+
+    ⚠️ A p99 OVER A SMALL SAMPLE IS NEARLY THE MAXIMUM. With n observations there are
+    only n distinct values, so at n=8 the "p99" IS the slowest row. That is not wrong,
+    but it is not a tail estimate either — say so rather than implying a resolution the
+    sample does not have. The number is still reported, because hiding it would hide
+    the very tail Rick asked to see.
 
     Requires:
         - sorted_values is sorted ascending
         - 0 <= q <= 1
+        - method is "nearest_rank", "linear", or None to use PERCENTILE_METHOD
 
     Ensures:
         - returns None for an empty list rather than raising
-        - returns the single value for a one-element list
-        - interpolates between neighbours, matching the standard "linear" method
+        - "nearest_rank" returns a value that was ACTUALLY MEASURED — the element at
+          ceil( q * n ), never an interpolated one
+        - "linear" interpolates between neighbours, matching numpy's default
 
     Raises:
-        - nothing
+        - ValueError on an unknown method, rather than silently picking one
     """
+    chosen = method if method is not None else PERCENTILE_METHOD
+    if chosen not in ( "nearest_rank", "linear" ):
+        raise ValueError( f"percentile method must be 'nearest_rank' or 'linear', got {chosen!r}" )
+
     n = len( sorted_values )
     if n == 0: return None
     if n == 1: return sorted_values[ 0 ]
+
+    if chosen == "nearest_rank":
+        return sorted_values[ max( 1, math.ceil( q * n ) ) - 1 ]
 
     position = q * ( n - 1 )
     lower    = int( position )
