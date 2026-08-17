@@ -29,6 +29,18 @@ from cosa.research.phi4_flash_lite_study import replay_harness as RH
 from cosa.research.phi4_flash_lite_study import freeze_corpus  as FZ
 
 
+@pytest.fixture( autouse=True )
+def _skip_surface_check( monkeypatch, request ):
+    """
+    The logic tests inject a fake tutor and must stay hermetic — building a real
+    Vertex client to satisfy the arm-surface gate would couple every one of them to
+    a resolvable GCP project and a gitignored env file. The gate itself is exercised
+    by the tests marked `arm_surface`, which opt out of this fixture.
+    """
+    if "arm_surface" in request.keywords: return
+    monkeypatch.setattr( RH, "verify_arm_surface", lambda arm, factory=None: None )
+
+
 def _meta( outcome="rewritten", enabled=True, fired=True, claims_out=3, words_out=40 ):
     """A meta dict shaped exactly like the one `_apply_dm_tutor` returns."""
     return {
@@ -501,6 +513,91 @@ def test_replay_builds_the_arm_rewrite_fn_when_none_is_given():
         max_model_failed_rate=0.5,
     )
     assert records[ 0 ][ "spec_key" ] == "dm_tutor/flash_lite"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# THE ARM-SURFACE GATE — "it answered" is not the assertion
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.arm_surface
+def test_the_flash_lite_arm_really_reaches_vertex():
+    """
+    EXECUTOR: AI. Builds the REAL client from the shipped INI key and reads Sam's
+    four markers off the SDK object the call would ride. Construction only — no
+    network, no credentials resolved, no model called.
+    """
+    markers = RH.verify_arm_surface( RH.ARM_FLASH_LITE )
+
+    assert "aiplatform.googleapis.com" in str( markers[ "endpoint" ] )   # M1
+    assert markers[ "model_id" ] == "gemini-3.1-flash-lite"              # M2 (see the arm_markers caveat)
+    assert markers[ "vertexai" ] is True                                 # M3
+    assert markers[ "project" ]                                          # M3
+    assert markers[ "api_key" ] is None                                  # M4
+
+
+@pytest.mark.arm_surface
+def test_the_phi4_arm_is_verified_negatively():
+    """The local arm must NOT be a Vertex client — the fall-through, pointing the other way."""
+    assert RH.verify_arm_surface( RH.ARM_PHI4 ) is None
+
+
+@pytest.mark.arm_surface
+def test_a_crossed_pair_is_refused():
+    """
+    Two arms that both resolved the same client would produce a perfectly paired
+    study of one model against itself, and every counter would look reasonable.
+    """
+    from cosa.agents.llm_client_factory import LlmClientFactory
+
+    class CrossedFactory:
+        def get_client( self, spec_key, *args, **kwargs ):
+            return LlmClientFactory().get_client( "dm_tutor/flash_lite" )   # both arms -> Vertex
+
+    with pytest.raises( RH.ArmNotVerified ) as excinfo:
+        RH.verify_arm_surface( RH.ARM_PHI4, factory=CrossedFactory() )
+    assert "crossed" in str( excinfo.value )
+
+
+@pytest.mark.arm_surface
+def test_a_fall_through_arm_is_refused_by_name():
+    """
+    The prove-it-red control at the harness layer: hand the Vertex arm a client that
+    answers well and is not Vertex, and the gate must name the marker that failed.
+    """
+    from cosa.agents.llm_client_factory import LlmClientFactory
+
+    class FallThroughFactory:
+        def get_client( self, spec_key, *args, **kwargs ):
+            return LlmClientFactory().get_client( "dm_tutor/phi_4" )
+
+    with pytest.raises( RH.ArmNotVerified ) as excinfo:
+        RH.verify_arm_surface( RH.ARM_FLASH_LITE, factory=FallThroughFactory() )
+    assert "M1 Vertex endpoint marker" in str( excinfo.value )
+
+
+def test_replay_refuses_to_record_a_row_from_an_unverified_arm( monkeypatch ):
+    """The gate runs BEFORE row 0, not after the run."""
+    def boom( arm, factory=None ):
+        raise RH.ArmNotVerified( "M1 Vertex endpoint marker: observed a LAN host" )
+
+    monkeypatch.setattr( RH, "verify_arm_surface", boom )
+    seen = []
+
+    with pytest.raises( RH.ArmNotVerified ):
+        RH.replay_arm( _rows( 5 ), RH.ARM_FLASH_LITE,
+                       tutor_fn=lambda b, config=None, rewrite_fn=None: seen.append( b ),
+                       rewrite_fn=lambda b: "x", max_model_failed_rate=0.5 )
+
+    assert seen == [], "not a single row may be recorded from an arm that failed its surface check"
+
+
+def test_verify_surface_can_be_disabled_for_hermetic_replays( monkeypatch ):
+    """The flag exists so the fake-tutor tests need no GCP project; production defaults to on."""
+    monkeypatch.setattr( RH, "verify_arm_surface",
+                         lambda *a, **k: ( _ for _ in () ).throw( AssertionError( "must not be called" ) ) )
+    records = RH.replay_arm( _rows( 1 ), RH.ARM_PHI4, tutor_fn=_tutor_returning( [ "rewritten" ] ),
+                             rewrite_fn=lambda b: "x", max_model_failed_rate=0.5, verify_surface=False )
+    assert len( records ) == 1
 
 
 # ─────────────────────────────────────────────────────────────────────────────

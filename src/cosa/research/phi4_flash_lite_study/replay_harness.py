@@ -49,6 +49,7 @@ import argparse
 import datetime
 
 from cosa.research.phi4_flash_lite_study import freeze_corpus
+from cosa.research.phi4_flash_lite_study.arm_markers import ArmNotVerified, check_arm_markers
 
 
 # The two arms, named by the INI spec key each one routes to. These keys are read
@@ -97,6 +98,33 @@ class ArmBroken( RuntimeError ):
 
 class DenominatorUnset( RuntimeError ):
     """Someone asked for a fabrication rate without saying which denominator."""
+
+
+def verify_arm_surface( arm, factory=None ):
+    """
+    Prove the arm is on the model it claims BEFORE a single row is recorded.
+
+    Delegates to `arm_markers.check_arm_markers` — Sam's four markers, read off the
+    SDK object the call would ride, kept in ONE place so the harness and the tests
+    cannot drift about what "this arm reached Vertex" means.
+
+    ⚠️ A green here means the arm is WIRED to Vertex, not that flash-lite answered:
+    M2 reads `client.model_name`, which is the descriptor we handed the factory. The
+    genuine read-back is `response.model_version`, which exists only after a paid
+    call. See `arm_markers` for the full note.
+
+    Requires:
+        - arm is one of ARM_SPEC_KEYS
+
+    Ensures:
+        - returns the observed marker dict for the Flash-Lite arm, None for phi_4
+        - makes NO network call and resolves no credentials — construction only
+
+    Raises:
+        - ArmNotVerified when a marker does not hold, or when the arms are crossed
+    """
+    return check_arm_markers( ARM_SPEC_KEYS[ arm ], expect_vertex=( arm == ARM_FLASH_LITE ),
+                              factory=factory )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -376,7 +404,8 @@ def _median( sorted_values ):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def replay_arm( rows, arm, tutor_fn=None, rewrite_fn=None, config=None,
-                max_model_failed_rate=None, preflight=25, on_row=None ):
+                max_model_failed_rate=None, preflight=25, on_row=None,
+                verify_surface=True ):
     """
     Run every frozen body through one arm, recording each `meta` verbatim.
 
@@ -387,6 +416,7 @@ def replay_arm( rows, arm, tutor_fn=None, rewrite_fn=None, config=None,
     Ensures:
         - returns a list of records, one per row, in frozen-set order, each holding
           the row's identity, the delivered text, and the tutor's `meta` UNCHANGED
+        - PROVES the arm reached the surface it claims before recording row 0
         - aborts on the first unmeasurable row rather than recording it
         - checks the model_failed ceiling on the first `preflight` rows BEFORE
           paying for the rest, and again over the whole arm
@@ -394,13 +424,17 @@ def replay_arm( rows, arm, tutor_fn=None, rewrite_fn=None, config=None,
 
     Raises:
         - ValueError when max_model_failed_rate was not stated
-        - UnmeasurableRow / ArmBroken per the guards above
+        - ArmNotVerified / UnmeasurableRow / ArmBroken per the guards above
     """
     if max_model_failed_rate is None:
         raise ValueError(
             "max_model_failed_rate must be PRE-STATED before the arm runs (reviewer finding F3). "
             "A broken arm and an occasionally-refusing model record identically."
         )
+
+    # Before row 0, not after the run: a fall-through arm answers well and would
+    # otherwise produce a full set of plausible numbers for the wrong model.
+    if verify_surface: verify_arm_surface( arm )
 
     if tutor_fn is None:
         from cosa.rest.routers.dm import _apply_dm_tutor
