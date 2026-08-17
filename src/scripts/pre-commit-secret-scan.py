@@ -6,6 +6,12 @@ repo already carries known credential-shaped lines that live on their own rows; 
 that fires on those would be turned off within a day, and a gate that is off is worse
 than no gate because it reads as coverage.
 
+THE TRADE THAT BUYS, named rather than discovered later: an existing secret edited
+NEARBY does not fire. Reformat the file, move the line, change the line above it — the
+gate stays quiet, because the credential line itself was not added. That is accepted on
+purpose. What this gate promises is "no NEW credential enters"; the standing inventory
+of what is already in the tree is the sweep's job, not this one's.
+
 INSTALL IT DELIBERATELY, not automatically — this repo is worked by several sessions at
 once and a hook installed under one of them silently changes how everybody else commits:
 
