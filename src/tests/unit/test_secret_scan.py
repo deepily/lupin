@@ -185,6 +185,18 @@ def _scan_fingerprint( findings ):
     return hashlib.sha256( "\n".join( rows ).encode() ).hexdigest()
 
 
+def _masked_rows( findings ):
+    """
+    The masked identity of each finding, WITHOUT its line number.
+
+    Deliberate: a credential is the same credential when the file is reformatted or an
+    import is added above it. Keying on the line would turn every unrelated edit into a
+    re-triage, and a check that cries wolf gets its accepted set rubber-stamped.
+    """
+    return { f"{origin.split( ':', 1 )[ -1 ]}|{key}|{digest}"
+             for origin, _lineno, key, _len, digest in findings }
+
+
 def test_a_detector_change_forces_a_full_rescan():
     """
     The trigger a calendar cannot cover (Mr Radio, 2026-08-17), built so it cannot be
@@ -254,3 +266,45 @@ def test_findings_never_carry_the_value():
     assert findings
     assert not any( secret in str( field ) for row in findings for field in row ), \
         "the scanner leaked a raw credential value into its own output"
+
+
+def test_the_branch_we_commit_to_carries_no_untriaged_finding():
+    """
+    THE REF THIS CONTROL WAS MISSING (Rachel, reviewing row 85959aaf).
+
+    The test above scans `origin/main`, which answers "what can a stranger read". It is
+    NOT what this fleet commits to. Measured 2026-08-17: the working branch was 645
+    commits and two weeks ahead of `origin/main`. So a credential committed that day was
+    seen by nothing — the gate reads only ADDED lines and is not installed, and the full
+    scan read a ref nobody had pushed to in a fortnight. A standing inventory of a
+    snapshot is not a standing inventory.
+
+    WHY AN ACCEPTED SET AND NOT A FINGERPRINT. The branch moves many times a day. A
+    fingerprint over it would be red permanently, and a check that is always red is a
+    check nobody reads. So this pins the masked identity of every finding that has been
+    TRIAGED, and fails only on one that has not: an ordinary commit is green, a new
+    credential-shaped line is red.
+
+    It cannot be cleared by editing a number. The digest of a value can only be produced
+    from the value, and adding a row to `branch_accepted` names the file and the key it
+    is accepting — a reviewable act, unlike overwriting a single hash.
+    """
+    import json
+
+    root     = cu.get_project_root()
+    record   = root + "/src/tests/unit/fixtures/secret_scan_last_full_scan.json"
+    recorded = json.load( open( record ) )
+
+    accepted = set( recorded[ "branch_accepted" ] )
+    measured = _masked_rows( secret_scan.scan_ref( recorded[ "branch_ref" ], cwd=root ) )
+    untriaged = sorted( measured - accepted )
+
+    steps = chr( 10 ).join( "    " + s for s in recorded[ "_how_to_clear_the_red" ] )
+    assert not untriaged, (
+        f"{len( untriaged )} finding(s) on {recorded[ 'branch_ref' ]} have never been triaged. "
+        "Values are masked — key, path and a truncated digest, never the secret:\n"
+        + chr( 10 ).join( "    " + row for row in untriaged )
+        + "\n\nIf one is real, remove it and read it from the environment or the secret store. "
+          "If it is a false positive, triage it and add its row above to branch_accepted:\n"
+        + steps
+    )
