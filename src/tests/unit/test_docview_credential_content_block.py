@@ -201,14 +201,69 @@ def test_a_BOM_does_not_start_a_false_positive( tmp_path ):
     assert not is_credential_file( str( path ) )
 
 
-@pytest.mark.parametrize( "lead", [ "", " ", "\n", "\t", "\r\n  ", "﻿", "﻿\n  " ] )
+@pytest.mark.parametrize( "lead", [
+    "",
+    " ", "\n", "\t", "\r\n  ",
+    # mark FIRST — the direction the position-0 strip handled
+    "﻿", "﻿\n  ", "﻿﻿",
+    # 🔴 AMENDED (Tiffany, second review): mark AFTER whitespace. Every mixed case
+    # above puts the mark first, which is exactly the direction the fix covered — so
+    # this table was green at ff6c9e46 while eight shapes were still SERVING. A table
+    # that only walks the passing direction is not a table.
+    " ﻿", "\n﻿", "\t﻿", "\r\n  ﻿", "﻿ ﻿",
+    # a non-BOM invisible: the strip must close the CLASS, not one codepoint
+    "​", "⁠", "‎", " ",
+] )
 def test_leading_whitespace_and_marks_do_not_smuggle_a_credential( lead ):
     """
     The narrowing keys on the opening brace, so anything that can sit BEFORE that
-    brace is a candidate bypass. Whitespace was already handled by lstrip(); the BOM
-    was not, and is the one that got through.
+    brace is a candidate bypass — in ANY ORDER, and not only the byte-order mark.
+    Whitespace was handled by lstrip(); the mark was added at position 0; neither
+    covered whitespace-then-mark or the other invisible format characters.
     """
     assert _prefix_looks_like_credential( lead + json.dumps( ADC_USER_CREDENTIAL ) )
+
+
+@pytest.mark.parametrize( "lead,lead_label", [
+    ( " ﻿",   "space then BOM" ),
+    ( "\n﻿", "newline then BOM" ),
+    ( "\t﻿", "tab then BOM" ),
+    ( "​",   "zero-width space" ),
+] )
+@pytest.mark.parametrize( "payload,payload_label", [
+    ( ADC_USER_CREDENTIAL, "ADC user credential" ),
+    ( SA_KEY_NO_PEM,       "service-account key with no PEM header" ),
+] )
+def test_an_invisible_leadin_does_not_smuggle_a_credential_THROUGH_THE_FILE_PATH(
+    tmp_path, lead, lead_label, payload, payload_label
+):
+    """
+    THE EIGHT SHAPES STILL SERVING AT ff6c9e46, driven end-to-end through
+    is_credential_file rather than the decision helper, because that is the surface
+    the doc viewer actually calls.
+
+    MEASURED at ff6c9e46: all eight SERVED a complete valid credential. The
+    position-0 mark strip could not see them — a space, tab or newline in front of
+    the mark shielded it, and U+200B was never named at all.
+    """
+    path = tmp_path / "creds.json"
+    path.write_text( lead + json.dumps( payload ), encoding="utf-8" )
+
+    assert is_credential_file( str( path ) ), \
+        f"{lead_label} + {payload_label} was SERVED"
+
+
+def test_stripping_invisible_leadins_does_not_buy_a_false_positive( tmp_path ):
+    """
+    Closing the class must not start blocking documents. A doc that opens with an
+    invisible character and TALKS ABOUT credentials is still a document.
+    """
+    path = tmp_path / "notes.md"
+    path.write_text(
+        "​# Auth notes\n\nHow we rotate a refresh_token and a client_secret.\n",
+        encoding="utf-8",
+    )
+    assert not is_credential_file( str( path ) )
 
 
 def test_a_truncated_key_still_BLOCKS():

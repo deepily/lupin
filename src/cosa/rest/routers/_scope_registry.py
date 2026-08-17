@@ -23,6 +23,7 @@ Generated on: 2026-05-12
 import os
 import re
 import json
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
@@ -97,6 +98,36 @@ SECRETS_BLOCKLIST_PATTERNS = (
     re.compile( r"(?<![a-z0-9])credentials?(?![a-z0-9])", re.IGNORECASE ),
     re.compile( r"(?<![a-z0-9])secrets?(?![a-z0-9])",     re.IGNORECASE ),
     re.compile( r"(?<![a-z0-9])password(?![a-z0-9])",     re.IGNORECASE ),
+
+    # 🔴 THREE MORE FILENAMES A REAL GOOGLE KEY CARRIES, none of which contains the
+    # word "credentials" or "secret", and none covered by the service-account family
+    # above. MEASURED on this branch before these lines: `adc.json`,
+    # `authorized_user.json` and `firebase-adminsdk-*.json` were all SERVED, and so
+    # were the `gcp-key.json` / `bigquery-key.json` shapes (`\.key$` below does not
+    # fire on a `.json` file).
+    #
+    # `token.json` is DELIBERATELY ABSENT: it is genuinely ambiguous, the content
+    # check is what catches a real one, and there is already a test asserting it stays
+    # served by name. Not every credential filename belongs on a path blocklist.
+    #
+    # ANCHORED TO `.json` DELIBERATELY. Every candidate was measured against the whole
+    # served tree first: a bare `*-key*.json` blocks `config-key-migration-map.json`
+    # (30 copies of a legitimate config doc), so the key rule names providers instead.
+    # These four measure ZERO hits across 907,074 files in the mounted tree.
+    #
+    # This is the path floor; the content check below is the payload floor. A key
+    # renamed to `notes.json` defeats every pattern here and is caught there — which
+    # is why both exist rather than either alone.
+    re.compile( r"(?<![a-z0-9])adminsdk[^/]*\.json$",           re.IGNORECASE ),
+    re.compile( r"(?<![a-z0-9])authorized[-_]user[^/]*\.json$",  re.IGNORECASE ),
+    re.compile( r"^adc\.json$",                                  re.IGNORECASE ),
+
+    # `gcp-key.json` / `bigquery-key.json` shapes. `\.key$` below does not fire on a
+    # `.json` file, so these were served too. Named providers ONLY, not a bare
+    # `*-key*.json`: the bare form was measured and blocks
+    # `config-key-migration-map.json`, 30 copies of a legitimate config doc across
+    # the tree. Provider-prefixed form measures ZERO hits on the served tree.
+    re.compile( r"(?<![a-z0-9])(gcp|gcloud|gce|bigquery|firebase|aws|azure)[-_][^/]*keys?[^/]*\.json$", re.IGNORECASE ),
 
     # Key/cert file extensions
     re.compile( r"\.pem$", re.IGNORECASE ),
@@ -266,6 +297,35 @@ def is_credential_file( full_path: str ) -> bool:
     return _prefix_looks_like_credential( prefix )
 
 
+def _strip_leadin_noise( text: str ) -> str:
+    """
+    Drop every leading character a reader cannot see, in ANY order, until a visible
+    one appears.
+
+    Requires:
+        - text is decoded text (possibly empty)
+
+    Ensures:
+        - returns text with leading whitespace AND leading Unicode category Cf
+          (format) characters removed, interleaved in any order
+        - returns text unchanged when its first character is visible
+        - returns "" for text that is entirely invisible
+
+    Raises:
+        - nothing
+
+    WHY A CHARACTER CLASS AND NOT A LONGER lstrip() ARGUMENT: two strips in a fixed
+    order cannot handle interleaving. `lstrip( "﻿" )` then `lstrip()` leaves
+    `" ﻿{...}"` with the mark back at the front, which SERVED a complete ADC
+    credential. Category Cf is what U+FEFF, U+200B, U+2060 and the direction marks
+    are, so this closes the class rather than the one codepoint that got caught.
+    """
+    i = 0
+    while i < len( text ) and ( text[ i ].isspace() or unicodedata.category( text[ i ] ) == "Cf" ):
+        i += 1
+    return text[ i: ]
+
+
 def _prefix_looks_like_credential( prefix: str ) -> bool:
     """
     Decide on an already-read prefix. Split out so the decision is testable without
@@ -299,7 +359,15 @@ def _prefix_looks_like_credential( prefix: str ) -> bool:
     # header were both SERVED. The PEM shape still blocked, which is why this hid —
     # the fixture that would have caught it had a PEM header doing the work.
     # (Found by Tiffany on review of my own brace narrowing, which introduced it.)
-    prefix = prefix.lstrip( "﻿" )
+    #
+    # 🔴 SECOND PASS (Tiffany, review of the fix above): stripping the mark at
+    # position 0 only closed 4 of the 12 shapes that were serving. A space, tab or
+    # newline in FRONT of the mark shielded it — the whitespace lstrip() down at the
+    # narrowing runs LATER, so the mark was back at the front by the time the brace
+    # test looked. U+200B walked through untouched. Measured: 8 of 24 shapes still
+    # SERVED a complete ADC credential at ff6c9e46. Both call sites now go through
+    # the class-based strip, which is order-independent.
+    prefix = _strip_leadin_noise( prefix )
 
     # PEM first: decisive, needs no parsing, catches a key pasted into any wrapper.
     if _PEM_PRIVATE_KEY.search( prefix ):
@@ -316,7 +384,7 @@ def _prefix_looks_like_credential( prefix: str ) -> bool:
         # guide quoting `"type": "service_account"` is a document, and this test file
         # itself would be refused. A truncated key still starts with `{`; prose does
         # not, so the opening brace is what separates them.
-        if not prefix.lstrip().startswith( "{" ):
+        if not _strip_leadin_noise( prefix ).startswith( "{" ):
             return False
         lowered = prefix.lower()
         if any( f'"{key}"' in lowered for key in _CREDENTIAL_JSON_KEYS ):
