@@ -2044,6 +2044,39 @@ def main():
                 "server_url" : os.getenv( "LUPIN_APP_SERVER_URL", "http://localhost:7999" )
             }
 
+    # ── Phase 4.6: Stamp the implicit manager-figure answer (bug e5d600bd) ──
+    # is_manager_figure()'s IMPLICIT source — "is this session's allocated
+    # persona one of the repo's NAMED standing personas
+    # (COSA_VOICE_PREFERRED_PERSONA__<PROJECT>)?" — can ONLY be resolved HERE,
+    # where the caller's real env lives. The server (tasks.py:652 G1 blocked-mint
+    # guard, and any future v2-experiment manager-vs-worker stratum classifier)
+    # runs in the lupin-rest-dev container, whose env carries ZERO
+    # COSA_VOICE_PREFERRED_PERSONA__* vars and LUPIN_ROOT=/var/lupin — so a
+    # server-side re-derive fails closed for EVERY caller (Rick's Option A,
+    # 2026-08-15). Compute the answer with os.environ AFTER allocation (the
+    # persona name is now known — freshly allocated OR carried forward across a
+    # /clear) and stamp it as a static bridge field the server reads directly.
+    #
+    # Only the IMPLICIT answer is stamped: the EXPLICIT source (role=="manager")
+    # stays a live bridge field is_manager_figure() checks first. Fail-soft — a
+    # stamp failure leaves the field absent and is_manager_figure() falls back to
+    # the (server-empty) env compute: the exact pre-fix behavior, no regression,
+    # and the bridge self-heals on its next SessionStart.
+    if session_id:
+        try:
+            from lupin_cli.claude_code.hooks.lib.manager_figure import resolve_implicit_manager_figure
+            from lupin_cli.claude_code.hooks.lib.session_bridge import set_manager_figure_implicit
+            _mf_persona  = ( session_data.get( "voice_persona" ) or {} ).get( "name" )
+            _mf_implicit = resolve_implicit_manager_figure( _mf_persona, os.environ )
+            if not set_manager_figure_implicit( stable_session_id, _mf_implicit ):
+                print( "[register_session] WARNING: manager-figure stamp not written "
+                       "(bridge unresolved); is_manager_figure will fall back to the "
+                       "server-empty env compute for this session (row e5d600bd)",
+                       file=sys.stderr )
+        except Exception as e:
+            print( f"[register_session] WARNING: manager-figure stamp phase failed "
+                   f"({type( e ).__name__}: {e})", file=sys.stderr )
+
     # ── Phase 5: Send TTS notification (with explicit sender_id) ────────
     short_id = session_id[:8] if session_id else "unknown"
     # Use stable_session_id for sender_id — stays consistent across context clears

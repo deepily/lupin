@@ -48,21 +48,28 @@ class TestReadBridgeFields:
     def test_reads_role_and_persona( self, tmp_path ):
         write, find = bridge_factory( tmp_path )
         write( "s1", { "role": "author", "voice_persona": { "name": "Tiffany" } } )
-        assert mf._read_bridge_fields( "s1", _find_path=find ) == ( "author", "Tiffany" )
+        assert mf._read_bridge_fields( "s1", _find_path=find ) == ( "author", "Tiffany", None )
+
+    def test_reads_stamped_implicit_flag( self, tmp_path ):
+        # The e5d600bd field is surfaced as the third tuple element.
+        write, find = bridge_factory( tmp_path )
+        write( "s1", { "role": "author", "voice_persona": { "name": "Tiffany" },
+                       "manager_figure_implicit": True } )
+        assert mf._read_bridge_fields( "s1", _find_path=find ) == ( "author", "Tiffany", True )
 
     def test_missing_bridge_returns_nones( self, tmp_path ):
         _, find = bridge_factory( tmp_path )
-        assert mf._read_bridge_fields( "absent", _find_path=find ) == ( None, None )
+        assert mf._read_bridge_fields( "absent", _find_path=find ) == ( None, None, None )
 
     def test_malformed_json_degrades( self, tmp_path ):
         write, find = bridge_factory( tmp_path )
         write( "s1", "{bad" )
-        assert mf._read_bridge_fields( "s1", _find_path=find ) == ( None, None )
+        assert mf._read_bridge_fields( "s1", _find_path=find ) == ( None, None, None )
 
     def test_non_dict_persona_yields_no_name( self, tmp_path ):
         write, find = bridge_factory( tmp_path )
         write( "s1", { "role": "author", "voice_persona": "Tiffany" } )
-        assert mf._read_bridge_fields( "s1", _find_path=find ) == ( "author", None )
+        assert mf._read_bridge_fields( "s1", _find_path=find ) == ( "author", None, None )
 
 
 class TestIsManagerFigure:
@@ -143,8 +150,82 @@ class TestIsManagerFigure:
         assert mf.is_manager_figure( "s1", environ=ExplodingEnv(), _find_path=find ) is False
 
     def test_locator_error_degrades_to_nones_then_false( self, tmp_path ):
-        # The locator raising inside _read_bridge_fields hits ITS except → (None, None).
+        # The locator raising inside _read_bridge_fields hits ITS except → (None, None, None).
         def exploding_find( _sid ):
             raise RuntimeError( "boom" )
-        assert mf._read_bridge_fields( "s1", _find_path=exploding_find ) == ( None, None )
+        assert mf._read_bridge_fields( "s1", _find_path=exploding_find ) == ( None, None, None )
         assert mf.is_manager_figure( "s1", environ=ENV_LUPIN, _find_path=exploding_find ) is False
+
+
+class TestStampedImplicitFlag:
+    """
+    Bug e5d600bd — the STATIC bridge field is the source of truth server-side.
+    The stamp is computed at registration with the caller's real env; the server
+    reads it and NEVER re-derives the implicit source from its own (empty) env.
+    """
+
+    def test_stamped_true_wins_without_any_env_chain( self, tmp_path, monkeypatch ):
+        # THE SERVER-SIDE FIX. environ=None (os.environ, empty of chain vars) and
+        # NO persona match possible — yet a stamped True resolves True. This is the
+        # exact caller shape of tasks.py:652 (is_manager_figure(session_id), no env)
+        # that was universally returning False before the stamp existed.
+        monkeypatch.setattr( mf, "resolve_project_name", lambda environ=None: "lupin" )
+        write, find = bridge_factory( tmp_path )
+        write( "s1", { "role": "author", "voice_persona": { "name": "Tiffany" },
+                       "manager_figure_implicit": True } )
+        assert mf.is_manager_figure( "s1", _find_path=find ) is True
+
+    def test_stamped_false_is_authoritative_over_a_matching_chain( self, tmp_path, monkeypatch ):
+        # A present stamp is trusted even when the env WOULD have matched — the
+        # stamp is the resolved answer, not a hint. Guards against a stratum
+        # mis-classification sneaking back in via ambient env.
+        monkeypatch.setattr( mf, "resolve_project_name", lambda environ=None: "lupin" )
+        write, find = bridge_factory( tmp_path )
+        write( "s1", { "voice_persona": { "name": "Tiberius" },
+                       "manager_figure_implicit": False } )
+        assert mf.is_manager_figure( "s1", environ=ENV_LUPIN, _find_path=find ) is False
+
+    def test_explicit_manager_role_beats_a_false_stamp( self, tmp_path, monkeypatch ):
+        # Explicit source is checked first and independently of the stamp.
+        monkeypatch.setattr( mf, "resolve_project_name", lambda environ=None: "lupin" )
+        write, find = bridge_factory( tmp_path )
+        write( "s1", { "role": "manager", "voice_persona": { "name": "Tiffany" },
+                       "manager_figure_implicit": False } )
+        assert mf.is_manager_figure( "s1", environ={}, _find_path=find ) is True
+
+    def test_absent_stamp_falls_back_to_env_compute( self, tmp_path, monkeypatch ):
+        # Legacy bridge (no field): the env-based fallback still resolves it, so a
+        # hook-side caller passing its own env is unchanged. Self-heals on re-reg.
+        monkeypatch.setattr( mf, "resolve_project_name", lambda environ=None: "lupin" )
+        write, find = bridge_factory( tmp_path )
+        write( "s1", { "voice_persona": { "name": "Tiberius" } } )
+        assert mf.is_manager_figure( "s1", environ=ENV_LUPIN, _find_path=find ) is True
+
+
+class TestResolveImplicitManagerFigure:
+    """The pure resolver register_session calls to compute the stamp."""
+
+    @pytest.fixture( autouse=True )
+    def _stub_project( self, monkeypatch ):
+        monkeypatch.setattr( mf, "resolve_project_name", lambda environ=None: "lupin" )
+
+    def test_named_entry_matches( self ):
+        assert mf.resolve_implicit_manager_figure( "Tiberius", ENV_LUPIN ) is True
+
+    def test_worker_persona_does_not_match( self ):
+        assert mf.resolve_implicit_manager_figure( "Tiffany", ENV_LUPIN ) is False
+
+    def test_no_persona_is_false( self ):
+        assert mf.resolve_implicit_manager_figure( None, ENV_LUPIN ) is False
+
+    def test_wildcard_is_never_a_match( self ):
+        assert mf.resolve_implicit_manager_figure( "*", ENV_LUPIN ) is False
+
+    def test_unset_chain_is_false( self ):
+        assert mf.resolve_implicit_manager_figure( "Tiberius", { "LUPIN_ROOT": "/x/lupin" } ) is False
+
+    def test_exploding_env_degrades_to_false( self ):
+        class ExplodingEnv( dict ):
+            def get( self, *a, **k ):
+                raise RuntimeError( "boom" )
+        assert mf.resolve_implicit_manager_figure( "Tiberius", ExplodingEnv() ) is False

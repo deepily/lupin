@@ -1141,6 +1141,29 @@ def get_bridge_mtime( session_id ) -> Optional[ float ]:
 BRIDGE_FORMAT_VERSION = 2
 
 
+# Bridge field carrying the IMPLICIT manager-figure answer, resolved at
+# registration time and stamped here (bug e5d600bd, Rick's Option A 2026-08-15).
+#
+# 🔴 WHY A STATIC FIELD AND NOT A SERVER-SIDE COMPUTE. The implicit source of
+# is_manager_figure — "is this session's allocated persona one of the repo's
+# NAMED standing personas (COSA_VOICE_PREFERRED_PERSONA__<PROJECT>)?" — can ONLY
+# be answered where the caller's real environment lives: the SessionStart hook.
+# The server (tasks.py:652 G1 guard, and any future v2 experiment stratum
+# classifier) runs in the lupin-rest-dev container, whose env carries ZERO
+# COSA_VOICE_PREFERRED_PERSONA__* vars and LUPIN_ROOT=/var/lupin — so a
+# server-side compute resolved every caller to project "lupin" with an empty
+# persona chain and the implicit source was universally dead. register_session
+# has the real env; it computes the answer and stamps it here, and the server
+# reads this static field instead of trying (and failing) to re-derive it.
+#
+# Value is a bool (the implicit answer only — the EXPLICIT source, role=="manager",
+# is a separate live bridge field is_manager_figure() still checks first). Absent
+# on legacy bridges written before this fix; is_manager_figure() falls back to the
+# env-based compute for those, so a pre-fix bridge self-heals on its next
+# SessionStart re-registration. See src/lupin_cli/.../lib/manager_figure.py.
+MANAGER_FIGURE_BRIDGE_FIELD = "manager_figure_implicit"
+
+
 def _get_default_speakerphone():
     """
     Return the mode-aware default for `speakerphone_on` when a bridge has no
@@ -1328,6 +1351,48 @@ def set_speakerphone( session_id, on ):
         # Drop the v1 field if it lingers from a pre-Phase-2 bridge, to avoid
         # two-source-of-truth ambiguity. The v2 field is now authoritative.
         data.pop( "conversation_mode_active", None )
+        return atomic_write_json( path, data )
+    except ( json.JSONDecodeError, OSError ):
+        return False
+
+
+def set_manager_figure_implicit( session_id, flag ):
+    """
+    Stamp the IMPLICIT manager-figure answer onto the bridge (bug e5d600bd).
+
+    Read-modify-write the bridge JSON to set MANAGER_FIGURE_BRIDGE_FIELD,
+    preserving all other fields. Called from register_session's SessionStart
+    hook AFTER voice-persona allocation, using the caller's real environment —
+    the only place the COSA_VOICE_PREFERRED_PERSONA__<PROJECT> chain is visible.
+    The server-side is_manager_figure() then reads this static field instead of
+    re-deriving it from the container env (where the chain is empty). Mirrors the
+    set_speakerphone read-modify-write pattern; does NOT create a missing bridge.
+
+    Requires:
+        - session_id is a non-empty string (full UUID or 8-char prefix)
+        - flag is a bool (the implicit-source answer)
+
+    Ensures:
+        - Returns True if bridge was found and successfully updated
+        - Returns False if bridge not found or write failed
+        - Never raises exceptions
+        - Preserves all existing fields in the bridge JSON (read-modify-write)
+
+    Args:
+        session_id: Session ID to look up
+        flag:       Implicit manager-figure answer to stamp
+
+    Returns:
+        bool: True on successful write, False otherwise
+    """
+    path = find_session_path_by_id( session_id )
+    if not path:
+        return False
+
+    try:
+        with open( path ) as f:
+            data = json.load( f )
+        data[ MANAGER_FIGURE_BRIDGE_FIELD ] = bool( flag )
         return atomic_write_json( path, data )
     except ( json.JSONDecodeError, OSError ):
         return False
