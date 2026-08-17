@@ -680,6 +680,150 @@ def test_verify_surface_can_be_disabled_for_hermetic_replays( monkeypatch ):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# LATENCY — the tiebreaker, and the split that keeps it meaning what it says
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _timed( outcome, seconds, index=0 ):
+    return { "row_index": index, "frozen_index": index, "arm": "x", "body": "b",
+             "elapsed_seconds": seconds, "meta": _meta( outcome=outcome ) }
+
+
+def test_latency_excludes_model_failed_from_the_tiebreaker_figure():
+    """
+    THE design point. A model_failed row is timed too, and its duration is a
+    different KIND of number — a fast 404 or a slow timeout, not how long the model
+    took to answer. Pooling it makes the tiebreaker mean something else.
+    """
+    records = [ _timed( "rewritten", 2.0 ), _timed( "rewritten", 4.0 ),
+                _timed( "model_failed", 90.0 ) ]                 # a timeout, not an answer
+
+    summary = RH.latency_summary( records )
+
+    assert summary[ "answered" ][ "n" ]      == 2
+    assert summary[ "answered" ][ "median" ] == 3.0              # the 90s row cannot reach this
+    assert summary[ "all_fired" ][ "n" ]     == 3
+    assert summary[ "all_fired" ][ "median" ] == 4.0             # ...but it is still visible here
+
+
+def test_latency_counts_refusals_as_answered():
+    """A fabrication refusal required an answer to judge; the model did the work."""
+    for refusal in ( "fabrication_blocked", "rescope_blocked", "label_blocked", "gate_rejected" ):
+        assert RH.latency_summary( [ _timed( refusal, 3.0 ) ] )[ "answered" ][ "n" ] == 1
+
+
+def test_latency_median_is_none_rather_than_zero_when_nothing_qualifies():
+    """A 0.0 would read as "instant"; None reads as "no measurement", which is true."""
+    summary = RH.latency_summary( [ _timed( "model_failed", 5.0 ) ] )
+    assert summary[ "answered" ][ "median" ] is None
+    assert summary[ "answered" ][ "mean" ]   is None
+    assert summary[ "answered" ][ "n" ]      == 0
+
+
+def test_latency_ratio_names_the_faster_arm():
+    a = [ _timed( "rewritten", 8.0, 0 ), _timed( "rewritten", 8.0, 1 ) ]     # phi_4
+    b = [ _timed( "rewritten", 2.0, 0 ), _timed( "rewritten", 2.0, 1 ) ]     # flash_lite
+
+    result = RH.latency_ratio( a, b )
+
+    assert result[ "ratio_of_medians" ]    == pytest.approx( 4.0 )
+    assert result[ "paired_median_ratio" ] == pytest.approx( 4.0 )
+    assert result[ "faster_arm" ]          == "flash_lite"
+    assert "> 1 means phi_4 is slower" in result[ "ratio_meaning" ]
+
+
+def test_latency_ratio_the_other_way_round():
+    a = [ _timed( "rewritten", 1.0, 0 ) ]
+    b = [ _timed( "rewritten", 5.0, 0 ) ]
+    result = RH.latency_ratio( a, b )
+    assert result[ "ratio_of_medians" ] == pytest.approx( 0.2 )
+    assert result[ "faster_arm" ]       == "phi_4"
+
+
+def test_latency_ratio_reports_a_tie_as_a_tie():
+    a = [ _timed( "rewritten", 3.0, 0 ) ]
+    b = [ _timed( "rewritten", 3.0, 0 ) ]
+    assert RH.latency_ratio( a, b )[ "faster_arm" ] == "tie"
+
+
+def test_paired_median_ratio_is_robust_where_the_ratio_of_medians_is_not():
+    """
+    The arms are paired, so a per-row ratio is available. One arm meeting a single
+    very slow body moves the mean and can move the ratio of medians; the paired
+    median does not. Both are reported — neither replaces the other.
+    """
+    a = [ _timed( "rewritten", 2.0, 0 ), _timed( "rewritten", 2.0, 1 ), _timed( "rewritten", 200.0, 2 ) ]
+    b = [ _timed( "rewritten", 1.0, 0 ), _timed( "rewritten", 1.0, 1 ), _timed( "rewritten", 1.0, 2 ) ]
+
+    result = RH.latency_ratio( a, b )
+    assert result[ "paired_median_ratio" ] == pytest.approx( 2.0 )    # unmoved by the outlier
+    assert result[ "ratio_of_medians" ]    == pytest.approx( 2.0 )
+
+
+def test_latency_ratio_is_none_when_it_cannot_be_formed():
+    """Never a fabricated number: no answered rows means no ratio."""
+    a = [ _timed( "model_failed", 5.0, 0 ) ]
+    b = [ _timed( "model_failed", 5.0, 0 ) ]
+
+    result = RH.latency_ratio( a, b )
+    assert result[ "ratio_of_medians" ] is None
+    assert result[ "faster_arm" ]       is None
+
+
+def test_latency_ratio_survives_a_zero_denominator():
+    a = [ _timed( "rewritten", 3.0, 0 ), _timed( "rewritten", 4.0, 1 ) ]
+    b = [ _timed( "rewritten", 0.0, 0 ), _timed( "rewritten", 2.0, 1 ) ]
+
+    result = RH.latency_ratio( a, b )
+    assert result[ "paired_median_ratio" ] == pytest.approx( 2.0 )    # the 0.0 row is skipped
+    assert result[ "ratio_of_medians" ]    == pytest.approx( 3.5 )
+
+
+def test_latency_ratio_says_out_loud_that_it_is_only_a_tiebreaker():
+    """A faster arm that is significantly less honest does not win on speed."""
+    result = RH.latency_ratio( [ _timed( "rewritten", 1.0 ) ], [ _timed( "rewritten", 1.0 ) ] )
+    assert "ONLY after the statistical test" in result[ "tiebreaker_only" ]
+    assert "model_failed" in result[ "basis" ]
+
+
+def test_the_report_carries_latency_even_without_a_denominator( tmp_path ):
+    """
+    Latency needs neither Rick's denominator nor his floor, so withholding it would
+    withhold a number nothing is waiting on.
+    """
+    out_dir = _make_snapshot( tmp_path )
+    printed = []
+
+    RH.main(
+        [ "--snapshot-dir", str( out_dir ), "--out", str( tmp_path / "r.jsonl" ),
+          "--max-model-failed-rate", "0.5" ],
+        printer=printed.append,
+        runner=_fake_runner( { RH.ARM_PHI4: [ "rewritten" ] * 3, RH.ARM_FLASH_LITE: [ "rewritten" ] * 3 } ),
+    )
+
+    report = json.loads( printed[ -1 ] )
+    assert "withheld" in report[ "arms" ][ RH.ARM_PHI4 ]          # the summary IS withheld...
+    assert "ratio_of_medians" in report[ "latency" ]              # ...and latency is not
+    assert "faster_arm" in report[ "latency" ]
+
+
+def test_the_report_withholds_the_ratio_on_a_one_armed_run( tmp_path ):
+    """A tiebreaker needs both arms; one arm gets its summary and an explicit note."""
+    out_dir = _make_snapshot( tmp_path )
+    printed = []
+
+    RH.main(
+        [ "--snapshot-dir", str( out_dir ), "--out", str( tmp_path / "r.jsonl" ),
+          "--max-model-failed-rate", "0.5", "--arm", RH.ARM_PHI4 ],
+        printer=printed.append,
+        runner=_fake_runner( { RH.ARM_PHI4: [ "rewritten" ] * 3 } ),
+    )
+
+    latency = json.loads( printed[ -1 ] )[ "latency" ]
+    assert "ratio_of_medians" not in latency
+    assert "one arm only" in latency[ "note" ]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # THE CLI
 # ─────────────────────────────────────────────────────────────────────────────
 

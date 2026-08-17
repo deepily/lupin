@@ -607,6 +607,106 @@ def pair_records( arm_a_records, arm_b_records ):
     return paired
 
 
+def latency_summary( records ):
+    """
+    Per-arm latency, split by whether the model actually answered.
+
+    ⚠️ THE SPLIT IS THE POINT. `elapsed_seconds` times the WHOLE `_apply_dm_tutor`
+    call, so a `model_failed` row is timed too — and its duration is a different
+    KIND of thing: a fast 404 or a slow timeout, not "how long the model took to
+    answer". Pooling those into one median makes the number mean something other
+    than which model is faster, which is exactly what a tiebreaker must not do.
+
+    `answered` is therefore the tiebreaker figure: rows where a rewrite came back
+    and the tutor then judged it (delivered, or refused for fabricating/rescoping/
+    mislabelling — all of which required an answer to judge). `all_fired` is
+    reported beside it so a big gap between the two is visible rather than hidden.
+
+    Requires:
+        - records came from `replay_arm`, so each carries elapsed_seconds and meta
+
+    Ensures:
+        - returns { answered: {...}, all_fired: {...} }, each with n / median / mean
+        - a median of None where no row qualifies, never a 0.0 that reads as "fast"
+
+    Raises:
+        - nothing
+    """
+    answered_outcomes = ( "rewritten", "fabrication_blocked", "rescope_blocked",
+                          "label_blocked", "gate_rejected" )
+
+    def stats( subset ):
+        times = sorted( r[ "elapsed_seconds" ] for r in subset )
+        return {
+            "n"      : len( times ),
+            "median" : _median( times ),
+            "mean"   : ( sum( times ) / len( times ) ) if times else None,
+        }
+
+    return {
+        "answered"  : stats( [ r for r in records
+                               if r[ "meta" ].get( "tutor_outcome" ) in answered_outcomes ] ),
+        "all_fired" : stats( records ),
+    }
+
+
+def latency_ratio( arm_a_records, arm_b_records, arm_a="phi_4", arm_b="flash_lite" ):
+    """
+    The tiebreaker: how much slower arm A is than arm B.
+
+    ⚠️ A TIEBREAKER ONLY APPLIES AFTER THE TEST COMES BACK TIED. Statistics are
+    considered first; this decides nothing on its own, and a faster arm that is
+    significantly less honest does not win on speed.
+
+    Two figures, because they answer slightly different questions:
+      · `ratio_of_medians` — the headline. What a reader means by "latency ratio".
+      · `paired_median_ratio` — the median of per-row A/B ratios. The arms are
+        paired, so this is available and is robust to one arm meeting a few very
+        slow bodies. Report it beside the headline rather than instead of it.
+
+    Requires:
+        - both lists are PAIRED (same frozen indices, same order) — pass them
+          through `pair_records` first if that is not already established
+
+    Ensures:
+        - returns per-arm summaries plus both ratios, and names which arm is faster
+        - `> 1` means arm A took longer; `< 1` means arm B did
+        - a ratio of None where it cannot be formed (no qualifying rows, or a zero
+          denominator), never a fabricated number
+
+    Raises:
+        - nothing
+    """
+    a_summary = latency_summary( arm_a_records )
+    b_summary = latency_summary( arm_b_records )
+
+    a_median = a_summary[ "answered" ][ "median" ]
+    b_median = b_summary[ "answered" ][ "median" ]
+
+    ratio_of_medians = ( a_median / b_median ) if a_median is not None and b_median else None
+
+    per_row = sorted(
+        rec_a[ "elapsed_seconds" ] / rec_b[ "elapsed_seconds" ]
+        for rec_a, rec_b in zip( arm_a_records, arm_b_records )
+        if rec_b[ "elapsed_seconds" ]
+    )
+
+    faster = None
+    if ratio_of_medians is not None:
+        faster = arm_b if ratio_of_medians > 1 else arm_a if ratio_of_medians < 1 else "tie"
+
+    return {
+        "basis"              : "answered rows only — model_failed timings are a different kind of number",
+        "tiebreaker_only"    : "applies ONLY after the statistical test comes back tied",
+        arm_a                : a_summary,
+        arm_b                : b_summary,
+        "ratio_of_medians"   : ratio_of_medians,
+        "ratio_meaning"      : f"{arm_a} median / {arm_b} median; > 1 means {arm_a} is slower",
+        "paired_median_ratio": _median( per_row ),
+        "faster_arm"         : faster,
+    }
+
+
 def discordant_counts( paired, arm_a, arm_b, outcome="fabrication_blocked" ):
     """
     The b / c cells McNemar's test reads, over paired rows.
@@ -718,6 +818,14 @@ def main( argv=None, printer=print, runner=None ):
         "snapshot_sha256": manifest[ "snapshot_sha256" ],
         "rows"           : len( rows ),
         "selection"      : selection,
+        # Reported on EVERY run, unlike the per-arm summaries: latency needs neither
+        # Rick's denominator nor his floor, so withholding it would withhold a number
+        # nothing is waiting on. It is a TIEBREAKER — it decides nothing until the
+        # statistical test comes back tied.
+        "latency"        : ( latency_ratio( results[ ARM_PHI4 ], results[ ARM_FLASH_LITE ] )
+                             if len( results ) == 2 else
+                             { arm: latency_summary( recs ) for arm, recs in results.items() } |
+                             { "note": "one arm only — no ratio; a tiebreaker needs both arms" } ),
         "arms"           : { arm: summarize_arm( [ r[ "meta" ] for r in recs ], denominator=args.denominator )
                              for arm, recs in results.items() } if args.denominator else
                            { arm: "summary withheld — --denominator unset (F1, Rick's row 76755526)"
