@@ -359,14 +359,40 @@ class TestPushJobRouting( _TFQBase ):
             r = self.queue.push_job( "search and summarize quantum computing", "ws1", "u1", "u@x.com" )
         search.search_and_summarize_the_web.assert_called_once()
 
-    def test_else_unknown_command_searches( self ):
-        search = Mock(); search.get_results.return_value = "summary"
-        with patch.object( self.queue, "_get_routing_command", return_value=( "totally unknown command", "" ) ), \
-             patch.object( tfq, "LupinSearch", return_value=search ), \
-             patch.object( self.queue, "_notify" ), patch.object( self.queue, "push" ), \
-             patch( "builtins.print" ):
-            r = self.queue.push_job( "weird question", "ws1", "u1", "u@x.com" )
-        search.search_and_summarize_the_web.assert_called_once()
+    def test_unknown_command_hands_off_to_receptionist( self ):
+        # 720ce725 branch 1 — a GENUINE non-resolution: _get_routing_command returns
+        # ("unknown","") on any XML parse failure / gibberish. Behavior must be a
+        # receptionist hand-off, NOT a silent web-search of the user's question.
+        agent = Mock(); agent.id_hash = "ag"
+        with patch.object( self.queue, "_get_routing_command", return_value=( "unknown", "" ) ), \
+             patch.object( tfq, "ReceptionistAgent", return_value=agent ) as mk_rec, \
+             patch.object( self.queue, "_search_and_summarize_safely" ) as mk_search, \
+             patch.object( self.queue, "push" ) as mk_push, \
+             patch.object( self.queue, "_notify" ), patch( "builtins.print" ):
+            r = self.queue.push_job( "what time is it", "ws1", "u1", "u@x.com" )
+        # observable behavior: receptionist constructed + job pushed, no web-search
+        mk_rec.assert_called_once()
+        mk_search.assert_not_called()
+        mk_push.assert_called_once()
+        self.assertEqual( r[ "job_id" ], "ag" )
+
+    def test_unwired_command_fails_loudly( self ):
+        # 720ce725 branch 2 — the router EMITTED a command string that resolves
+        # nowhere (not conversational, not receptionist/none, not in JOB_ARG_CONTRACTS).
+        # Behavior must be a LOUD error-return: no web-search, no receptionist
+        # smoothing the routing bug into a friendly non-answer, no job pushed.
+        with patch.object( self.queue, "_get_routing_command",
+                           return_value=( "agent router go to nonexistent", "" ) ), \
+             patch.object( tfq, "ReceptionistAgent" ) as mk_rec, \
+             patch.object( self.queue, "_search_and_summarize_safely" ) as mk_search, \
+             patch.object( self.queue, "push" ) as mk_push, \
+             patch.object( self.queue, "_notify" ), patch( "builtins.print" ):
+            r = self.queue.push_job( "route me nowhere", "ws1", "u1", "u@x.com" )
+        mk_search.assert_not_called()        # NOT web-searched (the old defect)
+        mk_rec.assert_not_called()           # NOT smoothed over by the receptionist
+        mk_push.assert_not_called()          # no job created
+        self.assertIn( "unroutable command (no wiring)", r[ "message" ].lower() )
+        self.assertIsNone( r[ "job_id" ] )
 
     def test_user_mode_direct_routing( self ):
         # user in 'math' mode → bypass LLM, command synthesized

@@ -819,12 +819,28 @@ class TodoFifoQueue( FifoQueue ):
                         )
                 # _handle_agentic_command handles push + notify internally; skip fallthrough
                 return { "message": msg, "job_id": None }
+            elif command == "unknown":
+                # 720ce725: a GENUINE non-resolution — XML parse failure / gibberish
+                # (_get_routing_command returns ("unknown","") on any parse failure) —
+                # hands off to the receptionist instead of silently WEB-SEARCHING the
+                # user's question (the old else did self._search_and_summarize_safely,
+                # answering a different question with no signal the route missed).
+                print( f"[ROUTER-MISS] unresolved command '{command}' → receptionist hand-off (reason=unknown_command)" )
+                agent = ReceptionistAgent( question=question, question_gist=question_gist, last_question_asked=salutation_plus_question, push_counter=self.push_counter, user_id=user_id, user_email=user_email, session_id=websocket_id, debug=True, verbose=False, auto_debug=self.auto_debug, inject_bugs=self.inject_bugs )
+                msg = f"{self.hemming_and_hawing[ random.randint( 0, len( self.hemming_and_hawing ) - 1 ) ]} {self.thinking[ random.randint( 0, len( self.thinking ) - 1 ) ]}".strip()
             else:
-                msg = du.print_banner( f"TO DO: Implement else case command {command}" )
-                print( msg )
-                # TTS Migration (Session 98): Use notification service instead of emit_speech_callback
-                self._notify( f"{self.hemming_and_hawing[ random.randint( 0, len( self.hemming_and_hawing ) - 1 ) ]} {self.thinking[ random.randint( 0, len( self.thinking ) - 1 ) ]}", target_user=user_email )
-                msg = self._search_and_summarize_safely( question_gist )
+                # 720ce725 (María's design): the router EMITTED a command that resolves
+                # NOWHERE — not conversational, not receptionist/none, not in
+                # JOB_ARG_CONTRACTS. That is a routing/wiring bug, so FAIL LOUDLY:
+                # never a silent web-search (the old defect), never a receptionist
+                # smoothing a real bug into a friendly non-answer.
+                # Mechanism = loud error banner + honest user notify + no job (job_id
+                # None). Chosen over `raise` because push_job runs on the LIVE speech
+                # API path (routers/speech.py) where an unhandled raise would 500 the
+                # request; flagged for María/Tiberius in the landing report.
+                print( du.print_banner( f"ROUTER-MISS LOUD FAIL: router emitted unwired command {command!r} — no agent/factory handles it (720ce725)" ) )
+                self._notify( f"I heard a command I don't know how to run: {command}. That's a routing bug on my side, not your question.", target_user=user_email )
+                return { "message": f"Unroutable command (no wiring): {command}", "job_id": None }
                 
             if ding_for_new_job:
                 self.websocket_mgr.emit( 'notification_sound_update', { 'soundFile': '/static/gentle-gong.mp3' } )
