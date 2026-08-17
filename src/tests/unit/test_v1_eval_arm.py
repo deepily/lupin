@@ -503,11 +503,23 @@ class _FakeEngine:
     def __init__( self, url ): self.url = url
 
 class _FakeConn:
-    """A connection whose url and executor are ONE object — no decoupled db_url."""
+    """A connection whose url and executor are ONE object — no decoupled db_url.
+
+    Records the statement as a STRING (SQLAlchemy 2.x needs `text()`, and a TextClause
+    compared with `==` builds an expression instead of answering True or False) and counts
+    commits (commit-as-you-go: an uncommitted TRUNCATE rolls back on close).
+    """
     def __init__( self, url ):
-        self.engine   = _FakeEngine( url )
-        self.executed = []
-    def execute( self, sql ): self.executed.append( sql )
+        self.engine    = _FakeEngine( url )
+        self.executed  = []
+        self.committed = 0
+    def execute( self, sql ):
+        # Mimic SQLAlchemy 2.x, which REFUSES a bare string. A fake that accepts anything is
+        # how 291fb3fa stayed green at the unit layer while failing on the live connection.
+        if isinstance( sql, str ):
+            raise TypeError( "SQLAlchemy 2.x rejects a raw string — wrap the statement in text()" )
+        self.executed.append( str( sql ) )
+    def commit( self ): self.committed += 1
 
 def test_truncate_snapshots_derives_url_and_runs_on_test_db():
     conn  = _FakeConn( "postgresql://u:p@localhost/lupin_db_test" )
@@ -515,11 +527,25 @@ def test_truncate_snapshots_derives_url_and_runs_on_test_db():
     assert table == v1.SNAPSHOT_TABLE
     assert conn.executed == [ f"TRUNCATE TABLE {v1.SNAPSHOT_TABLE}" ]
 
+def test_truncate_snapshots_uses_text_and_commits():
+    # The sibling of 291fb3fa + 9b90ae5d, on the v1 arm. Both defects are INVISIBLE to a fake
+    # that accepts anything: a raw f-string is rejected only by real SQLAlchemy 2.x, and a
+    # missing commit only shows up as a store that is still dirty after the clean step ran.
+    # This pins both against a REAL executable check.
+    from sqlalchemy import text
+    conn = _FakeConn( "postgresql://u:p@localhost/lupin_db_v1baseline" )
+    v1.truncate_snapshots( conn )
+    assert conn.committed == 1                                     # RED without connection.commit()
+    # RED without text(): the fake raises TypeError on a bare string, exactly as the live
+    # SQLAlchemy 2.x connection does.
+    assert conn.executed == [ str( text( f"TRUNCATE TABLE {v1.SNAPSHOT_TABLE}" ) ) ]
+
 def test_truncate_snapshots_never_executes_on_wrong_db():
     conn = _FakeConn( "postgresql://u:p@localhost/lupin_db_dev" )
     with pytest.raises( v1.EvalIntegrityError ):
         v1.truncate_snapshots( conn )
-    assert conn.executed == [ ]               # url derived from the SAME conn; TRUNCATE never fired
+    # url derived from the SAME conn; TRUNCATE never fired and nothing was committed
+    assert conn.executed == [ ] and conn.committed == 0
 
 
 # ───────────────────────────────────────────── reporting

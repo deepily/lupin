@@ -781,8 +781,11 @@ def truncate_snapshots( connection: Any ) -> str:
         - on the test DB, truncates the FIXED SNAPSHOT_TABLE (a constant, never a
           caller-supplied identifier → no injection surface) and returns its name
     """
+    from sqlalchemy import text   # SQLAlchemy 2.x rejects a raw string here — statements must be executable
+
     assert_test_db( _connection_url( connection ) )   # url derived from the executing connection
-    connection.execute( f"TRUNCATE TABLE {SNAPSHOT_TABLE}" )
+    connection.execute( text( f"TRUNCATE TABLE {SNAPSHOT_TABLE}" ) )
+    connection.commit()   # SQLAlchemy 2.x is commit-as-you-go: without this the TRUNCATE rolls back on close (the store stays dirty)
     return SNAPSHOT_TABLE
 
 
