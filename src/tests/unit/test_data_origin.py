@@ -2,48 +2,26 @@
 """
 Unit tests for data_origin provenance tracking.
 
-Tests that data_origin round-trips through PostgreSQL (via repository layer)
-and LanceDB (via ProxyDecisionEmbeddings), that defaults are correct, and
-that find_similar() can filter by origin.
+Tests that data_origin round-trips through PostgreSQL (via the repository layer)
+and that defaults are correct.
 
 Session 268: Work Item 1 — data provenance tracking for proxy decisions.
+
+TRIMMED 2026-08-17 by Pocholo (LanceDB total-removal sweep, Lane A, rows
+5ff7b8f5 / 8098838f): TestDataOriginEmbeddings drove ProxyDecisionEmbeddings
+through a real LanceDB store in a tmpdir, pinned to the lancedb backend by an
+autouse fixture. That store and that backend are gone; the same behaviour is
+covered against the repository in
+src/cosa/tests/unit/agents/decision_proxy/test_proxy_decision_embeddings.py.
+Deleted, not skipped — and the pin went with it.
 """
 
-import tempfile
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
 
-from cosa.agents.decision_proxy.proxy_decision_embeddings import ProxyDecisionEmbeddings
 from cosa.rest.db.repositories.proxy_decision_repository import ProxyDecisionRepository
-
-
-@pytest.fixture( autouse=True )
-def _pin_lancedb_backend():
-    """
-    Pin `vector store backend` to lancedb for every test in this module.
-
-    These tests hand ProxyDecisionEmbeddings a real tmpdir and assert round-trip and
-    similarity behavior. The live INI resolves to `postgres`, under which the store
-    routes to PredictionDecisionRepository and the tmpdir is inert — so they were
-    reading and writing the SHARED store while their docstring claimed isolated
-    LanceDB instances (bug d621b111, ruling on decision 2b20a6d6).
-
-    This REPLACES the `_PG_ISOLATION_MODULES` allowlist entry that used to cover this
-    module. An allowlist of sanctioned offenders is the shape that let the defect
-    spread; a per-module pin gives genuine isolation — each test owns its tmpdir and
-    reaches no shared database at all.
-
-    Patched at the flag's single definition site so every class that resolves
-    is_postgres_backend() from that module's globals is covered at once.
-    """
-    from unittest.mock import patch
-    from cosa.rest.db.repositories import vector_store_backend
-
-    with patch.object( vector_store_backend, "get_vector_store_backend",
-                       return_value=vector_store_backend.LANCEDB ):
-        yield
 
 
 
@@ -157,195 +135,6 @@ class TestDataOriginRepository:
             call_kwargs = mock_create.call_args.kwargs
             assert call_kwargs[ "data_origin" ] == "synthetic_seed"
 
-
-# =============================================================================
-# LanceDB Embeddings Tests (Real LanceDB)
-# =============================================================================
-
-class TestDataOriginEmbeddings:
-    """Tests for data_origin in ProxyDecisionEmbeddings LanceDB store."""
-
-    def test_add_decision_default_origin_is_organic( self ):
-        """add_decision() defaults data_origin to 'organic'."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            store = ProxyDecisionEmbeddings( db_path=tmpdir, table_name="test_origin_default", debug=True )
-
-            embedding = _make_embedding( seed=100 )
-            store.add_decision(
-                id                  = "origin-default-001",
-                question            = "Should I run the tests?",
-                category            = "testing",
-                decision_value      = "approved",
-                ratification_state  = "ratified",
-                question_embedding  = embedding,
-                created_at          = "2026-02-25T10:00:00Z",
-            )
-
-            results = store.find_similar( embedding, threshold=0.50 )
-            assert len( results ) >= 1
-            _, record = results[ 0 ]
-            assert record[ "data_origin" ] == "organic"
-
-    def test_add_decision_synthetic_seed_round_trip( self ):
-        """data_origin='synthetic_seed' round-trips through LanceDB."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            store = ProxyDecisionEmbeddings( db_path=tmpdir, table_name="test_origin_seed", debug=True )
-
-            embedding = _make_embedding( seed=101 )
-            store.add_decision(
-                id                  = "origin-seed-001",
-                question            = "Deploy hotfix to prod?",
-                category            = "deployment",
-                decision_value      = "requires_review",
-                ratification_state  = "pending",
-                question_embedding  = embedding,
-                created_at          = "2026-02-25T10:00:00Z",
-                data_origin         = "synthetic_seed",
-            )
-
-            results = store.find_similar( embedding, threshold=0.50 )
-            assert len( results ) >= 1
-            _, record = results[ 0 ]
-            assert record[ "data_origin" ] == "synthetic_seed"
-
-    def test_add_decision_synthetic_generated_round_trip( self ):
-        """data_origin='synthetic_generated' round-trips through LanceDB."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            store = ProxyDecisionEmbeddings( db_path=tmpdir, table_name="test_origin_gen", debug=True )
-
-            embedding = _make_embedding( seed=102 )
-            store.add_decision(
-                id                  = "origin-gen-001",
-                question            = "Refactor auth module?",
-                category            = "architecture",
-                decision_value      = "requires_review",
-                ratification_state  = "pending",
-                question_embedding  = embedding,
-                created_at          = "2026-02-25T10:00:00Z",
-                data_origin         = "synthetic_generated",
-            )
-
-            results = store.find_similar( embedding, threshold=0.50 )
-            assert len( results ) >= 1
-            _, record = results[ 0 ]
-            assert record[ "data_origin" ] == "synthetic_generated"
-
-    def test_find_similar_filter_by_origin_includes( self ):
-        """find_similar() with data_origin filter returns only matching records."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            store = ProxyDecisionEmbeddings( db_path=tmpdir, table_name="test_origin_filter", debug=True )
-
-            base_embedding = _make_embedding( seed=200 )
-
-            # Add organic decision
-            store.add_decision(
-                id="filter-organic-001", question="Organic test question",
-                category="testing", decision_value="approved",
-                ratification_state="ratified", question_embedding=base_embedding,
-                created_at="2026-02-25T10:00:00Z", data_origin="organic",
-            )
-
-            # Add synthetic_seed decision (similar embedding)
-            seed_embedding = _make_similar_embedding( base_embedding, noise_level=0.02, seed=201 )
-            store.add_decision(
-                id="filter-seed-001", question="Synthetic seed test question",
-                category="testing", decision_value="approved",
-                ratification_state="pending", question_embedding=seed_embedding,
-                created_at="2026-02-25T10:01:00Z", data_origin="synthetic_seed",
-            )
-
-            # Filter for organic only
-            organic_results = store.find_similar(
-                base_embedding, threshold=0.0, data_origin="organic"
-            )
-            assert len( organic_results ) >= 1
-            for _, record in organic_results:
-                assert record[ "data_origin" ] == "organic"
-
-            # Filter for synthetic_seed only
-            seed_results = store.find_similar(
-                base_embedding, threshold=0.0, data_origin="synthetic_seed"
-            )
-            assert len( seed_results ) >= 1
-            for _, record in seed_results:
-                assert record[ "data_origin" ] == "synthetic_seed"
-
-    def test_find_similar_no_filter_returns_all_origins( self ):
-        """find_similar() without data_origin filter returns records of all origins."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            store = ProxyDecisionEmbeddings( db_path=tmpdir, table_name="test_origin_all", debug=True )
-
-            base_embedding = _make_embedding( seed=300 )
-
-            # Add one organic, one synthetic_seed
-            store.add_decision(
-                id="all-organic-001", question="Organic question",
-                category="testing", decision_value="approved",
-                ratification_state="ratified", question_embedding=base_embedding,
-                created_at="2026-02-25T10:00:00Z", data_origin="organic",
-            )
-
-            similar_emb = _make_similar_embedding( base_embedding, noise_level=0.02, seed=301 )
-            store.add_decision(
-                id="all-seed-001", question="Synthetic seed question",
-                category="testing", decision_value="approved",
-                ratification_state="pending", question_embedding=similar_emb,
-                created_at="2026-02-25T10:01:00Z", data_origin="synthetic_seed",
-            )
-
-            # No origin filter — should get both
-            all_results = store.find_similar( base_embedding, threshold=0.0 )
-            origins = { record[ "data_origin" ] for _, record in all_results }
-            assert "organic" in origins
-            assert "synthetic_seed" in origins
-
-    def test_find_similar_combined_category_and_origin_filter( self ):
-        """find_similar() can filter by both category AND data_origin simultaneously."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            store = ProxyDecisionEmbeddings( db_path=tmpdir, table_name="test_combined_filter", debug=True )
-
-            base_embedding = _make_embedding( seed=400 )
-
-            # Organic testing decision
-            store.add_decision(
-                id="combo-001", question="Run unit tests?",
-                category="testing", decision_value="approved",
-                ratification_state="ratified", question_embedding=base_embedding,
-                created_at="2026-02-25T10:00:00Z", data_origin="organic",
-            )
-
-            # Synthetic deployment decision (similar embedding, different category)
-            similar_emb = _make_similar_embedding( base_embedding, noise_level=0.02, seed=401 )
-            store.add_decision(
-                id="combo-002", question="Deploy to staging?",
-                category="deployment", decision_value="requires_review",
-                ratification_state="pending", question_embedding=similar_emb,
-                created_at="2026-02-25T10:01:00Z", data_origin="synthetic_seed",
-            )
-
-            # Synthetic testing decision
-            similar_emb2 = _make_similar_embedding( base_embedding, noise_level=0.03, seed=402 )
-            store.add_decision(
-                id="combo-003", question="Run integration tests?",
-                category="testing", decision_value="approved",
-                ratification_state="pending", question_embedding=similar_emb2,
-                created_at="2026-02-25T10:02:00Z", data_origin="synthetic_seed",
-            )
-
-            # Filter: category=testing AND data_origin=organic → only combo-001
-            results = store.find_similar(
-                base_embedding, category="testing", data_origin="organic", threshold=0.0
-            )
-            assert len( results ) >= 1
-            ids = { record[ "id" ] for _, record in results }
-            assert "combo-001" in ids
-            assert "combo-002" not in ids  # wrong category
-            assert "combo-003" not in ids  # wrong origin
-
-
-# =============================================================================
-# ORM Model Tests
-# =============================================================================
 
 class TestDataOriginOrmModel:
     """Tests for ProxyDecision ORM model data_origin field."""

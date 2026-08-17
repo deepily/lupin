@@ -732,7 +732,7 @@ def _get_embedding_store():
         - Returns configured ProxyDecisionEmbeddings instance
     """
     config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
-    table_name = config_mgr.get( "swe team trust proxy lancedb table", default="proxy_decisions" )
+    table_name = config_mgr.get( "swe team trust proxy decisions table", default="proxy_decisions" )
 
     return ProxyDecisionEmbeddings(
         table_name = table_name,

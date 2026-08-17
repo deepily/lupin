@@ -321,24 +321,18 @@ def test_get_embedding_store_initializes_on_success():
     cm = MagicMock()
     cm.get.return_value = "value"
     fake_cfg.ConfigurationManager.return_value = cm
-    # _get_embedding_store now asks the backend before building a LanceDB path
-    # (decision 2b20a6d6). The stub ConfigurationManager answers "value" to every key,
-    # including `vector store backend`, which get_vector_store_backend correctly
-    # rejects as invalid — so the pin supplies a real backend value.
-    from cosa.rest.db.repositories import vector_store_backend
 
     with patch.dict( sys.modules, {
             "cosa.agents.decision_proxy.proxy_decision_embeddings": fake_pde,
-            "cosa.config.configuration_manager": fake_cfg } ), \
-         patch.object( vector_store_backend, "get_vector_store_backend",
-                       return_value=vector_store_backend.LANCEDB ), \
-         patch( "cosa.utils.util.get_project_root", return_value="/root" ):
+            "cosa.config.configuration_manager": fake_cfg } ):
         store = r._get_embedding_store()
     assert store is sentinel_store
     assert r._embedding_store is sentinel_store
 
-    # The LanceDB arm was taken, so a real path was built and handed over.
-    assert fake_pde.ProxyDecisionEmbeddings.call_args.kwargs[ "db_path" ] is not None
+    # No location is built or handed over — the store is Postgres-backed.
+    kwargs = fake_pde.ProxyDecisionEmbeddings.call_args.kwargs
+    assert "db_path" not in kwargs
+    assert kwargs[ "table_name" ] == "value"
 
 
 def test_get_embedding_store_swallows_init_failure( capsys ):

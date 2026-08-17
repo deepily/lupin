@@ -87,7 +87,7 @@ DEFAULT_L4_AUDIT_SAMPLE_RATE = 0.10  # 10%
 # ============================================================================
 
 DEFAULT_SIMILARITY_THRESHOLD  = 0.75
-DEFAULT_PROXY_LANCEDB_TABLE   = "proxy_decisions"
+DEFAULT_PROXY_DECISIONS_TABLE = "proxy_decisions"
 
 
 # ============================================================================
@@ -195,7 +195,7 @@ def trust_proxy_config_from_config_mgr( config_mgr ):
         "l4_audit_sample_rate"             : config_mgr.get( "swe team trust proxy l4 audit sample rate",                           default=DEFAULT_L4_AUDIT_SAMPLE_RATE,             return_type="float" ),
         # Phase 0: Embedding / vector search
         "similarity_threshold"             : config_mgr.get( "swe team trust proxy similarity threshold",                           default=DEFAULT_SIMILARITY_THRESHOLD,             return_type="float" ),
-        "proxy_lancedb_table"              : config_mgr.get( "swe team trust proxy lancedb table",                                  default=DEFAULT_PROXY_LANCEDB_TABLE ),
+        "proxy_decisions_table"            : config_mgr.get( "swe team trust proxy decisions table",                                default=DEFAULT_PROXY_DECISIONS_TABLE ),
         # Phase 1: Beta-Bernoulli rate thresholds
         "beta_l2_rate_threshold"           : config_mgr.get( "swe team trust proxy beta l2 rate threshold",                         default=DEFAULT_BETA_L2_RATE_THRESHOLD,            return_type="float" ),
         "beta_l3_rate_threshold"           : config_mgr.get( "swe team trust proxy beta l3 rate threshold",                         default=DEFAULT_BETA_L3_RATE_THRESHOLD,            return_type="float" ),

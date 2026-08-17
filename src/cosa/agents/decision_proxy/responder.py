@@ -283,25 +283,14 @@ class DecisionResponder( BaseResponder ):
 
         try:
             from cosa.agents.decision_proxy.proxy_decision_embeddings import ProxyDecisionEmbeddings
-            from cosa.agents.decision_proxy.config import DEFAULT_PROXY_LANCEDB_TABLE
+            from cosa.agents.decision_proxy.config import DEFAULT_PROXY_DECISIONS_TABLE
 
-            import cosa.utils.util as cu
             from cosa.config.configuration_manager import ConfigurationManager
-            from cosa.rest.db.repositories.vector_store_backend import is_postgres_backend
 
             config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
-            table_name = config_mgr.get( "swe team trust proxy lancedb table", default=DEFAULT_PROXY_LANCEDB_TABLE )
-
-            # Ask the backend BEFORE building a path (decision 2b20a6d6). Under
-            # postgres the store routes to PredictionDecisionRepository and any
-            # db_path handed to it is ignored — so none is built.
-            if is_postgres_backend( config_mgr ):
-                db_path = None
-            else:
-                db_path = cu.get_project_root() + config_mgr.get( "solution snapshots lancedb path" )
+            table_name = config_mgr.get( "swe team trust proxy decisions table", default=DEFAULT_PROXY_DECISIONS_TABLE )
 
             self._embedding_store = ProxyDecisionEmbeddings(
-                db_path    = db_path,
                 table_name = table_name,
                 debug      = self.debug,
             )
