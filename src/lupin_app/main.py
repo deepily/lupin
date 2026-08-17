@@ -667,28 +667,6 @@ async def lifespan( app: FastAPI ):
     from cosa.rest.db.schema_drift import emit_startup_drift_alarm
     schema_drift_report = emit_startup_drift_alarm( debug=app_debug )
 
-    # Suppress LanceDB cosmetic warnings if configured
-    # These warnings are non-functional - queries execute correctly regardless
-    # Warnings occur when using .search() for metadata filtering (not vector similarity)
-    if config_mgr.get( "suppress lancedb warnings", default=True, return_type="boolean" ):
-        import logging
-        import warnings
-
-        # Suppress via warnings module (catches Rust layer warnings)
-        warnings.filterwarnings( "ignore", message=".*nprobes is not set.*" )
-        warnings.filterwarnings( "ignore", message=".*nearest has not been called.*" )
-
-        # Set LanceDB loggers to ERROR level only (suppress WARN, INFO, DEBUG)
-        logging.getLogger( "lance" ).setLevel( logging.ERROR )
-        logging.getLogger( "lance.dataset" ).setLevel( logging.ERROR )
-        logging.getLogger( "lance.dataset.scanner" ).setLevel( logging.ERROR )
-
-        if app_debug:
-            print( "✓ LanceDB warning suppression enabled (cosmetic warnings hidden)" )
-    else:
-        if app_debug:
-            print( "⚠ LanceDB warning suppression disabled (all warnings visible)" )
-
     # Initialize the ID generator singleton
     id_generator = TwoWordIdGenerator()
 
@@ -703,31 +681,43 @@ async def lifespan( app: FastAPI ):
         # manager routes to. Nothing compared them before, so this block built a LanceDB
         # path unconditionally and the manager silently ignored it under postgres.
         # `vector store backend` is the storage authority — ask it before building a path.
-        from cosa.rest.db.repositories.vector_store_backend import is_postgres_backend
+        # SEAM FREED 2026-08-17 (row 8098838f): the `is_postgres_backend()` call that
+        # used to guard this is gone, because there is one backend now. Measured before
+        # cutting: `vector store backend = postgres` is declared once in
+        # [Lupin: Baseline] and overridden by no section, so the flag returned True in
+        # Baseline / Development / Production / Testing / Testing-GCS alike — the
+        # LanceDB arm this replaces was unreachable in every environment. Behaviour is
+        # unchanged; the branch that could not run is simply not written down any more.
+        #
+        # This block stays for as long as [Lupin: Production] still says
+        # `manager type = lancedb` (lupin-app.ini:15). It builds the same
+        # table-name-only config the postgres branch below does, so prod keeps working
+        # while that key waits on Rick, and it goes when the key flips.
+        config = {
+            "table_name" : lancedb_table
+        }
 
-        if is_postgres_backend( config_mgr ):
-            config = {
-                "table_name" : lancedb_table
-            }
+        if app_debug:
+            print( "Using Postgres+pgvector solution snapshot storage (no LanceDB path built)" )
 
-            if app_debug:
-                print( "Using Postgres+pgvector solution snapshot storage (no LanceDB path built)" )
 
-        else:
-            lancedb_path = config_mgr.get( "solution snapshots lancedb path", default="/src/conf/long-term-memory/lupin.lancedb" )
+    elif manager_type.lower() == "postgres":
+        # The Postgres-native manager (row 5ff7b8f5, 2026-08-17). No storage location
+        # to build: the table is fixed by the ORM model and the connection comes from
+        # the DB layer, so the only key read here is the reporting-only table name.
+        #
+        # This branch is what makes `solution snapshots manager type = postgres` a
+        # legal value at STARTUP. Without it the else-arm below rejected every value
+        # but "lancedb", so flipping the dev key would have failed the server on its
+        # next bounce — latent, because reload is off and the running process still
+        # held the pre-flip config. Caught by Rachel during the removal sweep before
+        # it bit anyone; the unit suites never exercised this startup block.
+        config = {
+            "table_name" : config_mgr.get( "solution snapshots postgres table", default="solution_snapshots" )
+        }
 
-            # Convert relative path to absolute
-            if lancedb_path.startswith( "/" ):
-                lancedb_path = du.get_project_root() + lancedb_path
-
-            config = {
-                "db_path"    : lancedb_path,
-                "table_name" : lancedb_table
-            }
-
-            if app_debug:
-                print( f"Using LanceDB solution snapshot manager: {lancedb_path}" )
-
+        if app_debug:
+            print( "Using Postgres+pgvector solution snapshot manager (no LanceDB path built)" )
 
     else:
         # # Use file-based backend (default)
@@ -739,7 +729,10 @@ async def lifespan( app: FastAPI ):
         # if app_debug:
         #     print( f"Using file-based solution snapshot manager: {path_to_snapshots}" )
         # throw value error
-        raise ValueError( "As of v0.1.0, only lancedb solution snapshot type supported" )
+        raise ValueError(
+            f"Unsupported 'solution snapshots manager type' = {manager_type!r}; "
+            "supported values are 'postgres' and 'lancedb'"
+        )
     
     # Create manager using factory pattern for true swappability
     snapshot_mgr = SolutionSnapshotManagerFactory.create_manager(
