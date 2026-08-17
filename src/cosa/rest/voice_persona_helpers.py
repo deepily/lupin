@@ -24,6 +24,7 @@ See: src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md
 """
 
 import hashlib
+import json
 import os
 import random
 from datetime  import datetime, timezone
@@ -1010,10 +1011,28 @@ def parse_persona_chain( raw ) -> List[ str ]:
         "Mr. Radio, Tiberius , *"  → [ "Mr. Radio", "Tiberius", "*" ]
         [ "Rio", "Krishna" ]       → [ "Rio", "Krishna" ]
         "rio,Rio,*"                → [ "rio", "*" ]
+        '["arnold","krishna","*"]' → [ "arnold", "krishna", "*" ]   (JSON-array string, row e071e834)
         None / "" / ",,,"          → []
     """
     if isinstance( raw, str ):
-        items = raw.split( "," )
+        # DEFENSE-IN-DEPTH (row e071e834, fix part 1 — the single choke point).
+        # A caller that passes persona_preference as a JSON-ARRAY STRING (e.g.
+        # json.dumps(list) → '["arnold", "krishna", "*"]') would otherwise be
+        # comma-split into MANGLED elements ('["arnold"', '"krishna"', '"*"]'),
+        # silently killing the `*` wildcard — it becomes '"*"]' and never equals
+        # PERSONA_CHAIN_WILDCARD, so the whole chain reads exhausted and the server
+        # 409s (nameless seat). Tolerate that form here: if the string parses as a
+        # JSON list, treat it as the list input. Any parse failure falls through to
+        # the bare comma-split, which is the intended CSV form.
+        stripped_raw = raw.strip()
+        if stripped_raw.startswith( "[" ):
+            try:
+                decoded = json.loads( stripped_raw )
+            except ( ValueError, TypeError ):
+                decoded = None
+            items = [ item for item in decoded if isinstance( item, str ) ] if isinstance( decoded, list ) else raw.split( "," )
+        else:
+            items = raw.split( "," )
     elif isinstance( raw, list ):
         items = [ item for item in raw if isinstance( item, str ) ]
     else:

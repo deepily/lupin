@@ -492,6 +492,48 @@ class TestParsePersonaChain( unittest.TestCase ):
     def test_int_returns_empty( self ):
         self.assertEqual( parse_persona_chain( 42 ), [] )
 
+    # ── JSON-array-string tolerance (row e071e834, fix part 1) ────────────────
+    # A caller that passed persona_preference as json.dumps(list) sent the chain
+    # as a JSON-array STRING; the old comma-split mangled every element and killed
+    # the `*` wildcard (→ 409 → nameless seat). The parser now tolerates that form.
+    def test_json_array_string_with_wildcard_preserved( self ):
+        # THE bug shape: without the fix this split to ['["arnold"','"krishna"','"*"]']
+        # and the wildcard was lost. Now it round-trips.
+        self.assertEqual(
+            parse_persona_chain( '["arnold", "krishna", "*"]' ),
+            [ "arnold", "krishna", "*" ],
+        )
+        self.assertIn( PERSONA_CHAIN_WILDCARD, parse_persona_chain( '["arnold", "krishna", "*"]' ) )
+
+    def test_json_array_string_multi_named( self ):
+        self.assertEqual(
+            parse_persona_chain( '["Tiffany", "maya", "chloe", "*"]' ),
+            [ "Tiffany", "maya", "chloe", "*" ],
+        )
+
+    def test_json_array_string_single_element( self ):
+        self.assertEqual( parse_persona_chain( '["Tiberius"]' ), [ "Tiberius" ] )
+
+    def test_json_array_string_dedups_like_a_list( self ):
+        self.assertEqual( parse_persona_chain( '["Rio", "RIO", "rio"]' ), [ "Rio" ] )
+
+    def test_json_array_string_skips_non_string_items( self ):
+        self.assertEqual( parse_persona_chain( '["Rio", 42, null, "*"]' ), [ "Rio", "*" ] )
+
+    def test_bare_csv_still_works_after_json_tolerance( self ):
+        # The intended CSV form is unchanged — no regression.
+        self.assertEqual( parse_persona_chain( "arnold,krishna,*" ), [ "arnold", "krishna", "*" ] )
+
+    def test_malformed_bracket_string_falls_through_to_comma_split( self ):
+        # A string that starts with '[' but is NOT valid JSON falls through to the
+        # bare comma-split rather than raising or vanishing.
+        self.assertEqual( parse_persona_chain( "[not-valid-json" ), [ "[not-valid-json" ] )
+
+    def test_json_non_list_falls_through_to_comma_split( self ):
+        # Valid JSON that is NOT a list (e.g. an object) is not a chain; fall
+        # through to the comma-split of the raw string.
+        self.assertEqual( parse_persona_chain( '{"a": 1}' ), [ '{"a": 1}' ] )
+
 
 class TestResolveSessionStartPersonaChain( unittest.TestCase ):
     def test_spawn_chain_wins_over_everything( self ):
