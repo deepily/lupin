@@ -129,8 +129,8 @@ class TestPredictionVoteSteeringE2E:
         # NO db_path (decision 2b20a6d6). These are E2E tests: they seed here and then ask
         # the SERVER to predict, so the seed MUST land where the server reads. Under the
         # live `postgres` backend that is the PredictionDecisionRepository, and the
-        # LanceDB path this used to pass was never honored — it only made the call look
-        # isolated. `resolve_lancedb_path` now raises on it.
+        # store path this used to pass was never honored — it only made the call look
+        # isolated. No constructor accepts one now.
         #
         # Venue note: pytest runs inside the test container (LUPIN_ENV=testing), so both
         # this process and the server resolve to `lupin_db_test` — the dedicated test

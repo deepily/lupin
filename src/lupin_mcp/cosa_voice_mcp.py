@@ -2778,9 +2778,15 @@ def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str
     # memento on disk BEFORE kill — the flag was a no-op for 3 production failures.
     # partial (not a closure) so the wrapper stays fully covered even when the inner
     # dismiss_sessions is stubbed; coordinate_mementos has its own direct unit tests.
+    # NO project_root is passed (row 80b930e6). It used to be cu.get_project_root() —
+    # LUPIN_ROOT, which describes THIS HOST, not the seat being reaped — and the
+    # coordinator applied that single root to every seat in the batch, verifying each
+    # non-lupin seat against lupin's io/mementos/ and so against a DIFFERENT persona's
+    # live memento. Each seat's root now comes from its own bridge cwd; a seat whose
+    # repo cannot be determined is refused, never guessed at. The parameter was
+    # deleted rather than left unused, so there is no root here to fall back to.
     memento_coord = functools.partial(
         reap_memento.coordinate_mementos,
-        project_root      = cu.get_project_root(),
         write_memento     = wm,
         window_seconds    = cfg[ "reap_memento_window_seconds" ],
         min_bytes         = cfg[ "reap_memento_min_bytes" ],
@@ -2974,8 +2980,8 @@ def _commons_storage_root() -> str:
     Resolve the CommonsStore root path.
 
     `commons storage path` is interpreted as relative to LUPIN_ROOT (matches the
-    project's existing config convention — see `solution snapshots lancedb path`
-    pattern in lupin-app.ini). CommonsStore appends `io/commons` internally, so
+    project's existing config convention — see the `path to ... wo root` keys
+    in lupin-app.ini). CommonsStore appends `io/commons` internally, so
     we strip a leading `/io/commons` segment when the user has left the default
     in place; otherwise we pass through.
     """

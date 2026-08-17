@@ -495,23 +495,12 @@ def gcs_credentials_available():
         - Skip message includes clear remediation steps
 
     Usage:
-        Inject into GCS-dependent fixtures. NOTE the backend pin — without it the
-        ambient `vector store backend` is postgres and the manager ignores gcs_config
-        entirely, exercising the SHARED store instead of GCS (decision 2b20a6d6):
-
-        @pytest.fixture( scope="class", autouse=True )
-        def _pin_lancedb_backend():
-            from unittest.mock import patch
-            from cosa.rest.db.repositories import vector_store_backend
-            with patch.object( vector_store_backend, "get_vector_store_backend",
-                               return_value=vector_store_backend.LANCEDB ):
-                yield
+        Inject into GCS-dependent fixtures:
 
         @pytest.fixture
         def gcs_manager(gcs_credentials_available):
             # gcs_credentials_available validates before this runs
             manager = SolutionSnapshotManager( gcs_config )
-            assert manager._use_postgres is False, "backend pin failed"
             manager.initialize()  # Won't fail due to auth
             return manager
 

@@ -5,7 +5,7 @@ REWRITTEN 2026-08-17 by Pocholo 📣 (LanceDB total-removal sweep, Lane A, rows
 5ff7b8f5 / 8098838f). The LanceDB path is gone, and with it the ctor's
 connect/create/open/corruption branches, _create_table, _is_table_corrupted,
 _get_cached_by_verbatim / _get_cached_by_normalized and the caller-supplied
-db_uri (which resolve_lancedb_path already refused under postgres). The tests
+db_uri (which the store already refused under postgres). The tests
 that covered them were testing deleted code and were DELETED, not skipped.
 
 What remains is the Postgres path, which was already the only one running in

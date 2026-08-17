@@ -11,9 +11,9 @@ fact reading and writing the SHARED one, silently.
 
 HOW THE REMEDY CHANGED, AND WHY THIS FILE CHANGED WITH IT
 ---------------------------------------------------------
-The first remedy was a raise: `resolve_lancedb_path()` rejected a location that
-would not be honored, at the caller's own call site. That was the right fix while
-two backends existed and a constructor still had a location parameter to lie with.
+The first remedy was a raise: a resolver rejected a location that would not be
+honored, at the caller's own call site. That was the right fix while two backends
+existed and a constructor still had a location parameter to lie with.
 
 There is one backend now, and the constructors no longer take a location at all.
 So the guard moves up a level: instead of proving each class REFUSES a bad path,
@@ -21,6 +21,10 @@ it proves each class CANNOT BE OFFERED one. A signature that has no location
 parameter cannot be lied to, and no ordering of statements inside a constructor
 can reintroduce the defect. Checking the shape beats checking the behaviour,
 because the shape cannot regress quietly.
+
+The resolver itself, and the backend flag it read, were deleted with the second
+backend (row 8098838f). The behavioural tests that drove it went with them; the
+two structural classes below are the whole guard now.
 
 WHAT WOULD STILL BE SILENT
 --------------------------
@@ -45,19 +49,10 @@ import inspect
 import pytest
 from unittest.mock import patch
 
-from cosa.rest.db.repositories import vector_store_backend
-from cosa.rest.db.repositories.vector_store_backend import resolve_lancedb_path
-
 
 # --------------------------------------------------------------------------- #
 # Helpers                                                                      #
 # --------------------------------------------------------------------------- #
-
-def _pin( backend ):
-    """Pin the backend flag at its single definition site."""
-    return patch.object( vector_store_backend, "get_vector_store_backend",
-                         return_value=backend )
-
 
 # Every spelling a store location has ever gone by in this codebase. A new one
 # belongs here the day it is invented.
@@ -88,44 +83,6 @@ def _store_classes():
         ( "QueryLogTable",           QueryLogTable           ),
         ( "QuestionEmbeddingsTable", QuestionEmbeddingsTable ),
     ]
-
-
-# --------------------------------------------------------------------------- #
-# The seam itself                                                              #
-# --------------------------------------------------------------------------- #
-
-class TestResolveLancedbPath:
-    """The three behaviors resolve_lancedb_path owes its callers."""
-
-    def test_lancedb_passes_the_path_through_unchanged( self ):
-        """Under the on-disk backend the caller's path is honored, unchanged."""
-        with _pin( vector_store_backend.LANCEDB ):
-            assert resolve_lancedb_path( "/tmp/real.lancedb", "probe" ) == "/tmp/real.lancedb"
-            assert resolve_lancedb_path( None, "probe" ) is None
-
-    def test_postgres_with_no_path_returns_none( self ):
-        """Nothing was promised under postgres, so nothing is broken."""
-        with _pin( vector_store_backend.POSTGRES ):
-            assert resolve_lancedb_path( None, "probe" ) is None
-
-    def test_postgres_with_a_path_raises( self ):
-        """
-        The defect, made loud. A path that will not be honored must never be accepted.
-        """
-        with _pin( vector_store_backend.POSTGRES ):
-            with pytest.raises( ValueError ) as exc:
-                resolve_lancedb_path( "/tmp/ignored.lancedb", "MyStore" )
-
-        msg = str( exc.value )
-        assert "MyStore" in msg,                  "the message must name the offending caller"
-        assert "/tmp/ignored.lancedb" in msg,     "the message must show the ignored path"
-        assert "vector store backend" in msg,     "the message must name the config key to flip"
-
-    def test_gcs_uri_is_rejected_under_postgres_too( self ):
-        """A gs:// location is a location — postgres honors it no more than a local path."""
-        with _pin( vector_store_backend.POSTGRES ):
-            with pytest.raises( ValueError ):
-                resolve_lancedb_path( "gs://bucket/db.lancedb", "SnapshotStore" )
 
 
 # --------------------------------------------------------------------------- #

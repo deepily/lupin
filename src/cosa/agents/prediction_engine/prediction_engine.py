@@ -134,8 +134,8 @@ class PredictionEngine:
             self.hint_voting_enabled                = DEFAULT_HINT_VOTING_ENABLED
             self.hint_vote_min_confidence_threshold = DEFAULT_HINT_VOTE_MIN_CONFIDENCE_THRESHOLD
 
-        # Retained for backend-flag resolution in _get_embedding_store (decision
-        # 2b20a6d6). None is legitimate — is_postgres_backend() then builds its own.
+        # Retained for _get_embedding_store. None is legitimate — the store then
+        # resolves its own configuration.
         self._config_mgr = config_mgr
 
         # Initialize classifier
