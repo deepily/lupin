@@ -154,8 +154,22 @@ def find_test_file_population( project_root: Path ) -> Set[ str ]:
     """
     population = set()
     for path in ( project_root / "src" ).rglob( "test_*.py" ):
-        if any( part in EXCLUDED_PATH_PARTS for part in path.parts ): continue
-        population.add( path.relative_to( project_root ).as_posix() )
+        # Filter on the RELATIVE parts, not the absolute ones.
+        #
+        # `.claude` is an excluded part, and a git worktree lives at
+        # `<repo>/.claude/worktrees/<name>` — so every absolute path inside a
+        # worktree contains `.claude` and the census excluded ITSELF. Measured
+        # 2026-08-17: 1,319 test files from the main checkout, ZERO from a
+        # worktree. find_unreferenced_test_files then returns an empty list
+        # there, so the gate reports perfectly clean in exactly the place new
+        # work is written (bug 5e6e0680, found by Clayton 😎).
+        #
+        # The exclusions are about where a file sits WITHIN the project; asking
+        # that question of the absolute path lets the project's own location
+        # answer it.
+        relative = path.relative_to( project_root )
+        if any( part in EXCLUDED_PATH_PARTS for part in relative.parts ): continue
+        population.add( relative.as_posix() )
 
     return population
 
