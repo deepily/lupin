@@ -107,9 +107,40 @@ def backfill_provenance( header, records, printer=print ):
     return fixed
 
 
+def _percentile( sorted_values, fraction ):
+    """
+    Nearest-rank percentile, stated rather than assumed.
+
+    Requires:
+        - sorted_values is a non-empty ascending list
+        - fraction is in (0, 1]
+
+    Ensures:
+        - returns the value at ceil( fraction * n ), the nearest-rank definition — no
+          interpolation, so the number returned is one that was actually MEASURED
+        - on a small sample a high percentile collapses onto the maximum: with n=8 the
+          p99 IS the max, and saying so beats implying a tail resolution the sample
+          does not have
+
+    Raises:
+        - nothing
+    """
+    import math
+    rank = max( 1, math.ceil( fraction * len( sorted_values ) ) )
+    return round( sorted_values[ rank - 1 ], 3 )
+
+
 def latency_block( records ):
     """
     Per-arm wall-clock latency, over FIRED rows only, plus the between-arm ratio.
+
+    THIS IS A DEPLOYMENT COMPARISON, NOT A CLAIM ABOUT MODEL SPEED (Rick's ruling,
+    2026-08-17). What is being timed is two whole paths as they are actually wired: a
+    local vLLM on the LAN versus a hosted Vertex endpoint across the public internet.
+    A different deployment of either model — the same weights on other hardware, a
+    closer region, a warmed connection — moves these numbers without changing either
+    model. Nothing here says one model is faster than the other; it says one PATH
+    answered faster on this host, today.
 
     WHAT THE NUMBER CONTAINS, said before anyone quotes it: `elapsed_seconds` wraps the
     whole `_apply_dm_tutor` call — claim counting, the model call, the pointer restore
@@ -145,7 +176,8 @@ def latency_block( records ):
             "fired_rows" : len( secs ),
             "median_s"   : round( py_statistics.median( secs ), 3 ),
             "mean_s"     : round( py_statistics.fmean( secs ), 3 ),
-            "p90_s"      : round( secs[ min( len( secs ) - 1, int( 0.90 * len( secs ) ) ) ], 3 ),
+            "p90_s"      : _percentile( secs, 0.90 ),
+            "p99_s"      : _percentile( secs, 0.99 ),
             "min_s"      : round( secs[ 0 ], 3 ),
             "max_s"      : round( secs[ -1 ], 3 ),
             "total_s"    : round( sum( secs ), 1 ),
@@ -230,8 +262,10 @@ def main( argv=None, printer=print ):
                  f"median words {stats[ 'median_words_out' ]} | median {stats[ 'median_seconds' ]}s | total {stats[ 'total_seconds' ]}s" )
 
     printer( "" )
-    printer( "latency — FIRED rows only; wall clock around the whole _apply_dm_tutor call, one host," )
-    printer( "arms run sequentially, phi_4 over the LAN and flash_lite over the public internet:" )
+    printer( "latency — a DEPLOYMENT comparison, NOT a claim about model speed (Rick, 2026-08-17)." )
+    printer( "FIRED rows only; wall clock around the whole _apply_dm_tutor call; one host, arms run" )
+    printer( "sequentially; phi_4 to a LAN vLLM, flash_lite across the public internet to Vertex." )
+    printer( "Percentiles are nearest-rank, so on a small sample p99 collapses onto the maximum:" )
     for name, stats in latency_block( records ).items():
         printer( f"  {name:12} {stats}" )
 
