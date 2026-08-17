@@ -97,6 +97,10 @@ def build_statements( rows ):
             f"DROP TABLE IF EXISTS {target}",
             # LIKE copies the column types (including vector(768)) but no data.
             f"CREATE TABLE {target} (LIKE public.{table} INCLUDING DEFAULTS)",
+            # LIKE does NOT copy the primary key, so per-row UPDATE by id in the
+            # regeneration run would seq-scan the clone (O(N²)) — the artifact
+            # behind the withdrawn throughput figure. Restore the id PK.
+            f"ALTER TABLE {target} ADD PRIMARY KEY (id)",
         ]
         # The only reads of the live table, and they are SELECTs.
         statements += [
