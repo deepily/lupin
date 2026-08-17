@@ -616,3 +616,111 @@ def test_parse_own_pressure_section_not_a_dict_is_unknown_none():
     # the fetch-failure path feeds {} (or a stray non-dict) — must be unknown, never over_budget
     assert sr.parse_own_pressure( {}, "cheech" ) == ( "unknown", None )
     assert sr.parse_own_pressure( None, "cheech" ) == ( "unknown", None )
+
+
+# ---------------------------------------------------------------------------
+# The confirmation wording — THIRD PERSON, naming the persona
+# ---------------------------------------------------------------------------
+
+def test_confirmation_text_names_the_persona_in_third_person():
+    """
+    The ask lands on a SHARED voice surface. Second person ("You are at your context
+    ceiling") reads as if the HUMAN is at a ceiling and does not say which seat is
+    asking — the one thing the human needs to know to answer.
+    """
+    question, abstract = sr.confirmation_text( "Mr. Radio" )
+
+    assert question.startswith( "Mr. Radio is at their context ceiling" )
+    assert "Re-spin Mr. Radio now?" in question
+    assert "Mr. Radio" in abstract
+
+    for second_person in ( "You are", "your context", "I will", "my memento", "my own pane" ):
+        assert second_person not in question, f"second-person phrasing in the question: {second_person!r}"
+        assert second_person not in abstract, f"second-person phrasing in the abstract: {second_person!r}"
+
+
+def test_confirmation_text_uses_they_them():
+    """A persona name does not tell us anyone's pronouns, and this is read aloud."""
+    question, abstract = sr.confirmation_text( "María" )
+    assert "their context ceiling" in question
+    assert "their memento" in abstract and "their own pane" in abstract
+    for gendered in ( " his ", " her ", " he ", " she " ):
+        assert gendered not in f" {question} {abstract} "
+
+
+def test_confirmation_text_degrades_rather_than_saying_unknown():
+    """"unknown is at their context ceiling" reads worse than not naming anyone."""
+    for unresolved in ( None, "", "   ", "unknown", "UNKNOWN" ):
+        question, abstract = sr.confirmation_text( unresolved )
+        assert question.startswith( f"{sr.UNNAMED_SEAT} is at their context ceiling" )
+        assert "unknown" not in question.lower()
+        assert "unknown" not in abstract.lower()
+
+
+def test_confirmation_text_keeps_the_default_yes_notice_in_the_abstract():
+    """The offline default is the human's safety net; it must stay visible."""
+    _, abstract = sr.confirmation_text( "Clayton" )
+    assert "Defaults to YES if you are away." in abstract
+
+
+def test_the_default_ask_receives_the_persona( tmp_path, monkeypatch ):
+    """
+    The seam stays zero-arg so the sixteen injected doubles keep working; the persona
+    must still reach the default ask, which is the whole point of the change.
+    """
+    seen = {}
+    monkeypatch.setattr( sr, "_default_ask",
+                         lambda persona: seen.setdefault( "persona", persona ) or "no" )
+
+    mp = _write_memento( tmp_path, "u1", _dt( 20 ) )
+    r  = sr.perform_self_respin(
+        "sid1", persona="Tiberius", memento_path=mp, memento_nonce="u1",
+        pre_clear_status="over_budget", pre_clear_pct=61.0,
+        now=_dt( 21 ), resolve_tmux_fn=_seat(), base_dir=str( tmp_path ),
+    )
+
+    assert seen[ "persona" ] == "Tiberius"      # ...and NOT a zero-arg call
+    assert r.status == "declined"
+
+
+# ---------------------------------------------------------------------------
+# Every argument the ask is fired with — pinned, not changed
+# ---------------------------------------------------------------------------
+
+def test_confirmation_kwargs_pins_every_argument_the_ask_is_fired_with():
+    """
+    `_default_ask` is pragma-no-cover, so anything left inside it is the part of
+    this feature nothing can test. These are pinned as they stand — NOT changed.
+    """
+    kwargs = sr.confirmation_kwargs( "Mr. Radio" )
+
+    assert set( kwargs ) == { "question", "default", "timeout_seconds",
+                              "priority", "abstract", "human_only" }
+    assert kwargs[ "default" ]         == "yes"      # the OFFLINE SAFETY NET
+    assert kwargs[ "human_only" ]      is True       # row 804afce6 — no proxy veto
+    assert kwargs[ "timeout_seconds" ] == 120
+    assert kwargs[ "priority" ]        == "high"
+
+
+def test_confirmation_kwargs_default_yes_is_the_offline_safety_net():
+    """A seat at its ceiling with the human away must still re-spin; "no" strands it."""
+    assert sr.confirmation_kwargs( "anyone" )[ "default" ] == "yes"
+
+
+def test_confirmation_kwargs_human_only_blocks_the_auto_answer_proxy():
+    """Row 804afce6: only a real human "no" (or the offline default) may decide."""
+    assert sr.confirmation_kwargs( "anyone" )[ "human_only" ] is True
+
+
+def test_confirmation_kwargs_takes_its_wording_from_confirmation_text():
+    """One definition of the words, not two that drift."""
+    question, abstract = sr.confirmation_text( "María" )
+    kwargs             = sr.confirmation_kwargs( "María" )
+
+    assert kwargs[ "question" ] == question
+    assert kwargs[ "abstract" ] == abstract
+
+
+def test_confirmation_kwargs_degrades_the_persona_like_the_text_does():
+    kwargs = sr.confirmation_kwargs( "unknown" )
+    assert kwargs[ "question" ].startswith( f"{sr.UNNAMED_SEAT} is at their context ceiling" )

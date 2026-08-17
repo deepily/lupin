@@ -405,7 +405,10 @@ def perform_self_respin(
     now             = now             if now             is not None else datetime.datetime.now( datetime.timezone.utc )
     resolve_tmux_fn = resolve_tmux_fn if resolve_tmux_fn is not None else _default_resolve_tmux
     resolve_bridge_path_fn = resolve_bridge_path_fn if resolve_bridge_path_fn is not None else _default_resolve_bridge_path
-    ask_fn          = ask_fn          if ask_fn          is not None else _default_ask
+    # The seam stays ZERO-ARG — sixteen injected doubles are `lambda: "yes"`, and
+    # widening the seam to carry the persona would break every one of them. The
+    # persona rides in on a closure instead, so only the default path changes.
+    ask_fn          = ask_fn          if ask_fn          is not None else ( lambda: _default_ask( persona ) )
     schedule_fn     = schedule_fn     if schedule_fn     is not None else _default_schedule
     read_text_fn    = read_text_fn    if read_text_fn    is not None else _default_read_text
     write_json_fn   = write_json_fn   if write_json_fn   is not None else _write_json_atomic
@@ -660,24 +663,97 @@ def _live_own_pressure( persona ):   # pragma: no cover - live :8001 httpx fetch
     return parse_own_pressure( section, persona )
 
 
-def _default_ask():   # pragma: no cover - live MCP ask boundary (tests inject ask_fn)
+UNNAMED_SEAT = "This seat"
+
+
+def confirmation_text( persona ):
     """
-    Fire the confirmation ask on the human surface, default=yes, and return the
-    raw ask_yes_no string. Imported lazily so this module never pulls the MCP
-    server in at import time.
+    The words the human hears when a seat asks to re-spin itself — THIRD PERSON,
+    naming the persona.
+
+    ⚠️ WHY NOT SECOND PERSON. This ask lands on a SHARED voice surface that several
+    sessions speak into. "You are at your context ceiling" reads as if the HUMAN is
+    at a ceiling, and in chorus mode it does not say which of the running seats is
+    asking — so the one question the human must answer ("who am I clearing?") is the
+    one the wording withholds. Naming the persona answers it in the first three words.
+
+    Pronouns: they/them. A persona name does not tell us anyone's pronouns, and this
+    string is read aloud.
+
+    Requires:
+        - persona is the seat's persona name, or None/blank/"unknown" when unresolved
+
+    Ensures:
+        - returns ( question, abstract ), both naming the persona
+        - degrades to UNNAMED_SEAT rather than saying "unknown is at their ceiling",
+          which reads worse than not naming anyone
+        - the question is one short line; the detail lives in the abstract
+
+    Raises:
+        - nothing
+    """
+    name = ( persona or "" ).strip()
+    if not name or name.lower() == "unknown": name = UNNAMED_SEAT
+
+    question = f"{name} is at their context ceiling. Re-spin {name} now?"
+    abstract = (
+        f"Self-re-spin for {name}: {name} will write their memento, verify it on disk, and type "
+        f"/clear into their own pane, rehydrating as the same seat at low context. "
+        f"Defaults to YES if you are away."
+    )
+    return question, abstract
+
+
+def confirmation_kwargs( persona ):
+    """
+    EVERY argument the confirmation ask is fired with — pure, so all of it is pinnable.
+
+    ⚠️ WHY THIS IS SEPARATE FROM `_default_ask`. That function is
+    `# pragma: no cover`, because it is a live MCP boundary. Anything left inside it
+    is, by construction, the part of this feature no test can see — and three of
+    these values are behaviour, not decoration:
+
+      · `default="yes"` — the OFFLINE SAFETY NET. A seat at its ceiling with the
+        human away must still re-spin; flipping this to "no" would strand it silently.
+      · `human_only=True` — LOAD-BEARING (row 804afce6). The auto-answer proxy must
+        NOT veto a manager's own re-spin; only a real human "no", or the offline
+        default-yes, decides. Drop this and a proxy can quietly block every re-spin
+        in the fleet.
+      · `timeout_seconds=120` — how long "away" takes to mean away.
+
+    None of the values change here; they are lifted verbatim so they can be pinned.
+
+    Requires:
+        - persona is the seat's persona name, or None/blank/"unknown"
+
+    Ensures:
+        - returns the complete kwargs dict for `ask_yes_no.fn`
+        - question and abstract come from `confirmation_text`, so the wording has
+          exactly one definition
+
+    Raises:
+        - nothing
+    """
+    question, abstract = confirmation_text( persona )
+    return {
+        "question"        : question,
+        "default"         : "yes",
+        "timeout_seconds" : 120,
+        "priority"        : "high",
+        "abstract"        : abstract,
+        "human_only"      : True,
+    }
+
+
+def _default_ask( persona ):   # pragma: no cover - live MCP ask boundary (tests inject ask_fn)
+    """
+    Fire the confirmation ask on the human surface and return the raw ask_yes_no
+    string. Imported lazily so this module never pulls the MCP server in at import
+    time. Everything decidable — the wording AND every argument — comes from the
+    pure functions above, so this boundary carries no untested behaviour of its own.
     """
     from lupin_mcp.cosa_voice_mcp import ask_yes_no, DEFAULT_USED_MARKER as _M   # noqa: F401
-    return ask_yes_no.fn(
-        question="You are at your context ceiling. Self-re-spin (clear + rehydrate) now?",
-        default="yes",
-        timeout_seconds=120,
-        priority="high",
-        abstract="Manager self-re-spin: I will write my memento, verify it on disk, and type /clear into my "
-                 "own pane, rehydrating as the same seat at low context. Defaults to YES if you are away.",
-        # human_only: the auto-answer proxy must NOT veto a manager's own re-spin.
-        # Only a real human "no" (or the offline default=yes) decides (row 804afce6).
-        human_only=True,
-    )
+    return ask_yes_no.fn( **confirmation_kwargs( persona ) )
 
 
 # The observer's marker + wake-proof names — imported by name so the two files agree
