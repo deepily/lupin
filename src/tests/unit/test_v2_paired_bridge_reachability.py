@@ -162,6 +162,11 @@ def test_bridge_reaches_and_fires_v2_clean_step():
     from sqlalchemy.sql.elements import TextClause
     assert isinstance( truncate_stmt, TextClause ), f"TRUNCATE must be a text() clause, got {type( truncate_stmt )}"
     assert str( truncate_stmt ) == "TRUNCATE TABLE solution_snapshots"
+    # The TRUNCATE must be COMMITTED — SQLAlchemy 2.x is commit-as-you-go, so without an explicit
+    # commit the truncate rolls back on close and the live store stays dirty (the VALIDITY guard
+    # then refuses the run). A MagicMock swallows the omission; asserting commit here is the control
+    # that goes RED on the pre-fix no-commit code.
+    fake_conn.commit.assert_called_once()
     fake_conn.close.assert_called_once()
 
 

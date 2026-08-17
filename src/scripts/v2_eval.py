@@ -690,6 +690,7 @@ def clean_v2_snapshot_store( connection: Any, config_mgr: Any ) -> str:
     target = require_config_table_matches_write_target( config_mgr )   # raises on config drift
     assert_measurement_db( str( connection.engine.url ) )              # raises on a wrong db
     connection.execute( text( f"TRUNCATE TABLE {target}" ) )           # identifier = resolved __tablename__
+    connection.commit()   # SQLAlchemy 2.x is commit-as-you-go: without this the TRUNCATE rolls back on close (the store stays dirty)
     return target
 
 
