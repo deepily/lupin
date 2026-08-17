@@ -246,7 +246,28 @@ services:
   # local single-VM GPU-container variant.)
 
 volumes:
-  cloudsql-socket:                          # shared Auth-Proxy ↔ app unix-socket dir
+  # shared Auth-Proxy ↔ app unix-socket dir — tmpfs ON PURPOSE.
+  #
+  # A unix socket is a rendezvous point for two LIVE processes. It has no business
+  # outliving them, and when it does it is not a socket any more — it is a file that
+  # makes the next proxy fail to bind and the next app connect to nothing.
+  #
+  # Confirmed on lupin-host-test 2026-08-17: lupin-cloudsql-proxy crash-looping on
+  # `bind: address already in use`, while lupin-cloudsql-socket-init — the container
+  # written to clear exactly this — read `Exited (0) 13 days ago`. It is restart:"no",
+  # and Docker's restart policy IGNORES depends_on, so on every reboot/resume the two
+  # unless-stopped containers came back WITHOUT it. The app then hit a socket with no
+  # listener: `Connection refused`, `Application startup failed. Exiting.` (bug
+  # cd101a7e, and the recurrence of 300bc7ca that the init container did not stop.)
+  #
+  # tmpfs makes the directory die with the host, so there is nothing left to go stale.
+  # The init container stays as belt-and-braces for the `compose up` path; this is the
+  # braces, and it is the half that works on the path that actually broke.
+  cloudsql-socket:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
   claude-creds:                             # CC OAuth login store for lupin-rest
 
 networks:

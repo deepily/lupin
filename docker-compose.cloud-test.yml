@@ -200,7 +200,18 @@ services:
       - lupin-cloud-network
 
 volumes:
-  cloudsql-socket:                          # shared Auth-Proxy ↔ app unix-socket dir
+  # shared Auth-Proxy ↔ app unix-socket dir — tmpfs ON PURPOSE. See the long note in
+  # docker-compose.cloud-gpu.yml: a durable socket directory lets a stale socket
+  # survive a reboot, the proxy then crash-loops on `bind: address already in use`,
+  # and the app connects to a listener-less socket. The cloudsql-socket-init container
+  # that clears it is restart:"no", and Docker's restart policy ignores depends_on, so
+  # it does not run on the reboot path. Confirmed live on cloud-gpu 2026-08-17 (bug
+  # cd101a7e). This leg carries the IDENTICAL pattern and is fixed here pre-emptively.
+  cloudsql-socket:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
   claude-creds:                             # CC OAuth login store for lupin-rest (/home/rruiz/.claude) — manual `claude /login`, persistent + auto-refresh
 
 networks:
