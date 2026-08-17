@@ -53,6 +53,7 @@ the refusing scaffold for a finished run):
 Design: src/rnd/v0.2.0/2026.08.14-v2-paired-go-no-go-harness-design.md (§4, §6, §9).
 """
 
+import json
 import os
 import sys
 
@@ -249,6 +250,30 @@ def _run_v2_arm( *, corpus, seed, n_per_command, base_url ):   # pragma: no cove
     return { "metrics": result[ "warm" ], "provenance": result[ "provenance" ] }
 
 
+def _dump_paired_artifacts( v1_artifact, v2_artifact ):   # pragma: no cover - best-effort disk insurance
+    """
+    Persist BOTH arm artifacts to disk BEFORE the verdict step (row d8d019f6).
+
+    The lesson from ts-217961e6: a KeyError in the verdict step destroyed ~2.5h of recoverable v1
+    data (the v1 arm returns only in-memory; only the v2 arm self-persisted). Writing both here makes
+    the median-Δ recomputable offline via `paired_eval.build_paired_verdict(v1, v2)` — so a downstream
+    bug costs seconds, not hours. Best-effort: never let a dump failure mask the real run outcome.
+
+    Ensures:
+        - writes io/v2-flow/paired-run-latest/{v1,v2}-arm-artifact.json (overwrite = always the newest).
+        - swallows any I/O error (the run's verdict is the product; this is only insurance).
+    """
+    try:
+        import cosa.utils.util as cu
+        out_dir = os.path.join( cu.get_project_root(), "io", "v2-flow", "paired-run-latest" )
+        os.makedirs( out_dir, exist_ok=True )
+        for name, art in ( ( "v1", v1_artifact ), ( "v2", v2_artifact ) ):
+            with open( os.path.join( out_dir, f"{name}-arm-artifact.json" ), "w" ) as fh:
+                json.dump( art, fh, indent=2, default=str )
+    except Exception as e:                                 # insurance must never mask the run outcome
+        print( f"[paired] artifact-dump insurance failed (non-fatal): {e}" )
+
+
 @pytest.mark.paired_eval_live
 @pytest.mark.integration
 def test_v2_paired_go_no_go_live():
@@ -324,10 +349,19 @@ def test_v2_paired_go_no_go_live():
     v2_artifact = _run_v2_arm( corpus=corpus_name, seed=seed, n_per_command=n_per_command,
                                base_url=v2_base_url )
 
+    # INSURANCE (row d8d019f6): persist BOTH arm artifacts to disk BEFORE any downstream assertion,
+    # so a bug past this point never costs another ~2.5h re-run — the median-Δ can be recomputed
+    # offline via `paired_eval.build_paired_verdict(<v1>, <v2>)`. The v2 arm already writes its own
+    # artifact; the v1 arm returns only in-memory, so its data was previously lost on any late failure.
+    _dump_paired_artifacts( v1_artifact, v2_artifact )
+
     # d. The provenance-gated verdict. build_paired_verdict runs paired_provenance_check FIRST —
     #    binding both arms to the SAME corpus/seed/sample by SIGNATURE, not a shape-only compare —
     #    and only then fires the median-Δ gate. Both arms must have produced usable records.
-    assert v1_artifact[ "metrics" ][ "n_ok" ] > 0, "paired run: v1 arm produced 0 usable records"
+    #    KEY ASYMMETRY (row d8d019f6): v1's compute_v1_metrics emits "ok_n", v2's compute_metrics
+    #    emits "n_ok" — checking "n_ok" on BOTH KeyErrors on the v1 arm one line before the verdict
+    #    (the canned unit artifact used n_ok for both arms, masking it). Use each arm's own key.
+    assert v1_artifact[ "metrics" ][ "ok_n" ] > 0, "paired run: v1 arm produced 0 usable records"
     assert v2_artifact[ "metrics" ][ "n_ok" ] > 0, "paired run: v2 arm produced 0 usable records"
     verdict = paired_eval.build_paired_verdict( v1_artifact, v2_artifact )
     assert verdict[ "provenance_ok" ], (

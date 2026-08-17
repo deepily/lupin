@@ -44,8 +44,13 @@ def _canned_artifact( arm, *, spans, pairs=_PAIRS ):
     """A mocked arm {metrics, provenance} artifact — a REAL provenance stamp (so the paired
     provenance check runs for real, not a fake pass) over `pairs`, plus per-utterance client spans."""
     import paired_eval
+    # KEY ASYMMETRY (row d8d019f6): the REAL metrics dicts name the usable-record count differently
+    # per arm — v1 compute_v1_metrics -> "ok_n", v2 compute_metrics -> "n_ok". The canned artifact
+    # MUST mirror that, else it masks the very KeyError the live run hit (the old canned used "n_ok"
+    # for both arms, so the bridge's wrong v1 key passed in unit but KeyError'd live).
+    count_key = "ok_n" if arm == "v1" else "n_ok"
     return {
-        "metrics"    : { "n_ok": len( spans ), "spans_by_utterance": dict( spans ) },
+        "metrics"    : { count_key: len( spans ), "spans_by_utterance": dict( spans ) },
         "provenance" : paired_eval.make_provenance( arm, "simple", 1024, 60, pairs ),
     }
 
