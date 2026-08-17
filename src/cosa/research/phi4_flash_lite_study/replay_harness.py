@@ -412,7 +412,7 @@ def _median( sorted_values ):
 
 def replay_arm( rows, arm, tutor_fn=None, rewrite_fn=None, config=None,
                 max_model_failed_rate=None, preflight=25, on_row=None,
-                verify_surface=True ):
+                verify_surface=True, snapshot_sha256=None ):
     """
     Run every frozen body through one arm, recording each `meta` verbatim.
 
@@ -467,6 +467,9 @@ def replay_arm( rows, arm, tutor_fn=None, rewrite_fn=None, config=None,
             # row_index is the position in the replayed list; on a seeded subset the
             # two differ, and only this one traces back to the snapshot.
             "frozen_index"   : row.get( "frozen_index", index ),
+            # Which freeze these indices index into. Matching frozen indices across
+            # two DIFFERENT snapshots is not a pairing; pair_records refuses that.
+            "snapshot_sha256": snapshot_sha256,
             "arm"            : arm,
             "spec_key"       : ARM_SPEC_KEYS[ arm ],
             "ts"             : row.get( "ts" ),
@@ -535,32 +538,68 @@ def draw_seeded_subset( rows, sample_size, seed ):
 
 def pair_records( arm_a_records, arm_b_records ):
     """
-    Join the two arms on row index so every comparison is within one body.
+    Join the two arms on FROZEN INDEX so every comparison is within one body.
+
+    ⚠️ WHY NOT `row_index`. `row_index` is the position in the DRAW. Two different
+    draws of the same size both produce 0..N-1, so joining on it makes the guard
+    below pass while the function pairs DIFFERENT BODIES — the arms would look
+    perfectly paired and every McNemar cell would compare two populations. That is
+    the exact failure the freeze exists to prevent, and it is reachable without
+    anyone doing anything odd: `--arm` runs one arm at a time, `--seed` has a
+    default, and a re-freeze between two invocations changes the population.
+    `frozen_index` indexes the SNAPSHOT, so it is the only key that means "the same
+    body". (Tiffany 💍 found this by running it, not reading it.)
+
+    ⚠️ THE SNAPSHOT CHECK IS THE OTHER HALF. Matching frozen indices across two
+    DIFFERENT snapshots is still not a pairing — index 25 of one freeze is not
+    index 25 of another. Each record carries the snapshot's sha256, and a mismatch
+    is refused. The old docstring asked for "both lists came from the SAME frozen
+    snapshot" as a precondition nothing checked; now it is enforced.
 
     Requires:
-        - both lists came from the SAME frozen snapshot
+        - both lists came from `replay_arm`, so every record carries frozen_index
+          and snapshot_sha256
 
     Ensures:
-        - returns a list of { row_index, body, <arm_a>, <arm_b> } dicts
-        - RAISES rather than silently truncating when the two arms disagree about
-          which rows they saw — unpaired arms are the failure the freeze exists to
-          prevent, and a zip() would hide it
+        - returns a list of { row_index, frozen_index, body, <arm_a>, <arm_b> } dicts
+        - RAISES rather than silently truncating when the arms disagree about which
+          rows they saw, or about which snapshot those rows came from — a zip()
+          would hide both
 
     Raises:
-        - ValueError when the arms' row indices do not match exactly
+        - ValueError when the arms' frozen indices differ, or when the two arms
+          were replayed against different snapshots
     """
-    a_index = [ r[ "row_index" ] for r in arm_a_records ]
-    b_index = [ r[ "row_index" ] for r in arm_b_records ]
+    a_snapshot = { r[ "snapshot_sha256" ] for r in arm_a_records }
+    b_snapshot = { r[ "snapshot_sha256" ] for r in arm_b_records }
+    if a_snapshot != b_snapshot:
+        raise ValueError(
+            f"the two arms were replayed against different frozen snapshots "
+            f"({sorted( a_snapshot )} vs {sorted( b_snapshot )}). Row 25 of one freeze is not "
+            f"row 25 of another, so matching indices would not mean matching bodies."
+        )
+
+    a_index = [ r[ "frozen_index" ] for r in arm_a_records ]
+    b_index = [ r[ "frozen_index" ] for r in arm_b_records ]
     if a_index != b_index:
         raise ValueError(
-            f"the two arms did not see the same rows: {len( a_index )} vs {len( b_index )} records. "
-            f"They are not paired, so no per-body comparison is valid."
+            f"the two arms did not see the same rows: {len( a_index )} vs {len( b_index )} records, "
+            f"frozen indices differ. They are not paired, so no per-body comparison is valid."
         )
 
     paired = []
     for rec_a, rec_b in zip( arm_a_records, arm_b_records ):
+        # Belt to the index check's braces: the indices agreeing is the argument that
+        # the bodies agree, so assert the conclusion rather than trusting the premise.
+        if rec_a[ "body" ] != rec_b[ "body" ]:
+            raise ValueError(
+                f"frozen index {rec_a[ 'frozen_index' ]} holds different bodies in the two arms. "
+                f"The join key agreed and the content did not, which means the records did not "
+                f"come from the snapshot they claim."
+            )
         paired.append( {
             "row_index"          : rec_a[ "row_index" ],
+            "frozen_index"       : rec_a[ "frozen_index" ],
             "body"               : rec_a[ "body" ],
             rec_a[ "arm" ]       : rec_a,
             rec_b[ "arm" ]       : rec_b,
@@ -664,7 +703,8 @@ def main( argv=None, printer=print, runner=None ):
     for arm in arms:
         printer( f"[replay] arm '{arm}' -> {ARM_SPEC_KEYS[ arm ]}" )
         results[ arm ] = run(
-            rows, arm, max_model_failed_rate=args.max_model_failed_rate, preflight=args.preflight
+            rows, arm, max_model_failed_rate=args.max_model_failed_rate, preflight=args.preflight,
+            snapshot_sha256=manifest[ "snapshot_sha256" ]
         )
 
     with open( args.out, "w", encoding="utf-8" ) as handle:

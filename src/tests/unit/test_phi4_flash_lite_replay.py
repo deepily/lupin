@@ -305,6 +305,85 @@ def test_pair_records_joins_on_row_index():
     assert paired[ 0 ][ RH.ARM_FLASH_LITE ][ "meta" ][ "tutor_outcome" ] == "fabrication_blocked"
 
 
+def test_pair_records_refuses_two_different_draws_of_the_same_size():
+    """
+    THE finding. Two draws of the same size both produce row_index 0..N-1, so a join
+    on row_index passes its own guard while pairing DIFFERENT BODIES — arms that look
+    perfectly paired, and McNemar cells built from two populations. Reachable without
+    anything odd: --arm runs one arm at a time and --seed has a default.
+    """
+    rows      = _many_rows( 800 )
+    draw_a, _ = RH.draw_seeded_subset( rows, 5, 42 )
+    draw_b, _ = RH.draw_seeded_subset( rows, 5, 43 )
+    assert [ r[ "frozen_index" ] for r in draw_a ] != [ r[ "frozen_index" ] for r in draw_b ]
+
+    a = RH.replay_arm( draw_a, RH.ARM_PHI4, tutor_fn=_tutor_returning( [ "rewritten" ] * 5 ),
+                       rewrite_fn=lambda b: "x", max_model_failed_rate=0.5, snapshot_sha256="abc" )
+    b = RH.replay_arm( draw_b, RH.ARM_FLASH_LITE, tutor_fn=_tutor_returning( [ "rewritten" ] * 5 ),
+                       rewrite_fn=lambda b: "x", max_model_failed_rate=0.5, snapshot_sha256="abc" )
+
+    assert [ r[ "row_index" ] for r in a ] == [ r[ "row_index" ] for r in b ], \
+        "the row_index lists are identical — which is exactly why joining on them was wrong"
+
+    with pytest.raises( ValueError ) as excinfo:
+        RH.pair_records( a, b )
+    assert "frozen indices differ" in str( excinfo.value )
+
+
+def test_pair_records_refuses_two_different_snapshots():
+    """
+    Matching frozen indices across two DIFFERENT freezes is still not a pairing —
+    index 25 of one snapshot is not index 25 of another. The old docstring asked for
+    this as a precondition nothing checked.
+    """
+    rows   = _many_rows( 100 )
+    draw, _ = RH.draw_seeded_subset( rows, 4, 11 )
+
+    a = RH.replay_arm( draw, RH.ARM_PHI4, tutor_fn=_tutor_returning( [ "rewritten" ] * 4 ),
+                       rewrite_fn=lambda b: "x", max_model_failed_rate=0.5, snapshot_sha256="freeze-one" )
+    b = RH.replay_arm( draw, RH.ARM_FLASH_LITE, tutor_fn=_tutor_returning( [ "rewritten" ] * 4 ),
+                       rewrite_fn=lambda b: "x", max_model_failed_rate=0.5, snapshot_sha256="freeze-two" )
+
+    with pytest.raises( ValueError ) as excinfo:
+        RH.pair_records( a, b )
+    assert "different frozen snapshots" in str( excinfo.value )
+
+
+def test_pair_records_refuses_when_the_key_agrees_but_the_body_does_not():
+    """
+    Belt to the index check's braces. If the indices agree and the bodies do not, the
+    records did not come from the snapshot they claim — assert the conclusion, not
+    just the premise.
+    """
+    rows    = _many_rows( 20 )
+    draw, _ = RH.draw_seeded_subset( rows, 3, 3 )
+
+    a = RH.replay_arm( draw, RH.ARM_PHI4, tutor_fn=_tutor_returning( [ "rewritten" ] * 3 ),
+                       rewrite_fn=lambda b: "x", max_model_failed_rate=0.5, snapshot_sha256="s" )
+    b = RH.replay_arm( draw, RH.ARM_FLASH_LITE, tutor_fn=_tutor_returning( [ "rewritten" ] * 3 ),
+                       rewrite_fn=lambda b: "x", max_model_failed_rate=0.5, snapshot_sha256="s" )
+    b[ 1 ][ "body" ] = "a body from somewhere else"
+
+    with pytest.raises( ValueError ) as excinfo:
+        RH.pair_records( a, b )
+    assert "different bodies" in str( excinfo.value )
+
+
+def test_pair_records_joins_a_sampled_run_on_the_frozen_index():
+    """The happy path after the fix: same draw, paired on the snapshot's own index."""
+    rows    = _many_rows( 500 )
+    draw, drawn = RH.draw_seeded_subset( rows, 6, 20260817 )
+
+    a = RH.replay_arm( draw, RH.ARM_PHI4, tutor_fn=_tutor_returning( [ "rewritten" ] * 6 ),
+                       rewrite_fn=lambda b: "x", max_model_failed_rate=0.5, snapshot_sha256="s" )
+    b = RH.replay_arm( draw, RH.ARM_FLASH_LITE, tutor_fn=_tutor_returning( [ "fabrication_blocked" ] * 6 ),
+                       rewrite_fn=lambda b: "x", max_model_failed_rate=0.5, snapshot_sha256="s" )
+
+    paired = RH.pair_records( a, b )
+    assert [ p[ "frozen_index" ] for p in paired ] == drawn
+    assert all( p[ "body" ] == rows[ p[ "frozen_index" ] ][ "body" ] for p in paired )
+
+
 def test_pair_records_refuses_mismatched_arms():
     """A zip() would truncate silently; unpaired arms invalidate every comparison."""
     a = RH.replay_arm( _rows( 3 ), RH.ARM_PHI4, tutor_fn=_tutor_returning( [ "rewritten" ] * 3 ),
@@ -605,10 +684,10 @@ def test_verify_surface_can_be_disabled_for_hermetic_replays( monkeypatch ):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _fake_runner( outcomes_by_arm ):
-    def run( rows, arm, max_model_failed_rate=None, preflight=25 ):
+    def run( rows, arm, max_model_failed_rate=None, preflight=25, snapshot_sha256=None ):
         return RH.replay_arm( rows, arm, tutor_fn=_tutor_returning( outcomes_by_arm[ arm ] ),
                               rewrite_fn=lambda b: "x", max_model_failed_rate=max_model_failed_rate,
-                              preflight=preflight )
+                              preflight=preflight, snapshot_sha256=snapshot_sha256 )
     return run
 
 
