@@ -163,12 +163,11 @@ def _agentic_spec( command, entry ):
 # say out loud — that is a human design judgement). So it is a RATIFIED, checked-in
 # decision, and the generator's pin proves NO DRIFT, never correctness.
 #
-# The nine below are voice-reachable agentic commands. The THREE agentic commands
+# The nine below are voice-reachable agentic commands. The TWO agentic commands
 # held OUT are held out for a stated REASON, not by omission — set `speakable` from
 # the reason, so the prompt file must agree with this list, never the reverse:
 #   • "agent router go to bug fix expediter"  — card-reachable only; never an initial voice detection
 #   • "agent router go to test fix expediter" — START, system-triggered; its job-id arg is not speakable
-#   • "agent router go to heartbeat poker"    — system/programmatic; no production voice dispatch path
 _SPEAKABLE_AGENTIC = frozenset( {
     "agent router go to deep research",
     "agent router go to podcast generator",

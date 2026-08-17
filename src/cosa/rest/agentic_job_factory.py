@@ -135,8 +135,6 @@ def create_agentic_job( command, args_dict, user_id, user_email, session_id, deb
     from cosa.agents.swe_team.job                        import SweTeamJob
     from cosa.agents.test_fix_expediter.job              import TestFixExpediterJob
     from cosa.agents.test_suite.job                      import TestSuiteJob
-    from cosa.agents.heartbeat_poker_job                 import HeartbeatPokerJob, RecipientSpec
-    from cosa.agents.heartbeat_poker_commons_gateway     import LupinCommonsGateway
 
     if command == "agent router go to deep research":
         job = DeepResearchJob(
@@ -370,42 +368,6 @@ def create_agentic_job( command, args_dict, user_id, user_email, session_id, deb
         # and args from job_history; return it directly rather than falling through to
         # the common tail, which would overwrite those with the resume args.
         return resume_job( target.job_id, args_overrides=overrides or None )
-
-    elif command == "agent router go to heartbeat poker":
-        # recipients: list of {identifier, identifier_type, role} dicts → RecipientSpec list
-        recipients = [
-            RecipientSpec(
-                identifier      = r[ "identifier" ],
-                identifier_type = r.get( "identifier_type", "persona" ),
-                role            = r[ "role" ],
-            )
-            for r in ( args_dict.get( "recipients" ) or [] )
-        ]
-
-        # termination_signal_kinds: list, or comma-separated string
-        kinds_raw = args_dict.get( "termination_signal_kinds", "" )
-        if isinstance( kinds_raw, list ):
-            termination_signal_kinds = kinds_raw
-        else:
-            termination_signal_kinds = [ k.strip() for k in str( kinds_raw ).split( "," ) if k.strip() ]
-
-        job = HeartbeatPokerJob(
-            recipients                = recipients,
-            cadence_seconds           = _parse_optional_int( args_dict.get( "cadence_seconds" ) ) or 180,
-            termination_topic         = args_dict.get( "termination_topic", "" ),
-            termination_signal_kinds  = termination_signal_kinds,
-            workstream_id             = args_dict.get( "workstream_id", "" ),
-            commons                   = LupinCommonsGateway.from_environment( sender_session_id=session_id ),
-            deadman_consecutive_pokes = _parse_optional_int( args_dict.get( "deadman_consecutive_pokes" ) ) or 3,
-            max_duration_seconds      = _parse_optional_int( args_dict.get( "max_duration_seconds" ) ) or 43_200,
-            scheduled_at              = args_dict.get( "scheduled_at" ),
-            monopolize                = _parse_boolean( args_dict.get( "monopolize" ) ),
-            user_id                   = user_id,
-            user_email                = user_email,
-            session_id                = session_id,
-            debug                     = debug,
-            verbose                   = verbose,
-        )
 
     else:
         print( f"[agentic_job_factory] Unknown command: {command}" )

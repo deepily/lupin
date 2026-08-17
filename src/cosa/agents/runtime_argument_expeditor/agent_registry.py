@@ -334,41 +334,6 @@ JOB_ARG_CONTRACTS = {
             "dry_run"     : "no",
         },
     },
-
-    "agent router go to heartbeat poker" : {
-        # SYSTEM/programmatic agentic job — NO production dispatch path today. Closed
-        # enumeration over every non-test create_agentic_job CALL SITE shows none can
-        # pass this command (the router arm is EMPIRICAL prompt-gating, 0/10 observed,
-        # not a proven-closed vocabulary). The factory branch
-        # (agentic_job_factory.py:374 -> HeartbeatPokerJob:392) is reached only by
-        # tests. It keeps a registry entry because it is a documented, tested
-        # capability (design src/rnd/v0.1.7/2026.05.20-generic-heartbeat-poker-
-        # abstraction-design.md, 2026.05.22-...class-spec.md) and because the
-        # single-source endgame (phase 4/5) derives the factory FROM this registry, so
-        # an unowned factory branch IS the drift being eliminated. Wire-or-remove is
-        # tracked in store row 91ca9e80. cli_module=None (system-dispatched, no voice
-        # interview); drift-guard exemption waives prompt+training+card.
-        "job_prefix"         : "hb",
-        "cli_module"         : None,
-        "job_class_path"     : "cosa.agents.heartbeat_poker_job.HeartbeatPokerJob",
-        "display_name"       : "Heartbeat Poker",
-        "required_user_args" : [ "recipients" ],
-        "system_provided"    : [ "user_id", "user_email", "session_id" ],
-        "arg_mapping"        : {
-            "recipients"                : "recipients",
-            "cadence_seconds"           : "cadence_seconds",
-            "termination_topic"         : "termination_topic",
-            "termination_signal_kinds"  : "termination_signal_kinds",
-            "workstream_id"             : "workstream_id",
-            "deadman_consecutive_pokes" : "deadman_consecutive_pokes",
-            "max_duration_seconds"      : "max_duration_seconds",
-            "monopolize"                : "monopolize",
-        },
-        "fallback_questions" : {
-            "recipients" : "Who should the heartbeat poker monitor? (system-dispatched — no voice path today.)",
-        },
-        "fallback_defaults"  : {},
-    },
 }
 
 

@@ -11,12 +11,8 @@ AI-discretionary per §TESTING VENUES.
 Run: PYTHONPATH=src python -m pytest src/cosa/tests/smoke/test_heartbeat_poker_smoke.py -v
 """
 
-from unittest.mock import patch
-
 from cosa.agents.heartbeat_poker_job             import HeartbeatPokerJob, RecipientSpec
-from cosa.agents.heartbeat_poker_commons_gateway import LupinCommonsGateway
 from cosa.agents.agentic_job_base                import AgenticJobBase
-from cosa.rest.agentic_job_factory               import create_agentic_job
 from cosa.rest.queue_protocol                    import is_queueable_job
 
 
@@ -79,21 +75,3 @@ def test_job_is_not_cacheable():
 
 def test_last_question_asked_renders_for_queue_ui():
     assert "smoke-ws" in _make_job().last_question_asked
-
-
-def test_factory_dispatches_heartbeat_poker_command():
-    # CJ Flow ingestion: the agentic-job factory recognizes the heartbeat command
-    # and constructs a HeartbeatPokerJob. from_environment is patched (no real IO).
-    with patch.object( LupinCommonsGateway, "from_environment", return_value=_NullGateway() ):
-        job = create_agentic_job(
-            command    = "agent router go to heartbeat poker",
-            args_dict  = {
-                "recipients":               [ { "identifier": "tiberius", "identifier_type": "persona", "role": "watcher" } ],
-                "termination_topic":        "impl-done",
-                "termination_signal_kinds": [ "implementation_done" ],
-                "workstream_id":            "smoke-ws",
-            },
-            user_id="u", user_email="u@test.com", session_id="s",
-        )
-    assert isinstance( job, HeartbeatPokerJob )
-    assert job.routing_command == "agent router go to heartbeat poker"

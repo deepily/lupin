@@ -108,12 +108,11 @@ class TestGeneratorPin( unittest.TestCase ):
 
 
 class TestRatifiedSpeakableSet( unittest.TestCase ):
-    """The prompt lists exactly the 18 ratified commands; the 3 held-out stay out."""
+    """The prompt lists exactly the 18 ratified commands; the 2 held-out stay out."""
 
     HELD_OUT = (
         "agent router go to bug fix expediter",
         "agent router go to test fix expediter",     # START — exempt, not drift
-        "agent router go to heartbeat poker",
     )
     SPEAKABLE_AGENTIC = (
         "agent router go to deep research",

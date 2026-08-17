@@ -2,12 +2,11 @@
 """
 Unit tests — `cosa.rest.agentic_job_factory` (comprehensive coverage).
 
-Complements `test_agentic_job_factory_heartbeat.py` (which owns the
-`agent router go to heartbeat poker` branch). This file covers:
+This file covers:
 
     - the four private parser helpers (`_parse_optional_int`, `_parse_boolean`,
       `_parse_optional_boolean`, `_parse_optional_float`) across every arm,
-    - all ten non-heartbeat command branches of `create_agentic_job()`, with
+    - every command branch of `create_agentic_job()`, with
       each concrete Job class boundary-mocked at its source module so NO heavy
       agent / LLM / network init runs and ZERO API spend occurs,
     - `resume_job()` across its full success/failure branch matrix.
