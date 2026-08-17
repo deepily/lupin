@@ -258,6 +258,36 @@ def verify_seat_memento(
     return True, f"verified: complete, session-matched, fresh ({int( age )}s old)"
 
 
+# ── Present-vs-absent split (pure) ────────────────────────────────────────────
+def classify_slot_presence( slot_path, read_text_fn ):
+    """
+    The RECOVERABILITY axis that splits a post-ask timeout, three ways.
+
+    Requires:
+        - read_text_fn( slot_path ) -> the slot file's text, or None when unreadable
+
+    Ensures:
+        - returns "present" when a readable file with NON-whitespace content exists at
+          the BARE slot — a manager can OPEN it and read (recoverable).
+        - returns "empty" when a file EXISTS but is empty / whitespace-only — a write
+          that STARTED and DIED. There is nothing to read, so the recovery ACTION is
+          identical to absent and it buckets as absent (Mr. Radio's ruling); the distinct
+          label is kept so the reason string can preserve the started-and-died evidence,
+          which differs from nobody-ever-wrote-one.
+        - returns "absent" when nothing readable is there (never written) — unrecoverable.
+        - reads ONLY the slot, never resolving the pointer: a present pointer whose
+          record has vanished is STILL a file a manager can open to learn what it named,
+          so it classifies "present".
+        - never raises
+    """
+    text = read_text_fn( slot_path )
+    if text is None:
+        return "absent"
+    if text.strip() == "":
+        return "empty"
+    return "present"
+
+
 # ── Identity helpers ──────────────────────────────────────────────────────────
 def _identity_bits( ident ):
     """
@@ -345,8 +375,18 @@ def coordinate_mementos(
                                  double-send case and the self_respin gap)
             "written"            no usable memento at first, the child was asked, and
                                  a usable one appeared within ask_timeout_sec
-            "timeout_no_memento" the child was asked and no usable memento appeared —
-                                 parked / slow / declined. VISIBLE, never success
+            "timeout_no_memento" the child was asked and nothing READABLE-WITH-CONTENT is
+                                 on disk — either NOTHING at the slot, or an empty /
+                                 whitespace-only file (a write that started and died).
+                                 ABSENT for recovery, unrecoverable. VISIBLE, never
+                                 success. The empty case keeps its evidence in the reason
+            "unparseable_present" the child was asked and still no PROVABLE memento, but a
+                                 file IS on disk at the slot — a manager can OPEN and READ
+                                 it (RECOVERABLE). The present-but-unparseable case the
+                                 rows asked to split out (dffebbd6 / ebcb763e): a real
+                                 memento with only a markdown H1 header, a pointer whose
+                                 record vanished, or a prior-holder's file all land here —
+                                 distinct from absent, on which a manager cannot act
             "skipped"            no persona/session in the bridge identity, so the
                                  slot cannot be derived — surfaced, not silently ok
         - a seat with no identity is NEVER asked and NEVER reported verified
@@ -425,12 +465,29 @@ def coordinate_mementos(
                                      "slot": str( info[ "slot" ] ) }
                 del pending[ name ]
 
-    # Pass 4 — anything still un-written failed VISIBLY.
+    # Pass 4 — anything still un-written failed VISIBLY, split by RECOVERABILITY. A file
+    # on disk WITH content that could not be PROVEN is present-but-unparseable (open +
+    # read it); a slot with nothing — or an empty/whitespace-only file (a write that
+    # started and died) — is absent, because the recovery action is identical: there is
+    # nothing to read. Collapsing present-with-content into absent is what trained
+    # managers to ignore the alarm; sending them to open a 0-byte file is the same
+    # collapse inverted, so empty buckets as absent but keeps its evidence in the reason.
     for name, info in pending.items():
+        presence = classify_slot_presence( info[ "slot" ], read_text_fn )
+        if presence == "present":
+            status = "unparseable_present"
+            reason = ( f"asked{info[ 'ask_note' ]}, a file is on disk at the slot but could not be "
+                       f"proven fresh+complete within {ask_timeout_sec}s — OPEN AND READ IT "
+                       f"(RECOVERABLE, not missing); at ask time: {info[ 'pre_ask_reason' ]}" )
+        else:
+            status     = "timeout_no_memento"
+            empty_note = ( " slot file present but empty (0 bytes — a write started and died);"
+                           if presence == "empty" else "" )
+            reason = ( f"asked{info[ 'ask_note' ]}, no fresh+complete memento within {ask_timeout_sec}s "
+                       f"(parked / slow / declined);{empty_note} at ask time: {info[ 'pre_ask_reason' ]}" )
         outcomes[ name ] = {
-            "status"     : "timeout_no_memento",
-            "reason"     : ( f"asked{info[ 'ask_note' ]}, no fresh+complete memento within {ask_timeout_sec}s "
-                             f"(parked / slow / declined); at ask time: {info[ 'pre_ask_reason' ]}" ),
+            "status"     : status,
+            "reason"     : reason,
             "persona"    : info[ "persona" ], "session_id": info[ "session_id" ],
             "slot"       : str( info[ "slot" ] )
         }

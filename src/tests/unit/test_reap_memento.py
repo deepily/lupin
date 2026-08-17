@@ -413,3 +413,64 @@ def test_parse_header_when_text_is_all_comment_lines_no_content():
     text = "<!-- memento-record: persona=Rio session_id=abc12345 slot=io -->\n"
     fields = reap_memento.parse_memento_header( text )
     assert fields[ "session_id" ] == "abc12345"
+
+
+# ── classify_slot_presence + the present-vs-absent verdict split (dffebbd6 / ebcb763e) ──
+def test_classify_slot_presence_present_empty_absent():
+    disk = _Disk( {
+        "/proj/io/mementos/full.md"  : "some real content",
+        "/proj/io/mementos/blank.md" : "   \n\t  ",          # a write that started and died
+    } )
+    assert reap_memento.classify_slot_presence( "/proj/io/mementos/full.md",  disk.read ) == "present"
+    assert reap_memento.classify_slot_presence( "/proj/io/mementos/blank.md", disk.read ) == "empty"
+    assert reap_memento.classify_slot_presence( "/proj/io/mementos/gone.md",  disk.read ) == "absent"
+
+
+def test_coordinate_unparseable_present_when_h1_only_memento_never_reproven():
+    # SHAPE (b): a REAL memento whose identity is a markdown H1 with NO machine header
+    # (the clayton.md / krishna.md case). It is on disk, so the reap must NOT call it
+    # missing — a manager can OPEN AND READ it. Child never rewrites → unparseable_present.
+    slot = str( reap_memento.seat_memento_slot( "/proj", "Clayton" ) )
+    disk = _Disk( { slot: "# Memento — Clayton 😎 (session 02eec756)\n" + "x" * 5000 } )
+    dm   = _DM()
+    out  = _coord( { "tmux-a": _ident( "Clayton", "02eec756ffff" ) }, disk, dm,
+                   write_memento=True, ask_timeout_sec=3, poll_interval_sec=3 )
+    assert len( dm.calls ) == 1                          # the seat WAS asked (present ≠ verified)
+    assert out[ "tmux-a" ][ "status" ] == "unparseable_present"
+    assert "OPEN AND READ IT" in out[ "tmux-a" ][ "reason" ]
+    assert "no parseable memento-record header" in out[ "tmux-a" ][ "reason" ]  # the at-ask cause
+
+
+def test_coordinate_unparseable_present_when_pointer_record_vanished():
+    # A pointer slot whose current: record is gone: the pointer file is STILL on disk,
+    # so the manager can open it to learn what it named → present, not absent.
+    slot = str( reap_memento.seat_memento_slot( "/proj", "Rio" ) )
+    disk = _Disk( { slot: _pointer() } )                 # pointer present; record file absent
+    dm   = _DM()
+    out  = _coord( { "tmux-a": _ident( "Rio", "80d0e093ffff" ) }, disk, dm,
+                   write_memento=True, ask_timeout_sec=3, poll_interval_sec=3 )
+    assert out[ "tmux-a" ][ "status" ] == "unparseable_present"
+
+
+def test_coordinate_timeout_no_memento_stays_absent_when_slot_empty():
+    # The ABSENT side of the split: nothing on disk at all → still timeout_no_memento,
+    # the unrecoverable verdict. Backward-compatible with the prior single-status world.
+    dm  = _DM()
+    out = _coord( { "tmux-a": _ident() }, _Disk(), dm,
+                  write_memento=True, ask_timeout_sec=3, poll_interval_sec=3 )
+    assert out[ "tmux-a" ][ "status" ] == "timeout_no_memento"
+    assert "slot file present but empty" not in out[ "tmux-a" ][ "reason" ]   # truly-absent: no empty note
+
+
+def test_coordinate_zero_byte_slot_buckets_absent_but_keeps_evidence():
+    # Mr. Radio's guard: a 0-byte / whitespace-only slot is a write that started and died.
+    # Nothing to read → the ACTION is identical to absent, so it buckets as timeout_no_memento
+    # (NOT unparseable_present — that would send a manager to open an empty file). But the
+    # reason PRESERVES the started-and-died evidence, distinct from nobody-ever-wrote-one.
+    slot = str( reap_memento.seat_memento_slot( "/proj", "Rio" ) )
+    disk = _Disk( { slot: "   \n\t  " } )                  # present but whitespace-only
+    dm   = _DM()
+    out  = _coord( { "tmux-a": _ident() }, disk, dm,
+                   write_memento=True, ask_timeout_sec=3, poll_interval_sec=3 )
+    assert out[ "tmux-a" ][ "status" ] == "timeout_no_memento"          # verdict drives the action
+    assert "slot file present but empty (0 bytes" in out[ "tmux-a" ][ "reason" ]   # evidence preserved

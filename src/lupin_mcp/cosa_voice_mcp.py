@@ -2723,8 +2723,11 @@ def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str
     DM the still-alive child to write it and WAIT (bounded) for it to appear, so its
     specialization survives a future re-spawn (pass that path back as `seed_memento`).
     The result's `memento_outcomes` carries an EXPLICIT per-seat verdict (verified /
-    written / timeout_no_memento / skipped) — a seat that produced no memento fails
-    VISIBLY, never as a silent success (row 0a36d83d — the flag used to be a no-op).
+    written / unparseable_present / timeout_no_memento / skipped) — a seat that produced
+    no PROVABLE memento fails VISIBLY, never as a silent success (row 0a36d83d — the flag
+    used to be a no-op). The verdict splits present-but-unparseable (a file IS on disk —
+    OPEN AND READ it, RECOVERABLE) from timeout_no_memento (nothing on disk — ABSENT,
+    unrecoverable), so a manager acts on the first and never mistakes it for the second.
     A seat already carrying a fresh memento (a manual "prepare for re-spin" the
     manager already did) is NOT asked again — the guard suppresses the duplicate.
 
