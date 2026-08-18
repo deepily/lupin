@@ -420,7 +420,7 @@ JWT_SECRET_KEY=xGT4k2vN9pQr8sLmZnX0wYu7cA5bVfH1jD3eR6iK4oP=
 **Production**:
 ```bash
 # Environment variable set by deployment system
-export JWT_SECRET_KEY="production-secret-from-secure-vault"
+export JWT_SECRET_KEY="<REDACTED — row adce3547; JWT_SECRET_KEY is REQUIRED, there is no literal fallback>"
 ```
 
 **Configuration Integration**:
@@ -436,7 +436,7 @@ SECRET_KEY = os.getenv( "JWT_SECRET_KEY" )
 if not SECRET_KEY:
     if os.getenv( "ENVIRONMENT" ) == "development":
         print( "[WARNING] Using default development secret key" )
-        SECRET_KEY = "dev-secret-key-DO-NOT-USE-IN-PRODUCTION"
+        SECRET_KEY = "<REDACTED — row adce3547; JWT_SECRET_KEY is REQUIRED, there is no literal fallback>"
     else:
         raise ValueError( "JWT_SECRET_KEY environment variable not set!" )
 ```
@@ -1861,7 +1861,7 @@ def validate_auth_configuration():
 
     if auth_mode == "jwt":
         secret_key = config_mgr.get( "jwt secret key" )
-        if not secret_key or secret_key == "dev-secret-key-DO-NOT-USE-IN-PRODUCTION":
+        if not secret_key or secret_key == "<REDACTED — row adce3547; JWT_SECRET_KEY is REQUIRED, there is no literal fallback>":
             if os.getenv( "ENVIRONMENT" ) == "production":
                 raise ValueError( "JWT_SECRET_KEY must be set for production" )
 
