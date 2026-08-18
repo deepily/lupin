@@ -1,5 +1,36 @@
 # TODO
 
+## 🔴 2026-08-18 MORNING — THE REBOOT DOES NOT UNBLOCK ANYTHING. Two fixes, both measured.
+
+Rick asked directly whether tomorrow's reboot would pick up the new password and clear the blocked jobs.
+**It will not.** Verified, not assumed:
+
+**1. `~/.bashrc` returns early for non-interactive shells** — lines 5-8, `case $- in ... *) return;;`.
+Every export below that line is dead code for tool shells, scripts and cron, which is every path a seat
+actually uses. The password IS in the file (1 grep hit) and is still invisible after an explicit
+`source ~/.bashrc`. **Remedy (Rick's): move both exports ABOVE the guard, or into `~/.profile`.**
+
+**2. All four compose services are `restart: unless-stopped`** — `docker-compose.yml` lines 14, 61, 148, 333.
+A reboot RESTARTS the existing containers with the env baked in at their last CREATE. Compose is never
+re-rendered on boot, so the new password is not consulted. A reboot is not a recreate.
+
+**WHAT ACTUALLY CLEARS IT** — one command, from an **interactive** shell, after boot:
+```
+docker compose up -d --force-recreate
+```
+⚠️ `bounce-dev-server.sh` does NOT substitute — it is a plain `docker restart`, same reuse problem.
+
+**VERIFY AT EVERY STEP; four of these five have already failed silently once:**
+1. exports readable from a non-interactive shell
+2. `docker compose up -d --force-recreate`
+3. `docker exec … printenv` shows the value **inside** the container (it reads **absent** now — that
+   absence is the deliberate before-reading, so "present" after is real evidence)
+4. `list-pending` returns something other than **401**
+5. submit the paired run **behind** the already-queued 08:00 job, never ahead of it
+
+**Unblocks together**: `d8d019f6` (paired run) · `3bfd3fbc` (its acceptance run) · `adce3547` step 3
+(delete the JWT literal) · every future mount/env change. `53f60fcd` and `43fca908` are downstream of the first.
+
 ## ☀️ FIRST THING 2026-08-18 (Mr. Radio 🦉 `e251aa88`) — one credential unblocks four things
 
 **Rick issues `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL` / `_PASSWORD` to a seat.** That single act unblocks
