@@ -206,6 +206,53 @@ def _clean_v2_arm_store( config_mgr ) -> str:
         connection.close()
 
 
+def _open_v1_arm_connection( fully_qualified ):   # pragma: no cover - live DB boundary (real engine connect)
+    """
+    Open a LIVE connection to the database NAMED in a fully-qualified `database.table` store.
+
+    The v1 arm writes its OWN measurement database (lupin_db_v1baseline), which the app engine
+    never points at, so this takes get_database_url()'s host and credentials and swaps only the
+    db-path — the same construction guard.count_store_rows already uses to reach that store, and
+    for the same reason: urlsplit means a query or fragment cannot smuggle in a different db.
+    Live boundary; the :7999 reachability test injects a fake connection so no real TRUNCATE fires.
+    """
+    from urllib.parse import urlsplit
+    from sqlalchemy import create_engine
+    from cosa.rest.db.database import get_database_url
+    database, _, _table = fully_qualified.partition( "." )
+    target_url = urlsplit( get_database_url() )._replace( path=f"/{database}" ).geturl()
+    return create_engine( target_url ).connect()
+
+
+def _clean_v1_arm_store( v1_store ) -> str:
+    """
+    The v1 peer of _clean_v2_arm_store — row 3bfd3fbc, Rio's finding.
+
+    THE ASYMMETRY THIS CLOSES: the v2 arm's clean runs BEFORE the VALIDITY check, so an aborted run
+    leaves the v2 store clean for the next one. The v1 arm had no clean anywhere on the path —
+    v1_eval_arm.truncate_snapshots was unit-proven and called by nothing outside its own tests, the
+    same orphan shape as bug 080821da. So v1 residue survived every abort, VALIDITY refused the next
+    run on it, and clearing it needed destructive SQL that every worker's permission layer correctly
+    refuses. On 2026-08-17 that cost three seats an evening over 66 rows, and the run never landed.
+
+    Truncating was never the fix; cleaning where the v2 clean already cleans is. Nothing is weakened
+    to do it: truncate_snapshots derives its target from the connection ITSELF and assert_test_db
+    refuses any db whose exact name is not a measurement database, so a wrong target raises instead
+    of truncating.
+
+    Ensures:
+        - invokes v1_eval_arm.truncate_snapshots( connection ) via the module attribute
+          (late-bound, so a test spy on the real fn intercepts it) and returns the table name
+        - always closes the connection, even if the clean-step raises
+    """
+    import v1_eval_arm
+    connection = _open_v1_arm_connection( v1_store )
+    try:
+        return v1_eval_arm.truncate_snapshots( connection )
+    finally:
+        connection.close()
+
+
 def _run_v1_arm( *, corpus, seed, n_per_command, base_url ):   # pragma: no cover - live boundary (real push to :7997 + WS collect + inference)
     """
     Run the v1 baseline arm against the pinned :7997 server and return its {metrics, provenance}
@@ -366,11 +413,21 @@ def test_v2_paired_go_no_go_live():
     # reachability test spies the real fn so no live TRUNCATE happens here.
     _clean_v2_arm_store( config_mgr )
 
+    # ...and the SAME clean-step for the v1 arm, on the SAME side of the VALIDITY check (row
+    # 3bfd3fbc). This half was missing entirely: v1_eval_arm.truncate_snapshots had no caller, so
+    # v1 residue from an aborted run survived to refuse the NEXT run, and only a human with
+    # destructive-SQL permission could clear it. Both arms now clean up after themselves before
+    # anything is allowed to refuse on a dirty store.
+    v1_store = _resolve_v1_paired_store()
+    _clean_v1_arm_store( v1_store )
+
     # Precondition 3 — VALIDITY: the two arms must write DISTINCT, CLEAN stores (design §4).
     # Queries each store's LIVE rowcount and calls the distinct-and-clean check; count_store_rows
     # targets the exact db.table each string names. Reached only once preconditions 1+2 pass.
-    v1_store = _resolve_v1_paired_store()
+    # It still refuses a dirty store — the cleans above make an ABORT self-healing, they do not
+    # excuse residue arriving from anywhere else.
     guard.assert_paired_isolation( v1_store, v2_store, rowcount_fn=guard.count_store_rows )
+
 
     # ---- a–d: run BOTH arms and produce the PROVENANCE-GATED paired verdict (row d8d019f6) ----
     # This is the caller the paired verdict lacked: build_paired_verdict was wired into nothing,

@@ -216,6 +216,114 @@ def test_bridge_never_reaches_v2_clean_when_safety_refuses():
 
 
 # ---------------------------------------------------------------------------
+# The V1 half of the per-arm clean-step (row 3bfd3fbc, Rio's finding).
+#
+# WHY THIS EXISTS. The v2 clean above ran BEFORE the VALIDITY check; the v1 arm had no clean on the
+# path at all — v1_eval_arm.truncate_snapshots was unit-proven with nothing calling it, the orphan
+# shape of bug 080821da. So an aborted run left v1 residue that VALIDITY refused the NEXT run on,
+# and only a human with destructive-SQL permission could clear it: on 2026-08-17 that was 66 rows,
+# three seats, an evening, and no run. These three tests prove the v1 clean is REACHED, that it
+# fires BEFORE the check that would otherwise refuse on the residue, and that it is still gated
+# behind the preconditions rather than free-standing.
+# ---------------------------------------------------------------------------
+def test_bridge_reaches_and_fires_the_v1_clean_step():
+    """Preconditions 0-2 pass -> the bridge MUST invoke the REAL v1_eval_arm.truncate_snapshots on a
+    connection to the v1 arm's OWN measurement db, running assert_test_db through to the TRUNCATE.
+    The connection is injected, so the real fn's TRUNCATE lands on a MagicMock — no live DB."""
+    import v1_eval_arm
+
+    fake_conn               = MagicMock()
+    fake_conn.engine.url    = "postgresql://u:p@h/lupin_db_v1baseline"   # the v1 measurement db
+    cfg                     = MagicMock()
+    cfg.get.return_value    = "solution_snapshots"
+    spy                     = MagicMock( wraps=v1_eval_arm.truncate_snapshots )   # the REAL fn
+
+    with patch( "cosa.config.configuration_manager.ConfigurationManager", return_value=cfg ), \
+         patch( "v2_eval.load_corpus", return_value=[ ( "u", "agent router go to todo" ) ] ), \
+         patch.object( guard, "require_isolated_snapshot_table", return_value=_V2_STORE ), \
+         patch.object( bridge, "_require_v1_live_seam_and_worktree", lambda: None ), \
+         patch.object( bridge, "_require_model_servers_live", lambda cfg: None ), \
+         patch.object( bridge, "_clean_v2_arm_store", lambda config_mgr: "solution_snapshots" ), \
+         patch.object( bridge, "_open_v1_arm_connection", return_value=fake_conn ), \
+         patch.object( bridge, "_resolve_v1_paired_store", return_value=_V1_STORE ), \
+         patch.object( guard, "count_store_rows", return_value=0 ), \
+         patch.dict( os.environ, { "LUPIN_V1_ARM_BASE_URL": "http://stub-v1:7997",
+                                   "LUPIN_PAIRED_ARTIFACT_DIR": _ARTIFACT_TMPDIR } ), \
+         patch.object( bridge, "_run_v1_arm", return_value=_V1_ART ), \
+         patch.object( bridge, "_run_v2_arm", return_value=_V2_ART ), \
+         patch.object( v1_eval_arm, "truncate_snapshots", spy ):
+        bridge.test_v2_paired_go_no_go_live()
+
+    spy.assert_called_once_with( fake_conn )
+    # The REAL primitive ran through assert_test_db to the TRUNCATE on the injected connection.
+    fake_conn.execute.assert_called_once()
+    ( truncate_stmt, ), _kwargs = fake_conn.execute.call_args
+    from sqlalchemy.sql.elements import TextClause
+    assert isinstance( truncate_stmt, TextClause ), f"TRUNCATE must be a text() clause, got {type( truncate_stmt )}"
+    assert str( truncate_stmt ) == "TRUNCATE TABLE solution_snapshots"
+    # Commit-as-you-go: without this the TRUNCATE rolls back on close and the store stays dirty —
+    # which is the whole failure this row is about, so it is asserted rather than assumed.
+    fake_conn.commit.assert_called_once()
+    fake_conn.close.assert_called_once()
+
+
+def test_the_v1_clean_fires_before_the_check_that_would_refuse_on_residue():
+    """ORDERING IS THE FIX. A v1 clean placed after the VALIDITY check would be unreachable on
+    exactly the runs that need it — the check refuses on the residue first, which is what happened
+    on 2026-08-17. This pins the order: when assert_paired_isolation is entered, the v1 clean has
+    already fired. Moving the clean below the check makes this RED."""
+    import v1_eval_arm
+
+    order     = []
+    fake_conn = MagicMock()
+    fake_conn.engine.url = "postgresql://u:p@h/lupin_db_v1baseline"
+    cfg       = MagicMock()
+    cfg.get.return_value = "solution_snapshots"
+
+    def _record_clean( connection ):
+        order.append( "v1_clean" )
+        return "solution_snapshots"
+
+    def _record_validity( v1_store, v2_store, rowcount_fn=None ):
+        order.append( "validity" )
+
+    with patch( "cosa.config.configuration_manager.ConfigurationManager", return_value=cfg ), \
+         patch( "v2_eval.load_corpus", return_value=[ ( "u", "agent router go to todo" ) ] ), \
+         patch.object( guard, "require_isolated_snapshot_table", return_value=_V2_STORE ), \
+         patch.object( bridge, "_require_v1_live_seam_and_worktree", lambda: None ), \
+         patch.object( bridge, "_require_model_servers_live", lambda cfg: None ), \
+         patch.object( bridge, "_clean_v2_arm_store", lambda config_mgr: "solution_snapshots" ), \
+         patch.object( bridge, "_open_v1_arm_connection", return_value=fake_conn ), \
+         patch.object( bridge, "_resolve_v1_paired_store", return_value=_V1_STORE ), \
+         patch.object( guard, "assert_paired_isolation", _record_validity ), \
+         patch.dict( os.environ, { "LUPIN_V1_ARM_BASE_URL": "http://stub-v1:7997",
+                                   "LUPIN_PAIRED_ARTIFACT_DIR": _ARTIFACT_TMPDIR } ), \
+         patch.object( bridge, "_run_v1_arm", return_value=_V1_ART ), \
+         patch.object( bridge, "_run_v2_arm", return_value=_V2_ART ), \
+         patch.object( v1_eval_arm, "truncate_snapshots", _record_clean ):
+        bridge.test_v2_paired_go_no_go_live()
+
+    assert order == [ "v1_clean", "validity" ], f"the v1 clean must precede the VALIDITY check; got {order}"
+
+
+def test_bridge_never_reaches_the_v1_clean_when_safety_refuses():
+    """Negative control: precondition 1 (SAFETY) refuses -> no v1 TRUNCATE. The clean is a step
+    inside the gated path, not something that fires on the way to a refusal."""
+    import v1_eval_arm
+
+    spy    = MagicMock( wraps=v1_eval_arm.truncate_snapshots )
+    refuse = guard.IsolationNotConfigured( "SAFETY refuses (simulated precondition 1)" )
+    with patch( "cosa.config.configuration_manager.ConfigurationManager", MagicMock() ), \
+         patch( "v2_eval.load_corpus", return_value=[ ( "u", "agent router go to todo" ) ] ), \
+         patch.object( guard, "require_isolated_snapshot_table", side_effect=refuse ), \
+         patch.object( v1_eval_arm, "truncate_snapshots", spy ):
+        with pytest.raises( guard.IsolationNotConfigured ):
+            bridge.test_v2_paired_go_no_go_live()
+
+    spy.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # a-d ARM-RUNNING wiring — the PROVENANCE-GATED paired verdict is REACHED and FIRES (row d8d019f6).
 #
 # WHY THIS EXISTS. build_paired_verdict (provenance-check -> median-delta gate) was wired into
