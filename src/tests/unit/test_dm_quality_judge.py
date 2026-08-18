@@ -825,6 +825,7 @@ class TestMeahAlias:
         assert grade_weight( "meah" ) == 0
 
 
+@pytest.mark.allows_outbound_network   # row 7c84b8b8: these dial :3001 ON PURPOSE — declared, not hidden
 class TestLiveMistralRegression:
     """The gap that let bug a5f7b36d ship: unit tests fed hand-written XML and never
     hit the real endpoint. This exercises the LIVE model end-to-end (skipped when

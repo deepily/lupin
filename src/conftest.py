@@ -214,6 +214,26 @@ def pytest_terminal_summary( terminalreporter, exitstatus, config ):
         for frame in frames[ -3: ]:
             terminalreporter.write_line( f"      {frame}" )
 
+    # ⚠️ BLOCK MODE CANNOT RELY ON ITS OWN RAISE. Measured 2026-08-17 on the cosa tier: 88
+    # blocked dials produced ZERO failures in the files that made them. The raise fires at
+    # the socket, but the code under test catches it — the DM quality judge is documented to
+    # never raise, so every attempt was swallowed and degraded into a fallback grade. A guard
+    # whose enforcement depends on the caller not catching exceptions is not enforcement; it
+    # is a suggestion, and it reports GREEN on exactly the tests it was built to fail.
+    #
+    # So the verdict rides the SUMMARY, which nothing can swallow: in block mode, a run that
+    # recorded any unexempt attempt FAILS here, whatever the individual tests decided. count
+    # mode is unchanged — it reports and stays out of the way.
+    if _NETWORK_MODE == "block":
+        terminalreporter.write_line(
+            f"[unit-network:block] FAILING THE RUN: {len( _outbound_attempts )} outbound "
+            f"connection(s) from tests that did not declare @pytest.mark.allows_outbound_network. "
+            f"The per-socket raise is not enough — a caller that catches exceptions swallows it, "
+            f"so the run is failed here where nothing can."
+        )
+        # The exit status itself is set in pytest_sessionfinish, which is where pytest reads
+        # it back from; this hook only says WHY, next to the list it applies to.
+
 
 def pytest_collection_modifyitems( config, items ):
     from tests.worktree_tree_guard import check_paths as _worktree_check_paths
@@ -262,7 +282,14 @@ def pytest_sessionfinish( session, exitstatus ):
           is untouched, because a diagnoser that fires on everything makes the state
           meaningless
         - never raises: a broken diagnostic must not be able to change a suite's outcome
+        - in block mode, a run that recorded ANY unexempt outbound dial exits non-zero,
+          even when every test that dialled passed (row 7c84b8b8 — see the terminal-summary
+          note: the per-socket raise is swallowed by callers that catch broadly, so the
+          verdict has to be set here, where the outcome is actually read)
     """
+    if _NETWORK_MODE == "block" and _outbound_attempts:
+        session.exitstatus = 1
+
     if not _collect_failures:
         return
     try:

@@ -52,6 +52,11 @@ def _install_real_guard( directory ):
 
         pytest_runtest_setup    = _mod.pytest_runtest_setup
         pytest_terminal_summary = _mod.pytest_terminal_summary
+        # pytest_sessionfinish carries the VERDICT — block mode sets a non-zero exit status
+        # there, because the per-socket raise is swallowed by callers that catch broadly.
+        # Re-export it or the sandbox proves a guard that is missing its enforcement half
+        # (which is what this sandbox did until 2026-08-17: it mirrored two hooks of three).
+        pytest_sessionfinish    = _mod.pytest_sessionfinish
     """ ).lstrip() )
 
 
@@ -226,17 +231,26 @@ def test_count_mode_reports_zero_out_loud( loopback_test ):
     assert "[unit-network:count] outbound connections: 0" in output
 
 
-def test_a_swallowed_block_is_still_reported( swallowing_dialer ):
+def test_a_swallowed_block_is_reported_AND_fails_the_run( swallowing_dialer ):
     """
     THE CASE THAT WOULD OTHERWISE GO SILENT. Code that catches broadly eats the guard's
-    refusal, so the test passes — and the run must still SAY the connection happened, or
-    the guard is defeated by the very pattern that made the original bug invisible.
+    refusal, so the test passes — the run must still SAY the connection happened, AND it
+    must fail.
+
+    ⚠️ THIS ARM USED TO ASSERT `code == 0`, on the reasoning that it was "about the REPORT,
+    not the verdict". Measured 2026-08-17: the cosa tier in block mode recorded 88 outbound
+    connections and passed, because every one of them was swallowed exactly like this. A
+    report nobody is failed by is a report, not a guard — and the whole point of block mode
+    is to be the second one. The verdict now rides the recorded attempts (set in
+    pytest_sessionfinish), which no `except Exception` can reach.
     """
     code, output = _run_pytest( swallowing_dialer, "block" )
 
-    assert code == 0, "the test swallows the refusal — this arm is about the REPORT, not the verdict"
+    assert "1 passed" in output, "control: the dialling test itself still passes — that IS the problem"
+    assert code != 0, "block mode must fail the RUN even when the dialling test swallowed the refusal"
     assert "[unit-network:block] outbound connections: 1" in output
     assert "_grader_that_never_raises" in output
+    assert "FAILING THE RUN" in output, "the run must say WHY it failed, next to the list"
 
 
 # ── 4. THE CONTROLS — loopback and the default must be untouched ───────────
@@ -299,3 +313,24 @@ def test_the_network_using_runners_do_not_arm_it( script_rel ):
     text = open( os.path.join( PROJECT_ROOT, script_rel ) ).read()
 
     assert "LUPIN_UNIT_NETWORK" not in text, f"{script_rel} must not arm the unit network guard"
+
+
+# ── 4. THE RAISE IS NOT THE ENFORCEMENT — the RECORD is ─────────────────────
+#
+# MEASURED 2026-08-17 on the cosa tier: 88 blocked dials, and NOT ONE of the files that
+# made them failed. Block mode raises at the socket, but the code under test catches it —
+# the DM quality judge is documented never to raise, so every block was swallowed and
+# degraded into a fallback grade. A guard whose enforcement depends on the caller NOT
+# catching exceptions reports green on exactly the tests it exists to fail. So the verdict
+# now rides the run's exit status, set from the recorded attempts, which nothing can catch.
+def test_count_mode_never_fails_a_run_on_a_recorded_dial( swallowing_dialer ):
+    """
+    The control that keeps the two modes distinct. count exists to SURVEY without holding the
+    merge gate hostage to another lane's fallout — the census that the survey depends on has
+    to stay runnable, so the verdict must belong to block mode alone.
+    """
+    code, output = _run_pytest( swallowing_dialer, "count" )
+
+    assert code == 0, "count mode must report and stay out of the way"
+    assert "[unit-network:count] outbound connections: 1" in output
+    assert "FAILING THE RUN" not in output

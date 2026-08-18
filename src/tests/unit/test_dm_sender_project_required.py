@@ -128,6 +128,17 @@ class _CoreHarness( unittest.TestCase ):
         import cosa.rest.dm_experiment as dm_experiment
         dm_experiment.set_policy( dm_experiment.make_inactive_policy() )
         self.addCleanup( dm_experiment.reset_policy )
+        # Row 7c84b8b8: execute_dm_send grades every ACCEPTED send INLINE against a live model
+        # (_maybe_grade_dm_quality -> judge -> the vLLM endpoint), two calls per send. Nothing in
+        # this file's names suggests it, and a stack-capturing sweep on 2026-08-17 traced eight
+        # outbound connections from these four tests to 192.168.1.21:3001 — a unit test whose
+        # result depended on a server being up. Pin the judgment toggle OFF, which is the shipped
+        # CONTROL arm of that feature, so the send path runs its real code and returns without a
+        # grade. Not a stub of _maybe_grade_dm_quality: the call still happens, it just takes the
+        # branch that costs nothing. No assertion in this file reads the grade.
+        _judgment_patch = patch.object( dm, "get_dm_quality_judgment_enabled", lambda: False )
+        _judgment_patch.start()
+        self.addCleanup( _judgment_patch.stop )
 
     def _run( self, body ):
         return self.execute_dm_send(
