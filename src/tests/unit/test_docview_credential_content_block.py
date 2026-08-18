@@ -1010,10 +1010,15 @@ _TOO_DEEP = 20000
 def test_a_document_too_deeply_nested_to_parse_does_not_CRASH( tmp_path ):
     """
     THE RED for finding 2. `json.loads` raises RecursionError at roughly 20000 levels
-    — a 39 KiB file of open brackets does it — and RecursionError inherits from
-    BaseException, NOT Exception. So it was caught by nothing: not the
-    ValueError/TypeError handler beside it, not a broad `except Exception` further
-    up. It escaped the detector and the reader got a 500.
+    — a 39 KiB file of open brackets does it — and it escaped the detector, so the
+    reader got a 500 instead of a verdict.
+
+    ⚠️ NOT because of the exception's ancestry. My first version of this docstring
+    said RecursionError inherits from BaseException and not Exception, which is
+    FALSE: RecursionError -> RuntimeError -> Exception -> BaseException. Tiffany
+    corrected it. It escaped because of WHERE the broad handler sits — `is_credential_file`
+    wraps the FILE READ and calls the predicate after the try block, so nothing at all
+    guarded the decision.
 
     A crash is not a verdict. This asserts the detector ANSWERS.
     """
@@ -1057,3 +1062,39 @@ def test_ordinary_nesting_is_untouched():
     thousand levels is already far past anything real and still parses.
     """
     assert _json_carried_in_a_string( "[" * 1000 + "]" * 1000 ) is not None
+
+
+def test_an_error_raised_while_DECIDING_still_BLOCKS( tmp_path, monkeypatch ):
+    """
+    THE GAP THE WRONG DIAGNOSIS UNCOVERED (row de013b80, Tiffany's correction).
+
+    `is_credential_file` promises in its own docstring: "Raises: nothing; every
+    failure path blocks instead". That was true of READING and false of DECIDING —
+    the `except Exception` wraps only the `open`/`read`, and the predicate is called
+    after the try block. So for the whole life of this check, any error raised while
+    deciding left the module and the reader got a 500.
+
+    A 500 is not a serve, so nothing leaked. But it is not a verdict either, and a
+    check whose fail-closed guarantee stops one line short of the decision is one
+    refactor away from a caller reading the raise as absence.
+    """
+    path = tmp_path / "ordinary.json"
+    path.write_text( '{"type": "tokenizer"}', encoding="utf-8" )
+
+    def _explode( _prefix ):
+        raise ValueError( "the decision itself blew up" )
+
+    monkeypatch.setattr( "cosa.rest.routers._scope_registry._prefix_looks_like_credential",
+                         _explode )
+
+    assert is_credential_file( str( path ) ) is True
+
+
+def test_the_recursion_error_ancestry_claim_I_made_was_wrong():
+    """
+    Pinned as a fact rather than left in prose, because the wrong version of it is
+    written into a commit message that cannot be edited. RecursionError IS an
+    Exception; a broad handler catches it. Placement was the whole story.
+    """
+    assert issubclass( RecursionError, Exception )
+    assert RecursionError.__mro__[ : 4 ] == ( RecursionError, RuntimeError, Exception, BaseException )

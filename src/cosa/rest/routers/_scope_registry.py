@@ -342,7 +342,20 @@ def is_credential_file( full_path: str ) -> bool:
         # Unreadable, missing, permission-denied, or not utf-8 — all BLOCK.
         return True
 
-    return _prefix_looks_like_credential( prefix )
+    # 🔴 THE FAIL-CLOSED PROMISE HAS TO COVER THE DECISION TOO (row de013b80, found by
+    # Tiffany correcting my diagnosis of the RecursionError). The handler above wraps
+    # ONLY the read, and this call sits outside it — so for the whole life of this
+    # check, ANY error raised while deciding walked straight out of the module and the
+    # reader got a 500. The docstring above promises "Raises: nothing; every failure
+    # path blocks instead", and that promise was true of reading and false of deciding.
+    #
+    # A 500 is not a serve, so nothing leaked. But it is not a verdict either, and a
+    # detector that answers "I could not tell" by raising is one refactor away from a
+    # caller that treats the raise as absence. Both halves now block.
+    try:
+        return _prefix_looks_like_credential( prefix )
+    except Exception:
+        return True
 
 
 def _the_window_may_be_hiding_the_signature( prefix: str ) -> bool:
@@ -452,11 +465,19 @@ def _prefix_looks_like_credential( prefix: str ) -> bool:
     except ( ValueError, TypeError, RecursionError ):
         # 🔴 RecursionError IS IN THIS TUPLE ON PURPOSE (Tiffany, follow-up). `json.loads`
         # raises it at roughly 20000 levels of nesting — a 39 KiB file of open brackets
-        # does it — and RecursionError inherits from BaseException, NOT Exception, so
-        # neither this handler nor a broad `except Exception` anywhere above caught it.
-        # It escaped the detector entirely and the reader got a 500. Routing it here is
-        # not a special case: a document too deep to parse is a document we could not
-        # read, which is exactly what this branch already handles, fail-closed.
+        # does it — and it escaped the detector, so the reader got a 500 instead of a
+        # verdict.
+        #
+        # ⚠️ NOT because of its ancestry. I first wrote here that RecursionError inherits
+        # from BaseException and not Exception. That is FALSE — the chain is
+        # RecursionError -> RuntimeError -> Exception -> BaseException, so a broad
+        # `except Exception` catches it fine. Tiffany corrected it within minutes.
+        # It escaped because of WHERE the broad handler sits: `is_credential_file` wraps
+        # only the FILE READ, and calls this function AFTER the try block. Nothing
+        # guards the decision. See the fail-closed wrap added there.
+        #
+        # Routing it here is not a special case: a document too deep to parse is a
+        # document we could not read, which is what this branch already handles.
         #
         # TRUNCATED or non-JSON. A service-account key longer than the sniff window
         # lands here, so falling through to "serve it" would defeat the bounded read.
