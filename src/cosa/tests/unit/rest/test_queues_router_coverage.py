@@ -794,8 +794,12 @@ class TestJobHistory( unittest.IsolatedAsyncioTestCase ):
     async def test_get_history_regular_user_with_exclude_ids( self ):
         with patch( "cosa.rest.job_persistence.query_job_history",
                     return_value={ "jobs": [ { "id": 1 } ], "total": 1 } ) as qh:
+            # user_filter MUST be passed explicitly — see the guard test in this class.
+            # Calling the endpoint directly bypasses FastAPI, so an omitted
+            # Query-defaulted parameter arrives as the Query OBJECT, not None.
             out = await get_job_history( current_user=self.user, status="failed", job_type="deep_research",
-                                         limit=10, offset=0, days=7, exclude_ids=" a , b ,, " )
+                                         limit=10, offset=0, days=7, exclude_ids=" a , b ,, ",
+                                         user_filter=None )
         # regular user → filtered to own uid; exclude_ids parsed to ["a","b"]
         _, kwargs = qh.call_args
         self.assertEqual( kwargs[ "user_id" ], "u1" )
@@ -806,11 +810,48 @@ class TestJobHistory( unittest.IsolatedAsyncioTestCase ):
         with patch( "cosa.rest.job_persistence.query_job_history",
                     return_value={ "jobs": [], "total": 0 } ) as qh:
             out = await get_job_history( current_user=self.admin, status=None, job_type=None,
-                                         limit=20, offset=0, days=None, exclude_ids=None )
+                                         limit=20, offset=0, days=None, exclude_ids=None,
+                                         user_filter=None )
         _, kwargs = qh.call_args
         self.assertIsNone( kwargs[ "user_id" ] )       # admin → all
         self.assertIsNone( kwargs[ "exclude_ids" ] )
         self.assertEqual( out[ "filtered_by" ], "all" )
+
+    def test_every_query_defaulted_param_is_known_to_the_direct_call_tests( self ):
+        """
+        THE GUARD FOR THE NEXT PARAMETER (row 8145f3e1).
+
+        Every test in this class calls `get_job_history` DIRECTLY, which skips FastAPI's
+        dependency resolution entirely. A parameter declared `= Query( None )` therefore
+        arrives as the Query OBJECT unless the test passes it, and `Query(None) is None`
+        is False — so the endpoint takes the "a filter was supplied" branch and behaves
+        as though the caller asked for something.
+
+        That is exactly how these tests broke: e205a3b1 added `user_filter`, the two
+        direct-call tests did not pass it, and the sentinel flowed into string code
+        (`'Query' object has no attribute 'startswith'`) and into the permission check
+        (a 403 where the test expected rows). ONE root cause, two unrelated-looking
+        symptoms — which is why it first read as two separate bugs.
+
+        Adding another `Query`-defaulted parameter would do it again, silently, to
+        whichever direct call forgot it. This set is the tripwire: extend it
+        deliberately, and update every direct call in this class in the same edit.
+        """
+        import inspect
+        from fastapi.params import Query as QueryParam
+
+        query_defaulted = {
+            name for name, param in inspect.signature( get_job_history ).parameters.items()
+            if isinstance( param.default, QueryParam )
+        }
+
+        self.assertEqual(
+            query_defaulted,
+            { "status", "job_type", "limit", "offset", "days", "exclude_ids", "user_filter" },
+            "get_job_history's Query-defaulted parameters changed. Every direct call in "
+            "this class must pass the new one explicitly, or it receives the Query object "
+            "instead of the default value. Update the calls, then update this set."
+        )
 
     async def test_get_detail_not_found_404( self ):
         with patch( "cosa.rest.job_persistence.get_job_by_id_hash", return_value=None ):
