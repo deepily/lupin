@@ -95,6 +95,17 @@ _EXTRACTION_FAILED_DETAIL    = "not graded: extraction could not be verified aga
 # inputs that already parse never see the nudge.
 _RETRY_NUDGE                 = "Begin your reply with <response>.\n\n"
 
+# Retry budget. Three attempts are for a model that ANSWERED BADLY — a nudge and a
+# second look genuinely fix that, so anything that came back over the wire keeps the
+# full budget however unparseable it was. They are wasted on a server that never
+# answered at all: the same refused connection three times, 1.5s of sleep between them,
+# on every dimension of every accepted DM, and `judge` never raises so nobody sees it.
+# So the cut is on WHETHER THE CALL CAME BACK, not on what it said: a transport failure
+# on a client that has never once answered in this process stops immediately. The first
+# response of any kind buys the full budget for the rest of the process, because from
+# then on a refused call really might be the blip that a retry is for.
+_MAX_ATTEMPTS                = 3
+
 # A retry that repeats the identical prompt at temperature 0 gets the identical answer.
 # Measured 2026-08-01: on BURIED_PLAIN the model quoted "The timeout is set to thirty
 # seconds and it should be five." for a sentence reading "Anyway, the timeout is set to
@@ -182,6 +193,11 @@ class DmQualityJudgeV2:
         self.tone_prompt_path       = tone_prompt_path
         self._available             = False
         self._client                = None
+        # Has ANY call through this client ever come back — with ANYTHING, parseable or
+        # not? `_available` cannot answer that; it only says the factory returned an
+        # object (see the `available` property). This one is set by the first call that
+        # returns, and it is what the retry budget is spent against.
+        self._client_ever_responded = False
         self.qualitative_enabled    = ( _get_qualitative_enabled()
                                         if qualitative_enabled is None else bool( qualitative_enabled ) )
 
@@ -201,7 +217,16 @@ class DmQualityJudgeV2:
 
     @property
     def available( self ):
-        """Whether the LLM client is available for the qualitative dimensions."""
+        """
+        Whether the LLM client was CONSTRUCTED — not whether the server answers.
+
+        The name overpromises and the code cannot deliver on it: the factory builds a
+        client from config without opening a socket, so this is True against a server
+        that is down, and would have been True had it been down at construction. Nothing
+        re-checks it either — it is written once in __init__ and never again. Read it as
+        "we have a client object to call", and read `_client_ever_responded` for the
+        question this one looks like it answers.
+        """
         return self._available
 
     def judge( self, body_text ):
@@ -284,7 +309,8 @@ class DmQualityJudgeV2:
             - never raises
         """
         last_error = None
-        for attempt in range( 1, 4 ):
+        for attempt in range( 1, _MAX_ATTEMPTS + 1 ):
+            transport_failed = False
             try:
                 effective = prompt
                 if attempt > 1:
@@ -294,19 +320,34 @@ class DmQualityJudgeV2:
                         effective = _RETRY_AFTER_REJECTION.format( reason=last_error ) + prompt
                     else:
                         effective = _RETRY_NUDGE + prompt
-                raw       = self._client.run( effective )
+                try:
+                    raw = self._client.run( effective )
+                except Exception:
+                    # The call did not come back. Marked here, judged below, because the
+                    # difference that matters is "the server never spoke" vs "the server
+                    # spoke nonsense" — and only the first is worth refusing to retry.
+                    transport_failed = True
+                    raise
+                self._client_ever_responded = True
                 if self.debug: print( f"[DmQualityJudgeV2] raw (attempt {attempt}): {raw[ :200 ]}" )
                 if _is_garbage_output( raw ):
                     raise ValueError( "garbage output: degenerate repeated-character response" )
                 return parse_fn( _repair_llm_xml( raw, known_fields ) ), None
             except Exception as e:
                 last_error = e
-                if attempt < 3:
+                if transport_failed and not self._client_ever_responded:
+                    print(
+                        f"[DmQualityJudgeV2] the call did not come back and this client has never "
+                        f"answered — stopping after attempt {attempt} instead of sleeping through "
+                        f"{_MAX_ATTEMPTS - attempt} more: {e}"
+                    )
+                    break
+                if attempt < _MAX_ATTEMPTS:
                     backoff = 0.5 * attempt
                     print( f"[DmQualityJudgeV2] transient on attempt {attempt}, retrying in {backoff}s: {e}" )
                     time.sleep( backoff )
                     continue
-                print( f"[DmQualityJudgeV2] failed after 3 attempts: {e}" )
+                print( f"[DmQualityJudgeV2] failed after {_MAX_ATTEMPTS} attempts: {e}" )
         return None, last_error
 
     def _grade_directness( self, body_text ):
