@@ -30,7 +30,7 @@ Row: 12b5a766 (DM write path stamps @lupin for every session, any project)
 """
 
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 
 class _SenderIdSpy:
@@ -103,11 +103,19 @@ class TestSenderIdSpyControl( unittest.TestCase ):
 class TestCallerSuppliedProject( unittest.TestCase ):
 
     def setUp( self ):
+        import cosa.rest.routers.dm as dm
         from cosa.rest.routers.dm import execute_dm_send
         self.execute_dm_send = execute_dm_send
         self.queue           = MagicMock()
         self.persist         = MagicMock( return_value="db-123" )
         self.spy             = _SenderIdSpy()
+        # Row 7c84b8b8 / ec5cf83a: the send path grades every ACCEPTED send INLINE against a
+        # live model — 18 outbound connections from this file in the 2026-08-17 census. Pin
+        # the judgment toggle to its shipped CONTROL arm so the path runs its real code and
+        # takes the free branch; nothing here reads the grade.
+        _judgment_patch = patch.object( dm, "get_dm_quality_judgment_enabled", lambda: False )
+        _judgment_patch.start()
+        self.addCleanup( _judgment_patch.stop )
 
     def _run( self, body ):
         return self.execute_dm_send(
@@ -222,6 +230,12 @@ class TestUnprojectedAudit( unittest.TestCase ):
         self.queue   = MagicMock()
         self.persist = MagicMock( return_value="db-123" )
         self.spy     = _SenderIdSpy()
+        # Row 7c84b8b8 / ec5cf83a: same inline live-model grade on every accepted send as
+        # the class above — this one is a separate harness, so it needs the same pin or it
+        # keeps dialling on its own (6 of this file's connections came from here alone).
+        _judgment_patch = patch.object( dm, "get_dm_quality_judgment_enabled", lambda: False )
+        _judgment_patch.start()
+        self.addCleanup( _judgment_patch.stop )
 
     def _run( self, body ):
         return self.dm.execute_dm_send(

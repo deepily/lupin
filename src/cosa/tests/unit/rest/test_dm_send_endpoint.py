@@ -46,12 +46,23 @@ def _make_body( **overrides ):
 class TestExecuteDmSend( unittest.TestCase ):
 
     def setUp( self ):
+        import cosa.rest.routers.dm as dm
         from cosa.rest.routers.dm import execute_dm_send
         self.execute_dm_send = execute_dm_send
         self.queue       = MagicMock()
         self.persist     = MagicMock( return_value="db-123" )
         # 2-arg seam (row 12b5a766): the core now hands the CALLER's project through.
         self.build_sender = lambda s, project=None: f"sender::{s}"
+        # Row 7c84b8b8 / ec5cf83a: execute_dm_send grades every ACCEPTED send INLINE against
+        # a live model, two calls per send. A census on 2026-08-17 traced 54 outbound
+        # connections to 192.168.1.21:3001 from this class alone — the largest single source
+        # in either tier, and nothing in these test names suggests a network at all. Pin the
+        # judgment toggle OFF: that is the feature's shipped CONTROL arm, so the send path
+        # still runs its real code and takes the branch that costs nothing. No assertion here
+        # reads the grade.
+        _judgment_patch = patch.object( dm, "get_dm_quality_judgment_enabled", lambda: False )
+        _judgment_patch.start()
+        self.addCleanup( _judgment_patch.stop )
 
     def _run( self, resolve_result, body=None, new_id="fixed-msg-id", now_fn=None ):
         return self.execute_dm_send(

@@ -11,6 +11,16 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
+# Row 7c84b8b8: these smoke tests run the real v010 agents, so they reach the model server
+# at 192.168.1.21:3001 AND the public internet (16 outbound connections in the 2026-08-17
+# census). That is what they are FOR — they are not a defect and there is nothing here to
+# mock away. The unit-tier network guard needs that said OUT LOUD rather than inferred: a
+# declared exemption survives someone else reading the census and "fixing" a suite whose
+# whole job is to make live calls. Applies to every test in the module.
+pytestmark = pytest.mark.allows_outbound_network
+
 
 try:
     from cosa.tests.smoke.infrastructure.test_utilities import SmokeTestUtilities
