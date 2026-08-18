@@ -41,13 +41,30 @@ def _load_fixture( name ):
         return f.read()
 
 
+_MISTRAL_REACHABLE = {}   # one probe per process, filled on first CALL — never at import
+
+
 def _mistral_reachable():
-    import socket
-    try:
-        with socket.create_connection( ( "192.168.1.21", 3001 ), timeout=2 ):
-            return True
-    except OSError:
-        return False
+    """
+    Whether the live Mistral endpoint answers — probed WHEN ASKED, once per process.
+
+    Row 7c84b8b8: this used to be called inside a `@pytest.mark.skipif(...)` ARGUMENT, which
+    Python evaluates while the module is being imported. So the unit tier opened a socket at
+    COLLECTION time, before any test ran and regardless of which tests were selected — and a
+    collection-time dial is the one the outbound-socket guard cannot attribute to a test, and
+    the one that takes the whole run down in block mode (one offender hiding every other).
+    It is now called from an autouse fixture on the class that needs it, so it dials only when
+    those live tests are actually about to run, and the result is cached so a full run costs
+    at most one probe.
+    """
+    if "reachable" not in _MISTRAL_REACHABLE:
+        import socket
+        try:
+            with socket.create_connection( ( "192.168.1.21", 3001 ), timeout=2 ):
+                _MISTRAL_REACHABLE[ "reachable" ] = True
+        except OSError:
+            _MISTRAL_REACHABLE[ "reachable" ] = False
+    return _MISTRAL_REACHABLE[ "reachable" ]
 
 
 _VALID_XML = (
@@ -808,11 +825,24 @@ class TestMeahAlias:
         assert grade_weight( "meah" ) == 0
 
 
-@pytest.mark.skipif( not _mistral_reachable(), reason="live Mistral :3001 unreachable" )
 class TestLiveMistralRegression:
     """The gap that let bug a5f7b36d ship: unit tests fed hand-written XML and never
     hit the real endpoint. This exercises the LIVE model end-to-end (skipped when
     :3001 is unreachable so the offline unit gate stays green)."""
+
+    @pytest.fixture( autouse=True )
+    def _require_live_mistral( self ):
+        """
+        Skip at RUN time, not at collection.
+
+        The class-level `@pytest.mark.skipif( not _mistral_reachable(), ... )` this replaces
+        was evaluated while the module was imported, so merely COLLECTING the unit tier
+        opened a socket — whether or not these tests were selected (row 7c84b8b8). A fixture
+        runs per test, so the probe happens only when a live test is genuinely about to run,
+        and `_mistral_reachable` caches it so that is one probe per process at most.
+        """
+        if not _mistral_reachable():
+            pytest.skip( "live Mistral :3001 unreachable" )
 
     # Un-xfailed 2026-08-01 (row 25e8ca1c): the prompt regression is fixed and the repair
     # layer is now tag-convention-agnostic, so phi-4's clean dash-cased XML parses and this
