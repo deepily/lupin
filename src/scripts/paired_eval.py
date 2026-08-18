@@ -90,6 +90,13 @@ def _is_recorded_sha( value: Any ) -> bool:
 # v1 median). Named so the threshold is one edit, never a magic literal in the arithmetic.
 PASS_FRACTION = 0.20
 
+# Minimum shared utterances before the paired gate will report a verdict at all.
+# MANAGER RULING (María, 2026-08-17, row b7658173): a go/no-go decision must not be
+# decided by a median over a handful of utterances. Measured before the ruling: ONE
+# shared pair fired verdict PASS at n_shared=1. The number is a judgement call, not a
+# measurement — to change it, ask her; do not re-derive it at implementation time.
+MIN_SHARED_PAIRS = 30
+
 # The instrument string that PRINTS IN THE VERDICT TABLE (fix #2). It names the full
 # asymmetry — v1's FIFO queue-dwell is INSIDE its span, v2 has no queue — so a reader can
 # never take delta_ms for a compute-only difference.
@@ -196,10 +203,12 @@ def paired_provenance_check(
     if reasons:
         return "; ".join( reasons )   # a malformed stamp cannot be compared field-by-field
 
+    # SAMPLED, not measured (row b7658173). This reads `sampled_n` — what the run INTENDED
+    # to draw — so the sentence says "sampled". The outcome count is checked at the gate.
     if v1_provenance[ "sampled_n" ] == 0:
-        reasons.append( "v1 measured 0 utterances (an empty arm cannot be paired)" )
+        reasons.append( "v1 sampled 0 utterances (an empty arm cannot be paired)" )
     if v2_provenance[ "sampled_n" ] == 0:
-        reasons.append( "v2 measured 0 utterances (an empty arm cannot be paired)" )
+        reasons.append( "v2 sampled 0 utterances (an empty arm cannot be paired)" )
 
     # WHICH TREE (row c9b43538). The two shas legitimately DIFFER — v1 runs a pinned worktree,
     # v2 runs whatever is deployed — so this is a presence check, never an equality check. It
@@ -345,7 +354,15 @@ def build_paired_verdict(
         - on matching provenance, returns paired_median_delta_gate(v1_metrics,
           v2_metrics) with "provenance_ok": True added (the gate may still DECLINE on a
           missing instrument or zero shared pairs).
+        - DECLINES a FIRED gate whose n_shared is below MIN_SHARED_PAIRS, carrying
+          n_shared and provenance_ok so a reader sees how thin the pair was.
         - never raises on well-formed artifacts.
+
+    WHY THE FLOOR LIVES HERE AND NOT IN THE GATE (row b7658173). The gate computes a
+    statistic; this function decides whether a GO/NO-GO may be reported at all. Keeping
+    the floor at this layer leaves paired_median_delta_gate a pure statistic — its unit
+    tests use deliberate 2-3 point fixtures — and still covers every production path,
+    since this is the gate's only non-test caller.
     """
     provenance_reason = paired_provenance_check( v1_artifact[ "provenance" ], v2_artifact[ "provenance" ] )
     if provenance_reason is not None:
@@ -357,6 +374,21 @@ def build_paired_verdict(
 
     gate = paired_median_delta_gate( v1_artifact[ "metrics" ], v2_artifact[ "metrics" ] )
     gate[ "provenance_ok" ] = True
+
+    # THE FLOOR (María's ruling, row b7658173). A gate that FIRED over too few shared
+    # utterances is refused here rather than reported: a go/no-go must not be decided by a
+    # median over a handful. A zero-shared run and a THIN run are different failures, so
+    # the gate's own 0-shared refusal keeps its wording and this one names the count.
+    if gate[ "fired" ] and gate[ "n_shared" ] < MIN_SHARED_PAIRS:
+        return {
+            "fired"         : False,
+            "provenance_ok" : True,
+            "n_shared"      : gate[ "n_shared" ],
+            "reason"        : ( f"paired gate DECLINED (thin sample) — only {gate[ 'n_shared' ]} shared "
+                                f"utterance(s), below the {MIN_SHARED_PAIRS}-pair floor "
+                                f"(María's ruling, row b7658173)" ),
+        }
+
     return gate
 
 

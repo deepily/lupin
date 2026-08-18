@@ -37,6 +37,12 @@ import paired_eval as pe   # noqa: E402
 _PAIRS_A = [ ( "turn on the lights", "cmd_lights" ), ( "what time is it", "cmd_time" ) ]
 _PAIRS_B = [ ( "play some jazz",     "cmd_music" ) ]
 
+# A sample AT the minimum-shared-pairs floor (row b7658173). Any test that expects
+# build_paired_verdict to FIRE needs at least this many shared utterances, since the
+# go/no-go layer refuses a thinner sample. Sized off the constant, never a literal 30,
+# so raising the floor moves these fixtures with it instead of turning them red.
+_PAIRS_FLOOR = [ ( f"utterance {i}", f"cmd_{i % 6}" ) for i in range( pe.MIN_SHARED_PAIRS ) ]
+
 
 # The two arms legitimately run DIFFERENT trees — v1 a pinned worktree, v2 whatever is
 # deployed — so these differ on purpose. The sha check is presence, never equality.
@@ -56,6 +62,16 @@ def _metrics( spans_by_utt, p95=None ):
 
 def _artifact( spans_by_utt, provenance, p95=None ):
     return { "metrics": _metrics( spans_by_utt, p95 ), "provenance": provenance }
+
+
+def _spans_at_floor( span_ms, pairs=_PAIRS_FLOOR ):
+    """One identical span per utterance of `pairs` — a sample the floor lets through."""
+    return { utterance: span_ms for utterance, _ in pairs }
+
+
+def _floor_artifact( arm, span_ms, pairs=_PAIRS_FLOOR ):
+    """An artifact whose provenance and spans describe the SAME sample, at the floor."""
+    return _artifact( _spans_at_floor( span_ms, pairs ), _prov( arm, pairs=pairs ) )
 
 
 # ---------------------------------------------------------------------------
@@ -107,8 +123,10 @@ def test_provenance_check_names_missing_fields_on_either_arm():
 def test_provenance_check_flags_empty_arm():
     v1_empty = pe.make_provenance( "v1", "simple", 1024, 60, [], git_sha=_V1_SHA )
     v2_empty = pe.make_provenance( "v2", "simple", 1024, 60, [], git_sha=_V2_SHA )
-    assert "v1 measured 0 utterances" in pe.paired_provenance_check( v1_empty, _prov( "v2" ) )
-    assert "v2 measured 0 utterances" in pe.paired_provenance_check( _prov( "v1" ), v2_empty )
+    # SAMPLED, not measured (row b7658173): this check reads sampled_n — what the run
+    # INTENDED to draw — so the sentence must not claim the outcome count.
+    assert "v1 sampled 0 utterances" in pe.paired_provenance_check( v1_empty, _prov( "v2" ) )
+    assert "v2 sampled 0 utterances" in pe.paired_provenance_check( _prov( "v1" ), v2_empty )
 
 
 def test_provenance_check_names_each_disagreeing_field():
@@ -269,11 +287,56 @@ def test_gate_carries_p95_as_informational():
 # build_paired_verdict — the wiring
 # ---------------------------------------------------------------------------
 def test_build_verdict_fires_when_provenance_matches_and_instruments_present():
-    v1 = _artifact( { "a": 100.0, "b": 100.0 }, _prov( "v1" ) )
-    v2 = _artifact( { "a": 40.0,  "b": 40.0 },  _prov( "v2" ) )
-    verdict = pe.build_paired_verdict( v1, v2 )
+    verdict = pe.build_paired_verdict( _floor_artifact( "v1", 100.0 ), _floor_artifact( "v2", 40.0 ) )
     assert verdict[ "fired" ] is True and verdict[ "provenance_ok" ] is True
     assert verdict[ "verdict" ] == "PASS" and verdict[ "faster_arm" ] == "v2"
+
+
+def test_build_verdict_refuses_a_go_no_go_decided_by_one_utterance():
+    """THE FLOOR CONTROL (María's ruling, row b7658173). Before the floor this fired
+    verdict PASS at n_shared=1 — a ship decision taken on a single utterance."""
+    one     = [ _PAIRS_FLOOR[ 0 ] ]
+    verdict = pe.build_paired_verdict( _floor_artifact( "v1", 100.0, one ),
+                                       _floor_artifact( "v2", 40.0,  one ) )
+    assert verdict[ "fired" ] is False and verdict[ "provenance_ok" ] is True
+    assert verdict[ "n_shared" ] == 1 and "verdict" not in verdict
+    assert f"below the {pe.MIN_SHARED_PAIRS}-pair floor" in verdict[ "reason" ]
+
+
+def test_build_verdict_refuses_one_pair_below_the_floor():
+    """The boundary's REFUSING side. One short must refuse, or the floor is off by one."""
+    under   = _PAIRS_FLOOR[ : pe.MIN_SHARED_PAIRS - 1 ]
+    verdict = pe.build_paired_verdict( _floor_artifact( "v1", 100.0, under ),
+                                       _floor_artifact( "v2", 40.0,  under ) )
+    assert verdict[ "fired" ] is False
+    assert verdict[ "n_shared" ] == pe.MIN_SHARED_PAIRS - 1
+
+
+def test_build_verdict_fires_exactly_at_the_floor():
+    """The boundary's PROCEEDING side. AT the floor must fire — the floor is a minimum,
+    not a threshold to exceed."""
+    verdict = pe.build_paired_verdict( _floor_artifact( "v1", 100.0 ), _floor_artifact( "v2", 40.0 ) )
+    assert verdict[ "fired" ] is True and verdict[ "verdict" ] == "PASS"
+    assert verdict[ "n_shared" ] == pe.MIN_SHARED_PAIRS
+
+
+def test_build_verdict_still_fires_on_a_healthy_run():
+    """THE OTHER HALF, the one that is easy to skip: without it the floor could buy safety
+    by refusing everything and still look correct."""
+    healthy = [ ( f"healthy {i}", f"cmd_{i % 6}" ) for i in range( 480 ) ]
+    verdict = pe.build_paired_verdict( _floor_artifact( "v1", 100.0, healthy ),
+                                       _floor_artifact( "v2", 40.0,  healthy ) )
+    assert verdict[ "fired" ] is True and verdict[ "verdict" ] == "PASS"
+    assert verdict[ "n_shared" ] == 480
+
+
+def test_the_gate_itself_keeps_computing_the_statistic_below_the_floor():
+    """The floor is a GO/NO-GO policy, not part of the statistic. paired_median_delta_gate
+    stays pure so its small-fixture tests keep meaning what they say; refusing a thin
+    sample is build_paired_verdict's job."""
+    g = pe.paired_median_delta_gate( _metrics( { "a": 100.0, "b": 100.0 } ),
+                                     _metrics( { "a": 40.0,  "b": 40.0 } ) )
+    assert g[ "fired" ] is True and g[ "n_shared" ] == 2
 
 
 def test_build_verdict_declines_on_provenance_mismatch_without_calling_gate():
@@ -389,8 +452,8 @@ class _FakeStamp:
 
 def test_main_writes_report_explicit_out( tmp_path ):
     artifacts = {
-        "v1.json": _artifact( { "a": 100.0, "b": 100.0 }, _prov( "v1" ) ),
-        "v2.json": _artifact( { "a": 40.0,  "b": 40.0 },  _prov( "v2" ) ),
+        "v1.json": _floor_artifact( "v1", 100.0 ),
+        "v2.json": _floor_artifact( "v2", 40.0 ),
     }
     out = tmp_path / "paired.md"
     result = pe.main(
