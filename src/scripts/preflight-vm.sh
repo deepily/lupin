@@ -364,6 +364,39 @@ else
                 "python3 $PERM_APPLIER   # then restart any live Claude Code session"
 fi
 
+# B5 — ORPHANED BYTECODE: a .pyc whose .py is gone (row 70364793, 2026-08-18).
+# Deploys move by `git checkout`, and __pycache__ is gitignored, so git DELETES the
+# .py and LEAVES the .pyc behind. Nothing in the deploy path removes it and, until
+# this check, nothing looked for it. Runs in EVERY phase: PRE finds what the last
+# deploy left, POST finds what this one just created — the same defect at both ends.
+#
+# TIERED BY WHETHER IT CAN EXECUTE, measured on 3.13 (see pfv_pyc_orphan_class):
+#   SOURCELESS (sibling pkg/mod.pyc)      -> BLOCK. Python imports and runs it.
+#   DEAD       (pkg/__pycache__/mod.pyc)  -> WARN.  Python refuses to import it,
+#              but it is still code that no grep, diff or review can see.
+# Blocking on the inert form would be an alarm on something that cannot hurt you,
+# and a reader who triages one of those stops reading the tier.
+PYC_ROOT="${PREFLIGHT_VM_PYC_ROOT:-$REPO_ROOT/src}"
+pyc_orphans="$( pfv_scan_orphan_pyc "$PYC_ROOT" )"; pyc_rc=$?
+PYC_REMEDY="find $PYC_ROOT -name '__pycache__' -type d -prune -exec rm -rf {} + && find $PYC_ROOT -name '*.pyc' -delete"
+if [ $pyc_rc -eq 2 ]; then
+    report unknown BLOCK "cannot scan for orphaned bytecode — $PYC_ROOT is not a directory" \
+                "deploy the repo to the VM, or set PREFLIGHT_VM_PYC_ROOT"
+elif [ $pyc_rc -eq 1 ]; then
+    n_live="$( printf '%s\n' "$pyc_orphans" | grep -c '^SOURCELESS' )"
+    n_dead="$( printf '%s\n' "$pyc_orphans" | grep -c '^DEAD' )"
+    if [ "$n_live" -gt 0 ]; then
+        report fail BLOCK "$n_live sourceless .pyc under $PYC_ROOT — Python WILL import these: $( printf '%s\n' "$pyc_orphans" | grep '^SOURCELESS' | cut -f2 | head -3 | tr '\n' ' ' )" \
+                    "$PYC_REMEDY"
+    fi
+    if [ "$n_dead" -gt 0 ]; then
+        report fail WARN "$n_dead orphaned .pyc in __pycache__ under $PYC_ROOT — inert, but invisible to every grep and diff: $( printf '%s\n' "$pyc_orphans" | grep '^DEAD' | cut -f2 | head -3 | tr '\n' ' ' )" \
+                    "$PYC_REMEDY"
+    fi
+else
+    report pass BLOCK "no orphaned bytecode under $PYC_ROOT"
+fi
+
 if layer_runs B; then
 # B1/B2 — parity. POST-phase only: PRE runs before HEAD changes, so asserting the
 # old ref would be meaningless — and a meaningless assertion that passes is worse

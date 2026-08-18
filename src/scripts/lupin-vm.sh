@@ -234,8 +234,8 @@ do_push_bundle() {
     log "bundling branch '$branch' from $repo_root"
     local move_desc=""
     case "$mode" in
-        checkout) move_desc="; sudo git checkout -B $branch FETCH_HEAD; chown 1001 tree" ;;
-        reset)    move_desc="; sudo git reset --hard FETCH_HEAD; sudo git checkout -B $branch FETCH_HEAD; chown 1001 tree" ;;
+        checkout) move_desc="; sudo git checkout -B $branch FETCH_HEAD; purge __pycache__ + *.pyc; chown 1001 tree" ;;
+        reset)    move_desc="; sudo git reset --hard FETCH_HEAD; sudo git checkout -B $branch FETCH_HEAD; purge __pycache__ + *.pyc; chown 1001 tree" ;;
     esac
     if [ "$DRY_RUN" -eq 1 ]; then
         log "(dry-run) git bundle create <tmp> $branch; scp -> VM:/tmp; cp -> $vm_bundle; sudo git fetch origin $branch; chown 1001 .git$move_desc"
@@ -250,16 +250,28 @@ do_push_bundle() {
     rm -f "$bundle_tmp"
     # Overwrite the bundle in place (admin owns the file), fetch as root with an inline
     # safe.directory, restore .git ownership to 1001. Optional working-tree checkout.
+    # PURGE STALE BYTECODE whenever the working tree MOVES (row 70364793, 2026-08-18).
+    # git deletes a .py but __pycache__ is gitignored, so the .pyc SURVIVES the checkout.
+    # A sibling .pyc (no __pycache__ dir) is then imported sourceless and runs code that
+    # exists in no commit and no grep; a __pycache__ orphan is inert but still hides code
+    # from every diff and review. Both are removed here, at the one moment we know the
+    # tree just changed. Defined ONCE so `checkout` and `reset` cannot drift apart —
+    # the same single-source-of-truth reason do_push_bundle exists at all.
+    # Detected independently by preflight-vm.sh check B5; this is the prevention, that
+    # is the control. Neither replaces the other: prevention that is never verified is
+    # how "lupin-vm.sh deploy runs up -d WITHOUT --no-deps" sat in a runbook for a day
+    # and then took :7999 down.
+    local purge_pyc="sudo find $VM_ROOT/src -name '__pycache__' -type d -prune -exec rm -rf {} + && sudo find $VM_ROOT/src -name '*.pyc' -delete && echo PYCACHE_PURGED"
     local rcmd="cp /tmp/lupin-wip.bundle $vm_bundle && rm -f /tmp/lupin-wip.bundle && cd $VM_ROOT && sudo git $safe fetch origin $branch && sudo chown -R 1001:1001 .git && echo FETCHED && git $safe log --oneline -1 FETCH_HEAD"
     case "$mode" in
         checkout)
-            rcmd="$rcmd && sudo git $safe checkout -B $branch FETCH_HEAD && sudo chown -R 1001:1001 . && echo CHECKED_OUT && git $safe rev-parse --abbrev-ref HEAD" ;;
+            rcmd="$rcmd && sudo git $safe checkout -B $branch FETCH_HEAD && $purge_pyc && sudo chown -R 1001:1001 . && echo CHECKED_OUT && git $safe rev-parse --abbrev-ref HEAD" ;;
         reset)
             # DRIFT-PROOF: reset --hard forces the tracked tree to FETCH_HEAD (discards local
             # tracked edits, overwrites colliding untracked), then checkout -B relabels HEAD onto
             # the branch (now clean, so it can't abort). No `git clean` — untracked non-colliding
             # files (data/env/keys) survive.
-            rcmd="$rcmd && sudo git $safe reset --hard FETCH_HEAD && sudo git $safe checkout -B $branch FETCH_HEAD && sudo chown -R 1001:1001 . && echo RESET_CHECKED_OUT && git $safe rev-parse --abbrev-ref HEAD" ;;
+            rcmd="$rcmd && sudo git $safe reset --hard FETCH_HEAD && sudo git $safe checkout -B $branch FETCH_HEAD && $purge_pyc && sudo chown -R 1001:1001 . && echo RESET_CHECKED_OUT && git $safe rev-parse --abbrev-ref HEAD" ;;
     esac
     log "refreshing bundle + fetch on VM$( [ -n "$mode" ] && echo " (+$mode)" )"
     gcloud compute ssh "$VM_NAME" \

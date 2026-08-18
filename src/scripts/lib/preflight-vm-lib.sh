@@ -742,3 +742,132 @@ pfv_phase_includes() {
         *) return 0 ;;
     esac
 }
+
+# ── pfv_pyc_expected_source ──────────────────────────────────────────────────
+# Map a compiled-bytecode path back to the source file it must have come from.
+#
+# WHY THIS EXISTS (2026-08-18, row 70364793). The LanceDB sweep deleted
+# lancedb_solution_manager.py and vector_store_backend.py. The VM deploys by git
+# checkout and __pycache__ is gitignored, so git removed the .py files and LEFT the
+# .pyc. Python imports a stale .pyc perfectly happily when the .py is gone, so the
+# VM executed three-week-old bytecode for weeks. That dead code read a config key
+# that had since been RENAMED, got None, and every voice transcription returned 500.
+#
+# The pairing rule is the whole detector, so it is the part worth testing:
+#   pkg/__pycache__/mod.cpython-313.pyc                -> pkg/mod.py
+#   pkg/__pycache__/mod.cpython-313.opt-2.pyc          -> pkg/mod.py
+#   pkg/__pycache__/mod.cpython-313-pytest-8.4.2.pyc   -> pkg/mod.py
+#   pkg/mod.pyc  (pre-PEP-3147 sibling layout)         -> pkg/mod.py
+#
+# That third form is why the tag is stripped at the FIRST dot and not the last.
+# pytest's assertion rewriter writes a DOTTED tag (`cpython-313-pytest-8.4.2`), so
+# stripping one trailing component leaves `mod.cpython-313-pytest-8.4`, whose .py
+# never existed — and the detector reports every rewritten test file in the repo as
+# an orphan. Measured on this tree the first time: 1375 findings, ~all of them that.
+# A detector that cries wolf 1375 times is a detector nobody reads. PEP 3147 puts the
+# module name before the first dot and a module name cannot contain one, so the first
+# dot is the correct and only safe cut.
+#
+# Requires:
+#   - $1 is a path ending in .pyc
+# Ensures:
+#   - prints the .py path that .pyc must correspond to, with NO trailing newline,
+#     matching the output contract of every other printf-style helper here
+#   - the cache tag (everything from the first dot: .cpython-313, .opt-N, pytest tags) is stripped
+#     ONLY inside a __pycache__ directory, because only there does PEP 3147 put them.
+#     A sibling foo.pyc keeps its whole stem — guessing a tag off a legacy name would
+#     invent a source path and then report a file that never existed as missing
+#   - returns 2 and prints nothing for a path that is not a .pyc — a caller that
+#     hands this a .py is asking the wrong question, and answering it would fabricate
+#   - never touches the filesystem; existence is the CALLER's question
+pfv_pyc_expected_source() {
+    local pyc="$1"
+    case "$pyc" in *.pyc) ;; *) return 2 ;; esac
+    local dir base stem
+    case "$pyc" in */*) dir="${pyc%/*}" ;; *) dir="." ;; esac
+    base="${pyc##*/}"
+    stem="${base%.pyc}"
+    if [ "${dir##*/}" = "__pycache__" ]; then
+        # Step up out of __pycache__. A leading-slash root ("/__pycache__") collapses
+        # to the empty string, which the format string below turns back into "/foo.py"
+        # — correct, and one branch fewer than special-casing it.
+        case "$dir" in */*) dir="${dir%/*}" ;; *) dir="." ;; esac
+        stem="${stem%%.*}"
+    fi
+    printf '%s/%s.py' "$dir" "$stem"
+}
+
+# ── pfv_pyc_orphan_class ─────────────────────────────────────────────────────
+# Say whether an orphaned .pyc can actually EXECUTE, or is merely dead weight.
+#
+# MEASURED on CPython 3.13, not assumed (2026-08-18). Compile a module, delete the
+# .py, and `import` it:
+#   pkg/__pycache__/mod.cpython-313.pyc    ->  ModuleNotFoundError.  INERT.
+#   pkg/mod.pyc  (sibling, no __pycache__) ->  imports and runs.     LIVE.
+# PEP 3147 is explicit that a __pycache__ entry is only ever consulted ALONGSIDE its
+# source; sourceless import requires the legacy sibling layout. So the two orphan
+# shapes are not the same finding and must not carry the same tier — blocking a
+# deploy on bytecode that provably cannot run is a guard that fires where nothing
+# can hurt you, and a reader who triages one of those learns to skip the tier.
+#
+# The __pycache__ form is still worth reporting, for a different reason: it is code
+# that no grep, no diff and no review can see, so the tree lies about what it holds.
+# That is a WARN-shaped defect, not a BLOCK-shaped one.
+#
+# Requires:
+#   - $1 is a path ending in .pyc
+# Ensures:
+#   - prints SOURCELESS for a sibling .pyc — Python WILL import it
+#   - prints DEAD for a .pyc inside a __pycache__ directory — Python will not
+#   - returns 2 and prints nothing for a path that is not a .pyc
+pfv_pyc_orphan_class() {
+    local pyc="$1"
+    case "$pyc" in *.pyc) ;; *) return 2 ;; esac
+    local dir
+    case "$pyc" in */*) dir="${pyc%/*}" ;; *) dir="." ;; esac
+    if [ "${dir##*/}" = "__pycache__" ]; then printf 'DEAD'; else printf 'SOURCELESS'; fi
+    return 0
+}
+
+# ── pfv_scan_orphan_pyc ──────────────────────────────────────────────────────
+# Find every .pyc under a tree whose source .py is absent, classified by whether
+# it can execute.
+#
+# ORPHANED BYTECODE HIDES FROM EVERY REVIEW. Whether or not it runs, it is a file
+# the source tree does not account for: it appears in no grep, no diff, no code
+# review. The SOURCELESS shape additionally still imports, which makes it the only
+# class of running code that git can neither see nor remove.
+#
+# Requires:
+#   - $1 is a path
+# Ensures:
+#   - prints one orphan per line as: <SOURCELESS|DEAD><TAB><path>, unsorted
+#   - returns 0 and prints NOTHING when the tree is clean
+#   - returns 1 when one or more orphans exist — an exit code, not a count, so the
+#     caller cannot mistake "clean" for "did not look". The CALLER decides tiers by
+#     class; this function does not editorialise
+#   - returns 2 and prints nothing when $1 is not a directory. NOT 0: a scan that
+#     could not look must never report the same thing as a scan that found nothing,
+#     which is the alarm-gated-on-the-healthy-value defect this file keeps naming
+#   - prunes .git, .venv, venv, node_modules, site-packages and .claude worktree
+#     copies. Third-party wheels may legitimately ship .pyc without .py, and a
+#     worktree is a second checkout whose bytecode no deploy serves; reporting
+#     either would bury the real finding in noise
+#   - reads the filesystem but nothing else — no ssh, no docker, no network
+pfv_scan_orphan_pyc() {
+    local root="$1"
+    [ -d "$root" ] || return 2
+    local found=0 pyc src cls
+    while IFS= read -r pyc; do
+        src="$( pfv_pyc_expected_source "$pyc" )"
+        [ -e "$src" ] && continue
+        cls="$( pfv_pyc_orphan_class "$pyc" )"
+        printf '%s\t%s\n' "$cls" "$pyc"
+        found=1
+    done < <( find "$root" \
+                  \( -name .git -o -name .venv -o -name venv -o -name node_modules \
+                     -o -name site-packages -o -name worktrees \) -prune \
+                  -o -name '*.pyc' -print 2>/dev/null )
+    [ "$found" -eq 0 ] || return 1
+    return 0
+}
