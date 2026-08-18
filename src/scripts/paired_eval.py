@@ -273,6 +273,15 @@ def paired_median_delta_gate(
             threshold_ms; n_shared, n_dropped (+ v1_only / v2_only breakdown, RECORDED
             per §6); faster_arm from the sign of median_delta_ms; and the p95s carried
             as INFORMATIONAL (never gating).
+
+    ⚠️ NO MINIMUM-SAMPLE FLOOR IS APPLIED HERE. This function computes a statistic; it
+    will happily fire over two shared utterances. The MIN_SHARED_PAIRS floor lives one
+    layer up, in build_paired_verdict, which is this function's ONLY non-test caller —
+    so every production path gets the floor today. THAT IS A DEPENDENCY, NOT A
+    PROPERTY: add a second caller and it silently ships un-floored verdicts. A test
+    enforces it (test_paired_eval.py::test_the_gate_has_exactly_one_non_test_caller) —
+    if you are adding a caller, that test will fail, and the fix is to route through
+    build_paired_verdict or to apply the floor yourself. Row b7658173.
         - never raises.
     """
     reasons = [

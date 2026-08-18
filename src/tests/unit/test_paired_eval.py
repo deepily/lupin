@@ -303,6 +303,41 @@ def test_build_verdict_refuses_a_go_no_go_decided_by_one_utterance():
     assert f"below the {pe.MIN_SHARED_PAIRS}-pair floor" in verdict[ "reason" ]
 
 
+def test_the_gate_has_exactly_one_non_test_caller():
+    """THE DEPENDENCY GUARD (María, row b7658173). The floor lives in
+    build_paired_verdict, and that covers every production path ONLY because it is
+    paired_median_delta_gate's sole non-test caller. Nothing in the language enforces
+    that, so a second caller would silently ship un-floored verdicts and nobody would
+    find out. This test is what finds out.
+
+    If you are adding a caller and this went red: route it through build_paired_verdict,
+    or apply the MIN_SHARED_PAIRS floor yourself, then add it to _ALLOWED below."""
+    import re
+
+    _ALLOWED = { "src/scripts/paired_eval.py" }   # the definition + build_paired_verdict's call
+
+    root    = os.path.join( _LUPIN_ROOT, "src" )
+    callers = set()
+    for directory, dirs, files in os.walk( root ):
+        dirs[ : ] = [ d for d in dirs if d not in ( "__pycache__", ".venv", "node_modules" ) ]
+        if f"{os.sep}tests{os.sep}" in f"{directory}{os.sep}": continue
+        for name in files:
+            if not name.endswith( ".py" ): continue
+            path = os.path.join( directory, name )
+            # errors="ignore": a non-UTF8 byte cannot hide an ASCII identifier, and one
+            # undecodable file must not blind the whole scan.
+            with open( path, encoding="utf-8", errors="ignore" ) as handle: text = handle.read()
+            # a CALL, not the def line and not a bare mention in prose
+            if re.search( r"(?<!def )paired_median_delta_gate\s*\(", text ):
+                callers.add( os.path.relpath( path, _LUPIN_ROOT ) )
+
+    assert callers == _ALLOWED, (
+        f"paired_median_delta_gate gained a caller outside {_ALLOWED}: {sorted( callers - _ALLOWED )}. "
+        "The MIN_SHARED_PAIRS floor lives in build_paired_verdict, so a caller that skips it "
+        "reports a go/no-go over a sample the floor would have refused (row b7658173)."
+    )
+
+
 def test_build_verdict_refuses_one_pair_below_the_floor():
     """The boundary's REFUSING side. One short must refuse, or the floor is off by one."""
     under   = _PAIRS_FLOOR[ : pe.MIN_SHARED_PAIRS - 1 ]
