@@ -22,6 +22,7 @@ import os
 import pytest
 
 import cosa.utils.util as cu
+from cosa.training.xml_coordinator import XmlCoordinator
 
 
 # ============================================================================
@@ -196,10 +197,10 @@ class TestSweTeamTrainingData:
 # ============================================================================
 
 REQUIRED_CONFIG_KEYS = { "template_file", "placeholders", "args_key" }
-VALID_GETTER_NAMES   = {
-    "research_topics", "document_paths", "claude_code_tasks", "swe_team_tasks",
-    "audience_levels", "audience_contexts", "renderer_names", "duration_minutes",
-}
+# Derived from the coordinator's own dispatch, never re-typed here. The former
+# hardcoded copy went stale the moment a getter was added (test_types,
+# tfe_plan_paths) and reported the CONFIG as invalid rather than itself.
+VALID_GETTER_NAMES   = set( XmlCoordinator.PLACEHOLDER_GETTER_NAMES )
 
 
 def _load_full_config():

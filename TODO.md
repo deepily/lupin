@@ -1762,6 +1762,71 @@ The ratified **mux MVP-finish remediation** (6 items; plan `src/rnd/v0.1.9/2026.
 
 ## Pending
 
+### 🌅 MORNING AFTER THE REBOOT — two gates left open on purpose (store row `19a417fa`)
+
+Rick's call at session-end 2026-08-17: pick these up in the morning, after the reboot.
+
+**1. WebSocket smoke cannot run from any agent seat.** `run-websocket-smoke-tests.sh` aborts at
+pre-flight on unset `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL` / `_PASSWORD`. Measured: the
+credentials **are** in `~/.bashrc` (1 grep hit), `source ~/.bashrc` leaves them **empty**, and
+`~/.profile` has 0 hits. That is the `case $- in … *) return;;` early-return at lines 5-8 documented
+at the top of this file — every export below it is dead code for tool shells.
+**Remedy is Rick's, already recorded**: move both exports above the guard, or into `~/.profile`.
+⚠️ **The reboot alone does not fix it** — see the entry above; it needs
+`docker compose up -d --force-recreate` from an *interactive* shell, and `bounce-dev-server.sh`
+does not substitute.
+
+**2. Six pre-existing unit failures, none from tonight's work.** Proven by stashing every file
+touched and re-running against clean HEAD — identical list both ways.
+
+| test | count |
+|---|---|
+| `test_compose_env_contract_coverage.py` | 2 |
+| `test_compose_service_parity.py::test_env_key_parity` | 1 |
+| `test_env_contract_citations.py` (`GH_TOKEN@docker-compose.yml:266`, `:442`) | 2 |
+| `test_pytest_collection_diagnosis.py::test_shape_a_is_diagnosed_as_a_collection_error` | 1 |
+
+Five of six are the **docker-compose env contract** — the same surface as the `JWT_SECRET_KEY` /
+`.env` provisioning in `b6b012a6` and `cba7b4a6`. They look like compose changes that landed without
+the contract file following. **Whoever owns that lane should confirm before anyone edits.**
+
+**Green and needing no redo**: unit 15,639 passed · cosa 8,696 passed / 26 skipped · training 111
+passed / 7 skipped. **Still unrun**: serial bridge guard, E2E UI + visual, integration (final gate).
+
+### 🔬 FIRST LoRA RETRAIN — tomorrow evening, 2026-08-18 (store row `c4837011`)
+
+The registry → XML → PeftTrainer seam has **never run end to end**. Until 2026-08-17 the trainer
+had only ever consumed the April 2026-04-05 corpus, which predated the registry by four months.
+The live corpus was regenerated tonight through the sanctioned path
+(`XmlCoordinator.write_ttv_split_to_jsonl`), so tomorrow is the first run against generated data.
+
+**Corpus now on disk** (`sample_size_per_command=1500`): 47,336 rows — 37,868 train / 4,734 test /
+4,734 validate, 40 commands, worst class ratio **9.9×** (April was 56.3×).
+April preserved beside it as `voice-commands-xml-{train,test,validate}.april-2026.04.05.jsonl`
+(gitignored, same directory) — the swap is reversible with three `mv` commands.
+
+**Three defects the new corpus fixes vs April:**
+
+| # | defect | April | now |
+|---|---|---|---|
+| 1 | two contradicting router instructions for the same 17 commands | 16,585 rows `<agent-routing-commands>` + 7,371 rows `<browser-commands>` | one template, 0 browser-wrapper router rows |
+| 2 | `agent router go to test fix expediter resume` absent entirely | 0 | 1,500 |
+| 3 | starved classes | test suite 85, tfe resume 0 | 1,465 / 1,500 |
+
+Defect 1 was fixed in *code* on 2026-08-16 (`dfc9eb47`, row `14ba1437`) and guarded by a test —
+but the guard covers the generator, not the file, so the artifact carried it for two more days.
+
+**Watch during the run:** every row's `instruction` carries the full command menu inline, so the
+LoRA learns the **menu** — any registry change obliges a corpus regeneration before a retrain
+(row `95924f2d`). `test suite` and `tfe resume` went from starved to full, so they are the classes
+most likely to move.
+
+**Still open — the remaining floor:** the ten "using clipboard" variants are pinned at 200 rows each
+by their 200-line seed files, and they alone set the 9.9× ratio. Untouched tonight.
+
+⚠️ **The host is powered off ~22:53–07:17 EDT.** "Tomorrow evening" must start before ~22:53 or the
+job does not run late — it does not run at all until boot.
+
 ### History Archive (Session 280)
 
 ### SWE Team Proxy: Workload Generator + Shadow-Mode Capture

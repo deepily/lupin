@@ -670,6 +670,39 @@ class XmlCoordinator:
         with open( config_path, "r" ) as f:
             return json.load( f )
 
+    # The single source of truth for which placeholder sources a config entry may
+    # name. test_swe_team_training_data.py validates the config against THIS —
+    # it used to keep its own hardcoded copy, which went stale the moment a
+    # getter was added and failed the config rather than the drift.
+    PLACEHOLDER_GETTER_NAMES = (
+        "research_topics", "document_paths", "claude_code_tasks", "swe_team_tasks",
+        "test_types", "tfe_plan_paths", "audience_levels", "audience_contexts",
+        "renderer_names", "duration_minutes",
+    )
+
+    def _placeholder_getter_dispatch( self ):
+        """
+        Maps a config `source` name to the getter that supplies its values.
+
+        Requires:
+            - self.prompt_generator is initialized
+
+        Ensures:
+            - Returns a dict whose keys are exactly PLACEHOLDER_GETTER_NAMES
+        """
+        return {
+            "research_topics"   : self.prompt_generator.get_research_topics,
+            "document_paths"    : self.prompt_generator.get_document_paths,
+            "claude_code_tasks" : self.prompt_generator.get_claude_code_tasks,
+            "swe_team_tasks"    : self.prompt_generator.get_swe_team_tasks,
+            "test_types"        : self.prompt_generator.get_test_types,
+            "tfe_plan_paths"    : self.prompt_generator.get_tfe_plan_paths,
+            "audience_levels"   : self.prompt_generator.get_audience_levels,
+            "audience_contexts" : self.prompt_generator.get_audience_contexts,
+            "renderer_names"    : self.prompt_generator.get_renderer_names,
+            "duration_minutes"  : self.prompt_generator.get_duration_minutes,
+        }
+
     def _get_placeholder_values_by_name( self, getter_name, requested_length=None ):
         """
         Dispatch placeholder getter by name string from config.
@@ -683,16 +716,7 @@ class XmlCoordinator:
         Raises:
             - ValueError if getter_name is unknown
         """
-        dispatch = {
-            "research_topics"   : self.prompt_generator.get_research_topics,
-            "document_paths"    : self.prompt_generator.get_document_paths,
-            "claude_code_tasks" : self.prompt_generator.get_claude_code_tasks,
-            "swe_team_tasks"    : self.prompt_generator.get_swe_team_tasks,
-            "audience_levels"   : self.prompt_generator.get_audience_levels,
-            "audience_contexts" : self.prompt_generator.get_audience_contexts,
-            "renderer_names"    : self.prompt_generator.get_renderer_names,
-            "duration_minutes"  : self.prompt_generator.get_duration_minutes,
-        }
+        dispatch = self._placeholder_getter_dispatch()
         getter = dispatch.get( getter_name )
         if getter is None:
             raise ValueError( f"Unknown placeholder getter: '{getter_name}'. Available: {list( dispatch.keys() )}" )

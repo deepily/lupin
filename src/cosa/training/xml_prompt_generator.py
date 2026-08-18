@@ -751,6 +751,37 @@ class XmlPromptGenerator:
         """
         return self._get_placeholder_values( "/src/ephemera/prompts/data/placeholders-swe-team-tasks.txt", requested_length=requested_length )
 
+    def get_test_types( self, requested_length: Optional[int]=None ) -> list:
+        """
+        Gets placeholder test-suite type names for test suite job training.
+
+        Requires:
+            - requested_length is None or positive integer
+
+        Ensures:
+            - Returns list of test type names
+            - Length matches requested_length if specified
+        """
+        return self._get_placeholder_values( "/src/ephemera/prompts/data/placeholders-test-types.txt", requested_length=requested_length )
+
+    def get_tfe_plan_paths( self, requested_length: Optional[int]=None ) -> list:
+        """
+        Gets placeholder TFE resume targets for test-fix-expediter resume training.
+
+        Values are limited to the two forms resume_resolver.resolve_resume_target
+        actually implements — a tfe-* job ID, or a plan doc path ending in
+        "-plan.md" / containing "/plans/". Its natural-language branch is a
+        Phase 2 stub, so free-text targets are deliberately excluded.
+
+        Requires:
+            - requested_length is None or positive integer
+
+        Ensures:
+            - Returns list of resolvable TFE resume targets
+            - Length matches requested_length if specified
+        """
+        return self._get_placeholder_values( "/src/ephemera/prompts/data/placeholders-tfe-plan-paths.txt", requested_length=requested_length )
+
     def get_audience_levels( self, requested_length: Optional[int]=None ) -> list:
         """
         Gets placeholder audience levels for podcast generation.

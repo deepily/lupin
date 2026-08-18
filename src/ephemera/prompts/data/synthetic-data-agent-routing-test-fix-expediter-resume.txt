@@ -33,3 +33,17 @@ resume TFE from a while ago
 continue the TFE that was waiting
 resume that TFE from today
 pick up TFE from the plan file
+resume TFE from PLAN_PATH
+continue the test fix expediter from PLAN_PATH
+pick up TFE from PLAN_PATH
+resume the test fix expediter using PLAN_PATH
+restart TFE from PLAN_PATH
+continue the stalled TFE at PLAN_PATH
+resume the TFE job PLAN_PATH
+pick up test fix expediter work from PLAN_PATH
+resume from PLAN_PATH
+continue TFE using PLAN_PATH
+please resume TFE from PLAN_PATH
+can you continue the test fix expediter from PLAN_PATH
+go resume the TFE at PLAN_PATH
+kick off a TFE resume from PLAN_PATH

@@ -1,0 +1,57 @@
+unit
+integration
+end to end
+e2e
+smoke
+regression
+visual regression
+websocket
+websocket smoke
+auth
+authentication
+presentation regression
+proxy integration
+container preflight
+functional
+performance
+load
+security
+api
+rest api
+database
+migration
+notification
+queue
+agent
+router
+voice
+tts
+frontend
+ui
+backend
+cosa
+serial bridge guard
+coverage
+nightly
+full
+quick
+sanity
+acceptance
+contract
+schema
+lint
+type
+snapshot
+visual
+accessibility
+browser
+mobile
+firefox
+plugin
+scheduler
+watchdog
+expediter
+memory
+config
+startup
+health

@@ -8,6 +8,26 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.08.18 - Session 6d1de124 (Cheech 🌿) | The trainer had never once seen registry output
+
+**The seam Rick asked me to debug had never run.** PeftTrainer reads three jsonl files from `src/ephemera/prompts/data/`. Those files were dated 2026-04-05; `xml_coordinator.py` 2026-08-16; `xml_prompt_generator.py` 2026-08-17. Four months of registry changes had never reached the trainer, so "debug the seam" turned out to mean "run it for the first time."
+
+**What April actually taught**, measured across all 44,456 rows: **two contradicting instructions for the same 17 routing commands** — 16,585 rows under `<agent-routing-commands>` ("a routing command another LLM would understand") and 7,371 under `<browser-commands>` ("a command a browser on your computer would understand"). An order-insensitive diff says the wrapper tag and one sentence are the *only* differences. The mislabeled 7,371 carry `none`/`automatic`/`calculator`/`math`/`todo` — the five classes the augmentation config boosts hardest.
+
+I first reported that as a new finding. It wasn't: fixed in code on 2026-08-16 (`dfc9eb47`, row `14ba1437`) and pinned by a test that passes. **The guard covers the generator; nothing guarded the file**, so the artifact carried the defect for two more days. Regenerating is what retires it — and that gap is the reusable lesson, not the wrapper bug.
+
+**Two starved classes, and the cap was never the limiter.** Measured at cap 400 *and* cap 1500, `test suite` sat at 154 and `test fix expediter resume` at 35 — both declared `"placeholders": {}`, so the agentic builder emits one row per seed line at any cap. Raising the cap to April's 1500 made imbalance **worse**, 25.7× → 56.3×, because only healthy classes could grow. Wired `TEST_TYPE`→`test_types` and `PLAN_PATH`→`tfe_plan_paths`, both new getters with new value files.
+
+**`PLAN_PATH` first borrowed the registered `document_paths` list** — cheap, and wrong. `resolve_resume_target` implements exactly two branches (a `tfe-*` job ID, a path ending `-plan.md` or containing `/plans/`); its natural-language branch is a Phase 2 stub. Not one of `document_paths`' 179 values satisfies either. I reported that as "~29% wrong" — I had measured *is it a path*, the wrong bar. The negative control says **398 of 398, 100%**.
+
+**Result, verified by reading the live files back off disk**: 44,456 → 47,336 rows · 39 → 40 commands · 56.3× → 9.9× · browser-wrapper router rows 7,371 → **0** · unresolvable resume args **0 of 1,471**. Written through `write_ttv_split_to_jsonl()`, the real pipeline call. April preserved beside it as `*.april-2026.04.05.jsonl` — gitignored only after I renamed the backups; the first naming would have staged 237 MB.
+
+**One test failure was mine and pointed at a duplication.** `test_all_config_placeholder_getters_valid` kept its own hardcoded copy of the dispatch's key set, so two new getters made it fail the *config* rather than itself. Fixed at the seam: `_placeholder_getter_dispatch()` + `PLACEHOLDER_GETTER_NAMES`, one source of truth, test derives from it. The other two failures I proved pre-existing by stashing every file I touched and watching them still fail against clean HEAD.
+
+**Files**: `xml_coordinator.py` · `xml_prompt_generator.py` · `agent-router-agentic-commands.json` · `placeholders-test-types.txt` (NEW) · `placeholders-tfe-plan-paths.txt` (NEW, fixed seed so re-runs never churn the corpus) · two seed files · `test_agentic_placeholder_yield_regression.py` (NEW, 4 tests, two negative controls) · `test_swe_team_training_data.py`.
+
+**Still open**: the ten "using clipboard" variants are pinned at 200 rows each by their 200-line seed files and alone set the 9.9× floor. First LoRA retrain against this corpus is tomorrow evening — store row `c4837011`, TODO.md.
+
 ### 2026.08.17 - Session e251aa88 (Mr. Radio 🦉, with Tiffany 💍, Rachel 🕊️, john 🏄🏽) | The manager was wrong five times and the crew caught every one
 
 **Every substantive correction tonight ran worker → manager.** I filed a P1, ruled on a fix, and stated a rule; each was walked back by the person holding the measurement. The pattern in all five: I reached for the general statement one run before the evidence supported it.
