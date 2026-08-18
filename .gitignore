@@ -71,6 +71,11 @@ src/conf/memory/**
 src/conf/keys/**
 
 # Per-developer GCP deploy config (copied from cloud-run.env.example)
+# Docker Compose auto-loads this for ${VAR} substitution. It carries JWT_SECRET_KEY
+# (row adce3547) and must never be committable — the whole point of that row is a
+# signing secret sitting in a tracked file on a public repo.
+.env
+
 src/scripts/cloud-run.env
 src/scripts/cloud-run-model-server.env
 

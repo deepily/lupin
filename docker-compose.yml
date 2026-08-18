@@ -231,6 +231,14 @@ services:
     environment:
       LUPIN_ROOT: /var/lupin
       LUPIN_ENV: development
+      # Row adce3547: the JWT signing secret comes from the ENVIRONMENT and nowhere
+      # else — jwt_service.py has no literal fallback. The value lives in the
+      # UNTRACKED, gitignored .env beside this file, which Compose auto-loads; it is
+      # never committed, because a signing secret in a tracked file on a public repo
+      # is the defect that row exists to close.
+      # ⚠️ Env resolves at container CREATE: changing it needs
+      # `docker compose up -d --force-recreate`, never a plain restart.
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set JWT_SECRET_KEY in .env — see row adce3547}
       LUPIN_CONFIG_MGR_CLI_ARGS: "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development"
       # DM traffic corpus — OUTSIDE the repo (Rick 2026-08-13). Points at the
       # bind-mount below, which is the host's <projects-data>/lupin/dm-corpus.
@@ -408,6 +416,14 @@ services:
     environment:
       LUPIN_ROOT: /var/lupin
       LUPIN_ENV: testing
+      # Row adce3547: the JWT signing secret comes from the ENVIRONMENT and nowhere
+      # else — jwt_service.py has no literal fallback. The value lives in the
+      # UNTRACKED, gitignored .env beside this file, which Compose auto-loads; it is
+      # never committed, because a signing secret in a tracked file on a public repo
+      # is the defect that row exists to close.
+      # ⚠️ Env resolves at container CREATE: changing it needs
+      # `docker compose up -d --force-recreate`, never a plain restart.
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set JWT_SECRET_KEY in .env — see row adce3547}
       LUPIN_CONFIG_MGR_CLI_ARGS: "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing"
       # DM traffic corpus — same host directory as :7999 (see the dev service).
       # The two servers share ONE corpus; `server_port` + `boot_id` on every row
