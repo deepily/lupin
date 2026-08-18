@@ -314,6 +314,26 @@ def assemble_v1_record( utterance: str, expected_command: str, push_result: Dict
     return rec
 
 
+def _degradation_none_text( metrics: Dict[str, Any] ) -> str:
+    """
+    What to print when no degradation path was seen (row 3146c46b).
+
+    Requires:
+        - metrics is a v1 metric row; `degradation_observable` may be absent on an
+          artifact written before this field existed.
+
+    Ensures:
+        - returns "(NOT OBSERVABLE — this arm cannot see degradation; see row 3146c46b)"
+          when the arm reports the instrument cannot fire.
+        - returns "(none)" only when the arm actually reports it CAN observe, so the
+          bare word never again stands for "we did not look".
+        - a MISSING flag reads as not-observable: an old artifact predates the fix and
+          was produced by the same blind instrument.
+    """
+    return "(none)" if metrics.get( "degradation_observable" ) else \
+           "(NOT OBSERVABLE — this arm cannot see degradation; see row 3146c46b)"
+
+
 def _classify_degradation( metadata: Dict[str, Any] ) -> Optional[str]:
     """
     Ensures:
@@ -323,6 +343,20 @@ def _classify_degradation( metadata: Dict[str, Any] ) -> Optional[str]:
           (a failed job exercised the generic agent-error path)
         - else None (a clean completion exercised no degradation path)
         - never raises
+
+    ⚠️ THIS CLASSIFIER CANNOT CURRENTLY FIRE ON PRODUCTION DATA (row 3146c46b).
+    Both branches are unreachable as the system stands:
+      · nothing anywhere writes `degradation_path` — a grep over src/, excluding tests
+        and this file, returns zero producers;
+      · `error` is hardcoded None at all five COMPLETED emitters (running_fifo_queue.py
+        :608, :1416, :1622, :1698, :1906), and a real failure emits RUNNING -> FAILED
+        instead (:867) — a transition this arm never reads, since parse_transitions
+        captures metadata only on "completed".
+    So `degradation_paths_seen` reads [] on every real run. That is NOT evidence that no
+    degradation occurred; it means this arm cannot observe degradation at all. The unit
+    tests below hand this function metadata directly, so they exercise both branches and
+    pass regardless — which is exactly why the emptiness looked like a clean bill of
+    health for as long as it did.
     """
     named = metadata.get( "degradation_path" )
     if named in DEGRADATION_PATHS:
@@ -385,8 +419,10 @@ def compute_v1_metrics( records: List[V1Record] ) -> Dict[str, Any]:
         - returns a dict with: n, ok_n, failure_rate, routing_accuracy (over OK
           records, command-match LOWER BOUND R-C2), cache_hit_rate (over OK
           records), latency_p50_ms / latency_p95_ms (over OK spans),
-          degradation_paths_seen (sorted list), spans (the raw OK span list, for
-          the paired median-Δ gate)
+          degradation_paths_seen (sorted list), degradation_observable (row 3146c46b —
+          always False: this arm cannot observe degradation at all, so an empty
+          paths list means "cannot observe", NOT "none seen"), spans (the raw OK
+          span list, for the paired median-Δ gate)
         - rates are None when their denominator is 0 (never a divide-by-zero, never
           a fabricated 0.0) — see _rate
         - never raises
@@ -430,6 +466,11 @@ def compute_v1_metrics( records: List[V1Record] ) -> Dict[str, Any]:
         "server_compute_p50_ms"  : percentile( compute_spans, 50.0 ),
         "server_wall_p50_ms"     : percentile( wall_spans, 50.0 ),
         "degradation_paths_seen" : seen_paths,
+        # row 3146c46b — an empty list above means "CANNOT OBSERVE", not "none seen". No
+        # producer writes degradation_path, and every COMPLETED emitter hardcodes error
+        # None, so this arm never sees a degradation whatever happened. The companion
+        # rides IN the artifact so a downstream reader cannot mistake [] for a clean run.
+        "degradation_observable"  : False,
     }
 
 
@@ -627,7 +668,9 @@ def render_v1_report( metrics: Dict[str, Any], *, seed: int, corpus: str,
         "the pre-queue routing/embedding/cache work /api/push does synchronously) --",
         f"server_compute_p50_ms : {_fmt( metrics['server_compute_p50_ms'] )}  (RUNNING->COMPLETED, dwell excluded)",
         f"server_wall_p50_ms    : {_fmt( metrics['server_wall_p50_ms'] )}  (QUEUED->COMPLETED, dwell included)",
-        f"degradation_seen      : {', '.join( metrics['degradation_paths_seen'] ) or '(none)'}",
+        # row 3146c46b — "(none)" read as a clean bill of health is the defect this line
+        # carried. When the instrument cannot fire, the report says so instead.
+        f"degradation_seen      : {', '.join( metrics['degradation_paths_seen'] ) or _degradation_none_text( metrics )}",
     ]
     return "\n".join( rows )
 

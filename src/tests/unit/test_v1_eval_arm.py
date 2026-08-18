@@ -566,8 +566,27 @@ def test_render_report_with_values():
 def test_render_report_with_none_rates():
     m = v1.compute_v1_metrics( [ ] )
     out = v1.render_v1_report( m, seed=7, corpus="simple", n_per_command=60, base_url="http://x" )
-    assert "routing_accuracy      : <n/a>%" in out and "degradation_seen      : (none)" in out
+    assert "routing_accuracy      : <n/a>%" in out
     assert "client_p50_ms         : <n/a>" in out
+    # row 3146c46b — an empty degradation list must NOT render as a clean bill of health.
+    # This arm cannot observe degradation at all, and the report has to say so.
+    assert "degradation_seen      : (NOT OBSERVABLE" in out
+    assert "degradation_seen      : (none)" not in out
+
+
+def test_metrics_declare_degradation_unobservable():
+    """row 3146c46b. The artifact must carry the caveat, not just the empty list —
+    a downstream reader sees only the artifact, never this file's comments."""
+    m = v1.compute_v1_metrics( [ _rec( client=100.0 ) ] )
+    assert m[ "degradation_paths_seen" ] == [ ]
+    assert m[ "degradation_observable" ] is False
+
+
+def test_missing_observable_flag_reads_as_not_observable():
+    """An artifact written BEFORE this fix has no flag and came from the same blind
+    instrument, so the absent flag must not read as 'we looked and saw nothing'."""
+    assert "NOT OBSERVABLE" in v1._degradation_none_text( { } )
+    assert v1._degradation_none_text( { "degradation_observable": True } ) == "(none)"
 
 
 # ───────────────────────────────────────────── CLI
