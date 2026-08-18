@@ -35,6 +35,7 @@ from cosa.rest.routers._scope_registry import (
     _opens_a_json_container,
     _parsed_value_carries_a_credential,
     _prefix_looks_like_credential,
+    credential_verdict,
     _strip_leadin_noise,
     _the_window_may_be_hiding_the_signature,
     _value_is_secret_material,
@@ -1098,3 +1099,81 @@ def test_the_recursion_error_ancestry_claim_I_made_was_wrong():
     """
     assert issubclass( RecursionError, Exception )
     assert RecursionError.__mro__[ : 4 ] == ( RecursionError, RuntimeError, Exception, BaseException )
+
+
+# ── Row ee1670bc: the refusal has to say WHICH refusal it is ─────────────────
+#
+# `is_credential_file` answers one bit and two different facts were collapsing into it.
+# An unreadable file blocked, correctly, and the viewer then told the reader the file's
+# CONTENT was credential material — a true refusal with a false explanation, which sends
+# whoever is debugging to hunt for a key that was never there. THE FLOOR DOES NOT MOVE:
+# both outcomes still refuse. Only the explanation became available.
+
+def test_a_real_credential_reads_credential( tmp_path ):
+    path = tmp_path / "key.json"
+    path.write_text( json.dumps( SA_KEY_NO_PEM ), encoding="utf-8" )
+
+    assert credential_verdict( str( path ) ) == "credential"
+
+
+def test_an_ordinary_document_reads_clean( tmp_path ):
+    path = tmp_path / "notes.md"
+    path.write_text( "# Notes\nnothing secret here\n", encoding="utf-8" )
+
+    assert credential_verdict( str( path ) ) == "clean"
+
+
+def test_a_missing_file_reads_unreadable_NOT_credential( tmp_path ):
+    """
+    THE RED for ee1670bc, at the layer that decides it. Before the split this was
+    indistinguishable from a real key, and the doc viewer said so out loud.
+    """
+    assert credential_verdict( str( tmp_path / "gone.json" ) ) == "unreadable"
+
+
+def test_a_non_utf8_file_reads_unreadable_NOT_credential( tmp_path ):
+    path = tmp_path / "binary.txt"
+    path.write_bytes( b"\xff\xfe\x00\x01not utf-8 at all" )
+
+    assert credential_verdict( str( path ) ) == "unreadable"
+
+
+def test_an_error_while_deciding_reads_unreadable_NOT_credential( tmp_path, monkeypatch ):
+    """
+    We could not complete the decision. That is a statement about our ability to tell,
+    never about the file's content — so it must not borrow the credential verdict.
+    """
+    path = tmp_path / "ordinary.json"
+    path.write_text( '{"type": "tokenizer"}', encoding="utf-8" )
+
+    monkeypatch.setattr( "cosa.rest.routers._scope_registry._prefix_looks_like_credential",
+                         lambda _p: ( _ for _ in () ).throw( ValueError( "boom" ) ) )
+
+    assert credential_verdict( str( path ) ) == "unreadable"
+
+
+@pytest.mark.parametrize( "verdict_case,label", [
+    ( "credential",  "a real key"        ),
+    ( "unreadable",  "an unreadable file" ),
+] )
+def test_is_credential_file_still_BLOCKS_on_both_refusing_verdicts( tmp_path, verdict_case, label ):
+    """
+    THE CONTRACT THAT MUST NOT MOVE. `is_credential_file` is now defined as
+    `credential_verdict(...) != "clean"`, so every mutation proof written against it
+    keeps holding — including the unreadable case, which is the one a careless split
+    would quietly turn into a serve.
+    """
+    if verdict_case == "credential":
+        path = tmp_path / "key.json"
+        path.write_text( json.dumps( SA_KEY_NO_PEM ), encoding="utf-8" )
+    else:
+        path = tmp_path / "missing.json"          # never created
+
+    assert is_credential_file( str( path ) ) is True, f"{label} was SERVED"
+
+
+def test_is_credential_file_serves_only_on_clean( tmp_path ):
+    path = tmp_path / "notes.md"
+    path.write_text( "# Notes\n", encoding="utf-8" )
+
+    assert is_credential_file( str( path ) ) is False

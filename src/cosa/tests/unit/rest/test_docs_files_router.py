@@ -338,6 +338,44 @@ class TestServe( unittest.TestCase ):
         self.assertEqual( content, "# Title" )
         self.assertEqual( media_type, MEDIA_TYPES[ ".md" ] )
 
+    def test_unreadable_500_says_it_is_NOT_a_finding_about_the_content( self ):
+        """
+        Ensures: the unreadable refusal explains ITSELF, row ee1670bc.
+
+        The status alone does not pin this. An unreadable file reaches 500 either way —
+        through the credential check's own `unreadable` branch, or by falling through to
+        the text read and failing there. What differs is what the reader is TOLD, and
+        that is the entire subject of the row: an unreadable file used to be reported as
+        "this file's CONTENT is credential material", sending whoever is debugging to
+        hunt for key material that was never there.
+
+        So this asserts the MESSAGE, which is what makes the branch load-bearing. Without
+        it, deleting the branch is invisible — measured: the suite stayed green.
+        """
+        with patch( "cosa.rest.routers.docs_files.os.path.isdir", return_value=False ), \
+             patch( "cosa.rest.routers.docs_files.os.path.isfile", return_value=True ), \
+             patch( "cosa.rest.routers._scope_registry.credential_verdict",
+                    return_value="unreadable" ):
+            with self.assertRaises( HTTPException ) as ctx:
+                self._serve()
+        self.assertEqual( ctx.exception.status_code, 500 )
+        self.assertIn( "NOT a finding about the file's content", ctx.exception.detail )
+        self.assertNotIn( "credential material (service-account", ctx.exception.detail )
+
+    def test_credential_400_still_names_the_content( self ):
+        """
+        Ensures: the OTHER side keeps its meaning. A split that made everything say
+        "could not read" would be the same collapse inverted.
+        """
+        with patch( "cosa.rest.routers.docs_files.os.path.isdir", return_value=False ), \
+             patch( "cosa.rest.routers.docs_files.os.path.isfile", return_value=True ), \
+             patch( "cosa.rest.routers._scope_registry.credential_verdict",
+                    return_value="credential" ):
+            with self.assertRaises( HTTPException ) as ctx:
+                self._serve()
+        self.assertEqual( ctx.exception.status_code, 400 )
+        self.assertIn( "CONTENT is credential material", ctx.exception.detail )
+
     def test_text_read_error_500( self ):
         """Ensures: a read failure on a text file maps to 500."""
         with patch( "cosa.rest.routers.docs_files.os.path.isdir", return_value=False ), \

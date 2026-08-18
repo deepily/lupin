@@ -375,14 +375,29 @@ def _serve( full_path: str, rel_path: str, scope: str, parent_validator ) -> JSO
     # key.txt walk through and re-introduce the filename dependency one layer down.
     # FAIL CLOSED — unreadable or undecodable BLOCKS, because a check that serves
     # what it could not read looks like protection while providing none.
-    from cosa.rest.routers._scope_registry import is_credential_file
-    if is_credential_file( full_path ):
+    #
+    # 🔴 THE REFUSAL NOW SAYS WHICH REFUSAL IT IS (row ee1670bc). Both outcomes below
+    # refuse — the floor has not moved — but they are different facts and want
+    # different actions from the reader. "This file is a credential" sends you to look
+    # at the file; "this file could not be read" sends you to look at the disk, the
+    # permissions, or the bind-mount. Reporting the second as the first sent people
+    # hunting for key material that was never there.
+    from cosa.rest.routers._scope_registry import credential_verdict
+    verdict = credential_verdict( full_path )
+    if verdict == "credential":
         raise HTTPException(
             status_code = 400,
             detail      = ( "Refused: this file's CONTENT is credential material (service-account "
-                            "key, OAuth token, or private key), or could not be read to rule that "
-                            "out. The doc viewer never serves key material, whatever the file is "
-                            "named." )
+                            "key, OAuth token, or private key). The doc viewer never serves key "
+                            "material, whatever the file is named." )
+        )
+    if verdict == "unreadable":
+        raise HTTPException(
+            status_code = 500,
+            detail      = ( "Error reading file: it could not be read or decoded, so the doc viewer "
+                            "cannot rule out credential material and refuses to serve it. This is "
+                            "NOT a finding about the file's content — check that the file exists, is "
+                            "readable, is valid UTF-8, and that any bind-mount it lives on is up." )
         )
 
     # Text branch: utf-8 read + PlainTextResponse (existing behavior preserved).

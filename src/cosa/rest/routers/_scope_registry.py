@@ -333,29 +333,65 @@ def is_credential_file( full_path: str ) -> bool:
     Raises:
         - nothing; every failure path blocks instead
     """
+    return credential_verdict( full_path ) != "clean"
+
+
+def credential_verdict( full_path: str ) -> str:
+    """
+    Say WHY the file is being refused, not just that it is — FAIL CLOSED either way.
+
+    WHAT THIS SPLITS (row ee1670bc). `is_credential_file` answers one bit, and two very
+    different facts were collapsing into it. An unreadable file — a disk error, a
+    permission bit, a bind-mount that never came up — blocked, correctly, and then the
+    doc viewer told the reader "this file's CONTENT is credential material". That is a
+    true refusal attached to a false explanation, and it sends whoever is debugging to
+    look for a credential that was never there.
+
+    THE FLOOR DOES NOT MOVE. Unreadable still refuses. `is_credential_file` is now
+    defined as `credential_verdict( path ) != "clean"`, so its contract is unchanged
+    down to the unreadable case, and every mutation proof written against it still
+    holds. Only the EXPLANATION becomes available to the caller.
+
+    Requires:
+        - full_path is a filesystem path the caller intends to serve
+
+    Ensures:
+        - "unreadable"  the bytes could not be obtained or decoded, for ANY reason —
+                        missing, permission-denied, not utf-8, a failing disk. The
+                        caller should say so; it is not a statement about content
+        - "credential"  the bytes were read and carry credential material
+        - "clean"       the bytes were read and carry no signature — the ONLY verdict
+                        that permits serving
+        - never "clean" for a file it could not read, and never raises: an error while
+          DECIDING is itself a refusal (that promise used to stop at the read — see
+          the wrap below)
+
+    Raises:
+        - nothing; every failure path refuses instead
+    """
     try:
         with open( full_path, "r", encoding="utf-8" ) as handle:
             prefix = handle.read( CREDENTIAL_SNIFF_BYTES )
             if _the_window_may_be_hiding_the_signature( prefix ):
                 prefix += handle.read( CREDENTIAL_MAX_SNIFF_BYTES - CREDENTIAL_SNIFF_BYTES )
     except Exception:
-        # Unreadable, missing, permission-denied, or not utf-8 — all BLOCK.
-        return True
+        # Unreadable, missing, permission-denied, or not utf-8 — all REFUSE, and now
+        # they refuse under their own name instead of borrowing the credential one.
+        return "unreadable"
 
     # 🔴 THE FAIL-CLOSED PROMISE HAS TO COVER THE DECISION TOO (row de013b80, found by
     # Tiffany correcting my diagnosis of the RecursionError). The handler above wraps
-    # ONLY the read, and this call sits outside it — so for the whole life of this
-    # check, ANY error raised while deciding walked straight out of the module and the
-    # reader got a 500. The docstring above promises "Raises: nothing; every failure
-    # path blocks instead", and that promise was true of reading and false of deciding.
+    # ONLY the read, and this call used to sit outside it — so for the whole life of
+    # this check, ANY error raised while deciding walked straight out of the module and
+    # the reader got a 500, while the docstring promised every failure path blocks.
+    # That promise was true of reading and false of deciding.
     #
-    # A 500 is not a serve, so nothing leaked. But it is not a verdict either, and a
-    # detector that answers "I could not tell" by raising is one refactor away from a
-    # caller that treats the raise as absence. Both halves now block.
+    # It refuses as "unreadable", not "credential": we could not complete the decision,
+    # which is a statement about our ability to tell, never about the file's content.
     try:
-        return _prefix_looks_like_credential( prefix )
+        return "credential" if _prefix_looks_like_credential( prefix ) else "clean"
     except Exception:
-        return True
+        return "unreadable"
 
 
 def _the_window_may_be_hiding_the_signature( prefix: str ) -> bool:
