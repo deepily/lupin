@@ -713,6 +713,9 @@ _DM_TUTOR_DEFAULTS = {
     "trigger_claims"  : 4,       # fires on MORE THAN this many claims
     "gate_enabled"    : False,   # Rick ruled: no output gate, default off
     "gate_max_claims" : 4,
+    # V3-strict ON by default — Rick's ruling 2026-08-18. The flag exists so the dial
+    # moves without a code change; he has wanted to move it twice.
+    "fab_guard_strict": True,
 }
 
 
@@ -741,6 +744,7 @@ def get_dm_tutor_config():
             "trigger_claims"  : cm.get( "dm tutor trigger claims",         default=4,     return_type="int" ),
             "gate_enabled"    : cm.get( "dm tutor output gate enabled",    default=False, return_type="boolean" ),
             "gate_max_claims" : cm.get( "dm tutor output gate max claims", default=4,     return_type="int" ),
+            "fab_guard_strict": cm.get( "dm tutor fabrication guard strict", default=True,  return_type="boolean" ),
         }
     except Exception as e:
         print( f"[dm-tutor] WARNING: config read failed, tutor OFF for this send: {e}" )
@@ -811,7 +815,101 @@ _FAB_NOT_NAMES = frozenset(
 )
 
 
-def _fabricated_facts( original, rewritten ):
+# ── V3-STRICT: the capitalised-dictionary-word exemption (row ddf7581e) ──────
+#
+# Rick ruled "V3-strict behind a flag" on 2026-08-18, live. The problem it solves:
+# the name check flagged ordinary sentence-initial verbs — Update, Implement, Verify,
+# Ensure, Use — as invented entities. Measured on 400 paired bodies (run
+# 2026.08.18-mrradio-host-400): flash_lite 130 blocks -> 54, phi_4 67 -> 30.
+#
+# WHY "STRICT" AND NOT JUST "IS IT A DICTIONARY WORD". /usr/share/dict/american-english
+# holds 20,494 CAPITALISED entries, so `rachel`, `clayton`, `krishna` and `tiffany` are
+# all "dictionary words". Exempting any dictionary entry would stop the guard flagging
+# invented PERSON names — which is the exact incident it was built for ("there was no
+# reviewer"). So a capitalised token is exempt ONLY when the word list holds it as a
+# LOWERCASE entry. Proper nouns live in the list capitalised and stay flaggable.
+#
+# THE COST, ACCEPTED KNOWINGLY BY RICK: the guard loses its one demonstrated true
+# positive — a rewrite that turned "Force-recreated" into "Deployed". "deployed" is a
+# lowercase entry, so that rewrite now ships. Do not special-case it back without
+# telling him.
+#
+# ⚠️ VENDORED, NOT READ FROM THE HOST. /usr/share/dict exists on the dev box and NOT in
+# the server container, so reading it at runtime would pass every local test and fail
+# in production — a host-only dependency is invisible exactly where it matters.
+#
+# ⚠️ LOADED ONCE AT IMPORT, never per call: 83,815 entries is ~789 KB, and re-reading it
+# on every DM would put a file read on the send path. `test_dm_fabrication_guard_strict.py`
+# fails if the read moves back inside the function.
+_FAB_STRICT_WORDLIST_REL = "/src/conf/dm-tutor-lowercase-words.txt"
+
+
+def _load_lowercase_words( path ):
+    """
+    Read the vendored lowercase word list into a frozenset.
+
+    Requires:
+        - path names a UTF-8 text file, one lowercase word per line
+
+    Ensures:
+        - returns a frozenset of the non-blank lines, stripped
+        - returns an EMPTY frozenset if the file cannot be read, after saying so on
+          stdout. An empty set exempts nothing, so an unreadable list degrades to the
+          pre-V3 behaviour — MORE blocking, never less. Failing toward the permissive
+          side would silently disarm the guard, which is the opposite of what a missing
+          file should do
+        - NEVER raises. This runs at import; one bad file must not take the whole DM
+          send path down with it
+    """
+    try:
+        with open( path, encoding="utf-8" ) as fh:
+            return frozenset( line.strip() for line in fh if line.strip() )
+    except OSError as e:
+        print( f"[dm-tutor] WARNING: lowercase word list unreadable, strict exemption OFF: {e}" )
+        return frozenset()
+
+
+def _strict_wordlist_path():
+    """
+    Absolute path of the vendored list. Separate from the load so a test can point at
+    a fixture without monkeypatching `open`.
+
+    Ensures:
+        - returns the project-root-relative path resolved through the canonical helper
+        - returns "" if the project root cannot be resolved, which `_load_lowercase_words`
+          then reports as unreadable rather than raising at import
+    """
+    try:
+        import cosa.utils.util as cu
+        return cu.get_project_root() + _FAB_STRICT_WORDLIST_REL
+    except Exception as e:                                    # pragma: no cover - defensive; get_project_root has no failing path in-tree
+        print( f"[dm-tutor] WARNING: could not resolve project root for the word list: {e}" )
+        return ""
+
+
+_FAB_LOWERCASE_WORDS = _load_lowercase_words( _strict_wordlist_path() )
+
+
+def _strict_exempt( token, wordlist ):
+    """
+    True when `token` is a capitalised form of a LOWERCASE word-list entry.
+
+    ⚠️ THE CURLY APOSTROPHE IS NOT COSMETIC. The rewriter is a language model and emits
+    U+2019 constantly. The vendored list holds ASCII apostrophes, so without this
+    normalisation "Update's" is exempt and "Update’s" is blocked — the same word, the
+    same meaning, opposite verdicts, decided by a character nobody can see in a diff.
+
+    Requires:
+        - token is a string, wordlist is a set of lowercase strings
+
+    Ensures:
+        - returns True iff the lowercased, apostrophe-normalised token is in wordlist
+        - never raises
+    """
+    return token.lower().replace( "\u2019", "'" ) in wordlist
+
+
+def _fabricated_facts( original, rewritten, strict=True ):
     """
     Checkable facts the rewrite asserts that the original never did. Empty = clean.
 
@@ -862,9 +960,14 @@ def _fabricated_facts( original, rewritten ):
         found = { k: sorted( after[ k ] - before[ k ] ) for k in before if after[ k ] - before[ k ] }
 
         original_words = { w.lower() for w in _FAB_WORD.findall( original ) }
+        # V3-strict (row ddf7581e). `strict=False` reproduces the pre-V3 behaviour
+        # EXACTLY, because an empty exemption set excludes nothing — that is what makes
+        # the INI flag a real dial rather than two divergent code paths.
+        exempt         = _FAB_LOWERCASE_WORDS if strict else frozenset()
         new_names      = sorted( { c for c in _FAB_CAP.findall( rewritten )
                                    if c.lower() not in original_words
-                                   and c.lower() not in _FAB_NOT_NAMES } )
+                                   and c.lower() not in _FAB_NOT_NAMES
+                                   and not _strict_exempt( c, exempt ) } )
         if new_names: found[ "name" ] = new_names
         return found
     except Exception:
@@ -1217,7 +1320,8 @@ def _apply_dm_tutor( body_text, config=None, rewrite_fn=None ):
         # Runs AFTER the pointer restore so a path we put back is not itself read as
         # fabricated, and BEFORE the gate so a fabricating rewrite is refused on the
         # stronger ground of the two.
-        fabricated = _fabricated_facts( body_text, rewritten )
+        fabricated = _fabricated_facts( body_text, rewritten,
+                                        strict=config[ "fab_guard_strict" ] )
         if fabricated:
             meta[ "tutor_outcome" ]     = "fabrication_blocked"
             meta[ "tutor_fabricated" ]  = fabricated

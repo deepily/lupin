@@ -26,6 +26,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 import cosa.utils.util as cu
+from cosa.rest.routers.dm import _DM_TUTOR_DEFAULTS
 
 
 # The three-claim house style plus a trailing path — what a compliant DM looks like.
@@ -74,8 +75,20 @@ def _count_claims_helper( text ):
 
 
 def _cfg( **overrides ):
-    """A tutor config dict with explicit values — never read from the live ini."""
-    base = { "enabled": True, "trigger_claims": 4, "gate_enabled": False, "gate_max_claims": 4 }
+    """
+    A tutor config dict with explicit values — never read from the live ini.
+
+    ⚠️ SEEDED FROM `_DM_TUTOR_DEFAULTS`, not from a hand-written literal. The send path
+    reads its config by direct indexing (`config[ "enabled" ]`), per the house rule that
+    a missing key fails loudly rather than falling back — so a hand-written dict that
+    misses a newly-added key raises KeyError inside `_apply_dm_tutor`, which catches it
+    and delivers the ORIGINAL. Every "the tutor fired" test then fails with an assertion
+    about delivered text, naming nothing about config. That happened when
+    `fab_guard_strict` was added (row ddf7581e): 22 tests in this file went red at once.
+    Seeding from the defaults means the next key costs nothing here.
+    """
+    base = dict( _DM_TUTOR_DEFAULTS )
+    base.update( { "enabled": True, "trigger_claims": 4, "gate_enabled": False, "gate_max_claims": 4 } )
     base.update( overrides )
     return base
 
