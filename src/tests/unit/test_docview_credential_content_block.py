@@ -922,3 +922,138 @@ def test_the_re_parse_budget_is_generous_next_to_any_real_nesting():
     being reached by a real one.
     """
     assert CREDENTIAL_MAX_NESTED_PARSES == 64
+
+
+# ── Row de013b80: two follow-ups Tiffany found reviewing the payload fix ──────
+#
+# BOTH ARE NEW GAPS, NOT REGRESSIONS. Neither serves a credential that was blocked
+# before the payload fix — the first needs the nested-string walk to exist at all,
+# and the second is inherited from the top-level parse. Both are reproduced below
+# before being fixed, because the row was filed on her word and said so.
+
+_NESTED_LEADINS = [
+    ( "﻿", "BOM"                    ),
+    ( "​", "zero-width space"       ),
+    ( "⁠", "word joiner"            ),
+    ( " ﻿", "space then BOM"        ),
+    ( "\n\t﻿", "newline, tab, BOM"  ),
+]
+
+
+@pytest.mark.parametrize( "lead,lead_label", _NESTED_LEADINS )
+@pytest.mark.parametrize( "payload,label", [
+    ( ADC_USER_CREDENTIAL, "ADC user credential"                     ),
+    ( SA_KEY_NO_PEM,       "service-account key with no PEM header"  ),
+] )
+def test_a_leadin_inside_a_CARRIED_credential_string_still_BLOCKS(
+        tmp_path, lead, lead_label, payload, label ):
+    """
+    THE RED for finding 1 of row de013b80.
+
+    The payload fix taught the walk to re-parse a string that carries JSON, which is
+    how terraform tfvars, kubernetes secrets and compose env files carry a key. Two
+    functions do that job and they disagreed about which text they were judging:
+    `_opens_a_json_container` strips the invisible lead-in before saying "worth
+    parsing", and `_json_carried_in_a_string` then parsed the RAW string — so it
+    failed ON THE VERY CHARACTER THE GATE HAD JUST REMOVED, returned None, and the
+    credential inside was SERVED.
+
+    MEASURED before the fix: served with the BOM, served with the zero-width space,
+    and BLOCKED with no lead-in at all — which is exactly why it hid. Every fixture
+    written for the payload fix was clean-led.
+    """
+    path = tmp_path / "terraform.tfvars.json"
+    path.write_text( json.dumps( { "google_credentials": lead + json.dumps( payload ) } ),
+                     encoding="utf-8" )
+
+    assert is_credential_file( str( path ) ), f"{label} behind a {lead_label} was SERVED"
+
+
+@pytest.mark.parametrize( "lead,lead_label", _NESTED_LEADINS )
+def test_a_leadin_inside_a_carried_credential_in_a_LIST_still_BLOCKS( tmp_path, lead, lead_label ):
+    """
+    The same miss one container over. The walk reaches list items exactly as it
+    reaches object values, so a fix that only looked at dict values would leave this
+    open — and a reader would reasonably believe the class was closed.
+    """
+    path = tmp_path / "secrets.json"
+    path.write_text( json.dumps( [ lead + json.dumps( SA_KEY_NO_PEM ) ] ), encoding="utf-8" )
+
+    assert is_credential_file( str( path ) ), f"a key behind a {lead_label} in a list was SERVED"
+
+
+def test_the_carried_parse_reads_the_same_text_the_gate_judged():
+    """
+    The two functions, side by side. This is the invariant the bug broke, stated
+    directly rather than only through its symptom: if the gate says a string is worth
+    parsing, the parse must succeed on the text the gate was looking at.
+    """
+    carried = "﻿" + json.dumps( SA_KEY_NO_PEM )
+
+    assert _opens_a_json_container( carried ) is True
+    assert _json_carried_in_a_string( carried ) is not None
+
+
+def test_stripping_the_leadin_before_the_carried_parse_buys_no_false_positive():
+    """
+    THE OVER-REACH GUARD. Stripping more aggressively must not start blocking prose.
+    An ordinary document whose text happens to begin with a mark is still a document.
+    """
+    assert _json_carried_in_a_string( "﻿not json at all" ) is None
+    assert _json_carried_in_a_string( "﻿{\"type\": \"tokenizer\"}" ) == { "type": "tokenizer" }
+
+
+# ── Finding 2: nesting deep enough to break the parser ────────────────────────
+_TOO_DEEP = 20000
+
+
+def test_a_document_too_deeply_nested_to_parse_does_not_CRASH( tmp_path ):
+    """
+    THE RED for finding 2. `json.loads` raises RecursionError at roughly 20000 levels
+    — a 39 KiB file of open brackets does it — and RecursionError inherits from
+    BaseException, NOT Exception. So it was caught by nothing: not the
+    ValueError/TypeError handler beside it, not a broad `except Exception` further
+    up. It escaped the detector and the reader got a 500.
+
+    A crash is not a verdict. This asserts the detector ANSWERS.
+    """
+    path = tmp_path / "deep.json"
+    path.write_text( "[" * _TOO_DEEP + "]" * _TOO_DEEP, encoding="utf-8" )
+
+    assert is_credential_file( str( path ) ) is False     # answers, and this one carries nothing
+
+
+@pytest.mark.parametrize( "inner,label", [
+    ( '{"type": "service_account", "private_key": "MIIEvQIBADANBgkqhkiG9w0BAQEF"}',
+      "service-account key" ),
+    ( '{"refresh_token": "1//0eXaMpLeReFrEsHtOkEnMaTeRiAl"}',
+      "ADC refresh token" ),
+] )
+def test_a_credential_buried_under_too_much_nesting_still_BLOCKS( tmp_path, inner, label ):
+    """
+    Not crashing is only half of it. The refusal must still FAIL CLOSED — burying a
+    key under enough brackets to break the parser must not become a way to serve it.
+    The unparseable-container branch does that work, and this pins that RecursionError
+    reaches that branch rather than some quieter path.
+    """
+    path = tmp_path / "deep-key.json"
+    path.write_text( "[" * _TOO_DEEP + inner + "]" * _TOO_DEEP, encoding="utf-8" )
+
+    assert is_credential_file( str( path ) ), f"{label} under {_TOO_DEEP} levels was SERVED"
+
+
+def test_the_recursion_guard_covers_the_CARRIED_parse_too():
+    """
+    Two parse sites, and a fix applied to one of them is the partial mutation this
+    lane keeps hitting. The carried-string parse must swallow it as well, or a deep
+    document reached through a nested string crashes where a top-level one does not.
+    """
+    assert _json_carried_in_a_string( "[" * _TOO_DEEP + "]" * _TOO_DEEP ) is None
+
+
+def test_ordinary_nesting_is_untouched():
+    """
+    The depth that matters is absurd, and normal documents must not pay for it. A
+    thousand levels is already far past anything real and still parses.
+    """
+    assert _json_carried_in_a_string( "[" * 1000 + "]" * 1000 ) is not None

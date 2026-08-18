@@ -449,7 +449,15 @@ def _prefix_looks_like_credential( prefix: str ) -> bool:
 
     try:
         parsed = json.loads( prefix )
-    except ( ValueError, TypeError ):
+    except ( ValueError, TypeError, RecursionError ):
+        # 🔴 RecursionError IS IN THIS TUPLE ON PURPOSE (Tiffany, follow-up). `json.loads`
+        # raises it at roughly 20000 levels of nesting — a 39 KiB file of open brackets
+        # does it — and RecursionError inherits from BaseException, NOT Exception, so
+        # neither this handler nor a broad `except Exception` anywhere above caught it.
+        # It escaped the detector entirely and the reader got a 500. Routing it here is
+        # not a special case: a document too deep to parse is a document we could not
+        # read, which is exactly what this branch already handles, fail-closed.
+        #
         # TRUNCATED or non-JSON. A service-account key longer than the sniff window
         # lands here, so falling through to "serve it" would defeat the bounded read.
         #
@@ -663,19 +671,35 @@ def _json_carried_in_a_string( text: str ) -> object:
     and did not parse is text — it carries no object for the field test to read, and
     guessing at it would be the raw-substring scan the parsed path exists to avoid.
 
+    🔴 PARSE THE SAME TEXT THE GATE JUDGED (Tiffany, follow-up on the payload fix).
+    `_opens_a_json_container` strips the invisible lead-in before deciding a string is
+    worth parsing; this function used to parse the RAW string. So a value beginning
+    with a BOM or a zero-width space passed the gate and then failed the parse ON THE
+    VERY CHARACTER THE GATE HAD REMOVED, returned None, and the credential inside it
+    was SERVED. Two functions disagreeing about which text they are talking about is
+    the whole defect — they now read the same bytes.
+
+    MEASURED before this fix, all three SERVED a complete service-account key:
+    `{"note": "<BOM>{...key...}"}`, the same shape inside a list, and the zero-width
+    space in place of the BOM. Without a lead-in character the same payload BLOCKED,
+    which is why this hid — every fixture written for the payload fix was clean-led.
+
     Requires:
         - text is a string whose first visible character opens a JSON container
 
     Ensures:
-        - returns the parsed value on success
+        - returns the parsed value on success, lead-in noise removed first
         - returns None when the text is not parseable JSON
+        - returns None when the text nests too deep for the parser rather than
+          letting RecursionError escape to the caller (see the note in
+          `_prefix_looks_like_credential` — it is NOT an Exception subclass)
 
     Raises:
         - nothing
     """
     try:
-        return json.loads( text )
-    except ( ValueError, TypeError ):
+        return json.loads( _strip_leadin_noise( text ) )
+    except ( ValueError, TypeError, RecursionError ):
         return None
 
 

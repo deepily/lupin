@@ -1309,7 +1309,8 @@ async def delete_queue_job(
     "/job-history",
     summary     = "Query job history",
     description = "Paginated history of agentic jobs from PostgreSQL persistence. "
-                  "Admin sees all jobs; regular users see only their own."
+                  "Admin sees all jobs; regular users see only their own. A `user_filter` "
+                  "a regular user is not entitled to is REFUSED with 403, never ignored."
 )
 async def get_job_history(
     current_user: dict      = Depends( get_current_user ),
@@ -1318,26 +1319,72 @@ async def get_job_history(
     limit: int              = Query( 20, ge=1, le=100, description="Results per page (max 100)" ),
     offset: int             = Query( 0, ge=0, description="Pagination offset" ),
     days: Optional[int]     = Query( None, ge=1, le=365, description="Time window in days (e.g. 7, 14, 30). None = all time." ),
-    exclude_ids: Optional[str] = Query( None, description="Comma-separated job IDs to exclude (for live queue deduplication)" )
+    exclude_ids: Optional[str] = Query( None, description="Comma-separated job IDs to exclude (for live queue deduplication)" ),
+    user_filter: Optional[str] = Query(
+        None,
+        description="User filter: omit for the default view, '*' for all users (admin), or a specific user_id (admin). Same vocabulary and same 403 as /api/get-queue/{queue_name}.",
+        example="ricardo_felipe_ruiz_6bdc"
+    )
 ):
     """
     Query paginated job history with optional filters.
+
+    🔴 WHY `user_filter` EXISTS HERE AT ALL (bug e205a3b1). It did not, and FastAPI
+    DROPS an unknown query parameter silently — so `?user_filter=*` came back 200 with
+    the caller's OWN rows and `filtered_by` still pinned to their uid. The sibling
+    endpoint `/api/get-queue/{queue_name}` refuses the same request with a 403 naming
+    the admin rule. Same permission model, two ways of saying no: one honest, one that
+    hands the caller a partial view they believe is complete.
+
+    MEASURED on 2026-08-17: two seats read the same `:8000` queue and got opposite
+    answers — one saw two scheduled jobs, one saw none — because the rows belonged to
+    a different account and nothing said so. The widening flag was passed and ignored.
+    Accept-and-ignore is what turned a wrong flag into a confident wrong answer.
 
     Requires:
         - Authenticated user (Bearer token)
 
     Ensures:
-        - Admin users see all jobs (user_id=None filter)
-        - Regular users see only their own jobs
+        - Admin users see all jobs by default (user_id=None filter)
+        - Regular users see only their own jobs by default
+        - A `user_filter` the caller is not entitled to raises 403 — NEVER a silently
+          narrowed 200
         - Results are paginated and sorted by created_at DESC
         - exclude_ids supports the overlay model: frontend passes live Done/Dead job IDs
           so they are excluded from history results (no duplicates)
         - Returns { jobs: [...], total: N, filtered_by: str, limit: N, offset: N }
+
+    Raises:
+        - HTTPException 403: caller is not entitled to the requested user_filter
+        - HTTPException 400: '!self' — authorized for admins on the queue endpoint, but
+          this store filters by user equality and cannot express exclusion. Refused
+          loudly rather than answered with the wrong rows.
     """
     from cosa.rest.job_persistence import query_job_history
 
-    # Admin sees all, regular user sees own only
-    user_id = None if is_admin( current_user ) else current_user[ "uid" ]
+    if user_filter is None:
+        # Unchanged default: admin sees all, regular user sees own only.
+        user_id = None if is_admin( current_user ) else current_user[ "uid" ]
+    else:
+        # Raises 403 for a filter this caller is not entitled to — the whole point.
+        authorized_filter = authorize_queue_filter(
+            current_user   = current_user,
+            filter_user_id = user_filter
+        )
+
+        if authorized_filter == "*":
+            user_id = None
+        elif authorized_filter.startswith( "!" ):
+            # `query_job_history` filters on user_id EQUALITY; there is no exclusion
+            # arm to hand "!uid" to, and passing it through would match no rows and
+            # read as "no such jobs" — the exact failure this endpoint just got fixed
+            # for. Refuse instead of answering wrongly.
+            raise HTTPException(
+                status_code = 400,
+                detail      = "The '!self' filter is not supported by job history, which filters by user equality. Use '*' for all users."
+            )
+        else:
+            user_id = authorized_filter
 
     # Parse comma-separated exclude_ids into a list
     exclude_list = [ eid.strip() for eid in exclude_ids.split( "," ) if eid.strip() ] if exclude_ids else None
