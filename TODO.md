@@ -1,5 +1,35 @@
 # TODO
 
+## ☀️ FIRST THING 2026-08-18 (Mr. Radio 🦉 `e251aa88`) — one credential unblocks four things
+
+**Rick issues `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL` / `_PASSWORD` to a seat.** That single act unblocks
+john's `:8000` submissions, the morning paired run (`d8d019f6`), `3bfd3fbc`'s acceptance run, and every future
+`docker compose --force-recreate` — the documented remedy for ANY mount or env change on either server, which
+no seat can currently run. Compose has required these two in fail-loud `:?` form since before tonight.
+
+**Then, in order**: (1) `--force-recreate` and confirm `docker exec printenv JWT_SECRET_KEY` reads PRESENT —
+it reads absent now, measured, as the deliberate negative control; (2) only then delete the `jwt_service.py`
+literal fallback (`adce3547` step 3); (3) submit the paired run BEHIND the already-queued 08:00 job, never
+ahead of it; (4) flip block mode at `run-unit-tests.sh:31` and `run-cosa-tests.sh:34` — but run both tiers
+first and do NOT flip if either is red at that HEAD.
+
+⚠️ **The `:7999` bounce cannot do job (1).** `bounce-dev-server.sh` runs plain `docker restart`, which reuses
+the container, so env changes silently do not land. A healthy server after a bounce is NOT evidence.
+
+## ⚖️ RULED 2026-08-17 night (Mr. Radio 🦉 `e251aa88`)
+
+- **The DM quality grader comes OFF the send path** (`ec5cf83a`). Grading must not sit inside the latency of
+  accepting a DM; a grader that is down, slow or absent must be invisible to the sender. Acceptance is
+  measurable: send latency with `:3001` down indistinguishable from up. Mechanism deliberately unruled.
+- **JWT: require the env var everywhere, delete the literal — but provision FIRST** (`adce3547`). Not a random
+  per-process secret: random silently invalidates tokens across restarts and across the two servers, which
+  surfaces as an intermittent auth bug instead of a loud failure at boot.
+- **Block mode flips, but a morning seat executes it** (`7c84b8b8`) — the box goes down with nobody awake to
+  unflip. A red tier under a fresh flip is indistinguishable from a flip that caused it.
+- **P1 `07fda9b6`'s headline is WITHDRAWN — the permission classifier is deterministic.** I matched two runs on
+  the verb while they differed in both flag and commit. What survives: a refusal states none of the three
+  conditions it applies, and recovering that cost two seats nine runs. Receipts `33460c60`, `abd39c5e`.
+
 ## 🧩 HELD OUT OF THE STORE 2026-08-17 (Tiberius 👑) — BRAIN INTEGRATION has no row (Rick's no-new-rows ban)
 
 María (`89b27996`) flagged that her P1's two-part gate — *"pass 2 lands only after BOTH the registration

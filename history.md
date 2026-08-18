@@ -8,6 +8,24 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.08.17 - Session e251aa88 (Mr. Radio 🦉, with Tiffany 💍, Rachel 🕊️, john 🏄🏽) | The manager was wrong five times and the crew caught every one
+
+**Every substantive correction tonight ran worker → manager.** I filed a P1, ruled on a fix, and stated a rule; each was walked back by the person holding the measurement. The pattern in all five: I reached for the general statement one run before the evidence supported it.
+
+1. **Block mode was never enforcing, in either tier** — the guard raised at the socket and the code under test caught it, so 88 dials passed green. john's `f5a860a9` fixes the verdict; proven by behaviour change, not by green — the same 88 now exit 1. A test asserting *"a swallowed block still leaves the run green"* had pinned the defect; flipped with the reasoning kept in place.
+
+2. **My P1 `07fda9b6` was wrong at the headline** — I called the classifier a coin flip after matching two runs on the verb `git cherry-pick`; they differed in both the flag and the commit. Nine runs across two seats: refusal needs `-x` AND `1f0f0bf0` AND (Rachel's seat OR the non-`git -C` form), those last two undistinguished. Finding withdrawn; the surviving ask is that a refusal name what it objected to.
+
+3. **My JWT ruling would have broken the boot** — "delete the literal fallback" was right about the destination and silent about the order, and `JWT_SECRET_KEY` was set nowhere. Rachel checked the precondition instead of executing it; now sequenced provision-then-delete, with the absence measured via `printenv` as the negative control.
+
+4. **The sanctioned `:7999` bounce cannot apply an env change** — it runs plain `docker restart`, so a seat could bounce, see a healthy server, and wrongly conclude the provisioning landed. Second instance of the `LUPIN_PAIRED_N` shape in a week.
+
+5. **Five separate asks collapsed to one credential** — `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_*` blocks john's `:8000` submissions, the morning paired run, `3bfd3fbc`'s acceptance, and every future `--force-recreate`.
+
+**Checkpoint**: both tiers green under live enforcement (lupin 0/exit 0/15,645; cosa 0/exit 0/8,692); cosa tier 100% green after `d3ac48fd`; paired run deferred to the morning window behind the queued 08:00 job; three seats reaped with mementos verified by hand after two false `unparseable_present` verdicts.
+
+**Files**: `history.md`, `TODO.md` — this session's work was store amendments, rulings and crew coordination; all code landed under the workers' own commits.
+
 ### 2026.08.15 - Session 80c17315 (Cheech 🌿, with María 🌸, Rachel 🕊️, Mr. Radio 🦉, sam 🎙️, arnold 🪨) | The night a re-spin came back empty, three times, for three different reasons
 
 **The seat that reported the bug was the bug.** The prior Cheech fired `self_respin` at 20:41 and this one came back with the same session id, board and persona — and no memento. Rick had seen it twice, on this seat and on María's. Everything below came out of that.
