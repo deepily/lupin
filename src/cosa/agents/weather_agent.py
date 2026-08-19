@@ -93,8 +93,13 @@ class WeatherAgent( AgentBase ):
             
         except Exception as e:
             
+            # The output field is consumed as TEXT downstream: agent_base hands it straight to
+            # RawOutputFormatter, whose __init__ calls .replace() on it. Storing the exception
+            # OBJECT here is what produced "'HTTPError' object has no attribute 'replace'" — an
+            # error naming a string method, three frames from the web search that actually failed
+            # (row c27c2b60). Name the failure instead; self.error keeps the original exception.
             self.code_response_dict = {
-                "output"     : e,
+                "output"     : f"Weather search failed: {type( e ).__name__}: {e}",
                 "return_code": -1
             }
             self.error = e
