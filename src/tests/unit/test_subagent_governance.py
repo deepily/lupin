@@ -171,14 +171,31 @@ def test_manager_personas_roster_union_across_repos():
     }
     assert _manager_personas( env ) == [ "Mr. Radio", "Tiberius", "María" ]
 
-def test_manager_personas_preferred_head_only_skips_tail_and_wildcard():
-    # The chain HEAD is a manager; the tail and the "*" wildcard are NOT.
-    env = { "COSA_VOICE_PREFERRED_PERSONA__LUPIN": "Mr. Radio, Tiberius, *" }
-    assert _manager_personas( env ) == [ "Mr. Radio" ]
+def test_manager_personas_takes_every_named_chain_element():
+    # Row a1a84682: EVERY named element is a manager, wildcard excluded. This
+    # used to be head-only, which disagreed with manager_figure — the predicate
+    # that gates task-store writes — about the chain TAIL.
+    env = { "COSA_VOICE_PREFERRED_PERSONA__LUPIN": "Mr. Radio, Cheech, *" }
+    assert _manager_personas( env ) == [ "Mr. Radio", "Cheech" ]
+
+def test_manager_personas_agrees_with_manager_figure_on_the_chain_tail():
+    # The two consumers of the SAME string must return the same answer. Asserted
+    # against the real predicate, not a restatement of this module's own rule.
+    from lupin_cli.claude_code.hooks.lib.manager_figure import resolve_implicit_manager_figure
+    env = { "LUPIN_ROOT": "/x/lupin", "COSA_VOICE_PREFERRED_PERSONA__LUPIN": "Mr. Radio, Cheech, *" }
+    for name in ( "Mr. Radio", "Cheech" ):
+        assert name in _manager_personas( env )
+        assert resolve_implicit_manager_figure( name, env ) is True
+    assert "Tiberius" not in _manager_personas( env )
+    assert resolve_implicit_manager_figure( "Tiberius", env ) is False
 
 def test_manager_personas_lone_wildcard_head_is_skipped():
     env = { "COSA_VOICE_PREFERRED_PERSONA__X": "*" }
     assert _manager_personas( env ) == [ ]
+
+def test_manager_personas_wildcard_in_chain_tail_is_skipped():
+    env = { "COSA_VOICE_PREFERRED_PERSONA__X": "Sam, *, Tiffany" }
+    assert _manager_personas( env ) == [ "Sam", "Tiffany" ]
 
 def test_manager_personas_dedup_roster_and_preferred_overlap():
     # Mr. Radio appears in BOTH the roster and as a preferred head → once only.

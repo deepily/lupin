@@ -2108,8 +2108,30 @@ def main():
             print( f"[register_session] WARNING: memento block failed ({type( e ).__name__}: {e})",
                    file=sys.stderr )
             memento_block = ""
+        # ── Manager-roster drift check (row a1a84682) ───────────────────────
+        # COSA_VOICE_MANAGERS__<P> (who APPEARS to be a manager) and
+        # COSA_VOICE_PREFERRED_PERSONA__<P> (who may WRITE to the task store,
+        # via manager_figure) are supposed to name the same people. The
+        # launcher now DERIVES the second from the first, so this is the belt
+        # for the paths it does not own — a hand-exported chain, a bare
+        # terminal, a session alive across a roster edit. Rendered into
+        # additionalContext because a drift printed only to stderr is a drift
+        # nobody reads: that is exactly how the 2026-08-18 one survived.
+        try:
+            from lupin_cli.claude_code.hooks.lib.roster_consistency import (
+                find_roster_disagreements, format_roster_drift_block
+            )
+            _drift      = find_roster_disagreements( os.environ )
+            drift_block = format_roster_drift_block( _drift )
+            if _drift:
+                print( f"[register_session] WARNING: manager roster drift on {[ d[ 'project' ] for d in _drift ]}",
+                       file=sys.stderr )
+        except Exception as e:
+            print( f"[register_session] WARNING: roster drift check failed ({type( e ).__name__}: {e})",
+                   file=sys.stderr )
+            drift_block = ""
         emit_json( {
-            "additionalContext": f"Session ID: {session_id}\n\n{status_block}{alarm_block}{memento_block}"
+            "additionalContext": f"Session ID: {session_id}\n\n{status_block}{alarm_block}{drift_block}{memento_block}"
         } )
     else:
         emit_json( {} )

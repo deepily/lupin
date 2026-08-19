@@ -43,9 +43,17 @@ _TRUE_VALUES = ( "1", "true", "on", "yes" )
 #   • COSA_VOICE_MANAGERS__<PROJECT>          — the declared-manager roster
 #     (~/.claude/fleet-roster.env), comma-separated names; UNION across all repos.
 #   • COSA_VOICE_PREFERRED_PERSONA__<PROJECT> — the per-repo preferred-persona
-#     CHAIN; its HEAD (first element, never the "*" wildcard) is that repo's
-#     standing manager fallback.
+#     CHAIN; every NAMED element (the "*" wildcard excluded) is a standing
+#     manager for that repo.
 # Design: src/rnd/2026.06.22-fleet-roster-to-user-level-migration-spec.md §5.
+#
+# ⚠️ CHAIN-TAIL SEMANTICS CHANGED 2026-08-18 (row a1a84682). This module used to
+# take the chain HEAD only, while manager_figure.resolve_implicit_manager_figure
+# — the predicate that gates task-store WRITES — takes EVERY named element. Two
+# consumers, the same string, two different answers about who is a manager. The
+# launcher now derives the chain from the roster (`<roster>,*`), so the two agree
+# by construction there; taking every named element here makes them agree off the
+# launcher path too, instead of only where the roster happens to name the tail.
 _ROSTER_PREFIX    = "COSA_VOICE_MANAGERS__"
 _PREFERRED_PREFIX = "COSA_VOICE_PREFERRED_PERSONA__"
 _CHAIN_WILDCARD   = "*"
@@ -102,9 +110,10 @@ def _manager_personas( env=None ) -> list:
     start-cc-with-tmux.sh; the hook reads whichever the launch env carries):
       • every COSA_VOICE_MANAGERS__<PROJECT> var — comma-separated roster, taken
         as a UNION across all repos (a manager-figure in ANY repo is standing);
-      • every COSA_VOICE_PREFERRED_PERSONA__<PROJECT> var — the chain HEAD (first
-        comma element) is that repo's preferred manager; the "*" wildcard and the
-        chain tail are NOT managers.
+      • every COSA_VOICE_PREFERRED_PERSONA__<PROJECT> var — every NAMED chain
+        element is that repo's standing manager, matching what
+        manager_figure.resolve_implicit_manager_figure reads; the "*" wildcard
+        is not a name and is never a manager.
 
     Ensures:
         - returns the de-duplicated names in first-seen order (roster vars first,
@@ -126,7 +135,8 @@ def _manager_personas( env=None ) -> list:
                 _add( n )
     for key, val in env.items():
         if key.startswith( _PREFERRED_PREFIX ):
-            _add( str( val ).split( "," )[ 0 ] )   # chain head only
+            for n in str( val ).split( "," ):
+                _add( n )                          # every named element; _add drops "*"
     return out
 
 

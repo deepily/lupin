@@ -291,17 +291,33 @@ if [[ "$VERTEX" == "1" ]]; then PANE_GUARD_ARG="True"; else PANE_GUARD_ARG="Fals
 INNER+="python3 -c 'from cosa.utils.vertex_env import pane_guard; pane_guard( vertex_path=$PANE_GUARD_ARG )' || exit 1; "
 INNER+="$CLAUDE_CMD"
 
-# Per-project persona CHAINS. Forwarded into the tmux session via -e so the
+# Per-project persona CHAINS — DERIVED from the fleet roster, never typed twice
+# (row a1a84682, 2026-08-18). Forwarded into the tmux session via -e so the
 # SessionStart hook (register_session.py) sees them regardless of the tmux
 # server's frozen env or whether ~/.bashrc was sourced. The hook reads only the
 # key matching detect_project(), so unused keys are inert.
 # Chain syntax (2026-06-11, Rick): ordered comma-separated names; `*` means
 # "then take anything free"; no `*` = strict, loud fail on exhaustion.
-PERSONA_ENV_FLAGS=(
-    -e "COSA_VOICE_PREFERRED_PERSONA__LUPIN=Mr. Radio,Cheech,*"
-    -e "COSA_VOICE_PREFERRED_PERSONA__LUPIN_MOBILE=Tiffany,*"
-    -e "COSA_VOICE_PREFERRED_PERSONA__PLAN=María,*"
-    -e "COSA_VOICE_PREFERRED_PERSONA__SKILLS_DISTILLATION=Sam,*"
+#
+# WHY DERIVED. These four lines used to be hardcoded literals, and the roster
+# they were supposed to mirror lives in ~/.claude/fleet-roster.env. Two places
+# answered "who is a manager for this repo", different consumers read each
+# (roster → arbiter status + escalation + reserve-from-random; chain →
+# manager_figure, which gates task-store WRITES fail-closed), and nothing
+# compared them. They drifted to "Mr. Radio, Tiberius" vs "Mr. Radio,Cheech,*"
+# and it surfaced only when a human read a retired name off a status card.
+# Now the roster is the ONE source and the chain is `<roster>,*`: a repo gains
+# or loses a manager by editing ONE line in ONE file. A project with no roster
+# line gets no chain (random allocation) — declare it in the roster to give it
+# one. register_session's roster-drift check is the belt for the paths this
+# derivation does not own (hand-exported chains, bare terminals).
+PERSONA_ENV_FLAGS=()
+for _v in $( compgen -A variable | grep '^COSA_VOICE_MANAGERS__' || true ); do
+    if [[ -n "${!_v:-}" ]]; then
+        PERSONA_ENV_FLAGS+=( -e "COSA_VOICE_PREFERRED_PERSONA__${_v#COSA_VOICE_MANAGERS__}=${!_v},*" )
+    fi
+done
+PERSONA_ENV_FLAGS+=(
     # Disable Claude Code's terminal mouse capture inside tmux panes (Rick,
     # 2026-06-26). Forwarded via -e so it crosses the tmux boundary regardless of
     # the tmux server's frozen env (a bare parent export would NOT reach `claude`).
