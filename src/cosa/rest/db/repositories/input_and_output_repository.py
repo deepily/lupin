@@ -112,7 +112,15 @@ class InputAndOutputRepository( BaseRepository[InputAndOutput] ):
 
         Ensures:
             - returns up to max_rows rows whose input_type starts with the router prefix
+            - returns the MOST RECENT such rows, newest first, ordered by id
+
+        Note:
+            Until row a203d91d this was a LIMIT with no ORDER BY. Postgres is free to
+            return any rows it likes for an unordered LIMIT, so the receptionist's
+            "memory" was an arbitrary sample rather than the recent conversation, and
+            two identical calls could return different sets. id is the autoincrement
+            primary key, so descending id is insertion order, newest first.
         """
         return self.session.query( InputAndOutput ).filter(
             InputAndOutput.input_type.like( "agent router go to %" )
-        ).limit( max_rows ).all()
+        ).order_by( InputAndOutput.id.desc() ).limit( max_rows ).all()
