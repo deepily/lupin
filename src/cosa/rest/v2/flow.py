@@ -244,18 +244,26 @@ class AskFlow:
                                ctx[ 0 ], ctx[ 1 ], ctx[ 2 ], snapshotable=spec.snapshotable )
         outcome        = self.executor.submit( work, trace )
         if outcome.status != "done":
-            return self._receptionist( trace, question, ctx, "agent_error" )
+            return self._receptionist( trace, question, ctx, "agent_error", primary_error=outcome.error )
         return self._finish( trace, "agent", route_reason, outcome, question, ctx,
                              command=command, snapshotable=spec.snapshotable,
                              agent_class_name=spec.factory.__name__ )
 
-    def _receptionist( self, trace: StageTrace, question: str, ctx: tuple, route_reason: str ) -> dict:
-        """The else — run the receptionist inline (its failure is terminal, no recursion)."""
+    def _receptionist( self, trace: StageTrace, question: str, ctx: tuple, route_reason: str,
+                       primary_error: Optional[ str ]=None ) -> dict:
+        """The else — run the receptionist inline (its failure is terminal, no recursion).
+
+        primary_error carries the FAILURE THAT CAUSED THE DEGRADE. Without it the
+        emitted error is the fallback's, and a live failure reports why the
+        receptionist died while saying nothing about why the real agent did — which
+        is a fallback that hides the fault it was reached by.
+        """
+        if primary_error: trace.set( "primary_agent_error", primary_error )
         work    = Work( "receptionist", self._build_agent( self.receptionist_factory, question, ctx ),
                        ctx[ 0 ], ctx[ 1 ], ctx[ 2 ], snapshotable=False )
         outcome = self.executor.submit( work, trace )
         return self._finish( trace, "receptionist", route_reason, outcome, question, ctx,
-                             command="agent router go to receptionist" )
+                             command="agent router go to receptionist", primary_error=primary_error )
 
     def _needs_input(
         self, trace: StageTrace, command: str, extraction: Any, question: str,
@@ -294,6 +302,7 @@ class AskFlow:
     def _finish(
         self, trace: StageTrace, path: str, route_reason: str, outcome: Any, question: str, ctx: tuple,
         command: str, cache_hit: bool=False, snapshotable: bool=False, agent_class_name: str="",
+        primary_error: Optional[ str ]=None,
     ) -> dict:
         """Stamp first-useful, write back, speak, and emit the terminal result."""
         trace.mark( "t_first_useful" )
@@ -302,8 +311,16 @@ class AskFlow:
         return self._emit(
             trace, path=path, status=outcome.status, route_reason=route_reason, answer=outcome.answer,
             answer_raw=outcome.answer_raw, command=command, ctx=ctx, job_id=outcome.job_id,
-            snapshot_id=snapshot_id, cache_hit=cache_hit, error=outcome.error,
+            snapshot_id=snapshot_id, cache_hit=cache_hit,
+            error=self._compose_error( primary_error, outcome.error ),
         )
+
+    @staticmethod
+    def _compose_error( primary_error: Optional[ str ], fallback_error: Optional[ str ] ) -> Optional[ str ]:
+        """Keep the CAUSE of the degrade in the emitted error, not just the fallback's."""
+        if not primary_error: return fallback_error
+        if not fallback_error: return f"primary agent failed: {primary_error}"
+        return f"primary agent failed: {primary_error} | receptionist: {fallback_error}"
 
     def _speak( self, trace: StageTrace, message: Optional[ str ], job_id: Optional[ str ], ctx: tuple ) -> None:
         """Dispatch TTS via the injected notifier when speak is on; stamp t_tts_dispatch."""

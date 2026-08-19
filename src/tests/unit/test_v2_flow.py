@@ -690,3 +690,55 @@ def test_resume_expired_stamps_t_complete( tmp_path, notifier ):
     assert r[ "status" ] == "expired"
     assert "t_complete" in timings
     assert timings[ "t_complete" ] >= timings[ "t_recv" ]
+
+
+# ──────────────────────────────────── the degrade must not hide the fault it was reached by
+#
+# Live receipt, :8000 run ts-333d04de (2026-08-19): the v2 resume of a weather
+# question degraded to the receptionist and the emitted error was the
+# RECEPTIONIST's. The weather agent's own failure — the reason the degrade
+# happened at all — was dropped on the floor, so the run said why the fallback
+# died and nothing about why the real agent did. These three tests pin the three
+# shapes of the composed error.
+
+def _degrade_flow( tmp_path, notifier, monkeypatch, primary_error, fallback_outcome ):
+    """Run a flow whose primary agent fails and whose receptionist returns fallback_outcome."""
+    monkeypatch.setattr( flow_mod, "resolve",
+                         lambda command: FakeSpec( required_args=(), snapshotable=True ) )
+    outcomes = [ _outcome( status="failed", error=primary_error ), fallback_outcome ]
+
+    class _SeqExecutor( FakeExecutor ):
+        def submit( self, work, trace ):
+            self.works.append( work )
+            return outcomes.pop( 0 )
+
+    f = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(), _SeqExecutor(),
+                    FakePending(), notifier )
+    return f.run( "do a thing", **_CTX )
+
+
+def test_degrade_keeps_the_primary_agent_error_when_receptionist_succeeds( tmp_path, notifier, monkeypatch ):
+    """The cause survives even when the fallback answers fine — otherwise error is None."""
+    r = _degrade_flow( tmp_path, notifier, monkeypatch,
+                       primary_error="maximum context length is 8192 tokens",
+                       fallback_outcome=_outcome( status="done", error=None ) )
+    assert r[ "route_reason" ] == "agent_error"
+    assert r[ "error" ] == "primary agent failed: maximum context length is 8192 tokens"
+
+
+def test_degrade_reports_both_errors_when_the_receptionist_also_fails( tmp_path, notifier, monkeypatch ):
+    """Tonight's live shape: both halves died and both must be readable."""
+    r = _degrade_flow( tmp_path, notifier, monkeypatch,
+                       primary_error="agent boom",
+                       fallback_outcome=_outcome( status="failed", error="receptionist boom" ) )
+    assert r[ "error" ] == "primary agent failed: agent boom | receptionist: receptionist boom"
+
+
+def test_degrade_with_no_primary_error_still_reports_the_fallback_error( tmp_path, notifier, monkeypatch ):
+    """Negative control — a primary that failed WITHOUT an error message must not
+    invent a 'primary agent failed: None' prefix, and the fallback's error must
+    still reach the caller unchanged."""
+    r = _degrade_flow( tmp_path, notifier, monkeypatch,
+                       primary_error=None,
+                       fallback_outcome=_outcome( status="failed", error="receptionist boom" ) )
+    assert r[ "error" ] == "receptionist boom"
