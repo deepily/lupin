@@ -225,7 +225,8 @@ def build_spawn_argv(
     session_name : str,
     task_prompt  : str,
     dry_run      : bool = False,
-    claude_args  : Optional[ List[ str ] ] = None
+    claude_args  : Optional[ List[ str ] ] = None,
+    work_dir     : Optional[ str ] = None
 ) -> List[ str ]:
     """
     Build the argv for one headless spawn of start-cc-with-tmux.sh.
@@ -237,9 +238,13 @@ def build_spawn_argv(
         - claude_args is a list of pass-through claude args or None
 
     Ensures:
-        - Returns ["bash", script_path, "--headless", (--dry-run?), session_name,
-          *claude_args, "--prompt", task_prompt]
+        - Returns ["bash", script_path, "--headless", (--dry-run?),
+          (--work-dir <dir>?), session_name, *claude_args, "--prompt", task_prompt]
         - --dry-run is included iff dry_run is True
+        - --work-dir is included iff work_dir is truthy. It sets the child's cwd,
+          and therefore its CLAUDE.md and git identity (the WORK axis, row
+          697a85fe). Omitted ⇒ the child inherits the caller's cwd, as before.
+          It never affects the venv or PYTHONPATH, which stay pinned to lupin.
         - Never raises
 
     Args:
@@ -255,6 +260,8 @@ def build_spawn_argv(
     argv = [ "bash", script_path, "--headless" ]
     if dry_run:
         argv.append( "--dry-run" )
+    if work_dir:
+        argv.extend( [ "--work-dir", work_dir ] )
     argv.append( session_name )
     if claude_args:
         argv.extend( claude_args )
@@ -304,6 +311,52 @@ def _write_manifest( path: Path, records: List[ Dict[ str, Any ] ] ) -> bool:
 
 
 # ── Orchestration ─────────────────────────────────────────────────────────────
+
+def _resolve_project_root( project ):
+    """
+    Resolve a project NAME to its repository root on this host (row 697a85fe).
+
+    THE WORK AXIS ONLY. What this returns becomes the child's cwd — hence its
+    CLAUDE.md and git identity. It is never used to pick a venv, a PYTHONPATH or
+    a hook path; those stay pinned to lupin (the PLATFORM axis), because a child
+    booted on another repo's venv cannot import fastmcp and so cannot DM, set a
+    topic, or be reaped.
+
+    Requires:
+        - project is a project name, or None
+
+    Ensures:
+        - returns None for a falsy project (caller inherits its own cwd, the
+          prior behaviour)
+        - resolves the alias map first, so both "plan" and "planning-is-prompting"
+          reach the same root
+        - returns the absolute path of a SIBLING directory of LUPIN_ROOT whose
+          name matches and which contains a `.git` entry
+        - returns None when nothing matches — the caller REFUSES rather than
+          falling back to its own cwd, because a silent fallback is the original
+          defect wearing a new hat
+        - never raises
+
+    Returns:
+        str | None: absolute repo root, or None
+    """
+    if not project: return None
+
+    # "plan" is the alias sender_id.detect_project() reports for this repo, so a
+    # caller echoing that value back must resolve to the same place.
+    reverse_aliases = { "plan" : "planning-is-prompting" }
+    candidates      = [ project, reverse_aliases.get( project, project ) ]
+
+    lupin_root = os.environ.get( "LUPIN_ROOT" )
+    if not lupin_root: return None
+    projects_dir = Path( lupin_root ).resolve().parent
+
+    for name in candidates:
+        candidate = projects_dir / name
+        if ( candidate / ".git" ).exists():
+            return str( candidate )
+    return None
+
 
 def spawn_sessions(
     count              : int,
@@ -403,34 +456,37 @@ def spawn_sessions(
     if count > spawn_cap:
         raise ValueError( f"count {count} exceeds spawn cap {spawn_cap}" )
 
-    # CROSS-REPO SPAWN IS REFUSED, NOT SILENTLY MISLABELLED (row 697a85fe).
+    # `project` NOW GENUINELY SETS THE CHILD'S WORKING DIRECTORY (row 697a85fe,
+    # Rick's ruling 2026-08-19). It used to be a label read nowhere, while the
+    # child inherited the CALLER's cwd — so a manager in one repo asking for a
+    # seat in another got a seat in its OWN repo wearing the other repo's name.
     #
-    # `project` was documented as setting the child's cwd and CLAUDE.md. It never
-    # did: it is written onto the spawn record and read nowhere else, while the
-    # child inherits the CALLER's cwd because `tmux new-session` is invoked
-    # without `-c` (start-cc-with-tmux.sh:543). A manager sitting in one repo
-    # asking for a seat in another got a seat in its OWN repo wearing the other
-    # repo's label — which cost María an investigation before it was filed.
+    # THE MODEL, and it is what dissolved the earlier objection to fixing this by
+    # setting cwd. Two axes that the old code welded together:
+    #   · PLATFORM — venv, PYTHONPATH, hook binaries, MCP ⇒ ALWAYS lupin.
+    #   · WORK     — cwd, CLAUDE.md, git identity, detect_project() ⇒ the target.
+    # A child carrying lupin's platform while sitting in another repo is not
+    # half-migrated; it is telling the truth about what it is. Lupin IS the
+    # platform a worker communicates and collaborates through.
     #
-    # WHY THIS IS NOT FIXED BY SETTING cwd INSTEAD, which is the obvious repair:
-    # that spawn script hardwires THREE things to LUPIN_ROOT — the venv it
-    # activates (:70), the PYTHONPATH it exports into the pane (:233), and the
-    # hook command paths it forwards (:225-231). Booting a child with cwd in
-    # another repo while it runs lupin's venv, lupin's PYTHONPATH and lupin's
-    # hooks produces a seat whose CLAUDE.md and whose tooling disagree about
-    # which repo it is in. That is WORSE than today's behaviour, because today
-    # is at least self-consistent: the child really is a lupin seat.
+    # WHY THE PLATFORM PIN IS LOAD-BEARING RATHER THAN MERELY TOLERATED —
+    # measured by María 2026-08-19, and the reason per-repo venv resolution was
+    # rejected and should STAY rejected:
+    #     planning-is-prompting/.venv → import fastmcp → ModuleNotFoundError
+    #     lupin/.venv                 → cosa OK, platform stack present
+    # A child booted on the WORK repo's venv could not DM, could not set a
+    # session topic, and could not be reaped through the normal path. A seat
+    # nobody can reach is worse than a mislabelled one.
     #
-    # Real cross-repo spawning needs per-repo venv/PYTHONPATH/hook resolution in
-    # the spawn script. That is a separate piece of work, deliberately not
-    # smuggled in here.
-    caller_project = detect_project()
-    if project and project != caller_project:
+    # An UNRESOLVABLE project is still refused — that half was never the problem.
+    # A spawn that cannot name a real directory would silently fall back to the
+    # caller's cwd, which is the original defect wearing a new hat.
+    work_dir = _resolve_project_root( project )
+    if project and work_dir is None:
         raise ValueError(
-            f"cannot spawn into project {project!r} from a seat resident in "
-            f"{caller_project!r} — `project` is a label on the spawn record and does "
-            f"NOT set the child's working directory or CLAUDE.md. Spawn from a seat "
-            f"already resident in {project!r}, or pass project={caller_project!r}."
+            f"cannot spawn into project {project!r}: no repository root resolves for it. "
+            f"Pass a project whose root exists on this host, or omit `project` to inherit "
+            f"the caller's own repo ({detect_project()!r})."
         )
 
     # The DM/collection topic and the tmux SESSION name BOTH key on the manager
@@ -487,7 +543,8 @@ def spawn_sessions(
         # user default (fail-open). The resolved model is chosen upstream (the MCP
         # wrapper's explicit-param → INI role key → INI default resolution).
         claude_args = [ "--model", model ] if model else None
-        argv = build_spawn_argv( script_path, session_name, rendered, dry_run=dry_run, claude_args=claude_args )
+        argv = build_spawn_argv( script_path, session_name, rendered, dry_run=dry_run,
+                                 claude_args=claude_args, work_dir=work_dir )
         env  = {
             "COSA_VOICE_SPAWNED_BY" : manager_session_id,
             "COSA_VOICE_HEADLESS"   : "1",

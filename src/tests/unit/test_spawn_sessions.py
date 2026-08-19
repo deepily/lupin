@@ -37,6 +37,7 @@ from lupin_mcp.session_spawner import (
     _read_manifest,
     _write_manifest,
     _capture_reap_identity,
+    _resolve_project_root,
     _recover_tmux_session,
     _scan_persona_by_tmux_session,
     _build_identity_warning,
@@ -1678,57 +1679,89 @@ class TestShippedIniWorkerModelPin:
         assert not parser.has_option( "Lupin: Baseline", "cc session spawn model manager" )
 
 
-# ── Cross-repo spawn refusal (row 697a85fe) ───────────────────────────────────
-class TestCrossRepoSpawnRefused:
-    """
-    `project` was documented as setting the child's cwd and CLAUDE.md. It never
-    did — it is a label on the spawn record, and the child inherits the CALLER's
-    cwd because `tmux new-session` runs without `-c`. A manager in one repo
-    asking for a seat in another silently got a seat in its own repo wearing the
-    other repo's name.
+# ── Cross-repo spawn: the WORK axis moves, the PLATFORM axis does not ─────────
+# ⚠️ THE CROSS-REPO REFUSAL THAT USED TO LIVE HERE IS REPEALED (Rick's ruling
+# 2026-08-19). It was shipped in 222d2560 on the reasoning that a child with cwd
+# in one repo and lupin's venv/PYTHONPATH/hooks was "half-migrated". That reading
+# was wrong: those are two INDEPENDENT axes the old code welded together. Lupin is
+# the PLATFORM a worker communicates through; the target repo is the WORK. A child
+# carrying both is telling the truth about what it is.
+#
+# The tests asserting the refusal are DELETED rather than skipped. A passing test
+# that contradicts a live ruling is worse than no test — the next reader cannot
+# tell which one is current.
+#
+# The platform pin is load-bearing, not tolerated (María's measurement):
+#     planning-is-prompting/.venv → import fastmcp → ModuleNotFoundError
+#     lupin/.venv                 → platform stack present
+# A child on the work repo's venv could not DM, set a topic, or be reaped.
 
-    These tests assert the REFUSAL, and that it happens BEFORE any process is
-    launched. A guard that refuses after spawning has not prevented anything.
-    """
+class TestWorkDirIsThreadedToTheChild:
 
-    def test_cross_repo_project_is_refused( self, tmp_path ):
-        with patch( "lupin_mcp.session_spawner.detect_project", return_value="lupin" ):
-            with pytest.raises( ValueError ) as caught:
-                spawn_sessions( 1, "t", "mgr", script_path="/s.sh",
-                                project="planning-is-prompting",
-                                runner=FakeRunner(), session_dir=tmp_path )
-        assert "planning-is-prompting" in str( caught.value )
-        assert "lupin"                 in str( caught.value )
+    def test_work_dir_absent_by_default( self ):
+        """Omitting project must leave the child inheriting the caller's cwd."""
+        argv = build_spawn_argv( "/s.sh", "sess", "prompt" )
+        assert "--work-dir" not in argv
 
-    def test_refusal_happens_before_the_runner_is_invoked( self, tmp_path ):
+    def test_work_dir_is_emitted_when_given( self ):
+        argv = build_spawn_argv( "/s.sh", "sess", "prompt", work_dir="/repos/target" )
+        assert argv[ argv.index( "--work-dir" ) + 1 ] == "/repos/target"
+
+    def test_work_dir_precedes_the_session_name( self ):
         """
-        THE LOAD-BEARING ONE. If the guard sat after the spawn loop the message
-        would look identical while a real seat had already been created.
+        The script parses flags before positionals; a --work-dir landing after the
+        session name would be swallowed as a claude arg and silently do nothing.
+        """
+        argv = build_spawn_argv( "/s.sh", "sess", "prompt", work_dir="/repos/target" )
+        assert argv.index( "--work-dir" ) < argv.index( "sess" )
+
+    def test_unresolvable_project_is_refused( self, tmp_path ):
+        """
+        The half of 222d2560 that survives the repeal. A project naming no real
+        root must NOT fall through to the caller's cwd — that silent fallback is
+        the original defect wearing a new hat.
         """
         runner = FakeRunner()
-        with patch( "lupin_mcp.session_spawner.detect_project", return_value="lupin" ):
-            with pytest.raises( ValueError ):
-                spawn_sessions( 2, "t", "mgr", script_path="/s.sh",
-                                project="cosa-voice",
+        with patch( "lupin_mcp.session_spawner._resolve_project_root", return_value=None ):
+            with pytest.raises( ValueError ) as caught:
+                spawn_sessions( 1, "t", "mgr", script_path="/s.sh", project="no-such-repo",
                                 runner=runner, session_dir=tmp_path )
+        assert "no repository root resolves" in str( caught.value )
         assert runner.calls == [], "a refused spawn must not launch anything"
 
-    def test_same_repo_project_is_allowed( self, tmp_path ):
-        """The other direction — over-tightening this would break every spawn."""
-        with patch( "lupin_mcp.session_spawner.detect_project", return_value="lupin" ):
-            res = spawn_sessions( 1, "t", "mgr", script_path="/s.sh", project="lupin",
-                                  runner=FakeRunner( returncode=0 ), session_dir=tmp_path )
-        assert res[ "requested" ] == 1
+    def test_resolved_project_reaches_the_child_argv( self, tmp_path ):
+        runner = FakeRunner( returncode=0 )
+        with patch( "lupin_mcp.session_spawner._resolve_project_root", return_value="/repos/target" ):
+            spawn_sessions( 1, "t", "mgr", script_path="/s.sh", project="target",
+                            runner=runner, session_dir=tmp_path )
+        argv = runner.calls[ 0 ][ 0 ]
+        assert argv[ argv.index( "--work-dir" ) + 1 ] == "/repos/target"
 
-    def test_refusal_names_the_remedy_not_just_the_objection( self, tmp_path ):
-        """
-        Row 07fda9b6's lesson applied here: a refusal that states no remedy costs
-        the reader an investigation. This one must name what to do instead.
-        """
-        with patch( "lupin_mcp.session_spawner.detect_project", return_value="lupin" ):
-            with pytest.raises( ValueError ) as caught:
-                spawn_sessions( 1, "t", "mgr", script_path="/s.sh", project="weil-parallel-search",
-                                runner=FakeRunner(), session_dir=tmp_path )
-        message = str( caught.value )
-        assert "Spawn from a seat" in message
-        assert "does NOT set"      in message
+
+class TestResolveProjectRoot:
+
+    def test_none_project_resolves_to_none( self ):
+        assert _resolve_project_root( None ) is None
+        assert _resolve_project_root( "" )   is None
+
+    def test_sibling_repo_with_git_resolves( self, tmp_path, monkeypatch ):
+        ( tmp_path / "lupin" ).mkdir()
+        ( tmp_path / "other" / ".git" ).mkdir( parents=True )
+        monkeypatch.setenv( "LUPIN_ROOT", str( tmp_path / "lupin" ) )
+        assert _resolve_project_root( "other" ) == str( tmp_path / "other" )
+
+    def test_sibling_without_git_does_not_resolve( self, tmp_path, monkeypatch ):
+        """A plain directory is not a repo; resolving it would give a child no git identity."""
+        ( tmp_path / "lupin" ).mkdir()
+        ( tmp_path / "notarepo" ).mkdir()
+        monkeypatch.setenv( "LUPIN_ROOT", str( tmp_path / "lupin" ) )
+        assert _resolve_project_root( "notarepo" ) is None
+
+    def test_alias_resolves_to_the_same_root( self, tmp_path, monkeypatch ):
+        """detect_project() reports 'plan' for planning-is-prompting; both must land together."""
+        ( tmp_path / "lupin" ).mkdir()
+        ( tmp_path / "planning-is-prompting" / ".git" ).mkdir( parents=True )
+        monkeypatch.setenv( "LUPIN_ROOT", str( tmp_path / "lupin" ) )
+        expected = str( tmp_path / "planning-is-prompting" )
+        assert _resolve_project_root( "plan" )                  == expected
+        assert _resolve_project_root( "planning-is-prompting" ) == expected

@@ -57,6 +57,14 @@ while [[ $# -gt 0 ]]; do
         --dry-run  ) DRY_RUN=1;  shift ;;
         --vertex   ) VERTEX=1;   shift ;;
         --prompt   ) PROMPT="${2:-}"; shift 2 ;;
+        # WORK-AXIS directory (row 697a85fe). The child's cwd, and therefore the
+        # CLAUDE.md and git identity it picks up. DELIBERATELY SEPARATE from
+        # LUPIN_ROOT below, which stays the PLATFORM axis — venv, PYTHONPATH and
+        # hook binaries always come from lupin so the child can DM, set a topic and
+        # be reaped. Measured: planning-is-prompting/.venv cannot import fastmcp, so
+        # a child booted on the work repo's venv would be unreachable. Omit and the
+        # child inherits the caller's cwd, which is the prior behaviour.
+        --work-dir ) WORK_DIR="${2:-}"; shift 2 ;;
         -- )         shift; while [[ $# -gt 0 ]]; do POSITIONALS+=( "$1" ); shift; done; break ;;
         * )          POSITIONALS+=( "$1" ); shift ;;
     esac
@@ -540,7 +548,19 @@ else
     # forwards nothing — but it is NO LONGER unscrubbed. If this invocation CREATES the
     # server, SERVER_SCRUB is what stops it freezing a Vertex-tainted shell into an env
     # that every later session on this socket would inherit (F-A11, rebuilt above).
-    "${SERVER_SCRUB[@]}" tmux new-session -s "$SESSION_NAME" "${PERSONA_ENV_FLAGS[@]}" "${VERTEX_ENV_FLAGS[@]}" -d "$INNER"
+    # -c sets the WORK axis (row 697a85fe): the child's cwd, hence its CLAUDE.md
+    # and git identity. Empty WORK_DIR ⇒ no -c ⇒ inherit the caller's cwd, exactly
+    # as before. The PLATFORM axis is untouched — $INNER still sources lupin's venv
+    # and exports lupin's PYTHONPATH regardless of where the pane starts.
+    TMUX_WORKDIR_FLAGS=()
+    if [[ -n "${WORK_DIR:-}" ]]; then
+        if [[ ! -d "$WORK_DIR" ]]; then
+            echo "REFUSING TO LAUNCH: --work-dir '$WORK_DIR' is not a directory" >&2
+            exit 1
+        fi
+        TMUX_WORKDIR_FLAGS=( -c "$WORK_DIR" )
+    fi
+    "${SERVER_SCRUB[@]}" tmux new-session -s "$SESSION_NAME" "${PERSONA_ENV_FLAGS[@]}" "${VERTEX_ENV_FLAGS[@]}" "${TMUX_WORKDIR_FLAGS[@]}" -d "$INNER"
     if [[ "$HEADLESS" -eq 1 ]]; then
         # Headless: do NOT attach. Emit the session name for the caller to capture.
         echo "$SESSION_NAME"
