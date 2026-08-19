@@ -594,14 +594,30 @@ def test_a_json_key_the_registry_does_not_list_REFUSES_THE_BUILD():
     assert "registry" in message.lower()
 
 
-def test_a_REGISTERED_but_non_speakable_command_is_still_allowed():
+def test_a_REGISTERED_but_non_speakable_command_is_REFUSED_IN_THE_CORPUS():
     """
-    ⚠️ THE EXEMPTION, and the reason the oracle is the whole registry rather than
-    speakable_commands(). The expediters are system-triggered: deliberately in the
-    registry, deliberately out of the router prompt. Checking against the speakable
-    set would flag a documented exemption as drift, which is how a guard teaches
-    people to ignore it.
+    ⚠️ THIS TEST REVERSES ITS OWN EARLIER VERSION, which asserted the opposite —
+    that a registered-but-non-speakable command was ALLOWED in the training JSONs.
+    Recorded rather than quietly deleted, because the earlier reasoning was sound
+    about the wrong artifact (María, row 95924f2d step 4).
+
+    The earlier version read: "checking against the speakable set would flag a
+    documented exemption as drift." True of the ROUTER PROMPT — the expediters are
+    system-triggered, deliberately registered and deliberately absent from it, and
+    step 3's pin still honours that exemption untouched.
+
+    It is NOT true of the TRAINING CORPUS, and that is the whole of step 4. Every
+    training instruction interpolates the SPEAKABLE menu. So a non-speakable command
+    with rows teaches the model a label the menu inside those very rows never offers
+    — exactly the defect the exemption was invoked to avoid causing. The tree already
+    agreed in practice before it agreed in code: commit 14a44cf4 removed the
+    expediter-START phrasings from the JSONs for this reason.
+
+    So the oracle for the corpus is speakable_commands(), and the oracle for the
+    prompt stays the registry's `speakable` field. Two artifacts, one source, one
+    exemption honoured in the only place it means anything.
     """
+    import pytest
     from unittest.mock import patch
     from cosa.rest.v2.registry import REGISTRY
     from cosa.rest.v2.router_prompt_generator import speakable_commands
@@ -612,4 +628,21 @@ def test_a_REGISTERED_but_non_speakable_command_is_still_allowed():
 
     with patch.object( XmlPromptGenerator, "_get_simple_agent_router_commands",
                        lambda self: { exempt[ 0 ]: "x.txt" } ):
-        _generator()        # must not raise
+        with pytest.raises( ValueError ) as caught:
+            _generator()
+
+    assert exempt[ 0 ] in str( caught.value )
+
+
+def test_the_exemption_still_holds_where_it_was_meant_to___the_router_prompt():
+    """
+    The half of the earlier ruling that survives: a non-speakable command stays OUT
+    of the served router prompt, and nothing here has touched that.
+    """
+    from cosa.rest.v2.registry import REGISTRY
+    from cosa.rest.v2.router_prompt_generator import speakable_commands
+
+    exempt = sorted( set( REGISTRY ) - set( speakable_commands() ) )
+    for command in exempt:
+        assert command not in speakable_commands()
+        assert REGISTRY[ command ].speakable is False

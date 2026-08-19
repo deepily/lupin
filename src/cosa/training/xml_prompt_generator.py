@@ -52,7 +52,7 @@ class XmlPromptGenerator:
 
         # The JSONs supply PHRASINGS; the registry says what EXISTS. Checked here, before
         # a single row is built, because a row is where the two would silently disagree.
-        self._assert_agent_router_json_commands_are_registry_subset()
+        self._assert_agent_router_json_commands_match_speakable()
 
         # Compile commands after loading dictionaries
         self.vox_cmd_commands                   = self._compile_vox_cmd_commands()
@@ -228,58 +228,86 @@ class XmlPromptGenerator:
         
         return ( compound_categories + simple_categories ).strip()
     
-    def _assert_agent_router_json_commands_are_registry_subset( self ) -> None:
+    def _assert_agent_router_json_commands_match_speakable( self ) -> None:
         """
-        Refuse to build a corpus for a command the registry has never heard of.
+        Refuse to build a corpus whose command set is not exactly the served menu.
 
         WHAT THIS CLOSES (row 95924f2d, step 4). The MENU is already single-sourced —
         `_compile_agent_router_commands` reads `speakable_commands()`, and no JSON can
-        move it. But the three agent-router JSONs still decide WHICH commands get rows:
-        `xml_coordinator` iterates their keys and formats each row's answer with the key
-        it is on. So a key the registry does not list produces training rows teaching a
-        command the menu inside those very rows does not offer — and the LoRA learns
-        both halves. Measured before this guard: injecting one key left the menu at 18
-        while the row loop happily iterated the invented command.
+        move it. This guard makes the ROW SET obey the same source, in both directions:
 
-        WHY THE ORACLE IS THE WHOLE REGISTRY AND NOT `speakable_commands()`: a
-        system-triggered command is deliberately in the registry and deliberately out of
-        the router prompt — the expediters are exactly that. Checking against the
-        speakable set would flag a documented exemption as drift, which is how a guard
-        earns the right to be ignored. Checking against REGISTRY lets the exemption
-        through and still catches the invented command.
+          · a JSON key that is NOT speakable would build rows whose answer is a command
+            the menu inside those very rows never offers. The earlier subset-of-REGISTRY
+            check let that through: the two expediters are registered on purpose and
+            non-speakable on purpose, so naming one in a JSON passed the guard and still
+            trained a label the menu omits.
+          · a speakable command with NO JSON key gets zero rows — a command the served
+            prompt offers and the model has never been trained to emit. That is the
+            starvation half, and it is silent: nothing counts the rows per command.
 
-        This is the cheap half of step 4. The full version has the row loops iterate the
-        registry and look each phrasing file up; this one lets the JSONs keep driving row
-        generation while making it impossible for them to invent a command.
+        WHY THE ORACLE MOVED FROM `REGISTRY` TO `speakable_commands()`. Checking against
+        the whole registry was chosen to let the documented system-triggered exemptions
+        through. But those commands are exactly the ones that must NOT appear in the
+        corpus, because the training instruction interpolates the speakable menu. The
+        exemption belongs in the registry (`speakable=False`) and therefore belongs OUT
+        of the JSONs — which is where it already is, by care. This makes it construction.
 
         Requires:
             - the three agent_router_*_commands dicts are loaded
 
         Ensures:
-            - returns None when every JSON key is a command the registry knows
-            - raises ValueError naming every unknown key otherwise, before any row is
-              built
+            - returns None when the JSON key union equals the speakable command set
+            - raises ValueError naming BOTH directions of the difference otherwise,
+              before any row is built
 
         Raises:
-            - ValueError if any agent-router JSON key is absent from the registry
+            - ValueError if the JSON key union and speakable_commands() differ
         """
-        from cosa.rest.v2.registry import REGISTRY
+        from cosa.rest.v2.router_prompt_generator import speakable_commands
 
         json_commands = (
             set( self.agent_router_compound_commands )
             | set( self.agent_router_simple_commands )
             | set( self.agent_router_agentic_commands )
         )
-        unknown = sorted( json_commands - set( REGISTRY ) )
-        if unknown:
+        speakable  = set( speakable_commands() )
+        only_json  = sorted( json_commands - speakable )
+        only_menu  = sorted( speakable - json_commands )
+        if only_json or only_menu:
             raise ValueError(
-                "agent-router training JSON names command(s) the v2 registry does not "
-                f"list: {unknown}. The JSONs supply PHRASINGS; the registry says what "
-                "EXISTS (row 95924f2d). Building anyway would emit training rows whose "
-                "answer is a command the menu in those same rows never offers. Either "
-                "register the command in cosa/rest/v2/registry.py, or remove the key "
+                "the agent-router training JSONs and the served command menu disagree "
+                f"(row 95924f2d): in a JSON but not in the menu={only_json}, in the menu "
+                f"but in no JSON={only_menu}. The JSONs supply PHRASINGS; the registry "
+                "says what EXISTS and what is speakable. A JSON-only command trains a "
+                "label the menu in those same rows never offers; a menu-only command "
+                "ships in the prompt with no training rows behind it. Either set "
+                "speakable on the spec in cosa/rest/v2/registry.py, or remove the key "
                 "from the JSON."
             )
+
+    def registry_ordered_training_commands( self, command_index: dict ) -> list:
+        """
+        Order one JSON index's commands by the REGISTRY, so the registry decides which
+        commands get training rows and the JSON only says where their phrasings live.
+
+        The three row loops used to iterate a JSON's own `.keys()`, which made the JSON
+        the definition of what exists AND the source of each row's label. Iterating the
+        registry's speakable order instead means the loop variable — the string that
+        becomes the row's answer — comes from the registry itself.
+
+        Membership is already pinned by `_assert_agent_router_json_commands_match_speakable`,
+        which runs at construction, so this returns every key of `command_index` and drops
+        nothing; the filter is a belt, not the policy.
+
+        Requires:
+            - command_index maps a full routing string to its phrasing-file path or config
+
+        Ensures:
+            - Returns the speakable commands present in command_index, in served order
+        """
+        from cosa.rest.v2.router_prompt_generator import speakable_commands
+
+        return [ command for command in speakable_commands() if command in command_index ]
 
     def _compile_agent_router_commands( self ) -> str:
         """
