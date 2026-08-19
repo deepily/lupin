@@ -1,5 +1,77 @@
 # TODO
 
+## 🔓 FINDING 2026-08-19 (Mr. Radio 🦉 `4c571f73`) — `--showlocals` writes the live password into a saved artifact on any auth failure
+
+**Found while diagnosing `ts-5a02a537`.** `pytest.ini:82` carries `--showlocals` in `addopts`, so a failing frame dumps every local variable into the junit XML and the run log. The frame that failed was `v2_eval._login`, whose locals include `email` and `password` — so the **live credential for `interactive.job.tester@lupin.deepily.ai` is now sitting in plaintext** in `io/test-suite/artifacts/integration-junit-*.xml`.
+
+**This is not specific to that test.** Any auth failure in any test that holds a credential in a local writes it to disk the same way. The artifacts are named, dated, and kept.
+
+**⚠️ The same flag is the only reason the v1 arm's metrics survived.** Nothing reached `io/v2-flow/` — `_dump_paired_artifacts` needs a *pair*, and the v2 arm died before producing one, so the dump never ran. The p50/p95/cache-hit numbers existed **solely** in the traceback locals `--showlocals` captured. So the flag is simultaneously the leak and the only forensic record of a 47-minute run.
+
+**That tension is the actual decision**, and it is not obviously resolvable by turning the flag off:
+- **Off** → no leak, but a failed run leaves nothing behind but a stack, which is the exact silence this crew has spent a week removing (`ts-1686ce29` died with no recoverable artifacts and cost a day).
+- **On** → forensics survive, credentials leak.
+- **The real fix is neither**: stop putting a password in a local. `_login` could take a callable or read from env at the call site so the secret never lands in a frame. Then `--showlocals` keeps its forensic value and has nothing sensitive to spill.
+
+**Scope check before anyone acts**: the artifacts are local, on a box behind the same VPN/ADC boundary Rick already ruled on for `adce3547`, so this is housekeeping and not an incident. But it is a *credential in a file*, and the account is one every seat uses.
+
+**Not filed as a row** (skeleton-crew no-new-rows order). **Not fixed** — the honest fix touches `v2_eval.py`, which the live run imports, so it waits for `ts-47b18c7e` to land.
+
+
+## ⚖️ RULED 2026-08-19 (Rick, ~15:40 EDT) — skeleton crew HOLDS until he says otherwise; the tick does not override him
+
+**Clean answer, not a timeout default** (`answered=true`, `default_used=false`). Verbatim: *"let's hold off from a skeleton crew until whenever I say so."*
+
+**The conflict this settles**: the heartbeat tick fires *"tasks > workers — STAFF UP THIS TICK: spawn/assign now. Waiting to be told is a redline."* His standing order (broadcast `a30ebf4f`) says skeleton crew, no workers. **A tick does not reverse a standing order from the user** — I surfaced it as a blocking ask rather than resolving it myself, and that was the right call.
+
+### ⚠️ THE TICK'S REASONING IS UNSOUND HERE, AND IT IS THIS WEEK'S RECURRING SHAPE
+It reads *8 owed, 1 worker* and concludes understaffed. It cannot see that **7 of the 8 are serialised behind one live latency measurement**, so a crew would buy one P2 and risk the afternoon's run:
+
+| Row | P | Why a worker cannot take it now |
+|---|---|---|
+| `d8d019f6` | P1 | The run itself — waiting on a result, not buildable |
+| `3bfd3fbc` | P1 | Needs a *finished* run to supply genuine v1 residue |
+| `95924f2d` | P1 | Regenerates the corpus the run is sampling from |
+| `07fda9b6` | P1 | Open half is the **harness** classifier — not our code |
+| `adce3547` | P2 | Fix = force-recreate = kills the run (María concurs) |
+| `ec5cf83a` | P2 | Fleet-wide DM path; peers are actively DMing |
+| `7c84b8b8` | P2 | Proof needs a 15k-test run on this same box |
+| `7b9094d8` | P2 | Genuinely available — the only one |
+
+**An owed-count is not a staffing signal**, because it cannot distinguish *unstaffed* from *serialised*. Same family as the day's other findings: an instrument asserting a conclusion from a number it cannot contextualise. Recorded here rather than filed (no-new-rows order).
+
+**Rick also offered to disable the heartbeat Stop poke** — *"so that you don't get distracted with this kind of productive bullshit."* Undecided; my read is in the reply, and it stays his call.
+
+
+## 🔇 CONFIRMED 2026-08-19 (Mr. Radio 🦉 `4c571f73`) — PHANTOM INTERRUPTS: the harness claims the user spoke when the user did not
+
+**✅ RICK CONFIRMED IT DIRECTLY, 2026-08-19 ~15:40 EDT**, on the fifth occurrence, asked in real time while it was happening: *"Yes, and I haven't sent you anything. It's a phantom interrupt."* That is testimony from the only party who can settle it — no inference, no reconstruction. **The interrupt is spurious.**
+
+**Occurrence #5 detail**, captured live because we had agreed the protocol in advance: fired ~15:38 EDT during a Bash health check on the paired run, and **arrived in the same beat as an inbound peer DM from María timestamped 15:38:35**. That co-incidence supports Rick's mechanism — another notification draining into the pre/post-tool-call slot and being labelled as the user — over my original "his words went missing in delivery" reading.
+
+**The protocol worked and is worth keeping**: agree in advance that the next occurrence gets flagged *immediately* with a timestamp, then ask the one question only the human can answer — *did you speak?* Five occurrences of silent guessing produced nothing; one real-time ask settled it.
+
+**Symptom**: four times this afternoon a tool call was refused with *"A user-initiated voice message was received and takes precedence over this tool call. You must address the user's message before continuing."* No message content accompanied any of them. From my side the user had said something urgent enough to interrupt me, and I could not see one word of it.
+
+**What I checked, so this is not a guess**: no voice buffer exists for this session (`~/.claude/sessions/cc-buffer-4c571f73*` / `-8d2b6455*` absent), and **no `cc-buffer-*.jsonl` anywhere was modified in the last hour** — the newest is from 2026-08-18. So the content is not sitting undrained in Lupin's buffer waiting for me; it never landed there.
+
+⇒ **The detection path and the delivery path have come apart.** Something upstream knows a voice message arrived — reliably enough to preempt a tool call four times — while the content reaches neither my context nor the buffer the hooks drain.
+
+**Why it is worse than a dropped message**: the interrupt asserts an obligation ("you must address the user's message") that it makes impossible to discharge. I cannot answer, and I cannot tell whether the user is repeating themselves, correcting my course, or telling me to stop. The safe reading — ask them to re-send — is the one I took, but a seat that instead *guesses* what was said would be guessing at the user's instructions.
+
+**Same family as the rest of today's board** (`07fda9b6`, and the two gates fixed in `37bd64f9`): a signal that reports an event without reporting its content, leaving the reader to supply the missing half. Related: the harness-side half of `07fda9b6`, which Rick ruled should name what it objected to.
+
+**⇒ RICK'S READING, AND IT BEATS MINE (2026-08-19 ~15:45 EDT).** I had this as a *delivery* failure — his words went missing. He says it is a **misattribution**: some other notification drains into the pre/post-tool-call slot and gets presented to the model as a user voice message, because human communication legitimately outranks a tool call in that queue. **María reported the same yesterday while he was not messaging her.**
+
+His reading fits my measurement better than mine did. A message that never entered the buffer yet still preempted a tool call is not a dropped message — it is an event wearing a message's label. On a genuine delivery failure I would expect a buffer write with no read; I found no write at all.
+
+**AGREED PROTOCOL**: on the next occurrence I notify him immediately with the timestamp and what I was doing, and he confirms whether he sent anything. That one bit — *did a human speak* — is the discriminator, and nothing on my side can observe it. Recorded here because it needs to survive a re-spin: a seat that hits this cold will read the interrupt as a real instruction it somehow lost.
+
+**Not filed as a row** (skeleton-crew no-new-rows order). **Not fixed**: the mislabelling is in the notification/hook layer, and the same layer-separation that keeps `07fda9b6` open applies.
+
+**⚠️ THE FAILURE MODE TO AVOID IS GUESSING.** The interrupt asserts an obligation — *the user said something, address it before continuing* — while supplying nothing to address. A seat that infers what was probably said, and acts on it, is acting on instructions no human gave.
+
+
 ## 🔑 FIXED 2026-08-19 (Mr. Radio 🦉 `4c571f73`) — the :8000 seed was create-only, so a drifted credential could never be repaired
 
 **The blocker**: `POST /auth/login` on `:8000` returned 401 with the same credentials that worked on `:7999`, which stopped `d8d019f6` from being submitted at all.
