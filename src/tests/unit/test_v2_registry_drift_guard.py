@@ -361,6 +361,25 @@ class TestCliHelpNamesDeclaredArgs( unittest.TestCase ):
     is a branch that cannot go red. If a future CLI genuinely cannot name its args,
     that is a real finding: leave it red, don't reintroduce a soft arm to hide it."""
 
+    # ⚠️ ORDER-DEPENDENT RED, AND IT PREDATES 2026-08-19 — read this before filing a
+    # regression. This test PASSES ALONE and FAILS, all nine commands at once, whenever
+    # src/cosa/tests/unit/training/test_peft_trainer.py has run earlier in the same
+    # process. Bisected across all ten files in that directory; it is the only one that
+    # does it, reproducibly. It fails identically with the row-95924f2d step-4 work
+    # stashed, so a tier run that goes red here after that push is NOT reporting on it.
+    #
+    # FOUR OBVIOUS CAUSES ARE ALREADY RULED OUT BY DIRECT PROBE — do not start from them:
+    #   (a) the working directory IS restored — measured before and after the peft suite;
+    #   (b) subprocess.run still works afterwards — a probe in the same process after the
+    #       suite returns 450 bytes of help naming `prompt`;
+    #   (c) _help_cache is not stale — cleared and re-read, same good result;
+    #   (d) nothing under src/cosa/tests/unit/training or .../infrastructure references
+    #       get_cli_help, _help_cache, agent_registry, JOB_ARG_CONTRACTS or subprocess.
+    #
+    # The surviving suspects are something the peft suite does to the INTERPRETER rather
+    # than to the environment — a leaked import-system or `sys` mutation fits the evidence.
+    # Full write-up: planning-is-prompting TODO.md, under Pending. (María, 2026-08-19;
+    # Chloé hit the same failure independently from the tier-run side.)
     def test_cached_help_names_each_commands_declared_args( self ):
         from cosa.agents.runtime_argument_expeditor.agent_registry import (
             JOB_ARG_CONTRACTS, get_cli_help,
