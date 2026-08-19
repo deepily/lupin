@@ -4,7 +4,7 @@ Unit tests for cosa.rest.jwt_service.
 The PyJWT crypto seam ( jwt.encode / jwt.decode ) is mocked so token generation and
 decoding are deterministic with no real signing/verification. The module-level
 SECRET_KEY configuration branches ( import-time ) are covered via importlib.reload
-under patched os.environ — the only way to exercise the production-raise and
+under patched os.environ — the only way to exercise the raise-on-unset and
 secret-from-env arms.
 
 Covered:
@@ -12,7 +12,7 @@ Covered:
     - create_refresh_token  ( validation, token_type="refresh" )
     - decode_and_validate_token ( type-match matrix )
     - _generate_jti         ( unique string ids )
-    - module-level SECRET_KEY config ( dev default / from-env / production-raise )
+    - module-level SECRET_KEY config ( from-env / raise-on-unset in EVERY environment )
 """
 
 import os
@@ -199,46 +199,124 @@ class TestGenerateJti( unittest.TestCase ):
 
 class TestModuleLevelSecretKeyConfig( unittest.TestCase ):
     """
-    Tests for the import-time SECRET_KEY configuration branches.
+    Tests for the import-time SECRET_KEY configuration ( row adce3547 ).
 
     Ensures:
-        - JWT_SECRET_KEY from env is honored ( the `not SECRET_KEY` False arm )
-        - Production without a secret raises ValueError ( the production True arm )
+        - JWT_SECRET_KEY from env is what SECRET_KEY becomes
+        - An unset or blank secret raises ValueError at import in EVERY environment —
+          production, an explicitly non-production one, and none declared at all
+        - No value the environment did not supply can end up in SECRET_KEY
+
+    The last point is the one with teeth: the module used to fall through to a fixed
+    literal whenever ENVIRONMENT was anything other than "production". These tests go
+    red the moment such a fallback is reintroduced, whatever its value, because they
+    assert on the RAISE rather than on any particular string.
 
     Reloads the module under patched os.environ and ALWAYS restores it afterward so
-    later tests / suites see the normal dev-default module state.
+    later tests / suites see the ambient module state.
     """
 
     def tearDown( self ):
         """
         Ensures:
-            - jwt_service is reloaded back to the ambient ( dev-default ) environment
+            - jwt_service is reloaded back to the ambient environment
         """
         importlib.reload( jwt_service )
+
+    def _reload_with( self, **overrides ):
+        """
+        Reload jwt_service under an environment built from the ambient one.
+
+        Requires:
+            - overrides maps env var names to a string value, or to None to unset it
+
+        Ensures:
+            - returns the patch.dict context manager already entered is NOT used here;
+              the caller owns the `with` block so assertions run inside it
+        """
+        env = dict( os.environ )
+        for key, value in overrides.items():
+            if value is None:
+                env.pop( key, None )
+            else:
+                env[ key ] = value
+        return patch.dict( os.environ, env, clear=True )
 
     def test_secret_key_loaded_from_env( self ):
         """
         Ensures:
-            - When JWT_SECRET_KEY is set, SECRET_KEY adopts it ( skips the warning block )
+            - When JWT_SECRET_KEY is set, SECRET_KEY adopts it verbatim
         """
-        env = dict( os.environ )
-        env[ "JWT_SECRET_KEY" ] = "my-explicit-secret-key"
-        env.pop( "ENVIRONMENT", None )
-        with patch.dict( os.environ, env, clear=True ):
+        with self._reload_with( JWT_SECRET_KEY="my-explicit-secret-key", ENVIRONMENT=None ):
             importlib.reload( jwt_service )
             self.assertEqual( jwt_service.SECRET_KEY, "my-explicit-secret-key" )
 
     def test_production_without_secret_raises( self ):
         """
         Ensures:
-            - production environment + missing JWT_SECRET_KEY raises at import
+            - ENVIRONMENT=production + missing JWT_SECRET_KEY raises at import
         """
-        env = dict( os.environ )
-        env.pop( "JWT_SECRET_KEY", None )
-        env[ "ENVIRONMENT" ] = "production"
-        with patch.dict( os.environ, env, clear=True ):
+        with self._reload_with( JWT_SECRET_KEY=None, ENVIRONMENT="production" ):
             with self.assertRaises( ValueError ):
                 importlib.reload( jwt_service )
+
+    def test_no_environment_declared_without_secret_raises( self ):
+        """
+        Ensures:
+            - Missing JWT_SECRET_KEY raises even when ENVIRONMENT is not declared at all
+
+        This is the state BOTH running servers were in: no ENVIRONMENT, no secret. It
+        used to print a warning and sign with a literal committed to the source file.
+        """
+        with self._reload_with( JWT_SECRET_KEY=None, ENVIRONMENT=None ):
+            with self.assertRaises( ValueError ):
+                importlib.reload( jwt_service )
+
+    def test_non_production_environment_without_secret_raises( self ):
+        """
+        Ensures:
+            - An explicitly non-production ENVIRONMENT does not buy a default secret
+        """
+        with self._reload_with( JWT_SECRET_KEY=None, ENVIRONMENT="development" ):
+            with self.assertRaises( ValueError ):
+                importlib.reload( jwt_service )
+
+    def test_blank_secret_raises( self ):
+        """
+        Ensures:
+            - An empty JWT_SECRET_KEY is treated as unset rather than as a valid secret
+        """
+        with self._reload_with( JWT_SECRET_KEY="", ENVIRONMENT=None ):
+            with self.assertRaises( ValueError ):
+                importlib.reload( jwt_service )
+
+    def test_raise_message_names_the_variable_and_does_not_quote_a_secret( self ):
+        """
+        Ensures:
+            - The failure tells the operator which variable to set
+            - It does NOT print any secret value ( an error that echoes a credential
+              writes it into every log that catches the traceback )
+        """
+        with self._reload_with( JWT_SECRET_KEY=None, ENVIRONMENT=None ):
+            with self.assertRaises( ValueError ) as caught:
+                importlib.reload( jwt_service )
+        message = str( caught.exception )
+        self.assertIn( "JWT_SECRET_KEY", message )
+        self.assertIn( "no default signing secret", message )
+
+    def test_secret_key_is_never_a_value_the_environment_did_not_supply( self ):
+        """
+        Ensures:
+            - Whatever SECRET_KEY holds after a successful import came from the env var
+
+        Asserts the INVARIANT rather than the absence of one known literal, so a fallback
+        reintroduced under a different value is caught just the same.
+        """
+        for supplied in ( "first-supplied-secret", "second-supplied-secret" ):
+            with self.subTest( supplied=supplied ):
+                with self._reload_with( JWT_SECRET_KEY=supplied, ENVIRONMENT=None ):
+                    importlib.reload( jwt_service )
+                    self.assertEqual( jwt_service.SECRET_KEY, os.environ[ "JWT_SECRET_KEY" ] )
 
 
 if __name__ == "__main__":
