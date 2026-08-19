@@ -7,8 +7,12 @@ exist in the test database so the operator can log into the test server
 (port 8000) and monitor test runs with their normal credentials. Also
 ensures the cosa-voice MCP API key resolves against the test database.
 
-Runs at test container startup BEFORE uvicorn launches. Idempotent: uses
-INSERT ... ON CONFLICT DO NOTHING so it's safe to run on every startup.
+Runs at test container startup BEFORE uvicorn launches. Safe to run on every
+startup, and CONVERGENT rather than merely create-only: INSERT ... ON CONFLICT
+DO UPDATE refreshes the credential columns from dev each run, so a password or
+key rotated in dev actually reaches test. It used to be DO NOTHING, which meant
+an existing test row froze forever at whatever it was first seeded with — the
+cause of ":8000 returns 401 with credentials that work on :7999" (2026-08-19).
 
 Records seeded:
     - Admin user identified by LUPIN_DEV_EMAIL env var (default: ricardo.felipe.ruiz@gmail.com)
@@ -110,6 +114,23 @@ def seed_if_missing():
     Raises:
         - None (catches and logs all exceptions)
     """
+    # 🔴 THE TARGET MUST BE A TEST DATABASE — ASSERT IT, DO NOT ASSUME IT (María, 2026-08-19).
+    #
+    # This check did not need to exist while the seed was ON CONFLICT DO NOTHING: that
+    # version could never overwrite an existing credential, so pointing it at a live
+    # database was harmless. It was safe BY ACCIDENT — the safety came from the script
+    # being unable to do its job, not from anything guarding the destination.
+    #
+    # Converging the rows every run removed that accident: this script now OVERWRITES
+    # password hashes and API-key hashes. TEST_DB is a hardcoded constant today, and a
+    # constant is exactly the kind of thing a later edit makes configurable without anyone
+    # re-deriving what it was protecting. State the requirement where it is enforced.
+    if "test" not in TEST_DB:
+        _warn( f"REFUSING: seed target '{TEST_DB}' is not a test database. This script overwrites "
+               f"password and API-key hashes from {DEV_DB}; running it against a live store would "
+               f"replace real credentials. Aborting before any connection is opened." )
+        sys.exit( 3 )
+
     _info( "Checking companion credentials in test database..." )
 
     try:
@@ -125,7 +146,8 @@ def seed_if_missing():
         test_cur = test_conn.cursor()
 
         # ── Step 1: Seed companion users ──
-        users_seeded = 0
+        users_seeded    = 0
+        users_refreshed = 0
         for email in COMPANION_EMAILS:
             dev_cur.execute(
                 "SELECT id, email, password_hash, created_at, email_verified, "
@@ -153,17 +175,42 @@ def seed_if_missing():
             import json as _json
             roles_json = _json.dumps( roles ) if isinstance( roles, ( list, dict ) ) else roles
 
+            # 🔴 DO UPDATE, NOT DO NOTHING (2026-08-19, row d8d019f6).
+            # This was ON CONFLICT ( id ) DO NOTHING, which made the seed CREATE-ONLY:
+            # the instant a companion row existed in test, no later change in dev could
+            # ever reach it. Change a password in dev and test keeps the old hash
+            # forever, while this script runs on every container start and cheerfully
+            # reports success. That is exactly what happened — login worked on :7999 and
+            # returned 401 on :8000 with the SAME credentials, and the seed had been
+            # "succeeding" the whole time. The identical failure was diagnosed and
+            # written up on 2026-04-13; the fix then was to add the missing emails to the
+            # allowlist, which repaired that day's symptom and left the create-only
+            # mechanism in place to do it again.
+            #
+            # The point of this script is that test MATCHES dev. Converge the credential
+            # columns every run. RETURNING (xmax = 0) distinguishes a genuine INSERT from
+            # an UPDATE, so the counts below stay honest rather than counting every row
+            # as freshly seeded.
             test_cur.execute(
                 "INSERT INTO users ( id, email, password_hash, created_at, "
                 "email_verified, is_active, roles ) "
                 "VALUES ( %s, %s, %s, %s, %s, %s, %s::jsonb ) "
-                "ON CONFLICT ( id ) DO NOTHING",
+                "ON CONFLICT ( id ) DO UPDATE SET "
+                "    email          = EXCLUDED.email, "
+                "    password_hash  = EXCLUDED.password_hash, "
+                "    email_verified = EXCLUDED.email_verified, "
+                "    is_active      = EXCLUDED.is_active, "
+                "    roles          = EXCLUDED.roles "
+                "RETURNING ( xmax = 0 ) AS inserted",
                 ( uid, email, pw_hash, created_at, email_verified, is_active, roles_json )
             )
-            # Check if the row was actually inserted (vs. already existed)
-            if test_cur.rowcount > 0:
+            was_insert = test_cur.fetchone()[ 0 ]
+            if was_insert:
                 users_seeded += 1
                 _success( f"Seeded user: {email} ({uid})" )
+            else:
+                users_refreshed += 1
+                _info( f"Refreshed user from {DEV_DB}: {email} ({uid})" )
 
             # Always ensure companion is marked protected (idempotent)
             test_cur.execute(
@@ -172,7 +219,8 @@ def seed_if_missing():
             )
 
         # ── Step 2: Seed API keys owned by companion users ──
-        keys_seeded = 0
+        keys_seeded    = 0
+        keys_refreshed = 0
         for email in COMPANION_EMAILS:
             dev_cur.execute(
                 "SELECT a.id, a.user_id, a.key_hash, a.description, a.is_active, "
@@ -184,22 +232,36 @@ def seed_if_missing():
             for key_row in dev_cur.fetchall():
                 key_id, user_id, key_hash, description, is_active, created_at, last_used_at = key_row
 
+                # Same create-only defect as the users insert above: a rotated key in
+                # dev could never reach test. Converge it too.
                 test_cur.execute(
                     "INSERT INTO api_keys ( id, user_id, key_hash, description, "
                     "is_active, created_at, last_used_at ) "
                     "VALUES ( %s, %s, %s, %s, %s, %s, %s ) "
-                    "ON CONFLICT ( id ) DO NOTHING",
+                    "ON CONFLICT ( id ) DO UPDATE SET "
+                    "    key_hash    = EXCLUDED.key_hash, "
+                    "    description = EXCLUDED.description, "
+                    "    is_active   = EXCLUDED.is_active "
+                    "RETURNING ( xmax = 0 ) AS inserted",
                     ( key_id, user_id, key_hash, description, is_active, created_at, last_used_at )
                 )
-                if test_cur.rowcount > 0:
+                if test_cur.fetchone()[ 0 ]:
                     keys_seeded += 1
                     _success( f"Seeded API key: {description or key_id} → {email}" )
+                else:
+                    keys_refreshed += 1
 
         # ── Summary ──
+        # The old wording here was "All companion credentials already present in test
+        # database" — a green line asserting the credentials were GOOD when all it knew
+        # was that rows with those ids EXISTED. It printed on every startup for months
+        # while :8000 logins were failing. Report what was actually done.
         if users_seeded == 0 and keys_seeded == 0:
-            _success( "All companion credentials already present in test database" )
+            _success( f"Companion credentials refreshed from {DEV_DB}: "
+                      f"{users_refreshed} user(s), {keys_refreshed} API key(s) — none newly created" )
         else:
-            _success( f"Seeded {users_seeded} user(s) and {keys_seeded} API key(s) into {TEST_DB}" )
+            _success( f"Seeded {users_seeded} user(s) and {keys_seeded} API key(s) into {TEST_DB} "
+                      f"(refreshed {users_refreshed} user(s), {keys_refreshed} API key(s))" )
 
     except Exception as e:
         _warn( f"Companion seed error: {e}" )

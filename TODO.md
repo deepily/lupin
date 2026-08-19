@@ -1,5 +1,24 @@
 # TODO
 
+## 🔑 FIXED 2026-08-19 (Mr. Radio 🦉 `4c571f73`) — the :8000 seed was create-only, so a drifted credential could never be repaired
+
+**The blocker**: `POST /auth/login` on `:8000` returned 401 with the same credentials that worked on `:7999`, which stopped `d8d019f6` from being submitted at all.
+
+**Not a missing user, and not a wrong password.** The row existed in `lupin_db_test` with `is_active=t`, and its id matched dev exactly. Verified against the stored hashes directly: the dev hash verifies the env password, the test hash does not.
+
+**The mechanism**: `src/scripts/seed_test_companions.py` copies companions dev→test with `INSERT … ON CONFLICT ( id ) DO NOTHING`. That makes it **create-only** — the instant a row exists in test, nothing in dev can ever reach it again. Change a password in dev and test keeps the old hash forever. The script runs on every test-container start and reported `All companion credentials already present in test database` the entire time: a green line asserting the credentials were GOOD when all it had checked was that rows with those ids EXISTED.
+
+**This exact 401 was diagnosed before**, on 2026-04-13 (`src/rnd/2026.04.13-test-container-auth-fix-plan.md`). That fix added the two missing emails to the allowlist — it repaired that day's symptom and left the create-only mechanism untouched to do it again.
+
+**Fixed**: `ON CONFLICT ( id ) DO UPDATE` on the credential columns for both `users` and `api_keys`, inserted-vs-refreshed counted honestly via `RETURNING ( xmax = 0 )`, and the summary reports what it actually did. The container's startup log now shows both boots back to back — the old false green, then the converge line.
+
+**⚠️ The fix moved the blast radius, and that needed its own guard** (María 🌸). Create-only was safe **by accident**: a script that cannot overwrite anything is harmless pointed at a live database. Converging removed that accident — this script now overwrites password and API-key hashes — and `TEST_DB` is a hardcoded constant, exactly the kind of thing a later edit makes configurable without re-deriving what it protected. Added an assert-the-target refusal at the top (`"test" not in TEST_DB` → exit 3, before any connection opens). Proven both ways: `lupin_db_test` passes, `lupin_db_dev` refuses.
+
+### 📥 FINDING (not filed — skeleton-crew no-new-rows order): the regression guard for this exists and never runs
+
+`src/tests/integration/test_cross_container_auth.py` was written on 2026-04-13 **specifically** to catch this drift. It passes now, and it would have failed for however long the test hash was stale. It is login-only, non-destructive, and takes **0.49 s** — it meets every `:7999` criterion — but it lives in `src/tests/integration/`, so it only runs in the scheduled `:8000` bucket as the final merge gate. A guard that runs a few times a month is not guarding a credential that drifts silently. **Proposed**: move it to the fast `:7999` path so it runs with the unit tier. Not done — that is a test-venue change and belongs in a review, not in a run-unblocking patch.
+
+
 ## 📊 MEASURED 2026-08-18 night (Mr. Radio 🦉 `89a34076`) — the notification-length natural experiment, and why `type` cannot answer it
 
 **Rick's question**: did the DM tutor's brevity generalize to the spoken notifications he receives? **Measured, doc `9bc17152`**: the tail compressed (p90 1009 → 738 chars, −27%) while the median did **not** move (272 → 287). Distribution did not shift down; its right tail was cut. Replicated in both `lupin` and `plan`.

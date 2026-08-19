@@ -30,8 +30,15 @@ is proven in src/tests/unit/test_eval_isolation_guard.py, 6/6, 100%).
 VENUE + SELECTION. `@pytest.mark.paired_eval_live` (deselected from every default run by
 pytest.ini addopts `-m "... and not paired_eval_live"`) + `@pytest.mark.integration`.
 The scheduled paired run selects it explicitly: `POST /api/test-suite/submit` with
-pytest_args `-m paired_eval_live`, :8000, post-midnight off-peak. Never :7999, never
-curl, never side-doored (same pattern as test_v2_embedding_cost_live.py).
+pytest_args `-m paired_eval_live`, :8000, in a window the HOST IS UP for. Never :7999,
+never curl, never side-doored (same pattern as test_v2_embedding_cost_live.py).
+
+⚠️ THIS LINE USED TO SAY "post-midnight off-peak", AND THAT WINDOW IS DEAD (corrected
+fleet-wide 2026-08-17). It was true about Rick being asleep and false about the machine:
+measured boot history has the host DOWN ~10:53 PM – 7:17 AM, so a run scheduled there does
+not run late, it does not run at all until someone powers the box back on. Two jobs booked
+for 00:30 and 01:15 drained at ~10:07 the next morning. Prefer 7:30–10 AM EDT (up and
+quiet); 10 AM – 9 PM is acceptable. A ~3h run must therefore START before ~19:30 EDT.
 
 Precondition 3 (VALIDITY, now wired) — the two arms must write DISTINCT, CLEAN stores
 (design §4): `eval_isolation_guard.assert_paired_isolation` queries each store's live

@@ -57,6 +57,20 @@ LOG="/tmp/v1-baseline-7997.log"
 check_only=0
 [[ "${1:-}" == "--check" ]] && check_only=1
 
+# Print the served sha, or fail. NEVER print the whole payload as a fallback.
+#
+# 🔴 THIS FUNCTION HAD THE EXACT BUG THE GATE EXISTS TO CATCH (María, 2026-08-19).
+# It probed d['sha'] / d['code_identity'] — neither of which this endpoint serves —
+# and fell back to json.dumps(d), which the callers then SUBSTRING-matched against
+# the pin. The record's real field is `git_sha`, and when git cannot read a HEAD the
+# record says so in `git_sha_source`: "UNAVAILABLE: git could not read a HEAD sha at
+# /…/lupin-v1-baseline-b0735467". That string CONTAINS b0735467 — the worktree is
+# named after the pin. So the gate passed, loudest and most convincingly, in precisely
+# the case where the sha was explicitly UNAVAILABLE. A gate that can pass without
+# reading the value it gates on is not a gate.
+#
+# Now: read `git_sha` and nothing else, refuse UNAVAILABLE, and let the caller
+# PREFIX-match a bare sha rather than searching a blob.
 read_identity() {
     python3 -c "
 import urllib.request, json, sys
@@ -64,7 +78,13 @@ try:
     d = json.load( urllib.request.urlopen( 'http://localhost:$PORT/api/code-identity', timeout=5 ) )
 except Exception:
     sys.exit( 1 )
-print( d.get( 'sha' ) or d.get( 'code_identity' ) or json.dumps( d ) )
+if not isinstance( d, dict ):
+    sys.exit( 1 )
+sha = d.get( 'git_sha' )
+# UNAVAILABLE is a REPORTED MISS, not a value. Treat it as no answer at all.
+if not isinstance( sha, str ) or not sha or sha.startswith( 'UNAVAILABLE' ):
+    sys.exit( 1 )
+print( sha )
 " 2>/dev/null
 }
 
@@ -72,15 +92,33 @@ print( d.get( 'sha' ) or d.get( 'code_identity' ) or json.dumps( d ) )
 if identity=$( read_identity ); then
     echo "[:$PORT] already up — code-identity: $identity"
     case "$identity" in
-        *"$PINNED_SHA"*) echo "[:$PORT] identity matches the pin ($PINNED_SHA). Nothing to do." ; exit 0 ;;
+        "$PINNED_SHA"*) echo "[:$PORT] identity matches the pin ($PINNED_SHA). Nothing to do." ; exit 0 ;;
         *) echo "🔴 [:$PORT] REFUSING: a server holds this port and its identity is NOT $PINNED_SHA." >&2
            echo "   A paired run against an unpinned arm measures the wrong thing. Stop that process first." >&2
            exit 1 ;;
     esac
 fi
 
+# A port that answers /health but cannot prove its sha is NOT the same failure as a
+# port with nothing on it, and saying "DOWN" for both is how a guard that blocks for
+# the wrong reason ends up looking exactly like one that works. Name which case it is.
+port_answers_health() {
+    python3 -c "
+import urllib.request, sys
+try: urllib.request.urlopen( 'http://localhost:$PORT/health', timeout=2 )
+except Exception: sys.exit( 1 )
+" 2>/dev/null
+}
+
+if port_answers_health; then
+    echo "🔴 [:$PORT] a server IS answering /health, but /api/code-identity did not report a" >&2
+    echo "   usable git_sha (missing, or the record says UNAVAILABLE). Identity is UNPROVEN —" >&2
+    echo "   do NOT run the eval against it, and do NOT assume the port is free." >&2
+    exit 1
+fi
+
 if [[ "$check_only" -eq 1 ]]; then
-    echo "[:$PORT] DOWN (checked, not started)."
+    echo "[:$PORT] DOWN — nothing answering (checked, not started)."
     exit 1
 fi
 
@@ -127,7 +165,7 @@ except Exception: sys.exit( 1 )
         if identity=$( read_identity ); then
             echo "[:$PORT] code-identity: $identity"
             case "$identity" in
-                *"$PINNED_SHA"*) echo "[:$PORT] ✅ pinned at $PINNED_SHA — safe to run the paired eval." ; exit 0 ;;
+                "$PINNED_SHA"*) echo "[:$PORT] ✅ pinned at $PINNED_SHA — safe to run the paired eval." ; exit 0 ;;
                 *) echo "🔴 [:$PORT] booted but identity is $identity, NOT $PINNED_SHA. Do NOT run the eval." >&2
                    exit 1 ;;
             esac
