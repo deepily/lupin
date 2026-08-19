@@ -378,8 +378,7 @@ class TestCliHelpNamesDeclaredArgs( unittest.TestCase ):
     #
     # The surviving suspects are something the peft suite does to the INTERPRETER rather
     # than to the environment — a leaked import-system or `sys` mutation fits the evidence.
-    # Full write-up: planning-is-prompting TODO.md, under Pending. (María, 2026-08-19;
-    # Chloé hit the same failure independently from the tier-run side.)
+    # Full write-up: planning-is-prompting TODO.md, under Pending. (María, 2026-08-19.)
     def test_cached_help_names_each_commands_declared_args( self ):
         from cosa.agents.runtime_argument_expeditor.agent_registry import (
             JOB_ARG_CONTRACTS, get_cli_help,
