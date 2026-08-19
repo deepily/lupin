@@ -1616,7 +1616,88 @@ def _submit_deferred_grade( job ):
     return True
 
 
-def _defer_grade_and_persist( *, defer_fn, grade_quality_fn, body_text, persist_kwargs ):
+# The grade notice's identity. It comes from the JUDGE, not from the peer who was
+# messaged — a grade wearing the recipient's name would read as that peer replying.
+_DM_GRADE_SENDER_ID = "dm-quality-judge@lupin.deepily.ai"
+_DM_GRADE_PERSONA   = "DM Quality Judge"
+_DM_GRADE_ICON      = "⚖️"
+
+
+def format_dm_grade_notice( message_id, quality ):
+    """
+    The one-line grade notice pushed back to a sender.
+
+    Requires:
+        - message_id is the id of the DM being graded
+        - quality is DmQualityJudge.judge()'s dict
+
+    Ensures:
+        - NAMES THE MESSAGE IT GRADES (Mr Radio's constraint, 2026-08-19). A late
+          grade with no anchor is the same confusion arriving slower: by the time it
+          lands the sender may have sent three more DMs, and a bare "👎 too long"
+          cannot say which one it means.
+        - a dimension whose weight is None (LENGTH-ONLY mode) is shown as withheld
+          rather than as a zero
+    """
+    def dimension( name ):
+        d = quality[ name ]
+        if d[ "weight" ] is None:
+            return f"{name} —"
+        return f"{name} {d[ 'emoji' ]} {d[ 'weight' ]:+d}"
+    dimensions = " · ".join( dimension( n ) for n in ( "length", "directness", "tone", "overall" ) )
+    return f"[grade for DM {message_id}] {dimensions}"
+
+
+def push_dm_grade_to_sender( *, notification_queue, authenticated_user_id, sender_session_id,
+                             message_id, quality ):
+    """
+    Deliver a finished grade back to the seat that sent the DM.
+
+    Requires:
+        - sender_session_id is the SENDER's session id (routing is by its 8-char head,
+          the same job_id convention the DM itself uses)
+
+    Ensures:
+        - the sender keeps seeing its own grades. That feedback IS the live
+          intervention — arm `signal_only`, "grade shown, nothing refused" — so moving
+          the grade off the send path without this would have quietly ended the
+          experiment rather than relocated it.
+        - BEST-EFFORT AND SILENT (Mr Radio's constraint): a reaped seat is a normal
+          outcome, not an error. The push is fire-and-forget onto the notification
+          queue, which routes by job_id and simply reaches nobody when that seat is
+          gone; anything raised is caught and printed, never propagated. A grading
+          worker that dies on a departed recipient would take every LATER grade with it.
+        - NOT a DM. It rides push_notification directly, so it never re-enters the send
+          path — a grade delivered by dm_send would itself be graded, forever.
+        - returns True iff the notice was pushed
+
+    Raises:
+        - nothing
+    """
+    if quality is None:
+        return False
+    try:
+        notification_queue.push_notification(
+            message        = format_dm_grade_notice( message_id, quality ),
+            type           = "task",
+            priority       = "low",
+            id             = f"dm-grade-{message_id}",
+            sender_id      = _DM_GRADE_SENDER_ID,
+            job_id         = sender_session_id[ :8 ],
+            user_id        = authenticated_user_id,
+            suppress_ding  = True,
+            direction      = "ai_to_ai",
+            sender_persona = _DM_GRADE_PERSONA,
+            sender_icon    = _DM_GRADE_ICON,
+        )
+        return True
+    except Exception as e:
+        print( f"[dm-grade] WARNING: could not deliver the grade for {message_id}: {e}" )
+        return False
+
+
+def _defer_grade_and_persist( *, defer_fn, grade_quality_fn, body_text, persist_kwargs,
+                              deliver_grade_fn=None ):
     """
     Grade `body_text` and write its corpus row OFF the send path.
 
@@ -1624,6 +1705,10 @@ def _defer_grade_and_persist( *, defer_fn, grade_quality_fn, body_text, persist_
         - defer_fn( job ) -> bool accepts a 0-arg callable and reports whether it
           took it (the production default is _submit_deferred_grade)
         - persist_kwargs is every _persist_dm_row argument EXCEPT `quality`
+        - deliver_grade_fn( quality ), when given, hands the finished grade back to
+          the sender. It runs AFTER the row is written — the corpus is the durable
+          record and must not be at the mercy of a delivery — and its failures are
+          caught here as well as inside it
 
     Ensures:
         - the caller's timeline contains no model call: on the accepted path this
@@ -1635,6 +1720,8 @@ def _defer_grade_and_persist( *, defer_fn, grade_quality_fn, body_text, persist_
           is contracted never to raise, and this catches it anyway: a broken
           contract would otherwise cost the corpus its row as well as its grade,
           and the row is the part that cannot be recomputed later
+        - a REFUSED deferral delivers no grade, because there is no grade — the row
+          is written ungraded and the sender simply hears nothing
 
     Raises:
         - nothing the caller must handle — _persist_dm_row is fail-soft
@@ -1646,6 +1733,11 @@ def _defer_grade_and_persist( *, defer_fn, grade_quality_fn, body_text, persist_
             print( f"[dm-grade] WARNING: grader raised, writing the row ungraded: {e}" )
             quality = None
         _persist_dm_row( quality=quality, **persist_kwargs )
+        if deliver_grade_fn is not None:
+            try:
+                deliver_grade_fn( quality )
+            except Exception as e:
+                print( f"[dm-grade] WARNING: grade delivery raised: {e}" )
 
     if not defer_fn( _job ):
         _persist_dm_row( quality=None, **persist_kwargs )
@@ -1923,6 +2015,10 @@ def _execute_experiment( *, body, assignment, arrival_utc, target_session_id, ta
             "experiment"   : row,
         }
         if graded_delivery:
+            # NO deliver_grade_fn IN-WINDOW, deliberately. The baseline path pushes the
+            # finished grade back to its sender; doing that here would hand a blind-arm
+            # sender the very signal the arm exists to withhold, which is the same reason
+            # the in-window 201 carries no `quality` key in either arm.
             _defer_grade_and_persist(
                 defer_fn         = defer_grade_fn,
                 grade_quality_fn = grade_quality_fn,
@@ -1946,6 +2042,7 @@ def execute_dm_send(
     grade_quality_fn = None,
     arrival_utc_fn   = None,
     defer_grade_fn   = None,
+    deliver_grade_fn = None,
 ):
     """
     Pure-logic core for POST /api/dm/send — notification-native AI↔AI DM.
@@ -1981,6 +2078,8 @@ def execute_dm_send(
         - defer_grade_fn( job ) -> bool decides WHERE the grade + corpus row run.
           Production leaves it None → the grading worker. A test injects an inline
           runner so the row exists by the time it asserts on it.
+        - deliver_grade_fn( quality ) is the seam for HOW the finished grade reaches
+          the sender. Production leaves it None → push_dm_grade_to_sender.
 
     Ensures:
         - NO MODEL CALL HAPPENS IN THIS FUNCTION'S TIMELINE (row ec5cf83a). Grading
@@ -2131,10 +2230,23 @@ def execute_dm_send(
     # deferred job, so a row and its grade still arrive together. Fail-soft lives
     # inside the writer. `experiment=None` → the row keeps its legacy `arm` stamp (no
     # two-arm fields), the outside-window contract.
+    #
+    # THE SENDER STILL GETS ITS GRADE, just not in the response. That feedback is the
+    # live intervention (arm `signal_only`: grade shown, nothing refused), so the
+    # worker pushes it back naming the message it graded — Mr Radio's ruling and its
+    # two constraints, 2026-08-19. It is deliberately NOT sent as a DM: a grade
+    # delivered by dm_send would itself be graded, forever.
     _defer_grade_and_persist(
         defer_fn         = defer_grade_fn,
         grade_quality_fn = grade_quality_fn,
         body_text        = body.body,
+        deliver_grade_fn = ( deliver_grade_fn if deliver_grade_fn is not None else
+                             lambda quality: push_dm_grade_to_sender(
+                                 notification_queue    = notification_queue,
+                                 authenticated_user_id = authenticated_user_id,
+                                 sender_session_id     = body.sender_session_id,
+                                 message_id            = result[ "message_id" ],
+                                 quality               = quality ) ),
         persist_kwargs   = {
             "body_text"      : submitted_text,
             "delivered_text" : delivered_text,

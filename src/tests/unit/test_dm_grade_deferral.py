@@ -456,5 +456,96 @@ class TestTheExperimentPathDefersToo( _SendHarness ):
         self.assertIsNone( rows[ 0 ][ "overall" ] )
 
 
+class TestTheSenderStillGetsItsGrade( _SendHarness ):
+    """
+    Mr Radio's ruling, 2026-08-19: taking the grade out of the 201 must not take it
+    away from the sender. That feedback IS the live intervention (arm `signal_only`
+    — grade shown, nothing refused), so the worker pushes it back. Two constraints
+    came with the ruling and each has a test: it NAMES the message it grades, and it
+    is best-effort and silent when the sender seat is gone.
+    """
+
+    def _pushed( self ):
+        return [ call.kwargs for call in self.queue.push_notification.call_args_list ]
+
+    def test_the_grade_is_pushed_back_to_the_sending_session( self ):
+        self._send( grader=lambda b: _GRADE, defer_grade_fn=_run_deferred_inline )
+        grades = [ p for p in self._pushed() if p[ "sender_persona" ] == "DM Quality Judge" ]
+        self.assertEqual( len( grades ), 1 )
+        # Routed to the SENDER's seat, not the recipient's — the DM itself went to
+        # "abcdef12"; the grade comes back to "asker-se".
+        self.assertEqual( grades[ 0 ][ "job_id" ], "asker-se" )
+        self.assertTrue( grades[ 0 ][ "suppress_ding" ] )
+
+    def test_the_notice_names_the_message_it_grades( self ):
+        """
+        A late grade with no anchor is the same confusion arriving slower. The anchor
+        is the id the SENDER was handed in its 201 — which is the db id when the row
+        persisted, not the pre-persist message id, so the sender can match the two
+        without knowing that distinction exists.
+        """
+        result = self._send( grader=lambda b: _GRADE, defer_grade_fn=_run_deferred_inline )
+        grades = [ p for p in self._pushed() if p[ "sender_persona" ] == "DM Quality Judge" ]
+        self.assertIn( result[ "message_id" ], grades[ 0 ][ "message" ] )
+        self.assertIn( "overall", grades[ 0 ][ "message" ] )
+
+    def test_a_withheld_dimension_reads_as_withheld_not_as_zero( self ):
+        from cosa.rest.routers.dm import format_dm_grade_notice
+        length_only = dict( _GRADE )
+        length_only[ "directness" ] = { "emoji": "♾️", "weight": None }
+        length_only[ "tone" ]       = { "emoji": "♾️", "weight": None }
+        notice = format_dm_grade_notice( "msg-1", length_only )
+        self.assertIn( "directness —", notice )
+        self.assertIn( "tone —", notice )
+        self.assertNotIn( "directness ♾️ +0", notice )
+
+    def test_a_gone_seat_is_silent_not_an_error( self ):
+        """
+        A reaped worker is a normal outcome. The push raising must not reach the send,
+        must not lose the corpus row, and must not kill the grading worker — which
+        would take every LATER grade with it.
+        """
+        self.queue.push_notification.side_effect = [ None, RuntimeError( "no such session" ) ]
+        result = self._send( grader=lambda b: _GRADE, defer_grade_fn=_run_deferred_inline )
+        self.assertEqual( result[ "http_status" ], 201 )
+        rows = self._rows()
+        self.assertEqual( len( rows ), 1 )
+        self.assertEqual( rows[ 0 ][ "overall" ], 1 )      # the row kept its grade
+
+    def test_no_grade_means_no_notice( self ):
+        self._send( grader=lambda b: None, defer_grade_fn=_run_deferred_inline )
+        grades = [ p for p in self._pushed() if p[ "sender_persona" ] == "DM Quality Judge" ]
+        self.assertEqual( grades, [] )
+
+    def test_a_refused_deferral_delivers_nothing( self ):
+        self._send( grader=lambda b: _GRADE, defer_grade_fn=lambda job: False )
+        grades = [ p for p in self._pushed() if p[ "sender_persona" ] == "DM Quality Judge" ]
+        self.assertEqual( grades, [] )
+
+    def test_a_delivery_hook_that_raises_is_caught_by_the_job( self ):
+        """The hook catches its own failures; this proves the job catches them too, so
+        a future delivery path cannot kill the worker by forgetting to."""
+        def boom( quality ):
+            raise RuntimeError( "delivery exploded" )
+        result = self._send( grader=lambda b: _GRADE, defer_grade_fn=_run_deferred_inline,
+                             deliver_grade_fn=boom )
+        self.assertEqual( result[ "http_status" ], 201 )
+        self.assertEqual( len( self._rows() ), 1 )
+
+    def test_an_in_window_send_pushes_NO_grade_to_its_sender( self ):
+        """
+        The blind arm stays blind. Pushing the grade in-window would hand the sender
+        exactly the signal the arm exists to withhold — the same reason the in-window
+        201 carries no `quality` key in either arm.
+        """
+        dm_experiment.set_policy( dm_experiment.make_policy( slots=[ _SLOT_REJECTING, _SLOT_BLIND ] ) )
+        queued = []
+        self._send( arrival=_IN_BLIND, grader=lambda b: _GRADE,
+                    defer_grade_fn=lambda job: queued.append( job ) or True )
+        queued[ 0 ]()
+        grades = [ p for p in self._pushed() if p[ "sender_persona" ] == "DM Quality Judge" ]
+        self.assertEqual( grades, [] )
+
+
 if __name__ == "__main__":
     unittest.main()
