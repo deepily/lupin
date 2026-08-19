@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Pre-commit gate: refuse a commit that ADDS a credential value.
 
