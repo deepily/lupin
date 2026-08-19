@@ -349,7 +349,10 @@ class XmlCoordinator:
         instructions, inputs, outputs, prompts, commands = self._get_5_empty_lists()
 
         # For each browser command, load the corresponding file and generate prompts
-        for compound_command in self.prompt_generator.agent_router_compound_commands.keys():
+        # The REGISTRY decides which commands get rows and in what order (row 95924f2d,
+        # step 4); the JSON only says where each command's phrasings live. The loop
+        # variable is therefore a registry string, so the row's answer below is too.
+        for compound_command in self.prompt_generator.registry_ordered_training_commands( self.prompt_generator.agent_router_compound_commands ):
 
             du.print_banner( f"Building prompts for compound AGENT ROUTER command [{compound_command}]", prepend_nl=True, end="\n" )
             counter = 1
@@ -614,7 +617,8 @@ class XmlCoordinator:
 
         default_factor = 1
 
-        for simple_command in self.prompt_generator.agent_router_simple_commands.keys():
+        # Registry-ordered, registry-labelled — see the compound builder (row 95924f2d).
+        for simple_command in self.prompt_generator.registry_ordered_training_commands( self.prompt_generator.agent_router_simple_commands ):
 
             factor = augmentation_config.get( simple_command, {} ).get( "factor", default_factor )
 
@@ -742,7 +746,10 @@ class XmlCoordinator:
 
         # Use the shared agent router instruction template with ALL agent router commands
         # This integrates agentic jobs into the unified training pipeline
-        for command_name, config in agentic_commands.items():
+        # Registry-ordered, registry-labelled — see the compound builder (row 95924f2d).
+        for command_name in self.prompt_generator.registry_ordered_training_commands( agentic_commands ):
+
+            config = agentic_commands[ command_name ]
 
             du.print_banner( f"Building prompts for AGENTIC JOB command [{command_name}]", prepend_nl=True, end="\n" )
             counter = 1
