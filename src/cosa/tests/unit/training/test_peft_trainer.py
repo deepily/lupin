@@ -18,6 +18,7 @@ and model operations are mocked for isolated testing.
 
 import unittest
 from unittest.mock import Mock, MagicMock, patch, call
+import tempfile
 import time
 import sys
 import os
@@ -430,6 +431,89 @@ class TestPeftTrainer( unittest.TestCase ):
             # Verify model + tokenizer save_pretrained were called
             self.mock_model.save_pretrained.assert_called_once()
             self.mock_tokenizer.save_pretrained.assert_called_once()
+    
+    # -- cwd-restoration controls -------------------------------------------------
+    # Both methods os.chdir() away and back. The cwd is PROCESS-global, so restoring it
+    # only on the happy path leaks the change into every later test in the same pytest
+    # process. That is exactly what happened: this file left the process sitting in
+    # src/cosa/tests/unit/training, and the drift guard's §4 check
+    # (test_v2_registry_drift_guard.py::TestCliHelpNamesDeclaredArgs) then failed all nine
+    # of its commands, because get_cli_help() shells out with a RELATIVE PYTHONPATH=src
+    # that no longer resolves from there — every --help came back
+    # "No module named 'cosa'". These two tests use the REAL os.chdir on purpose;
+    # patching it away is what let the leak live.
+    
+    def test_load_model_and_tokenizer_restores_cwd_when_load_fails( self ):
+        """
+        Test the working directory survives a model-load failure.
+        
+        Ensures:
+            - _load_model_and_tokenizer restores the original cwd when
+              AutoModelForCausalLM.from_pretrained raises
+        """
+        with tempfile.TemporaryDirectory() as hf_home:
+            original_cwd = os.getcwd()
+            
+            with patch.dict( os.environ, { "HF_HOME": hf_home } ), \
+                 patch( 'cosa.training.peft_trainer.du.print_banner' ), \
+                 patch( 'builtins.print' ), \
+                 patch( 'cosa.training.peft_trainer.AutoModelForCausalLM.from_pretrained' ) as mock_model_load, \
+                 patch( 'cosa.training.peft_trainer.torch' ):
+                
+                mock_model_load.side_effect = RuntimeError( "Model loading failed" )
+                
+                trainer = PeftTrainer(
+                    model_hf_id=self.test_model_hf_id,
+                    model_name=self.test_model_name,
+                    test_train_path=self.test_train_path
+                )
+                
+                with self.assertRaises( RuntimeError ):
+                    trainer._load_model_and_tokenizer( mode="training" )
+            
+            self.assertEqual(
+                os.path.realpath( os.getcwd() ), os.path.realpath( original_cwd ),
+                "_load_model_and_tokenizer leaked its os.chdir when from_pretrained raised"
+            )
+    
+    def test_save_model_restores_cwd_when_save_fails( self ):
+        """
+        Test the working directory survives a save failure.
+        
+        Ensures:
+            - save_model restores the original cwd when model.save_pretrained raises
+        """
+        with tempfile.TemporaryDirectory() as output_dir:
+            original_cwd = os.getcwd()
+            
+            with patch( 'cosa.training.peft_trainer.du.print_banner' ), \
+                 patch( 'builtins.print' ), \
+                 patch( 'cosa.training.peft_trainer.du.get_current_date' ) as mock_get_date, \
+                 patch( 'cosa.training.peft_trainer.du.get_current_time' ) as mock_get_time:
+                
+                mock_get_date.return_value = "2026-08-19"
+                mock_get_time.return_value = "21-15"
+                
+                trainer = PeftTrainer(
+                    model_hf_id=self.test_model_hf_id,
+                    model_name=self.test_model_name,
+                    test_train_path=self.test_train_path
+                )
+                trainer.output_dir = output_dir
+                trainer.model      = self.mock_model
+                trainer.tokenizer  = self.mock_tokenizer
+                self.mock_model.save_pretrained.side_effect = OSError( "disk full" )
+                
+                try:
+                    with self.assertRaises( OSError ):
+                        trainer.save_model()
+                finally:
+                    self.mock_model.save_pretrained.side_effect = None
+            
+            self.assertEqual(
+                os.path.realpath( os.getcwd() ), os.path.realpath( original_cwd ),
+                "save_model leaked its os.chdir when save_pretrained raised"
+            )
     
     @_requires_peft
     def test_load_and_merge_adapter_success( self ):
