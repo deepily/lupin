@@ -1,5 +1,6 @@
 import os
 import subprocess
+import uuid
 from subprocess import PIPE, run
 from typing import Any, Optional
 
@@ -244,6 +245,27 @@ def _remove_consecutive_empty_strings( strings: list[str] ) -> list[str]:
     return result
 
 # TODO: Flip return none on timeout from true to false!
+def _remove_quietly( path: str ) -> None:
+    """
+    Delete a per-invocation code file, never raising.
+
+    Requires:
+        - path is a string path that may or may not exist
+
+    Ensures:
+        - the file is gone if it was there
+        - NEVER raises — cleanup failure must not mask or replace the execution result the
+          caller is about to return, which is the actual answer to the user's question
+
+    Raises:
+        - None
+    """
+    try:
+        os.remove( path )
+    except OSError:
+        pass
+
+
 def assemble_and_run_solution( solution_code: list[str], example_code: str, path_to_df: Optional[str]=None, solution_code_returns: str="string", python_runtime: str="python3", debug: bool=False, verbose: bool=False, inject_bugs: bool=False, return_none_on_timeout: bool=True ) -> dict[str, Any]:
     """
     Assemble and execute the solution code with necessary imports and post-processing.
@@ -302,20 +324,42 @@ def assemble_and_run_solution( solution_code: list[str], example_code: str, path
         
     code_path = du.get_project_root() + code_file_path
 
+    # 🔴 ONE FILE PER INVOCATION — row 7b9094d8, Rick's ruling 2026-08-19 ("fix the race only").
+    #
+    # The configured key gives ONE path (/io/code.py in [Lupin: Development]), and every agent
+    # that generates code wrote it and then executed it. `cj flow max concurrent agentic jobs`
+    # is 1 in Baseline but overridden to 3 in BOTH Development and Production, so up to three
+    # jobs shared that filename. The interleaving that matters is write(A) -> write(B) -> exec(A):
+    # job A executes job B's code and returns the result as its own answer. There was no job id
+    # in the file, no checksum and no lock, so nothing detected it — the failure mode is a
+    # confident WRONG ANSWER attributed to the wrong question, not a crash.
+    #
+    # Uniqueness is generated HERE rather than threaded in from a caller: RunnableCode has no
+    # id_hash to pass, and a per-invocation uuid cannot be defeated by a caller that forgets to
+    # supply one. The configured value keeps its meaning — it supplies the directory and the
+    # stem, and the suffix makes each run distinct.
+    code_dir       = os.path.dirname( code_path )
+    stem, ext      = os.path.splitext( os.path.basename( code_path ) )
+    code_path      = os.path.join( code_dir, f"{stem}-{uuid.uuid4().hex}{ext or '.py'}" )
+
     # Create directory if it doesn't exist (defensive programming for Docker environments)
-    os.makedirs( os.path.dirname( code_path ), exist_ok=True )
+    os.makedirs( code_dir, exist_ok=True )
 
     du.write_lines_to_file( code_path, solution_code )
-    
-    # Stash current working directory, so we can return to it after code has finished executing
-    original_wd = os.getcwd()
-    os.chdir( du.get_project_root() + "/io" )
-    
+
+    # ⚠️ cwd= ON THE CHILD, NOT os.chdir ON THE PARENT. This used to call
+    # os.chdir( <root>/io ) and restore it afterwards — a process-global mutation made from a
+    # worker thread, so every OTHER thread's relative paths moved for the duration. Worse, the
+    # `raise e` branch below never restored it, so a non-swallowed timeout left the whole server
+    # sitting in /io permanently. Passing cwd= gives the generated code the same working
+    # directory it always had, without the parent ever changing its own.
+    run_cwd = du.get_project_root() + "/io"
+
     if debug: print( "Code runner executing [{}]... ".format( code_path ), end="" )
-    
+
     # ¡OJO! Hardcoded value of python runtime... Make this runtime configurable
     try:
-        results = run( [ python_runtime, code_path ], stdout=PIPE, stderr=PIPE, universal_newlines=True, timeout=60 )
+        results = run( [ python_runtime, code_path ], stdout=PIPE, stderr=PIPE, universal_newlines=True, timeout=60, cwd=run_cwd )
     except subprocess.TimeoutExpired as e:
         
         du.print_stack_trace( e, explanation="subprocess.TimeExpired calling run(...)", caller="assemble_and_run_solution" )
@@ -325,14 +369,14 @@ def assemble_and_run_solution( solution_code: list[str], example_code: str, path
         # !OJO! This is a GIANT kludge, but it's a way to return a response that doesn't crash the gsm8k client
         if return_none_on_timeout:
             
-            # Return to original working directory
-            os.chdir( original_wd )
+            _remove_quietly( code_path )
             
             results_dict = initialize_code_response_dict()
             results_dict[ "output" ] = None
             
             return results_dict
         else:
+            _remove_quietly( code_path )
             raise e
     
     if debug: print( f"results.returncode = [{results.returncode}]...", end="" )
@@ -355,8 +399,9 @@ def assemble_and_run_solution( solution_code: list[str], example_code: str, path
         du.print_banner( "assemble_and_run_solution() output:", prepend_nl=True )
         print( results_dict[ "output" ] )
     
-    # Return to original working directory
-    os.chdir( original_wd )
+    # The per-invocation file has served its purpose. Leaving them behind would turn /io into an
+    # unbounded pile of code-<uuid>.py, which is the predictable cost of making the name unique.
+    _remove_quietly( code_path )
     
     return results_dict
 
