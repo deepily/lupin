@@ -212,13 +212,20 @@ class ProxyNotificationSmokeTest:
     def test_swe_submit_with_trust_mode( self ):
         """Test 3: Submit SWE Team dry-run job with trust_mode=suggest."""
         try:
+            payload = {
+                "task"       : "Add a health check endpoint for proxy notification smoke test",
+                "dry_run"    : True,
+                "trust_mode" : "suggest",
+            }
+            # Lineage tag (row 7451bebe / bug 5ed4f187): a child pytest inside a monopolizing
+            # test-suite job must thread LUPIN_TEST_MONOPOLIZE_PARENT_ID or the consumer's Gate B
+            # defers it as a foreign writer and it starves 900s.
+            parent_id = os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" )
+            if parent_id:
+                payload[ "parent_id_hash" ] = parent_id
             resp = requests.post(
                 f"{BASE_URL}/api/swe-team/submit",
-                json={
-                    "task"       : "Add a health check endpoint for proxy notification smoke test",
-                    "dry_run"    : True,
-                    "trust_mode" : "suggest",
-                },
+                json=payload,
                 headers=self.headers,
                 timeout=REQUEST_TIMEOUT
             )

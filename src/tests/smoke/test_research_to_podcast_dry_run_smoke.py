@@ -85,14 +85,21 @@ def quick_smoke_test():
         # ═══════════════════════════════════════════════════════════════════════
         print( "\nTest 2: Submitting Research→Podcast job with dry_run=true..." )
         headers = { "Authorization": f"Bearer {token}" }
+        payload = {
+            "query"            : "[Research→Podcast] dry-run smoke test - safe to ignore",
+            "budget"           : 0.01,
+            "target_languages" : [ "en" ],
+            "dry_run"          : True
+        }
+        # Lineage tag (row 7451bebe / bug 5ed4f187): a child pytest inside a monopolizing
+        # test-suite job must thread LUPIN_TEST_MONOPOLIZE_PARENT_ID or the consumer's Gate B
+        # defers it as a foreign writer and it starves 900s.
+        parent_id = os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" )
+        if parent_id:
+            payload[ "parent_id_hash" ] = parent_id
         submit_resp = requests.post(
             f"{BASE_URL}/api/deep-research-to-podcast/submit",
-            json={
-                "query"            : "[Research→Podcast] dry-run smoke test - safe to ignore",
-                "budget"           : 0.01,
-                "target_languages" : [ "en" ],
-                "dry_run"          : True
-            },
+            json=payload,
             headers=headers
         )
 

@@ -136,6 +136,12 @@ def _submit_dry_run_job( headers, endpoint, payload, label ):
     print( f"\n>>> Submitting {label}..." )
     print( f"    Endpoint: {endpoint}" )
     print( f"    force_failure_mode: {payload.get( 'force_failure_mode' )}" )
+    # Lineage tag (row 7451bebe / bug 5ed4f187): a child pytest inside a monopolizing
+    # test-suite job must thread LUPIN_TEST_MONOPOLIZE_PARENT_ID or the consumer's Gate B
+    # defers it as a foreign writer and it starves 900s.
+    parent_id = os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" )
+    if parent_id:
+        payload[ "parent_id_hash" ] = parent_id
     resp = requests.post( f"{BASE_URL}{endpoint}", json=payload, headers=headers, timeout=30 )
     if resp.status_code != 200:
         print( f"✗ Submit failed: {resp.status_code} {resp.text[ :300 ]}" )

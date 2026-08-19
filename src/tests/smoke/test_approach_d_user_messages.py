@@ -451,12 +451,19 @@ class ApproachDUserMessageSmokeTest( LivePipelineTestBase ):
         # -----------------------------------------------------------------
         print( "\n  Submitting SWE dry-run job..." )
 
-        submit_payload = {
+        payload = {
             "task"         : "Smoke test: Approach D user message injection",
             "dry_run"      : True,
             "websocket_id" : ws_id,
         }
-        req_headers = { **headers, "X-Session-ID": ws_id }
+        # Lineage tag (row 7451bebe / bug 5ed4f187): a child pytest inside a monopolizing
+        # test-suite job must thread LUPIN_TEST_MONOPOLIZE_PARENT_ID or the consumer's Gate B
+        # defers it as a foreign writer and it starves 900s.
+        parent_id = os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" )
+        if parent_id:
+            payload[ "parent_id_hash" ] = parent_id
+        submit_payload = payload
+        req_headers    = { **headers, "X-Session-ID": ws_id }
 
         try:
             resp = requests.post(

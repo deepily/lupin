@@ -138,10 +138,17 @@ class PresentationDryRunSmokeTest( LivePipelineTestBase ):
         if "payload" in scenario:
             return scenario[ "payload" ]
 
-        return {
+        payload = {
             "source_path" : scenario[ "source_path" ],
             "dry_run"     : scenario.get( "dry_run", True ),
         }
+        # Lineage tag (row 7451bebe / bug 5ed4f187): a child pytest inside a monopolizing
+        # test-suite job must thread LUPIN_TEST_MONOPOLIZE_PARENT_ID or the consumer's Gate B
+        # defers it as a foreign writer and it starves 900s.
+        parent_id = os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" )
+        if parent_id:
+            payload[ "parent_id_hash" ] = parent_id
+        return payload
 
     # ═══════════════════════════════════════════════════════════════════════
     # Mode Management
