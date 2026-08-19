@@ -30,6 +30,14 @@ The warm-then-dead arm is the honest outage, so _DEAD_COST_S is 3.00s. Five
 percent of that is generous, so the allowed gap is the TIGHTER of that 5% and
 the per-send cap — the cap binds at 50ms, and the failure message says both.
 
+WHAT THE NUMBER IS AND IS NOT (Mr Radio, 2026-08-19). The medians below are of
+the SEND CODE PATH with every collaborator faked — no socket, no database, no
+recipient. A median in the tenths of a millisecond is the proof of that, not an
+end-to-end DM. That is the right cut for this question: it isolates the grader,
+so the only thing that can move the number is where the grade runs. The revert
+control is what turns it into evidence — the identical harness with grading back
+inline reads three full seconds.
+
 A DEAD ENDPOINT IS MODELLED, NOT DIALLED. A unit test may not open a routed
 socket (row 7c84b8b8), so "the endpoint is down" is a grader that sleeps for the
 outage and then raises ConnectionError. What the REAL judge costs against a dead
