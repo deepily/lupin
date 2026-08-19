@@ -1776,6 +1776,23 @@ The ratified **mux MVP-finish remediation** (6 items; plan `src/rnd/v0.1.9/2026.
 
 ## Pending
 
+### 🔎 Sweep finding, NOT filed as a row (Rick's 2026-08-19 no-new-bugs-until-zero order)
+
+**`matplotlib_renderer.py:235` executes model-generated Python with no sandbox.** Found during
+row `60f04102`'s sweep (2026-08-19, Mr. Radio). It writes generated `code` to a temp file and runs
+`python3 <temp_path>` as the server's OS user — arbitrary code execution by construction, no import
+allowlist, a 30s timeout the only control.
+
+- **Same family as `7b9094d8`, different site.** Better in one respect: `NamedTemporaryFile` gives
+  each run a unique path, so it has none of `util_code_runner`'s shared-path race.
+- **Not caller-supplied directly** — the code is model-generated. But a caller who controls the
+  presentation prompt influences what gets generated, so the trust boundary is the model's output,
+  not the user's input.
+- **Deliberately not fixed.** Rick scoped `7b9094d8` to "the race only" and explicitly excluded the
+  sandbox half. Fixing the sandbox here would override that ruling at a site he had not seen.
+- **Promote to a row when the board reaches zero**, or fold into `7b9094d8` if its scope is ever
+  widened to the sandbox.
+
 ### 🌅 MORNING AFTER THE REBOOT — two gates left open on purpose (store row `19a417fa`)
 
 Rick's call at session-end 2026-08-17: pick these up in the morning, after the reboot.
