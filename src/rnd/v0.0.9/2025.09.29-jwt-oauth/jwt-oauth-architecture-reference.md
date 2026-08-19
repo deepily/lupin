@@ -429,9 +429,12 @@ export JWT_SECRET_KEY="<REDACTED — row adce3547; JWT_SECRET_KEY is REQUIRED, t
 jwt secret key = ${JWT_SECRET_KEY}  # Read from environment
 ```
 
-**Fallback for Development**:
+**Fallback for Development** — ⚠️ **SUPERSEDED 2026-08-19, row adce3547. There is no fallback any more, in any environment.** `jwt_service.py` now raises on an unset or blank `JWT_SECRET_KEY` whatever `ENVIRONMENT` says. The design below is kept because this is a reference document and the reasoning is part of the record; it is NOT what the code does.
+
+Two things are worth carrying forward from it. First, the shipped code never matched this sketch: it tested `ENVIRONMENT == "production"`, not `== "development"`, so the default branch was what a deployment landed on by SILENCE rather than by declaring itself a dev box. Second, a default that is identical in every checkout is a shared secret, and the warning print beside it was a hope rather than a control — nothing refused to run.
+
 ```python
-# In jwt_service.py
+# In jwt_service.py — HISTORICAL, superseded; see the note above
 SECRET_KEY = os.getenv( "JWT_SECRET_KEY" )
 if not SECRET_KEY:
     if os.getenv( "ENVIRONMENT" ) == "development":
@@ -1195,8 +1198,10 @@ jwt secret key = Secret key for signing JWT tokens.
   Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"
   Never commit secret keys to version control.
 
-  Development: Can use default key (warning logged)
-  Production: MUST set JWT_SECRET_KEY environment variable or startup will fail
+  Every environment: MUST set JWT_SECRET_KEY or startup fails.
+  (Superseded 2026-08-19, row adce3547 — this line used to read "Development: Can
+   use default key (warning logged)". There is no default key now, and no
+   environment that gets one.)
 
 jwt access token expire minutes = Lifespan of access tokens in minutes.
   Default: 30 minutes (balance between security and user experience)
