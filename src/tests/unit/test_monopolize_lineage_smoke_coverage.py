@@ -23,9 +23,19 @@ test file that POSTs to one of those paths must also read `LUPIN_TEST_MONOPOLIZE
 Add a seventh lineage-aware router tomorrow, or a new smoke against an existing one, and this
 holds the line without anyone remembering to update a list.
 
-SCOPE — what a green here does NOT mean: this proves the tag is THREADED, not that Gate B
-admits the child. That is the :8000 monopolize sweep, and it is still owed on row 7451bebe.
-A green here is the floor that makes the sweep worth running.
+SCOPE — two things a green here does NOT mean.
+  · It proves the tag is THREADED, not that Gate B ADMITS the child. That is the :8000
+    monopolize sweep, still owed on row 7451bebe. A green here is the floor that makes the
+    sweep worth running.
+  · The check is FILE-LEVEL: a file that reads the env var anywhere passes, even if one of
+    its submit sites still goes out untagged. That is deliberate — several of these files
+    submit raw payloads on purpose to probe a 422, and those must stay untagged — but it
+    means this cannot certify every CALL SITE, only that no file is wholly unaware.
+
+HISTORY, because the marker did its job and should be remembered for it: this arm shipped
+2026-08-19 as xfail(strict=True) over EIGHT untagged callers, three of them swe_team. Tiffany
+tagged all eight within the hour, the arm XPASSed, strict turned that into a FAILURE, and the
+waiver came off the same evening it went on. A non-strict marker would still be sitting here.
 
 Venue: :7999-eligible. Pure file reads; no server, no docker, no network.
 """
@@ -72,14 +82,32 @@ def lineage_aware_endpoints( router_dir ):
     return endpoints
 
 
+def _code_only( text ):
+    """
+    The file's CODE, with comment tails removed.
+
+    ⚠️ WHY THIS EXISTS — my own control caught it. The first version of this checker accepted
+    any file MENTIONING the env var, and every tagged file also carries a comment naming it.
+    So neutering the actual read (`parent_id = None`) left the comment behind and the checker
+    stayed green over a genuinely untagged file. An instrument that a comment can satisfy is
+    the same defect this file was written to catch, one level up.
+
+    Ensures:
+        - returns the text with everything after an unquoted-looking `#` dropped per line
+        - crude by design: it can only make the check STRICTER, never more permissive
+    """
+    return "\n".join( line.split( "#" )[ 0 ] for line in text.splitlines() )
+
+
 def untagged_callers( endpoints, root, test_dirs ):
     """
-    Test files that POST to a lineage-aware endpoint without reading the parent-id env var.
+    Test files that POST to a lineage-aware endpoint without READING the parent-id env var.
 
     Ensures:
         - returns a list of ( relative_path, endpoint ) pairs, one per offending file
-        - a file mentioning the env var anywhere is accepted (threading it is the point;
-          how it is spelled is the author's business)
+        - the env var must appear in CODE, not in a comment (see _code_only)
+        - the file must also stamp `parent_id_hash` in code — reading the var and never
+          putting it in a payload is not threading it
     """
     offenders = []
     for d in test_dirs:
@@ -89,7 +117,8 @@ def untagged_callers( endpoints, root, test_dirs ):
             if not name.endswith( ".py" ) or name.startswith( "._" ): continue   # AppleDouble sidecar
             path = os.path.join( full_dir, name )
             with open( path, "r", errors="ignore" ) as f: text = f.read()
-            if LINEAGE_ENV in text: continue
+            code = _code_only( text )
+            if LINEAGE_ENV in code and LINEAGE_FIELD in code: continue
             for endpoint in endpoints:
                 if endpoint in text:
                     offenders.append( ( os.path.join( d, name ), endpoint ) )
@@ -127,10 +156,29 @@ def test_the_checker_accepts_a_smoke_that_threads_the_tag( tmp_path ):
     smoke_dir.mkdir()
     ( smoke_dir / "test_tagged.py" ).write_text(
         f'parent = os.environ.get( "{LINEAGE_ENV}" )\n'
+        'payload[ "parent_id_hash" ] = parent\n'
         'requests.post( f"{BASE_URL}/api/deep-research/submit", json=payload )\n'
     )
     assert untagged_callers( { "/api/deep-research/submit": "deep_research.py" },
                              str( tmp_path ), ( "smoke", ) ) == []
+
+
+def test_a_comment_naming_the_env_var_does_NOT_satisfy_the_check( tmp_path ):
+    """
+    THE CONTROL THAT CAUGHT MY OWN INSTRUMENT. A file that only TALKS about the tag is
+    untagged, and must be flagged as such — otherwise neutering the real read leaves the
+    comment behind and the checker reports clean over a live gap.
+    """
+    smoke_dir = tmp_path / "smoke"
+    smoke_dir.mkdir()
+    ( smoke_dir / "test_comment_only.py" ).write_text(
+        f'# threads {LINEAGE_ENV} as parent_id_hash — except it does not\n'
+        'parent_id = None\n'
+        'requests.post( f"{BASE_URL}/api/deep-research/submit", json=payload )\n'
+    )
+    assert untagged_callers( { "/api/deep-research/submit": "deep_research.py" },
+                             str( tmp_path ), ( "smoke", ) ) == [
+        ( "smoke/test_comment_only.py", "/api/deep-research/submit" ) ]
 
 
 # ── the real-tree assertions ────────────────────────────────────────────────
@@ -147,21 +195,6 @@ def test_the_derivation_finds_the_lineage_aware_routers():
     assert "/api/podcast-generator/submit" in endpoints
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "MEASURED 2026-08-19 (row 7451bebe): EIGHT callers still submit untagged, and three of "
-        "them are swe_team — the ORIGINAL 3a14292b surface, fixed months before the presentation "
-        "one. Tiffany closed two tonight (deep_research_submit, podcast_generator_dry_run); the "
-        "rest are unowned as of this commit: test_approach_d_user_messages, "
-        "test_bfe_phase6_repair_loop_smoke, test_deep_research_dry_run_smoke, "
-        "test_presentation_dry_run_smoke, test_proxy_notifications, "
-        "test_research_to_podcast_dry_run_smoke, test_research_to_presentation_dry_run_smoke, "
-        "test_swe_team_mock_endpoint. strict=True on purpose: the day the last one is tagged this "
-        "XPASSes and FAILS, forcing the waiver off rather than letting it outlive the gap it "
-        "excuses — same discipline as the marker on test_compose_env_contract_coverage."
-    ),
-)
 def test_every_lineage_aware_caller_threads_the_parent_id():
     """
     The row's assertion: no test may submit to a lineage-aware endpoint untagged.
