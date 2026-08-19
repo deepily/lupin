@@ -33,6 +33,7 @@ Methods:
 """
 
 import random
+import threading
 from functools import wraps
 from typing import Callable, Any
 
@@ -106,41 +107,92 @@ class TwoWordIdGenerator:
         
         # Dictionary to store generated unique combinations
         self.generated_ids = set()  # Using a set for faster lookup
+
+        # Cycle number for the name space currently being handed out. Cycle 1 is the
+        # bare "adjective noun" space; when it fills, cycle 2 opens "adjective noun<a>",
+        # and so on. Without this the retry loop below could never find a free name and
+        # would spin forever on CPU once all len(adjectives) * len(nouns) were used.
+        self._cycle = 1
+
+        # get_id() is called from request-handler and agent-construction threads
+        # concurrently. The membership check and the add must be one step, or two
+        # threads can hand out the same id.
+        self._lock  = threading.RLock()
     
+    def _cycle_suffix( self, cycle: int ) -> str:
+        """
+        Letters appended to the noun to open a fresh name space past the first.
+
+        Letters, not digits, and appended with no separator, so the result is still
+        two lowercase words. Session ids from this generator are validated against
+        ^[a-z]+ [a-z]+$ in cosa/rest/routers/websocket.py before a WebSocket is
+        allowed to connect, and a digit or a third word would be refused.
+
+        Requires:
+            - cycle is an integer >= 1
+
+        Ensures:
+            - Cycle 1 returns "" (names are unchanged from the original scheme)
+            - Cycle 2 returns "a", 3 returns "b", ... 27 returns "z", 28 returns "aa"
+            - The returned string is lowercase ASCII letters only
+
+        Raises:
+            - None
+        """
+        suffix = ""
+        n      = cycle - 1
+        while n > 0:
+            n, remainder = divmod( n - 1, 26 )
+            suffix       = chr( ord( "a" ) + remainder ) + suffix
+        return suffix
+
     def get_id( self ) -> str:
         """
         Generate a unique two-word identifier.
-        
-        This method randomly selects an adjective and a noun from the
-        pre-defined lists and combines them to form a unique identifier.
-        The generated identifier is stored in the `generated_ids` set
-        to ensure that it is not generated again.
-        
+
+        Randomly draws an adjective and a noun and returns the pair the first time
+        it comes up. The pool holds len( adjectives ) * len( nouns ) names; once a
+        cycle is used up the next one opens with letters appended to the noun
+        ("bright liona"), so the generator keeps returning unique, readable ids for
+        the whole life of the process instead of looping forever.
+
         Requires:
-            - self.adjectives is non-empty list
-            - self.nouns is non-empty list
+            - self.adjectives is a non-empty list
+            - self.nouns is a non-empty list
             - self.generated_ids is a set
-            
+
         Ensures:
-            - Returns unique adjective-noun combination
-            - Combination is added to generated_ids set
-            - Never returns duplicate IDs
-            - Eventually exhausts all combinations
-            
+            - Returns a name that has not been returned before by this instance
+            - The returned name is added to generated_ids
+            - Always terminates, including when every name in the current cycle is taken
+            - The name is always two lowercase words, so it still passes the session-id
+              check in cosa/rest/routers/websocket.py (^[a-z]+ [a-z]+$)
+            - Safe to call from multiple threads at once
+
         Raises:
-            - None (infinite loop if all combinations used)
+            - None
         """
-        while True:
-            # Generate a random adjective and noun combination
-            adjective = random.choice( self.adjectives )
-            noun = random.choice( self.nouns )
-            combination = f"{adjective} {noun}"
-            
-            # Check if this combination has already been generated in this session
-            if combination not in self.generated_ids:
-                # If unique, store it in the dictionary and return it
-                self.generated_ids.add( combination )
-                return combination
+        with self._lock:
+            names_per_cycle = len( self.adjectives ) * len( self.nouns )
+
+            # Open a new cycle whenever the current name space is full. Guarantees the
+            # draw loop below always has at least one free name to land on.
+            while len( self.generated_ids ) >= names_per_cycle * self._cycle:
+                self._cycle += 1
+
+            suffix = self._cycle_suffix( self._cycle )
+
+            while True:
+                # Generate a random adjective and noun combination
+                adjective   = random.choice( self.adjectives )
+                noun        = random.choice( self.nouns )
+                combination = f"{adjective} {noun}{suffix}"
+
+                # Check if this combination has already been generated in this session
+                if combination not in self.generated_ids:
+                    # If unique, store it in the dictionary and return it
+                    self.generated_ids.add( combination )
+                    return combination
 
 def quick_smoke_test():
     """Quick smoke test to validate TwoWordIdGenerator functionality."""
