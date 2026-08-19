@@ -361,24 +361,28 @@ class TestCliHelpNamesDeclaredArgs( unittest.TestCase ):
     is a branch that cannot go red. If a future CLI genuinely cannot name its args,
     that is a real finding: leave it red, don't reintroduce a soft arm to hide it."""
 
-    # ⚠️ ORDER-DEPENDENT RED, AND IT PREDATES 2026-08-19 — read this before filing a
-    # regression. This test PASSES ALONE and FAILS, all nine commands at once, whenever
-    # src/cosa/tests/unit/training/test_peft_trainer.py has run earlier in the same
-    # process. Bisected across all ten files in that directory; it is the only one that
-    # does it, reproducibly. It fails identically with the row-95924f2d step-4 work
-    # stashed, so a tier run that goes red here after that push is NOT reporting on it.
+    # ✅ RESOLVED 2026-08-19 (Rachel). This check used to fail all nine of its commands
+    # whenever src/cosa/tests/unit/training/test_peft_trainer.py ran earlier in the SAME
+    # pytest process, and pass when run alone. María bisected it to that one file.
     #
-    # FOUR OBVIOUS CAUSES ARE ALREADY RULED OUT BY DIRECT PROBE — do not start from them:
-    #   (a) the working directory IS restored — measured before and after the peft suite;
-    #   (b) subprocess.run still works afterwards — a probe in the same process after the
-    #       suite returns 450 bytes of help naming `prompt`;
-    #   (c) _help_cache is not stale — cleared and re-read, same good result;
-    #   (d) nothing under src/cosa/tests/unit/training or .../infrastructure references
-    #       get_cli_help, _help_cache, agent_registry, JOB_ARG_CONTRACTS or subprocess.
+    # CAUSE: peft_trainer.PeftTrainer._load_model_and_tokenizer() and .save_model() both
+    # os.chdir() away and back, but the chdir-back was NOT in a finally. The peft suite's
+    # error-path test makes from_pretrained raise after the chdir, so the process was left
+    # sitting in src/cosa/tests/unit/training for every test that followed. get_cli_help()
+    # shells out to `python -m <mod> --help`, which inherits a RELATIVE PYTHONPATH=src that
+    # does not resolve from there — so all nine helps came back
+    # "No module named 'cosa'": non-empty text that names no declared arg.
     #
-    # The surviving suspects are something the peft suite does to the INTERPRETER rather
-    # than to the environment — a leaked import-system or `sys` mutation fits the evidence.
-    # Full write-up: planning-is-prompting TODO.md, under Pending. (María, 2026-08-19.)
+    # NOTE for anyone reading María's original write-up: her ruled-out cause (a), "the
+    # working directory IS restored", was measured on the SUCCESS path and does not hold on
+    # the error path. Her ruled-out (b), "a post-suite subprocess probe returns 450 bytes
+    # naming prompt", was run from a shell whose cwd was the repo root. Both observations
+    # were correct; neither covered the leaking path.
+    #
+    # Fix: try/finally around both chdir sites in cosa/training/peft_trainer.py, with two
+    # controls in test_peft_trainer.py (test_load_model_and_tokenizer_restores_cwd_when_
+    # load_fails, test_save_model_restores_cwd_when_save_fails) that use the REAL os.chdir
+    # — patching it away is what let the leak live. Both go red on revert.
     def test_cached_help_names_each_commands_declared_args( self ):
         from cosa.agents.runtime_argument_expeditor.agent_registry import (
             JOB_ARG_CONTRACTS, get_cli_help,

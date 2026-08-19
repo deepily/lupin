@@ -647,16 +647,19 @@ class PeftTrainer:
         # change directory to save adapter
         os.chdir( path )
         
-        print( f"Saving MODEL to {path}..." )
-        self.model.save_pretrained( path, safe_serialization=False )
-        print( f"Saving MODEL to {path}... Done!" )
-        
-        print( f"Saving TOKENIZER to {path}..." )
-        self.tokenizer.save_pretrained( path )
-        print( f"Saving TOKENIZER to {path}... Done!" )
-        
-        # change back to the original working directory
-        os.chdir( cwd )
+        # try/finally: the cwd is PROCESS-global. Restoring it only on the happy path
+        # leaks the directory change into everything that runs after a save failure.
+        try:
+            print( f"Saving MODEL to {path}..." )
+            self.model.save_pretrained( path, safe_serialization=False )
+            print( f"Saving MODEL to {path}... Done!" )
+            
+            print( f"Saving TOKENIZER to {path}..." )
+            self.tokenizer.save_pretrained( path )
+            print( f"Saving TOKENIZER to {path}... Done!" )
+        finally:
+            # change back to the original working directory
+            os.chdir( cwd )
     
     def _load_adapter( self, adapter_path: str ) -> None:
         """
@@ -961,66 +964,70 @@ class PeftTrainer:
         original_cwd = os.getcwd()
         # quantization_config = AutoRoundConfig( backend=backend )
         
-        if self.model is None:
+        # try/finally: the cwd is PROCESS-global. Restoring it only on the happy path
+        # leaks the directory change into everything that runs after a load failure.
+        try:
+            if self.model is None:
             
-            print( f"Loading {self.model_hf_id}..." )
-            print( f"Switching from current working directory: {original_cwd}..." )
-            os.chdir( os.environ[ "HF_HOME" ] )
-            print( f"To new working directory: {os.getcwd()}" )
+                print( f"Loading {self.model_hf_id}..." )
+                print( f"Switching from current working directory: {original_cwd}..." )
+                os.chdir( os.environ[ "HF_HOME" ] )
+                print( f"To new working directory: {os.getcwd()}" )
             
-            self.model = AutoModelForCausalLM.from_pretrained(
-                self.model_hf_id, device_map=device_map, low_cpu_mem_usage=True, use_cache=False,
-                torch_dtype=torch_dtype, local_files_only=True, cache_dir=cache_dir,
-                attn_implementation=attn_implementation
-            )
+                self.model = AutoModelForCausalLM.from_pretrained(
+                    self.model_hf_id, device_map=device_map, low_cpu_mem_usage=True, use_cache=False,
+                    torch_dtype=torch_dtype, local_files_only=True, cache_dir=cache_dir,
+                    attn_implementation=attn_implementation
+                )
             
-            if self.debug and self.verbose:
-                dupt.print_device_allocation( self.model )
-        else:
-            print( "Model already loaded. Skipping" )
-        
-        if self.tokenizer is None:
-            
-            self.tokenizer = AutoTokenizer.from_pretrained( self.model_hf_id, force_download=True, from_slow=False )
-            
-            # Load the model-specific tokenizer configuration
-            model_config = load_model_config( self.model_name )
-            tokenizer_config = model_config[ "tokenizer" ]
-            
-            # Apply tokenizer settings from configuration
-            pad_token = tokenizer_config[ "pad_token" ]
-            
-            # Handle different token attribute references
-            if pad_token == "eos_token":
-                self.tokenizer.pad_token = self.tokenizer.eos_token
-            elif pad_token == "unk_token":
-                self.tokenizer.pad_token = self.tokenizer.unk_token
-                # Convert from unk_token if needed
-                if tokenizer_config.get( "pad_token_id" ) == "converted_from_unk_token":
-                    self.tokenizer.pad_token_id = self.tokenizer.convert_tokens_to_ids( self.tokenizer.pad_token )
+                if self.debug and self.verbose:
+                    dupt.print_device_allocation( self.model )
             else:
-                # Direct string assignment
-                self.tokenizer.pad_token = pad_token
-                # Set ID if provided
-                if "pad_token_id" in tokenizer_config and isinstance( tokenizer_config[ "pad_token_id" ], int ):
-                    self.tokenizer.pad_token_id = tokenizer_config[ "pad_token_id" ]
-            
-            # Set padding side based on mode
-            if mode == "training":
-                print( f"Setting padding side to '{tokenizer_config[ 'padding_side' ][ 'training' ]}' for training" )
-                self.tokenizer.padding_side = tokenizer_config[ 'padding_side' ][ 'training' ]
-            elif mode == "inference":
-                print( f"Setting padding side to '{tokenizer_config[ 'padding_side' ][ 'inference' ]}' for inference" )
-                self.tokenizer.padding_side = tokenizer_config[ 'padding_side' ][ 'inference' ]
-            else:
-                # this is checked above, this will never be called
-                raise ValueError( "Mode MUST be specified, either 'training' or 'inference'" )
-        else:
-            print( "Tokenizer already loaded. Skipping" )
+                print( "Model already loaded. Skipping" )
         
-        if original_cwd != os.getcwd():
-            print( f"Switching back to original working directory: {original_cwd}" )
-            os.chdir( original_cwd )
+            if self.tokenizer is None:
+            
+                self.tokenizer = AutoTokenizer.from_pretrained( self.model_hf_id, force_download=True, from_slow=False )
+            
+                # Load the model-specific tokenizer configuration
+                model_config = load_model_config( self.model_name )
+                tokenizer_config = model_config[ "tokenizer" ]
+            
+                # Apply tokenizer settings from configuration
+                pad_token = tokenizer_config[ "pad_token" ]
+            
+                # Handle different token attribute references
+                if pad_token == "eos_token":
+                    self.tokenizer.pad_token = self.tokenizer.eos_token
+                elif pad_token == "unk_token":
+                    self.tokenizer.pad_token = self.tokenizer.unk_token
+                    # Convert from unk_token if needed
+                    if tokenizer_config.get( "pad_token_id" ) == "converted_from_unk_token":
+                        self.tokenizer.pad_token_id = self.tokenizer.convert_tokens_to_ids( self.tokenizer.pad_token )
+                else:
+                    # Direct string assignment
+                    self.tokenizer.pad_token = pad_token
+                    # Set ID if provided
+                    if "pad_token_id" in tokenizer_config and isinstance( tokenizer_config[ "pad_token_id" ], int ):
+                        self.tokenizer.pad_token_id = tokenizer_config[ "pad_token_id" ]
+            
+                # Set padding side based on mode
+                if mode == "training":
+                    print( f"Setting padding side to '{tokenizer_config[ 'padding_side' ][ 'training' ]}' for training" )
+                    self.tokenizer.padding_side = tokenizer_config[ 'padding_side' ][ 'training' ]
+                elif mode == "inference":
+                    print( f"Setting padding side to '{tokenizer_config[ 'padding_side' ][ 'inference' ]}' for inference" )
+                    self.tokenizer.padding_side = tokenizer_config[ 'padding_side' ][ 'inference' ]
+                else:
+                    # this is checked above, this will never be called
+                    raise ValueError( "Mode MUST be specified, either 'training' or 'inference'" )
+            else:
+                print( "Tokenizer already loaded. Skipping" )
+        
+        finally:
+            if original_cwd != os.getcwd():
+                print( f"Switching back to original working directory: {original_cwd}" )
+                os.chdir( original_cwd )
             # print( f"New working directory: {os.getcwd()}" )
     
     def _get_peft_config( self ) -> LoraConfig:
