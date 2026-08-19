@@ -3824,7 +3824,12 @@ class ArbiterConsumerJob( AgenticJobBase ):
         more tasks than workers) and NOT resume the work itself.
         """
         who        = view.get( "persona" ) or view.get( "session_id" )
-        is_manager = ( view.get( "role" ) or "" ).strip().lower() == "manager"
+        # A declared manager currently serving UNDER someone (view["manager"] set —
+        # lineage-only, never guessed) cannot tap a crew or staff up, so it gets the
+        # WORKER wording. Wording only: `role` is untouched, so audience routing and
+        # the manager-staleness tier keep exactly the population they have today.
+        is_manager = ( ( view.get( "role" ) or "" ).strip().lower() == "manager"
+                       and not ( view.get( "manager" ) or "" ) )
         prefix     = (
             f"{ARBITER_POKE_SENTINEL}auto-poke): {who}, you appear STUCK — repeated "
             f"cap-reached with work owed and no progress. Are you blocked or wedged? "
