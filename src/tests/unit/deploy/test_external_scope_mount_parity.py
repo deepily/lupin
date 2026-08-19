@@ -76,6 +76,7 @@ KNOWN_ABSENT = {
         "retail-ai-location-strategy": "not cloned on the GCP test VM",
         "google-project-wonderwall"  : "not cloned on the GCP test VM",
         "scratchpad"                 : "dev-host scratch project; intentionally not on the VM",
+        "weil-parallel-search"       : "registered 2026-08-19 (5394ca55) for the dev doc viewer at Clayton's request; nobody has said it exists on the VM and no seat here can read the VM's disk. Its sibling parallel-search IS bound on cloud-gpu from /mnt/lupin-data/google/, so if this repo is on the VM too the right fix is a MOUNT and this entry must go — the reverse-direction test forces that the moment one lands.",
     },
 }
 
