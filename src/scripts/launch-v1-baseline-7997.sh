@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+#
+# Stand up the PINNED v1 baseline arm on :7997 for the CJ Flow v2 paired eval
+# (row d8d019f6).
+#
+# WHY THIS FILE EXISTS AT ALL, and it is the whole lesson: the previous version
+# of this launcher lived in a session scratchpad. The scratchpad went away, the
+# host power-cycled overnight, and on 2026-08-19 the paired run was blocked not
+# by code, a model, or a database, but because nobody could remember how to
+# start the server. Every other precondition was green. A launch procedure that
+# lives in a scratchpad is a precondition nobody can satisfy twice — so this is
+# committed, and the next person re-stands the arm with one command.
+#
+#   bash src/scripts/launch-v1-baseline-7997.sh           # start
+#   bash src/scripts/launch-v1-baseline-7997.sh --check    # verify only, never start
+#
+# 🔴 THE IDENTITY GATE IS THE POINT (María, 2026-08-19): code-identity must read
+# b0735467 BEFORE a single utterance runs. The v1 arm is a BASELINE — its whole
+# job is to be the fixed thing the v2 delta is measured against. An arm serving
+# any other sha is not a baseline, and a delta computed against it is a number
+# with nothing behind it. So this script REFUSES rather than starting, or
+# continuing, whenever the identity does not match the pin.
+#
+# THE FOUR OVERRIDES ARE NOT OPTIONAL AND NOT DECORATIVE. Each is a gap the
+# bare-host path hit in sequence during the 2026-08-16 run, recorded in
+# src/rnd/v0.2.0/2026.08.16-v2-paired-live-run-results.md §4:
+#
+#   DB_NAME=lupin_db_v1baseline
+#       Isolates the v1 arm's writes. It defaulted to lupin_db_dev — the LIVE
+#       dev database. That is a hazard, not a tidiness preference.
+#
+#   AUTH_MODE=mock
+#       The arm authenticates with `mock_token_email_<email>`. The config block
+#       is `jwt`, which rejects it.
+#
+#   LUPIN_MODEL_SERVER_URL + LUPIN_MODEL_SERVER_API_KEY_NAME
+#       The bare host has no in-process GPU embedding engine, so routing
+#       embeddings must go over the model-server HTTP path — THE SAME BACKEND
+#       THE v2 ARM USES. This is what keeps the paired instrument fair; an arm
+#       that embeds differently is measuring a different thing.
+#
+# ⚠️ THE DESIGN DOC PREFERS A CONTAINER FROM THE PINNED SHA over this bare-host
+# uvicorn ("the boring, faithful option" —
+# 2026.08.15-v1-baseline-standalone-server-design.md). This script reproduces
+# the path that was actually used and verified end to end, and carries the
+# caveat rather than hiding it: if this arm ever disagrees with the container,
+# believe the container.
+
+set -euo pipefail
+
+WORKTREE="/mnt/DATA01/include/www.deepily.ai/projects/lupin-v1-baseline-b0735467"
+PINNED_SHA="b0735467"
+PORT=7997
+MAIN_ROOT="${LUPIN_ROOT:?LUPIN_ROOT must be set (the MAIN tree — its venv runs this)}"
+LOG="/tmp/v1-baseline-7997.log"
+
+check_only=0
+[[ "${1:-}" == "--check" ]] && check_only=1
+
+read_identity() {
+    python3 -c "
+import urllib.request, json, sys
+try:
+    d = json.load( urllib.request.urlopen( 'http://localhost:$PORT/api/code-identity', timeout=5 ) )
+except Exception:
+    sys.exit( 1 )
+print( d.get( 'sha' ) or d.get( 'code_identity' ) or json.dumps( d ) )
+" 2>/dev/null
+}
+
+# ── Already running? Verify identity; never start on top of it. ───────────────
+if identity=$( read_identity ); then
+    echo "[:$PORT] already up — code-identity: $identity"
+    case "$identity" in
+        *"$PINNED_SHA"*) echo "[:$PORT] identity matches the pin ($PINNED_SHA). Nothing to do." ; exit 0 ;;
+        *) echo "🔴 [:$PORT] REFUSING: a server holds this port and its identity is NOT $PINNED_SHA." >&2
+           echo "   A paired run against an unpinned arm measures the wrong thing. Stop that process first." >&2
+           exit 1 ;;
+    esac
+fi
+
+if [[ "$check_only" -eq 1 ]]; then
+    echo "[:$PORT] DOWN (checked, not started)."
+    exit 1
+fi
+
+# ── Preconditions, each named so a failure says which one ────────────────────
+[[ -d "$WORKTREE" ]] || { echo "🔴 worktree missing: $WORKTREE" >&2; exit 1; }
+[[ -f "$WORKTREE/src/conf/keys/model-server-api" ]] \
+    || { echo "🔴 model-server key missing: $WORKTREE/src/conf/keys/model-server-api" >&2; exit 1; }
+
+actual_sha=$( git -C "$WORKTREE" rev-parse --short HEAD )
+[[ "$actual_sha" == "$PINNED_SHA"* ]] \
+    || { echo "🔴 worktree HEAD is $actual_sha, expected $PINNED_SHA — the arm would not be the baseline." >&2; exit 1; }
+
+python3 -c "
+import urllib.request, sys
+try: urllib.request.urlopen( 'http://localhost:7998/health', timeout=5 )
+except Exception: sys.exit( 1 )
+" || { echo "🔴 model server :7998 is down — embeddings would differ from the v2 arm and un-fair the instrument." >&2; exit 1; }
+
+# ── Launch ───────────────────────────────────────────────────────────────────
+echo "[:$PORT] starting pinned v1 arm from $WORKTREE ($PINNED_SHA) → $LOG"
+
+LUPIN_ROOT="$WORKTREE" \
+DB_NAME="lupin_db_v1baseline" \
+AUTH_MODE="mock" \
+LUPIN_MODEL_SERVER_URL="http://localhost:7998" \
+LUPIN_MODEL_SERVER_API_KEY_NAME="model-server-api" \
+PYTHONPATH="$WORKTREE/src" \
+nohup "$MAIN_ROOT/.venv/bin/python" -m uvicorn lupin_app.main:app \
+    --host 0.0.0.0 --port "$PORT" >"$LOG" 2>&1 &
+
+pid=$!
+echo "[:$PORT] pid $pid — waiting for health"
+
+for _ in $( seq 1 60 ); do
+    if python3 -c "
+import urllib.request, sys
+try: urllib.request.urlopen( 'http://localhost:$PORT/health', timeout=2 )
+except Exception: sys.exit( 1 )
+" 2>/dev/null; then
+        echo "[:$PORT] UP (pid $pid)"
+        # THE GATE AGAIN, POST-BOOT. Health only says a server answered; it says
+        # nothing about WHICH code answered, and that is the property the whole
+        # measurement rests on.
+        if identity=$( read_identity ); then
+            echo "[:$PORT] code-identity: $identity"
+            case "$identity" in
+                *"$PINNED_SHA"*) echo "[:$PORT] ✅ pinned at $PINNED_SHA — safe to run the paired eval." ; exit 0 ;;
+                *) echo "🔴 [:$PORT] booted but identity is $identity, NOT $PINNED_SHA. Do NOT run the eval." >&2
+                   exit 1 ;;
+            esac
+        fi
+        echo "🔴 [:$PORT] healthy but /api/code-identity did not answer — identity unproven, do NOT run the eval." >&2
+        exit 1
+    fi
+    sleep 2
+done
+
+echo "🔴 [:$PORT] did not come up within 120s — last log lines:" >&2
+tail -20 "$LOG" >&2
+exit 1
