@@ -32,6 +32,7 @@ from typing  import Any, Callable, Dict, List, Optional, Tuple
 from lupin_mcp.persona_normalization import persona_slug
 from lupin_mcp import reap_memento
 from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
+from cosa.agents.utils.sender_id import detect_project
 
 
 # Default ceiling on concurrent reviewers a single manager may spawn. Overridden
@@ -373,7 +374,14 @@ def spawn_sessions(
         manager_session_id: the spawning manager's session id (lineage key)
         script_path: spawn script path
         role: requested role label (templated into the prompt)
-        project: project for the child (sets cwd / CLAUDE.md)
+        project: LABEL recorded on the spawn record. It does NOT set the
+            child's working directory and does NOT choose which CLAUDE.md the
+            child loads — the child inherits the CALLER's cwd, because
+            `tmux new-session` (start-cc-with-tmux.sh:543) is invoked without
+            `-c` and that script has no working-directory handling at all.
+            Passing a project other than the caller's own repo is REFUSED (row
+            697a85fe); see the rejection below for why cwd is not simply
+            retrofitted here.
         persona_preference: str | list — ordered persona chain transported to
             the children via COSA_VOICE_PERSONA_CHAIN (see
             src/rnd/v0.1.8/2026.06.11-multi-manager-env-var-and-persona-preference-transport-fix.md)
@@ -394,6 +402,36 @@ def spawn_sessions(
         raise ValueError( f"count must be ≥ 1 (got {count})" )
     if count > spawn_cap:
         raise ValueError( f"count {count} exceeds spawn cap {spawn_cap}" )
+
+    # CROSS-REPO SPAWN IS REFUSED, NOT SILENTLY MISLABELLED (row 697a85fe).
+    #
+    # `project` was documented as setting the child's cwd and CLAUDE.md. It never
+    # did: it is written onto the spawn record and read nowhere else, while the
+    # child inherits the CALLER's cwd because `tmux new-session` is invoked
+    # without `-c` (start-cc-with-tmux.sh:543). A manager sitting in one repo
+    # asking for a seat in another got a seat in its OWN repo wearing the other
+    # repo's label — which cost María an investigation before it was filed.
+    #
+    # WHY THIS IS NOT FIXED BY SETTING cwd INSTEAD, which is the obvious repair:
+    # that spawn script hardwires THREE things to LUPIN_ROOT — the venv it
+    # activates (:70), the PYTHONPATH it exports into the pane (:233), and the
+    # hook command paths it forwards (:225-231). Booting a child with cwd in
+    # another repo while it runs lupin's venv, lupin's PYTHONPATH and lupin's
+    # hooks produces a seat whose CLAUDE.md and whose tooling disagree about
+    # which repo it is in. That is WORSE than today's behaviour, because today
+    # is at least self-consistent: the child really is a lupin seat.
+    #
+    # Real cross-repo spawning needs per-repo venv/PYTHONPATH/hook resolution in
+    # the spawn script. That is a separate piece of work, deliberately not
+    # smuggled in here.
+    caller_project = detect_project()
+    if project and project != caller_project:
+        raise ValueError(
+            f"cannot spawn into project {project!r} from a seat resident in "
+            f"{caller_project!r} — `project` is a label on the spawn record and does "
+            f"NOT set the child's working directory or CLAUDE.md. Spawn from a seat "
+            f"already resident in {project!r}, or pass project={caller_project!r}."
+        )
 
     # The DM/collection topic and the tmux SESSION name BOTH key on the manager
     # PERSONA, but with DIFFERENT separators — and they MUST stay separate

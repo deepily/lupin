@@ -1676,3 +1676,59 @@ class TestShippedIniWorkerModelPin:
         # Managers boot interactively on Rick's user default — ruling #2, zero code.
         parser = self._shipped_ini()
         assert not parser.has_option( "Lupin: Baseline", "cc session spawn model manager" )
+
+
+# ── Cross-repo spawn refusal (row 697a85fe) ───────────────────────────────────
+class TestCrossRepoSpawnRefused:
+    """
+    `project` was documented as setting the child's cwd and CLAUDE.md. It never
+    did — it is a label on the spawn record, and the child inherits the CALLER's
+    cwd because `tmux new-session` runs without `-c`. A manager in one repo
+    asking for a seat in another silently got a seat in its own repo wearing the
+    other repo's name.
+
+    These tests assert the REFUSAL, and that it happens BEFORE any process is
+    launched. A guard that refuses after spawning has not prevented anything.
+    """
+
+    def test_cross_repo_project_is_refused( self, tmp_path ):
+        with patch( "lupin_mcp.session_spawner.detect_project", return_value="lupin" ):
+            with pytest.raises( ValueError ) as caught:
+                spawn_sessions( 1, "t", "mgr", script_path="/s.sh",
+                                project="planning-is-prompting",
+                                runner=FakeRunner(), session_dir=tmp_path )
+        assert "planning-is-prompting" in str( caught.value )
+        assert "lupin"                 in str( caught.value )
+
+    def test_refusal_happens_before_the_runner_is_invoked( self, tmp_path ):
+        """
+        THE LOAD-BEARING ONE. If the guard sat after the spawn loop the message
+        would look identical while a real seat had already been created.
+        """
+        runner = FakeRunner()
+        with patch( "lupin_mcp.session_spawner.detect_project", return_value="lupin" ):
+            with pytest.raises( ValueError ):
+                spawn_sessions( 2, "t", "mgr", script_path="/s.sh",
+                                project="cosa-voice",
+                                runner=runner, session_dir=tmp_path )
+        assert runner.calls == [], "a refused spawn must not launch anything"
+
+    def test_same_repo_project_is_allowed( self, tmp_path ):
+        """The other direction — over-tightening this would break every spawn."""
+        with patch( "lupin_mcp.session_spawner.detect_project", return_value="lupin" ):
+            res = spawn_sessions( 1, "t", "mgr", script_path="/s.sh", project="lupin",
+                                  runner=FakeRunner( returncode=0 ), session_dir=tmp_path )
+        assert res[ "requested" ] == 1
+
+    def test_refusal_names_the_remedy_not_just_the_objection( self, tmp_path ):
+        """
+        Row 07fda9b6's lesson applied here: a refusal that states no remedy costs
+        the reader an investigation. This one must name what to do instead.
+        """
+        with patch( "lupin_mcp.session_spawner.detect_project", return_value="lupin" ):
+            with pytest.raises( ValueError ) as caught:
+                spawn_sessions( 1, "t", "mgr", script_path="/s.sh", project="weil-parallel-search",
+                                runner=FakeRunner(), session_dir=tmp_path )
+        message = str( caught.value )
+        assert "Spawn from a seat" in message
+        assert "does NOT set"      in message
