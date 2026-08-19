@@ -246,6 +246,49 @@ def pytest_collection_modifyitems( config, items ):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# GUARD: a failing test must not write a credential to disk (row b0e97156)
+# ══════════════════════════════════════════════════════════════════════════════
+# `pytest.ini` carries `--showlocals`. A test that fails inside a frame holding a
+# credential therefore dumps that frame's locals into the junit XML AND the run log
+# under io/test-suite/artifacts/. A paired run failed on a 401 inside `_login` and
+# wrote a live password there in plaintext.
+#
+# ⚠️ THE FLAG STAYS. `--showlocals` is the only reason a crashed run's v1 arm metrics
+# survived at all — those numbers existed nowhere but a traceback's locals, and they
+# are recorded on row d8d019f6 because of it. Deleting the flag would close the leak
+# by destroying the instrument. So the secret is redacted and the traceback is kept.
+#
+# ONE SEAM, BOTH ARTIFACTS: junit XML and the terminal/log output are two renderings of
+# the SAME report object, so redacting the report before anything reads it covers both.
+# Redacting the XML writer alone would have left every run log leaking — and 10 of the
+# 18 exposed artifacts measured on 2026-08-19 were `.log` files, not XML.
+from cosa.utils.secret_redaction import redact_report
+
+
+@pytest.hookimpl( hookwrapper=True )
+def pytest_runtest_makereport( item, call ):
+    """
+    Scrub credentials out of a test report the moment it is built.
+
+    A hookwrapper, not a plain hook, because the post-yield half runs after the report
+    exists and before any consumer reads it — the junit writer and the terminal reporter
+    both take it from `pytest_runtest_logreport`, which fires later.
+
+    Ensures:
+        - never changes an outcome: it rewrites text and touches nothing else
+        - never raises. A redactor that can fail a run would be switched off, and a
+          control that gets switched off is worse than none — so a failure here prints
+          and leaves the report alone, LOUDLY, rather than pretending it scrubbed.
+    """
+    outcome = yield
+    try:
+        redact_report( outcome.get_result() )
+    except Exception as e:                               # pragma: no cover - defensive
+        print( f"\n[secret-redaction] WARNING: could not redact this report: {e!r}\n"
+               f"  Treat any artifact from this run as UNREDACTED.\n" )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # DIAGNOSIS: a collection error is SILENCE, not a red test (row bc83f2df)
 # ══════════════════════════════════════════════════════════════════════════════
 # A collection error takes the whole DIRECTORY down before anything runs. Read it as a
@@ -269,6 +312,11 @@ _collect_failures = []
 def pytest_collectreport( report ):
     """Record a failed collection so sessionfinish can explain it."""
     if report.failed:
+        # Redact BEFORE reading the text: a collection error renders locals too, and the
+        # diagnosis block below PRINTS this string. Scrubbing the run reports but not
+        # this one would leak the credential through the very feature built to make
+        # collection errors visible.
+        redact_report( report )
         _collect_failures.append( getattr( report, "longreprtext", "" ) or str( report.longrepr ) )
 
 
