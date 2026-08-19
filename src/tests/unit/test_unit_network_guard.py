@@ -302,6 +302,32 @@ def test_the_unit_runners_arm_the_guard( script_rel ):
 
 
 @pytest.mark.parametrize( "script_rel", (
+    "src/tests/run-unit-tests.sh",
+    "src/tests/run-cosa-tests.sh",
+) )
+def test_the_unit_runners_DEFAULT_TO_BLOCK_not_count( script_rel ):
+    """
+    THE FLIP ITSELF, pinned (row 7c84b8b8, 2026-08-19). Arming the variable is not the
+    same as enforcing it: for two days both runners set `count`, which records every dial
+    and fails nothing. A runner quietly reverted to count would still pass the test above
+    while the merge gate went back to reporting green on tests that only pass when a
+    server happens to be up.
+
+    An explicit `LUPIN_UNIT_NETWORK=count` on the command line still works — the default
+    is what this pins, not the override.
+    """
+    text = open( os.path.join( PROJECT_ROOT, script_rel ) ).read()
+
+    assert 'LUPIN_UNIT_NETWORK:-block' in text, (
+        f"{script_rel} no longer DEFAULTS the network guard to block mode — "
+        f"a guard set to count records dials and fails nothing"
+    )
+    assert 'LUPIN_UNIT_NETWORK:-count' not in text, (
+        f"{script_rel} is back on count mode by default"
+    )
+
+
+@pytest.mark.parametrize( "script_rel", (
     "src/tests/run-integration-tests.sh",
     "src/scripts/run-e2e-ui-tests.sh",
 ) )

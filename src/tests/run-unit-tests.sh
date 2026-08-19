@@ -23,12 +23,20 @@ cd "$PROJECT_ROOT"
 export PYTHONPATH="$PROJECT_ROOT/src:${PYTHONPATH}"
 export LUPIN_ROOT="$PROJECT_ROOT"
 
-# Arm the unit tier's network guard in COUNT mode (row 7c84b8b8): every outbound
-# connection a "unit" test makes is reported by test id, address and the STACK that
-# dialled. Count, not block, until the known fallout is cleared — a collection-time
-# probe in test_dm_quality_judge.py and the inline DM grader (row ec5cf83a), which is
-# another lane's row. Flipping this to "block" is the last step of 7c84b8b8.
-export LUPIN_UNIT_NETWORK="${LUPIN_UNIT_NETWORK:-count}"
+# Arm the unit tier's network guard in BLOCK mode (row 7c84b8b8): a "unit" test that
+# opens a routed socket FAILS THE RUN, named by test id, address and the STACK that
+# dialled — not the test that happened to be in flight, which named a file containing
+# no networking code at all the first time this was measured.
+#
+# FLIPPED FROM count TO block on 2026-08-19, the last step of 7c84b8b8. It ran in count
+# while two known offenders were open: a collection-time probe in test_dm_quality_judge.py
+# (closed, 4d35c39d) and the DM send path's inline grader (closed test-side, f5a860a9 /
+# 77e5d7df; moved off the send path entirely for row ec5cf83a). Both tiers then measured
+# 0 outbound with the guard armed, which is what made the flip safe rather than hopeful.
+#
+# `count` is still available for a census — export LUPIN_UNIT_NETWORK=count — and is the
+# right mode when you WANT the full list rather than the first offender.
+export LUPIN_UNIT_NETWORK="${LUPIN_UNIT_NETWORK:-block}"
 
 # Require an EXPLICIT venv pytest — never silently fall back to a bare `python3 -m pytest`.
 # The old fallback quietly ran whatever `python3` resolved to on PATH; when that interpreter
