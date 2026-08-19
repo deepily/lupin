@@ -19,6 +19,7 @@
 #   LUPIN_MODEL_SERVER_URL=https://lupin-model-server-XXXX.run.app   # Cloud Run output
 #   CLOUD_SQL_CONNECTION_NAME=<your-gcp-project-id>:us-central1:lupin-pg16-test
 #   DB_PASSWORD=<from Secret Manager `lupin-db-password` at deploy>
+#   JWT_SECRET_KEY=<signing secret; unset silently uses the in-repo dev literal>
 #   LUPIN_IMAGE=<AR path>/lupin:1.1.0      (or local `lupin:1.1.0`)
 # Optional (defaults shown):
 #   DB_USER=lupin_app  DB_NAME=lupin_db_test
@@ -183,6 +184,15 @@ services:
       DB_NAME: ${DB_NAME:-lupin_db_test}
       DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD (from Secret Manager lupin-db-password)}
       LUPIN_CONFIG_MGR_CLI_ARGS: "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing-GCS"
+      # JWT signing secret (row adce3547 / bug 8df98a96, 2026-08-18). REQUIRED, and
+      # `:?` rather than a default for a reason: jwt_service.py:25-31 raises only when
+      # ENVIRONMENT=production, which no service sets — so unset does NOT fail, it
+      # silently signs with the tracked in-repo literal
+      # `dev-secret-key-DO-NOT-USE-IN-PRODUCTION-8x7mp3`. Both cloud services had been
+      # missing this since they were written. Value lives in the UNTRACKED host env
+      # file, never a tracked one.
+      # ⚠️ Env resolves at container CREATE: a change needs `up -d --force-recreate`.
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set JWT_SECRET_KEY in the host env file — see row adce3547}
       LUPIN_API_URL: http://localhost:7999
       # ── THE ENV SWITCH ─────────────────────────────────────────────────────
       # Cloud Run model-server URL. The provider resolvers read this env var
