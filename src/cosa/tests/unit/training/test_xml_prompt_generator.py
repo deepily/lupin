@@ -33,7 +33,6 @@ from unit_test_utilities import UnitTestUtilities
 # Import the module under test
 from cosa.training.xml_prompt_generator import XmlPromptGenerator
 
-
 class TestXmlPromptGenerator( unittest.TestCase ):
     """
     Comprehensive unit tests for XML prompt generator.
@@ -78,26 +77,73 @@ class TestXmlPromptGenerator( unittest.TestCase ):
         """
         self.mock_manager.reset_mocks()
 
+    def _speakable_stand_in( self ):
+        """
+        A command index whose keys are exactly the registry's speakable commands.
+
+        Since row 95924f2d step 4 (merge 7989db99) the constructor asserts that the
+        agent-router JSON key union EQUALS the served speakable set, in both directions.
+        A fixture handing it {} trips the "in the menu but in no JSON" half — the guard
+        working, not failing. Tests that want the REAL getters to run therefore have to
+        feed them a consistent payload rather than an empty one.
+
+        Ensures:
+            - Returns { <every speakable command>: <dummy path> }; the paths are never
+              opened, because the file I/O these tests exercise is itself mocked
+        """
+        from cosa.rest.v2.router_prompt_generator import speakable_commands
+
+        # The value carries BOTH accepted shapes at once. The simple/compound getters
+        # want a bare path string; the agentic getter wants the enriched form and reads
+        # entry[ "template_file" ]. Since `json.load` is patched globally these tests hand
+        # every getter the same payload, so the enriched dict is the only shape all three
+        # survive — and the consistency check the fixture exists to satisfy reads KEYS,
+        # never values. No path is ever opened: the file I/O is itself mocked.
+        return {
+            command: { "template_file": "/src/ephemera/prompts/data/unit-fixture-never-opened.txt",
+                       "placeholders" : {} }
+            for command in speakable_commands()
+        }
+
     def _mock_command_loading( self ):
         """
         Returns a patch.multiple context that makes the JSON-config command
-        getters inert ( each returns {} ), so the constructor performs no real
-        file I/O and never triggers _test_command_paths during __init__.
+        getters inert, so the constructor performs no real file I/O and never
+        triggers _test_command_paths during __init__.
+
+        ⚠️ THE THREE AGENT-ROUTER GETTERS ARE NOT EMPTY, and must not be. Since
+        row 95924f2d step 4 (merge 7989db99) the constructor asserts that the
+        agent-router JSON key union EQUALS the served speakable command set, in
+        both directions — a JSON-only command would train a label the interpolated
+        menu omits, and a menu-only command would ship in the prompt with no
+        training rows behind it. An all-empty fixture trips the second half, which
+        is the guard doing its job rather than a defect in it.
+
+        So the fixture supplies a CONSISTENT stand-in: every speakable command,
+        pointed at a dummy path, in the simple index. The paths are never opened —
+        the getters that would read them are exactly what this patch replaces.
+        Relaxing the guard to tolerate the empty fixture was considered and
+        REJECTED (Mr Radio, 2026-08-19): the tolerance would have deleted the
+        property the guard was built for.
 
         Requires:
             - XmlPromptGenerator exposes the six private command-dictionary getters
+            - cosa.rest.v2.router_prompt_generator.speakable_commands is importable
 
         Ensures:
             - Returns an unentered patch.multiple context manager
-            - Under it, construction loads empty command dictionaries
+            - Under it, the agent-router indexes agree with the registry's speakable
+              set, so the constructor's consistency check passes
             - _test_command_paths is NOT invoked during construction
         """
+        speakable_stand_in = self._speakable_stand_in()
+
         return patch.multiple(
             XmlPromptGenerator,
             _get_compound_vox_commands                    = MagicMock( return_value={} ),
             _get_simple_vox_commands                      = MagicMock( return_value={} ),
             _get_compound_agent_router_commands           = MagicMock( return_value={} ),
-            _get_simple_agent_router_commands             = MagicMock( return_value={} ),
+            _get_simple_agent_router_commands             = MagicMock( return_value=speakable_stand_in ),
             _get_agentic_job_commands                     = MagicMock( return_value={} ),
             _get_compound_agent_function_mapping_commands = MagicMock( return_value={} ),
         )
@@ -115,11 +161,17 @@ class TestXmlPromptGenerator( unittest.TestCase ):
         # Live contract: __init__ loads command dictionaries from JSON config files
         # ( open + json.load ) and validates their paths via _test_command_paths.
         # Mock the file I/O so the real getters run and exercise the path-test seam.
+        # Built BEFORE the `with`: context-manager expressions are evaluated as the
+        # block is entered left-to-right, so patch( 'builtins.open' ) is already live
+        # by the time a later expression runs — and resolving the registry pulls in a
+        # lazy timezone-file read that a mocked open() cannot serve.
+        command_index = self._speakable_stand_in()
+
         with patch.object( XmlPromptGenerator, '_test_command_paths' ) as mock_test_paths, \
              patch.object( XmlPromptGenerator, 'get_interjections' ) as mock_get_interjections, \
              patch.object( XmlPromptGenerator, 'get_salutations' ) as mock_get_salutations, \
              patch( 'builtins.open', mock_open( read_data="{}" ) ), \
-             patch( 'json.load', return_value={} ):
+             patch( 'json.load', return_value=command_index ):
 
             mock_get_interjections.return_value = self.test_interjections
             mock_get_salutations.return_value = self.test_salutations
@@ -158,11 +210,17 @@ class TestXmlPromptGenerator( unittest.TestCase ):
             - Uses default values for optional parameters
             - Default path prefix is used
         """
+        # Built BEFORE the `with`: context-manager expressions are evaluated as the
+        # block is entered left-to-right, so patch( 'builtins.open' ) is already live
+        # by the time a later expression runs — and resolving the registry pulls in a
+        # lazy timezone-file read that a mocked open() cannot serve.
+        command_index = self._speakable_stand_in()
+
         with patch.object( XmlPromptGenerator, '_test_command_paths' ), \
              patch.object( XmlPromptGenerator, 'get_interjections' ) as mock_get_interjections, \
              patch.object( XmlPromptGenerator, 'get_salutations' ) as mock_get_salutations, \
              patch( 'builtins.open', mock_open( read_data="{}" ) ), \
-             patch( 'json.load', return_value={} ):
+             patch( 'json.load', return_value=command_index ):
 
             mock_get_interjections.return_value = []
             mock_get_salutations.return_value = []
