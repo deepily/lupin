@@ -1,5 +1,19 @@
 # TODO
 
+## 📊 MEASURED 2026-08-18 night (Mr. Radio 🦉 `89a34076`) — the notification-length natural experiment, and why `type` cannot answer it
+
+**Rick's question**: did the DM tutor's brevity generalize to the spoken notifications he receives? **Measured, doc `9bc17152`**: the tail compressed (p90 1009 → 738 chars, −27%) while the median did **not** move (272 → 287). Distribution did not shift down; its right tail was cut. Replicated in both `lupin` and `plan`.
+
+**Two decisions recorded here rather than in the doc:**
+
+1. **`type='progress'` must NOT be excluded from this population, despite looking like process chatter.** Rick asked for that cut; it reversed the finding. It is wrong: `notification_type: str = "progress"` is the **default** in `notify()` (`cosa_voice_mcp.py:1291`, `:1434`) and the closing-turn TTS contract never names the argument, so nearly all authored speech lands there by omission. A 100-row sample is conversation — *"Standing by for the next task."*, *"Want me to commit this?"*, *"Morning. I'm up and running…"*. Excluding it drops ~72% of the channel and keeps only senders who bothered to pass a type: a selection effect, not a filter.
+
+2. **The `type` column is not a category — it records whether the caller passed an argument.** Any future analysis cutting on `type` inherits that flaw. `custom` proves it twice over: 50.5% questions against 1–4.5% for every other type, but split at ~140 chars it is 90.2% questions below and 15.5% above — two populations under one label. **A question-vs-statement split (`message LIKE '%?%'`) is the honest cut and has not been run** (row `bdd1ca85`, P3).
+
+**Still open**: causation is NOT established and will not be until someone finds a project the tutor never touched. The cutover was fleet-wide, so there is no untreated control group; the spillover story fits the data and so would any other fleet-wide change on 2026-08-13. Nobody has found such a project.
+
+---
+
 ## 🔴 2026-08-18 MORNING — THE REBOOT DOES NOT UNBLOCK ANYTHING. Two fixes, both measured.
 
 Rick asked directly whether tomorrow's reboot would pick up the new password and clear the blocked jobs.
