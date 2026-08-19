@@ -16,12 +16,14 @@ THE TWO SHAPES, both taken from real incidents on 2026-08-17:
   B. a required parameter added to a function ahead of its callers, in a CONFTEST
 """
 
+import os
 import subprocess
 import sys
 import textwrap
 
 import pytest
 
+import cosa.utils.util as cu
 from cosa.agents.test_suite.job import TestSuiteJob
 from cosa.utils.pytest_collection_diagnosis import (
     COLLECTION_ERROR,
@@ -34,11 +36,34 @@ from cosa.utils.pytest_collection_diagnosis import (
 
 
 # ── Builders: each writes a real cause shape and runs a real pytest ──────────
+def _subprocess_env():
+    """
+    The child's environment, with `src` on PYTHONPATH as an ABSOLUTE path.
+
+    ⚠️ WHY THIS EXISTS — the shapes below run pytest with `cwd` set to a tmp dir, and a
+    RELATIVE PYTHONPATH (`PYTHONPATH=src`, the habit this repo's docs encourage) does not
+    resolve from there. The child then dies on `No module named 'cosa'` BEFORE reaching the
+    orphaned import the shape was built to produce, and shape A gets diagnosed as
+    "missing module: cosa" instead of naming the retired subject. That is a defect in the
+    HARNESS, not in the classifier — but it reads as a red test in the classifier's file,
+    and it was carried on row 19a417fa as one of six "pre-existing unit failures".
+
+    Ensures:
+        - returns a copy of os.environ whose PYTHONPATH starts with the absolute `src`
+        - preserves any PYTHONPATH the caller already set, appended after it
+    """
+    env = os.environ.copy()
+    src = os.path.join( cu.get_project_root(), "src" )
+    existing = env.get( "PYTHONPATH", "" )
+    env[ "PYTHONPATH" ] = f"{src}{os.pathsep}{existing}" if existing else src
+    return env
+
+
 def _run_pytest( path ):
     """Run pytest against `path` in its own process; return (exit_code, combined output)."""
     proc = subprocess.run(
         [ sys.executable, "-m", "pytest", str( path ), "-p", "no:cacheprovider" ],
-        capture_output=True, text=True, timeout=120, cwd=str( path ),
+        capture_output=True, text=True, timeout=120, cwd=str( path ), env=_subprocess_env(),
     )
     return proc.returncode, proc.stdout + proc.stderr
 
